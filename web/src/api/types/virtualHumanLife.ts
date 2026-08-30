@@ -17,6 +17,162 @@ export type AgentPluginBinding = {
   rhythmConfig?: Record<string, unknown>;
   toolBundleId?: string;
   promptPackId?: string;
+  homeLocation?: VirtualHumanLocation | null;
+  locale?: string;
+  locationSetupRequired?: boolean;
+  lifeIdentityKind?: VirtualHumanIdentityKind;
+  lifeWorld?: Pick<VirtualHumanLifeWorld, "schemaVersion" | "setupState" | "revision">;
+  steward?: VirtualHumanLifeStewardBinding;
+};
+
+export type VirtualHumanIdentityKind =
+  | "student"
+  | "employee"
+  | "freelancer"
+  | "unemployed"
+  | "retired";
+
+export type VirtualHumanLocation = {
+  locationId: string;
+  countryCode: string;
+  countryName: string;
+  regionCode: string;
+  regionName: string;
+  cityCode: string;
+  cityName: string;
+  timezone: string;
+  locale: string;
+  latitude?: number;
+  longitude?: number;
+  precision?: string;
+  sourceKind?: string;
+  sourceVersion?: string;
+};
+
+export type VirtualHumanLifeStewardBinding = {
+  enabled: boolean;
+  agentId: string;
+  sessionId: string;
+  promptPackId: string;
+  toolBundleId: string;
+  provisioningState: "missing" | "ready" | string;
+};
+
+export type VirtualHumanLifeIdentity = {
+  identityId: string;
+  kind: VirtualHumanIdentityKind | string;
+  roleTitle: string;
+  stage: string;
+  effectiveFrom?: string;
+  effectiveTo?: string;
+};
+
+export type VirtualHumanLifeAffiliation = {
+  affiliationId: string;
+  organizationKind: string;
+  name: string;
+  department?: string;
+  role?: string;
+  cityLocationId?: string;
+};
+
+export type VirtualHumanLifeRoutine = {
+  routineId: string;
+  dayType: string;
+  startTime: string;
+  endTime: string;
+  title: string;
+  activityKind: string;
+  timezone?: string;
+};
+
+export type VirtualHumanLifeItem = {
+  itemId: string;
+  category: string;
+  name: string;
+  brand?: string;
+  model?: string;
+  status?: string;
+  currentLocation?: string;
+  acquiredAt?: string;
+};
+
+export type VirtualHumanLifeAccount = {
+  accountId: string;
+  name: string;
+  accountType: string;
+  currency: string;
+  balanceMinor: number;
+};
+
+export type VirtualHumanLifeRecurringRule = {
+  ruleId: string;
+  kind: string;
+  accountId: string;
+  title: string;
+  amountMinor: number;
+  currency: string;
+  frequency: string;
+  nextDueOn: string;
+  status: string;
+};
+
+export type VirtualHumanLifeDraftPayload = {
+  draftId: string;
+  homeLocation: VirtualHumanLocation;
+  currency: string;
+  fictionalData: boolean;
+  identity: VirtualHumanLifeIdentity;
+  affiliations: VirtualHumanLifeAffiliation[];
+  routines: VirtualHumanLifeRoutine[];
+  items: VirtualHumanLifeItem[];
+  accounts: VirtualHumanLifeAccount[];
+  recurringRules: VirtualHumanLifeRecurringRule[];
+  disclaimer?: string;
+};
+
+export type VirtualHumanLifeDraft = {
+  draftId: string;
+  revision: number;
+  status: string;
+  payload: VirtualHumanLifeDraftPayload;
+  createdAt?: string;
+  updatedAt?: string;
+  confirmedAt?: string;
+};
+
+export type VirtualHumanLifeWorldFacts = {
+  identities: VirtualHumanLifeIdentity[];
+  affiliations: VirtualHumanLifeAffiliation[];
+  routines: VirtualHumanLifeRoutine[];
+  items: VirtualHumanLifeItem[];
+  accounts: VirtualHumanLifeAccount[];
+  recurringRules: VirtualHumanLifeRecurringRule[];
+  transactions?: Array<Record<string, unknown>>;
+};
+
+export type VirtualHumanLifeWorld = {
+  schemaVersion: number;
+  setupState: "missing" | "draft" | "ready" | string;
+  revision: number;
+  draft: VirtualHumanLifeDraft | null;
+  facts: VirtualHumanLifeWorldFacts;
+  updatedAt?: string;
+};
+
+export type VirtualHumanEnvironmentContext = {
+  location: VirtualHumanLocation;
+  timezone: string;
+  locale: string;
+  localDate: string;
+  localTime: string;
+  season: string;
+  dayPeriod: string;
+  weather?: unknown;
+  localNews?: unknown[];
+  localEvents?: unknown[];
+  externalFactsStatus?: string;
+  observedAt?: string;
 };
 
 export type AgentPluginCatalogEntry = {
@@ -472,7 +628,39 @@ export type VirtualHumanSnapshot = {
     remaining: number;
   };
   causal?: VirtualHumanCausalProjection | null;
+  lifeWorld?: VirtualHumanLifeWorld | null;
+  environment?: VirtualHumanEnvironmentContext | null;
   health?: VirtualHumanSnapshotHealth;
+};
+
+export type VirtualHumanLifeDraftUpdateRequest = {
+  agentId: string;
+  draftId: string;
+  expectedRevision: number;
+  idempotencyKey: string;
+  patch: {
+    identity?: Partial<Pick<VirtualHumanLifeIdentity, "roleTitle" | "stage" | "effectiveFrom" | "effectiveTo">>;
+    affiliations?: Array<Partial<VirtualHumanLifeAffiliation>>;
+    routines?: Array<Partial<VirtualHumanLifeRoutine>>;
+    items?: Array<Partial<VirtualHumanLifeItem>>;
+    accounts?: Array<Partial<VirtualHumanLifeAccount>>;
+    recurringRules?: Array<Partial<VirtualHumanLifeRecurringRule>>;
+  };
+};
+
+export type VirtualHumanLifeWorldConfirmRequest = {
+  agentId: string;
+  draftId: string;
+  expectedDraftRevision: number;
+  expectedBindingVersion: number;
+  idempotencyKey: string;
+};
+
+export type VirtualHumanLifeWorldConfirmResponse = {
+  agentId: string;
+  binding: AgentPluginBinding;
+  lifeWorld: VirtualHumanLifeWorld;
+  confirmation: Record<string, unknown>;
 };
 
 export type VirtualHumanCommandRequest = {

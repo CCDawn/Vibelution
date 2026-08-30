@@ -2,10 +2,18 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { HeartPulse, Save } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
-import { listAgentPlugins, updateAgentPluginBinding } from "../../api/agentPlugins";
+import {
+  listAgentPlugins,
+  listVirtualHumanLocations,
+  updateAgentPluginBinding,
+} from "../../api/agentPlugins";
 import { queryKeys } from "../../api/queryKeys";
 import { fetchVirtualHumanSnapshot } from "../../api/virtualHumanLife";
-import type { AgentPluginBinding, VirtualHumanSnapshotHealth } from "../../api/types";
+import type {
+  AgentPluginBinding,
+  VirtualHumanIdentityKind,
+  VirtualHumanSnapshotHealth,
+} from "../../api/types";
 import {
   VButton,
   VCheckbox,
@@ -22,8 +30,15 @@ import {
 } from "./virtualHumanProactiveSettings";
 
 const PLUGIN_ID = "virtual-human-life";
+const VIRTUAL_HUMAN_LOCATIONS_QUERY_KEY = [
+  "agent-plugins",
+  "virtual-human-life",
+  "locations",
+] as const;
 
 type BindingDraft = {
+  homeLocationId: string;
+  lifeIdentityKind: VirtualHumanIdentityKind;
   autonomyLevel: "assisted" | "autonomous";
   proactiveMessagesEnabled: boolean;
   nightlyPlanningTime: string;
@@ -34,6 +49,8 @@ type BindingDraft = {
 };
 
 const DEFAULT_DRAFT: BindingDraft = {
+  homeLocationId: "CN-SHANGHAI",
+  lifeIdentityKind: "student",
   autonomyLevel: "autonomous",
   proactiveMessagesEnabled: true,
   nightlyPlanningTime: "22:30",
@@ -45,6 +62,8 @@ const DEFAULT_DRAFT: BindingDraft = {
 
 function draftFromBinding(binding: AgentPluginBinding | null | undefined): BindingDraft {
   return {
+    homeLocationId: binding?.homeLocation?.locationId || DEFAULT_DRAFT.homeLocationId,
+    lifeIdentityKind: binding?.lifeIdentityKind || DEFAULT_DRAFT.lifeIdentityKind,
     autonomyLevel: binding?.autonomyLevel === "assisted" ? "assisted" : "autonomous",
     proactiveMessagesEnabled: binding?.proactiveMessagesEnabled ?? true,
     nightlyPlanningTime: binding?.nightlyPlanningTime || DEFAULT_DRAFT.nightlyPlanningTime,
@@ -60,6 +79,8 @@ function bindingConfig(
   draft: BindingDraft,
 ): Record<string, unknown> {
   return mergeVirtualHumanBindingConfig(binding, {
+    homeLocation: { locationId: draft.homeLocationId },
+    lifeIdentityKind: draft.lifeIdentityKind,
     autonomyLevel: draft.autonomyLevel,
     proactiveMessagesEnabled: draft.proactiveMessagesEnabled,
     nightlyPlanningTime: draft.nightlyPlanningTime,
@@ -242,6 +263,11 @@ export function AgentVirtualHumanPluginPanel({ agentId, lang }: { agentId: strin
     queryFn: () => listAgentPlugins(agentId),
     enabled: Boolean(agentId),
   });
+  const locationsQuery = useQuery({
+    queryKey: VIRTUAL_HUMAN_LOCATIONS_QUERY_KEY,
+    queryFn: ({ signal }) => listVirtualHumanLocations({ signal }),
+    staleTime: 24 * 60 * 60 * 1000,
+  });
   const plugin = useMemo(
     () => pluginsQuery.data?.plugins.find((item) => item.pluginId === PLUGIN_ID) ?? null,
     [pluginsQuery.data],
@@ -291,6 +317,11 @@ export function AgentVirtualHumanPluginPanel({ agentId, lang }: { agentId: strin
   });
   const pending = bindingMutation.isPending;
   const enabled = Boolean(binding?.enabled);
+  const enableBlocked = !enabled && (
+    !draft.homeLocationId
+    || locationsQuery.isPending
+    || locationsQuery.isError
+  );
 
   if (pluginsQuery.isPending) {
     return <VStateSurface className={styles.state} title={lang === "zh" ? "正在载入虚拟人插件" : "Loading virtual-human plugin"} tone="loading" density="compact" />;
@@ -328,6 +359,62 @@ export function AgentVirtualHumanPluginPanel({ agentId, lang }: { agentId: strin
         <span className={styles.badge}>Prompt pack · {plugin.promptPackId}</span>
         <span className={styles.badge}>{plugin.toolNames.length} {lang === "zh" ? "个专属工具" : "plugin tools"}</span>
       </div>
+
+      <section className={styles.setupSection} aria-label={lang === "zh" ? "虚拟人生活起点" : "Virtual-human life origin"}>
+        <div className={styles.setupHeader}>
+          <div>
+            <p>{lang === "zh" ? "生活起点" : "Life origin"}</p>
+            <strong>{lang === "zh" ? "她住在哪里，以什么身份生活" : "Where she lives and who she is"}</strong>
+          </div>
+          <VStatusChip tone={enabled ? "success" : "warning"}>
+            {enabled ? (lang === "zh" ? "已建立" : "Established") : (lang === "zh" ? "启用前必选" : "Required")}
+          </VStatusChip>
+        </div>
+        <div className={styles.setupGrid}>
+          <label className={styles.field}>
+            <span>{lang === "zh" ? "居住城市" : "Home city"}</span>
+            <VSelect
+              aria-label={lang === "zh" ? "居住城市" : "Home city"}
+              selectedKey={draft.homeLocationId}
+              isDisabled={pending || enabled || locationsQuery.isPending || locationsQuery.isError}
+              options={(locationsQuery.data ?? []).map((location) => ({
+                id: location.locationId,
+                label: `${location.countryName} · ${location.cityName}`,
+              }))}
+              onSelectionChange={(value) => setDraft((current) => ({
+                ...current,
+                homeLocationId: String(value || ""),
+              }))}
+            />
+          </label>
+          <label className={styles.field}>
+            <span>{lang === "zh" ? "身份类型" : "Life identity"}</span>
+            <VSelect
+              aria-label={lang === "zh" ? "身份类型" : "Life identity"}
+              selectedKey={draft.lifeIdentityKind}
+              isDisabled={pending || enabled}
+              options={[
+                { id: "student", label: lang === "zh" ? "学生" : "Student" },
+                { id: "employee", label: lang === "zh" ? "上班族" : "Employee" },
+                { id: "freelancer", label: lang === "zh" ? "自由职业者" : "Freelancer" },
+                { id: "unemployed", label: lang === "zh" ? "待业探索期" : "Between roles" },
+                { id: "retired", label: lang === "zh" ? "退休生活" : "Retired" },
+              ]}
+              onSelectionChange={(value) => setDraft((current) => ({
+                ...current,
+                lifeIdentityKind: (value || "student") as VirtualHumanIdentityKind,
+              }))}
+            />
+          </label>
+        </div>
+        <p className={styles.setupHint}>
+          {locationsQuery.isError
+            ? (lang === "zh" ? "城市列表暂不可用，暂时不能启用虚拟人生活。" : "The city list is unavailable, so Virtual Human Life cannot be enabled yet.")
+            : enabled
+              ? (lang === "zh" ? "城市和初始身份已进入她的生活世界；详细学校、单位、资产和作息可在人物聊天右栏确认。" : "The city and initial identity now anchor her life world. Confirm school, workplace, belongings, and routine from the companion chat rail.")
+              : (lang === "zh" ? "启用后先生成可编辑草案；确认前不会把学校、单位、物品或金额当作既成事实。" : "Enabling creates an editable draft. School, workplace, belongings, and money are not treated as facts until confirmation.")}
+        </p>
+      </section>
 
       <VirtualHumanHealthSection
         enabled={enabled}
@@ -423,6 +510,7 @@ export function AgentVirtualHumanPluginPanel({ agentId, lang }: { agentId: strin
           type="button"
           variant={enabled ? "danger" : "primary"}
           isPending={pending}
+          isDisabled={enableBlocked}
           onPress={() => bindingMutation.mutate({ enabled: !enabled, nextDraft: draft })}
         >
           {enabled ? (lang === "zh" ? "禁用插件" : "Disable plugin") : (lang === "zh" ? "启用虚拟人生活" : "Enable Virtual Human Life")}

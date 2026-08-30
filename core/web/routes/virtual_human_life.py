@@ -22,6 +22,10 @@ from core.web.routes.virtual_human_life_models import (
     VirtualHumanDiaryEntryResponse,
     VirtualHumanEventResponse,
     VirtualHumanMemoryResponse,
+    VirtualHumanLifeDraftResponse,
+    VirtualHumanLifeDraftUpdateRequest,
+    VirtualHumanLifeWorldConfirmRequest,
+    VirtualHumanLifeWorldConfirmResponse,
     VirtualHumanRelationshipResponse,
     VirtualHumanScheduleResponse,
     VirtualHumanSnapshotResponse,
@@ -31,6 +35,8 @@ from core.web.services.virtual_human_life_service import (
     import_legacy_pet,
     preview_legacy_pet_import,
     queue_virtual_human_conversation_message,
+    confirm_virtual_human_life_world,
+    update_virtual_human_life_draft,
     virtual_human_diary,
     virtual_human_events,
     virtual_human_memories,
@@ -192,6 +198,54 @@ def life_command(agent_id: str, payload: VirtualHumanCommandRequest) -> dict:
             expected_version=payload.expectedVersion,
             idempotency_key=payload.idempotencyKey,
             arguments=payload.arguments,
+        )
+    except Exception as exc:
+        _raise_life_http_error(exc)
+        raise
+
+
+@router.put(
+    "/agents/{agent_id}/plugins/virtual-human-life/life-world/draft",
+    response_model=VirtualHumanLifeDraftResponse,
+    response_model_exclude_unset=True,
+)
+def life_world_draft_update(
+    agent_id: str,
+    payload: VirtualHumanLifeDraftUpdateRequest,
+) -> dict:
+    if str(payload.agentId or "").strip() != str(agent_id or "").strip():
+        raise HTTPException(status_code=422, detail="Payload agentId must match the route Agent.")
+    try:
+        return update_virtual_human_life_draft(
+            agent_id,
+            draft_id=payload.draftId,
+            expected_revision=payload.expectedRevision,
+            patch=payload.patch,
+            idempotency_key=payload.idempotencyKey,
+        )
+    except Exception as exc:
+        _raise_life_http_error(exc)
+        raise
+
+
+@router.post(
+    "/agents/{agent_id}/plugins/virtual-human-life/life-world/confirm",
+    response_model=VirtualHumanLifeWorldConfirmResponse,
+    response_model_exclude_unset=True,
+)
+def life_world_confirm(
+    agent_id: str,
+    payload: VirtualHumanLifeWorldConfirmRequest,
+) -> dict:
+    if str(payload.agentId or "").strip() != str(agent_id or "").strip():
+        raise HTTPException(status_code=422, detail="Payload agentId must match the route Agent.")
+    try:
+        return confirm_virtual_human_life_world(
+            agent_id,
+            draft_id=payload.draftId,
+            expected_draft_revision=payload.expectedDraftRevision,
+            expected_binding_version=payload.expectedBindingVersion,
+            idempotency_key=payload.idempotencyKey,
         )
     except Exception as exc:
         _raise_life_http_error(exc)

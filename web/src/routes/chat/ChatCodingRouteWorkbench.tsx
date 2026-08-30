@@ -2842,6 +2842,12 @@ export function ChatCodingRoute() {
         state={companionRailState}
         errorMessage={companionRailError}
         lang={lang}
+        onOpenLifeSteward={(stewardSessionId) => {
+          openSession(stewardSessionId, {
+            replace: false,
+            telemetrySource: "virtual_human_life_steward",
+          });
+        }}
       />
       ) : (
       <Suspense fallback={null}>

@@ -5,6 +5,10 @@ const titleCopy = "min-w-0 [&>p]:m-0 [&>p]:[font-size:var(--vui-font-xs)] [&>p]:
 const description = "m-0 [font-size:var(--vui-font-xs)] leading-[1.55] text-vui-fg-tertiary";
 const badges = "flex min-w-0 flex-wrap gap-1.5";
 const badge = "inline-flex min-h-6 min-w-0 items-center rounded-[var(--radius-control)] border border-vui-border-subtle bg-vui-surface-row px-2 [font-size:0.62rem] text-vui-fg-secondary";
+const setupSection = "grid min-w-0 gap-2 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-cool)_22%,var(--vui-border-subtle))] bg-[linear-gradient(135deg,color-mix(in_srgb,var(--accent-cool)_7%,var(--vui-surface-row)),var(--vui-surface-row))] p-2.5";
+const setupHeader = "flex min-w-0 items-start justify-between gap-2 [&>div]:min-w-0 [&>div]:grid [&>div]:gap-0.5 [&_p]:m-0 [&_p]:[font-size:0.62rem] [&_p]:font-extrabold [&_p]:uppercase [&_p]:tracking-[0.07em] [&_p]:text-vui-fg-tertiary [&_strong]:text-xs [&_strong]:text-vui-fg-primary";
+const setupGrid = "grid min-w-0 grid-cols-2 gap-2 max-[760px]:grid-cols-1";
+const setupHint = "m-0 [font-size:0.62rem] leading-[1.5] text-vui-fg-tertiary";
 const healthSection = "grid min-w-0 gap-2 rounded-[var(--radius-control)] border border-vui-border-subtle bg-vui-surface-row p-2.5";
 const healthHeader = "flex min-w-0 items-start justify-between gap-2";
 const healthKicker = "m-0 [font-size:var(--vui-font-xs)] font-extrabold uppercase tracking-[0.07em] text-vui-fg-secondary";
@@ -29,6 +33,10 @@ export default {
   description,
   badges,
   badge,
+  setupSection,
+  setupHeader,
+  setupGrid,
+  setupHint,
   healthSection,
   healthHeader,
   healthKicker,

@@ -14,6 +14,7 @@ from core.web.services.virtual_human_life_service import (
     _default_conversation_receipt_resolver,
     _default_proactive_admission_resolver,
     _default_schedule_planner,
+    _default_steward_provisioner,
     set_virtual_human_life_service_for_tests,
     stop_virtual_human_life_runtime,
 )
@@ -90,6 +91,143 @@ def test_default_proactive_admission_resolver_reads_native_turn_start(
     }
 
 
+def test_default_steward_provisioner_reuses_one_hidden_native_session(monkeypatch) -> None:
+    from core.web.services import agent_directory_service, session_service
+
+    companion = {
+        "agentId": "agent-companion",
+        "displayName": "小洛",
+        "status": "active",
+        "primaryMode": "chat",
+        "directSessionId": "session-companion",
+        "llmBindings": {"dialogue": {"modelId": "model-dialogue"}},
+        "metadata": {"virtualHumanCompanion": True},
+    }
+    agents = {companion["agentId"]: companion}
+    create_calls: list[dict] = []
+    update_calls: list[dict] = []
+
+    def list_agents(*, include_archived=False, detail="full"):
+        assert detail == "config"
+        return [
+            dict(agent)
+            for agent in agents.values()
+            if include_archived or agent.get("status") != "archived"
+        ]
+
+    def get_agent(agent_id: str, *, include_archived=False):
+        agent = agents.get(agent_id)
+        if not agent or (agent.get("status") == "archived" and not include_archived):
+            return None
+        return dict(agent)
+
+    def create_chat_session(**kwargs):
+        create_calls.append(dict(kwargs))
+        steward = {
+            "agentId": "agent-steward",
+            "displayName": kwargs["title"],
+            "status": "active",
+            "primaryMode": "chat",
+            "directSessionId": "session-steward",
+            "llmBindings": kwargs["llm_bindings"],
+            "metadata": {},
+        }
+        agents[steward["agentId"]] = steward
+        return {
+            "id": steward["directSessionId"],
+            "agentId": steward["agentId"],
+            "title": steward["displayName"],
+        }
+
+    def update_agent_instance(agent_id: str, **kwargs):
+        update_calls.append({"agentId": agent_id, **kwargs})
+        agents[agent_id] = {
+            **agents[agent_id],
+            "displayName": kwargs.get("display_name", agents[agent_id]["displayName"]),
+            "llmBindings": kwargs.get("llm_bindings", agents[agent_id]["llmBindings"]),
+            "primaryMode": kwargs.get("primary_mode", agents[agent_id]["primaryMode"]),
+            "roleKey": kwargs.get("role_key", agents[agent_id].get("roleKey", "")),
+            "promptTemplateId": kwargs.get(
+                "prompt_template_id", agents[agent_id].get("promptTemplateId", "")
+            ),
+            "toolPolicy": kwargs.get("tool_policy", agents[agent_id].get("toolPolicy", {})),
+            "metadata": {**agents[agent_id].get("metadata", {}), **kwargs.get("metadata", {})},
+            "status": kwargs.get("status", agents[agent_id]["status"]),
+        }
+        return dict(agents[agent_id])
+
+    monkeypatch.setattr(agent_directory_service, "list_agents", list_agents)
+    monkeypatch.setattr(agent_directory_service, "get_agent", get_agent)
+    monkeypatch.setattr(agent_directory_service, "update_agent_instance", update_agent_instance)
+    monkeypatch.setattr(session_service, "create_chat_session", create_chat_session)
+
+    binding = {"lifeWorld": {"setupState": "ready"}}
+    first = _default_steward_provisioner(
+        companion["agentId"], action="ensure", binding=binding
+    )
+    second = _default_steward_provisioner(
+        companion["agentId"], action="ensure", binding=binding
+    )
+
+    assert first["created"] is True
+    assert second["created"] is False
+    assert first["agentId"] == second["agentId"] == "agent-steward"
+    assert first["sessionId"] == second["sessionId"] == "session-steward"
+    assert len(create_calls) == 1
+    assert create_calls[0]["conversation_index_kind"] == "hidden"
+    assert create_calls[0]["activate"] is False
+    assert create_calls[0]["llm_bindings"] == companion["llmBindings"]
+    configured = update_calls[-1]
+    assert configured["prompt_template_id"] == "virtual_human_life_steward_v1"
+    assert configured["metadata"]["lifeStewardForAgentId"] == companion["agentId"]
+    assert configured["metadata"]["showInSessionIndex"] is False
+    assert set(configured["tool_policy"]["allowedTools"]) == {
+        "virtual_human_status_tool",
+        "virtual_human_schedule_tool",
+        "virtual_human_activity_tool",
+    }
+
+
+def test_default_steward_rollback_archives_only_the_created_pair(monkeypatch) -> None:
+    from core.web.services import agent_directory_service
+
+    steward = {
+        "agentId": "agent-steward",
+        "status": "active",
+        "directSessionId": "session-steward",
+        "metadata": {"lifeStewardForAgentId": "agent-companion"},
+    }
+    updates: list[dict] = []
+    monkeypatch.setattr(
+        agent_directory_service,
+        "get_agent",
+        lambda agent_id, include_archived=False: (
+            dict(steward) if agent_id == steward["agentId"] else None
+        ),
+    )
+    monkeypatch.setattr(
+        agent_directory_service,
+        "update_agent_instance",
+        lambda agent_id, **kwargs: updates.append({"agentId": agent_id, **kwargs})
+        or {**steward, **kwargs},
+    )
+
+    result = _default_steward_provisioner(
+        "agent-companion",
+        action="rollback",
+        binding={},
+        token={
+            "created": True,
+            "agentId": "agent-steward",
+            "sessionId": "session-steward",
+            "companionAgentId": "agent-companion",
+        },
+    )
+
+    assert result["rolledBack"] is True
+    assert updates == [{"agentId": "agent-steward", "status": "archived"}]
+
+
 def _client(tmp_path) -> tuple[TestClient, VirtualHumanLifeService]:
     agent = {"agentId": "agent-a", "status": "active", "directSessionId": "session-a"}
     service = VirtualHumanLifeService(
@@ -110,12 +248,560 @@ def _client(tmp_path) -> tuple[TestClient, VirtualHumanLifeService]:
     return TestClient(app), service
 
 
+def test_new_binding_requires_canonical_city_and_creates_editable_life_draft(
+    tmp_path,
+) -> None:
+    client, service = _client(tmp_path)
+    try:
+        locations = client.get("/api/agent-plugins/virtual-human-life/locations")
+        assert locations.status_code == 200, locations.text
+        assert any(row["locationId"] == "CN-SHANGHAI" for row in locations.json())
+
+        missing_location = client.put(
+            "/api/agents/agent-a/plugins/virtual-human-life/binding",
+            json={
+                "enabled": True,
+                "expectedVersion": 0,
+                "config": {"timezone": "Asia/Shanghai"},
+            },
+        )
+        assert missing_location.status_code == 422
+        assert "home location" in missing_location.json()["detail"].lower()
+        assert service.binding_for("agent-a") is None
+
+        enabled = client.put(
+            "/api/agents/agent-a/plugins/virtual-human-life/binding",
+            json={
+                "enabled": True,
+                "expectedVersion": 0,
+                "config": {
+                    "homeLocation": {"locationId": "CN-SHANGHAI"},
+                    "lifeIdentityKind": "student",
+                },
+            },
+        )
+        assert enabled.status_code == 200, enabled.text
+        binding = enabled.json()
+        assert binding["configVersion"] == 1
+        assert binding["homeLocation"]["cityName"] == "上海"
+        assert binding["timezone"] == "Asia/Shanghai"
+        assert binding["locationSetupRequired"] is False
+        assert binding["lifeWorld"] == {
+            "schemaVersion": 1,
+            "setupState": "draft",
+            "revision": 0,
+        }
+
+        snapshot = client.get(
+            "/api/agents/agent-a/plugins/virtual-human-life/snapshot"
+        ).json()
+        assert snapshot["environment"]["localDate"] == "2026-08-27"
+        assert snapshot["environment"]["weather"] is None
+        assert snapshot["state"]["currentGeo"]["locationId"] == "CN-SHANGHAI"
+        assert snapshot["lifeWorld"]["draft"]["payload"]["identity"]["kind"] == "student"
+        assert snapshot["lifeWorld"]["facts"]["identities"] == []
+    finally:
+        set_virtual_human_life_service_for_tests(None)
+
+
+def test_binding_transition_hides_and_restores_only_the_companion_directory_entry(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from core.web.services import virtual_human_life_service as facade
+
+    agent = {
+        "agentId": "agent-a",
+        "status": "active",
+        "primaryMode": "chat",
+        "directSessionId": "session-a",
+        "metadata": {},
+    }
+    calls: list[dict] = []
+
+    def directory_manager(agent_id: str, *, action: str, restore=None):
+        calls.append({"agentId": agent_id, "action": action, "restore": restore})
+        if action == "hide":
+            return {
+                "conversationIndexKind": "personal_agent",
+                "conversationIndexVisibility": "user_visible",
+                "showInSessionIndex": True,
+                "directSessionVisibility": "active_session",
+            }
+        return dict(restore or {})
+
+    service = VirtualHumanLifeService(
+        tmp_path,
+        agent_loader=lambda agent_id, include_archived=False: (
+            agent if agent_id == "agent-a" else None
+        ),
+        agent_lister=lambda: [agent],
+        plugin_root_resolver=lambda agent_id: (
+            tmp_path / "agents" / agent_id / "plugins" / "virtual-human-life"
+        ),
+        directory_visibility_manager=directory_manager,
+        now_provider=lambda: datetime(2026, 8, 27, 9, 0, tzinfo=timezone.utc),
+    )
+    monkeypatch.setattr(
+        facade,
+        "_default_agent_persona_initializer",
+        lambda _agent_id: {"initialized": False, "reason": "test"},
+    )
+    set_virtual_human_life_service_for_tests(service)
+    try:
+        enabled = facade.update_virtual_human_binding(
+            "agent-a",
+            enabled=True,
+            expected_version=0,
+            config={
+                "homeLocation": {"locationId": "CN-SHANGHAI"},
+                "lifeIdentityKind": "employee",
+            },
+        )
+        assert calls == [{"agentId": "agent-a", "action": "hide", "restore": None}]
+        assert enabled["directoryVisibility"] == {
+            "state": "hidden",
+            "restore": {
+                "conversationIndexKind": "personal_agent",
+                "conversationIndexVisibility": "user_visible",
+                "showInSessionIndex": True,
+                "directSessionVisibility": "active_session",
+            },
+        }
+
+        disabled = facade.update_virtual_human_binding(
+            "agent-a",
+            enabled=False,
+            expected_version=enabled["configVersion"],
+            config=enabled,
+        )
+        assert disabled["enabled"] is False
+        assert calls[-1] == {
+            "agentId": "agent-a",
+            "action": "restore",
+            "restore": enabled["directoryVisibility"]["restore"],
+        }
+    finally:
+        set_virtual_human_life_service_for_tests(None)
+
+
+def test_life_draft_update_and_confirm_provisions_one_hidden_steward(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from core.web.services import virtual_human_life_service as facade
+
+    agent = {
+        "agentId": "agent-a",
+        "status": "active",
+        "primaryMode": "chat",
+        "directSessionId": "session-a",
+        "metadata": {},
+    }
+    steward_calls: list[dict] = []
+
+    def steward_provisioner(agent_id: str, *, action: str, binding, token=None):
+        steward_calls.append({"agentId": agent_id, "action": action, "token": token})
+        assert binding["lifeWorld"]["setupState"] == "ready"
+        return {
+            "enabled": True,
+            "agentId": "agent-steward-a",
+            "sessionId": "session-steward-a",
+            "promptPackId": "virtual_human_life_steward_v1",
+            "toolBundleId": "virtual_human_life_steward",
+            "provisioningState": "ready",
+            "created": action == "ensure",
+            "rollbackToken": {"agentId": "agent-steward-a"},
+        }
+
+    service = VirtualHumanLifeService(
+        tmp_path,
+        agent_loader=lambda agent_id, include_archived=False: (
+            agent if agent_id == "agent-a" else None
+        ),
+        agent_lister=lambda: [agent],
+        plugin_root_resolver=lambda agent_id: (
+            tmp_path / "agents" / agent_id / "plugins" / "virtual-human-life"
+        ),
+        directory_visibility_manager=lambda _agent_id, **_kwargs: {
+            "conversationIndexKind": "personal_agent",
+            "conversationIndexVisibility": "user_visible",
+            "showInSessionIndex": True,
+            "directSessionVisibility": "active_session",
+        },
+        steward_provisioner=steward_provisioner,
+        now_provider=lambda: datetime(2026, 8, 27, 9, 0, tzinfo=timezone.utc),
+    )
+    monkeypatch.setattr(
+        facade,
+        "_default_agent_persona_initializer",
+        lambda _agent_id: {"initialized": False, "reason": "test"},
+    )
+    set_virtual_human_life_service_for_tests(service)
+    app = FastAPI()
+    app.include_router(agent_plugins.router, prefix="/api")
+    app.include_router(virtual_human_life.router, prefix="/api")
+    client = TestClient(app)
+    try:
+        enabled = client.put(
+            "/api/agents/agent-a/plugins/virtual-human-life/binding",
+            json={
+                "enabled": True,
+                "expectedVersion": 0,
+                "config": {
+                    "homeLocation": {"locationId": "CN-SHANGHAI"},
+                    "lifeIdentityKind": "employee",
+                },
+            },
+        ).json()
+        draft = service.life_world_projection("agent-a")["draft"]
+
+        updated = client.put(
+            "/api/agents/agent-a/plugins/virtual-human-life/life-world/draft",
+            json={
+                "agentId": "agent-a",
+                "draftId": draft["draftId"],
+                "expectedRevision": draft["revision"],
+                "idempotencyKey": "api-edit-life-draft",
+                "patch": {
+                    "identity": {"roleTitle": "交互设计师"},
+                    "affiliations": [{"name": "星河产品工作室"}],
+                },
+            },
+        )
+        assert updated.status_code == 200, updated.text
+        assert updated.json()["revision"] == 2
+
+        confirmed = client.post(
+            "/api/agents/agent-a/plugins/virtual-human-life/life-world/confirm",
+            json={
+                "agentId": "agent-a",
+                "draftId": draft["draftId"],
+                "expectedDraftRevision": 2,
+                "expectedBindingVersion": enabled["configVersion"],
+                "idempotencyKey": "api-confirm-life-world",
+            },
+        )
+        assert confirmed.status_code == 200, confirmed.text
+        payload = confirmed.json()
+        assert payload["binding"]["configVersion"] == enabled["configVersion"] + 1
+        assert payload["binding"]["lifeWorld"]["setupState"] == "ready"
+        assert payload["binding"]["steward"] == {
+            "enabled": True,
+            "agentId": "agent-steward-a",
+            "sessionId": "session-steward-a",
+            "promptPackId": "virtual_human_life_steward_v1",
+            "toolBundleId": "virtual_human_life_steward",
+            "provisioningState": "ready",
+        }
+        assert payload["lifeWorld"]["facts"]["identities"][0]["roleTitle"] == "交互设计师"
+        assert payload["lifeWorld"]["facts"]["affiliations"][0]["name"] == "星河产品工作室"
+        tomorrow = service.schedule_for("agent-a", "2026-08-28")
+        assert tomorrow["planningMode"] == "identity_confirmed_refresh"
+        assert tomorrow["identityConstraint"]["kind"] == "employee"
+        assert any(
+            "上班" in str(activity.get("title") or "")
+            for activity in tomorrow["activities"]
+        )
+        assert steward_calls == [
+            {"agentId": "agent-a", "action": "ensure", "token": None}
+        ]
+
+        replay = client.post(
+            "/api/agents/agent-a/plugins/virtual-human-life/life-world/confirm",
+            json={
+                "agentId": "agent-a",
+                "draftId": draft["draftId"],
+                "expectedDraftRevision": 2,
+                "expectedBindingVersion": enabled["configVersion"],
+                "idempotencyKey": "api-confirm-life-world",
+            },
+        )
+        assert replay.status_code == 200, replay.text
+        assert replay.json() == payload
+        assert len(steward_calls) == 1
+
+        active_reanchor = client.put(
+            "/api/agents/agent-a/plugins/virtual-human-life/binding",
+            json={
+                "enabled": True,
+                "expectedVersion": payload["binding"]["configVersion"],
+                "config": {
+                    **payload["binding"],
+                    "homeLocation": {"locationId": "CN-BEIJING"},
+                    "lifeIdentityKind": "student",
+                },
+            },
+        )
+        assert active_reanchor.status_code == 409, active_reanchor.text
+        unchanged = service.binding_for("agent-a")
+        assert unchanged["enabled"] is True
+        assert unchanged["configVersion"] == payload["binding"]["configVersion"]
+        assert unchanged["homeLocation"]["locationId"] == "CN-SHANGHAI"
+
+        disabled_response = client.put(
+            "/api/agents/agent-a/plugins/virtual-human-life/binding",
+            json={
+                "enabled": False,
+                "expectedVersion": payload["binding"]["configVersion"],
+                "config": payload["binding"],
+            },
+        )
+        assert disabled_response.status_code == 200, disabled_response.text
+        disabled = disabled_response.json()
+
+        reanchor = client.put(
+            "/api/agents/agent-a/plugins/virtual-human-life/binding",
+            json={
+                "enabled": True,
+                "expectedVersion": disabled["configVersion"],
+                "config": {
+                    **disabled,
+                    "homeLocation": {"locationId": "CN-BEIJING"},
+                    "lifeIdentityKind": "student",
+                },
+            },
+        )
+        assert reanchor.status_code == 409, reanchor.text
+        restored = service.binding_for("agent-a")
+        assert restored["enabled"] is False
+        assert restored["homeLocation"]["locationId"] == "CN-SHANGHAI"
+        assert service.life_world_projection("agent-a")["setupState"] == "ready"
+    finally:
+        set_virtual_human_life_service_for_tests(None)
+
+
+def test_life_world_confirmation_rolls_back_when_steward_provisioning_fails(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from core.web.services import virtual_human_life_service as facade
+
+    agent = {
+        "agentId": "agent-a",
+        "status": "active",
+        "primaryMode": "chat",
+        "directSessionId": "session-a",
+        "metadata": {},
+    }
+    service = VirtualHumanLifeService(
+        tmp_path,
+        agent_loader=lambda agent_id, include_archived=False: (
+            agent if agent_id == "agent-a" else None
+        ),
+        agent_lister=lambda: [agent],
+        plugin_root_resolver=lambda agent_id: (
+            tmp_path / "agents" / agent_id / "plugins" / "virtual-human-life"
+        ),
+        directory_visibility_manager=lambda _agent_id, **_kwargs: {
+            "conversationIndexKind": "personal_agent",
+            "conversationIndexVisibility": "user_visible",
+            "showInSessionIndex": True,
+            "directSessionVisibility": "active_session",
+        },
+        steward_provisioner=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("steward unavailable")
+        ),
+        now_provider=lambda: datetime(2026, 8, 27, 9, 0, tzinfo=timezone.utc),
+    )
+    monkeypatch.setattr(
+        facade,
+        "_default_agent_persona_initializer",
+        lambda _agent_id: {"initialized": False, "reason": "test"},
+    )
+    set_virtual_human_life_service_for_tests(service)
+    app = FastAPI()
+    app.include_router(agent_plugins.router, prefix="/api")
+    app.include_router(virtual_human_life.router, prefix="/api")
+    client = TestClient(app)
+    try:
+        enabled = client.put(
+            "/api/agents/agent-a/plugins/virtual-human-life/binding",
+            json={
+                "enabled": True,
+                "expectedVersion": 0,
+                "config": {
+                    "homeLocation": {"locationId": "CN-SHANGHAI"},
+                    "lifeIdentityKind": "student",
+                },
+            },
+        ).json()
+        draft = service.life_world_projection("agent-a")["draft"]
+        failed = client.post(
+            "/api/agents/agent-a/plugins/virtual-human-life/life-world/confirm",
+            json={
+                "agentId": "agent-a",
+                "draftId": draft["draftId"],
+                "expectedDraftRevision": draft["revision"],
+                "expectedBindingVersion": enabled["configVersion"],
+                "idempotencyKey": "api-confirm-failing-steward",
+            },
+        )
+
+        assert failed.status_code == 422
+        projection = service.life_world_projection("agent-a")
+        assert projection["setupState"] == "draft"
+        assert projection["facts"]["identities"] == []
+        assert service.binding_for("agent-a")["steward"]["provisioningState"] == "missing"
+    finally:
+        set_virtual_human_life_service_for_tests(None)
+
+
+def test_life_world_confirmation_archives_created_steward_when_binding_commit_fails(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from core.web.services import virtual_human_life_service as facade
+
+    agent = {
+        "agentId": "agent-a",
+        "status": "active",
+        "primaryMode": "chat",
+        "directSessionId": "session-a",
+        "metadata": {},
+    }
+    steward_calls: list[dict] = []
+
+    def steward_provisioner(agent_id: str, *, action: str, binding, token=None):
+        steward_calls.append(
+            {
+                "agentId": agent_id,
+                "action": action,
+                "token": token,
+            }
+        )
+        if action == "rollback":
+            return {"rolledBack": True}
+        return {
+            "enabled": True,
+            "agentId": "agent-steward-a",
+            "sessionId": "session-steward-a",
+            "promptPackId": "virtual_human_life_steward_v1",
+            "toolBundleId": "virtual_human_life_steward",
+            "provisioningState": "ready",
+            "created": True,
+            "rollbackToken": {
+                "created": True,
+                "agentId": "agent-steward-a",
+                "sessionId": "session-steward-a",
+                "companionAgentId": "agent-a",
+            },
+        }
+
+    service = VirtualHumanLifeService(
+        tmp_path,
+        agent_loader=lambda agent_id, include_archived=False: (
+            agent if agent_id == "agent-a" else None
+        ),
+        agent_lister=lambda: [agent],
+        plugin_root_resolver=lambda agent_id: (
+            tmp_path / "agents" / agent_id / "plugins" / "virtual-human-life"
+        ),
+        directory_visibility_manager=lambda _agent_id, **_kwargs: {
+            "conversationIndexKind": "personal_agent",
+            "conversationIndexVisibility": "user_visible",
+            "showInSessionIndex": True,
+            "directSessionVisibility": "active_session",
+        },
+        steward_provisioner=steward_provisioner,
+        now_provider=lambda: datetime(2026, 8, 27, 9, 0, tzinfo=timezone.utc),
+    )
+    monkeypatch.setattr(
+        facade,
+        "_default_agent_persona_initializer",
+        lambda _agent_id: {"initialized": False, "reason": "test"},
+    )
+    set_virtual_human_life_service_for_tests(service)
+    app = FastAPI()
+    app.include_router(agent_plugins.router, prefix="/api")
+    app.include_router(virtual_human_life.router, prefix="/api")
+    client = TestClient(app)
+    try:
+        enabled = client.put(
+            "/api/agents/agent-a/plugins/virtual-human-life/binding",
+            json={
+                "enabled": True,
+                "expectedVersion": 0,
+                "config": {
+                    "homeLocation": {"locationId": "CN-SHANGHAI"},
+                    "lifeIdentityKind": "student",
+                },
+            },
+        ).json()
+        draft = service.life_world_projection("agent-a")["draft"]
+        original_set_binding = service.set_binding
+
+        def failing_steward_binding_commit(
+            agent_id: str,
+            *,
+            enabled: bool,
+            expected_version: int,
+            config=None,
+        ):
+            steward = config.get("steward") if isinstance(config, dict) else {}
+            if (
+                isinstance(steward, dict)
+                and steward.get("provisioningState") == "ready"
+            ):
+                raise RuntimeError("binding write unavailable")
+            return original_set_binding(
+                agent_id,
+                enabled=enabled,
+                expected_version=expected_version,
+                config=config,
+            )
+
+        monkeypatch.setattr(service, "set_binding", failing_steward_binding_commit)
+
+        failed = client.post(
+            "/api/agents/agent-a/plugins/virtual-human-life/life-world/confirm",
+            json={
+                "agentId": "agent-a",
+                "draftId": draft["draftId"],
+                "expectedDraftRevision": draft["revision"],
+                "expectedBindingVersion": enabled["configVersion"],
+                "idempotencyKey": "api-confirm-failing-binding-commit",
+            },
+        )
+
+        assert failed.status_code == 422
+        assert steward_calls == [
+            {"agentId": "agent-a", "action": "ensure", "token": None},
+            {
+                "agentId": "agent-a",
+                "action": "rollback",
+                "token": {
+                    "created": True,
+                    "agentId": "agent-steward-a",
+                    "sessionId": "session-steward-a",
+                    "companionAgentId": "agent-a",
+                },
+            },
+        ]
+        projection = service.life_world_projection("agent-a")
+        assert projection["setupState"] == "draft"
+        assert projection["facts"]["identities"] == []
+        binding = service.binding_for("agent-a")
+        assert binding["configVersion"] == enabled["configVersion"]
+        assert binding["steward"]["provisioningState"] == "missing"
+        assert binding["steward"]["agentId"] == ""
+        assert binding["steward"]["sessionId"] == ""
+    finally:
+        set_virtual_human_life_service_for_tests(None)
+
+
 def test_agent_plugin_and_virtual_human_routes_are_typed_and_agent_scoped(tmp_path) -> None:
     client, service = _client(tmp_path)
     try:
         catalog = client.get("/api/agent-plugins/catalog")
         assert catalog.status_code == 200
         assert catalog.json()[0]["pluginId"] == "virtual-human-life"
+        location_schema = client.app.openapi()["paths"][
+            "/api/agent-plugins/virtual-human-life/locations"
+        ]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
+        assert location_schema["items"]["$ref"].endswith(
+            "/VirtualHumanLocationResponse"
+        )
 
         before = client.get("/api/agents/agent-a/plugins")
         assert before.status_code == 200
@@ -127,7 +813,7 @@ def test_agent_plugin_and_virtual_human_routes_are_typed_and_agent_scoped(tmp_pa
             json={
                 "enabled": True,
                 "expectedVersion": 0,
-                "config": {"timezone": "Asia/Shanghai"},
+                "config": {"homeLocation": {"locationId": "CN-SHANGHAI"}},
             },
         )
         assert enabled.status_code == 200, enabled.text
@@ -312,7 +998,7 @@ def test_enabling_at_nightly_time_keeps_provisional_schedule_without_planner(
             "agent-a",
             enabled=True,
             expected_version=0,
-            config={"timezone": "Asia/Shanghai"},
+            config={"homeLocation": {"locationId": "CN-SHANGHAI"}},
         )
 
         assert binding["enabled"] is True
@@ -382,7 +1068,11 @@ def test_virtual_human_command_rejects_agent_id_mismatch_and_stale_version(tmp_p
     try:
         client.put(
             "/api/agents/agent-a/plugins/virtual-human-life/binding",
-            json={"enabled": True, "expectedVersion": 0, "config": {}},
+            json={
+                "enabled": True,
+                "expectedVersion": 0,
+                "config": {"homeLocation": {"locationId": "CN-SHANGHAI"}},
+            },
         )
         mismatch = client.post(
             "/api/agents/agent-a/plugins/virtual-human-life/commands",
@@ -416,7 +1106,11 @@ def test_operator_can_review_reflection_through_agent_scoped_command(tmp_path) -
     try:
         enabled = client.put(
             "/api/agents/agent-a/plugins/virtual-human-life/binding",
-            json={"enabled": True, "expectedVersion": 0, "config": {}},
+            json={
+                "enabled": True,
+                "expectedVersion": 0,
+                "config": {"homeLocation": {"locationId": "CN-SHANGHAI"}},
+            },
         )
         assert enabled.status_code == 200, enabled.text
         service.store.append_jsonl(
@@ -488,7 +1182,11 @@ def test_virtual_human_reads_reject_unknown_agent_and_invalid_query(tmp_path) ->
 
         enabled = client.put(
             "/api/agents/agent-a/plugins/virtual-human-life/binding",
-            json={"enabled": True, "expectedVersion": 0, "config": {}},
+            json={
+                "enabled": True,
+                "expectedVersion": 0,
+                "config": {"homeLocation": {"locationId": "CN-SHANGHAI"}},
+            },
         )
         assert enabled.status_code == 200
         assert (
@@ -791,6 +1489,35 @@ def test_default_schedule_planner_reuses_agent_dialogue_route_without_tools(
                     "content": "留下了一个很喜欢的动机。",
                 }
             ],
+            "lifeWorld": {
+                "setupState": "confirmed",
+                "revision": 3,
+                "facts": {
+                    "identities": [
+                        {
+                            "kind": "student",
+                            "roleTitle": "本科生",
+                            "stage": "大二",
+                        }
+                    ],
+                    "affiliations": [
+                        {
+                            "organizationKind": "school",
+                            "name": "临江大学",
+                            "role": "数字媒体专业学生",
+                        }
+                    ],
+                    "routines": [
+                        {
+                            "dayType": "weekday",
+                            "startTime": "08:00",
+                            "endTime": "12:00",
+                            "title": "上午课程",
+                            "activityKind": "study",
+                        }
+                    ],
+                },
+            },
             "constraints": {"allowedActivityKinds": ["creative"]},
         }
     )
@@ -801,4 +1528,27 @@ def test_default_schedule_planner_reuses_agent_dialogue_route_without_tools(
     assert calls["context"].agent_id == "agent-a"
     payload = json.loads(calls["messages"][1]["content"])
     assert payload["recentDiary"][0]["summary"] == "留下了一个很喜欢的动机。"
+    assert payload["confirmedLifeConstraints"] == {
+        "setupState": "confirmed",
+        "revision": 3,
+        "identities": [
+            {"kind": "student", "roleTitle": "本科生", "stage": "大二"}
+        ],
+        "affiliations": [
+            {
+                "organizationKind": "school",
+                "name": "临江大学",
+                "role": "数字媒体专业学生",
+            }
+        ],
+        "routines": [
+            {
+                "dayType": "weekday",
+                "startTime": "08:00",
+                "endTime": "12:00",
+                "title": "上午课程",
+                "activityKind": "study",
+            }
+        ],
+    }
     assert payload["constraints"]["allowedExecutionKinds"] == ["simulated"]

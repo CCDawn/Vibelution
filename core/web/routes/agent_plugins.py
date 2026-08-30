@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
+from core.agent_plugins.virtual_human_life.geography import list_city_locations
 from core.agent_plugins.virtual_human_life.service import (
     AgentUnavailableError,
     BindingConflictError,
@@ -16,6 +17,7 @@ from core.web.routes.agent_plugin_models import (
     AgentPluginListResponse,
     VirtualHumanCompanionResponse,
 )
+from core.web.routes.virtual_human_life_models import VirtualHumanLocationResponse
 from core.web.services.agent_plugin_service import (
     list_agent_plugin_catalog,
     list_agent_plugins,
@@ -42,6 +44,15 @@ def agent_plugin_catalog() -> list[dict]:
 )
 def virtual_human_companion_list() -> list[dict]:
     return list_virtual_human_companions()
+
+
+@router.get(
+    "/agent-plugins/virtual-human-life/locations",
+    response_model=list[VirtualHumanLocationResponse],
+    response_model_exclude_unset=True,
+)
+def virtual_human_location_list() -> list[dict]:
+    return list_city_locations()
 
 
 @router.get(

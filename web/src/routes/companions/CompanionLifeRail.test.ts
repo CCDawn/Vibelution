@@ -6,6 +6,7 @@ import styles from "./CompanionChatRails.styles";
 describe("virtual-human life rail memory projection", () => {
   it("renders real episodic memories with salience, time, and event provenance", () => {
     expect(railSource).toContain("fetchVirtualHumanMemories");
+    expect(railSource).toContain("CompanionLifeWorldCard");
     expect(railSource).toContain("queryKeys.virtualHumanMemories");
     expect(railSource).toContain("MemoryRows");
     expect(railSource).toContain("memory.text");
@@ -18,6 +19,11 @@ describe("virtual-human life rail memory projection", () => {
     expect(railSource).toContain("sort((left, right) => memoryTimestamp(right) - memoryTimestamp(left))");
     expect(railSource).toContain("styles.memoryVisual");
     expect(railSource).toContain("段重要生活片段");
+  });
+
+  it("opens the hidden life steward through the Chat route owner", () => {
+    expect(railSource).toContain("onOpenLifeSteward");
+    expect(railSource).not.toContain("/chat?session=");
   });
 
   it("projects causal life continuity without adding another chat or data route", () => {

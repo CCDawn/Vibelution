@@ -54,8 +54,20 @@ def build_deterministic_schedule(
     timezone_name: str,
     zone: tzinfo,
     now: datetime,
+    life_world: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the bounded provisional schedule used before a planner runs."""
+
+    identity_schedule = _identity_constrained_schedule(
+        agent_id,
+        local_date,
+        timezone_name=timezone_name,
+        zone=zone,
+        now=now,
+        life_world=life_world,
+    )
+    if identity_schedule is not None:
+        return identity_schedule
 
     seed = int(
         hashlib.sha256(f"{agent_id}:{local_date.isoformat()}".encode()).hexdigest()[:8],
@@ -95,6 +107,96 @@ def build_deterministic_schedule(
         "timezone": str(timezone_name or "Asia/Shanghai"),
         "scheduleVersion": 1,
         "planningMode": "deterministic_mvp",
+        "activities": activities,
+        "createdAt": _utc_iso(now),
+        "updatedAt": _utc_iso(now),
+    }
+
+
+def _identity_constrained_schedule(
+    agent_id: str,
+    local_date: date,
+    *,
+    timezone_name: str,
+    zone: tzinfo,
+    now: datetime,
+    life_world: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not isinstance(life_world, dict) or str(life_world.get("setupState") or "") != "ready":
+        return None
+    facts = life_world.get("facts") if isinstance(life_world.get("facts"), dict) else {}
+    identities = [row for row in list(facts.get("identities") or []) if isinstance(row, dict)]
+    if not identities:
+        return None
+    identity = identities[0]
+    identity_kind = str(identity.get("kind") or "").strip().lower()
+    day_type = "weekday" if local_date.weekday() < 5 else "weekend"
+    routines = [
+        row
+        for row in list(facts.get("routines") or [])
+        if isinstance(row, dict) and str(row.get("dayType") or "") == day_type
+    ]
+    if not routines:
+        routines = [
+            row
+            for row in list(facts.get("routines") or [])
+            if isinstance(row, dict) and str(row.get("dayType") or "") == "holiday"
+        ]
+    routines.sort(key=lambda row: str(row.get("startTime") or ""))
+    if not routines:
+        return None
+
+    activities: list[dict[str, Any]] = []
+    if str(routines[0].get("startTime") or "") >= "07:30":
+        routines = [
+            {
+                "routineId": "morning-meal",
+                "startTime": "07:00",
+                "endTime": "07:30",
+                "title": "起床、整理和吃早餐",
+                "activityKind": "meal",
+            },
+            *routines,
+        ]
+    for index, row in enumerate(routines, start=1):
+        try:
+            start_value = time.fromisoformat(str(row.get("startTime") or ""))
+            end_value = time.fromisoformat(str(row.get("endTime") or ""))
+        except ValueError:
+            continue
+        start_at = datetime.combine(local_date, start_value, tzinfo=zone)
+        end_at = datetime.combine(local_date, end_value, tzinfo=zone)
+        if end_at <= start_at:
+            continue
+        stable_id = hashlib.sha256(
+            f"{agent_id}:{local_date.isoformat()}:{row.get('routineId')}:{index}".encode("utf-8")
+        ).hexdigest()[:16]
+        activities.append(
+            {
+                "activityId": f"life-identity-{local_date.isoformat()}-{stable_id}",
+                "title": str(row.get("title") or "生活安排").strip()[:160],
+                "kind": "simulated",
+                "activityKind": str(row.get("activityKind") or "personal").strip() or "personal",
+                "startAt": _utc_iso(start_at),
+                "endAt": _utc_iso(end_at),
+                "status": "planned",
+                "origin": "life_world_identity_routine",
+                "lifeWorldRoutineId": str(row.get("routineId") or ""),
+            }
+        )
+    return {
+        "schemaVersion": STORAGE_SCHEMA_VERSION,
+        "agentId": str(agent_id).strip(),
+        "localDate": local_date.isoformat(),
+        "timezone": str(timezone_name or "Asia/Shanghai"),
+        "scheduleVersion": 1,
+        "planningMode": "identity_constrained_deterministic",
+        "identityConstraint": {
+            "kind": identity_kind,
+            "identityId": str(identity.get("identityId") or ""),
+            "roleTitle": str(identity.get("roleTitle") or ""),
+            "lifeWorldRevision": int(life_world.get("revision") or 0),
+        },
         "activities": activities,
         "createdAt": _utc_iso(now),
         "updatedAt": _utc_iso(now),

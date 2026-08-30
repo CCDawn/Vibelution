@@ -12,10 +12,11 @@ from typing import Any
 from core.chat.chat_task_types import trim_lines
 
 
-def _runtime_agent_id() -> str:
+def _runtime_context() -> dict[str, Any]:
     from core.web.services import agent_directory_service
 
-    return str(agent_directory_service.current_agent_runtime().get("agentId") or "").strip()
+    runtime = agent_directory_service.current_agent_runtime()
+    return dict(runtime) if isinstance(runtime, dict) else {}
 
 
 def _service():
@@ -34,16 +35,41 @@ def _blocked(message: str, *, error: str) -> str:
     return _result({"ok": False, "status": "blocked", "error": error, "message": message})
 
 
-def _invoke(operation) -> str:
-    agent_id = _runtime_agent_id()
-    if not agent_id:
+def _invoke(operation, *, require_steward: bool = False) -> str:
+    runtime = _runtime_context()
+    runtime_agent_id = str(runtime.get("agentId") or "").strip()
+    if not runtime_agent_id:
         return _blocked("当前工具需要在已绑定 Agent 的运行时中调用。", error="agent_runtime_missing")
     try:
-        binding = _service().binding_for(agent_id)
-        if not binding or not bool(binding.get("enabled")):
-            return _blocked("当前 Agent 未启用虚拟人生活插件。", error="plugin_binding_disabled")
-        return _result({"ok": True, "agentId": agent_id, **operation(agent_id)})
+        from core.web.services.virtual_human_life_service import (
+            resolve_virtual_human_runtime_target,
+        )
+
+        resolved = resolve_virtual_human_runtime_target(
+            runtime_agent_id,
+            session_id=str(runtime.get("sessionId") or ""),
+            runtime_agent=(runtime.get("agent") if isinstance(runtime.get("agent"), dict) else None),
+        )
+        if require_steward and not bool(resolved.get("steward")):
+            return _blocked(
+                "结构化生活世界只能由已配对的生活管家修改。",
+                error="life_steward_required",
+            )
+        target_agent_id = str(resolved.get("targetAgentId") or "").strip()
+        payload = {
+            "ok": True,
+            "agentId": target_agent_id,
+            **operation(target_agent_id),
+        }
+        if target_agent_id != runtime_agent_id:
+            payload["runtimeAgentId"] = runtime_agent_id
+        return _result(payload)
     except Exception as exc:  # noqa: BLE001 - tool boundary returns structured failure
+        if str(exc).strip() == "Virtual-human plugin binding is disabled for this Agent.":
+            return _blocked(
+                "当前 Agent 未启用虚拟人生活插件。",
+                error="plugin_binding_disabled",
+            )
         return _result(
             {
                 "ok": False,
@@ -191,6 +217,7 @@ def virtual_human_schedule_tool(
 def virtual_human_activity_tool(
     action: str,
     expected_version: int,
+    expected_world_revision: int = 0,
     activity_id: str = "",
     local_date: str = "",
     reason: str = "",
@@ -218,15 +245,80 @@ def virtual_human_activity_tool(
     artifact_summary: str = "",
     source_event_ids: list[str] | None = None,
     local_ref: str = "",
+    account_id: str = "",
+    amount_minor: int = 0,
+    currency: str = "",
+    category: str = "",
+    description: str = "",
+    occurred_at: str = "",
+    item_category: str = "",
+    item_name: str = "",
+    item_brand: str = "",
+    item_model: str = "",
+    item_status: str = "active",
+    item_location: str = "",
+    acquired_at: str = "",
     idempotency_key: str = "",
 ) -> str:
     """维护生活活动、环境/位置，以及由真实结果支撑的世界和作品记录。
 
     action: start | complete | fail | cancel | skip | replan |
     record_environment | start_move | complete_move | record_place_visit |
-    record_important_item | record_artifact_receipt。
+    record_important_item | record_artifact_receipt | record_transaction |
+    upsert_life_item。
     complete 接收 outcome_summary 记录实际结果；计划文本不会被视为完成结果。
     """
+
+    normalized_action = str(action or "").strip().lower()
+    if normalized_action in {"record_transaction", "upsert_life_item"}:
+        key = str(idempotency_key or "").strip()
+        if not key:
+            return _blocked(
+                "修改结构化生活世界需要 idempotency_key。",
+                error="idempotency_key_required",
+            )
+        if int(expected_world_revision or 0) <= 0:
+            return _blocked(
+                "修改结构化生活世界需要有效的 expected_world_revision。",
+                error="expected_world_revision_required",
+            )
+        if normalized_action == "record_transaction":
+            return _invoke(
+                lambda agent_id: {
+                    "status": "applied",
+                    "lifeWorldResult": _service().record_life_world_transaction(
+                        agent_id,
+                        account_id=str(account_id or "").strip(),
+                        amount_minor=int(amount_minor),
+                        currency=str(currency or "").strip(),
+                        category=str(category or "").strip(),
+                        description=str(description or "").strip(),
+                        occurred_at=str(occurred_at or "").strip(),
+                        idempotency_key=key,
+                        expected_world_revision=int(expected_world_revision),
+                    ),
+                },
+                require_steward=True,
+            )
+        return _invoke(
+            lambda agent_id: {
+                "status": "applied",
+                "lifeWorldResult": _service().upsert_life_world_item(
+                    agent_id,
+                    item_id=str(item_id or "").strip(),
+                    category=str(item_category or "").strip(),
+                    name=str(item_name or "").strip(),
+                    brand=str(item_brand or "").strip(),
+                    model=str(item_model or "").strip(),
+                    status=str(item_status or "active").strip(),
+                    current_location=str(item_location or "").strip(),
+                    acquired_at=str(acquired_at or "").strip(),
+                    idempotency_key=key,
+                    expected_world_revision=int(expected_world_revision),
+                ),
+            },
+            require_steward=True,
+        )
 
     command_by_action = {
         "start": "startActivity",
@@ -242,10 +334,10 @@ def virtual_human_activity_tool(
         "record_important_item": "recordImportantItem",
         "record_artifact_receipt": "recordArtifactReceipt",
     }
-    command = command_by_action.get(str(action or "").strip().lower(), "")
+    command = command_by_action.get(normalized_action, "")
     if not command:
         return _blocked(
-            "action 必须是 start/complete/fail/cancel/skip/replan/record_environment/start_move/complete_move/record_place_visit/record_important_item/record_artifact_receipt。",
+            "action 必须是 start/complete/fail/cancel/skip/replan/record_environment/start_move/complete_move/record_place_visit/record_important_item/record_artifact_receipt/record_transaction/upsert_life_item。",
             error="invalid_action",
         )
     key = str(idempotency_key or "").strip()

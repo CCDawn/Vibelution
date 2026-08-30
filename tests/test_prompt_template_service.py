@@ -137,6 +137,16 @@ def test_prompt_template_registry_repairs_research_defaults(tmp_path, monkeypatc
     assert "rg" in operation_chat["content"]
     assert _contains_tool_name(operation_chat["content"], "apply_patch_tool")
     assert _contains_tool_name(operation_chat["content"], "run_test_for_tool")
+    life_steward = prompt_template_service.get_prompt_template(
+        "virtual_human_life_steward_v1"
+    )
+    assert life_steward is not None
+    assert life_steward["category"] == "chat"
+    assert life_steward["metadata"]["roleKey"] == "virtual_human_life_steward"
+    assert "配对虚拟人的结构化生活世界" in life_steward["content"]
+    assert "不能执行自由 SQL" in life_steward["content"]
+    assert "先读取当前版本" in life_steward["content"]
+    assert "人物陪伴聊天 transcript" in life_steward["content"]
     self_evolution_template_ids = {
         item["promptTemplateId"]
         for item in payload["templates"]

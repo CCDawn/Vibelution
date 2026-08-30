@@ -5,6 +5,7 @@ import type {
   AgentPluginCatalogEntry,
   AgentPluginList,
   VirtualHumanCompanion,
+  VirtualHumanLocation,
 } from "./types";
 
 export function listAgentPluginCatalog(options?: { signal?: AbortSignal }): Promise<AgentPluginCatalogEntry[]> {
@@ -42,6 +43,13 @@ export function updateAgentPluginBinding(
 export function listVirtualHumanCompanions(options?: { signal?: AbortSignal }): Promise<VirtualHumanCompanion[]> {
   return fetchJson<VirtualHumanCompanion[]>(
     "/api/agent-plugins/virtual-human-life/companions",
+    { signal: options?.signal },
+  );
+}
+
+export function listVirtualHumanLocations(options?: { signal?: AbortSignal }): Promise<VirtualHumanLocation[]> {
+  return fetchJson<VirtualHumanLocation[]>(
+    "/api/agent-plugins/virtual-human-life/locations",
     { signal: options?.signal },
   );
 }

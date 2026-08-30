@@ -61,6 +61,57 @@ describe("companion presentation", () => {
     expect(upcomingLifeActivities(companion.snapshot).map((item) => item.title)).toEqual(["阅读", "散步"]);
   });
 
+  it("prioritizes the confirmed city, role, and affiliation in the lobby identity", () => {
+    expect(companionIdentity({
+      ...companion,
+      snapshot: {
+        ...companion.snapshot,
+        binding: {
+          agentId: companion.agentId,
+          pluginId: "virtual-human-life",
+          enabled: true,
+          configVersion: 4,
+          bindingRevision: 4,
+          homeLocation: {
+            locationId: "CN-SHANGHAI",
+            countryCode: "CN",
+            countryName: "中国",
+            regionCode: "CN-SH",
+            regionName: "上海",
+            cityCode: "SHA",
+            cityName: "上海",
+            timezone: "Asia/Shanghai",
+            locale: "zh-CN",
+          },
+        },
+        lifeWorld: {
+          schemaVersion: 1,
+          setupState: "ready",
+          revision: 1,
+          draft: null,
+          facts: {
+            identities: [{
+              identityId: "identity-a",
+              kind: "student",
+              roleTitle: "本科生",
+              stage: "大二",
+            }],
+            affiliations: [{
+              affiliationId: "affiliation-a",
+              organizationKind: "school",
+              name: "临江大学",
+              role: "数字媒体专业学生",
+            }],
+            routines: [],
+            items: [],
+            accounts: [],
+            recurringRules: [],
+          },
+        },
+      },
+    })).toBe("上海 · 本科生 · 临江大学");
+  });
+
   it("keeps settings returns on the same native companion Session", () => {
     expect(companionReturnTarget(companion)).toBe("/chat?session=session+1&companion=agent%2Fnora");
   });

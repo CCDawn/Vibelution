@@ -47,6 +47,12 @@ describe("virtual-human native Chat reuse", () => {
     expect(chatSource).toContain("showAgentFallbackTab={!verifiedCompanionMode}");
   });
 
+  it("opens life management as an exact hidden native Session", () => {
+    expect(chatSource).toContain("onOpenLifeSteward");
+    expect(chatSource).toContain('telemetrySource: "virtual_human_life_steward"');
+    expect(chatSource).not.toContain("/chat?session=${");
+  });
+
   it("removes technical composer chrome only from the verified companion presentation", () => {
     expect(chatSource).toContain("companionMode: verifiedCompanionMode");
     expect(chatSource).toContain("showMentalSnapshots: !verifiedCompanionMode");

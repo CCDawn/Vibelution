@@ -4,6 +4,7 @@ import json
 from datetime import datetime, timedelta, timezone
 
 from core.agent_plugins.virtual_human_life.manifest import VIRTUAL_HUMAN_TOOL_NAMES
+from core.agent_plugins.virtual_human_life.geography import resolve_city_location
 from core.agent_plugins.virtual_human_life.service import VirtualHumanLifeService
 from core.web.services import agent_directory_service, tool_catalog
 from core.web.services import virtual_human_life_service as virtual_human_facade
@@ -77,6 +78,155 @@ def test_virtual_human_tools_fail_closed_until_current_agent_binding_is_enabled(
         set_virtual_human_life_service_for_tests(None)
 
 
+def test_life_steward_tools_resolve_only_the_paired_companion_runtime(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    companion = {
+        "agentId": "agent-companion",
+        "status": "active",
+        "directSessionId": "session-companion",
+        "metadata": {"virtualHumanCompanion": True},
+    }
+    steward = {
+        "agentId": "agent-steward",
+        "status": "active",
+        "directSessionId": "session-steward",
+        "metadata": {"lifeStewardForAgentId": companion["agentId"]},
+    }
+    agents = {companion["agentId"]: companion, steward["agentId"]: steward}
+    service = VirtualHumanLifeService(
+        tmp_path,
+        agent_loader=lambda agent_id, include_archived=False: agents.get(agent_id),
+        agent_lister=lambda: list(agents.values()),
+        plugin_root_resolver=lambda agent_id: (
+            tmp_path / "agents" / agent_id / "plugins" / "virtual-human-life"
+        ),
+        now_provider=lambda: datetime(2026, 8, 30, 1, 0, tzinfo=timezone.utc),
+    )
+    enabled = service.set_binding(
+        companion["agentId"],
+        enabled=True,
+        expected_version=0,
+        config={
+            "homeLocation": resolve_city_location("CN-SHANGHAI"),
+            "lifeIdentityKind": "employee",
+        },
+    )
+    draft = service.ensure_life_world_draft(
+        companion["agentId"],
+        identity_kind="employee",
+        idempotency_key="steward-test-draft",
+    )
+    service.confirm_life_world_draft(
+        companion["agentId"],
+        draft_id=draft["draftId"],
+        expected_revision=draft["revision"],
+        idempotency_key="steward-test-confirm",
+    )
+    current = service.binding_for(companion["agentId"])
+    service.set_binding(
+        companion["agentId"],
+        enabled=True,
+        expected_version=current["configVersion"],
+        config={
+            **current,
+            "steward": {
+                "enabled": True,
+                "agentId": steward["agentId"],
+                "sessionId": steward["directSessionId"],
+                "promptPackId": "virtual_human_life_steward_v1",
+                "toolBundleId": "virtual_human_life_steward",
+                "provisioningState": "ready",
+            },
+        },
+    )
+    runtime = {
+        "agentId": companion["agentId"],
+        "sessionId": companion["directSessionId"],
+        "agent": companion,
+    }
+    monkeypatch.setattr(agent_directory_service, "current_agent_runtime", lambda: runtime)
+    set_virtual_human_life_service_for_tests(service)
+    try:
+        life_world = service.life_world_projection(companion["agentId"])
+        account = life_world["facts"]["accounts"][0]
+        companion_write = json.loads(
+            virtual_human_activity_tool(
+                action="record_transaction",
+                expected_version=0,
+                expected_world_revision=life_world["revision"],
+                account_id=account["accountId"],
+                amount_minor=-2599,
+                currency=account["currency"],
+                category="daily_expense",
+                description="人物不能绕过生活管家直接记账",
+                occurred_at="2026-08-30T09:05:00+08:00",
+                idempotency_key="companion-direct-expense",
+            )
+        )
+        assert companion_write["ok"] is False
+        assert companion_write["error"] == "life_steward_required"
+
+        runtime.update(
+            {
+                "agentId": steward["agentId"],
+                "sessionId": steward["directSessionId"],
+                "agent": steward,
+            }
+        )
+        status = json.loads(virtual_human_status_tool())
+        assert status["ok"] is True
+        assert status["agentId"] == companion["agentId"]
+        assert status["runtimeAgentId"] == steward["agentId"]
+        assert status["snapshot"]["agentId"] == companion["agentId"]
+
+        life_world = service.life_world_projection(companion["agentId"])
+        account = life_world["facts"]["accounts"][0]
+        transaction = json.loads(
+            virtual_human_activity_tool(
+                action="record_transaction",
+                expected_version=0,
+                expected_world_revision=life_world["revision"],
+                account_id=account["accountId"],
+                amount_minor=-2599,
+                currency=account["currency"],
+                category="daily_expense",
+                description="购买生活用品",
+                occurred_at="2026-08-30T09:10:00+08:00",
+                idempotency_key="steward-expense-1",
+            )
+        )
+        assert transaction["ok"] is True
+        assert transaction["lifeWorldResult"]["amountMinor"] == -2599
+
+        item = json.loads(
+            virtual_human_activity_tool(
+                action="upsert_life_item",
+                expected_version=0,
+                expected_world_revision=transaction["lifeWorldResult"]["worldRevision"],
+                item_id="item-headphones",
+                item_category="electronics",
+                item_name="无线耳机",
+                item_brand="星声",
+                item_model="Air 2",
+                item_status="active",
+                item_location="home",
+                acquired_at="2026-08-30",
+                idempotency_key="steward-item-1",
+            )
+        )
+        assert item["ok"] is True, item
+        assert item["lifeWorldResult"]["item"]["name"] == "无线耳机"
+
+        runtime["sessionId"] = "session-wrong"
+        blocked = json.loads(virtual_human_status_tool())
+        assert blocked["ok"] is False
+        assert "pair" in blocked["message"].lower()
+    finally:
+        set_virtual_human_life_service_for_tests(None)
+
+
 def test_active_agent_runtime_carries_virtual_human_binding_fence(
     tmp_path,
     monkeypatch,
@@ -131,6 +281,86 @@ def test_active_agent_runtime_carries_virtual_human_binding_fence(
             "agent-a", session_id="session-a", turn_id="turn-b"
         ) as runtime:
             assert runtime["externallyBlockedTools"] == []
+    finally:
+        set_virtual_human_life_service_for_tests(None)
+
+
+def test_active_agent_runtime_allows_the_paired_life_steward_tool_bundle(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    companion = {
+        "agentId": "agent-companion",
+        "status": "active",
+        "directSessionId": "session-companion",
+        "metadata": {"virtualHumanCompanion": True},
+    }
+    steward = {
+        "agentId": "agent-steward",
+        "status": "active",
+        "directSessionId": "session-steward",
+        "toolPolicyId": "virtual-human-life-steward",
+        "toolPolicy": {
+            "policyId": "virtual-human-life-steward",
+            "policyVersion": 1,
+            "allowedTools": list(VIRTUAL_HUMAN_TOOL_NAMES),
+            "blockedTools": [],
+            "preferredTools": [],
+            "networkAccess": "restricted",
+            "mutationAccess": "controlled",
+            "delegationAccess": "none",
+            "maxCallsPerTurn": 4,
+            "approvalOverrides": {},
+        },
+        "metadata": {"lifeStewardForAgentId": companion["agentId"]},
+        "configRevision": 1,
+        "configHash": "config-steward",
+        "permissionPreset": "request_approval",
+    }
+    agents = {companion["agentId"]: companion, steward["agentId"]: steward}
+    service = VirtualHumanLifeService(
+        tmp_path,
+        agent_loader=lambda agent_id, include_archived=False: agents.get(agent_id),
+        agent_lister=lambda: list(agents.values()),
+        plugin_root_resolver=lambda agent_id: (
+            tmp_path / "agents" / agent_id / "plugins" / "virtual-human-life"
+        ),
+        now_provider=lambda: datetime(2026, 8, 30, 1, 0, tzinfo=timezone.utc),
+    )
+    service.set_binding(companion["agentId"], enabled=True, expected_version=0)
+    current = service.binding_for(companion["agentId"])
+    service.set_binding(
+        companion["agentId"],
+        enabled=True,
+        expected_version=current["configVersion"],
+        config={
+            **current,
+            "steward": {
+                "enabled": True,
+                "agentId": steward["agentId"],
+                "sessionId": steward["directSessionId"],
+                "promptPackId": "virtual_human_life_steward_v1",
+                "toolBundleId": "virtual_human_life_steward",
+                "provisioningState": "ready",
+            },
+        },
+    )
+    monkeypatch.setattr(
+        agent_directory_service,
+        "get_agent",
+        lambda agent_id, **_kwargs: agents.get(agent_id),
+    )
+    set_virtual_human_life_service_for_tests(service)
+    try:
+        with agent_directory_service.active_agent_runtime(
+            steward["agentId"],
+            session_id=steward["directSessionId"],
+            turn_id="turn-steward",
+        ) as runtime:
+            assert runtime["externallyBlockedTools"] == []
+            assert set(runtime["toolPolicy"]["allowedTools"]) == set(
+                VIRTUAL_HUMAN_TOOL_NAMES
+            )
     finally:
         set_virtual_human_life_service_for_tests(None)
 

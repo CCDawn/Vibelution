@@ -9,7 +9,9 @@ describe("virtual human life frontend API", () => {
     expect(apiSource).toContain("listAgentPlugins");
     expect(apiSource).toContain("updateAgentPluginBinding");
     expect(apiSource).toContain("listVirtualHumanCompanions");
+    expect(apiSource).toContain("listVirtualHumanLocations");
     expect(apiSource).toContain("/api/agent-plugins/virtual-human-life/companions");
+    expect(apiSource).toContain("/api/agent-plugins/virtual-human-life/locations");
     expect(apiSource).toContain('method: "PUT"');
   });
 
@@ -17,6 +19,10 @@ describe("virtual human life frontend API", () => {
     expect(lifeApiSource).toContain("fetchVirtualHumanSnapshot");
     expect(lifeApiSource).toContain("fetchVirtualHumanMemories");
     expect(lifeApiSource).toContain("executeVirtualHumanCommand");
+    expect(lifeApiSource).toContain("updateVirtualHumanLifeDraft");
+    expect(lifeApiSource).toContain("confirmVirtualHumanLifeWorld");
+    expect(lifeApiSource).toContain("/plugins/virtual-human-life/life-world/draft");
+    expect(lifeApiSource).toContain("/plugins/virtual-human-life/life-world/confirm");
     expect(lifeApiSource).toContain("/plugins/virtual-human-life/commands");
     expect(lifeApiSource).toContain('method: "POST"');
     expect(lifeApiSource).toContain("/plugins/virtual-human-life/memories");
@@ -27,6 +33,8 @@ describe("virtual human life frontend API", () => {
     expect(typeSource).toContain("export type VirtualHumanEpisodicMemory");
     expect(typeSource).toContain("export type VirtualHumanCommandRequest");
     expect(typeSource).toContain("export type VirtualHumanCommandResponse");
+    expect(typeSource).toContain("export type VirtualHumanLifeWorld");
+    expect(typeSource).toContain("export type VirtualHumanLifeStewardBinding");
     expect(typeSource).toContain("health?: VirtualHumanSnapshotHealth");
     expect(typeSource).toContain("export type VirtualHumanActivity");
     expect(typeSource).toContain("directSessionId: string");

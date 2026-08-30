@@ -6,9 +6,15 @@ import asyncio
 import json
 import logging
 import threading
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from core.agent_plugins.virtual_human_life.geography import resolve_city_location
+from core.agent_plugins.virtual_human_life.life_world_store import (
+    LifeWorldConflictError,
+    LifeWorldError,
+)
 from core.agent_plugins.virtual_human_life.manifest import PLUGIN_ID
 from core.agent_plugins.virtual_human_life.service import (
     VirtualHumanLifeError,
@@ -22,6 +28,15 @@ _SERVICE_LOCK = threading.Lock()
 _SERVICE: VirtualHumanLifeService | None = None
 _RUNTIME_ACCEPTING = threading.Event()
 _RUNTIME_STARTED = threading.Event()
+_STEWARD_PROVISION_LOCK = threading.RLock()
+
+LIFE_STEWARD_PROMPT_TEMPLATE_ID = "virtual_human_life_steward_v1"
+LIFE_STEWARD_TOOL_BUNDLE_ID = "virtual_human_life_steward"
+LIFE_STEWARD_ALLOWED_TOOLS = (
+    "virtual_human_status_tool",
+    "virtual_human_schedule_tool",
+    "virtual_human_activity_tool",
+)
 
 
 def _runtime_acceptance_allowed() -> bool:
@@ -40,6 +55,333 @@ def _default_agent_lister() -> list[dict[str, Any]]:
     from .agent_directory_service import list_agents
 
     return list_agents(include_archived=False, detail="summary")
+
+
+def _default_directory_visibility_manager(
+    agent_id: str,
+    *,
+    action: str,
+    restore: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Apply the existing Agent Directory classification without touching Session core."""
+
+    from . import agent_directory_service
+
+    normalized_agent_id = str(agent_id or "").strip()
+    agent = agent_directory_service.get_agent(normalized_agent_id, include_archived=True)
+    if not isinstance(agent, dict):
+        raise VirtualHumanLifeError("Companion Agent is unavailable for directory classification.")
+    metadata = dict(agent.get("metadata") or {})
+    normalized_action = str(action or "").strip().lower()
+    if normalized_action == "hide":
+        previous = {
+            "conversationIndexKind": str(
+                metadata.get("conversationIndexKind")
+                or agent.get("conversationIndexKind")
+                or agent_directory_service.CONVERSATION_INDEX_KIND_PERSONAL_AGENT
+            ).strip(),
+            "conversationIndexVisibility": str(
+                metadata.get("conversationIndexVisibility")
+                or agent.get("conversationIndexVisibility")
+                or agent_directory_service.CONVERSATION_INDEX_VISIBILITY_USER_VISIBLE
+            ).strip(),
+            "showInSessionIndex": bool(metadata.get("showInSessionIndex", True)),
+            "directSessionVisibility": str(
+                metadata.get("directSessionVisibility")
+                or agent_directory_service.SESSION_AGENT_VISIBILITY_ACTIVE
+            ).strip(),
+        }
+        agent_directory_service.update_agent_instance(
+            normalized_agent_id,
+            metadata={
+                "conversationIndexKind": agent_directory_service.CONVERSATION_INDEX_KIND_HIDDEN,
+                "conversationIndexVisibility": agent_directory_service.CONVERSATION_INDEX_VISIBILITY_HIDDEN,
+                "showInSessionIndex": False,
+                # The direct Session remains active and is opened only by the
+                # explicit Companion deep link.
+                "directSessionVisibility": agent_directory_service.SESSION_AGENT_VISIBILITY_ACTIVE,
+                "virtualHumanCompanion": True,
+            },
+        )
+        return previous
+    if normalized_action == "restore":
+        previous = dict(restore or {})
+        if not previous:
+            raise VirtualHumanLifeError("Companion directory restore metadata is missing.")
+        agent_directory_service.update_agent_instance(
+            normalized_agent_id,
+            metadata={
+                "conversationIndexKind": str(
+                    previous.get("conversationIndexKind")
+                    or agent_directory_service.CONVERSATION_INDEX_KIND_PERSONAL_AGENT
+                ),
+                "conversationIndexVisibility": str(
+                    previous.get("conversationIndexVisibility")
+                    or agent_directory_service.CONVERSATION_INDEX_VISIBILITY_USER_VISIBLE
+                ),
+                "showInSessionIndex": bool(previous.get("showInSessionIndex", True)),
+                "directSessionVisibility": str(
+                    previous.get("directSessionVisibility")
+                    or agent_directory_service.SESSION_AGENT_VISIBILITY_ACTIVE
+                ),
+                "virtualHumanCompanion": False,
+            },
+        )
+        return previous
+    raise VirtualHumanLifeError("Unsupported Companion directory visibility action.")
+
+
+def _life_steward_agents_for(
+    companion_agent_id: str,
+    *,
+    include_archived: bool = False,
+) -> list[dict[str, Any]]:
+    from . import agent_directory_service
+
+    normalized_companion_id = str(companion_agent_id or "").strip()
+    return [
+        dict(agent)
+        for agent in agent_directory_service.list_agents(
+            include_archived=include_archived,
+            detail="config",
+        )
+        if isinstance(agent, dict)
+        and str((agent.get("metadata") or {}).get("lifeStewardForAgentId") or "").strip()
+        == normalized_companion_id
+        and str(agent.get("status") or "active").strip().lower() != "archived"
+    ]
+
+
+def _life_steward_tool_policy() -> dict[str, Any]:
+    return {
+        "allowedTools": list(LIFE_STEWARD_ALLOWED_TOOLS),
+        "preferredTools": ["virtual_human_status_tool"],
+        "blockedTools": [],
+        "readScopes": [],
+        "writeScopes": [],
+        "networkAccess": "none",
+        "mutationAccess": "controlled",
+        "maxCallsPerTurn": 16,
+    }
+
+
+def _default_steward_provisioner(
+    agent_id: str,
+    *,
+    action: str,
+    binding: dict[str, Any],
+    token: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Ensure one hidden native Agent/Session for one Companion's life facts."""
+
+    from . import agent_directory_service, session_service
+
+    normalized_agent_id = str(agent_id or "").strip()
+    normalized_action = str(action or "").strip().lower()
+    if not normalized_agent_id:
+        raise VirtualHumanLifeError("Life steward requires a Companion Agent id.")
+    if normalized_action == "rollback":
+        rollback = dict(token or {})
+        if not bool(rollback.get("created")):
+            return {"rolledBack": False, "reason": "not_created_by_attempt"}
+        steward_agent_id = str(rollback.get("agentId") or "").strip()
+        steward_session_id = str(rollback.get("sessionId") or "").strip()
+        companion_id = str(rollback.get("companionAgentId") or "").strip()
+        if not steward_agent_id or not steward_session_id or companion_id != normalized_agent_id:
+            raise VirtualHumanLifeError("Life steward rollback token does not match the Companion.")
+        with _STEWARD_PROVISION_LOCK:
+            steward = agent_directory_service.get_agent(
+                steward_agent_id,
+                include_archived=True,
+            )
+            if not isinstance(steward, dict):
+                return {"rolledBack": False, "reason": "steward_missing"}
+            metadata = steward.get("metadata") if isinstance(steward.get("metadata"), dict) else {}
+            if (
+                str(metadata.get("lifeStewardForAgentId") or "").strip()
+                != normalized_agent_id
+                or str(steward.get("directSessionId") or "").strip()
+                != steward_session_id
+            ):
+                raise VirtualHumanLifeError("Life steward rollback target no longer matches the created pair.")
+            if str(steward.get("status") or "active").strip().lower() != "archived":
+                agent_directory_service.update_agent_instance(
+                    steward_agent_id,
+                    status="archived",
+                )
+        return {
+            "rolledBack": True,
+            "agentId": steward_agent_id,
+            "sessionId": steward_session_id,
+        }
+    if normalized_action != "ensure":
+        raise VirtualHumanLifeError("Unsupported life steward provisioning action.")
+    life_world = binding.get("lifeWorld") if isinstance(binding.get("lifeWorld"), dict) else {}
+    if str(life_world.get("setupState") or "").strip() != "ready":
+        raise VirtualHumanLifeError("Life steward can only be created after life facts are confirmed.")
+
+    with _STEWARD_PROVISION_LOCK:
+        companion = agent_directory_service.get_agent(
+            normalized_agent_id,
+            include_archived=False,
+        )
+        if not isinstance(companion, dict):
+            raise VirtualHumanLifeError("Companion Agent is unavailable for life steward provisioning.")
+        if str(companion.get("status") or "active").strip().lower() != "active":
+            raise VirtualHumanLifeError("Life steward requires an active Companion Agent.")
+        llm_bindings = agent_directory_service.normalize_agent_llm_bindings(
+            companion.get("llmBindings")
+        )
+        if not agent_directory_service.agent_dialogue_model_id(
+            {"llmBindings": llm_bindings}
+        ):
+            raise VirtualHumanLifeError("Companion dialogue model is required for the life steward.")
+        matches = _life_steward_agents_for(normalized_agent_id)
+        if len(matches) > 1:
+            raise VirtualHumanLifeError("Multiple active life stewards exist for this Companion.")
+
+        created = False
+        if matches:
+            steward = matches[0]
+        else:
+            title = f"{str(companion.get('displayName') or '虚拟人').strip()}的生活管家"
+            created_session = session_service.create_chat_session(
+                title=title,
+                llm_bindings=llm_bindings,
+                created_by="virtual_human_life_steward",
+                conversation_index_kind=agent_directory_service.CONVERSATION_INDEX_KIND_HIDDEN,
+                session_metadata={
+                    "source": "virtual_human_life_steward",
+                    "externalTaskId": normalized_agent_id,
+                },
+                lightweight=True,
+                activate=False,
+            )
+            steward_agent_id = str(created_session.get("agentId") or "").strip()
+            steward_session_id = str(created_session.get("id") or "").strip()
+            if not steward_agent_id or not steward_session_id:
+                raise VirtualHumanLifeError("Life steward Session creation returned no Agent or Session.")
+            steward = agent_directory_service.get_agent(
+                steward_agent_id,
+                include_archived=False,
+            ) or {
+                "agentId": steward_agent_id,
+                "directSessionId": steward_session_id,
+                "metadata": {},
+            }
+            created = True
+
+        steward_agent_id = str(steward.get("agentId") or "").strip()
+        steward_session_id = str(steward.get("directSessionId") or "").strip()
+        if not steward_agent_id or not steward_session_id:
+            raise VirtualHumanLifeError("Life steward Agent has no persistent direct Session.")
+        title = f"{str(companion.get('displayName') or '虚拟人').strip()}的生活管家"
+        expected_metadata = {
+            "agentMode": "chat",
+            "configSurface": "companion_life_world",
+            "conversationIndexKind": agent_directory_service.CONVERSATION_INDEX_KIND_HIDDEN,
+            "conversationIndexVisibility": agent_directory_service.CONVERSATION_INDEX_VISIBILITY_HIDDEN,
+            "fixedRole": True,
+            "showInSessionIndex": False,
+            "directSessionVisibility": agent_directory_service.SESSION_AGENT_VISIBILITY_ACTIVE,
+            "functionalDisplayName": title,
+            "lifeStewardForAgentId": normalized_agent_id,
+            "virtualHumanLifeSteward": True,
+        }
+        desired_policy = _life_steward_tool_policy()
+        metadata = steward.get("metadata") if isinstance(steward.get("metadata"), dict) else {}
+        current_policy = steward.get("toolPolicy") if isinstance(steward.get("toolPolicy"), dict) else {}
+        needs_update = any(
+            (
+                str(steward.get("displayName") or "").strip() != title,
+                agent_directory_service.normalize_agent_llm_bindings(steward.get("llmBindings"))
+                != llm_bindings,
+                str(steward.get("primaryMode") or "").strip() != "chat",
+                str(steward.get("roleKey") or "").strip() != "virtual_human_life_steward",
+                str(steward.get("promptTemplateId") or "").strip()
+                != LIFE_STEWARD_PROMPT_TEMPLATE_ID,
+                any(metadata.get(key) != value for key, value in expected_metadata.items()),
+                set(current_policy.get("allowedTools") or [])
+                != set(desired_policy["allowedTools"]),
+                str(current_policy.get("networkAccess") or "") != "none",
+                str(current_policy.get("mutationAccess") or "") != "controlled",
+            )
+        )
+        try:
+            if needs_update:
+                steward = agent_directory_service.update_agent_instance(
+                    steward_agent_id,
+                    display_name=title,
+                    llm_bindings=llm_bindings,
+                    primary_mode="chat",
+                    role_key="virtual_human_life_steward",
+                    prompt_template_id=LIFE_STEWARD_PROMPT_TEMPLATE_ID,
+                    tool_policy=desired_policy,
+                    metadata=expected_metadata,
+                    status="active",
+                    preserve_generated_display_name=True,
+                )
+        except Exception:
+            if created:
+                try:
+                    agent_directory_service.update_agent_instance(
+                        steward_agent_id,
+                        status="archived",
+                    )
+                except Exception as rollback_exc:  # noqa: BLE001 - keep original provisioning error
+                    logger.error(
+                        "Life steward creation rollback failed for agent=%s (%s).",
+                        steward_agent_id,
+                        type(rollback_exc).__name__,
+                    )
+            raise
+        rollback_token = (
+            {
+                "created": True,
+                "agentId": steward_agent_id,
+                "sessionId": steward_session_id,
+                "companionAgentId": normalized_agent_id,
+            }
+            if created
+            else None
+        )
+        return {
+            "enabled": True,
+            "agentId": steward_agent_id,
+            "sessionId": steward_session_id,
+            "promptPackId": LIFE_STEWARD_PROMPT_TEMPLATE_ID,
+            "toolBundleId": LIFE_STEWARD_TOOL_BUNDLE_ID,
+            "provisioningState": "ready",
+            "created": created,
+            "rollbackToken": rollback_token,
+        }
+
+
+def _require_companion_eligible_agent(
+    service: VirtualHumanLifeService,
+    agent_id: str,
+) -> dict[str, Any]:
+    agent = service.require_agent(agent_id, include_archived=True)
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    status = str(agent.get("status") or "active").strip().lower()
+    primary_mode = str(agent.get("primaryMode") or "chat").strip().lower()
+    if status != "active":
+        raise VirtualHumanLifeError("Only an active Agent can become a Companion.")
+    if primary_mode != "chat":
+        raise VirtualHumanLifeError("Only a standalone chat Agent can become a Companion.")
+    if not str(agent.get("directSessionId") or "").strip():
+        raise VirtualHumanLifeError("Companion Agent requires a persistent direct Session.")
+    if any(
+        (
+            bool(metadata.get("protected")),
+            bool(metadata.get("fixedRole")),
+            bool(str(metadata.get("teamId") or "").strip()),
+            bool(str(metadata.get("challengeCupTeamId") or "").strip()),
+            bool(str(metadata.get("systemRole") or "").strip()),
+        )
+    ):
+        raise VirtualHumanLifeError("Protected, team, research, or system Agents cannot become Companions.")
+    return agent
 
 
 def _default_proactive_submitter(**payload: Any) -> dict[str, Any]:
@@ -342,6 +684,42 @@ def _default_schedule_planner(context: dict[str, Any]) -> dict[str, Any]:
     planner_constraints = (
         planner_constraints if isinstance(planner_constraints, dict) else {}
     )
+    life_world = normalized_context.get("lifeWorld")
+    life_world = life_world if isinstance(life_world, dict) else {}
+    life_facts = life_world.get("facts") if isinstance(life_world.get("facts"), dict) else {}
+    confirmed_life_constraints = {
+        "setupState": str(life_world.get("setupState") or "missing"),
+        "revision": int(life_world.get("revision") or 0),
+        "identities": [
+            {
+                "kind": str(item.get("kind") or "")[:40],
+                "roleTitle": str(item.get("roleTitle") or "")[:160],
+                "stage": str(item.get("stage") or "")[:80],
+            }
+            for item in list(life_facts.get("identities") or [])[:2]
+            if isinstance(item, dict)
+        ],
+        "affiliations": [
+            {
+                "organizationKind": str(item.get("organizationKind") or "")[:40],
+                "name": str(item.get("name") or "")[:160],
+                "role": str(item.get("role") or "")[:120],
+            }
+            for item in list(life_facts.get("affiliations") or [])[:4]
+            if isinstance(item, dict)
+        ],
+        "routines": [
+            {
+                "dayType": str(item.get("dayType") or "")[:40],
+                "startTime": str(item.get("startTime") or "")[:5],
+                "endTime": str(item.get("endTime") or "")[:5],
+                "title": str(item.get("title") or "")[:160],
+                "activityKind": str(item.get("activityKind") or "")[:80],
+            }
+            for item in list(life_facts.get("routines") or [])[:16]
+            if isinstance(item, dict)
+        ],
+    }
     planning_payload = {
         "agentId": agent_id,
         "displayName": str(agent.get("displayName") or agent_id)[:160],
@@ -350,6 +728,7 @@ def _default_schedule_planner(context: dict[str, Any]) -> dict[str, Any]:
         "personaData": persona,
         "currentState": compact_state,
         "recentDiary": compact_diary,
+        "confirmedLifeConstraints": confirmed_life_constraints,
         "constraints": {
             "maxActivities": 8,
             "sameLocalDate": True,
@@ -365,6 +744,8 @@ def _default_schedule_planner(context: dict[str, Any]) -> dict[str, Any]:
     system_prompt = (
         "你是一个独立存在的虚构人物的次日生活规划器，不是用户的数字分身。"
         "根据人物资料、当前状态和近期日记，为指定 localDate 规划真实可执行的个人日程。"
+        "confirmedLifeConstraints 中已确认的身份、学校或单位和对应作息是硬约束；"
+        "不要把上课、上班、通勤等固定时段改成冲突的自由活动。"
         "计划是未来提案，不要声称活动已经完成；不要编造用户发生过的事实。"
         "仅输出一个 JSON 对象，不要 Markdown、解释或思考过程。格式必须是 "
         '{"activities":[{"title":"...","activityKind":"creative",'
@@ -475,6 +856,8 @@ def get_virtual_human_life_service() -> VirtualHumanLifeService:
                 schedule_planner=_default_schedule_planner,
                 schedule_planner_timeout_seconds=25.0,
                 runtime_acceptance_provider=_runtime_acceptance_allowed,
+                directory_visibility_manager=_default_directory_visibility_manager,
+                steward_provisioner=_default_steward_provisioner,
             )
         return _SERVICE
 
@@ -485,8 +868,70 @@ def set_virtual_human_life_service_for_tests(service: VirtualHumanLifeService | 
         _SERVICE = service
 
 
+def resolve_virtual_human_runtime_target(
+    agent_id: str,
+    *,
+    session_id: str = "",
+    runtime_agent: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Resolve a Companion or its paired steward to one life-world owner."""
+
+    service = get_virtual_human_life_service()
+    runtime_agent_id = str(agent_id or "").strip()
+    normalized_session_id = str(session_id or "").strip()
+    if not runtime_agent_id:
+        raise VirtualHumanLifeError("Virtual-human runtime Agent is missing.")
+    direct_binding = service.binding_for(runtime_agent_id)
+    if direct_binding and bool(direct_binding.get("enabled")):
+        return {
+            "runtimeAgentId": runtime_agent_id,
+            "targetAgentId": runtime_agent_id,
+            "binding": direct_binding,
+            "steward": False,
+        }
+    agent = runtime_agent if isinstance(runtime_agent, dict) else service.require_agent(
+        runtime_agent_id,
+        include_archived=True,
+    )
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    target_agent_id = str(metadata.get("lifeStewardForAgentId") or "").strip()
+    if not target_agent_id:
+        raise VirtualHumanLifeError("Virtual-human plugin binding is disabled for this Agent.")
+    target_binding = service.binding_for(target_agent_id)
+    steward = (
+        target_binding.get("steward")
+        if isinstance((target_binding or {}).get("steward"), dict)
+        else {}
+    )
+    if (
+        not target_binding
+        or not bool(target_binding.get("enabled"))
+        or str(steward.get("provisioningState") or "").strip() != "ready"
+        or str(steward.get("agentId") or "").strip() != runtime_agent_id
+        or (
+            normalized_session_id
+            and str(steward.get("sessionId") or "").strip() != normalized_session_id
+        )
+        or str(agent.get("directSessionId") or "").strip()
+        != str(steward.get("sessionId") or "").strip()
+    ):
+        raise VirtualHumanLifeError("Life steward pair validation failed.")
+    target_agent = service.require_agent(target_agent_id, include_archived=True)
+    if str(target_agent.get("status") or "active").strip().lower() != "active":
+        raise VirtualHumanLifeError("Paired Companion Agent is unavailable.")
+    return {
+        "runtimeAgentId": runtime_agent_id,
+        "targetAgentId": target_agent_id,
+        "binding": target_binding,
+        "steward": True,
+    }
+
+
 def virtual_human_binding(agent_id: str) -> dict[str, Any] | None:
-    return get_virtual_human_life_service().binding_for(agent_id)
+    try:
+        return resolve_virtual_human_runtime_target(agent_id).get("binding")
+    except VirtualHumanLifeError:
+        return get_virtual_human_life_service().binding_for(agent_id)
 
 
 def queue_virtual_human_conversation_message(
@@ -524,12 +969,129 @@ def update_virtual_human_binding(
     config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     service = get_virtual_human_life_service()
-    binding = service.set_binding(
-        agent_id,
-        enabled=enabled,
-        expected_version=expected_version,
-        config=config,
-    )
+    current = service.binding_for(agent_id)
+    current_enabled = bool((current or {}).get("enabled"))
+    config_payload = deepcopy(config or {})
+    hidden_restore: dict[str, Any] | None = None
+    restored_before_disable = False
+    if enabled:
+        from core.agent_plugins.virtual_human_life.service import BindingConflictError
+
+        _require_companion_eligible_agent(service, agent_id)
+        raw_home_location = config_payload.get("homeLocation")
+        if raw_home_location is None and isinstance(current, dict):
+            raw_home_location = current.get("homeLocation")
+        if not current_enabled and not raw_home_location:
+            raise VirtualHumanLifeError(
+                "A supported city-level home location is required before enabling the Companion."
+            )
+        if raw_home_location:
+            try:
+                config_payload["homeLocation"] = resolve_city_location(raw_home_location)
+            except ValueError as exc:
+                raise VirtualHumanLifeError(str(exc)) from exc
+        life_world = service.life_world_projection(agent_id)
+        confirmed_draft = (
+            life_world.get("draft")
+            if isinstance(life_world.get("draft"), dict)
+            else {}
+        )
+        confirmed_payload = (
+            confirmed_draft.get("payload")
+            if isinstance(confirmed_draft.get("payload"), dict)
+            else {}
+        )
+        if str(life_world.get("setupState") or "").strip() == "ready":
+            confirmed_location = (
+                confirmed_payload.get("homeLocation")
+                if isinstance(confirmed_payload.get("homeLocation"), dict)
+                else {}
+            )
+            confirmed_identity = (
+                confirmed_payload.get("identity")
+                if isinstance(confirmed_payload.get("identity"), dict)
+                else {}
+            )
+            requested_location = (
+                config_payload.get("homeLocation")
+                if isinstance(config_payload.get("homeLocation"), dict)
+                else (current or {}).get("homeLocation")
+            )
+            requested_identity_kind = str(
+                config_payload.get("lifeIdentityKind")
+                or (current or {}).get("lifeIdentityKind")
+                or "student"
+            ).strip().lower()
+            if (
+                not isinstance(requested_location, dict)
+                or str(requested_location.get("locationId") or "").strip()
+                != str(confirmed_location.get("locationId") or "").strip()
+                or requested_identity_kind
+                != str(confirmed_identity.get("kind") or "").strip().lower()
+            ):
+                raise BindingConflictError(
+                    "Confirmed life-world anchors require an explicit relocation operation."
+                )
+        existing_directory = (
+            current.get("directoryVisibility")
+            if isinstance((current or {}).get("directoryVisibility"), dict)
+            else {}
+        )
+        if (
+            service.directory_visibility_manager is not None
+            and str(existing_directory.get("state") or "") != "hidden"
+        ):
+            hidden_restore = service.directory_visibility_manager(
+                agent_id,
+                action="hide",
+                restore=None,
+            )
+            config_payload["directoryVisibility"] = {
+                "state": "hidden",
+                "restore": hidden_restore,
+            }
+    elif current_enabled and service.directory_visibility_manager is not None:
+        directory_state = (
+            current.get("directoryVisibility")
+            if isinstance((current or {}).get("directoryVisibility"), dict)
+            else {}
+        )
+        restore = (
+            directory_state.get("restore")
+            if isinstance(directory_state.get("restore"), dict)
+            else {}
+        )
+        service.directory_visibility_manager(
+            agent_id,
+            action="restore",
+            restore=restore,
+        )
+        restored_before_disable = True
+        config_payload["directoryVisibility"] = {
+            "state": "restored",
+            "restore": restore,
+        }
+    try:
+        binding = service.set_binding(
+            agent_id,
+            enabled=enabled,
+            expected_version=expected_version,
+            config=config_payload,
+        )
+    except Exception:
+        if hidden_restore and service.directory_visibility_manager is not None:
+            service.directory_visibility_manager(
+                agent_id,
+                action="restore",
+                restore=hidden_restore,
+            )
+        elif restored_before_disable and service.directory_visibility_manager is not None:
+            service.directory_visibility_manager(
+                agent_id,
+                action="hide",
+                restore=None,
+            )
+        raise
     if enabled:
         try:
             persona_result = _default_agent_persona_initializer(agent_id)
@@ -540,6 +1102,41 @@ def update_virtual_human_binding(
                 type(exc).__name__,
             )
             persona_result = {"initialized": False, "reason": "initializer_failed"}
+        if isinstance(binding.get("homeLocation"), dict):
+            identity_kind = str(binding.get("lifeIdentityKind") or "student")
+            try:
+                service.ensure_life_world_draft(
+                    agent_id,
+                    identity_kind=identity_kind,
+                    idempotency_key=(
+                        f"life-world-draft:{str(agent_id).strip()}:"
+                        f"{binding['homeLocation']['locationId']}:{identity_kind}"
+                    ),
+                )
+                binding = service.binding_for(agent_id) or binding
+            except Exception as exc:
+                if not current_enabled:
+                    try:
+                        service.set_binding(
+                            agent_id,
+                            enabled=False,
+                            expected_version=int(binding.get("configVersion") or 0),
+                            config=current or {},
+                        )
+                    finally:
+                        if hidden_restore and service.directory_visibility_manager is not None:
+                            service.directory_visibility_manager(
+                                agent_id,
+                                action="restore",
+                                restore=hidden_restore,
+                            )
+                if isinstance(exc, LifeWorldConflictError):
+                    from core.agent_plugins.virtual_human_life.service import (
+                        BindingConflictError,
+                    )
+
+                    raise BindingConflictError(str(exc)) from exc
+                raise
         # Enable creates life state and activates the supervisor capability, but this
         # coalesced pass never backfills an old proactive message or startup greeting.
         service.heartbeat_agent(agent_id, coalesced=True, allow_planner=False)
@@ -562,6 +1159,186 @@ def update_virtual_human_binding(
 
 def virtual_human_snapshot(agent_id: str) -> dict[str, Any]:
     return get_virtual_human_life_service().snapshot(agent_id)
+
+
+def update_virtual_human_life_draft(
+    agent_id: str,
+    *,
+    draft_id: str,
+    expected_revision: int,
+    patch: dict[str, Any],
+    idempotency_key: str,
+) -> dict[str, Any]:
+    service = get_virtual_human_life_service()
+    try:
+        result = service.update_life_world_draft(
+            agent_id,
+            draft_id=draft_id,
+            expected_revision=expected_revision,
+            patch=patch,
+            idempotency_key=idempotency_key,
+        )
+    except LifeWorldConflictError as exc:
+        from core.agent_plugins.virtual_human_life.service import BindingConflictError
+
+        raise BindingConflictError(str(exc)) from exc
+    except LifeWorldError as exc:
+        raise VirtualHumanLifeError(str(exc)) from exc
+    _record_scene(
+        "life_world_draft_updated",
+        agent_id=agent_id,
+        outcome="updated",
+        fields={
+            "draftId": str(result.get("draftId") or ""),
+            "draftRevision": int(result.get("revision") or 0),
+        },
+    )
+    return result
+
+
+def confirm_virtual_human_life_world(
+    agent_id: str,
+    *,
+    draft_id: str,
+    expected_draft_revision: int,
+    expected_binding_version: int,
+    idempotency_key: str,
+) -> dict[str, Any]:
+    from core.agent_plugins.virtual_human_life.service import BindingConflictError
+
+    service = get_virtual_human_life_service()
+    binding = service.binding_for(agent_id)
+    if not binding or not bool(binding.get("enabled")):
+        raise VirtualHumanLifeError("virtual-human-life is not enabled for this Agent.")
+    projection_before = service.life_world_projection(agent_id)
+    steward_before = (
+        binding.get("steward") if isinstance(binding.get("steward"), dict) else {}
+    )
+    already_ready = (
+        str(projection_before.get("setupState") or "") == "ready"
+        and str(steward_before.get("provisioningState") or "") == "ready"
+        and bool(steward_before.get("agentId"))
+        and bool(steward_before.get("sessionId"))
+    )
+    if not already_ready and int(expected_binding_version) != int(
+        binding.get("configVersion") or 0
+    ):
+        raise BindingConflictError(
+            "Binding version changed before life-world confirmation. Refresh and retry."
+        )
+    try:
+        confirmation = service.confirm_life_world_draft(
+            agent_id,
+            draft_id=draft_id,
+            expected_revision=expected_draft_revision,
+            idempotency_key=idempotency_key,
+        )
+    except LifeWorldConflictError as exc:
+        raise BindingConflictError(str(exc)) from exc
+    except LifeWorldError as exc:
+        raise VirtualHumanLifeError(str(exc)) from exc
+    if already_ready:
+        return {
+            "agentId": str(agent_id).strip(),
+            "binding": binding,
+            "lifeWorld": projection_before,
+            "confirmation": confirmation,
+        }
+    rollback_token: dict[str, Any] | None = None
+    try:
+        if service.steward_provisioner is None:
+            raise VirtualHumanLifeError("Life steward provisioner is unavailable.")
+        binding_after_confirmation = service.binding_for(agent_id) or binding
+        provisioned = service.steward_provisioner(
+            agent_id,
+            action="ensure",
+            binding=binding_after_confirmation,
+            token=None,
+        )
+        rollback_token = (
+            dict(provisioned.get("rollbackToken") or {})
+            if isinstance(provisioned, dict)
+            else None
+        )
+        steward = {
+            "enabled": True,
+            "agentId": str((provisioned or {}).get("agentId") or "").strip(),
+            "sessionId": str((provisioned or {}).get("sessionId") or "").strip(),
+            "promptPackId": str(
+                (provisioned or {}).get("promptPackId")
+                or "virtual_human_life_steward_v1"
+            ).strip(),
+            "toolBundleId": str(
+                (provisioned or {}).get("toolBundleId")
+                or "virtual_human_life_steward"
+            ).strip(),
+            "provisioningState": "ready",
+        }
+        if not steward["agentId"] or not steward["sessionId"]:
+            raise VirtualHumanLifeError("Life steward provisioning returned no Agent or Session.")
+        current_binding = service.binding_for(agent_id) or binding
+        next_config = deepcopy(current_binding)
+        next_config["steward"] = steward
+        committed_binding = service.set_binding(
+            agent_id,
+            enabled=True,
+            expected_version=int(current_binding.get("configVersion") or 0),
+            config=next_config,
+        )
+    except Exception as exc:
+        try:
+            if rollback_token and service.steward_provisioner is not None:
+                service.steward_provisioner(
+                    agent_id,
+                    action="rollback",
+                    binding=service.binding_for(agent_id) or binding,
+                    token=rollback_token,
+                )
+        finally:
+            try:
+                service.rollback_life_world_confirmation(
+                    agent_id,
+                    draft_id=draft_id,
+                    confirmation_idempotency_key=idempotency_key,
+                    receipt_id=str(confirmation.get("receiptId") or ""),
+                )
+            except Exception as rollback_exc:  # noqa: BLE001 - preserve both failure facts
+                logger.error(
+                    "Life-world confirmation rollback failed for agent=%s (%s).",
+                    str(agent_id).strip(),
+                    type(rollback_exc).__name__,
+                )
+        if isinstance(exc, (VirtualHumanLifeError, BindingConflictError)):
+            raise
+        raise VirtualHumanLifeError(
+            f"Life steward provisioning failed: {type(exc).__name__}"
+        ) from exc
+    try:
+        service.refresh_future_identity_schedules(agent_id)
+    except Exception as exc:  # noqa: BLE001 - derived schedules can self-repair on read/heartbeat
+        logger.warning(
+            "Life-world identity schedule refresh failed for agent=%s (%s).",
+            str(agent_id).strip(),
+            type(exc).__name__,
+        )
+    projection = service.life_world_projection(agent_id)
+    _record_scene(
+        "life_world_confirmed",
+        agent_id=agent_id,
+        outcome="ready",
+        fields={
+            "draftId": str(draft_id or ""),
+            "lifeWorldRevision": int(projection.get("revision") or 0),
+            "stewardAgentId": str(committed_binding["steward"].get("agentId") or ""),
+            "stewardSessionId": str(committed_binding["steward"].get("sessionId") or ""),
+        },
+    )
+    return {
+        "agentId": str(agent_id).strip(),
+        "binding": committed_binding,
+        "lifeWorld": projection,
+        "confirmation": confirmation,
+    }
 
 
 def virtual_human_schedule(agent_id: str, local_date: str = "") -> dict[str, Any]:
@@ -664,8 +1441,12 @@ def build_virtual_human_prompt_segments(
     run_id: str = "",
 ) -> list[dict[str, Any]]:
     try:
-        return get_virtual_human_life_service().build_prompt_segments(
+        resolved = resolve_virtual_human_runtime_target(
             agent_id,
+            session_id=session_id,
+        )
+        return get_virtual_human_life_service().build_prompt_segments(
+            str(resolved.get("targetAgentId") or ""),
             session_id=session_id,
             run_id=run_id,
         )
@@ -685,8 +1466,19 @@ def filter_virtual_human_tool_names(
     runtime_context: dict[str, Any] | None = None,
 ) -> list[str]:
     try:
-        return get_virtual_human_life_service().filter_tool_names(
+        runtime_agent = (
+            runtime_context.get("agent")
+            if isinstance(runtime_context, dict)
+            and isinstance(runtime_context.get("agent"), dict)
+            else None
+        )
+        resolved = resolve_virtual_human_runtime_target(
             agent_id,
+            session_id=str((runtime_context or {}).get("sessionId") or ""),
+            runtime_agent=runtime_agent,
+        )
+        return get_virtual_human_life_service().filter_tool_names(
+            str(resolved.get("targetAgentId") or ""),
             tool_names,
             runtime_context=runtime_context,
         )

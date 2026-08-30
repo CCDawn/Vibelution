@@ -386,7 +386,7 @@ stewardPromptPackId: virtual_human_life_steward_v1
   "agentId": "agent-123",
   "pluginId": "virtual-human-life",
   "enabled": true,
-  "configVersion": 3,
+  "configVersion": 7,
   "homeLocation": {
     "geoId": "geo:cn/shanghai/shanghai",
     "countryCode": "CN",
@@ -402,7 +402,7 @@ stewardPromptPackId: virtual_human_life_steward_v1
   "timezone": "Asia/Shanghai",
   "lifeWorld": {
     "schemaVersion": 1,
-    "initialized": true,
+    "setupState": "ready",
     "revision": 1
   },
   "steward": {
@@ -428,7 +428,7 @@ stewardPromptPackId: virtual_human_life_steward_v1
 
 新启用事务必须携带可解析的城市级 `homeLocation`，顶层 `timezone` 作为现有计划/心跳契约的兼容投影。城市经纬度只是标准城市中心点，不是设备 GPS 或住址。已启用但没有 `homeLocation` 的旧 binding 不自动猜测城市：保留旧 `timezone` 以维持作息，投影 `locationSetupRequired=true`，在用户选择前禁用地域化天气、节日、新闻和环境表达。修改常住城市作为显式 relocation 操作并保留 receipt，不静默改写旧地理历史。
 
-`configVersion: 1` 表示旧时区-only binding，`configVersion: 2` 表示已具备 `homeLocation`，`configVersion: 3` 才表示生活世界草案已经确认并完成管家配对。旧 binding 继续可聊天和运行既有生活，不自动生成学校、单位、工资、余额或物品；页面投影 `lifeWorldSetupRequired=true`。只有用户确认生活草案后才在同一升级事务内创建 `life_world.sqlite3`、生活管家 Agent/Session 和配对 receipt，失败时不提升版本也不留下可运行的孤儿管家。
+`configVersion` 只是 binding 的单调递增乐观并发计数，不表达地理、生活世界或管家阶段。能力状态必须分别读取 `homeLocation / locationSetupRequired`、`lifeWorld.schemaVersion / setupState / revision` 与 `steward.provisioningState`。旧 binding 继续可聊天和运行既有生活，不自动生成学校、单位、工资、余额或物品；缺少城市时投影 `locationSetupRequired=true`，生活世界未确认时读取 `lifeWorld.setupState=draft|missing`。只有用户确认生活草案后才创建正式 Life World 事实并配对生活管家；binding 最终提交时仅校验当前 `configVersion` 并递增一次。任一步失败都恢复草案、保持 steward missing，并精确归档本次新建的孤儿管家。
 
 ### 10.3 生命周期
 
@@ -599,7 +599,7 @@ homeLocation / currentGeo
 
 ### 11.9 StructuredLifeWorld 与生活管家配对
 
-每个 `configVersion: 3` 的虚拟人在自己的插件目录中拥有一个 `life_world.sqlite3`。它是生活世界结构化事实的事务数据库，不是对话库、向量库或第二长期记忆库。SQLite 必须启用 foreign key、显式 schema version、事务和单写者队列；金额一律保存为 `amountMinor: INTEGER` 与 ISO 4217 `currency`，不得使用浮点数。
+每个 `lifeWorld.setupState=ready` 的虚拟人在自己的 Agent-scoped 插件目录中拥有一个 `life_world.sqlite3`。它是生活世界结构化事实的事务数据库，不是对话库、向量库或第二长期记忆库。SQLite 必须启用 foreign key、显式 schema version、事务和单写者队列；金额一律保存为 `amountMinor: INTEGER` 与 ISO 4217 `currency`，不得使用浮点数。
 
 | 表 | 关键字段 | 权威边界 |
 | --- | --- | --- |
@@ -844,7 +844,7 @@ POST /api/agents/{agentId}/plugins/virtual-human-life/steward/ensure
 
 ### 18.1 Agent 管理页
 
-单个 Agent 设置增加插件区域：已安装插件、启用/禁用、工具包、提示词包、自主等级、规划时间、主动消息、免打扰设置以及存储/迁移状态。首次启用虚拟人时在该插件流程内增加“人物常住地”和“生活档案”步骤：先选择标准国家/地区/城市并预览时区与 locale，再选择学生、员工、自由职业、待业、退休或其他生活角色。系统根据城市和角色生成可编辑草案，集中预览学校/单位、专业/职位、工作日/周末作息、初始物品、账户余额和周期收入支出；用户确认后才提交 `configVersion: 3` 启用事务。这些步骤不进入通用 Agent 创建向导。
+单个 Agent 设置增加插件区域：已安装插件、启用/禁用、工具包、提示词包、自主等级、规划时间、主动消息、免打扰设置以及存储/迁移状态。首次启用虚拟人时在该插件流程内增加“人物常住地”和“生活档案”步骤：先选择标准国家/地区/城市并预览时区与 locale，再选择学生、员工、自由职业、待业、退休或其他生活角色。系统根据城市和角色生成可编辑草案，集中预览学校/单位、专业/职位、工作日/周末作息、初始物品、账户余额和周期收入支出；用户确认时携带当前 `configVersion` 做乐观并发校验，成功后计数递增，并分别把 `lifeWorld.setupState` 与 `steward.provisioningState` 推进到 ready。这些步骤不进入通用 Agent 创建向导。
 
 ### 18.2 桌面端人物大厅与对话工作台
 
@@ -862,13 +862,13 @@ POST /api/agents/{agentId}/plugins/virtual-human-life/steward/ensure
 
 虚拟人从普通会话栏隐藏后，人物大厅卡片必须承接该 direct Session 的未读点/未读数。Companion 主动消息触发的桌面通知必须打开 `/chat?session=<directSessionId>&companion=<agentId>&returnTo=/companions`，不得打开缺少 Companion 身份的普通 Chat URL。隐藏只改变可见入口，未读事实、通知 receipt 和原生 Session 消息仍保留在唯一权威链路中。
 
-人物详情增加“生活档案”和“生活管理”入口。生活档案以结构化卡片展示当前学校/单位、角色、典型作息、常用物品和虚构财务摘要，金额默认只显示总览而不逐条塞入陪伴聊天。点击“生活管理”由唯一 Chat route writer 打开 `/chat?session=<stewardSessionId>&steward=<agentId>&returnTo=/companions`：
+人物详情增加“生活档案”和“生活管理”入口。生活档案以结构化卡片展示当前学校/单位、角色、典型作息、常用物品和虚构财务摘要，金额默认只显示总览而不逐条塞入陪伴聊天。点击“生活管理”必须把 binding 中精确记录的 `steward.sessionId` 交给既有 `openSession`/唯一 Chat route writer，不能拼接第二套 steward URL；进入运行态后由服务端同时校验当前 Agent、Session 与 `lifeStewardForAgentId` 配对：
 
 - 中间继续复用原生 Chat 消息历史、Composer、Journal 和 SSE，不创建管理专用 transport；
 - 左侧明确显示“生活管家 · 人物名”、被管理人物和返回人物详情，避免误认成陪伴对象；
 - 右侧展示本轮提议、待确认修改、数据库版本与最近 receipt，不展示陪伴关系、心情或主动联系设置；
 - 管家 Agent/Session 始终 `conversationIndexKind=hidden`，不参与普通会话栏、人物大厅未读和桌面主动消息；
-- steward URL 缺少匹配的配对关系时 fail closed，普通 `/chat?session=<stewardSessionId>` 不自动获得生活管理工具。
+- Agent、Session 与 Companion 配对任一不匹配时 fail closed；仅打开一个 hidden Session 或伪造客户端状态不能获得生活管理工具。
 
 第一版只交付桌面端布局，不新增移动端导航或响应式产品承诺。
 
@@ -1695,7 +1695,7 @@ Task 17—21 已在 `codex/companion-full-life-reuse` 完成实现，仍保持�
 #### Task 29：创建城市级地理锚点并注入有来源环境上下文
 
 - Owner/Boundary: Agent-scoped plugin binding、城市目录解析、Companion 配置 API/界面、`LifeState.currentGeo` 投影和环境事实 adapter；普通 Agent 创建流程不增加位置字段，天气/新闻/事件继续经过专属 Tool Bundle 与 Agent ToolPolicy。
-- Dependency: Task 21；Task 28 完成后实施，避免同时改动插件启用事务和 Agent Directory 分类。既有 binding 通过 `configVersion >= 2` 兼容读取，不自动猜测城市。
+- Dependency: Task 21；Task 28 完成后实施，避免同时改动插件启用事务和 Agent Directory 分类。既有 binding 按 `homeLocation` 是否存在兼容读取，`configVersion` 只参与乐观并发，不自动猜测城市。
 - Mode: HIGH_RISK BDD/TDD + frontend contract。
 - Verification/Stop: 新启用必须选择可解析的城市项并原子写入 `homeLocation` 与兼容时区；已有虚拟人缺少位置时保持聊天和作息、投影 `locationSetupRequired=true`，地域化输出关闭；`currentGeo` 只能由完成的移动或 relocation receipt 改变；城市中心点不被标记为 GPS/住址；时间、季节和昼夜确定性计算，节日带数据版本，天气最多 3 小时、本地新闻/事件最多 24 小时且带工具 receipt；工具失败或事实过期时省略；普通 Agent 创建、Prompt 和 ToolPolicy 零差异。
 
@@ -1711,13 +1711,13 @@ Task 17—21 已在 `codex/companion-full-life-reuse` 完成实现，仍保持�
 - Owner/Boundary: Companion 插件生命周期适配层、Agent Directory 固定角色配对、`virtual_human_life_steward_v1` Prompt、专属 Tool Bundle/ToolPolicy、人物详情管理入口和 steward 模式 Chat 投影；复用 `create_chat_session`、hidden 目录分类、原生 Journal/worker/SSE/Composer，不改 Session admission/persist/projection 核心语义。
 - Dependency: Task 28、Task 30；Life World 事务和目录隐藏先闭合，再允许管家写工具与管理 deep link。
 - Mode: HIGH_RISK BDD/TDD + frontend contract + desktop browser acceptance。
-- Verification/Stop: 同一人物并发 ensure 只得到一个 active 管家 Agent/Session；独立 Prompt/ToolPolicy 生效，工具只能访问配对 `companionAgentId`；管家会话不进入普通栏、人物大厅未读、关系/心情/主动额度或陪伴 transcript；`/chat?session=<steward>&steward=<companion>` 配对不匹配时 fail closed；disable 只读、archive/purge 无孤儿资源；普通 Agent 和普通 Session 零差异。
+- Verification/Stop: 同一人物并发 ensure 只得到一个 active 管家 Agent/Session；独立 Prompt/ToolPolicy 生效，工具只能访问配对 `companionAgentId`；管家会话不进入普通栏、人物大厅未读、关系/心情/主动额度或陪伴 transcript；Chat 只能打开 binding 精确记录的 hidden `steward.sessionId`，运行时对 Agent、Session 与 Companion 的配对不匹配时 fail closed；disable 只读、archive/purge 无孤儿资源；普通 Agent 和普通 Session 零差异。
 
 #### Task 32：创建完整生活草案并以身份约束日程
 
 - Owner/Boundary: Companion 插件启用向导、Life World draft/confirm API、生活档案卡片、夜间生活管家规划 Turn、planner proposal validator 与确定性 fallback；普通 Agent 创建向导不增加字段，人物 direct Session 不承担管理 Prompt。
-- Dependency: Task 29—31；城市、数据库和生活管家全部 ready 后才提交 `configVersion: 3`。
+- Dependency: Task 29—31；城市、数据库和生活管家全部 ready 后才以当前 `configVersion` 完成 binding 乐观提交并递增计数；阶段状态仍分别保存在 `lifeWorld` 与 `steward` 字段。
 - Mode: HIGH_RISK BDD/TDD + frontend contract + desktop browser acceptance。
 - Verification/Stop: 学生/员工/自由职业/待业或退休至少各有一组可编辑草案和工作日/周末/假期测试；学校/单位、专业/职位、通勤、作息、初始物品、账户与周期收入支出在确认前不是事实；确认后夜间计划尊重有效 affiliation/routine/calendar，机构变更只重算未发生计划；工资/奖学金到期只产生一次交易；LLM 失败回退身份感知确定性计划而非通用四段模板；普通 Agent 创建、Prompt、目录和 Session 零差异。
 
-Critical Path 为 Task 28 → Task 29 → Task 30 → Task 31 → Task 32 → Task 22 → Task 23 → Task 25 → Task 27。Task 24 和 Task 26 在 Task 22 后可在文件边界不重叠时推进，但 Task 28 与 Task 25 不并行，Task 30—32 因共享 binding/lifecycle/Life World 事实源保持串行；目录隔离、数据库事务、管家配对和生活草案必须先于表达、多气泡与全链路收口。由于用户仍在追加需求，本阶段任务当前保持 `PLANNED`，不进入实现。
+Critical Path 为 Task 28 → Task 29 → Task 30 → Task 31 → Task 32 → Task 22 → Task 23 → Task 25 → Task 27。Task 24 和 Task 26 在 Task 22 后可在文件边界不重叠时推进，但 Task 28 与 Task 25 不并行，Task 30—32 因共享 binding/lifecycle/Life World 事实源保持串行；目录隔离、数据库事务、管家配对和生活草案必须先于表达、多气泡与全链路收口。用户已批准先实施本节中的 Task 28—32；其余任务继续按依赖与后续新增需求保持规划态，不扩大本轮实现范围。

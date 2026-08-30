@@ -7,10 +7,46 @@ import type {
   VirtualHumanConversationMessageResponse,
   VirtualHumanDiaryEntry,
   VirtualHumanLifeEvent,
+  VirtualHumanLifeDraft,
+  VirtualHumanLifeDraftUpdateRequest,
+  VirtualHumanLifeWorldConfirmRequest,
+  VirtualHumanLifeWorldConfirmResponse,
   VirtualHumanRelationship,
   VirtualHumanScheduleBundle,
   VirtualHumanSnapshot,
 } from "./types";
+
+export function updateVirtualHumanLifeDraft(
+  agentId: string,
+  payload: VirtualHumanLifeDraftUpdateRequest,
+  options?: { signal?: AbortSignal },
+): Promise<VirtualHumanLifeDraft> {
+  return fetchJson<VirtualHumanLifeDraft>(
+    `/api/agents/${encodeURIComponent(agentId)}/plugins/virtual-human-life/life-world/draft`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: options?.signal,
+    },
+  );
+}
+
+export function confirmVirtualHumanLifeWorld(
+  agentId: string,
+  payload: VirtualHumanLifeWorldConfirmRequest,
+  options?: { signal?: AbortSignal },
+): Promise<VirtualHumanLifeWorldConfirmResponse> {
+  return fetchJson<VirtualHumanLifeWorldConfirmResponse>(
+    `/api/agents/${encodeURIComponent(agentId)}/plugins/virtual-human-life/life-world/confirm`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: options?.signal,
+    },
+  );
+}
 
 export function submitVirtualHumanConversationMessage(
   agentId: string,

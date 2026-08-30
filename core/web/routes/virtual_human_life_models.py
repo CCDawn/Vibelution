@@ -7,6 +7,25 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class VirtualHumanLocationResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    locationId: str
+    countryCode: str
+    countryName: str
+    regionCode: str
+    regionName: str
+    cityCode: str
+    cityName: str
+    timezone: str
+    locale: str
+    latitude: float
+    longitude: float
+    precision: str
+    sourceKind: str
+    sourceVersion: str
+
+
 class VirtualHumanSnapshotResponse(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -89,6 +108,44 @@ class VirtualHumanCommandResponse(BaseModel):
     idempotencyKey: str
     stateVersion: int
     result: dict[str, Any] = Field(default_factory=dict)
+
+
+class VirtualHumanLifeDraftUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    agentId: str
+    draftId: str = Field(min_length=1, max_length=200)
+    expectedRevision: int = Field(ge=1)
+    idempotencyKey: str = Field(min_length=1, max_length=200)
+    patch: dict[str, Any] = Field(default_factory=dict)
+
+
+class VirtualHumanLifeDraftResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    draftId: str
+    revision: int
+    status: str
+    payload: dict[str, Any]
+
+
+class VirtualHumanLifeWorldConfirmRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    agentId: str
+    draftId: str = Field(min_length=1, max_length=200)
+    expectedDraftRevision: int = Field(ge=1)
+    expectedBindingVersion: int = Field(ge=0)
+    idempotencyKey: str = Field(min_length=1, max_length=200)
+
+
+class VirtualHumanLifeWorldConfirmResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    agentId: str
+    binding: dict[str, Any]
+    lifeWorld: dict[str, Any]
+    confirmation: dict[str, Any]
 
 
 class VirtualHumanConversationMessageRequest(BaseModel):

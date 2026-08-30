@@ -12,6 +12,28 @@ export function companionInitials(companion: Pick<VirtualHumanCompanion, "agentC
 }
 
 export function companionIdentity(companion: VirtualHumanCompanion): string {
+  const world = companion.snapshot.lifeWorld;
+  const draftPayload = world?.draft?.payload;
+  const identity = world?.setupState === "ready"
+    ? world.facts.identities[0]
+    : draftPayload?.identity;
+  const affiliation = world?.setupState === "ready"
+    ? world.facts.affiliations[0]
+    : draftPayload?.affiliations[0];
+  const cityName = String(
+    draftPayload?.homeLocation?.cityName
+    || companion.snapshot.binding?.homeLocation?.cityName
+    || companion.snapshot.environment?.location?.cityName
+    || "",
+  ).trim();
+  const structuredIdentity = Array.from(new Set([
+    cityName,
+    String(identity?.roleTitle || identity?.stage || "").trim(),
+    String(affiliation?.name || "").trim(),
+  ].filter(Boolean)));
+  if (structuredIdentity.length >= 2) {
+    return structuredIdentity.join(" · ");
+  }
   const profile = companion.personaProfile ?? {};
   const expertise = Array.isArray(profile.expertise)
     ? profile.expertise.filter(Boolean).slice(0, 2).join(" · ")

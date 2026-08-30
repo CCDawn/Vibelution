@@ -49,6 +49,7 @@ RETIRED_PROMPT_TEMPLATE_IDS = frozenset({"prompt-self-summarizer"})
 RESEARCH_DEFAULT_PROMPT_VERSION = 1
 CHAT_AGENT_BASE_PROMPT_VERSION = 2
 SELF_EVOLUTION_EXECUTOR_PROMPT_VERSION = 1
+VIRTUAL_HUMAN_LIFE_STEWARD_PROMPT_VERSION = 1
 AGENT_PROMPT_SNAPSHOT_SCHEMA_VERSION = 3
 
 CHAT_AGENT_BASE_PROMPT = """## Conversation Agent Common Prompt
@@ -127,6 +128,32 @@ DEFAULT_PROMPT_TEMPLATES: tuple[dict[str, Any], ...] = (
             "3. 结果与风险：说明已解决、未验证和下一步。"
         ),
         "metadata": {"builtin": True, "roleKey": "operation_chat", "builtinContentVersion": CHALLENGE_CUP_STAGE_TASK_PROMPT_VERSION},
+    },
+    {
+        "templateId": "virtual_human_life_steward_v1",
+        "name": "虚拟人生活管家",
+        "category": "chat",
+        "sourcePath": "",
+        "content": (
+            "# 虚拟人生活管家\n\n"
+            "你是一个隐藏的生活管家 Agent，只管理配对虚拟人的结构化生活世界。"
+            "你复用 Vibelution 原生会话、Journal、worker、SSE 与 Composer，但管理会话不属于人物陪伴聊天 transcript。\n\n"
+            "## 工作协议\n"
+            "- 每次修改前先读取当前版本，确认 lifeWorld.schemaVersion、setupState 与 revision。\n"
+            "- 只能调用已授权的虚拟人生活工具，并且只能作用于运行时 metadata 中 lifeStewardForAgentId 指向的配对人物。\n"
+            "- 不能执行自由 SQL，不能接收任意 agentId，不能绕过草案确认、乐观并发、幂等回执或余额守恒约束。\n"
+            "- 学校、单位、作息、物品、账户和收支在草案确认前都不是人物事实；不要把猜测写成事实。\n"
+            "- 涉及地理信息时只使用受控城市目录，不读取 GPS，不记录街道、门牌或精确地址。\n"
+            "- 用户要求查看时先简洁展示当前事实与草案；用户要求修改时说明拟变更项，调用受控工具并报告新版本。\n"
+            "- 失败时保留原版本并明确冲突、校验失败或缺失前提，不自行扩大权限。\n\n"
+            "## 输出要求\n"
+            "使用自然、简洁的中文说明已读取的版本、完成的变更和仍待确认的草案；不要模拟人物本人说话。"
+        ),
+        "metadata": {
+            "builtin": True,
+            "roleKey": "virtual_human_life_steward",
+            "builtinContentVersion": VIRTUAL_HUMAN_LIFE_STEWARD_PROMPT_VERSION,
+        },
     },
     {
         "templateId": "prompt-knowledge-steward",

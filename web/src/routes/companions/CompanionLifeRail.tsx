@@ -40,6 +40,7 @@ import {
   upcomingLifeActivities,
 } from "./companionPresentation";
 import type { CompanionRailState } from "./CompanionPersonRail";
+import { CompanionLifeWorldCard } from "./CompanionLifeWorldCard";
 import styles from "./CompanionChatRails.styles";
 
 function ScheduleRows({ activities, lang }: { activities: VirtualHumanActivity[]; lang: "zh" | "en" }) {
@@ -609,6 +610,7 @@ export function CompanionLifeRail({
   state,
   errorMessage,
   lang,
+  onOpenLifeSteward,
 }: {
   className: string;
   collapsed: boolean;
@@ -617,6 +619,7 @@ export function CompanionLifeRail({
   state: CompanionRailState;
   errorMessage?: string;
   lang: "zh" | "en";
+  onOpenLifeSteward: (sessionId: string) => void;
 }) {
   const [activeTab, setActiveTab] = useState("now");
   const [reviewFeedback, setReviewFeedback] = useState("");
@@ -793,6 +796,11 @@ export function CompanionLifeRail({
                   <small><MapPin size={12} aria-hidden="true" />{locationLabel}</small>
                 </div>
               </section>
+              <CompanionLifeWorldCard
+                companion={companion}
+                lang={lang}
+                onOpenSteward={onOpenLifeSteward}
+              />
               <div className={styles.vitalGrid} aria-label={lang === "zh" ? "人物状态摘要" : "Person status summary"}>
                 <section className={styles.moodVisual}>
                   <span aria-hidden="true">{lifeMoodSymbol(companion.snapshot)}</span>
