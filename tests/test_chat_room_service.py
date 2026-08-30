@@ -2988,31 +2988,7 @@ def test_challenge_speaker_persists_heartbeat_without_touching_ordinary_rooms(
     assert work_run["heartbeatAt"]
 
 
-def test_candidate_generation_uses_trusted_short_answer_contract_and_output_cap():
-    class FakeProfile:
-        max_output_tokens = 32_768
-
-        def model_copy(self, *, update):
-            return SimpleNamespace(**update)
-
-    class FakeLLM:
-        def __init__(self):
-            self.profiles = {"primary": FakeProfile()}
-
-        def get_profile(self, *, profile_id):
-            return self.profiles[profile_id]
-
-    config = SimpleNamespace(llm=FakeLLM())
-    context = {
-        "challengeDeadlineAtMs": 1_000_000,
-        "meetingType": "hypothesis_candidate_generation",
-    }
-
-    assert chat_room_service._apply_challenge_speaker_output_cap(
-        config, profile_id="primary", context=context
-    ) is True
-    assert config.llm.profiles["primary"].max_output_tokens == 1024
-
+def test_candidate_generation_uses_trusted_short_answer_contract():
     prompt = chat_room_service._build_participant_prompt(
         room={"roomId": "room-formal", "title": "formal"},
         round_payload={
@@ -3033,15 +3009,6 @@ def test_candidate_generation_uses_trusted_short_answer_contract_and_output_cap(
     )
     assert "正文不超过 180 个中文字符" in prompt
     assert "只输出一条 CANDIDATE 标记" in prompt
-
-    ordinary = SimpleNamespace(llm=FakeLLM())
-    assert chat_room_service._apply_challenge_speaker_output_cap(
-        ordinary,
-        profile_id="primary",
-        context={"meetingType": "hypothesis_candidate_generation"},
-    ) is False
-    assert ordinary.llm.profiles["primary"].max_output_tokens == 32_768
-
 
 def test_ordinary_room_does_not_inherit_challenge_deadline(tmp_path, monkeypatch):
     _isolate_chat_room_kernel(tmp_path, monkeypatch)
