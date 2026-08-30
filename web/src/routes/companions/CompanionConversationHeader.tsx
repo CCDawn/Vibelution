@@ -2,7 +2,7 @@ import type { VirtualHumanCompanion } from "../../api/types";
 import { CompanionPortrait } from "./CompanionPortrait";
 import { CompanionProactiveSettingsPopover } from "./CompanionProactiveSettingsPopover";
 import { currentLifeActivityLabel } from "./companionPresentation";
-import styles from "./CompanionChatRails.styles";
+import styles from "./CompanionConversationHeader.styles";
 
 export function CompanionConversationHeader({
   companion,
