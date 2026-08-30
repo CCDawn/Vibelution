@@ -1,9 +1,10 @@
-import { useCallback, useMemo, type ReactNode } from "react";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { CHALLENGE_CUP_WORKFLOW_ID } from "../../../api/types/researchWorkflow";
 import { WORKBENCH_LAYOUT_IDS } from "../../../components/layout/workbenchLayoutIds";
 import { VButton, VCanvasWorkbenchPage } from "../../../components/vui";
+import { ChallengeQuestionRunResetDialog } from "../challenge-cup/ChallengeQuestionRunResetDialog";
 import {
   buildHypothesisFirstCanvasRegion,
   hypothesisFirstSemanticNodeId,
@@ -126,6 +127,7 @@ export function ResearchProcessWorkspace({
 }: ResearchProcessWorkspaceProps) {
   const isZh = lang === "zh";
   const navigate = useNavigate();
+  const [resetDialogOpen, setResetDialogOpen] = useState(false);
   const location = useResearchWorkflowWorkspace(teamId);
   const runState = useResearchWorkflowRun(teamId, location.runId);
   const catalog = useResearchWorkflowCatalog(teamId, runState.run?.runVersion ?? null);
@@ -805,6 +807,9 @@ export function ResearchProcessWorkspace({
             workflowActive={workflowActive}
             onSelectExperiment={selectExperiment}
             onOpenPanel={location.openPanel}
+            onResetExperiment={experimentIdentity?.questionId
+              ? () => setResetDialogOpen(true)
+              : undefined}
             navigationLabel={workflowActive && hypothesisFirstReady ? workspaceNavigationAction.navigationLabel : undefined}
             nextActionStage={workflowActive && hypothesisFirstReady ? workspaceNavigationAction.stage : undefined}
             scopeMismatch={hypothesisFirstChain.scopeMismatch || workspaceModel.scopeMismatch}
@@ -924,6 +929,22 @@ export function ResearchProcessWorkspace({
         shellTestId="research-process-workspace-shell"
         shellMode="board"
       />
+      {experimentIdentity?.questionId ? (
+        <ChallengeQuestionRunResetDialog
+          open={resetDialogOpen}
+          onOpenChange={setResetDialogOpen}
+          teamId={teamId}
+          questionId={experimentIdentity.questionId}
+          onCompleted={(targetNodeId) => {
+            location.replaceParams({
+              runId: null,
+              questionId: experimentIdentity.questionId,
+              node: targetNodeId,
+              panel: "node",
+            });
+          }}
+        />
+      ) : null}
     </div>
   );
 }

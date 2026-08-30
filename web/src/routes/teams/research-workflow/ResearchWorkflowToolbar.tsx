@@ -130,6 +130,8 @@ export function ResearchWorkflowToolbar(props: {
   leading?: ReactNode;
   /** Opens the existing team communication surface from the workflow chrome. */
   onOpenTeamCommunication?: () => void;
+  /** Opens the existing guarded reset flow for the selected experiment. */
+  onResetExperiment?: () => void;
 }) {
   const { lang } = useShellI18n();
   const isZh = lang === "zh";
@@ -194,6 +196,25 @@ export function ResearchWorkflowToolbar(props: {
           items={detailItems}
           trigger={<VButton type="button" density="compact" variant="secondary">{isZh ? "查看" : "View"}</VButton>}
         />
+        {selectedQuestionId && props.onResetExperiment ? (
+          <VDropdownMenu
+            aria-label={isZh ? "实验更多操作" : "More experiment actions"}
+            align="end"
+            items={[
+              {
+                id: "reset-experiment-run",
+                label: isZh ? "重置本题运行" : "Reset this question run",
+                danger: true,
+                onSelect: props.onResetExperiment,
+              },
+            ]}
+            trigger={(
+              <VButton type="button" density="compact" variant="secondary">
+                {isZh ? "更多操作" : "More actions"}
+              </VButton>
+            )}
+          />
+        ) : null}
         {runStatusBadge ? (
           <VStatusChip
             tone={runStatusBadge.tone}
