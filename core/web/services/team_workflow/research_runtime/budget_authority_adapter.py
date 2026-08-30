@@ -900,6 +900,84 @@ _TERMINAL_BUDGET_STATUSES = frozenset(
 )
 
 
+def finalize_cancelled_run_budget_receipts(
+    store: WorkflowLedgerStore,
+    run_id: str,
+    *,
+    reason: str = "run_cancelled",
+) -> dict[str, int]:
+    """Terminalize every live budget receipt owned by a cancelled run.
+
+    A provider invocation may finish while ``cancel_run`` is stopping its chat
+    turn.  Such a receipt already contains the authoritative invocation usage
+    and must be settled, not released.  Reservations with no observed usage
+    are intentionally released.  The whole run is handled in one Ledger
+    transaction so a cancellation cleanup cannot acknowledge a partial budget
+    terminalization.
+    """
+    normalized_run_id = _identity(run_id, "run_id")
+    normalized_reason = str(reason or "run_cancelled").strip() or "run_cancelled"
+    now_ms = int(time.time() * 1000)
+
+    def mutate(uow):
+        run = uow.repository.get_run(normalized_run_id)
+        if run is None:
+            raise BudgetAuthorityError(
+                f"workflow run missing for {normalized_run_id}",
+                code="budget_run_missing",
+            )
+        if str(run.status or "") != "cancelled":
+            raise BudgetAuthorityError(
+                f"workflow run {normalized_run_id} is not cancelled",
+                code="budget_cancel_state_mismatch",
+            )
+
+        counts = {"settled": 0, "released": 0}
+        rows = uow.repository.list_budget_receipts_for_run(normalized_run_id)
+        for row in rows:
+            mapped = _row_mapping(row)
+            if str(mapped.get("status") or "") in _TERMINAL_BUDGET_STATUSES:
+                continue
+            payload = _payload(mapped.get("settled_json"), label="settled_json")
+            usage = payload.get("usage")
+            invocations = payload.get("invocations")
+            if usage is not None and not isinstance(usage, Mapping):
+                raise BudgetAuthorityError(
+                    "budget usage projection is corrupt",
+                    code="budget_receipt_corrupt",
+                )
+            if invocations is not None and (
+                not isinstance(invocations, Mapping)
+                or any(not isinstance(item, Mapping) for item in invocations.values())
+            ):
+                raise BudgetAuthorityError(
+                    "budget invocation projection is corrupt",
+                    code="budget_receipt_corrupt",
+                )
+            # Validate every known counter before choosing the terminal state.
+            _usage_tokens(payload)
+            terminal_status = (
+                "settled" if bool(usage) or bool(invocations) else "released"
+            )
+            payload.update(
+                {
+                    "reason": normalized_reason,
+                    "source": "budget-authority-adapter",
+                    "terminal": terminal_status,
+                }
+            )
+            uow.repository.update_budget_receipt(
+                str(mapped["receipt_id"]),
+                status=terminal_status,
+                now_ms=now_ms,
+                settled_json=json.dumps(payload, ensure_ascii=False),
+            )
+            counts[terminal_status] += 1
+        return counts
+
+    return store.submit(mutate, force_flush=True).result(timeout=30)
+
+
 def release_budget_reservation(
     store: WorkflowLedgerStore,
     reservation: dict[str, Any],

@@ -23,9 +23,9 @@ from core.web.services.team_workflow.research_runtime.cancel_run_cleanup import 
     build_cancel_run_cleanup_record,
 )
 from core.web.services.team_workflow.research_runtime.store import WorkflowRunStore
-
 from tests._support.command_helpers import CommandHarness
 from tests._support.workflow_ledger_helpers import (
+    build_attempt_record,
     build_command_record,
     build_outbox_record,
     open_ledger_store,
@@ -103,6 +103,57 @@ def _submit_cancel(harness: CommandHarness, *, idempotency_key: str, run_id: str
             payload={"reason": "operator cancelled"},
         )
     )
+
+
+def _seed_budget_receipt(
+    harness: CommandHarness,
+    *,
+    run_id: str = "run-cancel",
+    receipt_id: str = "br-cancel",
+    settled: dict[str, Any] | None = None,
+) -> None:
+    def mutate(uow):
+        command_id = f"cmd-budget-{run_id}"
+        node_run_id = f"nr-{run_id}-problem_understanding-a1"
+        if uow.repository.get_command(command_id) is None:
+            uow.repository.insert_command(
+                build_command_record(
+                    command_id=command_id,
+                    run_id=run_id,
+                    idempotency_key=f"budget:{run_id}",
+                )
+            )
+        if uow.repository.get_attempt(node_run_id) is None:
+            uow.repository.insert_attempt(
+                build_attempt_record(
+                    node_run_id,
+                    run_id=run_id,
+                    node_id="problem_understanding",
+                    status="running",
+                    command_id=command_id,
+                )
+            )
+        uow.repository.insert_budget_receipt(
+            receipt_id=receipt_id,
+            run_id=run_id,
+            node_run_id=node_run_id,
+            reservation_id=f"reservation-{node_run_id}",
+            stage_id="execution_iteration",
+            policy_hash="policy-cancel",
+            reserved_json=json.dumps(
+                {"reserved": {"tokens": 50_000}, "limits": {"tokens": 50_000}}
+            ),
+            created_at_ms=1_750_000_000_000,
+        )
+        if settled is not None:
+            uow.repository.update_budget_receipt(
+                receipt_id,
+                status="reserved",
+                now_ms=1_750_000_000_001,
+                settled_json=json.dumps(settled),
+            )
+
+    harness.store.submit(mutate, force_flush=True).result(timeout=10)
 
 
 class _FakeWorkRunStore:
@@ -438,6 +489,121 @@ def test_cleanup_worker_does_not_lease_unrelated_reconcile_action(
         "cancel_run_cleanup:run-cancel": ("succeeded", None),
         "reconcile:other-run": ("pending", None),
     }
+
+
+def test_cleanup_worker_terminalizes_budget_before_acknowledging_cancel(
+    tmp_path, monkeypatch
+):
+    """The durable cancel intent covers both turns and budget receipts."""
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.command_service."
+        "_collect_cancel_run_turn_pairs",
+        lambda _run_id: [],
+    )
+
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run(run_id="run-cancel", status="running")
+        _seed_budget_receipt(
+            harness,
+            settled={
+                "invocations": {
+                    "inv-cancel": {
+                        "inputTokens": 100,
+                        "outputTokens": 50,
+                        "tokens": 150,
+                        "usageEstimated": False,
+                    }
+                },
+                "usage": {
+                    "inputTokens": 100,
+                    "outputTokens": 50,
+                    "tokens": 150,
+                    "usageEstimated": False,
+                },
+            },
+        )
+        _submit_cancel(harness, idempotency_key="cancel-key-budget")
+        worker = CancelRunCleanupWorker(
+            store=harness.store,
+            now_provider=lambda: 1_750_000_010_000,
+            retry_delay_ms=0,
+        )
+
+        assert worker.run_once() == 1
+        receipt, cleanup = harness.store.read(
+            lambda repo: (
+                repo.execute(
+                    "SELECT status, settled_json FROM budget_receipts WHERE receipt_id = ?",
+                    ("br-cancel",),
+                ).fetchone(),
+                repo.execute(
+                    "SELECT status FROM outbox_actions WHERE idempotency_key = ?",
+                    ("cancel_run_cleanup:run-cancel",),
+                ).fetchone(),
+            )
+        )
+    finally:
+        harness.close()
+
+    assert receipt[0] == "settled"
+    assert json.loads(receipt[1])["usage"]["tokens"] == 150
+    assert cleanup[0] == "succeeded"
+
+
+def test_cleanup_worker_repairs_budget_after_legacy_cleanup_already_succeeded(
+    tmp_path, monkeypatch
+):
+    """Startup ticks repair cancelled runs whose old cleanup omitted budget."""
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.command_service."
+        "_collect_cancel_run_turn_pairs",
+        lambda _run_id: [],
+    )
+
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run(run_id="run-cancel", status="cancelled")
+        _seed_budget_receipt(harness)
+        cleanup = build_cancel_run_cleanup_record(
+            run_id="run-cancel",
+            command_id="cmd-cancel",
+            now_ms=1_750_000_000_000,
+        )
+
+        def seed_succeeded_cleanup(uow):
+            uow.repository.insert_command(
+                build_command_record(
+                    command_id="cmd-cancel",
+                    run_id="run-cancel",
+                    idempotency_key="cancel:key",
+                )
+            )
+            uow.repository.insert_outbox(cleanup)
+            uow.repository.execute(
+                "UPDATE outbox_actions SET status = 'succeeded' WHERE action_id = ?",
+                (cleanup.action_id,),
+            )
+
+        harness.store.submit(seed_succeeded_cleanup, force_flush=True).result(timeout=10)
+        worker = CancelRunCleanupWorker(
+            store=harness.store,
+            now_provider=lambda: 1_750_000_010_000,
+            retry_delay_ms=0,
+        )
+
+        assert worker.run_once() == 1
+        receipt = harness.store.read(
+            lambda repo: repo.execute(
+                "SELECT status, settled_json FROM budget_receipts WHERE receipt_id = ?",
+                ("br-cancel",),
+            ).fetchone()
+        )
+    finally:
+        harness.close()
+
+    assert receipt[0] == "released"
+    assert json.loads(receipt[1])["reason"] == "run_cancelled"
 
 
 def test_cleanup_worker_requeues_transient_stop_then_acknowledges_terminal_turn(

@@ -1,4 +1,4 @@
-"""Durable cleanup worker for chat turns owned by a cancelled run.
+"""Durable cleanup worker for turns and budgets owned by a cancelled run.
 
 ``cancel_run`` is a ledger command, while stopping a web chat turn is a
 separate session-side effect.  Keeping the two operations separate is
@@ -45,6 +45,7 @@ def build_cancel_run_cleanup_record(
 ) -> Any:
     """Build the durable intent inserted in the cancel command transaction."""
     from core.research.workflow.ledger import OutboxRecord
+
     from .ids import new_id
 
     normalized_run_id = str(run_id or "").strip()
@@ -92,7 +93,8 @@ class CancelRunCleanupWorker:
         self._retry_delay_ms = max(0, int(retry_delay_ms))
 
     def run_once(self, limit: int = 4) -> int:
-        """Process one resident-tick batch and return leased action count."""
+        """Process one resident-tick batch and return handled work count."""
+        repaired = self._repair_completed_cleanup_budget_receipts(limit=limit)
         leased = outbox_api.lease_ready_actions(
             self._store,
             owner=self._owner,
@@ -104,7 +106,7 @@ class CancelRunCleanupWorker:
         )
         for action in leased:
             self._handle(action)
-        return len(leased)
+        return repaired + len(leased)
 
     def _handle(self, action: Any) -> None:
         run_id = ""
@@ -129,7 +131,9 @@ class CancelRunCleanupWorker:
 
         try:
             complete = self._reconcile_run_turns(run_id)
-        except Exception as exc:  # noqa: BLE001 - durable intent must be retried
+            if complete:
+                self._finalize_budget_receipts(run_id)
+        except Exception as exc:
             logger.exception(
                 "cancel_run cleanup attempt failed: runId=%s actionId=%s",
                 run_id,
@@ -158,8 +162,60 @@ class CancelRunCleanupWorker:
                 },
             )
 
+    def _repair_completed_cleanup_budget_receipts(self, *, limit: int) -> int:
+        """Repair cancellations completed by runtimes that omitted budgets."""
+        rows = self._store.read(
+            lambda repo: repo.execute(
+                """
+                SELECT DISTINCT b.run_id
+                FROM budget_receipts AS b
+                JOIN workflow_runs AS r ON r.run_id = b.run_id
+                WHERE r.status = 'cancelled'
+                  AND b.status NOT IN ('settled', 'released', 'failed', 'voided')
+                  AND EXISTS (
+                    SELECT 1 FROM outbox_actions AS o
+                    WHERE o.run_id = b.run_id
+                      AND o.idempotency_key = ? || b.run_id
+                      AND o.status = 'succeeded'
+                  )
+                ORDER BY b.run_id
+                LIMIT ?
+                """,
+                (CANCEL_RUN_CLEANUP_IDEMPOTENCY_PREFIX, max(1, int(limit))),
+            ).fetchall()
+        )
+        repaired = 0
+        for row in rows:
+            run_id = str(row[0] or "").strip()
+            if not run_id:
+                continue
+            try:
+                if not self._reconcile_run_turns(run_id):
+                    continue
+                self._finalize_budget_receipts(run_id)
+            except Exception:
+                logger.exception(
+                    "cancel_run legacy budget repair failed: runId=%s",
+                    run_id,
+                )
+                continue
+            repaired += 1
+        return repaired
+
+    def _finalize_budget_receipts(self, run_id: str) -> None:
+        from .budget_authority_adapter import (
+            finalize_cancelled_run_budget_receipts,
+        )
+
+        finalize_cancelled_run_budget_receipts(
+            self._store,
+            run_id,
+            reason="run_cancelled",
+        )
+
     def _reconcile_run_turns(self, run_id: str) -> bool:
         from core.web.services import session_service
+
         from .command_service import (
             _CHAT_TURN_OPEN_STATUSES,
             _close_cancel_run_turn,

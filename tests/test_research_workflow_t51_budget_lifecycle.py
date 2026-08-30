@@ -7,8 +7,8 @@ never silently succeed.
 
 from __future__ import annotations
 
-from dataclasses import replace
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -465,11 +465,11 @@ def test_worker_voids_reserved_receipt_when_verify_returns_blocked(
 
 
 def test_settle_failure_marks_reconciliation_required(tmp_path: Path) -> None:
-    from core.web.services.team_workflow.research_runtime.adapter_dispatch_worker import (
-        AdapterDispatchWorker,
-    )
     from core.web.services.team_workflow.research_runtime.action_registry import (
         ActionRegistry,
+    )
+    from core.web.services.team_workflow.research_runtime.adapter_dispatch_worker import (
+        AdapterDispatchWorker,
     )
 
     class _FailingSettlePorts(RealDomainPorts):
@@ -491,7 +491,7 @@ def test_settle_failure_marks_reconciliation_required(tmp_path: Path) -> None:
             successor_fn=lambda _node: (),
         )
         outbox = type("Outbox", (), {"action_id": "outbox-budget-settle"})()
-        worker._settle_domain_budget(  # noqa: SLF001
+        worker._settle_domain_budget(
             outbox, action, reservation, {"tokens": 10}
         )
 
@@ -686,6 +686,96 @@ def test_settle_merges_accumulated_usage_instead_of_overwriting_with_estimate(
         assert window["remaining"] == 1_999_500
     finally:
         harness.close()
+
+
+def test_finalize_cancelled_run_budgets_settles_usage_and_releases_unused(
+    tmp_path: Path,
+) -> None:
+    from core.web.services.team_workflow.research_runtime.budget_authority_adapter import (
+        finalize_cancelled_run_budget_receipts,
+    )
+
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run(run_id="run-cancel", status="cancelled")
+        used_action = replace(
+            _action(),
+            action_id="act-used",
+            run_id="run-cancel",
+            node_run_id="nr-used",
+        )
+        unused_action = replace(
+            _action("source_extraction"),
+            action_id="act-unused",
+            run_id="run-cancel",
+            node_run_id="nr-unused",
+        )
+        _seed_attempt(harness, used_action)
+        _seed_attempt(harness, unused_action)
+
+        def seed(uow):
+            for receipt_id, node_run_id in (
+                ("br-used", "nr-used"),
+                ("br-unused", "nr-unused"),
+            ):
+                uow.repository.insert_budget_receipt(
+                    receipt_id=receipt_id,
+                    run_id="run-cancel",
+                    node_run_id=node_run_id,
+                    reservation_id=f"reservation-{node_run_id}",
+                    stage_id="execution_iteration",
+                    policy_hash="policy-cancel",
+                    reserved_json=json.dumps({"reserved": {"tokens": 1_000}}),
+                    created_at_ms=1_750_000_000_000,
+                )
+            uow.repository.update_budget_receipt(
+                "br-used",
+                status="reserved",
+                now_ms=1_750_000_000_001,
+                settled_json=json.dumps(
+                    {
+                        "invocations": {
+                            "inv-used": {
+                                "inputTokens": 80,
+                                "outputTokens": 20,
+                                "tokens": 100,
+                                "usageEstimated": False,
+                            }
+                        },
+                        "usage": {
+                            "inputTokens": 80,
+                            "outputTokens": 20,
+                            "tokens": 100,
+                            "usageEstimated": False,
+                        },
+                    }
+                ),
+            )
+
+        harness.store.submit(seed, force_flush=True).result(timeout=10)
+        first = finalize_cancelled_run_budget_receipts(
+            harness.store, "run-cancel", reason="operator_cancelled"
+        )
+        replay = finalize_cancelled_run_budget_receipts(
+            harness.store, "run-cancel", reason="operator_cancelled"
+        )
+        rows = harness.store.read(
+            lambda repo: repo.execute(
+                "SELECT receipt_id, status, settled_json FROM budget_receipts "
+                "WHERE run_id = ? ORDER BY receipt_id",
+                ("run-cancel",),
+            ).fetchall()
+        )
+    finally:
+        harness.close()
+
+    assert first == {"settled": 1, "released": 1}
+    assert replay == {"settled": 0, "released": 0}
+    by_id = {row[0]: (row[1], json.loads(row[2])) for row in rows}
+    assert by_id["br-used"][0] == "settled"
+    assert by_id["br-used"][1]["usage"]["tokens"] == 100
+    assert by_id["br-unused"][0] == "released"
+    assert by_id["br-unused"][1]["reason"] == "operator_cancelled"
 
 
 def test_reserve_stage_admission_is_atomic_under_concurrency(tmp_path: Path) -> None:
