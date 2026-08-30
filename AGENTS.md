@@ -39,7 +39,7 @@
 
 细则与分级见 [development-standard.md §2](docs/standards/development-standard.md) 和 [开发路由](docs/guides/README.md)。
 
-随后只读 `route`、`ownership`、`loop` 的命中段和 [规范索引](docs/standards/README.md) 对应条。`STANDARD_TASK/HIGH_RISK`、续接或记忆敏感任务先跑 storage inventory；多会话写入走 guard/claim；异常先走 [`agent_log_context`](docs/guides/agent-log-routing.md)；Agent/Session/Inbox/Knowledge ACL 操作先读 [项目操作目录](docs/agents/project-operation-catalog.md)。
+随后只读 `route`、`ownership`、`loop` 的命中段和 [规范索引](docs/standards/README.md) 对应条。不得仅因任务属于 `STANDARD_TASK/HIGH_RISK` 或同任务续接就跑全量 storage inventory：普通代码、测试和文档任务若不依赖运行时数据路径，直接跳过；只需确认 active path/instance identity 时用 [`agent_log_context`](docs/guides/agent-log-routing.md) 的轻量上下文；只有触及存储迁移、活数据权威、项目记忆恢复或路径冲突仲裁时才运行 storage inventory。多会话写入走 guard/claim；Agent/Session/Inbox/Knowledge ACL 操作先读 [项目操作目录](docs/agents/project-operation-catalog.md)。
 
 常用入口：
 [开发标准](docs/standards/development-standard.md) · [协作规范](docs/agents/worktree-collaboration.md) · [测试指南](tests/README.md) · [VUI](web/src/components/vui/README.md) · [services](core/web/services/README.md) · [Launcher ADR](docs/adr/0009-launcher-control-plane-lives-in-electron-main.md)。
