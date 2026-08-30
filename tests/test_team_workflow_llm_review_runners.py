@@ -748,7 +748,7 @@ def test_review_llm_call_timeout_seconds_env_override(monkeypatch):
     )
     default = llm_review_runners.review_llm_call_timeout_seconds()
     assert default == llm_review_runners.REVIEW_LLM_CALL_TIMEOUT_SECONDS
-    assert 120 <= default <= 180
+    assert 300 < default <= 360
 
     monkeypatch.setenv(
         llm_review_runners._REVIEW_LLM_CALL_TIMEOUT_ENV, "42.5"
