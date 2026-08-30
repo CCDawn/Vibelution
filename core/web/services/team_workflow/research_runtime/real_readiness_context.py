@@ -18,6 +18,7 @@ from core.research.workflow.ledger import WorkflowLedgerStore
 from core.research.workflow.models import ActorKind
 
 from . import readiness_providers
+from .budget_authority_adapter import _stage_admitted_tokens
 from .human_gate_artifacts import canonical_sha256
 from .smoke_release_artifact import smoke_observation_is_releasable
 from .readiness.common import (
@@ -552,7 +553,8 @@ def _budget_consumed_from_ledger(store: WorkflowLedgerStore, run_id: str) -> dic
     try:
         rows = store.submit(
             lambda uow: uow.repository.execute(
-                "SELECT reserved_json, status FROM budget_receipts WHERE run_id = ?",
+                "SELECT reserved_json, settled_json, status FROM budget_receipts "
+                "WHERE run_id = ?",
                 (run_id,),
             ).fetchall(),
             force_flush=True,
@@ -563,8 +565,9 @@ def _budget_consumed_from_ledger(store: WorkflowLedgerStore, run_id: str) -> dic
     tool_calls = 0
     seconds = 0
     retries = 0
-    for reserved_json, status in rows:
-        if str(status or "") not in {"reserved", "settled", "consumed"}:
+    for reserved_json, settled_json, status in rows:
+        normalized_status = str(status or "")
+        if normalized_status in {"released", "voided", "failed"}:
             continue
         try:
             reserved = json.loads(reserved_json or "{}")
@@ -573,7 +576,24 @@ def _budget_consumed_from_ledger(store: WorkflowLedgerStore, run_id: str) -> dic
         if not isinstance(reserved, dict):
             reserved = {}
         inner = reserved.get("reserved") if isinstance(reserved.get("reserved"), dict) else reserved
-        tokens += int(inner.get("estimatedTokens") or inner.get("tokens") or 0)
+        # Token consumption mirrors the admission authority's semantics
+        # (budget_authority_adapter._stage_admitted_tokens): a live reservation
+        # occupies its estimate, a settled attempt occupies its real usage, and
+        # "settled usage is the authority" — completion releases the estimate
+        # weight so a serial successor stays admissible. Parse failures stay
+        # conservative and count the full estimate (gate can only over-block).
+        try:
+            tokens += _stage_admitted_tokens(
+                {
+                    "status": normalized_status,
+                    "reserved_json": reserved_json,
+                    "settled_json": settled_json,
+                }
+            )
+        except (TypeError, ValueError):
+            tokens += int(inner.get("estimatedTokens") or inner.get("tokens") or 0)
+        if normalized_status not in {"reserved", "settled", "consumed"}:
+            continue
         tool_calls += int(inner.get("toolCalls") or 0)
         seconds += int(inner.get("seconds") or inner.get("wallClockSeconds") or 0)
         retries += int(inner.get("retries") or 0)

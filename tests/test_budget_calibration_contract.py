@@ -569,3 +569,199 @@ def test_stage_exhausted_rejects_fail_closed(tmp_path: Path) -> None:
             ports.reserve_budget(action=second, estimate_tokens=25_000)
     finally:
         harness.close()
+
+
+# --------------------------------------------------------------- readiness
+# The readiness budget gate must consume the same facts as the admission
+# authority: settled usage is the authority and completion releases the
+# estimate weight, while a live reservation still occupies its estimate and
+# genuine exhaustion still rejects fail-closed.
+
+
+def _insert_budget_receipt(
+    harness: CommandHarness,
+    *,
+    receipt_id: str,
+    node_id: str,
+    node_run_id: str,
+    estimate: int,
+    status: str = "reserved",
+    usage: dict[str, int] | None = None,
+) -> None:
+    _seed_attempt(harness, _action(node_id, node_run_id))
+    reserved_json = json.dumps(
+        {
+            "reserved": {
+                "estimatedTokens": estimate,
+                "tokens": estimate,
+                "toolCalls": 1,
+                "seconds": 60,
+                "retries": 0,
+            },
+            "limits": {
+                "tokens": 250_000,
+                "toolCalls": 300,
+                "seconds": 21_600,
+                "retries": 2,
+            },
+        }
+    )
+
+    def mutate(uow):
+        uow.repository.insert_budget_receipt(
+            receipt_id=receipt_id,
+            run_id="run-test",
+            node_run_id=node_run_id,
+            reservation_id=f"reservation-{node_run_id}",
+            stage_id="knowledge_collection",
+            policy_hash="p-1",
+            reserved_json=reserved_json,
+            created_at_ms=1_750_000_000_000,
+        )
+        if status != "reserved":
+            settled: dict = {"usage": usage} if usage is not None else {}
+            assert uow.repository.update_budget_receipt(
+                receipt_id,
+                status=status,
+                now_ms=1_750_000_000_001,
+                settled_json=json.dumps(settled),
+            )
+
+    harness.store.submit(mutate, force_flush=True).result(timeout=10)
+
+
+def _readiness_budget(harness: CommandHarness):
+    from core.web.services.team_workflow.research_runtime.real_readiness_context import (
+        RealDomainReadinessContext,
+        _budget_consumed_from_ledger,
+    )
+
+    consumed = _budget_consumed_from_ledger(harness.store, "run-test")
+    context = RealDomainReadinessContext(harness.store)
+    return consumed, context.budget_limits("research-team", "run-test")
+
+
+def test_readiness_consumption_releases_settled_estimates(tmp_path: Path) -> None:
+    """Two settled attempts with small real usage keep a serial successor
+    admissible even though each reserved the full stage estimate."""
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run()
+        _write_snapshot(
+            harness,
+            {"stageBudgets": {"knowledge_collection": {"tokens": 250_000}}},
+        )
+        _insert_budget_receipt(
+            harness,
+            receipt_id="br-readiness-a",
+            node_id="source_finding",
+            node_run_id="nr-run-test-source_finding-a1",
+            estimate=250_000,
+            status="settled",
+            usage={"tokens": 52_000},
+        )
+        _insert_budget_receipt(
+            harness,
+            receipt_id="br-readiness-b",
+            node_id="source_extraction",
+            node_run_id="nr-run-test-source_extraction-a1",
+            estimate=250_000,
+            status="settled",
+            usage={"tokens": 52_000},
+        )
+        _insert_budget_receipt(
+            harness,
+            receipt_id="br-readiness-c",
+            node_id="evidence_relations",
+            node_run_id="nr-run-test-evidence_relations-a0",
+            estimate=900_000,
+            status="released",
+        )
+        consumed, budget = _readiness_budget(harness)
+        assert consumed["tokens"] == 104_000
+        assert budget.available() == (True, "")
+    finally:
+        harness.close()
+
+
+def test_readiness_live_reservation_still_occupies_its_estimate(
+    tmp_path: Path,
+) -> None:
+    """A live reservation occupies its full estimate: live estimate plus
+    settled real usage beyond the stage limit still blocks fail-closed."""
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run()
+        _write_snapshot(
+            harness,
+            {"stageBudgets": {"knowledge_collection": {"tokens": 250_000}}},
+        )
+        _insert_budget_receipt(
+            harness,
+            receipt_id="br-readiness-live",
+            node_id="evidence_relations",
+            node_run_id="nr-run-test-evidence_relations-a1",
+            estimate=250_000,
+        )
+        _insert_budget_receipt(
+            harness,
+            receipt_id="br-readiness-settled",
+            node_id="source_extraction",
+            node_run_id="nr-run-test-source_extraction-a1",
+            estimate=250_000,
+            status="settled",
+            usage={"tokens": 52_000},
+        )
+        consumed, budget = _readiness_budget(harness)
+        assert consumed["tokens"] == 302_000
+        available, reason = budget.available()
+        assert available is False
+        assert reason == "stage_tokens_limit_reached"
+    finally:
+        harness.close()
+
+
+def test_readiness_real_usage_exhaustion_still_rejects(tmp_path: Path) -> None:
+    """Settled real usage genuinely beyond the stage limit still rejects the
+    readiness gate (the semantic alignment never loosens the gate)."""
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run()
+        _write_snapshot(
+            harness,
+            {"stageBudgets": {"knowledge_collection": {"tokens": 250_000}}},
+        )
+        _insert_budget_receipt(
+            harness,
+            receipt_id="br-readiness-x",
+            node_id="source_finding",
+            node_run_id="nr-run-test-source_finding-a1",
+            estimate=250_000,
+            status="settled",
+            usage={"tokens": 130_000},
+        )
+        _insert_budget_receipt(
+            harness,
+            receipt_id="br-readiness-y",
+            node_id="source_extraction",
+            node_run_id="nr-run-test-source_extraction-a1",
+            estimate=250_000,
+            status="voided",
+            usage={"tokens": 900_000},
+        )
+        _insert_budget_receipt(
+            harness,
+            receipt_id="br-readiness-z",
+            node_id="evidence_relations",
+            node_run_id="nr-run-test-evidence_relations-a1",
+            estimate=250_000,
+            status="settled",
+            usage={"tokens": 130_000},
+        )
+        consumed, budget = _readiness_budget(harness)
+        assert consumed["tokens"] == 260_000
+        available, reason = budget.available()
+        assert available is False
+        assert reason == "stage_tokens_limit_reached"
+    finally:
+        harness.close()
