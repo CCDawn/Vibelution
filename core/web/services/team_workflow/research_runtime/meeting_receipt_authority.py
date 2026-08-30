@@ -21,6 +21,32 @@ _EXECUTION_INACTIVE_RUN_STATUSES = _TERMINAL_RUN_STATUSES | frozenset(
 )
 
 
+def _reject_duplicate_json_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in payload:
+            raise ValueError(f"duplicate blocked problem field: {key}")
+        payload[key] = value
+    return payload
+
+
+def _is_exact_hypothesis_first_meeting_block(run: Any) -> bool:
+    raw_problem = getattr(run, "blocked_problem_json", None)
+    if not isinstance(raw_problem, str) or not raw_problem.strip():
+        return False
+    try:
+        problem = json.loads(
+            raw_problem,
+            object_pairs_hook=_reject_duplicate_json_keys,
+        )
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return False
+    return isinstance(problem, Mapping) and (
+        problem.get("code") == "auto_advance_not_ready"
+        and problem.get("detail") == "hypothesis_first_meeting_open"
+    )
+
+
 def _required_text(value: Any, field: str) -> str:
     normalized = str(value or "").strip()
     if not normalized:
@@ -223,6 +249,11 @@ def workflow_run_stop_reason(authority: Mapping[str, Any] | None) -> str:
     if run is None:
         return "challenge_workflow_run_missing"
     status = str(getattr(run, "status", "") or "").strip().lower()
+    if status == "blocked" and _is_exact_hypothesis_first_meeting_block(run):
+        # ``hypothesis_first_meeting_open`` is the RESOLVE_HUMAN readiness
+        # gate that this formal candidate-generation meeting is meant to
+        # resolve.  Every other blocked shape remains fail-closed below.
+        return ""
     return (
         f"challenge_workflow_run_{status}"
         if status in _EXECUTION_INACTIVE_RUN_STATUSES

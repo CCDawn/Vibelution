@@ -1071,6 +1071,115 @@ def test_workflow_run_stop_reason_rechecks_blocked_then_allows_resumed_run(monke
     assert meeting_receipt_authority.workflow_run_stop_reason(authority) == ""
 
 
+def test_workflow_run_stop_reason_allows_only_exact_human_meeting_gate(monkeypatch):
+    problem_jsons = iter(
+        [
+            json.dumps(
+                {
+                    "code": "auto_advance_not_ready",
+                    "detail": "hypothesis_first_meeting_open",
+                    "title": "评审尚未闭环",
+                },
+                ensure_ascii=False,
+            ),
+            json.dumps(
+                {
+                    "code": "auto_advance_not_ready",
+                    "detail": "source_candidates_missing",
+                }
+            ),
+            json.dumps(
+                {
+                    "code": "auto_advance_not_ready",
+                    "detail": ["hypothesis_first_meeting_open", "other"],
+                }
+            ),
+            '{"code":"auto_advance_not_ready","detail":"other","detail":"hypothesis_first_meeting_open"}',
+            "not-json",
+            json.dumps({"code": "auto_advance_not_ready"}),
+        ]
+    )
+
+    class FakeStore:
+        def get_run(self, _run_id):
+            return type(
+                "Run",
+                (),
+                {
+                    "status": "blocked",
+                    "blocked_problem_json": next(problem_jsons),
+                },
+            )()
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.formal_write_runtime.get_write_store",
+        lambda: FakeStore(),
+    )
+    authority = {"workflowRunId": "run-blocked-human-gate"}
+
+    assert meeting_receipt_authority.workflow_run_stop_reason(authority) == ""
+    for _ in range(5):
+        assert (
+            meeting_receipt_authority.workflow_run_stop_reason(authority)
+            == "challenge_workflow_run_blocked"
+        )
+
+
+def test_formal_candidate_generation_runs_all_speakers_for_human_meeting_gate(
+    tmp_path, monkeypatch
+):
+    team_id, agents = _team_with_room(tmp_path, monkeypatch)
+
+    class FakeStore:
+        def get_run(self, _run_id):
+            return type(
+                "Run",
+                (),
+                {
+                    "status": "blocked",
+                    "blocked_problem_json": json.dumps(
+                        {
+                            "code": "auto_advance_not_ready",
+                            "detail": "hypothesis_first_meeting_open",
+                        }
+                    ),
+                },
+            )()
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.formal_write_runtime.get_write_store",
+        lambda: FakeStore(),
+    )
+    agent_ids = list(agents.values())
+    opened = meeting_runtime.open_candidate_generation_meeting(
+        team_id,
+        _selection_payload(
+            agent_ids,
+            meetingRoundId="meeting-human-gate-open",
+        ),
+        agent_runner=_marker_runner,
+        background=False,
+        _model_invocation_receipt_authority=_receipt_authority(
+            team_id,
+            run_id="run-blocked-human-gate",
+        ),
+    )
+
+    room = chat_room_service.get_chat_room_detail(opened["roomId"])
+    bound_round = next(
+        item
+        for item in room["rounds"]
+        if item["roundId"] == opened["roundId"]
+    )
+    completed_messages = [
+        message
+        for message in bound_round["messages"]
+        if message.get("status") == "completed"
+    ]
+    assert bound_round["status"] == "completed"
+    assert len(completed_messages) == len(agent_ids)
+
+
 def test_background_discussion_scheduler_deduplicates_one_ready_meeting(monkeypatch):
     class DeferredExecutor:
         def __init__(self):
