@@ -7,6 +7,7 @@
 
 | 文件 | Status | 说明 |
 | --- | --- | --- |
+| [2026-08-30-challenge-cup-automatic-chain-reliability-plan.md](2026-08-30-challenge-cup-automatic-chain-reliability-plan.md) | USER-REQUESTED / ACTIVE PLAN | 挑战杯群聊、摘要、LangGraph/Ledger 调度的 deadline、durable recovery、run 隔离、上下文与自动推进完整修复任务图 |
 | [2026-08-25-challenge-cup-canonical-workflow-state-plan.md](2026-08-25-challenge-cup-canonical-workflow-state-plan.md) | USER-REQUESTED / ACTIVE PLAN | 挑战杯从官方题目冷启动到正式运行、产出登记和 H1–H4 审核的规范化状态 V2、服务端动作与真实链路验收 |
 | [2026-08-22-challenge-cup-hypothesis-scoped-sessions.md](2026-08-22-challenge-cup-hypothesis-scoped-sessions.md) | user-approved / active-plan | 挑战杯按题目/假说隔离群聊与 Child Session、三类 checkpoint 绑定、旧数据清空及 SCI-096 初始化重建 |
 | [2026-08-21-research-workflow-three-pane-current-task-redesign.md](2026-08-21-research-workflow-three-pane-current-task-redesign.md) | user-approved | 科研流程统一 currentTask 投影、三栏信息架构、画布恢复、档案分层与一轮真实验收 |
