@@ -2925,7 +2925,10 @@ def _append_review_dispatch_attempt_state(
     meeting side effect: an existing non-failed attempt is reused so selection
     replays never stack duplicate attempts, while a latest failed attempt bumps
     the attempt number so retries supersede it in projection instead of
-    rewriting history. Terminal transitions update the same attempt id.
+    rewriting history. A latest attempt whose bound meeting already terminated
+    (closed) is superseded the same way, so a retry after a terminated review
+    opens a fresh attempt instead of reusing the dead meeting. Terminal
+    transitions update the same attempt id.
     """
     now = _utc_now()
     with _LOCK:
@@ -2937,7 +2940,11 @@ def _append_review_dispatch_attempt_state(
             round_index=round_index,
         )
         if lifecycle == "queued":
-            if current is not None and str(current.get("lifecycle") or "") != "failed":
+            if (
+                current is not None
+                and str(current.get("lifecycle") or "") != "failed"
+                and not _attempt_bound_meeting_is_terminal(team_id, current)
+            ):
                 return current
             attempt_number = int(current.get("attemptNumber") or 0) + 1 if current else 1
         else:
@@ -2989,6 +2996,37 @@ def _append_review_dispatch_attempt_state(
         }
         _append_jsonl(_storage_path(team_id), record)
     return record
+
+
+def _meeting_round_is_terminal(meeting_round: Any) -> bool:
+    """True when one meeting round has reached its terminal ``closed`` status."""
+
+    if not isinstance(meeting_round, Mapping):
+        return False
+    return str(meeting_round.get("status") or "").strip().lower() == "closed"
+
+
+def _attempt_bound_meeting_is_terminal(
+    team_id: str, attempt: Mapping[str, Any]
+) -> bool:
+    """True when the meeting bound to one attempt record already terminated.
+
+    A terminated review meeting can never serve a fresh dispatch again, so the
+    attempt ledger must supersede such attempts instead of replaying them.
+    """
+
+    from core.web.services.team_workflow import meeting_rounds
+
+    meeting_round_id = str(attempt.get("meetingRoundId") or "").strip()
+    if not meeting_round_id:
+        return False
+    try:
+        meeting_round = meeting_rounds.get_meeting_round(team_id, meeting_round_id)[
+            "meetingRound"
+        ]
+    except meeting_rounds.ResearchMeetingRoundNotFoundError:
+        return False
+    return _meeting_round_is_terminal(meeting_round)
 
 
 def list_review_dispatch_attempts(
@@ -3363,6 +3401,31 @@ def _record_review_round_link(
     return record
 
 
+def _candidate_review_meeting_id(
+    selection_id: str,
+    candidate_id: str,
+    round_index: int,
+    *,
+    attempt_number: int = 1,
+) -> str:
+    """Deterministic candidate review meeting id for one dispatch attempt.
+
+    Attempt 1 keeps the historical base id so existing data replays unchanged;
+    later attempts carry an ``-a{N}`` suffix (same ladder as candidate
+    generation) so a retry after a terminated review opens a fresh meeting
+    instead of colliding with the closed one.
+    """
+
+    base = (
+        f"hf-review-{selection_id}-"
+        f"{_stable_hash({'candidateId': candidate_id})[:10]}-"
+        f"r{round_index}"
+    )
+    if attempt_number > 1:
+        return f"{base}-a{int(attempt_number)}"
+    return base
+
+
 def open_review_meeting_for_selection(
     team_id: str,
     selection: Mapping[str, Any],
@@ -3489,9 +3552,14 @@ def open_review_meeting_for_selection(
         # Fan-out intents are queued on disk before any meeting side effect
         # (same contract as generation attempts): a crash mid-fan-out still
         # explains, per candidate, that dispatch was attempted. Replays reuse
-        # the existing attempt instead of stacking duplicates.
+        # the existing attempt instead of stacking duplicates, while attempts
+        # whose meeting already terminated are superseded so retries open a
+        # fresh meeting. The queued record is the single attempt authority:
+        # the meeting id below takes its attempt number, keeping ledger and
+        # meeting identity consistent.
+        candidate_attempt_numbers: dict[str, int] = {}
         for candidate_id in selected_candidate_ids:
-            _append_review_dispatch_attempt_state(
+            attempt_record = _append_review_dispatch_attempt_state(
                 normalized_team_id,
                 question_id=question_id,
                 selection_id=selection_id,
@@ -3499,6 +3567,9 @@ def open_review_meeting_for_selection(
                 candidate_id=candidate_id,
                 round_index=normalized_round_index,
                 lifecycle="queued",
+            )
+            candidate_attempt_numbers[candidate_id] = int(
+                attempt_record.get("attemptNumber") or 1
             )
         _record_scene_event(
             "review_dispatch.started",
@@ -3513,10 +3584,11 @@ def open_review_meeting_for_selection(
         )
         opened_candidates: list[dict[str, Any]] = []
         for candidate_order, candidate_id in enumerate(selected_candidate_ids):
-            candidate_meeting_id = (
-                f"hf-review-{selection_id}-"
-                f"{_stable_hash({'candidateId': candidate_id})[:10]}-"
-                f"r{normalized_round_index}"
+            candidate_meeting_id = _candidate_review_meeting_id(
+                selection_id,
+                candidate_id,
+                normalized_round_index,
+                attempt_number=candidate_attempt_numbers.get(candidate_id, 1),
             )
             candidate_selection = {
                 **selection_record,
@@ -3587,6 +3659,11 @@ def open_review_meeting_for_selection(
                     },
                 )
                 raise
+            opened_meeting = (
+                opened_candidate.get("meetingRound")
+                if isinstance(opened_candidate.get("meetingRound"), Mapping)
+                else {}
+            )
             _append_review_dispatch_attempt_state(
                 normalized_team_id,
                 question_id=question_id,
@@ -3596,7 +3673,12 @@ def open_review_meeting_for_selection(
                 round_index=normalized_round_index,
                 lifecycle="completed",
                 outcome="succeeded",
-                meeting_round_id=candidate_meeting_id,
+                # Bind the attempt to the meeting that actually opened so the
+                # ledger and the meeting identity can never drift apart.
+                meeting_round_id=str(
+                    opened_meeting.get("meetingRoundId") or ""
+                ).strip()
+                or candidate_meeting_id,
             )
             opened_candidates.append(opened_candidate)
         _record_scene_event(
@@ -3674,6 +3756,56 @@ def open_review_meeting_for_selection(
             normalized_team_id, normalized_meeting_round_id
         )["meetingRound"]
     except meeting_rounds.ResearchMeetingRoundNotFoundError:
+        existing_round = None
+    if (
+        isinstance(existing_round, Mapping)
+        and str(existing_round.get("meetingType") or "").strip().lower()
+        == HYPOTHESIS_REVIEW_MEETING_TYPE
+        and _normalized_str_list(existing_round.get("chatRoomRoundIds"))
+        and _meeting_round_is_terminal(existing_round)
+    ):
+        # A closed meeting is a terminated dispatch, never a fresh reuse.
+        # Reconcile the attempt this meeting belonged to, then derive the next
+        # attempt id so the dispatch opens a new meeting instead of reporting
+        # success on the dead one. Reached only when the durable attempt ledger
+        # could not see the termination (for example a dispatch that stayed
+        # ``queued`` across a crash); the regular retry path supersedes
+        # terminal attempts before this id is ever cast.
+        _append_review_dispatch_attempt_state(
+            normalized_team_id,
+            question_id=question_id,
+            selection_id=selection_id,
+            selection_version=selection_version,
+            candidate_id=_formal_candidate_id,
+            round_index=normalized_round_index,
+            lifecycle="failed",
+            outcome="superseded",
+            meeting_round_id=normalized_meeting_round_id,
+            error="bound review meeting already closed",
+            error_type="ReviewMeetingClosed",
+        )
+        attempt_record = _append_review_dispatch_attempt_state(
+            normalized_team_id,
+            question_id=question_id,
+            selection_id=selection_id,
+            selection_version=selection_version,
+            candidate_id=_formal_candidate_id,
+            round_index=normalized_round_index,
+            lifecycle="queued",
+        )
+        fresh_meeting_round_id = _candidate_review_meeting_id(
+            selection_id,
+            _formal_candidate_id,
+            normalized_round_index,
+            attempt_number=int(attempt_record.get("attemptNumber") or 1),
+        )
+        if fresh_meeting_round_id == normalized_meeting_round_id:
+            raise HypothesisFirstChainError(
+                "review meeting "
+                f"{normalized_meeting_round_id} is closed and no fresh review "
+                "attempt could be derived for this dispatch"
+            )
+        normalized_meeting_round_id = fresh_meeting_round_id
         existing_round = None
     if (
         isinstance(existing_round, Mapping)
