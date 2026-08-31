@@ -37,6 +37,13 @@ REQUIRED_REVIEW_DIMENSIONS = (
     "risk_and_ethics",
     "counterexample_coverage",
 )
+REVIEW_DIMENSION_RATINGS = (
+    "insufficient",
+    "weak",
+    "mixed",
+    "adequate",
+    "strong",
+)
 _REQUIRED_COMPETITION_VIEW_FIELDS = (
     "problem_statement",
     "rationale",
@@ -106,9 +113,7 @@ _HUMAN_GATE_DECISIONS = frozenset(
     {"pending", "approved", "revision_requested", "rejected"}
 )
 _SELECTION_COMPARISON_METHOD = "multi_dimension_pareto_plus_human_decision"
-_ALLOWED_REVIEW_RATINGS = frozenset(
-    {"insufficient", "weak", "mixed", "adequate", "strong"}
-)
+_ALLOWED_REVIEW_RATINGS = frozenset(REVIEW_DIMENSION_RATINGS)
 _REQUIRED_RESEARCH_PLAN_LIST_FIELDS = (
     "work_packages",
     "variables",
@@ -1597,6 +1602,7 @@ __all__ = [
     "QUESTION_RESULT_PACKAGE_SCHEMA_VERSION",
     "REQUIRED_RECEIPT_STAGES",
     "REQUIRED_REVIEW_DIMENSIONS",
+    "REVIEW_DIMENSION_RATINGS",
     "QuestionResultPackage",
     "QuestionResultPackageError",
     "canonical_model_policy",

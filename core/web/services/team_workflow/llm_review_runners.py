@@ -32,9 +32,12 @@ from core.llm.agent_runtime import agent_dialogue_model_id, config_for_agent_llm
 from core.llm.client import llm_cancel_context, model_invocation_receipt_context_scope
 from core.llm.invocation import invoke_llm_outcome
 from core.llm.types import LLMError
+from core.research.competition.question_result_package import (
+    REQUIRED_REVIEW_DIMENSIONS,
+    REVIEW_DIMENSION_RATINGS,
+)
 from core.research.workflow.contracts import ContractValidationError
 from core.research.workflow.contracts.hypothesis_quality import (
-    AUXILIARY_HYPOTHESIS_DIAGNOSTIC_DIMENSIONS,
     HYPOTHESIS_SCORE_DIMENSIONS,
     canonical_hypothesis_score_rubric,
 )
@@ -49,9 +52,6 @@ from core.web.services.team_workflow.source_collection import (
 REVIEW_LLM_PROFILE_ID = "primary"
 REVIEW_LLM_SURFACE = "team_workflow_review"
 REVIEW_LLM_CACHE_SCOPE = "team_workflow_review"
-
-# Ratings accepted by the seven-dimension review authority rows.
-DIMENSION_REVIEW_RATINGS = ("insufficient", "weak", "mixed", "adequate", "strong")
 
 _MAX_MESSAGE_CHARS = 1200
 _MAX_MESSAGES = 40
@@ -524,7 +524,8 @@ Rubric（分数 0.0-1.0，两位小数，按分档描述对号入座）：
 - scores 必须恰好包含五个维度：{list(HYPOTHESIS_SCORE_DIMENSIONS)}。
 - claim 沿用候选自己的 claim 原文；rationale 用中文说明打分依据；differenceFromAlternatives 说明相对其他候选的差异。
 - lineageRefs 沿用候选携带的来源引用，没有就给空数组，不得编造。
-- dimensionReviews 是七维独立评审行（维度为 {list(HYPOTHESIS_SCORE_DIMENSIONS) + list(AUXILIARY_HYPOTHESIS_DIAGNOSTIC_DIMENSIONS)}），每行 {{"hypothesis_id","dimension","rating","rationale","reviewer","evidence_refs"}}；rating 只能取 {list(DIMENSION_REVIEW_RATINGS)}；evidence_refs 只能从输入 refsWhitelist 中选择，白名单为空则 dimensionReviews 给空数组。
+- dimensionReviews 是与 5+2 完全独立的结果包审计七维，每个维度恰好一行，维度只能为 {list(REQUIRED_REVIEW_DIMENSIONS)}。不得把 5+2 评分字段映射、改名或复制成审计七维。
+- 每行 {{"hypothesis_id","dimension","rating","rationale","reviewer","evidence_refs"}}；rating 只能取 {list(REVIEW_DIMENSION_RATINGS)}；rationale 必须针对该审计维度给出非空正文；evidence_refs 只能从输入 refsWhitelist 中选择，白名单为空则给空数组。
 - reviewedBy 固定为 "llm"，status 固定为 "reviewed"。
 - 严格输出单个 JSON 对象。
 
@@ -559,12 +560,74 @@ _METAREVIEW_SYSTEM_PROMPT = """你是科研团队 Coordinator（MetaReview 步�
 要求：
 - recommendationCandidateId 必须从给出的候选 id 中选择。
 - rationale 用中文说明推荐依据；riskNotes 汇总未解决风险。
-- accepted 表示本轮评审结论是否可接受（推荐候选质量足以进入实验设计）。
+- accepted 表示本轮评审结论是否可接受（推荐候选质量足以进入下一轮修订或第一阶段研究计划设计）；不得据此声称实验已设计或执行。
 - 严格输出单个 JSON 对象。
 
 输出 JSON 结构：
 {"recommendationCandidateId": str, "rationale": str, "riskNotes": str, "accepted": bool}
 """
+
+
+def _validated_dimension_review_rows(
+    rows: Any,
+    *,
+    candidate_id: str,
+    reviewer: str,
+    refs_whitelist: Sequence[str],
+) -> list[dict[str, Any]]:
+    """Bind one real reflection output to the independent audit authority."""
+
+    if not isinstance(rows, list):
+        raise ContractValidationError(
+            "reflection dimensionReviews must be a list covering all audit dimensions"
+        )
+    allowed_dimensions = set(REQUIRED_REVIEW_DIMENSIONS)
+    allowed_ratings = set(REVIEW_DIMENSION_RATINGS)
+    allowed_refs = {str(item) for item in refs_whitelist if str(item or "").strip()}
+    seen: set[str] = set()
+    normalized: list[dict[str, Any]] = []
+    for raw in rows:
+        if not isinstance(raw, Mapping):
+            raise ContractValidationError("reflection dimensionReviews rows must be objects")
+        dimension = str(raw.get("dimension") or "").strip()
+        if dimension not in allowed_dimensions or dimension in seen:
+            raise ContractValidationError(
+                "reflection dimensionReviews must cover exactly the seven audit dimensions"
+            )
+        rating = str(raw.get("rating") or "").strip().lower()
+        rationale = str(raw.get("rationale") or "").strip()
+        evidence_refs = raw.get("evidence_refs", raw.get("evidenceRefs", []))
+        if rating not in allowed_ratings or not rationale:
+            raise ContractValidationError(
+                f"reflection audit dimension {dimension} requires a valid rating and rationale"
+            )
+        if not isinstance(evidence_refs, list):
+            raise ContractValidationError(
+                f"reflection audit dimension {dimension} evidence_refs must be a list"
+            )
+        normalized_refs = [
+            str(item).strip() for item in evidence_refs if str(item or "").strip()
+        ]
+        if any(ref not in allowed_refs for ref in normalized_refs):
+            raise ContractValidationError(
+                f"reflection audit dimension {dimension} contains an unbound evidence ref"
+            )
+        seen.add(dimension)
+        normalized.append(
+            {
+                "hypothesis_id": candidate_id,
+                "dimension": dimension,
+                "rating": rating,
+                "rationale": rationale,
+                "reviewer": reviewer,
+                "evidence_refs": list(dict.fromkeys(normalized_refs)),
+            }
+        )
+    if seen != allowed_dimensions:
+        raise ContractValidationError(
+            "reflection dimensionReviews must cover exactly the seven audit dimensions"
+        )
+    return normalized
 
 
 def _candidate_refs(candidate: Mapping[str, Any]) -> list[str]:
@@ -651,8 +714,9 @@ def build_hypothesis_review_runners(
                     "question": str(context.get("question") or ""),
                 },
                 "refsWhitelist": refs_whitelist,
-                "allowedDimensions": list(HYPOTHESIS_SCORE_DIMENSIONS),
-                "allowedRatings": list(DIMENSION_REVIEW_RATINGS),
+                "scoreDimensions": list(HYPOTHESIS_SCORE_DIMENSIONS),
+                "reviewDimensions": list(REQUIRED_REVIEW_DIMENSIONS),
+                "allowedRatings": list(REVIEW_DIMENSION_RATINGS),
             },
             session_id=_context_session(context),
             receipt_context=_receipt_context(
@@ -670,12 +734,12 @@ def build_hypothesis_review_runners(
         else:
             result = dict(produced)
         result["reviewedBy"] = f"llm:{resolved['modelId']}"
-        rows = result.get("dimensionReviews")
-        if isinstance(rows, list) and rows:
-            for row in rows:
-                if isinstance(row, dict):
-                    row.setdefault("hypothesis_id", str(candidate.get("candidateId") or ""))
-                    row.setdefault("reviewer", result["reviewedBy"])
+        result["dimensionReviews"] = _validated_dimension_review_rows(
+            result.get("dimensionReviews"),
+            candidate_id=str(candidate.get("candidateId") or ""),
+            reviewer=result["reviewedBy"],
+            refs_whitelist=refs_whitelist,
+        )
         if provider_receipt is not None:
             return ProviderBoundReviewResult(result, provider_receipt)
         return result

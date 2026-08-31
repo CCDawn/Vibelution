@@ -21,11 +21,19 @@ from __future__ import annotations
 import json
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
 from core.llm.types import CanonicalItemIdentity, LLMError, TurnOutcome
+from core.research.competition.question_result_package import (
+    REQUIRED_REVIEW_DIMENSIONS,
+)
 from core.research.workflow.contracts import ContractValidationError
+from core.research.workflow.contracts.hypothesis_quality import (
+    AUXILIARY_HYPOTHESIS_DIAGNOSTIC_DIMENSIONS,
+    HYPOTHESIS_SCORE_DIMENSIONS,
+)
 from core.research.workflow.contracts.model_invocation_receipt import (
     ModelInvocationReceipt,
     ModelInvocationStatus,
@@ -46,6 +54,10 @@ _FORMAL_FAKE_LLM = {
     "modelId": "deepseek-v4-flash",
     "modelRef": "opencode/deepseek-v4-flash",
 }
+_EVIDENCE_REF = (
+    "evidence_card_batch://team-1/source-1/"
+    "0123456789abcdef0123456789abcdef"
+)
 
 
 class _FakeResponse:
@@ -316,6 +328,24 @@ def _review_context() -> dict:
     }
 
 
+def _dimension_review_rows(
+    candidate_id: str,
+    *,
+    evidence_refs: list[str] | None = None,
+) -> list[dict[str, object]]:
+    return [
+        {
+            "hypothesis_id": candidate_id,
+            "dimension": dimension,
+            "rating": "adequate",
+            "rationale": f"{candidate_id} {dimension} 审计依据",
+            "reviewer": "model-output-is-server-overridden",
+            "evidence_refs": list(evidence_refs or []),
+        }
+        for dimension in REQUIRED_REVIEW_DIMENSIONS
+    ]
+
+
 def _formal_review_context(**overrides) -> dict:
     context = {
         **_review_context(),
@@ -511,9 +541,7 @@ def test_review_runners_produce_executor_compatible_outputs(monkeypatch):
             },
             "reviewedBy": "llm",
             "status": "reviewed",
-            "dimensionReviews": [
-                {"dimension": "novelty", "rating": "strong", "rationale": "新机制", "evidence_refs": []}
-            ],
+            "dimensionReviews": _dimension_review_rows("cand-a"),
         },
         ensure_ascii=False,
     )
@@ -543,8 +571,14 @@ def test_review_runners_produce_executor_compatible_outputs(monkeypatch):
     context = _review_context()
     reflection = runners["reflection_runner"](dict(context["candidates"][0]), context)
     assert reflection["reviewedBy"] == f"llm:{_FAKE_LLM['modelId']}"
-    assert reflection["dimensionReviews"][0]["hypothesis_id"] == "cand-a"
-    assert reflection["dimensionReviews"][0]["reviewer"] == f"llm:{_FAKE_LLM['modelId']}"
+    assert {
+        row["dimension"] for row in reflection["dimensionReviews"]
+    } == set(REQUIRED_REVIEW_DIMENSIONS)
+    assert all(
+        row["hypothesis_id"] == "cand-a"
+        and row["reviewer"] == f"llm:{_FAKE_LLM['modelId']}"
+        for row in reflection["dimensionReviews"]
+    )
 
     pairwise = runners["pairwise_runner"](
         dict(context["candidates"][0]), dict(context["candidates"][1]), context
@@ -590,6 +624,41 @@ def test_reflection_runner_fails_closed_on_missing_dimensions(monkeypatch):
             pareto_runner=runners["pareto_runner"],
             metareview_runner=runners["metareview_runner"],
             reviewer_assignments={"metareview": "coordinator"},
+        )
+
+
+def test_reflection_runner_rejects_5_plus_2_rows_as_audit_dimensions(monkeypatch):
+    runners = llm_review_runners.build_hypothesis_review_runners(dict(_FAKE_LLM))
+    score_dimensions = [
+        *HYPOTHESIS_SCORE_DIMENSIONS,
+        *AUXILIARY_HYPOTHESIS_DIAGNOSTIC_DIMENSIONS,
+    ]
+    payload = json.dumps(
+        {
+            "claim": "假说 A",
+            "rationale": "错误地把 5+2 当作审计七维。",
+            "differenceFromAlternatives": "机制不同",
+            "scores": {
+                dimension: 0.7 for dimension in HYPOTHESIS_SCORE_DIMENSIONS
+            },
+            "dimensionReviews": [
+                {
+                    "dimension": dimension,
+                    "rating": "adequate",
+                    "rationale": f"错误维度 {dimension}",
+                    "evidence_refs": [],
+                }
+                for dimension in score_dimensions
+            ],
+        },
+        ensure_ascii=False,
+    )
+    _install_fake_llm(monkeypatch, [payload])
+
+    with pytest.raises(ContractValidationError, match="audit dimensions"):
+        runners["reflection_runner"](
+            dict(_review_context()["candidates"][0]),
+            _review_context(),
         )
 
 
@@ -647,6 +716,7 @@ def test_formal_parallel_runner_calls_see_only_their_own_receipt_scope(monkeypat
             },
             "reviewedBy": "llm",
             "status": "reviewed",
+            "dimensionReviews": _dimension_review_rows("model-placeholder"),
         },
         ensure_ascii=False,
     )
@@ -728,7 +798,10 @@ def test_runners_compose_with_execute_hypothesis_review(monkeypatch):
     scores_b = {dimension: 0.4 for dimension in scores_a}
     payloads: list[str] = []
     # reflection for both candidates
-    for claim, scores in (("假说 A", scores_a), ("假说 B", scores_b)):
+    for candidate_id, claim, scores in (
+        ("cand-a", "假说 A", scores_a),
+        ("cand-b", "假说 B", scores_b),
+    ):
         payloads.append(
             json.dumps(
                 {
@@ -738,6 +811,7 @@ def test_runners_compose_with_execute_hypothesis_review(monkeypatch):
                     "lineageRefs": [],
                     "scores": scores,
                     "status": "reviewed",
+                    "dimensionReviews": _dimension_review_rows(candidate_id),
                 },
                 ensure_ascii=False,
             )
@@ -779,6 +853,188 @@ def test_runners_compose_with_execute_hypothesis_review(monkeypatch):
     assert result["candidates"][0]["reviewedBy"] == f"llm:{_FAKE_LLM['modelId']}"
     assert result["metaReview"]["recommendationCandidateId"] == "cand-a"
     assert result["metaReview"]["accepted"] is True
+
+
+def test_runner_executor_round_and_review_artifacts_integrate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.web.services.team_workflow import hypothesis_rounds
+    from core.web.services.team_workflow.research_runtime import (
+        dimension_reviews_artifact_writer,
+        review_independence_artifact_writer,
+    )
+
+    context = _review_context()
+    context["candidates"][0].update(
+        {
+            "claim": "候选 A 通过事件相机稀疏编码降低边缘推理延迟",
+            "differenceFromAlternatives": "采用事件驱动稀疏编码机制",
+        }
+    )
+    context["candidates"][1].update(
+        {
+            "claim": "候选 B 通过时序蒸馏提高弱光场景识别稳定性",
+            "differenceFromAlternatives": "采用教师学生时序蒸馏机制",
+        }
+    )
+    for candidate in context["candidates"]:
+        candidate["evidenceRefs"] = [_EVIDENCE_REF]
+
+    def fake_invoke_llm(client, messages, tools=None, invocation_context=None, context=None, **kwargs):
+        call_context = invocation_context or context
+        purpose = str(call_context.metadata.get("purpose") or "")
+        request = json.loads(messages[-1]["content"])
+        if purpose == "hypothesis_reflection":
+            candidate = request["candidate"]
+            candidate_id = candidate["candidateId"]
+            return _FakeResponse(
+                json.dumps(
+                    {
+                        "claim": candidate["claim"],
+                        "rationale": f"{candidate_id} 五维评分依据",
+                        "differenceFromAlternatives": candidate[
+                            "differenceFromAlternatives"
+                        ],
+                        "lineageRefs": [],
+                        "scores": {
+                            "novelty": 0.8 if candidate_id == "cand-a" else 0.6,
+                            "competitionFit": 0.8,
+                            "falsifiability": 0.75,
+                            "evidenceSupport": 0.7,
+                            "feasibility": 0.8,
+                        },
+                        "dimensionReviews": _dimension_review_rows(
+                            candidate_id,
+                            evidence_refs=[_EVIDENCE_REF],
+                        ),
+                    },
+                    ensure_ascii=False,
+                )
+            )
+        if purpose == "hypothesis_pairwise":
+            return _FakeResponse(
+                json.dumps(
+                    {"outcome": "left_wins", "justification": "左侧证据更完整"},
+                    ensure_ascii=False,
+                )
+            )
+        if purpose == "hypothesis_pareto":
+            return _FakeResponse(
+                json.dumps(
+                    {
+                        "paretoFrontCandidateIds": ["cand-a"],
+                        "dominatedCandidateIds": ["cand-b"],
+                        "notes": "cand-a 位于前沿",
+                    },
+                    ensure_ascii=False,
+                )
+            )
+        return _FakeResponse(
+            json.dumps(
+                {
+                    "recommendationCandidateId": "cand-a",
+                    "rationale": "审计七维与五维决策均支持 cand-a",
+                    "riskNotes": "仍需第一阶段修订",
+                    "accepted": True,
+                },
+                ensure_ascii=False,
+            )
+        )
+
+    monkeypatch.setattr(llm_review_runners, "invoke_llm", fake_invoke_llm)
+    runners = llm_review_runners.build_hypothesis_review_runners(dict(_FAKE_LLM))
+    review = execute_hypothesis_review(
+        context,
+        round_id="round-integration",
+        **runners,
+        reviewer_assignments={"metareview": "coordinator-1"},
+    )
+
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
+    monkeypatch.setattr(
+        hypothesis_rounds,
+        "_storage_path",
+        lambda _team_id: tmp_path / "hypothesis_rounds.jsonl",
+    )
+    round_result = hypothesis_rounds.create_hypothesis_round(
+        "team-1",
+        {
+            "program": "XH-202619",
+            "theme": "direction-1a",
+            "campaign": "challenge-stage-one",
+            "question": "SCI-091",
+            "branch": "main",
+            "workflow": "hypothesis_and_plan",
+            "agentId": "coordinator-1",
+            "mode": "dev",
+            "roundId": "round-integration",
+            "status": "closed",
+            **review,
+            "meetingRefs": [
+                {"kind": "meeting_round", "id": "meeting-1"},
+                {"kind": "meeting_digest", "id": "digest-1"},
+                {"kind": "decision_record", "id": "decision-1"},
+            ],
+            "closedBy": "coordinator-1",
+            "closedAt": "2026-09-01T00:00:00Z",
+        },
+    )
+    round_record = round_result["round"]
+
+    def fake_put(team_id, **kwargs):
+        return {
+            "recordId": kwargs["artifact_identity"],
+            "workflowRunId": kwargs["workflow_run_id"],
+            "sourceCollectionRunId": kwargs["source_collection_run_id"],
+            "contentHash": dimension_reviews_artifact_writer.canonical_sha256(
+                kwargs["payload"]
+            ),
+        }
+
+    monkeypatch.setattr(
+        dimension_reviews_artifact_writer, "put_workflow_artifact", fake_put
+    )
+    monkeypatch.setattr(
+        dimension_reviews_artifact_writer,
+        "read_domain_artifact",
+        lambda _ref: object(),
+    )
+    monkeypatch.setattr(
+        review_independence_artifact_writer, "put_workflow_artifact", fake_put
+    )
+    dimensions = dimension_reviews_artifact_writer.materialize_dimension_reviews_authority(
+        team_id="team-1",
+        workflow_run_id="workflow-1",
+        node_run_id="node-1",
+        question_id="SCI-091",
+        selection_id="selection-1",
+        review_round_id="round-integration",
+        input_refs=[_EVIDENCE_REF],
+        input_snapshot_hash="a" * 64,
+        candidates=round_record["candidates"],
+        review=round_record,
+        workflow_authority={
+            "authorityKind": "workflow_run",
+            "teamId": "team-1",
+            "questionId": "SCI-091",
+            "workflowRunId": "workflow-1",
+        },
+        source_collection_run_id="source-1",
+    )
+    independence = review_independence_artifact_writer.write_review_independence_artifacts(
+        team_id="team-1",
+        workflow_run_id="workflow-1",
+        node_run_id="node-1",
+        review_round_id="round-integration",
+        review=round_record,
+        reviewer_assignments=round_record["roles"],
+        source_collection_run_id="source-1",
+    )
+
+    assert dimensions["status"] == "written"
+    assert independence["status"] == "written"
+    assert len(round_record["candidates"][0]["dimensionReviews"]) == 7
 
 
 # ---------------------------------------------------------------------------

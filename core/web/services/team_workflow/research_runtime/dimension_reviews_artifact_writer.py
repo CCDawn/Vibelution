@@ -19,6 +19,11 @@ from typing import Any
 
 from core.research.competition.question_result_package import (
     REQUIRED_REVIEW_DIMENSIONS,
+    REVIEW_DIMENSION_RATINGS,
+)
+from core.research.workflow.contracts.model_invocation_receipt import (
+    ModelInvocationReceipt,
+    ModelInvocationStatus,
 )
 
 from .artifact_readback_registry import (
@@ -32,7 +37,7 @@ from .workflow_artifact_store import put_workflow_artifact
 SCHEMA_VERSION = 1
 ARTIFACT_KIND = "dimension_reviews"
 SELECTION_COMPARISON_METHOD = "multi_dimension_pareto_plus_human_decision"
-_ALLOWED_RATINGS = frozenset({"insufficient", "weak", "mixed", "adequate", "strong"})
+_ALLOWED_RATINGS = frozenset(REVIEW_DIMENSION_RATINGS)
 
 
 def _text(value: Any) -> str:
@@ -352,6 +357,71 @@ def _selection_from_review(
     return selection, [], pareto, meta_review
 
 
+def _review_receipt_bindings(
+    review: Mapping[str, Any] | Sequence[Any] | None,
+    *,
+    workflow_run_id: str,
+    candidate_ids: Sequence[str],
+    rows: Sequence[Mapping[str, Any]],
+) -> tuple[list[dict[str, str]], list[dict[str, Any]], list[str]]:
+    """Bind FORMAL reflection receipts to the exact audit rows they produced."""
+
+    source = _mapping(review)
+    if _text(source.get("executionMode")).lower() != "formal":
+        return [], [], []
+    blockers: list[str] = []
+    parsed_receipts: list[dict[str, Any]] = []
+    reflection_receipts: dict[str, str] = {}
+    for raw in list(source.get("modelInvocationReceipts") or []):
+        if not isinstance(raw, Mapping):
+            blockers.append("dimension_review_receipt_invalid")
+            continue
+        try:
+            receipt = ModelInvocationReceipt.from_dict(raw)
+        except (TypeError, ValueError):
+            blockers.append("dimension_review_receipt_invalid")
+            continue
+        if (
+            receipt.run_id != workflow_run_id
+            or receipt.status
+            not in {ModelInvocationStatus.SUCCEEDED, ModelInvocationStatus.RETRIED}
+            or _text(receipt.metadata.get("questionStage")).lower() != "review"
+        ):
+            blockers.append("dimension_review_receipt_scope_invalid")
+            continue
+        parsed_receipts.append(receipt.to_dict())
+        locator = _mapping(receipt.evidence_locator)
+        if _text(locator.get("reviewStep")).lower() != "reflection":
+            continue
+        identity_parts = _string_list(locator.get("identityParts"))
+        if len(identity_parts) != 1 or identity_parts[0] not in candidate_ids:
+            blockers.append("dimension_review_receipt_candidate_invalid")
+            continue
+        candidate_id = identity_parts[0]
+        if candidate_id in reflection_receipts:
+            blockers.append("dimension_review_receipt_duplicate")
+            continue
+        reflection_receipts[candidate_id] = receipt.receipt_id
+    if any(candidate_id not in reflection_receipts for candidate_id in candidate_ids):
+        blockers.append("dimension_review_receipt_missing")
+    bindings = [
+        {
+            "hypothesis_id": candidate_id,
+            "receipt_id": reflection_receipts[candidate_id],
+            "row_hash": canonical_sha256(
+                [
+                    dict(row)
+                    for row in rows
+                    if _candidate_id(row) == candidate_id
+                ]
+            ),
+        }
+        for candidate_id in candidate_ids
+        if candidate_id in reflection_receipts
+    ]
+    return bindings, parsed_receipts, list(dict.fromkeys(blockers))
+
+
 def _binding_blockers(
     *,
     team_id: str,
@@ -511,6 +581,13 @@ def materialize_dimension_reviews_authority(
         candidate_ids,
     )
     blockers.extend(selection_blockers)
+    receipt_bindings, model_receipts, receipt_blockers = _review_receipt_bindings(
+        review,
+        workflow_run_id=run,
+        candidate_ids=candidate_ids,
+        rows=rows,
+    )
+    blockers.extend(receipt_blockers)
     blockers = list(dict.fromkeys(blockers))
     result: dict[str, Any] = {
         "status": "blocked",
@@ -521,6 +598,7 @@ def materialize_dimension_reviews_authority(
         "inputHash": input_hash,
         "dimensionReviews": rows,
         "selection": selection,
+        "reviewReceiptBindings": receipt_bindings,
         "artifact": None,
     }
     if not blockers:
@@ -530,6 +608,8 @@ def materialize_dimension_reviews_authority(
             **binding,
             "inputHash": input_hash,
             "dimensionReviews": deepcopy(rows),
+            "reviewReceiptBindings": deepcopy(receipt_bindings),
+            "modelInvocationReceipts": deepcopy(model_receipts),
             "selection": deepcopy(selection),
             "pareto": deepcopy(pareto),
             "metaReview": deepcopy(meta_review),
@@ -561,6 +641,8 @@ def materialize_dimension_reviews_authority(
             "inputHash": input_hash,
             "dimensionReviews": rows,
             "selection": selection,
+            "reviewReceiptBindings": receipt_bindings,
+            "modelInvocationReceipts": model_receipts,
             "pareto": pareto,
             "metaReview": meta_review,
             "artifact": result["artifact"],
@@ -575,8 +657,8 @@ write_dimension_reviews_artifact = materialize_dimension_reviews_authority
 
 __all__ = [
     "ARTIFACT_KIND",
-    "SELECTION_COMPARISON_METHOD",
     "SCHEMA_VERSION",
+    "SELECTION_COMPARISON_METHOD",
     "compute_input_hash",
     "materialize_dimension_reviews_authority",
     "write_dimension_reviews_artifact",

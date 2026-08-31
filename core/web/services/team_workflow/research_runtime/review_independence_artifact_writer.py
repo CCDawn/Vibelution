@@ -31,9 +31,9 @@ from core.research.workflow.contracts.review_independence import (
     REVIEW_DISAGREEMENT_SCHEMA_VERSION,
     REVIEW_INDEPENDENCE_SCHEMA_VERSION,
     ReviewDisagreementArtifact,
+    ReviewerIndependenceRecord,
     ReviewPairDisagreement,
     ReviewScoreRef,
-    ReviewerIndependenceRecord,
     inconsistent_axes_for_pair,
     review_step_identity,
     reviewer_independence_summary,
@@ -136,9 +136,12 @@ def _receipt_ref_for_step(
         context_parts = _string_list(locator.get("identityParts"))
         if list(context_parts) != [str(part or "").strip() for part in identity_parts]:
             continue
-        invocation_id = _text(_mapping(receipt_context).get("invocationId"))
-        if invocation_id:
-            return invocation_id
+        receipt_ref = _text(
+            _mapping(receipt_context).get("invocationId")
+            or _mapping(receipt_context).get("receiptId")
+        )
+        if receipt_ref:
+            return receipt_ref
     return ""
 
 
@@ -220,6 +223,7 @@ def _independence_records(
         reviewer_ids.append(reviewer)
 
     candidates = _candidate_map(review)
+    candidate_ids = tuple(sorted(candidates))
     for candidate_id, candidate in candidates.items():
         _append(
             "reflection",
@@ -244,7 +248,7 @@ def _independence_records(
     if pareto:
         _append(
             "pareto",
-            ("round",),
+            candidate_ids,
             _text(pareto.get("analystAgentId")),
             blocker="review_independence_pareto_reviewer_missing",
         )
@@ -254,7 +258,7 @@ def _independence_records(
     if meta_review:
         _append(
             "metareview",
-            (_text(meta_review.get("metaReviewId")) or "round",),
+            candidate_ids,
             _text(meta_review.get("reviewerAgentId")),
             blocker="review_independence_metareview_reviewer_missing",
         )

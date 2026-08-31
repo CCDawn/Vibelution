@@ -1174,6 +1174,7 @@ def test_hypothesis_round_fan_in_keeps_every_meeting_authority(
             "positionSeed": "seed",
             "roles": {},
             "executionMode": "dev",
+            "modelInvocationReceipts": [{"receiptId": "review-receipt-1"}],
         },
     )
     monkeypatch.setattr(hrounds, "_read_jsonl", lambda _path: [])
@@ -1210,6 +1211,121 @@ def test_hypothesis_round_fan_in_keeps_every_meeting_authority(
     assert captured_context["digest"]["sourceMessageRefs"] == [
         "message:hyp-a",
         "message:hyp-b",
+    ]
+    assert result["round"]["reviewContextId"] == "context-fan-in"
+    assert result["round"]["executionMode"] == "dev"
+    assert result["round"]["modelInvocationReceipts"] == [
+        {"receiptId": "review-receipt-1"}
+    ]
+
+
+def test_generate_round_writes_all_three_review_authorities(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.web.services.team_workflow import hypothesis_rounds as hrounds
+    from core.web.services.team_workflow import hypothesis_selection as selections
+    from core.web.services.team_workflow.research_runtime import (
+        dimension_reviews_artifact_writer,
+        review_independence_artifact_writer,
+    )
+
+    team_id = "team-review-authorities"
+    meeting = {
+        "meetingRoundId": "meeting-authorities",
+        "question": "SCI-091",
+        "scopeHash": "scope-authorities",
+        "discussionScope": {"workflowRunId": "workflow-authorities"},
+        "modelInvocationReceiptAuthority": {
+            "workflowRunId": "workflow-authorities",
+            "sourceCollectionRunId": "source-authorities",
+        },
+        "nodeRunId": "node-authorities",
+        "inputSnapshotHash": "a" * 64,
+        "inputArtifactRefs": ["evidence_card_batch://team/source/hash"],
+    }
+    candidates = [
+        {"candidateId": "H1", "claim": "claim one"},
+        {"candidateId": "H2", "claim": "claim two"},
+    ]
+    round_record = {
+        "roundId": "round-authorities",
+        "reviewContextId": "context-authorities",
+        "executionMode": "formal",
+        "roles": {"metareview": "coordinator-1"},
+        "modelInvocationReceipts": [
+            {
+                "receiptId": "receipt-reflection-H1",
+                "evidenceLocator": {
+                    "reviewStep": "reflection",
+                    "identityParts": ["H1"],
+                },
+            }
+        ],
+        "candidates": candidates,
+        "pairwiseComparisons": [],
+        "pareto": {},
+        "metaReview": {},
+    }
+    monkeypatch.setattr(
+        chain,
+        "_review_meeting_fan_in_group",
+        lambda *_args, **_kwargs: {
+            "status": "ready",
+            "selectionId": "selection-authorities",
+            "roundIndex": 1,
+            "meetings": [meeting],
+        },
+    )
+    monkeypatch.setattr(
+        selections,
+        "get_hypothesis_selection",
+        lambda *_args, **_kwargs: {
+            "selection": {
+                "scopeHash": "scope-authorities",
+                "questionId": "SCI-091",
+                "selectedCandidateIds": ["H1", "H2"],
+            }
+        },
+    )
+    monkeypatch.setattr(chain, "_build_round_candidates", lambda *_a, **_k: candidates)
+    monkeypatch.setattr(
+        hrounds,
+        "generate_hypothesis_round_from_meeting",
+        lambda *_args, **_kwargs: {"status": "created", "round": round_record},
+    )
+    calls: dict[str, dict[str, object]] = {}
+
+    def write_dimensions(**kwargs):
+        calls["dimensions"] = kwargs
+        return {"status": "written"}
+
+    def write_independence(**kwargs):
+        calls["independence"] = kwargs
+        return {
+            "status": "written",
+            "reviewIndependence": {"artifact": {}},
+            "reviewDisagreement": {"artifact": {}},
+        }
+
+    monkeypatch.setattr(
+        dimension_reviews_artifact_writer,
+        "materialize_dimension_reviews_authority",
+        write_dimensions,
+    )
+    monkeypatch.setattr(
+        review_independence_artifact_writer,
+        "write_review_independence_artifacts",
+        write_independence,
+    )
+
+    result = chain._generate_hypothesis_round(team_id, meeting)
+
+    assert result["dimensionReviewsAuthority"]["status"] == "written"
+    assert result["reviewIndependenceAuthority"]["status"] == "written"
+    assert calls["dimensions"]["review"] is round_record
+    assert calls["independence"]["review"] is round_record
+    assert calls["independence"]["receipt_contexts"] == round_record[
+        "modelInvocationReceipts"
     ]
 
 

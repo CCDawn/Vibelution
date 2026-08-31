@@ -27,7 +27,6 @@ from core.web.services.team_workflow.research_runtime import (
     review_independence_artifact_writer as writer,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -168,7 +167,7 @@ def _review_payload() -> dict[str, Any]:
 
 def _receipt_context(step: str, parts: tuple[str, ...]) -> dict[str, Any]:
     return {
-        "invocationId": f"inv:{step}:{'-'.join(parts)}",
+        "receiptId": f"receipt:{step}:{'-'.join(parts)}",
         "evidenceLocator": {
             "reviewStep": step,
             "identityParts": list(parts),
@@ -187,8 +186,8 @@ def _formal_receipt_contexts() -> list[dict[str, Any]]:
             _receipt_context("pairwise", ("H1", "H2")),
             _receipt_context("pairwise", ("H1", "H3")),
             _receipt_context("pairwise", ("H2", "H3")),
-            _receipt_context("pareto", ("round",)),
-            _receipt_context("metareview", ("meta-1",)),
+            _receipt_context("pareto", ("H1", "H2", "H3")),
+            _receipt_context("metareview", ("H1", "H2", "H3")),
         ]
     )
     return contexts
@@ -420,7 +419,9 @@ def test_writer_projects_independence_and_disagreement(monkeypatch) -> None:
     assert reflection_record["assignmentSource"] == "executor_role_default"
     pairwise_record = by_step[review_step_identity("pairwise", "ctx-1", ("H1", "H2"))]
     assert pairwise_record["reviewerId"] == "reviewer-b"
-    metareview_record = by_step[review_step_identity("metareview", "ctx-1", ("meta-1",))]
+    metareview_record = by_step[
+        review_step_identity("metareview", "ctx-1", ("H1", "H2", "H3"))
+    ]
     assert metareview_record["reviewerId"] == "coordinator-1"
     assert metareview_record["assignmentSource"] == "reviewer_assignments"
 
@@ -528,7 +529,7 @@ def test_writer_formal_mode_binds_receipt_refs(monkeypatch) -> None:
         if record["stepIdentity"]
         == review_step_identity("reflection", "ctx-1", ("H1",))
     )
-    assert reflection_record["receiptRef"] == "inv:reflection:H1"
+    assert reflection_record["receiptRef"] == "receipt:reflection:H1"
     assert reflection_record["executionMode"] == "formal"
     assert result["reviewIndependence"]["summary"]["receiptBoundRecordCount"] == 8
     metareview_record = next(
@@ -536,7 +537,7 @@ def test_writer_formal_mode_binds_receipt_refs(monkeypatch) -> None:
         for record in records
         if record["reviewStep"] == "metareview"
     )
-    assert metareview_record["receiptRef"] == "inv:metareview:meta-1"
+    assert metareview_record["receiptRef"] == "receipt:metareview:H1-H2-H3"
 
 
 def test_writer_formal_mode_blocks_without_receipt_contexts(monkeypatch) -> None:

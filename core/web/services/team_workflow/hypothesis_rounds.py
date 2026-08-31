@@ -160,6 +160,11 @@ def _round_definition(record: Mapping[str, Any]) -> dict[str, Any]:
             "pairwiseComparisons",
             "pareto",
             "metaReview",
+            "reviewContextId",
+            "executionMode",
+            "positionSeed",
+            "roles",
+            "modelInvocationReceipts",
             "lineage",
             "meetingRefs",
         )
@@ -226,6 +231,25 @@ def create_hypothesis_round(team_id: str, payload: Mapping[str, Any] | None = No
         "closedAt": str(request.get("closedAt") or "").strip(),
         "closedBy": str(request.get("closedBy") or "").strip(),
     }
+    review_context_id = str(request.get("reviewContextId") or "").strip()
+    if review_context_id:
+        record.update(
+            {
+                "reviewContextId": review_context_id,
+                "executionMode": str(request.get("executionMode") or "dev")
+                .strip()
+                .lower(),
+                "positionSeed": str(request.get("positionSeed") or "").strip(),
+                "roles": dict(request.get("roles"))
+                if isinstance(request.get("roles"), Mapping)
+                else {},
+                "modelInvocationReceipts": [
+                    dict(item)
+                    for item in list(request.get("modelInvocationReceipts") or [])
+                    if isinstance(item, Mapping)
+                ],
+            }
+        )
     # Fail closed before persistence: parse validates shape, completeness of
     # candidates and scope; a complete round must pass validate_complete().
     parsed = HypothesisRound.from_dict(record)
@@ -679,6 +703,11 @@ def generate_hypothesis_round_from_meeting(
             "pairwiseComparisons": review["pairwiseComparisons"],
             "pareto": review["pareto"],
             "metaReview": review["metaReview"],
+            "reviewContextId": review["reviewContextId"],
+            "executionMode": review["executionMode"],
+            "positionSeed": review["positionSeed"],
+            "roles": review["roles"],
+            "modelInvocationReceipts": review.get("modelInvocationReceipts", []),
             "meetingRefs": meeting_refs,
             "lineage": lineage,
             "status": "closed",

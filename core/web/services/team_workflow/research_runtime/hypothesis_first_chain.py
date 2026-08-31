@@ -5988,11 +5988,9 @@ def _generate_hypothesis_round(
             metareview_runner=metareview_runner,
         )
         round_record = result.get("round") if isinstance(result.get("round"), Mapping) else {}
-        # The HypothesisRound is a review projection.  Promote only explicit
-        # seven-dimension rows to the independent v2 authority; the current
-        # executor emits scores, so the normal result is a structured blocked
-        # authority until a real review producer supplies dimensionReviews and
-        # a server-owned node binding/snapshot hash.
+        # The HypothesisRound preserves the independent 5+2 score projection
+        # and explicit audit-seven rows.  Each canonical authority is written
+        # from the same immutable round; neither is derived from the other.
         dimension_reviews_authority: dict[str, Any]
         try:
             from core.web.services.team_workflow.research_runtime.dimension_reviews_artifact_writer import (
@@ -6061,12 +6059,54 @@ def _generate_hypothesis_round(
                 "missingAuthorities": ["dimension_reviews"],
                 "error": str(exc) or type(exc).__name__,
             }
+        review_independence_authority: dict[str, Any]
+        try:
+            from core.web.services.team_workflow.research_runtime.review_independence_artifact_writer import (
+                write_review_independence_artifacts,
+            )
+
+            review_independence_authority = write_review_independence_artifacts(
+                team_id=team_id,
+                workflow_run_id=workflow_run_id,
+                node_run_id=node_run_id,
+                review_round_id=str(round_record.get("roundId") or ""),
+                review=round_record,
+                reviewer_assignments=(
+                    dict(round_record.get("roles"))
+                    if isinstance(round_record.get("roles"), Mapping)
+                    else {}
+                ),
+                receipt_contexts=[
+                    dict(item)
+                    for item in list(
+                        round_record.get("modelInvocationReceipts") or []
+                    )
+                    if isinstance(item, Mapping)
+                ],
+                source_collection_run_id=str(
+                    (receipt_authority or {}).get("sourceCollectionRunId")
+                    or primary_meeting.get("sourceCollectionRunId")
+                    or workflow_run_id
+                ).strip(),
+            )
+        except Exception as exc:  # noqa: BLE001 - persist failure becomes a blocker
+            review_independence_authority = {
+                "status": "blocked",
+                "reason": "NEEDS_CONTEXT",
+                "blockerCodes": ["review_independence_authority_persistence_failed"],
+                "missingAuthorities": [
+                    "review_independence",
+                    "review_disagreement",
+                ],
+                "error": str(exc) or type(exc).__name__,
+            }
         return {
             "status": str(result.get("status") or ""),
             "roundId": str(round_record.get("roundId") or ""),
             "round": dict(round_record),
             "closed": True,
             "dimensionReviewsAuthority": dimension_reviews_authority,
+            "reviewIndependenceAuthority": review_independence_authority,
         }
     except Exception as exc:  # closure fact stays; report the side effect
         return {

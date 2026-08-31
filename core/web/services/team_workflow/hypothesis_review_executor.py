@@ -33,11 +33,14 @@ import hashlib
 import json
 import random
 from collections.abc import Callable, Mapping, Sequence
-from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
+from core.research.competition.question_result_package import (
+    REQUIRED_REVIEW_DIMENSIONS,
+    REVIEW_DIMENSION_RATINGS,
+)
 from core.research.workflow.contracts import (
     COMPARISON_OUTCOMES,
     SCORE_DIMENSIONS,
@@ -268,6 +271,68 @@ def _context_candidates(context: Mapping[str, Any]) -> list[dict[str, Any]]:
     return candidates
 
 
+def _validate_explicit_dimension_reviews(
+    rows: Sequence[Any],
+    *,
+    candidate_id: str,
+) -> list[dict[str, Any]]:
+    """Validate explicit audit rows without deriving them from 5+2 scores."""
+
+    allowed_dimensions = set(REQUIRED_REVIEW_DIMENSIONS)
+    allowed_ratings = set(REVIEW_DIMENSION_RATINGS)
+    seen: set[str] = set()
+    normalized: list[dict[str, Any]] = []
+    for raw in rows:
+        if not isinstance(raw, Mapping):
+            raise ContractValidationError("reflection dimensionReviews rows must be objects")
+        hypothesis_id = str(
+            raw.get("hypothesis_id") or raw.get("candidateId") or ""
+        ).strip()
+        dimension = str(raw.get("dimension") or "").strip()
+        rating = str(raw.get("rating") or "").strip().lower()
+        rationale = str(raw.get("rationale") or "").strip()
+        reviewer = str(
+            raw.get("reviewer") or raw.get("reviewerAgentId") or ""
+        ).strip()
+        evidence_refs = raw.get("evidence_refs", raw.get("evidenceRefs", []))
+        if hypothesis_id != candidate_id:
+            raise ContractValidationError(
+                f"reflection dimensionReviews are not bound to candidate {candidate_id}"
+            )
+        if dimension not in allowed_dimensions or dimension in seen:
+            raise ContractValidationError(
+                "reflection dimensionReviews must cover exactly the seven audit dimensions"
+            )
+        if rating not in allowed_ratings or not rationale or not reviewer:
+            raise ContractValidationError(
+                f"reflection audit dimension {dimension} is incomplete"
+            )
+        if not isinstance(evidence_refs, list):
+            raise ContractValidationError(
+                f"reflection audit dimension {dimension} evidence_refs must be a list"
+            )
+        seen.add(dimension)
+        normalized.append(
+            {
+                "hypothesis_id": hypothesis_id,
+                "dimension": dimension,
+                "rating": rating,
+                "rationale": rationale,
+                "reviewer": reviewer,
+                "evidence_refs": [
+                    str(item).strip()
+                    for item in evidence_refs
+                    if str(item or "").strip()
+                ],
+            }
+        )
+    if seen != allowed_dimensions:
+        raise ContractValidationError(
+            "reflection dimensionReviews must cover exactly the seven audit dimensions"
+        )
+    return normalized
+
+
 def _reflection_step(
     context: Mapping[str, Any],
     candidates: list[dict[str, Any]],
@@ -379,7 +444,10 @@ def _reflection_step(
         if diagnostics:
             reviewed_item["diagnostics"] = diagnostics
         if has_explicit_dimension_reviews:
-            reviewed_item["dimensionReviews"] = deepcopy(list(explicit_dimension_reviews))
+            reviewed_item["dimensionReviews"] = _validate_explicit_dimension_reviews(
+                list(explicit_dimension_reviews),
+                candidate_id=candidate_id,
+            )
         reviewed.append(reviewed_item)
     return reviewed
 
