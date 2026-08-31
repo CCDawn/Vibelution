@@ -4148,3 +4148,211 @@ def test_close_review_meeting_fences_auto_injected_runners_by_meeting_mode(
 
     assert build_calls == [{"require_provider_receipts": expected_receipts}]
     assert result["hypothesisRound"]["status"] == "created"
+
+
+# ---------------------------------------------------------------------------
+# review dispatch retry: terminated meetings must never satisfy a retry
+# (regression for the reused-no-op deadlock on retry_review_dispatch)
+
+
+def _retry_dispatch_env(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    selection_id: str,
+):
+    """Real chain/attempt/link storage with meeting side effects in memory."""
+
+    from core.web.services.team_workflow.research_runtime import (
+        meeting_receipt_authority,
+    )
+
+    team_id, _agents = _hf_env(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        meeting_receipt_authority,
+        "resolve_active_question_authority",
+        lambda *_args: None,
+    )
+    monkeypatch.setattr(
+        chain,
+        "list_hypothesis_candidates",
+        lambda *_args, **_kwargs: {"candidates": []},
+    )
+    meetings_store: dict[str, dict[str, object]] = {}
+
+    def fake_get_meeting_round(_team_id: str, meeting_round_id: str):
+        record = meetings_store.get(str(meeting_round_id))
+        if record is None:
+            raise meetings.ResearchMeetingRoundNotFoundError("missing")
+        return {
+            "schemaVersion": meetings.SCHEMA_VERSION,
+            "teamId": _team_id,
+            "meetingRound": record,
+        }
+
+    opened_ids: list[str] = []
+
+    def fake_open(_team_id: str, payload, **_kwargs):
+        meeting_round_id = str(payload["meetingRoundId"])
+        opened_ids.append(meeting_round_id)
+        record = {
+            "meetingRoundId": meeting_round_id,
+            "meetingType": chain.HYPOTHESIS_REVIEW_MEETING_TYPE,
+            "status": "open",
+            "question": _QUESTION_ID,
+            "linkedChatRoomId": f"room-{meeting_round_id}",
+            "chatRoomRoundIds": [f"room-round-{meeting_round_id}"],
+        }
+        meetings_store[meeting_round_id] = record
+        return {
+            "schemaVersion": meetings.SCHEMA_VERSION,
+            "status": "created",
+            "teamId": _team_id,
+            "meetingRound": dict(record),
+            "roomId": record["linkedChatRoomId"],
+            "roundId": record["chatRoomRoundIds"][-1],
+            "chatRoomRoundIds": list(record["chatRoomRoundIds"]),
+        }
+
+    monkeypatch.setattr(meetings, "get_meeting_round", fake_get_meeting_round)
+    monkeypatch.setattr(meeting_runtime, "open_hypothesis_review_meeting", fake_open)
+
+    driver_calls: list[str] = []
+
+    def fake_schedule(_team_id: str, meeting_round_id: str):
+        driver_calls.append(str(meeting_round_id))
+        return {"status": "scheduled", "meetingRoundId": str(meeting_round_id)}
+
+    monkeypatch.setattr(meeting_runtime, "schedule_meeting_discussion", fake_schedule)
+
+    selection = {
+        **_selection_payload("agent-a"),
+        "selectionId": selection_id,
+    }
+    monkeypatch.setattr(
+        selections,
+        "get_hypothesis_selection",
+        lambda _team_id, _selection_id: {"selection": dict(selection)},
+    )
+    return team_id, selection, meetings_store, opened_ids, driver_calls
+
+
+def _attempts_for(attempts: list[dict], candidate_id: str) -> list[dict]:
+    return [
+        item
+        for item in attempts
+        if str(item.get("candidateId") or "") == candidate_id
+    ]
+
+
+def test_retry_review_dispatch_reopens_fresh_meeting_after_terminal_review(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A terminated review never satisfies a retry: a fresh attempt opens."""
+
+    selection_id = "selection-retry-terminal"
+    team_id, selection, meetings_store, opened_ids, driver_calls = (
+        _retry_dispatch_env(tmp_path, monkeypatch, selection_id)
+    )
+
+    first = chain.open_review_meeting_for_selection(
+        team_id, selection, background=True
+    )
+    assert first["candidateCount"] == 2
+    base_meeting_id = chain._candidate_review_meeting_id(selection_id, "hyp-a", 1)
+    sibling_meeting_id = chain._candidate_review_meeting_id(selection_id, "hyp-b", 1)
+    assert opened_ids == [base_meeting_id, sibling_meeting_id]
+    assert driver_calls == [base_meeting_id, sibling_meeting_id]
+
+    terminated = meetings_store[base_meeting_id]
+    terminated["status"] = "closed"
+    terminated["terminalReason"] = "review_rejected"
+
+    retried = chain.retry_review_dispatch(team_id, selection_id, ["hyp-a"])
+
+    fresh_meeting_id = f"{base_meeting_id}-a2"
+    assert retried["status"] == "created"
+    assert retried["meetingRound"]["meetingRoundId"] == fresh_meeting_id
+    assert opened_ids[-1] == fresh_meeting_id
+    assert driver_calls == [base_meeting_id, sibling_meeting_id, fresh_meeting_id]
+    assert meetings_store[fresh_meeting_id]["status"] == "open"
+
+    attempts = chain.list_review_dispatch_attempts(
+        team_id, selection_id=selection_id
+    )["attempts"]
+    hyp_a_attempts = _attempts_for(attempts, "hyp-a")
+    assert [int(item.get("attemptNumber") or 0) for item in hyp_a_attempts] == [1, 2]
+    assert hyp_a_attempts[-1]["lifecycle"] == "completed"
+    assert hyp_a_attempts[-1]["meetingRoundId"] == fresh_meeting_id
+    # Only the requested candidate retries; the sibling attempt never advances.
+    assert [
+        int(item.get("attemptNumber") or 0) for item in _attempts_for(attempts, "hyp-b")
+    ] == [1]
+
+
+def test_retry_review_dispatch_reuses_live_meeting_without_duplicates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An in-flight review stays idempotent under repeated dispatch."""
+
+    selection_id = "selection-retry-live"
+    team_id, selection, _meetings_store, opened_ids, _driver_calls = (
+        _retry_dispatch_env(tmp_path, monkeypatch, selection_id)
+    )
+
+    chain.open_review_meeting_for_selection(team_id, selection, background=True)
+    assert len(opened_ids) == 2
+    base_meeting_id = chain._candidate_review_meeting_id(selection_id, "hyp-a", 1)
+
+    retried = chain.retry_review_dispatch(
+        team_id, selection_id, ["hyp-a", "hyp-b"]
+    )
+
+    assert retried["status"] == "reused"
+    assert retried["meetingRound"]["meetingRoundId"] == base_meeting_id
+    assert retried["meetingRound"]["status"] == "open"
+    assert len(opened_ids) == 2
+
+    attempts = chain.list_review_dispatch_attempts(
+        team_id, selection_id=selection_id
+    )["attempts"]
+    for candidate_id in ("hyp-a", "hyp-b"):
+        candidate_attempts = _attempts_for(attempts, candidate_id)
+        assert [int(item.get("attemptNumber") or 0) for item in candidate_attempts] == [1]
+        assert (
+            len({str(item.get("attemptId") or "") for item in candidate_attempts}) == 1
+        )
+
+
+def test_retry_review_dispatch_rebinds_review_link_to_fresh_meeting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """After a retry the review round binds the candidate to the new meeting."""
+
+    selection_id = "selection-retry-link"
+    team_id, selection, meetings_store, _opened_ids, _driver_calls = (
+        _retry_dispatch_env(tmp_path, monkeypatch, selection_id)
+    )
+
+    chain.open_review_meeting_for_selection(team_id, selection, background=True)
+    base_meeting_id = chain._candidate_review_meeting_id(selection_id, "hyp-a", 1)
+    terminated = meetings_store[base_meeting_id]
+    terminated["status"] = "closed"
+    terminated["terminalReason"] = "review_rejected"
+
+    chain.retry_review_dispatch(team_id, selection_id, ["hyp-a"])
+
+    links = [
+        item
+        for item in chain._review_round_links(chain._records(team_id))
+        if str(item.get("selectionId") or "") == selection_id
+        and str(item.get("candidateId") or "") == "hyp-a"
+    ]
+    assert [str(item.get("meetingRoundId") or "") for item in links] == [
+        base_meeting_id,
+        f"{base_meeting_id}-a2",
+    ]
+    # The newest durable link is the resolution target: the candidate is no
+    # longer bound to the terminated meeting, and history stays append-only.
+    assert links[-1]["meetingRoundId"] == f"{base_meeting_id}-a2"
+    assert int(links[-1]["roundIndex"] or 0) == 1
+    assert links[0]["meetingRoundId"] == base_meeting_id
