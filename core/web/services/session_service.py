@@ -209,8 +209,8 @@ from .session.submit import (
     submit_session_message_lightweight,
 )
 from .session.proactive import (
+    cancel_agent_plugin_proactive_turns,
     cancel_proactive_turn_context,
-    cancel_virtual_human_proactive_turns,
     release_proactive_turn_context,
     submit_session_proactive_turn,
 )

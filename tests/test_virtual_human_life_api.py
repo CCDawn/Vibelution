@@ -1319,8 +1319,8 @@ def test_host_stop_fences_open_delivery_and_requests_session_cancellation(
     del client
     cancelled: list[tuple[str, str]] = []
     monkeypatch.setattr(
-        "core.web.services.session_service.cancel_virtual_human_proactive_turns",
-        lambda agent_id, *, reason: cancelled.append((agent_id, reason)) or [],
+        "core.web.services.session_service.cancel_agent_plugin_proactive_turns",
+        lambda agent_id, *, plugin_id, reason: cancelled.append((agent_id, reason)) or [],
     )
     service.proactive_submitter = lambda **_payload: {
         "accepted": True,

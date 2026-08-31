@@ -1690,9 +1690,9 @@ def _cancel_agent_proactive_session_turns(agent_id: str, *, reason: str) -> None
     try:
         from . import session_service
 
-        cancel = getattr(session_service, "cancel_virtual_human_proactive_turns", None)
+        cancel = getattr(session_service, "cancel_agent_plugin_proactive_turns", None)
         if callable(cancel):
-            cancel(agent_id, reason=reason)
+            cancel(agent_id, plugin_id=PLUGIN_ID, reason=reason)
     except Exception as exc:  # noqa: BLE001 - optional Session cancellation adapter
         logger.warning(
             "Failed to cancel proactive turns for agent=%s (%s).",

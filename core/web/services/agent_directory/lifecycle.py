@@ -204,12 +204,12 @@ def agent_archive_protected(agent: dict[str, Any]) -> bool:
 
 def archive_agent_instance(agent_id: str, *, repair_mode_bindings: bool = True) -> dict[str, Any]:
     s = _service()
-    from core.web.services.virtual_human_life_service import (
-        prepare_virtual_human_agent_archive,
-        rollback_virtual_human_agent_archive,
+    from core.agent_plugins.runtime_extensions import (
+        prepare_agent_plugin_archive,
+        rollback_agent_plugin_archive,
     )
 
-    plugin_restore_token = prepare_virtual_human_agent_archive(agent_id)
+    plugin_restore_token = prepare_agent_plugin_archive(agent_id)
     try:
         with s._STATE_LOCK:
             state = s.load_state()
@@ -222,7 +222,7 @@ def archive_agent_instance(agent_id: str, *, repair_mode_bindings: bool = True) 
             agent["updatedAt"] = s.utc_now_iso()
             s.save_state(state)
     except Exception:
-        rollback_virtual_human_agent_archive(plugin_restore_token)
+        rollback_agent_plugin_archive(plugin_restore_token)
         raise
     s._record_agent_event("agent.archived", agent, lifecycle=True)
     if repair_mode_bindings:
@@ -350,13 +350,13 @@ def purge_archived_agent_instance(
         tool_policy_id = str(agent.get("toolPolicyId") or "").strip()
         memory_policy_id = str(agent.get("memoryPolicyId") or "").strip()
 
-    from core.web.services.virtual_human_life_service import (
-        commit_virtual_human_agent_purge,
-        prepare_virtual_human_agent_archive,
-        rollback_virtual_human_agent_archive,
+    from core.agent_plugins.runtime_extensions import (
+        commit_agent_plugin_purge,
+        prepare_agent_plugin_archive,
+        rollback_agent_plugin_archive,
     )
 
-    plugin_restore_token = prepare_virtual_human_agent_archive(
+    plugin_restore_token = prepare_agent_plugin_archive(
         normalized_agent_id,
         stage_workspace=True,
     )
@@ -402,7 +402,7 @@ def purge_archived_agent_instance(
             s.save_state(state)
     except Exception as exc:
         try:
-            rollback_virtual_human_agent_archive(plugin_restore_token)
+            rollback_agent_plugin_archive(plugin_restore_token)
         except Exception as rollback_exc:
             raise exc from rollback_exc
         raise
@@ -420,7 +420,7 @@ def purge_archived_agent_instance(
         "toolPolicyId": tool_policy_id,
         "memoryPolicyId": memory_policy_id,
     }
-    commit_virtual_human_agent_purge(plugin_restore_token)
+    commit_agent_plugin_purge(plugin_restore_token)
     s._record_agent_purged_event(agent_snapshot, result)
     return result
 
