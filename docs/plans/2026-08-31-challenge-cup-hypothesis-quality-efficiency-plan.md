@@ -1,13 +1,14 @@
 # 2026-08-31 挑战杯假说质量与链路效率优化方案（假说优先链）
 
-- **Status**: user-approved（方向与范围已获用户拍板，2026-08-31）
+- **Status**: superseded（2026-09-01 被 Stage1 统一方案吸收，见下方 Superseded by 与 §12 裁决；原 user-approved 状态保留于 git 历史）
 - **Owner**: challenge 链路 lane（实施任务各自建 claim）
 - **Claim**: 本文档自身无代码 claim；实施任务 claim 按 §6 任务图逐任务建立
 - **Scope**: `docs/plans/2026-08-31-challenge-cup-hypothesis-quality-efficiency-plan.md`（本文件）
 - **Supersedes**: 无（不取代任何 ACTIVE 计划；与兄弟计划的去重边界见 §10）
-- **Implementation link**: 实施分支按任务图命名 `codex/challenge-hypothesis-quality-*`，逐任务回填
-- **Validation**: 见 §8 验证矩阵
-- **Close condition**: §6 全部任务合入 main 且 §8 对照运行证据采集完成，本文移入 `docs/archive/`
+- **Superseded by**: `挑战杯/03-工程合同/2026-08-31-挑战杯第一阶段高质量假说闭环高ROI优化实施计划.md`（CC-AIS-STAGE1-HYPOTHESIS-IMPL-001 **v1.2.0**，§6.5 统一裁决矩阵吸收本文全部六任务；repo 外桌面治理文档）
+- **Implementation link**: 已废止；实施统一走 Stage1 方案任务图（本文 T4→Stage1 Task R1、T5→R2、T1→R3、T2 发言协议→并入 Task 3A、T2 预检索/T3/T6→废弃，见 §12）
+- **Validation**: 见 §8 验证矩阵（随本文一并由 Stage1 方案 §8 统一）
+- **Close condition**: 已达成（superseded 关闭）；本文保留作调研证据与裁决记录，随 Stage1 方案关闭一并移入 `docs/archive/`
 - **证据基线**: main@fc700e8e2，2026-08-31；运行数据来自 `model_invocation_receipts`（463 条）、`meeting_rounds.jsonl`（332 轮）、`hypothesis_rounds.jsonl`（4 轮 12 候选）、22 个 source_collection run
 - **非完成声明**: 本文是实施合同，不是完成证据；文中所有"目标值"为监测指标，除机制验收外不构成硬门（质量分数提升属实验结果）。
 
@@ -205,3 +206,20 @@
 1. **立即停止重对齐**：T2 预检索引入不可接受的开台延迟（>90s 且缓存未命中路径无法收敛）；T3 分层在 FORMAL 模式 receipt 出现缺口；T4 并行后限流/失败率不降反升；对照运行质量指标显著回退。
 2. **代码阶段完成定义**：§6 六任务全部合入 main、聚焦测试绿、开关默认 off 的零差异回归通过。
 3. **计划关闭归档**：§8 runtime-scene + 对照运行证据采集完成并回填本文 Implementation link 后，本文移入 `docs/archive/`；质量分数结论与参数校准（K/M/阈值）沉淀到新的校准记录，不回写本合同。
+
+---
+
+## 12. 统一裁决（2026-09-01，本文 superseded 的依据）
+
+Stage1 工程合同方案 `挑战杯/03-工程合同/2026-08-31-挑战杯第一阶段高质量假说闭环高ROI优化实施计划.md`（CC-AIS-STAGE1-HYPOTHESIS-IMPL-001）经审查判定为更根本的主干方案：它修复本文未覆盖的结构性阻断（P0-1 节点 7 无法合法终止与组装结果包、P0-2 候选 5+2 与结果包审计七维契约断层、P0-3 证据未绑定候选核心 claim），且其 P1-2 与本文"盲生成"为同一根因。双方已协商统一为其 v1.2.0（§6.5 融合裁决矩阵），本文六任务处置如下：
+
+| 本文任务 | 处置 | Stage1 方案落点 |
+|---|---|---|
+| T1 模型分级 | 保留，延后 | Task R3（批次 G，G1 通过后；qwen 家族内分级） |
+| T2 证据预热 | 拆分吸收 | 时序修复由 Task 3A（节点 6 证据包就绪后开生成）取代——canonical 产物满足 claim belief gate，即时预检索摘要不满足；CANDIDATE 发言协议扩展（REFS/CHECK + lineageRefs 物化）并入 Task 3A；预检索组件不立项 |
+| T3 评审分层 | 废弃 | Task 4 finalist≤3 + 精确预算 `n + n(n-1)/2 + 2`（n=3 即 8 次）从收敛根上消解 C(n,2) 爆炸；co-scientist 对辩深化记为远期候选 |
+| T4 检索并行+限速+摘要优先 | 保留 | Task R1（批次 A/B 并行 lane，与 Stage1 文件面不相交） |
+| T5 检索缓存 | 保留 | Task R2（批次 E） |
+| T6 候选文本去重 | 废弃 | Task 4 五轴 screening（结构化去重优于文本相似度，已有实现） |
+
+本文 §2 现状证据、§4 外部调研（含未采用的 parallel tempering/embedding 查重/ToolUniverse 边界）、§8 对照运行指标（lineageRefs 非空率、novelty/evidenceSupport 基线）继续作为 Stage1 实施的基线证据引用。
