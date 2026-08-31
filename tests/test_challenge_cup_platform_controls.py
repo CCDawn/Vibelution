@@ -65,7 +65,9 @@ def _isolated_frontend_dist(
 
 
 def _client() -> TestClient:
-    return TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
+    app = create_app()
+    app.state.serving_frontend_dist = ""
+    return TestClient(app, headers={CONTROL_TOKEN_HEADER: get_control_token()})
 
 
 def _ready_report(**overrides) -> dict:
