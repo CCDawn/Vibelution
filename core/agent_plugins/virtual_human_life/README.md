@@ -12,7 +12,7 @@
 | 情绪事件、余波恢复和表达档位 | `affect.py` |
 | 关系事件、每日变化上限、阶段迟滞和自然回落 | `relationship_events.py` |
 | 主动候选、未回复降速、未完话题和承诺 | `conversation_continuity.py` |
-| 用户消息与已选主动消息的插件私有到达 FIFO | `mailbox.py` + `service.py` |
+| 用户消息、已选主动消息与第二气泡的插件私有到达 FIFO | `mailbox.py` + `delivery_plan.py` + `delivery_runtime.py` + `service.py` |
 | 夜间反思、记忆强化和来源校验 | `reflection.py` |
 | 长期日历、周期事件、例外和冲突 | `calendar.py` |
 | 昼夜节律与非医疗生活需要 | `rhythms.py` |
@@ -45,7 +45,7 @@
 - 心情和关系均从 Agent 私有事件账本投影；Prompt 只接收有界摘要，不接收原始互动备注。
 - 主动消息先进入候选池，候选未出队不创建 Turn；未回复、重复主题、免打扰、忙碌和睡眠都有可解释抑制原因。
 - 只有 Companion 模式把消息写入 `conversation/mailbox.json`；普通 Agent 继续直达原生 Session submit。mailbox 只保存待处理命令和租约，不保存 transcript、推理或工具轨迹；真正出队后才复用原生 Session Journal、worker 与 SSE。
-- 用户消息与已选中的主动消息按同一 Session 的 `arrivalSequence` 严格 FIFO；用户可在人物回复期间继续入队，但不能并发启动第二个 Turn。后续气泡只预留来源类型与“用户插话即取消未发送气泡”的 generation fence，本阶段不伪称已实现模型决策器。
+- 用户消息、已选中的主动消息和最多一个第二气泡按同一 Session 的 `arrivalSequence` 严格 FIFO；用户可在人物回复期间继续入队，但不能并发启动第二个 Turn。第二气泡复用原生 assistant-only proactive admission 建立独立 Turn，用户新 generation 会取消尚未原生 admission 的旧气泡；DeliveryPlan 和 mailbox 都不保存 assistant 文本，也不成为第二份 transcript。
 - 夜间反思只强化有来源的生活记忆；梦境与仅计划内容不能成为外部事实或自我历史。
 - 环境事实保留来源和 supersession 历史；位置移动必须经过明确耗时后才能到达。
 - 长期日历只提供跨日约束；每日 Schedule 仍是当天活动执行状态的唯一权威。
