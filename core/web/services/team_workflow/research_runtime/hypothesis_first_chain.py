@@ -2611,9 +2611,6 @@ def _execute_v2_command_impl(
                 from core.research.workflow.contracts.discussion_scope import (
                     WorkflowDiscussionScopeV1,
                 )
-                from core.web.services.team_workflow.research_project_agent_sessions import (
-                    resolve_research_project_identity,
-                )
                 from core.web.services.team_workflow.research_runtime.meeting_receipt_authority import (
                     resolve_active_question_authority,
                 )
@@ -2627,8 +2624,10 @@ def _execute_v2_command_impl(
                     raise HypothesisFirstChainError(
                         "workflow run authority is unavailable for generation"
                     )
-                project = resolve_research_project_identity(normalized_team_id)
-                research_project_id = str(project.get("projectId") or "").strip()
+                project = _question_research_project(
+                    normalized_team_id, normalized_question_id
+                )
+                research_project_id = str((project or {}).get("projectId") or "").strip()
                 if not research_project_id:
                     raise HypothesisFirstChainError(
                         "research project authority is unavailable for generation"
@@ -4034,12 +4033,8 @@ def _review_discussion_scope_base(
     )
 
     if receipt_authority is not None:
-        from core.web.services.team_workflow.research_project_agent_sessions import (
-            resolve_research_project_identity,
-        )
-
-        project = resolve_research_project_identity(team_id)
-        research_project_id = str(project.get("projectId") or "").strip()
+        project = _question_research_project(team_id, question_id)
+        research_project_id = str((project or {}).get("projectId") or "").strip()
         workflow_run_id = str(receipt_authority.get("workflowRunId") or "").strip()
         if not research_project_id or not workflow_run_id:
             raise HypothesisFirstChainError(
@@ -5121,6 +5116,80 @@ def _decision_id_for(meeting_round: Mapping[str, Any], raw: Mapping[str, Any]) -
     return f"decision-{meeting_rounds._stable_hash({'meetingRoundId': meeting_round['meetingRoundId'], 'scopeHash': meeting_round['scopeHash'], 'decision': str(raw.get('decision') or '').strip().lower(), 'candidateRefs': candidate_refs, 'evidenceRefs': evidence_refs})[:16]}"
 
 
+def _question_research_project(team_id: str, question_id: str) -> dict[str, Any] | None:
+    """Resolve the research project that owns one question, never the switcher.
+
+    ``resolve_research_project_identity`` answers with the team's active
+    project, which misbinds a question's identity as soon as the operator
+    activates another question (production: SCI-003 meetings and their
+    collection runs carried challenge-sci-002).  The question binding in the
+    research-project store is authoritative; the read is best-effort, so any
+    store/unreadable-team failure falls back to the exact legacy
+    ``resolve_research_project_identity`` behavior (including its exceptions).
+    """
+    from core.web.services import team_service
+    from core.web.services.team_workflow import research_projects
+    from core.web.services.team_workflow.research_project_agent_sessions import (
+        resolve_research_project_identity,
+    )
+
+    try:
+        bound = research_projects.get_research_project_for_question(team_id, question_id)
+    except (research_projects.ResearchProjectError, team_service.TeamServiceError):
+        bound = None
+    if bound is not None:
+        return bound
+    return resolve_research_project_identity(team_id)
+
+
+def _question_workflow_run_binding(
+    team_id: str,
+    meeting_round: Mapping[str, Any],
+) -> tuple[str, str]:
+    """Return ``(workflowRunId, researchProjectId)`` for chain collection runs.
+
+    The workflow run comes from the meeting's server-owned discussion-scope
+    binding (the question's current formal run); the project is resolved from
+    the question ownership, never from the meeting's own project field, which
+    may still carry an older question's lineage.  The project id is only
+    resolved when a workflow run is known: ``start_source_collection_run``
+    honors a non-active project exclusively on workflow-run-scoped payloads.
+    """
+    workflow_run_id = str(meeting_round.get("workflowRunId") or "").strip()
+    if not workflow_run_id:
+        return "", ""
+    question_project = _question_research_project(
+        team_id, str(meeting_round.get("question") or "")
+    )
+    research_project_id = str((question_project or {}).get("projectId") or "").strip()
+    return workflow_run_id, research_project_id
+
+
+def _recovery_workflow_run_binding(
+    team_id: str,
+    request: Mapping[str, Any],
+) -> tuple[str, str]:
+    """Best-effort ``(workflowRunId, researchProjectId)`` for request recovery.
+
+    Recovery requests only carry ``meetingRoundId``; the formal run binding
+    lives on that meeting round.  A missing or legacy unscoped meeting keeps
+    both fields empty so recovery proceeds with the legacy unscoped payload
+    instead of failing the repair.
+    """
+    from core.web.services.team_workflow import meeting_rounds
+
+    meeting_round_id = str(request.get("meetingRoundId") or "").strip()
+    if not meeting_round_id:
+        return "", ""
+    try:
+        meeting_round = meeting_rounds.get_meeting_round(team_id, meeting_round_id)[
+            "meetingRound"
+        ]
+    except meeting_rounds.ResearchMeetingRoundNotFoundError:
+        return "", ""
+    return _question_workflow_run_binding(team_id, meeting_round)
+
+
 def _scope_envelope_for_meeting(meeting_round: Mapping[str, Any]) -> dict[str, str]:
     """Rebuild the facade scope envelope from the meeting's validated scope."""
     from core.web.services.team_workflow import research_scope as scope_service
@@ -5256,6 +5325,13 @@ def _process_collection_decisions(
     )
 
     background_payload = _hypothesis_collection_background_payload()
+    # Workflow-run-scoped binding for the created collection run: the formal
+    # run id enables extraction-claim materialization and formal node
+    # discovery by scope, and the question-owned project replaces the team's
+    # active-project pointer (which may still sit on an older question).
+    workflow_run_id, research_project_id = _question_workflow_run_binding(
+        team_id, meeting_round
+    )
 
     persisted_ids = {
         str(item.get("decisionId") or "")
@@ -5327,6 +5403,8 @@ def _process_collection_decisions(
             requirements=requirements,
             writebackPolicy=writeback_policy,
             hypothesisCandidateIds=hypothesis_candidate_ids,
+            workflowRunId=workflow_run_id,
+            researchProjectId=research_project_id,
             team_id=team_id,
         )
         locator = ensured.get("locator") if isinstance(ensured.get("locator"), Mapping) else {}
@@ -6083,12 +6161,17 @@ def _recover_collection_request_locked(
     search_envelope = request.get("searchEnvelope") if isinstance(request.get("searchEnvelope"), Mapping) else {}
     requirements = request.get("requirements") if isinstance(request.get("requirements"), Mapping) else {}
     writeback_policy = request.get("writebackPolicy") if isinstance(request.get("writebackPolicy"), Mapping) else {}
+    workflow_run_id, research_project_id = _recovery_workflow_run_binding(
+        normalized_team_id, request
+    )
     ensured = facade.research_knowledge_collection_facade(
         action="ensure",
         scope=scope,
         searchEnvelope=search_envelope,
         requirements=requirements,
         writebackPolicy=writeback_policy,
+        workflowRunId=workflow_run_id,
+        researchProjectId=research_project_id,
         team_id=normalized_team_id,
     )
     locator = ensured.get("locator") if isinstance(ensured.get("locator"), Mapping) else {}
