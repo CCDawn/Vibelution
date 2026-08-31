@@ -2,6 +2,19 @@
 
 These resources intentionally live below ``core/research``.  Product runtime
 must not depend on the ignored, operator-private ``/挑战杯`` junction.
+
+Program core 2.3.0 (phased ``a_then_b``): phase 1 is the current program goal
+— the 125-question direction-A loop (problem understanding, knowledge
+integration, candidate hypotheses, evidence, research plans, feedback
+revision) — and completes on ``full_catalog_result_set_approved``.  Phase 2
+stacks the two independent deep experiments (SCI-091/SCI-096) behind that
+gate; the final program completion rule keeps both directions.  The contract
+is a single tracked file upgraded in place per version: the validator pins
+exactly the active version (older versions were never readable) and no
+persisted runtime artifact references a previous program contract version,
+so no dual-file legacy reader is needed.  The question-schema dual-version
+reader below is unrelated: it governs stored question results, which do
+outlive contract upgrades.
 """
 
 from __future__ import annotations
@@ -16,9 +29,21 @@ from typing import Any
 CATALOG_ID = "science-125-questions-2021"
 CATALOG_QUESTION_COUNT = 125
 CATALOG_SHA256 = "D5035032F80574B9521CC9CC8D73F127721CCADF54451411004323727D2FAAB9"
-PROGRAM_CONTRACT_VERSION = "2.2.0"
+PROGRAM_CONTRACT_VERSION = "2.3.0"
+PROGRAM_DIRECTION_EXECUTION_MODE = "a_then_b"
+PROGRAM_DIMENSIONS = [
+    "A. 科学假设生成与研究计划设计",
+    "B. 科学实验任务规划与反馈迭代",
+]
+DEEP_EXPERIMENT_EXECUTION_PHASE = 2
+DEEP_EXPERIMENT_ACTIVATION_GATE = "full_catalog_result_set_approved"
+PHASE1_COMPLETION_RULE = "full_catalog_result_set_approved"
 CATALOG_POLICY_VERSION = "1.2.0"
-CORE_BEHAVIOR_HASH = "C3965023488C76DF032130341347915E5EAD5451EE53C2501E75914205EB423A"
+# sha256 over the canonical JSON (sorted keys, compact separators) of the
+# behavior-bearing sections: program, catalogExecutionPolicy,
+# specializationProfile, fullCatalogResultSetContract, executionPhases,
+# requiredDeepExperiments, completionContract, isolationPolicy.
+CORE_BEHAVIOR_HASH = "0F9545A9F5286A6B35C0414B45303786AABBFF5E5A08A3E1AC9FE95F38812D81"
 CORE_POLICY_HASH = "D3A8FB5B97D1A4ECAF08798D4CFB283AC56A2563EA434C28EC988D15827EB83E"
 QUESTION_MIGRATION_MODE = "dual_version_reader_append_only_no_auto_promotion"
 
@@ -29,7 +54,7 @@ QUESTION_CATALOG_PATH = _RESOURCE_ROOT / "science_125_questions.json"
 LEGACY_CASE_REGISTRY_PATH = _RESOURCE_ROOT / "legacy_representative_deep_cases.v1.json"
 
 _RESOURCE_SHA256 = {
-    PROGRAM_RESOURCE_PATH.name: "06EFC4B363BC597D5FB75CE7C59D9AD3F61214AA044AA2456589C101D061CB36",
+    PROGRAM_RESOURCE_PATH.name: "29D6DFB12E4A9B60BF1D4D8842C32CA1D9269EE439E3BE8C55660622DE02FF69",
     FULL_CATALOG_POLICY_PATH.name: "DEE03F4E40AD361A6727692F0EC44B79C2635EC0A55C941AE7C47B83D97FA28E",
     QUESTION_CATALOG_PATH.name: CATALOG_SHA256,
     LEGACY_CASE_REGISTRY_PATH.name: "9C852B3D6C990A471E7B0F0083508CD43379CC27E9A5DCB5B261138F138CDE28",
@@ -91,29 +116,55 @@ def validate_question_catalog(value: dict[str, Any]) -> dict[str, Any]:
 
 def validate_competition_program_core(value: dict[str, Any]) -> dict[str, Any]:
     program = _mapping(value, field="competition_program_core")
-    if program.get("schemaVersion") != "2.2.0" or program.get("contractVersion") != "2.2.0":
-        raise CompetitionResourceError("Competition Program contract version must be 2.2.0.")
+    if program.get("schemaVersion") != PROGRAM_CONTRACT_VERSION or program.get("contractVersion") != PROGRAM_CONTRACT_VERSION:
+        raise CompetitionResourceError(f"Competition Program contract version must be {PROGRAM_CONTRACT_VERSION}.")
     if program.get("status") != "core_frozen":
         raise CompetitionResourceError("Competition Program core must be frozen before runtime use.")
     freeze = _mapping(_mapping(program.get("freezeLayers"), field="freezeLayers").get("programCore"), field="programCore")
     if freeze.get("status") != "frozen" or freeze.get("coreBehaviorHash") != CORE_BEHAVIOR_HASH:
         raise CompetitionResourceError("Competition Program core behavior hash does not match the frozen contract.")
+    body = _mapping(program.get("program"), field="program")
+    if body.get("directionExecutionMode") != PROGRAM_DIRECTION_EXECUTION_MODE or body.get("dimensions") != PROGRAM_DIMENSIONS:
+        raise CompetitionResourceError("Competition Program must declare the phased a_then_b A/B dimensions.")
+    phases = _mapping(program.get("executionPhases"), field="executionPhases")
+    phase_records = phases.get("phases")
+    if (
+        phases.get("mode") != PROGRAM_DIRECTION_EXECUTION_MODE
+        or phases.get("activePhase") != 1
+        or not isinstance(phase_records, list)
+        or [item.get("phase") for item in phase_records if isinstance(item, dict)] != [1, 2]
+        or phase_records[0].get("completionRule") != PHASE1_COMPLETION_RULE
+        or phase_records[1].get("activationGate") != DEEP_EXPERIMENT_ACTIVATION_GATE
+    ):
+        raise CompetitionResourceError("Competition Program must gate phase 2 behind the full catalog result set.")
     catalog = _mapping(program.get("catalogExecutionPolicy"), field="catalogExecutionPolicy")
     if catalog.get("catalogQuestionCount") != CATALOG_QUESTION_COUNT or catalog.get("fullCatalogResultSubmissionRequired") is not True:
         raise CompetitionResourceError("Competition Program must require all 125 standard results.")
+    if catalog.get("deepExperimentQuestionIds") != ["SCI-091", "SCI-096"]:
+        raise CompetitionResourceError("SCI-091 and SCI-096 must stay declared as phase-2 catalog questions.")
     result_set = _mapping(program.get("fullCatalogResultSetContract"), field="fullCatalogResultSetContract")
     if result_set.get("questionCount") != CATALOG_QUESTION_COUNT or result_set.get("requiredApprovedQuestionCount") != CATALOG_QUESTION_COUNT:
         raise CompetitionResourceError("FullCatalogResultSet must require 125 approved results.")
     experiments = program.get("requiredDeepExperiments")
     if not isinstance(experiments, list) or [item.get("questionId") for item in experiments if isinstance(item, dict)] != ["SCI-091", "SCI-096"]:
-        raise CompetitionResourceError("SCI-091 and SCI-096 must be the two required independent experiments.")
+        raise CompetitionResourceError("SCI-091 and SCI-096 must be the two declared independent experiments.")
     if any(item.get("required") is not True for item in experiments if isinstance(item, dict)):
-        raise CompetitionResourceError("Every declared deep experiment must be required.")
+        raise CompetitionResourceError("Every declared deep experiment must be required for the final program.")
+    if any(
+        item.get("executionPhase") != DEEP_EXPERIMENT_EXECUTION_PHASE
+        or item.get("activationGate") != DEEP_EXPERIMENT_ACTIVATION_GATE
+        for item in experiments
+        if isinstance(item, dict)
+    ):
+        raise CompetitionResourceError("Declared deep experiments must stay gated behind full catalog phase-1 completion.")
     if len({str(item.get("themeId")) for item in experiments}) != 2 or len({str(item.get("campaignId")) for item in experiments}) != 2:
-        raise CompetitionResourceError("Required deep experiments must use independent themes and campaigns.")
+        raise CompetitionResourceError("Declared deep experiments must use independent themes and campaigns.")
     completion = _mapping(program.get("completionContract"), field="completionContract")
     if completion.get("programRule") != "full_catalog_result_set_approved AND all_required_deep_experiments_approved":
         raise CompetitionResourceError("Competition Program completion rule has drifted.")
+    phase_rules = completion.get("phaseCompletionRules")
+    if not isinstance(phase_rules, dict) or phase_rules.get("phase1") != PHASE1_COMPLETION_RULE or phase_rules.get("phase2ActivationGate") != DEEP_EXPERIMENT_ACTIVATION_GATE:
+        raise CompetitionResourceError("Phase completion rules have drifted.")
     if completion.get("legacyQuestionCountsAffectCompletion") is not False or completion.get("legacyRepresentativeCaseCountsAffectCompletion") is not False:
         raise CompetitionResourceError("Legacy counts must never affect active completion.")
     return deepcopy(program)

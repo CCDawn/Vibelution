@@ -228,6 +228,17 @@ def _system_team_bootstrap_required_steps() -> list[str]:
             outcome="failed",
             fields={"errorType": type(exc).__name__},
         )
+    try:
+        if s.challenge_cup_research_team_copy_outdated():
+            required_steps.append("challenge_cup_team_copy_refresh")
+    except Exception as exc:
+        # Fail soft: an index read failure must never block startup; the
+        # version-gated copy refresh retries on the next bootstrap cycle.
+        _record_system_team_bootstrap_event(
+            "team.system_bootstrap.team_copy_check_failed",
+            outcome="failed",
+            fields={"errorType": type(exc).__name__},
+        )
     return required_steps
 
 
@@ -239,6 +250,30 @@ def _challenge_cup_context_policy_migration_needed() -> bool:
     )
 
     return challenge_cup_context_policies_outdated()
+
+
+def _apply_challenge_cup_team_copy_refresh(*, reason: str) -> None:
+    """Apply the version-gated managed Team copy refresh without ever raising."""
+
+    from core.web.services.team.system_teams import apply_challenge_cup_research_team_copy_refresh
+
+    try:
+        result = apply_challenge_cup_research_team_copy_refresh(reason=reason)
+        if result.get("refreshed"):
+            _record_system_team_bootstrap_event(
+                "team.system_bootstrap.team_copy_refreshed",
+                outcome="succeeded",
+                fields={
+                    "reason": reason,
+                    "copyVersion": int(result.get("copyVersion") or 0),
+                },
+            )
+    except Exception as exc:
+        _record_system_team_bootstrap_event(
+            "team.system_bootstrap.team_copy_refresh_failed",
+            outcome="failed",
+            fields={"reason": reason, "errorType": type(exc).__name__},
+        )
 
 
 def _apply_challenge_cup_context_policy_migration(*, reason: str) -> None:
@@ -316,6 +351,9 @@ def _run_system_team_bootstrap(request_id: str, required_steps: list[str], reaso
         # runs unconditionally so a freshly materialized team converges within
         # the same bootstrap run, and is a read-only no-op once migrated.
         _apply_challenge_cup_context_policy_migration(reason=reason)
+        # Fail-soft version-gated refresh of the managed Challenge Cup Team
+        # record copy (description/purpose); read-only no-op once current.
+        _apply_challenge_cup_team_copy_refresh(reason=reason)
         remaining_steps = _system_team_bootstrap_required_steps()
         elapsed_ms = s._elapsed_ms(started_at)
         status = "ready" if not remaining_steps else "needs_retry"

@@ -3,8 +3,8 @@
   "manifestKind": "challenge_cup_submission_source_manifest",
   "sourceCommit": "0123456789abcdef0123456789abcdef01234567",
   "programContract": {
-    "version": "2.2.0",
-    "coreBehaviorHash": "C3965023488C76DF032130341347915E5EAD5451EE53C2501E75914205EB423A"
+    "version": "2.3.0",
+    "coreBehaviorHash": "0F9545A9F5286A6B35C0414B45303786AABBFF5E5A08A3E1AC9FE95F38812D81"
   },
   "catalogPolicy": {
     "version": "1.2.0",

@@ -1,10 +1,10 @@
 {
-  "schemaVersion": "2.2.0",
+  "schemaVersion": "2.3.0",
   "contractId": "cc-xh-202619-program-v2",
-  "contractVersion": "2.2.0",
+  "contractVersion": "2.3.0",
   "status": "core_frozen",
   "createdAt": "2026-08-17T14:52:27+08:00",
-  "lastReviewedAt": "2026-08-17T16:39:26+08:00",
+  "lastReviewedAt": "2026-08-31T10:00:00+08:00",
   "authoritySnapshot": {
     "asOf": "2026-08-17",
     "officialPublicPage": "https://university.aliyun.com/action/tzbjbgs2026",
@@ -40,15 +40,17 @@
       "scope": [
         "track_direction_and_dimensions",
         "all_125_standard_results",
-        "two_required_independent_deep_experiments",
+        "phased_a_then_b_execution_deep_experiments_gated_behind_full_catalog",
         "completion_semantics",
         "isolation_policy",
         "legacy_read_only_compatibility"
       ],
       "blocksActiveCompletionImplementationUntilFrozen": false,
-      "frozenAt": "2026-08-17T16:39:26+08:00",
-      "approvedBy": ["project_owner"],
-      "coreBehaviorHash": "C3965023488C76DF032130341347915E5EAD5451EE53C2501E75914205EB423A"
+      "frozenAt": "2026-08-31T10:00:00+08:00",
+      "approvedBy": [
+        "project_owner"
+      ],
+      "coreBehaviorHash": "0F9545A9F5286A6B35C0414B45303786AABBFF5E5A08A3E1AC9FE95F38812D81"
     },
     "submissionProjection": {
       "status": "provisional_v1_pending_direction_popup",
@@ -76,7 +78,7 @@
     "workingTitle": "面向前沿科学问题的AI假设生成与研究计划设计平台",
     "submissionTitleStatus": "fixed_registered_do_not_change",
     "track": "赛道一：科学问题",
-    "direction": "方向1：科学实验任务规划与反馈迭代",
+    "direction": "方向1：科学假设生成与研究计划设计（一阶段）→ 科学实验任务规划与反馈迭代（二阶段）",
     "dimensions": [
       "A. 科学假设生成与研究计划设计",
       "B. 科学实验任务规划与反馈迭代"
@@ -109,7 +111,8 @@
     "optionalSupplementarySubmission": {
       "interactiveFrontend": true,
       "demoVideoMaximumMinutes": 10
-    }
+    },
+    "directionExecutionMode": "a_then_b"
   },
   "catalogExecutionPolicy": {
     "catalog": "Science 125 questions",
@@ -127,7 +130,7 @@
       "SCI-091",
       "SCI-096"
     ],
-    "selectionMode": "all_125_standard_results_plus_two_required_independent_deep_experiments",
+    "selectionMode": "phase1_all_125_standard_results_then_phase2_two_required_independent_deep_experiments",
     "scopeChangeRequiresNewContractVersion": true
   },
   "specializationProfile": {
@@ -188,7 +191,10 @@
       "campaignId": "cc-campaign-gpu-operator-001",
       "required": true,
       "status": "planned_not_started",
-      "approvalStatus": "not_approved"
+      "approvalStatus": "not_approved",
+      "executionPhase": 2,
+      "activationGate": "full_catalog_result_set_approved",
+      "phaseStatus": "gated_until_phase1_complete"
     },
     {
       "experimentId": "EXP-NEURAL-SPIKE-001",
@@ -198,7 +204,10 @@
       "campaignId": "cc-campaign-neural-spike-001",
       "required": true,
       "status": "planned_not_started",
-      "approvalStatus": "not_approved"
+      "approvalStatus": "not_approved",
+      "executionPhase": 2,
+      "activationGate": "full_catalog_result_set_approved",
+      "phaseStatus": "gated_until_phase1_complete"
     }
   ],
   "completionContract": {
@@ -222,7 +231,12 @@
     ],
     "negativeOrInconclusiveExperimentMayBeApproved": true,
     "legacyQuestionCountsAffectCompletion": false,
-    "legacyRepresentativeCaseCountsAffectCompletion": false
+    "legacyRepresentativeCaseCountsAffectCompletion": false,
+    "phaseCompletionRules": {
+      "phase1": "full_catalog_result_set_approved",
+      "phase2": "all_required_deep_experiments_approved",
+      "phase2ActivationGate": "full_catalog_result_set_approved"
+    }
   },
   "isolationPolicy": {
     "separateThemeContracts": true,
@@ -250,27 +264,54 @@
       "category": "科学价值",
       "points": 40,
       "items": [
-        {"name": "科学事实表达准确性", "points": 15},
-        {"name": "内容转化、解释或展示的清晰度", "points": 15},
-        {"name": "作品主题的完整性与一致性", "points": 10}
+        {
+          "name": "科学事实表达准确性",
+          "points": 15
+        },
+        {
+          "name": "内容转化、解释或展示的清晰度",
+          "points": 15
+        },
+        {
+          "name": "作品主题的完整性与一致性",
+          "points": 10
+        }
       ]
     },
     {
       "category": "技术深度",
       "points": 30,
       "items": [
-        {"name": "模型、智能体、技能设计完整性", "points": 10},
-        {"name": "多模态数据处理、生成、推理或交互能力", "points": 10},
-        {"name": "结果校验、反馈迭代与稳定性设计", "points": 10}
+        {
+          "name": "模型、智能体、技能设计完整性",
+          "points": 10
+        },
+        {
+          "name": "多模态数据处理、生成、推理或交互能力",
+          "points": 10
+        },
+        {
+          "name": "结果校验、反馈迭代与稳定性设计",
+          "points": 10
+        }
       ]
     },
     {
       "category": "应用潜力",
       "points": 30,
       "items": [
-        {"name": "面向真实场景的使用价值", "points": 10},
-        {"name": "作品演示、交互入口与交付完整度", "points": 10},
-        {"name": "代码、结果与流程可复现性", "points": 10}
+        {
+          "name": "面向真实场景的使用价值",
+          "points": 10
+        },
+        {
+          "name": "作品演示、交互入口与交付完整度",
+          "points": 10
+        },
+        {
+          "name": "代码、结果与流程可复现性",
+          "points": 10
+        }
       ]
     }
   ],
@@ -305,11 +346,36 @@
       "engineering_owner",
       "research_owner"
     ],
-    "coreFrozenAt": "2026-08-17T16:39:26+08:00",
-    "coreFrozenBy": ["project_owner"],
-    "coreFreezeEvidence": "user_continue_after_explicit_freeze_recommendation",
+    "coreFrozenAt": "2026-08-31T10:00:00+08:00",
+    "coreFrozenBy": [
+      "project_owner"
+    ],
+    "coreFreezeEvidence": "user_phased_a_then_b_goal_clarification_2026_08_31",
     "frozenAt": null,
     "contentHash": null,
     "approvedBy": []
+  },
+  "executionPhases": {
+    "mode": "a_then_b",
+    "activePhase": 1,
+    "phases": [
+      {
+        "phase": 1,
+        "directionId": "A",
+        "name": "A. 科学假设生成与研究计划设计",
+        "goal": "完成 125 题科学假设与研究计划的六环节闭环：问题理解、知识整合、候选假说生成、证据梳理、研究计划输出、反馈修正。",
+        "completionRule": "full_catalog_result_set_approved",
+        "status": "active"
+      },
+      {
+        "phase": 2,
+        "directionId": "B",
+        "name": "B. 科学实验任务规划与反馈迭代",
+        "goal": "在 125 题假说结果集全部通过后，完成 SCI-091 与 SCI-096 两个独立深实验的规划与反馈迭代。",
+        "activationGate": "full_catalog_result_set_approved",
+        "completionRule": "all_required_deep_experiments_approved",
+        "status": "gated_until_phase1_complete"
+      }
+    ]
   }
 }

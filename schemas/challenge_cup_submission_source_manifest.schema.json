@@ -14,8 +14,8 @@
       "additionalProperties": false,
       "required": ["version", "coreBehaviorHash"],
       "properties": {
-        "version": { "const": "2.2.0" },
-        "coreBehaviorHash": { "const": "C3965023488C76DF032130341347915E5EAD5451EE53C2501E75914205EB423A" }
+        "version": { "const": "2.3.0" },
+        "coreBehaviorHash": { "const": "0F9545A9F5286A6B35C0414B45303786AABBFF5E5A08A3E1AC9FE95F38812D81" }
       }
     },
     "catalogPolicy": {

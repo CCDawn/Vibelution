@@ -49,8 +49,8 @@ def _challenge_cup_research_team_placeholder(now: str) -> dict[str, Any]:
     team = {
         "teamId": s.CHALLENGE_CUP_RESEARCH_TEAM_ID,
         "name": s.RESEARCH_TEAM_DISPLAY_NAME,
-        "description": "挑战杯 125 题假说与研究计划的六 Agent 系统团队。",
-        "purpose": "组织搜索、提炼、知识治理、执行、实验修订与独立评估。",
+        **_challenge_cup_research_team_copy_fields(),
+        "challengeCupTeamCopyVersion": CHALLENGE_CUP_TEAM_COPY_VERSION,
         "status": s.DEFAULT_TEAM_STATUS,
         "members": [],
         "linkedChatRoomId": "",
@@ -66,6 +66,110 @@ def _challenge_cup_research_team_placeholder(now: str) -> dict[str, Any]:
         team_source="research_organization",
     )
     return team
+
+
+# Versioned managed copy contract for the materialized Challenge Cup Team
+# record, mirroring the version-gated ``challenge_cup_context_policy``
+# migration: the constant advances when the canonical description/purpose
+# changes, and the fail-soft bootstrap migration below refreshes only
+# materialized records whose copy exactly matches the previous managed
+# text.  Operator-customized copies are never overwritten.  (The separate
+# agent-level ``challengeCupTeamManagedVersion`` tracks agent materialization
+# lineage and is unrelated to the Team record copy.)
+CHALLENGE_CUP_TEAM_COPY_VERSION = 3
+_CHALLENGE_CUP_TEAM_COPY_HISTORY: dict[int, dict[str, str]] = {
+    2: {
+        "description": "挑战杯 125 题假说与研究计划的六 Agent 系统团队。",
+        "purpose": "组织搜索、提炼、知识治理、执行、实验修订与独立评估。",
+    },
+}
+
+
+def _challenge_cup_research_team_copy_fields() -> dict[str, str]:
+    """Return the canonical phased description/purpose for the team."""
+
+    return {
+        "description": "挑战杯 125 题科学假设与研究计划优先（阶段二叠加两个深实验）的六 Agent 系统团队。",
+        "purpose": "先以六环节闭环完成 125 题假说任务：问题理解、知识整合、候选假说生成、证据梳理、研究计划输出、反馈修正；125 题结果包全部通过后，再叠加 SCI-091 与 SCI-096 两个深实验的规划与反馈迭代。",
+    }
+
+
+def _challenge_cup_research_team_copy_version(team: dict[str, Any]) -> int:
+    try:
+        return int(team.get("challengeCupTeamCopyVersion") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _matches_managed_copy(team: dict[str, Any], copy_fields: dict[str, str]) -> bool:
+    return all(
+        str(team.get(field) or "").strip() == str(copy_fields.get(field) or "")
+        for field in ("description", "purpose")
+    )
+
+
+def challenge_cup_research_team_copy_outdated() -> bool:
+    """Return whether a materialized managed team still carries an older copy.
+
+    Missing teams are bootstrap's job, and customized copies are never
+    upgraded, so both report ``False`` here.
+    """
+
+    s = _service()
+    with s._TEAM_LOCK:
+        state = s._load_index()
+        team = s._find_team(state, s.CHALLENGE_CUP_RESEARCH_TEAM_ID)
+    if not isinstance(team, dict):
+        return False
+    version = _challenge_cup_research_team_copy_version(team)
+    previous = _CHALLENGE_CUP_TEAM_COPY_HISTORY.get(CHALLENGE_CUP_TEAM_COPY_VERSION - 1, {})
+    return version < CHALLENGE_CUP_TEAM_COPY_VERSION and _matches_managed_copy(team, previous)
+
+
+def apply_challenge_cup_research_team_copy_refresh(*, reason: str = "") -> dict[str, Any]:
+    """One-time version-gated refresh of the managed Team record copy.
+
+    Only a record whose description/purpose exactly match the previous
+    managed copy is rewritten to the canonical text and stamped with the
+    current copy version.  Never raises: bootstrap owns the fail-soft
+    decision so a broken index can never block startup.
+    """
+
+    s = _service()
+    result: dict[str, Any] = {
+        "copyVersion": CHALLENGE_CUP_TEAM_COPY_VERSION,
+        "teamPresent": False,
+        "refreshed": False,
+        "skippedCustom": False,
+    }
+    try:
+        with s._TEAM_LOCK:
+            state = s._load_index()
+            team = s._find_team(state, s.CHALLENGE_CUP_RESEARCH_TEAM_ID)
+            if not isinstance(team, dict):
+                return result
+            result["teamPresent"] = True
+            if _challenge_cup_research_team_copy_version(team) >= CHALLENGE_CUP_TEAM_COPY_VERSION:
+                return result
+            previous = _CHALLENGE_CUP_TEAM_COPY_HISTORY.get(CHALLENGE_CUP_TEAM_COPY_VERSION - 1, {})
+            if not _matches_managed_copy(team, previous):
+                result["skippedCustom"] = True
+                return result
+            team.update(_challenge_cup_research_team_copy_fields())
+            team["challengeCupTeamCopyVersion"] = CHALLENGE_CUP_TEAM_COPY_VERSION
+            team["updatedAt"] = s.utc_now_iso()
+            state["updatedAt"] = str(team["updatedAt"])
+            s._save_index(state)
+    except Exception:
+        result["refreshed"] = False
+        return result
+    result["refreshed"] = True
+    s._record_team_event(
+        "team.challenge_cup_copy_refreshed",
+        team,
+        fields={"reason": reason, "copyVersion": CHALLENGE_CUP_TEAM_COPY_VERSION},
+    )
+    return result
 
 
 def evolution_system_teams_missing() -> bool:

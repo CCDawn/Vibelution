@@ -477,13 +477,13 @@ def test_live_legacy_case_takes_precedence_over_documented_compatibility_registr
     assert projection["compatibility"]["caseRecoverySource"] == "legacy_lifecycle"
 
 
-def test_active_competition_projection_is_full_catalog_ab_and_deep_experiment_fail_closed():
+def test_active_competition_projection_is_phased_a_then_b():
     empty = build_competition_program_projection(question_run_summary={})
 
     assert empty["schemaVersion"] == 2
     assert empty["programContract"] == {
-        "version": "2.2.0",
-        "coreBehaviorHash": "C3965023488C76DF032130341347915E5EAD5451EE53C2501E75914205EB423A",
+        "version": "2.3.0",
+        "coreBehaviorHash": "0F9545A9F5286A6B35C0414B45303786AABBFF5E5A08A3E1AC9FE95F38812D81",
     }
     assert empty["fullCatalogPolicy"]["version"] == "1.2.0"
     assert empty["questionSchema"] == {
@@ -491,11 +491,24 @@ def test_active_competition_projection_is_full_catalog_ab_and_deep_experiment_fa
         "readOnlyVersions": [1],
         "migrationMode": "dual_version_reader_append_only_no_auto_promotion",
     }
-    assert empty["program"]["directionMode"] == "a_plus_b"
+    assert empty["program"]["directionMode"] == "a_then_b"
     assert [item["directionId"] for item in empty["directions"]] == ["A", "B"]
+    assert [item["phase"] for item in empty["directions"]] == [1, 2]
+    assert empty["directions"][1]["activated"] is False
+    assert empty["executionPhase"] == {
+        "mode": "a_then_b",
+        "currentPhase": 1,
+        "currentPhaseGoal": empty["executionPhase"]["currentPhaseGoal"],
+        "phase1CompletionRule": "full_catalog_result_set_approved",
+        "phase1Complete": False,
+        "phase2ActivationGate": "full_catalog_result_set_approved",
+        "phase2Activated": False,
+        "finalCompletionRequiresDeepExperiments": True,
+    }
     assert empty["questionCatalog"]["questionCount"] == 125
     assert len(empty["questionCatalog"]["questions"]) == 125
     assert [item["questionId"] for item in empty["requiredDeepExperiments"]] == ["SCI-091", "SCI-096"]
+    assert [item["executionPhase"] for item in empty["requiredDeepExperiments"]] == [2, 2]
     assert empty["allRequiredDeepExperimentsApproved"] is False
     assert empty["program"]["completed"] is False
 
@@ -508,6 +521,23 @@ def test_active_competition_projection_is_full_catalog_ab_and_deep_experiment_fa
     assert complete["fullCatalogResultSet"]["complete"] is True
     assert complete["allRequiredDeepExperimentsApproved"] is True
     assert complete["program"]["completed"] is True
+
+
+def test_phase1_completion_does_not_require_the_gated_deep_experiments():
+    catalog_complete = build_competition_program_projection(
+        question_run_summary={
+            "completedQuestionIds": [f"SCI-{index:03d}" for index in range(1, 126)],
+        }
+    )
+
+    # 125/125 approved completes the current phase and activates phase 2...
+    assert catalog_complete["fullCatalogResultSet"]["complete"] is True
+    assert catalog_complete["executionPhase"]["phase1Complete"] is True
+    assert catalog_complete["executionPhase"]["phase2Activated"] is True
+    assert [item["phaseActive"] for item in catalog_complete["requiredDeepExperiments"]] == [True, True]
+    # ...but the final program completion still waits for the deep experiments.
+    assert catalog_complete["allRequiredDeepExperimentsApproved"] is False
+    assert catalog_complete["program"]["completed"] is False
 
 
 def test_submission_readiness_is_one_conservative_artifact_contract():
@@ -527,12 +557,19 @@ def test_submission_readiness_is_one_conservative_artifact_contract():
     ]
     assert readiness["artifacts"][0]["detail"] == "0/125 题已通过提交门。"
     assert readiness["artifacts"][0]["primaryAction"]["questionId"] == "SCI-001"
-    assert readiness["artifacts"][1]["primaryAction"]["questionId"] == "SCI-091"
+    deep_suite = readiness["artifacts"][1]
+    assert deep_suite["phase"] == 2
+    assert deep_suite["required"] is False
+    assert deep_suite["finalRequired"] is True
+    assert deep_suite["status"] == "optional"
+    assert deep_suite["primaryAction"]["kind"] == "inspect"
+    assert "questionId" not in deep_suite["primaryAction"]
     assert readiness["artifacts"][3]["status"] == "optional"
     assert all("path" not in item and "id" not in item for item in readiness["artifacts"])
+    # The gated deep-experiment package must not block the current phase.
+    assert "deep_experiment_suite_incomplete" not in {item["code"] for item in readiness["blockers"]}
     assert {item["code"] for item in readiness["blockers"]} >= {
         "full_catalog_results_incomplete",
-        "deep_experiment_suite_incomplete",
         "technical_proposal_pdf_not_packaged",
         "test_api_not_packaged",
         "source_code_not_packaged",
@@ -541,11 +578,26 @@ def test_submission_readiness_is_one_conservative_artifact_contract():
 
 
 def test_submission_readiness_uses_first_unapproved_question_ids_from_projection():
-    projection = build_competition_program_projection(question_run_summary={
+    phase1_projection = build_competition_program_projection(question_run_summary={
         "completedQuestionIds": ["SCI-001", "SCI-091"],
         "approvedDeepExperimentQuestionIds": ["SCI-091"],
     })
-    readiness = build_challenge_submission_readiness(team_id="research-team", competition_program_projection=projection)
+    phase1_readiness = build_challenge_submission_readiness(
+        team_id="research-team", competition_program_projection=phase1_projection
+    )
 
-    assert readiness["artifacts"][0]["primaryAction"]["questionId"] == "SCI-002"
-    assert readiness["artifacts"][1]["primaryAction"]["questionId"] == "SCI-096"
+    assert phase1_readiness["artifacts"][0]["primaryAction"]["questionId"] == "SCI-002"
+    assert "questionId" not in phase1_readiness["artifacts"][1]["primaryAction"]
+
+    phase2_projection = build_competition_program_projection(question_run_summary={
+        "completedQuestionIds": [f"SCI-{index:03d}" for index in range(1, 126)],
+        "approvedDeepExperimentQuestionIds": ["SCI-091"],
+    })
+    phase2_readiness = build_challenge_submission_readiness(
+        team_id="research-team", competition_program_projection=phase2_projection
+    )
+
+    deep_suite = phase2_readiness["artifacts"][1]
+    assert deep_suite["required"] is True
+    assert deep_suite["status"] == "blocked"
+    assert deep_suite["primaryAction"]["questionId"] == "SCI-096"

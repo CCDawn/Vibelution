@@ -479,7 +479,9 @@ def test_challenge_program_projection_stays_team_scoped_across_active_projects(t
     assert before_active_projection["schemaVersion"] == 2
     assert before_active_projection["questionCatalog"]["questionCount"] == 125
     assert len(before_active_projection["questionCatalog"]["questions"]) == 125
-    assert before_active_projection["program"]["directionMode"] == "a_plus_b"
+    assert before_active_projection["program"]["directionMode"] == "a_then_b"
+    assert before_active_projection["executionPhase"]["currentPhase"] == 1
+    assert before_active_projection["executionPhase"]["phase1Complete"] is False
     assert [item["questionId"] for item in before_active_projection["requiredDeepExperiments"]] == [
         "SCI-091",
         "SCI-096",
