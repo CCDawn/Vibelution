@@ -12,6 +12,7 @@ from core.research.competition.question_result_package import (
 )
 from core.research.workflow.contracts import WorkflowSessionScopeV3
 from core.research.workflow.definition import build_challenge_cup_workflow_definition
+from core.research.workflow.definition_registry import resolve_definition_for_run_record
 from core.research.workflow.models import NodeSessionScopePolicy
 
 from .budget_lifecycle import BudgetLifecycleError, reserve_node_budget
@@ -1206,11 +1207,11 @@ def start_agent_node_execution(
         payload.get("idempotencyKey") or f"agent-task:{node_run['nodeRunId']}"
     ).strip()
     retry_candidate_id = str(payload.get("retryCandidateId") or "").strip()
-    node_spec = next(
-        item
-        for item in build_challenge_cup_workflow_definition().nodes
-        if item.nodeId == node_id
+    definition = resolve_definition_for_run_record(
+        record,
+        expected_node_ids=[node_id],
     )
+    node_spec = next(item for item in definition.nodes if item.nodeId == node_id)
     fan_out = None
     scope_shadow: dict[str, Any] | None = None
     scope_fallback: dict[str, str] | None = None

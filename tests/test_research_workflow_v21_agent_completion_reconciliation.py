@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from core.research.workflow.bindings import AgentBindingLayers
 from core.research.workflow.definition import CHALLENGE_CUP_WORKFLOW_ID
 from core.web.services.team_workflow.research_runtime import (
+    agent_task_artifact_builder,
     problem_understanding_artifact_writer,
     workflow_artifact_store,
 )
@@ -20,6 +23,25 @@ from core.web.services.team_workflow.research_runtime.service import (
     ResearchWorkflowRuntimeService,
 )
 from core.web.services.team_workflow.research_runtime.store import WorkflowRunStore
+from core.web.services.team_workflow.source_collection import search_execution
+
+
+@pytest.fixture(autouse=True)
+def _canonical_team_binding_source(monkeypatch) -> None:
+    """Freeze source_finder from Team members, the current binding SSOT."""
+
+    monkeypatch.setattr(
+        "core.web.services.team_service.list_team_role_binding_sources",
+        lambda _team_id: {
+            "team_exists": True,
+            "members": [
+                {
+                    "agentId": "agent-source-finder",
+                    "role": "source_finder",
+                }
+            ],
+        },
+    )
 
 
 def _run_input() -> dict:
@@ -86,6 +108,9 @@ def _terminal_source_task() -> dict:
             "summary": "Implementation evidence.",
         },
     ]
+    for index, lead in enumerate(leads, start=1):
+        lead["fingerprint"] = f"url:{lead['locator']}"
+        lead["leadId"] = f"lead-fixture-{index}"
     records = [
         {
             "recordId": f"record-{index}",
@@ -111,6 +136,19 @@ def _terminal_source_task() -> dict:
         "importedCandidates": candidates,
         "failedCount": 0,
         "excludedSourceCount": 0,
+        "lineage": [
+            {
+                "fingerprint": lead["fingerprint"],
+                "leadId": lead["leadId"],
+                "record": {"status": "created", "recordId": f"record-{index}"},
+                "candidate": {
+                    "status": "created",
+                    "candidateId": f"candidate-{index}",
+                },
+                "reason": "",
+            }
+            for index, lead in enumerate(leads, start=1)
+        ],
     }
     return {
         "taskId": "task-source-finding",
@@ -279,6 +317,49 @@ def _start_source_node(
             "llmUsage": {"totalTokens": 90},
         },
     )
+    leads = list((terminal.get("result") or {}).get("candidateLeads") or [])
+    canonical_trace = [
+        {
+            "sourceCollectionRunId": "source-run-1",
+            "assignmentId": "assignment-source-finder",
+            "queryId": f"query-{index}",
+            "query": lead.get("query") or "",
+            "perspective": lead.get("perspective") or "",
+            "provider": "crossref",
+            "status": "found",
+            "resultRefs": [lead.get("locator") or ""],
+            "eventIds": [f"event-{index}"],
+        }
+        for index, lead in enumerate(leads, start=1)
+    ]
+    present = {str(item.get("perspective") or "") for item in canonical_trace}
+    for perspective in (
+        "mechanism",
+        "independent_baseline",
+        "limitation_or_null",
+        "falsification",
+    ):
+        if perspective in present:
+            continue
+        canonical_trace.append(
+            {
+                "sourceCollectionRunId": "source-run-1",
+                "assignmentId": "assignment-source-finder",
+                "queryId": f"query-{perspective}",
+                "query": "implementation perspective",
+                "perspective": perspective,
+                "provider": "openalex",
+                "status": "no_credible_source",
+                "resultRefs": [],
+                "failureReason": "terminal_provider_receipt_without_results",
+                "eventIds": [f"event-{perspective}"],
+            }
+        )
+    monkeypatch.setattr(
+        agent_task_artifact_builder,
+        "project_source_collection_search_trace",
+        lambda *_args, **_kwargs: canonical_trace,
+    )
     service.apply_node_command(
         run["runId"],
         "source_finding",
@@ -311,6 +392,41 @@ def test_completed_external_source_task_advances_workflow_exactly_once(
         idempotency_key="create-agent-reconcile",
     )
     terminal = _terminal_source_task()
+    terminal["result"]["searchTrace"] = [
+        {"queryId": "agent-invented", "status": "found", "provider": "agent"}
+    ]
+    canonical_trace = [
+        {
+            "sourceCollectionRunId": "source-run-1",
+            "assignmentId": "assignment-source-finder",
+            "queryId": f"query-{index}",
+            "query": lead["query"],
+            "perspective": lead["perspective"],
+            "provider": "crossref",
+            "status": "found",
+            "resultRefs": [lead["locator"]],
+            "eventIds": [f"event-{index}"],
+        }
+        for index, lead in enumerate(terminal["result"]["candidateLeads"], start=1)
+    ] + [
+        {
+            "sourceCollectionRunId": "source-run-1",
+            "assignmentId": "assignment-source-finder",
+            "queryId": "query-limitation_or_null",
+            "query": "implementation perspective",
+            "perspective": "limitation_or_null",
+            "provider": "openalex",
+            "status": "no_credible_source",
+            "resultRefs": [],
+            "failureReason": "terminal_provider_receipt_without_results",
+            "eventIds": ["event-limitation_or_null"],
+        }
+    ]
+    monkeypatch.setattr(
+        agent_task_artifact_builder,
+        "project_source_collection_search_trace",
+        lambda *_args, **_kwargs: canonical_trace,
+    )
     observed_status = {"value": "running"}
     _start_source_node(service, run, tmp_path, terminal, observed_status, monkeypatch)
     observed_status["value"] = "completed"
@@ -343,7 +459,8 @@ def test_completed_external_source_task_advances_workflow_exactly_once(
     ]
     assert len(payload["perspectives"]) >= 2
     assert len(payload["counterEvidenceCandidateSources"]) == 1
-    assert len(payload["searchTrace"]) == 3
+    assert len(payload["searchTrace"]) == 4
+    assert payload["searchTrace"] == canonical_trace
     assert len(payload["candidateSources"]) == 3
     assert (
         next(
@@ -719,3 +836,262 @@ def test_completed_task_recovers_one_internal_reconciliation_failure(
         "e_problem_find",
         "e_find_extract",
     ]
+
+
+def test_source_finding_payload_does_not_shift_identity_after_failed_lead() -> None:
+    failed_lead = {
+        "leadId": "lead-failed",
+        "fingerprint": "url:https://example.test/failed",
+        "title": "Failed source",
+        "locator": "https://example.test/failed",
+        "query": "mechanism",
+        "perspective": "mechanism",
+    }
+    accepted_lead = {
+        "leadId": "lead-accepted",
+        "fingerprint": "url:https://example.test/accepted",
+        "title": "Accepted source",
+        "locator": "https://example.test/accepted",
+        "query": "baseline",
+        "perspective": "independent_baseline",
+    }
+    task = {
+        "taskId": "task-lineage-failure",
+        "sessionId": "session-lineage-failure",
+        "result": {"candidateLeads": [failed_lead, accepted_lead]},
+        "materializedSources": {
+            "createdRecords": [
+                {"recordId": "record-accepted", "sourceRef": accepted_lead["locator"]}
+            ],
+            "importedCandidates": [
+                {"candidateId": "candidate-accepted", "recordId": "record-accepted"}
+            ],
+            "lineage": [
+                {
+                    "fingerprint": failed_lead["fingerprint"],
+                    "leadId": failed_lead["leadId"],
+                    "record": {"status": "failed", "recordId": ""},
+                    "candidate": {"status": "not_attempted", "candidateId": ""},
+                    "reason": "data_record_create_failed",
+                },
+                {
+                    "fingerprint": accepted_lead["fingerprint"],
+                    "leadId": accepted_lead["leadId"],
+                    "record": {"status": "created", "recordId": "record-accepted"},
+                    "candidate": {
+                        "status": "created",
+                        "candidateId": "candidate-accepted",
+                    },
+                    "reason": "",
+                },
+            ],
+        },
+    }
+
+    payload = agent_task_artifact_builder._source_finding_payload(
+        {"runId": "run-lineage-failure"},
+        {"nodeRunId": "node-run-lineage-failure"},
+        task,
+    )
+
+    assert [item["leadId"] for item in payload["candidateSources"]] == [
+        "lead-accepted"
+    ]
+    assert payload["candidateSources"][0]["recordId"] == "record-accepted"
+    assert payload["candidateSources"][0]["candidateId"] == "candidate-accepted"
+
+
+def test_source_finding_payload_joins_reused_entities_by_lineage() -> None:
+    leads = [
+        {
+            "leadId": "lead-record-reused",
+            "fingerprint": "url:https://example.test/record-reused",
+            "locator": "https://example.test/record-reused",
+        },
+        {
+            "leadId": "lead-candidate-reused",
+            "fingerprint": "url:https://example.test/candidate-reused",
+            "locator": "https://example.test/candidate-reused",
+        },
+    ]
+    task = {
+        "taskId": "task-lineage-reuse",
+        "sessionId": "session-lineage-reuse",
+        "result": {"candidateLeads": leads},
+        "writeback": {
+            "materializedSources": {
+                # These legacy diagnostic arrays are deliberately sparse and
+                # oppositely ordered; they are not an identity authority.
+                "createdRecords": [
+                    {"recordId": "record-new", "sourceRef": leads[1]["locator"]}
+                ],
+                "importedCandidates": [
+                    {"candidateId": "candidate-new", "recordId": "record-old"}
+                ],
+                "lineage": [
+                    {
+                        "fingerprint": leads[0]["fingerprint"],
+                        "leadId": leads[0]["leadId"],
+                        "record": {"status": "reused", "recordId": "record-old"},
+                        "candidate": {
+                            "status": "created",
+                            "candidateId": "candidate-new",
+                        },
+                        "reason": "",
+                    },
+                    {
+                        "fingerprint": leads[1]["fingerprint"],
+                        "leadId": leads[1]["leadId"],
+                        "record": {"status": "created", "recordId": "record-new"},
+                        "candidate": {
+                            "status": "reused",
+                            "candidateId": "candidate-old",
+                        },
+                        "reason": "duplicate_source_candidate",
+                    },
+                ],
+            }
+        },
+    }
+
+    payload = agent_task_artifact_builder._source_finding_payload(
+        {"runId": "run-lineage-reuse"},
+        {"nodeRunId": "node-run-lineage-reuse"},
+        task,
+    )
+
+    assert [
+        (item["recordId"], item["candidateId"])
+        for item in payload["candidateSources"]
+    ] == [
+        ("record-old", "candidate-new"),
+        ("record-new", "candidate-old"),
+    ]
+
+
+def test_unknown_pinned_definition_blocks_external_reconciliation_once(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    store = WorkflowRunStore(tmp_path / "runs")
+    service = ResearchWorkflowRuntimeService(
+        run_store=store,
+        checkpoint_path=str(tmp_path / "checkpoints.sqlite"),
+    )
+    run = service.create_run(
+        CHALLENGE_CUP_WORKFLOW_ID,
+        run_input=_run_input(),
+        idempotency_key="create-agent-unknown-definition",
+    )
+    terminal = _terminal_source_task()
+    observed_status = {"value": "running"}
+    _start_source_node(service, run, tmp_path, terminal, observed_status, monkeypatch)
+    store.update_run(
+        run["runId"],
+        {"workflowVersionId": "wv-unknown-definition"},
+    )
+    observed_status["value"] = "completed"
+
+    blocked = service.get_run(run["runId"])
+    replay = service.get_run(run["runId"])
+
+    source_run = next(
+        item for item in blocked["nodeRuns"] if item["nodeId"] == "source_finding"
+    )
+    assert source_run["status"] == "blocked"
+    assert source_run["failureCode"] == "unknown_workflow_definition_version"
+    assert replay["runVersion"] == blocked["runVersion"]
+
+
+def test_search_trace_projection_uses_event_type_for_terminal_semantics(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from core.web.services import team_workflow_orchestration_service
+
+    events = [
+        {
+            "eventId": "evt-executed-duplicate",
+            "eventType": "search.executed",
+            "status": "completed",
+            "assignmentId": "assignment-1",
+            "queryId": "query-duplicate",
+            "query": "duplicate query",
+            "provider": "crossref",
+            "refs": ["search-url"],
+            "createdAt": "2026-08-31T01:00:00Z",
+        },
+        {
+            "eventId": "evt-duplicate",
+            "eventType": "search.duplicate_skipped",
+            "status": "completed",
+            "assignmentId": "assignment-1",
+            "queryId": "query-duplicate",
+            "query": "duplicate query",
+            "provider": "crossref",
+            "refs": ["record-existing"],
+            "createdAt": "2026-08-31T01:00:01Z",
+        },
+        {
+            "eventId": "evt-excluded",
+            "eventType": "search.excluded_source_filtered",
+            "status": "completed",
+            "assignmentId": "assignment-1",
+            "queryId": "query-excluded",
+            "query": "excluded query",
+            "provider": "openalex",
+            "refs": ["excluded-key"],
+            "createdAt": "2026-08-31T01:00:02Z",
+        },
+        {
+            "eventId": "evt-found",
+            "eventType": "storage.source_manifest_imported",
+            "status": "completed",
+            "assignmentId": "assignment-1",
+            "queryId": "query-found",
+            "query": "found query",
+            "provider": "arxiv",
+            "refs": ["candidate-new"],
+            "createdAt": "2026-08-31T01:00:03Z",
+        },
+        {
+            "eventId": "evt-empty",
+            "eventType": "search.executed",
+            "status": "completed",
+            "assignmentId": "assignment-1",
+            "queryId": "query-empty",
+            "query": "negative result query",
+            "perspective": "limitation_or_null",
+            "provider": "openalex",
+            "refs": [],
+            "createdAt": "2026-08-31T01:00:04Z",
+        },
+    ]
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "_source_collection_storage_artifact_paths",
+        lambda *_args, **_kwargs: {"searchEventsPath": tmp_path / "events.jsonl"},
+    )
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "_read_jsonl",
+        lambda _path: events,
+    )
+
+    projected = search_execution.project_source_collection_search_trace(
+        "team-1",
+        "source-run-1",
+        assignment_id="assignment-1",
+    )
+
+    assert {
+        (item["queryId"], item["provider"]): item["status"] for item in projected
+    } == {
+        ("query-duplicate", "crossref"): "duplicate",
+        ("query-excluded", "openalex"): "excluded",
+        ("query-found", "arxiv"): "found",
+        ("query-empty", "openalex"): "no_credible_source",
+    }
+    empty = next(item for item in projected if item["queryId"] == "query-empty")
+    assert empty["failureReason"] == "terminal_provider_receipt_without_results"
+    assert empty["eventIds"] == ["evt-empty"]

@@ -407,8 +407,8 @@ def wait_for_agent_turn_terminal(
 
 
 def collect_required_artifact_refs(
-    node_id: str,
     *,
+    required_kinds: tuple[str, ...],
     team_id: str,
     workflow_run_id: str,
     source_collection_run_id: str,
@@ -417,12 +417,10 @@ def collect_required_artifact_refs(
     from .artifact_readback_registry import (
         build_canonical_ref,
         load_scoped_artifact_payload,
-        required_artifact_kinds,
     )
     from .human_gate_artifacts import canonical_sha256
 
-    kinds = required_artifact_kinds(node_id)
-    if not kinds:
+    if not required_kinds:
         return []
     normalized_team = str(team_id or "").strip()
     authority_run_id = (
@@ -436,7 +434,7 @@ def collect_required_artifact_refs(
         )
 
     refs: list[dict[str, str]] = []
-    for kind in kinds:
+    for kind in required_kinds:
         payload = load_scoped_artifact_payload(
             kind,
             team_id=normalized_team,
@@ -844,6 +842,7 @@ def complete_agent_turn_outputs(
     action: PendingAction,
     handle: AgentTaskHandle,
     input_snapshot: dict[str, Any],
+    required_kinds: tuple[str, ...],
     timeout_ms: int = DEFAULT_AGENT_TURN_TIMEOUT_MS,
     poll_ms: int = 200,
     return_result: bool = False,
@@ -941,7 +940,7 @@ def complete_agent_turn_outputs(
             )
 
     refs = collect_required_artifact_refs(
-        action.node_id,
+        required_kinds=required_kinds,
         team_id=team_id,
         workflow_run_id=str(action.run_id or ""),
         source_collection_run_id=source_collection_run_id,

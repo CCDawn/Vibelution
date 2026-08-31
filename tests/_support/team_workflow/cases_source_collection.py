@@ -1699,6 +1699,23 @@ def test_source_collection_stage_session_task_writeback_materializes_search_lead
     assert materialized["importedCandidateCount"] == 2
     assert materialized["skippedCount"] == 1
     assert materialized["skipped"][0]["reason"] == "insufficient_source_identity"
+    assert len(materialized["lineage"]) == 3
+    assert [item["record"]["status"] for item in materialized["lineage"]] == [
+        "created",
+        "created",
+        "failed",
+    ]
+    assert [item["candidate"]["status"] for item in materialized["lineage"]] == [
+        "created",
+        "created",
+        "not_attempted",
+    ]
+    assert all(
+        item["leadId"].startswith("lead-")
+        and item["leadId"] not in {"lead-01", "lead-02", "lead-03"}
+        and item["fingerprint"]
+        for item in materialized["lineage"]
+    )
     records = data_processing_service.list_records(run_id)
     assert records["summary"]["recordCount"] == 2
     assert records["records"][0]["metadata"]["perspective"] == "falsification"
@@ -1715,6 +1732,17 @@ def test_source_collection_stage_session_task_writeback_materializes_search_lead
     assert second["writeback"]["materializedSources"]["createdRecordCount"] == 0
     assert second["writeback"]["materializedSources"]["importedCandidateCount"] == 0
     assert second["writeback"]["materializedSources"]["skippedDuplicateCount"] == 2
+    replay_lineage = second["writeback"]["materializedSources"]["lineage"]
+    assert [item["record"]["status"] for item in replay_lineage] == [
+        "reused",
+        "reused",
+        "failed",
+    ]
+    assert [item["candidate"]["status"] for item in replay_lineage] == [
+        "reused",
+        "reused",
+        "not_attempted",
+    ]
     assert data_processing_service.list_records(run_id)["summary"]["recordCount"] == 2
     assert team_workflow_orchestration_service.list_candidate_store(team["teamId"], candidate_type="source_manifest")["candidateCount"] == 2
     writeback_events = _workflow_scene_events_by_code(scene_events, "source_collection.stage_session_task_writeback")
@@ -9337,7 +9365,8 @@ def test_finding_close_first_step_checklist_single_read_and_gate(tmp_path, monke
     assert "一次性读取当前批上下文" in env["submitted"][0]["content"]
     assert "补读必要页" not in env["submitted"][0]["content"]
     assert "写回预算" in env["submitted"][0]["content"]
-    assert "每批 `candidateLeads[]` 最多 5 条" in env["submitted"][0]["content"]
+    assert "总计最多接受 8 条去重来源" in env["submitted"][0]["content"]
+    assert "每批 `candidateLeads[]` 最多 4 条" in env["submitted"][0]["content"]
 
 
 def test_finding_close_first_step_context_has_no_continuation_invite(tmp_path, monkeypatch):
@@ -9381,7 +9410,7 @@ def test_finding_close_first_step_context_has_no_continuation_invite(tmp_path, m
 
 
 def test_finding_close_first_step_writeback_batch_limit_and_replay(tmp_path, monkeypatch):
-    """第二个不同批次写回被拒并带收口错误；同批重放幂等不计新批次。"""
+    """第五个不同批次被拒；同批重放幂等且不重复消耗来源预算。"""
     env = _finding_close_first_step_task(tmp_path, monkeypatch)
     team = env["team"]
     run_id = env["runId"]
@@ -9431,11 +9460,23 @@ def test_finding_close_first_step_writeback_batch_limit_and_replay(tmp_path, mon
     stored_task = next(item for item in store["tasks"] if item["taskId"] == task["taskId"])
     assert len(stored_task["sourceCollectionWritebackBatches"]) == 1
 
-    lead_b = dict(
+    for suffix in ("b", "c", "d"):
+        next_lead = dict(
+            lead_a,
+            leadId=f"lead-close-{suffix}",
+            title=f"Distinct source {suffix}",
+            locator=f"https://example.test/{suffix}",
+        )
+        team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+            team["teamId"],
+            task["taskId"],
+            _payload(next_lead),
+        )
+    lead_e = dict(
         lead_a,
-        leadId="lead-close-b",
-        title="A free energy principle for the brain",
-        locator="https://doi.org/10.1038/nrn2787",
+        leadId="lead-close-e",
+        title="Distinct source e",
+        locator="https://example.test/e",
     )
     with pytest.raises(
         team_workflow_orchestration_service.TeamWorkflowOrchestrationError,
@@ -9444,10 +9485,10 @@ def test_finding_close_first_step_writeback_batch_limit_and_replay(tmp_path, mon
         team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
             team["teamId"],
             task["taskId"],
-            _payload(lead_b),
+            _payload(lead_e),
         )
     assert "请立即以现有 searchTrace[] 与 candidateLeads[] 写回收口并结束任务" in str(exc_info.value)
-    assert data_processing_service.list_records(run_id)["summary"]["recordCount"] == 1
+    assert data_processing_service.list_records(run_id)["summary"]["recordCount"] == 4
 
 
 def test_finding_close_first_step_writeback_rejects_oversized_lead_batch(tmp_path, monkeypatch):
@@ -9469,7 +9510,7 @@ def test_finding_close_first_step_writeback_rejects_oversized_lead_batch(tmp_pat
     ]
     with pytest.raises(
         team_workflow_orchestration_service.TeamWorkflowOrchestrationError,
-        match="每批最多 5 条",
+        match="每批最多 4 条",
     ):
         team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
             team["teamId"],

@@ -183,6 +183,7 @@ def test_project_needs_continue_without_canonical_result_stays_failed(
 
     with pytest.raises(RuntimeError, match="project_agent_task_terminal_failed"):
         complete_agent_turn_outputs(
+            required_kinds=("hypothesis_set",),
             action=PendingAction(
                 action_id="act-p0",
                 run_id="run-p0",
@@ -265,6 +266,7 @@ def test_complete_turn_does_not_invent_example_local_candidates(
     )
     refs = complete_agent_turn_outputs(
         action=action,
+        required_kinds=("source_candidate_batch",),
         handle=handle,
         input_snapshot={
             "teamId": "team-p0",
@@ -323,6 +325,7 @@ def test_source_collection_turn_receives_continuable_not_project_statuses(
     )
 
     refs = complete_agent_turn_outputs(
+        required_kinds=("source_candidate_batch",),
         action=PendingAction(
             action_id="act-sc-gate",
             run_id="run-sc-gate",
@@ -438,6 +441,7 @@ def test_source_collection_needs_continue_turn_is_continued(
     )
 
     refs = complete_agent_turn_outputs(
+        required_kinds=("source_candidate_batch",),
         action=PendingAction(
             action_id="act-sc-cont",
             run_id="run-sc-cont",
@@ -535,6 +539,7 @@ def test_source_collection_turn_continuation_exhaustion_fails_loudly(
 
     with pytest.raises(RuntimeError) as excinfo:
         complete_agent_turn_outputs(
+            required_kinds=("source_candidate_batch",),
             action=PendingAction(
                 action_id="act-sc-exh",
                 run_id="run-sc-exh",
@@ -598,6 +603,7 @@ def test_source_collection_turn_continuation_not_accepted_fails_loudly(
 
     with pytest.raises(RuntimeError) as excinfo:
         complete_agent_turn_outputs(
+            required_kinds=("source_candidate_batch",),
             action=PendingAction(
                 action_id="act-sc-rej",
                 run_id="run-sc-rej",
@@ -741,6 +747,7 @@ def test_completed_project_agent_task_is_closed_before_successor_dispatch(
     )
 
     refs = complete_agent_turn_outputs(
+        required_kinds=("hypothesis_set",),
         action=PendingAction(
             action_id="act-hypothesis-p0",
             run_id="run-p0",

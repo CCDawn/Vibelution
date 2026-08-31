@@ -158,11 +158,80 @@ def validate_artifact_quality(
             counter_candidates = list(
                 payload.get("counterEvidenceCandidateSources") or []
             )
-            if len(perspectives) < 2 or not queries or not candidates:
+            search_trace = [
+                dict(item)
+                for item in list(payload.get("searchTrace") or [])
+                if isinstance(item, dict)
+            ]
+            required_perspectives = {
+                "mechanism",
+                "independent_baseline",
+                "limitation_or_null",
+                "falsification",
+            }
+            normalized_perspectives = {
+                str(item or "").strip().lower() for item in perspectives
+            }
+            missing_perspectives = sorted(
+                required_perspectives - normalized_perspectives
+            )
+            terminal_trace_perspectives = {
+                str(item.get("perspective") or "").strip().lower()
+                for item in search_trace
+                if str(item.get("status") or "").strip().lower()
+                in {
+                    "found",
+                    "duplicate",
+                    "excluded",
+                    "failed",
+                    "no_credible_source",
+                }
+                and list(item.get("eventIds") or [])
+            }
+            missing_terminal_traces = sorted(
+                required_perspectives - terminal_trace_perspectives
+            )
+            candidate_perspectives = {
+                str(
+                    item.get("perspective") or item.get("perspectiveId") or ""
+                ).strip().lower()
+                for item in candidates
+                if isinstance(item, dict)
+            }
+            missing_primary_sources = sorted(
+                {"mechanism", "independent_baseline"} - candidate_perspectives
+            )
+            if (
+                missing_perspectives
+                or missing_terminal_traces
+                or missing_primary_sources
+                or not queries
+                or not candidates
+            ):
                 raise ArtifactQualityError(
-                    "source finding requires at least two perspectives, queries and candidates"
+                    "source finding requires terminal receipts for all four governed "
+                    "perspectives and materialized mechanism/baseline sources; "
+                    f"missingPerspectives={missing_perspectives} "
+                    f"missingTerminalTraces={missing_terminal_traces} "
+                    f"missingPrimarySources={missing_primary_sources}"
                 )
             if not counter_candidates:
+                no_source_perspectives = {
+                    str(item.get("perspective") or "").strip().lower()
+                    for item in search_trace
+                    if str(item.get("status") or "").strip().lower()
+                    == "no_credible_source"
+                    and list(item.get("eventIds") or [])
+                    and str(item.get("failureReason") or "").strip()
+                }
+                if {"limitation_or_null", "falsification"}.issubset(
+                    no_source_perspectives
+                ):
+                    raise ArtifactQualityError(
+                        "source finding needs review: both negative perspectives ended "
+                        "with receipt-bound no_credible_source",
+                        code="source_finding_needs_review",
+                    )
                 raise ArtifactQualityError(
                     "source finding requires a real limitation, null-result or falsification candidate"
                 )
@@ -171,6 +240,10 @@ def validate_artifact_quality(
                 "queryCount": len(queries),
                 "candidateCount": len(candidates),
                 "counterEvidenceCandidateCount": len(counter_candidates),
+                "requiredPerspectives": sorted(required_perspectives),
+                "missingPerspectives": missing_perspectives,
+                "missingTerminalTraces": missing_terminal_traces,
+                "missingPrimarySources": missing_primary_sources,
             }
         elif node_id == "source_extraction":
             payload = _payload_for_kind(manifests, payloads, "evidence_card_batch")

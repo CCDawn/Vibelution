@@ -35,6 +35,24 @@ from core.web.services.team_workflow.research_runtime.service import (
 from core.web.services.team_workflow.research_runtime.store import WorkflowRunStore
 
 
+@pytest.fixture(autouse=True)
+def _canonical_team_binding_source(monkeypatch) -> None:
+    """Freeze source_finder from Team members, the current binding SSOT."""
+
+    monkeypatch.setattr(
+        "core.web.services.team_service.list_team_role_binding_sources",
+        lambda _team_id: {
+            "team_exists": True,
+            "members": [
+                {
+                    "agentId": "agent-source-finder",
+                    "role": "source_finder",
+                }
+            ],
+        },
+    )
+
+
 def _run_input() -> dict:
     return {
         "teamId": "team-quality",
@@ -177,6 +195,7 @@ def test_run_initializes_stage_ledgers_and_budget_exhaustion_blocks_dispatch(
         idempotency_key="create-quality-budget",
     )
     assert {item["stageId"] for item in run["budgetLedgers"]} == {
+        "problem_understanding",
         "knowledge_collection",
         "experiment_design",
         "execution_iteration",
@@ -324,14 +343,36 @@ def test_agent_completion_settles_budget_and_task_bundle_with_real_artifact(
             "artifactManifests": [manifest],
             "artifactPayloads": {
                 manifest["artifactId"]: {
-                    "perspectives": ["技术", "竞赛价值"],
-                    "queries": ["quality query"],
-                    "candidateSources": [{"sourceId": "source-quality"}],
+                    "perspectives": [
+                        "mechanism",
+                        "independent_baseline",
+                        "limitation_or_null",
+                        "falsification",
+                    ],
+                    "queries": ["mechanism", "baseline", "limitation", "falsification"],
+                    "candidateSources": [
+                        {"sourceId": "source-quality", "perspective": "mechanism"},
+                        {"sourceId": "source-baseline", "perspective": "independent_baseline"},
+                        {"sourceId": "source-quality-counter", "perspective": "falsification"},
+                    ],
                     "counterEvidenceCandidateSources": [
                         {
                             "sourceId": "source-quality-counter",
                             "perspective": "falsification",
                         }
+                    ],
+                    "searchTrace": [
+                        {
+                            "perspective": perspective,
+                            "status": "found",
+                            "eventIds": [f"event-{perspective}"],
+                        }
+                        for perspective in (
+                            "mechanism",
+                            "independent_baseline",
+                            "limitation_or_null",
+                            "falsification",
+                        )
                     ],
                 }
             },
@@ -376,20 +417,42 @@ def test_source_quality_gate_requires_perspectives_queries_and_candidates() -> N
         manifests=[manifest],
         payloads={
             manifest["artifactId"]: {
-                "perspectives": ["技术", "竞赛价值"],
-                "queries": ["query-a"],
-                "candidateSources": [{"sourceId": "source-a"}],
+                "perspectives": [
+                    "mechanism",
+                    "independent_baseline",
+                    "limitation_or_null",
+                    "falsification",
+                ],
+                "queries": ["mechanism", "baseline", "limitation", "falsification"],
+                "candidateSources": [
+                    {"sourceId": "source-a", "perspective": "mechanism"},
+                    {"sourceId": "source-baseline-a", "perspective": "independent_baseline"},
+                    {"sourceId": "source-counter-a", "perspective": "limitation_or_null"},
+                ],
                 "counterEvidenceCandidateSources": [
                     {
                         "sourceId": "source-counter-a",
                         "perspective": "limitation_or_null",
                     }
                 ],
+                "searchTrace": [
+                    {
+                        "perspective": perspective,
+                        "status": "found",
+                        "eventIds": [f"event-{perspective}"],
+                    }
+                    for perspective in (
+                        "mechanism",
+                        "independent_baseline",
+                        "limitation_or_null",
+                        "falsification",
+                    )
+                ],
             }
         },
     )
     assert gate is not None and gate["status"] == "passed"
-    assert gate["details"]["perspectiveCount"] == 2
+    assert gate["details"]["perspectiveCount"] == 4
     assert gate["details"]["counterEvidenceCandidateCount"] == 1
     assert records == {}
 
@@ -406,24 +469,94 @@ def test_source_quality_gate_rejects_support_only_candidates() -> None:
             manifests=[manifest],
             payloads={
                 manifest["artifactId"]: {
-                    "perspectives": ["mechanism", "independent_baseline"],
+                    "perspectives": [
+                        "mechanism",
+                        "independent_baseline",
+                        "limitation_or_null",
+                        "falsification",
+                    ],
                     "queries": ["mechanism query", "baseline query"],
                     "candidateSources": [
-                        {"sourceId": "source-support", "perspective": "mechanism"}
+                        {"sourceId": "source-support", "perspective": "mechanism"},
+                        {"sourceId": "source-baseline", "perspective": "independent_baseline"},
                     ],
                     "counterEvidenceCandidateSources": [],
                     "searchTrace": [
+                        {
+                            "perspective": "mechanism",
+                            "status": "found",
+                            "eventIds": ["event-mechanism"],
+                        },
+                        {
+                            "perspective": "independent_baseline",
+                            "status": "found",
+                            "eventIds": ["event-baseline"],
+                        },
+                        {
+                            "perspective": "limitation_or_null",
+                            "status": "found",
+                            "eventIds": ["event-limitation"],
+                        },
                         {
                             "perspective": "falsification",
                             "query": "falsification query",
                             "status": "no_credible_source",
                             "resultRefs": [],
                             "failureReason": "no traceable negative result found",
+                            "eventIds": ["event-falsification"],
                         }
                     ],
                 }
             },
         )
+
+
+def test_source_quality_gate_marks_two_receipt_bound_empty_negative_views_for_review() -> None:
+    manifest = {"artifactId": "source_candidate_batch:needs-review"}
+    with pytest.raises(ArtifactQualityError) as exc_info:
+        validate_artifact_quality(
+            {"runId": "run-needs-review"},
+            node_id="source_finding",
+            manifests=[manifest],
+            payloads={
+                manifest["artifactId"]: {
+                    "perspectives": [
+                        "mechanism",
+                        "independent_baseline",
+                        "limitation_or_null",
+                        "falsification",
+                    ],
+                    "queries": ["mechanism", "baseline", "limitation", "falsification"],
+                    "candidateSources": [
+                        {"sourceId": "source-support", "perspective": "mechanism"},
+                        {"sourceId": "source-baseline", "perspective": "independent_baseline"},
+                    ],
+                    "counterEvidenceCandidateSources": [],
+                    "searchTrace": [
+                        {
+                            "perspective": "mechanism",
+                            "status": "found",
+                            "eventIds": ["event-mechanism"],
+                        },
+                        {
+                            "perspective": "independent_baseline",
+                            "status": "found",
+                            "eventIds": ["event-baseline"],
+                        },
+                        *[
+                            {
+                                "perspective": perspective,
+                                "status": "no_credible_source",
+                                "failureReason": "terminal_provider_receipt_without_results",
+                                "eventIds": [f"event-{perspective}"],
+                            }
+                            for perspective in ("limitation_or_null", "falsification")
+                        ],
+                    ],
+                }
+            },
+        )
+    assert exc_info.value.code == "source_finding_needs_review"
 
 
 def test_hypothesis_campaign_and_evaluation_gates_enforce_rigor() -> None:

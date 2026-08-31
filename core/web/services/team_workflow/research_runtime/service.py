@@ -753,6 +753,17 @@ class ResearchWorkflowRuntimeService:
         existing_edge_ids: set[str],
     ) -> list[dict[str, Any]]:
         """Append auto handoffs using definition edgeId identity (no human dupes)."""
+        from core.research.workflow.definition_registry import (
+            resolve_definition_for_run_record,
+        )
+
+        run_record = self._store.get_run(run_id)
+        if run_record is None:
+            raise ResearchWorkflowError(
+                f"Run not found: {run_id}",
+                code="run_not_found",
+            )
+        definition = resolve_definition_for_run_record(run_record)
         created = build_auto_handoffs_for_completed(
             run_id=run_id,
             workflow_id=workflow_id,
@@ -760,6 +771,7 @@ class ResearchWorkflowRuntimeService:
             completed=completed,
             artifacts=artifacts,
             existing_edge_ids=existing_edge_ids,
+            definition=definition,
         )
         for record in created:
             self._store.append_handoff(run_id, record)
@@ -910,7 +922,14 @@ class ResearchWorkflowRuntimeService:
 
     def get_node_detail(self, run_id: str, node_id: str) -> dict[str, Any]:
         record = self.get_run(run_id)
-        definition = build_challenge_cup_workflow_definition()
+        from core.research.workflow.definition_registry import (
+            resolve_definition_for_run_record,
+        )
+
+        definition = resolve_definition_for_run_record(
+            record,
+            expected_node_ids=[node_id],
+        )
         node = next((n for n in definition.nodes if n.nodeId == node_id), None)
         if node is None:
             raise ResearchWorkflowError(f"Unknown nodeId: {node_id}", code="unknown_node")

@@ -249,6 +249,26 @@ class RealDomainPorts:
 
     # ------------------------------------------------------- run snapshot
 
+    def required_artifact_kinds(self, action: PendingAction) -> tuple[str, ...]:
+        from core.research.workflow.definition_registry import (
+            resolve_definition_for_run_record,
+        )
+        from .artifact_readback_registry import required_artifact_kinds
+
+        run = self._store.get_run(action.run_id)
+        if run is None:
+            raise RuntimeError(f"workflow run not found: {action.run_id}")
+        definition = resolve_definition_for_run_record(
+            {
+                "runId": run.run_id,
+                "workflowId": run.workflow_id,
+                "workflowVersionId": run.workflow_version_id,
+                "structureHash": run.structure_hash,
+            },
+            expected_node_ids=[action.node_id],
+        )
+        return required_artifact_kinds(action.node_id, definition=definition)
+
     def _run_input_snapshot(self, run_id: str) -> dict[str, Any]:
         run = self._store.get_run(run_id)
         if run is None or not run.input_snapshot_json:
@@ -917,6 +937,7 @@ class RealDomainPorts:
             action=action,
             handle=handle,
             input_snapshot=snapshot,
+            required_kinds=self.required_artifact_kinds(action),
             return_result=True,
         )
 
@@ -1565,7 +1586,7 @@ class RealDomainPorts:
             discriminator="aggregation-completed",
         )
         refs = collect_required_artifact_refs(
-            action.node_id,
+            required_kinds=self.required_artifact_kinds(action),
             team_id=team_id,
             workflow_run_id=action.run_id,
             source_collection_run_id=source_collection_run_id,
@@ -1628,6 +1649,7 @@ class RealDomainPorts:
         return _execute_real_system_action(
             action,
             input_snapshot=self._run_input_snapshot(action.run_id),
+            required_kinds=self.required_artifact_kinds(action),
         )
 
     def execute_run_smoke(
@@ -2344,6 +2366,7 @@ def _execute_real_system_action(
     action: PendingAction,
     *,
     input_snapshot: dict[str, Any] | None = None,
+    required_kinds: tuple[str, ...],
 ) -> tuple[list[dict[str, str]], dict[str, Any]]:
     """Dispatch System nodes to the same domain executors the UI adapters use.
 
@@ -2357,9 +2380,9 @@ def _execute_real_system_action(
     node_id = str(action.node_id or "").strip()
     snapshot = dict(input_snapshot or {})
     if node_id == "controlled_run":
-        return _ledger_controlled_run(action, snapshot)
+        return _ledger_controlled_run(action, snapshot, required_kinds=required_kinds)
     if node_id == "result_package":
-        return _ledger_result_package(action, snapshot)
+        return _ledger_result_package(action, snapshot, required_kinds=required_kinds)
     if node_id == "smoke_gate":
         raise RuntimeError(
             "smoke_gate is a Human gate; use execute_run_smoke for Smoke evidence "
@@ -2472,8 +2495,8 @@ def _system_request_payload(
 
 
 def _collect_system_artifact_refs(
-    node_id: str,
     *,
+    required_kinds: tuple[str, ...],
     team_id: str,
     workflow_run_id: str,
     source_collection_run_id: str,
@@ -2481,14 +2504,15 @@ def _collect_system_artifact_refs(
     from .agent_turn_completion import collect_required_artifact_refs
 
     refs = collect_required_artifact_refs(
-        node_id,
+        required_kinds=required_kinds,
         team_id=team_id,
         workflow_run_id=workflow_run_id,
         source_collection_run_id=source_collection_run_id,
     )
     if not refs:
         raise RuntimeError(
-            f"system node {node_id} produced no readable artifact refs"
+            "system action produced no readable artifact refs for required kinds: "
+            + ", ".join(required_kinds)
         )
     return refs
 
@@ -2823,6 +2847,8 @@ def _load_experiment_plan_record(team_id: str, plan_id: str) -> dict[str, Any]:
 def _ledger_controlled_run(
     action: PendingAction,
     snapshot: dict[str, Any],
+    *,
+    required_kinds: tuple[str, ...],
 ) -> tuple[list[dict[str, str]], dict[str, Any]]:
     """Ledger path for controlled_run — same domain call as UI system adapter."""
     from core.research.workflow.contracts import (
@@ -2920,7 +2946,7 @@ def _ledger_controlled_run(
         payload=artifact_payload,
     )
     refs = _collect_system_artifact_refs(
-        "controlled_run",
+        required_kinds=required_kinds,
         team_id=team_id,
         workflow_run_id=action.run_id,
         source_collection_run_id=sc_run_id,
@@ -3157,7 +3183,7 @@ def _ledger_result_evaluation(
         },
     )
     return _collect_system_artifact_refs(
-        "result_evaluation",
+        required_kinds=("evaluation_report",),
         team_id=team_id,
         workflow_run_id=action.run_id,
         source_collection_run_id=sc_run_id,
@@ -3266,7 +3292,7 @@ def _ledger_iteration_decision(
         },
     )
     return _collect_system_artifact_refs(
-        "iteration_decision",
+        required_kinds=("iteration_decision",),
         team_id=team_id,
         workflow_run_id=action.run_id,
         source_collection_run_id=sc_run_id,
@@ -3336,7 +3362,7 @@ def _ledger_version_governance(
         },
     )
     return _collect_system_artifact_refs(
-        "version_governance",
+        required_kinds=("version_governance_record",),
         team_id=team_id,
         workflow_run_id=action.run_id,
         source_collection_run_id=sc_run_id,
@@ -3362,6 +3388,7 @@ def _commit_result_package(
     team_id: str,
     package: dict[str, Any],
     runner_id: str,
+    required_kinds: tuple[str, ...],
 ) -> tuple[list[dict[str, str]], dict[str, Any]]:
     sc_run_id = str(snapshot.get("sourceCollectionRunId") or "").strip()
     artifact_payload = {
@@ -3381,7 +3408,7 @@ def _commit_result_package(
         payload=artifact_payload,
     )
     refs = _collect_system_artifact_refs(
-        "result_package",
+        required_kinds=required_kinds,
         team_id=team_id,
         workflow_run_id=action.run_id,
         source_collection_run_id=sc_run_id,
@@ -3400,6 +3427,8 @@ def _commit_result_package(
 def _ledger_bounded_result_package(
     action: PendingAction,
     snapshot: dict[str, Any],
+    *,
+    required_kinds: tuple[str, ...],
 ) -> tuple[list[dict[str, str]], dict[str, Any]] | None:
     """Write a STOP package from Ledger artifacts when the UI projection is absent.
 
@@ -3534,12 +3563,15 @@ def _ledger_bounded_result_package(
         team_id=team_id,
         package=package,
         runner_id="bounded_package_builder",
+        required_kinds=required_kinds,
     )
 
 
 def _ledger_result_package(
     action: PendingAction,
     snapshot: dict[str, Any],
+    *,
+    required_kinds: tuple[str, ...],
 ) -> tuple[list[dict[str, str]], dict[str, Any]]:
     """Ledger path for result_package — UI projection, else bounded STOP package."""
     from .result_package import ResultPackageError, build_result_package
@@ -3589,7 +3621,11 @@ def _ledger_result_package(
                 )
         except (ResultPackageError, ResultPackageV2Error) as exc:
             if not proposal_only:
-                bounded = _ledger_bounded_result_package(action, snapshot)
+                bounded = _ledger_bounded_result_package(
+                    action,
+                    snapshot,
+                    required_kinds=required_kinds,
+                )
                 if bounded is not None:
                     return bounded
             raise RuntimeError(str(exc)) from exc
@@ -3601,9 +3637,14 @@ def _ledger_result_package(
             team_id=team_id,
             package=package,
             runner_id="package_builder",
+            required_kinds=required_kinds,
         )
 
-    bounded = _ledger_bounded_result_package(action, snapshot)
+    bounded = _ledger_bounded_result_package(
+        action,
+        snapshot,
+        required_kinds=required_kinds,
+    )
     if bounded is not None:
         return bounded
     raise RuntimeError(
