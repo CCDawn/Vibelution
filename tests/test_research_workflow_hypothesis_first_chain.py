@@ -2076,12 +2076,14 @@ def test_auto_retried_collection_completes_through_normal_handoff(
         agent_runner=None,
         background=True,
         budget=None,
+        fan_out_selection=False,
     ):
         meetings_opened.append(
             {
                 "teamId": opened_team_id,
                 "previousMeetingRoundId": previous_meeting_round_id,
                 "collectionRequestId": collection_request_id,
+                "fanOutSelection": fan_out_selection,
             }
         )
         return {"meetingRoundId": "meeting-next"}
@@ -2107,6 +2109,7 @@ def test_auto_retried_collection_completes_through_normal_handoff(
             "teamId": team_id,
             "previousMeetingRoundId": "meeting-auto-retry",
             "collectionRequestId": request_id,
+            "fanOutSelection": True,
         }
     ]
 
@@ -2129,8 +2132,14 @@ def test_completed_collection_handoff_path_unchanged_without_failures(
         agent_runner=None,
         background=True,
         budget=None,
+        fan_out_selection=False,
     ):
-        meetings_opened.append({"collectionRequestId": collection_request_id})
+        meetings_opened.append(
+            {
+                "collectionRequestId": collection_request_id,
+                "fanOutSelection": fan_out_selection,
+            }
+        )
         return {"meetingRoundId": "meeting-next"}
 
     monkeypatch.setattr(chain, "open_next_review_meeting", fake_open_next_meeting)
@@ -2146,7 +2155,9 @@ def test_completed_collection_handoff_path_unchanged_without_failures(
     assert request["collectionRunStatus"] == "completed"
     assert request["handoffError"] == {}
     assert "autoRetry" not in request
-    assert meetings_opened == [{"collectionRequestId": request_id}]
+    assert meetings_opened == [
+        {"collectionRequestId": request_id, "fanOutSelection": True}
+    ]
 
 
 def test_auto_retry_dispatch_failure_consumes_budget_and_escalates(
@@ -3389,6 +3400,13 @@ def test_interruption_recovery_preserves_rounds_and_idempotency(
                 agent_runner=_marker_runner,
             )
             second_round_meetings = _opened_review_meetings(handoff["nextMeeting"])
+            assert len(second_round_meetings) == 2
+            assert {
+                ref.split(":", 1)[1]
+                for item in second_round_meetings
+                for ref in list(item.get("discussionItemRefs") or [])
+                if str(ref).startswith("hypothesis_candidate:")
+            } == {"hyp-a", "hyp-b"}
             second_meeting_id = second_round_meetings[0]["meetingRoundId"]
 
             # Repeating the handoff is a no-op: no new meeting, no new link.

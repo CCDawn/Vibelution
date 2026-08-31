@@ -188,6 +188,70 @@ def _record_policy_shadow_decisions(
         )
 
 
+# ---------------------------------------------------------------------------
+# automation policy active execution hooks (gated, audited, quiet)
+#
+# The executor only ever presses the chain's own idempotent buttons after its
+# full safety ladder (kill switch, activation credential, calibration gate,
+# drain mode, capability switch) passes; with no active policy configured
+# every hook below is a no-op before any I/O, so these calls stay
+# behavior-identical to the pre-executor chain.
+
+
+def _auto_advance_selection_tick(
+    team_id: str,
+    meeting_round: Mapping[str, Any],
+    candidates: list[dict[str, Any]],
+) -> None:
+    """Try autoSelectCandidates right after generation candidates register."""
+
+    from core.web.services.team_workflow.research_runtime import (
+        automation_policy_executor,
+    )
+
+    question_id = str(meeting_round.get("question") or "").strip()
+    candidate_ids = [
+        str(item.get("hypothesisId") or item.get("candidateId") or "").strip()
+        for item in candidates
+        if isinstance(item, Mapping)
+    ]
+    automation_policy_executor.attempt_capability_quietly(
+        decision_point="candidate_selection",
+        team_id=team_id,
+        question_id=question_id,
+        candidate_ids=candidate_ids,
+        selection_scope=_question_scope_envelope(team_id, question_id),
+    )
+
+
+def _auto_advance_converge_tick(team_id: str, question_id: str) -> None:
+    """Try autoConvergeQuestion after a review closure settles."""
+
+    from core.web.services.team_workflow.research_runtime import (
+        automation_policy_executor,
+    )
+
+    automation_policy_executor.attempt_capability_quietly(
+        decision_point="converge_question",
+        team_id=team_id,
+        question_id=str(question_id or "").strip(),
+    )
+
+
+def _auto_advance_meeting_close_tick(team_id: str, meeting_round_id: str) -> None:
+    """Try autoCloseMeetingRound after a summary draft lands (awaiting_approval)."""
+
+    from core.web.services.team_workflow.research_runtime import (
+        automation_policy_executor,
+    )
+
+    automation_policy_executor.attempt_capability_quietly(
+        decision_point="meeting_close",
+        team_id=team_id,
+        meeting_round_id=str(meeting_round_id or "").strip(),
+    )
+
+
 class HypothesisFirstChainError(RuntimeError):
     """Base error for hypothesis-first chain orchestration."""
 
@@ -1698,8 +1762,14 @@ def record_human_adjudication(
     rationale: str,
     idempotency_key: str,
     workflow_run_id: str = "",
+    decided_by: str = "",
 ) -> dict[str, Any]:
-    """Append the missing human authority for an exhausted convergence gate."""
+    """Append the missing human authority for an exhausted convergence gate.
+
+    ``decided_by`` defaults to the operator agent id; the automation-policy
+    executor passes its system actor (``system:auto-advance:<policyId>``)
+    so an auto-recorded adjudication stays attributable in the ledger.
+    """
 
     from core.web.services.team_workflow import hypothesis_rounds
 
@@ -1708,6 +1778,7 @@ def record_human_adjudication(
     normalized_decision = str(decision or "").strip().lower()
     normalized_rationale = str(rationale or "").strip()
     normalized_workflow_run_id = str(workflow_run_id or "").strip()
+    normalized_decided_by = str(decided_by or "").strip() or _OPERATOR_AGENT_ID
     if normalized_decision not in {"accepted", "rejected"}:
         raise ContractValidationError(
             "human_adjudication decision must be accepted or rejected"
@@ -1815,7 +1886,7 @@ def record_human_adjudication(
             "meetingRoundIds": round_meeting_ids,
             "decision": normalized_decision,
             "rationale": normalized_rationale,
-            "decidedBy": _OPERATOR_AGENT_ID,
+            "decidedBy": normalized_decided_by,
             "createdAt": now,
             "updatedAt": now,
         }
@@ -4834,6 +4905,9 @@ def _close_generation_meeting(
     candidates = _append_generation_candidates(
         normalized_team_id, closed_record, proposals
     )
+    # Active-policy hook (autoSelectCandidates): gated, audited, quiet.  With
+    # no active policy configured this is a no-op before any I/O.
+    _auto_advance_selection_tick(normalized_team_id, meeting_round, candidates)
     # Shadow decision point "meeting_close" (generation digest confirmation):
     # advisory record only; the return value and every executed branch below
     # are identical with or without a configured shadow policy.
@@ -6990,6 +7064,13 @@ def close_review_meeting(
             ),
         ],
     )
+    # Active-policy hook (autoConvergeQuestion): gated, audited, quiet.  The
+    # executor re-checks the authoritative chain gates (closed round, meta
+    # review accepted, no pending handoffs) and always passes through the
+    # claim-belief hard gate before recording any adjudication.
+    _auto_advance_converge_tick(
+        normalized_team_id, str(closed_record.get("question") or "")
+    )
     return {
         **result,
         "collection": collection,
@@ -7051,6 +7132,7 @@ def record_collection_handoff(
         agent_runner=agent_runner,
         background=background,
         budget=budget,
+        fan_out_selection=True,
     )
     resume = None
     if runtime is not None:
