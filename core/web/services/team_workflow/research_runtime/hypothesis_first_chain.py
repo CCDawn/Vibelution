@@ -32,7 +32,7 @@ import threading
 import time
 from collections.abc import Callable, Mapping
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -69,6 +69,23 @@ _ACTIVE_MEETING_STATUSES = frozenset({"open", "summarizing", "awaiting_approval"
 _ACTIVE_COLLECTION_STATUSES = frozenset(
     {"pending", "queued", "starting", "dispatching", "running", "collecting"}
 )
+
+# Bounded self-healing for failed collection child runs: when a child run
+# reaches the ``failed`` terminal status, the chain schedules at most
+# ``SOURCE_COLLECTION_AUTO_RETRY_MAX_ATTEMPTS`` automatic recover attempts
+# (the same in-process implementation the recover endpoint uses) with
+# exponential backoff, so a transient failure heals without a human.  Only
+# ``failed`` is auto-retried: ``needs_continue`` stays fatal per the frozen
+# retry taxonomy P0 contract (never auto-reconciled) and ``cancelled`` is a
+# verdict.  Once the budget is spent the request keeps its failed recovery
+# state (the human recover path is untouched) and one anomaly-inbox
+# escalation item is emitted with the frozen ``collection_auto_retry_exhausted``
+# taxonomy code (kind/severity derived by ``build_anomaly_inbox``).
+SOURCE_COLLECTION_AUTO_RETRY_MAX_ATTEMPTS = 2
+SOURCE_COLLECTION_AUTO_RETRY_INITIAL_DELAY_SECONDS = 30.0
+SOURCE_COLLECTION_AUTO_RETRY_BACKOFF_FACTOR = 2.0
+SOURCE_COLLECTION_AUTO_RETRY_MAX_DELAY_SECONDS = 120.0
+COLLECTION_AUTO_RETRY_TAXONOMY_CODE = "collection_auto_retry_exhausted"
 
 PROJECT_ROOT = Path(__file__).resolve().parents[5]
 _LOCK = threading.RLock()
@@ -5933,6 +5950,8 @@ def _scope_envelope_for_collection_request(
 def _recover_collection_request_locked(
     team_id: str,
     request_id: str,
+    *,
+    reset_auto_retry: bool = True,
 ) -> dict[str, Any]:
     """Idempotently bind and restart one orphaned hypothesis collection request.
 
@@ -6071,6 +6090,7 @@ def _recover_collection_request_locked(
         status="pending",
         collectionRunStatus="running",
         startError={},
+        **({"autoRetry": {}} if reset_auto_retry else {}),
     )
     return {
         "schemaVersion": SCHEMA_VERSION,
@@ -6090,8 +6110,15 @@ def _collection_recovery_lock(team_id: str, request_id: str) -> threading.Lock:
 def recover_collection_request(
     team_id: str,
     request_id: str,
+    *,
+    reset_auto_retry: bool = True,
 ) -> dict[str, Any]:
-    """Serialize recovery for one durable request without holding the ledger lock."""
+    """Serialize recovery for one durable request without holding the ledger lock.
+
+    ``reset_auto_retry=True`` (the human/endpoint default) also clears the
+    bounded auto-retry budget so a fresh failure episode can self-heal again;
+    the automatic retry path passes ``False`` to keep its attempt counting.
+    """
     from core.web.services import team_service
 
     normalized_team_id = team_service.assert_team_exists(team_id)
@@ -6102,6 +6129,7 @@ def recover_collection_request(
         return _recover_collection_request_locked(
             normalized_team_id,
             normalized_request_id,
+            reset_auto_retry=reset_auto_retry,
         )
 
 
@@ -6325,6 +6353,369 @@ def approve_meeting_digest(
     )
 
 
+# ---------------------------------------------------------------------------
+# failed collection auto-retry (bounded self-healing) and escalation
+
+
+def _collection_auto_retry_delay_seconds(attempt_count: int) -> float:
+    """Backoff before the next automatic recover attempt.
+
+    Exponential from ``SOURCE_COLLECTION_AUTO_RETRY_INITIAL_DELAY_SECONDS``
+    with factor 2, capped at ``SOURCE_COLLECTION_AUTO_RETRY_MAX_DELAY_SECONDS``.
+    Pure function so tests can pin the schedule.
+    """
+    index = max(int(attempt_count), 0)
+    delay = SOURCE_COLLECTION_AUTO_RETRY_INITIAL_DELAY_SECONDS * (
+        SOURCE_COLLECTION_AUTO_RETRY_BACKOFF_FACTOR**index
+    )
+    return min(delay, SOURCE_COLLECTION_AUTO_RETRY_MAX_DELAY_SECONDS)
+
+
+def _start_collection_auto_retry_timer(
+    delay_seconds: float, callback: Callable[[], None]
+) -> threading.Timer:
+    """Run the backoff wait on a daemon thread, then invoke ``callback``.
+
+    The terminal notification can arrive on synchronous request paths (the
+    source-collection search has a synchronous execute route), so the wait
+    must never happen on the caller's thread — same discipline as the
+    background search thread's own sleeps.
+    """
+    timer = threading.Timer(max(float(delay_seconds), 0.0), callback)
+    timer.daemon = True
+    timer.start()
+    return timer
+
+
+def _failed_collection_run_error_hint(run_id: str) -> str:
+    """Best-effort terminal error text from the child run's work-run snapshot.
+
+    Never raises and never blocks the chain: a missing or unreadable snapshot
+    degrades to an empty hint (the request's own start/handoff errors remain
+    the fallback inside the escalation message).
+    """
+    normalized_run_id = str(run_id or "").strip()
+    if not normalized_run_id:
+        return ""
+    try:
+        from core.runtime_manager import work_run_store as work_run_store_module
+
+        store = work_run_store_module.WorkRunStore(
+            root=work_run_store_module.WORK_RUNS_DIR
+        )
+        snapshot = store.load_snapshot(
+            "source_collection_run", normalized_run_id
+        )
+    except Exception:  # noqa: BLE001 - diagnostics only
+        return ""
+    if not isinstance(snapshot, Mapping):
+        return ""
+    message = str(snapshot.get("error") or "").strip()
+    if not message:
+        message = str(snapshot.get("summary") or "").strip()
+    return message[:500]
+
+
+def _collection_request_error_hint(request: Mapping[str, Any]) -> str:
+    """Last error recorded on the request record itself (fallback hint)."""
+    for field in ("startError", "handoffError"):
+        value = request.get(field)
+        if isinstance(value, Mapping):
+            message = str(value.get("message") or "").strip()
+            if message:
+                return message[:500]
+    return ""
+
+
+def _latest_collection_request_locked(team_id: str, request_id: str) -> dict[str, Any] | None:
+    with _LOCK:
+        return _latest_by_id(
+            [
+                item
+                for item in _read_jsonl(_storage_path(team_id))
+                if item.get("recordKind") == COLLECTION_REQUEST_KIND
+            ],
+            "requestId",
+            request_id,
+        )
+
+
+def _merge_collection_auto_retry_state(
+    team_id: str, request_id: str, fields: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Read-modify-write the ``autoRetry`` state block of one request."""
+    with _LOCK:
+        latest = _latest_collection_request_locked(team_id, request_id)
+        if latest is None:
+            raise HypothesisFirstChainNotFoundError(
+                f"Collection request {request_id} not found."
+            )
+        state = (
+            dict(latest.get("autoRetry"))
+            if isinstance(latest.get("autoRetry"), Mapping)
+            else {}
+        )
+        state.update(dict(fields))
+        return _update_collection_request(team_id, request_id, autoRetry=state)
+
+
+def _escalate_collection_auto_retry_exhausted(
+    team_id: str,
+    request: Mapping[str, Any],
+    *,
+    auto_retry: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Emit the anomaly-inbox escalation once the retry budget is spent.
+
+    Same emission pattern as the bounded auto-revision parking: the pure
+    ``build_anomaly_inbox`` projector turns the frozen-taxonomy
+    ``human_required`` problem into the canonical item, which is persisted on
+    the request record (``anomalyEscalation``).  The request itself stays in
+    its failed recovery state so the human recover endpoint keeps working
+    unchanged.
+    """
+    request_id = str(request.get("requestId") or "")
+    run_id = str(request.get("collectionRunId") or "")
+    now = _utc_now()
+    attempts = int(auto_retry.get("attemptCount") or 0)
+    last_error = str(auto_retry.get("lastError") or "").strip()
+    message = (
+        f"资料搜集请求 {request_id} 自动重试预算已耗尽"
+        f"（{attempts}/{SOURCE_COLLECTION_AUTO_RETRY_MAX_ATTEMPTS} 次），"
+        "子运行保持 failed，需要人工恢复。"
+    )
+    if last_error:
+        message += f" 最后错误：{last_error}"
+    items: list[dict[str, Any]] = []
+    try:
+        from core.web.services.team_workflow.research_runtime.anomaly_inbox_service import (
+            build_anomaly_inbox,
+        )
+
+        inbox = build_anomaly_inbox(
+            {
+                "teamId": team_id,
+                "questionId": str(request.get("questionId") or ""),
+                "problems": [
+                    {
+                        "code": COLLECTION_AUTO_RETRY_TAXONOMY_CODE,
+                        "category": "execution",
+                        "sourceKind": "collection_request",
+                        "sourceId": request_id,
+                        "message": message,
+                        "detectedAt": (
+                            str(auto_retry.get("exhaustedAt") or "").strip() or now
+                        ),
+                    }
+                ],
+            },
+            generated_at=now,
+        )
+        items = [item.to_dict() for item in inbox.items]
+    except Exception:  # noqa: BLE001 - escalation must not depend on the projector
+        items = []
+    escalation = {
+        "status": "emitted" if items else "unavailable",
+        "taxonomyCode": COLLECTION_AUTO_RETRY_TAXONOMY_CODE,
+        "requestId": request_id,
+        "collectionRunId": run_id,
+        "attempts": attempts,
+        "lastError": last_error,
+        "emittedAt": now,
+        "items": items,
+    }
+    _record_scene_event(
+        "collection_auto_retry_exhausted",
+        outcome="escalated" if items else "projector_unavailable",
+        level="warning",
+        fields={
+            "requestId": request_id,
+            "collectionRunId": run_id,
+            "attempts": attempts,
+            "anomalyItemCount": len(items),
+        },
+    )
+    try:
+        _update_collection_request(team_id, request_id, anomalyEscalation=escalation)
+    except Exception:  # noqa: BLE001 - the exhausted marker is already durable
+        pass
+    return {"phase": "exhausted", "escalation": escalation}
+
+
+def _claim_collection_auto_retry(
+    team_id: str,
+    request_id: str,
+    *,
+    run_id: str = "",
+) -> dict[str, Any] | None:
+    """Claim one ``failed`` terminal event for a bounded automatic recover.
+
+    Compare-and-set under the ledger lock so a replayed terminal notification
+    never schedules a second attempt: a claim succeeds only when the request's
+    ``autoRetry.phase`` is idle or finished for the previous event
+    (``""`` / ``dispatched`` / ``dispatch_failed`` / ``superseded``).
+    ``backoff`` means the same failure event is already claimed (replay);
+    ``exhausted`` means the budget is spent.  When the budget is spent the
+    claim parks the request in ``exhausted`` and emits the anomaly-inbox
+    escalation exactly once; the request stays ``failed`` and recoverable.
+    """
+    outcome: tuple[str, dict[str, Any]] | None = None
+    with _LOCK:
+        latest = _latest_collection_request_locked(team_id, request_id)
+        if latest is not None and str(latest.get("status") or "").strip().lower() != "handed_off":
+            previous = (
+                dict(latest.get("autoRetry"))
+                if isinstance(latest.get("autoRetry"), Mapping)
+                else {}
+            )
+            phase = str(previous.get("phase") or "").strip().lower()
+            if phase not in {"backoff", "exhausted"}:
+                attempt_count = int(previous.get("attemptCount") or 0)
+                if (
+                    phase == "dispatch_failed"
+                    and str(previous.get("lastError") or "").strip()
+                ):
+                    # The chained claim after a failed dispatch: the freshest
+                    # error is the dispatch failure itself, not the run's
+                    # stale terminal snapshot.
+                    last_error = str(previous.get("lastError") or "").strip()[:500]
+                else:
+                    last_error = (
+                        _failed_collection_run_error_hint(run_id)
+                        or _collection_request_error_hint(latest)
+                    )
+                now = _utc_now()
+                if attempt_count >= SOURCE_COLLECTION_AUTO_RETRY_MAX_ATTEMPTS:
+                    exhausted = {
+                        **previous,
+                        "phase": "exhausted",
+                        "exhaustedAt": now,
+                        "lastError": last_error,
+                    }
+                    _update_collection_request(
+                        team_id, request_id, autoRetry=exhausted
+                    )
+                    outcome = ("exhausted", exhausted)
+                else:
+                    delay = _collection_auto_retry_delay_seconds(attempt_count)
+                    claimed = {
+                        **previous,
+                        "phase": "backoff",
+                        "attemptCount": attempt_count + 1,
+                        "scheduledAt": now,
+                        "nextRetryAt": (
+                            datetime.now(timezone.utc) + timedelta(seconds=delay)
+                        ).isoformat().replace("+00:00", "Z"),
+                        "lastError": last_error,
+                    }
+                    _update_collection_request(
+                        team_id, request_id, autoRetry=claimed
+                    )
+                    outcome = ("backoff", claimed)
+    if outcome is None:
+        return None
+    kind, state = outcome
+    if kind == "backoff":
+        delay = _collection_auto_retry_delay_seconds(
+            max(int(state.get("attemptCount") or 1) - 1, 0)
+        )
+        _start_collection_auto_retry_timer(
+            delay,
+            lambda: _dispatch_collection_auto_retry(
+                team_id, request_id, run_id=run_id
+            ),
+        )
+        return {"phase": "backoff", "autoRetry": state, "delaySeconds": delay}
+    escalation = _escalate_collection_auto_retry_exhausted(
+        team_id,
+        _latest_collection_request_locked(team_id, request_id) or {},
+        auto_retry=state,
+    )
+    return {
+        "phase": "exhausted",
+        "autoRetry": state,
+        "escalation": escalation["escalation"],
+    }
+
+
+def _dispatch_collection_auto_retry(team_id: str, request_id: str, *, run_id: str = "") -> None:
+    """Timer callback: run one claimed automatic recover attempt.
+
+    Skips when the claim was superseded (a human already recovered, stopped or
+    handed off the request).  The recover call is the same in-process
+    implementation the recover endpoint uses; ``reset_auto_retry=False``
+    keeps the attempt budget.  A failed dispatch consumes the attempt and
+    chains the next claim so the budget still terminates in an escalation.
+    """
+    try:
+        with _LOCK:
+            latest = _latest_collection_request_locked(team_id, request_id)
+            if latest is None:
+                return
+            state = (
+                dict(latest.get("autoRetry"))
+                if isinstance(latest.get("autoRetry"), Mapping)
+                else {}
+            )
+            if str(state.get("phase") or "").strip().lower() != "backoff":
+                return  # superseded: a human already moved the request
+        result = recover_collection_request(
+            team_id, request_id, reset_auto_retry=False
+        )
+        # ``reused`` covers both the idempotent same-run rebind (a normal
+        # restart) and the nothing-to-do early returns; the restarted run is
+        # recognised by its ``running`` collection status.
+        recovered_request = (
+            result.get("request") if isinstance(result.get("request"), Mapping) else {}
+        )
+        restarted = (
+            str(recovered_request.get("collectionRunStatus") or "").strip().lower()
+            == "running"
+        )
+        phase = "dispatched" if restarted else "superseded"
+        _merge_collection_auto_retry_state(
+            team_id,
+            request_id,
+            {"phase": phase, "lastAttemptAt": _utc_now()},
+        )
+        _record_scene_event(
+            "collection_auto_retry_dispatched",
+            outcome="ok",
+            fields={
+                "requestId": request_id,
+                "collectionRunId": run_id,
+                "recoverStatus": str(result.get("status") or ""),
+                "restarted": restarted,
+            },
+        )
+    except Exception as exc:  # noqa: BLE001 - request stays visibly failed/retryable
+        try:
+            _merge_collection_auto_retry_state(
+                team_id,
+                request_id,
+                {
+                    "phase": "dispatch_failed",
+                    "lastAttemptAt": _utc_now(),
+                    "lastError": str(exc)[:500],
+                },
+            )
+        except Exception:  # noqa: BLE001 - never mask the dispatch error
+            pass
+        _record_scene_event(
+            "collection_auto_retry_dispatch_failed",
+            outcome="error",
+            level="warning",
+            fields={"requestId": request_id, "error": str(exc)[:500]},
+        )
+        # The attempt never reached the run: consume the next budget slot so
+        # persistent recover failures still terminate in the escalation
+        # instead of stopping silently.
+        try:
+            _claim_collection_auto_retry(team_id, request_id, run_id=run_id)
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def notify_collection_run_terminal(
     team_id: str,
     collection_run_id: str,
@@ -6355,11 +6746,30 @@ def notify_collection_run_terminal(
             )
             for record in requests
         ]
-        return {
+        result: dict[str, Any] = {
             "status": "collection_recovery",
             "requests": updated,
             "request": updated[-1] if updated else {},
         }
+        if status == "failed":
+            # Bounded self-healing: only ``failed`` schedules the automatic
+            # recover chain; ``needs_continue`` stays fatal (retry taxonomy
+            # P0: never auto-reconciled) and ``cancelled`` is a verdict.
+            escalations: list[dict[str, Any]] = []
+            for record in requests:
+                request_id = str(record.get("requestId") or "").strip()
+                if not request_id:
+                    continue
+                outcome = _claim_collection_auto_retry(
+                    normalized_team_id,
+                    request_id,
+                    run_id=run_id,
+                )
+                if outcome and outcome.get("phase") == "exhausted":
+                    escalations.append(outcome)
+            if escalations:
+                result["autoRetryEscalations"] = escalations
+        return result
     if status != "completed":
         return {"status": "ignored", "reason": "non_completed"}
     last: dict[str, Any] = {"status": "ignored"}

@@ -432,6 +432,22 @@ _DEFAULT_RETRY_TAXONOMY_ENTRIES: tuple[RetryTaxonomyEntry, ...] = (
         "no automatic retry may consume budget that no longer exists",
         human_actions=(HumanActionFamily.RECONCILE_RUN, HumanActionFamily.ARCHIVE_RUN),
     ),
+    _entry(
+        "collection_auto_retry_exhausted",
+        RetryOutcomeClass.HUMAN_REQUIRED,
+        RetryOutcomeOwner.OPERATOR,
+        "hypothesis_first_chain.py collection auto-retry contract: a failed "
+        "hypothesis-first collection request receives at most "
+        "SOURCE_COLLECTION_AUTO_RETRY_MAX_ATTEMPTS automatic recover attempts "
+        "(same in-process implementation as the recover endpoint, exponential "
+        "backoff on a background thread); once that budget is exhausted the "
+        "request stays failed and only the human recover endpoint resolves it "
+        "(needs_continue is out of scope entirely: it stays fatal per the "
+        "cf789360c P0 contract); contract tests "
+        "test_research_workflow_hypothesis_first_chain.py and "
+        "test_research_workflow_retry_taxonomy.py",
+        human_actions=(HumanActionFamily.RETRY_NODE, HumanActionFamily.RECONCILE_RUN),
+    ),
     # -- terminal: never retried ------------------------------------------
     _entry(
         "session_cancelled",

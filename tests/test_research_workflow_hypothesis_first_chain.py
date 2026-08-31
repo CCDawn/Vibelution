@@ -1802,6 +1802,380 @@ def test_collection_request_recovery_reuses_child_run_without_resetting_chain(
     assert len([record for record in records if record["requestId"] == request_id]) == 1
 
 
+# ---------------------------------------------------------------------------
+# failed collection auto-retry (bounded self-healing) and exhaustion escalation
+
+
+_AUTO_RETRY_ERROR_HINT = "background worker crashed (fixture)"
+
+
+def _auto_retry_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Standard chain env plus a deterministic failed-run error hint.
+
+    The hint patch keeps the auto-retry path from reading the machine-global
+    work-run store, so the tests stay hermetic.
+    """
+    team_id, agents = _hf_env(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        chain, "_failed_collection_run_error_hint", lambda run_id: _AUTO_RETRY_ERROR_HINT
+    )
+    return team_id, agents
+
+
+def _seed_auto_retry_request(
+    team_id: str,
+    agents: dict[str, str],
+    *,
+    request_id: str,
+    run_id: str,
+    run_status: str = "running",
+) -> None:
+    scope_fields = _scope_fields(agents["coordinator"])
+    scope_hash = scope_hash_for(
+        **{field: scope_fields[field] for field in chain._SCOPE_FIELDS},
+        agent_id=scope_fields["agentId"],
+        mode=scope_fields["mode"],
+    )
+    chain._append_jsonl(
+        chain._storage_path(team_id),
+        {
+            "schemaVersion": 1,
+            "recordKind": chain.COLLECTION_REQUEST_KIND,
+            "requestId": request_id,
+            "requestHash": f"hash-{request_id}",
+            "status": "pending",
+            "meetingRoundId": "meeting-auto-retry",
+            "decisionId": f"decision-{request_id}",
+            "questionId": _QUESTION_ID,
+            **scope_fields,
+            "scopeHash": scope_hash,
+            "searchEnvelope": {"keywords": ["auto retry evidence"]},
+            "requirements": {"completeness": "bounded"},
+            "writebackPolicy": {"networkExecution": False},
+            "collectionRunId": run_id,
+            "collectionRunStatus": run_status,
+            "startError": {},
+            "createdAt": "2026-08-30T00:00:00Z",
+        },
+    )
+
+
+def _capture_auto_retry_timer(
+    monkeypatch: pytest.MonkeyPatch, *, run_inline: bool = False
+) -> list[dict[str, object]]:
+    """Capture the backoff scheduling seam; optionally dispatch inline."""
+    scheduled: list[dict[str, object]] = []
+
+    def fake_timer(delay_seconds: float, callback) -> None:
+        scheduled.append({"delaySeconds": float(delay_seconds), "callback": callback})
+        if run_inline:
+            callback()
+
+    monkeypatch.setattr(chain, "_start_collection_auto_retry_timer", fake_timer)
+    return scheduled
+
+
+def _patch_collection_restart(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    child_run_id: str = "child-auto-retry",
+    fail: bool = False,
+):
+    """Patch the facade ensure plus background start the recover path uses."""
+    ensures: list[dict[str, object]] = []
+    starts: list[dict[str, object]] = []
+
+    def fake_ensure(**kwargs):
+        ensures.append(dict(kwargs))
+        if fail:
+            raise RuntimeError("facade unavailable (fixture)")
+        return {"locator": {"runId": child_run_id}, "created": False}
+
+    monkeypatch.setattr(facade, "research_knowledge_collection_facade", fake_ensure)
+
+    def fake_start(team_id: str, run_id: str, payload=None):
+        starts.append({"runId": run_id, "payload": dict(payload or {})})
+        return {"runId": run_id, "status": "running"}
+
+    monkeypatch.setattr(
+        collection_runs, "start_source_collection_search_background", fake_start
+    )
+    return ensures, starts
+
+
+def _latest_auto_retry_request(team_id: str, request_id: str) -> dict[str, object]:
+    return chain._latest_by_id(
+        chain._collection_requests(chain._records(team_id)),
+        "requestId",
+        request_id,
+    )
+
+
+def test_failed_collection_run_schedules_one_backoff_auto_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    team_id, agents = _auto_retry_env(tmp_path, monkeypatch)
+    request_id, run_id = "hfcr-auto-first", "dprun-auto-first"
+    _seed_auto_retry_request(team_id, agents, request_id=request_id, run_id=run_id)
+    scheduled = _capture_auto_retry_timer(monkeypatch)
+    ensures, starts = _patch_collection_restart(monkeypatch)
+
+    result = chain.notify_collection_run_terminal(team_id, run_id, "failed")
+
+    assert result["status"] == "collection_recovery"
+    request = _latest_auto_retry_request(team_id, request_id)
+    assert request["collectionRunStatus"] == "failed"
+    auto_retry = request["autoRetry"]
+    assert auto_retry["phase"] == "backoff"
+    assert auto_retry["attemptCount"] == 1
+    assert auto_retry["lastError"] == _AUTO_RETRY_ERROR_HINT
+    assert auto_retry["nextRetryAt"]
+    assert [entry["delaySeconds"] for entry in scheduled] == [30.0]
+    # exponential schedule: 30s, 60s, then capped at 120s
+    assert chain._collection_auto_retry_delay_seconds(0) == 30.0
+    assert chain._collection_auto_retry_delay_seconds(1) == 60.0
+    assert chain._collection_auto_retry_delay_seconds(2) == 120.0
+    assert chain._collection_auto_retry_delay_seconds(9) == 120.0
+
+    # the timer callback runs the same in-process recover implementation
+    scheduled[0]["callback"]()
+    assert len(ensures) == 1
+    assert starts and starts[0]["runId"] == "child-auto-retry"
+    request = _latest_auto_retry_request(team_id, request_id)
+    assert request["status"] == "pending"
+    assert request["collectionRunStatus"] == "running"
+    assert request["autoRetry"]["phase"] == "dispatched"
+    assert request["autoRetry"]["attemptCount"] == 1
+
+
+def test_failed_collection_run_replay_does_not_double_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    team_id, agents = _auto_retry_env(tmp_path, monkeypatch)
+    request_id, run_id = "hfcr-auto-replay", "dprun-auto-replay"
+    _seed_auto_retry_request(team_id, agents, request_id=request_id, run_id=run_id)
+    scheduled = _capture_auto_retry_timer(monkeypatch)
+    # the idempotent facade re-binds the same child run on recover, so the
+    # request stays bound to the same run id across retries
+    _patch_collection_restart(monkeypatch, child_run_id=run_id)
+
+    chain.notify_collection_run_terminal(team_id, run_id, "failed")
+    # replays of the same failed terminal event while the retry is scheduled
+    chain.notify_collection_run_terminal(team_id, run_id, "failed")
+    chain.notify_collection_run_terminal(team_id, run_id, "failed")
+
+    assert [entry["delaySeconds"] for entry in scheduled] == [30.0]
+    request = _latest_auto_retry_request(team_id, request_id)
+    assert request["autoRetry"]["attemptCount"] == 1
+    assert request["autoRetry"]["phase"] == "backoff"
+
+    # a failure after the dispatched retry is a new event: it consumes the
+    # second budget slot with the next backoff step
+    scheduled[0]["callback"]()
+    chain.notify_collection_run_terminal(team_id, run_id, "failed")
+
+    assert [entry["delaySeconds"] for entry in scheduled] == [30.0, 60.0]
+    request = _latest_auto_retry_request(team_id, request_id)
+    assert request["autoRetry"]["attemptCount"] == 2
+    assert request["autoRetry"]["phase"] == "backoff"
+
+
+def test_auto_retry_exhaustion_emits_inbox_and_keeps_manual_recover(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    team_id, agents = _auto_retry_env(tmp_path, monkeypatch)
+    request_id, run_id = "hfcr-auto-exhaust", "dprun-auto-exhaust"
+    _seed_auto_retry_request(team_id, agents, request_id=request_id, run_id=run_id)
+    scheduled = _capture_auto_retry_timer(monkeypatch, run_inline=True)
+    _patch_collection_restart(monkeypatch, child_run_id=run_id)
+
+    # failure 1 -> retry 1; failure 2 -> retry 2; failure 3 -> exhausted
+    chain.notify_collection_run_terminal(team_id, run_id, "failed")
+    chain.notify_collection_run_terminal(team_id, run_id, "failed")
+    result = chain.notify_collection_run_terminal(team_id, run_id, "failed")
+
+    assert [entry["delaySeconds"] for entry in scheduled] == [30.0, 60.0]
+    assert [entry["escalation"]["attempts"] for entry in result["autoRetryEscalations"]] == [2]
+    request = _latest_auto_retry_request(team_id, request_id)
+    # the request keeps its failed recovery state (manual recover untouched)
+    assert request["status"] == "pending"
+    assert request["collectionRunStatus"] == "failed"
+    assert request["autoRetry"]["phase"] == "exhausted"
+    assert request["autoRetry"]["attemptCount"] == 2
+    assert request["autoRetry"]["exhaustedAt"]
+
+    escalation = request["anomalyEscalation"]
+    assert escalation["status"] == "emitted"
+    assert escalation["taxonomyCode"] == "collection_auto_retry_exhausted"
+    assert escalation["requestId"] == request_id
+    assert escalation["attempts"] == 2
+    assert escalation["lastError"] == _AUTO_RETRY_ERROR_HINT
+    items = escalation["items"]
+    assert len(items) == 1
+    item = items[0]
+    assert item["kind"] == "blocked_run"
+    assert item["recommendedAction"] == "retry_node"
+    assert request_id in item["summary"]
+    assert "2/2" in item["summary"]
+    assert _AUTO_RETRY_ERROR_HINT in item["summary"]
+    assert f"source:collection_request:{request_id}" in item["evidence"]
+
+    # exactly-once: another exhausted terminal event does not re-emit
+    chain.notify_collection_run_terminal(team_id, run_id, "failed")
+    request = _latest_auto_retry_request(team_id, request_id)
+    assert request["anomalyEscalation"]["emittedAt"] == escalation["emittedAt"]
+
+    # the human recover endpoint still works and refreshes the budget
+    recovered = chain.recover_collection_request(team_id, request_id)
+    assert recovered["status"] in {"recovered", "reused"}
+    request = _latest_auto_retry_request(team_id, request_id)
+    assert request["collectionRunStatus"] == "running"
+    assert request["autoRetry"] == {}
+
+
+def test_needs_continue_never_triggers_auto_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    team_id, agents = _auto_retry_env(tmp_path, monkeypatch)
+    request_id, run_id = "hfcr-auto-needs-continue", "dprun-auto-continue"
+    _seed_auto_retry_request(team_id, agents, request_id=request_id, run_id=run_id)
+    scheduled = _capture_auto_retry_timer(monkeypatch)
+
+    result = chain.notify_collection_run_terminal(team_id, run_id, "needs_continue")
+
+    # red line: needs_continue stays fatal and is never auto-reconciled
+    assert result["status"] == "collection_recovery"
+    request = _latest_auto_retry_request(team_id, request_id)
+    assert request["collectionRunStatus"] == "needs_continue"
+    assert "autoRetry" not in request
+    assert scheduled == []
+
+    result = chain.notify_collection_run_terminal(team_id, run_id, "cancelled")
+    request = _latest_auto_retry_request(team_id, request_id)
+    assert result["status"] == "collection_recovery"
+    assert request["status"] == "failed"
+    assert request["collectionRunStatus"] == "cancelled"
+    assert scheduled == []
+
+
+def test_auto_retried_collection_completes_through_normal_handoff(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    team_id, agents = _auto_retry_env(tmp_path, monkeypatch)
+    request_id, run_id = "hfcr-auto-handoff", "dprun-auto-handoff"
+    _seed_auto_retry_request(team_id, agents, request_id=request_id, run_id=run_id)
+    _capture_auto_retry_timer(monkeypatch, run_inline=True)
+    _patch_collection_restart(monkeypatch, child_run_id=run_id)
+    meetings_opened: list[dict[str, object]] = []
+
+    def fake_open_next_meeting(
+        opened_team_id: str,
+        *,
+        previous_meeting_round_id: str,
+        collection_request_id: str,
+        agent_runner=None,
+        background=True,
+        budget=None,
+    ):
+        meetings_opened.append(
+            {
+                "teamId": opened_team_id,
+                "previousMeetingRoundId": previous_meeting_round_id,
+                "collectionRequestId": collection_request_id,
+            }
+        )
+        return {"meetingRoundId": "meeting-next"}
+
+    monkeypatch.setattr(chain, "open_next_review_meeting", fake_open_next_meeting)
+
+    # failure -> automatic retry restarts the child run
+    chain.notify_collection_run_terminal(team_id, run_id, "failed")
+    request = _latest_auto_retry_request(team_id, request_id)
+    assert request["autoRetry"]["phase"] == "dispatched"
+    assert request["collectionRunStatus"] == "running"
+
+    # the restarted run completes: the untouched completed path hands off
+    result = chain.notify_collection_run_terminal(team_id, run_id, "completed")
+
+    assert result["status"] == "handed_off"
+    request = _latest_auto_retry_request(team_id, request_id)
+    assert request["status"] == "handed_off"
+    assert request["collectionRunStatus"] == "completed"
+    assert request["handoffRef"] == f"source_collection_run:{run_id}"
+    assert meetings_opened == [
+        {
+            "teamId": team_id,
+            "previousMeetingRoundId": "meeting-auto-retry",
+            "collectionRequestId": request_id,
+        }
+    ]
+
+
+def test_completed_collection_handoff_path_unchanged_without_failures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    team_id, agents = _auto_retry_env(tmp_path, monkeypatch)
+    request_id, run_id = "hfcr-auto-completed", "dprun-auto-completed"
+    _seed_auto_retry_request(team_id, agents, request_id=request_id, run_id=run_id)
+    scheduled = _capture_auto_retry_timer(monkeypatch)
+    _patch_collection_restart(monkeypatch)
+    meetings_opened: list[dict[str, object]] = []
+
+    def fake_open_next_meeting(
+        opened_team_id: str,
+        *,
+        previous_meeting_round_id: str,
+        collection_request_id: str,
+        agent_runner=None,
+        background=True,
+        budget=None,
+    ):
+        meetings_opened.append({"collectionRequestId": collection_request_id})
+        return {"meetingRoundId": "meeting-next"}
+
+    monkeypatch.setattr(chain, "open_next_review_meeting", fake_open_next_meeting)
+
+    result = chain.notify_collection_run_terminal(team_id, run_id, "completed")
+
+    # regression: the pristine completed path behaves exactly as before
+    assert result["status"] == "handed_off"
+    assert scheduled == []
+    assert "autoRetryEscalations" not in result
+    request = _latest_auto_retry_request(team_id, request_id)
+    assert request["status"] == "handed_off"
+    assert request["collectionRunStatus"] == "completed"
+    assert request["handoffError"] == {}
+    assert "autoRetry" not in request
+    assert meetings_opened == [{"collectionRequestId": request_id}]
+
+
+def test_auto_retry_dispatch_failure_consumes_budget_and_escalates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    team_id, agents = _auto_retry_env(tmp_path, monkeypatch)
+    request_id, run_id = "hfcr-auto-dispatch-fail", "dprun-auto-dispatch-fail"
+    _seed_auto_retry_request(team_id, agents, request_id=request_id, run_id=run_id)
+    scheduled = _capture_auto_retry_timer(monkeypatch, run_inline=True)
+    _patch_collection_restart(monkeypatch, child_run_id=run_id, fail=True)
+
+    # each failed dispatch consumes one budget slot and chains the next
+    # backoff attempt, so persistent recover failures still terminate in the
+    # escalation instead of stopping silently
+    chain.notify_collection_run_terminal(team_id, run_id, "failed")
+
+    assert [entry["delaySeconds"] for entry in scheduled] == [30.0, 60.0]
+    request = _latest_auto_retry_request(team_id, request_id)
+    assert request["autoRetry"]["phase"] == "exhausted"
+    assert request["autoRetry"]["attemptCount"] == 2
+    assert request["autoRetry"]["lastError"] == "facade unavailable (fixture)"
+    assert "facade unavailable (fixture)" in request["anomalyEscalation"]["lastError"]
+    assert request["anomalyEscalation"]["status"] == "emitted"
+    assert request["anomalyEscalation"]["items"][0]["summary"].count(
+        "facade unavailable (fixture)"
+    ) == 1
+    assert request["collectionRunStatus"] == "failed"
+
+
 def _seed_question_reset_artifacts(team_id: str, question_id: str) -> dict[str, str]:
     """Seed only the durable hypothesis-first artifacts owned by one question."""
     suffix = question_id.lower()
