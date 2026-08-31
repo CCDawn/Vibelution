@@ -1219,7 +1219,7 @@ describe("ResearchProcessWorkspace", () => {
   it("keeps collection recovery actionable in the fixed current-task footer", async () => {
     harness.location.panel = "node";
     harness.location.questionId = "SCI-004";
-    harness.location.selectedNodeId = "source_finding";
+    harness.location.selectedNodeId = "hf_collection";
     harness.chain.questionId = "SCI-004";
     harness.chain.selection = {
       questionId: "SCI-004",
@@ -1238,12 +1238,18 @@ describe("ResearchProcessWorkspace", () => {
       definition: { nodes: [], edges: [], stages: [] },
       run: { teamId: "research-team", runtimeCurrentNodeIds: [], nodeRuns: {} },
     } as never;
+    harness.runState.snapshot = {
+      currentTask: {
+        nodeId: "source_finding",
+      },
+    } as never;
     harness.chain.recoveryError = "worker unavailable";
     harness.chain.recoverCollection.mockResolvedValue(undefined);
     const rendered = await renderWorkspace();
     root = rendered.root;
 
     expect(rendered.container.querySelector('[data-task-status="recoverable_error"]')).not.toBeNull();
+    expect(rendered.container.querySelector('[data-history-mode="false"]')).not.toBeNull();
     const footer = rendered.container.querySelector('[data-vui-region="current-task-action"]');
     const retry = Array.from(footer?.querySelectorAll("button") ?? []).find((button) => (
       button.textContent?.includes("重试搜集")
