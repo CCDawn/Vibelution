@@ -3196,6 +3196,90 @@ def _source_collection_result_from_arxiv_entry(entry: ET.Element, *, fallback_so
     }
 
 
+def _source_collection_openalex_abstract(abstract_inverted_index: Any) -> str:
+    """Rebuild abstract text from OpenAlex's ``abstract_inverted_index``.
+
+    OpenAlex stores abstracts as a ``{word: [position, ...]}`` inverted index;
+    the words are placed at their positions and joined in order to recover the
+    original text.  The rebuilt abstract is the verbatim material downstream
+    extraction quotes from, so this rebuild is load-bearing for the evidence
+    pipeline.
+    """
+    if not isinstance(abstract_inverted_index, dict) or not abstract_inverted_index:
+        return ""
+    placements: list[tuple[int, str]] = []
+    for word, positions in abstract_inverted_index.items():
+        if not isinstance(positions, (list, tuple)):
+            continue
+        for position in positions:
+            if isinstance(position, int) and not isinstance(position, bool):
+                placements.append((int(position), str(word)))
+    if not placements:
+        return ""
+    placements.sort(key=lambda pair: pair[0])
+    return " ".join(word for _position, word in placements)
+
+
+def _source_collection_result_from_openalex_work(work: dict[str, Any], *, fallback_source_type: str) -> dict[str, Any]:
+    """Map one OpenAlex ``work`` object into the shared search-result shape.
+
+    The rebuilt abstract must land in ``summary`` (with a ``hasAbstract``
+    quality signal): downstream extraction produces the verbatim quotes from
+    that field, so a title+URL-only result would starve the evidence pipeline.
+    """
+    s = _service()
+    if not isinstance(work, dict):
+        work = {}
+    openalex_id = s._trim_text(work.get("id"), max_length=500)
+    doi_url = s._trim_text(work.get("doi"), max_length=500)
+    doi = s._source_collection_normalized_doi(doi_url)
+    primary_location = work.get("primary_location") if isinstance(work.get("primary_location"), dict) else {}
+    landing_page_url = s._trim_text(primary_location.get("landing_page_url"), max_length=1000)
+    location_source = primary_location.get("source") if isinstance(primary_location.get("source"), dict) else {}
+    venue = s._trim_text(location_source.get("display_name"), max_length=260)
+    source_ref = doi_url or landing_page_url or openalex_id
+    title = s._trim_text(work.get("title"), max_length=260) or source_ref
+    abstract = s._strip_html(s._source_collection_openalex_abstract(work.get("abstract_inverted_index")))
+    publication_date = s._trim_text(work.get("publication_date"), max_length=80)
+    publication_year = work.get("publication_year") if isinstance(work.get("publication_year"), int) else ""
+    authors: list[str] = []
+    authorships = work.get("authorships") if isinstance(work.get("authorships"), list) else []
+    for authorship in authorships:
+        if not isinstance(authorship, dict):
+            continue
+        author = authorship.get("author") if isinstance(authorship.get("author"), dict) else {}
+        display_name = s._trim_text(author.get("display_name"), max_length=200)
+        if display_name:
+            authors.append(display_name)
+    openalex_type = s._trim_text(work.get("type"), max_length=80)
+    # OpenAlex calls journal articles just "article"; alias it onto the
+    # Crossref-style vocabulary the shared source-type normalizer understands.
+    if openalex_type == "article":
+        openalex_type = "journal-article"
+    source_type = s._source_collection_data_processing_source_type(fallback_source_type or openalex_type)
+    return {
+        "title": title,
+        "sourceRef": source_ref,
+        "rawLocation": landing_page_url or source_ref,
+        "summary": s._trim_text(abstract, max_length=1600),
+        "sourceType": source_type,
+        "providerType": openalex_type,
+        "metadata": {
+            "openalexId": openalex_id,
+            "doi": doi,
+            "publicationDate": publication_date,
+            "publicationYear": publication_year,
+            "authors": authors,
+            "venue": venue,
+            "openalexType": openalex_type,
+        },
+        "qualitySignals": {
+            "hasDoi": bool(doi),
+            "hasAbstract": bool(abstract),
+        },
+    }
+
+
 def _source_collection_result_identity_key(result: dict[str, Any]) -> str:
     s = _service()
     metadata = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
