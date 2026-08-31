@@ -34,7 +34,11 @@ SEARCH_ENVELOPE_SCHEMA_VERSION = 1
 # v2: added arxiv_api as a default search provider alongside
 # crossref_rest_api.  Runs fingerprinted under v1 were collected without
 # arXiv coverage, so ensure must not keep reusing them.
-KNOWLEDGE_COLLECTION_SOURCE_POLICY_VERSION = "2"
+# v3: added openalex_api to the default provider set (abstract-bearing arXiv
+# preprint coverage that stays reachable when export.arxiv.org is blocked).
+# Runs fingerprinted under v2 lack OpenAlex coverage, so ensure must create
+# fresh runs instead of reusing them.
+KNOWLEDGE_COLLECTION_SOURCE_POLICY_VERSION = "3"
 
 # Metadata key on the processing run that stores the ensure idempotency
 # fingerprint (see ``search_envelope_fingerprint``).

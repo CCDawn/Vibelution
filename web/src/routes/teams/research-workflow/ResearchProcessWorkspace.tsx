@@ -442,8 +442,9 @@ export function ResearchProcessWorkspace({
       || hypothesisFirstChain.collectionRequests.length > 0,
     );
   const semanticSelectedNodeId = hypothesisFirstSemanticNodeId(location.selectedNodeId);
-  const prospectiveCurrentTaskNodeId = runState.snapshot?.currentTask?.nodeId
-    ?? safeNextAction.targetNodeId;
+  const prospectiveCurrentTaskNodeId = hypothesisFirstOwnsCurrentTask
+    ? safeNextAction.targetNodeId
+    : runState.snapshot?.currentTask?.nodeId ?? safeNextAction.targetNodeId;
   const semanticProspectiveCurrentTaskNodeId = hypothesisFirstSemanticNodeId(
     prospectiveCurrentTaskNodeId,
   );

@@ -7,6 +7,7 @@
 
 | 文件 | Status | 说明 |
 | --- | --- | --- |
+| [2026-08-31-challenge-cup-nodes-1-7-high-roi-repair-plan.md](2026-08-31-challenge-cup-nodes-1-7-high-roi-repair-plan.md) | USER-REQUESTED / ACTIVE PLAN | 挑战杯 1–7 节点的来源血缘、pinned definition、检索预算/质量合同、真实回执绑定与三版本回归任务图 |
 | [2026-08-30-challenge-cup-automatic-chain-reliability-plan.md](2026-08-30-challenge-cup-automatic-chain-reliability-plan.md) | USER-REQUESTED / ACTIVE PLAN | 挑战杯群聊、摘要、LangGraph/Ledger 调度的 deadline、durable recovery、run 隔离、上下文与自动推进完整修复任务图 |
 | [2026-08-25-challenge-cup-canonical-workflow-state-plan.md](2026-08-25-challenge-cup-canonical-workflow-state-plan.md) | USER-REQUESTED / ACTIVE PLAN | 挑战杯从官方题目冷启动到正式运行、产出登记和 H1–H4 审核的规范化状态 V2、服务端动作与真实链路验收 |
 | [2026-08-22-challenge-cup-hypothesis-scoped-sessions.md](2026-08-22-challenge-cup-hypothesis-scoped-sessions.md) | user-approved / active-plan | 挑战杯按题目/假说隔离群聊与 Child Session、三类 checkpoint 绑定、旧数据清空及 SCI-096 初始化重建 |

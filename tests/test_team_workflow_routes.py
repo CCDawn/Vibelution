@@ -1479,9 +1479,9 @@ def test_team_workflow_route_executes_source_collection_search(tmp_path, monkeyp
     assert response.json()["recordCount"] == 1
     assert response.json()["createdUniqueRecordCount"] == 1
     assert response.json()["importedCount"] == 1
-    # The second default provider (arxiv_api) replayed the same record and
-    # was deduped through its source identity.
-    assert response.json()["skippedDuplicateCount"] == 1
+    # The second and third default providers (arxiv_api, openalex_api)
+    # replayed the same record and were deduped through its source identity.
+    assert response.json()["skippedDuplicateCount"] == 2
     assert response.json()["boundaries"]["externalSearchTriggered"] is True
     assert response.json()["boundaries"]["writesFormalKnowledge"] is False
     assert response.json()["boundaries"]["writesRag"] is False
