@@ -33,8 +33,10 @@ from tests.test_research_workflow_hypothesis_first_chain import (
     _candidate_generation_runner,
     _fake_collection_runs,
     _hf_env,
+    _marker_runner,
     _open_first_meeting,
     _patch_approved_question,
+    _selection_payload,
     _seed_parent_run,
 )
 
@@ -351,7 +353,10 @@ def test_prepare_generation_repairs_stale_empty_candidate_draft(
 
     with server_operator_scope("u-1", roles=("operator",)):
         opened = chain.open_candidate_generation_meeting(
-            team_id, _QUESTION_ID, agent_runner=_candidate_generation_runner
+            team_id,
+            _QUESTION_ID,
+            agent_runner=_candidate_generation_runner,
+            background=False,
         )
         meeting_id = opened["meetingRound"]["meetingRoundId"]
         stale = meeting_runtime.prepare_meeting_summary_draft(
@@ -609,9 +614,17 @@ def test_auto_draft_runs_only_after_all_bound_rounds_finish(
 ) -> None:
     team_id, agents = _hf_env(tmp_path, monkeypatch)
     _patch_approved_question(monkeypatch)
+    from core.web.services.team_workflow import hypothesis_selection as selections
+
     agent_ids = [agents[role] for role in _ROLES]
     with server_operator_scope("u-1", roles=("operator",)):
-        recorded = _open_first_meeting(team_id, agent_ids)
+        recorded = selections.record_hypothesis_selection(
+            team_id,
+            _selection_payload(agent_ids[0]),
+            agent_runner=_marker_runner,
+            background=False,
+        )
+        assert recorded["status"] == "created"
         meeting_id = recorded["reviewMeeting"]["meetingRound"]["meetingRoundId"]
         meeting = meetings.get_meeting_round(team_id, meeting_id)["meetingRound"]
         # Inline executor finishes the chat before bind, so the completion
@@ -1155,6 +1168,7 @@ def test_summary_draft_llm_hang_times_out_and_stays_recoverable(
 ) -> None:
     import time as time_module
 
+    from core.llm import client as llm_client
     from core.web.services.team_workflow import llm_review_runners
 
     team_id, agents = _hf_env(tmp_path, monkeypatch)
@@ -1165,8 +1179,14 @@ def test_summary_draft_llm_hang_times_out_and_stays_recoverable(
     release = threading.Event()
 
     def hanging_invoke_llm(client, messages, tools=None, context=None, **kwargs):
-        # Wedged provider transport: blocks until the test releases it.
-        release.wait(timeout=15)
+        # A provider transport blocks but cooperates with the shared
+        # cancellation context installed by the review timeout boundary.
+        while not release.wait(timeout=0.01):
+            cancel_reason = llm_client._current_llm_cancel_reason()
+            if cancel_reason:
+                raise llm_review_runners.LLMError(
+                    "cancelled", cancel_reason, retryable=False
+                )
         return _FakeLLMResponse("{}")
 
     monkeypatch.setattr(
@@ -1174,7 +1194,9 @@ def test_summary_draft_llm_hang_times_out_and_stays_recoverable(
     )
     monkeypatch.setattr(llm_review_runners, "invoke_llm", hanging_invoke_llm)
     monkeypatch.setattr(
-        llm_review_runners, "review_llm_call_timeout_seconds", lambda: 0.3
+        llm_review_runners,
+        "review_llm_call_timeout_seconds",
+        lambda **_kwargs: 0.3,
     )
 
     with server_operator_scope("u-1", roles=("operator",)):
