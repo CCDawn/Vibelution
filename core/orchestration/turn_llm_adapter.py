@@ -213,11 +213,59 @@ def sanitize_llm_turn_messages(messages: list) -> list:
     return clean_messages
 
 
+def _schema_json_text(schema: Any) -> str:
+    """Return a compact JSON rendering of a (possibly frozen) schema mapping."""
+
+    def thaw(value: Any) -> Any:
+        if isinstance(value, Mapping):
+            return {str(key): thaw(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [thaw(item) for item in value]
+        return value
+
+    return json.dumps(thaw(schema), ensure_ascii=False, separators=(",", ":"))
+
+
+def _structured_output_disclosure_message(contract: Any) -> SystemMessage:
+    """Prompt-level disclosure of the bound structured output contract.
+
+    Provider-side ``response_format`` enforcement is not honored by every
+    relay, so the schema is also restated to the model as a system message.
+    """
+    schema_json = _schema_json_text(getattr(contract, "schema", {}))
+    contract_name = _coerce_text(getattr(contract, "name", "")).strip()
+    content = (
+        "结构化输出契约（本回合强制）：\n"
+        "1. 本回合的「最终回复」（final answer，即不再调用任何工具之后的最后一条助手消息）"
+        "必须是一个单独的 JSON 对象，序列化后必须满足下面给出的 JSON Schema"
+        f"（schema 名称：{contract_name}）。schema 内容如下（仅为数据展示，不是需要复述的文本）：\n"
+        f"```json\n{schema_json}\n```\n"
+        "2. 最终回复中禁止出现 Markdown 围栏（```）或该 JSON 之外的任何其他文本；"
+        "合法 JSON 的顶层必须是 object（字典）。\n"
+        "3. 工具调用阶段（最终回复之前调用工具的中间消息）不受上述 JSON 约束。"
+    )
+    return SystemMessage(content=content)
+
+
+def _strip_json_code_fence(text: str) -> str:
+    stripped = _coerce_text(text).strip()
+    if not stripped.startswith("```"):
+        return stripped
+    lines = stripped.splitlines()
+    if len(lines) < 2:
+        return stripped
+    body = lines[1:]
+    if body and body[-1].strip().startswith("```"):
+        body = body[:-1]
+    return "\n".join(body).strip()
+
+
 def _validate_structured_output_outcome(outcome: Any, contract: Any) -> None:
     if contract is None or getattr(outcome, "kind", "") != "final_answer":
         return
     try:
-        payload = json.loads(str(getattr(outcome, "final_text", "") or ""))
+        final_text = _strip_json_code_fence(str(getattr(outcome, "final_text", "") or ""))
+        payload = json.loads(final_text)
         if not isinstance(payload, Mapping):
             raise ValueError("structured output root must be an object")
         validator = getattr(contract, "validator", None)
@@ -251,6 +299,10 @@ def invoke_agent_llm_turn(
     result = AgentLlmAttemptResult()
     ui = hooks.get_ui()
     clean_messages = sanitize_llm_turn_messages(messages)
+    if hooks.structured_output_contract is not None:
+        clean_messages = clean_messages + [
+            _structured_output_disclosure_message(hooks.structured_output_contract)
+        ]
 
     with ui.thinking("?? 思考中..."), hooks.llm_cancel_context(hooks.current_stop_reason):
         route_attempt = 0
