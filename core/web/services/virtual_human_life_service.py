@@ -1649,6 +1649,11 @@ def finalize_proactive_delivery(context: dict[str, Any]) -> dict[str, Any] | Non
     if str(context.get("origin") or "") != "proactive_plugin":
         return None
     metadata = context.get("proactive_plugin") if isinstance(context.get("proactive_plugin"), dict) else {}
+    trigger = (
+        metadata.get("trigger")
+        if isinstance(metadata.get("trigger"), dict)
+        else {}
+    )
     session_id = str(context.get("session_id") or "").strip()
     turn_id = str(context.get("turn_id") or "").strip()
     from core.chat.turn_journal import EVENT_ASSISTANT_ITEM_COMMITTED
@@ -1673,14 +1678,16 @@ def finalize_proactive_delivery(context: dict[str, Any]) -> dict[str, Any] | Non
         turn_id=turn_id,
         receipt_event_id=str(getattr(assistant_receipt, "event_id", "") or "").strip(),
     )
+    delivery_kind = str(trigger.get("deliveryKind") or "proactive").strip()
     _record_scene(
-        "proactive_delivered",
+        "followup_delivered" if delivery_kind == "followup" else "proactive_delivered",
         agent_id=str(context.get("agent_id") or "").strip(),
         outcome="delivered",
         fields={
             "turnId": turn_id,
             "triggerId": str(metadata.get("triggerId") or ""),
             "deliveryToken": str(metadata.get("deliveryToken") or ""),
+            "deliveryKind": delivery_kind,
         },
     )
     return receipt

@@ -181,12 +181,16 @@ def project_companion_dialogue_context(
     """Project truthful time, experience, plan, and expression data for a turn."""
 
     local_date = local_now.date().isoformat()
-    interaction_context = interaction_context_for_turn(
+    expression_projection = project_companion_expression_for_turn(
         store,
         agent_id,
+        state=state,
+        causal=causal,
         session_id=session_id,
         run_id=run_id,
+        user_intent_override="proactive" if proactive else "",
     )
+    interaction_context = expression_projection["interactionContext"]
     current_activity = next(
         (
             {
@@ -244,6 +248,40 @@ def project_companion_dialogue_context(
             local_now=local_now,
         )
     ][:12]
+    expression_decision = deepcopy(expression_projection["expressionDecision"])
+    return {
+        "timeContext": {
+            "localDate": local_date,
+            "localWeekday": _LOCAL_WEEKDAYS[local_now.weekday()],
+            "localTime": local_now.strftime("%H:%M"),
+            "timezone": str(binding.get("timezone") or "Asia/Shanghai"),
+        },
+        "currentActivity": current_activity,
+        "completedExperiences": completed_experiences,
+        "futurePlans": future_plans,
+        "interactionContext": interaction_context,
+        "expressionDecision": expression_decision,
+    }
+
+
+def project_companion_expression_for_turn(
+    store: VirtualHumanLifeStore,
+    agent_id: str,
+    *,
+    state: Mapping[str, Any],
+    causal: Mapping[str, Any],
+    session_id: str,
+    run_id: str,
+    user_intent_override: str = "",
+) -> dict[str, Any]:
+    """Project the same expression inputs used by the turn Prompt."""
+
+    interaction_context = interaction_context_for_turn(
+        store,
+        agent_id,
+        session_id=session_id,
+        run_id=run_id,
+    )
     user_relationship = next(
         (
             item
@@ -271,29 +309,18 @@ def project_companion_dialogue_context(
         if isinstance(item, Mapping)
         and str(item.get("episodeId") or "") in active_episode_ids
     ][:8]
-    expression_decision = build_companion_expression_decision(
-        relationship=user_relationship,
-        affect=affect_projection,
-        energy=state.get("energy"),
-        user_intent=(
-            "proactive"
-            if proactive
-            else str(interaction_context.get("userIntent") or "small_talk")
-        ),
-        turn_ordinal=interaction_context.get("turnOrdinal"),
-    )
     return {
-        "timeContext": {
-            "localDate": local_date,
-            "localWeekday": _LOCAL_WEEKDAYS[local_now.weekday()],
-            "localTime": local_now.strftime("%H:%M"),
-            "timezone": str(binding.get("timezone") or "Asia/Shanghai"),
-        },
-        "currentActivity": current_activity,
-        "completedExperiences": completed_experiences,
-        "futurePlans": future_plans,
         "interactionContext": interaction_context,
-        "expressionDecision": expression_decision,
+        "expressionDecision": build_companion_expression_decision(
+            relationship=user_relationship,
+            affect=affect_projection,
+            energy=state.get("energy"),
+            user_intent=(
+                str(user_intent_override or "").strip()
+                or str(interaction_context.get("userIntent") or "small_talk")
+            ),
+            turn_ordinal=interaction_context.get("turnOrdinal"),
+        ),
     }
 
 
@@ -301,5 +328,6 @@ __all__ = [
     "bind_interaction_receipt_turn",
     "interaction_context_for_turn",
     "project_companion_dialogue_context",
+    "project_companion_expression_for_turn",
     "record_interaction_receipt",
 ]
