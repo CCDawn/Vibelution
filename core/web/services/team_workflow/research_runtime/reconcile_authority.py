@@ -150,6 +150,46 @@ def plan_ledger_authority(
         and depth(record.node_id) > frontier_success_depth
     ]
     if not leading:
+        # No evaluator verdict owns the frontier: a terminal-failed attempt
+        # beyond every success is the run's real state (its only recovery is
+        # the ordinary retry offer). Landing blocked there keeps
+        # reconciliation_required for genuinely inconsistent dispatch tables
+        # instead of wedging a retryable frontier behind a reconcile loop
+        # (retry is refused with run_reconciliation_required while reconcile
+        # keeps re-deriving "no active work" forever).
+        failed_leading = [
+            record
+            for record in records
+            if record.status == "failed"
+            and depth(record.node_id) > frontier_success_depth
+        ]
+        if failed_leading:
+            failed_keeper = sorted(
+                failed_leading,
+                key=lambda record: (
+                    -depth(record.node_id),
+                    int(getattr(record, "started_at_ms", 0) or 0),
+                    str(record.node_run_id),
+                ),
+            )[0]
+            failed_problem: Mapping[str, Any] = {}
+            try:
+                loaded = json.loads(str(failed_keeper.problem_json or "") or "{}")
+            except (TypeError, ValueError):
+                loaded = {}
+            if isinstance(loaded, Mapping) and loaded:
+                failed_problem = loaded
+            else:
+                failed_problem = {
+                    "code": "node_failed_awaiting_retry",
+                    "detail": str(failed_keeper.node_id),
+                }
+            return LedgerAuthorityPlan(
+                superseded_node_run_ids=tuple(sorted(dirty_ids)),
+                active_node_id=str(failed_keeper.node_id),
+                landing_node_id=str(failed_keeper.node_id),
+                landing_problem=dict(failed_problem),
+            )
         return LedgerAuthorityPlan(superseded_node_run_ids=tuple(sorted(dirty_ids)))
 
     # Deepest evaluator blocker wins; ties prefer the earliest evidence.

@@ -30,6 +30,11 @@ import pytest
 
 from core.research.workflow.contracts import WorkflowCommandKind
 from core.research.workflow.definition import build_challenge_cup_workflow_definition
+from core.research.workflow.definition_registry import register_or_resolve
+
+_PINNED_WORKFLOW_VERSION_ID = register_or_resolve(
+    build_challenge_cup_workflow_definition()
+).workflowVersionId
 from core.web.services.team_workflow.research_runtime.command_offers.reconcile_run import (
     build_reconcile_run_offer,
 )
@@ -131,6 +136,29 @@ def test_plan_supersedes_covered_incident_block_only() -> None:
     assert dict(plan.landing_problem or {}) == _INGESTION_PROBLEM
 
 
+def test_plan_lands_failed_frontier_blocked_for_retry() -> None:
+    """A terminal-failed attempt beyond every success authors the landing.
+
+    The evaluator blocker stays first-class; without one, the deepest failed
+    attempt lands the run blocked on its own problem so the retry offer
+    survives (reconciliation_required is reserved for inconsistent dispatch
+    tables)."""
+    plan = plan_ledger_authority(
+        [
+            _attempt("problem_understanding", status="succeeded"),
+            _attempt(
+                "hypothesis_design",
+                status="failed",
+                problem={"code": "agent_turn_terminal_failed"},
+            ),
+        ],
+        node_order=NODE_ORDER,
+    )
+    assert plan.lands_blocked is True
+    assert plan.active_node_id == "hypothesis_design"
+    assert plan.landing_problem == {"code": "agent_turn_terminal_failed"}
+
+
 def test_plan_never_lands_on_uncovered_incident_block() -> None:
     """Artifact-gap style blockers stay owned by backfill/heal contracts.
 
@@ -205,6 +233,7 @@ def test_plan_is_noop_without_unknown_nodes_or_blockers() -> None:
 
 def _seed_production_ledger(commands: CommandHarness, *, run_id: str = "run-test") -> None:
     record = build_run_record(
+        workflow_version_id=_PINNED_WORKFLOW_VERSION_ID,
         run_id=run_id,
         status="reconciliation_required",
         run_version=7,
@@ -452,6 +481,7 @@ def test_plain_drift_reconcile_still_revives_live_rows(tmp_path: Path) -> None:
     commands = CommandHarness(tmp_path / "ledger.sqlite3")
     try:
         record = build_run_record(
+            workflow_version_id=_PINNED_WORKFLOW_VERSION_ID,
             run_id="run-drift",
             status="reconciliation_required",
             run_version=3,
@@ -527,10 +557,16 @@ def test_plain_drift_reconcile_still_revives_live_rows(tmp_path: Path) -> None:
         commands.close()
 
 
-def test_reconcile_with_zero_revivable_or_active_work_stays_reconciliation_required(
+def test_reconcile_with_zero_revivable_or_active_work_lands_blocked_for_retry(
     tmp_path: Path,
 ) -> None:
-    """A failed adapter-only frontier must not be projected back to running."""
+    """A failed adapter-only frontier must not be projected back to running.
+
+    It lands ``blocked`` on the deepest failed attempt's own problem so the
+    ordinary retry offer stays usable; ``reconciliation_required`` remains
+    reserved for genuinely inconsistent dispatch tables (a reconcile loop
+    that keeps re-deriving "no active work" while retry is refused would
+    wedge the run forever — SCI-003 hypothesis_design incident)."""
 
     commands = CommandHarness(tmp_path / "ledger.sqlite3")
     try:
@@ -540,6 +576,7 @@ def test_reconcile_with_zero_revivable_or_active_work_stays_reconciliation_requi
         def seed(uow):
             uow.repository.insert_run(
                 build_run_record(
+                    workflow_version_id=_PINNED_WORKFLOW_VERSION_ID,
                     run_id=run_id,
                     status="reconciliation_required",
                     run_version=3,
@@ -619,10 +656,10 @@ def test_reconcile_with_zero_revivable_or_active_work_stays_reconciliation_requi
         )
 
         run = store.get_run(run_id)
-        assert run.status == "reconciliation_required"
+        assert run.status == "blocked"
         assert run.active_node_id == "knowledge_ingestion"
         assert json.loads(str(run.blocked_problem_json))["code"] == (
-            "reconcile_no_active_work"
+            "adapter_execution_exception"
         )
         assert [row.action_kind for row in store.list_pending_outbox(run_id)] == [
             "reconcile"
