@@ -44,6 +44,7 @@ from .block_projection import (
 from .blocked_reason import format_blocked_reason, problem_from_graph_error
 from .ids import new_id
 from .iteration_route import branch_decision_from_run, routed_successors
+from .stage_one_closeout import stage_one_terminal_facts
 
 # A run is created before START_NODE is accepted so the request can be made
 # idempotent.  That window must nevertheless be bounded: after this deadline
@@ -1599,10 +1600,16 @@ class GraphDispatchWorker:
                     outcome == "succeeded"
                     and result.pending_action is None
                     and closed_run is not None
-                    and _run_terminal_close_applies(closed_run, dispatch.node_id)
+                    and _run_terminal_close_applies(
+                        closed_run,
+                        dispatch.node_id,
+                        dispatch.state_update,
+                    )
                 ):
                     completion_kind, terminal_reason = _terminal_facts_for_close(
-                        closed_run
+                        closed_run,
+                        node_id=dispatch.node_id,
+                        state_update=dispatch.state_update,
                     )
                     sync_run_succeeded(
                         uow,
@@ -2184,7 +2191,12 @@ class GraphDispatchWorker:
         )
 
 
-def _terminal_facts_for_close(run: Any) -> tuple[str, str]:
+def _terminal_facts_for_close(
+    run: Any,
+    *,
+    node_id: str = "",
+    state_update: Mapping[str, Any] | None = None,
+) -> tuple[str, str]:
     """Terminal facts for a closing run.
 
     Main-flow runs keep the package/governance-derived facts; knowledge
@@ -2192,10 +2204,21 @@ def _terminal_facts_for_close(run: Any) -> tuple[str, str]:
     """
     if _is_sideflow_run(run):
         return "knowledge_sideflow", "knowledge_package_accepted"
+    stage_one = stage_one_terminal_facts(
+        run,
+        node_id=node_id,
+        state_update=state_update,
+    )
+    if stage_one is not None:
+        return stage_one
     return terminal_facts_for_run(run)
 
 
-def _run_terminal_close_applies(run: Any, node_id: str) -> bool:
+def _run_terminal_close_applies(
+    run: Any,
+    node_id: str,
+    state_update: Mapping[str, Any] | None = None,
+) -> bool:
     """Whether a completed dispatch on this run closes it as succeeded.
 
     Main-flow runs close only on ``result_package`` (historical behavior).
@@ -2204,6 +2227,15 @@ def _run_terminal_close_applies(run: Any, node_id: str) -> bool:
     sideflow definition.
     """
     if _is_sideflow_run(run):
+        return True
+    if (
+        stage_one_terminal_facts(
+            run,
+            node_id=node_id,
+            state_update=state_update,
+        )
+        is not None
+    ):
         return True
     return str(node_id or "") == "result_package"
 

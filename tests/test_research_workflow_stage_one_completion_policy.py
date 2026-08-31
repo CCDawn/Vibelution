@@ -4,24 +4,39 @@ import copy
 
 import pytest
 
+from core.research.competition.question_result_package import canonical_model_policy
+from core.research.competition.real_control_batch import real_plan
 from core.research.competition.stage_one_completion_policy import (
     StageOneCompletionPolicy,
     StageOneCompletionPolicyError,
     load_stage_one_completion_policy,
     stage_one_policy_snapshot_for,
 )
-from core.research.competition.real_control_batch import real_plan
-from core.research.competition.question_result_package import canonical_model_policy
 from core.research.workflow.contracts import ContractValidationError
 from core.research.workflow.contracts.run_input import WorkflowRunInputSnapshot
+from core.research.workflow.definition_registry import (
+    registered_identities,
+    resolve_definition_by_version_id,
+)
 from core.web.services.team_workflow import challenge_cup_real_batch
 from core.web.services.team_workflow.research_runtime import (
     catalog_run_authorization,
     run_creation,
 )
 
+WORKFLOW_DEFINITION_ID = "challenge-cup-research@2.1.0"
 
-WORKFLOW_VERSION_ID = "challenge-cup-research@2.1.0"
+
+def _registry_version(schema_version: str) -> str:
+    return next(
+        identity.workflowVersionId
+        for identity in registered_identities("challenge-cup-research")
+        if resolve_definition_by_version_id(identity.workflowVersionId).schemaVersion
+        == schema_version
+    )
+
+
+WORKFLOW_VERSION_ID = _registry_version("2.1.0")
 
 
 def _run_input_payload(policy: dict[str, object]) -> dict[str, object]:
@@ -55,7 +70,7 @@ def test_tracked_policy_is_exact_single_question_node_seven_contract() -> None:
     policy = load_stage_one_completion_policy()
 
     assert policy.scopeId == "cc-xh-202619-stage1-hypothesis-v1"
-    assert policy.workflowDefinitionId == WORKFLOW_VERSION_ID
+    assert policy.workflowDefinitionId == WORKFLOW_DEFINITION_ID
     assert policy.questionIds == ("SCI-091",)
     assert policy.closureNodeId == "hypothesis_design"
     assert policy.completionState == "STAGE1_G1_ACCEPTED"
@@ -70,8 +85,8 @@ def test_tracked_policy_is_exact_single_question_node_seven_contract() -> None:
 
 
 def test_policy_snapshot_only_applies_to_the_frozen_g1_identity() -> None:
-    assert stage_one_policy_snapshot_for("SCI-091", WORKFLOW_VERSION_ID)
-    assert stage_one_policy_snapshot_for("SCI-092", WORKFLOW_VERSION_ID) is None
+    assert stage_one_policy_snapshot_for("SCI-091", WORKFLOW_DEFINITION_ID)
+    assert stage_one_policy_snapshot_for("SCI-092", WORKFLOW_DEFINITION_ID) is None
     assert stage_one_policy_snapshot_for("SCI-091", "challenge-cup-research@3.0.0") is None
 
 
@@ -88,7 +103,7 @@ def test_run_input_snapshot_freezes_policy_and_rejects_tampering() -> None:
         WorkflowRunInputSnapshot.from_dict(_run_input_payload(tampered))
 
     wrong_workflow = _run_input_payload(policy)
-    wrong_workflow["workflowVersionId"] = "challenge-cup-research@3.0.0"
+    wrong_workflow["workflowVersionId"] = _registry_version("3.0.0")
     with pytest.raises(ContractValidationError, match="workflowDefinitionId"):
         WorkflowRunInputSnapshot.from_dict(wrong_workflow)
 

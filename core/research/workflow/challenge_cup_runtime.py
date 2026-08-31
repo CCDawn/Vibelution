@@ -22,6 +22,12 @@ from typing import Annotated, Any, Literal, TypedDict
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
+from core.research.workflow.checkpoint_store import (
+    ScopeBindingMismatch,
+    assert_five_way_scope_binding,
+    build_checkpoint_binding_payload,
+    canonical_discussion_scope,
+)
 from core.research.workflow.contracts import ExecutionReceipt, PendingAction
 from core.research.workflow.definition import (
     build_challenge_cup_workflow_definition,
@@ -34,12 +40,7 @@ from core.research.workflow.iteration_decisions import (
     route_target_for_decision,
 )
 from core.research.workflow.models import ActorKind
-from core.research.workflow.checkpoint_store import (
-    ScopeBindingMismatch,
-    assert_five_way_scope_binding,
-    build_checkpoint_binding_payload,
-    canonical_discussion_scope,
-)
+from core.research.workflow.stage_one_completion import route_after_stage_one_closure
 
 
 def merge_node_attempts(
@@ -89,6 +90,7 @@ class ChallengeCupGraphState(TypedDict, total=False):
     scope_binding_required: bool
     scope_binding_status: str
     scope_binding_problem: dict[str, Any]
+    stage_one_completion_state: str
 
 
 @dataclass(frozen=True)
@@ -581,9 +583,13 @@ def route_after_version_governance(
 
 
 def _route_after_linear(source: str, target: str):
+    stage_one_route = route_after_stage_one_closure(target)
+
     def route(state: ChallengeCupGraphState) -> Literal["__end__"] | str:
         if state.get("blocked_outcome"):
             return END  # type: ignore[return-value]
+        if source == "hypothesis_design":
+            return stage_one_route(state)
         return target
 
     route.__name__ = f"route_after_{source}"

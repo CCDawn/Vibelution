@@ -58,10 +58,20 @@ def test_graph_static_edges_are_definition_owned() -> None:
     )
 
     graph = build_challenge_cup_graph()
+    compiled_static = set(expected_static) - {
+        ("hypothesis_design", "protocol_design")
+    }
     assert graph.edges == {
-        *expected_static,
+        *compiled_static,
         ("__start__", "problem_understanding"),
         ("result_package", "__end__"),
+    }
+    stage_one_branch = graph.branches["hypothesis_design"][
+        "route_after_stage_one_closure"
+    ]
+    assert stage_one_branch.ends == {
+        "protocol_design": "protocol_design",
+        "__end__": "__end__",
     }
     expected_successors = {node.nodeId: () for node in build_challenge_cup_workflow_definition().nodes}
     for source, target in expected_static:

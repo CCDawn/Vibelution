@@ -12,6 +12,7 @@ from core.research.workflow.contracts import (
     ContractValidationError,
 )
 from core.research.workflow.definition_registry import resolve_definition_for_run_record
+from core.research.workflow.stage_one_completion import STAGE_ONE_CHECKPOINT_FIELD
 
 from .artifact_quality_gate import ArtifactQualityError, validate_artifact_quality
 from .artifact_reuse import ArtifactReuseError, validate_artifact_reuse
@@ -28,6 +29,10 @@ from .node_execution_support import (
     latest_node_run,
     replace_by_id,
     utc_now,
+)
+from .stage_one_closeout import (
+    build_stage_one_closeout_action,
+    evaluate_stage_one_closeout,
 )
 from .store import WorkflowRunStore
 from .successor_records import build_successor_records
@@ -241,6 +246,23 @@ def complete_node_execution(
         state_patch["iteration_decision"] = quality_records["iterationDecision"]
     if node_id == "controlled_run":
         state_patch["controlled_run_attempt"] = int(validated_node_run["attempt"])
+    closeout_candidate = {
+        **record,
+        "artifactManifests": [
+            *(dict(item) for item in record.get("artifactManifests") or []),
+            *(item.to_dict() for item in manifests),
+        ],
+        "artifactPayloads": {
+            **dict(record.get("artifactPayloads") or {}),
+            **artifact_payloads,
+        },
+    }
+    stage_one_closeout = evaluate_stage_one_closeout(
+        closeout_candidate,
+        node_id=node_id,
+    )
+    if stage_one_closeout is not None:
+        state_patch[STAGE_ONE_CHECKPOINT_FIELD] = stage_one_closeout.completion_state
     checkpoint_id, next_node_ids = advance_checkpoint(
         checkpoint_path,
         thread_id=record["threadId"],
@@ -249,6 +271,23 @@ def complete_node_execution(
         state_patch=state_patch,
         definition=definition,
     )
+    if stage_one_closeout is not None and next_node_ids:
+        raise NodeExecutionError(
+            "accepted stage-one closeout scheduled a phase-two successor",
+            code="stage_one_checkpoint_not_terminal",
+        )
+    stage_one_action = (
+        build_stage_one_closeout_action(
+            record=record,
+            node_run=validated_node_run,
+            idempotency_key=idempotency_key,
+            completed_at=now,
+            outcome=stage_one_closeout,
+        )
+        if stage_one_closeout is not None
+        else None
+    )
+
     def mutation(current: dict[str, Any]) -> dict[str, Any]:
         if any(
             item.get("idempotencyKey") == idempotency_key
@@ -480,6 +519,32 @@ def complete_node_execution(
                 artifactRefs=[item.artifactId for item in manifests],
             )
         )
+        if stage_one_action is not None and stage_one_closeout is not None:
+            event_record = {
+                **current,
+                "events": [
+                    *(current.get("events") or []),
+                    *transition_events,
+                ],
+            }
+            transition_events.append(
+                build_event(
+                    event_record,
+                    workflowId=current["workflowId"],
+                    workflowVersionId=current["workflowVersionId"],
+                    checkpointId=checkpoint_id,
+                    nodeId=node_id,
+                    nodeRunId=current_node_run["nodeRunId"],
+                    attempt=current_node_run["attempt"],
+                    type="StageOneCloseoutCompleted",
+                    summary={
+                        "actionId": stage_one_action["actionId"],
+                        "completionState": stage_one_closeout.completion_state,
+                        "policySha256": stage_one_closeout.policy_sha256,
+                    },
+                    artifactRefs=list(stage_one_closeout.artifact_refs),
+                )
+            )
         iteration_decisions = list(current.get("iterationDecisions") or [])
         if "iterationDecision" in quality_records and not any(
             item.get("decisionId")
@@ -494,6 +559,9 @@ def complete_node_execution(
         official_candidate_ref = str(current.get("officialCandidateRef") or "")
         completion_kind = str(current.get("completionKind") or "")
         terminal_reason = str(current.get("terminalReason") or "")
+        if stage_one_closeout is not None:
+            completion_kind = "stage_one_g1_accepted"
+            terminal_reason = stage_one_closeout.completion_state
         if "versionGovernance" in quality_records:
             governance = dict(quality_records["versionGovernance"])
             governance_records.append(governance)
@@ -590,6 +658,19 @@ def complete_node_execution(
             "officialCandidateRef": official_candidate_ref,
             "completionKind": completion_kind,
             "terminalReason": terminal_reason,
+            **(
+                {
+                    "completionState": stage_one_closeout.completion_state,
+                    "completedAt": now,
+                    "stageOneCloseout": stage_one_closeout.to_dict(),
+                    "systemActions": [
+                        *(current.get("systemActions") or []),
+                        stage_one_action,
+                    ],
+                }
+                if stage_one_closeout is not None and stage_one_action is not None
+                else {}
+            ),
             "handoffs": handoffs,
             "humanTasks": human_tasks,
             "taskBundles": task_bundles,

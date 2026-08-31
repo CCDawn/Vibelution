@@ -47,6 +47,11 @@ from .domain_ports import DomainPorts
 from .failure_projection import apply_node_run_failure
 from .ids import new_id
 from .iteration_route import branch_decision_from_run, routed_successors
+from .node_execution_support import NodeExecutionError
+from .stage_one_closeout import (
+    StageOneCloseoutOutcome,
+    evaluate_ledger_stage_one_closeout,
+)
 
 # Adapter execution may synchronously wait for a canonical Agent turn.  The
 # lease must outlive that bounded wait so another Workbench process cannot
@@ -529,12 +534,29 @@ class AdapterDispatchWorker:
             return
 
         try:
+            stage_one_closeout = evaluate_ledger_stage_one_closeout(
+                self._store,
+                action=action,
+                current_artifact_receipts=verified.artifact_receipts,
+            )
+        except NodeExecutionError as exc:
+            self._void_unused_reservation(
+                action, reason="stage_one_closeout_blocked_compensation"
+            )
+            self._block_attempt(outbox, action, exc.code, str(exc))
+            return
+
+        try:
             committed = False
             if action.actor_kind == ActorKind.HUMAN:
                 committed = self._commit_human(outbox, action, verified)
             else:
                 committed = self._commit_verified(
-                    outbox, action, verified, usage=result.usage
+                    outbox,
+                    action,
+                    verified,
+                    usage=result.usage,
+                    stage_one_closeout=stage_one_closeout,
                 )
             if committed and verified.budget_receipt:
                 # ledger 提交后结算领域预算权威；settle 失败不回滚已提交 receipt，
@@ -623,14 +645,20 @@ class AdapterDispatchWorker:
     # ------------------------------------------------------------ commits
 
     def _commit_verified(
-        self, outbox: Any, action: PendingAction, verified: VerifiedDomainResult, *, usage: dict[str, Any]
+        self,
+        outbox: Any,
+        action: PendingAction,
+        verified: VerifiedDomainResult,
+        *,
+        usage: dict[str, Any],
+        stage_one_closeout: StageOneCloseoutOutcome | None = None,
     ) -> bool:
         now_ms = self._now()
         anchor_payload = _canonical_anchor_payload(action, verified.anchor)
         anchor_id = new_id("anchor") if anchor_payload else None
         budget_receipt_id = new_id("br") if verified.budget_receipt else None
         handoff_id = new_id("ho")
-        event_count = 3
+        event_count = 4 if stage_one_closeout is not None else 3
 
         receipt_id_by_index: list[str] = []
         for index in range(len(verified.artifact_receipts)):
@@ -757,8 +785,30 @@ class AdapterDispatchWorker:
             )
 
             successors = self._successor_fn(action.node_id)
+            if stage_one_closeout is not None:
+                if uow.repository.list_pending_human_tasks(action.run_id):
+                    raise RuntimeError(
+                        "stage-one closeout raced with a pending human task"
+                    )
+                deferred = set(
+                    json.loads(run.input_snapshot_json)
+                    .get("stageOneCompletionPolicy", {})
+                    .get("deferredNodeIds", [])
+                )
+                if any(
+                    attempt.node_id in deferred
+                    for attempt in uow.repository.list_attempts(action.run_id)
+                ):
+                    raise RuntimeError(
+                        "stage-one closeout raced with a phase-two attempt"
+                    )
+                successors = ()
             branch = branch_decision_from_run(run)
-            routed = routed_successors(action.node_id, branch)
+            routed = (
+                ()
+                if stage_one_closeout is not None
+                else routed_successors(action.node_id, branch)
+            )
             if routed:
                 successors = routed
             elif action.node_id in {"iteration_decision", "version_governance"}:
@@ -809,7 +859,17 @@ class AdapterDispatchWorker:
             attempt = uow.repository.get_attempt(action.node_run_id)
             if attempt is None:
                 return False
-            if successors or action.node_id == "result_package":
+            if (
+                successors
+                or action.node_id == "result_package"
+                or stage_one_closeout is not None
+            ):
+                state_update = {"branch_decision": branch} if branch else {}
+                if stage_one_closeout is not None:
+                    state_update["stage_one_completion_state"] = (
+                        stage_one_closeout.completion_state
+                    )
+                    state_update["stage_one_closeout"] = stage_one_closeout.to_dict()
                 uow.repository.insert_outbox(
                     _resume_dispatch_record(
                         run=run,
@@ -818,7 +878,7 @@ class AdapterDispatchWorker:
                         receipt=receipt,
                         command_id=outbox.command_id,
                         now_ms=now_ms,
-                        state_update={"branch_decision": branch} if branch else None,
+                        state_update=state_update or None,
                     )
                 )
             if action.node_id == "result_package":
@@ -870,10 +930,29 @@ class AdapterDispatchWorker:
                     event_id=new_id("evt"),
                     event_type="node_succeeded",
                     correlation_id=action.action_id,
-                    payload={"nodeRunId": action.node_run_id, "handoffId": handoff_id},
+                    payload={
+                        "nodeRunId": action.node_run_id,
+                        "handoffId": handoff_id if successors else None,
+                    },
                     now_ms=now_ms,
                 )
             )
+            if stage_one_closeout is not None:
+                uow.repository.insert_event(
+                    _event(
+                        run_id=action.run_id,
+                        sequence=base_sequence + 4,
+                        run_version=run.run_version,
+                        event_id=new_id("evt"),
+                        event_type="stage_one_closeout_completed",
+                        correlation_id=action.action_id,
+                        payload={
+                            "nodeRunId": action.node_run_id,
+                            **stage_one_closeout.to_dict(),
+                        },
+                        now_ms=now_ms,
+                    )
+                )
             return True
 
         return bool(self._store.submit(mutate, force_flush=True).result(timeout=30))

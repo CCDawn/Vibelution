@@ -25,6 +25,7 @@ from .iteration_decisions import (
     route_target_for_decision,
 )
 from .models import WorkflowDefinition
+from .stage_one_completion import route_after_stage_one_closure
 
 
 class ChallengeCupState(TypedDict, total=False):
@@ -36,6 +37,7 @@ class ChallengeCupState(TypedDict, total=False):
     controlled_run_attempt: int
     blocked_reason: str
     pending_fork: bool
+    stage_one_completion_state: str
 
 
 def _node_order(definition: WorkflowDefinition) -> list[str]:
@@ -116,6 +118,13 @@ def build_challenge_cup_graph(
         builder.add_node(node_id, _make_node_fn(node_id, resolved))
     builder.add_edge(START, order[0])
     for source, target in graph_static_edge_pairs(resolved):
+        if source == "hypothesis_design":
+            builder.add_conditional_edges(
+                source,
+                route_after_stage_one_closure(target),
+                {target: target, END: END},
+            )
+            continue
         builder.add_edge(source, target)
     if "iteration_decision" in order:
         iteration_targets = graph_conditional_targets("iteration_decision", resolved)

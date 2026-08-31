@@ -1,0 +1,461 @@
+"""Fail-closed evidence authority for Challenge Cup node-7 termination."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
+from typing import Any
+
+from core.research.competition.stage_one_completion_policy import (
+    StageOneCompletionPolicy,
+    StageOneCompletionPolicyError,
+)
+from core.research.workflow.contracts.model_invocation_receipt import (
+    ModelInvocationReceipt,
+    ModelInvocationStatus,
+)
+from core.research.workflow.definition_registry import (
+    WorkflowDefinitionRegistryError,
+    resolve_definition_for_run_record,
+)
+from core.research.workflow.stage_one_completion import (
+    STAGE_ONE_ACCEPTED_STATE,
+    STAGE_ONE_CHECKPOINT_FIELD,
+    route_after_stage_one_closure,
+)
+
+from .node_execution_support import NodeExecutionError
+
+STAGE_ONE_CLOSEOUT_COMMAND = "close_stage_one"
+_REQUIRED_GATE_ARTIFACT_KINDS = ("hypothesis_set", "stage1_research_plan")
+_ACCEPTED_HUMAN_TASK_STATUSES = {"resolved_accept", "succeeded"}
+
+
+@dataclass(frozen=True, slots=True)
+class StageOneCloseoutOutcome:
+    completion_state: str
+    policy_sha256: str
+    artifact_refs: tuple[str, ...]
+    receipt_stages: tuple[str, ...]
+    receipt_refs: tuple[str, ...]
+    human_gate_count: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "completionState": self.completion_state,
+            "policySha256": self.policy_sha256,
+            "artifactRefs": list(self.artifact_refs),
+            "receiptStages": list(self.receipt_stages),
+            "receiptRefs": list(self.receipt_refs),
+            "humanGateCount": self.human_gate_count,
+        }
+
+
+def _fail(message: str, *, code: str) -> None:
+    raise NodeExecutionError(message, code=code)
+
+
+def _stage_one_policy(record: Mapping[str, Any]) -> StageOneCompletionPolicy | None:
+    snapshot = record.get("inputSnapshot")
+    snapshot = snapshot if isinstance(snapshot, Mapping) else {}
+    raw_policy = snapshot.get("stageOneCompletionPolicy")
+    if raw_policy is None:
+        return None
+    if not isinstance(raw_policy, Mapping):
+        _fail("stage-one completion policy is malformed", code="stage_one_policy_invalid")
+    try:
+        policy = StageOneCompletionPolicy.from_dict(raw_policy)
+    except (StageOneCompletionPolicyError, KeyError, TypeError, ValueError) as exc:
+        raise NodeExecutionError(
+            f"stage-one completion policy is invalid: {exc}",
+            code="stage_one_policy_invalid",
+        ) from exc
+    try:
+        definition = resolve_definition_for_run_record(record)
+    except WorkflowDefinitionRegistryError as exc:
+        raise NodeExecutionError(
+            "stage-one run definition cannot be resolved",
+            code="stage_one_policy_mismatch",
+        ) from exc
+    resolved_definition_id = f"{definition.workflowId}@{definition.schemaVersion}"
+    if resolved_definition_id != policy.workflowDefinitionId:
+        _fail(
+            "stage-one policy does not match the run workflow definition",
+            code="stage_one_policy_mismatch",
+        )
+    if str(record.get("questionId") or "").upper() not in policy.questionIds:
+        _fail(
+            "stage-one policy does not authorize this question",
+            code="stage_one_policy_mismatch",
+        )
+    return policy
+
+
+def _artifact_kind(manifest: Mapping[str, Any]) -> str:
+    return str(manifest.get("artifactId") or "").split(":", 1)[0].strip()
+
+
+def _receipt_payloads(value: Any) -> Iterable[Mapping[str, Any]]:
+    if isinstance(value, Mapping):
+        for key, child in value.items():
+            if key in {"modelInvocationReceipts", "model_invocation_receipts", "receipts"}:
+                if isinstance(child, Mapping):
+                    for receipt in child.values():
+                        if isinstance(receipt, Mapping):
+                            yield receipt
+                elif isinstance(child, list):
+                    for receipt in child:
+                        if isinstance(receipt, Mapping):
+                            yield receipt
+                continue
+            yield from _receipt_payloads(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _receipt_payloads(child)
+
+
+def _human_gates(value: Any) -> Iterable[Mapping[str, Any]]:
+    if isinstance(value, Mapping):
+        for key, child in value.items():
+            if key in {"human_gate", "humanGate"} and isinstance(child, Mapping):
+                yield child
+            else:
+                yield from _human_gates(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _human_gates(child)
+
+
+def _validate_human_tasks(record: Mapping[str, Any]) -> None:
+    for task in record.get("humanTasks") or []:
+        if not isinstance(task, Mapping):
+            _fail("stage-one human task is malformed", code="stage_one_human_gate_not_approved")
+        status = str(task.get("status") or "").strip().lower()
+        decision = str(task.get("decision") or "").strip().lower()
+        if status not in _ACCEPTED_HUMAN_TASK_STATUSES or decision not in {"accept", "approved"}:
+            _fail(
+                "every stage-one human task must be explicitly accepted",
+                code="stage_one_human_gate_not_approved",
+            )
+
+
+def evaluate_stage_one_closeout(
+    record: Mapping[str, Any],
+    *,
+    node_id: str,
+) -> StageOneCloseoutOutcome | None:
+    """Validate the immutable evidence set needed to stop at node 7."""
+
+    policy = _stage_one_policy(record)
+    if policy is None or node_id != policy.closureNodeId:
+        return None
+    deferred = set(policy.deferredNodeIds)
+    if any(
+        isinstance(item, Mapping) and str(item.get("nodeId") or "") in deferred
+        for item in record.get("nodeRuns") or []
+    ):
+        _fail(
+            "a phase-two node attempt already exists",
+            code="stage_one_phase_two_attempt_exists",
+        )
+
+    manifests = [
+        item for item in record.get("artifactManifests") or [] if isinstance(item, Mapping)
+    ]
+    payloads = record.get("artifactPayloads")
+    payloads = payloads if isinstance(payloads, Mapping) else {}
+    manifests_by_kind: dict[str, list[Mapping[str, Any]]] = {}
+    for manifest in manifests:
+        manifests_by_kind.setdefault(_artifact_kind(manifest), []).append(manifest)
+    missing = [kind for kind in policy.requiredArtifactKinds if not manifests_by_kind.get(kind)]
+    if missing:
+        _fail(
+            "stage-one required artifacts are missing: " + ", ".join(missing),
+            code="stage_one_artifact_missing",
+        )
+
+    required_payloads: dict[str, list[Mapping[str, Any]]] = {}
+    artifact_refs: list[str] = []
+    for kind in policy.requiredArtifactKinds:
+        for manifest in manifests_by_kind[kind]:
+            artifact_id = str(manifest.get("artifactId") or "").strip()
+            payload = payloads.get(artifact_id)
+            if not artifact_id or not isinstance(payload, Mapping):
+                _fail(
+                    f"stage-one artifact payload is missing for {kind}",
+                    code="stage_one_artifact_payload_missing",
+                )
+            artifact_refs.append(artifact_id)
+            required_payloads.setdefault(kind, []).append(payload)
+
+    human_gate_count = 0
+    for kind, kind_payloads in required_payloads.items():
+        kind_gate_count = 0
+        for payload in kind_payloads:
+            for gate in _human_gates(payload):
+                kind_gate_count += 1
+                human_gate_count += 1
+                if gate.get("required") is not True or str(gate.get("decision") or "").lower() != "approved":
+                    _fail(
+                        f"stage-one human gate is not approved for {kind}",
+                        code="stage_one_human_gate_not_approved",
+                    )
+        if kind in _REQUIRED_GATE_ARTIFACT_KINDS and kind_gate_count == 0:
+            _fail(
+                f"stage-one human gate is missing for {kind}",
+                code="stage_one_human_gate_missing",
+            )
+    _validate_human_tasks(record)
+
+    question_id = str(record.get("questionId") or "").upper()
+    run_id = str(record.get("runId") or "")
+    receipt_stages: dict[str, str] = {}
+    for kind_payloads in required_payloads.values():
+        for payload in kind_payloads:
+            for raw_receipt in _receipt_payloads(payload):
+                try:
+                    receipt = ModelInvocationReceipt.from_dict(raw_receipt)
+                except (KeyError, TypeError, ValueError) as exc:
+                    raise NodeExecutionError(
+                        f"stage-one model receipt is invalid: {exc}",
+                        code="stage_one_receipt_invalid",
+                    ) from exc
+                scope = dict(receipt.scope or {})
+                stage = str(scope.get("stageId") or scope.get("stage_id") or "").lower()
+                if stage not in policy.requiredReceiptStages:
+                    continue
+                if (
+                    receipt.status not in {ModelInvocationStatus.SUCCEEDED, ModelInvocationStatus.RETRIED}
+                    or str(scope.get("questionId") or "").upper() != question_id
+                    or str(scope.get("runId") or "") != run_id
+                ):
+                    _fail(
+                        f"stage-one {stage} receipt is not bound to this run",
+                        code="stage_one_receipt_invalid",
+                    )
+                receipt_stages[stage] = receipt.receipt_id
+    missing_stages = [stage for stage in policy.requiredReceiptStages if stage not in receipt_stages]
+    if missing_stages:
+        _fail(
+            "stage-one receipt stages are missing: " + ", ".join(missing_stages),
+            code="stage_one_receipt_missing",
+        )
+    return StageOneCloseoutOutcome(
+        completion_state=policy.completionState,
+        policy_sha256=policy.policySha256,
+        artifact_refs=tuple(dict.fromkeys(artifact_refs)),
+        receipt_stages=tuple(policy.requiredReceiptStages),
+        receipt_refs=tuple(receipt_stages[stage] for stage in policy.requiredReceiptStages),
+        human_gate_count=human_gate_count,
+    )
+
+
+def build_stage_one_closeout_action(
+    *,
+    record: Mapping[str, Any],
+    node_run: Mapping[str, Any],
+    idempotency_key: str,
+    completed_at: str,
+    outcome: StageOneCloseoutOutcome,
+) -> dict[str, Any]:
+    action_key = f"{idempotency_key}:{STAGE_ONE_CLOSEOUT_COMMAND}"
+    action_id = "action-stage1-" + hashlib.sha256(action_key.encode("utf-8")).hexdigest()[:12]
+    return {
+        "actionId": action_id,
+        "runId": str(record.get("runId") or ""),
+        "nodeId": str(node_run.get("nodeId") or ""),
+        "nodeRunId": str(node_run.get("nodeRunId") or ""),
+        "attempt": int(node_run.get("attempt") or 0),
+        "command": STAGE_ONE_CLOSEOUT_COMMAND,
+        "idempotencyKey": action_key,
+        "status": "succeeded",
+        "inputSummary": {
+            "policySha256": outcome.policy_sha256,
+            "artifactRefs": list(outcome.artifact_refs),
+        },
+        "issuedAt": completed_at,
+        "completedAt": completed_at,
+        "observation": {"status": "completed", **outcome.to_dict()},
+        "artifactRef": "",
+    }
+
+
+def _ledger_run_mapping(run: Any) -> dict[str, Any]:
+    try:
+        snapshot = json.loads(str(getattr(run, "input_snapshot_json", "") or "{}"))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        snapshot = {}
+    return {
+        "runId": str(getattr(run, "run_id", "") or ""),
+        "workflowId": str(getattr(run, "workflow_id", "") or ""),
+        "workflowVersionId": str(getattr(run, "workflow_version_id", "") or ""),
+        "structureHash": str(getattr(run, "structure_hash", "") or ""),
+        "questionId": str(getattr(run, "question_id", "") or "").upper(),
+        "inputSnapshot": snapshot if isinstance(snapshot, Mapping) else {},
+    }
+
+
+def _ledger_receipt_payload(row: Any) -> dict[str, Any]:
+    if isinstance(row, Mapping):
+        return {
+            "receiptId": str(row.get("receiptId") or row.get("receipt_id") or ""),
+            "artifactType": str(
+                row.get("artifactType") or row.get("artifact_kind") or ""
+            ),
+            "canonicalRef": str(
+                row.get("canonicalRef") or row.get("canonical_ref") or ""
+            ),
+            "version": str(row.get("version") or row.get("artifact_version") or ""),
+            "sha256": str(row.get("sha256") or ""),
+            "domainRevision": str(
+                row.get("domainRevision") or row.get("domain_revision") or ""
+            ),
+        }
+    canonical_ref = ""
+    try:
+        decoded = json.loads(str(row[5] or "{}"))
+        canonical_ref = str(decoded.get("canonicalRef") or "")
+    except (IndexError, TypeError, ValueError, json.JSONDecodeError, AttributeError):
+        canonical_ref = ""
+    return {
+        "receiptId": str(row[0] or ""),
+        "artifactType": str(row[4] or ""),
+        "canonicalRef": canonical_ref,
+        "version": str(row[6] or ""),
+        "sha256": str(row[7] or ""),
+        "domainRevision": str(row[8] or ""),
+    }
+
+
+def _load_ledger_artifact_payload(receipt: Mapping[str, Any]) -> dict[str, Any] | None:
+    from .artifact_readback_registry import (
+        load_scoped_artifact_payload,
+        parse_canonical_ref,
+        read_domain_artifact,
+    )
+
+    canonical_ref = str(receipt.get("canonicalRef") or "").strip()
+    parsed = parse_canonical_ref(canonical_ref)
+    if parsed is None or parsed.get("legacy") == "1":
+        return None
+    readback = read_domain_artifact(canonical_ref)
+    if (
+        readback is None
+        or readback.content_hash != str(receipt.get("sha256") or "")
+        or readback.domain_revision != str(receipt.get("domainRevision") or "")
+    ):
+        return None
+    envelope = load_scoped_artifact_payload(
+        str(parsed.get("kind") or ""),
+        team_id=str(parsed.get("teamId") or ""),
+        authority_run_id=str(parsed.get("authorityRunId") or ""),
+        content_hash=str(receipt.get("sha256") or ""),
+    )
+    if not isinstance(envelope, Mapping):
+        return None
+    payload = envelope.get("payload")
+    if isinstance(payload, Mapping):
+        return dict(payload)
+    return dict(envelope)
+
+
+def evaluate_ledger_stage_one_closeout(
+    store: Any,
+    *,
+    action: Any,
+    current_artifact_receipts: Iterable[Mapping[str, Any]],
+) -> StageOneCloseoutOutcome | None:
+    """Project the formal Ledger snapshot into the shared closeout validator."""
+
+    run, attempts, prior_receipts, pending_human_tasks = store.read(
+        lambda repo: (
+            repo.get_run(str(action.run_id)),
+            repo.list_attempts(str(action.run_id)),
+            repo.list_artifact_receipts_for_run(str(action.run_id)),
+            repo.list_pending_human_tasks(str(action.run_id)),
+        )
+    )
+    if run is None:
+        _fail("stage-one Ledger run is missing", code="stage_one_run_missing")
+    record = _ledger_run_mapping(run)
+    policy = _stage_one_policy(record)
+    if policy is None or str(action.node_id) != policy.closureNodeId:
+        return None
+
+    selected_by_kind: dict[str, dict[str, Any]] = {}
+    for raw in [*prior_receipts, *current_artifact_receipts]:
+        receipt = _ledger_receipt_payload(raw)
+        kind = str(receipt.get("artifactType") or "").split(":", 1)[0].strip()
+        if kind:
+            selected_by_kind[kind] = receipt
+
+    manifests: list[dict[str, Any]] = []
+    payloads: dict[str, dict[str, Any]] = {}
+    for kind in policy.requiredArtifactKinds:
+        receipt = selected_by_kind.get(kind)
+        if receipt is None:
+            continue
+        canonical_ref = str(receipt.get("canonicalRef") or "").strip()
+        artifact_id = canonical_ref or f"{kind}:{receipt.get('receiptId') or kind}"
+        payload = _load_ledger_artifact_payload(receipt)
+        if payload is None:
+            _fail(
+                f"stage-one artifact payload is unreadable for {kind}",
+                code="stage_one_artifact_payload_missing",
+            )
+        manifests.append({"artifactId": artifact_id})
+        payloads[artifact_id] = payload
+
+    record.update(
+        {
+            "artifactManifests": manifests,
+            "artifactPayloads": payloads,
+            "nodeRuns": [
+                {"nodeId": str(item.node_id), "status": str(item.status)}
+                for item in attempts
+            ],
+            "humanTasks": [
+                {
+                    "taskId": str(item[0] or ""),
+                    "status": str(item[6] or "pending"),
+                    "decision": "",
+                }
+                for item in pending_human_tasks
+            ],
+        }
+    )
+    return evaluate_stage_one_closeout(record, node_id=str(action.node_id))
+
+
+def stage_one_terminal_facts(
+    run: Any,
+    *,
+    node_id: str,
+    state_update: Mapping[str, Any] | None,
+) -> tuple[str, str] | None:
+    """Return terminal facts only for a server-authorized stage-one marker."""
+
+    if (
+        str((state_update or {}).get(STAGE_ONE_CHECKPOINT_FIELD) or "")
+        != STAGE_ONE_ACCEPTED_STATE
+    ):
+        return None
+    record = _ledger_run_mapping(run)
+    policy = _stage_one_policy(record)
+    if policy is None or str(node_id or "") != policy.closureNodeId:
+        return None
+    return "stage_one_g1_accepted", policy.completionState
+
+
+__all__ = [
+    "STAGE_ONE_ACCEPTED_STATE",
+    "STAGE_ONE_CLOSEOUT_COMMAND",
+    "StageOneCloseoutOutcome",
+    "build_stage_one_closeout_action",
+    "evaluate_ledger_stage_one_closeout",
+    "evaluate_stage_one_closeout",
+    "route_after_stage_one_closure",
+    "stage_one_terminal_facts",
+]

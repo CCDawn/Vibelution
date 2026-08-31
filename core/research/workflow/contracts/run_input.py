@@ -48,6 +48,23 @@ _REQUIRED_FIELDS = (
 )
 
 
+def _definition_id_for_registry_version(workflow_version_id: str) -> str:
+    """Resolve ``workflowId@schemaVersion`` from the immutable registry id."""
+
+    try:
+        from core.research.workflow.definition_registry import (
+            WorkflowDefinitionRegistryError,
+            resolve_definition_by_version_id,
+        )
+
+        definition = resolve_definition_by_version_id(workflow_version_id)
+    except WorkflowDefinitionRegistryError as exc:
+        raise ContractValidationError(
+            "workflowVersionId cannot resolve the stage-one workflow definition"
+        ) from exc
+    return f"{definition.workflowId}@{definition.schemaVersion}"
+
+
 def _normalize_research_scope(
     payload: Mapping[str, Any],
     *,
@@ -223,9 +240,13 @@ class WorkflowRunInputSnapshot:
                 raise ContractValidationError(
                     f"stageOneCompletionPolicy is malformed: {exc}"
                 ) from exc
-            if stage_one_policy.workflowDefinitionId != canonical["workflowVersionId"]:
+            resolved_definition_id = _definition_id_for_registry_version(
+                canonical["workflowVersionId"]
+            )
+            if stage_one_policy.workflowDefinitionId != resolved_definition_id:
                 raise ContractValidationError(
-                    "stageOneCompletionPolicy.workflowDefinitionId must match workflowVersionId"
+                    "stageOneCompletionPolicy.workflowDefinitionId must match the "
+                    "definition resolved by workflowVersionId"
                 )
             if canonical["questionId"] not in stage_one_policy.questionIds:
                 raise ContractValidationError(
