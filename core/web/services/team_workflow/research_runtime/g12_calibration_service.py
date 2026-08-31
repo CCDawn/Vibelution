@@ -557,6 +557,114 @@ def policy_activation_advice(
     }
 
 
+def calibration_gate_verdict(
+    policy: AutoAdvancePolicyV2 | Mapping[str, Any],
+    bundle: G12CalibrationBundle | None = None,
+) -> dict[str, Any]:
+    """Read-only gate query: has this policy's calibrationGate been met?
+
+    The single "is the statistical gate green" answer the automation-policy
+    executor consumes (safety-ladder rung 3).  Fail-closed by construction:
+
+    - ``bundle is None`` (no G12 pilot bundle available) -> not passed with
+      reason code ``calibration_evidence_unavailable``;
+    - a pending bundle (missing judgement records) -> ``evidence_pending``;
+    - a complete-but-underpowered/degenerate bundle -> ``evidence_insufficient``;
+    - otherwise the decision-#13 stratum verdicts decide: the gate passes
+      only when the evidence is complete AND every covered cross stratum is
+      approvable under the policy's declared thresholds (kappa >= declared
+      minimum, one-sided false-auto-approve upper bound within the declared
+      maximum).  Execution is global per policy, so one not-approvable
+      stratum fails the whole gate; overall numbers never justify a stratum
+      (decision #13).
+
+    The returned mapping is advice-shaped and never executes anything:
+    ``passed`` is a boolean the caller must still combine with its own
+    activation ladder.
+    """
+
+    policy_id, version, content_hash = _policy_identity(policy)
+    gate, gate_is_mapping = _calibration_gate_view(policy)
+
+    def _verdict(
+        passed: bool,
+        status: str,
+        reason_code: str,
+        reasons: list[str],
+        evidence: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            "passed": passed,
+            "policyId": policy_id,
+            "policyVersion": version,
+            "policyContentHash": content_hash,
+            "status": status,
+            "reasonCode": reason_code,
+            "reasons": reasons,
+            "declaredThresholds": _declared_thresholds(gate, policy)
+            if gate_is_mapping
+            else {},
+            "evidence": evidence,
+        }
+
+    if bundle is None:
+        return _verdict(
+            False,
+            "unavailable",
+            "calibration_evidence_unavailable",
+            [
+                "no G12 calibration bundle is available; the statistical "
+                "gate cannot be green without decision-#13 pilot evidence"
+            ],
+            {},
+        )
+    declared_bound = gate.get("falseAutoApproveUpperBound")
+    declared_method = (
+        str(declared_bound.get("method") or "").strip()
+        if isinstance(declared_bound, Mapping)
+        else ""
+    )
+    method = (
+        declared_method
+        if declared_method in UPPER_BOUND_METHODS
+        else DEFAULT_UPPER_BOUND_METHOD
+    )
+    assessment = assess_bundle(
+        bundle,
+        gate_policy=gate_policy_from_policy(policy),
+        method=method,
+    )
+    evidence = {
+        "bundleId": assessment.bundleId,
+        "manifestId": assessment.manifestId,
+        "sampleSize": assessment.sampleSize,
+        "kappa": assessment.kappa,
+        "falseAutoApproveUpperBounds": dict(assessment.falseAutoApproveUpperBounds),
+        "approvableStrata": list(assessment.approvableStrata),
+        "verdicts": [dict(item) for item in (assessment.activation or {}).get("verdicts", [])],
+        "notAPermanentDelegation": assessment.notPermanentDelegation,
+    }
+    if assessment.status == ASSESSMENT_STATUS_PENDING:
+        return _verdict(False, assessment.status, "evidence_pending", list(assessment.notes), evidence)
+    if assessment.status == ASSESSMENT_STATUS_INSUFFICIENT:
+        return _verdict(
+            False, assessment.status, "evidence_insufficient", list(assessment.notes), evidence
+        )
+    verdicts = evidence["verdicts"]
+    reasons = [
+        f"stratum {item.get('value')!r} not approvable: "
+        + "; ".join(item.get("reasons", []))
+        for item in verdicts
+        if not item.get("approvable")
+    ]
+    if not verdicts:
+        reasons.append("the completed bundle covers no cross strata")
+    kappa = assessment.kappa if isinstance(assessment.kappa, Mapping) else {}
+    if kappa.get("kappa") is None:
+        reasons.append("overall kappa is undefined for the completed bundle")
+    return _verdict(not reasons, assessment.status, "" if not reasons else "gate_not_met", reasons, evidence)
+
+
 __all__ = [
     "ASSESSMENT_STATUS_COMPLETE",
     "ASSESSMENT_STATUS_INSUFFICIENT",
@@ -565,6 +673,7 @@ __all__ = [
     "G12GateAssessment",
     "G12_GATE",
     "assess_bundle",
+    "calibration_gate_verdict",
     "collect_pending_records",
     "gate_policy_from_policy",
     "policy_activation_advice",
