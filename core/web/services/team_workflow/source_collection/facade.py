@@ -30,7 +30,11 @@ SEARCH_ENVELOPE_SCHEMA_VERSION = 1
 # turns its search envelope into evidence.  Bump this whenever the policy
 # changes in a way that must invalidate previously collected evidence; it is
 # part of the ensure idempotency fingerprint.
-KNOWLEDGE_COLLECTION_SOURCE_POLICY_VERSION = "1"
+#
+# v2: added arxiv_api as a default search provider alongside
+# crossref_rest_api.  Runs fingerprinted under v1 were collected without
+# arXiv coverage, so ensure must not keep reusing them.
+KNOWLEDGE_COLLECTION_SOURCE_POLICY_VERSION = "2"
 
 # Metadata key on the processing run that stores the ensure idempotency
 # fingerprint (see ``search_envelope_fingerprint``).

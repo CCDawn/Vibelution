@@ -1006,9 +1006,10 @@ def start_source_collection_search_background(team_id: str, run_id: str, payload
     normalized_run_id = s._normalize_required_id(run_id, "Data processing run id is required.")
     team = s.team_service.get_team(normalized_team_id)
     request_payload = dict(payload) if isinstance(payload, dict) else {}
-    provider = s._trim_text(request_payload.get("provider"), max_length=80) or s.SOURCE_COLLECTION_SEARCH_PROVIDER_CROSSREF
-    if provider != s.SOURCE_COLLECTION_SEARCH_PROVIDER_CROSSREF:
+    provider = s._trim_text(request_payload.get("provider"), max_length=80)
+    if provider and provider not in s.SOURCE_COLLECTION_SEARCH_PROVIDERS:
         raise s.TeamWorkflowOrchestrationError(f"Unsupported source collection search provider: {provider}")
+    provider = provider or s.SOURCE_COLLECTION_SEARCH_PROVIDERS[0]
     try:
         run = s.data_processing_service.get_processing_run(normalized_run_id)
         assignments_payload = s.data_processing_service.list_collection_assignments(normalized_run_id)

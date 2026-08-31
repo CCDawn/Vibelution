@@ -499,6 +499,80 @@ def test_facade_surfaces_run_creation_failure(monkeypatch):
     assert exc.value.code == "run_creation_failed"
 
 
+def test_facade_ensure_policy_version_bump_does_not_reuse_pre_arxiv_runs(monkeypatch):
+    """The arXiv-provider policy bump invalidates v1 evidence fingerprints.
+
+    A run fingerprinted under source policy v1 was collected without arXiv
+    coverage, so an ensure replay under v2 must create a fresh run instead of
+    silently reusing the stale one; runs fingerprinted under v2 still reuse.
+    """
+    legacy_fingerprint = facade.search_envelope_fingerprint(
+        facade._normalize_search_envelope(_valid_search_envelope()),
+        facade._normalize_requirements({}),
+        source_policy_version="1",
+    )
+    assert legacy_fingerprint != _request_fingerprint()
+
+    created_payloads = []
+
+    def fake_start(team_id, payload):
+        created_payloads.append((team_id, dict(payload)))
+        return {"runId": "dprun-v2", "run": {"runId": "dprun-v2"}}
+
+    monkeypatch.setattr(
+        data_processing_service,
+        "list_processing_runs",
+        _fake_list_runs(
+            [
+                _stored_run(
+                    "dprun-v1",
+                    updated_at="2026-08-28T00:00:00Z",
+                    fingerprint=legacy_fingerprint,
+                )
+            ]
+        ),
+    )
+    monkeypatch.setattr(source_collection_runs, "start_source_collection_run", fake_start)
+    monkeypatch.setattr(
+        source_collection_runs,
+        "get_source_collection_summary",
+        _fake_summary(),
+    )
+
+    result = facade.research_knowledge_collection_facade(
+        action="ensure",
+        scope=_valid_envelope(),
+        searchEnvelope=_valid_search_envelope(),
+    )
+
+    assert result["created"] is True
+    assert created_payloads != []
+
+    # A run fingerprinted under the current (v2) policy still reuses.
+    monkeypatch.setattr(
+        data_processing_service,
+        "list_processing_runs",
+        _fake_list_runs(
+            [
+                _stored_run(
+                    "dprun-v2",
+                    updated_at="2026-08-28T00:00:00Z",
+                    fingerprint=_request_fingerprint(),
+                )
+            ]
+        ),
+    )
+    created_payloads.clear()
+    replay = facade.research_knowledge_collection_facade(
+        action="ensure",
+        scope=_valid_envelope(),
+        searchEnvelope=_valid_search_envelope(),
+    )
+    assert replay["idempotent"] is True
+    assert replay["locator"]["runId"] == "dprun-v2"
+    assert created_payloads == []
+
+
 def test_search_envelope_fingerprint_is_canonical_and_order_insensitive():
     a = facade.search_envelope_fingerprint(
         facade._normalize_search_envelope({"keywords": ["b 关键词", "a keyword"]}),
@@ -529,7 +603,7 @@ def test_search_envelope_fingerprint_changes_with_keywords_and_requirements():
     other_policy = facade.search_envelope_fingerprint(
         facade._normalize_search_envelope({"keywords": ["alpha"]}),
         {},
-        source_policy_version="2",
+        source_policy_version="3",
     )
     assert base != other_keywords
     assert base != other_requirements

@@ -149,6 +149,46 @@ def _crossref_search_url(query_text: str, *, rows: int) -> str:
     return f"https://api.crossref.org/works?{params}"
 
 
+_ARXIV_QUERY_TOKEN_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+_ARXIV_QUERY_MAX_TOKENS = 8
+
+
+def _arxiv_search_query(query_text: str) -> str:
+    """Build an arXiv ``search_query`` expression from a plan query text.
+
+    Query tokens are AND-joined behind the ``all:`` field prefix so the
+    arXiv API treats them as conjunctive keyword filters, mirroring how the
+    Crossref branch posts the raw query text.
+    """
+    s = _service()
+    text = s._trim_text(query_text, max_length=1000)
+    tokens: list[str] = []
+    for match in _ARXIV_QUERY_TOKEN_PATTERN.finditer(text):
+        token = match.group(0).strip("._-")
+        if len(token) < 2:
+            continue
+        if token.lower() in s._SOURCE_COLLECTION_GENERIC_SEARCH_TERMS:
+            continue
+        if token not in tokens:
+            tokens.append(token)
+        if len(tokens) >= _ARXIV_QUERY_MAX_TOKENS:
+            break
+    if not tokens:
+        return s._trim_text(text, max_length=400)
+    return " AND ".join(f"all:{token}" for token in tokens)
+
+
+def _arxiv_search_url(query_text: str, *, start: int, max_results: int) -> str:
+    params = urllib.parse.urlencode(
+        {
+            "search_query": query_text,
+            "start": str(max(0, start)),
+            "max_results": str(max(1, max_results)),
+        }
+    )
+    return f"https://export.arxiv.org/api/query?{params}"
+
+
 def _current_research_stage(phases: list[dict[str, Any]], workflow: dict[str, Any]) -> str:
     s = _service()
     for phase in phases:

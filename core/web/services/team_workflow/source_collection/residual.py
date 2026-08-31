@@ -17,9 +17,13 @@ import re
 import time
 import urllib.parse
 import uuid
+import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
+
+ARXIV_ATOM_NAMESPACE = "http://www.w3.org/2005/Atom"
+ARXIV_SCHEMA_NAMESPACE = "http://arxiv.org/schemas/atom"
 
 
 def _service():
@@ -3119,6 +3123,73 @@ def _source_collection_result_from_crossref_item(item: dict[str, Any], *, fallba
         },
         "qualitySignals": {
             "providerScore": item.get("score"),
+            "hasDoi": bool(doi),
+            "hasAbstract": bool(abstract),
+        },
+    }
+
+
+def _source_collection_arxiv_atom_entries(payload: bytes | str) -> list[ET.Element]:
+    """Parse an arXiv Atom feed body into its ``<entry>`` elements."""
+    if isinstance(payload, str):
+        payload = payload.encode("utf-8", errors="replace")
+    root = ET.fromstring(payload)
+    return list(root.findall(f"{{{ARXIV_ATOM_NAMESPACE}}}entry"))
+
+
+def _source_collection_result_from_arxiv_entry(entry: ET.Element, *, fallback_source_type: str) -> dict[str, Any]:
+    """Map one arXiv Atom ``<entry>`` into the shared search-result shape.
+
+    The abstract must land in ``summary``: downstream extraction produces the
+    verbatim quotes from that field, so a title+URL-only result would starve
+    the evidence pipeline.
+    """
+    s = _service()
+    atom = f"{{{ARXIV_ATOM_NAMESPACE}}}"
+    schema = f"{{{ARXIV_SCHEMA_NAMESPACE}}}"
+
+    def _element_text(tag: str) -> str:
+        raw = entry.findtext(tag) or ""
+        return re.sub(r"\s+", " ", raw).strip()
+
+    entry_id = s._trim_text(_element_text(f"{atom}id"), max_length=500)
+    source_ref = entry_id or s._trim_text(_element_text(f"{atom}sourceRef"), max_length=1000)
+    title = _element_text(f"{atom}title") or source_ref
+    abstract = s._strip_html(_element_text(f"{atom}summary"))
+    published = s._trim_text(_element_text(f"{atom}published"), max_length=80)
+    updated = s._trim_text(_element_text(f"{atom}updated"), max_length=80)
+    authors = [
+        s._trim_text(re.sub(r"\s+", " ", author.findtext(f"{atom}name") or ""), max_length=200)
+        for author in entry.findall(f"{atom}author")
+    ]
+    authors = [author for author in authors if author]
+    doi = s._trim_text(_element_text(f"{schema}doi"), max_length=500)
+    primary_category = ""
+    primary_category_node = entry.find(f"{atom}category[@primary='true']")
+    if primary_category_node is None:
+        primary_category_node = entry.find(f"{atom}category")
+    if primary_category_node is not None:
+        primary_category = s._trim_text(primary_category_node.get("term"), max_length=120)
+    source_type = s._source_collection_data_processing_source_type(fallback_source_type or "preprint")
+    arxiv_id = ""
+    if "/abs/" in entry_id:
+        arxiv_id = s._trim_text(entry_id.rsplit("/abs/", 1)[-1], max_length=120)
+    return {
+        "title": title,
+        "sourceRef": source_ref,
+        "rawLocation": source_ref,
+        "summary": s._trim_text(abstract, max_length=1600),
+        "sourceType": source_type,
+        "providerType": "arxiv_preprint",
+        "metadata": {
+            "arxivId": arxiv_id,
+            "doi": doi,
+            "published": published,
+            "updated": updated,
+            "authors": authors,
+            "primaryCategory": primary_category,
+        },
+        "qualitySignals": {
             "hasDoi": bool(doi),
             "hasAbstract": bool(abstract),
         },

@@ -176,7 +176,8 @@ def start_research_stage_round(team_id: str, payload: dict[str, Any] | None = No
                 source_result["run"]["runId"],
                 {
                     "backgroundExecution": True,
-                    "provider": s.SOURCE_COLLECTION_SEARCH_PROVIDER_CROSSREF,
+                    # No explicit provider: the executor expands the default
+                    # SOURCE_COLLECTION_SEARCH_PROVIDERS set per query.
                     "maxQueries": s._normalize_int(
                         request_payload.get("maxQueries"),
                         default=s.SOURCE_COLLECTION_SEARCH_EXECUTION_DEFAULT_MAX_QUERIES,

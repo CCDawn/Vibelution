@@ -14,8 +14,10 @@ from __future__ import annotations
 
 import json
 import re
+import time
 import urllib.error
 import urllib.request
+import xml.etree.ElementTree as ET
 from typing import Any
 
 
@@ -113,9 +115,11 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
     normalized_run_id = s._normalize_required_id(run_id, "Data processing run id is required.")
     s.team_service.get_team(normalized_team_id)
     request_payload = payload if isinstance(payload, dict) else {}
-    provider = s._trim_text(request_payload.get("provider"), max_length=80) or s.SOURCE_COLLECTION_SEARCH_PROVIDER_CROSSREF
-    if provider != s.SOURCE_COLLECTION_SEARCH_PROVIDER_CROSSREF:
-        raise s.TeamWorkflowOrchestrationError(f"Unsupported source collection search provider: {provider}")
+    requested_provider = s._trim_text(request_payload.get("provider"), max_length=80)
+    if requested_provider and requested_provider not in s.SOURCE_COLLECTION_SEARCH_PROVIDERS:
+        raise s.TeamWorkflowOrchestrationError(f"Unsupported source collection search provider: {requested_provider}")
+    providers = (requested_provider,) if requested_provider else tuple(s.SOURCE_COLLECTION_SEARCH_PROVIDERS)
+    provider = requested_provider or s.SOURCE_COLLECTION_SEARCH_PROVIDERS[0]
     max_queries = s._normalize_int(
         request_payload.get("maxQueries"),
         default=s.SOURCE_COLLECTION_SEARCH_EXECUTION_DEFAULT_MAX_QUERIES,
@@ -221,136 +225,154 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
             if query_id in existing_query_ids and not force:
                 skipped_query_count += 1
                 continue
-            search_response = s._execute_source_collection_query(query, max_results=max_results_per_query, provider=provider)
-            attempted_query_count += 1
             attempted_query_ids.append(query_id)
             query_records: list[dict[str, Any]] = []
             query_skipped_duplicate_count = 0
-            if search_response.get("error"):
-                failed_query_count += 1
-                execution_events.append(
-                    s._source_collection_execution_event(
-                        "search.failed",
-                        assignment=assignment,
-                        query=query,
-                        status="blocked",
-                        title=f"Search failed: {query_text}",
-                        summary=s._trim_text(search_response.get("error"), max_length=500),
-                        refs=[query_id, provider],
-                    )
-                )
-                continue
-            executed_query_count += 1
-            existing_query_ids.add(query_id)
-            search_results = [item for item in list(search_response.get("results") or []) if isinstance(item, dict)]
-            result_count += len(search_results)
             query_filtered_excluded_count = 0
-            execution_events.append(
-                s._source_collection_execution_event(
-                    "search.executed",
-                    assignment=assignment,
-                    query=query,
-                    status="completed" if search_results else "returned",
-                    title=f"Searched {provider}: {query_text}",
-                    summary=f"Fetched {len(search_results)} metadata result(s); full text was not downloaded.",
-                    refs=[query_id, s._trim_text(search_response.get("searchUrl"), max_length=240)],
-                    raw_location=s._trim_text(search_response.get("searchUrl"), max_length=1000),
-                )
-            )
-            for result in search_results:
-                quality_gate = s._source_collection_search_result_quality_gate(query, result)
-                if not bool(quality_gate.get("accepted")):
-                    rejected_result_count += 1
+            query_executed_providers: list[str] = []
+            query_failed_provider_count = 0
+            for query_provider in providers:
+                search_response = s._execute_source_collection_query(query, max_results=max_results_per_query, provider=query_provider)
+                if search_response.get("error"):
+                    query_failed_provider_count += 1
                     execution_events.append(
                         s._source_collection_execution_event(
-                            "search.low_quality_rejected",
+                            "search.failed",
                             assignment=assignment,
                             query=query,
                             status="blocked",
-                            title=f"Rejected low-quality source: {result.get('title') or result.get('sourceRef')}",
-                            summary=(
-                                "The metadata result did not pass query relevance and quality gates: "
-                                + ", ".join(str(reason) for reason in list(quality_gate.get("reasons") or [])[:4])
-                            ),
-                            refs=[
-                                s._trim_text(result.get("sourceRef"), max_length=240),
-                                *[
-                                    f"matched:{term}"
-                                    for term in list(quality_gate.get("matchedTerms") or [])[:4]
-                                ],
-                                *[
-                                    f"blocked:{term}"
-                                    for term in list(quality_gate.get("blockingTerms") or [])[:4]
-                                ],
-                            ],
-                            raw_location=s._trim_text(result.get("rawLocation") or result.get("sourceRef"), max_length=1000),
+                            title=f"Search failed: {query_text}",
+                            summary=s._trim_text(search_response.get("error"), max_length=500),
+                            refs=[query_id, query_provider],
+                            provider=query_provider,
                         )
                     )
                     continue
-                result_quality_signals = s._normalize_metadata(result.get("qualitySignals"))
-                result_quality_signals["sourceCollectionQualityGate"] = quality_gate
-                result = dict(result)
-                result["qualitySignals"] = result_quality_signals
-                candidate_record = s._source_collection_record_from_search_result(
-                    normalized_team_id,
-                    run,
-                    assignment,
-                    query,
-                    result,
-                    provider=provider,
-                    search_url=s._trim_text(search_response.get("searchUrl"), max_length=1000),
+                query_executed_providers.append(query_provider)
+                existing_query_ids.add(query_id)
+                search_results = [item for item in list(search_response.get("results") or []) if isinstance(item, dict)]
+                result_count += len(search_results)
+                execution_events.append(
+                    s._source_collection_execution_event(
+                        "search.executed",
+                        assignment=assignment,
+                        query=query,
+                        status="completed" if search_results else "returned",
+                        title=f"Searched {query_provider}: {query_text}",
+                        summary=f"Fetched {len(search_results)} metadata result(s); full text was not downloaded.",
+                        refs=[query_id, s._trim_text(search_response.get("searchUrl"), max_length=240)],
+                        raw_location=s._trim_text(search_response.get("searchUrl"), max_length=1000),
+                        provider=query_provider,
+                    )
                 )
-                source_identity_key = s._source_collection_record_identity_key(candidate_record)
-                excluded_entry = s._source_collection_exclusion_match(normalized_team_id, run, source_identity_key)
-                if excluded_entry is not None:
-                    filtered_excluded_count += 1
-                    query_filtered_excluded_count += 1
-                    if source_identity_key:
-                        excluded_source_keys.append(source_identity_key)
-                    s._record_source_collection_exclusion_hit(
+                for result in search_results:
+                    quality_gate = s._source_collection_search_result_quality_gate(query, result)
+                    if not bool(quality_gate.get("accepted")):
+                        rejected_result_count += 1
+                        execution_events.append(
+                            s._source_collection_execution_event(
+                                "search.low_quality_rejected",
+                                assignment=assignment,
+                                query=query,
+                                status="blocked",
+                                title=f"Rejected low-quality source: {result.get('title') or result.get('sourceRef')}",
+                                summary=(
+                                    "The metadata result did not pass query relevance and quality gates: "
+                                    + ", ".join(str(reason) for reason in list(quality_gate.get("reasons") or [])[:4])
+                                ),
+                                refs=[
+                                    s._trim_text(result.get("sourceRef"), max_length=240),
+                                    *[
+                                        f"matched:{term}"
+                                        for term in list(quality_gate.get("matchedTerms") or [])[:4]
+                                    ],
+                                    *[
+                                        f"blocked:{term}"
+                                        for term in list(quality_gate.get("blockingTerms") or [])[:4]
+                                    ],
+                                ],
+                                raw_location=s._trim_text(result.get("rawLocation") or result.get("sourceRef"), max_length=1000),
+                                provider=query_provider,
+                            )
+                        )
+                        continue
+                    result_quality_signals = s._normalize_metadata(result.get("qualitySignals"))
+                    result_quality_signals["sourceCollectionQualityGate"] = quality_gate
+                    result = dict(result)
+                    result["qualitySignals"] = result_quality_signals
+                    candidate_record = s._source_collection_record_from_search_result(
                         normalized_team_id,
                         run,
-                        candidate_record,
-                        excluded_entry,
+                        assignment,
+                        query,
+                        result,
+                        provider=query_provider,
+                        search_url=s._trim_text(search_response.get("searchUrl"), max_length=1000),
                     )
-                    execution_events.append(
-                        s._source_collection_execution_event(
-                            "search.excluded_source_filtered",
-                            assignment=assignment,
-                            query=query,
-                            status="completed",
-                            title=f"Filtered excluded source: {candidate_record.get('title') or candidate_record.get('sourceRef')}",
-                            summary=(
-                                "This result matched the source exclusion ledger for the current topic and was not written back into the active source collection flow."
-                            ),
-                            refs=[source_identity_key, s._trim_text(excluded_entry.get("reason"), max_length=120)],
-                            raw_location=s._trim_text(candidate_record.get("rawLocation") or candidate_record.get("sourceRef"), max_length=1000),
+                    source_identity_key = s._source_collection_record_identity_key(candidate_record)
+                    excluded_entry = s._source_collection_exclusion_match(normalized_team_id, run, source_identity_key)
+                    if excluded_entry is not None:
+                        filtered_excluded_count += 1
+                        query_filtered_excluded_count += 1
+                        if source_identity_key:
+                            excluded_source_keys.append(source_identity_key)
+                        s._record_source_collection_exclusion_hit(
+                            normalized_team_id,
+                            run,
+                            candidate_record,
+                            excluded_entry,
                         )
-                    )
-                    continue
-                duplicate_record = existing_identity_records.get(source_identity_key) if source_identity_key else None
-                if duplicate_record is not None:
-                    skipped_duplicate_count += 1
-                    assignment_skipped_duplicate_count += 1
-                    query_skipped_duplicate_count += 1
+                        execution_events.append(
+                            s._source_collection_execution_event(
+                                "search.excluded_source_filtered",
+                                assignment=assignment,
+                                query=query,
+                                status="completed",
+                                title=f"Filtered excluded source: {candidate_record.get('title') or candidate_record.get('sourceRef')}",
+                                summary=(
+                                    "This result matched the source exclusion ledger for the current topic and was not written back into the active source collection flow."
+                                ),
+                                refs=[source_identity_key, s._trim_text(excluded_entry.get("reason"), max_length=120)],
+                                raw_location=s._trim_text(candidate_record.get("rawLocation") or candidate_record.get("sourceRef"), max_length=1000),
+                                provider=query_provider,
+                            )
+                        )
+                        continue
+                    duplicate_record = existing_identity_records.get(source_identity_key) if source_identity_key else None
+                    if duplicate_record is not None:
+                        skipped_duplicate_count += 1
+                        assignment_skipped_duplicate_count += 1
+                        query_skipped_duplicate_count += 1
+                        if source_identity_key:
+                            duplicate_source_keys.append(source_identity_key)
+                        execution_events.append(
+                            s._source_collection_execution_event(
+                                "search.duplicate_skipped",
+                                assignment=assignment,
+                                query=query,
+                                status="completed",
+                                title=f"Skipped duplicate source: {candidate_record.get('title') or candidate_record.get('sourceRef')}",
+                                summary="The search result matched an existing DataRecord source identity and was not written again.",
+                                refs=[source_identity_key, duplicate_record.get("recordId", "")],
+                                raw_location=s._trim_text(candidate_record.get("rawLocation") or candidate_record.get("sourceRef"), max_length=1000),
+                                provider=query_provider,
+                            )
+                        )
+                        continue
                     if source_identity_key:
-                        duplicate_source_keys.append(source_identity_key)
-                    execution_events.append(
-                        s._source_collection_execution_event(
-                            "search.duplicate_skipped",
-                            assignment=assignment,
-                            query=query,
-                            status="completed",
-                            title=f"Skipped duplicate source: {candidate_record.get('title') or candidate_record.get('sourceRef')}",
-                            summary="The search result matched an existing DataRecord source identity and was not written again.",
-                            refs=[source_identity_key, duplicate_record.get("recordId", "")],
-                            raw_location=s._trim_text(candidate_record.get("rawLocation") or candidate_record.get("sourceRef"), max_length=1000),
-                        )
-                    )
-                    continue
-                if source_identity_key:
-                    existing_identity_records[source_identity_key] = candidate_record
-                query_records.append(candidate_record)
+                        existing_identity_records[source_identity_key] = candidate_record
+                    query_records.append(candidate_record)
+            if not query_executed_providers and query_failed_provider_count:
+                # Every provider failed for this query: keep the query runnable
+                # for a later batch instead of recording an empty output.
+                attempted_query_count += 1
+                failed_query_count += 1
+                continue
+            attempted_query_count += 1
+            if query_executed_providers:
+                # Query-level counting: a query that succeeded on at least one
+                # provider counts as executed once.
+                executed_query_count += 1
             remaining_query_ids = assignment_query_ids - existing_query_ids
             if query_records:
                 output_status = "completed" if not remaining_query_ids else "returned"
@@ -363,8 +385,9 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
                             "records": query_records,
                             "notes": "Automated source collection search executed one metadata-only query and wrote DataRecords for review.",
                             "qualitySignals": {
-                                "searchProvider": provider,
-                                "executedQueryCount": 1,
+                                "searchProvider": query_executed_providers[0] if len(query_executed_providers) == 1 else "multi_provider",
+                                "searchProviders": query_executed_providers,
+                                "executedQueryCount": max(1, len(query_executed_providers)),
                                 "queryId": query_id,
                                 "metadataOnlyDownload": True,
                                 "remainingQueryCount": len(remaining_query_ids),
@@ -399,7 +422,7 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
                             "tags": ["source_collection", "search_execution", agent_role],
                             "metadata": {
                                 "sourceCollectionSearchExecution": True,
-                                "searchProvider": provider,
+                                "searchProvider": s._trim_text(trace.get("searchProvider"), max_length=80) or provider,
                                 "metadataOnlyDownload": True,
                                 "assignmentId": assignment_id,
                                 "agentRole": agent_role,
@@ -463,7 +486,9 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
                             "notes": no_record_notes,
                             "blockingIssues": [] if (duplicate_only or excluded_only) else ["no_importable_search_result"],
                             "qualitySignals": {
-                                "searchProvider": provider,
+                                "searchProvider": query_executed_providers[0] if len(query_executed_providers) == 1 else "multi_provider",
+                                "searchProviders": query_executed_providers,
+                                "executedQueryCount": max(1, len(query_executed_providers)),
                                 "metadataOnlyDownload": True,
                                 "queryId": query_id,
                                 "remainingQueryCount": len(remaining_query_ids),
@@ -540,6 +565,7 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
         fields={
             "runId": normalized_run_id,
             "provider": provider,
+            "providers": list(providers),
             "attemptedQueryCount": attempted_query_count,
             "executedQueryCount": executed_query_count,
             "skippedQueryCount": skipped_query_count,
@@ -561,6 +587,7 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
             "teamId": normalized_team_id,
             "runId": normalized_run_id,
             "provider": provider,
+            "providers": list(providers),
             "queryEvents": s._source_collection_query_event_summaries(execution_events),
             "summary": {
                 "attemptedQueryCount": attempted_query_count,
@@ -583,6 +610,7 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
         "runId": normalized_run_id,
         "status": status_label,
         "provider": provider,
+        "providers": list(providers),
         "attemptedQueryCount": attempted_query_count,
         "executedQueryCount": executed_query_count,
         "skippedQueryCount": skipped_query_count,
@@ -765,12 +793,14 @@ def _source_collection_stage_round_status_after_search(
 
 def _execute_source_collection_query(query: dict[str, Any], *, max_results: int, provider: str) -> dict[str, Any]:
     s = _service()
-    if provider != s.SOURCE_COLLECTION_SEARCH_PROVIDER_CROSSREF:
+    if provider not in s.SOURCE_COLLECTION_SEARCH_PROVIDERS:
         return {"provider": provider, "results": [], "error": f"Unsupported provider: {provider}"}
     query_text = s._trim_text(query.get("query"), max_length=1000)
     if not query_text:
         return {"provider": provider, "results": [], "error": "Search query is empty."}
     rows = s._normalize_int(max_results, default=s.SOURCE_COLLECTION_SEARCH_EXECUTION_DEFAULT_RESULTS_PER_QUERY, minimum=1, maximum=s.SOURCE_COLLECTION_SEARCH_EXECUTION_MAX_RESULTS_PER_QUERY)
+    if provider == s.SOURCE_COLLECTION_SEARCH_PROVIDER_ARXIV:
+        return s._execute_arxiv_source_collection_query(query_text, rows=rows, provider=provider, fallback_source_type=str(query.get("sourceType") or ""))
     search_url = s._crossref_search_url(query_text, rows=rows)
     try:
         request = urllib.request.Request(
@@ -787,6 +817,47 @@ def _execute_source_collection_query(query: dict[str, Any], *, max_results: int,
     message = payload.get("message") if isinstance(payload, dict) else {}
     items = message.get("items") if isinstance(message, dict) else []
     results = [s._source_collection_result_from_crossref_item(item, fallback_source_type=str(query.get("sourceType") or "")) for item in list(items or [])[:rows] if isinstance(item, dict)]
+    return {"provider": provider, "searchUrl": search_url, "results": [item for item in results if item.get("title") or item.get("sourceRef") or item.get("rawLocation")]}
+
+
+def _execute_arxiv_source_collection_query(
+    query_text: str,
+    *,
+    rows: int,
+    provider: str,
+    fallback_source_type: str,
+) -> dict[str, Any]:
+    """Run one metadata-only arXiv Atom API query on the background thread.
+
+    Same synchronous urllib transport as the Crossref branch (no console, no
+    subprocess).  arXiv etiquette caps request frequency at one call per 3
+    seconds, so the interval is enforced after every request, success or not.
+    """
+    s = _service()
+    arxiv_query = s._arxiv_search_query(query_text)
+    search_url = s._arxiv_search_url(arxiv_query, start=0, max_results=rows)
+    try:
+        request = urllib.request.Request(
+            search_url,
+            headers={
+                "Accept": "application/atom+xml",
+                "User-Agent": "Vibelution-ChallengeCup/1.0 (metadata-only research source collection)",
+            },
+        )
+        with urllib.request.urlopen(request, timeout=15) as response:
+            payload_bytes = response.read()
+    except (OSError, urllib.error.URLError) as exc:
+        return {"provider": provider, "searchUrl": search_url, "results": [], "error": str(exc)}
+    finally:
+        time.sleep(s.SOURCE_COLLECTION_SEARCH_ARXIV_REQUEST_INTERVAL_SECONDS)
+    try:
+        entries = s._source_collection_arxiv_atom_entries(payload_bytes)
+    except ET.ParseError as exc:
+        return {"provider": provider, "searchUrl": search_url, "results": [], "error": f"arXiv response parse failed: {exc}"}
+    results = [
+        s._source_collection_result_from_arxiv_entry(entry, fallback_source_type=fallback_source_type)
+        for entry in list(entries)[:rows]
+    ]
     return {"provider": provider, "searchUrl": search_url, "results": [item for item in results if item.get("title") or item.get("sourceRef") or item.get("rawLocation")]}
 
 
@@ -1053,6 +1124,7 @@ def _source_collection_execution_event(
     refs: list[Any] | None = None,
     raw_location: str = "",
     storage_refs: list[str] | None = None,
+    provider: str = "",
 ) -> dict[str, Any]:
     s = _service()
     now = s.utc_now_iso()
@@ -1069,6 +1141,7 @@ def _source_collection_execution_event(
         "queryId": s._trim_text(normalized_query.get("queryId"), max_length=160),
         "query": s._trim_text(normalized_query.get("query"), max_length=1000),
         "sourceType": s._trim_text(normalized_query.get("sourceType"), max_length=80),
+        "provider": s._trim_text(provider, max_length=80),
         "refs": s._normalize_text_list(refs or [], max_items=8, max_length=240),
         "rawLocation": s._trim_text(raw_location, max_length=1000),
         "storageRefs": s._normalize_text_list(storage_refs or [], max_items=8, max_length=240),

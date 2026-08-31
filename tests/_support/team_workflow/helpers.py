@@ -437,6 +437,83 @@ def _fake_low_quality_source_search_response(query, *, max_results, provider):
         ][:max_results],
     }
 
+def _fake_arxiv_atom_feed(entries: list[dict]) -> bytes:
+    """Build a minimal arXiv Atom feed (namespace http://www.w3.org/2005/Atom)."""
+    entry_xml = ""
+    for entry in entries:
+        authors = "".join(f"<author><name>{name}</name></author>" for name in entry.get("authors", []))
+        categories = ""
+        for index, term in enumerate(entry.get("categories", [])):
+            primary = ' primary="true"' if index == 0 else ""
+            categories += f'<category{primary} term="{term}" />'
+        entry_xml += (
+            "<entry>"
+            f"<id>{entry['id']}</id>"
+            f"<title>{entry['title']}</title>"
+            f"<summary>{entry['summary']}</summary>"
+            f"<published>{entry['published']}</published>"
+            f"<updated>{entry.get('updated') or entry['published']}</updated>"
+            f"{authors}"
+            f"{categories}"
+            "</entry>"
+        )
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<feed xmlns="http://www.w3.org/2005/Atom">'
+        "<id>http://arxiv.org/api/query</id>"
+        "<title>ArXiv Query</title>"
+        f"{entry_xml}"
+        "</feed>"
+    ).encode("utf-8")
+
+def _fake_arxiv_atom_entries(feed: bytes):
+    from core.web.services.team_workflow.source_collection import residual
+
+    return residual._source_collection_arxiv_atom_entries(feed)
+
+def _fake_arxiv_search_response(query, *, max_results, provider):
+    """Mimic one arXiv Atom query: parse the fixture through the real mapper."""
+    from core.web.services.team_workflow.source_collection import residual
+
+    query_text = str(query.get("query") or "neural source")
+    feed = _fake_arxiv_atom_feed(
+        entries=[
+            {
+                "id": "http://arxiv.org/abs/2101.00983v1",
+                "title": "Predictive coding cortical hierarchy preprint",
+                "summary": (
+                    "We prove new results on predictive coding and the cortical hierarchy "
+                    "using rigorous computations; metadata only, no full text."
+                ),
+                "published": "2021-01-11T18:00:00Z",
+                "authors": ["Timothy Platt", "Tim Trudgian"],
+                "categories": ["cs.NE", "q-bio.NC"],
+            },
+            {
+                "id": "http://arxiv.org/abs/2007.00001v2",
+                "title": "Cortical hierarchy verification dataset",
+                "summary": (
+                    "A companion dataset for predictive coding cortical hierarchy verification "
+                    "experiments with annotated neural recordings."
+                ),
+                "published": "2020-06-30T17:00:00Z",
+                "authors": ["Ada Lovelace"],
+                "categories": ["cs.LG"],
+            },
+        ]
+    )
+    results = [
+        residual._source_collection_result_from_arxiv_entry(
+            entry, fallback_source_type=str(query.get("sourceType") or "")
+        )
+        for entry in _fake_arxiv_atom_entries(feed)
+    ]
+    return {
+        "provider": provider,
+        "searchUrl": f"https://export.arxiv.org/api/query?search_query={query_text.replace(' ', '+')}",
+        "results": results[:max_results],
+    }
+
 def _fake_mixed_excluded_source_search_response(query, *, max_results, provider):
     query_text = str(query.get("query") or "neural source")
     return {

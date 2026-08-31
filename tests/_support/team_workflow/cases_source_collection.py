@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import re
 
 from core.research.competition.question_result_package import canonical_model_policy
@@ -5750,14 +5751,16 @@ def test_execute_source_collection_search_filters_previously_excluded_sources(tm
     records = data_processing_service.list_records(second_run["run"]["runId"])["records"]
     candidates = team_workflow_orchestration_service.list_candidate_store(team["teamId"], candidate_type="source_manifest")["candidates"]
 
-    assert execution["filteredExcludedCount"] == 1
+    # Both default providers returned the excluded source; each replay is
+    # filtered and counted.
+    assert execution["filteredExcludedCount"] == 2
     assert execution["recordCount"] == 1
     assert execution["importedCount"] == 1
     assert [record["title"] for record in records] == ["Predictive coding useful web note"]
     assert [candidate["title"] for candidate in candidates] == ["Predictive coding useful web note"]
     assert "search.excluded_source_filtered" in {event["eventType"] for event in execution["executionEvents"]}
     ledger = team_workflow_orchestration_service.get_source_collection_exclusion_ledger(team["teamId"])
-    assert ledger["entries"][0]["hitCount"] == 2
+    assert ledger["entries"][0]["hitCount"] == 3
 
 def test_source_quality_writeback_downgrades_completed_when_candidate_coverage_is_partial(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
@@ -6581,7 +6584,9 @@ def test_execute_source_collection_search_writes_records_and_imports_candidates(
     assert execution["recordCount"] == 2
     assert execution["createdUniqueRecordCount"] == 2
     assert execution["importedCount"] == 2
-    assert execution["skippedDuplicateCount"] == 0
+    # The default provider set runs crossref first; the arXiv replay of the
+    # same two records is deduped through sourceIdentityKey.
+    assert execution["skippedDuplicateCount"] == 2
     assert execution["boundaries"]["externalSearchTriggered"] is True
     assert execution["boundaries"]["metadataOnlyDownload"] is True
     assert execution["boundaries"]["writesFormalKnowledge"] is False
@@ -6632,6 +6637,324 @@ def test_execute_source_collection_search_writes_records_and_imports_candidates(
         candidate["candidateId"] for candidate in candidates["candidates"]
     ]
 
+def test_arxiv_atom_entry_mapping_parses_search_result_fields():
+    from core.web.services.team_workflow.source_collection import residual
+
+    feed = _fake_arxiv_atom_feed(
+        entries=[
+            {
+                "id": "http://arxiv.org/abs/2101.00983v1",
+                "title": "Counts of zeros of the Riemann zeta function",
+                "summary": "We prove bounds on simple zeros of the zeta function from rigorous Platt and Trudgian computations.",
+                "published": "2021-01-11T18:00:00Z",
+                "updated": "2021-03-02T10:00:00Z",
+                "authors": ["Timothy Platt", "Tim Trudgian"],
+                "categories": ["math.NT"],
+            }
+        ]
+    )
+    entries = _fake_arxiv_atom_entries(feed)
+    assert len(entries) == 1
+    result = residual._source_collection_result_from_arxiv_entry(entries[0], fallback_source_type="preprint")
+
+    assert result["sourceRef"] == "http://arxiv.org/abs/2101.00983v1"
+    assert result["rawLocation"] == "http://arxiv.org/abs/2101.00983v1"
+    assert result["title"] == "Counts of zeros of the Riemann zeta function"
+    # The abstract must land in summary with a hasAbstract signal: extraction
+    # produces the verbatim quotes from this field.
+    assert "rigorous Platt and Trudgian computations" in result["summary"]
+    assert result["qualitySignals"]["hasAbstract"] is True
+    assert result["metadata"]["published"] == "2021-01-11T18:00:00Z"
+    assert result["metadata"]["updated"] == "2021-03-02T10:00:00Z"
+    assert result["metadata"]["authors"] == ["Timothy Platt", "Tim Trudgian"]
+    assert result["metadata"]["arxivId"] == "2101.00983v1"
+    assert result["metadata"]["primaryCategory"] == "math.NT"
+    assert result["sourceType"] == "paper"
+
+def test_execute_source_collection_search_accepts_arxiv_provider_and_rejects_unknown(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    monkeypatch.setattr(team_workflow_orchestration_service, "_execute_source_collection_query", _fake_arxiv_search_response)
+    team = team_service.create_team(name="ai科学研究团队")
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "title": "Arxiv source batch",
+            "topic": "predictive coding cortical hierarchy",
+            "querySeeds": ["predictive coding cortical hierarchy"],
+            "searchLanguages": ["en"],
+            "sourceTypes": ["paper"],
+            "agentRoles": ["source_finder"],
+            "agentIds": {"source_finder": "Source Finder Agent"},
+        },
+    )
+
+    execution = team_workflow_orchestration_service.execute_source_collection_search(
+        team["teamId"],
+        run_response["run"]["runId"],
+        {"provider": "arxiv_api", "maxQueries": 1, "maxResultsPerQuery": 2},
+    )
+    records = data_processing_service.list_records(run_response["run"]["runId"])["records"]
+
+    assert execution["status"] == "executed"
+    assert execution["provider"] == "arxiv_api"
+    assert execution["providers"] == ["arxiv_api"]
+    assert execution["executedQueryCount"] == 1
+    assert execution["recordCount"] == 2
+    assert all(record["metadata"]["searchProvider"] == "arxiv_api" for record in records)
+    first_record = records[0]
+    assert first_record["sourceRef"] == "http://arxiv.org/abs/2101.00983v1"
+    assert "predictive coding" in first_record["summary"]
+    assert first_record["metadata"]["arxivId"] == "2101.00983v1"
+    assert first_record["metadata"]["authors"] == ["Timothy Platt", "Tim Trudgian"]
+    assert first_record["metadata"]["sourceCollectionTrace"]["searchProvider"] == "arxiv_api"
+    executed_events = [event for event in execution["executionEvents"] if event["eventType"] == "search.executed"]
+    assert len(executed_events) == 1
+    assert executed_events[0]["provider"] == "arxiv_api"
+
+    # Unknown providers are rejected at the execution entrypoint before any
+    # query runs, while both default-set members are accepted.
+    observed_queries = []
+
+    def observing_fake(query, *, max_results, provider):
+        observed_queries.append(provider)
+        return {"provider": provider, "results": []}
+
+    monkeypatch.setattr(team_workflow_orchestration_service, "_execute_source_collection_query", observing_fake)
+    with pytest.raises(
+        team_workflow_orchestration_service.TeamWorkflowOrchestrationError,
+        match="Unsupported source collection search provider: rss_feed",
+    ):
+        team_workflow_orchestration_service.execute_source_collection_search(
+            team["teamId"],
+            run_response["run"]["runId"],
+            {"provider": "rss_feed", "maxQueries": 1},
+        )
+    with pytest.raises(
+        team_workflow_orchestration_service.TeamWorkflowOrchestrationError,
+        match="Unsupported source collection search provider: rss_feed",
+    ):
+        team_workflow_orchestration_service.start_source_collection_search_background(
+            team["teamId"],
+            run_response["run"]["runId"],
+            {"provider": "rss_feed", "backgroundExecution": True},
+        )
+    assert observed_queries == []
+
+def test_execute_source_collection_search_runs_default_provider_set_with_merge_and_isolation(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    observed_providers = []
+
+    def provider_dispatch_fake(query, *, max_results, provider):
+        observed_providers.append(provider)
+        if provider == team_workflow_orchestration_service.SOURCE_COLLECTION_SEARCH_PROVIDER_CROSSREF:
+            return {
+                "provider": provider,
+                "searchUrl": "https://api.example.test/search?q=crossref",
+                "results": [
+                    {
+                        "title": "Shared predictive coding source",
+                        "sourceRef": "https://doi.org/10.0000/shared-source",
+                        "rawLocation": "https://api.example.test/works/10.0000/shared-source",
+                        "summary": "Crossref metadata record about predictive coding cortical hierarchy.",
+                        "sourceType": "paper",
+                        "metadata": {"doi": "10.0000/shared-source", "containerTitle": "Journal of Neural Computation"},
+                        "qualitySignals": {"hasDoi": True},
+                    },
+                    {
+                        "title": "Crossref only cortical hierarchy study",
+                        "sourceRef": "https://doi.org/10.0000/crossref-only",
+                        "rawLocation": "https://api.example.test/works/10.0000/crossref-only",
+                        "summary": "Crossref exclusive record on predictive coding hierarchy mechanisms.",
+                        "sourceType": "paper",
+                        "metadata": {"doi": "10.0000/crossref-only", "containerTitle": "Journal of Neuroscience"},
+                        "qualitySignals": {"hasDoi": True},
+                    },
+                ][:max_results],
+            }
+        return {
+            "provider": provider,
+            "searchUrl": "https://export.arxiv.org/api/query?search_query=all%3Apredictive",
+            "results": [
+                {
+                    "title": "Shared predictive coding source preprint",
+                    "sourceRef": "http://arxiv.org/abs/2101.00983v1",
+                    "rawLocation": "http://arxiv.org/abs/2101.00983v1",
+                    "summary": "arXiv abstract for the shared predictive coding cortical hierarchy record.",
+                    "sourceType": "paper",
+                    "metadata": {"doi": "10.0000/shared-source", "arxivId": "2101.00983v1"},
+                    "qualitySignals": {"hasAbstract": True},
+                },
+                {
+                    "title": "arXiv only cortical hierarchy preprint",
+                    "sourceRef": "http://arxiv.org/abs/2007.00001v2",
+                    "rawLocation": "http://arxiv.org/abs/2007.00001v2",
+                    "summary": "arXiv exclusive preprint on predictive coding cortical hierarchy verification.",
+                    "sourceType": "paper",
+                    "metadata": {"arxivId": "2007.00001v2"},
+                    "qualitySignals": {"hasAbstract": True},
+                },
+            ][:max_results],
+        }
+
+    monkeypatch.setattr(team_workflow_orchestration_service, "_execute_source_collection_query", provider_dispatch_fake)
+    team = team_service.create_team(name="ai科学研究团队")
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "title": "Provider set batch",
+            "topic": "predictive coding cortical hierarchy",
+            "querySeeds": ["predictive coding cortical hierarchy"],
+            "searchLanguages": ["en"],
+            "sourceTypes": ["paper"],
+            "agentRoles": ["source_finder"],
+            "agentIds": {"source_finder": "Source Finder Agent"},
+        },
+    )
+
+    execution = team_workflow_orchestration_service.execute_source_collection_search(
+        team["teamId"],
+        run_response["run"]["runId"],
+        {"maxQueries": 1, "maxResultsPerQuery": 2},
+    )
+
+    assert observed_providers == [
+        team_workflow_orchestration_service.SOURCE_COLLECTION_SEARCH_PROVIDER_CROSSREF,
+        team_workflow_orchestration_service.SOURCE_COLLECTION_SEARCH_PROVIDER_ARXIV,
+    ]
+    assert execution["providers"] == [
+        team_workflow_orchestration_service.SOURCE_COLLECTION_SEARCH_PROVIDER_CROSSREF,
+        team_workflow_orchestration_service.SOURCE_COLLECTION_SEARCH_PROVIDER_ARXIV,
+    ]
+    assert execution["provider"] == team_workflow_orchestration_service.SOURCE_COLLECTION_SEARCH_PROVIDER_CROSSREF
+    assert execution["attemptedQueryCount"] == 1
+    assert execution["executedQueryCount"] == 1
+    assert execution["resultCount"] == 4
+    assert execution["recordCount"] == 3
+    assert execution["skippedDuplicateCount"] == 1
+    records = data_processing_service.list_records(run_response["run"]["runId"])["records"]
+    assert {record["metadata"]["searchProvider"] for record in records} == {"crossref_rest_api", "arxiv_api"}
+    shared_records = [record for record in records if record["metadata"].get("doi") == "10.0000/shared-source"]
+    assert len(shared_records) == 1
+    assert shared_records[0]["metadata"]["searchProvider"] == "crossref_rest_api"
+    executed_events = [event for event in execution["executionEvents"] if event["eventType"] == "search.executed"]
+    assert sorted(event["provider"] for event in executed_events) == ["arxiv_api", "crossref_rest_api"]
+
+    # A failing provider is isolated: the other provider still delivers records.
+    def failing_crossref_fake(query, *, max_results, provider):
+        if provider == team_workflow_orchestration_service.SOURCE_COLLECTION_SEARCH_PROVIDER_CROSSREF:
+            return {"provider": provider, "searchUrl": "https://api.example.test/search?q=x", "results": [], "error": "crossref throttled"}
+        return _fake_arxiv_search_response(query, max_results=max_results, provider=provider)
+
+    monkeypatch.setattr(team_workflow_orchestration_service, "_execute_source_collection_query", failing_crossref_fake)
+    run_two = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "title": "Provider isolation batch",
+            "topic": "predictive coding cortical hierarchy",
+            "querySeeds": ["predictive coding cortical hierarchy"],
+            "searchLanguages": ["en"],
+            "sourceTypes": ["paper"],
+            "agentRoles": ["source_finder"],
+        },
+    )
+    isolated = team_workflow_orchestration_service.execute_source_collection_search(
+        team["teamId"],
+        run_two["run"]["runId"],
+        {"maxQueries": 1, "maxResultsPerQuery": 2},
+    )
+    assert isolated["executedQueryCount"] == 1
+    assert isolated["failedQueryCount"] == 0
+    assert isolated["recordCount"] == 2
+    failed_events = [event for event in isolated["executionEvents"] if event["eventType"] == "search.failed"]
+    assert len(failed_events) == 1
+    assert failed_events[0]["provider"] == team_workflow_orchestration_service.SOURCE_COLLECTION_SEARCH_PROVIDER_CROSSREF
+
+    # When every provider fails the query stays runnable and no output lands.
+    def always_failing_fake(query, *, max_results, provider):
+        return {"provider": provider, "results": [], "error": f"{provider} unavailable"}
+
+    monkeypatch.setattr(team_workflow_orchestration_service, "_execute_source_collection_query", always_failing_fake)
+    run_three = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "title": "All providers failing batch",
+            "topic": "predictive coding cortical hierarchy",
+            "querySeeds": ["predictive coding cortical hierarchy"],
+            "searchLanguages": ["en"],
+            "sourceTypes": ["paper"],
+            "agentRoles": ["source_finder"],
+        },
+    )
+    all_failed = team_workflow_orchestration_service.execute_source_collection_search(
+        team["teamId"],
+        run_three["run"]["runId"],
+        {"maxQueries": 1, "maxResultsPerQuery": 2},
+    )
+    assert all_failed["executedQueryCount"] == 0
+    assert all_failed["failedQueryCount"] == 1
+    assert all_failed["attemptedQueryCount"] == 1
+    assert all_failed["recordCount"] == 0
+    assert all_failed["outputCount"] == 0
+    assert all_failed["status"] == "partial"
+    assert {event["provider"] for event in all_failed["executionEvents"] if event["eventType"] == "search.failed"} == {
+        team_workflow_orchestration_service.SOURCE_COLLECTION_SEARCH_PROVIDER_CROSSREF,
+        team_workflow_orchestration_service.SOURCE_COLLECTION_SEARCH_PROVIDER_ARXIV,
+    }
+
+def test_execute_source_collection_search_applies_quality_gate_to_arxiv_results(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+
+    def irrelevant_arxiv_fake(query, *, max_results, provider):
+        assert provider == team_workflow_orchestration_service.SOURCE_COLLECTION_SEARCH_PROVIDER_ARXIV
+        feed = _fake_arxiv_atom_feed(
+            entries=[
+                {
+                    "id": "http://arxiv.org/abs/2212.00001v1",
+                    "title": "Quantum sourdough fermentation dynamics",
+                    "summary": "A study of bread starter cultures and oven thermodynamics with no neural content.",
+                    "published": "2022-12-01T00:00:00Z",
+                    "authors": ["Sample Author"],
+                }
+            ]
+        )
+        from core.web.services.team_workflow.source_collection import residual
+
+        results = [
+            residual._source_collection_result_from_arxiv_entry(entry, fallback_source_type="paper")
+            for entry in _fake_arxiv_atom_entries(feed)
+        ]
+        return {"provider": provider, "searchUrl": "https://export.arxiv.org/api/query?search_query=x", "results": results[:max_results]}
+
+    monkeypatch.setattr(team_workflow_orchestration_service, "_execute_source_collection_query", irrelevant_arxiv_fake)
+    team = team_service.create_team(name="ai科学研究团队")
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "predictive coding cortical hierarchy",
+            "querySeeds": ["predictive coding cortical hierarchy"],
+            "searchLanguages": ["en"],
+            "sourceTypes": ["paper"],
+            "agentRoles": ["source_finder"],
+        },
+    )
+
+    execution = team_workflow_orchestration_service.execute_source_collection_search(
+        team["teamId"],
+        run_response["run"]["runId"],
+        {"provider": "arxiv_api", "maxQueries": 1, "maxResultsPerQuery": 1},
+    )
+
+    assert execution["resultCount"] == 1
+    assert execution["rejectedResultCount"] == 1
+    assert execution["recordCount"] == 0
+    rejected_events = [event for event in execution["executionEvents"] if event["eventType"] == "search.low_quality_rejected"]
+    assert len(rejected_events) == 1
+    assert rejected_events[0]["provider"] == team_workflow_orchestration_service.SOURCE_COLLECTION_SEARCH_PROVIDER_ARXIV
+    assert "insufficient_query_overlap" in rejected_events[0]["summary"]
+
 def test_execute_source_collection_search_rejects_low_relevance_results_before_storage(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
@@ -6665,11 +6988,13 @@ def test_execute_source_collection_search_rejects_low_relevance_results_before_s
     event_types = {event["eventType"] for event in execution["executionEvents"]}
 
     assert execution["status"] == "partial"
-    assert execution["resultCount"] == 1
+    # Both default providers returned the same irrelevant record; each replay
+    # is rejected by the quality gate.
+    assert execution["resultCount"] == 2
     assert execution["recordCount"] == 0
     assert execution["createdUniqueRecordCount"] == 0
     assert execution["importedCount"] == 0
-    assert execution["rejectedResultCount"] == 1
+    assert execution["rejectedResultCount"] == 2
     assert records == []
     assert candidates["candidateCount"] == 0
     assert "search.low_quality_rejected" in event_types
@@ -6810,7 +7135,8 @@ def test_execute_source_collection_search_skips_existing_query_without_force(tmp
     assert second["skippedQueryCount"] == 0
     assert second["skippedDuplicateCount"] == 0
     assert second["status"] == "no_open_assignment"
-    assert calls == [run_response["searchPlan"]["queries"][0]["queryId"]]
+    # The first execution ran both default providers for the same query.
+    assert calls == [run_response["searchPlan"]["queries"][0]["queryId"]] * 2
     assert data_processing_service.list_records(run_response["run"]["runId"])["summary"]["recordCount"] == 2
 
 def test_execute_source_collection_search_limits_failed_provider_attempt_to_max_queries(tmp_path, monkeypatch):
@@ -6848,9 +7174,13 @@ def test_execute_source_collection_search_limits_failed_provider_attempt_to_max_
     assert execution["failedQueryCount"] == 1
     assert execution["recordCount"] == 0
     assert execution["status"] == "partial"
-    assert calls == [first_query_id]
+    assert calls == [first_query_id] * 2
     assert second_query_id in execution["nextRunnableQueryIds"]
-    assert [event["eventType"] for event in execution["executionEvents"]] == ["search.failed"]
+    assert [event["eventType"] for event in execution["executionEvents"]] == ["search.failed", "search.failed"]
+    assert {event["provider"] for event in execution["executionEvents"]} == {
+        "crossref_rest_api",
+        "arxiv_api",
+    }
     assert execution["boundaries"]["externalSearchTriggered"] is True
 
 def test_execute_source_collection_search_advances_after_no_record_output(tmp_path, monkeypatch):
@@ -6860,7 +7190,7 @@ def test_execute_source_collection_search_advances_after_no_record_output(tmp_pa
 
     def fake_search(query, *, max_results, provider):
         calls.append(query["queryId"])
-        if len(calls) == 1:
+        if query["queryId"] == first_query_id:
             return _fake_low_quality_source_search_response(query, max_results=max_results, provider=provider)
         return _fake_source_search_response(query, max_results=max_results, provider=provider)
 
@@ -6894,7 +7224,8 @@ def test_execute_source_collection_search_advances_after_no_record_output(tmp_pa
     assert first["outputCount"] == 1
     assert second["executedQueryCount"] == 1
     assert second["recordCount"] == 1
-    assert calls == [first_query_id, second_query_id]
+    # Each execution runs both default providers for its query.
+    assert calls == [first_query_id, first_query_id, second_query_id, second_query_id]
 
 def test_execute_source_collection_search_records_output_per_query(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
@@ -6982,10 +7313,17 @@ def test_execute_source_collection_search_skips_duplicate_sources_on_force_rerun
     assert second["recordCount"] == 0
     assert second["createdUniqueRecordCount"] == 0
     assert second["importedCount"] == 0
-    assert second["skippedDuplicateCount"] == 2
+    # Force replays both default providers; every replayed result matches an
+    # existing record identity.
+    assert second["skippedDuplicateCount"] == 4
     assert second["remainingQueryCount"] == 0
     assert second["hasMore"] is False
-    assert second["duplicateSourceKeys"] == ["doi:10.0000/predictive-coding", "doi:10.0000/cortical-dataset"]
+    assert second["duplicateSourceKeys"] == [
+        "doi:10.0000/predictive-coding",
+        "doi:10.0000/cortical-dataset",
+        "doi:10.0000/predictive-coding",
+        "doi:10.0000/cortical-dataset",
+    ]
     assert {event["eventType"] for event in second["executionEvents"]} >= {"search.duplicate_skipped"}
     assignments = data_processing_service.list_collection_assignments(run_response["run"]["runId"])["assignments"]
     assert assignments[0]["status"] == "completed"
@@ -6993,7 +7331,7 @@ def test_execute_source_collection_search_skips_duplicate_sources_on_force_rerun
     assert summary["latest"]["status"] == "completed"
     assert summary["latest"]["currentPhase"] == "completed"
     assert summary["latest"]["searchOpenAssignmentCount"] == 0
-    assert "跳过 2 条重复资料" in summary["latest"]["summary"]
+    assert "跳过 4 条重复资料" in summary["latest"]["summary"]
     assert data_processing_service.list_records(run_response["run"]["runId"])["summary"]["recordCount"] == 2
     candidates = team_workflow_orchestration_service.list_candidate_store(team["teamId"], candidate_type="source_manifest")
     assert candidates["candidateCount"] == 2
@@ -7049,7 +7387,9 @@ def test_execute_source_collection_search_dedupes_metadata_doi_and_sorted_url_qu
     ]
 
     def fake_search(query, *, max_results, provider):
-        return responses.pop(0)
+        query_text = str(query.get("query") or "")
+        base = responses[0] if "first" in query_text else responses[1]
+        return copy.deepcopy(base)
 
     monkeypatch.setattr(team_workflow_orchestration_service, "_execute_source_collection_query", fake_search)
     team = team_service.create_team(name="ai科学研究团队")
@@ -7078,8 +7418,14 @@ def test_execute_source_collection_search_dedupes_metadata_doi_and_sorted_url_qu
     assert first["recordCount"] == 2
     assert second["status"] == "duplicates_skipped"
     assert second["recordCount"] == 0
-    assert second["skippedDuplicateCount"] == 2
-    assert second["duplicateSourceKeys"] == ["doi:10.0000/metadata-only", "url:https://example.test/source?a=1&b=2"]
+    # The second batch replays both default providers over the same identities.
+    assert second["skippedDuplicateCount"] == 4
+    assert second["duplicateSourceKeys"] == [
+        "doi:10.0000/metadata-only",
+        "url:https://example.test/source?a=1&b=2",
+        "doi:10.0000/metadata-only",
+        "url:https://example.test/source?a=1&b=2",
+    ]
     assert data_processing_service.list_records(run_response["run"]["runId"])["summary"]["recordCount"] == 2
 
 def test_start_research_stage_round_creates_knowledge_collection_round(tmp_path, monkeypatch):
@@ -7114,7 +7460,8 @@ def test_start_research_stage_round_creates_knowledge_collection_round(tmp_path,
             "runId": response["run"]["runId"],
             "payload": {
                 "backgroundExecution": True,
-                "provider": team_workflow_orchestration_service.SOURCE_COLLECTION_SEARCH_PROVIDER_CROSSREF,
+                # No explicit provider: the automatic chain relies on the
+                # executor's default SOURCE_COLLECTION_SEARCH_PROVIDERS set.
                 "maxQueries": team_workflow_orchestration_service.SOURCE_COLLECTION_SEARCH_EXECUTION_DEFAULT_MAX_QUERIES,
                 "maxResultsPerQuery": team_workflow_orchestration_service.SOURCE_COLLECTION_SEARCH_EXECUTION_DEFAULT_RESULTS_PER_QUERY,
             },

@@ -68,7 +68,9 @@ class SourceCollectionSearchExecutePayload(BaseModel):
     agentRole: str = Field("", max_length=80)
     maxQueries: int = Field(4, ge=1, le=12)
     maxResultsPerQuery: int = Field(2, ge=1, le=5)
-    provider: str = Field("crossref_rest_api", max_length=80)
+    # Empty means unspecified: the executor then expands the default
+    # SOURCE_COLLECTION_SEARCH_PROVIDERS set (crossref + arXiv) per query.
+    provider: str = Field("", max_length=80)
     force: bool = False
     backgroundExecution: bool = False
 

@@ -886,6 +886,17 @@ SOURCE_COLLECTION_DEFAULT_SOURCE_TYPES = ("paper", "review", "dataset", "preprin
 SOURCE_COLLECTION_DEFAULT_MAX_RESULTS_PER_QUERY = 10
 SOURCE_COLLECTION_MAX_QUERIES = 48
 SOURCE_COLLECTION_SEARCH_PROVIDER_CROSSREF = "crossref_rest_api"
+SOURCE_COLLECTION_SEARCH_PROVIDER_ARXIV = "arxiv_api"
+# Default provider set executed for every source-collection query: each query
+# runs once per provider and results merge through the existing
+# sourceIdentityKey dedup semantics (first provider to return wins).
+SOURCE_COLLECTION_SEARCH_PROVIDERS = (
+    SOURCE_COLLECTION_SEARCH_PROVIDER_CROSSREF,
+    SOURCE_COLLECTION_SEARCH_PROVIDER_ARXIV,
+)
+# arXiv's official API etiquette asks clients not to issue requests more
+# often than once every 3 seconds; enforced after every arXiv HTTP call.
+SOURCE_COLLECTION_SEARCH_ARXIV_REQUEST_INTERVAL_SECONDS = 3
 SOURCE_COLLECTION_SEARCH_EXECUTION_DEFAULT_MAX_QUERIES = 4
 SOURCE_COLLECTION_SEARCH_EXECUTION_MAX_QUERIES = 12
 SOURCE_COLLECTION_SEARCH_EXECUTION_DEFAULT_RESULTS_PER_QUERY = 2
