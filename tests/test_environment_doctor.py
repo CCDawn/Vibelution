@@ -50,12 +50,17 @@ def run_doctor(extra_env: dict[str, str] | None = None):
     return json.loads(result.stdout)
 
 
+@pytest.fixture(scope="module")
+def doctor_report():
+    return run_doctor()
+
+
 def test_doctor_script_exists():
     assert DOCTOR_SCRIPT.exists()
 
 
-def test_doctor_reports_expected_python_and_venv():
-    report = run_doctor()
+def test_doctor_reports_expected_python_and_venv(doctor_report):
+    report = doctor_report
 
     assert report["ok"] is True
     assert Path(report["python"]["expected"]).resolve() == EXPECTED_VENV_PYTHON.resolve()
@@ -68,8 +73,8 @@ def test_doctor_reports_expected_python_and_venv():
     }
 
 
-def test_doctor_reports_critical_imports_and_pytest():
-    report = run_doctor()
+def test_doctor_reports_critical_imports_and_pytest(doctor_report):
+    report = doctor_report
 
     imports = {item["name"]: item["ok"] for item in report["checks"]["imports"]}
     assert imports["rich"] is True
@@ -82,8 +87,8 @@ def test_doctor_reports_critical_imports_and_pytest():
     assert "pytest" in pytest_check["version"].lower()
 
 
-def test_doctor_reports_local_quality_gate_and_hook_configuration():
-    report = run_doctor()
+def test_doctor_reports_local_quality_gate_and_hook_configuration(doctor_report):
+    report = doctor_report
 
     assert report["checks"]["git_hooks_path"]["expected"] == ".githooks"
     assert (
