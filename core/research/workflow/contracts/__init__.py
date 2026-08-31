@@ -161,8 +161,11 @@ from .evolution_lineage import (
 from .experiment_campaign import ExperimentCampaign, ExperimentCampaignStage
 from .hypothesis import HypothesisCandidate, HypothesisPortfolio
 from .hypothesis_fragment import (
+    HYPOTHESIS_CLAIM_BELIEF_STATES,
+    HYPOTHESIS_CLAIM_ROLES,
     HYPOTHESIS_FRAGMENT_KIND,
     HYPOTHESIS_FRAGMENT_SCHEMA_VERSION,
+    HypothesisClaimBinding,
     HypothesisFragment,
     canonical_fragment_payload,
 )
@@ -474,6 +477,8 @@ __all__ = [
     "ExperimentCampaignStage",
     "FINALIST_LIMIT",
     "GATES",
+    "HYPOTHESIS_CLAIM_BELIEF_STATES",
+    "HYPOTHESIS_CLAIM_ROLES",
     "HYPOTHESIS_FRAGMENT_KIND",
     "HYPOTHESIS_FRAGMENT_SCHEMA_VERSION",
     "HYPOTHESIS_REVIEW_MEETING_TYPE",
@@ -487,6 +492,7 @@ __all__ = [
     "HumanTaskSummary",
     "HypothesisAxisProfile",
     "HypothesisCandidate",
+    "HypothesisClaimBinding",
     "HypothesisDesignOutput",
     "HypothesisFragment",
     "HypothesisLineageRef",

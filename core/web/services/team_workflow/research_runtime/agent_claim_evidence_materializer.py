@@ -13,15 +13,10 @@ what lets ``evaluate_claim_belief_gate`` find an evaluable ledger row for every
 claim id an evidence record references; self-minted evidence ids without a
 ledger row would keep the gate fail-closed forever.
 
-Candidate dimensions: extraction records anchor claims to *source* candidate
-ids (``candidate-...`` space).  The claim belief gate aggregates evidence per
-*hypothesis* candidate id (``<question>-c<hash>`` space).  When the canonical
-collection run persists ``scope.hypothesisCandidateIds``, each claim is
-registered once per dimension — one record with the source candidate id and
-one per hypothesis candidate id — so the gate can aggregate on its own id
-space.  The evidence id hash includes ``candidateId``, so the two dimensions
-never collide and repeated runs stay idempotent.  Runs without that scope
-field keep the legacy single-dimension behavior.
+Candidate dimensions: extraction records anchor source facts to *source*
+candidate ids.  Hypothesis candidates receive separate core-claim rows only
+when their own ``lineageRefs`` cite the exact source.  Evidence is never copied
+across every hypothesis id, so one candidate cannot unlock another.
 """
 
 from __future__ import annotations
@@ -184,6 +179,58 @@ def _normalized_hypothesis_candidate_ids(value: object) -> list[str]:
     return list(dict.fromkeys(_text(item) for item in raw if _text(item)))
 
 
+def _normalized_hypothesis_candidate_bindings(
+    *,
+    team_id: str,
+    question_scope: Mapping[str, Any],
+    candidate_ids: list[str],
+    supplied: object,
+) -> dict[str, dict[str, Any]]:
+    """Resolve candidate-authored core claims and explicit lineage refs."""
+
+    raw_bindings = supplied if isinstance(supplied, Mapping) else {}
+    if not raw_bindings and candidate_ids:
+        try:
+            from .hypothesis_first_chain import list_hypothesis_candidates
+
+            listing = list_hypothesis_candidates(
+                _text(team_id),
+                question_id=_text(question_scope.get("question")).upper(),
+            )
+            raw_bindings = {
+                _text(item.get("candidateId")): {
+                    "claimText": _text(item.get("statement"))[:4000],
+                    "lineageRefs": item.get("lineageRefs") or [],
+                }
+                for item in list(listing.get("candidates") or [])
+                if isinstance(item, Mapping) and _text(item.get("candidateId"))
+            }
+        except Exception as exc:  # noqa: BLE001 - expose unavailable authority
+            raise EvidenceMaterializationError(
+                f"hypothesis candidate lineage is unavailable: {exc}"
+            ) from exc
+
+    resolved: dict[str, dict[str, Any]] = {}
+    for candidate_id in candidate_ids:
+        raw = raw_bindings.get(candidate_id)
+        if not isinstance(raw, Mapping):
+            continue
+        claim_text = _text(raw.get("claimText") or raw.get("statement"))[:4000]
+        lineage_refs = list(
+            dict.fromkeys(
+                _text(item)[:300]
+                for item in list(raw.get("lineageRefs") or [])
+                if _text(item)[:300]
+            )
+        )
+        if claim_text and lineage_refs:
+            resolved[candidate_id] = {
+                "claimText": claim_text,
+                "lineageRefs": lineage_refs,
+            }
+    return resolved
+
+
 def _collection_run_hypothesis_candidate_ids(source_collection_run_id: str) -> list[str]:
     """Read the hypothesis candidate ids persisted on the canonical run scope.
 
@@ -215,6 +262,7 @@ def materialize_claim_evidence_from_task(
     model_ref: str,
     question_scope: Mapping[str, Any],
     hypothesis_candidate_ids: object = None,
+    hypothesis_candidate_bindings: object = None,
 ) -> list[dict[str, Any]]:
     """Register only fully anchored claims; repeated calls remain idempotent.
 
@@ -224,11 +272,9 @@ def materialize_claim_evidence_from_task(
     ClaimEvidence record is registered under the ledger claim id, so the
     claim belief gate can evaluate the candidate from real extraction output.
 
-    ``hypothesis_candidate_ids`` optionally carries the gate's candidate
-    dimension (``scope.hypothesisCandidateIds`` of the canonical run).  When
-    non-empty, each claim is additionally registered once per hypothesis
-    candidate id so the belief gate can aggregate on its own id space; the
-    ledger proposal still happens exactly once per claim.
+    A hypothesis candidate receives a relation only when its own formal
+    statement and ``lineageRefs`` explicitly select this source.  Candidate
+    ids alone are intentionally insufficient.
     """
     from core.research.evidence import ClaimEvidenceStore
 
@@ -251,6 +297,12 @@ def materialize_claim_evidence_from_task(
     normalized_model_ref = _text(model_ref)
     bridged_candidate_ids = _normalized_hypothesis_candidate_ids(
         hypothesis_candidate_ids
+    )
+    candidate_bindings = _normalized_hypothesis_candidate_bindings(
+        team_id=normalized_team,
+        question_scope=question_scope,
+        candidate_ids=bridged_candidate_ids,
+        supplied=hypothesis_candidate_bindings,
     )
     store = ClaimEvidenceStore(project_root)
     materialized: list[dict[str, Any]] = []
@@ -335,22 +387,165 @@ def materialize_claim_evidence_from_task(
                 "claimLedgerStatus": proposed["status"],
             }
         )
-        # Second candidate dimension: one extra record per hypothesis
-        # candidate id so ``evaluate_claim_belief_gate`` can aggregate on the
-        # hypothesis id space.  The ledger claim is proposed exactly once
-        # above; the evidence id hash includes ``candidateId``, so these
-        # records are distinct and re-registration stays idempotent.
-        for bridged_candidate_id in bridged_candidate_ids:
-            if bridged_candidate_id == candidate_id:
+        # Candidate-specific relation: evidence is never copied to candidates
+        # that did not cite this exact source in their formal lineage.
+        for bridged_candidate_id, binding in candidate_bindings.items():
+            if source_ref not in set(binding["lineageRefs"]):
                 continue
+            candidate_claim = _propose_ledger_claim(
+                team_id=normalized_team,
+                question_scope=question_scope,
+                claim_text=binding["claimText"],
+            )
+            evidence_kind = (
+                "counter_evidence"
+                if challenge_evidence["relation"] in {"challenges", "boundary"}
+                else "primary_result"
+            )
             bridged = store.register(
                 normalized_team,
-                {**evidence_payload, "candidateId": bridged_candidate_id},
+                {
+                    **evidence_payload,
+                    "claimId": candidate_claim["claimId"],
+                    "candidateId": bridged_candidate_id,
+                    "reasoningRole": "hypothesis",
+                    "evidenceKind": evidence_kind,
+                },
             )
             materialized.append(
                 {
                     **bridged,
-                    "claimLedgerStatus": proposed["status"],
+                    "claimLedgerStatus": candidate_claim["status"],
+                    "claimBinding": {
+                        "candidateId": bridged_candidate_id,
+                        "claimId": candidate_claim["claimId"],
+                        "claimText": binding["claimText"],
+                        "claimRole": "core",
+                        "supportEvidenceIds": (
+                            [bridged["claimEvidenceId"]]
+                            if bridged["supportLevel"] == "supports"
+                            else []
+                        ),
+                        "counterEvidenceIds": (
+                            [bridged["claimEvidenceId"]]
+                            if bridged["supportLevel"] == "contradicts"
+                            else []
+                        ),
+                        "boundaryEvidenceIds": (
+                            [bridged["claimEvidenceId"]]
+                            if bridged["evidenceKind"] == "counter_evidence"
+                            and bridged["supportLevel"] != "contradicts"
+                            else []
+                        ),
+                        "beliefState": "untested",
+                        "unresolvedReason": "candidate_evidence_relation_pending_review",
+                    },
+                }
+            )
+    return materialized
+
+
+def materialize_candidate_claim_bindings_from_existing_evidence(
+    *,
+    project_root: str | Path,
+    team_id: str,
+    workflow_run_id: str,
+    question_scope: Mapping[str, Any],
+    candidates: Iterable[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Bind formal candidate core claims to already-materialized lineage evidence.
+
+    The source record remains a fact claim.  Each matching formal candidate
+    gets a distinct claim row and a new pending relation that must be reviewed
+    before the strict gate can count it as accepted support/boundary evidence.
+    """
+
+    from core.research.evidence import ClaimEvidenceStore
+    from core.research.workflow.contracts import HypothesisClaimBinding
+
+    normalized_team = _text(team_id)
+    normalized_run = _text(workflow_run_id)
+    store = ClaimEvidenceStore(project_root)
+    source_records = [
+        record
+        for record in store.list(normalized_team)
+        if _text(record.get("reasoningRole")).lower() != "hypothesis"
+        and _text(record.get("reviewStatus")).lower() not in {"rejected", "stale"}
+    ]
+    materialized: list[dict[str, Any]] = []
+    for candidate in candidates:
+        candidate_id = _text(candidate.get("candidateId"))
+        claim_text = _text(candidate.get("statement"))
+        lineage_refs = {
+            _text(item) for item in list(candidate.get("lineageRefs") or []) if _text(item)
+        }
+        if not candidate_id or not claim_text or not lineage_refs:
+            continue
+        matching = [
+            record
+            for record in source_records
+            if _text(record.get("sourceId")) in lineage_refs
+            or _text(record.get("claimEvidenceId")) in lineage_refs
+        ]
+        if not matching:
+            continue
+        candidate_claim = _propose_ledger_claim(
+            team_id=normalized_team,
+            question_scope=question_scope,
+            claim_text=claim_text,
+        )
+        for source in matching:
+            payload = {
+                "claimId": candidate_claim["claimId"],
+                "candidateId": candidate_id,
+                "sourceId": source["sourceId"],
+                "sourceRevision": source["sourceRevision"],
+                "locator": source["locator"],
+                "quote": source["quote"],
+                "evidenceKind": source["evidenceKind"],
+                "reasoningRole": "hypothesis",
+                "supportLevel": source["supportLevel"],
+                "extractionMethod": source["extractionMethod"],
+                "extractorAgentId": source["extractorAgentId"],
+                "modelRef": source["modelRef"],
+                "sourceCollectionRunId": source["sourceCollectionRunId"],
+                "workflowRunId": normalized_run or source["workflowRunId"],
+            }
+            bound = store.register(normalized_team, payload)
+            support_refs = (
+                [bound["claimEvidenceId"]]
+                if bound["supportLevel"] == "supports"
+                else []
+            )
+            counter_refs = (
+                [bound["claimEvidenceId"]]
+                if bound["supportLevel"] == "contradicts"
+                else []
+            )
+            boundary_refs = (
+                [bound["claimEvidenceId"]]
+                if bound["evidenceKind"] == "counter_evidence"
+                and bound["supportLevel"] != "contradicts"
+                else []
+            )
+            binding = HypothesisClaimBinding.from_dict(
+                {
+                    "candidateId": candidate_id,
+                    "claimId": candidate_claim["claimId"],
+                    "claimText": claim_text,
+                    "claimRole": "core",
+                    "supportEvidenceIds": support_refs,
+                    "counterEvidenceIds": counter_refs,
+                    "boundaryEvidenceIds": boundary_refs,
+                    "beliefState": "untested",
+                    "unresolvedReason": "candidate_evidence_relation_pending_review",
+                }
+            ).to_dict()
+            materialized.append(
+                {
+                    **bound,
+                    "claimLedgerStatus": candidate_claim["status"],
+                    "claimBinding": binding,
                 }
             )
     return materialized

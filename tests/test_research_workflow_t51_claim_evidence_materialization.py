@@ -11,6 +11,7 @@ from core.web.services.team_workflow import claim_ledger
 from core.web.services.team_workflow.research_runtime.agent_claim_evidence_materializer import (
     EvidenceMaterializationError,
     build_formal_evidence_retry_contract,
+    materialize_candidate_claim_bindings_from_existing_evidence,
     materialize_claim_evidence_from_task,
 )
 from core.web.services.team_workflow.research_runtime.domain_ports import (
@@ -520,24 +521,24 @@ def test_extraction_prompt_requires_verbatim_quote_for_claim_evidence() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_materialized_claims_bridge_ledger_row_and_allow_belief_gate(
+def test_materialized_claims_bind_only_matching_candidate_lineage(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Real extraction output satisfies the claim belief gate end to end.
+    """Real extraction output creates only an explicitly selected candidate relation.
 
     The materialized claim is proposed in the question-scoped claim ledger
     (the production writer the gate reads), the ClaimEvidence records carry
-    the ledger claim id in BOTH candidate dimensions — the source candidate
-    the extraction anchored to and the hypothesis candidate the gate
-    aggregates on (``scope.hypothesisCandidateIds``) — so
-    ``evaluate_claim_belief_gate`` allows the hypothesis candidate on the real
-    stores.  No seam stubs.
+    The source fact and candidate core claim remain distinct ledger rows.  The
+    candidate relation stays pending until reviewed, so the gate reports an
+    evidence gap rather than silently accepting the source fact as the core
+    mechanism.  No seam stubs.
     """
     from core.web.services.team_workflow.research_runtime import (
         hypothesis_first_chain as chain,
     )
 
     team_id, scope = _claim_bridge_env(tmp_path, monkeypatch)
+    candidate_b = "sci-mtz-1-candidate-b"
     created = materialize_claim_evidence_from_task(
         project_root=tmp_path,
         team_id=team_id,
@@ -546,39 +547,50 @@ def test_materialized_claims_bridge_ledger_row_and_allow_belief_gate(
         task=_verified_task(team_id=team_id),
         model_ref="provider/model-a",
         question_scope=scope,
-        hypothesis_candidate_ids=[HYPOTHESIS_CANDIDATE_ID],
+        hypothesis_candidate_ids=[HYPOTHESIS_CANDIDATE_ID, candidate_b],
+        hypothesis_candidate_bindings={
+            HYPOTHESIS_CANDIDATE_ID: {
+                "claimText": "Candidate A predicts a bounded mechanism.",
+                "lineageRefs": ["https://example.org/paper-a"],
+            },
+            candidate_b: {
+                "claimText": "Candidate B predicts a different mechanism.",
+                "lineageRefs": ["https://example.org/paper-b"],
+            },
+        },
     )
     assert created[0]["claimLedgerStatus"] == "created"
     ledger_claim_id = created[0]["claimId"]
 
-    # 1. The ledger row exists exactly once — dual-mount never re-proposes.
+    # 1. Source fact and candidate core claim are separate ledger rows.
     listing = claim_ledger.list_claims(team_id)
-    assert listing["claimCount"] == 1
-    row = listing["claims"][0]
-    assert row["claimId"] == ledger_claim_id
-    assert row["question"] == _QUESTION_ID
-    assert row["status"] == "proposed"
-    assert row["claim"] == "The abstract reports a bounded result."
+    assert listing["claimCount"] == 2
+    rows_by_text = {item["claim"]: item for item in listing["claims"]}
+    assert rows_by_text["The abstract reports a bounded result."]["claimId"] == ledger_claim_id
+    candidate_claim_id = rows_by_text[
+        "Candidate A predicts a bounded mechanism."
+    ]["claimId"]
+    assert "Candidate B predicts a different mechanism." not in rows_by_text
 
-    # 2. Two evidence records, one per candidate dimension, same claim id.
+    # 2. Two evidence records share source provenance but not claim identity.
     stored = ClaimEvidenceStore(tmp_path).list(team_id)
     assert [item["candidateId"] for item in stored] == [
         SOURCE_CANDIDATE_ID,
         HYPOTHESIS_CANDIDATE_ID,
     ]
-    assert [item["claimId"] for item in stored] == [ledger_claim_id, ledger_claim_id]
+    assert [item["claimId"] for item in stored] == [ledger_claim_id, candidate_claim_id]
+    assert stored[0]["reasoningRole"] == "fact"
+    assert stored[1]["reasoningRole"] == "hypothesis"
     assert len({item["claimEvidenceId"] for item in stored}) == 2
     assert stored[0]["claimEvidenceId"] == created[0]["claimEvidenceId"]
 
-    # 3. The gate allows the HYPOTHESIS candidate on the real stores.
-    # (Production gate call sites always query the hypothesis candidate id
-    # space — ``recommendationCandidateId`` — which is exactly the dimension
-    # the second record bridges.)
+    # 3. Candidate A has its own pending relation; B receives no copied evidence.
     verdict = chain.evaluate_claim_belief_gate(
-        team_id, _QUESTION_ID, [HYPOTHESIS_CANDIDATE_ID]
-    )[HYPOTHESIS_CANDIDATE_ID]
-    assert verdict["status"] == "allowed", verdict
-    assert [item["claimId"] for item in verdict["claims"]] == [ledger_claim_id]
+        team_id, _QUESTION_ID, [HYPOTHESIS_CANDIDATE_ID, candidate_b]
+    )
+    assert verdict[HYPOTHESIS_CANDIDATE_ID]["status"] == "blocked"
+    assert verdict[HYPOTHESIS_CANDIDATE_ID]["reason"] == "candidate_evidence_gap"
+    assert verdict[candidate_b]["reason"] == "claim_data_missing"
 
     # 4. Idempotent replay: same content + scope reuses the ledger row and
     # both evidence records; no row count doubles anywhere.
@@ -590,13 +602,23 @@ def test_materialized_claims_bridge_ledger_row_and_allow_belief_gate(
         task=_verified_task(team_id=team_id),
         model_ref="provider/model-a",
         question_scope=scope,
-        hypothesis_candidate_ids=[HYPOTHESIS_CANDIDATE_ID],
+        hypothesis_candidate_ids=[HYPOTHESIS_CANDIDATE_ID, candidate_b],
+        hypothesis_candidate_bindings={
+            HYPOTHESIS_CANDIDATE_ID: {
+                "claimText": "Candidate A predicts a bounded mechanism.",
+                "lineageRefs": ["https://example.org/paper-a"],
+            },
+            candidate_b: {
+                "claimText": "Candidate B predicts a different mechanism.",
+                "lineageRefs": ["https://example.org/paper-b"],
+            },
+        },
     )
     assert replay[0]["claimId"] == ledger_claim_id
     assert replay[0]["claimEvidenceId"] == created[0]["claimEvidenceId"]
     assert replay[0]["claimLedgerStatus"] == "reused"
     assert replay[1]["claimEvidenceId"] == stored[1]["claimEvidenceId"]
-    assert claim_ledger.list_claims(team_id)["claimCount"] == 1
+    assert claim_ledger.list_claims(team_id)["claimCount"] == 2
     assert len(ClaimEvidenceStore(tmp_path).list(team_id)) == 2
 
 
@@ -635,6 +657,61 @@ def test_materialization_without_hypothesis_candidates_keeps_gate_fail_closed(
     assert verdict["status"] == "blocked"
     assert verdict["reason"] == "claim_data_missing"
     assert claim_ledger.list_claims(team_id)["claimCount"] == 1
+
+
+def test_formal_candidate_binds_existing_lineage_without_reusing_source_fact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    team_id, scope = _claim_bridge_env(tmp_path, monkeypatch)
+    materialize_claim_evidence_from_task(
+        project_root=tmp_path,
+        team_id=team_id,
+        workflow_run_id="wf-run-a",
+        source_collection_run_id="sc-run-a",
+        task=_verified_task(team_id=team_id),
+        model_ref="provider/model-a",
+        question_scope=scope,
+    )
+
+    bound = materialize_candidate_claim_bindings_from_existing_evidence(
+        project_root=tmp_path,
+        team_id=team_id,
+        workflow_run_id="wf-run-a",
+        question_scope=scope,
+        candidates=[
+            {
+                "candidateId": HYPOTHESIS_CANDIDATE_ID,
+                "statement": "Candidate A predicts a bounded mechanism.",
+                "lineageRefs": ["https://example.org/paper-a"],
+            },
+            {
+                "candidateId": "candidate-b",
+                "statement": "Candidate B predicts another mechanism.",
+                "lineageRefs": ["https://example.org/paper-b"],
+            },
+        ],
+    )
+
+    assert len(bound) == 1
+    assert bound[0]["candidateId"] == HYPOTHESIS_CANDIDATE_ID
+    assert bound[0]["reviewStatus"] == "pending"
+    assert bound[0]["claimBinding"]["claimRole"] == "core"
+    assert bound[0]["claimBinding"]["supportEvidenceIds"] == [
+        bound[0]["claimEvidenceId"]
+    ]
+    assert bound[0]["claimBinding"]["claimText"] == (
+        "Candidate A predicts a bounded mechanism."
+    )
+    rows_by_text = {
+        item["claim"]: item for item in claim_ledger.list_claims(team_id)["claims"]
+    }
+    assert set(rows_by_text) == {
+        "The abstract reports a bounded result.",
+        "Candidate A predicts a bounded mechanism.",
+    }
+    assert bound[0]["claimId"] == rows_by_text[
+        "Candidate A predicts a bounded mechanism."
+    ]["claimId"]
 
 
 def test_materialization_without_question_scope_fails_closed(

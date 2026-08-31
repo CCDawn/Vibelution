@@ -109,6 +109,8 @@ def _evidence_record(
     *,
     review: str = "accepted",
     support: str = "supports",
+    reasoning_role: str = "fact",
+    evidence_kind: str = "primary_result",
 ) -> dict[str, Any]:
     return {
         "claimEvidenceId": evidence_id,
@@ -117,6 +119,8 @@ def _evidence_record(
         "sourceId": f"artifact:{evidence_id}",
         "reviewStatus": review,
         "supportLevel": support,
+        "reasoningRole": reasoning_role,
+        "evidenceKind": evidence_kind,
         "scopeHash": _scope_hash(),
     }
 
@@ -128,7 +132,13 @@ def _install_claim_sources(
     evidence_records: list[dict[str, Any]] | None = None,
     claims_raise: bool = False,
     evidence_raise: bool = False,
+    formal_candidate_ids: set[str] | None = None,
 ) -> None:
+    monkeypatch.setattr(
+        chain,
+        "_formal_grounded_candidate_ids_for_gate",
+        lambda _team_id, _question_id: set(formal_candidate_ids or set()),
+    )
     if claims_raise:
 
         def _raise_claims(_team_id: str, _question_id: str) -> list[dict[str, Any]]:
@@ -252,18 +262,28 @@ def test_gate_allows_candidate_with_supported_claim(monkeypatch):
     ]
 
 
-def test_gate_allows_weakly_supported_and_untested_claims(monkeypatch):
-    """Contract semantics: pending/no effective evidence never blocks by itself."""
+def test_gate_blocks_candidate_core_claim_without_accepted_support(monkeypatch):
+    """Candidate-specific core claims require accepted support, not pending refs."""
     claim_rows = [
         _claim_row("claim-pending", [_ref("ce-1", review="pending")]),
         _claim_row("claim-untested", [_ref("ce-2", review="rejected")]),
     ]
     evidence_records = [
         _evidence_record(
-            "ce-1", "claim-pending", _CANDIDATE_ID, review="pending", support="supports"
+            "ce-1",
+            "claim-pending",
+            _CANDIDATE_ID,
+            review="pending",
+            support="supports",
+            reasoning_role="hypothesis",
         ),
         _evidence_record(
-            "ce-2", "claim-untested", _CANDIDATE_ID, review="rejected", support="supports"
+            "ce-2",
+            "claim-untested",
+            _CANDIDATE_ID,
+            review="rejected",
+            support="supports",
+            reasoning_role="hypothesis",
         ),
     ]
     _install_claim_sources(
@@ -272,9 +292,99 @@ def test_gate_allows_weakly_supported_and_untested_claims(monkeypatch):
     verdict = chain.evaluate_claim_belief_gate(
         "team-gate", _QUESTION_ID, [_CANDIDATE_ID]
     )[_CANDIDATE_ID]
-    assert verdict["status"] == "allowed"
+    assert verdict["status"] == "blocked"
+    assert verdict["reason"] == "candidate_evidence_gap"
     states = {item["claimId"]: item["beliefState"] for item in verdict["claims"]}
     assert states == {"claim-pending": "weakly_supported", "claim-untested": "untested"}
+    assert {item["gap"] for item in verdict["evidenceGaps"]} == {
+        "accepted_support_missing",
+        "accepted_counter_or_boundary_missing",
+    }
+
+
+def test_gate_blocks_supported_candidate_core_claim_without_counter_or_boundary(monkeypatch):
+    claim_rows = [_claim_row("claim-core", [_ref("ce-support")], status="supported")]
+    evidence_records = [
+        _evidence_record(
+            "ce-support",
+            "claim-core",
+            _CANDIDATE_ID,
+            reasoning_role="hypothesis",
+        )
+    ]
+    _install_claim_sources(
+        monkeypatch, claim_rows=claim_rows, evidence_records=evidence_records
+    )
+
+    verdict = chain.evaluate_claim_belief_gate(
+        "team-gate", _QUESTION_ID, [_CANDIDATE_ID]
+    )[_CANDIDATE_ID]
+
+    assert verdict["status"] == "blocked"
+    assert verdict["reason"] == "candidate_evidence_gap"
+    assert verdict["evidenceGaps"] == [
+        {
+            "claimId": "claim-core",
+            "gap": "accepted_counter_or_boundary_missing",
+        }
+    ]
+
+
+def test_gate_keeps_candidate_specific_evidence_isolated(monkeypatch):
+    candidate_b = "hyp-b"
+    claim_rows = [_claim_row("claim-a", [_ref("ce-a")], status="supported")]
+    evidence_records = [
+        _evidence_record(
+            "ce-a",
+            "claim-a",
+            _CANDIDATE_ID,
+            reasoning_role="hypothesis",
+        ),
+        _evidence_record(
+            "ce-boundary-a",
+            "claim-a",
+            _CANDIDATE_ID,
+            support="insufficient",
+            reasoning_role="hypothesis",
+            evidence_kind="counter_evidence",
+        ),
+    ]
+    _install_claim_sources(
+        monkeypatch, claim_rows=claim_rows, evidence_records=evidence_records
+    )
+
+    verdicts = chain.evaluate_claim_belief_gate(
+        "team-gate", _QUESTION_ID, [_CANDIDATE_ID, candidate_b]
+    )
+
+    assert verdicts[_CANDIDATE_ID]["status"] == "allowed"
+    assert verdicts[candidate_b] == {
+        "candidateId": candidate_b,
+        "status": "blocked",
+        "reason": "claim_data_missing",
+        "claims": [],
+        "blockedClaims": [],
+    }
+
+
+def test_formal_candidate_never_uses_historical_source_fact_as_core_claim(monkeypatch):
+    claim_rows = [_claim_row("source-fact", [_ref("ce-fact")], status="supported")]
+    evidence_records = [
+        _evidence_record("ce-fact", "source-fact", _CANDIDATE_ID)
+    ]
+    _install_claim_sources(
+        monkeypatch,
+        claim_rows=claim_rows,
+        evidence_records=evidence_records,
+        formal_candidate_ids={_CANDIDATE_ID},
+    )
+
+    verdict = chain.evaluate_claim_belief_gate(
+        "team-gate", _QUESTION_ID, [_CANDIDATE_ID]
+    )[_CANDIDATE_ID]
+
+    assert verdict["status"] == "blocked"
+    assert verdict["reason"] == "candidate_claim_binding_missing"
 
 
 def test_gate_blocks_contradicted_claim_with_structured_claim_state(monkeypatch):

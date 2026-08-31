@@ -1485,11 +1485,10 @@ def retry_review_dispatch(
 # The formal selection/convergence authorities of this chain consume the
 # five-state belief table (`ClaimBeliefTable` via
 # `claim_belief_service.evaluate_claim_belief`) as a hard gate: only a
-# candidate whose core claims carry no accepted counter-evidence may advance.
-# Per the claim-belief contract semantics, `supported`/`weakly_supported`/
-# `untested` are allowed (pending evidence never demotes, adjudication stays
-# in the ledger), while `contradicted`/`disputed` block.  Missing or
-# unreadable claim data blocks as well — the gate never defaults to allow.
+# candidate-specific core claim must carry accepted support plus accepted
+# counter/boundary coverage.  Legacy fact-only projections retain their old
+# five-state semantics; formal candidate bindings are identified by
+# ``reasoningRole=hypothesis`` and are evaluated strictly.
 
 CLAIM_BELIEF_GATE_BLOCKING_STATES = frozenset({"contradicted", "disputed"})
 
@@ -1517,6 +1516,23 @@ def _question_claim_rows_for_gate(team_id: str, question_id: str) -> list[dict[s
         if isinstance(item, Mapping)
         and str(item.get("question") or "").strip().upper() == normalized_question
     ]
+
+
+def _formal_grounded_candidate_ids_for_gate(
+    team_id: str, question_id: str
+) -> set[str]:
+    """Formal R1 candidates that must never fall back to legacy fact rows."""
+
+    normalized_question = str(question_id or "").strip().upper()
+    return {
+        str(record.get("candidateId") or "").strip()
+        for record in _records(team_id)
+        if str(record.get("recordKind") or "") == CANDIDATE_KIND
+        and str(record.get("questionId") or "").strip().upper() == normalized_question
+        and str(record.get("candidateAuthority") or "").strip()
+        == FORMAL_GROUNDED_CANDIDATE_AUTHORITY
+        and str(record.get("candidateId") or "").strip()
+    }
 
 
 def _blocked_gate_verdict(
@@ -1574,6 +1590,12 @@ def evaluate_claim_belief_gate(
                 candidate_id, "claim_evidence_store_unavailable"
             )
         return verdicts
+    try:
+        formal_grounded_candidate_ids = _formal_grounded_candidate_ids_for_gate(
+            team_id, normalized_question
+        )
+    except Exception:  # noqa: BLE001 - evidence/ledger gates still fail closed
+        formal_grounded_candidate_ids = set()
 
     entries_by_id: dict[str, Any] = {}
     invalid_claim_ids: set[str] = set()
@@ -1589,14 +1611,34 @@ def evaluate_claim_belief_gate(
     claims_by_candidate: dict[str, set[str]] = {
         candidate_id: set() for candidate_id in requested
     }
+    strict_claims_by_candidate: dict[str, set[str]] = {
+        candidate_id: set() for candidate_id in requested
+    }
     for record in evidence_records:
         candidate_id = str(record.get("candidateId") or "").strip()
         claim_id = str(record.get("claimId") or "").strip()
         if candidate_id in claims_by_candidate and claim_id:
             claims_by_candidate[candidate_id].add(claim_id)
+            if str(record.get("reasoningRole") or "").strip().lower() == "hypothesis":
+                strict_claims_by_candidate[candidate_id].add(claim_id)
 
     for candidate_id in requested:
-        claim_ids = sorted(claims_by_candidate.get(candidate_id) or set())
+        strict_claim_ids = strict_claims_by_candidate.get(candidate_id) or set()
+        strict_candidate_binding = bool(strict_claim_ids)
+        strict_candidate_required = (
+            candidate_id in formal_grounded_candidate_ids
+            or strict_candidate_binding
+        )
+        if strict_candidate_required and not strict_candidate_binding:
+            verdicts[candidate_id] = _blocked_gate_verdict(
+                candidate_id, "candidate_claim_binding_missing"
+            )
+            continue
+        claim_ids = sorted(
+            strict_claim_ids
+            if strict_candidate_binding
+            else claims_by_candidate.get(candidate_id) or set()
+        )
         if not claim_ids:
             # No claim data at all for this candidate: an unevidenced core
             # claim must not enter the formal path (fail-closed).
@@ -1645,6 +1687,7 @@ def evaluate_claim_belief_gate(
         states = {entry.claimId: entry for entry in table.entries}
         claim_summaries: list[dict[str, Any]] = []
         blocked_claims: list[dict[str, Any]] = []
+        evidence_gaps: list[dict[str, str]] = []
         for claim_id in claim_ids:
             entry = states.get(claim_id)
             if entry is None:
@@ -1676,6 +1719,41 @@ def evaluate_claim_belief_gate(
                         "counterEvidenceIds": list(entry.counterEvidenceIds),
                     }
                 )
+            if strict_candidate_binding:
+                if entry.acceptedSupportCount < 1:
+                    evidence_gaps.append(
+                        {"claimId": claim_id, "gap": "accepted_support_missing"}
+                    )
+                accepted_boundary_or_counter = any(
+                    str(record.get("candidateId") or "").strip() == candidate_id
+                    and str(record.get("claimId") or "").strip() == claim_id
+                    and str(record.get("reviewStatus") or "").strip().lower()
+                    == "accepted"
+                    and (
+                        str(record.get("supportLevel") or "").strip().lower()
+                        == "contradicts"
+                        or str(record.get("evidenceKind") or "").strip().lower()
+                        == "counter_evidence"
+                    )
+                    for record in evidence_records
+                )
+                if not accepted_boundary_or_counter:
+                    evidence_gaps.append(
+                        {
+                            "claimId": claim_id,
+                            "gap": "accepted_counter_or_boundary_missing",
+                        }
+                    )
+        if evidence_gaps:
+            verdicts[candidate_id] = {
+                "candidateId": candidate_id,
+                "status": "blocked",
+                "reason": "candidate_evidence_gap",
+                "claims": claim_summaries,
+                "blockedClaims": blocked_claims,
+                "evidenceGaps": evidence_gaps,
+            }
+            continue
         if blocked_claims:
             verdicts[candidate_id] = _blocked_gate_verdict(
                 candidate_id, "claim_belief_state_blocked", claims=blocked_claims
@@ -1698,6 +1776,7 @@ def _gate_blocker_payload(verdict: dict[str, Any]) -> dict[str, Any]:
         "candidateId": verdict.get("candidateId") or "",
         "reason": str(verdict.get("reason") or ""),
         "claims": list(verdict.get("blockedClaims") or []),
+        "evidenceGaps": list(verdict.get("evidenceGaps") or []),
     }
 
 
@@ -4614,6 +4693,21 @@ def _append_generation_candidates(
             _append_jsonl(_storage_path(team_id), record)
             existing_by_id[candidate_id] = record
             appended.append(record)
+    if (
+        candidate_authority == FORMAL_GROUNDED_CANDIDATE_AUTHORITY
+        and appended
+    ):
+        from .agent_claim_evidence_materializer import (
+            materialize_candidate_claim_bindings_from_existing_evidence,
+        )
+
+        materialize_candidate_claim_bindings_from_existing_evidence(
+            project_root=_project_root(),
+            team_id=team_id,
+            workflow_run_id=str(meeting_round.get("workflowRunId") or ""),
+            question_scope=_question_scope_envelope(team_id, question_id),
+            candidates=appended,
+        )
     _finish_generation_attempt_for_meeting(
         team_id,
         meeting_round_id,
@@ -8103,6 +8197,7 @@ def chain_state(
             "reason": str(verdict.get("reason") or ""),
             "claims": list(verdict.get("claims") or []),
             "blockedClaims": list(verdict.get("blockedClaims") or []),
+            "evidenceGaps": list(verdict.get("evidenceGaps") or []),
         }
         if verdict.get("status") != "allowed":
             converged = False

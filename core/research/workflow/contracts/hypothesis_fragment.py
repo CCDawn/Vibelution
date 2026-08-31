@@ -29,6 +29,10 @@ from .hypothesis_quality import normalize_hypothesis_scores
 # must not be replayed as formal Challenge Cup evidence.
 HYPOTHESIS_FRAGMENT_SCHEMA_VERSION = 2
 HYPOTHESIS_FRAGMENT_KIND = "hypothesis_fragment"
+HYPOTHESIS_CLAIM_ROLES = frozenset({"core", "auxiliary"})
+HYPOTHESIS_CLAIM_BELIEF_STATES = frozenset(
+    {"untested", "weakly_supported", "supported", "contradicted", "disputed"}
+)
 
 
 def _string_list(
@@ -74,6 +78,56 @@ def _aliased_string_list(
     # ``_string_list`` expects a mapping so that its error names stay tied to
     # the canonical v2 field; aliases are resolved before this point.
     return _string_list({canonical: value}, canonical, non_empty=True)
+
+
+@dataclass(frozen=True, slots=True)
+class HypothesisClaimBinding:
+    """Candidate-owned claim identity and its explicit evidence relations."""
+
+    candidateId: str
+    claimId: str
+    claimText: str
+    claimRole: str
+    supportEvidenceIds: tuple[str, ...]
+    counterEvidenceIds: tuple[str, ...]
+    boundaryEvidenceIds: tuple[str, ...]
+    beliefState: str
+    unresolvedReason: str
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> HypothesisClaimBinding:
+        if not isinstance(payload, Mapping):
+            raise ContractValidationError("hypothesis claim binding must be an object")
+        claim_role = require_text(payload, "claimRole").lower()
+        if claim_role not in HYPOTHESIS_CLAIM_ROLES:
+            raise ContractValidationError("claimRole must be core or auxiliary")
+        belief_state = require_text(payload, "beliefState").lower()
+        if belief_state not in HYPOTHESIS_CLAIM_BELIEF_STATES:
+            raise ContractValidationError("beliefState is not a supported claim belief state")
+        return cls(
+            candidateId=require_text(payload, "candidateId"),
+            claimId=require_text(payload, "claimId"),
+            claimText=require_text(payload, "claimText"),
+            claimRole=claim_role,
+            supportEvidenceIds=_string_list(payload, "supportEvidenceIds"),
+            counterEvidenceIds=_string_list(payload, "counterEvidenceIds"),
+            boundaryEvidenceIds=_string_list(payload, "boundaryEvidenceIds"),
+            beliefState=belief_state,
+            unresolvedReason=str(payload.get("unresolvedReason") or "").strip(),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "candidateId": self.candidateId,
+            "claimId": self.claimId,
+            "claimText": self.claimText,
+            "claimRole": self.claimRole,
+            "supportEvidenceIds": list(self.supportEvidenceIds),
+            "counterEvidenceIds": list(self.counterEvidenceIds),
+            "boundaryEvidenceIds": list(self.boundaryEvidenceIds),
+            "beliefState": self.beliefState,
+            "unresolvedReason": self.unresolvedReason,
+        }
 
 
 def _content_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -269,8 +323,11 @@ def canonical_fragment_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
 
 
 __all__ = [
+    "HYPOTHESIS_CLAIM_BELIEF_STATES",
+    "HYPOTHESIS_CLAIM_ROLES",
     "HYPOTHESIS_FRAGMENT_KIND",
     "HYPOTHESIS_FRAGMENT_SCHEMA_VERSION",
+    "HypothesisClaimBinding",
     "HypothesisFragment",
     "canonical_fragment_payload",
 ]
