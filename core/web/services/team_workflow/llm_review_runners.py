@@ -42,6 +42,9 @@ from core.web.services.team.team_constants import CHALLENGE_CUP_RESEARCH_TEAM_ID
 from core.web.services.team_workflow.hypothesis_review_executor import (
     ProviderBoundReviewResult,
 )
+from core.web.services.team_workflow.source_collection import (
+    facade as collection_facade,
+)
 
 REVIEW_LLM_PROFILE_ID = "primary"
 REVIEW_LLM_SURFACE = "team_workflow_review"
@@ -411,6 +414,14 @@ def _meeting_transcript(
     return transcript
 
 
+_EVIDENCE_SOURCE_TYPES = "、".join(
+    sorted(collection_facade.SEARCH_ENVELOPE_SOURCE_TYPES)
+)
+_EVIDENCE_LEVELS = "、".join(
+    sorted(collection_facade.SEARCH_ENVELOPE_EVIDENCE_LEVELS)
+)
+
+
 _DIGEST_SYSTEM_PROMPT = """你是科研团队的 Coordinator，负责把团队会议发言整理为结构化会议纪要。
 
 要求：
@@ -424,6 +435,14 @@ _DIGEST_SYSTEM_PROMPT = """你是科研团队的 Coordinator，负责把团队�
 
 输出 JSON 结构：
 {"summary": str, "agendaSummary": str, "discussionTopics": [str], "agreements": [str], "disagreements": [{"issue": str, "positions": [str], "unresolvedReason": str}], "actionItems": [{"ownerRoleId": str, "action": str, "dueGate": str}], "risks": [str], "knowledgeCandidates": [str], "proposedCandidates": [{"candidateId": str, "statement": str, "rationale": str, "proposedBy": str}], "evidenceRequests": [dict]}
+""" + f"""
+证据请求唯一词表：
+- sourceTypes 只允许：{_EVIDENCE_SOURCE_TYPES}。
+- evidenceLevels 只允许：{_EVIDENCE_LEVELS}。
+- 预印本使用 sourceTypes=["paper"]、evidenceLevels=["preprint"]；
+  官方网页或声明使用 sourceTypes=["url"]、evidenceLevels=["primary"]；
+  代码仓库使用 sourceTypes=["repo"]。
+- candidateRefs 只能填写本会议已绑定的候选 ID，不得新造候选 ID。
 """
 
 
