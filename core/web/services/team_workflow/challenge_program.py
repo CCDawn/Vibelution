@@ -5,7 +5,11 @@ projection over the append-only experiment lifecycle.  It must never be
 promoted to completion of the whole 125-question competition program.
 
 ``build_competition_program_projection`` is the active typed v2 projection
-driven by the tracked Program 2.2.0 and FullCatalogPolicy 1.2.0 resources.
+driven by the tracked Program 2.3.0 and FullCatalogPolicy 1.2.0 resources.
+Program 2.3.0 is phased (``a_then_b``): phase 1 — the current goal — is the
+125-question direction-A hypothesis/plan loop and completes on
+``full_catalog_result_set_approved``; phase 2 stacks the two deep
+experiments behind that gate and the final program rule still requires both.
 Only schemaVersion=2 approved and submission-eligible question results count
 toward the formal 125-question completion contract.
 """
@@ -22,6 +26,10 @@ from core.research.competition.resources import (
     CORE_BEHAVIOR_HASH,
     CORE_POLICY_HASH,
     CompetitionResourceError,
+    DEEP_EXPERIMENT_ACTIVATION_GATE,
+    DEEP_EXPERIMENT_EXECUTION_PHASE,
+    PHASE1_COMPLETION_RULE,
+    PROGRAM_DIRECTION_EXECUTION_MODE,
     load_competition_program_core,
     load_full_catalog_execution_core,
     load_science_question_catalog,
@@ -540,6 +548,7 @@ def build_competition_program_projection(
     deep_experiment_records: list[dict[str, Any]] = []
     for experiment in deep_experiments:
         question_id = _text(experiment.get("questionId"))
+        execution_phase = int(experiment.get("executionPhase") or DEEP_EXPERIMENT_EXECUTION_PHASE)
         deep_experiment_records.append(
             {
                 "experimentId": _text(experiment.get("experimentId")),
@@ -548,6 +557,9 @@ def build_competition_program_projection(
                 "themeId": _text(experiment.get("themeId")),
                 "campaignId": _text(experiment.get("campaignId")),
                 "required": experiment.get("required") is True,
+                "executionPhase": execution_phase,
+                "activationGate": _text(experiment.get("activationGate")) or DEEP_EXPERIMENT_ACTIVATION_GATE,
+                "phaseActive": execution_phase == 1 or full_result_set_complete,
                 "questionResultApproved": question_id in approved_question_set,
                 "approved": (
                     question_id in approved_question_set
@@ -576,7 +588,7 @@ def build_competition_program_projection(
             "track": _text(program_program.get("track")),
             "direction": _text(program_program.get("direction")),
             "dimensions": list(dimensions),
-            "directionMode": "a_plus_b",
+            "directionMode": PROGRAM_DIRECTION_EXECUTION_MODE,
             "foundationModelFamily": _text(program_program.get("foundationModelFamily")),
             "officialQuestionCount": CATALOG_QUESTION_COUNT,
             "catalogId": CATALOG_ID,
@@ -590,14 +602,31 @@ def build_competition_program_projection(
                 "name": _text(dimensions[index]) if index < len(dimensions) else "",
                 "required": True,
                 "role": role,
+                "phase": phase,
+                "activated": phase == 1 or full_result_set_complete,
+                **(
+                    {"activationGate": DEEP_EXPERIMENT_ACTIVATION_GATE}
+                    if phase == 2
+                    else {}
+                ),
             }
-            for index, (direction_id, role) in enumerate(
+            for index, (direction_id, role, phase) in enumerate(
                 (
-                    ("A", "full_catalog_hypothesis_and_research_plan"),
-                    ("B", "deep_experiment_planning_and_feedback"),
+                    ("A", "full_catalog_hypothesis_and_research_plan", 1),
+                    ("B", "deep_experiment_planning_and_feedback", 2),
                 )
             )
         ],
+        "executionPhase": {
+            "mode": PROGRAM_DIRECTION_EXECUTION_MODE,
+            "currentPhase": 1,
+            "currentPhaseGoal": "方向A：完成 125 题科学假设与研究计划的六环节闭环（问题理解、知识整合、候选假说生成、证据梳理、研究计划输出、反馈修正）",
+            "phase1CompletionRule": PHASE1_COMPLETION_RULE,
+            "phase1Complete": full_result_set_complete,
+            "phase2ActivationGate": DEEP_EXPERIMENT_ACTIVATION_GATE,
+            "phase2Activated": full_result_set_complete,
+            "finalCompletionRequiresDeepExperiments": True,
+        },
         "programContract": {
             "version": _text(program.get("contractVersion")),
             "coreBehaviorHash": CORE_BEHAVIOR_HASH,
@@ -678,7 +707,7 @@ def build_challenge_submission_readiness(
     """Build the single user-facing Challenge Cup submission readiness view.
 
     The projection is deliberately conservative: only the canonical program
-    result counts can make the two computational packages ready.  The PDF,
+    result counts can make the 125-question result package ready.  The PDF,
     video, API and source-code submission artifacts have no tracked canonical
     package receipt yet, so they stay blocked/optional instead of being
     inferred from repository paths or implementation routes.
@@ -724,6 +753,12 @@ def build_challenge_submission_readiness(
         for item in deep_experiments
         if item.get("required") is True
     )
+    execution_phase = _mapping(projection.get("executionPhase"))
+    phase2_activated = (
+        execution_phase.get("phase2Activated") is True
+        if execution_phase
+        else full_catalog_ready
+    )
     direction_requirement = _mapping(projection.get("directionSubmissionRequirement"))
     artifacts = [
         {
@@ -743,15 +778,35 @@ def build_challenge_submission_readiness(
         {
             "key": "deep_experiment_suite",
             "label": "两个深实验包",
-            "required": True,
-            "status": "ready" if deep_ready else "blocked",
-            "detail": f"{approved_deep_count}/{required_deep_count or 2} 个独立深实验已通过提交门。",
-            "blocker": "deep_experiment_suite_incomplete" if not deep_ready else "",
+            # Program 2.3.0 phased (a_then_b): the deep-experiment package is
+            # a declared phase-2 deliverable.  Until the full catalog result
+            # set activates phase 2 it neither blocks nor counts toward the
+            # current phase-1 submission readiness; afterwards it flips to a
+            # required artifact under the final program rule.
+            "required": phase2_activated and bool(required_deep_count),
+            "finalRequired": bool(required_deep_count),
+            "phase": 2,
+            "activationGate": DEEP_EXPERIMENT_ACTIVATION_GATE,
+            "status": ("ready" if deep_ready else "blocked")
+            if phase2_activated and required_deep_count
+            else "optional",
+            "detail": (
+                f"{approved_deep_count}/{required_deep_count} 个独立深实验已通过提交门。"
+                if phase2_activated and required_deep_count
+                else f"{approved_deep_count}/{required_deep_count} 个独立深实验为第二阶段交付，125 题假说结果包完成后激活。"
+            ),
+            "blocker": "deep_experiment_suite_incomplete"
+            if (phase2_activated and required_deep_count and not deep_ready)
+            else "",
             "primaryAction": {
-                "kind": "repair" if not deep_ready else "export",
+                "kind": "repair" if (phase2_activated and required_deep_count and not deep_ready) else "inspect",
                 "target": "deep-experiment-suite",
-                "label": "修复深实验" if not deep_ready else "导出深实验包",
-                **({"questionId": first_missing_deep_question_id} if first_missing_deep_question_id else {}),
+                "label": "修复深实验" if (phase2_activated and required_deep_count and not deep_ready) else "查看深实验计划",
+                **(
+                    {"questionId": first_missing_deep_question_id}
+                    if first_missing_deep_question_id and phase2_activated
+                    else {}
+                ),
             },
         },
         {
@@ -843,7 +898,7 @@ def build_challenge_submission_readiness(
             "title": _text(program.get("title")),
             "questionCount": required_count,
             "approvedQuestionCount": approved_count,
-            "deepExperimentCount": required_deep_count or 2,
+            "deepExperimentCount": required_deep_count,
             "approvedDeepExperimentCount": approved_deep_count,
         },
     }

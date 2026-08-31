@@ -30,7 +30,7 @@ from core.infrastructure.no_console_git import (
     run_git,
 )
 
-from .resources import CORE_BEHAVIOR_HASH, CORE_POLICY_HASH
+from .resources import CORE_BEHAVIOR_HASH, CORE_POLICY_HASH, PROGRAM_CONTRACT_VERSION
 
 GIT_TIMEOUT_SECONDS = 120.0
 R1_PYTEST_TIMEOUT_SECONDS = 1800.0
@@ -46,7 +46,6 @@ R1_NESTED_PYTEST_EXCLUDES: tuple[str, ...] = (
 
 MANIFEST_KIND = "challenge_cup_submission_source_manifest"
 SCHEMA_VERSION = 1
-PROGRAM_CONTRACT_VERSION = "2.2.0"
 CATALOG_POLICY_VERSION = "1.2.0"
 MAX_ENTRY_BYTES = 5_000_000
 FORBIDDEN_SUFFIXES = (".nwb", ".cubin", ".ptx", ".pkl", ".pt", ".bin", ".exe")

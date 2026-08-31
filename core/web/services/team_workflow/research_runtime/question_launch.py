@@ -219,7 +219,12 @@ def _question_scope(output: Mapping[str, Any]) -> str:
 
 
 def _frozen_deep_experiment_records() -> list[dict[str, Any]]:
-    """Read the two required independent experiments from the frozen Program core."""
+    """Read required independent experiments from the frozen Program core.
+
+    Program 2.3.0 is phased (``a_then_b``): the two experiments stay declared
+    with ``executionPhase=2`` and activate only behind the full catalog
+    result-set gate; the 125-question phase-1 flow never depends on them.
+    """
     try:
         program = load_competition_program_core()
     except CompetitionResourceError as exc:
@@ -631,12 +636,12 @@ def _competition_program_snapshot() -> tuple[dict[str, Any], dict[str, Any]]:
         "catalogQuestionCount": CATALOG_QUESTION_COUNT,
         "catalogSha256": CATALOG_SHA256,
         "questionSchemaVersion": 2,
-        "directionMode": "a_plus_b",
+        "directionMode": "a_then_b",
         "directions": directions,
     }
     if catalog.get("catalog_id") != CATALOG_ID or len(directions) != 2:
         raise QuestionLaunchError(
-            "The frozen competition Program, Policy, catalog, or A+B direction snapshot is invalid.",
+            "The frozen competition Program, Policy, catalog, or phased A→B direction snapshot is invalid.",
             code="challenge_competition_snapshot_invalid",
         )
     return snapshot, program_body
@@ -812,7 +817,7 @@ def _build_catalog_seed_run_input(
         "competitionRuleVersion": "catalog-seed-v1",
         "trackAndRubricSnapshot": {
             "track": _text(program_body.get("track")),
-            "directionMode": "a_plus_b",
+            "directionMode": "a_then_b",
             "directions": directions,
             "blockingRules": [
                 "catalog_seed_not_submission_eligible",
@@ -940,7 +945,7 @@ def build_question_run_input(
         "competitionRuleVersion": f"question-output-v{int(output.get('schema_version') or 1)}",
         "trackAndRubricSnapshot": {
             "track": _text(program_body.get("track")),
-            "directionMode": "a_plus_b",
+            "directionMode": "a_then_b",
             "directions": directions,
             "blockingRules": [
                 "approved_v2_question_artifact_required",

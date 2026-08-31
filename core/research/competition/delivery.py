@@ -15,6 +15,7 @@ from core.research.competition.resources import (
     CATALOG_QUESTION_COUNT,
     CORE_BEHAVIOR_HASH,
     CORE_POLICY_HASH,
+    PROGRAM_CONTRACT_VERSION,
 )
 from core.research.workflow.contracts.catalog_hypothesis_flow_readiness import (
     CatalogHypothesisFlowReadinessAuthority,
@@ -70,7 +71,7 @@ def export_results(payload: dict[str, Any], *, mode: str) -> dict[str, Any]:
         "status": status,
         "blockers": blockers,
         "programContract": {
-            "version": "2.2.0",
+            "version": PROGRAM_CONTRACT_VERSION,
             "coreBehaviorHash": CORE_BEHAVIOR_HASH,
         },
         "catalogPolicy": {
