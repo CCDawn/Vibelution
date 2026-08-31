@@ -697,6 +697,44 @@ def test_question_run_scopes_candidate_generation_before_receipt_resolution(
         "workflowNodeId": chain.HYPOTHESIS_DESIGN_NODE_ID,
         "questionId": _QUESTION_ID,
     }
+    assert captured["_candidate_authority"] == ""
+
+
+def test_stage_one_question_run_auto_opens_exploratory_generation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.research.competition.stage_one_completion_policy import (
+        load_stage_one_completion_policy,
+    )
+    from core.web.services.team_workflow.research_runtime import run_creation
+
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(chain, "needs_candidate_generation", lambda *_args, **_kwargs: True)
+
+    def fake_open(_team_id, _question_id, **kwargs):
+        captured.update(kwargs)
+        return {"status": "opened", "meetingRound": {"meetingRoundId": "r0-1"}}
+
+    monkeypatch.setattr(chain, "open_candidate_generation_meeting", fake_open)
+    opened = run_creation._auto_open_candidate_generation(
+        {
+            "teamId": "team-stage-one",
+            "questionId": "SCI-091",
+            "projectId": "project-stage-one",
+            "researchObjectiveContract": {"hypothesisFirst": True},
+            "modelRoutingPolicy": {"modelPolicySha256": "a" * 64},
+            "stageOneCompletionPolicy": load_stage_one_completion_policy().to_dict(),
+        },
+        created_run={
+            "teamId": "team-stage-one",
+            "runId": "run-stage-one",
+            "workflowId": "challenge-cup-research",
+            "workflowVersionId": "wv-stage-one",
+        },
+    )
+
+    assert opened == {"status": "opened", "meetingRoundId": "r0-1"}
+    assert captured["_candidate_authority"] == "exploratory_draft"
 
 
 def test_review_meeting_fan_in_waits_for_every_selected_candidate(
@@ -3797,6 +3835,22 @@ def _candidate_generation_runner(participant, prompt, context):
     return {"status": "completed", "raw_output": content, "summary": "ok"}
 
 
+def _grounded_candidate_generation_runner(participant, prompt, context):
+    role = str(participant.get("teamRole") or "participant")
+    if role in {"source_finder", "challenge_cup_search"}:
+        content = (
+            "CANDIDATE: draft-a | 睡眠剥夺通过腺苷积累损害记忆巩固 | A1 受体机制 "
+            "| REFS: evidence:accepted-1; evidence:boundary-1 "
+            "| CHECK: 阻断 A1 受体后记忆表现应恢复\n"
+            "CANDIDATE: draft-b | 睡眠剥夺通过突触稳态失衡损害记忆巩固 | 突触稳态机制 "
+            "| REFS: evidence:accepted-2; evidence:boundary-1 "
+            "| CHECK: 睡眠恢复后突触标志物应回归基线"
+        )
+    else:
+        content = "AGREE: 两个候选都给出了可检验预测"
+    return {"status": "completed", "raw_output": content, "summary": "ok"}
+
+
 def _generation_receipt_authority(team_id: str, run_id: str) -> dict[str, object]:
     return {
         "schemaVersion": 1,
@@ -3887,6 +3941,152 @@ def test_candidate_generation_cold_start_registers_ledger_candidates(
         # The generation round is not a review round: it does not count into
         # the discussion-round budget.
         assert state["meetingCount"] == 0
+
+
+def test_stage_one_r0_isolated_then_r1_requires_whitelisted_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    team_id, agents = _hf_env(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        question_launch,
+        "challenge_question_run_summary",
+        lambda _team_id: {"completedQuestionIds": [], "completedQuestionResults": []},
+    )
+
+    with server_operator_scope("u-1", roles=("operator",)):
+        opened_r0 = chain.open_candidate_generation_meeting(
+            team_id,
+            _QUESTION_ID,
+            agent_runner=_candidate_generation_runner,
+            _candidate_authority="exploratory_draft",
+        )
+        r0_id = opened_r0["meetingRound"]["meetingRoundId"]
+        agent_ids = [agents[role] for role in _ROLES]
+        _drive_to_awaiting_approval(team_id, r0_id, agent_ids[0])
+        closed_r0 = chain.close_review_meeting(
+            team_id, r0_id, _closure_payload(agent_ids, [])
+        )
+
+        assert closed_r0["candidateCount"] == 0
+        assert closed_r0["draftCount"] == 2
+        assert chain.list_hypothesis_candidates(
+            team_id, question_id=_QUESTION_ID
+        )["candidates"] == []
+        drafts = chain.list_exploratory_drafts(
+            team_id, question_id=_QUESTION_ID
+        )["drafts"]
+        assert len(drafts) == 2
+        replayed_r0 = chain.open_candidate_generation_meeting(
+            team_id,
+            _QUESTION_ID,
+            agent_runner=_candidate_generation_runner,
+            _candidate_authority="exploratory_draft",
+        )
+        assert replayed_r0["status"] == "reused"
+        assert replayed_r0["meetingRound"]["meetingRoundId"] == r0_id
+
+        with pytest.raises(
+            chain.HypothesisFirstChainError,
+            match="accepted knowledge package",
+        ):
+            chain.open_candidate_generation_meeting(
+                team_id,
+                _QUESTION_ID,
+                agent_runner=_grounded_candidate_generation_runner,
+                _candidate_authority="formal_grounded_candidate",
+                _generation_context={
+                    "status": "blocked",
+                    "allowedEvidenceRefs": [],
+                },
+            )
+
+        opened_r1 = chain.open_candidate_generation_meeting(
+            team_id,
+            _QUESTION_ID,
+            agent_runner=_grounded_candidate_generation_runner,
+            _candidate_authority="formal_grounded_candidate",
+            _generation_context={
+                "status": "ready",
+                "allowedEvidenceRefs": [
+                    "evidence:accepted-1",
+                    "evidence:accepted-2",
+                    "evidence:boundary-1",
+                ],
+                "evidenceClaims": [
+                    {"sourceRef": "evidence:accepted-1", "claim": "腺苷支持证据"},
+                    {"sourceRef": "evidence:accepted-2", "claim": "突触支持证据"},
+                ],
+                "knowledgePackage": {
+                    "sourceArtifactIds": ["knowledge_package:pkg-1"]
+                },
+            },
+        )
+        r1_id = opened_r1["meetingRound"]["meetingRoundId"]
+        _drive_to_awaiting_approval(team_id, r1_id, agent_ids[0])
+        closed_r1 = chain.close_review_meeting(
+            team_id, r1_id, _closure_payload(agent_ids, [])
+        )
+
+    assert closed_r1["candidateCount"] == 2
+    formal = chain.list_hypothesis_candidates(
+        team_id, question_id=_QUESTION_ID
+    )["candidates"]
+    draft_ids = {str(item["candidateId"]) for item in drafts}
+    assert not draft_ids.intersection(str(item["candidateId"]) for item in formal)
+    assert all(item["candidateAuthority"] == "formal_grounded_candidate" for item in formal)
+    assert all(item["lineageRefs"] for item in formal)
+    assert all(item["testablePrediction"] for item in formal)
+    assert all(item["revisionOrdinal"] == 1 for item in formal)
+    assert all(item["derivedFromDraftRefs"] for item in formal)
+
+
+def test_formal_grounded_candidates_fail_closed_on_refs_and_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    team_id, _agents = _hf_env(tmp_path, monkeypatch)
+    meeting = {
+        "meetingRoundId": "meeting-r1",
+        "question": _QUESTION_ID,
+        "candidateAuthority": "formal_grounded_candidate",
+        "allowedEvidenceRefs": ["evidence:accepted-1"],
+        "exploratoryDraftRefs": ["exploratory_draft:r0-a"],
+        "knowledgePackageRefs": ["knowledge_package:pkg-1"],
+        "revisionOrdinal": 1,
+    }
+
+    with pytest.raises(
+        chain.HypothesisFirstChainError,
+        match="refs must match the evidence whitelist",
+    ):
+        chain._append_generation_candidates(
+            team_id,
+            meeting,
+            [
+                {
+                    "statement": "候选一",
+                    "rationale": "理由",
+                    "lineageRefs": ["evidence:not-accepted"],
+                    "testablePrediction": "预测一",
+                }
+            ],
+        )
+
+    with pytest.raises(
+        chain.HypothesisFirstChainError,
+        match="requires CHECK prediction",
+    ):
+        chain._append_generation_candidates(
+            team_id,
+            meeting,
+            [
+                {
+                    "statement": "候选二",
+                    "rationale": "理由",
+                    "lineageRefs": ["evidence:accepted-1"],
+                    "testablePrediction": "",
+                }
+            ],
+        )
 
 
 def test_candidate_generation_recovers_empty_digest_proposals_from_source_messages(

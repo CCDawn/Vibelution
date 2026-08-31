@@ -124,6 +124,13 @@ def _auto_open_candidate_generation(
         if not team_id or not question_id:
             return None
         workflow_run_id = str(created_run.get("runId") or "").strip()
+        stage_one_authority = ""
+        raw_stage_one_policy = run_input.get("stageOneCompletionPolicy")
+        if isinstance(raw_stage_one_policy, Mapping):
+            require_current_stage_one_policy_snapshot(raw_stage_one_policy)
+            stage_one_authority = (
+                hypothesis_first_chain.EXPLORATORY_DRAFT_AUTHORITY
+            )
         if not hypothesis_first_chain.needs_candidate_generation(
             team_id,
             question_id,
@@ -146,6 +153,7 @@ def _auto_open_candidate_generation(
                 created_run,
             ),
             _discussion_scope=discussion_scope.to_dict(),
+            _candidate_authority=stage_one_authority,
         )
         return {
             "status": str(opened.get("status") or ""),

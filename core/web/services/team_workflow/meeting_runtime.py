@@ -119,6 +119,13 @@ _GENERATION_AGENDA_RULES = (
     "没有新内容时回复 pass",
     "分歧必须显式记录，不得省略",
 )
+_FORMAL_GROUNDED_GENERATION_AGENDA_RULES = (
+    "本轮只生成正式证据接地候选；R0 探索草案只能作为待修订输入，不能沿用其 candidateId",
+    "每个候选写入 protocol.proposedCandidates，必须包含新的 candidateId、statement、rationale、proposedBy、lineageRefs 和 testablePrediction",
+    "lineageRefs 必须来自本轮 allowedEvidenceRefs 白名单，且每个候选至少一条；testablePrediction 不得为空",
+    "必须说明相对 R0 草案的具体机制变化，不得只改写措辞",
+    "没有新内容时回复 pass；分歧必须显式记录",
+)
 
 _SCOPE_FIELDS = ("program", "theme", "campaign", "question", "branch", "workflow")
 _PARTICIPANT_CONTRACT_FIELDS = (
@@ -1006,8 +1013,10 @@ def _generation_opening_topic(
     agenda: Sequence[str],
     *,
     question_context: Mapping[str, str] | None = None,
+    generation_context: Mapping[str, Any] | None = None,
 ) -> str:
     context = question_context or {}
+    grounded = generation_context or {}
     lines = [
         f"候选假说生成讨论开幕（{meeting_round_id}）：{question_id or '未命名赛题'}",
     ]
@@ -1017,10 +1026,42 @@ def _generation_opening_topic(
         lines.append("赛题正文：" + question_text)
     if domain:
         lines.append("赛题领域：" + domain)
+    evidence_claims = [
+        dict(item)
+        for item in list(grounded.get("evidenceClaims") or [])[:8]
+        if isinstance(item, Mapping)
+    ]
+    if evidence_claims:
+        lines.append("受控证据摘要（引用键必须原样用于 REFS）：")
+        lines.extend(
+            f"- {str(item.get('sourceRef') or '').strip()} | {str(item.get('claim') or '').strip()[:300]}"
+            for item in evidence_claims
+            if str(item.get("sourceRef") or "").strip()
+        )
+    exploratory_drafts = [
+        dict(item)
+        for item in list(grounded.get("exploratoryDrafts") or [])[:8]
+        if isinstance(item, Mapping)
+    ]
+    if exploratory_drafts:
+        lines.append("R0 探索草案（仅供修订，不得沿用 candidateId）：")
+        lines.extend(
+            f"- {str(item.get('draftId') or item.get('candidateId') or '').strip()} | {str(item.get('statement') or '').strip()[:300]}"
+            for item in exploratory_drafts
+        )
+    formal_grounded = (
+        str(grounded.get("candidateAuthority") or "").strip().lower()
+        == "formal_grounded_candidate"
+    )
     lines.extend(
         [
             "议程：" + "；".join(str(item) for item in agenda),
-            "规则：" + "；".join(_GENERATION_AGENDA_RULES),
+            "规则："
+            + "；".join(
+                _FORMAL_GROUNDED_GENERATION_AGENDA_RULES
+                if formal_grounded
+                else _GENERATION_AGENDA_RULES
+            ),
             "Coordinator 主持开场，成员按轮回应，无新内容回复 pass。",
         ]
     )
@@ -1484,8 +1525,11 @@ def open_candidate_generation_meeting(
     agenda_questions = _normalized_str_list(request.get("agendaQuestions")) or list(
         _GENERATION_AGENDA_QUESTIONS
     )
+    candidate_authority = str(request.get("candidateAuthority") or "").strip().lower()
     agenda_rules = _normalized_str_list(request.get("agendaRules")) or list(
-        _GENERATION_AGENDA_RULES
+        _FORMAL_GROUNDED_GENERATION_AGENDA_RULES
+        if candidate_authority == "formal_grounded_candidate"
+        else _GENERATION_AGENDA_RULES
     )
     create_request = {
         key: request.get(key)
@@ -1509,6 +1553,17 @@ def open_candidate_generation_meeting(
             "roundType": "generation",
             "discussionItemRefs": [],
             "inputArtifactRefs": _normalized_str_list(request.get("inputArtifactRefs")),
+            "candidateAuthority": candidate_authority,
+            "allowedEvidenceRefs": _normalized_str_list(
+                request.get("allowedEvidenceRefs")
+            ),
+            "exploratoryDraftRefs": _normalized_str_list(
+                request.get("exploratoryDraftRefs")
+            ),
+            "knowledgePackageRefs": _normalized_str_list(
+                request.get("knowledgePackageRefs")
+            ),
+            "revisionOrdinal": request.get("revisionOrdinal") or 0,
             "agenda": agenda,
             "agendaQuestions": agenda_questions,
             "agendaRules": agenda_rules,
@@ -1563,6 +1618,11 @@ def open_candidate_generation_meeting(
         question_id,
         agenda,
         question_context=_catalog_question_context(question_id),
+        generation_context=(
+            dict(request.get("generationContext") or {})
+            if isinstance(request.get("generationContext"), Mapping)
+            else {"candidateAuthority": candidate_authority}
+        ),
     )
     selection_shim = {
         "selectionId": "",

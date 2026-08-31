@@ -10,6 +10,7 @@ from core.web.services.team_workflow.research_project_agent_tasks import (
 )
 from core.web.services.team_workflow.research_project_hypothesis_context import (
     build_hypothesis_input_context,
+    build_stage_one_grounded_generation_context,
 )
 from core.web.services.team_workflow.research_runtime import workflow_artifact_store
 from core.web.services.team_workflow.research_runtime.artifact_quality_gate import (
@@ -161,6 +162,56 @@ def test_hypothesis_context_uses_the_accepted_candidate_claims(
             "sourceRef": "candidate-counter-1",
         }
     ]
+
+
+def test_stage_one_grounded_context_uses_the_run_pinned_source_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    from core.research.competition.stage_one_completion_policy import (
+        load_stage_one_completion_policy,
+    )
+    from core.web.services.team_workflow import research_project_hypothesis_context
+
+    captured: dict[str, object] = {}
+
+    def fake_build(team_id, task, store=None):
+        captured.update({"teamId": team_id, "task": task, "store": store})
+        return {"status": "ready", "allowedEvidenceRefs": ["evidence:accepted-1"]}
+
+    monkeypatch.setattr(
+        research_project_hypothesis_context,
+        "build_hypothesis_input_context",
+        fake_build,
+    )
+    run = SimpleNamespace(
+        team_id="research-team",
+        question_id="SCI-091",
+        input_snapshot_json=json.dumps(
+            {
+                "stageOneCompletionPolicy": load_stage_one_completion_policy().to_dict(),
+                "sourceCollectionRunId": "source-stage-one",
+            }
+        ),
+    )
+    store = SimpleNamespace(get_run=lambda _run_id: run)
+
+    context = build_stage_one_grounded_generation_context(
+        "research-team",
+        "run-stage-one",
+        question_id="SCI-091",
+        store=store,
+    )
+
+    assert context == {
+        "status": "ready",
+        "allowedEvidenceRefs": ["evidence:accepted-1"],
+    }
+    assert captured["task"] == {
+        "workflowRunId": "run-stage-one",
+        "sourceCollectionRunId": "source-stage-one",
+    }
 
 
 def test_hypothesis_writeback_uses_scoped_formal_artifact_store(

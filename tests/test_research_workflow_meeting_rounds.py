@@ -95,6 +95,52 @@ def test_close_meeting_emits_digest_decision_and_private_memory_refs(tmp_path, m
     assert beta["candidates"][0]["summary"].startswith("Track compilation")
 
 
+def test_grounded_candidate_protocol_preserves_refs_check_and_authority(
+    tmp_path, monkeypatch
+):
+    team_id = _team(tmp_path, monkeypatch)
+    created = meetings.create_meeting_round(
+        team_id,
+        _meeting(
+            meetingType="hypothesis_candidate_generation",
+            candidateAuthority="formal_grounded_candidate",
+            allowedEvidenceRefs=["evidence:accepted-1", "evidence:boundary-1"],
+            exploratoryDraftRefs=["exploratory_draft:r0-a"],
+            knowledgePackageRefs=["knowledge_package:pkg-1"],
+            revisionOrdinal=1,
+        ),
+    )["meetingRound"]
+
+    markers = meetings.extract_discussion_markers(
+        [
+            {
+                "status": "completed",
+                "speakerTitle": "研究员",
+                "content": (
+                    "CANDIDATE: r0-a | 腺苷积累损害记忆巩固 | 受体机制明确 "
+                    "| REFS: evidence:accepted-1; evidence:boundary-1 "
+                    "| CHECK: 阻断 A1 受体应恢复记忆表现"
+                ),
+            }
+        ]
+    )
+
+    assert created["candidateAuthority"] == "formal_grounded_candidate"
+    assert created["allowedEvidenceRefs"] == [
+        "evidence:accepted-1",
+        "evidence:boundary-1",
+    ]
+    assert created["revisionOrdinal"] == 1
+    assert markers["proposedCandidates"] == [
+        {
+            "candidateId": "r0-a",
+            "statement": "腺苷积累损害记忆巩固",
+            "rationale": "受体机制明确",
+            "proposedBy": "研究员",
+            "lineageRefs": ["evidence:accepted-1", "evidence:boundary-1"],
+            "testablePrediction": "阻断 A1 受体应恢复记忆表现",
+        }
+    ]
 def test_meeting_round_persists_participant_contract_snapshot(tmp_path, monkeypatch):
     team_id = _team(tmp_path, monkeypatch)
     snapshot = [

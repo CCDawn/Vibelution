@@ -128,3 +128,28 @@ def test_nested_protocol_objects_must_match_the_versioned_schema() -> None:
     assert ingested["messagePayload"]["audit"]["parseStatus"] == "invalid"
     assert ingested["messagePayload"]["audit"]["errorCode"] == "message_payload_schema_invalid"
     assert ingested["messagePayload"]["protocol"]["proposedCandidates"] == []
+
+
+def test_structured_candidate_preserves_optional_grounding_fields() -> None:
+    structured = json.loads(_structured_output())
+    structured["protocol"]["proposedCandidates"] = [
+        {
+            "candidateId": "draft-a",
+            "statement": "腺苷积累损害记忆巩固",
+            "rationale": "受体机制明确",
+            "proposedBy": "challenge_cup_hypothesis",
+            "lineageRefs": ["evidence:accepted-1", "evidence:boundary-1"],
+            "testablePrediction": "阻断 A1 受体后记忆表现应恢复",
+        }
+    ]
+
+    ingested = payloads.ingest_meeting_message_output(
+        json.dumps(structured, ensure_ascii=False)
+    )
+
+    candidate = ingested["messagePayload"]["protocol"]["proposedCandidates"][0]
+    assert candidate["lineageRefs"] == [
+        "evidence:accepted-1",
+        "evidence:boundary-1",
+    ]
+    assert candidate["testablePrediction"] == "阻断 A1 受体后记忆表现应恢复"

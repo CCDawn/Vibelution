@@ -64,7 +64,7 @@ def meeting_message_output_contract() -> str:
     ],
     "knowledgeCandidates": ["待进入知识治理的条目"],
     "proposedCandidates": [
-      {"candidateId": "候选 ID", "statement": "候选陈述", "rationale": "提出理由", "proposedBy": "角色"}
+      {"candidateId": "候选 ID", "statement": "候选陈述", "rationale": "提出理由", "proposedBy": "角色", "lineageRefs": ["证据引用"], "testablePrediction": "可检验预测"}
     ],
     "evidenceRequests": [
       {
@@ -198,7 +198,7 @@ def _normalize_action_items(value: Any) -> list[dict[str, str]]:
     ]
 
 
-def _normalize_proposed_candidates(value: Any) -> list[dict[str, str]]:
+def _normalize_proposed_candidates(value: Any) -> list[dict[str, Any]]:
     items = _mapping_list(value, field="protocol.proposedCandidates")
     return [
         {
@@ -217,6 +217,25 @@ def _normalize_proposed_candidates(value: Any) -> list[dict[str, str]]:
             "proposedBy": _required_text(
                 item.get("proposedBy"),
                 field="protocol.proposedCandidates[].proposedBy",
+            ),
+            **(
+                {
+                    "lineageRefs": _string_list(
+                        item.get("lineageRefs") or [],
+                        field="protocol.proposedCandidates[].lineageRefs",
+                    )
+                }
+                if "lineageRefs" in item
+                else {}
+            ),
+            **(
+                {
+                    "testablePrediction": str(
+                        item.get("testablePrediction") or ""
+                    ).strip()
+                }
+                if "testablePrediction" in item
+                else {}
             ),
         }
         for item in items

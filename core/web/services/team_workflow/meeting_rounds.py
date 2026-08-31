@@ -244,6 +244,19 @@ def create_meeting_round(team_id: str, payload: Mapping[str, Any] | None = None)
             "a meeting round must be created open and closed through close_meeting_round"
         )
     meeting_type = str(request.get("meetingType") or "hypothesis_review").strip().lower()
+    candidate_authority = str(request.get("candidateAuthority") or "").strip().lower()
+    if candidate_authority not in {
+        "",
+        "exploratory_draft",
+        "formal_grounded_candidate",
+    }:
+        raise ContractValidationError("candidateAuthority is invalid")
+    try:
+        revision_ordinal = int(request.get("revisionOrdinal") or 0)
+    except (TypeError, ValueError) as exc:
+        raise ContractValidationError("revisionOrdinal must be an integer") from exc
+    if revision_ordinal < 0:
+        raise ContractValidationError("revisionOrdinal must be non-negative")
     participant_role_ids = _normalized_str_list(request.get("participantRoleIds"))
     participant_role_snapshot = [
         dict(item) if isinstance(item, Mapping) else item
@@ -296,6 +309,23 @@ def create_meeting_round(team_id: str, payload: Mapping[str, Any] | None = None)
         "inputArtifactRefs": _normalized_str_list(request.get("inputArtifactRefs")),
         "linkedChatRoomId": str(request.get("linkedChatRoomId") or "").strip(),
         "chatRoomRoundIds": [],
+        **(
+            {
+                "candidateAuthority": candidate_authority,
+                "allowedEvidenceRefs": _normalized_str_list(
+                    request.get("allowedEvidenceRefs")
+                ),
+                "exploratoryDraftRefs": _normalized_str_list(
+                    request.get("exploratoryDraftRefs")
+                ),
+                "knowledgePackageRefs": _normalized_str_list(
+                    request.get("knowledgePackageRefs")
+                ),
+                "revisionOrdinal": revision_ordinal,
+            }
+            if candidate_authority
+            else {}
+        ),
         **(
             {
                 "modelInvocationReceiptAuthority": dict(
@@ -908,10 +938,32 @@ def extract_discussion_markers(messages: Sequence[Mapping[str, Any]]) -> dict[st
                     }
                 )
             elif marker == "CANDIDATE":
-                # CANDIDATE: <id> | <statement> | <rationale> — one proposed
-                # hypothesis per line from a candidate-generation discussion.
+                # Formal grounded rows extend the legacy three fields with
+                # ``REFS`` and ``CHECK``. Legacy rows remain compatible.
                 parts = [part.strip() for part in value.split("|")]
-                if len(parts) >= 3:
+                refs_index = next(
+                    (
+                        index
+                        for index, part in enumerate(parts)
+                        if part.upper().startswith("REFS:")
+                    ),
+                    -1,
+                )
+                check_index = next(
+                    (
+                        index
+                        for index, part in enumerate(parts)
+                        if part.upper().startswith("CHECK:")
+                    ),
+                    -1,
+                )
+                marker_indexes = [index for index in (refs_index, check_index) if index >= 0]
+                if marker_indexes and len(parts) >= 3:
+                    marker_start = min(marker_indexes)
+                    candidate_id = parts[0]
+                    statement = parts[1]
+                    rationale = "|".join(parts[2:marker_start]).strip()
+                elif len(parts) >= 3:
                     # The rationale is the last field; the statement may itself
                     # contain '|' characters, so keep everything in between.
                     candidate_id = parts[0]
@@ -922,14 +974,24 @@ def extract_discussion_markers(messages: Sequence[Mapping[str, Any]]) -> dict[st
                     rationale = ""
                 else:
                     candidate_id, statement, rationale = "", parts[0], ""
-                extracted["proposedCandidates"].append(
-                    {
-                        "candidateId": candidate_id,
-                        "statement": statement,
-                        "rationale": rationale,
-                        "proposedBy": speaker,
-                    }
-                )
+                proposal = {
+                    "candidateId": candidate_id,
+                    "statement": statement,
+                    "rationale": rationale,
+                    "proposedBy": speaker,
+                }
+                if refs_index >= 0:
+                    refs_text = parts[refs_index].partition(":")[2]
+                    proposal["lineageRefs"] = [
+                        item.strip()
+                        for item in re.split(r"[;,，；]", refs_text)
+                        if item.strip()
+                    ]
+                if check_index >= 0:
+                    proposal["testablePrediction"] = (
+                        parts[check_index].partition(":")[2].strip()
+                    )
+                extracted["proposedCandidates"].append(proposal)
             elif marker == "EVIDENCE_REQUEST":
                 try:
                     if len(value) > _EVIDENCE_REQUEST_MARKER_MAX_CHARS:

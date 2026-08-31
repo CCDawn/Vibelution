@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from collections.abc import Mapping
 from typing import Any
 
 
@@ -214,3 +216,76 @@ def build_hypothesis_input_context(
         "candidateContext": candidate_context,
         "writebackContract": writeback_contract,
     }
+
+
+def build_stage_one_grounded_generation_context(
+    team_id: str,
+    workflow_run_id: str,
+    *,
+    question_id: str,
+    store: Any | None = None,
+) -> dict[str, Any] | None:
+    """Build R1 input only for a run pinned to the current stage-one policy."""
+    resolved = store
+    if resolved is None:
+        from core.web.services.team_workflow.research_runtime.formal_write_runtime import (
+            get_write_store,
+        )
+
+        resolved = get_write_store()
+    run = resolved.get_run(_text(workflow_run_id))
+    if run is None:
+        return {
+            "status": "blocked",
+            "code": "workflow_run_not_found",
+            "allowedEvidenceRefs": [],
+        }
+    try:
+        snapshot = json.loads(str(run.input_snapshot_json or "{}"))
+    except (TypeError, json.JSONDecodeError):
+        return {
+            "status": "blocked",
+            "code": "workflow_snapshot_invalid",
+            "allowedEvidenceRefs": [],
+        }
+    raw_policy = snapshot.get("stageOneCompletionPolicy")
+    if raw_policy is None:
+        return None
+    if not isinstance(raw_policy, Mapping):
+        return {
+            "status": "blocked",
+            "code": "stage_one_policy_invalid",
+            "allowedEvidenceRefs": [],
+        }
+    from core.research.competition.stage_one_completion_policy import (
+        StageOneCompletionPolicyError,
+        require_current_stage_one_policy_snapshot,
+    )
+
+    try:
+        require_current_stage_one_policy_snapshot(raw_policy)
+    except StageOneCompletionPolicyError:
+        return {
+            "status": "blocked",
+            "code": "stage_one_policy_invalid",
+            "allowedEvidenceRefs": [],
+        }
+    normalized_team_id = _text(team_id)
+    normalized_question_id = _text(question_id).upper()
+    if (
+        _text(run.team_id) != normalized_team_id
+        or _text(run.question_id).upper() != normalized_question_id
+    ):
+        return {
+            "status": "blocked",
+            "code": "workflow_scope_mismatch",
+            "allowedEvidenceRefs": [],
+        }
+    return build_hypothesis_input_context(
+        normalized_team_id,
+        {
+            "workflowRunId": _text(workflow_run_id),
+            "sourceCollectionRunId": _text(snapshot.get("sourceCollectionRunId")),
+        },
+        store=resolved,
+    )

@@ -428,13 +428,13 @@ _DIGEST_SYSTEM_PROMPT = """你是科研团队的 Coordinator，负责把团队�
 - 只依据给出的会议发言，不得编造发言人或结论。
 - summary 用一两句中文概括会议结论。
 - agreements / risks / knowledgeCandidates 是字符串数组；disagreements 的每项是 {"issue","positions","unresolvedReason"}；actionItems 的每项是 {"ownerRoleId","action","dueGate"}。
-- 候选生成会议必须输出 proposedCandidates：每项 {"candidateId","statement","rationale","proposedBy"}，candidateId 沿用发言中出现的标识，没有标识就用 cand-1、cand-2 顺序编号。
+- 候选生成会议必须输出 proposedCandidates：每项 {"candidateId","statement","rationale","proposedBy","lineageRefs","testablePrediction"}，candidateId 沿用发言中出现的标识，没有标识就用 cand-1、cand-2 顺序编号；lineageRefs 与 testablePrediction 必须原样保留发言中的 REFS 与 CHECK，没有时分别给空数组和空字符串，不得编造。
 - 显式标记必须原文回显，关闭会议时会逐条机器校验，缺失或改写会被拒绝：源消息中每条 "DISAGREE:" 行的完整原文必须原样包含在对应 disagreements[].issue 文本里；每条 "RISK:" 行原文放进 risks；每条 "ACTION: <ownerRoleId> | <action>" 行解析为一条 actionItems，ownerRoleId 与 action 用原文。
 - 假说评审会议的 evidenceRequests：源消息中每条 "EVIDENCE_REQUEST:" 行都必须对应一项——该行 JSON 的 searchEnvelope（keywords/sourceTypes/evidenceLevels）与 requirements 必须原样照抄，keywords 不得为空、不得改写或省略；rationale 沿用该行的 rationale。发言中没有 "EVIDENCE_REQUEST:" 行时给空数组，不得自拟。
 - 严格输出单个 JSON 对象，不要输出 markdown 代码块或任何解释文字。
 
 输出 JSON 结构：
-{"summary": str, "agendaSummary": str, "discussionTopics": [str], "agreements": [str], "disagreements": [{"issue": str, "positions": [str], "unresolvedReason": str}], "actionItems": [{"ownerRoleId": str, "action": str, "dueGate": str}], "risks": [str], "knowledgeCandidates": [str], "proposedCandidates": [{"candidateId": str, "statement": str, "rationale": str, "proposedBy": str}], "evidenceRequests": [dict]}
+{"summary": str, "agendaSummary": str, "discussionTopics": [str], "agreements": [str], "disagreements": [{"issue": str, "positions": [str], "unresolvedReason": str}], "actionItems": [{"ownerRoleId": str, "action": str, "dueGate": str}], "risks": [str], "knowledgeCandidates": [str], "proposedCandidates": [{"candidateId": str, "statement": str, "rationale": str, "proposedBy": str, "lineageRefs": [str], "testablePrediction": str}], "evidenceRequests": [dict]}
 """ + f"""
 证据请求唯一词表：
 - sourceTypes 只允许：{_EVIDENCE_SOURCE_TYPES}。

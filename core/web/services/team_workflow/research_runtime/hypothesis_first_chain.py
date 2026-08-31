@@ -45,6 +45,9 @@ HARD_ROUND_LIMIT = 5
 COLLECTION_REQUEST_KIND = "collection_request"
 REVIEW_ROUND_LINK_KIND = "review_round_link"
 CANDIDATE_KIND = "hypothesis_candidate"
+EXPLORATORY_DRAFT_KIND = "hypothesis_exploratory_draft"
+EXPLORATORY_DRAFT_AUTHORITY = "exploratory_draft"
+FORMAL_GROUNDED_CANDIDATE_AUTHORITY = "formal_grounded_candidate"
 GENERATION_ATTEMPT_KIND = "generation_attempt"
 REVIEW_DISPATCH_ATTEMPT_KIND = "review_dispatch_attempt"
 HUMAN_ADJUDICATION_KIND = "human_adjudication"
@@ -2647,6 +2650,8 @@ def _execute_v2_command_impl(
         if command in {"open_generation", "retry_generation"}:
             receipt_authority = None
             discussion_scope = None
+            candidate_authority = ""
+            generation_context = None
             if normalized_workflow_run_id:
                 from core.research.workflow.contracts.discussion_scope import (
                     WorkflowDiscussionScopeV1,
@@ -2679,11 +2684,24 @@ def _execute_v2_command_impl(
                     workflowNodeId=HYPOTHESIS_DESIGN_NODE_ID,
                     questionId=normalized_question_id,
                 ).to_dict()
+                from core.web.services.team_workflow.research_project_hypothesis_context import (
+                    build_stage_one_grounded_generation_context,
+                )
+
+                generation_context = build_stage_one_grounded_generation_context(
+                    normalized_team_id,
+                    normalized_workflow_run_id,
+                    question_id=normalized_question_id,
+                )
+                if generation_context is not None:
+                    candidate_authority = FORMAL_GROUNDED_CANDIDATE_AUTHORITY
             result = open_candidate_generation_meeting(
                 normalized_team_id,
                 normalized_question_id,
                 _model_invocation_receipt_authority=receipt_authority,
                 _discussion_scope=discussion_scope,
+                _candidate_authority=candidate_authority,
+                _generation_context=generation_context,
             )
         elif command == "record_selection":
             from core.web.services.team_workflow import hypothesis_selection
@@ -4438,6 +4456,57 @@ def list_hypothesis_candidates(
     }
 
 
+def list_exploratory_drafts(
+    team_id: str,
+    *,
+    question_id: str = "",
+    workflow_run_id: str = "",
+) -> dict[str, Any]:
+    """List R0 drafts without exposing them as selectable candidates."""
+    from core.web.services import team_service
+
+    normalized_team_id = team_service.assert_team_exists(team_id)
+    normalized_question_id = str(question_id or "").strip().upper()
+    normalized_workflow_run_id = str(workflow_run_id or "").strip()
+    meeting_ids = (
+        {
+            str(meeting.get("meetingRoundId") or "").strip()
+            for meeting in _question_generation_meetings(
+                normalized_team_id,
+                normalized_question_id,
+                workflow_run_id=normalized_workflow_run_id,
+            )
+            if _meeting_candidate_authority(meeting) == EXPLORATORY_DRAFT_AUTHORITY
+        }
+        if normalized_workflow_run_id
+        else set()
+    )
+    drafts = [
+        record
+        for record in _records(normalized_team_id)
+        if str(record.get("recordKind") or "") == EXPLORATORY_DRAFT_KIND
+        and (
+            not normalized_question_id
+            or str(record.get("questionId") or "").upper() == normalized_question_id
+        )
+        and (
+            not normalized_workflow_run_id
+            or str(record.get("meetingRoundId") or "") in meeting_ids
+        )
+    ]
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": normalized_team_id,
+        "draftCount": len(drafts),
+        "drafts": drafts,
+        "storagePath": str(_storage_path(normalized_team_id)),
+    }
+
+
+def _meeting_candidate_authority(meeting_round: Mapping[str, Any]) -> str:
+    return str(meeting_round.get("candidateAuthority") or "").strip().lower()
+
+
 def _candidate_id_for(question_id: str, meeting_round_id: str, statement: str) -> str:
     digest = _stable_hash(
         {
@@ -4454,21 +4523,57 @@ def _append_generation_candidates(
     meeting_round: Mapping[str, Any],
     proposals: list[Mapping[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Register digest proposals as selectable candidates (idempotent)."""
+    """Register R0 drafts or R1 selectable candidates (idempotent)."""
     meeting_round_id = str(meeting_round.get("meetingRoundId") or "")
     question_id = str(meeting_round.get("question") or "").strip().upper()
+    candidate_authority = _meeting_candidate_authority(meeting_round)
+    record_kind = (
+        EXPLORATORY_DRAFT_KIND
+        if candidate_authority == EXPLORATORY_DRAFT_AUTHORITY
+        else CANDIDATE_KIND
+    )
+    allowed_evidence_refs = set(
+        _normalized_str_list(meeting_round.get("allowedEvidenceRefs"))
+    )
+    derived_from_drafts = _normalized_str_list(
+        meeting_round.get("exploratoryDraftRefs")
+    )
+    if candidate_authority == FORMAL_GROUNDED_CANDIDATE_AUTHORITY:
+        if not allowed_evidence_refs:
+            raise HypothesisFirstChainError(
+                "formal grounded generation requires an evidence whitelist"
+            )
+        if not derived_from_drafts:
+            raise HypothesisFirstChainError(
+                "formal grounded generation requires R0 exploratory drafts"
+            )
     appended: list[dict[str, Any]] = []
     with _LOCK:
         records = _read_jsonl(_storage_path(team_id))
         existing_by_id = {
             str(record.get("candidateId") or ""): record
             for record in records
-            if str(record.get("recordKind") or "") == CANDIDATE_KIND
+            if str(record.get("recordKind") or "") == record_kind
         }
         for proposal in proposals:
             statement = str(proposal.get("statement") or "").strip()
             if not statement:
                 continue
+            lineage_refs = _normalized_str_list(proposal.get("lineageRefs"))
+            testable_prediction = str(
+                proposal.get("testablePrediction") or ""
+            ).strip()
+            if candidate_authority == FORMAL_GROUNDED_CANDIDATE_AUTHORITY:
+                if not lineage_refs or any(
+                    ref not in allowed_evidence_refs for ref in lineage_refs
+                ):
+                    raise HypothesisFirstChainError(
+                        "formal grounded candidate refs must match the evidence whitelist"
+                    )
+                if not testable_prediction:
+                    raise HypothesisFirstChainError(
+                        "formal grounded candidate requires CHECK prediction"
+                    )
             candidate_id = _candidate_id_for(question_id, meeting_round_id, statement)
             existing = existing_by_id.get(candidate_id)
             if existing is not None:
@@ -4476,13 +4581,34 @@ def _append_generation_candidates(
                 continue
             record = {
                 "schemaVersion": SCHEMA_VERSION,
-                "recordKind": CANDIDATE_KIND,
+                "recordKind": record_kind,
                 "candidateId": candidate_id,
+                **(
+                    {"draftId": candidate_id}
+                    if record_kind == EXPLORATORY_DRAFT_KIND
+                    else {}
+                ),
                 "questionId": question_id,
                 "statement": statement,
                 "rationale": str(proposal.get("rationale") or "").strip(),
                 "proposedBy": str(proposal.get("proposedBy") or "").strip(),
                 "meetingRoundId": meeting_round_id,
+                **(
+                    {
+                        "candidateAuthority": candidate_authority,
+                        "lineageRefs": lineage_refs,
+                        "testablePrediction": testable_prediction,
+                        "revisionOrdinal": int(
+                            meeting_round.get("revisionOrdinal") or 0
+                        ),
+                        "derivedFromDraftRefs": derived_from_drafts,
+                        "knowledgePackageRefs": _normalized_str_list(
+                            meeting_round.get("knowledgePackageRefs")
+                        ),
+                    }
+                    if candidate_authority
+                    else {}
+                ),
                 "createdAt": _utc_now(),
             }
             _append_jsonl(_storage_path(team_id), record)
@@ -4504,6 +4630,8 @@ def open_candidate_generation_meeting(
     background: bool = True,
     _model_invocation_receipt_authority: Mapping[str, Any] | None = None,
     _discussion_scope: Mapping[str, Any] | None = None,
+    _candidate_authority: str = "",
+    _generation_context: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Open (or reuse) the round-0 candidate-generation discussion.
 
@@ -4519,6 +4647,25 @@ def open_candidate_generation_meeting(
     from core.web.services.team_workflow import meeting_rounds, meeting_runtime
 
     normalized_team_id = team_service.assert_team_exists(team_id)
+    candidate_authority = str(_candidate_authority or "").strip().lower()
+    if candidate_authority not in {
+        "",
+        EXPLORATORY_DRAFT_AUTHORITY,
+        FORMAL_GROUNDED_CANDIDATE_AUTHORITY,
+    }:
+        raise HypothesisFirstChainError("candidate generation authority is invalid")
+    generation_context = (
+        dict(_generation_context) if isinstance(_generation_context, Mapping) else {}
+    )
+    if candidate_authority == FORMAL_GROUNDED_CANDIDATE_AUTHORITY:
+        if str(generation_context.get("status") or "") != "ready":
+            raise HypothesisFirstChainError(
+                "formal grounded generation requires an accepted knowledge package"
+            )
+        if not _normalized_str_list(generation_context.get("allowedEvidenceRefs")):
+            raise HypothesisFirstChainError(
+                "formal grounded generation requires accepted evidence refs"
+            )
     scope = _question_scope_envelope(normalized_team_id, question_id)
     normalized_question_id = scope["question"]
     receipt_workflow_run_id = ""
@@ -4558,15 +4705,23 @@ def open_candidate_generation_meeting(
         agent_id=scope["agentId"],
         mode=scope["mode"],
     )
-    all_meetings = _question_generation_meetings(
-        normalized_team_id, normalized_question_id
-    )
-    run_meetings = (
-        _question_generation_meetings(
-            normalized_team_id,
-            normalized_question_id,
-            workflow_run_id=workflow_run_id,
+    all_meetings = [
+        meeting
+        for meeting in _question_generation_meetings(
+            normalized_team_id, normalized_question_id
         )
+        if _meeting_candidate_authority(meeting) == candidate_authority
+    ]
+    run_meetings = (
+        [
+            meeting
+            for meeting in _question_generation_meetings(
+                normalized_team_id,
+                normalized_question_id,
+                workflow_run_id=workflow_run_id,
+            )
+            if _meeting_candidate_authority(meeting) == candidate_authority
+        ]
         if workflow_run_id
         else all_meetings
     )
@@ -4615,15 +4770,23 @@ def open_candidate_generation_meeting(
                 lifecycle="failed",
                 error="discussion_has_no_completed_messages",
             )
-        all_meetings = _question_generation_meetings(
-            normalized_team_id, normalized_question_id
-        )
-        run_meetings = (
-            _question_generation_meetings(
-                normalized_team_id,
-                normalized_question_id,
-                workflow_run_id=workflow_run_id,
+        all_meetings = [
+            meeting
+            for meeting in _question_generation_meetings(
+                normalized_team_id, normalized_question_id
             )
+            if _meeting_candidate_authority(meeting) == candidate_authority
+        ]
+        run_meetings = (
+            [
+                meeting
+                for meeting in _question_generation_meetings(
+                    normalized_team_id,
+                    normalized_question_id,
+                    workflow_run_id=workflow_run_id,
+                )
+                if _meeting_candidate_authority(meeting) == candidate_authority
+            ]
             if workflow_run_id
             else all_meetings
         )
@@ -4664,6 +4827,18 @@ def open_candidate_generation_meeting(
         # a closed meeting whose proposals never landed; re-register them
         # (idempotent) instead of forcing a whole new generation discussion.
         _heal_generation_candidates(normalized_team_id, latest_closed_meeting)
+        if candidate_authority == EXPLORATORY_DRAFT_AUTHORITY:
+            return {
+                "schemaVersion": SCHEMA_VERSION,
+                "teamId": normalized_team_id,
+                "status": "reused",
+                "meetingRound": latest_closed_meeting,
+                "roomId": str(latest_closed_meeting.get("linkedChatRoomId") or ""),
+                "chatRoomRoundIds": _normalized_str_list(
+                    latest_closed_meeting.get("chatRoomRoundIds")
+                ),
+                "questionId": normalized_question_id,
+            }
         candidates = list_hypothesis_candidates(
             normalized_team_id,
             question_id=normalized_question_id,
@@ -4717,7 +4892,14 @@ def open_candidate_generation_meeting(
             ):
                 _discussion_scope = parsed_scope.to_dict()
                 break
-    base_id = f"hf-candgen-{scope_hash[:16]}"
+    authority_suffix = (
+        "-r0"
+        if candidate_authority == EXPLORATORY_DRAFT_AUTHORITY
+        else "-r1"
+        if candidate_authority == FORMAL_GROUNDED_CANDIDATE_AUTHORITY
+        else ""
+    )
+    base_id = f"hf-candgen-{scope_hash[:16]}{authority_suffix}"
     if open_meeting is not None:
         meeting_round_id = str(open_meeting.get("meetingRoundId") or "")
     else:
@@ -4773,7 +4955,49 @@ def open_candidate_generation_meeting(
         "questionId": normalized_question_id,
         "meetingRoundId": meeting_round_id,
         **participant_resolution,
+        "candidateAuthority": candidate_authority,
     }
+    if candidate_authority == FORMAL_GROUNDED_CANDIDATE_AUTHORITY:
+        drafts = list_exploratory_drafts(
+            normalized_team_id,
+            question_id=normalized_question_id,
+            workflow_run_id=workflow_run_id,
+        )["drafts"]
+        draft_refs = [
+            f"exploratory_draft:{str(item.get('draftId') or item.get('candidateId') or '').strip()}"
+            for item in drafts
+            if str(item.get("draftId") or item.get("candidateId") or "").strip()
+        ]
+        if not draft_refs:
+            raise HypothesisFirstChainError(
+                "formal grounded generation requires R0 exploratory drafts"
+            )
+        knowledge_package = (
+            dict(generation_context.get("knowledgePackage") or {})
+            if isinstance(generation_context.get("knowledgePackage"), Mapping)
+            else {}
+        )
+        knowledge_refs = _normalized_str_list(
+            knowledge_package.get("sourceArtifactIds")
+        )
+        payload.update(
+            {
+                "allowedEvidenceRefs": _normalized_str_list(
+                    generation_context.get("allowedEvidenceRefs")
+                ),
+                "exploratoryDraftRefs": draft_refs,
+                "knowledgePackageRefs": knowledge_refs,
+                "revisionOrdinal": 1,
+                "inputArtifactRefs": [*knowledge_refs, *draft_refs],
+                "generationContext": {
+                    "candidateAuthority": candidate_authority,
+                    "evidenceClaims": list(
+                        generation_context.get("evidenceClaims") or []
+                    )[:8],
+                    "exploratoryDrafts": drafts[:8],
+                },
+            }
+        )
     if isinstance(_discussion_scope, Mapping):
         payload["discussionScope"] = dict(_discussion_scope)
     try:
@@ -4823,11 +5047,15 @@ def needs_candidate_generation(
 
     normalized_workflow_run_id = str(workflow_run_id or "").strip()
     if normalized_workflow_run_id:
-        meetings = _question_generation_meetings(
-            team_id,
-            question_id,
-            workflow_run_id=normalized_workflow_run_id,
-        )
+        meetings = [
+            meeting
+            for meeting in _question_generation_meetings(
+                team_id,
+                question_id,
+                workflow_run_id=normalized_workflow_run_id,
+            )
+            if _meeting_candidate_authority(meeting) != EXPLORATORY_DRAFT_AUTHORITY
+        ]
         candidate_ids = hypothesis_selection._approved_candidate_ids(
             team_id,
             question_id,
@@ -4846,7 +5074,11 @@ def needs_candidate_generation(
     # chain-ledger candidates, so a non-empty set means selection can start.
     if hypothesis_selection._approved_candidate_ids(team_id, question_id):
         return False
-    return not _question_generation_meetings(team_id, question_id)
+    return not [
+        meeting
+        for meeting in _question_generation_meetings(team_id, question_id)
+        if _meeting_candidate_authority(meeting) != EXPLORATORY_DRAFT_AUTHORITY
+    ]
 
 
 def _generation_proposals_from_digest(digest: Any) -> list[dict[str, Any]]:
@@ -4937,12 +5169,18 @@ def _close_generation_meeting(
         normalized_team_id, normalized_round_id, request
     )
     closed_record = result["meetingRound"]
-    candidates = _append_generation_candidates(
+    generated_records = _append_generation_candidates(
         normalized_team_id, closed_record, proposals
     )
+    exploratory = (
+        _meeting_candidate_authority(closed_record) == EXPLORATORY_DRAFT_AUTHORITY
+    )
+    candidates = [] if exploratory else generated_records
+    drafts = generated_records if exploratory else []
     # Active-policy hook (autoSelectCandidates): gated, audited, quiet.  With
     # no active policy configured this is a no-op before any I/O.
-    _auto_advance_selection_tick(normalized_team_id, meeting_round, candidates)
+    if not exploratory:
+        _auto_advance_selection_tick(normalized_team_id, meeting_round, candidates)
     # Shadow decision point "meeting_close" (generation digest confirmation):
     # advisory record only; the return value and every executed branch below
     # are identical with or without a configured shadow policy.
@@ -4980,6 +5218,8 @@ def _close_generation_meeting(
         **result,
         "candidates": candidates,
         "candidateCount": len(candidates),
+        "drafts": drafts,
+        "draftCount": len(drafts),
     }
 
 

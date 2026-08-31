@@ -3560,6 +3560,93 @@ def test_v2_retry_generation_command_opens_generation(
     assert calls == [("team-1", "SCI-003")]
 
 
+def test_v2_stage_one_generation_opens_formal_grounded_revision(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.web.services import team_service
+    from core.web.services.team_workflow import research_project_hypothesis_context
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_first_chain,
+        hypothesis_first_state_v2,
+    )
+    from core.web.services.team_workflow.research_runtime import (
+        meeting_receipt_authority,
+    )
+
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
+    monkeypatch.setattr(hypothesis_first_chain, "PROJECT_ROOT", tmp_path)
+    snapshot = {
+        "stateVersion": "hf2-action:stage-one-generation",
+        "allowedActions": [
+            {
+                "kind": "command",
+                "actionId": "open-stage-one-generation",
+                "command": "open_generation",
+                "payload": {"questionId": "SCI-091"},
+                "enabled": True,
+                "idempotencyKey": "hf2:open-stage-one-generation",
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        hypothesis_first_state_v2,
+        "project_hypothesis_first_state_v2",
+        lambda *_args, **_kwargs: snapshot,
+    )
+    context = {
+        "status": "ready",
+        "allowedEvidenceRefs": ["evidence:accepted-1"],
+        "evidenceClaims": [
+            {"sourceRef": "evidence:accepted-1", "claim": "accepted claim"}
+        ],
+        "knowledgePackage": {"sourceArtifactIds": ["knowledge_package:pkg-1"]},
+    }
+    monkeypatch.setattr(
+        research_project_hypothesis_context,
+        "build_stage_one_grounded_generation_context",
+        lambda *_args, **_kwargs: context,
+    )
+    monkeypatch.setattr(
+        meeting_receipt_authority,
+        "resolve_active_question_authority",
+        lambda *_args, **_kwargs: {
+            "workflowRunId": "run-stage-one",
+            "sourceCollectionRunId": "source-stage-one",
+        },
+    )
+    monkeypatch.setattr(
+        hypothesis_first_chain,
+        "_question_research_project",
+        lambda *_args, **_kwargs: {"projectId": "project-stage-one"},
+    )
+    captured: dict[str, object] = {}
+
+    def open_generation(_team_id: str, _question_id: str, **kwargs):
+        captured.update(kwargs)
+        return {"status": "created", "generationAttemptId": "attempt-r1"}
+
+    monkeypatch.setattr(
+        hypothesis_first_chain, "open_candidate_generation_meeting", open_generation
+    )
+    result = hypothesis_first_chain.execute_v2_command(
+        "team-1",
+        {
+            "actionId": "open-stage-one-generation",
+            "idempotencyKey": "hf2:open-stage-one-generation",
+            "expectedStateVersion": "hf2-action:stage-one-generation",
+            "command": "open_generation",
+            "payload": {"questionId": "SCI-091"},
+        },
+        question_id="SCI-091",
+        workflow_run_id="run-stage-one",
+    )
+
+    assert result["result"]["status"] == "created"
+    assert captured["_candidate_authority"] == "formal_grounded_candidate"
+    assert captured["_generation_context"] == context
+
+
 def test_collection_failed_and_completed_states_expose_retry_and_handoff() -> None:
     running = HypothesisFirstStateV2.model_validate(
         project_state_from_records(
