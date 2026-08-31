@@ -373,6 +373,53 @@ def test_review_prompt_teaches_evidence_request_marker(tmp_path, monkeypatch):
     assert prompts
     assert all("EVIDENCE_REQUEST" in prompt for prompt in prompts)
     assert all('"searchEnvelope"' in prompt for prompt in prompts)
+    assert all("sourceTypes 只允许" in prompt for prompt in prompts)
+    assert all(
+        all(
+            value in prompt
+            for value in (
+                "paper",
+                "dataset",
+                "url",
+                "file",
+                "note",
+                "api",
+                "news",
+                "code",
+                "repo",
+                "report",
+                "manual",
+                "unknown",
+            )
+        )
+        for prompt in prompts
+    )
+    assert all("evidenceLevels 只允许" in prompt for prompt in prompts)
+    assert all(
+        all(
+            value in prompt
+            for value in (
+                "primary",
+                "secondary",
+                "tertiary",
+                "high",
+                "medium",
+                "low",
+                "peer_reviewed",
+                "preprint",
+            )
+        )
+        for prompt in prompts
+    )
+    assert all(
+        '预印本使用 sourceTypes=["paper"]、evidenceLevels=["preprint"]' in prompt
+        for prompt in prompts
+    )
+    assert all('代码仓库使用 sourceTypes=["repo"]' in prompt for prompt in prompts)
+    assert all(
+        "candidateRefs 只能填写本会议已绑定的候选 ID" in prompt
+        for prompt in prompts
+    )
     assert all("AGREE:" in prompt for prompt in prompts)
     assert all("DISAGREE:" in prompt for prompt in prompts)
 

@@ -4582,6 +4582,10 @@ def test_content_extraction_writeback_materializes_candidate_evidence_ledger(tmp
                         "claims": [
                             {
                                 "claim": "Predictive coding uses hierarchical prediction errors.",
+                                # Completed extraction writebacks on the formal
+                                # claim path require a verbatim quote anchor
+                                # copied from the stored candidate summary.
+                                "quote": "Predictive coding evidence",
                                 "sourceRef": "source-1",
                                 "supportLevel": "strong",
                             }
@@ -5547,6 +5551,9 @@ def test_record_extraction_writeback_materializes_evidence_ledger_on_imported_ca
                         "claims": [
                             {
                                 "claim": "Predictive coding raw record supports hierarchical control analogy.",
+                                # Verbatim quote anchor from the stored record
+                                # summary (formal claim path contract).
+                                "quote": "A raw DataRecord",
                                 "sourceRef": "record-source-1",
                                 "supportLevel": "medium",
                             }
@@ -5662,6 +5669,15 @@ def test_content_extraction_writeback_excludes_no_content_records_and_keeps_valu
                         "recordId": useful_record["recordId"],
                         "decision": "keep",
                         "valueSummary": "虽然没有 DOI，但提供了预测编码层级的可用解释和关键词线索。",
+                        # Verbatim quote anchor from the stored record summary
+                        # (formal claim path contract).
+                        "evidenceRefs": [
+                            {
+                                "id": "summary-quote-1",
+                                "type": "quote",
+                                "quote": "A useful explanation of predictive coding hierarchy",
+                            }
+                        ],
                         "defects": ["缺少 DOI"],
                         "followUpSuggestion": "后续补充更权威论文来源。",
                     },

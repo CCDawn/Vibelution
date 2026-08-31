@@ -41,6 +41,13 @@ from .conversation_continuity import (
     resolve_open_loop,
     upsert_open_loop,
 )
+from .delivery_runtime import CompanionDeliveryRuntime
+from .dialogue_context import (
+    bind_interaction_receipt_turn,
+    project_companion_dialogue_context,
+    project_companion_expression_for_turn,
+    record_interaction_receipt,
+)
 from .domain import (
     apply_completed_event_to_state,
     apply_relationship_interaction_to_state,
@@ -228,6 +235,10 @@ class VirtualHumanLifeService:
             plugin_root_resolver=plugin_root_resolver,
         )
         self.life_world = LifeWorldStore(self.store, now_provider=now_provider)
+        self.delivery_runtime = CompanionDeliveryRuntime(
+            self.store,
+            now_provider=now_provider,
+        )
         self.agent_loader = agent_loader
         self.agent_lister = agent_lister
         self.proactive_submitter = proactive_submitter
@@ -331,13 +342,30 @@ class VirtualHumanLifeService:
                     if str(item.get("sessionId") or "") == normalized_session_id
                 ]
                 generation = max(generations, default=0) + 1
-                mailbox, _cancelled = cancel_unsent_followups(
+                cancellable_followups = [
+                    deepcopy(item)
+                    for item in mailbox["entries"]
+                    if str(item.get("sessionId") or "") == normalized_session_id
+                    and str(item.get("sourceKind") or "") == "followup"
+                    and str(item.get("state") or "")
+                    in {"queued", "dispatching", "awaiting_native_admission"}
+                    and int(item.get("generation") or 0) < generation
+                ]
+                mailbox, cancelled_followup_ids = cancel_unsent_followups(
                     mailbox,
                     session_id=normalized_session_id,
                     before_generation=generation,
                     reason="user_interjected",
                     now=now,
                 )
+                for followup in cancellable_followups:
+                    if str(followup.get("entryId") or "") not in cancelled_followup_ids:
+                        continue
+                    self._cancel_followup_attempt_and_plan(
+                        normalized_agent_id,
+                        followup,
+                        reason="user_interjected",
+                    )
             else:
                 generation = int(entry.get("generation") or 0)
             mailbox, entry = enqueue_mailbox_entry(
@@ -543,7 +571,7 @@ class VirtualHumanLifeService:
             )
         if entry is None:
             return {"accepted": False, "queued": False, "reason": "empty_or_claimed"}
-        if str(entry.get("sourceKind") or "") == "proactive":
+        if str(entry.get("sourceKind") or "") in {"proactive", "followup"}:
             return self._dispatch_proactive_mailbox_entry(
                 normalized_agent_id,
                 session_id=normalized_session_id,
@@ -564,6 +592,14 @@ class VirtualHumanLifeService:
             )
             return {**released, "accepted": False, "queued": True}
         command = dict(entry.get("command") or {})
+        if str(entry.get("sourceKind") or "") == "user":
+            with self._lock_for(normalized_agent_id):
+                record_interaction_receipt(
+                    self.store,
+                    normalized_agent_id,
+                    entry=entry,
+                    now=self._now(),
+                )
         try:
             accepted = self.conversation_submitter(
                 session_id=normalized_session_id,
@@ -633,6 +669,15 @@ class VirtualHumanLifeService:
             )
             raise VirtualHumanLifeError("Native Session accepted without a turn id.")
         with self._lock_for(normalized_agent_id):
+            bind_interaction_receipt_turn(
+                self.store,
+                normalized_agent_id,
+                session_id=normalized_session_id,
+                entry_id=str(entry.get("entryId") or ""),
+                turn_id=turn_id,
+                now=self._now(),
+            )
+        with self._lock_for(normalized_agent_id):
             mailbox = normalize_mailbox(
                 self.store.read_json(normalized_agent_id, "conversation/mailbox.json")
             )
@@ -646,6 +691,12 @@ class VirtualHumanLifeService:
             self.store.write_json(
                 normalized_agent_id, "conversation/mailbox.json", mailbox
             )
+        delivery_plan = self._plan_and_enqueue_user_followup(
+            normalized_agent_id,
+            session_id=normalized_session_id,
+            source_entry=completed,
+            source_turn_id=turn_id,
+        )
         return {
             **dict(accepted or {}),
             "entryId": str(completed.get("entryId") or ""),
@@ -656,7 +707,56 @@ class VirtualHumanLifeService:
             "status": str((accepted or {}).get("status") or "running"),
             "clientSubmissionId": str(command.get("clientSubmissionId") or ""),
             "queueSequence": int(completed.get("arrivalSequence") or 0),
+            "deliveryPlan": delivery_plan,
         }
+
+    def _plan_and_enqueue_user_followup(
+        self,
+        agent_id: str,
+        *,
+        session_id: str,
+        source_entry: dict[str, Any],
+        source_turn_id: str,
+    ) -> dict[str, Any]:
+        """Create at most one Companion-only assistant Turn after a user Turn."""
+
+        if str(source_entry.get("sourceKind") or "") != "user":
+            return {}
+        with self._lock_for(agent_id):
+            binding = self._require_enabled_binding(agent_id)
+            state = self.store.read_json(agent_id, "state.json") or self._default_state(
+                agent_id,
+                binding,
+            )
+            causal = self._causal_projection(agent_id, now=self._local_now(binding))
+            expression = project_companion_expression_for_turn(
+                self.store,
+                agent_id,
+                state=state,
+                causal=causal,
+                session_id=session_id,
+                run_id=source_turn_id,
+            )["expressionDecision"]
+            plan = self.delivery_runtime.plan_user_response(
+                agent_id,
+                session_id=session_id,
+                generation=int(source_entry.get("generation") or 0),
+                source_entry_id=str(source_entry.get("entryId") or ""),
+                source_turn_id=source_turn_id,
+                expression_decision=expression,
+                binding_revision=int(binding.get("bindingRevision") or 0),
+                local_date=self._local_now(binding).date().isoformat(),
+            )
+        return plan
+
+    def _cancel_followup_attempt_and_plan(
+        self,
+        agent_id: str,
+        entry: dict[str, Any],
+        *,
+        reason: str,
+    ) -> None:
+        self.delivery_runtime.cancel_entry(agent_id, entry, reason=reason)
 
     def _recover_claimed_conversation_entry(
         self,
@@ -744,6 +844,12 @@ class VirtualHumanLifeService:
                 entry=entry,
                 reason="native_proactive_not_admitted",
             )
+            if str(entry.get("sourceKind") or "") == "followup":
+                self._cancel_followup_attempt_and_plan(
+                    agent_id,
+                    entry,
+                    reason="native_proactive_not_admitted",
+                )
             return {
                 **cancelled,
                 "accepted": False,
@@ -790,7 +896,7 @@ class VirtualHumanLifeService:
             self.store.write_json(agent_id, "conversation/mailbox.json", mailbox)
         return {
             "entryId": str(completed.get("entryId") or ""),
-            "sourceKind": "proactive",
+            "sourceKind": str(completed.get("sourceKind") or "proactive"),
             "accepted": True,
             "queued": False,
             "sessionId": session_id,
@@ -814,6 +920,8 @@ class VirtualHumanLifeService:
             if isinstance(command.get("proactiveAttempt"), dict)
             else {}
         )
+        if str(entry.get("sourceKind") or "") == "followup":
+            self.delivery_runtime.ensure_attempt_from_entry(agent_id, entry)
         delivery_token = str(payload.get("delivery_token") or "").strip()
         binding_revision = int(payload.get("binding_revision") or 0)
         if not delivery_token or not self.proactive_turn_is_current(
@@ -831,6 +939,12 @@ class VirtualHumanLifeService:
                 delivery_token,
                 reason="mailbox_dispatch_fence",
             )
+            if str(entry.get("sourceKind") or "") == "followup":
+                self._cancel_followup_attempt_and_plan(
+                    agent_id,
+                    entry,
+                    reason="mailbox_dispatch_fence",
+                )
             return {
                 **cancelled,
                 "accepted": False,
@@ -859,6 +973,12 @@ class VirtualHumanLifeService:
                 failedAt=_iso(self._now()),
                 failureType=type(exc).__name__,
             )
+            if str(entry.get("sourceKind") or "") == "followup":
+                self.delivery_runtime.transition_entry_plan(
+                    agent_id,
+                    entry,
+                    status="failed",
+                )
             return {
                 **cancelled,
                 "accepted": False,
@@ -885,6 +1005,12 @@ class VirtualHumanLifeService:
                 failedAt=_iso(self._now()),
                 failureType="session_not_accepted",
             )
+            if str(entry.get("sourceKind") or "") == "followup":
+                self.delivery_runtime.transition_entry_plan(
+                    agent_id,
+                    entry,
+                    status="failed",
+                )
             return {**cancelled, "accepted": False, "queued": False}
         turn_id = str((accepted or {}).get("turnId") or "").strip()
         if not turn_id:
@@ -900,12 +1026,41 @@ class VirtualHumanLifeService:
                 failedAt=_iso(self._now()),
                 failureType="native_session_missing_turn_id",
             )
+            if str(entry.get("sourceKind") or "") == "followup":
+                self.delivery_runtime.transition_entry_plan(
+                    agent_id,
+                    entry,
+                    status="failed",
+                )
             raise VirtualHumanLifeError("Native Session accepted without a turn id.")
         native_status = str((accepted or {}).get("status") or "running").strip().lower()
         with self._lock_for(agent_id):
             mailbox = normalize_mailbox(
                 self.store.read_json(agent_id, "conversation/mailbox.json")
             )
+            current = next(
+                (
+                    item
+                    for item in mailbox["entries"]
+                    if str(item.get("entryId") or "")
+                    == str(entry.get("entryId") or "")
+                ),
+                None,
+            )
+            if current is not None and str(current.get("state") or "") == "cancelled":
+                if str(entry.get("sourceKind") or "") == "followup":
+                    self._cancel_followup_attempt_and_plan(
+                        agent_id,
+                        entry,
+                        reason="user_interjected_before_native_admission",
+                    )
+                return {
+                    "entryId": str(entry.get("entryId") or ""),
+                    "sourceKind": str(entry.get("sourceKind") or "proactive"),
+                    "accepted": False,
+                    "queued": False,
+                    "reason": "cancelled_before_native_admission",
+                }
             if native_status == "queued":
                 mailbox, completed = await_mailbox_entry_native_admission(
                     mailbox,
@@ -930,10 +1085,16 @@ class VirtualHumanLifeService:
                 turnId=turn_id,
                 deliveryStartedAt=_iso(self._now()),
             )
+            if str(entry.get("sourceKind") or "") == "followup":
+                self.delivery_runtime.transition_entry_plan(
+                    agent_id,
+                    entry,
+                    status="delivering",
+                )
         return {
             **dict(accepted or {}),
             "entryId": str(completed.get("entryId") or ""),
-            "sourceKind": "proactive",
+            "sourceKind": str(completed.get("sourceKind") or "proactive"),
             "accepted": True,
             "queued": native_status == "queued",
             "sessionId": session_id,
@@ -1737,6 +1898,20 @@ class VirtualHumanLifeService:
         )
         trigger = self._attempt_for_turn(agent_id, run_id)
         rules = load_prompt_pack()
+        local_now = self._local_now(binding)
+        dialogue_context = project_companion_dialogue_context(
+            self.store,
+            agent_id,
+            binding=binding,
+            state=state,
+            causal=causal,
+            today_schedule=today_schedule,
+            tomorrow_schedule=tomorrow_schedule,
+            local_now=local_now,
+            session_id=session_id,
+            run_id=run_id,
+            proactive=bool(trigger),
+        )
         remaining = [
             {
                 "activityId": str(item.get("activityId") or ""),
@@ -1760,6 +1935,7 @@ class VirtualHumanLifeService:
             else {}
         )
         dynamic_payload = {
+            **dialogue_context,
             "mood": state.get("mood") or {},
             "energy": state.get("energy"),
             "currentActivityId": state.get("currentActivityId") or "",
@@ -1904,6 +2080,11 @@ class VirtualHumanLifeService:
                     "triggerId": trigger.get("triggerId"),
                     "reason": trigger.get("reason"),
                     "sourceEventId": trigger.get("sourceEventId"),
+                    "deliveryKind": trigger.get("deliveryKind"),
+                    "deliveryPlanId": trigger.get("deliveryPlanId"),
+                    "sourceTurnId": trigger.get("sourceTurnId"),
+                    "generation": trigger.get("generation"),
+                    "bubbleIndex": trigger.get("bubbleIndex"),
                 }
                 if trigger
                 else None
@@ -3827,6 +4008,8 @@ class VirtualHumanLifeService:
             rows = self.store.read_jsonl(agent_id, "proactive/deliveries.jsonl")
             delivered_tokens: list[str] = []
             expired_tokens: list[str] = []
+            delivered_followup_plans: list[tuple[str, dict[str, Any]]] = []
+            failed_followup_plan_ids: list[str] = []
             changed = False
             for index, row in enumerate(rows):
                 status = str(row.get("status") or "").strip()
@@ -3860,6 +4043,17 @@ class VirtualHumanLifeService:
                         "updatedAt": _iso(current),
                     }
                     delivered_tokens.append(delivery_token)
+                    if str(row.get("deliveryKind") or "") == "followup":
+                        delivered_followup_plans.append(
+                            (
+                                str(row.get("deliveryPlanId") or ""),
+                                {
+                                    "turnId": str(row.get("turnId") or ""),
+                                    "receiptEventId": receipt_event_id,
+                                    "deliveredAt": delivered_at or _iso(current),
+                                },
+                            )
+                        )
                     changed = True
                     continue
                 if status not in {"candidate", "reserved", "delivering"}:
@@ -3879,9 +4073,28 @@ class VirtualHumanLifeService:
                     "updatedAt": _iso(current),
                 }
                 expired_tokens.append(delivery_token)
+                if str(row.get("deliveryKind") or "") == "followup":
+                    failed_followup_plan_ids.append(
+                        str(row.get("deliveryPlanId") or "")
+                    )
                 changed = True
             if changed:
                 self.store.write_jsonl(agent_id, "proactive/deliveries.jsonl", rows)
+            for plan_id, plan_receipt in delivered_followup_plans:
+                if plan_id:
+                    self.delivery_runtime.transition_plan(
+                        agent_id,
+                        plan_id=plan_id,
+                        status="delivered",
+                        receipt=plan_receipt,
+                    )
+            for plan_id in failed_followup_plan_ids:
+                if plan_id:
+                    self.delivery_runtime.transition_plan(
+                        agent_id,
+                        plan_id=plan_id,
+                        status="failed",
+                    )
             self._sync_proactive_trigger_ledger(agent_id, rows)
             return {
                 "deliveredDeliveryTokens": delivered_tokens,
@@ -3915,6 +4128,7 @@ class VirtualHumanLifeService:
             str(item.get("deliveryToken") or "").strip()
             for item in self.store.read_jsonl(agent_id, "proactive/deliveries.jsonl")
             if str(item.get("status") or "").strip() == "delivered"
+            and str(item.get("deliveryKind") or "").strip() != "followup"
             and str(item.get("localDate") or "").strip() == str(local_date or "").strip()
             and str(item.get("deliveryToken") or "").strip()
         }
@@ -3985,6 +4199,17 @@ class VirtualHumanLifeService:
                 deliveredAt=_iso(self._now()),
                 receiptEventId=normalized_receipt_event_id,
             )
+            if str(delivered.get("deliveryKind") or "") == "followup":
+                self.delivery_runtime.transition_plan(
+                    agent_id,
+                    plan_id=str(delivered.get("deliveryPlanId") or ""),
+                    status="delivered",
+                    receipt={
+                        "turnId": str(turn_id or "").strip(),
+                        "receiptEventId": normalized_receipt_event_id,
+                        "deliveredAt": str(delivered.get("deliveredAt") or ""),
+                    },
+                )
             candidates = self.store.read_jsonl(
                 agent_id, "proactive/candidates.jsonl"
             )
@@ -4037,6 +4262,7 @@ class VirtualHumanLifeService:
         with self._lock_for(agent_id):
             rows = self.store.read_jsonl(agent_id, "proactive/deliveries.jsonl")
             changed_tokens: list[str] = []
+            followup_plan_ids: list[str] = []
             changed = False
             for row in rows:
                 if str(row.get("status") or "") not in {"candidate", "reserved", "delivering"}:
@@ -4047,10 +4273,19 @@ class VirtualHumanLifeService:
                 row["cancelledAt"] = _iso(self._now())
                 row["cancellationReason"] = str(reason or "binding_invalidated")[:160]
                 changed_tokens.append(str(row.get("deliveryToken") or ""))
+                if str(row.get("deliveryKind") or "") == "followup":
+                    followup_plan_ids.append(str(row.get("deliveryPlanId") or ""))
                 changed = True
             if changed:
                 self.store.write_jsonl(agent_id, "proactive/deliveries.jsonl", rows)
             self._sync_proactive_trigger_ledger(agent_id, rows)
+            for plan_id in followup_plan_ids:
+                if plan_id:
+                    self.delivery_runtime.transition_plan(
+                        agent_id,
+                        plan_id=plan_id,
+                        status="cancelled",
+                    )
             return changed_tokens
 
     def cancel_queued_conversation_mailbox_entries(
@@ -4100,13 +4335,22 @@ class VirtualHumanLifeService:
                 return None
             if str(attempt.get("status") or "") not in {"candidate", "reserved", "delivering"}:
                 return attempt
-            return self._update_attempt(
+            cancelled = self._update_attempt(
                 agent_id,
                 delivery_token,
                 status="cancelled",
                 cancelledAt=_iso(self._now()),
                 cancellationReason=str(reason or "binding_invalidated")[:160],
             )
+            if str(cancelled.get("deliveryKind") or "") == "followup":
+                plan_id = str(cancelled.get("deliveryPlanId") or "")
+                if plan_id:
+                    self.delivery_runtime.transition_plan(
+                        agent_id,
+                        plan_id=plan_id,
+                        status="cancelled",
+                    )
+            return cancelled
 
     def prepare_agent_archive(
         self,
@@ -6004,6 +6248,7 @@ class VirtualHumanLifeService:
                 item
                 for item in reversed(self.store.read_jsonl(agent_id, "proactive/deliveries.jsonl"))
                 if str(item.get("status") or "") == "delivered"
+                and str(item.get("deliveryKind") or "") != "followup"
             ),
             None,
         )

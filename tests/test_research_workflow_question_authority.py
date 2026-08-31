@@ -1025,6 +1025,52 @@ def test_canonical_question_project_collision_fails_loudly(
         )
 
 
+def test_get_research_project_for_question_resolves_question_binding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Project ownership resolves by the question binding, not the switcher.
+
+    Production incident shape: the active-project pointer stayed on an older
+    question's project while the formal run belonged to SCI-003; collection
+    and meeting scopes must therefore read the question binding directly.
+    """
+    monkeypatch.setattr(research_projects.team_service, "assert_team_exists", lambda _team_id: None)
+    monkeypatch.setattr(
+        research_projects,
+        "_load_store",
+        lambda _team_id: {
+            "projects": [
+                {"projectId": "legacy-default", "challengeQuestionId": ""},
+                {
+                    "projectId": "challenge-sci-002",
+                    "challengeQuestionId": "SCI-002",
+                },
+                {
+                    "projectId": "challenge-sci-003",
+                    "challengeQuestionId": "sci-003",
+                },
+            ],
+            # The switcher points at the older question's project.
+            "activeProjectId": "challenge-sci-002",
+        },
+    )
+
+    bound = research_projects.get_research_project_for_question("research-team", "sci-003")
+    assert bound is not None
+    assert bound["projectId"] == "challenge-sci-003"
+
+    # Lookup is case-insensitive on the question id.
+    assert research_projects.get_research_project_for_question(
+        "research-team", "SCI-003"
+    )["projectId"] == "challenge-sci-003"
+
+    # Unbound, unknown, and blank questions resolve to no project at all
+    # instead of falling back to the (wrong) active project.
+    assert research_projects.get_research_project_for_question("research-team", "SCI-404") is None
+    assert research_projects.get_research_project_for_question("research-team", "   ") is None
+    assert research_projects.get_research_project_for_question("research-team", "") is None
+
+
 def test_create_endpoint_forbids_client_authored_contract_fields(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

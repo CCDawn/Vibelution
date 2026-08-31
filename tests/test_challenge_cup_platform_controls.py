@@ -38,6 +38,7 @@ from core.research.workflow.contracts.model_invocation_receipt import (
     ModelInvocationStatus,
 )
 from core.infrastructure.no_console_git import no_console_subprocess_kwargs
+from core.web import route_bootstrap
 from core.web.routes.team_workflows import challenge_cup_dev_controls as dev_controls_routes
 from core.web.services import team_service
 from core.web.services.team_workflow import challenge_cup_dev_controls as dev_controls_service
@@ -50,8 +51,23 @@ DEV_CONTROLS_BASE = (
 TEST_SOURCE_COMMIT = "a" * 40
 
 
+@pytest.fixture(autouse=True)
+def _isolated_frontend_dist(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep API contracts reproducible without an ignored local web build."""
+
+    web_dist = tmp_path / "web-dist"
+    web_dist.mkdir()
+    (web_dist / "index.html").write_text("<!doctype html>", encoding="utf-8")
+    monkeypatch.setattr(route_bootstrap, "_web_dist", lambda: web_dist)
+
+
 def _client() -> TestClient:
-    return TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
+    app = create_app()
+    app.state.serving_frontend_dist = ""
+    return TestClient(app, headers={CONTROL_TOKEN_HEADER: get_control_token()})
 
 
 def _ready_report(**overrides) -> dict:

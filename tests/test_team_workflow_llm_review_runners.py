@@ -239,6 +239,40 @@ def test_digest_prompt_carries_marker_and_envelope_contract():
     assert 'EVIDENCE_REQUEST:' in prompt
     assert "keywords 不得为空" in prompt
     assert "原样照抄" in prompt
+    assert "sourceTypes 只允许" in prompt
+    assert all(
+        value in prompt
+        for value in (
+            "paper",
+            "dataset",
+            "url",
+            "file",
+            "note",
+            "api",
+            "news",
+            "code",
+            "repo",
+            "report",
+            "manual",
+            "unknown",
+        )
+    )
+    assert "evidenceLevels 只允许" in prompt
+    assert all(
+        value in prompt
+        for value in (
+            "primary",
+            "secondary",
+            "tertiary",
+            "high",
+            "medium",
+            "low",
+            "peer_reviewed",
+            "preprint",
+        )
+    )
+    assert '预印本使用 sourceTypes=["paper"]、evidenceLevels=["preprint"]' in prompt
+    assert "candidateRefs 只能填写本会议已绑定的候选 ID" in prompt
     assert '"DISAGREE:"' in prompt
     assert "原文" in prompt
 

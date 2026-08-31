@@ -496,7 +496,8 @@ def cancel_unsent_followups(
         if (
             str(entry.get("sessionId") or "") != normalized_session_id
             or str(entry.get("sourceKind") or "") != "followup"
-            or str(entry.get("state") or "") != "queued"
+            or str(entry.get("state") or "")
+            not in {"queued", "dispatching", "awaiting_native_admission"}
             or int(entry.get("generation") or 0) >= normalized_generation
         ):
             continue
@@ -505,6 +506,9 @@ def cancel_unsent_followups(
                 "state": "cancelled",
                 "command": {},
                 "cancelReason": normalized_reason,
+                "leaseToken": "",
+                "leaseOwner": "",
+                "leaseExpiresAt": "",
                 "cancelledAt": _iso(now),
                 "updatedAt": _iso(now),
             }

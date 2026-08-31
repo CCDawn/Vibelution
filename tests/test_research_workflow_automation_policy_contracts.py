@@ -693,3 +693,112 @@ def test_service_hash_mismatch_uses_typed_code(tmp_path: Path) -> None:
         service.load_auto_advance_policy_v2(path)
 
     assert excinfo.value.code == "content_hash_mismatch"
+
+
+# ---------------------------------------------------------------------------
+# activation stage (executor-facing; active documents with full credential)
+# ---------------------------------------------------------------------------
+
+
+def _approved_active_payload() -> dict:
+    """An active candidate document carrying the full activation credential."""
+
+    payload = _tampered(
+        _auto_advance_v2_payload(),
+        lambda p: (
+            p.__setitem__("status", "approved"),
+            p.__setitem__("executionMode", "active"),
+            p["approval"].__setitem__("approvedBy", ["competition-owner-1"]),
+            p["approval"].__setitem__("frozenAt", "2026-08-31T00:00:00Z"),
+        ),
+    )
+    return payload
+
+
+def test_activation_stage_accepts_approved_active_document() -> None:
+    payload = _with_hash(_approved_active_payload())
+
+    policy = AutoAdvancePolicyV2.from_dict(payload, stage="activation")
+
+    assert policy.executionMode == "active"
+    assert policy.status == "approved"
+    assert policy.declaredContentHash == payload["approval"]["contentHash"]
+
+
+def test_activation_stage_accepts_shadow_documents() -> None:
+    payload = _with_hash(_auto_advance_v2_payload())
+
+    policy = AutoAdvancePolicyV2.from_dict(payload, stage="activation")
+
+    assert policy.executionMode == "shadow"
+
+
+def test_activation_stage_rejects_active_without_approved_status() -> None:
+    payload = _with_hash(
+        _tampered(
+            _approved_active_payload(),
+            lambda p: p.__setitem__("status", "candidate_pending_approval"),
+        )
+    )
+
+    with pytest.raises(AutomationPolicyValidationError) as excinfo:
+        AutoAdvancePolicyV2.from_dict(payload, stage="activation")
+
+    assert "active_requires_approved_status" in _error_codes(excinfo.value)
+
+
+def test_activation_stage_rejects_active_without_recorded_approvers() -> None:
+    for approvers in ([], None):
+        payload = _with_hash(
+            _tampered(
+                _approved_active_payload(),
+                lambda p, a=approvers: p["approval"].__setitem__("approvedBy", a),
+            )
+        )
+
+        with pytest.raises(AutomationPolicyValidationError) as excinfo:
+            AutoAdvancePolicyV2.from_dict(payload, stage="activation")
+
+        assert "active_requires_approval_record" in _error_codes(excinfo.value)
+
+
+def test_preview_stage_still_rejects_active_documents() -> None:
+    payload = _with_hash(_approved_active_payload())
+
+    with pytest.raises(AutomationPolicyValidationError) as excinfo:
+        AutoAdvancePolicyV2.from_dict(payload, stage="preview")
+
+    assert "active_mode_forbidden_in_preview" in _error_codes(excinfo.value)
+
+
+def test_service_activation_loader_roundtrips_active_document(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "active-policy.json"
+    path.write_text(
+        json.dumps(_with_hash(_approved_active_payload()), ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    policy, payload = service.load_auto_advance_policy_v2_document(
+        path, stage="activation"
+    )
+
+    assert policy.executionMode == "active"
+    assert payload["approval"]["approvedBy"] == ["competition-owner-1"]
+    assert policy == service.load_auto_advance_policy_v2(path, stage="activation")
+
+
+def test_service_preview_loader_still_rejects_active_document(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "active-policy.json"
+    path.write_text(
+        json.dumps(_with_hash(_approved_active_payload()), ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(service.AutomationPolicyServiceError) as excinfo:
+        service.load_auto_advance_policy_v2(path)
+
+    assert excinfo.value.code == "active_mode_forbidden_in_preview"

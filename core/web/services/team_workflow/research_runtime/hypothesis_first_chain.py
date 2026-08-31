@@ -188,6 +188,70 @@ def _record_policy_shadow_decisions(
         )
 
 
+# ---------------------------------------------------------------------------
+# automation policy active execution hooks (gated, audited, quiet)
+#
+# The executor only ever presses the chain's own idempotent buttons after its
+# full safety ladder (kill switch, activation credential, calibration gate,
+# drain mode, capability switch) passes; with no active policy configured
+# every hook below is a no-op before any I/O, so these calls stay
+# behavior-identical to the pre-executor chain.
+
+
+def _auto_advance_selection_tick(
+    team_id: str,
+    meeting_round: Mapping[str, Any],
+    candidates: list[dict[str, Any]],
+) -> None:
+    """Try autoSelectCandidates right after generation candidates register."""
+
+    from core.web.services.team_workflow.research_runtime import (
+        automation_policy_executor,
+    )
+
+    question_id = str(meeting_round.get("question") or "").strip()
+    candidate_ids = [
+        str(item.get("hypothesisId") or item.get("candidateId") or "").strip()
+        for item in candidates
+        if isinstance(item, Mapping)
+    ]
+    automation_policy_executor.attempt_capability_quietly(
+        decision_point="candidate_selection",
+        team_id=team_id,
+        question_id=question_id,
+        candidate_ids=candidate_ids,
+        selection_scope=_question_scope_envelope(team_id, question_id),
+    )
+
+
+def _auto_advance_converge_tick(team_id: str, question_id: str) -> None:
+    """Try autoConvergeQuestion after a review closure settles."""
+
+    from core.web.services.team_workflow.research_runtime import (
+        automation_policy_executor,
+    )
+
+    automation_policy_executor.attempt_capability_quietly(
+        decision_point="converge_question",
+        team_id=team_id,
+        question_id=str(question_id or "").strip(),
+    )
+
+
+def _auto_advance_meeting_close_tick(team_id: str, meeting_round_id: str) -> None:
+    """Try autoCloseMeetingRound after a summary draft lands (awaiting_approval)."""
+
+    from core.web.services.team_workflow.research_runtime import (
+        automation_policy_executor,
+    )
+
+    automation_policy_executor.attempt_capability_quietly(
+        decision_point="meeting_close",
+        team_id=team_id,
+        meeting_round_id=str(meeting_round_id or "").strip(),
+    )
+
+
 class HypothesisFirstChainError(RuntimeError):
     """Base error for hypothesis-first chain orchestration."""
 
@@ -1698,8 +1762,14 @@ def record_human_adjudication(
     rationale: str,
     idempotency_key: str,
     workflow_run_id: str = "",
+    decided_by: str = "",
 ) -> dict[str, Any]:
-    """Append the missing human authority for an exhausted convergence gate."""
+    """Append the missing human authority for an exhausted convergence gate.
+
+    ``decided_by`` defaults to the operator agent id; the automation-policy
+    executor passes its system actor (``system:auto-advance:<policyId>``)
+    so an auto-recorded adjudication stays attributable in the ledger.
+    """
 
     from core.web.services.team_workflow import hypothesis_rounds
 
@@ -1708,6 +1778,7 @@ def record_human_adjudication(
     normalized_decision = str(decision or "").strip().lower()
     normalized_rationale = str(rationale or "").strip()
     normalized_workflow_run_id = str(workflow_run_id or "").strip()
+    normalized_decided_by = str(decided_by or "").strip() or _OPERATOR_AGENT_ID
     if normalized_decision not in {"accepted", "rejected"}:
         raise ContractValidationError(
             "human_adjudication decision must be accepted or rejected"
@@ -1815,7 +1886,7 @@ def record_human_adjudication(
             "meetingRoundIds": round_meeting_ids,
             "decision": normalized_decision,
             "rationale": normalized_rationale,
-            "decidedBy": _OPERATOR_AGENT_ID,
+            "decidedBy": normalized_decided_by,
             "createdAt": now,
             "updatedAt": now,
         }
@@ -2540,9 +2611,6 @@ def _execute_v2_command_impl(
                 from core.research.workflow.contracts.discussion_scope import (
                     WorkflowDiscussionScopeV1,
                 )
-                from core.web.services.team_workflow.research_project_agent_sessions import (
-                    resolve_research_project_identity,
-                )
                 from core.web.services.team_workflow.research_runtime.meeting_receipt_authority import (
                     resolve_active_question_authority,
                 )
@@ -2556,8 +2624,10 @@ def _execute_v2_command_impl(
                     raise HypothesisFirstChainError(
                         "workflow run authority is unavailable for generation"
                     )
-                project = resolve_research_project_identity(normalized_team_id)
-                research_project_id = str(project.get("projectId") or "").strip()
+                project = _question_research_project(
+                    normalized_team_id, normalized_question_id
+                )
+                research_project_id = str((project or {}).get("projectId") or "").strip()
                 if not research_project_id:
                     raise HypothesisFirstChainError(
                         "research project authority is unavailable for generation"
@@ -3963,12 +4033,8 @@ def _review_discussion_scope_base(
     )
 
     if receipt_authority is not None:
-        from core.web.services.team_workflow.research_project_agent_sessions import (
-            resolve_research_project_identity,
-        )
-
-        project = resolve_research_project_identity(team_id)
-        research_project_id = str(project.get("projectId") or "").strip()
+        project = _question_research_project(team_id, question_id)
+        research_project_id = str((project or {}).get("projectId") or "").strip()
         workflow_run_id = str(receipt_authority.get("workflowRunId") or "").strip()
         if not research_project_id or not workflow_run_id:
             raise HypothesisFirstChainError(
@@ -4834,6 +4900,9 @@ def _close_generation_meeting(
     candidates = _append_generation_candidates(
         normalized_team_id, closed_record, proposals
     )
+    # Active-policy hook (autoSelectCandidates): gated, audited, quiet.  With
+    # no active policy configured this is a no-op before any I/O.
+    _auto_advance_selection_tick(normalized_team_id, meeting_round, candidates)
     # Shadow decision point "meeting_close" (generation digest confirmation):
     # advisory record only; the return value and every executed branch below
     # are identical with or without a configured shadow policy.
@@ -5047,6 +5116,80 @@ def _decision_id_for(meeting_round: Mapping[str, Any], raw: Mapping[str, Any]) -
     return f"decision-{meeting_rounds._stable_hash({'meetingRoundId': meeting_round['meetingRoundId'], 'scopeHash': meeting_round['scopeHash'], 'decision': str(raw.get('decision') or '').strip().lower(), 'candidateRefs': candidate_refs, 'evidenceRefs': evidence_refs})[:16]}"
 
 
+def _question_research_project(team_id: str, question_id: str) -> dict[str, Any] | None:
+    """Resolve the research project that owns one question, never the switcher.
+
+    ``resolve_research_project_identity`` answers with the team's active
+    project, which misbinds a question's identity as soon as the operator
+    activates another question (production: SCI-003 meetings and their
+    collection runs carried challenge-sci-002).  The question binding in the
+    research-project store is authoritative; the read is best-effort, so any
+    store/unreadable-team failure falls back to the exact legacy
+    ``resolve_research_project_identity`` behavior (including its exceptions).
+    """
+    from core.web.services import team_service
+    from core.web.services.team_workflow import research_projects
+    from core.web.services.team_workflow.research_project_agent_sessions import (
+        resolve_research_project_identity,
+    )
+
+    try:
+        bound = research_projects.get_research_project_for_question(team_id, question_id)
+    except (research_projects.ResearchProjectError, team_service.TeamServiceError):
+        bound = None
+    if bound is not None:
+        return bound
+    return resolve_research_project_identity(team_id)
+
+
+def _question_workflow_run_binding(
+    team_id: str,
+    meeting_round: Mapping[str, Any],
+) -> tuple[str, str]:
+    """Return ``(workflowRunId, researchProjectId)`` for chain collection runs.
+
+    The workflow run comes from the meeting's server-owned discussion-scope
+    binding (the question's current formal run); the project is resolved from
+    the question ownership, never from the meeting's own project field, which
+    may still carry an older question's lineage.  The project id is only
+    resolved when a workflow run is known: ``start_source_collection_run``
+    honors a non-active project exclusively on workflow-run-scoped payloads.
+    """
+    workflow_run_id = str(meeting_round.get("workflowRunId") or "").strip()
+    if not workflow_run_id:
+        return "", ""
+    question_project = _question_research_project(
+        team_id, str(meeting_round.get("question") or "")
+    )
+    research_project_id = str((question_project or {}).get("projectId") or "").strip()
+    return workflow_run_id, research_project_id
+
+
+def _recovery_workflow_run_binding(
+    team_id: str,
+    request: Mapping[str, Any],
+) -> tuple[str, str]:
+    """Best-effort ``(workflowRunId, researchProjectId)`` for request recovery.
+
+    Recovery requests only carry ``meetingRoundId``; the formal run binding
+    lives on that meeting round.  A missing or legacy unscoped meeting keeps
+    both fields empty so recovery proceeds with the legacy unscoped payload
+    instead of failing the repair.
+    """
+    from core.web.services.team_workflow import meeting_rounds
+
+    meeting_round_id = str(request.get("meetingRoundId") or "").strip()
+    if not meeting_round_id:
+        return "", ""
+    try:
+        meeting_round = meeting_rounds.get_meeting_round(team_id, meeting_round_id)[
+            "meetingRound"
+        ]
+    except meeting_rounds.ResearchMeetingRoundNotFoundError:
+        return "", ""
+    return _question_workflow_run_binding(team_id, meeting_round)
+
+
 def _scope_envelope_for_meeting(meeting_round: Mapping[str, Any]) -> dict[str, str]:
     """Rebuild the facade scope envelope from the meeting's validated scope."""
     from core.web.services.team_workflow import research_scope as scope_service
@@ -5182,6 +5325,13 @@ def _process_collection_decisions(
     )
 
     background_payload = _hypothesis_collection_background_payload()
+    # Workflow-run-scoped binding for the created collection run: the formal
+    # run id enables extraction-claim materialization and formal node
+    # discovery by scope, and the question-owned project replaces the team's
+    # active-project pointer (which may still sit on an older question).
+    workflow_run_id, research_project_id = _question_workflow_run_binding(
+        team_id, meeting_round
+    )
 
     persisted_ids = {
         str(item.get("decisionId") or "")
@@ -5253,6 +5403,8 @@ def _process_collection_decisions(
             requirements=requirements,
             writebackPolicy=writeback_policy,
             hypothesisCandidateIds=hypothesis_candidate_ids,
+            workflowRunId=workflow_run_id,
+            researchProjectId=research_project_id,
             team_id=team_id,
         )
         locator = ensured.get("locator") if isinstance(ensured.get("locator"), Mapping) else {}
@@ -6009,12 +6161,17 @@ def _recover_collection_request_locked(
     search_envelope = request.get("searchEnvelope") if isinstance(request.get("searchEnvelope"), Mapping) else {}
     requirements = request.get("requirements") if isinstance(request.get("requirements"), Mapping) else {}
     writeback_policy = request.get("writebackPolicy") if isinstance(request.get("writebackPolicy"), Mapping) else {}
+    workflow_run_id, research_project_id = _recovery_workflow_run_binding(
+        normalized_team_id, request
+    )
     ensured = facade.research_knowledge_collection_facade(
         action="ensure",
         scope=scope,
         searchEnvelope=search_envelope,
         requirements=requirements,
         writebackPolicy=writeback_policy,
+        workflowRunId=workflow_run_id,
+        researchProjectId=research_project_id,
         team_id=normalized_team_id,
     )
     locator = ensured.get("locator") if isinstance(ensured.get("locator"), Mapping) else {}
@@ -6990,6 +7147,13 @@ def close_review_meeting(
             ),
         ],
     )
+    # Active-policy hook (autoConvergeQuestion): gated, audited, quiet.  The
+    # executor re-checks the authoritative chain gates (closed round, meta
+    # review accepted, no pending handoffs) and always passes through the
+    # claim-belief hard gate before recording any adjudication.
+    _auto_advance_converge_tick(
+        normalized_team_id, str(closed_record.get("question") or "")
+    )
     return {
         **result,
         "collection": collection,
@@ -7051,6 +7215,7 @@ def record_collection_handoff(
         agent_runner=agent_runner,
         background=background,
         budget=budget,
+        fan_out_selection=True,
     )
     resume = None
     if runtime is not None:

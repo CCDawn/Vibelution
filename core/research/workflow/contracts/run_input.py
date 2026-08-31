@@ -8,6 +8,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from core.research.competition.result_set import CatalogScope, ResultSetContractError
+from core.research.competition.stage_one_completion_policy import (
+    StageOneCompletionPolicy,
+    StageOneCompletionPolicyError,
+)
 
 from ._validation import (
     ContractValidationError,
@@ -138,6 +142,7 @@ class WorkflowRunInputSnapshot:
     catalogScope: dict[str, Any]
     hypothesisSelection: dict[str, Any]
     hypothesisConvergenceHandoff: dict[str, Any]
+    stageOneCompletionPolicy: dict[str, Any]
     snapshotHash: str
 
     @classmethod
@@ -205,6 +210,28 @@ class WorkflowRunInputSnapshot:
                 payload,
                 "hypothesisConvergenceHandoff",
             )
+        if "stageOneCompletionPolicy" in payload:
+            raw_stage_one_policy = require_mapping(
+                payload,
+                "stageOneCompletionPolicy",
+            )
+            try:
+                stage_one_policy = StageOneCompletionPolicy.from_dict(
+                    raw_stage_one_policy
+                )
+            except StageOneCompletionPolicyError as exc:
+                raise ContractValidationError(
+                    f"stageOneCompletionPolicy is malformed: {exc}"
+                ) from exc
+            if stage_one_policy.workflowDefinitionId != canonical["workflowVersionId"]:
+                raise ContractValidationError(
+                    "stageOneCompletionPolicy.workflowDefinitionId must match workflowVersionId"
+                )
+            if canonical["questionId"] not in stage_one_policy.questionIds:
+                raise ContractValidationError(
+                    "stageOneCompletionPolicy.questionIds must contain questionId"
+                )
+            canonical["stageOneCompletionPolicy"] = stage_one_policy.to_dict()
         raw_scope_mode = payload.get("workflowSessionScopeV3")
         if raw_scope_mode is None:
             canonical["workflowSessionScopeV3"] = {"hypothesis_design": "off"}
@@ -267,6 +294,9 @@ class WorkflowRunInputSnapshot:
             hypothesisConvergenceHandoff=copy.deepcopy(
                 canonical.get("hypothesisConvergenceHandoff") or {}
             ),
+            stageOneCompletionPolicy=copy.deepcopy(
+                canonical.get("stageOneCompletionPolicy") or {}
+            ),
             snapshotHash=snapshot_hash,
         )
 
@@ -312,5 +342,9 @@ class WorkflowRunInputSnapshot:
         if self.evidenceRemediationContract:
             payload["evidenceRemediationContract"] = copy.deepcopy(
                 self.evidenceRemediationContract
+            )
+        if self.stageOneCompletionPolicy:
+            payload["stageOneCompletionPolicy"] = copy.deepcopy(
+                self.stageOneCompletionPolicy
             )
         return payload

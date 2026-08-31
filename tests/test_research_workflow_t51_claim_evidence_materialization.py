@@ -492,7 +492,15 @@ def test_extraction_prompt_requires_verbatim_quote_for_claim_evidence() -> None:
 
     prompt = "\n".join(stage_writeback_prompt_lines("extraction"))
     assert "quote" in prompt
-    assert "不得为通过门禁" in prompt
+    # The enforced writeback contract: verbatim quotes must be copied from
+    # the stored summary, the evidence-state key is evidenceStatus (the
+    # verification_status alias belongs to Challenge v2 card metadata only),
+    # and empty-summary sources honestly declare missing_evidence_anchor.
+    assert "逐字子串" in prompt
+    assert "禁止改写" in prompt
+    assert "evidenceStatus" in prompt
+    assert "verified_abstract" in prompt
+    assert "missing_evidence_anchor" in prompt
     for field in (
         "title",
         "source_type",

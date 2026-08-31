@@ -1653,6 +1653,157 @@ def test_collection_decisions_carry_hypothesis_candidate_refs_to_request_and_run
     assert legacy_result["requests"][0]["hypothesisCandidateIds"] == []
 
 
+def test_collection_decisions_pin_workflow_run_and_question_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Chain collection runs are scoped to the formal run and question project.
+
+    The workflow run comes from the meeting's server-owned scope binding and
+    the project is resolved from the question ownership — never from the
+    meeting's own ``researchProjectId`` lineage field, which may still point
+    at an older question's project (production: SCI-003 run bound to
+    challenge-sci-002).
+    """
+    from core.web.services.team_workflow import research_projects
+
+    decisions = [_collection_decision("hyp-a", "message-a")]
+    meeting, close_result = _process_collection_decisions_fixture(
+        tmp_path, monkeypatch, decisions=decisions
+    )
+    meeting["workflowRunId"] = "run-16cfab646d08"
+    # The meeting lineage still carries the OLD question's project; the chain
+    # must ignore it and resolve by questionId instead.
+    meeting["researchProjectId"] = "challenge-sci-002"
+    resolved: list[tuple[str, str]] = []
+
+    def fake_question_project(_team_id: str, question_id: str):
+        resolved.append((_team_id, question_id))
+        return {"projectId": "challenge-sci-003", "challengeQuestionId": question_id}
+
+    monkeypatch.setattr(
+        research_projects,
+        "get_research_project_for_question",
+        fake_question_project,
+    )
+    facade_calls: list[dict[str, object]] = []
+
+    def fake_facade(**kwargs):
+        facade_calls.append(dict(kwargs))
+        return {"locator": {"runId": "dprun-hf-start"}}
+
+    monkeypatch.setattr(facade, "research_knowledge_collection_facade", fake_facade)
+    monkeypatch.setattr(
+        collection_runs,
+        "start_source_collection_search_background",
+        lambda team_id, run_id, payload=None: {"runId": run_id, "status": "running"},
+    )
+
+    result = chain._process_collection_decisions(
+        "team-hf-start",
+        meeting,
+        close_result,
+        {"decisions": decisions},
+    )
+
+    assert result["requests"][0]["collectionRunId"] == "dprun-hf-start"
+    assert resolved == [("team-hf-start", _QUESTION_ID)]
+    assert facade_calls[0]["workflowRunId"] == "run-16cfab646d08"
+    assert facade_calls[0]["researchProjectId"] == "challenge-sci-003"
+
+
+def test_collection_decisions_without_workflow_run_keep_legacy_binding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Dev/legacy meetings (no formal run) keep the unscoped collection payload."""
+    from core.web.services.team_workflow import research_projects
+
+    decisions = [_collection_decision("hyp-a", "message-a")]
+    meeting, close_result = _process_collection_decisions_fixture(
+        tmp_path, monkeypatch, decisions=decisions
+    )
+    assert "workflowRunId" not in meeting
+
+    def fail_question_project(*_args, **_kwargs):
+        raise AssertionError("question binding must not be read without a formal run")
+
+    monkeypatch.setattr(
+        research_projects,
+        "get_research_project_for_question",
+        fail_question_project,
+    )
+    facade_calls: list[dict[str, object]] = []
+
+    def fake_facade(**kwargs):
+        facade_calls.append(dict(kwargs))
+        return {"locator": {"runId": "dprun-hf-start"}}
+
+    monkeypatch.setattr(facade, "research_knowledge_collection_facade", fake_facade)
+    monkeypatch.setattr(
+        collection_runs,
+        "start_source_collection_search_background",
+        lambda team_id, run_id, payload=None: {"runId": run_id, "status": "running"},
+    )
+
+    result = chain._process_collection_decisions(
+        "team-hf-start",
+        meeting,
+        close_result,
+        {"decisions": decisions},
+    )
+
+    assert result["requests"][0]["collectionRunId"] == "dprun-hf-start"
+    assert facade_calls[0]["workflowRunId"] == ""
+    assert facade_calls[0]["researchProjectId"] == ""
+
+
+def test_recovery_binding_resolves_meeting_run_and_question_project(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Request recovery re-derives the run scope from the linked meeting."""
+    from core.web.services.team_workflow import research_projects
+
+    monkeypatch.setattr(
+        meetings,
+        "get_meeting_round",
+        lambda _team_id, meeting_round_id: {
+            "meetingRound": {
+                "meetingRoundId": meeting_round_id,
+                "question": _QUESTION_ID,
+                "workflowRunId": "run-16cfab646d08",
+            }
+        },
+    )
+    monkeypatch.setattr(
+        research_projects,
+        "get_research_project_for_question",
+        lambda _team_id, _question_id: {"projectId": "challenge-sci-003"},
+    )
+
+    binding = chain._recovery_workflow_run_binding(
+        "team-hf-start",
+        {"meetingRoundId": "meeting-hf-start", "questionId": _QUESTION_ID},
+    )
+    assert binding == ("run-16cfab646d08", "challenge-sci-003")
+
+
+def test_recovery_binding_survives_missing_meeting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing legacy meeting keeps recovery on the unscoped legacy payload."""
+    from core.web.services.team_workflow import meeting_rounds as meetings_module
+
+    def missing_meeting(_team_id: str, _meeting_round_id: str) -> dict:
+        raise meetings_module.ResearchMeetingRoundNotFoundError("Meeting round not found.")
+
+    monkeypatch.setattr(meetings, "get_meeting_round", missing_meeting)
+
+    assert chain._recovery_workflow_run_binding(
+        "team-hf-start", {"meetingRoundId": "meeting-gone"}
+    ) == ("", "")
+    # No meeting id at all short-circuits without any lookup.
+    assert chain._recovery_workflow_run_binding("team-hf-start", {}) == ("", "")
+
+
 def test_collection_decision_marks_request_failed_when_background_start_rejects(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2076,12 +2227,14 @@ def test_auto_retried_collection_completes_through_normal_handoff(
         agent_runner=None,
         background=True,
         budget=None,
+        fan_out_selection=False,
     ):
         meetings_opened.append(
             {
                 "teamId": opened_team_id,
                 "previousMeetingRoundId": previous_meeting_round_id,
                 "collectionRequestId": collection_request_id,
+                "fanOutSelection": fan_out_selection,
             }
         )
         return {"meetingRoundId": "meeting-next"}
@@ -2107,6 +2260,7 @@ def test_auto_retried_collection_completes_through_normal_handoff(
             "teamId": team_id,
             "previousMeetingRoundId": "meeting-auto-retry",
             "collectionRequestId": request_id,
+            "fanOutSelection": True,
         }
     ]
 
@@ -2129,8 +2283,14 @@ def test_completed_collection_handoff_path_unchanged_without_failures(
         agent_runner=None,
         background=True,
         budget=None,
+        fan_out_selection=False,
     ):
-        meetings_opened.append({"collectionRequestId": collection_request_id})
+        meetings_opened.append(
+            {
+                "collectionRequestId": collection_request_id,
+                "fanOutSelection": fan_out_selection,
+            }
+        )
         return {"meetingRoundId": "meeting-next"}
 
     monkeypatch.setattr(chain, "open_next_review_meeting", fake_open_next_meeting)
@@ -2146,7 +2306,9 @@ def test_completed_collection_handoff_path_unchanged_without_failures(
     assert request["collectionRunStatus"] == "completed"
     assert request["handoffError"] == {}
     assert "autoRetry" not in request
-    assert meetings_opened == [{"collectionRequestId": request_id}]
+    assert meetings_opened == [
+        {"collectionRequestId": request_id, "fanOutSelection": True}
+    ]
 
 
 def test_auto_retry_dispatch_failure_consumes_budget_and_escalates(
@@ -3389,6 +3551,13 @@ def test_interruption_recovery_preserves_rounds_and_idempotency(
                 agent_runner=_marker_runner,
             )
             second_round_meetings = _opened_review_meetings(handoff["nextMeeting"])
+            assert len(second_round_meetings) == 2
+            assert {
+                ref.split(":", 1)[1]
+                for item in second_round_meetings
+                for ref in list(item.get("discussionItemRefs") or [])
+                if str(ref).startswith("hypothesis_candidate:")
+            } == {"hyp-a", "hyp-b"}
             second_meeting_id = second_round_meetings[0]["meetingRoundId"]
 
             # Repeating the handoff is a no-op: no new meeting, no new link.

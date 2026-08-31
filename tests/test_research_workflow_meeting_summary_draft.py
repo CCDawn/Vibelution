@@ -382,7 +382,7 @@ def test_prepare_generation_repairs_stale_empty_candidate_draft(
     )
 
 
-def test_approve_review_digest_starts_one_collection(
+def test_approve_review_digest_rejects_mixed_source_type_contract(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     team_id, agents = _hf_env(tmp_path, monkeypatch)
@@ -425,14 +425,11 @@ def test_approve_review_digest_starts_one_collection(
             team_id, meeting_id, actor=agent_ids[0], force=False
         )
         assert drafted["status"] == "awaiting_approval"
-        assert drafted["digestDraft"]["evidenceRequests"]
-        assert drafted["digestDraft"]["evidenceRequests"][0]["searchEnvelope"][
-            "sourceTypes"
-        ] == ["paper"]
+        assert drafted["digestDraft"]["evidenceRequests"] == []
         assert drafted["digestDraft"]["validationErrors"] == [
             {
-                "code": "search_source_types_dropped",
-                "message": "已忽略不支持的 sourceTypes：reference",
+                "code": "search_sourceTypes_invalid",
+                "message": "Unsupported sourceTypes value: reference",
             }
         ]
         approved = chain.approve_meeting_digest(
@@ -442,9 +439,12 @@ def test_approve_review_digest_starts_one_collection(
             expected_digest_content_hash=drafted["digestDraft"]["contentHash"],
             runtime=runtime,
         )
-        assert approved["meetingRound"]["status"] == "closed"
-        assert len(approved["collection"]["requests"]) == 1
-        assert len(collection_calls) == 1
+        assert approved["closed"] is False
+        assert approved["status"] == "awaiting_approval"
+        assert approved["validationErrors"] == drafted["digestDraft"][
+            "validationErrors"
+        ]
+        assert collection_calls == []
 
 
 def test_approve_review_digest_without_keywords_stays_open(
@@ -500,8 +500,8 @@ def test_approve_review_digest_without_keywords_stays_open(
         assert collection_calls == []
 
 
-def test_mixed_source_types_keep_valid_values_and_report_dropped_tokens() -> None:
-    normalized, warnings = meeting_runtime.validate_evidence_request_draft(
+def test_mixed_source_types_fail_as_one_invalid_contract() -> None:
+    normalized, errors = meeting_runtime.validate_evidence_request_draft(
         {
             "rationale": "需要补充同行评审论文。",
             "candidateRefs": ["hyp-a"],
@@ -521,12 +521,11 @@ def test_mixed_source_types_keep_valid_values_and_report_dropped_tokens() -> Non
         },
     )
 
-    assert normalized is not None
-    assert normalized["searchEnvelope"]["sourceTypes"] == ["paper"]
-    assert warnings == [
+    assert normalized is None
+    assert errors == [
         {
-            "code": "search_source_types_dropped",
-            "message": "已忽略不支持的 sourceTypes：reference",
+            "code": "search_sourceTypes_invalid",
+            "message": "Unsupported sourceTypes value: reference",
         }
     ]
 
@@ -550,8 +549,8 @@ def test_all_unsupported_source_types_keep_evidence_request_blocked() -> None:
     assert normalized is None
     assert errors == [
         {
-            "code": "search_source_types_invalid",
-            "message": "sourceTypes 未包含支持的来源类型：reference",
+            "code": "search_sourceTypes_invalid",
+            "message": "Unsupported sourceTypes value: reference",
         }
     ]
 
