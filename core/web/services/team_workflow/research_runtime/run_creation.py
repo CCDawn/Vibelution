@@ -8,6 +8,10 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
 
+from core.research.competition.stage_one_completion_policy import (
+    StageOneCompletionPolicyError,
+    require_current_stage_one_policy_snapshot,
+)
 from core.research.workflow.bindings import (
     AgentBindingLayers,
     build_run_binding_snapshots,
@@ -36,6 +40,57 @@ from .team_role_source import effective_binding_layers
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _require_stage_one_authorization_binding(
+    run_input: Mapping[str, Any],
+    catalog_run_authorization: Mapping[str, Any] | None,
+) -> None:
+    raw_policy = run_input.get("stageOneCompletionPolicy")
+    if raw_policy is None:
+        return
+    if not isinstance(raw_policy, Mapping):
+        raise ResearchWorkflowError(
+            "stage-one completion policy is invalid",
+            code="invalid_run_input",
+        )
+    try:
+        expected_policy = require_current_stage_one_policy_snapshot(raw_policy)
+    except StageOneCompletionPolicyError as exc:
+        raise ResearchWorkflowError(
+            "stage-one completion policy is invalid",
+            code="invalid_run_input",
+        ) from exc
+    if not isinstance(catalog_run_authorization, Mapping):
+        raise ResearchWorkflowError(
+            "stage-one completion policy authorization is required",
+            code="catalog_run_authorization_required",
+        )
+    batch_scope = catalog_run_authorization.get("batchScope")
+    authorized_policy = (
+        batch_scope.get("stageOneCompletionPolicy")
+        if isinstance(batch_scope, Mapping)
+        else None
+    )
+    if not isinstance(authorized_policy, Mapping):
+        raise ResearchWorkflowError(
+            "stage-one completion policy authorization is required",
+            code="catalog_run_authorization_required",
+        )
+    try:
+        normalized_authorized_policy = require_current_stage_one_policy_snapshot(
+            authorized_policy
+        )
+    except StageOneCompletionPolicyError as exc:
+        raise ResearchWorkflowError(
+            "stage-one completion policy authorization does not match the run input",
+            code="catalog_run_authorization_invalid",
+        ) from exc
+    if normalized_authorized_policy != expected_policy:
+        raise ResearchWorkflowError(
+            "stage-one completion policy authorization does not match the run input",
+            code="catalog_run_authorization_invalid",
+        )
 
 
 def _auto_open_candidate_generation(
@@ -529,6 +584,9 @@ def _load_catalog_run_authorization(
     require_model_policy = isinstance(payload.get("batchScope"), Mapping) and (
         "modelPolicy" in payload.get("batchScope", {})
     )
+    require_stage_one_policy = isinstance(payload.get("batchScope"), Mapping) and (
+        "stageOneCompletionPolicy" in payload.get("batchScope", {})
+    )
     if record is None or not validate_catalog_run_authorization(
         record,
         team_id=team_id,
@@ -537,6 +595,7 @@ def _load_catalog_run_authorization(
         readiness_sha256=str(payload.get("readinessReportSha256") or ""),
         question_id=question_id,
         require_model_policy=require_model_policy,
+        require_stage_one_policy=require_stage_one_policy,
     ):
         raise ResearchWorkflowError(
             "catalog run authorization is missing or invalid",
@@ -572,6 +631,10 @@ def create_run(
 
     definition, identity = creation_workflow_definition()
     workflow_version_id = identity.workflowVersionId
+    _require_stage_one_authorization_binding(
+        run_input,
+        catalog_run_authorization,
+    )
     fingerprints = _create_request_fingerprints(run_input)
     fingerprint = fingerprints[0]
     run_id = run_id_for_create(workflow_id, idempotency_key)
