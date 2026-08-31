@@ -133,7 +133,12 @@ AgentRunner = Callable[[dict[str, Any], str, dict[str, Any]], dict[str, Any]]
 _CHAT_ROOM_ROUND_CONTROLS_LOCK = threading.Lock()
 _CHAT_ROOM_ROUND_CONTROLS: dict[str, dict[str, str]] = {}
 _CHALLENGE_ROOM_DEADLINE_CONFIG_KEY = "challengeDeadlineAtMs"
+_CHALLENGE_ROOM_PER_CALL_DEADLINE_CONTEXT_KEY = "challengePerCallDeadlineAtMs"
 _CHALLENGE_ROOM_DEADLINE_STOP_REASON = "challenge_logical_task_deadline_exhausted"
+# Per-call budget exhaustion only fences the current speaker call.  It must
+# never become a round terminalReason or a meeting terminalReason: the
+# meeting-level clock below stays the only meeting termination authority.
+_CHALLENGE_ROOM_PER_CALL_STOP_REASON = "challenge_per_call_budget_exhausted"
 _CHALLENGE_ROOM_RUN_STOP_REASON_PREFIX = "challenge_workflow_run_"
 _CHALLENGE_ROOM_RUN_POLL_INTERVAL_SECONDS = 0.5
 _CHALLENGE_ROOM_HEARTBEAT_INTERVAL_SECONDS = 30.0
@@ -1838,7 +1843,10 @@ def _execute_chat_room_round(
                 effective_call_deadline_at_ms,
             )
 
-            context["challengeDeadlineAtMs"] = effective_call_deadline_at_ms(
+            # The meeting-level clock stays in ``challengeDeadlineAtMs``; the
+            # per-call fence lives in its own key so an exhausted speaker call
+            # can never be mistaken for an exhausted meeting.
+            context[_CHALLENGE_ROOM_PER_CALL_DEADLINE_CONTEXT_KEY] = effective_call_deadline_at_ms(
                 call_started_at_ms=int(time.time() * 1000),
                 per_call_budget_ms=per_call_budget_ms,
                 meeting_deadline_at_ms=_positive_int(
@@ -1866,7 +1874,11 @@ def _execute_chat_room_round(
         context["promptBuildMs"] = prompt_build_ms
         message = _run_one_speaker(participant, prompt, context, runner)
         speaker_run_ms = _elapsed_ms(speaker_started_at)
-        stop_reason = _request_challenge_room_execution_stop(
+        # Tiered fence: only a meeting-level (or workflow-run) expiry returns a
+        # reason that has registered a round stop.  A per-call expiry aborts
+        # just this speaker call, so a late result is discarded and the round
+        # advances to the next speaker.
+        stop_reason = _challenge_room_speaker_abort_reason(
             round_id,
             context,
             force_run_read=True,
@@ -2221,7 +2233,7 @@ def _start_challenge_speaker_heartbeat(
 
     def heartbeat() -> None:
         while not stop.wait(_CHALLENGE_ROOM_HEARTBEAT_INTERVAL_SECONDS):
-            if _request_challenge_room_execution_stop(round_id, context):
+            if _challenge_room_speaker_abort_reason(round_id, context):
                 return
             heartbeat_at = utc_now_iso()
             with _CHAT_ROOM_LOCK:
@@ -2337,7 +2349,7 @@ def _run_one_speaker(
         normalized_round_id = str(context.get("roundId") or "").strip()
         stop_reason = _chat_room_round_stop_reason(normalized_round_id)
         if not stop_reason:
-            stop_reason = _request_challenge_room_execution_stop(
+            stop_reason = _challenge_room_speaker_abort_reason(
                 normalized_round_id,
                 context,
             )
@@ -4737,7 +4749,15 @@ def _resolve_challenge_room_deadline_at_ms(
 ) -> int | None:
     """Carry one persisted logical-meeting clock into all of its room rounds."""
 
-    if not _is_challenge_discussion_room(room):
+    supplied_deadline_at_ms = _positive_int(
+        supplied_config.get(_CHALLENGE_ROOM_DEADLINE_CONFIG_KEY)
+    )
+    # An explicitly supplied deadline is server-derived by the meeting
+    # runtime from the persisted MeetingRound policy.  It must survive even
+    # when the round runs on the team base room, which is not itself a
+    # scoped Challenge room; otherwise formal meetings would lose both of
+    # their fences.  Ordinary rooms never carry the key and stay unaffected.
+    if not _is_challenge_discussion_room(room) and supplied_deadline_at_ms is None:
         return None
     from core.web.services.team_workflow.research_runtime.challenge_turn_policy import (
         current_challenge_task_deadline_at_ms,
@@ -4748,7 +4768,7 @@ def _resolve_challenge_room_deadline_at_ms(
     candidates = [
         value
         for value in (
-            _positive_int(supplied_config.get(_CHALLENGE_ROOM_DEADLINE_CONFIG_KEY)),
+            supplied_deadline_at_ms,
             _positive_int(current_challenge_task_deadline_at_ms()),
         )
         if value is not None
@@ -4765,6 +4785,44 @@ def _challenge_room_deadline_stop_reason(context: Mapping[str, Any]) -> str:
         if int(time.time() * 1000) >= deadline_at_ms
         else ""
     )
+
+
+def _challenge_room_per_call_stop_reason(context: Mapping[str, Any]) -> str:
+    """Expiry of the current speaker call budget only, never the meeting."""
+
+    deadline_at_ms = _positive_int(
+        context.get(_CHALLENGE_ROOM_PER_CALL_DEADLINE_CONTEXT_KEY)
+    )
+    if deadline_at_ms is None:
+        return ""
+    return (
+        _CHALLENGE_ROOM_PER_CALL_STOP_REASON
+        if int(time.time() * 1000) >= deadline_at_ms
+        else ""
+    )
+
+
+def _challenge_room_speaker_abort_reason(
+    round_id: str,
+    context: Mapping[str, Any],
+    *,
+    force_run_read: bool = False,
+) -> str:
+    """Return the reason to abort the current speaker call, if any.
+
+    Meeting-level and workflow-run fences may register a round stop (and thus
+    terminate the whole meeting); the per-call fence only aborts the in-flight
+    speaker call so the round can advance to the next speaker.
+    """
+
+    reason = _request_challenge_room_execution_stop(
+        round_id,
+        context,
+        force_run_read=force_run_read,
+    )
+    if reason:
+        return reason
+    return _challenge_room_per_call_stop_reason(context)
 
 
 def _challenge_room_workflow_run_stop_reason(
@@ -4830,10 +4888,11 @@ def _chat_room_interrupt_checker(
         reason = _chat_room_round_stop_reason(round_id)
         if reason:
             return reason
-        return _request_challenge_room_execution_stop(round_id, context)
+        return _challenge_room_speaker_abort_reason(round_id, context)
 
     interrupt_checker._vibelution_chat_provider_abort_enabled = bool(  # type: ignore[attr-defined]
         _positive_int(context.get("challengeDeadlineAtMs"))
+        or _positive_int(context.get(_CHALLENGE_ROOM_PER_CALL_DEADLINE_CONTEXT_KEY))
         or isinstance(context.get("_modelInvocationReceiptAuthority"), Mapping)
     )
     return interrupt_checker

@@ -972,6 +972,157 @@ def test_old_workflow_run_can_open_new_review_meeting_with_fresh_server_deadline
     )["meetingRound"]["challengeDeadlineAtMs"] == deadline_at_ms
 
 
+def test_review_meeting_round_config_carries_derived_per_call_budget(
+    tmp_path, monkeypatch
+):
+    """The persisted meeting policy budget — not the 450s default — must reach
+    the review meeting room round config (SCI production fence regression)."""
+
+    from core.web.services.team_workflow import challenge_deadline_policy
+
+    team_id, agents = _team_with_room(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        challenge_deadline_policy,
+        "derive_per_call_budget",
+        lambda *_args, **_kwargs: {
+            "perCallBudgetMs": 563_500,
+            "latencyP95Ms": 450_800,
+            "sampleCount": 40,
+            "sampleSource": "provider_model_purpose_p95",
+            "overrideEnv": "",
+        },
+    )
+    # Keep the meeting open past the opening round; this test inspects the
+    # round config, not the digest lifecycle.
+    monkeypatch.setattr(
+        meeting_runtime, "maybe_auto_draft_meeting", lambda *_args, **_kwargs: {}
+    )
+    monkeypatch.setattr(
+        meeting_receipt_authority, "workflow_run_stop_reason", lambda _authority: ""
+    )
+    opened = meeting_runtime.open_hypothesis_review_meeting(
+        team_id,
+        _selection_payload(
+            list(agents.values()),
+            meetingRoundId="meeting-review-derived-budget",
+        ),
+        agent_runner=_marker_runner,
+        background=False,
+        _model_invocation_receipt_authority=_receipt_authority(
+            team_id, run_id="run-derived-budget"
+        ),
+    )
+
+    meeting_round = opened["meetingRound"]
+    assert meeting_round["perCallBudgetMs"] == 563_500
+    assert meeting_round["deadlinePolicyVersion"] == (
+        challenge_deadline_policy.DEADLINE_POLICY_VERSION
+    )
+    round_config = chat_room_service.get_chat_room_detail(opened["roomId"])[
+        "rounds"
+    ][-1]["config"]
+    assert round_config["perCallBudgetMs"] == 563_500
+    assert round_config["perCallBudgetMs"] != (
+        challenge_deadline_policy.DEFAULT_PER_CALL_BUDGET_MS
+    )
+    assert round_config["challengeDeadlineAtMs"] == meeting_round["challengeDeadlineAtMs"]
+    assert round_config["meetingDeadlineAtMs"] == meeting_round["meetingDeadlineAtMs"]
+
+
+def test_legacy_meeting_recovers_persisted_per_call_policy_from_bound_round(monkeypatch):
+    """A legacy meeting without its own policy fields recovers them from the
+    bound room round config so follow-up rounds keep the per-call fence."""
+
+    meeting = {
+        "meetingRoundId": "meeting-legacy-percall",
+        "status": "open",
+        "linkedChatRoomId": "room-legacy-percall",
+        "chatRoomRoundIds": ["round-opening"],
+        "rounds": 3,
+        "question": "SCI-096",
+        "meetingType": "hypothesis_review",
+        "modelInvocationReceiptAuthority": {
+            "schemaVersion": 1,
+            "authorityKind": "workflow_run",
+            "teamId": "team-legacy",
+            "questionId": "SCI-096",
+            "workflowRunId": "run-legacy",
+            "workflowId": "challenge-cup-research",
+            "workflowVersionId": "wv-legacy",
+            "modelPolicySha256": "a" * 64,
+        },
+    }
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
+    monkeypatch.setattr(
+        meetings, "get_meeting_round", lambda *_args: {"meetingRound": dict(meeting)}
+    )
+    monkeypatch.setattr(meeting_runtime, "_frozen_participant_agent_ids", lambda *_args: ["agent-1"])
+    monkeypatch.setattr(meeting_runtime, "_selection_from_meeting", lambda *_args: {})
+    monkeypatch.setattr(
+        meeting_runtime,
+        "_bound_room_challenge_deadline_at_ms",
+        lambda *_args: 5_000_000,
+    )
+    monkeypatch.setattr(
+        meeting_runtime,
+        "_bound_room_deadline_policy_field",
+        lambda _room_id, _round_ids, field: {
+            "perCallBudgetMs": 563_500,
+            "meetingDeadlineAtMs": 5_000_000,
+        }.get(field),
+    )
+    monkeypatch.setattr(meeting_runtime.time, "time", lambda: 1000.0)
+    stop_reasons = [""]
+    monkeypatch.setattr(
+        meeting_runtime,
+        "workflow_run_stop_reason",
+        lambda _authority: stop_reasons.pop(0)
+        if stop_reasons
+        else "challenge_workflow_run_cancelled",
+    )
+    monkeypatch.setattr(
+        meetings,
+        "meeting_source_messages",
+        lambda *_args: [{"status": "completed", "content": "DISAGREE: 证据不足"}],
+    )
+    monkeypatch.setattr(
+        meeting_runtime,
+        "_latest_bound_round_messages",
+        lambda *_args: [{"status": "completed", "content": "DISAGREE: 证据不足"}],
+    )
+    monkeypatch.setattr(meetings, "is_pass_message", lambda _message: False)
+    captured: dict[str, object] = {}
+
+    def fake_start(_room_id, _topic, **kwargs):
+        captured["config"] = dict(kwargs.get("config") or {})
+        callback = kwargs.get("_on_round_persisted")
+        if callback is not None:
+            callback({"roomId": _room_id}, {"roundId": "round-followup"})
+        return {"roundId": "round-followup", "status": "completed"}
+
+    monkeypatch.setattr(chat_room_service, "start_chat_room_round", fake_start)
+    monkeypatch.setattr(
+        meetings,
+        "bind_meeting_chat_room_round",
+        lambda *_args, **_kwargs: {
+            "meetingRound": {**meeting, "chatRoomRoundIds": ["round-opening", "round-followup"]}
+        },
+    )
+    monkeypatch.setattr(
+        meetings,
+        "terminate_meeting_execution",
+        lambda *_args, **_kwargs: {"meetingRound": dict(meeting)},
+    )
+
+    result = meeting_runtime._run_meeting_discussion_impl("team-legacy", "meeting-legacy-percall")
+
+    assert result["stopReason"] == "challenge_workflow_run_cancelled"
+    round_config = captured["config"]
+    assert round_config["challengeDeadlineAtMs"] == 5_000_000
+    assert round_config["perCallBudgetMs"] == 563_500
+    assert round_config["meetingDeadlineAtMs"] == 5_000_000
+
+
 @pytest.mark.parametrize(
     "stop_reason",
     ["challenge_workflow_run_cancelled", "challenge_workflow_run_blocked"],
