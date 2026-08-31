@@ -4585,3 +4585,311 @@ def test_room_to_api_truncates_history_round_messages_only(tmp_path, monkeypatch
     assert new_round["roundId"] == "round-new"
     assert len(new_round["messages"]) == 1
     assert "messagesTruncated" not in new_round
+
+
+def test_stop_chat_room_round_survives_contended_session_transaction(tmp_path, monkeypatch):
+    """Regression for the py-spy lock-order deadlock.
+
+    The stop finalizer (session sync via the chat-state transaction) used to
+    run while the round runner still held ``_CHAT_ROOM_LOCK``.  With the
+    session transaction contended, stop, room detail and round persistence all
+    froze.  The finalizer must release the room lock before touching the
+    session state lock, so stop stays responsive and room state stays readable
+    while the sync is parked.
+    """
+
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    room = chat_room_service.create_chat_room(
+        title="停止不被会话事务冻死",
+        participant_session_ids=["session-alpha"],
+    )
+    room_id = room["roomId"]
+
+    state_hold_seconds = 3.0
+    finalizer_entered_state_lock = threading.Event()
+    release_state_lock = threading.Event()
+    runner_can_return = threading.Event()
+    runner_entered_speaker = threading.Event()
+    real_state_lock = session_service._CHAT_STATE_LOCK
+
+    class ContendedStateLock:
+        def __enter__(self):
+            if finalizer_entered_state_lock.is_set():
+                return real_state_lock.__enter__()
+            # Lock order contract: the chat room lock must already be released
+            # when the stop finalizer enters the session state lock.
+            assert not chat_room_service._chat_room_lock_owned_by_current_thread()
+            finalizer_entered_state_lock.set()
+            assert release_state_lock.wait(timeout=state_hold_seconds)
+            return real_state_lock.__enter__()
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            return real_state_lock.__exit__(exc_type, exc_value, traceback)
+
+    monkeypatch.setattr(session_service, "_CHAT_STATE_LOCK", ContendedStateLock())
+
+    def runner_requests_stop_then_completes(participant, prompt, context):
+        # Park inside the speaker call so the stop below lands mid-round, then
+        # request the stop exactly like the production stop flow does before
+        # the runner's persist branch sees the stop reason.
+        runner_entered_speaker.set()
+        assert runner_can_return.wait(timeout=5)
+        chat_room_service._request_chat_room_round_stop(context["roundId"], "pytest lock-order stop")
+        return {
+            "status": "completed",
+            "raw_output": f"{participant['title']} 发言",
+            "summary": "ok",
+        }
+
+    def cancel_must_not_run_under_room_lock(run_id):
+        assert not chat_room_service._chat_room_lock_owned_by_current_thread()
+        return True
+
+    monkeypatch.setattr(
+        session_service,
+        "cancel_agent_execution_reservation",
+        cancel_must_not_run_under_room_lock,
+    )
+
+    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pytest-chat-room-round-runner")
+    future = executor.submit(
+        chat_room_service.start_chat_room_round,
+        room_id,
+        "停止收尾必须放锁后再同步会话",
+        agent_runner=runner_requests_stop_then_completes,
+    )
+    try:
+        # Wait until the runner is parked inside the speaker call (past the
+        # round loop's stop check) so the stop below lands mid-round.
+        assert runner_entered_speaker.wait(timeout=5)
+        detail = chat_room_service.stop_chat_room_round(room_id, reason="pytest lock-order stop")
+        assert detail["status"] == "stopping"
+        # The stopping state is durable while the round runner is still parked.
+        stored = chat_room_service._store().load()
+        stored_room = next(item for item in stored["rooms"] if item["roomId"] == room_id)
+        assert stored_room["status"] == "stopping"
+        assert stored_room["rounds"][-1]["status"] == "stopping"
+
+        runner_can_return.set()
+        # The finalizer parks on the contended session transaction; room reads
+        # must stay responsive instead of freezing behind the room lock.  The
+        # bounded executor keeps the test failing fast (instead of hanging) if
+        # the room lock is ever held across the session sync again.
+        probe_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pytest-chat-room-lock-probe")
+        try:
+            assert finalizer_entered_state_lock.wait(timeout=5)
+            detail_future = probe_executor.submit(chat_room_service.get_chat_room_detail, room_id)
+            detail_while_parked = detail_future.result(timeout=2)
+            assert detail_while_parked is not None
+            busy_stop_future = probe_executor.submit(
+                chat_room_service.stop_chat_room_round, room_id, reason="pytest duplicate stop"
+            )
+            with pytest.raises(chat_room_service.ChatRoomBusyError):
+                busy_stop_future.result(timeout=2)
+        finally:
+            probe_executor.shutdown(wait=False)
+    finally:
+        runner_can_return.set()
+        release_state_lock.set()
+        detail = future.result(timeout=10)
+        executor.shutdown(wait=True)
+
+    assert detail["status"] == "ready"
+    latest_round = detail["rounds"][-1]
+    assert latest_round["status"] == "stopped"
+    # The stop finalization still syncs the completed speaker transcript into
+    # participant sessions; it just does so outside the room lock.
+    assert _has_room_transcript(tmp_path, "session-alpha", room_id)
+
+
+def test_stop_and_round_persist_stress_does_not_deadlock(tmp_path, monkeypatch):
+    """Concurrent round persistence + stop must always make progress."""
+
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+
+    for iteration in range(3):
+        room = chat_room_service.create_chat_room(
+            title=f"压力迭代 {iteration}",
+            participant_session_ids=["session-alpha", "session-beta"],
+        )
+        room_id = room["roomId"]
+        stop_fired = threading.Event()
+        speaker_entered = threading.Event()
+
+        def slow_runner(participant, prompt, context):
+            # Keep the persist/stop race window open for every speaker.
+            speaker_entered.set()
+            assert stop_fired.wait(timeout=5)
+            time.sleep(0.05)
+            return {
+                "status": "completed",
+                "raw_output": f"{participant['title']} 发言",
+                "summary": "ok",
+            }
+
+        executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"pytest-chat-room-stress-{iteration}")
+        stop_executor = None
+        future = executor.submit(
+            chat_room_service.start_chat_room_round,
+            room_id,
+            f"压力并发 {iteration}",
+            agent_runner=slow_runner,
+        )
+        try:
+            # The runner parks inside the first speaker; stop then races the
+            # round's persist/finalize path from another thread.
+            assert speaker_entered.wait(timeout=5)
+            stop_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"pytest-chat-room-stopper-{iteration}")
+            stop_future = stop_executor.submit(chat_room_service.stop_chat_room_round, room_id, reason=f"pytest stress stop {iteration}")
+            stop_future.result(timeout=5)
+            stop_fired.set()
+            # Detail reads must stay fast while stop/persist run concurrently.
+            detail_started_at = time.perf_counter()
+            detail = chat_room_service.get_chat_room_detail(room_id)
+            assert time.perf_counter() - detail_started_at < 1.0
+            assert detail is not None
+        finally:
+            stop_fired.set()
+            detail = future.result(timeout=10)
+            executor.shutdown(wait=True)
+            if stop_executor is not None:
+                stop_executor.shutdown(wait=True)
+
+        latest_round = detail["rounds"][-1]
+        assert latest_round["status"] in {"stopped", "completed", "partial"}
+        assert detail["status"] in {"ready", "failed"}
+
+
+def test_participant_resolution_runs_outside_room_lock(tmp_path, monkeypatch):
+    """Lock order contract: create/update resolve participants before locking."""
+
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    room = chat_room_service.create_chat_room(
+        title="锁外解析成员",
+        participant_session_ids=["session-alpha"],
+    )
+
+    real_resolve = chat_room_service._resolve_participants
+
+    def resolve_must_not_hold_room_lock(session_ids):
+        assert not chat_room_service._chat_room_lock_owned_by_current_thread()
+        return real_resolve(session_ids)
+
+    monkeypatch.setattr(chat_room_service, "_resolve_participants", resolve_must_not_hold_room_lock)
+
+    updated = chat_room_service.update_chat_room(
+        room["roomId"],
+        participant_session_ids=["session-beta"],
+    )
+    assert [item["sessionId"] for item in updated["participants"]] == ["session-beta"]
+
+
+def test_read_paths_skip_reconcile_and_return_while_room_lock_is_held(tmp_path, monkeypatch):
+    """Acceptance: reads stay bounded while _CHAT_ROOM_LOCK is hijacked.
+
+    list_chat_rooms_compact feeds /api/teams, /conversations and
+    runtime-summary reads.  With the per-read reconcile gate in its
+    steady state, a read must not queue on _CHAT_ROOM_LOCK at all.
+    """
+
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    chat_room_service.create_chat_room(
+        title="读路径不穿大锁",
+        participant_session_ids=["session-alpha"],
+    )
+
+    reconcile_calls = []
+    real_reconcile = chat_room_service._reconcile_chat_room_round_state_locked_gate
+
+    def counting_reconcile():
+        reconcile_calls.append(True)
+        return real_reconcile()
+
+    monkeypatch.setattr(
+        chat_room_service,
+        "_reconcile_chat_room_round_state_locked_gate",
+        counting_reconcile,
+    )
+    # Reset the gate to its cold state: room creation already consumed the
+    # process's first reconcile pass via its detail publish.
+    monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_RECONCILE_LAST_RUN_AT", None)
+    monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_RECONCILE_INFLIGHT", False)
+    monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_RECONCILE_LAST_STORE_TOKEN", None)
+
+    # First read runs the reconcile pass once (cold gate).
+    rooms = chat_room_service.list_chat_rooms_compact()
+    assert len(rooms) == 1
+    assert reconcile_calls
+
+    # Steady state: same store revision and inside the TTL -> no more passes.
+    reconcile_calls.clear()
+    rooms = chat_room_service.list_chat_rooms_compact()
+    assert len(rooms) == 1
+    assert not reconcile_calls
+
+    # Even while the room lock is held forever, the steady-state read returns.
+    assert chat_room_service._CHAT_ROOM_LOCK.acquire(timeout=1)
+    try:
+        probe_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pytest-chat-room-read-probe")
+        try:
+            read_future = probe_executor.submit(chat_room_service.list_chat_rooms_compact)
+            started_at = time.perf_counter()
+            rooms = read_future.result(timeout=2)
+            assert time.perf_counter() - started_at < 1.5
+            assert len(rooms) == 1
+        finally:
+            probe_executor.shutdown(wait=False)
+    finally:
+        chat_room_service._CHAT_ROOM_LOCK.release()
+
+
+def test_reconcile_gate_reruns_after_store_change_or_inflight_release(tmp_path, monkeypatch):
+    """The reconcile gate must rerun on store changes, not stick shut.
+
+    The gate primitives are asserted directly: background session machinery
+    can trigger reconciles concurrently, so counting wrapper invocations would
+    be nondeterministic.
+    """
+
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    chat_room_service.create_chat_room(
+        title="去抖门可重开",
+        participant_session_ids=["session-alpha"],
+    )
+    monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_RECONCILE_LAST_RUN_AT", None)
+    monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_RECONCILE_INFLIGHT", False)
+    monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_RECONCILE_LAST_STORE_TOKEN", None)
+
+    # Cold gate: a run is granted and released.
+    assert chat_room_service._acquire_chat_room_reconcile_run() is True
+    chat_room_service._release_chat_room_reconcile_run()
+    # Unchanged store + inside TTL: skipped.
+    assert chat_room_service._acquire_chat_room_reconcile_run() is False
+    # An inflight marker blocks a rerun even on a cold timestamp.
+    monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_RECONCILE_LAST_RUN_AT", None)
+    monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_RECONCILE_INFLIGHT", True)
+    assert chat_room_service._acquire_chat_room_reconcile_run() is False
+    monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_RECONCILE_INFLIGHT", False)
+    assert chat_room_service._acquire_chat_room_reconcile_run() is True
+    chat_room_service._release_chat_room_reconcile_run()
+    # A store write (mtime change) reopens the gate.
+    state = chat_room_service._store().load()
+    chat_room_service._store().save(state)
+    assert chat_room_service._acquire_chat_room_reconcile_run() is True
+    chat_room_service._release_chat_room_reconcile_run()
+    assert next(item for item in state["rooms"] if item["roomId"]) is not None
