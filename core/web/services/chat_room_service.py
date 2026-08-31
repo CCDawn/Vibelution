@@ -83,6 +83,10 @@ from .team_case_orchestrator import (
     format_case_state_prompt,
     select_speakers_for_case,
 )
+from .team_workflow.meeting_message_payload import (
+    ingest_meeting_message_output,
+    meeting_message_output_contract,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -1920,6 +1924,7 @@ def _execute_chat_room_round(
             "challengeDeadlineAtMs": _positive_int(
                 round_config.get(_CHALLENGE_ROOM_DEADLINE_CONFIG_KEY)
             ),
+            "_structuredMeetingMessage": _is_scoped_discussion_room(room),
             "_modelInvocationReceiptAuthority": receipt_authority,
         }
         per_call_budget_ms = _positive_int(round_config.get("perCallBudgetMs"))
@@ -1980,6 +1985,7 @@ def _execute_chat_room_round(
                 "summary": stop_reason,
                 "lateResultDiscarded": True,
             }
+            message.pop("messagePayload", None)
         messages.append(message)
         message_time = utc_now_iso()
         stop_pending = False
@@ -2407,12 +2413,24 @@ def _run_one_speaker(
             if heartbeat_thread is not None:
                 heartbeat_thread.join(timeout=1.0)
         runner_ms = _elapsed_ms(stage_started_at)
-        content = _result_visible_text(result)
-        if not content:
-            content = _result_summary(result) or "No visible response."
-        content = _strip_redundant_speaker_prefix(content, participant)
+        structured_meeting_message = bool(context.get("_structuredMeetingMessage"))
+        message_payload: dict[str, Any] | None = None
+        if structured_meeting_message:
+            raw_content = _result_full_visible_text(result)
+            if not raw_content:
+                raw_content = _result_summary(result) or "No visible response."
+            ingested_message = ingest_meeting_message_output(raw_content)
+            content = str(ingested_message.get("content") or "").strip()
+            payload = ingested_message.get("messagePayload")
+            message_payload = dict(payload) if isinstance(payload, Mapping) else None
+        else:
+            content = _result_visible_text(result)
+            if not content:
+                content = _result_summary(result) or "No visible response."
+            content = _strip_redundant_speaker_prefix(content, participant)
         summary = _strip_redundant_speaker_prefix(_result_summary(result), participant)
-        content = _enforce_case_visible_output_boundary(content, context, participant)
+        if not structured_meeting_message:
+            content = _enforce_case_visible_output_boundary(content, context, participant)
         summary = _enforce_case_visible_output_boundary(summary, context, participant, record_event=False)
         result_timings = dict(result.get("timings") or {}) if isinstance(result, dict) else {}
         message_status, result_status = _structured_speaker_result_status(result)
@@ -2429,6 +2447,7 @@ def _run_one_speaker(
             "resultStatus": result_status,
             "content": content,
             "summary": summary,
+            **({"messagePayload": message_payload} if message_payload is not None else {}),
             **({"errorType": error_type} if error_type else {}),
             "timestamp": timestamp,
             **_case_message_metadata(context),
@@ -2927,6 +2946,7 @@ def _build_participant_prompt(
     purpose_lines = _purpose_prompt_lines(effective_purpose)
     role_view = _participant_role_view(participant)
     team_context_lines = _format_participant_team_context(participant)
+    structured_meeting_message = _is_scoped_discussion_room(room)
     challenge_short_answer_lines = (
         [
             "挑战杯会议短答合同：只给 1 个新增判断和 1 个依据，正文不超过 180 个中文字符。",
@@ -2939,7 +2959,16 @@ def _build_participant_prompt(
         is not None
         and str((round_payload.get("config") or {}).get("meetingType") or "").strip()
         == "hypothesis_candidate_generation"
+        and not structured_meeting_message
         else []
+    )
+    response_contract_lines = (
+        [meeting_message_output_contract()]
+        if structured_meeting_message
+        else [
+            "请给出一段紧凑、可读、只读的群聊发言。不要修改文件、不要提交、不要启动进化或部署。",
+            "如果你没有新信息，请明确说明你的确认、保留意见或下一步建议。",
+        ]
     )
     return "\n".join(
         [
@@ -2974,8 +3003,7 @@ def _build_participant_prompt(
             *purpose_lines,
             *challenge_short_answer_lines,
             "",
-            "请给出一段紧凑、可读、只读的群聊发言。不要修改文件、不要提交、不要启动进化或部署。",
-            "如果你没有新信息，请明确说明你的确认、保留意见或下一步建议。",
+            *response_contract_lines,
         ]
     )
 
@@ -3162,6 +3190,16 @@ def _result_visible_text(result: Any) -> str:
     else:
         raw = str(result or "")
     return sanitize_assistant_visible_text(trim_lines(str(raw or ""), max_lines=20)).strip()
+
+
+def _result_full_visible_text(result: Any) -> str:
+    """Return the complete visible output for structured meeting ingestion."""
+
+    if isinstance(result, dict):
+        raw = result.get("raw_output") or result.get("content") or result.get("response") or ""
+    else:
+        raw = str(result or "")
+    return sanitize_assistant_visible_text(str(raw or "")).strip()
 
 
 def _result_summary(result: Any) -> str:

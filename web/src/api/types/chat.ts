@@ -1064,6 +1064,61 @@ export type ChatRoomParticipant = {
   }>;
 };
 
+export type ChallengeMeetingDisplaySection = {
+  title: string;
+  bullets: string[];
+};
+
+export type ChallengeMeetingDisagreement = {
+  issue: string;
+  positions: string[];
+  unresolvedReason?: string;
+};
+
+export type ChallengeMeetingActionItem = {
+  ownerRoleId: string;
+  action: string;
+  dueGate?: string;
+};
+
+export type ChallengeMeetingEvidenceRequest = {
+  rationale: string;
+  candidateRefs?: string[];
+  searchEnvelope?: {
+    keywords?: string[];
+    sourceTypes?: string[];
+    evidenceLevels?: string[];
+  };
+  requirements?: {
+    minEvidenceLevel?: string;
+    completeness?: string;
+  };
+};
+
+export type ChallengeMeetingMessagePayload = {
+  schemaVersion: 1;
+  kind: "challenge_meeting_message";
+  display: {
+    conclusion: string;
+    sections: ChallengeMeetingDisplaySection[];
+  };
+  protocol: {
+    agreements: string[];
+    disagreements: ChallengeMeetingDisagreement[];
+    risks: string[];
+    actionItems: ChallengeMeetingActionItem[];
+    knowledgeCandidates: unknown[];
+    proposedCandidates: unknown[];
+    evidenceRequests: ChallengeMeetingEvidenceRequest[];
+  };
+  audit: {
+    parseStatus: "structured" | "invalid" | string;
+    rawModelOutput: string;
+    errorCode?: string;
+    errorMessage?: string;
+  };
+};
+
 export type ChatRoomMessage = {
   messageId: string;
   participantId: string;
@@ -1078,6 +1133,7 @@ export type ChatRoomMessage = {
   messageKind?: "user_clarification" | "team_discussion" | "team_message" | string;
   audience?: "user" | "internal" | string;
   visibility?: "collapsed_by_default" | "default" | string;
+  messagePayload?: ChallengeMeetingMessagePayload;
   errorType?: string;
   supervision?: AgentSupervisionDecision;
   timestamp: string;

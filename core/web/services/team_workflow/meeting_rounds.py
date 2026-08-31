@@ -45,6 +45,9 @@ from core.research.workflow.contracts import (
     MeetingRound,
     scope_hash_for,
 )
+from core.web.services.team_workflow.meeting_message_payload import (
+    structured_protocol_from_message,
+)
 
 SCHEMA_VERSION = 2
 LEGACY_DIGEST_SCHEMA_VERSION = 1
@@ -837,7 +840,7 @@ def is_pass_message(message: Mapping[str, Any]) -> bool:
 
 
 def extract_discussion_markers(messages: Sequence[Mapping[str, Any]]) -> dict[str, list[Any]]:
-    """Extract the DEV fixture marker lines from completed room messages."""
+    """Read structured protocol facts, with marker parsing for legacy messages."""
 
     extracted: dict[str, list[Any]] = {
         "agreements": [],
@@ -851,6 +854,11 @@ def extract_discussion_markers(messages: Sequence[Mapping[str, Any]]) -> dict[st
     }
     for message in messages:
         if str(message.get("status") or "").strip().lower() != "completed":
+            continue
+        structured_protocol = structured_protocol_from_message(message)
+        if structured_protocol is not None:
+            for key in _STRUCTURED_MARKER_KEYS:
+                extracted[key].extend(list(structured_protocol.get(key) or []))
             continue
         content = str(message.get("content") or "").strip()
         if not content or is_pass_message(message):
@@ -1019,6 +1027,8 @@ def derive_unstructured_digest_entries(
     for message in messages:
         if str(message.get("status") or "").strip().lower() != "completed":
             continue
+        if structured_protocol_from_message(message) is not None:
+            continue
         if is_pass_message(message):
             continue
         content = str(message.get("content") or "").strip()
@@ -1081,13 +1091,18 @@ def assert_review_digest_captured_discussion(
 
 
 def source_message_content_hash(messages: Sequence[Mapping[str, Any]]) -> str:
-    """Stable hash of bound discussion message content used for draft reuse."""
+    """Stable hash of structured facts and compatibility content for draft reuse."""
 
     return _stable_hash(
         [
             {
                 "ref": message_source_ref(message),
                 "content": str(message.get("content") or ""),
+                "messagePayload": (
+                    dict(message.get("messagePayload") or {})
+                    if isinstance(message.get("messagePayload"), Mapping)
+                    else None
+                ),
                 "status": str(message.get("status") or "").strip().lower(),
             }
             for message in list(messages or [])

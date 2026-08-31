@@ -765,6 +765,71 @@ def test_unstructured_fallback_does_not_override_markers() -> None:
     assert fallback["disagreements"][0]["issue"] == "hyp-b 泛化不足"
 
 
+def test_structured_message_payload_is_the_digest_authority() -> None:
+    evidence_request = _evidence_request_payload()
+    messages = [
+        {
+            "status": "completed",
+            "content": "AGREE: 这条冲突的兼容正文不得成为新消息权威",
+            "roomId": "room-structured",
+            "roundId": "round-structured",
+            "messageId": "message-structured",
+            "speakerTitle": "知识管理 Agent",
+            "messagePayload": {
+                "schemaVersion": 1,
+                "kind": "challenge_meeting_message",
+                "display": {
+                    "conclusion": "保持候选等级。",
+                    "sections": [],
+                },
+                "protocol": {
+                    "agreements": ["结构化共识是唯一权威"],
+                    "disagreements": [],
+                    "risks": ["证据覆盖仍不完整"],
+                    "actionItems": [],
+                    "knowledgeCandidates": [],
+                    "proposedCandidates": [],
+                    "evidenceRequests": [evidence_request],
+                },
+                "audit": {
+                    "parseStatus": "structured",
+                    "rawModelOutput": "{}",
+                },
+            },
+        }
+    ]
+
+    extracted = meetings.extract_discussion_markers(messages)
+
+    assert extracted["agreements"] == ["结构化共识是唯一权威"]
+    assert extracted["risks"] == ["证据覆盖仍不完整"]
+    assert extracted["evidenceRequests"] == [evidence_request]
+    assert "兼容正文" not in extracted["agreements"]
+
+
+def test_source_hash_changes_when_structured_protocol_changes() -> None:
+    message = {
+        "status": "completed",
+        "content": "同一兼容正文",
+        "roomId": "room-structured",
+        "roundId": "round-structured",
+        "messageId": "message-structured",
+        "messagePayload": {
+            "schemaVersion": 1,
+            "kind": "challenge_meeting_message",
+            "display": {"conclusion": "保持候选等级。", "sections": []},
+            "protocol": {"agreements": ["共识 A"]},
+            "audit": {"parseStatus": "structured", "rawModelOutput": "{}"},
+        },
+    }
+
+    first_hash = meetings.source_message_content_hash([message])
+    changed = json.loads(json.dumps(message, ensure_ascii=False))
+    changed["messagePayload"]["protocol"]["agreements"] = ["共识 B"]
+
+    assert meetings.source_message_content_hash([changed]) != first_hash
+
+
 def test_candidate_markers_accept_common_markdown_emphasis() -> None:
     messages = [
         {

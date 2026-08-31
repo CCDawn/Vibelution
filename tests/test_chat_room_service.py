@@ -2754,6 +2754,111 @@ def test_scoped_discussion_room_round_fails_closed_without_receipt_authority(tmp
     assert "回执授权" not in with_authority_message and "receipt authority" not in with_authority_message
 
 
+def test_formal_challenge_room_uses_structured_message_contract_without_changing_normal_rooms(
+    tmp_path,
+    monkeypatch,
+):
+    _isolate_chat_room_kernel(tmp_path, monkeypatch)
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.challenge_turn_policy.current_challenge_task_deadline_at_ms",
+        lambda: None,
+    )
+    structured_output = json.dumps(
+        {
+            "schemaVersion": 1,
+            "display": {
+                "conclusion": "当前证据不足，暂不升级候选。",
+                "sections": [
+                    {"title": "判断依据", "bullets": ["缺少直接证据。"]},
+                ],
+            },
+            "protocol": {
+                "agreements": ["保留当前候选等级。"],
+                "disagreements": [],
+                "risks": ["检索覆盖不完整。"],
+                "actionItems": [],
+                "knowledgeCandidates": [],
+                "proposedCandidates": [],
+                "evidenceRequests": [],
+            },
+        },
+        ensure_ascii=False,
+    )
+    captured_prompts = []
+
+    formal_room = chat_room_service.create_chat_room(
+        title="正式挑战杯讨论",
+        participant_session_ids=["session-beta"],
+        purpose="meeting",
+        config={
+            "scopeAuthority": "workflow_discussion_scope.v1",
+            "discussionScope": {
+                "kind": "hypothesis_review",
+                "questionId": "SCI-096",
+                "key": "scope-structured",
+            },
+            "scopeHash": "d" * 24,
+        },
+    )
+    authority = {
+        "schemaVersion": 1,
+        "authorityKind": "workflow_run",
+        "teamId": "team-formal",
+        "questionId": "SCI-096",
+        "workflowRunId": "run-formal",
+        "workflowId": "challenge-cup-research",
+        "workflowVersionId": "wv-formal",
+        "modelPolicySha256": "a" * 64,
+    }
+
+    def formal_runner(_participant, prompt, _context):
+        captured_prompts.append(prompt)
+        return {"status": "completed", "raw_output": structured_output, "summary": "ok"}
+
+    formal_detail = chat_room_service.start_chat_room_round(
+        formal_room["roomId"],
+        "评审候选证据",
+        config={
+            "teamId": "team-formal",
+            "question": "SCI-096",
+            "meetingRoundId": "meeting-structured",
+            "meetingType": "hypothesis_review",
+            "challengeDeadlineAtMs": int(time.time() * 1000) + 60_000,
+        },
+        agent_runner=formal_runner,
+        _model_invocation_receipt_authority=authority,
+    )
+
+    formal_message = formal_detail["rounds"][-1]["messages"][0]
+    assert "挑战杯会议结构化输出合同" in captured_prompts[0]
+    assert formal_message["content"].startswith("当前证据不足，暂不升级候选。")
+    assert formal_message["messagePayload"]["audit"]["parseStatus"] == "structured"
+    assert formal_message["messagePayload"]["audit"]["rawModelOutput"] == structured_output
+    assert formal_message["messagePayload"]["protocol"]["agreements"] == ["保留当前候选等级。"]
+
+    normal_prompts = []
+    normal_room = chat_room_service.create_chat_room(
+        title="普通会议群聊",
+        participant_session_ids=["session-alpha"],
+        purpose="meeting",
+    )
+
+    def normal_runner(_participant, prompt, _context):
+        normal_prompts.append(prompt)
+        return {"status": "completed", "raw_output": "普通会议文本保持不变。", "summary": "ok"}
+
+    normal_detail = chat_room_service.start_chat_room_round(
+        normal_room["roomId"],
+        "普通会议",
+        agent_runner=normal_runner,
+    )
+    normal_message = normal_detail["rounds"][-1]["messages"][0]
+    assert "挑战杯会议结构化输出合同" not in normal_prompts[0]
+    assert normal_message["content"] == "普通会议文本保持不变。"
+    assert "messagePayload" not in normal_message
+
+
 def test_formal_room_speakers_share_one_challenge_deadline(tmp_path, monkeypatch):
     _isolate_chat_room_kernel(tmp_path, monkeypatch)
     _seed_chat_sessions(tmp_path)
