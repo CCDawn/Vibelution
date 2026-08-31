@@ -2646,9 +2646,20 @@ def _seed_parent_run(runtime, team_id: str, planner_agent_id: str) -> None:
         "createdAt": "2026-08-18T00:00:00Z",
         "snapshotHash": "c" * 64,
     }
+    # Registry-era runs must pin a registered wv-* identity: the T2
+    # definition registry fails closed on the legacy non-empty literal, and
+    # the meeting receipt authority requires a non-empty version id. Register
+    # the built-in definition and pin the run to that identity.
+    from core.research.workflow.definition import build_challenge_cup_workflow_definition
+    from core.research.workflow.definition_registry import register_or_resolve
+
+    pinned_version_id = register_or_resolve(
+        build_challenge_cup_workflow_definition()
+    ).workflowVersionId
     record = build_run_record(
         run_id=_RUN_ID,
         team_id=team_id,
+        workflow_version_id=pinned_version_id,
         last_event_sequence=1,
         input_snapshot_hash="c" * 64,
         thread_id=_RUN_ID,
