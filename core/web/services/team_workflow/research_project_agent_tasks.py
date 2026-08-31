@@ -10,6 +10,10 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from core.research.workflow.contracts.research_team_role_contract import (
+    CURRENT_RESEARCH_TEAM_ROLE_CONTRACT,
+)
+
 SCHEMA_VERSION = 2
 TASK_STORE_FILE_NAME = "research_project_agent_tasks.json"
 MAX_TASKS = 500
@@ -455,6 +459,22 @@ def _write_store(
     s._write_json(_store_path(team_id, research_project_id), store)
 
 
+def _accepted_member_roles(expected_team_role: str, expected_role_key: str) -> set[str]:
+    """Expand expected task-role names through the authoritative role contract.
+
+    Task contracts name roles with legacy aliases (``experiment_planner`` /
+    ``challenge_cup_experiment_planner`` for ``challenge_cup_experiment_revision``),
+    while team member tables carry the canonical product role id.  Any name the
+    contract attaches to one product role must accept that role's member.
+    """
+    accepted = {expected_team_role, expected_role_key} - {""}
+    for role in CURRENT_RESEARCH_TEAM_ROLE_CONTRACT.product_agents:
+        names = {role.product_role_id, *role.legacy_role_aliases}
+        if accepted & names:
+            accepted |= names
+    return accepted
+
+
 def _resolve_role_agent(
     team_id: str,
     contract: dict[str, Any],
@@ -466,7 +486,7 @@ def _resolve_role_agent(
     expected_team_role = _text(contract.get("teamRole"), limit=80)
     expected_role_key = _text(contract.get("roleKey"), limit=80)
     normalized_requested_agent_id = _text(requested_agent_id)
-    accepted_member_roles = {expected_team_role, expected_role_key} - {""}
+    accepted_member_roles = _accepted_member_roles(expected_team_role, expected_role_key)
     eligible_members = [
         item
         for item in list(team.get("members") or [])
@@ -505,7 +525,11 @@ def _resolve_role_agent(
             code="agent_role_unbound",
         )
     actual_role_key = _text(agent.get("roleKey"), limit=80)
-    if actual_role_key and actual_role_key != expected_role_key:
+    if (
+        actual_role_key
+        and actual_role_key != expected_role_key
+        and actual_role_key not in accepted_member_roles
+    ):
         raise ResearchProjectAgentTaskError(
             f"Agent role mismatch for {expected_team_role}: expected {expected_role_key}.",
             code="agent_role_mismatch",

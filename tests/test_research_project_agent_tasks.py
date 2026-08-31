@@ -1605,3 +1605,47 @@ def test_formal_retry_lineage_with_ambiguous_tasks_still_fails_closed(monkeypatc
             task_kind="hypothesis_design",
             store=store,
         )
+
+
+def test_accepted_member_roles_expand_legacy_aliases_through_contract():
+    """Task contracts name roles with legacy aliases while member tables carry
+    the canonical product role id; the authoritative role contract must bridge
+    them (SCI-003 hypothesis_design incident: 'experiment_planner' is a legacy
+    alias of the canonical 'challenge_cup_experiment_revision')."""
+    from core.web.services.team_workflow.research_project_agent_tasks import (
+        _accepted_member_roles,
+    )
+
+    accepted = _accepted_member_roles(
+        "experiment_planner", "challenge_cup_experiment_planner"
+    )
+    assert "challenge_cup_experiment_revision" in accepted
+    assert "experiment_planner" in accepted
+    assert "challenge_cup_experiment_planner" in accepted
+
+
+def test_hypothesis_design_task_binds_canonical_role_member(tmp_path, monkeypatch):
+    """A team whose member table carries the canonical product role id must
+    satisfy a hypothesis_design task contract that names the legacy alias."""
+    team, project, _agents = _team_project_and_agents(tmp_path, monkeypatch)
+    _accepted_submitter(monkeypatch)
+    fresh = team_service.get_team(team["teamId"])
+    fresh["members"] = [
+        {**member, "role": "challenge_cup_experiment_revision"}
+        if member["role"] == "experiment_planner"
+        else member
+        for member in fresh["members"]
+    ]
+    team_service.update_team(team["teamId"], members=fresh["members"])
+    started = start_research_project_agent_task(
+        team["teamId"],
+        project["projectId"],
+        {
+            "taskKind": "hypothesis_design",
+            "idempotencyKey": "hyp-1",
+            "workflowRunId": "run-hyp-1",
+            "workflowNodeId": "hypothesis_design",
+            "sourceCollectionRunId": "dprun-hyp-1",
+        },
+    )
+    assert started["task"]["status"] == "running"
