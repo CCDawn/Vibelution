@@ -1869,7 +1869,7 @@ Task 34 只拥有状态 resolver、资产 manifest 和授权回退；Task 26 继
 
 ### 31.10 实施任务图
 
-Task 22—27 的定义继续以 §30.10 为准，本节只增加输入、依赖和验收，不创建重复 owner：Task 22 吸收稳定说话习惯与心情/体力/熟悉度联动；Task 24 继续复用 Agent episodic memory 的时态/来源/失效语义；Task 25 吸收多气泡、用户插话和 generation cancel；Task 26 消费 Task 34 的 `EmbodimentState` 并保持原人物头像与单一“正在输入…”；Task 27 先完成文字会话与视觉存在的阶段收口。
+Task 22—27 的定义继续以 §30.10 为准，本节只增加输入、依赖和验收，不创建重复 owner：Task 22 吸收稳定说话习惯与心情/体力/熟悉度联动；Task 24 继续复用 Agent episodic memory 的时态/来源/失效语义；Task 25 吸收多气泡、用户插话和 generation cancel，首版每次人物回复最多追加一个 follow-up，即一次交付总计最多两个人物气泡；Task 26 消费 Task 34 的 `EmbodimentState` 并保持原人物头像与单一“正在输入…”；Task 27 先完成文字会话与视觉存在的阶段收口。
 
 #### Task 33：建立 Character Card V3 安全导入与预览事务
 
@@ -1881,7 +1881,7 @@ Task 22—27 的定义继续以 §30.10 为准，本节只增加输入、依赖�
 #### Task 34：建立授权资产 manifest 与确定性 EmbodimentState
 
 - Owner/Boundary: `embodiment.py`、资产 manifest/source/license receipt、mood/activity/location 到 expression/motion/scene 的纯逻辑 resolver；Task 26 单独拥有 VUI 渲染。
-- Dependency: Task 20 的静态回退契约已实现；消费 Task 22 的表达 reason codes 和现有 Affect/Life State，不反向写状态。
+- Dependency: Task 20 的静态回退契约已实现；直接消费现有 Affect/Life State，不依赖 Task 22 的 `reasonCodes`，也不反向写状态。Task 22 与 Task 34 可以分别演进，只通过已经存在的人物状态事实源保持一致。
 - Mode: BDD_TDD。
 - Verification/Stop: 表驱动覆盖心情、体力、活动、地点、昼夜、天气新鲜度、provider 故障、缺资产、未知许可和 `prefers-reduced-motion`；同一输入可重放，心跳不调用 LLM，失败不影响文本聊天，普通 Agent 无 EmbodimentState。
 
@@ -1894,10 +1894,10 @@ Task 22—27 的定义继续以 §30.10 为准，本节只增加输入、依赖�
 
 #### Task 36：建立文本权威的语音便签
 
-- Owner/Boundary: 已确认 assistant 文本到 TTS artifact 的可选 adapter、voice/license receipt、音频附件和播放失败降级；不生成第二人物回答，不保存声纹。
+- Owner/Boundary: 已确认 assistant 文本到 TTS artifact 的可选 adapter、voice/license receipt 和播放失败降级；只有原生 Session 已有附件能力能够保持普通链路零差异时才复用音频附件，否则使用 Companion-only artifact 卡片引用已确认文本与音频 receipt。不生成第二人物回答，不保存声纹，也不为语音便签修改普通 attachment/composer。
 - Dependency: Task 22 的表达决定、Task 25 的 generation fence、Task 35 的媒体候选/receipt 结构。
 - Mode: HIGH_RISK BDD_TDD + frontend contract + desktop browser acceptance。
-- Verification/Stop: 文本终态先于音频产物；TTS 超时/失败/取消不重跑 LLM且保留文本；重复请求幂等，未知声音授权拒绝，用户关闭语音后不生成；音频附件与一个原生 assistant 终态一一关联，普通 Agent 零差异。
+- Verification/Stop: 文本终态先于音频产物；TTS 超时/失败/取消不重跑 LLM且保留文本；重复请求幂等，未知声音授权拒绝，用户关闭语音后不生成；音频附件或 Companion-only artifact 卡片必须与一个原生 assistant 终态一一关联，普通 Agent 零差异。
 
 #### Task 37：可选全双工语音、打断与文字降级
 
@@ -1906,12 +1906,12 @@ Task 22—27 的定义继续以 §30.10 为准，本节只增加输入、依赖�
 - Mode: HIGH_RISK BDD_TDD + permission/runtime scene + desktop browser acceptance。
 - Verification/Stop: 噪声、短停顿、重叠说话、用户打断、设备切换、provider 断线、页面离开和权限撤回均有确定性状态收口；partial 不入 Journal/Memory，final 只提交一次，文本模式始终可用；若需要改变普通会话核心才能通过，停止并保持可选功能未启用。
 
-#### Task 38：第五阶段全链路收口
+#### Task 38：第五阶段核心真人化收口
 
-- Owner/Boundary: Character Card 导入安全、表达人格化、多气泡插话、视觉存在、生活明信片、语音便签、可选语音适配和普通 Agent 零差异证据；不等待真实 7 天，不 push、不发布。
-- Dependency: 必需 Task 22—27、Task 33—36；Task 37 只有在启用全双工语音目标时进入对应验收，不阻塞文字/媒体版发布准备。
-- Mode: backend selector + security fixtures + frontend VUI contracts + `tsc -b` + production build + desktop browser acceptance。
-- Verification/Stop: 使用可注入时钟和脚本化人物场景覆盖初识/熟悉、正负心情、低体力、用户纠错、连续短答、插话、跨午夜、学校/工作场景、表情/背景切换、恶意角色卡、明信片来源、TTS 失败和跨 Agent/Session 隔离；任何普通 Agent 核心差异、目标 404/500、残留“正在输入”、无头像状态、未授权资产或第二 transcript 都阻止收口。
+- Owner/Boundary: 表达人格化、多气泡插话、视觉存在和普通 Agent 零差异证据；不等待真实 7 天，不 push、不发布。角色卡导入和媒体能力分别由独立收口承担，不进入核心体验完成条件。
+- Dependency: 核心必需 Task 22—27 与 Task 34。Task 33 为独立角色卡交付；Task 35—36 为独立媒体交付；Task 37 保持 Deferred，均不阻塞核心真人化收口。
+- Mode: backend selector + frontend VUI contracts + `tsc -b` + production build + desktop browser acceptance。
+- Verification/Stop: 使用可注入时钟和脚本化人物场景覆盖初识/熟悉、正负心情、低体力、用户纠错、连续短答、插话、跨午夜、学校/工作场景、表情/背景切换和跨 Agent/Session 隔离；任何普通 Agent 核心差异、目标 404/500、残留“正在输入”、无头像状态、未授权资产或第二 transcript 都阻止核心收口。角色卡恶意输入、明信片来源和 TTS 失败分别留给 Task 33 与 Task 35—36 的独立验收。
 
 ### 31.11 Critical Path、并行与停止条件
 
@@ -1920,16 +1920,38 @@ Task 22—27 的定义继续以 §30.10 为准，本节只增加输入、依赖�
 ```text
 Task 22 → Task 23 → Task 25 ───────────────┐
     ├────→ Task 24 ────────────────────────┤
-    └────→ Task 34 → Task 26 ──────────────┤
+Task 34 ─────────→ Task 26 ────────────────┤
                                            ▼
-                                         Task 27 → Task 35 → Task 36 ──┐
-                                                                       ▼
-Task 33（Task 28/32 基线复核后可独立推进）──────────────────────────→ Task 38
+                                         Task 27 → Task 38
 
-Task 37：Task 25 + Task 36 后的可选独立 lane，不阻塞文字/媒体版 Task 38。
+Task 33：Task 28/32 基线复核后的独立角色卡交付，不阻塞 Task 38。
+Task 35 → Task 36：Task 27 后的独立媒体交付，不阻塞 Task 38。
+Task 37：Task 25 + Task 36 后的 Deferred 独立 lane，不阻塞文字或媒体交付。
 ```
 
-并行只允许在文件与事实源不重叠时进行：Task 33 在 Task 28/32 基线复核后可独立推进，Task 24 和 Task 34 可在 Task 22 接口稳定后分别推进；Task 25 与任何修改 `mailbox.py`/Companion delivery adapter 的工作保持串行；Task 26 与 Task 34 分别拥有 VUI 和 resolver/asset manifest，不交换写入 owner；Task 35 与 Task 36 共享 media candidate/receipt 时保持串行。每个实施任务重新建立独立 worktree、精确 claim 和当前 `main` 验证，不继承本规划任务的 claim。
+并行只允许在文件与事实源不重叠时进行：Task 33 在 Task 28/32 基线复核后可独立推进；Task 24 在 Task 22 接口稳定后推进，Task 34 则可直接基于现有 Affect/Life State 独立推进；Task 25 与任何修改 `mailbox.py`/Companion delivery adapter 的工作保持串行；Task 26 与 Task 34 分别拥有 VUI 和 resolver/asset manifest，不交换写入 owner；Task 35 与 Task 36 共享 media candidate/receipt 时保持串行。每个实施任务重新建立独立 worktree、精确 claim 和当前 `main` 验证，不继承本规划任务的 claim。
+
+### 31.12 Companion 实施冻结门与独立交付边界
+
+第五阶段从本节起按三个交付包管理，不能用可选能力拖住核心真人化：
+
+| 交付包 | 必需任务 | 完成定义 |
+| --- | --- | --- |
+| 核心真人化 | Task 22—27、Task 34、Task 38 | 文字对话、插话、最多两个气泡、视觉存在及普通 Agent 零差异闭合 |
+| 角色卡导入 | Task 33 | 独立完成安全 staging、预览、确认事务和回滚，不改变核心完成状态 |
+| 媒体陪伴 | Task 35—36 | 独立完成明信片与语音便签来源/receipt/降级；无普通附件复用条件时走 Companion-only artifact 卡片 |
+
+Task 37 保持 Deferred；只有用户重新明确启用全双工语音目标后才建立实施任务，不能作为文字版、视觉版或媒体版的验收前置。
+
+每个 Companion 实施任务在写入前必须证明并在 closeout 时复核以下冻结门：
+
+1. 普通 Agent 的 Session admission、Journal、worker、persist、projection、SSE、`ConversationStore`、composer、follow-up、attachment、retry 和 cancel 语义保持不变。
+2. 普通 Agent 的 Prompt 组装、工具解析与 ToolPolicy、存储读取、消息提交和终态投影路径保持零差异；Companion 只通过 Agent-scoped plugin extension 或已经验证人物、Agent、`directSessionId` 一致的适配器激活。
+3. Companion mailbox 只保存到达命令、generation fence 与 delivery receipt，不保存 transcript，不解释原生 Turn 终态，也不要求普通 Session scheduler 理解 Companion 策略。
+4. 普通链路核心不得直接导入具体 `virtual_human_life` 实现。若现有历史接线需要拆除，必须作为独立高风险隔离任务，通过稳定且插件无关的 extension contract 做依赖倒置，迁移范围只限现存 hook，不借机建设通用插件平台。
+5. 若任何功能必须修改普通会话公共语义、API/DTO 或附件/重试/取消行为才能成立，停止该功能并重新对齐，不以兼容分支、URL 参数或前端猜测绕过冻结门。
+
+本冻结门只约束 Companion 引入的差异，不禁止普通会话在独立任务中修复自身缺陷；两类任务必须使用不同 worktree、claim、测试证据和合入闭环。
 
 出现以下任一条件时停止受影响实施并重新对齐：
 
@@ -1939,7 +1961,7 @@ Task 37：Task 25 + Task 36 后的可选独立 lane，不阻塞文字/媒体版 
 - 导入、媒体或语音需要新增用户未授权的网络、麦克风、摄像头、屏幕、设备位置或外部发布权限；
 - 新证据会改变人物身份、记忆、Life World、主动额度、安全、API 或普通会话兼容性，而现有任务卡没有覆盖。
 
-### 31.12 成功证据
+### 31.13 成功证据
 
 第五阶段完成时，用户应能观察到：人物说话长度、追问、称呼、玩笑和主动性与其稳定人格、当前心情、体力和熟悉度一致；输入状态始终保留人物头像且只显示一个“正在输入…”；用户在人物输出期间仍可发消息，未送达内容会按到达顺序取消或重排；头像和背景随可信生活状态自然变化且无资产时稳定回退；角色卡导入可预览、可拒绝、不执行卡内指令；生活明信片和语音便签可追溯到完成事件与 receipt；普通 Agent 的目录、Prompt、工具、会话、未读和实时输出零差异。
 
