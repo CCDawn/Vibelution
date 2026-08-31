@@ -411,6 +411,7 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
                             summary="The search result was stored in the generic data processing run before candidate import.",
                             refs=[record.get("recordId", ""), record.get("sourceRef", "") or record.get("rawLocation", "")],
                             storage_refs=[*s._source_collection_storage_refs(run), storage_artifacts["recordsPath"]],
+                            provider=s._trim_text(trace.get("searchProvider"), max_length=80),
                         )
                     )
                     import_response = s.import_data_record_as_source_candidate(
@@ -448,6 +449,7 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
                                 summary="The DataRecord matched an existing source_manifest identity and was not imported again.",
                                 refs=[candidate.get("candidateId", ""), str(record.get("recordId") or "")],
                                 storage_refs=[storage_artifacts["candidatesPath"], storage_artifacts["candidateStorePath"]],
+                                provider=s._trim_text(trace.get("searchProvider"), max_length=80),
                             )
                         )
                     else:
@@ -462,6 +464,7 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
                                 summary="The DataRecord was imported as a source_manifest candidate, still outside formal Team Knowledge/RAG/official graph.",
                                 refs=[import_response["candidate"].get("candidateId", ""), str(record.get("recordId") or "")],
                                 storage_refs=[storage_artifacts["candidatesPath"], storage_artifacts["candidateStorePath"]],
+                                provider=s._trim_text(trace.get("searchProvider"), max_length=80),
                             )
                         )
             elif query_id in attempted_query_ids:
@@ -1181,6 +1184,11 @@ def _source_collection_execution_event(
         "assignmentId": s._trim_text(assignment.get("assignmentId"), max_length=128),
         "queryId": s._trim_text(normalized_query.get("queryId"), max_length=160),
         "query": s._trim_text(normalized_query.get("query"), max_length=1000),
+        "perspective": s._trim_text(
+            normalized_query.get("perspective")
+            or normalized_query.get("perspectiveId"),
+            max_length=80,
+        ),
         "sourceType": s._trim_text(normalized_query.get("sourceType"), max_length=80),
         "provider": s._trim_text(provider, max_length=80),
         "refs": s._normalize_text_list(refs or [], max_items=8, max_length=240),
@@ -1236,6 +1244,131 @@ def _source_collection_query_event_summaries(events: list[dict[str, Any]]) -> li
             }
         )
     return summaries
+
+
+def project_source_collection_search_trace(
+    team_id: str,
+    run_id: str,
+    *,
+    assignment_id: str = "",
+    assignment_ids: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Project immutable search receipts into the workflow artifact trace.
+
+    The JSONL execution log remains the single authority. Agent-authored
+    ``searchTrace`` is deliberately not an input. Terminal meaning comes from
+    ``eventType`` because duplicate/excluded events legitimately use
+    ``status=completed`` without representing a newly found source.
+    """
+    s = _service()
+    normalized_run_id = s._trim_text(run_id, max_length=160)
+    normalized_assignment_ids = {
+        s._trim_text(item, max_length=128)
+        for item in [assignment_id, *(assignment_ids or [])]
+        if s._trim_text(item, max_length=128)
+    }
+    if not normalized_run_id:
+        return []
+    events_path = s._source_collection_storage_artifact_paths(
+        team_id,
+        normalized_run_id,
+    )["searchEventsPath"]
+    events = [
+        dict(item)
+        for item in s._read_jsonl(events_path)
+        if isinstance(item, dict)
+        and (
+            not normalized_assignment_ids
+            or s._trim_text(item.get("assignmentId"), max_length=128)
+            in normalized_assignment_ids
+        )
+        and s._trim_text(item.get("queryId"), max_length=160)
+    ]
+    providers_by_query: dict[tuple[str, str], set[str]] = {}
+    for event in events:
+        provider = s._trim_text(event.get("provider"), max_length=80)
+        if provider:
+            key = (
+                s._trim_text(event.get("assignmentId"), max_length=128),
+                s._trim_text(event.get("queryId"), max_length=160),
+            )
+            providers_by_query.setdefault(key, set()).add(provider)
+
+    grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    order: list[tuple[str, str, str]] = []
+    for event in events:
+        assignment = s._trim_text(event.get("assignmentId"), max_length=128)
+        query_id = s._trim_text(event.get("queryId"), max_length=160)
+        provider = s._trim_text(event.get("provider"), max_length=80)
+        if not provider:
+            candidates = providers_by_query.get((assignment, query_id), set())
+            provider = next(iter(candidates)) if len(candidates) == 1 else "unknown"
+        key = (assignment, query_id, provider)
+        if key not in grouped:
+            order.append(key)
+            grouped[key] = []
+        grouped[key].append(event)
+
+    status_by_event_type = {
+        "storage.source_manifest_imported": "found",
+        "storage.data_record_written": "found",
+        "search.duplicate_skipped": "duplicate",
+        "storage.source_manifest_duplicate_skipped": "duplicate",
+        "search.duplicates_only_output_recorded": "duplicate",
+        "search.excluded_source_filtered": "excluded",
+        "search.excluded_sources_only_output_recorded": "excluded",
+        "search.low_quality_rejected": "excluded",
+        "search.executed": "returned",
+        "search.failed": "failed",
+    }
+    priority = {"failed": 0, "returned": 1, "excluded": 2, "duplicate": 3, "found": 4}
+    projected: list[dict[str, Any]] = []
+    for assignment, query_id, provider in order:
+        group = grouped[(assignment, query_id, provider)]
+        terminal_status = ""
+        refs: list[str] = []
+        event_ids: list[str] = []
+        for event in group:
+            event_type = s._trim_text(event.get("eventType"), max_length=120)
+            candidate_status = status_by_event_type.get(event_type, "")
+            if priority.get(candidate_status, -1) > priority.get(terminal_status, -1):
+                terminal_status = candidate_status
+            for value in [
+                *(event.get("refs") if isinstance(event.get("refs"), list) else []),
+                event.get("rawLocation"),
+            ]:
+                text = s._trim_text(value, max_length=1000)
+                if text and text not in refs:
+                    refs.append(text)
+            event_id = s._trim_text(event.get("eventId"), max_length=160)
+            if event_id and event_id not in event_ids:
+                event_ids.append(event_id)
+        if not terminal_status:
+            continue
+        failure_reason = ""
+        if terminal_status == "returned" and not refs:
+            terminal_status = "no_credible_source"
+            failure_reason = "terminal_provider_receipt_without_results"
+        projected.append(
+            {
+                "sourceCollectionRunId": normalized_run_id,
+                "assignmentId": assignment,
+                "queryId": query_id,
+                "provider": provider,
+                "query": s._trim_text(group[0].get("query"), max_length=1000),
+                "perspective": s._trim_text(
+                    group[0].get("perspective"),
+                    max_length=80,
+                ),
+                "status": terminal_status,
+                "resultRefs": refs,
+                "eventIds": event_ids,
+                "failureReason": failure_reason,
+                "startedAt": s._trim_text(group[0].get("createdAt"), max_length=80),
+                "terminalAt": s._trim_text(group[-1].get("createdAt"), max_length=80),
+            }
+        )
+    return projected
 
 
 def _source_collection_record_identity_key(record: dict[str, Any]) -> str:

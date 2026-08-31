@@ -11,6 +11,7 @@ parallel domain_artifacts filesystem.
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -443,7 +444,7 @@ def test_knowledge_draft_readback_uses_scoped_authority_and_preserves_old_refs(
     assert readiness.ready is True
 
     refs = collect_required_artifact_refs(
-        "knowledge_ingestion",
+        required_kinds=("knowledge_package_draft",),
         team_id="team-a",
         workflow_run_id="wf-run-1",
         source_collection_run_id="sc-run-1",
@@ -602,7 +603,10 @@ def test_real_ports_system_action_does_not_return_empty_success(tmp_path: Path) 
         # Missing teamId/planId/campaign must fail — never empty success stubs.
         with pytest.raises(
             RuntimeError,
-            match="teamId|planId|ExperimentCampaign|no system executor|system node",
+            match=(
+                "workflow run not found|teamId|planId|ExperimentCampaign|"
+                "no system executor|system node"
+            ),
         ):
             ports.execute_system_action(action=action)
     finally:
@@ -633,6 +637,59 @@ def test_system_adapter_verify_requires_outputs() -> None:
         "required_artifact_missing",
         "system_runner_missing",
     }
+
+
+def test_real_ports_required_kinds_follow_pinned_definition() -> None:
+    from core.research.workflow.definition_registry import (
+        WorkflowDefinitionNodeMismatch,
+        register_or_resolve,
+    )
+    from core.web.services.team_workflow.research_runtime.knowledge_rollout import (
+        build_challenge_cup_workflow_definition_v3,
+    )
+    from core.web.services.team_workflow.research_runtime.knowledge_sideflow_service import (
+        build_knowledge_sideflow_workflow_definition,
+    )
+
+    class Store:
+        def __init__(self, definition: object) -> None:
+            identity = register_or_resolve(definition)
+            self.run = SimpleNamespace(
+                run_id="run-pinned",
+                workflow_id=identity.workflowId,
+                workflow_version_id=identity.workflowVersionId,
+                structure_hash=identity.structureHash,
+            )
+
+        def get_run(self, run_id: str) -> object | None:
+            return self.run if run_id == self.run.run_id else None
+
+    def action(node_id: str) -> PendingAction:
+        return PendingAction(
+            action_id=f"act-{node_id}",
+            run_id="run-pinned",
+            node_run_id=f"nr-{node_id}",
+            node_id=node_id,
+            attempt=1,
+            actor_kind=ActorKind.AGENT,
+            action_kind="start_agent_task",
+            input_snapshot_hash="a" * 64,
+            input_artifact_refs=(),
+            binding_snapshot_id=None,
+            budget_policy_hash="p-1",
+        )
+
+    v3_ports = RealDomainPorts(Store(build_challenge_cup_workflow_definition_v3()))
+    assert v3_ports.required_artifact_kinds(action("hypothesis_design")) == (
+        "hypothesis_set",
+    )
+    with pytest.raises(WorkflowDefinitionNodeMismatch):
+        v3_ports.required_artifact_kinds(action("source_finding"))
+
+    sideflow_ports = RealDomainPorts(Store(build_knowledge_sideflow_workflow_definition()))
+    assert sideflow_ports.required_artifact_kinds(action("source_finding")) == (
+        "source_candidate_batch",
+    )
 
 
 def test_every_produced_kind_has_authority_mapping() -> None:

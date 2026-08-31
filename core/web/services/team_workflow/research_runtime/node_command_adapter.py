@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from core.research.workflow.definition import build_challenge_cup_workflow_definition
+from core.research.workflow.definition_registry import resolve_definition_for_run_record
 from core.research.workflow.models import ActorKind
 
 from .agent_node_execution import (
@@ -49,8 +49,11 @@ class NodeCommandError(Exception):
         self.code = code
 
 
-def _node_spec(node_id: str) -> dict[str, Any] | None:
-    definition = build_challenge_cup_workflow_definition()
+def _node_spec(record: dict[str, Any], node_id: str) -> dict[str, Any] | None:
+    definition = resolve_definition_for_run_record(
+        record,
+        expected_node_ids=[node_id],
+    )
     return next((n.to_dict() for n in definition.nodes if n.nodeId == node_id), None)
 
 
@@ -141,7 +144,7 @@ def node_command_capabilities(
     research_ledger: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Per-node capability list driving the frontend (no fake buttons)."""
-    node = _node_spec(node_id)
+    node = _node_spec(record, node_id)
     if node is None:
         return []
     actor_kind = str(node.get("actorKind") or "")
@@ -294,7 +297,7 @@ def apply_node_command(
 ) -> dict[str, Any]:
     """Execute one node command against a real backend handler."""
     payload = payload or {}
-    node = _node_spec(node_id)
+    node = _node_spec(record, node_id)
     if node is None:
         raise NodeCommandError(f"Unknown nodeId: {node_id}", code="unknown_node")
     if command == "open_session":

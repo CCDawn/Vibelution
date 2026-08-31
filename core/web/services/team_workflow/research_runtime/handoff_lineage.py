@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from core.research.workflow.models import WorkflowDefinition
+
 from .handoff_builder import build_handoff_record, definition_edge, edges_between_completed
 
 
@@ -115,11 +117,16 @@ def build_auto_handoffs_for_completed(
     completed: list[str],
     artifacts: dict[str, Any],
     existing_edge_ids: set[str],
+    definition: WorkflowDefinition | None = None,
 ) -> list[dict[str, Any]]:
     """Create accepted auto handoffs for completed edges not yet in lineage."""
     created: list[dict[str, Any]] = []
-    for from_id, to_id in edges_between_completed(completed):
-        edge_id = definition_edge_id(from_id, to_id)
+    for from_id, to_id in edges_between_completed(
+        completed,
+        definition=definition,
+    ):
+        edge = definition_edge(from_id, to_id, definition=definition)
+        edge_id = str((edge or {}).get("edgeId") or f"{from_id}->{to_id}")
         if edge_id in existing_edge_ids:
             continue
         record = build_handoff_record(
@@ -130,6 +137,7 @@ def build_auto_handoffs_for_completed(
             to_node_id=to_id,
             status="accepted",
             artifacts=artifacts,
+            definition=definition,
         )
         # Ensure edgeId is definition identity even if builder fell back.
         record["edgeId"] = edge_id

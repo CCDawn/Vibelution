@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from core.research.workflow.contracts import ActorRef, CommandRequest, WorkflowCommandKind
 from core.research.workflow.ledger import WorkflowLedgerStore
+from core.research.workflow.definition import build_challenge_cup_workflow_definition
+from core.research.workflow.definition_registry import register_or_resolve
 
 from core.web.services.team_workflow.research_runtime.command_service import WorkflowCommandService
 from core.web.services.team_workflow.research_runtime.operator_authorization import (
@@ -99,7 +102,14 @@ class CommandHarness:
         self.store.close()
 
     def seed_run(self, run_id: str = "run-test", **overrides: Any) -> None:
-        record = build_run_record(run_id=run_id, last_event_sequence=1, **overrides)
+        definition = build_challenge_cup_workflow_definition()
+        identity = register_or_resolve(definition)
+        overrides.setdefault("workflow_version_id", identity.workflowVersionId)
+        structure_hash = str(overrides.pop("structure_hash", identity.structureHash))
+        record = dataclasses.replace(
+            build_run_record(run_id=run_id, last_event_sequence=1, **overrides),
+            structure_hash=structure_hash,
+        )
         store = self.store
 
         def mutate(uow):

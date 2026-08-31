@@ -30,6 +30,24 @@ SOURCE_BINDING = AgentBindingLayers(
 )
 
 
+@pytest.fixture(autouse=True)
+def _canonical_team_binding_source(monkeypatch) -> None:
+    """Freeze source_finder from Team members, the current binding SSOT."""
+
+    monkeypatch.setattr(
+        "core.web.services.team_service.list_team_role_binding_sources",
+        lambda _team_id: {
+            "team_exists": True,
+            "members": [
+                {
+                    "agentId": "agent-source-finder",
+                    "role": "source_finder",
+                }
+            ],
+        },
+    )
+
+
 def run_input_request(*, team_id: str = "acceptance-research-team") -> dict:
     return {
         "teamId": team_id,
@@ -295,7 +313,12 @@ def test_http_create_rejects_client_authored_frozen_contract(tmp_path: Path) -> 
         run_store=store,
         checkpoint_path=str(tmp_path / "checkpoints.sqlite"),
     )
-    client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
+    web_dist = tmp_path / "web-dist"
+    web_dist.mkdir()
+    (web_dist / "index.html").write_text("<!doctype html><title>fixture</title>", encoding="utf-8")
+    app = create_app()
+    app.state.serving_frontend_dist = str(web_dist)
+    client = TestClient(app, headers={CONTROL_TOKEN_HEADER: get_control_token()})
 
     rejected = client.post(
         f"/api/research/workflows/{CHALLENGE_CUP_WORKFLOW_ID}/runs",
@@ -434,16 +457,48 @@ def test_node_completion_records_real_artifact_receipt_handoff_and_next_ready_no
     }
     artifact_payloads = {
         manifest["artifactId"]: {
-            "perspectives": ["技术路线", "可验证性"],
+            "perspectives": [
+                "mechanism",
+                "independent_baseline",
+                "limitation_or_null",
+                "falsification",
+            ],
             "queries": ["predictive coding evidence", "challenge cup baseline"],
             "candidateSources": [
-                {"sourceId": "source-1", "url": "https://example.test/source-1"}
+                {
+                    "sourceId": "source-1",
+                    "url": "https://example.test/source-1",
+                    "perspective": "mechanism",
+                },
+                {
+                    "sourceId": "source-baseline-1",
+                    "url": "https://example.test/source-baseline-1",
+                    "perspective": "independent_baseline",
+                },
+                {
+                    "sourceId": "source-counter-1",
+                    "url": "https://example.test/source-counter-1",
+                    "perspective": "falsification",
+                },
             ],
             "counterEvidenceCandidateSources": [
                 {
                     "sourceId": "source-counter-1",
                     "perspective": "falsification",
                 }
+            ],
+            "searchTrace": [
+                {
+                    "perspective": perspective,
+                    "status": "found",
+                    "eventIds": [f"event-{perspective}"],
+                }
+                for perspective in (
+                    "mechanism",
+                    "independent_baseline",
+                    "limitation_or_null",
+                    "falsification",
+                )
             ],
         }
     }

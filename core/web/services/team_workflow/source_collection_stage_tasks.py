@@ -242,6 +242,12 @@ def source_collection_stage_task_writeback_contract(
         contract["resultContract"] = _source_collection_relations_result_contract(
             allowed_relation_endpoint_ids or []
         )
+    if normalize_source_collection_stage_id(stage_id, default="") == "finding":
+        from .source_collection.writeback_materialize import (
+            finding_resolved_search_envelope,
+        )
+
+        contract["searchEnvelope"] = finding_resolved_search_envelope()
     return contract
 
 

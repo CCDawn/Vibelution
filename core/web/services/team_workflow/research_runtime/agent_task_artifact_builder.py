@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from core.research.workflow.contracts import ArtifactManifest
-from core.research.workflow.definition import build_challenge_cup_workflow_definition
+from core.research.workflow.definition_registry import resolve_definition_for_run_record
 from core.research.workflow.models import WorkflowNodeSpec
 
 from .artifact_readback_registry import load_scoped_artifact_payload
@@ -13,6 +13,9 @@ from .evidence_relation_artifact import build_evidence_relation_artifact
 from .human_gate_artifacts import canonical_sha256
 from .source_extraction_evidence_cards import (
     build_source_extraction_evidence_cards,
+)
+from ..source_collection.search_execution import (
+    project_source_collection_search_trace,
 )
 
 
@@ -26,7 +29,10 @@ def _unique_text(values: list[object]) -> list[str]:
 
 
 def _source_artifact_ids(record: dict[str, Any], node_id: str) -> list[str]:
-    definition = build_challenge_cup_workflow_definition()
+    definition = resolve_definition_for_run_record(
+        record,
+        expected_node_ids=[node_id],
+    )
     required_kinds = {
         kind
         for edge in definition.edges
@@ -51,39 +57,89 @@ def _source_finding_payload(
     materialized = dict(
         task.get("materializedSources")
         or result.get("materializedSources")
+        or (
+            task.get("writeback", {}).get("materializedSources")
+            if isinstance(task.get("writeback"), dict)
+            else {}
+        )
         or {}
     )
-    records = [dict(item) for item in materialized.get("createdRecords") or [] if isinstance(item, dict)]
-    candidates = [dict(item) for item in materialized.get("importedCandidates") or [] if isinstance(item, dict)]
+    lineage = [
+        dict(item)
+        for item in materialized.get("lineage") or []
+        if isinstance(item, dict)
+    ]
+    lineage_by_fingerprint = {
+        str(item.get("fingerprint") or "").strip(): item
+        for item in lineage
+        if str(item.get("fingerprint") or "").strip()
+    }
+    lineage_by_lead_id = {
+        str(item.get("leadId") or "").strip(): item
+        for item in lineage
+        if str(item.get("leadId") or "").strip()
+    }
     candidate_sources: list[dict[str, Any]] = []
-    for index, lead in enumerate(leads):
-        source_record = records[index] if index < len(records) else {}
-        candidate = candidates[index] if index < len(candidates) else {}
+    for lead in leads:
+        lead_fingerprint = str(lead.get("fingerprint") or "").strip()
+        lead_id = str(lead.get("leadId") or "").strip()
+        lineage_entry = (
+            lineage_by_fingerprint.get(lead_fingerprint)
+            if lead_fingerprint
+            else None
+        ) or (lineage_by_lead_id.get(lead_id) if lead_id else None)
+        if not lineage_entry:
+            continue
+        source_record = (
+            dict(lineage_entry.get("record"))
+            if isinstance(lineage_entry.get("record"), dict)
+            else {}
+        )
+        candidate = (
+            dict(lineage_entry.get("candidate"))
+            if isinstance(lineage_entry.get("candidate"), dict)
+            else {}
+        )
+        candidate_id = str(candidate.get("candidateId") or "").strip()
+        record_id = str(source_record.get("recordId") or "").strip()
+        if not candidate_id and not record_id:
+            continue
         candidate_sources.append(
             {
                 **lead,
                 "sourceId": str(
-                    candidate.get("candidateId")
-                    or source_record.get("recordId")
-                    or lead.get("locator")
-                    or ""
+                    candidate_id or record_id
                 ),
-                "candidateId": str(candidate.get("candidateId") or ""),
-                "recordId": str(source_record.get("recordId") or ""),
+                "candidateId": candidate_id,
+                "recordId": record_id,
                 "sourceRef": str(
                     source_record.get("sourceRef") or lead.get("locator") or ""
                 ),
             }
         )
-    queries = _unique_text([item.get("query") for item in leads])
+    source_collection_run_id = str(
+        task.get("sourceCollectionRunId")
+        or record.get("sourceCollectionRunId")
+        or ""
+    ).strip()
+    search_trace = project_source_collection_search_trace(
+        str(record.get("teamId") or ""),
+        source_collection_run_id,
+        assignment_id=str(task.get("assignmentId") or "").strip(),
+        assignment_ids=[
+            str(item or "").strip()
+            for item in task.get("assignmentIds") or []
+            if str(item or "").strip()
+        ],
+    )
+    queries = _unique_text(
+        [item.get("query") for item in leads]
+        + [item.get("query") for item in search_trace]
+    )
     explicit_perspectives = _unique_text(
         [item.get("perspective") or item.get("perspectiveId") for item in leads]
+        + [item.get("perspective") for item in search_trace]
     )
-    search_trace = [
-        dict(item)
-        for item in result.get("searchTrace") or []
-        if isinstance(item, dict)
-    ]
     counter_perspectives = {"limitation_or_null", "falsification"}
     counter_candidates = [
         dict(item)

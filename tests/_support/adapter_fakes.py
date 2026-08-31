@@ -40,6 +40,19 @@ class FakeDomainPorts:
 
     # ------------------------------------------------------------- ports
 
+    def required_artifact_kinds(self, action: PendingAction) -> tuple[str, ...]:
+        from core.research.workflow.definition import (
+            build_challenge_cup_workflow_definition,
+        )
+        from core.web.services.team_workflow.research_runtime.artifact_readback_registry import (
+            required_artifact_kinds,
+        )
+
+        return required_artifact_kinds(
+            action.node_id,
+            definition=build_challenge_cup_workflow_definition(),
+        )
+
     def read_back_input(self, action: PendingAction) -> ReadBackVerdict:
         self.calls.append("read_back_input")
         if self.fail_input_readback or self.input_ok.get(action.action_id) is False:
@@ -93,11 +106,7 @@ class FakeDomainPorts:
             self.calls.append("execute_agent_turn(cached)")
             return existing
         self.calls.append("execute_agent_turn")
-        from core.web.services.team_workflow.research_runtime.artifact_readback_registry import (
-            required_artifact_kinds,
-        )
-
-        kinds = required_artifact_kinds(action.node_id) or ("evidence_card_batch",)
+        kinds = self.required_artifact_kinds(action) or ("evidence_card_batch",)
         refs: list[dict[str, str]] = []
         actual_hash = "b" * 64 if self.fail_artifact_hash else "a" * 64
         for kind in kinds:

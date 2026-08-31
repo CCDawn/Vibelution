@@ -113,9 +113,7 @@ class AgentActionAdapter:
                 anchor=None,
                 budget_receipt=None,
             )
-        from ..artifact_readback_registry import required_artifact_kinds
-
-        required = required_artifact_kinds(action.node_id)
+        required = self._ports.required_artifact_kinds(action)
         if required and not result.materialized_refs:
             return VerifiedDomainResult(
                 action_id=action.action_id,
@@ -290,8 +288,6 @@ class SystemActionAdapter:
         )
 
     def verify(self, action: PendingAction, result: AdapterResult) -> VerifiedDomainResult:
-        from ..artifact_readback_registry import required_artifact_kinds
-
         runner_id = str((result.usage or {}).get("compute") or "").strip()
         if not runner_id:
             return VerifiedDomainResult(
@@ -305,7 +301,7 @@ class SystemActionAdapter:
                     "detail": f"{action.node_id} requires a non-empty runnerId",
                 },
             )
-        required = required_artifact_kinds(action.node_id)
+        required = self._ports.required_artifact_kinds(action)
         if required and not result.materialized_refs:
             return VerifiedDomainResult(
                 action_id=action.action_id,

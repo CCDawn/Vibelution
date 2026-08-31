@@ -1219,6 +1219,11 @@ def start_source_collection_stage_session_task(
         "candidateCount": len(source_candidates),
         "assignmentCount": len(assignments),
         "matchingAssignmentCount": len(matching_assignments),
+        "assignmentIds": [
+            s._trim_text(item.get("assignmentId"), max_length=128)
+            for item in matching_assignments
+            if s._trim_text(item.get("assignmentId"), max_length=128)
+        ],
         "storageArtifacts": storage_artifacts,
         "writebackContract": writeback_contract,
         "taskToolRequired": False,

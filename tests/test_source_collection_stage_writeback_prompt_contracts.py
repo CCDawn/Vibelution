@@ -1,5 +1,7 @@
 """Finding prompts require balanced, traceable evidence discovery."""
 
+import pytest
+
 from core.web.services.team_workflow.source_collection.relation_endpoints import (
     build_relation_endpoint_registry,
     normalize_relation_endpoint_token,
@@ -13,6 +15,7 @@ from core.web.services.team_workflow.source_collection_stage_tasks import (
     source_collection_stage_task_writeback_contract,
 )
 from core.web.services.team_workflow.source_collection.writeback_materialize import (
+    _enforce_source_collection_finding_writeback_batch_limits,
     _merge_source_collection_stage_writeback_agent_graph,
     _source_collection_stage_writeback_agent_graph_payload,
 )
@@ -25,8 +28,8 @@ def test_finding_prompt_requires_counter_search_without_fabrication() -> None:
     assert "independent_baseline" in prompt
     assert "limitation_or_null" in prompt
     assert "falsification" in prompt
-    assert "result.searchTrace[]" in prompt
-    assert "status=found/no_credible_source" in prompt
+    assert "canonical searchTrace" in prompt
+    assert "Agent 自报 `result.searchTrace[]` 不作为审计权威" in prompt
     assert "status=needs_review" in prompt
     assert "不得伪造负面资料" in prompt
 
@@ -56,8 +59,11 @@ def test_finding_prompt_states_writeback_budget_with_hard_limits() -> None:
     prompt = "\n".join(lines)
 
     assert "写回预算" in prompt
-    assert "最多接受 1 个检索写回批次" in prompt
-    assert "每批 `candidateLeads[]` 最多 5 条" in prompt
+    assert "总计最多接受 8 条去重来源" in prompt
+    assert "最多 4 个写回批次" in prompt
+    assert "每批 `candidateLeads[]` 最多 4 条" in prompt
+    assert "实际接受上限取小为 8 条" in prompt
+    assert "重复/复用来源不重复消耗总预算" in prompt
     assert "写回收口并结束任务" in prompt
     rolling_index = next(index for index, line in enumerate(lines) if "滚动写回" in line)
     budget_index = next(index for index, line in enumerate(lines) if "写回预算" in line)
@@ -67,16 +73,73 @@ def test_finding_prompt_states_writeback_budget_with_hard_limits() -> None:
 def test_finding_writeback_limits_are_env_overridable(monkeypatch) -> None:
     from core.web.services.team_workflow.source_collection import writeback_materialize
 
-    assert writeback_materialize.finding_max_writeback_batches_per_task() == 1
-    assert writeback_materialize.finding_max_leads_per_writeback_batch() == 5
+    assert writeback_materialize.finding_max_writeback_batches_per_task() == 4
+    assert writeback_materialize.finding_max_leads_per_writeback_batch() == 4
     monkeypatch.setenv("VIBELUTION_FINDING_MAX_WRITEBACK_BATCHES_PER_TASK", "3")
     monkeypatch.setenv("VIBELUTION_FINDING_MAX_LEADS_PER_WRITEBACK_BATCH", "8")
     assert writeback_materialize.finding_max_writeback_batches_per_task() == 3
     assert writeback_materialize.finding_max_leads_per_writeback_batch() == 8
     monkeypatch.setenv("VIBELUTION_FINDING_MAX_WRITEBACK_BATCHES_PER_TASK", "not-a-number")
     monkeypatch.setenv("VIBELUTION_FINDING_MAX_LEADS_PER_WRITEBACK_BATCH", "-2")
-    assert writeback_materialize.finding_max_writeback_batches_per_task() == 1
-    assert writeback_materialize.finding_max_leads_per_writeback_batch() == 5
+    assert writeback_materialize.finding_max_writeback_batches_per_task() == 4
+    assert writeback_materialize.finding_max_leads_per_writeback_batch() == 4
+
+
+def test_finding_contract_freezes_resolved_search_envelope(monkeypatch) -> None:
+    monkeypatch.setenv("VIBELUTION_FINDING_MAX_WRITEBACK_BATCHES_PER_TASK", "2")
+    monkeypatch.setenv("VIBELUTION_FINDING_MAX_LEADS_PER_WRITEBACK_BATCH", "6")
+    contract = source_collection_stage_task_writeback_contract(
+        "team-a",
+        "run-a",
+        "task-a",
+        stage_id="finding",
+        agent_id="agent-a",
+        agent_role="source_finder",
+        schema_version=1,
+    )
+    assert contract["searchEnvelope"] == {
+        "schemaVersion": 1,
+        "totalAcceptedLeadBudget": 8,
+        "maxLeadsPerWriteback": 6,
+        "maxWritebackBatches": 2,
+        "effectiveAcceptedLeadLimit": 8,
+        "requiredPerspectives": [
+            "mechanism",
+            "independent_baseline",
+            "limitation_or_null",
+            "falsification",
+        ],
+        "authority": "task_creation_resolved",
+    }
+
+    # Later process-env changes cannot alter an already-created task.
+    monkeypatch.setenv("VIBELUTION_FINDING_MAX_WRITEBACK_BATCHES_PER_TASK", "1")
+    monkeypatch.setenv("VIBELUTION_FINDING_MAX_LEADS_PER_WRITEBACK_BATCH", "1")
+    task = {
+        "taskId": "task-a",
+        "stageId": "finding",
+        "agentRole": "source_finder",
+        "writebackContract": contract,
+    }
+    first = [
+        {"title": f"Source {index}", "locator": f"https://example.test/{index}"}
+        for index in range(6)
+    ]
+    second = [
+        {"title": f"Source {index}", "locator": f"https://example.test/{index}"}
+        for index in range(6, 8)
+    ]
+    _enforce_source_collection_finding_writeback_batch_limits(task, first)
+    _enforce_source_collection_finding_writeback_batch_limits(task, second)
+    assert sum(
+        int(item["newAcceptedLeadCount"])
+        for item in task["sourceCollectionWritebackBatches"]
+    ) == 8
+    with pytest.raises(Exception, match="检索批次已达上限"):
+        _enforce_source_collection_finding_writeback_batch_limits(
+            task,
+            [{"title": "Source 9", "locator": "https://example.test/9"}],
+        )
 
 
 def test_extraction_contract_states_nested_findings_carry_fact_themselves() -> None:

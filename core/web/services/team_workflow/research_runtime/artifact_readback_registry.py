@@ -69,13 +69,16 @@ def resolve_artifact_authority(kind: str) -> ArtifactAuthoritySpec | None:
     return ARTIFACT_AUTHORITY.get(str(kind or "").strip())
 
 
-def required_artifact_kinds(node_id: str) -> tuple[str, ...]:
-    from core.research.workflow.definition import build_challenge_cup_workflow_definition
-
+def required_artifact_kinds(
+    node_id: str,
+    *,
+    definition: Any,
+) -> tuple[str, ...]:
+    """Return produced kinds from the caller's already-pinned definition."""
     node = next(
         (
             item
-            for item in build_challenge_cup_workflow_definition().nodes
+            for item in definition.nodes
             if item.nodeId == node_id
         ),
         None,

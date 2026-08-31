@@ -8,6 +8,7 @@ dispatching / Outbox in leased when execute/preflight/read-back/verify raises.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -231,7 +232,18 @@ def _seed_run_with_snapshot(harness: CommandHarness, *, run_id: str, snapshot: d
 
     from tests._support.workflow_ledger_helpers import build_event_record, build_run_record
 
-    record = build_run_record(run_id=run_id, last_event_sequence=1)
+    from core.research.workflow.definition_registry import register_or_resolve
+
+    identity = register_or_resolve(build_challenge_cup_workflow_definition())
+    record = replace(
+        build_run_record(
+            run_id=run_id,
+            workflow_id=identity.workflowId,
+            workflow_version_id=identity.workflowVersionId,
+            last_event_sequence=1,
+        ),
+        structure_hash=identity.structureHash,
+    )
     snapshot_json = json.dumps(snapshot, ensure_ascii=False)
 
     def mutate(uow):
@@ -794,6 +806,11 @@ def test_ledger_ports_result_package_bounded_without_projection(
 def test_ledger_ports_unknown_system_node_still_refuses(tmp_path: Path) -> None:
     harness = CommandHarness(tmp_path / "ledger-unknown-sys.sqlite3")
     try:
+        _seed_run_with_snapshot(
+            harness,
+            run_id="run-test",
+            snapshot={"snapshotHash": "a" * 64, "teamId": "team-test"},
+        )
         ports = RealDomainPorts(harness.store)
         action = PendingAction(
             action_id="act-unknown-sys",
@@ -808,7 +825,7 @@ def test_ledger_ports_unknown_system_node_still_refuses(tmp_path: Path) -> None:
             binding_snapshot_id=None,
             budget_policy_hash="p-1",
         )
-        with pytest.raises(RuntimeError, match="no system executor wired"):
+        with pytest.raises(RuntimeError, match="missingNodes"):
             ports.execute_system_action(action=action)
     finally:
         harness.close()

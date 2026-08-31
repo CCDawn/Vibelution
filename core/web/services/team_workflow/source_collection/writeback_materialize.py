@@ -25,8 +25,15 @@ from .relation_endpoints import build_relation_endpoint_registry, resolve_relati
 # finding 阶段写回批次硬上限（finding 闭合化第一步，O5）：滚动写回仍然成立，
 # 但每批 candidateLeads[] 有界、每任务总批次有上限；超过即拒绝该批并返回结构化
 # 错误，闭合 finding 阶段的开放式检索循环。默认值可用环境变量覆盖。
-FINDING_MAX_WRITEBACK_BATCHES_PER_TASK = 1
-FINDING_MAX_LEADS_PER_WRITEBACK_BATCH = 5
+FINDING_TOTAL_ACCEPTED_LEAD_BUDGET = 8
+FINDING_MAX_WRITEBACK_BATCHES_PER_TASK = 4
+FINDING_MAX_LEADS_PER_WRITEBACK_BATCH = 4
+FINDING_REQUIRED_PERSPECTIVES = (
+    "mechanism",
+    "independent_baseline",
+    "limitation_or_null",
+    "falsification",
+)
 _FINDING_MAX_WRITEBACK_BATCHES_PER_TASK_ENV = "VIBELUTION_FINDING_MAX_WRITEBACK_BATCHES_PER_TASK"
 _FINDING_MAX_LEADS_PER_WRITEBACK_BATCH_ENV = "VIBELUTION_FINDING_MAX_LEADS_PER_WRITEBACK_BATCH"
 
@@ -57,6 +64,41 @@ def finding_max_leads_per_writeback_batch() -> int:
         _FINDING_MAX_LEADS_PER_WRITEBACK_BATCH_ENV,
         FINDING_MAX_LEADS_PER_WRITEBACK_BATCH,
     )
+
+
+def finding_resolved_search_envelope() -> dict[str, Any]:
+    """Resolve compatibility inputs once when a finding task is created."""
+    max_batches = finding_max_writeback_batches_per_task()
+    max_leads = finding_max_leads_per_writeback_batch()
+    return {
+        "schemaVersion": 1,
+        "totalAcceptedLeadBudget": FINDING_TOTAL_ACCEPTED_LEAD_BUDGET,
+        "maxLeadsPerWriteback": max_leads,
+        "maxWritebackBatches": max_batches,
+        "effectiveAcceptedLeadLimit": min(
+            FINDING_TOTAL_ACCEPTED_LEAD_BUDGET,
+            max_batches * max_leads,
+        ),
+        "requiredPerspectives": list(FINDING_REQUIRED_PERSPECTIVES),
+        "authority": "task_creation_resolved",
+    }
+
+
+def _finding_search_envelope_for_task(task: dict[str, Any]) -> dict[str, Any]:
+    writeback_contract = (
+        task.get("writebackContract")
+        if isinstance(task.get("writebackContract"), dict)
+        else {}
+    )
+    frozen = (
+        writeback_contract.get("searchEnvelope")
+        if isinstance(writeback_contract.get("searchEnvelope"), dict)
+        else {}
+    )
+    if frozen:
+        return dict(frozen)
+    # Read compatibility inputs only for pre-envelope tasks.
+    return finding_resolved_search_envelope()
 
 
 def _finding_writeback_batch_fingerprints(leads: list[dict[str, Any]]) -> list[str]:
@@ -93,14 +135,19 @@ def _enforce_source_collection_finding_writeback_batch_limits(
     agent_role = s._normalize_source_collection_agent_role(task.get("agentRole"))
     if stage_id != "finding" and agent_role != "source_finder":
         return
-    max_leads = finding_max_leads_per_writeback_batch()
+    envelope = _finding_search_envelope_for_task(task)
+    max_leads = max(1, int(envelope.get("maxLeadsPerWriteback") or 1))
     if len(leads) > max_leads:
         raise s.TeamWorkflowOrchestrationError(
             f"单批写回 candidateLeads[] 超过上限（{len(leads)} 条 > 每批最多 {max_leads} 条）；"
             "请把本批压缩到上限内写回；检索批次已达上限时，"
             "请立即以现有 searchTrace[] 与 candidateLeads[] 写回收口并结束任务。"
         )
-    max_batches = finding_max_writeback_batches_per_task()
+    max_batches = max(1, int(envelope.get("maxWritebackBatches") or 1))
+    accepted_lead_limit = max(
+        1,
+        int(envelope.get("effectiveAcceptedLeadLimit") or 1),
+    )
     lead_fingerprints = _finding_writeback_batch_fingerprints(leads)
     batch_fingerprint = _finding_writeback_batch_digest(lead_fingerprints)
     ledger = [
@@ -116,12 +163,30 @@ def _enforce_source_collection_finding_writeback_batch_limits(
             f"检索批次已达上限（本任务最多 {max_batches} 批）；"
             "请立即以现有 searchTrace[] 与 candidateLeads[] 写回收口并结束任务。"
         )
+    previously_accepted = {
+        s._trim_text(fingerprint, max_length=240)
+        for item in ledger
+        for fingerprint in list(item.get("leadFingerprints") or [])
+        if s._trim_text(fingerprint, max_length=240)
+    }
+    new_fingerprints = [
+        fingerprint
+        for fingerprint in lead_fingerprints
+        if fingerprint not in previously_accepted
+    ]
+    if len(previously_accepted) + len(new_fingerprints) > accepted_lead_limit:
+        raise s.TeamWorkflowOrchestrationError(
+            "检索候选已达任务接受上限"
+            f"（最多 {accepted_lead_limit} 条去重来源）；"
+            "请立即以现有服务端检索回执与 candidateLeads[] 写回收口并结束任务。"
+        )
     task["sourceCollectionWritebackBatches"] = [
         *ledger,
         {
             "batchFingerprint": batch_fingerprint,
             "leadCount": len(leads),
             "leadFingerprints": lead_fingerprints[:80],
+            "newAcceptedLeadCount": len(new_fingerprints),
             "recordedAt": s.utc_now_iso(),
         },
     ]
@@ -796,6 +861,13 @@ def _materialize_source_collection_stage_writeback_sources(
         return record_materialized
 
     leads = s._source_collection_stage_writeback_source_leads(result)
+    task_id = s._trim_text(task.get("taskId"), max_length=160)
+    for lead in leads:
+        fingerprint = s._source_collection_stage_writeback_lead_fingerprint(lead)
+        lead["fingerprint"] = fingerprint
+        lead["leadId"] = "lead-" + hashlib.sha256(
+            f"{task_id}|{fingerprint}".encode("utf-8", errors="replace")
+        ).hexdigest()[:24]
     # finding 写回批次硬上限（O5）：在物化任何来源前强制，超限即拒绝整批。
     _enforce_source_collection_finding_writeback_batch_limits(task, leads)
     invalid_sources = s._source_collection_stage_writeback_invalid_sources(result)
@@ -819,6 +891,7 @@ def _materialize_source_collection_stage_writeback_sources(
 
     created_records: list[dict[str, Any]] = []
     imported_candidates: list[dict[str, Any]] = []
+    lineage: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = [*invalid_skipped]
     failed: list[dict[str, Any]] = []
     normalized_team_id = s._trim_text(team_id, max_length=128)
@@ -826,9 +899,17 @@ def _materialize_source_collection_stage_writeback_sources(
     stage_id = s._trim_text(task.get("stageId"), max_length=80)
     agent_id = s._trim_text(task.get("agentId"), max_length=160)
     agent_role = s._trim_text(task.get("agentRole"), max_length=80)
-    task_id = s._trim_text(task.get("taskId"), max_length=160)
 
     for index, lead in enumerate(leads, start=1):
+        fingerprint = s._trim_text(lead.get("fingerprint"), max_length=240)
+        lead_id = s._trim_text(lead.get("leadId"), max_length=160)
+        lineage_entry: dict[str, Any] = {
+            "fingerprint": fingerprint,
+            "leadId": lead_id,
+            "record": {"status": "failed", "recordId": ""},
+            "candidate": {"status": "not_attempted", "candidateId": ""},
+            "reason": "",
+        }
         record_payload = s._source_collection_stage_writeback_record_payload(
             lead,
             team_id=normalized_team_id,
@@ -840,6 +921,8 @@ def _materialize_source_collection_stage_writeback_sources(
             index=index,
         )
         if not record_payload:
+            lineage_entry["reason"] = "insufficient_source_identity"
+            lineage.append(lineage_entry)
             skipped.append(
                 {
                     "reason": "insufficient_source_identity",
@@ -850,10 +933,13 @@ def _materialize_source_collection_stage_writeback_sources(
             continue
         source_identity_key = s._source_collection_record_identity_key(record_payload)
         record = existing_identity_records.get(source_identity_key) if source_identity_key else None
+        record_reused = record is not None
         if record is None:
             try:
                 record = s.data_processing_service.add_record(normalized_run_id, record_payload)
             except s.data_processing_service.DataProcessingError as exc:
+                lineage_entry["reason"] = "data_record_create_failed"
+                lineage.append(lineage_entry)
                 failed.append(
                     {
                         "reason": "data_record_create_failed",
@@ -866,6 +952,15 @@ def _materialize_source_collection_stage_writeback_sources(
             created_records.append(record)
             if source_identity_key:
                 existing_identity_records[source_identity_key] = record
+        record_id = s._trim_text(record.get("recordId"), max_length=160)
+        lineage_entry["record"] = {
+            "status": "reused" if record_reused else "created",
+            "recordId": record_id,
+            "sourceRef": s._trim_text(
+                record.get("sourceRef") or record.get("rawLocation"),
+                max_length=2000,
+            ),
+        }
         try:
             import_response = s.import_data_record_as_source_candidate(
                 normalized_team_id,
@@ -886,6 +981,9 @@ def _materialize_source_collection_stage_writeback_sources(
                 },
             )
         except s.TeamWorkflowOrchestrationError as exc:
+            lineage_entry["candidate"] = {"status": "failed", "candidateId": ""}
+            lineage_entry["reason"] = "candidate_import_failed"
+            lineage.append(lineage_entry)
             failed.append(
                 {
                     "reason": "candidate_import_failed",
@@ -903,6 +1001,10 @@ def _materialize_source_collection_stage_writeback_sources(
                     "title": s._trim_text(candidate.get("title") or record.get("title"), max_length=240),
                 }
             )
+            lineage_entry["candidate"] = {
+                "status": "created",
+                "candidateId": s._trim_text(candidate.get("candidateId"), max_length=160),
+            }
         else:
             candidate = import_response.get("candidate") if isinstance(import_response.get("candidate"), dict) else {}
             skipped.append(
@@ -912,6 +1014,12 @@ def _materialize_source_collection_stage_writeback_sources(
                     "candidateId": s._trim_text(candidate.get("candidateId"), max_length=160),
                 }
             )
+            lineage_entry["candidate"] = {
+                "status": "reused",
+                "candidateId": s._trim_text(candidate.get("candidateId"), max_length=160),
+            }
+            lineage_entry["reason"] = "duplicate_source_candidate"
+        lineage.append(lineage_entry)
 
     summary = s._source_collection_stage_writeback_materialization_summary(
         status="completed",
@@ -921,6 +1029,7 @@ def _materialize_source_collection_stage_writeback_sources(
         excluded_sources=excluded_sources,
         skipped=skipped,
         failed=failed,
+        lineage=lineage,
     )
     s._record_workflow_event(
         "source_collection.stage_session_task_sources_materialized",
@@ -2775,6 +2884,7 @@ def _source_collection_stage_writeback_materialization_summary(
     excluded_sources: list[dict[str, Any]] | None = None,
     skipped: list[dict[str, Any]] | None = None,
     failed: list[dict[str, Any]] | None = None,
+    lineage: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     s = _service()
     normalized_skipped = [item for item in list(skipped or []) if isinstance(item, dict)]
@@ -2802,6 +2912,10 @@ def _source_collection_stage_writeback_materialization_summary(
         "excludedSources": normalized_excluded[:24],
         "skipped": normalized_skipped[:24],
         "failed": [item for item in list(failed or []) if isinstance(item, dict)][:24],
+        # Authoritative identity binding is intentionally complete. The
+        # bounded arrays above are diagnostics and must never be joined by
+        # position to reconstruct provenance.
+        "lineage": [item for item in list(lineage or []) if isinstance(item, dict)],
     }
 
 
@@ -2814,6 +2928,9 @@ def _merge_source_collection_stage_writeback_result_payload(
     s = _service()
     if not isinstance(incoming, dict) or not incoming:
         return {}
+    stage_id = s._normalize_source_collection_stage_id(task.get("stageId"), default="")
+    agent_role = s._normalize_source_collection_agent_role(task.get("agentRole"))
+    merge_candidate_leads = stage_id == "finding" or agent_role == "source_finder"
     merged_previous: dict[str, Any] = {}
     for ancestor_result in s._source_collection_stage_retry_ancestor_results(team_id, run_id, task):
         merged_previous = s._merge_source_collection_stage_writeback_result_pair(
@@ -2821,6 +2938,7 @@ def _merge_source_collection_stage_writeback_result_payload(
             run_id,
             merged_previous,
             ancestor_result,
+            merge_candidate_leads=merge_candidate_leads,
         )
     previous_writeback = task.get("writeback") if isinstance(task.get("writeback"), dict) else {}
     previous_result = previous_writeback.get("result") if isinstance(previous_writeback.get("result"), dict) else {}
@@ -2832,12 +2950,14 @@ def _merge_source_collection_stage_writeback_result_payload(
             run_id,
             merged_previous,
             previous_result,
+            merge_candidate_leads=merge_candidate_leads,
         )
     return s._merge_source_collection_stage_writeback_result_pair(
         team_id,
         run_id,
         merged_previous,
         incoming,
+        merge_candidate_leads=merge_candidate_leads,
     )
 
 
@@ -2846,6 +2966,8 @@ def _merge_source_collection_stage_writeback_result_pair(
     run_id: str,
     previous_result: dict[str, Any],
     incoming: dict[str, Any],
+    *,
+    merge_candidate_leads: bool,
 ) -> dict[str, Any]:
     s = _service()
     if not previous_result:
@@ -2863,6 +2985,35 @@ def _merge_source_collection_stage_writeback_result_pair(
         for item in s._source_collection_stage_records_for_run(run_id)
         if s._trim_text(item.get("recordId"), max_length=160)
     }
+    if merge_candidate_leads:
+        s._merge_source_collection_stage_writeback_array_group(
+            merged,
+            previous_result,
+            incoming,
+            canonical_key="candidateLeads",
+            aliases=(
+                "candidateLeads",
+                "candidate_leads",
+                "sourceRecords",
+                "source_records",
+                "sourceCandidates",
+                "source_candidates",
+                "sources",
+                "records",
+                "createdRecords",
+                "created_records",
+                "newPapers",
+                "new_papers",
+            ),
+            containers=("searchFrame", "handoff", "result", "outputs", "summary"),
+            item_id=lambda item: hashlib.sha256(
+                s._source_collection_stage_writeback_lead_fingerprint(item).encode(
+                    "utf-8", errors="replace"
+                )
+            ).hexdigest(),
+            valid_existing_ids=set(),
+            max_items=80,
+        )
     s._merge_source_collection_stage_writeback_array_group(
         merged,
         previous_result,

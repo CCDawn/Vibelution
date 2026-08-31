@@ -50,6 +50,15 @@ from core.web.services.team_workflow.research_runtime.checkpoint_lifecycle impor
 from core.web.services.team_workflow.research_runtime.run_fork import (
     build_child_run_skeleton,
 )
+from core.research.workflow.knowledge_sideflow_definition import (
+    build_challenge_cup_workflow_definition_v3,
+)
+from core.web.services.team_workflow.research_runtime.agent_task_artifact_builder import (
+    _source_artifact_ids,
+)
+from core.web.services.team_workflow.research_runtime.handoff_builder import (
+    build_handoff_record,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -129,6 +138,29 @@ def pinned_run_record(definition: WorkflowDefinition, run_id: str = "run-pinned"
         "completedNodeIds": [],
         "runtimeCurrentNodeIds": [],
     }
+
+
+def test_v3_downstream_artifact_and_handoff_use_pinned_definition() -> None:
+    definition = build_challenge_cup_workflow_definition_v3()
+    record = pinned_run_record(definition, run_id="run-v3-downstream")
+    record["artifactManifests"] = [
+        {"artifactId": "problem_understanding:current"},
+        {"artifactId": "knowledge_package:legacy-default"},
+    ]
+
+    assert _source_artifact_ids(record, "hypothesis_design") == [
+        "problem_understanding:current"
+    ]
+    handoff = build_handoff_record(
+        run_id=record["runId"],
+        workflow_id=record["workflowId"],
+        workflow_version_id=record["workflowVersionId"],
+        from_node_id="problem_understanding",
+        status="pending",
+        definition=definition,
+    )
+    assert handoff["toNodeId"] == "hypothesis_design"
+    assert handoff["edgeId"] == "e_problem_hypothesis"
 
 
 # --------------------------------------------------------------------------
