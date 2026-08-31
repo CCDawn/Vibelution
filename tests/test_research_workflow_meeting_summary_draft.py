@@ -346,11 +346,6 @@ def test_prepare_generation_repairs_stale_empty_candidate_draft(
     )
     agent_ids = [agents[role] for role in _ROLES]
 
-    def stale_drafter(meeting_round, source_messages):
-        draft = meeting_runtime.build_meeting_digest_draft(meeting_round, source_messages)
-        draft["proposedCandidates"] = []
-        return draft
-
     with server_operator_scope("u-1", roles=("operator",)):
         opened = chain.open_candidate_generation_meeting(
             team_id,
@@ -359,14 +354,21 @@ def test_prepare_generation_repairs_stale_empty_candidate_draft(
             background=False,
         )
         meeting_id = opened["meetingRound"]["meetingRoundId"]
-        stale = meeting_runtime.prepare_meeting_summary_draft(
-            team_id,
-            meeting_id,
-            actor=agent_ids[0],
-            force=False,
-            drafter=stale_drafter,
+        fresh = meeting_runtime.prepare_meeting_summary_draft(
+            team_id, meeting_id, actor=agent_ids[0], force=False
         )
-        assert stale["digestDraft"]["proposedCandidates"] == []
+        assert fresh["status"] == "awaiting_approval"
+        assert fresh["digestDraft"]["proposedCandidates"]
+
+        # A live drafter can no longer strip candidate markers (the
+        # deterministic marker merge overwrites them), so the stale state can
+        # only come from drafts stored before that fix: append an
+        # awaiting_approval record whose digestDraft lost proposedCandidates.
+        stale_round = dict(fresh["meetingRound"])
+        stale_draft = dict(fresh["digestDraft"])
+        stale_draft["proposedCandidates"] = []
+        stale_round["digestDraft"] = stale_draft
+        meetings._append_round_record(team_id, stale_round)
 
         repaired = meeting_runtime.prepare_meeting_summary_draft(
             team_id, meeting_id, actor=agent_ids[0], force=False
@@ -374,7 +376,10 @@ def test_prepare_generation_repairs_stale_empty_candidate_draft(
 
     assert repaired["status"] == "awaiting_approval"
     assert repaired["digestDraft"]["proposedCandidates"]
-    assert repaired["digestDraft"]["contentHash"] != stale["digestDraft"]["contentHash"]
+    assert (
+        repaired["digestDraft"]["proposedCandidates"]
+        == fresh["digestDraft"]["proposedCandidates"]
+    )
 
 
 def test_approve_review_digest_starts_one_collection(
