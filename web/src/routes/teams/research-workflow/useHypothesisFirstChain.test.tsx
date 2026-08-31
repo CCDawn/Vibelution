@@ -25,7 +25,7 @@ import {
 import type { HypothesisFirstStateV2 } from "../../../api/types/hypothesisFirst";
 import { queryKeys } from "../../../api/queryKeys";
 import {
-  HYPOTHESIS_FIRST_DEFAULT_ROUND_BUDGET,
+  HYPOTHESIS_FIRST_REVIEW_ROUND_LIMIT,
   hypothesisFirstChainCollectionRequestsKey,
   hypothesisFirstChainReviewRoundLinksKey,
   resolveHypothesisFirstRoundBudget,
@@ -736,24 +736,21 @@ describe("hypothesis-first round budget display contract", () => {
     return { convergence: { ...stateV2Payload().convergence, roundBudget } };
   }
 
-  it("prefers the canonical V2 convergence budget over the V1 projection", () => {
+  it("ignores historical V1/V2 budget values", () => {
     expect(resolveHypothesisFirstRoundBudget({
       stateV2: v2WithRoundBudget(4),
       chainState: { roundBudget: 3 },
-    })).toBe(4);
-  });
-
-  it("falls back to the V1 chain-state budget when no V2 snapshot exists", () => {
+    })).toBe(5);
     expect(resolveHypothesisFirstRoundBudget({
       stateV2: null,
       chainState: { roundBudget: 2 },
-    })).toBe(2);
+    })).toBe(5);
   });
 
-  it("defaults to the backend DEFAULT_ROUND_BUDGET when neither source has a value", () => {
-    expect(HYPOTHESIS_FIRST_DEFAULT_ROUND_BUDGET).toBe(3);
-    expect(resolveHypothesisFirstRoundBudget({ stateV2: null, chainState: null })).toBe(3);
-    expect(resolveHypothesisFirstRoundBudget({})).toBe(3);
+  it("publishes the single server-owned hard limit", () => {
+    expect(HYPOTHESIS_FIRST_REVIEW_ROUND_LIMIT).toBe(5);
+    expect(resolveHypothesisFirstRoundBudget({ stateV2: null, chainState: null })).toBe(5);
+    expect(resolveHypothesisFirstRoundBudget({})).toBe(5);
   });
 });
 

@@ -298,8 +298,8 @@ export function HypothesisFirstMeetingOps(props: {
       setReopenBlockedReason(
         openStatus === "budget_exhausted"
           ? (isZh
-            ? "失败轮已作废，但轮次预算已耗尽，无法开启新的评审轮；请在假说收敛卡提升预算并发起新一轮评审。"
-            : "The failed round was voided, but the round budget is exhausted; increase the budget on the convergence card to open another review round.")
+            ? "失败轮已作废，但已达到评审硬上限，假说仍未收敛。"
+            : "The failed round was voided, but the hard review limit was reached without convergence.")
           : null,
       );
       invalidate();

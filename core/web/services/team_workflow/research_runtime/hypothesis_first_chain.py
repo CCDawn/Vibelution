@@ -41,8 +41,7 @@ from core.research.workflow.contracts import ContractValidationError, scope_hash
 from core.research.workflow.definition import CHALLENGE_CUP_WORKFLOW_ID
 
 SCHEMA_VERSION = 1
-DEFAULT_ROUND_BUDGET = 3
-MAX_ROUND_BUDGET = 5
+HARD_ROUND_LIMIT = 5
 COLLECTION_REQUEST_KIND = "collection_request"
 REVIEW_ROUND_LINK_KIND = "review_round_link"
 CANDIDATE_KIND = "hypothesis_candidate"
@@ -3333,7 +3332,7 @@ def _record_review_round_link(
     collection_request_id: str,
     question_id: str,
     round_index: int,
-    round_budget: int = DEFAULT_ROUND_BUDGET,
+    round_budget: int = HARD_ROUND_LIMIT,
     candidate_id: str = "",
     candidate_order: int | None = None,
     selection_version: str = "",
@@ -3350,9 +3349,9 @@ def _record_review_round_link(
         "collectionRequestId": collection_request_id,
         "questionId": question_id,
         "roundIndex": round_index,
-        # Persist the effective budget so chain_state reads the raised limit
-        # (links written before this field fall back to the default).
-        "roundBudget": int(round_budget or DEFAULT_ROUND_BUDGET),
+        # Persist the single hard limit for audit/replay. Projection authority
+        # remains the server constant so historical values cannot lower it.
+        "roundBudget": HARD_ROUND_LIMIT,
         "candidateId": str(candidate_id or "").strip(),
         "candidateOrder": (
             int(candidate_order) if candidate_order is not None else None
@@ -3436,7 +3435,7 @@ def open_review_meeting_for_selection(
     previous_meeting_round_id: str = "",
     collection_request_id: str = "",
     meeting_round_id: str = "",
-    round_budget: int = DEFAULT_ROUND_BUDGET,
+    round_budget: int = HARD_ROUND_LIMIT,
     fan_out_selection: bool = False,
     _selection_version: str = "",
     _formal_candidate_id: str = "",
@@ -4860,16 +4859,16 @@ def _close_generation_meeting(
 
 def _normalize_budget(budget: Any) -> int:
     if budget is None:
-        return DEFAULT_ROUND_BUDGET
+        return HARD_ROUND_LIMIT
     try:
         normalized = int(budget)
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"round budget must be an integer: {budget!r}") from exc
-    if normalized < 1 or normalized > MAX_ROUND_BUDGET:
+        raise ValueError(f"round limit must be an integer: {budget!r}") from exc
+    if normalized != HARD_ROUND_LIMIT:
         raise ValueError(
-            f"round budget must stay within 1..{MAX_ROUND_BUDGET}: {normalized}"
+            f"round limit is fixed at {HARD_ROUND_LIMIT}: {normalized}"
         )
-    return normalized
+    return HARD_ROUND_LIMIT
 
 
 def reopen_failed_review_meeting(
@@ -4938,11 +4937,12 @@ def open_next_review_meeting(
     budget: Any = None,
     fan_out_selection: bool = False,
 ) -> dict[str, Any]:
-    """Open the next review round after knowledge back-fill, budget-gated.
+    """Open the next review round after knowledge back-fill, hard-limit gated.
 
-    The default budget is three discussion rounds; a human may raise it to at
-    most five.  Once the budget is reached no further meeting opens and the
-    result reports ``budget_exhausted`` so a manual decision happens instead.
+    Each completed meta-review decides whether the hypothesis has converged or
+    needs another round.  The only round limit is ``HARD_ROUND_LIMIT``; once it
+    is reached without convergence, no further meeting opens and the result
+    reports ``budget_exhausted`` for an explicit blocked/manual decision.
     """
     from core.web.services import team_service
     from core.web.services.team_workflow import hypothesis_selection as selections
@@ -7206,16 +7206,14 @@ def chain_state(
                 )
 
     baselines = _question_template_baselines(normalized_team_id, normalized_question_id)
-    # Budget authority lives on the current selection's links: raised limits
-    # are persisted per round, and exhaustion counts only this selection's
-    # rounds (superseded/older selections must not fake budget_exhausted).
+    # Exhaustion counts only the current selection's rounds. Persisted
+    # ``roundBudget`` values are historical replay data, not mutable authority;
+    # older runs written with the former default of 3 must inherit the single
+    # hard limit instead of blocking before the agent can decide round 4.
     selection_round_index = max(
         (int(item.get("roundIndex") or 0) for item in selection_links), default=0
     )
-    budget = max(
-        [int(item.get("roundBudget") or 0) for item in selection_links]
-        + [DEFAULT_ROUND_BUDGET]
-    )
+    budget = HARD_ROUND_LIMIT
     generation_meetings = (
         _question_generation_meetings(
             normalized_team_id,

@@ -162,34 +162,21 @@ export function inspectorNodeOwnsCurrentStep(nodeId: string, targetNodeId: strin
 }
 
 // ---------------------------------------------------------------------------
-// Review round budget contract (shared with the workspace progress display):
-// 当前预算 N = V2 convergence.roundBudget ?? V1 chainState.roundBudget ?? 3
-// (= backend DEFAULT_ROUND_BUDGET). The raise-to-5 number is only the action
-// semantic of open-next-review; the server re-authorizes inside its lock and a
-// client can never lift the budget itself (see
-// tests/test_challenge_review_budget_consistency.py).
+// Review rounds have one server-owned hard limit. Per-round records may retain
+// historical roundBudget values, but they are not mutable budget authority.
 // ---------------------------------------------------------------------------
-export const HYPOTHESIS_FIRST_DEFAULT_REVIEW_ROUND_BUDGET = 3;
-export const HYPOTHESIS_FIRST_MAX_REVIEW_ROUND_BUDGET = 5;
+export const HYPOTHESIS_FIRST_REVIEW_ROUND_LIMIT = 5;
 
 type ReviewRoundBudgetSnapshot = {
   stateV2?: { convergence?: { roundBudget?: number; roundIndex?: number } | null } | null;
   chainState?: { roundBudget?: number; hypothesisRoundCount?: number } | null;
 };
 
-function usableBudget(value: unknown): boolean {
-  return typeof value === "number" && Number.isFinite(value) && value > 0;
-}
-
-/** 当前预算 N，按统一契约解析；非法值一律回退到后端默认 3。 */
+/** 唯一硬上限；快照中的旧 roundBudget 仅用于历史回放，不参与裁决。 */
 export function resolveHypothesisFirstReviewRoundBudget(
-  snapshot: ReviewRoundBudgetSnapshot,
+  _snapshot: ReviewRoundBudgetSnapshot,
 ): number {
-  const v2Budget = snapshot.stateV2?.convergence?.roundBudget;
-  if (usableBudget(v2Budget)) return Number(v2Budget);
-  const v1Budget = snapshot.chainState?.roundBudget;
-  if (usableBudget(v1Budget)) return Number(v1Budget);
-  return HYPOTHESIS_FIRST_DEFAULT_REVIEW_ROUND_BUDGET;
+  return HYPOTHESIS_FIRST_REVIEW_ROUND_LIMIT;
 }
 
 /** 当前轮序 M（开启新轮即 M+1）；快照缺失时返回 null，文案降级为不提轮次。 */
@@ -208,33 +195,19 @@ export function resolveHypothesisFirstNextReviewRoundIndex(
 }
 
 export function reviewRoundActionCopy(
-  budget: number,
   nextRoundIndex: number | null,
   lang: Language,
 ): { label: string; detail: string } {
   const isZh = lang === "zh";
-  const max = HYPOTHESIS_FIRST_MAX_REVIEW_ROUND_BUDGET;
-  if (budget < max) {
-    return {
-      label: isZh ? "提升预算并发起新一轮评审" : "Raise budget and open a new review round",
-      detail: nextRoundIndex !== null
-        ? (isZh
-          ? `当前预算 ${budget}/${max}，将开启第 ${nextRoundIndex} 轮评审。`
-          : `Current budget ${budget}/${max}; this opens review round ${nextRoundIndex}.`)
-        : (isZh
-          ? `当前预算 ${budget}/${max}，将开启新一轮评审。`
-          : `Current budget ${budget}/${max}; this opens another review round.`),
-    };
-  }
   return {
     label: isZh ? "发起新一轮评审" : "Open a new review round",
     detail: nextRoundIndex !== null
       ? (isZh
-        ? `当前预算 ${budget}/${max} 已达上限，将在预算内尝试开启第 ${nextRoundIndex} 轮。`
-        : `The budget is at its ${budget}/${max} limit; round ${nextRoundIndex} will be attempted within budget.`)
+        ? `本轮尚未收敛，将在硬上限 ${HYPOTHESIS_FIRST_REVIEW_ROUND_LIMIT} 内开启第 ${nextRoundIndex} 轮评审。`
+        : `This review has not converged; opening round ${nextRoundIndex} within the hard limit of ${HYPOTHESIS_FIRST_REVIEW_ROUND_LIMIT}.`)
       : (isZh
-        ? `当前预算 ${budget}/${max} 已达上限，将在预算内尝试开启新一轮。`
-        : `The budget is at its ${budget}/${max} limit; a new round will be attempted within budget.`),
+        ? `本轮尚未收敛，将在硬上限 ${HYPOTHESIS_FIRST_REVIEW_ROUND_LIMIT} 内开启新一轮评审。`
+        : `This review has not converged; opening another round within the hard limit of ${HYPOTHESIS_FIRST_REVIEW_ROUND_LIMIT}.`),
   };
 }
 
@@ -968,10 +941,6 @@ function InspectorBody(props: {
             questionId={questionId}
             runId={runId}
             meetingRoundId={liveMeetingRoundId}
-            roundBudget={resolveHypothesisFirstReviewRoundBudget({
-              stateV2: props.stateV2,
-              chainState: props.chainState,
-            })}
             nextRoundIndex={resolveHypothesisFirstNextReviewRoundIndex({
               stateV2: props.stateV2,
               chainState: props.chainState,
@@ -1534,21 +1503,19 @@ function NextReviewRoundButton(props: {
   questionId: string;
   runId: string;
   meetingRoundId: string;
-  roundBudget: number;
   nextRoundIndex: number | null;
   lang: Language;
 }) {
   const queryClient = useQueryClient();
   const [blockedReason, setBlockedReason] = useState<string | null>(null);
-  const max = HYPOTHESIS_FIRST_MAX_REVIEW_ROUND_BUDGET;
-  const copy = reviewRoundActionCopy(props.roundBudget, props.nextRoundIndex, props.lang);
+  const copy = reviewRoundActionCopy(props.nextRoundIndex, props.lang);
   const mutation = useMutation({
     mutationFn: () =>
-      openNextHypothesisReviewRound(props.teamId, props.meetingRoundId, max),
+      openNextHypothesisReviewRound(props.teamId, props.meetingRoundId),
     onSuccess: (payload) => {
       setBlockedReason(
         payload?.status === "budget_exhausted"
-          ? (props.lang === "zh" ? `轮次预算已达上限 ${max}，无法再开启新的评审轮。` : `The round budget has reached its limit of ${max}; no new review round can be opened.`)
+          ? (props.lang === "zh" ? `已达到评审硬上限 ${HYPOTHESIS_FIRST_REVIEW_ROUND_LIMIT}，假说仍未收敛。` : `The hard review limit of ${HYPOTHESIS_FIRST_REVIEW_ROUND_LIMIT} was reached without convergence.`)
           : null,
       );
       invalidateHypothesisFirstQueries(queryClient, props.teamId, props.questionId, props.runId);

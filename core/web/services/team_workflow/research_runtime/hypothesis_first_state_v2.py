@@ -2980,9 +2980,10 @@ def project_state_from_records(
         if claim_belief_gate["status"] != "allowed":
             converged = False
     round_index = int((latest_round or {}).get("roundIndex") or active_round or 0)
-    round_budget = max(
-        [int(item.get("roundBudget") or 0) for item in links] + [3]
-    )
+    # The review chain has one server-owned hard limit. Historical links may
+    # still carry the retired default budget of 3; those values are replay
+    # data and must not suppress rounds 4-5 for an unconverged hypothesis.
+    round_budget = hypothesis_first_chain.HARD_ROUND_LIMIT
     if adjudication_rejected:
         convergence_phase = _phase(
             "completed",

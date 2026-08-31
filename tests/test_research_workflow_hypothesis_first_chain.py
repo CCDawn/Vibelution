@@ -2842,7 +2842,7 @@ def test_chain_state_budget_tracks_current_selection_not_history(
 
     recorded = _open_first_meeting(team_id, agent_ids)
     previous_id = recorded["reviewMeeting"]["meetingRound"]["meetingRoundId"]
-    for _ in range(2):
+    for _ in range(4):
         opened = chain.open_next_review_meeting(
             team_id,
             previous_meeting_round_id=previous_id,
@@ -2853,7 +2853,7 @@ def test_chain_state_budget_tracks_current_selection_not_history(
 
     exhausted_state = chain.chain_state(team_id, _QUESTION_ID)
     assert exhausted_state["budgetExhausted"] is True
-    assert exhausted_state["roundBudget"] == 3
+    assert exhausted_state["roundBudget"] == 5
 
     # Re-selecting candidates starts a fresh selection: its rounds restart at 1
     # and budget exhaustion must clear even though the question keeps all old
@@ -2866,7 +2866,7 @@ def test_chain_state_budget_tracks_current_selection_not_history(
     assert reselected["status"] == "created"
     refreshed_state = chain.chain_state(team_id, _QUESTION_ID)
     assert refreshed_state["budgetExhausted"] is False
-    assert refreshed_state["roundBudget"] == 3
+    assert refreshed_state["roundBudget"] == 5
 
 
 def test_round_budget_exhaustion_requires_manual_decision(
@@ -2880,34 +2880,34 @@ def test_round_budget_exhaustion_requires_manual_decision(
     recorded = _open_first_meeting(team_id, agent_ids)
     first_meeting_id = recorded["reviewMeeting"]["meetingRound"]["meetingRoundId"]
 
-    # Budget of 1: the follow-up round would be round 2 and must not open.
-    exhausted = chain.open_next_review_meeting(
-        team_id,
-        previous_meeting_round_id=first_meeting_id,
-        budget=1,
-        agent_runner=_marker_runner,
-    )
-    assert exhausted["status"] == "budget_exhausted"
-    assert exhausted["roundIndex"] == 2
-    assert exhausted["budget"] == 1
-
-    # A manually raised budget (capped at 5) opens the next round.
-    opened = chain.open_next_review_meeting(
-        team_id,
-        previous_meeting_round_id=first_meeting_id,
-        budget=5,
-        agent_runner=_marker_runner,
-    )
-    assert opened["status"] == "opened"
-    assert opened["roundIndex"] == 2
-
-    with pytest.raises(ValueError, match="budget"):
+    # The limit is server-owned: callers cannot shrink or raise it.
+    with pytest.raises(ValueError, match="fixed at 5"):
         chain.open_next_review_meeting(
             team_id,
             previous_meeting_round_id=first_meeting_id,
-            budget=6,
+            budget=1,
             agent_runner=_marker_runner,
         )
+
+    previous_id = first_meeting_id
+    for expected_round in range(2, 6):
+        opened = chain.open_next_review_meeting(
+            team_id,
+            previous_meeting_round_id=previous_id,
+            agent_runner=_marker_runner,
+        )
+        assert opened["status"] == "opened"
+        assert opened["roundIndex"] == expected_round
+        previous_id = opened["meetingRound"]["meetingRoundId"]
+
+    exhausted = chain.open_next_review_meeting(
+        team_id,
+        previous_meeting_round_id=previous_id,
+        agent_runner=_marker_runner,
+    )
+    assert exhausted["status"] == "budget_exhausted"
+    assert exhausted["roundIndex"] == 6
+    assert exhausted["budget"] == 5
 
 
 def test_canonical_next_review_round_fans_out_the_full_selection(
@@ -2925,7 +2925,6 @@ def test_canonical_next_review_round_fans_out_the_full_selection(
     opened = chain.open_next_review_meeting(
         team_id,
         previous_meeting_round_id=first_round[0]["meetingRoundId"],
-        budget=3,
         fan_out_selection=True,
         agent_runner=_marker_runner,
     )

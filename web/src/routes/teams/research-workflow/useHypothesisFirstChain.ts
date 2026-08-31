@@ -55,28 +55,21 @@ export const hypothesisFirstChainReviewRoundLinksKey = (
 ) => ["teams", teamId, "hypothesis-first", "chain", "review-round-links", questionId, runId] as const;
 
 /**
- * Display contract for the current review-round budget N, shared with the
- * workspace chrome. Keep the default in sync with
- * core/web/services/team_workflow/research_runtime/hypothesis_first_chain.py
- * `DEFAULT_ROUND_BUDGET`. The separate increase-budget action cap
- * (`MAX_ROUND_BUDGET = 5`) is action-side semantics and must not leak into
- * this display value.
+ * Display contract for the single server-owned review-round hard limit,
+ * shared with the workspace chrome. Historical per-round budget values are
+ * replay data and do not reduce this limit.
  */
-export const HYPOTHESIS_FIRST_DEFAULT_ROUND_BUDGET = 3;
+export const HYPOTHESIS_FIRST_REVIEW_ROUND_LIMIT = 5;
 
 /**
- * Current round budget for display: prefer the canonical V2 convergence
- * snapshot, then the V1 compatibility projection, then the backend default.
- * N is a mutable server-owned allowance ("当前预算 N"), not a hard total;
- * after a budget raise the next canonical read carries the larger value.
+ * Keep the hard limit stable when replaying snapshots written under the
+ * retired default-3 budget model.
  */
-export function resolveHypothesisFirstRoundBudget(input: {
+export function resolveHypothesisFirstRoundBudget(_input: {
   stateV2?: Pick<HypothesisFirstStateV2, "convergence"> | null;
   chainState?: Pick<HypothesisFirstChainState, "roundBudget"> | null;
 }): number {
-  return input.stateV2?.convergence.roundBudget
-    ?? input.chainState?.roundBudget
-    ?? HYPOTHESIS_FIRST_DEFAULT_ROUND_BUDGET;
+  return HYPOTHESIS_FIRST_REVIEW_ROUND_LIMIT;
 }
 
 /**

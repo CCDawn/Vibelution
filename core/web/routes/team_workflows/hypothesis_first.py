@@ -76,9 +76,7 @@ from .hypothesis_first_models import (
     QuestionRunResetPayload,
     QuestionRunResetPreviewResponse,
     QuestionRunResetResponse,
-    ReviewNextRoundPayload,
     ReviewNextRoundResponse,
-    ReviewReopenPayload,
     ReviewRoundLinkListResponse,
     SelectionContextResponse,
 )
@@ -1013,14 +1011,12 @@ def team_workflow_hypothesis_first_close_review_meeting(
 def team_workflow_hypothesis_first_reopen_review_meeting(
     team_id: str,
     meeting_round_id: str,
-    payload: ReviewReopenPayload | None = None,
 ) -> dict:
     """Restart one review round whose discussion produced no successful speech."""
     try:
         return hypothesis_first_chain.reopen_failed_review_meeting(
             team_id,
             meeting_round_id,
-            budget=payload.budget if payload is not None else None,
         )
     except _DOMAIN_ERRORS as exc:
         _map_domain_error("hypothesis_first.chain.reopen_review_meeting", team_id, exc)
@@ -1034,7 +1030,6 @@ def team_workflow_hypothesis_first_reopen_review_meeting(
 def team_workflow_hypothesis_first_next_review_round(
     team_id: str,
     meeting_round_id: str,
-    payload: ReviewNextRoundPayload | None = None,
 ) -> dict:
     """Open the next review round after a closed one, budget-gated.
 
@@ -1046,7 +1041,6 @@ def team_workflow_hypothesis_first_next_review_round(
         return hypothesis_first_chain.open_next_review_meeting(
             team_id,
             previous_meeting_round_id=meeting_round_id,
-            budget=payload.budget if payload is not None else None,
         )
     except _DOMAIN_ERRORS as exc:
         _map_domain_error("hypothesis_first.chain.next_review_round", team_id, exc)

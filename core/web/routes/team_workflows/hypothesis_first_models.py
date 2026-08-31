@@ -146,18 +146,6 @@ class MeetingApproveDigestPayload(BaseModel):
     expectedDigestContentHash: str = Field(..., min_length=1, max_length=200)
 
 
-class ReviewReopenPayload(BaseModel):
-    """Payload for ``POST .../chain/review-meetings/{id}/reopen``."""
-
-    budget: int = Field(3, ge=1, le=5, description="人工提高的轮次预算，上限 5")
-
-
-class ReviewNextRoundPayload(BaseModel):
-    """Payload for ``POST .../chain/review-meetings/{id}/next-round``."""
-
-    budget: int = Field(3, ge=1, le=5, description="人工提高的轮次预算，上限 5")
-
-
 class ReviewNextRoundResponse(BaseModel):
     """Result of opening the next review round for a selection.
 

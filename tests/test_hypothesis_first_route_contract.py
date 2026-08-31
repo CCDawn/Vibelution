@@ -1538,7 +1538,7 @@ def test_routes_map_team_not_found_to_404(monkeypatch) -> None:
     assert response.status_code == 404
 
 
-def test_next_review_round_route_passes_payload_and_maps_domain_error(monkeypatch) -> None:
+def test_next_review_round_route_ignores_retired_budget_and_maps_domain_error(monkeypatch) -> None:
     calls: list[dict] = []
 
     def fake_open(team_id, *, previous_meeting_round_id, budget=None, **_kwargs):
@@ -1556,7 +1556,7 @@ def test_next_review_round_route_passes_payload_and_maps_domain_error(monkeypatc
             "selectionId": "hsel-1",
             "previousMeetingRoundId": previous_meeting_round_id,
             "roundIndex": 2,
-            "budget": 3,
+            "budget": 5,
             "meetingRound": {"meetingRoundId": "mr-next"},
         }
 
@@ -1568,7 +1568,7 @@ def test_next_review_round_route_passes_payload_and_maps_domain_error(monkeypatc
     )
     assert response.status_code == 200, response.text
     assert calls == [
-        {"teamId": "team-1", "previousMeetingRoundId": "mr-1", "budget": 4}
+        {"teamId": "team-1", "previousMeetingRoundId": "mr-1", "budget": None}
     ]
     body = response.json()
     assert body["status"] == "opened"

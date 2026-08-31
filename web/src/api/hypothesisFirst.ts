@@ -592,12 +592,11 @@ export function reopenHypothesisReviewMeeting(
 export function openNextHypothesisReviewRound(
   teamId: string,
   meetingRoundId: string,
-  budget?: number,
 ): Promise<ReviewNextRoundResponse> {
   return writeJson<ReviewNextRoundResponse>(
     `${teamPrefix(teamId)}/hypothesis-first/chain/review-meetings/${encodeURIComponent(meetingRoundId)}/next-round`,
     "POST",
-    { budget },
+    {},
   );
 }
 

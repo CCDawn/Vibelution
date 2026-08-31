@@ -102,10 +102,7 @@ describe("researchWorkflowContextModel", () => {
     });
   });
 
-  it("labels review progress as a mutable current budget, not an immutable total", () => {
-    // The workspace resolves N via resolveHypothesisFirstRoundBudget
-    // (V2 convergence -> V1 chainState -> default 3); this template must keep
-    // expressing N as the current allowance ("当前预算"), never "共 N 轮".
+  it("labels review progress against the single hard limit", () => {
     const context = buildResearchWorkflowContext({
       ...base,
       nextAction: {
@@ -120,7 +117,7 @@ describe("researchWorkflowContextModel", () => {
     expect(context.currentTask?.progress).toEqual({
       current: 2,
       total: 4,
-      label: "第 2 轮 / 当前预算 4",
+      label: "第 2 轮 / 硬上限 4",
     });
   });
 

@@ -1696,24 +1696,24 @@ describe("HypothesisFirstNodeInspector", () => {
   // ---------------------------------------------------------------------------
 
   describe("review round budget contract", () => {
-    it("resolves the current budget as V2 roundBudget ?? V1 chainState.roundBudget ?? default 3", () => {
+    it("keeps one hard limit when snapshots carry historical budget values", () => {
       expect(resolveHypothesisFirstReviewRoundBudget({
         stateV2: { convergence: { roundBudget: 4, roundIndex: 2 } },
         chainState: { roundBudget: 9 },
-      })).toBe(4);
+      })).toBe(5);
       expect(resolveHypothesisFirstReviewRoundBudget({
         stateV2: null,
         chainState: { roundBudget: 5 },
       })).toBe(5);
-      expect(resolveHypothesisFirstReviewRoundBudget({})).toBe(3);
-      // 非法值（0/负数/NaN）不劫持契约，回退后端默认。
+      expect(resolveHypothesisFirstReviewRoundBudget({})).toBe(5);
+      // 非法值（0/负数/NaN）和旧值一样不参与硬上限裁决。
       expect(resolveHypothesisFirstReviewRoundBudget({
         stateV2: { convergence: { roundBudget: Number.NaN } },
-      })).toBe(3);
+      })).toBe(5);
       expect(resolveHypothesisFirstReviewRoundBudget({
         stateV2: null,
         chainState: { roundBudget: -1 },
-      })).toBe(3);
+      })).toBe(5);
     });
 
     it("derives the next review round index from the freshest snapshot", () => {
@@ -1728,20 +1728,15 @@ describe("HypothesisFirstNodeInspector", () => {
       expect(resolveHypothesisFirstNextReviewRoundIndex({})).toBeNull();
     });
 
-    it("labels the budget raise below the cap and degrades to plain open at the cap", () => {
-      const raise = reviewRoundActionCopy(2, 3, "zh");
-      expect(raise.label).toBe("提升预算并发起新一轮评审");
-      expect(raise.detail).toContain("当前预算 2/5");
-      expect(raise.detail).toContain("第 3 轮");
+    it("labels agent-decided continuation under the hard limit", () => {
+      const chinese = reviewRoundActionCopy(3, "zh");
+      expect(chinese.label).toBe("发起新一轮评审");
+      expect(chinese.detail).toContain("硬上限 5");
+      expect(chinese.detail).toContain("第 3 轮");
 
-      const capped = reviewRoundActionCopy(5, 6, "zh");
-      expect(capped.label).toBe("发起新一轮评审");
-      expect(capped.detail).toContain("已达上限");
-      expect(capped.label).not.toContain("提升预算");
-
-      const english = reviewRoundActionCopy(1, 2, "en");
-      expect(english.label).toBe("Raise budget and open a new review round");
-      expect(reviewRoundActionCopy(5, null, "en").label).toBe("Open a new review round");
+      const english = reviewRoundActionCopy(2, "en");
+      expect(english.label).toBe("Open a new review round");
+      expect(reviewRoundActionCopy(null, "en").label).toBe("Open a new review round");
     });
   });
 
@@ -1787,13 +1782,13 @@ describe("HypothesisFirstNodeInspector", () => {
       />,
     );
     // 该 legacy 收敛快照把下一动作落到 human_adjudication 命令但没有已签名
-    // 动作可渲染，兜底出现开新轮按钮；文案必须反映当前快照预算而非写死 5。
+    // 动作可渲染，兜底出现开新轮按钮；旧预算不再改变唯一硬上限。
     const wrapper = container.querySelector('[data-testid="next-review-round-action"]');
     if (wrapper) {
       expect(wrapper.querySelector('[data-testid="next-review-round-budget"]')?.textContent)
-        .toContain("当前预算 2/5，将开启第 3 轮评审。");
+        .toContain("硬上限 5 内开启第 3 轮评审。");
       expect(Array.from(wrapper.querySelectorAll("button")).some((button) =>
-        button.textContent === "提升预算并发起新一轮评审")).toBe(true);
+        button.textContent === "发起新一轮评审")).toBe(true);
     }
   });
 

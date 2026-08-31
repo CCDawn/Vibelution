@@ -1179,7 +1179,7 @@ def test_legacy_running_formal_run_does_not_hide_unstarted_hypothesis_generation
 
 @pytest.mark.parametrize(
     ("round_index", "expected_command"),
-    [(1, "open_next_review"), (3, "human_adjudication")],
+    [(3, "open_next_review"), (5, "human_adjudication")],
 )
 def test_unaccepted_closed_round_uses_budget_before_human_adjudication(
     round_index: int,
@@ -1251,7 +1251,7 @@ def test_unaccepted_closed_round_uses_budget_before_human_adjudication(
     if expected_command == "open_next_review":
         action = commands[expected_command]
         assert action.payload.previousMeetingRoundId == f"review-{round_index}"
-        assert action.payload.roundBudget == 3
+        assert action.payload.roundBudget == 5
         assert state.convergence.lifecycle == "waiting_human"
         assert state.convergence.outcome == "none"
     else:

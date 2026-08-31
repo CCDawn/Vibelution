@@ -132,10 +132,8 @@ export function ResearchProcessWorkspace({
   const catalog = useResearchWorkflowCatalog(teamId, runState.run?.runVersion ?? null);
   const chainQuestionId = location.questionId || runState.run?.questionId || "";
   const hypothesisFirstChain = useHypothesisFirstChain(teamId, chainQuestionId, location.runId);
-  // Budget display contract (see resolveHypothesisFirstRoundBudget): current
-  // budget N = V2 convergence.roundBudget ?? V1 chainState.roundBudget ??
-  // backend default 3. "第 x 轮 / 当前预算 N" — N is the server-owned current
-  // allowance; a budget raise flows in with the next canonical read.
+  // The server owns one hard review limit. Historical roundBudget values in
+  // V1/V2 snapshots are replay data and do not reduce the limit.
   const currentRoundBudget = resolveHypothesisFirstRoundBudget({
     stateV2: hypothesisFirstChain.stateV2,
     chainState: hypothesisFirstChain.chainState,

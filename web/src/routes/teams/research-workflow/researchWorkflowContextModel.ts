@@ -655,12 +655,7 @@ export function buildResearchWorkflowContext(
       progress: input.roundProgress
         ? {
             ...input.roundProgress,
-            // Current budget N ("当前预算"), not an immutable hard cap: the
-            // workspace resolves N via resolveHypothesisFirstRoundBudget
-            // (V2 convergence.roundBudget -> V1 chainState.roundBudget ->
-            // backend default 3), so a budget raise flows in with the next
-            // canonical read.
-            label: `第 ${input.roundProgress.current} 轮 / 当前预算 ${input.roundProgress.total}`,
+            label: `第 ${input.roundProgress.current} 轮 / 硬上限 ${input.roundProgress.total}`,
           }
         : undefined,
       navigationAction: action?.targetNodeId
