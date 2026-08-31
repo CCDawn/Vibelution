@@ -40,6 +40,7 @@ from .i18n import get_web_language, text_for
 from .avatar_image_service import avatar_image_url
 from .runtime_manager_control_service import current_runtime_manager_pid
 from .session_service import (
+    cancel_agent_execution_reservation,
     get_active_session_summary,
     list_active_session_work_runs,
     load_session_conversation_events_snapshot,
@@ -77,10 +78,19 @@ _RUNTIME_SUMMARY_HTTP_SNAPSHOT_AT = 0.0
 class RuntimeRestartActiveWorkBlocked(Exception):
     """Raised when a restart would interrupt active work."""
 
-    def __init__(self, message: str, active_work_runs: list[dict[str, str]]) -> None:
+    def __init__(
+        self,
+        message: str,
+        active_work_runs: list[dict[str, str]],
+        *,
+        force_available: bool = False,
+        force_channel_hint: str = "",
+    ) -> None:
         super().__init__(message)
         self.message = message
         self.active_work_runs = active_work_runs
+        self.force_available = bool(force_available)
+        self.force_channel_hint = str(force_channel_hint or "")
 
 
 def _with_runtime_summary_agent_cache(func):
@@ -313,6 +323,14 @@ _WINDOW_CLOSE_DEDUPE_TTL_SECONDS = 30.0
 # An operator stop identical to one still being processed is answered
 # idempotently instead of spawning the daemon / handing off a second time.
 _OPERATOR_STOP_IN_FLIGHT_GRACE_SECONDS = 8.0
+# Shutdown/restart harvest bounds. The control plane must stay responsive even
+# when a data-plane stop channel is wedged (a deadlocked round runner holding
+# _CHAT_ROOM_LOCK made shutdown/restart unanswerable in production). Every
+# harvest action runs on a worker thread with a bounded wait; whatever survives
+# is recorded as skipped/timeout and left for the active-work guard, which then
+# blocks the lifecycle change with forceAvailable instead of hanging forever.
+SHUTDOWN_HARVEST_ITEM_WAIT_SECONDS = 3.0
+SHUTDOWN_HARVEST_TOTAL_WAIT_SECONDS = 12.0
 _WINDOW_CLOSE_DEDUPE_LOCK = threading.Lock()
 _WINDOW_CLOSE_DEDUPE: dict[str, tuple[float, dict[str, object]]] = {}
 
@@ -367,17 +385,31 @@ def request_runtime_shutdown(
         stop_manager=stop_manager,
         body_present=body_present,
     )
-    active_work_runs = _restart_guard_active_work_runs()
+    observed_active_work_runs = _restart_guard_active_work_runs()
     _record_shutdown_event(
         "runtime.shutdown.requested",
         message="Runtime shutdown requested.",
         fields=classification
         | {
-            "activeWorkCount": len(active_work_runs),
-            "activeWorkKinds": _active_work_kinds(active_work_runs),
+            "activeWorkCount": len(observed_active_work_runs),
+            "activeWorkKinds": _active_work_kinds(observed_active_work_runs),
         },
     )
+    # Harvest before guarding: a zombie running WorkRun whose stop channel is
+    # wedged must be reaped (best effort, bounded) before the guard decides.
+    # Guarding first left the process unstoppable from inside: the block message
+    # pointed at stop channels that were themselves deadlocked.
+    (
+        stopped_chat_room_rounds,
+        stopped_chat_turns,
+        stopped_evolution_runs,
+    ) = _harvest_active_work_before_lifecycle_change(
+        scene="shutdown",
+        record=_record_shutdown_event,
+    )
+    active_work_runs = _restart_guard_active_work_runs()
     if active_work_runs:
+        force_channel_hint = _lifecycle_force_channel_hint(lang)
         message = _lifecycle_active_work_block_message("shutdown", lang)
         _record_shutdown_event(
             "runtime.shutdown.blocked_active_work",
@@ -389,12 +421,29 @@ def request_runtime_shutdown(
                 "activeWorkCount": len(active_work_runs),
                 "activeWorkKinds": _active_work_kinds(active_work_runs),
                 "activeWorkRuns": active_work_runs[:8],
+                "forceAvailable": True,
+                "forceChannelHint": force_channel_hint,
+                "unharvestedWorkRuns": _unharvested_lifecycle_work_items(
+                    stopped_chat_room_rounds,
+                    stopped_chat_turns,
+                    stopped_evolution_runs,
+                )[:8],
             },
         )
-        raise RuntimeRestartActiveWorkBlocked(message, active_work_runs[:8])
+        raise RuntimeRestartActiveWorkBlocked(
+            message,
+            active_work_runs[:8],
+            force_available=True,
+            force_channel_hint=force_channel_hint,
+        )
 
     if not body_present:
-        return _electron_retire_local_shutdown(lang)
+        return _electron_retire_local_shutdown(
+            lang,
+            stopped_chat_room_rounds=stopped_chat_room_rounds,
+            stopped_chat_turns=stopped_chat_turns,
+            stopped_evolution_runs=stopped_evolution_runs,
+        )
 
     if (
         normalized_source in _WEB_WINDOW_CLOSE_SOURCES
@@ -402,10 +451,6 @@ def request_runtime_shutdown(
         and electron_owns_main_line_queue()
     ):
         return _delegated_window_close_response(lang=lang, source=normalized_source)
-
-    stopped_chat_room_rounds = _stop_active_chat_room_rounds_before_shutdown()
-    stopped_chat_turns = _stop_active_chat_turns_before_shutdown()
-    stopped_evolution_runs = _stop_active_evolution_runs_before_shutdown()
 
     if normalized_source not in _WEB_WINDOW_CLOSE_SOURCES or stop_manager:
         # Operator-class stop: an equivalent intent already being processed is
@@ -529,18 +574,34 @@ def request_runtime_shutdown(
     }
 
 
-def _electron_retire_local_shutdown(lang: str) -> dict[str, object]:
+def _electron_retire_local_shutdown(
+    lang: str,
+    *,
+    stopped_chat_room_rounds: list[dict[str, object]] | None = None,
+    stopped_chat_turns: list[dict[str, object]] | None = None,
+    stopped_evolution_runs: list[dict[str, object]] | None = None,
+) -> dict[str, object]:
     """Graceful self-exit for the Electron retire contract.
 
     workbenchBackendRetire.ts POSTs without a body and then polls for
     process-gone + port-gone. The queue round-trip used to forward a desktop
     "stop" back into Electron, aborting in-flight restarts; scheduling the
     local exit here keeps the retire contract without touching the daemon.
+    When the caller already harvested in-flight work, those results are reused
+    instead of running a second bounded harvest pass.
     """
 
-    stopped_chat_room_rounds = _stop_active_chat_room_rounds_before_shutdown()
-    stopped_chat_turns = _stop_active_chat_turns_before_shutdown()
-    stopped_evolution_runs = _stop_active_evolution_runs_before_shutdown()
+    stopped_chat_room_rounds = (
+        _stop_active_chat_room_rounds_before_shutdown()
+        if stopped_chat_room_rounds is None
+        else stopped_chat_room_rounds
+    )
+    stopped_chat_turns = (
+        _stop_active_chat_turns_before_shutdown() if stopped_chat_turns is None else stopped_chat_turns
+    )
+    stopped_evolution_runs = (
+        _stop_active_evolution_runs_before_shutdown() if stopped_evolution_runs is None else stopped_evolution_runs
+    )
     _schedule_local_backend_exit()
     _record_shutdown_event(
         "runtime.shutdown.accepted",
@@ -617,17 +678,30 @@ def request_runtime_restart() -> dict[str, object]:
     """
 
     lang = get_web_language()
-    active_work_runs = _restart_guard_active_work_runs()
+    observed_active_work_runs = _restart_guard_active_work_runs()
     _record_restart_event(
         "runtime.restart.requested",
         message="Runtime restart requested from web UI.",
         fields={
             "source": "web_ui",
-            "activeWorkCount": len(active_work_runs),
-            "activeWorkKinds": _active_work_kinds(active_work_runs),
+            "activeWorkCount": len(observed_active_work_runs),
+            "activeWorkKinds": _active_work_kinds(observed_active_work_runs),
         },
     )
+    # Harvest before guarding: see request_runtime_shutdown. The guard must
+    # decide on the post-harvest world so a wedged stop channel degrades into
+    # an auditable block with forceAvailable instead of an unstoppable process.
+    (
+        stopped_chat_room_rounds,
+        stopped_chat_turns,
+        stopped_evolution_runs,
+    ) = _harvest_active_work_before_lifecycle_change(
+        scene="restart",
+        record=_record_restart_event,
+    )
+    active_work_runs = _restart_guard_active_work_runs()
     if active_work_runs:
+        force_channel_hint = _lifecycle_force_channel_hint(lang)
         _record_restart_event(
             "runtime.restart.blocked_active_work",
             message="Runtime restart blocked by active work.",
@@ -638,9 +712,21 @@ def request_runtime_restart() -> dict[str, object]:
                 "activeWorkCount": len(active_work_runs),
                 "activeWorkKinds": _active_work_kinds(active_work_runs),
                 "activeWorkRuns": active_work_runs[:8],
+                "forceAvailable": True,
+                "forceChannelHint": force_channel_hint,
+                "unharvestedWorkRuns": _unharvested_lifecycle_work_items(
+                    stopped_chat_room_rounds,
+                    stopped_chat_turns,
+                    stopped_evolution_runs,
+                )[:8],
             },
         )
-        raise RuntimeRestartActiveWorkBlocked(_lifecycle_active_work_block_message("restart", lang), active_work_runs[:8])
+        raise RuntimeRestartActiveWorkBlocked(
+            _lifecycle_active_work_block_message("restart", lang),
+            active_work_runs[:8],
+            force_available=True,
+            force_channel_hint=force_channel_hint,
+        )
 
     if electron_owns_main_line_queue():
         _record_restart_event(
@@ -662,10 +748,6 @@ def request_runtime_restart() -> dict[str, object]:
             "chatRoomRounds": [],
             "evolutionRuns": [],
         }
-
-    stopped_chat_room_rounds = _stop_active_chat_room_rounds_before_shutdown()
-    stopped_chat_turns = _stop_active_chat_turns_before_shutdown()
-    stopped_evolution_runs = _stop_active_evolution_runs_before_shutdown()
 
     try:
         ensure_daemon_running()
@@ -872,6 +954,117 @@ def _lifecycle_active_work_block_message(action: str, lang: str) -> str:
     )
 
 
+def _lifecycle_force_channel_hint(lang: str) -> str:
+    return text_for(
+        lang,
+        zh="自动收割未能停止全部活跃任务，可由操作员通过 Launcher 强制停止/重启收尾。",
+        en="Automatic harvest could not stop every active task; an operator can force a stop or restart through the Launcher.",
+    )
+
+
+def _run_with_bounded_wait(
+    fn,
+    *,
+    timeout_seconds: float,
+) -> tuple[bool, object, BaseException | None]:
+    """Run ``fn()`` on a daemon worker and wait at most ``timeout_seconds``.
+
+    Returns ``(completed, value, error)``. On timeout the worker is abandoned
+    as a daemon thread: the control plane never waits indefinitely on a wedged
+    data-plane stop channel.
+    """
+
+    bound = max(0.05, float(timeout_seconds))
+    finished = threading.Event()
+    result: list[object] = []
+    error: list[BaseException] = []
+
+    def _worker() -> None:
+        try:
+            result.append(fn())
+        except BaseException as exc:  # surfaced to the caller below
+            error.append(exc)
+        finally:
+            finished.set()
+
+    worker = threading.Thread(target=_worker, name="runtime-lifecycle-harvest", daemon=True)
+    worker.start()
+    if not finished.wait(bound):
+        return False, None, None
+    if error:
+        return True, None, error[0]
+    return True, (result[0] if result else None), None
+
+
+def _remaining_harvest_seconds(deadline: float) -> float:
+    return max(0.05, min(SHUTDOWN_HARVEST_ITEM_WAIT_SECONDS, float(deadline) - time.monotonic()))
+
+
+def _harvest_active_work_before_lifecycle_change(
+    *,
+    scene: str,
+    record,
+) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, object]]]:
+    """Best-effort bounded reaping of in-flight work before a lifecycle change.
+
+    Every action is recorded as a lifecycle event (stopped/skipped/timeout plus
+    runId) so an operator can audit why the process did or did not stop.
+    """
+
+    deadline = time.monotonic() + SHUTDOWN_HARVEST_TOTAL_WAIT_SECONDS
+    stopped_chat_room_rounds = _stop_active_chat_room_rounds_before_shutdown(deadline=deadline)
+    stopped_chat_turns = _stop_active_chat_turns_before_shutdown(deadline=deadline)
+    stopped_evolution_runs = _stop_active_evolution_runs_before_shutdown(deadline=deadline)
+    for items in (stopped_chat_room_rounds, stopped_chat_turns, stopped_evolution_runs):
+        for item in items:
+            status = str(item.get("status") or "unknown")
+            if status == "stopped":
+                outcome, level = "stopped", "info"
+            elif status == "timeout":
+                outcome, level = "timeout", "warning"
+            elif status == "skipped":
+                outcome, level = "skipped", "warning"
+            else:
+                outcome, level = "failed", "warning"
+            record(
+                f"runtime.{scene}.harvest_action",
+                message=f"Lifecycle harvest action for active work: {status}.",
+                outcome=outcome,
+                level=level,
+                fields={
+                    "kind": str(item.get("kind") or ""),
+                    "runId": str(item.get("runId") or ""),
+                    "sessionId": str(item.get("sessionId") or ""),
+                    "roomId": str(item.get("roomId") or ""),
+                    "status": status,
+                    "error": str(item.get("error") or ""),
+                },
+            )
+    return stopped_chat_room_rounds, stopped_chat_turns, stopped_evolution_runs
+
+
+def _unharvested_lifecycle_work_items(
+    *item_lists: list[dict[str, object]],
+) -> list[dict[str, str]]:
+    """Active-work items the harvest could not safely stop (audit trail)."""
+
+    items: list[dict[str, str]] = []
+    for group in item_lists:
+        for item in group:
+            status = str(item.get("status") or "")
+            if status in {"", "stopped"}:
+                continue
+            items.append(
+                {
+                    "kind": str(item.get("kind") or ""),
+                    "runId": str(item.get("runId") or ""),
+                    "sessionId": str(item.get("sessionId") or ""),
+                    "status": status,
+                }
+            )
+    return items
+
+
 def _restart_guard_active_work_runs() -> list[dict[str, str]]:
     """Return active work that should block an unconfirmed destructive restart."""
 
@@ -1069,24 +1262,158 @@ def _active_session_model_identity(active_session: dict) -> dict[str, str]:
     }
 
 
-def _stop_active_chat_turns_before_shutdown() -> list[dict[str, object]]:
-    """Persist active chat partials before the backend/launcher is closed."""
+def _active_chat_room_round_items() -> list[dict[str, str]]:
+    """Active chat room rounds from the WorkRun projection (no room lock).
+
+    Reading the projection is the only way to identify rounds without touching
+    ``_CHAT_ROOM_LOCK``, which a wedged round runner can hold forever.
+    """
 
     try:
-        active_runs = list_active_session_work_runs()
-    except Exception as exc:
+        summary = _work_run_summary()
+    except Exception:
+        return []
+    active = summary.get("active") if isinstance(summary, dict) else None
+    payload = active.get("chat_room_round") if isinstance(active, dict) else None
+    if not isinstance(payload, dict) or not _active_work_payload_blocks_lifecycle(payload):
+        return []
+    run_id = str(payload.get("runId") or payload.get("roundId") or "").strip()
+    if not run_id:
+        return []
+    return [
+        {
+            "kind": "chat_room_round",
+            "runId": run_id,
+            "roomId": str(payload.get("roomId") or "").strip(),
+        }
+    ]
+
+
+def _stop_active_chat_room_rounds_before_shutdown(
+    *,
+    deadline: float | None = None,
+) -> list[dict[str, object]]:
+    """Stop active chat room rounds with light flags, then bounded persist.
+
+    The persisting stop (``force_stop_active_chat_room_rounds_for_shutdown``)
+    takes ``_CHAT_ROOM_LOCK`` and would hang forever behind a deadlocked round
+    runner, so it only ever runs under a bounded wait after the lock-free stop
+    flag and execution-reservation cancel have been applied. Rounds that
+    survive are reported as timeout items for the active-work guard.
+    """
+
+    if deadline is None:
+        deadline = time.monotonic() + SHUTDOWN_HARVEST_TOTAL_WAIT_SECONDS
+    rounds = _active_chat_room_round_items()
+    if not rounds:
+        return []
+
+    reason = text_for(
+        get_web_language(),
+        zh="工作台关闭前停止活跃群聊轮次。",
+        en="Stopped active chat room rounds before workbench shutdown.",
+    )
+
+    from . import chat_room_service
+
+    records: dict[str, dict[str, object]] = {
+        item["runId"]: {
+            "kind": "chat_room_round",
+            "roomId": item["roomId"],
+            "runId": item["runId"],
+            "roundId": item["runId"],
+            "status": "stopped",
+        }
+        for item in rounds
+    }
+
+    def _apply_light_stops() -> None:
+        for item in rounds:
+            # Light path: set the round stop flag and cancel any queued
+            # execution reservation; neither takes _CHAT_ROOM_LOCK.
+            chat_room_service._request_chat_room_round_stop(item["runId"], reason)
+            cancel_agent_execution_reservation(item["runId"])
+
+    light_completed, _, light_error = _run_with_bounded_wait(
+        _apply_light_stops,
+        timeout_seconds=_remaining_harvest_seconds(deadline),
+    )
+    if not light_completed or light_error is not None:
+        detail = (
+            "chat_room_round_stop_flag_wait_timeout"
+            if not light_completed
+            else f"{type(light_error).__name__}: {light_error}"
+        )
+        for record_payload in records.values():
+            record_payload["status"] = "skipped"
+            record_payload["error"] = detail
+        return list(records.values())
+
+    heavy_completed, heavy_value, heavy_error = _run_with_bounded_wait(
+        lambda: chat_room_service.force_stop_active_chat_room_rounds_for_shutdown(reason),
+        timeout_seconds=_remaining_harvest_seconds(deadline),
+    )
+    if not heavy_completed:
+        for record_payload in records.values():
+            record_payload["status"] = "timeout"
+            record_payload["error"] = "chat_room_round_stop_wait_timeout"
+        return list(records.values())
+    if heavy_error is not None:
+        for record_payload in records.values():
+            record_payload["status"] = "failed"
+            record_payload["error"] = f"{type(heavy_error).__name__}: {heavy_error}"
+        return list(records.values())
+
+    for snapshot in heavy_value or []:
+        if not isinstance(snapshot, dict):
+            continue
+        run_id = str(snapshot.get("runId") or snapshot.get("roundId") or "").strip()
+        records[run_id] = {
+            "kind": "chat_room_round",
+            "roomId": str(snapshot.get("roomId") or ""),
+            "runId": run_id,
+            "roundId": str(snapshot.get("roundId") or run_id),
+            "status": str(snapshot.get("status") or "stopped"),
+        }
+    return [records[key] for key in sorted(records)]
+
+
+def _stop_active_chat_turns_before_shutdown(
+    *,
+    deadline: float | None = None,
+) -> list[dict[str, object]]:
+    """Persist active chat partials before the backend/launcher is closed."""
+
+    if deadline is None:
+        deadline = time.monotonic() + SHUTDOWN_HARVEST_TOTAL_WAIT_SECONDS
+    active_completed, active_value, active_error = _run_with_bounded_wait(
+        list_active_session_work_runs,
+        timeout_seconds=_remaining_harvest_seconds(deadline),
+    )
+    if not active_completed:
         return [
             {
+                "kind": "chat_turn",
+                "sessionId": "",
+                "runId": "",
+                "status": "timeout",
+                "error": "active_session_work_run_read_wait_timeout",
+            }
+        ]
+    if active_error is not None:
+        return [
+            {
+                "kind": "chat_turn",
                 "sessionId": "",
                 "runId": "",
                 "status": "failed",
-                "error": f"{type(exc).__name__}: {exc}",
+                "error": f"{type(active_error).__name__}: {active_error}",
             }
         ]
 
     stopped: list[dict[str, object]] = []
     seen_session_ids: set[str] = set()
-    for run in active_runs:
+    for run in active_value or []:
         if not isinstance(run, dict):
             continue
         session_id = str(run.get("sessionId") or "").strip()
@@ -1094,20 +1421,35 @@ def _stop_active_chat_turns_before_shutdown() -> list[dict[str, object]]:
             continue
         seen_session_ids.add(session_id)
         run_id = str(run.get("runId") or "").strip()
-        try:
-            request_stop_session_turn(session_id)
-        except Exception as exc:
+        stop_completed, _, stop_error = _run_with_bounded_wait(
+            lambda target_session_id=session_id: request_stop_session_turn(target_session_id),
+            timeout_seconds=_remaining_harvest_seconds(deadline),
+        )
+        if not stop_completed:
             stopped.append(
                 {
+                    "kind": "chat_turn",
+                    "sessionId": session_id,
+                    "runId": run_id,
+                    "status": "timeout",
+                    "error": "chat_turn_stop_wait_timeout",
+                }
+            )
+            continue
+        if stop_error is not None:
+            stopped.append(
+                {
+                    "kind": "chat_turn",
                     "sessionId": session_id,
                     "runId": run_id,
                     "status": "failed",
-                    "error": f"{type(exc).__name__}: {exc}",
+                    "error": f"{type(stop_error).__name__}: {stop_error}",
                 }
             )
             continue
         stopped.append(
             {
+                "kind": "chat_turn",
                 "sessionId": session_id,
                 "runId": run_id,
                 "status": "stopped",
@@ -1116,34 +1458,14 @@ def _stop_active_chat_turns_before_shutdown() -> list[dict[str, object]]:
     return stopped
 
 
-def _stop_active_chat_room_rounds_before_shutdown() -> list[dict[str, object]]:
-    """Persist active chat room round stop state before the backend/launcher is closed."""
-
-    reason = text_for(
-        get_web_language(),
-        zh="工作台关闭前停止活跃群聊轮次。",
-        en="Stopped active chat room rounds before workbench shutdown.",
-    )
-    try:
-        from . import chat_room_service
-
-        return list(chat_room_service.force_stop_active_chat_room_rounds_for_shutdown(reason))
-    except Exception as exc:
-        return [
-            {
-                "kind": "chat_room_round",
-                "roomId": "",
-                "runId": "",
-                "roundId": "",
-                "status": "failed",
-                "error": f"{type(exc).__name__}: {exc}",
-            }
-        ]
-
-
-def _stop_active_evolution_runs_before_shutdown() -> list[dict[str, object]]:
+def _stop_active_evolution_runs_before_shutdown(
+    *,
+    deadline: float | None = None,
+) -> list[dict[str, object]]:
     """Release active evolution leases before closing the workbench."""
 
+    if deadline is None:
+        deadline = time.monotonic() + SHUTDOWN_HARVEST_TOTAL_WAIT_SECONDS
     stopped: list[dict[str, object]] = []
     reason = text_for(
         get_web_language(),
@@ -1156,19 +1478,31 @@ def _stop_active_evolution_runs_before_shutdown() -> list[dict[str, object]]:
         ("supervised_evolution_run", _force_cancel_supervised_evolution_for_shutdown),
         ("supervised_worktree_evolution_run", _force_cancel_supervised_worktree_evolution_for_shutdown),
     ):
-        try:
-            snapshots = stopper(reason)
-        except Exception as exc:
+        stopper_completed, stopper_value, stopper_error = _run_with_bounded_wait(
+            lambda target_stopper=stopper: target_stopper(reason),
+            timeout_seconds=_remaining_harvest_seconds(deadline),
+        )
+        if not stopper_completed:
+            stopped.append(
+                {
+                    "kind": kind,
+                    "runId": "",
+                    "status": "timeout",
+                    "error": "evolution_stop_wait_timeout",
+                }
+            )
+            continue
+        if stopper_error is not None:
             stopped.append(
                 {
                     "kind": kind,
                     "runId": "",
                     "status": "failed",
-                    "error": f"{type(exc).__name__}: {exc}",
+                    "error": f"{type(stopper_error).__name__}: {stopper_error}",
                 }
             )
             continue
-        for snapshot in snapshots:
+        for snapshot in stopper_value or []:
             if not isinstance(snapshot, dict):
                 continue
             stopped.append(

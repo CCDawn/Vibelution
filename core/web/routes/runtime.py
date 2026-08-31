@@ -74,6 +74,8 @@ def runtime_shutdown(payload: RuntimeShutdownPayload | None = None) -> dict:
                 "code": "active_work_stop_blocked",
                 "message": exc.message,
                 "activeWorkRuns": exc.active_work_runs,
+                "forceAvailable": exc.force_available,
+                "forceChannelHint": exc.force_channel_hint,
             },
         ) from exc
 
@@ -94,6 +96,8 @@ def runtime_restart() -> dict:
                 "code": "active_work_restart_blocked",
                 "message": exc.message,
                 "activeWorkRuns": exc.active_work_runs,
+                "forceAvailable": exc.force_available,
+                "forceChannelHint": exc.force_channel_hint,
             },
         ) from exc
 

@@ -3,6 +3,7 @@ import json
 import shutil
 import sqlite3
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -2991,6 +2992,8 @@ def test_runtime_restart_blocks_active_work(monkeypatch):
             "sessionId": "session-live",
         }
     ]
+    assert detail["forceAvailable"] is True
+    assert detail["forceChannelHint"]
     assert calls == []
     event_codes = [item[2] for item in scene_events]
     assert "runtime.restart.requested" in event_codes
@@ -2999,8 +3002,9 @@ def test_runtime_restart_blocks_active_work(monkeypatch):
     blocked_event = next(item for item in scene_events if item[2] == "runtime.restart.blocked_active_work")
     assert blocked_event[3]["outcome"] == "blocked"
     assert blocked_event[3]["fields"]["activeWorkCount"] == 1
+    assert blocked_event[3]["fields"]["forceAvailable"] is True
 
-def test_runtime_restart_blocks_confirmed_active_work_without_releasing_tasks(monkeypatch):
+def test_runtime_restart_harvests_then_blocks_surviving_active_work(monkeypatch):
     calls: list[object] = []
     self_calls: list[str] = []
     supervised_calls: list[str] = []
@@ -3011,6 +3015,7 @@ def test_runtime_restart_blocks_confirmed_active_work_without_releasing_tasks(mo
         stop_calls.append(session_id)
         raise RuntimeError(f"stop failed for {session_id}")
 
+    monkeypatch.setattr(runtime_service, "_work_run_summary", lambda: {"active": {}, "activeItems": {}})
     monkeypatch.setattr(
         runtime_service,
         "list_active_session_work_runs",
@@ -3041,16 +3046,19 @@ def test_runtime_restart_blocks_confirmed_active_work_without_releasing_tasks(mo
         raising=False,
     )
 
-    response = client.post("/api/runtime/restart?confirmedActiveWork=true")
+    response = client.post("/api/runtime/restart")
 
     assert response.status_code == 409
     detail = response.json()["detail"]
     assert detail["code"] == "active_work_restart_blocked"
     assert detail["activeWorkRuns"][0]["runId"] == "chat-turn-live"
-    assert stop_calls == []
-    assert self_calls == []
-    assert supervised_calls == []
-    assert worktree_calls == []
+    assert detail["forceAvailable"] is True
+    # Harvest ran (bounded) before the guard decided; the surviving turn is
+    # what finally blocks the restart.
+    assert stop_calls == ["session-live"]
+    assert len(self_calls) == 1
+    assert len(supervised_calls) == 1
+    assert len(worktree_calls) == 1
     assert calls == []
 
 def test_runtime_shutdown_blocks_active_chat_turn_before_manager_close(tmp_path, monkeypatch):
@@ -3068,6 +3076,17 @@ def test_runtime_shutdown_blocks_active_chat_turn_before_manager_close(tmp_path,
     }
     monkeypatch.setattr(runtime_service, "get_config", lambda: cfg)
     monkeypatch.setattr(session_service, "get_config", lambda: cfg)
+    # Harvest now reads the projection before the guard; keep the room/evolution
+    # reads hermetic so only the real session turn participates in this test.
+    monkeypatch.setattr(runtime_service, "_work_run_summary", lambda: {"active": {}, "activeItems": {}})
+    monkeypatch.setattr(runtime_service, "_force_cancel_self_evolution_for_shutdown", lambda reason: [])
+    monkeypatch.setattr(runtime_service, "_force_cancel_supervised_evolution_for_shutdown", lambda reason: [])
+    monkeypatch.setattr(
+        runtime_service,
+        "_force_cancel_supervised_worktree_evolution_for_shutdown",
+        lambda reason: [],
+        raising=False,
+    )
     agent = agent_directory_service.ensure_agent_for_session(
         "session-live",
         display_name="真实会话",
@@ -3124,7 +3143,14 @@ def test_runtime_shutdown_blocks_active_chat_turn_before_manager_close(tmp_path,
         session_service._clear_session_live_output("session-live")
 
 @pytest.mark.slow
-def test_runtime_shutdown_blocks_active_chat_room_round_before_manager_close(tmp_path, monkeypatch):
+def test_runtime_shutdown_harvests_active_chat_room_round_then_queues_manager_close(tmp_path, monkeypatch):
+    scene_events: list[tuple[str, str, str, dict]] = []
+
+    def record_scene_event(component, phase, event_code, **kwargs):
+        scene_events.append((component, phase, event_code, kwargs))
+        return {"accepted": True}
+
+    monkeypatch.setattr(runtime_service, "record_runtime_scene_event", record_scene_event, raising=False)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
@@ -3137,6 +3163,7 @@ def test_runtime_shutdown_blocks_active_chat_room_round_before_manager_close(tmp
     monkeypatch.setattr(runtime_service, "LAUNCHER_SCRIPT_PATH", script_path)
     monkeypatch.setattr(runtime_service, "LAUNCHER_STATE_PATH", state_path)
     monkeypatch.setattr(runtime_service.os, "name", "nt", raising=False)
+    monkeypatch.setattr(runtime_service, "electron_owns_main_line_queue", lambda: False)
     monkeypatch.setattr(runtime_service, "ensure_daemon_running", lambda: calls.append("ensure"))
     monkeypatch.setattr(
         runtime_service,
@@ -3177,20 +3204,33 @@ def test_runtime_shutdown_blocks_active_chat_room_round_before_manager_close(tmp
     assert room_started.wait(1.0)
 
     try:
-        response = client.post("/api/runtime/shutdown")
+        response = client.post("/api/runtime/shutdown", json={"source": "web_ui", "reason": "web_close_button"})
 
-        assert response.status_code == 409
-        detail = response.json()["detail"]
-        assert detail["code"] == "active_work_stop_blocked"
-        assert detail["message"] == "有进行中的任务，无法停止 Vibelution。请等待任务完成或先停止任务。"
-        assert detail["activeWorkRuns"][0]["kind"] == "chat_room_round"
-        assert detail["activeWorkRuns"][0]["runId"] == round_id
+        # Harvest-first: the active round is stopped (bounded) instead of the
+        # shutdown being blocked, so the manager close proceeds.
+        assert response.status_code == 202, json.dumps(response.json(), ensure_ascii=False, default=str)
+        payload = response.json()
+        assert payload["accepted"] is True
+        assert payload["mode"] == "runtime_manager"
+        assert payload["chatRoomRounds"][0]["runId"] == round_id
+        assert payload["chatRoomRounds"][0]["status"] == "stopped"
+        assert calls == [
+            "ensure",
+            ("close_workbench", {"reason": "web_close_button", "source": "web_ui", "stopManager": False}, "web_ui"),
+        ]
         final_detail = chat_room_service.get_chat_room_detail(room["roomId"])
-        assert final_detail["status"] == "running"
-        assert final_detail["activeRoundId"] == round_id
-        assert final_detail["rounds"][-1]["status"] == "running"
-        assert chat_room_service.load_chat_room_work_run_summary()["active"]["runId"] == round_id
-        assert calls == []
+        assert final_detail["status"] == "ready"
+        assert final_detail["activeRoundId"] == ""
+        assert final_detail["rounds"][-1]["status"] == "stopped"
+        assert chat_room_service.load_chat_room_work_run_summary()["active"] is None
+        harvest_events = [item for item in scene_events if item[2] == "runtime.shutdown.harvest_action"]
+        assert any(
+            item[3]["fields"].get("runId") == round_id and item[3]["outcome"] == "stopped"
+            for item in harvest_events
+        )
+        event_codes = [item[2] for item in scene_events]
+        assert "runtime.shutdown.blocked_active_work" not in event_codes
+        assert "runtime.shutdown.accepted" in event_codes
     finally:
         release_room.set()
         room_executor.shutdown(wait=True, cancel_futures=True)
@@ -3255,12 +3295,14 @@ def test_runtime_shutdown_blocks_active_evolution_runs_before_manager_close(tmp_
         "web-supervised-active",
         "web-worktree-active",
     }
-    assert self_calls == []
-    assert supervised_calls == []
-    assert worktree_calls == []
+    # Harvest ran before the guard decided; the projection still reports the
+    # three runs as running, so the shutdown stays blocked with force semantics.
+    assert len(self_calls) == 1
+    assert len(supervised_calls) == 1
+    assert len(worktree_calls) == 1
     assert calls == []
 
-def test_runtime_shutdown_blocks_active_chat_turn_without_trying_stop(tmp_path, monkeypatch):
+def test_runtime_shutdown_blocks_active_chat_turn_when_stop_fails(tmp_path, monkeypatch):
     script_path = tmp_path / "vibelution_launcher.ps1"
     script_path.write_text("Write-Host managed\n", encoding="utf-8")
     state_path = tmp_path / "state.json"
@@ -3272,6 +3314,7 @@ def test_runtime_shutdown_blocks_active_chat_turn_without_trying_stop(tmp_path, 
         stop_calls.append(session_id)
         raise RuntimeError(f"stop failed for {session_id}")
 
+    monkeypatch.setattr(runtime_service, "_work_run_summary", lambda: {"active": {}, "activeItems": {}})
     monkeypatch.setattr(runtime_service, "LAUNCHER_SCRIPT_PATH", script_path)
     monkeypatch.setattr(runtime_service, "LAUNCHER_STATE_PATH", state_path)
     monkeypatch.setattr(runtime_service.os, "name", "nt", raising=False)
@@ -3295,8 +3338,106 @@ def test_runtime_shutdown_blocks_active_chat_turn_without_trying_stop(tmp_path, 
     assert detail["code"] == "active_work_stop_blocked"
     assert detail["activeWorkRuns"][0]["sessionId"] == "session-live"
     assert detail["activeWorkRuns"][0]["runId"] == "chat-turn-live"
-    assert stop_calls == []
+    assert detail["forceAvailable"] is True
+    assert detail["forceChannelHint"]
+    # Harvest attempts the stop (bounded) before the guard blocks the shutdown.
+    assert stop_calls == ["session-live"]
     assert calls == []
+
+def test_runtime_shutdown_blocks_with_force_available_when_room_stop_channel_hangs(monkeypatch):
+    """Incident regression: a wedged room stop channel must not hang shutdown.
+
+    Production (2026-08-31): a deadlocked chat room runner held the room stop
+    channel forever; the active-work guard blocked shutdown while pointing at
+    that same channel, leaving the process unstoppable from inside. Shutdown
+    must now harvest with bounded waits, then block with forceAvailable.
+    """
+
+    scene_events: list[tuple[str, str, str, dict]] = []
+
+    def record_scene_event(component, phase, event_code, **kwargs):
+        scene_events.append((component, phase, event_code, kwargs))
+        return {"accepted": True}
+
+    monkeypatch.setattr(runtime_service, "SHUTDOWN_HARVEST_ITEM_WAIT_SECONDS", 0.2)
+    monkeypatch.setattr(runtime_service, "SHUTDOWN_HARVEST_TOTAL_WAIT_SECONDS", 0.8)
+    monkeypatch.setattr(
+        runtime_service,
+        "_work_run_summary",
+        lambda: {
+            "active": {
+                "chat_room_round": {
+                    "runId": "room-round-zombie",
+                    "roomId": "room-zombie",
+                    "status": "running",
+                }
+            },
+            "activeItems": {},
+        },
+    )
+    monkeypatch.setattr(runtime_service, "list_active_session_work_runs", lambda: [])
+    monkeypatch.setattr(runtime_service, "record_runtime_scene_event", record_scene_event, raising=False)
+
+    light_flags: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        chat_room_service,
+        "_request_chat_room_round_stop",
+        lambda round_id, reason: light_flags.append((round_id, reason)),
+    )
+    monkeypatch.setattr(runtime_service, "cancel_agent_execution_reservation", lambda run_id: True)
+    monkeypatch.setattr(
+        runtime_service,
+        "_force_cancel_self_evolution_for_shutdown",
+        lambda reason: [],
+    )
+    monkeypatch.setattr(runtime_service, "_force_cancel_supervised_evolution_for_shutdown", lambda reason: [])
+    monkeypatch.setattr(
+        runtime_service,
+        "_force_cancel_supervised_worktree_evolution_for_shutdown",
+        lambda reason: [],
+        raising=False,
+    )
+
+    lock_held = threading.Event()
+    release_lock = threading.Event()
+
+    def hold_room_lock():
+        with chat_room_service._CHAT_ROOM_LOCK:
+            lock_held.set()
+            assert release_lock.wait(5.0)
+
+    lock_thread = threading.Thread(target=hold_room_lock, name="pytest-room-lock-holder", daemon=True)
+    lock_thread.start()
+    assert lock_held.wait(2.0)
+
+    started_at = time.monotonic()
+    try:
+        response = client.post("/api/runtime/shutdown", json={"source": "web_ui", "reason": "web_close_button"})
+    finally:
+        release_lock.set()
+        lock_thread.join(timeout=2.0)
+
+    elapsed_seconds = time.monotonic() - started_at
+    assert response.status_code == 409
+    # The wedged stop channel must degrade into a bounded block, not a hang.
+    assert elapsed_seconds < 10.0
+    detail = response.json()["detail"]
+    assert detail["code"] == "active_work_stop_blocked"
+    assert detail["activeWorkRuns"][0]["runId"] == "room-round-zombie"
+    assert detail["forceAvailable"] is True
+    assert detail["forceChannelHint"]
+    # The lock-free light path (stop flag + reservation cancel) still applied.
+    assert [item[0] for item in light_flags] == ["room-round-zombie"]
+    event_codes = [item[2] for item in scene_events]
+    assert "runtime.shutdown.harvest_action" in event_codes
+    harvest_events = [item for item in scene_events if item[2] == "runtime.shutdown.harvest_action"]
+    assert any(
+        item[3]["fields"].get("runId") == "room-round-zombie" and item[3]["outcome"] == "timeout"
+        for item in harvest_events
+    )
+    blocked_event = next(item for item in scene_events if item[2] == "runtime.shutdown.blocked_active_work")
+    assert blocked_event[3]["fields"]["forceAvailable"] is True
+    assert blocked_event[3]["fields"]["unharvestedWorkRuns"][0]["runId"] == "room-round-zombie"
 
 def test_runtime_shutdown_falls_back_to_launcher_stop_when_manager_queue_fails(tmp_path, monkeypatch):
     script_path = tmp_path / "vibelution_launcher.ps1"
