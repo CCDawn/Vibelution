@@ -2130,7 +2130,7 @@ def build_meeting_digest_draft(
         drafted = drafter(dict(meeting_round), [dict(item) for item in source_messages])
         if not isinstance(drafted, Mapping):
             raise ContractValidationError("digest drafter must return a mapping")
-        return dict(drafted)
+        return _merge_llm_digest_with_deterministic_markers(meeting_round, dict(drafted))
     markers = meeting_rounds.apply_unstructured_digest_fallback(
         meeting_rounds.extract_discussion_markers(source_messages),
         source_messages,
@@ -2192,6 +2192,49 @@ def build_meeting_digest_draft(
         "validationErrors": validation_errors,
         "sourceMessageRefs": source_refs,
     }
+
+
+_LLM_DIGEST_MARKER_BUCKETS = (
+    "agreements",
+    "disagreements",
+    "actionItems",
+    "risks",
+    "knowledgeCandidates",
+    "proposedCandidates",
+)
+
+
+def _merge_llm_digest_with_deterministic_markers(
+    meeting_round: Mapping[str, Any],
+    drafted: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Replace protocol-fact buckets in an LLM draft with deterministic extraction.
+
+    The close gate (``meeting_rounds._assert_markers_preserved``) requires every
+    source-message marker verbatim in the submitted digest, and an LLM rewrite
+    cannot guarantee verbatim fidelity. Protocol facts are machine-extractable
+    hard facts, so after the LLM narrative is produced the fact buckets are
+    overwritten wholesale by ``extract_discussion_markers`` over
+    ``completed_meeting_source_messages`` — the same extraction the close gate
+    re-runs. The LLM keeps only the narrative fields (summary /
+    agendaSummary / discussionTopics) plus the server-owned sourceMessageRefs.
+    """
+
+    completed_messages = meeting_rounds.completed_meeting_source_messages(meeting_round)
+    markers = meeting_rounds.extract_discussion_markers(completed_messages)
+    merged = dict(drafted)
+    for key in _LLM_DIGEST_MARKER_BUCKETS:
+        merged[key] = list(markers.get(key) or [])
+    source_refs = [
+        meeting_rounds.message_source_ref(message)
+        for message in completed_messages
+    ]
+    evidence_requests, validation_errors = _collect_evidence_requests(
+        meeting_round, markers, source_refs
+    )
+    merged["evidenceRequests"] = evidence_requests
+    merged["validationErrors"] = validation_errors
+    return merged
 
 
 def draft_meeting_digest(
