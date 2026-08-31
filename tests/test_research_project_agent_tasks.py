@@ -1466,3 +1466,142 @@ def test_experiment_stage_round_selection_is_project_scoped():
     )
 
     assert selected["stageRoundId"] == "round-project-a"
+
+
+def _retry_lineage_fixture():
+    from types import SimpleNamespace
+
+    from core.research.workflow.contracts import PendingAction
+    from core.research.workflow.models import ActorKind
+
+    a1 = SimpleNamespace(
+        run_id="run-1",
+        node_id="hypothesis_design",
+        node_run_id="nr-1",
+        retry_of_node_run_id=None,
+        attempt=1,
+    )
+    a2 = SimpleNamespace(
+        run_id="run-1",
+        node_id="hypothesis_design",
+        node_run_id="nr-2",
+        retry_of_node_run_id="nr-1",
+        attempt=2,
+    )
+    attempts = {"nr-1": a1, "nr-2": a2}
+
+    class _Repo:
+        def get_attempt(self, node_run_id):
+            return attempts.get(node_run_id)
+
+    class _Store:
+        def read(self, fn):
+            return fn(_Repo())
+
+    action = PendingAction(
+        action_id="act-1",
+        run_id="run-1",
+        node_run_id="nr-2",
+        node_id="hypothesis_design",
+        attempt=2,
+        actor_kind=ActorKind.SYSTEM,
+        action_kind="agent_node",
+        input_snapshot_hash="h",
+        input_artifact_refs=(),
+        binding_snapshot_id=None,
+        budget_policy_hash="h",
+    )
+    return action, _Store()
+
+
+def test_formal_retry_lineage_without_tasks_falls_back_to_first_run(monkeypatch):
+    """A node blocked before any agent dispatch (readiness gate) owns no
+    project task in its whole retry lineage; the retry is the node's first
+    real execution and must fall back to the plain start payload instead of
+    failing on a missing source task (SCI-003 hypothesis_design incident)."""
+    from core.web.services.team_workflow.research_runtime import real_domain_ports
+
+    action, store = _retry_lineage_fixture()
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_project_agent_tasks."
+        "get_research_project_agent_task_status",
+        lambda team_id, project_id: {"tasks": []},
+    )
+    payload = real_domain_ports._formal_project_retry_payload(
+        action,
+        team_id="t",
+        project_id="p",
+        agent_id="agent-1",
+        task_kind="hypothesis_design",
+        store=store,
+    )
+    assert payload == {}
+
+
+def test_formal_retry_lineage_with_matching_task_returns_retry_payload(monkeypatch):
+    from core.web.services.team_workflow.research_runtime import real_domain_ports
+
+    action, store = _retry_lineage_fixture()
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_project_agent_tasks."
+        "get_research_project_agent_task_status",
+        lambda team_id, project_id: {
+            "tasks": [
+                {
+                    "taskId": "task-1",
+                    "workflowRunId": "run-1",
+                    "nodeRunId": "nr-1",
+                    "agentId": "agent-1",
+                    "taskKind": "hypothesis_design",
+                }
+            ]
+        },
+    )
+    payload = real_domain_ports._formal_project_retry_payload(
+        action,
+        team_id="t",
+        project_id="p",
+        agent_id="agent-1",
+        task_kind="hypothesis_design",
+        store=store,
+    )
+    assert payload == {"formalRetry": True, "retryTaskId": "task-1"}
+
+
+def test_formal_retry_lineage_with_ambiguous_tasks_still_fails_closed(monkeypatch):
+    from core.web.services.team_workflow.research_runtime import real_domain_ports
+
+    action, store = _retry_lineage_fixture()
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_project_agent_tasks."
+        "get_research_project_agent_task_status",
+        lambda team_id, project_id: {
+            "tasks": [
+                {
+                    "taskId": "task-1",
+                    "workflowRunId": "run-1",
+                    "nodeRunId": "nr-1",
+                    "agentId": "agent-1",
+                    "taskKind": "hypothesis_design",
+                },
+                {
+                    "taskId": "task-2",
+                    "workflowRunId": "run-1",
+                    "nodeRunId": "nr-1",
+                    "agentId": "agent-1",
+                    "taskKind": "hypothesis_design",
+                },
+            ]
+        },
+    )
+    import pytest
+
+    with pytest.raises(RuntimeError, match="missing or ambiguous"):
+        real_domain_ports._formal_project_retry_payload(
+            action,
+            team_id="t",
+            project_id="p",
+            agent_id="agent-1",
+            task_kind="hypothesis_design",
+            store=store,
+        )

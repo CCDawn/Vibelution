@@ -1908,9 +1908,11 @@ def _formal_project_retry_payload(
             "formalRetry": True,
             "retryTaskId": str(matches[0]["taskId"]),
         }
-    raise RuntimeError(
-        "formal project Agent retry source task is missing or ambiguous"
-    )
+    # A node can be blocked before any agent dispatch (for example by a
+    # readiness gate), so its whole retry lineage owns no project task.  Such
+    # a retry is the node's first real execution, not a task retry: fall back
+    # to the plain start payload and let the adapter create a fresh task.
+    return {}
 
 
 def _create_real_agent_task(
