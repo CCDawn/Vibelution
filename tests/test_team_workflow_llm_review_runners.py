@@ -232,6 +232,17 @@ def test_digest_drafter_uses_llm_output_and_server_owned_refs(monkeypatch):
     assert isinstance(refs, list) and len(refs) == 2
 
 
+def test_digest_prompt_carries_marker_and_envelope_contract():
+    """关闭护栏逐条校验 marker 原文与 searchEnvelope.keywords；起草 prompt 必须传达同样契约。"""
+
+    prompt = llm_review_runners._DIGEST_SYSTEM_PROMPT
+    assert 'EVIDENCE_REQUEST:' in prompt
+    assert "keywords 不得为空" in prompt
+    assert "原样照抄" in prompt
+    assert '"DISAGREE:"' in prompt
+    assert "原文" in prompt
+
+
 def test_digest_drafter_fails_closed_without_completed_messages(monkeypatch):
     _install_fake_llm(monkeypatch, ["{}"])
     drafter = llm_review_runners.build_meeting_digest_drafter(dict(_FAKE_LLM))
