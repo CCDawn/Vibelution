@@ -216,6 +216,19 @@ describe("resolveHypothesisFirstNextAction", () => {
     expect(failed.recovery?.label).toBe("重试整理候选清单");
     expect(failed.recovery?.reason).toBe("自动整理未完成");
     expect(failed.statusMessage).toBe("自动整理失败，可手动重试");
+
+    const missingDraft = resolveHypothesisFirstNextAction({
+      run: { runId: "run-1" },
+      meetings: [meeting({
+        meetingType: "hypothesis_candidate_generation",
+        status: "summarizing",
+      })],
+      boundChatRoundsTerminal: true,
+    });
+    expect(missingDraft.stage).toBe("generation_summarizing");
+    expect(missingDraft.recovery?.command).toBe("retry_draft_summary");
+    expect(missingDraft.recovery?.label).toBe("重试整理候选清单");
+    expect(missingDraft.statusMessage).toBe("自动整理未完成，可手动重试");
   });
 
   it("confirms the generation candidate list at awaiting_approval", () => {

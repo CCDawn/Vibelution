@@ -1815,6 +1815,190 @@ def test_stopped_linked_chat_round_projects_guarded_review_reopen() -> None:
     assert "retry_review_dispatch" not in commands
 
 
+def test_summarizing_generation_with_all_terminal_bound_rounds_exposes_summary_retry() -> None:
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-002",
+            reset_boundary=None,
+            chain_records=[],
+            selection_records=[],
+            meeting_records=[
+                {
+                    "meetingRoundId": "generation-1",
+                    "meetingType": "hypothesis_candidate_generation",
+                    "question": "SCI-002",
+                    "status": "summarizing",
+                    "linkedChatRoomId": "room-generation",
+                    "chatRoomRoundIds": ["round-completed", "round-stopped"],
+                    "summaryStartedAt": "2026-08-26T02:00:00Z",
+                }
+            ],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[],
+            chat_room_round_snapshots={
+                "round-completed": {
+                    "runId": "round-completed",
+                    "runKind": "chat_room_round",
+                    "status": "completed",
+                },
+                "round-stopped": {
+                    "runId": "round-stopped",
+                    "runKind": "chat_room_round",
+                    "status": "stopped",
+                    "runtimeStatus": "orphan_reconciled",
+                },
+            },
+        )
+    )
+
+    commands = [
+        action.command
+        for action in state.allowedActions
+        if action.kind == "command"
+    ]
+    assert state.currentPhase == "generation"
+    assert state.generation.lifecycle == "failed"
+    assert commands == ["regenerate_summary"]
+    retry = next(
+        action
+        for action in state.allowedActions
+        if action.kind == "command" and action.command == "regenerate_summary"
+    )
+    assert retry.payload.meetingRoundId == "generation-1"
+
+
+def test_summarizing_review_with_all_terminal_bound_rounds_exposes_summary_retry() -> None:
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[
+                {
+                    "recordKind": "hypothesis_candidate",
+                    "candidateId": "candidate-1",
+                    "questionId": "SCI-001",
+                },
+                {
+                    "recordKind": "review_round_link",
+                    "linkId": "link-1",
+                    "selectionId": "selection-1",
+                    "candidateId": "candidate-1",
+                    "candidateOrder": 0,
+                    "roundIndex": 1,
+                    "meetingRoundId": "review-1",
+                    "questionId": "SCI-001",
+                },
+            ],
+            selection_records=[
+                {
+                    "selectionId": "selection-1",
+                    "questionId": "SCI-001",
+                    "selectedCandidateIds": ["candidate-1"],
+                }
+            ],
+            meeting_records=[
+                {
+                    "meetingRoundId": "review-1",
+                    "meetingType": "hypothesis_review",
+                    "question": "SCI-001",
+                    "selectionId": "selection-1",
+                    "status": "summarizing",
+                    "linkedChatRoomId": "room-review",
+                    "chatRoomRoundIds": ["round-completed", "round-stopped"],
+                    "summaryStartedAt": "2026-08-26T02:00:00Z",
+                }
+            ],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[],
+            chat_room_round_snapshots={
+                "round-completed": {
+                    "runId": "round-completed",
+                    "runKind": "chat_room_round",
+                    "status": "completed",
+                },
+                "round-stopped": {
+                    "runId": "round-stopped",
+                    "runKind": "chat_room_round",
+                    "status": "stopped",
+                    "runtimeStatus": "orphan_reconciled",
+                },
+            },
+        )
+    )
+
+    commands = {
+        action.command
+        for action in state.allowedActions
+        if action.kind == "command"
+    }
+    assert state.currentPhase == "review"
+    assert "regenerate_summary" in commands
+    assert "reopen_review" not in commands
+
+
+@pytest.mark.parametrize(
+    "chat_room_round_snapshots",
+    [
+        {
+            "round-completed": {
+                "runId": "round-completed",
+                "runKind": "chat_room_round",
+                "status": "completed",
+            },
+            "round-running": {
+                "runId": "round-running",
+                "runKind": "chat_room_round",
+                "status": "running",
+            },
+        },
+        {
+            "round-completed": {
+                "runId": "round-completed",
+                "runKind": "chat_room_round",
+                "status": "completed",
+            }
+        },
+    ],
+    ids=["bound-round-running", "bound-round-snapshot-missing"],
+)
+def test_summarizing_generation_requires_every_bound_round_terminal_snapshot(
+    chat_room_round_snapshots: dict[str, dict[str, str]],
+) -> None:
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-002",
+            reset_boundary=None,
+            chain_records=[],
+            selection_records=[],
+            meeting_records=[
+                {
+                    "meetingRoundId": "generation-1",
+                    "meetingType": "hypothesis_candidate_generation",
+                    "question": "SCI-002",
+                    "status": "summarizing",
+                    "linkedChatRoomId": "room-generation",
+                    "chatRoomRoundIds": ["round-completed", "round-running"],
+                }
+            ],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[],
+            chat_room_round_snapshots=chat_room_round_snapshots,
+        )
+    )
+
+    assert "regenerate_summary" not in {
+        action.command
+        for action in state.allowedActions
+        if action.kind == "command"
+    }
+
+
 def test_v2_reopen_review_command_uses_guarded_recovery(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -4410,6 +4594,78 @@ def test_production_projector_reads_bound_chat_round_work_run_without_room_recon
     assert any(
         problem.code == "discussion_round_orphaned" for problem in state.problems
     )
+    state_module.clear_hypothesis_first_state_v2_cache()
+
+
+def test_production_projector_reads_all_bound_rounds_for_summarizing_meeting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_module = hypothesis_first_routes.hypothesis_first_state_v2
+    state_module.clear_hypothesis_first_state_v2_cache()
+    monkeypatch.setattr(
+        "core.web.services.team_service.assert_team_exists",
+        lambda team_id: team_id,
+    )
+    monkeypatch.setattr(
+        state_module.hypothesis_first_chain,
+        "_question_reset_snapshot",
+        lambda *_args: {
+            "targetMeetingIds": {"generation-1"},
+            "targetRoundIds": set(),
+            "chainRecords": [],
+            "selectionRecords": [],
+            "meetingRecords": [
+                {
+                    "meetingRoundId": "generation-1",
+                    "meetingType": "hypothesis_candidate_generation",
+                    "question": "SCI-002",
+                    "status": "summarizing",
+                    "linkedChatRoomId": "room-generation",
+                    "chatRoomRoundIds": ["round-old", "round-current"],
+                }
+            ],
+            "digestRecords": [],
+            "decisionRecords": [],
+            "hypothesisRoundRecords": [],
+        },
+    )
+    loaded: list[str] = []
+
+    def load_chat_round_snapshot(round_id: str) -> dict[str, object]:
+        loaded.append(round_id)
+        return {
+            "runId": round_id,
+            "runKind": "chat_room_round",
+            "status": "completed",
+        }
+
+    monkeypatch.setattr(
+        state_module,
+        "_load_chat_room_round_snapshot",
+        load_chat_round_snapshot,
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.formal_read_runtime.get_query_service",
+        lambda: type(
+            "QueryService",
+            (),
+            {"list_runs": lambda self, **_kwargs: {"runs": []}},
+        )(),
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.challenge_question_runs.get_challenge_question_run_detail",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            ValueError("challenge_question_run_not_found")
+        ),
+    )
+
+    sources = state_module._scope_records("team-1", "SCI-002")
+
+    assert set(loaded) == {"round-old", "round-current"}
+    assert set(sources["chat_room_round_snapshots"]) == {
+        "round-old",
+        "round-current",
+    }
     state_module.clear_hypothesis_first_state_v2_cache()
 
 

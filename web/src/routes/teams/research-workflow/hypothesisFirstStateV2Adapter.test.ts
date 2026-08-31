@@ -227,6 +227,35 @@ describe("resolveHypothesisFirstNextActionFromV2", () => {
     expect(action.expectedStateVersion).toBe("state-1");
   });
 
+  it("maps generation summary recovery to the meeting operations panel", () => {
+    const regenerate = {
+      ...command({
+        command: "regenerate_summary",
+        payload: { meetingRoundId: "generation-1" },
+      }, "重试生成纪要"),
+      targetPhase: "generation",
+      targetNodeId: HYPOTHESIS_FIRST_GENERATION_NODE_ID,
+    } as CommandAction;
+    const state = stateV2({
+      isInitial: false,
+      currentPhase: "generation",
+      generation: {
+        ...stateV2().generation,
+        lifecycle: "failed",
+        actionability: "blocked",
+        generationMeetingId: "generation-1",
+      },
+      allowedActions: [regenerate],
+    });
+
+    const action = resolveHypothesisFirstNextActionFromV2(state);
+
+    expect(action.stage).toBe("generation_summarizing");
+    expect(action.command).toBe("retry_draft_summary");
+    expect(action.commandLabel).toBe("重试生成纪要");
+    expect(action.canonicalAction?.command).toBe("regenerate_summary");
+  });
+
   it("maps generated candidates to selection", () => {
     const state = stateV2({
       isInitial: false,
