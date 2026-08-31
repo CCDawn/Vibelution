@@ -158,14 +158,21 @@ def _git_sh_exe() -> Path:
     pytest.skip("Git for Windows sh.exe is required for pre-commit hook tests")
 
 
+@pytest.fixture(scope="session")
+def _git_repo_template(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    template = tmp_path_factory.mktemp("quality-gate-git-template")
+    git(template, "init")
+    git(template, "config", "user.email", "quality-gate@example.invalid")
+    git(template, "config", "user.name", "Quality Gate Test")
+    (template / "seed.txt").write_text("seed\n", encoding="utf-8")
+    git(template, "add", "seed.txt")
+    git(template, "commit", "-m", "seed")
+    return template
+
+
 @pytest.fixture
-def git_repo(tmp_path: Path) -> Path:
-    git(tmp_path, "init")
-    git(tmp_path, "config", "user.email", "quality-gate@example.invalid")
-    git(tmp_path, "config", "user.name", "Quality Gate Test")
-    (tmp_path / "seed.txt").write_text("seed\n", encoding="utf-8")
-    git(tmp_path, "add", "seed.txt")
-    git(tmp_path, "commit", "-m", "seed")
+def git_repo(tmp_path: Path, _git_repo_template: Path) -> Path:
+    shutil.copytree(_git_repo_template, tmp_path, dirs_exist_ok=True)
     return tmp_path
 
 
