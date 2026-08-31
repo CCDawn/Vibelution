@@ -6671,6 +6671,77 @@ def test_arxiv_atom_entry_mapping_parses_search_result_fields():
     assert result["metadata"]["primaryCategory"] == "math.NT"
     assert result["sourceType"] == "paper"
 
+class _FakeAtomHttpResponse:
+    def __init__(self, payload: bytes):
+        self._payload = payload
+
+    def read(self) -> bytes:
+        return self._payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+
+def test_arxiv_provider_helpers_are_bound_into_orchestration_service_namespace():
+    # The background search thread resolves every provider helper through the
+    # orchestration_service namespace (``s.<name>``).  A new provider helper
+    # that is defined but not bound into that namespace raises AttributeError
+    # at runtime and fails the whole collection batch, so the binding is part
+    # of the provider contract.
+    from core.web.services import team_workflow_orchestration_service as s
+
+    assert hasattr(s, "_execute_arxiv_source_collection_query")
+    assert hasattr(s, "_execute_source_collection_query")
+    assert hasattr(s, "_arxiv_search_url")
+    assert hasattr(s, "_arxiv_search_query")
+    assert hasattr(s, "_source_collection_arxiv_atom_entries")
+    assert hasattr(s, "_source_collection_result_from_arxiv_entry")
+
+
+def test_execute_arxiv_source_collection_query_runs_through_service_namespace(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    from core.web.services import team_workflow_orchestration_service as s
+
+    feed = _fake_arxiv_atom_feed(
+        entries=[
+            {
+                "id": "http://arxiv.org/abs/2101.00983v1",
+                "title": "Counts of zeros of the Riemann zeta function",
+                "summary": "We prove bounds on simple zeros of the zeta function from rigorous Platt and Trudgian computations.",
+                "published": "2021-01-11T18:00:00Z",
+                "authors": ["Timothy Platt", "Tim Trudgian"],
+                "categories": ["math.NT"],
+            }
+        ]
+    )
+    seen_urls = []
+
+    def _fake_urlopen(request, timeout=0):
+        seen_urls.append(request.full_url)
+        return _FakeAtomHttpResponse(feed)
+
+    monkeypatch.setattr(s.urllib.request, "urlopen", _fake_urlopen)
+    monkeypatch.setattr(s.time, "sleep", lambda *_args: None)
+
+    response = s._execute_arxiv_source_collection_query(
+        "Platt Trudgian zeta zeros",
+        rows=2,
+        provider=s.SOURCE_COLLECTION_SEARCH_PROVIDER_ARXIV,
+        fallback_source_type="preprint",
+    )
+
+    assert seen_urls and "export.arxiv.org/api/query" in seen_urls[0]
+    assert not response.get("error")
+    results = response.get("results") or []
+    assert len(results) == 1
+    assert results[0]["sourceRef"] == "http://arxiv.org/abs/2101.00983v1"
+    assert "Platt and Trudgian" in (results[0]["summary"] or "")
+
+
 def test_execute_source_collection_search_accepts_arxiv_provider_and_rejects_unknown(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
