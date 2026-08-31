@@ -652,9 +652,10 @@ def test_preregistry_run_keeps_legacy_mutation_semantics(
     )
 
     _patch_mode(monkeypatch, KNOWLEDGE_SIDEFLOW_MODE_ON)
-    harness = _seeded_command_harness(
-        tmp_path, version_id="challenge-cup-research-v2.1.0"
-    )
+    # Pre-registry runs are represented by an empty pinned version id.  A
+    # non-empty unknown literal is deliberately fail-closed and belongs to the
+    # degraded-definition test above.
+    harness = _seeded_command_harness(tmp_path, version_id="")
     try:
         with pytest.raises(Exception) as excinfo:  # noqa: PT011 - any outcome but degraded
             harness.commands.command_service.submit(
