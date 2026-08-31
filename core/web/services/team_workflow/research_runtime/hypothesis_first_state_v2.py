@@ -1597,7 +1597,37 @@ def _collection_request_state(
             problems=[continuation_problem],
         )
     elif run_status in {"failed", "cancelled"}:
-        child = _phase("failed", "none", "available", updated_at=updated_at)
+        auto_retry = (
+            request.get("autoRetry")
+            if isinstance(request.get("autoRetry"), Mapping)
+            else {}
+        )
+        exhausted_at = str(auto_retry.get("exhaustedAt") or "").strip()
+        if exhausted_at:
+            # The bounded auto-retry budget is spent (frozen taxonomy
+            # ``collection_auto_retry_exhausted``): the request stays failed
+            # and only the human recover endpoint resolves it, so the
+            # snapshot raises the human-required problem for the anomaly
+            # inbox projection.
+            child = _phase(
+                "failed",
+                "none",
+                "blocked",
+                updated_at=updated_at,
+                problems=[
+                    _problem(
+                        "collection_auto_retry_exhausted",
+                        "资料搜集子运行自动重试预算已耗尽，需要人工恢复。",
+                        category="execution",
+                        severity="error",
+                        source_kind="collection_request",
+                        source_id=request_id,
+                        detected_at=exhausted_at,
+                    )
+                ],
+            )
+        else:
+            child = _phase("failed", "none", "available", updated_at=updated_at)
     elif run_status in {"succeeded", "completed"}:
         child = _phase("completed", "succeeded", "terminal", updated_at=updated_at)
     elif run_id:

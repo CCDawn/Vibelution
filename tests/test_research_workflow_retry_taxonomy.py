@@ -100,6 +100,10 @@ EXPECTED_DEFAULT_CLASSIFICATION: dict[str, tuple[RetryOutcomeClass, RetryOutcome
         RetryOutcomeClass.HUMAN_REQUIRED,
         RetryOutcomeOwner.OPERATOR,
     ),
+    "collection_auto_retry_exhausted": (
+        RetryOutcomeClass.HUMAN_REQUIRED,
+        RetryOutcomeOwner.OPERATOR,
+    ),
     "session_cancelled": (
         RetryOutcomeClass.TERMINAL,
         RetryOutcomeOwner.STAGE_SESSION,
@@ -179,7 +183,7 @@ def test_default_taxonomy_covers_exactly_the_frozen_registry() -> None:
     )
     assert distribution[RetryOutcomeClass.RETRYABLE_INFRA] == 2
     assert distribution[RetryOutcomeClass.RETRYABLE_BUSINESS] == 14
-    assert distribution[RetryOutcomeClass.HUMAN_REQUIRED] == 2
+    assert distribution[RetryOutcomeClass.HUMAN_REQUIRED] == 3
     assert distribution[RetryOutcomeClass.TERMINAL] == 3
 
 
