@@ -1894,6 +1894,46 @@ def record_human_adjudication(
     return {"status": "created", "adjudication": record}
 
 
+def _latest_round_adjudication(
+    records: list[dict[str, Any]],
+    *,
+    question_id: str,
+    round_id: str,
+    meeting_ids: set[str] | None = None,
+) -> dict[str, Any] | None:
+    """Latest human adjudication record appended for one hypothesis round.
+
+    Read-model counterpart of ``record_human_adjudication``: the appended
+    HUMAN_ADJUDICATION_KIND record is the convergence authority, so the
+    chain_state projection must consume it here (latest write wins, matching
+    the v2 projection).  Records are scoped like every other chain_state
+    input — question always, and the run's meeting ids when the caller reads
+    a formal run — so retained history from another execution cannot decide
+    this question.
+    """
+
+    normalized_question_id = str(question_id or "").strip().upper()
+    normalized_round_id = str(round_id or "").strip()
+    for item in reversed(records):
+        if str(item.get("recordKind") or "") != HUMAN_ADJUDICATION_KIND:
+            continue
+        if str(item.get("questionId") or "").strip().upper() != normalized_question_id:
+            continue
+        if str(item.get("hypothesisRoundId") or "").strip() != normalized_round_id:
+            continue
+        if meeting_ids is not None:
+            record_meeting_ids = {
+                str(meeting_id or "").strip()
+                for meeting_id in list(item.get("meetingRoundIds") or [])
+            }
+            if record_meeting_ids and not record_meeting_ids.intersection(
+                meeting_ids
+            ):
+                continue
+        return item
+    return None
+
+
 def _submit_formal_v2_command(
     team_id: str,
     *,
@@ -7711,23 +7751,50 @@ def chain_state(
         for request in requests
         if str(request.get("meetingRoundId") or "") in latest_meeting_ids
     ]
+    latest_adjudication = _latest_round_adjudication(
+        records,
+        question_id=normalized_question_id,
+        round_id=latest_round_id,
+        meeting_ids=meeting_ids if normalized_workflow_run_id else None,
+    )
+    adjudication_decision = (
+        str((latest_adjudication or {}).get("decision") or "").strip().lower()
+    )
+    # The appended human adjudication record is the second acceptance
+    # authority: an accepted adjudication converges the latest round even
+    # when that round produced new evidence requests (they must all be
+    # handed off — pending collection still blocks in every case) and even
+    # when the meta review itself did not accept.  A rejected adjudication
+    # never converges; the v2 projection mirrors these exact clauses.
+    adjudication_accepted = adjudication_decision == "accepted"
+    adjudication_rejected = adjudication_decision == "rejected"
     converged = bool(
         latest_round
         and latest_round_closed
-        and bool(meta_review.get("accepted"))
-        and not new_requests_this_round
+        and (bool(meta_review.get("accepted")) or adjudication_accepted)
         and not pending_requests
+        and (not new_requests_this_round or adjudication_accepted)
     )
     if not latest_round:
         convergence_detail = "尚无闭环的假说评审轮次"
     elif not latest_round_closed:
         convergence_detail = f"最近一轮 {latest_round_id} 尚未 closed"
-    elif not bool(meta_review.get("accepted")):
+    elif converged:
+        convergence_detail = (
+            f"最近一轮 {latest_round_id} 已由人工裁决收敛"
+            if adjudication_accepted
+            else "converged"
+        )
+    elif adjudication_rejected:
+        convergence_detail = f"最近一轮 {latest_round_id} 已被人工裁决拒绝"
+    elif not (bool(meta_review.get("accepted")) or adjudication_accepted):
         convergence_detail = f"最近一轮 {latest_round_id} 的 MetaReview 未 accepted"
-    elif new_requests_this_round:
-        convergence_detail = f"最近一轮 {latest_round_id} 产生了新的搜集决策"
     elif pending_requests:
         convergence_detail = "仍有待交接的搜集请求"
+    elif new_requests_this_round:
+        convergence_detail = (
+            f"最近一轮 {latest_round_id} 产生了新的搜集决策，等待人工裁决或下一轮评审"
+        )
     else:
         convergence_detail = "converged"
 

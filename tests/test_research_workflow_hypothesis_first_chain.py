@@ -26,6 +26,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 import threading
 import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 from core.research.workflow.contracts import (
@@ -4212,6 +4213,215 @@ def test_human_adjudication_persists_and_checks_workflow_run_scope(
     assert result["status"] == "created"
     assert result["adjudication"]["workflowRunId"] == "run-new"
     assert result["adjudication"]["meetingRoundIds"] == ["meeting-new"]
+
+
+# ---------------------------------------------------------------------------
+# Convergence authority consumption: the appended human adjudication record
+# must converge the latest round (with all new evidence requests handed off)
+# so the readiness blocker ``hypothesis_round_unconverged`` clears.
+# ---------------------------------------------------------------------------
+
+_CONV_ROUND_ID = "hround-conv-5"
+_CONV_MEETING_ID = "meeting-conv-5"
+_CONV_RUN_ID = "run-conv"
+
+
+def _adjudication_chain_fixture(
+    *,
+    decision: str | None,
+    request_statuses: tuple[str, ...] = ("handed_off",),
+    meta_accepted: bool = True,
+    run_id: str = "",
+) -> dict[str, Any]:
+    return {
+        "records": [
+            {
+                "recordKind": "review_round_link",
+                "linkId": "link-conv-5",
+                "selectionId": "selection-conv",
+                "candidateId": "hyp-a",
+                "candidateOrder": 0,
+                "roundIndex": 5,
+                "meetingRoundId": _CONV_MEETING_ID,
+                "questionId": _QUESTION_ID,
+                "workflowRunId": run_id,
+                "createdAt": "2026-08-30T00:00:01Z",
+            },
+            *[
+                {
+                    "recordKind": "collection_request",
+                    "requestId": f"request-conv-{index}",
+                    "questionId": _QUESTION_ID,
+                    "meetingRoundId": _CONV_MEETING_ID,
+                    "status": status,
+                    "createdAt": f"2026-08-30T00:01:{index:02d}Z",
+                }
+                for index, status in enumerate(request_statuses, start=1)
+            ],
+            *(
+                []
+                if decision is None
+                else [
+                    {
+                        "recordKind": "human_adjudication",
+                        "adjudicationId": f"hf-adjudication-conv-{decision}",
+                        "idempotencyKey": f"conv-key-{decision}",
+                        "questionId": _QUESTION_ID,
+                        "hypothesisRoundId": _CONV_ROUND_ID,
+                        "workflowRunId": run_id,
+                        "meetingRoundIds": [_CONV_MEETING_ID],
+                        "decision": decision,
+                        "rationale": "challenge-cup adjudication",
+                        "createdAt": "2026-08-30T00:02:00Z",
+                        "updatedAt": "2026-08-30T00:02:00Z",
+                    }
+                ]
+            ),
+        ],
+        "rounds": [
+            {
+                "roundId": _CONV_ROUND_ID,
+                "question": _QUESTION_ID,
+                "status": "closed",
+                "roundIndex": 5,
+                "metaReview": {
+                    "metaReviewId": "mr-conv-5",
+                    "recommendationCandidateId": "hyp-a",
+                    "accepted": meta_accepted,
+                },
+                "meetingRefs": [{"kind": "meeting_round", "id": _CONV_MEETING_ID}],
+                "createdAt": "2026-08-30T00:00:00Z",
+            }
+        ],
+        "meetings": [{"meetingRoundId": _CONV_MEETING_ID, "status": "closed"}],
+    }
+
+
+def _convergence_chain_state_env(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    records: list[dict[str, Any]],
+    rounds: list[dict[str, Any]],
+    meetings: list[dict[str, Any]],
+) -> None:
+    monkeypatch.setattr(chain, "_records", lambda _team_id: records)
+    monkeypatch.setattr(chain, "_question_meetings", lambda _t, _q, **_kw: meetings)
+    monkeypatch.setattr(chain, "_question_hypothesis_rounds", lambda _t, _q: rounds)
+    monkeypatch.setattr(chain, "_question_template_baselines", lambda _t, _q: [])
+    monkeypatch.setattr(
+        chain, "_question_generation_meetings", lambda _t, _q, **_kw: []
+    )
+
+
+def _allow_chain_claim_belief_gate(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _allow(_team_id, _question_id, candidate_ids):
+        return {
+            candidate_id: {
+                "status": "allowed",
+                "reason": "",
+                "claims": [],
+                "blockedClaims": [],
+            }
+            for candidate_id in candidate_ids
+        }
+
+    monkeypatch.setattr(chain, "evaluate_claim_belief_gate", _allow)
+
+
+def test_accepted_adjudication_converges_exhausted_round_with_handed_off_requests(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Round 5/5 closed, meta review accepted, new evidence requests all
+    handed off, human adjudication accepted -> chain_state converges, the
+    detail names the adjudication, and budget exhaustion clears."""
+    team_id, _agents = _hf_env(tmp_path, monkeypatch)
+    _convergence_chain_state_env(
+        monkeypatch, **_adjudication_chain_fixture(decision="accepted")
+    )
+    _allow_chain_claim_belief_gate(monkeypatch)
+
+    state = chain.chain_state(team_id, _QUESTION_ID)
+
+    assert state["hypothesisConverged"] is True
+    assert "人工裁决" in state["convergenceDetail"]
+    assert state["budgetExhausted"] is False
+    assert state["pendingCollectionCount"] == 0
+    assert state["claimBeliefGate"]["status"] == "allowed"
+
+
+def test_accepted_adjudication_converges_within_workflow_run_scope(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The formal readiness path reads chain_state scoped by runId; an
+    adjudication recorded for that run must converge exactly there."""
+    team_id, _agents = _hf_env(tmp_path, monkeypatch)
+    _convergence_chain_state_env(
+        monkeypatch,
+        **_adjudication_chain_fixture(decision="accepted", run_id=_CONV_RUN_ID),
+    )
+    _allow_chain_claim_belief_gate(monkeypatch)
+
+    state = chain.chain_state(team_id, _QUESTION_ID, workflow_run_id=_CONV_RUN_ID)
+
+    assert state["hypothesisConverged"] is True
+    assert "人工裁决" in state["convergenceDetail"]
+    assert state["budgetExhausted"] is False
+
+
+def test_accepted_adjudication_cannot_waive_pending_collection_requests(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A pending collection request blocks convergence in every case: the
+    adjudication must never waive unfinished evidence handoffs."""
+    team_id, _agents = _hf_env(tmp_path, monkeypatch)
+    _convergence_chain_state_env(
+        monkeypatch,
+        **_adjudication_chain_fixture(
+            decision="accepted",
+            request_statuses=("handed_off", "collecting"),
+        ),
+    )
+
+    state = chain.chain_state(team_id, _QUESTION_ID)
+
+    assert state["hypothesisConverged"] is False
+    assert state["convergenceDetail"] == "仍有待交接的搜集请求"
+    assert state["pendingCollectionCount"] == 1
+
+
+def test_unadjudicated_new_requests_keep_exhausted_round_unconverged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without a human adjudication, an exhausted round whose new evidence
+    requests are all handed off stays unconverged and waits for the manual
+    decision (the production run-16cfab646d08 deadlock state)."""
+    team_id, _agents = _hf_env(tmp_path, monkeypatch)
+    _convergence_chain_state_env(
+        monkeypatch, **_adjudication_chain_fixture(decision=None)
+    )
+
+    state = chain.chain_state(team_id, _QUESTION_ID)
+
+    assert state["hypothesisConverged"] is False
+    assert "产生了新的搜集决策" in state["convergenceDetail"]
+    assert state["budgetExhausted"] is True
+
+
+def test_rejected_adjudication_keeps_round_unconverged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A rejected human adjudication is terminal: the round never converges
+    and the budget stays exhausted."""
+    team_id, _agents = _hf_env(tmp_path, monkeypatch)
+    _convergence_chain_state_env(
+        monkeypatch, **_adjudication_chain_fixture(decision="rejected")
+    )
+
+    state = chain.chain_state(team_id, _QUESTION_ID)
+
+    assert state["hypothesisConverged"] is False
+    assert state["convergenceDetail"] == f"最近一轮 {_CONV_ROUND_ID} 已被人工裁决拒绝"
+    assert state["budgetExhausted"] is True
 
 
 def _empty_generation_runner(participant, prompt, context):

@@ -2952,27 +2952,55 @@ def project_state_from_records(
         if rounds
         else None
     )
+    latest_round_id = str((latest_round or {}).get("roundId") or "")
     latest_adjudication = next(
         (
             item
             for item in reversed(chain)
             if item.get("recordKind") == _HUMAN_ADJUDICATION_KIND
-            and str(item.get("hypothesisRoundId") or "")
-            == str((latest_round or {}).get("roundId") or "")
+            and str(item.get("hypothesisRoundId") or "") == latest_round_id
         ),
         None,
+    )
+    adjudication_decision = (
+        str((latest_adjudication or {}).get("decision") or "").strip().lower()
+    )
+    adjudication_accepted = (
+        latest_adjudication is not None and adjudication_decision == "accepted"
+    )
+    adjudication_rejected = (
+        latest_adjudication is not None and adjudication_decision == "rejected"
     )
     meta_review = (latest_round or {}).get("metaReview")
     accepted = (
         bool(meta_review.get("accepted"))
         if isinstance(meta_review, Mapping)
         else False
-    ) or str((latest_adjudication or {}).get("decision") or "").lower() == "accepted"
-    adjudication_rejected = (
-        str((latest_adjudication or {}).get("decision") or "").lower() == "rejected"
-    )
+    ) or adjudication_accepted
+    latest_round_meeting_ids = {
+        str(ref.get("id") or "")
+        for ref in list((latest_round or {}).get("meetingRefs") or [])
+        if isinstance(ref, Mapping) and str(ref.get("kind") or "") == "meeting_round"
+    }
+    # Mirror the v1 chain_state convergence clauses exactly: a latest round
+    # that produced new evidence requests has NOT converged on acceptance
+    # alone — it must either hand every request off and win a human
+    # adjudication (budget exhausted) or open the next review round.  Pending
+    # collection blocks in every case; a rejected adjudication never
+    # converges.
+    new_requests_this_round = [
+        item
+        for item in request_records
+        if str(item.get("meetingRoundId") or "") in latest_round_meeting_ids
+    ]
     pending_collection = any(item.get("lifecycle") != "completed" for item in collection_requests)
-    converged = bool(latest_round and latest_round.get("status") == "closed" and accepted and not pending_collection)
+    converged = bool(
+        latest_round
+        and latest_round.get("status") == "closed"
+        and accepted
+        and not pending_collection
+        and (not new_requests_this_round or adjudication_accepted)
+    )
     # Convergence consistency (claim belief hard gate, fail-closed): v2
     # mirrors the v1 chain state's gate so both projections agree — an
     # accepted round whose recommended candidate carries no evaluable,

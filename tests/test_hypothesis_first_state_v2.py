@@ -1328,6 +1328,281 @@ def test_rejected_human_adjudication_is_terminal_and_not_reoffered() -> None:
     assert not any(action.kind == "command" for action in state.allowedActions)
 
 
+# ---------------------------------------------------------------------------
+# Convergence dual predicate: budget-exhausted rounds with new evidence
+# requests must reach the human adjudication exit and converge after an
+# accepted adjudication (mirrors the v1 chain_state clauses exactly).
+# ---------------------------------------------------------------------------
+
+
+def _convergence_round_record(
+    round_index: int,
+    *,
+    accepted: bool = True,
+) -> dict[str, object]:
+    return {
+        "roundId": f"round-{round_index}",
+        "question": "SCI-001",
+        "roundIndex": round_index,
+        "status": "closed",
+        "metaReview": {
+            "accepted": accepted,
+            "recommendationCandidateId": "candidate-1",
+        },
+        "meetingRefs": [{"kind": "meeting_round", "id": f"review-{round_index}"}],
+        "createdAt": "2026-08-25T00:00:00Z",
+    }
+
+
+def _convergence_link_record(round_index: int) -> dict[str, object]:
+    return {
+        "recordKind": "review_round_link",
+        "linkId": f"link-{round_index}",
+        "selectionId": "selection-1",
+        "candidateId": "candidate-1",
+        "candidateOrder": 0,
+        "roundIndex": round_index,
+        "roundBudget": 3,
+        "meetingRoundId": f"review-{round_index}",
+        "questionId": "SCI-001",
+    }
+
+
+def _convergence_request_record(
+    request_id: str,
+    round_index: int,
+    *,
+    handed_off: bool,
+) -> dict[str, object]:
+    return {
+        "recordKind": "collection_request",
+        "requestId": request_id,
+        "questionId": "SCI-001",
+        "meetingRoundId": f"review-{round_index}",
+        "status": "handed_off" if handed_off else "pending",
+        "collectionRunId": f"child-{request_id}",
+        "collectionRunStatus": "succeeded",
+        "searchEnvelope": {"keywords": ["water"]},
+        "createdAt": "2026-08-25T00:01:00Z",
+    }
+
+
+def _convergence_adjudication_record(
+    round_index: int,
+    decision: str,
+) -> dict[str, object]:
+    return {
+        "recordKind": "human_adjudication",
+        "adjudicationId": f"adjudication-{decision}-{round_index}",
+        "hypothesisRoundId": f"round-{round_index}",
+        "decision": decision,
+        "questionId": "SCI-001",
+        "meetingRoundIds": [f"review-{round_index}"],
+        "updatedAt": "2026-08-25T00:05:00Z",
+    }
+
+
+def _convergence_commands(state: HypothesisFirstStateV2) -> dict[str, Any]:
+    return {
+        action.command: action
+        for action in state.allowedActions
+        if action.kind == "command"
+    }
+
+
+def test_accepted_adjudication_with_all_requests_handed_off_converges() -> None:
+    """Budget-exhausted round: accepted adjudication + every new evidence
+    request handed off -> the v2 projection converges green and switches to
+    the formal-run creation exit instead of re-offering adjudication."""
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[
+                {
+                    "recordKind": "hypothesis_candidate",
+                    "candidateId": "candidate-1",
+                    "questionId": "SCI-001",
+                },
+                _convergence_link_record(5),
+                _convergence_request_record("request-1", 5, handed_off=True),
+                _convergence_adjudication_record(5, "accepted"),
+            ],
+            selection_records=[
+                {
+                    "selectionId": "selection-1",
+                    "questionId": "SCI-001",
+                    "selectedCandidateIds": ["candidate-1"],
+                }
+            ],
+            meeting_records=[
+                {
+                    "meetingRoundId": "review-5",
+                    "meetingType": "hypothesis_review",
+                    "question": "SCI-001",
+                    "status": "closed",
+                }
+            ],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[_convergence_round_record(5)],
+        )
+    )
+
+    commands = _convergence_commands(state)
+    # A converged chain that offers create_formal_run derives its current
+    # phase from that offer (formal_runtime); the convergence payload is the
+    # authority under test here.
+    assert state.convergence.accepted is True
+    assert state.convergence.lifecycle == "completed"
+    assert state.convergence.outcome == "succeeded"
+    assert state.convergence.actionability == "terminal"
+    assert "human_adjudication" not in commands
+    assert "create_formal_run" in commands
+
+
+def test_accepted_adjudication_with_pending_request_stays_unconverged() -> None:
+    """An accepted adjudication can never waive unfinished collection: one
+    request that has not been handed off keeps the projection unconverged."""
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[
+                {
+                    "recordKind": "hypothesis_candidate",
+                    "candidateId": "candidate-1",
+                    "questionId": "SCI-001",
+                },
+                _convergence_link_record(5),
+                _convergence_request_record("request-1", 5, handed_off=True),
+                _convergence_request_record("request-2", 5, handed_off=False),
+                _convergence_adjudication_record(5, "accepted"),
+            ],
+            selection_records=[
+                {
+                    "selectionId": "selection-1",
+                    "questionId": "SCI-001",
+                    "selectedCandidateIds": ["candidate-1"],
+                }
+            ],
+            meeting_records=[
+                {
+                    "meetingRoundId": "review-5",
+                    "meetingType": "hypothesis_review",
+                    "question": "SCI-001",
+                    "status": "closed",
+                }
+            ],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[_convergence_round_record(5)],
+        )
+    )
+
+    # The pending handoff pulls currentPhase to "collection"; the convergence
+    # payload is the authority under test here.
+    assert state.convergence.accepted is False
+    assert state.convergence.outcome == "exhausted"
+
+
+def test_unadjudicated_new_requests_budget_exhausted_offers_human_adjudication() -> None:
+    """Meta review accepted, round budget exhausted, new evidence requests all
+    handed off but no human decision yet -> the projection must NOT fake
+    convergence and must surface the human adjudication offer."""
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[
+                {
+                    "recordKind": "hypothesis_candidate",
+                    "candidateId": "candidate-1",
+                    "questionId": "SCI-001",
+                },
+                _convergence_link_record(5),
+                _convergence_request_record("request-1", 5, handed_off=True),
+            ],
+            selection_records=[
+                {
+                    "selectionId": "selection-1",
+                    "questionId": "SCI-001",
+                    "selectedCandidateIds": ["candidate-1"],
+                }
+            ],
+            meeting_records=[
+                {
+                    "meetingRoundId": "review-5",
+                    "meetingType": "hypothesis_review",
+                    "question": "SCI-001",
+                    "status": "closed",
+                }
+            ],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[_convergence_round_record(5)],
+        )
+    )
+
+    commands = _convergence_commands(state)
+    assert state.currentPhase == "convergence"
+    assert state.convergence.accepted is False
+    assert state.convergence.lifecycle == "completed"
+    assert state.convergence.outcome == "exhausted"
+    assert "human_adjudication" in commands
+    assert "open_next_review" not in commands
+    assert commands["human_adjudication"].payload.hypothesisRoundId == "round-5"
+
+
+def test_unadjudicated_new_requests_within_budget_offers_open_next_review() -> None:
+    """Same unconverged shape but inside the round budget -> the projection
+    offers the next review round, not the adjudication exit."""
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[
+                {
+                    "recordKind": "hypothesis_candidate",
+                    "candidateId": "candidate-1",
+                    "questionId": "SCI-001",
+                },
+                _convergence_link_record(3),
+                _convergence_request_record("request-1", 3, handed_off=True),
+            ],
+            selection_records=[
+                {
+                    "selectionId": "selection-1",
+                    "questionId": "SCI-001",
+                    "selectedCandidateIds": ["candidate-1"],
+                }
+            ],
+            meeting_records=[
+                {
+                    "meetingRoundId": "review-3",
+                    "meetingType": "hypothesis_review",
+                    "question": "SCI-001",
+                    "status": "closed",
+                }
+            ],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[_convergence_round_record(3)],
+        )
+    )
+
+    commands = _convergence_commands(state)
+    assert state.currentPhase == "convergence"
+    assert state.convergence.accepted is False
+    assert state.convergence.lifecycle == "waiting_human"
+    assert "open_next_review" in commands
+    assert "human_adjudication" not in commands
+
+
 def test_program_output_waits_for_exact_h1_h4_review() -> None:
     state = HypothesisFirstStateV2.model_validate(
         project_state_from_records(
