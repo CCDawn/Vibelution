@@ -21,6 +21,8 @@
 | 稳定 NPC 社会圈 | `social_circle.py` |
 | 本地生活动态、日记和作品聚合 | `life_feed.py` |
 | 有条件、可排序、可解释的表达规则 | `expression_policy.py` |
+| 每轮真人化表达决定、意图优先级和追问预算 | `interaction_expression.py` |
+| mailbox 意图 receipt 与时间/经历/计划 Prompt 投影 | `dialogue_context.py` |
 | 可选语音/3D/Live2D provider 回退 | `embodiment.py` |
 | 环境事实 supersession 与位置移动连续性 | `environment.py` |
 | 因果存储路径、schema 和授权复用来源 receipt | `causal_contracts.py` |
@@ -51,6 +53,7 @@
 - 偏好、习惯、技能、自我叙事和记忆纠错提案未经审核不得进入 Prompt；Persona 核心与 ToolPolicy 不可由提案改写。
 - 兴趣只从可验证的成功 outcome 成长；NPC 不是 Agent，生活动态也不反向写入生活经历。
 - 具身化 provider 和资产均为可选；没有授权资产或 provider 不健康时回退现有立绘，文本会话不受影响。
+- 每轮表达决定只读取有界投影和插件 mailbox 的意图 receipt，不保存用户原文，不调用第二次 LLM，也不能放宽关系、权限或安全边界。
 
 ## 主测试
 

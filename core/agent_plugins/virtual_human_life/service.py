@@ -41,6 +41,11 @@ from .conversation_continuity import (
     resolve_open_loop,
     upsert_open_loop,
 )
+from .dialogue_context import (
+    bind_interaction_receipt_turn,
+    project_companion_dialogue_context,
+    record_interaction_receipt,
+)
 from .domain import (
     apply_completed_event_to_state,
     apply_relationship_interaction_to_state,
@@ -564,6 +569,14 @@ class VirtualHumanLifeService:
             )
             return {**released, "accepted": False, "queued": True}
         command = dict(entry.get("command") or {})
+        if str(entry.get("sourceKind") or "") == "user":
+            with self._lock_for(normalized_agent_id):
+                record_interaction_receipt(
+                    self.store,
+                    normalized_agent_id,
+                    entry=entry,
+                    now=self._now(),
+                )
         try:
             accepted = self.conversation_submitter(
                 session_id=normalized_session_id,
@@ -632,6 +645,15 @@ class VirtualHumanLifeService:
                 reason="native_session_missing_turn_id",
             )
             raise VirtualHumanLifeError("Native Session accepted without a turn id.")
+        with self._lock_for(normalized_agent_id):
+            bind_interaction_receipt_turn(
+                self.store,
+                normalized_agent_id,
+                session_id=normalized_session_id,
+                entry_id=str(entry.get("entryId") or ""),
+                turn_id=turn_id,
+                now=self._now(),
+            )
         with self._lock_for(normalized_agent_id):
             mailbox = normalize_mailbox(
                 self.store.read_json(normalized_agent_id, "conversation/mailbox.json")
@@ -1737,6 +1759,20 @@ class VirtualHumanLifeService:
         )
         trigger = self._attempt_for_turn(agent_id, run_id)
         rules = load_prompt_pack()
+        local_now = self._local_now(binding)
+        dialogue_context = project_companion_dialogue_context(
+            self.store,
+            agent_id,
+            binding=binding,
+            state=state,
+            causal=causal,
+            today_schedule=today_schedule,
+            tomorrow_schedule=tomorrow_schedule,
+            local_now=local_now,
+            session_id=session_id,
+            run_id=run_id,
+            proactive=bool(trigger),
+        )
         remaining = [
             {
                 "activityId": str(item.get("activityId") or ""),
@@ -1760,6 +1796,7 @@ class VirtualHumanLifeService:
             else {}
         )
         dynamic_payload = {
+            **dialogue_context,
             "mood": state.get("mood") or {},
             "energy": state.get("energy"),
             "currentActivityId": state.get("currentActivityId") or "",

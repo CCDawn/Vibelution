@@ -16,7 +16,12 @@ Contract under test:
   stage task authority confirms the main turn's work: the verdict follows the
   main turn and the failure is exposed as a structured warning.
 - Without that authority confirmation the failure still raises (fail-closed).
-- A main turn that itself fails terminally still fails the attempt.
+- A main turn that itself fails terminally after its stage task settled
+  ``completed`` (production run-16cfab646d08: writeback passed the gate, then
+  a later LLM call died with ``budget_exhausted``) must not deadlock retries:
+  the attempt returns the failed turn's snapshot with a structured warning.
+- A main turn that itself fails terminally without that settled authority
+  (task still ``needs_review``) still fails the attempt (fail-closed).
 - ``research_project`` tasks keep their authority-owned, never-continued
   semantics.
 """
@@ -80,20 +85,21 @@ def _snapshot(status: str, turn_id: str) -> dict:
     }
 
 
-def _terminal_failure(turn_id: str, status: str) -> RuntimeError:
-    return RuntimeError(
-        json.dumps(
-            {
-                "code": "agent_turn_terminal_failed",
-                "sessionId": "sess-1",
-                "turnId": turn_id,
-                "terminalStatus": status,
-                "completionSource": "last_turn_status",
-                "failureClass": "terminal_failure",
-            },
-            ensure_ascii=False,
-        )
-    )
+def _terminal_failure(
+    turn_id: str, status: str, problem_code: str = ""
+) -> RuntimeError:
+    detail = {
+        "code": "agent_turn_terminal_failed",
+        "sessionId": "sess-1",
+        "turnId": turn_id,
+        "terminalStatus": status,
+        "completionSource": "last_turn_status",
+        "failureClass": "terminal_failure",
+    }
+    if problem_code:
+        detail["terminalProblemCode"] = problem_code
+        detail["terminalReason"] = problem_code
+    return RuntimeError(json.dumps(detail, ensure_ascii=False))
 
 
 def _deadline_terminal_failure(turn_id: str = "turn-main") -> RuntimeError:
@@ -643,8 +649,74 @@ def test_continuation_failure_still_fails_when_work_not_settled(monkeypatch):
     assert "submit:continue" in events
 
 
-def test_main_turn_failure_raises_without_continuation(monkeypatch):
-    """The main turn itself failed terminally: no continuation, no rescue."""
+def test_main_turn_failure_rescued_when_stage_task_settled(monkeypatch):
+    """Production run-16cfab646d08: the main turn's writeback tool settled the
+    stage task ``completed`` (completion gate passed), then a later LLM call
+    died with ``budget_exhausted`` so the main turn failed terminally.  The
+    stage-task idempotency key omits the node-run attempt, so every retry
+    re-anchors to the same failed turn -- the settled authority must rescue
+    the attempt (failed snapshot returned, structured warning) instead of
+    deadlocking retries, and the failure must stay visible (never swallowed,
+    never reclassified as success)."""
+    import core.web.services.team_workflow.research_runtime.agent_turn_completion as atc
+
+    recorded: list[tuple] = []
+
+    def _record(event_code, *, outcome, fields, level="info"):
+        recorded.append((event_code, level, outcome, fields))
+
+    monkeypatch.setattr(atc, "_record_turn_continuation_scene_event", _record)
+
+    def _wait(session_id, turn_id, *, timeout_ms, poll_ms, reconcilable_terminal_statuses):
+        raise _terminal_failure(turn_id, "failed", problem_code="budget_exhausted")
+
+    monkeypatch.setattr(atc, "wait_for_agent_turn_terminal", _wait)
+    monkeypatch.setattr(
+        atc,
+        "_stage_task_work_already_complete",
+        lambda *, team_id, task_id: True,
+    )
+
+    snapshot, final_turn_id, used = _wait_with_bounded_turn_continuation(
+        _handle(),
+        action=_action(),
+        input_snapshot=_input_snapshot(),
+        adapter_spec=AgentTaskAdapterSpec(
+            node_id="source_finding",
+            family="source_collection",
+            task_key="finding",
+            role_key="source_finder",
+        ),
+        timeout_ms=1000,
+        poll_ms=10,
+    )
+
+    assert final_turn_id == "turn-main"
+    assert used == []
+    assert snapshot["turnId"] == "turn-main"
+    assert snapshot["terminal"] is True
+    assert snapshot["terminalStatus"] == "failed"
+    assert snapshot["terminalProblemCode"] == "budget_exhausted"
+    assert snapshot["failureClass"] == "terminal_failure"
+    assert snapshot["rescuedByStageTaskAuthority"] is True
+    warnings = [
+        item
+        for item in recorded
+        if item[0] == "agent_turn.main_turn_failed_work_complete"
+    ]
+    assert len(warnings) == 1
+    assert warnings[0][1] == "warning"
+    assert warnings[0][2] == "resolved_by_stage_task_authority"
+    assert warnings[0][3]["mainTurnId"] == "turn-main"
+    assert warnings[0][3]["failedTurnId"] == "turn-main"
+    assert warnings[0][3]["failedTurnStatus"] == "failed"
+
+
+def test_main_turn_failure_still_raises_when_work_not_settled(monkeypatch):
+    """The main turn itself failed terminally and the stage task is not
+    completed (writeback downgrades gate-failed completions to ``needs_review``,
+    which the settled predicate treats as not-complete): the failure must
+    keep raising -- fail-closed is preserved."""
     import core.web.services.team_workflow.research_runtime.agent_turn_completion as atc
 
     def _wait(session_id, turn_id, *, timeout_ms, poll_ms, reconcilable_terminal_statuses):
@@ -655,7 +727,7 @@ def test_main_turn_failure_raises_without_continuation(monkeypatch):
     monkeypatch.setattr(
         atc,
         "_stage_task_work_already_complete",
-        lambda *, team_id, task_id: True,
+        lambda *, team_id, task_id: False,
     )
 
     with pytest.raises(RuntimeError) as excinfo:
@@ -676,6 +748,7 @@ def test_main_turn_failure_raises_without_continuation(monkeypatch):
     detail = json.loads(str(excinfo.value))
     assert detail["code"] == "agent_turn_terminal_failed"
     assert detail["turnId"] == "turn-main"
+    assert detail["terminalStatus"] == "failed"
 
 
 def test_settled_predicate_requires_completed_stage_task(monkeypatch):
