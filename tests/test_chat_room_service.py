@@ -26,6 +26,10 @@ from core.web.services.team_workflow.research_runtime import meeting_receipt_aut
 from tests.helpers.chat_turn_harness import wait_for_matching_event
 
 
+def test_chat_room_executor_allows_four_concurrent_rounds() -> None:
+    assert chat_room_service._CHAT_ROOM_EXECUTOR_MAX_WORKERS == 4
+
+
 def _append_session_ledger_message(root, session_id: str, message: dict, *, turn_id: str) -> None:
     role = str(message.get("role") or "").strip().lower()
     append_conversation_event(

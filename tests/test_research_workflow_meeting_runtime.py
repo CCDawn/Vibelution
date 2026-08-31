@@ -64,6 +64,10 @@ _ROLES = (
 )
 
 
+def test_meeting_discussion_executor_allows_four_concurrent_meetings() -> None:
+    assert meeting_runtime._MEETING_DISCUSSION_EXECUTOR_MAX_WORKERS == 4
+
+
 def _team_with_room(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(meetings, "PROJECT_ROOT", tmp_path)

@@ -154,7 +154,11 @@ _CHAT_ROOM_API_HISTORY_MESSAGE_LIMIT = 50
 # persistence, or scene-event writes.  Never nest with _CHAT_STATE_LOCK.
 _CHAT_ROOM_LOCK = threading.RLock()
 _CHAT_ROOM_PARTICIPANT_REFRESH_MAX_ATTEMPTS = 3
-_CHAT_ROOM_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="web-chat-room")
+_CHAT_ROOM_EXECUTOR_MAX_WORKERS = 4
+_CHAT_ROOM_EXECUTOR = ThreadPoolExecutor(
+    max_workers=_CHAT_ROOM_EXECUTOR_MAX_WORKERS,
+    thread_name_prefix="web-chat-room",
+)
 # The executor queue is unbounded, so cap submitted-but-not-finished rounds;
 # otherwise N rooms can all flip to durable "running" while queueing forever.
 _CHAT_ROOM_MAX_INFLIGHT_ROUNDS = 16

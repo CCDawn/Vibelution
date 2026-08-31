@@ -130,8 +130,9 @@ _ROLE_METADATA_FIELDS = (
     "challengeCupTeamRole",
 )
 _DISCUSSION_DRIVER = threading.local()
+_MEETING_DISCUSSION_EXECUTOR_MAX_WORKERS = 4
 _MEETING_DISCUSSION_EXECUTOR = ThreadPoolExecutor(
-    max_workers=2,
+    max_workers=_MEETING_DISCUSSION_EXECUTOR_MAX_WORKERS,
     thread_name_prefix="hypothesis-meeting",
 )
 _MEETING_DISCUSSION_JOBS_LOCK = threading.Lock()
