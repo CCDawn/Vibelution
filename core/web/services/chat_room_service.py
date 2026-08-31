@@ -1,4 +1,41 @@
-"""Chat room orchestration for multi-session agent discussion."""
+"""Chat room orchestration for multi-session agent discussion.
+
+Lock order contract
+-------------------
+
+``_CHAT_ROOM_LOCK`` is the outer lock for the durable room store.  Inside its
+critical sections only room-store in-memory mutations plus
+``_store().load()``/``_store().save()`` are allowed.  Forbidden under this
+lock: any ``session_service.*`` call, any chat-state transaction
+(``session_service._CHAT_STATE_LOCK`` / ``chat_state_transaction``), session
+turn scheduler calls, WorkRun persistence, runtime-scene event writes, and any
+other potentially blocking I/O.  Publishing SSE snapshots is allowed because
+it only copies into bounded subscriber queues.
+
+``_CHAT_ROOM_LOCK`` and ``_CHAT_STATE_LOCK`` are sibling locks and must never
+be held at the same time in either nesting order.  Cross-service work (session
+transcript sync, agent-execution reservation cancels, participant repair
+backed by directory/session reads) must snapshot what it needs inside the
+lock, release the lock, then execute.  This prevents the AB-BA deadlock where
+a round runner holds ``_CHAT_ROOM_LOCK`` while waiting for the chat-state
+transaction lock, and a session-side path holds the chat-state lock while
+waiting for ``_CHAT_ROOM_LOCK``.
+
+Wider lock cascade (production py-spy evidence): the chat room lock also
+interacts with ``_TEAM_LOCK`` (``core/web/services/team/team_crud.py``) and
+with the chat-state file transaction's per-process thread lock
+(``_CHAT_STATE_THREAD_LOCK`` inside ``core/ui/chat_state.py``'s
+``chat_state_transaction``, held by ``session_service._CHAT_STATE_LOCK``).
+The three subsystem locks — team store, room store, chat state — are siblings.
+Code in this module must not hold ``_CHAT_ROOM_LOCK`` while acquiring
+``_TEAM_LOCK``, ``_CHAT_STATE_LOCK``/``_CHAT_STATE_THREAD_LOCK``, the session
+turn scheduler condition, or any other subsystem lock.  Nesting in the other
+direction (another subsystem locking, then touching room state) is only safe
+because this module never holds the room lock across a foreign lock, which
+keeps the global lock graph acyclic.  Audited 2026-08-31: ``_TEAM_LOCK``
+critical sections acquire no chat-room or chat-state locks (their only
+``chat_room_service`` calls happen after the team lock is released).
+"""
 
 from __future__ import annotations
 
@@ -107,6 +144,10 @@ CHAT_ROOM_PURPOSES = [
 ]
 RUNNING_ROUND_STATUSES = {"queued", "running", "stopping"}
 _CHAT_ROOM_API_HISTORY_MESSAGE_LIMIT = 50
+# Lock order contract (see module docstring): outer lock for the room store.
+# Only room-store memory ops + load/save inside; never hold it while calling
+# session_service, chat-state transactions, the session turn scheduler, WorkRun
+# persistence, or scene-event writes.  Never nest with _CHAT_STATE_LOCK.
 _CHAT_ROOM_LOCK = threading.RLock()
 _CHAT_ROOM_PARTICIPANT_REFRESH_MAX_ATTEMPTS = 3
 _CHAT_ROOM_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="web-chat-room")
@@ -132,6 +173,18 @@ _PARTICIPANT_CONTEXT_FIELDS = (
 AgentRunner = Callable[[dict[str, Any], str, dict[str, Any]], dict[str, Any]]
 _CHAT_ROOM_ROUND_CONTROLS_LOCK = threading.Lock()
 _CHAT_ROOM_ROUND_CONTROLS: dict[str, dict[str, str]] = {}
+# Read-path reconcile gate: nearly every read API (room lists, room detail,
+# team listing via list_chat_rooms_compact, conversation index) funnels through
+# _reconcile_chat_room_round_state, which needs _CHAT_ROOM_LOCK.  Running it on
+# every read turned one hijacked lock into a frozen API surface, so reconcile
+# only runs when the room store changed on disk, after a bounded staleness TTL
+# (external WorkRun changes), or once per process start — and only one
+# reconcile runs at a time; concurrent readers skip it instead of queueing.
+_CHAT_ROOM_RECONCILE_GATE_LOCK = threading.Lock()
+_CHAT_ROOM_RECONCILE_LAST_RUN_AT: float | None = None
+_CHAT_ROOM_RECONCILE_LAST_STORE_TOKEN: str | None = None
+_CHAT_ROOM_RECONCILE_INFLIGHT = False
+_CHAT_ROOM_RECONCILE_MIN_INTERVAL_SECONDS = 30.0
 _CHALLENGE_ROOM_DEADLINE_CONFIG_KEY = "challengeDeadlineAtMs"
 _CHALLENGE_ROOM_PER_CALL_DEADLINE_CONTEXT_KEY = "challengePerCallDeadlineAtMs"
 _CHALLENGE_ROOM_DEADLINE_STOP_REASON = "challenge_logical_task_deadline_exhausted"
@@ -531,6 +584,15 @@ def update_chat_room(
 ) -> dict[str, Any]:
     lang = get_web_language()
     normalized_room_id = str(room_id or "").strip()
+    # Lock order contract: participant resolution reads the session directory
+    # (session_service) and must not run under _CHAT_ROOM_LOCK; resolve before
+    # taking the lock and apply the resolved list inside.
+    resolved_participants_override: list[dict[str, Any]] | None = None
+    if participant_session_ids is not None:
+        resolved_participants_override = _apply_participant_contexts(
+            _resolve_participants(participant_session_ids),
+            participant_contexts_by_agent_id=participant_contexts_by_agent_id,
+        )
     with _CHAT_ROOM_LOCK:
         state = _store().load()
         room = _find_room(state, normalized_room_id)
@@ -550,17 +612,12 @@ def update_chat_room(
             room["purpose"] = _normalize_purpose(purpose or room.get("purpose") or DEFAULT_PURPOSE)
         if config is not None:
             room["config"] = _safe_config(config)
-        if participant_session_ids is not None:
-            participants = _resolve_participants(participant_session_ids)
-            participants = _apply_participant_contexts(
-                participants,
-                participant_contexts_by_agent_id=participant_contexts_by_agent_id,
-            )
-            if not participants and not allow_empty_participants:
+        if resolved_participants_override is not None:
+            if not resolved_participants_override and not allow_empty_participants:
                 raise ChatRoomValidationError(
                     text_for(lang, zh="至少需要一个可用会话才能更新群聊。", en="At least one session is required.")
                 )
-            room["participants"] = participants
+            room["participants"] = resolved_participants_override
 
         room["updatedAt"] = utc_now_iso()
         _store().save(state)
@@ -693,9 +750,19 @@ def remove_agent_from_chat_rooms(
     restore_rooms: list[dict[str, Any]] = []
     now = utc_now_iso()
     session_summaries = _session_summary_index()
+    # Lock order contract: the participant repair reads the agent directory and
+    # writes scene events (file I/O); precompute the directory index here and
+    # defer event writes until after _CHAT_ROOM_LOCK is released.
+    repair_indexes = _active_agent_participant_indexes()
+    deferred_repair_events: list[dict[str, Any]] = []
     with _CHAT_ROOM_LOCK:
         state = _store().load()
-        if _repair_room_participants_in_state(state, session_summaries=session_summaries):
+        if _repair_room_participants_in_state(
+            state,
+            session_summaries=session_summaries,
+            active_agent_indexes=repair_indexes,
+            deferred_events=deferred_repair_events,
+        ):
             _store().save(state)
             state = _store().load()
         rooms = [item for item in list(state.get("rooms") or []) if isinstance(item, dict)]
@@ -724,6 +791,8 @@ def remove_agent_from_chat_rooms(
             changed_rooms.append(room)
         if changed_rooms:
             _store().save(state)
+
+    _emit_deferred_participant_repair_events(deferred_repair_events)
 
     for room in changed_rooms:
         _record_room_event(
@@ -788,9 +857,18 @@ def remove_agents_from_chat_rooms(
     agent_id_set = set(normalized_agent_ids)
     now = utc_now_iso()
     session_summaries = _session_summary_index() if repair_participants or include_chat_rooms else None
+    # Lock order contract: same as remove_agent_from_chat_rooms — precompute
+    # the directory index and defer scene-event writes out of the lock.
+    repair_indexes = _active_agent_participant_indexes()
+    deferred_repair_events: list[dict[str, Any]] = []
     with _CHAT_ROOM_LOCK:
         state = _store().load()
-        if repair_participants and _repair_room_participants_in_state(state, session_summaries=session_summaries):
+        if repair_participants and _repair_room_participants_in_state(
+            state,
+            session_summaries=session_summaries,
+            active_agent_indexes=repair_indexes,
+            deferred_events=deferred_repair_events,
+        ):
             _store().save(state)
             state = _store().load()
         rooms = [item for item in list(state.get("rooms") or []) if isinstance(item, dict)]
@@ -832,6 +910,8 @@ def remove_agents_from_chat_rooms(
                 removed_by_agent_id.setdefault(removed_agent_id, []).append(room_id)
         if changed_rooms:
             _store().save(state)
+
+    _emit_deferred_participant_repair_events(deferred_repair_events)
 
     for room in changed_rooms:
         room_id = str(room.get("roomId") or "").strip()
@@ -978,6 +1058,18 @@ def create_chat_room(
     if requested_room_id and (_safe_fragment(requested_room_id) != requested_room_id or not requested_room_id.startswith("room-")):
         raise ChatRoomValidationError("Invalid chat room id.")
     _require_ready_mode(normalized_mode)
+    # Lock order contract: participant resolution reads the session directory
+    # (session_service / agent directory) and must not run under
+    # _CHAT_ROOM_LOCK; resolve before taking the lock.
+    participants = (
+        _resolve_agent_participants(participant_agent_ids)
+        if participant_agent_ids
+        else _resolve_participants(participant_session_ids)
+    )
+    participants = _apply_participant_contexts(
+        participants,
+        participant_contexts_by_agent_id=participant_contexts_by_agent_id,
+    )
     with _CHAT_ROOM_LOCK:
         state = _store().load()
         existing_room_ids = {
@@ -991,15 +1083,6 @@ def create_chat_room(
             room_id = requested_room_id
         else:
             room_id = _new_id("room", existing_room_ids)
-        participants = (
-            _resolve_agent_participants(participant_agent_ids)
-            if participant_agent_ids
-            else _resolve_participants(participant_session_ids)
-        )
-        participants = _apply_participant_contexts(
-            participants,
-            participant_contexts_by_agent_id=participant_contexts_by_agent_id,
-        )
         if not participants and not allow_empty_participants:
             raise ChatRoomValidationError(
                 text_for(lang, zh="至少需要一个可用会话才能创建群聊。", en="At least one session is required.")
@@ -1676,7 +1759,6 @@ def stop_chat_room_round(room_id: str, *, reason: str = "") -> dict[str, Any]:
         ):
             raise ChatRoomBusyError(text_for(lang, zh="当前群聊没有正在运行的轮次。", en="No chat room round is running."))
         _request_chat_room_round_stop(active_round_id, stop_reason)
-        session_service.cancel_agent_execution_reservation(active_round_id)
         target_round["status"] = "stopping"
         target_round["summary"] = text_for(
             lang,
@@ -1692,6 +1774,9 @@ def stop_chat_room_round(room_id: str, *, reason: str = "") -> dict[str, Any]:
         room_payload = dict(room)
         round_payload = dict(target_round)
 
+    # Lock order contract: the scheduler cancel touches the session turn
+    # scheduler's own lock and must never run while holding _CHAT_ROOM_LOCK.
+    session_service.cancel_agent_execution_reservation(active_round_id)
     _persist_chat_room_work_run(
         room_payload,
         round_payload,
@@ -1897,6 +1982,7 @@ def _execute_chat_room_round(
             }
         messages.append(message)
         message_time = utc_now_iso()
+        stop_pending = False
         with _CHAT_ROOM_LOCK:
             state = _store().load()
             live_room = _find_room(state, normalized_room_id)
@@ -1911,24 +1997,31 @@ def _execute_chat_room_round(
             if _chat_room_round_stop_reason(round_id):
                 # A stop arrived between the outer check and this lock: persist
                 # the latest messages without rewinding the round to running,
-                # then let the shared stop finalizer close the round.
+                # then let the shared stop finalizer close the round.  The
+                # finalizer performs session sync (chat-state transaction), so
+                # per the lock order contract it must run after releasing
+                # _CHAT_ROOM_LOCK.
                 target_round["messages"] = [dict(item) for item in messages]
                 target_round["updatedAt"] = message_time
                 _store().save(state)
-                stopped = _stopped_chat_room_round_detail(normalized_room_id, round_id)
-                if stopped is not None:
-                    _clear_chat_room_round_control(round_id)
-                    return stopped
-                return _room_to_api(live_room)
-            target_round["messages"] = [dict(item) for item in messages]
-            target_round["status"] = "running"
-            target_round["updatedAt"] = message_time
-            live_room["status"] = "running"
-            live_room["activeRoundId"] = round_id
-            live_room["updatedAt"] = message_time
-            _store().save(state)
-            room = dict(live_room)
-            round_payload = dict(target_round)
+                locked_room_snapshot = dict(live_room)
+                stop_pending = True
+            else:
+                target_round["messages"] = [dict(item) for item in messages]
+                target_round["status"] = "running"
+                target_round["updatedAt"] = message_time
+                live_room["status"] = "running"
+                live_room["activeRoundId"] = round_id
+                live_room["updatedAt"] = message_time
+                _store().save(state)
+                room = dict(live_room)
+                round_payload = dict(target_round)
+        if stop_pending:
+            stopped = _stopped_chat_room_round_detail(normalized_room_id, round_id)
+            if stopped is not None:
+                _clear_chat_room_round_control(round_id)
+                return stopped
+            return _room_to_api(locked_room_snapshot)
         _persist_chat_room_work_run(
             room,
             round_payload,
@@ -2166,7 +2259,6 @@ def force_stop_active_chat_room_rounds_for_shutdown(reason: str) -> list[dict[st
                 if active_round_id and round_id != active_round_id:
                     continue
                 _request_chat_room_round_stop(round_id, stop_reason)
-                session_service.cancel_agent_execution_reservation(round_id)
                 summary = _stopped_round_summary(
                     stop_reason,
                     message_count=len(list(round_payload.get("messages") or [])),
@@ -2194,6 +2286,10 @@ def force_stop_active_chat_room_rounds_for_shutdown(reason: str) -> list[dict[st
                 )
         if changed:
             _store().save(state)
+
+    # Lock order contract: scheduler cancels must not run under _CHAT_ROOM_LOCK.
+    for item in stopped:
+        session_service.cancel_agent_execution_reservation(str(item.get("roundId") or ""))
 
     for item in stopped:
         room_payload = item.pop("_room", {})
@@ -4335,6 +4431,7 @@ def _repair_room_participants(
     active_agents_by_id: dict[str, dict[str, Any]] | None = None,
     active_agents_by_session_id: dict[str, dict[str, Any]] | None = None,
     preserve_scoped_session_ids: bool = False,
+    deferred_events: list[dict[str, Any]] | None = None,
 ) -> bool:
     participants = list(room.get("participants") or [])
     refreshed = _refresh_participants(
@@ -4356,16 +4453,27 @@ def _repair_room_participants(
         and str(item.get("sessionId") or item.get("directSessionId") or "").strip() not in previous_missing_sessions
     ]
     for participant in newly_missing:
+        # Scene-event writes are file I/O; per the lock order contract callers
+        # that repair under _CHAT_ROOM_LOCK defer them until after the lock.
+        event_fields = {
+            "sessionId": str(participant.get("sessionId") or participant.get("directSessionId") or "").strip(),
+            "agentId": str(participant.get("agentId") or "").strip(),
+            "agentStatusCode": str(participant.get("agentStatusCode") or "").strip(),
+            "enabled": bool(participant.get("enabled")),
+        }
+        if deferred_events is not None:
+            deferred_events.append(
+                {
+                    "room": dict(room),
+                    "fields": event_fields,
+                }
+            )
+            continue
         _record_room_event(
             "participant",
             "chat_room.participant_agent_missing",
             room,
-            fields={
-                "sessionId": str(participant.get("sessionId") or participant.get("directSessionId") or "").strip(),
-                "agentId": str(participant.get("agentId") or "").strip(),
-                "agentStatusCode": str(participant.get("agentStatusCode") or "").strip(),
-                "enabled": bool(participant.get("enabled")),
-            },
+            fields=event_fields,
             outcome="disabled",
             level="warning",
             lifecycle=True,
@@ -4381,21 +4489,39 @@ def _repair_room_participants_in_state(
     state: dict[str, Any],
     *,
     session_summaries: dict[str, dict[str, Any]] | None = None,
+    active_agent_indexes: dict[str, dict[str, dict[str, Any]]] | None = None,
+    deferred_events: list[dict[str, Any]] | None = None,
 ) -> bool:
     changed = False
-    active_agent_indexes = _active_agent_participant_indexes()
+    # ``active_agent_indexes`` lets callers that repair under _CHAT_ROOM_LOCK
+    # precompute the directory read outside the lock (lock order contract).
+    indexes = active_agent_indexes if active_agent_indexes is not None else _active_agent_participant_indexes()
     for room in list(state.get("rooms") or []):
         if not isinstance(room, dict):
             continue
         if _repair_room_participants(
             room,
             session_summaries=session_summaries,
-            active_agents_by_id=active_agent_indexes["by_id"],
-            active_agents_by_session_id=active_agent_indexes["by_session_id"],
+            active_agents_by_id=indexes["by_id"],
+            active_agents_by_session_id=indexes["by_session_id"],
             preserve_scoped_session_ids=_is_scoped_discussion_room(room),
+            deferred_events=deferred_events,
         ):
             changed = True
     return changed
+
+
+def _emit_deferred_participant_repair_events(events: list[dict[str, Any]]) -> None:
+    for item in events:
+        _record_room_event(
+            "participant",
+            "chat_room.participant_agent_missing",
+            item.get("room") or {},
+            fields=item.get("fields") or {},
+            outcome="disabled",
+            level="warning",
+            lifecycle=True,
+        )
 
 
 def _session_summary_index(*, session_ids: set[str] | None = None) -> dict[str, dict[str, Any]]:
@@ -5020,9 +5146,56 @@ def _chat_room_reconciliation_reason(snapshot: dict[str, Any], *, final_status: 
     )
 
 
+def _chat_room_reconcile_store_token() -> str:
+    try:
+        stat = _store().state_path.stat()
+    except OSError:
+        return "missing"
+    return f"{stat.st_mtime_ns}"
+
+
+def _acquire_chat_room_reconcile_run() -> bool:
+    """Return True when this caller may run a reconcile pass.
+
+    See the gate notes next to the module-level gate state: runs are deduped
+    per store-file change, bounded by a staleness TTL, and never overlap.
+    """
+
+    global _CHAT_ROOM_RECONCILE_INFLIGHT
+    now = _perf_counter()
+    token = _chat_room_reconcile_store_token()
+    with _CHAT_ROOM_RECONCILE_GATE_LOCK:
+        if _CHAT_ROOM_RECONCILE_INFLIGHT:
+            return False
+        if _CHAT_ROOM_RECONCILE_LAST_RUN_AT is not None:
+            unchanged = token == _CHAT_ROOM_RECONCILE_LAST_STORE_TOKEN
+            within_ttl = now - _CHAT_ROOM_RECONCILE_LAST_RUN_AT < _CHAT_ROOM_RECONCILE_MIN_INTERVAL_SECONDS
+            if unchanged and within_ttl:
+                return False
+        _CHAT_ROOM_RECONCILE_INFLIGHT = True
+        return True
+
+
+def _release_chat_room_reconcile_run() -> None:
+    global _CHAT_ROOM_RECONCILE_INFLIGHT, _CHAT_ROOM_RECONCILE_LAST_RUN_AT, _CHAT_ROOM_RECONCILE_LAST_STORE_TOKEN
+    with _CHAT_ROOM_RECONCILE_GATE_LOCK:
+        _CHAT_ROOM_RECONCILE_INFLIGHT = False
+        _CHAT_ROOM_RECONCILE_LAST_RUN_AT = _perf_counter()
+        _CHAT_ROOM_RECONCILE_LAST_STORE_TOKEN = _chat_room_reconcile_store_token()
+
+
 def _reconcile_chat_room_round_state() -> list[dict[str, Any]]:
     """Converge persisted active rooms with terminal WorkRuns or process ownership."""
 
+    if not _acquire_chat_room_reconcile_run():
+        return []
+    try:
+        return _reconcile_chat_room_round_state_locked_gate()
+    finally:
+        _release_chat_room_reconcile_run()
+
+
+def _reconcile_chat_room_round_state_locked_gate() -> list[dict[str, Any]]:
     if _chat_room_lock_owned_by_current_thread():
         return []
     store = _work_run_store()
