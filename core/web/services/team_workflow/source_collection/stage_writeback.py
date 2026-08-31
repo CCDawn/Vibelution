@@ -17,6 +17,224 @@ from .stage_session import (
     assert_source_collection_stage_advance_ready,
 )
 
+# Evidence states an extraction entry may declare.  The claim evidence
+# materializer skips ``missing_evidence_anchor``/``missing``/``unverified``
+# and materializes everything else only with a verbatim quote anchor, so the
+# writeback validation and the ``verification_status`` alias routing below
+# must accept exactly this enum.
+_EXTRACTION_EVIDENCE_STATUS_VALUES = {
+    "verified_abstract",
+    "evidence_ready",
+    "missing_evidence_anchor",
+    "missing",
+    "unverified",
+}
+
+# Bounded diagnostics: at most this many per-writeback quote-anchor errors are
+# surfaced in the rejection message.
+_EXTRACTION_QUOTE_ANCHOR_ERROR_LIMIT = 3
+
+
+def _extraction_entry_with_normalized_evidence_status(entry: dict[str, Any]) -> dict[str, Any]:
+    """Return the entry with ``verification_status`` alias routed, if applicable.
+
+    Production incident (dprun-20260831142015208397-93ca7108): the extraction
+    agent knew the evidence-state value ``missing_evidence_anchor`` but wrote
+    it under the Challenge v2 card metadata key ``verification_status``, so the
+    materializer read an empty ``evidenceStatus``.  Only this one key is
+    aliased, and only when its value belongs to the extraction evidence-state
+    enum; Challenge v2 card values (``metadata_checked`` and friends) stay card
+    metadata untouched.
+    """
+    s = _service()
+    if s._trim_text(entry.get("evidenceStatus"), max_length=80):
+        return entry
+    alias_value = s._trim_text(entry.get("verification_status"), max_length=80).lower()
+    if alias_value in _EXTRACTION_EVIDENCE_STATUS_VALUES:
+        normalized = dict(entry)
+        normalized["evidenceStatus"] = alias_value
+        return normalized
+    return entry
+
+
+def _normalize_extraction_evidence_status_aliases_in_payload(
+    result: dict[str, Any],
+) -> dict[str, Any]:
+    """Route the ``verification_status`` alias on canonical extraction lists."""
+    for key in ("candidateExtractions", "recordExtractions"):
+        entries = result.get(key)
+        if not isinstance(entries, list):
+            continue
+        normalized_entries: list[Any] = []
+        changed = False
+        for entry in entries:
+            if isinstance(entry, dict):
+                normalized = _extraction_entry_with_normalized_evidence_status(entry)
+                changed = changed or normalized is not entry
+                normalized_entries.append(normalized)
+            else:
+                normalized_entries.append(entry)
+        if changed:
+            result[key] = normalized_entries
+    return result
+
+
+def _extraction_entry_quote_anchor(
+    entry: dict[str, Any],
+    source_summary: str,
+) -> tuple[bool, bool]:
+    """Return ``(has_verbatim_anchor, supplied_quote_without_anchor)``.
+
+    A valid anchor is a nested ``claims[]``/``keyFindings[]`` item with a
+    ``quote`` or an ``evidenceRefs[]`` item with ``{id, quote}`` whose quote is
+    a verbatim substring of the stored source summary.  A supplied quote that
+    never matches verbatim is the strong paraphrase signal the contract
+    rejects.
+    """
+    s = _service()
+    supplied_quote = False
+    for key in ("claims", "keyFindings", "key_findings", "findings"):
+        items = entry.get(key)
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            quote = s._trim_text(item.get("quote"), max_length=4000)
+            if not quote:
+                continue
+            supplied_quote = True
+            if quote in source_summary:
+                return True, False
+    refs = entry.get("evidenceRefs") or entry.get("evidence_refs")
+    if isinstance(refs, list):
+        for item in refs:
+            if not isinstance(item, dict):
+                continue
+            quote = s._trim_text(item.get("quote"), max_length=4000)
+            if not quote:
+                continue
+            supplied_quote = True
+            ref_id = s._trim_text(
+                item.get("id") or item.get("evidenceRefId") or item.get("refId"),
+                max_length=240,
+            )
+            if ref_id and quote in source_summary:
+                return True, False
+    return False, supplied_quote
+
+
+def _source_collection_stage_writeback_formal_claim_bound(
+    task: dict[str, Any],
+    run_id: str,
+) -> bool:
+    """True when this stage task can cross the claim-evidence boundary.
+
+    The quote-anchor contract exists to feed claim materialization; runs
+    without a formal workflow binding never materialize claims, so their
+    writebacks keep the permissive legacy behavior.
+    """
+    s = _service()
+    if s._trim_text(task.get("workflowRunId"), max_length=160):
+        return True
+    try:
+        run = s.data_processing_service.get_processing_run(run_id)
+    except Exception:  # noqa: BLE001 - absent run leaves the contract inert
+        return False
+    run_scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
+    return bool(s._trim_text(run_scope.get("workflowRunId"), max_length=160))
+
+
+def _source_collection_stage_writeback_quote_anchor_errors(
+    team_id: str,
+    run_id: str,
+    task: dict[str, Any],
+    result_payload: dict[str, Any],
+) -> list[str]:
+    """Validate completed extraction writebacks against verbatim quote anchors.
+
+    Per non-exclude entry whose source summary is stored non-empty: require at
+    least one verbatim quote anchor and reject any paraphrased quote.  Sources
+    with an empty stored summary must honestly declare
+    ``evidenceStatus=missing_evidence_anchor`` (the materializer skips those).
+    Returns human-readable errors; an empty list means the writeback passes.
+    """
+    s = _service()
+    stage_id = s._trim_text(task.get("stageId"), max_length=80)
+    agent_role = s._trim_text(task.get("agentRole"), max_length=80)
+    if stage_id != "extraction" and agent_role != "source_extractor":
+        return []
+    if not _source_collection_stage_writeback_formal_claim_bound(task, run_id):
+        return []
+    summary_by_id: dict[str, str] = {}
+    known_source_ids: set[str] = set()
+    for candidate in s._source_collection_candidates_for_run(team_id, run_id):
+        candidate_id = s._trim_text(candidate.get("candidateId"), max_length=160)
+        if not candidate_id:
+            continue
+        known_source_ids.add(candidate_id)
+        summary = s._trim_text(candidate.get("summary"), max_length=4000)
+        if summary:
+            summary_by_id[candidate_id] = summary
+    records = s._source_collection_stage_records_for_run(run_id)
+    try:
+        run = s.data_processing_service.get_processing_run(run_id)
+        records, _excluded_source_summary = s._source_collection_filter_active_records(team_id, run, records)
+    except s.data_processing_service.DataProcessingError:
+        pass
+    for record in records:
+        record_id = s._trim_text(record.get("recordId"), max_length=160)
+        if not record_id:
+            continue
+        known_source_ids.add(record_id)
+        summary = s._trim_text(record.get("summary") or record.get("content"), max_length=4000)
+        if summary:
+            summary_by_id.setdefault(record_id, summary)
+    errors: list[str] = []
+    entries = list(s._source_collection_stage_writeback_candidate_extractions(result_payload))
+    entries.extend(
+        s._source_collection_stage_writeback_record_extractions(
+            result_payload,
+            include_candidate_fallback=False,
+        )
+    )
+    for entry in entries:
+        decision = s._trim_text(entry.get("decision"), max_length=80).lower()
+        if decision == "exclude":
+            continue
+        candidate_id = s._source_collection_stage_writeback_candidate_id(entry)
+        record_id = s._source_collection_stage_writeback_record_id(entry)
+        source_id = candidate_id or record_id
+        if not source_id or source_id not in known_source_ids:
+            # Unknown ids stay with candidate-coverage invalid-id handling.
+            continue
+        source_summary = summary_by_id.get(source_id, "")
+        source_label = f"candidate {source_id}" if candidate_id else f"record {source_id}"
+        if not source_summary:
+            normalized_entry = _extraction_entry_with_normalized_evidence_status(entry)
+            evidence_status = s._trim_text(normalized_entry.get("evidenceStatus"), max_length=80).lower()
+            if evidence_status != "missing_evidence_anchor":
+                errors.append(
+                    f"{source_label} 存储摘要为空：条目必须声明 evidenceStatus=missing_evidence_anchor 诚实跳过，"
+                    "不能在没有任何锚点的情况下声称证据。"
+                )
+            continue
+        has_anchor, supplied_quote = _extraction_entry_quote_anchor(entry, source_summary)
+        if has_anchor:
+            continue
+        if supplied_quote:
+            errors.append(
+                f"{source_label} 的 quote 不是存储 summary 的逐字子串："
+                "quote 必须从 candidates[].summary 原样复制，禁止改写、拼接或凭记忆重写。"
+            )
+        else:
+            errors.append(
+                f"{source_label} 缺少逐字 quote 锚：嵌套 claims[]/keyFindings[] 项需含 quote，"
+                "或 evidenceRefs[] 项需含 {id, quote}（quote 为存储 summary 的逐字子串）。"
+            )
+    return errors
+
+
 def writeback_source_collection_stage_session_task(
     team_id: str,
     task_id: str,
@@ -36,7 +254,25 @@ def writeback_source_collection_stage_session_task(
         result_payload,
         request_payload.get("evidenceRefs"),
     )
+    incoming_result_payload = result_payload
     result_payload = s._merge_source_collection_stage_writeback_result_payload(normalized_team_id, run_id, task, result_payload)
+    result_payload = _normalize_extraction_evidence_status_aliases_in_payload(result_payload)
+    if status == "completed":
+        # Fail-closed quote-anchor contract: a completed extraction writeback
+        # without verbatim quote anchors used to be accepted and then
+        # silently materialize zero claims (production incident
+        # stagetask-20260831142807-d31d5a7d).  Reject it at the door instead.
+        quote_anchor_errors = _source_collection_stage_writeback_quote_anchor_errors(
+            normalized_team_id,
+            run_id,
+            task,
+            incoming_result_payload,
+        )
+        if quote_anchor_errors:
+            raise s.TeamWorkflowOrchestrationError(
+                "extraction writeback rejected: 提炼回写缺少逐字 quote 锚 —— "
+                + " ".join(quote_anchor_errors[:_EXTRACTION_QUOTE_ANCHOR_ERROR_LIMIT])
+            )
     writeback = {
         "status": status,
         "agentRequestedStatus": status,
@@ -503,7 +739,23 @@ def get_source_collection_stage_task_context(
     if normalized_context_mode in {"evidence", "retry_missing", "retry_evidence"}:
         context["usage"]["evidenceInstruction"] = (
             "candidates[].summary 是搜集阶段保存的摘要或元数据，不等于全文；"
-            "只可对该摘要支持的判断使用 candidates[].evidenceRefs，不能虚构页码、原文引语或全文结论。"
+            "quote 只能从 candidates[].summary 逐字复制，不能虚构页码、原文引语或全文结论。"
+        )
+    if normalized_stage_id == "extraction" or task_agent_role == "source_extractor":
+        # Hard writeback contract for the formal claim path: the server
+        # rejects completed extraction writebacks without verbatim quote
+        # anchors, so the agent must see the exact field names and quote
+        # rules before it writes back.
+        context["usage"]["extractionWritebackContract"] = (
+            "正式 claim 路径的 completed 提炼回写会被服务端逐条校验："
+            "(1) 证据状态字段名是 evidenceStatus（不是 verification_status；"
+            "verification_status 只属于 Challenge v2 证据卡元数据）；"
+            "(2) 候选/记录的存储 summary 非空时，每条非 exclude 条目必须至少带一个逐字 quote 锚："
+            "嵌套 claims[]/keyFindings[] 项含 quote，或 evidenceRefs[] 项含 {id, quote}；"
+            "(3) quote 必须是 candidates[].summary 的逐字子串，从上下文原样复制，禁止改写；"
+            "引述存储摘要时写 evidenceStatus=verified_abstract；"
+            "(4) 存储 summary 为空的来源必须声明 evidenceStatus=missing_evidence_anchor（诚实跳过，不物化）；"
+            "(5) 缺少逐字 quote 锚的 completed 回写会被拒绝并要求重写。"
         )
     context["usage"]["continuationHint"] = s._source_collection_context_continuation_hint(
         context["candidatePage"],
@@ -545,8 +797,9 @@ def _materialize_extraction_claim_evidence_after_reconcile(
     extraction tasks without claim-ledger rows.  The materializer is
     idempotent (content-hash claim ids), so both paths may call it for the
     same task.  A failure is recorded as a workflow event and returned for
-    diagnosis but never flips the completed task status or blocks the
-    reconcile result.
+    diagnosis but never flips the completed task status here or blocks the
+    reconcile result; the zero-claim fail-loud parking lives in
+    ``_apply_extraction_claim_materialization_visibility_and_gate``.
     """
     s = _service()
     normalized_task_id = s._trim_text(reconciled_task.get("taskId"), max_length=160)
@@ -605,6 +858,112 @@ def _materialize_extraction_claim_evidence_after_reconcile(
         "workflowRunId": workflow_run_id,
         "claimEvidenceCount": len(materialized) if isinstance(materialized, list) else 0,
     }
+
+
+def _run_has_summary_bearing_source_collection_candidate(team_id: str, run_id: str) -> bool:
+    """True when the run holds at least one candidate with a stored summary.
+
+    Such summaries are the verbatim quote material extraction writebacks must
+    anchor to, so their presence with zero materialized claims is exactly the
+    silent-zero incident shape.
+    """
+    s = _service()
+    for candidate in s._source_collection_candidates_for_run(team_id, run_id):
+        if s._trim_text(candidate.get("summary"), max_length=4000):
+            return True
+    return False
+
+
+def _apply_extraction_claim_materialization_visibility_and_gate(
+    team_id: str,
+    run_id: str,
+    task: dict[str, Any],
+    claim_materialization: dict[str, Any],
+) -> dict[str, Any]:
+    """Persist the materialization outcome on the canonical task; park zero-claim completions.
+
+    Production incident (stagetask-20260831142807-d31d5a7d): a completed
+    extraction writeback without verbatim quote anchors materialized zero
+    claim-evidence rows while the task record showed nothing — the
+    ``claimMaterialization`` result lived only on the reconcile response, so
+    the run silently lost its evidence.  This boundary (1) writes the
+    materialization outcome onto the canonical task record, and (2) fails
+    loud: a completed extraction task that materialized zero claims while the
+    run holds summary-bearing candidates is parked at ``needs_review`` — the
+    stage-task status equivalent of a never-auto-reconciled needs_continue
+    stop — with explicit remediation.  Materialization failures keep their
+    diagnostic-only contract (workflow event, no status flip); only a
+    successful materialization with zero claims trips the gate.
+    """
+    s = _service()
+    materialization_status = s._trim_text(claim_materialization.get("status"), max_length=80)
+    if materialization_status not in {"materialized", "failed"}:
+        return task
+    would_gate = (
+        materialization_status == "materialized"
+        and not s._source_collection_count(claim_materialization.get("claimEvidenceCount"))
+        and s._trim_text(task.get("status"), max_length=80) == "completed"
+        and _run_has_summary_bearing_source_collection_candidate(team_id, run_id)
+    )
+    existing = task.get("claimMaterialization") if isinstance(task.get("claimMaterialization"), dict) else {}
+    if (
+        existing.get("status") == materialization_status
+        and existing.get("claimEvidenceCount") == claim_materialization.get("claimEvidenceCount")
+        and bool(existing.get("gate")) == would_gate
+    ):
+        # Same outcome already recorded on the canonical task; repeated
+        # reconciles (adapter dispatch, turn diagnostics, graph finalize all
+        # funnel through here) must not churn updatedAt with fresh stamps.
+        return task
+    recorded = {**claim_materialization, "recordedAt": s.utc_now_iso()}
+    next_task = dict(task)
+    next_result = dict(task.get("result")) if isinstance(task.get("result"), dict) else {}
+    next_result["claimMaterialization"] = recorded
+    next_task["result"] = next_result
+    next_task["claimMaterialization"] = recorded
+    if materialization_status == "materialized" and not s._source_collection_count(
+        recorded.get("claimEvidenceCount")
+    ) and _run_has_summary_bearing_source_collection_candidate(team_id, run_id):
+        remediation = (
+            "提炼回写缺少逐字 quote 锚：候选存储摘要非空但物化出 0 条 claim 证据。"
+            "请重新回写 completed：每条非 exclude 条目至少带一个 quote 锚"
+            "（嵌套 claims[]/keyFindings[] 项含 quote，或 evidenceRefs[] 项含 {id, quote}），"
+            "quote 必须从 candidates[].summary 逐字复制，并写 evidenceStatus=verified_abstract。"
+        )
+        recorded["gate"] = "needs_quote_anchor_retry"
+        recorded["remediation"] = remediation
+        next_result["claimMaterializationRemediation"] = remediation
+        previous_status = s._trim_text(next_task.get("status"), max_length=80)
+        next_task["status"] = "needs_review"
+        next_writeback = dict(task.get("writeback")) if isinstance(task.get("writeback"), dict) else {}
+        next_writeback["status"] = "needs_review"
+        next_writeback["agentRequestedStatus"] = "needs_review"
+        next_task["writeback"] = next_writeback
+        next_turn = next_task.get("turn") if isinstance(next_task.get("turn"), dict) else {}
+        if next_turn:
+            updated_turn = dict(next_turn)
+            updated_turn["status"] = "needs_review"
+            next_task["turn"] = updated_turn
+        next_task["updatedAt"] = recorded["recordedAt"]
+        s._record_workflow_event(
+            "source_collection.stage_session_task_claim_materialization_gate_parked",
+            team_id,
+            fields={
+                "runId": run_id,
+                "taskId": s._trim_text(next_task.get("taskId"), max_length=160),
+                "stageId": s._trim_text(next_task.get("stageId"), max_length=80),
+                "previousStatus": previous_status,
+                "status": "needs_review",
+                "claimEvidenceCount": 0,
+                "workflowRunId": s._trim_text(recorded.get("workflowRunId"), max_length=160),
+            },
+            level="warning",
+            outcome="needs_review",
+        )
+    s._upsert_source_collection_stage_session_task(team_id, run_id, next_task)
+    if next_task.get("status") != task.get("status"):
+        s._sync_stage_round_with_source_collection_stage_task(team_id, run_id, next_task)
+    return next_task
 
 def reconcile_source_collection_stage_session_task_after_turn(
     team_id: str,
@@ -717,6 +1076,12 @@ def reconcile_source_collection_stage_session_task_after_turn(
         normalized_team_id,
         found_run_id,
         reconciled,
+    )
+    reconciled = _apply_extraction_claim_materialization_visibility_and_gate(
+        normalized_team_id,
+        found_run_id,
+        reconciled,
+        claim_materialization,
     )
     return {
         "schemaVersion": s.SCHEMA_VERSION,
