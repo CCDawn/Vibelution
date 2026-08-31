@@ -5458,6 +5458,22 @@ def _review_meeting_fan_in_group(
         if str(item.get("selectionId") or "").strip() == selection_id
         and str(item.get("candidateId") or "").strip()
     ]
+    # Retry attempts append one link per attempt while reusing the same
+    # (candidateId, roundIndex).  Fold that append-only attempt history down
+    # to its newest link before the duplicate-binding guard below, which
+    # otherwise raises for every selection that ever retried a dispatch.
+    latest_attempt_link: dict[tuple[str, int], dict[str, Any]] = {}
+    for item in selection_links:
+        binding_key = (
+            str(item.get("candidateId") or "").strip(),
+            int(item.get("roundIndex") or 1),
+        )
+        existing_link = latest_attempt_link.get(binding_key)
+        if existing_link is None or str(item.get("createdAt") or "") >= str(
+            existing_link.get("createdAt") or ""
+        ):
+            latest_attempt_link[binding_key] = item
+    selection_links = list(latest_attempt_link.values())
     seen_bindings: set[tuple[str, int]] = set()
     for item in selection_links:
         binding = (

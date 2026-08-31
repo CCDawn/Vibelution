@@ -862,6 +862,95 @@ def test_fan_in_skips_superseded_attempt_and_binds_latest_authority(
     assert ready_from_latest["roundIndex"] == 2
 
 
+def test_fan_in_folds_retry_attempt_links_to_newest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Retry attempts reuse (candidateId, roundIndex) with one link per attempt.
+
+    The append-only attempt history must fold to its newest link before the
+    duplicate-binding guard, otherwise any selection that ever retried a
+    review dispatch raises "duplicate candidate bindings" on every close and
+    the HF-3 HypothesisRound can never converge.
+    """
+    from core.web.services import team_service
+
+    team_id = "team-fan-in-retries"
+    links = [
+        {
+            "meetingRoundId": "meeting-a-r1",
+            "selectionId": "selection-1",
+            "roundIndex": 1,
+            "candidateId": "hyp-a",
+            "candidateOrder": 0,
+            "createdAt": "2026-08-31T01:00:00Z",
+        },
+        {
+            "meetingRoundId": "meeting-a-r1-a2",
+            "selectionId": "selection-1",
+            "roundIndex": 1,
+            "candidateId": "hyp-a",
+            "candidateOrder": 0,
+            "createdAt": "2026-08-31T02:00:00Z",
+        },
+        {
+            "meetingRoundId": "meeting-a-r1-a3",
+            "selectionId": "selection-1",
+            "roundIndex": 1,
+            "candidateId": "hyp-a",
+            "candidateOrder": 0,
+            "createdAt": "2026-08-31T03:00:00Z",
+        },
+        {
+            "meetingRoundId": "meeting-b-r1",
+            "selectionId": "selection-1",
+            "roundIndex": 1,
+            "candidateId": "hyp-b",
+            "candidateOrder": 1,
+            "createdAt": "2026-08-31T01:30:00Z",
+        },
+    ]
+    meeting_by_id = {
+        "meeting-a-r1": {"meetingRoundId": "meeting-a-r1", "status": "closed"},
+        "meeting-a-r1-a2": {
+            "meetingRoundId": "meeting-a-r1-a2",
+            "status": "closed",
+        },
+        "meeting-a-r1-a3": {
+            "meetingRoundId": "meeting-a-r1-a3",
+            "status": "closed",
+        },
+        "meeting-b-r1": {"meetingRoundId": "meeting-b-r1", "status": "closed"},
+    }
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
+    monkeypatch.setattr(
+        chain,
+        "list_review_round_links",
+        lambda *_args, **_kwargs: {"links": links},
+    )
+    monkeypatch.setattr(
+        selections,
+        "get_hypothesis_selection",
+        lambda *_args: {
+            "selection": {"selectedCandidateIds": ["hyp-a", "hyp-b"]}
+        },
+    )
+    monkeypatch.setattr(
+        meetings,
+        "get_meeting_round",
+        lambda _team_id, meeting_id: {"meetingRound": meeting_by_id[meeting_id]},
+    )
+
+    ready = chain._review_meeting_fan_in_group(
+        team_id, meeting_by_id["meeting-a-r1-a3"]
+    )
+    assert ready["status"] == "ready"
+    assert [item["meetingRoundId"] for item in ready["meetings"]] == [
+        "meeting-a-r1-a3",
+        "meeting-b-r1",
+    ]
+    assert ready["roundIndex"] == 1
+
+
 def test_fan_in_skips_execution_stopped_review_attempt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
