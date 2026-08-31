@@ -1,10 +1,12 @@
-"""Preview-only load/validate/hash/preview service for automation policies.
+"""Preview/activation load/validate/hash/preview service for automation policies.
 
 R0.3 boundary (challenge-cup decision record, decisions #10/#12/#13): this
 service loads policy documents, recomputes and verifies their content hash,
 validates them fail-closed, and renders a *static* preview snapshot of what
-activation would change.  It never activates a policy, never executes an
-automation decision, and does not subscribe to the canonical command chain.
+activation would change.  It never activates a policy and never executes an
+automation decision itself; the gated execution path lives in
+``automation_policy_executor`` (safety ladder + audit), which uses the
+``stage="activation"`` loader for approved active documents.
 
 Hash-chain style mirrors the catalog model-policy chain
 (``model_routing.resolve_catalog_model_policy`` feeding
@@ -107,11 +109,19 @@ def compute_and_verify_content_hash(payload: Mapping[str, Any]) -> str:
 
 def validate_auto_advance_policy_v2(
     payload: Mapping[str, Any],
+    *,
+    stage: str = "preview",
 ) -> AutoAdvancePolicyV2:
-    """Validate an AutoAdvancePolicyV2 document; preview stage only (shadow)."""
+    """Validate an AutoAdvancePolicyV2 document.
+
+    ``stage="preview"`` (default) keeps the R0.3 boundary: shadow documents
+    only.  ``stage="activation"`` additionally accepts an active policy whose
+    activation credential (status=approved + approval.approvedBy) is recorded
+    fail-closed; validation itself still never executes anything.
+    """
 
     try:
-        return AutoAdvancePolicyV2.from_dict(dict(payload), stage="preview")
+        return AutoAdvancePolicyV2.from_dict(dict(payload), stage=stage)
     except AutomationPolicyValidationError as exc:
         raise _service_validation_error(exc) from exc
 
@@ -140,12 +150,33 @@ def _service_validation_error(
     return AutomationPolicyServiceError(str(exc), code=code)
 
 
-def load_auto_advance_policy_v2(path: Path | str) -> AutoAdvancePolicyV2:
+def load_auto_advance_policy_v2(
+    path: Path | str,
+    *,
+    stage: str = "preview",
+) -> AutoAdvancePolicyV2:
     """Load, hash-verify and validate an AutoAdvancePolicyV2 document."""
 
     payload = load_policy_document(path)
     compute_and_verify_content_hash(payload)
-    return validate_auto_advance_policy_v2(payload)
+    return validate_auto_advance_policy_v2(payload, stage=stage)
+
+
+def load_auto_advance_policy_v2_document(
+    path: Path | str,
+    *,
+    stage: str = "preview",
+) -> tuple[AutoAdvancePolicyV2, dict[str, Any]]:
+    """Load + validate and also return the raw verified payload.
+
+    The executor needs the raw ``approval.approvedBy`` credential, which the
+    frozen ``AutoAdvancePolicyV2`` dataclass intentionally does not carry.
+    The hash is verified exactly once for both views of the document.
+    """
+
+    payload = load_policy_document(path)
+    compute_and_verify_content_hash(payload)
+    return validate_auto_advance_policy_v2(payload, stage=stage), payload
 
 
 def load_human_review_policy_v2(path: Path | str) -> HumanReviewPolicyV2:
@@ -256,6 +287,7 @@ __all__ = [
     "AutomationPolicyServiceError",
     "compute_and_verify_content_hash",
     "load_auto_advance_policy_v2",
+    "load_auto_advance_policy_v2_document",
     "load_human_review_policy_v2",
     "load_policy_document",
     "preview_auto_advance_policy_v2",

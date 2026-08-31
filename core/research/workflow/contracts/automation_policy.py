@@ -13,7 +13,15 @@ Two frozen policy documents are described here:
 
 Scope guard: this module validates and hashes policy documents only.  It does
 not activate anything, does not subscribe to the canonical command chain, and
-does not execute automation.  ``executionMode == "shadow"`` here means an
+does not execute automation.  Two validation stages exist:
+
+- ``stage="preview"`` (default): shadow documents only — an active policy is
+  rejected with ``active_mode_forbidden_in_preview``.
+- ``stage="activation"``: additionally accepts ``executionMode == "active"``
+  but only with the full activation credential recorded fail-closed
+  (``status == "approved"`` AND a non-empty ``approval.approvedBy``); this is
+  the only stage the executor may load, and passing it still never executes
+  anything by itself.  ``executionMode == "shadow"`` here means an
 *automation policy shadow* (the policy would run without side effects); it is
 unrelated to the ``hypothesis_session_scope_mode`` off/shadow/on session-scope
 semantics and the two concepts must not be conflated.
@@ -83,7 +91,16 @@ FALSE_AUTO_APPROVE_BOUND_METHODS: frozenset[str] = frozenset(
 HUMAN_REVIEW_ROLLING_DRIFT_SENTINELS = 3
 HUMAN_REVIEW_FINAL_APPROVAL = "manifest_level"
 
-PolicyStage = Literal["preview"]
+# ``preview`` keeps the R0.3 fail-closed boundary (shadow documents only).
+# ``activation`` is the executor-facing stage: it additionally accepts
+# ``executionMode == "active"`` but only when the activation credential is
+# recorded fail-closed (status == approved AND approval.approvedBy non-empty).
+PolicyStage = Literal["preview", "activation"]
+
+# Activation-stage error codes (fail-closed; active is still rejected unless
+# every activation credential is present).
+ACTIVE_REQUIRES_APPROVED_STATUS = "active_requires_approved_status"
+ACTIVE_REQUIRES_APPROVAL_RECORD = "active_requires_approval_record"
 
 POLICY_CONTENT_HASH_RULE = (
     "sha256 over canonical JSON (sort_keys=True, separators=(',',':'), "
@@ -259,12 +276,12 @@ def _validated_status_and_mode(
     *,
     stage: PolicyStage,
 ) -> tuple[str, str]:
-    if stage != "preview":
+    if stage not in ("preview", "activation"):
         errors.append(
             _error(
                 "unsupported_stage",
                 "stage",
-                "only preview validation is implemented (R0.3 is preview-only)",
+                "only preview and activation validation is implemented",
             )
         )
     status = _collect(
@@ -282,16 +299,49 @@ def _validated_status_and_mode(
         label="executionMode",
     )
     if execution_mode == "active":
-        # Preview stage accepts shadow only.  There is deliberately no
-        # activation path in this contract layer yet (R0.3 preview-only).
-        errors.append(
-            _error(
-                "active_mode_forbidden_in_preview",
-                "executionMode",
-                "preview-only validation accepts executionMode=shadow; an "
-                "active automation policy cannot be loaded here",
+        if stage == "preview":
+            # Preview stage accepts shadow only.  There is deliberately no
+            # activation path in this contract layer for preview (R0.3
+            # preview-only).
+            errors.append(
+                _error(
+                    "active_mode_forbidden_in_preview",
+                    "executionMode",
+                    "preview-only validation accepts executionMode=shadow; an "
+                    "active automation policy cannot be loaded here",
+                )
             )
-        )
+        else:
+            # Activation stage: the active credential is fail-closed checked
+            # here so an unapproved or unattributed document can never be
+            # loaded for execution.
+            if status != "approved":
+                errors.append(
+                    _error(
+                        ACTIVE_REQUIRES_APPROVED_STATUS,
+                        "status",
+                        "an active automation policy requires "
+                        "status=approved; got "
+                        f"{status!r}",
+                    )
+                )
+            approval = payload.get("approval")
+            approvers = (
+                approval.get("approvedBy") if isinstance(approval, Mapping) else None
+            )
+            has_record = isinstance(approvers, list) and bool(approvers) and all(
+                isinstance(item, str) and item.strip() for item in approvers
+            )
+            if not has_record:
+                errors.append(
+                    _error(
+                        ACTIVE_REQUIRES_APPROVAL_RECORD,
+                        "approval.approvedBy",
+                        "an active automation policy requires a non-empty "
+                        "list of recorded approvers (explicit approval "
+                        "against policyId + version + contentHash)",
+                    )
+                )
     return status, execution_mode
 
 
@@ -894,6 +944,8 @@ class HumanReviewPolicyV2:
 
 
 __all__ = [
+    "ACTIVE_REQUIRES_APPROVAL_RECORD",
+    "ACTIVE_REQUIRES_APPROVED_STATUS",
     "AUTO_ADVANCE_CAPABILITIES",
     "AUTO_ADVANCE_DRAIN_MODES",
     "AUTO_ADVANCE_EXECUTION_MODES",

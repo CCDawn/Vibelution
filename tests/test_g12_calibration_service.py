@@ -34,6 +34,7 @@ from core.web.services.team_workflow.research_runtime.g12_calibration_service im
     ASSESSMENT_STATUS_PENDING,
     G12CalibrationServiceError,
     assess_bundle,
+    calibration_gate_verdict,
     collect_pending_records,
     gate_policy_from_policy,
     policy_activation_advice,
@@ -498,3 +499,54 @@ def test_end_to_end_manifest_to_advice_chain() -> None:
     assert advice["advisable"] is True
     assert advice["advisableStrata"] == ["low x physics"]
     assert advice["executed"] is False
+
+
+# ---------------------------------------------------------------------------
+# calibration_gate_verdict (executor-facing read-only gate query)
+# ---------------------------------------------------------------------------
+
+
+def test_calibration_gate_verdict_without_bundle_fails_closed() -> None:
+    verdict = calibration_gate_verdict(_validated_policy())
+
+    assert verdict["passed"] is False
+    assert verdict["reasonCode"] == "calibration_evidence_unavailable"
+    assert verdict["status"] == "unavailable"
+    assert any("bundle" in reason for reason in verdict["reasons"])
+
+
+def test_calibration_gate_verdict_pending_bundle_is_not_passed() -> None:
+    bundle = G12CalibrationBundle.build(manifest=_manifest(), records=[])
+
+    verdict = calibration_gate_verdict(_validated_policy(), bundle)
+
+    assert verdict["passed"] is False
+    assert verdict["reasonCode"] == "evidence_pending"
+
+
+def test_calibration_gate_verdict_passes_on_complete_agreed_pilot() -> None:
+    # The frozen default bound (0.05) mathematically needs a pilot far larger
+    # than the 12-question ceiling; declare the bound the pilot can satisfy.
+    policy = _validated_policy(maxFalseAutoApproveUpperBound=0.35)
+    verdict = calibration_gate_verdict(policy, _complete_bundle())
+
+    assert verdict["passed"] is True
+    assert verdict["status"] == "complete"
+    assert verdict["reasonCode"] == ""
+    assert verdict["evidence"]["kappa"]["kappa"] == pytest.approx(1.0)
+    assert verdict["evidence"]["approvableStrata"] == ["low x physics"]
+    assert verdict["evidence"]["notAPermanentDelegation"] is True
+
+
+def test_calibration_gate_verdict_fails_on_degenerate_matrix() -> None:
+    # All-auto-approve + all-human-approve: zero variance -> undefined kappa.
+    degenerate = [
+        _record(f"q{index:02d}") for index in range(1, 13)
+    ]
+    bundle = G12CalibrationBundle.build(manifest=_manifest(), records=degenerate)
+
+    verdict = calibration_gate_verdict(_validated_policy(), bundle)
+
+    assert verdict["passed"] is False
+    assert verdict["status"] == "insufficient"
+    assert verdict["reasonCode"] == "evidence_insufficient"
