@@ -653,7 +653,7 @@ def manifest_payload(
     }
 
 
-def write_manifest(root: Path, task_id: str, payload: dict[str, object]) -> Path:
+def quality_gate_manifest_path(root: Path, task_id: str) -> Path:
     cache_home = resolve_project_cache_home(root).resolve()
     try:
         cache_home.relative_to(root.resolve())
@@ -666,10 +666,13 @@ def write_manifest(root: Path, task_id: str, payload: dict[str, object]) -> Path
         raw_common_dir = Path(completed.stdout.strip())
         common_dir = raw_common_dir if raw_common_dir.is_absolute() else root / raw_common_dir
         manifest_home = common_dir.resolve() / "vibelution-cache"
-    directory = manifest_home / "quality_gates"
-    directory.mkdir(parents=True, exist_ok=True)
     safe_task_id = re.sub(r"[^A-Za-z0-9_.-]+", "-", task_id).strip("-") or "task"
-    path = directory / f"{safe_task_id}.json"
+    return manifest_home / "quality_gates" / f"{safe_task_id}.json"
+
+
+def write_manifest(root: Path, task_id: str, payload: dict[str, object]) -> Path:
+    path = quality_gate_manifest_path(root, task_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",

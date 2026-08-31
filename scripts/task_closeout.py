@@ -100,6 +100,12 @@ def resolve_context(task_worktree: Path | str, *, base: str = "main") -> Closeou
     return CloseoutContext(main_root=main_root, task_root=task_root, branch=branch)
 
 
+def discover_manifest(context: CloseoutContext) -> Path | None:
+    task_id = context.branch.removeprefix("codex/")
+    candidate = gate.quality_gate_manifest_path(context.task_root, task_id)
+    return candidate if candidate.is_file() else None
+
+
 def _coordination_script() -> Path:
     for candidate in gate.GUARD_SCRIPT_CANDIDATES:
         if candidate.is_file():
@@ -538,7 +544,12 @@ def run_managed_closeout(
             errors=[_bounded_error(error)],
         )
 
-    resolved_manifest = Path(manifest_path) if manifest_path is not None else None
+    explicit_manifest = manifest_path is not None
+    resolved_manifest = (
+        Path(manifest_path)
+        if explicit_manifest
+        else discover_manifest(context)
+    )
     manifest_path_text = str(resolved_manifest or "")
     integration_claim_id = ""
     validated_retry_token: Path | None = None
@@ -578,6 +589,19 @@ def run_managed_closeout(
 
     validation_result: ManagedCloseoutResult | None = None
     try:
+        manifest_preverified = False
+        if resolved_manifest is not None and not explicit_manifest:
+            verified = gate.verify_manifest(
+                resolved_manifest,
+                context.task_root,
+                base,
+            )
+            if verified.outcome == "passed":
+                manifest_preverified = True
+            else:
+                resolved_manifest = None
+                manifest_path_text = ""
+
         if resolved_manifest is None:
             closeout = gate.run_closeout(context.task_root, base, claim_id)
             resolved_manifest = closeout.manifest_path
@@ -590,7 +614,7 @@ def run_managed_closeout(
                     errors=[str(closeout.outcome)],
                 )
 
-        if validation_result is None:
+        if validation_result is None and not manifest_preverified:
             verified = gate.verify_manifest(resolved_manifest, context.task_root, base)
             if verified.outcome != "passed":
                 validation_result = ManagedCloseoutResult(

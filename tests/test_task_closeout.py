@@ -8,11 +8,13 @@ from scripts import local_quality_gate as gate
 from scripts import task_closeout as closeout
 
 ORIGINAL_VALIDATE_DEVELOPMENT_CLAIM = closeout.validate_development_claim
+ORIGINAL_DISCOVER_MANIFEST = closeout.discover_manifest
 
 
 @pytest.fixture(autouse=True)
 def valid_development_claim(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(closeout, "validate_development_claim", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(closeout, "discover_manifest", lambda _context: None)
 
 
 def context(tmp_path: Path) -> closeout.CloseoutContext:
@@ -568,6 +570,147 @@ def test_existing_manifest_skips_expensive_closeout_but_is_verified_inside_lease
     assert result.status == "merged_clean"
     assert result.manifest_path == str(manifest)
     assert events == ["verify", "acquire", "verify", "merge"]
+
+
+def test_implicit_manifest_reuses_valid_cache_without_rerunning_closeout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+    manifest = tmp_path / "cached-manifest.json"
+    monkeypatch.setattr(closeout, "resolve_context", lambda *_args, **_kwargs: context(tmp_path))
+    monkeypatch.setattr(
+        closeout,
+        "discover_manifest",
+        lambda _context: manifest,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        gate,
+        "run_closeout",
+        lambda *_args, **_kwargs: pytest.fail(
+            "valid implicit manifest must skip expensive closeout"
+        ),
+    )
+    monkeypatch.setattr(
+        gate,
+        "verify_manifest",
+        lambda *_args, **_kwargs: events.append("verify")
+        or gate.GateResult(outcome="passed", exit_code=0, manifest_path=manifest),
+    )
+    monkeypatch.setattr(
+        closeout,
+        "acquire_integration_claim",
+        lambda *_args, **_kwargs: events.append("acquire") or "claim-int",
+    )
+    monkeypatch.setattr(
+        closeout,
+        "merge_ff_only",
+        lambda *_args, **_kwargs: events.append("merge") or "head-sha",
+    )
+    monkeypatch.setattr(closeout, "release_claim", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(closeout, "cleanup_task_resources", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(closeout, "complete_agent", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(closeout, "prune_coordination", lambda *_args, **_kwargs: None)
+
+    result = closeout.run_managed_closeout(
+        tmp_path / "task",
+        claim_id="claim-dev",
+        agent_id="agent-test",
+    )
+
+    assert result.status == "merged_clean"
+    assert result.manifest_path == str(manifest)
+    assert events == ["verify", "acquire", "verify", "merge"]
+
+
+def test_discover_manifest_uses_deterministic_quality_gate_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest = tmp_path / "cache" / "quality_gates" / "test-task.json"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        gate,
+        "quality_gate_manifest_path",
+        lambda _root, _task_id: manifest,
+    )
+
+    assert ORIGINAL_DISCOVER_MANIFEST(context(tmp_path)) == manifest
+
+
+def test_invalid_implicit_manifest_falls_back_to_fresh_closeout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+    cached_manifest = tmp_path / "cached-manifest.json"
+    fresh_manifest = tmp_path / "fresh-manifest.json"
+    monkeypatch.setattr(closeout, "resolve_context", lambda *_args, **_kwargs: context(tmp_path))
+    monkeypatch.setattr(
+        closeout,
+        "discover_manifest",
+        lambda _context: cached_manifest,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        gate,
+        "run_closeout",
+        lambda *_args, **_kwargs: events.append("closeout")
+        or gate.GateResult(
+            outcome="passed",
+            exit_code=0,
+            manifest_path=fresh_manifest,
+        ),
+    )
+
+    def verify(path: Path, *_args, **_kwargs) -> gate.GateResult:
+        events.append(f"verify:{path.name}")
+        if path == cached_manifest:
+            return gate.GateResult(
+                outcome="failed",
+                exit_code=1,
+                manifest_path=path,
+            )
+        return gate.GateResult(
+            outcome="passed",
+            exit_code=0,
+            manifest_path=path,
+        )
+
+    monkeypatch.setattr(gate, "verify_manifest", verify)
+    monkeypatch.setattr(
+        closeout,
+        "acquire_integration_claim",
+        lambda *_args, **_kwargs: events.append("acquire") or "claim-int",
+    )
+    monkeypatch.setattr(
+        closeout,
+        "merge_ff_only",
+        lambda *_args, **_kwargs: events.append("merge") or "head-sha",
+    )
+    monkeypatch.setattr(closeout, "release_claim", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(closeout, "cleanup_task_resources", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(closeout, "complete_agent", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(closeout, "prune_coordination", lambda *_args, **_kwargs: None)
+
+    result = closeout.run_managed_closeout(
+        tmp_path / "task",
+        claim_id="claim-dev",
+        agent_id="agent-test",
+    )
+
+    assert result.status == "merged_clean"
+    assert result.manifest_path == str(fresh_manifest)
+    assert events == [
+        "verify:cached-manifest.json",
+        "closeout",
+        "verify:fresh-manifest.json",
+        "acquire",
+        "verify:fresh-manifest.json",
+        "merge",
+    ]
 
 
 def test_stale_retry_token_is_bound_and_consumed_once(
