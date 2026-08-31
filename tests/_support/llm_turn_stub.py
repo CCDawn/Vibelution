@@ -636,40 +636,55 @@ def _result_for_stage(stage_id: str, *, team_id: str, run_id: str) -> dict[str, 
                 or candidate.get("sourceRef")
                 or f"https://doi.org/10.0000/t518-extract-{index}"
             )
-            extractions.append(
-                {
-                    "candidateId": candidate_id,
-                    "title": str(
-                        candidate.get("title") or f"T5.1 extraction {index}"
-                    ),
-                    "source_type": str(
-                        candidate.get("sourceType") or "peer_reviewed_paper"
-                    ),
-                    "source_url": source_ref,
-                    "retrieved_at": "2026-08-26T00:00:00Z",
-                    "fact": claim_text,
-                    "relation": "supports",
-                    "verification_status": "full_text_checked",
-                    "decision": "keep",
-                    "status": "extracted",
-                    "summary": f"Extracted claim {index} for T5.1 gate.",
-                    "keyFindings": [
-                        {
-                            "finding": claim_text,
-                            "fact": claim_text,
-                            "quote": (
-                                f"Bounded source excerpt {index} for the T5.1 gate."
-                            ),
-                            "citationLocator": {"page": str(index)},
-                            "sourceRef": source_ref,
-                            "evidenceRef": f"page:{index}",
-                        }
-                    ],
-                    "evidenceRefs": [
-                        {"type": "page", "page": str(index), "sourceRef": source_ref}
-                    ],
-                }
-            )
+            # The extraction writeback contract requires a verbatim quote
+            # anchor from the stored candidate summary whenever that summary
+            # is non-empty; the stub mirrors the production agent contract by
+            # copying a bounded slice of the summary verbatim instead of
+            # inventing one.
+            stored_summary = str(candidate.get("summary") or "").strip()
+            verbatim_quote = stored_summary[:160]
+            entry: dict[str, Any] = {
+                "candidateId": candidate_id,
+                "title": str(
+                    candidate.get("title") or f"T5.1 extraction {index}"
+                ),
+                "source_type": str(
+                    candidate.get("sourceType") or "peer_reviewed_paper"
+                ),
+                "source_url": source_ref,
+                "retrieved_at": "2026-08-26T00:00:00Z",
+                "fact": claim_text,
+                "relation": "supports",
+                "verification_status": "full_text_checked",
+                "decision": "keep",
+                "status": "extracted",
+                "summary": f"Extracted claim {index} for T5.1 gate.",
+                "keyFindings": [
+                    {
+                        "finding": claim_text,
+                        "fact": claim_text,
+                        "citationLocator": {"page": str(index)},
+                        "sourceRef": source_ref,
+                        "evidenceRef": f"page:{index}",
+                    }
+                ],
+                "evidenceRefs": [
+                    {"type": "page", "page": str(index), "sourceRef": source_ref}
+                ],
+            }
+            if verbatim_quote:
+                entry["evidenceStatus"] = "verified_abstract"
+                entry["keyFindings"][0]["quote"] = verbatim_quote
+                entry["evidenceRefs"].append(
+                    {
+                        "type": "quote",
+                        "id": f"abstract-quote-{index}",
+                        "quote": verbatim_quote,
+                    }
+                )
+            else:
+                entry["evidenceStatus"] = "missing_evidence_anchor"
+            extractions.append(entry)
         return {
             "candidateExtractions": extractions,
             "recordExtractions": [],
