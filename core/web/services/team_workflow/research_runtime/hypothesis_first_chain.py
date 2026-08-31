@@ -7215,6 +7215,7 @@ def record_collection_handoff(
         agent_runner=agent_runner,
         background=background,
         budget=budget,
+        fan_out_selection=True,
     )
     resume = None
     if runtime is not None:

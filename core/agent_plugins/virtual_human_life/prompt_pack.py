@@ -16,6 +16,7 @@ PROMPT_PACK_FILES = (
     "08_proactive_message_rules.md",
     "09_reflection_and_environment.md",
     "10_full_life_continuity.md",
+    "11_companion_dialogue_decision.md",
 )
 MAX_PROMPT_PACK_CHARS = 12_000
 

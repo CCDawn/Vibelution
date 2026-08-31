@@ -24,8 +24,8 @@ from __future__ import annotations
 
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
 from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from typing import Any
 
@@ -47,13 +47,15 @@ from core.research.workflow.contracts.discussion_scope import (
     parse_discussion_scope,
     session_scope_key,
 )
-from core.web.services.team_workflow import meeting_driver_work
-from core.web.services.team_workflow import meeting_rounds
+from core.web.services.team_workflow import meeting_driver_work, meeting_rounds
 from core.web.services.team_workflow.research_runtime.challenge_cup_maintenance_fence import (
     assert_writes_allowed,
 )
 from core.web.services.team_workflow.research_runtime.meeting_receipt_authority import (
     workflow_run_stop_reason,
+)
+from core.web.services.team_workflow.source_collection import (
+    facade as collection_facade,
 )
 
 DEFAULT_MAX_MESSAGES = 40
@@ -88,6 +90,14 @@ _DEFAULT_AGENDA_RULES = (
     '"evidenceLevels":["peer_reviewed"]},'
     '"requirements":{"minEvidenceLevel":"medium","completeness":"stage-one"}} '
     "（JSON 字段可按需增删，candidateRefs 用本轮候选 ID）；本轮无资料缺口则不输出该标记",
+    "证据请求必须使用唯一合法词表：sourceTypes 只允许 "
+    + "、".join(sorted(collection_facade.SEARCH_ENVELOPE_SOURCE_TYPES))
+    + "；evidenceLevels 只允许 "
+    + "、".join(sorted(collection_facade.SEARCH_ENVELOPE_EVIDENCE_LEVELS))
+    + '。预印本使用 sourceTypes=["paper"]、evidenceLevels=["preprint"]；'
+    + '官方网页或声明使用 sourceTypes=["url"]、evidenceLevels=["primary"]；'
+    + '代码仓库使用 sourceTypes=["repo"]。candidateRefs 只能填写本会议已绑定的'
+    + "候选 ID，不得新造候选 ID",
     "共识与分歧必须独占一行，格式：AGREE: <一条共识> 或 DISAGREE: <一条分歧>",
 )
 
@@ -2318,7 +2328,6 @@ def validate_evidence_request_draft(
     from core.web.services.team_workflow.source_collection import facade
 
     errors: list[dict[str, str]] = []
-    warnings: list[dict[str, str]] = []
     if not isinstance(raw, Mapping):
         return None, [
             {
@@ -2361,35 +2370,6 @@ def validate_evidence_request_draft(
             )
             break
     search_envelope = raw.get("searchEnvelope")
-    if isinstance(search_envelope, Mapping):
-        search_envelope = dict(search_envelope)
-        source_types = _normalized_str_list(search_envelope.get("sourceTypes"))
-        supported_source_types: list[str] = []
-        dropped_source_types: list[str] = []
-        for item in source_types:
-            normalized = item.lower()
-            if normalized in facade.SEARCH_ENVELOPE_SOURCE_TYPES:
-                if normalized not in supported_source_types:
-                    supported_source_types.append(normalized)
-            elif item not in dropped_source_types:
-                dropped_source_types.append(item)
-        search_envelope["sourceTypes"] = supported_source_types
-        if source_types and not supported_source_types:
-            errors.append(
-                {
-                    "code": "search_source_types_invalid",
-                    "message": "sourceTypes 未包含支持的来源类型："
-                    + "、".join(dropped_source_types),
-                }
-            )
-        elif dropped_source_types:
-            warnings.append(
-                {
-                    "code": "search_source_types_dropped",
-                    "message": "已忽略不支持的 sourceTypes："
-                    + "、".join(dropped_source_types),
-                }
-            )
     try:
         envelope = facade._normalize_search_envelope(
             search_envelope, require_keywords=True
@@ -2415,7 +2395,7 @@ def validate_evidence_request_draft(
         requirements = {}
         writeback_policy = {}
     if errors or envelope is None:
-        return None, [*errors, *warnings]
+        return None, errors
     return {
         "rationale": rationale,
         "candidateRefs": candidate_refs,
@@ -2427,7 +2407,7 @@ def validate_evidence_request_draft(
         },
         "requirements": requirements,
         "writebackPolicy": writeback_policy,
-    }, warnings
+    }, []
 
 
 def _collect_evidence_requests(

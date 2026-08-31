@@ -72,9 +72,12 @@ MAX_AGENT_TURN_CONTINUATIONS = 3
 # continuation consults this authority at both decision points: a parked turn
 # whose task already settled must not trigger a "继续" LLM round-trip, and a
 # failed continuation turn must not retroactively poison an attempt whose
-# main turn already completed the work.  The failure itself is never
-# swallowed -- it stays visible in the session turn record and is surfaced as
-# a structured warning scene event.
+# main turn already completed the work.  The same authority covers the main
+# turn failing after its own work settled (e.g. a post-writeback budget
+# exhaustion): with the attempt-keyed idempotency key re-anchoring retries to
+# the failed turn, the settled verdict must win over re-raising.  The failure
+# itself is never swallowed -- it stays visible in the session turn record
+# and is surfaced as a structured warning scene event.
 _STAGE_TASK_SETTLED_COMPLETED_STATUS = "completed"
 
 DEFAULT_AGENT_TURN_TIMEOUT_MS = CHALLENGE_TURN_WAIT_WINDOW_MS
@@ -611,8 +614,16 @@ def _wait_with_bounded_turn_continuation(
       receipts and writeback are the real work) and the continuation failure
       is surfaced as a structured warning -- it is never silently swallowed
       (the session turn record keeps the failure and its user-readable
-      reason).  If the authority does not confirm completed work, the
-      failure raises as before (fail-closed).
+      reason).
+    - When the main turn itself fails terminally: the same authority question
+      decides.  A settled ``completed`` stage task means the gate passed and
+      the work product exists; because the stage-task idempotency key omits
+      the node-run attempt, every retry re-anchors to that same failed turn,
+      so re-raising would deadlock the node permanently.  The attempt then
+      returns the failed turn's snapshot with a structured warning scene
+      event -- the failure stays visible, never reclassified as success.  If
+      the authority does not confirm completed work, the failure raises as
+      before (fail-closed).
 
     Research-project tasks are excluded: their task authority
     (``research_project_agent_tasks`` reconcile) deliberately classifies a
@@ -692,9 +703,14 @@ def _wait_with_bounded_turn_continuation(
         requested_ms = max(0, int(timeout_ms))
         return min(requested_ms, remaining_ms), remaining_ms < requested_ms
 
-    def _rescue_settled_main_turn(failed_turn_id: str, status: str) -> None:
+    def _rescue_settled_main_turn(
+        failed_turn_id: str,
+        status: str,
+        *,
+        event_code: str = "agent_turn.continuation_failed_work_complete",
+    ) -> None:
         _record_turn_continuation_scene_event(
-            "agent_turn.continuation_failed_work_complete",
+            event_code,
             level="warning",
             outcome="resolved_by_stage_task_authority",
             fields={
@@ -761,20 +777,41 @@ def _wait_with_bounded_turn_continuation(
                         turn_chain=turn_chain,
                     )
                 ) from exc
-            if (
-                source_collection_scope
-                and original_snapshot is not None
-                and _stage_task_work_already_complete(
-                    team_id=team_id, task_id=handle.task_id
-                )
+            if source_collection_scope and _stage_task_work_already_complete(
+                team_id=team_id, task_id=handle.task_id
             ):
-                # The main turn finished the work before parking; a later
-                # continuation turn's failure must not erase that.  Judge the
-                # attempt by the main turn and expose the failure as a
-                # structured warning instead of poisoning the verdict.  The
-                # failure itself stays visible in the session turn record.
-                _rescue_settled_main_turn(turn_id, failure_status)
-                return original_snapshot, original_turn_id, continuations
+                if original_snapshot is not None:
+                    # The main turn finished the work before parking; a later
+                    # continuation turn's failure must not erase that.  Judge
+                    # the attempt by the main turn and expose the failure as a
+                    # structured warning instead of poisoning the verdict.
+                    # The failure itself stays visible in the session turn
+                    # record.
+                    _rescue_settled_main_turn(turn_id, failure_status)
+                    return original_snapshot, original_turn_id, continuations
+                # The main turn itself failed terminally after the stage task
+                # settled "completed" (production run-16cfab646d08: the
+                # writeback tool passed the completion gate, then a later LLM
+                # call died with budget_exhausted).  The stage-task idempotency
+                # key omits the node-run attempt, so every retry re-anchors to
+                # this same failed turn: re-raising here would deadlock the
+                # node forever even though gate-verified work exists.  The
+                # attempt is judged by the failed turn's own snapshot -- the
+                # failure stays visible (session turn record plus a structured
+                # warning scene event) instead of being swallowed.
+                _rescue_settled_main_turn(
+                    turn_id,
+                    failure_status,
+                    event_code="agent_turn.main_turn_failed_work_complete",
+                )
+                failure_snapshot = {
+                    **failure_detail,
+                    "sessionId": handle.session_id,
+                    "turnId": original_turn_id,
+                    "terminal": True,
+                    "rescuedByStageTaskAuthority": True,
+                }
+                return failure_snapshot, original_turn_id, continuations
             raise
         status = str(
             snapshot.get("terminalStatus") or snapshot.get("lastTurnStatus") or ""
