@@ -3201,20 +3201,51 @@ def test_update_agent_chat_room_membership_rejects_unknown_room(tmp_path, monkey
 
 
 @pytest.mark.slow
-def test_chat_room_participant_waits_for_active_direct_turn_on_same_agent(tmp_path, monkeypatch):
+def test_chat_room_participant_runs_with_active_direct_turn_in_another_session(tmp_path, monkeypatch):
     _isolate_chat_room_kernel(tmp_path, monkeypatch)
-    wait_for_lifecycle_phase, _events = _capture_session_lifecycle_events(monkeypatch)
+    _wait_for_lifecycle_phase, scheduler_events = _capture_session_lifecycle_events(monkeypatch)
     monkeypatch.setattr(session_service, "build_agent_context", _lightweight_agent_context)
     monkeypatch.setattr(chat_room_service, "build_agent_context", _lightweight_agent_context)
+    monkeypatch.setattr(
+        meeting_receipt_authority,
+        "build_speaker_receipt_context",
+        lambda *_args, **_kwargs: None,
+    )
     llm_bindings = _install_chat_room_test_llm_config(monkeypatch)
     alpha = session_service.create_chat_session(title="Alpha Agent", llm_bindings=llm_bindings)
-    beta = session_service.create_chat_session(title="Beta Agent", llm_bindings=llm_bindings)
+    gamma = session_service.create_chat_session(title="Gamma Agent", llm_bindings=llm_bindings)
+    child = session_service.create_child_session(
+        alpha["id"],
+        user_request="候选实验会话",
+        task_title="Alpha candidate session",
+        auto_start=False,
+    )
+    child_session_id = child["childSessionId"]
     room = chat_room_service.create_chat_room(
-        title="同 Agent 串行群聊",
-        participant_agent_ids=[alpha["agentId"], beta["agentId"]],
-        config={"maxSpeakers": 1},
+        title="同 Agent 不同 Session 并行群聊",
+        participant_session_ids=[child_session_id, gamma["id"]],
+        config={
+            "maxSpeakers": 1,
+            "scopeAuthority": "workflow_discussion_scope.v1",
+            "scopeHash": "scope-hash",
+            "discussionScope": {
+                "workflowRunId": "workflow-run",
+                "nodeRunId": "node-run",
+            },
+        },
     )
     assert room["participants"][0]["agentId"] == alpha["agentId"]
+    assert room["participants"][0]["sessionId"] == child_session_id
+    receipt_authority = {
+        "schemaVersion": 1,
+        "authorityKind": "workflow_run",
+        "teamId": "team-formal",
+        "questionId": "SCI-002",
+        "workflowRunId": "workflow-run",
+        "workflowId": "challenge-cup-research",
+        "workflowVersionId": "workflow-version",
+        "modelPolicySha256": "a" * 64,
+    }
     executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="pytest-chat-room-agent-slot")
     monkeypatch.setattr(session_service, "_SESSION_EXECUTOR", executor)
 
@@ -3266,21 +3297,30 @@ def test_chat_room_participant_waits_for_active_direct_turn_on_same_agent(tmp_pa
         result_holder: dict[str, dict] = {}
         room_thread = threading.Thread(
             target=lambda: result_holder.update(
-                detail=chat_room_service.start_chat_room_round(room["roomId"], "群聊也想让 alpha 发言")
+                detail=chat_room_service.start_chat_room_round(
+                    room["roomId"],
+                    "群聊也想让 alpha 发言",
+                    _model_invocation_receipt_authority=receipt_authority,
+                )
             ),
             name="pytest-chat-room-round",
         )
         room_thread.start()
 
-        queued_event = wait_for_lifecycle_phase(
-            "scheduler_external_queued",
-            fields={"owner": "chat_room_round"},
-        )
-        assert queued_event is not None
-        assert not room_started.is_set()
-        release_direct.set()
-        assert room_started.wait(8.0), "room speaker should start after the direct turn releases the agent slot"
+        assert room_started.wait(8.0), [("ids", alpha["id"], child_session_id), *[
+            (
+                event["session_id"],
+                event["phase"],
+                event["fields"].get("schedulerSessionKey"),
+                event["fields"].get("queueReason"),
+                event["fields"].get("reservationScope"),
+            )
+            for event in scheduler_events
+            if "scheduler" in event["phase"]
+        ]]
+        assert not release_direct.is_set()
         release_room.set()
+        release_direct.set()
         room_thread.join(timeout=2.0)
     finally:
         release_direct.set()
@@ -3294,7 +3334,123 @@ def test_chat_room_participant_waits_for_active_direct_turn_on_same_agent(tmp_pa
 
 
 @pytest.mark.slow
-def test_chat_room_waiting_speaker_keeps_fifo_before_later_direct_turn(tmp_path, monkeypatch):
+def test_two_scoped_rooms_run_same_agent_in_distinct_sessions_concurrently(tmp_path, monkeypatch):
+    _isolate_chat_room_kernel(tmp_path, monkeypatch)
+    monkeypatch.setattr(session_service, "build_agent_context", _lightweight_agent_context)
+    monkeypatch.setattr(chat_room_service, "build_agent_context", _lightweight_agent_context)
+    monkeypatch.setattr(
+        meeting_receipt_authority,
+        "build_speaker_receipt_context",
+        lambda *_args, **_kwargs: None,
+    )
+    llm_bindings = _install_chat_room_test_llm_config(monkeypatch)
+    alpha = session_service.create_chat_session(title="Alpha Agent", llm_bindings=llm_bindings)
+    gamma = session_service.create_chat_session(title="Gamma Agent", llm_bindings=llm_bindings)
+    delta = session_service.create_chat_session(title="Delta Agent", llm_bindings=llm_bindings)
+    first_child = session_service.create_child_session(
+        alpha["id"],
+        user_request="候选一评审",
+        task_title="Alpha candidate one",
+        auto_start=False,
+    )["childSessionId"]
+    second_child = session_service.create_child_session(
+        alpha["id"],
+        user_request="候选二评审",
+        task_title="Alpha candidate two",
+        auto_start=False,
+    )["childSessionId"]
+
+    def create_scoped_room(title, alpha_session_id, peer_session_id, scope_hash):
+        return chat_room_service.create_chat_room(
+            title=title,
+            participant_session_ids=[alpha_session_id, peer_session_id],
+            config={
+                "maxSpeakers": 1,
+                "scopeAuthority": "workflow_discussion_scope.v1",
+                "scopeHash": scope_hash,
+                "discussionScope": {
+                    "workflowRunId": "workflow-run",
+                    "nodeRunId": "node-run",
+                },
+            },
+        )
+
+    first_room = create_scoped_room("Candidate one", first_child, gamma["id"], "scope-one")
+    second_room = create_scoped_room("Candidate two", second_child, delta["id"], "scope-two")
+    assert first_room["participants"][0]["agentId"] == alpha["agentId"]
+    assert second_room["participants"][0]["agentId"] == alpha["agentId"]
+    assert first_child != second_child
+
+    authority = {
+        "schemaVersion": 1,
+        "authorityKind": "workflow_run",
+        "teamId": "team-formal",
+        "questionId": "SCI-002",
+        "workflowRunId": "workflow-run",
+        "workflowId": "challenge-cup-research",
+        "workflowVersionId": "workflow-version",
+        "modelPolicySha256": "a" * 64,
+    }
+    entered_sessions: set[str] = set()
+    entered_lock = threading.Lock()
+    both_entered = threading.Event()
+    release_calls = threading.Event()
+
+    class BlockingAgent:
+        def __init__(self, workspace_path=None, config=None):
+            pass
+
+        def seed_chat_history(self, messages):
+            pass
+
+        def seed_runtime_context(self, content):
+            pass
+
+        def run_single_turn(self, initial_prompt=None, disable_tools=False):
+            active_session_id = str(
+                agent_directory_service.current_agent_runtime().get("sessionId") or ""
+            )
+            with entered_lock:
+                entered_sessions.add(active_session_id)
+                if entered_sessions == {first_child, second_child}:
+                    both_entered.set()
+            assert release_calls.wait(10.0)
+            return {
+                "status": "completed",
+                "summary": "room done",
+                "raw_output": "room done",
+                "tool_call_count": 0,
+            }
+
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda **kwargs: BlockingAgent())
+    results: dict[str, dict] = {}
+
+    def run_room(key, room, topic):
+        results[key] = chat_room_service.start_chat_room_round(
+            room["roomId"],
+            topic,
+            _model_invocation_receipt_authority=authority,
+        )
+
+    first_thread = threading.Thread(target=run_room, args=("first", first_room, "candidate-one"))
+    second_thread = threading.Thread(target=run_room, args=("second", second_room, "candidate-two"))
+    try:
+        first_thread.start()
+        second_thread.start()
+        assert both_entered.wait(10.0), entered_sessions
+    finally:
+        release_calls.set()
+        first_thread.join(timeout=10.0)
+        second_thread.join(timeout=10.0)
+
+    assert not first_thread.is_alive()
+    assert not second_thread.is_alive()
+    assert results["first"]["rounds"][-1]["status"] == "completed"
+    assert results["second"]["rounds"][-1]["status"] == "completed"
+
+
+@pytest.mark.slow
+def test_chat_room_same_session_wait_does_not_block_later_different_session_turn(tmp_path, monkeypatch):
     _isolate_chat_room_kernel(tmp_path, monkeypatch)
     wait_for_lifecycle_phase, _events = _capture_session_lifecycle_events(monkeypatch)
     monkeypatch.setattr(session_service, "build_agent_context", _lightweight_agent_context)
@@ -3393,18 +3549,15 @@ def test_chat_room_waiting_speaker_keeps_fifo_before_later_direct_turn(tmp_path,
         assert external_queued_event is not None
         assert not room_started.is_set()
 
-        queued_direct = session_service.submit_session_message(beta["id"], "beta second direct")
-        assert queued_direct["currentPhase"] == "queued"
-        queued_direct_event = wait_for_lifecycle_phase("scheduler_queued", fields={"agentId": alpha["agentId"]})
-        assert queued_direct_event is not None
-        assert not second_direct_started.is_set()
+        second_direct = session_service.submit_session_message(beta["id"], "beta second direct")
+        assert second_direct["currentPhase"] == "running"
+        assert second_direct_started.wait(10.0)
+        assert not room_started.is_set()
+        release_second_direct.set()
 
         release_first_direct.set()
         assert room_started.wait(15.0)
-        assert "second_direct_started_before_room_finished" not in run_order
         release_room.set()
-        assert second_direct_started.wait(15.0)
-        release_second_direct.set()
         room_thread.join(timeout=2.0)
     finally:
         release_first_direct.set()
@@ -3414,7 +3567,12 @@ def test_chat_room_waiting_speaker_keeps_fifo_before_later_direct_turn(tmp_path,
 
     assert not room_thread.is_alive()
     assert result_holder["detail"]["rounds"][-1]["status"] == "completed"
-    assert run_order == ["first_direct", "room", "room_finished", "second_direct"]
+    assert run_order == [
+        "first_direct",
+        "second_direct_started_before_room_finished",
+        "room",
+        "room_finished",
+    ]
 
 
 @pytest.mark.slow

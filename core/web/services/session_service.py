@@ -233,6 +233,7 @@ from .session.schedule import (
     _submit_scheduled_session_turn,
     cancel_agent_execution_reservation,
     reserve_agent_execution_slot,
+    reserve_session_execution_slot,
 )
 from .session.stream_capture import (
     SessionTurnCapture,

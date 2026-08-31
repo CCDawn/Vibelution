@@ -2575,14 +2575,11 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
     timings["agentLookupMs"] = _elapsed_ms(stage_started_at)
     agent_context = None
     result: dict[str, Any] | Any
-    with session_service.reserve_agent_execution_slot(
+    with session_service.reserve_session_execution_slot(
         agent_id=agent_id,
         run_id=round_id,
         session_id=session_id,
         owner="chat_room_round",
-        # A worker (max 2) must not wait forever for the agent slot held by a
-        # long session turn: time out and fail the round instead of stalling
-        # every room.
         wait_timeout_seconds=_challenge_room_execution_slot_wait_seconds(context),
     ):
         stop_reason = interrupt_checker()

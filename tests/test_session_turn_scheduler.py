@@ -91,6 +91,164 @@ def test_session_turn_scheduler_runs_same_agent_different_sessions_concurrently(
     assert [item["turn_id"] for item in submitted] == ["turn-1", "turn-2"]
 
 
+def test_session_turn_scheduler_allows_same_agent_different_session_reservations_to_overlap():
+    scheduler = _scheduler(max_active_per_agent=4)
+
+    with scheduler.reserve_session(
+        agent_id="agent-a",
+        session_id="session-a",
+        run_id="round-a",
+        owner="chat_room_round",
+        wait_timeout_seconds=0.1,
+        release=lambda context: scheduler.release(context),
+    ), scheduler.reserve_session(
+        agent_id="agent-a",
+        session_id="session-b",
+        run_id="round-b",
+        owner="chat_room_round",
+        wait_timeout_seconds=0.1,
+        release=lambda context: scheduler.release(context),
+    ):
+        pass
+
+
+def test_session_turn_scheduler_serializes_reservations_for_the_same_session():
+    events = []
+    second_queued = threading.Event()
+    scheduler = _scheduler(
+        events=events,
+        event_hook=lambda event: second_queued.set()
+        if event["phase"] == "external_queued" and event["turn_id"] == "round-b"
+        else None,
+    )
+    second_entered = threading.Event()
+
+    def reserve_same_session():
+        with scheduler.reserve_session(
+            agent_id="agent-a",
+            session_id="session-a",
+            run_id="round-b",
+            owner="chat_room_round",
+            wait_timeout_seconds=1.0,
+            release=lambda context: scheduler.release(context),
+        ):
+            second_entered.set()
+
+    with scheduler.reserve_session(
+        agent_id="agent-a",
+        session_id="session-a",
+        run_id="round-a",
+        owner="chat_room_round",
+        wait_timeout_seconds=1.0,
+        release=lambda context: scheduler.release(context),
+    ):
+        worker = threading.Thread(target=reserve_same_session)
+        worker.start()
+        assert second_queued.wait(1.0)
+        assert not second_entered.is_set()
+
+    assert second_entered.wait(1.0)
+    worker.join(timeout=1.0)
+    assert not worker.is_alive()
+    queued_event = next(event for event in events if event["phase"] == "external_queued")
+    assert queued_event["fields"]["queueReason"] == "session_active"
+
+
+def test_session_turn_scheduler_applies_agent_capacity_to_session_reservations():
+    events = []
+    second_queued = threading.Event()
+    scheduler = _scheduler(
+        events=events,
+        max_active_per_agent=1,
+        event_hook=lambda event: second_queued.set()
+        if event["phase"] == "external_queued" and event["turn_id"] == "round-b"
+        else None,
+    )
+    second_entered = threading.Event()
+
+    def reserve_second_session():
+        with scheduler.reserve_session(
+            agent_id="agent-a",
+            session_id="session-b",
+            run_id="round-b",
+            owner="chat_room_round",
+            wait_timeout_seconds=1.0,
+            release=lambda context: scheduler.release(context),
+        ):
+            second_entered.set()
+
+    with scheduler.reserve_session(
+        agent_id="agent-a",
+        session_id="session-a",
+        run_id="round-a",
+        owner="chat_room_round",
+        wait_timeout_seconds=1.0,
+        release=lambda context: scheduler.release(context),
+    ):
+        worker = threading.Thread(target=reserve_second_session)
+        worker.start()
+        assert second_queued.wait(1.0)
+        assert not second_entered.is_set()
+
+    assert second_entered.wait(1.0)
+    worker.join(timeout=1.0)
+    assert not worker.is_alive()
+    queued_event = next(event for event in events if event["phase"] == "external_queued")
+    assert queued_event["fields"]["queueReason"] == "agent_concurrency_limit"
+
+
+def test_agent_exclusive_reservation_keeps_priority_over_later_session_turn():
+    external_queued = threading.Event()
+    external_entered = threading.Event()
+    release_external = threading.Event()
+    submitted = []
+    scheduler = _scheduler(
+        event_hook=lambda event: external_queued.set()
+        if event["phase"] == "external_queued" and event["turn_id"] == "global-run"
+        else None,
+    )
+
+    def release_and_submit(context):
+        released = scheduler.release(context)
+        if released is None or released.external or released.context is None:
+            return
+        submitted.extend([released.context, *released.additional_contexts])
+
+    def reserve_agent_exclusively():
+        with scheduler.reserve_external(
+            agent_id="agent-a",
+            session_id="",
+            run_id="global-run",
+            owner="agent_global_work",
+            wait_timeout_seconds=1.0,
+            release=release_and_submit,
+        ):
+            external_entered.set()
+            assert release_external.wait(1.0)
+
+    with scheduler.reserve_session(
+        agent_id="agent-a",
+        session_id="session-a",
+        run_id="round-a",
+        owner="chat_room_round",
+        wait_timeout_seconds=1.0,
+        release=release_and_submit,
+    ):
+        worker = threading.Thread(target=reserve_agent_exclusively)
+        worker.start()
+        assert external_queued.wait(1.0)
+        later = {"session_id": "session-b", "turn_id": "turn-b", "agent_id": "agent-a"}
+        scheduler.schedule(later, submit=submitted.append, release=release_and_submit)
+        assert submitted == []
+
+    assert external_entered.wait(1.0)
+    assert submitted == []
+    release_external.set()
+    worker.join(timeout=1.0)
+    assert not worker.is_alive()
+    assert [context["turn_id"] for context in submitted] == ["turn-b"]
+
+
 def test_session_turn_scheduler_queues_same_agent_when_agent_limit_is_reached():
     queued = []
     dequeued = []

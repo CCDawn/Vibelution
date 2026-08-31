@@ -55,7 +55,7 @@ def reserve_agent_execution_slot(
     owner: str = "external",
     wait_timeout_seconds: float | None = None,
 ):
-    """Reserve the per-agent execution slot for non-session work such as group chat speakers."""
+    """Reserve the whole Agent for work without an independent Session identity."""
 
     s = _service()
     with s._SESSION_TURN_SCHEDULER.reserve_external(
@@ -67,6 +67,30 @@ def reserve_agent_execution_slot(
         release=_release_scheduled_session_turn,
     ):
         yield
+
+
+@contextmanager
+def reserve_session_execution_slot(
+    *,
+    agent_id: str,
+    run_id: str,
+    session_id: str,
+    owner: str = "external",
+    wait_timeout_seconds: float | None = None,
+):
+    """Reserve one Session for work executed outside the normal turn worker."""
+
+    s = _service()
+    with s._SESSION_TURN_SCHEDULER.reserve_session(
+        agent_id=agent_id,
+        run_id=run_id,
+        session_id=session_id,
+        owner=owner,
+        wait_timeout_seconds=wait_timeout_seconds,
+        release=_release_scheduled_session_turn,
+    ):
+        yield
+
 
 def _scheduler_context_is_external(context: dict[str, Any]) -> bool:
     s = _service()

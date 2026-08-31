@@ -5,10 +5,10 @@ from __future__ import annotations
 import threading
 import time
 from collections import deque
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, Callable
-
+from typing import Any
 
 RecordSchedulerEvent = Callable[[dict[str, Any], str, str, dict[str, Any] | None], None]
 SessionTurnCallback = Callable[[dict[str, Any]], None]
@@ -98,6 +98,58 @@ class SessionTurnScheduler:
         wait_timeout_seconds: float | None = None,
         release: SessionTurnCallback,
     ):
+        """Reserve the whole Agent for work that has no independent Session identity."""
+
+        with self._reserve_execution(
+            agent_id=agent_id,
+            run_id=run_id,
+            session_id=session_id,
+            owner=owner,
+            wait_timeout_seconds=wait_timeout_seconds,
+            release=release,
+            reservation_scope="agent",
+        ):
+            yield
+
+    @contextmanager
+    def reserve_session(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        run_id: str,
+        owner: str = "external",
+        wait_timeout_seconds: float | None = None,
+        release: SessionTurnCallback,
+    ):
+        """Reserve one Session while preserving bounded same-Agent concurrency."""
+
+        normalized_session_id = str(session_id or "").strip()
+        if not normalized_session_id:
+            raise ValueError("Session execution reservations require a session id")
+        with self._reserve_execution(
+            agent_id=agent_id,
+            run_id=run_id,
+            session_id=normalized_session_id,
+            owner=owner,
+            wait_timeout_seconds=wait_timeout_seconds,
+            release=release,
+            reservation_scope="session",
+        ):
+            yield
+
+    @contextmanager
+    def _reserve_execution(
+        self,
+        *,
+        agent_id: str,
+        run_id: str,
+        session_id: str,
+        owner: str,
+        wait_timeout_seconds: float | None,
+        release: SessionTurnCallback,
+        reservation_scope: str,
+    ):
         normalized_agent_id = str(agent_id or "").strip()
         normalized_run_id = str(run_id or "").strip()
         if not normalized_agent_id or not normalized_run_id:
@@ -114,20 +166,34 @@ class SessionTurnScheduler:
             "turn_id": normalized_run_id,
             "agent_id": normalized_agent_id,
             "_scheduler_agent_key": agent_key,
-            "_scheduler_session_key": f"external:{normalized_run_id}",
+            "_scheduler_session_key": (
+                f"session:{str(session_id or '').strip()}"
+                if reservation_scope == "session"
+                else f"external:{normalized_run_id}"
+            ),
             "_scheduler_external": True,
+            "_scheduler_reservation_scope": reservation_scope,
             "_scheduler_ready_event": ready_event,
             "_scheduler_cancelled": False,
         }
         owner_name = str(owner or "external").strip() or "external"
-        self._record_event(context, "external_waiting", "waiting", {"owner": owner_name})
+        event_fields = {"owner": owner_name, "reservationScope": reservation_scope}
+        self._record_event(context, "external_waiting", "waiting", event_fields)
         with self._condition:
-            if self._can_start_external_locked(context) and not self._queues.get(agent_key):
+            queue_reason = (
+                "agent_queue_pending"
+                if self.is_agent_exclusive(context) and self._queues.get(agent_key)
+                else self._reservation_queue_reason_locked(
+                    context,
+                    respect_agent_waiter=True,
+                )
+            )
+            if not queue_reason:
                 self._activate_locked(context)
                 self._set_started_fields(context)
                 acquired = True
             else:
-                self._set_queue_fields(context, "agent_busy_for_external")
+                self._set_queue_fields(context, queue_reason)
                 queue_bucket = self._queues.setdefault(agent_key, deque())
                 queue_bucket.append(context)
                 self._record_event(
@@ -136,6 +202,7 @@ class SessionTurnScheduler:
                     "queued",
                     {
                         "owner": owner_name,
+                        "reservationScope": reservation_scope,
                         "queuePosition": len(queue_bucket),
                         **self._event_fields(context),
                     },
@@ -160,12 +227,22 @@ class SessionTurnScheduler:
                 if bool(context.get("_scheduler_cancelled")):
                     raise RuntimeError(f"Agent execution slot reservation was cancelled: {normalized_agent_id}")
                 acquired = True
-        self._record_event(context, "external_started", "running", {"owner": owner_name, **self._event_fields(context)})
+        self._record_event(
+            context,
+            "external_started",
+            "running",
+            {**event_fields, **self._event_fields(context)},
+        )
         try:
             yield
         finally:
             if acquired:
-                self._record_event(context, "external_finished", "finished", {"owner": owner_name, **self._event_fields(context)})
+                self._record_event(
+                    context,
+                    "external_finished",
+                    "finished",
+                    {**event_fields, **self._event_fields(context)},
+                )
                 release(context)
 
     def cancel_queued_context(self, agent_key: str, turn_id: str) -> bool:
@@ -241,13 +318,19 @@ class SessionTurnScheduler:
         turn_id = str(context.get("turn_id") or "").strip()
         next_context: dict[str, Any] | None = None
         additional_contexts: list[dict[str, Any]] = []
+        ready_reservations: list[dict[str, Any]] = []
         dropped_contexts: list[dict[str, Any]] = []
         with self._condition:
-            self._deactivate_locked(agent_key, session_key, turn_id, external=self.is_external(context))
+            self._deactivate_locked(
+                agent_key,
+                session_key,
+                turn_id,
+                agent_exclusive=self.is_agent_exclusive(context),
+            )
             queue_bucket = self._queues.get(agent_key)
             if queue_bucket:
                 remaining: deque[dict[str, Any]] = deque()
-                external_waiter_blocked = False
+                agent_waiter_blocked = False
                 while queue_bucket:
                     candidate = queue_bucket.popleft()
                     self._ensure_context_keys(candidate)
@@ -255,22 +338,40 @@ class SessionTurnScheduler:
                         dropped_contexts.append(candidate)
                         continue
                     if self.is_external(candidate):
+                        if self.is_session_reservation(candidate):
+                            if not agent_waiter_blocked and not self._reservation_queue_reason_locked(
+                                candidate,
+                                respect_agent_waiter=False,
+                            ):
+                                self._activate_locked(candidate)
+                                self._set_started_fields(candidate)
+                                ready_reservations.append(candidate)
+                                ready_event = candidate.get("_scheduler_ready_event")
+                                if isinstance(ready_event, threading.Event):
+                                    ready_event.set()
+                                continue
+                            remaining.append(candidate)
+                            continue
                         if (
-                            not external_waiter_blocked
+                            not agent_waiter_blocked
                             and not remaining
                             and not next_context
                             and not additional_contexts
-                            and self._can_start_external_locked(candidate)
+                            and not ready_reservations
+                            and not self._reservation_queue_reason_locked(
+                                candidate,
+                                respect_agent_waiter=False,
+                            )
                         ):
-                            next_context = candidate
                             self._activate_locked(candidate)
                             self._set_started_fields(candidate)
+                            ready_reservations.append(candidate)
                             ready_event = candidate.get("_scheduler_ready_event")
                             if isinstance(ready_event, threading.Event):
                                 ready_event.set()
                             break
                         remaining.append(candidate)
-                        external_waiter_blocked = True
+                        agent_waiter_blocked = True
                         break
 
                     candidate_session_id = str(candidate.get("session_id") or "").strip()
@@ -282,7 +383,7 @@ class SessionTurnScheduler:
                     ):
                         dropped_contexts.append(candidate)
                         continue
-                    if not external_waiter_blocked and not self._chat_queue_reason_locked(
+                    if not agent_waiter_blocked and not self._chat_queue_reason_locked(
                         candidate,
                         respect_external_waiter=False,
                     ):
@@ -304,11 +405,19 @@ class SessionTurnScheduler:
             self._condition.notify_all()
 
         if next_context is None:
+            if ready_reservations:
+                return ReleasedSchedulerTurn(
+                    context=ready_reservations[0],
+                    external=True,
+                    dropped_contexts=dropped_contexts,
+                )
             if dropped_contexts:
-                return ReleasedSchedulerTurn(context=None, external=False, dropped_contexts=dropped_contexts)
+                return ReleasedSchedulerTurn(
+                    context=None,
+                    external=False,
+                    dropped_contexts=dropped_contexts,
+                )
             return None
-        if self.is_external(next_context):
-            return ReleasedSchedulerTurn(context=next_context, external=True, dropped_contexts=dropped_contexts)
         self._mark_dequeued(next_context)
         for additional_context in additional_contexts:
             self._mark_dequeued(additional_context)
@@ -380,6 +489,16 @@ class SessionTurnScheduler:
     @staticmethod
     def is_external(context: dict[str, Any]) -> bool:
         return bool(context.get("_scheduler_external"))
+
+    @staticmethod
+    def is_session_reservation(context: dict[str, Any]) -> bool:
+        return bool(context.get("_scheduler_external")) and str(
+            context.get("_scheduler_reservation_scope") or "agent"
+        ).strip() == "session"
+
+    @classmethod
+    def is_agent_exclusive(cls, context: dict[str, Any]) -> bool:
+        return cls.is_external(context) and not cls.is_session_reservation(context)
 
     @staticmethod
     def _default_session_key_for_context(context: dict[str, Any]) -> str:
@@ -462,24 +581,47 @@ class SessionTurnScheduler:
         queue_bucket.extend(items)
         return insertion_index + 1
 
-    def _can_start_external_locked(self, context: dict[str, Any]) -> bool:
+    def _reservation_queue_reason_locked(
+        self,
+        context: dict[str, Any],
+        *,
+        respect_agent_waiter: bool,
+    ) -> str:
         agent_key = str(context.get("_scheduler_agent_key") or "").strip()
         if self._active_external_turn_ids_by_agent.get(agent_key):
-            return False
-        return self._agent_active_count_locked(agent_key) == 0
+            return "agent_external_active"
+        if self.is_agent_exclusive(context):
+            if self._agent_active_count_locked(agent_key) > 0:
+                return "agent_busy_for_external"
+            return ""
+        if respect_agent_waiter and self._agent_has_external_waiter_locked(agent_key):
+            return "agent_external_waiting"
+        session_key = str(context.get("_scheduler_session_key") or "").strip()
+        if self._active_turn_ids_by_session.get(session_key):
+            return "session_active"
+        if self._agent_active_count_locked(agent_key) >= self._max_active_per_agent:
+            return "agent_concurrency_limit"
+        return ""
 
     def _activate_locked(self, context: dict[str, Any]) -> None:
         agent_key = str(context.get("_scheduler_agent_key") or "").strip()
         turn_id = str(context.get("turn_id") or "").strip()
-        if self.is_external(context):
+        if self.is_agent_exclusive(context):
             self._active_external_turn_ids_by_agent[agent_key] = turn_id
             return
         session_key = str(context.get("_scheduler_session_key") or "").strip()
         self._active_turn_ids_by_session[session_key] = turn_id
         self._active_session_keys_by_agent.setdefault(agent_key, set()).add(session_key)
 
-    def _deactivate_locked(self, agent_key: str, session_key: str, turn_id: str, *, external: bool) -> None:
-        if external:
+    def _deactivate_locked(
+        self,
+        agent_key: str,
+        session_key: str,
+        turn_id: str,
+        *,
+        agent_exclusive: bool,
+    ) -> None:
+        if agent_exclusive:
             if self._active_external_turn_ids_by_agent.get(agent_key) == turn_id:
                 self._active_external_turn_ids_by_agent.pop(agent_key, None)
             return
@@ -496,7 +638,7 @@ class SessionTurnScheduler:
 
     def _agent_has_external_waiter_locked(self, agent_key: str) -> bool:
         queue_bucket = self._queues.get(agent_key)
-        return any(self.is_external(item) for item in queue_bucket or [])
+        return any(self.is_agent_exclusive(item) for item in queue_bucket or [])
 
     def _set_queue_fields(self, context: dict[str, Any], reason: str) -> None:
         agent_key = str(context.get("_scheduler_agent_key") or "").strip()
