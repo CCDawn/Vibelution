@@ -105,10 +105,6 @@ GATE_SELF_TEST_COMMANDS = (
         "tests/test_select_tests.py tests/test_reuse_research_contract.py tests/test_validation_toolchain.py "
         "tests/test_github_project_library_service.py -n 4 --dist load -m \"not serial\" -q --maxfail=0"
     ),
-    (
-        ".\\.venv\\Scripts\\python.exe -m pytest "
-        "tests/test_environment_doctor.py -m serial -q --maxfail=0"
-    ),
 )
 GATE_DEFINITION_FILES = frozenset(
     {

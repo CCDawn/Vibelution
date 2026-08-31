@@ -258,18 +258,38 @@ def test_selector_matches_local_quality_gate_surfaces():
         select_tests.load_matrix(),
     )
 
-    rule = next(rule for rule in result["matchedRules"] if rule["id"] == "local-quality-gate")
-    assert set(rule["matchedFiles"]) == {
+    gate_rule = next(
+        rule for rule in result["matchedRules"] if rule["id"] == "local-quality-gate"
+    )
+    doctor_rule = next(
+        rule for rule in result["matchedRules"] if rule["id"] == "environment-doctor"
+    )
+    assert set(gate_rule["matchedFiles"]) == {
         ".github/workflows/ci.yml",
-        "scripts/doctor.ps1",
         "scripts/local_quality_gate.py",
         "tests/test_matrix.yaml",
     }
+    assert doctor_rule["matchedFiles"] == ["scripts/doctor.ps1"]
     assert any("tests/test_local_quality_gate.py" in command for command in result["commands"])
     assert any("tests/test_ci_workflow_contract.py" in command for command in result["commands"])
     assert any("tests/test_environment_doctor.py" in command for command in result["commands"])
     assert any("tests/test_select_tests.py" in command for command in result["commands"])
     assert "local-serial" in result["validationLayers"]
+
+
+def test_selector_skips_environment_doctor_for_core_gate_only():
+    result = select_tests.select_tests(
+        ["scripts/task_closeout.py"],
+        select_tests.load_matrix(),
+    )
+
+    assert [rule["id"] for rule in result["matchedRules"]] == ["local-quality-gate"]
+    assert not any(
+        "tests/test_environment_doctor.py" in command
+        for command in result["commands"]
+    )
+    assert "local-parallel" in result["validationLayers"]
+    assert "local-serial" not in result["validationLayers"]
 
 
 def test_selector_scopes_pre_commit_hook_to_hook_contract_tests():

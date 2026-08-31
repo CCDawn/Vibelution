@@ -49,13 +49,12 @@ rules:
       - "Hook-only changes run the hook contract tests; closeout keeps its full gate-definition self-test."
 
   - id: local-quality-gate
-    description: "Closeout manifest, doctor, selector, and manual CI contracts."
+    description: "Closeout manifest, selector, and manual CI contracts."
     executionLayers:
       - "focused"
-      - "local-serial"
+      - "local-parallel"
     paths:
       - ".github/workflows/ci.yml"
-      - "scripts/doctor.ps1"
       - "scripts/local_quality_gate.py"
       - "scripts/task_closeout.py"
       - "tests/select_tests.py"
@@ -63,13 +62,24 @@ rules:
       - "tests/test_local_quality_gate.py"
       - "tests/test_task_closeout.py"
       - "tests/test_ci_workflow_contract.py"
-      - "tests/test_environment_doctor.py"
       - "tests/test_select_tests.py"
     commands:
       - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_local_quality_gate.py tests/test_task_closeout.py tests/test_ci_workflow_contract.py tests/test_select_tests.py tests/test_reuse_research_contract.py tests/test_validation_toolchain.py tests/test_github_project_library_service.py -n 4 --dist load -m \"not serial\" -q --maxfail=0"
-      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_environment_doctor.py -m serial -q --maxfail=0"
     notes:
       - "Gate-definition changes must validate the gate itself even when the matrix changes in the same branch."
+
+  - id: environment-doctor
+    description: "Live environment, validation toolchain, and Git hook diagnostics."
+    executionLayers:
+      - "focused"
+      - "local-serial"
+    paths:
+      - "scripts/doctor.ps1"
+      - "tests/test_environment_doctor.py"
+    commands:
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_environment_doctor.py -m serial -q --maxfail=0"
+    notes:
+      - "Only doctor-owned changes run the live environment probe."
 
   - id: agent-runtime-core
     description: "Agent single-turn entry, orchestration, turn status bar, and budget profiles."

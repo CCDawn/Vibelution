@@ -671,6 +671,9 @@ def test_local_quality_gate_matrix_command_matches_self_test_and_allowlist(
 ) -> None:
     matrix = select_tests.load_matrix()
     rule = next(rule for rule in matrix["rules"] if rule["id"] == "local-quality-gate")
+    doctor_rule = next(
+        rule for rule in matrix["rules"] if rule["id"] == "environment-doctor"
+    )
 
     assert rule["commands"] == list(gate.GATE_SELF_TEST_COMMANDS)
     specs = [gate.parse_allowed_command(command, git_repo) for command in rule["commands"]]
@@ -686,7 +689,14 @@ def test_local_quality_gate_matrix_command_matches_self_test_and_allowlist(
         "-q",
         "--maxfail=0",
     ]
-    assert specs[1].argv == [
+    assert doctor_rule["commands"] == [
+        ".\\.venv\\Scripts\\python.exe -m pytest "
+        "tests/test_environment_doctor.py -m serial -q --maxfail=0"
+    ]
+    doctor_spec = gate.parse_allowed_command(doctor_rule["commands"][0], git_repo)
+    assert doctor_spec.kind == "pytest"
+    assert doctor_spec.cwd == git_repo
+    assert doctor_spec.argv == [
         str(gate.PROJECT_PYTHON_NAME),
         "-m",
         "pytest",
@@ -1841,7 +1851,6 @@ def test_closeout_appends_gate_self_tests_when_gate_definition_changes(
     assert [command.kind for command in result.commands] == [
         "changed-python-ruff",
         "diff-check",
-        "pytest",
         "pytest",
     ]
 
