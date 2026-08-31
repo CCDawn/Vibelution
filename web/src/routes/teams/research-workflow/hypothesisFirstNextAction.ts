@@ -390,6 +390,20 @@ function meetingStage(
         meetingRoundId: roundId,
       });
     }
+    if (terminal) {
+      return action({
+        stage: generation ? "generation_summarizing" : "review_summarizing",
+        targetNodeId: nodeId,
+        navigationLabel: generation ? "前往候选生成" : "前往评审讨论",
+        recovery: {
+          command: "retry_draft_summary",
+          label: generation ? "重试整理候选清单" : "重试整理本轮结论",
+          reason: "自动整理未完成",
+        },
+        statusMessage: "自动整理未完成，可手动重试",
+        meetingRoundId: roundId,
+      });
+    }
     return action({
       stage: generation ? "generation_summarizing" : "review_summarizing",
       targetNodeId: nodeId,

@@ -86,6 +86,20 @@ _CHAT_ROOM_ROUND_FAILED_STATUSES = {
     "failed_runtime",
     "stop_failed",
 }
+_CHAT_ROOM_ROUND_TERMINAL_STATUSES = {
+    "completed",
+    "done",
+    "ready",
+    "routed",
+    "success",
+    "succeeded",
+    "partial",
+    "needs_continue",
+    "paused_limit",
+    "closed",
+    *_CHAT_ROOM_ROUND_STOPPED_STATUSES,
+    *_CHAT_ROOM_ROUND_FAILED_STATUSES,
+}
 _CHAT_ROOM_ROUND_STOPPED_RUNTIME_STATUSES = {
     "cancelled",
     "canceled",
@@ -95,6 +109,23 @@ _CHAT_ROOM_ROUND_STOPPED_RUNTIME_STATUSES = {
     "stopped",
     "terminated",
 }
+_CHAT_ROOM_ROUND_TERMINAL_RUNTIME_STATUSES = {
+    "completed",
+    "done",
+    "ready",
+    "routed",
+    "success",
+    "succeeded",
+    "partial",
+    "needs_continue",
+    "paused_limit",
+    *_CHAT_ROOM_ROUND_STOPPED_RUNTIME_STATUSES,
+    "error",
+    "failed",
+    "failed_provider",
+    "failed_runtime",
+}
+_CHAT_ROOM_ROUND_RUNNING_STATUSES = {"queued", "running", "stopping"}
 _CHAT_ROOM_RUN_KIND = "chat_room_round"
 # A meeting-driven execution whose last observable activity (attempt
 # heartbeat, meeting update, or bound chat-room WorkRun update) is older than
@@ -880,6 +911,53 @@ def _linked_chat_room_round_problem(
     )
 
 
+def _chat_room_round_snapshot_is_terminal(snapshot: Mapping[str, Any]) -> bool:
+    """Return whether a WorkRun snapshot has an explicit terminal status."""
+
+    status = str(
+        snapshot.get("status")
+        or snapshot.get("currentPhase")
+        or snapshot.get("phase")
+        or ""
+    ).strip().lower()
+    if status in _CHAT_ROOM_ROUND_RUNNING_STATUSES:
+        return False
+    if status in _CHAT_ROOM_ROUND_TERMINAL_STATUSES:
+        return True
+    return str(snapshot.get("runtimeStatus") or "").strip().lower() in {
+        *_CHAT_ROOM_ROUND_TERMINAL_RUNTIME_STATUSES,
+    }
+
+
+def _bound_chat_rounds_are_terminal(
+    meeting: Mapping[str, Any],
+    chat_room_round_snapshots: Mapping[str, Mapping[str, Any]] | None,
+) -> bool:
+    """Require a matching, explicit terminal snapshot for every bound round."""
+
+    if not isinstance(chat_room_round_snapshots, Mapping):
+        return False
+    round_ids = [
+        str(round_id or "").strip()
+        for round_id in list(meeting.get("chatRoomRoundIds") or [])
+        if str(round_id or "").strip()
+    ]
+    if not round_ids:
+        return False
+    for round_id in round_ids:
+        snapshot = chat_room_round_snapshots.get(round_id)
+        if not isinstance(snapshot, Mapping):
+            return False
+        snapshot_id = str(
+            snapshot.get("runId") or snapshot.get("roundId") or ""
+        ).strip()
+        if snapshot_id and snapshot_id != round_id:
+            return False
+        if not _chat_room_round_snapshot_is_terminal(snapshot):
+            return False
+    return True
+
+
 def _load_chat_room_round_snapshot(round_id: str) -> Mapping[str, Any] | None:
     """Read one chat-room WorkRun through the public runtime-store API.
 
@@ -1268,6 +1346,32 @@ def _meeting_recovery_actions(
         )
     ]
     status = str(meeting.get("status") or "").strip().lower()
+    summary_retry_ready = (
+        status == "summarizing"
+        and not meeting.get("digestDraft")
+        and not meeting.get("summaryDraftError")
+        and not meeting.get("summaryError")
+        and _bound_chat_rounds_are_terminal(
+            meeting,
+            chat_room_round_snapshots,
+        )
+    )
+    if summary_retry_ready:
+        # The discussion has already ended and its source rounds are all
+        # terminal.  Retry the missing digest from the existing transcript;
+        # reopening the discussion would create a new attempt and discard the
+        # useful completed messages from this meeting.
+        actions.append(
+            _command_action(
+                "regenerate_summary",
+                action_id=f"regenerate-summary:{meeting_id}",
+                label="重试生成纪要",
+                target_phase=target_phase,
+                target_node_id=target_node_id,
+                payload={"meetingRoundId": meeting_id},
+            )
+        )
+        return actions, anchor
     linked_round_problem = _linked_chat_room_round_problem(
         meeting,
         chat_room_round_snapshots,
@@ -3644,10 +3748,17 @@ def _scope_records(
                 if str(round_id or "").strip()
             ]
             if meeting_round_ids:
-                # The append-only list's final id is the current retry.  Do
-                # not spend a read on historical rounds that cannot affect
-                # the canonical projection.
-                bound_round_ids.add(meeting_round_ids[-1])
+                if str(meeting.get("status") or "").strip().lower() == "summarizing":
+                    # A missing summary may depend on any completed message in
+                    # the meeting's append-only retry history.  Read every
+                    # bound round so the recovery gate can prove that the
+                    # whole transcript is terminal.
+                    bound_round_ids.update(meeting_round_ids)
+                else:
+                    # For ordinary open meetings the final id is the current
+                    # retry.  Historical rounds cannot affect the canonical
+                    # projection and should not add runtime-store reads.
+                    bound_round_ids.add(meeting_round_ids[-1])
         for round_id in bound_round_ids:
             work_run = _load_chat_room_round_snapshot(round_id)
             if not isinstance(work_run, Mapping):

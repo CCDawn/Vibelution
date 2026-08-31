@@ -882,6 +882,95 @@ def test_candidate_markers_accept_common_markdown_emphasis() -> None:
     ]
 
 
+def test_candidate_restatement_replaces_same_identity_in_original_position() -> None:
+    def _message(
+        message_id: str, proposed_candidates: list[dict[str, str]]
+    ) -> dict[str, object]:
+        return {
+            "status": "completed",
+            "content": "结构化候选发言",
+            "roomId": "room-generation",
+            "roundId": "round-generation",
+            "messageId": message_id,
+            "speakerTitle": "A001",
+            "messagePayload": {
+                "schemaVersion": 1,
+                "kind": "challenge_meeting_message",
+                "display": {"conclusion": "提出候选", "sections": []},
+                "protocol": {
+                    "agreements": [],
+                    "disagreements": [],
+                    "risks": [],
+                    "actionItems": [],
+                    "knowledgeCandidates": [],
+                    "proposedCandidates": proposed_candidates,
+                    "evidenceRequests": [],
+                },
+                "audit": {"parseStatus": "structured", "rawModelOutput": "{}"},
+            },
+        }
+
+    extracted = meetings.extract_discussion_markers(
+        [
+            _message(
+                "message-1",
+                [
+                    {
+                        "candidateId": "C01",
+                        "statement": "候选一初稿",
+                        "rationale": "理由一初稿",
+                        "proposedBy": "A001",
+                    },
+                    {
+                        "candidateId": "C02",
+                        "statement": "候选二初稿",
+                        "rationale": "理由二初稿",
+                        "proposedBy": "A001",
+                    },
+                ],
+            ),
+            _message(
+                "message-2",
+                [
+                    {
+                        "candidateId": "c02",
+                        "statement": "候选二修订稿",
+                        "rationale": "理由二修订稿",
+                        "proposedBy": "A002",
+                    },
+                    {
+                        "candidateId": "C03",
+                        "statement": "候选三",
+                        "rationale": "理由三",
+                        "proposedBy": "A002",
+                    },
+                ],
+            ),
+        ]
+    )
+
+    assert extracted["proposedCandidates"] == [
+        {
+            "candidateId": "C01",
+            "statement": "候选一初稿",
+            "rationale": "理由一初稿",
+            "proposedBy": "A001",
+        },
+        {
+            "candidateId": "c02",
+            "statement": "候选二修订稿",
+            "rationale": "理由二修订稿",
+            "proposedBy": "A002",
+        },
+        {
+            "candidateId": "C03",
+            "statement": "候选三",
+            "rationale": "理由三",
+            "proposedBy": "A002",
+        },
+    ]
+
+
 def test_candidate_generation_digest_reports_proposed_candidate_count() -> None:
     messages = [
         {

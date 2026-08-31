@@ -293,7 +293,11 @@ function legacyCommand(action: CommandAction | null, phase: HypothesisFirstPhase
 function stageFor(
   state: HypothesisFirstStateV2,
   reviewCandidate: ReviewCandidateState | null = null,
+  summaryRecovery: CommandAction | null = null,
 ): HypothesisFirstStage {
+  if (state.currentPhase === "generation" && summaryRecovery?.command === "regenerate_summary") {
+    return "generation_summarizing";
+  }
   switch (state.currentPhase) {
     case "generation":
       if (state.generation.lifecycle === "waiting_human") return "generation_awaiting_approval";
@@ -397,7 +401,7 @@ export function resolveHypothesisFirstNextActionFromV2(
     : phaseState(state);
   const mappedCommand = legacyCommand(command, state.currentPhase);
   return {
-    stage: stageFor(state, reviewCandidate),
+    stage: stageFor(state, reviewCandidate, command),
     targetNodeId: phaseTarget(state, reviewCandidate),
     navigationLabel: navigation?.label || command?.label || canonicalActions[0]?.label || "前往当前任务",
     command: mappedCommand,
