@@ -10,6 +10,7 @@ production source-collection writeback tool.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -22,6 +23,8 @@ from core.research.workflow.contracts import (
     ExecutionReceipt,
     WorkflowCommandKind,
 )
+from core.research.workflow.definition import build_challenge_cup_workflow_definition
+from core.research.workflow.definition_registry import register_or_resolve
 from core.web.services.team_workflow.research_runtime.operator_authorization import (
     server_operator_scope,
 )
@@ -102,6 +105,9 @@ def _seed_team_and_agents(tmp_path: Path):
 
 
 def _seed_run(store, *, team_id: str, project_id: str, agents: dict[str, str]) -> None:
+    definition_identity = register_or_resolve(
+        build_challenge_cup_workflow_definition()
+    )
     required_model_policy = canonical_model_policy(
         {
             "family": "qwen",
@@ -124,7 +130,7 @@ def _seed_run(store, *, team_id: str, project_id: str, agents: dict[str, str]) -
         "projectId": project_id,
         "questionId": "SCI-096",
         "workflowId": "challenge-cup-research",
-        "workflowVersionId": "challenge-cup-research-v2.1.0",
+        "workflowVersionId": definition_identity.workflowVersionId,
         "researchBriefHash": "b" * 64,
         "datasetRefs": [],
         "metricContract": {},
@@ -189,12 +195,16 @@ def _seed_run(store, *, team_id: str, project_id: str, agents: dict[str, str]) -
         "createdAt": "2026-08-12T00:00:00Z",
         "snapshotHash": "c" * 64,
     }
-    record = build_run_record(
-        run_id="run-t518",
-        team_id=team_id,
-        last_event_sequence=1,
-        input_snapshot_hash="c" * 64,
-        thread_id="run-t518",
+    record = replace(
+        build_run_record(
+            run_id="run-t518",
+            team_id=team_id,
+            workflow_version_id=definition_identity.workflowVersionId,
+            last_event_sequence=1,
+            input_snapshot_hash="c" * 64,
+            thread_id="run-t518",
+        ),
+        structure_hash=definition_identity.structureHash,
     )
     record = record.__class__(
         **{
@@ -234,7 +244,9 @@ def _seed_checkpoint_at_source_finding(runtime, *, team_id: str) -> None:
             attempt=1,
             dispatch_kind="start",
             input_snapshot_hash="c" * 64,
-            workflow_version_id="challenge-cup-research-v2.1.0",
+            workflow_version_id=runtime.store.get_run(
+                "run-t518"
+            ).workflow_version_id,
             team_id=team_id,
         )
     )

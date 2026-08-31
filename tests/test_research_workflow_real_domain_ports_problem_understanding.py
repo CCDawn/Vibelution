@@ -573,7 +573,7 @@ def test_problem_understanding_retry_resolves_nearest_tasked_ancestor(
     assert payloads[0]["retryTaskId"] == "task-problem-root"
 
 
-def test_problem_understanding_retry_fails_closed_when_lineage_has_no_task(
+def test_problem_understanding_retry_without_lineage_task_starts_fresh_task(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     store = _retry_store(
@@ -608,8 +608,16 @@ def test_problem_understanding_retry_fails_closed_when_lineage_has_no_task(
         ],
     )
 
-    def start_project_task(*_args, **_kwargs):
-        pytest.fail("task-less lineage must fail closed before task creation")
+    payloads: list[dict[str, object]] = []
+
+    def start_project_task(_team_id, _project_id, payload, **_kwargs):
+        payloads.append(dict(payload))
+        return {
+            "taskId": "task-problem-first-dispatch",
+            "sessionId": "session-problem-first-dispatch",
+            "sessionAttempt": 1,
+            "task": {"turn": {"turnId": "turn-problem-first-dispatch"}},
+        }
 
     from core.web.services.team_workflow import research_project_agent_tasks
 
@@ -619,18 +627,21 @@ def test_problem_understanding_retry_fails_closed_when_lineage_has_no_task(
         start_project_task,
     )
 
-    with pytest.raises(RuntimeError, match="missing or ambiguous"):
-        real_domain_ports._create_real_agent_task(
-            _action(node_run_id="node-run-problem-3", attempt=3),
-            _binding(),
-            _snapshot() | {"sourceCollectionRunId": "source-run-existing"},
-            adapter_spec=AgentTaskAdapterSpec(
-                node_id="problem_understanding",
-                family="research_project",
-                task_key="problem_understanding",
-            ),
-            store=store,
-        )
+    handle = real_domain_ports._create_real_agent_task(
+        _action(node_run_id="node-run-problem-3", attempt=3),
+        _binding(),
+        _snapshot() | {"sourceCollectionRunId": "source-run-existing"},
+        adapter_spec=AgentTaskAdapterSpec(
+            node_id="problem_understanding",
+            family="research_project",
+            task_key="problem_understanding",
+        ),
+        store=store,
+    )
+
+    assert handle.task_id == "task-problem-first-dispatch"
+    assert "formalRetry" not in payloads[0]
+    assert "retryTaskId" not in payloads[0]
 
 
 def test_problem_understanding_retry_fails_closed_on_cross_run_lineage(

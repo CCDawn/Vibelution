@@ -593,7 +593,7 @@ def test_formal_live_selection_enables_fan_out_when_snapshot_is_missing_selectio
 ) -> None:
     harness = CommandHarness(tmp_path / "ledger.sqlite3")
     try:
-        harness.seed_run(run_id="run-1", workflow_id="ledger-workflow")
+        harness.seed_run(run_id="run-1")
         harness.service.submit(
             harness.request(run_id="run-1", idempotency_key="start-live-selection")
         )
@@ -683,7 +683,9 @@ def test_formal_live_selection_enables_fan_out_when_snapshot_is_missing_selectio
 
         assert handle.task_id == "task-live"
         assert observed and observed[0]["selectionId"] == "selection-live"
-        assert authority_ids == [("ledger-workflow", "ledger-workflow")]
+        assert authority_ids == [
+            ("challenge-cup-research", "challenge-cup-research")
+        ]
         payload = json.loads(
             next(
                 item
