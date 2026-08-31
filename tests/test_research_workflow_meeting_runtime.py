@@ -1740,3 +1740,215 @@ def test_non_hypothesis_stage_coordination_stays_manual_only(tmp_path, monkeypat
     if room_id:
         room_detail = chat_room_service.get_chat_room_detail(room_id)
         assert room_detail["rounds"] == []
+
+
+# ---------------------------------------------------------------------------
+# Deterministic marker merge after LLM digest drafting.
+#
+# The close gate (``_assert_markers_preserved``) checks every source-message
+# marker verbatim against the submitted digest, and an LLM rewrite cannot
+# guarantee verbatim fidelity. ``build_meeting_digest_draft`` therefore
+# overwrites all protocol-fact buckets with deterministic extraction after the
+# LLM returns; the LLM keeps only the narrative fields.
+# ---------------------------------------------------------------------------
+
+
+def _lossy_llm_drafter(meeting_round, source_messages):
+    """Mimic the production failure: rewrite every marker, drop evidence requests."""
+
+    refs = [
+        meetings.message_source_ref(message)
+        for message in source_messages
+        if str(message.get("status") or "").strip().lower() == "completed"
+        and not meetings.is_pass_message(message)
+    ]
+    return {
+        "summary": "LLM 叙事：评审整体顺利，倾向 cand-a。",
+        "agendaSummary": "LLM 议程复述",
+        "discussionTopics": ["LLM 话题一"],
+        "agreements": ["LLM 改写的共识"],
+        "disagreements": [{"issue": "LLM 改写的分歧", "positions": [], "unresolvedReason": ""}],
+        "actionItems": [{"ownerRoleId": "llm", "action": "LLM 改写的行动项", "dueGate": ""}],
+        "risks": ["LLM 改写的风险"],
+        "blockers": [],
+        "knowledgeCandidates": ["LLM 改写的知识条目"],
+        "proposedCandidates": [],
+        "evidenceRequests": [],
+        "sourceMessageRefs": refs,
+    }
+
+
+def _draft_with_lossy_llm(tmp_path, monkeypatch, *, runner=None):
+    team_id, agents, opened = _open_meeting(tmp_path, monkeypatch, runner=runner)
+    meeting_round_id = opened["meetingRound"]["meetingRoundId"]
+    agent_ids = list(agents.values())
+    meetings.begin_meeting_summary(team_id, meeting_round_id, actor=agent_ids[0])
+    drafted = meeting_runtime.draft_meeting_digest(
+        team_id, meeting_round_id, drafter=_lossy_llm_drafter
+    )
+    assert drafted["status"] == "awaiting_approval"
+    return team_id, agents, opened, drafted
+
+
+def test_llm_digest_markers_replaced_with_deterministic_extraction(tmp_path, monkeypatch):
+    team_id, agents, opened, drafted = _draft_with_lossy_llm(tmp_path, monkeypatch)
+    draft = drafted["digestDraft"]
+    meeting_round = drafted["meetingRound"]
+
+    expected = meetings.extract_discussion_markers(
+        meetings.completed_meeting_source_messages(meeting_round)
+    )
+    # The lossy LLM rewrite never survives: every protocol-fact bucket is the
+    # verbatim deterministic extraction of the completed source messages.
+    assert draft["agreements"] == expected["agreements"]
+    assert draft["disagreements"] == expected["disagreements"]
+    assert draft["risks"] == expected["risks"]
+    assert draft["actionItems"] == expected["actionItems"]
+    assert draft["knowledgeCandidates"] == expected["knowledgeCandidates"]
+    assert draft["proposedCandidates"] == expected["proposedCandidates"]
+    assert expected["disagreements"], "fixture must carry disagreements to protect"
+    assert all(
+        item["issue"] == "cand-b 的泛化证据不足" for item in draft["disagreements"]
+    )
+    assert "数据集偏差尚未评估" in draft["risks"]
+    assert all(
+        item["action"] == "补充 cand-b 的消融实验证据" for item in draft["actionItems"]
+    )
+
+    # Narrative fields stay LLM-owned and must not be cleared by the merge.
+    assert draft["summary"] == "LLM 叙事：评审整体顺利，倾向 cand-a。"
+    assert draft["agendaSummary"] == "LLM 议程复述"
+    assert draft["discussionTopics"] == ["LLM 话题一"]
+    assert draft["sourceMessageRefs"]
+
+
+def test_llm_digest_merge_passes_close_marker_gate(tmp_path, monkeypatch):
+    team_id, agents, opened, drafted = _draft_with_lossy_llm(tmp_path, monkeypatch)
+    draft = drafted["digestDraft"]
+    markers = meetings.extract_discussion_markers(
+        meetings.completed_meeting_source_messages(drafted["meetingRound"])
+    )
+
+    # The close gate passes on the merged draft directly...
+    meetings._assert_markers_preserved(draft, markers)
+    # ...and through the full closure flow that re-runs extraction fail-closed.
+    agent_ids = list(agents.values())
+    approved = meetings.approve_meeting_closure(
+        team_id, drafted["meetingRound"]["meetingRoundId"], _closure_payload(agent_ids)
+    )
+    assert approved["meetingRound"]["status"] == "closed"
+    assert any(
+        item["issue"] == "cand-b 的泛化证据不足"
+        for item in approved["digest"]["disagreements"]
+    )
+
+
+def _evidence_marker_runner(participant, prompt, context):
+    """Round 1 carries markers plus one EVIDENCE_REQUEST; critique rounds pass."""
+    if "批评与修订" in str(prompt):
+        return {"status": "completed", "raw_output": "pass", "summary": "pass"}
+    role = str(participant.get("teamRole") or "participant")
+    if role == "challenge_cup_search":
+        return {
+            "status": "completed",
+            "raw_output": "AGREE: cand-a 的机制证据最完整，进入有界验证",
+            "summary": "ok",
+        }
+    envelope = json.dumps(
+        {
+            "rationale": "cand-b 的泛化证据不足，需要按信封补充搜集。",
+            "candidateRefs": ["cand-b"],
+            "evidenceRefs": ["evidence:review-matrix-1"],
+            "searchEnvelope": {
+                "keywords": ["predictive coding", "spike train coding"],
+                "sourceTypes": ["paper"],
+                "evidenceLevels": ["peer_reviewed"],
+            },
+            "requirements": {"minEvidenceLevel": "medium", "completeness": "stage-one"},
+            "writebackPolicy": {},
+        },
+        ensure_ascii=False,
+    )
+    return {
+        "status": "completed",
+        "raw_output": (
+            "DISAGREE: cand-b 的泛化证据不足\n"
+            "RISK: 数据集偏差尚未评估\n"
+            "ACTION: researcher | 补充 cand-b 的消融实验证据\n"
+            f"EVIDENCE_REQUEST: {envelope}"
+        ),
+        "summary": "ok",
+    }
+
+
+def test_llm_digest_evidence_requests_keep_extraction_verbatim(tmp_path, monkeypatch):
+    team_id, agents, opened, drafted = _draft_with_lossy_llm(
+        tmp_path, monkeypatch, runner=_evidence_marker_runner
+    )
+    draft = drafted["digestDraft"]
+
+    # The lossy drafter dropped evidenceRequests entirely; the merge restores
+    # them from the source-message markers with keywords untouched.
+    requests = draft["evidenceRequests"]
+    assert len(requests) >= 1
+    assert requests[0]["searchEnvelope"]["keywords"] == [
+        "predictive coding",
+        "spike train coding",
+    ]
+    assert requests[0]["rationale"] == "cand-b 的泛化证据不足，需要按信封补充搜集。"
+    assert requests[0]["candidateRefs"] == ["cand-b"]
+    assert requests[0]["requirements"] == {
+        "minEvidenceLevel": "medium",
+        "completeness": "stage-one",
+        "notes": "",
+    }
+    assert draft["validationErrors"] == []
+
+
+def test_system_auto_draft_path_also_merges_deterministic_markers(tmp_path, monkeypatch):
+    team_id, agents, opened = _open_meeting(tmp_path, monkeypatch)
+    meeting_round_id = opened["meetingRound"]["meetingRoundId"]
+
+    drafted = meeting_runtime.prepare_meeting_summary_draft(
+        team_id,
+        meeting_round_id,
+        actor="system",
+        force=False,
+        drafter=_lossy_llm_drafter,
+    )
+    assert drafted["status"] == "awaiting_approval"
+    draft = drafted["digestDraft"]
+    expected = meetings.extract_discussion_markers(
+        meetings.completed_meeting_source_messages(drafted["meetingRound"])
+    )
+    assert draft["disagreements"] == expected["disagreements"]
+    assert draft["risks"] == expected["risks"]
+    assert draft["actionItems"] == expected["actionItems"]
+    assert draft["summary"] == "LLM 叙事：评审整体顺利，倾向 cand-a。"
+
+
+def test_llm_digest_with_empty_protocol_buckets_submits_legal_empty_buckets(
+    tmp_path, monkeypatch
+):
+    def _freeform_runner(participant, prompt, context):
+        if "批评与修订" in str(prompt):
+            return {"status": "completed", "raw_output": "pass", "summary": "pass"}
+        return {
+            "status": "completed",
+            "raw_output": "自由格式评审意见，没有使用任何协议标记。",
+            "summary": "ok",
+        }
+
+    team_id, agents, opened, drafted = _draft_with_lossy_llm(
+        tmp_path, monkeypatch, runner=_freeform_runner
+    )
+    draft = drafted["digestDraft"]
+    # Extraction is empty, so the hallucinated LLM markers are stripped and the
+    # submitted draft carries legal empty buckets instead.
+    assert draft["agreements"] == []
+    assert draft["disagreements"] == []
+    assert draft["risks"] == []
+    assert draft["actionItems"] == []
+    assert draft["knowledgeCandidates"] == []
+    assert draft["summary"] == "LLM 叙事：评审整体顺利，倾向 cand-a。"
+    assert draft["sourceMessageRefs"]

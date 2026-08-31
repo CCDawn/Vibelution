@@ -1721,3 +1721,226 @@ Task 17—21 已在 `codex/companion-full-life-reuse` 完成实现，仍保持�
 - Verification/Stop: 学生/员工/自由职业/待业或退休至少各有一组可编辑草案和工作日/周末/假期测试；学校/单位、专业/职位、通勤、作息、初始物品、账户与周期收入支出在确认前不是事实；确认后夜间计划尊重有效 affiliation/routine/calendar，机构变更只重算未发生计划；工资/奖学金到期只产生一次交易；LLM 失败回退身份感知确定性计划而非通用四段模板；普通 Agent 创建、Prompt、目录和 Session 零差异。
 
 Critical Path 为 Task 28 → Task 29 → Task 30 → Task 31 → Task 32 → Task 22 → Task 23 → Task 25 → Task 27。Task 24 和 Task 26 在 Task 22 后可在文件边界不重叠时推进，但 Task 28 与 Task 25 不并行，Task 30—32 因共享 binding/lifecycle/Life World 事实源保持串行；目录隔离、数据库事务、管家配对和生活草案必须先于表达、多气泡与全链路收口。用户已批准先实施本节中的 Task 28—32；其余任务继续按依赖与后续新增需求保持规划态，不扩大本轮实现范围。
+
+## 31. 第五阶段：对话人格化、视觉存在与角色生态（调研收口，待开发）
+
+2026-08-31，用户要求继续调研能让虚拟人更像真人对话和真人陪伴的高 ROI 能力，并把推荐方案落盘。本节只固化实施路线、复用裁决、信任边界和验收契约，不表示已经开始修改产品代码、运行数据或 Launcher。远端 push、PR、发布、第三方资产分发和新的系统权限仍不在本节授权范围内。
+
+### 31.1 当前基线与差距
+
+当前本地 `main` 的代码基线已经包含城市地理、Agent-scoped `life_world.sqlite3`、学生/员工等生活草案、物品与虚构财务、配对 hidden 生活管家 Agent/Session 及身份感知日程能力，因此 Task 28—32 作为本阶段的已实现底座，不再重复拆分。运行态刷新与桌面浏览器验收仍是独立证据层，不能仅凭代码存在宣称通过。
+
+Task 22—27 仍是最直接影响“像真人聊天”的未完成主线：
+
+- `expression_policy.py` 目前拥有可解释规则排序，但没有形成每轮统一的 `CompanionExpressionDecision`；短答、追问预算、称呼、幽默、自我披露、纠错顺序尚未稳定地与关系、心情和体力联动。
+- `embodiment.py` 目前只负责 provider 可用性、授权资产和静态回退，没有把 mood、activity、location 转成可持续的眨眼、呼吸、表情和场景状态。
+- Companion mailbox 已承担到达顺序和 generation fence，但多气泡、用户插话和未送达内容取消仍必须在 Task 25 内证明原生 Journal/SSE 权威，不能用前端假消息代替。
+- Agent episodic memory、Reflection receipt、Life Event、作品/图片 receipt 和生活动态已经存在，不应继续增加相似的状态字段、第二 profile 库、第二向量库或第二 transcript。
+
+### 31.2 ROI 优先级与任务归并
+
+| 优先级 | 可观察能力 | 实施归属 | 价值与边界 |
+| --- | --- | --- | --- |
+| P0 | 回复有稳定说话习惯，并随心情、体力和熟悉度自然变化 | **归并 Task 22** | 直接减少客服腔、每轮追问和人格漂移；同一 Turn 内纯逻辑计算，不新增 LLM 调用 |
+| P0 | 人物头像有轻量呼吸、眨眼、表情，场景随活动与地点变化 | **Task 34 提供状态/资产，Task 26 负责 VUI 呈现** | 视觉收益高；缺资产、低性能或减少动态偏好下始终回退静态立绘 |
+| P0/P1 | 人物可分成自然短气泡继续说，用户可在回复中插话 | **归并 Task 25** | 提升轮次自然度；只通过 Companion mailbox，到达顺序、取消和终态仍以原生 Journal/SSE 为准 |
+| P1 | 安全导入标准角色卡、头像、表情、背景和开场白 | **Task 33** | 降低创建成本；所有导入内容先进入不可信 staging，用户预览确认后才写入既有权威 |
+| P1 | 从真实生活经历生成生活明信片和语音便签 | **Task 35、Task 36** | 让自主生活可被感知；只能从已完成 Life Event 和成功 artifact receipt 派生，失败不伪造经历 |
+| P2 | 可选实时语音、打断和抢话 | **Task 37** | 沉浸感强但权限、资源和会话状态复杂；不阻塞文字版交付，不改变普通会话链路 |
+
+Graphiti 的时态事实、来源和失效语义已经由 Task 18 的原生 episodic memory reconciliation/supersede receipt 与 Task 24 的偏好投影继续承接，不创建新任务或图数据库。SillyTavern 的 swipe/regenerate、故事分支和 Prompt 脚本不进入主陪伴会话；默认回复不增加人为延迟。
+
+### 31.3 推荐架构与权威边界
+
+```text
+Character Card V3 / 本地资产
+        │  untrusted staging：schema、MIME、大小、hash、来源、许可检查
+        ▼
+导入预览与字段映射 ──用户确认──→ AgentDirectory Persona / 插件 binding / 授权资产 manifest
+                                           │
+用户文本 / 主动候选 ─→ Companion mailbox ─→ 原生 Session admission
+                                           │
+                              CompanionExpressionDecision（Task 22）
+                               ├─ 心情/体力/熟悉度/偏好/时间/生活事实
+                               └─ 有界 Prompt 摘要，不新增模型轮次
+                                           │
+                          原生 worker → Journal → SSE → transcript
+                                           │
+                  ┌────────────────────────┴───────────────────────┐
+                  ▼                                                ▼
+      EmbodimentState → Task 26 VUI                    Life Event + artifact receipt
+   表情/呼吸/眨眼/场景/静态回退                      → 明信片 / 语音便签候选
+                                                                   │
+                                                     mailbox → 原生消息终态
+
+可选全双工语音：麦克风 → VAD/轮次检测 → 最终文本一次性进入 Companion mailbox
+                原生 assistant 终态文本 → TTS 播放；文本 Journal 始终是会话权威
+```
+
+权威保持不变：
+
+| 数据或行为 | 唯一权威 | 本阶段只允许的派生 |
+| --- | --- | --- |
+| 人物身份与 Persona | AgentDirectory | 角色卡 staging 只产生待确认映射，不直接改写 |
+| 生活身份、物品与虚构财务 | Agent-scoped Life World | 明信片可引用，不复制余额或物品当前态 |
+| 心情、关系与生活事件 | 既有 Affect/Relationship/Life Event ledger | 表达和视觉只读投影，不反向伪造事件 |
+| 长期记忆与偏好 | Agent episodic memory | Task 24 只投影经审核且当前有效的相关偏好 |
+| Turn、消息和实时输出 | 原生 Session Journal、worker、SSE | mailbox 只负责到达顺序；气泡、语音和媒体都不能成为第二 transcript |
+| 人物与场景资产 | 授权资产 manifest + license/source receipt | VUI 只消费已授权引用；未知授权一律回退 |
+| 媒体产物 | 成功 artifact receipt | feed、明信片、语音便签只读引用并保留来源 |
+
+### 31.4 Character Card V3 安全导入
+
+导入只接受显式选择的本地文件，不抓取远程 URL，不执行卡片内代码，不自动安装插件或模型。所有字段先进入一次性 staging，完成解析、限制和预览后才允许用户确认：
+
+| 卡片内容 | 推荐映射 | 默认处理 |
+| --- | --- | --- |
+| `name`、简介、人格、场景 | AgentDirectory Persona 候选 | 展示差异，用户确认后写入；不能覆盖保护 Agent 或既有未选择字段 |
+| `first_mes`、`alternate_greetings` | Companion 开场白候选 | 仅作为非事实文本模板，不写入历史 transcript |
+| 头像、表情、背景等 asset | 授权资产 manifest 候选 | 校验类型、大小、hash、来源与许可；未知许可不启用 |
+| `character_book` / Lorebook | 不自动导入 | 只展示存在性与风险；后续若支持必须单独走 Knowledge 信任、清洗、删除和重建语义 |
+| `system_prompt`、`post_history_instructions`、extensions Prompt | 不导入 Prompt Pack | 视为不可信指令，不能覆盖系统、Persona 不变量、ToolPolicy 或 Companion Prompt |
+| regex、Quick Reply、脚本、插件、模型参数、远程资源 | 无映射 | 拒绝执行和自动安装；不因兼容性在浏览器或后端中求值 |
+
+导入是创建/更新向导，不是运行时卡片解释器。确认事务必须能够报告写入的 Agent 字段、插件字段和资产 receipt；任一步失败时不留下半人物、半绑定或孤立资产。
+
+### 31.5 视觉存在与场景状态
+
+扩展 `embodiment.py` 为确定性 `EmbodimentState` resolver，输入只读取已有 `mood / affect episode / energy / currentActivity / currentLocation / currentGeo / localTime` 及授权资产清单，输出至少包含：
+
+```text
+expressionId        neutral / happy / low / focused / surprised / tired …
+motionPreset        still / breathing / attentive / celebrating / resting
+blinkProfile        interval range + enabled
+sceneKey            home-evening / campus-day / office-day / outdoors-rain …
+assetRefs           portrait / expression / background
+sourceRefs          affect episode / activity / location / environment receipt
+validUntil          下次状态重新计算边界
+fallbackReason      reduced-motion / missing-asset / provider-unavailable / stale-source
+```
+
+优先级固定为用户界面偏好与可访问性 → 资产授权与 provider 健康 → 当前明确活动 → 有来源情绪 → 地点/时间/环境 → neutral fallback。心跳只重算小型状态，不调用 LLM；眨眼和呼吸由前端低成本动画完成，`prefers-reduced-motion` 下禁用非必要运动。表情不能推导新的心情事实，背景不能把过期天气当成当前环境。
+
+Task 34 只拥有状态 resolver、资产 manifest 和授权回退；Task 26 继续拥有 `/companions` 人物栏、消息头像和 VUI 动画。两者不得修改原生消息 DTO、Composer、SSE 或普通 Chat 页面。
+
+### 31.6 生活明信片与语音便签
+
+生活明信片和语音便签都先生成 `MediaShareCandidate`，而不是直接发送。候选至少绑定 `agentId / lifeEventId / artifactReceiptId / createdAt / expiresAt / mediaKind / disclosureLevel / sourceSummary`，并经过主动额度、免打扰、未回复降速、重复主题和发送前 binding revision 复核。
+
+- **明信片**：只允许引用成功的照片/插图/作品 artifact，或由已完成 Life Event 生成明确标注为“生成插图”的新 artifact；不能把 planned activity、失败工具或外部未授权图片说成亲自拍摄。
+- **语音便签**：原生 assistant 终态文本先写 Journal，再由可选 TTS provider 生成带 voice/license receipt 的音频附件；音频不是独立回答，也不替代文本 transcript。provider 失败时保留文本，不重跑人物回答。
+- 媒体发送继续走 Companion mailbox 和原生消息/附件能力；只有真正显示并收到 delivery receipt 才计入主动额度。未出队、过期、被用户插话取消或生成失败的候选不出现在 transcript。
+- 用户可以按人物关闭全部媒体、只允许聊天中回复、或允许主动分享；默认不向外部社交平台发布，不读取摄像头、屏幕和麦克风后台内容。
+
+### 31.7 可选全双工语音
+
+全双工语音保持为可选适配层，不进入文字版 Critical Path：
+
+1. 用户在 Companion 页面显式启用麦克风并选择输入/输出 provider；权限只在该页面和当前会话生效。
+2. VAD、语义轮次检测和 partial transcript 只用于本地实时状态；只有稳定最终文本才以一个用户到达项进入 Companion mailbox。
+3. 人物回答仍由原生 Session 产生一个或多个可关联终态；TTS 只消费已确认的 assistant 文本。用户打断播放时停止未播放音频，并按 Task 25 generation fence 取消尚未送达 followup，已经写入 Journal 的文本不伪造撤回。
+4. 用户说话、人物 TTS 播放和“正在输入…”必须是互斥且可恢复的 UI 状态；网络、设备或 provider 失败时立即回到文字输入，不阻塞 Session。
+5. partial transcript、原始音频和声纹默认不进入长期记忆；如需保存录音必须另行提供显式开关、保留期限、删除入口和权限说明。
+
+如果无法把最终用户文本与原生 Turn 一一对应、无法在打断后证明未送达内容不入 transcript，或需要改动普通 Session admission/Journal/SSE 才能成立，则停止 Task 37，不以全局会话修改换取语音体验。
+
+### 31.8 外部参考固定版本与许可证裁决
+
+| 候选 | 固定版本与许可证 | 裁决 | 可借内容 | 不进入 Vibelution 的内容 |
+| --- | --- | --- | --- | --- |
+| [AIRI](https://github.com/moeru-ai/airi/tree/ffad10a71600d1e0cc9a654f1cc5a73512541fab) | `ffad10a71600d1e0cc9a654f1cc5a73512541fab`；MIT | `ADAPT` | 表情/动作状态、可插拔具身化和无 provider 回退思路 | 整体 runtime、第二会话引擎、未审查角色资产 |
+| [Open-LLM-VTuber](https://github.com/Open-LLM-VTuber/Open-LLM-VTuber/tree/992309c0aa19845960228f880013d4685fde93b5) | `992309c0aa19845960228f880013d4685fde93b5`；MIT；Live2D 示例资产另行授权 | `REFERENCE_ONLY` | 语音输入/TTS/打断/头像 provider 分层和资产许可分离 | 整体 runtime、模型路由、Live2D 示例资产和第二 transcript |
+| [Graphiti](https://github.com/getzep/graphiti/tree/8b61fce9f003cc3a05e246f6201f8b782dfe6546) | `8b61fce9f003cc3a05e246f6201f8b782dfe6546`；Apache-2.0 | `SEMANTIC_ADAPT` | 时态事实、来源和失效语义，继续映射到现有 episodic supersede/receipt | Graphiti 服务、Neo4j/FalkorDB、第二记忆图和热路径图查询 |
+| [LiveKit Agents](https://github.com/livekit/agents/tree/f8b69d74b186bbc85bcdc3cd7e17c90736726056) | `f8b69d74b186bbc85bcdc3cd7e17c90736726056`；Apache-2.0；turn-detection 模型另行许可 | `OPTIONAL_ADAPTER_REFERENCE` | VAD、语义轮次、barge-in、TTS 播放编排和降级状态 | 默认依赖、云服务绑定、替代原生 Session 的 Agent runtime |
+| [Character Card V3](https://github.com/kwaroran/character-card-spec-v3/tree/f3a86af019fbd99f788f7a1155f399655b34ab35) | `f3a86af019fbd99f788f7a1155f399655b34ab35`；MIT | `STANDARD_ADAPT` | schema/version、角色字段、assets 与 greetings 的可移植边界 | 自动执行 Prompt、Lorebook、extension、代码、插件、模型或远程资源 |
+| [SillyTavern](https://github.com/SillyTavern/SillyTavern/tree/8172dcd0ee672d3cd9a5e5f7af134f91a45cd2b8) | `8172dcd0ee672d3cd9a5e5f7af134f91a45cd2b8`；AGPL-3.0 | `REFERENCE_ONLY` | 角色卡导入预览、人物聊天的信息层级和资产组织 | swipe/regenerate、故事分支、Lorebook 自动注入、Quick Reply/脚本和运行时代码复用 |
+| [KouriChat](https://github.com/KouriChat/KouriChat/tree/26d40b28739e4b07cc68b2231693e63c03d65eca) | `26d40b28739e4b07cc68b2231693e63c03d65eca`；DeepAnima Non-Commercial | `REFERENCE_ONLY` | 陪伴产品中的主动联系、角色连续性和多通道体验作为交互参考 | 任何代码复制、商业分发、整体运行时或未经单独许可的资产复用 |
+
+许可证裁决以固定版本为基线，实施前仍须重新核对目标文件和许可证是否变化。MIT/Apache-2.0 不自动覆盖仓库内示例模型、声音、图片、Live2D/GLB 和第三方数据；任何资产都必须保留独立来源和授权 receipt。
+
+### 31.9 明确拒绝的低 ROI 或高风险路径
+
+- 不整体引入 AIRI、Open-LLM-VTuber、LiveKit Agents、SillyTavern 或 KouriChat runtime；Vibelution 原生 Agent、Session、Memory、ToolPolicy、Journal、SSE 和 VUI 继续是平台权威。
+- 不把 Graphiti/Neo4j/FalkorDB 引入为第二记忆系统，也不把 Life World SQLite 扩成对话或长期记忆库。
+- 不把 swipe/regenerate、分支剧情、角色扮演脚本和自动 Lorebook 注入放进主陪伴聊天；这些机制会破坏单一人物连续性或扩大 Prompt 信任面。
+- 不用固定等待、逐字假流式或“人物忙碌所以故意晚回”模拟真人；忙碌、睡眠和心情只影响表达、主动联系和生活状态。
+- 不被动持续采集摄像头、屏幕、环境音或设备位置；麦克风只在显式语音会话中临时启用。
+- 不生成无来源的“照片”“录音”“共同回忆”并宣称真实发生；媒体必须绑定完成事件与 artifact receipt。
+
+### 31.10 实施任务图
+
+Task 22—27 的定义继续以 §30.10 为准，本节只增加输入、依赖和验收，不创建重复 owner：Task 22 吸收稳定说话习惯与心情/体力/熟悉度联动；Task 24 继续复用 Agent episodic memory 的时态/来源/失效语义；Task 25 吸收多气泡、用户插话和 generation cancel；Task 26 消费 Task 34 的 `EmbodimentState` 并保持原人物头像与单一“正在输入…”；Task 27 先完成文字会话与视觉存在的阶段收口。
+
+#### Task 33：建立 Character Card V3 安全导入与预览事务
+
+- Owner/Boundary: Companion 创建/更新向导、untrusted staging、V3 parser/validator、AgentDirectory/插件字段映射和授权资产 manifest；不改普通 Agent 创建、不解释运行时脚本、不自动导入 Prompt/Lorebook/模型。
+- Dependency: Task 28、Task 32 的 Companion 身份、目录隔离和 Life World 启用事务已完成；复用现有 Agent 创建、plugin binding 乐观并发和 persona 字段 owner。
+- Mode: HIGH_RISK BDD_TDD + frontend contract。
+- Verification/Stop: 覆盖合法卡、超大/畸形文件、路径穿越、错误 MIME、重复 asset、远程 URL、恶意 Prompt/extensions、未知字段、许可缺失、已有 Agent 差异预览和中途失败回滚；任何未确认字段、未知授权资产或卡内指令不得进入 Agent/Prompt/ToolPolicy/Session。
+
+#### Task 34：建立授权资产 manifest 与确定性 EmbodimentState
+
+- Owner/Boundary: `embodiment.py`、资产 manifest/source/license receipt、mood/activity/location 到 expression/motion/scene 的纯逻辑 resolver；Task 26 单独拥有 VUI 渲染。
+- Dependency: Task 20 的静态回退契约已实现；消费 Task 22 的表达 reason codes 和现有 Affect/Life State，不反向写状态。
+- Mode: BDD_TDD。
+- Verification/Stop: 表驱动覆盖心情、体力、活动、地点、昼夜、天气新鲜度、provider 故障、缺资产、未知许可和 `prefers-reduced-motion`；同一输入可重放，心跳不调用 LLM，失败不影响文本聊天，普通 Agent 无 EmbodimentState。
+
+#### Task 35：建立有来源的生活明信片候选与投递
+
+- Owner/Boundary: Life Event/artifact receipt 只读聚合、`MediaShareCandidate`、明信片生成/引用、主动抑制和 Companion mailbox 投递；不写 Life Event，不发布外部社交平台。
+- Dependency: Task 19/21 的生活动态与 artifact receipt、Task 14/25 的主动候选和到达/取消契约、Task 27 的文字会话收口。
+- Mode: HIGH_RISK BDD_TDD + desktop browser acceptance。
+- Verification/Stop: 计划、失败、取消、过期、重复、无 receipt、未知许可和用户关闭媒体时均不发送；已完成事件可生成带来源说明的明信片，并且只有显示后的原生终态/delivery receipt 扣额度；用户插话可取消未送达候选，普通会话无媒体逻辑。
+
+#### Task 36：建立文本权威的语音便签
+
+- Owner/Boundary: 已确认 assistant 文本到 TTS artifact 的可选 adapter、voice/license receipt、音频附件和播放失败降级；不生成第二人物回答，不保存声纹。
+- Dependency: Task 22 的表达决定、Task 25 的 generation fence、Task 35 的媒体候选/receipt 结构。
+- Mode: HIGH_RISK BDD_TDD + frontend contract + desktop browser acceptance。
+- Verification/Stop: 文本终态先于音频产物；TTS 超时/失败/取消不重跑 LLM且保留文本；重复请求幂等，未知声音授权拒绝，用户关闭语音后不生成；音频附件与一个原生 assistant 终态一一关联，普通 Agent 零差异。
+
+#### Task 37：可选全双工语音、打断与文字降级
+
+- Owner/Boundary: Companion-only microphone permission、VAD/turn detector adapter、partial/final transcript 状态、TTS barge-in 与文字降级；不修改普通 Session admission、Journal、worker、SSE 或全局 Composer。
+- Dependency: Task 25 的用户插话/取消契约和 Task 36 的 TTS 文本权威闭合后才启动；provider 与模型许可证另行核对。
+- Mode: HIGH_RISK BDD_TDD + permission/runtime scene + desktop browser acceptance。
+- Verification/Stop: 噪声、短停顿、重叠说话、用户打断、设备切换、provider 断线、页面离开和权限撤回均有确定性状态收口；partial 不入 Journal/Memory，final 只提交一次，文本模式始终可用；若需要改变普通会话核心才能通过，停止并保持可选功能未启用。
+
+#### Task 38：第五阶段全链路收口
+
+- Owner/Boundary: Character Card 导入安全、表达人格化、多气泡插话、视觉存在、生活明信片、语音便签、可选语音适配和普通 Agent 零差异证据；不等待真实 7 天，不 push、不发布。
+- Dependency: 必需 Task 22—27、Task 33—36；Task 37 只有在启用全双工语音目标时进入对应验收，不阻塞文字/媒体版发布准备。
+- Mode: backend selector + security fixtures + frontend VUI contracts + `tsc -b` + production build + desktop browser acceptance。
+- Verification/Stop: 使用可注入时钟和脚本化人物场景覆盖初识/熟悉、正负心情、低体力、用户纠错、连续短答、插话、跨午夜、学校/工作场景、表情/背景切换、恶意角色卡、明信片来源、TTS 失败和跨 Agent/Session 隔离；任何普通 Agent 核心差异、目标 404/500、残留“正在输入”、无头像状态、未授权资产或第二 transcript 都阻止收口。
+
+### 31.11 Critical Path、并行与停止条件
+
+必需文字与视觉 Critical Path：
+
+```text
+Task 22 → Task 23 → Task 25 ───────────────┐
+    ├────→ Task 24 ────────────────────────┤
+    └────→ Task 34 → Task 26 ──────────────┤
+                                           ▼
+                                         Task 27 → Task 35 → Task 36 ──┐
+                                                                       ▼
+Task 33（Task 28/32 基线复核后可独立推进）──────────────────────────→ Task 38
+
+Task 37：Task 25 + Task 36 后的可选独立 lane，不阻塞文字/媒体版 Task 38。
+```
+
+并行只允许在文件与事实源不重叠时进行：Task 33 在 Task 28/32 基线复核后可独立推进，Task 24 和 Task 34 可在 Task 22 接口稳定后分别推进；Task 25 与任何修改 `mailbox.py`/Companion delivery adapter 的工作保持串行；Task 26 与 Task 34 分别拥有 VUI 和 resolver/asset manifest，不交换写入 owner；Task 35 与 Task 36 共享 media candidate/receipt 时保持串行。每个实施任务重新建立独立 worktree、精确 claim 和当前 `main` 验证，不继承本规划任务的 claim。
+
+出现以下任一条件时停止受影响实施并重新对齐：
+
+- 需要修改普通 Agent 的 Session admission、Journal、worker、persist、projection、SSE、`ConversationStore`、普通 Composer 或 follow-up 语义；
+- 无法证明多气泡、媒体或语音最终内容与原生 Journal 终态一一对应；
+- Character Card 字段、第三方资产或声音许可证不能确定来源、授权和删除语义；
+- 导入、媒体或语音需要新增用户未授权的网络、麦克风、摄像头、屏幕、设备位置或外部发布权限；
+- 新证据会改变人物身份、记忆、Life World、主动额度、安全、API 或普通会话兼容性，而现有任务卡没有覆盖。
+
+### 31.12 成功证据
+
+第五阶段完成时，用户应能观察到：人物说话长度、追问、称呼、玩笑和主动性与其稳定人格、当前心情、体力和熟悉度一致；输入状态始终保留人物头像且只显示一个“正在输入…”；用户在人物输出期间仍可发消息，未送达内容会按到达顺序取消或重排；头像和背景随可信生活状态自然变化且无资产时稳定回退；角色卡导入可预览、可拒绝、不执行卡内指令；生活明信片和语音便签可追溯到完成事件与 receipt；普通 Agent 的目录、Prompt、工具、会话、未读和实时输出零差异。
+
+自动验收使用可注入时钟和短脚本覆盖跨时段、恢复与主动投递，不等待真实 7 天。Launcher 运行态刷新、桌面浏览器、后端接口、前端控制台/网络和实际音频设备仍按各任务风险分别取证，不能用单元测试或构建结果互相替代。
