@@ -142,6 +142,7 @@ rules:
       - "local-parallel"
     paths:
       - "core/agent_plugins/__init__.py"
+      - "core/agent_plugins/runtime_extensions.py"
       - "core/agent_plugins/virtual_human_life/**"
       - "core/web/services/agent_plugin_service.py"
       - "core/web/services/session/proactive.py"
@@ -155,10 +156,12 @@ rules:
       - "tests/test_virtual_human_life_plugin.py"
       - "tests/test_virtual_human_life_tools.py"
       - "tests/test_virtual_human_session_proactive.py"
+      - "tests/test_agent_plugin_runtime_extensions.py"
     commands:
-      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_virtual_human_life_api.py tests/test_virtual_human_life_plugin.py tests/test_virtual_human_life_tools.py tests/test_virtual_human_session_proactive.py -q"
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_agent_plugin_runtime_extensions.py tests/test_virtual_human_life_api.py tests/test_virtual_human_life_plugin.py tests/test_virtual_human_life_tools.py tests/test_virtual_human_session_proactive.py -q"
     notes:
       - "The plugin remains isolated by agentId binding; this batch owns its domain, proactive receipt, API, and tool authorization contracts."
+      - "The runtime-extension contract also proves ordinary Agent/Session cores do not import or name this concrete plugin."
 
   - id: web-session-chat
     description: "Direct chat, session routes, and room service/route behavior."

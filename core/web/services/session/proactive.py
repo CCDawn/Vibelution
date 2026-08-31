@@ -50,9 +50,17 @@ def submit_session_proactive_turn(
     normalized_agent_id = str(agent_id or "").strip()
     normalized_trigger_id = str(trigger_id or "").strip()
     normalized_delivery_token = str(delivery_token or "").strip()
+    normalized_source_kind = str(source_kind or "").strip()
+    normalized_plugin_id = str(plugin_id or "").strip()
     if str(origin or "").strip() != "proactive_plugin":
         raise s.SessionValidationError("Internal proactive turns require origin=proactive_plugin.")
-    if str(source_kind or "").strip() != "virtual-human-life" or str(plugin_id or "").strip() != "virtual-human-life":
+    from core.agent_plugins.runtime_extensions import proactive_runtime_extension
+
+    extension = proactive_runtime_extension(
+        plugin_id=normalized_plugin_id,
+        source_kind=normalized_source_kind,
+    )
+    if extension is None:
         raise s.SessionValidationError("Unsupported proactive plugin source.")
     if not all(
         [
@@ -64,12 +72,7 @@ def submit_session_proactive_turn(
         ]
     ):
         raise s.SessionValidationError("Proactive turn identity is incomplete.")
-    from core.web.services.virtual_human_life_service import (
-        get_virtual_human_life_service,
-    )
-
-    plugin_service = get_virtual_human_life_service()
-    if not plugin_service.proactive_turn_is_current(
+    if not extension.proactive_turn_is_current(
         agent_id=normalized_agent_id,
         binding_revision=int(binding_revision),
         delivery_token=normalized_delivery_token,
@@ -78,11 +81,11 @@ def submit_session_proactive_turn(
     trigger_payload = dict(trigger or {})
     turn_id = f"{normalized_session_id}-proactive-{uuid.uuid4().hex[:16]}"
     plugin_metadata = {
-        "pluginId": "virtual-human-life",
+        "pluginId": normalized_plugin_id,
         "triggerId": normalized_trigger_id,
         "deliveryToken": normalized_delivery_token,
         "bindingRevision": int(binding_revision),
-        "sourceKind": "virtual-human-life",
+        "sourceKind": normalized_source_kind,
         "trigger": trigger_payload,
     }
     context = {
@@ -158,27 +161,20 @@ def admit_session_proactive_turn(context: dict[str, Any]) -> str:
     )
     delivery_token = str(metadata.get("deliveryToken") or "").strip()
     binding_revision = int(metadata.get("bindingRevision") or 0)
-    from core.web.services.virtual_human_life_service import (
-        get_virtual_human_life_service,
+    plugin_id = str(metadata.get("pluginId") or "").strip()
+    source_kind = str(metadata.get("sourceKind") or "").strip()
+    from core.agent_plugins.runtime_extensions import (
+        agent_plugin_proactive_turn_is_current,
     )
 
-    plugin_service = get_virtual_human_life_service()
-    if not plugin_service.proactive_turn_is_current(
-        agent_id=agent_id,
-        binding_revision=binding_revision,
-        delivery_token=delivery_token,
-    ):
+    if not agent_plugin_proactive_turn_is_current(context):
         cancel_proactive_turn_context(context, reason="binding_revision_fence_before_admission")
         return "cancelled"
 
     admit_lock = _session_submit_admit_lock(session_id)
     admit_lock.acquire()
     try:
-        if not plugin_service.proactive_turn_is_current(
-            agent_id=agent_id,
-            binding_revision=binding_revision,
-            delivery_token=delivery_token,
-        ):
+        if not agent_plugin_proactive_turn_is_current(context):
             cancel_proactive_turn_context(context, reason="binding_revision_fence_during_admission")
             return "cancelled"
         if s._is_session_running(session_id) and not s._is_session_turn_current(
@@ -265,12 +261,12 @@ def admit_session_proactive_turn(context: dict[str, Any]) -> str:
             "agentId": agent_id,
             "leases": [],
             "source": "proactive_plugin",
-            "pluginId": "virtual-human-life",
+            "pluginId": plugin_id,
         },
         source="submit_session_proactive_turn",
         visible_in_model=False,
         correlation_id=delivery_token,
-        source_kind="virtual-human-life",
+        source_kind=source_kind,
     )
     s._append_session_conversation_event(
         session_id,
@@ -279,7 +275,7 @@ def admit_session_proactive_turn(context: dict[str, Any]) -> str:
         status="recorded",
         payload={
             "agentId": agent_id,
-            "pluginId": "virtual-human-life",
+            "pluginId": plugin_id,
             "triggerId": str(metadata.get("triggerId") or ""),
             "deliveryToken": delivery_token,
             "bindingRevision": binding_revision,
@@ -288,7 +284,7 @@ def admit_session_proactive_turn(context: dict[str, Any]) -> str:
         source="submit_session_proactive_turn",
         visible_in_model=False,
         correlation_id=delivery_token,
-        source_kind="virtual-human-life",
+        source_kind=source_kind,
     )
     s._set_session_waiting_live_output(session_id, turn_id=turn_id)
     return "admitted"
@@ -312,7 +308,12 @@ def release_proactive_turn_context(context: dict[str, Any]) -> None:
         _PROACTIVE_CONTEXTS.pop(delivery_token, None)
 
 
-def cancel_virtual_human_proactive_turns(agent_id: str, *, reason: str) -> list[str]:
+def cancel_agent_plugin_proactive_turns(
+    agent_id: str,
+    *,
+    plugin_id: str,
+    reason: str,
+) -> list[str]:
     s = _service()
     normalized_agent_id = str(agent_id or "").strip()
     with _PROACTIVE_CONTEXTS_LOCK:
@@ -320,6 +321,15 @@ def cancel_virtual_human_proactive_turns(agent_id: str, *, reason: str) -> list[
             context
             for context in _PROACTIVE_CONTEXTS.values()
             if str(context.get("agent_id") or "").strip() == normalized_agent_id
+            and str(
+                (
+                    context.get("proactive_plugin")
+                    if isinstance(context.get("proactive_plugin"), dict)
+                    else {}
+                ).get("pluginId")
+                or ""
+            ).strip()
+            == str(plugin_id or "").strip()
         ]
     cancelled: list[str] = []
     for context in contexts:
@@ -327,7 +337,7 @@ def cancel_virtual_human_proactive_turns(agent_id: str, *, reason: str) -> list[
         turn_id = str(context.get("turn_id") or "").strip()
         controller = s._get_session_turn_control(session_id)
         if controller is not None and str(controller.turn_id or "").strip() == turn_id:
-            controller.request_stop(str(reason or "virtual_human_binding_invalidated"))
+            controller.request_stop(str(reason or "agent_plugin_binding_invalidated"))
         queued = s._cancel_queued_session_turn(session_id, turn_id)
         if queued:
             cancel_proactive_turn_context(context, reason=reason)
@@ -350,13 +360,12 @@ def cancel_proactive_turn_context(context: dict[str, Any], *, reason: str) -> No
     # surfaces. Reconcile both so a binding/host fence cannot leave a delivering
     # attempt open forever after its in-memory context is released.
     try:
-        from core.web.services.virtual_human_life_service import (
-            get_virtual_human_life_service,
+        from core.agent_plugins.runtime_extensions import (
+            cancel_agent_plugin_proactive_attempt,
         )
 
-        get_virtual_human_life_service().cancel_proactive_attempt(
-            str(context.get("agent_id") or "").strip(),
-            str(metadata.get("deliveryToken") or "").strip(),
+        cancel_agent_plugin_proactive_attempt(
+            context,
             reason=reason,
         )
     except Exception as exc:  # noqa: BLE001 - plugin storage is an optional adapter here
@@ -385,14 +394,14 @@ def cancel_proactive_turn_context(context: dict[str, Any], *, reason: str) -> No
                 status="cancelled",
                 payload={
                     "reason": str(reason or "binding_invalidated")[:160],
-                    "pluginId": "virtual-human-life",
+                    "pluginId": str(metadata.get("pluginId") or "").strip(),
                     "triggerId": str(metadata.get("triggerId") or ""),
                     "deliveryToken": str(metadata.get("deliveryToken") or ""),
                 },
-                source="virtual_human_life_revision_fence",
+                source="agent_plugin_revision_fence",
                 visible_in_model=False,
                 correlation_id=str(metadata.get("deliveryToken") or ""),
-                source_kind="virtual-human-life",
+                source_kind=str(metadata.get("sourceKind") or "").strip(),
             )
         conversation = s.load_session_chat_state(s.PROJECT_ROOT, session_id)
         if conversation is not None:
@@ -403,7 +412,7 @@ def cancel_proactive_turn_context(context: dict[str, Any], *, reason: str) -> No
             session_id=session_id,
             turn_id=turn_id,
             status="stopped",
-            summary="Virtual human proactive turn cancelled by the binding revision fence.",
+            summary="Agent plugin proactive turn cancelled by the binding revision fence.",
             finished_at=s._now_timestamp(),
             updated_at=s._now_timestamp(),
         )
@@ -421,8 +430,8 @@ def cancel_proactive_turn_context(context: dict[str, Any], *, reason: str) -> No
 __all__ = [
     "INTERNAL_TURN_TRIGGER_EVENT",
     "admit_session_proactive_turn",
+    "cancel_agent_plugin_proactive_turns",
     "cancel_proactive_turn_context",
-    "cancel_virtual_human_proactive_turns",
     "register_proactive_turn_context",
     "release_proactive_turn_context",
     "submit_session_proactive_turn",

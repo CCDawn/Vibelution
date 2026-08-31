@@ -585,13 +585,11 @@ def _finish_session_turn_worker(
 
 
 def _proactive_turn_is_current(context: dict[str, Any]) -> bool:
-    if str(context.get("origin") or "") != "proactive_plugin":
-        return True
-    from core.web.services.virtual_human_life_service import (
-        proactive_context_is_current,
+    from core.agent_plugins.runtime_extensions import (
+        agent_plugin_proactive_turn_is_current,
     )
 
-    return bool(proactive_context_is_current(context))
+    return bool(agent_plugin_proactive_turn_is_current(context))
 
 
 def _cancel_stale_proactive_turn(context: dict[str, Any], *, reason: str) -> None:
@@ -615,11 +613,11 @@ def _finalize_proactive_delivery_after_persist(
     if str(context.get("origin") or "") != "proactive_plugin":
         return None
     try:
-        from core.web.services.virtual_human_life_service import (
-            finalize_proactive_delivery,
+        from core.agent_plugins.runtime_extensions import (
+            finalize_agent_plugin_proactive_delivery,
         )
 
-        return finalize_proactive_delivery(context)
+        return finalize_agent_plugin_proactive_delivery(context)
     except Exception:
         return None
 
@@ -655,7 +653,9 @@ def _abort_session_turn_for_stop(
             "stopReason": trim_lines(stop_reason, max_lines=2),
         },
     )
-    if str(context.get("origin") or "") == "proactive_plugin":
+    from core.agent_plugins.runtime_extensions import is_agent_plugin_proactive_turn
+
+    if is_agent_plugin_proactive_turn(context):
         _cancel_stale_proactive_turn(context, reason=stop_reason or "proactive_turn_stopped")
         if finish_worker:
             _finish_session_turn_worker(session_id, turn_id, turn_control)
@@ -795,31 +795,11 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
         runtime_tool_grants = list(external_runtime_tool_grants(external_runtime_permission_profile))
         runtime_tool_source = f"external_agent_task:{external_runtime_permission_profile}"
     runtime_metadata: dict[str, Any] = {}
-    proactive_plugin = (
-        context.get("proactive_plugin")
-        if isinstance(context.get("proactive_plugin"), dict)
-        else {}
+    from core.agent_plugins.runtime_extensions import (
+        agent_plugin_proactive_runtime_metadata,
     )
-    proactive_trigger = (
-        proactive_plugin.get("trigger")
-        if isinstance(proactive_plugin.get("trigger"), dict)
-        else {}
-    )
-    tool_activity = (
-        proactive_trigger.get("toolActivity")
-        if isinstance(proactive_trigger.get("toolActivity"), dict)
-        else {}
-    )
-    if tool_activity:
-        runtime_metadata["virtualHumanLife"] = {
-            "kind": "tool_activity",
-            "activityId": str(tool_activity.get("activityId") or "").strip(),
-            "requiredToolNames": [
-                str(name or "").strip()
-                for name in list(tool_activity.get("requiredToolNames") or [])
-                if str(name or "").strip()
-            ][:8],
-        }
+
+    runtime_metadata.update(agent_plugin_proactive_runtime_metadata(context))
     prepare_timings["agentLookupMs"] = s._elapsed_ms(stage_started_at)
     stage_started_at = s._perf_counter()
     prompt_snapshot_hint = (
@@ -1855,7 +1835,9 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
             else:
                 s._persist_session_turn_failure(session_id, context, exc)
     finally:
-        if str(context.get("origin") or "") == "proactive_plugin":
+        from core.agent_plugins.runtime_extensions import is_agent_plugin_proactive_turn
+
+        if is_agent_plugin_proactive_turn(context):
             from core.web.services.session.proactive import (
                 release_proactive_turn_context,
             )

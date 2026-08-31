@@ -1227,11 +1227,11 @@ def effective_visible_tool_names_for_current_agent(tools: Iterable[Any] | None =
     visible_tools = list(visibility.visible_tools)
     # Plugin tools require both ToolPolicy permission and an enabled per-Agent
     # binding. A policy entry by itself must not activate a plugin capability.
-    from core.web.services.virtual_human_life_service import (
-        filter_virtual_human_tool_names,
+    from core.agent_plugins.runtime_extensions import (
+        filter_agent_plugin_tool_names,
     )
 
-    return filter_virtual_human_tool_names(
+    return filter_agent_plugin_tool_names(
         str(runtime.get("agentId") or "").strip(),
         visible_tools,
         runtime_context=runtime,

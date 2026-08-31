@@ -534,11 +534,11 @@ def build_agent_context(
     # Trusted first-party Agent plugins append bounded segments. Providers fail
     # closed and unbound/disabled Agents return no placeholder segment.
     try:
-        from core.web.services.virtual_human_life_service import (
-            build_virtual_human_prompt_segments,
+        from core.agent_plugins.runtime_extensions import (
+            build_agent_plugin_prompt_segments,
         )
 
-        for plugin_segment in build_virtual_human_prompt_segments(
+        for plugin_segment in build_agent_plugin_prompt_segments(
             normalized_agent_id,
             session_id=session_id,
             run_id=run_id,

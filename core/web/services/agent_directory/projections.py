@@ -715,23 +715,11 @@ def active_agent_runtime(
     )
     externally_blocked_tools: list[str] = []
     if agent_id:
-        from core.agent_plugins.virtual_human_life.manifest import (
-            VIRTUAL_HUMAN_TOOL_NAMES,
+        from core.agent_plugins.runtime_extensions import (
+            blocked_agent_plugin_tool_names,
         )
 
-        try:
-            from core.web.services.virtual_human_life_service import (
-                virtual_human_binding,
-            )
-
-            plugin_binding = virtual_human_binding(agent_id)
-            if not plugin_binding or not bool(plugin_binding.get("enabled")):
-                externally_blocked_tools = list(VIRTUAL_HUMAN_TOOL_NAMES)
-        except Exception:  # noqa: BLE001 - deny-first if plugin binding lookup fails
-            # Plugin visibility is a deny-first boundary. If its binding cannot be
-            # resolved, keep the normal Agent surface intact but hide this plugin's
-            # tools until the binding can be read again.
-            externally_blocked_tools = list(VIRTUAL_HUMAN_TOOL_NAMES)
+        externally_blocked_tools = blocked_agent_plugin_tool_names(agent_id)
     context = {
         "agentId": str(agent_id or "").strip(),
         "sessionId": str(session_id or "").strip(),
