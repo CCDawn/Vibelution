@@ -503,6 +503,35 @@ def get_active_research_project(team_id: str) -> dict[str, Any]:
         return dict(_project_payload(store, store["activeProjectId"]))
 
 
+def get_research_project_for_question(team_id: str, question_id: str) -> dict[str, Any] | None:
+    """Read-only: the canonical research project bound to one Challenge Cup question.
+
+    ``ensure_challenge_question_project`` owns the binding
+    (``challengeQuestionId``).  Workflow code must resolve project ownership by
+    question, because the team-level active-project pointer follows the
+    operator's switcher and silently misbinds new work once another question
+    becomes active.  Returns ``None`` when the question has no bound project
+    (dev themes, legacy rows); it never creates or mutates state.
+    """
+
+    team_service.assert_team_exists(team_id)
+    normalized_question_id = str(question_id or "").strip().upper()[:32]
+    if not normalized_question_id:
+        return None
+    with _STORE_LOCK:
+        store = _load_store(team_id)
+        project = next(
+            (
+                item
+                for item in store["projects"]
+                if str(item.get("challengeQuestionId") or "").strip().upper()
+                == normalized_question_id
+            ),
+            None,
+        )
+        return dict(project) if project is not None else None
+
+
 def get_research_project_progress(team_id: str, project_id: str = "") -> dict[str, Any]:
     """Aggregate one research project's stage/source facts for overview UX.
 

@@ -505,9 +505,11 @@ def _ensure_payload(
     requirements: dict[str, Any],
     writeback_policy: dict[str, Any],
     hypothesis_candidate_ids: list[str] | None = None,
+    workflow_run_id: str = "",
+    research_project_id: str = "",
 ) -> dict[str, Any]:
     keywords = list(search.get("keywords") or [])
-    return {
+    payload = {
         "title": "D03 knowledge collection",
         "goal": " ".join(keywords)[:1000] or envelope.question[:1000],
         "topic": (keywords[0] if keywords else envelope.theme)[:500],
@@ -535,6 +537,19 @@ def _ensure_payload(
         "requestedByAgent": envelope.agentId,
         "ownerAgentId": envelope.agentId,
     }
+    if workflow_run_id:
+        # Workflow-run-scoped collection (hypothesis-first chain) pins the
+        # question's current formal run on the run scope so extraction-claim
+        # materialization and formal node discovery can find this run by
+        # scope alone.  Empty (dev/legacy chains) keeps the legacy payload.
+        payload["scope"]["workflowRunId"] = workflow_run_id
+    if research_project_id:
+        # Passed top-level so start_source_collection_run binds the
+        # question-canonical research project (resolved by the caller from
+        # the question binding, never from meeting lineage) onto the run
+        # scope and metadata.
+        payload["researchProjectId"] = research_project_id
+    return payload
 
 
 def _create_collection_run(
@@ -544,6 +559,8 @@ def _create_collection_run(
     requirements: dict[str, Any],
     writeback_policy: dict[str, Any],
     hypothesis_candidate_ids: list[str] | None = None,
+    workflow_run_id: str = "",
+    research_project_id: str = "",
 ) -> dict[str, Any]:
     runs = _source_collection_runs_module()
     try:
@@ -555,6 +572,8 @@ def _create_collection_run(
                 requirements,
                 writeback_policy,
                 hypothesis_candidate_ids,
+                workflow_run_id,
+                research_project_id,
             ),
         )
     except Exception as exc:
@@ -581,6 +600,8 @@ def research_knowledge_collection_facade(
     requirements: Mapping[str, Any] | None = None,
     writebackPolicy: Mapping[str, Any] | None = None,
     hypothesisCandidateIds: list[str] | None = None,
+    workflowRunId: str = "",
+    researchProjectId: str = "",
     team_id: str = "research-team",
 ) -> dict[str, Any]:
     """Single facade for D03 stage-1 knowledge collection.
@@ -594,6 +615,11 @@ def research_knowledge_collection_facade(
       (``scope.hypothesisCandidateIds``) so evidence materialization can bridge
       canonical claims back to the gate's candidate dimension.  An empty list
       keeps the legacy single-dimension behavior.
+    - ``workflowRunId`` / ``researchProjectId`` (hypothesis-first chain only)
+      pin the question's current formal run and its question-canonical research
+      project onto the created run's scope so claim materialization and formal
+      node discovery can find the run by scope.  Empty values keep the legacy
+      unscoped payload; both never participate in the ensure fingerprint.
     """
     normalized_action = _text(action).lower()
     if normalized_action not in {"ensure", "inspect"}:
@@ -614,6 +640,8 @@ def research_knowledge_collection_facade(
             _text_list(hypothesisCandidateIds, max_items=24, max_length=160)
         )
     )
+    workflow_run_id = _text(workflowRunId, limit=160)
+    research_project_id = _text(researchProjectId, limit=160)
     # ensure reuses a run only when its persisted fingerprint proves the same
     # evidence request; inspect stays a pure scope-level reader and must keep
     # surfacing the latest run regardless of the requested envelope.
@@ -676,6 +704,8 @@ def research_knowledge_collection_facade(
         requirements,
         writeback_policy,
         hypothesis_candidate_ids,
+        workflow_run_id,
+        research_project_id,
     )
     run_id = _run_id_from_start_response(created_run)
     return {
