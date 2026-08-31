@@ -3096,6 +3096,167 @@ def test_challenge_room_interrupt_checker_enables_provider_abort_and_classifies_
     assert blocked_checker._vibelution_chat_provider_abort_enabled is True
 
 
+def test_challenge_per_call_budget_exhaustion_discards_speaker_and_round_advances(
+    tmp_path, monkeypatch
+):
+    """Per-call expiry fences only one speaker call; the meeting stays open."""
+
+    _isolate_chat_room_kernel(tmp_path, monkeypatch)
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.challenge_turn_policy.current_challenge_task_deadline_at_ms",
+        lambda: None,
+    )
+    now_seconds = [1000.0]
+    monkeypatch.setattr(chat_room_service.time, "time", lambda: now_seconds[0])
+    room = chat_room_service.create_chat_room(
+        title="逐调用预算群聊",
+        participant_session_ids=["session-alpha", "session-beta"],
+        purpose="meeting",
+        config={
+            "scopeAuthority": "workflow_discussion_scope.v1",
+            "discussionScope": {"kind": "hypothesis_review", "questionId": "SCI-096"},
+            "scopeHash": "c" * 24,
+        },
+    )
+    authority = {
+        "schemaVersion": 1,
+        "authorityKind": "workflow_run",
+        "teamId": "team-percall",
+        "questionId": "SCI-096",
+        "workflowRunId": "run-percall",
+        "workflowId": "challenge-cup-research",
+        "workflowVersionId": "wv-percall",
+        "modelPolicySha256": "a" * 64,
+    }
+    meeting_deadline_ms = 1_000_000 + 3_600_000
+    contexts = []
+    called_participants = []
+
+    def runner(participant, _prompt, context):
+        called_participants.append(participant["participantId"])
+        contexts.append(dict(context))
+        if len(called_participants) == 1:
+            # The provider answers after the per-call fence but well before
+            # the meeting deadline: this one late result must be discarded.
+            now_seconds[0] = 1060.0
+            return {"status": "completed", "raw_output": "晚到发言", "summary": "late"}
+        return {"status": "completed", "raw_output": "正常发言", "summary": "ok"}
+
+    meeting_bridges = []
+    auto_drafts = []
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.meeting_runtime.finalize_stopped_meeting_after_chat_round",
+        lambda room, round_payload: meeting_bridges.append(dict(round_payload)),
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.meeting_runtime.maybe_auto_draft_meeting",
+        lambda *_args, **_kwargs: auto_drafts.append(True) or {},
+    )
+
+    detail = chat_room_service.start_chat_room_round(
+        room["roomId"],
+        "假说评审",
+        config={
+            "challengeDeadlineAtMs": meeting_deadline_ms,
+            "perCallBudgetMs": 50_000,
+            "meetingRoundId": "meeting-percall",
+            "teamId": "team-percall",
+        },
+        agent_runner=runner,
+        _model_invocation_receipt_authority=authority,
+    )
+
+    latest = detail["rounds"][-1]
+    assert called_participants == [
+        detail["participants"][0]["participantId"],
+        detail["participants"][1]["participantId"],
+    ]
+    # The meeting-level clock is no longer overwritten by the per-call fence.
+    assert contexts[0]["challengeDeadlineAtMs"] == meeting_deadline_ms
+    assert contexts[0]["challengePerCallDeadlineAtMs"] == 1_050_000
+    assert contexts[1]["challengeDeadlineAtMs"] == meeting_deadline_ms
+    assert contexts[1]["challengePerCallDeadlineAtMs"] == 1_110_000
+    # The round advanced past the exhausted speaker call and stays open: it
+    # closes as a normal (non-stopped) round with one discarded speech.
+    assert latest["status"] == "partial"
+    assert not str(latest.get("terminalReason") or "").strip()
+    assert len(latest["messages"]) == 2
+    assert latest["messages"][0]["status"] == "stopped"
+    assert latest["messages"][0]["lateResultDiscarded"] is True
+    assert latest["messages"][0]["summary"] == "challenge_per_call_budget_exhausted"
+    assert latest["messages"][1]["status"] == "completed"
+    assert meeting_bridges == []
+
+
+def test_challenge_meeting_deadline_expiry_still_terminates_meeting(tmp_path, monkeypatch):
+    """Fail-closed guard: meeting-level expiry keeps terminating the meeting."""
+
+    _isolate_chat_room_kernel(tmp_path, monkeypatch)
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.challenge_turn_policy.current_challenge_task_deadline_at_ms",
+        lambda: None,
+    )
+    now_seconds = [1000.0]
+    monkeypatch.setattr(chat_room_service.time, "time", lambda: now_seconds[0])
+    room = chat_room_service.create_chat_room(
+        title="会议级到期群聊",
+        participant_session_ids=["session-alpha", "session-beta"],
+        purpose="meeting",
+        config={
+            "scopeAuthority": "workflow_discussion_scope.v1",
+            "discussionScope": {"kind": "hypothesis_review", "questionId": "SCI-096"},
+            "scopeHash": "c" * 24,
+        },
+    )
+    authority = {
+        "schemaVersion": 1,
+        "authorityKind": "workflow_run",
+        "teamId": "team-meeting-deadline",
+        "questionId": "SCI-096",
+        "workflowRunId": "run-meeting-deadline",
+        "workflowId": "challenge-cup-research",
+        "workflowVersionId": "wv-meeting-deadline",
+        "modelPolicySha256": "a" * 64,
+    }
+    meeting_deadline_ms = 1_000_500
+
+    def runner(participant, _prompt, context):
+        # The speaker call answers after the meeting deadline.
+        now_seconds[0] = 1001.0
+        return {"status": "completed", "raw_output": "迟到发言", "summary": "late"}
+
+    meeting_bridges = []
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.meeting_runtime.finalize_stopped_meeting_after_chat_round",
+        lambda room, round_payload: meeting_bridges.append(dict(round_payload)),
+    )
+
+    detail = chat_room_service.start_chat_room_round(
+        room["roomId"],
+        "假说评审",
+        config={
+            "challengeDeadlineAtMs": meeting_deadline_ms,
+            "perCallBudgetMs": 600_000,
+            "meetingRoundId": "meeting-meeting-deadline",
+            "teamId": "team-meeting-deadline",
+        },
+        agent_runner=runner,
+        _model_invocation_receipt_authority=authority,
+    )
+
+    latest = detail["rounds"][-1]
+    assert latest["status"] == "stopped"
+    assert latest["terminalReason"] == "challenge_logical_task_deadline_exhausted"
+    assert latest["messages"][0]["lateResultDiscarded"] is True
+    assert len(meeting_bridges) == 1
+    assert (
+        meeting_bridges[0]["terminalReason"] == "challenge_logical_task_deadline_exhausted"
+    )
+    assert meeting_bridges[0]["config"]["meetingRoundId"] == "meeting-meeting-deadline"
+
+
 def test_chat_room_participant_runner_rejects_archived_agent_before_runtime(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)

@@ -1900,9 +1900,22 @@ def _run_meeting_discussion_impl(
                 bound_round_ids,
             )
         if challenge_deadline_at_ms is not None:
+            # The persisted MeetingRound deadline policy is the single source
+            # for the per-call fence.  Legacy meetings that recovered their
+            # clock from the bound room config must also recover the persisted
+            # per-call budget fields, otherwise room rounds would silently
+            # lose the per-call fence (or fall back to defaults).
+            recovered_policy = {
+                field: value
+                for field in ("perCallBudgetMs", "meetingDeadlineAtMs")
+                if meeting_round.get(field) in (None, "")
+                and (value := _bound_room_deadline_policy_field(room_id, bound_round_ids, field))
+                is not None
+            }
             meeting_round = {
                 **dict(meeting_round),
                 "challengeDeadlineAtMs": challenge_deadline_at_ms,
+                **recovered_policy,
             }
     budget = int(meeting_round.get("rounds") or 3)
     stop_reason = ""
@@ -2057,6 +2070,39 @@ def _bound_room_challenge_deadline_at_ms(
             continue
         config = round_payload.get("config") if isinstance(round_payload.get("config"), Mapping) else {}
         value = config.get("challengeDeadlineAtMs")
+        if isinstance(value, bool):
+            return None
+        try:
+            normalized = int(value)
+        except (TypeError, ValueError):
+            return None
+        return normalized if normalized > 0 else None
+    return None
+
+
+def _bound_room_deadline_policy_field(
+    room_id: str,
+    bound_round_ids: Sequence[str],
+    field: str,
+) -> int | None:
+    """Recover one persisted deadline-policy field from a bound room round.
+
+    The bound round config was server-derived from the MeetingRound record
+    when that round started, so it is the faithful fallback source for legacy
+    meetings whose own record predates the persisted policy fields.
+    """
+
+    from core.web.services import chat_room_service
+
+    room = chat_room_service.get_chat_room_detail(room_id) or {}
+    expected_round_ids = set(_normalized_str_list(bound_round_ids))
+    for round_payload in reversed(list(room.get("rounds") or [])):
+        if not isinstance(round_payload, Mapping):
+            continue
+        if str(round_payload.get("roundId") or "").strip() not in expected_round_ids:
+            continue
+        config = round_payload.get("config") if isinstance(round_payload.get("config"), Mapping) else {}
+        value = config.get(field)
         if isinstance(value, bool):
             return None
         try:
