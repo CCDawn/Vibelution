@@ -469,6 +469,86 @@ def test_facade_ensure_persists_hypothesis_candidate_ids_on_run_scope(monkeypatc
     assert created_payloads == []
 
 
+def test_facade_ensure_pins_workflow_run_and_question_project_on_payload(monkeypatch):
+    """Chain collection pins the question's formal run and canonical project.
+
+    ``workflowRunId`` reaches the created run payload's scope so extraction-claim
+    materialization and formal node discovery can find the run by scope alone;
+    ``researchProjectId`` travels top-level so ``start_source_collection_run``
+    binds the question-owned project instead of the team's active-project
+    pointer.  Omitted or blank values keep the legacy payload unchanged, and
+    neither field participates in the ensure fingerprint.
+    """
+    created_payloads = []
+
+    def fake_start(team_id, payload):
+        created_payloads.append(dict(payload))
+        return {"runId": "dprun-pinned", "run": {"runId": "dprun-pinned"}}
+
+    monkeypatch.setattr(data_processing_service, "list_processing_runs", _fake_list_runs())
+    monkeypatch.setattr(source_collection_runs, "start_source_collection_run", fake_start)
+    monkeypatch.setattr(
+        source_collection_runs,
+        "get_source_collection_summary",
+        _fake_summary(),
+    )
+
+    result = facade.research_knowledge_collection_facade(
+        action="ensure",
+        scope=_valid_envelope(),
+        searchEnvelope=_valid_search_envelope(),
+        workflowRunId=" run-hf-formal ",
+        researchProjectId="challenge-sci-003",
+    )
+
+    assert result["status"] == "ok"
+    assert result["created"] is True
+    payload = created_payloads[0]
+    assert payload["scope"]["workflowRunId"] == "run-hf-formal"
+    assert payload["researchProjectId"] == "challenge-sci-003"
+    # The ensure fingerprint (reuse identity) must not cover the binding.
+    assert payload["searchEnvelopeFingerprint"] == _request_fingerprint()
+
+    # Blank bindings keep the legacy payload shape (no empty scope noise).
+    created_payloads.clear()
+    facade.research_knowledge_collection_facade(
+        action="ensure",
+        scope=_valid_envelope(),
+        searchEnvelope=_valid_search_envelope(),
+        workflowRunId="   ",
+        researchProjectId="",
+    )
+    legacy_payload = created_payloads[0]
+    assert "workflowRunId" not in legacy_payload["scope"]
+    assert "researchProjectId" not in legacy_payload
+
+    # A replay that reuses the existing run never reaches run creation again.
+    monkeypatch.setattr(
+        data_processing_service,
+        "list_processing_runs",
+        _fake_list_runs(
+            [
+                _stored_run(
+                    "dprun-pinned",
+                    updated_at="2026-08-28T00:00:00Z",
+                    fingerprint=_request_fingerprint(),
+                )
+            ]
+        ),
+    )
+    created_payloads.clear()
+    replay = facade.research_knowledge_collection_facade(
+        action="ensure",
+        scope=_valid_envelope(),
+        searchEnvelope=_valid_search_envelope(),
+        workflowRunId="run-hf-formal",
+        researchProjectId="challenge-sci-003",
+    )
+    assert replay["idempotent"] is True
+    assert replay["locator"]["runId"] == "dprun-pinned"
+    assert created_payloads == []
+
+
 def test_facade_surfaces_run_lookup_failure(monkeypatch):
     def fail_list(**kwargs):
         raise data_processing_service.DataProcessingError("lookup failed")
