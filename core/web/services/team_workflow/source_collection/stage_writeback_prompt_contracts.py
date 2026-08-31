@@ -6,17 +6,24 @@ from __future__ import annotations
 def _finding_writeback_budget_line() -> str:
     try:
         from .writeback_materialize import (
-            finding_max_leads_per_writeback_batch,
-            finding_max_writeback_batches_per_task,
+            finding_resolved_search_envelope,
         )
 
-        max_batches = finding_max_writeback_batches_per_task()
-        max_leads = finding_max_leads_per_writeback_batch()
+        envelope = finding_resolved_search_envelope()
     except Exception:  # pragma: no cover - contract lines must never break prompts
-        max_batches, max_leads = 1, 5
+        envelope = {
+            "totalAcceptedLeadBudget": 8,
+            "maxWritebackBatches": 4,
+            "maxLeadsPerWriteback": 4,
+            "effectiveAcceptedLeadLimit": 8,
+        }
     return (
-        f"- 写回预算：每个任务最多接受 {max_batches} 个检索写回批次，每批 `candidateLeads[]` 最多 {max_leads} 条；"
-        "达到批次上限后再写新批会被拒绝，届时请立即以现有 `searchTrace[]` 与 `candidateLeads[]` 写回收口并结束任务。"
+        "- 写回预算：服务端已在任务创建时固化检索预算："
+        f"总计最多接受 {envelope['totalAcceptedLeadBudget']} 条去重来源，"
+        f"最多 {envelope['maxWritebackBatches']} 个写回批次，每批 `candidateLeads[]` 最多 "
+        f"{envelope['maxLeadsPerWriteback']} 条；实际接受上限取小为 "
+        f"{envelope['effectiveAcceptedLeadLimit']} 条。重复/复用来源不重复消耗总预算；"
+        "达到任一上限后请立即以现有服务端检索回执与 `candidateLeads[]` 写回收口并结束任务。"
     )
 
 
@@ -26,7 +33,7 @@ def stage_writeback_prompt_lines(stage_id: str) -> list[str]:
             "- 本任务只负责资料寻找：新资料只写入 `candidateLeads[]`，无效来源只写入 `invalidSources[]`；不要把检索结果写成 `candidateExtractions[]`、`recordExtractions[]` 或 `candidateDecisions[]`。",
             "- 检索计划必须同时覆盖四类视角：`mechanism`（机制/支持）、`independent_baseline`（独立基线或复现）、`limitation_or_null`（限制、失败或零结果）和 `falsification`（反例或可证伪线索）；不得只检索支持当前设想的资料。",
             "- 每条 `candidateLeads[]` 至少包含 `title`、`locator`（可验证 DOI 或 https URL）、`sourceType`、`summary`、本条资料对应的 `query`，以及上述四类之一的 `perspective`；可额外填写 `doi`、`authors`、`year`、`container`、`relevance`。",
-            "- `result.searchTrace[]` 必须逐条登记四类视角的实际检索轨迹；每项包含 `perspective`、`query`、`status=found/no_credible_source`、真实 `resultRefs[]`，未找到可信来源时再写 `failureReason`。",
+            "- 服务端会从真实检索执行事件生成 canonical searchTrace；你可以在结果中提交查询说明，但 Agent 自报 `result.searchTrace[]` 不作为审计权威，也不能替代真实 provider 调用。",
             "- 至少一条候选资料必须属于 `limitation_or_null` 或 `falsification`，并能作为后续反证候选；如果真实检索后仍未找到，保留完整 `searchTrace[]`、写 `status=needs_review`，不得伪造负面资料或把支持性背景冒充反证。",
             "- `locator` 必须是本条资料的 DOI 或 https URL；不要只写自然语言来源名，也不要把搜索结果的概述当作资料定位符。",
             "- 检索到的可用资料写入 `result.candidateLeads[]`，明确无效、跑题或不可获取的来源写入 `result.invalidSources[]`；自然语言总结不能替代这些结构化写回。",

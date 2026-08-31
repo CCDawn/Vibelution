@@ -2,7 +2,7 @@
 
 > 文档 ID：`CC-NODES-1-7-HIGH-ROI-REPAIR-20260831`
 >
-> 状态：`USER-APPROVED / ACTIVE PLAN / REVISION 1 / IMPLEMENTATION NOT STARTED`
+> 状态：`IMPLEMENTED / DEV CLOSED / T6 NOT RUN`
 >
 > 证据复核基线：首次审查 `main@9207d3df4d65a6d0b39ba00ee7d411daf493b22c`；修订复核 `main@fc700e8e2f079be81a61b0b0e4fcda1cb39c26dd`，复核时间 `2026-08-31 +08:00`
 >
@@ -327,7 +327,7 @@ flowchart LR
 
 ## 10. 与既有计划的去重边界
 
-[2026-08-30 挑战杯自动运行链路可靠性方案](2026-08-30-challenge-cup-automatic-chain-reliability-plan.md) 负责 meeting deadline、durable meeting work、review timeout/cancel、reconcile zero-work、run 隔离和自动推进可靠性。
+[2026-08-30 挑战杯自动运行链路可靠性方案](../../../plans/2026-08-30-challenge-cup-automatic-chain-reliability-plan.md) 负责 meeting deadline、durable meeting work、review timeout/cancel、reconcile zero-work、run 隔离和自动推进可靠性。
 
 本文只负责节点 1–7 的：
 
@@ -338,6 +338,19 @@ flowchart LR
 - 三版本节点链集成回归。
 
 若实施发现问题属于 meeting driver、摘要、Workflow Ledger durable recovery 或自动批准，应回到 8 月 30 日计划，不在本文中重复设计。
+
+### 10.1 DEV 实施结果（2026-09-01）
+
+T0–T5 已按本计划闭合，并与本归档文档作为同一任务变更进入受管 closeout：
+
+- 来源物化使用服务端 canonical fingerprint 与稳定 `leadId`，逐 lead 保存完整 record/candidate lineage；artifact builder 已删除数组位置关联，并仅对 finding/source_finder 累计跨批 `candidateLeads[]`。
+- 既有 run 的 artifact、handoff、reconcile、execution、budget、command 与 artifact readback 使用 run-scoped pinned definition；空 version 保留明确 legacy 路径，非空 unknown/hash mismatch fail closed。
+- finding task 创建时冻结 `8` 条总接受预算、每批 `4` 条、最多 `4` 批和四类视角；实际接受上限取小，环境变量只在创建时解析为兼容输入。
+- canonical `searchTrace` 从现有 `search_events.jsonl` 按 run、assignment、query、provider 投影并保存 eventId；Agent 自报 trace 不再作为权威，真实空结果进入可审计的 `needs_review`。
+- 聚焦验证通过：三版本/生命周期/quality/handoff/definition/sideflow/prompt 合同 `89 passed`，command transaction/idempotency/version/team/fork 回归 `31 passed`；此前分组验证另有 artifact readback/adapters `62 passed`、quality/lineage/prompt `39 passed`、source collection 宽回归 `164 passed`。相同测试可能在分组间重叠，数字不作总计。
+- 外部挑战杯研究流程站的唯一生成器已同步上述合同并重新生成 13 页；派生 HTML 未手改。
+
+本次未启动 Launcher、未执行 G1、未调用付费模型、未修改 operator config，也未产生真实 provider 可用性结论。Crossref/arXiv/OpenAlex 的实际成功、空结果或失败仍只能由另行授权的 T6 回执证明。
 
 ## 11. 停止条件与完成定义
 

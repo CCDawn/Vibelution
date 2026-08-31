@@ -958,7 +958,33 @@ def extract_discussion_markers(messages: Sequence[Mapping[str, Any]]) -> dict[st
                     )
                     continue
                 extracted["evidenceRequests"].append(parsed)
+    extracted["proposedCandidates"] = _canonical_proposed_candidates(
+        extracted["proposedCandidates"]
+    )
     return extracted
+
+
+def _canonical_proposed_candidates(value: Any) -> list[dict[str, Any]]:
+    """Keep one current proposal per candidate identity in discussion order."""
+
+    canonical: list[dict[str, Any]] = []
+    positions_by_id: dict[str, int] = {}
+    for raw in list(value or []):
+        if not isinstance(raw, Mapping):
+            continue
+        candidate = dict(raw)
+        candidate_id = str(candidate.get("candidateId") or "").strip()
+        identity = candidate_id.casefold()
+        if not identity:
+            canonical.append(candidate)
+            continue
+        previous_position = positions_by_id.get(identity)
+        if previous_position is None:
+            positions_by_id[identity] = len(canonical)
+            canonical.append(candidate)
+            continue
+        canonical[previous_position] = candidate
+    return canonical
 
 
 UNSTRUCTURED_DERIVED_FROM = "unstructured"

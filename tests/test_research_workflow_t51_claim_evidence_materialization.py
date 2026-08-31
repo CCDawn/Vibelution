@@ -423,6 +423,7 @@ def test_completed_extraction_materializes_before_collecting_refs(
 
     refs = complete_agent_turn_outputs(
         action=_pending_action(),
+        required_kinds=("evidence_card_batch",),
         handle=AgentTaskHandle(
             session_id="session-a",
             session_attempt=1,

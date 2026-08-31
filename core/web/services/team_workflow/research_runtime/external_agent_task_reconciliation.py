@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from core.research.workflow.definition import build_challenge_cup_workflow_definition
+from core.research.workflow.definition_registry import (
+    WorkflowDefinitionRegistryError,
+    resolve_definition_for_run_record,
+)
 from core.research.workflow.models import ActorKind, NodeSessionScopePolicy
 
 from .agent_node_execution import SOURCE_NODE_TASKS, _hypothesis_chain_state
@@ -67,10 +70,14 @@ def _candidate_fan_out_ready(
     record: dict[str, Any],
     node_run: dict[str, Any],
 ) -> bool:
+    definition = resolve_definition_for_run_record(
+        record,
+        expected_node_ids=[str(node_run.get("nodeId") or "")],
+    )
     node_spec = next(
         (
             item
-            for item in build_challenge_cup_workflow_definition().nodes
+            for item in definition.nodes
             if item.nodeId == node_run.get("nodeId")
         ),
         None,
@@ -486,11 +493,11 @@ def _reconcile_single_task(
             message_limit=0,
             transcript_scope="none",
         )
-        node_spec = next(
-            item
-            for item in build_challenge_cup_workflow_definition().nodes
-            if item.nodeId == node_run["nodeId"]
+        definition = resolve_definition_for_run_record(
+            record,
+            expected_node_ids=[str(node_run.get("nodeId") or "")],
         )
+        node_spec = next(item for item in definition.nodes if item.nodeId == node_run["nodeId"])
         manifests, payloads = build_agent_task_artifacts(
             record=record,
             node_spec=node_spec,
@@ -541,10 +548,14 @@ def _reconcile_one(
     record: dict[str, Any],
     node_run: dict[str, Any],
 ) -> dict[str, Any]:
+    definition = resolve_definition_for_run_record(
+        record,
+        expected_node_ids=[str(node_run.get("nodeId") or "")],
+    )
     node_spec = next(
         (
             item
-            for item in build_challenge_cup_workflow_definition().nodes
+            for item in definition.nodes
             if item.nodeId == node_run.get("nodeId")
         ),
         None,
@@ -578,7 +589,22 @@ def reconcile_external_agent_tasks(
 ) -> dict[str, Any]:
     """Apply terminal external task state exactly once for reconcilable Agent nodes."""
     current = record
-    definition = build_challenge_cup_workflow_definition()
+    try:
+        definition = resolve_definition_for_run_record(current)
+    except WorkflowDefinitionRegistryError as exc:
+        for node_run in [
+            dict(item)
+            for item in current.get("nodeRuns") or []
+            if item.get("status") == "running" and item.get("taskId")
+        ]:
+            current = block_external_agent_node_run(
+                store,
+                record=current,
+                node_run=node_run,
+                failure_code=exc.code,
+                failure_summary=str(exc),
+            )
+        return current
     actor_by_node = {item.nodeId: item.actorKind for item in definition.nodes}
     candidates = [
         dict(item)

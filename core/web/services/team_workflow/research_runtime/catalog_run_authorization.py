@@ -27,6 +27,10 @@ from core.research.competition.question_result_package import (
     model_family_for_model_id,
 )
 from core.research.competition.real_control_batch import RealBatchError, real_plan
+from core.research.competition.stage_one_completion_policy import (
+    StageOneCompletionPolicyError,
+    require_current_stage_one_policy_snapshot,
+)
 from core.research.workflow.contracts._validation import ContractValidationError
 from core.research.workflow.contracts.catalog_hypothesis_flow_readiness import (
     CATALOG_HYPOTHESIS_FLOW_REPORT_KIND,
@@ -396,6 +400,7 @@ def _canonical_batch_scope(
     batch_scope: Mapping[str, Any] | list[Any],
     *,
     require_model_policy: bool = False,
+    require_stage_one_policy: bool = False,
 ) -> dict[str, Any]:
     """Validate a scope against the frozen real-batch plan definition."""
 
@@ -426,6 +431,8 @@ def _canonical_batch_scope(
     allowed_fields = {"planId", "gateId", "questionIds"}
     if "modelPolicy" in batch_scope:
         allowed_fields.add("modelPolicy")
+    if "stageOneCompletionPolicy" in batch_scope:
+        allowed_fields.add("stageOneCompletionPolicy")
     unknown = sorted(set(batch_scope) - allowed_fields)
     if unknown:
         raise CatalogRunAuthorizationError(
@@ -440,6 +447,30 @@ def _canonical_batch_scope(
     model_policy = _model_policy_from_scope(batch_scope, required=require_model_policy)
     if model_policy is not None:
         normalized["modelPolicy"] = model_policy
+    raw_stage_one_policy = batch_scope.get("stageOneCompletionPolicy")
+    if raw_stage_one_policy is None:
+        if require_stage_one_policy:
+            raise CatalogRunAuthorizationError(
+                "catalog authorization stage-one completion policy is required"
+            )
+    else:
+        if not isinstance(raw_stage_one_policy, Mapping):
+            raise CatalogRunAuthorizationError(
+                "catalog authorization stage-one completion policy is malformed"
+            )
+        try:
+            stage_one_policy = require_current_stage_one_policy_snapshot(
+                raw_stage_one_policy
+            )
+        except StageOneCompletionPolicyError as exc:
+            raise CatalogRunAuthorizationError(
+                "catalog authorization stage-one completion policy is invalid"
+            ) from exc
+        if stage_one_policy["questionIds"] != expected_question_ids:
+            raise CatalogRunAuthorizationError(
+                "catalog authorization stage-one completion policy question scope does not match"
+            )
+        normalized["stageOneCompletionPolicy"] = stage_one_policy
     return normalized
 
 
@@ -539,6 +570,7 @@ def validate_catalog_run_authorization(
     readiness_sha256: str | None = None,
     question_id: str | None = None,
     require_model_policy: bool = False,
+    require_stage_one_policy: bool = False,
 ) -> bool:
     """Validate immutable content and optional lookup scope before use."""
 
@@ -556,6 +588,7 @@ def validate_catalog_run_authorization(
             record.plan_id,
             scope,
             require_model_policy=require_model_policy,
+            require_stage_one_policy=require_stage_one_policy,
         )
     except (CatalogRunAuthorizationError, TypeError, ValueError, json.JSONDecodeError):
         return False
@@ -584,6 +617,7 @@ def find_catalog_run_authorization(
     readiness_report_sha256_value: str | None = None,
     readiness_report_hash: str | None = None,
     require_model_policy: bool = False,
+    require_stage_one_policy: bool = False,
 ) -> CatalogRunAuthorization | None:
     """Find and validate the exact approval for a current scope/evidence hash."""
 
@@ -596,6 +630,7 @@ def find_catalog_run_authorization(
             normalized_plan,
             batch_scope,
             require_model_policy=require_model_policy,
+            require_stage_one_policy=require_stage_one_policy,
         )
     except CatalogRunAuthorizationError:
         return None
@@ -624,6 +659,7 @@ def find_catalog_run_authorization(
         scope_hash=scope_hash,
         readiness_sha256=report_hash,
         require_model_policy=require_model_policy,
+        require_stage_one_policy=require_stage_one_policy,
     ):
         return None
     return record
@@ -641,6 +677,7 @@ def record_catalog_run_authorization(
     approved_at_ms: int | None = None,
     authorization_id: str | None = None,
     require_model_policy: bool = False,
+    require_stage_one_policy: bool = False,
 ) -> CatalogRunAuthorization:
     """Persist one approval, idempotently, for an exact scope/evidence pair.
 
@@ -663,6 +700,7 @@ def record_catalog_run_authorization(
         normalized_plan,
         batch_scope,
         require_model_policy=require_model_policy,
+        require_stage_one_policy=require_stage_one_policy,
     )
     if (
         readiness_report_sha256_value is not None
@@ -710,6 +748,7 @@ def record_catalog_run_authorization(
             scope_hash=scope_hash,
             readiness_sha256=report_hash,
             require_model_policy=require_model_policy,
+            require_stage_one_policy=require_stage_one_policy,
         ):
             raise CatalogRunAuthorizationError("existing catalog authorization is corrupt")
         return existing
@@ -766,6 +805,7 @@ def record_catalog_run_authorization(
         scope_hash=scope_hash,
         readiness_sha256=report_hash,
         require_model_policy=require_model_policy,
+        require_stage_one_policy=require_stage_one_policy,
     ):
         raise CatalogRunAuthorizationError("catalog authorization was not persisted")
     return persisted

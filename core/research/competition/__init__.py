@@ -22,6 +22,13 @@ from .resources import (
     load_legacy_representative_cases,
     load_science_question_catalog,
 )
+from .stage_one_completion_policy import (
+    StageOneCompletionPolicy,
+    StageOneCompletionPolicyError,
+    load_stage_one_completion_policy,
+    require_current_stage_one_policy_snapshot,
+    stage_one_policy_snapshot_for,
+)
 
 __all__ = [
     "AUTO_DECISIONS",
@@ -37,9 +44,14 @@ __all__ = [
     "G12CalibrationBundle",
     "G12JudgementRecord",
     "HUMAN_DECISIONS",
+    "StageOneCompletionPolicy",
+    "StageOneCompletionPolicyError",
     "g12_calibration_bundle_hash",
     "load_competition_program_core",
     "load_full_catalog_execution_core",
     "load_legacy_representative_cases",
     "load_science_question_catalog",
+    "load_stage_one_completion_policy",
+    "require_current_stage_one_policy_snapshot",
+    "stage_one_policy_snapshot_for",
 ]

@@ -294,6 +294,36 @@ def test_new_user_generation_cancels_only_unsent_followup_bubbles() -> None:
     assert by_id["followup-current"]["state"] == "queued"
 
 
+def test_user_generation_cancels_claimed_followup_before_native_admission() -> None:
+    mailbox, _ = _enqueue(
+        normalize_mailbox(None),
+        entry_id="followup-claimed",
+        source_kind="followup",
+        minute=0,
+        generation=1,
+    )
+    mailbox, claimed = claim_next_mailbox_entry(
+        mailbox,
+        session_id="session-a",
+        lease_owner="dispatcher-a",
+        now=_now(1),
+        lease_seconds=30,
+    )
+    assert claimed is not None
+
+    mailbox, cancelled = cancel_unsent_followups(
+        mailbox,
+        session_id="session-a",
+        before_generation=2,
+        reason="user_interjected",
+        now=_now(2),
+    )
+
+    assert cancelled == ["followup-claimed"]
+    assert mailbox["entries"][0]["state"] == "cancelled"
+    assert mailbox["entries"][0]["leaseToken"] == ""
+
+
 def test_plugin_mailbox_rejects_transcript_or_tool_payload_fields() -> None:
     with pytest.raises(ValueError, match="command"):
         enqueue_mailbox_entry(

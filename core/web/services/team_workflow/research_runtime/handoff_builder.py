@@ -6,6 +6,7 @@ import uuid
 from typing import Any
 
 from core.research.workflow.definition import build_challenge_cup_workflow_definition
+from core.research.workflow.models import WorkflowDefinition
 
 
 def _utc_now() -> str:
@@ -14,15 +15,26 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
-def definition_edge(from_node_id: str, to_node_id: str) -> dict[str, Any] | None:
-    for edge in build_challenge_cup_workflow_definition().edges:
+def definition_edge(
+    from_node_id: str,
+    to_node_id: str,
+    *,
+    definition: WorkflowDefinition | None = None,
+) -> dict[str, Any] | None:
+    pinned = definition or build_challenge_cup_workflow_definition()
+    for edge in pinned.edges:
         if edge.fromNodeId == from_node_id and edge.toNodeId == to_node_id:
             return edge.to_dict()
     return None
 
 
-def successor_node(from_node_id: str) -> str | None:
-    for edge in build_challenge_cup_workflow_definition().edges:
+def successor_node(
+    from_node_id: str,
+    *,
+    definition: WorkflowDefinition | None = None,
+) -> str | None:
+    pinned = definition or build_challenge_cup_workflow_definition()
+    for edge in pinned.edges:
         if edge.fromNodeId == from_node_id:
             return edge.toNodeId
     return None
@@ -65,9 +77,14 @@ def build_handoff_record(
     rejection_reason: str = "",
     supersedes_handoff_id: str = "",
     human_task_id: str = "",
+    definition: WorkflowDefinition | None = None,
 ) -> dict[str, Any]:
-    target = to_node_id or successor_node(from_node_id) or ""
-    edge = definition_edge(from_node_id, target) if target else None
+    target = to_node_id or successor_node(from_node_id, definition=definition) or ""
+    edge = (
+        definition_edge(from_node_id, target, definition=definition)
+        if target
+        else None
+    )
     kind = artifact_kind_for_gate(from_node_id)
     artifacts = artifacts or {}
     content_hash = str(artifacts.get(kind) or artifacts.get("knowledge_package") or "")
@@ -116,11 +133,16 @@ def build_handoff_record(
     }
 
 
-def edges_between_completed(completed: list[str]) -> list[tuple[str, str]]:
+def edges_between_completed(
+    completed: list[str],
+    *,
+    definition: WorkflowDefinition | None = None,
+) -> list[tuple[str, str]]:
     """Return definition edges whose endpoints are both in completed, in definition order."""
     done = set(completed)
     pairs: list[tuple[str, str]] = []
-    for edge in build_challenge_cup_workflow_definition().edges:
+    pinned = definition or build_challenge_cup_workflow_definition()
+    for edge in pinned.edges:
         if edge.fromNodeId in done and edge.toNodeId in done:
             pairs.append((edge.fromNodeId, edge.toNodeId))
     return pairs

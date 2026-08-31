@@ -67,18 +67,10 @@ logger = logging.getLogger(__name__)
 _CHAT_TURN_OPEN_STATUSES = frozenset({"", "queued", "running", "stopping", "paused"})
 
 
-def formal_node_order() -> tuple[str, ...]:
-    """Canonical node order of the fixed formal workflow definition.
-
-    Imported lazily through this accessor so the command service module can be
-    imported without pulling the definition builder into every consumer; the
-    order is the only structural fact reconcile_authority needs.
-    """
-    from core.research.workflow.definition import build_challenge_cup_workflow_definition
-
-    return tuple(
-        node.nodeId for node in build_challenge_cup_workflow_definition().nodes
-    )
+def formal_node_order(run: Any) -> tuple[str, ...]:
+    """Canonical node order from this run's pinned definition."""
+    definition = _definition_for_ledger_run(run)
+    return tuple(node.nodeId for node in definition.nodes)
 
 _ARTIFACT_HUMAN_GATES = frozenset(
     {
@@ -687,17 +679,19 @@ class WorkflowCommandService:
           registry — unknown version, structureHash drift or registry
           unavailability all reject the mutation with
           ``definition_resolution_degraded`` (diagnostics included).
-        - pre-registry literals / empty ids (runs created before the
-          version-identity era): there is no pinned credential to verify, so
-          they keep the legacy mutation semantics (the read layer still shows
-          their degraded/legacy status diagnostic-visibly).
+        - empty ids are the only explicit pre-registry legacy path and retain
+          the registered current-definition fallback. A non-empty unknown
+          literal is not a legacy credential and fails closed.
         """
-        from core.research.workflow.definition_registry import resolve_definition
+        from core.research.workflow.definition_registry import (
+            WorkflowDefinitionRegistryError,
+            resolve_definition,
+        )
 
         workflow_id = str(getattr(run, "workflow_id", "") or "").strip()
         version_id = str(getattr(run, "workflow_version_id", "") or "").strip()
         run_id = str(getattr(run, "run_id", "") or "")
-        if not version_id.startswith("wv-"):
+        if not version_id:
             return
         try:
             resolve_definition(
@@ -706,7 +700,7 @@ class WorkflowCommandService:
                 structure_hash=str(getattr(run, "structure_hash", "") or "").strip(),
                 run_id=run_id,
             )
-        except Exception as exc:  # noqa: BLE001 - any resolution failure blocks
+        except WorkflowDefinitionRegistryError as exc:
             raise DefinitionResolutionDegradedError(
                 f"run {run_id} 的钉住定义无法解析（workflowId={workflow_id} "
                 f"workflowVersionId={version_id} "
@@ -716,6 +710,7 @@ class WorkflowCommandService:
 
     def _assert_node_in_pinned_definition(self, run: Any, node_id: str) -> None:
         from core.research.workflow.definition_registry import (
+            WorkflowDefinitionRegistryError,
             resolve_definition_for_run_record,
         )
 
@@ -731,7 +726,7 @@ class WorkflowCommandService:
                 },
                 expected_node_ids=[node_id],
             )
-        except Exception as exc:  # noqa: BLE001 - any resolution failure blocks
+        except WorkflowDefinitionRegistryError as exc:
             raise KnowledgeCommandError(
                 f"node {node_id} 不属于 run {run.run_id} 冻结的工作流定义",
                 code="unknown_node",
@@ -782,6 +777,10 @@ class WorkflowCommandService:
         accepted_version, sequence = bumped
 
         run = uow.repository.get_run(request.run_id)
+        if run is None:
+            raise RunNotFoundError(request.run_id)
+        definition = _definition_for_ledger_run(run, expected_node_ids=[node_id])
+        node_spec = next(item for item in definition.nodes if item.nodeId == node_id)
         binding_snapshot_id = _binding_snapshot_id(uow, request.run_id, node_id)
         uow.repository.insert_command(
             _command_record(
@@ -804,6 +803,7 @@ class WorkflowCommandService:
                 started_at_ms=now_ms,
                 retry_of_node_run_id=latest.node_run_id if latest else None,
                 binding_snapshot_id=binding_snapshot_id,
+                actor_kind=node_spec.actorKind.value,
             )
         )
         uow.repository.insert_outbox(
@@ -816,6 +816,7 @@ class WorkflowCommandService:
                     node_id=node_id,
                     attempt=attempt,
                     binding_snapshot_id=binding_snapshot_id,
+                    actor_kind=node_spec.actorKind.value,
                 ),
                 command_id=command_id,
                 now_ms=now_ms,
@@ -1178,7 +1179,9 @@ class WorkflowCommandService:
         # earlier successful advance (operator-misassigned retries whose
         # nodeId conflicts with the chain frontier) would otherwise pin
         # active_node_id and re-derive the same failing dispatch forever.
-        plan = plan_ledger_authority(attempts, node_order=formal_node_order())
+        if run is None:
+            raise RunNotFoundError(request.run_id)
+        plan = plan_ledger_authority(attempts, node_order=formal_node_order(run))
         command_id = new_id("cmd")
         bumped = _bump(uow, request, event_count=1, now_ms=now_ms)
         accepted_version, sequence = bumped
@@ -1468,13 +1471,17 @@ class WorkflowCommandService:
             raise WorkflowCommandError("fork_revision 需要 fromNodeId（实验设计节点）")
         if not reason:
             raise WorkflowCommandError("fork_revision 需要 reason")
-        # fromNodeId 必须属于实验设计阶段（revision 只从实验设计分支）。
-        from core.research.workflow.definition import (
-            build_challenge_cup_workflow_definition,
-        )
+        parent = uow.repository.get_run(request.run_id)
+        if parent is None:
+            raise RunNotFoundError(request.run_id)
+
+        # fromNodeId 必须属于当前 run 钉住定义的知识/实验设计阶段。
         from core.research.workflow.models import WorkflowStageId
 
-        definition = build_challenge_cup_workflow_definition()
+        definition = _definition_for_ledger_run(
+            parent,
+            expected_node_ids=[from_node_id],
+        )
         node_spec = next(
             (n for n in definition.nodes if n.nodeId == from_node_id), None
         )
@@ -1486,9 +1493,6 @@ class WorkflowCommandService:
         ):
             raise WorkflowCommandError("fork_revision 只能从知识/实验设计节点分支")
 
-        parent = uow.repository.get_run(request.run_id)
-        if parent is None:
-            raise RunNotFoundError(request.run_id)
         if parent.status in ("failed", "cancelled", "archived"):
             raise WorkflowCommandError("failed/cancelled/archived run 不能 fork revision")
         if parent.status == "succeeded":
@@ -1635,6 +1639,19 @@ class WorkflowCommandService:
         """
         from core.research.workflow.ledger import RunRecord
 
+        definition = _definition_for_ledger_run(
+            parent,
+            expected_node_ids=[from_node_id],
+        )
+        node_spec = next(
+            (node for node in definition.nodes if node.nodeId == from_node_id),
+            None,
+        )
+        if node_spec is None:
+            raise WorkflowCommandError(
+                f"unknown node {from_node_id} in pinned workflow definition"
+            )
+
         child_run_id = new_id("run")
         child_thread_id = child_run_id  # threadId == runId (ADR / spec 7.3)
         if not str(checkpoint_id or "").strip():
@@ -1698,6 +1715,7 @@ class WorkflowCommandService:
                 command_id=command_id,
                 input_snapshot_hash=parent.input_snapshot_hash,
                 started_at_ms=now_ms,
+                actor_kind=node_spec.actorKind.value,
             )
         )
         # Durable checkpoint fork outbox — child graph_dispatch is inserted only
@@ -1812,15 +1830,30 @@ def _command_record(
     )
 
 
-def _actor_kind_for_node(node_id: str) -> str:
-    from core.research.workflow.definition import (
-        build_challenge_cup_workflow_definition,
+def _definition_for_ledger_run(
+    run: Any,
+    *,
+    expected_node_ids: list[str] | None = None,
+) -> Any:
+    if not str(getattr(run, "workflow_version_id", "") or "").strip():
+        from core.research.workflow.definition import (
+            build_challenge_cup_workflow_definition,
+        )
+
+        return build_challenge_cup_workflow_definition()
+    from core.research.workflow.definition_registry import (
+        resolve_definition_for_run_record,
     )
 
-    for node in build_challenge_cup_workflow_definition().nodes:
-        if node.nodeId == node_id:
-            return node.actorKind.value
-    raise WorkflowCommandError(f"unknown node {node_id}")
+    return resolve_definition_for_run_record(
+        {
+            "runId": run.run_id,
+            "workflowId": run.workflow_id,
+            "workflowVersionId": run.workflow_version_id,
+            "structureHash": run.structure_hash,
+        },
+        expected_node_ids=expected_node_ids or [],
+    )
 
 
 def _attempt_record(
@@ -1839,12 +1872,15 @@ def _attempt_record(
 ) -> Any:
     from core.research.workflow.ledger import NodeAttemptRecord
 
+    if not str(actor_kind or "").strip():
+        raise WorkflowCommandError("attempt record requires pinned actor_kind")
+
     return NodeAttemptRecord(
         node_run_id=node_run_id,
         run_id=run_id,
         node_id=node_id,
         attempt=attempt,
-        actor_kind=actor_kind or _actor_kind_for_node(node_id),
+        actor_kind=str(actor_kind),
         status=status,
         command_id=command_id,
         binding_snapshot_id=binding_snapshot_id,
@@ -1866,6 +1902,7 @@ def _node_attempt_for_dispatch(
     node_id: str,
     attempt: int,
     binding_snapshot_id: str | None = None,
+    actor_kind: str,
 ) -> Any:
     from core.research.workflow.ledger import NodeAttemptRecord
 
@@ -1874,7 +1911,7 @@ def _node_attempt_for_dispatch(
         run_id=run_id,
         node_id=node_id,
         attempt=attempt,
-        actor_kind=_actor_kind_for_node(node_id),
+        actor_kind=actor_kind,
         status="starting",
         command_id="",
         binding_snapshot_id=binding_snapshot_id,

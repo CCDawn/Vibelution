@@ -17,7 +17,7 @@ import urllib.parse
 import uuid
 from typing import Any
 
-from core.research.workflow.definition import build_challenge_cup_workflow_definition
+from core.research.workflow.definition_registry import resolve_definition_for_run_record
 from core.research.workflow.models import ActorKind
 
 from .store import WorkflowRunStore
@@ -93,7 +93,10 @@ class SessionBindingBridge:
         node_id: str,
         binding: dict[str, Any],
     ) -> dict[str, Any]:
-        definition = build_challenge_cup_workflow_definition()
+        definition = resolve_definition_for_run_record(
+            record,
+            expected_node_ids=[node_id],
+        )
         node = next((n for n in definition.nodes if n.nodeId == node_id), None)
         if node is None:
             raise SessionBindingError(f"Unknown nodeId: {node_id}", code="unknown_node")

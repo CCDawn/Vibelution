@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "kind": "challenge_cup_stage_one_completion_policy",
+  "policyVersion": "1.0.0",
+  "scopeId": "cc-xh-202619-stage1-hypothesis-v1",
+  "workflowDefinitionId": "challenge-cup-research@2.1.0",
+  "questionIds": [
+    "SCI-091"
+  ],
+  "closureNodeId": "hypothesis_design",
+  "completionState": "STAGE1_G1_ACCEPTED",
+  "requiredArtifactKinds": [
+    "hypothesis_set",
+    "stage1_research_plan",
+    "dimension_reviews",
+    "review_independence",
+    "review_disagreement",
+    "feedback_iterations",
+    "core_hypothesis_coherence",
+    "competition_alignment"
+  ],
+  "requiredReceiptStages": [
+    "generation",
+    "review",
+    "revision"
+  ],
+  "deferredNodeIds": [
+    "protocol_design",
+    "protocol_review",
+    "protocol_freeze",
+    "smoke_gate",
+    "controlled_run",
+    "result_evaluation",
+    "iteration_decision",
+    "version_governance",
+    "candidate_promotion",
+    "result_package"
+  ],
+  "allowPhaseTwoAdvance": false
+}

@@ -57,7 +57,6 @@
 
 | 草案 | 说明 |
 | --- | --- |
-| [plans/2026-08-31-challenge-cup-nodes-1-7-high-roi-repair-plan.md](plans/2026-08-31-challenge-cup-nodes-1-7-high-roi-repair-plan.md) | USER-REQUESTED：挑战杯 1–7 节点的来源血缘、run-scoped definition、检索预算/质量与真实回执绑定修复计划 |
 | [plans/2026-08-30-challenge-cup-automatic-chain-reliability-plan.md](plans/2026-08-30-challenge-cup-automatic-chain-reliability-plan.md) | USER-REQUESTED：挑战杯群聊、摘要、LangGraph/Ledger 自动运行链路的 deadline、durable recovery、run 隔离、上下文与自动推进修复计划 |
 | [plans/2026-08-25-challenge-cup-canonical-workflow-state-plan.md](plans/2026-08-25-challenge-cup-canonical-workflow-state-plan.md) | USER-REQUESTED：挑战杯从官方题目冷启动到产出登记与 H1–H4 审核的规范化状态 V2、服务端动作和真实链路闭环验收 |
 | [plans/2026-08-22-challenge-cup-hypothesis-scoped-sessions.md](plans/2026-08-22-challenge-cup-hypothesis-scoped-sessions.md) | user-approved：挑战杯节点根会话、逐假说 Child Session 与结构化聚合 |
@@ -81,6 +80,7 @@
 | `docs/plans/2026-08-20-launcher-lifecycle-ts-migration.md` | `archive/plans/2026-08/`（Closed；长期规则 [ADR 0009](adr/0009-launcher-control-plane-lives-in-electron-main.md)） |
 | `docs/plans/2026-08-26-test-regression-baseline-recovery.md` | `archive/plans/2026-08/`（Implemented；Pet 测试隔离与完整回归命令恢复） |
 | `docs/plans/2026-08-26-test-selector-import-closure.md` | `archive/plans/2026-08/`（Implemented；未映射 Python 改动按最近测试 import 前沿选择测试） |
+| `docs/plans/2026-08-31-challenge-cup-nodes-1-7-high-roi-repair-plan.md` | `archive/plans/2026-09/`（Implemented / DEV Closed；来源血缘、pinned definition、检索预算/质量与真实回执绑定） |
 | `docs/plans/2026-08-26-development-loop-throughput.md` | `archive/plans/2026-08/`（Implemented；测试去重、短时集成锁与 gate-definition 并行自测） |
 | `docs/archive/plans/2026-08-26-challenge-workflow-recovery-closure.md` | `archive/plans/2026-08/`（Implemented；terminal run 归档、collection 孤儿恢复与恢复动作面已合入 main） |
 | `docs/ops/2026-05-*`、efficiency-baselines | `archive/ops/` |

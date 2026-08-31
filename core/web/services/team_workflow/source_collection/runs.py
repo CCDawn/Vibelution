@@ -25,12 +25,22 @@ def start_source_collection_run(team_id: str, payload: dict[str, Any] | None = N
     team = s.team_service.get_team(normalized_team_id)
     request_payload = dict(payload) if isinstance(payload, dict) else {}
     active_project = s.get_active_research_project(normalized_team_id)
+    scope = s._normalize_metadata(request_payload.get("scope"))
     requested_project_id = s._trim_text(request_payload.get("researchProjectId"), max_length=160)
-    if requested_project_id and requested_project_id != active_project["projectId"]:
-        raise s.TeamWorkflowOrchestrationError(
-            "Source collection run researchProjectId must match the active research project."
-        )
     research_project = active_project
+    if requested_project_id and requested_project_id != active_project["projectId"]:
+        # Workflow-run-scoped payloads (hypothesis-first chain) pin the
+        # question's canonical research project, resolved from the question
+        # binding instead of the operator's active-project pointer.  Every
+        # other caller keeps the strict active-project rule unchanged.
+        if not s._trim_text(scope.get("workflowRunId"), max_length=160):
+            raise s.TeamWorkflowOrchestrationError(
+                "Source collection run researchProjectId must match the active research project."
+            )
+        try:
+            research_project = s.get_research_project(normalized_team_id, requested_project_id)
+        except s.ResearchProjectNotFoundError as exc:
+            raise s.TeamWorkflowOrchestrationError(str(exc)) from exc
     workflow_kind = s._source_collection_workflow_kind(request_payload, team)
     collection_mode = s._source_collection_collection_mode(request_payload.get("collectionMode"))
     title = s._trim_text(request_payload.get("title"), max_length=180) or (
@@ -47,7 +57,6 @@ def start_source_collection_run(team_id: str, payload: dict[str, Any] | None = N
     owner_agent_id = s._trim_text(request_payload.get("ownerAgentId"), max_length=160) or default_owner_agent_id
     requested_by_agent = s._trim_text(request_payload.get("requestedByAgent"), max_length=160) or owner_agent_id
     prompt_cache_policy = s._source_collection_prompt_cache_policy(normalized_team_id, request_payload, roles)
-    scope = s._normalize_metadata(request_payload.get("scope"))
     # Optional ensure-idempotency fingerprint set by the knowledge-collection
     # facade (see facade.search_envelope_fingerprint).  Only the explicit
     # metadata key is propagated; arbitrary caller metadata is never merged.
