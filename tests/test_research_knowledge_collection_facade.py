@@ -573,6 +573,80 @@ def test_facade_ensure_policy_version_bump_does_not_reuse_pre_arxiv_runs(monkeyp
     assert created_payloads == []
 
 
+def test_facade_ensure_policy_version_bump_does_not_reuse_pre_openalex_runs(monkeypatch):
+    """The OpenAlex-provider policy bump invalidates v2 evidence fingerprints.
+
+    A run fingerprinted under source policy v2 was collected without OpenAlex
+    coverage, so an ensure replay under v3 must create a fresh run instead of
+    silently reusing the stale one; runs fingerprinted under v3 still reuse.
+    """
+    legacy_fingerprint = facade.search_envelope_fingerprint(
+        facade._normalize_search_envelope(_valid_search_envelope()),
+        facade._normalize_requirements({}),
+        source_policy_version="2",
+    )
+    assert legacy_fingerprint != _request_fingerprint()
+
+    created_payloads = []
+
+    def fake_start(team_id, payload):
+        created_payloads.append((team_id, dict(payload)))
+        return {"runId": "dprun-v3", "run": {"runId": "dprun-v3"}}
+
+    monkeypatch.setattr(
+        data_processing_service,
+        "list_processing_runs",
+        _fake_list_runs(
+            [
+                _stored_run(
+                    "dprun-v2",
+                    updated_at="2026-08-28T00:00:00Z",
+                    fingerprint=legacy_fingerprint,
+                )
+            ]
+        ),
+    )
+    monkeypatch.setattr(source_collection_runs, "start_source_collection_run", fake_start)
+    monkeypatch.setattr(
+        source_collection_runs,
+        "get_source_collection_summary",
+        _fake_summary(),
+    )
+
+    result = facade.research_knowledge_collection_facade(
+        action="ensure",
+        scope=_valid_envelope(),
+        searchEnvelope=_valid_search_envelope(),
+    )
+
+    assert result["created"] is True
+    assert created_payloads != []
+
+    # A run fingerprinted under the current (v3) policy still reuses.
+    monkeypatch.setattr(
+        data_processing_service,
+        "list_processing_runs",
+        _fake_list_runs(
+            [
+                _stored_run(
+                    "dprun-v3",
+                    updated_at="2026-08-28T00:00:00Z",
+                    fingerprint=_request_fingerprint(),
+                )
+            ]
+        ),
+    )
+    created_payloads.clear()
+    replay = facade.research_knowledge_collection_facade(
+        action="ensure",
+        scope=_valid_envelope(),
+        searchEnvelope=_valid_search_envelope(),
+    )
+    assert replay["idempotent"] is True
+    assert replay["locator"]["runId"] == "dprun-v3"
+    assert created_payloads == []
+
+
 def test_search_envelope_fingerprint_is_canonical_and_order_insensitive():
     a = facade.search_envelope_fingerprint(
         facade._normalize_search_envelope({"keywords": ["b 关键词", "a keyword"]}),
@@ -603,7 +677,7 @@ def test_search_envelope_fingerprint_changes_with_keywords_and_requirements():
     other_policy = facade.search_envelope_fingerprint(
         facade._normalize_search_envelope({"keywords": ["alpha"]}),
         {},
-        source_policy_version="3",
+        source_policy_version="4",
     )
     assert base != other_keywords
     assert base != other_requirements

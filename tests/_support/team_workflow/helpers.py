@@ -514,6 +514,85 @@ def _fake_arxiv_search_response(query, *, max_results, provider):
         "results": results[:max_results],
     }
 
+def _fake_openalex_works_payload(works: list[dict]) -> bytes:
+    """Build a minimal OpenAlex ``/works`` response body."""
+    return json.dumps({"meta": {"count": len(works)}, "results": works}).encode("utf-8")
+
+def _fake_openalex_search_response(query, *, max_results, provider):
+    """Mimic one OpenAlex works query: parse the fixture through the real mapper.
+
+    The first work carries a deliberately shuffled ``abstract_inverted_index``
+    so the real mapper's position-based rebuild is exercised end to end.
+    """
+    from core.web.services.team_workflow.source_collection import residual
+
+    query_text = str(query.get("query") or "neural source")
+    payload = _fake_openalex_works_payload(
+        [
+            {
+                "id": "https://openalex.org/W210100983",
+                "doi": "https://doi.org/10.0000/openalex-predictive",
+                "title": "Predictive coding cortical hierarchy preprint",
+                "publication_year": 2021,
+                "publication_date": "2021-01-11",
+                "type": "preprint",
+                "authorships": [
+                    {"author": {"display_name": "Timothy Platt"}},
+                    {"author": {"display_name": "Tim Trudgian"}},
+                ],
+                "primary_location": {
+                    "landing_page_url": "https://arxiv.org/abs/2101.00983",
+                    "source": {"display_name": "arXiv (Cornell University)"},
+                },
+                "abstract_inverted_index": {
+                    "coding": [3],
+                    "predictive": [2],
+                    "We": [0],
+                    "hierarchy.": [6],
+                    "study": [4],
+                    "cortical": [5],
+                    "the": [1],
+                },
+            },
+            {
+                "id": "https://openalex.org/W200700001",
+                "doi": "https://doi.org/10.0000/openalex-dataset",
+                "title": "Cortical hierarchy verification dataset",
+                "publication_year": 2020,
+                "publication_date": "2020-06-30",
+                "type": "article",
+                "authorships": [{"author": {"display_name": "Ada Lovelace"}}],
+                "primary_location": {
+                    "landing_page_url": "https://example.org/works/cortical-hierarchy-verification",
+                    "source": {"display_name": "Journal of Neuroscience"},
+                },
+                "abstract_inverted_index": {
+                    "dataset": [4],
+                    "A": [0],
+                    "annotated": [5],
+                    "companion": [1],
+                    "with": [7],
+                    "recordings.": [9],
+                    "neural": [8],
+                    "verification": [3],
+                    "for": [2],
+                },
+            },
+        ]
+    )
+    works = json.loads(payload.decode("utf-8")).get("results") or []
+    results = [
+        residual._source_collection_result_from_openalex_work(
+            work, fallback_source_type=str(query.get("sourceType") or "")
+        )
+        for work in works
+    ]
+    return {
+        "provider": provider,
+        "searchUrl": f"https://api.openalex.org/works?search={query_text.replace(' ', '+')}",
+        "results": results[:max_results],
+    }
+
 def _fake_mixed_excluded_source_search_response(query, *, max_results, provider):
     query_text = str(query.get("query") or "neural source")
     return {

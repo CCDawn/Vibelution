@@ -121,6 +121,7 @@ from core.web.services.team_workflow.source_collection.search_execution import (
     _source_collection_stage_round_status_after_search,
     _execute_source_collection_query,
     _execute_arxiv_source_collection_query,
+    _execute_openalex_source_collection_query,
     _source_collection_search_quality_terms,
     _source_collection_search_result_quality_gate,
     _source_collection_record_from_search_result,
@@ -291,6 +292,8 @@ from core.web.services.team_workflow.source_collection.residual import (
     _source_collection_resolve_prompt_cache_model,
     _source_collection_arxiv_atom_entries,
     _source_collection_result_from_arxiv_entry,
+    _source_collection_openalex_abstract,
+    _source_collection_result_from_openalex_work,
     _source_collection_result_from_crossref_item,
     _source_collection_result_identity_key,
     _source_collection_role_assignment_inputs,
@@ -365,6 +368,7 @@ from core.web.services.team_workflow.facade_helpers import (
     _append_jsonl,
     _arxiv_search_query,
     _arxiv_search_url,
+    _openalex_search_url,
     _best_research_loop_evidence_id,
     _bounded_log_items,
     _bounded_text_items,
@@ -892,12 +896,17 @@ SOURCE_COLLECTION_DEFAULT_MAX_RESULTS_PER_QUERY = 10
 SOURCE_COLLECTION_MAX_QUERIES = 48
 SOURCE_COLLECTION_SEARCH_PROVIDER_CROSSREF = "crossref_rest_api"
 SOURCE_COLLECTION_SEARCH_PROVIDER_ARXIV = "arxiv_api"
+SOURCE_COLLECTION_SEARCH_PROVIDER_OPENALEX = "openalex_api"
 # Default provider set executed for every source-collection query: each query
 # runs once per provider and results merge through the existing
-# sourceIdentityKey dedup semantics (first provider to return wins).
+# sourceIdentityKey dedup semantics (first provider to return wins).  OpenAlex
+# covers arXiv preprints (with rebuilt abstracts) and stays reachable when the
+# export.arxiv.org channel is blocked; arXiv stays in the set so it resumes
+# contributing automatically once connectivity returns.
 SOURCE_COLLECTION_SEARCH_PROVIDERS = (
     SOURCE_COLLECTION_SEARCH_PROVIDER_CROSSREF,
     SOURCE_COLLECTION_SEARCH_PROVIDER_ARXIV,
+    SOURCE_COLLECTION_SEARCH_PROVIDER_OPENALEX,
 )
 # arXiv's official API etiquette asks clients not to issue requests more
 # often than once every 3 seconds; enforced after every arXiv HTTP call.

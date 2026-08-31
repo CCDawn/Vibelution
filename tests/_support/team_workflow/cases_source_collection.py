@@ -5751,16 +5751,16 @@ def test_execute_source_collection_search_filters_previously_excluded_sources(tm
     records = data_processing_service.list_records(second_run["run"]["runId"])["records"]
     candidates = team_workflow_orchestration_service.list_candidate_store(team["teamId"], candidate_type="source_manifest")["candidates"]
 
-    # Both default providers returned the excluded source; each replay is
+    # All default providers returned the excluded source; each replay is
     # filtered and counted.
-    assert execution["filteredExcludedCount"] == 2
+    assert execution["filteredExcludedCount"] == 3
     assert execution["recordCount"] == 1
     assert execution["importedCount"] == 1
     assert [record["title"] for record in records] == ["Predictive coding useful web note"]
     assert [candidate["title"] for candidate in candidates] == ["Predictive coding useful web note"]
     assert "search.excluded_source_filtered" in {event["eventType"] for event in execution["executionEvents"]}
     ledger = team_workflow_orchestration_service.get_source_collection_exclusion_ledger(team["teamId"])
-    assert ledger["entries"][0]["hitCount"] == 3
+    assert ledger["entries"][0]["hitCount"] == 4
 
 def test_source_quality_writeback_downgrades_completed_when_candidate_coverage_is_partial(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
@@ -6584,9 +6584,9 @@ def test_execute_source_collection_search_writes_records_and_imports_candidates(
     assert execution["recordCount"] == 2
     assert execution["createdUniqueRecordCount"] == 2
     assert execution["importedCount"] == 2
-    # The default provider set runs crossref first; the arXiv replay of the
-    # same two records is deduped through sourceIdentityKey.
-    assert execution["skippedDuplicateCount"] == 2
+    # The default provider set runs crossref first; the arXiv and OpenAlex
+    # replays of the same two records are deduped through sourceIdentityKey.
+    assert execution["skippedDuplicateCount"] == 4
     assert execution["boundaries"]["externalSearchTriggered"] is True
     assert execution["boundaries"]["metadataOnlyDownload"] is True
     assert execution["boundaries"]["writesFormalKnowledge"] is False
@@ -6784,7 +6784,7 @@ def test_execute_source_collection_search_accepts_arxiv_provider_and_rejects_unk
     assert executed_events[0]["provider"] == "arxiv_api"
 
     # Unknown providers are rejected at the execution entrypoint before any
-    # query runs, while both default-set members are accepted.
+    # query runs, while all default-set members are accepted.
     observed_queries = []
 
     def observing_fake(query, *, max_results, provider):
@@ -6844,6 +6844,31 @@ def test_execute_source_collection_search_runs_default_provider_set_with_merge_a
                     },
                 ][:max_results],
             }
+        if provider == team_workflow_orchestration_service.SOURCE_COLLECTION_SEARCH_PROVIDER_OPENALEX:
+            return {
+                "provider": provider,
+                "searchUrl": "https://api.openalex.org/works?search=predictive",
+                "results": [
+                    {
+                        "title": "Shared predictive coding source (OpenAlex preprint)",
+                        "sourceRef": "https://doi.org/10.0000/shared-source",
+                        "rawLocation": "https://arxiv.org/abs/2101.00983",
+                        "summary": "OpenAlex rebuilt abstract for the shared predictive coding cortical hierarchy record.",
+                        "sourceType": "paper",
+                        "metadata": {"doi": "10.0000/shared-source", "openalexId": "https://openalex.org/W210100983"},
+                        "qualitySignals": {"hasAbstract": True},
+                    },
+                    {
+                        "title": "OpenAlex only cortical hierarchy survey",
+                        "sourceRef": "https://doi.org/10.0000/openalex-only",
+                        "rawLocation": "https://example.org/works/openalex-only-survey",
+                        "summary": "OpenAlex exclusive survey on predictive coding cortical hierarchy mechanisms.",
+                        "sourceType": "paper",
+                        "metadata": {"doi": "10.0000/openalex-only", "openalexId": "https://openalex.org/W300000001"},
+                        "qualitySignals": {"hasAbstract": True},
+                    },
+                ][:max_results],
+            }
         return {
             "provider": provider,
             "searchUrl": "https://export.arxiv.org/api/query?search_query=all%3Apredictive",
@@ -6893,24 +6918,34 @@ def test_execute_source_collection_search_runs_default_provider_set_with_merge_a
     assert observed_providers == [
         team_workflow_orchestration_service.SOURCE_COLLECTION_SEARCH_PROVIDER_CROSSREF,
         team_workflow_orchestration_service.SOURCE_COLLECTION_SEARCH_PROVIDER_ARXIV,
+        team_workflow_orchestration_service.SOURCE_COLLECTION_SEARCH_PROVIDER_OPENALEX,
     ]
     assert execution["providers"] == [
         team_workflow_orchestration_service.SOURCE_COLLECTION_SEARCH_PROVIDER_CROSSREF,
         team_workflow_orchestration_service.SOURCE_COLLECTION_SEARCH_PROVIDER_ARXIV,
+        team_workflow_orchestration_service.SOURCE_COLLECTION_SEARCH_PROVIDER_OPENALEX,
     ]
     assert execution["provider"] == team_workflow_orchestration_service.SOURCE_COLLECTION_SEARCH_PROVIDER_CROSSREF
     assert execution["attemptedQueryCount"] == 1
     assert execution["executedQueryCount"] == 1
-    assert execution["resultCount"] == 4
-    assert execution["recordCount"] == 3
-    assert execution["skippedDuplicateCount"] == 1
+    assert execution["resultCount"] == 6
+    assert execution["recordCount"] == 4
+    assert execution["skippedDuplicateCount"] == 2
     records = data_processing_service.list_records(run_response["run"]["runId"])["records"]
-    assert {record["metadata"]["searchProvider"] for record in records} == {"crossref_rest_api", "arxiv_api"}
+    assert {record["metadata"]["searchProvider"] for record in records} == {
+        "crossref_rest_api",
+        "arxiv_api",
+        "openalex_api",
+    }
     shared_records = [record for record in records if record["metadata"].get("doi") == "10.0000/shared-source"]
     assert len(shared_records) == 1
     assert shared_records[0]["metadata"]["searchProvider"] == "crossref_rest_api"
     executed_events = [event for event in execution["executionEvents"] if event["eventType"] == "search.executed"]
-    assert sorted(event["provider"] for event in executed_events) == ["arxiv_api", "crossref_rest_api"]
+    assert sorted(event["provider"] for event in executed_events) == [
+        "arxiv_api",
+        "crossref_rest_api",
+        "openalex_api",
+    ]
 
     # A failing provider is isolated: the other provider still delivers records.
     def failing_crossref_fake(query, *, max_results, provider):
@@ -6972,6 +7007,7 @@ def test_execute_source_collection_search_runs_default_provider_set_with_merge_a
     assert {event["provider"] for event in all_failed["executionEvents"] if event["eventType"] == "search.failed"} == {
         team_workflow_orchestration_service.SOURCE_COLLECTION_SEARCH_PROVIDER_CROSSREF,
         team_workflow_orchestration_service.SOURCE_COLLECTION_SEARCH_PROVIDER_ARXIV,
+        team_workflow_orchestration_service.SOURCE_COLLECTION_SEARCH_PROVIDER_OPENALEX,
     }
 
 def test_execute_source_collection_search_applies_quality_gate_to_arxiv_results(tmp_path, monkeypatch):
@@ -7026,6 +7062,261 @@ def test_execute_source_collection_search_applies_quality_gate_to_arxiv_results(
     assert rejected_events[0]["provider"] == team_workflow_orchestration_service.SOURCE_COLLECTION_SEARCH_PROVIDER_ARXIV
     assert "insufficient_query_overlap" in rejected_events[0]["summary"]
 
+def test_openalex_work_mapping_rebuilds_inverted_index_abstract_and_fields():
+    # The OpenAlex abstract arrives as a {word: [position, ...]} inverted
+    # index; the mapper must rebuild the original sentence order and land it
+    # in summary (with hasAbstract) because downstream extraction produces
+    # verbatim quotes from that field.
+    from core.web.services.team_workflow.source_collection import residual
+
+    work = {
+        "id": "https://openalex.org/W210100983",
+        "doi": "https://doi.org/10.0000/openalex-predictive",
+        "title": "Predictive coding cortical hierarchy preprint",
+        "publication_year": 2021,
+        "publication_date": "2021-01-11",
+        "type": "preprint",
+        "authorships": [
+            {"author": {"display_name": "Timothy Platt"}},
+            {"author": {"display_name": "Tim Trudgian"}},
+            {"author": {"display_name": ""}},
+            "not-a-dict",
+        ],
+        "primary_location": {
+            "landing_page_url": "https://arxiv.org/abs/2101.00983",
+            "source": {"display_name": "arXiv (Cornell University)"},
+        },
+        "abstract_inverted_index": {
+            "coding": [3],
+            "predictive": [2],
+            "We": [0],
+            "hierarchy.": [6],
+            "study": [4],
+            "cortical": [5],
+            "the": [1],
+        },
+    }
+    result = residual._source_collection_result_from_openalex_work(work, fallback_source_type="")
+
+    assert result["summary"] == "We the predictive coding study cortical hierarchy."
+    assert result["qualitySignals"]["hasAbstract"] is True
+    assert result["title"] == "Predictive coding cortical hierarchy preprint"
+    assert result["sourceRef"] == "https://doi.org/10.0000/openalex-predictive"
+    assert result["rawLocation"] == "https://arxiv.org/abs/2101.00983"
+    assert result["metadata"]["openalexId"] == "https://openalex.org/W210100983"
+    assert result["metadata"]["doi"] == "10.0000/openalex-predictive"
+    assert result["metadata"]["publicationYear"] == 2021
+    assert result["metadata"]["publicationDate"] == "2021-01-11"
+    assert result["metadata"]["authors"] == ["Timothy Platt", "Tim Trudgian"]
+    assert result["metadata"]["venue"] == "arXiv (Cornell University)"
+    # OpenAlex "preprint" is normalized through the shared source-type map.
+    assert result["sourceType"] == "paper"
+
+    # A journal "article" alias lands on the Crossref-style paper vocabulary.
+    article_result = residual._source_collection_result_from_openalex_work(
+        {"title": "Article work", "type": "article"}, fallback_source_type=""
+    )
+    assert article_result["sourceType"] == "paper"
+    assert article_result["metadata"]["openalexType"] == "journal-article"
+
+    # Missing or malformed inverted indexes degrade to no abstract.
+    empty_result = residual._source_collection_result_from_openalex_work(
+        {"title": "No abstract work", "abstract_inverted_index": {}}, fallback_source_type="paper"
+    )
+    assert empty_result["summary"] == ""
+    assert empty_result["qualitySignals"]["hasAbstract"] is False
+    assert empty_result["sourceType"] == "paper"
+    broken_result = residual._source_collection_result_from_openalex_work(
+        {"title": "Broken abstract work", "abstract_inverted_index": {"word": "not-a-list"}}, fallback_source_type=""
+    )
+    assert broken_result["qualitySignals"]["hasAbstract"] is False
+
+class _FakeOpenAlexHttpResponse:
+    def __init__(self, payload: bytes):
+        self._payload = payload
+
+    def read(self) -> bytes:
+        return self._payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+def test_openalex_provider_helpers_are_bound_into_orchestration_service_namespace():
+    # The background search thread resolves every provider helper through the
+    # orchestration_service namespace (``s.<name>``).  An OpenAlex helper that
+    # is defined but not bound into that namespace raises AttributeError at
+    # runtime and fails the whole collection batch, so the binding is part of
+    # the provider contract.
+    from core.web.services import team_workflow_orchestration_service as s
+
+    assert hasattr(s, "_execute_openalex_source_collection_query")
+    assert hasattr(s, "_execute_source_collection_query")
+    assert hasattr(s, "_openalex_search_url")
+    assert hasattr(s, "_source_collection_openalex_abstract")
+    assert hasattr(s, "_source_collection_result_from_openalex_work")
+    assert hasattr(s, "_arxiv_search_url")
+
+def test_execute_openalex_source_collection_query_dispatches_through_service_namespace(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    from core.web.services import team_workflow_orchestration_service as s
+
+    payload = _fake_openalex_works_payload(
+        [
+            {
+                "id": "https://openalex.org/W210100983",
+                "doi": "https://doi.org/10.0000/openalex-predictive",
+                "title": "Predictive coding cortical hierarchy preprint",
+                "publication_year": 2021,
+                "type": "preprint",
+                "authorships": [{"author": {"display_name": "Timothy Platt"}}],
+                "primary_location": {
+                    "landing_page_url": "https://arxiv.org/abs/2101.00983",
+                    "source": {"display_name": "arXiv (Cornell University)"},
+                },
+                "abstract_inverted_index": {"predictive": [1], "We": [0], "coding.": [2]},
+            }
+        ]
+    )
+    seen_requests = []
+
+    def _fake_urlopen(request, timeout=0):
+        seen_requests.append((request.full_url, timeout))
+        return _FakeOpenAlexHttpResponse(payload)
+
+    monkeypatch.setattr(s.urllib.request, "urlopen", _fake_urlopen)
+
+    response = s._execute_source_collection_query(
+        {"query": "predictive coding cortical hierarchy", "sourceType": "preprint"},
+        max_results=3,
+        provider=s.SOURCE_COLLECTION_SEARCH_PROVIDER_OPENALEX,
+    )
+
+    assert seen_requests and "api.openalex.org/works" in seen_requests[0][0]
+    # The mailto contact keeps the request in OpenAlex's polite pool.
+    assert "mailto=" in seen_requests[0][0]
+    assert seen_requests[0][1] == 15
+    assert not response.get("error")
+    assert response["provider"] == "openalex_api"
+    results = response.get("results") or []
+    assert len(results) == 1
+    assert results[0]["sourceRef"] == "https://doi.org/10.0000/openalex-predictive"
+    assert results[0]["summary"] == "We predictive coding."
+    assert results[0]["sourceType"] == "paper"
+
+    # Unknown providers are rejected at the query dispatch, not by HTTP.
+    unknown = s._execute_source_collection_query(
+        {"query": "anything"}, max_results=1, provider="rss_feed"
+    )
+    assert unknown.get("error") == "Unsupported provider: rss_feed"
+    assert len(seen_requests) == 1
+
+def test_execute_source_collection_search_accepts_openalex_provider(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    monkeypatch.setattr(team_workflow_orchestration_service, "_execute_source_collection_query", _fake_openalex_search_response)
+    team = team_service.create_team(name="ai科学研究团队")
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "title": "OpenAlex source batch",
+            "topic": "predictive coding cortical hierarchy",
+            "querySeeds": ["predictive coding cortical hierarchy"],
+            "searchLanguages": ["en"],
+            "sourceTypes": ["paper"],
+            "agentRoles": ["source_finder"],
+            "agentIds": {"source_finder": "Source Finder Agent"},
+        },
+    )
+
+    execution = team_workflow_orchestration_service.execute_source_collection_search(
+        team["teamId"],
+        run_response["run"]["runId"],
+        {"provider": "openalex_api", "maxQueries": 1, "maxResultsPerQuery": 2},
+    )
+    records = data_processing_service.list_records(run_response["run"]["runId"])["records"]
+
+    assert execution["status"] == "executed"
+    assert execution["provider"] == "openalex_api"
+    assert execution["providers"] == ["openalex_api"]
+    assert execution["executedQueryCount"] == 1
+    assert execution["recordCount"] == 2
+    assert all(record["metadata"]["searchProvider"] == "openalex_api" for record in records)
+    first_record = records[0]
+    assert first_record["sourceRef"] == "https://doi.org/10.0000/openalex-predictive"
+    # The rebuilt abstract (not just the title) lands in the record summary.
+    assert "We the predictive coding study cortical hierarchy." in first_record["summary"]
+    assert first_record["metadata"]["authors"] == ["Timothy Platt", "Tim Trudgian"]
+    assert first_record["metadata"]["venue"] == "arXiv (Cornell University)"
+    assert first_record["metadata"]["publicationYear"] == 2021
+    assert first_record["metadata"]["doi"] == "10.0000/openalex-predictive"
+    assert first_record["sourceType"] == "paper"
+    assert first_record["metadata"]["sourceCollectionTrace"]["searchProvider"] == "openalex_api"
+    executed_events = [event for event in execution["executionEvents"] if event["eventType"] == "search.executed"]
+    assert len(executed_events) == 1
+    assert executed_events[0]["provider"] == "openalex_api"
+
+def test_execute_source_collection_search_applies_quality_gate_to_openalex_results(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+
+    def irrelevant_openalex_fake(query, *, max_results, provider):
+        assert provider == team_workflow_orchestration_service.SOURCE_COLLECTION_SEARCH_PROVIDER_OPENALEX
+        from core.web.services.team_workflow.source_collection import residual
+
+        work = {
+            "id": "https://openalex.org/W220000001",
+            "title": "Quantum sourdough fermentation dynamics",
+            "type": "article",
+            "authorships": [{"author": {"display_name": "Sample Author"}}],
+            "primary_location": {
+                "landing_page_url": "https://example.org/works/quantum-sourdough",
+                "source": {"display_name": "Journal of Baking"},
+            },
+            "abstract_inverted_index": {
+                "bread": [2],
+                "A": [0],
+                "thermodynamics": [5],
+                "study": [1],
+                "starter": [3],
+                "oven": [6],
+                "of": [4],
+                "cultures.": [7],
+            },
+        }
+        results = [residual._source_collection_result_from_openalex_work(work, fallback_source_type="paper")]
+        return {"provider": provider, "searchUrl": "https://api.openalex.org/works?search=x", "results": results[:max_results]}
+
+    monkeypatch.setattr(team_workflow_orchestration_service, "_execute_source_collection_query", irrelevant_openalex_fake)
+    team = team_service.create_team(name="ai科学研究团队")
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "predictive coding cortical hierarchy",
+            "querySeeds": ["predictive coding cortical hierarchy"],
+            "searchLanguages": ["en"],
+            "sourceTypes": ["paper"],
+            "agentRoles": ["source_finder"],
+        },
+    )
+
+    execution = team_workflow_orchestration_service.execute_source_collection_search(
+        team["teamId"],
+        run_response["run"]["runId"],
+        {"provider": "openalex_api", "maxQueries": 1, "maxResultsPerQuery": 1},
+    )
+
+    assert execution["resultCount"] == 1
+    assert execution["rejectedResultCount"] == 1
+    assert execution["recordCount"] == 0
+    rejected_events = [event for event in execution["executionEvents"] if event["eventType"] == "search.low_quality_rejected"]
+    assert len(rejected_events) == 1
+    assert rejected_events[0]["provider"] == team_workflow_orchestration_service.SOURCE_COLLECTION_SEARCH_PROVIDER_OPENALEX
+    assert "insufficient_query_overlap" in rejected_events[0]["summary"]
+
 def test_execute_source_collection_search_rejects_low_relevance_results_before_storage(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
@@ -7059,13 +7350,13 @@ def test_execute_source_collection_search_rejects_low_relevance_results_before_s
     event_types = {event["eventType"] for event in execution["executionEvents"]}
 
     assert execution["status"] == "partial"
-    # Both default providers returned the same irrelevant record; each replay
+    # All default providers returned the same irrelevant record; each replay
     # is rejected by the quality gate.
-    assert execution["resultCount"] == 2
+    assert execution["resultCount"] == 3
     assert execution["recordCount"] == 0
     assert execution["createdUniqueRecordCount"] == 0
     assert execution["importedCount"] == 0
-    assert execution["rejectedResultCount"] == 2
+    assert execution["rejectedResultCount"] == 3
     assert records == []
     assert candidates["candidateCount"] == 0
     assert "search.low_quality_rejected" in event_types
@@ -7206,8 +7497,8 @@ def test_execute_source_collection_search_skips_existing_query_without_force(tmp
     assert second["skippedQueryCount"] == 0
     assert second["skippedDuplicateCount"] == 0
     assert second["status"] == "no_open_assignment"
-    # The first execution ran both default providers for the same query.
-    assert calls == [run_response["searchPlan"]["queries"][0]["queryId"]] * 2
+    # The first execution ran all three default providers for the same query.
+    assert calls == [run_response["searchPlan"]["queries"][0]["queryId"]] * 3
     assert data_processing_service.list_records(run_response["run"]["runId"])["summary"]["recordCount"] == 2
 
 def test_execute_source_collection_search_limits_failed_provider_attempt_to_max_queries(tmp_path, monkeypatch):
@@ -7245,12 +7536,17 @@ def test_execute_source_collection_search_limits_failed_provider_attempt_to_max_
     assert execution["failedQueryCount"] == 1
     assert execution["recordCount"] == 0
     assert execution["status"] == "partial"
-    assert calls == [first_query_id] * 2
+    assert calls == [first_query_id] * 3
     assert second_query_id in execution["nextRunnableQueryIds"]
-    assert [event["eventType"] for event in execution["executionEvents"]] == ["search.failed", "search.failed"]
+    assert [event["eventType"] for event in execution["executionEvents"]] == [
+        "search.failed",
+        "search.failed",
+        "search.failed",
+    ]
     assert {event["provider"] for event in execution["executionEvents"]} == {
         "crossref_rest_api",
         "arxiv_api",
+        "openalex_api",
     }
     assert execution["boundaries"]["externalSearchTriggered"] is True
 
@@ -7295,8 +7591,15 @@ def test_execute_source_collection_search_advances_after_no_record_output(tmp_pa
     assert first["outputCount"] == 1
     assert second["executedQueryCount"] == 1
     assert second["recordCount"] == 1
-    # Each execution runs both default providers for its query.
-    assert calls == [first_query_id, first_query_id, second_query_id, second_query_id]
+    # Each execution runs all three default providers for its query.
+    assert calls == [
+        first_query_id,
+        first_query_id,
+        first_query_id,
+        second_query_id,
+        second_query_id,
+        second_query_id,
+    ]
 
 def test_execute_source_collection_search_records_output_per_query(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
@@ -7384,12 +7687,14 @@ def test_execute_source_collection_search_skips_duplicate_sources_on_force_rerun
     assert second["recordCount"] == 0
     assert second["createdUniqueRecordCount"] == 0
     assert second["importedCount"] == 0
-    # Force replays both default providers; every replayed result matches an
-    # existing record identity.
-    assert second["skippedDuplicateCount"] == 4
+    # Force replays all three default providers; every replayed result matches
+    # an existing record identity.
+    assert second["skippedDuplicateCount"] == 6
     assert second["remainingQueryCount"] == 0
     assert second["hasMore"] is False
     assert second["duplicateSourceKeys"] == [
+        "doi:10.0000/predictive-coding",
+        "doi:10.0000/cortical-dataset",
         "doi:10.0000/predictive-coding",
         "doi:10.0000/cortical-dataset",
         "doi:10.0000/predictive-coding",
@@ -7402,7 +7707,7 @@ def test_execute_source_collection_search_skips_duplicate_sources_on_force_rerun
     assert summary["latest"]["status"] == "completed"
     assert summary["latest"]["currentPhase"] == "completed"
     assert summary["latest"]["searchOpenAssignmentCount"] == 0
-    assert "跳过 4 条重复资料" in summary["latest"]["summary"]
+    assert "跳过 6 条重复资料" in summary["latest"]["summary"]
     assert data_processing_service.list_records(run_response["run"]["runId"])["summary"]["recordCount"] == 2
     candidates = team_workflow_orchestration_service.list_candidate_store(team["teamId"], candidate_type="source_manifest")
     assert candidates["candidateCount"] == 2
@@ -7489,9 +7794,12 @@ def test_execute_source_collection_search_dedupes_metadata_doi_and_sorted_url_qu
     assert first["recordCount"] == 2
     assert second["status"] == "duplicates_skipped"
     assert second["recordCount"] == 0
-    # The second batch replays both default providers over the same identities.
-    assert second["skippedDuplicateCount"] == 4
+    # The second batch replays all three default providers over the same
+    # identities.
+    assert second["skippedDuplicateCount"] == 6
     assert second["duplicateSourceKeys"] == [
+        "doi:10.0000/metadata-only",
+        "url:https://example.test/source?a=1&b=2",
         "doi:10.0000/metadata-only",
         "url:https://example.test/source?a=1&b=2",
         "doi:10.0000/metadata-only",

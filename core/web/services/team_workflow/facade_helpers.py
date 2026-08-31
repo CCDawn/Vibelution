@@ -189,6 +189,24 @@ def _arxiv_search_url(query_text: str, *, start: int, max_results: int) -> str:
     return f"https://export.arxiv.org/api/query?{params}"
 
 
+# OpenAlex polite pool: the API asks callers to pass a stable mailto contact so
+# requests are served from the polite pool (10 req/s) instead of the common
+# pool.  This placeholder identifies the Vibelution metadata-only collector and
+# is not a secret.
+_SOURCE_COLLECTION_OPENALEX_MAILTO = "challenge-cup-research@localhost"
+
+
+def _openalex_search_url(query_text: str, *, per_page: int) -> str:
+    params = urllib.parse.urlencode(
+        {
+            "search": query_text,
+            "per-page": str(max(1, per_page)),
+            "mailto": _SOURCE_COLLECTION_OPENALEX_MAILTO,
+        }
+    )
+    return f"https://api.openalex.org/works?{params}"
+
+
 def _current_research_stage(phases: list[dict[str, Any]], workflow: dict[str, Any]) -> str:
     s = _service()
     for phase in phases:

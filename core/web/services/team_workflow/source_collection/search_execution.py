@@ -801,6 +801,8 @@ def _execute_source_collection_query(query: dict[str, Any], *, max_results: int,
     rows = s._normalize_int(max_results, default=s.SOURCE_COLLECTION_SEARCH_EXECUTION_DEFAULT_RESULTS_PER_QUERY, minimum=1, maximum=s.SOURCE_COLLECTION_SEARCH_EXECUTION_MAX_RESULTS_PER_QUERY)
     if provider == s.SOURCE_COLLECTION_SEARCH_PROVIDER_ARXIV:
         return s._execute_arxiv_source_collection_query(query_text, rows=rows, provider=provider, fallback_source_type=str(query.get("sourceType") or ""))
+    if provider == s.SOURCE_COLLECTION_SEARCH_PROVIDER_OPENALEX:
+        return s._execute_openalex_source_collection_query(query_text, rows=rows, provider=provider, fallback_source_type=str(query.get("sourceType") or ""))
     search_url = s._crossref_search_url(query_text, rows=rows)
     try:
         request = urllib.request.Request(
@@ -857,6 +859,45 @@ def _execute_arxiv_source_collection_query(
     results = [
         s._source_collection_result_from_arxiv_entry(entry, fallback_source_type=fallback_source_type)
         for entry in list(entries)[:rows]
+    ]
+    return {"provider": provider, "searchUrl": search_url, "results": [item for item in results if item.get("title") or item.get("sourceRef") or item.get("rawLocation")]}
+
+
+def _execute_openalex_source_collection_query(
+    query_text: str,
+    *,
+    rows: int,
+    provider: str,
+    fallback_source_type: str,
+) -> dict[str, Any]:
+    """Run one metadata-only OpenAlex works query on the background thread.
+
+    Same synchronous urllib transport as the other provider branches (no
+    console, no subprocess).  The mailto contact embedded by
+    ``_openalex_search_url`` keeps the request in OpenAlex's polite pool
+    (10 req/s, no artificial interval needed); occasional 429/5xx responses
+    surface as a per-query error without retries, matching the Crossref
+    branch, so later batches naturally refill the gap.
+    """
+    s = _service()
+    search_url = s._openalex_search_url(query_text, per_page=rows)
+    try:
+        request = urllib.request.Request(
+            search_url,
+            headers={
+                "Accept": "application/json",
+                "User-Agent": "Vibelution-ChallengeCup/1.0 (metadata-only research source collection)",
+            },
+        )
+        with urllib.request.urlopen(request, timeout=15) as response:
+            payload = json.loads(response.read().decode("utf-8", errors="replace"))
+    except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
+        return {"provider": provider, "searchUrl": search_url, "results": [], "error": str(exc)}
+    items = payload.get("results") if isinstance(payload, dict) else []
+    results = [
+        s._source_collection_result_from_openalex_work(work, fallback_source_type=fallback_source_type)
+        for work in list(items or [])[:rows]
+        if isinstance(work, dict)
     ]
     return {"provider": provider, "searchUrl": search_url, "results": [item for item in results if item.get("title") or item.get("sourceRef") or item.get("rawLocation")]}
 
