@@ -75,6 +75,26 @@ class HypothesisReviewExecutionMode(str, Enum):
     FORMAL = "formal"
 
 
+def _source_collection_run_id_for_formal_workflow(workflow_run_id: str) -> str:
+    """Resolve artifact authority from the canonical Ledger run snapshot."""
+
+    normalized_run_id = str(workflow_run_id or "").strip()
+    if not normalized_run_id:
+        return ""
+    try:
+        from core.web.services.team_workflow.research_runtime.formal_write_runtime import (
+            get_write_store,
+        )
+
+        run = get_write_store().get_run(normalized_run_id)
+        snapshot = json.loads(str(getattr(run, "input_snapshot_json", "") or "{}"))
+    except Exception:  # noqa: BLE001 - caller decides whether missing scope is fatal
+        return ""
+    if not isinstance(snapshot, Mapping):
+        return ""
+    return str(snapshot.get("sourceCollectionRunId") or "").strip()
+
+
 @dataclass(frozen=True, slots=True)
 class ProviderBoundReviewResult:
     """One parsed review payload paired with its provider-issued receipt."""
@@ -857,9 +877,26 @@ def execute_hypothesis_review(
             )
             team_id = str(context.get("teamId") or "").strip()
             workflow_run_id = str(authority.get("workflowRunId") or "").strip()
+            source_collection_run_id = str(
+                authority.get("sourceCollectionRunId") or ""
+            ).strip() or _source_collection_run_id_for_formal_workflow(
+                workflow_run_id
+            )
+            from core.research.competition.stage_one_completion_policy import (
+                STAGE_ONE_POLICY_QUESTION_IDS,
+            )
+
+            question_id = str(context.get("questionId") or "").strip().upper()
             if not team_id or not workflow_run_id:
                 raise ContractValidationError(
                     "coherence_failure: formal coherence artifact scope is unavailable"
+                )
+            if (
+                question_id in STAGE_ONE_POLICY_QUESTION_IDS
+                and not source_collection_run_id
+            ):
+                raise ContractValidationError(
+                    "coherence_failure: stage-one source collection authority is unavailable"
                 )
             from core.web.services.team_workflow.research_runtime.core_hypothesis_coherence_artifact_writer import (
                 record_core_hypothesis_coherence_artifact,
@@ -868,6 +905,7 @@ def execute_hypothesis_review(
             coherence_artifact_ref = record_core_hypothesis_coherence_artifact(
                 team_id=team_id,
                 workflow_run_id=workflow_run_id,
+                source_collection_run_id=source_collection_run_id,
                 review_context_id=str(context.get("contextId") or ""),
                 results=coherence_results,
                 require_receipts=True,

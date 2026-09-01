@@ -10,6 +10,7 @@ parallel domain_artifacts filesystem.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -652,13 +653,14 @@ def test_real_ports_required_kinds_follow_pinned_definition() -> None:
     )
 
     class Store:
-        def __init__(self, definition: object) -> None:
+        def __init__(self, definition: object, *, snapshot: dict | None = None) -> None:
             identity = register_or_resolve(definition)
             self.run = SimpleNamespace(
                 run_id="run-pinned",
                 workflow_id=identity.workflowId,
                 workflow_version_id=identity.workflowVersionId,
                 structure_hash=identity.structureHash,
+                input_snapshot_json=json.dumps(snapshot or {}),
             )
 
         def get_run(self, run_id: str) -> object | None:
@@ -683,6 +685,20 @@ def test_real_ports_required_kinds_follow_pinned_definition() -> None:
     assert v3_ports.required_artifact_kinds(action("hypothesis_design")) == (
         "hypothesis_set",
     )
+    from core.research.competition.stage_one_completion_policy import (
+        load_stage_one_completion_policy,
+    )
+
+    policy = load_stage_one_completion_policy().to_dict()
+    stage_one_ports = RealDomainPorts(
+        Store(
+            build_challenge_cup_workflow_definition_v3(),
+            snapshot={"stageOneCompletionPolicy": policy},
+        )
+    )
+    assert stage_one_ports.required_artifact_kinds(
+        action("hypothesis_design")
+    ) == tuple(policy["requiredArtifactKinds"])
     with pytest.raises(WorkflowDefinitionNodeMismatch):
         v3_ports.required_artifact_kinds(action("source_finding"))
 
@@ -704,3 +720,40 @@ def test_every_produced_kind_has_authority_mapping() -> None:
     }
     missing = [kind for kind in sorted(kinds) if resolve_artifact_authority(kind) is None]
     assert missing == [], f"Artifact kinds missing authority mapping: {missing}"
+
+
+def test_legacy_agent_artifact_builder_reads_stage_one_extras_from_canonical_store(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.research.competition.stage_one_completion_policy import (
+        load_stage_one_completion_policy,
+    )
+    from core.web.services.team_workflow.research_runtime import (
+        agent_task_artifact_builder as builder,
+    )
+
+    policy = load_stage_one_completion_policy().to_dict()
+    calls: list[str] = []
+
+    def fake_load(kind: str, **kwargs):
+        calls.append(kind)
+        return {"payload": {"kind": kind, "canonical": True}}
+
+    monkeypatch.setattr(builder, "load_scoped_artifact_payload", fake_load)
+    payloads = builder._stage_one_completion_payloads(
+        {
+            "runId": "run-stage-one",
+            "teamId": "team-stage-one",
+            "inputSnapshot": {
+                "sourceCollectionRunId": "source-stage-one",
+                "stageOneCompletionPolicy": policy,
+            },
+        },
+        node_id="hypothesis_design",
+        produced_kinds=("hypothesis_set",),
+    )
+
+    expected_extra_kinds = policy["requiredArtifactKinds"][1:]
+    assert calls == expected_extra_kinds
+    assert list(payloads) == expected_extra_kinds
+    assert all(payload["canonical"] is True for payload in payloads.values())
