@@ -23,6 +23,7 @@ from core.infrastructure import developer_sandbox
 from core.research.workflow.contracts import (
     ContractValidationError,
     HypothesisRound,
+    review_call_budget_for,
     scope_hash_for,
 )
 from core.web.services.team_workflow.jsonl_quarantine import (
@@ -165,6 +166,7 @@ def _round_definition(record: Mapping[str, Any]) -> dict[str, Any]:
             "positionSeed",
             "roles",
             "modelInvocationReceipts",
+            "reviewCallBudget",
             "revisionEnvelope",
             "lineage",
             "meetingRefs",
@@ -251,6 +253,10 @@ def create_hypothesis_round(team_id: str, payload: Mapping[str, Any] | None = No
                 ],
             }
         )
+    if isinstance(request.get("reviewCallBudget"), Mapping) and request[
+        "reviewCallBudget"
+    ]:
+        record["reviewCallBudget"] = dict(request["reviewCallBudget"])
     if isinstance(request.get("revisionEnvelope"), Mapping):
         record["revisionEnvelope"] = dict(request["revisionEnvelope"])
     # Fail closed before persistence: parse validates shape, completeness of
@@ -683,6 +689,12 @@ def generate_hypothesis_round_from_meeting(
         context["_modelInvocationReceiptAuthority"] = (
             dict(receipt_authority) if isinstance(receipt_authority, Mapping) else None
         )
+    # FORMAL passes the exact Stage-1 review call budget it derived from the
+    # bounded context; the executor cross-validates the wiring and fails
+    # closed on any disagreement before spending a single review call.
+    formal_execution = (
+        execution_mode is hypothesis_review_executor.HypothesisReviewExecutionMode.FORMAL
+    )
     review = hypothesis_review_executor.execute_hypothesis_review(
         context,
         round_id=round_id,
@@ -694,6 +706,15 @@ def generate_hypothesis_round_from_meeting(
         revision_runner=revision_runner,
         reviewer_assignments={"metareview": coordinator_agent},
         position_seed=str(request.get("positionSeed") or "").strip(),
+        **(
+            {
+                "expected_review_call_budget": review_call_budget_for(
+                    len(context.get("candidates") or [])
+                ).to_dict()
+            }
+            if formal_execution
+            else {}
+        ),
     )
     meeting_refs: list[dict[str, str]] = []
     for bound_meeting, digest, decision_ids in zip(
@@ -726,6 +747,7 @@ def generate_hypothesis_round_from_meeting(
             "positionSeed": review["positionSeed"],
             "roles": review["roles"],
             "modelInvocationReceipts": review.get("modelInvocationReceipts", []),
+            "reviewCallBudget": review.get("reviewCallBudget"),
             **(
                 {"revisionEnvelope": dict(review["revisionEnvelope"])}
                 if isinstance(review.get("revisionEnvelope"), Mapping)

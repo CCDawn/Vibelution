@@ -31,6 +31,7 @@ from __future__ import annotations
 import concurrent.futures
 import hashlib
 import json
+import logging
 import random
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -43,9 +44,14 @@ from core.research.competition.question_result_package import (
 )
 from core.research.workflow.contracts import (
     COMPARISON_OUTCOMES,
+    MAX_FINALIST_LIMIT,
+    REVIEW_CALL_BUDGET_FORMULA,
     SCORE_DIMENSIONS,
     ContractValidationError,
     CoreHypothesisCoherenceResult,
+    ReviewCallBudget,
+    review_call_budget_for,
+    reconcile_review_call_budget,
 )
 from core.research.workflow.contracts.hypothesis_quality import (
     normalize_hypothesis_scores,
@@ -54,6 +60,8 @@ from core.research.workflow.contracts.model_invocation_receipt import (
     ModelInvocationReceipt,
     ModelInvocationStatus,
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 REFLECTION_ROLE = "research_evidence_reviewer"
 PAIRWISE_ROLE = "research_theme_synthesizer"
@@ -998,23 +1006,33 @@ def execute_hypothesis_review(
     reviewer_assignments: Mapping[str, Any] | None = None,
     position_seed: str = "",
     max_concurrent_calls: int | None = None,
+    expected_review_call_budget: Mapping[str, Any] | ReviewCallBudget | None = None,
 ) -> dict[str, Any]:
     """Run separated review steps over one bounded review context.
 
     ``execution_mode`` defaults to ``DEV`` for existing fixture callers.  A
     ``FORMAL`` request is fenced before any review step: all five real runners
-    plus a real revision runner must be present, and every call must return a
-    unique provider-bound receipt.
+    plus a real revision runner must be present, every call must return a
+    unique provider-bound receipt, and the finalist count may not exceed
+    ``MAX_FINALIST_LIMIT`` — the exact Stage-1 review call budget is
+    ``n + n(n-1)/2 + 2`` review calls (n individual + n(n-1)/2 pairwise +
+    Pareto + MetaReview), so extra candidates fail closed instead of silently
+    spending an over-budget C(n,2) fan-out; trimming candidates belongs to the
+    upstream screening, never to this executor.
     The reflection and pairwise runner calls run with bounded parallelism
     (``max_concurrent_calls``; default ``MAX_CONCURRENT_REVIEW_CALLS``, values
     below 2 fall back to fully serial invocation); results are always
     assembled in input order and every step still fails closed on any
     incomplete output.
+    ``expected_review_call_budget`` lets the caller pass the budget it derived
+    upstream; a disagreement with the actual candidate set fails closed before
+    any review call.
 
     Returns the candidate scores, pairwise comparisons, Pareto analysis, and
     MetaReview ready for ``HypothesisRound`` persistence, plus the role
-    attribution and the recorded pairwise position seed.  Raises
-    ``ContractValidationError`` on any incomplete step output.
+    attribution, the recorded pairwise position seed, and the
+    ``reviewCallBudget`` record proving the exact budget was respected.
+    Raises ``ContractValidationError`` on any incomplete step output.
     """
 
     if not isinstance(context, Mapping):
@@ -1035,6 +1053,42 @@ def execute_hypothesis_review(
         [] if mode is HypothesisReviewExecutionMode.FORMAL else None
     )
     candidates = _context_candidates(context)
+    finalist_count = len(candidates)
+    # Exact Stage-1 review call budget (n + n(n-1)/2 + 2).  Fail closed
+    # before any review call when the wiring disagrees with the candidate
+    # set or the finalist count busts the formal budget.
+    if expected_review_call_budget is not None:
+        expected_budget = (
+            expected_review_call_budget
+            if isinstance(expected_review_call_budget, ReviewCallBudget)
+            else ReviewCallBudget.from_dict(expected_review_call_budget)
+        )
+        if expected_budget.finalistCount != finalist_count:
+            raise ContractValidationError(
+                "review call budget was derived for "
+                f"{expected_budget.finalistCount} finalists but the review "
+                f"context carries {finalist_count} candidates "
+                f"({expected_budget.describe()})"
+            )
+    budget = review_call_budget_for(finalist_count)
+    if finalist_count > MAX_FINALIST_LIMIT:
+        formal_budget = review_call_budget_for(MAX_FINALIST_LIMIT)
+        over_budget_detail = (
+            f"{finalist_count} candidates would require {budget.totalReviewCalls} "
+            f"review calls ({budget.describe()}); formal review allows at most "
+            f"{MAX_FINALIST_LIMIT} finalists ({formal_budget.describe()})"
+        )
+        if mode is HypothesisReviewExecutionMode.FORMAL:
+            raise ContractValidationError(
+                "formal hypothesis review exceeds the exact review call budget: "
+                f"{over_budget_detail}; reduce the finalists upstream at "
+                "screening instead of silently over-running the budget here"
+            )
+        _LOGGER.warning(
+            "dev hypothesis review exceeds the exact review call budget: %s; "
+            "trim candidates upstream at screening",
+            over_budget_detail,
+        )
     require_core_coherence = bool(context.get("requireCoreHypothesisCoherence")) or (
         bool(candidates)
         and all(
@@ -1159,6 +1213,21 @@ def execute_hypothesis_review(
         round_id=round_id,
         formal_receipts=formal_receipts,
     )
+    # Record actual review-step spending against the exact budget.  The four
+    # contract-enumerated steps (reflection / pairwise / Pareto / MetaReview)
+    # must exhaust the formula exactly; the FORMAL revision call stays
+    # outside the formula and is recorded separately for deadline accounting.
+    reconciliation = reconcile_review_call_budget(
+        budget,
+        individual_review_calls=len(reviewed_candidates),
+        pairwise_comparison_calls=len(comparisons),
+        pareto_calls=1,
+        metareview_calls=1,
+    )
+    budget_record = {
+        **budget.to_dict(),
+        "actual": reconciliation.to_dict(),
+    }
     revision_envelope = None
     if mode is HypothesisReviewExecutionMode.FORMAL:
         assert revision_runner is not None
@@ -1171,6 +1240,13 @@ def execute_hypothesis_review(
             round_id=round_id,
             formal_receipts=formal_receipts,
         )
+        budget_record["revisionRunnerCalls"] = 1
+        if not reconciliation.exact:
+            raise ContractValidationError(
+                "formal hypothesis review deviated from the exact review call "
+                f"budget ({REVIEW_CALL_BUDGET_FORMULA}): "
+                + reconciliation.deviation_detail()
+            )
     result = {
         "schemaVersion": SCHEMA_VERSION,
         "executionMode": mode.value,
@@ -1180,6 +1256,7 @@ def execute_hypothesis_review(
         "pairwiseComparisons": comparisons,
         "pareto": pareto,
         "metaReview": meta_review,
+        "reviewCallBudget": budget_record,
         "roles": {
             "reflection": reflection_agent,
             "pairwise": pairwise_agent,

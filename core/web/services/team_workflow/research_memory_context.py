@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 from typing import Any
 
@@ -13,6 +14,8 @@ from core.web.services.team_workflow.outcome_graph import (
     plan_has_outcome_graph,
     project_outcome_memory,
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 NEGATIVE_PLAN_STATUSES = {
     "smoke_failed",
@@ -312,6 +315,21 @@ def build_hypothesis_review_context(
         for item in candidate_rows[:MAX_REVIEW_CANDIDATES]
         if str(item.get("candidateId") or "").strip()
     ]
+    if len(candidate_rows) > MAX_REVIEW_CANDIDATES:
+        # Silent truncation would hide both the dropped candidates and the
+        # pairwise call-budget growth of the survivors; the exact Stage-1
+        # budget (n + n(n-1)/2 + 2) makes the cost visible instead.
+        _LOGGER.warning(
+            "hypothesis review context truncated candidates from %d to %d "
+            "(MAX_REVIEW_CANDIDATES); at %d candidates the exact review call "
+            "budget n + n(n-1)/2 + 2 would reach %d calls",
+            len(candidate_rows),
+            MAX_REVIEW_CANDIDATES,
+            MAX_REVIEW_CANDIDATES,
+            MAX_REVIEW_CANDIDATES
+            + MAX_REVIEW_CANDIDATES * (MAX_REVIEW_CANDIDATES - 1) // 2
+            + 2,
+        )
     source_refs = _text_list(digest_row.get("sourceMessageRefs"), limit=MAX_REVIEW_SOURCE_REFS, max_length=360)
     merged_refs = list(extra_evidence_refs or [])
     for decision in bounded_decisions:

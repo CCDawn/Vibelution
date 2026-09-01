@@ -228,6 +228,15 @@ def test_generate_from_closed_meeting_completes_full_review_loop(tmp_path, monke
     parsed = HypothesisRound.from_dict(round_record)
     parsed.validate_complete()
 
+    # The exact Stage-1 review call budget is persisted with the round so the
+    # G1 acceptance can prove the budget was respected (n=3 -> 8 calls).
+    budget = round_record["reviewCallBudget"]
+    assert budget["formula"] == "n + n(n-1)/2 + 2"
+    assert budget["finalistCount"] == len(round_record["candidates"]) == 3
+    assert budget["totalReviewCalls"] == 8
+    assert budget["actual"]["reviewStepCalls"] == 8
+    assert budget["actual"]["matchesFormula"] is True
+
     # Reflection: every candidate carries the five decision scores; auxiliary
     # diagnostics, when present, stay separate from the Pareto input.
     assert [item["candidateId"] for item in round_record["candidates"]] == list(_SELECTED_IDS)
@@ -1538,3 +1547,118 @@ def test_formal_parallel_review_collects_unique_receipts_in_input_order():
     assert receipt_ids == expected_ids
     assert len(set(receipt_ids)) == len(receipt_ids) == 3 + 3 + 1 + 1 + 1
     assert all(item["metadata"]["questionStage"] == "review" for item in receipts)
+
+
+def _never_called_runners():
+    def _refuse(step):
+        def _runner(*_args):
+            raise AssertionError(f"{step} runner must not be called before budget fence")
+        return _runner
+
+    return {
+        "reflection_runner": _refuse("reflection"),
+        "pairwise_runner": _refuse("pairwise"),
+        "pareto_runner": _refuse("pareto"),
+        "metareview_runner": _refuse("metareview"),
+        "revision_runner": _refuse("revision"),
+    }
+
+
+def test_formal_review_fails_fast_before_any_call_when_finalists_exceed_budget():
+    ids = [f"cand-{index}" for index in range(4)]
+
+    with pytest.raises(ContractValidationError, match=r"n \+ n\(n-1\)/2 \+ 2") as excinfo:
+        hypothesis_review_executor.execute_hypothesis_review(
+            _parallel_reflection_context(*ids),
+            execution_mode="formal",
+            **_never_called_runners(),
+            reviewer_assignments={"metareview": "coordinator"},
+        )
+
+    message = str(excinfo.value)
+    assert "4 candidates would require 12 review calls" in message
+    assert "at most 3 finalists" in message
+
+
+def test_formal_review_records_exact_eight_call_budget_for_three_finalists():
+    ids = ("cand-a", "cand-b", "cand-c")
+    result = hypothesis_review_executor.execute_hypothesis_review(
+        _parallel_reflection_context(*ids),
+        execution_mode="formal",
+        **_provider_bound_review_runners(),
+        reviewer_assignments={"metareview": "coordinator"},
+    )
+
+    budget = result["reviewCallBudget"]
+    assert budget["formula"] == "n + n(n-1)/2 + 2"
+    assert budget["finalistCount"] == 3
+    assert budget["individualReviewCalls"] == 3
+    assert budget["pairwiseComparisonCalls"] == 3
+    assert budget["closingReviewCalls"] == 2
+    assert budget["totalReviewCalls"] == 8
+    assert budget["actual"]["reviewStepCalls"] == 8
+    assert budget["actual"]["matchesFormula"] is True
+    assert budget["actual"]["withinBudget"] is True
+    assert budget["revisionRunnerCalls"] == 1
+    # The recorded receipts prove the exact budget: 3 reflection + 3 pairwise
+    # + Pareto + MetaReview = 8 review calls, plus the out-of-formula revision.
+    assert len(result["modelInvocationReceipts"]) == 9
+
+
+def test_dev_review_records_budget_and_warns_without_hard_finalist_cap(caplog):
+    ids = [f"cand-{index}" for index in range(4)]
+
+    with caplog.at_level(
+        "WARNING",
+        logger="core.web.services.team_workflow.hypothesis_review_executor",
+    ):
+        result = hypothesis_review_executor.execute_hypothesis_review(
+            _parallel_reflection_context(*ids),
+            reviewer_assignments={"metareview": "coordinator"},
+        )
+
+    budget = result["reviewCallBudget"]
+    assert budget["totalReviewCalls"] == 12
+    assert budget["actual"]["reviewStepCalls"] == 12
+    assert budget["actual"]["matchesFormula"] is True
+    # DEV fixtures spend zero model calls; only the structural step count is
+    # reconciled against the formula.
+    assert "revisionRunnerCalls" not in budget
+    assert any("review call budget" in record.message for record in caplog.records)
+
+
+def test_review_rejects_expected_budget_derived_for_a_different_finalist_count():
+    expected_budget = hypothesis_review_executor.review_call_budget_for(3).to_dict()
+
+    with pytest.raises(ContractValidationError, match="derived for 3 finalists"):
+        hypothesis_review_executor.execute_hypothesis_review(
+            _direct_review_context(),
+            expected_review_call_budget=expected_budget,
+            reviewer_assignments={"metareview": "coordinator"},
+        )
+
+
+def test_formal_review_fails_closed_when_recorded_budget_deviates_from_formula(
+    monkeypatch,
+):
+    # Simulate a duplicated pairwise comparison slipping past the structural
+    # step: the closing reconciliation must fail the FORMAL round instead of
+    # persisting an over-budget review.
+    monkeypatch.setattr(
+        hypothesis_review_executor,
+        "deterministic_pairwise_order",
+        lambda candidate_ids, seed: [
+            (candidate_ids[0], candidate_ids[1]),
+            (candidate_ids[0], candidate_ids[1]),
+        ],
+    )
+
+    with pytest.raises(
+        ContractValidationError, match="deviated from the exact review call budget"
+    ):
+        hypothesis_review_executor.execute_hypothesis_review(
+            _direct_review_context(),
+            execution_mode="formal",
+            **_provider_bound_review_runners(),
+            reviewer_assignments={"metareview": "coordinator"},
+        )
