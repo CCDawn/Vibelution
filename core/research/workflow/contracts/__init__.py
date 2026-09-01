@@ -114,6 +114,12 @@ from .claim_ledger import (
     ClaimLedgerEntry,
 )
 from .competition_evaluation import CompetitionEvaluationSnapshot
+from .core_hypothesis_coherence import (
+    CORE_HYPOTHESIS_COHERENCE_CHECK_IDS,
+    CORE_HYPOTHESIS_COHERENCE_CONTRACT_VERSION,
+    CoreHypothesisCoherenceCheck,
+    CoreHypothesisCoherenceResult,
+)
 from .decision_record import (
     DECISION_KINDS,
     DECISION_STATUSES,
@@ -419,6 +425,8 @@ __all__ = [
     "CLAIM_SOURCES",
     "CLAIM_STATUSES",
     "COMPARISON_OUTCOMES",
+    "CORE_HYPOTHESIS_COHERENCE_CHECK_IDS",
+    "CORE_HYPOTHESIS_COHERENCE_CONTRACT_VERSION",
     "CURRENT_RESEARCH_TEAM_ROLE_CONTRACT",
     "CampaignActivationStatus",
     "CandidateMergeRecord",
@@ -437,6 +445,8 @@ __all__ = [
     "CompetitionEvaluationSnapshot",
     "ConfirmationContract",
     "ContractValidationError",
+    "CoreHypothesisCoherenceCheck",
+    "CoreHypothesisCoherenceResult",
     "DECISION_KINDS",
     "DECISION_STATUSES",
     "DEFAULT_APPROXIMATE_MATCH_AXES",

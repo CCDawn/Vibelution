@@ -45,6 +45,7 @@ from core.research.workflow.contracts import (
     COMPARISON_OUTCOMES,
     SCORE_DIMENSIONS,
     ContractValidationError,
+    CoreHypothesisCoherenceResult,
 )
 from core.research.workflow.contracts.hypothesis_quality import (
     normalize_hypothesis_scores,
@@ -131,6 +132,19 @@ MetaReviewRunner = Callable[
 
 class HypothesisReviewExecutionError(RuntimeError):
     """Base error for hypothesis review execution."""
+
+
+class CoreHypothesisCoherenceFailure(ContractValidationError):
+    """Stage-one reflection found a non-compensable coherence defect."""
+
+    code = "coherence_failure"
+
+    def __init__(self, candidate_ids: Sequence[str], *, artifact_ref: str = "") -> None:
+        self.candidate_ids = tuple(str(item) for item in candidate_ids)
+        self.artifact_ref = str(artifact_ref or "")
+        super().__init__(
+            "coherence_failure: " + ", ".join(self.candidate_ids)
+        )
 
 
 def _validated_runner_payload(
@@ -340,6 +354,7 @@ def _reflection_step(
     runner: ReflectionRunner | None,
     agent_id: str,
     formal_receipts: list[dict[str, Any]] | None,
+    require_core_coherence: bool = False,
     max_concurrent_calls: int = MAX_CONCURRENT_REVIEW_CALLS,
 ) -> list[dict[str, Any]]:
     """Score every candidate independently on the five fixed dimensions."""
@@ -363,9 +378,17 @@ def _reflection_step(
         merged = dict(candidate)
         explicit_dimension_reviews: Any = None
         has_explicit_dimension_reviews = False
+        coherence_receipt_ref = ""
         if runner is not None:
+            raw_produced = produced_by_candidate[index]
+            if isinstance(raw_produced, ProviderBoundReviewResult) and isinstance(
+                raw_produced.model_invocation_receipt, Mapping
+            ):
+                coherence_receipt_ref = str(
+                    raw_produced.model_invocation_receipt.get("receiptId") or ""
+                ).strip()
             produced = _validated_runner_payload(
-                produced_by_candidate[index],
+                raw_produced,
                 step_label=f"reflection for candidate {candidate_id}",
                 formal_receipts=formal_receipts,
             )
@@ -448,6 +471,19 @@ def _reflection_step(
                 list(explicit_dimension_reviews),
                 candidate_id=candidate_id,
             )
+        if require_core_coherence:
+            raw_coherence = merged.get("coreHypothesisCoherence")
+            if not isinstance(raw_coherence, Mapping):
+                raise ContractValidationError(
+                    f"coherence_failure: candidate {candidate_id} is missing the five-item core coherence gate"
+                )
+            coherence = CoreHypothesisCoherenceResult.from_review_payload(
+                raw_coherence,
+                candidate_id=candidate_id,
+                reviewer=str(merged.get("reviewedBy") or "").strip() or agent_id,
+                receipt_ref=coherence_receipt_ref,
+            )
+            reviewed_item["coreHypothesisCoherence"] = coherence.to_dict()
         reviewed.append(reviewed_item)
     return reviewed
 
@@ -769,6 +805,14 @@ def execute_hypothesis_review(
         [] if mode is HypothesisReviewExecutionMode.FORMAL else None
     )
     candidates = _context_candidates(context)
+    require_core_coherence = bool(context.get("requireCoreHypothesisCoherence")) or (
+        bool(candidates)
+        and all(
+            str(item.get("candidateAuthority") or "").strip().lower()
+            == "formal_grounded_candidate"
+            for item in candidates
+        )
+    )
     assignments = dict(reviewer_assignments) if isinstance(reviewer_assignments, Mapping) else {}
     reflection_agent = str(assignments.get("reflection") or "").strip() or REFLECTION_ROLE
     pairwise_agent = str(assignments.get("pairwise") or "").strip() or PAIRWISE_ROLE
@@ -791,8 +835,55 @@ def execute_hypothesis_review(
         runner=reflection_runner,
         agent_id=reflection_agent,
         formal_receipts=formal_receipts,
+        require_core_coherence=require_core_coherence,
         max_concurrent_calls=effective_concurrency,
     )
+    coherence_results = [
+        dict(item.get("coreHypothesisCoherence"))
+        for item in reviewed_candidates
+        if isinstance(item.get("coreHypothesisCoherence"), Mapping)
+    ]
+    if require_core_coherence:
+        if len(coherence_results) != len(reviewed_candidates):
+            raise ContractValidationError(
+                "coherence_failure: every stage-one finalist requires a core coherence result"
+            )
+        coherence_artifact_ref = ""
+        if formal_receipts is not None:
+            authority = (
+                context.get("_modelInvocationReceiptAuthority")
+                if isinstance(context.get("_modelInvocationReceiptAuthority"), Mapping)
+                else {}
+            )
+            team_id = str(context.get("teamId") or "").strip()
+            workflow_run_id = str(authority.get("workflowRunId") or "").strip()
+            if not team_id or not workflow_run_id:
+                raise ContractValidationError(
+                    "coherence_failure: formal coherence artifact scope is unavailable"
+                )
+            from core.web.services.team_workflow.research_runtime.core_hypothesis_coherence_artifact_writer import (
+                record_core_hypothesis_coherence_artifact,
+            )
+
+            coherence_artifact_ref = record_core_hypothesis_coherence_artifact(
+                team_id=team_id,
+                workflow_run_id=workflow_run_id,
+                review_context_id=str(context.get("contextId") or ""),
+                results=coherence_results,
+                require_receipts=True,
+            )["canonicalRef"]
+        failed = [
+            str(item.get("candidateId") or "")
+            for item in coherence_results
+            if item.get("passed") is not True
+        ]
+        if failed:
+            raise CoreHypothesisCoherenceFailure(
+                failed,
+                artifact_ref=coherence_artifact_ref,
+            )
+    else:
+        coherence_artifact_ref = ""
     comparisons = _pairwise_step(
         context,
         reviewed_candidates,
@@ -838,4 +929,7 @@ def execute_hypothesis_review(
     }
     if formal_receipts is not None:
         result["modelInvocationReceipts"] = formal_receipts
+    if require_core_coherence:
+        result["coreHypothesisCoherence"] = coherence_results
+        result["coreHypothesisCoherenceArtifactRef"] = coherence_artifact_ref
     return result

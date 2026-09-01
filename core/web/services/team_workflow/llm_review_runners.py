@@ -36,7 +36,11 @@ from core.research.competition.question_result_package import (
     REQUIRED_REVIEW_DIMENSIONS,
     REVIEW_DIMENSION_RATINGS,
 )
-from core.research.workflow.contracts import ContractValidationError
+from core.research.workflow.contracts import (
+    CORE_HYPOTHESIS_COHERENCE_CHECK_IDS,
+    ContractValidationError,
+    CoreHypothesisCoherenceResult,
+)
 from core.research.workflow.contracts.hypothesis_quality import (
     HYPOTHESIS_SCORE_DIMENSIONS,
     canonical_hypothesis_score_rubric,
@@ -527,10 +531,11 @@ Rubric（分数 0.0-1.0，两位小数，按分档描述对号入座）：
 - dimensionReviews 是与 5+2 完全独立的结果包审计七维，每个维度恰好一行，维度只能为 {list(REQUIRED_REVIEW_DIMENSIONS)}。不得把 5+2 评分字段映射、改名或复制成审计七维。
 - 每行 {{"hypothesis_id","dimension","rating","rationale","reviewer","evidence_refs"}}；rating 只能取 {list(REVIEW_DIMENSION_RATINGS)}；rationale 必须针对该审计维度给出非空正文；evidence_refs 只能从输入 refsWhitelist 中选择，白名单为空则给空数组。
 - reviewedBy 固定为 "llm"，status 固定为 "reviewed"。
+- 若输入 requireCoreHypothesisCoherence=true，必须在同一次 Reflection 输出 coreHypothesisCoherence，不得新增模型调用。它必须恰好按顺序覆盖 {list(CORE_HYPOTHESIS_COHERENCE_CHECK_IDS)}；每项包含 checkId、passed、非空 rationale、claimRefs、evidenceRefs。evidenceRefs 只能来自 refsWhitelist；五项分别审查因果链、prediction 是否由 mechanism 推导、falsifier 是否命中机制、population/boundary 是否冲突、候选边界是否与替代方案可区分。
 - 严格输出单个 JSON 对象。
 
 输出 JSON 结构：
-{{"claim": str, "rationale": str, "differenceFromAlternatives": str, "lineageRefs": [str], "scores": {{{", ".join(f'"{d}": float' for d in HYPOTHESIS_SCORE_DIMENSIONS)}}}, "reviewedBy": "llm", "status": "reviewed", "dimensionReviews": [dict]}}
+{{"claim": str, "rationale": str, "differenceFromAlternatives": str, "lineageRefs": [str], "scores": {{{", ".join(f'"{d}": float' for d in HYPOTHESIS_SCORE_DIMENSIONS)}}}, "reviewedBy": "llm", "status": "reviewed", "dimensionReviews": [dict], "coreHypothesisCoherence": {{"candidateId": str, "reviewer": str, "checks": [{{"checkId": str, "passed": bool, "rationale": str, "claimRefs": [str], "evidenceRefs": [str]}}]}}}}
 """
 
 _PAIRWISE_SYSTEM_PROMPT = """你是科研假说评审员（两两比较步骤）。对给出的左右两个候选做一次比较。
@@ -713,6 +718,13 @@ def build_hypothesis_review_runners(
                     "contextId": str(context.get("contextId") or ""),
                     "question": str(context.get("question") or ""),
                 },
+                "requireCoreHypothesisCoherence": bool(
+                    context.get("requireCoreHypothesisCoherence")
+                )
+                or (
+                    str(candidate.get("candidateAuthority") or "").strip().lower()
+                    == "formal_grounded_candidate"
+                ),
                 "refsWhitelist": refs_whitelist,
                 "scoreDimensions": list(HYPOTHESIS_SCORE_DIMENSIONS),
                 "reviewDimensions": list(REQUIRED_REVIEW_DIMENSIONS),
@@ -740,6 +752,37 @@ def build_hypothesis_review_runners(
             reviewer=result["reviewedBy"],
             refs_whitelist=refs_whitelist,
         )
+        require_coherence = bool(context.get("requireCoreHypothesisCoherence")) or (
+            str(candidate.get("candidateAuthority") or "").strip().lower()
+            == "formal_grounded_candidate"
+        )
+        if require_coherence:
+            raw_coherence = result.get("coreHypothesisCoherence")
+            if not isinstance(raw_coherence, Mapping):
+                raise ContractValidationError(
+                    "coherence_failure: reflection output is missing coreHypothesisCoherence"
+                )
+            coherence = CoreHypothesisCoherenceResult.from_review_payload(
+                raw_coherence,
+                candidate_id=str(candidate.get("candidateId") or ""),
+                reviewer=result["reviewedBy"],
+            )
+            allowed_refs = set(refs_whitelist)
+            if any(
+                ref not in allowed_refs
+                for check in coherence.checks
+                for ref in check.evidenceRefs
+            ):
+                raise ContractValidationError(
+                    "coherence_failure: core coherence contains an unbound evidence ref"
+                )
+            # The executor adds the provider receipt and canonical artifact
+            # hash after it verifies the provider-bound result.
+            result["coreHypothesisCoherence"] = {
+                "candidateId": coherence.candidateId,
+                "reviewer": coherence.reviewer,
+                "checks": [item.to_dict() for item in coherence.checks],
+            }
         if provider_receipt is not None:
             return ProviderBoundReviewResult(result, provider_receipt)
         return result

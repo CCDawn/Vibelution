@@ -4406,6 +4406,180 @@ def test_v2_selection_command_replays_original_ids_before_stale_cas(
     assert len(calls) == 1
 
 
+def test_stage_one_selection_screens_before_persisting_or_opening_review(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.web.services import team_service
+    from core.web.services.team_workflow import hypothesis_selection
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_first_chain,
+        hypothesis_first_state_v2,
+    )
+
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
+    monkeypatch.setattr(hypothesis_first_chain, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        hypothesis_first_chain,
+        "_question_scope_envelope",
+        lambda *_args: {
+            "program": "program",
+            "theme": "theme",
+            "campaign": "campaign",
+            "question": "SCI-001",
+            "branch": "main",
+            "workflow": "hypothesis_first",
+            "agentId": "operator",
+            "mode": "formal",
+        },
+    )
+    snapshot = {
+        "stateVersion": "hf2-action:origin:selection",
+        "resetBoundary": {"resetId": "origin"},
+        "allowedActions": [
+            {
+                "kind": "command",
+                "actionId": "record-selection",
+                "command": "record_selection",
+                "payload": {
+                    "questionId": "SCI-001",
+                    "generationAttemptId": "attempt-1",
+                },
+                "enabled": True,
+                "idempotencyKey": "selection-stage-one",
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        hypothesis_first_state_v2,
+        "project_hypothesis_first_state_v2",
+        lambda *_args, **_kwargs: snapshot,
+    )
+    order: list[str] = []
+
+    def screen(**kwargs):
+        order.append("screen")
+        assert kwargs["selected_candidate_ids"] == ["cand-a", "cand-b", "cand-c", "cand-d"]
+        return {
+            "candidateIds": ["cand-b", "cand-c", "cand-d"],
+            "artifactRef": "candidate_screening://team-1/run-stage-one/hash",
+        }
+
+    def record(_team_id, payload, **_kwargs):
+        order.append("record")
+        assert payload["selectedCandidateIds"] == ["cand-b", "cand-c", "cand-d"]
+        return {
+            "status": "created",
+            "selection": {
+                "selectionId": "selection-stage-one",
+                "questionId": "SCI-001",
+                "selectedCandidateIds": list(payload["selectedCandidateIds"]),
+            },
+            "reviewMeeting": {"status": "opened"},
+        }
+
+    monkeypatch.setattr(
+        hypothesis_first_chain,
+        "_screen_stage_one_selection_candidates",
+        screen,
+    )
+    monkeypatch.setattr(hypothesis_selection, "record_hypothesis_selection", record)
+
+    result = hypothesis_first_chain.execute_v2_command(
+        "team-1",
+        _record_selection_command_request(
+            key="selection-stage-one",
+            candidates=["cand-d", "cand-c", "cand-b", "cand-a"],
+        ),
+        question_id="SCI-001",
+        workflow_run_id="run-stage-one",
+    )
+
+    assert order == ["screen", "record"]
+    assert result["result"]["selection"]["selectedCandidateIds"] == [
+        "cand-b",
+        "cand-c",
+        "cand-d",
+    ]
+
+
+def test_stage_one_diversity_collapse_writes_no_selection_or_review(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.web.services import team_service
+    from core.web.services.team_workflow import hypothesis_selection
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_first_chain,
+        hypothesis_first_state_v2,
+    )
+
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
+    monkeypatch.setattr(hypothesis_first_chain, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        hypothesis_first_chain,
+        "_question_scope_envelope",
+        lambda *_args: {"question": "SCI-001"},
+    )
+    snapshot = {
+        "stateVersion": "hf2-action:origin:selection",
+        "resetBoundary": {"resetId": "origin"},
+        "allowedActions": [
+            {
+                "kind": "command",
+                "actionId": "record-selection",
+                "command": "record_selection",
+                "payload": {
+                    "questionId": "SCI-001",
+                    "generationAttemptId": "attempt-1",
+                },
+                "enabled": True,
+                "idempotencyKey": "selection-collapse",
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        hypothesis_first_state_v2,
+        "project_hypothesis_first_state_v2",
+        lambda *_args, **_kwargs: snapshot,
+    )
+    persisted = 0
+
+    def record(*_args, **_kwargs):
+        nonlocal persisted
+        persisted += 1
+        return {}
+
+    def collapse(**_kwargs):
+        raise hypothesis_first_chain.StageOneCandidateScreeningError(
+            "diversity_collapse",
+            artifact_ref="candidate_screening://team-1/run-stage-one/hash",
+        )
+
+    monkeypatch.setattr(hypothesis_selection, "record_hypothesis_selection", record)
+    monkeypatch.setattr(
+        hypothesis_first_chain,
+        "_screen_stage_one_selection_candidates",
+        collapse,
+    )
+
+    with pytest.raises(
+        hypothesis_first_chain.StageOneCandidateScreeningError,
+        match="diversity_collapse",
+    ):
+        hypothesis_first_chain.execute_v2_command(
+            "team-1",
+            _record_selection_command_request(
+                key="selection-collapse",
+                candidates=["cand-a", "cand-b"],
+            ),
+            question_id="SCI-001",
+            workflow_run_id="run-stage-one",
+        )
+
+    assert persisted == 0
+
+
 def test_v2_selection_command_rejects_same_key_with_different_input(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

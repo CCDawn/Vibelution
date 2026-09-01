@@ -3119,6 +3119,28 @@ def test_candidate_generation_uses_trusted_short_answer_contract():
     assert "正文不超过 180 个中文字符" in prompt
     assert "只输出一条 CANDIDATE 标记" in prompt
 
+    grounded_prompt = chat_room_service._build_participant_prompt(
+        room={"roomId": "room-grounded", "title": "grounded"},
+        round_payload={
+            "topic": "正式证据接地候选生成",
+            "purpose": "meeting",
+            "mode": "round_robin",
+            "config": {
+                "challengeDeadlineAtMs": 1_000_000,
+                "meetingType": "hypothesis_candidate_generation",
+                "candidateAuthority": "formal_grounded_candidate",
+            },
+        },
+        participant={
+            "participantId": "participant-a",
+            "agentCode": "A",
+            "sessionId": "session-a",
+        },
+        prior_messages=[],
+    )
+    assert "挑战杯会议结构化输出合同" in grounded_prompt
+    assert "只输出一条 CANDIDATE 标记" not in grounded_prompt
+
 def test_ordinary_room_does_not_inherit_challenge_deadline(tmp_path, monkeypatch):
     _isolate_chat_room_kernel(tmp_path, monkeypatch)
     _seed_chat_sessions(tmp_path)

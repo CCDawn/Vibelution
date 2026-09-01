@@ -43,6 +43,76 @@ from core.research.workflow.contracts import (
 )
 from core.research.workflow.contracts.research_scope import scope_hash_for
 
+FORMAL_GROUNDED_CANDIDATE_AUTHORITY = "formal_grounded_candidate"
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, (list, tuple)):
+        return []
+    result: list[str] = []
+    for item in value:
+        text = str(item or "").strip()
+        if text and text not in result:
+            result.append(text)
+    return result
+
+
+def build_screening_drafts_from_candidates(
+    candidates: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Project formal R1 candidates into the existing screening contract.
+
+    The producer owns the five axes, prediction, falsifier, and evidence refs.
+    Screening only records whether those explicit fields satisfy its two
+    structural thresholds; it never asks another model or infers missing text.
+    """
+
+    drafts: list[dict[str, Any]] = []
+    for candidate in candidates:
+        candidate_id = str(candidate.get("candidateId") or "").strip()
+        authority = str(candidate.get("candidateAuthority") or "").strip().lower()
+        if authority != FORMAL_GROUNDED_CANDIDATE_AUTHORITY:
+            raise ContractValidationError(
+                f"candidate {candidate_id or '<missing>'} is not a formal grounded candidate"
+            )
+        axis_profile = candidate.get("axisProfile")
+        if not isinstance(axis_profile, Mapping):
+            raise ContractValidationError(
+                f"formal grounded candidate {candidate_id or '<missing>'} requires axisProfile"
+            )
+        # Validate at the producer boundary before the screening artifact is
+        # assembled, preserving the contract's exact closed five-axis shape.
+        normalized_axis_profile = CandidateScreeningDraft.from_dict(
+            {
+                "candidateId": candidate_id,
+                "axisProfile": dict(axis_profile),
+                "grounded": bool(_string_list(candidate.get("lineageRefs"))),
+                "groundingEvidenceRefs": _string_list(candidate.get("lineageRefs")),
+                "hardThresholdChecks": [
+                    {
+                        "thresholdId": "falsifiable_hypothesis",
+                        "passed": bool(str(candidate.get("testablePrediction") or "").strip()),
+                        "detail": (
+                            "candidate carries a testable prediction"
+                            if str(candidate.get("testablePrediction") or "").strip()
+                            else "candidate is missing a testable prediction"
+                        ),
+                    },
+                    {
+                        "thresholdId": "failure_condition_stated",
+                        "passed": bool(str(candidate.get("falsifier") or "").strip()),
+                        "detail": (
+                            "candidate carries a mechanism-targeting falsifier"
+                            if str(candidate.get("falsifier") or "").strip()
+                            else "candidate is missing a mechanism-targeting falsifier"
+                        ),
+                    },
+                ],
+            }
+        )
+        drafts.append(normalized_axis_profile.to_dict())
+    return drafts
+
 
 def _parse_drafts(
     drafts: Sequence[Mapping[str, Any] | CandidateScreeningDraft],
@@ -264,4 +334,4 @@ def screen_candidate_drafts(
     return CandidateScreeningArtifact.from_dict(payload)
 
 
-__all__ = ["screen_candidate_drafts"]
+__all__ = ["build_screening_drafts_from_candidates", "screen_candidate_drafts"]

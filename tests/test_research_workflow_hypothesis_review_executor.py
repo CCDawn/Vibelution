@@ -26,6 +26,7 @@ import pytest
 
 from core.research.workflow.contracts import (
     COMPARISON_OUTCOMES,
+    CORE_HYPOTHESIS_COHERENCE_CHECK_IDS,
     CURRENT_RESEARCH_TEAM_ROLE_CONTRACT,
     HYPOTHESIS_REVIEW_MEETING_TYPE,
     SCORE_DIMENSIONS,
@@ -713,6 +714,100 @@ def _complete_review_runners():
     }
 
 
+def _coherence_payload(candidate_id: str, *, failed_check: str = "") -> dict:
+    return {
+        "candidateId": candidate_id,
+        "reviewer": "llm:reviewer",
+        "checks": [
+            {
+                "checkId": check_id,
+                "passed": check_id != failed_check,
+                "rationale": f"{check_id} 已逐项核对",
+                "claimRefs": [f"claim:{candidate_id}:core"],
+                "evidenceRefs": [f"evidence:{candidate_id}:support"],
+            }
+            for check_id in CORE_HYPOTHESIS_COHERENCE_CHECK_IDS
+        ],
+    }
+
+
+def test_stage_one_coherence_failure_stops_before_pairwise_pareto_and_metareview():
+    calls = {"pairwise": 0, "pareto": 0, "metareview": 0}
+    runners = _complete_review_runners()
+
+    def reflection(candidate, context):
+        payload = runners["reflection_runner"](candidate, context)
+        payload["coreHypothesisCoherence"] = _coherence_payload(
+            candidate["candidateId"],
+            failed_check=(
+                "prediction_entails_mechanism"
+                if candidate["candidateId"] == "cand-b"
+                else ""
+            ),
+        )
+        return payload
+
+    def counted(name, runner):
+        def wrapped(*args):
+            calls[name] += 1
+            return runner(*args)
+
+        return wrapped
+
+    with pytest.raises(ContractValidationError, match="coherence_failure"):
+        hypothesis_review_executor.execute_hypothesis_review(
+            {
+                **_direct_review_context(),
+                "requireCoreHypothesisCoherence": True,
+            },
+            reflection_runner=reflection,
+            pairwise_runner=counted("pairwise", runners["pairwise_runner"]),
+            pareto_runner=counted("pareto", runners["pareto_runner"]),
+            metareview_runner=counted("metareview", runners["metareview_runner"]),
+            reviewer_assignments={"metareview": "coordinator"},
+        )
+
+    assert calls == {"pairwise": 0, "pareto": 0, "metareview": 0}
+
+
+def test_stage_one_coherence_passes_with_same_reflection_calls_and_is_returned():
+    runners = _complete_review_runners()
+
+    def reflection(candidate, context):
+        payload = runners["reflection_runner"](candidate, context)
+        payload["coreHypothesisCoherence"] = _coherence_payload(
+            candidate["candidateId"]
+        )
+        return payload
+
+    result = hypothesis_review_executor.execute_hypothesis_review(
+        {
+            **_direct_review_context(),
+            "requireCoreHypothesisCoherence": True,
+        },
+        reflection_runner=reflection,
+        pairwise_runner=runners["pairwise_runner"],
+        pareto_runner=runners["pareto_runner"],
+        metareview_runner=runners["metareview_runner"],
+        reviewer_assignments={"metareview": "coordinator"},
+    )
+
+    coherence = result["coreHypothesisCoherence"]
+    assert [item["candidateId"] for item in coherence] == ["cand-a", "cand-b"]
+    assert all(item["passed"] is True for item in coherence)
+    assert all(len(item["artifactHash"]) == 64 for item in coherence)
+
+
+def test_non_stage_one_review_keeps_existing_behavior_without_coherence_rows():
+    result = hypothesis_review_executor.execute_hypothesis_review(
+        _direct_review_context(),
+        **_complete_review_runners(),
+        reviewer_assignments={"metareview": "coordinator"},
+    )
+
+    assert "coreHypothesisCoherence" not in result
+
+
 def _provider_bound_receipt(
     receipt_id: str,
     *,
@@ -747,8 +842,8 @@ def _provider_bound_receipt(
     ).to_dict()
 
 
-def _provider_bound_review_runners(*, receipt_factory=None):
-    runners = _complete_review_runners()
+def _provider_bound_review_runners(*, receipt_factory=None, runners=None):
+    runners = runners or _complete_review_runners()
     call_index = 0
     # Reflection calls run concurrently now; receipt numbering must stay unique.
     call_index_lock = threading.Lock()
@@ -821,6 +916,53 @@ def test_formal_review_accepts_one_unique_provider_receipt_per_model_call():
     assert len({item["receiptId"] for item in receipts}) == 5
     assert {item["metadata"]["questionStage"] for item in receipts} == {"review"}
     assert all("review" in item["metadata"]["outcomeKinds"] for item in receipts)
+
+
+def test_formal_stage_one_coherence_artifact_is_receipt_bound_and_readable(
+    tmp_path, monkeypatch
+):
+    from core.web.services.team_workflow.research_runtime import (
+        artifact_readback_registry,
+        workflow_artifact_store,
+    )
+
+    monkeypatch.setattr(workflow_artifact_store, "PROJECT_ROOT", tmp_path)
+    runners = _complete_review_runners()
+    base_reflection = runners["reflection_runner"]
+
+    def reflection(candidate, context):
+        payload = base_reflection(candidate, context)
+        payload["coreHypothesisCoherence"] = _coherence_payload(
+            candidate["candidateId"]
+        )
+        return payload
+
+    runners["reflection_runner"] = reflection
+    context = {
+        **_direct_review_context(),
+        "teamId": "team-stage-one",
+        "_modelInvocationReceiptAuthority": {
+            "workflowRunId": "workflow-run-formal"
+        },
+    }
+    context["candidates"] = [
+        {**candidate, "candidateAuthority": "formal_grounded_candidate"}
+        for candidate in context["candidates"]
+    ]
+
+    result = hypothesis_review_executor.execute_hypothesis_review(
+        context,
+        execution_mode="formal",
+        **_provider_bound_review_runners(runners=runners),
+        reviewer_assignments={"metareview": "coordinator"},
+    )
+
+    artifact_ref = result["coreHypothesisCoherenceArtifactRef"]
+    assert artifact_readback_registry.read_domain_artifact(artifact_ref) is not None
+    coherence = result["coreHypothesisCoherence"]
+    assert all(item["receiptRef"] for item in coherence)
+    receipt_ids = {item["receiptId"] for item in result["modelInvocationReceipts"]}
+    assert {item["receiptRef"] for item in coherence}.issubset(receipt_ids)
 
 
 @pytest.mark.parametrize(

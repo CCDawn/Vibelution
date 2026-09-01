@@ -140,6 +140,14 @@ def test_structured_candidate_preserves_optional_grounding_fields() -> None:
             "proposedBy": "challenge_cup_hypothesis",
             "lineageRefs": ["evidence:accepted-1", "evidence:boundary-1"],
             "testablePrediction": "阻断 A1 受体后记忆表现应恢复",
+            "falsifier": "阻断 A1 受体后记忆表现仍不恢复",
+            "axisProfile": {
+                "mechanism": "腺苷 A1 受体介导",
+                "intervention": "阻断 A1 受体",
+                "observable": "记忆表现",
+                "population": "睡眠剥夺受试者",
+                "boundary": "急性睡眠剥夺",
+            },
         }
     ]
 
@@ -153,3 +161,5 @@ def test_structured_candidate_preserves_optional_grounding_fields() -> None:
         "evidence:boundary-1",
     ]
     assert candidate["testablePrediction"] == "阻断 A1 受体后记忆表现应恢复"
+    assert candidate["falsifier"] == "阻断 A1 受体后记忆表现仍不恢复"
+    assert candidate["axisProfile"]["mechanism"] == "腺苷 A1 受体介导"

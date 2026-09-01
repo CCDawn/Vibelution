@@ -64,7 +64,7 @@ def meeting_message_output_contract() -> str:
     ],
     "knowledgeCandidates": ["待进入知识治理的条目"],
     "proposedCandidates": [
-      {"candidateId": "候选 ID", "statement": "候选陈述", "rationale": "提出理由", "proposedBy": "角色", "lineageRefs": ["证据引用"], "testablePrediction": "可检验预测"}
+      {"candidateId": "候选 ID", "statement": "候选陈述", "rationale": "提出理由", "proposedBy": "角色", "lineageRefs": ["证据引用"], "testablePrediction": "可检验预测", "falsifier": "能够否定或显著削弱核心机制的结果", "axisProfile": {"mechanism": "机制", "intervention": "干预", "observable": "观测量", "population": "研究对象", "boundary": "适用边界"}}
     ],
     "evidenceRequests": [
       {
@@ -235,6 +235,30 @@ def _normalize_proposed_candidates(value: Any) -> list[dict[str, Any]]:
                     ).strip()
                 }
                 if "testablePrediction" in item
+                else {}
+            ),
+            **(
+                {"falsifier": str(item.get("falsifier") or "").strip()}
+                if "falsifier" in item
+                else {}
+            ),
+            **(
+                {
+                    "axisProfile": {
+                        axis: _required_text(
+                            item["axisProfile"].get(axis),
+                            field=f"protocol.proposedCandidates[].axisProfile.{axis}",
+                        )
+                        for axis in (
+                            "mechanism",
+                            "intervention",
+                            "observable",
+                            "population",
+                            "boundary",
+                        )
+                    }
+                }
+                if isinstance(item.get("axisProfile"), Mapping)
                 else {}
             ),
         }

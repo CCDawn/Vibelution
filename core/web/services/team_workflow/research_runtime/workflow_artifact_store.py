@@ -45,6 +45,8 @@ _SUPPORTED_KINDS = frozenset(
         "review_independence",
         "review_disagreement",
         "evolution_lineage",
+        "candidate_screening",
+        "core_hypothesis_coherence",
     }
 )
 

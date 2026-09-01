@@ -121,8 +121,9 @@ _GENERATION_AGENDA_RULES = (
 )
 _FORMAL_GROUNDED_GENERATION_AGENDA_RULES = (
     "本轮只生成正式证据接地候选；R0 探索草案只能作为待修订输入，不能沿用其 candidateId",
-    "每个候选写入 protocol.proposedCandidates，必须包含新的 candidateId、statement、rationale、proposedBy、lineageRefs 和 testablePrediction",
+    "每个候选写入 protocol.proposedCandidates，必须包含新的 candidateId、statement、rationale、proposedBy、lineageRefs、testablePrediction、falsifier 和完整 axisProfile",
     "lineageRefs 必须来自本轮 allowedEvidenceRefs 白名单，且每个候选至少一条；testablePrediction 不得为空",
+    "axisProfile 必须恰好描述 mechanism、intervention、observable、population、boundary 五轴；falsifier 必须能够否定或显著削弱核心机制",
     "必须说明相对 R0 草案的具体机制变化，不得只改写措辞",
     "没有新内容时回复 pass；分歧必须显式记录",
 )
@@ -1101,6 +1102,7 @@ def _round_config(
         "meetingType": str(meeting_round.get("meetingType") or "hypothesis_review"),
         "meetingStage": str(meeting_round.get("stage") or ""),
         "meetingRoundType": str(meeting_round.get("roundType") or ""),
+        "candidateAuthority": str(meeting_round.get("candidateAuthority") or ""),
         "selectionId": str(selection.get("selectionId") or ""),
         # The legacy MeetingRound scopeHash is retained for compatibility. A
         # formal room has its own canonical v1 hash and must not be overwritten

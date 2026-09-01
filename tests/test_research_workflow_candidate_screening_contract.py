@@ -28,6 +28,7 @@ from core.research.workflow.contracts import (
 )
 from core.research.workflow.contracts._validation import ContractValidationError
 from core.web.services.team_workflow.research_runtime.candidate_screening import (
+    build_screening_drafts_from_candidates,
     screen_candidate_drafts,
 )
 
@@ -100,6 +101,121 @@ def _screen(drafts, **overrides: object) -> CandidateScreeningArtifact:
     }
     params.update(overrides)
     return screen_candidate_drafts(**params)
+
+
+def test_formal_grounded_candidates_build_complete_screening_drafts() -> None:
+    drafts = build_screening_drafts_from_candidates(
+        [
+            {
+                "candidateId": "cand-a",
+                "candidateAuthority": "formal_grounded_candidate",
+                "axisProfile": _axis_profile(),
+                "lineageRefs": ["evidence:accepted-1"],
+                "testablePrediction": "干预后可观察量下降",
+                "falsifier": "干预后可观察量不变或上升",
+            }
+        ]
+    )
+
+    assert drafts == [
+        {
+            "candidateId": "cand-a",
+            "axisProfile": _axis_profile(),
+            "grounded": True,
+            "groundingEvidenceRefs": ["evidence:accepted-1"],
+            "hardThresholdChecks": [
+                {
+                    "thresholdId": "falsifiable_hypothesis",
+                    "passed": True,
+                    "detail": "candidate carries a testable prediction",
+                },
+                {
+                    "thresholdId": "failure_condition_stated",
+                    "passed": True,
+                    "detail": "candidate carries a mechanism-targeting falsifier",
+                },
+            ],
+        }
+    ]
+
+
+def test_formal_grounded_candidate_missing_axis_profile_fails_closed() -> None:
+    with pytest.raises(ContractValidationError, match="axisProfile"):
+        build_screening_drafts_from_candidates(
+            [
+                {
+                    "candidateId": "cand-a",
+                    "candidateAuthority": "formal_grounded_candidate",
+                    "lineageRefs": ["evidence:accepted-1"],
+                    "testablePrediction": "可检验预测",
+                    "falsifier": "失败条件",
+                }
+            ]
+        )
+
+
+def test_stage_one_selection_helper_persists_screening_and_returns_at_most_three(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from core.web.services.team_workflow.research_runtime import (
+        artifact_readback_registry,
+        hypothesis_first_chain,
+        workflow_artifact_store,
+    )
+
+    monkeypatch.setattr(workflow_artifact_store, "PROJECT_ROOT", tmp_path)
+
+    def candidate(candidate_id: str, **axis_overrides: str) -> dict[str, object]:
+        return {
+            "candidateId": candidate_id,
+            "candidateAuthority": "formal_grounded_candidate",
+            "axisProfile": _axis_profile(**axis_overrides),
+            "lineageRefs": [f"evidence:{candidate_id}"],
+            "testablePrediction": f"{candidate_id} prediction",
+            "falsifier": f"{candidate_id} falsifier",
+            "createdAt": "2026-09-01T00:00:00Z",
+        }
+
+    candidates = [
+        candidate("cand-a"),
+        candidate("cand-a-variant", observable="另一观测量"),
+        candidate("cand-b", mechanism="AMPK 代谢机制", intervention="激活 AMPK"),
+        candidate("cand-c", mechanism="自噬清除机制", intervention="增强自噬"),
+    ]
+    monkeypatch.setattr(
+        hypothesis_first_chain,
+        "list_hypothesis_candidates",
+        lambda *_args, **_kwargs: {"candidates": candidates},
+    )
+
+    result = hypothesis_first_chain._screen_stage_one_selection_candidates(
+        team_id="team-1",
+        question_id="SCI-091",
+        workflow_run_id="run-stage-one",
+        selected_candidate_ids=[item["candidateId"] for item in candidates],
+        scope={
+            "program": "challenge-cup",
+            "theme": "bio",
+            "campaign": "2026",
+            "question": "SCI-091",
+            "branch": "main",
+            "workflow": "hypothesis_first",
+            "agentId": "operator",
+            "mode": "formal",
+        },
+        screened_by="operator",
+    )
+
+    assert len(result["candidateIds"]) == 3
+    assert "cand-a-variant" not in result["candidateIds"]
+    readback = artifact_readback_registry.read_domain_artifact(result["artifactRef"])
+    assert readback is not None
+    stored = workflow_artifact_store.list_workflow_artifacts(
+        "team-1",
+        kind="candidate_screening",
+        workflow_run_id="run-stage-one",
+    )
+    assert stored[-1]["payload"]["pairwiseCandidateIds"] == result["candidateIds"]
 
 
 def test_five_axis_vocabulary_is_closed_and_profile_parsing_fails_closed() -> None:

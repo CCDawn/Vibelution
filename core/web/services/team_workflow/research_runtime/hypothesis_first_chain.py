@@ -259,6 +259,16 @@ class HypothesisFirstChainError(RuntimeError):
     """Base error for hypothesis-first chain orchestration."""
 
 
+class StageOneCandidateScreeningError(HypothesisFirstChainError):
+    """Formal R1 screening cannot produce two mechanism-distinct finalists."""
+
+    code = "diversity_collapse"
+
+    def __init__(self, message: str = "diversity_collapse", *, artifact_ref: str = ""):
+        self.artifact_ref = str(artifact_ref or "")
+        super().__init__(message)
+
+
 class HypothesisFirstChainNotFoundError(HypothesisFirstChainError):
     """Raised when a chain record (collection request / link) does not exist."""
 
@@ -1132,6 +1142,101 @@ def _selection_command_action_id(action_id: str, command: str) -> str:
     ):
         return "record_selection"
     return ""
+
+
+def _screen_stage_one_selection_candidates(
+    *,
+    team_id: str,
+    question_id: str,
+    workflow_run_id: str,
+    selected_candidate_ids: list[str],
+    scope: Mapping[str, Any],
+    screened_by: str,
+) -> dict[str, Any]:
+    """Apply R1 screening only when the selected set is formally grounded."""
+
+    normalized_run_id = str(workflow_run_id or "").strip()
+    if not normalized_run_id:
+        return {"candidateIds": list(selected_candidate_ids), "artifactRef": ""}
+    records = list_hypothesis_candidates(
+        team_id,
+        question_id=question_id,
+        workflow_run_id=normalized_run_id,
+    )["candidates"]
+    by_id = {
+        str(item.get("candidateId") or "").strip(): dict(item)
+        for item in records
+        if isinstance(item, Mapping) and str(item.get("candidateId") or "").strip()
+    }
+    selected = [by_id[item] for item in selected_candidate_ids if item in by_id]
+    formal = [
+        item
+        for item in selected
+        if str(item.get("candidateAuthority") or "").strip().lower()
+        == FORMAL_GROUNDED_CANDIDATE_AUTHORITY
+    ]
+    if not formal:
+        return {"candidateIds": list(selected_candidate_ids), "artifactRef": ""}
+    if len(selected) != len(selected_candidate_ids) or len(formal) != len(selected):
+        raise StageOneCandidateScreeningError(
+            "diversity_collapse: stage-one selection mixes missing or non-formal candidates"
+        )
+    from .candidate_screening import (
+        build_screening_drafts_from_candidates,
+        screen_candidate_drafts,
+    )
+    from .candidate_screening_artifact_writer import (
+        record_candidate_screening_artifact,
+    )
+
+    drafts = build_screening_drafts_from_candidates(formal)
+    created_at = max(
+        (str(item.get("createdAt") or "").strip() for item in formal),
+        default="",
+    ) or "1970-01-01T00:00:00Z"
+    screening_id = "candidate-screening-" + _stable_hash(
+        {
+            "teamId": team_id,
+            "workflowRunId": normalized_run_id,
+            "questionId": question_id,
+            "candidateIds": sorted(selected_candidate_ids),
+        }
+    )[:20]
+    artifact = screen_candidate_drafts(
+        screening_id=screening_id,
+        question_id=question_id,
+        program=str(scope.get("program") or ""),
+        theme=str(scope.get("theme") or ""),
+        campaign=str(scope.get("campaign") or ""),
+        question=str(scope.get("question") or question_id),
+        branch=str(scope.get("branch") or ""),
+        workflow=str(scope.get("workflow") or ""),
+        agent_id=str(scope.get("agentId") or ""),
+        mode=str(scope.get("mode") or ""),
+        drafts=drafts,
+        screened_by=screened_by,
+        created_at=created_at,
+    )
+    persisted = record_candidate_screening_artifact(
+        team_id=team_id,
+        workflow_run_id=normalized_run_id,
+        artifact=artifact,
+    )
+    finalist_ids = list(artifact.pairwiseCandidateIds)
+    mechanisms = {
+        artifact.candidate_by_id(candidate_id).axisProfile.mechanism
+        for candidate_id in finalist_ids
+        if artifact.candidate_by_id(candidate_id) is not None
+    }
+    if len(finalist_ids) < 2 or len(mechanisms) < 2:
+        raise StageOneCandidateScreeningError(
+            "diversity_collapse: fewer than two mechanism-distinct finalists survived",
+            artifact_ref=persisted["canonicalRef"],
+        )
+    return {
+        "candidateIds": finalist_ids,
+        "artifactRef": persisted["canonicalRef"],
+    }
 
 
 def _selection_command_outcome(
@@ -2795,11 +2900,21 @@ def _execute_v2_command_impl(
                     "record_selection requires input.candidateIds"
                 )
             selected_candidate_ids = sorted(selected_candidate_ids)
+            selection_scope = _question_scope_envelope(
+                normalized_team_id,
+                normalized_question_id,
+            )
+            screening = _screen_stage_one_selection_candidates(
+                team_id=normalized_team_id,
+                question_id=normalized_question_id,
+                workflow_run_id=normalized_workflow_run_id,
+                selected_candidate_ids=selected_candidate_ids,
+                scope=selection_scope,
+                screened_by=_OPERATOR_AGENT_ID,
+            )
+            selected_candidate_ids = list(screening["candidateIds"])
             selection_payload = {
-                **_question_scope_envelope(
-                    normalized_team_id,
-                    normalized_question_id,
-                ),
+                **selection_scope,
                 "questionId": normalized_question_id,
                 "workflowRunId": normalized_workflow_run_id,
                 "selectedCandidateIds": selected_candidate_ids,
@@ -2825,6 +2940,10 @@ def _execute_v2_command_impl(
             )
             selection_result = _selection_command_result(result)
             selection_result["selectionVersion"] = selection_version
+            if screening.get("artifactRef"):
+                selection_result["candidateScreeningArtifactRef"] = str(
+                    screening["artifactRef"]
+                )
             outcome = {
                 "schemaVersion": SCHEMA_VERSION,
                 "recordKind": SELECTION_COMMAND_OUTCOME_KIND,
@@ -4642,6 +4761,8 @@ def _append_generation_candidates(
             testable_prediction = str(
                 proposal.get("testablePrediction") or ""
             ).strip()
+            falsifier = str(proposal.get("falsifier") or "").strip()
+            axis_profile = proposal.get("axisProfile")
             if candidate_authority == FORMAL_GROUNDED_CANDIDATE_AUTHORITY:
                 if not lineage_refs or any(
                     ref not in allowed_evidence_refs for ref in lineage_refs
@@ -4653,6 +4774,21 @@ def _append_generation_candidates(
                     raise HypothesisFirstChainError(
                         "formal grounded candidate requires CHECK prediction"
                     )
+                if not falsifier:
+                    raise HypothesisFirstChainError(
+                        "formal grounded candidate requires a mechanism-targeting falsifier"
+                    )
+                from core.research.workflow.contracts import HypothesisAxisProfile
+
+                if not isinstance(axis_profile, Mapping):
+                    raise HypothesisFirstChainError(
+                        "formal grounded candidate requires a complete axisProfile"
+                    )
+                normalized_axis_profile = HypothesisAxisProfile.from_dict(
+                    axis_profile
+                ).to_dict()
+            else:
+                normalized_axis_profile = None
             candidate_id = _candidate_id_for(question_id, meeting_round_id, statement)
             existing = existing_by_id.get(candidate_id)
             if existing is not None:
@@ -4677,6 +4813,8 @@ def _append_generation_candidates(
                         "candidateAuthority": candidate_authority,
                         "lineageRefs": lineage_refs,
                         "testablePrediction": testable_prediction,
+                        "falsifier": falsifier,
+                        "axisProfile": normalized_axis_profile,
                         "revisionOrdinal": int(
                             meeting_round.get("revisionOrdinal") or 0
                         ),
@@ -6187,6 +6325,15 @@ def _build_round_candidates(
                 "statement": str(item.get("statement") or item.get("claim") or "").strip(),
                 "mechanism": str(item.get("rationale") or "").strip(),
                 "novelty_basis": str(item.get("differenceFromAlternatives") or "").strip(),
+                "candidateAuthority": str(item.get("candidateAuthority") or "").strip(),
+                "lineageRefs": _normalized_str_list(item.get("lineageRefs")),
+                "testablePrediction": str(item.get("testablePrediction") or "").strip(),
+                "falsifier": str(item.get("falsifier") or "").strip(),
+                "axisProfile": (
+                    dict(item.get("axisProfile"))
+                    if isinstance(item.get("axisProfile"), Mapping)
+                    else {}
+                ),
             }
             for item in ledger_candidates
             if isinstance(item, Mapping)
@@ -6208,6 +6355,15 @@ def _build_round_candidates(
             "candidateId": candidate_id,
             "claim": str(artifact.get("statement") or "").strip(),
             "rationale": str(artifact.get("mechanism") or "").strip(),
+            "candidateAuthority": str(artifact.get("candidateAuthority") or "").strip(),
+            "lineageRefs": _normalized_str_list(artifact.get("lineageRefs")),
+            "testablePrediction": str(artifact.get("testablePrediction") or "").strip(),
+            "falsifier": str(artifact.get("falsifier") or "").strip(),
+            "axisProfile": (
+                dict(artifact.get("axisProfile"))
+                if isinstance(artifact.get("axisProfile"), Mapping)
+                else {}
+            ),
         }
         difference = str(artifact.get("novelty_basis") or "").strip()
         if difference:

@@ -3838,13 +3838,55 @@ def _candidate_generation_runner(participant, prompt, context):
 def _grounded_candidate_generation_runner(participant, prompt, context):
     role = str(participant.get("teamRole") or "participant")
     if role in {"source_finder", "challenge_cup_search"}:
-        content = (
-            "CANDIDATE: draft-a | 睡眠剥夺通过腺苷积累损害记忆巩固 | A1 受体机制 "
-            "| REFS: evidence:accepted-1; evidence:boundary-1 "
-            "| CHECK: 阻断 A1 受体后记忆表现应恢复\n"
-            "CANDIDATE: draft-b | 睡眠剥夺通过突触稳态失衡损害记忆巩固 | 突触稳态机制 "
-            "| REFS: evidence:accepted-2; evidence:boundary-1 "
-            "| CHECK: 睡眠恢复后突触标志物应回归基线"
+        candidates = [
+            {
+                "candidateId": "draft-a",
+                "statement": "睡眠剥夺通过腺苷积累损害记忆巩固",
+                "rationale": "A1 受体机制",
+                "proposedBy": role,
+                "lineageRefs": ["evidence:accepted-1", "evidence:boundary-1"],
+                "testablePrediction": "阻断 A1 受体后记忆表现应恢复",
+                "falsifier": "阻断 A1 受体后记忆表现仍不恢复",
+                "axisProfile": {
+                    "mechanism": "腺苷 A1 受体介导",
+                    "intervention": "阻断 A1 受体",
+                    "observable": "记忆表现",
+                    "population": "睡眠剥夺受试者",
+                    "boundary": "急性睡眠剥夺",
+                },
+            },
+            {
+                "candidateId": "draft-b",
+                "statement": "睡眠剥夺通过突触稳态失衡损害记忆巩固",
+                "rationale": "突触稳态机制",
+                "proposedBy": role,
+                "lineageRefs": ["evidence:accepted-2", "evidence:boundary-1"],
+                "testablePrediction": "睡眠恢复后突触标志物应回归基线",
+                "falsifier": "睡眠恢复后突触标志物持续偏离且记忆不受影响",
+                "axisProfile": {
+                    "mechanism": "突触稳态失衡",
+                    "intervention": "恢复睡眠",
+                    "observable": "突触标志物与记忆表现",
+                    "population": "睡眠剥夺受试者",
+                    "boundary": "急性睡眠剥夺",
+                },
+            },
+        ]
+        content = json.dumps(
+            {
+                "schemaVersion": 1,
+                "display": {"conclusion": "提出两个正式候选", "sections": []},
+                "protocol": {
+                    "agreements": [],
+                    "disagreements": [],
+                    "risks": [],
+                    "actionItems": [],
+                    "knowledgeCandidates": [],
+                    "proposedCandidates": candidates,
+                    "evidenceRequests": [],
+                },
+            },
+            ensure_ascii=False,
         )
     else:
         content = "AGREE: 两个候选都给出了可检验预测"
@@ -4036,6 +4078,8 @@ def test_stage_one_r0_isolated_then_r1_requires_whitelisted_evidence(
     assert all(item["candidateAuthority"] == "formal_grounded_candidate" for item in formal)
     assert all(item["lineageRefs"] for item in formal)
     assert all(item["testablePrediction"] for item in formal)
+    assert all(item["falsifier"] for item in formal)
+    assert all(len(item["axisProfile"]) == 5 for item in formal)
     assert all(item["revisionOrdinal"] == 1 for item in formal)
     assert all(item["derivedFromDraftRefs"] for item in formal)
 

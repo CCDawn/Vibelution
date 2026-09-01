@@ -1928,7 +1928,9 @@ def _execute_chat_room_round(
             "challengeDeadlineAtMs": _positive_int(
                 round_config.get(_CHALLENGE_ROOM_DEADLINE_CONFIG_KEY)
             ),
-            "_structuredMeetingMessage": _is_scoped_discussion_room(room),
+            "_structuredMeetingMessage": _uses_structured_meeting_message(
+                room, round_payload
+            ),
             "_modelInvocationReceiptAuthority": receipt_authority,
         }
         per_call_budget_ms = _positive_int(round_config.get("perCallBudgetMs"))
@@ -2950,7 +2952,9 @@ def _build_participant_prompt(
     purpose_lines = _purpose_prompt_lines(effective_purpose)
     role_view = _participant_role_view(participant)
     team_context_lines = _format_participant_team_context(participant)
-    structured_meeting_message = _is_scoped_discussion_room(room)
+    structured_meeting_message = _uses_structured_meeting_message(
+        room, round_payload
+    )
     challenge_short_answer_lines = (
         [
             "挑战杯会议短答合同：只给 1 个新增判断和 1 个依据，正文不超过 180 个中文字符。",
@@ -4000,6 +4004,29 @@ def _is_challenge_discussion_room(value: Mapping[str, Any] | None) -> bool:
         return False
     return isinstance(config.get("discussionScope"), Mapping) and bool(
         str(config.get("discussionScopeHash") or config.get("scopeHash") or "").strip()
+    )
+
+
+def _uses_structured_meeting_message(
+    room: Mapping[str, Any] | None,
+    round_payload: Mapping[str, Any] | None,
+) -> bool:
+    """Use the full protocol contract for formal grounded R1 generation."""
+
+    if _is_scoped_discussion_room(room):
+        return True
+    if not isinstance(round_payload, Mapping):
+        return False
+    config = (
+        round_payload.get("config")
+        if isinstance(round_payload.get("config"), Mapping)
+        else {}
+    )
+    return (
+        str(config.get("meetingType") or "").strip()
+        == "hypothesis_candidate_generation"
+        and str(config.get("candidateAuthority") or "").strip().lower()
+        == "formal_grounded_candidate"
     )
 
 

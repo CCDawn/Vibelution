@@ -292,6 +292,22 @@ def build_hypothesis_review_context(
             "claim": _text(item.get("claim"), 800),
             "rationale": _text(item.get("rationale"), 600),
             "differenceFromAlternatives": _text(item.get("differenceFromAlternatives"), 600),
+            "candidateAuthority": str(item.get("candidateAuthority") or "").strip(),
+            "lineageRefs": _text_list(item.get("lineageRefs"), limit=24, max_length=360),
+            "testablePrediction": _text(item.get("testablePrediction"), 800),
+            "falsifier": _text(item.get("falsifier"), 800),
+            "axisProfile": {
+                axis: _text(item.get("axisProfile", {}).get(axis), 360)
+                for axis in (
+                    "mechanism",
+                    "intervention",
+                    "observable",
+                    "population",
+                    "boundary",
+                )
+            }
+            if isinstance(item.get("axisProfile"), dict)
+            else {},
         }
         for item in candidate_rows[:MAX_REVIEW_CANDIDATES]
         if str(item.get("candidateId") or "").strip()
