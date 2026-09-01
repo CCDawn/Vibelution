@@ -43,6 +43,7 @@ from core.research.workflow.transitions import (
     require_human_task_transition,
     require_run_transition,
 )
+from core.research.workflow.models import WorkflowStageId
 from core.web.services.team_workflow.research_runtime.readiness import (
     NodeReadinessService,
 )
@@ -141,6 +142,91 @@ class DefinitionResolutionDegradedError(WorkflowCommandError):
         super().__init__(detail)
         self.code = "definition_resolution_degraded"
         self.detail = detail
+
+
+def _positive_budget_limit(value: object, *, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise WorkflowCommandError(
+            f"extend_budget requires a positive integer for budget limit {field}"
+        )
+    return int(value)
+
+
+def _merged_budget_extension(
+    current_limits: Mapping[str, Any],
+    raw_extension: object,
+) -> dict[str, Any]:
+    if not isinstance(raw_extension, Mapping) or not raw_extension:
+        raise WorkflowCommandError(
+            "extend_budget requires a concrete non-empty budget limits extension"
+        )
+    allowed = {"stageTokens", "toolCalls", "wallClockSeconds", "maxRetries"}
+    unknown = set(raw_extension) - allowed
+    if unknown:
+        raise WorkflowCommandError(
+            "extend_budget contains unknown budget limits: "
+            + ", ".join(sorted(str(item) for item in unknown))
+        )
+
+    merged = dict(current_limits)
+    scalar_legacy_keys = {
+        "toolCalls": "maxToolCalls",
+        "wallClockSeconds": "maxSeconds",
+        "maxRetries": "autoRetries",
+    }
+    for key in ("toolCalls", "wallClockSeconds", "maxRetries"):
+        if key not in raw_extension:
+            continue
+        proposed = _positive_budget_limit(raw_extension[key], field=key)
+        prior = current_limits.get(key, current_limits.get(scalar_legacy_keys[key], 0))
+        prior_value = int(prior) if isinstance(prior, int) and not isinstance(prior, bool) else 0
+        if proposed <= prior_value:
+            raise WorkflowCommandError(
+                f"extend_budget budget limit {key} must increase above {prior_value}"
+            )
+        merged[key] = proposed
+
+    if "stageTokens" in raw_extension:
+        proposed_stages = raw_extension["stageTokens"]
+        if not isinstance(proposed_stages, Mapping) or not proposed_stages:
+            raise WorkflowCommandError(
+                "extend_budget requires a non-empty stageTokens budget mapping"
+            )
+        current_stages_raw = current_limits.get("stageTokens")
+        if isinstance(current_stages_raw, Mapping):
+            merged_stages = dict(current_stages_raw)
+            fallback_stage_tokens = 0
+        else:
+            fallback_stage_tokens = (
+                int(current_stages_raw)
+                if isinstance(current_stages_raw, int)
+                and not isinstance(current_stages_raw, bool)
+                else 0
+            )
+            merged_stages = {
+                stage.value: fallback_stage_tokens for stage in WorkflowStageId
+            }
+        for raw_stage, raw_value in proposed_stages.items():
+            stage = str(raw_stage or "").strip()
+            if not stage:
+                raise WorkflowCommandError(
+                    "extend_budget stageTokens contains an empty budget stage"
+                )
+            proposed = _positive_budget_limit(raw_value, field=f"stageTokens.{stage}")
+            prior_raw = merged_stages.get(stage, fallback_stage_tokens)
+            prior = (
+                int(prior_raw)
+                if isinstance(prior_raw, int) and not isinstance(prior_raw, bool)
+                else 0
+            )
+            if proposed <= prior:
+                raise WorkflowCommandError(
+                    "extend_budget budget limit "
+                    f"stageTokens.{stage} must increase above {prior}"
+                )
+            merged_stages[stage] = proposed
+        merged["stageTokens"] = merged_stages
+    return merged
 
 
 _ATTEMPT_CREATING_COMMANDS = frozenset(
@@ -1134,7 +1220,9 @@ class WorkflowCommandService:
         now_ms = self._clock()
         run = uow.repository.get_run(request.run_id)
         limits = json.loads(run.safety_limits_json)
-        limits.update(dict(request.payload.get("limits") or {}))
+        if not isinstance(limits, Mapping):
+            raise WorkflowCommandError("extend_budget current budget limits are invalid")
+        limits = _merged_budget_extension(limits, request.payload.get("limits"))
         command_id = new_id("cmd")
         bumped = _bump(uow, request, event_count=1, now_ms=now_ms)
         accepted_version, sequence = bumped

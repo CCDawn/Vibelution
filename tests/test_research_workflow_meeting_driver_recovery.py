@@ -2,12 +2,18 @@
 
 Covers the T2 lean contract: ``schedule_meeting_discussion`` persists a
 durable intent next to ``meeting_rounds.jsonl`` (pending before submit,
-completed/failed after the run, failed on submit rejection); the startup
-sweep ``recover_challenge_meeting_drivers`` fences deadline-expired open
-meetings through the existing terminal path (no partial digest promoted),
-re-drives interrupted discussions after a simulated process restart, and
-stays idempotent across consecutive runs.  Awaiting-approval / closed
-meetings and open meetings without any durable work record are untouched;
+completed/failed after the run, failed on submit rejection); running intents
+carry a bounded lease that the live driver refreshes through a heartbeat
+thread, so the startup sweep ``recover_challenge_meeting_drivers`` re-drives
+a running intent whose boot id is foreign OR whose lease has expired —
+including same-boot drivers that wedged past their lease.  The sweep fences
+deadline-expired open meetings through the existing terminal path (no partial
+digest promoted), re-drives interrupted discussions after a simulated process
+restart, and stays idempotent across consecutive runs.  Awaiting-approval /
+closed meetings are untouched; open meetings without any durable work record
+are split by identity: challenge-identity meetings get the governed deadline
+backfilled, while identity-less legacy orphans are fenced through the
+terminal path because no governed deadline can ever be derived for them;
 failed work at the attempt cap is left auditable instead of retried.
 
 All discussion content comes from fake runners (DEV fixtures); no real model
@@ -16,6 +22,7 @@ or network is involved.
 
 from __future__ import annotations
 
+import threading
 import time
 
 import pytest
@@ -409,7 +416,137 @@ def test_recovery_fences_expired_open_meeting_without_promoting_digest(
     )
 
 
-def test_recovery_leaves_awaiting_approval_closed_and_unrecorded_meetings_alone(
+def _amend_meeting(team_id: str, meeting: dict, **fields) -> dict:
+    """Append an amended record to stage a shape ``create_meeting_round`` cannot.
+
+    Mirrors ``_expire_deadline``: the append-only store's latest-wins read is
+    the staging mechanism, so pre-policy / mid-lifecycle shapes are produced by
+    appending an amended record rather than patching removed constants.
+    """
+
+    amended = {**meeting, **fields}
+    with meetings._LOCK:
+        meetings._append_round_record(team_id, amended)
+    return amended
+
+
+def test_recovery_fences_legacy_orphan_meetings_without_identity(
+    tmp_path, monkeypatch
+):
+    _isolate(tmp_path, monkeypatch)
+    team_id, agent_ids = _team(tmp_path, monkeypatch)
+
+    # A bare open meeting created before the identity contract: no scope
+    # authority, no receipt authority, and therefore no possible deadline.
+    orphan_open = _create_open_meeting(team_id, agent_ids, "meeting-orphan-open")
+    # The production hang shape: stuck in ``summarizing`` with a draft error
+    # and no driver that can ever advance it.
+    orphan_stuck = _create_open_meeting(team_id, agent_ids, "meeting-orphan-stuck")
+    _amend_meeting(
+        team_id,
+        orphan_stuck,
+        status="summarizing",
+        summaryDraftError={
+            "code": "summary_draft_timeout",
+            "message": "digest draft timed out after 450s",
+        },
+    )
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(meeting_runtime, "run_meeting_discussion", _recorder(calls))
+
+    summary = meeting_driver_work.recover_challenge_meeting_drivers()
+
+    assert summary["meetingsScanned"] == 2
+    assert summary["fenced"] == 2
+    assert summary["backfilled"] == 0
+    assert summary["rescheduled"] == 0
+    assert summary["skipped"] == 0
+    assert calls == []
+    for meeting_round_id in (
+        orphan_open["meetingRoundId"],
+        orphan_stuck["meetingRoundId"],
+    ):
+        terminal = meetings.get_meeting_round(team_id, meeting_round_id)["meetingRound"]
+        assert terminal["status"] == "closed"
+        assert terminal["executionStatus"] == "stopped"
+        assert terminal["terminalReason"] == "legacy_orphan_closeout"
+        assert terminal["closedBy"] == "system:challenge-execution-fence"
+        assert (
+            meeting_driver_work.latest_intent(team_id, meeting_round_id) is None
+        )
+    # No partial digest was promoted by the legacy fence.
+    digests_path = meetings._rounds_path(team_id).with_name("meeting_digests.jsonl")
+    assert not digests_path.exists()
+
+    # Idempotent: fenced meetings are now closed, so a second sweep scans none.
+    second = meeting_driver_work.recover_challenge_meeting_drivers()
+    assert second["meetingsScanned"] == 0
+    assert second["fenced"] == 0
+    assert calls == []
+
+
+def test_recovery_backfills_deadline_for_identity_meeting_missing_policy(
+    tmp_path, monkeypatch
+):
+    _isolate(tmp_path, monkeypatch)
+    team_id, agent_ids = _team(tmp_path, monkeypatch)
+    meeting = _create_open_meeting(
+        team_id,
+        agent_ids,
+        "meeting-backfill",
+        modelInvocationReceiptAuthority={
+            "schemaVersion": 1,
+            "authorityKind": "workflow_run",
+            "teamId": team_id,
+            "questionId": "SCI-096",
+            "workflowRunId": "run-backfill",
+            "workflowId": "challenge-cup-research",
+            "workflowVersionId": "wv-backfill",
+            "modelPolicySha256": "c" * 64,
+        },
+    )
+    assert meeting["challengeDeadlineAtMs"] > 0
+    # Strip the persisted policy to reproduce a pre-policy identity meeting:
+    # challenge identity present, governed deadline absent.
+    _amend_meeting(
+        team_id,
+        meeting,
+        challengeDeadlineAtMs=0,
+        meetingDeadlineAtMs=0,
+        deadlinePolicyVersion="",
+    )
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(meeting_runtime, "run_meeting_discussion", _recorder(calls))
+
+    summary = meeting_driver_work.recover_challenge_meeting_drivers()
+
+    assert summary["meetingsScanned"] == 1
+    assert summary["backfilled"] == 1
+    assert summary["fenced"] == 0
+    assert summary["rescheduled"] == 0
+    assert calls == []
+    restored = meetings.get_meeting_round(team_id, meeting["meetingRoundId"])[
+        "meetingRound"
+    ]
+    # The meeting stays open and now carries a future governed deadline.
+    assert restored["status"] == "open"
+    assert restored["challengeDeadlineAtMs"] > int(time.time() * 1000)
+    assert (
+        meeting_driver_work.latest_intent(team_id, meeting["meetingRoundId"]) is None
+    )
+
+    # Idempotent: the backfilled deadline is in the future and there is no
+    # durable intent, so the second sweep leaves the meeting untouched.
+    second = meeting_driver_work.recover_challenge_meeting_drivers()
+    assert second["meetingsScanned"] == 1
+    assert second["backfilled"] == 0
+    assert second["fenced"] == 0
+    assert second["skipped"] == 1
+    assert calls == []
+
+
+def test_recovery_leaves_awaiting_approval_and_closed_meetings_alone(
     tmp_path, monkeypatch
 ):
     _isolate(tmp_path, monkeypatch)
@@ -432,17 +569,17 @@ def test_recovery_leaves_awaiting_approval_closed_and_unrecorded_meetings_alone(
     meetings.terminate_meeting_execution(
         team_id, closed["meetingRoundId"], reason="challenge_workflow_run_cancelled"
     )
-    untouched = _create_open_meeting(team_id, agent_ids, "meeting-no-work-record")
     calls: list[tuple[str, str]] = []
     monkeypatch.setattr(meeting_runtime, "run_meeting_discussion", _recorder(calls))
 
     summary = meeting_driver_work.recover_challenge_meeting_drivers()
 
-    # Only the deadline-free open meeting without a work record is scanned.
-    assert summary["meetingsScanned"] == 1
+    # Both terminal meetings sit outside the open/summarizing scan window.
+    assert summary["meetingsScanned"] == 0
     assert summary["rescheduled"] == 0
     assert summary["fenced"] == 0
-    assert summary["skipped"] == 1
+    assert summary["backfilled"] == 0
+    assert summary["skipped"] == 0
     assert calls == []
     assert (
         meetings.get_meeting_round(team_id, awaiting_id)["meetingRound"]["status"]
@@ -453,12 +590,6 @@ def test_recovery_leaves_awaiting_approval_closed_and_unrecorded_meetings_alone(
             "status"
         ]
         == "closed"
-    )
-    assert (
-        meetings.get_meeting_round(team_id, untouched["meetingRoundId"])["meetingRound"][
-            "status"
-        ]
-        == "open"
     )
 
 
@@ -532,6 +663,7 @@ def test_recovery_is_idempotent_across_consecutive_runs(tmp_path, monkeypatch):
         "teams": 1,
         "meetingsScanned": 2,
         "fenced": 1,
+        "backfilled": 0,
         "rescheduled": 1,
         "skipped": 0,
     }
@@ -543,7 +675,181 @@ def test_recovery_is_idempotent_across_consecutive_runs(tmp_path, monkeypatch):
     assert second["teams"] == 1
     assert second["meetingsScanned"] == 1
     assert second["fenced"] == 0
+    assert second["backfilled"] == 0
     assert second["rescheduled"] == 0
     assert second["skipped"] == 1
     assert len(executor.submissions) == 1
     assert calls == []
+
+
+def _append_intent(team_id: str, meeting_round_id: str, **overrides) -> dict:
+    """Stage an intent shape ``record_intent`` cannot write (e.g. expired lease).
+
+    The store is append-only jsonl, so a same-boot wedged driver is staged by
+    appending the record exactly as a dead heartbeat would have left it.
+    """
+
+    now_ms = int(time.time() * 1000)
+    record = {
+        "schemaVersion": meeting_driver_work.SCHEMA_VERSION,
+        "workId": f"work-staged-{meeting_round_id}",
+        "teamId": team_id,
+        "meetingRoundId": meeting_round_id,
+        "actionKind": meeting_driver_work.ACTION_RUN_DISCUSSION,
+        "status": "running",
+        "attemptCount": 1,
+        "workerBootId": meeting_driver_work.worker_boot_id(),
+        "createdAtMs": now_ms,
+        "updatedAtMs": now_ms,
+        "leaseExpiresAtMs": 0,
+        "lastProblem": "",
+    }
+    record.update(overrides)
+    from core.web.services.team_workflow.storage_durability import append_jsonl_locked
+
+    append_jsonl_locked(meeting_driver_work.work_path(team_id), record)
+    return record
+
+
+def test_recovery_reschedules_same_boot_running_work_with_expired_lease(
+    tmp_path, monkeypatch
+):
+    _isolate(tmp_path, monkeypatch)
+    team_id, agent_ids = _team(tmp_path, monkeypatch)
+
+    # A same-boot driver wedged past its lease: running intent under the
+    # current boot id whose heartbeat stopped, leaving an expired lease.
+    wedged = _create_open_meeting(team_id, agent_ids, "meeting-lease-expired")
+    _append_intent(
+        team_id,
+        wedged["meetingRoundId"],
+        leaseExpiresAtMs=int(time.time() * 1000) - 1000,
+    )
+
+    # A healthy same-boot driver mid-flight: its fresh lease must be trusted.
+    healthy = _create_open_meeting(team_id, agent_ids, "meeting-lease-fresh")
+    meeting_driver_work.record_intent(team_id, healthy["meetingRoundId"], status="pending")
+    meeting_driver_work.record_intent(team_id, healthy["meetingRoundId"], status="running")
+
+    _ready_to_drive(
+        monkeypatch,
+        {**wedged, "linkedChatRoomId": "room-lease", "chatRoomRoundIds": ["round-lease"]},
+    )
+    executor = _InlineExecutor()
+    monkeypatch.setattr(meeting_runtime, "_MEETING_DISCUSSION_EXECUTOR", executor)
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(meeting_runtime, "run_meeting_discussion", _recorder(calls))
+
+    summary = meeting_driver_work.recover_challenge_meeting_drivers()
+
+    assert summary["meetingsScanned"] == 2
+    assert summary["rescheduled"] == 1
+    assert summary["skipped"] == 1
+    assert summary["fenced"] == 0
+    assert calls == [(team_id, wedged["meetingRoundId"])]
+    re_driven = meeting_driver_work.latest_intent(team_id, wedged["meetingRoundId"])
+    assert re_driven["status"] == "completed"
+    # The fresh lease was trusted: no second driver was layered on top.
+    healthy_after = meeting_driver_work.latest_intent(team_id, healthy["meetingRoundId"])
+    assert healthy_after["status"] == "running"
+    assert healthy_after["attemptCount"] == 1
+
+
+def test_heartbeat_extends_lease_without_inflating_attempts(tmp_path, monkeypatch):
+    _isolate(tmp_path, monkeypatch)
+    team_id = "team-lease-heartbeat"
+    round_id = "meeting-lease-heartbeat"
+    assert meeting_driver_work.refresh_intent_lease(team_id, "meeting-missing") is None
+    meeting_driver_work.record_intent(team_id, round_id, status="pending")
+    running = meeting_driver_work.record_intent(team_id, round_id, status="running")
+    assert running["attemptCount"] == 1
+    assert running["leaseExpiresAtMs"] > running["createdAtMs"]
+
+    refreshed = meeting_driver_work.refresh_intent_lease(team_id, round_id)
+    assert refreshed is not None
+    assert refreshed["status"] == "running"
+    assert refreshed["heartbeat"] is True
+    assert refreshed["attemptCount"] == 1
+    assert refreshed["leaseExpiresAtMs"] >= running["leaseExpiresAtMs"]
+    assert not meeting_driver_work._lease_expired(refreshed, int(time.time() * 1000))
+    assert (
+        meeting_driver_work.latest_intent(team_id, round_id)["workId"]
+        == refreshed["workId"]
+    )
+
+    # A foreign boot must never extend the lease (no adoption of another
+    # process's driver); the latest record stays untouched.
+    meeting_driver_work.reset_for_tests()
+    assert meeting_driver_work.refresh_intent_lease(team_id, round_id) is None
+    assert (
+        meeting_driver_work.latest_intent(team_id, round_id)["workId"]
+        == refreshed["workId"]
+    )
+
+    # Terminal intents are not heartbeated either.
+    meeting_driver_work.reset_for_tests()
+    meeting_driver_work.record_intent(team_id, round_id, status="completed")
+    assert meeting_driver_work.refresh_intent_lease(team_id, round_id) is None
+    assert meeting_driver_work.latest_intent(team_id, round_id)["status"] == "completed"
+
+
+def test_lease_heartbeat_thread_refreshes_until_stopped(tmp_path, monkeypatch):
+    _isolate(tmp_path, monkeypatch)
+    team_id = "team-heartbeat-thread"
+    round_id = "meeting-heartbeat-thread"
+    running = meeting_driver_work.record_intent(team_id, round_id, status="running")
+    stop = threading.Event()
+    thread = meeting_driver_work.start_lease_heartbeat(
+        team_id, round_id, stop_event=stop, interval_ms=10
+    )
+    deadline = time.monotonic() + 5.0
+    latest = running
+    while time.monotonic() < deadline:
+        latest = meeting_driver_work.latest_intent(team_id, round_id)
+        if latest.get("heartbeat"):
+            break
+        time.sleep(0.01)
+    stop.set()
+    thread.join(timeout=2.0)
+    assert not thread.is_alive()
+    assert latest["heartbeat"] is True
+    assert latest["attemptCount"] == 1
+    assert latest["leaseExpiresAtMs"] >= running["leaseExpiresAtMs"]
+
+
+def test_driver_wrapper_runs_lease_heartbeat_around_discussion(tmp_path, monkeypatch):
+    _isolate(tmp_path, monkeypatch)
+    team_id = "team-heartbeat-wiring"
+    meeting = {
+        "meetingRoundId": "meeting-heartbeat-wiring",
+        "status": "open",
+        "chatRoomRoundIds": ["round-1"],
+    }
+    _ready_to_drive(monkeypatch, meeting)
+    monkeypatch.setattr(meeting_runtime, "_MEETING_DISCUSSION_EXECUTOR", _InlineExecutor())
+
+    original_start = meeting_driver_work.start_lease_heartbeat
+    heartbeats: list[tuple[str, str, threading.Event]] = []
+
+    def spy(team_id_arg, round_id_arg, *, stop_event, **kwargs):
+        heartbeats.append((team_id_arg, round_id_arg, stop_event))
+        # Long interval: verify wiring without racing the synchronous run.
+        return original_start(
+            team_id_arg, round_id_arg, stop_event=stop_event, interval_ms=60_000
+        )
+
+    monkeypatch.setattr(meeting_driver_work, "start_lease_heartbeat", spy)
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(meeting_runtime, "run_meeting_discussion", _recorder(calls))
+
+    scheduled = meeting_runtime.schedule_meeting_discussion(
+        team_id, meeting["meetingRoundId"]
+    )
+    assert scheduled["status"] == "scheduled"
+    assert calls == [(team_id, meeting["meetingRoundId"])]
+    assert len(heartbeats) == 1
+    assert heartbeats[0][:2] == (team_id, meeting["meetingRoundId"])
+    # The wrapper stops the heartbeat before releasing the dedup key.
+    assert heartbeats[0][2].is_set()
+    completed = meeting_driver_work.latest_intent(team_id, meeting["meetingRoundId"])
+    assert completed["status"] == "completed"

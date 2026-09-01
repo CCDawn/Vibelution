@@ -17,8 +17,9 @@ PROMPT_PACK_FILES = (
     "09_reflection_and_environment.md",
     "10_full_life_continuity.md",
     "11_companion_dialogue_decision.md",
-    "12_companion_followup_delivery.md",
+    "13_companion_dialogue_v2_draft.md",
 )
+LEGACY_FOLLOWUP_PROMPT_FILE = "12_companion_followup_delivery.md"
 MAX_PROMPT_PACK_CHARS = 12_000
 
 
@@ -36,4 +37,16 @@ def load_prompt_pack() -> str:
     return block
 
 
-__all__ = ["PROMPT_PACK_FILES", "load_prompt_pack"]
+@lru_cache(maxsize=1)
+def load_legacy_followup_prompt() -> str:
+    return (Path(__file__).with_name("prompts") / LEGACY_FOLLOWUP_PROMPT_FILE).read_text(
+        encoding="utf-8"
+    ).strip()
+
+
+__all__ = [
+    "LEGACY_FOLLOWUP_PROMPT_FILE",
+    "PROMPT_PACK_FILES",
+    "load_legacy_followup_prompt",
+    "load_prompt_pack",
+]

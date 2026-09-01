@@ -10,6 +10,9 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from core.agent_plugins.virtual_human_life.delivery_runtime import (
+    is_companion_continuation_delivery_kind,
+)
 from core.agent_plugins.virtual_human_life.geography import resolve_city_location
 from core.agent_plugins.virtual_human_life.life_world_store import (
     LifeWorldConflictError,
@@ -1755,8 +1758,15 @@ def finalize_proactive_delivery(context: dict[str, Any]) -> dict[str, Any] | Non
         receipt_event_id=str(getattr(assistant_receipt, "event_id", "") or "").strip(),
     )
     delivery_kind = str(trigger.get("deliveryKind") or "proactive").strip()
+    scene_kind = "proactive_delivered"
+    if is_companion_continuation_delivery_kind(delivery_kind):
+        scene_kind = (
+            "dialogue_continuation_delivered"
+            if delivery_kind == "burst_continuation"
+            else "followup_delivered"
+        )
     _record_scene(
-        "followup_delivered" if delivery_kind == "followup" else "proactive_delivered",
+        scene_kind,
         agent_id=str(context.get("agent_id") or "").strip(),
         outcome="delivered",
         fields={

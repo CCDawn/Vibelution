@@ -46,13 +46,9 @@ from core.web.services.team_workflow.research_projects import (
     ensure_challenge_question_project,
     get_theme_activation,
 )
+from .budget_contract import FORMAL_STAGE_IDS
 
-_STAGES = (
-    "knowledge_collection",
-    "experiment_design",
-    "execution_iteration",
-)
-_MAX_STAGE_TOKENS = 500_000
+_STAGES = FORMAL_STAGE_IDS
 _MAX_TOOL_CALLS = 600
 _MAX_WALL_CLOCK_SECONDS = 12 * 60 * 60
 _MAX_RETRIES = 5
@@ -671,10 +667,18 @@ def _catalog_question(question_id: str) -> dict[str, Any] | None:
     return None
 
 
-def _positive_int(value: Any, *, field: str, maximum: int) -> int:
-    if not isinstance(value, int) or isinstance(value, bool) or value < 1 or value > maximum:
+def _positive_int(value: Any, *, field: str, maximum: int | None) -> int:
+    invalid = not isinstance(value, int) or isinstance(value, bool) or value < 1
+    if maximum is not None:
+        invalid = invalid or value > maximum
+    if invalid:
+        expected = (
+            "a positive integer"
+            if maximum is None
+            else f"an integer between 1 and {maximum}"
+        )
         raise QuestionLaunchError(
-            f"{field} must be an integer between 1 and {maximum}.",
+            f"{field} must be {expected}.",
             code="invalid_safety_limits",
         )
     return value
@@ -691,7 +695,7 @@ def build_safety_budget_policy(safety_limits: Mapping[str, Any]) -> dict[str, An
         stage: _positive_int(
             stage_tokens.get(stage),
             field=f"stageTokens.{stage}",
-            maximum=_MAX_STAGE_TOKENS,
+            maximum=None,
         )
         for stage in _STAGES
     }

@@ -90,6 +90,16 @@ def _write_snapshot(harness: CommandHarness, budget_policy: dict | None) -> None
     harness.store.submit(mutate, force_flush=True).result(timeout=10)
 
 
+def _write_safety_limits(harness: CommandHarness, limits: dict) -> None:
+    def mutate(uow):
+        uow.repository.execute(
+            "UPDATE workflow_runs SET safety_limits_json = ? WHERE run_id = ?",
+            (json.dumps(limits), "run-test"),
+        )
+
+    harness.store.submit(mutate, force_flush=True).result(timeout=10)
+
+
 def _reserved_estimate(harness: CommandHarness, reservation_id: str) -> dict:
     row = harness.store.submit(
         lambda uow: uow.repository.execute(
@@ -119,6 +129,120 @@ def test_missing_contract_reserves_conservative_fallback(tmp_path: Path) -> None
         stored = _reserved_estimate(harness, reservation["reservationId"])
         assert stored["reserved"]["estimatedTokens"] == FALLBACK_TOKENS
         assert stored["reserved"]["estimatedTokens"] != 25_000
+    finally:
+        harness.close()
+
+
+def test_real_batch_uses_the_formal_budget_capacity_contract() -> None:
+    """The real-batch launcher must not freeze the obsolete 200K contract."""
+    from core.web.services.team_workflow.challenge_cup_real_batch import (
+        _default_safety_limits,
+    )
+
+    limits = _default_safety_limits()
+    assert limits == {
+        "stageTokens": {
+            "knowledge_collection": FALLBACK_TOKENS,
+            "experiment_design": FALLBACK_TOKENS,
+            "execution_iteration": FALLBACK_TOKENS,
+        },
+        "toolCalls": 600,
+        "wallClockSeconds": 4 * 60 * 60,
+        "maxRetries": 3,
+    }
+
+
+def test_question_launch_accepts_the_formal_budget_capacity_contract() -> None:
+    """The launch validator must accept the same 2M capacity as the runtime."""
+    from core.web.services.team_workflow.research_runtime.question_launch import (
+        build_safety_budget_policy,
+    )
+
+    policy = build_safety_budget_policy(
+        {
+            "stageTokens": {
+                "knowledge_collection": FALLBACK_TOKENS,
+                "experiment_design": FALLBACK_TOKENS,
+                "execution_iteration": FALLBACK_TOKENS,
+            },
+            "toolCalls": 600,
+            "wallClockSeconds": 4 * 60 * 60,
+            "maxRetries": 3,
+        }
+    )
+    assert policy["tokens"] == FALLBACK_TOKENS
+    assert policy["stageBudgets"]["knowledge_collection"]["tokens"] == FALLBACK_TOKENS
+
+
+def test_budget_authority_uses_canonical_stage_and_retry_fields() -> None:
+    """Stage mapping and retry limits must match the frozen launch contract."""
+    from core.web.services.team_workflow.research_runtime import (
+        budget_authority_adapter,
+    )
+
+    assert budget_authority_adapter.stage_for_node("problem_understanding") == (
+        "knowledge_collection"
+    )
+    limits = budget_authority_adapter._policy_limits(
+        {
+            "budgetPolicy": {
+                "tokens": FALLBACK_TOKENS,
+                "toolCalls": 600,
+                "wallClockSeconds": 4 * 60 * 60,
+                "maxRetries": 3,
+            }
+        },
+        "knowledge_collection",
+    )
+    assert limits == {
+        "tokens": FALLBACK_TOKENS,
+        "toolCalls": 600,
+        "seconds": 4 * 60 * 60,
+        "retries": 3,
+    }
+
+
+def test_operator_safety_limits_override_legacy_frozen_stage_capacity(
+    tmp_path: Path,
+) -> None:
+    """A formal operator override must affect new receipts without rewriting
+    the immutable input snapshot."""
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run()
+        frozen_policy = {
+            "tokens": 200_000,
+            "toolCalls": 600,
+            "wallClockSeconds": 4 * 60 * 60,
+            "maxRetries": 3,
+            "stageBudgets": {
+                "knowledge_collection": {"tokens": 200_000},
+                "experiment_design": {"tokens": 200_000},
+                "execution_iteration": {"tokens": 200_000},
+            },
+        }
+        _write_snapshot(harness, frozen_policy)
+        _write_safety_limits(
+            harness,
+            {
+                "stageTokens": {"knowledge_collection": FALLBACK_TOKENS},
+                "maxRetries": 3,
+            },
+        )
+        action = _action()
+        _seed_attempt(harness, action)
+
+        reservation = RealDomainPorts(harness.store).reserve_budget(
+            action=action,
+            estimate_tokens=200_000,
+        )
+
+        assert reservation["limits"]["tokens"] == FALLBACK_TOKENS
+        row = harness.store.submit(
+            lambda uow: uow.repository.get_run("run-test"),
+            force_flush=True,
+        ).result(timeout=10)
+        assert json.loads(row.input_snapshot_json)["budgetPolicy"] == frozen_policy
     finally:
         harness.close()
 
@@ -315,11 +439,11 @@ def test_stage_admission_allows_next_attempt_after_real_node_settles(
 # --------------------------------------------------------------------- ④
 
 
-def test_preflight_rejects_explicitly_when_output_floor_unreachable(
+def test_preflight_reports_soft_pressure_without_blocking_output(
     monkeypatch,
 ) -> None:
-    """Old-scale reservation (25K) + 24K input -> explicit budget_exhausted,
-    never a silent 1K clamp."""
+    """An obsolete 25K reservation is accounting pressure, not permission to
+    terminate a progressing formal Agent invocation."""
     from core.web.services.session import worker as session_worker
 
     monkeypatch.setattr(
@@ -332,15 +456,16 @@ def test_preflight_rejects_explicitly_when_output_floor_unreachable(
         estimated_input_tokens=24_000,
         max_output_tokens=32_768,
     )
-    assert decision["maxOutputTokens"] == 0
-    assert decision["budgetExhausted"] is True
+    assert decision["maxOutputTokens"] == 32_768
+    assert decision["budgetPressure"] is True
+    assert decision["softLimitExceeded"] is True
     assert decision["reason"] == "insufficient_budget"
     assert decision["requiredMinOutput"] == 4_096
     assert decision["remainingTokens"] == 25_000
     assert decision["estimatedInputTokens"] == 24_000
 
 
-def test_preflight_distinguishes_input_overrun_from_output_floor(
+def test_preflight_distinguishes_soft_pressure_reasons_without_blocking(
     monkeypatch,
 ) -> None:
     from core.web.services.session import worker as session_worker
@@ -355,8 +480,9 @@ def test_preflight_distinguishes_input_overrun_from_output_floor(
         estimated_input_tokens=31_000,
         max_output_tokens=32_768,
     )
-    assert overrun["maxOutputTokens"] == 0
-    assert overrun["budgetExhausted"] is True
+    assert overrun["maxOutputTokens"] == 32_768
+    assert overrun["budgetPressure"] is True
+    assert overrun["softLimitExceeded"] is True
     assert overrun["reason"] == "input_exceeds_remaining"
 
     floor = session_worker._challenge_invocation_budget_preflight(
@@ -364,11 +490,13 @@ def test_preflight_distinguishes_input_overrun_from_output_floor(
         estimated_input_tokens=27_000,
         max_output_tokens=32_768,
     )
-    assert floor["maxOutputTokens"] == 0
+    assert floor["maxOutputTokens"] == 32_768
+    assert floor["budgetPressure"] is True
+    assert floor["softLimitExceeded"] is True
     assert floor["reason"] == "insufficient_budget"
 
 
-def test_preflight_output_floor_is_env_configurable(monkeypatch) -> None:
+def test_preflight_output_floor_only_changes_soft_pressure_metadata(monkeypatch) -> None:
     from core.web.services.session import worker as session_worker
 
     monkeypatch.setattr(
@@ -382,7 +510,8 @@ def test_preflight_output_floor_is_env_configurable(monkeypatch) -> None:
         estimated_input_tokens=24_000,
         max_output_tokens=32_768,
     )
-    assert decision["maxOutputTokens"] == 0
+    assert decision["maxOutputTokens"] == 32_768
+    assert decision["budgetPressure"] is True
     assert decision["requiredMinOutput"] == 8192
 
     monkeypatch.setenv("VIBELUTION_MIN_INVOCATION_OUTPUT_TOKENS", "2048")
@@ -391,7 +520,9 @@ def test_preflight_output_floor_is_env_configurable(monkeypatch) -> None:
         estimated_input_tokens=24_000,
         max_output_tokens=32_768,
     )
-    assert allowed["maxOutputTokens"] == 6_000
+    assert allowed["maxOutputTokens"] == 32_768
+    assert allowed["budgetPressure"] is True
+    assert allowed["softLimitExceeded"] is False
 
 
 # ------------------------------------------------------- injected authority

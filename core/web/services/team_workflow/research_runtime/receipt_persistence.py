@@ -109,11 +109,17 @@ def enqueue_question_model_invocation_receipt(
         else {}
     )
     input_tokens = int(token_usage.get("inputTokens") or 0)
+    cached_input_tokens = min(
+        input_tokens,
+        int(token_usage.get("cachedInputTokens") or 0),
+    )
+    uncached_input_tokens = max(0, input_tokens - cached_input_tokens)
     output_tokens = int(token_usage.get("outputTokens") or 0)
     total_tokens = int(token_usage.get("totalTokens") or 0)
     if input_tokens + output_tokens == 0 and total_tokens > 0:
         output_tokens = total_tokens
     reasoning_tokens = int(token_usage.get("reasoningTokens") or 0)
+    latency_ms = max(0, int(canonical_receipt.get("latencyMs") or 0))
     if not node_run_id or not invocation_id:
         raise ValueError("receipt budget binding is incomplete")
 
@@ -136,8 +142,12 @@ def enqueue_question_model_invocation_receipt(
             reservation_id=f"reservation-{node_run_id}",
             invocation_id=invocation_id,
             input_tokens=input_tokens,
+            cached_input_tokens=cached_input_tokens,
+            uncached_input_tokens=uncached_input_tokens,
             output_tokens=output_tokens,
             reasoning_tokens=reasoning_tokens,
+            tool_calls=1,
+            wall_clock_seconds=(latency_ms + 999) // 1000,
             usage_estimated=False,
         )
         existing = uow.repository.execute(

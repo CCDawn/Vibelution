@@ -372,7 +372,7 @@ def test_continuation_wait_requeues_with_persisted_chain(monkeypatch) -> None:
     assert raised.value.snapshot["continuationsUsed"] == 1
 
 
-def test_continuation_budget_does_not_reset_after_requeue(monkeypatch) -> None:
+def test_consecutive_no_progress_count_does_not_reset_after_requeue(monkeypatch) -> None:
     import core.web.services.team_workflow.research_runtime.agent_turn_completion as atc
     from core.web.services.team_workflow.research_runtime.challenge_turn_policy import (
         challenge_task_deadline_scope,
@@ -407,6 +407,7 @@ def test_continuation_budget_does_not_reset_after_requeue(monkeypatch) -> None:
             "turn-cont-3",
         ],
         "continuationsUsed": 3,
+        "continuationNoProgressCount": 2,
     }
 
     with (
@@ -431,7 +432,59 @@ def test_continuation_budget_does_not_reset_after_requeue(monkeypatch) -> None:
     assert polled == ["turn-cont-3"]
     assert detail["code"] == "agent_turn_continuation_exhausted"
     assert detail["continuationsUsed"] == 3
+    assert detail["consecutiveNoProgressContinuations"] == 3
     assert detail["turnChain"][-1] == "turn-cont-3"
+
+
+def test_canonical_progress_resets_external_continuation_limit(monkeypatch) -> None:
+    import core.web.services.team_workflow.research_runtime.agent_turn_completion as atc
+
+    submitted: list[str] = []
+
+    def wait(_session_id, turn_id, **_kwargs):
+        if turn_id == "turn-cont-4":
+            return _snapshot("completed", turn_id)
+        snapshot = _snapshot("needs_continue", turn_id)
+        snapshot["continuationProgressAdvanced"] = turn_id != "turn-main"
+        return snapshot
+
+    def submit(*_args, **_kwargs):
+        turn_id = f"turn-cont-{len(submitted) + 1}"
+        submitted.append(turn_id)
+        return turn_id
+
+    monkeypatch.setattr(atc, "wait_for_agent_turn_terminal", wait)
+    monkeypatch.setattr(atc, "_submit_agent_turn_continuation", submit)
+    monkeypatch.setattr(
+        atc,
+        "_stage_task_work_already_complete",
+        lambda **_kwargs: False,
+    )
+    monkeypatch.setattr(atc, "remaining_challenge_task_ms", lambda: 1_000)
+
+    snapshot, final_turn_id, continuations = _wait_with_bounded_turn_continuation(
+        _handle(),
+        action=_action(),
+        input_snapshot=_input_snapshot(),
+        adapter_spec=AgentTaskAdapterSpec(
+            node_id="source_finding",
+            family="source_collection",
+            task_key="finding",
+            role_key="source_finder",
+        ),
+        timeout_ms=1_000,
+        poll_ms=10,
+    )
+
+    assert snapshot["terminalStatus"] == "completed"
+    assert final_turn_id == "turn-cont-4"
+    assert len(continuations) == 4
+    assert submitted == [
+        "turn-cont-1",
+        "turn-cont-2",
+        "turn-cont-3",
+        "turn-cont-4",
+    ]
 
 
 def test_challenge_deadline_uses_canonical_task_created_at(monkeypatch) -> None:

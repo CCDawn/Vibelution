@@ -6,14 +6,20 @@ only scheduler; a backend restart used to orphan every open challenge meeting
 because the pending driver existed only in memory.  This module persists one
 append-only intent record per ``(teamId, meetingRoundId, actionKind)`` next to
 ``meeting_rounds.jsonl`` so a startup sweep can fence deadline-expired
-meetings and re-drive interrupted discussions.
+meetings, re-drive interrupted discussions, backfill the governed deadline
+for challenge-identity meetings whose policy was never persisted, and close
+identity-less legacy orphans that can never receive a governed deadline.
 
 Reads are latest-wins by ``(teamId, meetingRoundId, actionKind)``, mirroring
 the append + latest read contract of ``meeting_rounds``.  No second scheduler
 lives here: the recovery sweep only re-enters
 ``meeting_runtime.schedule_meeting_discussion``, whose in-process dedup set
-still guarantees at most one live driver per meeting.  A full lease/heartbeat
-contract remains future work (plan T3).
+still guarantees at most one live driver per meeting.  Running intents carry
+a bounded lease: the live driver refreshes it through a heartbeat thread, so
+the sweep treats a running intent as stale when the boot id is foreign OR the
+lease has expired — a same-boot driver wedged past its lease is re-driven the
+same way a crashed one is.  Making digest/review work itself durable (own
+intent kind, deadline, sourceHash) remains future work (plan T3).
 """
 
 from __future__ import annotations
@@ -44,8 +50,17 @@ _VALID_STATUSES = frozenset(
 # Same terminal vocabulary meeting_runtime uses when the discussion runner
 # observes an expired ``challengeDeadlineAtMs`` (stop_reason ``challenge_deadline``).
 _FENCE_REASON_DEADLINE = "challenge_deadline"
+# Legacy meetings predate the challenge identity contract (no scope authority,
+# no receipt authority), so no governed deadline can ever be derived for them.
+# The sweep closes such orphans through the existing terminal path instead of
+# leaving a permanent ``open``/``summarizing`` hang with no possible closer.
+_FENCE_REASON_LEGACY_ORPHAN = "legacy_orphan_closeout"
 MAX_AUTO_RESCHEDULE_ATTEMPTS = 3
 _MAX_LAST_PROBLEM_LENGTH = 240
+# A running intent is only authoritative for this long without a heartbeat;
+# the recovery sweep re-drives a same-boot driver that let its lease lapse.
+DEFAULT_INTENT_LEASE_MS = 90_000
+HEARTBEAT_INTERVAL_MS = DEFAULT_INTENT_LEASE_MS // 3
 
 _LOCK = threading.RLock()
 _WORKER_BOOT_ID = uuid.uuid4().hex
@@ -175,12 +190,109 @@ def record_intent(
             "workerBootId": boot_id,
             "createdAtMs": now_ms,
             "updatedAtMs": now_ms,
+            "leaseExpiresAtMs": (
+                now_ms + DEFAULT_INTENT_LEASE_MS
+                if normalized_status == STATUS_RUNNING
+                else 0
+            ),
             "lastProblem": str(last_problem or "").strip()[:_MAX_LAST_PROBLEM_LENGTH],
         }
         from core.web.services.team_workflow.storage_durability import append_jsonl_locked
 
         append_jsonl_locked(work_path(normalized_team_id), record)
         return record
+
+
+def _lease_expired(work: Mapping[str, Any], now_ms: int) -> bool:
+    expires_at_ms = work.get("leaseExpiresAtMs")
+    if isinstance(expires_at_ms, bool) or not isinstance(expires_at_ms, int):
+        # Pre-lease records keep the legacy same-boot trust: only a foreign
+        # boot id marks them stale.
+        return False
+    return expires_at_ms > 0 and now_ms >= expires_at_ms
+
+
+def refresh_intent_lease(
+    team_id: str,
+    meeting_round_id: str,
+    *,
+    action_kind: str = ACTION_RUN_DISCUSSION,
+    lease_ms: int = DEFAULT_INTENT_LEASE_MS,
+) -> dict[str, Any] | None:
+    """Heartbeat: extend the lease of a running intent owned by this boot.
+
+    Appends a running record that preserves ``attemptCount`` so recovery
+    accounting stays accurate.  Returns ``None`` without writing when the
+    latest intent is not running or belongs to a foreign boot: a heartbeat
+    must never adopt someone else's driver.
+    """
+
+    normalized_team_id = _require_id(team_id, "teamId")
+    normalized_round_id = _require_id(meeting_round_id, "meetingRoundId")
+    now_ms = int(time.time() * 1000)
+    with _LOCK:
+        previous = latest_intent(
+            normalized_team_id, normalized_round_id, action_kind=action_kind
+        )
+        if previous is None:
+            return None
+        if str(previous.get("status") or "").strip().lower() != STATUS_RUNNING:
+            return None
+        if str(previous.get("workerBootId") or "").strip() != worker_boot_id():
+            return None
+        record = {
+            "schemaVersion": SCHEMA_VERSION,
+            "workId": uuid.uuid4().hex,
+            "teamId": normalized_team_id,
+            "meetingRoundId": normalized_round_id,
+            "actionKind": action_kind,
+            "status": STATUS_RUNNING,
+            "attemptCount": _attempt_count(previous),
+            "heartbeat": True,
+            "workerBootId": worker_boot_id(),
+            "createdAtMs": now_ms,
+            "updatedAtMs": now_ms,
+            "leaseExpiresAtMs": now_ms + int(lease_ms),
+            "lastProblem": str(previous.get("lastProblem") or "").strip()[
+                :_MAX_LAST_PROBLEM_LENGTH
+            ],
+        }
+        from core.web.services.team_workflow.storage_durability import append_jsonl_locked
+
+        append_jsonl_locked(work_path(normalized_team_id), record)
+        return record
+
+
+def start_lease_heartbeat(
+    team_id: str,
+    meeting_round_id: str,
+    *,
+    stop_event: threading.Event,
+    interval_ms: int = HEARTBEAT_INTERVAL_MS,
+) -> threading.Thread:
+    """Refresh the running intent lease until ``stop_event`` is set.
+
+    Heartbeat failures are swallowed: the worst outcome is that the lease
+    lapses and the recovery sweep re-drives the meeting, which is exactly
+    the contract this lease exists to provide.
+    """
+
+    interval_s = max(int(interval_ms), 10) / 1000.0
+
+    def _loop() -> None:
+        while not stop_event.wait(interval_s):
+            try:
+                refresh_intent_lease(team_id, meeting_round_id)
+            except Exception:  # noqa: BLE001 - a missed beat must not kill the driver
+                continue
+
+    thread = threading.Thread(
+        target=_loop,
+        name=f"meeting-driver-lease:{meeting_round_id}",
+        daemon=True,
+    )
+    thread.start()
+    return thread
 
 
 def _teams_workspace_root() -> Path:
@@ -210,16 +322,21 @@ def recover_challenge_meeting_drivers() -> dict[str, Any]:
     For every open/summarizing meeting: fence it through the existing
     terminal path when its ``challengeDeadlineAtMs`` has passed, re-enter
     ``schedule_meeting_discussion`` when its durable intent shows an
-    interrupted run, and leave everything else untouched.  Idempotent: a
-    second consecutive run is a no-op because fenced meetings are closed and
-    rescheduled ones are protected by the in-process dedup set.  Never
-    raises; every team/meeting failure is isolated into ``skipped``.
+    interrupted run (foreign boot id or an expired lease), backfill the
+    governed deadline for challenge-identity meetings whose deadline was
+    never persisted, and fence identity-less legacy orphans through the
+    terminal path.  Idempotent: a second
+    consecutive run is a no-op because fenced meetings are closed,
+    backfilled meetings now carry a future deadline, and rescheduled ones are
+    protected by the in-process dedup set.  Never raises; every team/meeting
+    failure is isolated into ``skipped``.
     """
 
     summary: dict[str, Any] = {
         "teams": 0,
         "meetingsScanned": 0,
         "fenced": 0,
+        "backfilled": 0,
         "rescheduled": 0,
         "skipped": 0,
     }
@@ -259,6 +376,8 @@ def _recover_team_drivers(team_id: str, summary: dict[str, Any]) -> None:
             continue
         if outcome == "fenced":
             summary["fenced"] += 1
+        elif outcome == "backfilled":
+            summary["backfilled"] += 1
         elif outcome == "rescheduled":
             summary["rescheduled"] += 1
         else:
@@ -272,12 +391,12 @@ def _recover_one_meeting(
     now_ms: int,
 ) -> str:
     deadline_at_ms = meeting.get("challengeDeadlineAtMs")
-    deadline_passed = (
+    has_deadline = (
         isinstance(deadline_at_ms, int)
         and not isinstance(deadline_at_ms, bool)
         and deadline_at_ms > 0
-        and now_ms >= deadline_at_ms
     )
+    deadline_passed = has_deadline and now_ms >= deadline_at_ms
     if deadline_passed:
         # terminate_meeting_execution closes without promoting a partial digest.
         _meeting_rounds().terminate_meeting_execution(
@@ -288,14 +407,17 @@ def _recover_one_meeting(
         return "fenced"
     work = latest_intent(team_id, meeting_round_id)
     if work is None:
-        # No durable intent and no expired deadline: the preformal deadline
-        # backfill task owns these meetings; do not touch them here.
-        return "skipped"
+        if has_deadline:
+            # A future deadline without durable work may legitimately await an
+            # explicit schedule command; leave the meeting untouched.
+            return "skipped"
+        return _close_or_backfill_identity_gap(team_id, meeting_round_id, meeting)
     status = str(work.get("status") or "").strip().lower()
     stale_boot = str(work.get("workerBootId") or "") != worker_boot_id()
+    lease_expired = _lease_expired(work, now_ms)
     should_reschedule = (
         status == STATUS_PENDING
-        or (status == STATUS_RUNNING and stale_boot)
+        or (status == STATUS_RUNNING and (stale_boot or lease_expired))
         or (status == STATUS_FAILED and _attempt_count(work) < MAX_AUTO_RESCHEDULE_ATTEMPTS)
     )
     if not should_reschedule:
@@ -304,6 +426,53 @@ def _recover_one_meeting(
 
     result = meeting_runtime.schedule_meeting_discussion(team_id, meeting_round_id)
     return "rescheduled" if str(result.get("status") or "") == "scheduled" else "skipped"
+
+
+def _close_or_backfill_identity_gap(
+    team_id: str,
+    meeting_round_id: str,
+    meeting: Mapping[str, Any],
+) -> str:
+    """Close the no-deadline, no-intent gap left by pre-policy meetings.
+
+    Challenge-identity meetings whose deadline was never persisted get the
+    governed deadline backfilled through the existing persist primitive, so a
+    later sweep can fence them on expiry.  Meetings without any challenge
+    identity (legacy records created before the scope/receipt authority
+    contract) can never receive a governed deadline and have no driver that
+    could advance them; the sweep fences them through the existing terminal
+    path with an auditable reason instead of skipping them forever.
+    """
+
+    from core.web.services.team_workflow.challenge_deadline_policy import (
+        is_challenge_meeting,
+    )
+
+    if is_challenge_meeting(meeting):
+        updated = _meeting_rounds().persist_challenge_meeting_deadline_policy(
+            team_id, meeting_round_id
+        )
+        backfilled_deadline = updated.get("challengeDeadlineAtMs")
+        if (
+            isinstance(backfilled_deadline, int)
+            and not isinstance(backfilled_deadline, bool)
+            and backfilled_deadline > 0
+        ):
+            return "backfilled"
+        return "skipped"
+    from core.web.services.team_workflow import meeting_runtime
+
+    key = (str(team_id or "").strip(), meeting_round_id)
+    with meeting_runtime._MEETING_DISCUSSION_JOBS_LOCK:
+        has_live_driver = key in meeting_runtime._MEETING_DISCUSSION_JOBS
+    if has_live_driver:
+        return "skipped"
+    _meeting_rounds().terminate_meeting_execution(
+        team_id,
+        meeting_round_id,
+        reason=_FENCE_REASON_LEGACY_ORPHAN,
+    )
+    return "fenced"
 
 
 def _record_recovery_scene_event(summary: Mapping[str, Any]) -> None:
@@ -325,6 +494,7 @@ def _record_recovery_scene_event(summary: Mapping[str, Any]) -> None:
                 "teams": int(summary.get("teams") or 0),
                 "meetingsScanned": int(summary.get("meetingsScanned") or 0),
                 "fenced": int(summary.get("fenced") or 0),
+                "backfilled": int(summary.get("backfilled") or 0),
                 "rescheduled": int(summary.get("rescheduled") or 0),
                 "skipped": int(summary.get("skipped") or 0),
             },

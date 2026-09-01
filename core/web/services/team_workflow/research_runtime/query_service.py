@@ -1052,6 +1052,13 @@ def _node_blocked_reason(latest: Any, run_blocked_reason: str | None) -> str:
 
 
 def _budget_receipt_summary(row: tuple) -> dict[str, Any]:
+    def payload(raw: object) -> dict[str, Any]:
+        try:
+            decoded = json.loads(str(raw or "{}"))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return {}
+        return dict(decoded) if isinstance(decoded, Mapping) else {}
+
     return {
         "receiptId": row[0],
         "runId": row[1],
@@ -1059,6 +1066,8 @@ def _budget_receipt_summary(row: tuple) -> dict[str, Any]:
         "reservationId": row[3],
         "stageId": row[4],
         "policyHash": row[5],
+        "reservedPayload": payload(row[6]),
+        "settledPayload": payload(row[7]),
         "status": row[8],
         "createdAtMs": row[9],
         "updatedAtMs": row[10],

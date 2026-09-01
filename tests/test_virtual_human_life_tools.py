@@ -23,12 +23,25 @@ from tools.virtual_human_life_tools import (
 
 
 def test_virtual_human_tool_bundle_is_registered_in_key_tools_and_catalog() -> None:
-    names = {getattr(item, "name", "") for item in create_key_tools()}
+    tools = create_key_tools()
+    names = {getattr(item, "name", "") for item in tools}
     assert set(VIRTUAL_HUMAN_TOOL_NAMES).issubset(names)
     for name in VIRTUAL_HUMAN_TOOL_NAMES:
         assert tool_catalog.metadata_for_tool(name)["category"] == "virtual_life"
     bundles = {item["bundleId"]: item for item in tool_catalog.list_tool_bundles()}
     assert set(bundles["virtual_human_life"]["toolNames"]) == set(VIRTUAL_HUMAN_TOOL_NAMES)
+    decision_tool = next(
+        item
+        for item in tools
+        if getattr(item, "name", "") == "virtual_human_dialogue_decision_v2_tool"
+    )
+    assert set(decision_tool.args) == {
+        "act",
+        "reasonCode",
+        "topicKey",
+        "expectsUserReply",
+        "referencedSourceKeys",
+    }
 
 
 def test_virtual_human_tools_fail_closed_until_current_agent_binding_is_enabled(

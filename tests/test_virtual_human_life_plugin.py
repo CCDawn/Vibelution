@@ -128,7 +128,7 @@ def test_companion_mailbox_is_plugin_scoped_and_reuses_native_submit_only_after_
     assert accepted_second["turnId"] == "turn-2"
 
 
-def test_companion_mailbox_orders_proactive_and_user_messages_by_arrival(
+def test_companion_mailbox_prioritizes_user_over_earlier_proactive_message(
     tmp_path: Path,
 ) -> None:
     agent = _active_agent("agent-a")
@@ -187,11 +187,11 @@ def test_companion_mailbox_orders_proactive_and_user_messages_by_arrival(
         "agent-a", session_id="session-agent-a"
     )
 
-    assert first["sourceKind"] == "proactive"
-    assert first["turnId"] == "turn-proactive"
-    assert second["sourceKind"] == "user"
-    assert second["turnId"] == "turn-user"
-    assert submitted == ["proactive", "user:后到达的用户消息"]
+    assert first["sourceKind"] == "user"
+    assert first["turnId"] == "turn-user"
+    assert second["sourceKind"] == "proactive"
+    assert second["turnId"] == "turn-proactive"
+    assert submitted == ["user:后到达的用户消息", "proactive"]
 
 
 def test_unbound_agent_cannot_create_companion_mailbox(service: VirtualHumanLifeService) -> None:

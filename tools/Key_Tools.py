@@ -146,6 +146,7 @@ from tools.project_operation_tools import (
 from tools.cli_agent_tools import cli_agent_run_tool as _cli_agent_run_impl
 from tools.virtual_human_life_tools import (
     virtual_human_activity_tool as _virtual_human_activity_impl,
+    virtual_human_dialogue_decision_v2_tool as _virtual_human_dialogue_decision_v2_impl,
     virtual_human_diary_tool as _virtual_human_diary_impl,
     virtual_human_proactive_message_tool as _virtual_human_proactive_message_impl,
     virtual_human_reflection_tool as _virtual_human_reflection_impl,
@@ -278,6 +279,9 @@ def _build_key_tools() -> List[BaseTool]:
     virtual_human_status_tool = StructuredTool.from_function(_virtual_human_status_impl)
     virtual_human_schedule_tool = StructuredTool.from_function(_virtual_human_schedule_impl)
     virtual_human_activity_tool = StructuredTool.from_function(_virtual_human_activity_impl)
+    virtual_human_dialogue_decision_v2_tool = StructuredTool.from_function(
+        _virtual_human_dialogue_decision_v2_impl
+    )
     virtual_human_diary_tool = StructuredTool.from_function(_virtual_human_diary_impl)
     virtual_human_relationship_tool = StructuredTool.from_function(
         _virtual_human_relationship_impl
@@ -3122,6 +3126,7 @@ def _build_key_tools() -> List[BaseTool]:
         virtual_human_status_tool,
         virtual_human_schedule_tool,
         virtual_human_activity_tool,
+        virtual_human_dialogue_decision_v2_tool,
         virtual_human_diary_tool,
         virtual_human_relationship_tool,
         virtual_human_reflection_tool,

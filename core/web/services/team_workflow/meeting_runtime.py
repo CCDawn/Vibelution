@@ -1803,9 +1803,17 @@ def _record_driver_work_state(
 
 def _run_scheduled_meeting_discussion(team_id: str, meeting_round_id: str) -> None:
     key = (team_id, meeting_round_id)
+    heartbeat_stop = threading.Event()
+    heartbeat_thread: threading.Thread | None = None
     try:
         _record_driver_work_state(
             team_id, meeting_round_id, status=meeting_driver_work.STATUS_RUNNING
+        )
+        # Keep the durable lease fresh while the discussion runs; if this
+        # driver wedges or the process dies, the lease lapses and the
+        # recovery sweep re-drives the meeting.
+        heartbeat_thread = meeting_driver_work.start_lease_heartbeat(
+            team_id, meeting_round_id, stop_event=heartbeat_stop
         )
         result = run_meeting_discussion(team_id, meeting_round_id)
         _record_driver_work_state(
@@ -1832,6 +1840,9 @@ def _run_scheduled_meeting_discussion(team_id: str, meeting_round_id: str) -> No
             error=exc,
         )
     finally:
+        heartbeat_stop.set()
+        if heartbeat_thread is not None:
+            heartbeat_thread.join(timeout=2.0)
         with _MEETING_DISCUSSION_JOBS_LOCK:
             _MEETING_DISCUSSION_JOBS.discard(key)
 

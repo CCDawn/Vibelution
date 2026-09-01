@@ -831,21 +831,19 @@ def test_turn_llm_usage_tokens_extracts_provider_usage() -> None:
     ) == 3
 
 
-def test_session_turn_token_budget_line_reads_canonical_ledger_window(monkeypatch) -> None:
+def test_formal_session_turn_uses_emergency_line_not_reservation_remaining(
+    monkeypatch,
+) -> None:
     receipt_context = {"questionStageBinding": {"workflowRunId": "run-1"}}
     monkeypatch.setattr(
         worker,
         "_challenge_budget_window",
-        lambda context: (
-            {"remaining": 123456}
-            if context is receipt_context
-            else pytest.fail("unexpected receipt context")
-        ),
+        lambda _context: pytest.fail("soft reservation must not own turn termination"),
     )
 
     assert worker._session_turn_token_budget_line(receipt_context) == (
-        123456,
-        "workflow_ledger_reservation",
+        worker.DEFAULT_SESSION_TOKEN_BUDGET,
+        "challenge_emergency_default",
     )
 
 
@@ -975,6 +973,152 @@ def test_continuation_loop_unaffected_below_token_budget(tmp_path, monkeypatch) 
     assert result["status"] == "completed"
     assert result["metadata"].get("continuation_pause_reason") is None
     assert result["metadata"].get("continuation_limit_reached") is None
+
+
+def _run_scripted_continuation_results(
+    tmp_path,
+    monkeypatch,
+    results: list[dict],
+    *,
+    no_progress_limit: int,
+):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        session_service,
+        "_publish_session_detail_snapshot",
+        lambda _session_id: None,
+    )
+    monkeypatch.setattr(
+        worker,
+        "_session_turn_token_budget_line",
+        lambda _context: (10_000_000, "session_default"),
+    )
+    calls: list[int] = []
+
+    def fake_run_existing_agent_single_turn(_agent, **_kwargs):
+        calls.append(1)
+        return dict(results[len(calls) - 1])
+
+    monkeypatch.setattr(
+        session_service,
+        "run_existing_agent_single_turn",
+        fake_run_existing_agent_single_turn,
+    )
+    turn_control = session_service._create_session_turn_control(
+        "session-no-progress-guard"
+    )
+    try:
+        result = worker._run_session_continuation_loop(
+            object(),
+            context={},
+            session_id="session-no-progress-guard",
+            turn_control=turn_control,
+            initial_prompt="继续推进正式任务",
+            history_messages=[],
+            allow_internal_auto_continue=True,
+            max_internal_auto_continue_turns=no_progress_limit,
+        )
+    finally:
+        session_service._clear_session_turn_control(
+            "session-no-progress-guard",
+            turn_id=turn_control.turn_id,
+        )
+    return calls, result
+
+
+def test_continuation_no_progress_limit_resets_after_new_successful_tool(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    def progressing(tool_call: dict) -> dict:
+        return {
+            "status": "completed",
+            "summary": "仍在推进。",
+            "raw_output": "仍在推进。",
+            "outcome": "progress",
+            "tool_call_count": 1,
+            "tool_trace": [tool_call],
+        }
+
+    calls, result = _run_scripted_continuation_results(
+        tmp_path,
+        monkeypatch,
+        [
+            progressing(
+                {
+                    "name": "source_writeback_tool",
+                    "status": "done",
+                    "args": {"result_json": {"batch": 1}},
+                    "result": {"recorded": 1},
+                }
+            ),
+            progressing(
+                {
+                    "name": "source_writeback_tool",
+                    "status": "failed",
+                    "args": {"payload_json": {"batch": 2}},
+                    "errorCode": "unexpected_argument",
+                    "error": "unexpected argument: payload_json",
+                }
+            ),
+            progressing(
+                {
+                    "name": "source_writeback_tool",
+                    "status": "done",
+                    "args": {"result_json": {"batch": 2}},
+                    "result": {"recorded": 2},
+                }
+            ),
+            {
+                "status": "completed",
+                "summary": "结论：任务已完成。",
+                "raw_output": "结论：任务已完成。",
+                "outcome": "done",
+                "tool_call_count": 0,
+                "tool_trace": [],
+            },
+        ],
+        no_progress_limit=2,
+    )
+
+    assert len(calls) == 4
+    assert result["status"] == "completed"
+    assert result["metadata"]["continuation_turn_count"] == 4
+    assert "continuation_limit_reached" not in result["metadata"]
+
+
+def test_continuation_pauses_only_after_consecutive_repeated_tool_error(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    repeated_error = {
+        "status": "completed",
+        "summary": "参数错误，准备重试。",
+        "raw_output": "参数错误，准备重试。",
+        "outcome": "progress",
+        "tool_call_count": 1,
+        "tool_trace": [
+            {
+                "name": "source_writeback_tool",
+                "status": "failed",
+                "args": {"payload_json": {"batch": 2}},
+                "errorCode": "unexpected_argument",
+                "error": "unexpected argument: payload_json",
+            }
+        ],
+    }
+    calls, result = _run_scripted_continuation_results(
+        tmp_path,
+        monkeypatch,
+        [repeated_error, repeated_error, repeated_error],
+        no_progress_limit=3,
+    )
+
+    assert len(calls) == 3
+    assert result["status"] == "paused_limit"
+    assert result["metadata"]["continuation_pause_reason"] == "runaway_no_progress"
+    assert result["metadata"]["continuation_no_progress_count"] == 3
+    assert result["metadata"]["continuation_progress_advanced"] is False
 
 
 _UNIFIED_HISTORY = [

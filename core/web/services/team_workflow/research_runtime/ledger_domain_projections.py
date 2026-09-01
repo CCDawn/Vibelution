@@ -18,8 +18,120 @@ from .run_domain_queries import (
 )
 
 
+_BUDGET_COUNTER_KEYS = (
+    "tokens",
+    "toolCalls",
+    "wallClockSeconds",
+    "maxRetries",
+)
+_TERMINAL_CONSUMED_STATUSES = frozenset({"settled", "consumed"})
+_TERMINAL_UNUSED_STATUSES = frozenset({"released", "voided", "failed"})
+
+
+def _counter(value: object) -> int:
+    return int(value) if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
+
+
+def _normalized_budget_counters(value: Any, *, requested: bool = False) -> dict[str, int]:
+    raw = dict(value) if isinstance(value, dict) else {}
+    tokens = raw.get("tokens")
+    if requested and tokens is None:
+        tokens = raw.get("estimatedTokens")
+    return {
+        "tokens": _counter(tokens),
+        "toolCalls": _counter(raw.get("toolCalls")),
+        "wallClockSeconds": _counter(
+            raw.get("wallClockSeconds", raw.get("seconds"))
+        ),
+        "maxRetries": _counter(raw.get("maxRetries", raw.get("retries"))),
+    }
+
+
+def _actual_usage(value: Any) -> dict[str, Any]:
+    actual = dict(value) if isinstance(value, dict) else {}
+    if "wallClockSeconds" not in actual and "seconds" in actual:
+        actual["wallClockSeconds"] = _counter(actual.pop("seconds"))
+    if "maxRetries" not in actual and "retries" in actual:
+        actual["maxRetries"] = _counter(actual.pop("retries"))
+    return actual
+
+
+def _budget_records(snapshot: ResearchWorkflowSnapshot) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    run_id = snapshot.run.run_id
+    reservations: list[dict[str, Any]] = []
+    stages: dict[str, dict[str, Any]] = {}
+    for ref in snapshot.budget_summary.receipt_refs:
+        reserved_payload = dict(ref.reserved_payload)
+        settled_payload = dict(ref.settled_payload)
+        requested = _normalized_budget_counters(
+            reserved_payload.get("reserved", reserved_payload),
+            requested=True,
+        )
+        limits = _normalized_budget_counters(reserved_payload.get("limits"))
+        actual = _actual_usage(settled_payload.get("usage"))
+        actual_counters = _normalized_budget_counters(actual)
+        stage_id = str(ref.stage_id or "")
+        status = str(ref.status or "")
+        reservation = {
+            "reservationId": str(ref.reservation_id or ""),
+            "receiptId": str(ref.receipt_id or ""),
+            "runId": run_id,
+            "nodeRunId": str(ref.node_run_id or ""),
+            "stageId": stage_id,
+            "budgetLedgerId": f"budget-{run_id}-{stage_id}",
+            "requested": requested,
+            "actual": actual,
+            "status": status,
+            "policySnapshotHash": str(ref.policy_hash or ""),
+            "reservedAtMs": ref.created_at_ms,
+            "settledAtMs": (
+                ref.updated_at_ms if status in _TERMINAL_CONSUMED_STATUSES else None
+            ),
+        }
+        reservations.append(reservation)
+
+        stage = stages.setdefault(
+            stage_id,
+            {
+                "budgetLedgerId": f"budget-{run_id}-{stage_id}",
+                "runId": run_id,
+                "stageId": stage_id,
+                "policySnapshotHash": str(ref.policy_hash or ""),
+                "limits": {key: 0 for key in _BUDGET_COUNTER_KEYS},
+                "reserved": {key: 0 for key in _BUDGET_COUNTER_KEYS},
+                "consumed": {key: 0 for key in _BUDGET_COUNTER_KEYS},
+                "remaining": {key: 0 for key in _BUDGET_COUNTER_KEYS},
+                "stopReason": "",
+                "updatedAtMs": ref.updated_at_ms,
+            },
+        )
+        for key in _BUDGET_COUNTER_KEYS:
+            stage["limits"][key] = max(stage["limits"][key], limits[key])
+            if status in _TERMINAL_CONSUMED_STATUSES:
+                stage["consumed"][key] += actual_counters[key]
+            elif status not in _TERMINAL_UNUSED_STATUSES:
+                stage["reserved"][key] += requested[key]
+        stage["updatedAtMs"] = max(
+            _counter(stage.get("updatedAtMs")),
+            _counter(ref.updated_at_ms),
+        )
+
+    for stage in stages.values():
+        stage["remaining"] = {
+            key: max(
+                0,
+                stage["limits"][key]
+                - stage["reserved"][key]
+                - stage["consumed"][key],
+            )
+            for key in _BUDGET_COUNTER_KEYS
+        }
+    return list(stages.values()), reservations
+
+
 def snapshot_projection_record(snapshot: ResearchWorkflowSnapshot) -> dict[str, Any]:
     run = snapshot.run.to_dict()
+    budget_ledgers, budget_reservations = _budget_records(snapshot)
     return {
         "runId": run["runId"],
         "teamId": run["teamId"],
@@ -28,8 +140,8 @@ def snapshot_projection_record(snapshot: ResearchWorkflowSnapshot) -> dict[str, 
         "handoffs": [item.to_dict() for item in snapshot.handoff_summary.refs],
         "nodeRuns": [],
         "artifactManifests": [],
-        "budgetLedgers": [],
-        "budgetReservations": [],
+        "budgetLedgers": budget_ledgers,
+        "budgetReservations": budget_reservations,
         "hypothesisPortfolios": [],
         "experimentCampaigns": [],
         "competitionEvaluations": [],

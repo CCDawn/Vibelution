@@ -190,14 +190,15 @@ def test_missing_decision_and_empty_novelty_fail_closed_without_a_fixed_count() 
     assert "turnOrdinal" not in repr(no_new_information)
 
 
-def test_v1_expression_and_runtime_registration_remain_unchanged() -> None:
+def test_v1_expression_remains_available_while_v2_runtime_is_registered() -> None:
     assert EXPRESSION_DECISION_VERSION == "companion_expression.v1"
     assert build_companion_expression_decision(turn_ordinal=3)["followup"] is True
-    assert "virtual_human_dialogue_decision_v2_tool" not in VIRTUAL_HUMAN_TOOL_NAMES
-    assert all("dialogue_v2" not in filename for filename in PROMPT_PACK_FILES)
+    assert "virtual_human_dialogue_decision_v2_tool" in VIRTUAL_HUMAN_TOOL_NAMES
+    assert "13_companion_dialogue_v2_draft.md" in PROMPT_PACK_FILES
+    assert "12_companion_followup_delivery.md" not in PROMPT_PACK_FILES
 
 
-def test_v2_prompt_contract_is_present_but_intentionally_not_runtime_loaded() -> None:
+def test_v2_prompt_contract_is_runtime_loaded_without_model_owned_identity() -> None:
     prompt_name = "13_companion_dialogue_v2_draft.md"
     prompt_path = (
         Path(__file__).parents[1]
@@ -210,7 +211,7 @@ def test_v2_prompt_contract_is_present_but_intentionally_not_runtime_loaded() ->
     prompt = prompt_path.read_text(encoding="utf-8")
     compact_prompt = " ".join(prompt.split())
 
-    assert prompt_name not in PROMPT_PACK_FILES
+    assert prompt_name in PROMPT_PACK_FILES
     assert "Do not aim for a target number of messages" in compact_prompt
     assert "personality" in compact_prompt
     assert "relationship" in compact_prompt

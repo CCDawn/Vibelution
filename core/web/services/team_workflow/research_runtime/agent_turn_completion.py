@@ -55,13 +55,10 @@ AGENT_TURN_CONTINUABLE_TERMINAL_STATUSES = frozenset(
     {"needs_continue", "paused_limit"}
 )
 
-# Bounded continuation budget per complete_agent_turn_outputs call (one node
-# attempt).  Every continuation is a first-class protocol step: it submits the
-# canonical continue request to the SAME session and records an auditable
-# runtime-scene event (attempt number, paused status, from/to turn ids).
-# Exhausting the budget fails the node loudly with the
-# agent_turn_continuation_exhausted problem code and the full turn chain --
-# there is no silent downgrade, archive, or success reclassification.
+# Consecutive no-progress allowance per complete_agent_turn_outputs call. Every
+# continuation remains a first-class protocol step on the SAME session. New
+# canonical progress resets this counter; the logical-task deadline remains
+# the absolute bound for a legitimately long progressing chain.
 MAX_AGENT_TURN_CONTINUATIONS = 3
 
 # A source-collection stage task whose canonical status settled to
@@ -658,9 +655,11 @@ def _wait_with_bounded_turn_continuation(
     A turn that reaches ``needs_continue``/``paused_limit`` is resumable per
     the session protocol, so instead of failing the node attempt this loop
     submits the canonical continue request to the same session and keeps
-    waiting -- at most ``MAX_AGENT_TURN_CONTINUATIONS`` times, each step
-    audited.  Exhausting the budget raises ``agent_turn_continuation_exhausted``
-    with the full turn chain; a failure is never downgraded into success.
+    waiting. ``MAX_AGENT_TURN_CONTINUATIONS`` bounds consecutive continuations
+    without canonical progress, not the total number of productive turns.
+    Exhausting that no-progress allowance raises
+    ``agent_turn_continuation_exhausted`` with the full turn chain; a failure
+    is never downgraded into success.
 
     Source-collection family turns are additionally anchored to their domain
     authority (the stage task store) at both decision points:
@@ -722,15 +721,23 @@ def _wait_with_bounded_turn_continuation(
         resume_used = max(0, int(resume_problem.get("continuationsUsed") or 0))
     except (TypeError, ValueError):
         resume_used = 0
+    try:
+        resume_no_progress_continuations = max(
+            0,
+            int(resume_problem.get("continuationNoProgressCount") or 0),
+        )
+    except (TypeError, ValueError):
+        resume_no_progress_continuations = 0
+    consecutive_no_progress_continuations = 0
     if (
         str(resume_problem.get("code") or "").strip() == "live_turn_wait"
         and resume_used > 0
-        and resume_used <= MAX_AGENT_TURN_CONTINUATIONS
         and len(resume_chain) == resume_used + 1
         and resume_chain[0] == handle.turn_id
         and resume_chain[-1]
         == str(resume_problem.get("continuationTurnId") or "").strip()
     ):
+        consecutive_no_progress_continuations = resume_no_progress_continuations
         turn_chain = resume_chain
         turn_id = resume_chain[-1]
         continuations = [
@@ -818,6 +825,9 @@ def _wait_with_bounded_turn_continuation(
                         "continuationTurnId": turn_id,
                         "continuationTurnChain": list(turn_chain),
                         "continuationsUsed": len(continuations),
+                        "continuationNoProgressCount": (
+                            consecutive_no_progress_continuations
+                        ),
                     }
                 )
             raise
@@ -901,7 +911,16 @@ def _wait_with_bounded_turn_continuation(
                 },
             )
             return snapshot, turn_id, continuations
-        if len(continuations) >= MAX_AGENT_TURN_CONTINUATIONS:
+        progress_advanced = bool(snapshot.get("continuationProgressAdvanced"))
+        if continuations:
+            if progress_advanced:
+                consecutive_no_progress_continuations = 0
+            else:
+                consecutive_no_progress_continuations += 1
+        if (
+            consecutive_no_progress_continuations
+            >= MAX_AGENT_TURN_CONTINUATIONS
+        ):
             raise RuntimeError(
                 json.dumps(
                     {
@@ -911,6 +930,9 @@ def _wait_with_bounded_turn_continuation(
                         "terminalStatus": status,
                         "continuationsUsed": len(continuations),
                         "maxContinuations": MAX_AGENT_TURN_CONTINUATIONS,
+                        "consecutiveNoProgressContinuations": (
+                            consecutive_no_progress_continuations
+                        ),
                         "turnChain": list(turn_chain),
                     },
                     ensure_ascii=False,
@@ -931,6 +953,10 @@ def _wait_with_bounded_turn_continuation(
                 "fromTurnId": turn_id,
                 "toTurnId": next_turn_id,
                 "pausedStatus": status,
+                "progressAdvanced": progress_advanced,
+                "consecutiveNoProgressContinuations": (
+                    consecutive_no_progress_continuations
+                ),
             }
         )
         turn_chain.append(next_turn_id)

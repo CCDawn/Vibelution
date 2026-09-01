@@ -295,6 +295,30 @@ def get_session_turn_completion_snapshot(session_id: str, turn_id: str = "") -> 
         "activeTurnId": active_turn_id,
         "turnCurrent": turn_current,
     }
+    assistant_metadata = (
+        assistant_message.get("metadata")
+        if isinstance(assistant_message, dict)
+        and isinstance(assistant_message.get("metadata"), dict)
+        else {}
+    )
+    continuation_pause_reason = str(
+        assistant_metadata.get("continuation_pause_reason") or ""
+    ).strip()
+    if continuation_pause_reason:
+        snapshot["continuationPauseReason"] = continuation_pause_reason
+    try:
+        continuation_no_progress_count = max(
+            0,
+            int(assistant_metadata.get("continuation_no_progress_count") or 0),
+        )
+    except (TypeError, ValueError):
+        continuation_no_progress_count = 0
+    if continuation_no_progress_count:
+        snapshot["continuationNoProgressCount"] = continuation_no_progress_count
+    if "continuation_progress_advanced" in assistant_metadata:
+        snapshot["continuationProgressAdvanced"] = bool(
+            assistant_metadata.get("continuation_progress_advanced")
+        )
     if terminal_problem_code:
         snapshot["terminalProblemCode"] = terminal_problem_code
     if terminal_reason:
