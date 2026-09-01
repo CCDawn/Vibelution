@@ -1,4 +1,8 @@
-/** Canonical Run read model: formal snapshot plus SSE deltas, no polling fallback. */
+/**
+ * Canonical Run read model: formal snapshot plus SSE deltas, with a bounded
+ * low-frequency snapshot poll as a fallback for dropped streams and unknown
+ * events (the poll stops once the run reaches a terminal status).
+ */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
@@ -20,6 +24,15 @@ import { trackWorkflowHumanGateResolve } from "../challengeCupTelemetry";
 import { useResearchWorkflowEventReplay } from "./useResearchWorkflowEventReplay";
 import { useResearchWorkflowEventStream } from "./useResearchWorkflowEventStream";
 import { useResearchWorkflowSnapshot } from "./useResearchWorkflowSnapshot";
+
+/**
+ * Fallback poll interval for the formal snapshot. SSE stays the primary
+ * refresh path; this covers dropped streams and event shapes this build
+ * cannot interpret, so revision/aggregation state never stays stale.
+ */
+const SNAPSHOT_FALLBACK_POLL_MS = 30_000;
+/** Backend WorkflowRunStatus values after which nothing new can happen. */
+const TERMINAL_RUN_STATUSES = new Set(["succeeded", "failed", "cancelled", "superseded"]);
 
 export type UseResearchWorkflowRunResult = {
   projection: WorkflowCanvasProjection | null;
@@ -149,6 +162,18 @@ export function useResearchWorkflowRun(
   }, [eventState.events, snapshotState.snapshot]);
 
   runRef.current = run;
+
+  const runStatus = run?.status ?? null;
+  useEffect(() => {
+    if (!teamId.trim() || !runId.trim()) return;
+    if (runStatus && TERMINAL_RUN_STATUSES.has(runStatus)) return;
+    const pollTimer = window.setInterval(() => {
+      const current = runRef.current;
+      if (current && TERMINAL_RUN_STATUSES.has(current.status)) return;
+      scheduleRefresh();
+    }, SNAPSHOT_FALLBACK_POLL_MS);
+    return () => window.clearInterval(pollTimer);
+  }, [runId, runStatus, scheduleRefresh, teamId]);
 
   const createRun = useCallback(async (input: CreateResearchWorkflowRunInput) => {
     setBusy(true);

@@ -44,6 +44,7 @@ describe("useResearchWorkflowEventStream", () => {
   });
 
   afterEach(async () => {
+    vi.useRealTimers();
     await act(async () => root.unmount());
     container.remove();
   });
@@ -80,7 +81,7 @@ describe("useResearchWorkflowEventStream", () => {
     root = createRoot(container);
   });
 
-  it("keeps the accepted cursor when an unknown frame reconnects", async () => {
+  it("delivers unknown event frames, advances the cursor, and reconnects from it", async () => {
     let callCount = 0;
     api.consumeResearchWorkflowEventStream.mockImplementation(async (options) => {
       callCount += 1;
@@ -88,8 +89,12 @@ describe("useResearchWorkflowEventStream", () => {
       if (callCount === 1) {
         options.onFrame({
           id: "run-a:6",
-          event: "revision_forked",
-          data: JSON.stringify({ sequence: 6, runId: "run-a", type: "revision_forked" }),
+          event: "workflow.brand_new.future_event",
+          data: JSON.stringify({
+            sequence: 6,
+            runId: "run-a",
+            type: "workflow.brand_new.future_event",
+          }),
         });
       }
       throw new Error("disconnect");
@@ -105,10 +110,42 @@ describe("useResearchWorkflowEventStream", () => {
       await vi.advanceTimersByTimeAsync(1_000);
     });
 
-    expect(onEvent).not.toHaveBeenCalled();
-    expect(api.consumeResearchWorkflowEventStream.mock.calls[1][0]).toEqual(
-      expect.objectContaining({ afterSequence: 3, lastEventId: "run-a:3" }),
+    // Unknown types are forwarded as generic events instead of being dropped,
+    // so the cursor advances and the reconnect resumes after the new frame.
+    expect(onEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sequence: 6,
+        type: "workflow.brand_new.future_event",
+      }),
     );
-    vi.useRealTimers();
+    expect(api.consumeResearchWorkflowEventStream.mock.calls[1][0]).toEqual(
+      expect.objectContaining({ afterSequence: 6, lastEventId: "run-a:6" }),
+    );
+  });
+
+  it("surfaces malformed unknown frames without advancing the cursor", async () => {
+    api.consumeResearchWorkflowEventStream.mockImplementation(async (options) => {
+      options.onOpen?.();
+      options.onFrame({
+        id: "run-a:6",
+        event: "workflow.brand_new.future_event",
+        data: "{not-json",
+      });
+      await new Promise<void>((_resolve, reject) => {
+        options.signal.addEventListener(
+          "abort",
+          () => reject(new DOMException("aborted", "AbortError")),
+        );
+      });
+    });
+    const onEvent = vi.fn();
+
+    await act(async () => {
+      root.render(<HookProbe onEvent={onEvent} onValue={(value) => { latest = value; }} />);
+      await Promise.resolve();
+    });
+
+    expect(onEvent).not.toHaveBeenCalled();
+    expect(latest?.error).toBe("工作流事件格式无效");
   });
 });

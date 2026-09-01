@@ -31,11 +31,21 @@ const EVENT_LABELS: Record<string, string> = {
   budget_settled: "预算已结算",
   execution_anchor_bound: "执行锚点已绑定",
   artifact_verified: "产物已核验",
+  "workflow.session_scope.resolved": "会话范围已确定",
+  "workflow.child_session.created": "子会话已创建",
+  "workflow.child_session.resumed": "子会话已恢复",
+  "workflow.scope_attempt.retried": "范围尝试已重试",
+  "workflow.hypothesis_fragment.recorded": "假说片段已记录",
+  "workflow.hypothesis_aggregation.blocked": "假说聚合已阻塞",
+  "workflow.hypothesis_aggregation.completed": "假说聚合已完成",
   run_forked: "运行已分叉",
   revision_forked: "修订分支已创建",
   run_blocked: "运行已阻塞",
   run_succeeded: "运行已完成",
   reconciliation_required: "需要对账",
+  delivery_orchestration_completed: "交付编排已完成",
+  delivery_orchestration_blocked: "交付编排已阻塞",
+  delivery_orchestration_failed: "交付编排失败",
 };
 
 function field(event: WorkflowEventEnvelope, key: string): string {

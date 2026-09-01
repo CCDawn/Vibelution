@@ -161,6 +161,7 @@ describe("useResearchWorkflowRun behavior", () => {
   });
 
   afterEach(async () => {
+    vi.useRealTimers();
     await act(async () => {
       root.unmount();
     });
@@ -264,5 +265,81 @@ describe("useResearchWorkflowRun behavior", () => {
     });
     expect(latest?.run?.runId).toBe("run-b");
     expect(latest?.lastSequence).toBe(1);
+  });
+
+  it("unknown SSE event types trigger a snapshot refetch instead of being dropped", async () => {
+    api.fetchResearchWorkflowSnapshot.mockResolvedValue(makeSnapshot("run-a", 3));
+    api.consumeResearchWorkflowEventStream.mockImplementation(async (options) => {
+      options.onOpen?.();
+      options.onFrame({
+        id: "run-a:4",
+        event: "workflow.brand_new.future_event",
+        data: JSON.stringify({
+          eventId: "evt-unknown-4",
+          sequence: 4,
+          runId: "run-a",
+          teamId: "research-team",
+          runVersion: 4,
+          type: "workflow.brand_new.future_event",
+          correlationId: "corr",
+          occurredAt: "2026-08-12T14:00:00.000Z",
+          payload: {},
+        }),
+      });
+      await new Promise<void>((_resolve, reject) => {
+        options.signal.addEventListener(
+          "abort",
+          () => reject(new DOMException("aborted", "AbortError")),
+          { once: true },
+        );
+      });
+    });
+
+    await renderWith("run-a");
+    const callsAfterSettle = api.fetchResearchWorkflowSnapshot.mock.calls.length;
+    for (
+      let attempt = 0;
+      attempt < 40 && api.fetchResearchWorkflowSnapshot.mock.calls.length <= callsAfterSettle;
+      attempt += 1
+    ) {
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+    }
+    expect(api.fetchResearchWorkflowSnapshot.mock.calls.length).toBeGreaterThan(
+      callsAfterSettle,
+    );
+    expect(latest?.lastSequence).toBe(4);
+  });
+
+  it("polls the snapshot while the run is non-terminal as an SSE fallback", async () => {
+    // Install fake timers before mount so the fallback interval is faked too.
+    vi.useFakeTimers();
+    api.fetchResearchWorkflowSnapshot.mockResolvedValue(makeSnapshot("run-a", 3));
+    await renderWith("run-a");
+    const callsAfterSettle = api.fetchResearchWorkflowSnapshot.mock.calls.length;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_200);
+    });
+    expect(api.fetchResearchWorkflowSnapshot.mock.calls.length).toBeGreaterThan(
+      callsAfterSettle,
+    );
+    vi.useRealTimers();
+  });
+
+  it("stops the fallback poll once the run reaches a terminal status", async () => {
+    vi.useFakeTimers();
+    const settled = makeSnapshot("run-a", 3);
+    api.fetchResearchWorkflowSnapshot.mockResolvedValue({
+      ...settled,
+      run: { ...settled.run, status: "succeeded" },
+    });
+    await renderWith("run-a");
+    const callsAfterSettle = api.fetchResearchWorkflowSnapshot.mock.calls.length;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(120_000);
+    });
+    expect(api.fetchResearchWorkflowSnapshot.mock.calls.length).toBe(callsAfterSettle);
+    vi.useRealTimers();
   });
 });

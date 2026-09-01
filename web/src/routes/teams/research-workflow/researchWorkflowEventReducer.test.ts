@@ -166,6 +166,26 @@ describe("formal event reducer (T6)", () => {
     );
     expect(gap.resyncRequired).toBe(true);
   });
+
+  it("treats unknown event types as generic events without resync", () => {
+    let state = emptyFormalEventReadModel("team-a", "run-a");
+    state = applyFormalEvent(state, evt({ eventId: "e1", sequence: 1 }));
+    const unknownType = "workflow.brand_new.future_event";
+    state = applyFormalEvent(
+      state,
+      evt({ eventId: "e2", sequence: 2, type: unknownType }),
+    );
+    // Unknown types must not crash, dirty the state, or force a resync —
+    // they advance the cursor so snapshot refresh keeps the canvas current.
+    expect(state.resyncRequired).toBe(false);
+    expect(state.lastSequence).toBe(2);
+    expect(state.events).toHaveLength(2);
+    expect(state.events[1].type).toBe(unknownType);
+    // A replayed unknown frame stays ignored (dedupe by id and sequence).
+    expect(
+      applyFormalEvent(state, evt({ eventId: "e2", sequence: 2, type: unknownType })),
+    ).toBe(state);
+  });
 });
 
 describe("formal snapshot reducer (T6)", () => {

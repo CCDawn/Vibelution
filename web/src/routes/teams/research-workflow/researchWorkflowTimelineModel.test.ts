@@ -76,4 +76,27 @@ describe("researchWorkflowTimelineModel", () => {
     expect(labels.some((label) => label.includes("节点已阻塞"))).toBe(true);
     expect(labels.some((label) => label.includes("检查点仍停留在前驱节点"))).toBe(true);
   });
+
+  it("labels revision fork and hypothesis aggregation events with Chinese terms", () => {
+    const groups = buildResearchTimelineGroups([
+      event({ eventId: "e-fork", sequence: 4, type: "revision_forked" }),
+      event({
+        eventId: "e-agg",
+        sequence: 5,
+        type: "workflow.hypothesis_aggregation.completed",
+        payload: { nodeId: "hypothesis_integration", attempt: 1 },
+      }),
+    ]);
+    const labels = groups.flatMap((group) => group.items.map((item) => item.label));
+    expect(labels).toContain("修订分支已创建");
+    expect(labels).toContain("假说聚合已完成");
+  });
+
+  it("falls back to the generic label for unknown event types", () => {
+    const groups = buildResearchTimelineGroups([
+      event({ eventId: "e-future", sequence: 9, type: "workflow.brand_new.future_event" }),
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].items[0].label).toBe("运行状态已更新");
+  });
 });

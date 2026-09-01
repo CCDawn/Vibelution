@@ -7,7 +7,6 @@ import {
   observeWorkflowStreamReconnected,
   observeWorkflowStreamInterrupted,
 } from "../challengeCupTelemetry";
-import { RESEARCH_WORKFLOW_SSE_EVENT_TYPES } from "./researchWorkflowSseEventTypes";
 
 export type ResearchWorkflowEventStreamState =
   | "idle"
@@ -16,7 +15,6 @@ export type ResearchWorkflowEventStreamState =
   | "reconnecting";
 
 const RECONNECT_DELAY_MS = 1_000;
-const KNOWN_EVENT_TYPES = new Set<string>(RESEARCH_WORKFLOW_SSE_EVENT_TYPES);
 
 export function useResearchWorkflowEventStream(options: {
   teamId: string;
@@ -127,7 +125,12 @@ export function useResearchWorkflowEventStream(options: {
                 void (JSON.parse(frame.data) as { cursor?: number });
                 return;
               }
-              if (!KNOWN_EVENT_TYPES.has(frame.event)) return;
+              // Forward compatibility: every well-formed workflow event frame
+              // is delivered, including event types this build does not know.
+              // Unknown types flow through the reducer as generic events so
+              // the cursor still advances and the snapshot gets refetched;
+              // dropping them here would freeze the canvas on stale state
+              // until an unrelated event arrived.
               const event = JSON.parse(frame.data) as WorkflowEventEnvelope;
               const sequence = Number(event.sequence) || 0;
               if (sequence <= cursorRef.current) return;
