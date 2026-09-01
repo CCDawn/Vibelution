@@ -40,7 +40,7 @@ def _enqueue(
     )
 
 
-def test_plugin_mailbox_is_idempotent_and_strict_fifo_across_user_and_proactive() -> None:
+def test_plugin_mailbox_is_idempotent_and_prioritizes_user_over_proactive() -> None:
     mailbox = normalize_mailbox(None)
     mailbox, proactive = _enqueue(
         mailbox,
@@ -74,8 +74,8 @@ def test_plugin_mailbox_is_idempotent_and_strict_fifo_across_user_and_proactive(
         lease_seconds=30,
     )
     assert first is not None
-    assert first["entryId"] == "proactive-a"
-    assert first["command"] == {"content": "proactive-a"}
+    assert first["entryId"] == "user-a"
+    assert first["command"] == {"content": "user-a"}
 
     mailbox, blocked = claim_next_mailbox_entry(
         mailbox,

@@ -18,6 +18,7 @@ from typing import Any
 
 MAILBOX_SCHEMA_VERSION = 1
 _SOURCE_KINDS = {"user", "proactive", "followup"}
+_SOURCE_PRIORITY = {"user": 0, "proactive": 1, "followup": 2}
 _ENTRY_STATES = {
     "queued",
     "dispatching",
@@ -248,14 +249,19 @@ def claim_next_mailbox_entry(
             }
         )
 
-    candidate = next(
-        (
-            entry
-            for entry in state["entries"]
-            if str(entry.get("sessionId") or "") == normalized_session_id
-            and str(entry.get("state") or "") == "queued"
+    candidates = [
+        entry
+        for entry in state["entries"]
+        if str(entry.get("sessionId") or "") == normalized_session_id
+        and str(entry.get("state") or "") == "queued"
+    ]
+    candidate = min(
+        candidates,
+        key=lambda item: (
+            _SOURCE_PRIORITY.get(str(item.get("sourceKind") or ""), 99),
+            int(item.get("arrivalSequence") or 0),
         ),
-        None,
+        default=None,
     )
     if candidate is None:
         return state, None

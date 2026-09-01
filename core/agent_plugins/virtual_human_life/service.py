@@ -33,13 +33,13 @@ from .calendar import (
     merge_calendar_into_schedule,
     project_calendar_for_date,
 )
+from .causal_contracts import CAUSAL_SCHEMA_VERSION, authorized_reuse_receipt
 from .companion_preferences import (
     CompanionPreferenceError,
     CompanionPreferenceManager,
     CompanionPreferencePersistenceError,
     project_companion_preferences,
 )
-from .causal_contracts import CAUSAL_SCHEMA_VERSION, authorized_reuse_receipt
 from .conversation_continuity import (
     build_proactive_candidate,
     evaluate_proactive_candidate,
@@ -47,11 +47,15 @@ from .conversation_continuity import (
     resolve_open_loop,
     upsert_open_loop,
 )
-from .delivery_runtime import CompanionDeliveryRuntime
+from .delivery_plan import DIALOGUE_BURST_VERSION
+from .delivery_runtime import (
+    CompanionDeliveryRuntime,
+    companion_delivery_kind_from_entry,
+    is_companion_continuation_delivery_kind,
+)
 from .dialogue_context import (
     bind_interaction_receipt_turn,
     project_companion_dialogue_context,
-    project_companion_expression_for_turn,
     record_interaction_receipt,
 )
 from .domain import (
@@ -102,7 +106,7 @@ from .planning import (
     build_deterministic_schedule,
     validate_schedule_proposal,
 )
-from .prompt_pack import load_prompt_pack
+from .prompt_pack import load_legacy_followup_prompt, load_prompt_pack
 from .reflection import (
     build_nightly_reflection_proposals,
     project_memory_strength,
@@ -352,7 +356,8 @@ class VirtualHumanLifeService:
                     deepcopy(item)
                     for item in mailbox["entries"]
                     if str(item.get("sessionId") or "") == normalized_session_id
-                    and str(item.get("sourceKind") or "") == "followup"
+                    and str(item.get("sourceKind") or "")
+                    == "followup"
                     and str(item.get("state") or "")
                     in {"queued", "dispatching", "awaiting_native_admission"}
                     and int(item.get("generation") or 0) < generation
@@ -524,6 +529,10 @@ class VirtualHumanLifeService:
 
         normalized_agent_id = str(agent_id or "").strip()
         normalized_session_id = str(session_id or "").strip()
+        burst_reconciliation = self.reconcile_dialogue_bursts(
+            normalized_agent_id,
+            session_id=normalized_session_id,
+        )
         with self._lock_for(normalized_agent_id):
             self._require_enabled_binding(normalized_agent_id)
             mailbox = normalize_mailbox(
@@ -552,6 +561,12 @@ class VirtualHumanLifeService:
                 entry=awaiting_entry,
             )
         if not queued:
+            if burst_reconciliation["awaitingReceiptPlanIds"]:
+                return {
+                    "accepted": False,
+                    "queued": True,
+                    "reason": "dialogue_burst_receipt_pending",
+                }
             return {"accepted": False, "queued": False, "reason": "empty"}
         if self.conversation_busy_provider is not None and bool(
             self.conversation_busy_provider(normalized_session_id)
@@ -577,7 +592,10 @@ class VirtualHumanLifeService:
             )
         if entry is None:
             return {"accepted": False, "queued": False, "reason": "empty_or_claimed"}
-        if str(entry.get("sourceKind") or "") in {"proactive", "followup"}:
+        if str(entry.get("sourceKind") or "") in {
+            "proactive",
+            "followup",
+        }:
             return self._dispatch_proactive_mailbox_entry(
                 normalized_agent_id,
                 session_id=normalized_session_id,
@@ -697,7 +715,7 @@ class VirtualHumanLifeService:
             self.store.write_json(
                 normalized_agent_id, "conversation/mailbox.json", mailbox
             )
-        delivery_plan = self._plan_and_enqueue_user_followup(
+        delivery_plan = self._start_user_dialogue_burst_v2(
             normalized_agent_id,
             session_id=normalized_session_id,
             source_entry=completed,
@@ -716,7 +734,7 @@ class VirtualHumanLifeService:
             "deliveryPlan": delivery_plan,
         }
 
-    def _plan_and_enqueue_user_followup(
+    def _start_user_dialogue_burst_v2(
         self,
         agent_id: str,
         *,
@@ -724,36 +742,178 @@ class VirtualHumanLifeService:
         source_entry: dict[str, Any],
         source_turn_id: str,
     ) -> dict[str, Any]:
-        """Create at most one Companion-only assistant Turn after a user Turn."""
+        """Start a receipt-driven Companion burst without queuing future text."""
 
         if str(source_entry.get("sourceKind") or "") != "user":
             return {}
         with self._lock_for(agent_id):
             binding = self._require_enabled_binding(agent_id)
-            state = self.store.read_json(agent_id, "state.json") or self._default_state(
-                agent_id,
-                binding,
-            )
-            causal = self._causal_projection(agent_id, now=self._local_now(binding))
-            expression = project_companion_expression_for_turn(
-                self.store,
-                agent_id,
-                state=state,
-                causal=causal,
-                session_id=session_id,
-                run_id=source_turn_id,
-            )["expressionDecision"]
-            plan = self.delivery_runtime.plan_user_response(
+            plan = self.delivery_runtime.start_dialogue_burst(
                 agent_id,
                 session_id=session_id,
+                root_entry_id=str(source_entry.get("entryId") or ""),
+                root_source_kind="user",
                 generation=int(source_entry.get("generation") or 0),
-                source_entry_id=str(source_entry.get("entryId") or ""),
-                source_turn_id=source_turn_id,
-                expression_decision=expression,
                 binding_revision=int(binding.get("bindingRevision") or 0),
-                local_date=self._local_now(binding).date().isoformat(),
+                root_turn_id=source_turn_id,
             )
         return plan
+
+    def record_dialogue_decision_v2(
+        self,
+        agent_id: str,
+        *,
+        session_id: str,
+        turn_id: str,
+        model_decision: Mapping[str, Any],
+        tool_call_id: str,
+    ) -> dict[str, Any]:
+        """Record metadata-only intent for the current Companion native Turn."""
+
+        normalized_agent_id = str(agent_id or "").strip()
+        normalized_session_id = str(session_id or "").strip()
+        normalized_turn_id = str(turn_id or "").strip()
+        with self._lock_for(normalized_agent_id):
+            binding = self._require_enabled_binding(normalized_agent_id)
+            agent = self._agent(normalized_agent_id, include_archived=False) or {}
+            direct_session_id = str(
+                agent.get("directSessionId") or agent.get("direct_session_id") or ""
+            ).strip()
+            if direct_session_id != normalized_session_id:
+                raise VirtualHumanLifeError(
+                    "Companion dialogue decision must target the bound direct Session."
+                )
+            mailbox = normalize_mailbox(
+                self.store.read_json(normalized_agent_id, "conversation/mailbox.json")
+            )
+            generation = max(
+                (
+                    int(item.get("generation") or 0)
+                    for item in mailbox["entries"]
+                    if str(item.get("sessionId") or "") == normalized_session_id
+                ),
+                default=0,
+            )
+            allowed_source_keys = self._dialogue_v2_allowed_source_keys(
+                normalized_agent_id
+            )
+            try:
+                return self.delivery_runtime.record_dialogue_decision_draft(
+                    normalized_agent_id,
+                    session_id=normalized_session_id,
+                    turn_id=normalized_turn_id,
+                    generation=generation,
+                    binding_revision=int(binding.get("bindingRevision") or 0),
+                    tool_call_id=str(tool_call_id or "").strip(),
+                    model_decision=model_decision,
+                    allowed_source_keys=allowed_source_keys,
+                )
+            except ValueError as exc:
+                raise VirtualHumanLifeError(str(exc)) from exc
+
+    def reconcile_dialogue_bursts(
+        self,
+        agent_id: str,
+        *,
+        session_id: str,
+    ) -> dict[str, list[str]]:
+        """Advance only V2 plans backed by a native assistant terminal receipt."""
+
+        normalized_agent_id = str(agent_id or "").strip()
+        normalized_session_id = str(session_id or "").strip()
+        queued_entry_ids: list[str] = []
+        completed_plan_ids: list[str] = []
+        awaiting_plan_ids: list[str] = []
+        if self.delivery_receipt_resolver is None:
+            return {
+                "queuedContinuationEntryIds": [],
+                "completedPlanIds": [],
+                "awaitingReceiptPlanIds": [],
+            }
+        with self._lock_for(normalized_agent_id):
+            binding = self._require_enabled_binding(normalized_agent_id)
+            mailbox = normalize_mailbox(
+                self.store.read_json(normalized_agent_id, "conversation/mailbox.json")
+            )
+            generation = max(
+                (
+                    int(item.get("generation") or 0)
+                    for item in mailbox["entries"]
+                    if str(item.get("sessionId") or "") == normalized_session_id
+                ),
+                default=0,
+            )
+            plans = [
+                deepcopy(item)
+                for item in self.store.read_jsonl(
+                    normalized_agent_id, "conversation/delivery_plans.jsonl"
+                )
+                if str(item.get("contractVersion") or "")
+                == DIALOGUE_BURST_VERSION
+                and str(item.get("sessionId") or "") == normalized_session_id
+                and str(item.get("status") or "") == "awaiting_terminal_receipt"
+            ]
+            for plan in plans:
+                identity = {
+                    **plan,
+                    "turnId": str(plan.get("currentTurnId") or ""),
+                }
+                try:
+                    receipt = self.delivery_receipt_resolver(
+                        normalized_agent_id, identity
+                    )
+                except Exception as exc:  # noqa: BLE001 - read-only receipt adapter
+                    logger.warning(
+                        "Companion burst receipt lookup failed for agent=%s (%s).",
+                        normalized_agent_id,
+                        type(exc).__name__,
+                    )
+                    awaiting_plan_ids.append(str(plan.get("planId") or ""))
+                    continue
+                receipt_event_id = str(
+                    (receipt or {}).get("receiptEventId") or ""
+                ).strip()
+                if not receipt_event_id:
+                    awaiting_plan_ids.append(str(plan.get("planId") or ""))
+                    continue
+                advanced, entry = self.delivery_runtime.reconcile_dialogue_burst_receipt(
+                    normalized_agent_id,
+                    plan_id=str(plan.get("planId") or ""),
+                    receipt_event_id=receipt_event_id,
+                    current_generation=generation,
+                    binding_revision=int(binding.get("bindingRevision") or 0),
+                    local_date=self._local_now(binding).date().isoformat(),
+                )
+                if entry is not None:
+                    queued_entry_ids.append(str(entry.get("entryId") or ""))
+                if str(advanced.get("status") or "") in {
+                    "await_user",
+                    "completed",
+                    "cancelled",
+                    "failed",
+                    "expired",
+                }:
+                    completed_plan_ids.append(str(advanced.get("planId") or ""))
+        return {
+            "queuedContinuationEntryIds": queued_entry_ids,
+            "completedPlanIds": completed_plan_ids,
+            "awaitingReceiptPlanIds": awaiting_plan_ids,
+        }
+
+    def _dialogue_v2_allowed_source_keys(self, agent_id: str) -> list[str]:
+        keys: set[str] = set()
+        for row in self.store.read_jsonl(agent_id, "conversation/open_loops.jsonl"):
+            if str(row.get("status") or "") == "open":
+                topic_key = str(row.get("topicKey") or "").strip()
+                if topic_key:
+                    keys.add(f"open-loop:{topic_key}")
+        binding = self.binding_for(agent_id) or {}
+        local_date = self._local_now(binding).date().isoformat()
+        for row in self.store.read_jsonl(agent_id, f"events/{local_date}.jsonl"):
+            event_id = str(row.get("eventId") or "").strip()
+            if event_id:
+                keys.add(f"life-event:{event_id}")
+        return sorted(keys)[:32]
 
     def _cancel_followup_attempt_and_plan(
         self,
@@ -843,6 +1003,9 @@ class VirtualHumanLifeService:
             else {}
         )
         delivery_token = str(payload.get("delivery_token") or "").strip()
+        delivery_kind = companion_delivery_kind_from_entry(entry)
+        is_continuation = is_companion_continuation_delivery_kind(delivery_kind)
+        is_v2_continuation = delivery_kind == "burst_continuation"
         attempt = self.proactive_attempt(agent_id, delivery_token) or {}
         if str(attempt.get("status") or "") in {"cancelled", "failed", "expired"}:
             cancelled = self._cancel_conversation_mailbox_entry(
@@ -850,12 +1013,19 @@ class VirtualHumanLifeService:
                 entry=entry,
                 reason="native_proactive_not_admitted",
             )
-            if str(entry.get("sourceKind") or "") == "followup":
-                self._cancel_followup_attempt_and_plan(
-                    agent_id,
-                    entry,
-                    reason="native_proactive_not_admitted",
-                )
+            if is_continuation:
+                if is_v2_continuation:
+                    self.delivery_runtime.cancel_dialogue_burst_for_entry(
+                        agent_id,
+                        entry,
+                        reason="native_proactive_not_admitted",
+                    )
+                else:
+                    self._cancel_followup_attempt_and_plan(
+                        agent_id,
+                        entry,
+                        reason="native_proactive_not_admitted",
+                    )
             return {
                 **cancelled,
                 "accepted": False,
@@ -900,6 +1070,19 @@ class VirtualHumanLifeService:
                 now=self._now(),
             )
             self.store.write_json(agent_id, "conversation/mailbox.json", mailbox)
+            if is_continuation and is_v2_continuation:
+                self.delivery_runtime.mark_dialogue_burst_admitted(
+                    agent_id,
+                    entry=completed,
+                    turn_id=turn_id,
+                )
+            elif str(entry.get("sourceKind") or "") == "proactive":
+                self._start_proactive_dialogue_burst_v2(
+                    agent_id,
+                    entry=completed,
+                    turn_id=turn_id,
+                    binding_revision=int(payload.get("binding_revision") or 0),
+                )
         return {
             "entryId": str(completed.get("entryId") or ""),
             "sourceKind": str(completed.get("sourceKind") or "proactive"),
@@ -926,8 +1109,12 @@ class VirtualHumanLifeService:
             if isinstance(command.get("proactiveAttempt"), dict)
             else {}
         )
-        if str(entry.get("sourceKind") or "") == "followup":
+        source_kind = str(entry.get("sourceKind") or "")
+        if source_kind == "followup":
             self.delivery_runtime.ensure_attempt_from_entry(agent_id, entry)
+        delivery_kind = companion_delivery_kind_from_entry(entry)
+        is_continuation = is_companion_continuation_delivery_kind(delivery_kind)
+        is_v2_continuation = delivery_kind == "burst_continuation"
         delivery_token = str(payload.get("delivery_token") or "").strip()
         binding_revision = int(payload.get("binding_revision") or 0)
         if not delivery_token or not self.proactive_turn_is_current(
@@ -945,12 +1132,19 @@ class VirtualHumanLifeService:
                 delivery_token,
                 reason="mailbox_dispatch_fence",
             )
-            if str(entry.get("sourceKind") or "") == "followup":
-                self._cancel_followup_attempt_and_plan(
-                    agent_id,
-                    entry,
-                    reason="mailbox_dispatch_fence",
-                )
+            if is_continuation:
+                if is_v2_continuation:
+                    self.delivery_runtime.cancel_dialogue_burst_for_entry(
+                        agent_id,
+                        entry,
+                        reason="mailbox_dispatch_fence",
+                    )
+                else:
+                    self._cancel_followup_attempt_and_plan(
+                        agent_id,
+                        entry,
+                        reason="mailbox_dispatch_fence",
+                    )
             return {
                 **cancelled,
                 "accepted": False,
@@ -979,12 +1173,19 @@ class VirtualHumanLifeService:
                 failedAt=_iso(self._now()),
                 failureType=type(exc).__name__,
             )
-            if str(entry.get("sourceKind") or "") == "followup":
-                self.delivery_runtime.transition_entry_plan(
-                    agent_id,
-                    entry,
-                    status="failed",
-                )
+            if is_continuation:
+                if is_v2_continuation:
+                    self.delivery_runtime.cancel_dialogue_burst_for_entry(
+                        agent_id,
+                        entry,
+                        reason="proactive_submit_failed",
+                    )
+                else:
+                    self.delivery_runtime.transition_entry_plan(
+                        agent_id,
+                        entry,
+                        status="failed",
+                    )
             return {
                 **cancelled,
                 "accepted": False,
@@ -1011,12 +1212,19 @@ class VirtualHumanLifeService:
                 failedAt=_iso(self._now()),
                 failureType="session_not_accepted",
             )
-            if str(entry.get("sourceKind") or "") == "followup":
-                self.delivery_runtime.transition_entry_plan(
-                    agent_id,
-                    entry,
-                    status="failed",
-                )
+            if is_continuation:
+                if is_v2_continuation:
+                    self.delivery_runtime.cancel_dialogue_burst_for_entry(
+                        agent_id,
+                        entry,
+                        reason="native_session_not_accepted",
+                    )
+                else:
+                    self.delivery_runtime.transition_entry_plan(
+                        agent_id,
+                        entry,
+                        status="failed",
+                    )
             return {**cancelled, "accepted": False, "queued": False}
         turn_id = str((accepted or {}).get("turnId") or "").strip()
         if not turn_id:
@@ -1032,12 +1240,19 @@ class VirtualHumanLifeService:
                 failedAt=_iso(self._now()),
                 failureType="native_session_missing_turn_id",
             )
-            if str(entry.get("sourceKind") or "") == "followup":
-                self.delivery_runtime.transition_entry_plan(
-                    agent_id,
-                    entry,
-                    status="failed",
-                )
+            if is_continuation:
+                if is_v2_continuation:
+                    self.delivery_runtime.cancel_dialogue_burst_for_entry(
+                        agent_id,
+                        entry,
+                        reason="native_session_missing_turn_id",
+                    )
+                else:
+                    self.delivery_runtime.transition_entry_plan(
+                        agent_id,
+                        entry,
+                        status="failed",
+                    )
             raise VirtualHumanLifeError("Native Session accepted without a turn id.")
         native_status = str((accepted or {}).get("status") or "running").strip().lower()
         with self._lock_for(agent_id):
@@ -1054,12 +1269,19 @@ class VirtualHumanLifeService:
                 None,
             )
             if current is not None and str(current.get("state") or "") == "cancelled":
-                if str(entry.get("sourceKind") or "") == "followup":
-                    self._cancel_followup_attempt_and_plan(
-                        agent_id,
-                        entry,
-                        reason="user_interjected_before_native_admission",
-                    )
+                if is_continuation:
+                    if is_v2_continuation:
+                        self.delivery_runtime.cancel_dialogue_burst_for_entry(
+                            agent_id,
+                            entry,
+                            reason="user_interjected_before_native_admission",
+                        )
+                    else:
+                        self._cancel_followup_attempt_and_plan(
+                            agent_id,
+                            entry,
+                            reason="user_interjected_before_native_admission",
+                        )
                 return {
                     "entryId": str(entry.get("entryId") or ""),
                     "sourceKind": str(entry.get("sourceKind") or "proactive"),
@@ -1091,11 +1313,25 @@ class VirtualHumanLifeService:
                 turnId=turn_id,
                 deliveryStartedAt=_iso(self._now()),
             )
-            if str(entry.get("sourceKind") or "") == "followup":
-                self.delivery_runtime.transition_entry_plan(
+            if is_continuation:
+                if is_v2_continuation:
+                    self.delivery_runtime.mark_dialogue_burst_admitted(
+                        agent_id,
+                        entry=completed,
+                        turn_id=turn_id,
+                    )
+                else:
+                    self.delivery_runtime.transition_entry_plan(
+                        agent_id,
+                        entry,
+                        status="delivering",
+                    )
+            elif source_kind == "proactive":
+                self._start_proactive_dialogue_burst_v2(
                     agent_id,
-                    entry,
-                    status="delivering",
+                    entry=completed,
+                    turn_id=turn_id,
+                    binding_revision=binding_revision,
                 )
         return {
             **dict(accepted or {}),
@@ -1109,6 +1345,24 @@ class VirtualHumanLifeService:
             "deliveryToken": delivery_token,
             "proactiveAttempt": attempt,
         }
+
+    def _start_proactive_dialogue_burst_v2(
+        self,
+        agent_id: str,
+        *,
+        entry: Mapping[str, Any],
+        turn_id: str,
+        binding_revision: int,
+    ) -> dict[str, Any]:
+        return self.delivery_runtime.start_dialogue_burst(
+            agent_id,
+            session_id=str(entry.get("sessionId") or ""),
+            root_entry_id=str(entry.get("entryId") or ""),
+            root_source_kind="proactive",
+            generation=int(entry.get("generation") or 0),
+            binding_revision=int(binding_revision),
+            root_turn_id=str(turn_id or ""),
+        )
 
     def _release_conversation_mailbox_entry(
         self,
@@ -1904,6 +2158,8 @@ class VirtualHumanLifeService:
         )
         trigger = self._attempt_for_turn(agent_id, run_id)
         rules = load_prompt_pack()
+        if str((trigger or {}).get("deliveryKind") or "") == "followup":
+            rules = f"{rules}\n\n{load_legacy_followup_prompt()}"
         local_now = self._local_now(binding)
         dialogue_context = project_companion_dialogue_context(
             self.store,
@@ -2091,6 +2347,7 @@ class VirtualHumanLifeService:
                     "sourceTurnId": trigger.get("sourceTurnId"),
                     "generation": trigger.get("generation"),
                     "bubbleIndex": trigger.get("bubbleIndex"),
+                    "bubbleOrdinal": trigger.get("bubbleOrdinal"),
                 }
                 if trigger
                 else None
@@ -4091,12 +4348,26 @@ class VirtualHumanLifeService:
             delivered_tokens: list[str] = []
             expired_tokens: list[str] = []
             delivered_followup_plans: list[tuple[str, dict[str, Any]]] = []
+            delivered_burst_plans: list[tuple[str, str]] = []
             failed_followup_plan_ids: list[str] = []
+            failed_burst_entries: list[dict[str, Any]] = []
             changed = False
             for index, row in enumerate(rows):
                 status = str(row.get("status") or "").strip()
                 delivery_token = str(row.get("deliveryToken") or "").strip()
                 if not delivery_token:
+                    continue
+                if (
+                    status == "delivered"
+                    and str(row.get("deliveryKind") or "") == "burst_continuation"
+                    and str(row.get("receiptEventId") or "").strip()
+                ):
+                    delivered_burst_plans.append(
+                        (
+                            str(row.get("deliveryPlanId") or ""),
+                            str(row.get("receiptEventId") or ""),
+                        )
+                    )
                     continue
                 receipt: dict[str, Any] | None = None
                 if (
@@ -4125,17 +4396,26 @@ class VirtualHumanLifeService:
                         "updatedAt": _iso(current),
                     }
                     delivered_tokens.append(delivery_token)
-                    if str(row.get("deliveryKind") or "") == "followup":
-                        delivered_followup_plans.append(
-                            (
-                                str(row.get("deliveryPlanId") or ""),
-                                {
-                                    "turnId": str(row.get("turnId") or ""),
-                                    "receiptEventId": receipt_event_id,
-                                    "deliveredAt": delivered_at or _iso(current),
-                                },
+                    delivery_kind = str(row.get("deliveryKind") or "")
+                    if is_companion_continuation_delivery_kind(delivery_kind):
+                        if delivery_kind == "burst_continuation":
+                            delivered_burst_plans.append(
+                                (
+                                    str(row.get("deliveryPlanId") or ""),
+                                    receipt_event_id,
+                                )
                             )
-                        )
+                        else:
+                            delivered_followup_plans.append(
+                                (
+                                    str(row.get("deliveryPlanId") or ""),
+                                    {
+                                        "turnId": str(row.get("turnId") or ""),
+                                        "receiptEventId": receipt_event_id,
+                                        "deliveredAt": delivered_at or _iso(current),
+                                    },
+                                )
+                            )
                     changed = True
                     continue
                 # validUntil bounds candidate/admission freshness. Once the
@@ -4155,10 +4435,20 @@ class VirtualHumanLifeService:
                     "updatedAt": _iso(current),
                 }
                 expired_tokens.append(delivery_token)
-                if str(row.get("deliveryKind") or "") == "followup":
-                    failed_followup_plan_ids.append(
-                        str(row.get("deliveryPlanId") or "")
-                    )
+                delivery_kind = str(row.get("deliveryKind") or "")
+                if is_companion_continuation_delivery_kind(delivery_kind):
+                    if delivery_kind == "burst_continuation":
+                        failed_burst_entries.append(
+                            {
+                                "deliveryPlanId": str(
+                                    row.get("deliveryPlanId") or ""
+                                ),
+                            }
+                        )
+                    else:
+                        failed_followup_plan_ids.append(
+                            str(row.get("deliveryPlanId") or "")
+                        )
                 changed = True
             if changed:
                 self.store.write_jsonl(agent_id, "proactive/deliveries.jsonl", rows)
@@ -4177,6 +4467,19 @@ class VirtualHumanLifeService:
                         plan_id=plan_id,
                         status="failed",
                     )
+            for plan_id, receipt_event_id in delivered_burst_plans:
+                if plan_id:
+                    self._advance_dialogue_burst_from_attempt(
+                        agent_id,
+                        plan_id=plan_id,
+                        receipt_event_id=receipt_event_id,
+                    )
+            for entry in failed_burst_entries:
+                self.delivery_runtime.cancel_dialogue_burst_for_entry(
+                    agent_id,
+                    entry,
+                    reason="candidate_window_elapsed",
+                )
             self._sync_proactive_trigger_ledger(agent_id, rows)
             return {
                 "deliveredDeliveryTokens": delivered_tokens,
@@ -4210,7 +4513,9 @@ class VirtualHumanLifeService:
             str(item.get("deliveryToken") or "").strip()
             for item in self.store.read_jsonl(agent_id, "proactive/deliveries.jsonl")
             if str(item.get("status") or "").strip() == "delivered"
-            and str(item.get("deliveryKind") or "").strip() != "followup"
+            and not is_companion_continuation_delivery_kind(
+                item.get("deliveryKind")
+            )
             and str(item.get("localDate") or "").strip() == str(local_date or "").strip()
             and str(item.get("deliveryToken") or "").strip()
         }
@@ -4234,6 +4539,16 @@ class VirtualHumanLifeService:
                     raise VirtualHumanLifeError("Delivery receipt turn id mismatch.")
                 if str(attempt.get("receiptEventId") or "").strip() != str(receipt_event_id or "").strip():
                     raise VirtualHumanLifeError("Delivery receipt does not match the recorded receipt.")
+                delivery_kind = str(attempt.get("deliveryKind") or "")
+                if (
+                    is_companion_continuation_delivery_kind(delivery_kind)
+                    and delivery_kind == "burst_continuation"
+                ):
+                    self._advance_dialogue_burst_from_attempt(
+                        agent_id,
+                        plan_id=str(attempt.get("deliveryPlanId") or ""),
+                        receipt_event_id=str(attempt.get("receiptEventId") or ""),
+                    )
                 return attempt
             if str(attempt.get("status") or "") not in {
                 "delivering",
@@ -4281,17 +4596,25 @@ class VirtualHumanLifeService:
                 deliveredAt=_iso(self._now()),
                 receiptEventId=normalized_receipt_event_id,
             )
-            if str(delivered.get("deliveryKind") or "") == "followup":
-                self.delivery_runtime.transition_plan(
-                    agent_id,
-                    plan_id=str(delivered.get("deliveryPlanId") or ""),
-                    status="delivered",
-                    receipt={
-                        "turnId": str(turn_id or "").strip(),
-                        "receiptEventId": normalized_receipt_event_id,
-                        "deliveredAt": str(delivered.get("deliveredAt") or ""),
-                    },
-                )
+            delivery_kind = str(delivered.get("deliveryKind") or "")
+            if is_companion_continuation_delivery_kind(delivery_kind):
+                if delivery_kind == "burst_continuation":
+                    self._advance_dialogue_burst_from_attempt(
+                        agent_id,
+                        plan_id=str(delivered.get("deliveryPlanId") or ""),
+                        receipt_event_id=normalized_receipt_event_id,
+                    )
+                else:
+                    self.delivery_runtime.transition_plan(
+                        agent_id,
+                        plan_id=str(delivered.get("deliveryPlanId") or ""),
+                        status="delivered",
+                        receipt={
+                            "turnId": str(turn_id or "").strip(),
+                            "receiptEventId": normalized_receipt_event_id,
+                            "deliveredAt": str(delivered.get("deliveredAt") or ""),
+                        },
+                    )
             candidates = self.store.read_jsonl(
                 agent_id, "proactive/candidates.jsonl"
             )
@@ -4311,6 +4634,31 @@ class VirtualHumanLifeService:
                     agent_id, "proactive/candidates.jsonl", candidates
                 )
             return delivered
+
+    def _advance_dialogue_burst_from_attempt(
+        self,
+        agent_id: str,
+        *,
+        plan_id: str,
+        receipt_event_id: str,
+    ) -> dict[str, Any]:
+        binding = self.binding_for(agent_id) or {}
+        mailbox = normalize_mailbox(
+            self.store.read_json(agent_id, "conversation/mailbox.json")
+        )
+        generation = max(
+            (int(item.get("generation") or 0) for item in mailbox["entries"]),
+            default=0,
+        )
+        plan, _entry = self.delivery_runtime.reconcile_dialogue_burst_receipt(
+            agent_id,
+            plan_id=plan_id,
+            receipt_event_id=receipt_event_id,
+            current_generation=generation,
+            binding_revision=int(binding.get("bindingRevision") or 0),
+            local_date=self._local_now(binding).date().isoformat(),
+        )
+        return plan
 
     def proactive_turn_is_current(
         self,
@@ -4348,6 +4696,7 @@ class VirtualHumanLifeService:
             rows = self.store.read_jsonl(agent_id, "proactive/deliveries.jsonl")
             changed_tokens: list[str] = []
             followup_plan_ids: list[str] = []
+            burst_plan_ids: list[str] = []
             changed = False
             for row in rows:
                 if str(row.get("status") or "") not in {"candidate", "reserved", "delivering"}:
@@ -4358,8 +4707,14 @@ class VirtualHumanLifeService:
                 row["cancelledAt"] = _iso(self._now())
                 row["cancellationReason"] = str(reason or "binding_invalidated")[:160]
                 changed_tokens.append(str(row.get("deliveryToken") or ""))
-                if str(row.get("deliveryKind") or "") == "followup":
-                    followup_plan_ids.append(str(row.get("deliveryPlanId") or ""))
+                delivery_kind = str(row.get("deliveryKind") or "")
+                if is_companion_continuation_delivery_kind(delivery_kind):
+                    target = (
+                        burst_plan_ids
+                        if delivery_kind == "burst_continuation"
+                        else followup_plan_ids
+                    )
+                    target.append(str(row.get("deliveryPlanId") or ""))
                 changed = True
             if changed:
                 self.store.write_jsonl(agent_id, "proactive/deliveries.jsonl", rows)
@@ -4370,6 +4725,13 @@ class VirtualHumanLifeService:
                         agent_id,
                         plan_id=plan_id,
                         status="cancelled",
+                    )
+            for plan_id in burst_plan_ids:
+                if plan_id:
+                    self.delivery_runtime.cancel_dialogue_burst_for_entry(
+                        agent_id,
+                        {"deliveryPlanId": plan_id},
+                        reason=reason,
                     )
             return changed_tokens
 
@@ -4427,9 +4789,16 @@ class VirtualHumanLifeService:
                 cancelledAt=_iso(self._now()),
                 cancellationReason=str(reason or "binding_invalidated")[:160],
             )
-            if str(cancelled.get("deliveryKind") or "") == "followup":
+            delivery_kind = str(cancelled.get("deliveryKind") or "")
+            if is_companion_continuation_delivery_kind(delivery_kind):
                 plan_id = str(cancelled.get("deliveryPlanId") or "")
-                if plan_id:
+                if delivery_kind == "burst_continuation":
+                    self.delivery_runtime.cancel_dialogue_burst_for_entry(
+                        agent_id,
+                        {"deliveryPlanId": plan_id},
+                        reason=reason,
+                    )
+                elif plan_id:
                     self.delivery_runtime.transition_plan(
                         agent_id,
                         plan_id=plan_id,
@@ -6374,7 +6743,9 @@ class VirtualHumanLifeService:
                 item
                 for item in reversed(self.store.read_jsonl(agent_id, "proactive/deliveries.jsonl"))
                 if str(item.get("status") or "") == "delivered"
-                and str(item.get("deliveryKind") or "") != "followup"
+                and not is_companion_continuation_delivery_kind(
+                    item.get("deliveryKind")
+                )
             ),
             None,
         )

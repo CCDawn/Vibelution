@@ -6,6 +6,7 @@ No tool accepts an arbitrary target Agent id.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import Any
 
@@ -663,8 +664,77 @@ def virtual_human_proactive_message_tool(
     )
 
 
+def virtual_human_dialogue_decision_v2_tool(
+    act: str,
+    reasonCode: str,
+    topicKey: str,
+    expectsUserReply: bool,
+    referencedSourceKeys: list[str] | None = None,
+) -> str:
+    """记录当前人物消息的自然延续决策，不生成或保存下一条消息文本。
+
+    act: continue_dialogue | ask_user | stop。身份、会话、Turn 与调用标识
+    全部由当前 Agent 运行时绑定，模型不可指定。
+    """
+
+    runtime = _runtime_context()
+    agent_id = str(runtime.get("agentId") or "").strip()
+    session_id = str(runtime.get("sessionId") or "").strip()
+    turn_id = str(runtime.get("turnId") or runtime.get("runId") or "").strip()
+    if not agent_id or not session_id or not turn_id:
+        return _blocked(
+            "当前对话决策需要已绑定的人物 Agent、Session 与 Turn。",
+            error="companion_turn_runtime_missing",
+        )
+    model_decision = {
+        "act": str(act or "").strip(),
+        "reasonCode": str(reasonCode or "").strip(),
+        "topicKey": str(topicKey or "").strip(),
+        "expectsUserReply": bool(expectsUserReply),
+        "referencedSourceKeys": [
+            str(item).strip()
+            for item in list(referencedSourceKeys or [])
+            if str(item).strip()
+        ],
+    }
+    canonical = json.dumps(
+        model_decision,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    tool_call_id = "dialogue-v2:" + hashlib.sha256(
+        f"{turn_id}\x1f{canonical}".encode()
+    ).hexdigest()[:24]
+    try:
+        plan = _service().record_dialogue_decision_v2(
+            agent_id,
+            session_id=session_id,
+            turn_id=turn_id,
+            model_decision=model_decision,
+            tool_call_id=tool_call_id,
+        )
+        return _result(
+            {
+                "ok": True,
+                "status": str(plan.get("decisionDraftStatus") or "recorded"),
+                "act": str((plan.get("decisionDraft") or {}).get("act") or "stop"),
+            }
+        )
+    except Exception as exc:  # noqa: BLE001 - tool boundary returns structured failure
+        return _result(
+            {
+                "ok": False,
+                "status": "failed",
+                "error": type(exc).__name__,
+                "message": trim_lines(str(exc), max_lines=2),
+            }
+        )
+
+
 __all__ = [
     "virtual_human_activity_tool",
+    "virtual_human_dialogue_decision_v2_tool",
     "virtual_human_diary_tool",
     "virtual_human_proactive_message_tool",
     "virtual_human_reflection_tool",

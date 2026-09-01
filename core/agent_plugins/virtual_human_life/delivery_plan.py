@@ -1,17 +1,30 @@
-"""Deterministic Companion delivery plan for one user-triggered response.
+"""Versioned Companion delivery plans backed by native assistant-only Turns.
 
-The plan may reserve one native assistant-only follow-up Turn. It never stores
-assistant text and never becomes a transcript or Session authority.
+Plans keep only identity, ordering, decision and receipt metadata. They never
+store assistant text or become a transcript or Session authority.
 """
 
 from __future__ import annotations
 
 import hashlib
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 DELIVERY_PLAN_VERSION = "companion_delivery.v1"
+DIALOGUE_BURST_VERSION = "companion_dialogue_burst.v2"
+DIALOGUE_BURST_STATUSES = {
+    "queued",
+    "awaiting_native_admission",
+    "running",
+    "awaiting_terminal_receipt",
+    "decision_ready",
+    "await_user",
+    "completed",
+    "cancelled",
+    "failed",
+    "expired",
+}
 DELIVERY_PLAN_STATUSES = {
     "planned",
     "queued",
@@ -88,6 +101,83 @@ def build_companion_delivery_plan(
     }
 
 
+def build_conversation_burst_plan_v2(
+    *,
+    agent_id: str,
+    session_id: str,
+    root_entry_id: str,
+    root_source_kind: str,
+    generation: int,
+    binding_revision: int,
+    root_turn_id: str,
+    now: datetime,
+) -> dict[str, Any]:
+    """Build a receipt-driven Companion burst without future message text."""
+
+    normalized_agent_id = str(agent_id or "").strip()
+    normalized_session_id = str(session_id or "").strip()
+    normalized_entry_id = str(root_entry_id or "").strip()
+    normalized_source_kind = str(root_source_kind or "").strip().lower()
+    normalized_turn_id = str(root_turn_id or "").strip()
+    normalized_generation = int(generation)
+    normalized_revision = int(binding_revision)
+    if (
+        not normalized_agent_id
+        or not normalized_session_id
+        or not normalized_entry_id
+        or not normalized_turn_id
+        or normalized_source_kind not in {"user", "proactive"}
+    ):
+        raise ValueError("Companion dialogue burst identity is incomplete.")
+    if (
+        normalized_generation < 0
+        or (normalized_source_kind == "user" and normalized_generation < 1)
+        or normalized_revision < 1
+    ):
+        raise ValueError("Companion dialogue burst fence is invalid.")
+    suffix = _stable_suffix(
+        normalized_agent_id,
+        normalized_session_id,
+        normalized_entry_id,
+        normalized_generation,
+    )
+    timestamp = _iso(now)
+    return {
+        "contractVersion": DIALOGUE_BURST_VERSION,
+        "planId": f"dialogue-burst:{suffix}",
+        "agentId": normalized_agent_id,
+        "sessionId": normalized_session_id,
+        "rootEntryId": normalized_entry_id,
+        "rootSourceKind": normalized_source_kind,
+        "generation": normalized_generation,
+        "bindingRevision": normalized_revision,
+        "status": "awaiting_terminal_receipt",
+        "deliveredCount": 0,
+        "questionCount": 0,
+        "currentBubbleOrdinal": 1,
+        "currentEntryId": normalized_entry_id,
+        "currentAttemptId": "",
+        "currentTriggerId": "",
+        "currentDeliveryToken": "",
+        "currentIdempotencyKey": "",
+        "currentTurnId": normalized_turn_id,
+        "decisionDraft": None,
+        "decisionDraftStatus": "missing",
+        "decisionDraftStopReason": "",
+        "decisionToolCallIds": [],
+        "nextAct": "",
+        "latestAssistantReceiptEventId": "",
+        "assistantReceiptEventIds": [],
+        "latestDeliveryReceiptId": "",
+        "disclosedTopicKeys": [],
+        "stopReason": "",
+        "createdAt": timestamp,
+        "updatedAt": timestamp,
+        "expiresAt": _iso(now + timedelta(minutes=5)),
+        "version": 1,
+    }
+
+
 def upsert_delivery_plan(
     rows: list[dict[str, Any]],
     plan: dict[str, Any],
@@ -103,13 +193,26 @@ def upsert_delivery_plan(
         if str(existing.get("planId") or "") != plan_id:
             continue
         identity_keys = (
-            "contractVersion",
-            "sessionId",
-            "generation",
-            "sourceEntryId",
-            "sourceTurnId",
-            "bubbleBudget",
-            "followup",
+            (
+                "contractVersion",
+                "agentId",
+                "sessionId",
+                "rootEntryId",
+                "rootSourceKind",
+                "generation",
+                "bindingRevision",
+            )
+            if str(normalized.get("contractVersion") or "")
+            == DIALOGUE_BURST_VERSION
+            else (
+                "contractVersion",
+                "sessionId",
+                "generation",
+                "sourceEntryId",
+                "sourceTurnId",
+                "bubbleBudget",
+                "followup",
+            )
         )
         if any(existing.get(key) != normalized.get(key) for key in identity_keys):
             raise ValueError("Companion delivery plan id conflicts with another plan.")
@@ -158,7 +261,10 @@ def transition_delivery_plan(
 __all__ = [
     "DELIVERY_PLAN_STATUSES",
     "DELIVERY_PLAN_VERSION",
+    "DIALOGUE_BURST_STATUSES",
+    "DIALOGUE_BURST_VERSION",
     "build_companion_delivery_plan",
+    "build_conversation_burst_plan_v2",
     "transition_delivery_plan",
     "upsert_delivery_plan",
 ]

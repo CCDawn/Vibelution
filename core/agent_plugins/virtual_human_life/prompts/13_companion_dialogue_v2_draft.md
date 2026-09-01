@@ -1,8 +1,4 @@
-## Companion Dialogue V2 decision draft (not runtime-wired)
-
-This contract is reserved for the Companion-only Dialogue V2 adapter. It must
-not be added to the active prompt pack or ordinary Agent prompts before the V2
-admission and receipt lifecycle is integrated atomically.
+## Companion Dialogue V2 decision
 
 After composing the current complete Companion message, decide whether there is
 one more adjacent, worthwhile conversational act. Do not aim for a target
@@ -11,7 +7,7 @@ familiarity, current mood and energy, confirmed user preferences, recent
 misunderstanding, and whether genuinely new information remains may influence
 the decision, but no single score or turn ordinal decides it.
 
-Submit only these fields to the future structured decision tool:
+Submit only these fields to `virtual_human_dialogue_decision_v2_tool`:
 
 - `act`: `continue_dialogue`, `ask_user`, or `stop`;
 - `reasonCode`: `unfinished_thought`, `emotional_afterthought`,

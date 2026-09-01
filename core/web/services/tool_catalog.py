@@ -883,6 +883,12 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
         "riskTags": ["session_state_write", "session_wake"],
         "permissionTier": MEDIUM_PERMISSION_TIER,
     },
+    "virtual_human_dialogue_decision_v2_tool": {
+        "category": "virtual_life",
+        "capabilityTags": ["virtual_life", "dialogue_decision", "structured_result"],
+        "riskTags": ["session_state_write"],
+        "permissionTier": MEDIUM_PERMISSION_TIER,
+    },
 }
 
 TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
@@ -899,6 +905,7 @@ TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
             "virtual_human_relationship_tool",
             "virtual_human_reflection_tool",
             "virtual_human_proactive_message_tool",
+            "virtual_human_dialogue_decision_v2_tool",
         ],
         "preferredToolNames": [
             "virtual_human_status_tool",
@@ -908,6 +915,7 @@ TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
             "virtual_human_relationship_tool",
             "virtual_human_reflection_tool",
             "virtual_human_proactive_message_tool",
+            "virtual_human_dialogue_decision_v2_tool",
         ],
     },
     {

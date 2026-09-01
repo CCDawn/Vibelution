@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from core.agent_plugins.virtual_human_life.delivery_plan import (
+    DIALOGUE_BURST_VERSION,
     build_companion_delivery_plan,
 )
 from core.agent_plugins.virtual_human_life.service import VirtualHumanLifeService
@@ -77,6 +78,26 @@ def _send(service: VirtualHumanLifeService, ordinal: int) -> dict:
     )
 
 
+def _seed_legacy_followup(service: VirtualHumanLifeService) -> dict:
+    mailbox = service.store.read_json("agent-a", "conversation/mailbox.json") or {}
+    source = next(
+        item
+        for item in mailbox.get("entries", [])
+        if item.get("entryId") == "user:submission-3"
+    )
+    binding = service.binding_for("agent-a") or {}
+    return service.delivery_runtime.plan_user_response(
+        "agent-a",
+        session_id="session-agent-a",
+        generation=int(source.get("generation") or 0),
+        source_entry_id=str(source.get("entryId") or ""),
+        source_turn_id=str(source.get("turnId") or ""),
+        expression_decision={"followup": True, "questionBudget": 0},
+        binding_revision=int(binding.get("bindingRevision") or 0),
+        local_date="2026-09-01",
+    )
+
+
 def test_delivery_plan_is_stable_and_never_exceeds_two_bubbles() -> None:
     now = datetime(2026, 9, 1, 1, 30, tzinfo=UTC)
     first = build_companion_delivery_plan(
@@ -114,7 +135,7 @@ def test_delivery_plan_is_stable_and_never_exceeds_two_bubbles() -> None:
     assert single["followup"] is None
 
 
-def test_third_eligible_user_turn_queues_one_native_followup_turn(
+def test_user_turn_uses_v2_without_precreating_a_fixed_followup(
     tmp_path: Path,
 ) -> None:
     busy = [False]
@@ -138,27 +159,13 @@ def test_third_eligible_user_turn_queues_one_native_followup_turn(
     ]
 
     assert third["turnId"] == "turn-user-3"
-    assert len(followups) == 1
-    assert followups[0]["state"] == "queued"
-    assert followups[0]["generation"] == 3
+    assert followups == []
     assert followup_payloads == []
-
-    delivered = service.dispatch_conversation_mailbox_once(
-        "agent-a", session_id="session-agent-a"
-    )
-
-    assert delivered["sourceKind"] == "followup"
-    assert delivered["turnId"] == "turn-followup-1"
-    assert followup_payloads[0]["trigger"]["deliveryKind"] == "followup"
-    assert followup_payloads[0]["trigger"]["sourceTurnId"] == "turn-user-3"
     assert len(user_turns) == 3
-    prompt_segments = service.build_prompt_segments(
-        "agent-a",
-        session_id="session-agent-a",
-        run_id="turn-followup-1",
+    plans = service.store.read_jsonl(
+        "agent-a", "conversation/delivery_plans.jsonl"
     )
-    assert "第二气泡交付规则" in prompt_segments[0]["block"]
-    assert '"deliveryKind": "followup"' in prompt_segments[1]["block"]
+    assert plans[-1]["contractVersion"] == DIALOGUE_BURST_VERSION
 
 
 def test_user_interjection_cancels_unsent_followup_and_preserves_arrival_order(
@@ -176,6 +183,7 @@ def test_user_interjection_cancels_unsent_followup_and_preserves_arrival_order(
     _send(service, 1)
     _send(service, 2)
     _send(service, 3)
+    _seed_legacy_followup(service)
 
     busy[0] = True
     fourth = _send(service, 4)
@@ -215,6 +223,7 @@ def test_retrying_same_user_submission_does_not_duplicate_followup(
     _send(service, 1)
     _send(service, 2)
     _send(service, 3)
+    _seed_legacy_followup(service)
 
     busy[0] = True
     repeated = _send(service, 3)
@@ -228,7 +237,9 @@ def test_retrying_same_user_submission_does_not_duplicate_followup(
 
     assert repeated["queueSequence"] == 3
     assert len(followups) == 1
-    assert len(plans) == 1
+    assert len(
+        [item for item in plans if item.get("contractVersion") == "companion_delivery.v1"]
+    ) == 1
 
 
 def test_followup_receipt_closes_plan_without_using_proactive_quota(
@@ -244,6 +255,7 @@ def test_followup_receipt_closes_plan_without_using_proactive_quota(
     _send(service, 1)
     _send(service, 2)
     _send(service, 3)
+    _seed_legacy_followup(service)
     dispatched = service.dispatch_conversation_mailbox_once(
         "agent-a", session_id="session-agent-a"
     )
@@ -255,10 +267,13 @@ def test_followup_receipt_closes_plan_without_using_proactive_quota(
         receipt_event_id="assistant-receipt-1",
     )
     plans = service.store.read_jsonl("agent-a", "conversation/delivery_plans.jsonl")
+    legacy_plan = next(
+        item for item in plans if item.get("contractVersion") == "companion_delivery.v1"
+    )
 
     assert receipt["deliveryKind"] == "followup"
-    assert plans[0]["status"] == "delivered"
-    assert plans[0]["receipt"]["receiptEventId"] == "assistant-receipt-1"
+    assert legacy_plan["status"] == "delivered"
+    assert legacy_plan["receipt"]["receiptEventId"] == "assistant-receipt-1"
     assert service.proactive_usage("agent-a", "2026-09-01")["delivered"] == 0
 
 
@@ -276,6 +291,7 @@ def test_followup_attempt_is_recovered_from_mailbox_without_duplicate_turn(
     _send(service, 1)
     _send(service, 2)
     _send(service, 3)
+    _seed_legacy_followup(service)
     service.store.write_jsonl("agent-a", "proactive/deliveries.jsonl", [])
 
     delivered = service.dispatch_conversation_mailbox_once(
