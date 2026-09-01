@@ -21,6 +21,7 @@ from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, Syst
 
 from config import AppConfig, get_config
 from config.llm_security import is_llm_local_network_base_url
+from config.models import DEFAULT_LLM_ROUTE_CONCURRENCY
 from core.context.volatility import is_volatile_context_text
 
 from .adapters import get_provider_adapter
@@ -78,7 +79,7 @@ _LLM_CHAT_PROVIDER_ABORT_CONTEXT: ContextVar[bool] = ContextVar(
     "vibelution_llm_chat_provider_abort_enabled",
     default=False,
 )
-_LLM_ROUTE_CONCURRENCY_LIMIT = 2
+_LLM_ROUTE_CONCURRENCY_LIMIT: int | None = None
 _LLM_ROUTE_CONCURRENCY_LOCK = threading.Lock()
 _LLM_ROUTE_CONCURRENCY_GATES: Dict[str, threading.BoundedSemaphore] = {}
 _LLM_BACKEND_ATTEMPT_CONTEXT: ContextVar[tuple[int, int]] = ContextVar(
@@ -392,19 +393,39 @@ def _llm_route_concurrency_key(provider: Any, profile: Any, *, profile_id: str) 
     return "|".join((provider_kind, base_url, model, str(profile_id or "").strip()))
 
 
-def _llm_route_concurrency_gate(route_key: str) -> threading.BoundedSemaphore:
+def _llm_route_concurrency_gate(route_key: str, *, limit: int) -> threading.BoundedSemaphore:
     with _LLM_ROUTE_CONCURRENCY_LOCK:
         gate = _LLM_ROUTE_CONCURRENCY_GATES.get(route_key)
         if gate is None:
-            gate = threading.BoundedSemaphore(_LLM_ROUTE_CONCURRENCY_LIMIT)
+            gate = threading.BoundedSemaphore(limit)
             _LLM_ROUTE_CONCURRENCY_GATES[route_key] = gate
         return gate
+
+
+def _resolve_llm_route_concurrency_limit(config: Any = None) -> int:
+    """Resolve the per-route concurrency limit lazily per request.
+
+    ``_LLM_ROUTE_CONCURRENCY_LIMIT`` stays as an in-process override channel
+    (tests monkeypatch it); otherwise the limit comes from the caller's
+    ``[llm]`` config (``route_concurrency``), and missing/invalid values fall
+    back to the packaged default. Nothing is read at import time, and the
+    per-route gate keying is unchanged: existing gates keep their semaphore.
+    """
+
+    override = _LLM_ROUTE_CONCURRENCY_LIMIT
+    if isinstance(override, int) and not isinstance(override, bool) and override >= 1:
+        return override
+    value = getattr(getattr(config, "llm", None), "route_concurrency", None)
+    if isinstance(value, int) and not isinstance(value, bool) and value >= 1:
+        return value
+    return DEFAULT_LLM_ROUTE_CONCURRENCY
 
 
 @contextmanager
 def _reserve_llm_route_slot(
     route_key: str,
     *,
+    limit: int,
     role: str,
     profile_id: str,
     provider: str,
@@ -413,7 +434,7 @@ def _reserve_llm_route_slot(
     message_count: int,
     tool_count: int,
 ):
-    gate = _llm_route_concurrency_gate(route_key)
+    gate = _llm_route_concurrency_gate(route_key, limit=limit)
     wait_started = time.time()
     acquired_immediately = gate.acquire(blocking=False)
     if not acquired_immediately:
@@ -429,7 +450,7 @@ def _reserve_llm_route_slot(
                 "model": model,
                 "phase": phase,
                 "routeKeyHash": _short_hash(route_key),
-                "limit": _LLM_ROUTE_CONCURRENCY_LIMIT,
+                "limit": limit,
                 "messageCount": message_count,
                 "toolCount": tool_count,
             },
@@ -459,7 +480,7 @@ def _reserve_llm_route_slot(
                 "model": model,
                 "phase": phase,
                 "routeKeyHash": _short_hash(route_key),
-                "limit": _LLM_ROUTE_CONCURRENCY_LIMIT,
+                "limit": limit,
                 "waitMs": wait_ms,
                 "messageCount": message_count,
                 "toolCount": tool_count,
@@ -3776,6 +3797,7 @@ class LLMClient:
                 _raise_if_llm_cancelled()
                 with _reserve_llm_route_slot(
                     route_key,
+                    limit=_resolve_llm_route_concurrency_limit(self.config),
                     role=self.role,
                     profile_id=self.profile_id,
                     provider=self.provider.kind,
@@ -4267,6 +4289,7 @@ class LLMClient:
                 )
                 with _reserve_llm_route_slot(
                     route_key,
+                    limit=_resolve_llm_route_concurrency_limit(self.config),
                     role=self.role,
                     profile_id=self.profile_id,
                     provider=self.provider.kind,

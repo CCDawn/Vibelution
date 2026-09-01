@@ -20,6 +20,7 @@ from core.llm.client import (
     _ensure_no_proxy_for_local_base_url,
     _new_cancellable_completion_http_handler,
     _new_cancellable_responses_http_handler,
+    _resolve_llm_route_concurrency_limit,
     _retry_policy_backoff_seconds,
     _retry_policy_max_attempts,
     _safe_prompt_cache_payload_summary,
@@ -3522,6 +3523,93 @@ def test_stream_waiting_for_route_slot_can_be_cancelled(monkeypatch):
     assert raised.value.category == "cancelled"
     assert backend_calls == 1
     assert first_future_result == ["text_delta", "done"]
+
+
+def test_llm_route_concurrency_defaults_to_four_without_override(monkeypatch):
+    monkeypatch.setattr("core.llm.client._LLM_ROUTE_CONCURRENCY_LIMIT", None)
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "local",
+            "llm.providers.default.requires_api_key": False,
+            "llm.providers.default.base_url": "http://localhost:8000/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "qwen-32b-awq",
+        }
+    )
+
+    assert config.llm.route_concurrency == 4
+    assert _resolve_llm_route_concurrency_limit(config) == 4
+
+
+@pytest.mark.parametrize("invalid_value", [0, -3, "abc", None, 2.5, True])
+def test_llm_route_concurrency_invalid_values_fall_back_to_default(monkeypatch, invalid_value):
+    monkeypatch.setattr("core.llm.client._LLM_ROUTE_CONCURRENCY_LIMIT", None)
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "local",
+            "llm.providers.default.requires_api_key": False,
+            "llm.providers.default.base_url": "http://localhost:8000/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "qwen-32b-awq",
+            "llm.route_concurrency": invalid_value,
+        }
+    )
+
+    assert config.llm.route_concurrency == 4
+    assert _resolve_llm_route_concurrency_limit(config) == 4
+
+
+@pytest.mark.slow
+def test_stream_route_concurrency_uses_configured_limit(monkeypatch):
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "local",
+            "llm.providers.default.requires_api_key": False,
+            "llm.providers.default.base_url": "http://localhost:8000/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "qwen-32b-awq",
+            "llm.route_concurrency": 6,
+        }
+    )
+    monkeypatch.setattr("core.llm.client._LLM_ROUTE_CONCURRENCY_LIMIT", None)
+    monkeypatch.setattr("core.llm.client._LLM_ROUTE_CONCURRENCY_GATES", {})
+    assert _resolve_llm_route_concurrency_limit(config) == 6
+    entered = 0
+    max_entered = 0
+    entered_lock = threading.Lock()
+    six_entered = threading.Event()
+    release = threading.Event()
+
+    def backend(_payload):
+        nonlocal entered, max_entered
+        with entered_lock:
+            entered += 1
+            max_entered = max(max_entered, entered)
+            if entered == 6:
+                six_entered.set()
+
+        def chunks():
+            try:
+                assert release.wait(5.0)
+                yield {"choices": [{"delta": {"content": "ok"}}]}
+            finally:
+                nonlocal entered
+                with entered_lock:
+                    entered -= 1
+
+        return chunks()
+
+    def run_stream():
+        client = LLMClient(config=config, backend=backend)
+        return [event.type for event in client.stream_events([{"role": "user", "content": "ping"}])]
+
+    with ThreadPoolExecutor(max_workers=7) as executor:
+        futures = [executor.submit(run_stream) for _ in range(7)]
+        assert six_entered.wait(5.0)
+        assert max_entered == 6
+        release.set()
+        assert [future.result(timeout=5.0) for future in futures] == [["text_delta", "done"]] * 7
+    assert max_entered == 6
 
 
 def test_stream_cancellation_closes_provider_iterator():

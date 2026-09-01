@@ -560,6 +560,9 @@ DEFAULT_ROLE_PROFILE_IDS = (
 )
 
 
+DEFAULT_LLM_ROUTE_CONCURRENCY = 4
+
+
 class LLMConfig(BaseModel):
     """新的 LLM 根配置：providers / profiles / discovery。"""
     model_config = ConfigDict(extra="ignore")
@@ -570,6 +573,18 @@ class LLMConfig(BaseModel):
     model_library: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
     model_aliases: Dict[str, str] = Field(default_factory=dict)
     discovery: LLMDiscoveryConfig = Field(default_factory=LLMDiscoveryConfig)
+    route_concurrency: int = Field(
+        default=DEFAULT_LLM_ROUTE_CONCURRENCY,
+        description="单条 LLM 路由（provider|base_url|model|profile）的最大并发请求数",
+    )
+
+    @field_validator("route_concurrency", mode="before")
+    @classmethod
+    def _fallback_invalid_route_concurrency(cls, value: Any) -> int:
+        # 非法值（0/负数/bool/浮点/字符串/None）不阻断启动，统一回退缺省。
+        if isinstance(value, bool) or not isinstance(value, int):
+            return DEFAULT_LLM_ROUTE_CONCURRENCY
+        return value if value >= 1 else DEFAULT_LLM_ROUTE_CONCURRENCY
 
     @model_validator(mode="after")
     def ensure_defaults(self) -> "LLMConfig":
