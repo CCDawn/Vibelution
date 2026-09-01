@@ -12,6 +12,7 @@ transactional outbox (spec 7.3 steps 2-4).
 from __future__ import annotations
 
 import json
+import threading
 import time
 from collections.abc import Callable, Mapping
 from typing import Any
@@ -113,6 +114,16 @@ def _record_repair_skip(run_id: str, stage: str, exc: BaseException) -> None:
 
 class GraphDecisionError(RuntimeError):
     """An iteration decision the graph cannot route (run must block)."""
+
+
+class _GraphLeaseLost(RuntimeError):
+    """The worker's graph-dispatch lease was reclaimed; local progress stops.
+
+    A lost lease means another worker may be driving the same thread. The
+    in-flight LangGraph invoke cannot be interrupted mid-flight, but the
+    result is discarded and every commit point keeps its owner-CAS fencing,
+    so a stale worker can never advance the ledger.
+    """
 
 
 class GraphRecoverStepError(RuntimeError):
@@ -452,10 +463,13 @@ class GraphDispatchWorker:
             return
 
         try:
-            if dispatch.dispatch_kind == "start":
-                result = self._start_or_recover(dispatch)
-            else:
-                result = self._resume(dispatch)
+            result = self._invoke_with_lease_heartbeat(action, dispatch)
+        except _GraphLeaseLost:
+            # The lease was lost mid-invoke (or before it): another worker
+            # may be driving the same thread. Every commit point keeps its
+            # owner-CAS fencing, but there is nothing this worker may still
+            # advance — discard the local result without touching the ledger.
+            return
         except GraphDecisionError as exc:
             self._mark_blocked(action, dispatch, str(exc))
             self._repair_stranded_iteration_route_after_failure(dispatch)
@@ -565,6 +579,83 @@ class GraphDispatchWorker:
         self._commit_dispatch(
             action, dispatch, result, readiness_hint, budget_admission=budget_admission
         )
+
+    def _invoke_with_lease_heartbeat(
+        self, action: Any, dispatch: GraphDispatch
+    ) -> GraphDispatchResult:
+        """Invoke the graph while a heartbeat keeps the outbox lease alive.
+
+        A LangGraph invoke can run far past the default 30s lease (long LLM
+        turns reach minutes). Without renewal the lease expires mid-invoke
+        and another worker can re-lease the same action and drive the thread
+        twice. The heartbeat renews every ``lease_ms / 3`` (Temporal-style
+        heartbeat), so the lease can no longer expire while this worker is
+        live. Renewal failure (rows_affected == 0 — the lease was reclaimed
+        or expired) sets the lost signal; the invoke itself cannot be
+        interrupted mid-flight, but its result is then discarded (see
+        ``_GraphLeaseLost``) and the pre-invoke renewal plus the commit-point
+        owner CAS keep the ledger fenced.
+        """
+        # Push the lease to its full window and prove ownership BEFORE the
+        # invoke: a reclaimed action never enters the graph on this worker.
+        if not outbox_api.renew_lease(
+            self._store,
+            action.action_id,
+            self._owner,
+            now_ms=self._now(),
+            lease_ms=self._lease_ms,
+        ):
+            _record_scene_event(
+                "graph_dispatch.lease_lost_before_invoke",
+                outcome="failed",
+                fields={
+                    "runId": str(dispatch.run_id or ""),
+                    "nodeId": str(dispatch.node_id or ""),
+                    "actionId": str(getattr(action, "action_id", "") or ""),
+                },
+            )
+            raise _GraphLeaseLost("graph dispatch lease was lost before invoke")
+        stop = threading.Event()
+        lost = threading.Event()
+        interval_seconds = max(0.001, float(self._lease_ms) / 3000.0)
+
+        def heartbeat() -> None:
+            while not stop.wait(interval_seconds):
+                try:
+                    renewed = outbox_api.renew_lease(
+                        self._store,
+                        action.action_id,
+                        self._owner,
+                        now_ms=self._now(),
+                        lease_ms=self._lease_ms,
+                    )
+                except Exception:
+                    renewed = False
+                if not renewed:
+                    lost.set()
+                    return
+
+        thread = threading.Thread(
+            target=heartbeat,
+            name=f"graph-dispatch-lease-heartbeat:{action.action_id}",
+            daemon=True,
+        )
+        thread.start()
+        try:
+            if dispatch.dispatch_kind == "start":
+                result = self._start_or_recover(dispatch)
+            else:
+                result = self._resume(dispatch)
+        except Exception as exc:
+            if lost.is_set():
+                raise _GraphLeaseLost("graph dispatch lease was lost") from exc
+            raise
+        finally:
+            stop.set()
+            thread.join(timeout=max(1.0, interval_seconds * 2.0))
+        if lost.is_set():
+            raise _GraphLeaseLost("graph dispatch lease was lost")
+        return result
 
     def _budget_admission(self, dispatch: GraphDispatch, pending: Any):
         """Stage-boundary budget admission for a NEW successor attempt.

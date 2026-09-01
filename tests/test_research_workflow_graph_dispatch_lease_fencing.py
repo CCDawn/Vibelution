@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -28,6 +30,19 @@ def _worker(harness: GraphHarness) -> GraphDispatchWorker:
         coordinator=harness.coordinator,
         owner_id="graph-worker-stale",
         now_provider=lambda: FIXED_NOW_MS + 1300,
+    )
+
+
+def _realtime_worker(
+    harness: GraphHarness, *, owner: str, lease_ms: int
+) -> GraphDispatchWorker:
+    """Worker on the real clock so sub-second leases can actually expire."""
+    return GraphDispatchWorker(
+        store=harness.commands.store,
+        coordinator=harness.coordinator,
+        owner_id=owner,
+        lease_ms=lease_ms,
+        now_provider=lambda: int(time.time() * 1000),
     )
 
 
@@ -239,5 +254,221 @@ def test_stale_upstream_accept_does_not_advance_attempt_or_handoff(
         assert graph_row.lease_owner == "graph-worker-new"
         assert attempt is not None and attempt.status == "starting"
         assert handoff is not None and handoff[8] == "ready"
+    finally:
+        harness.close()
+
+
+# ---------------------------------------------------------------------------
+# B2 invoke heartbeat: a LangGraph invoke can outlive the 30s outbox lease.
+# The worker now renews the lease every lease_ms/3 while the invoke runs
+# (Temporal-style heartbeat), so the lease can no longer expire mid-invoke;
+# a failed renewal (lease reclaimed by another owner) aborts local progress
+# and the commit-point owner CAS keeps the ledger fenced.
+# ---------------------------------------------------------------------------
+
+
+def _steal_lease(harness: GraphHarness, action_id: str, new_owner: str) -> None:
+    """External takeover: another worker re-owns the lease directly."""
+
+    def steal(uow):
+        uow.repository.execute(
+            """
+            UPDATE outbox_actions
+            SET lease_owner = ?, lease_expires_at_ms = ?
+            WHERE action_id = ?
+            """,
+            (new_owner, int(time.time() * 1000) + 60_000, action_id),
+        )
+
+    harness.commands.store.submit(steal, force_flush=True).result(timeout=10)
+
+
+def _completed_start_result(checkpoint_id: str) -> GraphDispatchResult:
+    return GraphDispatchResult(
+        dispatch_kind="start",
+        pending_action=None,
+        next_node_ids=(),
+        checkpoint_id=checkpoint_id,
+        state={},
+        completed=True,
+    )
+
+
+def test_invoke_heartbeat_keeps_lease_alive_past_single_window(
+    tmp_path: Path,
+) -> None:
+    harness = GraphHarness(tmp_path)
+    try:
+        harness.seed(status="running")
+        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
+
+        def mark_dispatching(uow):
+            # dispatching → succeeded is the legal commit transition; the
+            # seeded attempt starts at "starting".
+            uow.repository.update_attempt_status(
+                "nr-run-test-source_finding-a1",
+                "dispatching",
+                int(time.time() * 1000),
+            )
+
+        harness.commands.store.submit(
+            mark_dispatching, force_flush=True
+        ).result(timeout=10)
+        leased = outbox_api.lease_ready_actions(
+            harness.commands.store,
+            owner="graph-worker-beat",
+            now_ms=int(time.time() * 1000),
+            lease_ms=400,
+            action_kinds=("graph_dispatch",),
+        )
+        assert len(leased) == 1
+        action = leased[0]
+        dispatch = _dispatch(action)
+        worker = _realtime_worker(
+            harness, owner="graph-worker-beat", lease_ms=400
+        )
+
+        release_invoke = threading.Event()
+
+        def slow_start(_dispatch: GraphDispatch) -> GraphDispatchResult:
+            # Simulate a long LangGraph invoke far past the 400ms lease.
+            assert release_invoke.wait(timeout=10)
+            return _completed_start_result("ckpt-beat")
+
+        worker._start_or_recover = slow_start  # type: ignore[method-assign]
+
+        failures: list[BaseException] = []
+
+        def run_handle() -> None:
+            try:
+                worker._handle(action)
+            except BaseException as exc:  # noqa: BLE001 - surfaced below
+                failures.append(exc)
+
+        thread = threading.Thread(target=run_handle, name="handle-under-test")
+        thread.start()
+        # Stay blocked past the original 400ms lease window (heartbeat
+        # interval is 400/3 ≈ 133ms, so several renewals must have fired).
+        time.sleep(0.6)
+        stolen = outbox_api.lease_ready_actions(
+            harness.commands.store,
+            owner="graph-worker-new",
+            now_ms=int(time.time() * 1000),
+            lease_ms=5000,
+            action_kinds=("graph_dispatch",),
+        )
+        # The heartbeat kept the lease un-expirable: no second worker can
+        # reclaim the action mid-invoke.
+        assert stolen == []
+        release_invoke.set()
+        thread.join(timeout=10)
+        assert failures == []
+
+        row = harness.commands.store.read(
+            lambda repo: repo.get_outbox(action.action_id)
+        )
+        # ack's owner + expiry CAS passed: the lease was live at commit.
+        assert row is not None and row.status == "succeeded"
+    finally:
+        harness.close()
+
+
+def test_reclaimed_lease_aborts_invoke_and_commit(tmp_path: Path) -> None:
+    harness = GraphHarness(tmp_path)
+    try:
+        harness.seed(status="running")
+        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
+        leased = outbox_api.lease_ready_actions(
+            harness.commands.store,
+            owner="graph-worker-victim",
+            now_ms=int(time.time() * 1000),
+            lease_ms=600,
+            action_kinds=("graph_dispatch",),
+        )
+        assert len(leased) == 1
+        action = leased[0]
+        dispatch = _dispatch(action)
+        worker = _realtime_worker(
+            harness, owner="graph-worker-victim", lease_ms=600
+        )
+
+        invoke_entered = threading.Event()
+        release_invoke = threading.Event()
+
+        def slow_start(_dispatch: GraphDispatch) -> GraphDispatchResult:
+            invoke_entered.set()
+            assert release_invoke.wait(timeout=10)
+            return _completed_start_result("ckpt-stolen")
+
+        worker._start_or_recover = slow_start  # type: ignore[method-assign]
+
+        thread = threading.Thread(
+            target=worker._handle,
+            args=(action,),
+            name="handle-under-test",
+        )
+        thread.start()
+        assert invoke_entered.wait(timeout=5)
+
+        _steal_lease(harness, action.action_id, "graph-worker-new")
+        # Wait past one heartbeat interval (600/3 = 200ms): the next renewal
+        # must observe the takeover and set the lost signal.
+        time.sleep(0.4)
+        release_invoke.set()
+        thread.join(timeout=10)
+
+        row = harness.commands.store.read(
+            lambda repo: repo.get_outbox(action.action_id)
+        )
+        assert row is not None
+        assert row.status == "leased"
+        assert row.lease_owner == "graph-worker-new"
+        attempt = harness.commands.store.latest_attempt(
+            "run-test", "source_finding"
+        )
+        assert attempt is not None and attempt.status == "starting"
+        run = harness.commands.store.get_run("run-test")
+        assert run is not None and run.status == "running"
+    finally:
+        harness.close()
+
+
+def test_invoke_skipped_when_lease_lost_before_invoke(tmp_path: Path) -> None:
+    harness = GraphHarness(tmp_path)
+    try:
+        harness.seed(status="running")
+        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
+        leased = outbox_api.lease_ready_actions(
+            harness.commands.store,
+            owner="graph-worker-victim",
+            now_ms=int(time.time() * 1000),
+            lease_ms=30_000,
+            action_kinds=("graph_dispatch",),
+        )
+        assert len(leased) == 1
+        action = leased[0]
+        dispatch = _dispatch(action)
+        _steal_lease(harness, action.action_id, "graph-worker-new")
+
+        worker = _realtime_worker(
+            harness, owner="graph-worker-victim", lease_ms=30_000
+        )
+        invoked = threading.Event()
+
+        def must_not_invoke(_dispatch: GraphDispatch) -> GraphDispatchResult:
+            invoked.set()
+            raise AssertionError("invoke must not run on a lost lease")
+
+        worker._start_or_recover = must_not_invoke  # type: ignore[method-assign]
+
+        worker._handle(action)
+
+        assert not invoked.is_set()
+        row = harness.commands.store.read(
+            lambda repo: repo.get_outbox(action.action_id)
+        )
+        assert row is not None
+        assert row.status == "leased"
+        assert row.lease_owner == "graph-worker-new"
     finally:
         harness.close()

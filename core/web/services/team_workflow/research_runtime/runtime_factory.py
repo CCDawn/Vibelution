@@ -8,6 +8,7 @@ the production runtime never composes itself inside a worker or route.
 from __future__ import annotations
 
 import logging
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -289,6 +290,29 @@ def build_workflow_runtime(
 
 _PRODUCTION: WorkflowRuntime | None = None
 _PUMP: WorkflowOutboxPump | None = None
+# Serializes the whole start/stop sequence (check → build → assign → close).
+# The singleton check-then-act used to be lock-free, so concurrent starts
+# could build two WorkflowLedgerStores plus two pump threads on the same
+# ledger file, and a start×stop interleave could leave an old pump draining
+# a store another thread had already closed (WorkflowLedgerClosedError).
+_LIFECYCLE_LOCK = threading.Lock()
+
+
+class ProductionRuntimeBusyError(RuntimeError):
+    """A concurrent start collided with an in-flight start/stop sequence.
+
+    Fail-closed on purpose: the caller must not assume a runtime came up on
+    this thread while another thread is mid-start or mid-stop. Retry after
+    the in-flight transition settles.
+    """
+
+    code = "production_workflow_runtime_busy"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "production workflow runtime start collided with an in-flight "
+            "start/stop on another thread"
+        )
 
 
 def production_workflow_runtime() -> WorkflowRuntime | None:
@@ -304,7 +328,13 @@ def wake_production_workflow_runtime() -> bool:
 
 
 def start_production_workflow_runtime() -> str:
-    """Open the Ledger-backed runtime or fail closed (no JSON fallback)."""
+    """Open the Ledger-backed runtime or fail closed (no JSON fallback).
+
+    The singleton build is serialized behind ``_LIFECYCLE_LOCK``. A start
+    that races an in-flight start/stop fails closed with
+    ``ProductionRuntimeBusyError`` instead of blocking; a start against an
+    already-ready runtime stays idempotent and returns ``"ready"``.
+    """
     global _PRODUCTION, _PUMP
     from core.research.workflow.migration.manifest import is_activated
 
@@ -318,34 +348,43 @@ def start_production_workflow_runtime() -> str:
         workflow_ledger_path,
     )
 
-    if _PRODUCTION is not None:
-        return "ready"
-    data_root = research_workflow_data_root()
-    data_root.mkdir(parents=True, exist_ok=True)
-    if legacy_json_runs_exist(data_root) and not is_activated(data_root):
-        mark_migration_required()
-        return "migration_required"
-    pump = WorkflowOutboxPump()
+    if not _LIFECYCLE_LOCK.acquire(blocking=False):
+        raise ProductionRuntimeBusyError()
     try:
-        _PRODUCTION = build_workflow_runtime(
-            workflow_ledger_path(data_root),
-            wake_worker=pump.wake,
-        )
-    except Exception:
-        reset_formal_write_runtime_for_tests()
-        return "unavailable"
-    pump.attach(_PRODUCTION)
-    _PUMP = pump
-    return "ready"
+        if _PRODUCTION is not None:
+            return "ready"
+        data_root = research_workflow_data_root()
+        data_root.mkdir(parents=True, exist_ok=True)
+        if legacy_json_runs_exist(data_root) and not is_activated(data_root):
+            mark_migration_required()
+            return "migration_required"
+        pump = WorkflowOutboxPump()
+        try:
+            _PRODUCTION = build_workflow_runtime(
+                workflow_ledger_path(data_root),
+                wake_worker=pump.wake,
+            )
+        except Exception:
+            reset_formal_write_runtime_for_tests()
+            return "unavailable"
+        pump.attach(_PRODUCTION)
+        _PUMP = pump
+        return "ready"
+    finally:
+        _LIFECYCLE_LOCK.release()
 
 
 def stop_production_workflow_runtime() -> None:
     global _PRODUCTION, _PUMP
-    pump = _PUMP
-    _PUMP = None
-    if pump is not None:
-        pump.stop()
-    runtime = _PRODUCTION
-    _PRODUCTION = None
-    if runtime is not None:
-        runtime.close()
+    with _LIFECYCLE_LOCK:
+        pump = _PUMP
+        _PUMP = None
+        if pump is not None:
+            # Drain the pump while still holding the lock: a start racing
+            # this stop must not build a new runtime until the old pump
+            # thread is joined, so no pump can outlive its store's close().
+            pump.stop()
+        runtime = _PRODUCTION
+        _PRODUCTION = None
+        if runtime is not None:
+            runtime.close()

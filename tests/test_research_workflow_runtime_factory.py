@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -315,5 +316,243 @@ def test_production_runtime_drains_graph_dispatch_without_manual_run_once(
         assert pending == []
         assert attempt is not None
         assert attempt.status != "starting"
+    finally:
+        stop_production_workflow_runtime()
+
+
+# ---------------------------------------------------------------------------
+# B1 singleton lifecycle: the start/stop sequence is serialized behind a
+# module-level lock. Concurrent starts fail closed (ProductionRuntimeBusyError)
+# instead of building a second ledger store + pump; a start racing an
+# in-flight stop never observes a stale "ready"; stop drains the pump while
+# still holding the lock so no pump can outlive its store's close().
+# ---------------------------------------------------------------------------
+
+
+def test_concurrent_start_single_builder_fail_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+
+    from core.web.services.team_workflow.research_runtime import runtime_factory
+    from core.web.services.team_workflow.research_runtime.runtime_factory import (
+        ProductionRuntimeBusyError,
+        production_workflow_runtime,
+        start_production_workflow_runtime,
+        stop_production_workflow_runtime,
+    )
+
+    monkeypatch.setenv("VIBELUTION_RESEARCH_WORKFLOW_DATA_ROOT", str(tmp_path))
+    stop_production_workflow_runtime()
+
+    original_build = runtime_factory.build_workflow_runtime
+    build_calls: list[str] = []
+
+    def slow_build(*args: Any, **kwargs: Any):
+        # Widen the in-lock build window so the racing start collides with
+        # the lock instead of arriving after the winner already finished.
+        build_calls.append("build")
+        time.sleep(0.3)
+        return original_build(*args, **kwargs)
+
+    monkeypatch.setattr(runtime_factory, "build_workflow_runtime", slow_build)
+
+    barrier = threading.Barrier(2, timeout=5)
+    outcomes: dict[str, object] = {}
+
+    def runner(name: str) -> None:
+        barrier.wait()
+        try:
+            outcomes[name] = start_production_workflow_runtime()
+        except Exception as exc:  # noqa: BLE001 - race outcome under test
+            outcomes[name] = exc
+
+    threads = [threading.Thread(target=runner, args=(n,)) for n in ("a", "b")]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=15)
+
+    ready = [n for n, outcome in outcomes.items() if outcome == "ready"]
+    busy = [
+        n
+        for n, outcome in outcomes.items()
+        if isinstance(outcome, ProductionRuntimeBusyError)
+    ]
+    assert len(ready) == 1, outcomes
+    assert len(busy) == 1, outcomes
+    assert len(build_calls) == 1
+    assert production_workflow_runtime() is not None
+    stop_production_workflow_runtime()
+    assert production_workflow_runtime() is None
+
+
+def test_start_during_in_flight_stop_fails_closed_busy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+    from core.research.workflow.ledger import WorkflowLedgerStore
+    from core.web.services.team_workflow.research_runtime.runtime_factory import (
+        ProductionRuntimeBusyError,
+        production_workflow_runtime,
+        start_production_workflow_runtime,
+        stop_production_workflow_runtime,
+    )
+
+    monkeypatch.setenv("VIBELUTION_RESEARCH_WORKFLOW_DATA_ROOT", str(tmp_path))
+    stop_production_workflow_runtime()
+    assert start_production_workflow_runtime() == "ready"
+
+    release_close = threading.Event()
+    original_store_close = WorkflowLedgerStore.close
+
+    def blocking_close(self: WorkflowLedgerStore) -> None:
+        release_close.wait(timeout=10)
+        original_store_close(self)
+
+    monkeypatch.setattr(WorkflowLedgerStore, "close", blocking_close)
+
+    stopped = threading.Event()
+
+    def do_stop() -> None:
+        stop_production_workflow_runtime()
+        stopped.set()
+
+    stopper = threading.Thread(target=do_stop, name="stopper")
+    stopper.start()
+    try:
+        # Give the stopper time to acquire the lifecycle lock and block
+        # inside the store close; a start racing that window must fail
+        # closed instead of building a runtime the stop will never stop.
+        time.sleep(0.3)
+        with pytest.raises(ProductionRuntimeBusyError):
+            start_production_workflow_runtime()
+    finally:
+        release_close.set()
+        stopper.join(timeout=15)
+    assert stopped.is_set()
+    assert production_workflow_runtime() is None
+
+
+def test_start_stop_interleaving_never_orphans_pump_on_closed_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+    from core.research.workflow.ledger import WorkflowLedgerStore
+    from core.web.services.team_workflow.research_runtime.outbox_pump import (
+        WorkflowOutboxPump,
+    )
+    from core.web.services.team_workflow.research_runtime.runtime_factory import (
+        ProductionRuntimeBusyError,
+        production_workflow_runtime,
+        start_production_workflow_runtime,
+        stop_production_workflow_runtime,
+    )
+
+    monkeypatch.setenv("VIBELUTION_RESEARCH_WORKFLOW_DATA_ROOT", str(tmp_path))
+    stop_production_workflow_runtime()
+
+    lifecycle_events: list[str] = []
+    events_lock = threading.Lock()
+    original_store_close = WorkflowLedgerStore.close
+    original_pump_stop = WorkflowOutboxPump.stop
+
+    def recording_store_close(self: WorkflowLedgerStore) -> None:
+        with events_lock:
+            lifecycle_events.append("store_close_begin")
+        original_store_close(self)
+        with events_lock:
+            lifecycle_events.append("store_close_end")
+
+    def recording_pump_stop(self: WorkflowOutboxPump) -> None:
+        original_pump_stop(self)
+        with events_lock:
+            lifecycle_events.append("pump_stopped")
+
+    monkeypatch.setattr(WorkflowLedgerStore, "close", recording_store_close)
+    monkeypatch.setattr(WorkflowOutboxPump, "stop", recording_pump_stop)
+
+    errors: list[BaseException] = []
+    barrier = threading.Barrier(2, timeout=5)
+
+    def churn(name: str) -> None:
+        barrier.wait()
+        successes = 0
+        deadline = time.monotonic() + 25
+        while successes < 3 and time.monotonic() < deadline:
+            try:
+                outcome = start_production_workflow_runtime()
+            except ProductionRuntimeBusyError:
+                # Raced the other thread's in-flight start/stop: fail closed
+                # and retry; a busy start never builds a second runtime.
+                time.sleep(0.05)
+                continue
+            except BaseException as exc:  # noqa: BLE001
+                errors.append(exc)
+                return
+            if outcome != "ready":
+                errors.append(AssertionError(f"unexpected outcome {outcome}"))
+                return
+            runtime = production_workflow_runtime()
+            if runtime is None:
+                errors.append(AssertionError("ready start without runtime"))
+                return
+            try:
+                # A stale "ready" handed out while another thread closes the
+                # store surfaces here as WorkflowLedgerClosedError.
+                runtime.store.get_run("probe")
+            except BaseException as exc:  # noqa: BLE001
+                errors.append(exc)
+                return
+            successes += 1
+            time.sleep(0.02)
+            try:
+                stop_production_workflow_runtime()
+            except BaseException as exc:  # noqa: BLE001
+                errors.append(exc)
+                return
+
+    threads = [threading.Thread(target=churn, args=(n,)) for n in ("a", "b")]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=60)
+
+    assert errors == []
+    assert production_workflow_runtime() is None
+    with events_lock:
+        sequence = list(lifecycle_events)
+    # Every store close must happen strictly after some pump stop: no pump
+    # may outlive the store it drains.
+    last_pump_stop = -1
+    for index, event in enumerate(sequence):
+        if event == "pump_stopped":
+            last_pump_stop = index
+        elif event == "store_close_begin":
+            assert last_pump_stop >= 0, sequence
+
+
+def test_sequential_start_is_idempotent_and_stop_rebuilds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from core.web.services.team_workflow.research_runtime.runtime_factory import (
+        production_workflow_runtime,
+        start_production_workflow_runtime,
+        stop_production_workflow_runtime,
+    )
+
+    monkeypatch.setenv("VIBELUTION_RESEARCH_WORKFLOW_DATA_ROOT", str(tmp_path))
+    stop_production_workflow_runtime()
+    try:
+        assert start_production_workflow_runtime() == "ready"
+        # A start against an already-ready runtime stays idempotent.
+        assert start_production_workflow_runtime() == "ready"
+        first = production_workflow_runtime()
+        assert first is not None
+        stop_production_workflow_runtime()
+        assert production_workflow_runtime() is None
+        assert start_production_workflow_runtime() == "ready"
+        second = production_workflow_runtime()
+        assert second is not None and second is not first
     finally:
         stop_production_workflow_runtime()
