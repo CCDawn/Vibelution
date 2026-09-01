@@ -312,6 +312,73 @@ def test_close_meeting_is_idempotent_but_rejects_conflicting_reuse(tmp_path, mon
         )
 
 
+def test_create_meeting_round_rejects_same_id_with_different_candidate_identity(
+    tmp_path, monkeypatch
+):
+    """C3 guard: one meeting id stays bound to exactly one candidate (fail closed)."""
+
+    team_id = _team(tmp_path, monkeypatch)
+    created = meetings.create_meeting_round(
+        team_id,
+        _meeting(discussionItemRefs=["hypothesis_candidate:cand-a"]),
+    )
+    assert created["status"] == "created"
+
+    replayed = meetings.create_meeting_round(
+        team_id,
+        _meeting(discussionItemRefs=["hypothesis_candidate:cand-a"]),
+    )
+    assert replayed["status"] == "reused"
+    assert replayed["meetingRound"]["meetingRoundId"] == "meeting-demo-1"
+
+    with pytest.raises(meetings.ResearchMeetingRoundError, match="different content"):
+        meetings.create_meeting_round(
+            team_id,
+            _meeting(discussionItemRefs=["hypothesis_candidate:cand-b"]),
+        )
+
+    records = [
+        record
+        for record in meetings._read_jsonl(meetings._rounds_path(team_id))
+        if record.get("meetingRoundId") == "meeting-demo-1"
+    ]
+    assert len(records) == 1
+
+
+def test_concurrent_same_id_create_meeting_round_yields_single_record(
+    tmp_path, monkeypatch
+):
+    """C3 guard: racing creates of one meeting id append exactly one record."""
+
+    import threading
+
+    team_id = _team(tmp_path, monkeypatch)
+    payload = _meeting()
+    barrier = threading.Barrier(2)
+    results = {}
+
+    def worker(index: int) -> None:
+        barrier.wait(timeout=5)
+        results[index] = meetings.create_meeting_round(team_id, payload)
+
+    threads = [threading.Thread(target=worker, args=(index,)) for index in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+
+    assert sorted(result["status"] for result in results.values()) == [
+        "created",
+        "reused",
+    ]
+    records = [
+        record
+        for record in meetings._read_jsonl(meetings._rounds_path(team_id))
+        if record.get("meetingRoundId") == "meeting-demo-1"
+    ]
+    assert len(records) == 1
+
+
 def test_close_meeting_fails_closed_without_digest_or_decision(tmp_path, monkeypatch):
     team_id = _team(tmp_path, monkeypatch)
     meetings.create_meeting_round(team_id, _meeting())

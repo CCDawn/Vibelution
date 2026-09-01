@@ -3829,6 +3829,56 @@ def _record_review_round_link(
     return record
 
 
+# C3 dispatch TOCTOU guard: the attempt ledger collapses concurrent "queued"
+# writes onto one attempt (hence one deterministic meeting id), but the inner
+# open sequence remains read-then-act — a second dispatch that reads before
+# the first one binds its room round sees no meeting, falls through to open,
+# and would leave one meeting bound to two discussion rounds (duplicated
+# digest sources, doubled discussion tokens). ``create_meeting_round`` already
+# reuses or fail-closes the meeting record itself, but its lock cannot span
+# the slow ``start_chat_room_round``/bind tail, so the dispatch layer
+# serializes the whole per-candidate open sequence here instead.
+_CANDIDATE_DISPATCH_LOCKS_GUARD = threading.Lock()
+_CANDIDATE_DISPATCH_LOCKS: dict[tuple[str, str, str], tuple[threading.Lock, int]] = {}
+
+
+@contextmanager
+def _candidate_dispatch_serialized(
+    team_id: str, question_id: str, candidate_id: str
+):
+    """Hold the per-candidate dispatch lock for one whole open sequence.
+
+    The registry is refcounted under the guard: every caller increments the
+    waiters before blocking on the lock, and the entry is removed only when
+    the last waiter leaves, so late arrivals always find the same lock object
+    while the registry cannot grow without bound.
+    """
+
+    key = (
+        str(team_id or "").strip(),
+        str(question_id or "").strip().upper(),
+        str(candidate_id or "").strip(),
+    )
+    with _CANDIDATE_DISPATCH_LOCKS_GUARD:
+        entry = _CANDIDATE_DISPATCH_LOCKS.get(key)
+        if entry is None:
+            entry = (threading.Lock(), 0)
+        lock = entry[0]
+        _CANDIDATE_DISPATCH_LOCKS[key] = (lock, entry[1] + 1)
+    try:
+        with lock:
+            yield
+    finally:
+        with _CANDIDATE_DISPATCH_LOCKS_GUARD:
+            current = _CANDIDATE_DISPATCH_LOCKS.get(key)
+            if current is not None and current[0] is lock:
+                remaining = current[1] - 1
+                if remaining <= 0:
+                    _CANDIDATE_DISPATCH_LOCKS.pop(key, None)
+                else:
+                    _CANDIDATE_DISPATCH_LOCKS[key] = (lock, remaining)
+
+
 def _candidate_review_meeting_id(
     selection_id: str,
     candidate_id: str,
@@ -4046,21 +4096,30 @@ def open_review_meeting_for_selection(
                     }
                 )
             try:
-                opened_candidate = open_review_meeting_for_selection(
-                    normalized_team_id,
-                    candidate_selection,
-                    agent_runner=agent_runner,
-                    background=background,
-                    round_index=normalized_round_index,
-                    previous_meeting_round_id=previous_meeting_round_id,
-                    collection_request_id=collection_request_id,
-                    meeting_round_id=candidate_meeting_id,
-                    round_budget=round_budget,
-                    fan_out_selection=fan_out_selection,
-                    _selection_version=selection_version,
-                    _formal_candidate_id=candidate_id,
-                    _formal_candidate_order=candidate_order,
-                )
+                # Every dispatch entry (selection commit, human retry, next
+                # round auto-open) funnels through this recursive call, so the
+                # per-candidate lock here covers the whole read-then-act open
+                # sequence: the loser waits, then replays into the
+                # "meeting exists with bound rounds -> reused" branch instead
+                # of starting a second discussion round for the same meeting.
+                with _candidate_dispatch_serialized(
+                    normalized_team_id, question_id, candidate_id
+                ):
+                    opened_candidate = open_review_meeting_for_selection(
+                        normalized_team_id,
+                        candidate_selection,
+                        agent_runner=agent_runner,
+                        background=background,
+                        round_index=normalized_round_index,
+                        previous_meeting_round_id=previous_meeting_round_id,
+                        collection_request_id=collection_request_id,
+                        meeting_round_id=candidate_meeting_id,
+                        round_budget=round_budget,
+                        fan_out_selection=fan_out_selection,
+                        _selection_version=selection_version,
+                        _formal_candidate_id=candidate_id,
+                        _formal_candidate_order=candidate_order,
+                    )
             except Exception as exc:  # noqa: BLE001 - attempt fact stays durable
                 _append_review_dispatch_attempt_state(
                     normalized_team_id,

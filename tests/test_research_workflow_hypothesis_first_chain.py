@@ -6312,6 +6312,168 @@ def test_retry_review_dispatch_rebinds_review_link_to_fresh_meeting(
     assert links[0]["meetingRoundId"] == base_meeting_id
 
 
+def _hold_open_window_env(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    selection_id: str,
+):
+    """``_retry_dispatch_env`` plus an observable, holdable open window.
+
+    The first ``open_hypothesis_review_meeting`` caller blocks inside the
+    open window (exactly the TOCTOU gap C3 closes) until the test releases
+    it, while recording how many callers reached the open at all.
+    """
+
+    team_id, selection, meetings_store, opened_ids, driver_calls = (
+        _retry_dispatch_env(tmp_path, monkeypatch, selection_id)
+    )
+    guarded_open = meeting_runtime.open_hypothesis_review_meeting
+    guard = threading.Lock()
+    state = {"openCalls": 0}
+    first_entered = threading.Event()
+    release_open = threading.Event()
+
+    def slow_open(_team_id: str, payload, **kwargs):
+        with guard:
+            state["openCalls"] += 1
+            call_index = state["openCalls"]
+        if call_index == 1:
+            first_entered.set()
+            release_open.wait(timeout=10)
+        return guarded_open(_team_id, payload, **kwargs)
+
+    monkeypatch.setattr(meeting_runtime, "open_hypothesis_review_meeting", slow_open)
+    return (
+        team_id,
+        selection,
+        meetings_store,
+        opened_ids,
+        state,
+        first_entered,
+        release_open,
+    )
+
+
+def test_concurrent_same_candidate_dispatch_opens_meeting_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two dispatches racing one candidate converge on a single open (C3)."""
+
+    selection_id = "selection-concurrent-dispatch"
+    (
+        team_id,
+        selection,
+        _meetings_store,
+        opened_ids,
+        state,
+        first_entered,
+        release_open,
+    ) = _hold_open_window_env(tmp_path, monkeypatch, selection_id)
+
+    barrier = threading.Barrier(2)
+    results: list[Any] = [None, None]
+
+    def worker(index: int) -> None:
+        barrier.wait(timeout=5)
+        results[index] = chain.open_review_meeting_for_selection(
+            team_id, selection, background=True
+        )
+
+    threads = [threading.Thread(target=worker, args=(index,)) for index in range(2)]
+    for thread in threads:
+        thread.start()
+    assert first_entered.wait(timeout=5)
+    # While the first dispatch is still inside the open window, give the
+    # second one time to reach the guarded sequence: before the C3 lock it
+    # would start a duplicate discussion round for the same meeting.
+    time.sleep(0.2)
+    assert state["openCalls"] == 1
+    release_open.set()
+    for thread in threads:
+        thread.join(timeout=30)
+
+    # Exactly one open per candidate meeting; the loser replays as reused.
+    assert state["openCalls"] == 2
+    assert len(opened_ids) == 2
+    assert len(set(opened_ids)) == 2
+    statuses = sorted(item["status"] for item in results)
+    assert statuses == ["created", "reused"]
+    for item in results:
+        assert item["candidateCount"] == 2
+        assert item["meetingRound"]["status"] == "open"
+    attempts = chain.list_review_dispatch_attempts(
+        team_id, selection_id=selection_id
+    )["attempts"]
+    for candidate_id in ("hyp-a", "hyp-b"):
+        candidate_attempts = _attempts_for(attempts, candidate_id)
+        assert [int(item.get("attemptNumber") or 0) for item in candidate_attempts] == [1]
+        assert (
+            len({str(item.get("attemptId") or "") for item in candidate_attempts}) == 1
+        )
+
+
+def test_retry_and_auto_dispatch_converge_on_one_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A human RETRY racing the automatic dispatch never doubles the open (C3)."""
+
+    selection_id = "selection-retry-race"
+    (
+        team_id,
+        selection,
+        _meetings_store,
+        opened_ids,
+        state,
+        first_entered,
+        release_open,
+    ) = _hold_open_window_env(tmp_path, monkeypatch, selection_id)
+
+    barrier = threading.Barrier(2)
+    results: list[Any] = [None, None]
+
+    def auto_dispatch() -> None:
+        barrier.wait(timeout=5)
+        results[0] = chain.open_review_meeting_for_selection(
+            team_id, selection, background=True
+        )
+
+    def human_retry() -> None:
+        barrier.wait(timeout=5)
+        results[1] = chain.retry_review_dispatch(
+            team_id, selection_id, ["hyp-a", "hyp-b"]
+        )
+
+    threads = [
+        threading.Thread(target=auto_dispatch),
+        threading.Thread(target=human_retry),
+    ]
+    for thread in threads:
+        thread.start()
+    assert first_entered.wait(timeout=5)
+    time.sleep(0.2)
+    assert state["openCalls"] == 1
+    release_open.set()
+    for thread in threads:
+        thread.join(timeout=30)
+
+    assert state["openCalls"] == 2
+    assert len(opened_ids) == 2
+    assert len(set(opened_ids)) == 2
+    for item in results:
+        assert item["status"] in {"created", "reused"}
+        assert item["candidateCount"] == 2
+        assert item["meetingRound"]["status"] == "open"
+    attempts = chain.list_review_dispatch_attempts(
+        team_id, selection_id=selection_id
+    )["attempts"]
+    for candidate_id in ("hyp-a", "hyp-b"):
+        candidate_attempts = _attempts_for(attempts, candidate_id)
+        assert [int(item.get("attemptNumber") or 0) for item in candidate_attempts] == [1]
+        assert (
+            len({str(item.get("attemptId") or "") for item in candidate_attempts}) == 1
+        )
+
+
 def test_stage_one_run_consumes_origin_drafts_and_skips_second_r0(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
