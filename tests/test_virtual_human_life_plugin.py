@@ -1101,7 +1101,7 @@ def test_delivery_receipt_must_match_authoritative_assistant_receipt(
         )
 
 
-def test_proactive_reconciliation_expires_unconfirmed_delivery_without_quota(
+def test_proactive_reconciliation_expires_unadmitted_candidate_without_quota(
     tmp_path: Path,
 ) -> None:
     now = [datetime(2026, 8, 27, 9, 0, tzinfo=timezone.utc)]
@@ -1115,10 +1115,6 @@ def test_proactive_reconciliation_expires_unconfirmed_delivery_without_quota(
         plugin_root_resolver=lambda agent_id: (
             tmp_path / "agents" / agent_id / "plugins" / "virtual-human-life"
         ),
-        proactive_submitter=lambda **_payload: {
-            "accepted": True,
-            "turnId": "turn-expiring",
-        },
         delivery_receipt_resolver=lambda _agent_id, _attempt: None,
         now_provider=lambda: now[0],
     )
@@ -1137,6 +1133,48 @@ def test_proactive_reconciliation_expires_unconfirmed_delivery_without_quota(
         "agent-a", attempt["deliveryToken"]
     )["status"] == "expired"
     assert service.proactive_usage("agent-a", "2026-08-27")["delivered"] == 0
+
+
+def test_admitted_proactive_turn_outlives_candidate_window(
+    tmp_path: Path,
+) -> None:
+    now = [datetime(2026, 8, 27, 9, 0, tzinfo=timezone.utc)]
+    agent = _active_agent("agent-a")
+    service = VirtualHumanLifeService(
+        project_root=tmp_path,
+        agent_loader=lambda agent_id, include_archived=False: (
+            agent if agent_id == "agent-a" else None
+        ),
+        agent_lister=lambda: [agent],
+        plugin_root_resolver=lambda agent_id: (
+            tmp_path / "agents" / agent_id / "plugins" / "virtual-human-life"
+        ),
+        proactive_submitter=lambda **_payload: {
+            "accepted": True,
+            "turnId": "turn-slow-native",
+        },
+        delivery_receipt_resolver=lambda _agent_id, _attempt: None,
+        now_provider=lambda: now[0],
+    )
+    binding = service.set_binding("agent-a", enabled=True, expected_version=0)
+    attempt = service.request_proactive_message(
+        "agent-a",
+        reason="模型响应时间可能超过候选窗口",
+        valid_for_minutes=10,
+    )
+
+    now[0] += timedelta(minutes=11)
+    reconciled = service.reconcile_proactive_attempts("agent-a")
+
+    assert reconciled["expiredDeliveryTokens"] == []
+    assert service.proactive_attempt(
+        "agent-a", attempt["deliveryToken"]
+    )["status"] == "delivering"
+    assert service.proactive_turn_is_current(
+        agent_id="agent-a",
+        binding_revision=binding["bindingRevision"],
+        delivery_token=attempt["deliveryToken"],
+    ) is True
 
 
 def test_proactive_reconciliation_promotes_only_a_persisted_assistant_receipt(
