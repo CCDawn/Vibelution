@@ -10,13 +10,16 @@ round 记录），不由客户端推断。
 
 from __future__ import annotations
 
-from typing import Any, NoReturn
+import os
+from datetime import datetime, timezone
+from typing import Any, Mapping, NoReturn
 
 from fastapi import Header, HTTPException, Query, Request, Response, status
 
 from core.research.workflow.contracts import (
     AnomalyInbox,
     ContractValidationError,
+    WorkflowCommandKind,
     scope_hash_for,
 )
 from core.web.services import chat_room_service
@@ -36,6 +39,10 @@ from core.web.services.team_workflow.research_runtime import (
     hypothesis_first_state_v2,
     meeting_receipt_authority,
 )
+from core.web.services.team_workflow.research_runtime.formal_read_runtime import (
+    get_event_replay_service,
+    get_query_service,
+)
 from core.web.services.team_workflow.research_runtime.operator_authorization import (
     server_operator_scope_from_http,
 )
@@ -49,7 +56,9 @@ from core.web.services.team_workflow.research_scope import (
 
 from ._errors import _raise_team_workflow_route_error
 from ._router import router
+from .research_runtime import _submit_workflow_command
 from .hypothesis_first_models import (
+    AnomalyInboxExtendBudgetRequest,
     AnomalyInboxResponse,
     CandidateEvidenceTrailResponse,
     ChainStateResponse,
@@ -806,6 +815,153 @@ def team_workflow_hypothesis_first_chain_state_v2(
     return snapshot
 
 
+_ANOMALY_GATE_WAIT_THRESHOLD_ENV = "VIBELUTION_ANOMALY_GATE_WAIT_THRESHOLD_MS"
+_EVENT_PAGE_SIZE = 500
+
+
+def _gate_wait_threshold_ms() -> int:
+    """Configured human-gate wait threshold; env override is a positive int ms."""
+
+    raw = str(os.environ.get(_ANOMALY_GATE_WAIT_THRESHOLD_ENV) or "").strip()
+    if raw:
+        try:
+            normalized = int(raw)
+        except ValueError:
+            normalized = 0
+        if normalized > 0:
+            return normalized
+    return anomaly_inbox_service.DEFAULT_GATE_WAIT_THRESHOLD_MS
+
+
+def _meeting_scope_question_id(meeting: Mapping[str, Any]) -> str:
+    """The question a meeting round belongs to (record or discussion scope)."""
+
+    direct = str(meeting.get("questionId") or "").strip().upper()
+    if direct:
+        return direct
+    for scope_key in ("discussionScope", "preformalDiscussionScope", "scope"):
+        scope = meeting.get(scope_key)
+        if isinstance(scope, Mapping):
+            scoped = str(scope.get("questionId") or "").strip().upper()
+            if scoped:
+                return scoped
+    return ""
+
+
+def _collect_digest_ttl_overdues(team_id: str, question_id: str) -> list[dict[str, Any]]:
+    """Read-only digest-TTL stop-loss signals for one question.
+
+    判定口径完全复用 meeting runtime 的 ``meeting_digest_ttl_mute_state``
+    （同一 TTL 配置、同一 deadline 优先语义）；这里只负责按题目归属过滤并
+    附上 ``meetingRoundId``。任何读取失败都降级为「无信号」，绝不阻塞收件箱。
+    """
+
+    normalized_question_id = str(question_id or "").strip().upper()
+    if not normalized_question_id:
+        return []
+    try:
+        listing = meeting_rounds.list_meeting_rounds(
+            team_id, status=("summarizing", "awaiting_approval")
+        )
+    except Exception:  # noqa: BLE001 - an unavailable meeting store is not an inbox error
+        return []
+    overdues: list[dict[str, Any]] = []
+    for meeting in listing.get("meetings") or []:
+        if not isinstance(meeting, Mapping):
+            continue
+        if _meeting_scope_question_id(meeting) != normalized_question_id:
+            continue
+        try:
+            mute = meeting_runtime.meeting_digest_ttl_mute_state(meeting)
+        except Exception:  # noqa: BLE001 - one unreadable meeting must not break the rest
+            continue
+        if not mute:
+            continue
+        round_id = str(meeting.get("meetingRoundId") or "").strip()
+        if round_id:
+            overdues.append({**dict(mute), "meetingRoundId": round_id})
+    return overdues
+
+
+def _iso_from_ms(value: int) -> str:
+    return (
+        datetime.fromtimestamp(int(value) / 1000, tz=timezone.utc)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+
+
+def _collect_budget_precheck_blocks(
+    team_id: str, snapshot: Mapping[str, Any]
+) -> list[dict[str, Any]]:
+    """Read-only ``budget_precheck_blocked`` payloads for the blocked run.
+
+    The state-v2 snapshot pins the current formal run to ``blocked`` but does
+    not carry the structured stage-boundary problem, so the route replays the
+    run's ledger tail (last ``_EVENT_PAGE_SIZE`` events) and collects the
+    precheck payloads.  Failures degrade to «no signal»; the inbox never
+    fails because the ledger is unavailable.
+    """
+
+    formal = snapshot.get("formalRuntime")
+    if not isinstance(formal, Mapping):
+        return []
+    run_id = str(formal.get("runId") or "").strip()
+    if not run_id or str(formal.get("runStatus") or "").strip().lower() != "blocked":
+        return []
+    replay = get_event_replay_service()
+    try:
+        probe = replay.list_events(team_id=team_id, run_id=run_id, limit=1)
+        after = max(0, int(probe.latest_event_sequence) - _EVENT_PAGE_SIZE)
+        page = replay.list_events(
+            team_id=team_id, run_id=run_id, after_sequence=after, limit=_EVENT_PAGE_SIZE
+        )
+    except Exception:  # noqa: BLE001 - an unavailable ledger is not an inbox error
+        return []
+    blocks: list[dict[str, Any]] = []
+    for event in page.events:
+        if str(event.event_type) != (
+            anomaly_inbox_service.BUDGET_PRECHECK_BLOCKED_EVENT_TYPE
+        ):
+            continue
+        payload = event.payload if isinstance(event.payload, Mapping) else {}
+        blocks.append(
+            {
+                **dict(payload),
+                "runId": run_id,
+                "nodeId": str(payload.get("nodeId") or ""),
+                "occurredAt": _iso_from_ms(event.occurred_at_ms),
+            }
+        )
+    return blocks
+
+
+def _resolve_run_version(team_id: str, run_id: str) -> int:
+    """Current ledger run version for CAS; 0 when the run cannot be seen."""
+
+    try:
+        listing = get_query_service().list_runs(
+            team_id=team_id,
+            workflow_id=_challenge_workflow_id(),
+        )
+    except Exception:  # noqa: BLE001 - resolution failure is mapped by the caller
+        return 0
+    for record in listing.get("runs") or []:
+        if (
+            isinstance(record, Mapping)
+            and str(record.get("runId") or "").strip() == run_id
+        ):
+            version = record.get("runVersion")
+            return int(version) if isinstance(version, int) and version > 0 else 0
+    return 0
+
+
+def _challenge_workflow_id() -> str:
+    from core.research.workflow.definition import CHALLENGE_CUP_WORKFLOW_ID
+
+    return CHALLENGE_CUP_WORKFLOW_ID
+
+
 @router.get(
     "/teams/{team_id}/workflow-orchestration/hypothesis-first/chain/anomaly-inbox",
     response_model=AnomalyInboxResponse,
@@ -818,9 +974,11 @@ def team_workflow_hypothesis_first_anomaly_inbox(
     """R4.3 anomaly inbox: one read-only projection for the operations console.
 
     薄路由：把该题目的 canonical state-v2 快照交给纯投影服务
-    ``build_anomaly_inbox``（disputed/escalation 等可选输入本阶段为空，
-    面板先呈现 problems/awaiting/heartbeat 信号），响应原样携带合同
-    ``AnomalyInbox.to_dict()``，排序/合并/完整性全部由合同保证。
+    ``build_anomaly_inbox``，并附上三类「无推送断点」的只读信号——
+    digest 审批 TTL 止损（口径复用 meeting runtime）、人工门等待超阈值
+    （knowledge_handoff / H1-H4，阈值可配）、阶段预算预检阻塞（带
+    extend_budget CTA action）。响应在合同投影之上只增不删
+    （``attach_inbox_actions``），排序/合并/完整性全部由合同保证。
     未给 questionId 时返回合法的空收件箱（无信号的合法状态）。
     """
 
@@ -849,13 +1007,89 @@ def team_workflow_hypothesis_first_anomaly_inbox(
         ) from exc
     except _DOMAIN_ERRORS as exc:
         _map_domain_error("hypothesis_first.chain.anomaly_inbox", team_id, exc)
-    inbox = anomaly_inbox_service.build_anomaly_inbox(snapshot)
+    budget_precheck_blocks = _collect_budget_precheck_blocks(team_id, snapshot)
+    inbox = anomaly_inbox_service.build_anomaly_inbox(
+        snapshot,
+        digest_ttl_overdues=_collect_digest_ttl_overdues(
+            team_id, normalized_question_id
+        ),
+        gate_waits=anomaly_inbox_service.derive_gate_waits(snapshot),
+        budget_precheck_blocks=budget_precheck_blocks,
+        gate_wait_threshold_ms=_gate_wait_threshold_ms(),
+    )
     return {
         "schemaVersion": 1,
         "teamId": team_id,
         "questionId": normalized_question_id,
-        "inbox": inbox.to_dict(),
+        "inbox": anomaly_inbox_service.attach_inbox_actions(
+            inbox.to_dict(),
+            blocks=budget_precheck_blocks,
+        ),
     }
+
+
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/hypothesis-first/chain/anomaly-inbox/actions/extend-budget",
+    response_model=dict[str, Any],
+    response_model_exclude_unset=True,
+)
+def team_workflow_hypothesis_first_anomaly_inbox_extend_budget(
+    team_id: str,
+    payload: AnomalyInboxExtendBudgetRequest,
+    request: Request,
+) -> dict:
+    """Execute the inbox one-click extend CTA (human-authorized, confirmed).
+
+    误触防护在服务端闭合：缺少显式 ``confirmed=true``、额度数字无效或
+    run/stage 缺失时直接拒绝（428/422 语义），绝不静默执行。幂等键由
+    run/stage/额度决定，因此同一确认重复提交会幂等重放而不是重复加预算；
+    extend 只提高 stageTokens 上限，随后对该节点的 retry_node 仍走既有
+    命令授权面（本端点不自动补预算、不自动重试）。
+    ``questionId`` 只作请求上下文；命令授权由 team+run 的既有命令面完成。
+    """
+
+    try:
+        anomaly_inbox_service.assert_extend_budget_confirmation(
+            confirmed=payload.confirmed,
+            run_id=payload.runId,
+            stage_id=payload.stageId,
+            stage_limit_tokens=payload.stageLimitTokens,
+            suggested_extension_tokens=payload.suggestedExtensionTokens,
+        )
+    except anomaly_inbox_service.InboxActionConfirmationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_428_PRECONDITION_REQUIRED,
+            detail={"code": exc.code, "message": exc.message},
+        ) from exc
+    expected_run_version = payload.expectedRunVersion or _resolve_run_version(
+        team_id, payload.runId
+    )
+    if expected_run_version < 1:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "code": "run_not_found",
+                "message": f"workflow run {payload.runId} not found",
+            },
+        )
+    new_stage_tokens = payload.stageLimitTokens + payload.suggestedExtensionTokens
+    idempotency_key = (
+        f"inbox-extend-budget:{payload.runId}:{payload.stageId}"
+        f":{payload.stageLimitTokens}:{payload.suggestedExtensionTokens}"
+    )
+    return _submit_workflow_command(
+        run_id=payload.runId,
+        team_id=team_id,
+        kind=WorkflowCommandKind.EXTEND_BUDGET,
+        node_id=payload.nodeId or None,
+        expected_run_version=expected_run_version,
+        idempotency_key=idempotency_key,
+        payload={
+            "limits": {"stageTokens": {payload.stageId: new_stage_tokens}},
+            "recovery": {"command": "extend_budget", "then": "retry_node"},
+        },
+        request=request,
+    )
 
 
 @router.post(

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 # ---------------------------------------------------------------------------
 # Payloads — selection (HF-1)
@@ -460,6 +460,8 @@ class AnomalyInboxResponse(BaseModel):
 
     ``inbox`` is the verbatim ``AnomalyInbox.to_dict()`` projection (sorted,
     merged, fail-closed contract shape); the route never reshapes it.
+    ``budget_precheck`` items may additionally carry the structured
+    ``action`` (one-click extend CTA) added by ``attach_inbox_actions``.
     """
 
     model_config = ConfigDict(extra="allow")
@@ -468,3 +470,25 @@ class AnomalyInboxResponse(BaseModel):
     teamId: str = ""
     questionId: str = ""
     inbox: dict[str, Any] = Field(default_factory=dict)
+
+
+class AnomalyInboxExtendBudgetRequest(BaseModel):
+    """One-click extend CTA execution (inbox anomaly → extend_budget).
+
+    ``confirmed`` is the mandatory human-authorization flag (误触防护):
+    the endpoint refuses the request without it.  ``stageLimitTokens`` and
+    ``suggestedExtensionTokens`` echo the amounts shown in the CTA; the
+    server recomputes the new stage total and derives the idempotency key,
+    so a repeated identical confirmation replays instead of double-charging.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    questionId: str = Field("", max_length=200)
+    runId: str = Field(..., min_length=1, max_length=200)
+    nodeId: str = Field("", max_length=200)
+    stageId: str = Field(..., min_length=1, max_length=200)
+    stageLimitTokens: int = Field(..., ge=1)
+    suggestedExtensionTokens: int = Field(..., ge=1)
+    confirmed: StrictBool = False
+    expectedRunVersion: int = Field(0, ge=0)

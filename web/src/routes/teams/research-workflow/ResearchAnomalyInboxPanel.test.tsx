@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 import {
+  executeHypothesisFirstInboxExtendBudget,
   fetchHypothesisFirstAnomalyInbox,
 } from "../../../api/hypothesisFirst";
 import type { AnomalyInboxItem, AnomalyInboxResponse } from "../../../api/types/hypothesisFirst";
@@ -25,6 +26,7 @@ import {
 
 vi.mock("../../../api/hypothesisFirst", () => ({
   fetchHypothesisFirstAnomalyInbox: vi.fn(),
+  executeHypothesisFirstInboxExtendBudget: vi.fn(),
 }));
 
 vi.mock("../../../i18n/useShellI18n", () => ({
@@ -32,6 +34,7 @@ vi.mock("../../../i18n/useShellI18n", () => ({
 }));
 
 const mockedInbox = vi.mocked(fetchHypothesisFirstAnomalyInbox);
+const mockedExtend = vi.mocked(executeHypothesisFirstInboxExtendBudget);
 
 function item(patch: Partial<AnomalyInboxItem>): AnomalyInboxItem {
   return {
@@ -52,6 +55,23 @@ function item(patch: Partial<AnomalyInboxItem>): AnomalyInboxItem {
     ...patch,
   };
 }
+
+const extendAction = {
+  command: "extend_budget" as const,
+  params: {
+    runId: "run-7",
+    nodeId: "hf_hypothesis",
+    stageId: "hypothesis",
+    stageLimitTokens: 300000,
+    suggestedExtensionTokens: 260000,
+    newStageTokens: 560000,
+    limits: { stageTokens: { hypothesis: 560000 } },
+  },
+  then: { command: "retry_node" as const, nodeId: "hf_hypothesis" },
+  hint: "extend_budget 提高 stageTokens 后对该节点 retry_node，无需人工修数据",
+  requiresConfirmation: true as const,
+  confirmHint: "将阶段 hypothesis 预算上限从 300,000 提高到 560,000 tokens（+260,000）",
+};
 
 function inboxPayload(items: AnomalyInboxItem[]): AnomalyInboxResponse {
   return {
@@ -269,5 +289,83 @@ describe("ResearchAnomalyInboxPanel", () => {
     // Scope text only renders what the scope itself carries; the deep-link
     // fallback questionId does not leak into it.
     expect(anomalyInboxScopeText(runScoped, false)).toBe("run run-7");
+  });
+
+  it("arms the extend CTA with the amount, then executes only on explicit confirm", async () => {
+    const budgetItem = item({
+      kind: "budget_exhausted",
+      scope: { teamId: "team-1", questionId: "SCI-001", runId: "run-7", nodeId: "hf_hypothesis", meetingRoundId: "" },
+      summary: "阶段 hypothesis 预算预检不足",
+      action: extendAction,
+    });
+    mockedInbox.mockResolvedValue(inboxPayload([budgetItem]));
+    mockedExtend.mockResolvedValue({ status: "accepted" });
+    renderPanel({ questionId: "SCI-001", onOpenItem: vi.fn() });
+    await flushQueries();
+
+    // The CTA shows the amount; a deep link would nest buttons, so the row
+    // renders plain while the CTA is interactive.
+    expect(testId("anomaly-extend-cta").textContent).toContain("+260,000 tokens");
+    expect(container.querySelectorAll('[data-testid="anomaly-inbox-row-link"]')).toHaveLength(0);
+
+    // First click only arms the confirmation; nothing executes yet.
+    act(() => {
+      (testId("anomaly-extend-arm") as HTMLButtonElement).click();
+    });
+    expect(mockedExtend).not.toHaveBeenCalled();
+    expect(testId("anomaly-extend-confirm").textContent).toContain("确认补预算");
+
+    await act(async () => {
+      (testId("anomaly-extend-confirm") as HTMLButtonElement).click();
+    });
+    await flushQueries();
+    expect(mockedExtend).toHaveBeenCalledTimes(1);
+    expect(mockedExtend).toHaveBeenCalledWith("team-1", {
+      questionId: "SCI-001",
+      runId: "run-7",
+      nodeId: "hf_hypothesis",
+      stageId: "hypothesis",
+      stageLimitTokens: 300000,
+      suggestedExtensionTokens: 260000,
+      confirmed: true,
+    });
+  });
+
+  it("cancels the armed CTA without executing", async () => {
+    mockedInbox.mockResolvedValue(inboxPayload([
+      item({ kind: "budget_exhausted", action: extendAction }),
+    ]));
+    mockedExtend.mockResolvedValue({});
+    renderPanel({ questionId: "SCI-001" });
+    await flushQueries();
+
+    act(() => {
+      (testId("anomaly-extend-arm") as HTMLButtonElement).click();
+    });
+    act(() => {
+      (testId("anomaly-extend-cancel") as HTMLButtonElement).click();
+    });
+    expect(testId("anomaly-extend-arm")).toBeTruthy();
+    expect(mockedExtend).not.toHaveBeenCalled();
+  });
+
+  it("surfaces the server refusal when execution fails", async () => {
+    mockedInbox.mockResolvedValue(inboxPayload([
+      item({ kind: "budget_exhausted", action: extendAction }),
+    ]));
+    mockedExtend.mockRejectedValue(new Error("confirmation_required"));
+    renderPanel({ questionId: "SCI-001" });
+    await flushQueries();
+
+    act(() => {
+      (testId("anomaly-extend-arm") as HTMLButtonElement).click();
+    });
+    await act(async () => {
+      (testId("anomaly-extend-confirm") as HTMLButtonElement).click();
+    });
+    await flushQueries();
+    expect(testId("anomaly-extend-error").textContent).toContain("confirmation_required");
+    // Still armed so the operator can retry after fixing the blocker.
+    expect(testId("anomaly-extend-confirm")).toBeTruthy();
   });
 });

@@ -19,5 +19,10 @@ export default {
   lastSeen: "text-[var(--fg-tertiary)] [font-size:var(--vui-font-2xs)]",
   itemSummary: "text-[var(--fg-secondary)] [font-size:var(--vui-font-xs)]",
   recommendation: "text-[var(--fg-tertiary)] [font-size:var(--vui-font-2xs)]",
+  cta: "flex flex-col gap-1 border border-[var(--border-strong)] bg-[var(--bg-subtle)] p-2",
+  ctaAmount: "flex flex-wrap items-center gap-1.5",
+  ctaAmountValue: "font-[650] [font-size:var(--vui-font-xs)] text-[var(--fg-primary)]",
+  ctaConfirmHint: "text-[var(--fg-tertiary)] [font-size:var(--vui-font-2xs)]",
+  ctaError: "text-[var(--fg-danger)] [font-size:var(--vui-font-2xs)]",
   footer: "flex items-center",
 } as const;

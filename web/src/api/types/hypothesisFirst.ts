@@ -939,6 +939,24 @@ export type AnomalyInboxScope = {
   meetingRoundId: string;
 };
 
+/** Structured one-click extend CTA (server-built; execution needs explicit confirmation). */
+export type AnomalyInboxExtendBudgetAction = {
+  command: "extend_budget";
+  params: {
+    runId: string;
+    nodeId: string;
+    stageId: string;
+    stageLimitTokens: number;
+    suggestedExtensionTokens: number;
+    newStageTokens: number;
+    limits: { stageTokens: Record<string, number> };
+  };
+  then: { command: "retry_node"; nodeId: string };
+  hint: string;
+  requiresConfirmation: true;
+  confirmHint: string;
+};
+
 export type AnomalyInboxItem = {
   kind: AnomalyKind;
   scope: AnomalyInboxScope;
@@ -948,6 +966,20 @@ export type AnomalyInboxItem = {
   summary: string;
   recommendedAction: string | null;
   evidence: string[];
+  /** Present only on budget_precheck items with a computable extend contract. */
+  action?: AnomalyInboxExtendBudgetAction | null;
+};
+
+export type AnomalyInboxExtendBudgetRequest = {
+  questionId: string;
+  runId: string;
+  nodeId: string;
+  stageId: string;
+  stageLimitTokens: number;
+  suggestedExtensionTokens: number;
+  /** 误触防护：显式确认后才执行（缺失/False 服务端 428 拒绝）。 */
+  confirmed: boolean;
+  expectedRunVersion?: number;
 };
 
 export type AnomalyInboxProjection = {

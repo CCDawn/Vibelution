@@ -10,6 +10,7 @@ import { fetchJson, isFetchJsonHttpError } from "./client";
 import type {
   ActionCommand,
   ActionInputByCommand,
+  AnomalyInboxExtendBudgetRequest,
   AnomalyInboxItem,
   AnomalyInboxResponse,
   CandidateEvidenceTrailResponse,
@@ -552,6 +553,22 @@ export function fetchHypothesisFirstAnomalyInbox(
   ).then((payload) => parseAnomalyInboxResponse(payload));
 }
 
+/**
+ * One-click extend CTA execution (human-authorized): the server refuses the
+ * request without `confirmed: true` (428), derives the idempotency key and
+ * the new stage total itself, then submits the existing extend_budget command.
+ */
+export function executeHypothesisFirstInboxExtendBudget(
+  teamId: string,
+  request: AnomalyInboxExtendBudgetRequest,
+): Promise<Record<string, unknown>> {
+  return writeJson(
+    `${teamPrefix(teamId)}/hypothesis-first/chain/anomaly-inbox/actions/extend-budget`,
+    "POST",
+    request,
+  );
+}
+
 const ANOMALY_SEVERITIES = new Set(["critical", "high", "medium"]);
 
 const ANOMALY_KINDS = new Set([
@@ -594,6 +611,7 @@ function parseAnomalyInboxResponse(payload: unknown): AnomalyInboxResponse {
       && (item.recommendedAction === null || typeof item.recommendedAction === "string")
       && Array.isArray(item.evidence)
       && item.evidence.every((ref) => typeof ref === "string")
+      && (item.action === undefined || item.action === null || isRecord(item.action))
       && ["teamId", "questionId", "runId", "nodeId", "meetingRoundId"]
         .every((field) => typeof scope[field] === "string");
     if (!validScope) {

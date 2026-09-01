@@ -47,7 +47,7 @@ import { ResearchAnomalyInboxPanel } from "@/routes/teams/research-workflow/Rese
 
 ### 非职责
 
-- 不做任何处置动作（重试/对账/裁决仍走既有节点操作面与 claim ledger）；本面板只读 + 跳转。
+- 除「一键补预算」CTA（见下节）外不做其他处置动作（重试/对账/裁决仍走既有节点操作面与 claim ledger）。
 - 不聚合团队级跨题队列（服务端本阶段按题目投影）。
 
 ### 视觉与状态
@@ -66,3 +66,60 @@ import { ResearchAnomalyInboxPanel } from "@/routes/teams/research-workflow/Rese
 
 - 只复用既有 VUI 元素（`VEmbeddedPanel` / `VStatusChip` / `VContextualHint` / `VStateSurface` / `VNativeButton` / `VButton`），不新建第二套徽章、列表或指标组件。
 - 与 `ChallengeRealBatchControlPanel`「运行观察」区块：那里是 gate 级聚合比率；本组件是题目级异常队列，两者互不替代。
+
+## ResearchAnomalyInboxExtendCta
+
+### 功能
+
+异常收件箱「一键补预算」CTA：对 `budget_precheck` 条目呈现服务端计算的可执行额度（`+N tokens`、阶段、新上限），两步确认后调用收件箱 extend-budget 执行端点完成 `extend_budget`（随后提示对节点 `retry_node`）。人工授权语义：CTA 只呈现额度，不自动补预算。
+
+### 适用范围
+
+- **适用**：`AnomalyInboxItem.action` 存在（服务端 `budget_precheck_blocked` 且可计算 extend 契约）的收件箱条目；只随 `ResearchAnomalyInboxPanel` 出现。
+- **不适用**（改用 `…`）：run 画布上的通用 extend_budget/retry 操作（`FormalRuntimeActionBody`）、批次 gate 控制（`ChallengeRealBatchControlPanel`）。
+
+### 使用方式
+
+```tsx
+// 面板内部按 item.action 自动渲染；无需直接调用。
+{item.action ? (
+  <AnomalyInboxExtendCta
+    teamId={teamId}
+    questionId={questionId}
+    action={item.action}
+    zh={zh}
+    onExtended={() => invalidateInboxQuery()}
+  />
+) : null}
+```
+
+| Prop / 槽位 | 说明 | 设计注意 |
+| --- | --- | --- |
+| `action` | 服务端结构化 CTA（command/params/then/hint/confirmHint） | 额度数字必须来自服务端，不在前端重算 |
+| `zh` | 文案语言 | 金额用 `toLocaleString("en-US")` 保持稳定 |
+| `onExtended` | 执行成功回调 | 失效收件箱查询以刷新条目 |
+
+**误触防护（硬约束）**：首次点击只「武装」确认（`anomaly-extend-arm` → 出现 danger 态 `确认补预算` + `取消`）；只有武装后的确认按钮才会以 `confirmed: true` 调用执行端点；服务端对缺确认/非法额度一律 428/422 拒绝。执行失败保留武装态并显示错误，便于修正后重试。带 CTA 的行不再嵌套整行点击按钮（避免 button 套 button），改为 plain 行 + 独立 CTA。
+
+### 非职责
+
+- 不自动补预算、不自动重试；`retry_node` 仅作为 `then` 提示，仍走既有命令授权面。
+- 不做 extend 之外的任何处置动作。
+
+### 视觉与状态
+
+- 金额行：`+N tokens` 加粗 + 阶段/新上限说明（`ctaAmount` / `ctaAmountValue`）。
+- 按钮：武装前 `VButton secondary`；武装后 `VButton danger`（确认）+ `VButton ghost`（取消）；执行中禁用。
+- 错误：`ctaError` 文本（danger 色）。
+
+### 实现落点
+
+- 源码：`web/src/routes/teams/research-workflow/ResearchAnomalyInboxPanel.tsx`（`AnomalyInboxExtendCta`）
+- 执行端点：`POST /teams/{teamId}/workflow-orchestration/hypothesis-first/chain/anomaly-inbox/actions/extend-budget`（`core/web/routes/team_workflows/hypothesis_first.py`）
+- 传输：`web/src/api/hypothesisFirst.ts`（`executeHypothesisFirstInboxExtendBudget`）
+- 服务端确认门：`anomaly_inbox_service.assert_extend_budget_confirmation`（误触防护与幂等键推导）
+
+### 反冗余
+
+- 只组合既有 `VButton`；不新建第二套确认控件（需要模态确认的场景走 `VConfirmDialog`，此处为轻量两步确认）。
+- 与 run 画布 `FormalRuntimeActionBody` 的 extend_budget 操作互不替代：那里是完整命令操作面，这里是收件箱内的人工授权快捷路径，两者共用同一条命令与幂等语义。

@@ -20,6 +20,7 @@ from core.research.workflow.contracts import (
     ANOMALY_KIND_BUDGET_EXHAUSTED,
     ANOMALY_KIND_CLAIM_DISPUTED,
     ANOMALY_KIND_HEARTBEAT_STALE,
+    ANOMALY_KIND_NEEDS_HUMAN_GATE,
     ANOMALY_KIND_RETRY_BUDGET_EXHAUSTED,
     ANOMALY_KIND_SEVERITY,
     ANOMALY_KINDS,
@@ -477,8 +478,10 @@ def test_retry_budget_exhaustion_produces_per_node_items() -> None:
         ANOMALY_KIND_RETRY_BUDGET_EXHAUSTED,
     ]
     assert [item.scope.nodeId for item in inbox.items] == ["node-a", "node-b"]
+    # The charged retry budget can never succeed again, so the recommendation
+    # is the ledger-authority rebuild family, not another doomed retry_node.
     assert all(
-        item.recommendedAction == HumanActionFamily.RETRY_NODE.value
+        item.recommendedAction == HumanActionFamily.RECONCILE_RUN.value
         for item in inbox.items
     )
 
@@ -540,3 +543,396 @@ def test_same_inputs_with_fixed_generated_at_are_deterministic() -> None:
     first = anomaly_inbox_service.build_anomaly_inbox(state, generated_at=_GENERATED_AT)
     second = anomaly_inbox_service.build_anomaly_inbox(state, generated_at=_GENERATED_AT)
     assert first.to_dict() == second.to_dict()
+
+
+# -- breakpoint escalations (convergence / digest TTL / gate waits) ----------
+
+
+def test_convergence_exhausted_becomes_one_human_gate_item() -> None:
+    state = {
+        **_TEAM_QUESTION,
+        "computedAt": _GENERATED_AT,
+        "convergence": {
+            "lifecycle": "completed",
+            "outcome": "exhausted",
+            "actionability": "waiting_user",
+            "updatedAt": "2026-08-28T00:30:00Z",
+            "roundIndex": 5,
+            "roundBudget": 5,
+            "latestHypothesisRoundId": "round-5",
+        },
+    }
+    inbox = anomaly_inbox_service.build_anomaly_inbox(
+        state, generated_at=_GENERATED_AT
+    )
+    assert [item.kind for item in inbox.items] == [ANOMALY_KIND_NEEDS_HUMAN_GATE]
+    item = inbox.items[0]
+    assert item.severity == "high"
+    assert item.summary.startswith("收敛评审轮预算已耗尽（第 5/5 轮）")
+    assert "convergence:exhausted" in item.evidence
+    assert "convergenceRound:5/5" in item.evidence
+    assert item.firstSeenAt == "2026-08-28T00:30:00Z"
+
+
+def test_convergence_not_exhausted_stays_silent() -> None:
+    state = {
+        **_TEAM_QUESTION,
+        "computedAt": _GENERATED_AT,
+        "convergence": {
+            "lifecycle": "waiting_human",
+            "outcome": "none",
+            "actionability": "waiting_user",
+        },
+    }
+    inbox = anomaly_inbox_service.build_anomaly_inbox(
+        state, generated_at=_GENERATED_AT
+    )
+    assert inbox.items == ()
+
+
+def _mute_state(round_id: str = "meeting-1") -> dict[str, Any]:
+    return {
+        "meetingStatus": "awaiting_approval",
+        "digestAt": "2026-08-28T00:00:00Z",
+        "digestAtSource": "digestDraft.generatedAt",
+        "ttlMs": 2_700_000,
+        "overdueMs": 1_800_000,
+        "meetingRoundId": round_id,
+    }
+
+
+def test_digest_ttl_overdue_becomes_meeting_scoped_gate_item() -> None:
+    inbox = anomaly_inbox_service.build_anomaly_inbox(
+        _state(),
+        digest_ttl_overdues=[_mute_state()],
+        generated_at=_GENERATED_AT,
+    )
+    assert [item.kind for item in inbox.items] == [ANOMALY_KIND_NEEDS_HUMAN_GATE]
+    item = inbox.items[0]
+    assert item.scope.meetingRoundId == "meeting-1"
+    assert "纪要审批等待超过 TTL" in item.summary
+    assert "meetingDigestTtlOverdue:meeting-1" in item.evidence
+    assert "digestAtSource:digestDraft.generatedAt" in item.evidence
+    assert "ttlMs:2700000" in item.evidence
+    assert "overdueMs:1800000" in item.evidence
+    assert item.firstSeenAt == "2026-08-28T00:00:00Z"
+    assert item.lastSeenAt == _GENERATED_AT
+
+
+def test_digest_ttl_overdue_without_round_id_is_skipped() -> None:
+    inbox = anomaly_inbox_service.build_anomaly_inbox(
+        _state(),
+        digest_ttl_overdues=[{**_mute_state(), "meetingRoundId": ""}],
+        generated_at=_GENERATED_AT,
+    )
+    assert inbox.items == ()
+
+
+def _gate_wait(
+    *,
+    gate_kind: str = "knowledge_handoff",
+    since: str = "2026-08-28T00:00:00Z",
+    threshold: int | None = None,
+    **extra: Any,
+) -> dict[str, Any]:
+    entry: dict[str, Any] = {
+        "gateKind": gate_kind,
+        "gateId": extra.pop("gateId", gate_kind),
+        "since": since,
+        "runId": "run-1",
+    }
+    if threshold is not None:
+        entry["thresholdMs"] = threshold
+    entry.update(extra)
+    return entry
+
+
+def test_gate_wait_over_threshold_becomes_gate_item_with_run_scope() -> None:
+    # 00:00 -> 01:00 = 3600s waited, past the explicit 30min threshold.
+    inbox = anomaly_inbox_service.build_anomaly_inbox(
+        _state(),
+        gate_waits=[_gate_wait(requestId="req-1")],
+        gate_wait_threshold_ms=30 * 60 * 1000,
+        generated_at=_GENERATED_AT,
+    )
+    assert [item.kind for item in inbox.items] == [ANOMALY_KIND_NEEDS_HUMAN_GATE]
+    item = inbox.items[0]
+    assert item.scope.runId == "run-1"
+    assert "人工门 knowledge_handoff 等待已超过阈值" in item.summary
+    assert "humanGateWait:knowledge_handoff:knowledge_handoff" in item.evidence
+    assert "waitedMs:3600000" in item.evidence
+    assert "thresholdMs:1800000" in item.evidence
+    assert "gateRequest:req-1" in item.evidence
+
+
+def test_gate_wait_honors_threshold_parameter_and_entry_threshold() -> None:
+    # 45min wait: silent at a 60min threshold, escalated at 30min.
+    silent = anomaly_inbox_service.build_anomaly_inbox(
+        _state(),
+        gate_waits=[_gate_wait(since="2026-08-28T00:15:00Z")],
+        gate_wait_threshold_ms=60 * 60 * 1000,
+        generated_at=_GENERATED_AT,
+    )
+    assert silent.items == ()
+    escalated = anomaly_inbox_service.build_anomaly_inbox(
+        _state(),
+        gate_waits=[_gate_wait(since="2026-08-28T00:15:00Z")],
+        gate_wait_threshold_ms=30 * 60 * 1000,
+        generated_at=_GENERATED_AT,
+    )
+    assert len(escalated.items) == 1
+    # Entry-level thresholdMs wins over the caller default.
+    entry = anomaly_inbox_service.build_anomaly_inbox(
+        _state(),
+        gate_waits=[
+            _gate_wait(since="2026-08-28T00:15:00Z", threshold=10 * 60 * 1000)
+        ],
+        gate_wait_threshold_ms=60 * 60 * 1000,
+        generated_at=_GENERATED_AT,
+    )
+    assert len(entry.items) == 1
+    assert "thresholdMs:600000" in entry.items[0].evidence
+
+
+def test_gate_wait_with_unusable_since_is_skipped() -> None:
+    inbox = anomaly_inbox_service.build_anomaly_inbox(
+        _state(),
+        gate_waits=[_gate_wait(since="not-a-timestamp")],
+        generated_at=_GENERATED_AT,
+    )
+    assert inbox.items == ()
+
+
+# -- budget precheck block + one-click extend CTA ----------------------------
+
+
+def _precheck_block(**overrides: Any) -> dict[str, Any]:
+    block = {
+        "code": "budget_precheck_insufficient",
+        "detail": "阶段 hypothesis 预算预检不足",
+        "stageId": "hypothesis",
+        "nodeId": "hf_hypothesis",
+        "runId": "run-7",
+        "stageLimitTokens": 300_000,
+        "stageConsumedTokens": 280_000,
+        "remainingTokens": 20_000,
+        "referenceTokens": 280_000,
+        "suggestedExtensionTokens": 260_000,
+        "occurredAt": "2026-08-28T00:45:00Z",
+    }
+    block.update(overrides)
+    return block
+
+
+def test_budget_precheck_block_becomes_critical_budget_item() -> None:
+    inbox = anomaly_inbox_service.build_anomaly_inbox(
+        _state(),
+        budget_precheck_blocks=[_precheck_block()],
+        generated_at=_GENERATED_AT,
+    )
+    assert [item.kind for item in inbox.items] == [ANOMALY_KIND_BUDGET_EXHAUSTED]
+    item = inbox.items[0]
+    assert item.severity == "critical"
+    assert item.scope.runId == "run-7"
+    assert item.scope.nodeId == "hf_hypothesis"
+    assert item.recommendedAction == HumanActionFamily.RETRY_NODE.value
+    assert "problem:budget_precheck_insufficient" in item.evidence
+    assert "stage:hypothesis" in item.evidence
+    assert "suggestedExtensionTokens:260000" in item.evidence
+    assert "remainingTokens:20000" in item.evidence
+
+
+def test_extend_budget_action_carries_confirmed_contract_shape() -> None:
+    action = anomaly_inbox_service.extend_budget_action(_precheck_block())
+    assert action is not None
+    assert action["command"] == "extend_budget"
+    assert action["then"] == {"command": "retry_node", "nodeId": "hf_hypothesis"}
+    assert action["requiresConfirmation"] is True
+    assert "260000" in action["confirmHint"]
+    # limits is directly usable as the extend_budget command payload and the
+    # new total is limit + suggested (extend only accepts increases).
+    assert action["params"]["limits"] == {"stageTokens": {"hypothesis": 560_000}}
+    assert action["params"]["newStageTokens"] == 560_000
+    assert action["params"]["suggestedExtensionTokens"] == 260_000
+    assert action["params"]["runId"] == "run-7"
+
+
+def test_extend_budget_action_requires_computable_contract() -> None:
+    assert (
+        anomaly_inbox_service.extend_budget_action(_precheck_block(stageLimitTokens=0))
+        is None
+    )
+    assert (
+        anomaly_inbox_service.extend_budget_action(
+            _precheck_block(suggestedExtensionTokens=0)
+        )
+        is None
+    )
+    assert (
+        anomaly_inbox_service.extend_budget_action(
+            _precheck_block(code="budget_exceeded")
+        )
+        is None
+    )
+
+
+def test_attach_inbox_actions_decorates_only_matching_items() -> None:
+    inbox = anomaly_inbox_service.build_anomaly_inbox(
+        _state(
+            [
+                _problem(
+                    "review_heartbeat_stale",
+                    source_kind="meeting_round",
+                    source_id="r-1",
+                )
+            ]
+        ),
+        budget_precheck_blocks=[_precheck_block()],
+        generated_at=_GENERATED_AT,
+    )
+    decorated = anomaly_inbox_service.attach_inbox_actions(
+        inbox.to_dict(), blocks=[_precheck_block()]
+    )
+    by_kind = {item["kind"]: item for item in decorated["items"]}
+    assert "action" not in by_kind["heartbeat_stale"]
+    action = by_kind["budget_exhausted"]["action"]
+    assert action["command"] == "extend_budget"
+    # Without matching blocks the inbox payload stays verbatim.
+    undecorated = anomaly_inbox_service.attach_inbox_actions(inbox.to_dict(), blocks=[])
+    assert all("action" not in item for item in undecorated["items"])
+    # Non-precheck blocks never decorate.
+    foreign = anomaly_inbox_service.attach_inbox_actions(
+        inbox.to_dict(), blocks=[_precheck_block(code="budget_exceeded")]
+    )
+    assert all("action" not in item for item in foreign["items"])
+
+
+def test_derive_gate_waits_reads_snapshot_gates() -> None:
+    state = {
+        **_TEAM_QUESTION,
+        "collection": {
+            "requests": [
+                {
+                    "requestId": "req-9",
+                    "handoff": {
+                        "lifecycle": "waiting_human",
+                        "updatedAt": "2026-08-28T00:00:00Z",
+                    },
+                    "childRun": {"runId": "run-3"},
+                },
+                {
+                    "requestId": "req-ok",
+                    "handoff": {"lifecycle": "completed"},
+                },
+            ]
+        },
+        "programDelivery": {
+            "humanReviewStatus": "waiting_human",
+            "updatedAt": "2026-08-28T00:30:00Z",
+            "outputRunId": "run-9",
+            "humanGates": {
+                "decisions": {
+                    "H1_problem_understanding": "pending",
+                    "H2_hypothesis_selection": "approved",
+                    "H3_research_plan": "pending",
+                    "H4_external_output": "pending",
+                }
+            },
+        },
+    }
+    waits = anomaly_inbox_service.derive_gate_waits(state)
+    kinds = sorted(wait["gateKind"] for wait in waits)
+    assert kinds == [
+        "H1_problem_understanding",
+        "H3_research_plan",
+        "H4_external_output",
+        "knowledge_handoff",
+    ]
+    handoff = next(wait for wait in waits if wait["gateKind"] == "knowledge_handoff")
+    assert handoff == {
+        "gateKind": "knowledge_handoff",
+        "gateId": "req-9",
+        "since": "2026-08-28T00:00:00Z",
+        "runId": "run-3",
+        "requestId": "req-9",
+    }
+    gate = next(
+        wait for wait in waits if wait["gateKind"] == "H1_problem_understanding"
+    )
+    assert gate["since"] == "2026-08-28T00:30:00Z"
+    assert gate["runId"] == "run-9"
+    assert anomaly_inbox_service.derive_gate_waits(_state()) == []
+
+
+# -- 误触防护: explicit confirmation is mandatory for CTA execution ----------
+
+
+def test_confirmation_guard_refuses_missing_confirmation() -> None:
+    with pytest.raises(anomaly_inbox_service.InboxActionConfirmationError) as excinfo:
+        anomaly_inbox_service.assert_extend_budget_confirmation(
+            confirmed=False,
+            run_id="run-7",
+            stage_id="hypothesis",
+            stage_limit_tokens=300_000,
+            suggested_extension_tokens=260_000,
+        )
+    assert excinfo.value.code == "inbox_action_confirmation_required"
+
+
+def test_confirmation_guard_refuses_invalid_amounts_and_targets() -> None:
+    cases = [
+        (
+            {
+                "run_id": "",
+                "stage_id": "hypothesis",
+                "stage_limit_tokens": 300_000,
+                "suggested_extension_tokens": 260_000,
+            },
+            "inbox_action_run_required",
+        ),
+        (
+            {
+                "run_id": "run-7",
+                "stage_id": "",
+                "stage_limit_tokens": 300_000,
+                "suggested_extension_tokens": 260_000,
+            },
+            "inbox_action_stage_required",
+        ),
+        (
+            {
+                "run_id": "run-7",
+                "stage_id": "hypothesis",
+                "stage_limit_tokens": 0,
+                "suggested_extension_tokens": 260_000,
+            },
+            "inbox_action_stage_limit_invalid",
+        ),
+        (
+            {
+                "run_id": "run-7",
+                "stage_id": "hypothesis",
+                "stage_limit_tokens": 300_000,
+                "suggested_extension_tokens": 0,
+            },
+            "inbox_action_extension_invalid",
+        ),
+    ]
+    for kwargs, code in cases:
+        with pytest.raises(
+            anomaly_inbox_service.InboxActionConfirmationError
+        ) as excinfo:
+            anomaly_inbox_service.assert_extend_budget_confirmation(
+                confirmed=True, **kwargs
+            )
+        assert excinfo.value.code == code
+
+
+def test_confirmation_guard_accepts_explicit_confirmation() -> None:
+    anomaly_inbox_service.assert_extend_budget_confirmation(
+        confirmed=True,
+        run_id="run-7",
+        stage_id="hypothesis",
+        stage_limit_tokens=300_000,
+        suggested_extension_tokens=260_000,
+    )
