@@ -1678,6 +1678,7 @@ Task 17—21 已在 `codex/companion-full-life-reuse` 完成实现，仍保持�
 - Dependency: Task 22 的稳定表达投影；可与 Task 24 在不重叠文件时并行。
 - Mode: frontend contract + browser acceptance。
 - Verification/Stop: 人物头像和名字保留；“正在输入…”仍带人物头像并只出现一个；表情/呼吸由同一 mood/expression 投影驱动；支持 `prefers-reduced-motion`；缺资产或异常时回退静态立绘；不出现推理文字、工具过程、第二 Composer 或原生文件输入。
+- Implementation status (2026-09-01): 已让大厅、聊天左侧人物栏和会话头共用的 `CompanionPortrait` 消费 Task 34 `EmbodimentState`，以 Companion-only data attributes 和低成本 CSS 表现表情、呼吸、眨眼及场景；授权表达/背景资产加载失败时回退 Agent 原头像与姓名首字母，系统减少动态偏好会关闭动画。原生 ConversationView、消息 DTO、Chat route、Composer、SSE 和“正在输入…”头像/单一状态均未修改。
 
 #### Task 27：真人化对话全链路收口
 

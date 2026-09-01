@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
 import lobbySource from "../CompanionsRoute.tsx?raw";
@@ -9,6 +11,11 @@ import lifeRailSource from "./CompanionLifeRail.tsx?raw";
 import personRailSource from "./CompanionPersonRail.tsx?raw";
 import portraitSource from "./CompanionPortrait.tsx?raw";
 import portraitStyles from "./companions.styles.ts";
+
+const portraitMotionSource = readFileSync(
+  new URL("../../design/route-css/companions.tailwind.css", import.meta.url),
+  "utf8",
+);
 
 describe("virtual-human native Chat reuse", () => {
   it("uses the sole Chat route writer to select a native direct Session with companion identity", () => {
@@ -82,5 +89,23 @@ describe("virtual-human native Chat reuse", () => {
     expect(personRailSource).not.toContain("companionAbout(");
     expect(personRailSource).not.toContain("companionIdentity(");
     expect(personRailSource).not.toContain("打开她的完整档案");
+  });
+
+  it("projects Companion-only expression, scene, breath, and blink without replacing native typing", () => {
+    expect(portraitSource).toContain("companion.snapshot.causal?.embodiment");
+    expect(portraitSource).toContain("data-expression-id");
+    expect(portraitSource).toContain("data-motion-preset");
+    expect(portraitSource).toContain("data-scene-key");
+    expect(portraitSource).toContain("data-companion-blink");
+    expect(portraitSource).toContain("blinkProfile?.minIntervalMs");
+    expect(portraitSource).toContain("--companion-blink-duration");
+    expect(portraitSource).toContain("embodiment?.assetRefs?.expression");
+    expect(portraitSource).toContain("setFailedAssetRef");
+    expect(portraitStyles.portrait).toContain("data-[scene-key=campus-day]");
+    expect(portraitMotionSource).toContain("@keyframes companion-portrait-breathe");
+    expect(portraitMotionSource).toContain("@keyframes companion-portrait-blink");
+    expect(portraitMotionSource).toContain("@media (prefers-reduced-motion: reduce)");
+    expect(chatSource).toContain("companionMode: verifiedCompanionMode");
+    expect(chatSource).not.toContain("EmbodimentState");
   });
 });
