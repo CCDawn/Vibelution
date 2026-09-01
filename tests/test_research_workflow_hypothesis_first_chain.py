@@ -6175,3 +6175,141 @@ def test_retry_review_dispatch_rebinds_review_link_to_fresh_meeting(
     assert links[-1]["meetingRoundId"] == f"{base_meeting_id}-a2"
     assert int(links[-1]["roundIndex"] or 0) == 1
     assert links[0]["meetingRoundId"] == base_meeting_id
+
+
+def test_stage_one_run_consumes_origin_drafts_and_skips_second_r0(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """SCI-091 field shape: origin-layer R0 drafts feed a run-scoped R1.
+
+    The origin R0 round closed with drafts before any run existed.  When the
+    stage-one run appears, its grounded R1 must consume the same-question
+    origin drafts (lineage keeps the origin meeting id), and a further run
+    creation must not open a second exploratory round on top of them.
+    """
+    team_id, agents = _hf_env(tmp_path, monkeypatch)
+    from core.research.workflow.contracts.discussion_scope import (
+        WorkflowDiscussionScopeV1,
+    )
+    from core.web.services.team_workflow.research_projects import (
+        ensure_challenge_question_project,
+    )
+
+    project_id = str(
+        ensure_challenge_question_project(
+            team_id,
+            question_id=_QUESTION_ID,
+            title="SCI-096 深度实验",
+            topic="sleep",
+        )["project"]["projectId"]
+    )
+    monkeypatch.setattr(
+        question_launch,
+        "challenge_question_run_summary",
+        lambda _team_id: {"completedQuestionIds": [], "completedQuestionResults": []},
+    )
+    run_id = "run-stage-one-origin-drafts"
+
+    with server_operator_scope("u-1", roles=("operator",)):
+        # Origin-layer R0 (no run binding) closes with two drafts.
+        opened_r0 = chain.open_candidate_generation_meeting(
+            team_id,
+            _QUESTION_ID,
+            agent_runner=_candidate_generation_runner,
+            _candidate_authority="exploratory_draft",
+        )
+        r0_id = opened_r0["meetingRound"]["meetingRoundId"]
+        agent_ids = [agents[role] for role in _ROLES]
+        _drive_to_awaiting_approval(team_id, r0_id, agent_ids[0])
+        closed_r0 = chain.close_review_meeting(
+            team_id, r0_id, _closure_payload(agent_ids, [])
+        )
+        assert closed_r0["draftCount"] == 2
+        drafts = chain.list_exploratory_drafts(
+            team_id, question_id=_QUESTION_ID
+        )["drafts"]
+        draft_ids = {
+            str(item.get("draftId") or item.get("candidateId") or "")
+            for item in drafts
+        }
+        # Run-scoped draft lookup finds nothing: the drafts are origin-layer.
+        assert (
+            chain.list_exploratory_drafts(
+                team_id, question_id=_QUESTION_ID, workflow_run_id=run_id
+            )["drafts"]
+            == []
+        )
+
+        # A further run creation would see the consumable draft floor and
+        # must not open a second exploratory round.  The run-scoped approved
+        # candidate read verifies the run in the canonical ledger; this test
+        # focuses on the draft floor, so stub the empty candidate set.
+        monkeypatch.setattr(
+            selections,
+            "_approved_candidate_ids",
+            lambda _team_id, _question_id, workflow_run_id="": [],
+        )
+        assert (
+            chain.needs_candidate_generation(
+                team_id, _QUESTION_ID, workflow_run_id=run_id
+            )
+            is False
+        )
+
+        opened_r1 = chain.open_candidate_generation_meeting(
+            team_id,
+            _QUESTION_ID,
+            agent_runner=_grounded_candidate_generation_runner,
+            _candidate_authority="formal_grounded_candidate",
+            _model_invocation_receipt_authority=_generation_receipt_authority(
+                team_id, run_id
+            ),
+            _discussion_scope=(
+                WorkflowDiscussionScopeV1.generation(
+                    teamId=team_id,
+                    researchProjectId=project_id,
+                    workflowRunId=run_id,
+                    workflowNodeId=chain.HYPOTHESIS_DESIGN_NODE_ID,
+                    questionId=_QUESTION_ID,
+                ).to_dict()
+            ),
+            _generation_context={
+                "status": "ready",
+                "allowedEvidenceRefs": [
+                    "evidence:accepted-1",
+                    "evidence:accepted-2",
+                    "evidence:boundary-1",
+                ],
+                "evidenceClaims": [
+                    {"sourceRef": "evidence:accepted-1", "claim": "腺苷支持证据"},
+                    {"sourceRef": "evidence:accepted-2", "claim": "突触支持证据"},
+                ],
+                "knowledgePackage": {
+                    "sourceArtifactIds": ["knowledge_package:pkg-1"]
+                },
+            },
+        )
+        r1_meeting = opened_r1["meetingRound"]
+        assert {
+            ref.split(":", 1)[-1]
+            for ref in r1_meeting["exploratoryDraftRefs"]
+        } == draft_ids
+        # Lineage keeps the producing round: every consumed draft still
+        # points at the origin-layer R0 meeting id.
+        assert all(
+            str(item.get("meetingRoundId") or "") == r0_id for item in drafts
+        )
+        # The knowledge package rides along so the REFS agenda rules accept
+        # the grounded candidate lineage built on top of the origin drafts.
+        assert r1_meeting["knowledgePackageRefs"] == ["knowledge_package:pkg-1"]
+        assert r1_meeting["allowedEvidenceRefs"] == [
+            "evidence:accepted-1",
+            "evidence:accepted-2",
+            "evidence:boundary-1",
+        ]
+        assert r1_meeting["revisionOrdinal"] == 1
+        # The closure-time lineage registration (R1 candidates deriving from
+        # the consumed drafts) is covered by
+        # test_stage_one_r0_isolated_then_r1_requires_whitelisted_evidence;
+        # this test pins the run-scoped consumption of origin drafts itself,
+        # including the origin meeting id surviving on every consumed draft.

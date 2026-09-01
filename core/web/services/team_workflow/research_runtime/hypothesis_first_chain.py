@@ -346,6 +346,46 @@ class FormalCommandRejectedError(HypothesisFirstChainError):
         self.blockers = [dict(item) for item in blockers or []]
 
 
+class StageOneContextBlockedError(FormalCommandRejectedError):
+    """A stage-one R1 launch was rejected because its grounded context is blocked.
+
+    Opening the meeting with a FORMAL authority and an empty evidence
+    whitelist would strand every speaker turn on the REFS rules, so the
+    launch fails before any meeting opens.  The blocker names the exact
+    blocked context code (for example ``knowledge_package_has_no_evidence_claims``)
+    so the UI can explain what is still missing.
+    """
+
+    def __init__(self, context: Mapping[str, Any]) -> None:
+        blocked_code = str(context.get("code") or "stage_one_context_blocked")
+        message = _STAGE_ONE_BLOCKED_MESSAGES.get(
+            blocked_code, "第一阶段接地生成上下文未就绪"
+        )
+        super().__init__(
+            message,
+            code="stage_one_context_blocked",
+            status_code=409,
+            blockers=[
+                {
+                    "code": blocked_code,
+                    "message": message,
+                }
+            ],
+        )
+        self.blockedContextCode = blocked_code
+
+
+_STAGE_ONE_BLOCKED_MESSAGES = {
+    "workflow_run_not_found": "第一阶段运行不存在或已不可读，无法开启接地生成",
+    "workflow_snapshot_invalid": "第一阶段运行的冻结输入不可读，无法开启接地生成",
+    "stage_one_policy_invalid": "第一阶段完成策略不是当前跟踪版本，无法开启接地生成",
+    "workflow_scope_mismatch": "运行不属于当前团队或赛题，无法开启接地生成",
+    "knowledge_package_has_no_evidence_claims": (
+        "知识包没有可引用的证据主张；请先补齐并批准证据后再开启接地生成"
+    ),
+}
+
+
 class ClaimBeliefGateBlockedError(FormalCommandRejectedError):
     """A formal selection authority was blocked by the claim belief hard gate.
 
@@ -2350,6 +2390,52 @@ def _formal_run_entry_node_id(run: Mapping[str, Any]) -> str:
     )
 
 
+def _create_stage_one_question_run(
+    team_id: str,
+    *,
+    question_id: str,
+    idempotency_key: str,
+) -> dict[str, Any]:
+    """Create the stage-one run behind the v2 ``create_stage_one_run`` offer.
+
+    This is the origin-level entry redirect: instead of opening an orphan R0
+    with no run context, the projection routes the question through the run
+    creation service so the frozen input carries the current stage-one
+    policy and the durable CatalogRunAuthorization gate stays in force.  Run
+    creation auto-opens the R0 exploratory round; replays reuse the
+    deterministic run id derived from the v2 idempotency key.
+    """
+
+    from core.web.services.team_workflow import challenge_cup_real_batch
+    from .run_creation import create_question_run
+
+    authorization = challenge_cup_real_batch._current_catalog_run_authorization(
+        team_id,
+        "real-1",
+    )
+    result = create_question_run(
+        CHALLENGE_CUP_WORKFLOW_ID,
+        team_id=team_id,
+        question_id=question_id,
+        safety_limits=challenge_cup_real_batch._default_safety_limits(),
+        idempotency_key=idempotency_key,
+        catalog_run_authorization=authorization,
+    )
+    if (
+        isinstance(result, Mapping)
+        and str(result.get("runId") or "").strip()
+    ):
+        # A created run has no automatic start channel (graph-worker
+        # reconciliation spares only hypothesis-first-era runs), so submit
+        # the entry start_node immediately, exactly like create_formal_run.
+        _auto_start_created_formal_run(
+            team_id,
+            run=result,
+            idempotency_key=idempotency_key,
+        )
+    return result
+
+
 def _auto_start_created_formal_run(
     team_id: str,
     *,
@@ -2832,60 +2918,24 @@ def _execute_v2_command_impl(
         from core.web.services.team_workflow import meeting_rounds, meeting_runtime
 
         if command in {"open_generation", "retry_generation"}:
-            receipt_authority = None
-            discussion_scope = None
-            candidate_authority = ""
-            generation_context = None
-            if normalized_workflow_run_id:
-                from core.research.workflow.contracts.discussion_scope import (
-                    WorkflowDiscussionScopeV1,
-                )
-                from core.web.services.team_workflow.research_runtime.meeting_receipt_authority import (
-                    resolve_active_question_authority,
-                )
-
-                receipt_authority = resolve_active_question_authority(
-                    normalized_team_id,
-                    normalized_question_id,
-                    normalized_workflow_run_id,
-                )
-                if receipt_authority is None:
-                    raise HypothesisFirstChainError(
-                        "workflow run authority is unavailable for generation"
-                    )
-                project = _question_research_project(
-                    normalized_team_id, normalized_question_id
-                )
-                research_project_id = str((project or {}).get("projectId") or "").strip()
-                if not research_project_id:
-                    raise HypothesisFirstChainError(
-                        "research project authority is unavailable for generation"
-                    )
-                discussion_scope = WorkflowDiscussionScopeV1.generation(
-                    teamId=normalized_team_id,
-                    researchProjectId=research_project_id,
-                    workflowRunId=normalized_workflow_run_id,
-                    workflowNodeId=HYPOTHESIS_DESIGN_NODE_ID,
-                    questionId=normalized_question_id,
-                ).to_dict()
-                from core.web.services.team_workflow.research_project_hypothesis_context import (
-                    build_stage_one_grounded_generation_context,
-                )
-
-                generation_context = build_stage_one_grounded_generation_context(
-                    normalized_team_id,
-                    normalized_workflow_run_id,
-                    question_id=normalized_question_id,
-                )
-                if generation_context is not None:
-                    candidate_authority = FORMAL_GROUNDED_CANDIDATE_AUTHORITY
+            # The R1 offer carries its run in the payload so the origin-level
+            # projection can route a click without a separate runId query;
+            # an explicit query runId still wins.
+            launch_run_id = normalized_workflow_run_id or str(
+                payload.get("runId") or ""
+            ).strip()
+            launch = resolve_stage_one_generation_launch(
+                normalized_team_id,
+                normalized_question_id,
+                launch_run_id,
+            )
             result = open_candidate_generation_meeting(
                 normalized_team_id,
                 normalized_question_id,
-                _model_invocation_receipt_authority=receipt_authority,
-                _discussion_scope=discussion_scope,
-                _candidate_authority=candidate_authority,
-                _generation_context=generation_context,
+                _model_invocation_receipt_authority=launch.get("receipt_authority"),
+                _discussion_scope=launch.get("discussion_scope"),
+                _candidate_authority=str(launch.get("candidate_authority") or ""),
+                _generation_context=launch.get("generation_context"),
             )
         elif command == "record_selection":
             from core.web.services.team_workflow import hypothesis_selection
@@ -3118,6 +3168,12 @@ def _execute_v2_command_impl(
                     run=result,
                     idempotency_key=idempotency_key,
                 )
+        elif command == "create_stage_one_run":
+            result = _create_stage_one_question_run(
+                normalized_team_id,
+                question_id=normalized_question_id,
+                idempotency_key=idempotency_key,
+            )
         elif command == "retry_formal_node":
             result = _submit_formal_v2_command(
                 normalized_team_id,
@@ -4701,6 +4757,39 @@ def list_exploratory_drafts(
     }
 
 
+def _available_exploratory_drafts(
+    team_id: str,
+    question_id: str,
+    *,
+    workflow_run_id: str = "",
+) -> list[dict[str, Any]]:
+    """Resolve consumable R0 drafts for one question (run first, origin fallback).
+
+    A stage-one run consumes its own in-run exploratory drafts; when the run
+    has none (for example the SCI-091 field state where the origin layer
+    closed an R0 round before any run existed), the same-question origin
+    drafts become the R1 input instead of raising.  Each draft keeps its
+    original ``meetingRoundId`` so lineage still points at the producing
+    round, and the two sources are never mixed: origin drafts are only
+    consulted when the run-scoped list is empty.
+    """
+
+    normalized_workflow_run_id = str(workflow_run_id or "").strip()
+    drafts: list[dict[str, Any]] = []
+    if normalized_workflow_run_id:
+        drafts = list_exploratory_drafts(
+            team_id,
+            question_id=question_id,
+            workflow_run_id=normalized_workflow_run_id,
+        )["drafts"]
+    if not drafts:
+        drafts = list_exploratory_drafts(
+            team_id,
+            question_id=question_id,
+        )["drafts"]
+    return drafts
+
+
 def _meeting_candidate_authority(meeting_round: Mapping[str, Any]) -> str:
     return str(meeting_round.get("candidateAuthority") or "").strip().lower()
 
@@ -4902,11 +4991,11 @@ def _materialize_grounded_revision_authority(
         )
     draft_refs = _normalized_str_list(meeting_round.get("exploratoryDraftRefs"))
     draft_ids = [item.split(":", 1)[-1].strip() for item in draft_refs]
-    available_drafts = list_exploratory_drafts(
+    available_drafts = _available_exploratory_drafts(
         team_id,
         question_id=question_id,
         workflow_run_id=workflow_run_id,
-    )["drafts"]
+    )
     drafts_by_id = {
         str(item.get("draftId") or item.get("candidateId") or "").strip(): item
         for item in available_drafts
@@ -4971,6 +5060,79 @@ def _materialize_grounded_revision_authority(
         node_id="hypothesis_design",
         revision_phase="grounded_revision",
     )
+
+
+def resolve_stage_one_generation_launch(
+    team_id: str,
+    question_id: str,
+    workflow_run_id: str,
+) -> dict[str, Any]:
+    """Resolve the grounded R1 launch bundle for one run-scoped generation.
+
+    The v2 command path and the REST candidate-generation entry must open the
+    same authority: receipt authority verified from the canonical ledger, the
+    generation discussion scope, and — when the run is pinned to the current
+    stage-one policy — the formal grounded candidate authority together with
+    its grounded context.  A blocked context (for example a knowledge package
+    without evidence claims) raises :class:`StageOneContextBlockedError`
+    before any meeting opens; an empty return means the caller has no run
+    context and proceeds with the plain exploratory path.
+    """
+
+    from core.research.workflow.contracts.discussion_scope import (
+        WorkflowDiscussionScopeV1,
+    )
+    from core.web.services.team_workflow.research_runtime.meeting_receipt_authority import (
+        resolve_active_question_authority,
+    )
+
+    normalized_team_id = str(team_id or "").strip()
+    normalized_question_id = str(question_id or "").strip().upper()
+    normalized_workflow_run_id = str(workflow_run_id or "").strip()
+    if not normalized_workflow_run_id:
+        return {}
+    receipt_authority = resolve_active_question_authority(
+        normalized_team_id,
+        normalized_question_id,
+        normalized_workflow_run_id,
+    )
+    if receipt_authority is None:
+        raise HypothesisFirstChainError(
+            "workflow run authority is unavailable for generation"
+        )
+    project = _question_research_project(normalized_team_id, normalized_question_id)
+    research_project_id = str((project or {}).get("projectId") or "").strip()
+    if not research_project_id:
+        raise HypothesisFirstChainError(
+            "research project authority is unavailable for generation"
+        )
+    discussion_scope = WorkflowDiscussionScopeV1.generation(
+        teamId=normalized_team_id,
+        researchProjectId=research_project_id,
+        workflowRunId=normalized_workflow_run_id,
+        workflowNodeId=HYPOTHESIS_DESIGN_NODE_ID,
+        questionId=normalized_question_id,
+    ).to_dict()
+    from core.web.services.team_workflow.research_project_hypothesis_context import (
+        build_stage_one_grounded_generation_context,
+    )
+
+    generation_context = build_stage_one_grounded_generation_context(
+        normalized_team_id,
+        normalized_workflow_run_id,
+        question_id=normalized_question_id,
+    )
+    candidate_authority = ""
+    if generation_context is not None:
+        if str(generation_context.get("status") or "") == "blocked":
+            raise StageOneContextBlockedError(generation_context)
+        candidate_authority = FORMAL_GROUNDED_CANDIDATE_AUTHORITY
+    return {
+        "receipt_authority": receipt_authority,
+        "discussion_scope": discussion_scope,
+        "candidate_authority": candidate_authority,
+        "generation_context": generation_context,
+    }
 
 
 def open_candidate_generation_meeting(
@@ -5309,11 +5471,11 @@ def open_candidate_generation_meeting(
         "candidateAuthority": candidate_authority,
     }
     if candidate_authority == FORMAL_GROUNDED_CANDIDATE_AUTHORITY:
-        drafts = list_exploratory_drafts(
+        drafts = _available_exploratory_drafts(
             normalized_team_id,
-            question_id=normalized_question_id,
+            normalized_question_id,
             workflow_run_id=workflow_run_id,
-        )["drafts"]
+        )
         draft_refs = [
             f"exploratory_draft:{str(item.get('draftId') or item.get('candidateId') or '').strip()}"
             for item in drafts
@@ -5418,6 +5580,21 @@ def needs_candidate_generation(
             str(meeting.get("status") or "").strip().lower()
             in _ACTIVE_MEETING_STATUSES
             for meeting in meetings
+        ):
+            return False
+        # Same-question R0 drafts (in-run first, origin fallback) already
+        # satisfy the R1 input floor, so a fresh stage-one run must not open
+        # a second exploratory round on top of them — the next step is the
+        # grounded R1 generation that consumes those drafts.
+        if (
+            len(
+                _available_exploratory_drafts(
+                    team_id,
+                    question_id,
+                    workflow_run_id=normalized_workflow_run_id,
+                )
+            )
+            >= 2
         ):
             return False
         return True

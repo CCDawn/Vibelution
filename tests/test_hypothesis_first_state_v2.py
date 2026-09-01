@@ -5840,3 +5840,531 @@ def test_awaiting_handoff_collection_exposes_confirm_and_retry_actions() -> None
         )
     )
     assert orphan.collection.requests[0].handoffStatus == "needs_context"
+
+
+# ---------------------------------------------------------------------------
+# Stage-one R0 -> R1 bridge: entry redirect, grounded R1 offer, dead-state
+# sentinel.  SCI-091 is deliberately used because the frozen stage-one policy
+# covers it; SCI-001 keeps the plain exploratory entry.
+# ---------------------------------------------------------------------------
+
+
+def _stage_one_draft_records(
+    meeting_round_id: str, *, count: int = 2
+) -> list[dict[str, object]]:
+    return [
+        {
+            "recordKind": "hypothesis_exploratory_draft",
+            "draftId": f"draft-{index}",
+            "candidateId": f"draft-{index}",
+            "questionId": "SCI-091",
+            "statement": f"draft statement {index}",
+            "meetingRoundId": meeting_round_id,
+            "candidateAuthority": "exploratory_draft",
+            "createdAt": f"2026-08-25T00:0{index}:00Z",
+        }
+        for index in range(count)
+    ]
+
+
+def _stage_one_projection(**overrides: object) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "team_id": "team-1",
+        "question_id": "SCI-091",
+        "reset_boundary": None,
+        "chain_records": [],
+        "selection_records": [],
+        "meeting_records": [],
+        "digest_records": [],
+        "decision_records": [],
+        "hypothesis_round_records": [],
+    }
+    payload.update(overrides)
+    return project_state_from_records(**payload)
+
+
+def test_stage_one_origin_entry_redirects_to_run_creation() -> None:
+    state = _stage_one_projection()
+
+    commands = [
+        action
+        for action in state["allowedActions"]
+        if action.get("kind") == "command"
+    ]
+    assert [action["command"] for action in commands] == ["create_stage_one_run"]
+    offer = commands[0]
+    assert offer["actionId"] == "create-stage-one-run"
+    assert offer["label"] == "创建第一阶段运行"
+    assert offer["payload"] == {"questionId": "SCI-091"}
+    assert offer["idempotencyKey"].startswith("hf2:")
+    assert offer["expectedStateVersion"] == state["stateVersion"]
+
+
+def test_off_policy_question_keeps_plain_open_generation_entry() -> None:
+    state = project_state_from_records(
+        team_id="team-1",
+        question_id="SCI-001",
+        reset_boundary=None,
+        chain_records=[],
+        selection_records=[],
+        meeting_records=[],
+        digest_records=[],
+        decision_records=[],
+        hypothesis_round_records=[],
+    )
+
+    commands = [
+        action
+        for action in state["allowedActions"]
+        if action.get("kind") == "command"
+    ]
+    assert [action["command"] for action in commands] == ["open_generation"]
+    assert commands[0]["actionId"] == "open-generation"
+
+
+def test_stage_one_run_r0_completion_offers_grounded_stage_one_generation() -> None:
+    state = _stage_one_projection(
+        chain_records=_stage_one_draft_records("hf-candgen-run-r0"),
+        formal_runs=[
+            {
+                "runId": "run-stage-one",
+                "status": "queued",
+                "questionId": "SCI-091",
+                "createdAt": "2026-08-25T00:00:00Z",
+            }
+        ],
+    )
+
+    commands = [
+        action
+        for action in state["allowedActions"]
+        if action.get("kind") == "command"
+    ]
+    assert [action["actionId"] for action in commands] == [
+        "open-stage-one-generation"
+    ]
+    offer = commands[0]
+    assert offer["command"] == "open_generation"
+    assert offer["payload"] == {
+        "questionId": "SCI-091",
+        "runId": "run-stage-one",
+    }
+    assert offer["idempotencyKey"].startswith("hf2:open-stage-one-generation:")
+    assert offer["expectedStateVersion"] == state["stateVersion"]
+
+
+def test_stage_one_origin_drafts_with_run_offer_grounded_generation() -> None:
+    # SCI-091 field shape: the origin layer closed an R0 round (drafts carry
+    # the origin meeting id); after a stage-one run exists the projection
+    # routes straight to the grounded R1 round that consumes those drafts.
+    state = _stage_one_projection(
+        chain_records=_stage_one_draft_records("hf-candgen-origin-r0"),
+        formal_runs=[
+            {
+                "runId": "run-stage-one",
+                "status": "created",
+                "questionId": "SCI-091",
+                "createdAt": "2026-08-25T00:00:00Z",
+            }
+        ],
+    )
+
+    offer_ids = [
+        action["actionId"]
+        for action in state["allowedActions"]
+        if action.get("kind") == "command"
+    ]
+    assert offer_ids == ["open-stage-one-generation"]
+
+
+def test_stage_one_live_r1_meeting_suppresses_duplicate_offer() -> None:
+    state = _stage_one_projection(
+        chain_records=_stage_one_draft_records("hf-candgen-run-r0"),
+        meeting_records=[
+            {
+                "meetingRoundId": "hf-candgen-run-r1",
+                "meetingType": "hypothesis_candidate_generation",
+                "question": "SCI-091",
+                "status": "open",
+                "candidateAuthority": "formal_grounded_candidate",
+                "createdAt": "2026-08-25T00:10:00Z",
+                "updatedAt": "2026-08-25T00:10:00Z",
+            }
+        ],
+        formal_runs=[
+            {
+                "runId": "run-stage-one",
+                "status": "queued",
+                "questionId": "SCI-091",
+                "createdAt": "2026-08-25T00:00:00Z",
+            }
+        ],
+    )
+
+    offer_ids = [
+        action["actionId"]
+        for action in state["allowedActions"]
+        if action.get("kind") == "command"
+    ]
+    assert "open-stage-one-generation" not in offer_ids
+
+
+def test_dead_state_sentinel_flags_generation_without_transition() -> None:
+    # SCI-091 field incident: an open generation meeting whose bound room
+    # round stopped projects a failed/blocked generation, the retry offer is
+    # suppressed by the orphaned-round problem, and with no drafts, no run
+    # and no candidates the allowedActions list used to go empty.
+    state = _stage_one_projection(
+        meeting_records=[
+            {
+                "meetingRoundId": "hf-candgen-stopped",
+                "meetingType": "hypothesis_candidate_generation",
+                "question": "SCI-091",
+                "status": "open",
+                "chatRoomRoundIds": ["round-stopped"],
+                "createdAt": "2026-08-25T00:00:00Z",
+                "updatedAt": "2026-08-25T00:05:00Z",
+            }
+        ],
+        chat_room_round_snapshots={
+            "round-stopped": {
+                "runId": "round-stopped",
+                "status": "stopped",
+            }
+        },
+    )
+
+    commands = [
+        action
+        for action in state["allowedActions"]
+        if action.get("kind") == "command"
+    ]
+    assert commands == []
+    # Only the dead-room navigation remains; it is not a transition.
+    assert state["allowedActions"]
+    assert all(action["kind"] == "navigation" for action in state["allowedActions"])
+    codes = {problem["code"] for problem in state["generation"]["problems"]}
+    assert "generation_no_transition" in codes
+    overall_codes = {problem["code"] for problem in state["overall"]["problems"]}
+    assert "generation_no_transition" in overall_codes
+    sentinel = next(
+        problem
+        for problem in state["generation"]["problems"]
+        if problem["code"] == "generation_no_transition"
+    )
+    assert sentinel["recoverable"] is True
+    assert "创建第一阶段运行" in sentinel["message"]
+
+
+def test_dead_state_sentinel_stays_quiet_on_healthy_states() -> None:
+    # Retryable empty generation still owns its retry offer.
+    retryable = _stage_one_projection(
+        meeting_records=[
+            {
+                "meetingRoundId": "hf-candgen-closed",
+                "meetingType": "hypothesis_candidate_generation",
+                "question": "SCI-091",
+                "status": "closed",
+                "createdAt": "2026-08-25T00:00:00Z",
+                "updatedAt": "2026-08-25T00:05:00Z",
+            }
+        ],
+    )
+    retry_codes = {
+        problem["code"] for problem in retryable["generation"]["problems"]
+    }
+    assert "generation_no_transition" not in retry_codes
+    assert any(
+        action["actionId"] == "retry-generation"
+        for action in retryable["allowedActions"]
+    )
+
+    # Registered candidates make the generation terminal-healthy.
+    with_candidates = _stage_one_projection(
+        chain_records=[
+            {
+                "recordKind": "hypothesis_candidate",
+                "candidateId": "cand-a",
+                "questionId": "SCI-091",
+                "createdAt": "2026-08-25T00:00:00Z",
+            }
+        ],
+    )
+    assert "generation_no_transition" not in {
+        problem["code"] for problem in with_candidates["generation"]["problems"]
+    }
+
+    # A formal run owns the next phase.
+    with_run = _stage_one_projection(
+        formal_runs=[
+            {
+                "runId": "run-stage-one",
+                "status": "queued",
+                "questionId": "SCI-091",
+                "createdAt": "2026-08-25T00:00:00Z",
+            }
+        ],
+    )
+    assert "generation_no_transition" not in {
+        problem["code"] for problem in with_run["generation"]["problems"]
+    }
+
+
+def test_v2_create_stage_one_run_command_creates_stage_one_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.web.services import team_service
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_first_chain,
+        hypothesis_first_state_v2,
+        run_creation,
+    )
+
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
+    monkeypatch.setattr(hypothesis_first_chain, "PROJECT_ROOT", tmp_path)
+    snapshot = {
+        "stateVersion": "hf2-action:create-stage-one-run",
+        "allowedActions": [
+            {
+                "kind": "command",
+                "actionId": "create-stage-one-run",
+                "command": "create_stage_one_run",
+                "payload": {"questionId": "SCI-091"},
+                "enabled": True,
+                "idempotencyKey": "hf2:create-stage-one-run",
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        hypothesis_first_state_v2,
+        "project_hypothesis_first_state_v2",
+        lambda *_args, **_kwargs: snapshot,
+    )
+    from core.web.services.team_workflow import challenge_cup_real_batch
+
+    authorization = {"authorizationId": "auth-1"}
+    captured: dict[str, object] = {}
+
+    def fake_authorization(team_id: str, plan_id: str) -> dict[str, object]:
+        captured["authorization_call"] = (team_id, plan_id)
+        return authorization
+
+    def fake_create_question_run(workflow_id, **kwargs):
+        captured["create_kwargs"] = kwargs
+        return {"runId": "run-stage-one-1", "status": "queued"}
+
+    monkeypatch.setattr(
+        challenge_cup_real_batch,
+        "_current_catalog_run_authorization",
+        fake_authorization,
+    )
+    monkeypatch.setattr(
+        run_creation,
+        "create_question_run",
+        fake_create_question_run,
+    )
+    monkeypatch.setattr(
+        hypothesis_first_chain,
+        "_auto_start_created_formal_run",
+        lambda team_id, *, run, idempotency_key: captured.setdefault(
+            "auto_start", (team_id, run["runId"], idempotency_key)
+        ),
+    )
+
+    result = hypothesis_first_chain.execute_v2_command(
+        "team-1",
+        {
+            "actionId": "create-stage-one-run",
+            "idempotencyKey": "hf2:create-stage-one-run",
+            "expectedStateVersion": "hf2-action:create-stage-one-run",
+            "command": "create_stage_one_run",
+            "payload": {"questionId": "SCI-091"},
+        },
+        question_id="SCI-091",
+    )
+
+    assert result["result"]["runId"] == "run-stage-one-1"
+    assert captured["authorization_call"] == ("team-1", "real-1")
+    create_kwargs = captured["create_kwargs"]
+    assert create_kwargs["team_id"] == "team-1"
+    assert create_kwargs["question_id"] == "SCI-091"
+    assert create_kwargs["catalog_run_authorization"] == authorization
+    assert create_kwargs["idempotency_key"] == "hf2:create-stage-one-run"
+    assert "safety_limits" in create_kwargs
+    assert captured["auto_start"] == (
+        "team-1",
+        "run-stage-one-1",
+        "hf2:create-stage-one-run",
+    )
+
+
+def test_v2_blocked_stage_one_context_rejected_without_meeting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.web.services import team_service
+    from core.web.services.team_workflow import research_project_hypothesis_context
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_first_chain,
+        hypothesis_first_state_v2,
+        meeting_receipt_authority,
+    )
+
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
+    snapshot = {
+        "stateVersion": "hf2-action:stage-one-generation-blocked",
+        "allowedActions": [
+            {
+                "kind": "command",
+                "actionId": "open-stage-one-generation",
+                "command": "open_generation",
+                "payload": {"questionId": "SCI-091", "runId": "run-stage-one"},
+                "enabled": True,
+                "idempotencyKey": "hf2:open-stage-one-generation",
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        hypothesis_first_state_v2,
+        "project_hypothesis_first_state_v2",
+        lambda *_args, **_kwargs: snapshot,
+    )
+    blocked_context = {
+        "status": "blocked",
+        "code": "knowledge_package_has_no_evidence_claims",
+        "allowedEvidenceRefs": [],
+    }
+    monkeypatch.setattr(
+        research_project_hypothesis_context,
+        "build_stage_one_grounded_generation_context",
+        lambda *_args, **_kwargs: blocked_context,
+    )
+    monkeypatch.setattr(
+        meeting_receipt_authority,
+        "resolve_active_question_authority",
+        lambda *_args, **_kwargs: {"workflowRunId": "run-stage-one"},
+    )
+    monkeypatch.setattr(
+        hypothesis_first_chain,
+        "_question_research_project",
+        lambda *_args, **_kwargs: {"projectId": "project-stage-one"},
+    )
+    opened: list[object] = []
+    monkeypatch.setattr(
+        hypothesis_first_chain,
+        "open_candidate_generation_meeting",
+        lambda *args, **kwargs: opened.append((args, kwargs)),
+    )
+
+    with pytest.raises(hypothesis_first_chain.StageOneContextBlockedError) as excinfo:
+        hypothesis_first_chain.execute_v2_command(
+            "team-1",
+            {
+                "actionId": "open-stage-one-generation",
+                "idempotencyKey": "hf2:open-stage-one-generation",
+                "expectedStateVersion": "hf2-action:stage-one-generation-blocked",
+                "command": "open_generation",
+                "payload": {"questionId": "SCI-091", "runId": "run-stage-one"},
+            },
+            question_id="SCI-091",
+        )
+
+    assert opened == []
+    assert excinfo.value.code == "stage_one_context_blocked"
+    assert excinfo.value.status_code == 409
+    assert excinfo.value.blockers[0]["code"] == "knowledge_package_has_no_evidence_claims"
+    assert "证据主张" in excinfo.value.blockers[0]["message"]
+
+
+def test_v2_stage_one_generation_offer_routes_run_from_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The R1 offer carries its runId in the payload; no query runId needed."""
+    from core.web.services import team_service
+    from core.web.services.team_workflow import research_project_hypothesis_context
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_first_chain,
+        hypothesis_first_state_v2,
+        meeting_receipt_authority,
+    )
+
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
+    snapshot = {
+        "stateVersion": "hf2-action:stage-one-generation",
+        "allowedActions": [
+            {
+                "kind": "command",
+                "actionId": "open-stage-one-generation",
+                "command": "open_generation",
+                "payload": {"questionId": "SCI-091", "runId": "run-from-payload"},
+                "enabled": True,
+                "idempotencyKey": "hf2:open-stage-one-generation",
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        hypothesis_first_state_v2,
+        "project_hypothesis_first_state_v2",
+        lambda *_args, **_kwargs: snapshot,
+    )
+    context = {
+        "status": "ready",
+        "allowedEvidenceRefs": ["evidence:accepted-1"],
+        "evidenceClaims": [
+            {"sourceRef": "evidence:accepted-1", "claim": "accepted claim"}
+        ],
+        "knowledgePackage": {"sourceArtifactIds": ["knowledge_package:pkg-1"]},
+    }
+    monkeypatch.setattr(
+        research_project_hypothesis_context,
+        "build_stage_one_grounded_generation_context",
+        lambda team_id, run_id, *, question_id, **_kwargs: (
+            context
+            if run_id == "run-from-payload" and question_id == "SCI-091"
+            else None
+        ),
+    )
+    authority_calls: list[tuple[str, str, str]] = []
+
+    def fake_authority(team_id, question_id, run_id):
+        authority_calls.append((team_id, question_id, run_id))
+        return {"workflowRunId": run_id}
+
+    monkeypatch.setattr(
+        meeting_receipt_authority,
+        "resolve_active_question_authority",
+        fake_authority,
+    )
+    monkeypatch.setattr(
+        hypothesis_first_chain,
+        "_question_research_project",
+        lambda *_args, **_kwargs: {"projectId": "project-stage-one"},
+    )
+    captured: dict[str, object] = {}
+
+    def open_generation(_team_id: str, _question_id: str, **kwargs):
+        captured.update(kwargs)
+        return {"status": "created", "generationAttemptId": "attempt-r1"}
+
+    monkeypatch.setattr(
+        hypothesis_first_chain,
+        "open_candidate_generation_meeting",
+        open_generation,
+    )
+
+    result = hypothesis_first_chain.execute_v2_command(
+        "team-1",
+        {
+            "actionId": "open-stage-one-generation",
+            "idempotencyKey": "hf2:open-stage-one-generation",
+            "expectedStateVersion": "hf2-action:stage-one-generation",
+            "command": "open_generation",
+            "payload": {"questionId": "SCI-091", "runId": "run-from-payload"},
+        },
+        question_id="SCI-091",
+    )
+
+    assert result["result"]["status"] == "created"
+    assert authority_calls == [("team-1", "SCI-091", "run-from-payload")]
+    assert captured["_candidate_authority"] == "formal_grounded_candidate"
+    assert captured["_generation_context"] == context

@@ -33,6 +33,12 @@ _RESET_AUDIT_KIND = "question_reset_audit"
 _GENERATION_MEETING_TYPE = "hypothesis_candidate_generation"
 _REVIEW_MEETING_TYPE = "hypothesis_review"
 _EPOCH = "1970-01-01T00:00:00Z"
+_FORMAL_RUN_TERMINAL_STATUSES = frozenset(
+    {"succeeded", "failed", "cancelled", "archived"}
+)
+_ACTIVE_GENERATION_MEETING_STATUSES = frozenset(
+    {"open", "summarizing", "awaiting_approval"}
+)
 _TIMESTAMP_KEYS = {
     "createdAt",
     "updatedAt",
@@ -2415,6 +2421,84 @@ def _direction_1a_submission_section(
     }
 
 
+def _stage_one_policy_covers(question_id: str) -> bool:
+    """Whether the frozen stage-one completion policy covers this question.
+
+    Only policy-covered questions are routed to the run creation service by
+    the origin-level entry redirect; every other question keeps the plain
+    exploratory generation entry.
+    """
+
+    from core.research.competition.stage_one_completion_policy import (
+        STAGE_ONE_POLICY_WORKFLOW_DEFINITION_ID,
+        stage_one_policy_snapshot_for,
+    )
+
+    try:
+        return (
+            stage_one_policy_snapshot_for(
+                str(question_id or "").strip().upper(),
+                STAGE_ONE_POLICY_WORKFLOW_DEFINITION_ID,
+            )
+            is not None
+        )
+    except Exception:  # noqa: BLE001 - a drifted policy must not kill the projection
+        return False
+
+
+def _question_exploratory_drafts(
+    chain: Sequence[Mapping[str, Any]],
+    question_id: str,
+) -> list[dict[str, Any]]:
+    """Latest R0 exploratory drafts recorded for one question (any layer)."""
+
+    drafts_by_id: dict[str, dict[str, Any]] = {}
+    for record in chain:
+        if (
+            str(record.get("recordKind") or "")
+            != hypothesis_first_chain.EXPLORATORY_DRAFT_KIND
+        ):
+            continue
+        if (
+            str(record.get("questionId") or "").strip().upper()
+            != question_id
+        ):
+            continue
+        draft_id = str(
+            record.get("draftId") or record.get("candidateId") or ""
+        ).strip()
+        if not draft_id:
+            continue
+        existing = drafts_by_id.get(draft_id)
+        if existing is None or str(record.get("createdAt") or "") >= str(
+            existing.get("createdAt") or ""
+        ):
+            drafts_by_id[draft_id] = dict(record)
+    return sorted(
+        drafts_by_id.values(),
+        key=lambda item: (str(item.get("createdAt") or ""), item["draftId"]),
+    )
+
+
+def _active_stage_one_run(
+    formal_runs: Sequence[Mapping[str, Any]],
+) -> dict[str, Any] | None:
+    """Newest non-terminal run for the question, if any."""
+
+    active = [
+        run
+        for run in formal_runs
+        if str(run.get("status") or "").strip().lower()
+        not in _FORMAL_RUN_TERMINAL_STATUSES
+    ]
+    if not active:
+        return None
+    return sorted(
+        active,
+        key=lambda item: (str(item.get("createdAt") or ""), str(item.get("runId") or "")),
+    )[-1]
+
+
 def project_state_from_records(
     *,
     team_id: str,
@@ -3232,7 +3316,48 @@ def project_state_from_records(
     )
 
     allowed_actions: list[dict[str, Any]] = []
-    if generation["lifecycle"] == "not_started":
+    # Stage-one bridge (R0 -> R1): the origin-level "open generation" entry on
+    # a policy-covered question is redirected to the run creation service.
+    # Opening an R0 round without a run can only produce exploratory drafts
+    # that no R1 consumes (the chain's formal-run offer is gated behind
+    # convergence), so the run — which auto-opens R0 and pins the grounded
+    # R1 context — is the real entry point.
+    stage_one_covered = _stage_one_policy_covers(normalized_question_id)
+    active_stage_one_run = _active_stage_one_run(formal_runs)
+    exploratory_drafts = _question_exploratory_drafts(chain, normalized_question_id)
+    formal_candidate_count = len(candidate_ids)
+    needs_stage_one_run = (
+        stage_one_covered
+        and active_stage_one_run is None
+        and formal_candidate_count < 2
+        and (
+            generation["lifecycle"] == "not_started"
+            or (
+                generation["lifecycle"] in {"completed", "failed"}
+                and generation.get("outcome") in {"empty", "failed", "none"}
+                and bool(exploratory_drafts)
+            )
+        )
+    )
+    if needs_stage_one_run:
+        allowed_actions.append(
+            _command_action(
+                "create_stage_one_run",
+                action_id="create-stage-one-run",
+                label="创建第一阶段运行",
+                target_phase="generation",
+                target_node_id="hf_generation",
+                payload={"questionId": normalized_question_id},
+            )
+        )
+    elif (
+        generation["lifecycle"] == "not_started"
+        and not stage_one_covered
+    ):
+        # A policy-covered question that already owns a run never gets a bare
+        # origin-level open_generation offer: without the run binding it can
+        # only open an orphan R0 whose drafts nobody consume.  Non-covered
+        # questions have no run-side R0 auto-open, so the plain entry stays.
         allowed_actions.append(
             _command_action(
                 "open_generation",
@@ -3272,6 +3397,37 @@ def project_state_from_records(
                         or generation["generationMeetingId"]
                         or "legacy-generation"
                     ),
+                },
+            )
+        )
+    if (
+        stage_one_covered
+        and active_stage_one_run is not None
+        and formal_candidate_count < 2
+        and exploratory_drafts
+        and not any(
+            str(meeting.get("meetingType") or "") == _GENERATION_MEETING_TYPE
+            and str(meeting.get("candidateAuthority") or "").strip().lower()
+            == hypothesis_first_chain.FORMAL_GROUNDED_CANDIDATE_AUTHORITY
+            and str(meeting.get("status") or "").strip().lower()
+            in _ACTIVE_GENERATION_MEETING_STATUSES
+            for meeting in meetings
+        )
+    ):
+        # R0 drafts are consumable (in-run or origin fallback) while fewer
+        # than two formal candidates exist: offer the grounded R1 round.  The
+        # run id rides in the payload so the origin-level projection can
+        # route the command without a separate runId query.
+        allowed_actions.append(
+            _command_action(
+                "open_generation",
+                action_id="open-stage-one-generation",
+                label="开启第一阶段接地生成",
+                target_phase="generation",
+                target_node_id="hf_generation",
+                payload={
+                    "questionId": normalized_question_id,
+                    "runId": str(active_stage_one_run.get("runId") or ""),
                 },
             )
         )
@@ -3649,6 +3805,54 @@ def project_state_from_records(
         for action in allowed_actions
         if str(action.get("targetPhase") or "") == current_phase
     ]
+    # Dead-state sentinel: a finished (or failed) generation with no
+    # candidates, no formal run to fall back on, and no offered command
+    # transition would leave the question with no way forward.  A bare
+    # navigation offer into the dead room does not count as a transition;
+    # healthy states (any command action, any formal run, or any registered
+    # candidate) must never report this problem.
+    if (
+        formal_phase is None
+        and not formal_runs
+        and not candidate_ids
+        and not any(
+            action.get("kind") == "command" for action in allowed_actions
+        )
+        and (
+            generation["lifecycle"] in {"completed", "failed"}
+            or generation.get("outcome") in {"empty", "failed"}
+        )
+    ):
+        exit_hint = (
+            "请通过「创建第一阶段运行」建立第一阶段运行后继续"
+            if stage_one_covered
+            else "请重新发起候选生成，或重置本题后重试"
+        )
+        sentinel_problem = _problem(
+            "generation_no_transition",
+            (
+                "候选生成已结束但没有产出可选择的候选，且当前没有可用的过渡动作。"
+                f"{exit_hint}"
+            ),
+            category="integrity",
+            severity="error",
+            recoverable=True,
+            source_kind="generation",
+            source_id=str(generation.get("generationMeetingId") or "") or None,
+            detected_at=_timestamp(generation) or _EPOCH,
+        )
+        generation = {
+            **generation,
+            "problems": [
+                *(list(generation.get("problems") or [])),
+                sentinel_problem,
+            ],
+        }
+        phase_lookup = {
+            **phase_lookup,
+            "generation": generation,
+        }
+        current_state = phase_lookup[current_phase]
     overall = _phase(
         current_state["lifecycle"],
         current_state["outcome"],

@@ -47,6 +47,7 @@ from core.web.services.team_workflow import (
     meeting_rounds,
     meeting_runtime,
     research_project_agent_sessions,
+    research_project_hypothesis_context,
 )
 from core.web.services.team_workflow.research_runtime import hypothesis_first_chain
 
@@ -1318,6 +1319,14 @@ def test_candidate_generation_route_builds_verified_generation_scope(monkeypatch
             "storagePath": "x",
         }
 
+    # SCI-002's run is not pinned to the stage-one policy, so the shared
+    # launch resolver must come back with no grounded context and the plain
+    # (non-formal) candidate authority.
+    monkeypatch.setattr(
+        research_project_hypothesis_context,
+        "build_stage_one_grounded_generation_context",
+        lambda *_args, **_kwargs: None,
+    )
     monkeypatch.setattr(
         hf_routes.meeting_receipt_authority,
         "resolve_active_question_authority",
@@ -1344,6 +1353,8 @@ def test_candidate_generation_route_builds_verified_generation_scope(monkeypatch
     assert authority_calls == [("team-1", "SCI-002", run_id)]
     assert project_calls == ["team-1"]
     assert open_calls[0]["kwargs"]["_model_invocation_receipt_authority"] is authority
+    assert open_calls[0]["kwargs"]["_candidate_authority"] == ""
+    assert open_calls[0]["kwargs"]["_generation_context"] is None
     discussion_scope = open_calls[0]["kwargs"]["_discussion_scope"]
     assert discussion_scope["kind"] == "question_generation"
     assert discussion_scope["teamId"] == "team-1"

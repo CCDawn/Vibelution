@@ -471,45 +471,35 @@ def team_workflow_hypothesis_candidate_generation_open(
             fields={"questionId": question_id},
         )
     try:
-        receipt_authority = None
-        discussion_scope = None
-        if workflow_run_id:
-            from core.research.workflow.contracts.discussion_scope import (
-                WorkflowDiscussionScopeV1,
-            )
-            from core.web.services.team_workflow.research_project_agent_sessions import (
-                resolve_research_project_identity,
-            )
-
-            receipt_authority = (
-                meeting_receipt_authority.resolve_active_question_authority(
-                    team_id,
-                    question_id,
-                    workflow_run_id,
-                )
-            )
-            if receipt_authority is None:
-                raise meeting_receipt_authority.MeetingReceiptAuthorityError(
-                    "workflowRunId cannot be verified from the canonical Ledger"
-                )
-            project = resolve_research_project_identity(team_id)
-            research_project_id = str(project.get("projectId") or "").strip()
-            if not research_project_id:
-                raise meeting_receipt_authority.MeetingReceiptAuthorityError(
-                    "research project authority is unavailable for generation"
-                )
-            discussion_scope = WorkflowDiscussionScopeV1.generation(
-                teamId=team_id,
-                researchProjectId=research_project_id,
-                workflowRunId=workflow_run_id,
-                workflowNodeId=hypothesis_first_chain.HYPOTHESIS_DESIGN_NODE_ID,
-                questionId=question_id,
-            ).to_dict()
+        # A run-scoped entry must resolve the same grounded authority as the
+        # v2 open_generation command: receipt authority, discussion scope and
+        # — for stage-one runs — the formal grounded context.  A blocked
+        # grounded context is a structured rejection, never a meeting with a
+        # FORMAL authority and an empty evidence whitelist.
+        launch = hypothesis_first_chain.resolve_stage_one_generation_launch(
+            team_id,
+            question_id,
+            workflow_run_id,
+        )
         return hypothesis_first_chain.open_candidate_generation_meeting(
             team_id,
             question_id,
-            _model_invocation_receipt_authority=receipt_authority,
-            _discussion_scope=discussion_scope,
+            _model_invocation_receipt_authority=launch.get("receipt_authority"),
+            _discussion_scope=launch.get("discussion_scope"),
+            _candidate_authority=str(launch.get("candidate_authority") or ""),
+            _generation_context=launch.get("generation_context"),
+        )
+    except hypothesis_first_chain.StageOneContextBlockedError as exc:
+        _raise_team_workflow_route_error(
+            "hypothesis_first.candidate_generation.open",
+            team_id,
+            exc,
+            status_code=exc.status_code,
+            detail={
+                "code": exc.code,
+                "message": str(exc),
+                "blockers": exc.blockers,
+            },
         )
     except _DOMAIN_ERRORS as exc:
         _map_domain_error("hypothesis_first.candidate_generation.open", team_id, exc)
