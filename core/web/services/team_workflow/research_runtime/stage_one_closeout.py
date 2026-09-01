@@ -12,6 +12,11 @@ from core.research.competition.stage_one_completion_policy import (
     StageOneCompletionPolicy,
     StageOneCompletionPolicyError,
 )
+from core.research.competition.stage_one_requirement_matrix import (
+    StageOneRequirementMatrixError,
+    requirement_matrix_from_dict,
+    unmet_g1_required,
+)
 from core.research.workflow.contracts.model_invocation_receipt import (
     ModelInvocationReceipt,
     ModelInvocationStatus,
@@ -29,6 +34,7 @@ from core.research.workflow.stage_one_completion import (
 from .node_execution_support import NodeExecutionError
 
 STAGE_ONE_CLOSEOUT_COMMAND = "close_stage_one"
+REQUIRED_MATRIX_ARTIFACT_KIND = "competition_alignment"
 _REQUIRED_GATE_ARTIFACT_KINDS = ("hypothesis_set", "stage1_research_plan")
 _ACCEPTED_HUMAN_TASK_STATUSES = {"resolved_accept", "succeeded"}
 
@@ -244,6 +250,41 @@ def _validate_human_tasks(record: Mapping[str, Any]) -> None:
             )
 
 
+def _validate_requirement_matrices(required_payloads: dict[str, list[Mapping[str, Any]]]) -> None:
+    """Block G1 when any official G1_REQUIRED matrix row lacks evidence.
+
+    The §2.5 matrix rides inside every ``competition_alignment`` payload.  A
+    missing or malformed matrix fails closed, and any unmet ``G1_REQUIRED``
+    row blocks stage-one acceptance; non-G1 rows may stay
+    ``not_yet_evidenced`` without blocking.
+    """
+
+    alignment_payloads = required_payloads.get(REQUIRED_MATRIX_ARTIFACT_KIND)
+    if not alignment_payloads:
+        return
+    for payload in alignment_payloads:
+        raw_matrix = payload.get("officialRequirementMatrix")
+        if not isinstance(raw_matrix, Mapping):
+            _fail(
+                "stage-one competition alignment has no official requirement matrix",
+                code="stage_one_requirement_matrix_missing",
+            )
+        try:
+            matrix_items = requirement_matrix_from_dict(dict(raw_matrix))
+        except StageOneRequirementMatrixError as exc:
+            raise NodeExecutionError(
+                f"stage-one official requirement matrix is invalid: {exc}",
+                code="stage_one_requirement_matrix_invalid",
+            ) from exc
+        unmet = unmet_g1_required(matrix_items)
+        if unmet:
+            _fail(
+                "stage-one G1_REQUIRED requirements are not evidenced: "
+                + ", ".join(unmet),
+                code="stage_one_g1_requirement_not_evidenced",
+            )
+
+
 def evaluate_stage_one_closeout(
     record: Mapping[str, Any],
     *,
@@ -312,6 +353,7 @@ def evaluate_stage_one_closeout(
                 code="stage_one_human_gate_missing",
             )
     _validate_human_tasks(record)
+    _validate_requirement_matrices(required_payloads)
 
     question_id = str(record.get("questionId") or "").upper()
     run_id = str(record.get("runId") or "")

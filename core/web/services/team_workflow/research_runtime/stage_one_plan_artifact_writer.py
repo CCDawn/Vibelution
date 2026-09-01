@@ -8,13 +8,22 @@ review scores or prose summaries as substitutes for the canonical output.
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from typing import Any
 
+from core.research.competition.stage_one_completion_policy import (
+    load_stage_one_completion_policy,
+)
+from core.research.competition.stage_one_requirement_matrix import (
+    G1_REQUIRED_EVIDENCE_KINDS,
+    evaluate_stage_one_requirement_matrix,
+    matrix_to_dict,
+)
+
 from .artifact_readback_registry import build_canonical_ref
 from .human_gate_artifacts import canonical_sha256
-from .workflow_artifact_store import put_workflow_artifact
+from .workflow_artifact_store import list_workflow_artifacts, put_workflow_artifact
 
 STAGE_ONE_RESEARCH_PLAN_KIND = "stage1_research_plan"
 COMPETITION_ALIGNMENT_KIND = "competition_alignment"
@@ -88,6 +97,81 @@ def _descriptor(
             content_hash=canonical_hash,
         ),
     }
+
+
+# Evidence for the official requirement matrix is read back from the same
+# immutable workflow artifact store the closure authorities were written to.
+_MATRIX_STORE_EVIDENCE_KINDS = tuple(
+    dict.fromkeys(
+        kind
+        for kinds in G1_REQUIRED_EVIDENCE_KINDS.values()
+        for kind in kinds
+        if kind != STAGE_ONE_RESEARCH_PLAN_KIND
+    )
+)
+
+
+def _stored_evidence_refs(
+    team: str,
+    *,
+    workflow_run_id: str,
+    source_collection_run_id: str,
+) -> dict[str, tuple[str, ...]]:
+    refs: dict[str, list[str]] = {}
+    for kind in _MATRIX_STORE_EVIDENCE_KINDS:
+        rows = list_workflow_artifacts(team, kind=kind, workflow_run_id=workflow_run_id)
+        if not rows:
+            continue
+        latest = rows[-1]
+        content_hash = _text(latest.get("contentHash")).lower()
+        if not _SHA256_RE.fullmatch(content_hash):
+            continue
+        refs.setdefault(kind, []).append(
+            build_canonical_ref(
+                kind=kind,
+                team_id=team,
+                authority_run_id=_text(latest.get("sourceCollectionRunId"))
+                or source_collection_run_id,
+                content_hash=content_hash,
+            )
+        )
+    return {kind: tuple(items) for kind, items in refs.items()}
+
+
+def _requirement_evidence(
+    evidence_by_kind: Mapping[str, Sequence[str]],
+    *,
+    plan_ref: str,
+) -> dict[str, tuple[str, ...]]:
+    resolved: dict[str, tuple[str, ...]] = {}
+    for requirement_id, kinds in G1_REQUIRED_EVIDENCE_KINDS.items():
+        refs: list[str] = []
+        for kind in kinds:
+            if kind == STAGE_ONE_RESEARCH_PLAN_KIND:
+                if plan_ref:
+                    refs.append(plan_ref)
+                continue
+            refs.extend(evidence_by_kind.get(kind) or ())
+        if refs:
+            resolved[requirement_id] = tuple(refs)
+    return resolved
+
+
+def _official_requirement_matrix(plan_ref: str, team: str, workflow: str, source: str) -> dict[str, Any]:
+    matrix_items = evaluate_stage_one_requirement_matrix(
+        _requirement_evidence(
+            _stored_evidence_refs(
+                team,
+                workflow_run_id=workflow,
+                source_collection_run_id=source,
+            ),
+            plan_ref=plan_ref,
+        )
+    )
+    return matrix_to_dict(
+        matrix_items,
+        scope_id=load_stage_one_completion_policy().scopeId,
+    )
 
 
 def write_stage_one_plan_artifacts(
@@ -181,34 +265,56 @@ def write_stage_one_plan_artifacts(
         "sourceQuestionRunId": _text(record.get("runId")),
         "sourceArtifactSha256": _text(artifact.get("sha256")).lower(),
     }
-    payloads = {
-        STAGE_ONE_RESEARCH_PLAN_KIND: deepcopy(research_plan),
-        COMPETITION_ALIGNMENT_KIND: alignment_payload,
-    }
-    descriptors: dict[str, Any] = {}
-    for kind, payload in payloads.items():
-        stored = put_workflow_artifact(
-            team,
-            kind=kind,
-            workflow_run_id=workflow,
-            source_collection_run_id=source,
-            artifact_identity=f"{kind}:{node}:{question}",
-            payload=payload,
-        )
-        descriptors[kind] = _descriptor(
-            kind=kind,
-            team_id=team,
-            workflow_run_id=workflow,
-            source_collection_run_id=source,
-            payload=payload,
-            record=stored,
-        )
+    plan_payload = deepcopy(research_plan)
+    plan_stored = put_workflow_artifact(
+        team,
+        kind=STAGE_ONE_RESEARCH_PLAN_KIND,
+        workflow_run_id=workflow,
+        source_collection_run_id=source,
+        artifact_identity=f"{STAGE_ONE_RESEARCH_PLAN_KIND}:{node}:{question}",
+        payload=plan_payload,
+    )
+    plan_descriptor = _descriptor(
+        kind=STAGE_ONE_RESEARCH_PLAN_KIND,
+        team_id=team,
+        workflow_run_id=workflow,
+        source_collection_run_id=source,
+        payload=plan_payload,
+        record=plan_stored,
+    )
+    # The §2.5 matrix is materialized from real artifact refs only: the plan
+    # descriptor above plus the closure authorities already in the store.
+    alignment_payload["officialRequirementMatrix"] = _official_requirement_matrix(
+        str(plan_descriptor.get("canonicalRef") or ""),
+        team,
+        workflow,
+        source,
+    )
+    alignment_stored = put_workflow_artifact(
+        team,
+        kind=COMPETITION_ALIGNMENT_KIND,
+        workflow_run_id=workflow,
+        source_collection_run_id=source,
+        artifact_identity=f"{COMPETITION_ALIGNMENT_KIND}:{node}:{question}",
+        payload=alignment_payload,
+    )
+    alignment_descriptor = _descriptor(
+        kind=COMPETITION_ALIGNMENT_KIND,
+        team_id=team,
+        workflow_run_id=workflow,
+        source_collection_run_id=source,
+        payload=alignment_payload,
+        record=alignment_stored,
+    )
     return {
         "status": "written",
         "reason": "",
         "blockerCodes": [],
         "missingAuthorities": [],
-        "artifacts": descriptors,
+        "artifacts": {
+            STAGE_ONE_RESEARCH_PLAN_KIND: plan_descriptor,
+            COMPETITION_ALIGNMENT_KIND: alignment_descriptor,
+        },
     }
 
 

@@ -1446,6 +1446,11 @@ def test_stage_one_plan_writer_projects_only_canonical_question_sections(
         return record
 
     monkeypatch.setattr(writer, "put_workflow_artifact", fake_put)
+    monkeypatch.setattr(
+        writer,
+        "list_workflow_artifacts",
+        lambda *args, **kwargs: [],
+    )
     detail = _canonical_stage_one_question_detail()
 
     result = writer.write_stage_one_plan_artifacts(

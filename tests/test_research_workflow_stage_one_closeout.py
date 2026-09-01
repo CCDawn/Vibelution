@@ -11,6 +11,11 @@ from langgraph.graph import END
 from core.research.competition.stage_one_completion_policy import (
     load_stage_one_completion_policy,
 )
+from core.research.competition.stage_one_requirement_matrix import (
+    G1_REQUIRED_EVIDENCE_KINDS,
+    evaluate_stage_one_requirement_matrix,
+    matrix_to_dict,
+)
 from core.research.workflow.challenge_cup_graph import ChallengeCupState
 from core.research.workflow.contracts.model_invocation_receipt import (
     ModelInvocationReceipt,
@@ -149,6 +154,13 @@ def _manifest(kind: str, *, node_run_id: str, input_hash: str) -> dict:
     }
 
 
+def _g1_matrix_evidence() -> dict[str, tuple[str, ...]]:
+    return {
+        requirement_id: tuple(f"{kind}:{kind}-artifact" for kind in kinds)
+        for requirement_id, kinds in G1_REQUIRED_EVIDENCE_KINDS.items()
+    }
+
+
 def _payloads(run_id: str) -> dict[str, dict]:
     policy = load_stage_one_completion_policy()
     payloads = {
@@ -168,6 +180,13 @@ def _payloads(run_id: str) -> dict[str, dict]:
     payloads["stage1_research_plan:stage1_research_plan-artifact"] = {
         "proposal_only": True,
         "human_gate": _approved_gate(),
+    }
+    payloads["competition_alignment:competition_alignment-artifact"] = {
+        "status": "accepted",
+        "officialRequirementMatrix": matrix_to_dict(
+            evaluate_stage_one_requirement_matrix(_g1_matrix_evidence()),
+            scope_id=policy.scopeId,
+        ),
     }
     return payloads
 
