@@ -64,6 +64,7 @@ import { buildScopedDiscussionModel } from "./scopedDiscussionModel";
 import type { ScopedDiscussionModel } from "./scopedDiscussionModel";
 import {
   invalidateHypothesisFirstQueries,
+  resolveHypothesisFirstCanonicalRound,
   resolveHypothesisFirstRoundBudget,
   useHypothesisFirstChain,
   useHypothesisFirstChainInvalidation,
@@ -143,6 +144,13 @@ export function ResearchProcessWorkspace({
   const currentRoundBudget = resolveHypothesisFirstRoundBudget({
     stateV2: hypothesisFirstChain.stateV2,
     chainState: hypothesisFirstChain.chainState,
+  });
+  // Same canonical round the experiment switcher shows: V2 activeRoundIndex,
+  // link-derived fallback. chainState.meetingCount is a physical-room count
+  // (one round fans out per candidate) and must never be displayed as a round.
+  const canonicalReviewRound = resolveHypothesisFirstCanonicalRound({
+    stateV2: hypothesisFirstChain.stateV2,
+    meetings: hypothesisFirstChain.meetings,
   });
   useHypothesisFirstChainInvalidation(
     teamId,
@@ -228,6 +236,7 @@ export function ResearchProcessWorkspace({
       collectionRequests: hypothesisFirstChain.collectionRequests,
       reviewRoundLinks: hypothesisFirstChain.reviewRoundLinks,
       selection: hypothesisFirstChain.selection,
+      activeRoundIndex: hypothesisFirstChain.stateV2?.review.activeRoundIndex ?? null,
     });
     const withHypothesisFirst = composeHypothesisFirstGraph(base, region, {
       demotePipelineStages: isHypothesisFirstDiscussionActive(
@@ -262,6 +271,7 @@ export function ResearchProcessWorkspace({
     hypothesisFirstChain.collectionRequests,
     hypothesisFirstChain.reviewRoundLinks,
     hypothesisFirstChain.selection,
+    hypothesisFirstChain.stateV2,
     chainQuestionId,
   ]);
 
@@ -593,8 +603,11 @@ export function ResearchProcessWorkspace({
     hypothesisFirstChain.meetings,
   ]);
   const reviewSummary = useMemo(
-    () => summarizeHypothesisReviewMeetings(scopedReviewMeetings),
-    [scopedReviewMeetings],
+    () => summarizeHypothesisReviewMeetings(
+      scopedReviewMeetings,
+      hypothesisFirstChain.stateV2?.review.activeRoundIndex,
+    ),
+    [hypothesisFirstChain.stateV2?.review.activeRoundIndex, scopedReviewMeetings],
   );
   const reviewHistory = useMemo(() => {
     const effectiveMeetings = scopedReviewMeetings.filter(
@@ -659,12 +672,14 @@ export function ResearchProcessWorkspace({
     panel: location.panel,
     roundProgress: hypothesisFirstChain.chainState
       ? {
-          current: hypothesisFirstChain.chainState.meetingCount ?? 0,
+          // Canonical logical round, not the physical meeting count.
+          current: canonicalReviewRound,
           // Current budget N, not an immutable total; see currentRoundBudget.
           total: currentRoundBudget,
         }
       : null,
   }), [
+    canonicalReviewRound,
     chainQuestionId,
     currentRoundBudget,
     displayError,
@@ -872,7 +887,8 @@ export function ResearchProcessWorkspace({
             chainRound={
               workflowActive && !formalRuntimeActive && hypothesisFirstChain.chainState
                 ? {
-                    current: hypothesisFirstChain.chainState.meetingCount ?? 0,
+                    // Canonical logical round, not the physical meeting count.
+                    current: canonicalReviewRound,
                     // Current budget N, not an immutable cap; see currentRoundBudget.
                     budget: currentRoundBudget,
                   }

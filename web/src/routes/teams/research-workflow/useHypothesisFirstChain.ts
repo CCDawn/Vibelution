@@ -66,6 +66,11 @@ function isReadableRoundBudget(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= 1;
 }
 
+/** Readable logical round index; same fail-closed rule as the budget guard. */
+function isReadableRoundIndex(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 1;
+}
+
 /**
  * Read the review-round budget from the server snapshot: V2 first, then the
  * V1 compatibility chain state, then the hard-limit fallback. Both snapshot
@@ -91,6 +96,32 @@ export function resolveHypothesisFirstRoundBudget(input: {
     return input.chainState.roundBudget;
   }
   return HYPOTHESIS_FIRST_REVIEW_ROUND_LIMIT;
+}
+
+/**
+ * Canonical logical review round for human-facing "第 N 轮" chrome.
+ *
+ * The V2 snapshot's `review.activeRoundIndex` is authoritative (the server
+ * derives it from review-round links). Payloads without a readable V2 round
+ * fall back to the max roundIndex the link decoration placed on the scoped
+ * meetings — the same source the server itself uses. `chainState.meetingCount`
+ * is a physical-room count (one logical round fans out to one meeting per
+ * candidate) and must never stand in for a round number.
+ */
+export function resolveHypothesisFirstCanonicalRound(input: {
+  stateV2?: { review?: { activeRoundIndex?: number | null } } | null;
+  meetings?: readonly MeetingRoundRecord[];
+}): number {
+  if (isReadableRoundIndex(input.stateV2?.review?.activeRoundIndex)) {
+    return input.stateV2.review.activeRoundIndex;
+  }
+  // Meeting records never carry roundIndex server-side; any positive value
+  // here came from the review-round link decoration, so the max is
+  // link-derived and matches the server's own active-round resolution.
+  return (input.meetings ?? []).reduce(
+    (max, meeting) => Math.max(max, Number(meeting.roundIndex ?? 0) || 0),
+    0,
+  );
 }
 
 /**

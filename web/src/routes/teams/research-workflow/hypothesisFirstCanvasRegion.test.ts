@@ -165,6 +165,40 @@ describe("hypothesisFirstCanvasRegion", () => {
     expect(summary.latestRound).toBe(2);
   });
 
+  it("does not fabricate round numbers for legacy meetings without roundIndex", () => {
+    const summary = summarizeHypothesisReviewMeetings([
+      meeting(1, "closed", { meetingRoundId: "r1-a", digestId: "d1-a" }),
+      { ...meeting(1, "closed", { digestId: "d1-b" }), meetingRoundId: "legacy-a", roundIndex: undefined },
+      { ...meeting(2, "closed", { recoveryReason: "discussion_has_no_completed_messages" }), meetingRoundId: "legacy-b", roundIndex: undefined },
+    ]);
+
+    // Legacy physical meetings must not become fabricated extra rounds, and
+    // the latest round stays the max real roundIndex instead of list position.
+    expect(summary.effectiveRounds).toBe(1);
+    expect(summary.latestRound).toBe(1);
+  });
+
+  it("anchors the summary on the canonical round when provided", () => {
+    const summary = summarizeHypothesisReviewMeetings([
+      meeting(1, "closed", { meetingRoundId: "r1-a", digestId: "d1-a" }),
+      meeting(1, "closed", { meetingRoundId: "r1-b", digestId: "d1-b" }),
+    ], 5);
+
+    expect(summary.effectiveRounds).toBe(1);
+    expect(summary.latestRound).toBe(5);
+  });
+
+  it("caps legacy per-candidate roundIndex inflation at the canonical round", () => {
+    // Old per-candidate writes produced ten distinct roundIndex values while
+    // the canonical chain sits at round 5; neither count may exceed it.
+    const inflated = Array.from({ length: 10 }, (_, index) =>
+      meeting(index + 1, "closed", { meetingRoundId: `r${index + 1}`, digestId: `d${index + 1}` }));
+    const summary = summarizeHypothesisReviewMeetings(inflated, 5);
+
+    expect(summary.effectiveRounds).toBe(5);
+    expect(summary.latestRound).toBe(5);
+  });
+
   it("returns null only when the chain has no question identity", () => {
     expect(regionOf({ chainState: null })).toBeNull();
   });
@@ -554,5 +588,29 @@ describe("review attempts aggregate behind one semantic card", () => {
     const review = region!.nodes.find((node) => node.nodeId === HYPOTHESIS_FIRST_REVIEW_NODE_ID)!;
     expect(review.status).toBe("blocked");
     expect(review.description).toBe("0 轮有效评审 · 1 次失败重试 · 最近第 1 轮");
+  });
+
+  it("degrades the review card copy when legacy data has no round numbers", () => {
+    const region = regionOf({
+      meetings: [
+        { ...meeting(1, "closed", { digestId: "d-legacy" }), meetingRoundId: "legacy-a", roundIndex: undefined },
+        { ...meeting(1, "closed"), meetingRoundId: "legacy-b", roundIndex: undefined },
+      ],
+    })!;
+    const review = region.nodes.find((node) => node.nodeId === HYPOTHESIS_FIRST_REVIEW_NODE_ID)!;
+    expect(review.description).toBe("有效轮数未知 · 1 次失败重试 · 最近轮次未知");
+  });
+
+  it("uses the canonical round for the review card when meetings lack roundIndex", () => {
+    const region = regionOf({
+      meetings: [
+        { ...meeting(1, "closed", { digestId: "d-legacy" }), meetingRoundId: "legacy-a", roundIndex: undefined },
+      ],
+      activeRoundIndex: 5,
+    })!;
+    const review = region.nodes.find((node) => node.nodeId === HYPOTHESIS_FIRST_REVIEW_NODE_ID)!;
+    // The latest round is known (canonical) but the effective count of
+    // numberless meetings is not — never show a fabricated or false-zero count.
+    expect(review.description).toBe("有效轮数未知 · 0 次失败重试 · 最近第 5 轮");
   });
 });

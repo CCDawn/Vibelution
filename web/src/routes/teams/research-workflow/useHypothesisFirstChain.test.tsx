@@ -22,12 +22,13 @@ import {
   fetchReviewRoundLinks,
   recoverCollectionRequest,
 } from "../../../api/hypothesisFirst";
-import type { HypothesisFirstStateV2 } from "../../../api/types/hypothesisFirst";
+import type { HypothesisFirstStateV2, MeetingRoundRecord } from "../../../api/types/hypothesisFirst";
 import { queryKeys } from "../../../api/queryKeys";
 import {
   HYPOTHESIS_FIRST_REVIEW_ROUND_LIMIT,
   hypothesisFirstChainCollectionRequestsKey,
   hypothesisFirstChainReviewRoundLinksKey,
+  resolveHypothesisFirstCanonicalRound,
   resolveHypothesisFirstRoundBudget,
   useHypothesisFirstChain,
   useHypothesisFirstChainInvalidation,
@@ -760,6 +761,57 @@ describe("hypothesis-first round budget display contract", () => {
       stateV2: v2WithRoundBudget(Number.NaN),
       chainState: { roundBudget: -1 },
     })).toBe(5);
+  });
+});
+
+describe("hypothesis-first canonical review round", () => {
+  function reviewMeeting(roundIndex?: number): MeetingRoundRecord {
+    return {
+      ...scope,
+      schemaVersion: 1,
+      meetingRoundId: `hf-review-${roundIndex ?? "legacy"}`,
+      meetingType: "hypothesis_review",
+      mode: "review",
+      scopeHash: "sh",
+      participants: ["agent-1"],
+      status: "closed",
+      startedAt: "2026-08-19T00:00:00Z",
+      ...(roundIndex === undefined ? {} : { roundIndex }),
+    };
+  }
+
+  it("prefers the V2 activeRoundIndex over decorated meeting rounds", () => {
+    expect(resolveHypothesisFirstCanonicalRound({
+      stateV2: { review: { activeRoundIndex: 3 } },
+      meetings: [reviewMeeting(2), reviewMeeting(2)],
+    })).toBe(3);
+  });
+
+  it("falls back to the max link-derived meeting roundIndex without a readable V2 round", () => {
+    expect(resolveHypothesisFirstCanonicalRound({
+      stateV2: null,
+      meetings: [reviewMeeting(2), reviewMeeting(2), reviewMeeting(1)],
+    })).toBe(2);
+    expect(resolveHypothesisFirstCanonicalRound({
+      stateV2: { review: { activeRoundIndex: null } },
+      meetings: [reviewMeeting(4)],
+    })).toBe(4);
+    expect(resolveHypothesisFirstCanonicalRound({
+      stateV2: { review: { activeRoundIndex: 0 } },
+      meetings: [],
+    })).toBe(0);
+  });
+
+  it("never derives a round from the physical meeting count", () => {
+    // Ten fan-out rooms across five logical rounds still resolve to round 5.
+    const fanOut = Array.from({ length: 10 }, (_, index) =>
+      reviewMeeting(Math.floor(index / 2) + 1));
+    expect(resolveHypothesisFirstCanonicalRound({ stateV2: null, meetings: fanOut })).toBe(5);
+    // Without any round numbers the round is unknown (0), not the room count.
+    expect(resolveHypothesisFirstCanonicalRound({
+      stateV2: null,
+      meetings: [reviewMeeting(undefined), reviewMeeting(undefined)],
+    })).toBe(0);
   });
 });
 

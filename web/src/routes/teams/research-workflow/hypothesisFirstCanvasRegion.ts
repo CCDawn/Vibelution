@@ -51,6 +51,8 @@ export type HypothesisFirstCanvasRegionInput = {
   collectionRequests: CollectionRequestRecord[];
   reviewRoundLinks: ReviewRoundLinkRecord[];
   selection: HypothesisSelectionRecord | null;
+  /** Canonical current round (V2 review.activeRoundIndex); unknown when absent. */
+  activeRoundIndex?: number | null;
 };
 
 export type HypothesisFirstCanvasRegion = {
@@ -129,27 +131,60 @@ export function isHypothesisReviewRetryAttempt(meeting: MeetingRoundRecord): boo
 export type HypothesisReviewSummary = {
   effectiveRounds: number;
   retryAttempts: number;
+  /** Max known logical round; 0 means the round number is unknown (legacy data). */
   latestRound: number;
+  /**
+   * False when effective review meetings exist but none carries a readable
+   * roundIndex (legacy data), so the effective count would be an undercount.
+   */
+  effectiveRoundsKnown: boolean;
 };
 
+/** Only a positive finite roundIndex counts as a known logical round. */
+function readableRoundIndex(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 1 ? value : 0;
+}
+
+/**
+ * Round numbers come only from real roundIndex values (review-round links /
+ * the V2 snapshot). Legacy meetings without one must not fabricate rounds from
+ * list position: one logical round fans out into several physical meetings, so
+ * position-based numbers inflate both counts. `canonicalRound`
+ * (V2 review.activeRoundIndex) anchors both numbers when present — effective
+ * rounds can never exceed the current canonical round, which also absorbs
+ * legacy per-candidate roundIndex writes.
+ */
 export function summarizeHypothesisReviewMeetings(
   meetings: readonly MeetingRoundRecord[],
+  canonicalRound?: number | null,
 ): HypothesisReviewSummary {
   const reviewMeetings = sortMeetings(
     meetings.filter((meeting) => meeting.meetingType === HYPOTHESIS_REVIEW_MEETING_TYPE),
   );
-  const effectiveRoundKeys = new Set(
-    reviewMeetings
-      .filter((meeting) => !isHypothesisReviewRetryAttempt(meeting))
-      .map((meeting) => meeting.roundIndex ?? `legacy:${meeting.meetingRoundId}`),
+  const canonical = readableRoundIndex(canonicalRound);
+  const effectiveMeetings = reviewMeetings.filter(
+    (meeting) => !isHypothesisReviewRetryAttempt(meeting),
+  );
+  const effectiveRoundIndexes = new Set(
+    effectiveMeetings
+      .map((meeting) => readableRoundIndex(meeting.roundIndex))
+      .filter((round) => round > 0),
+  );
+  const maxKnownRound = reviewMeetings.reduce(
+    (max, meeting) => Math.max(max, readableRoundIndex(meeting.roundIndex)),
+    0,
   );
   return {
-    effectiveRounds: effectiveRoundKeys.size,
+    effectiveRounds: canonical > 0
+      ? Math.min(effectiveRoundIndexes.size, canonical)
+      : effectiveRoundIndexes.size,
     retryAttempts: reviewMeetings.filter(isHypothesisReviewRetryAttempt).length,
-    latestRound: reviewMeetings.reduce(
-      (max, meeting, index) => Math.max(max, meeting.roundIndex ?? index + 1),
-      0,
-    ),
+    // The canonical round is the server-owned upper bound; meeting roundIndex
+    // values above it are legacy per-candidate inflation, never displayed.
+    latestRound: canonical > 0 ? canonical : maxKnownRound,
+    // Zero effective meetings is a real zero; effective meetings without any
+    // readable roundIndex leave the count unknowable.
+    effectiveRoundsKnown: effectiveMeetings.length === 0 || effectiveRoundIndexes.size > 0,
   };
 }
 
@@ -314,15 +349,22 @@ export function buildHypothesisFirstCanvasRegion(
     });
   }
 
-  const reviewSummary = summarizeHypothesisReviewMeetings(meetings);
+  const reviewSummary = summarizeHypothesisReviewMeetings(meetings, input.activeRoundIndex);
   const latestReview = meetings[meetings.length - 1];
   const showReview = Boolean(selection || latestReview);
   if (showReview) {
+    // latestRound > 0 iff any real round number (roundIndex / canonical) is
+    // known; effectiveRoundsKnown is false when legacy meetings leave the
+    // effective count unknowable — degrade to "unknown" over fabricated numbers.
     const summaryParts = latestReview
       ? [
-          `${reviewSummary.effectiveRounds} 轮有效评审`,
+          reviewSummary.effectiveRoundsKnown
+            ? `${reviewSummary.effectiveRounds} 轮有效评审`
+            : "有效轮数未知",
           `${reviewSummary.retryAttempts} 次失败重试`,
-          `最近第 ${reviewSummary.latestRound} 轮`,
+          reviewSummary.latestRound > 0
+            ? `最近第 ${reviewSummary.latestRound} 轮`
+            : "最近轮次未知",
         ]
       : ["等待首次评审"];
     nodes.push({
