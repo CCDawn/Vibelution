@@ -6,20 +6,26 @@ only scheduler; a backend restart used to orphan every open challenge meeting
 because the pending driver existed only in memory.  This module persists one
 append-only intent record per ``(teamId, meetingRoundId, actionKind)`` next to
 ``meeting_rounds.jsonl`` so a startup sweep can fence deadline-expired
-meetings, re-drive interrupted discussions, backfill the governed deadline
-for challenge-identity meetings whose policy was never persisted, and close
-identity-less legacy orphans that can never receive a governed deadline.
+meetings, re-drive interrupted discussions, re-drive interrupted digest
+drafts, backfill the governed deadline for challenge-identity meetings whose
+policy was never persisted, and close identity-less legacy orphans that can
+never receive a governed deadline.
+
+Two action kinds are durable: ``run_discussion`` (the round driver) and
+``run_digest`` (the Coordinator digest draft).  Digest intents additionally
+carry the ``sourceHash`` of the bound room messages they draft from and the
+meeting's governed ``deadlineAtMs``; the digest LLM call itself is bounded
+(review-runner timeout), so the digest lease is a crash fence rather than a
+heartbeat window: a running digest intent is stale when the boot id is foreign
+or the lease has expired.  The lease is clamped to the meeting deadline, so a
+lapsed deadline always reads as a stale lease.
 
 Reads are latest-wins by ``(teamId, meetingRoundId, actionKind)``, mirroring
 the append + latest read contract of ``meeting_rounds``.  No second scheduler
 lives here: the recovery sweep only re-enters
-``meeting_runtime.schedule_meeting_discussion``, whose in-process dedup set
-still guarantees at most one live driver per meeting.  Running intents carry
-a bounded lease: the live driver refreshes it through a heartbeat thread, so
-the sweep treats a running intent as stale when the boot id is foreign OR the
-lease has expired — a same-boot driver wedged past its lease is re-driven the
-same way a crashed one is.  Making digest/review work itself durable (own
-intent kind, deadline, sourceHash) remains future work (plan T3).
+``meeting_runtime.schedule_meeting_discussion`` (dedup set guarantees at most
+one live driver per meeting) or submits one bounded digest re-drive per
+meeting through the same executor (in-process digest job set dedups).
 """
 
 from __future__ import annotations
@@ -33,6 +39,8 @@ from typing import Any
 
 SCHEMA_VERSION = 1
 ACTION_RUN_DISCUSSION = "run_discussion"
+ACTION_RUN_DIGEST = "run_digest"
+_ACTION_KINDS = frozenset({ACTION_RUN_DISCUSSION, ACTION_RUN_DIGEST})
 STATUS_PENDING = "pending"
 STATUS_RUNNING = "running"
 STATUS_COMPLETED = "completed"
@@ -61,6 +69,14 @@ _MAX_LAST_PROBLEM_LENGTH = 240
 # the recovery sweep re-drives a same-boot driver that let its lease lapse.
 DEFAULT_INTENT_LEASE_MS = 90_000
 HEARTBEAT_INTERVAL_MS = DEFAULT_INTENT_LEASE_MS // 3
+# The digest draft LLM call is bounded by the review-runner timeout (450s);
+# the digest lease is a crash fence just beyond that budget, not a heartbeat
+# window. A digest re-drive never waits longer than the meeting deadline.
+DIGEST_INTENT_LEASE_MS = 480_000
+_LEASE_MS_BY_ACTION = {
+    ACTION_RUN_DISCUSSION: DEFAULT_INTENT_LEASE_MS,
+    ACTION_RUN_DIGEST: DIGEST_INTENT_LEASE_MS,
+}
 
 _LOCK = threading.RLock()
 _WORKER_BOOT_ID = uuid.uuid4().hex
@@ -160,18 +176,43 @@ def record_intent(
     *,
     status: str,
     last_problem: str | None = None,
+    action_kind: str = ACTION_RUN_DISCUSSION,
+    source_hash: str = "",
+    deadline_at_ms: int = 0,
 ) -> dict[str, Any]:
-    """Append one durable intent record for the meeting discussion driver."""
+    """Append one durable intent record for a meeting driver action."""
 
     normalized_team_id = _require_id(team_id, "teamId")
     normalized_round_id = _require_id(meeting_round_id, "meetingRoundId")
     normalized_status = str(status or "").strip().lower()
     if normalized_status not in _VALID_STATUSES:
         raise MeetingDriverWorkError(f"unsupported driver work status: {status!r}")
+    normalized_action_kind = str(action_kind or "").strip()
+    if normalized_action_kind not in _ACTION_KINDS:
+        raise MeetingDriverWorkError(f"unsupported driver work actionKind: {action_kind!r}")
+    try:
+        normalized_deadline = int(deadline_at_ms)
+    except (TypeError, ValueError):
+        normalized_deadline = 0
+    if isinstance(deadline_at_ms, bool) or normalized_deadline <= 0:
+        normalized_deadline = 0
+    normalized_source_hash = str(source_hash or "").strip()
     now_ms = int(time.time() * 1000)
     with _LOCK:
-        previous = latest_intent(normalized_team_id, normalized_round_id)
+        previous = latest_intent(
+            normalized_team_id, normalized_round_id, action_kind=normalized_action_kind
+        )
         previous_attempts = _attempt_count(previous)
+        # Terminal records inherit the identity of the work they close out.
+        if not normalized_source_hash and isinstance(previous, Mapping):
+            normalized_source_hash = str(previous.get("sourceHash") or "").strip()
+        if not normalized_deadline and isinstance(previous, Mapping):
+            try:
+                inherited_deadline = int(previous.get("deadlineAtMs") or 0)
+            except (TypeError, ValueError):
+                inherited_deadline = 0
+            if inherited_deadline > 0:
+                normalized_deadline = inherited_deadline
         if normalized_status in {STATUS_PENDING, STATUS_RUNNING}:
             boot_id = worker_boot_id()
         else:
@@ -179,22 +220,28 @@ def record_intent(
                 str((previous or {}).get("workerBootId") or "").strip()
                 or worker_boot_id()
             )
+        if normalized_status == STATUS_RUNNING:
+            lease_ms = _LEASE_MS_BY_ACTION[normalized_action_kind]
+            lease_expires_at_ms = now_ms + lease_ms
+            # A re-drive must never outlive the governed meeting deadline.
+            if normalized_deadline and lease_expires_at_ms > normalized_deadline:
+                lease_expires_at_ms = normalized_deadline
+        else:
+            lease_expires_at_ms = 0
         record = {
             "schemaVersion": SCHEMA_VERSION,
             "workId": uuid.uuid4().hex,
             "teamId": normalized_team_id,
             "meetingRoundId": normalized_round_id,
-            "actionKind": ACTION_RUN_DISCUSSION,
+            "actionKind": normalized_action_kind,
             "status": normalized_status,
             "attemptCount": previous_attempts + (1 if normalized_status == STATUS_RUNNING else 0),
             "workerBootId": boot_id,
             "createdAtMs": now_ms,
             "updatedAtMs": now_ms,
-            "leaseExpiresAtMs": (
-                now_ms + DEFAULT_INTENT_LEASE_MS
-                if normalized_status == STATUS_RUNNING
-                else 0
-            ),
+            "leaseExpiresAtMs": lease_expires_at_ms,
+            "sourceHash": normalized_source_hash,
+            "deadlineAtMs": normalized_deadline,
             "lastProblem": str(last_problem or "").strip()[:_MAX_LAST_PROBLEM_LENGTH],
         }
         from core.web.services.team_workflow.storage_durability import append_jsonl_locked
@@ -321,8 +368,9 @@ def recover_challenge_meeting_drivers() -> dict[str, Any]:
 
     For every open/summarizing meeting: fence it through the existing
     terminal path when its ``challengeDeadlineAtMs`` has passed, re-enter
-    ``schedule_meeting_discussion`` when its durable intent shows an
-    interrupted run (foreign boot id or an expired lease), backfill the
+    ``schedule_meeting_discussion`` (open) or ``schedule_meeting_digest_redrive``
+    (summarizing) when its durable intent shows an interrupted run (foreign
+    boot id or an expired lease), backfill the
     governed deadline for challenge-identity meetings whose deadline was
     never persisted, and fence identity-less legacy orphans through the
     terminal path.  Idempotent: a second
@@ -405,6 +453,17 @@ def _recover_one_meeting(
             reason=_FENCE_REASON_DEADLINE,
         )
         return "fenced"
+    if str(meeting.get("status") or "").strip().lower() == "summarizing":
+        digest_work = latest_intent(
+            team_id, meeting_round_id, action_kind=ACTION_RUN_DIGEST
+        )
+        if digest_work is not None:
+            return _recover_one_digest(team_id, meeting_round_id, digest_work, now_ms)
+        if not has_deadline:
+            # Legacy summarizing hang with no durable digest work: keep the
+            # identity-gap closeout (backfill or legacy-orphan fence).
+            return _close_or_backfill_identity_gap(team_id, meeting_round_id, meeting)
+        return "skipped"
     work = latest_intent(team_id, meeting_round_id)
     if work is None:
         if has_deadline:
@@ -425,6 +484,36 @@ def _recover_one_meeting(
     from core.web.services.team_workflow import meeting_runtime
 
     result = meeting_runtime.schedule_meeting_discussion(team_id, meeting_round_id)
+    return "rescheduled" if str(result.get("status") or "") == "scheduled" else "skipped"
+
+
+def _recover_one_digest(
+    team_id: str,
+    meeting_round_id: str,
+    work: Mapping[str, Any],
+    now_ms: int,
+) -> str:
+    """Re-drive an interrupted digest draft for a summarizing meeting.
+
+    Same decision table as the discussion path: pending or interrupted
+    (foreign boot / expired lease — the lease is clamped to the meeting
+    deadline, so a lapsed deadline reads as stale) work is re-driven once
+    through the bounded digest re-drive entry point; failed work stops at
+    the shared attempt cap and stays auditable for the ordinary UI retry.
+    """
+
+    status = str(work.get("status") or "").strip().lower()
+    stale_boot = str(work.get("workerBootId") or "") != worker_boot_id()
+    should_reschedule = (
+        status == STATUS_PENDING
+        or (status == STATUS_RUNNING and (stale_boot or _lease_expired(work, now_ms)))
+        or (status == STATUS_FAILED and _attempt_count(work) < MAX_AUTO_RESCHEDULE_ATTEMPTS)
+    )
+    if not should_reschedule:
+        return "skipped"
+    from core.web.services.team_workflow import meeting_runtime
+
+    result = meeting_runtime.schedule_meeting_digest_redrive(team_id, meeting_round_id)
     return "rescheduled" if str(result.get("status") or "") == "scheduled" else "skipped"
 
 

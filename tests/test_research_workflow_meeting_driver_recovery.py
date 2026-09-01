@@ -14,7 +14,13 @@ closed meetings are untouched; open meetings without any durable work record
 are split by identity: challenge-identity meetings get the governed deadline
 backfilled, while identity-less legacy orphans are fenced through the
 terminal path because no governed deadline can ever be derived for them;
-failed work at the attempt cap is left auditable instead of retried.
+failed work at the attempt cap is left auditable instead of retried.  Digest
+drafts are durable work too (T3): ``draft_meeting_digest`` records a
+``run_digest`` intent carrying the source hash and the meeting's governed
+deadline, and the sweep re-drives interrupted digest drafts for summarizing
+meetings through ``schedule_meeting_digest_redrive`` — blocked re-drives
+finalize as failed, fresh same-boot leases are trusted, and summarizing
+meetings without any digest intent keep the legacy identity-gap behavior.
 
 All discussion content comes from fake runners (DEV fixtures); no real model
 or network is involved.
@@ -73,6 +79,8 @@ def _isolate(tmp_path, monkeypatch):
     meeting_driver_work.reset_for_tests()
     with meeting_runtime._MEETING_DISCUSSION_JOBS_LOCK:
         meeting_runtime._MEETING_DISCUSSION_JOBS.clear()
+    with meeting_runtime._MEETING_DIGEST_JOBS_LOCK:
+        meeting_runtime._MEETING_DIGEST_JOBS.clear()
 
 
 def _team(tmp_path, monkeypatch) -> tuple[str, list[str]]:
@@ -702,6 +710,8 @@ def _append_intent(team_id: str, meeting_round_id: str, **overrides) -> dict:
         "createdAtMs": now_ms,
         "updatedAtMs": now_ms,
         "leaseExpiresAtMs": 0,
+        "sourceHash": "",
+        "deadlineAtMs": 0,
         "lastProblem": "",
     }
     record.update(overrides)
@@ -853,3 +863,247 @@ def test_driver_wrapper_runs_lease_heartbeat_around_discussion(tmp_path, monkeyp
     assert heartbeats[0][2].is_set()
     completed = meeting_driver_work.latest_intent(team_id, meeting["meetingRoundId"])
     assert completed["status"] == "completed"
+
+
+def test_recovery_redrives_stale_digest_and_trusts_fresh_lease(tmp_path, monkeypatch):
+    _isolate(tmp_path, monkeypatch)
+    team_id, agent_ids = _team(tmp_path, monkeypatch)
+
+    # Case A: the digest LLM call was interrupted by a process restart. The
+    # running record belongs to a foreign boot, so the sweep re-drives it
+    # through the real idempotent summary-draft state machine; the meeting has
+    # no completed discussion output, so the re-drive finalizes as blocked.
+    interrupted = _amend_meeting(
+        team_id,
+        _create_open_meeting(team_id, agent_ids, "meeting-digest-stale"),
+        status="summarizing",
+    )
+    _append_intent(
+        team_id,
+        interrupted["meetingRoundId"],
+        actionKind=meeting_driver_work.ACTION_RUN_DIGEST,
+        workerBootId="foreign-boot",
+        leaseExpiresAtMs=int(time.time() * 1000) + 60_000,
+        sourceHash="a" * 64,
+    )
+
+    # Case B: digest work already failed at the attempt cap: left auditable.
+    capped = _amend_meeting(
+        team_id,
+        _create_open_meeting(team_id, agent_ids, "meeting-digest-cap"),
+        status="summarizing",
+    )
+    _append_intent(
+        team_id,
+        capped["meetingRoundId"],
+        actionKind=meeting_driver_work.ACTION_RUN_DIGEST,
+        status="failed",
+        attemptCount=3,
+        lastProblem="digest_redrive_blocked:discussion_has_no_completed_messages",
+    )
+
+    # Case C: a digest draft still inside its crash-fence lease is trusted.
+    healthy = _amend_meeting(
+        team_id,
+        _create_open_meeting(team_id, agent_ids, "meeting-digest-fresh"),
+        status="summarizing",
+    )
+    meeting_driver_work.record_intent(
+        team_id,
+        healthy["meetingRoundId"],
+        status="running",
+        action_kind=meeting_driver_work.ACTION_RUN_DIGEST,
+        source_hash="b" * 64,
+    )
+
+    discussion_calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        meeting_runtime, "run_meeting_discussion", _recorder(discussion_calls)
+    )
+    executor = _InlineExecutor()
+    monkeypatch.setattr(meeting_runtime, "_MEETING_DISCUSSION_EXECUTOR", executor)
+
+    summary = meeting_driver_work.recover_challenge_meeting_drivers()
+
+    assert summary["meetingsScanned"] == 3
+    assert summary["rescheduled"] == 1
+    assert summary["skipped"] == 2
+    assert summary["fenced"] == 0
+    assert summary["backfilled"] == 0
+    # A digest re-drive never layers a second discussion driver on top.
+    assert discussion_calls == []
+    assert len(executor.submissions) == 1
+    redriven = meeting_driver_work.latest_intent(
+        team_id,
+        interrupted["meetingRoundId"],
+        action_kind=meeting_driver_work.ACTION_RUN_DIGEST,
+    )
+    assert redriven["status"] == "failed"
+    assert (
+        redriven["lastProblem"]
+        == "digest_redrive_blocked:discussion_has_no_completed_messages"
+    )
+    # The blocked finalization inherited the identity of the interrupted work.
+    assert redriven["sourceHash"] == "a" * 64
+    assert redriven["workerBootId"] == "foreign-boot"
+    # Digest work never enters the discussion namespace.
+    assert (
+        meeting_driver_work.latest_intent(team_id, interrupted["meetingRoundId"])
+        is None
+    )
+    assert (
+        meeting_driver_work.latest_intent(
+            team_id,
+            healthy["meetingRoundId"],
+            action_kind=meeting_driver_work.ACTION_RUN_DIGEST,
+        )["status"]
+        == "running"
+    )
+    assert (
+        meetings.get_meeting_round(team_id, interrupted["meetingRoundId"])[
+            "meetingRound"
+        ]["status"]
+        == "summarizing"
+    )
+
+
+def test_digest_roundtrip_persists_source_hash_and_reuse_redrive_completes(
+    tmp_path, monkeypatch
+):
+    _isolate(tmp_path, monkeypatch)
+    team_id, agent_ids = _team(tmp_path, monkeypatch)
+    opened = meeting_runtime.open_hypothesis_review_meeting(
+        team_id,
+        _selection_payload(agent_ids, "meeting-digest-durable"),
+        agent_runner=_marker_runner,
+        background=False,
+    )
+    meeting_round_id = opened["meetingRound"]["meetingRoundId"]
+    meetings.begin_meeting_summary(team_id, meeting_round_id, actor=agent_ids[0])
+    drafted = meeting_runtime.draft_meeting_digest(team_id, meeting_round_id)
+    assert drafted["status"] == "awaiting_approval"
+
+    stored = meetings.get_meeting_round(team_id, meeting_round_id)["meetingRound"]
+    source_hash = str(stored["digestDraft"]["sourceMessageContentHash"] or "")
+    assert source_hash
+    intent = meeting_driver_work.latest_intent(
+        team_id, meeting_round_id, action_kind=meeting_driver_work.ACTION_RUN_DIGEST
+    )
+    assert intent["status"] == "completed"
+    assert intent["sourceHash"] == source_hash
+    assert intent["attemptCount"] == 1
+    assert meeting_driver_work.latest_intent(team_id, meeting_round_id) is None
+
+    # Replay the hang shape: the draft landed but the process died before the
+    # intent was closed out. The re-drive must reuse the hash-matched draft
+    # instead of paying for a second model call.
+    _amend_meeting(team_id, stored, status="summarizing")
+    _append_intent(
+        team_id,
+        meeting_round_id,
+        workId="work-staged-digest-crash",
+        actionKind=meeting_driver_work.ACTION_RUN_DIGEST,
+        leaseExpiresAtMs=int(time.time() * 1000) - 1000,
+        sourceHash=source_hash,
+    )
+
+    def _no_second_model_call(*_args, **_kwargs):
+        raise AssertionError("digest re-drive must reuse the hash-matched draft")
+
+    monkeypatch.setattr(meeting_runtime, "draft_meeting_digest", _no_second_model_call)
+    executor = _InlineExecutor()
+    monkeypatch.setattr(meeting_runtime, "_MEETING_DISCUSSION_EXECUTOR", executor)
+
+    summary = meeting_driver_work.recover_challenge_meeting_drivers()
+
+    assert summary["meetingsScanned"] == 1
+    assert summary["rescheduled"] == 1
+    assert summary["fenced"] == 0
+    assert len(executor.submissions) == 1
+    recovered = meetings.get_meeting_round(team_id, meeting_round_id)["meetingRound"]
+    assert recovered["status"] == "awaiting_approval"
+    finalized = meeting_driver_work.latest_intent(
+        team_id, meeting_round_id, action_kind=meeting_driver_work.ACTION_RUN_DIGEST
+    )
+    assert finalized["status"] == "completed"
+    assert finalized["sourceHash"] == source_hash
+
+    # Idempotent: the meeting left the summarizing window, so a second sweep
+    # submits nothing even though the completed record is the latest state.
+    second = meeting_driver_work.recover_challenge_meeting_drivers()
+    assert second["meetingsScanned"] == 0
+    assert second["rescheduled"] == 0
+    assert len(executor.submissions) == 1
+
+
+def test_digest_intent_lease_clamps_to_deadline_and_inherits_identity(
+    tmp_path, monkeypatch
+):
+    _isolate(tmp_path, monkeypatch)
+    team_id = "team-digest-store"
+    round_id = "meeting-digest-store"
+    digest = meeting_driver_work.ACTION_RUN_DIGEST
+
+    with pytest.raises(meeting_driver_work.MeetingDriverWorkError):
+        meeting_driver_work.record_intent(
+            team_id, round_id, status="running", action_kind="run_review"
+        )
+
+    now_ms = int(time.time() * 1000)
+    deadline = now_ms + 5_000
+    pending = meeting_driver_work.record_intent(
+        team_id,
+        round_id,
+        status="pending",
+        action_kind=digest,
+        source_hash="f" * 64,
+        deadline_at_ms=deadline,
+    )
+    assert pending["leaseExpiresAtMs"] == 0
+    assert pending["sourceHash"] == "f" * 64
+    assert pending["deadlineAtMs"] == deadline
+
+    # The crash fence never outlives the governed meeting deadline.
+    running = meeting_driver_work.record_intent(
+        team_id, round_id, status="running", action_kind=digest
+    )
+    assert running["leaseExpiresAtMs"] == deadline
+    assert running["attemptCount"] == 1
+    assert running["sourceHash"] == "f" * 64
+
+    failed = meeting_driver_work.record_intent(
+        team_id,
+        round_id,
+        status="failed",
+        action_kind=digest,
+        last_problem="RuntimeError: digest exploded",
+    )
+    assert failed["leaseExpiresAtMs"] == 0
+    assert failed["sourceHash"] == "f" * 64
+    assert failed["deadlineAtMs"] == deadline
+    assert failed["attemptCount"] == 1
+
+    # A generous deadline keeps the full digest crash-fence lease.
+    roomy = meeting_driver_work.record_intent(
+        team_id,
+        "meeting-digest-roomy",
+        status="running",
+        action_kind=digest,
+        deadline_at_ms=now_ms + 3_600_000,
+    )
+    assert roomy["leaseExpiresAtMs"] >= now_ms + meeting_driver_work.DIGEST_INTENT_LEASE_MS
+    assert roomy["leaseExpiresAtMs"] < roomy["deadlineAtMs"]
+
+    # The two action kinds keep separate durable timelines per meeting.
+    discussion = meeting_driver_work.record_intent(
+        team_id, round_id, status="running", action_kind=meeting_driver_work.ACTION_RUN_DISCUSSION
+    )
+    assert discussion["leaseExpiresAtMs"] == (
+        discussion["createdAtMs"] + meeting_driver_work.DEFAULT_INTENT_LEASE_MS
+    )
+    assert (
+        meeting_driver_work.latest_intent(team_id, round_id, action_kind=digest)[
+            "status"
+        ]
+        == "failed"
+    )
