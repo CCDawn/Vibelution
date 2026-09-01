@@ -7,7 +7,10 @@ sweep ``recover_challenge_meeting_drivers`` fences deadline-expired open
 meetings through the existing terminal path (no partial digest promoted),
 re-drives interrupted discussions after a simulated process restart, and
 stays idempotent across consecutive runs.  Awaiting-approval / closed
-meetings and open meetings without any durable work record are untouched;
+meetings are untouched; open meetings without any durable work record are
+split by identity: challenge-identity meetings get the governed deadline
+backfilled, while identity-less legacy orphans are fenced through the
+terminal path because no governed deadline can ever be derived for them;
 failed work at the attempt cap is left auditable instead of retried.
 
 All discussion content comes from fake runners (DEV fixtures); no real model
@@ -409,7 +412,137 @@ def test_recovery_fences_expired_open_meeting_without_promoting_digest(
     )
 
 
-def test_recovery_leaves_awaiting_approval_closed_and_unrecorded_meetings_alone(
+def _amend_meeting(team_id: str, meeting: dict, **fields) -> dict:
+    """Append an amended record to stage a shape ``create_meeting_round`` cannot.
+
+    Mirrors ``_expire_deadline``: the append-only store's latest-wins read is
+    the staging mechanism, so pre-policy / mid-lifecycle shapes are produced by
+    appending an amended record rather than patching removed constants.
+    """
+
+    amended = {**meeting, **fields}
+    with meetings._LOCK:
+        meetings._append_round_record(team_id, amended)
+    return amended
+
+
+def test_recovery_fences_legacy_orphan_meetings_without_identity(
+    tmp_path, monkeypatch
+):
+    _isolate(tmp_path, monkeypatch)
+    team_id, agent_ids = _team(tmp_path, monkeypatch)
+
+    # A bare open meeting created before the identity contract: no scope
+    # authority, no receipt authority, and therefore no possible deadline.
+    orphan_open = _create_open_meeting(team_id, agent_ids, "meeting-orphan-open")
+    # The production hang shape: stuck in ``summarizing`` with a draft error
+    # and no driver that can ever advance it.
+    orphan_stuck = _create_open_meeting(team_id, agent_ids, "meeting-orphan-stuck")
+    _amend_meeting(
+        team_id,
+        orphan_stuck,
+        status="summarizing",
+        summaryDraftError={
+            "code": "summary_draft_timeout",
+            "message": "digest draft timed out after 450s",
+        },
+    )
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(meeting_runtime, "run_meeting_discussion", _recorder(calls))
+
+    summary = meeting_driver_work.recover_challenge_meeting_drivers()
+
+    assert summary["meetingsScanned"] == 2
+    assert summary["fenced"] == 2
+    assert summary["backfilled"] == 0
+    assert summary["rescheduled"] == 0
+    assert summary["skipped"] == 0
+    assert calls == []
+    for meeting_round_id in (
+        orphan_open["meetingRoundId"],
+        orphan_stuck["meetingRoundId"],
+    ):
+        terminal = meetings.get_meeting_round(team_id, meeting_round_id)["meetingRound"]
+        assert terminal["status"] == "closed"
+        assert terminal["executionStatus"] == "stopped"
+        assert terminal["terminalReason"] == "legacy_orphan_closeout"
+        assert terminal["closedBy"] == "system:challenge-execution-fence"
+        assert (
+            meeting_driver_work.latest_intent(team_id, meeting_round_id) is None
+        )
+    # No partial digest was promoted by the legacy fence.
+    digests_path = meetings._rounds_path(team_id).with_name("meeting_digests.jsonl")
+    assert not digests_path.exists()
+
+    # Idempotent: fenced meetings are now closed, so a second sweep scans none.
+    second = meeting_driver_work.recover_challenge_meeting_drivers()
+    assert second["meetingsScanned"] == 0
+    assert second["fenced"] == 0
+    assert calls == []
+
+
+def test_recovery_backfills_deadline_for_identity_meeting_missing_policy(
+    tmp_path, monkeypatch
+):
+    _isolate(tmp_path, monkeypatch)
+    team_id, agent_ids = _team(tmp_path, monkeypatch)
+    meeting = _create_open_meeting(
+        team_id,
+        agent_ids,
+        "meeting-backfill",
+        modelInvocationReceiptAuthority={
+            "schemaVersion": 1,
+            "authorityKind": "workflow_run",
+            "teamId": team_id,
+            "questionId": "SCI-096",
+            "workflowRunId": "run-backfill",
+            "workflowId": "challenge-cup-research",
+            "workflowVersionId": "wv-backfill",
+            "modelPolicySha256": "c" * 64,
+        },
+    )
+    assert meeting["challengeDeadlineAtMs"] > 0
+    # Strip the persisted policy to reproduce a pre-policy identity meeting:
+    # challenge identity present, governed deadline absent.
+    _amend_meeting(
+        team_id,
+        meeting,
+        challengeDeadlineAtMs=0,
+        meetingDeadlineAtMs=0,
+        deadlinePolicyVersion="",
+    )
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(meeting_runtime, "run_meeting_discussion", _recorder(calls))
+
+    summary = meeting_driver_work.recover_challenge_meeting_drivers()
+
+    assert summary["meetingsScanned"] == 1
+    assert summary["backfilled"] == 1
+    assert summary["fenced"] == 0
+    assert summary["rescheduled"] == 0
+    assert calls == []
+    restored = meetings.get_meeting_round(team_id, meeting["meetingRoundId"])[
+        "meetingRound"
+    ]
+    # The meeting stays open and now carries a future governed deadline.
+    assert restored["status"] == "open"
+    assert restored["challengeDeadlineAtMs"] > int(time.time() * 1000)
+    assert (
+        meeting_driver_work.latest_intent(team_id, meeting["meetingRoundId"]) is None
+    )
+
+    # Idempotent: the backfilled deadline is in the future and there is no
+    # durable intent, so the second sweep leaves the meeting untouched.
+    second = meeting_driver_work.recover_challenge_meeting_drivers()
+    assert second["meetingsScanned"] == 1
+    assert second["backfilled"] == 0
+    assert second["fenced"] == 0
+    assert second["skipped"] == 1
+    assert calls == []
+
+
+def test_recovery_leaves_awaiting_approval_and_closed_meetings_alone(
     tmp_path, monkeypatch
 ):
     _isolate(tmp_path, monkeypatch)
@@ -432,17 +565,17 @@ def test_recovery_leaves_awaiting_approval_closed_and_unrecorded_meetings_alone(
     meetings.terminate_meeting_execution(
         team_id, closed["meetingRoundId"], reason="challenge_workflow_run_cancelled"
     )
-    untouched = _create_open_meeting(team_id, agent_ids, "meeting-no-work-record")
     calls: list[tuple[str, str]] = []
     monkeypatch.setattr(meeting_runtime, "run_meeting_discussion", _recorder(calls))
 
     summary = meeting_driver_work.recover_challenge_meeting_drivers()
 
-    # Only the deadline-free open meeting without a work record is scanned.
-    assert summary["meetingsScanned"] == 1
+    # Both terminal meetings sit outside the open/summarizing scan window.
+    assert summary["meetingsScanned"] == 0
     assert summary["rescheduled"] == 0
     assert summary["fenced"] == 0
-    assert summary["skipped"] == 1
+    assert summary["backfilled"] == 0
+    assert summary["skipped"] == 0
     assert calls == []
     assert (
         meetings.get_meeting_round(team_id, awaiting_id)["meetingRound"]["status"]
@@ -453,12 +586,6 @@ def test_recovery_leaves_awaiting_approval_closed_and_unrecorded_meetings_alone(
             "status"
         ]
         == "closed"
-    )
-    assert (
-        meetings.get_meeting_round(team_id, untouched["meetingRoundId"])["meetingRound"][
-            "status"
-        ]
-        == "open"
     )
 
 
@@ -532,6 +659,7 @@ def test_recovery_is_idempotent_across_consecutive_runs(tmp_path, monkeypatch):
         "teams": 1,
         "meetingsScanned": 2,
         "fenced": 1,
+        "backfilled": 0,
         "rescheduled": 1,
         "skipped": 0,
     }
@@ -543,6 +671,7 @@ def test_recovery_is_idempotent_across_consecutive_runs(tmp_path, monkeypatch):
     assert second["teams"] == 1
     assert second["meetingsScanned"] == 1
     assert second["fenced"] == 0
+    assert second["backfilled"] == 0
     assert second["rescheduled"] == 0
     assert second["skipped"] == 1
     assert len(executor.submissions) == 1
