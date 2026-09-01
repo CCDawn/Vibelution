@@ -9507,6 +9507,100 @@ def test_finding_close_first_step_writeback_batch_limit_and_replay(tmp_path, mon
     assert data_processing_service.list_records(run_id)["summary"]["recordCount"] == 4
 
 
+def test_finding_running_writebacks_materialize_and_close_at_frozen_lead_limit(
+    tmp_path,
+    monkeypatch,
+):
+    """Two rolling batches persist immediately and the frozen cap closes the task."""
+    env = _finding_close_first_step_task(tmp_path, monkeypatch)
+    team = env["team"]
+    run_id = env["runId"]
+    task = env["task"]
+    perspectives = [
+        "mechanism",
+        "independent_baseline",
+        "limitation_or_null",
+        "falsification",
+    ]
+
+    def _batch(offset: int):
+        return {
+            "status": "running",
+            "summary": f"滚动写回第 {offset // 4 + 1} 批候选线索。",
+            "result": {
+                "candidateLeads": [
+                    {
+                        "title": f"Bounded source {index}",
+                        "locator": f"https://example.test/bounded-{index}",
+                        "sourceType": "paper",
+                        "summary": f"Bounded evidence summary {index}",
+                        "query": f"bounded query {index}",
+                        "perspective": perspectives[index % len(perspectives)],
+                    }
+                    for index in range(offset, offset + 4)
+                ],
+                "invalidSources": [],
+            },
+        }
+
+    for tool_name in ("source_collection_context_tool", "batch_web_search_tool"):
+        append_conversation_event(
+            tmp_path,
+            task["sessionId"],
+            task["turn"]["turnId"],
+            "tool_result",
+            status="done",
+            payload={
+                "toolCall": {
+                    "name": tool_name,
+                    "status": "done",
+                    "args": {"task_id": task["taskId"]},
+                    "result": "stage tool completed",
+                }
+            },
+        )
+
+    first = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        team["teamId"],
+        task["taskId"],
+        _batch(0),
+    )
+    assert first["writeback"]["status"] == "running"
+    assert first["writeback"]["materializedSources"]["createdRecordCount"] == 4
+    assert data_processing_service.list_records(run_id)["summary"]["recordCount"] == 4
+    append_conversation_event(
+        tmp_path,
+        task["sessionId"],
+        task["turn"]["turnId"],
+        "tool_result",
+        status="done",
+        payload={
+            "toolCall": {
+                "name": "source_collection_stage_writeback_tool",
+                "status": "done",
+                "args": {"task_id": task["taskId"]},
+                "result": "first rolling batch materialized",
+            }
+        },
+    )
+
+    second = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        team["teamId"],
+        task["taskId"],
+        _batch(4),
+    )
+    assert second["writeback"]["agentRequestedStatus"] == "running"
+    assert second["writeback"]["status"] == "completed", {
+        "status": second["writeback"]["status"],
+        "closureSummary": second["writeback"]["closureSummary"],
+        "taskToolProgress": second["task"]["taskToolProgress"],
+    }
+    assert second["writeback"]["autoCloseReason"] == "finding_search_envelope_saturated"
+    assert second["task"]["status"] == "completed"
+    assert len(second["task"]["sourceCollectionWritebackBatches"]) == 2
+    assert data_processing_service.list_records(run_id)["summary"]["recordCount"] == 8
+
+
 def test_finding_close_first_step_writeback_rejects_oversized_lead_batch(tmp_path, monkeypatch):
     """单批 candidateLeads[] 超过每批上限即拒绝整批，不物化任何来源。"""
     env = _finding_close_first_step_task(tmp_path, monkeypatch)

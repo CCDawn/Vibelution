@@ -302,7 +302,21 @@ def writeback_source_collection_stage_session_task(
         run_id,
         task,
         writeback,
+        incoming_result=incoming_result_payload,
     )
+    if status == "running":
+        from .writeback_materialize import (
+            source_collection_finding_writeback_close_status,
+        )
+
+        finding_close_status = source_collection_finding_writeback_close_status(
+            task,
+            writeback["result"],
+        )
+        if finding_close_status:
+            status = finding_close_status
+            writeback["status"] = status
+            writeback["autoCloseReason"] = "finding_search_envelope_saturated"
     materialized_content_extraction = s._materialize_source_collection_stage_writeback_content_extraction(
         normalized_team_id,
         run_id,
