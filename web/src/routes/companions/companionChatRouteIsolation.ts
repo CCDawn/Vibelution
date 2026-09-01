@@ -1,11 +1,28 @@
 import type {
   AgentInstance,
   SessionSummary,
+  VirtualHumanCompanion,
   VirtualHumanCompanionActivity,
 } from "../../api/types";
 
 function isCompanionAgent(agent: AgentInstance) {
   return agent.metadata?.virtualHumanCompanion === true;
+}
+
+export function companionRouteBindingIsVerified(
+  companions: readonly Pick<VirtualHumanCompanion, "agentId" | "directSessionId">[] | undefined,
+  agentId: string,
+  sessionId: string,
+) {
+  const normalizedAgentId = String(agentId || "").trim();
+  const normalizedSessionId = String(sessionId || "").trim();
+  if (!normalizedAgentId || !normalizedSessionId) {
+    return false;
+  }
+  return (companions ?? []).some((companion) => (
+    String(companion.agentId || "").trim() === normalizedAgentId
+    && String(companion.directSessionId || "").trim() === normalizedSessionId
+  ));
 }
 
 export function companionAgentIdForDirectSession(

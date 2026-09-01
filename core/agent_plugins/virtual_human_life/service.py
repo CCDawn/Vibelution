@@ -4138,7 +4138,11 @@ class VirtualHumanLifeService:
                         )
                     changed = True
                     continue
-                if status not in {"candidate", "reserved", "delivering"}:
+                # validUntil bounds candidate/admission freshness. Once the
+                # native Session has admitted the Turn, its worker and Journal
+                # own completion or cancellation; slow model output must not
+                # retroactively expire an in-flight native Turn.
+                if status not in {"candidate", "reserved"}:
                     continue
                 expires_at = _parse_datetime(row.get("expiresAt") or row.get("validUntil"))
                 if expires_at is None or current <= expires_at:
@@ -4147,11 +4151,7 @@ class VirtualHumanLifeService:
                     **row,
                     "status": "expired",
                     "expiredAt": _iso(current),
-                    "expiryReason": (
-                        "delivery_unconfirmed_before_expiry"
-                        if status == "delivering"
-                        else "candidate_window_elapsed"
-                    ),
+                    "expiryReason": "candidate_window_elapsed",
                     "updatedAt": _iso(current),
                 }
                 expired_tokens.append(delivery_token)
@@ -4329,8 +4329,11 @@ class VirtualHumanLifeService:
             return False
         if int(attempt.get("bindingRevision") or 0) != int(binding_revision):
             return False
-        if str(attempt.get("status") or "") not in {"reserved", "delivering"}:
+        status = str(attempt.get("status") or "")
+        if status not in {"reserved", "delivering"}:
             return False
+        if status == "delivering":
+            return True
         valid_until = _parse_datetime(attempt.get("validUntil"))
         return valid_until is None or self._now() <= valid_until
 
