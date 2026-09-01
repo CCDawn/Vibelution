@@ -37,8 +37,21 @@
 - **10-parallel 线独占**：`hypothesis_first_chain.py` 编排并发（C 系列延续）、LLM 总闸/限速、runtime 单例/lease。两线通过 main 提交互相同步；D2 端到端验收作为分片改造的前置基线，分片落地后复跑即回归。
 - **止血与根治的关系**：`hf-digest-lock-timeout`（锁获取超时 + in-process watchdog + 前端失败可见）在分片落地前保护现场，分片落地后超时防御保留为纵深（不再承担主要吞吐职责）。
 
-## 6. 开放问题（调研定稿）
+## 6. 开放问题（调研后状态）
 
 - 全量读方的完整清单与各自一致性要求（强一致 vs 可最终一致）。
 - 幽灵锁根因（无人持有却不可获取）未定位；分片消除全局锁后该风险面收缩到单分片，超时观测事件（hf-digest-lock-timeout）继续留证。
 - 分片文件的清理语义：重置本题 / 题目删除时分片文件与旧只读源的处理。
+
+## 7. 调研定稿（2026-09-02，已合入 main 的调研结论）
+
+影响面调研已完成，关键结论与追加决策：
+
+- **外部直读：无**。仓外/前端均走 API；仓内仅 3 处路径级依赖需随批改造：meeting_driver_work.py:590（glob 跨 team 枚举）、hypothesis_first_chain.py:4650-4655（trail 缓存 mtime 戳）、hypothesis_first_state_v2.py:206-225（state_v2 文件 cursor stat）。后两者若漏改会出现「缓存永不失效或恒失效」。
+- **全量读方 9 处**（REST 列表、state_v2 投影、启动清扫 sweep、anomaly inbox TTL、chain 5 处按题扫描、query_service、reset live adapter、reset_question_chain）统一经 `list_meeting_rounds` facade → 分片后由「目录扫描 + 旧文件只读源」合并视图实现，全量读方零改动（只改 facade 内部）。单会议读方（30+ 处）天然分片友好。
+- **写方 18 处**全部已确认在 `_LOCK` 内 append 路径上；两个例外显式处理：(1) `reset_question_chain`（chain.py:872-964）是唯一绕过 append 的四锁重写，改为「按分片删除 + 旧源保留」，锁序维持 chain→selection→meeting→hypothesis_rounds 不成环；(2) `_persist_closure_artifacts` 锁内嵌套 personal_memory_candidates 锁，随分片把该调用移到分片锁外。
+- **锁序确认**：summary_lock → meeting_rounds._LOCK 固定、无反序路径；chat→_LOCK 单向。今晨幽灵死锁不属于已知锁序环，分片后该风险面收缩到单分片，超时观测（hf-digest-lock-timeout）继续留证。
+- **测试迁移清单**（直读文件形态，随批改）：test_research_workflow_meeting_rounds.py:342/:376、test_research_workflow_hypothesis_first_chain.py:5919/:3194-3208/:3276、test_challenge_review_budget_consistency.py:264、test_research_workflow_meeting_driver_recovery.py:251/:420/:488、`_digests_path/_decisions_path` monkeypatch 签名 5 处、test_research_workflow_hypothesis_first_e2e.py:700-704。服务层测试零改动预期通过。
+- **storage inventory 基线**（分片改动前，2026-09-02）：instance bcabd5ca，totalFiles 12443，aggregateSha256 `c73299cb54a88f7414153b2f090e5d935070301a366586dc13a2cc3c669175c4`。
+- **实施顺序**：hf-digest-lock-timeout（同文件止血）与 hf-sibling-archive-gate（state_v2 同文件）先合入 main，分片批 rebase 其上——分片锁改造吸收/替换全局 `_bounded_lock` 包装，避免互相踩踏。
+- **范围确认**：本批对象为 meeting_rounds + meeting_digests + decision_records 三件套（同一 `_LOCK` 域）；其余 8 个同模式存储（driver_work、chain、selection、rounds、pmc、shadow/policy、chat rooms、circuit 账本）后续批次按同图纸迁移。
