@@ -142,9 +142,12 @@ def _binding_mismatch(
 
 def _fragment_ref(fragment: HypothesisFragment) -> str:
     supplied = _text(fragment.provenance.get("artifactRef"))
+    # Mirrors the writer's artifact identity, which is attempt-scoped so a
+    # retry-improved fragment never collides with its superseded attempt.
     return supplied or (
         f"hypothesis_fragment:{fragment.selectionId}:"
-        f"{fragment.candidateId}:{fragment.nodeRunId}"
+        f"{fragment.candidateId}:{fragment.nodeRunId}:"
+        f"{fragment.sessionAttempt}"
     )
 
 
@@ -158,6 +161,11 @@ def aggregate_hypothesis_fragments(
     Input order is intentionally ignored.  Selection order is the sole order
     used for both the candidate list and provenance anchors, making replay and
     content hashes stable across concurrent completion order.
+
+    When the scope does not pin ``sessionAttempt``, a candidate may supply one
+    fragment per retry attempt; the latest attempt wins and superseded
+    fragments stay as history.  Fragments sharing one candidate and attempt
+    remain a duplicate error.
     """
     selection_payload = _selection_fields(selection)
     selection_id = _text(selection_payload.get("selectionId"))
@@ -230,8 +238,18 @@ def aggregate_hypothesis_fragments(
                 "Hypothesis fragment provenance scope mismatch for candidate "
                 + item.candidateId
             )
-        if item.candidateId in parsed:
-            raise ValueError("duplicate hypothesis fragment for candidate " + item.candidateId)
+        existing = parsed.get(item.candidateId)
+        if existing is not None:
+            # A formal retry keeps the superseded attempt's fragment as
+            # history.  Unless the scope pins one attempt, the latest
+            # attempt wins and older fragments are ignored; two fragments
+            # on the same attempt are still a genuine duplicate.
+            if item.sessionAttempt == existing.sessionAttempt:
+                raise ValueError(
+                    "duplicate hypothesis fragment for candidate " + item.candidateId
+                )
+            if item.sessionAttempt < existing.sessionAttempt:
+                continue
         parsed[item.candidateId] = item
     missing = [candidate_id for candidate_id in selected if candidate_id not in parsed]
     if missing:

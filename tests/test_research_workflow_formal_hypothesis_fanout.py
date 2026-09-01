@@ -1703,7 +1703,7 @@ def test_formal_retry_reuses_successful_children_and_rebinds_replayed_fragments(
             assert provenance["replayedFromNodeRunId"] == "node-1"
             assert provenance["replayedFromTaskId"] == f"task-{candidate_id}"
             assert provenance["replayedFromFragmentRef"].endswith(
-                f":{candidate_id}:node-1"
+                f":{candidate_id}:node-1:1"
             )
 
         hypothesis_sets = workflow_artifact_store.list_workflow_artifacts(

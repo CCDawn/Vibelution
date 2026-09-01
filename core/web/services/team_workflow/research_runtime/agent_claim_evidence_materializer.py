@@ -126,18 +126,58 @@ def _materializable_claims(task: dict[str, Any]) -> Iterable[tuple[dict[str, Any
                     break
 
 
+def _ledger_claim_id(
+    *,
+    question_scope: Mapping[str, Any],
+    claim_text: str,
+    candidate_id: str,
+) -> str:
+    """Deterministic, candidate-dimensioned ledger claim id.
+
+    The ledger's own seed hashes only (claim, scopeHash, createdBy), so two
+    hypothesis candidates whose statements are byte-identical would share one
+    claim row and merge their evidence into a single belief entry.  The
+    materializer therefore proposes an explicit id that also binds the
+    candidate dimension: the same candidate replaying the same claim text
+    still reuses its row, while a sibling candidate with identical text gets
+    its own row and belief entry.
+    """
+    normalized_candidate = _text(candidate_id)
+    if not normalized_candidate:
+        raise EvidenceMaterializationError(
+            "claim ledger proposal requires a candidate dimension"
+        )
+    seed = _sha256(
+        {
+            **{field: _text(question_scope.get(field)) for field in _LEDGER_SCOPE_FIELDS},
+            "agentId": _text(question_scope.get("agentId")),
+            "mode": _text(question_scope.get("mode")).lower(),
+            "claim": claim_text,
+            "candidateId": normalized_candidate,
+        }
+    )
+    return f"claim-{seed[:20]}"
+
+
 def _propose_ledger_claim(
     *,
     team_id: str,
     question_scope: Mapping[str, Any],
     claim_text: str,
+    candidate_id: str = "",
 ) -> dict[str, Any]:
     """Propose one anchored claim in the question-scoped claim ledger.
 
-    Idempotent by ledger contract: identical claim content under the same
-    scope reuses the deterministic ledger claim id.  Failures are surfaced as
-    ``EvidenceMaterializationError`` instead of being swallowed, so an
-    unproposable claim can never silently skip the claim belief gate.
+    Hypothesis candidate core claims must pass ``candidate_id``: the ledger's
+    own seed hashes only (claim, scopeHash, createdBy), so byte-identical
+    candidate statements would otherwise share one claim row and merge their
+    evidence into a single belief entry.  Source fact claims deliberately omit
+    the dimension so identical facts across source candidates still collapse
+    into one ledger row (the reconcile contract asserts that dedup, and fact
+    rows never enter the hypothesis candidates' strict gate path).  Failures
+    are surfaced as ``EvidenceMaterializationError`` instead of being
+    swallowed, so an unproposable claim can never silently skip the claim
+    belief gate.
     """
     from core.web.services.team_workflow import claim_ledger
 
@@ -158,6 +198,12 @@ def _propose_ledger_claim(
         "createdBy": agent_id,
         "source": "agent",
     }
+    if _text(candidate_id):
+        payload["claimId"] = _ledger_claim_id(
+            question_scope=question_scope,
+            claim_text=claim_text,
+            candidate_id=candidate_id,
+        )
     try:
         proposed = claim_ledger.propose_claim(team_id, payload)
     except Exception as exc:  # noqa: BLE001 - structured exposure, never swallowed
@@ -349,6 +395,8 @@ def materialize_claim_evidence_from_task(
         # Self-minted ids (the legacy ``workflow-claim-<sha>`` scheme) could
         # never be proposed in advance because their hash included the future
         # workflow run id, which left the gate permanently claim-data-missing.
+        # No candidate dimension here: identical facts across source
+        # candidates intentionally collapse into one ledger row.
         proposed = _propose_ledger_claim(
             team_id=normalized_team,
             question_scope=question_scope,
@@ -396,6 +444,7 @@ def materialize_claim_evidence_from_task(
                 team_id=normalized_team,
                 question_scope=question_scope,
                 claim_text=binding["claimText"],
+                candidate_id=bridged_candidate_id,
             )
             evidence_kind = (
                 "counter_evidence"
@@ -493,6 +542,7 @@ def materialize_candidate_claim_bindings_from_existing_evidence(
             team_id=normalized_team,
             question_scope=question_scope,
             claim_text=claim_text,
+            candidate_id=candidate_id,
         )
         for source in matching:
             payload = {
