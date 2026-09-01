@@ -544,6 +544,102 @@ def test_same_round_index_keeps_each_candidate_in_review_aggregate() -> None:
     ]
 
 
+def test_stale_round_awaiting_candidate_keeps_approve_entry() -> None:
+    """A non-latest round's awaiting digest keeps its confirmation entry.
+
+    The open-next gate must defer any newer round until every sibling of the
+    newest logical round is archived; this fallback defends historical data
+    where an awaiting candidate already sits behind the active round, so its
+    approval gate can never silently disappear from the projection.
+    """
+    state = HypothesisFirstStateV2.model_validate(project_state_from_records(
+        team_id="team-1",
+        question_id="SCI-001",
+        reset_boundary=None,
+        chain_records=[
+            {
+                "recordKind": "hypothesis_candidate",
+                "candidateId": candidate_id,
+                "questionId": "SCI-001",
+                "createdAt": "2026-08-25T00:00:00Z",
+            }
+            for candidate_id in ("candidate-a", "candidate-b")
+        ]
+        + [
+            {
+                "recordKind": "review_round_link",
+                "linkId": f"link-r1-{candidate_id}",
+                "questionId": "SCI-001",
+                "selectionId": "selection-1",
+                "candidateId": candidate_id,
+                "candidateOrder": order,
+                "roundIndex": 1,
+                "meetingRoundId": f"meeting-r1-{candidate_id}",
+                "createdAt": "2026-08-25T00:02:00Z",
+            }
+            for order, candidate_id in enumerate(("candidate-a", "candidate-b"))
+        ]
+        + [
+            {
+                "recordKind": "review_round_link",
+                "linkId": "link-r2-candidate-a",
+                "questionId": "SCI-001",
+                "selectionId": "selection-1",
+                "candidateId": "candidate-a",
+                "candidateOrder": 0,
+                "roundIndex": 2,
+                "meetingRoundId": "meeting-r2-candidate-a",
+                "createdAt": "2026-08-25T00:10:00Z",
+            }
+        ],
+        selection_records=[
+            {
+                "selectionId": "selection-1",
+                "questionId": "SCI-001",
+                "selectedCandidateIds": ["candidate-a", "candidate-b"],
+                "createdAt": "2026-08-25T00:01:00Z",
+            }
+        ],
+        meeting_records=[
+            {
+                "meetingRoundId": "meeting-r1-candidate-a",
+                "meetingType": "hypothesis_review",
+                "question": "SCI-001",
+                "status": "closed",
+                "createdAt": "2026-08-25T00:03:00Z",
+            },
+            {
+                "meetingRoundId": "meeting-r1-candidate-b",
+                "meetingType": "hypothesis_review",
+                "question": "SCI-001",
+                "status": "awaiting_approval",
+                "createdAt": "2026-08-25T00:03:00Z",
+            },
+            {
+                "meetingRoundId": "meeting-r2-candidate-a",
+                "meetingType": "hypothesis_review",
+                "question": "SCI-001",
+                "status": "open",
+                "createdAt": "2026-08-25T00:11:00Z",
+            },
+        ],
+        digest_records=[],
+        decision_records=[],
+        hypothesis_round_records=[],
+        return_to="/teams/team-1/research?question=SCI-001",
+    ))
+
+    approve_actions = [
+        action
+        for action in state.allowedActions
+        if action.kind == "command" and str(action.command) == "approve_summary"
+    ]
+    assert [
+        (action.actionId, action.payload.meetingRoundId)
+        for action in approve_actions
+    ] == [("approve-summary:candidate-b", "meeting-r1-candidate-b")]
+
+
 def test_succeeded_formal_run_with_missing_delivery_stays_program_delivery_blocked() -> None:
     state = HypothesisFirstStateV2.model_validate(
         project_state_from_records(

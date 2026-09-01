@@ -3584,6 +3584,56 @@ def project_state_from_records(
                         input_schema_ref="hypothesis-first/approve-summary/v1",
                     )
                 )
+        # Stale-round confirmation fallback: a candidate whose digest still
+        # awaits approval in a non-latest round keeps its approve entry.  The
+        # open-next gate should defer any newer round until every sibling is
+        # archived; this fallback defends historical data and any future path
+        # that leaves a confirmation gate behind an active round.
+        active_review_candidate_ids = set(review_candidate_ids)
+        stale_attempt_by_candidate: dict[str, dict[str, Any]] = {}
+        for link in review_link_records:
+            candidate_id = str(link.get("candidateId") or "").strip()
+            if (
+                not candidate_id
+                or candidate_id in active_review_candidate_ids
+                or (selection_id and str(link.get("selectionId") or "") != selection_id)
+            ):
+                continue
+            existing = stale_attempt_by_candidate.get(candidate_id)
+            if existing is None or (
+                int(link.get("roundIndex") or 0),
+                str(link.get("createdAt") or ""),
+            ) >= (
+                int(existing.get("roundIndex") or 0),
+                str(existing.get("createdAt") or ""),
+            ):
+                stale_attempt_by_candidate[candidate_id] = dict(link)
+        for candidate_id, link in stale_attempt_by_candidate.items():
+            stale_meeting = meeting_by_id.get(str(link.get("meetingRoundId") or ""))
+            if not stale_meeting or (
+                str(stale_meeting.get("status") or "").strip().lower()
+                != "awaiting_approval"
+            ):
+                continue
+            if any(
+                item.get("kind") == "command"
+                and item.get("actionId") == f"approve-summary:{candidate_id}"
+                for item in allowed_actions
+            ):
+                continue
+            allowed_actions.append(
+                _command_action(
+                    "approve_summary",
+                    action_id=f"approve-summary:{candidate_id}",
+                    label="确认候选纪要",
+                    target_phase="review",
+                    target_node_id="hf_review",
+                    payload={
+                        "meetingRoundId": str(link.get("meetingRoundId") or "")
+                    },
+                    input_schema_ref="hypothesis-first/approve-summary/v1",
+                )
+            )
     for request_state in collection_requests:
         request_id = str(request_state.get("requestId") or "")
         if not request_id:

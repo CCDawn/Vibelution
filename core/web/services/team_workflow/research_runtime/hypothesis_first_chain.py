@@ -3140,6 +3140,7 @@ def _execute_v2_command_impl(
                 ),
                 budget=payload.get("roundBudget"),
                 fan_out_selection=True,
+                enforce_sibling_archive_gate=True,
             )
         elif command == "record_program_review":
             from core.web.services.team_workflow.challenge_question_runs import (
@@ -5965,6 +5966,7 @@ def open_next_review_meeting(
     background: bool = True,
     budget: Any = None,
     fan_out_selection: bool = False,
+    enforce_sibling_archive_gate: bool = False,
 ) -> dict[str, Any]:
     """Open the next review round after knowledge back-fill, hard-limit gated.
 
@@ -5972,6 +5974,14 @@ def open_next_review_meeting(
     needs another round.  The only round limit is ``HARD_ROUND_LIMIT``; once it
     is reached without convergence, no further meeting opens and the result
     reports ``budget_exhausted`` for an explicit blocked/manual decision.
+
+    With ``enforce_sibling_archive_gate`` the open also waits for the
+    selection's newest logical round to be fully archived: while any sibling
+    review meeting of that round is still actionable
+    (open/summarizing/awaiting_approval) the result reports
+    ``sibling_reviews_pending`` instead of opening, so the sibling's digest
+    confirmation gate survives.  Superseded attempts stay on their
+    ``retry_review_dispatch`` recovery and never block.
     """
     from core.web.services import team_service
     from core.web.services.team_workflow import hypothesis_selection as selections
@@ -6022,6 +6032,19 @@ def open_next_review_meeting(
         if str(link.get("selectionId") or "") == selection_id
     ]
     round_index = max((int(link.get("roundIndex") or 0) for link in links), default=0) + 1
+    if enforce_sibling_archive_gate:
+        gate = _latest_round_sibling_gate(normalized_team_id, selection_id)
+        if gate["pendingMeetingRoundIds"]:
+            return {
+                "schemaVersion": SCHEMA_VERSION,
+                "teamId": normalized_team_id,
+                "status": "sibling_reviews_pending",
+                "selectionId": selection_id,
+                "roundIndex": round_index,
+                "previousMeetingRoundId": previous_id,
+                "pendingMeetingRoundIds": gate["pendingMeetingRoundIds"],
+                "pendingCandidateIds": gate["pendingCandidateIds"],
+            }
     effective_budget = _normalize_budget(budget)
     if round_index > effective_budget:
         return {
@@ -6739,6 +6762,56 @@ def _review_meeting_fan_in_group(
             int(item[0]) for item in authority_by_candidate.values()
         ),
         "meetings": ordered_meetings,
+    }
+
+
+def _latest_round_sibling_gate(team_id: str, selection_id: str) -> dict[str, Any]:
+    """Classify the selection's newest logical review round for open-next gating.
+
+    The newest round's own links (latest attempt per candidate binding)
+    decide: a closed or superseded meeting is archived or owns its retry
+    recovery and never blocks, while a still-actionable meeting
+    (open/summarizing/awaiting_approval) blocks the next round so its digest
+    confirmation gate cannot be overwritten by a newer round.
+    """
+    from core.web.services.team_workflow import meeting_rounds
+
+    selection_links = [
+        dict(item)
+        for item in list_review_round_links(team_id).get("links") or []
+        if str(item.get("selectionId") or "").strip() == selection_id
+        and str(item.get("candidateId") or "").strip()
+    ]
+    latest_round_index = max(
+        (int(item.get("roundIndex") or 0) for item in selection_links), default=0
+    )
+    latest_attempt: dict[str, dict[str, Any]] = {}
+    for item in selection_links:
+        if int(item.get("roundIndex") or 0) != latest_round_index:
+            continue
+        candidate = str(item.get("candidateId") or "").strip()
+        existing = latest_attempt.get(candidate)
+        if existing is None or str(item.get("createdAt") or "") >= str(
+            existing.get("createdAt") or ""
+        ):
+            latest_attempt[candidate] = item
+    pending_meeting_ids: list[str] = []
+    pending_candidate_ids: list[str] = []
+    for candidate in sorted(latest_attempt):
+        link = latest_attempt[candidate]
+        meeting = meeting_rounds.get_meeting_round(
+            team_id, str(link.get("meetingRoundId") or "").strip()
+        )["meetingRound"]
+        if str(meeting.get("status") or "").strip().lower() in _ACTIVE_MEETING_STATUSES:
+            pending_meeting_ids.append(
+                str(meeting.get("meetingRoundId") or "").strip()
+            )
+            pending_candidate_ids.append(candidate)
+    return {
+        "selectionId": selection_id,
+        "roundIndex": latest_round_index,
+        "pendingMeetingRoundIds": pending_meeting_ids,
+        "pendingCandidateIds": pending_candidate_ids,
     }
 
 
@@ -9053,6 +9126,7 @@ def close_review_meeting(
     pareto_runner: Any = None,
     metareview_runner: Any = None,
     revision_runner: Any = None,
+    agent_runner: Any = None,
 ) -> dict[str, Any]:
     """Approve one hypothesis-review closure, then apply chain effects.
 
@@ -9211,10 +9285,42 @@ def close_review_meeting(
     _auto_advance_converge_tick(
         normalized_team_id, str(closed_record.get("question") or "")
     )
+    # The sibling archive gate may have deferred this round's open-next; a
+    # first-time archive of the newest logical round's last sibling retries it
+    # here.  Replay closures ("reused") never re-trigger, and the gate inside
+    # open_next_review_meeting keeps the retry itself idempotent.  Best-effort:
+    # the closed fact is append-only, so a failed trigger is reported, never
+    # rolled back.
+    deferred_next_review = None
+    if str(result.get("status") or "") == "created":
+        try:
+            deferred_next_review = _trigger_deferred_next_review(
+                normalized_team_id,
+                closed_record,
+                agent_runner=agent_runner,
+            )
+        except Exception as exc:  # noqa: BLE001 - structural report, closure stands
+            deferred_next_review = {
+                "status": "failed",
+                "errorType": type(exc).__name__,
+                "error": str(exc)[:400],
+            }
+            _record_scene_event(
+                "hypothesis_first.deferred_next_review_failed",
+                outcome="error",
+                level="warning",
+                fields={
+                    "teamId": normalized_team_id,
+                    "meetingRoundId": normalized_round_id,
+                    "errorType": type(exc).__name__,
+                    "error": str(exc)[:400],
+                },
+            )
     return {
         **result,
         "collection": collection,
         "hypothesisRound": hypothesis_round,
+        "deferredNextReview": deferred_next_review,
         "resume": resume,
     }
 
@@ -9238,8 +9344,9 @@ def record_collection_handoff(
     Marks the request ``handed_off``, materializes the collected evidence into
     the question-scoped claim ledger (idempotently, before the next round can
     read the claim belief gate), auto-opens the next review meeting
-    (budget-gated, lineage-linked), and re-checks the parent runs'
-    ``hypothesis_design`` readiness outside any writer transaction.
+    (budget-gated, sibling-archive gated, lineage-linked), and re-checks the
+    parent runs' ``hypothesis_design`` readiness outside any writer
+    transaction.
 
     Replays (an already ``handed_off`` request) re-run the claim
     materialization on purpose: requests handed off before the chain-level
@@ -9275,14 +9382,12 @@ def record_collection_handoff(
     claim_materialization = _materialize_request_collection_claims(
         normalized_team_id, latest
     )
-    next_meeting = open_next_review_meeting(
+    next_meeting = _handoff_next_review_meeting(
         normalized_team_id,
-        previous_meeting_round_id=str(latest.get("meetingRoundId") or ""),
-        collection_request_id=normalized_request_id,
+        latest,
         agent_runner=agent_runner,
         background=background,
         budget=budget,
-        fan_out_selection=True,
     )
     resume = None
     if runtime is not None:
@@ -9301,6 +9406,154 @@ def record_collection_handoff(
         "nextMeeting": next_meeting,
         "resume": resume,
     }
+
+
+def _handoff_next_review_meeting(
+    team_id: str,
+    request: Mapping[str, Any],
+    *,
+    agent_runner: Any = None,
+    background: bool = True,
+    budget: Any = None,
+) -> dict[str, Any]:
+    """Open the post-handoff review round, sibling-archive gated.
+
+    Only a request whose meeting still sits in the selection's newest logical
+    round owns the open-next duty: once a newer round exists, a late handoff
+    must not stack another round on top of the live one.  While a sibling of
+    that newest round still awaits its digest confirmation the open reports
+    ``sibling_reviews_pending``; the last sibling close re-triggers it through
+    ``_trigger_deferred_next_review``.
+    """
+    request_meeting_id = str(request.get("meetingRoundId") or "").strip()
+    request_link = _newest_link_for_meeting(team_id, request_meeting_id)
+    selection_id = str((request_link or {}).get("selectionId") or "").strip()
+    if not selection_id:
+        return open_next_review_meeting(
+            team_id,
+            previous_meeting_round_id=request_meeting_id,
+            collection_request_id=str(request.get("requestId") or "").strip(),
+            agent_runner=agent_runner,
+            background=background,
+            budget=budget,
+            fan_out_selection=True,
+        )
+    gate = _latest_round_sibling_gate(team_id, selection_id)
+    request_round_index = int((request_link or {}).get("roundIndex") or 0)
+    already_linked = _request_has_review_round_link(
+        team_id, str(request.get("requestId") or "").strip()
+    )
+    if (
+        gate["roundIndex"]
+        and request_round_index < gate["roundIndex"]
+        and not already_linked
+    ):
+        return {
+            "schemaVersion": SCHEMA_VERSION,
+            "teamId": team_id,
+            "status": "skipped",
+            "reason": "newer_review_round_already_open",
+            "selectionId": selection_id,
+            "roundIndex": gate["roundIndex"],
+            "requestRoundIndex": request_round_index,
+        }
+    return open_next_review_meeting(
+        team_id,
+        previous_meeting_round_id=request_meeting_id,
+        collection_request_id=str(request.get("requestId") or "").strip(),
+        agent_runner=agent_runner,
+        background=background,
+        budget=budget,
+        fan_out_selection=True,
+        enforce_sibling_archive_gate=True,
+    )
+
+
+def _newest_link_for_meeting(team_id: str, meeting_round_id: str) -> dict[str, Any] | None:
+    """Newest review-round link bound to one meeting round id."""
+    normalized_id = str(meeting_round_id or "").strip()
+    if not normalized_id:
+        return None
+    newest: dict[str, Any] | None = None
+    for link in list_review_round_links(team_id).get("links") or []:
+        if str(link.get("meetingRoundId") or "").strip() != normalized_id:
+            continue
+        if newest is None or str(link.get("createdAt") or "") >= str(
+            newest.get("createdAt") or ""
+        ):
+            newest = dict(link)
+    return newest
+
+
+def _request_has_review_round_link(team_id: str, request_id: str) -> bool:
+    """True when one collection request already produced its follow-up round.
+
+    A replayed handoff whose open-next already committed must resolve through
+    the idempotent reuse path instead of the late-handoff skip.
+    """
+    normalized_id = str(request_id or "").strip()
+    if not normalized_id:
+        return False
+    return any(
+        str(link.get("collectionRequestId") or "").strip() == normalized_id
+        for link in list_review_round_links(team_id).get("links") or []
+    )
+
+
+def _trigger_deferred_next_review(
+    team_id: str,
+    closed_meeting: Mapping[str, Any],
+    *,
+    agent_runner: Any = None,
+    background: bool = True,
+    budget: Any = None,
+) -> dict[str, Any] | None:
+    """Re-open the sibling-deferred next round on the last archive of a round.
+
+    The earliest handed-off request still bound to the selection's newest
+    logical round owns the deferred open; the sibling gate inside
+    ``open_next_review_meeting`` plus that round binding together keep this
+    trigger to one round per logical round.  Returns ``None`` when a sibling
+    still awaits confirmation or nothing is deferred.
+    """
+    if str(closed_meeting.get("status") or "").strip().lower() != "closed":
+        return None
+    selection_id = _selection_id_from_meeting(closed_meeting)
+    if not selection_id:
+        return None
+    gate = _latest_round_sibling_gate(team_id, selection_id)
+    if not gate["roundIndex"] or gate["pendingMeetingRoundIds"]:
+        return None
+    link_by_meeting: dict[str, dict[str, Any]] = {}
+    for link in list_review_round_links(team_id).get("links") or []:
+        meeting_id = str(link.get("meetingRoundId") or "").strip()
+        existing = link_by_meeting.get(meeting_id)
+        if existing is None or str(link.get("createdAt") or "") >= str(
+            existing.get("createdAt") or ""
+        ):
+            link_by_meeting[meeting_id] = dict(link)
+    deferred = []
+    for request in _collection_requests(_records(team_id)):
+        if str(request.get("status") or "") != "handed_off":
+            continue
+        link = link_by_meeting.get(str(request.get("meetingRoundId") or "").strip()) or {}
+        if str(link.get("selectionId") or "") != selection_id:
+            continue
+        if int(link.get("roundIndex") or 0) == gate["roundIndex"]:
+            deferred.append(request)
+    if not deferred:
+        return None
+    earliest = min(deferred, key=lambda item: str(item.get("createdAt") or ""))
+    return open_next_review_meeting(
+        team_id,
+        previous_meeting_round_id=str(earliest.get("meetingRoundId") or ""),
+        collection_request_id=str(earliest.get("requestId") or "").strip(),
+        agent_runner=agent_runner,
+        background=background,
+        budget=budget,
+        fan_out_selection=True,
+        enforce_sibling_archive_gate=True,
+    )
 
 
 def _materialize_request_collection_claims(
@@ -9796,10 +10049,11 @@ def chain_state(
         else []
     )
     # Review meetings of superseded selections must not block collection
-    # readiness forever.  Within the current selection, only the newest
-    # logical review round remains actionable: a collection handoff can open
-    # the next candidate round while older sibling rooms are still retained as
-    # history.  Treating those historical rooms as active wedges the formal
+    # readiness forever.  Within the current selection, the open-next gate
+    # defers the next round until every sibling of the newest logical round is
+    # archived, so a non-latest open room is stale history for collection
+    # readiness (its confirmation entry stays projected) rather than a live
+    # wedge; treating those historical rooms as active would wedge the formal
     # source_finding node even though a later closed round supplied the scope.
     current_selection_meeting_ids = {
         str(link.get("meetingRoundId") or "") for link in selection_links
