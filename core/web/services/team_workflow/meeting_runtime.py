@@ -155,6 +155,8 @@ _MEETING_DISCUSSION_EXECUTOR = ThreadPoolExecutor(
 )
 _MEETING_DISCUSSION_JOBS_LOCK = threading.Lock()
 _MEETING_DISCUSSION_JOBS: set[tuple[str, str]] = set()
+_MEETING_DIGEST_JOBS_LOCK = threading.Lock()
+_MEETING_DIGEST_JOBS: set[tuple[str, str]] = set()
 _SUMMARY_DRAFT_LOCKS_GUARD = threading.Lock()
 _SUMMARY_DRAFT_LOCKS: dict[tuple[str, str], tuple[Any, int]] = {}
 _SCOPED_DISCUSSION_SCOPE_AUTHORITY = "workflow_discussion_scope.v1"
@@ -1801,6 +1803,50 @@ def _record_driver_work_state(
         return
 
 
+def _digest_recovery_deadline_ms(meeting_round: Mapping[str, Any]) -> int:
+    """Earliest governed deadline bounding any digest re-drive for this meeting."""
+
+    candidates = [
+        value
+        for value in (
+            meeting_round.get("challengeDeadlineAtMs"),
+            meeting_round.get("meetingDeadlineAtMs"),
+        )
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0
+    ]
+    return min(candidates) if candidates else 0
+
+
+def _record_digest_work_state(
+    team_id: str,
+    meeting_round_id: str,
+    *,
+    status: str,
+    source_hash: str = "",
+    deadline_at_ms: int = 0,
+    error: Exception | None = None,
+    problem: str = "",
+) -> None:
+    """Persist the durable digest intent; storage outages never alter the draft."""
+
+    try:
+        meeting_driver_work.record_intent(
+            team_id,
+            meeting_round_id,
+            status=status,
+            action_kind=meeting_driver_work.ACTION_RUN_DIGEST,
+            source_hash=source_hash,
+            deadline_at_ms=deadline_at_ms,
+            last_problem=(
+                meeting_driver_work.format_problem(error)
+                if error is not None
+                else problem
+            ),
+        )
+    except Exception:  # noqa: BLE001 - durable intent accelerates recovery only
+        return
+
+
 def _run_scheduled_meeting_discussion(team_id: str, meeting_round_id: str) -> None:
     key = (team_id, meeting_round_id)
     heartbeat_stop = threading.Event()
@@ -1929,6 +1975,122 @@ def schedule_meeting_discussion(team_id: str, meeting_round_id: str) -> dict[str
         normalized_team_id,
         normalized_round_id,
         "meeting_discussion.driver.scheduled",
+        outcome="scheduled",
+    )
+    return {
+        "status": "scheduled",
+        "teamId": normalized_team_id,
+        "meetingRoundId": normalized_round_id,
+    }
+
+
+def _run_scheduled_meeting_digest_redrive(team_id: str, meeting_round_id: str) -> None:
+    key = (team_id, meeting_round_id)
+    try:
+        result = prepare_meeting_summary_draft(
+            team_id, meeting_round_id, actor="system:digest-recovery"
+        )
+        result_status = str(result.get("status") or "").strip().lower()
+        if result_status == "blocked":
+            blocker = (
+                result.get("blocker")
+                if isinstance(result.get("blocker"), Mapping)
+                else {}
+            )
+            _record_digest_work_state(
+                team_id,
+                meeting_round_id,
+                status=meeting_driver_work.STATUS_FAILED,
+                problem=f"digest_redrive_blocked:{str(blocker.get('code') or 'blocked')}",
+            )
+        elif result_status in {"awaiting_approval", "closed"}:
+            # Fresh drafts close their own intent inside draft_meeting_digest;
+            # the reuse path (hash-matched draft submitted without a new LLM
+            # call) still leaves the interrupted record to finalize here.
+            latest = None
+            try:
+                latest = meeting_driver_work.latest_intent(
+                    team_id, meeting_round_id,
+                    action_kind=meeting_driver_work.ACTION_RUN_DIGEST,
+                )
+            except Exception:  # noqa: BLE001 - finalization is recovery-only sugar
+                latest = None
+            if str((latest or {}).get("status") or "") != (
+                meeting_driver_work.STATUS_COMPLETED
+            ):
+                _record_digest_work_state(
+                    team_id, meeting_round_id,
+                    status=meeting_driver_work.STATUS_COMPLETED,
+                )
+        _record_meeting_discussion_driver_event(
+            team_id,
+            meeting_round_id,
+            "meeting_digest.driver.redrive_completed",
+            outcome=result_status or "completed",
+        )
+    except Exception as exc:  # noqa: BLE001 - re-drive failures stay durable
+        _record_digest_work_state(
+            team_id,
+            meeting_round_id,
+            status=meeting_driver_work.STATUS_FAILED,
+            error=exc,
+        )
+        _record_meeting_discussion_driver_event(
+            team_id,
+            meeting_round_id,
+            "meeting_digest.driver.redrive_failed",
+            outcome="failed",
+            error=exc,
+        )
+    finally:
+        with _MEETING_DIGEST_JOBS_LOCK:
+            _MEETING_DIGEST_JOBS.discard(key)
+
+
+def schedule_meeting_digest_redrive(team_id: str, meeting_round_id: str) -> dict[str, Any]:
+    """Submit exactly one durable digest re-drive for a summarizing meeting.
+
+    Recovery-only entry used by the startup sweep: the in-process digest job
+    set dedups so consecutive sweeps never stack work on one meeting, and
+    the draft re-enters the same bounded, idempotent summary-draft state
+    machine a UI retry uses (sourceHash reuse check included).
+    """
+
+    from core.web.services import team_service
+
+    normalized_team_id = team_service.assert_team_exists(team_id)
+    normalized_round_id = str(meeting_round_id or "").strip()
+    if not normalized_round_id:
+        raise ResearchMeetingRuntimeError("Meeting round id is required.")
+    key = (normalized_team_id, normalized_round_id)
+    with _MEETING_DIGEST_JOBS_LOCK:
+        if key in _MEETING_DIGEST_JOBS:
+            return {
+                "status": "already_scheduled",
+                "teamId": normalized_team_id,
+                "meetingRoundId": normalized_round_id,
+            }
+        _MEETING_DIGEST_JOBS.add(key)
+    try:
+        _MEETING_DISCUSSION_EXECUTOR.submit(
+            _run_scheduled_meeting_digest_redrive,
+            normalized_team_id,
+            normalized_round_id,
+        )
+    except Exception as exc:
+        with _MEETING_DIGEST_JOBS_LOCK:
+            _MEETING_DIGEST_JOBS.discard(key)
+        _record_digest_work_state(
+            normalized_team_id,
+            normalized_round_id,
+            status=meeting_driver_work.STATUS_FAILED,
+            error=exc,
+        )
+        raise
+    _record_meeting_discussion_driver_event(
+        normalized_team_id,
+        normalized_round_id,
+        "meeting_digest.driver.redrive_scheduled",
         outcome="scheduled",
     )
     return {
@@ -2690,12 +2852,37 @@ def draft_meeting_digest(
         },
         lifecycle=True,
     )
-    draft = build_meeting_digest_draft(meeting_round, source_messages, drafter=effective_drafter)
-    draft["sourceMessageContentHash"] = meeting_rounds.source_message_content_hash(
-        source_messages
+    digest_source_hash = meeting_rounds.source_message_content_hash(source_messages)
+    # The durable running intent precedes the bounded LLM call: a process
+    # death mid-draft leaves a sourceHash-bound, deadline-bounded record the
+    # startup sweep can re-drive (plan T3).
+    _record_digest_work_state(
+        normalized_team_id,
+        normalized_round_id,
+        status=meeting_driver_work.STATUS_RUNNING,
+        source_hash=digest_source_hash,
+        deadline_at_ms=_digest_recovery_deadline_ms(meeting_round),
     )
-    persisted = meeting_rounds.submit_meeting_digest_draft(
-        normalized_team_id, normalized_round_id, draft
+    try:
+        draft = build_meeting_digest_draft(
+            meeting_round, source_messages, drafter=effective_drafter
+        )
+        draft["sourceMessageContentHash"] = digest_source_hash
+        persisted = meeting_rounds.submit_meeting_digest_draft(
+            normalized_team_id, normalized_round_id, draft
+        )
+    except Exception as exc:
+        _record_digest_work_state(
+            normalized_team_id,
+            normalized_round_id,
+            status=meeting_driver_work.STATUS_FAILED,
+            error=exc,
+        )
+        raise
+    _record_digest_work_state(
+        normalized_team_id,
+        normalized_round_id,
+        status=meeting_driver_work.STATUS_COMPLETED,
     )
     _record_meeting_digest_scene_event(
         "meeting_digest.draft.persisted",
