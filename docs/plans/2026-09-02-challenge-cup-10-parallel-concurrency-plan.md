@@ -256,3 +256,12 @@ Temporal worker performance / activity timeouts / sticky execution（docs.tempor
 | D2 10 并发端到端验收 | not started | main 上 8 文件整合回归 82 passed（2026-09-02），非 runtime-scene 验收 |
 
 已知非本计划引入的既有失败（均已 main 基线复现确认）：`test_research_workflow_runtime_factory.py` 2 例（definition registry 冷启动注册时序，对应审查 R 项 definition_registry TOCTOU）；`test_challenge_cup_reset_checkpoint_receipt_ports.py` 2 例（storage_durability `.json.lock` 与 receipt 扫描白名单矛盾）。两者建议独立任务修复。
+
+## 8. 写入层根治交叉引用（2026-09-02 协同新增）
+
+多候选并行评审的存储写入竞态（团队级单文件 `meeting_rounds.jsonl` + 模块级全局 `_LOCK` + 全量重写）已立项物理分片根治：见 [2026-09-02-meeting-store-physical-sharding.md](2026-09-02-meeting-store-physical-sharding.md)。要点：
+
+- `meeting_rounds.py` / `storage_durability.py` 归分片计划独占写入，本计划后续批次触碰前先登记协调。
+- D2（10 并发端到端验收）同时是分片改造的**前置基线**：D2 全绿 → 分片落地 → 复跑 D2 作为回归。
+- 本计划已合入的并发修复（C3 dispatch 串行化、B5 总闸等）与分片互补：编排层竞态归本计划，写入层「单门」归分片计划；后续批次若再遇全局锁/单文件瓶颈类问题，移交分片计划处理。
+- 止血任务 `hf-digest-lock-timeout`（锁超时+watchdog）、`hf-sibling-archive-gate`（兄弟归档门）、`hf-deadline-call-count`（deadline 次数对齐）在分片前保护现场，落地后保留为纵深防御。
