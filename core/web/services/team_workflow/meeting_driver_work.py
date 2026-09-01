@@ -533,8 +533,11 @@ def start_lease_heartbeat(
     stops advancing its stamp, so the heartbeat stops renewing (the lease
     lapses), fences the attempt once via :func:`fence_wedged_driver`, and
     invokes ``on_lapse`` exactly once so the runtime can re-drive the meeting
-    in-run.  Callers that pass no window keep the legacy unconditional
-    renewal.
+    in-run.  After the lapse this heartbeat exits: its own attempt is fenced
+    and any successor drives with its own progress-gated heartbeat — renewing
+    here would silently adopt the successor's lease (same worker boot) and
+    mask a successor wedge from the same-boot exit.  Callers that pass no
+    window keep the legacy unconditional renewal.
     """
 
     interval_s = max(int(interval_ms), 10) / 1000.0
@@ -556,7 +559,7 @@ def start_lease_heartbeat(
                                 on_lapse()
                             except Exception:  # noqa: BLE001
                                 pass
-                        continue
+                        return
                 refresh_intent_lease(team_id, meeting_round_id)
             except Exception:  # noqa: BLE001 - a missed beat must not kill the driver
                 continue

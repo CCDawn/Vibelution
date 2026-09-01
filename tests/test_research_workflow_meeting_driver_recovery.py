@@ -1367,3 +1367,50 @@ def test_effective_review_timeout_env_override_is_honored(
     _isolate(tmp_path, monkeypatch)
     monkeypatch.setenv("VIBELUTION_REVIEW_LLM_CALL_TIMEOUT_SECONDS", "550")
     assert meeting_driver_work.effective_review_call_timeout_seconds() == 550.0
+
+
+def test_lapsed_heartbeat_exits_and_never_adopts_successor_lease(
+    tmp_path, monkeypatch
+):
+    """T1 hardening: once a heartbeat fences its wedged driver it must exit.
+
+    A successor re-drive shares the same worker boot id, so an unconditional
+    refresh after the lapse would silently adopt (renew) the successor's
+    lease and mask the successor's own wedge from the same-boot exit.
+    """
+    _isolate(tmp_path, monkeypatch)
+    team_id = "team-lapse-exit"
+    round_id = "meeting-lapse-exit"
+
+    first = meeting_driver_work.record_intent(team_id, round_id, status="running")
+    meeting_driver_work.mark_driver_progress(team_id, round_id)
+    stop = threading.Event()
+    heartbeat = meeting_driver_work.start_lease_heartbeat(
+        team_id,
+        round_id,
+        stop_event=stop,
+        interval_ms=15,
+        progress_window_ms=10,
+    )
+    # The stamp goes stale past the tiny window; the heartbeat fences the
+    # attempt and exits instead of renewing anything else.
+    latest = None
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        latest = meeting_driver_work.latest_intent(team_id, round_id)
+        if str(latest.get("status") or "") == "failed":
+            break
+        time.sleep(0.01)
+    assert latest is not None and latest["status"] == "failed"
+    assert latest["lastProblem"] == meeting_driver_work.WEDGED_DRIVER_PROBLEM
+    assert latest["attemptCount"] == first["attemptCount"]
+    heartbeat.join(timeout=5.0)
+    assert not heartbeat.is_alive()
+
+    # The same-boot successor's lease must stay untouched by the dead heartbeat.
+    successor = meeting_driver_work.record_intent(team_id, round_id, status="running")
+    time.sleep(0.08)
+    after = meeting_driver_work.latest_intent(team_id, round_id)
+    assert after["workId"] == successor["workId"]
+    assert after["leaseExpiresAtMs"] == successor["leaseExpiresAtMs"]
+    stop.set()
