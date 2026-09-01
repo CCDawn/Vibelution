@@ -16,29 +16,31 @@
 
 用户已于 2026-09-01 拍板：第一阶段链路目标为**全零人工自动化**，包括 G1 质量门（当前 4 道人工门 + Challenge Program 审批）也改为自动裁决；最终规模是 125 个假说批量跑通（`FullCatalogResultSet` 125/125）。推荐路径分四层推进：
 
-1. **可靠性地基**：先完成 [`2026-08-30` 自动链可靠性计划](2026-08-30-challenge-cup-automatic-chain-reliability-plan.md) 的 T1–T4（deadline 治理、durable meeting driver、durable summary/review、reconcile 死态）。链路会悬挂时把方向盘交给自动化等于失控，此层不绿不得合闸自动化。
+1. **可靠性地基**：先完成 [`2026-08-30` 自动链可靠性计划](2026-08-30-challenge-cup-automatic-chain-reliability-plan.md) 的 T1–T4（deadline 治理、durable meeting driver、durable summary/review、reconcile 死态，全部 P1）；T5–T7 按母计划推进（T5 为 test-first 证伪项）。链路会悬挂时把方向盘交给自动化等于失控；**T8 合闸前 T1–T7 必须全绿**（母计划 §8 关键路径约束，本路线图不放宽）。
 2. **决策层自动化**：把既有 `AutoAdvancePolicyV2`（当前 `executed` 恒为 `False` 的 shadow 策略）升级为 authoritative，自动放行沿路全部 `waiting_human` 触点；每个自动决策带 policy hash、decision actor、fail-closed 门。
 3. **收口搬运自动化 + 合同 v2**：发布第一阶段范围合同 v2，把人工质量门重定义为自动证据门；收口链路变为「证据齐备 → 自动建结果包 → 自动送审 → 批准信号唤醒自动 `finalize`」，无人搬运。
-4. **125 批次编排层**：新增批量调度器（并发配速、批次预算总闸、失败隔离区、批次进度投影），按协议 §9 的 G1 → G5 → G12 → G125 分级扩容，任一阶段失败不扩容。
+4. **125 批次编排层**：新增批量调度器（并发配速、批次预算总闸、失败隔离区、批次进度投影），按 G1 → G5 → G12 → G125 分级扩容（序列来自协议历史 v3.x 块，扩容启动前须升格为现行条款，见 §2.2），任一阶段失败不扩容。
 
-「零人工」的验收指标是既有投影字段 `awaitingHumanCount`（`hypothesis_first_state_v2.py:3630` 附近）从当前约 9 类触点降到 0。
+「零人工」的验收指标是既有投影字段 `awaitingHumanCount`（`hypothesis_first_state_v2.py:3630` 附近）从当前约 9 类触点降到 0；该字段是投影读模型，运行权威仍在 Workflow Ledger，验收以投影与 Ledger 一致为准。
 
 ## 2. 合同对齐与冲突声明
 
 ### 2.1 一致项
 
-- 125/125 是协议 v4.0 明确的最终扩容目标，方向 1A；本路线图不改变「先单题 G1、分级扩容」的顺序合同。
-- `CatalogHypothesisFlowReady`、`CatalogRunAuthorization`、问题级隔离（`ResearchScopeEnvelope`）、receipt 证据链等既有门保留，只把其中**人工裁决动作**改造为自动证据裁决。
+- 125/125 是协议 v4.0 明确的最终扩容目标，方向 1A；本路线图不改变「先单题 G1、G1 后停止」的现行顺序合同。
+- 本路线图的自动化范围**只覆盖第一阶段运行内质量门**（节点 7 收口的 4 道人工门与 Challenge Program 审批）；批次/扩容授权门（`CatalogHypothesisFlowReady`、`CatalogRunAuthorization` 等 Human Research Owner 批准动作）默认保留人工，是否自动化另行裁决（见 §2.2）。
+- 问题级隔离以代码层 run-scoped 合同为准（`workflowRunId`/attempt fencing，可靠性计划 T6 已锁定）；receipt 证据链与三阶段收据体系保留不变。
 - 自动决策以 `automation` actor 如实记录，**不伪装 `human_approved`**——这是可靠性计划 §8 T8 的既有红线，本路线图遵守。
 
 ### 2.2 冲突项（必须修订后才能合闸）
 
 | 冲突 | 现状 | 修订方向 |
 | --- | --- | --- |
-| 第一阶段范围合同冻结人工门 | `core/research/competition/data/challenge_cup_stage_one_scope_v1.json` 要求 8 类产物 + 3 阶段收据 + 人工门；`policySha256` 硬编码，进 run 身份 | 发布 scope v2：质量门类型 `human` → `automated_evidence_gate`，重算策略哈希；新 run 绑 v2，旧 run 保持 v1，不追溯 |
+| 第一阶段范围合同未定义门类型 | scope v1 本身**不含人工门字段**（仅 8 类产物 + 3 阶段收据 + deferred 节点 + 题目白名单）；人工门语义由收口校验器（`stage_one_closeout.py`）与完成清单强制；`policySha256` 硬编码于 `stage_one_completion_policy.py` 常量并进 run 身份 | 发布 scope v2：**新增** `gateType: automated_evidence_gate` 与 `adjudication` 合同，重算策略哈希；新 run 绑 v2，旧 run 保持 v1，不追溯 |
 | 收口校验器要求人工批准 | `stage_one_closeout.py` 的 `_validated_completion_manifest` 要求 Program 审批 approved 与 4 人工门 | v2 下接受自动裁决记录；`finalize_stage_one_closeout` 的 Program 权威回读改为裁决器权威 |
 | 仓库外工程合同 | `03-工程合同/2026-08-31-...开发合同.md` 为 `CURRENT_SCOPE_SSOT`，§4 十条 G1 门按人工口径书写 | 需用户签署合同 v2 修订或废止声明；两份「唯一事实源」不得并存打架 |
-| 协议人工门 | 125 协议 §6 的 H2/H3/H4 与 §9 的 Human Research Owner 批准 | 属于深实验与批次授权门；v2 仅覆盖第一阶段质量门自动化，批次授权门是否自动化另行裁决，默认保留 |
+| 125 协议分级序列不在现行正文 | 协议 v4.0 现行条款只锁单题 G1（通过后停止、不自动扩容）；G1→G5→G12→G125 序列、`ResearchScopeEnvelope`（§5）、H2/H3/H4 门（§6）全部位于 `<details>` 历史 v3.x 块，标注「只作第二阶段参考」 | 扩容启动前必须发布新协议版本，把分级序列与审计门升格为现行条款；本路线图 §6 的分级扩容以此为前置 |
+| 协议人工门 | 125 协议的 H2/H3/H4 门与 Human Research Owner 批准（历史 v3.x 块，第二阶段参考） | 属于深实验与批次授权门；v2 仅覆盖第一阶段运行内质量门自动化，批次授权门默认保留人工 |
 
 ## 3. 可靠性地基（Phase 1，前置闸）
 
@@ -46,18 +48,19 @@
 
 - T1（deadline + provider cancel）、T2（durable meeting driver）、T3（durable summary/review）、T4（reconcile 死态）全绿是自动化合闸的**必要条件**；
 - 生产证据锚点：`run-16cfab646d08` 仍为 `running + zero active outbox` 死态；会议无 deadline、`summarizing` 悬挂均已发生；
-- T5–T7 与自动化合闸并行推进，但 T7（Child Session 有界上下文）必须在 125 批量前完成——批量放大上下文污染风险。
+- T5–T7 可与 Phase 3 的开发并行推进，但 **T8/Phase 2 合闸前必须全绿**（母计划 §8：T8 之前要求 T1–T7 全绿）；其中 T7（Child Session 有界上下文）另是 125 批量前的硬前置——批量放大上下文污染风险。
 
 ## 4. 决策层自动化（Phase 2）
 
 - **载体**：`automation_policy_service.py` 的 `AutoAdvancePolicyV2` / `HumanReviewPolicyV2` 已有 fail-closed 校验与 preview 快照；升级路径按可靠性计划 T8 的 shadow → drain/checkpoint → authoritative 受控序列。
+- **模型依赖**：评审团门需要与生成方不同的模型 binding，涉及 operator 模型授权路径（`docs/ops/config/INDEX.md`）；未授权 binding 不得作为裁决器依赖，fail-closed。
 - **覆盖触点**（当前 `waiting_human` 全集，目标全部自动放行）：手动启动、会议续轮/审批、候选审批、选择裁决、评审候选、收集请求、收敛确认、Program 交付评审、节点 7 收口补完命令。
 - **裁决记录合同**：每个自动决策至少持久化 `decisionId / runId / gateKey / policyHash / decisionActor=automation / inputHash / thresholdEvidence / createdAtMs`；决策可回放、可审计。
 - **异常路径**：任何 hard gate 缺失、policy hash 漂移、证据不足 → fail-closed 挂起并进异常队列（`anomaly_inbox_service.py` 已有 `_awaiting_human_item` 投影，v2 下改投异常告警而非等人）。
 
 ## 5. 锦标赛自动裁决器（Phase 3 核心）
 
-质量门自动化的设计基线来自外部调研（见 §10），核心是「质量来自对抗式评审与证据核验，不来自人工点头」：
+质量门自动化的设计基线来自外部调研（见 §12），核心是「质量来自对抗式评审与证据核验，不来自人工点头」：
 
 ### 5.1 裁决器分层
 
@@ -81,9 +84,9 @@
 | 分批并发配速 | 信号量控制同时在跑题数；实测单次调用 p95 已 360s、max 506s，不得无配速全量并发冲垮 provider |
 | 单题失败隔离 | 每题独立 run（`workflowRunId` 隔离已有），失败/耗尽进隔离区 + 告警，不阻塞其余题；重试有预算，耗尽不自动复活（可靠性计划 T5 合同） |
 | 批次预算总闸 | 复用既有 receipt/预算体系，加批次级累计预算；超支自动暂停批次并进异常队列 |
-| 批次进度投影 | `已完成 / 裁决挂起 / 隔离 / 在跑` 计数与清单；前端呈现走 VUI 合同（红线 §9.1），顺带补齐当前前端无收口入口的断点 |
-| 分级扩容 | G1 → G5 → G12 → G125（协议 §9.0）；每级自动裁决通过率、隔离率、预算消耗达标才授权下一级；任一失败停止扩容 |
-| 隔离 | 全链路遵守 `ResearchScopeEnvelope`（协议 §5）；批次编排层不得成为第二个事实源，权威仍在 Ledger |
+| 批次进度投影 | `已完成 / 裁决挂起 / 隔离 / 在跑` 计数与清单；前端呈现走 VUI 合同（development-standard.md §9.1），顺带补齐当前前端无收口入口的断点 |
+| 分级扩容 | G1 → G5 → G12 → G125（序列来自协议历史 v3.x 块，扩容启动前须升格为现行条款，见 §2.2）；每级自动裁决通过率、隔离率、预算消耗达标才授权下一级；任一失败停止扩容 |
+| 隔离 | 沿用代码层 run-scoped 隔离合同（`workflowRunId`/attempt fencing，可靠性计划 T6 已锁定）；批次编排层不得成为第二个事实源，权威仍在 Workflow Ledger |
 
 ## 7. 合同 v2 修订草案骨架
 
@@ -94,7 +97,7 @@ stageOneScopeV2:
   questionIds: [SCI-003, SCI-091]          # G1 阶段不变；扩容由分级授权另附批次合同
   closureNodeId: hypothesis_design
   completionState: STAGE1_G1_ACCEPTED
-  gateType: automated_evidence_gate        # v1 为 human
+  gateType: automated_evidence_gate        # v2 新增字段；scope v1 无门类型定义，人工门语义在校验器
   requiredArtifactKinds: [...]             # 沿用 8 类
   requiredReceiptStages: [generation, review, revision]
   adjudication:
@@ -113,7 +116,7 @@ stageOneScopeV2:
 
 ```mermaid
 flowchart TD
-  P1["Phase 1 可靠性地基 = 可靠性计划 T1–T4"]
+  P1["Phase 1 可靠性地基 = 可靠性计划 T1–T4（合闸前 T1–T7 全绿）"]
   P2["Phase 2 AutoAdvancePolicyV2 authoritative（含 9 触点自动放行）"]
   P3a["Phase 3a 合同 v2：scope/policy 修订 + 校验器门语义"]
   P3b["Phase 3b 锦标赛自动裁决器（确定性门 + 独立评审团）"]
@@ -133,9 +136,33 @@ flowchart TD
   P4 --> Z125
 ```
 
-关键路径：`Phase 1 → Phase 3a/3b/3c → 零人工 G1 → 分级试点 → 批次编排 → G125`。Phase 2 与 Phase 3 可并行开发，但零人工 G1 要求两者都合入最新 clean main。
+关键路径：`Phase 1 → Phase 3a/3b/3c → 零人工 G1 → 分级试点 → 批次编排 → G125`。Phase 2 与 Phase 3 可并行开发，但 Phase 2 合闸以 T1–T7 全绿为前置（母计划 §8），零人工 G1 要求两者都合入最新 clean main。
 
-## 9. 停止条件
+## 9. 回滚与降级
+
+- Phase 2 可立即降回 shadow（母计划 §10.3 automation 回退路径）；降级**不回滚** durable 决策记录与收据事实；
+- 裁决器禁用后，未过的门回到 fail-closed 挂起态，**不得**回退为默认放行；
+- 合同 v2 停用：已绑 v2 的在途 run 按冻结身份跑到当前门并挂起，不迁移回 v1；新建 run 恢复 v1 策略；
+- 批次编排层暂停：在跑题跑到当前门后挂起；隔离区不清理、不自动复活；批次预算闸冻结新题启动；
+- 代码回滚用新修复 commit 或可审计 revert，不用 `git reset --hard`（母计划 §10.3）。
+
+## 10. 验证矩阵
+
+| 场景 | 必须证明 |
+| --- | --- |
+| 确定性门 | 同一输入重放结果一致；证据缺失/哈希漂移时 fail-closed 挂起 |
+| 评审团门 | 独立 binding 生效；多评委分歧超阈值判未过；评审调用有官方收据 |
+| 裁决记录 | 每个自动决策可按 `decisionId` 回放，actor=automation，无 `human_approved` 伪装 |
+| 收口搬运 | 建包→送审→批准信号→finalize 全链幂等；进程重启后不重复、不丢失 |
+| 批次配速 | 并发不超过信号量；慢调用（p95≈360s）不被误杀，也不冲垮 provider 配额 |
+| 失败隔离 | 单题失败/耗尽只进隔离区；隔离区不自动复活；其余题不受阻 |
+| 预算总闸 | 批次累计超支即暂停新题；在途调用按预算合同收敛 |
+| 分级扩容 | 每级通过率/隔离率/预算达标才进下一级；任一失败即停 |
+| 零人工验收 | 受控 G1 全程 `awaitingHumanCount=0` 且投影与 Workflow Ledger 一致 |
+| 普通会话零差异 | 普通 Session/chat/Companion 回归全绿（AGENTS.md §2 红线） |
+| Development Lane | 裁决器/编排层的开发与 DEV 验收仅使用 `DEV-*` 合成题，不读取真实 125 题数据 |
+
+## 11. 停止条件
 
 出现任一项立即停止合闸或扩容：
 
@@ -144,9 +171,10 @@ flowchart TD
 - 批次预算总闸失效、隔离区题被自动复活；
 - 分级试点任一级失败仍扩大规模；
 - 合同 v2 未生效（外部工程合同未修订）即运行零人工正式批次；
+- 裁决器/编排层开发或 DEV 验收读取真实 125 题数据（Development Lane 只允许 `DEV-*` 合成题）；
 - 任何自动决策以 `human_approved` 身份落账。
 
-## 10. 调研证据锚点（2026-09-01）
+## 12. 调研证据锚点（2026-09-01）
 
 | 借鉴点 | 来源 |
 | --- | --- |
@@ -158,8 +186,8 @@ flowchart TD
 | 审批异步化 + 幂等键 + 上下文包 + 防审批疲劳 | Mastra HITL 模式；HITL escalation design |
 | 端到端多智能体科研自动化开源参照 | EvoScientist |
 
-## 11. 协作与串行闸门
+## 13. 协作与串行闸门
 
-- 本路线图只新增计划文档，不触碰在途任务代码面；当前在途 worktree：`stage1-clarity`、`stage1-closeout-integrity`、`challenge-stage1-lineage-writers`、`budget-governance`、`digest-review-budget`、`t6-base-proof` 等，Phase 1–3 实施前必须按 `docs/agents/worktree-collaboration.md` 复核 claim。
+- 本路线图只新增计划文档，不触碰在途任务代码面；当前在途 worktree（2026-09-01 快照，共 10 个）：`stage1-clarity`、`stage1-closeout-integrity`、`challenge-stage1-lineage-writers`、`challenge-collection-orphan-recovery`、`chat-room-prior-message-semantics`、`companion-dialogue-v2-tighten`、`fix-source-writeback-arg-contract`、`budget-governance`、`digest-review-budget`、`t6-base-proof`；Phase 1–3 实施前必须按 `docs/agents/worktree-collaboration.md` 复核 claim。
 - 热文件（`meeting_runtime.py`、`chat_room_service.py`、`hypothesis_first_chain.py`、`stage_one_closeout.py`）默认单 writer，与可靠性计划串行集成。
 - 已知本地事实偏差：`AGENTS.md` §3.0 引用的本机 `briefbound-router/SKILL.md` 在仓库与本机均不存在，本任务按 `docs/guides/route.md` 路由；该偏差需另行治理轮修正文档或补齐 skill。
