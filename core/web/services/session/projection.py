@@ -197,12 +197,17 @@ def get_session_detail(
     before_message_index: Any = None,
     transcript_scope: Any = "all",
     include_secondary: Any = True,
+    requester: Any = None,
 ) -> dict | None:
     """Return a session detail payload by persisted conversation id.
 
     include_secondary=False skips expensive side lists (inbox / governance /
     group context / next-state signals) for high-frequency poll while SSE owns
     the live transcript path.
+
+    ``requester`` optionally declares who is reading (candidate read gate).
+    ``None`` keeps the operator-channel default; only candidate hypothesis
+    child sessions are gated, so normal sessions are unchanged.
     """
     s = _service()
 
@@ -238,6 +243,13 @@ def get_session_detail(
             transcript_scope=transcript_scope,
             include_secondary=include_secondary_lists,
         )
+    from .candidate_read_gate import assert_candidate_session_read
+
+    # Candidate hypothesis read gate: no-op for non-candidate targets and for
+    # operator-channel (default) reads; raises before any side effect for a
+    # sibling agent read of a candidate child session.
+    assert_candidate_session_read(conversation, requester)
+
     from . import directory_bridge
 
     directory_bridge.sync_conversation_record(conversation)
