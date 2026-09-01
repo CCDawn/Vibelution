@@ -320,6 +320,7 @@ def test_query_service_resolves_run_pinned_definition(tmp_path: Path) -> None:
             status="created",
             run_version=1,
             workflow_version_id=v3_version_id,
+            structure_hash=v3.structureHash,
         )
         mismatch_record = replace(
             build_run_record(
@@ -347,6 +348,7 @@ def test_query_service_resolves_run_pinned_definition(tmp_path: Path) -> None:
             run_id="run-legacy-unregistered",
             status="created",
             run_version=1,
+            workflow_version_id="challenge-cup-research-unregistered",
         )
         harness.seed_run(
             run_id="run-ancient",
@@ -409,6 +411,7 @@ def test_get_node_detail_judges_membership_against_pinned_definition(
             status="created",
             run_version=1,
             workflow_version_id=v3_version_id,
+            structure_hash=v3.structureHash,
         )
         harness.seed_run(
             run_id="run-ancient",
