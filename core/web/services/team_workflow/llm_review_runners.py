@@ -56,17 +56,21 @@ REVIEW_LLM_CACHE_SCOPE = "team_workflow_review"
 
 _MAX_MESSAGES = 40
 
-# Wall-clock budget for one review-profile LLM call (digest draft and the
-# four hypothesis review runners).  Normal digest calls finish well under a
-# minute on faster team relays, but the low-cost GLM route has produced valid
-# discussion utterances in roughly 4.5-7 minutes.  A digest sees the whole
-# bounded transcript (<= _MAX_MESSAGES), so 600s leaves three minutes of headroom
-# above that observed latency without removing the recovery boundary.  Without
-# a finite budget a wedged provider
-# connection pinned the meeting in ``summarizing`` for 33+ minutes while
-# holding the per-meeting summary lock with no in-product recovery path
-# (SCI-096 P0, validated 2026-08-28).  Budgets of 180s and 360s both produced
-# false timeouts on valid low-cost digest attempts.
+# Fallback wall-clock budget for one review-profile LLM call (digest draft and
+# the four hypothesis review runners).  Live budgets are receipt-derived:
+# ``review_llm_call_timeout_seconds`` resolves p95 latency from succeeded
+# model invocation receipts via ``derive_per_call_budget``, bounded to the
+# governed 300-600s band.  This 450s constant is the audited fallback for a
+# malformed env override and mirrors ``DEFAULT_PER_CALL_BUDGET_MS`` in
+# challenge_deadline_policy.py: it sits above the global success-receipt p95
+# (~360s over 221 receipts), while the slowest observed route
+# (``relay_autodl/GLM-5.3-flash``, p95 ~478s, max ~506s) is covered by the
+# receipt-derived review budget, not by this fallback.  Without a finite
+# budget a wedged provider connection pinned the meeting in ``summarizing``
+# for 33+ minutes while holding the per-meeting summary lock with no
+# in-product recovery path (SCI-096 P0, validated 2026-08-28).  Budgets of
+# 180s and 360s both produced false timeouts on valid low-cost digest
+# attempts.
 REVIEW_LLM_CALL_TIMEOUT_SECONDS = 450.0
 _REVIEW_LLM_CALL_TIMEOUT_ENV = "VIBELUTION_REVIEW_LLM_CALL_TIMEOUT_SECONDS"
 

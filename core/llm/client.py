@@ -99,6 +99,12 @@ _PROXY_ENV_CONDITION = threading.Condition(threading.RLock())
 _PROXY_ENV_STATE = {"readers": 0, "writer": False}
 PROMPT_CACHE_OPPORTUNITY_PREFIX_CHARS = 4096
 _CANONICAL_WIRE_ADAPTERS = build_default_wire_adapter_registry()
+_PROVIDER_ABORT_UNAVAILABLE_EVENT_CODE = "llm.provider_abort_unavailable"
+# Bounded residual-risk diagnostics: emit at most one scene event per
+# (transport, purpose, reason) per process so repeated watcher-skip paths
+# cannot flood the scene log on long Challenge sessions.
+_PROVIDER_ABORT_UNAVAILABLE_EMIT_LOCK = threading.Lock()
+_PROVIDER_ABORT_UNAVAILABLE_EMITTED: set[tuple[str, str, str]] = set()
 
 
 @contextmanager
@@ -2218,21 +2224,90 @@ class LLMClient:
         setattr(self, key_attr, cache_key)
         return handler
 
+    def _record_provider_abort_unavailable_once(
+        self,
+        transport: str,
+        *,
+        reason: str,
+        backend: Any,
+    ) -> None:
+        """Record residual cancel risk once per transport+purpose+reason.
+
+        Non-default backends and the native Anthropic Messages adapter cannot
+        host the hard provider-abort watcher; the call still proceeds with
+        cooperative stop-checker cancellation only.  The Challenge deadline
+        contract requires the precise residual risk to stay visible, so this
+        emits one bounded scene event per transport+purpose+reason and never
+        refuses the call.
+        """
+
+        purpose = str(getattr(self, "role", "") or "").strip() or "primary"
+        key = (str(transport), purpose, str(reason))
+        with _PROVIDER_ABORT_UNAVAILABLE_EMIT_LOCK:
+            if key in _PROVIDER_ABORT_UNAVAILABLE_EMITTED:
+                return
+            _PROVIDER_ABORT_UNAVAILABLE_EMITTED.add(key)
+        try:
+            backend_id = str(
+                getattr(backend, "__name__", "") or type(backend).__name__ or "unknown"
+            )
+        except Exception:  # noqa: BLE001 - diagnostics must never fail the call
+            backend_id = "unknown"
+        # Partially-constructed clients (unit tests, teardown paths) may lack
+        # identity attributes; diagnostics degrade to empty strings instead of
+        # breaking the provider call.
+        provider = getattr(self, "provider", None)
+        profile = getattr(self, "profile", None)
+        _record_llm_scene_event(
+            "transport",
+            _PROVIDER_ABORT_UNAVAILABLE_EVENT_CODE,
+            message=(
+                "Provider abort watcher unavailable; cancellation stays "
+                "cooperative-only for this transport."
+            ),
+            level="warning",
+            outcome="degraded",
+            fields={
+                "transport": transport,
+                "reason": reason,
+                "purpose": purpose,
+                "adapterId": str(
+                    getattr(self.protocol_route, "adapter_id", "") or ""
+                ),
+                "backendId": backend_id,
+                "profileId": str(getattr(self, "profile_id", "") or ""),
+                "providerId": str(getattr(provider, "provider_id", "") or ""),
+                "model": str(getattr(profile, "model", "") or ""),
+            },
+            lifecycle=False,
+        )
+
     def _prepare_cancellable_responses_stream(
         self,
         payload: Dict[str, Any],
     ) -> tuple[Dict[str, Any], Callable[[], None]]:
         checker = _LLM_CANCEL_CHECKER_CONTEXT.get(None)
+        default_responses_backend = bool(
+            getattr(
+                self._responses_backend,
+                "_vibelution_default_responses_backend",
+                False,
+            )
+        )
+        if (
+            callable(checker)
+            and _payload_uses_responses(payload)
+            and not default_responses_backend
+        ):
+            self._record_provider_abort_unavailable_once(
+                "responses_stream",
+                reason="backend_not_default",
+                backend=self._responses_backend,
+            )
         if not (
             callable(checker)
             and _payload_uses_responses(payload)
-            and bool(
-                getattr(
-                    self._responses_backend,
-                    "_vibelution_default_responses_backend",
-                    False,
-                )
-            )
+            and default_responses_backend
         ):
             return payload, lambda: None
 
@@ -2315,10 +2390,22 @@ class LLMClient:
         """Attach a cancellable client only to the default Chat backend."""
 
         checker = _LLM_CANCEL_CHECKER_CONTEXT.get(None)
+        abort_enabled = _chat_provider_abort_enabled(checker)
+        native_adapter = self.protocol_route.adapter_id == "anthropic_messages_native"
+        if abort_enabled and (
+            self._backend is not _default_completion_backend or native_adapter
+        ):
+            self._record_provider_abort_unavailable_once(
+                "chat_stream",
+                reason="native_anthropic_adapter"
+                if native_adapter
+                else "backend_not_default",
+                backend=self._backend,
+            )
         if (
-            not _chat_provider_abort_enabled(checker)
+            not abort_enabled
             or self._backend is not _default_completion_backend
-            or self.protocol_route.adapter_id == "anthropic_messages_native"
+            or native_adapter
         ):
             return payload, lambda: None
 
@@ -2400,18 +2487,37 @@ class LLMClient:
         checker = _LLM_CANCEL_CHECKER_CONTEXT.get(None)
         if _payload_uses_responses(payload):
             backend = self._responses_backend
-            enabled = callable(checker) and bool(
+            default_responses_backend = bool(
                 getattr(backend, "_vibelution_default_responses_backend", False)
             )
+            if callable(checker) and not default_responses_backend:
+                self._record_provider_abort_unavailable_once(
+                    "non_stream_responses",
+                    reason="backend_not_default",
+                    backend=backend,
+                )
+            enabled = callable(checker) and default_responses_backend
             handler_attr = "_cancellable_responses_http_handler"
             handler_lock = self._cancellable_responses_http_handler_lock
             request_lock = self._cancellable_responses_request_lock
             factory = _new_cancellable_responses_http_handler
         elif "messages" in payload:
+            abort_enabled = _chat_provider_abort_enabled(checker)
+            native_adapter = self.protocol_route.adapter_id == "anthropic_messages_native"
+            if abort_enabled and (
+                self._backend is not _default_completion_backend or native_adapter
+            ):
+                self._record_provider_abort_unavailable_once(
+                    "non_stream_chat",
+                    reason="native_anthropic_adapter"
+                    if native_adapter
+                    else "backend_not_default",
+                    backend=self._backend,
+                )
             enabled = (
-                _chat_provider_abort_enabled(checker)
+                abort_enabled
                 and self._backend is _default_completion_backend
-                and self.protocol_route.adapter_id != "anthropic_messages_native"
+                and not native_adapter
             )
             handler_attr = "_cancellable_completion_http_handler"
             handler_lock = self._cancellable_completion_http_handler_lock

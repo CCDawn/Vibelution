@@ -3815,6 +3815,187 @@ def test_native_anthropic_route_does_not_inject_litellm_client(monkeypatch):
         finish()
 
 
+def _bare_llm_client(backend, adapter_id):
+    """Build an unmounted LLMClient for cancellable-prepare unit tests."""
+
+    client = LLMClient.__new__(LLMClient)
+    client._backend = backend
+    client._responses_backend = _default_responses_backend
+    client.protocol_route = SimpleNamespace(adapter_id=adapter_id)
+    client.role = "primary"
+    client.profile_id = "primary"
+    client.provider = SimpleNamespace(provider_id="default")
+    client.profile = SimpleNamespace(model="glm-5.3-flash")
+    client._cancellable_responses_http_handler_lock = threading.Lock()
+    client._cancellable_responses_request_lock = threading.Lock()
+    client._cancellable_completion_http_handler_lock = threading.Lock()
+    client._cancellable_completion_request_lock = threading.Lock()
+    return client
+
+
+def _capture_llm_scene_events(monkeypatch):
+    """Route _record_llm_scene_event into a list and reset the emit dedupe."""
+    from core.llm import client as llm_client_module
+
+    events = []
+    monkeypatch.setattr(
+        llm_client_module,
+        "_record_llm_scene_event",
+        lambda phase, event_code, **kwargs: events.append((phase, event_code, kwargs)),
+    )
+    llm_client_module._PROVIDER_ABORT_UNAVAILABLE_EMITTED.clear()
+    return events
+
+
+def test_native_anthropic_chat_stream_records_abort_unavailable_once(monkeypatch):
+    """The native Anthropic adapter keeps cooperative cancel and records it."""
+    from core.llm import client as llm_client_module
+
+    events = _capture_llm_scene_events(monkeypatch)
+    client = _bare_llm_client(_default_completion_backend, "anthropic_messages_native")
+    payload = {
+        "model": "claude-test",
+        "messages": [{"role": "user", "content": "ping"}],
+        "stream": True,
+    }
+
+    with llm_cancel_context(lambda: "", enable_chat_provider_abort=True):
+        prepared, finish = client._prepare_cancellable_chat_stream(payload)
+        try:
+            assert prepared is payload
+            assert "client" not in prepared
+            # Repeated skips on the same transport+purpose stay bounded.
+            client._prepare_cancellable_chat_stream(payload)
+        finally:
+            finish()
+
+    assert [event_code for _phase, event_code, _kwargs in events] == [
+        "llm.provider_abort_unavailable"
+    ]
+    _phase, _event_code, kwargs = events[0]
+    assert kwargs["outcome"] == "degraded"
+    assert kwargs["level"] == "warning"
+    fields = kwargs["fields"]
+    assert fields["transport"] == "chat_stream"
+    assert fields["reason"] == "native_anthropic_adapter"
+    assert fields["adapterId"] == "anthropic_messages_native"
+    assert fields["purpose"] == "primary"
+
+
+def test_non_default_chat_backend_records_abort_unavailable(monkeypatch):
+    """A non-default Chat backend stays cooperative-only and says so once."""
+    import litellm
+
+    events = _capture_llm_scene_events(monkeypatch)
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "relay",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://pixel.try-chatapi.com/v1",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "glm-5.3-flash",
+        }
+    )
+    observed = {}
+
+    def fake_backend(*args, **kwargs):
+        if args:
+            observed.update(args[0])
+        observed.update(kwargs)
+        return {"choices": [{"message": {"role": "assistant", "content": "ok"}}]}
+
+    monkeypatch.setattr(litellm, "completion", fake_backend, raising=False)
+    client = LLMClient(config=config)
+    client._backend = fake_backend
+    payload = {
+        "model": "glm-5.3-flash",
+        "messages": [{"role": "user", "content": "ping"}],
+        "stream": False,
+        "base_url": "https://pixel.try-chatapi.com/v1",
+    }
+
+    with llm_cancel_context(lambda: "", enable_chat_provider_abort=True):
+        response = client._invoke_payload_once(payload)
+
+    # The call result is unchanged: the fake backend answered and no
+    # cancellable client was injected.
+    assert response["choices"][0]["message"]["content"] == "ok"
+    assert "client" not in observed
+    abort_events = [
+        kwargs for _phase, event_code, kwargs in events
+        if event_code == "llm.provider_abort_unavailable"
+    ]
+    assert len(abort_events) == 1
+    fields = abort_events[0]["fields"]
+    assert fields["transport"] == "non_stream_chat"
+    assert fields["reason"] == "backend_not_default"
+    assert fields["backendId"] == "fake_backend"
+    assert fields["adapterId"]
+
+
+def test_non_default_responses_backends_record_abort_unavailable(monkeypatch):
+    """Responses stream and non-stream skips each record one bounded event."""
+    from core.llm import client as llm_client_module
+
+    events = _capture_llm_scene_events(monkeypatch)
+    client = _bare_llm_client(_default_completion_backend, "openai_chat")
+    client._responses_backend = object()
+    stream_payload = {"model": "glm-5.3-flash", "input": "ping", "stream": True}
+    non_stream_payload = {"model": "glm-5.3-flash", "input": "ping", "stream": False}
+
+    with llm_cancel_context(lambda: ""):
+        prepared_stream, finish = client._prepare_cancellable_responses_stream(
+            stream_payload
+        )
+        try:
+            assert prepared_stream is stream_payload
+            assert "client" not in prepared_stream
+            prepared_request, finish_request = client._prepare_cancellable_non_stream_request(
+                non_stream_payload
+            )
+            try:
+                assert prepared_request is non_stream_payload
+                assert "client" not in prepared_request
+            finally:
+                finish_request()
+        finally:
+            finish()
+
+    assert [event_code for _phase, event_code, _kwargs in events] == [
+        "llm.provider_abort_unavailable",
+        "llm.provider_abort_unavailable",
+    ]
+    transports = [kwargs["fields"]["transport"] for _p, _e, kwargs in events]
+    assert transports == ["responses_stream", "non_stream_responses"]
+    for _p, _e, kwargs in events:
+        assert kwargs["fields"]["reason"] == "backend_not_default"
+        assert kwargs["fields"]["backendId"] == "object"
+
+
+def test_plain_cancel_context_neither_records_nor_injects(monkeypatch):
+    """Without provider abort opt-in, cooperative-only stays silent."""
+    from core.llm import client as llm_client_module
+
+    events = _capture_llm_scene_events(monkeypatch)
+    client = _bare_llm_client(object(), "openai_chat")
+    payload = {
+        "model": "glm-5.3-flash",
+        "messages": [{"role": "user", "content": "ping"}],
+        "stream": True,
+    }
+
+    with llm_cancel_context(lambda: "", enable_chat_provider_abort=False):
+        prepared, finish = client._prepare_cancellable_chat_stream(payload)
+        try:
+            assert prepared is payload
+        finally:
+            finish()
+
+    assert events == []
+    assert llm_client_module._PROVIDER_ABORT_UNAVAILABLE_EMITTED == set()
+
+
 def test_slow_cancel_watcher_cannot_reuse_handler_after_finish_timeout(monkeypatch):
     """A slow provider close fences the old handler before the next request."""
     import threading
