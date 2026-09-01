@@ -777,6 +777,36 @@ _AGENT_CODE_PATTERN = re.compile(r"^[A-Z][A-Z0-9-]{1,15}$")
 _AGENT_ID_LIKE_PATTERN = re.compile(r"^(agent[-_].+|[aA]\d{3,}|[A-Z][A-Z0-9-]{1,15})$")
 _STATE_LOCK = threading.RLock()
 _AGENT_SESSION_LIFECYCLE_LOCK = threading.RLock()
+# 显式 project_root 的调用栈内传播：list_agents/get_agent/registry_path 接收
+# 显式参数后通过 scoped context 生效，包内唯一的根读取口（_active_project_root）
+# 优先取该值，否则回落模块级 PROJECT_ROOT。只在单次公开调用栈内 set/reset，
+# 线程与 async 任务之间互不可见，取代旧的跨线程 save-swap-restore。
+_SCOPED_PROJECT_ROOT: ContextVar[Path | None] = ContextVar(
+    "vibelution_agent_directory_scoped_project_root",
+    default=None,
+)
+
+
+@contextmanager
+def scoped_project_root(project_root: Path | str | None):
+    """Scope explicit ``project_root`` reads for one public API call."""
+
+    if project_root is None:
+        yield None
+        return
+    normalized = Path(project_root)
+    token = _SCOPED_PROJECT_ROOT.set(normalized)
+    try:
+        yield normalized
+    finally:
+        _SCOPED_PROJECT_ROOT.reset(token)
+
+
+def _active_project_root() -> Path:
+    scoped = _SCOPED_PROJECT_ROOT.get()
+    return scoped if scoped is not None else PROJECT_ROOT
+
+
 _REPAIRED_STATE_CACHE_SIGNATURE: tuple[str, bool, int, int] | None = None
 _REPAIRED_STATE_CACHE: dict[str, Any] | None = None
 _JSONL_RECENT_CACHE: dict[tuple[str, bool, int, int, int, str, bool], list[dict[str, Any]]] = {}

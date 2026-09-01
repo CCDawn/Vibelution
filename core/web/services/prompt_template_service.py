@@ -956,32 +956,42 @@ DEFAULT_PROMPT_TEMPLATES: tuple[dict[str, Any], ...] = (
 )
 
 
-def list_prompt_templates(*, include_inactive: bool = False, include_content: bool = False) -> dict[str, Any]:
-    """Return the prompt template index with lightweight content metadata."""
+def list_prompt_templates(
+    *,
+    include_inactive: bool = False,
+    include_content: bool = False,
+    project_root: Path | None = None,
+) -> dict[str, Any]:
+    """Return the prompt template index with lightweight content metadata.
 
-    payload = repair_prompt_templates()
+    ``project_root`` 为显式解析根；缺省回落模块级 ``PROJECT_ROOT``，保持既有
+    调用方行为不变。
+    """
+
+    payload = repair_prompt_templates(project_root=project_root)
     templates = [
-        _template_to_api(item, include_content=include_content)
+        _template_to_api(item, include_content=include_content, project_root=project_root)
         for item in payload.get("templates") or []
         if include_inactive or str(item.get("status") or "active").strip() != "inactive"
     ]
     templates.sort(key=lambda item: (str(item.get("category") or ""), str(item.get("templateId") or "")))
+    path = prompt_template_path(project_root=project_root)
     return {
         "schemaVersion": PROMPT_TEMPLATE_INDEX_VERSION,
-        "path": str(prompt_template_path()),
-        "storagePath": _relative_project_path(prompt_template_path()),
+        "path": str(path),
+        "storagePath": _relative_project_path(path, project_root=project_root),
         "templates": templates,
         "repairWarnings": list(payload.get("repairWarnings") or []),
     }
 
 
-def get_prompt_template(template_id: str) -> dict[str, Any] | None:
+def get_prompt_template(template_id: str, *, project_root: Path | None = None) -> dict[str, Any] | None:
     """Return one prompt template with resolved content."""
 
     normalized = _normalize_template_id(template_id)
-    for item in repair_prompt_templates().get("templates") or []:
+    for item in repair_prompt_templates(project_root=project_root).get("templates") or []:
         if str(item.get("templateId") or "").strip() == normalized:
-            return _template_to_api(item, include_content=True)
+            return _template_to_api(item, include_content=True, project_root=project_root)
     return None
 
 
@@ -1065,14 +1075,7 @@ def get_agent_prompt_snapshot_versions(
     )
     stored_metadata: dict[str, Any] = {}
     if normalized:
-        global PROJECT_ROOT
-        previous_root = PROJECT_ROOT
-        if project_root is not None:
-            PROJECT_ROOT = Path(project_root)
-        try:
-            payload = _load_prompt_templates()
-        finally:
-            PROJECT_ROOT = previous_root
+        payload = _load_prompt_templates(project_root=project_root)
         for item in payload.get("templates") or []:
             if not isinstance(item, dict):
                 continue
@@ -1342,10 +1345,10 @@ def reset_prompt_template(template_id: str) -> dict[str, Any]:
     return _template_to_api(reset_record, include_content=True)
 
 
-def repair_prompt_templates() -> dict[str, Any]:
+def repair_prompt_templates(*, project_root: Path | None = None) -> dict[str, Any]:
     """Load and repair the prompt template index."""
 
-    payload = _load_prompt_templates()
+    payload = _load_prompt_templates(project_root=project_root)
     templates_by_id = _default_template_map()
     changed = False
     restored_template_ids: set[str] = set()
@@ -1354,7 +1357,7 @@ def repair_prompt_templates() -> dict[str, Any]:
             changed = True
             continue
         try:
-            record = _normalize_template_record(raw)
+            record = _normalize_template_record(raw, project_root=project_root)
         except PromptTemplateError:
             changed = True
             continue
@@ -1377,7 +1380,7 @@ def repair_prompt_templates() -> dict[str, Any]:
                 }
                 restored_template_ids.add(record["templateId"])
                 changed = True
-            templates_by_id[record["templateId"]] = _normalize_template_record(merged)
+            templates_by_id[record["templateId"]] = _normalize_template_record(merged, project_root=project_root)
         else:
             templates_by_id[record["templateId"]] = record
     next_payload = {
@@ -1390,14 +1393,14 @@ def repair_prompt_templates() -> dict[str, Any]:
         changed = True
     if _template_signature(payload.get("templates") or []) != _template_signature(next_payload["templates"]):
         changed = True
-    if changed or not prompt_template_path().exists():
+    if changed or not prompt_template_path(project_root=project_root).exists():
         next_payload["updatedAt"] = _now()
         for record in next_payload["templates"]:
             if str(record.get("templateId") or "").strip() in restored_template_ids:
-                _write_template_source_if_configured(record)
+                _write_template_source_if_configured(record, project_root=project_root)
             else:
-                _write_template_source_if_missing(record)
-        _save_prompt_templates(next_payload)
+                _write_template_source_if_missing(record, project_root=project_root)
+        _save_prompt_templates(next_payload, project_root=project_root)
         _record_prompt_template_event(
             "prompt_template.repaired",
             "",
@@ -1407,24 +1410,16 @@ def repair_prompt_templates() -> dict[str, Any]:
     return next_payload
 
 
-def prompt_template_path() -> Path:
-    return _workspace_path("agent_config", "prompt_templates.json")
+def prompt_template_path(*, project_root: Path | None = None) -> Path:
+    return _workspace_path("agent_config", "prompt_templates.json", project_root=project_root)
 
 
 def _get_prompt_template_for_project(template_id: str, *, project_root: Path | None = None) -> dict[str, Any] | None:
-    if project_root is None:
-        return get_prompt_template(template_id)
-    global PROJECT_ROOT
-    previous_root = PROJECT_ROOT
-    PROJECT_ROOT = Path(project_root)
-    try:
-        return get_prompt_template(template_id)
-    finally:
-        PROJECT_ROOT = previous_root
+    return get_prompt_template(template_id, project_root=project_root)
 
 
-def _load_prompt_templates() -> dict[str, Any]:
-    path = prompt_template_path()
+def _load_prompt_templates(*, project_root: Path | None = None) -> dict[str, Any]:
+    path = prompt_template_path(project_root=project_root)
     if not path.exists():
         return {"schemaVersion": PROMPT_TEMPLATE_INDEX_VERSION, "templates": []}
     try:
@@ -1434,24 +1429,24 @@ def _load_prompt_templates() -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {"schemaVersion": PROMPT_TEMPLATE_INDEX_VERSION, "templates": []}
 
 
-def _save_prompt_templates(payload: dict[str, Any]) -> None:
+def _save_prompt_templates(payload: dict[str, Any], *, project_root: Path | None = None) -> None:
     data = {
         "schemaVersion": PROMPT_TEMPLATE_INDEX_VERSION,
         "updatedAt": _now(),
-        "templates": [_normalize_template_record(item) for item in payload.get("templates") or [] if isinstance(item, dict)],
+        "templates": [_normalize_template_record(item, project_root=project_root) for item in payload.get("templates") or [] if isinstance(item, dict)],
         "repairWarnings": list(payload.get("repairWarnings") or [])[-50:],
     }
-    _atomic_write_json(prompt_template_path(), data)
+    _atomic_write_json(prompt_template_path(project_root=project_root), data)
 
 
-def _template_to_api(record: dict[str, Any], *, include_content: bool) -> dict[str, Any]:
-    content = _resolve_template_content(record)
+def _template_to_api(record: dict[str, Any], *, include_content: bool, project_root: Path | None = None) -> dict[str, Any]:
+    content = _resolve_template_content(record, project_root=project_root)
     template_id = str(record.get("templateId") or "").strip()
     source_path = str(record.get("sourcePath") or "").strip()
-    source_exists = _source_exists(source_path)
+    source_exists = _source_exists(source_path, project_root=project_root)
     source_type = "workspace_file" if source_path else ("inline_record" if "content" in record else "empty")
     source_authority = "record_content" if "content" in record else ("source_file" if source_path else "empty")
-    source_content = _read_template_source_content(source_path)
+    source_content = _read_template_source_content(source_path, project_root=project_root)
     source_content_hash = _content_hash(source_content or "") if source_content is not None else ""
     if not source_path:
         source_drift_status = "not_applicable"
@@ -1491,11 +1486,11 @@ def _template_to_api(record: dict[str, Any], *, include_content: bool) -> dict[s
     return payload
 
 
-def _read_template_source_content(source_path: str) -> str | None:
+def _read_template_source_content(source_path: str, *, project_root: Path | None = None) -> str | None:
     if not source_path:
         return None
     try:
-        path = _resolve_project_path(source_path)
+        path = _resolve_project_path(source_path, project_root=project_root)
         if path.exists() and path.is_file():
             return path.read_text(encoding="utf-8")
     except Exception:
@@ -1503,14 +1498,14 @@ def _read_template_source_content(source_path: str) -> str | None:
     return None
 
 
-def _resolve_template_content(record: dict[str, Any]) -> str:
+def _resolve_template_content(record: dict[str, Any], *, project_root: Path | None = None) -> str:
     if "content" in record:
         return str(record.get("content") or "")
     source_path = str(record.get("sourcePath") or "").strip()
     if not source_path:
         return ""
     try:
-        path = _resolve_project_path(source_path)
+        path = _resolve_project_path(source_path, project_root=project_root)
         if path.exists() and path.is_file():
             return path.read_text(encoding="utf-8")
     except Exception:
@@ -1534,14 +1529,14 @@ def _compose_agent_prompt_content(role_content: str, *, include_chat_base: bool)
     return "\n\n".join(parts).strip()
 
 
-def _normalize_template_record(raw: dict[str, Any]) -> dict[str, Any]:
+def _normalize_template_record(raw: dict[str, Any], *, project_root: Path | None = None) -> dict[str, Any]:
     template_id = _normalize_template_id(raw.get("templateId") or raw.get("id"))
     now = _now()
     record = {
         "templateId": template_id,
         "name": _trim_text(raw.get("name") or template_id, max_chars=120) or template_id,
         "category": _safe_token(raw.get("category") or "general", fallback="general"),
-        "sourcePath": _normalize_source_path(raw.get("sourcePath") or ""),
+        "sourcePath": _normalize_source_path(raw.get("sourcePath") or "", project_root=project_root),
         "status": _normalize_status(raw.get("status") or "active"),
         "metadata": dict(raw.get("metadata") or {}) if isinstance(raw.get("metadata"), dict) else {},
         "createdAt": str(raw.get("createdAt") or now).strip(),
@@ -1572,31 +1567,31 @@ def _should_restore_builtin_content(record: dict[str, Any], default: dict[str, A
     return not str(record.get("content") or "").strip()
 
 
-def _write_template_source_if_configured(record: dict[str, Any]) -> None:
+def _write_template_source_if_configured(record: dict[str, Any], *, project_root: Path | None = None) -> None:
     source_path = str(record.get("sourcePath") or "").strip()
     if not source_path:
         return
-    path = _resolve_project_path(source_path)
+    path = _resolve_project_path(source_path, project_root=project_root)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(str(record.get("content") or ""), encoding="utf-8", newline="\n")
 
 
-def _write_template_source_if_missing(record: dict[str, Any]) -> None:
+def _write_template_source_if_missing(record: dict[str, Any], *, project_root: Path | None = None) -> None:
     source_path = str(record.get("sourcePath") or "").strip()
     if not source_path or "content" not in record:
         return
-    path = _resolve_project_path(source_path)
+    path = _resolve_project_path(source_path, project_root=project_root)
     if path.exists():
         return
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(str(record.get("content") or ""), encoding="utf-8", newline="\n")
 
 
-def _source_exists(source_path: str) -> bool:
+def _source_exists(source_path: str, *, project_root: Path | None = None) -> bool:
     if not source_path:
         return False
     try:
-        return _resolve_project_path(source_path).is_file()
+        return _resolve_project_path(source_path, project_root=project_root).is_file()
     except PromptTemplateError:
         return False
 
@@ -1612,20 +1607,20 @@ def _normalize_template_id(value: Any) -> str:
     return normalized
 
 
-def _normalize_source_path(value: Any) -> str:
+def _normalize_source_path(value: Any, *, project_root: Path | None = None) -> str:
     raw = str(value or "").strip().replace("\\", "/")
     if not raw:
         return ""
-    _resolve_project_path(raw)
+    _resolve_project_path(raw, project_root=project_root)
     return raw
 
 
-def _resolve_project_path(value: str) -> Path:
-    root = Path(PROJECT_ROOT).resolve()
+def _resolve_project_path(value: str, *, project_root: Path | None = None) -> Path:
+    root = Path(project_root).resolve() if project_root is not None else Path(PROJECT_ROOT).resolve()
     raw = str(value or "").strip().replace("\\", "/")
     parts = PurePosixPath(raw).parts if raw else ()
     if parts and parts[0] == "workspace":
-        candidate = _workspace_path(*parts[1:])
+        candidate = _workspace_path(*parts[1:], project_root=project_root)
         return candidate.resolve()
     candidate = (root / raw).resolve()
     if candidate != root and root not in candidate.parents:
@@ -1633,9 +1628,10 @@ def _resolve_project_path(value: str) -> Path:
     return candidate
 
 
-def _workspace_path(*parts: str) -> Path:
+def _workspace_path(*parts: str, project_root: Path | None = None) -> Path:
+    root = Path(project_root) if project_root is not None else PROJECT_ROOT
     return developer_sandbox.route_workspace_path(
-        PROJECT_ROOT,
+        root,
         "prompt_manager",
         *parts,
         intent="state",
@@ -1694,21 +1690,22 @@ def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
     tmp.replace(path)
 
 
-def _relative_project_path(path: Path) -> str:
+def _relative_project_path(path: Path, *, project_root: Path | None = None) -> str:
+    root = Path(project_root) if project_root is not None else PROJECT_ROOT
     resolved = path.resolve()
-    workspace_root = developer_sandbox.formal_workspace_path(PROJECT_ROOT).resolve()
+    workspace_root = developer_sandbox.formal_workspace_path(root).resolve()
     try:
         return f"workspace/{resolved.relative_to(workspace_root).as_posix()}"
     except ValueError:
         pass
-    sandbox_root = developer_sandbox.sandbox_workspace_path(PROJECT_ROOT)
+    sandbox_root = developer_sandbox.sandbox_workspace_path(root)
     if sandbox_root is not None:
         try:
             return f"workspace/{resolved.relative_to(sandbox_root.resolve()).as_posix()}"
         except ValueError:
             pass
     try:
-        return resolved.relative_to(Path(PROJECT_ROOT).resolve()).as_posix()
+        return resolved.relative_to(Path(root).resolve()).as_posix()
     except ValueError:
         return str(path)
 

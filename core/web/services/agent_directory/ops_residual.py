@@ -72,7 +72,7 @@ def _active_agent_prompt_template_id(agent: dict[str, Any]) -> str:
 def _active_chat_session_id() -> str:
     s = _service()
     try:
-        payload = s.load_chat_state(s.PROJECT_ROOT)
+        payload = s.load_chat_state(s._active_project_root())
     except Exception:
         return ""
     if not isinstance(payload, dict):
@@ -1698,9 +1698,10 @@ def reactivate_agent_instance(agent_id: str, *, reason: str = "", metadata: dict
     return s._agent_to_api(agent)
 
 
-def registry_path() -> Path:
+def registry_path(*, project_root: Path | None = None) -> Path:
     s = _service()
-    return s._workspace_path("agents", "agents.json")
+    with s.scoped_project_root(project_root):
+        return s._workspace_path("agents", "agents.json")
 
 
 def resolve_agent_workspace_territory(agent_id: str) -> dict[str, Any]:

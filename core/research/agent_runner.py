@@ -521,75 +521,63 @@ class LLMResearchAgentRunner(ResearchAgentRunner):
         if mode_bound_agent:
             return mode_bound_agent
         project_root = _workspace_project_root(workspace)
-        previous_agent_root = agent_directory_service.PROJECT_ROOT
-        if project_root is not None:
-            agent_directory_service.PROJECT_ROOT = project_root
-        try:
-            matches: list[dict[str, Any]] = []
-            expected_role = f"research_{agent_key}"
-            for agent in agent_directory_service.list_agents(
-                include_archived=False,
-                detail="full",
-            ):
-                metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
-                if str(metadata.get("challengeCupTeamId") or "").strip():
-                    continue
-                research_key = str(metadata.get("researchAgentKey") or "").strip()
-                role_key = str(agent.get("roleKey") or "").strip()
-                if research_key == agent_key or role_key == expected_role:
-                    matches.append(agent)
-            if len(matches) > 1:
-                raise ValueError(
-                    f"Research AgentDirectory binding is duplicated: {agent_key}"
-                )
-            if matches:
-                return _profile_from_agent_instance(agent_key, matches[0])
-        finally:
-            agent_directory_service.PROJECT_ROOT = previous_agent_root
+        matches: list[dict[str, Any]] = []
+        expected_role = f"research_{agent_key}"
+        for agent in agent_directory_service.list_agents(
+            include_archived=False,
+            detail="full",
+            project_root=project_root,
+        ):
+            metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+            if str(metadata.get("challengeCupTeamId") or "").strip():
+                continue
+            research_key = str(metadata.get("researchAgentKey") or "").strip()
+            role_key = str(agent.get("roleKey") or "").strip()
+            if research_key == agent_key or role_key == expected_role:
+                matches.append(agent)
+        if len(matches) > 1:
+            raise ValueError(
+                f"Research AgentDirectory binding is duplicated: {agent_key}"
+            )
+        if matches:
+            return _profile_from_agent_instance(agent_key, matches[0])
         raise ValueError(f"Unknown research agent: {agent_key}")
 
     def _mode_bound_agent_profile(self, agent_key: str, workspace: Any) -> dict[str, Any] | None:
         project_root = _workspace_project_root(workspace)
         if project_root is None:
             return None
-        previous_binding_root = agent_mode_binding_service.PROJECT_ROOT
-        previous_agent_root = agent_directory_service.PROJECT_ROOT
-        agent_mode_binding_service.PROJECT_ROOT = project_root
-        agent_directory_service.PROJECT_ROOT = project_root
-        try:
-            payload = agent_mode_binding_service.get_mode_bindings_payload()
-            research_mode = (payload.get("modes") or {}).get("research") or {}
-            agent_id = str((research_mode.get("flowBindings") or {}).get(agent_key) or "").strip()
-            if not agent_id and agent_key in {"broad", "deep", "review", "themes", "card"}:
-                role_key = f"research_{agent_key}"
-                for candidate_id in list(research_mode.get("pool") or []):
-                    candidate = agent_directory_service.get_agent(str(candidate_id or ""), include_archived=False)
-                    if candidate and str(candidate.get("roleKey") or "").strip() == role_key:
-                        agent_id = str(candidate.get("agentId") or "").strip()
-                        break
-            if not agent_id:
-                return None
-            agent = agent_directory_service.get_agent(agent_id, include_archived=False)
-            if not agent:
-                return None
-            return _profile_from_agent_instance(agent_key, agent)
-        finally:
-            agent_mode_binding_service.PROJECT_ROOT = previous_binding_root
-            agent_directory_service.PROJECT_ROOT = previous_agent_root
+        payload = agent_mode_binding_service.get_mode_bindings_payload(project_root=project_root)
+        research_mode = (payload.get("modes") or {}).get("research") or {}
+        agent_id = str((research_mode.get("flowBindings") or {}).get(agent_key) or "").strip()
+        if not agent_id and agent_key in {"broad", "deep", "review", "themes", "card"}:
+            role_key = f"research_{agent_key}"
+            for candidate_id in list(research_mode.get("pool") or []):
+                candidate = agent_directory_service.get_agent(
+                    str(candidate_id or ""),
+                    include_archived=False,
+                    project_root=project_root,
+                )
+                if candidate and str(candidate.get("roleKey") or "").strip() == role_key:
+                    agent_id = str(candidate.get("agentId") or "").strip()
+                    break
+        if not agent_id:
+            return None
+        agent = agent_directory_service.get_agent(agent_id, include_archived=False, project_root=project_root)
+        if not agent:
+            return None
+        return _profile_from_agent_instance(agent_key, agent)
 
     def _system_prompt(self, agent_key: str, contract: str) -> str:
         workspace = get_workspace()
         profile = self._agent_profile(agent_key)
         prompt_template_id = str(profile.get("promptTemplateId") or "").strip()
         if prompt_template_id:
-            previous_prompt_root = prompt_template_service.PROJECT_ROOT
             project_root = _workspace_project_root(workspace)
-            if project_root is not None:
-                prompt_template_service.PROJECT_ROOT = project_root
-            try:
-                template = prompt_template_service.get_prompt_template(prompt_template_id)
-            finally:
-                prompt_template_service.PROJECT_ROOT = previous_prompt_root
+            template = prompt_template_service.get_prompt_template(
+                prompt_template_id,
+                project_root=project_root,
+            )
             if not template:
                 raise ValueError(f"Research agent {agent_key} prompt template not found: {prompt_template_id}")
             prompt = str(template.get("content") or "")
@@ -606,17 +594,8 @@ class LLMResearchAgentRunner(ResearchAgentRunner):
         agent_id = str(profile.get("agentId") or profile.get("agentInstanceId") or "").strip()
         if not agent_id:
             return profile
-        previous_root = agent_directory_service.PROJECT_ROOT
-        previous_prompt_root = prompt_template_service.PROJECT_ROOT
         project_root = _workspace_project_root(get_workspace())
-        if project_root is not None:
-            agent_directory_service.PROJECT_ROOT = project_root
-            prompt_template_service.PROJECT_ROOT = project_root
-        try:
-            agent = agent_directory_service.get_agent(agent_id, include_archived=False)
-        finally:
-            agent_directory_service.PROJECT_ROOT = previous_root
-            prompt_template_service.PROJECT_ROOT = previous_prompt_root
+        agent = agent_directory_service.get_agent(agent_id, include_archived=False, project_root=project_root)
         if not agent:
             return profile
         resolved = dict(profile)

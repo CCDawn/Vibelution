@@ -22,12 +22,14 @@ from pathlib import Path
 from typing import Any, Iterable
 
 # _workspace_path / load_state 进程内缓存：
-# - _workspace_path 以 (PROJECT_ROOT, parts, intent, seed) 为 key，以
+# - _workspace_path 以 (路由根, parts, intent, seed) 为 key，以
 #   developer_sandbox.workspace_routing_fingerprint（配置/活跃沙箱/环境变量签名）
 #   为校验值；仅缓存 dev mode 关闭时的正式路由结果，dev 模式下 seeded 语义
-#   依赖实时文件存在性，保持实时计算。
+#   依赖实时文件存在性，保持实时计算。路由根含显式 project_root 维度，
+#   不同根的缓存条目互不命中。
 # - load_state 在 _STATE_LOCK 内以注册表文件签名 (path, exists, mtime_ns, size)
-#   校验；读取前后签名一致才缓存，写入点经 _invalidate_repaired_state_cache 显式失效。
+#   校验；签名含注册表绝对路径，天然按根分区；读取前后签名一致才缓存，
+#   写入点经 _invalidate_repaired_state_cache 显式失效。
 _WORKSPACE_PATH_CACHE_LOCK = threading.RLock()
 _WORKSPACE_PATH_CACHE: dict[tuple[object, ...], tuple[tuple[object, ...], Path]] = {}
 _WORKSPACE_PATH_CACHE_LIMIT = 512
@@ -1318,7 +1320,7 @@ def _profile_id_to_model_id(profile_id: str) -> str:
 
 def _project_root() -> Path:
     s = _service()
-    root = Path(s.PROJECT_ROOT).resolve()
+    root = Path(s._active_project_root()).resolve()
     return root.parent if root.name.lower() == "workspace" else root
 
 
@@ -1880,7 +1882,9 @@ def _workspace_path(*parts: str, intent: str = "state", seed: bool = True) -> Pa
     sandbox = s._developer_sandbox_module()
     root = s._project_root()
     fingerprint = sandbox.workspace_routing_fingerprint(root)
-    cache_key = (str(s.PROJECT_ROOT), tuple(str(part) for part in parts), str(intent), bool(seed))
+    # 缓存键必须携带实际路由根（显式 project_root 或默认根），
+    # 否则不同根的解析结果会在并发下互相命中，形成新的串线口。
+    cache_key = (str(root), tuple(str(part) for part in parts), str(intent), bool(seed))
     with _WORKSPACE_PATH_CACHE_LOCK:
         cached = _WORKSPACE_PATH_CACHE.get(cache_key)
         if cached is not None and cached[0] == fingerprint:

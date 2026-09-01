@@ -213,7 +213,7 @@ def test_research_runner_uses_directory_agent_when_legacy_file_conflicts(
     monkeypatch.setattr(
         agent_runner_module.agent_mode_binding_service,
         "get_mode_bindings_payload",
-        lambda: {"modes": {"research": {"flowBindings": {}, "pool": []}}},
+        lambda **_kwargs: {"modes": {"research": {"flowBindings": {}, "pool": []}}},
     )
 
     profile = LLMResearchAgentRunner(

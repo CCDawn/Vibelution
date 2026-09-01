@@ -364,7 +364,24 @@ def _build_agent_api_hydration_context(
     return context
 
 
-def list_agents(*, include_archived: bool = False, detail: str = "full") -> list[dict[str, Any]]:
+def list_agents(
+    *,
+    include_archived: bool = False,
+    detail: str = "full",
+    project_root: Path | None = None,
+) -> list[dict[str, Any]]:
+    """List Agent API projections.
+
+    ``project_root`` 为显式解析根；缺省回落模块级 ``PROJECT_ROOT``。并发
+    调用方（如 research agent runner）必须显式传参，不得改写模块级根。
+    """
+
+    s = _service()
+    with s.scoped_project_root(project_root):
+        return _list_agents(include_archived=include_archived, detail=detail)
+
+
+def _list_agents(*, include_archived: bool, detail: str) -> list[dict[str, Any]]:
     s = _service()
     started = time.perf_counter()
     timings: dict[str, float] = {}
@@ -921,7 +938,20 @@ def _agent_api_hydration_fast_signature(agents: list[dict[str, Any]]) -> tuple[A
     return (s._registry_state_signature(), s._agent_api_hydration_event_version(), tuple(agent_keys))
 
 
-def get_agent(agent_id: str, *, include_archived: bool = True) -> dict[str, Any] | None:
+def get_agent(
+    agent_id: str,
+    *,
+    include_archived: bool = True,
+    project_root: Path | None = None,
+) -> dict[str, Any] | None:
+    """Return one Agent API projection under the explicit (or default) root."""
+
+    s = _service()
+    with s.scoped_project_root(project_root):
+        return _get_agent(agent_id, include_archived=include_archived)
+
+
+def _get_agent(agent_id: str, *, include_archived: bool) -> dict[str, Any] | None:
     s = _service()
     normalized = str(agent_id or "").strip()
     if not normalized:

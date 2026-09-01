@@ -62,11 +62,20 @@ DEFAULT_MODE_BINDINGS: tuple[dict[str, Any], ...] = (
 )
 
 
-def get_mode_bindings_payload(*, agent_options: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    """Return repaired mode bindings plus the active Agent index."""
+def get_mode_bindings_payload(
+    *,
+    agent_options: list[dict[str, Any]] | None = None,
+    project_root: Path | None = None,
+) -> dict[str, Any]:
+    """Return repaired mode bindings plus the active Agent index.
 
-    agents = agent_options if agent_options is not None else _agent_options()
-    payload = repair_mode_bindings(agent_options=agents)
+    ``project_root`` 为显式解析根；缺省回落模块级 ``PROJECT_ROOT``，保持既有
+    调用方行为不变。并发调用方（如 research agent runner）应始终显式传参，
+    禁止再依赖模块级 save-swap-restore。
+    """
+
+    agents = agent_options if agent_options is not None else _agent_options(project_root=project_root)
+    payload = repair_mode_bindings(agent_options=agents, project_root=project_root)
     modes = {
         str(item.get("mode") or ""): _binding_to_api(item)
         for item in payload.get("bindings") or []
@@ -74,7 +83,7 @@ def get_mode_bindings_payload(*, agent_options: list[dict[str, Any]] | None = No
     }
     return {
         "schemaVersion": MODE_BINDING_VERSION,
-        "storagePath": _relative_project_path(mode_binding_path()),
+        "storagePath": _relative_project_path(mode_binding_path(project_root=project_root), project_root=project_root),
         "bindings": modes,
         "modes": modes,
         "agents": agents,
@@ -424,16 +433,20 @@ def _fixed_role_tombstone_slots(agent: dict[str, Any] | None) -> dict[str, str]:
     return {mode: safe_role} if mode in {"supervised_evolution", "self_evolution"} and safe_role else {}
 
 
-def repair_mode_bindings(*, agent_options: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+def repair_mode_bindings(
+    *,
+    agent_options: list[dict[str, Any]] | None = None,
+    project_root: Path | None = None,
+) -> dict[str, Any]:
     """Load bindings, seed known modes, and remove stale Agent references."""
 
-    agents = agent_options if agent_options is not None else _agent_options()
+    agents = agent_options if agent_options is not None else _agent_options(project_root=project_root)
     active_agent_ids = {
         str(agent.get("agentId") or "").strip()
         for agent in agents
         if str(agent.get("agentId") or "").strip()
     }
-    payload = _load_mode_bindings()
+    payload = _load_mode_bindings(project_root=project_root)
     bindings_by_mode = _default_binding_map()
     changed = False
     for raw in payload.get("bindings") or []:
@@ -496,9 +509,9 @@ def repair_mode_bindings(*, agent_options: list[dict[str, Any]] | None = None) -
         changed = True
     if repair_warnings:
         changed = True
-    if changed or not mode_binding_path().exists():
+    if changed or not mode_binding_path(project_root=project_root).exists():
         next_payload["updatedAt"] = _now()
-        _save_mode_bindings(next_payload)
+        _save_mode_bindings(next_payload, project_root=project_root)
         _record_mode_binding_event(
             "mode_binding.repaired",
             "",
@@ -545,16 +558,17 @@ def save_mode_binding_state(state: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
-def mode_binding_path() -> Path:
+def mode_binding_path(*, project_root: Path | None = None) -> Path:
+    root = Path(project_root) if project_root is not None else PROJECT_ROOT
     configured_path = Path(MODE_BINDING_PATH)
-    current_formal_path = developer_sandbox.formal_workspace_path(PROJECT_ROOT, "agent_config", "mode_bindings.json")
+    current_formal_path = developer_sandbox.formal_workspace_path(root, "agent_config", "mode_bindings.json")
     if configured_path.resolve() not in {
         _DEFAULT_MODE_BINDING_PATH.resolve(),
         current_formal_path.resolve(),
     }:
         return configured_path
     return developer_sandbox.route_workspace_path(
-        PROJECT_ROOT,
+        root,
         "agent_configuration",
         "agent_config",
         "mode_bindings.json",
@@ -769,7 +783,11 @@ def _binding_to_api(binding: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _agent_options() -> list[dict[str, Any]]:
+def _agent_options(*, project_root: Path | None = None) -> list[dict[str, Any]]:
+    kwargs: dict[str, Any] = {"include_archived": False, "detail": "summary"}
+    if project_root is not None:
+        # 仅在显式根存在时转发，保持既有 list_agents 桩/子类的签名兼容。
+        kwargs["project_root"] = project_root
     return [
         {
             "agentId": str(agent.get("agentId") or "").strip(),
@@ -782,12 +800,12 @@ def _agent_options() -> list[dict[str, Any]]:
             "directSessionId": str(agent.get("directSessionId") or "").strip(),
             "metadata": dict(agent.get("metadata") or {}) if isinstance(agent.get("metadata"), dict) else {},
         }
-        for agent in list_agents(include_archived=False, detail="summary")
+        for agent in list_agents(**kwargs)
     ]
 
 
-def _load_mode_bindings() -> dict[str, Any]:
-    path = mode_binding_path()
+def _load_mode_bindings(*, project_root: Path | None = None) -> dict[str, Any]:
+    path = mode_binding_path(project_root=project_root)
     if not path.exists():
         return {"schemaVersion": MODE_BINDING_VERSION, "bindings": []}
     try:
@@ -797,14 +815,14 @@ def _load_mode_bindings() -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {"schemaVersion": MODE_BINDING_VERSION, "bindings": []}
 
 
-def _save_mode_bindings(payload: dict[str, Any]) -> None:
+def _save_mode_bindings(payload: dict[str, Any], *, project_root: Path | None = None) -> None:
     data = {
         "schemaVersion": MODE_BINDING_VERSION,
         "updatedAt": _now(),
         "bindings": [_normalize_binding(item) for item in payload.get("bindings") or [] if isinstance(item, dict)],
         "repairWarnings": list(payload.get("repairWarnings") or [])[-50:],
     }
-    _atomic_write_json(mode_binding_path(), data)
+    _atomic_write_json(mode_binding_path(project_root=project_root), data)
 
 
 def _normalize_binding(raw: dict[str, Any]) -> dict[str, Any]:
@@ -974,21 +992,22 @@ def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
     tmp.replace(path)
 
 
-def _relative_project_path(path: Path) -> str:
+def _relative_project_path(path: Path, *, project_root: Path | None = None) -> str:
+    root = Path(project_root) if project_root is not None else PROJECT_ROOT
     resolved = path.resolve()
-    workspace_root = developer_sandbox.formal_workspace_path(PROJECT_ROOT).resolve()
+    workspace_root = developer_sandbox.formal_workspace_path(root).resolve()
     try:
         return f"workspace/{resolved.relative_to(workspace_root).as_posix()}"
     except ValueError:
         pass
-    sandbox_root = developer_sandbox.sandbox_workspace_path(PROJECT_ROOT)
+    sandbox_root = developer_sandbox.sandbox_workspace_path(root)
     if sandbox_root is not None:
         try:
             return f"workspace/{resolved.relative_to(sandbox_root.resolve()).as_posix()}"
         except ValueError:
             pass
     try:
-        return resolved.relative_to(Path(PROJECT_ROOT).resolve()).as_posix()
+        return resolved.relative_to(Path(root).resolve()).as_posix()
     except ValueError:
         return str(path)
 

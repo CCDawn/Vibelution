@@ -1167,37 +1167,32 @@ class ResearchThemeDiscoveryService:
     def _research_agent_template_profile(self) -> dict[str, Any]:
         workspace = get_workspace()
         project_root = _workspace_project_root(workspace)
-        previous_root = agent_directory_service.PROJECT_ROOT
-        if project_root is not None:
-            agent_directory_service.PROJECT_ROOT = project_root
-        try:
-            agents: list[dict[str, Any]] = []
-            seen_keys: set[str] = set()
-            for agent in agent_directory_service.list_agents(
-                include_archived=False,
-                detail="full",
-            ):
-                metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
-                if str(metadata.get("challengeCupTeamId") or "").strip():
-                    continue
-                role_key = str(agent.get("roleKey") or "").strip()
-                key = str(metadata.get("researchAgentKey") or "").strip()
-                if not key and role_key.startswith("research_"):
-                    key = role_key.removeprefix("research_")
-                if key:
-                    if key in seen_keys:
-                        raise ValueError(
-                            f"Research AgentDirectory binding is duplicated: {key}"
-                        )
-                    seen_keys.add(key)
-                    agents.append(_profile_from_agent_instance(key, agent))
-            agents.sort(key=lambda item: str(item.get("key") or ""))
-            return {
-                "configPath": str(agent_directory_service.registry_path()),
-                "agents": agents,
-            }
-        finally:
-            agent_directory_service.PROJECT_ROOT = previous_root
+        agents: list[dict[str, Any]] = []
+        seen_keys: set[str] = set()
+        for agent in agent_directory_service.list_agents(
+            include_archived=False,
+            detail="full",
+            project_root=project_root,
+        ):
+            metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+            if str(metadata.get("challengeCupTeamId") or "").strip():
+                continue
+            role_key = str(agent.get("roleKey") or "").strip()
+            key = str(metadata.get("researchAgentKey") or "").strip()
+            if not key and role_key.startswith("research_"):
+                key = role_key.removeprefix("research_")
+            if key:
+                if key in seen_keys:
+                    raise ValueError(
+                        f"Research AgentDirectory binding is duplicated: {key}"
+                    )
+                seen_keys.add(key)
+                agents.append(_profile_from_agent_instance(key, agent))
+        agents.sort(key=lambda item: str(item.get("key") or ""))
+        return {
+            "configPath": str(agent_directory_service.registry_path(project_root=project_root)),
+            "agents": agents,
+        }
 
     def _research_prompt_profile(self) -> dict[str, Any]:
         workspace = get_workspace()

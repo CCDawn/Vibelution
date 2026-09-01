@@ -1027,7 +1027,7 @@ def _agent_avatar_storage_dirs(filename: str = "") -> tuple[tuple[str, Path], ..
     custom = ("custom", _agent_custom_avatar_dir())
     bundled = (
         "bundled",
-        Path(s.PROJECT_ROOT).resolve() / "assets" / s.AGENT_AVATAR_ASSET_DIR_NAME,
+        Path(s._active_project_root()).resolve() / "assets" / s.AGENT_AVATAR_ASSET_DIR_NAME,
     )
     legacy = ("legacy", s._workspace_path("avatars", seed=False).resolve())
     # Product-owned model marks are immutable defaults: only the bundled asset
