@@ -1637,6 +1637,11 @@ def test_round_candidate_ledger_fallback_uses_meeting_workflow_run(
             "candidateId": "candidate-current",
             "claim": "current claim",
             "rationale": "current rationale",
+            "candidateAuthority": "",
+            "lineageRefs": [],
+            "testablePrediction": "",
+            "falsifier": "",
+            "axisProfile": {},
             "differenceFromAlternatives": "current difference",
         }
     ]
