@@ -49,6 +49,9 @@ const HYPOTHESIS_FIRST_STAGE_PHASES: Partial<Record<HypothesisFirstStage, Workfl
   handoff_pending: { step: 4, zh: "资料搜集", en: "Evidence collection" },
 };
 
+/** The hypothesis-first chain has five fixed phases; step badges read X/5. */
+const HYPOTHESIS_FIRST_PHASE_STEP_TOTAL = 5;
+
 export function researchWorkflowPhase(
   navigationLabel?: string,
   runtimeCurrentNodeIds?: readonly string[] | null,
@@ -136,6 +139,26 @@ export function ResearchWorkflowToolbar(props: {
   const { lang } = useShellI18n();
   const isZh = lang === "zh";
   const runStatusBadge = researchRunStatusBadge(props.runStatus, lang);
+  // Global "step X/5" progress for the pre-formal hypothesis-first chain. The
+  // derivation yields a numbered step only while the chain is in progress;
+  // formal-runtime nodes, a converged loop and unknown states return
+  // step:null, keeping the badge off the top bar for delivered work.
+  const workflowPhase = researchWorkflowPhase(
+    props.navigationLabel,
+    props.runtimeCurrentNodeIds,
+    props.formalRuntimeActive ?? true,
+    props.nextActionStage,
+  );
+  const phaseBadgeText = typeof workflowPhase.step === "number"
+    ? (isZh
+      ? `假说先行 · 第${workflowPhase.step}/${HYPOTHESIS_FIRST_PHASE_STEP_TOTAL}步 · ${workflowPhase.zh}`
+      : `Hypothesis-first · Step ${workflowPhase.step}/${HYPOTHESIS_FIRST_PHASE_STEP_TOTAL} · ${workflowPhase.en}`)
+    : null;
+  const chainRoundText = props.chainRound
+    ? (isZh
+      ? `第${props.chainRound.current}轮/${props.chainRound.budget}`
+      : `Round ${props.chainRound.current}/${props.chainRound.budget}`)
+    : null;
   const selectedQuestionId = props.identity?.questionId || null;
   const emptySwitcherLabel = props.identity
     ? formatExperimentSwitchLabel(props.identity.questionId, props.identity.hypothesisSummary)
@@ -175,6 +198,16 @@ export function ResearchWorkflowToolbar(props: {
         </div>
       </div>
       <div className={styles.actions}>
+        {phaseBadgeText ? (
+          <VStatusChip
+            tone="accent"
+            role="status"
+            data-testid="research-workflow-phase-badge"
+            className={styles.trailing}
+          >
+            {chainRoundText ? `${phaseBadgeText} · ${chainRoundText}` : phaseBadgeText}
+          </VStatusChip>
+        ) : null}
         {(props.awaitingHumanCount ?? 0) > 0 ? (
           <VButton
             type="button"

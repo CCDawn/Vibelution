@@ -62,7 +62,7 @@ import {
 } from "./hypothesisFirstNextAction";
 import { resolveHypothesisFirstNextActionFromV2 } from "./hypothesisFirstStateV2Adapter";
 import type { HypothesisFirstV2NextAction } from "./hypothesisFirstStateV2Adapter";
-import { invalidateHypothesisFirstQueries, useHypothesisFirstChain } from "./useHypothesisFirstChain";
+import { invalidateHypothesisFirstQueries, resolveHypothesisFirstRoundBudget, useHypothesisFirstChain } from "./useHypothesisFirstChain";
 import { resolvePollingInterval, usePageVisibility } from "../../../app/pollingPolicy";
 import type { ScopedDiscussionModel } from "./scopedDiscussionModel";
 import styles from "./HypothesisFirstNodeInspector.styles";
@@ -163,22 +163,21 @@ export function inspectorNodeOwnsCurrentStep(nodeId: string, targetNodeId: strin
   return false;
 }
 
-// ---------------------------------------------------------------------------
-// Review rounds have one server-owned hard limit. Per-round records may retain
-// historical roundBudget values, but they are not mutable budget authority.
-// ---------------------------------------------------------------------------
-export const HYPOTHESIS_FIRST_REVIEW_ROUND_LIMIT = 5;
-
 type ReviewRoundBudgetSnapshot = {
   stateV2?: { convergence?: { roundBudget?: number; roundIndex?: number } | null } | null;
   chainState?: { roundBudget?: number; hypothesisRoundCount?: number } | null;
 };
 
-/** 唯一硬上限；快照中的旧 roundBudget 仅用于历史回放，不参与裁决。 */
+// ---------------------------------------------------------------------------
+// Review rounds have one server-owned budget. The resolver authority lives in
+// useHypothesisFirstChain (V2 convergence → V1 chain state → hard limit);
+// per-round records may retain historical roundBudget values, but they are
+// not mutable budget authority.
+// ---------------------------------------------------------------------------
 export function resolveHypothesisFirstReviewRoundBudget(
-  _snapshot: ReviewRoundBudgetSnapshot,
+  snapshot: ReviewRoundBudgetSnapshot,
 ): number {
-  return HYPOTHESIS_FIRST_REVIEW_ROUND_LIMIT;
+  return resolveHypothesisFirstRoundBudget(snapshot);
 }
 
 /** 当前轮序 M（开启新轮即 M+1）；快照缺失时返回 null，文案降级为不提轮次。 */
@@ -196,20 +195,22 @@ export function resolveHypothesisFirstNextReviewRoundIndex(
   return null;
 }
 
+/** 服务端快照解析出的轮次上限 M；文案读「第 N 轮 / 上限 M」。 */
 export function reviewRoundActionCopy(
   nextRoundIndex: number | null,
   lang: Language,
+  roundBudget: number,
 ): { label: string; detail: string } {
   const isZh = lang === "zh";
   return {
     label: isZh ? "发起新一轮评审" : "Open a new review round",
     detail: nextRoundIndex !== null
       ? (isZh
-        ? `本轮尚未收敛，将在硬上限 ${HYPOTHESIS_FIRST_REVIEW_ROUND_LIMIT} 内开启第 ${nextRoundIndex} 轮评审。`
-        : `This review has not converged; opening round ${nextRoundIndex} within the hard limit of ${HYPOTHESIS_FIRST_REVIEW_ROUND_LIMIT}.`)
+        ? `本轮尚未收敛，将在上限 ${roundBudget} 内开启第 ${nextRoundIndex} 轮评审。`
+        : `This review has not converged; opening round ${nextRoundIndex} within the limit of ${roundBudget}.`)
       : (isZh
-        ? `本轮尚未收敛，将在硬上限 ${HYPOTHESIS_FIRST_REVIEW_ROUND_LIMIT} 内开启新一轮评审。`
-        : `This review has not converged; opening another round within the hard limit of ${HYPOTHESIS_FIRST_REVIEW_ROUND_LIMIT}.`),
+        ? `本轮尚未收敛，将在上限 ${roundBudget} 内开启新一轮评审。`
+        : `This review has not converged; opening another round within the limit of ${roundBudget}.`),
   };
 }
 
@@ -1068,6 +1069,10 @@ function InspectorBody(props: {
               stateV2: props.stateV2,
               chainState: props.chainState,
             })}
+            roundBudget={resolveHypothesisFirstReviewRoundBudget({
+              stateV2: props.stateV2,
+              chainState: props.chainState,
+            })}
             gateDetail={gateBlockedDetail}
             lang={lang}
           />
@@ -1628,6 +1633,8 @@ function NextReviewRoundButton(props: {
   runId: string;
   meetingRoundId: string;
   nextRoundIndex: number | null;
+  /** Server-resolved review-round budget; the copy reads "round N of M". */
+  roundBudget: number;
   /** Claim-gate guidance replaces the generic "not converged" detail when the
    * server gate blocked convergence; the button authority itself is untouched. */
   gateDetail?: string | null;
@@ -1635,14 +1642,14 @@ function NextReviewRoundButton(props: {
 }) {
   const queryClient = useQueryClient();
   const [blockedReason, setBlockedReason] = useState<string | null>(null);
-  const copy = reviewRoundActionCopy(props.nextRoundIndex, props.lang);
+  const copy = reviewRoundActionCopy(props.nextRoundIndex, props.lang, props.roundBudget);
   const mutation = useMutation({
     mutationFn: () =>
       openNextHypothesisReviewRound(props.teamId, props.meetingRoundId),
     onSuccess: (payload) => {
       setBlockedReason(
         payload?.status === "budget_exhausted"
-          ? (props.lang === "zh" ? `已达到评审硬上限 ${HYPOTHESIS_FIRST_REVIEW_ROUND_LIMIT}，假说仍未收敛。` : `The hard review limit of ${HYPOTHESIS_FIRST_REVIEW_ROUND_LIMIT} was reached without convergence.`)
+          ? (props.lang === "zh" ? `已达到评审上限 ${props.roundBudget}，假说仍未收敛。` : `The review limit of ${props.roundBudget} was reached without convergence.`)
           : null,
       );
       invalidateHypothesisFirstQueries(queryClient, props.teamId, props.questionId, props.runId);

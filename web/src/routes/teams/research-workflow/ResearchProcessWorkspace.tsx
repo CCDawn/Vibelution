@@ -132,8 +132,8 @@ export function ResearchProcessWorkspace({
   const catalog = useResearchWorkflowCatalog(teamId, runState.run?.runVersion ?? null);
   const chainQuestionId = location.questionId || runState.run?.questionId || "";
   const hypothesisFirstChain = useHypothesisFirstChain(teamId, chainQuestionId, location.runId);
-  // The server owns one hard review limit. Historical roundBudget values in
-  // V1/V2 snapshots are replay data and do not reduce the limit.
+  // The server snapshot owns the review-round budget (V2 convergence first,
+  // V1 chain state fallback); the hard limit only covers payloads without one.
   const currentRoundBudget = resolveHypothesisFirstRoundBudget({
     stateV2: hypothesisFirstChain.stateV2,
     chainState: hypothesisFirstChain.chainState,

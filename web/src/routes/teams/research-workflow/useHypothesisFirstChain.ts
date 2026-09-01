@@ -55,20 +55,41 @@ export const hypothesisFirstChainReviewRoundLinksKey = (
 ) => ["teams", teamId, "hypothesis-first", "chain", "review-round-links", questionId, runId] as const;
 
 /**
- * Display contract for the single server-owned review-round hard limit,
- * shared with the workspace chrome. Historical per-round budget values are
- * replay data and do not reduce this limit.
+ * Display fallback for the single server-owned review-round hard limit, shared
+ * with the workspace chrome. The authoritative value travels on the snapshot
+ * itself (`stateV2.convergence.roundBudget` / `chainState.roundBudget`); this
+ * constant only covers payloads that carry no readable budget.
  */
 export const HYPOTHESIS_FIRST_REVIEW_ROUND_LIMIT = 5;
 
+function isReadableRoundBudget(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 1;
+}
+
 /**
- * Keep the hard limit stable when replaying snapshots written under the
- * retired default-3 budget model.
+ * Read the review-round budget from the server snapshot: V2 first, then the
+ * V1 compatibility chain state, then the hard-limit fallback. Both snapshot
+ * surfaces are recomputed server-side on every read, so replayed review-round
+ * links written under the retired default-3 budget model never reach this
+ * resolver — those historical per-round values stay replay-only data and do
+ * not reduce the limit. Legacy V1 snapshots default `roundBudget` to 0, and
+ * any other unreadable value (negative/NaN) also falls back so old payloads
+ * keep the stable hard-limit display.
+ *
+ * The input is deliberately structural (optional convergence/roundBudget) so
+ * partial snapshots from any consumer stay assignable; the runtime guard,
+ * not the type, decides readability.
  */
-export function resolveHypothesisFirstRoundBudget(_input: {
-  stateV2?: Pick<HypothesisFirstStateV2, "convergence"> | null;
-  chainState?: Pick<HypothesisFirstChainState, "roundBudget"> | null;
+export function resolveHypothesisFirstRoundBudget(input: {
+  stateV2?: { convergence?: { roundBudget?: number } | null } | null;
+  chainState?: { roundBudget?: number } | null;
 }): number {
+  if (isReadableRoundBudget(input.stateV2?.convergence?.roundBudget)) {
+    return input.stateV2.convergence.roundBudget;
+  }
+  if (isReadableRoundBudget(input.chainState?.roundBudget)) {
+    return input.chainState.roundBudget;
+  }
   return HYPOTHESIS_FIRST_REVIEW_ROUND_LIMIT;
 }
 

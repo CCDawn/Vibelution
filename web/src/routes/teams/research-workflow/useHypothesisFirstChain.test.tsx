@@ -736,21 +736,30 @@ describe("hypothesis-first round budget display contract", () => {
     return { convergence: { ...stateV2Payload().convergence, roundBudget } };
   }
 
-  it("ignores historical V1/V2 budget values", () => {
+  it("prefers the V2 snapshot budget, then the V1 chain-state value", () => {
     expect(resolveHypothesisFirstRoundBudget({
       stateV2: v2WithRoundBudget(4),
       chainState: { roundBudget: 3 },
-    })).toBe(5);
+    })).toBe(4);
     expect(resolveHypothesisFirstRoundBudget({
       stateV2: null,
       chainState: { roundBudget: 2 },
-    })).toBe(5);
+    })).toBe(2);
   });
 
-  it("publishes the single server-owned hard limit", () => {
+  it("publishes the single server-owned hard limit as the fallback", () => {
     expect(HYPOTHESIS_FIRST_REVIEW_ROUND_LIMIT).toBe(5);
     expect(resolveHypothesisFirstRoundBudget({ stateV2: null, chainState: null })).toBe(5);
     expect(resolveHypothesisFirstRoundBudget({})).toBe(5);
+    // 非法值（0/负数/NaN）与旧 V1 快照的缺省 0 一样回落到稳定硬上限。
+    expect(resolveHypothesisFirstRoundBudget({
+      stateV2: null,
+      chainState: { roundBudget: 0 },
+    })).toBe(5);
+    expect(resolveHypothesisFirstRoundBudget({
+      stateV2: v2WithRoundBudget(Number.NaN),
+      chainState: { roundBudget: -1 },
+    })).toBe(5);
   });
 });
 

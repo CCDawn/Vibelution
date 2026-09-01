@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 import { queryKeys } from "../../../api/queryKeys";
+import type { HypothesisFirstStage } from "./hypothesisFirstNextAction";
 import type { ExperimentSwitchOption } from "./researchExperimentSwitchModel";
 import { ResearchWorkflowToolbar, researchWorkflowPhase } from "./ResearchWorkflowToolbar";
 
@@ -169,6 +170,66 @@ describe("ResearchWorkflowToolbar", () => {
       .toMatchObject({ step: 4, zh: "资料搜集" });
     expect(researchWorkflowPhase("", null, true, "converged"))
       .toMatchObject({ step: null, zh: "假说先行闭环已完成" });
+  });
+
+  it("surfaces the hypothesis-first step badge with the chain round overlay", () => {
+    const markup = renderToolbar({
+      ...BASE_PROPS,
+      nextActionStage: "review_running",
+      chainRound: { current: 2, budget: 5 },
+    });
+
+    expect(markup).toContain('data-testid="research-workflow-phase-badge"');
+    expect(markup).toContain("假说先行 · 第3/5步 · 团队评审");
+    expect(markup).toContain("第2轮/5");
+  });
+
+  it("maps each staged hypothesis-first step onto the badge", () => {
+    const staged: Array<[HypothesisFirstStage, string]> = [
+      ["generation_running", "第1/5步 · 候选形成"],
+      ["selection_required", "第2/5步 · 假说选择"],
+      ["review_awaiting_approval", "第3/5步 · 团队评审"],
+      ["collecting", "第4/5步 · 资料搜集"],
+    ];
+    for (const [stage, expected] of staged) {
+      const markup = renderToolbar({ ...BASE_PROPS, nextActionStage: stage });
+      expect(markup).toContain('data-testid="research-workflow-phase-badge"');
+      expect(markup).toContain(`假说先行 · ${expected}`);
+    }
+  });
+
+  it("hides the step badge once the formal runtime owns the current node", () => {
+    const markup = renderToolbar({
+      ...BASE_PROPS,
+      nextActionStage: "review_running",
+      runtimeCurrentNodeIds: ["protocol_design"],
+      chainRound: { current: 2, budget: 5 },
+    });
+
+    expect(markup).not.toContain('data-testid="research-workflow-phase-badge"');
+    expect(markup).not.toContain("第2轮/5");
+  });
+
+  it("hides the step badge when the hypothesis-first loop has converged", () => {
+    const markup = renderToolbar({
+      ...BASE_PROPS,
+      nextActionStage: "converged",
+      chainRound: { current: 3, budget: 5 },
+    });
+
+    expect(markup).not.toContain('data-testid="research-workflow-phase-badge"');
+  });
+
+  it("renders bilingual step and round copy on the badge", () => {
+    const english = renderToolbar({
+      ...BASE_PROPS,
+      nextActionStage: "review_running",
+      chainRound: { current: 2, budget: 5 },
+    }, "en");
+
+    expect(english).toContain('data-testid="research-workflow-phase-badge"');
+    expect(english).toContain("Hypothesis-first · Step 3/5 · Team review");
+    expect(english).toContain("Round 2/5");
   });
 
   it("keeps context and actions usable in the compact two-row layout", () => {

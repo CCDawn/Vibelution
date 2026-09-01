@@ -1818,17 +1818,17 @@ describe("HypothesisFirstNodeInspector", () => {
   // ---------------------------------------------------------------------------
 
   describe("review round budget contract", () => {
-    it("keeps one hard limit when snapshots carry historical budget values", () => {
+    it("reads the server snapshot budget: V2 first, V1 fallback, hard limit last", () => {
       expect(resolveHypothesisFirstReviewRoundBudget({
         stateV2: { convergence: { roundBudget: 4, roundIndex: 2 } },
         chainState: { roundBudget: 9 },
-      })).toBe(5);
+      })).toBe(4);
       expect(resolveHypothesisFirstReviewRoundBudget({
         stateV2: null,
         chainState: { roundBudget: 5 },
       })).toBe(5);
       expect(resolveHypothesisFirstReviewRoundBudget({})).toBe(5);
-      // 非法值（0/负数/NaN）和旧值一样不参与硬上限裁决。
+      // 非法值（NaN/负数）不参与裁决，回落到稳定硬上限。
       expect(resolveHypothesisFirstReviewRoundBudget({
         stateV2: { convergence: { roundBudget: Number.NaN } },
       })).toBe(5);
@@ -1850,15 +1850,16 @@ describe("HypothesisFirstNodeInspector", () => {
       expect(resolveHypothesisFirstNextReviewRoundIndex({})).toBeNull();
     });
 
-    it("labels agent-decided continuation under the hard limit", () => {
-      const chinese = reviewRoundActionCopy(3, "zh");
+    it("labels agent-decided continuation with the server budget", () => {
+      const chinese = reviewRoundActionCopy(3, "zh", 5);
       expect(chinese.label).toBe("发起新一轮评审");
-      expect(chinese.detail).toContain("硬上限 5");
+      expect(chinese.detail).toContain("上限 5");
       expect(chinese.detail).toContain("第 3 轮");
 
-      const english = reviewRoundActionCopy(2, "en");
+      const english = reviewRoundActionCopy(2, "en", 4);
       expect(english.label).toBe("Open a new review round");
-      expect(reviewRoundActionCopy(null, "en").label).toBe("Open a new review round");
+      expect(english.detail).toContain("within the limit of 4");
+      expect(reviewRoundActionCopy(null, "en", 4).label).toBe("Open a new review round");
     });
   });
 
@@ -1904,11 +1905,11 @@ describe("HypothesisFirstNodeInspector", () => {
       />,
     );
     // 该 legacy 收敛快照把下一动作落到 human_adjudication 命令但没有已签名
-    // 动作可渲染，兜底出现开新轮按钮；旧预算不再改变唯一硬上限。
+    // 动作可渲染，兜底出现开新轮按钮；文案读服务端快照预算（上限 2）。
     const wrapper = container.querySelector('[data-testid="next-review-round-action"]');
     if (wrapper) {
       expect(wrapper.querySelector('[data-testid="next-review-round-budget"]')?.textContent)
-        .toContain("硬上限 5 内开启第 3 轮评审。");
+        .toContain("上限 2 内开启第 3 轮评审。");
       expect(Array.from(wrapper.querySelectorAll("button")).some((button) =>
         button.textContent === "发起新一轮评审")).toBe(true);
     }
