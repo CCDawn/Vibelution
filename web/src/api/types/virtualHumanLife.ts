@@ -1,4 +1,5 @@
 import type { AgentPersonaProfile } from "./agents";
+import type { SessionSummary } from "./chat";
 
 export type AgentPluginBinding = {
   agentId: string;
@@ -752,8 +753,25 @@ export type VirtualHumanCompanion = {
   avatarImageUrl: string;
   personaProfile: Partial<AgentPersonaProfile>;
   status: string;
+  sessionActivity?: (Pick<
+    SessionSummary,
+    | "id"
+    | "status"
+    | "currentPhase"
+    | "lastTurnStatus"
+    | "terminalReason"
+    | "taskSummary"
+    | "updatedAt"
+    | "lastActive"
+    | "agentInboxPendingCount"
+  > & { activityStamp?: string }) | null;
   snapshot: VirtualHumanSnapshot;
 };
+
+export type VirtualHumanCompanionActivity = Pick<
+  VirtualHumanCompanion,
+  "agentId" | "displayName" | "directSessionId" | "sessionActivity"
+>;
 
 export type AgentPluginBindingUpdate = {
   enabled: boolean;

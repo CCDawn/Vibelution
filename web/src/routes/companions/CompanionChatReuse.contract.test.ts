@@ -10,7 +10,9 @@ import conversationHeaderSource from "./CompanionConversationHeader.tsx?raw";
 import lifeRailSource from "./CompanionLifeRail.tsx?raw";
 import personRailSource from "./CompanionPersonRail.tsx?raw";
 import portraitSource from "./CompanionPortrait.tsx?raw";
+import attentionSource from "./CompanionDesktopAttention.tsx?raw";
 import portraitStyles from "./companions.styles.ts";
+import appShellSource from "../../app/AppShell.tsx?raw";
 
 const portraitMotionSource = readFileSync(
   new URL("../../design/route-css/companions.tailwind.css", import.meta.url),
@@ -76,6 +78,20 @@ describe("virtual-human native Chat reuse", () => {
     expect(lobbySource).not.toContain("fetchJson");
     expect(lifeRailSource).not.toContain("fetchJson");
     expect(personRailSource).not.toContain("fetchJson");
+  });
+
+  it("keeps hidden Companion unread and notifications in a Companion-only adapter", () => {
+    expect(appShellSource).toContain("<CompanionDesktopAttention");
+    expect(attentionSource).toContain("listVirtualHumanCompanionActivity");
+    expect(attentionSource).toContain("companionAgentId: companion.agentId");
+    expect(attentionSource).toContain('completionIdentity: String(activity.activityStamp || "").trim()');
+    expect(attentionSource).toContain("refetchIntervalInBackground: Boolean(desktopBridge)");
+    expect(attentionSource).toContain("openCompanionSession(");
+    expect(lobbySource).toContain("isSessionActivitySeen(");
+    expect(lobbySource).toContain("markSessionActivitySeen(");
+    expect(lobbySource).toContain("styles.unreadBadge");
+    expect(chatSource).not.toContain("CompanionDesktopAttention");
+    expect(streamSource).not.toContain("companionAgentId");
   });
 
   it("uses the Agent avatar as one shared full portrait in the lobby card and chat person rail", () => {

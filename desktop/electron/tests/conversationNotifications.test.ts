@@ -176,6 +176,36 @@ describe("conversation notification service", () => {
     ]);
   });
 
+  it("preserves Companion identity only for an explicit Companion notification click", async () => {
+    const { service, notifications, workbenchMessages } = makeService({ focused: false });
+
+    await service.notify(completion({
+      notificationKey: "session-nora:turn-1:completed",
+      sessionId: "session-nora",
+      companionAgentId: "agent-nora",
+    }));
+    notifications[0].clicked();
+
+    expect(workbenchMessages).toEqual([{
+      channel: OPENED_CHANNEL,
+      payload: {
+        schemaVersion: 1,
+        sessionId: "session-nora",
+        companionAgentId: "agent-nora",
+      },
+    }]);
+  });
+
+  it("rejects an unsafe Companion identity without notifying or changing attention", async () => {
+    const { service, provider, notifications } = makeService({ focused: false });
+
+    const result = await service.notify(completion({ companionAgentId: "../unsafe" }));
+
+    expect(result.status).toBe("invalid_payload");
+    expect(notifications).toHaveLength(0);
+    expect(provider.setWorkbenchAttention).not.toHaveBeenCalled();
+  });
+
   it("applies taskbar attention even when native notifications are unavailable", async () => {
     const { service, provider, notifications } = makeService({
       focused: false,

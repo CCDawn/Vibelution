@@ -12,11 +12,13 @@ export type DesktopConversationCompletionNotification = {
   terminalStatus?: string;
   sessionLabel?: string;
   suppressWhenFocused?: boolean;
+  companionAgentId?: string;
 };
 
 export type ConversationNotificationOpenPayload = {
   schemaVersion: 1;
   sessionId: string;
+  companionAgentId?: string;
 };
 
 type DesktopBridge = {
@@ -44,6 +46,8 @@ export type SessionCompletionSummary = {
   lastTurnStatus?: string;
   updatedAt?: string;
   lastActive?: string;
+  companionAgentId?: string;
+  completionIdentity?: string;
 };
 
 const SUCCESS_TERMINAL_STATUSES = new Set(["ready", "completed", "done", "success"]);
@@ -199,7 +203,7 @@ export function parseConversationNotificationOpenPayload(raw: unknown): Conversa
   if (typeof raw !== "object" || raw === null) {
     return null;
   }
-  const payload = raw as { schemaVersion?: unknown; sessionId?: unknown };
+  const payload = raw as { schemaVersion?: unknown; sessionId?: unknown; companionAgentId?: unknown };
   if (payload.schemaVersion !== 1) {
     return null;
   }
@@ -207,7 +211,15 @@ export function parseConversationNotificationOpenPayload(raw: unknown): Conversa
   if (!sessionId || !/^[A-Za-z0-9._:-]{1,128}$/.test(sessionId)) {
     return null;
   }
-  return { schemaVersion: 1, sessionId };
+  const companionAgentId = normalizeNotificationText(payload.companionAgentId);
+  if (companionAgentId && !/^[A-Za-z0-9._:-]{1,128}$/.test(companionAgentId)) {
+    return null;
+  }
+  return {
+    schemaVersion: 1,
+    sessionId,
+    ...(companionAgentId ? { companionAgentId } : {}),
+  };
 }
 
 export function browserDesktopNotificationBridge(globalLike: unknown = globalThis): DesktopBridge | undefined {
@@ -236,8 +248,26 @@ export function subscribeConversationNotificationOpened(
   }
   return bridge.onConversationNotificationOpened((raw) => {
     const parsed = parseConversationNotificationOpenPayload(raw);
-    if (parsed) {
+    if (parsed && !parsed.companionAgentId) {
       onOpen(parsed.sessionId);
+    }
+  });
+}
+
+export function subscribeCompanionNotificationOpened(
+  bridge: DesktopBridge | undefined,
+  onOpen: (payload: { sessionId: string; companionAgentId: string }) => void,
+): () => void {
+  if (typeof bridge?.onConversationNotificationOpened !== "function") {
+    return () => undefined;
+  }
+  return bridge.onConversationNotificationOpened((raw) => {
+    const parsed = parseConversationNotificationOpenPayload(raw);
+    if (parsed?.companionAgentId) {
+      onOpen({
+        sessionId: parsed.sessionId,
+        companionAgentId: parsed.companionAgentId,
+      });
     }
   });
 }
@@ -249,6 +279,7 @@ export function createDesktopConversationNotifier(
   const seenKeySet = new Set<string>();
   const maxSeenKeys = Math.max(1, Math.round(options.maxSeenKeys ?? 200));
   const lastBusyBySession = new Map<string, boolean>();
+  const lastCompanionCompletionBySession = new Map<string, string>();
 
   function remember(key: string): boolean {
     if (seenKeySet.has(key)) {
@@ -310,6 +341,7 @@ export function createDesktopConversationNotifier(
     completedAt?: string;
     sessionLabel: string;
     suppressWhenFocused: boolean;
+    companionAgentId?: string;
   }): void {
     const copy = buildConversationNotificationCopy({
       sessionLabel: input.sessionLabel,
@@ -326,6 +358,7 @@ export function createDesktopConversationNotifier(
       terminalStatus: input.terminalStatus,
       sessionLabel: input.sessionLabel,
       suppressWhenFocused: input.suppressWhenFocused,
+      ...(input.companionAgentId ? { companionAgentId: input.companionAgentId } : {}),
     });
   }
 
@@ -401,11 +434,33 @@ export function createDesktopConversationNotifier(
         if (!sessionId) {
           continue;
         }
-        if (sessionId === normalizeNotificationText(context?.viewedSessionId)) {
+        const companionAgentId = normalizeNotificationText(session.companionAgentId);
+        if (sessionId === normalizeNotificationText(context?.viewedSessionId) && !companionAgentId) {
           continue;
         }
         const busy = isBusyPhase(session.currentPhase || session.status);
         const terminalPhase = terminalPhaseForValue(session.currentPhase, session.status, session.lastTurnStatus);
+        const completionIdentity = normalizeNotificationText(session.completionIdentity);
+        const suppressWhenFocused = companionAgentId
+          ? normalizeNotificationText(context?.viewedSessionId) === sessionId
+          : shouldSuppressWhenFocused(sessionId, context);
+        if (companionAgentId && completionIdentity && terminalPhase) {
+          const previousIdentity = lastCompanionCompletionBySession.get(sessionId);
+          lastCompanionCompletionBySession.set(sessionId, completionIdentity);
+          if (previousIdentity && previousIdentity !== completionIdentity) {
+            emitSessionCompletion({
+              sessionId,
+              turnId: completionIdentity,
+              terminalStatus: notificationStatusForTerminalPhase(terminalPhase),
+              completedAt: normalizeNotificationText(session.updatedAt || session.lastActive) || undefined,
+              sessionLabel: sessionLabelFromContext(sessionId, context, session.title, session.agentDisplayName),
+              suppressWhenFocused,
+              companionAgentId,
+            });
+            lastBusyBySession.set(sessionId, false);
+            continue;
+          }
+        }
         observeSessionPhase(sessionId, busy, terminalPhase, () => {
           const turnId = (
             normalizeNotificationText(session.updatedAt)
@@ -418,7 +473,8 @@ export function createDesktopConversationNotifier(
             terminalStatus: notificationStatusForTerminalPhase(terminalPhase),
             completedAt: normalizeNotificationText(session.updatedAt || session.lastActive) || undefined,
             sessionLabel: sessionLabelFromContext(sessionId, context, session.title, session.agentDisplayName),
-            suppressWhenFocused: shouldSuppressWhenFocused(sessionId, context),
+            suppressWhenFocused,
+            ...(companionAgentId ? { companionAgentId } : {}),
           });
         });
       }

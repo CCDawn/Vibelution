@@ -20,6 +20,12 @@ import {
   lifeMoodLabel,
 } from "./companions/companionPresentation";
 import styles from "./companions/companions.styles";
+import {
+  isSessionActivitySeen,
+  markSessionActivitySeen,
+  sessionIsCompletedStatus,
+  sessionIsErrorStatus,
+} from "./sessionActivityIndicator";
 
 const COPY = {
   zh: {
@@ -38,6 +44,7 @@ const COPY = {
     relationship: "与你的关系",
     tomorrow: "明日安排",
     relationshipEmpty: "还在慢慢熟悉",
+    newMessage: "有新消息",
     tomorrowEmpty: "等待今晚规划",
     loading: "正在载入人物大厅",
     loadFailed: "人物大厅暂时不可用",
@@ -64,6 +71,7 @@ const COPY = {
     relationship: "Your relationship",
     tomorrow: "Tomorrow",
     relationshipEmpty: "Still getting acquainted",
+    newMessage: "New message",
     tomorrowEmpty: "Planning tonight",
     loading: "Loading companion lobby",
     loadFailed: "Companion lobby is unavailable",
@@ -144,6 +152,32 @@ export function CompanionsRoute() {
             const paused = Boolean(companion.snapshot.state?.lifePaused);
             const relationship = String(companion.snapshot.state?.relationshipSummary || "").trim();
             const tomorrowCount = companion.snapshot.tomorrowSchedule?.activities.length ?? 0;
+            const sessionActivity = companion.sessionActivity;
+            const activityStamp = String(sessionActivity?.activityStamp || "").trim();
+            const activityStatus = String(
+              sessionActivity?.currentPhase
+              || sessionActivity?.status
+              || sessionActivity?.lastTurnStatus
+              || "",
+            );
+            const hasUnread = Boolean(
+              activityStamp
+              && (sessionIsCompletedStatus(activityStatus) || sessionIsErrorStatus(activityStatus))
+              && !isSessionActivitySeen(companion.directSessionId, activityStamp),
+            );
+            const openCompanion = () => {
+              if (activityStamp) {
+                markSessionActivitySeen(companion.directSessionId, activityStamp);
+              }
+              openCompanionSession(
+                companion.directSessionId,
+                companion.agentId,
+                {
+                  returnLabel: lang === "zh" ? "人物大厅" : "Companion lobby",
+                  telemetrySource: "virtual_human_companion_lobby",
+                },
+              );
+            };
             return (
               <article
                 key={companion.agentId}
@@ -153,9 +187,12 @@ export function CompanionsRoute() {
                 <span className={styles.cardGridLines} aria-hidden="true" />
                 <div className={styles.cardCopy}>
                   <div className={styles.presenceRow}>
-                    <VStatusChip tone={paused ? "warning" : "success"}>
-                      {paused ? copy.paused : copy.living}
-                    </VStatusChip>
+                    <span className={styles.presenceStatus}>
+                      <VStatusChip tone={paused ? "warning" : "success"}>
+                        {paused ? copy.paused : copy.living}
+                      </VStatusChip>
+                      {hasUnread ? <span className={styles.unreadBadge}>{copy.newMessage}</span> : null}
+                    </span>
                     <span className={styles.localTime}>
                       {copy.localTime} · {formatCompanionLocalTime(companion.snapshot, lang)}
                     </span>
@@ -189,14 +226,7 @@ export function CompanionsRoute() {
                     <VButton
                       type="button"
                       className={styles.primaryAction}
-                      onPress={() => openCompanionSession(
-                        companion.directSessionId,
-                        companion.agentId,
-                        {
-                          returnLabel: lang === "zh" ? "人物大厅" : "Companion lobby",
-                          telemetrySource: "virtual_human_companion_lobby",
-                        },
-                      )}
+                      onPress={openCompanion}
                     >
                       {copy.enter}
                       <ArrowRight size={16} aria-hidden="true" />

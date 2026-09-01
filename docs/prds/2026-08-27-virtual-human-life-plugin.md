@@ -1686,6 +1686,7 @@ Task 17—21 已在 `codex/companion-full-life-reuse` 完成实现，仍保持�
 - Dependency: Task 22—26、Task 28—32。
 - Mode: backend selector + frontend contracts + `tsc -b` + production build + desktop browser acceptance。
 - Verification/Stop: 使用可注入时钟和脚本化短场景覆盖初识到熟悉、正负情绪余波、用户纠错、连续短回执、重复话题、插话、崩溃恢复、跨时区/跨午夜、地理事实过期、学生/员工作息、物品移动和工资/支出周期；验收虚拟人 Agent/direct Session 不出现在普通会话栏，但人物大厅可继续打开同一原生 Session 并显示未读，主动通知打开显式 Companion deep link；生活管家只从人物详情进入独立原生管理 Session，配对/工具/数据库权限不串人物；不等待真实 7 天；目标接口无 404/500，普通 Agent 核心测试、目录、未读与会话行为零差异；不 push、不发布。
+- Implementation status (2026-09-01): 核心代码与自动化验收已收口。人物大厅通过 Companion-only 轻量投影读取隐藏 direct Session 的原生 Journal 最新终态，以稳定 `activityStamp` 显示单一未读提示；桌面通知只对显式 Companion payload 增加经校验的 `companionAgentId`，点击复用 `openCompanionSession` 返回带 `session` 与 `companion` 的人物页面。普通通知 payload、普通会话目录、Session admission、Journal、worker、persist、projection、SSE、`ConversationStore`、Composer 和 follow-up 语义均未改；Launcher 刷新后的桌面浏览器运行态验收仍作为独立证据层，不由测试或构建替代。
 
 #### Task 28：隔离 Companion Agent 与普通会话目录
 
@@ -1722,11 +1723,11 @@ Task 17—21 已在 `codex/companion-full-life-reuse` 完成实现，仍保持�
 - Mode: HIGH_RISK BDD/TDD + frontend contract + desktop browser acceptance。
 - Verification/Stop: 学生/员工/自由职业/待业或退休至少各有一组可编辑草案和工作日/周末/假期测试；学校/单位、专业/职位、通勤、作息、初始物品、账户与周期收入支出在确认前不是事实；确认后夜间计划尊重有效 affiliation/routine/calendar，机构变更只重算未发生计划；工资/奖学金到期只产生一次交易；LLM 失败回退身份感知确定性计划而非通用四段模板；普通 Agent 创建、Prompt、目录和 Session 零差异。
 
-Critical Path 为 Task 28 → Task 29 → Task 30 → Task 31 → Task 32 → Task 22 → Task 23 → Task 25 → Task 27。Task 22—25 与 Task 28—32 已完成代码实施；Task 26 和 Task 27 仍按依赖推进。Task 30—32 因共享 binding/lifecycle/Life World 事实源保持串行；目录隔离、数据库事务、管家配对和生活草案必须先于表达、多气泡与全链路收口。
+Critical Path 为 Task 28 → Task 29 → Task 30 → Task 31 → Task 32 → Task 22 → Task 23 → Task 25 → Task 27。Task 22—32 的核心代码实施与自动化验收已完成；Task 27 的 Launcher 刷新后桌面浏览器运行态验收仍需按独立证据层执行。Task 30—32 因共享 binding/lifecycle/Life World 事实源保持串行；目录隔离、数据库事务、管家配对和生活草案必须先于表达、多气泡与全链路收口。
 
-## 31. 第五阶段：对话人格化、视觉存在与角色生态（调研收口，待开发）
+## 31. 第五阶段：对话人格化、视觉存在与角色生态（核心已实施，可选交付独立推进）
 
-2026-08-31，用户要求继续调研能让虚拟人更像真人对话和真人陪伴的高 ROI 能力，并把推荐方案落盘。本节只固化实施路线、复用裁决、信任边界和验收契约，不表示已经开始修改产品代码、运行数据或 Launcher。远端 push、PR、发布、第三方资产分发和新的系统权限仍不在本节授权范围内。
+2026-08-31，用户要求继续调研能让虚拟人更像真人对话和真人陪伴的高 ROI 能力，并把推荐方案落盘；截至 2026-09-01，核心真人化代码已按本节边界实施，运行态验收仍与代码/测试/构建分层记录。Task 33、Task 35—36 继续作为独立可选交付，Task 37 保持 Deferred，不能用这些未完成项反向阻塞或冒充核心完成。远端 push、PR、发布、第三方资产分发和新的系统权限仍不在本节授权范围内。
 
 ### 31.1 当前基线与差距
 
@@ -1915,6 +1916,7 @@ Task 22—27 的定义继续以 §30.10 为准，本节只增加输入、依赖�
 - Dependency: 核心必需 Task 22—27 与 Task 34。Task 33 为独立角色卡交付；Task 35—36 为独立媒体交付；Task 37 保持 Deferred，均不阻塞核心真人化收口。
 - Mode: backend selector + frontend VUI contracts + `tsc -b` + production build + desktop browser acceptance。
 - Verification/Stop: 使用可注入时钟和脚本化人物场景覆盖初识/熟悉、正负心情、低体力、用户纠错、连续短答、插话、跨午夜、学校/工作场景、表情/背景切换和跨 Agent/Session 隔离；任何普通 Agent 核心差异、目标 404/500、残留“正在输入”、无头像状态、未授权资产或第二 transcript 都阻止核心收口。角色卡恶意输入、明信片来源和 TTS 失败分别留给 Task 33 与 Task 35—36 的独立验收。
+- Implementation status (2026-09-01): Task 22—27 与 Task 34 的核心实现及自动化回归已闭合，包括人格/心情/熟悉度表达、原生 Session 串行 mailbox、多气泡插话、人物视觉存在、隐藏人物会话未读和通知 deep link；Companion mailbox 仍只管理到达顺序和 delivery receipt，原生 Journal/SSE 仍是唯一 transcript 与实时输出权威。核心交付尚未用本次代码收口替代 Launcher 刷新后的桌面浏览器验收；Task 33、Task 35、Task 36 未并入本任务，Task 37 仍为 Deferred。
 
 ### 31.11 Critical Path、并行与停止条件
 

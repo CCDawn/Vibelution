@@ -1010,7 +1010,7 @@ def test_enabling_at_nightly_time_keeps_provisional_schedule_without_planner(
         set_virtual_human_life_service_for_tests(None)
 
 
-def test_companion_lobby_omits_unbound_and_sessionless_agents(tmp_path) -> None:
+def test_companion_lobby_omits_unbound_and_sessionless_agents(tmp_path, monkeypatch) -> None:
     agents = [
         {
             "agentId": "enabled",
@@ -1047,6 +1047,23 @@ def test_companion_lobby_omits_unbound_and_sessionless_agents(tmp_path) -> None:
     app = FastAPI()
     app.include_router(agent_plugins.router, prefix="/api")
     client = TestClient(app)
+    monkeypatch.setattr(
+        "core.web.services.agent_plugin_service._native_session_activity_by_id",
+        lambda *_args, **_kwargs: {
+            "session-nora": {
+                "id": "session-nora",
+                "status": "ready",
+                "currentPhase": "ready",
+                "lastTurnStatus": "completed",
+                "terminalReason": "success",
+                "taskSummary": "刚刚给你发了一条消息",
+                "updatedAt": "2026-08-27T09:01:00Z",
+                "lastActive": "2026-08-27T09:01:00Z",
+                "agentInboxPendingCount": 0,
+                "activityStamp": "turn:turn-nora-1:turn_completed",
+            }
+        },
+    )
     try:
         service.set_binding("enabled", enabled=True, expected_version=0)
         service.set_binding("sessionless", enabled=True, expected_version=0)
@@ -1059,8 +1076,83 @@ def test_companion_lobby_omits_unbound_and_sessionless_agents(tmp_path) -> None:
         assert [item["agentId"] for item in response.json()] == ["enabled"]
         assert response.json()[0]["displayName"] == "Nora"
         assert response.json()[0]["personaProfile"]["personality"] == "calm"
+        assert response.json()[0]["sessionActivity"] == {
+            "id": "session-nora",
+            "status": "ready",
+            "currentPhase": "ready",
+            "lastTurnStatus": "completed",
+            "terminalReason": "success",
+            "taskSummary": "刚刚给你发了一条消息",
+            "updatedAt": "2026-08-27T09:01:00Z",
+            "lastActive": "2026-08-27T09:01:00Z",
+            "agentInboxPendingCount": 0,
+            "activityStamp": "turn:turn-nora-1:turn_completed",
+        }
+        monkeypatch.setattr(
+            service,
+            "snapshot",
+            lambda _agent_id: (_ for _ in ()).throw(AssertionError("activity endpoint must stay lightweight")),
+        )
+        activity_response = client.get(
+            "/api/agent-plugins/virtual-human-life/companion-activity"
+        )
+        assert activity_response.status_code == 200, activity_response.text
+        assert activity_response.json() == [{
+            "agentId": "enabled",
+            "displayName": "Nora",
+            "directSessionId": "session-nora",
+            "sessionActivity": response.json()[0]["sessionActivity"],
+        }]
     finally:
         set_virtual_human_life_service_for_tests(None)
+
+
+def test_companion_activity_reuses_hidden_native_session_summary(monkeypatch) -> None:
+    calls: list[dict[str, object]] = []
+
+    def fake_list_sessions(**kwargs):
+        calls.append(kwargs)
+        return [
+            {
+                "id": "session-nora",
+                "status": "ready",
+                "currentPhase": "ready",
+                "taskSummary": "一起去散步吧",
+                "updatedAt": "2026-08-27T09:01:00Z",
+                "messages": [{"role": "assistant", "content": "must not leak"}],
+                "workspacePath": "private/path",
+            }
+        ]
+
+    monkeypatch.setattr(
+        "core.web.services.session_service.list_sessions",
+        fake_list_sessions,
+    )
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        "core.web.services.session.journal_bridge.load_session_conversation_events_snapshot",
+        lambda session_id: [
+            SimpleNamespace(
+                event_type="turn_completed",
+                turn_id="turn-nora-1",
+                sequence=8,
+            )
+        ] if session_id == "session-nora" else [],
+    )
+    from core.web.services.agent_plugin_service import _native_session_activity_by_id
+
+    assert _native_session_activity_by_id({"session-nora"}) == {
+        "session-nora": {
+            "id": "session-nora",
+            "status": "ready",
+            "currentPhase": "ready",
+            "taskSummary": "一起去散步吧",
+            "updatedAt": "2026-08-27T09:01:00Z",
+            "activityStamp": "turn:turn-nora-1:turn_completed",
+        }
+    }
+    assert calls == [{"include_hidden_internal": True, "repair_collisions": False}]
 
 
 def test_virtual_human_command_rejects_agent_id_mismatch_and_stale_version(tmp_path) -> None:

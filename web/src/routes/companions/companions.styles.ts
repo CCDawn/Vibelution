@@ -10,6 +10,8 @@ const card = "relative isolate grid min-h-[min(590px,calc(100dvh-250px))] min-w-
 const cardGridLines = "pointer-events-none absolute inset-0 -z-[1] opacity-40 [background:linear-gradient(90deg,transparent_49.9%,color-mix(in_srgb,var(--vui-border-subtle)_68%,transparent)_50%,transparent_50.1%),linear-gradient(color-mix(in_srgb,var(--vui-border-subtle)_48%,transparent)_1px,transparent_1px)_0_0/100%_72px]";
 const cardCopy = "flex min-w-0 flex-col p-[clamp(30px,4vh,48px)_clamp(26px,3vw,42px)_clamp(28px,4vh,42px)_clamp(34px,4.4vw,64px)] max-[960px]:p-8";
 const presenceRow = "flex items-center justify-between gap-4";
+const presenceStatus = "flex min-w-0 items-center gap-2";
+const unreadBadge = "inline-flex h-6 items-center rounded-full bg-[var(--accent-cool)] px-2.5 [font-size:0.62rem] font-bold text-[var(--bg-primary)] shadow-[0_0_0_3px_color-mix(in_srgb,var(--accent-cool)_12%,transparent)]";
 const localTime = "shrink-0 font-mono text-[0.66rem] text-vui-fg-tertiary";
 const identityBlock = "mt-auto min-w-0 [&>h2]:m-0 [&>h2]:mt-3 [&>h2]:text-[clamp(3rem,4vw,4.2rem)] [&>h2]:font-[760] [&>h2]:leading-none [&>h2]:tracking-[-0.06em] [&>h2]:text-vui-fg-primary";
 const identityCode = "m-0 font-mono text-[0.64rem] font-bold tracking-[0.12em] text-[var(--accent-cool)]";
@@ -50,6 +52,8 @@ export default {
   cardGridLines,
   cardCopy,
   presenceRow,
+  presenceStatus,
+  unreadBadge,
   localTime,
   identityBlock,
   identityCode,
