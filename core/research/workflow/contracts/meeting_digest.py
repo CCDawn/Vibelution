@@ -7,7 +7,9 @@ refs, and a content hash so a closed meeting stays auditable and every
 conclusion can be traced back to the original room messages.  Legacy v1
 digests (no schemaVersion or ``schemaVersion: 1``) stay read-only compatible:
 the new fields default to empty, mirroring the Question v1/v2 dual-read
-pattern.
+pattern. Model-backed drafts may additionally retain an open Markdown document
+and a source-owned protocol fact ledger; both are optional v2 extensions so
+previously persisted digests remain readable without migration.
 """
 
 from __future__ import annotations
@@ -90,6 +92,15 @@ def _optional_content_hash(payload: Mapping[str, Any]) -> str:
     return require_sha256(payload, "contentHash")
 
 
+def _optional_mapping(payload: Mapping[str, Any], key: str) -> dict[str, Any]:
+    value = payload.get(key)
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise ContractValidationError(f"{key} must be an object")
+    return dict(value)
+
+
 @dataclass(frozen=True, slots=True)
 class MeetingDigest:
     """Append-only summary of one closed meeting round."""
@@ -111,6 +122,9 @@ class MeetingDigest:
     blockers: tuple[str, ...] = field(default_factory=tuple)
     knowledgeCandidates: tuple[str, ...] = field(default_factory=tuple)
     sourceMessageRefs: tuple[str, ...] = field(default_factory=tuple)
+    documentMarkdown: str = ""
+    documentTemplateId: str = ""
+    factLedger: dict[str, Any] = field(default_factory=dict)
     contentHash: str = ""
 
     @classmethod
@@ -141,6 +155,9 @@ class MeetingDigest:
             blockers=_optional_str_tuple(payload, "blockers"),
             knowledgeCandidates=_optional_str_tuple(payload, "knowledgeCandidates"),
             sourceMessageRefs=_optional_str_tuple(payload, "sourceMessageRefs"),
+            documentMarkdown=str(payload.get("documentMarkdown") or "").strip(),
+            documentTemplateId=str(payload.get("documentTemplateId") or "").strip(),
+            factLedger=_optional_mapping(payload, "factLedger"),
             contentHash=_optional_content_hash(payload),
         )
 
@@ -163,5 +180,8 @@ class MeetingDigest:
             "blockers": list(self.blockers),
             "knowledgeCandidates": list(self.knowledgeCandidates),
             "sourceMessageRefs": list(self.sourceMessageRefs),
+            "documentMarkdown": self.documentMarkdown,
+            "documentTemplateId": self.documentTemplateId,
+            "factLedger": dict(self.factLedger),
             "contentHash": self.contentHash,
         }

@@ -1758,7 +1758,42 @@ def test_legacy_v1_records_stay_readable_with_defaults():
     assert parsed_digest.actionItems == ()
     assert parsed_digest.knowledgeCandidates == ()
     assert parsed_digest.sourceMessageRefs == ()
+    assert parsed_digest.documentMarkdown == ""
+    assert parsed_digest.documentTemplateId == ""
+    assert parsed_digest.factLedger == {}
     assert parsed_digest.contentHash == ""
+
+
+def test_meeting_digest_contract_round_trips_document_and_fact_ledger():
+    scope_hash = "d" * 64
+    payload = {
+        "schemaVersion": 2,
+        "digestId": "digest-document-1",
+        "meetingRoundId": "meeting-document-1",
+        "scopeHash": scope_hash,
+        "summary": "评审完成，倾向候选 A。",
+        "participantAgentIds": ["agent-a"],
+        "discussionTopics": ["评审候选 A/B"],
+        "decisionRefs": ["decision-a"],
+        "closedBy": "reviewer",
+        "createdAt": "2026-09-01T00:00:00Z",
+        "sourceMessageRefs": ["room-a/round-a/message-a"],
+        "documentMarkdown": "# 评审纪要\n\n## 会议结论\n\n评审完成，倾向候选 A。",
+        "documentTemplateId": "open_sections_v1",
+        "factLedger": {
+            "schemaVersion": 1,
+            "source": "completed_meeting_messages",
+            "agreements": ["候选 A 更契合赛题"],
+            "sourceMessageRefs": ["room-a/round-a/message-a"],
+        },
+    }
+
+    parsed = MeetingDigest.from_dict(payload)
+
+    assert parsed.documentMarkdown.startswith("# 评审纪要")
+    assert parsed.documentTemplateId == "open_sections_v1"
+    assert parsed.factLedger["source"] == "completed_meeting_messages"
+    assert parsed.to_dict()["factLedger"] == payload["factLedger"]
 
 
 def test_non_hypothesis_stage_coordination_stays_manual_only(tmp_path, monkeypatch):
@@ -1790,13 +1825,11 @@ def test_non_hypothesis_stage_coordination_stays_manual_only(tmp_path, monkeypat
 
 
 # ---------------------------------------------------------------------------
-# Deterministic marker merge after LLM digest drafting.
+# Protocol fact ledger projection after LLM digest drafting.
 #
-# The close gate (``_assert_markers_preserved``) checks every source-message
-# marker verbatim against the submitted digest, and an LLM rewrite cannot
-# guarantee verbatim fidelity. ``build_meeting_digest_draft`` therefore
-# overwrites all protocol-fact buckets with deterministic extraction after the
-# LLM returns; the LLM keeps only the narrative fields.
+# The LLM owns an open Markdown document. Explicit source-message protocol
+# markers are independently captured in ``factLedger`` and projected into the
+# legacy digest buckets while downstream consumers migrate.
 # ---------------------------------------------------------------------------
 
 
@@ -1813,6 +1846,8 @@ def _lossy_llm_drafter(meeting_round, source_messages):
         "summary": "LLM 叙事：评审整体顺利，倾向 cand-a。",
         "agendaSummary": "LLM 议程复述",
         "discussionTopics": ["LLM 话题一"],
+        "documentMarkdown": "# 评审纪要\n\n## 会议结论\n\nLLM 叙事：评审整体顺利，倾向 cand-a。",
+        "documentTemplateId": "open_sections_v1",
         "agreements": ["LLM 改写的共识"],
         "disagreements": [{"issue": "LLM 改写的分歧", "positions": [], "unresolvedReason": ""}],
         "actionItems": [{"ownerRoleId": "llm", "action": "LLM 改写的行动项", "dueGate": ""}],
@@ -1837,7 +1872,7 @@ def _draft_with_lossy_llm(tmp_path, monkeypatch, *, runner=None):
     return team_id, agents, opened, drafted
 
 
-def test_llm_digest_markers_replaced_with_deterministic_extraction(tmp_path, monkeypatch):
+def test_llm_digest_protocol_facts_live_in_separate_ledger(tmp_path, monkeypatch):
     team_id, agents, opened, drafted = _draft_with_lossy_llm(tmp_path, monkeypatch)
     draft = drafted["digestDraft"]
     meeting_round = drafted["meetingRound"]
@@ -1845,8 +1880,17 @@ def test_llm_digest_markers_replaced_with_deterministic_extraction(tmp_path, mon
     expected = meetings.extract_discussion_markers(
         meetings.completed_meeting_source_messages(meeting_round)
     )
-    # The lossy LLM rewrite never survives: every protocol-fact bucket is the
-    # verbatim deterministic extraction of the completed source messages.
+    ledger = draft["factLedger"]
+    assert ledger["schemaVersion"] == 1
+    assert ledger["source"] == "completed_meeting_messages"
+    # The lossy LLM rewrite never becomes authoritative. Every protocol-fact
+    # bucket comes from the source ledger, and legacy fields are projections.
+    assert ledger["agreements"] == expected["agreements"]
+    assert ledger["disagreements"] == expected["disagreements"]
+    assert ledger["risks"] == expected["risks"]
+    assert ledger["actionItems"] == expected["actionItems"]
+    assert ledger["knowledgeCandidates"] == expected["knowledgeCandidates"]
+    assert ledger["proposedCandidates"] == expected["proposedCandidates"]
     assert draft["agreements"] == expected["agreements"]
     assert draft["disagreements"] == expected["disagreements"]
     assert draft["risks"] == expected["risks"]
@@ -1866,6 +1910,7 @@ def test_llm_digest_markers_replaced_with_deterministic_extraction(tmp_path, mon
     assert draft["summary"] == "LLM 叙事：评审整体顺利，倾向 cand-a。"
     assert draft["agendaSummary"] == "LLM 议程复述"
     assert draft["discussionTopics"] == ["LLM 话题一"]
+    assert draft["documentMarkdown"].startswith("# 评审纪要")
     assert draft["sourceMessageRefs"]
 
 
@@ -1888,6 +1933,8 @@ def test_llm_digest_merge_passes_close_marker_gate(tmp_path, monkeypatch):
         item["issue"] == "cand-b 的泛化证据不足"
         for item in approved["digest"]["disagreements"]
     )
+    assert approved["digest"]["documentMarkdown"].startswith("# 评审纪要")
+    assert approved["digest"]["factLedger"]["disagreements"]
 
 
 def _evidence_marker_runner(participant, prompt, context):

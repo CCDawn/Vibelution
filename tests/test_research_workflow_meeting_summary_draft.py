@@ -1240,20 +1240,16 @@ class _FakeLLMResponse:
 
 
 def _digest_llm_payload() -> str:
-    return json.dumps(
-        {
-            "summary": "评审完成，倾向候选 A。",
-            "agendaSummary": "评审候选 A/B",
-            "agreements": ["候选 A 更契合赛题"],
-            "disagreements": [],
-            "actionItems": [],
-            "risks": [],
-            "knowledgeCandidates": [],
-            "proposedCandidates": [],
-            "evidenceRequests": [],
-        },
-        ensure_ascii=False,
-    )
+    return """# 候选 A/B 评审纪要
+
+## 会议结论
+
+评审完成，倾向候选 A。
+
+## 关键讨论
+
+- 候选 A 更契合赛题。
+"""
 
 
 def test_summary_draft_llm_hang_times_out_and_stays_recoverable(

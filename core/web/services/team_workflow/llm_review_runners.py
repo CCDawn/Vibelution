@@ -49,15 +49,11 @@ from core.web.services.team.team_constants import CHALLENGE_CUP_RESEARCH_TEAM_ID
 from core.web.services.team_workflow.hypothesis_review_executor import (
     ProviderBoundReviewResult,
 )
-from core.web.services.team_workflow.source_collection import (
-    facade as collection_facade,
-)
 
 REVIEW_LLM_PROFILE_ID = "primary"
 REVIEW_LLM_SURFACE = "team_workflow_review"
 REVIEW_LLM_CACHE_SCOPE = "team_workflow_review"
 
-_MAX_MESSAGE_CHARS = 1200
 _MAX_MESSAGES = 40
 
 # Wall-clock budget for one review-profile LLM call (digest draft and the
@@ -277,8 +273,9 @@ def _invoke_review_llm(
     receipt_context: Mapping[str, Any] | None = None,
     require_provider_receipt: bool = False,
     deadline_at_ms: int | None = None,
-) -> dict[str, Any] | ProviderBoundReviewResult:
-    """Run one review model call and parse its JSON object output."""
+    response_mode: str = "json_object",
+) -> dict[str, Any] | str | ProviderBoundReviewResult:
+    """Run one review model call and return its requested response form."""
 
     messages: list[Any] = [
         build_cacheable_system_message(system_prompt),
@@ -342,7 +339,23 @@ def _invoke_review_llm(
             deadline_at_ms=deadline_at_ms,
         )
         content = str(getattr(response, "content", "") or "")
+        if response_mode == "text":
+            normalized = content.strip()
+            if normalized.startswith("```markdown") and normalized.endswith("```"):
+                normalized = normalized[len("```markdown") : -len("```")].strip()
+            elif normalized.startswith("```") and normalized.endswith("```"):
+                normalized = normalized[len("```") : -len("```")].strip()
+            if not normalized:
+                raise ContractValidationError(
+                    f"review step `{purpose}` returned empty text"
+                )
+            return normalized
+        if response_mode != "json_object":
+            raise ValueError(f"unsupported review response mode: {response_mode}")
         return _parse_json_object(content, what=f"review step `{purpose}`")
+
+    if response_mode != "json_object":
+        raise ValueError("provider-bound review results require JSON object output")
 
     def _invoke_bound_outcome() -> Any:
         # The receipt scope is a ContextVar: it must wrap the invocation
@@ -410,7 +423,7 @@ def _meeting_transcript(
         transcript.append(
             {
                 "speaker": speaker,
-                "content": content[:_MAX_MESSAGE_CHARS],
+                "content": content,
             }
         )
         if len(transcript) >= _MAX_MESSAGES:
@@ -418,36 +431,50 @@ def _meeting_transcript(
     return transcript
 
 
-_EVIDENCE_SOURCE_TYPES = "、".join(
-    sorted(collection_facade.SEARCH_ENVELOPE_SOURCE_TYPES)
-)
-_EVIDENCE_LEVELS = "、".join(
-    sorted(collection_facade.SEARCH_ENVELOPE_EVIDENCE_LEVELS)
-)
-
-
-_DIGEST_SYSTEM_PROMPT = """你是科研团队的 Coordinator，负责把团队会议发言整理为结构化会议纪要。
+_DIGEST_SYSTEM_PROMPT = """你是科研团队的 Coordinator，负责把团队会议发言整理为人类可审阅的会议纪要文档。
 
 要求：
 - 只依据给出的会议发言，不得编造发言人或结论。
-- summary 用一两句中文概括会议结论。
-- agreements / risks / knowledgeCandidates 是字符串数组；disagreements 的每项是 {"issue","positions","unresolvedReason"}；actionItems 的每项是 {"ownerRoleId","action","dueGate"}。
-- 候选生成会议必须输出 proposedCandidates：每项 {"candidateId","statement","rationale","proposedBy","lineageRefs","testablePrediction"}，candidateId 沿用发言中出现的标识，没有标识就用 cand-1、cand-2 顺序编号；lineageRefs 与 testablePrediction 必须原样保留发言中的 REFS 与 CHECK，没有时分别给空数组和空字符串，不得编造。
-- 显式标记必须原文回显，关闭会议时会逐条机器校验，缺失或改写会被拒绝：源消息中每条 "DISAGREE:" 行的完整原文必须原样包含在对应 disagreements[].issue 文本里；每条 "RISK:" 行原文放进 risks；每条 "ACTION: <ownerRoleId> | <action>" 行解析为一条 actionItems，ownerRoleId 与 action 用原文。
-- 假说评审会议的 evidenceRequests：源消息中每条 "EVIDENCE_REQUEST:" 行都必须对应一项——该行 JSON 的 searchEnvelope（keywords/sourceTypes/evidenceLevels）与 requirements 必须原样照抄，keywords 不得为空、不得改写或省略；rationale 沿用该行的 rationale。发言中没有 "EVIDENCE_REQUEST:" 行时给空数组，不得自拟。
-- 严格输出单个 JSON 对象，不要输出 markdown 代码块或任何解释文字。
-
-输出 JSON 结构：
-{"summary": str, "agendaSummary": str, "discussionTopics": [str], "agreements": [str], "disagreements": [{"issue": str, "positions": [str], "unresolvedReason": str}], "actionItems": [{"ownerRoleId": str, "action": str, "dueGate": str}], "risks": [str], "knowledgeCandidates": [str], "proposedCandidates": [{"candidateId": str, "statement": str, "rationale": str, "proposedBy": str, "lineageRefs": [str], "testablePrediction": str}], "evidenceRequests": [dict]}
-""" + f"""
-证据请求唯一词表：
-- sourceTypes 只允许：{_EVIDENCE_SOURCE_TYPES}。
-- evidenceLevels 只允许：{_EVIDENCE_LEVELS}。
-- 预印本使用 sourceTypes=["paper"]、evidenceLevels=["preprint"]；
-  官方网页或声明使用 sourceTypes=["url"]、evidenceLevels=["primary"]；
-  代码仓库使用 sourceTypes=["repo"]。
-- candidateRefs 只能填写本会议已绑定的候选 ID，不得新造候选 ID。
+- 第一行必须是 `# ` 开头的会议标题。
+- 必须包含 `## 会议结论`，用一到三段中文概括本次会议形成的判断。
+- 其余二级章节由你根据实际会议内容自行选择；不要为了填固定栏目重复同一信息。
+- 重要结论、取舍和未解决问题应保留发言中的限定条件，不把提议写成已经达成的决定。
+- `DISAGREE:`、`RISK:`、`ACTION:`、`CANDIDATE:` 和 `EVIDENCE_REQUEST:` 属于系统独立保存的协议事实；你可以在自然语言中解释其意义，但不要承担协议字段复制或重组职责。
+- 输出只包含最终 Markdown 文档，不要输出 JSON、代码围栏、前言或解释。
 """
+
+
+def _summary_from_digest_markdown(markdown: str) -> str:
+    """Project the first conclusion paragraph into the legacy summary field."""
+
+    lines = [line.strip() for line in str(markdown or "").splitlines()]
+    first_content = next((line for line in lines if line), "")
+    if not first_content.startswith("# "):
+        raise ContractValidationError("meeting digest markdown requires an H1 title")
+    conclusion_index = next(
+        (index for index, line in enumerate(lines) if line == "## 会议结论"),
+        -1,
+    )
+    if conclusion_index < 0:
+        raise ContractValidationError(
+            "meeting digest markdown requires a `## 会议结论` section"
+        )
+    candidates = lines[conclusion_index + 1 :]
+    paragraph: list[str] = []
+    for line in candidates:
+        if line.startswith("#"):
+            if paragraph:
+                break
+            continue
+        if not line:
+            if paragraph:
+                break
+            continue
+        paragraph.append(line.removeprefix("- ").strip())
+    summary = " ".join(item for item in paragraph if item).strip()
+    if not summary:
+        raise ContractValidationError("meeting digest markdown requires narrative content")
+    return summary
 
 
 def build_meeting_digest_drafter(llm: Mapping[str, Any] | None = None):
@@ -483,7 +510,10 @@ def build_meeting_digest_drafter(llm: Mapping[str, Any] | None = None):
             session_id=str(meeting_round.get("teamId") or "") or "team",
             deadline_at_ms=int(meeting_round.get("challengeDeadlineAtMs") or 0)
             or None,
+            response_mode="text",
         )
+        if not isinstance(produced, str):
+            raise ContractValidationError("digest drafter requires Markdown text")
         # Server-owned fields: source refs are computed from the bound
         # messages, never delegated to the model.
         source_refs = [
@@ -492,20 +522,19 @@ def build_meeting_digest_drafter(llm: Mapping[str, Any] | None = None):
             if str(message.get("status") or "").strip().lower() == "completed"
             and not meeting_rounds.is_pass_message(message)
         ]
-        digest = dict(produced)
-        digest["sourceMessageRefs"] = source_refs
-        digest.setdefault("summary", "")
-        digest.setdefault("agendaSummary", "")
-        digest.setdefault("discussionTopics", list(meeting_round.get("agenda") or []))
-        digest.setdefault("agreements", [])
-        digest.setdefault("disagreements", [])
-        digest.setdefault("actionItems", [])
-        digest.setdefault("risks", [])
-        digest.setdefault("blockers", [])
-        digest.setdefault("knowledgeCandidates", [])
-        digest.setdefault("proposedCandidates", [])
-        digest.setdefault("evidenceRequests", [])
-        return digest
+        agenda = [
+            str(item).strip()
+            for item in list(meeting_round.get("agenda") or [])
+            if str(item).strip()
+        ]
+        return {
+            "summary": _summary_from_digest_markdown(produced),
+            "agendaSummary": "；".join(agenda),
+            "discussionTopics": agenda,
+            "documentMarkdown": produced,
+            "documentTemplateId": "open_sections_v1",
+            "sourceMessageRefs": source_refs,
+        }
 
     return drafter
 

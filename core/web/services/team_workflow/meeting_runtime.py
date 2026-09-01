@@ -2291,22 +2291,21 @@ _LLM_DIGEST_MARKER_BUCKETS = (
     "knowledgeCandidates",
     "proposedCandidates",
 )
+_PROTOCOL_FACT_LEDGER_SCHEMA_VERSION = 1
 
 
 def _merge_llm_digest_with_deterministic_markers(
     meeting_round: Mapping[str, Any],
     drafted: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """Replace protocol-fact buckets in an LLM draft with deterministic extraction.
+    """Attach the source-owned protocol ledger and legacy field projections.
 
-    The close gate (``meeting_rounds._assert_markers_preserved``) requires every
-    source-message marker verbatim in the submitted digest, and an LLM rewrite
-    cannot guarantee verbatim fidelity. Protocol facts are machine-extractable
-    hard facts, so after the LLM narrative is produced the fact buckets are
-    overwritten wholesale by ``extract_discussion_markers`` over
-    ``completed_meeting_source_messages`` — the same extraction the close gate
-    re-runs. The LLM keeps only the narrative fields (summary /
-    agendaSummary / discussionTopics) plus the server-owned sourceMessageRefs.
+    The LLM owns only the narrative document. Explicit marker facts already
+    exist in completed room messages, so asking the model to reproduce them
+    made the digest response large and then discarded that work. The ledger
+    remains authoritative for those facts. ``factLedger`` is the approved
+    source snapshot, and the existing top-level buckets are compatibility
+    projections at draft time while current consumers migrate.
     """
 
     completed_messages = meeting_rounds.completed_meeting_source_messages(meeting_round)
@@ -2321,6 +2320,19 @@ def _merge_llm_digest_with_deterministic_markers(
     evidence_requests, validation_errors = _collect_evidence_requests(
         meeting_round, markers, source_refs
     )
+    fact_ledger = {
+        "schemaVersion": _PROTOCOL_FACT_LEDGER_SCHEMA_VERSION,
+        "source": "completed_meeting_messages",
+        **{
+            key: list(markers.get(key) or [])
+            for key in _LLM_DIGEST_MARKER_BUCKETS
+        },
+        "evidenceRequests": evidence_requests,
+        "validationErrors": validation_errors,
+        "sourceMessageRefs": source_refs,
+    }
+    merged["factLedger"] = fact_ledger
+    merged["sourceMessageRefs"] = source_refs
     merged["evidenceRequests"] = evidence_requests
     merged["validationErrors"] = validation_errors
     return merged

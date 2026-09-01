@@ -18,6 +18,11 @@ original direct ``close_meeting_round`` path.  No research runtime is
 involved; chat-room access is read-only except for the binding metadata the
 runtime writes through ``bind_meeting_chat_room_round``.
 
+For model-backed drafts, the Coordinator owns an open Markdown narrative.
+Explicit meeting-protocol facts remain source-owned in ``factLedger`` and are
+projected into the legacy top-level buckets for current consumers. The model
+is not asked to regenerate those facts.
+
 DEV fixture convention: the deterministic digest drafter and the closure
 gate share a marker convention over room message content — ``AGREE:``,
 ``DISAGREE:``, ``RISK:``, ``ACTION: <ownerRoleId> | <action>``,
@@ -1364,6 +1369,9 @@ def submit_meeting_digest_draft(
             "blockers": list(normalized_draft.get("blockers") or []),
             "knowledgeCandidates": list(normalized_draft.get("knowledgeCandidates") or []),
             "sourceMessageRefs": list(normalized_draft.get("sourceMessageRefs") or []),
+            "documentMarkdown": str(normalized_draft.get("documentMarkdown") or ""),
+            "documentTemplateId": str(normalized_draft.get("documentTemplateId") or ""),
+            "factLedger": dict(normalized_draft.get("factLedger") or {}),
             "contentHash": str(normalized_draft.get("contentHash") or ""),
         }
         MeetingDigest.from_dict(probe)
@@ -1432,6 +1440,9 @@ def _digest_content_hash(payload: Mapping[str, Any]) -> str:
             "sourceMessageRefs": _normalized_str_list(payload.get("sourceMessageRefs")),
             "proposedCandidates": list(payload.get("proposedCandidates") or []),
             "evidenceRequests": list(payload.get("evidenceRequests") or []),
+            "documentMarkdown": str(payload.get("documentMarkdown") or "").strip(),
+            "documentTemplateId": str(payload.get("documentTemplateId") or "").strip(),
+            "factLedger": dict(payload.get("factLedger") or {}),
         }
     )
 
@@ -1504,6 +1515,9 @@ def _build_digest_v2(
         "knowledgeCandidates": _normalized_str_list(merged.get("knowledgeCandidates")),
         "sourceMessageRefs": _normalized_str_list(merged.get("sourceMessageRefs")),
         "proposedCandidates": list(merged.get("proposedCandidates") or []),
+        "documentMarkdown": str(merged.get("documentMarkdown") or "").strip(),
+        "documentTemplateId": str(merged.get("documentTemplateId") or "").strip(),
+        "factLedger": dict(merged.get("factLedger") or {}),
     }
     digest["contentHash"] = _digest_content_hash(digest)
     return digest

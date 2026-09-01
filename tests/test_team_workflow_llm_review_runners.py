@@ -216,21 +216,17 @@ def _source_messages():
     ]
 
 
-def test_digest_drafter_uses_llm_output_and_server_owned_refs(monkeypatch):
-    payload = json.dumps(
-        {
-            "summary": "评审完成，倾向候选 A。",
-            "agendaSummary": "评审候选 A/B",
-            "agreements": ["候选 A 更契合赛题"],
-            "disagreements": [],
-            "actionItems": [],
-            "risks": [],
-            "knowledgeCandidates": [],
-            "proposedCandidates": [],
-            "evidenceRequests": [],
-        },
-        ensure_ascii=False,
-    )
+def test_digest_drafter_uses_llm_markdown_and_server_owned_refs(monkeypatch):
+    payload = """# 候选 A/B 评审纪要
+
+## 会议结论
+
+评审完成，倾向候选 A。
+
+## 关键讨论
+
+- 候选 A 更契合赛题。
+"""
     _install_fake_llm(monkeypatch, [payload])
 
     drafter = llm_review_runners.build_meeting_digest_drafter(dict(_FAKE_LLM))
@@ -238,55 +234,25 @@ def test_digest_drafter_uses_llm_output_and_server_owned_refs(monkeypatch):
     digest = drafter(_meeting_round(), _source_messages())
 
     assert digest["summary"] == "评审完成，倾向候选 A。"
-    assert digest["agreements"] == ["候选 A 更契合赛题"]
+    assert digest["documentMarkdown"] == payload.strip()
+    assert digest["documentTemplateId"] == "open_sections_v1"
+    assert digest["discussionTopics"] == ["评审候选 A/B"]
+    assert "agreements" not in digest
     # sourceMessageRefs are server-owned: only completed, non-pass messages.
     refs = digest["sourceMessageRefs"]
     assert isinstance(refs, list) and len(refs) == 2
 
 
-def test_digest_prompt_carries_marker_and_envelope_contract():
-    """关闭护栏逐条校验 marker 原文与 searchEnvelope.keywords；起草 prompt 必须传达同样契约。"""
+def test_digest_prompt_requests_open_markdown_instead_of_protocol_fact_json():
+    """The digest model owns prose; protocol facts stay in the source-ledger path."""
 
     prompt = llm_review_runners._DIGEST_SYSTEM_PROMPT
-    assert 'EVIDENCE_REQUEST:' in prompt
-    assert "keywords 不得为空" in prompt
-    assert "原样照抄" in prompt
-    assert "sourceTypes 只允许" in prompt
-    assert all(
-        value in prompt
-        for value in (
-            "paper",
-            "dataset",
-            "url",
-            "file",
-            "note",
-            "api",
-            "news",
-            "code",
-            "repo",
-            "report",
-            "manual",
-            "unknown",
-        )
-    )
-    assert "evidenceLevels 只允许" in prompt
-    assert all(
-        value in prompt
-        for value in (
-            "primary",
-            "secondary",
-            "tertiary",
-            "high",
-            "medium",
-            "low",
-            "peer_reviewed",
-            "preprint",
-        )
-    )
-    assert '预印本使用 sourceTypes=["paper"]、evidenceLevels=["preprint"]' in prompt
-    assert "candidateRefs 只能填写本会议已绑定的候选 ID" in prompt
-    assert '"DISAGREE:"' in prompt
-    assert "原文" in prompt
+    assert "Markdown" in prompt
+    assert "自行选择" in prompt
+    assert "不要输出 JSON" in prompt
+    assert "协议事实" in prompt
+    assert "proposedCandidates" not in prompt
+    assert "evidenceRequests" not in prompt
 
 
 def test_digest_drafter_fails_closed_without_completed_messages(monkeypatch):
@@ -296,10 +262,34 @@ def test_digest_drafter_fails_closed_without_completed_messages(monkeypatch):
         drafter(_meeting_round(), [{"status": "failed", "content": "x"}])
 
 
-def test_digest_drafter_fails_closed_on_non_json(monkeypatch):
-    _install_fake_llm(monkeypatch, ["这不是 JSON"])
+def test_digest_transcript_keeps_the_full_completed_message():
+    content = "前序论证" * 400 + "尾部限定条件"
+
+    transcript = llm_review_runners._meeting_transcript(
+        [{"status": "completed", "participantId": "p-1", "content": content}]
+    )
+
+    assert transcript == [{"speaker": "p-1", "content": content}]
+
+
+def test_digest_drafter_fails_closed_on_empty_markdown(monkeypatch):
+    _install_fake_llm(monkeypatch, ["   "])
     drafter = llm_review_runners.build_meeting_digest_drafter(dict(_FAKE_LLM))
     with pytest.raises(ContractValidationError):
+        drafter(_meeting_round(), _source_messages())
+
+
+def test_digest_drafter_fails_closed_without_required_markdown_structure(monkeypatch):
+    _install_fake_llm(monkeypatch, ["只有一段没有标题的纪要。"])
+    drafter = llm_review_runners.build_meeting_digest_drafter(dict(_FAKE_LLM))
+    with pytest.raises(ContractValidationError, match="H1 title"):
+        drafter(_meeting_round(), _source_messages())
+
+
+def test_digest_drafter_requires_conclusion_section(monkeypatch):
+    _install_fake_llm(monkeypatch, ["# 评审纪要\n\n## 关键讨论\n\n候选 A 更契合赛题。"])
+    drafter = llm_review_runners.build_meeting_digest_drafter(dict(_FAKE_LLM))
+    with pytest.raises(ContractValidationError, match="会议结论"):
         drafter(_meeting_round(), _source_messages())
 
 
