@@ -34,6 +34,7 @@ import concurrent.futures
 import hashlib
 import json
 import logging
+import os
 import random
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -76,6 +77,31 @@ SCHEMA_VERSION = 1
 # executor only parallelizes that IO wait (never the validation below), so the
 # review latency stays bounded instead of O(candidates + pairs) serial calls.
 MAX_CONCURRENT_REVIEW_CALLS = 4
+
+# Per-run fan-out override.  This bound is per review execution (every
+# ``execute_hypothesis_review`` call opens its own bounded pool), not
+# process-wide: the global ceiling across concurrent runs/questions lives in
+# the LLM gate in ``llm_review_runners`` (``VIBELUTION_LLM_MAX_CONCURRENT``).
+_MAX_CONCURRENT_REVIEW_CALLS_ENV = "VIBELUTION_MAX_CONCURRENT_REVIEW_CALLS"
+_MAX_CONCURRENT_REVIEW_CALLS_LIMIT = 64
+
+
+def resolve_max_concurrent_review_calls() -> int:
+    """Resolve the per-run review fan-out; env-tunable, default 4.
+
+    Malformed or out-of-range overrides fall back to the audited default, so
+    a bad env edit can neither serialize a review wave nor open an unbounded
+    fan-out.
+    """
+
+    raw = str(os.environ.get(_MAX_CONCURRENT_REVIEW_CALLS_ENV) or "").strip()
+    if not raw:
+        return MAX_CONCURRENT_REVIEW_CALLS
+    try:
+        value = int(raw)
+    except ValueError:
+        return MAX_CONCURRENT_REVIEW_CALLS
+    return min(_MAX_CONCURRENT_REVIEW_CALLS_LIMIT, max(1, value))
 
 
 class HypothesisReviewExecutionMode(str, Enum):
@@ -1171,7 +1197,9 @@ def execute_hypothesis_review(
             revision_runner=revision_runner,
         )
     effective_concurrency = (
-        MAX_CONCURRENT_REVIEW_CALLS if max_concurrent_calls is None else int(max_concurrent_calls)
+        resolve_max_concurrent_review_calls()
+        if max_concurrent_calls is None
+        else int(max_concurrent_calls)
     )
     formal_receipts: list[dict[str, Any]] | None = (
         [] if mode is HypothesisReviewExecutionMode.FORMAL else None

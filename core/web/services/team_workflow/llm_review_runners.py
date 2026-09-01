@@ -26,10 +26,12 @@ paths never write anything, and a dump failure only logs.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
 import tempfile
+import threading
 import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
@@ -120,6 +122,8 @@ def _record_meeting_digest_scene_event(
 def _review_llm_error_category(error: Exception) -> str:
     if isinstance(error, ReviewLLMTimeoutError):
         return "timeout"
+    if is_recoverable_review_llm_gate_error(error):
+        return "llm_gate_rejected"
     if isinstance(error, ContractValidationError):
         return "contract_validation"
     if isinstance(error, LLMError):
@@ -350,12 +354,264 @@ class ReviewLLMTimeoutError(LLMError):
         self.timeout_seconds = float(timeout_seconds)
 
 
+# ---------------------------------------------------------------------------
+# Global LLM concurrency gate (Challenge 10-way parallel review guard)
+# ---------------------------------------------------------------------------
+
+# Every review wave opens one ThreadPoolExecutor per question with
+# ``MAX_CONCURRENT_REVIEW_CALLS`` workers, so N concurrent questions multiply
+# into N x 4 in-flight provider calls with no process-wide ceiling (the
+# 10-question Challenge wave therefore fires up to 40 simultaneous LLM
+# calls).  This gate adds the missing process-level ceiling around the single
+# funnel every review call passes through (`_invoke_review_llm` ->
+# `_invoke_llm_with_timeout`), so the gated in-flight count measures real
+# provider requests, not merely pooled worker threads.
+#
+# Sizing follows Little's law against the provider's sustained capacity:
+#
+#     max_concurrent ~= provider_calls_per_minute * avg_call_wall_clock_s / 60
+#
+# e.g. a provider sustaining 80 calls/min at a 7.5s average wall clock
+# supports ~10 concurrent calls.  Tune ``VIBELUTION_LLM_MAX_CONCURRENT`` to
+# the provider's real concurrency budget; the default 10 keeps one full
+# 10-question wave flowing without multiplicative fan-out.
+_LLM_GATE_MAX_CONCURRENT_ENV = "VIBELUTION_LLM_MAX_CONCURRENT"
+_LLM_GATE_MAX_CONCURRENT_DEFAULT = 10
+_LLM_GATE_MAX_CONCURRENT_LIMIT = 256
+
+# Waiting on the gate must never become unbounded silent queueing: a caller
+# that cannot obtain a slot within this budget fails fast into the existing
+# recoverable review-failure path (structured exception -> failure
+# classification -> retry/requeue) instead of pinning its worker thread.
+_LLM_GATE_ACQUIRE_TIMEOUT_ENV = "VIBELUTION_LLM_GATE_ACQUIRE_TIMEOUT_SECONDS"
+_LLM_GATE_ACQUIRE_TIMEOUT_DEFAULT = 120.0
+
+# After a provider 429 (transport category ``rate_limit_error``) the model
+# cools down for this long: further attempts for the same model fail fast
+# before acquiring a slot, so no request is sent and no worker is pinned.
+# The transport-level retry policy inside ``core/llm/client.py`` stays
+# authoritative for per-call retries with backoff; this window only stops
+# *new* calls from piling onto an already throttled model.
+_LLM_RATE_LIMIT_COOLDOWN_ENV = "VIBELUTION_LLM_RATE_LIMIT_COOLDOWN_SECONDS"
+_LLM_RATE_LIMIT_COOLDOWN_DEFAULT = 60.0
+
+_gate_state_lock = threading.Lock()
+_gate_semaphore: threading.BoundedSemaphore | None = None
+_gate_semaphore_size = 0
+_rate_limit_cooldown_until: dict[str, float] = {}
+
+
+class ReviewLLMGateTimeoutError(LLMError):
+    """No global LLM concurrency slot was freed within the acquire budget.
+
+    Classified as a recoverable gate rejection (``retryable``): the call
+    never reached the provider, so a later retry or requeue loses nothing.
+    """
+
+    def __init__(
+        self,
+        *,
+        purpose: str,
+        model_ref: str = "",
+        wait_seconds: float,
+    ) -> None:
+        super().__init__(
+            "gate_timeout",
+            (
+                f"review step `{purpose}` waited {wait_seconds:g}s for a "
+                "global LLM concurrency slot and was rejected before "
+                f"reaching the provider (model={model_ref or 'unresolved'})"
+            ),
+            retryable=True,
+        )
+        self.purpose = str(purpose)
+        self.model_ref = str(model_ref)
+        self.wait_seconds = float(wait_seconds)
+
+
+class ReviewLLMRateLimitCooldownError(LLMError):
+    """The target model is inside a provider rate-limit cooldown window."""
+
+    def __init__(
+        self,
+        *,
+        purpose: str,
+        model_ref: str = "",
+        cooldown_remaining_seconds: float,
+    ) -> None:
+        super().__init__(
+            "rate_limit_cooldown",
+            (
+                f"review step `{purpose}` was rejected while model "
+                f"{model_ref or 'unresolved'} cools down a provider 429 for "
+                f"another {cooldown_remaining_seconds:g}s"
+            ),
+            retryable=True,
+        )
+        self.purpose = str(purpose)
+        self.model_ref = str(model_ref)
+        self.cooldown_remaining_seconds = float(cooldown_remaining_seconds)
+
+
+def is_recoverable_review_llm_gate_error(error: Exception) -> bool:
+    """True for gate rejections the retry/requeue path can absorb."""
+
+    return isinstance(
+        error, (ReviewLLMGateTimeoutError, ReviewLLMRateLimitCooldownError)
+    )
+
+
+def _env_float(name: str, default: float, *, minimum: float, maximum: float) -> float:
+    raw = str(os.environ.get(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        return default
+    return min(maximum, max(minimum, value))
+
+
+def llm_gate_max_concurrent() -> int:
+    """Process-wide LLM call ceiling (``VIBELUTION_LLM_MAX_CONCURRENT``)."""
+
+    return int(
+        _env_float(
+            _LLM_GATE_MAX_CONCURRENT_ENV,
+            _LLM_GATE_MAX_CONCURRENT_DEFAULT,
+            minimum=1.0,
+            maximum=float(_LLM_GATE_MAX_CONCURRENT_LIMIT),
+        )
+    )
+
+
+def llm_gate_acquire_timeout_seconds() -> float:
+    """Max wait for one global slot before failing fast."""
+
+    return _env_float(
+        _LLM_GATE_ACQUIRE_TIMEOUT_ENV,
+        _LLM_GATE_ACQUIRE_TIMEOUT_DEFAULT,
+        minimum=0.05,
+        maximum=600.0,
+    )
+
+
+def llm_rate_limit_cooldown_seconds() -> float:
+    """Model-level 429 cooldown window."""
+
+    return _env_float(
+        _LLM_RATE_LIMIT_COOLDOWN_ENV,
+        _LLM_RATE_LIMIT_COOLDOWN_DEFAULT,
+        minimum=0.0,
+        maximum=600.0,
+    )
+
+
+def _llm_gate() -> threading.BoundedSemaphore:
+    global _gate_semaphore, _gate_semaphore_size
+    size = llm_gate_max_concurrent()
+    with _gate_state_lock:
+        if _gate_semaphore is None or _gate_semaphore_size != size:
+            # Rebuild only when the configured size changed (env edits are a
+            # test/ops action, never a mid-flight product event, so holders
+            # of the previous semaphore have released by then).
+            _gate_semaphore = threading.BoundedSemaphore(size)
+            _gate_semaphore_size = size
+        return _gate_semaphore
+
+
+def reset_llm_gate_for_tests(*, max_concurrent: int | None = None) -> None:
+    """Reset the process-wide gate state (tests only)."""
+
+    global _gate_semaphore, _gate_semaphore_size
+    with _gate_state_lock:
+        if max_concurrent is not None:
+            size = max(1, int(max_concurrent))
+            _gate_semaphore = threading.BoundedSemaphore(size)
+            _gate_semaphore_size = size
+        else:
+            _gate_semaphore = None
+            _gate_semaphore_size = 0
+        _rate_limit_cooldown_until.clear()
+
+
+def _llm_gate_model_key(model_ref: str) -> str:
+    return str(model_ref or "").strip().lower()
+
+
+def _record_model_rate_limit(model_ref: str, *, now_s: float | None = None) -> None:
+    key = _llm_gate_model_key(model_ref)
+    if not key:
+        return
+    moment = time.time() if now_s is None else now_s
+    deadline = moment + llm_rate_limit_cooldown_seconds()
+    with _gate_state_lock:
+        _rate_limit_cooldown_until[key] = max(
+            deadline, _rate_limit_cooldown_until.get(key, 0.0)
+        )
+
+
+def _maybe_record_provider_rate_limit(error: Exception, *, model_ref: str) -> None:
+    """Track a real provider 429 (transport category ``rate_limit_error``).
+
+    The gate's own fast-fail exceptions carry different categories, so a
+    storm of gate rejections can never extend the cooldown window.
+    """
+
+    if isinstance(error, LLMError) and str(error.category) == "rate_limit_error":
+        _record_model_rate_limit(model_ref)
+
+
+def _raise_if_model_cooling_down(*, purpose: str, model_ref: str) -> None:
+    key = _llm_gate_model_key(model_ref)
+    if not key:
+        return
+    with _gate_state_lock:
+        deadline = _rate_limit_cooldown_until.get(key, 0.0)
+    remaining = deadline - time.time()
+    if remaining > 0:
+        raise ReviewLLMRateLimitCooldownError(
+            purpose=purpose,
+            model_ref=model_ref,
+            cooldown_remaining_seconds=remaining,
+        )
+
+
+@contextlib.contextmanager
+def _llm_gate_slot(*, purpose: str, model_ref: str):
+    """Hold one global LLM slot around a real provider call.
+
+    Fast-fails before queueing when the model is in a 429 cooldown, then
+    bounds the wait for a slot by the configured acquire timeout.  Release is
+    guaranteed on every path (success, provider error, cancellation) via
+    try/finally, so an exception can never leak a slot.
+    """
+
+    _raise_if_model_cooling_down(purpose=purpose, model_ref=model_ref)
+    semaphore = _llm_gate()
+    wait_seconds = llm_gate_acquire_timeout_seconds()
+    if not semaphore.acquire(timeout=wait_seconds):
+        raise ReviewLLMGateTimeoutError(
+            purpose=purpose,
+            model_ref=model_ref,
+            wait_seconds=wait_seconds,
+        )
+    try:
+        # Re-check after the wait: a sibling call may have observed a 429 for
+        # this model while this call was queued on the gate.
+        _raise_if_model_cooling_down(purpose=purpose, model_ref=model_ref)
+        yield
+    finally:
+        semaphore.release()
+
+
 def _invoke_llm_with_timeout(
     invoke: Callable[[], Any],
     *,
     purpose: str,
     timeout_seconds: float,
     deadline_at_ms: int | None = None,
+    model_ref: str = "",
 ) -> Any:
     """Run one review call through the existing abortable provider transport."""
 
@@ -384,7 +640,12 @@ def _invoke_llm_with_timeout(
         )
     try:
         with llm_cancel_context(interrupt_checker, enable_chat_provider_abort=True):
-            value = invoke()
+            # Global gate (B5): the in-flight count covers the real provider
+            # request only, so queueing on the gate does not consume the
+            # per-call budget; the absolute challenge deadline above still
+            # fences the whole call, including the gate wait.
+            with _llm_gate_slot(purpose=purpose, model_ref=model_ref):
+                value = invoke()
     except LLMError as exc:
         if exc.category == "cancelled" and interrupt_checker():
             raise ReviewLLMTimeoutError(
@@ -587,6 +848,9 @@ def _invoke_review_llm(
 ) -> dict[str, Any] | str | ProviderBoundReviewResult:
     """Run one review model call and return its requested response form."""
 
+    # Gate/cooldown attribution key: provider-qualified modelRef when present,
+    # falling back to the bare model id.
+    model_gate_ref = str(llm.get("modelRef") or llm.get("modelId") or "")
     user_content = json.dumps(dict(user_payload), ensure_ascii=False)
     messages: list[Any] = [
         build_cacheable_system_message(system_prompt),
@@ -677,6 +941,7 @@ def _invoke_review_llm(
                 purpose=purpose,
                 timeout_seconds=timeout_seconds,
                 deadline_at_ms=deadline_at_ms,
+                model_ref=model_gate_ref,
             )
             content = str(getattr(response, "content", "") or "")
             if response_mode == "text":
@@ -697,6 +962,9 @@ def _invoke_review_llm(
                     )
                 produced = _parse_json_object(content, what=f"review step `{purpose}`")
         except Exception as exc:  # noqa: BLE001 - classify, record, and re-raise unchanged
+            # A real provider 429 opens the model-level cooldown window so
+            # later calls fast-fail instead of piling onto the same throttle.
+            _maybe_record_provider_rate_limit(exc, model_ref=model_gate_ref)
             if digest_observation:
                 _record_meeting_digest_scene_event(
                     "meeting_digest.llm.failed",
@@ -765,6 +1033,7 @@ def _invoke_review_llm(
                 model_ref=str(llm.get("modelRef") or "")
             ),
             deadline_at_ms=deadline_at_ms,
+            model_ref=model_gate_ref,
         )
         final_text = str(getattr(outcome, "final_text", "") or "")
         identity = getattr(outcome, "identity", None)
@@ -787,6 +1056,9 @@ def _invoke_review_llm(
             what=f"review step `{purpose}`",
         )
     except Exception as exc:  # noqa: BLE001 - dump raw evidence, re-raise unchanged
+        # A real provider 429 opens the model-level cooldown window (same
+        # contract as the non-receipt branch above).
+        _maybe_record_provider_rate_limit(exc, model_ref=model_gate_ref)
         _dump_failed_review_response(
             purpose=purpose,
             failure_category=_review_llm_error_category(exc),

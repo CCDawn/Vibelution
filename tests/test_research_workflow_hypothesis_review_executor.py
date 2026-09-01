@@ -1977,3 +1977,30 @@ def test_shared_wave_output_is_identical_to_serial_output():
     parallel = run(**build_runners())
 
     assert parallel == serial
+
+
+# ---------------------------------------------------------------------------
+# Per-run concurrency ceiling: env-tunable, default stays the audited 4
+# ---------------------------------------------------------------------------
+
+
+def test_max_concurrent_review_calls_env_override(monkeypatch):
+    from core.web.services.team_workflow import hypothesis_review_executor as executor
+
+    env = executor._MAX_CONCURRENT_REVIEW_CALLS_ENV
+    monkeypatch.delenv(env, raising=False)
+    assert executor.resolve_max_concurrent_review_calls() == 4
+    assert executor.MAX_CONCURRENT_REVIEW_CALLS == 4
+
+    monkeypatch.setenv(env, "2")
+    assert executor.resolve_max_concurrent_review_calls() == 2
+
+    for junk in ("not-a-number", ""):
+        monkeypatch.setenv(env, junk)
+        assert executor.resolve_max_concurrent_review_calls() == 4
+
+    # Out-of-range values clamp instead of serializing or exploding fan-out.
+    monkeypatch.setenv(env, "0")
+    assert executor.resolve_max_concurrent_review_calls() == 1
+    monkeypatch.setenv(env, "999")
+    assert executor.resolve_max_concurrent_review_calls() == 64

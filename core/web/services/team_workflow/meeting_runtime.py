@@ -3802,15 +3802,22 @@ def _prepare_meeting_summary_draft_locked(
         # stays in ``summarizing`` with a structured summaryDraftError, the
         # per-meeting lock is released by this return, and the retry path
         # (summary-draft / regenerate_summary) regenerates from the bound
-        # source messages without reopening the discussion.
+        # source messages without reopening the discussion.  Global-gate
+        # rejections (concurrency slot starvation, per-model 429 cooldown)
+        # follow the same recoverable shape: the call never completed, so the
+        # meeting requeues on the existing retry path instead of crashing.
         from core.web.services.team_workflow.llm_review_runners import (
             ReviewLLMTimeoutError,
+            is_recoverable_review_llm_gate_error,
         )
 
         timed_out = isinstance(exc, ReviewLLMTimeoutError)
+        gate_rejected = not timed_out and is_recoverable_review_llm_gate_error(exc)
         error_category = (
             "timeout"
             if timed_out
+            else "llm_gate_rejected"
+            if gate_rejected
             else "contract_validation"
             if isinstance(exc, ContractValidationError)
             else "runtime_error"
@@ -3830,7 +3837,13 @@ def _prepare_meeting_summary_draft_locked(
             lifecycle=True,
         )
         error = {
-            "code": "summary_draft_timeout" if timed_out else "summary_draft_failed",
+            "code": (
+                "summary_draft_timeout"
+                if timed_out
+                else "summary_draft_gate_rejected"
+                if gate_rejected
+                else "summary_draft_failed"
+            ),
             "message": str(exc),
             "remediationLabel": "重试生成纪要",
         }
