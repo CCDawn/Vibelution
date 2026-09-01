@@ -20,6 +20,10 @@ DEADLINE_POLICY_VERSION = "challenge_meeting_deadline.v1"
 PER_CALL_MIN_MS = 300_000
 PER_CALL_MAX_MS = 600_000
 DEFAULT_PER_CALL_BUDGET_MS = 450_000
+# Review calls process the full bounded transcript and have observed valid
+# GLM latencies up to seven minutes; use the governed cap when receipts are
+# still sparse, while speaker calls retain the 450s audited default.
+DEFAULT_REVIEW_PER_CALL_BUDGET_MS = PER_CALL_MAX_MS
 MIN_BUCKET_SAMPLE_COUNT = 20
 _PER_CALL_OVERRIDE_ENV = "VIBELUTION_CHALLENGE_MEETING_PER_CALL_BUDGET_MS"
 _CHALLENGE_SCOPE_AUTHORITIES = frozenset(
@@ -155,7 +159,11 @@ def derive_per_call_budget(
                 "overrideEnv": "",
             }
     return {
-        "perCallBudgetMs": DEFAULT_PER_CALL_BUDGET_MS,
+        "perCallBudgetMs": (
+            DEFAULT_REVIEW_PER_CALL_BUDGET_MS
+            if normalized_purpose == "team_workflow_review"
+            else DEFAULT_PER_CALL_BUDGET_MS
+        ),
         "latencyP95Ms": 0,
         "sampleCount": len(samples),
         "sampleSource": "audited_default",
