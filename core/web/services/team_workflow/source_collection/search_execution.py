@@ -81,6 +81,20 @@ def _source_collection_search_background_response(
     }
 
 
+def _source_collection_circuit_provider_order(run: dict[str, Any]) -> list[str]:
+    """Read the evidence-request circuit provider order off a rewrite run.
+
+    Returns [] for every run without ``metadata.searchCircuit`` (all legacy
+    and original-path runs), keeping the default provider order unchanged.
+    """
+    s = _service()
+    metadata = run.get("metadata") if isinstance(run.get("metadata"), dict) else {}
+    circuit = metadata.get("searchCircuit") if isinstance(metadata.get("searchCircuit"), dict) else {}
+    order = [s._trim_text(item, max_length=80) for item in list(circuit.get("providerOrder") or [])]
+    supported = [item for item in order if item in s.SOURCE_COLLECTION_SEARCH_PROVIDERS]
+    return list(dict.fromkeys(supported))
+
+
 def _run_source_collection_search_background(team_id: str, run_id: str, payload: dict[str, Any]) -> None:
     s = _service()
     try:
@@ -146,6 +160,14 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
     run_team_id = s._trim_text(run_scope.get("teamId"), max_length=128)
     if run_team_id and run_team_id != normalized_team_id:
         raise s.TeamWorkflowOrchestrationError("Data processing run does not belong to this team.")
+    if not requested_provider:
+        circuit_provider_order = _source_collection_circuit_provider_order(run)
+        if circuit_provider_order:
+            # Evidence-request circuit rewrite run: execute the variant's
+            # provider priority order instead of the default order.  Only
+            # runs carrying run.metadata.searchCircuit are affected.
+            providers = tuple(circuit_provider_order)
+            provider = circuit_provider_order[0]
     assignments = [item for item in list(assignments_payload.get("assignments") or []) if isinstance(item, dict)]
     existing_records = [item for item in list(records_payload.get("records") or []) if isinstance(item, dict)]
     existing_outputs = [item for item in list(outputs_payload.get("outputs") or []) if isinstance(item, dict)]

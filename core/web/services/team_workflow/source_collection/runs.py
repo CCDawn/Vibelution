@@ -19,6 +19,12 @@ def _service():
     return team_workflow_orchestration_service
 
 
+def _search_circuit():
+    from core.web.services.team_workflow.source_collection import search_circuit
+
+    return search_circuit
+
+
 def start_source_collection_run(team_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     s = _service()
     normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
@@ -62,6 +68,14 @@ def start_source_collection_run(team_id: str, payload: dict[str, Any] | None = N
     # metadata key is propagated; arbitrary caller metadata is never merged.
     search_envelope_fingerprint = s._trim_text(
         request_payload.get("searchEnvelopeFingerprint"), max_length=128
+    )
+    # Evidence-request circuit metadata (rewrite runs only; see
+    # source_collection.search_circuit).  Absent on every other caller, so
+    # the default run-creation path is unchanged.
+    search_circuit_metadata = (
+        request_payload.get("searchCircuit")
+        if isinstance(request_payload.get("searchCircuit"), dict)
+        else {}
     )
     question_id = request_payload.get("questionId") or scope.get("questionId")
     required_model_policy = (
@@ -132,6 +146,8 @@ def start_source_collection_run(team_id: str, payload: dict[str, Any] | None = N
     }
     if search_envelope_fingerprint:
         run_metadata["searchEnvelopeFingerprint"] = search_envelope_fingerprint
+    if search_circuit_metadata:
+        run_metadata["searchCircuit"] = search_circuit_metadata
     run = s.data_processing_service.create_processing_run(
         s.data_processing_service.DEFAULT_PROFILE_ID,
         title=title,
@@ -938,38 +954,63 @@ def execute_source_collection_search(team_id: str, run_id: str, payload: dict[st
         active=True,
     )
     try:
-        result = s._execute_source_collection_search_impl(normalized_team_id, normalized_run_id, payload)
-    except Exception as exc:
-        failure_result = {
-            "status": "failed",
-            "failedQueryCount": 1,
-            "executedQueryCount": 0,
-            "recordCount": len(records),
-            "importedCount": 0,
-            "sourceCollectionSummary": s._source_collection_assignment_stage_summary(assignments),
-        }
-        s._persist_source_collection_work_run(
+        circuit = _search_circuit()
+        exhausted_duplicate_marker = circuit.exhausted_duplicate_marker_for_run(
             normalized_team_id,
             normalized_run_id,
-            status="failed",
-            current_phase="failed",
+        )
+    except Exception:  # noqa: BLE001 - circuit must fail open to the legacy path
+        exhausted_duplicate_marker = {}
+    if exhausted_duplicate_marker:
+        # Evidence-request circuit: this run's goal already exhausted its
+        # rewrite budget and a duplicate request was routed back here.  Do
+        # not repeat any provider search; return the structured gap marker
+        # as a terminal, zero-query execution result (terminal status maps
+        # to "completed" so the chain bridge still handoffs).
+        result = _search_circuit().build_exhausted_duplicate_result(
+            exhausted_duplicate_marker,
             run=run,
-            team=team,
+            run_status=None,
             assignments=assignments,
-            records=records,
-            summary="资料搜索执行失败。",
-            active=False,
-            error=str(exc),
-            error_type=type(exc).__name__,
         )
-        s._sync_source_collection_stage_round_after_search(
-            normalized_team_id,
-            normalized_run_id,
-            failure_result,
-            terminal_status="failed",
-            terminal_summary="资料搜索执行失败，等待检查搜索错误。",
-        )
-        raise
+    else:
+        try:
+            result = s._execute_source_collection_search_impl(normalized_team_id, normalized_run_id, payload)
+        except Exception as exc:
+            failure_result = {
+                "status": "failed",
+                "failedQueryCount": 1,
+                "executedQueryCount": 0,
+                "recordCount": len(records),
+                "importedCount": 0,
+                "sourceCollectionSummary": s._source_collection_assignment_stage_summary(assignments),
+            }
+            s._persist_source_collection_work_run(
+                normalized_team_id,
+                normalized_run_id,
+                status="failed",
+                current_phase="failed",
+                run=run,
+                team=team,
+                assignments=assignments,
+                records=records,
+                summary="资料搜索执行失败。",
+                active=False,
+                error=str(exc),
+                error_type=type(exc).__name__,
+            )
+            s._sync_source_collection_stage_round_after_search(
+                normalized_team_id,
+                normalized_run_id,
+                failure_result,
+                terminal_status="failed",
+                terminal_summary="资料搜索执行失败，等待检查搜索错误。",
+            )
+            raise
+        try:
+            _search_circuit().record_attempt_outcome(normalized_team_id, normalized_run_id, result)
+        except Exception:  # noqa: BLE001 - ledger must never fail the search
+            pass
 
     final_run = result.get("run") if isinstance(result.get("run"), dict) else run
     final_assignments = [item for item in list(result.get("assignments") or []) if isinstance(item, dict)]
@@ -980,6 +1021,19 @@ def execute_source_collection_search(team_id: str, run_id: str, payload: dict[st
     terminal_status = s._source_collection_work_run_terminal_status(result)
     terminal_phase = s._source_collection_work_run_terminal_phase(result)
     terminal_summary = s._source_collection_work_run_terminal_summary(result)
+    terminal_extra: dict[str, Any] = {
+        "attemptedQueryCount": s._source_collection_count(result.get("attemptedQueryCount")),
+        "executedQueryCount": s._source_collection_count(result.get("executedQueryCount")),
+        "failedQueryCount": s._source_collection_count(result.get("failedQueryCount")),
+        "recordCount": s._source_collection_count(result.get("recordCount")),
+        "importedCount": s._source_collection_count(result.get("importedCount")),
+        "resultCount": s._source_collection_count(result.get("resultCount")),
+    }
+    evidence_gap = result.get("evidenceGap") if isinstance(result.get("evidenceGap"), dict) else {}
+    if str(result.get("status") or "") == "evidence_gap_unavailable":
+        # Surface the circuit verdict on the collection run status snapshot.
+        terminal_extra["evidenceGapUnavailable"] = True
+        terminal_extra["evidenceGapMarkerId"] = str(evidence_gap.get("markerId") or "")[:64]
     s._persist_source_collection_work_run(
         normalized_team_id,
         normalized_run_id,
@@ -991,14 +1045,7 @@ def execute_source_collection_search(team_id: str, run_id: str, payload: dict[st
         records=[item for item in list(final_records or []) if isinstance(item, dict)],
         summary=terminal_summary,
         active=False,
-        extra={
-            "attemptedQueryCount": s._source_collection_count(result.get("attemptedQueryCount")),
-            "executedQueryCount": s._source_collection_count(result.get("executedQueryCount")),
-            "failedQueryCount": s._source_collection_count(result.get("failedQueryCount")),
-            "recordCount": s._source_collection_count(result.get("recordCount")),
-            "importedCount": s._source_collection_count(result.get("importedCount")),
-            "resultCount": s._source_collection_count(result.get("resultCount")),
-        },
+        extra=terminal_extra,
     )
     s._sync_source_collection_stage_round_after_search(
         normalized_team_id,
