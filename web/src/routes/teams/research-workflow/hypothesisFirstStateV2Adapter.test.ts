@@ -5,9 +5,11 @@ import type {
   HypothesisFirstStateV2,
   NavigationAction,
   PhaseState,
+  ProgramHumanReviewStatus,
   ReviewCandidateState,
 } from "../../../api/types/hypothesisFirst";
 import {
+  HYPOTHESIS_FIRST_COLLECTION_NODE_ID,
   HYPOTHESIS_FIRST_CONVERGENCE_NODE_ID,
   HYPOTHESIS_FIRST_GENERATION_NODE_ID,
   HYPOTHESIS_FIRST_REVIEW_NODE_ID,
@@ -214,6 +216,102 @@ describe("resolveHypothesisFirstNextActionFromV2", () => {
 
     expect(action.stage).toBe("blocked");
     expect(action.canonicalActions?.map((item) => item.command)).toEqual(["reconcile_formal_run"]);
+  });
+
+  // P2-9: stop_collection / cancel_run / archive_run have no legacy endpoint.
+  // The legacy `command` name stays undefined, but every datum the primary
+  // button needs must still be emitted from the canonical action, so a future
+  // MeetingOps/contextModel canonical channel can render it without re-deriving.
+  it("keeps primary-button data for canonical-only commands without a legacy mapping", () => {
+    const stopCollection = {
+      ...command(
+        { command: "stop_collection", payload: { requestId: "req-1", childRunId: "child-1" } },
+        "停止资料搜集",
+      ),
+      targetPhase: "collection",
+      confirmationText: "停止后将终止该资料搜集子运行。",
+    } as CommandAction;
+    const cancelRun = {
+      ...command(
+        { command: "cancel_run", payload: { runId: "formal-run-1" } },
+        "取消正式运行",
+      ),
+      targetPhase: "formal_runtime",
+    } as CommandAction;
+    const archiveRun = {
+      ...command(
+        { command: "archive_run", payload: { runId: "formal-run-1" } },
+        "归档正式运行",
+      ),
+      targetPhase: "program_delivery",
+    } as CommandAction;
+
+    const collectionState = stateV2({
+      isInitial: false,
+      currentPhase: "collection",
+      collection: {
+        ...stateV2().collection,
+        lifecycle: "running",
+        actionability: "executing",
+        aggregate: { total: 2, completed: 1, pending: 1, failed: 0, blocked: 0 },
+      },
+      allowedActions: [stopCollection],
+    });
+    const formalState = stateV2({
+      isInitial: false,
+      currentPhase: "formal_runtime",
+      formalRuntime: {
+        ...stateV2().formalRuntime,
+        runId: "formal-run-1",
+        runStatus: "running",
+        currentNodeIds: ["formal_node_1"],
+      },
+      allowedActions: [cancelRun],
+    });
+    const deliveryState = stateV2({
+      isInitial: false,
+      currentPhase: "program_delivery",
+      programDelivery: {
+        ...stateV2().programDelivery,
+        lifecycle: "completed",
+        outcome: "succeeded",
+        actionability: "terminal",
+        deliveryStatus: "succeeded",
+        humanReviewStatus: "approved",
+        approvedGateCount: 4,
+      },
+      allowedActions: [archiveRun],
+    });
+
+    const cases = [
+      { state: collectionState, action: stopCollection, targetNodeId: HYPOTHESIS_FIRST_COLLECTION_NODE_ID },
+      { state: formalState, action: cancelRun, targetNodeId: "formal_node_1" },
+      { state: deliveryState, action: archiveRun, targetNodeId: HYPOTHESIS_FIRST_CONVERGENCE_NODE_ID },
+    ];
+
+    for (const { state, action, targetNodeId } of cases) {
+      const resolved = resolveHypothesisFirstNextActionFromV2(state);
+      // No legacy alias exists; the canonical channel is the only dispatcher.
+      expect(resolved.command).toBeUndefined();
+      expect(resolved.canonicalCommand).toBe(action.command);
+      expect(resolved.canonicalAction?.actionId).toBe(action.actionId);
+      expect(resolved.canonicalAction?.enabled).toBe(true);
+      expect(resolved.canonicalActions.map((item) => item.command)).toEqual([action.command]);
+      // Primary-button data stays complete: label, detail, target, version.
+      expect(resolved.commandLabel).toBe(action.label);
+      expect(resolved.commandLabel).toBeTruthy();
+      expect(resolved.commandDetail).toBeTruthy();
+      expect(resolved.targetNodeId).toBe(targetNodeId);
+      expect(resolved.expectedStateVersion).toBe("state-1");
+      expect(resolved.navigationLabel).toBe(action.label);
+    }
+
+    // Detail comes from the server confirmation text when present, and from
+    // the phase status otherwise — never empty for a canonical-only command.
+    expect(resolveHypothesisFirstNextActionFromV2(collectionState).commandDetail)
+      .toContain("停止后将终止该资料搜集子运行");
+    expect(resolveHypothesisFirstNextActionFromV2(deliveryState).commandDetail)
+      .toBe("正式研究结果正在交付");
   });
 
   it("maps an official catalog cold start to the generation CTA", () => {
@@ -703,6 +801,65 @@ describe("resolveHypothesisFirstNextActionFromV2", () => {
     expect(action.stage).toBe("program_delivery");
     expect(action.targetNodeId).toBe(HYPOTHESIS_FIRST_CONVERGENCE_NODE_ID);
     expect(action.navigationDeepLink).toBeUndefined();
+  });
+
+  // P2-10: a rejected or revision-requested human review is the opposite of
+  // "delivering"; the status copy must say what actually happened.
+  it("reports rejected and revision-requested program delivery instead of 'delivering'", () => {
+    const stateFor = (humanReviewStatus: ProgramHumanReviewStatus): HypothesisFirstStateV2 => stateV2({
+      isInitial: false,
+      currentPhase: "program_delivery",
+      programDelivery: {
+        ...stateV2().programDelivery,
+        lifecycle: "waiting_human",
+        actionability: "waiting_user",
+        deliveryStatus: "succeeded",
+        humanReviewStatus,
+        approvedGateCount: 2,
+      },
+    });
+
+    const rejected = resolveHypothesisFirstNextActionFromV2(stateFor("rejected"));
+    expect(rejected.stage).toBe("program_delivery");
+    expect(rejected.statusMessage).toBe("正式研究产出已被人工驳回");
+    expect(rejected.commandDetail).toBe("正式研究产出已被人工驳回");
+
+    const revision = resolveHypothesisFirstNextActionFromV2(stateFor("revision_requested"));
+    expect(revision.statusMessage)
+      .toBe("正式研究产出需要修订（已创建修订流程或等待修订）");
+
+    // Existing statuses keep their copy.
+    const waiting = resolveHypothesisFirstNextActionFromV2(stateFor("waiting_human"));
+    expect(waiting.statusMessage).toBe("等待 H1–H4 审核（2/4）");
+    const delivering = resolveHypothesisFirstNextActionFromV2(stateFor("approved"));
+    expect(delivering.statusMessage).toBe("正式研究结果正在交付");
+  });
+
+  it("emits English program-delivery copy when lang is en", () => {
+    const stateFor = (humanReviewStatus: ProgramHumanReviewStatus): HypothesisFirstStateV2 => stateV2({
+      isInitial: false,
+      currentPhase: "program_delivery",
+      programDelivery: {
+        ...stateV2().programDelivery,
+        lifecycle: "waiting_human",
+        actionability: "waiting_user",
+        deliveryStatus: "succeeded",
+        humanReviewStatus,
+        approvedGateCount: 2,
+      },
+    });
+
+    expect(resolveHypothesisFirstNextActionFromV2(stateFor("rejected"), { lang: "en" }).statusMessage)
+      .toBe("The formal research output was rejected by human review");
+    expect(resolveHypothesisFirstNextActionFromV2(stateFor("revision_requested"), { lang: "en" }).statusMessage)
+      .toBe("The formal research output needs revision (a revision run was created or is pending)");
+    expect(resolveHypothesisFirstNextActionFromV2(stateFor("waiting_human"), { lang: "en" }).statusMessage)
+      .toBe("Waiting for H1–H4 review (2/4)");
+    expect(resolveHypothesisFirstNextActionFromV2(stateFor("approved"), { lang: "en" }).statusMessage)
+      .toBe("The formal research output is being delivered");
+    // zh stays the default when lang is omitted.
+    expect(resolveHypothesisFirstNextActionFromV2(stateFor("rejected")).statusMessage)
+      .toBe("正式研究产出已被人工驳回");
   });
 
   it("maps four approved gates to completed", () => {

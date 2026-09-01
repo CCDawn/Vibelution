@@ -25,6 +25,8 @@ import type {
 type ResolveV2Options = {
   preferredCandidateId?: string | null;
   preferredMeetingRoundId?: string | null;
+  /** Copy language for synthesized status/detail text; server-authored labels stay verbatim. */
+  lang?: "zh" | "en";
 };
 
 /** V2-only extension kept local so legacy next-action consumers remain stable. */
@@ -277,6 +279,16 @@ function activeReviewCandidate(
     ?? null;
 }
 
+/**
+ * Map a V2 canonical command to the legacy command name, when one exists.
+ *
+ * `stop_collection` / `cancel_run` / `archive_run` are V2-only commands with
+ * no legacy endpoint: they must stay `undefined` here and be dispatched by the
+ * button layer through `executeHypothesisFirstCommand(nextAction.canonicalAction)`.
+ * Every other button datum (commandLabel / commandDetail / targetNodeId /
+ * canonicalAction) is emitted from the canonical action regardless, so a
+ * missing legacy mapping never drops the primary button data.
+ */
 function legacyCommand(action: CommandAction | null, phase: HypothesisFirstPhase): HypothesisFirstCommand | undefined {
   if (!action) return undefined;
   switch (action.command) {
@@ -302,7 +314,18 @@ function legacyCommand(action: CommandAction | null, phase: HypothesisFirstPhase
     case "reopen_review": return "reopen_review";
     case "resume_discussion": return "resume_discussion";
     case "stop_discussion": return "stop_discussion";
+    case "stop_collection":
+    case "cancel_run":
+    case "archive_run": return undefined;
   }
+  // Compile-time guard: every backend ActionCommand must be handled above —
+  // either mapped to a legacy command or deliberately left canonical-only.
+  // Once the switch is exhaustive, control flow narrows `action` to `never`
+  // and this line compiles; a newly added backend command keeps it reachable
+  // and fails `tsc -b` here instead of silently losing the primary button
+  // (the P2-9 failure mode).
+  const unmapped: never = action;
+  return unmapped;
 }
 
 function stageFor(
@@ -358,6 +381,7 @@ function stageFor(
 function defaultStatus(
   state: HypothesisFirstStateV2,
   current: PhaseState = phaseState(state),
+  lang: "zh" | "en" = "zh",
 ): string {
   const problem = state.problems.find((item) => item.severity === "fatal")
     ?? (
@@ -379,9 +403,28 @@ function defaultStatus(
         ? "人工已拒绝当前收敛结果"
         : "等待假说收敛";
     case "formal_runtime": return state.formalRuntime.runId ? "正式研究运行进行中" : "可以创建正式研究运行";
-    case "program_delivery": return state.programDelivery.humanReviewStatus === "waiting_human"
-      ? `等待 H1–H4 审核（${state.programDelivery.approvedGateCount}/4）`
-      : "正式研究结果正在交付";
+    case "program_delivery": {
+      // P2-10: a rejected or revision-requested human review is the opposite
+      // of "delivering" — say so instead of the generic delivery copy.
+      const reviewStatus = state.programDelivery.humanReviewStatus;
+      const zh = lang !== "en";
+      if (reviewStatus === "waiting_human") {
+        return zh
+          ? `等待 H1–H4 审核（${state.programDelivery.approvedGateCount}/4）`
+          : `Waiting for H1–H4 review (${state.programDelivery.approvedGateCount}/4)`;
+      }
+      if (reviewStatus === "rejected") {
+        return zh
+          ? "正式研究产出已被人工驳回"
+          : "The formal research output was rejected by human review";
+      }
+      if (reviewStatus === "revision_requested") {
+        return zh
+          ? "正式研究产出需要修订（已创建修订流程或等待修订）"
+          : "The formal research output needs revision (a revision run was created or is pending)";
+      }
+      return zh ? "正式研究结果正在交付" : "The formal research output is being delivered";
+    }
     case "completed": return "挑战杯研究流程已闭环";
   }
 }
@@ -427,14 +470,14 @@ export function resolveHypothesisFirstNextActionFromV2(
     navigationLabel: navigation?.label || command?.label || canonicalActions[0]?.label || "前往当前任务",
     command: mappedCommand,
     commandLabel: command?.label,
-    commandDetail: command?.confirmationText || gateCopy || defaultStatus(state, current),
+    commandDetail: command?.confirmationText || gateCopy || defaultStatus(state, current, options.lang),
     disabledReason: command
       ? undefined
       : current.actionability === "blocked"
         ? current.problems[0]?.message || "当前状态需要修复后才能继续"
         : undefined,
     recovery: null,
-    statusMessage: gateCopy || defaultStatus(state, current),
+    statusMessage: gateCopy || defaultStatus(state, current, options.lang),
     meetingRoundId: reviewCandidate?.meetingRoundId
       || state.generation.generationMeetingId
       || navigation?.navigation.meetingRoundId
