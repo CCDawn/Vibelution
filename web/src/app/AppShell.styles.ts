@@ -65,16 +65,10 @@ const styles = {
   activeWorkToneChip:
     "vui-app-appshell activeWorkToneChip !min-h-5 max-w-[6.5rem] shrink-0 truncate !px-1.5 !text-[10px]",
   activeWorkSummary: `vui-app-appshell activeWorkSummary min-w-0 ${vuiGlassPanelClass} p-2 ${vuiStateSelectedRowClass}`,
-  brand:
-    "vui-app-appshell brand min-w-0",
   brandBlock:
     "vui-app-appshell brandBlock min-w-0",
-  brandCopy:
-    "vui-app-appshell brandCopy min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   brandGate:
     "vui-app-appshell brandGate min-w-0",
-  brandSubtle:
-    "vui-app-appshell brandSubtle min-w-0",
   // Git mini-panel styles live in AppShellUtilityMenu.styles (VUI composition).
   lifecycleMenuCluster:
     "vui-app-appshell lifecycleMenuCluster min-w-0",
@@ -261,8 +255,6 @@ const styles = {
     "vui-app-appshell utilityTrigger min-w-0 h-[var(--vui-control-height-sm)] !border-0 flex-nowrap [&_[data-slot=vui-button-content]]:flex-nowrap [&_[data-slot=vui-button-content]]:whitespace-nowrap [&_[data-slot=vui-button-icon]]:shrink-0 [&_[data-slot=vui-button-label]]:inline-flex [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-1.5 [&_[data-slot=vui-button-label]]:whitespace-nowrap [&_[data-slot=vui-button-trailing-icon]]:shrink-0",
   utilityTriggerLabel:
     "vui-app-appshell utilityTriggerLabel min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] whitespace-nowrap",
-  versionPill:
-    `vui-app-appshell versionPill min-w-0 ${vuiControlPillClass}`,
 } as const;
 
 export default styles;

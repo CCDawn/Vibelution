@@ -1,8 +1,7 @@
-/** Route/domain dictionary slice: core (474 keys). */
+/** Route/domain dictionary slice: core (473 keys). */
 export const dictionaryCore = {
   zh: {
     appTitle: "Vibelution 工作台",
-    brandSubtle: "本地 agent 工作台",
     navLogs: "日志",
     navTools: "工具",
     navSkills: "技能",
@@ -495,7 +494,6 @@ export const dictionaryCore = {
   },
   en: {
     appTitle: "Vibelution Workbench",
-    brandSubtle: "local agent workbench",
     navLogs: "Logs",
     navTools: "Tools",
     navSkills: "Skills",

@@ -106,7 +106,6 @@ import { getPageInstanceId } from "./pageInstance";
 import { useShellStore } from "../store/shellStore";
 import styles from "./AppShell.styles";
 import { shareRuntimeSummaryIfOnlyVolatileChanged } from "./runtimeSummaryQueryShare";
-import packageJson from "../../package.json";
 import { CompanionDesktopAttention } from "../routes/companions/CompanionDesktopAttention";
 
 const LazyAppShellUtilityMenu = lazy(() =>
@@ -344,7 +343,6 @@ export function routeLocationKey(location: RouteLocationLike): string {
 
 const API_FAILURE_TELEMETRY_THROTTLE_MS = 15_000;
 const API_FAILURE_BACKGROUND_METHODS = new Set(["GET", "HEAD"]);
-const APP_VERSION = packageJson.version;
 const BROWSER_MEMORY_SAMPLE_INTERVAL_MS = 30_000;
 const PAGEHIDE_NETWORK_FAILURE_SUPPRESSION_MS = 2_500;
 const RETURN_NAVIGATION_STACK_STORAGE_KEY = "vibelution:return-navigation-stack";
@@ -2201,13 +2199,6 @@ export function AppShell() {
               icon={<ArrowLeft size={16} />}
             />
           ) : null}
-          <div className={styles.brandCopy}>
-            <span className={styles.brand}>Vibelution</span>
-            <span className={styles.versionPill} title={`Vibelution v${APP_VERSION}`}>
-              v{APP_VERSION}
-            </span>
-            <span className={styles.brandSubtle}>{t("brandSubtle")}</span>
-          </div>
           {activeWorkIndicator ? (
             <VPopover
               align="start"

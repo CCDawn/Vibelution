@@ -111,7 +111,7 @@ describe("AppShell layout contract", () => {
 
   it("renders one compact status summary chip while keeping the detailed guide panel", () => {
     expect(shellSource).toContain("statusSummaryChip");
-    expect(shellSource).toContain('t("brandSubtle")');
+    expect(shellSource).not.toContain('t("brandSubtle")');
     expect(shellSource).not.toContain("<span className={styles.statusBadgeLabel}>Gate</span>");
     expect(shellSource).not.toContain("className={`${styles.statusCluster} ${styles.brandGate}`}");
     expect(shellSource).toContain("LazyAppShellStatusGuidePanel");
@@ -230,14 +230,17 @@ describe("AppShell layout contract", () => {
     expect(narrowDesktopBlock).toContain(":where(.vui-app-appshell).statusSummaryToneChip");
     expect(narrowDesktopBlock).not.toContain(":where(.vui-app-appshell).statusBadgeValue");
 
-    const wrappedTopBarBlock = shellStyles.slice(
+    const narrowTopBarBlock = shellStyles.slice(
       shellStyles.indexOf("@media (max-width: 980px)"),
       shellStyles.indexOf("@media (max-width: 520px)"),
     );
-    expect(wrappedTopBarBlock).toContain(".vui-app-appshell.statusGuidePanel");
-    expect(wrappedTopBarBlock).toContain("position: fixed");
-    expect(wrappedTopBarBlock).toContain("top: 108px");
-    expect(wrappedTopBarBlock).toContain("max-height: calc(100dvh - 124px)");
+    // The top bar stays on one row at every width; the nav band scrolls horizontally instead of wrapping.
+    expect(narrowTopBarBlock).not.toContain("grid-template-areas");
+    expect(narrowTopBarBlock).not.toContain("--shell-topbar-height");
+    expect(narrowTopBarBlock).toContain(".vui-app-appshell.statusGuidePanel");
+    expect(narrowTopBarBlock).toContain("position: fixed");
+    expect(narrowTopBarBlock).toContain("top: 60px");
+    expect(narrowTopBarBlock).toContain("max-height: calc(100dvh - 76px)");
   });
 
   it("keeps AppShell popover headers layout-only instead of card-like", () => {
@@ -289,7 +292,7 @@ describe("AppShell layout contract", () => {
     expect(styles.utilityTrigger).not.toContain("hover:bg-");
   });
 
-  it("keeps the light shell top bar on light surfaces with a stable brand stack", () => {
+  it("keeps the light shell top bar on light surfaces without brand text stacks", () => {
     const lightThemeBlock = shellStyles.slice(
       shellStyles.indexOf('.shell[data-theme="light"] {'),
       shellStyles.indexOf('.shell[data-theme="light"][data-theme-background="custom"]'),
@@ -302,8 +305,9 @@ describe("AppShell layout contract", () => {
     expect(shellStyles).toContain("var(--vui-gradient-route-soft),\n    var(--shell-surface)");
     expect(shellStyles).not.toContain("color-mix(in srgb, var(--shell-panel)");
     expect(shellStyles).not.toContain("color-mix(in srgb, var(--shell-card)");
-    expect(shellStyles).toContain('grid-template-areas:\n    "brand version"\n    "subtle subtle";');
-    expect(shellStyles).toContain("max-width: min(230px, 34vw)");
+    expect(shellStyles).not.toContain("brandCopy");
+    expect(shellStyles).not.toContain("brandSubtle");
+    expect(shellStyles).not.toContain("versionPill");
   });
 
   it("syncs the selected theme to the document root for global VUI tokens", () => {
@@ -373,11 +377,14 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("shareRuntimeSummaryIfOnlyVolatileChanged");
   });
 
-  it("shows the current app version in the brand area", () => {
-    expect(shellSource).toContain("APP_VERSION");
-    expect(shellSource).toContain("packageJson.version");
-    expect(shellSource).toContain("versionPill");
-    expect(styles.versionPill).toBeTypeOf("string");
+  it("keeps the top bar free of brand text so every control shares one row", () => {
+    expect(shellSource).not.toContain("brandCopy");
+    expect(shellSource).not.toContain("versionPill");
+    expect(shellSource).not.toContain("APP_VERSION");
+    expect(shellSource).not.toContain('t("brandSubtle")');
+    expect(styles).not.toHaveProperty("brandCopy");
+    expect(styles).not.toHaveProperty("versionPill");
+    expect(shellStyles).toContain("--shell-topbar-height: 52px");
   });
 
   it("uses the lightweight shell dictionary instead of the full route dictionary", () => {
