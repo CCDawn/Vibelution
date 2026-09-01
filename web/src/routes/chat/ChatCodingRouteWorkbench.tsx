@@ -37,7 +37,10 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { listSessionChildSessions, fetchSessionLlmOptions, listPendingSessionToolApprovals } from "../../api/chat";
 import { archiveAgent, updateAgent } from "../../api/agents";
-import { listVirtualHumanCompanions } from "../../api/agentPlugins";
+import {
+  listVirtualHumanCompanionActivity,
+  listVirtualHumanCompanions,
+} from "../../api/agentPlugins";
 import { fetchFileContent } from "../../api/files";
 import { createChatWorkspaceCache } from "../chatWorkspaceCache";
 import type { AgentArchiveResponse } from "../agentWorkspaceCache";
@@ -786,6 +789,15 @@ export function ChatCodingRoute() {
   }, []);
   const pageVisible = usePageVisibility();
   const companionMode = Boolean(requestedCompanionId && requestedSessionId && !requestedRoomId);
+  const companionRouteUpgradeLookupEnabled = Boolean(
+    requestedSessionId && !requestedCompanionId && !requestedRoomId,
+  );
+  const companionRouteUpgradeQuery = useQuery({
+    queryKey: queryKeys.virtualHumanCompanionActivity(),
+    queryFn: listVirtualHumanCompanionActivity,
+    enabled: companionRouteUpgradeLookupEnabled,
+    staleTime: 5_000,
+  });
   const companionsQuery = useQuery({
     queryKey: queryKeys.virtualHumanCompanions(),
     queryFn: listVirtualHumanCompanions,
@@ -2347,8 +2359,8 @@ export function ChatCodingRoute() {
   const requestedCompanionAgentId = useMemo(() => (
     requestedCompanionId
       ? ""
-      : companionAgentIdForDirectSession(agentsQuery.data, requestedSessionId)
-  ), [agentsQuery.data, requestedCompanionId, requestedSessionId]);
+      : companionAgentIdForDirectSession(companionRouteUpgradeQuery.data, requestedSessionId)
+  ), [companionRouteUpgradeQuery.data, requestedCompanionId, requestedSessionId]);
 
   useEffect(() => {
     if (!requestedSessionId || requestedCompanionId || requestedRoomId || !requestedCompanionAgentId) {

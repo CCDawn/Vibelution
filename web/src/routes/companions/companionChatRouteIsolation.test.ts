@@ -68,9 +68,15 @@ describe("companionChatRouteIsolation", () => {
   });
 
   it("upgrades only an exact marked Companion direct Session", () => {
-    expect(companionAgentIdForDirectSession([companion, ordinary], "session-companion"))
+    const companionActivity = [{
+      agentId: companion.agentId,
+      displayName: companion.displayName,
+      directSessionId: companion.directSessionId,
+      sessionActivity: undefined,
+    }];
+    expect(companionAgentIdForDirectSession(companionActivity, "session-companion"))
       .toBe("agent-companion");
-    expect(companionAgentIdForDirectSession([companion, ordinary], "session-ordinary"))
+    expect(companionAgentIdForDirectSession(companionActivity, "session-ordinary"))
       .toBe("");
   });
 });

@@ -1,20 +1,23 @@
-import type { AgentInstance, SessionSummary } from "../../api/types";
+import type {
+  AgentInstance,
+  SessionSummary,
+  VirtualHumanCompanionActivity,
+} from "../../api/types";
 
 function isCompanionAgent(agent: AgentInstance) {
   return agent.metadata?.virtualHumanCompanion === true;
 }
 
 export function companionAgentIdForDirectSession(
-  agents: readonly AgentInstance[] | undefined,
+  companions: readonly Pick<VirtualHumanCompanionActivity, "agentId" | "directSessionId">[] | undefined,
   sessionId: string,
 ) {
   const normalizedSessionId = String(sessionId || "").trim();
   if (!normalizedSessionId) {
     return "";
   }
-  return String((agents ?? []).find((agent) => (
-    isCompanionAgent(agent)
-    && String(agent.directSessionId || "").trim() === normalizedSessionId
+  return String((companions ?? []).find((companion) => (
+    String(companion.directSessionId || "").trim() === normalizedSessionId
   ))?.agentId || "").trim();
 }
 
