@@ -7,6 +7,8 @@ import json
 import os
 import re
 import tempfile
+import threading
+import time
 from collections import Counter
 from pathlib import Path
 from typing import Any, Iterable
@@ -14,6 +16,20 @@ from typing import Any, Iterable
 from core.infrastructure.workspace_manager import get_workspace
 
 from .models import ResearchDiscoverySession, ResearchSource, utcnow_iso
+
+
+# Every reader and writer of knowledge_base.json lives inside the backend
+# process, so an in-process RLock is sufficient for read-modify-write mutual
+# exclusion (no filelock dependency). External handles that ignore in-process
+# locks (AV scanners, indexers holding the target open across a restart
+# window) are covered by the PermissionError backoff retry in
+# ``ResearchKnowledgeBase._replace_atomically``.
+_LOCK = threading.RLock()
+_REPLACE_RETRY_BACKOFF_SECONDS = (0.05, 0.1, 0.2, 0.4)
+
+
+class KnowledgeBaseWriteError(RuntimeError):
+    """Raised when the knowledge base file cannot be atomically replaced."""
 
 
 _WORD_RE = re.compile(r"[A-Za-z][A-Za-z0-9_-]{2,}|[\u4e00-\u9fff]{2,}")
@@ -95,68 +111,77 @@ class ResearchKnowledgeBase:
         sources: Iterable[ResearchSource],
         search_run: Any | None = None,
     ) -> dict[str, Any]:
-        library = self._read()
-        entries: list[dict[str, Any]] = [dict(item) for item in library["entries"]]
-        claims: list[dict[str, Any]] = [dict(item) for item in library["claims"]]
-        evidence_records: list[dict[str, Any]] = [dict(item) for item in library["evidence"]]
-        gaps: list[dict[str, Any]] = [dict(item) for item in library["gaps"]]
-        by_key = {_entry_key(item): index for index, item in enumerate(entries)}
-        claim_keys = {str(item.get("dedupeKey") or "") for item in claims}
-        evidence_keys = {str(item.get("dedupeKey") or "") for item in evidence_records}
-        gap_keys = {str(item.get("dedupeKey") or "") for item in gaps}
-        added = 0
-        updated = 0
-        now = utcnow_iso()
-        for source in sources:
-            entry = _entry_from_source(source, session=session, phase=phase, search_run=search_run, now=now)
-            key = _entry_key(entry)
-            index = by_key.get(key)
-            if index is None:
-                entries.append(entry)
-                by_key[key] = len(entries) - 1
-                added += 1
-            else:
-                entries[index] = _merge_entry(entries[index], entry, now=now)
-                updated += 1
-            for claim in _claims_from_entry(entry, session=session, now=now):
-                if str(claim.get("dedupeKey") or "") not in claim_keys:
-                    claims.append(claim)
-                    claim_keys.add(str(claim.get("dedupeKey") or ""))
-            for evidence in _evidence_from_entry(entry, session=session, now=now):
-                if str(evidence.get("dedupeKey") or "") not in evidence_keys:
-                    evidence_records.append(evidence)
-                    evidence_keys.add(str(evidence.get("dedupeKey") or ""))
-            for gap in _gaps_from_entry(entry, session=session, phase=phase, now=now):
-                if str(gap.get("dedupeKey") or "") not in gap_keys:
-                    gaps.append(gap)
-                    gap_keys.add(str(gap.get("dedupeKey") or ""))
-        library["entries"] = entries
-        library["claims"] = claims
-        library["evidence"] = evidence_records
-        library["gaps"] = gaps
-        library["hypotheses"] = _normalize_records(library.get("hypotheses") or [], "hypothesis")
-        library["experiments"] = _normalize_records(library.get("experiments") or [], "experiment")
-        library["agentEvolutionMemory"] = _normalize_agent_evolution_memory(library.get("agentEvolutionMemory"))
-        library["updatedAt"] = now
-        self._write(library)
-        return {
-            "added": added,
-            "updated": updated,
-            "total": len(entries),
-            "claims": len(claims),
-            "evidence": len(evidence_records),
-            "gaps": len(gaps),
-            "path": str(self.path),
-        }
+        # Read-modify-write must be atomic: concurrent ingestion runs
+        # (parallel theme-discovery phases) would otherwise lose entries via
+        # last-writer-wins on the shared JSON file.
+        with _LOCK:
+            library = self._read()
+            entries: list[dict[str, Any]] = [dict(item) for item in library["entries"]]
+            claims: list[dict[str, Any]] = [dict(item) for item in library["claims"]]
+            evidence_records: list[dict[str, Any]] = [dict(item) for item in library["evidence"]]
+            gaps: list[dict[str, Any]] = [dict(item) for item in library["gaps"]]
+            by_key = {_entry_key(item): index for index, item in enumerate(entries)}
+            claim_keys = {str(item.get("dedupeKey") or "") for item in claims}
+            evidence_keys = {str(item.get("dedupeKey") or "") for item in evidence_records}
+            gap_keys = {str(item.get("dedupeKey") or "") for item in gaps}
+            added = 0
+            updated = 0
+            now = utcnow_iso()
+            for source in sources:
+                entry = _entry_from_source(source, session=session, phase=phase, search_run=search_run, now=now)
+                key = _entry_key(entry)
+                index = by_key.get(key)
+                if index is None:
+                    entries.append(entry)
+                    by_key[key] = len(entries) - 1
+                    added += 1
+                else:
+                    entries[index] = _merge_entry(entries[index], entry, now=now)
+                    updated += 1
+                for claim in _claims_from_entry(entry, session=session, now=now):
+                    if str(claim.get("dedupeKey") or "") not in claim_keys:
+                        claims.append(claim)
+                        claim_keys.add(str(claim.get("dedupeKey") or ""))
+                for evidence in _evidence_from_entry(entry, session=session, now=now):
+                    if str(evidence.get("dedupeKey") or "") not in evidence_keys:
+                        evidence_records.append(evidence)
+                        evidence_keys.add(str(evidence.get("dedupeKey") or ""))
+                for gap in _gaps_from_entry(entry, session=session, phase=phase, now=now):
+                    if str(gap.get("dedupeKey") or "") not in gap_keys:
+                        gaps.append(gap)
+                        gap_keys.add(str(gap.get("dedupeKey") or ""))
+            library["entries"] = entries
+            library["claims"] = claims
+            library["evidence"] = evidence_records
+            library["gaps"] = gaps
+            library["hypotheses"] = _normalize_records(library.get("hypotheses") or [], "hypothesis")
+            library["experiments"] = _normalize_records(library.get("experiments") or [], "experiment")
+            library["agentEvolutionMemory"] = _normalize_agent_evolution_memory(library.get("agentEvolutionMemory"))
+            library["updatedAt"] = now
+            self._write(library)
+            return {
+                "added": added,
+                "updated": updated,
+                "total": len(entries),
+                "claims": len(claims),
+                "evidence": len(evidence_records),
+                "gaps": len(gaps),
+                "path": str(self.path),
+            }
 
     def _read(self) -> dict[str, Any]:
-        if self.path.exists():
-            try:
-                payload = json.loads(self.path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
+        # Hold the same lock as writers for this short critical section so a
+        # reader never keeps the target file handle open while a concurrent
+        # writer calls os.replace (PermissionError on Windows without
+        # FILE_SHARE_DELETE).
+        with _LOCK:
+            if self.path.exists():
+                try:
+                    payload = json.loads(self.path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    payload = {}
+            else:
                 payload = {}
-        else:
-            payload = {}
         entries = payload.get("entries") if isinstance(payload, dict) else []
         if not isinstance(entries, list):
             entries = []
@@ -187,10 +212,29 @@ class ResearchKnowledgeBase:
             with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
                 json.dump(payload, handle, ensure_ascii=False, indent=2)
                 handle.write("\n")
-            os.replace(temp_path, self.path)
+            self._replace_atomically(temp_path)
         finally:
             if os.path.exists(temp_path):
                 os.remove(temp_path)
+
+    def _replace_atomically(self, temp_path: str) -> None:
+        # Windows os.replace raises PermissionError (instead of swapping) when
+        # an external process holds the target open without FILE_SHARE_DELETE;
+        # such handles ignore in-process locks, so back off and retry, then
+        # surface a structured error instead of failing silently.
+        last_error: PermissionError | None = None
+        attempts = 1 + len(_REPLACE_RETRY_BACKOFF_SECONDS)
+        for backoff in (0.0, *_REPLACE_RETRY_BACKOFF_SECONDS):
+            if backoff:
+                time.sleep(backoff)
+            try:
+                os.replace(temp_path, self.path)
+                return
+            except PermissionError as error:
+                last_error = error
+        raise KnowledgeBaseWriteError(
+            f"failed to replace knowledge base file '{self.path}' after {attempts} attempts"
+        ) from last_error
 
     def _filter_entries(
         self,
