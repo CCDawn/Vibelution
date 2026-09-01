@@ -25,6 +25,11 @@ from .workflow_artifact_store import (
 
 FEEDBACK_ITERATIONS_KIND = "feedback_iterations"
 SCHEMA_VERSION = 1
+REVISION_ENVELOPE_SCHEMA_VERSION = 2
+HYPOTHESIS_DESIGN_NODE_ID = "hypothesis_design"
+_HYPOTHESIS_REVISION_PHASES = frozenset(
+    {"grounded_revision", "review_revision"}
+)
 _SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 
 
@@ -129,6 +134,8 @@ def _normalize_inputs(
     parent_run_id: str,
     child_run_id: str,
     decision_id: str,
+    node_id: str,
+    revision_phase: str,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Normalize explicit evidence and build the canonical payload."""
 
@@ -198,6 +205,17 @@ def _normalize_inputs(
     parent = _optional_text(parent_run_id)
     child = _optional_text(child_run_id)
     decision = _optional_text(decision_id)
+    node_identity = _text(node_id, "nodeId")
+    phase = _optional_text(revision_phase).lower()
+    if node_identity == HYPOTHESIS_DESIGN_NODE_ID:
+        if phase not in _HYPOTHESIS_REVISION_PHASES:
+            raise FeedbackIterationAuthorityError(
+                "feedback iteration hypothesis revision phase is unsupported"
+            )
+    elif phase:
+        raise FeedbackIterationAuthorityError(
+            "feedback iteration revision phase is only supported for hypothesis_design"
+        )
     row = {
         "round": round_value,
         "trigger": trigger,
@@ -207,12 +225,16 @@ def _normalize_inputs(
         "human_feedback": human_feedback,
     }
     payload: dict[str, Any] = {
-        "schemaVersion": SCHEMA_VERSION,
+        "schemaVersion": (
+            REVISION_ENVELOPE_SCHEMA_VERSION
+            if node_identity == HYPOTHESIS_DESIGN_NODE_ID
+            else SCHEMA_VERSION
+        ),
         "artifactKind": FEEDBACK_ITERATIONS_KIND,
         "teamId": team,
         "workflowRunId": workflow,
         "sourceCollectionRunId": source,
-        "nodeId": "iteration_decision",
+        "nodeId": node_identity,
         "nodeRunId": node,
         "questionId": question,
         "iterationRound": round_value,
@@ -223,6 +245,13 @@ def _normalize_inputs(
         "feedbackIteration": row,
         "feedbackIterations": [row],
     }
+    if phase:
+        payload["revisionPhase"] = phase
+        payload["revisionEnvelope"] = {
+            "phase": phase,
+            "parentOutput": {"refs": input_refs, "sha256": input_hash},
+            "childOutput": {"refs": output_refs, "sha256": output_hash},
+        }
     if parent:
         payload["parentRunId"] = parent
     if child:
@@ -245,6 +274,8 @@ def validate_feedback_iteration(
     parent_run_id: str = "",
     child_run_id: str = "",
     decision_id: str = "",
+    node_id: str = "iteration_decision",
+    revision_phase: str = "",
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Return strict canonical payload and v2-compatible row."""
 
@@ -260,6 +291,8 @@ def validate_feedback_iteration(
         parent_run_id=parent_run_id,
         child_run_id=child_run_id,
         decision_id=decision_id,
+        node_id=node_id,
+        revision_phase=revision_phase,
     )
 
 
@@ -319,6 +352,8 @@ def write_feedback_iterations_artifact(
     parent_run_id: str = "",
     child_run_id: str = "",
     decision_id: str = "",
+    node_id: str = "iteration_decision",
+    revision_phase: str = "",
 ) -> dict[str, Any]:
     """Persist one feedback iteration, or return a fail-closed blocker.
 
@@ -341,6 +376,8 @@ def write_feedback_iterations_artifact(
             parent_run_id=parent_run_id,
             child_run_id=child_run_id,
             decision_id=decision_id,
+            node_id=node_id,
+            revision_phase=revision_phase,
         )
     except FeedbackIterationAuthorityError as exc:
         code = "feedback_iteration_evidence_invalid"

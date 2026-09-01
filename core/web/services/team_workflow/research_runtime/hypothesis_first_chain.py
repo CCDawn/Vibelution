@@ -6372,6 +6372,102 @@ def _build_round_candidates(
     return candidates
 
 
+def _blocked_round_authority(kind: str, code: str) -> dict[str, Any]:
+    return {
+        "status": "blocked",
+        "reason": "NEEDS_CONTEXT",
+        "blockerCodes": [code],
+        "missingAuthorities": [kind],
+        "artifact": None,
+    }
+
+
+def _materialize_hypothesis_revision_authority(
+    *,
+    team_id: str,
+    workflow_run_id: str,
+    node_run_id: str,
+    question_id: str,
+    source_collection_run_id: str,
+    round_record: Mapping[str, Any],
+) -> dict[str, Any]:
+    envelope = (
+        dict(round_record.get("revisionEnvelope"))
+        if isinstance(round_record.get("revisionEnvelope"), Mapping)
+        else {}
+    )
+    phase = str(envelope.get("phase") or "").strip()
+    round_by_phase = {"grounded_revision": 1, "review_revision": 2}
+    if phase not in round_by_phase:
+        return _blocked_round_authority(
+            "feedback_iterations", "hypothesis_revision_evidence_missing"
+        )
+    feedback = envelope.get("feedback")
+    revision = envelope.get("revision")
+    if not isinstance(feedback, Mapping) or not isinstance(revision, Mapping):
+        return _blocked_round_authority(
+            "feedback_iterations", "hypothesis_revision_evidence_missing"
+        )
+    from .feedback_iterations_artifact_writer import (
+        write_feedback_iterations_artifact,
+    )
+
+    return write_feedback_iterations_artifact(
+        team_id=team_id,
+        workflow_run_id=workflow_run_id,
+        node_run_id=node_run_id,
+        question_id=question_id,
+        iteration_round=round_by_phase[phase],
+        feedback=feedback,
+        revision=revision,
+        source_collection_run_id=source_collection_run_id,
+        node_id="hypothesis_design",
+        revision_phase=phase,
+    )
+
+
+def _materialize_stage_one_plan_authority(
+    *,
+    team_id: str,
+    workflow_run_id: str,
+    node_run_id: str,
+    question_id: str,
+    source_collection_run_id: str,
+    round_record: Mapping[str, Any],
+) -> dict[str, Any]:
+    meta_review = (
+        dict(round_record.get("metaReview"))
+        if isinstance(round_record.get("metaReview"), Mapping)
+        else {}
+    )
+    if meta_review.get("accepted") is not True:
+        return _blocked_round_authority(
+            "stage1_research_plan", "hypothesis_round_not_accepted"
+        )
+    selected = str(meta_review.get("recommendationCandidateId") or "").strip()
+    if not selected:
+        return _blocked_round_authority(
+            "stage1_research_plan", "hypothesis_round_selection_missing"
+        )
+    from core.web.services.team_workflow.research_runtime import question_launch
+    from .stage_one_plan_artifact_writer import write_stage_one_plan_artifacts
+
+    detail = question_launch._approved_details(team_id).get(question_id.upper())
+    if not isinstance(detail, Mapping):
+        return _blocked_round_authority(
+            "stage1_research_plan", "stage_one_question_authority_missing"
+        )
+    return write_stage_one_plan_artifacts(
+        team_id=team_id,
+        workflow_run_id=workflow_run_id,
+        node_run_id=node_run_id,
+        question_id=question_id,
+        selected_candidate_id=selected,
+        question_detail=detail,
+        source_collection_run_id=source_collection_run_id,
+    )
+
+
 def _generate_hypothesis_round(
     team_id: str,
     meeting_round: Mapping[str, Any],
@@ -6390,7 +6486,10 @@ def _generate_hypothesis_round(
     Replays reuse the already-generated round through HF-3 idempotency.
     """
     try:
-        from core.web.services.team_workflow import hypothesis_rounds
+        from core.web.services.team_workflow import (
+            hypothesis_review_executor,
+            hypothesis_rounds,
+        )
         from core.web.services.team_workflow import (
             hypothesis_selection as selections,
         )
@@ -6478,6 +6577,29 @@ def _generate_hypothesis_round(
             metareview_runner=metareview_runner,
         )
         round_record = result.get("round") if isinstance(result.get("round"), Mapping) else {}
+        receipt_authority = (
+            dict(primary_meeting.get("modelInvocationReceiptAuthority"))
+            if isinstance(primary_meeting.get("modelInvocationReceiptAuthority"), Mapping)
+            else None
+        )
+        workflow_run_id = str(
+            (receipt_authority or {}).get("workflowRunId")
+            or primary_meeting.get("workflowRunId")
+            or ""
+        ).strip()
+        node_run_id = str(
+            primary_meeting.get("nodeRunId")
+            or (receipt_authority or {}).get("nodeRunId")
+            or ""
+        ).strip()
+        source_collection_run_id = str(
+            (receipt_authority or {}).get("sourceCollectionRunId")
+            or primary_meeting.get("sourceCollectionRunId")
+            or hypothesis_review_executor._source_collection_run_id_for_formal_workflow(
+                workflow_run_id
+            )
+            or workflow_run_id
+        ).strip()
         # The HypothesisRound preserves the independent 5+2 score projection
         # and explicit audit-seven rows.  Each canonical authority is written
         # from the same immutable round; neither is derived from the other.
@@ -6487,21 +6609,6 @@ def _generate_hypothesis_round(
                 materialize_dimension_reviews_authority,
             )
 
-            receipt_authority = (
-                dict(primary_meeting.get("modelInvocationReceiptAuthority"))
-                if isinstance(primary_meeting.get("modelInvocationReceiptAuthority"), Mapping)
-                else None
-            )
-            workflow_run_id = str(
-                (receipt_authority or {}).get("workflowRunId")
-                or primary_meeting.get("workflowRunId")
-                or ""
-            ).strip()
-            node_run_id = str(
-                primary_meeting.get("nodeRunId")
-                or (receipt_authority or {}).get("nodeRunId")
-                or ""
-            ).strip()
             input_refs = [
                 *[
                     ref
@@ -6532,11 +6639,7 @@ def _generate_hypothesis_round(
                 candidates=candidates,
                 review=round_record,
                 workflow_authority=receipt_authority,
-                source_collection_run_id=str(
-                    (receipt_authority or {}).get("sourceCollectionRunId")
-                    or primary_meeting.get("sourceCollectionRunId")
-                    or workflow_run_id
-                ).strip(),
+                source_collection_run_id=source_collection_run_id,
             )
         except Exception as exc:
             # A closed meeting/round is append-only and remains valid.  A
@@ -6573,11 +6676,7 @@ def _generate_hypothesis_round(
                     )
                     if isinstance(item, Mapping)
                 ],
-                source_collection_run_id=str(
-                    (receipt_authority or {}).get("sourceCollectionRunId")
-                    or primary_meeting.get("sourceCollectionRunId")
-                    or workflow_run_id
-                ).strip(),
+                source_collection_run_id=source_collection_run_id,
             )
         except Exception as exc:  # noqa: BLE001 - persist failure becomes a blocker
             review_independence_authority = {
@@ -6590,6 +6689,46 @@ def _generate_hypothesis_round(
                 ],
                 "error": str(exc) or type(exc).__name__,
             }
+        try:
+            feedback_iterations_authority = (
+                _materialize_hypothesis_revision_authority(
+                    team_id=team_id,
+                    workflow_run_id=workflow_run_id,
+                    node_run_id=node_run_id,
+                    question_id=str(primary_meeting.get("question") or ""),
+                    source_collection_run_id=source_collection_run_id,
+                    round_record=round_record,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 - authority stays fail-closed
+            feedback_iterations_authority = {
+                **_blocked_round_authority(
+                    "feedback_iterations",
+                    "hypothesis_revision_authority_persistence_failed",
+                ),
+                "error": str(exc) or type(exc).__name__,
+            }
+        try:
+            stage_one_plan_authority = _materialize_stage_one_plan_authority(
+                team_id=team_id,
+                workflow_run_id=workflow_run_id,
+                node_run_id=node_run_id,
+                question_id=str(primary_meeting.get("question") or ""),
+                source_collection_run_id=source_collection_run_id,
+                round_record=round_record,
+            )
+        except Exception as exc:  # noqa: BLE001 - authority stays fail-closed
+            stage_one_plan_authority = {
+                **_blocked_round_authority(
+                    "stage1_research_plan",
+                    "stage_one_plan_authority_persistence_failed",
+                ),
+                "missingAuthorities": [
+                    "stage1_research_plan",
+                    "competition_alignment",
+                ],
+                "error": str(exc) or type(exc).__name__,
+            }
         return {
             "status": str(result.get("status") or ""),
             "roundId": str(round_record.get("roundId") or ""),
@@ -6597,6 +6736,8 @@ def _generate_hypothesis_round(
             "closed": True,
             "dimensionReviewsAuthority": dimension_reviews_authority,
             "reviewIndependenceAuthority": review_independence_authority,
+            "feedbackIterationsAuthority": feedback_iterations_authority,
+            "stageOnePlanAuthority": stage_one_plan_authority,
         }
     except Exception as exc:  # closure fact stays; report the side effect
         return {
