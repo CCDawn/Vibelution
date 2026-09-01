@@ -54,6 +54,7 @@ const productSharedParentStyleConsumers = [
   "routes/companions/CompanionLifeRail.tsx",
   "routes/companions/CompanionPersonRail.tsx",
   "routes/companions/CompanionPortrait.tsx",
+  "routes/companions/CompanionPreferenceCard.tsx",
   "routes/teams/workflowTone.ts",
   "routes/TeamsRoute.tsx",
   // Companions surface subcomponents share the owning route's style modules
