@@ -256,6 +256,47 @@ describe("resolveHypothesisFirstNextActionFromV2", () => {
     expect(action.canonicalAction?.command).toBe("regenerate_summary");
   });
 
+  it("keeps generation summary recovery ahead of a stale parent attempt retry", () => {
+    const retryGeneration = {
+      ...command({
+        command: "retry_generation",
+        payload: { questionId: "SCI-001", previousAttemptId: "attempt-1" },
+      }, "重新生成候选"),
+      targetPhase: "generation",
+      targetNodeId: HYPOTHESIS_FIRST_GENERATION_NODE_ID,
+    } as CommandAction;
+    const regenerate = {
+      ...command({
+        command: "regenerate_summary",
+        payload: { meetingRoundId: "generation-1" },
+      }, "重试生成纪要"),
+      targetPhase: "generation",
+      targetNodeId: HYPOTHESIS_FIRST_GENERATION_NODE_ID,
+    } as CommandAction;
+    const state = stateV2({
+      isInitial: false,
+      currentPhase: "generation",
+      generation: {
+        ...stateV2().generation,
+        lifecycle: "running",
+        actionability: "blocked",
+        generationMeetingId: "generation-1",
+      },
+      allowedActions: [retryGeneration, regenerate],
+    });
+
+    const action = resolveHypothesisFirstNextActionFromV2(state);
+
+    expect(action.stage).toBe("generation_summarizing");
+    expect(action.command).toBe("retry_draft_summary");
+    expect(action.commandLabel).toBe("重试生成纪要");
+    expect(action.canonicalAction?.command).toBe("regenerate_summary");
+    expect(action.canonicalActions.map((item) => item.command)).toEqual([
+      "retry_generation",
+      "regenerate_summary",
+    ]);
+  });
+
   it("maps generated candidates to selection", () => {
     const state = stateV2({
       isInitial: false,
