@@ -48,6 +48,36 @@ _TEAM_WORKFLOW_DOMAIN_PACKS = frozenset(
 )
 
 
+# ============================================================================
+# web/dist 自包含占位 — worktree 里 route contract 测试的环境自足
+# ============================================================================
+# Git worktree 只检出被追踪文件，gitignored 的 web/dist 构建产物只存在于根
+# checkout。完整后端启动（create_app + TestClient）在 register_spa_routes 处
+# 要求该目录存在，否则所有 route contract 测试以 RuntimeError 假红。会话开始
+# 时按生产同一解析逻辑补一个最小占位目录（仅在缺失时），会话结束且无并发
+# 会话持有时清理；根 checkout 存在真实构建时完全零操作。
+
+
+def pytest_sessionstart(session):
+    try:
+        from tests.helpers.web_dist_placeholder import acquire_web_dist_placeholder
+
+        session._web_dist_placeholder = acquire_web_dist_placeholder(PROJECT_ROOT)
+    except Exception:  # noqa: BLE001 - 测试基础设施不得阻断收集
+        session._web_dist_placeholder = None
+
+
+def pytest_sessionfinish(session, exitstatus):
+    placeholder = getattr(session, "_web_dist_placeholder", None)
+    if placeholder is not None:
+        try:
+            from tests.helpers.web_dist_placeholder import release_web_dist_placeholder
+
+            release_web_dist_placeholder(placeholder)
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def _pytest_arg_paths(config) -> list[Path]:
     paths: list[Path] = []
     for raw in getattr(config, "args", []) or []:
