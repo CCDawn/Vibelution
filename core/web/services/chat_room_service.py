@@ -42,7 +42,6 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
-import os
 import queue
 import re
 import threading
@@ -96,19 +95,6 @@ RUN_LEASES = [READONLY_CHAT_LEASE]
 DEFAULT_MODE = "round_robin"
 DEFAULT_PURPOSE = "discussion"
 CHAT_ROOM_AGENT_LLM_SLOT = "dialogue"
-# Speaker history rolling window: a formal meeting speaker replays its session
-# ledger on every turn, so unbounded replay made model input grow with the
-# round count (measured 25-58k tokens per speaker on long Challenge Cup
-# meetings, ~85% duplicated prefix).  The window keeps only the most recent N
-# ledger messages; everything older is summarized by the meeting anchor block
-# below.  ``0`` (or any non-positive value) restores the legacy full replay.
-SPEAKER_RECENT_MESSAGE_LIMIT_ENV = "VIBELUTION_CHAT_ROOM_RECENT_MESSAGE_LIMIT"
-DEFAULT_SPEAKER_RECENT_MESSAGE_LIMIT = 40
-_MEETING_ANCHOR_METADATA_KIND = "meeting_anchor_facts"
-_MEETING_ANCHOR_MAX_EVIDENCE_REQUESTS = 10
-_MEETING_ANCHOR_MAX_CONCLUSIONS = 6
-_MEETING_ANCHOR_MAX_CANDIDATES = 10
-_MEETING_ANCHOR_MAX_CHARS = 8_000
 _CHALLENGE_PRIOR_SEMANTIC_MEETING_TYPES = frozenset(
     {
         "hypothesis_candidate_generation",
@@ -2753,253 +2739,6 @@ def _supervision_decision_to_message(decision: Any) -> dict[str, Any]:
     }
 
 
-def _speaker_recent_message_limit() -> int | None:
-    """Resolve the speaker rolling-window size; ``None`` keeps full replay."""
-
-    raw = str(os.environ.get(SPEAKER_RECENT_MESSAGE_LIMIT_ENV) or "").strip()
-    if not raw:
-        return DEFAULT_SPEAKER_RECENT_MESSAGE_LIMIT
-    try:
-        value = int(raw)
-    except ValueError:
-        return DEFAULT_SPEAKER_RECENT_MESSAGE_LIMIT
-    if value <= 0:
-        return None
-    return value
-
-
-def _anchor_line(value: Any, *, char_limit: int) -> str:
-    return trim_lines(str(value or "").replace("\n", " "), max_lines=1).strip()[:char_limit].strip()
-
-
-def _evidence_request_dedupe_key(request: Mapping[str, Any]) -> str:
-    envelope = request.get("searchEnvelope") if isinstance(request.get("searchEnvelope"), Mapping) else {}
-    keywords = sorted(
-        str(item or "").strip()
-        for item in list(envelope.get("keywords") or [])
-        if str(item or "").strip()
-    )
-    if keywords:
-        return "fp:" + "|".join(keywords)
-    rationale = _anchor_line(request.get("rationale"), char_limit=120)
-    refs = ",".join(
-        sorted(str(item or "").strip() for item in list(request.get("candidateRefs") or []) if str(item or "").strip())
-    )
-    return f"txt:{rationale}|{refs}"
-
-
-def _evidence_request_status_lines(
-    requests: list[Mapping[str, Any]],
-    *,
-    team_id: str,
-) -> list[tuple[str, Mapping[str, Any]]]:
-    """Attach a best-effort retrieval status to each deduped evidence request.
-
-    Status comes from read-only projections only: the latest source-collection
-    run whose metadata carries the request's search-envelope fingerprint
-    (completed -> 已满足, in-flight -> 检索中, cancelled -> 不可得); without a
-    linked run the request stays 待检索.  Every lookup failure degrades to
-    待检索 so anchor evidence can never break the speaker path.
-    """
-
-    statuses: dict[str, str] = {}
-    fingerprints: dict[str, str] = {}
-    try:
-        from core.web.services.team_workflow.source_collection import facade
-
-        for key, request in requests:
-            envelope = request.get("searchEnvelope") if isinstance(request.get("searchEnvelope"), Mapping) else {}
-            requirements = request.get("requirements") if isinstance(request.get("requirements"), Mapping) else {}
-            if list(envelope.get("keywords") or []):
-                fingerprints[key] = facade.search_envelope_fingerprint(envelope, requirements)
-    except Exception:  # noqa: BLE001 - anchor evidence never blocks the speaker path
-        fingerprints = {}
-    if fingerprints and team_id:
-        try:
-            from core.web.services import data_processing_service
-
-            payload = data_processing_service.list_processing_runs(
-                limit=200,
-                metadata_filters={
-                    "startedFrom": "team_workflow_source_collection",
-                    "teamId": team_id,
-                },
-            )
-            latest_by_fingerprint: dict[str, tuple[str, str]] = {}
-            for run in list(payload.get("runs") or []):
-                if not isinstance(run, Mapping):
-                    continue
-                metadata = run.get("metadata") if isinstance(run.get("metadata"), Mapping) else {}
-                fingerprint = str(metadata.get("searchEnvelopeFingerprint") or "").strip()
-                if not fingerprint:
-                    continue
-                updated_at = str(run.get("updatedAt") or run.get("createdAt") or "").strip()
-                status = str(run.get("status") or "").strip().lower()
-                previous = latest_by_fingerprint.get(fingerprint)
-                if previous is None or updated_at >= previous[0]:
-                    latest_by_fingerprint[fingerprint] = (updated_at, status)
-            for key, fingerprint in fingerprints.items():
-                status = latest_by_fingerprint.get(fingerprint, ("", ""))[1]
-                if status == "completed":
-                    statuses[key] = "已满足"
-                elif status in {"collecting", "processing", "reviewing"}:
-                    statuses[key] = "检索中"
-                elif status in {"cancelled", "failed"}:
-                    statuses[key] = "不可得"
-        except Exception:  # noqa: BLE001 - anchor evidence never blocks the speaker path
-            statuses = {}
-    return [(statuses.get(key, "待检索"), request) for key, request in requests]
-
-
-def _format_meeting_anchor_block(
-    markers: Mapping[str, Any],
-    *,
-    team_id: str,
-    digest_draft: Mapping[str, Any] | None = None,
-) -> str:
-    lines: list[str] = [
-        "【会议关键事实锚点】以下事实发生在滚动窗口之前、本轮对话历史未包含；发言前先核对："
-        "不要重复提出已满足的证据请求，不要推翻已收敛结论。",
-    ]
-    deduped: dict[str, Mapping[str, Any]] = {}
-    for raw in list(markers.get("evidenceRequests") or []):
-        if not isinstance(raw, Mapping):
-            continue
-        deduped.setdefault(_evidence_request_dedupe_key(raw), raw)
-    ordered_requests = list(deduped.items())[:_MEETING_ANCHOR_MAX_EVIDENCE_REQUESTS]
-    if ordered_requests:
-        lines.append(f"已发证据请求（{len(deduped)} 条，超出部分省略）:" if len(deduped) > len(ordered_requests) else f"已发证据请求（{len(deduped)} 条）:")
-        for status, request in _evidence_request_status_lines(ordered_requests, team_id=team_id):
-            rationale = _anchor_line(request.get("rationale"), char_limit=80) or "（未填理由）"
-            refs = ",".join(
-                str(item or "").strip()
-                for item in list(request.get("candidateRefs") or [])
-                if str(item or "").strip()
-            )
-            ref_suffix = f"｜候选: {refs}" if refs else ""
-            lines.append(f"- {rationale}{ref_suffix}｜状态: {status}")
-    agreements: list[str] = []
-    seen_agreements: set[str] = set()
-    for raw in list(markers.get("agreements") or []):
-        text = _anchor_line(raw, char_limit=80)
-        if text and text not in seen_agreements:
-            seen_agreements.add(text)
-            agreements.append(text)
-    disagreements: list[str] = []
-    for raw in list(markers.get("disagreements") or []):
-        if not isinstance(raw, Mapping):
-            continue
-        issue = _anchor_line(raw.get("issue"), char_limit=80)
-        if issue:
-            disagreements.append(f"{issue}（未收敛）")
-    if agreements:
-        lines.append("已收敛共识:")
-        lines.extend(f"- {text}" for text in agreements[:_MEETING_ANCHOR_MAX_CONCLUSIONS])
-    if disagreements:
-        lines.append("未收敛分歧:")
-        lines.extend(f"- {text}" for text in disagreements[:_MEETING_ANCHOR_MAX_CONCLUSIONS])
-    digest_summary = _anchor_line((digest_draft or {}).get("summary"), char_limit=160)
-    if digest_summary:
-        lines.append(f"纪要草稿摘要: {digest_summary}")
-    candidates: list[str] = []
-    seen_candidates: set[str] = set()
-    for raw in list(markers.get("proposedCandidates") or []):
-        if not isinstance(raw, Mapping):
-            continue
-        candidate_id = str(raw.get("candidateId") or "").strip()
-        statement = _anchor_line(raw.get("statement"), char_limit=60)
-        if not candidate_id or not statement or candidate_id in seen_candidates:
-            continue
-        seen_candidates.add(candidate_id)
-        candidates.append(f"{candidate_id}: {statement}")
-    if candidates:
-        lines.append("候选陈述锚（全文以窗口内发言/会议纪要为准，勿整段复述）:")
-        lines.extend(f"- {text}" for text in candidates[:_MEETING_ANCHOR_MAX_CANDIDATES])
-    if len(lines) <= 1:
-        return ""
-    block = "\n".join(lines)
-    if len(block) > _MEETING_ANCHOR_MAX_CHARS:
-        block = block[:_MEETING_ANCHOR_MAX_CHARS].rstrip() + "\n…（锚点块超长已截断）"
-    return block
-
-
-def _meeting_anchor_seed_message(context: Mapping[str, Any], *, omitted_event_count: int) -> dict[str, Any] | None:
-    """Build the meeting key-facts anchor for a truncated speaker history.
-
-    Returns ``None`` for non-meeting rooms or when every authoritative
-    projection is empty, so a truncated but anchor-free history stays honest
-    about having nothing outside the window.
-    """
-
-    team_id = str(context.get("teamId") or "").strip()
-    meeting_round_id = str(context.get("meetingRoundId") or "").strip()
-    if not team_id or not meeting_round_id:
-        return None
-    try:
-        from core.web.services.team_workflow import meeting_rounds
-
-        meeting_round = meeting_rounds.get_meeting_round(team_id, meeting_round_id)[
-            "meetingRound"
-        ]
-        markers = meeting_rounds.extract_discussion_markers(
-            meeting_rounds.completed_meeting_source_messages(meeting_round)
-        )
-        digest_draft = (
-            dict(meeting_round.get("digestDraft"))
-            if isinstance(meeting_round.get("digestDraft"), Mapping)
-            else None
-        )
-    except Exception:  # noqa: BLE001 - anchor evidence never blocks the speaker path
-        return None
-    block = _format_meeting_anchor_block(markers, team_id=team_id, digest_draft=digest_draft)
-    if not block:
-        return None
-    return {
-        "role": "system",
-        "content": block,
-        "metadata": {
-            "kind": _MEETING_ANCHOR_METADATA_KIND,
-            "meetingRoundId": meeting_round_id,
-            "teamId": team_id,
-            "omittedEventCount": max(0, int(omitted_event_count or 0)),
-        },
-    }
-
-
-def _speaker_canonical_chat_history(
-    *,
-    session_id: str,
-    turn_identity: str,
-    ledger_events: list[Any],
-    context: Mapping[str, Any],
-) -> tuple[list[dict[str, Any]], Any]:
-    """Assemble the speaker history seed under the rolling-window policy.
-
-    Returns ``(canonical_chat_history, history_assembly)``.  When the window
-    dropped older ledger events, the meeting key-facts anchor block is
-    prepended so speakers keep visibility into satisfied evidence requests,
-    settled conclusions and candidate anchors.  Untruncated histories stay
-    byte-identical to the legacy full replay (``recent_message_limit=None``).
-    """
-
-    history_assembly = session_service.assemble_conversation_context(
-        [],
-        session_id=session_id,
-        current_turn_id=turn_identity,
-        ledger_events=ledger_events or None,
-        recent_message_limit=_speaker_recent_message_limit(),
-    )
-    canonical_chat_history = list(history_assembly.history_messages or [])
-    if int(history_assembly.omitted_event_count or 0) > 0:
-        anchor_message = _meeting_anchor_seed_message(
-            context,
-            omitted_event_count=int(history_assembly.omitted_event_count or 0),
-        )
-        if anchor_message is not None:
-            canonical_chat_history.insert(0, anchor_message)
-    return canonical_chat_history, history_assembly
-
-
 def _run_participant_agent(participant: dict[str, Any], prompt: str, context: dict[str, Any]) -> dict[str, Any]:
     prepare_started_at = _perf_counter()
     timings: dict[str, Any] = {}
@@ -3086,12 +2825,14 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
         timings["agentConfigMs"] = _elapsed_ms(stage_started_at)
         stage_started_at = _perf_counter()
         ledger_events = load_conversation_events(PROJECT_ROOT, session_id) if session_id else []
-        canonical_chat_history, _ = _speaker_canonical_chat_history(
+        history_assembly = session_service.assemble_conversation_context(
+            [],
             session_id=session_id,
-            turn_identity=turn_identity,
-            ledger_events=ledger_events,
-            context=context,
+            current_turn_id=turn_identity,
+            ledger_events=ledger_events or None,
+            recent_message_limit=None,
         )
+        canonical_chat_history = list(history_assembly.history_messages or [])
         timings["ledgerHistoryMs"] = _elapsed_ms(stage_started_at)
         with active_agent_runtime(
             agent_id,
