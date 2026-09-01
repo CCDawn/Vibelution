@@ -72,10 +72,11 @@ def _blocked_exhausted_extraction(
     run = service.create_run(
         CHALLENGE_CUP_WORKFLOW_ID,
         run_input=_run_input(),
+        # Team-scoped runs ignore workflowDefaults (retired membership source);
+        # node overrides remain the supported way to pin one agent per node.
         binding_layers=AgentBindingLayers(
-            workflowDefaults={
-                "source_finder": "agent-source-finder",
-                "source_extractor": "agent-source-extractor",
+            nodeOverrides={
+                "source_extraction": "agent-source-extractor",
             }
         ),
         idempotency_key="create-evidence-remediation",
