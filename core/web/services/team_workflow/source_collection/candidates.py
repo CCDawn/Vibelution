@@ -80,6 +80,47 @@ def register_candidate_source(
         if not candidate_valid:
             candidate["currentState"] = "source_needs_confirmation"
             candidate["qualityStatus"] = "source_manifest_invalid"
+        # 存储层 identity 幂等：同 identity 的 source_manifest 候选已存在时复用既有记录、不追加，
+        # 任何调用方（含绕过外层查重锁的调用点）都不会产生双份 source_manifest 候选。
+        # identity 为空（如未带 sourceIdentityKey 的普通登记）或非 source_manifest 类型不查重，
+        # 行为与历史保持一致。
+        if candidate_type == "source_manifest":
+            candidate_metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+            candidate_imported_from = (
+                candidate_metadata.get("importedFromDataRecord")
+                if isinstance(candidate_metadata.get("importedFromDataRecord"), dict)
+                else {}
+            )
+            candidate_identity_key = s._trim_text(
+                candidate_metadata.get("sourceIdentityKey") or candidate_imported_from.get("sourceIdentityKey"),
+                max_length=160,
+            )
+            existing_by_identity = s._find_source_candidate_by_identity_key(candidate_store, candidate_identity_key)
+            if existing_by_identity is not None:
+                existing_validation = (
+                    existing_by_identity.get("validation")
+                    if isinstance(existing_by_identity.get("validation"), dict)
+                    else s.validate_candidate_record(existing_by_identity)
+                )
+                s._record_workflow_event(
+                    "candidate.register_duplicate_reused",
+                    normalized_team_id,
+                    fields={
+                        "workflowId": workflow["workflowId"],
+                        "candidateId": str(existing_by_identity.get("candidateId") or ""),
+                        "candidateType": str(existing_by_identity.get("candidateType") or ""),
+                        "duplicateReason": "source_identity_key",
+                        "sourceIdentityKey": candidate_identity_key,
+                    },
+                )
+                return {
+                    "candidate": existing_by_identity,
+                    "validation": existing_validation,
+                    "workflow": s._workflow_to_api(normalized_team_id, workflow, candidate_store),
+                    "duplicate": True,
+                    "duplicateReason": "source_identity_key",
+                    "duplicateOfCandidateId": str(existing_by_identity.get("candidateId") or ""),
+                }
         candidate_store.setdefault("candidates", []).append(candidate)
         candidate_store["updatedAt"] = now
         s._write_json(s._candidate_store_path(normalized_team_id, run_id), candidate_store)
@@ -186,9 +227,37 @@ def import_data_record_as_source_candidate(team_id: str, run_id: str, record_id:
                 "validation": existing_by_identity.get("validation") if isinstance(existing_by_identity.get("validation"), dict) else s.validate_candidate_record(existing_by_identity),
                 "workflow": s._workflow_to_api(normalized_team_id, workflow, candidate_store),
             }
-    candidate_payload = s._source_candidate_payload_from_data_record(run, record, import_payload)
-    response = register_candidate_source(normalized_team_id, candidate_payload, run_id=normalized_run_id)
+        # check+register 同临界区：payload 构建与注册留在 identity 检查所在的 _WORKFLOW_LOCK
+        # 窗口内（RLock 可重入、纯本地文件读写，无网络/重 IO），消除「出锁后才注册」窗口内
+        # 并发导入同一 source 产生双份候选的竞态。
+        candidate_payload = s._source_candidate_payload_from_data_record(run, record, import_payload)
+        response = register_candidate_source(normalized_team_id, candidate_payload, run_id=normalized_run_id)
     candidate = response["candidate"]
+    if response.get("duplicate"):
+        # register 层幂等兜底命中（防御未来绕过外层查重的调用点）：按查重语义返回复用结果。
+        duplicate_of_candidate_id = str(response.get("duplicateOfCandidateId") or candidate.get("candidateId") or "")
+        s._record_workflow_event(
+            "candidate.import_duplicate_skipped",
+            normalized_team_id,
+            fields={
+                "workflowId": str(candidate.get("workflowId") or ""),
+                "runId": normalized_run_id,
+                "recordId": normalized_record_id,
+                "duplicateReason": "source_identity_key",
+                "duplicateOfCandidateId": duplicate_of_candidate_id,
+                "sourceIdentityKey": source_identity_key,
+            },
+        )
+        return {
+            "created": False,
+            "duplicate": True,
+            "duplicateReason": "source_identity_key",
+            "duplicateOfCandidateId": duplicate_of_candidate_id,
+            "candidate": candidate,
+            "dataRecordRef": s._data_record_ref(run, record),
+            "validation": response.get("validation") if isinstance(response.get("validation"), dict) else s.validate_candidate_record(candidate),
+            "workflow": response.get("workflow") if isinstance(response.get("workflow"), dict) else s._workflow_to_api(normalized_team_id, workflow, candidate_store),
+        }
     s._record_workflow_event(
         "candidate.imported_from_data_record",
         normalized_team_id,
