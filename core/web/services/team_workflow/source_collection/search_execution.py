@@ -14,17 +14,151 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 from typing import Any
+
+from pyrate_limiter import Duration, Limiter, Rate
 
 
 def _service():
     from core.web.services import team_workflow_orchestration_service
 
     return team_workflow_orchestration_service
+
+
+# ---------------------------------------------------------------------------
+# Global per-provider HTTP rate limiting and bounded retry/backoff.
+#
+# The search kernel runs concurrently across background worker threads, so a
+# thread-local ``time.sleep`` cannot enforce provider etiquette: parallel
+# queries would still hit the same provider inside one interval window.  Each
+# provider instead shares one process-wide ``Limiter``; ``try_acquire`` blocks
+# the calling thread until a permit is available, which serializes real HTTP
+# attempts per provider no matter which thread issues them.
+# ---------------------------------------------------------------------------
+
+# Shared polite-pool contact for providers that ask callers for a stable
+# mailto identity.  Not a secret; mirrors the OpenAlex contact already
+# embedded by ``_openalex_search_url`` in facade_helpers.
+_SOURCE_COLLECTION_CONTACT_MAILTO = "challenge-cup-research@localhost"
+
+# Rate limit per provider key (keys match the ``SOURCE_COLLECTION_SEARCH_PROVIDER_*``
+# constants on the orchestration service):
+# - arxiv_api: arXiv API etiquette asks for at most one request every 3 seconds.
+# - crossref_rest_api: the Crossref polite pool serves ~3 requests/second when
+#   a mailto contact is supplied (injected per request below).
+# - openalex_api: the OpenAlex polite pool is documented at 10 req/s with a
+#   mailto contact; run at half of that to leave headroom for retry bursts.
+_SOURCE_COLLECTION_PROVIDER_RATE_LIMITS: dict[str, Rate] = {
+    "arxiv_api": Rate(1, Duration.SECOND * 3),
+    "crossref_rest_api": Rate(3, Duration.SECOND),
+    "openalex_api": Rate(5, Duration.SECOND),
+}
+_SOURCE_COLLECTION_RATE_LIMITER_LOCK = threading.Lock()
+_SOURCE_COLLECTION_RATE_LIMITERS: dict[str, Limiter] = {}
+
+# Bounded exponential backoff for transient HTTP failures: the first attempt
+# plus at most three retries waiting 1s/2s/4s (429 responses follow
+# Retry-After instead, defaulting to 5s).
+_SOURCE_COLLECTION_SEARCH_HTTP_MAX_ATTEMPTS = 4
+_SOURCE_COLLECTION_SEARCH_HTTP_TIMEOUT_SECONDS = 15
+_SOURCE_COLLECTION_SEARCH_RATE_LIMIT_DEFAULT_BACKOFF_SECONDS = 5.0
+
+
+def _source_collection_rate_limiter(provider: str) -> Limiter | None:
+    """Return the shared limiter for one provider (``None`` = unlimited)."""
+    rate = _SOURCE_COLLECTION_PROVIDER_RATE_LIMITS.get(provider)
+    if rate is None:
+        return None
+    with _SOURCE_COLLECTION_RATE_LIMITER_LOCK:
+        limiter = _SOURCE_COLLECTION_RATE_LIMITERS.get(provider)
+        if limiter is None:
+            limiter = Limiter(rate)
+            _SOURCE_COLLECTION_RATE_LIMITERS[provider] = limiter
+        return limiter
+
+
+def _source_collection_url_with_mailto(url: str) -> str:
+    """Append the polite-pool mailto contact to a provider search URL.
+
+    Crossref serves requests from its polite pool (higher quota, fewer
+    auth walls) when a ``mailto`` parameter is present; OpenAlex already
+    embeds one in ``_openalex_search_url``, so this is a no-op there.
+    """
+    parts = urllib.parse.urlsplit(url)
+    pairs = urllib.parse.parse_qsl(parts.query, keep_blank_values=True)
+    if any(key == "mailto" for key, _value in pairs):
+        return url
+    pairs.append(("mailto", _SOURCE_COLLECTION_CONTACT_MAILTO))
+    return urllib.parse.urlunsplit(parts._replace(query=urllib.parse.urlencode(pairs)))
+
+
+def _source_collection_backoff_sleep(seconds: float) -> None:
+    time.sleep(seconds)
+
+
+def _source_collection_retry_after_seconds(headers: Any) -> float:
+    """Read ``Retry-After`` seconds from a 429 response's headers.
+
+    Only the numeric form is honored; HTTP-date values (rare for these APIs)
+    fall back to the default backoff instead of failing the request.
+    """
+    raw = headers.get("Retry-After") if headers is not None else None
+    if raw:
+        try:
+            return max(0.0, float(str(raw).strip()))
+        except ValueError:
+            pass
+    return _SOURCE_COLLECTION_SEARCH_RATE_LIMIT_DEFAULT_BACKOFF_SECONDS
+
+
+def _source_collection_rate_limited_http_get(
+    url: str,
+    *,
+    headers: dict[str, str],
+    provider: str,
+) -> bytes:
+    """Perform one rate-limited GET with bounded exponential backoff.
+
+    Every real HTTP attempt, including retries, first acquires a permit from
+    the shared per-provider limiter.  Transient failures (``URLError``,
+    socket timeouts, HTTP 5xx) are retried up to three times waiting
+    1s/2s/4s; a 429 waits for ``Retry-After`` seconds (default 5s).  Other
+    client errors (4xx) are raised immediately.  The last error is re-raised
+    so callers keep their existing failure semantics.
+    """
+    limiter = _source_collection_rate_limiter(provider)
+    last_error: Exception | None = None
+    next_delay = 1.0
+    for attempt in range(_SOURCE_COLLECTION_SEARCH_HTTP_MAX_ATTEMPTS):
+        if attempt:
+            _source_collection_backoff_sleep(next_delay)
+        if limiter is not None:
+            limiter.try_acquire(provider)
+        request = urllib.request.Request(url, headers=headers)
+        try:
+            with urllib.request.urlopen(
+                request, timeout=_SOURCE_COLLECTION_SEARCH_HTTP_TIMEOUT_SECONDS
+            ) as response:
+                return response.read()
+        except urllib.error.HTTPError as exc:
+            if exc.code == 429:
+                next_delay = _source_collection_retry_after_seconds(exc.headers)
+            elif exc.code >= 500:
+                next_delay = 2.0**attempt
+            else:
+                raise
+            last_error = exc
+        except (OSError, urllib.error.URLError) as exc:
+            next_delay = 2.0**attempt
+            last_error = exc
+    assert last_error is not None
+    raise last_error
 
 
 def _source_collection_search_background_response(
@@ -829,16 +963,19 @@ def _execute_source_collection_query(query: dict[str, Any], *, max_results: int,
     if provider == s.SOURCE_COLLECTION_SEARCH_PROVIDER_OPENALEX:
         return s._execute_openalex_source_collection_query(query_text, rows=rows, provider=provider, fallback_source_type=str(query.get("sourceType") or ""))
     search_url = s._crossref_search_url(query_text, rows=rows)
+    # The mailto contact keeps the request in Crossref's polite pool; the
+    # reported searchUrl stays free of the contact parameter.
+    request_url = _source_collection_url_with_mailto(search_url)
     try:
-        request = urllib.request.Request(
-            search_url,
+        payload_bytes = _source_collection_rate_limited_http_get(
+            request_url,
             headers={
                 "Accept": "application/json",
                 "User-Agent": "Vibelution-ChallengeCup/1.0 (metadata-only research source collection)",
             },
+            provider=provider,
         )
-        with urllib.request.urlopen(request, timeout=15) as response:
-            payload = json.loads(response.read().decode("utf-8", errors="replace"))
+        payload = json.loads(payload_bytes.decode("utf-8", errors="replace"))
     except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
         return {"provider": provider, "searchUrl": search_url, "results": [], "error": str(exc)}
     message = payload.get("message") if isinstance(payload, dict) else {}
@@ -858,25 +995,24 @@ def _execute_arxiv_source_collection_query(
 
     Same synchronous urllib transport as the Crossref branch (no console, no
     subprocess).  arXiv etiquette caps request frequency at one call per 3
-    seconds, so the interval is enforced after every request, success or not.
+    seconds; the cap is enforced globally by the shared per-provider limiter
+    (``try_acquire`` blocks until a permit is available), so parallel worker
+    threads cannot burst past it the way a thread-local sleep allowed.
     """
     s = _service()
     arxiv_query = s._arxiv_search_query(query_text)
     search_url = s._arxiv_search_url(arxiv_query, start=0, max_results=rows)
     try:
-        request = urllib.request.Request(
+        payload_bytes = _source_collection_rate_limited_http_get(
             search_url,
             headers={
                 "Accept": "application/atom+xml",
                 "User-Agent": "Vibelution-ChallengeCup/1.0 (metadata-only research source collection)",
             },
+            provider=provider,
         )
-        with urllib.request.urlopen(request, timeout=15) as response:
-            payload_bytes = response.read()
     except (OSError, urllib.error.URLError) as exc:
         return {"provider": provider, "searchUrl": search_url, "results": [], "error": str(exc)}
-    finally:
-        time.sleep(s.SOURCE_COLLECTION_SEARCH_ARXIV_REQUEST_INTERVAL_SECONDS)
     try:
         entries = s._source_collection_arxiv_atom_entries(payload_bytes)
     except ET.ParseError as exc:
@@ -900,22 +1036,23 @@ def _execute_openalex_source_collection_query(
     Same synchronous urllib transport as the other provider branches (no
     console, no subprocess).  The mailto contact embedded by
     ``_openalex_search_url`` keeps the request in OpenAlex's polite pool
-    (10 req/s, no artificial interval needed); occasional 429/5xx responses
-    surface as a per-query error without retries, matching the Crossref
-    branch, so later batches naturally refill the gap.
+    (documented 10 req/s; throttled to half of that by the shared
+    per-provider limiter), and transient 429/5xx responses are retried with
+    bounded backoff by the shared transport helper instead of surfacing as a
+    per-query error, matching the Crossref and arXiv branches.
     """
     s = _service()
     search_url = s._openalex_search_url(query_text, per_page=rows)
     try:
-        request = urllib.request.Request(
+        payload_bytes = _source_collection_rate_limited_http_get(
             search_url,
             headers={
                 "Accept": "application/json",
                 "User-Agent": "Vibelution-ChallengeCup/1.0 (metadata-only research source collection)",
             },
+            provider=provider,
         )
-        with urllib.request.urlopen(request, timeout=15) as response:
-            payload = json.loads(response.read().decode("utf-8", errors="replace"))
+        payload = json.loads(payload_bytes.decode("utf-8", errors="replace"))
     except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
         return {"provider": provider, "searchUrl": search_url, "results": [], "error": str(exc)}
     items = payload.get("results") if isinstance(payload, dict) else []

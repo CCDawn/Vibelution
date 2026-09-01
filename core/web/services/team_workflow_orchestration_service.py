@@ -908,9 +908,8 @@ SOURCE_COLLECTION_SEARCH_PROVIDERS = (
     SOURCE_COLLECTION_SEARCH_PROVIDER_ARXIV,
     SOURCE_COLLECTION_SEARCH_PROVIDER_OPENALEX,
 )
-# arXiv's official API etiquette asks clients not to issue requests more
-# often than once every 3 seconds; enforced after every arXiv HTTP call.
-SOURCE_COLLECTION_SEARCH_ARXIV_REQUEST_INTERVAL_SECONDS = 3
+# arXiv's once-per-3-seconds API etiquette is now enforced globally by the
+# per-provider pyrate-limiter registry in source_collection.search_execution.
 SOURCE_COLLECTION_SEARCH_EXECUTION_DEFAULT_MAX_QUERIES = 4
 SOURCE_COLLECTION_SEARCH_EXECUTION_MAX_QUERIES = 12
 SOURCE_COLLECTION_SEARCH_EXECUTION_DEFAULT_RESULTS_PER_QUERY = 2
