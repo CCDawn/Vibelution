@@ -545,11 +545,38 @@ class AdapterDispatchWorker:
                 current_artifact_receipts=verified.artifact_receipts,
             )
         except NodeExecutionError as exc:
+            if str(exc.code or "").startswith("stage_one_"):
+                _record_scene_event(
+                    "stage_one_closeout.started",
+                    outcome="started",
+                    fields={**_action_identity(action)},
+                )
+                _record_scene_event(
+                    "stage_one_closeout.blocked",
+                    outcome="blocked",
+                    fields={
+                        **_action_identity(action),
+                        "missingCategory": str(exc.code or "stage_one_invalid"),
+                    },
+                )
             self._void_unused_reservation(
                 action, reason="stage_one_closeout_blocked_compensation"
             )
             self._block_attempt(outbox, action, exc.code, str(exc))
             return
+
+        if stage_one_closeout is not None:
+            _record_scene_event(
+                "stage_one_closeout.started",
+                outcome="started",
+                fields={
+                    **_action_identity(action),
+                    "policySha256": stage_one_closeout.policy_sha256,
+                    "artifactCount": len(stage_one_closeout.artifact_refs),
+                    "receiptCount": len(stage_one_closeout.receipt_refs),
+                    "humanGateCount": stage_one_closeout.human_gate_count,
+                },
+            )
 
         try:
             committed = False
@@ -584,6 +611,33 @@ class AdapterDispatchWorker:
                         ),
                     },
                 )
+                if stage_one_closeout is not None:
+                    completed = stage_one_closeout.accepted
+                    _record_scene_event(
+                        (
+                            "stage_one_closeout.completed"
+                            if completed
+                            else "stage_one_closeout.blocked"
+                        ),
+                        outcome="completed" if completed else "blocked",
+                        fields={
+                            **_action_identity(action),
+                            "policySha256": stage_one_closeout.policy_sha256,
+                            "artifactCount": len(stage_one_closeout.artifact_refs),
+                            "receiptCount": len(stage_one_closeout.receipt_refs),
+                            "humanGateCount": stage_one_closeout.human_gate_count,
+                            "missingCategory": (
+                                "" if completed else "program_review_required"
+                            ),
+                            "packageSha256": (
+                                stage_one_closeout.canonical_package_sha256
+                            ),
+                            "programOutputId": stage_one_closeout.program_record_id,
+                            "programOutputSha256": (
+                                stage_one_closeout.program_output_sha256
+                            ),
+                        },
+                    )
         except Exception as exc:
             # commit 前 crash：outbox 保留 pending（可重领取），领域侧幂等。
             self._requeue_or_fail(outbox, action, str(exc))

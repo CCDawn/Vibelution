@@ -1986,7 +1986,7 @@ Task 37 保持 Deferred；只有用户重新明确启用全双工语音目标后
 
 Dialogue V2 将“一个用户回合最多两个人物气泡”从产品策略中移除，改为**逐条送达、逐条重判、可被用户随时插话终止**的动态对话 burst。人物可以只说一句，也可以自然连续说多句并主动提问；连续多少条由当前语境、人物主动性、心情、体力、熟悉度、是否有新信息和用户是否正在等待回答共同决定，不由固定气泡数量或 `turnOrdinal % N` 决定。
 
-本阶段不是新建会话引擎。每个用户气泡和人物气泡仍与一条原生 Session Journal 终态一一对应，原生 worker、Journal、SSE、persist 和 transcript 继续是唯一权威。Companion 只在 Session admission 之前保存到达顺序和下一步结构化意图；它不保存预生成回答、不切割模型长文本，也不维护第二 transcript。
+本阶段不是新建会话引擎。用户气泡继续对应根 Turn 中的原生 `user_message`；该根 Turn 的人物回复和后续每个人物气泡都分别对应一个原生 `assistant_message` 终态，根 Turn 的 user/assistant 不被错误拆成两个 Turn。后续 continuation 才使用原生 assistant-only Turn。原生 worker、Journal、SSE、persist 和 transcript 继续是唯一权威。Companion 只在 Session admission 之前保存到达顺序和下一步结构化意图；它不保存预生成回答、不切割模型长文本，也不维护第二 transcript。
 
 ### 32.2 根因与替换范围
 
@@ -2021,7 +2021,7 @@ V2 只替换 Companion-owned 的决定、计划、mailbox admission 和 Prompt p
 
 ### 32.4 动态决定契约
 
-不新增独立 planner LLM 调用。当前人物模型在 Companion 专属 ToolPolicy 下，可在本 Turn 内调用一个轻量结构化工具声明下一步：
+不新增独立 planner LLM 调用。当前人物模型在 Companion 专属 ToolPolicy 下，可在本 Turn 内调用一个轻量结构化工具声明下一步。模型只提交行为意图，不提交 Agent、Session、Turn、generation 或权威 receipt 身份：
 
 ```json
 {
@@ -2029,15 +2029,17 @@ V2 只替换 Companion-owned 的决定、计划、mailbox admission 和 Prompt p
   "reasonCode": "unfinished_thought | emotional_afterthought | relevant_detail | self_disclosure | open_loop | natural_question | repaired_misunderstanding | complete",
   "topicKey": "bounded-stable-topic-key",
   "expectsUserReply": true,
-  "sourceRefs": ["journal-turn-id", "event-id-or-memory-receipt"]
+  "referencedSourceKeys": ["bounded-key-exposed-in-current-context"]
 }
 ```
 
 约束：
 
-- 工具只对验证后的 Companion Agent/Session 可见；普通 Agent 的工具列表与 Prompt 完全不变；
-- 工具只写结构化意图，不写下一条人物文本；下一条文本必须在下一条原生 assistant-only Turn 中生成；
-- `sourceRefs` 只允许引用当前 Journal Turn、已完成 Life Event、有效原生 episodic memory 或未完话题 receipt；
+- 工具只对验证后的 Companion Agent/Session 可见；普通 Agent 的工具列表与 Prompt 完全不变；不支持 tool calling 的人物模型正常完成当前单条回复，并以 `stopReason=decision_tool_unavailable` 停止 burst，不报用户可见系统错误；
+- 工具只写 `CompanionDialogueDecisionDraftV2` 元数据，不写下一条人物文本；下一条文本必须在下一条原生 assistant-only Turn 中生成；
+- `agentId/sessionId/turnId/generation/bindingRevision/toolCallId` 由工具执行上下文注入。模型传入的 `referencedSourceKeys` 只能映射到本轮已经注入且允许引用的 Life Event、有效原生 episodic memory 或未完话题 receipt；未知 key 使 draft 无效，模型不能自行声明权威 ID；
+- 一个原生 Turn 最多接受一个语义决定。相同 `toolCallId` 重放幂等，多个内容相同的调用折叠；同一 Turn 出现互相冲突的决定时整轮按 `stop` 收口，不采用“最后一次写入获胜”；
+- draft 只按 `turnId + generation` 暂存，不能排队。`rootSourceKind=user` 的根 Turn 由插件自己的 mailbox dispatcher 在原生 Session settlement 后通过现有 Journal receipt resolver 读取可见 assistant 终态，不向普通 worker 增加 Companion hook；`rootSourceKind=proactive` 的根 assistant-only Turn 和 ordinal ≥ 2 continuation 继续复用现有 proactive finalizer/attempt receipt。用户根 Turn 以 assistant terminal event ID 直接作为本跳 delivery proof，主动根 Turn/continuation 则要求该 terminal event 与 attempt delivery receipt 匹配。满足对应证明后才把 draft 晋升为 `decision_ready`；Turn 失败、中断、无可见 assistant 终态、receipt 不匹配或 generation 已变化时 draft 失效；
 - `continue_dialogue` 只表示还有一个紧邻且相关的表达动作，不保证下一条一定 admission；
 - `ask_user` 必须对应当前气泡中已经提出、且确实需要用户回应的问题；送达后进入 `await_user`；
 - 未调用工具、工具参数无效、当前 Turn 失败或 receipt 未确认时均按 `stop` 收口；
@@ -2049,9 +2051,12 @@ V2 只替换 Companion-owned 的决定、计划、mailbox admission 和 Prompt p
 IDLE
   │ 用户消息或已通过主动候选复核的首条消息
   ▼
-ROOT_QUEUED ──mailbox admission──→ ASSISTANT_RUNNING
-                                        │ 原生终态 + delivery receipt
-                                        ▼
+ROOT_QUEUED ──mailbox admission──→ TURN_RUNNING
+                                       │ 可选 decision draft；不可排下一条
+                                       ▼
+                              AWAITING_TERMINAL_RECEIPT
+                                       │ 原生可见 assistant 终态 + 匹配 receipt
+                                       ▼
                                   DECISION_READY
                                   ├─ stop ─────────────→ COMPLETED
                                   ├─ ask_user ─────────→ AWAIT_USER
@@ -2060,7 +2065,7 @@ ROOT_QUEUED ──mailbox admission──→ ASSISTANT_RUNNING
                                            ▼
                                   CONTINUATION_QUEUED
                                            │ 原生 admission
-                                           └────────────→ ASSISTANT_RUNNING
+                                           └────────────→ TURN_RUNNING
 
 任意非终态阶段收到用户消息：
   generation + 1 → CANCEL_NOT_ADMITTED → ROOT_QUEUED
@@ -2081,21 +2086,37 @@ V2 计划只保存恢复与幂等所需元数据：
 
 | 字段 | 含义 |
 | --- | --- |
-| `schemaVersion` | 固定 `companion.dialogue_burst.v2` |
-| `burstId` | 一个连续人物表达 burst 的稳定 ID |
+| `contractVersion` | 固定 `companion_dialogue_burst.v2`，与同一账本中的 `companion_delivery.v1` 区分 |
+| `planId`（即 `burstId`） | `dialogue-burst:` 加 `agentId/sessionId/rootEntryId/generation` 的稳定 hash；重试不得生成新 ID |
 | `agentId` / `sessionId` | 已验证绑定的人物和原生 Session |
 | `rootEntryId` | 触发本 burst 的 mailbox entry |
+| `rootSourceKind` | `user/proactive`；决定 ordinal 1 使用用户根 Turn receipt resolver 还是既有 proactive attempt/finalizer |
 | `generation` | 用户插话栅栏；不一致时禁止 continuation admission |
-| `status` | `queued/running/decision_ready/await_user/completed/cancelled/failed` |
+| `bindingRevision` | 创建 burst 时的人物绑定版本；变更后旧 continuation 失效 |
+| `status` | `queued/awaiting_native_admission/running/awaiting_terminal_receipt/decision_ready/await_user/completed/cancelled/failed/expired` |
 | `deliveredCount` | 已获得原生终态与 delivery receipt 的人物消息数量 |
 | `questionCount` | 已送达且期望用户回答的问题动作数量 |
-| `nextAct` | 最后一次已校验结构化决定；不含人物文本 |
-| `latestJournalTurnId` | 最近已 admission 的原生 Turn |
-| `latestReceiptId` | 最近已确认投递 receipt |
-| `stopReason` | `natural_stop/await_user/user_interjected/hard_guard/expired/failed` |
+| `currentBubbleOrdinal` | 当前人物气泡序号；首条人物回复为 1，下一条 identity 只由 `planId + ordinal` 派生 |
+| `currentEntryId/currentAttemptId/currentTriggerId` | ordinal ≥ 2 时必须存在的稳定 mailbox/attempt/trigger 身份 |
+| `currentDeliveryToken/currentIdempotencyKey` | ordinal ≥ 2 时绑定原生 assistant-only Turn admission 和重放去重 |
+| `currentTurnId` | 最近已 admission 的原生 Turn；未 admission 时为空 |
+| `decisionDraft` | 由系统绑定到 `turnId/generation/toolCallId` 的待终态结构化决定；不含人物文本 |
+| `nextAct` | 仅在匹配 assistant 终态 receipt 后晋升的决定；不含人物文本 |
+| `latestAssistantReceiptEventId/latestDeliveryReceiptId` | 最近可见 assistant 终态和本跳投递证明；用户根 Turn 两者使用同一 terminal event ID，主动根 Turn与 ordinal ≥ 2 continuation 的 delivery receipt 必须引用该 terminal event |
+| `createdAt/updatedAt/expiresAt` | 恢复、审计和过期判断；每个 continuation 从上一条 assistant receipt 起最多保留 5 分钟 |
+| `stopReason` | `natural_stop/await_user/user_interjected/hard_guard/decision_tool_unavailable/expired/failed` |
 | `version` | 乐观并发版本 |
 
-禁止保存：未来人物消息文本、完整 Prompt、复制的 transcript、推理过程、工具过程或原生记忆正文。plan 可从 `latestJournalTurnId + latestReceiptId + mailbox identity` 恢复；恢复时若不能证明下一条尚未 admission，则停止而不是重复发送。
+禁止保存：未来人物消息文本、完整 Prompt、复制的 transcript、推理过程、工具过程或原生记忆正文。V2 row 继续写入现有 `conversation/delivery_plans.jsonl`；每跳 attempt 继续写入 `proactive/deliveries.jsonl`；到达顺序继续由 `conversation/mailbox.json` 拥有，不创建第二计划、attempt 或 mailbox 账本。
+
+持久化顺序固定为：
+
+1. 在现有 Agent-scoped lock 内先用 `planId + currentBubbleOrdinal` 确定性派生并幂等 upsert plan/attempt identity，再以同一 `deliveryToken` enqueue mailbox；禁止先写 mailbox 后补 plan；
+2. 原生 admission 成功后先由 mailbox 记录或通过现有 Journal admission resolver 恢复 `turnId`，再镜像到 plan；崩溃发生在原生接受与本地回写之间时必须按 `deliveryToken` 找回原 Turn，不能提交第二次；
+3. 原生 assistant 终态是本跳投递证明的前置。用户根 Turn 由插件 dispatcher 读到 terminal event 后直接用其 event ID 推进；主动根 Turn与 ordinal ≥ 2 continuation 先幂等记录引用同一 terminal event 的 attempt receipt，再推进 plan 的 `deliveredCount/decision_ready`；崩溃导致 plan 未推进时由 receipt reconciliation 补齐，不重复扣额度或 admission；
+4. 只有 plan 同时持有匹配 generation、decision draft、assistant terminal receipt 和 delivery receipt 时，才能派生下一 ordinal；任何身份冲突都终止 burst 并记录错误，不用新 ID 兜底重试。
+
+plan 从现有 Journal admission/assistant receipt、attempt receipt 和 mailbox identity 恢复。`expiresAt` 到期、binding revision 改变或无法证明下一条尚未 admission 时，标记 `expired` 并停止，而不是恢复一条可能重复或已经失去语境的续话。
 
 ### 32.7 自然多说、提问与异常硬闸
 
@@ -2104,7 +2125,7 @@ V2 计划只保存恢复与幂等所需元数据：
 - 人物稳定人格、当前心情、体力、熟悉度和用户配置共同影响继续倾向，但任何单一数值都不直接决定条数；
 - 低体力、用户表现不耐烦、明确要求简短或刚发生误解时更早停止；健谈、熟悉、情绪活跃且有真实新内容时可多说；
 - 每条 continuation 必须引入新信息、情绪或问题，不能换句话重复、总结刚说完的内容或制造无来源经历；
-- 默认模式中，一个需要回答的自然问题送达后即 `await_user`；“主动”提问模式可在同一语义动作中提出最多两个紧密相关的小问题，但仍在该气泡后等待用户，不允许连续多个气泡盘问；
+- 任何明显需要用户回答的问题送达后即进入 `await_user`，不允许跨多个气泡连续盘问。同一气泡可以自然组织一个联合语义下的问题或相关分句，不设置固定问题数量；validator 只拒绝无关问题堆叠、重复追问和把多个话题一次抛给用户，不以问号或数字作为机械预算；
 - 修辞问句、口头语和不要求用户回答的反问不触发 `await_user`，但 validator 不能仅靠问号判断，应以 `expectsUserReply` 与实际文本共同校验；
 - 自我披露每个 burst 最多选择一个新主题，来源必须是已完成 Life Event 或当前有效人物记忆。
 
@@ -2115,6 +2136,7 @@ V2 计划只保存恢复与幂等所需元数据：
 - 用户提交入口保持可用，不因 `assistant_running` 或 `continuation_queued` 禁用；仍复用现有 Companion composer adapter，不新增普通 composer 分支。
 - 新用户 entry 持久化成功后立即推进 mailbox generation。所有旧 generation 且尚未 admission 的 continuation 原子转为 `cancelled`。
 - 已由原生 Session admission 的人物 Turn 不做 Companion 强杀，不修改原生 cancel；它的终态仍可展示，但其声明的后续意图因 generation 过期而无效。
+- 用户点击发送后复用现有 `clientSubmissionId` optimistic user message 立即显示；后端返回 queued 时保留该临时投影，原生 `user_message` admission 后以同一 `clientSubmissionId` 对账替换，失败则移除并恢复草稿。它只是已有 UI cache，不写 mailbox transcript、不伪造 Journal、不得形成重复用户气泡。
 - 用户 entry 获得 admission 后才进入原生 Journal；mailbox 不向前端伪造一个“第二用户气泡”。
 - 应用重启时先以 Journal 终态和 delivery receipt 对账，再恢复 mailbox。已送达不重发，已取消不复活，`running` 但无可证明 admission 的 continuation 过期停止。
 - 一个 receipt 只能推进一次 `deliveredCount`；重复 SSE、重复恢复或重复 receipt 都必须幂等。
@@ -2177,64 +2199,71 @@ Companion-only intent 增加 `misunderstanding / restate_request / user_impatien
 
 ### 32.12 兼容与迁移
 
-- 保留 `delivery_plan.v1`、`deliveryKind=followup` 和现有 receipt 的只读兼容，不重写历史 Journal。
-- 新用户消息从 Dialogue V2 启用时刻起创建 `companion.dialogue_burst.v2`；旧 v1 计划不原地扩字段伪装成 V2。
+- 保留 `companion_delivery.v1`、`deliveryKind=followup` 和现有 receipt 的只读兼容，不重写历史 Journal；V1/V2 plan 继续共享 `conversation/delivery_plans.jsonl`，以 `contractVersion` 分派 parser/transition。
+- 新用户消息从 Dialogue V2 启用时刻起创建 `contractVersion=companion_dialogue_burst.v2` 的 plan；旧 v1 计划不原地扩字段伪装成 V2。
 - 升级时已 admission 的旧 `delivering` follow-up 正常收口；未 admission 的旧 follow-up 遇到新用户 generation 时仍按现有 fence 取消。
-- V2 continuation 使用独立 `deliveryKind=burst_continuation`，继续免主动额度，但不能被主动候选查询当成新主动联系。
-- 回滚到 v1 时忽略 V2 未 admission 计划并标记过期；已写入原生 Journal 的消息保持可读，不删除、不改序。
+- V2 continuation 在 mailbox 中继续使用现有调度类别 `sourceKind=followup`，避免创建第四种 sourceKind 和不必要的 mailbox schema 迁移；attempt/trigger 使用独立 `deliveryKind=burst_continuation`，继续免主动额度，且不能被主动候选查询当成新主动联系。
+- 插件内新增唯一 `is_companion_continuation_delivery_kind()`（接受 `followup` 与 `burst_continuation`）作为取消、admission、receipt reconciliation、主动额度、latest-delivered-proactive 查询和 runtime scene 分类依据；禁止在 Task 40 继续散落新的字符串判断。现有 mailbox `_SOURCE_KINDS` 不变，`cancel_unsent_followups` 按 `sourceKind=followup` 继续覆盖 V1/V2。
+- 回滚到 v1 时先把未 admission 的 V2 plan/attempt/mailbox entry 标记 `expired/cancelled`，再由 v1 忽略 `contractVersion=companion_dialogue_burst.v2` 的 plan；已写入原生 Journal 的消息保持可读，不删除、不改序。若旧运行时不能安全忽略 V2 plan，回滚工具必须先完成该停用事务，禁止直接降级进程。
 - API 仅在 Companion 路由增加 V2 DTO；普通会话 DTO、SSE event 和 URL 不新增 Companion 字段。
 
 ### 32.13 实施任务图
 
 #### Task 39：建立 `CompanionDialogueDecisionV2`
 
-- Owner/Boundary: `interaction_expression.py`、`dialogue_context.py`、Companion 专属结构化决定工具、Prompt pack 和 validator；删除产品级轮次取模与两气泡决定，不改普通 Agent Prompt/ToolPolicy。
+- Owner/Boundary: `interaction_expression.py`、`dialogue_context.py`、`tools/virtual_human_life_tools.py`、Companion 专属 decision draft/validator 和未接线的 V2 Prompt pack；只新增 V2 contract 和测试，不删除、替换或调用 v1 运行态决定，不改普通 Agent Prompt/ToolPolicy。
 - Dependency: 复用 Task 22 的人格/心情/体力/熟悉度与已确认偏好输入，复用现有 Companion tool scope。
-- Verification: 表驱动覆盖克制/自然/健谈、初识/熟悉、不同心情体力、无新信息、自然提问、误解和工具参数非法；同一输入决定可解释，不新增 planner LLM 调用。
-- Stop: 普通 Agent 可见新工具或 Prompt 变化、决定工具能写人物文本、仍使用固定目标条数或轮次取模。
+- Mode: BDD_TDD；Task 39 合入后产品运行行为必须与 v1 完全一致，V2 tool/Prompt 不进入任何运行中人物工具列表。
+- Verification: 表驱动覆盖克制/自然/健谈、初识/熟悉、不同心情体力、无新信息、自然提问、误解、无 tool-calling 模型、重复/冲突 tool call 和非法 source key；同一输入决定可解释，不新增 planner LLM 调用。
+- Stop: 普通 Agent 可见新工具或 Prompt 变化、Task 40 前已经切换人物运行态、决定工具能写人物文本、系统身份仍由模型传入，或 V2 决定仍使用固定目标条数/轮次取模。
 
 #### Task 40：建立动态 continuation chain、插话与恢复
 
-- Owner/Boundary: `delivery_plan.py`、`delivery_runtime.py`、`mailbox.py`、`service.py` 的 Companion-owned adapter 和 continuation Prompt；实现 V2 plan、逐条 admission、generation cancel、receipt reconciliation 和重启幂等。
-- Dependency: Task 39 的 `nextAct` schema 冻结后开始；与任何修改上述文件的 Companion delivery 任务保持串行。
-- Verification: 1、3、5、8 条连续人物消息均逐条获得真实 Journal/SSE 终态；用户可在任意序号之间插话；取消内容不入 transcript；重启、重复 receipt、admission 失败和过期不重发。
-- Stop: 需要修改原生 Session scheduler/Journal/SSE、mailbox 保存回复文本、无法证明一气泡一终态或普通主动额度被 continuation 扣减。
+- Owner/Boundary: `delivery_plan.py`、`delivery_runtime.py`、`mailbox.py`、插件 `service.py`、`core/web/services/virtual_human_life_service.py` 的既有 Companion receipt resolver/proactive finalizer 和 continuation Prompt；用户根 Turn 通过插件 dispatcher 读取 settlement 后的 Journal receipt，主动根 Turn与 continuation 复用 proactive finalizer；实现 V2 plan、decision draft 终态晋升、逐条 admission、generation cancel、receipt reconciliation 和重启幂等，不修改普通 session worker。
+- Dependency: Task 39 的 draft/validator schema 冻结后开始；Task 40 才一次性把新用户消息切换到 V2 tool/Prompt/plan，旧 V1 open plan 继续按版本收口。切换必须在同一任务内闭合，不允许先停用 v1 再等待后续任务补链路；与任何修改上述 delivery 文件的任务保持串行。
+- Mode: HIGH_RISK BDD_TDD。
+- Verification: 1、3、5、8 条连续人物消息均逐条获得真实 Journal/SSE 终态；第 9 条被异常硬闸阻止且不 admission；用户可在任意序号之间插话；取消内容不入 transcript；重启发生在 plan upsert、mailbox enqueue、native accept、本地 turnId 回写、assistant receipt、plan 推进各窗口时均不重发。
+- Stop: 需要修改原生 Session scheduler/worker/Journal/SSE、mailbox 保存回复文本、V2 先写 mailbox 后补 identity、无法证明一气泡一终态、旧版本不能安全收口，或普通主动额度被 continuation 扣减。
 
 #### Task 41：建立偏好 proposal 与原生记忆召回
 
-- Owner/Boundary: 扩展现有 `companion_preferences.py`、原生 episodic memory 只读 selector、Companion DTO/API；不创建第二 profile/向量库，不自动确认用户偏好。
+- Owner/Boundary: 扩展现有 `companion_preferences.py`、原生 episodic memory 只读 selector、三组对话偏好设置的 Agent-scoped 持久化、Companion DTO/API 和 proposal 接受/拒绝事务；不创建第二 profile/向量库，不自动确认用户偏好。proposal 复用本轮人物模型的 Companion 专属结构化工具，不新增抽取 LLM 调用。
 - Dependency: Task 39 的行为枚举稳定；复用现有 preference receipt 与 episodic supersede 语义。
+- Mode: BDD_TDD。
 - Verification: 明确偏好可确认/拒绝/过期/纠错，含糊表达不生成 proposal；召回跨 Agent 隔离、只返回有效来源、冲突时使用当前版本、失败不阻塞对话。
 - Stop: 保存原始用户文本副本、未确认偏好影响模型、读取其他 Agent 记忆或新增第二记忆权威。
 
 #### Task 42：建立误解修复和自我披露新鲜度
 
 - Owner/Boundary: Companion intent、continuity selector、Life Event/episodic memory 只读候选与 disclosure receipt；不写关系惩罚，不生成虚构经历。
-- Dependency: Task 40 的 cancel/receipt 已闭合，Task 41 的当前有效记忆 selector 可用。
+- Dependency: Task 40 的 cancel/receipt 已闭合，且 Task 41 的当前有效记忆 selector 可用；两项都是硬依赖。
+- Mode: BDD_TDD。
 - Verification: 误解、重述、不耐烦、结束话题均取消旧续话并简短收口；同一事件不重复披露，用户追问可恢复，失败 receipt 不错误去重。
 - Stop: 单次误解直接改变关系阶段、无来源披露、保存 assistant 文本副本或修复后继续旧 burst。
 
 #### Task 43：建立 VUI 对话偏好配置
 
-- Owner/Boundary: `CompanionConversationHeader` 邻近 VUI、Agent-scoped Companion 设置 API、设计文档和前端 contract；不修改普通 composer、普通会话头和 ConversationStore。
-- Dependency: Task 41 DTO 稳定后开始；只消费 Task 39 的枚举，不读取内部 burst plan。
+- Owner/Boundary: `CompanionConversationHeader` 邻近 VUI、设计文档和前端 contract；只消费 Task 41 已完成的设置 DTO/API，不再拥有后端设置存储或 API，不修改普通 composer、普通会话头和 ConversationStore。
+- Dependency: Task 41 的设置 DTO/API 稳定后开始；只消费公开行为枚举，不读取内部 burst plan。
+- Mode: frontend contract + `tsc -b` + production build。
 - Verification: 三组配置读写、刷新恢复、Agent 切换隔离、键盘/屏幕阅读器、窄屏、暗色、减少动态；普通 `/chat` DOM 与行为零差异。
 - Stop: UI 展示内部技术状态、普通 Session 获得配置字段、创建第二套控件或破坏人物头像/单一输入状态。
 
 #### Task 44：Dialogue V2 全链路与普通 Session 零差异收口
 
 - Owner/Boundary: 只负责 V2 集成、自审和分层验收；不把角色卡、媒体或全双工语音并入完成条件，不 push、不发布。
-- Dependency: Task 39 → Task 40 → Task 42；Task 41 → Task 43；全部进入 Task 44。
+- Dependency: Task 39 后分出 Task 40 与 Task 41；Task 42 同时等待 Task 40/41，Task 43 等待 Task 41；Task 42/43 全部进入 Task 44。
 - Verification: backend selector、普通 Session 回归、frontend VUI contracts、`tsc -b`、production build、Launcher 刷新后的已认证桌面浏览器场景分别取证；不等待真实 7 天，使用可注入时钟和脚本化到达序列。
 - Stop: 任何普通会话核心差异、串 Session/Agent、残留输入状态、重复发送、目标 404/500、第二 transcript 或不能解释的历史迁移。
 
 Critical Path：
 
 ```text
-Task 39 → Task 40 → Task 42 ─────────────┐
-     └────────→ Task 41 → Task 43 ───────┤
-                                         ▼
-                                      Task 44
+Task 39 → Task 40
+Task 39 → Task 41
+Task 40 + Task 41 → Task 42
+Task 41 → Task 43
+Task 42 + Task 43 → Task 44
 ```
 
 `service.py`、mailbox、Prompt 注入和 preference/memory selector 共享 Companion 事实源，实际开发默认单 writer 串行推进；前端 Task 43 只在 DTO 稳定后独立写入。每个任务重新创建 worktree、claim 和复用裁决，不继承本规划任务资源。
@@ -2243,13 +2272,17 @@ Task 39 → Task 40 → Task 42 ─────────────┐
 
 | 层级 | 必须证明 |
 | --- | --- |
-| 决定单测 | 不再有固定两气泡目标或轮次取模；继续/提问/停止消费人物状态和显式用户偏好；非法决定安全停止 |
-| Mailbox/计划测试 | 用户优先、稳定 arrival order、generation cancel、8 条异常硬闸、重复 receipt 幂等、重启不重发 |
-| 原生会话集成 | 1/3/5/8 条人物消息分别对应 1/3/5/8 个原生 assistant 终态；取消内容为 0 个 Journal Turn |
-| 插话场景 | 用户在生成中及第 1/3/7 条后发送均可被接收；尚未 admission 的 continuation 取消，用户消息优先且顺序不乱 |
-| 提问场景 | 自然问题送达后进入 `await_user`；主动模式可问紧密相关问题但不跨气泡连续盘问；用户回答创建新 burst |
+| 决定单测 | 不再有固定两气泡/问题数量目标或轮次取模；继续/提问/停止消费人物状态和显式用户偏好；系统绑定权威 ID；重复调用幂等、冲突调用安全停止；无 tool-calling 模型退化为正常单条回复 |
+| 决定终态握手 | draft 在 assistant 终态前不可排队；用户根 Turn 由插件 dispatcher 读取 terminal receipt，主动根 Turn/continuation 由 proactive finalizer 记录匹配 attempt receipt；两类路径都只晋升一次，失败、中断、receipt/turn/generation 不匹配均失效，普通 worker 无 Companion hook |
+| Mailbox/计划测试 | 用户优先、稳定 arrival order、generation cancel、确定性 per-hop identity、5 分钟过期、重复 receipt 幂等；8 条可送达且第 9 条不 admission |
+| 崩溃窗口恢复 | 分别在 plan/attempt upsert、mailbox enqueue、native accept、turnId 回写、assistant receipt、plan 推进后重启；每个窗口都不丢已接受用户消息、不重复人物 Turn、不复活过期 continuation |
+| 原生会话集成 | 1/3/5/8 条人物消息分别对应 1/3/5/8 个原生 assistant 终态；根用户消息仍与首条 assistant 属于同一原生 Turn；取消内容为 0 个 Journal Turn |
+| 主动根消息 | 已通过候选复核的主动根 Turn 可按同一 V2 决定继续或提问；首条继续计主动额度，后续 continuation 不重复计额度；用户插话取消未 admission 后续 |
+| 插话场景 | 用户在生成中及第 1/3/7 条后发送均可被接收；optimistic 用户气泡立即显示并按同一 `clientSubmissionId` 无重复对账；尚未 admission 的 continuation 取消，用户消息优先且顺序不乱 |
+| 提问场景 | 自然问题送达后进入 `await_user`；联合语义问题不按数字截断，无关问题堆叠被拒绝；不跨气泡连续盘问；用户回答创建新 burst |
 | 偏好/记忆 | proposal 先确认后生效；拒绝、过期、纠错闭合；每轮只读 1—3 条当前有效且 Agent-scoped 的原生记忆 |
 | 误解/披露 | 误解后旧续话停止、关系不被单次惩罚；披露有 Life Event/Memory 来源且不重复 |
+| 版本切换/回滚 | Task 39 单独合入时 v1 行为零差异；Task 40 原子切换新消息；V1 open plan 正常收口；V2 未 admission 项先失效再降级，历史 Journal 不重写 |
 | 普通 Session 零差异 | 普通 `/chat` 不调用 Companion API、不读取 burst/preference/memory 投影；Prompt、工具、composer、follow-up、retry/cancel、Journal/SSE/DTO 与基线一致 |
 | 前端 contract | 始终只有一个带人物头像的“正在输入…”；不显示推理/工具/队列；底部无原生文件控件；配置仅在已验证 Companion 页面出现 |
 | 运行态 | Launcher 正式刷新后 backend/frontend 指纹一致；不同人物和普通 Session 不串线；目标接口无 404/500，控制台与网络无目标错误 |

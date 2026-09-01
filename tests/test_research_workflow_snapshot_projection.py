@@ -998,6 +998,25 @@ def test_snapshot_projects_artifacts_delivery_and_launch_context() -> None:
         )
     ).to_dict()
     assert snapshot["deliveryStatus"] == "succeeded"
+    assert snapshot["stageOne"] == {
+        "authority": "challenge_program",
+        "completionState": "pending",
+        "formalTopology": {
+            "workflowId": run.workflow_id,
+            "workflowVersionId": run.workflow_version_id,
+            "definitionResolution": "pinned",
+            "role": "execution_authority",
+        },
+        "hypothesisView": {
+            "nodePrefix": "hf_",
+            "role": "operator_projection",
+        },
+        "knowledgeFlow": {
+            "topology": "child_workflow",
+            "rolloutMode": snapshot["knowledgeSideflowMode"],
+            "role": "optional_child_workflow",
+        },
+    }
     assert snapshot["artifactSummary"] == {
         "count": 1,
         "materializedCount": 1,
@@ -1618,6 +1637,11 @@ def test_round_candidate_ledger_fallback_uses_meeting_workflow_run(
             "candidateId": "candidate-current",
             "claim": "current claim",
             "rationale": "current rationale",
+            "candidateAuthority": "",
+            "lineageRefs": [],
+            "testablePrediction": "",
+            "falsifier": "",
+            "axisProfile": {},
             "differenceFromAlternatives": "current difference",
         }
     ]

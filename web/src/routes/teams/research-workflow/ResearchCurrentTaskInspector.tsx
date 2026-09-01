@@ -5,6 +5,7 @@ import type {
   ResearchWorkflowContext,
   ResearchWorkflowTaskStatus,
 } from "./researchWorkflowContextModel";
+import type { ResearchWorkflowSnapshot } from "../../../api/types/research-workflow/core";
 import styles from "./ResearchCurrentTaskInspector.styles";
 
 const STATUS_LABEL: Record<ResearchWorkflowTaskStatus, string> = {
@@ -48,6 +49,7 @@ export type ResearchCurrentTaskInspectorProps = {
   onReturnCurrentTask?: () => void;
   onRetryDispatch?: () => void;
   retryPending?: boolean;
+  stageOne?: ResearchWorkflowSnapshot["stageOne"];
 };
 
 export function ResearchCurrentTaskInspector({
@@ -57,6 +59,7 @@ export function ResearchCurrentTaskInspector({
   onReturnCurrentTask,
   onRetryDispatch,
   retryPending = false,
+  stageOne,
 }: ResearchCurrentTaskInspectorProps) {
   const task = context.currentTask;
   const historyMode = Boolean(
@@ -118,6 +121,13 @@ export function ResearchCurrentTaskInspector({
           {historyMode ? `归档记录 · 当前仍是“${task.title}”` : task.detail}
         </div>
         {task.progress && !historyMode ? <div className={styles.progress}>{task.progress.label}</div> : null}
+        {stageOne && !historyMode ? (
+          <div className={styles.progress} data-testid="stage-one-topology-summary">
+            {`正式执行图 ${stageOne.formalTopology.workflowVersionId || "未标版本"} · hf_* 仅为操作投影 · ${
+              stageOne.knowledgeFlow.topology === "embedded" ? "知识节点在正式图内" : "知识补充为独立子流程"
+            } · 终态以 Challenge Program 登记为准`}
+          </div>
+        ) : null}
         {children}
       </div>
       <footer className={styles.footer} data-vui-region="current-task-action">

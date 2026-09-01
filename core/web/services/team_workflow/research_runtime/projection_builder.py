@@ -167,6 +167,7 @@ def build_research_workflow_snapshot(inputs: ProjectionInputs) -> ResearchWorkfl
     invocation_badges = _invocation_badges(inputs)
     command_authorizations = _offer_authorizations(inputs)
 
+    sideflow_mode = knowledge_sideflow_mode()
     return ResearchWorkflowSnapshot(
         run=run_summary,
         definition=inputs.definition.to_dict(),
@@ -214,8 +215,50 @@ def build_research_workflow_snapshot(inputs: ProjectionInputs) -> ResearchWorkfl
         invocation_badges=invocation_badges,
         command_authorizations=command_authorizations,
         definition_resolution=str(inputs.definition_resolution or "pinned"),
-        knowledge_sideflow_mode=knowledge_sideflow_mode(),
+        knowledge_sideflow_mode=sideflow_mode,
+        stage_one=_stage_one_projection(inputs, sideflow_mode=sideflow_mode),
     )
+
+
+def _stage_one_projection(
+    inputs: ProjectionInputs,
+    *,
+    sideflow_mode: str,
+) -> dict[str, Any]:
+    """Describe Stage 1 surfaces from pinned server facts only."""
+
+    node_ids = {
+        str(getattr(node, "node_id", "") or "")
+        for node in inputs.definition.nodes
+    }
+    knowledge_topology = "embedded" if "knowledge_handoff" in node_ids else "child_workflow"
+    accepted = (
+        str(inputs.run.completion_kind or "") == "stage_one_g1_accepted"
+        and str(inputs.run.terminal_reason or "") == "STAGE1_G1_ACCEPTED"
+    )
+    return {
+        "authority": "challenge_program",
+        "completionState": "STAGE1_G1_ACCEPTED" if accepted else "pending",
+        "formalTopology": {
+            "workflowId": str(inputs.run.workflow_id or ""),
+            "workflowVersionId": str(inputs.run.workflow_version_id or ""),
+            "definitionResolution": str(inputs.definition_resolution or "pinned"),
+            "role": "execution_authority",
+        },
+        "hypothesisView": {
+            "nodePrefix": "hf_",
+            "role": "operator_projection",
+        },
+        "knowledgeFlow": {
+            "topology": knowledge_topology,
+            "rolloutMode": str(sideflow_mode or "off"),
+            "role": (
+                "formal_graph_nodes"
+                if knowledge_topology == "embedded"
+                else "optional_child_workflow"
+            ),
+        },
+    }
 
 
 def _invocation_badges(

@@ -888,6 +888,7 @@ export function ResearchProcessWorkspace({
         inspector={archiveOpen ? null : (
           <ResearchCurrentTaskInspector
             context={workflowContext}
+            stageOne={runState.snapshot?.stageOne}
             footer={visibleFormalPrimaryAction ? (
               <VButton
                 type="button"

@@ -354,4 +354,24 @@ export type ResearchWorkflowSnapshot = {
   /** How the read layer resolved this run's pinned definition:
    * "pinned" | "legacy_default" | "degraded". */
   definitionResolution?: "pinned" | "legacy_default" | "degraded" | string;
+  /** Server-authored Stage 1 topology roles and terminal authority. */
+  stageOne?: {
+    authority: "challenge_program";
+    completionState: "pending" | "STAGE1_G1_ACCEPTED";
+    formalTopology: {
+      workflowId: string;
+      workflowVersionId: string;
+      definitionResolution: string;
+      role: "execution_authority";
+    };
+    hypothesisView: {
+      nodePrefix: "hf_";
+      role: "operator_projection";
+    };
+    knowledgeFlow: {
+      topology: "embedded" | "child_workflow";
+      rolloutMode: string;
+      role: "formal_graph_nodes" | "optional_child_workflow";
+    };
+  };
 };

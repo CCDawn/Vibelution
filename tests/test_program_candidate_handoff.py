@@ -201,6 +201,7 @@ def test_completion_manifest_requires_fresh_approved_program_readback():
         "questionId": "SCI-096",
         "recordId": "SCI-096:workflow-sci-096",
         "reviewStatus": "approved",
+        "outputSha256": "e" * 64,
         "sourceResultPackageHash": "a" * 64,
         "resultPackage": {"canonicalHash": "c" * 64},
         "officialModelCall": True,
