@@ -364,4 +364,94 @@ describe("ChatGroupCenterSurface hand-test substitutes", () => {
     expect(html).toContain("等待收尾");
     expect(html).not.toContain("停止当前群聊轮次");
   });
+
+  describe("stale typing fallback", () => {
+    const pendingParticipant = {
+      participantId: "p1",
+      kind: "session_agent",
+      agentId: "a1",
+      agentCode: "A01",
+      sessionId: "s1",
+      title: "分析员",
+      enabled: true,
+      status: "ready",
+    };
+
+    function runningRoomProps(updatedAt: string): Partial<ChatGroupCenterSurfaceProps> {
+      return {
+        activeGroupRoom: {
+          roomId: "room-1",
+          title: "研究组",
+          mode: "round_robin",
+          purpose: "discussion",
+          status: "running",
+          participants: [pendingParticipant],
+          rounds: [
+            {
+              roundId: "r1",
+              status: "running",
+              mode: "round_robin",
+              purpose: "discussion",
+              topic: "陈旧兜底",
+              startedAt: updatedAt,
+              updatedAt,
+              speakerOrder: ["p1"],
+              messages: [],
+              summary: "",
+            },
+          ],
+        } as never,
+        activeGroupParticipantById: new Map([["p1", pendingParticipant as never]]),
+      };
+    }
+
+    it("shows the typing animation while the round snapshot is fresh", () => {
+      const html = renderToStaticMarkup(
+        <ChatGroupCenterSurface
+          {...baseProps(runningRoomProps(new Date(Date.now() - 5_000).toISOString()))}
+        />,
+      );
+      expect(html).toContain("正在输入");
+      expect(html).toContain("groupTypingDots");
+      expect(html).not.toContain("该发言已等待较久");
+    });
+
+    it("replaces the typing animation with a neutral status line once the round is stale", () => {
+      const html = renderToStaticMarkup(
+        <ChatGroupCenterSurface
+          {...baseProps(runningRoomProps(new Date(Date.now() - 10 * 60_000).toISOString()))}
+        />,
+      );
+      expect(html).not.toContain("groupTypingDots");
+      expect(html).not.toContain("正在输入");
+      expect(html).toContain("该发言已等待较久，仍在等待后端响应…");
+      expect(html).toContain("等待中");
+    });
+
+    it("points at the broken live connection while stale and disconnected", () => {
+      const html = renderToStaticMarkup(
+        <ChatGroupCenterSurface
+          {...baseProps({
+            ...runningRoomProps(new Date(Date.now() - 10 * 60_000).toISOString()),
+            groupStreamConnected: false,
+          })}
+        />,
+      );
+      expect(html).toContain("实时连接已断开，正在重连");
+      expect(html).not.toContain("groupTypingDots");
+    });
+
+    it("keeps the neutral backend-waiting copy when stale and connected", () => {
+      const html = renderToStaticMarkup(
+        <ChatGroupCenterSurface
+          {...baseProps({
+            ...runningRoomProps(new Date(Date.now() - 10 * 60_000).toISOString()),
+            groupStreamConnected: true,
+          })}
+        />,
+      );
+      expect(html).toContain("该发言已等待较久，仍在等待后端响应…");
+      expect(html).not.toContain("实时连接已断开");
+    });
+  });
 });

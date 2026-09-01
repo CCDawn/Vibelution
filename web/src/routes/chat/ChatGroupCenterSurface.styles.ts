@@ -49,6 +49,8 @@ const styles = {
   groupTopicMessage:
     "vui-routes-chatcodingroute groupTopicMessage min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   groupTypingDots: "vui-routes-chatcodingroute groupTypingDots min-w-0",
+  groupTypingStaleNote:
+    "vui-routes-chatcodingroute groupTypingStaleNote min-w-0 m-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   inlineNotice: `vui-routes-chatcodingroute inlineNotice min-w-0 ${vuiGlassPanelClass} p-2`,
   kernelTraceLink: "vui-routes-chatcodingroute kernelTraceLink min-w-0",
   projectBusEvent: "vui-routes-chatcodingroute projectBusEvent min-w-0",

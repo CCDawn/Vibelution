@@ -1,5 +1,5 @@
 import { BellRing, Square, UsersRound } from "lucide-react";
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 
 import { kernelTaskCenterHref } from "../../api/kernel";
@@ -18,6 +18,25 @@ import styles from "./ChatGroupCenterSurface.styles";
 import { ChatGroupMessageBody, ChatMentionedText } from "./ChatGroupMessagePresentation";
 import { ChatMessageChromeHeader } from "./ChatMessageChromeHeader";
 import { groupConsecutiveBy } from "./chatRoutePresentation";
+
+// The backend only publishes a full snapshot when a speaker finishes, so the
+// derived "typing" bubble can outlive a hung round forever. After this long
+// without any round update, stop the typing animation and show a neutral
+// status line instead. The tick keeps the flip reactive even when no new
+// snapshots arrive.
+const GROUP_TYPING_STALE_AFTER_MS = 150_000;
+const GROUP_TYPING_STALE_TICK_MS = 15_000;
+
+function useStalenessNow(enabled: boolean): number {
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    if (!enabled) return;
+    setNowMs(Date.now());
+    const timer = window.setInterval(() => setNowMs(Date.now()), GROUP_TYPING_STALE_TICK_MS);
+    return () => window.clearInterval(timer);
+  }, [enabled]);
+  return nowMs;
+}
 
 export type GroupParticipantIdentity = {
   name: string;
@@ -57,6 +76,8 @@ export type ChatGroupCenterSurfaceProps = {
   projectBusRevokePending: boolean;
   groupRoomRefreshing: boolean;
   groupRoomRefreshError: string;
+  /** False while the room event stream is disconnected/reconnecting; drives the stale-typing copy. */
+  groupStreamConnected?: boolean;
   startGroupRoundPending: boolean;
   stopGroupRoundPending: boolean;
   formatTime: (value: string) => string;
@@ -93,6 +114,7 @@ function GroupRoundsTimeline({
   avatarInitials,
   expandedGroupMessageIds,
   chatMentionTargets,
+  groupStreamConnected,
   onOpenMentionTarget,
   onToggleExpandedGroupMessage,
 }: {
@@ -108,9 +130,20 @@ function GroupRoundsTimeline({
   avatarInitials: ChatGroupCenterSurfaceProps["avatarInitials"];
   expandedGroupMessageIds: string[];
   chatMentionTargets: ChatMentionTarget[];
+  groupStreamConnected?: boolean;
   onOpenMentionTarget: (target: ChatMentionTarget) => void;
   onToggleExpandedGroupMessage: (messageId: string) => void;
 }) {
+  const hasPendingSpeaker = rounds.some((round) => {
+    if (String(round.status ?? "").trim().toLowerCase() !== "running") return false;
+    const delivered = new Set(
+      (round.messages ?? []).map((message) => String(message.participantId ?? "").trim()),
+    );
+    return (round.speakerOrder ?? []).some(
+      (participantId) => !delivered.has(String(participantId ?? "").trim()),
+    );
+  });
+  const stalenessNowMs = useStalenessNow(hasPendingSpeaker);
   return (
     <>
       {rounds.map((round, roundIndex) => {
@@ -122,6 +155,13 @@ function GroupRoundsTimeline({
           (participantId) => !deliveredParticipantIds.has(String(participantId ?? "").trim()),
         );
         const nextParticipant = nextSpeakerId ? activeGroupParticipantById.get(nextSpeakerId) : undefined;
+        const roundUpdatedAtMs = Date.parse(round.updatedAt || round.startedAt || "");
+        // A round whose updatedAt has been frozen past the threshold is no
+        // longer "typing" — the backend is slow or hung. Unparsable timestamps
+        // conservatively count as stale so typing never sticks forever.
+        const typingStale = roundRunning && nextParticipant
+          ? (!Number.isFinite(roundUpdatedAtMs) || stalenessNowMs - roundUpdatedAtMs > GROUP_TYPING_STALE_AFTER_MS)
+          : false;
         return (
           <section key={round.roundId} className={styles.groupRoundBlock}>
             <div className={styles.groupRoundDivider}>
@@ -226,6 +266,39 @@ function GroupRoundsTimeline({
                 <article className={`${styles.groupBubbleRow} ${styles.groupBubbleRowPending}`}>
                   {(() => {
                     const nextIdentity = groupParticipantIdentity(nextParticipant);
+                    if (typingStale) {
+                      const staleCopy = groupStreamConnected === false
+                        ? (lang === "zh"
+                          ? "实时连接已断开，正在重连，已暂停输入状态显示。"
+                          : "Live connection lost; reconnecting. Typing status paused.")
+                        : (lang === "zh"
+                          ? "该发言已等待较久，仍在等待后端响应…"
+                          : "This speaker has been waiting a while; still waiting for the backend…");
+                      return (
+                        <>
+                          <div className={styles.groupStreamIdentity} data-testid="group-stream-identity">
+                            {renderAgentAvatar(
+                              styles.groupBubbleAvatar,
+                              nextIdentity.avatarImageUrl || undefined,
+                              avatarInitials(nextParticipant.agentCode, nextIdentity.name, "AI"),
+                            )}
+                            <ChatMessageChromeHeader
+                              className={styles.groupBubbleHeader}
+                              density="bubble"
+                              title={(
+                                <strong className={styles.groupStreamName} title={nextIdentity.fullIdentityLabel}>
+                                  {nextIdentity.identityLabel}
+                                </strong>
+                              )}
+                              trailing={<span>{lang === "zh" ? "等待中" : "waiting"}</span>}
+                            />
+                          </div>
+                          <div className={styles.groupStreamCopy}>
+                            <p className={styles.groupTypingStaleNote} role="status">{staleCopy}</p>
+                          </div>
+                        </>
+                      );
+                    }
                     return (
                       <>
                         <div className={styles.groupStreamIdentity} data-testid="group-stream-identity">
@@ -300,6 +373,7 @@ export function ChatGroupCenterSurface({
   projectBusRevokePending,
   groupRoomRefreshing,
   groupRoomRefreshError,
+  groupStreamConnected,
   startGroupRoundPending,
   stopGroupRoundPending,
   formatTime,
@@ -501,6 +575,7 @@ export function ChatGroupCenterSurface({
               avatarInitials={avatarInitials}
               expandedGroupMessageIds={expandedGroupMessageIds}
               chatMentionTargets={chatMentionTargets}
+              groupStreamConnected={groupStreamConnected}
               onOpenMentionTarget={onOpenMentionTarget}
               onToggleExpandedGroupMessage={onToggleExpandedGroupMessage}
             />
@@ -603,6 +678,7 @@ export function ChatGroupCenterSurface({
             avatarInitials={avatarInitials}
             expandedGroupMessageIds={expandedGroupMessageIds}
             chatMentionTargets={chatMentionTargets}
+            groupStreamConnected={groupStreamConnected}
             onOpenMentionTarget={onOpenMentionTarget}
             onToggleExpandedGroupMessage={onToggleExpandedGroupMessage}
           />

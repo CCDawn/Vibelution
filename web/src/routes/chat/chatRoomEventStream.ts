@@ -45,6 +45,12 @@ export async function consumeChatRoomEventStream(options: {
   roomId: string;
   signal: AbortSignal;
   onOpen?: () => void;
+  /**
+   * Fired for every complete SSE frame received, including comment-only
+   * keep-alive frames that never reach onFrame. Consumers use this as a
+   * liveness heartbeat so a half-open TCP connection can be detected.
+   */
+  onActivity?: () => void;
   onFrame: (frame: ChatRoomSseFrame) => void;
 }): Promise<void> {
   const response = await fetchWithControl(chatRoomEventsUrl(options.roomId), {
@@ -65,6 +71,7 @@ export async function consumeChatRoomEventStream(options: {
       const parsed = splitCompleteSseFrames(buffer);
       buffer = parsed.rest;
       for (const rawFrame of parsed.frames) {
+        options.onActivity?.();
         const frame = parseChatRoomSseFrame(rawFrame);
         if (frame) options.onFrame(frame);
       }
@@ -72,6 +79,7 @@ export async function consumeChatRoomEventStream(options: {
     buffer += decoder.decode();
     const parsed = splitCompleteSseFrames(buffer);
     for (const rawFrame of parsed.frames) {
+      options.onActivity?.();
       const frame = parseChatRoomSseFrame(rawFrame);
       if (frame) options.onFrame(frame);
     }

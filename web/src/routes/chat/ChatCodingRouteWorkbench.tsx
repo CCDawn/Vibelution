@@ -3119,6 +3119,7 @@ export function ChatCodingRouteWorkbench() {
               projectBusRevokePending={revokeProjectBusMessageMutation.isPending}
               groupRoomRefreshing={activeGroupRoomQuery.isFetching}
               groupRoomRefreshError={activeGroupRoomQuery.isError ? describeError(activeGroupRoomQuery.error, t("loadFailed")) : ""}
+              groupStreamConnected={groupStreamConnected}
               startGroupRoundPending={startGroupRoundMutation.isPending}
               stopGroupRoundPending={stopGroupRoundMutation.isPending}
               formatTime={formatTime}

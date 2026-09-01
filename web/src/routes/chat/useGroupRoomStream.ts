@@ -42,9 +42,15 @@ export function useGroupRoomStream({
     // event.
     const MIN_APPLY_INTERVAL_MS = 350;
     const RECONNECT_DELAY_MS = 1_000;
+    // Liveness watchdog: the backend emits a keep-alive comment every 15s, so
+    // 40s of silence means 2+ missed heartbeats. A half-open TCP connection
+    // leaves reader.read() pending forever without this, freezing the UI on a
+    // stale snapshot with polling disabled.
+    const LIVENESS_TIMEOUT_MS = 40_000;
     let pendingDetail: ChatRoomDetail | null = null;
     let applyTimer: number | null = null;
     let reconnectTimer: number | null = null;
+    let livenessTimer: number | null = null;
     let streamController: AbortController | null = null;
 
     function flushPendingDetail() {
@@ -70,9 +76,39 @@ export function useGroupRoomStream({
       }, MIN_APPLY_INTERVAL_MS);
     }
 
+    function clearStreamLivenessWatchdog() {
+      if (livenessTimer !== null) {
+        window.clearTimeout(livenessTimer);
+        livenessTimer = null;
+      }
+    }
+
+    function feedStreamLivenessWatchdog() {
+      clearStreamLivenessWatchdog();
+      if (disposed) return;
+      livenessTimer = window.setTimeout(() => {
+        livenessTimer = null;
+        if (disposed) return;
+        setGroupStreamConnected(false);
+        postBrowserTelemetry({
+          phase: "chat_room_stream",
+          eventCode: "browser.chat_room_stream.stalled",
+          message: "Chat room detail stream went silent; forcing reconnect.",
+          level: "warning",
+          fields: {
+            roomId: streamRoomId,
+            transport: "fetch",
+          },
+        });
+        streamController?.abort();
+        scheduleReconnect();
+      }, LIVENESS_TIMEOUT_MS);
+    }
+
     function handleOpen() {
       if (!disposed) {
         setGroupStreamConnected(true);
+        feedStreamLivenessWatchdog();
         groupStreamErrorLoggedRef.current[streamRoomId] = false;
         postBrowserTelemetry({
           phase: "chat_room_stream",
@@ -142,11 +178,14 @@ export function useGroupRoomStream({
       if (disposed) return;
       const controller = new AbortController();
       streamController = controller;
+      // Arm before the fetch so a hung response/handshake is covered too.
+      feedStreamLivenessWatchdog();
       try {
         await consumeChatRoomEventStream({
           roomId: streamRoomId,
           signal: controller.signal,
           onOpen: handleOpen,
+          onActivity: feedStreamLivenessWatchdog,
           onFrame: (frame) => {
             if (frame.event === "chat_room_detail") {
               handleChatRoomDetail(frame.data);
@@ -163,6 +202,7 @@ export function useGroupRoomStream({
           scheduleReconnect();
         }
       } finally {
+        clearStreamLivenessWatchdog();
         if (streamController === controller) {
           streamController = null;
         }
@@ -175,6 +215,7 @@ export function useGroupRoomStream({
       disposed = true;
       flushPendingDetail();
       setGroupStreamConnected(false);
+      clearStreamLivenessWatchdog();
       if (reconnectTimer !== null) {
         window.clearTimeout(reconnectTimer);
         reconnectTimer = null;

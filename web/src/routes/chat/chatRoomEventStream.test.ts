@@ -68,4 +68,32 @@ describe("chat room event stream", () => {
     const requestInit = fetchMock.mock.calls[0]?.[1] as RequestInit;
     expect(new Headers(requestInit.headers).get("X-Vibelution-Control-Token")).toBe("room-stream-token");
   });
+
+  it("feeds keep-alive comment frames to onActivity while onFrame only sees data frames", async () => {
+    seedControlTokenForTests("keep-alive-stream-token");
+    const payload = JSON.stringify({ type: "chat_room_detail", roomId: "room-1" });
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(": keep-alive\n\n"));
+        controller.enqueue(new TextEncoder().encode(`event: chat_room_detail\ndata: ${payload}\n\n`));
+        controller.close();
+      },
+    });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(body, {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    })));
+    const activities = vi.fn();
+    const frames: Array<{ event: string; data: string }> = [];
+
+    await consumeChatRoomEventStream({
+      roomId: "room-1",
+      signal: new AbortController().signal,
+      onActivity: activities,
+      onFrame: (frame) => frames.push(frame),
+    });
+
+    expect(activities).toHaveBeenCalledTimes(2);
+    expect(frames).toEqual([{ event: "chat_room_detail", data: payload }]);
+  });
 });
