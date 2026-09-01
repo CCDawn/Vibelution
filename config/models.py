@@ -1770,6 +1770,9 @@ class ResearchKnowledgeSideflowConfig(BaseModel):
     )
 
 
+DEFAULT_RESEARCH_BLOCKING_FANOUT_WAIT = False
+
+
 class ResearchConfig(BaseModel):
     """研究工作流（research workflow）配置。"""
 
@@ -1778,6 +1781,22 @@ class ResearchConfig(BaseModel):
         default_factory=ResearchKnowledgeSideflowConfig,
         description="知识侧流程 rollout 配置",
     )
+    blocking_fanout_wait: bool = Field(
+        default=DEFAULT_RESEARCH_BLOCKING_FANOUT_WAIT,
+        description=(
+            "hypothesis_design 候选 fan-out 是否回到旧同步语义：在编排线程内"
+            "阻塞等待全部候选终态后再聚合（仅作为回滚开关保留一个版本）。"
+            "缺省 false：启动候选后立即返回 pending，由 durable requeue 驱动。"
+        ),
+    )
+
+    @field_validator("blocking_fanout_wait", mode="before")
+    @classmethod
+    def _fallback_invalid_blocking_fanout_wait(cls, value: Any) -> bool:
+        # 非法值（None/字符串/数字）不阻断启动，统一回退缺省（非阻塞）。
+        if isinstance(value, bool):
+            return value
+        return DEFAULT_RESEARCH_BLOCKING_FANOUT_WAIT
 
 
 class SupervisedEvolutionFeatureConfig(BaseModel):
