@@ -193,3 +193,38 @@ def test_handoff_forwards_canonical_package_and_receipt_authority(
     assert result["resultPackage"]["canonicalHash"] == "c" * 64
     assert result["officialModelCall"] is True
     assert result["receiptStatus"] == "passed"
+
+
+def test_completion_manifest_requires_fresh_approved_program_readback():
+    approved = {
+        "workflowRunId": "workflow-sci-096",
+        "questionId": "SCI-096",
+        "recordId": "SCI-096:workflow-sci-096",
+        "reviewStatus": "approved",
+        "sourceResultPackageHash": "a" * 64,
+        "resultPackage": {"canonicalHash": "c" * 64},
+        "officialModelCall": True,
+        "receiptStatus": "passed",
+        "humanGates": {"allApproved": True, "approvedCount": 4},
+    }
+
+    manifest = program_candidate_handoff.stage_one_completion_manifest_from_handoff(
+        approved,
+        policy_sha256="d" * 64,
+    )
+
+    assert manifest["programRecordId"] == approved["recordId"]
+    assert manifest["programReviewStatus"] == "approved"
+    assert len(manifest["manifestSha256"]) == 64
+
+    pending = deepcopy(approved)
+    pending["reviewStatus"] = "review_required"
+    pending["humanGates"] = {"allApproved": False, "approvedCount": 0}
+    with pytest.raises(
+        program_candidate_handoff.ProgramCandidateHandoffContractError,
+        match="not approved",
+    ):
+        program_candidate_handoff.stage_one_completion_manifest_from_handoff(
+            pending,
+            policy_sha256="d" * 64,
+        )

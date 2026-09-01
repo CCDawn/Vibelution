@@ -34,6 +34,7 @@ from .agent_start_contract import (
     AgentStartContractError,
     build_agent_start_contract,
 )
+from .node_execution_support import NodeExecutionError
 from .retry_policy import retry_is_available
 
 
@@ -148,6 +149,25 @@ def node_command_capabilities(
     if node is None:
         return []
     actor_kind = str(node.get("actorKind") or "")
+    closeout = record.get("stageOneCloseout")
+    if (
+        isinstance(closeout, dict)
+        and closeout.get("status") == "program_review_required"
+        and str(record.get("completionState") or "") != "STAGE1_G1_ACCEPTED"
+    ):
+        handoff = record.get("programCandidateHandoff")
+        return [
+            {
+                "command": (
+                    "finalize_stage_one"
+                    if isinstance(handoff, dict)
+                    else "build_stage_one_package"
+                ),
+                "available": True,
+                "reason": "",
+            },
+            {"command": "view_artifacts", "available": True, "reason": ""},
+        ]
 
     if actor_kind == ActorKind.AGENT.value:
         supplemental: list[dict[str, Any]] = []
@@ -347,6 +367,29 @@ def apply_node_command(
                 checkpoint_path=checkpoint_path,
                 record=record,
                 research_ledger=research_ledger,
+                payload=payload,
+            )
+        except SystemActionError as exc:
+            raise NodeCommandError(str(exc), code=exc.code) from exc
+    if command == "finalize_stage_one":
+        from .stage_one_closeout import finalize_stage_one_closeout
+
+        try:
+            return finalize_stage_one_closeout(
+                store,
+                record=record,
+                payload=payload,
+            )
+        except NodeExecutionError as exc:
+            raise NodeCommandError(str(exc), code=exc.code) from exc
+    if command == "build_stage_one_package":
+        from .result_package_system_adapter import execute_stage_one_package_action
+        from .system_action_records import SystemActionError
+
+        try:
+            return execute_stage_one_package_action(
+                store,
+                record=record,
                 payload=payload,
             )
         except SystemActionError as exc:

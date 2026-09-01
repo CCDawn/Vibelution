@@ -191,7 +191,9 @@ def test_ledger_closeout_reads_run_bound_artifacts_and_rejects_phase_two_attempt
         )
 
         assert outcome is not None
-        assert outcome.completion_state == "STAGE1_G1_ACCEPTED"
+        assert outcome.completion_state == ""
+        assert outcome.status == "program_review_required"
+        assert outcome.accepted is False
         assert set(outcome.receipt_stages) == {"generation", "review", "revision"}
 
         harness.store.submit(

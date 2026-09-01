@@ -25,9 +25,14 @@ from core.research.workflow.definition_registry import (
 from core.web.services.team_workflow.research_runtime import (
     knowledge_rollout,
     node_completion,
+    program_candidate_handoff,
+    result_package_system_adapter,
 )
 from core.web.services.team_workflow.research_runtime.checkpoint_lifecycle import (
     advance_checkpoint,
+)
+from core.web.services.team_workflow.research_runtime.node_command_adapter import (
+    node_command_capabilities,
 )
 from core.web.services.team_workflow.research_runtime.node_execution_support import (
     NodeExecutionError,
@@ -37,7 +42,9 @@ from core.web.services.team_workflow.research_runtime.service import (
 )
 from core.web.services.team_workflow.research_runtime.stage_one_closeout import (
     STAGE_ONE_CLOSEOUT_COMMAND,
+    _completion_manifest_sha256,
     evaluate_stage_one_closeout,
+    finalize_stage_one_closeout,
     route_after_stage_one_closure,
 )
 from core.web.services.team_workflow.research_runtime.store import WorkflowRunStore
@@ -190,18 +197,242 @@ def _stage_one_record(run_id: str = "run-stage-one") -> dict:
     }
 
 
-def test_closeout_evidence_requires_every_artifact_receipt_and_human_gate() -> None:
+def test_closeout_evidence_is_only_ready_until_catalog_approval() -> None:
     record = _stage_one_record()
 
     outcome = evaluate_stage_one_closeout(record, node_id="hypothesis_design")
 
     assert outcome is not None
-    assert outcome.completion_state == "STAGE1_G1_ACCEPTED"
+    assert outcome.status == "program_review_required"
+    assert outcome.accepted is False
+    assert outcome.completion_state == ""
     assert set(outcome.artifact_refs) == {
         item["artifactId"] for item in record["artifactManifests"]
     }
     assert set(outcome.receipt_stages) == {"generation", "review", "revision"}
     assert outcome.human_gate_count >= 2
+
+
+def test_approved_program_manifest_is_required_for_terminal_acceptance() -> None:
+    record = _stage_one_record()
+    policy = load_stage_one_completion_policy()
+    manifest = {
+        "schemaVersion": 1,
+        "manifestKind": "stage_one_completion",
+        "workflowRunId": record["runId"],
+        "questionId": record["questionId"],
+        "policySha256": policy.policySha256,
+        "programRecordId": f"{record['questionId']}:{record['runId']}",
+        "programReviewStatus": "approved",
+        "sourceResultPackageHash": "a" * 64,
+        "canonicalPackageHash": "b" * 64,
+        "officialModelCall": True,
+        "receiptStatus": "passed",
+        "humanGates": {"allApproved": True, "approvedCount": 4},
+    }
+    manifest["manifestSha256"] = _completion_manifest_sha256(manifest)
+    record["stageOneCompletionManifest"] = manifest
+
+    outcome = evaluate_stage_one_closeout(record, node_id="hypothesis_design")
+
+    assert outcome is not None
+    assert outcome.accepted is True
+    assert outcome.status == "accepted"
+    assert outcome.completion_state == "STAGE1_G1_ACCEPTED"
+    assert outcome.completion_manifest_sha256 == manifest["manifestSha256"]
+
+
+def test_completion_manifest_cannot_self_assert_program_approval() -> None:
+    record = _stage_one_record()
+    policy = load_stage_one_completion_policy()
+    manifest = {
+        "schemaVersion": 1,
+        "manifestKind": "stage_one_completion",
+        "workflowRunId": record["runId"],
+        "questionId": record["questionId"],
+        "policySha256": policy.policySha256,
+        "programRecordId": f"{record['questionId']}:{record['runId']}",
+        "programReviewStatus": "review_required",
+        "sourceResultPackageHash": "a" * 64,
+        "canonicalPackageHash": "b" * 64,
+        "officialModelCall": True,
+        "receiptStatus": "passed",
+        "humanGates": {"allApproved": False, "approvedCount": 0},
+    }
+    manifest["manifestSha256"] = _completion_manifest_sha256(manifest)
+    record["stageOneCompletionManifest"] = manifest
+
+    with pytest.raises(NodeExecutionError) as exc:
+        evaluate_stage_one_closeout(record, node_id="hypothesis_design")
+
+    assert exc.value.code == "stage_one_program_review_not_approved"
+
+
+def test_finalize_rechecks_program_authority_before_terminal_write(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    record = _stage_one_record()
+    record.update(
+        {
+            "teamId": "challenge-stage-one-team",
+            "status": "waiting_human",
+            "stageOneCloseout": {"status": "program_review_required"},
+            "systemActions": [
+                {"command": STAGE_ONE_CLOSEOUT_COMMAND, "status": "pending_human"}
+            ],
+            "nodeRuns": [
+                {
+                    "nodeId": "hypothesis_design",
+                    "nodeRunId": "nr-hypothesis-design",
+                    "attempt": 1,
+                    "status": "succeeded",
+                    "inputSnapshotHash": "1" * 64,
+                }
+            ],
+        }
+    )
+    store = WorkflowRunStore(tmp_path / "runs")
+    stored = store.create_run(record)
+    approved = {
+        "status": "idempotent",
+        "workflowRunId": stored["runId"],
+        "questionId": stored["questionId"],
+        "recordId": f"{stored['questionId']}:{stored['runId']}",
+        "reviewStatus": "approved",
+        "sourceResultPackageHash": "a" * 64,
+        "resultPackage": {"canonicalHash": "b" * 64},
+        "officialModelCall": True,
+        "receiptStatus": "passed",
+        "humanGates": {"allApproved": True, "approvedCount": 4},
+    }
+    monkeypatch.setattr(
+        program_candidate_handoff,
+        "handoff_result_package_to_challenge_program",
+        lambda **_kwargs: approved,
+    )
+    from core.web.services.team_workflow.research_runtime import workflow_artifact_store
+
+    monkeypatch.setattr(
+        workflow_artifact_store,
+        "put_workflow_artifact",
+        lambda *_args, **_kwargs: {},
+    )
+
+    finalized = finalize_stage_one_closeout(
+        store,
+        record=stored,
+        payload={"idempotencyKey": "finalize-stage-one"},
+    )
+
+    assert finalized["status"] == "succeeded"
+    assert finalized["completionState"] == "STAGE1_G1_ACCEPTED"
+    assert finalized["stageOneCloseout"]["accepted"] is True
+    assert finalized["stageOneCompletionManifest"]["programRecordId"] == approved["recordId"]
+    assert finalized["stageOneCompletionManifestRef"].startswith(
+        "stage_one_completion_manifest:"
+    )
+    assert finalized["systemActions"][0]["status"] == "succeeded"
+
+
+def test_stage_one_package_registers_review_required_without_node_seventeen(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    record = _stage_one_record()
+    record.update(
+        {
+            "teamId": "challenge-stage-one-team",
+            "projectId": "challenge-stage-one-project",
+            "status": "waiting_human",
+            "stageOneCloseout": {
+                "status": "program_review_required",
+                "artifactRefs": [item["artifactId"] for item in record["artifactManifests"]],
+            },
+            "nodeRuns": [
+                {
+                    "nodeId": "hypothesis_design",
+                    "nodeRunId": "nr-hypothesis-design",
+                    "attempt": 1,
+                    "status": "succeeded",
+                    "inputSnapshotHash": "1" * 64,
+                }
+            ],
+        }
+    )
+    store = WorkflowRunStore(tmp_path / "runs")
+    stored = store.create_run(record)
+    monkeypatch.setattr(
+        result_package_system_adapter,
+        "build_proposal_result_package_base",
+        lambda _record: {"factChainHash": "f" * 64},
+    )
+    package = {
+        "packageId": "rrp-v2-stage-one",
+        "factChainHash": "f" * 64,
+        "contentHash": "c" * 64,
+    }
+    monkeypatch.setattr(
+        result_package_system_adapter,
+        "build_challenge_result_package_v2",
+        lambda **_kwargs: package,
+    )
+    from core.web.services.team_workflow.research_runtime import (
+        artifact_readback_registry,
+        workflow_artifact_store,
+    )
+
+    monkeypatch.setattr(
+        artifact_readback_registry,
+        "load_scoped_artifact_payload",
+        lambda *_args, **_kwargs: {"payload": {"objective": "bounded plan"}},
+    )
+    writes: list[dict] = []
+    monkeypatch.setattr(
+        workflow_artifact_store,
+        "put_workflow_artifact",
+        lambda *_args, **kwargs: writes.append(kwargs) or {},
+    )
+
+    class _Manifest:
+        artifactId = "research_result_package:stage-one"
+
+        def to_dict(self):
+            return {"artifactId": self.artifactId, "contentHash": "c" * 64}
+
+    monkeypatch.setattr(
+        result_package_system_adapter,
+        "build_system_artifact",
+        lambda **_kwargs: _Manifest(),
+    )
+    handoff = {
+        "status": "registered",
+        "reviewStatus": "review_required",
+        "workflowRunId": stored["runId"],
+    }
+    monkeypatch.setattr(
+        program_candidate_handoff,
+        "handoff_result_package_to_challenge_program",
+        lambda **_kwargs: handoff,
+    )
+
+    result = result_package_system_adapter.execute_stage_one_package_action(
+        store,
+        record=stored,
+        payload={"idempotencyKey": "build-stage-one-package"},
+    )
+
+    assert result["programCandidateHandoff"]["reviewStatus"] == "review_required"
+    updated = store.get_run(stored["runId"])
+    assert updated is not None
+    assert updated["status"] == "waiting_human"
+    assert "completionState" not in updated
+    assert updated["resultPackageRef"] == "research_result_package:stage-one"
+    assert not any(item["nodeId"] == "result_package" for item in updated["nodeRuns"])
+    assert {item["kind"] for item in writes} == {"research_plan", "research_result_package"}
+    assert node_command_capabilities(
+        updated, "hypothesis_design"
+    )[0]["command"] == "finalize_stage_one"
 
 
 @pytest.mark.parametrize(
@@ -257,7 +488,7 @@ def test_checkpoint_route_stops_only_for_accepted_stage_one_state() -> None:
     ) == END
 
 
-def test_node_completion_closes_at_node_seven_without_phase_two_attempt(
+def test_node_completion_waits_for_program_review_without_phase_two_attempt(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -372,8 +603,8 @@ def test_node_completion_closes_at_node_seven_without_phase_two_attempt(
         },
     )
 
-    assert completed_run["status"] == "succeeded"
-    assert completed_run["completionState"] == "STAGE1_G1_ACCEPTED"
+    assert completed_run["status"] == "waiting_human"
+    assert "completionState" not in completed_run
     assert completed_run["runtimeCurrentNodeIds"] == []
     assert completed_run["completedNodeIds"][-1] == "hypothesis_design"
     assert not any(
@@ -381,14 +612,19 @@ def test_node_completion_closes_at_node_seven_without_phase_two_attempt(
     )
     closeout = completed_run["stageOneCloseout"]
     assert closeout["policySha256"] == policy.policySha256
-    assert closeout["completionState"] == "STAGE1_G1_ACCEPTED"
+    assert closeout["completionState"] == ""
+    assert closeout["status"] == "program_review_required"
+    assert closeout["accepted"] is False
     action = next(
         item
         for item in completed_run["systemActions"]
         if item["command"] == STAGE_ONE_CLOSEOUT_COMMAND
     )
-    assert action["status"] == "succeeded"
+    assert action["status"] == "pending_human"
     assert action["nodeId"] == "hypothesis_design"
+    assert node_command_capabilities(
+        completed_run, "hypothesis_design"
+    )[0]["command"] == "build_stage_one_package"
 
     replay = service.apply_node_command(
         run["runId"],

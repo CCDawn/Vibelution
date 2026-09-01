@@ -925,6 +925,24 @@ def test_unregistered_model_evidence_cannot_satisfy_official_call_gate(tmp_path,
     assert response["summary"]["validCandidateCount"] == 0
 
 
+def test_canonical_package_accepts_authorized_dashscope_provider_alias():
+    policy = canonical_model_policy(
+        {
+            "family": "qwen",
+            "providerIds": ["dashscope_main"],
+            "modelIds": ["qwen3.6-plus"],
+            "requireOfficialProvider": True,
+        }
+    )
+
+    assert challenge_question_runs._official_call_from_canonical_package(
+        model_policy=policy,
+        model_provider="dashscope_main",
+        model_ref="dashscope_main/qwen3.6-plus",
+        receipt_refs={"generation": {"receipt_id": "receipt-generation"}},
+    ) is True
+
+
 def test_catalog_question_text_mismatch_fails_schema_gate(tmp_path, monkeypatch):
     _isolate_store(tmp_path, monkeypatch)
     output = _output()

@@ -265,7 +265,11 @@ def complete_node_execution(
         node_id=node_id,
     )
     if stage_one_closeout is not None:
-        state_patch[STAGE_ONE_CHECKPOINT_FIELD] = stage_one_closeout.completion_state
+        state_patch[STAGE_ONE_CHECKPOINT_FIELD] = (
+            stage_one_closeout.completion_state
+            if stage_one_closeout.accepted
+            else "STAGE1_PROGRAM_REVIEW_REQUIRED"
+        )
     checkpoint_id, next_node_ids = advance_checkpoint(
         checkpoint_path,
         thread_id=record["threadId"],
@@ -274,7 +278,9 @@ def complete_node_execution(
         state_patch=state_patch,
         definition=definition,
     )
-    if stage_one_closeout is not None and next_node_ids:
+    if stage_one_closeout is not None and not stage_one_closeout.accepted:
+        next_node_ids = []
+    if stage_one_closeout is not None and stage_one_closeout.accepted and next_node_ids:
         raise NodeExecutionError(
             "accepted stage-one closeout scheduled a phase-two successor",
             code="stage_one_checkpoint_not_terminal",
@@ -539,7 +545,11 @@ def complete_node_execution(
                     nodeId=node_id,
                     nodeRunId=current_node_run["nodeRunId"],
                     attempt=current_node_run["attempt"],
-                    type="StageOneCloseoutCompleted",
+                    type=(
+                        "StageOneCloseoutCompleted"
+                        if stage_one_closeout.accepted
+                        else "StageOneProgramReviewRequired"
+                    ),
                     summary={
                         "actionId": stage_one_action["actionId"],
                         "completionState": stage_one_closeout.completion_state,
@@ -562,7 +572,7 @@ def complete_node_execution(
         official_candidate_ref = str(current.get("officialCandidateRef") or "")
         completion_kind = str(current.get("completionKind") or "")
         terminal_reason = str(current.get("terminalReason") or "")
-        if stage_one_closeout is not None:
+        if stage_one_closeout is not None and stage_one_closeout.accepted:
             completion_kind = "stage_one_g1_accepted"
             terminal_reason = stage_one_closeout.completion_state
         if "versionGovernance" in quality_records:
@@ -609,6 +619,10 @@ def complete_node_execution(
             "status": (
                 "waiting_human"
                 if human_task is not None
+                or (
+                    stage_one_closeout is not None
+                    and not stage_one_closeout.accepted
+                )
                 else "running"
                 if next_node_ids
                 else "succeeded"
@@ -665,6 +679,12 @@ def complete_node_execution(
                 {
                     "completionState": stage_one_closeout.completion_state,
                     "completedAt": now,
+                }
+                if stage_one_closeout is not None and stage_one_closeout.accepted
+                else {}
+            ),
+            **(
+                {
                     "stageOneCloseout": stage_one_closeout.to_dict(),
                     "systemActions": [
                         *(current.get("systemActions") or []),

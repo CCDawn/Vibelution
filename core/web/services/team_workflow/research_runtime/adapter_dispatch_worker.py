@@ -867,13 +867,17 @@ class AdapterDispatchWorker:
             if (
                 successors
                 or action.node_id == "result_package"
-                or stage_one_closeout is not None
+                or (
+                    stage_one_closeout is not None
+                    and stage_one_closeout.accepted
+                )
             ):
                 state_update = {"branch_decision": branch} if branch else {}
                 if stage_one_closeout is not None:
-                    state_update["stage_one_completion_state"] = (
-                        stage_one_closeout.completion_state
-                    )
+                    if stage_one_closeout.accepted:
+                        state_update["stage_one_completion_state"] = (
+                            stage_one_closeout.completion_state
+                        )
                     state_update["stage_one_closeout"] = stage_one_closeout.to_dict()
                 uow.repository.insert_outbox(
                     _resume_dispatch_record(
@@ -949,7 +953,11 @@ class AdapterDispatchWorker:
                         sequence=base_sequence + 4,
                         run_version=run.run_version,
                         event_id=new_id("evt"),
-                        event_type="stage_one_closeout_completed",
+                        event_type=(
+                            "stage_one_closeout_completed"
+                            if stage_one_closeout.accepted
+                            else "stage_one_program_review_required"
+                        ),
                         correlation_id=action.action_id,
                         payload={
                             "nodeRunId": action.node_run_id,

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Mapping
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
@@ -930,8 +931,7 @@ def is_challenge_official_model_evidence_eligible(
         return False
     provider_is_official = any(
         normalized_provider == marker
-        or normalized_provider.startswith(f"{marker}_")
-        or normalized_provider.startswith(f"{marker}-")
+        or normalized_provider.startswith((f"{marker}_", f"{marker}-"))
         for marker in OFFICIAL_PROVIDERS
     )
     allowed_provider_ids = {
@@ -951,6 +951,30 @@ def is_challenge_official_model_evidence_eligible(
         normalized_provider in allowed_provider_ids
         and bool(model_candidates & allowed_model_ids)
         and provider_is_official
+    )
+
+
+def _official_call_from_canonical_package(
+    *,
+    model_policy: Any,
+    model_provider: Any,
+    model_ref: Any,
+    receipt_refs: Any,
+) -> bool:
+    """Derive the catalog gate from canonical policy and verified receipts."""
+
+    normalized_model_ref = str(model_ref or "").strip()
+    model_id = normalized_model_ref.rpartition("/")[2]
+    normalized_policy = dict(model_policy) if isinstance(model_policy, Mapping) else model_policy
+    if isinstance(normalized_policy, dict):
+        for field in ("providerIds", "modelIds"):
+            if isinstance(normalized_policy.get(field), tuple):
+                normalized_policy[field] = list(normalized_policy[field])
+    return bool(receipt_refs) and is_challenge_official_model_evidence_eligible(
+        normalized_policy,
+        provider_id=model_provider,
+        model_ref=normalized_model_ref,
+        model_id=model_id,
     )
 
 
@@ -2180,8 +2204,11 @@ def register_challenge_question_output(team_id: str, payload: dict[str, Any]) ->
             set(matched_evidence_refs)
             | {item for item in receipt_evidence_refs if item}
         )
-        official_call = model_provider in OFFICIAL_PROVIDERS and bool(
-            matched_evidence_refs
+        official_call = _official_call_from_canonical_package(
+            model_policy=canonical_package.model_policy,
+            model_provider=model_provider,
+            model_ref=run.get("model_id"),
+            receipt_refs=model_invocation_receipt_refs,
         )
 
     record = {

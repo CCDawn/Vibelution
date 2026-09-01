@@ -510,6 +510,60 @@ def handoff_result_package_to_challenge_program(
     return response
 
 
+def stage_one_completion_manifest_from_handoff(
+    handoff: dict[str, Any],
+    *,
+    policy_sha256: str,
+) -> dict[str, Any]:
+    """Create a terminal manifest only from a fresh approved Program readback."""
+
+    human_gates = handoff.get("humanGates")
+    human_gates = human_gates if isinstance(human_gates, dict) else {}
+    result_package = handoff.get("resultPackage")
+    result_package = result_package if isinstance(result_package, dict) else {}
+    source_hash = str(handoff.get("sourceResultPackageHash") or "").lower()
+    canonical_hash = str(
+        result_package.get("canonicalHash")
+        or result_package.get("canonical_sha256")
+        or ""
+    ).lower()
+    if (
+        str(handoff.get("reviewStatus") or "") != "approved"
+        or handoff.get("officialModelCall") is not True
+        or str(handoff.get("receiptStatus") or "") != "passed"
+        or human_gates.get("allApproved") is not True
+        or int(human_gates.get("approvedCount") or 0) != 4
+        or not _SHA256_RE.fullmatch(source_hash)
+        or not _SHA256_RE.fullmatch(canonical_hash)
+        or not _SHA256_RE.fullmatch(str(policy_sha256 or ""))
+    ):
+        raise ProgramCandidateHandoffContractError(
+            "Challenge Program record is not approved for stage-one completion"
+        )
+    manifest = {
+        "schemaVersion": 1,
+        "manifestKind": "stage_one_completion",
+        "workflowRunId": str(handoff.get("workflowRunId") or ""),
+        "questionId": str(handoff.get("questionId") or "").upper(),
+        "policySha256": str(policy_sha256).lower(),
+        "programRecordId": str(handoff.get("recordId") or ""),
+        "programReviewStatus": "approved",
+        "sourceResultPackageHash": source_hash,
+        "canonicalPackageHash": canonical_hash,
+        "officialModelCall": True,
+        "receiptStatus": "passed",
+        "humanGates": deepcopy(human_gates),
+    }
+    if not manifest["workflowRunId"] or not manifest["questionId"] or not manifest["programRecordId"]:
+        raise ProgramCandidateHandoffContractError(
+            "Challenge Program approval is missing immutable run identity"
+        )
+    from .stage_one_closeout import _completion_manifest_sha256
+
+    manifest["manifestSha256"] = _completion_manifest_sha256(manifest)
+    return manifest
+
+
 # Short compatibility aliases for callers that use the bridge as a command.
 bridge_result_package_to_challenge_question = handoff_result_package_to_challenge_program
 register_result_package_candidate = handoff_result_package_to_challenge_program
@@ -524,4 +578,5 @@ __all__ = [
     "bridge_result_package_to_challenge_question",
     "handoff_result_package_to_challenge_program",
     "register_result_package_candidate",
+    "stage_one_completion_manifest_from_handoff",
 ]
