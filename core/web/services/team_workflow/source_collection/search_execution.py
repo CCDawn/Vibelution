@@ -13,6 +13,7 @@ Late-bound facade keeps route imports and monkeypatches on
 from __future__ import annotations
 
 import json
+import os
 import re
 import threading
 import time
@@ -69,6 +70,27 @@ _SOURCE_COLLECTION_SEARCH_HTTP_MAX_ATTEMPTS = 4
 _SOURCE_COLLECTION_SEARCH_HTTP_TIMEOUT_SECONDS = 15
 _SOURCE_COLLECTION_SEARCH_RATE_LIMIT_DEFAULT_BACKOFF_SECONDS = 5.0
 
+# A server-supplied ``Retry-After`` is honored, but only up to this cap: a
+# throttling provider reporting hours must never pin a background worker
+# thread (production incident 2026-09-02: two collectors slept on a huge
+# OpenAlex Retry-After and the run hung at "资料搜集 7/9").
+_SOURCE_COLLECTION_RETRY_AFTER_MAX_DEFAULT_SECONDS = 30.0
+_SOURCE_COLLECTION_RETRY_AFTER_MAX_SECONDS_ENV = "VIBELUTION_SOURCE_COLLECTION_RETRY_AFTER_MAX_SECONDS"
+
+# One search execution (one dprun execution) may spend at most this much
+# total time sleeping in backoff across all its queries, providers, and
+# retries; once the budget is exhausted, backoff sleeps become no-ops and
+# the bounded retry loop fails remaining queries through the existing
+# per-query error path, so a run can never hang on provider throttling.
+_SOURCE_COLLECTION_BACKOFF_BUDGET_DEFAULT_SECONDS = 120.0
+_SOURCE_COLLECTION_BACKOFF_BUDGET_SECONDS_ENV = "VIBELUTION_SOURCE_COLLECTION_BACKOFF_BUDGET_SECONDS"
+
+# Per-thread budget state: each search execution runs synchronously on one
+# worker thread, so a thread-local remaining budget scopes the cap to a
+# single execution without changing any transport signature.  Unset state
+# keeps direct helper calls (and existing tests) on the legacy behavior.
+_SOURCE_COLLECTION_BACKOFF_BUDGET_STATE = threading.local()
+
 
 def _source_collection_rate_limiter(provider: str) -> Limiter | None:
     """Return the shared limiter for one provider (``None`` = unlimited)."""
@@ -98,7 +120,57 @@ def _source_collection_url_with_mailto(url: str) -> str:
     return urllib.parse.urlunsplit(parts._replace(query=urllib.parse.urlencode(pairs)))
 
 
+def _source_collection_env_seconds(name: str, default: float) -> float:
+    """Read one positive float knob from the environment (invalid = default)."""
+    raw = str(os.environ.get(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+def _source_collection_retry_after_max_seconds() -> float:
+    return _source_collection_env_seconds(
+        _SOURCE_COLLECTION_RETRY_AFTER_MAX_SECONDS_ENV,
+        _SOURCE_COLLECTION_RETRY_AFTER_MAX_DEFAULT_SECONDS,
+    )
+
+
+def _source_collection_backoff_budget_seconds() -> float:
+    return _source_collection_env_seconds(
+        _SOURCE_COLLECTION_BACKOFF_BUDGET_SECONDS_ENV,
+        _SOURCE_COLLECTION_BACKOFF_BUDGET_DEFAULT_SECONDS,
+    )
+
+
+def _source_collection_activate_backoff_budget() -> None:
+    """Start one search execution's backoff budget on the calling thread."""
+    _SOURCE_COLLECTION_BACKOFF_BUDGET_STATE.remaining_seconds = (
+        _source_collection_backoff_budget_seconds()
+    )
+
+
+def _source_collection_clear_backoff_budget() -> None:
+    _SOURCE_COLLECTION_BACKOFF_BUDGET_STATE.remaining_seconds = None
+
+
 def _source_collection_backoff_sleep(seconds: float) -> None:
+    """Sleep for a backoff wait, charged against the active execution budget.
+
+    Without an active budget this is a plain ``time.sleep`` (legacy behavior).
+    With one active, the wait is truncated to the remaining budget, and once
+    the budget is exhausted no sleep happens at all so the bounded retry loop
+    fails fast through the existing per-query error path.
+    """
+    remaining = getattr(_SOURCE_COLLECTION_BACKOFF_BUDGET_STATE, "remaining_seconds", None)
+    if remaining is not None:
+        if remaining <= 0:
+            return
+        seconds = min(seconds, remaining)
+        _SOURCE_COLLECTION_BACKOFF_BUDGET_STATE.remaining_seconds = remaining - seconds
     time.sleep(seconds)
 
 
@@ -106,14 +178,19 @@ def _source_collection_retry_after_seconds(headers: Any) -> float:
     """Read ``Retry-After`` seconds from a 429 response's headers.
 
     Only the numeric form is honored; HTTP-date values (rare for these APIs)
-    fall back to the default backoff instead of failing the request.
+    fall back to the default backoff instead of failing the request.  The
+    server value is honored up to ``_source_collection_retry_after_max_seconds``
+    so a huge Retry-After cannot pin a worker thread; parse failures keep the
+    default backoff and non-positive values keep the pre-existing
+    ``max(0.0, ...)`` clamp.
     """
     raw = headers.get("Retry-After") if headers is not None else None
     if raw:
         try:
-            return max(0.0, float(str(raw).strip()))
+            parsed = max(0.0, float(str(raw).strip()))
         except ValueError:
-            pass
+            return _SOURCE_COLLECTION_SEARCH_RATE_LIMIT_DEFAULT_BACKOFF_SECONDS
+        return min(parsed, _source_collection_retry_after_max_seconds())
     return _SOURCE_COLLECTION_SEARCH_RATE_LIMIT_DEFAULT_BACKOFF_SECONDS
 
 
@@ -128,7 +205,9 @@ def _source_collection_rate_limited_http_get(
     Every real HTTP attempt, including retries, first acquires a permit from
     the shared per-provider limiter.  Transient failures (``URLError``,
     socket timeouts, HTTP 5xx) are retried up to three times waiting
-    1s/2s/4s; a 429 waits for ``Retry-After`` seconds (default 5s).  Other
+    1s/2s/4s; a 429 waits for ``Retry-After`` seconds (default 5s), clamped
+    to ``_source_collection_retry_after_max_seconds``.  All waits are charged
+    against the calling execution's backoff budget when one is active.  Other
     client errors (4xx) are raised immediately.  The last error is re-raised
     so callers keep their existing failure semantics.
     """
@@ -258,6 +337,22 @@ def _run_source_collection_search_background(team_id: str, run_id: str, payload:
 
 
 def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Run one search execution under a bounded total backoff budget.
+
+    The budget covers every transport backoff sleep (429 Retry-After waits
+    and exponential retry waits) issued on this execution's thread.  Once it
+    is exhausted, remaining queries fail fast through the existing per-query
+    error path (recorded as ``search.failed`` events and failed-query counts)
+    instead of sleeping, so a run can never hang on provider throttling.
+    """
+    _source_collection_activate_backoff_budget()
+    try:
+        return _execute_source_collection_search_body(team_id, run_id, payload)
+    finally:
+        _source_collection_clear_backoff_budget()
+
+
+def _execute_source_collection_search_body(team_id: str, run_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     s = _service()
     normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
     normalized_run_id = s._normalize_required_id(run_id, "Data processing run id is required.")

@@ -296,3 +296,156 @@ def test_url_with_mailto_is_idempotent():
     twice = search_execution._source_collection_url_with_mailto(once)
     assert once.count("mailto=") == 1
     assert twice == once
+
+
+# ---------------------------------------------------------------------------
+# 5. Retry-After clamping and the per-execution backoff budget.
+#
+# Production incident 2026-09-02: OpenAlex answered a 429 with a huge
+# Retry-After and two background collectors slept on it indefinitely,
+# hanging the run at "资料搜集 7/9".  A server Retry-After is honored only
+# up to a cap, and one search execution may spend at most a bounded total
+# budget sleeping in backoff.
+# ---------------------------------------------------------------------------
+
+
+def test_huge_retry_after_is_clamped_to_cap(monkeypatch, unlimited_rate_limits):
+    monkeypatch.setenv("VIBELUTION_SOURCE_COLLECTION_RETRY_AFTER_MAX_SECONDS", "30")
+    assert search_execution._source_collection_retry_after_seconds({"Retry-After": "3600"}) == 30.0
+
+    recorder: list[str] = []
+    delays: list[float] = []
+    monkeypatch.setattr(search_execution, "_source_collection_backoff_sleep", delays.append)
+    sequence = [
+        urllib.error.HTTPError(
+            "https://api.crossref.org/works",
+            429,
+            "Too Many Requests",
+            {"Retry-After": "3600"},
+            None,
+        ),
+        _FakeJsonResponse(_CROSSREF_PAYLOAD),
+    ]
+    _install_fake_transport(monkeypatch, _crossref_handler(recorder, sequence))
+
+    response = _run_crossref_query()
+
+    # The provider asked for an hour; the wait actually taken is the cap.
+    assert not response.get("error")
+    assert len(recorder) == 2
+    assert delays == [30.0]
+
+
+def test_retry_after_cap_env_is_configurable(monkeypatch):
+    monkeypatch.setenv("VIBELUTION_SOURCE_COLLECTION_RETRY_AFTER_MAX_SECONDS", "45")
+    assert search_execution._source_collection_retry_after_seconds({"Retry-After": "3600"}) == 45.0
+    assert search_execution._source_collection_retry_after_seconds({"Retry-After": "44.5"}) == 44.5
+
+
+def test_retry_after_invalid_or_missing_keeps_existing_semantics(monkeypatch):
+    monkeypatch.setenv("VIBELUTION_SOURCE_COLLECTION_RETRY_AFTER_MAX_SECONDS", "30")
+    # No header / HTTP-date form / negative seconds keep the legacy default
+    # (parse failures and the pre-existing max(0.0, ...) clamp) unchanged.
+    assert search_execution._source_collection_retry_after_seconds(None) == 5.0
+    assert search_execution._source_collection_retry_after_seconds({}) == 5.0
+    assert search_execution._source_collection_retry_after_seconds({"Retry-After": "soon"}) == 5.0
+    assert search_execution._source_collection_retry_after_seconds({"Retry-After": "-3"}) == 0.0
+    # Values at or below the cap pass through untouched.
+    assert search_execution._source_collection_retry_after_seconds({"Retry-After": "7"}) == 7.0
+    assert search_execution._source_collection_retry_after_seconds({"Retry-After": "30"}) == 30.0
+
+
+def test_backoff_budget_exhausted_stops_sleeping_and_fails(monkeypatch, unlimited_rate_limits):
+    monkeypatch.setenv("VIBELUTION_SOURCE_COLLECTION_RETRY_AFTER_MAX_SECONDS", "30")
+    monkeypatch.setenv("VIBELUTION_SOURCE_COLLECTION_BACKOFF_BUDGET_SECONDS", "5")
+    recorder: list[str] = []
+    slept: list[float] = []
+    monkeypatch.setattr(time, "sleep", slept.append)
+    sequence = [
+        urllib.error.HTTPError(
+            "https://api.crossref.org/works",
+            429,
+            "Too Many Requests",
+            {"Retry-After": "10"},
+            None,
+        )
+        for _ in range(8)
+    ]
+    _install_fake_transport(monkeypatch, _crossref_handler(recorder, sequence))
+
+    search_execution._source_collection_activate_backoff_budget()
+    try:
+        response = _run_crossref_query()
+    finally:
+        search_execution._source_collection_clear_backoff_budget()
+
+    # The first 429 spends min(10, 5) = 5s of budget; afterwards no sleep at
+    # all, the bounded retry loop burns its remaining attempts immediately,
+    # and the last error surfaces through the existing per-query error path.
+    assert slept == [5.0]
+    assert response.get("error")
+    assert len(recorder) == search_execution._SOURCE_COLLECTION_SEARCH_HTTP_MAX_ATTEMPTS
+
+
+def test_backoff_sleep_charges_budget_and_resets_per_execution(monkeypatch):
+    monkeypatch.setenv("VIBELUTION_SOURCE_COLLECTION_BACKOFF_BUDGET_SECONDS", "120")
+    slept: list[float] = []
+    monkeypatch.setattr(time, "sleep", slept.append)
+
+    search_execution._source_collection_activate_backoff_budget()
+    assert search_execution._SOURCE_COLLECTION_BACKOFF_BUDGET_STATE.remaining_seconds == 120.0
+    search_execution._source_collection_backoff_sleep(30)
+    assert slept == [30.0]
+    assert search_execution._SOURCE_COLLECTION_BACKOFF_BUDGET_STATE.remaining_seconds == 90.0
+    search_execution._source_collection_clear_backoff_budget()
+
+    # A fresh execution starts with the full budget again.
+    search_execution._source_collection_activate_backoff_budget()
+    assert search_execution._SOURCE_COLLECTION_BACKOFF_BUDGET_STATE.remaining_seconds == 120.0
+    search_execution._source_collection_clear_backoff_budget()
+
+
+def test_search_execution_impl_scopes_backoff_budget(monkeypatch):
+    monkeypatch.setenv("VIBELUTION_SOURCE_COLLECTION_BACKOFF_BUDGET_SECONDS", "120")
+    seen: list[float | None] = []
+
+    def _fake_body(team_id, run_id, payload=None):
+        seen.append(
+            getattr(search_execution._SOURCE_COLLECTION_BACKOFF_BUDGET_STATE, "remaining_seconds", None)
+        )
+        return {"status": "executed"}
+
+    monkeypatch.setattr(search_execution, "_execute_source_collection_search_body", _fake_body)
+
+    result = search_execution._execute_source_collection_search_impl("team", "run")
+
+    # The budget is active for the whole execution body and cleared after it,
+    # including on failure, so other threads and later calls are unaffected.
+    assert result == {"status": "executed"}
+    assert seen == [120.0]
+    assert getattr(search_execution._SOURCE_COLLECTION_BACKOFF_BUDGET_STATE, "remaining_seconds", None) is None
+
+
+def test_search_execution_impl_clears_budget_on_failure(monkeypatch):
+    monkeypatch.setenv("VIBELUTION_SOURCE_COLLECTION_BACKOFF_BUDGET_SECONDS", "120")
+
+    def _failing_body(team_id, run_id, payload=None):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(search_execution, "_execute_source_collection_search_body", _failing_body)
+
+    with pytest.raises(RuntimeError):
+        search_execution._execute_source_collection_search_impl("team", "run")
+    assert getattr(search_execution._SOURCE_COLLECTION_BACKOFF_BUDGET_STATE, "remaining_seconds", None) is None
+
+
+def test_search_execution_budget_default_without_env(monkeypatch):
+    monkeypatch.delenv("VIBELUTION_SOURCE_COLLECTION_BACKOFF_BUDGET_SECONDS", raising=False)
+    monkeypatch.delenv("VIBELUTION_SOURCE_COLLECTION_RETRY_AFTER_MAX_SECONDS", raising=False)
+    assert search_execution._source_collection_backoff_budget_seconds() == 120.0
+    assert search_execution._source_collection_retry_after_max_seconds() == 30.0
+    # Invalid or non-positive env values fall back to the defaults.
+    monkeypatch.setenv("VIBELUTION_SOURCE_COLLECTION_BACKOFF_BUDGET_SECONDS", "nonsense")
+    monkeypatch.setenv("VIBELUTION_SOURCE_COLLECTION_RETRY_AFTER_MAX_SECONDS", "0")
+    assert search_execution._source_collection_backoff_budget_seconds() == 120.0
+    assert search_execution._source_collection_retry_after_max_seconds() == 30.0
