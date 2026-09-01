@@ -7016,6 +7016,10 @@ def _classify_round_failure(exc: BaseException) -> str:
         # hypothesis_rounds append-only idempotency guard: the round id is
         # already bound to different candidate/lineage content.
         return "hypothesis_round_content_conflict"
+    if type_name == "ResearchHypothesisRoundGenerationInProgressError":
+        # Pre-generation dedup guard: a concurrent trigger is already
+        # generating this content-addressed round id.
+        return "hypothesis_round_generation_in_progress"
     if type_name == "HypothesisReviewExecutionError":
         return (
             "formal_receipt_fence"
@@ -7486,6 +7490,35 @@ def _generate_hypothesis_round(
             )
         return generation_result
     except Exception as exc:  # closure fact stays; report the side effect
+        from core.web.services.team_workflow import (
+            hypothesis_rounds as _hypothesis_rounds_service,
+        )
+
+        if isinstance(
+            exc,
+            _hypothesis_rounds_service.ResearchHypothesisRoundGenerationInProgressError,
+        ):
+            # Pre-generation dedup: another trigger is already generating the
+            # same content-addressed round id.  No review budget was spent by
+            # this attempt, so report a structured wait/reuse rejection —
+            # never a failure trace (that would be a ghost record) and never
+            # a faked success.  A later replay (or the winning trigger itself)
+            # lands the round under the same round id and replays reuse it.
+            rejection: dict[str, Any] = {
+                "status": "generation_in_progress",
+                "roundId": str(getattr(exc, "round_id", "") or "") or round_id,
+                "selectionId": selection_id,
+                "meetingRoundIds": meeting_round_ids,
+                "error": str(exc),
+                "errorType": type(exc).__name__,
+                "retryHint": (
+                    "a concurrent trigger is generating the same hypothesis "
+                    "round; wait for it to finish — replaying "
+                    "close_review_meeting or regenerate_hypothesis_round then "
+                    "reuses the stored round without new review calls"
+                ),
+            }
+            return rejection
         failure_trace = _record_round_persistence_failure(
             team_id,
             meeting_round,

@@ -37,6 +37,15 @@ FAILURE_RECORD_KIND = "hypothesis_round_failure"
 FAILURE_OPEN_STATUSES = ("failed", "blocked")
 RESOLVED_FAILURE_STATUS = "resolved"
 _LOCK = threading.RLock()
+# In-flight generation guard for content-addressed round ids.  This lock only
+# protects membership mutations of the registry set below; it is never held
+# across the review executor, the ledger append, or any acquisition of
+# ``_LOCK``, so the two locks never nest and no ordering between them exists
+# (deadlock-free by construction).  The registry is process-local: across
+# processes the append-only ``create_hypothesis_round`` idempotency check
+# remains the final backstop.
+_IN_FLIGHT_LOCK = threading.Lock()
+_IN_FLIGHT_GENERATIONS: set[tuple[str, str]] = set()
 _SCOPE_FIELDS = ("program", "theme", "campaign", "question", "branch", "workflow")
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
@@ -48,6 +57,24 @@ class ResearchHypothesisRoundError(RuntimeError):
 
 class ResearchHypothesisRoundNotFoundError(ResearchHypothesisRoundError):
     """Raised when a hypothesis round does not exist."""
+
+
+class ResearchHypothesisRoundGenerationInProgressError(ResearchHypothesisRoundError):
+    """Raised when the same content-addressed round is already generating.
+
+    Carries the claiming identity so callers can report a structured
+    wait/reuse rejection (no review budget was spent by the rejected
+    trigger) instead of a generic persistence failure.
+    """
+
+    def __init__(self, team_id: str, round_id: str) -> None:
+        self.team_id = str(team_id)
+        self.round_id = str(round_id)
+        super().__init__(
+            f"hypothesis round {self.round_id} is already being generated "
+            "for this team; wait for the in-flight attempt to finish — it "
+            "stores the round under the same round id for reuse"
+        )
 
 
 def _project_root() -> Path:
@@ -139,6 +166,27 @@ def _latest_by_id(records: list[dict[str, Any]], field: str, record_id: str) -> 
 
 def _normalized_str_list(value: Any) -> list[str]:
     return [str(item or "").strip() for item in list(value or []) if str(item or "").strip()]
+
+
+def _claim_round_generation(team_id: str, round_id: str) -> bool:
+    """Atomically claim the in-flight generation slot for one round id.
+
+    Returns ``False`` when another generation for ``(team_id, round_id)`` is
+    already running in this process, so the caller can fail fast with a
+    structured rejection instead of double-spending the review budget.
+    """
+    key = (str(team_id), str(round_id))
+    with _IN_FLIGHT_LOCK:
+        if key in _IN_FLIGHT_GENERATIONS:
+            return False
+        _IN_FLIGHT_GENERATIONS.add(key)
+        return True
+
+
+def _release_round_generation(team_id: str, round_id: str) -> None:
+    """Release the in-flight generation slot claimed by this process."""
+    with _IN_FLIGHT_LOCK:
+        _IN_FLIGHT_GENERATIONS.discard((str(team_id), str(round_id)))
 
 
 def _storage_path(team_id: str) -> Path:
@@ -363,6 +411,66 @@ def close_hypothesis_round(
     }
 
 
+REUSABLE_ROUND_STATUSES = frozenset({"reviewed", "closed"})
+
+
+def find_reusable_hypothesis_round(
+    team_id: str, round_id: str
+) -> dict[str, Any] | None:
+    """Return the latest stored record for ``round_id`` when it is reusable.
+
+    The round id is content-addressed, so a stored completed record
+    (``reviewed``/``closed``) means the full review executor already ran for
+    exactly this round identity and a new generation attempt can reuse the
+    stored round without spending review calls.  The round ledger never
+    stores failed attempts (those live in the sibling failure ledger), but
+    the explicit status allowlist keeps any future failed/superseded status
+    fail-closed toward regeneration instead of silently replaying a dead
+    record.  Open (incomplete) records are deliberately not reusable: a
+    generation must never present an unfinished artifact as the outcome of a
+    completed review.
+    """
+    from core.web.services.team_service import assert_team_exists
+
+    normalized_team_id = assert_team_exists(team_id)
+    normalized_round_id = str(round_id or "").strip()
+    if not normalized_round_id:
+        return None
+    with _LOCK:
+        records = _read_jsonl(_storage_path(normalized_team_id))
+        record = _latest_by_id(records, "roundId", normalized_round_id)
+    if record is None or str(record.get("status") or "") not in REUSABLE_ROUND_STATUSES:
+        return None
+    return record
+
+
+def _reuse_generation_result(
+    team_id: str, round_record: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Build the generate-path response for an already-stored round.
+
+    Mirrors the shape of a freshly generated result (including the ``review``
+    projection reconstructed from the stored immutable round) so callers
+    cannot distinguish a reuse replay from the original generation.
+    """
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": team_id,
+        "status": "reused",
+        "round": round_record,
+        "storagePath": str(_storage_path(team_id)),
+        "closed": str(round_record.get("status") or "") == "closed",
+        "review": {
+            "contextId": str(round_record.get("reviewContextId") or ""),
+            "positionSeed": str(round_record.get("positionSeed") or ""),
+            "roles": dict(round_record.get("roles"))
+            if isinstance(round_record.get("roles"), Mapping)
+            else {},
+            "executionMode": str(round_record.get("executionMode") or ""),
+        },
+    }
+
+
 def generate_hypothesis_round_from_meeting(
     team_id: str,
     meeting_round_id: str,
@@ -387,6 +495,17 @@ def generate_hypothesis_round_from_meeting(
     digests and decisions are combined only for the review executor. Re-running
     the same ordered group and scope reuses the existing round (append-only
     idempotency).
+
+    Pre-generation dedup: the round id is content-addressed, so it is resolved
+    against the ledger before the review executor runs.  A stored completed
+    round under the same id is returned directly (zero review calls) instead
+    of double-spending the budget and failing at create time with a content
+    conflict.  While one generation for a round id is in flight, a concurrent
+    trigger fails fast with
+    :class:`ResearchHypothesisRoundGenerationInProgressError` (structured
+    wait/reuse rejection, never a queued second run); the claim is
+    double-checked after acquisition so a trigger that raced the winner's
+    create still reuses instead of re-running the executor.
 
     The executor's explicit DEV/FORMAL fence is driven by the bound meeting's
     server-owned scope ``mode``: only ``mode=formal`` runs ``FORMAL`` (real
@@ -575,6 +694,14 @@ def generate_hypothesis_round_from_meeting(
         f"hround-{_stable_hash(round_seed)[:12]}"
     )
 
+    # Pre-generation dedup (concurrency guard): both the explicit group id and
+    # the derived single-meeting id are content-addressed, so a stored
+    # completed round under this id means the review executor already ran for
+    # exactly this round identity — reuse it before spending any review calls.
+    reusable_round = find_reusable_hypothesis_round(normalized_team_id, round_id)
+    if reusable_round is not None:
+        return _reuse_generation_result(normalized_team_id, reusable_round)
+
     closed_prior_rounds = [
         record
         for record in _read_jsonl(_storage_path(normalized_team_id))
@@ -693,85 +820,103 @@ def generate_hypothesis_round_from_meeting(
         context["_modelInvocationReceiptAuthority"] = (
             dict(receipt_authority) if isinstance(receipt_authority, Mapping) else None
         )
-    # FORMAL passes the exact Stage-1 review call budget it derived from the
-    # bounded context; the executor cross-validates the wiring and fails
-    # closed on any disagreement before spending a single review call.
-    formal_execution = (
-        execution_mode is hypothesis_review_executor.HypothesisReviewExecutionMode.FORMAL
-    )
-    review = hypothesis_review_executor.execute_hypothesis_review(
-        context,
-        round_id=round_id,
-        execution_mode=execution_mode,
-        reflection_runner=reflection_runner,
-        pairwise_runner=pairwise_runner,
-        pareto_runner=pareto_runner,
-        metareview_runner=metareview_runner,
-        revision_runner=revision_runner,
-        reviewer_assignments={"metareview": coordinator_agent},
-        position_seed=str(request.get("positionSeed") or "").strip(),
-        **(
-            {
-                "expected_review_call_budget": review_call_budget_for(
-                    len(context.get("candidates") or [])
-                ).to_dict()
-            }
-            if formal_execution
-            else {}
-        ),
-    )
-    meeting_refs: list[dict[str, str]] = []
-    for bound_meeting, digest, decision_ids in zip(
-        meetings, digests, meeting_decision_ids
-    ):
-        meeting_refs.extend(
-            [
-                {
-                    "kind": "meeting_round",
-                    "id": str(bound_meeting.get("meetingRoundId") or ""),
-                },
-                {"kind": "meeting_digest", "id": str(digest.get("digestId") or "")},
-                *[
-                    {"kind": "decision_record", "id": decision_id}
-                    for decision_id in decision_ids
-                ],
-            ]
+    # In-flight guard: claim the round id for this process before the
+    # executor runs, double-check the ledger under the claim (a concurrent
+    # winner may have stored the round between the pre-read above and this
+    # claim), and always release in a finally so a failed run never wedges
+    # the round id.  The claim is held only as registry membership; it never
+    # nests with _LOCK.
+    if not _claim_round_generation(normalized_team_id, round_id):
+        raise ResearchHypothesisRoundGenerationInProgressError(
+            normalized_team_id, round_id
         )
-    result = create_hypothesis_round(
-        normalized_team_id,
-        {
-            **scope,
-            "roundId": round_id,
-            "candidates": review["candidates"],
-            "pairwiseComparisons": review["pairwiseComparisons"],
-            "pareto": review["pareto"],
-            "metaReview": review["metaReview"],
-            "reviewContextId": review["reviewContextId"],
-            "executionMode": review["executionMode"],
-            "positionSeed": review["positionSeed"],
-            "roles": review["roles"],
-            "modelInvocationReceipts": review.get("modelInvocationReceipts", []),
-            "reviewCallBudget": review.get("reviewCallBudget"),
+    try:
+        reusable_round = find_reusable_hypothesis_round(
+            normalized_team_id, round_id
+        )
+        if reusable_round is not None:
+            return _reuse_generation_result(normalized_team_id, reusable_round)
+        # FORMAL passes the exact Stage-1 review call budget it derived from the
+        # bounded context; the executor cross-validates the wiring and fails
+        # closed on any disagreement before spending a single review call.
+        formal_execution = (
+            execution_mode is hypothesis_review_executor.HypothesisReviewExecutionMode.FORMAL
+        )
+        review = hypothesis_review_executor.execute_hypothesis_review(
+            context,
+            round_id=round_id,
+            execution_mode=execution_mode,
+            reflection_runner=reflection_runner,
+            pairwise_runner=pairwise_runner,
+            pareto_runner=pareto_runner,
+            metareview_runner=metareview_runner,
+            revision_runner=revision_runner,
+            reviewer_assignments={"metareview": coordinator_agent},
+            position_seed=str(request.get("positionSeed") or "").strip(),
             **(
-                {"revisionEnvelope": dict(review["revisionEnvelope"])}
-                if isinstance(review.get("revisionEnvelope"), Mapping)
+                {
+                    "expected_review_call_budget": review_call_budget_for(
+                        len(context.get("candidates") or [])
+                    ).to_dict()
+                }
+                if formal_execution
                 else {}
             ),
-            "meetingRefs": meeting_refs,
-            "lineage": lineage,
-            "status": "closed",
-            "closedBy": coordinator_agent,
-            "closedAt": _utc_now(),
-        },
-    )
-    result["closed"] = True
-    result["review"] = {
-        "contextId": review["reviewContextId"],
-        "positionSeed": review["positionSeed"],
-        "roles": review["roles"],
-        "executionMode": review["executionMode"],
-    }
-    return result
+        )
+        meeting_refs: list[dict[str, str]] = []
+        for bound_meeting, digest, decision_ids in zip(
+            meetings, digests, meeting_decision_ids
+        ):
+            meeting_refs.extend(
+                [
+                    {
+                        "kind": "meeting_round",
+                        "id": str(bound_meeting.get("meetingRoundId") or ""),
+                    },
+                    {"kind": "meeting_digest", "id": str(digest.get("digestId") or "")},
+                    *[
+                        {"kind": "decision_record", "id": decision_id}
+                        for decision_id in decision_ids
+                    ],
+                ]
+            )
+        result = create_hypothesis_round(
+            normalized_team_id,
+            {
+                **scope,
+                "roundId": round_id,
+                "candidates": review["candidates"],
+                "pairwiseComparisons": review["pairwiseComparisons"],
+                "pareto": review["pareto"],
+                "metaReview": review["metaReview"],
+                "reviewContextId": review["reviewContextId"],
+                "executionMode": review["executionMode"],
+                "positionSeed": review["positionSeed"],
+                "roles": review["roles"],
+                "modelInvocationReceipts": review.get("modelInvocationReceipts", []),
+                "reviewCallBudget": review.get("reviewCallBudget"),
+                **(
+                    {"revisionEnvelope": dict(review["revisionEnvelope"])}
+                    if isinstance(review.get("revisionEnvelope"), Mapping)
+                    else {}
+                ),
+                "meetingRefs": meeting_refs,
+                "lineage": lineage,
+                "status": "closed",
+                "closedBy": coordinator_agent,
+                "closedAt": _utc_now(),
+            },
+        )
+        result["closed"] = True
+        result["review"] = {
+            "contextId": review["reviewContextId"],
+            "positionSeed": review["positionSeed"],
+            "roles": review["roles"],
+            "executionMode": review["executionMode"],
+        }
+        return result
+    finally:
+        _release_round_generation(normalized_team_id, round_id)
 
 
 def list_hypothesis_rounds(team_id: str) -> dict[str, Any]:

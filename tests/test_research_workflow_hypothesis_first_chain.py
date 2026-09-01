@@ -6565,6 +6565,317 @@ def test_failed_generation_persists_classified_trace(tmp_path, monkeypatch):
     assert degraded["failureRecordError"] == "ledger unavailable"
 
 
+def test_concurrent_fan_in_triggers_spend_review_budget_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two aligned triggers for one fan-in group run the review exactly once.
+
+    The loser trigger either reuses the stored round or reports the
+    structured in-progress rejection; it never double-spends the review
+    executor and never leaves a hypothesis_round_content_conflict ghost
+    failure trace.
+    """
+    import threading
+
+    from core.research.workflow.contracts import SCORE_DIMENSIONS
+    from core.web.services.team_workflow import (
+        hypothesis_review_executor,
+        research_memory_context,
+    )
+    from core.web.services.team_workflow.research_runtime import (
+        dimension_reviews_artifact_writer,
+        review_independence_artifact_writer,
+    )
+
+    team_id = "team-fan-in-race"
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
+    monkeypatch.setattr(hrounds, "PROJECT_ROOT", tmp_path)
+
+    scope = _scope_fields("agent-coordinator")
+    scope_hash = scope_hash_for(
+        program=scope["program"],
+        theme=scope["theme"],
+        campaign=scope["campaign"],
+        question=scope["question"],
+        branch=scope["branch"],
+        workflow=scope["workflow"],
+        agent_id=scope["agentId"],
+        mode=scope["mode"],
+    )
+    meetings_by_id = {}
+    for candidate_id, meeting_id in (
+        ("hyp-a", "meeting-a"),
+        ("hyp-b", "meeting-b"),
+    ):
+        meetings_by_id[meeting_id] = {
+            **scope,
+            "scopeHash": scope_hash,
+            "meetingRoundId": meeting_id,
+            "meetingType": "hypothesis_review",
+            "status": "closed",
+            "digestId": f"digest-{candidate_id}",
+            "decisionRefs": [f"decision-{candidate_id}"],
+            "discussionItemRefs": [f"hypothesis_candidate:{candidate_id}"],
+            "participants": ["agent-coordinator"],
+            "participantRoleIds": ["coordinator"],
+            "closedBy": "agent-coordinator",
+        }
+    digest_rows = [
+        {
+            "digestId": f"digest-{candidate_id}",
+            "summary": candidate_id,
+            "sourceMessageRefs": [f"message:{candidate_id}"],
+            "contentHash": f"hash-{candidate_id}",
+        }
+        for candidate_id in ("hyp-a", "hyp-b")
+    ]
+    decision_rows = [
+        {
+            "decisionId": f"decision-{candidate_id}",
+            "decision": "approve",
+            "candidateRefs": [candidate_id],
+            "evidenceRefs": [f"message:{candidate_id}"],
+        }
+        for candidate_id in ("hyp-a", "hyp-b")
+    ]
+    monkeypatch.setattr(
+        meetings,
+        "get_meeting_round",
+        lambda _team_id, meeting_id: {"meetingRound": meetings_by_id[meeting_id]},
+    )
+    monkeypatch.setattr(meetings, "_digests_path", lambda _team_id: Path("digests"))
+    monkeypatch.setattr(meetings, "_decisions_path", lambda _team_id: Path("decisions"))
+    monkeypatch.setattr(
+        meetings,
+        "_read_jsonl",
+        lambda path: digest_rows if str(path) == "digests" else decision_rows,
+    )
+    monkeypatch.setattr(
+        chain,
+        "_review_meeting_fan_in_group",
+        lambda *_args, **_kwargs: {
+            "status": "ready",
+            "selectionId": "selection-race",
+            "roundIndex": 1,
+            "meetings": [meetings_by_id["meeting-a"], meetings_by_id["meeting-b"]],
+        },
+    )
+    monkeypatch.setattr(
+        selections,
+        "get_hypothesis_selection",
+        lambda *_args, **_kwargs: {
+            "selection": {
+                "scopeHash": scope_hash,
+                "questionId": _QUESTION_ID,
+                "selectedCandidateIds": ["hyp-a", "hyp-b"],
+            }
+        },
+    )
+    candidate_inputs = [
+        {
+            "candidateId": "hyp-a",
+            "claim": "hyp-a 的机制陈述",
+            "rationale": "r-a",
+            "differenceFromAlternatives": "hyp-a 走代理路径",
+        },
+        {
+            "candidateId": "hyp-b",
+            "claim": "hyp-b 的机制陈述",
+            "rationale": "r-b",
+            "differenceFromAlternatives": "hyp-b 走容量路径",
+        },
+    ]
+    monkeypatch.setattr(
+        chain, "_build_round_candidates", lambda *_args, **_kwargs: candidate_inputs
+    )
+    monkeypatch.setattr(
+        research_memory_context,
+        "build_hypothesis_review_context",
+        lambda **_kwargs: {"contextId": "ctx-race"},
+    )
+
+    review_calls: list[str] = []
+    executor_entered = threading.Event()
+    finish_review = threading.Event()
+
+    def fake_review(context, **kwargs):
+        review_calls.append(str(kwargs.get("round_id")))
+        executor_entered.set()
+        finish_review.wait(timeout=10)
+        return {
+            "candidates": [
+                {
+                    "candidateId": "hyp-a",
+                    "claim": "hyp-a 的机制陈述",
+                    "rationale": "r-a",
+                    "differenceFromAlternatives": "hyp-a 走代理路径",
+                    "lineageRefs": [],
+                    "scores": {dim: 0.8 for dim in SCORE_DIMENSIONS},
+                    "reviewedBy": "agent-coordinator",
+                    "status": "proposed",
+                },
+                {
+                    "candidateId": "hyp-b",
+                    "claim": "hyp-b 的机制陈述",
+                    "rationale": "r-b",
+                    "differenceFromAlternatives": "hyp-b 走容量路径",
+                    "lineageRefs": [],
+                    "scores": {dim: 0.6 for dim in SCORE_DIMENSIONS},
+                    "reviewedBy": "agent-coordinator",
+                    "status": "proposed",
+                },
+            ],
+            "pairwiseComparisons": [
+                {
+                    "comparisonId": "cmp-hyp-a-hyp-b",
+                    "leftCandidateId": "hyp-a",
+                    "rightCandidateId": "hyp-b",
+                    "reviewerAgentId": "agent-coordinator",
+                    "outcome": "left_wins",
+                    "justification": "hyp-a 更完整",
+                }
+            ],
+            "pareto": {
+                "paretoFrontCandidateIds": ["hyp-a"],
+                "dominatedCandidateIds": ["hyp-b"],
+                "analystAgentId": "agent-coordinator",
+                "notes": "",
+            },
+            "metaReview": {
+                "metaReviewId": "meta-race-1",
+                "reviewerAgentId": "agent-coordinator",
+                "recommendationCandidateId": "hyp-a",
+                "rationale": "hyp-a 收敛",
+                "riskNotes": "",
+                "accepted": True,
+            },
+            "reviewContextId": "ctx-race",
+            "executionMode": "dev",
+            "positionSeed": "seed",
+            "roles": {"metareview": "agent-coordinator"},
+            "modelInvocationReceipts": [],
+        }
+
+    monkeypatch.setattr(
+        hypothesis_review_executor, "execute_hypothesis_review", fake_review
+    )
+    # The authority writers are not under test here; pin them so the racing
+    # threads never touch the real repo-root team workspace.
+    monkeypatch.setattr(
+        dimension_reviews_artifact_writer,
+        "materialize_dimension_reviews_authority",
+        lambda **_kwargs: {"status": "written"},
+    )
+    monkeypatch.setattr(
+        review_independence_artifact_writer,
+        "write_review_independence_artifacts",
+        lambda **_kwargs: {"status": "written"},
+    )
+    monkeypatch.setattr(
+        chain,
+        "_materialize_hypothesis_revision_authority",
+        lambda **_kwargs: {"status": "written"},
+    )
+    monkeypatch.setattr(
+        chain,
+        "_materialize_stage_one_plan_authority",
+        lambda **_kwargs: {"status": "written"},
+    )
+
+    barrier = threading.Barrier(2)
+    results: list[dict] = []
+
+    def trigger():
+        barrier.wait(timeout=10)
+        results.append(
+            chain._generate_hypothesis_round(team_id, meetings_by_id["meeting-a"])
+        )
+
+    threads = [threading.Thread(target=trigger) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    assert executor_entered.wait(timeout=10)
+    finish_review.set()
+    for thread in threads:
+        thread.join(timeout=30)
+    assert not any(thread.is_alive() for thread in threads)
+    assert len(results) == 2
+
+    statuses = [str(item.get("status")) for item in results]
+    assert statuses.count("created") == 1
+    assert set(statuses) <= {"created", "reused", "generation_in_progress"}
+    assert len(review_calls) == 1
+    assert hrounds.list_hypothesis_rounds(team_id)["roundCount"] == 1
+    failures = hrounds.list_hypothesis_round_failures(team_id)
+    assert failures["failureCount"] == 0
+    assert failures["openFailureCount"] == 0
+
+
+def test_in_progress_generation_reports_structured_rejection_without_failure_trace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A rejected concurrent trigger is structured, never a ghost failure."""
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
+    monkeypatch.setattr(hrounds, "PROJECT_ROOT", tmp_path)
+    meeting = {
+        "meetingRoundId": "meeting-inflight",
+        "question": _QUESTION_ID,
+        "scopeHash": "scope-x",
+        "discussionScope": {"workflowRunId": "run-1"},
+    }
+    monkeypatch.setattr(
+        chain,
+        "_review_meeting_fan_in_group",
+        lambda *_args, **_kwargs: {
+            "status": "ready",
+            "selectionId": "selection-inflight",
+            "roundIndex": 1,
+            "meetings": [meeting],
+        },
+    )
+    monkeypatch.setattr(
+        selections,
+        "get_hypothesis_selection",
+        lambda *_args, **_kwargs: {
+            "selection": {
+                "scopeHash": "scope-x",
+                "questionId": _QUESTION_ID,
+                "selectedCandidateIds": ["H1", "H2"],
+            }
+        },
+    )
+    monkeypatch.setattr(
+        chain,
+        "_build_round_candidates",
+        lambda *_args, **_kwargs: [
+            {"candidateId": "H1", "claim": "c1"},
+            {"candidateId": "H2", "claim": "c2"},
+        ],
+    )
+
+    def raise_in_progress(*_args, **_kwargs):
+        raise hrounds.ResearchHypothesisRoundGenerationInProgressError(
+            "team-inflight", "hround-inflight-1"
+        )
+
+    monkeypatch.setattr(
+        hrounds, "generate_hypothesis_round_from_meeting", raise_in_progress
+    )
+
+    result = chain._generate_hypothesis_round("team-inflight", meeting)
+
+    assert result["status"] == "generation_in_progress"
+    assert result["roundId"] == "hround-inflight-1"
+    assert result["selectionId"] == "selection-inflight"
+    assert "failureRecordId" not in result
+    assert "reuse" in result["retryHint"]
+    # No budget was spent by the rejected trigger, so the failure ledger must
+    # stay empty instead of gaining a phantom content-conflict record.
+    failures = hrounds.list_hypothesis_round_failures("team-inflight")
+    assert failures["failureCount"] == 0
+    assert failures["openFailureCount"] == 0
+
+
 def test_regenerate_hypothesis_round_requires_closed_review_meeting(monkeypatch):
     monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
     monkeypatch.setattr(

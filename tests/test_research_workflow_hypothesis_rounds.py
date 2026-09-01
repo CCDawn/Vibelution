@@ -509,3 +509,303 @@ def test_failure_record_requires_code_and_known_status(
             team_id, {"failureCode": "some_code", "status": "bogus"}
         )
     assert service.list_hypothesis_round_failures(team_id)["failureCount"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Pre-generation dedup: reuse before spend + in-flight rejection
+# ---------------------------------------------------------------------------
+
+
+def _race_env(tmp_path, monkeypatch) -> str:
+    """Create a tmp team and wire a closed two-meeting fan-in group."""
+    from core.research.workflow.contracts import scope_hash_for
+    from core.web.services.team_workflow import meeting_rounds
+
+    team_id = _team(tmp_path, monkeypatch)
+
+    scope = _scope(mode="dev", agentId="agent-coordinator")
+    scope_hash = scope_hash_for(
+        program=scope["program"],
+        theme=scope["theme"],
+        campaign=scope["campaign"],
+        question=scope["question"],
+        branch=scope["branch"],
+        workflow=scope["workflow"],
+        agent_id=scope["agentId"],
+        mode=scope["mode"],
+    )
+    meetings_by_id = {}
+    for candidate_id, meeting_id in (
+        ("cand-a", "meeting-a"),
+        ("cand-b", "meeting-b"),
+    ):
+        meetings_by_id[meeting_id] = {
+            **scope,
+            "scopeHash": scope_hash,
+            "meetingRoundId": meeting_id,
+            "meetingType": "hypothesis_review",
+            "status": "closed",
+            "digestId": f"digest-{candidate_id}",
+            "decisionRefs": [f"decision-{candidate_id}"],
+            "discussionItemRefs": [f"hypothesis_candidate:{candidate_id}"],
+            "participants": ["agent-coordinator"],
+            "participantRoleIds": ["coordinator"],
+            "closedBy": "agent-coordinator",
+        }
+    digest_rows = [
+        {
+            "digestId": f"digest-{candidate_id}",
+            "summary": candidate_id,
+            "sourceMessageRefs": [f"message:{candidate_id}"],
+            "contentHash": f"hash-{candidate_id}",
+        }
+        for candidate_id in ("cand-a", "cand-b")
+    ]
+    decision_rows = [
+        {
+            "decisionId": f"decision-{candidate_id}",
+            "decision": "approve",
+            "candidateRefs": [candidate_id],
+            "evidenceRefs": [f"message:{candidate_id}"],
+        }
+        for candidate_id in ("cand-a", "cand-b")
+    ]
+    monkeypatch.setattr(
+        meeting_rounds,
+        "get_meeting_round",
+        lambda _team_id, meeting_id: {"meetingRound": meetings_by_id[meeting_id]},
+    )
+    monkeypatch.setattr(
+        meeting_rounds, "_digests_path", lambda _team_id: Path("digests")
+    )
+    monkeypatch.setattr(
+        meeting_rounds, "_decisions_path", lambda _team_id: Path("decisions")
+    )
+    monkeypatch.setattr(
+        meeting_rounds,
+        "_read_jsonl",
+        lambda path: digest_rows if str(path) == "digests" else decision_rows,
+    )
+    return team_id
+
+
+def _group_payload():
+    return {
+        "meetingRoundIds": ["meeting-a", "meeting-b"],
+        "candidates": [
+            {
+                "candidateId": "cand-a",
+                "claim": "cand-a 的有界代理机制陈述",
+                "rationale": "rationale-a",
+                "differenceFromAlternatives": "cand-a 走编码器代理路径",
+            },
+            {
+                "candidateId": "cand-b",
+                "claim": "cand-b 的解码器容量机制陈述",
+                "rationale": "rationale-b",
+                "differenceFromAlternatives": "cand-b 走解码器容量路径",
+            },
+        ],
+    }
+
+
+def _complete_review_output():
+    return {
+        "candidates": [
+            {
+                "candidateId": "cand-a",
+                "claim": "cand-a 的有界代理机制陈述",
+                "rationale": "rationale-a",
+                "differenceFromAlternatives": "cand-a 走编码器代理路径",
+                "lineageRefs": [],
+                "scores": {dim: 0.8 for dim in SCORE_DIMENSIONS},
+                "reviewedBy": "agent-coordinator",
+                "status": "proposed",
+            },
+            {
+                "candidateId": "cand-b",
+                "claim": "cand-b 的解码器容量机制陈述",
+                "rationale": "rationale-b",
+                "differenceFromAlternatives": "cand-b 走解码器容量路径",
+                "lineageRefs": [],
+                "scores": {dim: 0.6 for dim in SCORE_DIMENSIONS},
+                "reviewedBy": "agent-coordinator",
+                "status": "proposed",
+            },
+        ],
+        "pairwiseComparisons": [
+            {
+                "comparisonId": "cmp-cand-a-cand-b",
+                "leftCandidateId": "cand-a",
+                "rightCandidateId": "cand-b",
+                "reviewerAgentId": "agent-coordinator",
+                "outcome": "left_wins",
+                "justification": "cand-a 证据更完整",
+            }
+        ],
+        "pareto": {
+            "paretoFrontCandidateIds": ["cand-a"],
+            "dominatedCandidateIds": ["cand-b"],
+            "analystAgentId": "agent-coordinator",
+            "notes": "",
+        },
+        "metaReview": {
+            "metaReviewId": "meta-race-1",
+            "reviewerAgentId": "agent-coordinator",
+            "recommendationCandidateId": "cand-a",
+            "rationale": "cand-a 收敛",
+            "riskNotes": "",
+            "accepted": True,
+        },
+        "reviewContextId": "ctx-race",
+        "executionMode": "dev",
+        "positionSeed": "seed",
+        "roles": {"metareview": "agent-coordinator"},
+        "modelInvocationReceipts": [],
+    }
+
+
+def _patch_review_executor(monkeypatch, review_calls, entered, finish):
+    from core.web.services.team_workflow import (
+        hypothesis_review_executor,
+        research_memory_context,
+    )
+
+    def fake_review(context, **kwargs):
+        review_calls.append(str(kwargs.get("round_id")))
+        entered.set()
+        finish.wait(timeout=10)
+        return _complete_review_output()
+
+    monkeypatch.setattr(
+        research_memory_context,
+        "build_hypothesis_review_context",
+        lambda **_kwargs: {"contextId": "ctx-race"},
+    )
+    monkeypatch.setattr(
+        hypothesis_review_executor, "execute_hypothesis_review", fake_review
+    )
+
+
+def test_concurrent_group_generation_runs_executor_exactly_once(
+    tmp_path, monkeypatch
+) -> None:
+    """Two aligned triggers for one fan-in group spend the review budget once.
+
+    The loser trigger either reuses the stored round or is rejected with the
+    structured in-progress error; it never double-spends the executor and
+    never leaves a content-conflict ghost failure trace.
+    """
+    import threading
+
+    team_id = _race_env(tmp_path, monkeypatch)
+
+    review_calls: list[str] = []
+    executor_entered = threading.Event()
+    finish_review = threading.Event()
+    _patch_review_executor(
+        monkeypatch, review_calls, executor_entered, finish_review
+    )
+
+    barrier = threading.Barrier(2)
+    results: list[dict] = []
+
+    def trigger():
+        barrier.wait(timeout=10)
+        try:
+            results.append(
+                hypothesis_rounds_service.generate_hypothesis_round_from_meeting(
+                    team_id, "meeting-a", dict(_group_payload())
+                )
+            )
+        except (
+            hypothesis_rounds_service.ResearchHypothesisRoundGenerationInProgressError
+        ) as exc:
+            results.append(
+                {"status": "generation_in_progress", "roundId": exc.round_id}
+            )
+
+    threads = [threading.Thread(target=trigger) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    assert executor_entered.wait(timeout=10)
+    finish_review.set()
+    for thread in threads:
+        thread.join(timeout=30)
+    assert not any(thread.is_alive() for thread in threads)
+    assert len(results) == 2
+
+    statuses = [str(item.get("status")) for item in results]
+    assert statuses.count("created") == 1
+    assert set(statuses) <= {"created", "reused", "generation_in_progress"}
+    assert len(review_calls) == 1
+    assert hypothesis_rounds_service.list_hypothesis_rounds(team_id)[
+        "roundCount"
+    ] == 1
+    failures = hypothesis_rounds_service.list_hypothesis_round_failures(team_id)
+    assert failures["failureCount"] == 0
+    assert failures["openFailureCount"] == 0
+
+
+def test_in_flight_generation_rejects_second_trigger_then_reuses(
+    tmp_path, monkeypatch
+) -> None:
+    """A live generation rejects the second trigger; later replays reuse free."""
+    import threading
+
+    team_id = _race_env(tmp_path, monkeypatch)
+
+    review_calls: list[str] = []
+    executor_entered = threading.Event()
+    finish_review = threading.Event()
+    _patch_review_executor(
+        monkeypatch, review_calls, executor_entered, finish_review
+    )
+
+    worker_result: dict = {}
+    worker_errors: list[BaseException] = []
+
+    def worker():
+        try:
+            worker_result.update(
+                hypothesis_rounds_service.generate_hypothesis_round_from_meeting(
+                    team_id, "meeting-a", dict(_group_payload())
+                )
+            )
+        except BaseException as exc:  # noqa: BLE001 - surfaced by the asserts
+            worker_errors.append(exc)
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    assert executor_entered.wait(timeout=10)
+
+    # While the first generation holds the in-flight slot, the second trigger
+    # is rejected fast with the structured error: no executor run, no queuing.
+    with pytest.raises(
+        hypothesis_rounds_service.ResearchHypothesisRoundGenerationInProgressError
+    ) as excinfo:
+        hypothesis_rounds_service.generate_hypothesis_round_from_meeting(
+            team_id, "meeting-a", dict(_group_payload())
+        )
+    assert excinfo.value.round_id
+    assert excinfo.value.team_id == team_id
+    assert len(review_calls) == 1
+
+    finish_review.set()
+    thread.join(timeout=30)
+    assert not worker_errors
+    assert worker_result["status"] == "created"
+
+    # Once the winner stored the round, a replay reuses it with zero
+    # additional executor calls (pre-read reuse, not create-time byte match).
+    replay = hypothesis_rounds_service.generate_hypothesis_round_from_meeting(
+        team_id, "meeting-a", dict(_group_payload())
+    )
+    assert replay["status"] == "reused"
+    assert replay["round"]["roundId"] == worker_result["round"]["roundId"]
+    assert replay["closed"] is True
+    assert replay["review"]["contextId"] == "ctx-race"
+    assert len(review_calls) == 1
+    assert hypothesis_rounds_service.list_hypothesis_rounds(team_id)[
+        "roundCount"
+    ] == 1
