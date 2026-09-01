@@ -3370,7 +3370,10 @@ def _source_collection_run_context_bundle(team_id: str, run_id: str) -> dict[str
     all_records = [item for item in list(records_payload.get("records") or []) if isinstance(item, dict)]
     records, excluded_source_summary = s._source_collection_filter_active_records(team_id, run, all_records)
     source_candidates = s._source_collection_candidates_for_run(team_id, run_id)
-    active_snapshot = s._source_collection_work_run_store().load_active_snapshot(s.SOURCE_COLLECTION_WORK_RUN_KIND)
+    active_snapshot = s._source_collection_work_run_store().load_active_snapshot_for_run(
+        s.SOURCE_COLLECTION_WORK_RUN_KIND,
+        run_id,
+    )
     active_snapshot = s._decorate_source_collection_work_run_snapshot(
         active_snapshot,
         team_id=team_id,

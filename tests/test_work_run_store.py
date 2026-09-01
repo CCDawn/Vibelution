@@ -1,5 +1,6 @@
 import json
 import os
+import threading
 from datetime import datetime, timezone
 
 import pytest
@@ -480,3 +481,132 @@ def test_evolution_store_delegates_to_work_run_store(tmp_path, monkeypatch):
     assert json.loads((tmp_path / "evolution" / "supervised" / "runs" / "supervised_1.json").read_text(encoding="utf-8"))["status"] == "queued"
     assert evolution_store.load_active_run_snapshot("supervised")["runId"] == "supervised_1"
     assert evolution_store.load_latest_run_snapshot("supervised")["runId"] == "supervised_1"
+
+
+def _running_snapshot(run_id: str) -> dict:
+    return {"runId": run_id, "runKind": "source_collection_run", "status": "running", "currentPhase": "running"}
+
+
+def _terminal_snapshot(run_id: str) -> dict:
+    return {
+        "runId": run_id,
+        "runKind": "source_collection_run",
+        "status": "completed",
+        "currentPhase": "completed",
+        "finishedAt": "2026-09-01T00:00:00Z",
+    }
+
+
+def test_work_run_store_terminal_persist_keeps_other_run_active(tmp_path):
+    store = WorkRunStore(root=tmp_path / "work_runs")
+    kind = "source_collection_run"
+
+    store.persist_snapshot(kind, _running_snapshot("run_a"), active_run_id="run_a")
+    store.persist_snapshot(kind, _running_snapshot("run_b"), active_run_id="run_b")
+
+    assert store.load_active_run_ids(kind) == ["run_a", "run_b"]
+
+    # Run A finishes and persists its terminal state with the legacy
+    # ``active_run_id=""`` form; run B must keep its active mark.
+    store.persist_snapshot(kind, _terminal_snapshot("run_a"), active_run_id="")
+
+    assert store.load_active_run_ids(kind) == ["run_b"]
+    assert store.load_active_snapshot(kind)["runId"] == "run_b"
+    assert store.load_active_snapshot_for_run(kind, "run_a") is None
+    assert store.load_active_snapshot_for_run(kind, "run_b")["runId"] == "run_b"
+    index = store.load_run_index(kind)
+    assert index["activeRunId"] == "run_b"
+    assert index["activeRunIds"] == ["run_b"]
+
+
+def test_work_run_store_active_set_converges_after_all_runs_finish(tmp_path):
+    store = WorkRunStore(root=tmp_path / "work_runs")
+    kind = "source_collection_run"
+
+    store.persist_snapshot(kind, _running_snapshot("run_a"), active_run_id="run_a")
+    store.persist_snapshot(kind, _running_snapshot("run_b"), active_run_id="run_b")
+    store.persist_snapshot(kind, _terminal_snapshot("run_a"), active_run_id="")
+    store.persist_snapshot(kind, _terminal_snapshot("run_b"), active_run_id="run_b")
+
+    assert store.load_active_run_ids(kind) == []
+    assert store.load_active_snapshot(kind) is None
+    assert store.load_active_snapshots(kind) == []
+    index = store.load_run_index(kind)
+    assert index["activeRunId"] == ""
+    assert index["activeRunIds"] == []
+    # Latest projection still resolves after convergence.
+    assert store.load_latest_snapshot(kind)["runId"] == "run_b"
+
+
+def test_work_run_store_concurrent_persist_keeps_both_active_marks(tmp_path):
+    store = WorkRunStore(root=tmp_path / "work_runs")
+    kind = "source_collection_run"
+    barrier = threading.Barrier(2)
+    errors: list[Exception] = []
+
+    def persist(run_id: str) -> None:
+        try:
+            barrier.wait(timeout=10)
+            store.persist_snapshot(kind, _running_snapshot(run_id), active_run_id=run_id)
+        except Exception as exc:  # pragma: no cover - surfaced via assertion
+            errors.append(exc)
+
+    threads = [threading.Thread(target=persist, args=(run_id,)) for run_id in ("run_a", "run_b")]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+
+    assert errors == []
+    assert sorted(store.load_active_run_ids(kind)) == ["run_a", "run_b"]
+    assert store.load_active_snapshot_for_run(kind, "run_a") is not None
+    assert store.load_active_snapshot_for_run(kind, "run_b") is not None
+    assert store.load_snapshot(kind, "run_a")["runId"] == "run_a"
+    assert store.load_snapshot(kind, "run_b")["runId"] == "run_b"
+
+
+def test_work_run_store_reads_legacy_single_active_field(tmp_path):
+    store = WorkRunStore(root=tmp_path / "work_runs")
+    kind = "source_collection_run"
+    runs_dir = store.runs_dir(kind)
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    (runs_dir / "legacy_run.json").write_text(
+        json.dumps({"runId": "legacy_run", "runKind": kind, "status": "running"}),
+        encoding="utf-8",
+    )
+    store.index_path(kind).write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "updatedAt": "2026-06-08T00:00:00Z",
+                "activeRunId": "legacy_run",
+                "latestRunId": "legacy_run",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    # Index has no ``activeRunIds`` field; readers must fall back to the
+    # legacy single-value field without changing behavior.
+    assert store.load_active_run_ids(kind) == ["legacy_run"]
+    assert store.load_active_snapshot(kind)["runId"] == "legacy_run"
+    assert store.load_active_snapshots(kind)[-1]["runId"] == "legacy_run"
+    assert store.load_active_snapshot_for_run(kind, "legacy_run")["runId"] == "legacy_run"
+    assert store.load_active_snapshot_for_run(kind, "other_run") is None
+
+    # A legacy single-value save keeps defining the whole active set.
+    store.save_run_index(kind, active_run_id="", latest_run_id="legacy_run", emit_event=False)
+    assert store.load_active_run_ids(kind) == []
+    assert store.load_active_snapshot(kind) is None
+
+
+def test_work_run_store_list_lifecycle_candidates_include_all_active_runs(tmp_path):
+    store = WorkRunStore(root=tmp_path / "work_runs")
+    kind = "source_collection_run"
+
+    store.persist_snapshot(kind, _running_snapshot("run_a"), active_run_id="run_a")
+    store.persist_snapshot(kind, _running_snapshot("run_b"), active_run_id="run_b")
+
+    candidates = {item["runId"] for item in store.list_lifecycle_candidate_snapshots(kind)}
+    assert {"run_a", "run_b"} <= candidates

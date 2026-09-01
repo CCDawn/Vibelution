@@ -2126,6 +2126,22 @@ def test_launcher_active_work_guard_ignores_superseded_worktree_snapshot(tmp_pat
     )
     monkeypatch.setattr(work_run_store, "WORK_RUNS_DIR", work_runs_dir)
 
+    # Multi-slot active sets: another run's terminal persist no longer clears
+    # the superseded run's own active mark, so the guard keeps blocking until
+    # the superseded run itself is terminalized.
+    assert launcher_service.launcher_active_work_runs() != []
+
+    store.persist_snapshot(
+        "supervised_worktree_evolution_run",
+        {
+            "runId": "worktree-superseded",
+            "runKind": "supervised_worktree_evolution_run",
+            "status": "superseded",
+            "finishedAt": datetime.now(timezone.utc).isoformat(),
+        },
+        active_run_id="",
+    )
+
     assert launcher_service.launcher_active_work_runs() == []
 
 

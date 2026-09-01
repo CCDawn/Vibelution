@@ -6,6 +6,7 @@ import json
 import os
 import re
 import tempfile
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -19,9 +20,14 @@ from .constants import PROJECT_ROOT, RUNTIME_MANAGER_DIR
 
 WORK_RUNS_DIR = RUNTIME_MANAGER_DIR / "work_runs"
 RECENT_RUN_IDS_LIMIT = 100
+ACTIVE_RUN_IDS_LIMIT = 64
 WRITE_RETRY_TIMEOUT_SECONDS = 5.0
 READ_RETRY_ATTEMPTS = 5
 READ_RETRY_DELAY_SECONDS = 0.05
+# Index updates are read-modify-write across processes of store instances; a
+# module-level reentrant lock keeps concurrent persist/delete RMW cycles from
+# clobbering each other's active-run-id set within one process.
+_STORE_LOCK = threading.RLock()
 _SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 _ACTIVE_WORK_BLOCKING_STATUSES = {
     "",
@@ -93,6 +99,7 @@ def _default_index() -> dict[str, Any]:
         "version": 1,
         "updatedAt": now,
         "activeRunId": "",
+        "activeRunIds": [],
         "latestRunId": "",
         "recentRunIds": [],
     }
@@ -344,6 +351,43 @@ def _bounded_recent_run_ids(values: Any, latest_run_id: str = "") -> list[str]:
     return result
 
 
+def _index_active_run_ids(index: dict[str, Any]) -> list[str]:
+    """Return the raw active-run-id list from an index payload.
+
+    Prefers the multi-slot ``activeRunIds`` field; falls back to the legacy
+    single ``activeRunId`` value when the set field is missing or empty so
+    indexes written before multi-slot support keep resolving their active run.
+    """
+
+    raw_values = index.get("activeRunIds")
+    values = [str(item or "").strip() for item in raw_values] if isinstance(raw_values, list) else []
+    if values:
+        return values
+    legacy_value = str(index.get("activeRunId") or "").strip()
+    return [legacy_value] if legacy_value else []
+
+
+def _bounded_active_run_ids(values: Any) -> list[str]:
+    """Normalize an active-run-id set: safe ids only, ordered, bounded."""
+
+    seen: set[str] = set()
+    result: list[str] = []
+    raw_values = values if isinstance(values, list) else [values]
+    for raw_run_id in raw_values:
+        run_id = str(raw_run_id or "").strip()
+        if not run_id or run_id in seen:
+            continue
+        try:
+            normalized = normalize_run_id(run_id)
+        except ValueError:
+            continue
+        seen.add(normalized)
+        result.append(normalized)
+        if len(result) >= ACTIVE_RUN_IDS_LIMIT:
+            break
+    return result
+
+
 def _bounded_snapshot_limit(limit: int | None) -> int | None:
     if limit is None:
         return None
@@ -422,32 +466,46 @@ class WorkRunStore:
         active_run_id: str = "",
         latest_run_id: str = "",
         recent_run_ids: Iterable[str] | None = None,
+        active_run_ids: Iterable[str] | None = None,
         emit_event: bool = True,
     ) -> dict[str, Any]:
-        payload = self.load_run_index(run_kind)
-        next_latest_run_id = str(latest_run_id or "").strip()
-        next_recent_run_ids = _bounded_recent_run_ids(
-            payload.get("recentRunIds") if recent_run_ids is None else recent_run_ids,
-            latest_run_id=next_latest_run_id,
-        )
-        payload.update(
-            {
-                "updatedAt": _now_iso(),
-                "activeRunId": str(active_run_id or "").strip(),
-                "latestRunId": next_latest_run_id,
-                "recentRunIds": next_recent_run_ids,
-            }
-        )
-        self.ensure_kind_dirs(run_kind)
-        _atomic_write_json(self.index_path(run_kind), payload)
+        with _STORE_LOCK:
+            payload = self.load_run_index(run_kind)
+            next_latest_run_id = str(latest_run_id or "").strip()
+            next_recent_run_ids = _bounded_recent_run_ids(
+                payload.get("recentRunIds") if recent_run_ids is None else recent_run_ids,
+                latest_run_id=next_latest_run_id,
+            )
+            # ``active_run_ids`` carries the multi-slot set; when omitted the
+            # legacy single-value argument defines the whole set (empty string
+            # clears it), preserving pre-multi-slot callers.
+            raw_active_run_ids = (
+                list(active_run_ids)
+                if active_run_ids is not None
+                else [active_run_id]
+            )
+            next_active_run_ids = _bounded_active_run_ids(raw_active_run_ids)
+            next_active_run_id = next_active_run_ids[-1] if next_active_run_ids else ""
+            payload.update(
+                {
+                    "updatedAt": _now_iso(),
+                    "activeRunId": next_active_run_id,
+                    "activeRunIds": next_active_run_ids,
+                    "latestRunId": next_latest_run_id,
+                    "recentRunIds": next_recent_run_ids,
+                }
+            )
+            self.ensure_kind_dirs(run_kind)
+            _atomic_write_json(self.index_path(run_kind), payload)
         if emit_event:
             _record_work_run_event(
                 "state",
                 "work_run.index.saved",
                 run_kind=run_kind,
-                run_id=str(latest_run_id or active_run_id or "").strip(),
+                run_id=str(latest_run_id or next_active_run_id or "").strip(),
                 fields={
-                    "activeRunId": str(active_run_id or "").strip(),
+                    "activeRunId": next_active_run_id,
+                    "activeRunIds": next_active_run_ids,
                     "latestRunId": next_latest_run_id,
                     "recentRunCount": len(next_recent_run_ids),
                     "indexPath": str(self.index_path(run_kind)),
@@ -496,33 +554,48 @@ class WorkRunStore:
         effective_active_run_id = requested_active_run_id
         if requested_active_run_id == run_id and not _snapshot_blocks_active_index(snapshot):
             effective_active_run_id = ""
-        previous_payload = self.load_snapshot(run_kind, run_id)
-        previous_signature = (
-            _snapshot_lifecycle_signature(previous_payload, active_run_id=effective_active_run_id)
-            if previous_payload
-            else ()
-        )
-        current_signature = _snapshot_lifecycle_signature(payload, active_run_id=effective_active_run_id)
-        current_index = self.load_run_index(run_kind)
-        current_recent_run_ids = _bounded_recent_run_ids(current_index.get("recentRunIds"))
-        index_already_current = (
-            str(current_index.get("activeRunId") or "").strip() == effective_active_run_id
-            and str(current_index.get("latestRunId") or "").strip() == run_id
-            and bool(current_recent_run_ids)
-            and current_recent_run_ids[0] == run_id
-        )
-        if previous_payload == payload:
-            if not index_already_current:
-                self.save_run_index(
-                    run_kind,
-                    active_run_id=effective_active_run_id,
-                    latest_run_id=run_id,
-                    emit_event=False,
-                )
-            return payload
-        self.ensure_kind_dirs(run_kind)
-        _atomic_write_json(self.runs_dir(run_kind) / f"{run_id}.json", payload)
-        saved_index = self.save_run_index(run_kind, active_run_id=effective_active_run_id, latest_run_id=run_id, emit_event=False)
+        with _STORE_LOCK:
+            previous_payload = self.load_snapshot(run_kind, run_id)
+            previous_signature = (
+                _snapshot_lifecycle_signature(previous_payload, active_run_id=effective_active_run_id)
+                if previous_payload
+                else ()
+            )
+            current_signature = _snapshot_lifecycle_signature(payload, active_run_id=effective_active_run_id)
+            current_index = self.load_run_index(run_kind)
+            current_active_run_ids = _bounded_active_run_ids(_index_active_run_ids(current_index))
+            # Multi-slot semantics: this persist only mutates this run's own
+            # membership. Marking this run active adds it; a terminal or
+            # non-active declaration removes just this run so concurrent runs
+            # keep their own active marks.
+            next_active_run_ids = list(current_active_run_ids)
+            if effective_active_run_id == run_id:
+                if run_id not in next_active_run_ids:
+                    next_active_run_ids.append(run_id)
+            else:
+                next_active_run_ids = [item for item in next_active_run_ids if item != run_id]
+            if effective_active_run_id and effective_active_run_id != run_id and effective_active_run_id not in next_active_run_ids:
+                next_active_run_ids.append(effective_active_run_id)
+            next_active_run_id = next_active_run_ids[-1] if next_active_run_ids else ""
+            current_recent_run_ids = _bounded_recent_run_ids(current_index.get("recentRunIds"))
+            index_already_current = (
+                current_active_run_ids == next_active_run_ids
+                and str(current_index.get("latestRunId") or "").strip() == run_id
+                and bool(current_recent_run_ids)
+                and current_recent_run_ids[0] == run_id
+            )
+            if previous_payload == payload:
+                if not index_already_current:
+                    self.save_run_index(
+                        run_kind,
+                        active_run_ids=next_active_run_ids,
+                        latest_run_id=run_id,
+                        emit_event=False,
+                    )
+                return payload
+            self.ensure_kind_dirs(run_kind)
+            _atomic_write_json(self.runs_dir(run_kind) / f"{run_id}.json", payload)
+            saved_index = self.save_run_index(run_kind, active_run_ids=next_active_run_ids, latest_run_id=run_id, emit_event=False)
         status = str(payload.get("status") or "").strip()
         phase = str(payload.get("phase") or payload.get("currentPhase") or "").strip()
         lifecycle_status = status in {
@@ -579,11 +652,40 @@ class WorkRunStore:
         payload = _load_json(self.runs_dir(run_kind) / f"{normalized}.json")
         return payload or None
 
+    def load_active_run_ids(self, run_kind: str) -> list[str]:
+        """Return the active-run-id set for a kind, newest mark last."""
+
+        return _bounded_active_run_ids(_index_active_run_ids(self.load_run_index(run_kind)))
+
     def load_active_snapshot(self, run_kind: str) -> dict[str, Any] | None:
-        active_run_id = str(self.load_run_index(run_kind).get("activeRunId") or "").strip()
-        if not active_run_id:
+        """Return the most recent resolvable active snapshot for a kind."""
+
+        for run_id in reversed(self.load_active_run_ids(run_kind)):
+            payload = self.load_snapshot(run_kind, run_id)
+            if payload is not None:
+                return payload
+        return None
+
+    def load_active_snapshots(self, run_kind: str) -> list[dict[str, Any]]:
+        """Return every resolvable active snapshot, oldest mark first."""
+
+        snapshots: list[dict[str, Any]] = []
+        for run_id in self.load_active_run_ids(run_kind):
+            payload = self.load_snapshot(run_kind, run_id)
+            if payload is not None:
+                snapshots.append(payload)
+        return snapshots
+
+    def load_active_snapshot_for_run(self, run_kind: str, run_id: str) -> dict[str, Any] | None:
+        """Return the active snapshot of one run, or None when not marked active."""
+
+        try:
+            normalized = normalize_run_id(run_id)
+        except ValueError:
             return None
-        return self.load_snapshot(run_kind, active_run_id)
+        if normalized not in self.load_active_run_ids(run_kind):
+            return None
+        return self.load_snapshot(run_kind, normalized)
 
     def load_latest_snapshot(self, run_kind: str) -> dict[str, Any] | None:
         latest_run_id = str(self.load_run_index(run_kind).get("latestRunId") or "").strip()
@@ -635,10 +737,10 @@ class WorkRunStore:
         if not runs_dir.exists():
             return []
         index = self.load_run_index(run_kind)
-        active_run_id = str(index.get("activeRunId") or "").strip()
+        active_run_ids = _bounded_active_run_ids(_index_active_run_ids(index))
         candidate_run_ids: list[str] = []
         seen: set[str] = set()
-        for run_id in [active_run_id, *_bounded_recent_run_ids(index.get("recentRunIds"))]:
+        for run_id in [*active_run_ids, *_bounded_recent_run_ids(index.get("recentRunIds"))]:
             if run_id and run_id not in seen:
                 seen.add(run_id)
                 candidate_run_ids.append(run_id)
@@ -679,44 +781,46 @@ class WorkRunStore:
         normalized = normalize_run_id(run_id)
         runs_dir = self.runs_dir(run_kind)
         target = runs_dir / f"{normalized}.json"
-        index = self.load_run_index(run_kind)
-        active_run_id = str(index.get("activeRunId") or "").strip()
-        latest_run_id = str(index.get("latestRunId") or "").strip()
-        existed = target.exists()
+        with _STORE_LOCK:
+            index = self.load_run_index(run_kind)
+            active_run_ids = _bounded_active_run_ids(_index_active_run_ids(index))
+            latest_run_id = str(index.get("latestRunId") or "").strip()
+            existed = target.exists()
 
-        try:
-            target.unlink(missing_ok=True)
-        except OSError:
-            if target.exists():
-                raise
+            try:
+                target.unlink(missing_ok=True)
+            except OSError:
+                if target.exists():
+                    raise
 
-        cleared_active = active_run_id == normalized
-        cleared_latest = latest_run_id == normalized
-        next_active_id = "" if cleared_active else active_run_id
-        next_latest_id = latest_run_id
-        next_recent_run_ids = [
-            run_id
-            for run_id in _bounded_recent_run_ids(index.get("recentRunIds"))
-            if run_id != normalized
-        ]
+            cleared_active = normalized in active_run_ids
+            cleared_latest = latest_run_id == normalized
+            next_active_run_ids = [item for item in active_run_ids if item != normalized]
+            next_active_id = next_active_run_ids[-1] if next_active_run_ids else ""
+            next_latest_id = latest_run_id
+            next_recent_run_ids = [
+                item
+                for item in _bounded_recent_run_ids(index.get("recentRunIds"))
+                if item != normalized
+            ]
 
-        if cleared_latest:
-            candidates: list[dict[str, Any]] = []
-            for path in sorted(runs_dir.glob("*.json")):
-                if path.name == target.name:
-                    continue
-                payload = _load_json(path)
-                if payload:
-                    candidates.append(payload)
-            next_latest_id = str(max(candidates, key=_run_sort_key).get("runId") or "") if candidates else ""
+            if cleared_latest:
+                candidates: list[dict[str, Any]] = []
+                for path in sorted(runs_dir.glob("*.json")):
+                    if path.name == target.name:
+                        continue
+                    payload = _load_json(path)
+                    if payload:
+                        candidates.append(payload)
+                next_latest_id = str(max(candidates, key=_run_sort_key).get("runId") or "") if candidates else ""
 
-        if existed or cleared_active or cleared_latest:
-            self.save_run_index(
-                run_kind,
-                active_run_id=next_active_id,
-                latest_run_id=next_latest_id,
-                recent_run_ids=next_recent_run_ids,
-            )
+            if existed or cleared_active or cleared_latest:
+                self.save_run_index(
+                    run_kind,
+                    active_run_ids=next_active_run_ids,
+                    latest_run_id=next_latest_id,
+                    recent_run_ids=next_recent_run_ids,
+                )
 
         _record_work_run_event(
             "state",
