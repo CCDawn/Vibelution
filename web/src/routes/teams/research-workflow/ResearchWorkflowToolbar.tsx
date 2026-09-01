@@ -168,6 +168,7 @@ export function ResearchWorkflowToolbar(props: {
     { id: "question", label: isZh ? "题目档案" : "Question archive", onSelect: () => props.onOpenPanel("question") },
     { id: "team", label: isZh ? "成员与讨论" : "Members", onSelect: () => props.onOpenPanel("team") },
     { id: "evidence", label: isZh ? "证据图谱" : "Evidence graph", onSelect: () => props.onOpenPanel("evidence") },
+    { id: "leaderboard", label: isZh ? "假说排行" : "Hypothesis leaderboard", onSelect: () => props.onOpenPanel("leaderboard") },
     { id: "agents", label: "Agent", onSelect: () => props.onOpenPanel("agents") },
     { id: "timeline", label: isZh ? RUN_TIMELINE_TERM.zh : RUN_TIMELINE_TERM.en, onSelect: () => props.onOpenPanel("timeline") },
   ];

@@ -12,6 +12,7 @@ export { ChallengeQuestionDetailPanel } from "./challenge-cup/ChallengeQuestionD
 export { ChallengeMvpProgressPanel } from "./research-workflow/ChallengeMvpProgressPanel";
 export { EvidenceGraphView } from "./research-workflow/EvidenceGraphView";
 export { HypothesisFirstNodeInspector } from "./research-workflow/HypothesisFirstNodeInspector";
+export { HypothesisLeaderboardPanel } from "./research-workflow/HypothesisLeaderboardPanel";
 export { ResearchAgentBindingPanel } from "./research-workflow/ResearchAgentBindingPanel";
 export { ResearchAnomalyInboxPanel } from "./research-workflow/ResearchAnomalyInboxPanel";
 export { ResearchProcessDefinitionNodePanel } from "./research-workflow/ResearchProcessDefinitionNodePanel";

@@ -22,6 +22,7 @@ const PANELS = new Set<ResearchProcessPanel>([
   "evidence",
   "progress",
   "question",
+  "leaderboard",
 ]);
 
 export function parseResearchProcessLocation(searchParams: URLSearchParams): ResearchProcessLocation {

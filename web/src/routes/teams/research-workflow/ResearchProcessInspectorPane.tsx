@@ -19,6 +19,7 @@ import {
   ChallengeQuestionDetailPanel,
   EvidenceGraphView,
   HypothesisFirstNodeInspector,
+  HypothesisLeaderboardPanel,
   ResearchAgentBindingPanel,
   ResearchAnomalyInboxPanel,
   ResearchProcessDefinitionNodePanel,
@@ -291,6 +292,15 @@ export function ResearchProcessInspectorPane(props: {
     return state.run
       ? <EvidenceGraphView runId={state.run.runId} nodeId="evidence_relations" teamId={scope.teamId} runVersion={state.run.runVersion} />
       : <ResearchCenteredEmptyState title={isZh ? "证据关系尚不可用" : "Evidence relations unavailable"} />;
+  }
+  if (scope.panel === "leaderboard") {
+    return (
+      <HypothesisLeaderboardPanel
+        teamId={scope.teamId}
+        questionId={scope.questionId}
+        lang={lang}
+      />
+    );
   }
   if (scope.panel === "timeline") {
     return <ResearchRunTimeline run={state.run} projection={state.projection} insights={state.insights} />;

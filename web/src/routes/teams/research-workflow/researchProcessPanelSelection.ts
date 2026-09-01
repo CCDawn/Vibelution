@@ -6,7 +6,8 @@ export type ResearchProcessPanel =
   | "launch"
   | "evidence"
   | "progress"
-  | "question";
+  | "question"
+  | "leaderboard";
 
 export const RESEARCH_PROCESS_INSPECTOR_CLOSED = "closed";
 
@@ -17,6 +18,7 @@ const RESEARCH_PROCESS_TOOL_PANELS: ReadonlySet<ResearchProcessPanel> = new Set(
   "evidence",
   "progress",
   "launch",
+  "leaderboard",
 ]);
 
 /**

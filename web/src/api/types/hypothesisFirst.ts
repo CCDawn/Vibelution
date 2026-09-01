@@ -310,6 +310,19 @@ export type MeetingClosureApprovePayload = {
 // Hypothesis rounds (HF-3)
 // ---------------------------------------------------------------------------
 
+/**
+ * One seven-dimension audit review row attached to a round candidate
+ * (extension field; DEV fixture rounds may omit it entirely). Dimensions use
+ * the canonical `REQUIRED_REVIEW_DIMENSIONS` snake_case keys.
+ */
+export type HypothesisCandidateDimensionReview = {
+  dimension: string;
+  rating: "insufficient" | "weak" | "mixed" | "adequate" | "strong" | (string & {});
+  rationale: string;
+  evidence_refs: string[];
+  reviewer: string;
+};
+
 export type HypothesisRoundCandidate = {
   candidateId: string;
   claim: string;
@@ -317,6 +330,10 @@ export type HypothesisRoundCandidate = {
   differenceFromAlternatives: string;
   lineageRefs: string[];
   scores: Record<string, number>;
+  /** Auxiliary diagnostics (replicability, scopeAlignment); optional. */
+  diagnostics?: Record<string, number>;
+  /** Seven-dimension audit review rows; optional extension field. */
+  dimensionReviews?: HypothesisCandidateDimensionReview[];
   reviewedBy: string;
   status: string;
 };
@@ -377,6 +394,8 @@ export type HypothesisRoundListResponse = {
   teamId: string;
   roundCount: number;
   rounds: HypothesisRoundRecord[];
+  /** Ledger lines quarantined during the list projection (fail-closed marker). */
+  corruptQuarantinedLineCount?: number;
   storagePath?: string;
 };
 
