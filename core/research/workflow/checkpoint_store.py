@@ -8,8 +8,9 @@ import base64
 import hashlib
 import json
 import sqlite3
+from contextlib import contextmanager
 from threading import RLock
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -448,10 +449,63 @@ def ensure_checkpoint_parent(path: Path) -> Path:
     return path
 
 
+# Fixed per-connection pragma policy for the checkpoint SQLite store.  After
+# parallelization the pump worker and HTTP threads open this store
+# concurrently through short-lived, per-call connections, so every handle
+# must run WAL with a busy timeout matching the workflow ledger policy
+# (core/research/workflow/ledger/runtime.py) instead of the sqlite3 module
+# default.  ``journal_size_limit`` only bounds WAL truncation after
+# auto-checkpoints; it never changes the checkpoint schema.
+CHECKPOINT_BUSY_TIMEOUT_MS = 5000
+CHECKPOINT_WAL_JOURNAL_SIZE_LIMIT_BYTES = 67108864
+
+
+def _connect_checkpoint_sqlite(path: Path, *, read_only: bool = False) -> sqlite3.Connection:
+    """Single connection factory for every checkpoint SQLite handle.
+
+    Connections are short-lived and owned by the opening call stack; none of
+    them is ever shared across threads.  The pragma sequence is fixed so a
+    connection cannot silently fall back to delete-journal defaults.
+    """
+
+    connection = sqlite3.connect(str(path), isolation_level=None, check_same_thread=False)
+    try:
+        # busy_timeout first so the pragma writes below wait on a competing
+        # writer instead of failing fast.
+        connection.execute(f"PRAGMA busy_timeout = {CHECKPOINT_BUSY_TIMEOUT_MS}")
+        connection.execute("PRAGMA journal_mode = WAL")
+        connection.execute("PRAGMA synchronous = NORMAL")
+        connection.execute(
+            f"PRAGMA journal_size_limit = {CHECKPOINT_WAL_JOURNAL_SIZE_LIMIT_BYTES}"
+        )
+        connection.execute("PRAGMA foreign_keys = ON")
+        if read_only:
+            connection.execute("PRAGMA query_only = ON")
+        return connection
+    except sqlite3.Error:
+        connection.close()
+        raise
+
+
 def open_sqlite_checkpointer(path: Path | str | None = None) -> Any:
-    """Return a context-manager SqliteSaver (use as `with open_sqlite_checkpointer() as cp:`)."""
+    """Return a context-manager SqliteSaver (use as `with open_sqlite_checkpointer() as cp:`).
+
+    The connection is created by :func:`_connect_checkpoint_sqlite` so the
+    LangGraph saver never opens an unconfigured (delete-journal, no
+    busy-timeout) handle behind our back.
+    """
+
     target = ensure_checkpoint_parent(Path(path) if path else default_checkpoint_path())
-    return SqliteSaver.from_conn_string(str(target))
+    connection = _connect_checkpoint_sqlite(target, read_only=False)
+
+    @contextmanager
+    def _saver() -> Iterator[Any]:
+        try:
+            yield SqliteSaver(connection)
+        finally:
+            connection.close()
+
+    return _saver()
 
 
 def assert_not_memory_saver(checkpointer: Any) -> None:
@@ -881,11 +935,7 @@ def _checkpoint_open_connection(path: Path, *, read_only: bool) -> sqlite3.Conne
             "checkpoint store is not available", code="checkpoint_store_missing"
         )
     try:
-        connection = sqlite3.connect(str(path), isolation_level=None)
-        connection.execute("PRAGMA foreign_keys = ON")
-        if read_only:
-            connection.execute("PRAGMA query_only = ON")
-        return connection
+        return _connect_checkpoint_sqlite(path, read_only=read_only)
     except sqlite3.Error as exc:
         raise CheckpointResetPortError(
             "checkpoint store cannot be opened", code="checkpoint_store_unavailable"

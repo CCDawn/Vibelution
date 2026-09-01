@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from typing import Any
 
 from langgraph.types import Command
@@ -11,9 +12,23 @@ from .graph_builder import compile_vertical_slice
 
 
 class VerticalSliceRuntime:
-    """Thin runtime around the 3-node HITL graph with SQLite checkpointer."""
+    """Thin runtime around the 3-node HITL graph with SQLite checkpointer.
+
+    Test-only harness: unlike the production checkpoint lane (pump worker and
+    per-operation handles), this object opens one SQLite connection in
+    ``__init__`` and holds it for the whole lifetime.  Never attach it to the
+    shared product checkpoint store; doing so emits a :class:`RuntimeWarning`.
+    """
 
     def __init__(self, checkpoint_path: str | None = None):
+        if checkpoint_path is None:
+            warnings.warn(
+                "VerticalSliceRuntime is a test-only harness that holds one "
+                "SQLite connection for its whole lifetime; pass an isolated "
+                "checkpoint_path instead of the shared product store.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
         self._checkpoint_path = checkpoint_path
         self._cm = open_sqlite_checkpointer(checkpoint_path)
         self._checkpointer = self._cm.__enter__()
