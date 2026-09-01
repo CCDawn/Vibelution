@@ -443,6 +443,89 @@ describe("HypothesisFirstMeetingOps automatic organization", () => {
     expect(mockedDraftMeetingSummary).toHaveBeenCalledTimes(1);
   });
 
+  it("surfaces the blocker instead of dropping a blocked automatic organization", async () => {
+    mockedDraftMeetingSummary.mockResolvedValueOnce({
+      schemaVersion: 1,
+      teamId: "team-1",
+      status: "blocked",
+      blocker: {
+        code: "discussion_has_no_completed_messages",
+        message: "讨论未产出可引用的成功发言，不能生成纪要",
+        remediationLabel: "重新发起讨论",
+      },
+      meetingRound: meetingRound("open"),
+    } as never);
+    render(AUTO_ACTION);
+    await act(async () => {
+      await vi.waitFor(() => expect(mockedDraftMeetingSummary).toHaveBeenCalledTimes(1));
+    });
+    await act(async () => {
+      await vi.waitFor(() => expect(container.textContent).toContain("自动整理暂未开始"));
+    });
+    expect(container.querySelector('[data-testid="draft-blocked-notice"]')).toBeTruthy();
+    expect(container.textContent).toContain("讨论未产出可引用的成功发言");
+    expect(container.textContent).toContain("重新发起讨论");
+  });
+
+  it("reports the number of running rounds when organization is blocked on them", async () => {
+    mockedDraftMeetingSummary.mockResolvedValueOnce({
+      schemaVersion: 1,
+      teamId: "team-1",
+      status: "blocked",
+      blocker: {
+        code: "discussion_round_running",
+        message: "讨论回合仍在进行，全部结束后才能生成纪要",
+        runningRoundIds: ["round-a", "round-b"],
+      },
+      meetingRound: meetingRound("open"),
+    } as never);
+    render(AUTO_ACTION);
+    await act(async () => {
+      await vi.waitFor(() => expect(container.textContent).toContain("自动整理暂未开始"));
+    });
+    expect(container.textContent).toContain("2 个讨论回合仍在进行");
+  });
+
+  it("shows the same blocker notice when a manual retry draft is blocked", async () => {
+    mockedFetchMeetingRound.mockResolvedValue({
+      schemaVersion: 1,
+      teamId: "team-1",
+      meetingRound: { ...meetingRound("summarizing"), summaryError: "timeout" },
+    });
+    mockedDraftMeetingSummary.mockResolvedValueOnce({
+      schemaVersion: 1,
+      teamId: "team-1",
+      status: "blocked",
+      blocker: {
+        code: "discussion_round_running",
+        message: "讨论回合仍在进行，全部结束后才能生成纪要",
+        runningRoundIds: ["round-live"],
+      },
+      meetingRound: meetingRound("summarizing"),
+    } as never);
+    render({
+      ...AUTO_ACTION,
+      stage: "generation_summarizing",
+      command: undefined,
+      commandLabel: undefined,
+      recovery: {
+        command: "retry_draft_summary",
+        label: "重试整理候选清单",
+        reason: "自动整理未完成",
+      },
+    });
+    await act(async () => {
+      await vi.waitFor(() => expect(container.textContent).toContain("重试整理候选清单"));
+    });
+    const retry = [...container.querySelectorAll("button")]
+      .find((button) => button.textContent?.includes("重试整理候选清单"));
+    await act(async () => {
+      retry?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await vi.waitFor(() => expect(container.textContent).toContain("自动整理暂未开始"));
+    });
+    expect(container.textContent).toContain("1 个讨论回合仍在进行");
+  });
+
   it("restarts a review discussion when every speaker failed", async () => {
     mockedFetchMeetingRound.mockResolvedValue({
       schemaVersion: 1,

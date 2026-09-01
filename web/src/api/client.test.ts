@@ -170,9 +170,13 @@ describe("fetchJson control token", () => {
     ]);
   });
 
-  it("preserves structured JSON error details for callers", async () => {
+  it("surfaces the problem code verbatim when a structured detail has no readable fields", async () => {
     const reports: unknown[] = [];
     setFetchJsonFailureReporter((report) => reports.push(report));
+    const structuredDetail = {
+      code: "active_work_restart_blocked",
+      activeWorkRuns: [{ kind: "chat_turn", runId: "turn-live" }],
+    };
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({
         ok: true,
@@ -185,36 +189,59 @@ describe("fetchJson control token", () => {
         ok: false,
         status: 409,
         headers: new Headers({ "content-type": "application/json" }),
-        json: async () => ({
-          detail: {
-            code: "active_work_restart_blocked",
-            activeWorkRuns: [{ kind: "chat_turn", runId: "turn-live" }],
-          },
-        }),
+        json: async () => ({ detail: structuredDetail }),
         text: async () => "",
       });
     vi.stubGlobal("fetch", fetchMock);
 
-    const expectedMessage = JSON.stringify({
-      detail: {
-        code: "active_work_restart_blocked",
-        activeWorkRuns: [{ kind: "chat_turn", runId: "turn-live" }],
-      },
-    });
-    await expect(fetchJson("/api/runtime/restart", { method: "POST" })).rejects.toThrow(expectedMessage);
+    await expect(fetchJson("/api/runtime/restart", { method: "POST" })).rejects.toThrow(
+      "active_work_restart_blocked",
+    );
 
     expect(reports).toEqual([
       {
         endpoint: "/api/runtime/restart",
         method: "POST",
         status: 409,
-        message: expectedMessage,
+        message: "active_work_restart_blocked",
         failureKind: "http",
       },
     ]);
   });
 
-  it("exposes HTTP status and stable problem code without changing the message", async () => {
+  it("falls back to compact truncated JSON when the structured detail is unreadable", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          header: "X-Vibelution-Control-Token",
+          controlToken: "test-token",
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 422,
+        headers: new Headers({ "content-type": "application/json" }),
+        json: async () => ({
+          detail: {
+            opaque: "x".repeat(400),
+          },
+        }),
+        text: async () => "",
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      await fetchJson("/api/probe", { method: "POST" });
+      expect.unreachable("expected the request to fail");
+    } catch (error) {
+      expect((error as Error).message.startsWith('{"detail":{"opaque":"xxx')).toBe(true);
+      expect((error as Error).message.endsWith("…")).toBe(true);
+      expect((error as Error).message.length).toBeLessThanOrEqual(241);
+    }
+  });
+
+  it("reads the server message out of a structured detail instead of showing JSON", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({
         ok: true,
@@ -237,10 +264,68 @@ describe("fetchJson control token", () => {
       status: 404,
       code: "catalog_question_unknown",
     });
-    await expect(result).rejects.toThrow(JSON.stringify({
-      detail: { code: "catalog_question_unknown", message: "unknown question" },
-    }));
-    await expect(result).rejects.toSatisfy((error: unknown) => isFetchJsonHttpError(error));
+    await expect(result).rejects.toThrow("unknown question");
+    await expect(result.catch((error: unknown) => {
+      expect(isFetchJsonHttpError(error)).toBe(true);
+      expect((error as { details?: unknown }).details).toEqual({
+        detail: { code: "catalog_question_unknown", message: "unknown question" },
+      });
+    })).resolves.toBeUndefined();
+  });
+
+  it("maps command_forbidden to plain language when the detail carries no message", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          header: "X-Vibelution-Control-Token",
+          controlToken: "test-token",
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 403,
+        headers: new Headers({ "content-type": "application/json" }),
+        json: async () => ({ detail: { code: "command_forbidden", message: "" } }),
+        text: async () => "",
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchJson("/api/teams/team-1/workflow-orchestration/hypothesis-first/commands", {
+      method: "POST",
+    })).rejects.toThrow("当前身份无权执行此操作");
+  });
+
+  it("appends readiness blockers as readable entries after the detail message", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          header: "X-Vibelution-Control-Token",
+          controlToken: "test-token",
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 412,
+        headers: new Headers({ "content-type": "application/json" }),
+        json: async () => ({
+          detail: {
+            code: "node_not_ready",
+            message: "节点尚未就绪",
+            blockers: [
+              "知识包缺少证据主张",
+              { code: "run_not_started", message: "正式运行尚未启动" },
+            ],
+          },
+        }),
+        text: async () => "",
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchJson("/api/teams/team-1/workflow-orchestration/hypothesis-first/commands", {
+      method: "POST",
+    })).rejects.toThrow("节点尚未就绪（阻塞项：知识包缺少证据主张；run_not_started：正式运行尚未启动）");
   });
 
   it("refreshes a rotated control token and retries the guarded request once", async () => {

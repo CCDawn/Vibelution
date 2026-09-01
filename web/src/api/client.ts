@@ -300,6 +300,99 @@ type FailureDetails = {
   payload: unknown;
 };
 
+export type UiLanguage = "zh" | "en";
+
+/**
+ * Best-effort UI language for transport-layer messages. The workbench writes
+ * `zh-CN`/`en` onto `documentElement.lang`; outside a document (tests, SSR)
+ * the product default (Chinese) wins.
+ */
+export function detectUiLanguage(): UiLanguage {
+  if (typeof document === "undefined") return "zh";
+  const lang = String(document.documentElement?.lang ?? "").trim().toLowerCase();
+  return lang.startsWith("en") ? "en" : "zh";
+}
+
+/**
+ * Human-readable copy for the structured problem codes the workflow routes
+ * return inside an object `detail` (see
+ * `core/web/routes/team_workflows/_errors.py` and the hypothesis-first
+ * command route). Mirrors the labels established by the node inspector's
+ * command-rejection parsing; unknown codes surface verbatim.
+ */
+const STRUCTURED_CODE_LABELS: Record<string, { zh: string; en: string }> = {
+  command_forbidden: {
+    zh: "当前身份无权执行此操作",
+    en: "You are not allowed to perform this action",
+  },
+  node_not_ready: {
+    zh: "节点尚未就绪",
+    en: "The node is not ready yet",
+  },
+  command_not_allowed: {
+    zh: "当前状态不允许该操作",
+    en: "The current state does not allow this action",
+  },
+  run_version_conflict: {
+    zh: "正式运行状态已变化，请刷新后重试",
+    en: "The formal run moved on; refresh and retry",
+  },
+};
+
+/** One readiness/decision blocker entry; mirrors the node inspector reader. */
+function structuredBlockerLabel(blocker: unknown): string {
+  if (typeof blocker === "string") return blocker.trim();
+  if (!blocker || typeof blocker !== "object" || Array.isArray(blocker)) return "";
+  const record = blocker as Record<string, unknown>;
+  const text = (value: unknown) => (typeof value === "string" ? value.trim() : "");
+  const title = text(record.title) || text(record.label) || text(record.code);
+  const detail = text(record.detail) || text(record.message);
+  if (title && detail && title !== detail) return `${title}：${detail}`;
+  return title || detail;
+}
+
+/** Bounded raw-JSON fallback for `detail` objects nothing could unpack. */
+function compactDetailJson(detail: unknown): string {
+  try {
+    const serialized = JSON.stringify({ detail });
+    const limit = 240;
+    return serialized.length > limit ? `${serialized.slice(0, limit)}…` : serialized;
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Turn a structured `detail` object into a readable sentence: prefer the
+ * server-authored message, list readiness blockers, and map known problem
+ * codes to plain language. Returns "" when nothing human-readable exists.
+ */
+function describeStructuredDetail(detail: unknown, lang: UiLanguage): string {
+  if (!detail || typeof detail !== "object" || Array.isArray(detail)) return "";
+  const record = detail as Record<string, unknown>;
+  const text = (value: unknown) => (typeof value === "string" ? value.trim() : "");
+  const code = text(record.code);
+  const message = text(record.message) || text(record.error);
+  const blockerTexts = (Array.isArray(record.blockers) ? record.blockers : [])
+    .map(structuredBlockerLabel)
+    .filter(Boolean);
+  const blockerSuffix = blockerTexts.length
+    ? (lang === "zh"
+      ? `（阻塞项：${blockerTexts.join("；")}）`
+      : ` (blocked by: ${blockerTexts.join("; ")})`)
+    : "";
+  if (message) return `${message}${blockerSuffix}`;
+  const knownLabel = code ? STRUCTURED_CODE_LABELS[code]?.[lang] : undefined;
+  if (knownLabel) return `${knownLabel}${blockerSuffix}`;
+  if (code) return `${code}${blockerSuffix}`;
+  if (blockerTexts.length) {
+    return lang === "zh"
+      ? `阻塞项：${blockerTexts.join("；")}`
+      : `Blocked by: ${blockerTexts.join("; ")}`;
+  }
+  return "";
+}
+
 async function readFailureDetails(response: Response): Promise<FailureDetails> {
   const contentType = response.headers.get("content-type") ?? "";
   let message = "";
@@ -317,7 +410,8 @@ async function readFailureDetails(response: Response): Promise<FailureDetails> {
       } else if (body.detail && typeof body.detail === "object") {
         const detail = body.detail as { code?: unknown };
         code = typeof detail.code === "string" ? detail.code : null;
-        message = JSON.stringify({ detail: body.detail });
+        message = describeStructuredDetail(body.detail, detectUiLanguage())
+          || compactDetailJson(body.detail);
       } else if (typeof body.message === "string") {
         message = body.message;
         code = typeof body.code === "string" ? body.code : null;

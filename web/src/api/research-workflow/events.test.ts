@@ -82,7 +82,7 @@ describe("replayResearchWorkflowEvents", () => {
     }
   });
 
-  it("fails closed when the replay cursor does not advance", async () => {
+  it("fails closed with a readable message when the replay cursor does not advance", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => ({
       ok: true,
       json: async () => ({
@@ -100,7 +100,56 @@ describe("replayResearchWorkflowEvents", () => {
 
     await expect(
       replayResearchWorkflowEvents({ runId: "run-a", teamId: "research-team" }),
-    ).rejects.toThrow("events_replay_cursor_stuck");
+    ).rejects.toThrow("事件回放游标停滞，建议刷新页面获取最新状态");
+  });
+
+  it("translates a truncated replay into a readable snapshot-authoritative message", async () => {
+    let calls = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo) => {
+      calls += 1;
+      const after = Number(new URL(String(input), "http://localhost").searchParams.get("afterSequence") ?? 0);
+      return {
+        ok: true,
+        json: async () => ({
+          runId: "run-a",
+          teamId: "research-team",
+          runVersion: 1,
+          latestEventSequence: 999,
+          afterSequence: after,
+          lastReturnedSequence: after,
+          hasMore: true,
+          nextAfterSequence: after + 1,
+          events: [],
+        }),
+      };
+    }));
+
+    await expect(
+      replayResearchWorkflowEvents({ runId: "run-a", teamId: "research-team" }),
+    ).rejects.toThrow("历史事件过多，回放已截断，时间线可能不完整；最新状态以快照为准");
+    expect(calls).toBe(32);
+  });
+
+  it("renders replay failure copy in English when the document language is en", async () => {
+    vi.stubGlobal("document", { documentElement: { lang: "en" } });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        runId: "run-a",
+        teamId: "research-team",
+        runVersion: 1,
+        latestEventSequence: 9,
+        afterSequence: 0,
+        lastReturnedSequence: 0,
+        hasMore: true,
+        nextAfterSequence: 0,
+        events: [],
+      }),
+    })));
+
+    await expect(
+      replayResearchWorkflowEvents({ runId: "run-a", teamId: "research-team" }),
+    ).rejects.toThrow("refresh the page to load the latest state");
   });
 });
 

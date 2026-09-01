@@ -1,5 +1,5 @@
 import type { WorkflowEventEnvelope } from "../types/research-workflow/events";
-import { fetchJson, fetchWithControl } from "../client";
+import { detectUiLanguage, fetchJson, fetchWithControl } from "../client";
 
 function requireTeamId(teamId: string): string {
   const normalized = String(teamId || "").trim();
@@ -42,6 +42,27 @@ export async function fetchResearchWorkflowEvents(options: {
 
 const MAX_REPLAY_PAGES = 32;
 
+/**
+ * Replay failures still surface through the run panel's error slot, but the
+ * raw transport codes read like gibberish to operators; translate them into
+ * the consequence plus the remediation instead.
+ */
+const REPLAY_ERROR_LABELS: Record<string, { zh: string; en: string }> = {
+  events_replay_truncated: {
+    zh: "历史事件过多，回放已截断，时间线可能不完整；最新状态以快照为准",
+    en: "Too many historical events: the replay was truncated and the timeline may be incomplete. The latest state is authoritative in the snapshot.",
+  },
+  events_replay_cursor_stuck: {
+    zh: "事件回放游标停滞，建议刷新页面获取最新状态",
+    en: "The event replay cursor stopped advancing; refresh the page to load the latest state.",
+  },
+};
+
+function replayError(code: keyof typeof REPLAY_ERROR_LABELS): Error {
+  const label = REPLAY_ERROR_LABELS[code];
+  return new Error(detectUiLanguage() === "en" ? label.en : label.zh);
+}
+
 export async function replayResearchWorkflowEvents(options: {
   runId: string;
   teamId: string;
@@ -61,11 +82,11 @@ export async function replayResearchWorkflowEvents(options: {
       return events.sort((left, right) => left.sequence - right.sequence);
     }
     if (page.nextAfterSequence <= afterSequence) {
-      throw new Error("events_replay_cursor_stuck");
+      throw replayError("events_replay_cursor_stuck");
     }
     afterSequence = page.nextAfterSequence;
   }
-  throw new Error("events_replay_truncated");
+  throw replayError("events_replay_truncated");
 }
 
 export function researchWorkflowStreamUrl(options: {

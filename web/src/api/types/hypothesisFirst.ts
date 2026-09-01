@@ -245,12 +245,30 @@ export type MeetingCollectionSkippedItem = {
   error?: string;
 };
 
+/**
+ * Why a summary-draft prepare was blocked (discussion still running / no
+ * completed statements); mirrors the blocker object built by
+ * `prepare_meeting_summary_draft` in the meeting runtime.
+ */
+export type MeetingSummaryBlocker = {
+  code?: string;
+  message?: string;
+  remediationLabel?: string;
+  runningRoundIds?: string[];
+};
+
 export type MeetingRoundMutationResponse = {
   schemaVersion: number;
   teamId: string;
   status: string;
   meetingRound: MeetingRoundRecord;
   digestDraft?: MeetingDigestDraft | null;
+  /**
+   * Present when the prepare-draft state machine returns
+   * `{status:"blocked", blocker}` instead of starting a summary; the UI must
+   * surface it rather than treat the mutation as a silent no-op.
+   */
+  blocker?: MeetingSummaryBlocker;
   /** Present when a close reports dropped evidence requests. */
   collection?: {
     skipped?: MeetingCollectionSkippedItem[];

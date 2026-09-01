@@ -90,6 +90,41 @@ function describePrepareBlocker(payload: unknown, isZh: boolean): string | null 
 }
 
 /**
+ * Detail text (without the headline) for a prepare-draft `{status:"blocked",
+ * blocker}` response on the automatic/manual draft path. Running rounds win
+ * because they explain the wait; otherwise the known-code copy or the server
+ * message is shown with the remediation label (or raw code) appended. Null
+ * when the response is not a blocked prepare result.
+ */
+function describeDraftBlockDetail(payload: unknown, isZh: boolean): string | null {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  const record = payload as Record<string, unknown>;
+  if (String(record.status ?? "") !== "blocked") return null;
+  const blocker = record.blocker;
+  if (!blocker || typeof blocker !== "object" || Array.isArray(blocker)) {
+    return isZh ? "系统暂时无法整理本轮结论" : "The system cannot organize this round right now";
+  }
+  const info = blocker as Record<string, unknown>;
+  const runningRoundIds = Array.isArray(info.runningRoundIds) ? info.runningRoundIds : [];
+  if (runningRoundIds.length) {
+    return isZh
+      ? `${runningRoundIds.length} 个讨论回合仍在进行，全部结束后才能整理结论`
+      : `${runningRoundIds.length} discussion round(s) still running; organization starts once all rounds finish`;
+  }
+  const remediation = String(info.remediationLabel ?? "").trim();
+  const code = String(info.code ?? "").trim();
+  const suffix = remediation || code
+    ? (isZh ? `（${remediation || code}）` : ` (${remediation || code})`)
+    : "";
+  const label = PREPARE_BLOCKER_LABELS[code];
+  if (label) return `${isZh ? label.zh : label.en}${suffix}`;
+  const message = String(info.message ?? "").trim();
+  if (message) return `${message}${suffix}`;
+  if (code) return code;
+  return isZh ? "系统暂时无法整理本轮结论" : "The system cannot organize this round right now";
+}
+
+/**
  * Reject responses come in two envelopes: a V2 command receipt wraps the
  * prepare-draft result in `result`, while the legacy digest-reject endpoint
  * returns the prepare/blocked shape directly. Unwrap to the inner response.
@@ -154,6 +189,10 @@ export function HypothesisFirstMeetingOps(props: {
     if (isHypothesisFirstCommandStateConflict(error)) invalidate();
   };
 
+  const [draftBlockedNotice, setDraftBlockedNotice] = useState<string | null>(null);
+  // The reject flow already renders the blocker from its own re-prepare
+  // result; the follow-up draft kick must not repeat it as a second notice.
+  const suppressDraftBlockNoticeRef = useRef(false);
   const draftMutation = useMutation<unknown, Error, void>({
     mutationFn: () => {
       if (canonicalAction?.command === "regenerate_summary") {
@@ -170,7 +209,15 @@ export function HypothesisFirstMeetingOps(props: {
       }
       return canonicalActionUnavailable();
     },
-    onSuccess: invalidate,
+    onSuccess: (payload) => {
+      // A blocked prepare resolves as a 200 success; surface the blocker so
+      // the auto-draft (one attempt per meeting) and the manual retry button
+      // never fail silently.
+      setDraftBlockedNotice(
+        describeDraftBlockDetail(prepareResponseFromMutationPayload(payload), isZh),
+      );
+      invalidate();
+    },
   });
   const autoDraftedMeetingIds = useRef(new Set<string>());
   const roundStatus = roundQuery.data?.meetingRound?.status ?? "";
@@ -314,6 +361,7 @@ export function HypothesisFirstMeetingOps(props: {
         prepareResponseFromMutationPayload(payload),
         isZh,
       );
+      if (blockerText) suppressDraftBlockNoticeRef.current = true;
       setRejectNotice(
         blockerText
           ? (isZh
@@ -611,6 +659,13 @@ export function HypothesisFirstMeetingOps(props: {
               {isZh ? "按现有结论关闭本轮（不发起资料搜集）" : "Close with the current conclusion (do not start collection)"}
             </VButton>
           ) : undefined}
+        />
+      ) : null}
+      {draftBlockedNotice ? (
+        <VErrorSummary
+          label={isZh ? "自动整理暂未开始" : "Automatic organization has not started"}
+          summary={draftBlockedNotice}
+          data-testid="draft-blocked-notice"
         />
       ) : null}
       {rejectNotice ? (
