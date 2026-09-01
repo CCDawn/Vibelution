@@ -153,10 +153,8 @@ export function cacheCalibrationSummaryLabel(
 
 
 
-export function formatAgentIdentityWithRole(name: string, role: string, fallback = "Agent") {
-  const cleanName = String(name || fallback || "Agent").trim() || "Agent";
-  const cleanRole = String(role || "").trim();
-  return cleanRole ? `${cleanName} · ${cleanRole}` : cleanName;
+export function formatAgentIdentityLabel(name: string, fallback = "Agent") {
+  return String(name || fallback || "Agent").trim() || "Agent";
 }
 
 

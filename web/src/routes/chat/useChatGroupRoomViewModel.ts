@@ -10,7 +10,7 @@ import type {
 import { participantAgentDisplayInfo } from "../agentDisplay";
 import {
   compactAgentRoleLabel,
-  formatAgentIdentityWithRole,
+  formatAgentIdentityLabel,
 } from "./chatRoutePresentation";
 
 export interface UseChatGroupRoomViewModelParams {
@@ -99,9 +99,9 @@ export function useChatGroupRoomViewModel({
         functionLabel: role || display.functionLabel,
         compactRole,
         avatarImageUrl: avatarImageUrlFrom(participantAgent, participantLike, fallback),
-        identityLabel: formatAgentIdentityWithRole(name, compactRole, fallback.participantId || "Agent"),
+        identityLabel: formatAgentIdentityLabel(name, fallback.participantId || "Agent"),
         fullIdentityLabel: [
-          formatAgentIdentityWithRole(name, role || display.functionLabel, fallback.participantId || "Agent"),
+          formatAgentIdentityLabel(name, fallback.participantId || "Agent"),
           display.modelLabel,
         ].filter(Boolean).join(" · "),
       };

@@ -4,7 +4,7 @@ import {
   avatarInitials,
   chatRoomModeLabel,
   compactAgentRoleLabel,
-  formatAgentIdentityWithRole,
+  formatAgentIdentityLabel,
   groupConsecutiveBy,
   shouldCollapseGroupMessage,
 } from "./chatRoutePresentation";
@@ -16,8 +16,9 @@ describe("chatRoutePresentation", () => {
     expect(chatRoomModeLabel({ id: "custom", label: "X" }, "en")).toBe("X");
   });
 
-  it("formats agent identity and compact roles", () => {
-    expect(formatAgentIdentityWithRole("Alpha", "planner")).toBe("Alpha · planner");
+  it("formats agent identity labels without role suffix", () => {
+    expect(formatAgentIdentityLabel("Alpha")).toBe("Alpha");
+    expect(formatAgentIdentityLabel("", "p1")).toBe("p1");
     expect(compactAgentRoleLabel("planner / long description")).toBe("planner");
   });
 

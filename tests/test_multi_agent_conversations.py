@@ -1124,8 +1124,8 @@ def test_chat_room_messages_and_prompts_carry_agent_codes(tmp_path, monkeypatch)
         alpha["agentCode"],
         beta["agentCode"],
     ]
-    assert latest_round["messages"][0]["speakerTitle"].startswith(f"{alpha['agentCode']} · ")
-    assert latest_round["messages"][1]["speakerTitle"].startswith(f"{beta['agentCode']} · ")
+    assert latest_round["messages"][0]["speakerTitle"] == alpha["agentCode"]
+    assert latest_round["messages"][1]["speakerTitle"] == beta["agentCode"]
     assert alpha["agentCode"] in prompts[0]
     assert beta["agentCode"] in prompts[1]
 

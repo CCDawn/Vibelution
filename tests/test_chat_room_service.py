@@ -237,6 +237,16 @@ def test_group_speaker_message_uses_completion_time_and_strips_self_prefix(monke
     assert message["summary"] == "收到，夏总。"
 
 
+def test_participant_speaker_label_prefers_code_without_role_suffix():
+    assert chat_room_service._participant_speaker_label(
+        {"participantId": "session-alpha", "agentCode": "A012", "title": "组织顾问 Agent"}
+    ) == "A012"
+    assert chat_room_service._participant_speaker_label(
+        {"participantId": "session-alpha", "title": "搜索 Agent"}
+    ) == "搜索 Agent"
+    assert chat_room_service._participant_speaker_label({"participantId": "session-alpha"}) == "session-alpha"
+
+
 def test_group_speaker_marks_team_discussion_internal_when_case_discusses():
     participant = {
         "participantId": "session-alpha",

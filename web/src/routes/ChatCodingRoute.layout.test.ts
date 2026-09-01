@@ -1257,7 +1257,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("isAvailableGroupParticipant");
     expect(routeSource).toContain("availableGroupParticipants");
     expect(routeSource).toContain("groupParticipantIdentity");
-    expect(routeSource).toContain("formatAgentIdentityWithRole");
+    expect(routeSource).toContain("formatAgentIdentityLabel");
     expect(routeSource).toContain("rightIndexPanel");
     expect(routeAndActionsSource).toContain("setRightIndexPanel(\"members\")");
     expect(routeSource).toContain("latestMentalSnapshot");
@@ -2762,7 +2762,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(agentSessionTabStripSource).toContain("const sessionAgent = session.agentId ? agentsById.get(session.agentId) : undefined");
     expect(agentSessionTabStripSource).toContain("const sessionDisplay = sessionAgentDisplayInfo(session, sessionAgent, lang, resolveModelLabel)");
     expect(routeAndIndexRailSource).toContain("const participantDisplay = groupParticipantIdentity(participant)");
-    expect(routeSource).toContain("identityLabel: formatAgentIdentityWithRole");
+    expect(routeSource).toContain("identityLabel: formatAgentIdentityLabel");
     expect(chatGroupManagementDialogSource).toContain("styles.memberCopy");
     expect(chatGroupManagementDialogSource).toContain("styles.agentRoleTag");
     expect(routeAndIndexRailSource).toMatch(/styles\.agentRoleTag|routeStyles\.agentRoleTag/);

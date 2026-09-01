@@ -3209,11 +3209,13 @@ def _format_prior_room_messages(
 
 
 def _participant_speaker_label(participant: dict[str, Any]) -> str:
-    title = str(participant.get("title") or participant.get("participantId") or "").strip()
     code = str(participant.get("agentCode") or "").strip()
-    if code and title:
-        return f"{code} · {title}"
-    return title or code or str(participant.get("participantId") or "").strip()
+    if code:
+        return code
+    title = str(participant.get("title") or "").strip()
+    if title:
+        return title
+    return str(participant.get("participantId") or "").strip()
 
 
 def _participant_role_view(participant: dict[str, Any]) -> str:
