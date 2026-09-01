@@ -586,6 +586,68 @@ describe("resolveHypothesisFirstNextActionFromV2", () => {
     expect(action.canonicalAction?.command).toBe("open_next_review");
   });
 
+  it("explains a claim-gate-blocked convergence without touching the server action authority", () => {
+    const state = stateV2({
+      isInitial: false,
+      currentPhase: "convergence",
+      convergence: {
+        ...stateV2().convergence,
+        lifecycle: "waiting_human",
+        actionability: "waiting_user",
+        accepted: false,
+        latestHypothesisRoundId: "round-2",
+        roundIndex: 2,
+        roundBudget: 5,
+        claimBeliefGate: {
+          decisionPoint: "converge_question",
+          roundId: "round-2",
+          candidateId: "cand-1",
+          status: "blocked",
+          reason: "claim_belief_state_blocked",
+          claims: [],
+          blockedClaims: [{ claimId: "claim-7", beliefState: "contradicted" }],
+          evidenceGaps: [],
+        },
+      },
+      allowedActions: [command({ command: "open_next_review", payload: { previousMeetingRoundId: "meeting-1", roundBudget: 5 } }, "发起下一轮候选评审")],
+    });
+
+    const action = resolveHypothesisFirstNextActionFromV2(state);
+
+    // Navigation mapping stays stable; the server-authored button stays the
+    // single authority (present, enabled, unmodified).
+    expect(action.stage).toBe("next_review");
+    expect(action.canonicalAction?.command).toBe("open_next_review");
+    expect(action.canonicalAction?.enabled).toBe(true);
+    expect(action.canonicalActions.map((item) => item.command)).toEqual(["open_next_review"]);
+    // The guidance copy explains the gate block instead of luring the user
+    // into "open the next review round" as if it were the fix.
+    expect(action.claimGate?.status).toBe("blocked");
+    expect(action.claimGate?.blockedClaims.map((claim) => claim.claimId)).toEqual(["claim-7"]);
+    expect(action.statusMessage).toContain("claim 证据门拦截");
+    expect(action.statusMessage).toContain("claim_belief_state_blocked");
+    expect(action.commandDetail).toContain("claim 证据门拦截");
+  });
+
+  it("treats a malformed claim gate payload as unknown instead of crashing", () => {
+    const state = stateV2({
+      isInitial: false,
+      currentPhase: "convergence",
+      convergence: {
+        ...stateV2().convergence,
+        lifecycle: "waiting_human",
+        actionability: "waiting_user",
+        claimBeliefGate: { status: 42, reason: null, blockedClaims: "noise" } as never,
+      },
+    });
+
+    const action = resolveHypothesisFirstNextActionFromV2(state);
+
+    expect(action.claimGate?.status).toBe("unknown");
+    expect(action.claimGate?.blockedClaims).toEqual([]);
+    expect(action.statusMessage).not.toContain("claim 证据门拦截");
+  });
+
   it("reports a terminally rejected adjudication without inventing a next action", () => {
     const state = stateV2({
       isInitial: false,

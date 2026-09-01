@@ -15,12 +15,14 @@ import {
   isHypothesisFirstCommandStateConflict,
   openHypothesisCandidateGeneration,
   openNextHypothesisReviewRound,
+  parseClaimBeliefGate,
   recordCollectionHandoff,
 } from "../../../api/hypothesisFirst";
 import { queryKeys } from "../../../api/queryKeys";
 import type {
   CommandAction,
   HypothesisFirstChainState,
+  HypothesisFirstClaimBeliefGate,
   HypothesisFirstStateV2,
   MeetingRoundRecord,
   WorkflowProblem,
@@ -212,6 +214,115 @@ export function reviewRoundActionCopy(
 }
 
 export type DiscussionMemberCompletion = { spoken: number; total: number };
+
+// ---------------------------------------------------------------------------
+// Claim belief hard gate (R2.2): server-authored verdict on the recommended
+// candidate's claim evidence. Bilingual copy helpers + panel composed from the
+// existing VUI primitives and local styles — no new VUI component.
+// ---------------------------------------------------------------------------
+
+const CLAIM_GATE_REASONS: Record<string, { zh: string; en: string }> = {
+  claim_data_missing: { zh: "claim 数据缺失", en: "claim data missing" },
+  claim_ledger_unavailable: { zh: "claim 台账不可用", en: "claim ledger unavailable" },
+  claim_evidence_store_unavailable: { zh: "claim 证据库不可用", en: "claim evidence store unavailable" },
+  candidate_claim_binding_missing: { zh: "候选未绑定核心 claim", en: "candidate claim binding missing" },
+  claim_ledger_entry_unreadable: { zh: "claim 台账条目不可读", en: "claim ledger entry unreadable" },
+  claim_belief_evaluation_failed: { zh: "claim 置信评估失败", en: "claim belief evaluation failed" },
+  candidate_evidence_gap: { zh: "已接受证据存在缺口", en: "accepted evidence gaps remain" },
+  claim_belief_state_blocked: { zh: "核心 claim 被反证或争议中", en: "a core claim is contradicted or disputed" },
+  claim_belief_gate_unavailable: { zh: "置信门评估不可用", en: "gate evaluation unavailable" },
+};
+
+const CLAIM_GATE_BELIEF_STATES: Record<string, { zh: string; en: string }> = {
+  contradicted: { zh: "被反证", en: "contradicted" },
+  disputed: { zh: "争议中", en: "disputed" },
+  unknown: { zh: "状态未知", en: "unknown" },
+};
+
+const CLAIM_GATE_PROBLEMS: Record<string, { zh: string; en: string }> = {
+  ledger_entry_invalid: { zh: "台账条目无效", en: "ledger entry invalid" },
+  belief_entry_missing: { zh: "置信条目缺失", en: "belief entry missing" },
+};
+
+const CLAIM_GATE_GAPS: Record<string, { zh: string; en: string }> = {
+  accepted_support_missing: { zh: "缺少已接受的支持证据", en: "no accepted supporting evidence" },
+  accepted_counter_or_boundary_missing: { zh: "缺少已接受的反证/边界证据", en: "no accepted counter/boundary evidence" },
+};
+
+function claimGateReasonLabel(reason: string, isZh: boolean): string {
+  const key = String(reason || "").trim();
+  const mapped = CLAIM_GATE_REASONS[key];
+  return mapped ? (isZh ? mapped.zh : mapped.en) : key || (isZh ? "原因未知" : "unknown reason");
+}
+
+function claimGateBlockedClaimLabel(claim: HypothesisFirstClaimBeliefGate["blockedClaims"][number], isZh: boolean): string {
+  const problem = CLAIM_GATE_PROBLEMS[String(claim.problem || "")];
+  if (problem) return isZh ? problem.zh : problem.en;
+  const belief = CLAIM_GATE_BELIEF_STATES[String(claim.beliefState || "unknown")];
+  return belief ? (isZh ? belief.zh : belief.en) : String(claim.beliefState || "unknown");
+}
+
+function claimGateStatusView(status: HypothesisFirstClaimBeliefGate["status"], isZh: boolean): {
+  label: string;
+  tone: "success" | "danger" | "neutral";
+} {
+  if (status === "allowed") return { label: isZh ? "已通过" : "Passed", tone: "success" };
+  if (status === "blocked") return { label: isZh ? "未通过" : "Blocked", tone: "danger" };
+  return { label: isZh ? "门禁状态未知" : "Gate status unknown", tone: "neutral" };
+}
+
+function ClaimBeliefGatePanel({ gate, lang }: { gate: HypothesisFirstClaimBeliefGate; lang: Language }) {
+  const isZh = lang === "zh";
+  const status = claimGateStatusView(gate.status, isZh);
+  return (
+    <section
+      className={styles.candidateChecklist}
+      data-testid="claim-belief-gate-panel"
+      aria-label={isZh ? "claim 置信门" : "Claim belief gate"}
+    >
+      <div className={styles.candidateChecklistSummary}>
+        <strong>{isZh ? "claim 置信门" : "Claim belief gate"}</strong>
+        <VStatusChip tone={status.tone}>{status.label}</VStatusChip>
+      </div>
+      <p className={styles.status}>
+        {isZh ? "原因：" : "Reason: "}
+        {claimGateReasonLabel(gate.reason, isZh)}
+      </p>
+      {gate.candidateId ? (
+        <p className={styles.status}>
+          {isZh ? `入选候选：${gate.candidateId}` : `Recommended candidate: ${gate.candidateId}`}
+        </p>
+      ) : null}
+      {gate.blockedClaims.length ? (
+        <ul className={styles.candidateChecklistList}>
+          {gate.blockedClaims.map((claim, index) => (
+            <li className={styles.candidateChecklistItem} key={`${claim.claimId}:${index}`}>
+              <div className={styles.candidateChecklistIdentity}>
+                <strong>{claim.claimId}</strong>
+                <span>{claimGateBlockedClaimLabel(claim, isZh)}</span>
+              </div>
+              <VStatusChip tone="danger">{isZh ? "阻断收敛" : "Blocking"}</VStatusChip>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {gate.evidenceGaps.length ? (
+        <ul className={styles.bulletedList}>
+          {gate.evidenceGaps.map((gap, index) => {
+            const mapped = CLAIM_GATE_GAPS[String(gap.gap || "")];
+            return (
+              <li key={`${gap.claimId}:${gap.gap}:${index}`}>
+                {gap.claimId}
+                {isZh ? "：" : ": "}
+                {mapped ? (isZh ? mapped.zh : mapped.en) : gap.gap}
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+    </section>
+  );
+}
 
 /**
  * x/y 位成员已发言：分母是房间成员数，分子按消息 sender 去重（仅统计已完成、
@@ -801,6 +912,17 @@ function InspectorBody(props: {
     const summary = props.stageSummary;
     const programDelivery = props.stateV2?.programDelivery;
     const canonicalActions = canonicalActionsFor(nextAction);
+    // V2 is the gate authority; the raw V1 chain state is only consulted on
+    // the route-unavailable fallback, never layered under an explicit V2 null.
+    const rawClaimGate = props.stateV2
+      ? props.stateV2.convergence?.claimBeliefGate
+      : props.chainState?.claimBeliefGate;
+    const claimGate = parseClaimBeliefGate(rawClaimGate);
+    const gateBlockedDetail = claimGate?.status === "blocked"
+      ? (isZh
+        ? `收敛被 claim 证据门拦截（${claimGateReasonLabel(claimGate.reason, isZh)}）；请先补齐或修订 claim 证据，再考虑开启新一轮评审。`
+        : `Convergence is blocked by the claim evidence gate (${claimGateReasonLabel(claimGate.reason, isZh)}); revise the claims or evidence before opening another round.`)
+      : null;
     const humanAdjudication = canonicalActions.find(
       (action): action is Extract<CommandAction, { command: "human_adjudication" }> => action.command === "human_adjudication",
     );
@@ -910,6 +1032,7 @@ function InspectorBody(props: {
     }
     return (
       <div className={styles.task}>
+        {claimGate ? <ClaimBeliefGatePanel gate={claimGate} lang={lang} /> : null}
         <VStateRow tone={nextAction.stage === "converged" ? "success" : "warning"}>
           {nextAction.statusMessage || nextAction.disabledReason || (isZh ? "待收敛" : "Awaiting convergence")}
         </VStateRow>
@@ -945,6 +1068,7 @@ function InspectorBody(props: {
               stateV2: props.stateV2,
               chainState: props.chainState,
             })}
+            gateDetail={gateBlockedDetail}
             lang={lang}
           />
         ) : null}
@@ -1504,6 +1628,9 @@ function NextReviewRoundButton(props: {
   runId: string;
   meetingRoundId: string;
   nextRoundIndex: number | null;
+  /** Claim-gate guidance replaces the generic "not converged" detail when the
+   * server gate blocked convergence; the button authority itself is untouched. */
+  gateDetail?: string | null;
   lang: Language;
 }) {
   const queryClient = useQueryClient();
@@ -1533,7 +1660,7 @@ function NextReviewRoundButton(props: {
         />
       ) : null}
       <p className={styles.status} data-testid="next-review-round-budget">
-        {copy.detail}
+        {props.gateDetail || copy.detail}
       </p>
       <VButton
         type="button"

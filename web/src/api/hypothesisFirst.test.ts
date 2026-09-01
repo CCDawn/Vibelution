@@ -10,6 +10,7 @@ import {
   fetchHypothesisSelections,
   fetchHypothesisSelectionContext,
   fetchReviewRoundLinks,
+  parseClaimBeliefGate,
   recordHypothesisSelection,
 } from "./hypothesisFirst";
 import { isHypothesisFirstStateV2EndpointUnavailable } from "./hypothesisFirst";
@@ -169,5 +170,49 @@ describe("hypothesis-first API", () => {
     expect(meetingOpsSource).not.toContain("closeHypothesisReviewMeeting");
     expect(meetingOpsSource).not.toContain("submitMeetingDigestDraft");
     expect(timelineSource).toContain("fetchHypothesisRounds");
+  });
+});
+
+describe("parseClaimBeliefGate", () => {
+  it("returns null when the gate did not run", () => {
+    expect(parseClaimBeliefGate(null)).toBeNull();
+    expect(parseClaimBeliefGate(undefined)).toBeNull();
+  });
+
+  it("normalizes a blocked verdict with its claims and evidence gaps", () => {
+    const gate = parseClaimBeliefGate({
+      decisionPoint: "converge_question",
+      roundId: "hr-2",
+      candidateId: "cand-1",
+      status: "blocked",
+      reason: "claim_belief_state_blocked",
+      claims: [{ claimId: "claim-1", beliefState: "contradicted", acceptedSupportCount: 1 }],
+      blockedClaims: [
+        { claimId: "claim-1", beliefState: "contradicted", counterEvidenceIds: ["ev-9"] },
+        { beliefState: "disputed" },
+        "noise",
+      ],
+      evidenceGaps: [{ claimId: "claim-1", gap: "accepted_support_missing" }, { gap: "" }],
+    });
+    expect(gate?.status).toBe("blocked");
+    expect(gate?.reason).toBe("claim_belief_state_blocked");
+    expect(gate?.candidateId).toBe("cand-1");
+    expect(gate?.claims).toEqual([
+      { claimId: "claim-1", beliefState: "contradicted", acceptedSupportCount: 1 },
+    ]);
+    expect(gate?.blockedClaims).toEqual([
+      { claimId: "claim-1", beliefState: "contradicted", counterEvidenceIds: ["ev-9"] },
+    ]);
+    expect(gate?.evidenceGaps).toEqual([{ claimId: "claim-1", gap: "accepted_support_missing" }]);
+  });
+
+  it("fails closed to status unknown for malformed payloads instead of throwing", () => {
+    for (const malformed of ["noise", 42, {}, { status: 42, blockedClaims: "x" }]) {
+      const gate = parseClaimBeliefGate(malformed);
+      expect(gate?.status).toBe("unknown");
+      expect(gate?.claims).toEqual([]);
+      expect(gate?.blockedClaims).toEqual([]);
+      expect(gate?.evidenceGaps).toEqual([]);
+    }
   });
 });

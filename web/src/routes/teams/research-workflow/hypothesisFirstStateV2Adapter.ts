@@ -1,12 +1,14 @@
 import type {
   AllowedAction,
   CommandAction,
+  HypothesisFirstClaimBeliefGate,
   HypothesisFirstPhase,
   HypothesisFirstStateV2,
   NavigationAction,
   PhaseState,
   ReviewCandidateState,
 } from "../../../api/types/hypothesisFirst";
+import { parseClaimBeliefGate } from "../../../api/hypothesisFirst";
 import {
   HYPOTHESIS_FIRST_COLLECTION_NODE_ID,
   HYPOTHESIS_FIRST_CONVERGENCE_NODE_ID,
@@ -28,7 +30,14 @@ type ResolveV2Options = {
 /** V2-only extension kept local so legacy next-action consumers remain stable. */
 export type HypothesisFirstV2NextAction = HypothesisFirstNextAction & {
   canonicalActions?: readonly CommandAction[];
+  /** Server claim belief hard gate verdict parsed from the convergence payload. */
+  claimGate?: HypothesisFirstClaimBeliefGate | null;
 };
+
+/** zh explanation for a gate-blocked convergence; the raw reason stays visible for unmapped codes. */
+function claimGateBlockedCopy(gate: HypothesisFirstClaimBeliefGate): string {
+  return `收敛被 claim 证据门拦截（${gate.reason || "原因未知"}）；入选候选的 claim 证据不足或存在反证，需先补齐证据再继续。`;
+}
 
 function reviewNodeId(candidate: ReviewCandidateState): string {
   return `hf_meeting_${candidate.roundIndex}_${encodeURIComponent(candidate.candidateId)}`;
@@ -406,20 +415,26 @@ export function resolveHypothesisFirstNextActionFromV2(
     ? reviewCandidate
     : phaseState(state);
   const mappedCommand = legacyCommand(command, state.currentPhase);
+  // R2.2 claim belief hard gate: when a structurally converged round is held
+  // back by the server gate, the guidance copy explains the block while the
+  // server-authored allowedActions stay the only button authority (nothing is
+  // hidden, disabled, or re-labeled here).
+  const claimGate = parseClaimBeliefGate(state.convergence?.claimBeliefGate);
+  const gateCopy = claimGate?.status === "blocked" ? claimGateBlockedCopy(claimGate) : null;
   return {
     stage: stageFor(state, reviewCandidate, command),
     targetNodeId: phaseTarget(state, reviewCandidate),
     navigationLabel: navigation?.label || command?.label || canonicalActions[0]?.label || "前往当前任务",
     command: mappedCommand,
     commandLabel: command?.label,
-    commandDetail: command?.confirmationText || defaultStatus(state, current),
+    commandDetail: command?.confirmationText || gateCopy || defaultStatus(state, current),
     disabledReason: command
       ? undefined
       : current.actionability === "blocked"
         ? current.problems[0]?.message || "当前状态需要修复后才能继续"
         : undefined,
     recovery: null,
-    statusMessage: defaultStatus(state, current),
+    statusMessage: gateCopy || defaultStatus(state, current),
     meetingRoundId: reviewCandidate?.meetingRoundId
       || state.generation.generationMeetingId
       || navigation?.navigation.meetingRoundId
@@ -427,6 +442,7 @@ export function resolveHypothesisFirstNextActionFromV2(
     collectionRequestId: request?.requestId,
     collectionRunId: request?.childRun.runId || undefined,
     stateSource: "v2_canonical",
+    claimGate,
     canonicalActionId: command?.actionId,
     canonicalAction: command || undefined,
     canonicalActions,

@@ -1086,6 +1086,128 @@ describe("HypothesisFirstNodeInspector", () => {
     expect(container.querySelector('[role="status"]')).toBeTruthy();
   });
 
+  it("renders the claim belief gate panel and keeps server actions when the gate blocks", () => {
+    const openNext = {
+      kind: "command",
+      actionId: "action:open_next_review",
+      label: "发起下一轮候选评审",
+      enabled: true,
+      disabledReason: null,
+      targetPhase: "convergence",
+      targetNodeId: null,
+      command: "open_next_review",
+      payload: { previousMeetingRoundId: "hf-review-2", roundBudget: 5 },
+      inputSchemaRef: null,
+      idempotencyKey: "idem:open-next-review",
+      expectedStateVersion: "state-1",
+      requiresConfirmation: false,
+      confirmationText: null,
+    } as const;
+    mockedChain.mockReturnValue(chainData({
+      stateV2: {
+        currentPhase: "convergence",
+        generation: { generationMeetingId: null },
+        review: { candidates: [], aggregate: { total: 0, completed: 0, pending: 0, failed: 0, blocked: 0 } },
+        collection: { requests: [] },
+        convergence: {
+          lifecycle: "waiting_human",
+          outcome: "none",
+          actionability: "waiting_user",
+          attempt: null,
+          updatedAt: null,
+          problems: [],
+          accepted: false,
+          latestHypothesisRoundId: "hr-2",
+          roundIndex: 2,
+          roundBudget: 5,
+          claimBeliefGate: {
+            decisionPoint: "converge_question",
+            roundId: "hr-2",
+            candidateId: "cand-1",
+            status: "blocked",
+            reason: "claim_belief_state_blocked",
+            claims: [],
+            blockedClaims: [
+              { claimId: "claim-7", beliefState: "contradicted", acceptedCounterCount: 2 },
+              { claimId: "claim-9", beliefState: "unknown", problem: "ledger_entry_invalid" },
+            ],
+            evidenceGaps: [{ claimId: "claim-7", gap: "accepted_support_missing" }],
+          },
+        },
+        allowedActions: [openNext],
+        problems: [],
+      } as unknown as HypothesisFirstStateV2,
+    }));
+    render(
+      <HypothesisFirstNodeInspector
+        teamId="team-1"
+        questionId="Q-01"
+        nodeId="hf_convergence_gate"
+        runId="run-1"
+        onOpenQuestion={() => {}}
+      />,
+    );
+
+    const panel = container.querySelector('[data-testid="claim-belief-gate-panel"]');
+    expect(panel).toBeTruthy();
+    expect(panel?.textContent).toContain("claim 置信门");
+    expect(panel?.textContent).toContain("未通过");
+    expect(panel?.textContent).toContain("核心 claim 被反证或争议中");
+    expect(panel?.textContent).toContain("claim-7");
+    expect(panel?.textContent).toContain("被反证");
+    expect(panel?.textContent).toContain("claim-9");
+    expect(panel?.textContent).toContain("台账条目无效");
+    expect(panel?.textContent).toContain("缺少已接受的支持证据");
+    // The guidance explains the gate block instead of luring the user into
+    // "open the next review round"…
+    expect(container.textContent).toContain("claim 证据门拦截");
+    // …while the server-authored action authority stays untouched.
+    const serverButton = [...container.querySelectorAll("button")]
+      .find((button) => button.textContent?.includes("发起下一轮候选评审"));
+    expect(serverButton).toBeTruthy();
+    expect(serverButton?.hasAttribute("disabled")).toBe(false);
+  });
+
+  it("shows gate status unknown for a malformed gate payload instead of crashing", () => {
+    mockedChain.mockReturnValue(chainData({
+      stateV2: {
+        currentPhase: "convergence",
+        generation: { generationMeetingId: null },
+        review: { candidates: [], aggregate: { total: 0, completed: 0, pending: 0, failed: 0, blocked: 0 } },
+        collection: { requests: [] },
+        convergence: {
+          lifecycle: "waiting_human",
+          outcome: "none",
+          actionability: "waiting_user",
+          attempt: null,
+          updatedAt: null,
+          problems: [],
+          accepted: false,
+          latestHypothesisRoundId: "hr-2",
+          roundIndex: 2,
+          roundBudget: 5,
+          claimBeliefGate: { status: 42, reason: null, blockedClaims: "noise" },
+        },
+        allowedActions: [],
+        problems: [],
+      } as unknown as HypothesisFirstStateV2,
+    }));
+    render(
+      <HypothesisFirstNodeInspector
+        teamId="team-1"
+        questionId="Q-01"
+        nodeId="hf_convergence_gate"
+        runId="run-1"
+        onOpenQuestion={() => {}}
+      />,
+    );
+
+    const panel = container.querySelector('[data-testid="claim-belief-gate-panel"]');
+    expect(panel).toBeTruthy();
+    expect(panel?.textContent).toContain("门禁状态未知");
+    expect(panel?.textContent).not.toContain("未通过");
+  });
+
   it("opens the created formal run from the signed convergence command result", async () => {
     const phase = {
       lifecycle: "completed",

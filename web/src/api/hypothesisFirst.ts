@@ -18,6 +18,9 @@ import type {
   CollectionHandoffResponse,
   CollectionRequestListResponse,
   HypothesisFirstChainState,
+  HypothesisFirstClaimBeliefGate,
+  HypothesisFirstClaimGateEntry,
+  HypothesisFirstClaimGateEvidenceGap,
   HypothesisFirstStateV2,
   HypothesisRoundGetResponse,
   HypothesisRoundListResponse,
@@ -453,6 +456,63 @@ function parseHypothesisFirstStateV2(payload: unknown): HypothesisFirstStateV2 {
     throw new Error("Invalid hypothesis-first state V2 response");
   }
   return payload as unknown as HypothesisFirstStateV2;
+}
+
+function gateEntries(value: unknown): HypothesisFirstClaimGateEntry[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!isRecord(item)) return [];
+    const claimId = String(item.claimId ?? "").trim();
+    if (!claimId) return [];
+    const support = Number(item.acceptedSupportCount);
+    const counter = Number(item.acceptedCounterCount);
+    return [{
+      claimId,
+      beliefState: String(item.beliefState ?? "").trim() || "unknown",
+      ...(Number.isFinite(support) ? { acceptedSupportCount: support } : {}),
+      ...(Number.isFinite(counter) ? { acceptedCounterCount: counter } : {}),
+      ...(Array.isArray(item.supportingEvidenceIds)
+        ? { supportingEvidenceIds: item.supportingEvidenceIds.map((id) => String(id)) }
+        : {}),
+      ...(Array.isArray(item.counterEvidenceIds)
+        ? { counterEvidenceIds: item.counterEvidenceIds.map((id) => String(id)) }
+        : {}),
+      ...(typeof item.problem === "string" && item.problem.trim() ? { problem: item.problem.trim() } : {}),
+    }];
+  });
+}
+
+function gateEvidenceGaps(value: unknown): HypothesisFirstClaimGateEvidenceGap[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!isRecord(item)) return [];
+    const claimId = String(item.claimId ?? "").trim();
+    const gap = String(item.gap ?? "").trim();
+    return claimId && gap ? [{ claimId, gap }] : [];
+  });
+}
+
+/**
+ * Fail-closed parse of the claim belief hard gate payload (R2.2). An
+ * absent/null payload means the gate did not run (null return). A present but
+ * malformed payload normalizes to `status: "unknown"` so UIs degrade to a
+ * visible "gate status unknown" state instead of crashing or treating it as a
+ * pass.
+ */
+export function parseClaimBeliefGate(value: unknown): HypothesisFirstClaimBeliefGate | null {
+  if (value === null || value === undefined) return null;
+  const source = isRecord(value) ? value : {};
+  const rawStatus = typeof source.status === "string" ? source.status.trim().toLowerCase() : "";
+  return {
+    decisionPoint: typeof source.decisionPoint === "string" ? source.decisionPoint.trim() : "",
+    roundId: typeof source.roundId === "string" ? source.roundId.trim() : "",
+    candidateId: typeof source.candidateId === "string" ? source.candidateId.trim() : "",
+    status: rawStatus === "allowed" || rawStatus === "blocked" ? rawStatus : "unknown",
+    reason: typeof source.reason === "string" ? source.reason.trim() : "",
+    claims: gateEntries(source.claims),
+    blockedClaims: gateEntries(source.blockedClaims),
+    evidenceGaps: gateEvidenceGaps(source.evidenceGaps),
+  };
 }
 
 export function fetchCollectionRequests(

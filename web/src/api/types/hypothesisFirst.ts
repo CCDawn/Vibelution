@@ -437,6 +437,8 @@ export type HypothesisFirstChainState = {
   latestHypothesisRoundId: string;
   hypothesisConverged: boolean;
   convergenceDetail: string;
+  /** R2.2 claim belief hard gate verdict; null while not structurally converged. */
+  claimBeliefGate?: HypothesisFirstClaimBeliefGate | null;
   roundBudget: number;
   budgetExhausted: boolean;
   templateBaselineExists: boolean;
@@ -768,6 +770,8 @@ export type HypothesisFirstStateV2 = {
     accepted: boolean;
     roundIndex: number;
     roundBudget: number;
+    /** R2.2 claim belief hard gate verdict; null while not structurally converged. */
+    claimBeliefGate: HypothesisFirstClaimBeliefGate | null;
   };
   formalRuntime: PhaseState & {
     runId: string | null;
@@ -818,6 +822,45 @@ export type ReviewRoundLinkListResponse = {
   linkCount: number;
   links: ReviewRoundLinkRecord[];
   storagePath?: string;
+};
+
+// ---------------------------------------------------------------------------
+// Claim belief hard gate (R2.2) — server-authored convergence verdict
+// ---------------------------------------------------------------------------
+
+/** One claim's belief summary inside a gate verdict. */
+export type HypothesisFirstClaimGateEntry = {
+  claimId: string;
+  beliefState: string;
+  acceptedSupportCount?: number;
+  acceptedCounterCount?: number;
+  supportingEvidenceIds?: string[];
+  counterEvidenceIds?: string[];
+  /** Present when the ledger entry itself could not be evaluated. */
+  problem?: string;
+};
+
+/** One accepted-evidence shortfall on a blocked gate verdict. */
+export type HypothesisFirstClaimGateEvidenceGap = {
+  claimId: string;
+  gap: string;
+};
+
+/**
+ * Claim belief hard gate verdict attached to a structurally converged round:
+ * `convergence.claimBeliefGate` on the V2 state, top-level `claimBeliefGate`
+ * on the legacy V1 chain state. `status` is `allowed` / `blocked`; the UI must
+ * treat any other value (or a malformed payload) as unknown, never as a pass.
+ */
+export type HypothesisFirstClaimBeliefGate = {
+  decisionPoint: string;
+  roundId: string;
+  candidateId: string;
+  status: "allowed" | "blocked" | "unknown";
+  reason: string;
+  claims: HypothesisFirstClaimGateEntry[];
+  blockedClaims: HypothesisFirstClaimGateEntry[];
+  evidenceGaps: HypothesisFirstClaimGateEvidenceGap[];
 };
 
 // ---------------------------------------------------------------------------
