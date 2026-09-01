@@ -1,20 +1,45 @@
 # 挑战杯知识 Sideflow 与假说 Agent 非阻塞证据补充实施方案
 
-> Status：`active-plan`
+> Status：`implemented-dev`（代码与合入前验收已闭合；真实 G1/正式研究未执行）
 >
 > Owner：`core/web/services/team_workflow/research_runtime`（主 owner）；`tools/research_knowledge_request_tools.py`、Team Knowledge 读取投影与相关测试为协作面
 >
-> Claim / branch / worktree：`claim-ae144c7a5314` / `codex/challenge-knowledge-sideflow-plan` / `.worktrees/challenge-knowledge-sideflow-plan`
+> Implementation branch：`codex/challenge-knowledge-sideflow-integration`
 >
 > Scope：把节点 2–6 的正式知识 sideflow 接入假说先行链路，使假说 Agent 可读取已接受知识包补充证据，并让知识生产与探索主线并行而不抢占主线关键容量
 >
 > Supersedes：不替代 [挑战杯 1–7 节点链路高 ROI 修复方案](2026-08-31-challenge-cup-nodes-1-7-high-roi-repair-plan.md)；本文只补齐其 DEV 实施后尚未接通的 sideflow→假说消费与性能隔离
 >
-> Implementation link：尚未实施；后续实现必须关联本方案并在完成后将状态改为 `implemented`
+> Implementation links：[自动 sideflow trigger](../../../../core/web/services/team_workflow/research_runtime/knowledge_sideflow_trigger.py) · [快照消费权威](../../../../core/web/services/team_workflow/research_runtime/knowledge_snapshot_consumption.py) · [假说输入构建](../../../../core/web/services/team_workflow/research_project_hypothesis_context.py) · [正式 fanout](../../../../core/web/services/team_workflow/research_runtime/formal_hypothesis_fanout.py) · [foreground-first outbox](../../../../core/research/workflow/ledger/outbox.py) · [知识请求工具](../../../../tools/research_knowledge_request_tools.py)
 >
-> Validation：当前仅完成代码、测试、operator 配置和外部方案的只读复核；未修改业务代码、operator config、Launcher、运行数据或 G1
+> Validation：2026-09-01 完成实现、自审前相关回归 `329 passed`、同机 10 次 before/after 性能对比与 EXTERNAL reuse 记录；未修改 operator config、Launcher、运行数据，未调用真实 provider、真实知识库或 G1
 >
 > Close condition：T0–T5 的代码、聚焦测试、性能对比、DEV sideflow 场景与本地 main 合入全部闭合；真实 G1/正式研究仍是独立授权门
+
+## 0. 实施状态与验收快照
+
+T0–T5 的 DEV 行为合同已经实现：知识请求统一进入 `WorkflowCommandService`；3.0.0 `problem_understanding` 成功提交后只执行一次本地异步 ensure；accepted package 由 invocation、父 run event、canonical ref 与 content hash 共同校验；多个 package 稳定合并成一个冻结 `knowledgeSnapshot`，所有 candidate 共享同一 `snapshotHash`；live hypothesis 只记录 `knowledge_revision_available`，不改写当前 Turn；下一安全边界以幂等 `knowledge_snapshot_consumed` 记录消费事实。
+
+同时完成了两个会直接影响主线效率或可重放性的修复：outbox 按 foreground-first 租约并把后台知识并发限制为 `2`；candidate task 私有冻结快照 binding 持久化但不进入公开 task DTO。父 run 的知识吸收事实改为按事件类型读取完整 Ledger 记录，避免超过 500 条事件后因窗口截断而误判；兼容投影继续保留 `knowledgeBaseId`，并补充 `knowledgeItemIds`。
+
+### 0.1 DEV 性能证据
+
+环境：同机、同一根 `.venv`、同一 deterministic fixture；baseline=`7c600100ce64bc9cdcda79e1c8beba716e2ae515`，after=该基线上的实现 worktree；每侧 10 次。仅测本地 Ledger/outbox 与 ensure 事务，不启动网络、模型、Launcher 或真实知识写入。
+
+| 指标 | Baseline p50 / p95 | After p50 / p95 | 行为结果 |
+| --- | --- | --- | --- |
+| 100 条 background sideflow backlog 下首次 outbox lease | 50.360ms / 50.551ms | 50.310ms / 51.201ms | baseline 主线 0/10 入选；after 主线 10/10 入选且每次首条均为 foreground；p95 +0.650ms |
+| 单次 sideflow ensure 本地事务 | 167.300ms / 173.198ms | 164.184ms / 166.602ms | p95 -6.596ms；下游 provider/model 耗时未进入主线调用栈 |
+
+after 未劣于 `max(5%, 100ms)` 阈值；时间数据仅作为同机 DEV 证据，确定性合同由测试保护。
+
+### 0.2 已闭合验证与真实限制
+
+- 相关回归共 `329 passed`，覆盖 sideflow、readiness、formal fanout、冻结 task binding、工具、outbox、Command、HTTP route、rollout、跨 run event、角色权限、hypothesis-first chain 与 research knowledge cases。
+- EXTERNAL reuse 裁决为 `ADAPT`：参考 `langchain-ai/langgraph@38031739e...` 的 checkpoint/interrupt 边界，但继续复用本项目 Ledger、outbox、CommandService 和 run events；不引入第二 workflow engine 或 store。
+- 当前真实 operator config 未修改，Launcher 未启动或重启；因此这里不声称本机产品实例已启用自动 sideflow。
+- 未发起付费/真实 provider 检索，未向真实 Team Knowledge 写入资料，未跑 G1，也未验证正式赛题质量、成本或提交链。
+- 本轮没有重解释既有 2.1.0 run；3.0.0 仍按 run-pinned definition 与 accepted handoff 边界 fail closed。
 
 ## 1. 结论
 
@@ -25,7 +50,7 @@
 
 并行语义是“多条知识生产管线可在后台推进，最终由知识管理角色受控写入”，不是“多个假说 Agent 同时直接写同一知识库”。角色边界保持：**多读者、单请求面、知识管理单写者**。
 
-## 2. 现状与根因
+## 2. 实施前现状与根因
 
 ### 2.1 已经具备的能力
 
@@ -111,8 +136,8 @@ parent absorbs invocation + package hash
                          │
                          ▼
 next review/revision/fan-in boundary
-build composite accepted snapshot K1
-→ candidate-scoped top-k projection
+build composite accepted snapshot K1 once
+→ candidate task private binding + bounded shared refs
 → allowedEvidenceRefs whitelist
 → grounded fragment fan-out / fan-in
 ```
@@ -168,7 +193,7 @@ requestHash = hash(questionId + scopeHash + searchEnvelopeHash
 2.1.0 与 3.0.0 使用统一输出、不同读取来源：
 
 - 2.1.0：父 run 的 accepted `knowledge_handoff` receipt；
-- 3.0.0：父 run 下所有 `completed + handoff_state=accepted + packageContentHash` 的 knowledge invocations，以及每个 invocation 指向的 child `knowledge_package` receipt。
+- 3.0.0：父 run 下所有 `completed + handoff_state=accepted + packageContentHash` 的 knowledge invocations、对应的父 run absorption event，以及 invocation 指向的 canonical `knowledge_package` artifact。
 
 3.0.0 不能只取“最新一个 package”覆盖旧证据。输入构建器按稳定顺序合并全部 accepted package，并生成不可变复合快照：
 
@@ -183,8 +208,7 @@ requestHash = hash(questionId + scopeHash + searchEnvelopeHash
         "packageContentHash": "..."
       }
     ],
-    "knowledgeItemIds": ["ki-..."],
-    "createdForTaskAt": "task creation boundary"
+    "knowledgeItemIds": ["ki-..."]
   },
   "knowledgeItems": [],
   "evidenceClaims": [],
@@ -194,21 +218,20 @@ requestHash = hash(questionId + scopeHash + searchEnvelopeHash
 
 不变量：
 
-- canonical ref、invocation record、child receipt 与 payload content hash 必须四方一致；不一致 fail closed。
+- canonical ref、invocation record、父 run absorption event 与 payload content hash 必须四方一致；不一致 fail closed。
 - 只合并 applied/accepted Team Knowledge item；库存中更晚但未绑定 invocation 的 item 不得替换快照。
 - package/item/claim 顺序稳定，重放产生相同 `snapshotHash`。
 - `allowedEvidenceRefs` 只来自已验证 package 的 source artifacts / evidence claims。
 - 当前 `24 claims / 64 refs` 上限继续作为 Prompt 边界；超出部分留在 Team Knowledge，可由 Agent 受 ACL 约束检索，不扩大 Prompt。
 
-### 5.4 Candidate 级读取
+### 5.4 Candidate 级读取（实施裁决）
 
-所有 candidate task 共享同一个 `knowledgeSnapshot.snapshotHash`，但注入内容按 candidate claim 做有界 top-k 投影：
+所有 candidate task 共享同一个 `knowledgeSnapshot.snapshotHash` 和同一组受 `24 claims / 64 refs` 限制的正式 refs；每个 task 再绑定自己的 `candidateContext`。fanout 关键路径不为每个 candidate 重跑 Team Knowledge 检索，避免 N 倍读取、任务间快照漂移和主线延迟。
 
-- 检索集合只限本快照的 `knowledgeItemIds`；
-- query 由 candidate claim、mechanism、falsification criteria 组成；
-- top-k 使用现有 Team Knowledge 搜索/ranking，不新增向量库；
-- top-k 摘要是 Prompt 上下文优化，不改变 package 权威；
-- candidate 可以继续调用 `unified_memory_search_tool` 查团队正式知识，但正式写回引用仍必须属于本任务的 `allowedEvidenceRefs`。
+- task 启动时把完整 `hypothesisInput` 作为服务端私有 binding 冻结，公开 task DTO 不返回该 binding；
+- candidate 可以继续调用 `unified_memory_search_tool` / `research_knowledge_query_tool` 查团队正式知识来补充推理；
+- 额外检索结果不会自动扩充本 Turn 的 `allowedEvidenceRefs`，正式写回引用仍必须属于冻结 binding；
+- 若以后需要大规模 candidate 级 ranking，应以真实 Prompt/召回 profile 另立任务，不能在本次 fanout 中增加同步检索。
 
 ### 5.5 修订消费状态
 
@@ -272,7 +295,7 @@ T0 先在相同 HEAD、相同 deterministic provider、相同题目 fixture 下�
 - foreground 在 sideflow backlog 下无饥饿，首个 lease cycle 必须取得主线 action；
 - 主指标 after 不劣于 baseline 的 `max(5%, 100ms)`，并记录至少 5 次重复的 p50/p95；
 - sideflow ensure 只增加一次有界本地事务；其下游耗时不计入主指标；
-- candidate top-k 投影不突破现有 `24 claims / 64 refs` Prompt 上限。
+- 共享正式投影不突破现有 `24 claims / 64 refs` Prompt 上限，fanout 不新增 per-candidate 同步检索。
 
 时间阈值不放入普通单元测试；单测保护确定性的 lease 顺序、调用次数、并发上限和“没有 await 下游”合同。p50/p95 只作为同机 DEV 性能证据。
 
@@ -348,7 +371,7 @@ T0 先在相同 HEAD、相同 deterministic provider、相同题目 fixture 下�
 
 Critical Path：`T0 → T1 → T2 → T3 → T4 → T5`。T2/T3 的纯测试准备可并行只读，但共享 Ledger/runtime owner 的写入保持单 writer；实施时重新 preflight，任何命中活跃 claim 的文件必须串行等待或重新划分。
 
-### Task 0：冻结行为合同与性能 baseline
+### Task 0：冻结行为合同与性能 baseline（DEV 已完成）
 
 - Owner/Boundary：tests + 有界 benchmark/scene probe；不改产品行为。
 - Dependency：本方案。
@@ -356,7 +379,7 @@ Critical Path：`T0 → T1 → T2 → T3 → T4 → T5`。T2/T3 的纯测试准�
 - 产出：证明旧 request tool 仍走 facade、3.0 readiness/context 不一致、live attempt 吸收后无 revision、FIFO backlog 会先到先租；记录主指标 baseline。
 - Verification/Stop：新增测试先在旧实现上按预期失败；若现状与本文根因不符，停止后续写入并修订方案。
 
-### Task 1：统一知识补给 Command 入口
+### Task 1：统一知识补给 Command 入口（DEV 已完成）
 
 - Owner/Boundary：`tools/research_knowledge_request_tools.py`、`command_service.py` 的既有 facade、3.0 review collection bridge；不扩 Agent 权限。
 - Dependency：T0 failing contracts。
@@ -364,7 +387,7 @@ Critical Path：`T0 → T1 → T2 → T3 → T4 → T5`。T2/T3 的纯测试准�
 - 产出：`request/status` 与 3.0 `request_new_evidence` 都走 `ENSURE/INSPECT_KNOWLEDGE_COLLECTION`；2.1 pinned run 保持旧链；collection request 投影保存 `invocationId/childRunId` 用于修订关联。
 - Verification/Stop：相同请求只创建一个 child；跨题/跨 team/fake node 失败；preview 仍 advisory；如必须新增第二 facade/store，停止并回到架构审查。
 
-### Task 2：节点 1 完成后非阻塞启动基础 sideflow
+### Task 2：节点 1 完成后非阻塞启动基础 sideflow（DEV 已完成）
 
 - Owner/Boundary：新增 `knowledge_sideflow_trigger.py`，graph completion 只调用窄接口，runtime factory 注入 CommandService；不把业务逻辑堆进 worker。
 - Dependency：T1 统一入口。
@@ -372,15 +395,15 @@ Critical Path：`T0 → T1 → T2 → T3 → T4 → T5`。T2/T3 的纯测试准�
 - 产出：approved canonical `problem_understanding` 构建 server-owned envelope，以 `hypothesis_design` 为 parent node ensure；ensure 完成即返回，不等待 child。
 - Verification/Stop：上游 success、sideflow child 和父 invocation 关联可重放；replay 不创建第二 child；rejected/pending problem gate 不启动；主线调用栈无 provider/model wait。
 
-### Task 3：让正式假说输入消费 accepted sideflow 快照
+### Task 3：让正式假说输入消费 accepted sideflow 快照（DEV 已完成）
 
 - Owner/Boundary：`research_project_hypothesis_context.py`、accepted package loader/authority、formal fan-out task context；不复制 child receipt 到父 run，不新建 revision store。
 - Dependency：T1；可在 T2 编码稳定后串行落地。
 - Mode：`BDD_TDD`。
-- 产出：2.1 parent receipt 与 3.0 accepted invocation 统一生成 composite `knowledgeSnapshot`；candidate scoped top-k；所有假说角色仍通过现有统一检索读取 applied Team Knowledge。
+- 产出：2.1 parent receipt 与 3.0 accepted invocation 统一生成 composite `knowledgeSnapshot`；candidate task 私有冻结 binding；所有假说角色仍通过现有统一检索读取 applied Team Knowledge。
 - Verification/Stop：readiness ready 必须与 hypothesisInput ready 一致；hash/lineage 不一致 fail closed；多 package 稳定合并而非最新覆盖；未接受 item 不可见。
 
-### Task 4：修订消费与主线容量隔离
+### Task 4：修订消费与主线容量隔离（DEV 已完成）
 
 - Owner/Boundary：`knowledge_sideflow_service/event_publish_worker` 的 post-absorption hook、`hypothesis_first_chain`/formal revision owner、outbox leasing filter 与相关 projection；不改变当前 Turn。
 - Dependency：T2、T3。
@@ -388,7 +411,7 @@ Critical Path：`T0 → T1 → T2 → T3 → T4 → T5`。T2/T3 的纯测试准�
 - 产出：live attempt 时记录 `revision_available`，在安全边界消费一次；foreground-first leasing、background cap、状态投影和 runtime scene。
 - Verification/Stop：相同 snapshot 只触发一次 revision；100 条 sideflow backlog 下 foreground 首轮可租；相同负载 after 达成 §7.2；若收益不超过噪声或需要通用 priority schema，保留最小正确性部分并重新评审性能设计。
 
-### Task 5：DEV 灰度、完整验收与启用决策
+### Task 5：DEV 灰度、完整验收与启用决策（确定性 DEV 已完成；真实启用未授权）
 
 - Owner/Boundary：测试、隔离 DEV config、Challenge Cup flow projection；不修改真实 operator config、不跑 G1，除非届时另获授权。
 - Dependency：T0–T4 全绿。
@@ -396,22 +419,20 @@ Critical Path：`T0 → T1 → T2 → T3 → T4 → T5`。T2/T3 的纯测试准�
 - 产出：shadow 对照、on 模式 deterministic end-to-end、节点 5 applied item 可检索、节点 6 accepted package、下一轮假说成功消费新 snapshot、回滚演练说明。
 - Verification/Stop：任何知识写入、ACL、hash、主线性能或 pinned definition 不一致均阻止启用；DEV 通过只代表代码/确定性运行闭合，不代表真实 provider/G1。
 
-## 12. 预计影响文件
+## 12. 实际影响文件
 
-实施时以新鲜 preflight 和实际 owner 为准；下表是预计面，不授权绕过其他 active claim。
+实现全程位于任务 worktree，并以新鲜 preflight 与精确 claim 约束实际 owner。下表记录最终实现面；没有修改 operator config、Launcher、真实运行数据、公共 task DTO 或 Agent 写权限。
 
-| 责任面 | 预计文件 | 目的 |
+| 责任面 | 实际文件 | 目的 |
 | --- | --- | --- |
 | Agent 请求入口 | `tools/research_knowledge_request_tools.py` | 3.0 request/status 改接 CommandService |
-| Command/trigger | `research_runtime/command_service.py`、新 `knowledge_sideflow_trigger.py` | 统一 ensure 与 node1 post-commit kickoff |
-| completion wiring | `research_runtime/graph_dispatch_worker.py`、`runtime_factory.py` | 注入窄 trigger，不等待下游 |
-| sideflow/event | `knowledge_sideflow_service.py`、`event_publish_worker.py` | absorption 后 readiness/revision 分流 |
-| accepted package authority | `human_acceptance_artifact.py` 或 `knowledge_artifact_authority.py` | 通过 invocation canonical ref/hash 加载 child package |
-| hypothesis context | `research_project_hypothesis_context.py`、`formal_hypothesis_fanout.py` | composite snapshot、candidate top-k、consumed hash |
-| hypothesis revision | `hypothesis_first_chain.py` 及既有 collection request/round owner | invocation 关联和一次性 revision |
-| scheduling | Ledger outbox repository/filter、graph/adapter lease owner | foreground-first 与 sideflow cap |
-| projection | `knowledge_invocation_projection.py`、`projection_builder.py` | queued→published→revision 状态 |
-| permissions | `agent_role_tool_profile_service.py` 仅做回归核对 | 保持多读、planner request、knowledge manager write |
+| Command/trigger | 新 `research_runtime/knowledge_sideflow_trigger.py`、`graph_dispatch_worker.py`、`runtime_factory.py` | 复用既有 CommandService；node1 post-commit kickoff 不等待下游 |
+| accepted package authority | `human_acceptance_artifact.py`、新 `knowledge_snapshot_consumption.py` | 通过 invocation、父 event、canonical ref 与 hash 加载和消费 child package |
+| hypothesis context | `research_project_hypothesis_context.py`、`formal_hypothesis_fanout.py` | composite snapshot、candidate 私有冻结 binding、consumed hash |
+| task binding | `research_project_agent_tasks.py` | 私有冻结 snapshot binding 持久化，不扩公开 DTO |
+| readiness/revision | `readiness/common.py`、`readiness/knowledge_recheck.py`、`real_domain_ports.py`、`real_readiness_context.py` | readiness 与实际已吸收 package 对齐；live Turn 只发 revision event |
+| scheduling | `ledger/outbox.py`、`ledger/repository.py`、`graph_dispatch_worker.py`、`adapter_dispatch_worker.py` | foreground-first、background cap 与完整事件事实读取 |
+| tests | `test_knowledge_sideflow_run.py`、`test_knowledge_readiness_gate.py`、`test_research_workflow_formal_hypothesis_fanout.py`、`test_research_project_agent_tasks.py`、`test_research_knowledge_request_tool.py`、`test_research_workflow_outbox_leasing.py` | 锁定入口、身份/hash、冻结快照、revision、长事件窗口和容量隔离 |
 
 ## 13. 验证矩阵
 
@@ -448,9 +469,9 @@ Critical Path：`T0 → T1 → T2 → T3 → T4 → T5`。T2/T3 的纯测试准�
 - **Launcher 层：** 只有用户授权启用本机 operator config 后才执行 restart/health/runtime scene 验收。
 - **真实研究层：** provider 回执、模型成本、G1 质量和正式知识内容另行授权；不得用 DEV fixture 代替。
 
-## 14. 实施完成时的 Challenge Cup 投影要求
+## 14. Challenge Cup 投影状态
 
-本方案本身不改变运行时或当前 flow site，因此本轮不修改 `挑战杯/research_team_flow_design.html`。T5 完成前必须同步下表并更新生成站点：
+本轮没有新增公开 DTO 或前端写入面；candidate 的冻结 snapshot binding 明确保留为服务端私有字段。方案中原计划引用的 `挑战杯/research_team_flow_design.html` 不存在于当前 Git checkout，因此没有伪造或补建第二份流程站点；真实实例启用时，应在该站点的实际 owner/生成源可用后同步下表。当前权威实现与验收链接记录在本方案 §0、§12、§13：
 
 | Source or fact | Backend source | API DTO | Teams UI | Generated flow site | Project memory/docs | Validation | Deferred debt |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -470,4 +491,4 @@ Critical Path：`T0 → T1 → T2 → T3 → T4 → T5`。T2/T3 的纯测试准�
 - 同一知识快照无法做到事件重放与 revision 幂等；
 - operator config、Launcher、G1 或真实知识写入缺少用户授权。
 
-下一步建议：从 T0 建立四个根因的失败合同与同机 baseline，然后按 Critical Path 连续实施 T1–T5。
+下一步建议：完成本分支的受管 closeout；如需进入真实验收，再单独授权 operator config、Launcher 与 G1/provider/真实知识库写入。

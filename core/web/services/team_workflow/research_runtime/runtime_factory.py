@@ -213,6 +213,13 @@ def build_workflow_runtime(
         coordinator_factory=lambda: coordinator,
     )
     configure_formal_write_runtime(store=store, command_service=command_service)
+    from .knowledge_sideflow_trigger import KnowledgeSideflowTrigger
+
+    knowledge_sideflow_trigger = KnowledgeSideflowTrigger(
+        store=store,
+        command_service=command_service,
+        now_provider=clock,
+    )
     graph_worker = GraphDispatchWorker(
         store=store,
         coordinator=coordinator,
@@ -220,6 +227,7 @@ def build_workflow_runtime(
         readiness_service=readiness,
         readiness_context=lambda: readiness_context,
         commit_hook=combined_wake,
+        node_success_hook=knowledge_sideflow_trigger.on_node_succeeded,
     )
     adapter_worker = AdapterDispatchWorker(
         store=store,

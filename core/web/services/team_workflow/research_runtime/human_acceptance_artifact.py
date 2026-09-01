@@ -228,6 +228,115 @@ def load_accepted_knowledge_package_from_receipt(
     return payload
 
 
+def load_accepted_knowledge_packages_from_invocations(
+    store: WorkflowLedgerStore,
+    *,
+    team_id: str,
+    parent_run_id: str,
+) -> list[dict[str, Any]]:
+    """Load every accepted sideflow package absorbed by one parent run.
+
+    The invocation row supplies lineage and the parent event proves delivery.
+    The canonical ref then pins the Team Knowledge authority and content hash;
+    no child receipt is copied into the parent run.
+    """
+
+    normalized_team = str(team_id or "").strip()
+    normalized_parent = str(parent_run_id or "").strip()
+    if not normalized_team or not normalized_parent:
+        return []
+    try:
+        invocations, delivery_payloads = store.read(
+            lambda repo: (
+                repo.list_knowledge_invocations_for_parent(normalized_parent),
+                repo.list_knowledge_delivery_event_payloads(normalized_parent),
+            )
+        )
+    except Exception:
+        return []
+
+    delivered: set[tuple[str, str]] = set()
+    for raw_payload in delivery_payloads or []:
+        try:
+            event_payload = json.loads(str(raw_payload or "{}"))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if not isinstance(event_payload, dict):
+            continue
+        invocation_id = str(event_payload.get("invocationId") or "").strip()
+        package_hash = str(
+            event_payload.get("packageContentHash") or ""
+        ).strip().lower()
+        if invocation_id and len(package_hash) == 64:
+            delivered.add((invocation_id, package_hash))
+
+    packages: list[dict[str, Any]] = []
+    for invocation in invocations or []:
+        invocation_id = str(invocation.invocation_id or "").strip()
+        package_hash = str(invocation.package_content_hash or "").strip().lower()
+        if (
+            str(invocation.parent_run_id or "") != normalized_parent
+            or str(invocation.status or "") != "completed"
+            or str(invocation.handoff_state or "") != "accepted"
+            or (invocation_id, package_hash) not in delivered
+        ):
+            continue
+        canonical_ref = _canonical_ref_from_json(
+            str(invocation.knowledge_package_ref or "")
+        )
+        parsed = parse_canonical_ref(canonical_ref)
+        if (
+            parsed is None
+            or parsed.get("kind") != "knowledge_package"
+            or str(parsed.get("teamId") or "") != normalized_team
+            or str(parsed.get("contentHash") or "").strip().lower()
+            != package_hash
+        ):
+            continue
+        producer_run_id = str(invocation.knowledge_child_run_id or "").strip()
+        payload = load_scoped_artifact_payload(
+            "knowledge_package",
+            team_id=normalized_team,
+            authority_run_id=str(parsed.get("authorityRunId") or ""),
+            workflow_run_id=producer_run_id,
+            content_hash=package_hash,
+        )
+        if (
+            not is_accepted_knowledge_package(payload)
+            or canonical_sha256(payload) != package_hash
+        ):
+            continue
+        packages.append(
+            {
+                "invocationId": invocation_id,
+                "producerRunId": producer_run_id,
+                "knowledgePackageRef": canonical_ref,
+                "packageContentHash": package_hash,
+                "package": dict(payload or {}),
+            }
+        )
+    return sorted(
+        packages,
+        key=lambda item: (
+            str(item.get("packageContentHash") or ""),
+            str(item.get("invocationId") or ""),
+        ),
+    )
+
+
+def _canonical_ref_from_json(value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    try:
+        decoded = json.loads(text)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return text
+    if isinstance(decoded, dict):
+        return str(decoded.get("canonicalRef") or "").strip()
+    return text
+
+
 def persist_prepared_human_acceptance_artifact(
     uow: Any,
     *,

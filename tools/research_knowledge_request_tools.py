@@ -4,10 +4,9 @@
 The experiment planner role uses this tool to serve its own evidence needs
 without touching the stage-1 collection machinery directly:
 
-- ``request`` ensures a scoped source-collection run exists for the bound
-  question (idempotent, reuses the D03 facade) but never blocks the
-  hypothesis node and never writes formal knowledge.
-- ``status`` inspects the scoped collection run read-only.
+- ``request`` ensures a scoped knowledge-sideflow invocation through the
+  workflow CommandService, but never blocks the hypothesis node.
+- ``status`` inspects the scoped invocation and child run read-only.
 - ``preview`` runs a bounded metadata search whose results are advisory
   context only: they must never be cited as ``allowedEvidenceRefs``.
 
@@ -18,8 +17,15 @@ project task; the caller cannot pick another question's scope.
 from __future__ import annotations
 
 import json
+import hashlib
+import time
 from typing import Any
 
+from core.research.workflow.contracts import (
+    ActorRef,
+    CommandRequest,
+    WorkflowCommandKind,
+)
 from core.chat.chat_task_types import trim_lines
 
 
@@ -41,7 +47,7 @@ _MAX_PREVIEW_LIMIT = 8
 _ADVISORY_NOTICE = (
     "Advisory only: request does not block hypothesis design and preview "
     "results are not citable evidence; formal evidence still requires the "
-    "stage-1 chain plus human knowledge-package handoff."
+    "knowledge sideflow plus human knowledge-package handoff."
 )
 
 
@@ -204,13 +210,14 @@ def _resolve_bound_scope(
         agent_id=str(seed.get("agentId") or ""),
         scope_seed=seed,
     )
-    scope = {
+    scope: dict[str, Any] = {
         "questionId": question_id,
         "themeId": str(envelope.get("theme") or ""),
         "campaignId": str(envelope.get("campaign") or ""),
         "workflowRunId": workflow_run_id,
         "mode": str(envelope.get("mode") or ""),
         "scopeHash": str(envelope.get("scopeHash") or ""),
+        "runVersion": int(run.get("runVersion") or 1),
     }
     return scope, dict(envelope)
 
@@ -231,26 +238,59 @@ def _split_keywords(raw: str) -> list[str]:
     return items
 
 
-def _facade_call(
+def _command_call(
     team_id: str,
-    envelope: dict[str, Any],
+    scope: dict[str, Any],
     *,
     action: str,
     keywords: list[str],
 ) -> dict[str, Any]:
-    from core.web.services.team_workflow.source_collection import facade
-
-    search_envelope = facade._normalize_search_envelope(
-        {"keywords": keywords}, require_keywords=(action == "ensure")
+    from core.web.services.team_workflow.research_runtime.formal_write_runtime import (
+        get_command_service,
     )
-    return facade.research_knowledge_collection_facade(
-        action=action,
-        scope=envelope,
-        searchEnvelope=search_envelope,
-        requirements=None,
-        writebackPolicy=None,
-        team_id=team_id,
+    command = (
+        WorkflowCommandKind.ENSURE_KNOWLEDGE_COLLECTION
+        if action == "ensure"
+        else WorkflowCommandKind.INSPECT_KNOWLEDGE_COLLECTION
     )
+    run_id = str(scope.get("workflowRunId") or "").strip()
+    question_id = str(scope.get("questionId") or "").strip().upper()
+    fingerprint = hashlib.sha256(
+        json.dumps(
+            {
+                "action": action,
+                "runId": run_id,
+                "questionId": question_id,
+                "keywords": keywords,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    payload: dict[str, Any] = {"questionId": question_id}
+    if action == "ensure":
+        payload["searchEnvelope"] = {
+            "keywords": keywords,
+            "evidenceTypes": [],
+            "timeWindow": {},
+        }
+    receipt = get_command_service().submit(
+        CommandRequest(
+            command_id=f"cmd-rkr-{fingerprint[:24]}",
+            run_id=run_id,
+            team_id=team_id,
+            command=command,
+            node_id="hypothesis_design" if action == "ensure" else None,
+            expected_run_version=int(scope.get("runVersion") or 1),
+            idempotency_key=f"research-knowledge-request:{fingerprint}",
+            payload=payload,
+            requested_by=ActorRef("agent", "research-knowledge-request-tool"),
+            requested_at_ms=int(time.time() * 1000),
+        )
+    )
+    result = receipt.result if isinstance(receipt.result, dict) else {}
+    return {"commandStatus": str(receipt.status or ""), **dict(result)}
 
 
 def _run_request(
@@ -266,14 +306,14 @@ def _run_request(
             "action=request requires keywords (comma or newline separated).",
             code="keywords_required",
         )
-    ensured = _facade_call(team_id, envelope, action="ensure", keywords=keyword_list)
+    ensured = _command_call(team_id, scope, action="ensure", keywords=keyword_list)
     return {
         "ok": True,
         "status": "succeeded",
         "action": "request",
         "scope": scope,
         "keywords": keyword_list,
-        "collection": _facade_projection(ensured),
+        "collection": _command_projection(ensured),
         "advisory": {"blocking": False, "notice": _ADVISORY_NOTICE},
     }
 
@@ -283,34 +323,31 @@ def _run_status(
     scope: dict[str, str],
     envelope: dict[str, Any],
 ) -> dict[str, Any]:
-    inspected = _facade_call(team_id, envelope, action="inspect", keywords=[])
+    inspected = _command_call(team_id, scope, action="inspect", keywords=[])
     return {
         "ok": True,
         "status": "succeeded",
         "action": "status",
         "scope": scope,
-        "collection": _facade_projection(inspected),
+        "collection": _command_projection(inspected),
     }
 
 
-def _facade_projection(facade_result: dict[str, Any]) -> dict[str, Any]:
-    locator = (
-        facade_result.get("locator")
-        if isinstance(facade_result.get("locator"), dict)
-        else {}
-    )
-    summary = (
-        facade_result.get("summary")
-        if isinstance(facade_result.get("summary"), dict)
-        else {}
-    )
+def _command_projection(result: dict[str, Any]) -> dict[str, Any]:
+    """Keep one bounded collection envelope while exposing canonical IDs."""
+
     return {
-        "facadeStatus": str(facade_result.get("status") or ""),
-        "created": bool(facade_result.get("created")),
-        "idempotent": bool(facade_result.get("idempotent")),
-        "runId": str(locator.get("runId") or ""),
-        "stage": str(summary.get("stage") or ""),
-        "summary": summary,
+        "commandStatus": str(result.get("commandStatus") or ""),
+        "invocationId": str(result.get("invocationId") or ""),
+        "childRunId": str(result.get("childRunId") or ""),
+        "replayed": bool(result.get("replayed")),
+        "reused": bool(result.get("reused")),
+        "invocationStatus": str(result.get("invocationStatus") or ""),
+        "handoffState": str(result.get("handoffState") or ""),
+        "invocations": list(result.get("invocations") or []),
+        "childRun": result.get("childRun") if isinstance(result.get("childRun"), dict) else None,
+        "recoveryActions": list(result.get("recoveryActions") or []),
+        "knowledgeSideflowMode": str(result.get("knowledgeSideflowMode") or ""),
     }
 
 
