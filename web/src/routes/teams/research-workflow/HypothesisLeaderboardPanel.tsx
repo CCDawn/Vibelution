@@ -512,7 +512,7 @@ function DimensionReviewCard({
     );
   }
   return (
-    <div className="grid gap-1">
+    <div className={styles.reviewList}>
       {candidate.dimensionReviews.map((review, index) => {
         const ratingLabel = RATING_KEYS.has(review.rating)
           ? challengeRatingLabel(review.rating as ChallengeQuestionDimensionReview["rating"], lang)

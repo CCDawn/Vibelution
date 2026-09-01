@@ -34,6 +34,7 @@ export default {
   detailText: "wrap-anywhere",
   reviewRow:
     "grid gap-0.5 rounded border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-card)] px-2 py-1.5 [font-size:var(--vui-font-2xs)]",
+  reviewList: "grid gap-1",
   reviewHead: "flex flex-wrap items-center gap-1.5",
   reviewMeta: "wrap-anywhere text-[var(--fg-tertiary)]",
   reviewText: "wrap-anywhere text-[var(--fg-secondary)]",
