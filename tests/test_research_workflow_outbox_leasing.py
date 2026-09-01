@@ -81,6 +81,85 @@ def test_lease_respects_limit_and_kind_filter(tmp_path: Path) -> None:
         store.close()
 
 
+def test_lease_prioritizes_foreground_and_caps_background_sideflow(
+    tmp_path: Path,
+) -> None:
+    """A sideflow backlog cannot take the foreground worker capacity."""
+
+    from core.research.workflow.knowledge_sideflow_definition import (
+        KNOWLEDGE_SIDEFLOW_WORKFLOW_ID,
+    )
+    from tests._support.workflow_ledger_helpers import build_command_record
+
+    store = open_ledger_store(tmp_path / "ledger.sqlite3")
+    try:
+        def mutate(uow) -> None:
+            uow.repository.insert_run(
+                build_run_record(
+                    run_id="run-foreground",
+                    workflow_id="challenge-cup-research",
+                )
+            )
+            uow.repository.insert_run(
+                build_run_record(
+                    run_id="run-background",
+                    workflow_id=KNOWLEDGE_SIDEFLOW_WORKFLOW_ID,
+                    parent_run_id="run-foreground",
+                )
+            )
+            for index in range(8):
+                command_id = f"cmd-background-{index}"
+                uow.repository.insert_command(
+                    build_command_record(
+                        command_id=command_id,
+                        run_id="run-background",
+                        idempotency_key=command_id,
+                    )
+                )
+                uow.repository.insert_outbox(
+                    build_outbox_record(
+                        action_id=f"a-background-{index:03d}",
+                        run_id="run-background",
+                        command_id=command_id,
+                        available_at_ms=1000,
+                    )
+                )
+            uow.repository.insert_command(
+                build_command_record(
+                    command_id="cmd-foreground",
+                    run_id="run-foreground",
+                    idempotency_key="cmd-foreground",
+                )
+            )
+            # Alphabetically last on purpose: the historical FIFO query
+            # chooses a-background-* before this foreground action.
+            uow.repository.insert_outbox(
+                build_outbox_record(
+                    action_id="z-foreground",
+                    run_id="run-foreground",
+                    command_id="cmd-foreground",
+                    available_at_ms=1000,
+                )
+            )
+
+        store.submit(mutate, force_flush=True).result(timeout=10)
+        leased = outbox_api.lease_ready_actions(
+            store,
+            owner="worker",
+            now_ms=1000,
+            limit=8,
+            action_kinds=("graph_dispatch",),
+            background_workflow_ids=(KNOWLEDGE_SIDEFLOW_WORKFLOW_ID,),
+            background_limit=2,
+        )
+
+        assert leased[0].action_id == "z-foreground"
+        assert [item.run_id for item in leased].count("run-background") == 2
+        assert len(leased) == 3
+    finally:
+        store.close()
+
+
 def test_expired_lease_is_releasable(tmp_path: Path) -> None:
     store = open_ledger_store(tmp_path / "ledger.sqlite3")
     try:

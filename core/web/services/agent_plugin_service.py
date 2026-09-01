@@ -30,32 +30,50 @@ _SESSION_ACTIVITY_FIELDS = (
 
 
 def _native_session_activity_by_id(
-    session_ids: set[str] | None = None,
+    companion_rows: list[dict[str, Any]],
 ) -> dict[str, dict[str, Any]]:
     """Read the native Session summary projection without changing its index rules."""
 
     from core.chat.turn_journal import TERMINAL_EVENTS
 
     from .session.journal_bridge import load_session_conversation_events_snapshot
-    from .session_service import list_sessions
+    from .session_service import query_sessions
 
-    try:
-        rows = list_sessions(include_hidden_internal=True, repair_collisions=False)
-    except Exception as exc:  # noqa: BLE001 - lobby life data remains available if Session projection is transiently unavailable
-        logger.warning("Companion Session activity projection unavailable: %s", type(exc).__name__)
-        return {}
-    selected_ids = {
-        str(session_id or "").strip()
-        for session_id in (session_ids or set())
-        if str(session_id or "").strip()
-    }
+    selected_rows = [
+        {
+            "agentId": str(row.get("agentId") or "").strip(),
+            "sessionId": str(row.get("directSessionId") or "").strip(),
+        }
+        for row in companion_rows
+        if isinstance(row, dict)
+        and str(row.get("agentId") or "").strip()
+        and str(row.get("directSessionId") or "").strip()
+    ]
     activity_by_id: dict[str, dict[str, Any]] = {}
-    for row in rows:
-        if not isinstance(row, dict):
+    for selected in selected_rows:
+        agent_id = selected["agentId"]
+        selected_session_id = selected["sessionId"]
+        try:
+            payload = query_sessions(limit=1, agent_id=agent_id)
+        except Exception as exc:  # noqa: BLE001 - lobby life data remains available if Session projection is transiently unavailable
+            logger.warning(
+                "Companion Session activity projection unavailable for %s: %s",
+                agent_id,
+                type(exc).__name__,
+            )
             continue
-        session_id = str(row.get("id") or "").strip()
-        if not session_id or (selected_ids and session_id not in selected_ids):
+        row = next(
+            (
+                item
+                for item in list(payload.get("items") or [])
+                if isinstance(item, dict)
+                and str(item.get("id") or "").strip() == selected_session_id
+            ),
+            None,
+        )
+        if row is None:
             continue
+        session_id = selected_session_id
         activity = {
             field: row.get(field)
             for field in _SESSION_ACTIVITY_FIELDS
@@ -142,10 +160,7 @@ def _enabled_companion_directory_rows() -> list[dict[str, Any]]:
 def _companion_activity_rows(
     companion_rows: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    session_activity_by_id = _native_session_activity_by_id({
-        str(row.get("directSessionId") or "").strip()
-        for row in companion_rows
-    })
+    session_activity_by_id = _native_session_activity_by_id(companion_rows)
     return [
         {
             "agentId": str(row.get("agentId") or "").strip(),

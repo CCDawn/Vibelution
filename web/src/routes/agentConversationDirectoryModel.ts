@@ -41,9 +41,11 @@ function storedConversationIndexKind(agent: AgentInstance) {
 }
 
 export function isEligibleDirectoryAgent(agent: AgentInstance) {
+  const metadata = agent.metadata ?? {};
   return (
     String(agent.kind || "").trim() === "persistent"
     && String(agent.status || "").trim() !== "archived"
+    && metadata.virtualHumanCompanion !== true
   );
 }
 

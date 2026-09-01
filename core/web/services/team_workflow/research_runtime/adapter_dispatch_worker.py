@@ -27,6 +27,9 @@ from core.research.workflow.contracts import (
 )
 from core.research.workflow.ledger import WorkflowLedgerStore
 from core.research.workflow.ledger import outbox as outbox_api
+from core.research.workflow.knowledge_sideflow_definition import (
+    KNOWLEDGE_SIDEFLOW_WORKFLOW_ID,
+)
 from core.research.workflow.models import ActorKind
 from core.research.workflow.transitions import NodeAttemptStatus
 
@@ -277,6 +280,8 @@ class AdapterDispatchWorker:
             limit=limit,
             lease_ms=self._lease_ms,
             action_kinds=("adapter_dispatch",),
+            background_workflow_ids=(KNOWLEDGE_SIDEFLOW_WORKFLOW_ID,),
+            background_limit=2,
         )
         for action in leased:
             self._handle(action)

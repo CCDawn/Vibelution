@@ -19,6 +19,7 @@
 - 大幅透明立绘使用 `object-contain` 和底部对齐；圆形小头像才使用面部裁切。
 - 大厅卡片使用真实 `personaProfile`、插件 snapshot、日程与关系摘要。无数据时显示明确的空状态，不编造经历、关系或时间。
 - 进入人物调用 `openCompanionSession`；设置页返回目标包含原 `session` 与 `companion`，以回到同一条会话。
+- 普通 `/chat` 的恢复候选、Session 标签与引用列表排除明确带 `virtualHumanCompanion` 标记的人物会话；旧通知或历史链接若只带人物 `session`，必须由 Companion 适配层补齐 `companion` 身份后再展示，不得落入普通聊天外观。
 - 人物大厅从原生 Session summary 投影最新完成身份；未读只使用共享 `sessionActivityIndicator` 的本地已读标记，不复制 transcript 或把人物放回普通会话栏。点击人物或显式 Companion 通知后，使用同一完成身份清除大厅未读。
 - 对话左栏不放人物选择器。切换人物需返回人物大厅。
 

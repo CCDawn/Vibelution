@@ -333,6 +333,61 @@ def test_candidate_hypothesis_tasks_run_in_parallel_hidden_child_sessions(
     assert len(calls) == 2
 
 
+def test_candidate_task_persists_private_frozen_hypothesis_binding(
+    tmp_path, monkeypatch
+) -> None:
+    team, project, agents = _team_project_and_agents(tmp_path, monkeypatch)
+    calls = _accepted_submitter(monkeypatch)
+    snapshot_hash = "d" * 64
+    started = start_research_project_agent_task(
+        team["teamId"],
+        project["projectId"],
+        {
+            "taskKind": "hypothesis_design",
+            "agentId": agents["experiment_planner"]["agentId"],
+            "workflowRunId": "run-sci-096",
+            "workflowNodeId": "hypothesis_design",
+            "nodeRunId": "node-run-hypothesis",
+            "sourceCollectionRunId": "dprun-sci-096",
+            "selectionId": "selection-1",
+            "selectedCandidateIds": ["H1"],
+            "candidateId": "H1",
+            "candidateContext": {"candidateId": "H1", "statement": "claim H1"},
+            "subtaskId": "node-run-hypothesis:selection-1:H1",
+            "targetRef": "hypothesis:selection-1:H1",
+            "idempotencyKey": "candidate-H1-frozen",
+        },
+        _hypothesis_input_binding={
+            "status": "ready",
+            "workflowRunId": "run-sci-096",
+            "sourceCollectionRunId": "dprun-sci-096",
+            "allowedEvidenceRefs": ["source:paper:1"],
+            "knowledgeSnapshot": {
+                "snapshotHash": snapshot_hash,
+                "packageCount": 1,
+                "packages": [],
+                "knowledgeItemIds": ["ki-1"],
+            },
+        },
+    )
+
+    public_task = started["task"]
+    assert public_task["consumedKnowledgeSnapshotHash"] == snapshot_hash
+    assert "hypothesisInputBinding" not in public_task
+    assert snapshot_hash in calls[0]["content"]
+    context = get_research_project_agent_task_context(
+        team["teamId"], project["projectId"], public_task["taskId"]
+    )
+    assert context["hypothesisInput"]["knowledgeSnapshot"]["snapshotHash"] == (
+        snapshot_hash
+    )
+    assert context["hypothesisInput"]["candidateId"] == "H1"
+    status = get_research_project_agent_task_status(
+        team["teamId"], project["projectId"]
+    )
+    assert "hypothesisInputBinding" not in status["tasks"][0]
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [

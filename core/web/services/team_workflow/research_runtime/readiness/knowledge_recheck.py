@@ -21,6 +21,7 @@ Fail-closed properties:
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from typing import Any
 
@@ -34,6 +35,7 @@ from core.research.workflow.contracts.knowledge_sideflow import (
 )
 from core.research.workflow.ledger import (
     CommandNotAllowedError,
+    EventRecord,
     IdempotencyConflictError,
     RunVersionConflictError,
     WorkflowLedgerStore,
@@ -118,8 +120,16 @@ def _recheck_once(
 
     latest = store.latest_attempt(consumer_run_id, node_id)
     if latest is not None and str(latest.status) in _LIVE_ATTEMPT_STATUSES:
-        # The requesting node already executes; no successor attempt needed.
-        _record_recheck_skip(payload, "node_already_live")
+        # Freeze the current Turn.  A deterministic parent event advertises
+        # the new package to the next formal revision/fan-in boundary.
+        _record_revision_available(
+            store,
+            payload,
+            parent=parent,
+            node_id=node_id,
+            current_node_run_id=str(latest.node_run_id or ""),
+            now_provider=now_provider,
+        )
         return
     if command_service is None:
         _record_recheck_skip(payload, "no_command_service")
@@ -157,6 +167,68 @@ def _recheck_once(
         _record_recheck_blocked(payload, node_id, exc)
         return
     _record_recheck_started(payload, node_id)
+
+
+def _record_revision_available(
+    store: WorkflowLedgerStore,
+    payload: dict[str, Any],
+    *,
+    parent: Any,
+    node_id: str,
+    current_node_run_id: str,
+    now_provider: Callable[[], int] | None,
+) -> None:
+    invocation_id = str(payload.get("invocationId") or "").strip()
+    package_hash = str(payload.get("packageContentHash") or "").strip().lower()
+    if not invocation_id or len(package_hash) != 64:
+        _record_recheck_skip(payload, "revision_identity_missing")
+        return
+    event_id = f"evt-knowledge-revision-available:{invocation_id}:{package_hash}"
+    if store.get_event_by_id(event_id) is not None:
+        _record_recheck_skip(payload, "revision_already_available")
+        return
+    now_ms = now_provider() if now_provider else 0
+
+    def mutate(uow) -> None:
+        if uow.repository.get_event_by_id(event_id) is not None:
+            return
+        sequence = uow.repository.advance_last_sequence(parent.run_id, 1, now_ms)
+        if sequence is None:
+            return
+        current = uow.repository.get_run(parent.run_id)
+        uow.repository.insert_event(
+            EventRecord(
+                run_id=parent.run_id,
+                sequence=sequence,
+                event_id=event_id,
+                run_version=int(current.run_version if current is not None else parent.run_version),
+                event_type="knowledge_revision_available",
+                actor_json=json.dumps(
+                    {"actorType": "system", "actorId": "knowledge-readiness-recheck"}
+                ),
+                correlation_id=invocation_id,
+                causation_id=None,
+                payload_json=json.dumps(
+                    {
+                        "invocationId": invocation_id,
+                        "packageContentHash": package_hash,
+                        "nodeId": node_id,
+                        "currentNodeRunId": current_node_run_id,
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+                occurred_at_ms=now_ms,
+            )
+        )
+
+    store.submit(mutate, force_flush=True).result(timeout=30)
+    _scene_event(
+        "knowledge_sideflow.revision_available",
+        payload,
+        {"nodeId": node_id, "packageContentHash": package_hash},
+        outcome="success",
+    )
 
 
 def _record_recheck_skip(payload: dict, reason: str) -> None:

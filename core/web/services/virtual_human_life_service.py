@@ -1515,6 +1515,11 @@ def heartbeat_all_virtual_humans(*, coalesced: bool = False) -> list[dict[str, A
         if not binding or not bool(binding.get("enabled")):
             continue
         try:
+            binding = _reconcile_enabled_companion_directory_visibility(
+                service,
+                agent_id=agent_id,
+                binding=binding,
+            )
             try:
                 _default_agent_persona_initializer(agent_id)
             except Exception as exc:  # noqa: BLE001 - life heartbeat remains independent
@@ -1558,6 +1563,77 @@ def heartbeat_all_virtual_humans(*, coalesced: bool = False) -> list[dict[str, A
             },
         )
     return results
+
+
+def _reconcile_enabled_companion_directory_visibility(
+    service: VirtualHumanLifeService,
+    *,
+    agent_id: str,
+    binding: dict[str, Any],
+) -> dict[str, Any]:
+    """Migrate or repair the Companion-only directory marker at runtime startup."""
+
+    if service.directory_visibility_manager is None:
+        return binding
+    agent = service.require_agent(agent_id, include_archived=True)
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    directory = (
+        binding.get("directoryVisibility")
+        if isinstance(binding.get("directoryVisibility"), dict)
+        else {}
+    )
+    state_is_hidden = str(directory.get("state") or "").strip() == "hidden"
+    marker_is_hidden = (
+        metadata.get("virtualHumanCompanion") is True
+        and str(metadata.get("conversationIndexKind") or "").strip() == "hidden"
+        and str(metadata.get("conversationIndexVisibility") or "").strip() == "hidden"
+        and metadata.get("showInSessionIndex") is False
+    )
+    if state_is_hidden and marker_is_hidden:
+        return binding
+
+    captured_restore = service.directory_visibility_manager(
+        agent_id,
+        action="hide",
+        restore=None,
+    )
+    restore = (
+        directory.get("restore")
+        if state_is_hidden and isinstance(directory.get("restore"), dict)
+        else captured_restore
+    )
+    try:
+        updated = service.set_binding(
+            agent_id,
+            enabled=True,
+            expected_version=int(binding.get("configVersion") or 0),
+            config={
+                **binding,
+                "directoryVisibility": {
+                    "state": "hidden",
+                    "restore": restore,
+                },
+            },
+        )
+    except Exception:
+        if not state_is_hidden:
+            service.directory_visibility_manager(
+                agent_id,
+                action="restore",
+                restore=captured_restore,
+            )
+        raise
+    _record_scene(
+        "directory_visibility_reconciled",
+        agent_id=agent_id,
+        outcome="hidden",
+        fields={
+            "bindingRevision": int(updated.get("bindingRevision") or 0),
+            "migration": not state_is_hidden,
+            "markerRepair": state_is_hidden and not marker_is_hidden,
+        },
+    )
+    return updated
 
 
 async def run_virtual_human_life_runtime(*, interval_seconds: float = 60.0) -> None:

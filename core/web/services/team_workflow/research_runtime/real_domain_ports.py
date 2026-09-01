@@ -1037,6 +1037,33 @@ class RealDomainPorts:
         ).strip()
         if not team_id or not project_id:
             raise RuntimeError("hypothesis_design fan-out requires teamId and projectId")
+        from ..research_project_hypothesis_context import (
+            build_hypothesis_input_context,
+        )
+
+        hypothesis_input_binding = build_hypothesis_input_context(
+            team_id,
+            {
+                "workflowRunId": action.run_id,
+                "sourceCollectionRunId": source_collection_run_id,
+            },
+            store=self._store,
+        )
+        knowledge_snapshot = (
+            hypothesis_input_binding.get("knowledgeSnapshot")
+            if isinstance(hypothesis_input_binding.get("knowledgeSnapshot"), Mapping)
+            else {}
+        )
+        consumed_snapshot_hash = str(
+            knowledge_snapshot.get("snapshotHash") or ""
+        ).strip().lower()
+        if (
+            hypothesis_input_binding.get("status") != "ready"
+            or len(consumed_snapshot_hash) != 64
+        ):
+            raise RuntimeError(
+                "accepted knowledge package is not ready for hypothesis fan-out"
+            )
 
         root = _resolve_formal_node_root_session(
             team_id=team_id,
@@ -1105,6 +1132,7 @@ class RealDomainPorts:
                     previous=prior,
                     challenge_task_contract=challenge_task_contract,
                     model_invocation_receipt_binding=model_invocation_receipt_binding,
+                    hypothesis_input_binding=hypothesis_input_binding,
                 )
                 child = _scoped_handle_from_started(
                     started,
@@ -1179,6 +1207,18 @@ class RealDomainPorts:
 
         if not handles:
             raise RuntimeError("hypothesis_design fan-out produced no candidate tasks")
+        from .knowledge_snapshot_consumption import (
+            record_knowledge_snapshot_consumed,
+        )
+
+        record_knowledge_snapshot_consumed(
+            self._store,
+            run_id=action.run_id,
+            node_run_id=action.node_run_id,
+            selection_id=selection_id,
+            snapshot_hash=consumed_snapshot_hash,
+            now_ms=int(time.time() * 1000),
+        )
         return AgentTaskHandle(
             session_id=root_session_id,
             session_attempt=root_attempt,

@@ -78,6 +78,26 @@ def _formal_required_model_policy() -> dict[str, Any]:
     )
 
 
+def _ready_hypothesis_input(
+    snapshot_hash: str = "d" * 64,
+    *,
+    source_collection_run_id: str = "run-1",
+) -> dict[str, Any]:
+    return {
+        "status": "ready",
+        "workflowRunId": "run-1",
+        "sourceCollectionRunId": source_collection_run_id,
+        "allowedEvidenceRefs": ["source:paper:1"],
+        "knowledgeSnapshot": {
+            "snapshotHash": snapshot_hash,
+            "packageCount": 1,
+            "packages": [],
+            "knowledgeItemIds": ["ki-1"],
+        },
+        "consumedKnowledgeSnapshotHash": snapshot_hash,
+    }
+
+
 def test_pending_action_rejects_candidate_identity_outside_its_scope() -> None:
     with pytest.raises(ValueError, match="does not match"):
         replace(
@@ -728,6 +748,7 @@ def test_parallel_limit_is_frozen_and_fail_closed() -> None:
 def test_resolve_candidate_reuses_success_and_retries_only_failed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    snapshot_hash = "b" * 64
     statuses = {
         "H1": {
             "taskId": "task-H1",
@@ -739,6 +760,7 @@ def test_resolve_candidate_reuses_success_and_retries_only_failed(
             "sessionId": "child-H1",
             "sessionAttempt": 1,
             "status": "completed",
+            "consumedKnowledgeSnapshotHash": snapshot_hash,
             "turn": {"turnId": "turn-H1"},
         },
         "H2": {
@@ -751,6 +773,7 @@ def test_resolve_candidate_reuses_success_and_retries_only_failed(
             "sessionId": "child-H2",
             "sessionAttempt": 1,
             "status": "failed",
+            "consumedKnowledgeSnapshotHash": snapshot_hash,
             "turn": {"turnId": "turn-H2"},
         },
     }
@@ -820,6 +843,14 @@ def test_resolve_candidate_reuses_success_and_retries_only_failed(
             "outcomeKinds": ["candidate"],
             "modelPolicySha256": "a" * 64,
         },
+        "hypothesis_input_binding": {
+            "status": "ready",
+            "workflowRunId": "run-1",
+            "sourceCollectionRunId": "source-1",
+            "allowedEvidenceRefs": ["source:paper:1"],
+            "knowledgeSnapshot": {"snapshotHash": snapshot_hash},
+            "consumedKnowledgeSnapshotHash": snapshot_hash,
+        },
     }
     reused = formal_hypothesis_fanout.resolve_formal_candidate_task(
         **{**common, "candidate_id": "H1"}
@@ -835,6 +866,12 @@ def test_resolve_candidate_reuses_success_and_retries_only_failed(
     assert authorities[0]["_model_invocation_receipt_binding"]["outcomeKinds"] == [
         "candidate"
     ]
+    assert (
+        authorities[0]["_hypothesis_input_binding"]["knowledgeSnapshot"][
+            "snapshotHash"
+        ]
+        == snapshot_hash
+    )
     reused_previous = formal_hypothesis_fanout.resolve_formal_candidate_task(
         **{
             **common,
@@ -845,6 +882,73 @@ def test_resolve_candidate_reuses_success_and_retries_only_failed(
     )
     assert reused_previous["sessionId"] == "child-H1"
     assert len(starts) == 1
+
+    statuses["H1"]["consumedKnowledgeSnapshotHash"] = "c" * 64
+    revised = formal_hypothesis_fanout.resolve_formal_candidate_task(
+        **{
+            **common,
+            "action": _action(attempt=4, node_run_id="node-4"),
+            "candidate_id": "H1",
+            "previous": statuses["H1"],
+            "challenge_task_contract": {
+                **common["challenge_task_contract"],
+                "nodeRunId": "node-4",
+                "nodeAttempt": 4,
+            },
+            "model_invocation_receipt_binding": {
+                **common["model_invocation_receipt_binding"],
+                "formalNodeRunId": "node-4",
+                "formalNodeAttempt": 4,
+            },
+        }
+    )
+    assert revised["sessionId"] == "child-H2-retry"
+    assert starts[-1]["formalRetry"] is True
+    assert starts[-1]["retryTaskId"] == "task-H1"
+    assert snapshot_hash[:16] in starts[-1]["idempotencyKey"]
+
+
+def test_knowledge_snapshot_consumption_is_idempotent(tmp_path) -> None:
+    from core.web.services.team_workflow.research_runtime.knowledge_snapshot_consumption import (
+        record_knowledge_snapshot_consumed,
+    )
+
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run(run_id="run-1")
+        first = record_knowledge_snapshot_consumed(
+            harness.store,
+            run_id="run-1",
+            node_run_id="node-1",
+            selection_id="selection-1",
+            snapshot_hash="d" * 64,
+            now_ms=1_750_000_001_000,
+        )
+        replay = record_knowledge_snapshot_consumed(
+            harness.store,
+            run_id="run-1",
+            node_run_id="node-1",
+            selection_id="selection-1",
+            snapshot_hash="d" * 64,
+            now_ms=1_750_000_001_001,
+        )
+
+        assert first is True
+        assert replay is False
+        events = [
+            event
+            for event in harness.store.list_events("run-1")
+            if event.event_type == "knowledge_snapshot_consumed"
+        ]
+        assert len(events) == 1
+        payload = json.loads(events[0].payload_json)
+        assert payload == {
+            "nodeRunId": "node-1",
+            "selectionId": "selection-1",
+            "snapshotHash": "d" * 64,
+        }
+    finally:
+        harness.close()
 
 
 def test_fragment_readback_requires_exact_formal_scope() -> None:
@@ -1283,6 +1387,15 @@ def test_formal_create_continues_after_one_candidate_start_failure(
         assert latest is not None
         action = _action(node_run_id=latest.node_run_id)
         started_candidates: list[str] = []
+        binding_hashes: list[str] = []
+        build_calls: list[str] = []
+        monkeypatch.setattr(
+            "core.web.services.team_workflow.research_project_hypothesis_context.build_hypothesis_input_context",
+            lambda _team_id, task, **_kwargs: (
+                build_calls.append(str(task.get("workflowRunId") or ""))
+                or _ready_hypothesis_input()
+            ),
+        )
         monkeypatch.setattr(
             real_ports_module,
             "_resolve_formal_node_root_session",
@@ -1297,6 +1410,11 @@ def test_formal_create_continues_after_one_candidate_start_failure(
         def start_candidate(**kwargs):
             candidate_id = kwargs["candidate_id"]
             started_candidates.append(candidate_id)
+            binding_hashes.append(
+                kwargs["hypothesis_input_binding"]["knowledgeSnapshot"][
+                    "snapshotHash"
+                ]
+            )
             if candidate_id == "H2":
                 raise RuntimeError("H2 unavailable")
             return {"candidateId": candidate_id}
@@ -1367,7 +1485,16 @@ def test_formal_create_continues_after_one_candidate_start_failure(
             },
         )
         assert started_candidates == ["H1", "H2", "H3"]
+        assert build_calls == ["run-1"]
+        assert binding_hashes == ["d" * 64] * 3
         assert [item.candidate_id for item in handle.scoped_handles] == ["H1", "H3"]
+        consumed = [
+            event
+            for event in harness.store.list_events("run-1")
+            if event.event_type == "knowledge_snapshot_consumed"
+        ]
+        assert len(consumed) == 1
+        assert json.loads(consumed[0].payload_json)["snapshotHash"] == "d" * 64
         row = harness.store.read(
             lambda repo: repo.get_anchor_by_node_run(latest.node_run_id)
         )
@@ -1397,6 +1524,12 @@ def test_formal_retry_reuses_successful_children_and_rebinds_replayed_fragments(
     harness = CommandHarness(tmp_path / "ledger.sqlite3")
     try:
         harness.seed_run(run_id="run-1")
+        monkeypatch.setattr(
+            "core.web.services.team_workflow.research_project_hypothesis_context.build_hypothesis_input_context",
+            lambda *_args, **_kwargs: _ready_hypothesis_input(
+                source_collection_run_id="source-1"
+            ),
+        )
 
         def seed_attempts(uow) -> None:
             for command_id, node_run_id, attempt, status in (
@@ -1523,6 +1656,7 @@ def test_formal_retry_reuses_successful_children_and_rebinds_replayed_fragments(
                 "sessionId": child.session_id,
                 "sessionAttempt": child.session_attempt,
                 "status": "completed" if child.candidate_id != "H2" else "failed",
+                "consumedKnowledgeSnapshotHash": "d" * 64,
                 "turn": {"turnId": child.turn_id},
             }
             for child in old_children

@@ -17,6 +17,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from core.research.workflow.contracts import WorkflowCommandKind
 from tools import research_knowledge_request_tools as request_tools
 
 
@@ -80,22 +81,37 @@ def bound_scope(monkeypatch):
 
 @pytest.fixture()
 def facade_calls(monkeypatch):
-    calls: list[dict] = []
+    calls = []
 
-    def fake_facade(**kwargs):
-        calls.append(kwargs)
-        return {
-            "action": kwargs["action"],
-            "status": "ok",
-            "created": True,
-            "idempotent": False,
-            "locator": {"runId": "collect-1"},
-            "summary": {"stage": "search", "recordCount": 3},
-        }
+    class FakeCommandService:
+        def submit(self, request):
+            calls.append(request)
+            if request.command is WorkflowCommandKind.ENSURE_KNOWLEDGE_COLLECTION:
+                return SimpleNamespace(
+                    status="accepted",
+                    result={
+                        "invocationId": "kinv-1",
+                        "childRunId": "collect-1",
+                        "replayed": False,
+                        "reused": False,
+                        "invocationStatus": "child_created",
+                        "handoffState": "pending",
+                    },
+                )
+            return SimpleNamespace(
+                status="accepted",
+                result={
+                    "invocationId": "kinv-1",
+                    "invocations": [{"invocationId": "kinv-1"}],
+                    "childRun": {"runId": "collect-1"},
+                    "recoveryActions": ["none"],
+                    "knowledgeSideflowMode": "on",
+                },
+            )
 
     monkeypatch.setattr(
-        "core.web.services.team_workflow.source_collection.facade.research_knowledge_collection_facade",
-        fake_facade,
+        "core.web.services.team_workflow.research_runtime.formal_write_runtime.get_command_service",
+        lambda: FakeCommandService(),
     )
     return calls
 
@@ -136,7 +152,7 @@ def test_request_requires_keywords(bound_scope, facade_calls):
     assert facade_calls == []
 
 
-def test_request_delegates_to_facade_ensure_and_stays_advisory(bound_scope, facade_calls):
+def test_request_delegates_to_command_ensure_and_stays_advisory(bound_scope, facade_calls):
     result = _parse(
         request_tools.research_knowledge_request_tool(
             action="request",
@@ -149,23 +165,94 @@ def test_request_delegates_to_facade_ensure_and_stays_advisory(bound_scope, faca
     assert result["scope"]["questionId"] == "SCI-096"
     assert result["scope"]["mode"] == "dev"
     assert result["scope"]["scopeHash"] == "a" * 64
-    assert result["collection"]["runId"] == "collect-1"
+    assert result["collection"]["childRunId"] == "collect-1"
     assert result["advisory"]["blocking"] is False
-    assert facade_calls[0]["action"] == "ensure"
-    assert facade_calls[0]["team_id"] == "research-team"
-    assert facade_calls[0]["searchEnvelope"]["keywords"] == [
+    assert facade_calls[0].command is WorkflowCommandKind.ENSURE_KNOWLEDGE_COLLECTION
+    assert facade_calls[0].team_id == "research-team"
+    assert facade_calls[0].payload["searchEnvelope"]["keywords"] == [
         "predictive coding",
         "spike coding",
         "redundancy",
     ]
-    assert facade_calls[0]["scope"]["scopeHash"] == "a" * 64
+    assert facade_calls[0].run_id == "run-1"
 
 
-def test_status_delegates_to_facade_inspect(bound_scope, facade_calls):
+def test_status_delegates_to_command_inspect(bound_scope, facade_calls):
     result = _parse(request_tools.research_knowledge_request_tool(action="status"))
     assert result["ok"] is True
     assert result["action"] == "status"
-    assert facade_calls[0]["action"] == "inspect"
+    assert facade_calls[0].command is WorkflowCommandKind.INSPECT_KNOWLEDGE_COLLECTION
+
+
+def test_request_and_status_use_workflow_command_service(
+    bound_scope, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """3.0 provisioning must use the Ledger command authority, never D03."""
+
+    calls = []
+
+    class FakeCommandService:
+        def submit(self, request):
+            calls.append(request)
+            if request.command is WorkflowCommandKind.ENSURE_KNOWLEDGE_COLLECTION:
+                return SimpleNamespace(
+                    status="accepted",
+                    result={
+                        "invocationId": "kinv-1",
+                        "childRunId": "run-child-1",
+                        "replayed": False,
+                        "reused": False,
+                        "invocationStatus": "child_created",
+                        "handoffState": "pending",
+                    },
+                )
+            return SimpleNamespace(
+                status="accepted",
+                result={
+                    "invocationId": "kinv-1",
+                    "invocations": [{"invocationId": "kinv-1"}],
+                    "childRun": {"runId": "run-child-1"},
+                    "recoveryActions": ["none"],
+                    "knowledgeSideflowMode": "on",
+                },
+            )
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.formal_write_runtime.get_command_service",
+        lambda: FakeCommandService(),
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.source_collection.facade.research_knowledge_collection_facade",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("legacy source-collection facade must not be called")
+        ),
+    )
+
+    requested = _parse(
+        request_tools.research_knowledge_request_tool(
+            action="request", keywords="predictive coding, spike coding"
+        )
+    )
+    inspected = _parse(
+        request_tools.research_knowledge_request_tool(action="status")
+    )
+
+    assert requested["ok"] is True
+    assert requested["collection"]["invocationId"] == "kinv-1"
+    assert inspected["ok"] is True
+    assert inspected["collection"]["childRun"]["runId"] == "run-child-1"
+    assert [item.command for item in calls] == [
+        WorkflowCommandKind.ENSURE_KNOWLEDGE_COLLECTION,
+        WorkflowCommandKind.INSPECT_KNOWLEDGE_COLLECTION,
+    ]
+    ensure = calls[0]
+    assert ensure.run_id == "run-1"
+    assert ensure.node_id == "hypothesis_design"
+    assert ensure.payload["questionId"] == "SCI-096"
+    assert ensure.payload["searchEnvelope"]["keywords"] == [
+        "predictive coding",
+        "spike coding",
+    ]
 
 
 def test_preview_requires_query_and_kind(bound_scope):
@@ -271,20 +358,15 @@ def test_keyword_split_is_bounded_and_deduplicated():
     assert all(len(item) <= request_tools._MAX_KEYWORD_LENGTH for item in keywords)
 
 
-def test_request_status_through_real_facade_and_scope(tmp_path, monkeypatch):
-    """Composition test mirroring the hypothesis-first e2e pattern.
+def test_request_status_through_real_command_service_and_scope(tmp_path, monkeypatch):
+    """Composition test: bound tool -> command authority -> one child run."""
 
-    Only the task-anchoring seams (project task binding, workflow run lookup)
-    and the data-processing run layer are faked; the scope seed, envelope
-    resolution, facade normalization, and scope-hash idempotency all run the
-    real production code. SCI-099 is not in the frozen theme registry, so the
-    real resolution takes the dev-theme fallback without touching storage.
-    """
+    from types import SimpleNamespace
 
-    from core.web.services import data_processing_service
-    from core.web.services.team_workflow.source_collection import runs as collection_runs
+    from tests._support.graph_helpers import GraphHarness
 
-    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path))
+    harness = GraphHarness(tmp_path)
+    harness.commands.seed_run("run-9", status="running")
 
     def fake_binding(workflow_service, **kwargs):
         return {
@@ -298,7 +380,12 @@ def test_request_status_through_real_facade_and_scope(tmp_path, monkeypatch):
     class FakeRunService:
         def get_run(self, run_id: str) -> dict:
             assert run_id == "run-9"
-            return {"runId": "run-9", "teamId": "research-team", "questionId": "SCI-099"}
+            return {
+                "runId": "run-9",
+                "teamId": "research-team",
+                "questionId": "SCI-096",
+                "runVersion": 1,
+            }
 
     monkeypatch.setattr(
         "tools.challenge_cup_operations_tools._project_task_binding", fake_binding
@@ -307,77 +394,69 @@ def test_request_status_through_real_facade_and_scope(tmp_path, monkeypatch):
         "core.web.services.team_workflow.research_runtime.get_research_workflow_runtime_service",
         lambda: FakeRunService(),
     )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.hypothesis_first_chain._question_scope_envelope",
+        lambda _team_id, question_id: {
+            "program": "XH-202619",
+            "theme": f"dev-{question_id.lower()}",
+            "campaign": "dev-campaign",
+            "question": question_id,
+            "branch": "main",
+            "workflow": "hypothesis_first",
+            "agentId": "operator",
+            "mode": "dev",
+        },
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_scope.resolve_research_scope",
+        lambda _team_id, *, agent_id, scope_seed: {
+            **scope_seed,
+            "agentId": agent_id,
+            "scopeHash": "e" * 64,
+        },
+    )
 
-    created: list[dict] = []
-
-    def fake_start(team_id, payload=None):
-        created.append(dict(payload or {}))
-        return {"runId": f"dprun-kr-{len(created)}", "status": "accepted"}
-
-    def fake_list_runs(*, limit=200, metadata_filters=None, scope_filters=None, **_):
-        scope_hash = str((scope_filters or {}).get("researchScopeHash") or "")
-        expected_fingerprint = str(
-            (metadata_filters or {}).get("searchEnvelopeFingerprint") or ""
-        )
-        runs = []
-        for index, item in enumerate(created):
-            if (
-                scope_hash
-                and str(item.get("scope", {}).get("researchScopeHash") or "") != scope_hash
-            ):
-                continue
-            run_fingerprint = str(item.get("searchEnvelopeFingerprint") or "")
-            if expected_fingerprint and run_fingerprint != expected_fingerprint:
-                continue
-            runs.append(
-                {
-                    "runId": f"dprun-kr-{index + 1}",
-                    "createdAt": "2026-08-21T00:00:00Z",
-                    "updatedAt": "2026-08-21T00:00:00Z",
-                    "metadata": (
-                        {
-                            "startedFrom": "team_workflow_source_collection",
-                            "searchEnvelopeFingerprint": run_fingerprint,
-                        }
-                        if run_fingerprint
-                        else {}
-                    ),
-                }
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.formal_write_runtime.get_command_service",
+        lambda: harness.commands.command_service,
+    )
+    monkeypatch.setattr(
+        "config.settings.get_config",
+        lambda: SimpleNamespace(
+            research=SimpleNamespace(
+                knowledge_sideflow=SimpleNamespace(mode="on")
             )
-        return {"runs": runs}
-
-    def fake_summary(team_id, run_id=""):
-        return {
-            "status": "accepted",
-            "runId": run_id,
-            "run": {"runId": run_id, "status": "accepted"},
-            "runStatus": {"status": "accepted", "currentPhase": "queued"},
-            "summary": {"recordCount": 0, "sourceCandidateCount": 0},
-            "stageCards": [],
-        }
-
-    monkeypatch.setattr(collection_runs, "start_source_collection_run", fake_start)
-    monkeypatch.setattr(collection_runs, "get_source_collection_summary", fake_summary)
-    monkeypatch.setattr(data_processing_service, "list_processing_runs", fake_list_runs)
-
-    first = _parse(
-        request_tools.research_knowledge_request_tool(action="request", keywords="spike coding")
+        ),
     )
-    second = _parse(
-        request_tools.research_knowledge_request_tool(action="request", keywords="spike coding")
-    )
-    status = _parse(request_tools.research_knowledge_request_tool(action="status"))
 
-    assert first["ok"] is True
-    assert first["collection"]["created"] is True
-    assert first["scope"]["questionId"] == "SCI-099"
-    assert first["scope"]["mode"] == "dev"
-    assert first["scope"]["themeId"].startswith("dev-")
-    assert second["ok"] is True
-    assert second["collection"]["idempotent"] is True
-    assert second["collection"]["runId"] == first["collection"]["runId"]
-    assert len(created) == 1
-    assert created[0]["scope"]["researchScopeHash"] == first["scope"]["scopeHash"]
-    assert status["ok"] is True
-    assert status["collection"]["facadeStatus"] == "ok"
-    assert status["collection"]["runId"] == first["collection"]["runId"]
+    try:
+        first = _parse(
+            request_tools.research_knowledge_request_tool(
+                action="request", keywords="spike coding"
+            )
+        )
+        second = _parse(
+            request_tools.research_knowledge_request_tool(
+                action="request", keywords="spike coding"
+            )
+        )
+        status = _parse(
+            request_tools.research_knowledge_request_tool(action="status")
+        )
+
+        assert first["ok"] is True, first
+        assert first["scope"]["questionId"] == "SCI-096"
+        assert first["scope"]["mode"] == "dev"
+        assert second["ok"] is True
+        assert second["collection"]["replayed"] is True
+        assert second["collection"]["invocationId"] == first["collection"]["invocationId"]
+        assert second["collection"]["childRunId"] == first["collection"]["childRunId"]
+        assert status["ok"] is True
+        assert status["collection"]["invocations"][0]["invocationId"] == (
+            first["collection"]["invocationId"]
+        )
+        assert status["collection"]["childRun"]["runId"] == (
+            first["collection"]["childRunId"]
+        )
+    finally:
+        harness.close()

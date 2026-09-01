@@ -27,6 +27,9 @@ from core.research.workflow.challenge_cup_runtime import (
     successor_map,
 )
 from core.research.workflow.contracts import ExecutionReceipt
+from core.research.workflow.knowledge_sideflow_definition import (
+    KNOWLEDGE_SIDEFLOW_WORKFLOW_ID,
+)
 from core.research.workflow.ledger import WorkflowLedgerStore
 from core.research.workflow.ledger import outbox as outbox_api
 from core.research.workflow.transitions import (
@@ -51,6 +54,7 @@ from .stage_one_closeout import stage_one_terminal_facts
 # a run with no durable node attempt is a failed dispatch, not an indefinitely
 # pending job.  Command/outbox rows alone do not prove that dispatch started.
 DEFAULT_START_DEADLINE_MS = 60_000
+DEFAULT_KNOWLEDGE_BACKGROUND_LIVE_LIMIT = 2
 
 
 def _record_scene_event(event_code: str, *, outcome: str, fields: dict[str, Any]) -> None:
@@ -154,6 +158,7 @@ class GraphDispatchWorker:
         readiness_service: Any | None = None,
         readiness_context: Callable[[], Any] | None = None,
         commit_hook: Callable[[], None] | None = None,
+        node_success_hook: Callable[..., Any] | None = None,
     ) -> None:
         self._store = store
         self._coordinator = coordinator
@@ -172,6 +177,7 @@ class GraphDispatchWorker:
         self._readiness = readiness_service
         self._readiness_context = readiness_context
         self._commit_hook = commit_hook
+        self._node_success_hook = node_success_hook
 
     def _submit(self, mutate, *, force_flush: bool = True):
         hook = self._commit_hook
@@ -208,6 +214,8 @@ class GraphDispatchWorker:
             limit=limit,
             lease_ms=self._lease_ms,
             action_kinds=("graph_dispatch",),
+            background_workflow_ids=(KNOWLEDGE_SIDEFLOW_WORKFLOW_ID,),
+            background_limit=DEFAULT_KNOWLEDGE_BACKGROUND_LIVE_LIMIT,
         )
         for action in leased:
             self._handle(action)
@@ -531,6 +539,7 @@ class GraphDispatchWorker:
             except Exception as exc:
                 self._requeue_or_fail(action, dispatch, f"successor_commit_failed:{exc}")
                 raise
+            self._notify_node_succeeded(dispatch)
             return
 
         readiness_hint = None
@@ -599,6 +608,7 @@ class GraphDispatchWorker:
                 _sideflow_child_succeeded(uow, run_id=dispatch.run_id, now_ms=now_ms)
 
             self._submit(ack_only, force_flush=True).result(timeout=30)
+            self._notify_node_succeeded(dispatch)
             return True
         successor_id = successors[0]
         snapshot = self._coordinator.snapshot(dispatch.run_id, dispatch.workflow_version_id)
@@ -618,6 +628,7 @@ class GraphDispatchWorker:
                     return
 
             self._submit(ack_only, force_flush=True).result(timeout=30)
+            self._notify_node_succeeded(dispatch)
             return True
 
         values = dict(snapshot.get("values") or {})
@@ -642,6 +653,7 @@ class GraphDispatchWorker:
         except Exception as exc:
             self._requeue_or_fail(action, dispatch, f"successor_commit_failed:{exc}")
             raise
+        self._notify_node_succeeded(dispatch)
         return True
 
     def _pending_with_node_binding(
@@ -859,6 +871,36 @@ class GraphDispatchWorker:
             _ = result
 
         self._submit(mutate, force_flush=True).result(timeout=30)
+        if result.completed:
+            outcome = (
+                dispatch.receipt.outcome
+                if dispatch.receipt is not None
+                else "succeeded"
+            )
+            if outcome == "succeeded":
+                self._notify_node_succeeded(dispatch)
+
+    def _notify_node_succeeded(self, dispatch: GraphDispatch) -> None:
+        hook = self._node_success_hook
+        if hook is None:
+            return
+        try:
+            hook(
+                run_id=dispatch.run_id,
+                node_id=dispatch.node_id,
+                node_run_id=dispatch.node_run_id,
+            )
+        except Exception as exc:  # post-commit sideflow cannot fail the main run
+            _record_scene_event(
+                "graph_dispatch.node_success_hook_failed",
+                outcome="failed",
+                fields={
+                    "runId": dispatch.run_id,
+                    "nodeId": dispatch.node_id,
+                    "nodeRunId": dispatch.node_run_id,
+                    "errorType": type(exc).__name__,
+                },
+            )
 
     def _defer_for_maintenance(
         self, action: Any, dispatch: GraphDispatch, detail: str

@@ -15,6 +15,7 @@ Covers plan Task 4 deliverable 3:
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -67,6 +68,20 @@ class StoreBackedKnowledgeContext(FakeDomainContext):
             lambda uow: uow.repository.list_knowledge_invocations_for_parent(run_id),
             force_flush=True,
         ).result(timeout=10)
+        delivered = set()
+        for event in self._store.list_events(run_id):
+            if event.event_type not in {
+                "knowledge_result_absorbed",
+                "knowledge_invocation_reused",
+            }:
+                continue
+            payload = json.loads(event.payload_json)
+            delivered.add(
+                (
+                    str(payload.get("invocationId") or ""),
+                    str(payload.get("packageContentHash") or "").lower(),
+                )
+            )
         return [
             {
                 "invocationId": record.invocation_id,
@@ -74,6 +89,11 @@ class StoreBackedKnowledgeContext(FakeDomainContext):
                 "status": str(record.status),
                 "handoffState": str(record.handoff_state),
                 "packageContentHash": str(record.package_content_hash or ""),
+                "absorbed": (
+                    str(record.invocation_id),
+                    str(record.package_content_hash or "").lower(),
+                )
+                in delivered,
             }
             for record in records or []
         ]
@@ -112,6 +132,32 @@ def _mark_invocation(harness: GraphHarness, invocation_id: str, *, handoff: str)
     ).result(timeout=10)
 
 
+def _mark_absorbed(harness: GraphHarness, invocation_id: str) -> None:
+    from tests._support.workflow_ledger_helpers import build_event_record
+
+    def mutate(uow) -> None:
+        sequence = uow.repository.advance_last_sequence(
+            "run-parent", 1, FIXED_NOW_MS + 6
+        )
+        event = replace(
+            build_event_record(
+                sequence,
+                run_id="run-parent",
+                event_type="knowledge_result_absorbed",
+                event_id=f"evt-absorbed-{invocation_id}",
+            ),
+            payload_json=json.dumps(
+                {
+                    "invocationId": invocation_id,
+                    "packageContentHash": "a" * 64,
+                }
+            ),
+        )
+        uow.repository.insert_event(event)
+
+    harness.commands.store.submit(mutate, force_flush=True).result(timeout=10)
+
+
 def _knowledge_blocker_codes(readiness) -> list[str]:
     return [
         blocker.code
@@ -134,6 +180,11 @@ def test_knowledge_gate_blocks_without_package_passes_with_absorbed_invocation(
         invocation_id = result["invocation"].invocation_id
 
         _mark_invocation(harness, invocation_id, handoff="accepted")
+        not_absorbed = _evaluate_hypothesis(harness)
+        assert "knowledge_handoff_not_accepted" in _knowledge_blocker_codes(
+            not_absorbed
+        )
+        _mark_absorbed(harness, invocation_id)
         passed = _evaluate_hypothesis(harness)
         assert _knowledge_blocker_codes(passed) == []
 
@@ -209,6 +260,178 @@ def test_absorb_triggers_recheck_and_creates_successor_attempt(tmp_path: Path) -
             item for item in attempts if item.node_id == "hypothesis_design"
         ]
         assert len(hypothesis_attempts) == 1
+    finally:
+        harness.close()
+
+
+def test_hypothesis_input_consumes_accepted_sideflow_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Readiness and the formal hypothesis input must share one authority."""
+
+    from core.web.services.team_workflow import research_project_hypothesis_context
+
+    package = {
+        "accepted": True,
+        "candidateId": "source-candidate-1",
+        "knowledgeBaseId": "kb-1",
+        "knowledgeItems": [{"knowledgeItemId": "ki-1", "contentHash": "d" * 64}],
+        "sourceArtifactIds": ["source:paper:1"],
+        "approval": {"reviewedByAgentId": "knowledge-manager-1"},
+    }
+    monkeypatch.setattr(
+        research_project_hypothesis_context,
+        "_load_receipt_bound_knowledge_package",
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        research_project_hypothesis_context,
+        "_load_sideflow_bound_knowledge_packages",
+        lambda **_kwargs: [
+            {
+                "invocationId": "kinv-1",
+                "producerRunId": "run-knowledge-1",
+                "knowledgePackageRef": "knowledge-artifact://package/1",
+                "packageContentHash": "c" * 64,
+                "package": package,
+            }
+        ],
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_knowledge_service.list_knowledge_items",
+        lambda *_args, **_kwargs: {
+            "items": [
+                {
+                    "knowledgeItemId": "ki-1",
+                    "title": "Accepted finding",
+                    "summary": "Applied Team Knowledge summary.",
+                }
+            ]
+        },
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.source_collection.candidates.list_candidate_store",
+        lambda *_args, **_kwargs: {
+            "candidates": [
+                {
+                    "candidateId": "source-candidate-1",
+                    "metadata": {
+                        "output": {
+                            "claims": [
+                                {
+                                    "claim": "Predictive coding reduces redundant spikes.",
+                                    "sourceRef": "source:paper:1",
+                                }
+                            ]
+                        }
+                    },
+                }
+            ]
+        },
+    )
+
+    result = research_project_hypothesis_context.build_hypothesis_input_context(
+        "research-team",
+        {
+            "workflowRunId": "run-parent",
+            "sourceCollectionRunId": "run-parent",
+        },
+        store=object(),
+    )
+
+    assert result["status"] == "ready"
+    assert result["allowedEvidenceRefs"] == ["source:paper:1"]
+    assert result["knowledgePackage"]["knowledgeBaseId"] == "kb-1"
+    assert result["knowledgePackage"]["knowledgeItems"][0]["knowledgeItemId"] == "ki-1"
+    snapshot = result["knowledgeSnapshot"]
+    assert snapshot["packageCount"] == 1
+    assert snapshot["packages"][0]["invocationId"] == "kinv-1"
+    assert snapshot["knowledgeItemIds"] == ["ki-1"]
+    assert len(snapshot["snapshotHash"]) == 64
+
+
+def test_live_hypothesis_attempt_records_revision_available_once(
+    tmp_path: Path,
+) -> None:
+    """A completed sideflow never mutates a live Turn, but leaves a durable revision."""
+
+    from tests._support.workflow_ledger_helpers import (
+        build_attempt_record,
+        build_command_record,
+    )
+
+    harness = _harness(tmp_path)
+    try:
+        store = harness.commands.store
+
+        def seed_live_attempt(uow) -> None:
+            uow.repository.insert_command(
+                build_command_record(
+                    command_id="cmd-hypothesis-live",
+                    run_id="run-parent",
+                    node_id="hypothesis_design",
+                    idempotency_key="hypothesis-live",
+                )
+            )
+            uow.repository.insert_attempt(
+                build_attempt_record(
+                    node_run_id="nr-hypothesis-live",
+                    run_id="run-parent",
+                    node_id="hypothesis_design",
+                    status="running",
+                    command_id="cmd-hypothesis-live",
+                )
+            )
+
+        store.submit(seed_live_attempt, force_flush=True).result(timeout=10)
+        result = _invoke(harness)
+        child_run_id = result["childRunId"]
+        pending = _walk_child_to_handoff(harness, child_run_id)
+        from tests.test_knowledge_sideflow_run import _accept_handoff
+
+        _accept_handoff(harness, child_run_id, pending)
+        worker = EventPublishWorker(
+            store=store,
+            now_provider=lambda: FIXED_NOW_MS + 5000,
+            readiness_recheck=build_knowledge_readiness_recheck(
+                store=store,
+                command_service=harness.commands.command_service,
+                readiness_invalidate=harness.commands.readiness.invalidate,
+                now_provider=lambda: FIXED_NOW_MS + 5000,
+            ),
+        )
+        assert worker.run_once() == 1
+
+        revision_events = [
+            event
+            for event in store.list_events("run-parent")
+            if event.event_type == "knowledge_revision_available"
+        ]
+        assert len(revision_events) == 1
+        revision = json.loads(revision_events[0].payload_json)
+        assert revision["invocationId"] == result["invocation"].invocation_id
+        assert revision["packageContentHash"] == "b" * 64
+        assert store.latest_attempt("run-parent", "hypothesis_design").node_run_id == (
+            "nr-hypothesis-live"
+        )
+
+        payload = json.loads(
+            _outbox_rows(harness, child_run_id, "event_publish")[0][2]
+        )
+        recheck = build_knowledge_readiness_recheck(
+            store=store,
+            command_service=harness.commands.command_service,
+            now_provider=lambda: FIXED_NOW_MS + 5001,
+        )
+        recheck(payload)
+        assert len(
+            [
+                event
+                for event in store.list_events("run-parent")
+                if event.event_type == "knowledge_revision_available"
+            ]
+        ) == 1
     finally:
         harness.close()
 

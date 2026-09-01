@@ -756,6 +756,22 @@ class WorkflowLedgerRepository:
         ).fetchall()
         return [_row_event(row) for row in rows if row is not None]
 
+    def list_knowledge_delivery_event_payloads(self, run_id: str) -> list[str]:
+        rows = self.execute(
+            """
+            SELECT payload_json
+            FROM workflow_events
+            WHERE run_id = ?
+              AND event_type IN (
+                'knowledge_result_absorbed',
+                'knowledge_invocation_reused'
+              )
+            ORDER BY sequence ASC
+            """,
+            (run_id,),
+        ).fetchall()
+        return [str(row[0] or "") for row in rows]
+
     def latest_event_sequence(self, run_id: str) -> int:
         row = self.execute(
             "SELECT COALESCE(MAX(sequence), 0) FROM workflow_events WHERE run_id = ?",
@@ -803,10 +819,14 @@ class WorkflowLedgerRepository:
         lease_ms: int = 30_000,
         action_kinds: tuple[str, ...] | None = None,
         idempotency_prefix: str | None = None,
+        background_workflow_ids: tuple[str, ...] | None = None,
+        background_limit: int | None = None,
         max_attempts: int = MAX_OUTBOX_LEASE_ATTEMPTS,
     ) -> list[OutboxRecord]:
         if max_attempts < 1:
             raise ValueError("max_attempts must be >= 1")
+        if background_limit is not None and background_limit < 0:
+            raise ValueError("background_limit must be >= 0")
         self._fail_leases_over_attempt_gate(
             now_ms=now_ms,
             max_attempts=max_attempts,
@@ -826,25 +846,70 @@ class WorkflowLedgerRepository:
             # ``cancel_run_cleanup:``.
             kind_filter += " AND SUBSTR(idempotency_key, 1, ?) = ?"
             params.extend([len(idempotency_prefix), idempotency_prefix])
-        params.extend([now_ms, limit])
+        normalized_background = tuple(
+            str(item).strip()
+            for item in (background_workflow_ids or ())
+            if str(item).strip()
+        )
+        background_order = ""
+        fetch_limit = limit
+        params.append(now_ms)
+        if normalized_background:
+            placeholders = ",".join("?" for _ in normalized_background)
+            background_order = (
+                f"CASE WHEN r.workflow_id IN ({placeholders}) THEN 1 ELSE 0 END,"
+            )
+            params.extend(normalized_background)
+            if background_limit is not None:
+                fetch_limit = limit + max(0, int(background_limit))
+        params.append(fetch_limit)
         rows = self.execute(
             f"""
-            SELECT action_id, run_id, command_id, node_run_id, action_kind,
-                   idempotency_key, payload_json, status, attempt_count,
-                   available_at_ms, lease_owner, lease_expires_at_ms,
-                   last_problem_json, created_at_ms, updated_at_ms
-            FROM outbox_actions
-            WHERE status IN ('pending', 'leased')
-              AND available_at_ms <= ?
+            SELECT o.action_id, o.run_id, o.command_id, o.node_run_id, o.action_kind,
+                   o.idempotency_key, o.payload_json, o.status, o.attempt_count,
+                   o.available_at_ms, o.lease_owner, o.lease_expires_at_ms,
+                   o.last_problem_json, o.created_at_ms, o.updated_at_ms,
+                   r.workflow_id
+            FROM outbox_actions o
+            JOIN workflow_runs r ON r.run_id = o.run_id
+            WHERE o.status IN ('pending', 'leased')
+              AND o.available_at_ms <= ?
               {kind_filter}
-              AND (lease_expires_at_ms IS NULL OR lease_expires_at_ms <= ?)
-            ORDER BY available_at_ms ASC, action_id ASC
+              AND (o.lease_expires_at_ms IS NULL OR o.lease_expires_at_ms <= ?)
+            ORDER BY {background_order} o.available_at_ms ASC, o.action_id ASC
             LIMIT ?
             """,
             tuple(params),
         ).fetchall()
+        background_remaining: int | None = None
+        if normalized_background and background_limit is not None:
+            placeholders = ",".join("?" for _ in normalized_background)
+            active_background = self.execute(
+                f"""
+                SELECT COUNT(*)
+                FROM outbox_actions o
+                JOIN workflow_runs r ON r.run_id = o.run_id
+                WHERE o.status = 'leased'
+                  AND o.lease_expires_at_ms IS NOT NULL
+                  AND o.lease_expires_at_ms > ?
+                  AND o.action_kind IN ('graph_dispatch', 'adapter_dispatch')
+                  AND r.workflow_id IN ({placeholders})
+                """,
+                (now_ms, *normalized_background),
+            ).fetchone()
+            background_remaining = max(
+                0,
+                int(background_limit) - int(active_background[0] if active_background else 0),
+            )
         leased: list[OutboxRecord] = []
         for row in rows:
+            if len(leased) >= limit:
+                break
+            is_background = str(row[15] or "") in normalized_background
+            if is_background and background_remaining is not None:
+                if background_remaining <= 0:
+                    continue
+                background_remaining -= 1
             action_id = str(row[0])
             updated = self.execute(
                 """
