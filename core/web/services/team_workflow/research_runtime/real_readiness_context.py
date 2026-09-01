@@ -191,6 +191,26 @@ class RealDomainReadinessContext:
             ).result(timeout=10)
         except Exception:  # noqa: BLE001 - unreadable ledger fails closed
             return []
+        try:
+            delivery_payloads = self._store.read(
+                lambda repo: repo.list_knowledge_delivery_event_payloads(run_id)
+            )
+        except Exception:  # noqa: BLE001 - unreadable events fail closed
+            delivery_payloads = []
+        delivered: set[tuple[str, str]] = set()
+        for raw_payload in delivery_payloads or []:
+            try:
+                payload = json.loads(str(raw_payload or "{}"))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+            if not isinstance(payload, Mapping):
+                continue
+            delivered.add(
+                (
+                    str(payload.get("invocationId") or "").strip(),
+                    str(payload.get("packageContentHash") or "").strip().lower(),
+                )
+            )
         views: list[Mapping[str, Any]] = []
         for record in records or []:
             if record is None:
@@ -206,6 +226,11 @@ class RealDomainReadinessContext:
                     "handoffState": str(record.handoff_state),
                     "packageContentHash": str(record.package_content_hash or ""),
                     "knowledgePackageRef": str(record.knowledge_package_ref or ""),
+                    "absorbed": (
+                        str(record.invocation_id),
+                        str(record.package_content_hash or "").lower(),
+                    )
+                    in delivered,
                 }
             )
         return views

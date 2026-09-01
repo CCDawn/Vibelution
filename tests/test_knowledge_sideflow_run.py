@@ -14,7 +14,9 @@ Covers Task 3's child-run surface:
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -46,7 +48,7 @@ from core.research.workflow.knowledge_sideflow_definition import (
 from core.research.workflow.models import WorkflowStageId
 from core.research.workflow.ledger.schema import SCHEMA_VERSION
 from tests._support.graph_helpers import GraphHarness
-from tests._support.workflow_ledger_helpers import FIXED_NOW_MS
+from tests._support.workflow_ledger_helpers import FIXED_NOW_MS, build_event_record
 
 from core.web.services.team_workflow.research_runtime.knowledge_sideflow_service import (
     KnowledgeSideflowError,
@@ -473,6 +475,133 @@ def test_child_run_creation_is_crash_replay_idempotent(tmp_path: Path) -> None:
         harness.close()
 
 
+def test_problem_understanding_success_auto_ensures_sideflow_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The v3 post-commit hook performs only one local, non-blocking ensure."""
+
+    from types import SimpleNamespace
+
+    from core.web.services.team_workflow.research_runtime import (
+        workflow_artifact_store,
+    )
+    from core.web.services.team_workflow.research_runtime.knowledge_sideflow_trigger import (
+        KnowledgeSideflowTrigger,
+    )
+
+    monkeypatch.setattr(workflow_artifact_store, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        "config.settings.get_config",
+        lambda: SimpleNamespace(
+            research=SimpleNamespace(
+                knowledge_sideflow=SimpleNamespace(mode="on")
+            )
+        ),
+    )
+    harness = GraphHarness(tmp_path)
+    try:
+        v3 = build_challenge_cup_workflow_definition_v3()
+        identity = register_or_resolve(v3)
+        harness.commands.seed_run(
+            "run-parent",
+            workflow_id="challenge-cup-research",
+            workflow_version_id=identity.workflowVersionId,
+            structure_hash=identity.structureHash,
+            status="running",
+        )
+        workflow_artifact_store.put_workflow_artifact(
+            "research-team",
+            kind="problem_understanding",
+            workflow_run_id="run-parent",
+            source_collection_run_id="source-1",
+            artifact_identity="nr-problem-a1",
+            payload={
+                "scope": "Evaluate predictive coding for redundant spike reduction.",
+                "subquestions": ["Which redundancy metrics change?"],
+                "assumptions": ["Comparable encoding budget"],
+                "known_unknowns": ["Energy benefit under sparse workloads"],
+                "human_gate": {
+                    "required": True,
+                    "decision": "approved",
+                    "rationale": "Scope is testable.",
+                },
+            },
+        )
+        trigger = KnowledgeSideflowTrigger(
+            store=harness.commands.store,
+            command_service=harness.commands.command_service,
+            now_provider=lambda: FIXED_NOW_MS + 3000,
+        )
+
+        first = trigger.on_node_succeeded(
+            run_id="run-parent",
+            node_id="problem_understanding",
+            node_run_id="nr-problem-a1",
+        )
+        second = trigger.on_node_succeeded(
+            run_id="run-parent",
+            node_id="problem_understanding",
+            node_run_id="nr-problem-a1",
+        )
+
+        assert first["status"] == "submitted"
+        assert first["childRunId"]
+        assert second["status"] == "replayed"
+        assert second["invocationId"] == first["invocationId"]
+        assert second["childRunId"] == first["childRunId"]
+        assert len(_child_rows(harness)) == 1
+    finally:
+        harness.close()
+
+
+def test_graph_success_hook_runs_after_commit_and_never_blocks_mainline(
+    tmp_path: Path,
+) -> None:
+    harness = GraphHarness(tmp_path)
+    try:
+        _seed_parent(harness)
+        observed: list[tuple[str, str, str]] = []
+
+        def hook(*, run_id: str, node_id: str, node_run_id: str) -> None:
+            attempt = harness.commands.store.latest_attempt(run_id, node_id)
+            assert attempt is not None
+            assert attempt.status == "succeeded"
+            observed.append((run_id, node_id, node_run_id))
+            raise RuntimeError("sideflow trigger unavailable")
+
+        harness.worker._node_success_hook = hook
+        harness.enqueue_graph_dispatch("run-parent", "problem_understanding", 1)
+        assert harness.worker.run_once() == 1
+        pending = harness.latest_adapter_pending("run-parent")
+        assert pending is not None
+        payload = json.loads(pending.payload_json)
+        harness.resume(
+            run_id="run-parent",
+            node_id="problem_understanding",
+            attempt=1,
+            action_id=str(payload["actionId"]),
+        )
+        harness.consume_adapter(pending.action_id)
+
+        assert harness.worker.run_once() == 1
+        assert observed == [
+            (
+                "run-parent",
+                "problem_understanding",
+                "nr-run-parent-problem_understanding-a1",
+            )
+        ]
+        assert (
+            harness.commands.store.latest_attempt(
+                "run-parent", "problem_understanding"
+            ).status
+            == "succeeded"
+        )
+    finally:
+        harness.close()
+
+
 # --------------------------------------------------------------------------
 # Five-node advance + producer transaction
 # --------------------------------------------------------------------------
@@ -706,6 +835,146 @@ def test_absorb_validates_payload_lineage_fail_closed(tmp_path: Path) -> None:
                 },
                 now_provider=lambda: FIXED_NOW_MS + 20,
             )
+    finally:
+        harness.close()
+
+
+def test_sideflow_package_loader_requires_parent_lineage_and_matching_hash(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.web.services.team_workflow.research_runtime import (
+        human_acceptance_artifact,
+    )
+    from core.web.services.team_workflow.research_runtime.artifact_readback_registry import (
+        build_canonical_ref,
+    )
+    from core.web.services.team_workflow.research_runtime.human_gate_artifacts import (
+        canonical_sha256,
+    )
+
+    package = {
+        "accepted": True,
+        "candidateId": "candidate-1",
+        "knowledgeBaseId": "kb-1",
+        "knowledgeItems": [
+            {"knowledgeItemId": "ki-1", "contentHash": "e" * 64}
+        ],
+    }
+    package_hash = canonical_sha256(package)
+    invocation = SimpleNamespace(
+        invocation_id="kinv-1",
+        parent_run_id="run-parent",
+        status="completed",
+        handoff_state="accepted",
+        package_content_hash=package_hash,
+        knowledge_package_ref=json.dumps(
+            {
+                "canonicalRef": build_canonical_ref(
+                    kind="knowledge_package",
+                    team_id="research-team",
+                    authority_run_id="run-child",
+                    content_hash=package_hash,
+                )
+            }
+        ),
+        knowledge_child_run_id="run-child",
+    )
+    event = SimpleNamespace(
+        event_type="knowledge_result_absorbed",
+        payload_json=json.dumps(
+            {
+                "invocationId": "kinv-1",
+                "packageContentHash": package_hash,
+            }
+        ),
+    )
+
+    class Repo:
+        def list_knowledge_invocations_for_parent(self, _parent_run_id: str):
+            return [invocation]
+
+        def list_knowledge_delivery_event_payloads(self, _parent_run_id: str):
+            return [event.payload_json]
+
+    class Store:
+        def read(self, callback):
+            return callback(Repo())
+
+    monkeypatch.setattr(
+        human_acceptance_artifact,
+        "load_scoped_artifact_payload",
+        lambda *_args, **_kwargs: package,
+    )
+
+    loaded = human_acceptance_artifact.load_accepted_knowledge_packages_from_invocations(
+        Store(), team_id="research-team", parent_run_id="run-parent"
+    )
+    assert [item["invocationId"] for item in loaded] == ["kinv-1"]
+
+    invocation.parent_run_id = "run-other"
+    assert (
+        human_acceptance_artifact.load_accepted_knowledge_packages_from_invocations(
+            Store(), team_id="research-team", parent_run_id="run-parent"
+        )
+        == []
+    )
+    invocation.parent_run_id = "run-parent"
+    invocation.package_content_hash = "f" * 64
+    assert (
+        human_acceptance_artifact.load_accepted_knowledge_packages_from_invocations(
+            Store(), team_id="research-team", parent_run_id="run-parent"
+        )
+        == []
+    )
+
+
+def test_knowledge_delivery_query_is_not_limited_to_first_500_events(
+    tmp_path: Path,
+) -> None:
+    harness = GraphHarness(tmp_path)
+    try:
+        _seed_parent(harness)
+
+        def mutate(uow) -> None:
+            base_sequence = uow.repository.latest_event_sequence("run-parent")
+            uow.repository.advance_last_sequence(
+                "run-parent", 501, FIXED_NOW_MS + 10
+            )
+            for offset in range(1, 501):
+                sequence = base_sequence + offset
+                uow.repository.insert_event(
+                    build_event_record(
+                        sequence,
+                        run_id="run-parent",
+                        event_id=f"evt-noise-{sequence}",
+                        event_type="workflow.noise",
+                    )
+                )
+            uow.repository.insert_event(
+                replace(
+                    build_event_record(
+                        base_sequence + 501,
+                        run_id="run-parent",
+                        event_id="evt-knowledge-late",
+                        event_type="knowledge_result_absorbed",
+                    ),
+                    payload_json=json.dumps(
+                        {
+                            "invocationId": "kinv-late",
+                            "packageContentHash": "f" * 64,
+                        }
+                    ),
+                )
+            )
+
+        harness.commands.store.submit(mutate, force_flush=True).result(timeout=10)
+        assert len(harness.commands.store.list_events("run-parent")) == 500
+        payloads = harness.commands.store.read(
+            lambda repo: repo.list_knowledge_delivery_event_payloads("run-parent")
+        )
+        assert [json.loads(item)["invocationId"] for item in payloads] == [
+            "kinv-late"
+        ]
     finally:
         harness.close()
 

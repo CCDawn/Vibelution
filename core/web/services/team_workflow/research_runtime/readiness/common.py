@@ -316,6 +316,7 @@ def run_has_accepted_knowledge_package(
             str(item.get("status") or "") == "completed"
             and str(item.get("handoffState") or "") == "accepted"
             and str(item.get("packageContentHash") or "").strip()
+            and item.get("absorbed") is True
         ):
             return True
     return False

@@ -446,8 +446,21 @@ def resolve_formal_candidate_task(
     previous: Mapping[str, Any],
     challenge_task_contract: Mapping[str, Any],
     model_invocation_receipt_binding: Mapping[str, Any],
+    hypothesis_input_binding: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """Reuse active/successful sibling; formal-retry only a failed child."""
+    """Reuse only a sibling that consumed the same composite snapshot."""
+
+    binding = _mapping(hypothesis_input_binding)
+    knowledge_snapshot = _mapping(binding.get("knowledgeSnapshot"))
+    snapshot_hash = _text(knowledge_snapshot.get("snapshotHash")).lower()
+    if (
+        binding.get("status") != "ready"
+        or len(snapshot_hash) != 64
+        or _text(binding.get("workflowRunId")) != action.run_id
+        or _text(binding.get("sourceCollectionRunId"))
+        != source_collection_run_id
+    ):
+        raise RuntimeError("formal candidate hypothesis input binding is invalid")
 
     existing = _task_from_status(
         team_id=team_id,
@@ -459,7 +472,14 @@ def resolve_formal_candidate_task(
     )
     if existing is not None:
         status = _text(existing.get("status")).lower()
-        if status in {"queued", "running", "completed", "complete", "succeeded"}:
+        existing_snapshot_hash = _text(
+            existing.get("consumedKnowledgeSnapshotHash")
+        ).lower()
+        if (
+            existing_snapshot_hash == snapshot_hash
+            and status
+            in {"queued", "running", "completed", "complete", "succeeded"}
+        ):
             started = _started_from_task(existing)
             if started is not None:
                 return started
@@ -467,13 +487,13 @@ def resolve_formal_candidate_task(
     else:
         retry_task_id = _text(previous.get("taskId"))
 
-    if existing is None and _text(previous.get("status")).lower() in {
-        "queued",
-        "running",
-        "completed",
-        "complete",
-        "succeeded",
-    }:
+    if (
+        existing is None
+        and _text(previous.get("consumedKnowledgeSnapshotHash")).lower()
+        == snapshot_hash
+        and _text(previous.get("status")).lower()
+        in {"queued", "running", "completed", "complete", "succeeded"}
+    ):
         started = _started_from_anchor(previous)
         if started is not None:
             return started
@@ -490,7 +510,8 @@ def resolve_formal_candidate_task(
     # fragment provenance into the new NodeRun.
     formal_retry = bool(retry_task_id)
     idempotency_key = (
-        f"agent-task:{action.node_run_id}:hypothesis:{selection_id}:{candidate_id}"
+        f"agent-task:{action.node_run_id}:hypothesis:{selection_id}:"
+        f"{candidate_id}:{snapshot_hash[:16]}"
     )
     from core.web.services.team_workflow.research_project_agent_tasks import (
         start_research_project_agent_task,
@@ -519,6 +540,7 @@ def resolve_formal_candidate_task(
             },
             _challenge_task_contract=contract,
             _model_invocation_receipt_binding=receipt_binding,
+            _hypothesis_input_binding=binding,
         )
     except HypothesisAuthorityUnavailable:
         raise
