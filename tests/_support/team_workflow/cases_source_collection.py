@@ -4579,9 +4579,19 @@ def test_content_extraction_writeback_materializes_candidate_evidence_ledger(tmp
                         "candidateId": candidate["candidateId"],
                         "decision": "keep",
                         "summary": "预测编码层级误差传播可启发多层控制结构。",
+                        # Challenge v2 fail-closed card contract (enforced at
+                        # the completed-writeback boundary): shared source
+                        # metadata lives on the entry, `fact` on each claim.
+                        "title": "Predictive coding source with anchored finding",
+                        "source_type": "peer_reviewed_paper",
+                        "source_url": "https://doi.org/10.0000/evidence-ledger",
+                        "retrieved_at": "2026-09-01T08:00:00Z",
+                        "relation": "supports",
+                        "verification_status": "metadata_checked",
                         "claims": [
                             {
                                 "claim": "Predictive coding uses hierarchical prediction errors.",
+                                "fact": "Predictive coding uses hierarchical prediction errors.",
                                 # Completed extraction writebacks on the formal
                                 # claim path require a verbatim quote anchor
                                 # copied from the stored candidate summary.
@@ -4593,6 +4603,7 @@ def test_content_extraction_writeback_materializes_candidate_evidence_ledger(tmp
                         "keyFindings": [
                             {
                                 "finding": "层级预测误差支持跨层控制结构设计。",
+                                "fact": "层级预测误差支持跨层控制结构设计。",
                                 "sourceRef": "source-1",
                                 "page": "3",
                                 "citation": "Predictive Coding Source, p.3",
@@ -5548,9 +5559,19 @@ def test_record_extraction_writeback_materializes_evidence_ledger_on_imported_ca
                         "recordId": record["recordId"],
                         "decision": "keep",
                         "valueSummary": "原始记录可作为预测编码机制候选来源。",
+                        # Challenge v2 fail-closed card contract (enforced at
+                        # the completed-writeback boundary): shared source
+                        # metadata lives on the entry, `fact` on each claim.
+                        "title": "Predictive coding raw record with anchored evidence",
+                        "source_type": "preprint",
+                        "source_url": "https://doi.org/10.0000/record-ledger",
+                        "retrieved_at": "2026-09-01T08:00:00Z",
+                        "relation": "supports",
+                        "verification_status": "metadata_checked",
                         "claims": [
                             {
                                 "claim": "Predictive coding raw record supports hierarchical control analogy.",
+                                "fact": "Predictive coding raw record supports hierarchical control analogy.",
                                 # Verbatim quote anchor from the stored record
                                 # summary (formal claim path contract).
                                 "quote": "A raw DataRecord",
@@ -5561,6 +5582,7 @@ def test_record_extraction_writeback_materializes_evidence_ledger_on_imported_ca
                         "keyFindings": [
                             {
                                 "finding": "原始记录包含可追溯层级误差控制线索。",
+                                "fact": "原始记录包含可追溯层级误差控制线索。",
                                 "sourceRef": "record-source-1",
                                 "page": "abstract",
                                 "citation": "Record Ledger Source, abstract",

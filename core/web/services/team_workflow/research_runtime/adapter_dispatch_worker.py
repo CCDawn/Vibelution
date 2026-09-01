@@ -450,7 +450,10 @@ class AdapterDispatchWorker:
         try:
             result = self._execute_with_lease_heartbeat(adapter, action, outbox)
         except Exception as exc:
-            from .agent_turn_completion import TurnNotReadyError
+            from .agent_turn_completion import (
+                SourceExtractionContractViolation,
+                TurnNotReadyError,
+            )
             from .formal_hypothesis_fanout import HypothesisAuthorityUnavailable
 
             if isinstance(exc, _OutboxLeaseLost):
@@ -491,6 +494,15 @@ class AdapterDispatchWorker:
             self._void_unused_reservation(
                 action, reason="execute_exception_compensation"
             )
+            if isinstance(exc, SourceExtractionContractViolation):
+                # A fail-closed contract violation surfaced by turn
+                # completion carries its own structured problem: record the
+                # dedicated diagnosable code (e.g.
+                # ``source_extraction_contract_violation`` with the failing
+                # path) instead of the generic wrap.  The attempt still fails
+                # — the exception is never swallowed.
+                self._fail_attempt(outbox, action, exc.problem)
+                return
             self._fail_attempt(
                 outbox,
                 action,

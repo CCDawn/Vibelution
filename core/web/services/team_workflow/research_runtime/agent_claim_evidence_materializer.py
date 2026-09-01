@@ -75,10 +75,22 @@ def _claim_locator(claim: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
-def _materializable_claims(task: dict[str, Any]) -> Iterable[tuple[dict[str, Any], dict[str, Any]]]:
+def _materializable_claims(
+    task: dict[str, Any],
+) -> Iterable[tuple[dict[str, Any], dict[str, Any], str]]:
+    """Yield ``(extraction, claim, path)`` for every claim the materializer touches.
+
+    The path is the collection-qualified location of the claim inside the task
+    result (``candidateExtractions[0].keyFindings[1]``), so contract errors name
+    the exact entry the Agent must fix.  The writeback acceptance boundary
+    reuses this generator together with
+    :func:`normalize_challenge_evidence_fields` to reject violating writebacks
+    at the door, which guarantees both boundaries enforce one rule set: a
+    writeback is rejected exactly when materialization would raise.
+    """
     result = task.get("result") if isinstance(task.get("result"), dict) else {}
     for collection in ("candidateExtractions", "recordExtractions"):
-        for raw_extraction in result.get(collection) or []:
+        for extraction_index, raw_extraction in enumerate(result.get(collection) or []):
             if not isinstance(raw_extraction, dict):
                 continue
             extraction = dict(raw_extraction)
@@ -87,17 +99,27 @@ def _materializable_claims(task: dict[str, Any]) -> Iterable[tuple[dict[str, Any
             evidence_status = _text(extraction.get("evidenceStatus")).lower()
             if evidence_status in {"missing_evidence_anchor", "missing", "unverified"}:
                 continue
+            extraction_path = f"{collection}[{extraction_index}]"
+            claims_items = list(extraction.get("claims") or [])
+            findings_items = list(extraction.get("keyFindings") or [])
             nested_claims = [
                 dict(item)
-                for item in (
-                    list(extraction.get("claims") or [])
-                    + list(extraction.get("keyFindings") or [])
-                )
+                for item in claims_items + findings_items
                 if isinstance(item, dict)
             ]
             if nested_claims:
-                for claim in nested_claims:
-                    yield extraction, claim
+                for list_key, items in (
+                    ("claims", claims_items),
+                    ("keyFindings", findings_items),
+                ):
+                    for claim_index, raw_claim in enumerate(items):
+                        if not isinstance(raw_claim, dict):
+                            continue
+                        yield (
+                            extraction,
+                            dict(raw_claim),
+                            f"{extraction_path}.{list_key}[{claim_index}]",
+                        )
                 continue
             # The extraction writeback contract lists ``evidenceRefs`` beside
             # ``claims``/``keyFindings`` as a valid evidence anchor, and
@@ -122,7 +144,7 @@ def _materializable_claims(task: dict[str, Any]) -> Iterable[tuple[dict[str, Any
                         "fact": flat_fact,
                         "quote": quote,
                         "evidenceRef": ref_id,
-                    }
+                    }, extraction_path
                     break
 
 
@@ -352,11 +374,11 @@ def materialize_claim_evidence_from_task(
     )
     store = ClaimEvidenceStore(project_root)
     materialized: list[dict[str, Any]] = []
-    for index, (extraction, claim) in enumerate(_materializable_claims(task)):
+    for extraction, claim, claim_path in _materializable_claims(task):
         challenge_evidence = normalize_challenge_evidence_fields(
             claim,
             extraction,
-            path=f"extraction[{index}]",
+            path=claim_path,
         )
         candidate_id = _text(
             challenge_evidence.get("candidateId")

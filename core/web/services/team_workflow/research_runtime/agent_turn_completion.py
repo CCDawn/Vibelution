@@ -307,6 +307,24 @@ class TurnNotReadyError(RuntimeError):
         self.snapshot = dict(snapshot or {})
 
 
+class SourceExtractionContractViolation(RuntimeError):
+    """source_extraction turn-final materialization hit the fail-closed contract.
+
+    Production blocker (run-882610596ddb): a Challenge v2 evidence-card
+    violation used to escape as a bare exception and get wrapped into the
+    generic ``adapter_execution_exception`` problem, leaving the failed node
+    undiagnosable.  This error carries a structured problem dict so the
+    dispatch layer records the dedicated
+    ``source_extraction_contract_violation`` code with the precise failing
+    path.  It is never swallowed: the attempt still fails fail-closed — only
+    the classification and message become actionable.
+    """
+
+    def __init__(self, problem: dict[str, Any]) -> None:
+        self.problem = dict(problem)
+        super().__init__(json.dumps(self.problem, ensure_ascii=False, sort_keys=True))
+
+
 def _turn_terminal_failure_detail(exc: Exception) -> dict[str, Any] | None:
     """Parse the canonical ``agent_turn_terminal_failed`` rejection, if exc is one.
 
@@ -1057,13 +1075,32 @@ def complete_agent_turn_outputs(
             from .agent_claim_evidence_materializer import (
                 materialize_completed_extraction_task,
             )
-
-            materialize_completed_extraction_task(
-                team_id=team_id,
-                workflow_run_id=str(action.run_id or ""),
-                source_collection_run_id=source_collection_run_id,
-                task_id=task_id,
+            from .source_extraction_evidence_cards import (
+                SourceExtractionEvidenceContractError,
             )
+
+            try:
+                materialize_completed_extraction_task(
+                    team_id=team_id,
+                    workflow_run_id=str(action.run_id or ""),
+                    source_collection_run_id=source_collection_run_id,
+                    task_id=task_id,
+                )
+            except SourceExtractionEvidenceContractError as exc:
+                # Fail-closed, but diagnosable: surface the contract violation
+                # with its precise path as a dedicated problem code instead of
+                # letting the dispatch layer wrap it into the generic
+                # adapter_execution_exception.  The exception keeps propagating
+                # (chained), so the attempt still fails.
+                raise SourceExtractionContractViolation(
+                    {
+                        "code": "source_extraction_contract_violation",
+                        "detail": str(exc),
+                        "taskId": task_id,
+                        "workflowRunId": str(action.run_id or ""),
+                        "sourceCollectionRunId": source_collection_run_id,
+                    }
+                ) from exc
 
     refs = collect_required_artifact_refs(
         required_kinds=required_kinds,

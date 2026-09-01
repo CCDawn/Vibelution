@@ -121,6 +121,10 @@ def _source_collection_stage_backfill_extraction_retrieved_at(
             entries[index] = normalized
     return result_payload
 
+# Bounded diagnostics: at most this many Challenge v2 evidence-card contract
+# errors are surfaced in the rejection message.
+_EXTRACTION_CARD_CONTRACT_ERROR_LIMIT = 3
+
 
 def _extraction_entry_with_normalized_evidence_status(entry: dict[str, Any]) -> dict[str, Any]:
     """Return the entry with ``verification_status`` alias routed, if applicable.
@@ -322,6 +326,55 @@ def _source_collection_stage_writeback_quote_anchor_errors(
     return errors
 
 
+def _source_collection_stage_writeback_extraction_card_contract_errors(
+    task: dict[str, Any],
+    run_id: str,
+    result_payload: dict[str, Any],
+) -> list[str]:
+    """Validate the merged extraction writeback against the Challenge v2 card contract.
+
+    Production blocker (run-882610596ddb): the fail-closed Challenge v2
+    contract only fired at claim materialization — after the task already
+    completed — so an extraction writeback with systematically missing
+    ``retrieved_at`` passed the completion gate, the agent never got a chance
+    to correct it, and the run failed with a generic adapter exception.
+
+    This boundary rejects the same violation at writeback acceptance with a
+    precise path so the agent can fix and rewrite within the same task.  The
+    rules are NOT duplicated here: this gate reuses the materializer's own
+    ``_materializable_claims`` (skip semantics for ``exclude`` and honest
+    ``missing_evidence_anchor`` entries) plus
+    ``normalize_challenge_evidence_fields`` (the exact validator the
+    materializer calls), so a writeback is rejected exactly when
+    materialization would raise.
+
+    Returns human-readable errors; an empty list means the writeback passes.
+    """
+    s = _service()
+    stage_id = s._trim_text(task.get("stageId"), max_length=80)
+    agent_role = s._trim_text(task.get("agentRole"), max_length=80)
+    if stage_id != "extraction" and agent_role != "source_extractor":
+        return []
+    if not _source_collection_stage_writeback_formal_claim_bound(task, run_id):
+        return []
+    from ..research_runtime.agent_claim_evidence_materializer import (
+        _materializable_claims,
+    )
+    from ..research_runtime.source_extraction_evidence_cards import (
+        SourceExtractionEvidenceContractError,
+        normalize_challenge_evidence_fields,
+    )
+
+    errors: list[str] = []
+    task_like = {"result": result_payload}
+    for extraction, claim, claim_path in _materializable_claims(task_like):
+        try:
+            normalize_challenge_evidence_fields(claim, extraction, path=claim_path)
+        except SourceExtractionEvidenceContractError as exc:
+            errors.append(s._trim_text(str(exc), max_length=400))
+    return errors
+
+
 def writeback_source_collection_stage_session_task(
     team_id: str,
     task_id: str,
@@ -365,6 +418,29 @@ def writeback_source_collection_stage_session_task(
             raise s.TeamWorkflowOrchestrationError(
                 "extraction writeback rejected: 提炼回写缺少逐字 quote 锚 —— "
                 + " ".join(quote_anchor_errors[:_EXTRACTION_QUOTE_ANCHOR_ERROR_LIMIT])
+            )
+        # Fail-closed Challenge v2 evidence-card contract at the acceptance
+        # boundary (production blocker run-882610596ddb), layered behind the
+        # server-side ``retrieved_at`` backfill above: the backfill resolves
+        # the dominant "agent omitted the timestamp" failure with real chain
+        # times, and this gate rejects whatever still violates the card
+        # contract (missing title/source_type/fact/..., structural
+        # violations) with precise paths.  The merged, backfilled result is
+        # exactly the payload claim materialization will read, and it is
+        # validated here with the materializer's own validators, so a
+        # completed writeback is rejected exactly when materialization would
+        # raise — while the agent can still correct and rewrite within the
+        # same task; completionGate can never pass on contract-violating data.
+        card_contract_errors = _source_collection_stage_writeback_extraction_card_contract_errors(
+            task,
+            run_id,
+            result_payload,
+        )
+        if card_contract_errors:
+            raise s.TeamWorkflowOrchestrationError(
+                "extraction writeback rejected: Challenge v2 证据卡契约校验失败 —— "
+                "请在对应条目补全缺失字段后重写；"
+                + " | ".join(card_contract_errors[:_EXTRACTION_CARD_CONTRACT_ERROR_LIMIT])
             )
     writeback = {
         "status": status,
