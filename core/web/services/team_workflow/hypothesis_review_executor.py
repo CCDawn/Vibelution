@@ -19,7 +19,7 @@ candidate hypotheses + evidence refs) into the content of a closable
 
 DEV fixtures are deterministic (seeded from the review context id).  The
 explicit ``DEV`` / ``FORMAL`` execution fence keeps those fixtures out of
-formal review: FORMAL requires all four real runners and one provider-bound
+formal review: FORMAL requires all five real runners and one provider-bound
 model invocation receipt for every model call.
 Every step fails closed: a missing dimension, an invalid or missing
 comparison, an unclassified candidate, or a missing recommendation raises
@@ -123,6 +123,7 @@ def _require_formal_prerequisites(
     pairwise_runner: PairwiseRunner | None,
     pareto_runner: ParetoRunner | None,
     metareview_runner: MetaReviewRunner | None,
+    revision_runner: RevisionRunner | None,
 ) -> None:
     """Keep FORMAL out of the DEV fixture path unless all runners are real."""
 
@@ -131,11 +132,12 @@ def _require_formal_prerequisites(
         "pairwise": pairwise_runner,
         "pareto": pareto_runner,
         "metareview": metareview_runner,
+        "revision": revision_runner,
     }
     missing = [name for name, runner in runners.items() if not callable(runner)]
     if missing:
         raise ContractValidationError(
-            "FORMAL hypothesis review requires all four real runners; missing: "
+            "FORMAL hypothesis review requires all five real runners; missing: "
             + ", ".join(missing)
         )
 
@@ -146,6 +148,10 @@ PairwiseRunner = Callable[[dict[str, Any], dict[str, Any], dict[str, Any]], Revi
 ParetoRunner = Callable[[dict[str, dict[str, float]], dict[str, Any]], ReviewRunnerResult]
 MetaReviewRunner = Callable[
     [dict[str, Any], list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]],
+    ReviewRunnerResult,
+]
+RevisionRunner = Callable[
+    [dict[str, Any], dict[str, Any], list[dict[str, Any]], dict[str, Any]],
     ReviewRunnerResult,
 ]
 
@@ -172,6 +178,7 @@ def _validated_runner_payload(
     *,
     step_label: str,
     formal_receipts: list[dict[str, Any]] | None,
+    required_outcome_kinds: Sequence[str] = ("review",),
 ) -> Mapping[str, Any] | None:
     """Unwrap a runner output and verify its provider receipt in FORMAL mode."""
 
@@ -213,9 +220,15 @@ def _validated_runner_payload(
         for item in list(receipt.metadata.get("outcomeKinds") or [])
         if str(item or "").strip()
     }
-    if "review" not in outcome_kinds:
+    required_kinds = {
+        str(item or "").strip().lower()
+        for item in required_outcome_kinds
+        if str(item or "").strip()
+    }
+    if not required_kinds.issubset(outcome_kinds):
         raise ContractValidationError(
-            f"FORMAL {step_label} receipt outcomeKinds must include review"
+            f"FORMAL {step_label} receipt outcomeKinds must include "
+            + ", ".join(sorted(required_kinds))
         )
     if any(item.get("receiptId") == receipt.receipt_id for item in formal_receipts):
         raise ContractValidationError(
@@ -228,6 +241,51 @@ def _validated_runner_payload(
 def _stable_hash(payload: Any) -> str:
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def canonical_hypothesis_revision_snapshot(
+    candidates: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Return the stable R0/R1/R2 content used by two-phase lineage hashes.
+
+    The snapshot deliberately excludes review scores and prose: those are
+    observations about a hypothesis, not the hypothesis revision itself.
+    Aliases let generation records (``statement``) and review inputs
+    (``claim``) resolve to the same R1 hash.
+    """
+
+    normalized: list[dict[str, Any]] = []
+    for raw in candidates:
+        candidate_id = str(
+            raw.get("candidateId") or raw.get("draftId") or ""
+        ).strip()
+        claim = str(raw.get("claim") or raw.get("statement") or "").strip()
+        if not candidate_id or not claim:
+            raise ContractValidationError(
+                "hypothesis revision snapshot requires candidateId and claim"
+            )
+        axis_profile = raw.get("axisProfile")
+        normalized.append(
+            {
+                "candidateId": candidate_id,
+                "claim": claim,
+                "lineageRefs": sorted(
+                    {
+                        str(item).strip()
+                        for item in list(raw.get("lineageRefs") or [])
+                        if str(item or "").strip()
+                    }
+                ),
+                "testablePrediction": str(
+                    raw.get("testablePrediction") or ""
+                ).strip(),
+                "falsifier": str(raw.get("falsifier") or "").strip(),
+                "axisProfile": (
+                    dict(axis_profile) if isinstance(axis_profile, Mapping) else {}
+                ),
+            }
+        )
+    return sorted(normalized, key=lambda item: item["candidateId"])
 
 
 def _collect_runner_outputs(
@@ -778,6 +836,155 @@ def _metareview_step(
     }
 
 
+def _required_text_list(value: Any, *, field: str) -> list[str]:
+    if not isinstance(value, (list, tuple)):
+        raise ContractValidationError(f"formal revision {field} must be a list")
+    normalized = [
+        str(item).strip() for item in value if str(item or "").strip()
+    ]
+    if not normalized:
+        raise ContractValidationError(
+            f"formal revision {field} must contain explicit evidence"
+        )
+    return list(dict.fromkeys(normalized))
+
+
+def _revision_step(
+    context: Mapping[str, Any],
+    parent_candidates: list[dict[str, Any]],
+    meta_review: Mapping[str, Any],
+    *,
+    runner: RevisionRunner,
+    round_id: str,
+    formal_receipts: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Produce one real R2 set by revising the MetaReview recommendation.
+
+    Candidate identity remains stable while content changes.  This keeps the
+    review/pairwise authorities bound to R1 and records R2 separately instead
+    of rewriting the reviewed round or creating a second candidate store.
+    """
+
+    recommended_id = str(
+        meta_review.get("recommendationCandidateId") or ""
+    ).strip()
+    parent_by_id = {
+        str(item.get("candidateId") or "").strip(): dict(item)
+        for item in parent_candidates
+    }
+    parent = parent_by_id.get(recommended_id)
+    if parent is None:
+        raise ContractValidationError(
+            "formal revision requires the MetaReview recommendation in the R1 set"
+        )
+    raw_produced = runner(
+        dict(context),
+        dict(parent),
+        [dict(item) for item in parent_candidates],
+        dict(meta_review),
+    )
+    receipt_ref = ""
+    if isinstance(raw_produced, ProviderBoundReviewResult) and isinstance(
+        raw_produced.model_invocation_receipt, Mapping
+    ):
+        receipt_ref = str(
+            raw_produced.model_invocation_receipt.get("receiptId") or ""
+        ).strip()
+    produced = _validated_runner_payload(
+        raw_produced,
+        step_label="hypothesis revision",
+        formal_receipts=formal_receipts,
+        required_outcome_kinds=("review", "revision"),
+    )
+    if not isinstance(produced, Mapping):
+        raise ContractValidationError("formal revision runner must return a mapping")
+    raw_revised = produced.get("revisedCandidate")
+    if not isinstance(raw_revised, Mapping):
+        raise ContractValidationError(
+            "formal revision output requires a revisedCandidate object"
+        )
+    revised_id = str(raw_revised.get("candidateId") or "").strip()
+    if revised_id != recommended_id:
+        raise ContractValidationError(
+            "formal revision must preserve the recommended candidateId"
+        )
+    revised_claim = str(raw_revised.get("claim") or "").strip()
+    parent_claim = str(parent.get("claim") or parent.get("statement") or "").strip()
+    if not revised_claim or revised_claim == parent_claim:
+        raise ContractValidationError(
+            "formal revision must produce genuinely new hypothesis text"
+        )
+    revised = dict(parent)
+    for key in (
+        "claim",
+        "rationale",
+        "differenceFromAlternatives",
+        "lineageRefs",
+        "testablePrediction",
+        "falsifier",
+        "axisProfile",
+    ):
+        if key in raw_revised:
+            revised[key] = raw_revised[key]
+    revised["candidateId"] = recommended_id
+    revised["claim"] = revised_claim
+    child_candidates = [
+        revised
+        if str(item.get("candidateId") or "").strip() == recommended_id
+        else dict(item)
+        for item in parent_candidates
+    ]
+    parent_snapshot = canonical_hypothesis_revision_snapshot(parent_candidates)
+    child_snapshot = canonical_hypothesis_revision_snapshot(child_candidates)
+    if child_snapshot == parent_snapshot:
+        raise ContractValidationError(
+            "formal revision output is identical to its R1 parent"
+        )
+    feedback_text = "；".join(
+        item
+        for item in (
+            str(meta_review.get("rationale") or "").strip(),
+            str(meta_review.get("riskNotes") or "").strip(),
+        )
+        if item
+    )
+    if not feedback_text:
+        raise ContractValidationError(
+            "formal revision requires explicit MetaReview feedback"
+        )
+    changes = _required_text_list(produced.get("changes"), field="changes")
+    unresolved = _required_text_list(
+        produced.get("unresolvedIssues"), field="unresolvedIssues"
+    )
+    r1_refs = [
+        f"hypothesis_candidate:{item['candidateId']}:r1" for item in parent_snapshot
+    ]
+    r2_refs = [
+        f"hypothesis_candidate:{item['candidateId']}:r2" for item in child_snapshot
+    ]
+    return {
+        "schemaVersion": 1,
+        "phase": "review_revision",
+        "parentCandidateId": recommended_id,
+        "revisionReceiptRef": receipt_ref,
+        "feedback": {
+            "trigger": "formal_hypothesis_review",
+            "humanFeedback": feedback_text,
+            "inputRefs": r1_refs,
+            "inputHash": _stable_hash(parent_snapshot),
+        },
+        "revision": {
+            "changes": changes,
+            "unresolvedIssues": unresolved,
+            "outputRefs": r2_refs,
+            "outputHash": _stable_hash(child_snapshot),
+            "status": "completed",
+            "actual": True,
+            "output": {"candidates": child_snapshot},
+        },
+    }
+
+
 def execute_hypothesis_review(
     context: Mapping[str, Any],
     *,
@@ -787,15 +994,17 @@ def execute_hypothesis_review(
     pairwise_runner: PairwiseRunner | None = None,
     pareto_runner: ParetoRunner | None = None,
     metareview_runner: MetaReviewRunner | None = None,
+    revision_runner: RevisionRunner | None = None,
     reviewer_assignments: Mapping[str, Any] | None = None,
     position_seed: str = "",
     max_concurrent_calls: int | None = None,
 ) -> dict[str, Any]:
-    """Run the four separated review steps over one bounded review context.
+    """Run separated review steps over one bounded review context.
 
     ``execution_mode`` defaults to ``DEV`` for existing fixture callers.  A
-    ``FORMAL`` request is fenced before any review step: all four real runners
-    must be present, and every call must return a unique provider-bound receipt.
+    ``FORMAL`` request is fenced before any review step: all five real runners
+    plus a real revision runner must be present, and every call must return a
+    unique provider-bound receipt.
     The reflection and pairwise runner calls run with bounded parallelism
     (``max_concurrent_calls``; default ``MAX_CONCURRENT_REVIEW_CALLS``, values
     below 2 fall back to fully serial invocation); results are always
@@ -817,6 +1026,7 @@ def execute_hypothesis_review(
             pairwise_runner=pairwise_runner,
             pareto_runner=pareto_runner,
             metareview_runner=metareview_runner,
+            revision_runner=revision_runner,
         )
     effective_concurrency = (
         MAX_CONCURRENT_REVIEW_CALLS if max_concurrent_calls is None else int(max_concurrent_calls)
@@ -949,6 +1159,18 @@ def execute_hypothesis_review(
         round_id=round_id,
         formal_receipts=formal_receipts,
     )
+    revision_envelope = None
+    if mode is HypothesisReviewExecutionMode.FORMAL:
+        assert revision_runner is not None
+        assert formal_receipts is not None
+        revision_envelope = _revision_step(
+            context,
+            candidates,
+            meta_review,
+            runner=revision_runner,
+            round_id=round_id,
+            formal_receipts=formal_receipts,
+        )
     result = {
         "schemaVersion": SCHEMA_VERSION,
         "executionMode": mode.value,
@@ -967,6 +1189,7 @@ def execute_hypothesis_review(
     }
     if formal_receipts is not None:
         result["modelInvocationReceipts"] = formal_receipts
+        result["revisionEnvelope"] = revision_envelope
     if require_core_coherence:
         result["coreHypothesisCoherence"] = coherence_results
         result["coreHypothesisCoherenceArtifactRef"] = coherence_artifact_ref

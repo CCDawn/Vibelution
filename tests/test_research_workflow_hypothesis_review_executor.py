@@ -706,11 +706,22 @@ def _complete_review_runners():
             "accepted": True,
         }
 
+    def revision(context, parent_candidate, candidates, meta_review):
+        return {
+            "revisedCandidate": {
+                **parent_candidate,
+                "claim": parent_candidate["claim"] + "（根据评审收窄边界）",
+            },
+            "changes": ["收窄了适用边界。"],
+            "unresolvedIssues": ["外部有效性仍待验证。"],
+        }
+
     return {
         "reflection_runner": reflection,
         "pairwise_runner": pairwise,
         "pareto_runner": pareto,
         "metareview_runner": metareview,
+        "revision_runner": revision,
     }
 
 
@@ -858,7 +869,14 @@ def _provider_bound_review_runners(*, receipt_factory=None, runners=None):
             receipt = (
                 receipt_factory(index, name)
                 if receipt_factory is not None
-                else _provider_bound_receipt(f"formal-review-{index}")
+                else _provider_bound_receipt(
+                    f"formal-review-{index}",
+                    outcome_kinds=(
+                        ("review", "revision")
+                        if name == "revision"
+                        else ("review",)
+                    ),
+                )
             )
             return hypothesis_review_executor.ProviderBoundReviewResult(
                 payload=payload,
@@ -912,10 +930,35 @@ def test_formal_review_accepts_one_unique_provider_receipt_per_model_call():
     )
 
     receipts = result["modelInvocationReceipts"]
-    assert len(receipts) == 5  # 2 reflection + 1 pairwise + Pareto + MetaReview
-    assert len({item["receiptId"] for item in receipts}) == 5
+    assert len(receipts) == 6  # 2 reflection + pairwise + Pareto + MetaReview + revision
+    assert len({item["receiptId"] for item in receipts}) == 6
     assert {item["metadata"]["questionStage"] for item in receipts} == {"review"}
     assert all("review" in item["metadata"]["outcomeKinds"] for item in receipts)
+    assert receipts[-1]["metadata"]["outcomeKinds"] == ["review", "revision"]
+    assert result["revisionEnvelope"]["phase"] == "review_revision"
+    assert result["revisionEnvelope"]["revision"]["output"]["candidates"][0][
+        "claim"
+    ].endswith("（根据评审收窄边界）")
+
+
+def test_formal_review_rejects_revision_that_copies_the_r1_claim():
+    runners = _complete_review_runners()
+
+    def copied_revision(context, parent_candidate, candidates, meta_review):
+        return {
+            "revisedCandidate": dict(parent_candidate),
+            "changes": ["Claimed a revision without changing the hypothesis."],
+            "unresolvedIssues": ["External validity remains open."],
+        }
+
+    runners["revision_runner"] = copied_revision
+    with pytest.raises(ContractValidationError, match="genuinely new hypothesis text"):
+        hypothesis_review_executor.execute_hypothesis_review(
+            _direct_review_context(),
+            execution_mode="formal",
+            **_provider_bound_review_runners(runners=runners),
+            reviewer_assignments={"metareview": "coordinator"},
+        )
 
 
 def test_formal_artifact_scope_reads_source_collection_run_from_ledger_snapshot(
@@ -1049,8 +1092,13 @@ def test_formal_review_accepts_retried_provider_receipt():
         _direct_review_context(),
         execution_mode="formal",
         **_provider_bound_review_runners(
-            receipt_factory=lambda index, _name: _provider_bound_receipt(
+            receipt_factory=lambda index, name: _provider_bound_receipt(
                 f"retried-{index}",
+                outcome_kinds=(
+                    ("review", "revision")
+                    if name == "revision"
+                    else ("review",)
+                ),
                 status=(
                     ModelInvocationStatus.RETRIED
                     if index == 1
@@ -1427,6 +1475,7 @@ def test_formal_parallel_review_collects_unique_receipts_in_input_order():
         ],
         "pareto": ["formal-pareto:" + "|".join(sorted(ids))],
         "metareview": ["formal-metareview:meta"],
+        "revision": ["formal-revision:cand-a"],
     }
 
     def tagged(name, runner):
@@ -1439,13 +1488,22 @@ def test_formal_parallel_review_collects_unique_receipts_in_input_order():
                 time.sleep(reflection_delays[str(args[0]["candidateId"])])
             elif name == "pairwise":
                 marker = f"formal-pairwise:{args[0]['candidateId']}>{args[1]['candidateId']}"
-            else:
+            elif name in {"pareto", "metareview"}:
                 marker = (
                     "formal-pareto:" + "|".join(sorted(args[0]))
                     if name == "pareto"
                     else "formal-metareview:meta"
                 )
-            receipt = _provider_bound_receipt(marker)
+            else:
+                marker = f"formal-revision:{args[1]['candidateId']}"
+            receipt = _provider_bound_receipt(
+                marker,
+                outcome_kinds=(
+                    ("review", "revision")
+                    if name == "revision"
+                    else ("review",)
+                ),
+            )
             return hypothesis_review_executor.ProviderBoundReviewResult(
                 payload=payload,
                 model_invocation_receipt=receipt,
@@ -1461,6 +1519,7 @@ def test_formal_parallel_review_collects_unique_receipts_in_input_order():
         pairwise_runner=tagged("pairwise", base_runners["pairwise_runner"]),
         pareto_runner=tagged("pareto", base_runners["pareto_runner"]),
         metareview_runner=tagged("metareview", base_runners["metareview_runner"]),
+        revision_runner=tagged("revision", base_runners["revision_runner"]),
         reviewer_assignments={"metareview": "coordinator"},
         position_seed="formal-par",
     )
@@ -1472,9 +1531,10 @@ def test_formal_parallel_review_collects_unique_receipts_in_input_order():
         *markers["pairwise"],
         *markers["pareto"],
         *markers["metareview"],
+        *markers["revision"],
     ]
     # Receipts are recorded in input order (candidates then pairs), not the
     # deliberately inverted completion order of the tagged delays.
     assert receipt_ids == expected_ids
-    assert len(set(receipt_ids)) == len(receipt_ids) == 3 + 3 + 1 + 1
+    assert len(set(receipt_ids)) == len(receipt_ids) == 3 + 3 + 1 + 1 + 1
     assert all(item["metadata"]["questionStage"] == "review" for item in receipts)

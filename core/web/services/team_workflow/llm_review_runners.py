@@ -791,6 +791,19 @@ _METAREVIEW_SYSTEM_PROMPT = """你是科研团队 Coordinator（MetaReview 步�
 {"recommendationCandidateId": str, "rationale": str, "riskNotes": str, "accepted": bool}
 """
 
+_REVISION_SYSTEM_PROMPT = """你是科研假说修订员。根据 MetaReview 的明确反馈，真正改写被推荐的 R1 假说，产出 R2；你不是复述评分或推荐理由。
+
+要求：
+- revisedCandidate.candidateId 必须与 parentCandidate.candidateId 完全一致，但 claim 必须是实质修订后的新文本，不能复制原文。
+- 保留并完善可检验预测、机制靶向 falsifier、差异说明与 axisProfile；lineageRefs 只能从 refsWhitelist 选择，不得编造引用。
+- changes 必须逐条说明实际改动；unresolvedIssues 必须逐条保留仍未解决的边界或风险，两者都不能为空。
+- 不得把 MetaReview rationale、riskNotes、分数或收据本身冒充 revisedCandidate。
+- 严格输出单个 JSON 对象。
+
+输出 JSON 结构：
+{"revisedCandidate": {"candidateId": str, "claim": str, "rationale": str, "differenceFromAlternatives": str, "lineageRefs": [str], "testablePrediction": str, "falsifier": str, "axisProfile": dict}, "changes": [str], "unresolvedIssues": [str]}
+"""
+
 
 def _validated_dimension_review_rows(
     rows: Any,
@@ -878,7 +891,7 @@ def build_hypothesis_review_runners(
     *,
     require_provider_receipts: bool = False,
 ) -> dict[str, Any] | None:
-    """Return the four real-LLM review runners, or ``None`` if unavailable."""
+    """Return the real-LLM review and revision runners, or ``None``."""
 
     resolved = dict(llm) if isinstance(llm, Mapping) and llm else resolve_review_llm()
     if not resolved:
@@ -1100,9 +1113,75 @@ def build_hypothesis_review_runners(
             return ProviderBoundReviewResult(result, provider_receipt)
         return result
 
+    def revision_runner(
+        context: dict[str, Any],
+        parent_candidate: dict[str, Any],
+        candidates: list[dict[str, Any]],
+        meta_review: dict[str, Any],
+    ):
+        refs_whitelist = list(
+            dict.fromkeys(
+                [
+                    *_candidate_refs(parent_candidate),
+                    *_context_digest_refs(context),
+                ]
+            )
+        )
+        produced = _invoke_review_llm(
+            resolved,
+            agent_id=str(resolved.get("agentId") or "challenge_cup_evaluator"),
+            purpose="hypothesis_revision",
+            system_prompt=_REVISION_SYSTEM_PROMPT,
+            user_payload={
+                "context": {
+                    "contextId": str(context.get("contextId") or ""),
+                    "question": str(context.get("question") or ""),
+                },
+                "parentCandidate": dict(parent_candidate),
+                "candidateSet": [dict(item) for item in candidates],
+                "metaReview": dict(meta_review),
+                "refsWhitelist": refs_whitelist,
+            },
+            session_id=_context_session(context),
+            receipt_context=_receipt_context(
+                context,
+                review_step="revision",
+                identity_parts=(
+                    str(parent_candidate.get("candidateId") or ""),
+                    str(meta_review.get("metaReviewId") or ""),
+                ),
+            ),
+            require_provider_receipt=require_provider_receipts,
+            deadline_at_ms=int(context.get("challengeDeadlineAtMs") or 0) or None,
+        )
+        provider_receipt = None
+        if isinstance(produced, ProviderBoundReviewResult):
+            provider_receipt = produced.model_invocation_receipt
+            result = dict(produced.payload)
+        else:
+            result = dict(produced)
+        revised = result.get("revisedCandidate")
+        if not isinstance(revised, Mapping):
+            raise ContractValidationError(
+                "hypothesis revision output is missing revisedCandidate"
+            )
+        revised_refs = [
+            str(item).strip()
+            for item in list(revised.get("lineageRefs") or [])
+            if str(item or "").strip()
+        ]
+        if any(ref not in set(refs_whitelist) for ref in revised_refs):
+            raise ContractValidationError(
+                "hypothesis revision contains an unbound lineage ref"
+            )
+        if provider_receipt is not None:
+            return ProviderBoundReviewResult(result, provider_receipt)
+        return result
+
     return {
         "reflection_runner": reflection_runner,
         "pairwise_runner": pairwise_runner,
         "pareto_runner": pareto_runner,
         "metareview_runner": metareview_runner,
+        "revision_runner": revision_runner,
     }

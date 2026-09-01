@@ -554,12 +554,24 @@ def test_review_receipt_context_binds_stable_unique_step_identity():
         session_id="team-1",
         expected_model_route=route,
     )
+    revision = meeting_receipt_authority.build_review_step_receipt_context(
+        context,
+        review_step="revision",
+        identity_parts=("cand-a", "meta-1"),
+        session_id="team-1",
+        expected_model_route=route,
+    )
 
     assert first == replay
     assert first["invocationId"] != pairwise["invocationId"]
     assert first["questionStageBinding"]["questionStage"] == "review"
     assert first["questionStageBinding"]["formalNodeId"] == "hypothesis_design"
     assert first["outcomeKinds"] == ["review"]
+    assert revision["outcomeKinds"] == ["review", "revision"]
+    assert revision["invocationId"] not in {
+        first["invocationId"],
+        pairwise["invocationId"],
+    }
 
 
 @pytest.mark.parametrize(
@@ -702,9 +714,25 @@ def test_review_runners_produce_executor_compatible_outputs(monkeypatch):
             "accepted": True,
         }
     )
+    revision_payload = json.dumps(
+        {
+            "revisedCandidate": {
+                **_candidate("cand-a", "假说 A（收窄到目标人群）"),
+            },
+            "changes": ["收窄目标人群"],
+            "unresolvedIssues": ["外部有效性待验证"],
+        },
+        ensure_ascii=False,
+    )
     _install_fake_llm(
         monkeypatch,
-        [reflection_payload, pairwise_payload, pareto_payload, metareview_payload],
+        [
+            reflection_payload,
+            pairwise_payload,
+            pareto_payload,
+            metareview_payload,
+            revision_payload,
+        ],
     )
 
     context = _review_context()
@@ -737,6 +765,14 @@ def test_review_runners_produce_executor_compatible_outputs(monkeypatch):
     )
     assert metareview["recommendationCandidateId"] == "cand-a"
     assert metareview["reviewerAgentId"] == f"llm:{_FAKE_LLM['modelId']}"
+
+    revision = runners["revision_runner"](
+        context,
+        context["candidates"][0],
+        context["candidates"],
+        {**metareview, "metaReviewId": "meta-1"},
+    )
+    assert revision["revisedCandidate"]["claim"] == "假说 A（收窄到目标人群）"
 
 
 def test_reflection_runner_fails_closed_on_missing_dimensions(monkeypatch):
@@ -821,7 +857,14 @@ def _formal_step_receipt(step: str, marker: str) -> dict:
         started_at_ms=10,
         finished_at_ms=20,
         retry_count=0,
-        metadata={"questionStage": "review", "outcomeKinds": ["review"]},
+        metadata={
+            "questionStage": "review",
+            "outcomeKinds": (
+                ["review", "revision"]
+                if "revision" in step
+                else ["review"]
+            ),
+        },
         evidence_locator={"kind": "hypothesis_review_step"},
     ).to_dict()
 
@@ -879,6 +922,16 @@ def test_formal_parallel_runner_calls_see_only_their_own_receipt_scope(monkeypat
                 "accepted": True,
             }
         ),
+        "hypothesis_revision": json.dumps(
+            {
+                "revisedCandidate": {
+                    **_candidate("cand-a", "假说 A（根据评审收窄边界）"),
+                },
+                "changes": ["收窄适用边界"],
+                "unresolvedIssues": ["外部有效性待验证"],
+            },
+            ensure_ascii=False,
+        ),
     }
 
     def fake_invoke_llm_outcome(client, messages, context=None, **kwargs):
@@ -913,7 +966,7 @@ def test_formal_parallel_runner_calls_see_only_their_own_receipt_scope(monkeypat
         reviewer_assignments={"metareview": "coordinator"},
     )
 
-    # Two concurrent reflections plus pairwise/pareto/metareview: every call
+    # Two concurrent reflections plus pairwise/pareto/metareview/revision: every call
     # must read back exactly its own binding while others are in flight.
     purposes = [record["purpose"] for record in captured]
     assert purposes.count("hypothesis_reflection") == 2
@@ -921,8 +974,9 @@ def test_formal_parallel_runner_calls_see_only_their_own_receipt_scope(monkeypat
         assert record["scopeInvocationId"] == record["invocationId"]
     assert len({record["invocationId"] for record in captured}) == len(captured)
     receipts = result["modelInvocationReceipts"]
-    assert [item["status"] for item in receipts] == ["succeeded"] * 5
-    assert len({item["receiptId"] for item in receipts}) == 5
+    assert [item["status"] for item in receipts] == ["succeeded"] * 6
+    assert len({item["receiptId"] for item in receipts}) == 6
+    assert receipts[-1]["metadata"]["outcomeKinds"] == ["review", "revision"]
 
 
 def test_runners_compose_with_execute_hypothesis_review(monkeypatch):

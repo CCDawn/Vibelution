@@ -1573,6 +1573,296 @@ def test_round_revision_authority_requires_explicit_hash_bound_envelope(
     assert calls[0]["iteration_round"] == 1
 
 
+def test_review_revision_requires_provider_receipt_and_continuous_grounded_parent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.web.services.team_workflow import hypothesis_review_executor
+    from core.web.services.team_workflow.research_runtime import (
+        feedback_iterations_artifact_writer as writer,
+    )
+    from core.web.services.team_workflow.research_runtime import (
+        workflow_artifact_store,
+    )
+
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        writer,
+        "write_feedback_iterations_artifact",
+        lambda **kwargs: calls.append(kwargs) or {"status": "recorded"},
+    )
+    r1_candidates = [
+        {
+            "candidateId": "cand-a",
+            "claim": "R1 A",
+            "lineageRefs": ["paper:a"],
+            "testablePrediction": "Prediction A",
+            "falsifier": "Falsifier A",
+            "axisProfile": {"mechanism": "a"},
+        },
+        {
+            "candidateId": "cand-b",
+            "claim": "R1 B",
+            "lineageRefs": ["paper:b"],
+            "testablePrediction": "Prediction B",
+            "falsifier": "Falsifier B",
+            "axisProfile": {"mechanism": "b"},
+        },
+        {
+            "candidateId": "cand-c",
+            "claim": "R1 C",
+            "lineageRefs": ["paper:c"],
+            "testablePrediction": "Prediction C",
+            "falsifier": "Falsifier C",
+            "axisProfile": {"mechanism": "c"},
+        },
+    ]
+    r1_snapshot = hypothesis_review_executor.canonical_hypothesis_revision_snapshot(
+        r1_candidates
+    )
+    r1_refs = [
+        f"hypothesis_candidate:{item['candidateId']}:r1" for item in r1_snapshot
+    ]
+    r1_hash = chain._stable_hash(r1_snapshot)
+    selected_r2 = [
+        {**r1_candidates[0], "claim": "R2 A narrowed"},
+        r1_candidates[1],
+    ]
+    envelope = {
+        "phase": "review_revision",
+        "parentCandidateId": "cand-a",
+        "revisionReceiptRef": "receipt-r2",
+        "feedback": {
+            "trigger": "formal_hypothesis_review",
+            "humanFeedback": "Narrow the population boundary.",
+            "inputRefs": [
+                "hypothesis_candidate:cand-a:r1",
+                "hypothesis_candidate:cand-b:r1",
+            ],
+            "inputHash": "f" * 64,
+        },
+        "revision": {
+            "changes": ["Narrowed the population."],
+            "unresolvedIssues": ["External validity remains open."],
+            "outputRefs": [
+                "hypothesis_candidate:cand-a:r2",
+                "hypothesis_candidate:cand-b:r2",
+            ],
+            "outputHash": "e" * 64,
+            "status": "completed",
+            "output": {"candidates": selected_r2},
+        },
+    }
+    round_record = {
+        "revisionEnvelope": envelope,
+        "modelInvocationReceipts": [
+            {
+                "receiptId": "receipt-r2",
+                "metadata": {"outcomeKinds": ["review", "revision"]},
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        workflow_artifact_store,
+        "list_workflow_artifacts",
+        lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        chain,
+        "list_hypothesis_candidates",
+        lambda *_args, **_kwargs: {"candidates": r1_candidates},
+    )
+
+    missing_parent = chain._materialize_hypothesis_revision_authority(
+        team_id="team-review-authorities",
+        workflow_run_id="workflow-authorities",
+        node_run_id="node-authorities",
+        question_id="SCI-091",
+        source_collection_run_id="source-authorities",
+        round_record=round_record,
+    )
+    assert "hypothesis_grounded_revision_authority_missing" in missing_parent[
+        "blockerCodes"
+    ]
+    assert calls == []
+
+    monkeypatch.setattr(
+        workflow_artifact_store,
+        "list_workflow_artifacts",
+        lambda *_args, **_kwargs: [
+            {
+                "payload": {
+                    "iterationRound": 1,
+                    "revisionPhase": "grounded_revision",
+                    "revisionEnvelope": {
+                        "phase": "grounded_revision",
+                        "childOutput": {
+                            "refs": r1_refs,
+                            "sha256": "d" * 64,
+                        },
+                    },
+                }
+            }
+        ],
+    )
+    discontinuous = chain._materialize_hypothesis_revision_authority(
+        team_id="team-review-authorities",
+        workflow_run_id="workflow-authorities",
+        node_run_id="node-authorities",
+        question_id="SCI-091",
+        source_collection_run_id="source-authorities",
+        round_record=round_record,
+    )
+    assert "hypothesis_revision_lineage_discontinuous" in discontinuous[
+        "blockerCodes"
+    ]
+    assert calls == []
+
+    monkeypatch.setattr(
+        workflow_artifact_store,
+        "list_workflow_artifacts",
+        lambda *_args, **_kwargs: [
+            {
+                "payload": {
+                    "iterationRound": 1,
+                    "revisionPhase": "grounded_revision",
+                    "revisionEnvelope": {
+                        "phase": "grounded_revision",
+                        "childOutput": {
+                            "refs": r1_refs,
+                            "sha256": r1_hash,
+                        },
+                    },
+                }
+            }
+        ],
+    )
+    written = chain._materialize_hypothesis_revision_authority(
+        team_id="team-review-authorities",
+        workflow_run_id="workflow-authorities",
+        node_run_id="node-authorities",
+        question_id="SCI-091",
+        source_collection_run_id="source-authorities",
+        round_record=round_record,
+    )
+    assert written["status"] == "recorded"
+    assert calls[0]["iteration_round"] == 2
+    assert calls[0]["revision_phase"] == "review_revision"
+    assert calls[0]["feedback"]["inputRefs"] == r1_refs
+    assert calls[0]["feedback"]["inputHash"] == r1_hash
+    r2_snapshot = calls[0]["revision"]["output"]["candidates"]
+    assert [item["candidateId"] for item in r2_snapshot] == [
+        "cand-a",
+        "cand-b",
+        "cand-c",
+    ]
+    assert next(
+        item for item in r2_snapshot if item["candidateId"] == "cand-a"
+    )["claim"] == "R2 A narrowed"
+    assert next(
+        item for item in r2_snapshot if item["candidateId"] == "cand-c"
+    )["claim"] == "R1 C"
+    assert calls[0]["revision"]["outputRefs"] == [
+        "hypothesis_candidate:cand-a:r2",
+        "hypothesis_candidate:cand-b:r2",
+        "hypothesis_candidate:cand-c:r2",
+    ]
+    assert calls[0]["revision"]["outputHash"] == chain._stable_hash(r2_snapshot)
+
+
+def test_formal_grounded_generation_materializes_real_r0_to_r1_authority(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.web.services.team_workflow import hypothesis_review_executor
+    from core.web.services.team_workflow.research_runtime import (
+        feedback_iterations_artifact_writer as writer,
+    )
+    from core.web.services.team_workflow.research_runtime import (
+        model_invocation_receipt_registry as registry,
+    )
+
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        registry,
+        "question_model_invocation_receipt_refs",
+        lambda *_args, **_kwargs: [
+            {
+                "receiptId": "receipt-r1",
+                "nodeRunId": "generation-node-r1",
+                "outcomeKinds": ["candidate", "revision"],
+                "evidenceLocator": {"meetingRoundId": "meeting-r1"},
+            }
+        ],
+    )
+    drafts = [
+        {"draftId": "draft-a", "candidateId": "draft-a", "statement": "R0 A"},
+        {"draftId": "draft-b", "candidateId": "draft-b", "statement": "R0 B"},
+    ]
+    monkeypatch.setattr(
+        chain,
+        "list_exploratory_drafts",
+        lambda *_args, **_kwargs: {"drafts": drafts},
+    )
+    monkeypatch.setattr(
+        hypothesis_review_executor,
+        "_source_collection_run_id_for_formal_workflow",
+        lambda _run_id: "source-r1",
+    )
+    monkeypatch.setattr(
+        writer,
+        "write_feedback_iterations_artifact",
+        lambda **kwargs: calls.append(kwargs) or {"status": "recorded"},
+    )
+    candidates = [
+        {
+            "candidateId": "cand-a",
+            "statement": "R1 A grounded",
+            "lineageRefs": ["paper:a"],
+            "testablePrediction": "Prediction A",
+            "falsifier": "Falsifier A",
+            "axisProfile": {"mechanism": "a"},
+        },
+        {
+            "candidateId": "cand-b",
+            "statement": "R1 B grounded",
+            "lineageRefs": ["paper:b"],
+            "testablePrediction": "Prediction B",
+            "falsifier": "Falsifier B",
+            "axisProfile": {"mechanism": "b"},
+        },
+    ]
+
+    result = chain._materialize_grounded_revision_authority(
+        "team-review-authorities",
+        {
+            "meetingRoundId": "meeting-r1",
+            "mode": "formal",
+            "candidateAuthority": "formal_grounded_candidate",
+            "question": "SCI-091",
+            "exploratoryDraftRefs": [
+                "exploratory_draft:draft-a",
+                "exploratory_draft:draft-b",
+            ],
+            "modelInvocationReceiptAuthority": {
+                "workflowRunId": "workflow-authorities"
+            },
+        },
+        candidates,
+    )
+
+    assert result["status"] == "recorded"
+    assert calls[0]["iteration_round"] == 1
+    assert calls[0]["node_run_id"] == "generation-node-r1"
+    assert calls[0]["revision_phase"] == "grounded_revision"
+    r1_snapshot = hypothesis_review_executor.canonical_hypothesis_revision_snapshot(
+        candidates
+    )
+    assert calls[0]["revision"]["outputHash"] == chain._stable_hash(r1_snapshot)
+    assert calls[0]["revision"]["outputRefs"] == [
+        "hypothesis_candidate:cand-a:r1",
+        "hypothesis_candidate:cand-b:r1",
+    ]
+
+
 def test_accepted_round_materializes_stage_one_plan_from_approved_question_authority(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

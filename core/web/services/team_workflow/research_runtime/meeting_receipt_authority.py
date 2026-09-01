@@ -285,6 +285,15 @@ def build_speaker_receipt_context(
             "formal model invocation receipt authority is not valid for this meeting type"
         )
     question_stage, outcome_kind = mapped
+    outcome_kinds = [outcome_kind]
+    if (
+        meeting_type == "hypothesis_candidate_generation"
+        and str(context.get("candidateAuthority") or "").strip().lower()
+        == "formal_grounded_candidate"
+    ):
+        # This call is the actual R0 -> R1 evidence-grounded rewrite, not a
+        # second projection of the exploratory candidate output.
+        outcome_kinds.append("revision")
     team_id = str(authority.get("teamId") or "").strip()
     question_id = str(authority.get("questionId") or "").strip().upper()
     workflow_run_id = str(authority.get("workflowRunId") or "").strip()
@@ -350,7 +359,7 @@ def build_speaker_receipt_context(
         "receiptRunId": workflow_run_id,
         "modelPolicySha256": policy_sha256,
         "questionStageBinding": stage_binding.to_dict(),
-        "outcomeKinds": [outcome_kind],
+        "outcomeKinds": outcome_kinds,
         "expectedModelRoute": expected_route,
         "evidenceLocator": {
             "kind": "challenge_model_invocation_receipt_registry",
@@ -409,7 +418,13 @@ def build_review_step_receipt_context(
         or any(char not in "0123456789abcdef" for char in policy_sha256)
     ):
         raise MeetingReceiptAuthorityError("formal review receipt authority is invalid")
-    if normalized_step not in {"reflection", "pairwise", "pareto", "metareview"}:
+    if normalized_step not in {
+        "reflection",
+        "pairwise",
+        "pareto",
+        "metareview",
+        "revision",
+    }:
         raise MeetingReceiptAuthorityError("formal review receipt step is invalid")
     if not parts or any(not part for part in parts):
         raise MeetingReceiptAuthorityError("formal review receipt identity is incomplete")
@@ -453,7 +468,11 @@ def build_review_step_receipt_context(
         "receiptRunId": workflow_run_id,
         "modelPolicySha256": policy_sha256,
         "questionStageBinding": stage_binding.to_dict(),
-        "outcomeKinds": ["review"],
+        "outcomeKinds": (
+            ["review", "revision"]
+            if normalized_step == "revision"
+            else ["review"]
+        ),
         "expectedModelRoute": route,
         "invocationId": invocation_id,
         "evidenceLocator": {
