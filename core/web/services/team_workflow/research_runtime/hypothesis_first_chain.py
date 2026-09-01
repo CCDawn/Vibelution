@@ -6929,6 +6929,114 @@ def _materialize_stage_one_plan_authority(
     )
 
 
+def _classify_round_failure(exc: BaseException) -> str:
+    """Map one generation failure to a stable machine-readable failure code."""
+    type_name = type(exc).__name__
+    message = str(exc)
+    if "already bound to different content" in message:
+        # hypothesis_rounds append-only idempotency guard: the round id is
+        # already bound to different candidate/lineage content.
+        return "hypothesis_round_content_conflict"
+    if type_name == "HypothesisReviewExecutionError":
+        return (
+            "formal_receipt_fence"
+            if message.startswith("FORMAL")
+            else "review_execution_failed"
+        )
+    if type_name == "ContractValidationError":
+        return "hypothesis_round_validation_failed"
+    if type_name in {
+        "ResearchHypothesisRoundError",
+        "ResearchHypothesisRoundNotFoundError",
+    }:
+        return "hypothesis_round_precondition_failed"
+    if type_name == "HypothesisFirstChainError":
+        return "chain_precondition_failed"
+    return "hypothesis_round_generation_error"
+
+
+def _record_round_persistence_failure(
+    team_id: str,
+    meeting_round: Mapping[str, Any],
+    *,
+    status: str,
+    failure_code: str,
+    reason: str,
+    error_type: str = "",
+    fan_in: Mapping[str, Any] | None = None,
+    round_id: str = "",
+    selection_id: str = "",
+    round_index: int | None = None,
+    meeting_round_ids: list[str] | None = None,
+    retry_hint: str = "",
+    context: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Persist one failure trace for a round generation attempt (best-effort).
+
+    The trace lands in the ``hypothesis_round_failures`` sibling ledger so a
+    spent review budget is never silently lost; ``hypothesis_rounds.jsonl``
+    itself only ever carries real generated rounds.  When the trace write
+    fails, the returned ``failureRecordError`` keeps the diagnostic visible
+    in the caller's structural report instead of raising.
+    """
+    try:
+        from core.web.services.team_workflow import hypothesis_rounds
+
+        bound_meeting_ids = list(meeting_round_ids or [])
+        if not bound_meeting_ids:
+            bound_meeting_ids = [
+                str(item.get("meetingRoundId") or "").strip()
+                for item in list((fan_in or {}).get("meetings") or [])
+                if isinstance(item, Mapping)
+            ]
+        if not bound_meeting_ids:
+            primary_meeting_id = str(meeting_round.get("meetingRoundId") or "").strip()
+            if primary_meeting_id:
+                bound_meeting_ids = [primary_meeting_id]
+        scope = (
+            meeting_round.get("discussionScope")
+            if isinstance(meeting_round.get("discussionScope"), Mapping)
+            else {}
+        )
+        receipt_authority = (
+            meeting_round.get("modelInvocationReceiptAuthority")
+            if isinstance(meeting_round.get("modelInvocationReceiptAuthority"), Mapping)
+            else {}
+        )
+        recorded = hypothesis_rounds.record_hypothesis_round_failure(
+            team_id,
+            {
+                "status": status,
+                "failureCode": failure_code,
+                "reason": reason,
+                "errorType": error_type,
+                "roundId": round_id,
+                "meetingRoundIds": bound_meeting_ids,
+                "selectionId": selection_id
+                or str((fan_in or {}).get("selectionId") or "").strip(),
+                "roundIndex": round_index,
+                "questionId": str(meeting_round.get("question") or "").strip(),
+                "workflowRunId": str(
+                    (receipt_authority or {}).get("workflowRunId")
+                    or (scope or {}).get("workflowRunId")
+                    or meeting_round.get("workflowRunId")
+                    or ""
+                ).strip(),
+                "scopeHash": str(meeting_round.get("scopeHash") or "").strip(),
+                "retryHint": retry_hint,
+                "context": dict(context or {}),
+            },
+        )
+        failure = (
+            recorded.get("failure")
+            if isinstance(recorded.get("failure"), Mapping)
+            else {}
+        )
+        return {"failureRecordId": str(failure.get("failureId") or "")}
+    except Exception as exc:  # noqa: BLE001 - trace failure stays diagnostic
+        return {"failureRecordError": str(exc) or type(exc).__name__}
+
+
 def _generate_hypothesis_round(
     team_id: str,
     meeting_round: Mapping[str, Any],
@@ -6946,7 +7054,19 @@ def _generate_hypothesis_round(
     never rolls the closure back; the readiness layer keeps blocking on
     ``hypothesis_round_unconverged`` until a round converges (fail-closed).
     Replays reuse the already-generated round through HF-3 idempotency.
+
+    Every non-ready or failed attempt additionally appends a durable trace
+    to the ``hypothesis_round_failures`` ledger (``blocked`` for a pending
+    fan-in, ``failed`` with a classified ``failureCode`` otherwise) so the
+    spent review work stays recoverable: the fan-in path regenerates
+    automatically when the last sibling review closes, and the other
+    failure codes rerun through :func:`regenerate_hypothesis_round`.
     """
+    fan_in: dict[str, Any] = {}
+    round_id = ""
+    selection_id = ""
+    round_index: int | None = None
+    meeting_round_ids: list[str] = []
     try:
         from core.web.services.team_workflow import (
             hypothesis_review_executor,
@@ -6958,6 +7078,46 @@ def _generate_hypothesis_round(
 
         fan_in = _review_meeting_fan_in_group(team_id, meeting_round)
         if fan_in.get("status") != "ready":
+            failure_trace = _record_round_persistence_failure(
+                team_id,
+                meeting_round,
+                status="blocked",
+                failure_code="fan_in_waiting_for_sibling_reviews",
+                reason=(
+                    "review fan-in is not ready; the HypothesisRound is "
+                    "regenerated automatically when every sibling review closes"
+                ),
+                fan_in=fan_in,
+                round_index=(
+                    int(fan_in.get("roundIndex") or 1)
+                    if fan_in.get("roundIndex") is not None
+                    else None
+                ),
+                retry_hint=(
+                    "close the pending sibling review meetings; the last "
+                    "sibling close regenerates the round automatically"
+                ),
+                context={
+                    "missingCandidateIds": list(fan_in.get("missingCandidateIds") or []),
+                    "pendingMeetingRoundIds": list(
+                        fan_in.get("pendingMeetingRoundIds") or []
+                    ),
+                    "supersededCandidateIds": list(
+                        fan_in.get("supersededCandidateIds") or []
+                    ),
+                    "supersededMeetingRoundIds": list(
+                        fan_in.get("supersededMeetingRoundIds") or []
+                    ),
+                    "closedMeetingRoundIds": list(
+                        fan_in.get("closedMeetingRoundIds") or []
+                    ),
+                },
+            )
+            if failure_trace:
+                fan_in = {
+                    **fan_in,
+                    **{key: value for key, value in failure_trace.items() if value},
+                }
             return fan_in
         bound_meetings = [
             dict(item)
@@ -7021,14 +7181,16 @@ def _generate_hypothesis_round(
             # fan-in (for example the round-1 group resolving a superseded
             # candidate to its reopened round-2 meeting) never collides with
             # a candidate-scoped round generated from a subset.
+            group_round_id = (
+                f"hround-{_stable_hash({'selectionId': selection_id, 'roundIndex': round_index, 'meetingRoundIds': meeting_round_ids, 'scopeHash': selection.get('scopeHash')})[:12]}"
+            )
             round_payload.update(
                 {
                     "meetingRoundIds": meeting_round_ids,
-                    "roundId": (
-                        f"hround-{_stable_hash({'selectionId': selection_id, 'roundIndex': round_index, 'meetingRoundIds': meeting_round_ids, 'scopeHash': selection.get('scopeHash')})[:12]}"
-                    ),
+                    "roundId": group_round_id,
                 }
             )
+            round_id = group_round_id
         result = hypothesis_rounds.generate_hypothesis_round_from_meeting(
             team_id,
             meeting_round_id,
@@ -7217,7 +7379,7 @@ def _generate_hypothesis_round(
                 ],
                 "error": str(exc) or type(exc).__name__,
             }
-        return {
+        generation_result: dict[str, Any] = {
             "status": str(result.get("status") or ""),
             "roundId": str(round_record.get("roundId") or ""),
             "round": dict(round_record),
@@ -7227,12 +7389,53 @@ def _generate_hypothesis_round(
             "feedbackIterationsAuthority": feedback_iterations_authority,
             "stageOnePlanAuthority": stage_one_plan_authority,
         }
+        # Bookkeeping backfill: mark any open failure traces this successful
+        # generation resolves.  The rounds ledger is untouched either way;
+        # a resolution error must never turn a generated round into a failure.
+        try:
+            hypothesis_rounds.resolve_hypothesis_round_failures(
+                team_id,
+                resolved_by_round_id=str(round_record.get("roundId") or ""),
+                round_id=str(round_record.get("roundId") or ""),
+                selection_id=selection_id,
+                round_index=round_index,
+                meeting_round_ids=meeting_round_ids,
+            )
+        except Exception as exc:  # noqa: BLE001 - bookkeeping stays non-fatal
+            generation_result["failureResolutionError"] = (
+                str(exc) or type(exc).__name__
+            )
+        return generation_result
     except Exception as exc:  # closure fact stays; report the side effect
-        return {
+        failure_trace = _record_round_persistence_failure(
+            team_id,
+            meeting_round,
+            status="failed",
+            failure_code=_classify_round_failure(exc),
+            reason=str(exc) or type(exc).__name__,
+            error_type=type(exc).__name__,
+            fan_in=fan_in,
+            round_id=round_id,
+            selection_id=selection_id,
+            round_index=round_index,
+            meeting_round_ids=meeting_round_ids,
+            retry_hint=(
+                "after the failure cause is resolved, rerun through "
+                "regenerate_hypothesis_round(team_id, meeting_round_id); "
+                "replaying close_review_meeting with the original closure "
+                "payload regenerates the round as well"
+            ),
+        )
+        reported: dict[str, Any] = {
             "status": "failed",
             "error": str(exc),
             "errorType": type(exc).__name__,
         }
+        if failure_trace:
+            reported.update(
+                {key: value for key, value in failure_trace.items() if value}
+            )
+        return reported
 
 
 def _update_collection_request(
@@ -8182,6 +8385,133 @@ def notify_collection_run_terminal(
     return last
 
 
+def _resolve_review_runners(
+    meeting_round: Mapping[str, Any],
+    meeting_round_id: str,
+    meeting_type: str,
+    *,
+    reflection_runner: Any = None,
+    pairwise_runner: Any = None,
+    pareto_runner: Any = None,
+    metareview_runner: Any = None,
+    revision_runner: Any = None,
+) -> dict[str, Any]:
+    """Resolve the review runners for one meeting (shared close/regenerate).
+
+    When no runner is injected the operator-configured LLM is tried first;
+    with no model configured dev/platform scopes fall back to the
+    deterministic DEV fixtures.  The meeting's server-owned scope mode is
+    the explicit execution fence: a ``mode=formal`` review meeting must
+    never slide onto fixture output, so without real receipt-bound runners
+    this raises the structured fence error and the caller fails fast.
+    """
+    if all(
+        runner is None
+        for runner in (
+            reflection_runner,
+            pairwise_runner,
+            pareto_runner,
+            metareview_runner,
+            revision_runner,
+        )
+    ):
+        from core.web.services.team_workflow.llm_review_runners import (
+            build_hypothesis_review_runners,
+        )
+
+        formal_meeting = (
+            str(meeting_round.get("mode") or "").strip().lower()
+            == HYPOTHESIS_REVIEW_FORMAL_MODE
+        )
+        real_runners = build_hypothesis_review_runners(
+            require_provider_receipts=formal_meeting
+        )
+        if real_runners:
+            return dict(real_runners)
+        if formal_meeting and meeting_type == HYPOTHESIS_REVIEW_MEETING_TYPE:
+            # Formal fence (fail closed): a formal review meeting must never
+            # slide into the deterministic DEV fixtures.  Candidate-generation
+            # closures and dev/platform scopes do not consume review runners
+            # and keep their previous behaviour.
+            raise HypothesisFirstChainError(
+                f"Formal review meeting {meeting_round_id} cannot close: "
+                "no real receipt-bound review runners resolved from the "
+                "Challenge Cup evaluator LLM (see review_llm.resolve."
+                "unavailable diagnostics for the missing configuration). "
+                "Configure the evaluator agent model and provider "
+                "credentials, or close this meeting in a dev/platform scope."
+            )
+    return {
+        "reflection_runner": reflection_runner,
+        "pairwise_runner": pairwise_runner,
+        "pareto_runner": pareto_runner,
+        "metareview_runner": metareview_runner,
+        "revision_runner": revision_runner,
+    }
+
+
+def regenerate_hypothesis_round(
+    team_id: str,
+    meeting_round_id: str,
+    *,
+    reflection_runner: Any = None,
+    pairwise_runner: Any = None,
+    pareto_runner: Any = None,
+    metareview_runner: Any = None,
+    revision_runner: Any = None,
+) -> dict[str, Any]:
+    """Re-run selection-level HypothesisRound generation for a closed meeting.
+
+    Command-triggered retry path for a persisted round failure trace
+    (``hypothesis_round_failures`` ledger): the closed meeting and its
+    closure artifacts stay untouched append-only facts; only the fan-in
+    projection and the round generation run again.  When generation now
+    succeeds, the matching open failure traces are marked resolved; when it
+    fails again, a fresh failure trace is appended.  The fan-in
+    ``waiting_for_sibling_reviews`` case needs no command: closing the last
+    pending sibling review regenerates the round automatically.
+    """
+    from core.web.services import team_service
+    from core.web.services.team_workflow import meeting_rounds
+
+    normalized_team_id = team_service.assert_team_exists(team_id)
+    normalized_round_id = str(meeting_round_id or "").strip()
+    if not normalized_round_id:
+        raise HypothesisFirstChainError("Meeting round id is required.")
+    meeting_round = meeting_rounds.get_meeting_round(
+        normalized_team_id, normalized_round_id
+    )["meetingRound"]
+    meeting_type = str(meeting_round.get("meetingType") or "")
+    if meeting_type != HYPOTHESIS_REVIEW_MEETING_TYPE:
+        raise HypothesisFirstChainError(
+            "regenerate_hypothesis_round only handles hypothesis_review rounds."
+        )
+    if str(meeting_round.get("status") or "").strip().lower() != "closed":
+        raise HypothesisFirstChainError(
+            f"Review meeting {normalized_round_id} is not closed; close it "
+            "before regenerating the hypothesis round."
+        )
+    resolved_runners = _resolve_review_runners(
+        meeting_round,
+        normalized_round_id,
+        meeting_type,
+        reflection_runner=reflection_runner,
+        pairwise_runner=pairwise_runner,
+        pareto_runner=pareto_runner,
+        metareview_runner=metareview_runner,
+        revision_runner=revision_runner,
+    )
+    return _generate_hypothesis_round(
+        normalized_team_id,
+        meeting_round,
+        reflection_runner=resolved_runners["reflection_runner"],
+        pairwise_runner=resolved_runners["pairwise_runner"],
+        pareto_runner=resolved_runners["pareto_runner"],
+        metareview_runner=resolved_runners["metareview_runner"],
+        revision_runner=resolved_runners["revision_runner"],
+    )
+
+
 def close_review_meeting(
     team_id: str,
     meeting_round_id: str,
@@ -8230,43 +8560,21 @@ def close_review_meeting(
     # The meeting's server-owned scope mode is the explicit execution fence:
     # formal review meetings require provider-bound receipts from the
     # auto-injected runners; DEV/platform scopes keep the receipt-free path.
-    formal_meeting = (
-        str(meeting_round.get("mode") or "").strip().lower()
-        == HYPOTHESIS_REVIEW_FORMAL_MODE
+    resolved_runners = _resolve_review_runners(
+        meeting_round,
+        normalized_round_id,
+        meeting_type,
+        reflection_runner=reflection_runner,
+        pairwise_runner=pairwise_runner,
+        pareto_runner=pareto_runner,
+        metareview_runner=metareview_runner,
+        revision_runner=revision_runner,
     )
-    if (
-        reflection_runner is None
-        and pairwise_runner is None
-        and pareto_runner is None
-        and metareview_runner is None
-        and revision_runner is None
-    ):
-        from core.web.services.team_workflow.llm_review_runners import (
-            build_hypothesis_review_runners,
-        )
-
-        real_runners = build_hypothesis_review_runners(
-            require_provider_receipts=formal_meeting
-        )
-        if real_runners:
-            reflection_runner = real_runners["reflection_runner"]
-            pairwise_runner = real_runners["pairwise_runner"]
-            pareto_runner = real_runners["pareto_runner"]
-            metareview_runner = real_runners["metareview_runner"]
-            revision_runner = real_runners["revision_runner"]
-        elif formal_meeting and meeting_type == HYPOTHESIS_REVIEW_MEETING_TYPE:
-            # Formal fence (fail closed): a formal review meeting must never
-            # slide into the deterministic DEV fixtures.  Candidate-generation
-            # closures and dev/platform scopes do not consume review runners
-            # and keep their previous behaviour.
-            raise HypothesisFirstChainError(
-                f"Formal review meeting {normalized_round_id} cannot close: "
-                "no real receipt-bound review runners resolved from the "
-                "Challenge Cup evaluator LLM (see review_llm.resolve."
-                "unavailable diagnostics for the missing configuration). "
-                "Configure the evaluator agent model and provider "
-                "credentials, or close this meeting in a dev/platform scope."
-            )
+    reflection_runner = resolved_runners["reflection_runner"]
+    pairwise_runner = resolved_runners["pairwise_runner"]
+    pareto_runner = resolved_runners["pareto_runner"]
+    metareview_runner = resolved_runners["metareview_runner"]
+    revision_runner = resolved_runners["revision_runner"]
     request = dict(payload) if isinstance(payload, Mapping) else {}
     if meeting_type == CANDIDATE_GENERATION_MEETING_TYPE:
         return _close_generation_meeting(normalized_team_id, meeting_round, request)

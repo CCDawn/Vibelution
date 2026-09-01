@@ -1095,6 +1095,10 @@ _FIRST_SELECT_CLOSURE_SHAPE = {
     "hypothesisRoundKeys": [
         "closed",
         "closedMeetingRoundIds",
+        # Persisted failure-trace id appended by the round-persist-fallback
+        # chain (hypothesis_round_failures ledger), present on every
+        # waiting/failed generation attempt regardless of shadow policy.
+        "failureRecordId",
         "missingCandidateIds",
         "pendingMeetingRoundIds",
         "roundIndex",

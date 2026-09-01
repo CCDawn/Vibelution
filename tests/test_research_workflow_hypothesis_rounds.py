@@ -385,3 +385,127 @@ def test_round_reads_are_idempotent_and_clean_ledgers_stay_sidecar_free(
     assert repeated_list["corruptQuarantinedLineCount"] == 1
     assert repeated_fetch["corruptQuarantinedLineCount"] == 1
     assert sidecar.read_bytes() == sidecar_after_first
+
+
+def test_failure_records_persist_resolve_and_leave_rounds_untouched(
+    tmp_path, monkeypatch
+) -> None:
+    """Failure traces live in a sibling ledger and never enter the rounds file."""
+    team_id = _team(tmp_path, monkeypatch)
+    service = hypothesis_rounds_service
+
+    recorded = service.record_hypothesis_round_failure(
+        team_id,
+        {
+            "status": "blocked",
+            "failureCode": "fan_in_waiting_for_sibling_reviews",
+            "reason": "fan-in pending",
+            "meetingRoundIds": ["meeting-a"],
+            "selectionId": "selection-1",
+            "roundIndex": 1,
+            "questionId": "SCI-091",
+            "retryHint": "close the pending sibling reviews",
+            "context": {"pendingMeetingRoundIds": ["meeting-b"]},
+        },
+    )
+    assert recorded["status"] == "recorded"
+    record = recorded["failure"]
+    assert record["failureId"].startswith("hrfail-")
+    assert record["status"] == "blocked"
+    assert record["recordKind"] == "hypothesis_round_failure"
+    assert record["resolvedAt"] == ""
+    assert record["resolvedByRoundId"] == ""
+    assert record["context"] == {"pendingMeetingRoundIds": ["meeting-b"]}
+
+    listed = service.list_hypothesis_round_failures(team_id)
+    assert listed["failureCount"] == 1
+    assert listed["openFailureCount"] == 1
+    assert listed["failures"][0]["failureId"] == record["failureId"]
+    # The round ledger itself must stay free of failure-state records.
+    assert service.list_hypothesis_rounds(team_id)["roundCount"] == 0
+
+    resolved_count = service.resolve_hypothesis_round_failures(
+        team_id,
+        resolved_by_round_id="hround-abc123",
+        round_id="hround-abc123",
+        selection_id="selection-1",
+        round_index=1,
+        meeting_round_ids=["meeting-a", "meeting-b"],
+    )
+    assert resolved_count == 1
+    after = service.list_hypothesis_round_failures(team_id)
+    assert after["openFailureCount"] == 0
+    assert after["failures"][0]["status"] == "resolved"
+    assert after["failures"][0]["resolvedByRoundId"] == "hround-abc123"
+    assert after["failures"][0]["resolvedAt"]
+    # Idempotent: an already-resolved trace never resolves twice.
+    assert (
+        service.resolve_hypothesis_round_failures(
+            team_id,
+            resolved_by_round_id="hround-abc123",
+            selection_id="selection-1",
+            round_index=1,
+        )
+        == 0
+    )
+
+
+def test_failure_resolution_requires_correlation(tmp_path, monkeypatch) -> None:
+    team_id = _team(tmp_path, monkeypatch)
+    service = hypothesis_rounds_service
+    service.record_hypothesis_round_failure(
+        team_id,
+        {
+            "status": "failed",
+            "failureCode": "hypothesis_round_precondition_failed",
+            "reason": "candidate requires a non-empty claim",
+            "meetingRoundIds": ["meeting-x"],
+            "selectionId": "selection-1",
+            "roundIndex": 1,
+        },
+    )
+    assert (
+        service.resolve_hypothesis_round_failures(
+            team_id,
+            resolved_by_round_id="hround-other",
+            selection_id="selection-2",
+            round_index=1,
+        )
+        == 0
+    )
+    assert (
+        service.resolve_hypothesis_round_failures(
+            team_id,
+            resolved_by_round_id="hround-other",
+            selection_id="selection-1",
+            round_index=2,
+        )
+        == 0
+    )
+    assert (
+        service.resolve_hypothesis_round_failures(
+            team_id,
+            resolved_by_round_id="hround-other",
+            round_id="hround-other",
+        )
+        == 0
+    )
+    remaining = service.list_hypothesis_round_failures(team_id)
+    assert remaining["openFailureCount"] == 1
+    assert remaining["failures"][0]["failureCode"] == (
+        "hypothesis_round_precondition_failed"
+    )
+
+
+def test_failure_record_requires_code_and_known_status(
+    tmp_path, monkeypatch
+) -> None:
+    team_id = _team(tmp_path, monkeypatch)
+    service = hypothesis_rounds_service
+    with pytest.raises(service.ResearchHypothesisRoundError):
+        service.record_hypothesis_round_failure(team_id, {"status": "failed"})
+    with pytest.raises(service.ResearchHypothesisRoundError):
+        service.record_hypothesis_round_failure(
+            team_id, {"failureCode": "some_code", "status": "bogus"}
+        )
+    assert service.list_hypothesis_round_failures(team_id)["failureCount"] == 0

@@ -32,6 +32,10 @@ from core.web.services.team_workflow.jsonl_quarantine import (
 
 SCHEMA_VERSION = 1
 DEFAULT_MODE = "formal"
+FAILURE_SCHEMA_VERSION = 1
+FAILURE_RECORD_KIND = "hypothesis_round_failure"
+FAILURE_OPEN_STATUSES = ("failed", "blocked")
+RESOLVED_FAILURE_STATUS = "resolved"
 _LOCK = threading.RLock()
 _SCOPE_FIELDS = ("program", "theme", "campaign", "question", "branch", "workflow")
 
@@ -809,3 +813,206 @@ def get_hypothesis_round(team_id: str, round_id: str) -> dict[str, Any]:
         "corruptQuarantinedLineCount": corrupt_count,
         "storagePath": str(_storage_path(normalized_team_id)),
     }
+
+
+# ---------------------------------------------------------------------------
+# failure ledger
+#
+# ``hypothesis_rounds.jsonl`` is the append-only authority for generated
+# rounds; a generation that fails closed must never leave a phantom round
+# record there.  Failure traces therefore live in a sibling ledger,
+# ``hypothesis_round_failures.jsonl``, so the round store (idempotency,
+# lineage resolution, listings) keeps byte-identical behaviour while every
+# failed or blocked generation attempt stays visible, correlatable and
+# resolvable.
+
+
+def _failure_storage_path(team_id: str) -> Path:
+    return _kind_path(team_id, "hypothesis_round_failures")
+
+
+def _json_safe(value: Any) -> Any:
+    """Coerce a context payload into JSON-safe primitives for the ledger."""
+    return json.loads(json.dumps(value, ensure_ascii=False, default=str))
+
+
+def record_hypothesis_round_failure(
+    team_id: str, payload: Mapping[str, Any] | None = None
+) -> dict[str, Any]:
+    """Append one failure/blocked trace for a round generation attempt.
+
+    This is a best-effort internal recorder for the generation chain: it
+    does not require team existence (the caller already resolved the team
+    when the meeting closed) so the failure path keeps the fewest possible
+    failure modes.  ``status`` is ``failed`` (generation attempted and
+    errored) or ``blocked`` (prerequisites not ready, e.g. sibling reviews
+    still open).  Records are append-only; a later successful generation
+    resolves matching open records through
+    :func:`resolve_hypothesis_round_failures`.
+    """
+    request = dict(payload) if isinstance(payload, Mapping) else {}
+    status = str(request.get("status") or "failed").strip().lower()
+    if status not in FAILURE_OPEN_STATUSES:
+        raise ResearchHypothesisRoundError(
+            f"unsupported hypothesis round failure status: {status}"
+        )
+    failure_code = str(request.get("failureCode") or "").strip()
+    if not failure_code:
+        raise ResearchHypothesisRoundError(
+            "a hypothesis round failure record requires a non-empty failureCode"
+        )
+    now = _utc_now()
+    meeting_round_ids = _normalized_str_list(request.get("meetingRoundIds"))
+    round_index_value = request.get("roundIndex")
+    try:
+        round_index = int(round_index_value) if round_index_value is not None else None
+    except (TypeError, ValueError):
+        round_index = None
+    failure_id = (
+        f"hrfail-{_stable_hash(
+            {
+                "status": status,
+                "failureCode": failure_code,
+                "roundId": str(request.get("roundId") or "").strip(),
+                "meetingRoundIds": meeting_round_ids,
+                "selectionId": str(request.get("selectionId") or "").strip(),
+                "createdAt": now,
+            }
+        )[:12]}"
+    )
+    context = request.get("context")
+    record: dict[str, Any] = {
+        "schemaVersion": FAILURE_SCHEMA_VERSION,
+        "recordKind": FAILURE_RECORD_KIND,
+        "failureId": failure_id,
+        "status": status,
+        "failureCode": failure_code,
+        "reason": str(request.get("reason") or "").strip(),
+        "errorType": str(request.get("errorType") or "").strip(),
+        "roundId": str(request.get("roundId") or "").strip(),
+        "meetingRoundIds": meeting_round_ids,
+        "selectionId": str(request.get("selectionId") or "").strip(),
+        "roundIndex": round_index,
+        "questionId": str(request.get("questionId") or "").strip(),
+        "workflowRunId": str(request.get("workflowRunId") or "").strip(),
+        "scopeHash": str(request.get("scopeHash") or "").strip(),
+        "retryHint": str(request.get("retryHint") or "").strip(),
+        "context": _json_safe(context) if isinstance(context, Mapping) else {},
+        "createdAt": now,
+        "resolvedAt": "",
+        "resolvedByRoundId": "",
+    }
+    with _LOCK:
+        _append_jsonl(_failure_storage_path(team_id), record)
+    return {
+        "schemaVersion": FAILURE_SCHEMA_VERSION,
+        "teamId": team_id,
+        "status": "recorded",
+        "failure": record,
+        "storagePath": str(_failure_storage_path(team_id)),
+    }
+
+
+def _latest_failure_records(team_id: str) -> list[dict[str, Any]]:
+    records = _read_jsonl(_failure_storage_path(team_id))
+    latest: dict[str, dict[str, Any]] = {}
+    for record in records:
+        failure_id = str(record.get("failureId") or "")
+        latest[failure_id] = record
+    return list(latest.values())
+
+
+def list_hypothesis_round_failures(
+    team_id: str, *, unresolved_only: bool = False
+) -> dict[str, Any]:
+    """List the latest failure trace of every round generation failure."""
+    from core.web.services.team_service import assert_team_exists
+
+    normalized_team_id = assert_team_exists(team_id)
+    with _LOCK:
+        records = _latest_failure_records(normalized_team_id)
+    open_count = sum(
+        1
+        for record in records
+        if str(record.get("status") or "") in FAILURE_OPEN_STATUSES
+    )
+    if unresolved_only:
+        records = [
+            record
+            for record in records
+            if str(record.get("status") or "") in FAILURE_OPEN_STATUSES
+        ]
+    records = sorted(records, key=lambda item: str(item.get("createdAt") or ""))
+    return {
+        "schemaVersion": FAILURE_SCHEMA_VERSION,
+        "teamId": normalized_team_id,
+        "failureCount": len(records),
+        "openFailureCount": open_count,
+        "failures": records,
+        "storagePath": str(_failure_storage_path(normalized_team_id)),
+    }
+
+
+def resolve_hypothesis_round_failures(
+    team_id: str,
+    *,
+    resolved_by_round_id: str = "",
+    round_id: str = "",
+    selection_id: str = "",
+    round_index: int | None = None,
+    meeting_round_ids: list[str] | None = None,
+) -> int:
+    """Mark open failure records resolved by one successful round generation.
+
+    A record resolves when the successful generation correlates with it by
+    round id, by selection id + round index, or by any shared bound meeting
+    id.  Resolution appends updated copies (the ledger stays append-only)
+    and returns how many open records were resolved.
+    """
+    from core.web.services.team_service import assert_team_exists
+
+    normalized_team_id = assert_team_exists(team_id)
+    resolved_by_round_id = str(resolved_by_round_id or "").strip()
+    normalized_round_id = str(round_id or "").strip()
+    normalized_selection_id = str(selection_id or "").strip()
+    target_meeting_ids = set(_normalized_str_list(meeting_round_ids))
+    with _LOCK:
+        records = _latest_failure_records(normalized_team_id)
+        resolved: list[dict[str, Any]] = []
+        for record in records:
+            if str(record.get("status") or "") not in FAILURE_OPEN_STATUSES:
+                continue
+            matched = bool(
+                normalized_round_id
+                and str(record.get("roundId") or "") == normalized_round_id
+            )
+            if (
+                not matched
+                and normalized_selection_id
+                and str(record.get("selectionId") or "") == normalized_selection_id
+                and round_index is not None
+            ):
+                try:
+                    matched = int(record.get("roundIndex")) == round_index
+                except (TypeError, ValueError):
+                    matched = False
+            if not matched and target_meeting_ids:
+                matched = bool(
+                    set(_normalized_str_list(record.get("meetingRoundIds")))
+                    & target_meeting_ids
+                )
+            if matched:
+                resolved.append(record)
+        if resolved:
+            now = _utc_now()
+            for record in resolved:
+                _append_jsonl(
+                    _failure_storage_path(normalized_team_id),
+                    {
+                        **record,
+                        "status": RESOLVED_FAILURE_STATUS,
+                        "resolvedAt": now,
+                        "resolvedByRoundId": resolved_by_round_id,
+                    },
+                )
+    return len(resolved)

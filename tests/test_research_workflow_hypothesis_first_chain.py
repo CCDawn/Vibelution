@@ -6332,3 +6332,258 @@ def test_stage_one_run_consumes_origin_drafts_and_skips_second_r0(
         # test_stage_one_r0_isolated_then_r1_requires_whitelisted_evidence;
         # this test pins the run-scoped consumption of origin drafts itself,
         # including the origin meeting id surviving on every consumed draft.
+
+
+def test_waiting_fan_in_persists_blocked_trace(tmp_path, monkeypatch):
+    """A pending fan-in appends a resolvable blocked trace, not silence."""
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
+    monkeypatch.setattr(hrounds, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        chain,
+        "_review_meeting_fan_in_group",
+        lambda *_args, **_kwargs: {
+            "status": "waiting_for_sibling_reviews",
+            "selectionId": "selection-wait-1",
+            "roundIndex": 1,
+            "closed": False,
+            "missingCandidateIds": [],
+            "pendingMeetingRoundIds": ["meeting-b"],
+            "supersededCandidateIds": [],
+            "supersededMeetingRoundIds": [],
+            "closedMeetingRoundIds": ["meeting-a"],
+        },
+    )
+
+    result = chain._generate_hypothesis_round(
+        "team-wait", {"meetingRoundId": "meeting-a", "question": "SCI-096"}
+    )
+
+    assert result["status"] == "waiting_for_sibling_reviews"
+    assert result["failureRecordId"].startswith("hrfail-")
+    failures = hrounds.list_hypothesis_round_failures("team-wait")
+    assert failures["failureCount"] == 1
+    assert failures["openFailureCount"] == 1
+    trace = failures["failures"][0]
+    assert trace["status"] == "blocked"
+    assert trace["failureCode"] == "fan_in_waiting_for_sibling_reviews"
+    assert trace["selectionId"] == "selection-wait-1"
+    assert trace["roundIndex"] == 1
+    assert trace["meetingRoundIds"] == ["meeting-a"]
+    assert trace["context"]["pendingMeetingRoundIds"] == ["meeting-b"]
+    assert trace["context"]["closedMeetingRoundIds"] == ["meeting-a"]
+    # Waiting traces never fabricate a round record.
+    assert hrounds.list_hypothesis_rounds("team-wait")["roundCount"] == 0
+
+
+def test_failed_generation_persists_classified_trace(tmp_path, monkeypatch):
+    """Generation failures persist a classified trace; trace failures degrade visibly."""
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
+    monkeypatch.setattr(hrounds, "PROJECT_ROOT", tmp_path)
+    meeting = {
+        "meetingRoundId": "meeting-conflict",
+        "question": "SCI-096",
+        "scopeHash": "scope-x",
+        "discussionScope": {"workflowRunId": "run-1"},
+    }
+    monkeypatch.setattr(
+        chain,
+        "_review_meeting_fan_in_group",
+        lambda *_args, **_kwargs: {
+            "status": "ready",
+            "selectionId": "selection-9",
+            "roundIndex": 1,
+            "meetings": [meeting],
+        },
+    )
+    monkeypatch.setattr(
+        selections,
+        "get_hypothesis_selection",
+        lambda *_args, **_kwargs: {
+            "selection": {
+                "scopeHash": "scope-x",
+                "questionId": "SCI-096",
+                "selectedCandidateIds": ["H1", "H2"],
+            }
+        },
+    )
+    monkeypatch.setattr(
+        chain,
+        "_build_round_candidates",
+        lambda *_args, **_kwargs: [
+            {"candidateId": "H1", "claim": "c1"},
+            {"candidateId": "H2", "claim": "c2"},
+        ],
+    )
+    monkeypatch.setattr(
+        hrounds,
+        "generate_hypothesis_round_from_meeting",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            hrounds.ResearchHypothesisRoundError(
+                "hypothesis round id is already bound to different content"
+            )
+        ),
+    )
+
+    result = chain._generate_hypothesis_round("team-conflict", meeting)
+
+    assert result["status"] == "failed"
+    assert result["errorType"] == "ResearchHypothesisRoundError"
+    assert result["failureRecordId"].startswith("hrfail-")
+    trace = hrounds.list_hypothesis_round_failures("team-conflict")["failures"][0]
+    assert trace["status"] == "failed"
+    assert trace["failureCode"] == "hypothesis_round_content_conflict"
+    assert trace["errorType"] == "ResearchHypothesisRoundError"
+    assert trace["selectionId"] == "selection-9"
+    assert trace["roundIndex"] == 1
+    assert trace["questionId"] == "SCI-096"
+    assert trace["workflowRunId"] == "run-1"
+    assert trace["meetingRoundIds"] == ["meeting-conflict"]
+    assert "regenerate_hypothesis_round" in trace["retryHint"]
+
+    # A failing trace write must surface diagnostically, never mask the outcome.
+    monkeypatch.setattr(
+        hrounds,
+        "record_hypothesis_round_failure",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("ledger unavailable")
+        ),
+    )
+    degraded = chain._generate_hypothesis_round("team-conflict", meeting)
+    assert degraded["status"] == "failed"
+    assert degraded["failureRecordError"] == "ledger unavailable"
+
+
+def test_regenerate_hypothesis_round_requires_closed_review_meeting(monkeypatch):
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
+    monkeypatch.setattr(
+        meetings,
+        "get_meeting_round",
+        lambda _team_id, meeting_id: {
+            "meetingRound": {
+                "meetingRoundId": meeting_id,
+                "meetingType": "hypothesis_review",
+                "status": "awaiting_approval",
+            }
+        },
+    )
+    with pytest.raises(chain.HypothesisFirstChainError, match="not closed"):
+        chain.regenerate_hypothesis_round("team-regen", "meeting-1")
+    monkeypatch.setattr(
+        meetings,
+        "get_meeting_round",
+        lambda _team_id, meeting_id: {
+            "meetingRound": {
+                "meetingRoundId": meeting_id,
+                "meetingType": "candidate_generation",
+                "status": "closed",
+            }
+        },
+    )
+    with pytest.raises(chain.HypothesisFirstChainError, match="hypothesis_review"):
+        chain.regenerate_hypothesis_round("team-regen", "meeting-1")
+
+
+def test_round_failure_traces_persist_and_backfill_on_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Sibling wait and failed generation both leave traces the retry resolves."""
+    team_id, agents = _hf_env(tmp_path, monkeypatch)
+    _patch_approved_question(
+        monkeypatch,
+        hypotheses=[
+            {"hypothesis_id": "hyp-a", "statement": "hyp-a 的机制陈述"},
+            {"hypothesis_id": "hyp-b", "statement": ""},
+            {"hypothesis_id": "hyp-c", "statement": "hyp-c 的机制陈述"},
+        ],
+    )
+    _fake_collection_runs(monkeypatch)
+    runtime = _build_runtime(tmp_path)
+    try:
+        _seed_parent_run(runtime, team_id, agents["experiment_planner"])
+        agent_ids = [agents[role] for role in _ROLES]
+
+        with server_operator_scope("u-1", roles=("operator",)):
+            recorded = _open_first_meeting(team_id, agent_ids)
+            sibling_meetings = _review_meetings(recorded)
+            assert len(sibling_meetings) == 2
+            first_meeting_id = sibling_meetings[0]["meetingRoundId"]
+            second_meeting_id = sibling_meetings[1]["meetingRoundId"]
+
+            # 1) Sibling still open: a blocked trace is appended.
+            _drive_to_awaiting_approval(team_id, first_meeting_id, agent_ids[0])
+            closed_first = chain.close_review_meeting(
+                team_id,
+                first_meeting_id,
+                _closure_payload(agent_ids, [_envelope_decision(agent_ids[0])]),
+                runtime=runtime,
+            )
+            waiting = closed_first["hypothesisRound"]
+            assert waiting["status"] == "waiting_for_sibling_reviews"
+            assert waiting["failureRecordId"].startswith("hrfail-")
+            blocked_list = hrounds.list_hypothesis_round_failures(team_id)
+            assert blocked_list["failureCount"] == 1
+            assert blocked_list["openFailureCount"] == 1
+            blocked = blocked_list["failures"][0]
+            assert blocked["status"] == "blocked"
+            assert blocked["failureCode"] == "fan_in_waiting_for_sibling_reviews"
+            assert blocked["selectionId"]
+            assert blocked["roundIndex"] == 1
+            assert blocked["meetingRoundIds"] == [first_meeting_id]
+            assert hrounds.list_hypothesis_rounds(team_id)["roundCount"] == 0
+
+            # 2) Fan-in ready but generation fails: a classified failed trace.
+            _drive_to_awaiting_approval(team_id, second_meeting_id, agent_ids[0])
+            closed = chain.close_review_meeting(
+                team_id,
+                second_meeting_id,
+                _closure_payload(agent_ids, [_select_decision(agent_ids[0])]),
+                runtime=runtime,
+            )
+            failed_round = closed["hypothesisRound"]
+            assert failed_round["status"] == "failed"
+            assert "hyp-b" in failed_round["error"]
+            assert failed_round["failureRecordId"].startswith("hrfail-")
+            failures = hrounds.list_hypothesis_round_failures(team_id)
+            assert failures["failureCount"] == 2
+            assert failures["openFailureCount"] == 2
+            failed_trace = next(
+                item
+                for item in failures["failures"]
+                if item["failureCode"] != "fan_in_waiting_for_sibling_reviews"
+            )
+            assert failed_trace["failureCode"] == (
+                "hypothesis_round_precondition_failed"
+            )
+            assert failed_trace["status"] == "failed"
+            assert first_meeting_id in failed_trace["meetingRoundIds"]
+            assert second_meeting_id in failed_trace["meetingRoundIds"]
+            assert hrounds.list_hypothesis_rounds(team_id)["roundCount"] == 0
+
+            # 3) Failure cause removed: the regenerate command rebuilds the
+            # round and resolves every open trace.
+            _patch_approved_question(
+                monkeypatch,
+                hypotheses=[
+                    {"hypothesis_id": "hyp-a", "statement": "hyp-a 的机制陈述"},
+                    {"hypothesis_id": "hyp-b", "statement": "hyp-b 的机制陈述"},
+                    {"hypothesis_id": "hyp-c", "statement": "hyp-c 的机制陈述"},
+                ],
+            )
+            regenerated = chain.regenerate_hypothesis_round(
+                team_id, second_meeting_id
+            )
+            assert regenerated["status"] == "created"
+            round_id = regenerated["roundId"]
+            assert round_id
+            assert regenerated["round"]["roundId"] == round_id
+            assert regenerated["round"]["status"] == "closed"
+            assert hrounds.list_hypothesis_rounds(team_id)["roundCount"] == 1
+            after = hrounds.list_hypothesis_round_failures(team_id)
+            assert after["failureCount"] == 2
+            assert after["openFailureCount"] == 0
+            assert all(
+                item["resolvedByRoundId"] == round_id
+                for item in after["failures"]
+            )
+    finally:
+        runtime.close()
