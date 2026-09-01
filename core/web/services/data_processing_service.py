@@ -17,7 +17,7 @@ from core.web.services.runtime_scene_service import record_runtime_scene_event
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SCHEMA_VERSION = 1
 DEFAULT_PROFILE_ID = "generic_document_processing"
-RUN_STATUSES = {"draft", "collecting", "processing", "reviewing", "completed", "cancelled"}
+RUN_STATUSES = {"draft", "collecting", "processing", "reviewing", "completed", "cancelled", "failed"}
 RECORD_STATUSES = {"collected", "processing", "ready_for_review", "accepted", "rejected", "archived"}
 ASSIGNMENT_STATUSES = {"open", "in_progress", "completed", "returned", "cancelled"}
 OUTPUT_STATUSES = {"completed", "returned", "partial", "failed"}
@@ -236,6 +236,39 @@ def cancel_processing_run(run_id: str, *, reason: str = "operator_cancelled") ->
         fields={"reason": _trim_text(reason, max_length=300) or "operator_cancelled"},
     )
     return cancelled
+
+
+def fail_processing_run(run_id: str, *, reason: str = "execution_failed") -> dict[str, Any]:
+    """Mark one active run failed so liveness gates treat it as terminal.
+
+    Idempotent and terminal-preserving: a run already ``completed``,
+    ``cancelled``, or ``failed`` keeps its status (a cancelled run is never
+    overwritten by a late failure report).  Returns the refreshed run.
+    """
+
+    normalized_run_id = _safe_token(run_id, default="", max_length=96)
+    if not normalized_run_id:
+        raise DataProcessingNotFoundError("Data processing run id is required.")
+    normalized_reason = _trim_text(reason, max_length=300) or "execution_failed"
+    with _LOCK:
+        run = _load_run(normalized_run_id)
+        if str(run.get("status") or "") not in {"completed", "cancelled", "failed"}:
+            _touch_run(normalized_run_id, status="failed")
+        failed = _load_run(normalized_run_id)
+        _append_jsonl(
+            _events_path(normalized_run_id),
+            _run_event(
+                "data_processing.run.failed",
+                normalized_run_id,
+                {"reason": normalized_reason},
+            ),
+        )
+    _record_data_processing_event(
+        "data_processing.run.failed",
+        run_id=normalized_run_id,
+        fields={"reason": normalized_reason},
+    )
+    return failed
 
 
 def list_records(run_id: str) -> dict[str, Any]:
@@ -511,10 +544,10 @@ def _load_run(run_id: str) -> dict[str, Any]:
 def _touch_run(run_id: str, *, status: str | None = None) -> None:
     run = _load_run(run_id)
     run["updatedAt"] = _now_utc()
-    # Cancellation is terminal. A search call already in flight may finish
-    # after the operator stops the run; its stale preferred status must not
-    # reopen the run.
-    if status and str(run.get("status") or "") != "cancelled":
+    # Cancellation and failure are terminal. A search call already in flight
+    # may finish after the operator stops the run or after its failure was
+    # recorded; its stale preferred status must not reopen the run.
+    if status and str(run.get("status") or "") not in {"cancelled", "failed"}:
         run["status"] = _normalize_choice(status, RUN_STATUSES, default=run.get("status") or "draft")
     _write_json(_run_path(run_id), run)
 
@@ -536,7 +569,7 @@ def _replace_assignment(run_id: str, assignment_id: str, updates: dict[str, Any]
 
 def _advance_run_status(run: dict[str, Any], *, preferred: str) -> str:
     current = str(run.get("status") or "draft")
-    if current in {"completed", "cancelled"}:
+    if current in {"completed", "cancelled", "failed"}:
         return current
     return _normalize_choice(preferred, RUN_STATUSES, default=current)
 
@@ -549,7 +582,7 @@ def _advance_run_status_after_collection_output(
     preferred: str,
 ) -> str:
     current = str(run.get("status") or "draft")
-    if current in {"completed", "cancelled"}:
+    if current in {"completed", "cancelled", "failed"}:
         return current
     if not assignments:
         return _normalize_choice(preferred, RUN_STATUSES, default=current)

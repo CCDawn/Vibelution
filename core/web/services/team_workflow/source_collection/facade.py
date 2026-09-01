@@ -672,10 +672,11 @@ def _record_circuit_workflow_event(team_id: str, event_type: str, fields: dict[s
 def _circuit_live_run(team_id: str, run_id: str) -> dict[str, Any] | None:
     """Resolve a ledger-referenced run in the real data-processing run store.
 
-    Returns ``None`` for missing or terminal (completed/cancelled) runs so a
-    stale ledger entry (unit-test fake run id, aborted creation, already
-    finished run without a recorded outcome) never gates or reroutes a
-    request.  Any lookup error fails open to ``None`` (entry treated dead).
+    Returns ``None`` for missing or terminal (completed/cancelled/failed) runs
+    so a stale ledger entry (unit-test fake run id, aborted creation, already
+    finished or crashed run without a recorded outcome) never gates or
+    reroutes a request.  Any lookup error fails open to ``None`` (entry
+    treated dead).
     """
     normalized_run_id = _text(run_id, limit=160)
     if not normalized_run_id:
@@ -686,7 +687,7 @@ def _circuit_live_run(team_id: str, run_id: str) -> dict[str, Any] | None:
         return None
     if not isinstance(run, dict):
         return None
-    if str(run.get("status") or "") in {"completed", "cancelled"}:
+    if str(run.get("status") or "") in {"completed", "cancelled", "failed"}:
         return None
     return run
 
@@ -893,11 +894,6 @@ def research_knowledge_collection_facade(
         if normalized_action == "ensure"
         else ""
     )
-    existing_run = _find_existing_run(
-        normalized_team_id,
-        envelope.scopeHash,
-        search_fingerprint,
-    )
     base = {
         "schemaVersion": FACADE_SCHEMA_VERSION,
         "teamId": normalized_team_id,
@@ -908,6 +904,11 @@ def research_knowledge_collection_facade(
         "boundaries": _collection_boundaries(),
     }
     if normalized_action == "inspect":
+        existing_run = _find_existing_run(
+            normalized_team_id,
+            envelope.scopeHash,
+            search_fingerprint,
+        )
         if existing_run is None:
             return {
                 **base,
@@ -928,27 +929,23 @@ def research_knowledge_collection_facade(
             "locator": _collection_locator(envelope, run_id, normalized_team_id),
             "summary": _load_distilled_summary(normalized_team_id, run_id),
         }
-    if existing_run is not None:
-        run_id = _text(existing_run.get("runId"))
-        return {
-            **base,
-            "action": "ensure",
-            "status": "ok",
-            "created": False,
-            "idempotent": True,
-            "found": True,
-            "locator": _collection_locator(envelope, run_id, normalized_team_id),
-            "summary": _load_distilled_summary(normalized_team_id, run_id),
-        }
-    # Evidence-request circuit: a goal identical to an already-executed
-    # collection for this team/question is never re-run as-is.  A duplicate
-    # gets the next deterministic rewrite variant; once the rewrite budget is
-    # exhausted the structured gap marker is returned instead of a new run.
-    circuit_decision = _circuit_gate_decision(normalized_team_id, envelope, search)
-    circuit_action = str((circuit_decision or {}).get("action") or "")
-    if circuit_action == "reuse_in_flight":
-        run_id = _text((circuit_decision or {}).get("runId"))
-        if run_id:
+    # ensure is one check-then-act transaction: "existing-run lookup ->
+    # circuit gate decision -> run creation -> ledger append" must not
+    # interleave, or two concurrent ensures for the same goal both pass the
+    # gate as execute_original and run the identical search twice.  The whole
+    # sequence runs under the shared team-workflow lock (the same module-level
+    # RLock the background search launcher and workflow stores already use).
+    # The critical section is local file IO only (no provider/network calls),
+    # and the lock is re-entrant, so start_source_collection_run's own use of
+    # the same lock cannot deadlock.
+    with _orchestration_service()._WORKFLOW_LOCK:
+        existing_run = _find_existing_run(
+            normalized_team_id,
+            envelope.scopeHash,
+            search_fingerprint,
+        )
+        if existing_run is not None:
+            run_id = _text(existing_run.get("runId"))
             return {
                 **base,
                 "action": "ensure",
@@ -958,54 +955,74 @@ def research_knowledge_collection_facade(
                 "found": True,
                 "locator": _collection_locator(envelope, run_id, normalized_team_id),
                 "summary": _load_distilled_summary(normalized_team_id, run_id),
-                "evidenceCircuit": {"status": "reuse_in_flight"},
             }
-    if circuit_action == "mark_unavailable":
-        return _evidence_gap_unavailable_response(
-            base,
+        # Evidence-request circuit: a goal identical to an already-executed
+        # collection for this team/question is never re-run as-is.  A duplicate
+        # gets the next deterministic rewrite variant; once the rewrite budget
+        # is exhausted the structured gap marker is returned instead of a new
+        # run.
+        circuit_decision = _circuit_gate_decision(normalized_team_id, envelope, search)
+        circuit_action = str((circuit_decision or {}).get("action") or "")
+        if circuit_action == "reuse_in_flight":
+            run_id = _text((circuit_decision or {}).get("runId"))
+            if run_id:
+                return {
+                    **base,
+                    "action": "ensure",
+                    "status": "ok",
+                    "created": False,
+                    "idempotent": True,
+                    "found": True,
+                    "locator": _collection_locator(envelope, run_id, normalized_team_id),
+                    "summary": _load_distilled_summary(normalized_team_id, run_id),
+                    "evidenceCircuit": {"status": "reuse_in_flight"},
+                }
+        if circuit_action == "mark_unavailable":
+            return _evidence_gap_unavailable_response(
+                base,
+                normalized_team_id,
+                envelope,
+                circuit_decision or {},
+            )
+        effective_search = search
+        search_circuit_metadata: dict[str, Any] | None = None
+        if circuit_action == "execute_rewrite":
+            variant = (
+                circuit_decision.get("variant")
+                if isinstance(circuit_decision, dict) and isinstance(circuit_decision.get("variant"), dict)
+                else {}
+            )
+            effective_search = _object(variant.get("searchEnvelope")) or search
+            search_circuit_metadata = {
+                "goalKey": _text((circuit_decision or {}).get("goalKey"), limit=64),
+                "baseGoalKey": search_circuit.canonical_goal_key(search),
+                "attemptKind": "rewrite",
+                "variantIndex": search_circuit._int_or_zero((circuit_decision or {}).get("variantIndex")),
+                "strategy": _text(variant.get("strategy"), limit=80),
+                "providerOrder": [_text(item, limit=80) for item in list(variant.get("providerOrder") or [])][:8],
+                "querySeeds": [_text(item, limit=220) for item in list(variant.get("querySeeds") or [])][:12],
+            }
+        created_run = _create_collection_run(
             normalized_team_id,
             envelope,
-            circuit_decision or {},
+            effective_search,
+            requirements,
+            writeback_policy,
+            hypothesis_candidate_ids,
+            workflow_run_id,
+            research_project_id,
+            search_circuit_metadata,
         )
-    effective_search = search
-    search_circuit_metadata: dict[str, Any] | None = None
-    if circuit_action == "execute_rewrite":
-        variant = (
-            circuit_decision.get("variant")
-            if isinstance(circuit_decision, dict) and isinstance(circuit_decision.get("variant"), dict)
-            else {}
-        )
-        effective_search = _object(variant.get("searchEnvelope")) or search
-        search_circuit_metadata = {
-            "goalKey": _text((circuit_decision or {}).get("goalKey"), limit=64),
-            "baseGoalKey": search_circuit.canonical_goal_key(search),
-            "attemptKind": "rewrite",
-            "variantIndex": search_circuit._int_or_zero((circuit_decision or {}).get("variantIndex")),
-            "strategy": _text(variant.get("strategy"), limit=80),
-            "providerOrder": [_text(item, limit=80) for item in list(variant.get("providerOrder") or [])][:8],
-            "querySeeds": [_text(item, limit=220) for item in list(variant.get("querySeeds") or [])][:12],
-        }
-    created_run = _create_collection_run(
-        normalized_team_id,
-        envelope,
-        effective_search,
-        requirements,
-        writeback_policy,
-        hypothesis_candidate_ids,
-        workflow_run_id,
-        research_project_id,
-        search_circuit_metadata,
-    )
-    run_id = _run_id_from_start_response(created_run)
-    if run_id and circuit_decision is not None:
-        _append_circuit_attempt_entry(
-            normalized_team_id,
-            envelope,
-            run_id=run_id,
-            fingerprint=search_envelope_fingerprint(effective_search, requirements),
-            effective_search=effective_search,
-            decision=circuit_decision,
-        )
+        run_id = _run_id_from_start_response(created_run)
+        if run_id and circuit_decision is not None:
+            _append_circuit_attempt_entry(
+                normalized_team_id,
+                envelope,
+                run_id=run_id,
+                fingerprint=search_envelope_fingerprint(effective_search, requirements),
+                effective_search=effective_search,
+                decision=circuit_decision,
+            )
     response = {
         **base,
         "action": "ensure",

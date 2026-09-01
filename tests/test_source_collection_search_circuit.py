@@ -9,6 +9,7 @@ zero-difference guarantee for brand-new requests.
 from __future__ import annotations
 
 import copy
+import threading
 
 import pytest
 
@@ -745,3 +746,253 @@ def test_execute_search_replays_exhausted_goal_with_zero_queries(tmp_path, monke
     stored = search_circuit.load_circuit_store(team["teamId"])
     assert stored["markers"][-1]["marker"] == "evidence_gap_unavailable"
     assert stored["markers"][-1]["latestAttemptRunId"] == run_id
+
+
+# ---------------------------------------------------------------------------
+# Concurrency: the ensure gate and the ledger RMW cycles under threads.
+# ---------------------------------------------------------------------------
+
+
+def _start_and_join(threads: list[threading.Thread], *, timeout: float = 60.0) -> None:
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=timeout)
+        assert not thread.is_alive(), "worker thread did not finish"
+
+
+def test_concurrent_ensure_same_goal_creates_exactly_one_run(monkeypatch):
+    """Two ensures racing on the same goal must not both execute the original.
+
+    Regression shape: the gate decision, run creation, and ledger append are
+    one check-then-act sequence.  Without the shared workflow lock both
+    threads passed the gate as ``execute_original`` and the identical search
+    ran twice.  Under the lock the loser reuses the winner's in-flight run.
+    """
+    store = _MemoryStore()
+    store.install(monkeypatch)
+    created: list[dict] = []
+    create_lock = threading.Lock()
+
+    def fake_start_run(team_id, payload):
+        with create_lock:
+            run_id = f"dprun-concurrent-{len(created) + 1}"
+            created.append({"teamId": team_id, "payload": payload, "runId": run_id})
+        return {"run": {"runId": run_id}}
+
+    monkeypatch.setattr(
+        data_processing_service,
+        "list_processing_runs",
+        lambda **kwargs: {"runs": []},
+    )
+    monkeypatch.setattr(source_collection_runs, "start_source_collection_run", fake_start_run)
+    monkeypatch.setattr(
+        source_collection_runs,
+        "get_source_collection_summary",
+        lambda team_id, *, run_id: {
+            "status": "collecting",
+            "runId": run_id,
+            "runStatus": {"status": "collecting"},
+            "summary": {"recordCount": 0},
+            "stageCards": [],
+        },
+    )
+
+    worker_count = 6
+    barrier = threading.Barrier(worker_count)
+    results: list[dict] = []
+
+    def worker():
+        barrier.wait()
+        results.append(
+            facade.research_knowledge_collection_facade(
+                action="ensure",
+                scope=_valid_envelope(),
+                searchEnvelope=SCI001_SEARCH_ENVELOPE,
+                team_id="research-team",
+            )
+        )
+
+    _start_and_join([threading.Thread(target=worker) for _ in range(worker_count)])
+
+    assert len(results) == worker_count
+    assert len(created) == 1
+    assert len(store.store["entries"]) == 1
+    assert store.store["entries"][0]["runId"] == created[0]["runId"]
+    winners = [item for item in results if item["created"] is True]
+    losers = [item for item in results if item["created"] is False]
+    assert len(winners) == 1
+    assert len(losers) == worker_count - 1
+    for loser in losers:
+        assert loser["idempotent"] is True
+        assert loser["locator"]["runId"] == created[0]["runId"]
+        assert loser.get("evidenceCircuit", {}).get("status") == "reuse_in_flight"
+
+
+def test_concurrent_ledger_appends_do_not_lose_entries(monkeypatch):
+    """N concurrent append_attempt_entry calls all land in the ledger.
+
+    Each store write is atomic, but the load-modify-save cycle is not: without
+    the ledger lock, concurrent writers overwrite each other's appended
+    entries (last writer wins).
+    """
+    store = _MemoryStore()
+    store.install(monkeypatch)
+    worker_count = 8
+    per_worker = 12
+    barrier = threading.Barrier(worker_count)
+
+    def worker(worker_index: int):
+        barrier.wait()
+        for i in range(per_worker):
+            search_circuit.append_attempt_entry(
+                "research-team",
+                search_circuit.new_attempt_entry(
+                    goal_key=f"goal-{worker_index}",
+                    goal_scope="question:sci-001",
+                    question="SCI-001",
+                    run_id=f"dprun-append-{worker_index}-{i}",
+                    search_envelope=SCI001_SEARCH_ENVELOPE,
+                    fingerprint="fp",
+                    attempt_kind="original",
+                    now_iso="2026-09-01T00:00:00Z",
+                ),
+            )
+
+    _start_and_join(
+        [threading.Thread(target=worker, args=(index,)) for index in range(worker_count)]
+    )
+
+    entries = store.store["entries"]
+    assert len(entries) == worker_count * per_worker
+    assert len({entry["entryId"] for entry in entries}) == worker_count * per_worker
+
+
+def test_concurrent_outcome_records_do_not_lose_updates(monkeypatch):
+    """Concurrent record_attempt_outcome calls all survive in the ledger."""
+    store = _MemoryStore()
+    store.install(monkeypatch)
+    run_ids = [f"dprun-outcome-{i}" for i in range(24)]
+    store.store["entries"] = [
+        search_circuit.new_attempt_entry(
+            goal_key="goal",
+            goal_scope="question:sci-001",
+            question="SCI-001",
+            run_id=run_id,
+            search_envelope=SCI001_SEARCH_ENVELOPE,
+            fingerprint="fp",
+            attempt_kind="original",
+            now_iso="2026-09-01T00:00:00Z",
+        )
+        for run_id in run_ids
+    ]
+    worker_count = 8
+    barrier = threading.Barrier(worker_count)
+
+    def worker(worker_index: int):
+        barrier.wait()
+        for run_id in run_ids[worker_index::worker_count]:
+            search_circuit.record_attempt_outcome(
+                "research-team",
+                run_id,
+                {"status": "executed", "recordCount": 3},
+            )
+
+    _start_and_join(
+        [threading.Thread(target=worker, args=(index,)) for index in range(worker_count)]
+    )
+
+    entries = {entry["runId"]: entry for entry in store.store["entries"]}
+    assert len(entries) == len(run_ids)
+    for run_id in run_ids:
+        entry = entries[run_id]
+        assert entry["status"] == "executed"
+        assert entry["outcome"]["newRecordCount"] == 3
+
+
+def test_search_failure_marks_run_failed_and_unblocks_goal(tmp_path, monkeypatch):
+    """A crashed search must free the goal instead of pinning it forever.
+
+    Regression shape: the provider search raised, the run stayed in a
+    non-terminal data-processing status, and every later ensure for the same
+    goal resolved to ``reuse_in_flight`` pointing at the dead run.  Now the
+    failure path marks the run ``failed`` and closes the ledger attempt.
+    """
+    from core.web.services import team_service
+    from tests._support.team_workflow.helpers import (
+        _use_fake_local_research_config,
+        _use_tmp_project_root,
+    )
+
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    team_id = team["teamId"]
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team_id,
+        {
+            "topic": "large language model hallucination",
+            "querySeeds": ["large language model hallucination"],
+            "agentRoles": ["source_finder"],
+        },
+    )
+    run_id = run_response["run"]["runId"]
+    search_circuit.append_attempt_entry(
+        team_id,
+        search_circuit.new_attempt_entry(
+            goal_key=search_circuit.canonical_goal_key(SCI001_SEARCH_ENVELOPE),
+            goal_scope="question:sci-001",
+            question="SCI-001",
+            run_id=run_id,
+            search_envelope=SCI001_SEARCH_ENVELOPE,
+            fingerprint="fp",
+            attempt_kind="original",
+            now_iso="2026-09-01T00:00:00Z",
+        ),
+    )
+    # The ledger entry now gates the goal to reuse_in_flight (live run).
+    assert facade._circuit_live_run(team_id, run_id) is not None
+
+    def exploding_impl(team_id_arg, run_id_arg, payload):
+        raise RuntimeError("provider exploded")
+
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "_execute_source_collection_search_impl",
+        exploding_impl,
+    )
+    with pytest.raises(RuntimeError, match="provider exploded"):
+        team_workflow_orchestration_service.execute_source_collection_search(
+            team_id,
+            run_id,
+            {},
+        )
+
+    # The run itself became terminal, so the liveness gate treats it as dead.
+    run_after = data_processing_service.get_processing_run(run_id)
+    assert run_after["status"] == "failed"
+    assert facade._circuit_live_run(team_id, run_id) is None
+    # The ledger attempt was closed (idempotent merge of the failure result).
+    entries = {
+        entry["runId"]: entry
+        for entry in search_circuit.load_goal_entries(team_id, "question:sci-001")
+    }
+    assert entries[run_id]["status"] == "executed"
+    assert entries[run_id]["outcome"]["terminalStatus"] == "failed"
+
+    # A later ensure for the same goal is no longer pinned to the dead run:
+    # the gate re-routes instead of returning reuse_in_flight.
+    monkeypatch.setattr(
+        source_collection_runs,
+        "start_source_collection_run",
+        lambda team_id_arg, payload: {"run": {"runId": "dprun-retry"}},
+    )
+    result = facade.research_knowledge_collection_facade(
+        action="ensure",
+        scope=_valid_envelope(),
+        searchEnvelope=SCI001_SEARCH_ENVELOPE,
+        team_id=team_id,
+    )
+    assert result.get("evidenceCircuit", {}).get("status") != "reuse_in_flight"
+    assert result["created"] is True
+    assert result["locator"]["runId"] == "dprun-retry"

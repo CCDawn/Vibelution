@@ -999,6 +999,28 @@ def execute_source_collection_search(team_id: str, run_id: str, payload: dict[st
                 error=str(exc),
                 error_type=type(exc).__name__,
             )
+            # The data-processing run itself must become terminal too: the
+            # circuit's liveness gate reads this status, and a run left in
+            # "collecting" would keep every later ensure for the same goal
+            # pinned to reuse_in_flight forever.  Both writes are best-effort;
+            # the original search error stays the raised error.
+            try:
+                s.data_processing_service.fail_processing_run(
+                    normalized_run_id,
+                    reason=f"source_collection_search_failed: {type(exc).__name__}",
+                )
+            except Exception:  # noqa: BLE001 - liveness marking must not mask the failure
+                pass
+            # Close the ledger attempt (idempotent; only touches non-executed
+            # entries) so decide_circuit_action stops treating it as in flight.
+            try:
+                _search_circuit().record_attempt_outcome(
+                    normalized_team_id,
+                    normalized_run_id,
+                    failure_result,
+                )
+            except Exception:  # noqa: BLE001 - ledger must never mask the failure
+                pass
             s._sync_source_collection_stage_round_after_search(
                 normalized_team_id,
                 normalized_run_id,

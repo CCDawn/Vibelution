@@ -29,6 +29,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import threading
 import uuid
 from typing import Any
 
@@ -564,6 +565,14 @@ def build_evidence_gap_marker(
 # Persistence wrappers (late-bound service; fail-open everywhere).
 # ---------------------------------------------------------------------------
 
+# Serializes every read-modify-write cycle on the per-team circuit ledger.
+# Each individual store write is already atomic (temp + fsync + os.replace),
+# but without this lock two concurrent RMW cycles lose updates (last writer
+# overwrites the other's appended entry / recorded outcome).  Read-only
+# helpers stay lock-free: they observe either the old or the new complete
+# file, which is safe under the atomic replace.
+_LEDGER_LOCK = threading.RLock()
+
 
 def _service():
     from core.web.services import team_workflow_orchestration_service
@@ -626,11 +635,12 @@ def load_goal_entries(team_id: str, goal_scope: str) -> list[dict[str, Any]]:
 def append_attempt_entry(team_id: str, entry: dict[str, Any]) -> None:
     """Record a started attempt; swallow failures (circuit must fail open)."""
     try:
-        store = load_circuit_store(team_id)
-        entries = list(store.get("entries") or [])
-        entries.append(entry)
-        store["entries"] = entries
-        save_circuit_store(team_id, store)
+        with _LEDGER_LOCK:
+            store = load_circuit_store(team_id)
+            entries = list(store.get("entries") or [])
+            entries.append(entry)
+            store["entries"] = entries
+            save_circuit_store(team_id, store)
     except Exception:  # noqa: BLE001
         return
 
@@ -638,17 +648,18 @@ def append_attempt_entry(team_id: str, entry: dict[str, Any]) -> None:
 def record_attempt_outcome(team_id: str, run_id: str, result: dict[str, Any]) -> None:
     """Merge one finished execution into the ledger; fail-open."""
     try:
-        store = load_circuit_store(team_id)
-        entries = apply_attempt_outcome(
-            store.get("entries"),
-            run_id,
-            result,
-            now_iso=_service().utc_now_iso(),
-        )
-        if entries == store.get("entries"):
-            return
-        store["entries"] = entries
-        save_circuit_store(team_id, store)
+        with _LEDGER_LOCK:
+            store = load_circuit_store(team_id)
+            entries = apply_attempt_outcome(
+                store.get("entries"),
+                run_id,
+                result,
+                now_iso=_service().utc_now_iso(),
+            )
+            if entries == store.get("entries"):
+                return
+            store["entries"] = entries
+            save_circuit_store(team_id, store)
     except Exception:  # noqa: BLE001
         return
 
@@ -661,16 +672,17 @@ def record_evidence_gap_marker(
 ) -> None:
     """Persist the ``evidence_gap_unavailable`` marker; fail-open."""
     try:
-        store = load_circuit_store(team_id)
-        markers = [item for item in list(store.get("markers") or []) if isinstance(item, dict)]
-        goal_key = str(marker.get("goalKey") or "")
-        markers = [item for item in markers if str(item.get("goalKey") or "") != goal_key]
-        stored = dict(marker)
-        if latest_attempt_run_id:
-            stored["latestAttemptRunId"] = str(latest_attempt_run_id)[:160]
-        markers.append(stored)
-        store["markers"] = markers
-        save_circuit_store(team_id, store)
+        with _LEDGER_LOCK:
+            store = load_circuit_store(team_id)
+            markers = [item for item in list(store.get("markers") or []) if isinstance(item, dict)]
+            goal_key = str(marker.get("goalKey") or "")
+            markers = [item for item in markers if str(item.get("goalKey") or "") != goal_key]
+            stored = dict(marker)
+            if latest_attempt_run_id:
+                stored["latestAttemptRunId"] = str(latest_attempt_run_id)[:160]
+            markers.append(stored)
+            store["markers"] = markers
+            save_circuit_store(team_id, store)
     except Exception:  # noqa: BLE001
         return
 
