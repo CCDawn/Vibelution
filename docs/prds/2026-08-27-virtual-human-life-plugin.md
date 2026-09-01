@@ -1885,6 +1885,7 @@ Task 22—27 的定义继续以 §30.10 为准，本节只增加输入、依赖�
 - Dependency: Task 20 的静态回退契约已实现；直接消费现有 Affect/Life State，不依赖 Task 22 的 `reasonCodes`，也不反向写状态。Task 22 与 Task 34 可以分别演进，只通过已经存在的人物状态事实源保持一致。
 - Mode: BDD_TDD。
 - Verification/Stop: 表驱动覆盖心情、体力、活动、地点、昼夜、天气新鲜度、provider 故障、缺资产、未知许可和 `prefers-reduced-motion`；同一输入可重放，心跳不调用 LLM，失败不影响文本聊天，普通 Agent 无 EmbodimentState。
+- Implementation status (2026-09-01): 已在现有 `embodiment.py` 上实现确定性 `EmbodimentState`，保持 Task 20 的 `activeMode` / provider / 静态立绘回退字段并新增 `expressionId`、`motionPreset`、`blinkProfile`、`sceneKey`、授权 `assetRefs` / `assetReceipts`、状态 `sourceRefs` 与 `validUntil`。Resolver 只读取现有 Life State、Affect、当前日程活动、地点、当前有效环境事实与显式减少动态偏好；结构化资产同时要求 source 与 license receipt，旧版仅含 license receipt 的主模型记录继续兼容。该任务不写 Affect/Life State、不调用 LLM、不实现 VUI，也不触及普通 Session/Chat 链路。
 
 #### Task 35：建立有来源的生活明信片候选与投递
 

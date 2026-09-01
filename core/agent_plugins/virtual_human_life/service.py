@@ -3047,21 +3047,11 @@ class VirtualHumanLifeService:
                 "sensitiveRequest": False,
             },
         )
-        embodiment_config = self.store.read_json(agent_id, "embodiment/config.json") or {}
-        authorized_assets = self.store.read_json(agent_id, "embodiment/assets.json") or {}
-        provider_health = self._embodiment_provider_health(agent_id)
-        embodiment = resolve_embodiment(
-            embodiment_config,
-            authorized_assets=[
-                item
-                for item in list(authorized_assets.get("assets") or [])
-                if isinstance(item, Mapping)
-            ],
-            provider_health={
-                str(key): value
-                for key, value in provider_health.items()
-                if isinstance(value, Mapping)
-            },
+        embodiment = self._embodiment_projection(
+            agent_id,
+            now=now,
+            affect=affect,
+            environment=environment,
         )
         companion_preferences = self.list_companion_preferences(agent_id)
         return {
@@ -3114,6 +3104,68 @@ class VirtualHumanLifeService:
             )
             return {}
         return payload if isinstance(payload, dict) else {}
+
+    def _embodiment_projection(
+        self,
+        agent_id: str,
+        *,
+        now: datetime,
+        affect: Mapping[str, Any] | None = None,
+        environment: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        config = self.store.read_json(agent_id, "embodiment/config.json") or {}
+        manifest = self.store.read_json(agent_id, "embodiment/assets.json") or {}
+        life_state = self.store.read_json(agent_id, "state.json") or {}
+        current_schedule = self.store.read_json(
+            agent_id,
+            f"schedules/{now.date().isoformat()}.json",
+        ) or {}
+        current_activity_id = str(life_state.get("currentActivityId") or "")
+        current_activity = next(
+            (
+                item
+                for item in list(current_schedule.get("activities") or [])
+                if isinstance(item, Mapping)
+                and (
+                    str(item.get("activityId") or "") == current_activity_id
+                    or str(item.get("status") or "") == "active"
+                )
+            ),
+            None,
+        )
+        affect_projection = (
+            affect
+            if isinstance(affect, Mapping)
+            else project_affect(
+                self.store.read_jsonl(agent_id, "affect/episodes.jsonl"),
+                now=now,
+                baseline_mood=self._affect_baseline(agent_id),
+            )
+        )
+        environment_projection = (
+            environment
+            if isinstance(environment, Mapping)
+            else self.list_environment_facts(agent_id, limit=64)
+        )
+        return resolve_embodiment(
+            config,
+            authorized_assets=[
+                item
+                for item in list(manifest.get("assets") or [])
+                if isinstance(item, Mapping)
+            ],
+            provider_health={
+                str(key): value
+                for key, value in self._embodiment_provider_health(agent_id).items()
+                if isinstance(value, Mapping)
+            },
+            state=life_state,
+            affect=affect_projection,
+            current_activity=current_activity,
+            environment=environment_projection,
+            local_time=now,
+            prefers_reduced_motion=bool(config.get("prefersReducedMotion")),
+        )
 
     def list_memory_promotion_receipts(
         self,
@@ -4785,6 +4837,9 @@ class VirtualHumanLifeService:
                 "providerId": str(arguments.get("providerId") or "")[:160],
                 "mode": str(arguments.get("mode") or "portrait")[:40],
                 "assetRef": str(arguments.get("assetRef") or "")[:400],
+                "prefersReducedMotion": bool(
+                    arguments.get("prefersReducedMotion")
+                ),
                 "updatedAt": _iso(self._now()),
             }
             self.store.write_json(agent_id, "embodiment/config.json", config)
@@ -4793,16 +4848,31 @@ class VirtualHumanLifeService:
                 assets = self.store.read_json(agent_id, "embodiment/assets.json") or {"assets": []}
                 rows = [item for item in list(assets.get("assets") or []) if isinstance(item, dict)]
                 rows = [item for item in rows if str(item.get("assetRef") or "") != config["assetRef"]]
-                rows.append({"assetRef": config["assetRef"], "licenseReceipt": license_receipt})
-                self.store.write_json(agent_id, "embodiment/assets.json", {"assets": rows[-32:]})
-            resolved = resolve_embodiment(
-                config,
-                authorized_assets=list(
-                    (self.store.read_json(agent_id, "embodiment/assets.json") or {}).get("assets")
-                    or []
-                ),
-                provider_health=self._embodiment_provider_health(agent_id),
-            )
+                asset_entry = {
+                    "assetRef": config["assetRef"],
+                    "licenseReceipt": license_receipt,
+                }
+                asset_kind = str(arguments.get("assetKind") or "").strip()[:40]
+                if asset_kind:
+                    asset_entry.update(
+                        {
+                            "assetKind": asset_kind,
+                            "stateKey": str(arguments.get("stateKey") or "")[:120],
+                            "sourceRef": str(
+                                arguments.get("assetSourceRef") or ""
+                            )[:300],
+                            "contentHash": str(
+                                arguments.get("assetContentHash") or ""
+                            )[:160],
+                        }
+                    )
+                rows.append(asset_entry)
+                self.store.write_json(
+                    agent_id,
+                    "embodiment/assets.json",
+                    {"schemaVersion": 1, "assets": rows[-32:]},
+                )
+            resolved = self._embodiment_projection(agent_id, now=local_now)
             return {"embodiment": resolved}
         if command == "recordEnvironmentFact":
             current = self._now()
