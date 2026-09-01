@@ -3767,7 +3767,7 @@ def test_preformal_fanout_persists_siblings_while_kernel_trace_is_slow(
 
     def slow_kernel_trace(_event_payload):
         trace_started.set()
-        assert release_trace.wait(timeout=5), "test must release the background trace"
+        assert release_trace.wait(timeout=60), "test must release the background trace"
         return {"event": {}, "task": {}, "execution": {}, "outcome": {}}
 
     def record_selection() -> None:
@@ -3789,8 +3789,12 @@ def test_preformal_fanout_persists_siblings_while_kernel_trace_is_slow(
 
     try:
         selection_thread.start()
-        assert trace_started.wait(timeout=5), "background worker did not start the trace"
-        assert selection_finished.wait(timeout=5), "slow trace blocked candidate fan-out"
+        # The wait budgets only bound the worst case; healthy runs fire these
+        # events in milliseconds.  5s was too tight for fleet-parallel xdist
+        # runs on a loaded machine, where scheduling the single worker thread
+        # onto the trace call can exceed 5s (registered flaky, 2026-09-02).
+        assert trace_started.wait(timeout=60), "background worker did not start the trace"
+        assert selection_finished.wait(timeout=60), "slow trace blocked candidate fan-out"
         assert not errors
 
         review_meetings = _review_meetings(recorded["value"])
@@ -3798,7 +3802,7 @@ def test_preformal_fanout_persists_siblings_while_kernel_trace_is_slow(
         assert all(meeting["chatRoomRoundIds"] for meeting in review_meetings)
     finally:
         release_trace.set()
-        selection_thread.join(timeout=5)
+        selection_thread.join(timeout=60)
         executor.shutdown(wait=True)
 
 
