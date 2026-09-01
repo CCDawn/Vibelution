@@ -23,17 +23,27 @@ lapsed deadline always reads as a stale lease.
 Reads are latest-wins by ``(teamId, meetingRoundId, actionKind)``, mirroring
 the append + latest read contract of ``meeting_rounds``.  No second scheduler
 lives here: the recovery sweep only re-enters
-``meeting_runtime.schedule_meeting_discussion`` (dedup set guarantees at most
-one live driver per meeting) or submits one bounded digest re-drive per
-meeting through the same executor (in-process digest job set dedups).
+``meeting_runtime.schedule_meeting_discussion`` (the dedup registry guarantees
+at most one live driver per meeting, and an expired lease proves the holder is
+wedged, so the sweep may evict the stale holder first) or submits one bounded
+digest re-drive per meeting through the same executor (in-process digest job
+set dedups).
+
+Heartbeats are progress-gated (T1): the discussion driver stamps progress at
+each step boundary and the heartbeat thread only renews the lease while that
+progress is recent.  A driver wedged inside an unbounded blocking call stops
+advancing its stamp, so the heartbeat stops renewing, fences the attempt as
+``failed`` once, and hands the meeting back to recovery — a same-boot wedge
+therefore has a real in-run exit instead of a permanently renewed lease.
 """
 
 from __future__ import annotations
 
+import os
 import threading
 import time
 import uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -69,17 +79,36 @@ _MAX_LAST_PROBLEM_LENGTH = 240
 # the recovery sweep re-drives a same-boot driver that let its lease lapse.
 DEFAULT_INTENT_LEASE_MS = 90_000
 HEARTBEAT_INTERVAL_MS = DEFAULT_INTENT_LEASE_MS // 3
-# The digest draft LLM call is bounded by the review-runner timeout (450s);
-# the digest lease is a crash fence just beyond that budget, not a heartbeat
+# The digest draft LLM call is bounded by the review-runner timeout; the
+# digest lease is a crash fence just beyond that budget, not a heartbeat
 # window. A digest re-drive never waits longer than the meeting deadline.
+# The lease derives from the review call timeout actually in effect
+# (``review_llm_call_timeout_seconds`` in llm_review_runners — the env
+# override accepts 300-600s, the persisted per-call budget fills the rest);
+# ``DIGEST_INTENT_LEASE_MS`` stays as the historical 480s floor so a
+# shorter derived budget can never under-cover a legitimate slow call.
 DIGEST_INTENT_LEASE_MS = 480_000
-_LEASE_MS_BY_ACTION = {
-    ACTION_RUN_DISCUSSION: DEFAULT_INTENT_LEASE_MS,
-    ACTION_RUN_DIGEST: DIGEST_INTENT_LEASE_MS,
-}
+DIGEST_LEASE_MARGIN_MS = 30_000
+# Fallback when the review-runner authority is unavailable: the documented
+# default review call budget (llm_review_runners.REVIEW_LLM_CALL_TIMEOUT_SECONDS).
+DEFAULT_REVIEW_CALL_TIMEOUT_S = 450.0
+# The discussion heartbeat is progress-gated: one driver "step" is one full
+# discussion round of bounded participant LLM calls.  The stale-progress
+# window must therefore cover a whole round of maximal bounded calls before
+# declaring the driver wedged — a healthy bounded round can never trip it,
+# while an unbounded wedge always eventually does.
+DISCUSSION_STEP_ALLOWANCE_CALLS = 8
+DISCUSSION_STEP_MARGIN_MS = 60_000
+# Bounded problem marker stamped by the heartbeat when it fences a driver
+# whose progress stamp went stale inside one step.
+WEDGED_DRIVER_PROBLEM = "driver_lease_lapsed_no_progress"
 
 _LOCK = threading.RLock()
 _WORKER_BOOT_ID = uuid.uuid4().hex
+# In-memory driver progress stamps: (teamId, meetingRoundId, actionKind) ->
+# last progress epoch ms.  The heartbeat trusts these over the mere existence
+# of the driver thread: a wedged thread never refreshes its stamp.
+_PROGRESS_STAMPS: dict[tuple[str, str, str], int] = {}
 
 
 class MeetingDriverWorkError(RuntimeError):
@@ -99,7 +128,125 @@ def reset_for_tests() -> str:
     global _WORKER_BOOT_ID
     with _LOCK:
         _WORKER_BOOT_ID = uuid.uuid4().hex
+        _PROGRESS_STAMPS.clear()
         return _WORKER_BOOT_ID
+
+
+def effective_review_call_timeout_seconds() -> float:
+    """The review-profile LLM call budget actually in effect, in seconds.
+
+    Authority is ``review_llm_call_timeout_seconds`` in
+    ``llm_review_runners`` (read-only reference: that surface is owned by
+    another task).  The local fallback duplicates only its documented
+    contract — an env override bounded to 300-600 seconds, else the default
+    review call budget — so a broken import can never turn a lease back into
+    a stale hardcoded constant.
+    """
+
+    try:
+        from core.web.services.team_workflow.llm_review_runners import (
+            review_llm_call_timeout_seconds,
+        )
+
+        value = float(review_llm_call_timeout_seconds())
+        if value > 0:
+            return value
+    except Exception:  # noqa: BLE001 - lease derivation must never raise
+        pass
+    raw = str(
+        os.environ.get("VIBELUTION_REVIEW_LLM_CALL_TIMEOUT_SECONDS") or ""
+    ).strip()
+    if raw:
+        try:
+            value = float(raw)
+        except ValueError:
+            return DEFAULT_REVIEW_CALL_TIMEOUT_S
+        if 300.0 <= value <= 600.0:
+            return value
+    return DEFAULT_REVIEW_CALL_TIMEOUT_S
+
+
+def _lease_ms_for_action(action_kind: str) -> int:
+    """Crash-fence lease for one action kind, derived from live timeouts."""
+
+    if action_kind != ACTION_RUN_DIGEST:
+        return DEFAULT_INTENT_LEASE_MS
+    per_call_ms = int(effective_review_call_timeout_seconds() * 1000)
+    derived = per_call_ms + DIGEST_LEASE_MARGIN_MS
+    # Never below the historical floor: a slower configured timeout widens
+    # the fence, a faster one keeps the old coverage.
+    return max(DIGEST_INTENT_LEASE_MS, derived)
+
+
+def discussion_step_window_ms() -> int:
+    """Stale-progress window for the discussion heartbeat (T1).
+
+    One driver step is one full discussion round of bounded participant
+    calls, so the window covers ``DISCUSSION_STEP_ALLOWANCE_CALLS`` maximal
+    review-timeout calls plus scheduling slack, floored at the digest
+    crash-fence lease.  A driver that stops advancing its progress stamp for
+    longer than this is wedged beyond any legitimate bounded step.
+    """
+
+    per_call_ms = int(effective_review_call_timeout_seconds() * 1000)
+    derived = (
+        per_call_ms * DISCUSSION_STEP_ALLOWANCE_CALLS + DISCUSSION_STEP_MARGIN_MS
+    )
+    return max(DIGEST_INTENT_LEASE_MS, derived)
+
+
+def mark_driver_progress(
+    team_id: str,
+    meeting_round_id: str,
+    *,
+    action_kind: str = ACTION_RUN_DISCUSSION,
+) -> None:
+    """Stamp driver progress; heartbeat renewal requires a recent stamp."""
+
+    key = (
+        str(team_id or "").strip(),
+        str(meeting_round_id or "").strip(),
+        str(action_kind or "").strip(),
+    )
+    if not key[0] or not key[1]:
+        return
+    with _LOCK:
+        _PROGRESS_STAMPS[key] = int(time.time() * 1000)
+
+
+def progress_age_ms(
+    team_id: str,
+    meeting_round_id: str,
+    *,
+    action_kind: str = ACTION_RUN_DISCUSSION,
+) -> int | None:
+    """Age of the last progress stamp, or ``None`` when never stamped."""
+
+    key = (
+        str(team_id or "").strip(),
+        str(meeting_round_id or "").strip(),
+        str(action_kind or "").strip(),
+    )
+    with _LOCK:
+        stamp = _PROGRESS_STAMPS.get(key)
+    if stamp is None:
+        return None
+    return max(0, int(time.time() * 1000) - stamp)
+
+
+def _clear_driver_progress(
+    team_id: str,
+    meeting_round_id: str,
+    *,
+    action_kind: str = ACTION_RUN_DISCUSSION,
+) -> None:
+    key = (
+        str(team_id or "").strip(),
+        str(meeting_round_id or "").strip(),
+        str(action_kind or "").strip(),
+    )
+    with _LOCK:
+        _PROGRESS_STAMPS.pop(key, None)
 
 
 def format_problem(error: BaseException) -> str:
@@ -221,13 +368,18 @@ def record_intent(
                 or worker_boot_id()
             )
         if normalized_status == STATUS_RUNNING:
-            lease_ms = _LEASE_MS_BY_ACTION[normalized_action_kind]
+            lease_ms = _lease_ms_for_action(normalized_action_kind)
             lease_expires_at_ms = now_ms + lease_ms
             # A re-drive must never outlive the governed meeting deadline.
             if normalized_deadline and lease_expires_at_ms > normalized_deadline:
                 lease_expires_at_ms = normalized_deadline
         else:
             lease_expires_at_ms = 0
+            _clear_driver_progress(
+                normalized_team_id,
+                normalized_round_id,
+                action_kind=normalized_action_kind,
+            )
         record = {
             "schemaVersion": SCHEMA_VERSION,
             "workId": uuid.uuid4().hex,
@@ -271,7 +423,9 @@ def refresh_intent_lease(
     Appends a running record that preserves ``attemptCount`` so recovery
     accounting stays accurate.  Returns ``None`` without writing when the
     latest intent is not running or belongs to a foreign boot: a heartbeat
-    must never adopt someone else's driver.
+    must never adopt someone else's driver.  The renewal is clamped to the
+    intent's governed meeting ``deadlineAtMs`` like every fresh lease, so a
+    lapsed deadline always reads as a stale lease.
     """
 
     normalized_team_id = _require_id(team_id, "teamId")
@@ -287,6 +441,15 @@ def refresh_intent_lease(
             return None
         if str(previous.get("workerBootId") or "").strip() != worker_boot_id():
             return None
+        lease_expires_at_ms = now_ms + int(lease_ms)
+        try:
+            deadline = int(previous.get("deadlineAtMs") or 0)
+        except (TypeError, ValueError):
+            deadline = 0
+        if isinstance(previous.get("deadlineAtMs"), bool) or deadline <= 0:
+            deadline = 0
+        if deadline and lease_expires_at_ms > deadline:
+            lease_expires_at_ms = deadline
         record = {
             "schemaVersion": SCHEMA_VERSION,
             "workId": uuid.uuid4().hex,
@@ -299,7 +462,8 @@ def refresh_intent_lease(
             "workerBootId": worker_boot_id(),
             "createdAtMs": now_ms,
             "updatedAtMs": now_ms,
-            "leaseExpiresAtMs": now_ms + int(lease_ms),
+            "leaseExpiresAtMs": lease_expires_at_ms,
+            "deadlineAtMs": deadline,
             "lastProblem": str(previous.get("lastProblem") or "").strip()[
                 :_MAX_LAST_PROBLEM_LENGTH
             ],
@@ -310,25 +474,89 @@ def refresh_intent_lease(
         return record
 
 
+def fence_wedged_driver(
+    team_id: str,
+    meeting_round_id: str,
+    *,
+    action_kind: str = ACTION_RUN_DISCUSSION,
+    problem: str = WEDGED_DRIVER_PROBLEM,
+) -> dict[str, Any] | None:
+    """Terminalize a running intent whose driver stopped making progress.
+
+    The heartbeat thread is the only observer that stays alive while the
+    driver thread is wedged inside an unbounded blocking call, so it owns
+    this transition: once the driver's progress stamp goes stale past the
+    step window, the attempt is fenced as ``failed`` (attemptCount preserved
+    so the shared auto-reschedule cap still bounds recovery) instead of the
+    heartbeat silently renewing a dead driver forever.  Returns ``None``
+    when there is no same-boot running intent to fence.
+    """
+
+    normalized_team_id = _require_id(team_id, "teamId")
+    normalized_round_id = _require_id(meeting_round_id, "meetingRoundId")
+    with _LOCK:
+        previous = latest_intent(
+            normalized_team_id, normalized_round_id, action_kind=action_kind
+        )
+        if previous is None:
+            return None
+        if str(previous.get("status") or "").strip().lower() != STATUS_RUNNING:
+            return None
+        if str(previous.get("workerBootId") or "").strip() != worker_boot_id():
+            return None
+    return record_intent(
+        normalized_team_id,
+        normalized_round_id,
+        status=STATUS_FAILED,
+        action_kind=action_kind,
+        last_problem=problem,
+    )
+
+
 def start_lease_heartbeat(
     team_id: str,
     meeting_round_id: str,
     *,
     stop_event: threading.Event,
     interval_ms: int = HEARTBEAT_INTERVAL_MS,
+    progress_window_ms: int | None = None,
+    on_lapse: Callable[[], None] | None = None,
 ) -> threading.Thread:
     """Refresh the running intent lease until ``stop_event`` is set.
 
     Heartbeat failures are swallowed: the worst outcome is that the lease
     lapses and the recovery sweep re-drives the meeting, which is exactly
     the contract this lease exists to provide.
+
+    When ``progress_window_ms`` is set, renewal additionally requires the
+    driver's progress stamp to be younger than the window.  A wedged driver
+    stops advancing its stamp, so the heartbeat stops renewing (the lease
+    lapses), fences the attempt once via :func:`fence_wedged_driver`, and
+    invokes ``on_lapse`` exactly once so the runtime can re-drive the meeting
+    in-run.  Callers that pass no window keep the legacy unconditional
+    renewal.
     """
 
     interval_s = max(int(interval_ms), 10) / 1000.0
+    heartbeat_state = {"lapsed": False}
 
     def _loop() -> None:
         while not stop_event.wait(interval_s):
             try:
+                if progress_window_ms is not None and not heartbeat_state["lapsed"]:
+                    age = progress_age_ms(team_id, meeting_round_id)
+                    if age is not None and age > int(progress_window_ms):
+                        # The driver thread has not advanced within one
+                        # maximal bounded step: stop renewing its lease and
+                        # hand the meeting to recovery exactly once.
+                        heartbeat_state["lapsed"] = True
+                        fenced = fence_wedged_driver(team_id, meeting_round_id)
+                        if fenced is not None and on_lapse is not None:
+                            try:
+                                on_lapse()
+                            except Exception:  # noqa: BLE001
+                                pass
+                        continue
                 refresh_intent_lease(team_id, meeting_round_id)
             except Exception:  # noqa: BLE001 - a missed beat must not kill the driver
                 continue
@@ -375,9 +603,11 @@ def recover_challenge_meeting_drivers() -> dict[str, Any]:
     never persisted, and fence identity-less legacy orphans through the
     terminal path.  Idempotent: a second
     consecutive run is a no-op because fenced meetings are closed,
-    backfilled meetings now carry a future deadline, and rescheduled ones are
-    protected by the in-process dedup set.  Never raises; every team/meeting
-    failure is isolated into ``skipped``.
+    backfilled meetings now carry a future deadline, and rescheduled ones
+    are protected by the in-process dedup registry — except that a running
+    intent with an expired lease proves its in-process holder is wedged, so
+    the stale holder is evicted and the re-drive proceeds.  Never raises;
+    every team/meeting failure is isolated into ``skipped``.
     """
 
     summary: dict[str, Any] = {
@@ -483,6 +713,15 @@ def _recover_one_meeting(
         return "skipped"
     from core.web.services.team_workflow import meeting_runtime
 
+    if status == STATUS_RUNNING and lease_expired:
+        # An expired lease proves the in-process holder (if any) stopped
+        # progressing past its heartbeat window: a live, healthy driver
+        # never lets its lease lapse.  Evict the stale dedup holder so the
+        # re-drive is not silently swallowed by "already_scheduled" — this
+        # is the same-boot exit for a wedged driver thread.
+        meeting_runtime.force_release_wedged_discussion_job(
+            team_id, meeting_round_id
+        )
     result = meeting_runtime.schedule_meeting_discussion(team_id, meeting_round_id)
     return "rescheduled" if str(result.get("status") or "") == "scheduled" else "skipped"
 

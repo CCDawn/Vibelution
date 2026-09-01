@@ -28,6 +28,10 @@ class RemediationKind(str, Enum):
     VIEW_DIAGNOSTICS = "view_diagnostics"
     RESOLVE_HUMAN = "resolve_human"
     REBIND_AGENT = "rebind_agent"
+    # Operator raises this run's own budget ceiling (safety limits only
+    # widen, never the global default) through the existing extend_budget
+    # command; the blocked run keeps going instead of being discarded.
+    EXTEND_BUDGET = "extend_budget"
 
 
 @dataclass(frozen=True, slots=True)

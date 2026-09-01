@@ -465,6 +465,11 @@ def evaluate_common(
                 "预算安全上限",
                 f"预算无法容纳一次新尝试（{budget_reason}）",
                 category="budget",
+                # In-run exit (T2): the operator can raise this run's own
+                # ceiling through the existing extend_budget command; the
+                # 412 carries the remediation so the UI can offer it.
+                remediation_kind=RemediationKind.EXTEND_BUDGET,
+                remediation_label="上调本 run 预算上限",
             )
         )
 

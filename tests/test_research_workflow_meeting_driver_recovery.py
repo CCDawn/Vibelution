@@ -141,7 +141,9 @@ class _DeferredExecutor:
         self.status_at_submit: list[str | None] = []
 
     def submit(self, callback, *args):
-        intent = meeting_driver_work.latest_intent(*args)
+        # The runner signature is (teamId, meetingRoundId, jobToken); the
+        # durable intent is keyed by the first two.
+        intent = meeting_driver_work.latest_intent(args[0], args[1])
         self.status_at_submit.append(
             str(intent.get("status") or "") if intent else None
         )
@@ -1107,3 +1109,261 @@ def test_digest_intent_lease_clamps_to_deadline_and_inherits_identity(
         ]
         == "failed"
     )
+
+
+def test_wedged_driver_heartbeat_fences_attempt_and_redrives_in_run(
+    tmp_path, monkeypatch
+):
+    """T1: a driver wedged inside an unbounded blocking call loses its lease.
+
+    The heartbeat is progress-gated: once the driver stops advancing its
+    progress stamp past one maximal bounded step, the heartbeat stops
+    renewing, fences the attempt as failed, and re-drives the meeting
+    in-run.  The wedged attempt is superseded at its next boundary and can
+    neither release the replacement's dedup registration nor clobber the
+    replacement's terminal intent.
+    """
+    _isolate(tmp_path, monkeypatch)
+    team_id, agent_ids = _team(tmp_path, monkeypatch)
+    meeting = _create_open_meeting(team_id, agent_ids, "meeting-wedged-driver")
+    wedged_view = {
+        **meeting,
+        "linkedChatRoomId": "room-wedged",
+        "chatRoomRoundIds": ["round-wedged"],
+    }
+    _ready_to_drive(monkeypatch, wedged_view)
+
+    release_first = threading.Event()
+    first_entered = threading.Event()
+    calls: list[tuple[str, str]] = []
+
+    def wedged_runner(team_id_arg, meeting_round_id_arg):
+        calls.append((team_id_arg, meeting_round_id_arg))
+        if len(calls) == 1:
+            first_entered.set()
+            release_first.wait(timeout=30.0)
+        return {"stopReason": "converged"}
+
+    monkeypatch.setattr(meeting_runtime, "run_meeting_discussion", wedged_runner)
+
+    class _ThreadExecutor:
+        def __init__(self):
+            self.threads: list[threading.Thread] = []
+
+        def submit(self, callback, *args):
+            thread = threading.Thread(target=callback, args=args, daemon=True)
+            thread.start()
+            self.threads.append(thread)
+            return object()
+
+    executor = _ThreadExecutor()
+    monkeypatch.setattr(meeting_runtime, "_MEETING_DISCUSSION_EXECUTOR", executor)
+    monkeypatch.setattr(meeting_driver_work, "HEARTBEAT_INTERVAL_MS", 20)
+    monkeypatch.setattr(meeting_driver_work, "discussion_step_window_ms", lambda: 150)
+
+    scheduled = meeting_runtime.schedule_meeting_discussion(
+        team_id, meeting["meetingRoundId"]
+    )
+    assert scheduled["status"] == "scheduled"
+    assert first_entered.wait(timeout=5.0)
+
+    # The re-drive runs to completion while the first attempt stays wedged.
+    deadline = time.monotonic() + 10.0
+    latest = None
+    while time.monotonic() < deadline:
+        latest = meeting_driver_work.latest_intent(team_id, meeting["meetingRoundId"])
+        if str(latest.get("status") or "") == "completed":
+            break
+        time.sleep(0.02)
+    assert latest is not None and latest["status"] == "completed"
+    assert latest["attemptCount"] == 2
+    assert len(calls) >= 2
+
+    trail = meeting_driver_work._read_records(
+        meeting_driver_work.work_path(team_id)
+    )
+    assert any(
+        str(item.get("status") or "") == "failed"
+        and item.get("lastProblem") == meeting_driver_work.WEDGED_DRIVER_PROBLEM
+        for item in trail
+    )
+
+    # The superseded attempt unwinds without touching the replacement.
+    release_first.set()
+    for thread in executor.threads:
+        thread.join(timeout=5.0)
+    final = meeting_driver_work.latest_intent(team_id, meeting["meetingRoundId"])
+    assert final["status"] == "completed"
+    assert final["attemptCount"] == 2
+    key = (team_id, meeting["meetingRoundId"])
+    with meeting_runtime._MEETING_DISCUSSION_JOBS_LOCK:
+        assert key not in meeting_runtime._MEETING_DISCUSSION_JOBS
+        assert key not in meeting_runtime._MEETING_DISCUSSION_SESSIONS
+
+
+def test_sweep_redrives_expired_lease_despite_held_dedup_job(tmp_path, monkeypatch):
+    """T1: an expired lease proves the same-boot dedup holder is wedged.
+
+    The startup sweep evicts the stale holder and re-drives; a live driver
+    with a fresh lease keeps its dedup registration untouched.
+    """
+    _isolate(tmp_path, monkeypatch)
+    team_id, agent_ids = _team(tmp_path, monkeypatch)
+    wedged = _create_open_meeting(team_id, agent_ids, "meeting-sweep-wedged")
+    healthy = _create_open_meeting(team_id, agent_ids, "meeting-sweep-healthy")
+
+    wedged_view = {
+        **wedged,
+        "linkedChatRoomId": "room-sweep-wedged",
+        "chatRoomRoundIds": ["round-sweep-wedged"],
+    }
+    healthy_view = {
+        **healthy,
+        "linkedChatRoomId": "room-sweep-healthy",
+        "chatRoomRoundIds": ["round-sweep-healthy"],
+    }
+    _ready_to_drive(monkeypatch, wedged_view)
+
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(meeting_runtime, "run_meeting_discussion", _recorder(calls))
+    executor = _InlineExecutor()
+    monkeypatch.setattr(meeting_runtime, "_MEETING_DISCUSSION_EXECUTOR", executor)
+
+    # Simulate a same-boot wedged driver: the dedup registry is held and the
+    # running intent's lease has expired (a live driver never lets that
+    # happen — the progress-gated heartbeat keeps renewing it).
+    wedged_key = (team_id, wedged["meetingRoundId"])
+    healthy_key = (team_id, healthy["meetingRoundId"])
+    with meeting_runtime._MEETING_DISCUSSION_JOBS_LOCK:
+        meeting_runtime._MEETING_DISCUSSION_JOBS[wedged_key] = "wedged-token"
+        meeting_runtime._MEETING_DISCUSSION_SESSIONS[wedged_key] = "wedged-token"
+        meeting_runtime._MEETING_DISCUSSION_JOBS[healthy_key] = "healthy-token"
+        meeting_runtime._MEETING_DISCUSSION_SESSIONS[healthy_key] = "healthy-token"
+    meeting_driver_work.record_intent(
+        team_id, wedged["meetingRoundId"], status="pending"
+    )
+    running = meeting_driver_work.record_intent(
+        team_id, wedged["meetingRoundId"], status="running"
+    )
+    _append_intent(
+        team_id,
+        wedged["meetingRoundId"],
+        workId="work-staged-wedged-expired",
+        leaseExpiresAtMs=int(running["createdAtMs"]) - 1000,
+    )
+    meeting_driver_work.record_intent(
+        team_id, healthy["meetingRoundId"], status="running"
+    )
+
+    summary = meeting_driver_work.recover_challenge_meeting_drivers()
+
+    assert summary["rescheduled"] == 1
+    assert summary["skipped"] >= 1
+    assert calls == [(team_id, wedged["meetingRoundId"])]
+    redriven = meeting_driver_work.latest_intent(
+        team_id, wedged["meetingRoundId"]
+    )
+    assert redriven["status"] == "completed"
+    # The expired-lease holder was evicted, the fresh-lease holder was not.
+    with meeting_runtime._MEETING_DISCUSSION_JOBS_LOCK:
+        assert meeting_runtime._MEETING_DISCUSSION_JOBS.get(wedged_key) is None
+        assert (
+            meeting_runtime._MEETING_DISCUSSION_JOBS.get(healthy_key)
+            == "healthy-token"
+        )
+
+
+def test_discussion_intent_and_heartbeat_clamp_to_meeting_deadline(
+    tmp_path, monkeypatch
+):
+    """T1: the discussion RUNNING lease and every heartbeat renewal are
+    clamped to the governed meeting deadline like the digest lease."""
+    _isolate(tmp_path, monkeypatch)
+    team_id = "team-clamp"
+    round_id = "meeting-clamp"
+    now_ms = int(time.time() * 1000)
+    tight_deadline = now_ms + 5_000
+
+    running = meeting_driver_work.record_intent(
+        team_id, round_id, status="running", deadline_at_ms=tight_deadline
+    )
+    assert running["leaseExpiresAtMs"] == tight_deadline
+
+    refreshed = meeting_driver_work.refresh_intent_lease(team_id, round_id)
+    assert refreshed is not None
+    assert refreshed["heartbeat"] is True
+    assert refreshed["leaseExpiresAtMs"] == tight_deadline
+    assert refreshed["deadlineAtMs"] == tight_deadline
+
+    # A generous deadline keeps the full discussion lease.
+    roomy = meeting_driver_work.record_intent(
+        team_id,
+        "meeting-clamp-roomy",
+        status="running",
+        deadline_at_ms=now_ms + 3_600_000,
+    )
+    assert roomy["leaseExpiresAtMs"] == (
+        roomy["createdAtMs"] + meeting_driver_work.DEFAULT_INTENT_LEASE_MS
+    )
+
+
+def test_lease_and_step_window_track_effective_llm_timeout(
+    tmp_path, monkeypatch
+):
+    """T4: digest lease and the discussion stale-progress window derive from
+    the effective review-call timeout (>= historical 480s floor), so a
+    configured 600s timeout can never be re-driven as stale mid-call."""
+    _isolate(tmp_path, monkeypatch)
+    team_id = "team-derived-lease"
+    digest = meeting_driver_work.ACTION_RUN_DIGEST
+
+    monkeypatch.setattr(
+        meeting_driver_work, "effective_review_call_timeout_seconds", lambda: 600.0
+    )
+    slow = meeting_driver_work.record_intent(
+        team_id,
+        "meeting-derived-slow",
+        status="running",
+        action_kind=digest,
+        deadline_at_ms=int(time.time() * 1000) + 3_600_000,
+    )
+    assert (
+        slow["leaseExpiresAtMs"] - slow["createdAtMs"]
+        >= 600_000 + meeting_driver_work.DIGEST_LEASE_MARGIN_MS
+    )
+    assert meeting_driver_work.discussion_step_window_ms() == (
+        600_000 * meeting_driver_work.DISCUSSION_STEP_ALLOWANCE_CALLS
+        + meeting_driver_work.DISCUSSION_STEP_MARGIN_MS
+    )
+
+    # A short effective timeout never under-covers the historical floor.
+    monkeypatch.setattr(
+        meeting_driver_work, "effective_review_call_timeout_seconds", lambda: 100.0
+    )
+    floored = meeting_driver_work.record_intent(
+        team_id,
+        "meeting-derived-floored",
+        status="running",
+        action_kind=digest,
+        deadline_at_ms=int(time.time() * 1000) + 3_600_000,
+    )
+    assert (
+        floored["leaseExpiresAtMs"] - floored["createdAtMs"]
+        == meeting_driver_work.DIGEST_INTENT_LEASE_MS
+    )
+
+    # The discussion heartbeat lease itself stays the short crash window.
+    discussion = meeting_driver_work.record_intent(
+        team_id, "meeting-derived-discussion", status="running"
+    )
+    assert discussion["leaseExpiresAtMs"] == (
+        discussion["createdAtMs"] + meeting_driver_work.DEFAULT_INTENT_LEASE_MS
+    )
+
+
+def test_effective_review_timeout_env_override_is_honored(
+    tmp_path, monkeypatch
+):
+    _isolate(tmp_path, monkeypatch)
+    monkeypatch.setenv("VIBELUTION_REVIEW_LLM_CALL_TIMEOUT_SECONDS", "550")
+    assert meeting_driver_work.effective_review_call_timeout_seconds() == 550.0

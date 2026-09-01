@@ -90,7 +90,13 @@ def _policy_limits(
         or policy.get("wallClockSeconds")
         or DEFAULT_WALL_CLOCK_SECONDS
     )
-    retries = int(policy.get("maxRetries") or DEFAULT_MAX_RETRIES)
+    # Retry vocabulary is dual-read: run snapshots historically carry
+    # ``autoRetries`` while newer surfaces (and extend_budget) write
+    # ``maxRetries``.  Reading only one key silently dropped the other and
+    # fell back to the default (T3).
+    retries = int(
+        policy.get("maxRetries") or policy.get("autoRetries") or DEFAULT_MAX_RETRIES
+    )
 
     # ``safety_limits_json`` is the operator-owned, auditable extension delta
     # for an immutable run snapshot.  It may only widen capacity; it never
@@ -105,6 +111,8 @@ def _policy_limits(
     tool_override = _positive_policy_int(override.get("toolCalls"))
     seconds_override = _positive_policy_int(override.get("wallClockSeconds"))
     retries_override = _positive_policy_int(override.get("maxRetries"))
+    if retries_override is None:
+        retries_override = _positive_policy_int(override.get("autoRetries"))
     if stage_token_override is not None:
         tokens = max(tokens, stage_token_override)
     if tool_override is not None:

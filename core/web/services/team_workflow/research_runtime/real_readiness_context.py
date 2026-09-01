@@ -406,16 +406,40 @@ class RealDomainReadinessContext:
         tool_calls = _first_positive_limit(stage_budgets, "toolCalls") or int(
             budget_policy.get("toolCalls") or 300
         )
+        max_seconds = int(budget_policy.get("wallClockSeconds") or 21_600)
         consumed = _budget_consumed_from_ledger(self._store, run_id)
+        # The operator-owned safety-limits extension (extend_budget) is part
+        # of the effective budget window, exactly as the admission authority
+        # (budget_authority_adapter._policy_limits) applies it: only-widen,
+        # per-run, never the frozen contract or a global default.  Without
+        # this mirror, a mid-run budget exhaustion would keep failing the
+        # readiness gate (and retry/start with 412) even after the operator
+        # raised the ceiling — leaving run abandonment as the only exit.
+        override = _safety_limits_override(self._run(run_id))
+        stage_token_override = _max_positive_mapping_int(
+            override.get("stageTokens") if isinstance(override, Mapping) else None
+        )
+        if stage_token_override is not None:
+            tokens = max(tokens, stage_token_override)
+        tool_override = _positive_override_int(override.get("toolCalls"))
+        if tool_override is not None:
+            tool_calls = max(tool_calls, tool_override)
+        seconds_override = _positive_override_int(override.get("wallClockSeconds"))
+        if seconds_override is not None:
+            max_seconds = max(max_seconds, seconds_override)
         return BudgetLimitsSnapshot(
             policy_hash=_policy_hash(budget_policy),
             stage_tokens_limit=tokens,
             stage_tokens_consumed=int(consumed.get("tokens") or 0),
             max_tool_calls=tool_calls,
             tool_calls_consumed=int(consumed.get("toolCalls") or 0),
-            max_seconds=int(budget_policy.get("wallClockSeconds") or 21_600),
+            max_seconds=max_seconds,
             seconds_consumed=int(consumed.get("seconds") or 0),
-            auto_retries=int(budget_policy.get("autoRetries") or 2),
+            auto_retries=int(
+                budget_policy.get("autoRetries")
+                or budget_policy.get("maxRetries")
+                or 2
+            ),
             retries_consumed=int(consumed.get("retries") or 0),
         )
 
@@ -667,6 +691,38 @@ def _first_positive_limit(stage_budgets: Mapping[str, Any], key: str) -> int | N
         if isinstance(limits, Mapping) and int(limits.get(key) or 0) > 0:
             return int(limits[key])
     return None
+
+
+def _safety_limits_override(run: Any) -> dict[str, Any]:
+    """Decode the run's operator-owned safety-limits extension (tolerant)."""
+
+    raw = getattr(run, "safety_limits_json", None) if run is not None else None
+    if not raw:
+        return {}
+    try:
+        decoded = json.loads(raw)
+    except (TypeError, ValueError):
+        return {}
+    return decoded if isinstance(decoded, dict) else {}
+
+
+def _positive_override_int(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return None
+    return int(value)
+
+
+def _max_positive_mapping_int(value: object) -> int | None:
+    """Largest positive int in a stage->limit mapping (adapter semantics)."""
+
+    if not isinstance(value, Mapping):
+        return None
+    widest: int | None = None
+    for item in value.values():
+        normalized = _positive_override_int(item)
+        if normalized is not None and (widest is None or normalized > widest):
+            widest = normalized
+    return widest
 
 
 def _policy_hash(budget_policy: Mapping[str, Any]) -> str:

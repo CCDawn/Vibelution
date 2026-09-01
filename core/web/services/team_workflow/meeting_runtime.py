@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import threading
 import time
+import uuid
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
@@ -154,7 +155,15 @@ _MEETING_DISCUSSION_EXECUTOR = ThreadPoolExecutor(
     thread_name_prefix="hypothesis-meeting",
 )
 _MEETING_DISCUSSION_JOBS_LOCK = threading.Lock()
-_MEETING_DISCUSSION_JOBS: set[tuple[str, str]] = set()
+# Dedup registry for live discussion drivers: (teamId, meetingRoundId) ->
+# scheduling session token.  A driver's cleanup only releases its own token,
+# so a wedged attempt superseded by a lease-lapse re-drive can never release
+# (or be confused with) the replacement driver's registration.
+_MEETING_DISCUSSION_JOBS: dict[tuple[str, str], str] = {}
+# Session ownership per meeting, mirroring _MEETING_DISCUSSION_JOBS.  A
+# superseded (wedged) driver detects the ownership change at its next step
+# boundary and aborts without writing terminal state over the re-drive.
+_MEETING_DISCUSSION_SESSIONS: dict[tuple[str, str], str] = {}
 _MEETING_DIGEST_JOBS_LOCK = threading.Lock()
 _MEETING_DIGEST_JOBS: set[tuple[str, str]] = set()
 _SUMMARY_DRAFT_LOCKS_GUARD = threading.Lock()
@@ -1849,6 +1858,14 @@ def run_meeting_discussion(
     budget from the meeting contract (default 3).
     """
     _DISCUSSION_DRIVER.active = True
+    # T1: this thread owns (or observes) the meeting's current driver session.
+    # The heartbeat gates lease renewal on the progress stamps written at each
+    # step boundary below, and a superseded attempt aborts at the next
+    # boundary instead of racing the lease-lapse re-drive.
+    _DISCUSSION_DRIVER.session = _current_discussion_session(
+        team_id, meeting_round_id
+    )
+    meeting_driver_work.mark_driver_progress(team_id, meeting_round_id)
     try:
         return _run_meeting_discussion_impl(
             team_id,
@@ -1858,6 +1875,29 @@ def run_meeting_discussion(
         )
     finally:
         _DISCUSSION_DRIVER.active = False
+        _DISCUSSION_DRIVER.session = ""
+
+
+def _current_discussion_session(team_id: str, meeting_round_id: str) -> str:
+    with _MEETING_DISCUSSION_JOBS_LOCK:
+        return _MEETING_DISCUSSION_SESSIONS.get((team_id, meeting_round_id), "")
+
+
+def _discussion_step_boundary(team_id: str, meeting_round_id: str) -> None:
+    """One driver step boundary: stamp progress, abort if superseded.
+
+    Called between bounded steps (discussion rounds).  The progress stamp is
+    what keeps the lease heartbeat renewing; the ownership check is what
+    stops a wedged attempt that eventually unwinds from racing the
+    replacement driver.
+    """
+
+    meeting_driver_work.mark_driver_progress(team_id, meeting_round_id)
+    session = getattr(_DISCUSSION_DRIVER, "session", "")
+    if session and not _owns_discussion_session(team_id, meeting_round_id, session):
+        raise _DiscussionSupersededError(
+            "discussion driver superseded by a lease-lapse re-drive"
+        )
 
 
 def _record_meeting_discussion_driver_event(
@@ -1911,6 +1951,7 @@ def _record_driver_work_state(
     *,
     status: str,
     error: Exception | None = None,
+    deadline_at_ms: int = 0,
 ) -> None:
     """Persist the durable driver intent; storage outages never alter the run."""
 
@@ -1919,14 +1960,107 @@ def _record_driver_work_state(
             team_id,
             meeting_round_id,
             status=status,
+            deadline_at_ms=deadline_at_ms,
             last_problem=None if error is None else meeting_driver_work.format_problem(error),
         )
     except Exception:  # noqa: BLE001 - durable intent accelerates recovery only
         return
 
 
+class _DiscussionSupersededError(RuntimeError):
+    """Raised when a wedged driver's replacement already owns the meeting."""
+
+
+def _claim_discussion_session(team_id: str, meeting_round_id: str, token: str) -> None:
+    with _MEETING_DISCUSSION_JOBS_LOCK:
+        _MEETING_DISCUSSION_SESSIONS[(team_id, meeting_round_id)] = token
+
+
+def _owns_discussion_session(team_id: str, meeting_round_id: str, token: str) -> bool:
+    with _MEETING_DISCUSSION_JOBS_LOCK:
+        return _MEETING_DISCUSSION_SESSIONS.get((team_id, meeting_round_id)) == token
+
+
+def _release_discussion_session(
+    team_id: str, meeting_round_id: str, token: str
+) -> None:
+    """Release the dedup registry only if this attempt still owns it."""
+
+    key = (team_id, meeting_round_id)
+    with _MEETING_DISCUSSION_JOBS_LOCK:
+        if _MEETING_DISCUSSION_JOBS.get(key) == token:
+            _MEETING_DISCUSSION_JOBS.pop(key, None)
+        if _MEETING_DISCUSSION_SESSIONS.get(key) == token:
+            _MEETING_DISCUSSION_SESSIONS.pop(key, None)
+
+
+def force_release_wedged_discussion_job(team_id: str, meeting_round_id: str) -> None:
+    """Evict the dedup holder of a meeting whose lease has expired.
+
+    Recovery-only entry (startup sweep / heartbeat lapse): an expired lease
+    proves the holder stopped progressing, so the sweep must not be silently
+    swallowed by "already_scheduled".  A live, healthy driver never lets its
+    lease lapse because its progress-gated heartbeat keeps renewing it.
+    """
+
+    key = (str(team_id or "").strip(), str(meeting_round_id or "").strip())
+    with _MEETING_DISCUSSION_JOBS_LOCK:
+        _MEETING_DISCUSSION_JOBS.pop(key, None)
+        _MEETING_DISCUSSION_SESSIONS.pop(key, None)
+
+
+def _check_discussion_supersession(team_id: str, meeting_round_id: str, token: str) -> None:
+    """Abort a superseded driver at its next step boundary."""
+
+    if token and not _owns_discussion_session(team_id, meeting_round_id, token):
+        raise _DiscussionSupersededError(
+            "discussion driver superseded by a lease-lapse re-drive"
+        )
+
+
+def _handle_wedged_discussion(
+    team_id: str,
+    meeting_round_id: str,
+    job_token: str,
+) -> None:
+    """Heartbeat lapse callback: evict the wedged holder and re-drive once.
+
+    The shared auto-reschedule cap bounds the loop: a meeting that wedges at
+    the cap stays open with an auditable ``failed`` intent for the ordinary
+    operator retry instead of re-driving itself forever.
+    """
+
+    try:
+        latest = meeting_driver_work.latest_intent(team_id, meeting_round_id)
+    except Exception:  # noqa: BLE001 - recovery-only sugar
+        return
+    if str((latest or {}).get("status") or "") != meeting_driver_work.STATUS_FAILED:
+        return
+    if (
+        meeting_driver_work._attempt_count(latest)
+        >= meeting_driver_work.MAX_AUTO_RESCHEDULE_ATTEMPTS
+    ):
+        _record_meeting_discussion_driver_event(
+            team_id,
+            meeting_round_id,
+            "meeting_discussion.driver.wedge_cap_reached",
+            outcome="skipped",
+            fields={"attemptCount": meeting_driver_work._attempt_count(latest)},
+        )
+        return
+    _release_discussion_session(team_id, meeting_round_id, job_token)
+    try:
+        schedule_meeting_discussion(team_id, meeting_round_id)
+    except Exception:  # noqa: BLE001 - re-drive failures stay auditable
+        return
+
+
 def _digest_recovery_deadline_ms(meeting_round: Mapping[str, Any]) -> int:
-    """Earliest governed deadline bounding any digest re-drive for this meeting."""
+    """Earliest governed deadline bounding any re-drive for this meeting.
+
+    Used for both digest leases and discussion leases: a re-drive must never
+    outlive the meeting's governed deadline.
+    """
 
     candidates = [
         value
@@ -1969,37 +2103,79 @@ def _record_digest_work_state(
         return
 
 
-def _run_scheduled_meeting_discussion(team_id: str, meeting_round_id: str) -> None:
+def _run_scheduled_meeting_discussion(
+    team_id: str, meeting_round_id: str, job_token: str = ""
+) -> None:
     key = (team_id, meeting_round_id)
     heartbeat_stop = threading.Event()
     heartbeat_thread: threading.Thread | None = None
     try:
+        governed_deadline_ms = 0
+        try:
+            meeting_round = meeting_rounds.get_meeting_round(
+                team_id, meeting_round_id
+            )["meetingRound"]
+            governed_deadline_ms = _digest_recovery_deadline_ms(meeting_round)
+        except Exception:  # noqa: BLE001 - deadline is an optimization, not a gate
+            governed_deadline_ms = 0
         _record_driver_work_state(
-            team_id, meeting_round_id, status=meeting_driver_work.STATUS_RUNNING
+            team_id,
+            meeting_round_id,
+            status=meeting_driver_work.STATUS_RUNNING,
+            deadline_at_ms=governed_deadline_ms,
         )
-        # Keep the durable lease fresh while the discussion runs; if this
-        # driver wedges or the process dies, the lease lapses and the
-        # recovery sweep re-drives the meeting.
+        # Progress-gated heartbeat (T1): renewal requires this driver to keep
+        # advancing its progress stamp.  If the driver thread wedges inside an
+        # unbounded blocking call, the stamp goes stale, the heartbeat stops
+        # renewing, fences the attempt as failed, and re-drives the meeting
+        # through _handle_wedged_discussion — a same-boot wedge has a real
+        # in-run exit instead of a permanently renewed lease.
+        meeting_driver_work.mark_driver_progress(team_id, meeting_round_id)
         heartbeat_thread = meeting_driver_work.start_lease_heartbeat(
-            team_id, meeting_round_id, stop_event=heartbeat_stop
+            team_id,
+            meeting_round_id,
+            stop_event=heartbeat_stop,
+            interval_ms=meeting_driver_work.HEARTBEAT_INTERVAL_MS,
+            progress_window_ms=meeting_driver_work.discussion_step_window_ms(),
+            on_lapse=lambda: _handle_wedged_discussion(
+                team_id, meeting_round_id, job_token
+            ),
         )
         result = run_meeting_discussion(team_id, meeting_round_id)
-        _record_driver_work_state(
-            team_id, meeting_round_id, status=meeting_driver_work.STATUS_COMPLETED
-        )
+        if _owns_discussion_session(team_id, meeting_round_id, job_token):
+            _record_driver_work_state(
+                team_id, meeting_round_id, status=meeting_driver_work.STATUS_COMPLETED
+            )
+            _record_meeting_discussion_driver_event(
+                team_id,
+                meeting_round_id,
+                "meeting_discussion.driver.completed",
+                outcome=str(result.get("stopReason") or "completed"),
+            )
+        else:
+            _record_meeting_discussion_driver_event(
+                team_id,
+                meeting_round_id,
+                "meeting_discussion.driver.superseded",
+                outcome="superseded",
+            )
+    except _DiscussionSupersededError:
+        # A lease-lapse re-drive owns this meeting now; the wedged attempt
+        # must not write terminal state over the replacement's running intent.
         _record_meeting_discussion_driver_event(
             team_id,
             meeting_round_id,
-            "meeting_discussion.driver.completed",
-            outcome=str(result.get("stopReason") or "completed"),
+            "meeting_discussion.driver.superseded",
+            outcome="superseded",
         )
     except Exception as exc:  # noqa: BLE001 - background failures need durable evidence
-        _record_driver_work_state(
-            team_id,
-            meeting_round_id,
-            status=meeting_driver_work.STATUS_FAILED,
-            error=exc,
-        )
+        if _owns_discussion_session(team_id, meeting_round_id, job_token):
+            _record_driver_work_state(
+                team_id,
+                meeting_round_id,
+                status=meeting_driver_work.STATUS_FAILED,
+                error=exc,
+            )
         _record_meeting_discussion_driver_event(
             team_id,
             meeting_round_id,
@@ -2011,8 +2187,7 @@ def _run_scheduled_meeting_discussion(team_id: str, meeting_round_id: str) -> No
         heartbeat_stop.set()
         if heartbeat_thread is not None:
             heartbeat_thread.join(timeout=2.0)
-        with _MEETING_DISCUSSION_JOBS_LOCK:
-            _MEETING_DISCUSSION_JOBS.discard(key)
+        _release_discussion_session(team_id, meeting_round_id, job_token)
 
 
 def schedule_meeting_discussion(team_id: str, meeting_round_id: str) -> dict[str, Any]:
@@ -2062,6 +2237,7 @@ def schedule_meeting_discussion(team_id: str, meeting_round_id: str) -> dict[str
             "meetingRoundId": normalized_round_id,
         }
     key = (normalized_team_id, normalized_round_id)
+    job_token = uuid.uuid4().hex
     with _MEETING_DISCUSSION_JOBS_LOCK:
         if key in _MEETING_DISCUSSION_JOBS:
             return {
@@ -2069,23 +2245,27 @@ def schedule_meeting_discussion(team_id: str, meeting_round_id: str) -> dict[str
                 "teamId": normalized_team_id,
                 "meetingRoundId": normalized_round_id,
             }
-        _MEETING_DISCUSSION_JOBS.add(key)
+        _MEETING_DISCUSSION_JOBS[key] = job_token
+        _MEETING_DISCUSSION_SESSIONS[key] = job_token
     # Persist the intent before the executor accepts the job: a backend
     # restart between here and completion must leave a recoverable record.
+    # The governed deadline rides along so the running lease is clamped to
+    # the meeting deadline exactly like the digest lease.
     _record_driver_work_state(
         normalized_team_id,
         normalized_round_id,
         status=meeting_driver_work.STATUS_PENDING,
+        deadline_at_ms=_digest_recovery_deadline_ms(meeting_round),
     )
     try:
         _MEETING_DISCUSSION_EXECUTOR.submit(
             _run_scheduled_meeting_discussion,
             normalized_team_id,
             normalized_round_id,
+            job_token,
         )
     except Exception as exc:
-        with _MEETING_DISCUSSION_JOBS_LOCK:
-            _MEETING_DISCUSSION_JOBS.discard(key)
+        _release_discussion_session(normalized_team_id, normalized_round_id, job_token)
         _record_driver_work_state(
             normalized_team_id,
             normalized_round_id,
@@ -2333,6 +2513,9 @@ def _run_meeting_discussion_impl(
     )
     stop_reason = ""
     while len(bound_round_ids) < budget:
+        # T1 step boundary: fresh progress stamp for the lease heartbeat, and
+        # an abort point for an attempt superseded by a lease-lapse re-drive.
+        _discussion_step_boundary(normalized_team_id, normalized_round_id)
         parent_run_stop_reason = workflow_run_stop_reason(receipt_authority)
         if parent_run_stop_reason:
             stop_reason = parent_run_stop_reason

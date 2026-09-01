@@ -147,6 +147,40 @@ def test_budget_limit_blocks() -> None:
     assert any(b.code == "budget_safety_limit_reached" for b in result.blockers)
 
 
+def test_budget_limit_blocker_offers_extend_budget_remediation() -> None:
+    """T2: the 412 payload must tell the operator how to exit a mid-run
+    budget exhaustion instead of leaving run abandonment as the only exit."""
+    service = _service()
+    context = FakeDomainContext()
+    context.budget = type(
+        "Budget",
+        (),
+        {
+            "policy_hash": "p-1",
+            "stage_tokens_limit": 100,
+            "stage_tokens_consumed": 90,
+            "max_tool_calls": 300,
+            "tool_calls_consumed": 0,
+            "max_seconds": 21600,
+            "seconds_consumed": 0,
+            "auto_retries": 2,
+            "retries_consumed": 0,
+            "estimated_next_attempt_tokens": 20,
+            "available": lambda self: (False, "stage_tokens_limit_reached"),
+        },
+    )()
+    result = _evaluate(service, context)
+    blocker = next(
+        b for b in result.blockers if b.code == "budget_safety_limit_reached"
+    )
+    assert blocker.remediation is not None
+    assert blocker.remediation.kind.value == "extend_budget"
+    assert blocker.remediation.label == "上调本 run 预算上限"
+    payload = blocker.to_dict()
+    assert payload["remediation"]["kind"] == "extend_budget"
+    assert payload["remediation"]["label"] == "上调本 run 预算上限"
+
+
 def test_agent_not_configured_blocks_agent_node() -> None:
     service = _service()
     context = FakeDomainContext()

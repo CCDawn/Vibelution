@@ -1791,7 +1791,7 @@ def test_background_discussion_scheduler_deduplicates_one_ready_meeting(
     )
     key = (team_id, meeting_id)
     with meeting_runtime._MEETING_DISCUSSION_JOBS_LOCK:
-        meeting_runtime._MEETING_DISCUSSION_JOBS.discard(key)
+        meeting_runtime._MEETING_DISCUSSION_JOBS.pop(key, None)
     try:
         first = meeting_runtime.schedule_meeting_discussion(team_id, meeting_id)
         duplicate = meeting_runtime.schedule_meeting_discussion(team_id, meeting_id)
@@ -1806,7 +1806,7 @@ def test_background_discussion_scheduler_deduplicates_one_ready_meeting(
             assert key not in meeting_runtime._MEETING_DISCUSSION_JOBS
     finally:
         with meeting_runtime._MEETING_DISCUSSION_JOBS_LOCK:
-            meeting_runtime._MEETING_DISCUSSION_JOBS.discard(key)
+            meeting_runtime._MEETING_DISCUSSION_JOBS.pop(key, None)
 
 
 def test_auto_drive_hook_queues_discussion_instead_of_drafting(monkeypatch):
