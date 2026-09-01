@@ -2,7 +2,7 @@
 
 > 文档 ID：`CC-PARALLEL-CONCURRENCY-10P-20260902`
 >
-> 状态：`USER-REQUESTED DIRECTION / ACTIVE PLAN / IMPLEMENTATION NOT STARTED`
+> 状态：`USER-REQUESTED / ACTIVE PLAN / BATCH 1+2 IMPLEMENTED 2026-09-02（A1/A2/B1/B2/B3/B4/B5/C1/C2/C6 已合入 main；C3–C5/C7/D1/D2 未开始；D2 通过前 10 并发不算达成）`
 >
 > 权威路径：根 `main` 的 `docs/plans/2026-09-02-challenge-cup-10-parallel-concurrency-plan.md`
 >
@@ -236,3 +236,23 @@ LangGraph 官方明确 SqliteSaver 定位单进程/本地、多 worker 生产场
 ### 6.9 来源索引
 
 Temporal worker performance / activity timeouts / sticky execution（docs.temporal.io）；LangGraph checkpoints 官方参考 / Agent Server / Data Plane（docs.langchain.com）；Celery configuration + issue #2788；Azure DTF storage provider / singleton orchestrators / Service Bus locks & settlement（learn.microsoft.com）；Kleppmann《How to do distributed locking》+ Percolator (OSDI'10) + antirez Redlock 之争；Sidekiq Pro Reliability / Ent-Unique-Jobs wiki；Stripe idempotent requests API + blog；co-scientist arXiv:2502.18864；SakanaAI/AI-Scientist v1/v2 源码（launch_scientist.py 错峰、para_agent.py 工作池、token_tracker.py、backend_openai.py backoff_create）；LiteLLM Router / Virtual Keys 文档；pyrate-limiter、py-filelock、tenacity PyPI/ReadTheDocs；SQLite WAL 官方文档；arXiv API ToU、Crossref rate-limit 公告。
+
+## 7. 实施进度（2026-09-02 收口）
+
+| 任务 | 状态 | 合入提交 |
+| --- | --- | --- |
+| A1 搜索 circuit 并发闭环 | done | `5c572257c`（gate 序列入 `_WORKFLOW_LOCK`、账本 RLock、`failed` 终态+双保险解卡死；27 用例） |
+| A2 fan-in 前置查重 | done | `462336a61`（预读复用 + in-flight claim + claim 后 double-check；被拒方零 LLM 调用无幽灵 trace） |
+| B1 runtime 单例两道闸 | done | `40b3e1d27`（`_LIFECYCLE_LOCK` + `ProductionRuntimeBusyError` fail-closed；持久闸按裁决留 B3 批次后评估） |
+| B2 lease 心跳续租 | done | `40b3e1d27`（invoke 前 renew 探针 + lease/3 心跳 + `_GraphLeaseLost` 丢弃不碰账本；epoch 不动 schema 按裁决） |
+| B3 dispatch 并行化 | done | `3dc941896`（固定 N worker 默认 10 + maintenance 单线程；graph/adapter 并行、fork/receipt/delivery/event 保持串行；wake 改 Semaphore token；返工修复测试 wake 接线） |
+| B4 checkpoint 连接工厂 | done | `06cffdf09`（含 `SqliteSaver.from_conn_string` 隐式建连收口；WAL+busy_timeout=5000+NORMAL+64MiB；VerticalSliceRuntime 加 test-only 警告） |
+| B5 全局 LLM 总闸 | done | `263e16004`（BoundedSemaphore 默认 10 + acquire 超时 120s 快速失败 + 429 按 model 冷却 60s + per-run 上限 env 可配；接入点=`_invoke_llm_with_timeout`） |
+| C1 PROJECT_ROOT 传参化 | done | `e4e5516fa`（五处 swap 全删含 theme_discovery；ContextVar token 对称重置；缓存按路由根分区；遗留 research_service/chat_room 两处全局写待后续） |
+| C2 knowledge_base 锁 | done | `e51d2b24d`（RLock + PermissionError 退避；零新依赖裁决） |
+| C6 provider 限速 | done | `0e3a2a6c0`+`f811d41fc`（pyrate-limiter v4；arXiv 1/3s、Crossref 3/1s+mailto、OpenAlex 保守 5/1s；统一退避重试） |
+| C3/C4/C5/C7 | not started | — |
+| D1 并发测试矩阵 | 部分 | 各任务自带并发用例已随批合入；集中 marker/selector 未做 |
+| D2 10 并发端到端验收 | not started | main 上 8 文件整合回归 82 passed（2026-09-02），非 runtime-scene 验收 |
+
+已知非本计划引入的既有失败（均已 main 基线复现确认）：`test_research_workflow_runtime_factory.py` 2 例（definition registry 冷启动注册时序，对应审查 R 项 definition_registry TOCTOU）；`test_challenge_cup_reset_checkpoint_receipt_ports.py` 2 例（storage_durability `.json.lock` 与 receipt 扫描白名单矛盾）。两者建议独立任务修复。
