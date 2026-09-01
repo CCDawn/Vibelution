@@ -41,9 +41,18 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain('data-shell-group="brand"');
     expect(shellSource).toContain('data-shell-group="navigation"');
     expect(shellSource).toContain('data-shell-group="system-actions"');
-    expect(styles.nav).toContain("rounded-[var(--vui-radius-panel-soft)]");
-    expect(styles.nav).toMatch(/bg-vui-surface-toolbar|bg-\[var\(--vui-surface-toolbar\)\]/);
-    expect(styles.nav).toContain("shadow-[var(--vui-elevation-panel)]");
+    expect(shellSource).toContain('data-shell-group="tool-actions"');
+    // 方案A: the nav container is flattened — only the active tab keeps a pill.
+    expect(styles.nav).not.toContain("rounded-[var(--vui-radius-panel-soft)]");
+    expect(styles.nav).not.toMatch(/bg-vui-surface-toolbar|bg-\[var\(--vui-surface-toolbar\)\]/);
+    expect(styles.nav).not.toContain("shadow-[var(--vui-elevation-panel)]");
+    const navLayoutBlock = shellStyles.slice(
+      shellStyles.indexOf(":where(.vui-app-appshell).nav {"),
+      shellStyles.indexOf(":where(.vui-app-appshell).nav::-webkit-scrollbar"),
+    );
+    expect(navLayoutBlock).toContain("justify-self: start");
+    expect(shellStyles).toContain(":where(.vui-app-appshell).toolCluster {");
+    expect(shellStyles).toContain("gap: 14px;");
     expect(styles.topActions).not.toContain("rounded-[var(--vui-radius-panel-soft)]");
     expect(styles.topActions).not.toMatch(/bg-vui-surface-toolbar|bg-\[var\(--vui-surface-toolbar\)\]/);
     expect(styles.topActions).not.toContain("border");
@@ -155,7 +164,8 @@ describe("AppShell layout contract", () => {
 
   it("keeps the global shell top bar compact", () => {
     expect(styles.statusSummaryChip).toBeTypeOf("string");
-    expect(styles.statusSummaryCount).toBeTypeOf("string");
+    expect(styles.statusSummaryDot).toBeTypeOf("string");
+    expect(styles.statusSummaryLabel).toBeTypeOf("string");
     expect(styles.returnButton).toBeTypeOf("string");
     expect(statusGuideStyles.statusGuideGrid).toBeTypeOf("string");
     expect(statusGuideStyles.lifecycleProofMeta).toBeTypeOf("string");
@@ -179,11 +189,14 @@ describe("AppShell layout contract", () => {
     expect(styles.statusSummaryChip).not.toContain("vuiControlPillClass");
     expect(styles.statusSummaryChip).not.toContain("vuiStateSelectedRowClass");
     expect(styles.utilityTrigger).not.toContain("vuiControlQuietClass");
-    // Top bar status uses VStatusChip (not hand-rolled statusDot).
+    // Top bar summary is a bare tone dot + text; pill details live in the popover.
     expect(shellSource).toContain("VStatusChip");
     expect(shellSource).toContain("systemToneToStatus");
+    expect(shellSource).toContain("systemToneToDotClass");
+    expect(shellSource).toContain("styles.statusSummaryDot");
+    expect(shellSource).toContain("styles.statusSummaryLabel");
+    expect(shellSource).not.toContain("statusSummaryCount");
     expect(shellSource).not.toContain("styles.statusDot");
-    expect(styles.statusSummaryToneChip).toBeTypeOf("string");
     expect(styles.activeWorkToneChip).toBeTypeOf("string");
     expect(styles.statusBadgeValue).toContain("leading-none");
     expect(styles.statusBadgeValue).toContain("[font-size:var(--vui-font-xs)]");
@@ -219,7 +232,7 @@ describe("AppShell layout contract", () => {
       shellStyles.indexOf("@media (max-width: 1279px)"),
       shellStyles.indexOf("@media (max-width: 1180px)"),
     );
-    expect(compactDesktopBlock).toContain(":where(.vui-app-appshell).statusSummaryToneChip");
+    expect(compactDesktopBlock).toContain(":where(.vui-app-appshell).statusSummaryLabel");
     expect(compactDesktopBlock).not.toContain(":where(.vui-app-appshell).statusBadgeValue");
     expect(compactDesktopBlock).toContain("display: none");
 
@@ -227,7 +240,7 @@ describe("AppShell layout contract", () => {
       shellStyles.indexOf("@media (max-width: 1180px)"),
       shellStyles.indexOf("@media (max-width: 980px)"),
     );
-    expect(narrowDesktopBlock).toContain(":where(.vui-app-appshell).statusSummaryToneChip");
+    expect(narrowDesktopBlock).toContain(":where(.vui-app-appshell).statusSummaryLabel");
     expect(narrowDesktopBlock).not.toContain(":where(.vui-app-appshell).statusBadgeValue");
 
     const narrowTopBarBlock = shellStyles.slice(

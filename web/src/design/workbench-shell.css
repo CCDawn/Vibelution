@@ -158,6 +158,7 @@
 .vui-app-appshell.topBar .activeWorkChip,
 .vui-app-appshell.topBar .utilityCluster,
 .vui-app-appshell.topBar .statusCluster,
+.vui-app-appshell.topBar .toolCluster,
 .vui-app-appshell.topBar .statusSummaryChip {
   position: relative;
   z-index: 2;
@@ -220,9 +221,9 @@
 
 :where(.vui-app-appshell).nav {
   display: flex;
-  justify-self: center;
+  justify-self: start;
   flex-wrap: nowrap;
-  gap: 3px;
+  gap: 4px;
   max-width: 100%;
   overflow-x: auto;
   overscroll-behavior-x: contain;
@@ -286,6 +287,14 @@
   justify-self: end;
   align-items: center;
   justify-content: flex-end;
+  flex-wrap: nowrap;
+  gap: 14px;
+  max-width: 100%;
+}
+
+:where(.vui-app-appshell).toolCluster {
+  display: flex;
+  align-items: center;
   flex-wrap: nowrap;
   gap: 6px;
   max-width: 100%;
@@ -1112,19 +1121,23 @@
   font-weight: 600;
 }
 
-:where(.vui-app-appshell).statusSummaryCount {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+:where(.vui-app-appshell).statusSummaryDot {
+  display: block;
+  flex: 0 0 auto;
   align-self: center;
-  min-width: 18px;
-  height: 18px;
-  max-height: 18px;
-  padding: 0 5px;
-  border: 1px solid var(--border-soft);
+  width: 7px;
+  height: 7px;
+  margin: 0;
+  padding: 0;
+  border: 0;
   border-radius: 999px;
-  color: var(--fg-tertiary);
-  background: var(--shell-card);
+  background: currentColor;
+}
+
+:where(.vui-app-appshell).statusSummaryLabel {
+  flex: 0 0 auto;
+  align-self: center;
+  color: var(--fg-primary);
   font-size: var(--vui-font-xs);
   font-weight: 650;
   line-height: 1;
@@ -1294,7 +1307,7 @@
 @media (max-width: 1279px) {
   :where(.vui-app-appshell).utilityTriggerLabel,
   :where(.vui-app-appshell).statusBadgeLabel,
-  :where(.vui-app-appshell).statusSummaryToneChip {
+  :where(.vui-app-appshell).statusSummaryLabel {
     display: none;
   }
 
@@ -1307,7 +1320,7 @@
 @media (max-width: 1180px) {
   :where(.vui-app-appshell).utilityTriggerLabel,
   :where(.vui-app-appshell).statusBadgeLabel,
-  :where(.vui-app-appshell).statusSummaryToneChip {
+  :where(.vui-app-appshell).statusSummaryLabel {
     display: none;
   }
 

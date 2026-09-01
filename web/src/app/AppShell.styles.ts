@@ -98,7 +98,7 @@ const styles = {
     `vui-app-appshell mobileRouteLinkActive ${vuiStateSelectedRowClass}`,
   mobileRouteMenu:
     "vui-app-appshell mobileRouteMenu hidden max-[639px]:grid min-w-0 w-full gap-1 rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2",
-  nav: `vui-app-appshell nav min-w-0 max-[639px]:hidden rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] ${vuiToolbarFillClass} p-[3px] shadow-[var(--vui-elevation-panel)]`,
+  nav: `vui-app-appshell nav min-w-0 max-[639px]:hidden`,
   navLink:
     "vui-app-appshell navLink relative z-[2] inline-flex min-h-[30px] min-w-0 cursor-pointer items-center justify-center rounded-[var(--radius-control)] px-2.5 [font-size:var(--vui-font-sm)] font-semibold text-[var(--fg-primary)] no-underline select-none",
   navLinkActive:
@@ -160,10 +160,10 @@ const styles = {
     "vui-app-appshell statusSummaryChip min-w-0 " +
     "!inline-flex !h-8 !min-h-8 !max-h-8 !border-0 flex-nowrap !items-center !justify-center !gap-1.5 !px-2.5 !py-0 " +
     "whitespace-nowrap leading-none [&>*]:!self-center [&>*]:leading-none",
-  statusSummaryCount:
-    "vui-app-appshell statusSummaryCount inline-flex h-[18px] min-h-[18px] max-h-[18px] shrink-0 items-center justify-center tabular-nums leading-none text-[var(--fg-tertiary)]",
-  statusSummaryToneChip:
-    "vui-app-appshell statusSummaryToneChip !min-h-5 max-w-[7rem] shrink-0 truncate !px-1.5 !text-[10px]",
+  statusSummaryDot:
+    "vui-app-appshell statusSummaryDot block h-1.5 w-1.5 shrink-0 grow-0 self-center rounded-full border-0 bg-current p-0 leading-none",
+  statusSummaryLabel:
+    "vui-app-appshell statusSummaryLabel min-w-0 max-w-[12rem] truncate [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-primary)] whitespace-nowrap",
   status_active:
     `vui-app-appshell status_active min-w-0 ${vuiStateSelectedRowClass}`,
   status_blocked:
@@ -208,7 +208,9 @@ const styles = {
     "vui-app-appshell status_warn min-w-0",
   status_warning:
     "vui-app-appshell status_warning min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
-  topActions: "vui-app-appshell topActions min-w-0 flex flex-nowrap items-center gap-0.5",
+  toolCluster:
+    "vui-app-appshell toolCluster min-w-0 shrink-0 flex flex-nowrap items-center gap-1.5",
+  topActions: "vui-app-appshell topActions min-w-0 flex flex-nowrap items-center gap-3.5",
   // Display/layout + Electron drag policy for topBar live in workbench-shell.css.
   // Do not add Tailwind flex/grid or pointer-events here — they fight the fixed 3-column grid / hit targets.
   topBar:

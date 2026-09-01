@@ -147,6 +147,13 @@ function systemToneToStatus(tone: SystemStatusTone): VStatusTone {
   return "neutral";
 }
 
+function systemToneToDotClass(tone: SystemStatusTone): string {
+  if (tone === "running") return styles.status_running;
+  if (tone === "caution") return styles.status_caution;
+  if (tone === "failed") return styles.status_failed;
+  return styles.status_muted;
+}
+
 function shellPrimaryNavClass(pathname: string, to: string) {
   return isShellPrimaryNavActive(pathname, to)
     ? `${styles.navLink} ${styles.navLinkActive}`
@@ -2509,14 +2516,13 @@ export function AppShell() {
                   aria-expanded={statusGuideOpen}
                   aria-label={`${t("systemStatusGuide")}: ${effectivePrimaryStatusCard.label} ${effectivePrimaryStatusCard.value}`}
                 >
-                  <VStatusChip
-                    tone={systemToneToStatus(effectivePrimaryStatusCard.tone)}
-                    className={styles.statusSummaryToneChip}
-                  >
-                    {effectivePrimaryStatusCard.label}
-                  </VStatusChip>
-                  <strong className={styles.statusBadgeValue}>{effectivePrimaryStatusCard.value}</strong>
-                  <span className={styles.statusSummaryCount}>{rightStatusCards.length}</span>
+                  <span
+                    aria-hidden="true"
+                    className={`${styles.statusSummaryDot} ${systemToneToDotClass(effectivePrimaryStatusCard.tone)}`}
+                  />
+                  <span className={styles.statusSummaryLabel}>
+                    {effectivePrimaryStatusCard.label} {effectivePrimaryStatusCard.value}
+                  </span>
                 </VButton>
               )}
             >
@@ -2536,45 +2542,47 @@ export function AppShell() {
               </Suspense>
             </VPopover>
           </div>
-          <VIconButton
-            type="button"
-            variant="ghost"
-            className={styles.actionIconButton}
-            label={themeToggleLabel}
-            tooltip={themeToggleLabel}
-            title={themeToggleLabel}
-            icon={theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
-            onPress={toggleTheme}
-          />
-          <VIconButton
-            type="button"
-            variant="ghost"
-            className={styles.actionIconButton}
-            label={refreshFrontendLabel}
-            tooltip={refreshFrontendLabel}
-            title={refreshFrontendLabel}
-            icon={<RefreshCw size={16} />}
-            onPress={refreshFrontend}
-            isDisabled={restartRequested || shutdownRequested || (shutdownInFlight && !shutdownSettled)}
-          />
-          <VIconButton
-            type="button"
-            variant="ghost"
-            className={styles.actionIconButton}
-            label={hideTopBarLabel}
-            tooltip={hideTopBarLabel}
-            title={hideTopBarLabel}
-            icon={<PanelTopClose size={16} />}
-            onPress={() => setTopBarMode("hidden")}
-          />
-          <VRouteLinkButton
-            to="/config"
-            variant="ghost"
-            className={styles.actionIconButton}
-            aria-label={t("navConfig")}
-            title={t("navConfig")}
-            icon={<Settings size={16} aria-hidden="true" />}
-          />
+          <div className={styles.toolCluster} data-shell-group="tool-actions">
+            <VIconButton
+              type="button"
+              variant="ghost"
+              className={styles.actionIconButton}
+              label={themeToggleLabel}
+              tooltip={themeToggleLabel}
+              title={themeToggleLabel}
+              icon={theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
+              onPress={toggleTheme}
+            />
+            <VIconButton
+              type="button"
+              variant="ghost"
+              className={styles.actionIconButton}
+              label={refreshFrontendLabel}
+              tooltip={refreshFrontendLabel}
+              title={refreshFrontendLabel}
+              icon={<RefreshCw size={16} />}
+              onPress={refreshFrontend}
+              isDisabled={restartRequested || shutdownRequested || (shutdownInFlight && !shutdownSettled)}
+            />
+            <VIconButton
+              type="button"
+              variant="ghost"
+              className={styles.actionIconButton}
+              label={hideTopBarLabel}
+              tooltip={hideTopBarLabel}
+              title={hideTopBarLabel}
+              icon={<PanelTopClose size={16} />}
+              onPress={() => setTopBarMode("hidden")}
+            />
+            <VRouteLinkButton
+              to="/config"
+              variant="ghost"
+              className={styles.actionIconButton}
+              aria-label={t("navConfig")}
+              title={t("navConfig")}
+              icon={<Settings size={16} aria-hidden="true" />}
+            />
+          </div>
         </div>
       </header>
 
