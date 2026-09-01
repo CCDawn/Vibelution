@@ -230,11 +230,49 @@ class GraphDispatchWorker:
         )
         for action in leased:
             self._handle(action)
-        repaired += self._repair_dispatching_without_adapter()
+        return len(leased) + repaired + self._run_post_lease_repairs()
+
+    def run_claim_one(self) -> bool:
+        """Lease exactly ONE ready graph_dispatch action and handle it.
+
+        Parallel pump entry point (claim-as-you-run, no prefetch): the
+        outbox lease is a CAS inside one ``BEGIN IMMEDIATE`` writer
+        transaction, so two threads can never claim the same action, and
+        every commit point keeps its owner-CAS fencing (the B2 heartbeat
+        keeps the lease alive during long invokes). Returns True when an
+        action was claimed and handled.
+        """
+        leased = outbox_api.lease_ready_actions(
+            self._store,
+            owner=self._owner,
+            now_ms=self._now(),
+            limit=1,
+            lease_ms=self._lease_ms,
+            action_kinds=("graph_dispatch",),
+            background_workflow_ids=(KNOWLEDGE_SIDEFLOW_WORKFLOW_ID,),
+            background_limit=DEFAULT_KNOWLEDGE_BACKGROUND_LIVE_LIMIT,
+        )
+        if not leased:
+            return False
+        self._handle(leased[0])
+        return True
+
+    def run_repairs_once(self) -> int:
+        """All retention sweeps WITHOUT leasing, for serial maintenance.
+
+        Deliberately kept off the parallel dispatch workers: the sweeps
+        rewrite run/attempt states behind sequence-conflict checks that are
+        not designed for concurrent rewrites of the same run. Dispatch
+        itself fans out; repairs stay single-threaded.
+        """
+        return self._repair_created_without_start() + self._run_post_lease_repairs()
+
+    def _run_post_lease_repairs(self) -> int:
+        repaired = self._repair_dispatching_without_adapter()
         repaired += self._repair_starting_without_progress()
         repaired += self._repair_stranded_terminal_package()
         repaired += self._repair_terminal_failed_dispatch()
-        return len(leased) + repaired
+        return repaired
 
     def _repair_created_without_start(self) -> int:
         """Fail runs that were created but never accepted by START_NODE.

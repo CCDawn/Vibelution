@@ -285,8 +285,35 @@ class AdapterDispatchWorker:
         )
         for action in leased:
             self._handle(action)
-        repaired = self._repair_terminal_failed_adapter_dispatch(limit=limit)
-        return len(leased) + repaired
+        return len(leased) + self.run_repairs_once()
+
+    def run_claim_one(self) -> bool:
+        """Lease exactly ONE ready adapter_dispatch action and handle it.
+
+        Parallel pump entry point (claim-as-you-run, no prefetch): the
+        outbox lease CAS shards actions between workers, so two threads
+        never claim the same action, and the ack/fail commits stay fenced
+        by lease owner. Returns True when an action was claimed and
+        handled.
+        """
+        leased = outbox_api.lease_ready_actions(
+            self._store,
+            owner=self._owner,
+            now_ms=self._now(),
+            limit=1,
+            lease_ms=self._lease_ms,
+            action_kinds=("adapter_dispatch",),
+            background_workflow_ids=(KNOWLEDGE_SIDEFLOW_WORKFLOW_ID,),
+            background_limit=2,
+        )
+        if not leased:
+            return False
+        self._handle(leased[0])
+        return True
+
+    def run_repairs_once(self, limit: int = 1) -> int:
+        """Dead-letter projection sweep, for the serial maintenance loop."""
+        return self._repair_terminal_failed_adapter_dispatch(limit=max(1, int(limit)))
 
     def _repair_terminal_failed_adapter_dispatch(self, *, limit: int = 4) -> int:
         """Project lease-gate dead letters onto their latest active attempt.

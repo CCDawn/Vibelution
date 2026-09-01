@@ -8,6 +8,7 @@ the production runtime never composes itself inside a worker or route.
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -42,6 +43,22 @@ from .receipt_persistence import ReceiptPersistenceWorker
 
 logger = logging.getLogger(__name__)
 
+# Challenge Cup 10-concurrency plan (B3): the production outbox pump drives
+# dispatch with this many parallel worker threads (Temporal-style fixed
+# task-queue pollers). ``VIBELUTION_WORKFLOW_WORKERS`` overrides it.
+DEFAULT_WORKFLOW_WORKERS = 10
+WORKFLOW_WORKERS_ENV = "VIBELUTION_WORKFLOW_WORKERS"
+
+
+def workflow_worker_count() -> int:
+    """Pump dispatch parallelism: env override, clamped to >= 1."""
+    raw = os.environ.get(WORKFLOW_WORKERS_ENV, "")
+    try:
+        value = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return DEFAULT_WORKFLOW_WORKERS
+    return max(1, value)
+
 
 @dataclass(frozen=True)
 class WorkflowRuntime:
@@ -68,6 +85,42 @@ class WorkflowRuntime:
         handled += self.adapter_worker.run_once(limit=limit)
         handled += self.event_publish_worker.run_once(limit=limit)
         handled += self.delivery_worker.run_once(limit=limit)
+        self._reconcile_expired_task_bundles_best_effort()
+        return handled
+
+    def claim_and_run_one(self) -> bool:
+        """Claim-and-run exactly ONE dispatch action (parallel worker entry).
+
+        Tries graph_dispatch first, then adapter_dispatch. Claiming is the
+        outbox lease CAS inside the single ``BEGIN IMMEDIATE`` writer, so
+        two workers can never claim the same action, and all ledger writes
+        stay funneled through the one writer queue. Deliberately excludes
+        the repair sweeps and the non-dispatch workers: they run on the
+        serial maintenance loop (``run_maintenance_once``) because their
+        sequence-conflict checks are not designed for concurrent rewrites
+        of the same run. Returns True when work was claimed and executed.
+        """
+        if self.graph_worker.run_claim_one():
+            return True
+        return self.adapter_worker.run_claim_one()
+
+    def run_maintenance_once(self, limit: int = 4) -> int:
+        """Serial driver for the non-dispatch workers + retention sweeps.
+
+        One maintenance thread runs this loop (Challenge Cup 10-concurrency
+        B3): fork stays serial because it writes the LangGraph checkpoint
+        store that the B4 checkpoint-parallelization task owns; receipt /
+        delivery / event / cancel-cleanup are low-frequency with run-level
+        side effects; the graph/adapter sweeps rewrite states behind
+        sequence-conflict checks.
+        """
+        handled = self.fork_worker.run_once(limit=limit)
+        handled += self.cancel_run_cleanup_worker.run_once(limit=limit)
+        handled += self.receipt_persistence_worker.run_once(limit=limit)
+        handled += self.event_publish_worker.run_once(limit=limit)
+        handled += self.delivery_worker.run_once(limit=limit)
+        handled += self.graph_worker.run_repairs_once()
+        handled += self.adapter_worker.run_repairs_once(limit=limit)
         self._reconcile_expired_task_bundles_best_effort()
         return handled
 
@@ -358,7 +411,7 @@ def start_production_workflow_runtime() -> str:
         if legacy_json_runs_exist(data_root) and not is_activated(data_root):
             mark_migration_required()
             return "migration_required"
-        pump = WorkflowOutboxPump()
+        pump = WorkflowOutboxPump(workers=workflow_worker_count())
         try:
             _PRODUCTION = build_workflow_runtime(
                 workflow_ledger_path(data_root),
