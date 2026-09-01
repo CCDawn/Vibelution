@@ -523,6 +523,14 @@ class GraphDispatchWorker:
                 self._defer_for_maintenance(action, dispatch, str(exc))
                 return
 
+        # Stage-boundary budget admission (SCI-091 guardrail): evaluated
+        # outside the writer transaction like readiness, BEFORE any new
+        # successor attempt is created. An underfunded stage is blocked
+        # here with a structured event instead of dying mid-turn.
+        budget_admission = None
+        if pending is not None and needs_successor:
+            budget_admission = self._budget_admission(dispatch, pending)
+
         if (
             dispatch.dispatch_kind in ("resume_action", "resume_human")
             and dispatch.receipt is not None
@@ -534,7 +542,12 @@ class GraphDispatchWorker:
             readiness_hint = self._precheck_readiness(dispatch, pending)
             try:
                 self._commit_successor_dispatch(
-                    dispatch, result, pending, readiness_hint, action=action
+                    dispatch,
+                    result,
+                    pending,
+                    readiness_hint,
+                    action=action,
+                    budget_admission=budget_admission,
                 )
             except Exception as exc:
                 self._requeue_or_fail(action, dispatch, f"successor_commit_failed:{exc}")
@@ -549,7 +562,38 @@ class GraphDispatchWorker:
             from dataclasses import replace as _replace
 
             result = _replace(result, pending_action=pending)
-        self._commit_dispatch(action, dispatch, result, readiness_hint)
+        self._commit_dispatch(
+            action, dispatch, result, readiness_hint, budget_admission=budget_admission
+        )
+
+    def _budget_admission(self, dispatch: GraphDispatch, pending: Any):
+        """Stage-boundary budget admission for a NEW successor attempt.
+
+        Returns None when admission passes (or is out of scope); the caller
+        only acts on a not-admitted decision. Fail-open lives inside the
+        evaluator; this wrapper only guards against wiring errors.
+        """
+        try:
+            from .budget_stage_admission import evaluate_stage_budget_admission
+
+            actor_kind = getattr(pending.actor_kind, "value", pending.actor_kind)
+            return evaluate_stage_budget_admission(
+                self._store,
+                run_id=dispatch.run_id,
+                node_id=pending.node_id,
+                actor_kind=actor_kind,
+            )
+        except Exception as exc:  # noqa: BLE001 - admission must never break dispatch
+            _record_scene_event(
+                "graph_dispatch.budget_precheck_failed",
+                outcome="failed",
+                fields={
+                    "runId": str(dispatch.run_id or ""),
+                    "nodeId": str(pending.node_id or ""),
+                    "errorType": type(exc).__name__,
+                },
+            )
+            return None
 
     def _recover_half_advanced_successor(self, action: Any, dispatch: GraphDispatch) -> bool:
         """Return True when this action finished recovery without re-resume."""
@@ -761,6 +805,7 @@ class GraphDispatchWorker:
         *,
         action: Any | None = None,
         fallback_command_id: str | None = None,
+        budget_admission: Any | None = None,
     ) -> None:
         """Ack graph outbox + create successor attempt / adapter outbox."""
         now_ms = self._now()
@@ -796,6 +841,16 @@ class GraphDispatchWorker:
                 or fallback_command_id
                 or "cmd-recovery"
             )
+            if budget_admission is not None and not budget_admission.admitted:
+                _commit_budget_precheck_block(
+                    uow,
+                    dispatch=dispatch,
+                    pending=pending,
+                    admission=budget_admission,
+                    command_id=command_id,
+                    now_ms=now_ms,
+                )
+                return
             if not ready:
                 uow.repository.insert_attempt(
                     _attempt_for_pending(
@@ -1461,6 +1516,8 @@ class GraphDispatchWorker:
         dispatch: GraphDispatch,
         result: GraphDispatchResult,
         readiness_hint: tuple[bool, list[Any]] | None = None,
+        *,
+        budget_admission: Any | None = None,
     ) -> None:
         now_ms = self._now()
         pending_node = getattr(result.pending_action, "node_id", "") or ""
@@ -1547,6 +1604,16 @@ class GraphDispatchWorker:
                         ready, blockers = True, []
                     else:
                         ready, blockers = readiness_hint
+                    if budget_admission is not None and not budget_admission.admitted:
+                        _commit_budget_precheck_block(
+                            uow,
+                            dispatch=dispatch,
+                            pending=pending,
+                            admission=budget_admission,
+                            command_id=action.command_id or "cmd-recovery",
+                            now_ms=now_ms,
+                        )
+                        return
                     if not ready:
                         uow.repository.insert_attempt(
                             _attempt_for_pending(
@@ -2471,6 +2538,80 @@ def _event_record_for(
         causation_id=None,
         payload_json=json.dumps(payload, ensure_ascii=False),
         occurred_at_ms=now_ms,
+    )
+
+
+def _commit_budget_precheck_block(
+    uow,
+    *,
+    dispatch: GraphDispatch,
+    pending: Any,
+    admission: Any,
+    command_id: str,
+    now_ms: int,
+) -> None:
+    """Block a NEW successor attempt on stage-boundary budget admission.
+
+    Mirrors the auto_advance_not_ready path: blocked attempt (no adapter
+    outbox), run pinned to blocked, one structured ``budget_precheck_blocked``
+    event carrying stage, reference, remaining, suggested extension and the
+    extend_budget → retry_node recovery contract. Idempotent with the
+    attempt-exists checks in the callers, so a re-derived dispatch never
+    duplicates the block.
+    """
+    problem = admission.problem()
+    uow.repository.insert_attempt(
+        _attempt_for_pending(
+            pending,
+            command_id=command_id,
+            now_ms=now_ms,
+            status="blocked",
+            problem_json=json.dumps(problem, ensure_ascii=False),
+        )
+    )
+    sync_run_blocked(
+        uow,
+        run_id=dispatch.run_id,
+        node_id=pending.node_id,
+        problem=problem,
+        now_ms=now_ms,
+    )
+    sequence = uow.repository.advance_last_sequence(dispatch.run_id, 1, now_ms)
+    if sequence is not None:
+        run = uow.repository.get_run(dispatch.run_id)
+        run_version = run.run_version if run else 1
+        uow.repository.insert_event(
+            _event_record_for(
+                run_id=dispatch.run_id,
+                sequence=sequence,
+                run_version=run_version,
+                event_id=new_id("evt"),
+                event_type="budget_precheck_blocked",
+                correlation_id=pending.action_id,
+                payload={
+                    "nodeRunId": pending.node_run_id,
+                    "nodeId": pending.node_id,
+                    "autoAdvanceBlocked": True,
+                    **problem,
+                    "reason": format_blocked_reason(problem),
+                },
+                now_ms=now_ms,
+            )
+        )
+    _record_scene_event(
+        "graph_dispatch.budget_precheck_blocked",
+        outcome="blocked",
+        fields={
+            "teamId": str(dispatch.team_id or ""),
+            "runId": str(dispatch.run_id or ""),
+            "nodeId": str(pending.node_id or ""),
+            "nodeRunId": str(pending.node_run_id or ""),
+            "stageId": str(problem.get("stageId") or ""),
+            "remainingTokens": problem.get("remainingTokens"),
+            "referenceTokens": problem.get("referenceTokens"),
+            "referenceBasis": str(problem.get("referenceBasis") or ""),
+            "suggestedExtensionTokens": problem.get("suggestedExtensionTokens"),
+        },
     )
 
 
