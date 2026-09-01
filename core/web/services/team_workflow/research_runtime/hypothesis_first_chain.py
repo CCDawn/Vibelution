@@ -8073,6 +8073,54 @@ def _project_chain_discussion_anchor(
     )
 
 
+def _stage_one_r0_collection_ready(
+    generation_meeting: Mapping[str, Any] | None,
+) -> bool:
+    """Treat one closed, actionable R0 digest as the source-finding scope.
+
+    Stage-one catalog runs deliberately persist the first generation round as
+    exploratory drafts.  Its validated evidence requests are the bounded
+    search scope for ``source_finding``; requiring a later review-round
+    collection request here creates a cycle because formal candidates and
+    review rounds only exist after the knowledge stages finish.
+    """
+
+    meeting = generation_meeting if isinstance(generation_meeting, Mapping) else {}
+    if (
+        _meeting_candidate_authority(meeting) != EXPLORATORY_DRAFT_AUTHORITY
+        or str(meeting.get("status") or "").strip().lower() != "closed"
+        or _is_execution_stopped_meeting(meeting)
+    ):
+        return False
+    draft = meeting.get("digestDraft")
+    if not isinstance(draft, Mapping):
+        return False
+    if not _generation_proposals_from_digest(draft):
+        return False
+    raw_requests = [
+        item
+        for item in list(draft.get("evidenceRequests") or [])
+        if isinstance(item, Mapping)
+    ]
+    if not raw_requests:
+        return False
+    source_refs = _normalized_str_list(draft.get("sourceMessageRefs"))
+    from core.web.services.team_workflow import meeting_runtime
+
+    for raw in raw_requests:
+        try:
+            normalized, _errors = meeting_runtime.validate_evidence_request_draft(
+                raw,
+                meeting,
+                source_refs=source_refs,
+            )
+        except Exception:  # noqa: BLE001 - readiness stays fail-closed
+            continue
+        if normalized is not None:
+            return True
+    return False
+
+
 def chain_state(
     team_id: str,
     question_id: str,
@@ -8414,6 +8462,9 @@ def chain_state(
         )
     ]
     generation_meeting = generation_meetings[-1] if generation_meetings else {}
+    stage_one_r0_collection_ready = _stage_one_r0_collection_ready(
+        generation_meeting
+    )
     return {
         "schemaVersion": SCHEMA_VERSION,
         "teamId": normalized_team_id,
@@ -8436,6 +8487,7 @@ def chain_state(
             current_selection_requests
             and (not open_meeting_ids or not current_selection_pending_requests)
         )
+        or stage_one_r0_collection_ready
         or bool(
             converged
             and not open_meeting_ids
