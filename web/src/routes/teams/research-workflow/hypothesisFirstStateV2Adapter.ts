@@ -216,6 +216,12 @@ function firstEnabledCommand(
   reviewCandidate: ReviewCandidateState | null,
 ): CommandAction | null {
   const commands = commandActionsForPhase(actions, phase, reviewCandidate);
+  if (phase === "generation") {
+    const regenerateSummary = commands.find((action) => (
+      action.enabled && action.command === "regenerate_summary"
+    ));
+    if (regenerateSummary) return regenerateSummary;
+  }
   if (phase === "review" && reviewCandidate) {
     const summaryFailed = reviewCandidate.problems.some((problem) => problem.code === "summary_draft_failed");
     if (summaryFailed) {

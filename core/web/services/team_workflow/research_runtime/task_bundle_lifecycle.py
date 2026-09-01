@@ -631,6 +631,45 @@ def complete_task_bundle_records(
     return bundles
 
 
+def _promote_next_pending_candidate(subtasks: list[dict[str, Any]]) -> bool:
+    """Claim the next pending candidate for dispatch as ``queued``.
+
+    Must run inside ``store.mutate_run`` so a terminal subtask hands its
+    fan-out concurrency slot to exactly one queued candidate, even with
+    concurrent terminal events.
+    """
+
+    for index, subtask in enumerate(subtasks):
+        if (
+            str(subtask.get("taskId") or "").strip()
+            or str(subtask.get("status") or "") != "pending"
+        ):
+            continue
+        scope = subtask.get("scope")
+        scope = dict(scope) if isinstance(scope, dict) else {}
+        if not (
+            str(scope.get("selectionId") or "").strip()
+            and str(scope.get("candidateId") or "").strip()
+        ):
+            continue
+        subtask.update({"status": "queued", "queuedAt": iso(utc_now())})
+        subtasks[index] = subtask
+        return True
+    return False
+
+
+def _dispatch_queued_candidate_subtasks(
+    store: WorkflowRunStore,
+    *,
+    run_id: str,
+    node_run_id: str,
+) -> None:
+    # Late import: agent_node_execution imports this module at load time.
+    from .agent_node_execution import dispatch_queued_candidate_subtasks
+
+    dispatch_queued_candidate_subtasks(store, run_id=run_id, node_run_id=node_run_id)
+
+
 def complete_agent_task_bundle_subtask(
     store: WorkflowRunStore,
     *,
@@ -639,21 +678,35 @@ def complete_agent_task_bundle_subtask(
     subtask_id: str,
     output_artifact_refs: list[str],
     attempt: int,
+    dispatch_pending: bool = True,
 ) -> dict[str, Any]:
     """Persist one candidate completion without mutating sibling subtasks."""
 
     def mutation(current: dict[str, Any]) -> dict[str, Any]:
-        return {
-            **current,
-            "taskBundles": complete_task_bundle_records(
-                current,
-                node_run_id=node_run_id,
-                subtask_id=subtask_id,
-                output_artifact_refs=output_artifact_refs,
-                completed_at=iso(utc_now()),
-                attempt=attempt,
+        bundles = complete_task_bundle_records(
+            current,
+            node_run_id=node_run_id,
+            subtask_id=subtask_id,
+            output_artifact_refs=output_artifact_refs,
+            completed_at=iso(utc_now()),
+            attempt=attempt,
+        )
+        bundle = next(
+            (
+                dict(item)
+                for item in bundles
+                if item.get("parentNodeRunId") == node_run_id
             ),
-        }
+            None,
+        )
+        # The completed subtask freed one fan-out slot; hand it to the next
+        # pending candidate atomically under the mutate_run lock.
+        if bundle is not None:
+            subtasks = [dict(item) for item in bundle.get("subtasks") or []]
+            if _promote_next_pending_candidate(subtasks):
+                bundle.update({"subtasks": subtasks})
+                replace_by_id(bundles, "bundleId", str(bundle["bundleId"]), bundle)
+        return {**current, "taskBundles": bundles}
 
     persisted = store.mutate_run(run_id, mutation)
     bundle = next(
@@ -666,6 +719,10 @@ def complete_agent_task_bundle_subtask(
     )
     if bundle is None:
         raise TaskBundleError("task bundle not found", code="unknown_task_bundle")
+    if dispatch_pending:
+        _dispatch_queued_candidate_subtasks(
+            store, run_id=run_id, node_run_id=node_run_id
+        )
     return bundle
 
 
@@ -678,6 +735,7 @@ def fail_agent_task_bundle_subtask(
     failure_code: str,
     failure_summary: str,
     attempt: int | None = None,
+    dispatch_pending: bool = True,
 ) -> dict[str, Any]:
     """Fail exactly one subtask while preserving every sibling outcome."""
 
@@ -730,6 +788,9 @@ def fail_agent_task_bundle_subtask(
                 f"subtask must be active, got {selected.get('status')}",
                 code="invalid_task_bundle_state",
             )
+        freed_slot = selected.get("status") == "running" and bool(
+            str(selected.get("taskId") or "").strip()
+        )
         selected.update(
             {
                 "status": "failed",
@@ -739,6 +800,10 @@ def fail_agent_task_bundle_subtask(
             }
         )
         subtasks[subtask_index] = selected
+        if freed_slot:
+            # The failed running candidate freed one fan-out slot; hand it to
+            # the next pending candidate atomically under the mutate_run lock.
+            _promote_next_pending_candidate(subtasks)
         bundle.update(
             {
                 "status": derive_task_bundle_status(subtasks),
@@ -752,6 +817,10 @@ def fail_agent_task_bundle_subtask(
         return {**current, "taskBundles": bundles}
 
     persisted = store.mutate_run(run_id, mutation)
+    if dispatch_pending:
+        _dispatch_queued_candidate_subtasks(
+            store, run_id=run_id, node_run_id=node_run_id
+        )
     return next(
         item
         for item in persisted.get("taskBundles") or []

@@ -7,9 +7,11 @@ from pathlib import Path
 
 import pytest
 
+from core.research.workflow import challenge_cup_runtime
 from core.research.workflow.challenge_cup_runtime import (
     GraphDispatch,
     action_id_for,
+    build_pending_action,
     merge_node_attempts,
 )
 from core.research.workflow.contracts import ExecutionReceipt
@@ -290,4 +292,126 @@ def test_retry_uses_persisted_interrupt_when_checkpoint_next_is_empty(
         assert payload["nodeId"] == "source_extraction"
         assert int(payload["attempt"]) == 2
     finally:
+        harness.close()
+
+
+def test_start_attempt_persists_binding_and_budget_authorities(
+    tmp_path: Path,
+) -> None:
+    """binding_snapshot_id/budget_policy_hash are declared channels.
+
+    Before declaration, langgraph dropped these invoke-input keys, so the
+    persisted checkpoint never contained them and ``build_pending_action``
+    read empty values back (dead read).
+    """
+
+    harness = GraphHarness(tmp_path)
+    try:
+        entered = harness.coordinator.start_attempt(
+            GraphDispatch(
+                action_id="act-binding",
+                run_id="run-binding",
+                node_run_id="nr-run-binding-problem_understanding-a1",
+                node_id="problem_understanding",
+                attempt=1,
+                dispatch_kind="start",
+                input_snapshot_hash="a" * 64,
+                workflow_version_id="challenge-cup-research-v2.1.0",
+                team_id="research-team",
+                binding_snapshot_id="binding-snapshot-1",
+                budget_policy_hash="d" * 64,
+            )
+        )
+
+        # The interrupt payload carries the binding/budget identity.
+        assert entered.pending_action is not None
+        assert entered.pending_action.binding_snapshot_id == "binding-snapshot-1"
+        assert entered.pending_action.budget_policy_hash == "d" * 64
+
+        snapshot = harness.coordinator.snapshot("run-binding")
+        values = dict(snapshot.get("values") or {})
+        assert values["binding_snapshot_id"] == "binding-snapshot-1"
+        assert values["budget_policy_hash"] == "d" * 64
+        persisted_pending = snapshot.get("pendingAction") or {}
+        assert persisted_pending.get("bindingSnapshotId") == "binding-snapshot-1"
+        assert persisted_pending.get("budgetPolicyHash") == "d" * 64
+
+        # The declared channels survive reopen: a fresh coordinator reads the
+        # same persisted state and build_pending_action reads non-empty.
+        reopened = GraphHarness(tmp_path)
+        try:
+            reopened_values = dict(
+                reopened.coordinator.snapshot("run-binding").get("values") or {}
+            )
+            assert reopened_values["binding_snapshot_id"] == "binding-snapshot-1"
+            rebuilt = build_pending_action(reopened_values, "problem_understanding")
+            assert rebuilt.binding_snapshot_id == "binding-snapshot-1"
+            assert rebuilt.budget_policy_hash == "d" * 64
+        finally:
+            reopened.close()
+    finally:
+        harness.close()
+
+
+def test_old_version_checkpoint_is_discarded_and_rebuilt_from_ledger(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """A checkpoint written by an older schema version is never resumed.
+
+    The stale thread is reported as absent to decision callers, and the next
+    graph dispatch rebuilds the checkpoint from the Ledger dispatch identity
+    (start_attempt path) instead of raising to the user.
+    """
+
+    harness = GraphHarness(tmp_path)
+    try:
+        # Produce a legacy fixture: checkpoint written by the old version 1.
+        monkeypatch.setattr(challenge_cup_runtime, "CHALLENGE_CUP_CHECKPOINT_VERSION", 1)
+        harness.seed()
+        harness.enqueue_graph_dispatch("run-test", "problem_understanding", 1)
+        harness.worker.run_once()
+        stale = harness.coordinator.snapshot("run-test")
+        stale_values = dict(stale.get("values") or {})
+        assert stale_values.get("checkpoint_version") == 1
+        stale_checkpoint_id = stale.get("checkpointId")
+        assert stale_checkpoint_id
+        assert harness.latest_adapter_pending() is not None
+
+        monkeypatch.undo()
+
+        # Decision callers no longer see the stale thread.
+        discarded = harness.coordinator.snapshot("run-test")
+        assert discarded.get("values") == {}
+        assert discarded.get("nextNodeIds") == []
+        assert discarded.get("pendingAction") is None
+        assert discarded.get("checkpointDiscarded") is True
+
+        # The worker rebuilds from Ledger authority instead of trusting the
+        # stale checkpoint: the next start dispatch re-seeds the thread on a
+        # fresh checkpoint with the current schema version.
+        harness.enqueue_graph_dispatch(
+            "run-test",
+            "problem_understanding",
+            1,
+            command_id="cmd-rebuild",
+            idempotency_key="rebuild-entry-1",
+        )
+        harness.worker.run_once()
+
+        rebuilt = harness.coordinator.snapshot("run-test")
+        rebuilt_values = dict(rebuilt.get("values") or {})
+        assert (
+            rebuilt_values.get("checkpoint_version")
+            == challenge_cup_runtime.CHALLENGE_CUP_CHECKPOINT_VERSION
+        )
+        assert rebuilt.get("checkpointId")
+        assert rebuilt.get("checkpointId") != stale_checkpoint_id
+        rebuilt_pending = rebuilt.get("pendingAction") or {}
+        assert rebuilt_pending.get("nodeId") == "problem_understanding"
+        assert rebuilt_pending.get("actionId") == action_id_for(
+            "run-test", "problem_understanding", 1
+        )
+    finally:
+        monkeypatch.undo()
         harness.close()

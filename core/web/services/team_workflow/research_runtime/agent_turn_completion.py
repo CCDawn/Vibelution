@@ -409,6 +409,69 @@ def wait_for_agent_turn_terminal(
         time.sleep(sleep_s)
 
 
+def probe_agent_turn_terminal(
+    session_id: str,
+    turn_id: str,
+) -> dict[str, Any]:
+    """One non-blocking canonical turn state probe (no polling, no sleep).
+
+    Same contract as :func:`wait_for_agent_turn_terminal` minus the wait:
+    the returned snapshot carries ``terminal`` (``True`` with a success
+    terminal status, ``False`` while the turn is still live, including its
+    ``turnCurrent`` liveness signal); a failure-terminal turn raises the same
+    ``agent_turn_terminal_failed`` rejection shape.  Callers that must not
+    hold the single-threaded dispatch pump use this to requeue durably
+    instead of sleeping inside the node action.
+    """
+
+    from core.web.services.session.turn_diagnostics import (
+        get_session_turn_completion_snapshot,
+    )
+
+    normalized_session_id = str(session_id or "").strip()
+    normalized_turn_id = str(turn_id or "").strip()
+    if not normalized_session_id or not normalized_turn_id:
+        raise RuntimeError(
+            json.dumps(
+                {
+                    "code": "agent_turn_anchor_incomplete",
+                    "sessionId": normalized_session_id,
+                    "turnId": normalized_turn_id,
+                },
+                ensure_ascii=False,
+            )
+        )
+    snapshot = get_session_turn_completion_snapshot(
+        normalized_session_id, normalized_turn_id
+    )
+    if not bool(snapshot.get("terminal")):
+        return snapshot
+    status = str(
+        snapshot.get("terminalStatus") or snapshot.get("lastTurnStatus") or ""
+    ).strip().lower()
+    if status in _SUCCESS_TERMINAL_STATUSES:
+        return snapshot
+    raise RuntimeError(
+        json.dumps(
+            {
+                "code": "agent_turn_terminal_failed",
+                "sessionId": normalized_session_id,
+                "turnId": normalized_turn_id,
+                "terminalStatus": status,
+                "completionSource": snapshot.get("completionSource"),
+                "terminalProblemCode": snapshot.get("terminalProblemCode"),
+                "terminalReason": snapshot.get("terminalReason"),
+                "failureClass": (
+                    "terminal_failure"
+                    if status in _FAILURE_TERMINAL_STATUSES
+                    else "terminal_non_success"
+                ),
+            },
+            ensure_ascii=False,
+        )
+    )
+
+
 def collect_required_artifact_refs(
     *,
     required_kinds: tuple[str, ...],

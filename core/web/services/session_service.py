@@ -1079,12 +1079,15 @@ _SESSION_ACTIVE_TURN_LEASES: dict[str, list[str]] = {}
 _AGENT_INBOX_WAKE_STATE_LOCK = threading.Lock()
 _AGENT_INBOX_IDLE_DRAINING_SESSION_IDS: set[str] = set()
 _AGENT_INBOX_WAKE_IN_FLIGHT_MESSAGE_IDS: set[str] = set()
-_SESSION_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="web-chat-turn")
+# P0 T3: raised from 4 to 8 so parallel Agent sessions/candidate fan-outs are not
+# hard-capped below the budgetPolicy.maxParallelTasks headroom. Module has no
+# settings-reading idiom for these tunables, so they stay module constants.
+_SESSION_EXECUTOR = ThreadPoolExecutor(max_workers=8, thread_name_prefix="web-chat-turn")
 _SESSION_CYCLE_PROJECTION_EXECUTOR = ThreadPoolExecutor(
     max_workers=1,
     thread_name_prefix="web-chat-cycle-projection",
 )
-_SESSION_AGENT_MAX_ACTIVE_TURNS = 4
+_SESSION_AGENT_MAX_ACTIVE_TURNS = 8
 SOURCE_COLLECTION_STAGE_SESSION_TASK_KIND = "source_collection_stage_session_task"
 INTERNAL_AUTO_CONTINUE_MAX_TURNS = 3
 SOURCE_COLLECTION_STAGE_TASK_AUTO_CONTINUE_MAX_TURNS = 4

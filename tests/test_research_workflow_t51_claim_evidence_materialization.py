@@ -622,6 +622,153 @@ def test_materialized_claims_bind_only_matching_candidate_lineage(
     assert len(ClaimEvidenceStore(tmp_path).list(team_id)) == 2
 
 
+def test_identical_candidate_statements_keep_distinct_claim_beliefs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Byte-identical candidate statements must never share one claim row.
+
+    The claim ledger's own seed hashes only (claim, scope, createdBy), so the
+    materializer proposes an explicit candidate-dimensioned claim id.  Each
+    candidate gets its own ledger row and belief entry; sibling evidence can
+    no longer bleed across candidates.  Replaying the same candidate plus the
+    same text still reuses its row.
+    """
+    team_id, scope = _claim_bridge_env(tmp_path, monkeypatch)
+    candidate_b = "sci-mtz-1-candidate-b"
+    shared_statement = "Both candidates predict one identical bounded mechanism."
+    bindings = {
+        HYPOTHESIS_CANDIDATE_ID: {
+            "claimText": shared_statement,
+            "lineageRefs": ["https://example.org/paper-a"],
+        },
+        candidate_b: {
+            "claimText": shared_statement,
+            "lineageRefs": ["https://example.org/paper-a"],
+        },
+    }
+    created = materialize_claim_evidence_from_task(
+        project_root=tmp_path,
+        team_id=team_id,
+        workflow_run_id="wf-run-a",
+        source_collection_run_id="sc-run-a",
+        task=_verified_task(team_id=team_id),
+        model_ref="provider/model-a",
+        question_scope=scope,
+        hypothesis_candidate_ids=[HYPOTHESIS_CANDIDATE_ID, candidate_b],
+        hypothesis_candidate_bindings=bindings,
+    )
+
+    listing = claim_ledger.list_claims(team_id)
+    candidate_rows = [
+        item for item in listing["claims"] if item["claim"] == shared_statement
+    ]
+    # One fact row plus one core-claim row per candidate, never merged.
+    assert listing["claimCount"] == 3
+    assert len(candidate_rows) == 2
+    assert len({item["claimId"] for item in candidate_rows}) == 2
+
+    hypothesis_records = [
+        item
+        for item in ClaimEvidenceStore(tmp_path).list(team_id)
+        if item["reasoningRole"] == "hypothesis"
+    ]
+    assert sorted(item["candidateId"] for item in hypothesis_records) == sorted(
+        [HYPOTHESIS_CANDIDATE_ID, candidate_b]
+    )
+    assert len({item["claimId"] for item in hypothesis_records}) == 2
+
+    evidence_by_claim = {
+        item["claimId"]: item["claimEvidenceId"] for item in hypothesis_records
+    }
+    assert set(evidence_by_claim) == {row["claimId"] for row in candidate_rows}
+
+    replay = materialize_claim_evidence_from_task(
+        project_root=tmp_path,
+        team_id=team_id,
+        workflow_run_id="wf-run-a",
+        source_collection_run_id="sc-run-a",
+        task=_verified_task(team_id=team_id),
+        model_ref="provider/model-a",
+        question_scope=scope,
+        hypothesis_candidate_ids=[HYPOTHESIS_CANDIDATE_ID, candidate_b],
+        hypothesis_candidate_bindings=bindings,
+    )
+    assert [item["claimLedgerStatus"] for item in replay].count("reused") == len(replay)
+    assert claim_ledger.list_claims(team_id)["claimCount"] == 3
+    assert len(ClaimEvidenceStore(tmp_path).list(team_id)) == 3
+    assert (
+        len(
+            {
+                item["claimId"]
+                for item in replay
+                if item["reasoningRole"] == "hypothesis"
+            }
+        )
+        == 2
+    )
+
+    # Attach each candidate's own evidence through the production support
+    # path, then the belief table must keep one isolated entry per claim row:
+    # sibling evidence can never bleed across identical statements.
+    from core.web.services.team_workflow.research_runtime import claim_belief_service
+
+    for row in candidate_rows:
+        supported = claim_ledger.support_claim(
+            team_id,
+            row["claimId"],
+            {
+                "evidenceRefs": [
+                    {
+                        "claimEvidenceId": evidence_by_claim[row["claimId"]],
+                        "scopeHash": row["scopeHash"],
+                        "reviewStatus": "accepted",
+                        "supportLevel": "supports",
+                        "sourceId": "artifact:source-1",
+                    }
+                ],
+                "supportedBy": "operator",
+            },
+        )
+        assert supported["claim"]["status"] == "supported"
+    refreshed_rows = [
+        item
+        for item in claim_ledger.list_claims(team_id)["claims"]
+        if item["claim"] == shared_statement
+    ]
+    # The belief service takes the authoritative current state of each
+    # claimEvidenceId from the supplied records; mirror the ledger rows'
+    # scope so the accepted support resolves instead of degrading to neutral.
+    resolved_records = [
+        {
+            **record,
+            "scopeHash": next(
+                row["scopeHash"]
+                for row in refreshed_rows
+                if row["claimId"] == record["claimId"]
+            ),
+        }
+        for record in ClaimEvidenceStore(tmp_path).list(team_id)
+        if record["claimId"] in {row["claimId"] for row in refreshed_rows}
+    ]
+    table = claim_belief_service.evaluate_claim_belief(
+        refreshed_rows,
+        resolved_records,
+    )
+    entries = {entry.claimId: entry for entry in table.entries}
+    assert len(entries) == 2
+    for row in refreshed_rows:
+        entry = entries[row["claimId"]]
+        # The store's pending review state is authoritative, so each isolated
+        # claim row counts exactly its own candidate's evidence as one pending
+        # support.  A shared claim row would collapse both into one entry
+        # with pendingSupportCount == 2.
+        assert entry.pendingSupportCount == 1
+        assert entry.acceptedSupportCount == 0
+        assert entry.supportingEvidenceIds == ()
+        assert entry.beliefState == "weakly_supported"
+    assert sum(entry.pendingSupportCount for entry in entries.values()) == 2
+
+
 def test_materialization_without_hypothesis_candidates_keeps_gate_fail_closed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
