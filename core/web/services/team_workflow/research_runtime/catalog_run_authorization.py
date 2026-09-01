@@ -466,9 +466,10 @@ def _canonical_batch_scope(
             raise CatalogRunAuthorizationError(
                 "catalog authorization stage-one completion policy is invalid"
             ) from exc
-        if stage_one_policy["questionIds"] != expected_question_ids:
+        if not set(expected_question_ids) <= set(stage_one_policy["questionIds"]):
             raise CatalogRunAuthorizationError(
-                "catalog authorization stage-one completion policy question scope does not match"
+                "catalog authorization stage-one completion policy question scope "
+                "does not cover the plan"
             )
         normalized["stageOneCompletionPolicy"] = stage_one_policy
     return normalized

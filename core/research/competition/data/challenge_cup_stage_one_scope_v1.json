@@ -5,6 +5,7 @@
   "scopeId": "cc-xh-202619-stage1-hypothesis-v1",
   "workflowDefinitionId": "challenge-cup-research@2.1.0",
   "questionIds": [
+    "SCI-003",
     "SCI-091"
   ],
   "closureNodeId": "hypothesis_design",

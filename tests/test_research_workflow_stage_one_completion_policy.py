@@ -4,6 +4,7 @@ import copy
 
 import pytest
 
+from core.research.competition.catalog_execution import CatalogExecutionPlan
 from core.research.competition.question_result_package import canonical_model_policy
 from core.research.competition.real_control_batch import real_plan
 from core.research.competition.stage_one_completion_policy import (
@@ -66,12 +67,12 @@ def _run_input_payload(policy: dict[str, object]) -> dict[str, object]:
     }
 
 
-def test_tracked_policy_is_exact_single_question_node_seven_contract() -> None:
+def test_tracked_policy_is_exact_question_scope_contract() -> None:
     policy = load_stage_one_completion_policy()
 
     assert policy.scopeId == "cc-xh-202619-stage1-hypothesis-v1"
     assert policy.workflowDefinitionId == WORKFLOW_DEFINITION_ID
-    assert policy.questionIds == ("SCI-091",)
+    assert policy.questionIds == ("SCI-003", "SCI-091")
     assert policy.closureNodeId == "hypothesis_design"
     assert policy.completionState == "STAGE1_G1_ACCEPTED"
     assert policy.allowPhaseTwoAdvance is False
@@ -85,7 +86,9 @@ def test_tracked_policy_is_exact_single_question_node_seven_contract() -> None:
 
 
 def test_policy_snapshot_only_applies_to_the_frozen_g1_identity() -> None:
+    assert stage_one_policy_snapshot_for("SCI-003", WORKFLOW_DEFINITION_ID)
     assert stage_one_policy_snapshot_for("SCI-091", WORKFLOW_DEFINITION_ID)
+    assert stage_one_policy_snapshot_for("SCI-042", WORKFLOW_DEFINITION_ID) is None
     assert stage_one_policy_snapshot_for("SCI-092", WORKFLOW_DEFINITION_ID) is None
     assert stage_one_policy_snapshot_for("SCI-091", "challenge-cup-research@3.0.0") is None
 
@@ -165,6 +168,71 @@ def test_real_one_authorization_scope_requires_the_exact_tracked_policy(
         catalog_run_authorization._canonical_batch_scope(
             "real-1",
             drifted_policy,
+            require_stage_one_policy=True,
+        )
+
+
+def _single_question_plan(question_id: str) -> CatalogExecutionPlan:
+    return CatalogExecutionPlan(
+        plan_id="real-1",
+        gate_id="G1",
+        question_ids=(question_id,),
+    )
+
+
+def _patch_single_question_plan(
+    monkeypatch: pytest.MonkeyPatch, question_id: str
+) -> None:
+    monkeypatch.setattr(
+        challenge_cup_real_batch,
+        "resolve_catalog_model_policy",
+        lambda _team_id: canonical_model_policy(
+            {
+                "family": "qwen",
+                "providerIds": ["dashscope"],
+                "modelIds": ["qwen3-max"],
+                "requireOfficialProvider": True,
+            }
+        ),
+    )
+    plan = _single_question_plan(question_id)
+    monkeypatch.setattr(challenge_cup_real_batch, "real_plan", lambda _plan_id: plan)
+    monkeypatch.setattr(catalog_run_authorization, "real_plan", lambda _plan_id: plan)
+
+
+def test_policy_covered_plan_keeps_snapshot_and_authorization_binding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_single_question_plan(monkeypatch, "SCI-003")
+    policy = load_stage_one_completion_policy().to_dict()
+
+    scope = challenge_cup_real_batch._batch_scope("team-stage-one", "real-1")
+    assert scope["stageOneCompletionPolicy"] == policy
+
+    normalized = catalog_run_authorization._canonical_batch_scope(
+        "real-1",
+        scope,
+        require_stage_one_policy=True,
+    )
+    assert normalized["stageOneCompletionPolicy"] == policy
+
+
+def test_policy_out_of_scope_plan_gets_no_snapshot_and_fails_authorization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_single_question_plan(monkeypatch, "SCI-042")
+    policy = load_stage_one_completion_policy().to_dict()
+
+    scope = challenge_cup_real_batch._batch_scope("team-stage-one", "real-1")
+    assert "stageOneCompletionPolicy" not in scope
+
+    with pytest.raises(
+        catalog_run_authorization.CatalogRunAuthorizationError,
+        match="does not cover the plan",
+    ):
+        catalog_run_authorization._canonical_batch_scope(
+            "real-1",
+            {**scope, "stageOneCompletionPolicy": policy},
             require_stage_one_policy=True,
         )
 

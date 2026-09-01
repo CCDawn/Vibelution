@@ -683,7 +683,9 @@ def _batch_scope(team_id: str, plan_id: str) -> dict[str, Any]:
         "questionIds": [str(question_id) for question_id in plan.question_ids],
         "modelPolicy": model_policy,
     }
-    if tuple(scope["questionIds"]) == STAGE_ONE_POLICY_QUESTION_IDS:
+    if scope["questionIds"] and set(scope["questionIds"]) <= set(
+        STAGE_ONE_POLICY_QUESTION_IDS
+    ):
         snapshot = stage_one_policy_snapshot_for(
             STAGE_ONE_POLICY_QUESTION_IDS[0],
             STAGE_ONE_POLICY_WORKFLOW_DEFINITION_ID,
