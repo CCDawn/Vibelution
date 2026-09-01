@@ -692,6 +692,253 @@ def _start_external_task(
     return record, started
 
 
+_TERMINAL_CANDIDATE_SUBTASK_STATUSES = {"succeeded", "failed", "cancelled"}
+_QUEUEABLE_CANDIDATE_SUBTASK_STATUSES = {"pending", "queued"}
+
+
+def _candidate_scope(subtask: dict[str, Any]) -> dict[str, Any]:
+    scope = subtask.get("scope")
+    return dict(scope) if isinstance(scope, dict) else {}
+
+
+def _candidate_subtask_is_bound(subtask: dict[str, Any]) -> bool:
+    return bool(str(subtask.get("taskId") or "").strip())
+
+
+def _active_candidate_slot_count(subtasks: list[dict[str, Any]]) -> int:
+    """Count bound subtasks that still occupy a fan-out concurrency slot."""
+
+    return sum(
+        1
+        for item in subtasks
+        if _candidate_subtask_is_bound(item)
+        and str(item.get("status") or "") not in _TERMINAL_CANDIDATE_SUBTASK_STATUSES
+    )
+
+
+def _start_one_candidate_subtask(
+    store: WorkflowRunStore,
+    record: dict[str, Any],
+    *,
+    node_id: str,
+    node_run_id: str,
+    agent_id: str,
+    idempotency_key: str,
+    payload: dict[str, Any],
+    bundle: dict[str, Any],
+    fan_out: dict[str, Any],
+    subtask: dict[str, Any],
+    candidate_context: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """Start and bind exactly one candidate subtask; raises on any failure."""
+
+    candidate_id = str(_candidate_scope(subtask).get("candidateId") or "").strip()
+    record, started = _start_external_task(
+        store,
+        record,
+        node_id=node_id,
+        node_run_id=node_run_id,
+        agent_id=agent_id,
+        idempotency_key=f"{idempotency_key}:{candidate_id}",
+        payload={
+            **payload,
+            "targetRef": f"hypothesis:{fan_out['selectionId']}:{candidate_id}",
+            "selectionId": fan_out["selectionId"],
+            "candidateId": candidate_id,
+            "selectedCandidateIds": list(fan_out["selectedCandidateIds"]),
+            "subtaskId": str(subtask.get("subtaskId") or ""),
+            "candidateContext": dict(candidate_context),
+        },
+    )
+    anchor = _task_anchor(started)
+    if str(anchor["agentId"] or "") != agent_id:
+        raise AgentNodeExecutionError(
+            "started task Agent does not match the frozen NodeRun binding",
+            code="binding_agent_mismatch",
+        )
+    missing = [
+        key
+        for key in ("taskId", "sessionId", "turnId")
+        if not str(anchor[key] or "")
+    ]
+    if missing:
+        raise AgentNodeExecutionError(
+            f"Agent task anchor is incomplete: {', '.join(missing)}",
+            code="incomplete_task_anchor",
+        )
+    _require_canonical_task_session(
+        session_id=str(anchor["sessionId"]),
+        agent_id=agent_id,
+    )
+    bundle = bind_agent_task_bundle(
+        store,
+        run_id=str(record["runId"]),
+        bundle_id=str(bundle["bundleId"]),
+        subtask_id=str(subtask.get("subtaskId") or ""),
+        task_id=str(anchor["taskId"]),
+        session_id=str(anchor["sessionId"]),
+        turn_id=str(anchor["turnId"]),
+    )
+    return record, bundle, started, anchor
+
+
+def _record_candidate_start_failure(
+    store: WorkflowRunStore,
+    record: dict[str, Any],
+    bundle: dict[str, Any],
+    *,
+    node_run_id: str,
+    subtask: dict[str, Any],
+    candidate_id: str,
+    exc: Exception,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, str]]:
+    """Fail exactly one candidate subtask while preserving every sibling."""
+
+    fail_agent_task_bundle_subtask(
+        store,
+        run_id=str(record["runId"]),
+        node_run_id=node_run_id,
+        subtask_id=str(subtask.get("subtaskId") or ""),
+        failure_code=str(getattr(exc, "code", "candidate_task_start_failed")),
+        failure_summary=str(exc),
+        attempt=int(subtask.get("attempt") or 1),
+        dispatch_pending=False,
+    )
+    record = store.get_run(str(record["runId"])) or record
+    bundle = next(
+        (
+            dict(item)
+            for item in record.get("taskBundles") or []
+            if item.get("bundleId") == bundle.get("bundleId")
+        ),
+        bundle,
+    )
+    return (
+        record,
+        bundle,
+        {
+            "candidateId": candidate_id,
+            "code": str(getattr(exc, "code", "candidate_task_start_failed")),
+            "summary": str(exc),
+        },
+    )
+
+
+def dispatch_queued_candidate_subtasks(
+    store: WorkflowRunStore,
+    *,
+    run_id: str,
+    node_run_id: str,
+) -> list[dict[str, Any]]:
+    """Start queued candidate subtasks as fan-out concurrency slots free up.
+
+    Each queued subtask was claimed atomically inside the terminal mutation
+    (``pending`` -> ``queued`` under the ``store.mutate_run`` lock), so a
+    candidate is dispatched exactly once even with concurrent terminal events.
+    A candidate whose start fails is recorded as a failed subtask while its
+    siblings keep running.
+    """
+
+    from core.web.services.team_workflow.research_project_agent_tasks import (
+        ResearchProjectAgentTaskError,
+    )
+
+    started: list[dict[str, Any]] = []
+    while True:
+        record = store.get_run(str(run_id))
+        if record is None:
+            return started
+        bundle = next(
+            (
+                dict(item)
+                for item in record.get("taskBundles") or []
+                if item.get("parentNodeRunId") == node_run_id
+            ),
+            None,
+        )
+        if bundle is None:
+            return started
+        subtasks = [dict(item) for item in bundle.get("subtasks") or []]
+        max_concurrency = max(
+            1, int(bundle.get("maxConcurrency") or len(subtasks) or 1)
+        )
+        target = next(
+            (
+                item
+                for item in subtasks
+                if not _candidate_subtask_is_bound(item)
+                and str(item.get("status") or "") == "queued"
+            ),
+            None,
+        )
+        if target is None:
+            return started
+        if _active_candidate_slot_count(subtasks) >= max_concurrency:
+            return started
+        node_id = str(bundle.get("nodeId") or "")
+        node_run = next(
+            (
+                dict(item)
+                for item in record.get("nodeRuns") or []
+                if item.get("nodeRunId") == node_run_id
+            ),
+            {},
+        )
+        agent_id = str(node_run.get("agentId") or "").strip()
+        idempotency_key = str(bundle.get("idempotencyKey") or "").strip()
+        candidate_id = str(_candidate_scope(target).get("candidateId") or "").strip()
+        try:
+            fan_out = load_hypothesis_fan_out_input(record)
+            candidate_context = next(
+                (
+                    dict(item)
+                    for item in fan_out.get("candidateSnapshots") or []
+                    if str(item.get("candidateId") or "").strip() == candidate_id
+                ),
+                None,
+            )
+            if not agent_id or not idempotency_key or candidate_context is None:
+                raise AgentNodeExecutionError(
+                    f"queued candidate {candidate_id} cannot be dispatched from "
+                    "the persisted fan-out",
+                    code="candidate_fan_out_dispatch_invalid",
+                )
+            record, bundle, _started, anchor = _start_one_candidate_subtask(
+                store,
+                record,
+                node_id=node_id,
+                node_run_id=node_run_id,
+                agent_id=agent_id,
+                idempotency_key=idempotency_key,
+                payload={},
+                bundle=bundle,
+                fan_out=fan_out,
+                subtask=target,
+                candidate_context=candidate_context,
+            )
+        except (
+            AgentNodeExecutionError,
+            ResearchProjectAgentTaskError,
+            TaskBundleError,
+            ValueError,
+        ) as exc:
+            try:
+                record, bundle, _failure = _record_candidate_start_failure(
+                    store,
+                    record,
+                    bundle,
+                    node_run_id=node_run_id,
+                    subtask=target,
+                    candidate_id=candidate_id,
+                    exc=exc,
+                )
+            except TaskBundleError:
+                return started
+            continue
+        started.append(anchor)
+    return started
+
+
 def _start_candidate_tasks(
     store: WorkflowRunStore,
     record: dict[str, Any],
@@ -717,6 +964,9 @@ def _start_candidate_tasks(
             "TaskBundle candidate count no longer matches the bound selection",
             code="hypothesis_selection_replay_conflict",
         )
+    max_concurrency = max(
+        1, int(bundle.get("maxConcurrency") or len(subtasks) or 1)
+    )
     starts: list[dict[str, Any]] = []
     anchors: list[dict[str, Any]] = []
     started_subtasks: list[dict[str, Any]] = []
@@ -763,81 +1013,51 @@ def _start_candidate_tasks(
             anchors.append(anchor)
             started_subtasks.append(dict(subtask))
             continue
+        if str(subtask.get("status") or "") not in _QUEUEABLE_CANDIDATE_SUBTASK_STATUSES:
+            # Unbound terminal subtask: its start failure is already recorded
+            # and only an explicit retryCandidateId may re-run it.
+            continue
+        if (
+            _active_candidate_slot_count(
+                [dict(item) for item in bundle.get("subtasks") or []]
+            )
+            >= max_concurrency
+        ):
+            # Candidate stays pending in the bundle and is dispatched once a
+            # running sibling reaches a terminal state.
+            continue
         try:
-            record, started = _start_external_task(
+            record, bundle, started, anchor = _start_one_candidate_subtask(
                 store,
                 record,
                 node_id=node_id,
                 node_run_id=node_run_id,
                 agent_id=agent_id,
-                idempotency_key=f"{idempotency_key}:{candidate_id}",
-                payload={
-                    **payload,
-                    "targetRef": f"hypothesis:{fan_out['selectionId']}:{candidate_id}",
-                    "selectionId": fan_out["selectionId"],
-                    "candidateId": candidate_id,
-                    "selectedCandidateIds": list(fan_out["selectedCandidateIds"]),
-                    "subtaskId": str(subtask.get("subtaskId") or ""),
-                    "candidateContext": dict(candidate_context),
-                },
-            )
-            anchor = _task_anchor(started)
-            if str(anchor["agentId"] or "") != agent_id:
-                raise AgentNodeExecutionError(
-                    "started task Agent does not match the frozen NodeRun binding",
-                    code="binding_agent_mismatch",
-                )
-            missing = [
-                key
-                for key in ("taskId", "sessionId", "turnId")
-                if not str(anchor[key] or "")
-            ]
-            if missing:
-                raise AgentNodeExecutionError(
-                    f"Agent task anchor is incomplete: {', '.join(missing)}",
-                    code="incomplete_task_anchor",
-                )
-            _require_canonical_task_session(
-                session_id=str(anchor["sessionId"]),
-                agent_id=agent_id,
-            )
-            bundle = bind_agent_task_bundle(
-                store,
-                run_id=str(record["runId"]),
-                bundle_id=str(bundle["bundleId"]),
-                subtask_id=str(subtask.get("subtaskId") or ""),
-                task_id=str(anchor["taskId"]),
-                session_id=str(anchor["sessionId"]),
-                turn_id=str(anchor["turnId"]),
+                idempotency_key=idempotency_key,
+                payload=payload,
+                bundle=bundle,
+                fan_out=fan_out,
+                subtask=subtask,
+                candidate_context=candidate_context,
             )
         except (AgentNodeExecutionError, ResearchProjectAgentTaskError, TaskBundleError) as exc:
             try:
-                fail_agent_task_bundle_subtask(
+                record, bundle, failure = _record_candidate_start_failure(
                     store,
-                    run_id=str(record["runId"]),
+                    record,
+                    bundle,
                     node_run_id=node_run_id,
-                    subtask_id=str(subtask.get("subtaskId") or ""),
-                    failure_code=str(
-                        getattr(exc, "code", "candidate_task_start_failed")
-                    ),
-                    failure_summary=str(exc),
-                    attempt=int(subtask.get("attempt") or 1),
+                    subtask=subtask,
+                    candidate_id=candidate_id,
+                    exc=exc,
                 )
             except TaskBundleError:
-                pass
-            failures.append(
-                {
+                failure = {
                     "candidateId": candidate_id,
                     "code": str(getattr(exc, "code", "candidate_task_start_failed")),
                     "summary": str(exc),
                 }
-            )
-            record = store.get_run(str(record["runId"])) or record
-            bundle = next(
-                item
-                for item in record.get("taskBundles") or []
-                if item.get("bundleId") == bundle.get("bundleId")
-            )
+            failures.append(failure)
             continue
         record = store.get_run(str(record["runId"])) or record
         starts.append(started)
@@ -1363,12 +1583,9 @@ def start_agent_node_execution(
         max_concurrency = min(
             len(selected_candidate_ids), configured_limit, budget_limit
         )
-        if len(selected_candidate_ids) > max_concurrency:
-            raise AgentNodeExecutionError(
-                "selected candidate count exceeds the effective maxConcurrency; "
-                "reduce the selection or increase the concurrency limit",
-                code="candidate_fan_out_concurrency_exceeded",
-            )
+        # Candidates beyond the effective concurrency stay as pending bundle
+        # subtasks; they are dispatched one by one as running candidates reach
+        # a terminal state instead of failing the whole fan-out dispatch.
         subtask_specs = [
             {
                 "subtaskId": f"{node_run['nodeRunId']}:{fan_out['selectionId']}:{candidate_id}",

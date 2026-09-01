@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import pytest
 
+from core.research.workflow.definition import build_challenge_cup_workflow_definition
+from core.research.workflow.definition_registry import register_or_resolve
 from core.web.services.team_workflow import research_project_agent_tasks
 from core.web.services.team_workflow.research_runtime import (
     agent_node_execution,
@@ -17,6 +19,12 @@ from core.web.services.team_workflow.research_runtime.hypothesis_scoped_executio
     record_candidate_fragment_and_maybe_aggregate,
 )
 from core.web.services.team_workflow.research_runtime.store import WorkflowRunStore
+
+
+def _registered_workflow_version_id() -> str:
+    """Pin fixture runs like production run creation does (fail-closed registry)."""
+
+    return register_or_resolve(build_challenge_cup_workflow_definition()).workflowVersionId
 
 
 def _task(candidate_id: str) -> dict:
@@ -206,6 +214,8 @@ def test_fragments_close_independent_subtasks_and_last_one_fans_in(
     store.create_run(
         {
             "runId": "run-1",
+            "workflowId": "challenge-cup-research",
+            "workflowVersionId": _registered_workflow_version_id(),
             "teamId": "team-1",
             "projectId": "project-1",
             "inputSnapshot": {"questionId": "SCI-096"},
@@ -298,7 +308,7 @@ def test_agent_node_execution_fans_selection_into_ordered_child_tasks(
         {
             "runId": "run-1",
             "workflowId": "challenge-cup-research",
-            "workflowVersionId": "2.1.0",
+            "workflowVersionId": _registered_workflow_version_id(),
             "teamId": "team-1",
             "projectId": "project-1",
             "threadId": "thread-1",
@@ -432,7 +442,7 @@ def test_agent_node_execution_uses_bounded_legacy_fallback_without_selection(
         {
             "runId": "run-legacy-1",
             "workflowId": "challenge-cup-research",
-            "workflowVersionId": "2.1.0",
+            "workflowVersionId": _registered_workflow_version_id(),
             "teamId": "team-1",
             "projectId": "project-1",
             "threadId": "thread-legacy-1",
