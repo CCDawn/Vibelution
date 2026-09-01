@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { AgentInstance, SessionSummary } from "../../api/types";
 import {
   companionAgentIdForDirectSession,
+  companionRouteBindingIsVerified,
   sessionsForChatRoute,
 } from "./companionChatRouteIsolation";
 
@@ -78,5 +79,28 @@ describe("companionChatRouteIsolation", () => {
       .toBe("agent-companion");
     expect(companionAgentIdForDirectSession(companionActivity, "session-ordinary"))
       .toBe("");
+  });
+
+  it("verifies the requested Companion and direct Session as one binding", () => {
+    const companions = [{
+      agentId: "agent-companion",
+      directSessionId: "session-companion",
+    }];
+
+    expect(companionRouteBindingIsVerified(
+      companions,
+      "agent-companion",
+      "session-companion",
+    )).toBe(true);
+    expect(companionRouteBindingIsVerified(
+      companions,
+      "agent-wrong",
+      "session-companion",
+    )).toBe(false);
+    expect(companionRouteBindingIsVerified(
+      companions,
+      "agent-companion",
+      "session-wrong",
+    )).toBe(false);
   });
 });

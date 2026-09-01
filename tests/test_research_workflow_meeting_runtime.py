@@ -68,6 +68,73 @@ def test_meeting_discussion_executor_allows_four_concurrent_meetings() -> None:
     assert meeting_runtime._MEETING_DISCUSSION_EXECUTOR_MAX_WORKERS == 4
 
 
+def _capture_discussion_events(monkeypatch) -> list[dict[str, object]]:
+    events: list[dict[str, object]] = []
+
+    def capture(team_id, meeting_round_id, event_code, **details):
+        events.append(
+            {
+                "teamId": team_id,
+                "meetingRoundId": meeting_round_id,
+                "eventCode": event_code,
+                **details,
+            }
+        )
+
+    monkeypatch.setattr(
+        meeting_runtime,
+        "_record_meeting_discussion_driver_event",
+        capture,
+    )
+    return events
+
+
+def test_meeting_discussion_event_is_bounded_and_best_effort(monkeypatch):
+    from core.web.services import runtime_scene_service
+
+    captured: dict[str, object] = {}
+
+    def capture(*args, **kwargs):
+        captured.update({"args": args, **kwargs})
+
+    monkeypatch.setattr(
+        runtime_scene_service,
+        "record_runtime_scene_event_quietly",
+        capture,
+    )
+    meeting_runtime._record_meeting_discussion_driver_event(
+        "team-observed",
+        "meeting-observed",
+        "meeting_discussion.round.completed",
+        outcome="failed",
+        fields={"roomId": "room-observed", "roundId": "round-observed"},
+        error=RuntimeError("SECRET transcript and prompt"),
+        error_category="round_execution",
+    )
+
+    assert captured["fields"] == {
+        "teamId": "team-observed",
+        "meetingRoundId": "meeting-observed",
+        "roomId": "room-observed",
+        "roundId": "round-observed",
+        "errorCategory": "round_execution",
+        "errorType": "RuntimeError",
+    }
+    assert "SECRET" not in json.dumps(captured, ensure_ascii=False, default=str)
+
+    monkeypatch.setattr(
+        runtime_scene_service,
+        "record_runtime_scene_event_quietly",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("scene down")),
+    )
+    meeting_runtime._record_meeting_discussion_driver_event(
+        "team-observed",
+        "meeting-observed",
+        "meeting_discussion.run.started",
+        outcome="started",
+    )
+
+
 def _team_with_room(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(meetings, "PROJECT_ROOT", tmp_path)
@@ -891,6 +958,7 @@ def test_closure_gate_enforces_section_15_4_fail_closed(tmp_path, monkeypatch):
 
 
 def test_discussion_driver_stops_on_convergence_signal(tmp_path, monkeypatch):
+    events = _capture_discussion_events(monkeypatch)
     team_id, agents, opened = _open_meeting(tmp_path, monkeypatch)
     meeting_round_id = opened["meetingRound"]["meetingRoundId"]
 
@@ -903,6 +971,21 @@ def test_discussion_driver_stops_on_convergence_signal(tmp_path, monkeypatch):
     assert result["roundBudget"] == 3
     assert result["meetingRound"]["status"] == "awaiting_approval"
     assert len(result["chatRoomRoundIds"]) == 2
+    assert [event["eventCode"] for event in events] == [
+        "meeting_discussion.run.started",
+        "meeting_discussion.round.started",
+        "meeting_discussion.round.completed",
+        "meeting_discussion.stop.decided",
+        "meeting_discussion.summary.triggered",
+    ]
+    round_completed = events[2]
+    assert round_completed["fields"]["roundId"] == result["chatRoomRoundIds"][-1]
+    assert round_completed["fields"]["boundRoundCount"] == 2
+    stop_decided = events[3]
+    assert stop_decided["fields"]["stopReason"] == "converged"
+    assert stop_decided["fields"]["passMessageCount"] == len(agents)
+    assert events[4]["outcome"] == "succeeded"
+    assert events[4]["fields"]["summaryStatus"] == "awaiting_approval"
     room_detail = chat_room_service.get_chat_room_detail(result["roomId"])
     for round_id in result["chatRoomRoundIds"]:
         bound = next(item for item in room_detail["rounds"] if item["roundId"] == round_id)
@@ -914,6 +997,7 @@ def test_discussion_driver_stops_on_convergence_signal(tmp_path, monkeypatch):
 
 
 def test_formal_discussion_driver_reuses_bound_deadline_and_starts_no_late_round(monkeypatch):
+    events = _capture_discussion_events(monkeypatch)
     meeting = {
         "meetingRoundId": "meeting-deadline",
         "status": "open",
@@ -975,6 +1059,17 @@ def test_formal_discussion_driver_reuses_bound_deadline_and_starts_no_late_round
     assert result["stopReason"] == "challenge_deadline"
     assert result["roundsRun"] == 1
     assert result["completedMessageCount"] == 1
+    stop_decided = next(
+        event
+        for event in events
+        if event["eventCode"] == "meeting_discussion.stop.decided"
+    )
+    assert stop_decided["fields"]["stopReason"] == "challenge_deadline"
+    assert stop_decided["fields"]["deadlinePresent"] is True
+    assert not any(
+        event["eventCode"] == "meeting_discussion.summary.triggered"
+        for event in events
+    )
     assert meeting_runtime._round_config(
         {**meeting, "challengeDeadlineAtMs": 1_000_000},
         {},
@@ -1182,6 +1277,7 @@ def test_formal_discussion_starts_no_new_round_after_parent_run_inactive(
     monkeypatch,
     stop_reason,
 ):
+    events = _capture_discussion_events(monkeypatch)
     meeting = {
         "meetingRoundId": "meeting-parent-cancelled",
         "status": "open",
@@ -1233,6 +1329,11 @@ def test_formal_discussion_starts_no_new_round_after_parent_run_inactive(
     assert result["status"] == "stopped"
     assert result["stopReason"] == stop_reason
     assert result["roundsRun"] == 1
+    assert next(
+        event["fields"]["stopReason"]
+        for event in events
+        if event["eventCode"] == "meeting_discussion.stop.decided"
+    ) == stop_reason
 
 
 def test_fenced_meeting_persists_closed_terminal_and_cannot_reschedule(tmp_path, monkeypatch):
@@ -1552,6 +1653,7 @@ def test_auto_drive_hook_queues_discussion_instead_of_drafting(monkeypatch):
 
 
 def test_discussion_driver_stops_at_round_budget(tmp_path, monkeypatch):
+    events = _capture_discussion_events(monkeypatch)
     team_id, agents, opened = _open_meeting(tmp_path, monkeypatch, runner=_content_runner)
 
     result = meeting_runtime.run_meeting_discussion(
@@ -1563,9 +1665,15 @@ def test_discussion_driver_stops_at_round_budget(tmp_path, monkeypatch):
     assert result["stopReason"] == "budget_exhausted"
     assert result["roundsRun"] == 3
     assert result["completedMessageCount"] >= 3
+    assert next(
+        event["fields"]["stopReason"]
+        for event in events
+        if event["eventCode"] == "meeting_discussion.stop.decided"
+    ) == "budget_exhausted"
 
 
 def test_discussion_driver_enforces_max_messages_cap(tmp_path, monkeypatch):
+    events = _capture_discussion_events(monkeypatch)
     team_id, agents, opened = _open_meeting(tmp_path, monkeypatch, runner=_content_runner)
     meeting_round_id = opened["meetingRound"]["meetingRoundId"]
 
@@ -1579,6 +1687,11 @@ def test_discussion_driver_enforces_max_messages_cap(tmp_path, monkeypatch):
     assert result["stopReason"] == "max_messages"
     assert result["roundsRun"] < 3
     assert result["completedMessageCount"] >= 2
+    assert next(
+        event["fields"]["stopReason"]
+        for event in events
+        if event["eventCode"] == "meeting_discussion.stop.decided"
+    ) == "max_messages"
 
     with pytest.raises(ContractValidationError, match="maxMessages"):
         meeting_runtime.run_meeting_discussion(
@@ -1587,6 +1700,7 @@ def test_discussion_driver_enforces_max_messages_cap(tmp_path, monkeypatch):
 
 
 def test_failed_discussion_does_not_advance_to_summary(tmp_path, monkeypatch):
+    events = _capture_discussion_events(monkeypatch)
     team_id, _agents, opened = _open_meeting(
         tmp_path,
         monkeypatch,
@@ -1604,6 +1718,18 @@ def test_failed_discussion_does_not_advance_to_summary(tmp_path, monkeypatch):
     assert result["stopReason"] == "no_progress"
     assert result["summaryDraft"]["status"] == "blocked"
     assert result["summaryDraft"]["blocker"]["code"] == "discussion_has_no_completed_messages"
+    assert next(
+        event["fields"]["stopReason"]
+        for event in events
+        if event["eventCode"] == "meeting_discussion.stop.decided"
+    ) == "no_progress"
+    summary_triggered = next(
+        event
+        for event in events
+        if event["eventCode"] == "meeting_discussion.summary.triggered"
+    )
+    assert summary_triggered["outcome"] == "blocked"
+    assert summary_triggered["fields"]["summaryStatus"] == "blocked"
     persisted = meetings.get_meeting_round(team_id, meeting_round_id)["meetingRound"]
     assert persisted["status"] == "open"
     assert "summaryDraftError" not in persisted

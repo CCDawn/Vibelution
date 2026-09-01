@@ -4084,6 +4084,73 @@ def test_stage_one_r0_isolated_then_r1_requires_whitelisted_evidence(
     assert all(item["derivedFromDraftRefs"] for item in formal)
 
 
+def test_closed_stage_one_r0_evidence_scope_unblocks_source_finding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R0 owns the bounded search scope before formal candidates can exist."""
+    team_id, agents = _hf_env(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        question_launch,
+        "challenge_question_run_summary",
+        lambda _team_id: {"completedQuestionIds": [], "completedQuestionResults": []},
+    )
+
+    with server_operator_scope("u-1", roles=("operator",)):
+        opened = chain.open_candidate_generation_meeting(
+            team_id,
+            _QUESTION_ID,
+            agent_runner=_candidate_generation_runner,
+            _candidate_authority="exploratory_draft",
+        )
+        meeting_id = opened["meetingRound"]["meetingRoundId"]
+        actor = agents[_ROLES[0]]
+        _drive_to_awaiting_approval(team_id, meeting_id, actor)
+        draft = dict(
+            meetings.get_meeting_round(team_id, meeting_id)["meetingRound"][
+                "digestDraft"
+            ]
+        )
+        assert len(draft["proposedCandidates"]) == 2
+        draft["evidenceRequests"] = [
+            {
+                "rationale": "为两个机制补充可核验来源",
+                "candidateRefs": ["cand-a", "cand-b"],
+                "evidenceRefs": [],
+                "searchEnvelope": {
+                    "keywords": [
+                        "adenosine sleep deprivation",
+                        "synaptic homeostasis",
+                    ],
+                    "sourceTypes": ["paper"],
+                    "evidenceLevels": ["peer_reviewed"],
+                },
+                "requirements": {
+                    "minEvidenceLevel": "medium",
+                    "completeness": "stage-one",
+                },
+                "writebackPolicy": {},
+            }
+        ]
+        meetings.reject_meeting_digest_draft(
+            team_id, meeting_id, actor=actor, reason="补入已确认的搜集范围"
+        )
+        submitted = meetings.submit_meeting_digest_draft(team_id, meeting_id, draft)
+        draft = submitted["digestDraft"]
+        closed = chain.approve_meeting_digest(
+            team_id,
+            meeting_id,
+            closed_by=actor,
+            expected_digest_content_hash=draft["contentHash"],
+        )
+
+    assert closed["meetingRound"]["status"] == "closed"
+    assert closed["draftCount"] == 2
+    state = chain.chain_state(team_id, _QUESTION_ID)
+    assert state["candidateCount"] == 0
+    assert state["collectionRequestCount"] == 0
+    assert state["collectionReady"] is True
+
+
 def test_formal_grounded_candidates_fail_closed_on_refs_and_check(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

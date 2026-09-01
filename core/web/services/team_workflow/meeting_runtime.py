@@ -1742,32 +1742,38 @@ def _record_meeting_discussion_driver_event(
     event_code: str,
     *,
     outcome: str,
+    fields: Mapping[str, Any] | None = None,
     error: Exception | None = None,
+    error_category: str = "",
+    level: str | None = None,
 ) -> None:
-    """Emit bounded scheduler evidence without turning logs into authority."""
+    """Emit bounded discussion evidence without turning logs into authority."""
 
     try:
         from core.web.services.runtime_scene_service import (
             record_runtime_scene_event_quietly,
         )
 
+        event_fields = {
+            "teamId": team_id,
+            "meetingRoundId": meeting_round_id,
+            **dict(fields or {}),
+        }
+        if error is not None:
+            event_fields.update(
+                {
+                    "errorCategory": error_category or "runtime_error",
+                    "errorType": type(error).__name__,
+                }
+            )
         record_runtime_scene_event_quietly(
             "team_workflow",
             "meeting_discussion",
             event_code,
-            message=(
-                "Hypothesis meeting discussion driver failed."
-                if error is not None
-                else "Hypothesis meeting discussion driver scheduled."
-            ),
-            level="error" if error is not None else "info",
+            message="Hypothesis meeting discussion driver observed.",
+            level=level or ("error" if error is not None else "info"),
             outcome=outcome,
-            fields={
-                "teamId": team_id,
-                "meetingRoundId": meeting_round_id,
-                "errorType": type(error).__name__ if error is not None else "",
-                "error": str(error)[:240] if error is not None else "",
-            },
+            fields=event_fields,
             lifecycle=True,
         )
     except Exception:
@@ -1991,6 +1997,45 @@ def _run_meeting_discussion_impl(
                 **recovered_policy,
             }
     budget = int(meeting_round.get("rounds") or 3)
+    run_started_at = time.monotonic()
+    challenge_deadline_at_ms = meeting_round.get("challengeDeadlineAtMs")
+    deadline_present = bool(
+        isinstance(challenge_deadline_at_ms, int)
+        and not isinstance(challenge_deadline_at_ms, bool)
+        and challenge_deadline_at_ms > 0
+    )
+    initial_messages = meeting_rounds.meeting_source_messages(meeting_round)
+    initial_completed = [
+        message
+        for message in initial_messages
+        if str(message.get("status") or "").strip().lower() == "completed"
+    ]
+    _record_meeting_discussion_driver_event(
+        normalized_team_id,
+        normalized_round_id,
+        "meeting_discussion.run.started",
+        outcome="started",
+        fields={
+            "roomId": room_id,
+            "meetingType": str(meeting_round.get("meetingType") or ""),
+            "roundBudget": budget,
+            "boundRoundCount": len(bound_round_ids),
+            "messageCount": len(initial_messages),
+            "completedMessageCount": len(initial_completed),
+            "passMessageCount": sum(
+                1
+                for message in initial_completed
+                if meeting_rounds.is_pass_message(message)
+            ),
+            "maxMessages": normalized_max_messages,
+            "deadlinePresent": deadline_present,
+            "deadlineRemainingMs": (
+                max(0, challenge_deadline_at_ms - int(time.time() * 1000))
+                if deadline_present
+                else 0
+            ),
+        },
+    )
     stop_reason = ""
     while len(bound_round_ids) < budget:
         parent_run_stop_reason = workflow_run_stop_reason(receipt_authority)
@@ -2029,43 +2074,163 @@ def _run_meeting_discussion_impl(
         # Existing meetings may drain, but they cannot create another room
         # round after maintenance starts.
         assert_writes_allowed(normalized_team_id, operation="meeting_round_start")
+        round_started_at = time.monotonic()
+        _record_meeting_discussion_driver_event(
+            normalized_team_id,
+            normalized_round_id,
+            "meeting_discussion.round.started",
+            outcome="started",
+            fields={
+                "roomId": room_id,
+                "meetingType": str(meeting_round.get("meetingType") or ""),
+                "roundBudget": budget,
+                "boundRoundCount": len(bound_round_ids),
+                "discussionRoundIndex": discussion_round_index,
+                "messageCount": len(all_messages),
+                "completedMessageCount": len(completed),
+                "passMessageCount": sum(
+                    1
+                    for message in completed
+                    if meeting_rounds.is_pass_message(message)
+                ),
+                "maxMessages": normalized_max_messages,
+            },
+        )
         bound_result: dict[str, Any] = {}
 
         def bind_follow_up_round(
             _room: Mapping[str, Any], round_payload: Mapping[str, Any]
         ) -> None:
+            persisted_round_id = str(round_payload.get("roundId") or "")
             bound_result.update(
                 meeting_rounds.bind_meeting_chat_room_round(
                     normalized_team_id,
                     normalized_round_id,
                     room_id,
-                    str(round_payload.get("roundId") or ""),
+                    persisted_round_id,
                 )
             )
+            bound_result["roundId"] = persisted_round_id
 
-        chat_room_service.start_chat_room_round(
-            room_id,
-            _follow_up_topic(discussion_round_index),
-            purpose="meeting",
-            config=_round_config(
-                meeting_round,
-                selection,
-                discussion_round_index=discussion_round_index,
-                team_id=normalized_team_id,
-            ),
-            agent_runner=agent_runner,
-            background=False,
-            max_topic_lines=MEETING_TOPIC_MAX_LINES,
-            _model_invocation_receipt_authority=receipt_authority,
-            _on_round_persisted=bind_follow_up_round,
-        )
+        try:
+            round_result = chat_room_service.start_chat_room_round(
+                room_id,
+                _follow_up_topic(discussion_round_index),
+                purpose="meeting",
+                config=_round_config(
+                    meeting_round,
+                    selection,
+                    discussion_round_index=discussion_round_index,
+                    team_id=normalized_team_id,
+                ),
+                agent_runner=agent_runner,
+                background=False,
+                max_topic_lines=MEETING_TOPIC_MAX_LINES,
+                _model_invocation_receipt_authority=receipt_authority,
+                _on_round_persisted=bind_follow_up_round,
+            )
+        except Exception as exc:
+            _record_meeting_discussion_driver_event(
+                normalized_team_id,
+                normalized_round_id,
+                "meeting_discussion.round.completed",
+                outcome="failed",
+                error=exc,
+                error_category="round_execution",
+                fields={
+                    "roomId": room_id,
+                    "meetingType": str(meeting_round.get("meetingType") or ""),
+                    "roundBudget": budget,
+                    "boundRoundCount": len(bound_round_ids),
+                    "discussionRoundIndex": discussion_round_index,
+                    "maxMessages": normalized_max_messages,
+                    "elapsedMs": max(
+                        0, int((time.monotonic() - round_started_at) * 1000)
+                    ),
+                },
+            )
+            raise
         bound = bound_result
         meeting_round = bound["meetingRound"]
         bound_round_ids = _normalized_str_list(meeting_round.get("chatRoomRoundIds"))
+        round_messages = meeting_rounds.meeting_source_messages(meeting_round)
+        round_completed = [
+            message
+            for message in round_messages
+            if str(message.get("status") or "").strip().lower() == "completed"
+        ]
+        _record_meeting_discussion_driver_event(
+            normalized_team_id,
+            normalized_round_id,
+            "meeting_discussion.round.completed",
+            outcome="succeeded",
+            fields={
+                "roomId": room_id,
+                "meetingType": str(meeting_round.get("meetingType") or ""),
+                "roundBudget": budget,
+                "boundRoundCount": len(bound_round_ids),
+                "discussionRoundIndex": discussion_round_index,
+                "roundId": str(
+                    bound.get("roundId") or round_result.get("roundId") or ""
+                ),
+                "messageCount": len(round_messages),
+                "completedMessageCount": len(round_completed),
+                "passMessageCount": sum(
+                    1
+                    for message in round_completed
+                    if meeting_rounds.is_pass_message(message)
+                ),
+                "maxMessages": normalized_max_messages,
+                "elapsedMs": max(
+                    0, int((time.monotonic() - round_started_at) * 1000)
+                ),
+            },
+        )
     else:
         stop_reason = "budget_exhausted"
 
     all_messages = meeting_rounds.meeting_source_messages(meeting_round)
+    completed_count = sum(
+        1
+        for message in all_messages
+        if str(message.get("status") or "").strip().lower() == "completed"
+    )
+    pass_message_count = sum(
+        1
+        for message in all_messages
+        if str(message.get("status") or "").strip().lower() == "completed"
+        and meeting_rounds.is_pass_message(message)
+    )
+    challenge_deadline_at_ms = meeting_round.get("challengeDeadlineAtMs")
+    deadline_present = bool(
+        isinstance(challenge_deadline_at_ms, int)
+        and not isinstance(challenge_deadline_at_ms, bool)
+        and challenge_deadline_at_ms > 0
+    )
+    _record_meeting_discussion_driver_event(
+        normalized_team_id,
+        normalized_round_id,
+        "meeting_discussion.stop.decided",
+        outcome="stopped",
+        fields={
+            "roomId": room_id,
+            "meetingType": str(meeting_round.get("meetingType") or ""),
+            "roundBudget": budget,
+            "boundRoundCount": len(bound_round_ids),
+            "messageCount": len(all_messages),
+            "completedMessageCount": completed_count,
+            "passMessageCount": pass_message_count,
+            "maxMessages": normalized_max_messages,
+            "deadlinePresent": deadline_present,
+            "deadlineRemainingMs": (
+                max(0, challenge_deadline_at_ms - int(time.time() * 1000))
+                if deadline_present
+                else 0
+            ),
+            "stopReason": stop_reason,
+            "elapsedMs": max(0, int((time.monotonic() - run_started_at) * 1000)),
+        },
+    )
     if stop_reason == "challenge_deadline" or stop_reason.startswith(
         "challenge_workflow_run_"
     ):
@@ -2097,18 +2262,68 @@ def _run_meeting_discussion_impl(
             "stopReason": stop_reason,
             "summaryDraft": None,
         }
-    completed_count = sum(
-        1
-        for message in all_messages
-        if str(message.get("status") or "").strip().lower() == "completed"
-    )
+    summary_started_at = time.monotonic()
+    summary_error: Exception | None = None
     try:
         drafted = prepare_meeting_summary_draft(
             normalized_team_id, normalized_round_id, actor="system", force=False
         )
         meeting_round = drafted.get("meetingRound") or meeting_round
-    except Exception:
+    except Exception as exc:
+        summary_error = exc
         drafted = None
+    if summary_error is not None:
+        summary_status = "failed"
+        summary_outcome = "failed"
+    else:
+        drafted_status = str((drafted or {}).get("status") or "").strip().lower()
+        has_summary_error = isinstance(
+            (drafted or {}).get("summaryDraftError"), Mapping
+        )
+        summary_status = (
+            "failed"
+            if has_summary_error
+            else drafted_status
+            or str(meeting_round.get("status") or "").strip().lower()
+            or "completed"
+        )
+        summary_outcome = (
+            "failed"
+            if has_summary_error
+            else "blocked"
+            if drafted_status == "blocked"
+            else "succeeded"
+        )
+    _record_meeting_discussion_driver_event(
+        normalized_team_id,
+        normalized_round_id,
+        "meeting_discussion.summary.triggered",
+        outcome=summary_outcome,
+        error=summary_error,
+        level=(
+            "error"
+            if summary_outcome == "failed"
+            else "warning"
+            if summary_outcome == "blocked"
+            else "info"
+        ),
+        error_category=(
+            "contract_validation"
+            if isinstance(summary_error, ContractValidationError)
+            else "summary_execution"
+            if summary_error is not None
+            else ""
+        ),
+        fields={
+            "roomId": room_id,
+            "meetingType": str(meeting_round.get("meetingType") or ""),
+            "stopReason": stop_reason,
+            "summaryStatus": summary_status,
+            "elapsedMs": max(
+                0, int((time.monotonic() - summary_started_at) * 1000)
+            ),
+        },
+    )
     if drafted is not None:
         # Active-policy hook (autoCloseMeetingRound): a digest draft just
         # landed (meeting is awaiting_approval).  Gated, audited, quiet —
@@ -2203,11 +2418,87 @@ def _bound_room_deadline_policy_field(
     return None
 
 
+def _record_meeting_digest_scene_event(
+    event_code: str,
+    *,
+    outcome: str,
+    fields: Mapping[str, Any],
+    level: str = "info",
+    lifecycle: bool = False,
+) -> None:
+    """Emit bounded digest lifecycle evidence without becoming state authority."""
+
+    try:
+        from core.web.services.runtime_scene_service import (
+            record_runtime_scene_event_quietly,
+        )
+
+        record_runtime_scene_event_quietly(
+            "team_workflow",
+            "meeting_digest",
+            event_code,
+            message="Meeting digest lifecycle observed.",
+            level=level,
+            outcome=outcome,
+            fields=dict(fields),
+            lifecycle=lifecycle,
+        )
+    except Exception:  # noqa: BLE001 - diagnostics must never fail the meeting
+        # Diagnostics are best-effort and must never alter meeting state.
+        return
+
+
+def _meeting_digest_source_metrics(
+    meeting_round: Mapping[str, Any],
+    source_messages: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    completed = [
+        item
+        for item in source_messages
+        if str(item.get("status") or "").strip().lower() == "completed"
+    ]
+    return {
+        "teamId": str(meeting_round.get("teamId") or ""),
+        "meetingRoundId": str(meeting_round.get("meetingRoundId") or ""),
+        "meetingType": str(meeting_round.get("meetingType") or ""),
+        "meetingStatus": str(meeting_round.get("status") or ""),
+        "sourceMessageCount": len(source_messages),
+        "completedSourceMessageCount": len(completed),
+        "transcriptChars": sum(
+            len(str(item.get("content") or "")) for item in completed
+        ),
+        "participantCount": len(
+            _normalized_str_list(meeting_round.get("participants"))
+        ),
+        "roundCount": len(_normalized_str_list(meeting_round.get("chatRoomRoundIds"))),
+    }
+
+
+def _meeting_digest_fact_counts(draft: Mapping[str, Any]) -> dict[str, int]:
+    ledger = (
+        draft.get("factLedger")
+        if isinstance(draft.get("factLedger"), Mapping)
+        else draft
+    )
+    return {
+        "agreementCount": len(list(ledger.get("agreements") or [])),
+        "disagreementCount": len(list(ledger.get("disagreements") or [])),
+        "actionCount": len(list(ledger.get("actionItems") or [])),
+        "riskCount": len(list(ledger.get("risks") or [])),
+        "knowledgeCandidateCount": len(list(ledger.get("knowledgeCandidates") or [])),
+        "proposedCandidateCount": len(list(ledger.get("proposedCandidates") or [])),
+        "evidenceRequestCount": len(list(ledger.get("evidenceRequests") or [])),
+        "validationErrorCount": len(list(ledger.get("validationErrors") or [])),
+        "sourceMessageRefCount": len(list(ledger.get("sourceMessageRefs") or [])),
+    }
+
+
 def build_meeting_digest_draft(
     meeting_round: Mapping[str, Any],
     source_messages: Sequence[Mapping[str, Any]],
     *,
-    drafter: Callable[[dict[str, Any], list[dict[str, Any]]], Mapping[str, Any]] | None = None,
+    drafter: Callable[[dict[str, Any], list[dict[str, Any]]], Mapping[str, Any]]
+    | None = None,
 ) -> dict[str, Any]:
     """Build the Coordinator digest draft from bound room messages.
 
@@ -2219,7 +2510,9 @@ def build_meeting_digest_draft(
         drafted = drafter(dict(meeting_round), [dict(item) for item in source_messages])
         if not isinstance(drafted, Mapping):
             raise ContractValidationError("digest drafter must return a mapping")
-        return _merge_llm_digest_with_deterministic_markers(meeting_round, dict(drafted))
+        return _merge_llm_digest_with_deterministic_markers(
+            meeting_round, dict(drafted)
+        )
     markers = meeting_rounds.apply_unstructured_digest_fallback(
         meeting_rounds.extract_discussion_markers(source_messages),
         source_messages,
@@ -2335,6 +2628,15 @@ def _merge_llm_digest_with_deterministic_markers(
     merged["sourceMessageRefs"] = source_refs
     merged["evidenceRequests"] = evidence_requests
     merged["validationErrors"] = validation_errors
+    _record_meeting_digest_scene_event(
+        "meeting_digest.fact_ledger.projected",
+        outcome="succeeded",
+        fields={
+            "teamId": str(meeting_round.get("teamId") or ""),
+            "meetingRoundId": str(meeting_round.get("meetingRoundId") or ""),
+            **_meeting_digest_fact_counts(merged),
+        },
+    )
     return merged
 
 
@@ -2352,6 +2654,7 @@ def draft_meeting_digest(
     """
     from core.web.services import team_service
 
+    started_at = time.monotonic()
     normalized_team_id = team_service.assert_team_exists(team_id)
     normalized_round_id = str(meeting_round_id or "").strip()
     if not normalized_round_id:
@@ -2367,13 +2670,37 @@ def draft_meeting_digest(
         )
 
         effective_drafter = build_meeting_digest_drafter()
+    _record_meeting_digest_scene_event(
+        "meeting_digest.draft.started",
+        outcome="started",
+        fields={
+            **_meeting_digest_source_metrics(meeting_round, source_messages),
+            "drafterMode": "llm" if effective_drafter is not None else "deterministic",
+        },
+        lifecycle=True,
+    )
     draft = build_meeting_digest_draft(meeting_round, source_messages, drafter=effective_drafter)
     draft["sourceMessageContentHash"] = meeting_rounds.source_message_content_hash(
         source_messages
     )
-    return meeting_rounds.submit_meeting_digest_draft(
+    persisted = meeting_rounds.submit_meeting_digest_draft(
         normalized_team_id, normalized_round_id, draft
     )
+    _record_meeting_digest_scene_event(
+        "meeting_digest.draft.persisted",
+        outcome="succeeded",
+        fields={
+            "teamId": normalized_team_id,
+            "meetingRoundId": normalized_round_id,
+            "meetingStatus": str(persisted.get("status") or ""),
+            "drafterMode": "llm" if effective_drafter is not None else "deterministic",
+            "documentChars": len(str(draft.get("documentMarkdown") or "")),
+            "elapsedMs": max(0, int((time.monotonic() - started_at) * 1000)),
+            **_meeting_digest_fact_counts(draft),
+        },
+        lifecycle=True,
+    )
+    return persisted
 
 
 def discussion_driver_active() -> bool:
@@ -2552,6 +2879,7 @@ def _prepare_meeting_summary_draft_locked(
 ) -> dict[str, Any]:
     """Run the summary-draft state machine while its meeting lock is held."""
 
+    started_at = time.monotonic()
     meeting_round = meeting_rounds.get_meeting_round(normalized_team_id, normalized_round_id)[
         "meetingRound"
     ]
@@ -2565,6 +2893,19 @@ def _prepare_meeting_summary_draft_locked(
         dict(meeting_round.get("digestDraft"))
         if isinstance(meeting_round.get("digestDraft"), Mapping)
         else {}
+    )
+    _record_meeting_digest_scene_event(
+        "meeting_digest.prepare.started",
+        outcome="started",
+        fields={
+            **_meeting_digest_source_metrics(meeting_round, source_messages),
+            "teamId": normalized_team_id,
+            "meetingRoundId": normalized_round_id,
+            "force": bool(force),
+            "existingDraft": bool(existing_draft),
+            "drafterInjected": drafter is not None,
+        },
+        lifecycle=True,
     )
     stale_generation_draft = (
         str(meeting_round.get("meetingType") or "") == CANDIDATE_GENERATION_MEETING_TYPE
@@ -2580,6 +2921,18 @@ def _prepare_meeting_summary_draft_locked(
         )
     )
     if status == "closed":
+        _record_meeting_digest_scene_event(
+            "meeting_digest.prepare.reused",
+            outcome="closed",
+            fields={
+                "teamId": normalized_team_id,
+                "meetingRoundId": normalized_round_id,
+                "meetingStatus": status,
+                "reuseReason": "meeting_closed",
+                "elapsedMs": max(0, int((time.monotonic() - started_at) * 1000)),
+            },
+            lifecycle=True,
+        )
         return {
             "schemaVersion": meeting_rounds.SCHEMA_VERSION,
             "teamId": normalized_team_id,
@@ -2601,6 +2954,18 @@ def _prepare_meeting_summary_draft_locked(
         status = "summarizing"
         existing_draft = {}
     elif status == "awaiting_approval":
+        _record_meeting_digest_scene_event(
+            "meeting_digest.prepare.reused",
+            outcome="awaiting_approval",
+            fields={
+                "teamId": normalized_team_id,
+                "meetingRoundId": normalized_round_id,
+                "meetingStatus": status,
+                "reuseReason": "draft_already_persisted",
+                "elapsedMs": max(0, int((time.monotonic() - started_at) * 1000)),
+            },
+            lifecycle=True,
+        )
         return {
             "schemaVersion": meeting_rounds.SCHEMA_VERSION,
             "teamId": normalized_team_id,
@@ -2615,6 +2980,19 @@ def _prepare_meeting_summary_draft_locked(
     if status == "open":
         running = [] if force else meeting_rounds.running_bound_round_ids(meeting_round)
         if running:
+            _record_meeting_digest_scene_event(
+                "meeting_digest.prepare.blocked",
+                outcome="blocked",
+                level="warning",
+                fields={
+                    "teamId": normalized_team_id,
+                    "meetingRoundId": normalized_round_id,
+                    "blockerCode": "discussion_round_running",
+                    "runningRoundCount": len(running),
+                    "elapsedMs": max(0, int((time.monotonic() - started_at) * 1000)),
+                },
+                lifecycle=True,
+            )
             return {
                 "schemaVersion": meeting_rounds.SCHEMA_VERSION,
                 "teamId": normalized_team_id,
@@ -2629,6 +3007,19 @@ def _prepare_meeting_summary_draft_locked(
                 "storagePath": str(meeting_rounds._rounds_path(normalized_team_id)),
             }
         if not completed_source_messages:
+            _record_meeting_digest_scene_event(
+                "meeting_digest.prepare.blocked",
+                outcome="blocked",
+                level="warning",
+                fields={
+                    "teamId": normalized_team_id,
+                    "meetingRoundId": normalized_round_id,
+                    "blockerCode": "discussion_has_no_completed_messages",
+                    "runningRoundCount": 0,
+                    "elapsedMs": max(0, int((time.monotonic() - started_at) * 1000)),
+                },
+                lifecycle=True,
+            )
             return {
                 "schemaVersion": meeting_rounds.SCHEMA_VERSION,
                 "teamId": normalized_team_id,
@@ -2658,6 +3049,21 @@ def _prepare_meeting_summary_draft_locked(
             else {}
         )
     if status == "summarizing" and not completed_source_messages:
+        _record_meeting_digest_scene_event(
+            "meeting_digest.prepare.blocked",
+            outcome="blocked",
+            level="warning",
+            fields={
+                "teamId": normalized_team_id,
+                "meetingRoundId": normalized_round_id,
+                "blockerCode": "discussion_has_no_completed_messages",
+                "runningRoundCount": len(
+                    meeting_rounds.running_bound_round_ids(meeting_round)
+                ),
+                "elapsedMs": max(0, int((time.monotonic() - started_at) * 1000)),
+            },
+            lifecycle=True,
+        )
         return {
             "schemaVersion": meeting_rounds.SCHEMA_VERSION,
             "teamId": normalized_team_id,
@@ -2682,6 +3088,18 @@ def _prepare_meeting_summary_draft_locked(
         and str(existing_draft.get("sourceMessageContentHash") or "") == source_hash
         and not stale_generation_draft
     ):
+        _record_meeting_digest_scene_event(
+            "meeting_digest.prepare.reused",
+            outcome="succeeded",
+            fields={
+                "teamId": normalized_team_id,
+                "meetingRoundId": normalized_round_id,
+                "meetingStatus": status,
+                "reuseReason": "source_hash_unchanged",
+                "elapsedMs": max(0, int((time.monotonic() - started_at) * 1000)),
+            },
+            lifecycle=True,
+        )
         return meeting_rounds.submit_meeting_digest_draft(
             normalized_team_id, normalized_round_id, existing_draft
         )
@@ -2701,6 +3119,27 @@ def _prepare_meeting_summary_draft_locked(
         )
 
         timed_out = isinstance(exc, ReviewLLMTimeoutError)
+        error_category = (
+            "timeout"
+            if timed_out
+            else "contract_validation"
+            if isinstance(exc, ContractValidationError)
+            else "runtime_error"
+        )
+        _record_meeting_digest_scene_event(
+            "meeting_digest.draft.failed",
+            outcome="failed",
+            level="error",
+            fields={
+                "teamId": normalized_team_id,
+                "meetingRoundId": normalized_round_id,
+                "meetingStatus": status,
+                "errorCategory": error_category,
+                "errorType": type(exc).__name__,
+                "elapsedMs": max(0, int((time.monotonic() - started_at) * 1000)),
+            },
+            lifecycle=True,
+        )
         error = {
             "code": "summary_draft_timeout" if timed_out else "summary_draft_failed",
             "message": str(exc),
