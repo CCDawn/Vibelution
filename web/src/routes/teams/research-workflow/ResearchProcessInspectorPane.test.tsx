@@ -19,6 +19,12 @@ import {
 import type { ResearchProcessPanel } from "./researchProcessPanelSelection";
 import type { NodeDetailState } from "./useNodeDetailState";
 
+// The inspector leaves are lazy packs: on a loaded machine the on-demand
+// transform of the research-workflow chunk can outgrow the 5s default test
+// timeout even though flushUntil itself budgets 10s (400 x 25ms). Keep the
+// assertions unchanged and give this file room to wait for real rendering.
+vi.setConfig({ testTimeout: 30_000 });
+
 const leafHarness = vi.hoisted(() => ({
   props: null as Record<string, unknown> | null,
 }));
@@ -366,7 +372,7 @@ describe("ResearchProcessInspectorPane question-run cache scope", () => {
     );
 
     await act(async () => {
-      await vi.waitFor(() => expect(questionDetailHarness.props).not.toBeNull());
+      await vi.waitFor(() => expect(questionDetailHarness.props).not.toBeNull(), { timeout: 15_000 });
     });
     expect(mockedGetQuestionRunDetail).toHaveBeenCalledWith(
       "research-team",
@@ -387,7 +393,7 @@ describe("ResearchProcessInspectorPane question-run cache scope", () => {
         "research-team",
         "SCI-002",
         "run-current",
-      ));
+      ), { timeout: 15_000 });
     });
     expect(queryClient.getQueryCache().find({
       queryKey: queryKeys.challengeQuestionRunDetail("research-team", "SCI-002", "run-current"),
