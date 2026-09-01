@@ -105,10 +105,6 @@
   display: none;
 }
 
-:where(.vui-app-appshell).shell[data-desktop-shell="electron"] .topBar {
-  --shell-window-control-inset: 136px;
-}
-
 :where(.vui-app-appshell).topBar {
   position: fixed;
   top: 0;
@@ -167,9 +163,10 @@
 }
 
 /*
- * Intentionally no drag regions on topBar chrome. Electron titleBarOverlay already
- * owns window-control drag; extra -webkit-app-region: drag strips under the nav
- * band swallow primary navigation clicks on Windows.
+ * Intentionally no drag regions on topBar chrome. The Electron workbench window
+ * keeps the native title bar (titleBarStyle: default), so window controls never
+ * overlap the web content; extra -webkit-app-region: drag strips under the nav
+ * band only swallow primary navigation clicks on Windows.
  */
 
 :where(.vui-app-appshell).topBar::before {

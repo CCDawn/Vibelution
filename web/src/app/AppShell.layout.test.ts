@@ -97,7 +97,7 @@ describe("AppShell layout contract", () => {
     expect(shellStyles).toContain(".vui-app-appshell.topBar .navLink");
     expect(shellStyles).toContain("-webkit-app-region: no-drag !important");
 
-    // No extra Electron drag strips under the nav band (titleBarOverlay owns window chrome).
+    // No extra Electron drag strips under the nav band (native title bar owns window chrome).
     expect(shellStyles).not.toContain(
       ':where(.vui-app-appshell).shell[data-desktop-shell="electron"] .topBar .brandCopy',
     );
@@ -775,8 +775,11 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("syncWorkbenchThemeRoot(theme)");
     expect(shellSource).toContain("isElectronDesktopShell()");
     expect(shellSource).toContain('data-desktop-shell={desktopShell ? "electron" : "browser"}');
-    expect(shellStyles).toContain('.shell[data-desktop-shell="electron"] .topBar');
-    expect(shellStyles).toContain("--shell-window-control-inset");
+    // Native title bar (titleBarStyle: default) owns window controls; the top bar
+    // must not reserve an Electron inset band that pushes the right cluster inward.
+    expect(shellStyles).not.toContain('.shell[data-desktop-shell="electron"] .topBar');
+    expect(shellStyles).not.toContain("136px");
+    expect(shellStyles).toContain("--shell-window-control-inset: 0px");
     expect(shellStyles).not.toMatch(/font-size:\s*0\.(?:[0-6]\d?|7(?:0|1)?)rem/);
   });
 });
