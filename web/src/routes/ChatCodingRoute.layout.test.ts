@@ -3375,7 +3375,7 @@ describe("ChatCodingRoute layout contract", () => {
     );
     expect(canonicalizeEffect).toContain("chatRouteSelection.kind !== \"bare\"");
     expect(canonicalizeEffect).toContain("canonicalizeBareRoute(bareRouteBootstrapTarget)");
-    expect(canonicalizeEffect).toContain("if (!sessionsQuery.data)");
+    expect(canonicalizeEffect).toContain("if (!routeVisibleSessions)");
   });
 
   it("loads direct session details as a window and wires top-edge history paging", () => {

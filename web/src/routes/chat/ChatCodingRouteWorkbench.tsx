@@ -161,6 +161,10 @@ import { ChatSessionWorkbenchShell } from "./ChatSessionWorkbenchShell";
 import { CompanionConversationHeader } from "../companions/CompanionConversationHeader";
 import { CompanionLifeRail } from "../companions/CompanionLifeRail";
 import { CompanionPersonRail, type CompanionRailState } from "../companions/CompanionPersonRail";
+import {
+  companionAgentIdForDirectSession,
+  sessionsForChatRoute,
+} from "../companions/companionChatRouteIsolation";
 import { ChatWorkbenchCenterColumn } from "./ChatWorkbenchCenterColumn";
 import { useChatWorkbenchLayout } from "./useChatWorkbenchLayout";
 import {
@@ -539,6 +543,7 @@ export function ChatCodingRoute() {
   const {
     selection: chatRouteSelection,
     openSession,
+    openCompanionSession,
     openRoom,
     openProjectBus,
     canonicalizeBareRoute,
@@ -2333,8 +2338,38 @@ export function ChatCodingRoute() {
     pendingArchiveAgentIds,
   });
 
+  const routeVisibleSessions = useMemo(() => sessionsForChatRoute({
+    sessions: sessionsQuery.data,
+    agents: agentsQuery.data,
+    companionRouteVerified: verifiedCompanionMode,
+  }), [agentsQuery.data, sessionsQuery.data, verifiedCompanionMode]);
+
+  const requestedCompanionAgentId = useMemo(() => (
+    requestedCompanionId
+      ? ""
+      : companionAgentIdForDirectSession(agentsQuery.data, requestedSessionId)
+  ), [agentsQuery.data, requestedCompanionId, requestedSessionId]);
+
+  useEffect(() => {
+    if (!requestedSessionId || requestedCompanionId || requestedRoomId || !requestedCompanionAgentId) {
+      return;
+    }
+    openCompanionSession(requestedSessionId, requestedCompanionAgentId, {
+      replace: true,
+      returnLabel: lang === "zh" ? "人物大厅" : "Companion lobby",
+      telemetrySource: "companion_route_upgrade",
+    });
+  }, [
+    lang,
+    openCompanionSession,
+    requestedCompanionAgentId,
+    requestedCompanionId,
+    requestedRoomId,
+    requestedSessionId,
+  ]);
+
   const composerSessionReferenceOptions = useMemo(() =>
-    (sessionsQuery.data ?? [])
+    (routeVisibleSessions ?? [])
       .filter((session) => session.id !== activeSessionId)
       .map((session) => {
         const sessionAgent = session.agentId ? agentsById.get(session.agentId) : undefined;
@@ -2346,7 +2381,7 @@ export function ChatCodingRoute() {
           reference: buildSessionReferencePayload(session, display.name, session.taskSummary ?? ""),
         };
       }),
-  [activeSessionId, agentsById, lang, resolveModelLabel, sessionsQuery.data]);
+  [activeSessionId, agentsById, lang, resolveModelLabel, routeVisibleSessions]);
 
   const {
     allVisibleSessions,
@@ -2354,7 +2389,7 @@ export function ChatCodingRoute() {
     visibleChatAgents,
     activeSessionAgentId,
   } = useChatVisibleSessionCatalog({
-    sessions: sessionsQuery.data,
+    sessions: routeVisibleSessions,
     childSessions: childSessionsQuery.data,
     pendingArchiveAgentIds,
     archiveVisibleAgents,
@@ -2369,13 +2404,13 @@ export function ChatCodingRoute() {
     serverSessionId: activeSessionBootstrapQuery.data?.activeSessionId,
     activeSessionAgentId,
     selectedAgentId,
-    sessions: sessionsQuery.data,
+    sessions: routeVisibleSessions,
   });
 
   // Bare `/chat` canonicalizes once per location key, only after the session
   // directory is authoritative. Explicit routes always skip bootstrap.
   useEffect(() => {
-    if (!sessionsQuery.data) {
+    if (!routeVisibleSessions) {
       return;
     }
     if (chatRouteSelection.kind !== "bare") {
@@ -2385,7 +2420,7 @@ export function ChatCodingRoute() {
       return;
     }
     canonicalizeBareRoute(bareRouteBootstrapTarget);
-  }, [bareRouteBootstrapTarget, canonicalizeBareRoute, chatRouteSelection.kind, sessionsQuery.data]);
+  }, [bareRouteBootstrapTarget, canonicalizeBareRoute, chatRouteSelection.kind, routeVisibleSessions]);
   const selectedChatAgentId = selectedAgentId || activeSessionAgentId || visibleChatAgents[0]?.agentId || "";
 
   const {

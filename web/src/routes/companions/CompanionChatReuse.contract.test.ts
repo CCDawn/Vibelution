@@ -26,6 +26,9 @@ describe("virtual-human native Chat reuse", () => {
     expect(chatSource).toContain("requestedSessionId");
     expect(chatSource).toContain('get("companion")');
     expect(chatSource).toContain("companion.directSessionId === requestedSessionId");
+    expect(chatSource).toContain("sessionsForChatRoute({");
+    expect(chatSource).toContain("companionAgentIdForDirectSession(agentsQuery.data, requestedSessionId)");
+    expect(chatSource).toContain('telemetrySource: "companion_route_upgrade"');
     expect(chatSource).toContain("const verifiedCompanionMode = Boolean(activeCompanion);");
     expect(chatSource).toContain("const companionTransportAgentId = activeCompanion?.agentId;");
     expect(chatSource).toContain("const companionComposerDisabled = composerDisabled || (companionMode && !companionTransportAgentId);");
