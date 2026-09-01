@@ -117,6 +117,12 @@ export type HypothesisFirstNextActionInput = {
   selection?: HypothesisSelectionRecord | null;
   collectionRequests?: readonly CollectionRequestRecord[] | null;
   boundChatRoundsTerminal?: boolean;
+  /** Explicit override for "the discussion ended abnormally"; derived from
+   *  chatRounds when absent. */
+  boundChatRoundsTerminalFailed?: boolean;
+  /** Bound chat-room rounds; legacy fallback for terminal/failed derivation
+   *  when the caller has not precomputed a boolean. */
+  chatRounds?: ReadonlyArray<{ roundId: string; status: string }> | null;
   collectionChildStatus?: string | null;
   selectedNodeId?: string | null;
 };
@@ -126,17 +132,62 @@ const REVIEW_TYPE = "hypothesis_review";
 
 const COLLECTING_CHILD = new Set(["queued", "pending", "running", "collecting", "starting", "dispatching"]);
 const RECOVERY_CHILD = new Set(["failed", "needs_continue", "error", "blocked"]);
+// Backend stop_collection and terminal-event bridging park the child run on
+// "cancelled" (legacy "canceled" and "stopped" spellings also occur); a
+// stopped run needs the user-decides recovery surface, not a "collecting" mask.
+const STOPPED_CHILD = new Set(["cancelled", "canceled", "stopped"]);
 const COMPLETED_CHILD = new Set(["completed", "succeeded"]);
+// Terminal chat-round statuses, mirrored from the backend discussion-turn
+// taxonomy (core/web/services/team_workflow/research_runtime/
+// hypothesis_first_state_v2.py, _CHAT_ROOM_ROUND_TERMINAL_STATUSES unified
+// with _CHAT_ROOM_ROUND_TERMINAL_RUNTIME_STATUSES). A bound round in any of
+// these states means the room is done and the summary gate may open.
 const CHAT_TERMINAL = new Set([
+  // completed family
   "completed",
+  "done",
+  "ready",
+  "routed",
+  "success",
+  "succeeded",
+  // Backend finalizes mixed-success rounds as "partial"; the room is ready.
+  // Kept for old-snapshot replay.
+  "partial",
+  // Legacy defensive spellings never written by the current backend; kept so
+  // old persisted snapshots still replay as terminal.
   "finished",
-  "failed",
+  // continuation gates: the turn ended but a follow-up may still be needed
+  "needs_continue",
+  "paused_limit",
+  "closed",
+  // stopped family
   "cancelled",
   "canceled",
-  "succeeded",
+  "idle",
   "stopped",
-  // Backend finalizes mixed-success rounds as "partial"; the room is ready.
-  "partial",
+  "stopped_by_user",
+  "superseded",
+  "terminated",
+  // runtime stop bookkeeping
+  "force_stopped",
+  "orphan_reconciled",
+  "orphaned_room_reconciled",
+  // failed family
+  "error",
+  "failed",
+  "failed_provider",
+  "failed_runtime",
+  "stop_failed",
+]);
+// Failed endings still open the summary gate (captured content exists to
+// draft), but the status copy must say the discussion ended abnormally
+// instead of "finished".
+const CHAT_TERMINAL_FAILED = new Set([
+  "error",
+  "failed",
+  "failed_provider",
+  "failed_runtime",
+  "stop_failed",
 ]);
 
 /** Meeting-round queries are team-scoped; next-action state is question-scoped. */
@@ -215,6 +266,25 @@ export function chatRoundIsTerminal(status: string | null | undefined): boolean 
   return CHAT_TERMINAL.has(String(status || "").trim().toLowerCase());
 }
 
+export function chatRoundIsFailedTerminal(status: string | null | undefined): boolean {
+  return CHAT_TERMINAL_FAILED.has(String(status || "").trim().toLowerCase());
+}
+
+function boundChatRoundStatuses(input: {
+  meeting?: MeetingRoundRecord | null;
+  chatRounds?: ReadonlyArray<{ roundId: string; status: string }> | null;
+}): string[] | null {
+  const boundIds = (input.meeting?.chatRoomRoundIds ?? []).map((id) => id.trim()).filter(Boolean);
+  const rounds = input.chatRounds ?? [];
+  if (!boundIds.length) {
+    if (!rounds.length) return null;
+    return rounds.map((round) => round.status);
+  }
+  const byId = new Map(rounds.map((round) => [round.roundId, round]));
+  if (boundIds.some((id) => !byId.has(id))) return null;
+  return boundIds.map((id) => String(byId.get(id)?.status ?? ""));
+}
+
 export function boundChatRoundsAreTerminal(input: {
   meeting?: MeetingRoundRecord | null;
   chatRounds?: ReadonlyArray<{ roundId: string; status: string }> | null;
@@ -222,15 +292,19 @@ export function boundChatRoundsAreTerminal(input: {
   if (typeof input.meeting?.boundChatRoundsTerminal === "boolean") {
     return input.meeting.boundChatRoundsTerminal;
   }
-  const boundIds = (input.meeting?.chatRoomRoundIds ?? []).map((id) => id.trim()).filter(Boolean);
-  const rounds = input.chatRounds ?? [];
-  if (!boundIds.length) {
-    if (!rounds.length) return false;
-    return rounds.every((round) => chatRoundIsTerminal(round.status));
-  }
-  const byId = new Map(rounds.map((round) => [round.roundId, round]));
-  if (boundIds.some((id) => !byId.has(id))) return false;
-  return boundIds.every((id) => chatRoundIsTerminal(byId.get(id)?.status));
+  const statuses = boundChatRoundStatuses(input);
+  return statuses !== null && statuses.every((status) => chatRoundIsTerminal(status));
+}
+
+/** True when the bound rounds are observable and at least one ended in a
+ *  failed terminal state; callers combine it with terminal before showing
+ *  "ended abnormally" copy. */
+export function boundChatRoundsFailedTerminal(input: {
+  meeting?: MeetingRoundRecord | null;
+  chatRounds?: ReadonlyArray<{ roundId: string; status: string }> | null;
+}): boolean {
+  const statuses = boundChatRoundStatuses(input);
+  return statuses !== null && statuses.some((status) => chatRoundIsFailedTerminal(status));
 }
 
 export function evidenceRequestKeywords(request: MeetingEvidenceRequestDraft): string[] {
@@ -338,6 +412,7 @@ function meetingStage(
   kind: "generation" | "review",
   meeting: MeetingRoundRecord,
   terminal: boolean,
+  failedTerminal: boolean,
   reviewNodeId?: string,
   sibling?: HypothesisFirstSiblingProgress,
 ): HypothesisFirstNextAction {
@@ -369,9 +444,13 @@ function meetingStage(
       navigationLabel: generation ? "前往候选生成" : "前往评审讨论",
       command: "draft_summary",
       commandLabel: generation ? "整理候选清单" : "整理本轮结论",
-      statusMessage: generation
-        ? "团队讨论已结束，系统正在整理候选清单"
-        : `${siblingPrefix(sibling)}本轮评审已结束，系统正在整理结论`,
+      statusMessage: failedTerminal
+        ? (generation
+          ? "讨论异常终止，可基于已捕获的发言整理候选清单"
+          : `${siblingPrefix(sibling)}本轮讨论异常终止，可基于已捕获的发言整理结论`)
+        : (generation
+          ? "团队讨论已结束，系统正在整理候选清单"
+          : `${siblingPrefix(sibling)}本轮评审已结束，系统正在整理结论`),
       meetingRoundId: roundId,
     });
   }
@@ -482,7 +561,24 @@ export function resolveHypothesisFirstNextAction(
   const reviewRound = currentActionableProjectedReview(reviewProjection);
   const review = reviewRound?.meeting ?? null;
   const request = latestRequest(input.collectionRequests);
-  const terminal = Boolean(input.boundChatRoundsTerminal);
+  // Explicit caller boolean wins (precomputed by boundChatRoundsAreTerminal);
+  // otherwise fall back to the meeting's server-persisted flag, then to the
+  // bound chat rounds themselves, so the legacy route resolver does not read
+  // an ended room as "still discussing".
+  const explicitTerminal = typeof input.boundChatRoundsTerminal === "boolean"
+    ? input.boundChatRoundsTerminal
+    : null;
+  const explicitFailed = typeof input.boundChatRoundsTerminalFailed === "boolean"
+    ? input.boundChatRoundsTerminalFailed
+    : null;
+  const chatTerminalFor = (meeting: MeetingRoundRecord | null | undefined): boolean =>
+    explicitTerminal !== null
+      ? explicitTerminal
+      : boundChatRoundsAreTerminal({ meeting, chatRounds: input.chatRounds });
+  const chatFailedFor = (meeting: MeetingRoundRecord | null | undefined): boolean =>
+    explicitFailed !== null
+      ? explicitFailed
+      : boundChatRoundsFailedTerminal({ meeting, chatRounds: input.chatRounds });
   const state = input.chainState;
 
   // Meeting gates come before the converged navigation: a round still walking
@@ -491,13 +587,14 @@ export function resolveHypothesisFirstNextAction(
   // converged while its final review round sat in awaiting_approval offered
   // only 前往资料搜集, hiding 确认并结束本轮).
   if (generation && generation.status !== "closed") {
-    return meetingStage("generation", generation, terminal);
+    return meetingStage("generation", generation, chatTerminalFor(generation), chatFailedFor(generation));
   }
 
   if (reviewRound && reviewRound.meeting.status !== "closed") {
     const activeReview = reviewRound.meeting;
     const followUp = Boolean(reviewRound.previousMeetingRoundId);
-    if (activeReview.status === "open" && !terminal && followUp) {
+    const reviewTerminal = chatTerminalFor(activeReview);
+    if (activeReview.status === "open" && !reviewTerminal && followUp) {
       return action({
         stage: "next_review",
         targetNodeId: reviewRound.nodeId,
@@ -509,7 +606,8 @@ export function resolveHypothesisFirstNextAction(
     return meetingStage(
       "review",
       activeReview,
-      terminal,
+      reviewTerminal,
+      chatFailedFor(activeReview),
       reviewRound.nodeId,
       siblingProgress(reviewProjection, reviewRound),
     );
@@ -578,18 +676,22 @@ export function resolveHypothesisFirstNextAction(
   if (request && request.status !== "handed_off" && !request.handoffRef) {
     const status = childStatus(request, input.collectionChildStatus);
     const collectionRunId = String(request.collectionRunId || "").trim() || undefined;
-    if (RECOVERY_CHILD.has(status)) {
-      const recoveryReason = status === "failed" && request.status === "failed"
-        ? "资料搜集启动失败，请重试。"
-        : status === "failed"
-          ? "资料搜集失败，请重试。"
-        : "资料搜集未完成";
+    if (RECOVERY_CHILD.has(status) || STOPPED_CHILD.has(status)) {
+      const stopped = STOPPED_CHILD.has(status);
+      const recoveryReason = stopped
+        ? "资料搜集已停止，可重新发起搜集。"
+        : status === "failed" && request.status === "failed"
+          ? "资料搜集启动失败，请重试。"
+          : status === "failed"
+            ? "资料搜集失败，请重试。"
+            : "资料搜集未完成";
       return action({
         stage: "collection_recovery",
         targetNodeId: "source_finding",
         navigationLabel: "前往资料搜集",
         command: status === "needs_continue" ? "continue_collection" : "retry_collection",
         commandLabel: status === "needs_continue" ? "继续搜集" : "重试搜集",
+        statusMessage: stopped ? "资料搜集已停止" : undefined,
         recovery: {
           command: status === "needs_continue" ? "continue_collection" : "retry_collection",
           label: status === "needs_continue" ? "继续搜集" : "重试搜集",
@@ -648,7 +750,8 @@ export function resolveHypothesisFirstNextAction(
   if (request && (request.status === "handed_off" || request.handoffRef)) {
     const next = openReviewAfterHandoff(reviewProjection, request);
     if (next && next.meeting.status !== "closed") {
-      if (next.meeting.status === "open" && !terminal) {
+      const nextTerminal = chatTerminalFor(next.meeting);
+      if (next.meeting.status === "open" && !nextTerminal) {
         return action({
           stage: "next_review",
           targetNodeId: next.nodeId,
@@ -660,7 +763,8 @@ export function resolveHypothesisFirstNextAction(
       return meetingStage(
         "review",
         next.meeting,
-        terminal,
+        nextTerminal,
+        chatFailedFor(next.meeting),
         next.nodeId,
         siblingProgress(reviewProjection, next),
       );

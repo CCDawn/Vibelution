@@ -9,6 +9,9 @@ import type {
 } from "../../../api/types/hypothesisFirst";
 import {
   boundChatRoundsAreTerminal,
+  boundChatRoundsFailedTerminal,
+  chatRoundIsFailedTerminal,
+  chatRoundIsTerminal,
   focusNodeFromNextAction,
   hasValidEvidenceRequestKeywords,
   resolveHypothesisFirstNextAction,
@@ -404,6 +407,35 @@ describe("resolveHypothesisFirstNextAction", () => {
     expect(cont.commandLabel).toBe("继续搜集");
   });
 
+  it("enters recovery with stopped copy when the child run was cancelled", () => {
+    const cancelled = resolveHypothesisFirstNextAction({
+      run: { runId: "run-1" },
+      selection: selection(),
+      meetings: [meeting({ status: "closed" })],
+      collectionRequests: [request({ status: "pending", collectionRunStatus: "cancelled" })],
+    });
+    expect(cancelled.stage).toBe("collection_recovery");
+    expect(cancelled.statusMessage).toBe("资料搜集已停止");
+    expect(cancelled.command).toBe("retry_collection");
+    expect(cancelled.commandLabel).toBe("重试搜集");
+    expect(cancelled.recovery?.reason).toBe("资料搜集已停止，可重新发起搜集。");
+    expect(cancelled.collectionRunId).toBe("run-collect-1");
+    expect(shouldHideSourceFindingStart(cancelled.stage)).toBe(true);
+
+    // Legacy spellings and the generic stopped status share the same surface.
+    for (const status of ["canceled", "stopped"]) {
+      const next = resolveHypothesisFirstNextAction({
+        run: { runId: "run-1" },
+        selection: selection(),
+        meetings: [meeting({ status: "closed" })],
+        collectionRequests: [request({ status: "pending", collectionRunStatus: status })],
+      });
+      expect(next.stage, status).toBe("collection_recovery");
+      expect(next.statusMessage, status).toBe("资料搜集已停止");
+      expect(next.statusMessage, status).not.toBe("资料搜集中");
+    }
+  });
+
   it("uses the child-run terminal status when the request record is still pending", () => {
     const failed = resolveHypothesisFirstNextAction({
       run: { runId: "run-1" },
@@ -772,6 +804,181 @@ describe("bound chat terminal detection", () => {
       meeting: meeting({ chatRoomRoundIds: ["r1"] }),
       chatRounds: [{ roundId: "r1", status: "completed" }],
     })).toBe(true);
+  });
+});
+
+describe("legacy chat round terminal taxonomy", () => {
+  // Mirrors core/web/services/team_workflow/research_runtime/
+  // hypothesis_first_state_v2.py: _CHAT_ROOM_ROUND_TERMINAL_STATUSES unified
+  // with _CHAT_ROOM_ROUND_TERMINAL_RUNTIME_STATUSES.
+  const BACKEND_TERMINAL_STATUSES = [
+    "completed",
+    "done",
+    "ready",
+    "routed",
+    "success",
+    "succeeded",
+    "partial",
+    "needs_continue",
+    "paused_limit",
+    "closed",
+    "cancelled",
+    "canceled",
+    "idle",
+    "stopped",
+    "stopped_by_user",
+    "superseded",
+    "terminated",
+    "force_stopped",
+    "orphan_reconciled",
+    "orphaned_room_reconciled",
+    "error",
+    "failed",
+    "failed_provider",
+    "failed_runtime",
+    "stop_failed",
+  ];
+  const FAILED_TERMINAL_STATUSES = new Set([
+    "error",
+    "failed",
+    "failed_provider",
+    "failed_runtime",
+    "stop_failed",
+  ]);
+
+  it("treats every backend terminal round status as ended", () => {
+    for (const status of BACKEND_TERMINAL_STATUSES) {
+      expect(chatRoundIsTerminal(status), status).toBe(true);
+      expect(boundChatRoundsAreTerminal({
+        meeting: meeting({ chatRoomRoundIds: ["r1"] }),
+        chatRounds: [{ roundId: "r1", status }],
+      }), status).toBe(true);
+    }
+  });
+
+  it("keeps non-terminal and unknown round statuses open", () => {
+    for (const status of ["queued", "running", "stopping", "", "unknown_new_status"]) {
+      expect(chatRoundIsTerminal(status), status).toBe(false);
+    }
+    expect(chatRoundIsTerminal(undefined)).toBe(false);
+  });
+
+  it("replays legacy spellings (partial, finished) as terminal", () => {
+    expect(chatRoundIsTerminal("partial")).toBe(true);
+    expect(chatRoundIsTerminal(" Finished ")).toBe(true);
+  });
+
+  it("classifies failed endings apart from normal endings", () => {
+    for (const status of BACKEND_TERMINAL_STATUSES) {
+      expect(chatRoundIsFailedTerminal(status), status)
+        .toBe(FAILED_TERMINAL_STATUSES.has(status));
+    }
+    expect(chatRoundIsFailedTerminal("partial")).toBe(false);
+  });
+
+  it("flags an abnormal close when any bound round failed", () => {
+    expect(boundChatRoundsFailedTerminal({
+      meeting: meeting({ chatRoomRoundIds: ["r1", "r2"] }),
+      chatRounds: [
+        { roundId: "r1", status: "completed" },
+        { roundId: "r2", status: "failed_provider" },
+      ],
+    })).toBe(true);
+    // A user stop is an intentional end, not an abnormal one.
+    expect(boundChatRoundsFailedTerminal({
+      meeting: meeting({ chatRoomRoundIds: ["r1", "r2"] }),
+      chatRounds: [
+        { roundId: "r1", status: "completed" },
+        { roundId: "r2", status: "stopped_by_user" },
+      ],
+    })).toBe(false);
+    expect(boundChatRoundsFailedTerminal({ meeting: meeting() })).toBe(false);
+  });
+});
+
+describe("legacy discussion close copy", () => {
+  const openGenerationMeeting = () => [meeting({
+    meetingRoundId: "gen-1",
+    meetingType: "hypothesis_candidate_generation",
+    status: "open",
+  })];
+
+  it("distinguishes a normal close from an abnormal termination", () => {
+    const normal = resolveHypothesisFirstNextAction({
+      run: { runId: "run-1" },
+      meetings: openGenerationMeeting(),
+      boundChatRoundsTerminal: true,
+      boundChatRoundsTerminalFailed: false,
+    });
+    expect(normal.stage).toBe("generation_ready_to_summarize");
+    expect(normal.statusMessage).toBe("团队讨论已结束，系统正在整理候选清单");
+
+    const abnormal = resolveHypothesisFirstNextAction({
+      run: { runId: "run-1" },
+      meetings: openGenerationMeeting(),
+      boundChatRoundsTerminal: true,
+      boundChatRoundsTerminalFailed: true,
+    });
+    expect(abnormal.stage).toBe("generation_ready_to_summarize");
+    expect(abnormal.command).toBe("draft_summary");
+    expect(abnormal.statusMessage).toContain("讨论异常终止");
+    expect(abnormal.statusMessage).not.toBe(normal.statusMessage);
+  });
+
+  it("marks review close copy as abnormal when the round failed", () => {
+    const next = resolveHypothesisFirstNextAction({
+      run: { runId: "run-1" },
+      selection: selection(),
+      chainState: chain({ selectionId: "sel-1", candidateCount: 2 }),
+      meetings: [meeting({ status: "open" })],
+      boundChatRoundsTerminal: true,
+      boundChatRoundsTerminalFailed: true,
+    });
+    expect(next.stage).toBe("review_ready_to_summarize");
+    expect(next.commandLabel).toBe("整理本轮结论");
+    expect(next.statusMessage).toContain("本轮讨论异常终止");
+  });
+
+  it("derives terminal state from the meeting server flag when the caller passes no boolean", () => {
+    const next = resolveHypothesisFirstNextAction({
+      run: { runId: "run-1" },
+      meetings: [meeting({
+        meetingRoundId: "gen-1",
+        meetingType: "hypothesis_candidate_generation",
+        status: "open",
+        boundChatRoundsTerminal: true,
+      })],
+    });
+    expect(next.stage).toBe("generation_ready_to_summarize");
+    expect(next.statusMessage).toBe("团队讨论已结束，系统正在整理候选清单");
+  });
+
+  it("derives abnormal close from bound chat rounds when no boolean is passed", () => {
+    const failedProvider = resolveHypothesisFirstNextAction({
+      run: { runId: "run-1" },
+      meetings: [meeting({
+        meetingRoundId: "gen-1",
+        meetingType: "hypothesis_candidate_generation",
+        status: "open",
+        chatRoomRoundIds: ["r1"],
+      })],
+      chatRounds: [{ roundId: "r1", status: "failed_provider" }],
+    });
+    expect(failedProvider.stage).toBe("generation_ready_to_summarize");
+    expect(failedProvider.statusMessage).toContain("讨论异常终止");
+
+    const stoppedByUser = resolveHypothesisFirstNextAction({
+      run: { runId: "run-1" },
+      meetings: [meeting({
+        meetingRoundId: "gen-1",
+        meetingType: "hypothesis_candidate_generation",
+        status: "open",
+        chatRoomRoundIds: ["r1"],
+      })],
+      chatRounds: [{ roundId: "r1", status: "stopped_by_user" }],
+    });
+    expect(stoppedByUser.stage).toBe("generation_ready_to_summarize");
+    expect(stoppedByUser.statusMessage).toBe("团队讨论已结束，系统正在整理候选清单");
   });
 });
 
