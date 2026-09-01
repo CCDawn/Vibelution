@@ -2,7 +2,7 @@
 
 > 文档 ID：`CC-PARALLEL-CONCURRENCY-10P-20260902`
 >
-> 状态：`USER-REQUESTED / ACTIVE PLAN / BATCH 1+2 IMPLEMENTED 2026-09-02（A1/A2/B1/B2/B3/B4/B5/C1/C2/C6 已合入 main；C3–C5/C7/D1/D2 未开始；D2 通过前 10 并发不算达成）`
+> 状态：`USER-REQUESTED / IMPLEMENTED 2026-09-02（A/B/C 全批次 + D2 验收合入 main；D2 runtime-scene 10-run 并发五断言两遍全绿；sideflow 混跑与 B5 上限断言的 e2e 覆盖为后续增量）`
 >
 > 权威路径：根 `main` 的 `docs/plans/2026-09-02-challenge-cup-10-parallel-concurrency-plan.md`
 >
@@ -251,9 +251,12 @@ Temporal worker performance / activity timeouts / sticky execution（docs.tempor
 | C1 PROJECT_ROOT 传参化 | done | `e4e5516fa`（五处 swap 全删含 theme_discovery；ContextVar token 对称重置；缓存按路由根分区；遗留 research_service/chat_room 两处全局写待后续） |
 | C2 knowledge_base 锁 | done | `e51d2b24d`（RLock + PermissionError 退避；零新依赖裁决） |
 | C6 provider 限速 | done | `0e3a2a6c0`+`f811d41fc`（pyrate-limiter v4；arXiv 1/3s、Crossref 3/1s+mailto、OpenAlex 保守 5/1s；统一退避重试） |
-| C3/C4/C5/C7 | not started | — |
+| C3 dispatch TOCTOU 闭环 | done | `196584a07`（per-candidate 引用计数锁池包住全部 dispatch 入口汇聚点；审查报告的「create 无查重」为过时事实，真窗口在 create→bind） |
+| C4 work-run active 多槽 | done | `5ceec1f07`（activeRunIds 集合 + 锁内 RMW；`active_run_id=""` 语义改为仅移除本 run；单槽确认为存储限制非业务单例门） |
+| C5 候选导入原子性 | done | `d79c4f9de`（register 存储层 identity 幂等 + import 检查/注册同临界区双层） |
+| C7 formal run 生命周期 | done | `4fa773aa2`（formal_run 注册 active-work 三读端 + outputRoot 独占校验（归一比较）+ 汇总原子写复用 atomic_io；Job 对象按裁决跳过） |
 | D1 并发测试矩阵 | 部分 | 各任务自带并发用例已随批合入；集中 marker/selector 未做 |
-| D2 10 并发端到端验收 | not started | main 上 8 文件整合回归 82 passed（2026-09-02），非 runtime-scene 验收 |
+| D2 10 并发端到端验收 | done | `687b9a9ae`（真实 ledger+pump 10 worker+lease 心跳链路，五断言含峰值==10；两遍全绿 ~11.4s；无产品缺陷发现；sideflow 混跑为后续增量） |
 
 已知非本计划引入的既有失败（均已 main 基线复现确认）：`test_research_workflow_runtime_factory.py` 2 例（definition registry 冷启动注册时序，对应审查 R 项 definition_registry TOCTOU）；`test_challenge_cup_reset_checkpoint_receipt_ports.py` 2 例（storage_durability `.json.lock` 与 receipt 扫描白名单矛盾）。两者建议独立任务修复。
 
@@ -265,3 +268,9 @@ Temporal worker performance / activity timeouts / sticky execution（docs.tempor
 - D2（10 并发端到端验收）同时是分片改造的**前置基线**：D2 全绿 → 分片落地 → 复跑 D2 作为回归。
 - 本计划已合入的并发修复（C3 dispatch 串行化、B5 总闸等）与分片互补：编排层竞态归本计划，写入层「单门」归分片计划；后续批次若再遇全局锁/单文件瓶颈类问题，移交分片计划处理。
 - 止血任务 `hf-digest-lock-timeout`（锁超时+watchdog）、`hf-sibling-archive-gate`（兄弟归档门）、`hf-deadline-call-count`（deadline 次数对齐）在分片前保护现场，落地后保留为纵深防御。
+
+## 8. 批 3 + D2 收口（2026-09-02）
+
+批 3（C3/C4/C5/C7）与 D2 验收当日完成合入，main 推进至 `687b9a9ae`。D2 验收测试以真实生产链路（WorkflowLedgerStore 单写者 + CommandService CAS + Pump 10 worker + B2 lease 心跳 + 真实 checkpoint 接线）驱动 10 run 并发推进，五断言（零串线/零双执行/零锁失败/真重叠峰值==10/投影一致）两遍全绿，未发现产品并发缺陷。运行时并发配置入口：`VIBELUTION_WORKFLOW_WORKERS`（默认 10）、`VIBELUTION_LLM_MAX_CONCURRENT`（默认 10）、`VIBELUTION_LLM_GATE_ACQUIRE_TIMEOUT_SECONDS`（默认 120）、`VIBELUTION_MAX_CONCURRENT_REVIEW_CALLS`（默认 4）、provider 限速为 pyrate-limiter 常量（arXiv 1/3s、Crossref 3/1s、OpenAlex 5/1s）。
+
+并行实施期事故记录（供后续流程改进）：两个子 agent 的 `git stash` 基线验证在共享 worktree 上互卷（stash 栈为仓库级共享），双方改动经人工协调恢复、提交纯净性均经主 agent 验证；教训已固化——并行 worktree 基线切换一律用 `git diff > backup.patch` 替代 stash。
