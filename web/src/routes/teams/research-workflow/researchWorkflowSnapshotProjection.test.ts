@@ -68,12 +68,29 @@ const snapshot: ResearchWorkflowSnapshot = {
   budgetSummary: { safetyLimits: {}, receiptRefs: [], receiptCount: 0 },
   latestEventSequence: 3,
   generatedAt: "2026-08-12T14:00:00.000Z",
+  stageOne: {
+    authority: "challenge_program",
+    completionState: "pending",
+    formalTopology: {
+      workflowId: "challenge-cup-research",
+      workflowVersionId: "challenge-cup-research-v2.1.0",
+      definitionResolution: "pinned",
+      role: "execution_authority",
+    },
+    hypothesisView: { nodePrefix: "hf_", role: "operator_projection" },
+    knowledgeFlow: {
+      topology: "embedded",
+      rolloutMode: "off",
+      role: "formal_graph_nodes",
+    },
+  },
 };
 
 describe("researchWorkflowSnapshotProjection", () => {
   it("copies frozen Agent bindings onto canvas nodeRuns and the run record", () => {
     const projection = snapshotToCanvasProjection(snapshot);
     expect(projection.run.nodeRuns.source_finding.primaryAgentId).toBe("agent-finder");
+    expect(projection.stageOne).toBe(snapshot.stageOne);
     const record = snapshotToRunRecord(snapshot, []);
     expect(record.bindingSnapshots).toEqual([
       {

@@ -434,6 +434,11 @@ class ResearchWorkflowSnapshot:
     # diagnostic-visible so operators can see which surface is live without
     # reading the config file.
     knowledge_sideflow_mode: str = "off"
+    # Server-authored Stage 1 semantics.  This is a read projection over the
+    # pinned workflow definition and terminal run facts, not another lifecycle
+    # state machine.  Clients use it to distinguish the formal execution graph,
+    # the hf_* operator overlay, and the optional knowledge child workflow.
+    stage_one: Mapping[str, Any] = field(default_factory=dict)
 
     def _serialized_command_offers(self) -> list[dict[str, Any]]:
         auth_by_key = {
@@ -485,4 +490,5 @@ class ResearchWorkflowSnapshot:
             "knowledgeSideflowMode": str(
                 self.knowledge_sideflow_mode or "off"
             ),
+            "stageOne": dict(self.stage_one),
         }

@@ -26,6 +26,7 @@ export type ResearchWorkflowCanvasProjection = WorkflowCanvasProjection & {
   artifactSummary: ResearchWorkflowSnapshot["artifactSummary"];
   deliveryStatus: ResearchWorkflowSnapshot["deliveryStatus"];
   launchContext: ResearchWorkflowSnapshot["launchContext"];
+  stageOne: ResearchWorkflowSnapshot["stageOne"];
 };
 
 function asWorkflowDefinition(raw: Record<string, unknown>): WorkflowDefinition {
@@ -85,6 +86,7 @@ export function snapshotToCanvasProjection(
     artifactSummary: snapshot.artifactSummary,
     deliveryStatus: snapshot.deliveryStatus,
     launchContext: snapshot.launchContext,
+    stageOne: snapshot.stageOne,
     definition: asWorkflowDefinition(snapshot.definition),
     run: {
       runId: run.runId,

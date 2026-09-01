@@ -69,6 +69,38 @@ describe("ResearchCurrentTaskInspector", () => {
     await act(async () => root.unmount());
   });
 
+  it("explains the three Stage 1 surfaces from the server projection", async () => {
+    const { container, root } = await render(
+      <ResearchCurrentTaskInspector
+        context={context()}
+        stageOne={{
+          authority: "challenge_program",
+          completionState: "pending",
+          formalTopology: {
+            workflowId: "challenge-cup-research",
+            workflowVersionId: "challenge-cup-research-v3.0.0",
+            definitionResolution: "pinned",
+            role: "execution_authority",
+          },
+          hypothesisView: { nodePrefix: "hf_", role: "operator_projection" },
+          knowledgeFlow: {
+            topology: "child_workflow",
+            rolloutMode: "on",
+            role: "optional_child_workflow",
+          },
+        }}
+      />,
+    );
+
+    const summary = container.querySelector('[data-testid="stage-one-topology-summary"]');
+    expect(summary?.textContent).toContain("正式执行图 challenge-cup-research-v3.0.0");
+    expect(summary?.textContent).toContain("hf_* 仅为操作投影");
+    expect(summary?.textContent).toContain("知识补充为独立子流程");
+    expect(summary?.textContent).toContain("Challenge Program 登记为准");
+
+    await act(async () => root.unmount());
+  });
+
   it("keeps header, body, and footer regions mounted while the task is loading", async () => {
     const loading = context();
     loading.currentTask = null;

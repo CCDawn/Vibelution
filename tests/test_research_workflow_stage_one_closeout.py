@@ -213,7 +213,7 @@ def test_closeout_evidence_is_only_ready_until_catalog_approval() -> None:
     assert outcome.human_gate_count >= 2
 
 
-def test_approved_program_manifest_is_required_for_terminal_acceptance() -> None:
+def test_persisted_program_manifest_cannot_self_assert_terminal_acceptance() -> None:
     record = _stage_one_record()
     policy = load_stage_one_completion_policy()
     manifest = {
@@ -236,36 +236,37 @@ def test_approved_program_manifest_is_required_for_terminal_acceptance() -> None
     outcome = evaluate_stage_one_closeout(record, node_id="hypothesis_design")
 
     assert outcome is not None
-    assert outcome.accepted is True
-    assert outcome.status == "accepted"
-    assert outcome.completion_state == "STAGE1_G1_ACCEPTED"
-    assert outcome.completion_manifest_sha256 == manifest["manifestSha256"]
+    assert outcome.accepted is False
+    assert outcome.status == "program_review_required"
+    assert outcome.completion_state == ""
+    assert outcome.completion_manifest_sha256 == ""
 
 
-def test_completion_manifest_cannot_self_assert_program_approval() -> None:
+def test_fresh_program_handoff_is_required_for_terminal_acceptance() -> None:
     record = _stage_one_record()
-    policy = load_stage_one_completion_policy()
-    manifest = {
-        "schemaVersion": 1,
-        "manifestKind": "stage_one_completion",
+    handoff = {
         "workflowRunId": record["runId"],
         "questionId": record["questionId"],
-        "policySha256": policy.policySha256,
-        "programRecordId": f"{record['questionId']}:{record['runId']}",
-        "programReviewStatus": "review_required",
+        "recordId": f"{record['questionId']}:{record['runId']}",
+        "reviewStatus": "approved",
+        "outputSha256": "e" * 64,
         "sourceResultPackageHash": "a" * 64,
-        "canonicalPackageHash": "b" * 64,
+        "resultPackage": {"canonicalHash": "b" * 64},
         "officialModelCall": True,
         "receiptStatus": "passed",
-        "humanGates": {"allApproved": False, "approvedCount": 0},
+        "humanGates": {"allApproved": True, "approvedCount": 4},
     }
-    manifest["manifestSha256"] = _completion_manifest_sha256(manifest)
-    record["stageOneCompletionManifest"] = manifest
 
-    with pytest.raises(NodeExecutionError) as exc:
-        evaluate_stage_one_closeout(record, node_id="hypothesis_design")
+    outcome = evaluate_stage_one_closeout(
+        record,
+        node_id="hypothesis_design",
+        program_handoff=handoff,
+    )
 
-    assert exc.value.code == "stage_one_program_review_not_approved"
+    assert outcome is not None
+    assert outcome.accepted is True
+    assert outcome.completion_state == "STAGE1_G1_ACCEPTED"
+    assert outcome.program_record_id == handoff["recordId"]
 
 
 def test_finalize_rechecks_program_authority_before_terminal_write(
@@ -300,6 +301,7 @@ def test_finalize_rechecks_program_authority_before_terminal_write(
         "questionId": stored["questionId"],
         "recordId": f"{stored['questionId']}:{stored['runId']}",
         "reviewStatus": "approved",
+        "outputSha256": "e" * 64,
         "sourceResultPackageHash": "a" * 64,
         "resultPackage": {"canonicalHash": "b" * 64},
         "officialModelCall": True,
@@ -328,6 +330,7 @@ def test_finalize_rechecks_program_authority_before_terminal_write(
     assert finalized["status"] == "succeeded"
     assert finalized["completionState"] == "STAGE1_G1_ACCEPTED"
     assert finalized["stageOneCloseout"]["accepted"] is True
+    assert finalized["formalCloseoutEnqueued"] is False
     assert finalized["stageOneCompletionManifest"]["programRecordId"] == approved["recordId"]
     assert finalized["stageOneCompletionManifestRef"].startswith(
         "stage_one_completion_manifest:"

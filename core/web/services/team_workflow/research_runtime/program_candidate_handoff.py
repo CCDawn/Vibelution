@@ -522,6 +522,7 @@ def stage_one_completion_manifest_from_handoff(
     result_package = handoff.get("resultPackage")
     result_package = result_package if isinstance(result_package, dict) else {}
     source_hash = str(handoff.get("sourceResultPackageHash") or "").lower()
+    output_hash = str(handoff.get("outputSha256") or "").lower()
     canonical_hash = str(
         result_package.get("canonicalHash")
         or result_package.get("canonical_sha256")
@@ -534,6 +535,7 @@ def stage_one_completion_manifest_from_handoff(
         or human_gates.get("allApproved") is not True
         or int(human_gates.get("approvedCount") or 0) != 4
         or not _SHA256_RE.fullmatch(source_hash)
+        or not _SHA256_RE.fullmatch(output_hash)
         or not _SHA256_RE.fullmatch(canonical_hash)
         or not _SHA256_RE.fullmatch(str(policy_sha256 or ""))
     ):
@@ -547,6 +549,7 @@ def stage_one_completion_manifest_from_handoff(
         "questionId": str(handoff.get("questionId") or "").upper(),
         "policySha256": str(policy_sha256).lower(),
         "programRecordId": str(handoff.get("recordId") or ""),
+        "programOutputSha256": output_hash,
         "programReviewStatus": "approved",
         "sourceResultPackageHash": source_hash,
         "canonicalPackageHash": canonical_hash,

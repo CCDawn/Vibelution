@@ -43,6 +43,9 @@ class StageOneCloseoutOutcome:
     human_gate_count: int
     status: str = "accepted"
     completion_manifest_sha256: str = ""
+    program_record_id: str = ""
+    program_output_sha256: str = ""
+    canonical_package_sha256: str = ""
 
     @property
     def accepted(self) -> bool:
@@ -59,6 +62,9 @@ class StageOneCloseoutOutcome:
             "status": self.status,
             "accepted": self.accepted,
             "completionManifestSha256": self.completion_manifest_sha256,
+            "programRecordId": self.program_record_id,
+            "programOutputSha256": self.program_output_sha256,
+            "canonicalPackageSha256": self.canonical_package_sha256,
         }
 
 
@@ -82,10 +88,14 @@ def _validated_completion_manifest(
     record: Mapping[str, Any],
     *,
     policy: StageOneCompletionPolicy,
-) -> str:
-    raw = record.get("stageOneCompletionManifest")
+    verified_manifest: Mapping[str, Any] | None = None,
+) -> tuple[str, str, str, str]:
+    # A persisted workflow manifest is evidence, not Program authority.  The
+    # validator only accepts the manifest created from this call's fresh
+    # Program readback; ordinary run fields can never self-assert acceptance.
+    raw = verified_manifest
     if raw is None:
-        return ""
+        return "", "", "", ""
     if not isinstance(raw, Mapping):
         _fail(
             "stage-one completion manifest is malformed",
@@ -110,6 +120,7 @@ def _validated_completion_manifest(
     human_gates = raw.get("humanGates")
     human_gates = human_gates if isinstance(human_gates, Mapping) else {}
     package_hash = str(raw.get("sourceResultPackageHash") or "").lower()
+    output_hash = str(raw.get("programOutputSha256") or "").lower()
     canonical_hash = str(raw.get("canonicalPackageHash") or "").lower()
     if (
         str(raw.get("programRecordId") or "").strip() == ""
@@ -119,8 +130,12 @@ def _validated_completion_manifest(
         or human_gates.get("allApproved") is not True
         or int(human_gates.get("approvedCount") or 0) != 4
         or len(package_hash) != 64
+        or len(output_hash) != 64
         or len(canonical_hash) != 64
-        or any(char not in "0123456789abcdef" for char in package_hash + canonical_hash)
+        or any(
+            char not in "0123456789abcdef"
+            for char in package_hash + output_hash + canonical_hash
+        )
     ):
         _fail(
             "Challenge Program approval is incomplete",
@@ -133,7 +148,12 @@ def _validated_completion_manifest(
             "stage-one completion manifest hash does not match",
             code="stage_one_completion_manifest_invalid",
         )
-    return calculated_sha256
+    return (
+        calculated_sha256,
+        str(raw.get("programRecordId") or ""),
+        output_hash,
+        canonical_hash,
+    )
 
 
 def _fail(message: str, *, code: str) -> None:
@@ -228,6 +248,7 @@ def evaluate_stage_one_closeout(
     record: Mapping[str, Any],
     *,
     node_id: str,
+    program_handoff: Mapping[str, Any] | None = None,
 ) -> StageOneCloseoutOutcome | None:
     """Validate the immutable evidence set needed to stop at node 7."""
 
@@ -325,7 +346,32 @@ def evaluate_stage_one_closeout(
             "stage-one receipt stages are missing: " + ", ".join(missing_stages),
             code="stage_one_receipt_missing",
         )
-    completion_manifest_sha256 = _validated_completion_manifest(record, policy=policy)
+    verified_manifest: Mapping[str, Any] | None = None
+    if program_handoff is not None:
+        from .program_candidate_handoff import (
+            ProgramCandidateHandoffContractError,
+            stage_one_completion_manifest_from_handoff,
+        )
+
+        try:
+            verified_manifest = stage_one_completion_manifest_from_handoff(
+                dict(program_handoff),
+                policy_sha256=policy.policySha256,
+            )
+        except ProgramCandidateHandoffContractError as exc:
+            raise NodeExecutionError(
+                str(exc), code="stage_one_program_review_not_approved"
+            ) from exc
+    (
+        completion_manifest_sha256,
+        program_record_id,
+        program_output_sha256,
+        canonical_package_sha256,
+    ) = _validated_completion_manifest(
+        record,
+        policy=policy,
+        verified_manifest=verified_manifest,
+    )
     accepted = bool(completion_manifest_sha256)
     return StageOneCloseoutOutcome(
         completion_state=policy.completionState if accepted else "",
@@ -336,6 +382,9 @@ def evaluate_stage_one_closeout(
         human_gate_count=human_gate_count,
         status="accepted" if accepted else "program_review_required",
         completion_manifest_sha256=completion_manifest_sha256,
+        program_record_id=program_record_id,
+        program_output_sha256=program_output_sha256,
+        canonical_package_sha256=canonical_package_sha256,
     )
 
 
@@ -428,7 +477,11 @@ def finalize_stage_one_closeout(
             str(exc), code="stage_one_program_review_not_approved"
         ) from exc
     candidate = {**dict(record), "stageOneCompletionManifest": manifest}
-    outcome = evaluate_stage_one_closeout(candidate, node_id=policy.closureNodeId)
+    outcome = evaluate_stage_one_closeout(
+        candidate,
+        node_id=policy.closureNodeId,
+        program_handoff=handoff,
+    )
     if outcome is None or not outcome.accepted:
         _fail(
             "stage-one completion manifest did not authorize acceptance",
@@ -476,6 +529,12 @@ def finalize_stage_one_closeout(
         payload=manifest,
         artifact_identity=idempotency_key,
     )
+    formal_closeout_enqueued = _enqueue_production_stage_one_closeout(
+        record=record,
+        outcome=outcome,
+        idempotency_key=idempotency_key,
+        completed_at=completed_at,
+    )
 
     def mutation(current: dict[str, Any]) -> dict[str, Any]:
         if str(current.get("completionState") or "") == STAGE_ONE_ACCEPTED_STATE:
@@ -503,6 +562,7 @@ def finalize_stage_one_closeout(
             "stageOneCompletionManifest": manifest,
             "stageOneCompletionManifestRef": completion_artifact.artifactId,
             "stageOneCloseout": outcome.to_dict(),
+            "formalCloseoutEnqueued": formal_closeout_enqueued,
             "artifactManifests": [
                 *(current.get("artifactManifests") or []),
                 *(
@@ -525,6 +585,121 @@ def finalize_stage_one_closeout(
     return store.mutate_run(workflow_run_id, mutation)
 
 
+def enqueue_ledger_stage_one_closeout(
+    store: Any,
+    *,
+    workflow_run_id: str,
+    outcome: StageOneCloseoutOutcome,
+    idempotency_key: str,
+    completed_at_ms: int,
+) -> bool:
+    """Atomically enqueue the authoritative Ledger resume after Program approval."""
+
+    if not outcome.accepted:
+        _fail(
+            "stage-one Ledger finalize requires approved Program authority",
+            code="stage_one_program_review_not_approved",
+        )
+    from core.research.workflow.challenge_cup_runtime import action_id_for
+    from core.research.workflow.contracts import ExecutionReceipt
+
+    from .graph_dispatch_factory import build_graph_dispatch_record
+
+    run = store.get_run(workflow_run_id)
+    if run is None:
+        return False
+    policy = _stage_one_policy(_ledger_run_mapping(run))
+    if policy is None:
+        _fail("stage-one policy is missing", code="stage_one_policy_invalid")
+    attempt = store.latest_attempt(workflow_run_id, policy.closureNodeId)
+    if attempt is None or str(attempt.status) != "succeeded":
+        _fail(
+            "stage-one closure attempt is not durably succeeded",
+            code="stage_one_closure_attempt_missing",
+        )
+    receipt_action_id = action_id_for(
+        workflow_run_id,
+        policy.closureNodeId,
+        int(attempt.attempt),
+    )
+    receipt = ExecutionReceipt(
+        action_id=receipt_action_id,
+        node_run_id=str(attempt.node_run_id),
+        outcome="succeeded",
+        artifact_receipt_ids=(),
+        execution_anchor_id=attempt.execution_anchor_id,
+        budget_receipt_id=None,
+        problem=None,
+        completed_at_ms=int(completed_at_ms),
+    )
+    identity = f"{workflow_run_id}:{idempotency_key}:formal-closeout"
+    outbox_action_id = "act-stage1-finalize-" + hashlib.sha256(
+        identity.encode("utf-8")
+    ).hexdigest()[:12]
+    outbox = build_graph_dispatch_record(
+        run=run,
+        attempt=attempt,
+        command_id=str(attempt.command_id or "cmd-stage-one-finalize"),
+        dispatch_kind="resume_action",
+        now_ms=int(completed_at_ms),
+        receipt_payload=receipt.to_dict(),
+        state_update={
+            STAGE_ONE_CHECKPOINT_FIELD: outcome.completion_state,
+            "stage_one_closeout": outcome.to_dict(),
+        },
+        idempotency_key=f"graph:stage-one-finalize:{workflow_run_id}:{idempotency_key}",
+        action_id=outbox_action_id,
+    )
+
+    def mutation(uow: Any) -> bool:
+        if uow.repository.get_outbox(outbox_action_id) is not None:
+            return True
+        current = uow.repository.get_run(workflow_run_id)
+        current_attempt = uow.repository.get_attempt(str(attempt.node_run_id))
+        if current is None or current_attempt is None:
+            return False
+        if str(current_attempt.status) != "succeeded":
+            return False
+        uow.repository.insert_outbox(outbox)
+        return True
+
+    return bool(store.submit(mutation, force_flush=True).result(timeout=30))
+
+
+def _enqueue_production_stage_one_closeout(
+    *,
+    record: Mapping[str, Any],
+    outcome: StageOneCloseoutOutcome,
+    idempotency_key: str,
+    completed_at: str,
+) -> bool:
+    from datetime import datetime
+
+    from .runtime_factory import (
+        production_workflow_runtime,
+        wake_production_workflow_runtime,
+    )
+
+    runtime = production_workflow_runtime()
+    if runtime is None or runtime.store.get_run(str(record.get("runId") or "")) is None:
+        return False
+    completed_at_ms = int(datetime.fromisoformat(completed_at).timestamp() * 1000)
+    enqueued = enqueue_ledger_stage_one_closeout(
+        runtime.store,
+        workflow_run_id=str(record.get("runId") or ""),
+        outcome=outcome,
+        idempotency_key=idempotency_key,
+        completed_at_ms=completed_at_ms,
+    )
+    if not enqueued:
+        _fail(
+            "formal stage-one closeout could not be enqueued",
+            code="stage_one_formal_closeout_enqueue_failed",
+        )
+    wake_production_workflow_runtime()
+    return True
+
+
 def _ledger_run_mapping(run: Any) -> dict[str, Any]:
     try:
         snapshot = json.loads(str(getattr(run, "input_snapshot_json", "") or "{}"))
@@ -532,6 +707,8 @@ def _ledger_run_mapping(run: Any) -> dict[str, Any]:
         snapshot = {}
     return {
         "runId": str(getattr(run, "run_id", "") or ""),
+        "teamId": str(getattr(run, "team_id", "") or ""),
+        "projectId": str(getattr(run, "project_id", "") or ""),
         "workflowId": str(getattr(run, "workflow_id", "") or ""),
         "workflowVersionId": str(getattr(run, "workflow_version_id", "") or ""),
         "structureHash": str(getattr(run, "structure_hash", "") or ""),
@@ -669,7 +846,45 @@ def evaluate_ledger_stage_one_closeout(
             ],
         }
     )
-    return evaluate_stage_one_closeout(record, node_id=str(action.node_id))
+    evidence_outcome = evaluate_stage_one_closeout(
+        record,
+        node_id=str(action.node_id),
+    )
+    if evidence_outcome is None:
+        return None
+
+    from .program_candidate_handoff import (
+        HANDOFF_STATUS_NEEDS_CONTEXT,
+        ProgramCandidateHandoffContractError,
+        handoff_result_package_to_challenge_program,
+    )
+
+    snapshot = record.get("inputSnapshot")
+    snapshot = snapshot if isinstance(snapshot, Mapping) else {}
+    try:
+        handoff = handoff_result_package_to_challenge_program(
+            store=store,
+            team_id=str(record.get("teamId") or ""),
+            workflow_run_id=str(record.get("runId") or ""),
+            source_collection_run_id=str(
+                snapshot.get("sourceCollectionRunId") or record.get("runId") or ""
+            ),
+            registered_by="stage_one_ledger_closeout",
+        )
+    except ProgramCandidateHandoffContractError as exc:
+        raise NodeExecutionError(
+            str(exc), code="stage_one_program_authority_invalid"
+        ) from exc
+    if (
+        str(handoff.get("status") or "") == HANDOFF_STATUS_NEEDS_CONTEXT
+        or str(handoff.get("reviewStatus") or "") != "approved"
+    ):
+        return evidence_outcome
+    return evaluate_stage_one_closeout(
+        record,
+        node_id=str(action.node_id),
+        program_handoff=handoff,
+    )
 
 
 def stage_one_terminal_facts(
@@ -697,6 +912,7 @@ __all__ = [
     "STAGE_ONE_CLOSEOUT_COMMAND",
     "StageOneCloseoutOutcome",
     "build_stage_one_closeout_action",
+    "enqueue_ledger_stage_one_closeout",
     "evaluate_ledger_stage_one_closeout",
     "evaluate_stage_one_closeout",
     "finalize_stage_one_closeout",
