@@ -819,3 +819,254 @@ def test_verbatim_quote_writeback_materializes_ledger_row_and_gate_allows(tmp_pa
     )
     assert stored_task["status"] != "needs_review"
     assert stored_task["claimMaterialization"]["claimEvidenceCount"] == 3
+
+
+# ---------------------------------------------------------------------------
+# Challenge v2 证据卡契约回写门（生产实锤 run-882610596ddb / N3）——叠加语义
+#
+# 两层防线（f8d5d08e2 兜底在前，本门在后，不是二选一）：
+# 1. 服务端兜底先消灭「模型遗漏 retrieved_at」主流失败（真实链上时间补齐）；
+# 2. 兜底补齐之后仍违反 Challenge v2 卡契约的（其他必填缺失、结构违约），
+#    在写回接受边界用与 materialize 相同的校验器（_materializable_claims +
+#    normalize_challenge_evidence_fields，禁止第二套规则）结构化拒绝并带
+#    精确 path，agent 同任务补正；completionGate 不得在违约数据上 passed。
+# ---------------------------------------------------------------------------
+
+
+def _missing_retrieved_at_entry(candidate, *, index: int = 1) -> dict:
+    """run-882610596ddb 的条目形态：quote 锚齐全但系统性缺 retrieved_at。"""
+    entry = _anchored_extraction_entry(candidate, index=index)
+    entry.pop("retrieved_at")
+    return entry
+
+
+def test_missing_retrieved_at_backfilled_then_gate_passes_and_materializes(
+    tmp_path, monkeypatch
+):
+    """①缺 retrieved_at → 服务端兜底补齐 → 契约门放行 → 真实物化成功。
+
+    与 SCI-091 兜底用例互补：那里锁定兜底值本身与 build_source_extraction_
+    evidence_cards 放行；这里锁定叠加链路的终点——回写被接受、canonical
+    result 带兜底时间、真实 claim materializer 物化出 ledger 行 + ClaimEvidence。
+    """
+    from datetime import datetime
+
+    from core.research.evidence import ClaimEvidenceStore
+    from core.web.services.team_workflow import claim_ledger
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_first_chain as chain,
+    )
+
+    setup = _seed_completed_extraction_task(tmp_path, monkeypatch)
+    task = setup["task"]
+    _append_stage_task_tool_trace(tmp_path, task["task"])
+
+    complete = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        setup["teamId"],
+        task["taskId"],
+        {
+            "status": "completed",
+            "summary": "完成 3/3 条候选资料提炼（条目省略 retrieved_at）。",
+            "result": {
+                "candidateExtractions": [
+                    _missing_retrieved_at_entry(item, index=index)
+                    for index, item in enumerate(setup["candidates"], start=1)
+                ]
+            },
+            "recordedByAgent": task["task"]["agentId"],
+        },
+    )
+    # 不再拒绝：兜底补齐后契约门放行，任务落成 completed。
+    assert complete["task"]["status"] == "completed"
+
+    # 兜底值为该候选被注册的真实时间，且满足 RFC3339 带时区。
+    created_by_id = {item["candidateId"]: item["createdAt"] for item in setup["candidates"]}
+    stored_entries = complete["task"]["result"]["candidateExtractions"]
+    assert len(stored_entries) == 3
+    for entry in stored_entries:
+        assert entry["retrieved_at"] == created_by_id[entry["candidateId"]]
+        parsed = datetime.fromisoformat(entry["retrieved_at"].replace("Z", "+00:00"))
+        assert parsed.tzinfo is not None
+
+    # 真实物化链路终点：ledger 幂合一行 + ClaimEvidence 按候选各一条。
+    monkeypatch.setattr(claim_ledger, "PROJECT_ROOT", tmp_path, raising=False)
+    monkeypatch.setattr(chain, "PROJECT_ROOT", tmp_path, raising=False)
+    scope = chain._question_scope_envelope(setup["teamId"], "SCI-096")
+    monkeypatch.setattr(
+        agent_claim_evidence_materializer,
+        "_formal_question_scope",
+        lambda team_id, workflow_run_id: scope,
+    )
+    real_get_agent = agent_directory_service.get_agent
+
+    def fake_get_agent(agent_id, **kwargs):
+        agent = dict(real_get_agent(agent_id, **kwargs) or {})
+        bindings = dict(agent.get("llmBindings") or {})
+        bindings.setdefault("dialogue", {"modelId": "local/qwen3.5-9b"})
+        agent["llmBindings"] = bindings
+        return agent
+
+    monkeypatch.setattr(agent_directory_service, "get_agent", fake_get_agent)
+
+    result = team_workflow_orchestration_service.reconcile_source_collection_stage_session_task_after_turn(
+        setup["teamId"],
+        task["taskId"],
+        run_id=setup["runId"],
+        session_id=task["sessionId"],
+        turn_id=task["task"]["turn"]["turnId"],
+        final_status="completed",
+    )
+    assert result["taskStatus"] == "completed"
+    assert result["claimMaterialization"]["status"] == "materialized"
+    assert result["claimMaterialization"]["claimEvidenceCount"] == 3
+    stored = ClaimEvidenceStore(tmp_path).list(setup["teamId"])
+    assert len(stored) == 3
+
+
+def test_post_backfill_contract_violation_rejected_then_corrected_round_trip(
+    tmp_path, monkeypatch
+):
+    """②兜底后仍违约（缺 title，非 retrieved_at）→ 精确 path 拒绝 → 补正 → 物化成功。"""
+    from core.research.evidence import ClaimEvidenceStore
+    from core.web.services.team_workflow import claim_ledger
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_first_chain as chain,
+    )
+
+    setup = _seed_completed_extraction_task(tmp_path, monkeypatch)
+    task = setup["task"]
+    _append_stage_task_tool_trace(tmp_path, task["task"])
+
+    broken = _missing_retrieved_at_entry(setup["candidates"][0])
+    broken.pop("title")  # 兜底只管 retrieved_at，title 仍由契约门拦截。
+    with pytest.raises(
+        team_workflow_orchestration_service.TeamWorkflowOrchestrationError,
+        match="title",
+    ) as excinfo:
+        team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+            setup["teamId"],
+            task["taskId"],
+            {
+                "status": "completed",
+                "summary": "完成资料提炼。",
+                "result": {"candidateExtractions": [broken]},
+                "recordedByAgent": task["task"]["agentId"],
+            },
+        )
+    # 拒绝必须带精确 path，agent 才能在同一任务内定位补正重写。
+    assert "candidateExtractions[0]" in str(excinfo.value)
+    assert "Challenge v2" in str(excinfo.value)
+
+    stored_task, _run_id = team_workflow_orchestration_service._find_source_collection_stage_session_task_by_id(
+        setup["teamId"], task["taskId"]
+    )
+    # 违约数据不得落成 completed 任务（completionGate 不得放行）。
+    assert stored_task["status"] != "completed"
+
+    # 补正重写：同一任务、同一 candidateId，补上 title（retrieved_at 继续交给兜底；
+    # 3 条全覆盖保 completed）。
+    entries = [
+        _missing_retrieved_at_entry(item, index=index)
+        for index, item in enumerate(setup["candidates"], start=1)
+    ]
+    complete = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        setup["teamId"],
+        task["taskId"],
+        {
+            "status": "completed",
+            "summary": "补正 1/3 条候选的 title 后完成资料提炼。",
+            "result": {"candidateExtractions": entries},
+            "recordedByAgent": task["task"]["agentId"],
+        },
+    )
+    assert complete["task"]["status"] == "completed"
+
+    # 真实物化链路：ledger 幂合一行 + ClaimEvidence 按候选各一条。
+    monkeypatch.setattr(claim_ledger, "PROJECT_ROOT", tmp_path, raising=False)
+    monkeypatch.setattr(chain, "PROJECT_ROOT", tmp_path, raising=False)
+    scope = chain._question_scope_envelope(setup["teamId"], "SCI-096")
+    monkeypatch.setattr(
+        agent_claim_evidence_materializer,
+        "_formal_question_scope",
+        lambda team_id, workflow_run_id: scope,
+    )
+    real_get_agent = agent_directory_service.get_agent
+
+    def fake_get_agent(agent_id, **kwargs):
+        agent = dict(real_get_agent(agent_id, **kwargs) or {})
+        bindings = dict(agent.get("llmBindings") or {})
+        bindings.setdefault("dialogue", {"modelId": "local/qwen3.5-9b"})
+        agent["llmBindings"] = bindings
+        return agent
+
+    monkeypatch.setattr(agent_directory_service, "get_agent", fake_get_agent)
+
+    result = team_workflow_orchestration_service.reconcile_source_collection_stage_session_task_after_turn(
+        setup["teamId"],
+        task["taskId"],
+        run_id=setup["runId"],
+        session_id=task["sessionId"],
+        turn_id=task["task"]["turn"]["turnId"],
+        final_status="completed",
+    )
+    assert result["taskStatus"] == "completed"
+    assert result["claimMaterialization"]["status"] == "materialized"
+    assert result["claimMaterialization"]["claimEvidenceCount"] == 3
+    stored = ClaimEvidenceStore(tmp_path).list(setup["teamId"])
+    assert len(stored) == 3
+
+
+def test_card_gate_preserves_legal_writeback_shapes(tmp_path, monkeypatch):
+    """④合法回写不受影响：exclude 条目与诚实 missing_evidence_anchor 不参与卡契约。"""
+    setup = _seed_completed_extraction_task(tmp_path, monkeypatch)
+    task = setup["task"]
+    _append_stage_task_tool_trace(tmp_path, task["task"])
+
+    excluded = {
+        "candidateId": setup["candidates"][1]["candidateId"],
+        "decision": "exclude",
+        "valueSummary": "与问题无关，仅保留否决理由。",
+    }
+    entries = [
+        _anchored_extraction_entry(setup["candidates"][0], index=1),
+        excluded,
+        _anchored_extraction_entry(setup["candidates"][2], index=3),
+    ]
+    complete = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        setup["teamId"],
+        task["taskId"],
+        {
+            "status": "completed",
+            "summary": "完成 3/3 条候选资料提炼（1 条否决）。",
+            "result": {"candidateExtractions": entries},
+            "recordedByAgent": task["task"]["agentId"],
+        },
+    )
+    # exclude 条目没有 v2 字段也必须照常接受——materializer 会跳过它。
+    assert complete["task"]["status"] == "completed"
+
+
+def test_card_gate_skips_missing_evidence_anchor_alias_entry(tmp_path, monkeypatch):
+    """④别名归一后的诚实跳过条目（missing_evidence_anchor）不被卡契约误拒。"""
+    setup = _seed_completed_extraction_task(tmp_path, monkeypatch)
+    task = setup["task"]
+    _append_stage_task_tool_trace(tmp_path, task["task"])
+
+    alias_entry = _incident_extraction_entry(setup["candidates"][0])
+    alias_entry["evidenceRefs"] = [
+        {"id": "abstract-quote-1", "type": "quote", "quote": _CANDIDATE_SUMMARY_QUOTE}
+    ]
+    complete = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        setup["teamId"],
+        task["taskId"],
+        {
+            "status": "completed",
+            "summary": "单条候选诚实跳过。",
+            "result": {"candidateExtractions": [alias_entry]},
+            "recordedByAgent": task["task"]["agentId"],
+        },
+    )
+    assert complete["task"]["status"] in {"completed", "needs_review"}
+    assert complete["task"]["result"]["candidateExtractions"][0]["evidenceStatus"] == (
+        "missing_evidence_anchor"
+    )

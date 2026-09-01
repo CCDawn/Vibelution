@@ -688,3 +688,61 @@ def test_delivery_action_without_run_id_leaves_invalid_scene_event(
         assert event["fields"]["actionId"] == "delivery-outbox-obs-invalid"
     finally:
         harness.close()
+
+
+def test_adapter_contract_violation_keeps_dedicated_problem_code(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """N3：turn 终结阶段的 fail-closed 契约违约以专用 problem code 失败，
+    不再泛化成 adapter_execution_exception；节点仍 fail-closed。"""
+    from core.web.services.team_workflow.research_runtime.action_registry import (
+        AdapterPreflight,
+    )
+    from core.web.services.team_workflow.research_runtime.agent_turn_completion import (
+        SourceExtractionContractViolation,
+    )
+
+    recorder = _SceneEventRecorder(monkeypatch)
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run()
+        action = _adapter_action(node_id="source_extraction")
+        _seed_adapter_outbox(harness, action)
+
+        class _ContractViolationAdapter:
+            action_kind = "start_agent_task"
+
+            def preflight(self, action: PendingAction) -> AdapterPreflight:
+                return AdapterPreflight(ready=True)
+
+            def execute(self, action: PendingAction):
+                raise SourceExtractionContractViolation(
+                    problem={
+                        "code": "source_extraction_contract_violation",
+                        "detail": (
+                            "candidateExtractions[0] is missing explicit "
+                            "retrieved_at; URL, summary and sourceKind are not "
+                            "substitutes"
+                        ),
+                        "actionId": action.action_id,
+                    }
+                )
+
+            def verify(self, action, result):  # pragma: no cover - must not run
+                raise AssertionError("verify must not run after execute exception")
+
+        worker = _adapter_worker(
+            harness, _ContractViolationAdapter(), RealDomainPorts(harness.store)
+        )
+        worker.run_once()
+
+        event = recorder.find("adapter_dispatch.attempt_failed")
+        assert event is not None
+        assert event["outcome"] == "failed"
+        assert event["fields"]["nodeId"] == "source_extraction"
+        # 专用 code 直达 problem 记录，不再包一层 adapter_execution_exception。
+        assert event["fields"]["problemCode"] == (
+            "source_extraction_contract_violation"
+        )
+    finally:
+        harness.close()

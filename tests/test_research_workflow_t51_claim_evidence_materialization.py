@@ -441,6 +441,116 @@ def test_completed_extraction_materializes_before_collecting_refs(
     assert calls == ["reconcile", "materialize", "collect"]
 
 
+def test_source_extraction_contract_violation_carries_dedicated_problem_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """N3 可诊断性：materialize 阶段的 Challenge v2 契约违约不得再被泛化成
+    adapter_execution_exception——必须以专用 problem code 带精确 path 上抛；
+    异常本身不被吞掉，节点仍然 fail-closed。"""
+    from core.web.services.team_workflow.research_runtime.agent_turn_completion import (
+        SourceExtractionContractViolation,
+        complete_agent_turn_outputs,
+    )
+    from core.web.services.team_workflow.research_runtime.source_extraction_evidence_cards import (
+        SourceExtractionEvidenceContractError,
+    )
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.agent_turn_completion.wait_for_agent_turn_terminal",
+        lambda *_a, **_k: {"terminal": True, "terminalStatus": "completed"},
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.source_collection.stage_writeback.reconcile_source_collection_stage_session_task_after_turn",
+        lambda *_a, **_k: None,
+    )
+
+    def failing_materialize(**_kwargs):
+        raise SourceExtractionEvidenceContractError(
+            "candidateExtractions[0] is missing explicit retrieved_at; "
+            "URL, summary and sourceKind are not substitutes"
+        )
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.agent_claim_evidence_materializer.materialize_completed_extraction_task",
+        failing_materialize,
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.agent_turn_completion.collect_required_artifact_refs",
+        lambda *_a, **_k: pytest.fail("refs must not be collected after a contract violation"),
+    )
+
+    with pytest.raises(SourceExtractionContractViolation) as excinfo:
+        complete_agent_turn_outputs(
+            action=_pending_action(),
+            required_kinds=("evidence_card_batch",),
+            handle=AgentTaskHandle(
+                session_id="session-a",
+                session_attempt=1,
+                task_id="task-a",
+                turn_id="turn-a",
+            ),
+            input_snapshot={
+                "teamId": "team-a",
+                "sourceCollectionRunId": "sc-run-a",
+            },
+        )
+
+    problem = excinfo.value.problem
+    assert problem["code"] == "source_extraction_contract_violation"
+    assert "candidateExtractions[0]" in problem["detail"]
+    assert "retrieved_at" in problem["detail"]
+    assert problem["taskId"] == "task-a"
+    assert problem["workflowRunId"] == "wf-run-a"
+    assert problem["sourceCollectionRunId"] == "sc-run-a"
+    # 不得吞异常：原始契约错误保持为 cause，fail-closed 语义不变。
+    assert isinstance(excinfo.value.__cause__, SourceExtractionEvidenceContractError)
+
+
+def test_non_contract_materialization_failures_keep_generic_propagation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """非契约违约（如 ledger 不可用）不走专用 problem code，保持原样上抛。"""
+    from core.web.services.team_workflow.research_runtime.agent_claim_evidence_materializer import (
+        EvidenceMaterializationError,
+    )
+    from core.web.services.team_workflow.research_runtime.agent_turn_completion import (
+        complete_agent_turn_outputs,
+    )
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.agent_turn_completion.wait_for_agent_turn_terminal",
+        lambda *_a, **_k: {"terminal": True, "terminalStatus": "completed"},
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.source_collection.stage_writeback.reconcile_source_collection_stage_session_task_after_turn",
+        lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.agent_claim_evidence_materializer.materialize_completed_extraction_task",
+        lambda **_k: (_ for _ in ()).throw(
+            EvidenceMaterializationError("formal workflow run does not carry a question")
+        ),
+    )
+
+    with pytest.raises(EvidenceMaterializationError) as excinfo:
+        complete_agent_turn_outputs(
+            action=_pending_action(),
+            required_kinds=("evidence_card_batch",),
+            handle=AgentTaskHandle(
+                session_id="session-a",
+                session_attempt=1,
+                task_id="task-a",
+                turn_id="turn-a",
+            ),
+            input_snapshot={
+                "teamId": "team-a",
+                "sourceCollectionRunId": "sc-run-a",
+            },
+        )
+    # 原样上抛：非契约违约不被包装成专用 problem code。
+    assert type(excinfo.value) is EvidenceMaterializationError
+
+
 def test_retry_attempt_passes_evidence_scope_without_forcing_session_retry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
