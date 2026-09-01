@@ -498,12 +498,31 @@ export type VirtualHumanExpressionRule = {
 };
 
 export type VirtualHumanEmbodiment = {
+  schemaVersion?: number;
+  assetManifestVersion?: number;
   enabled?: boolean;
   requestedMode?: string;
   activeMode?: string;
   providerId?: string;
   assetRef?: string;
+  expressionId?: string;
+  motionPreset?: string;
+  blinkProfile?: {
+    enabled?: boolean;
+    minIntervalMs?: number;
+    maxIntervalMs?: number;
+  };
+  sceneKey?: string;
+  assetRefs?: {
+    primary?: string;
+    expression?: string;
+    background?: string;
+  };
+  assetReceipts?: Record<string, { licenseReceipt?: string; sourceRef?: string }>;
+  sourceRefs?: Array<{ kind?: string; ref?: string }>;
+  validUntil?: string;
   fallbackReason?: string;
+  fallbackReasons?: string[];
   textChatUnaffected?: boolean;
 };
 
