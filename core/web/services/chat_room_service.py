@@ -63,7 +63,7 @@ from core.chat.conversation_ledger import (
 )
 from core.chat.chat_task_types import trim_lines
 from core.chatroom.scheduler import get_scheduler_registry
-from core.chatroom.store import ChatRoomStore, utc_now_iso
+from core.chatroom.store import ChatRoomStore, ChatRoomStoreReadError, utc_now_iso
 from core.infrastructure import developer_sandbox
 from core.orchestration.context_engine import build_agent_context, record_agent_turn_result
 from core.orchestration.output_boundary import sanitize_assistant_visible_text
@@ -206,9 +206,20 @@ _CHALLENGE_ROOM_DEADLINE_STOP_REASON = "challenge_logical_task_deadline_exhauste
 # never become a round terminalReason or a meeting terminalReason: the
 # meeting-level clock below stays the only meeting termination authority.
 _CHALLENGE_ROOM_PER_CALL_STOP_REASON = "challenge_per_call_budget_exhausted"
+# Speaker watchdog: rooms without an explicit ``perCallBudgetMs`` still bound
+# every speaker call at this budget (challenge rooms derive 300-600s budgets
+# from their deadline policy; this matches the audited 300s floor), so a hung
+# LLM call can never occupy a round indefinitely.
+_CHAT_ROOM_SPEAKER_DEFAULT_PER_CALL_BUDGET_MS = 300_000
 _CHALLENGE_ROOM_RUN_STOP_REASON_PREFIX = "challenge_workflow_run_"
 _CHALLENGE_ROOM_RUN_POLL_INTERVAL_SECONDS = 0.5
 _CHALLENGE_ROOM_HEARTBEAT_INTERVAL_SECONDS = 30.0
+# Heartbeat-aware orphan exemption: a running WorkRun whose heartbeat (30s
+# renewal cadence) is still inside this window proves the owning backend
+# process is alive, so a missing in-memory round control record must not be
+# treated as a dead orphan.  The window covers 3 missed heartbeats plus clock
+# skew; a genuinely dead process stops renewing and expires out of it.
+_CHAT_ROOM_WORK_RUN_HEARTBEAT_FRESH_SECONDS = 90.0
 # Digest-wait TTL stop-loss: a meeting-bound round whose meeting has a digest
 # draft waiting past the TTL stops before the next speaker call.  It fences
 # the room round only; the meeting state machine and its digest stay intact.
@@ -262,6 +273,10 @@ class ChatRoomValidationError(ValueError):
 
 class ChatRoomBusyError(RuntimeError):
     """Raised when a chat room already has an active round."""
+
+
+class SpeakerCallWatchdogTimeout(RuntimeError):
+    """A speaker runner call exceeded its per-call budget and was abandoned."""
 
 
 def list_chat_room_modes() -> list[dict[str, str]]:
@@ -1981,23 +1996,29 @@ def _execute_chat_room_round(
             "_modelInvocationReceiptAuthority": receipt_authority,
         }
         per_call_budget_ms = _positive_int(round_config.get("perCallBudgetMs"))
-        if per_call_budget_ms is not None and context["challengeDeadlineAtMs"] is not None:
-            from core.web.services.team_workflow.challenge_deadline_policy import (
-                effective_call_deadline_at_ms,
-            )
+        if per_call_budget_ms is None:
+            # Speaker watchdog: plain meeting/discussion rooms have no
+            # challenge meeting clock, but every speaker call still needs a
+            # bounded budget so a hung LLM call cannot occupy the round
+            # forever.  Challenge rooms keep their policy-derived budget.
+            per_call_budget_ms = _CHAT_ROOM_SPEAKER_DEFAULT_PER_CALL_BUDGET_MS
+        from core.web.services.team_workflow.challenge_deadline_policy import (
+            effective_call_deadline_at_ms,
+        )
 
-            # The meeting-level clock stays in ``challengeDeadlineAtMs``; the
-            # per-call fence lives in its own key so an exhausted speaker call
-            # can never be mistaken for an exhausted meeting.
-            context[_CHALLENGE_ROOM_PER_CALL_DEADLINE_CONTEXT_KEY] = effective_call_deadline_at_ms(
-                call_started_at_ms=int(time.time() * 1000),
-                per_call_budget_ms=per_call_budget_ms,
-                meeting_deadline_at_ms=_positive_int(
-                    round_config.get("meetingDeadlineAtMs")
-                )
-                or context["challengeDeadlineAtMs"],
-                outer_deadline_at_ms=context["challengeDeadlineAtMs"],
+        # The meeting-level clock stays in ``challengeDeadlineAtMs``; the
+        # per-call fence lives in its own key so an exhausted speaker call
+        # can never be mistaken for an exhausted meeting.  Plain rooms have
+        # no outer deadline, so the per-call budget alone defines the fence.
+        context[_CHALLENGE_ROOM_PER_CALL_DEADLINE_CONTEXT_KEY] = effective_call_deadline_at_ms(
+            call_started_at_ms=int(time.time() * 1000),
+            per_call_budget_ms=per_call_budget_ms,
+            meeting_deadline_at_ms=_positive_int(
+                round_config.get("meetingDeadlineAtMs")
             )
+            or context["challengeDeadlineAtMs"],
+            outer_deadline_at_ms=context["challengeDeadlineAtMs"],
+        )
         # A deadline is an absolute round fence.  Check it before constructing
         # the next prompt so an expired formal round never starts another
         # speaker, even when the previous runner returned a late result.
@@ -2448,6 +2469,91 @@ def _start_challenge_speaker_heartbeat(
     return stop, worker
 
 
+def _speaker_call_timeout_seconds(context: Mapping[str, Any]) -> float:
+    """Bounded wall-clock budget for the current speaker call."""
+
+    deadline_at_ms = _positive_int(
+        context.get(_CHALLENGE_ROOM_PER_CALL_DEADLINE_CONTEXT_KEY)
+    )
+    if deadline_at_ms is None:
+        return max(1.0, _CHAT_ROOM_SPEAKER_DEFAULT_PER_CALL_BUDGET_MS / 1000.0)
+    remaining_seconds = (deadline_at_ms - int(time.time() * 1000)) / 1000.0
+    return max(1.0, remaining_seconds)
+
+
+def _record_speaker_watchdog_timeout_event(
+    context: Mapping[str, Any],
+    *,
+    timeout_seconds: float,
+) -> None:
+    try:
+        record_runtime_scene_event(
+            "chat_room",
+            "speaker_watchdog",
+            "chat_room.speaker_call.watchdog_timeout",
+            message=(
+                "Speaker call exceeded its per-call budget; the round abandoned "
+                "the runner and closed this speaker as failed/stopped."
+            ),
+            level="warning",
+            outcome="failed",
+            fields={
+                "roomId": str(context.get("roomId") or "").strip(),
+                "roundId": str(context.get("roundId") or "").strip(),
+                "speakerIndex": context.get("speakerIndex"),
+                "timeoutSeconds": max(0, int(timeout_seconds)),
+            },
+        )
+    except Exception:
+        return
+
+
+def _invoke_speaker_runner_with_watchdog(
+    runner: AgentRunner,
+    participant: dict[str, Any],
+    prompt: str,
+    context: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Run one speaker call behind a hard watchdog timeout.
+
+    Every speaker turn must be bounded: a hung provider call must never keep
+    occupying a round indefinitely.  The runner executes on a daemon thread;
+    when it does not finish inside the per-call budget the call is abandoned
+    (raising ``SpeakerCallWatchdogTimeout`` so the shared exception path
+    persists the speaker as failed/stopped) and the round advances.  The
+    abandoned thread keeps running detached and its late result is discarded —
+    it never touches room state, because the caller alone persists messages.
+    """
+
+    timeout_seconds = _speaker_call_timeout_seconds(context)
+    outcome: dict[str, Any] = {}
+
+    def target() -> None:
+        try:
+            outcome["result"] = runner(participant, prompt, context)
+        except Exception as exc:  # re-raised on the waiting thread below
+            outcome["error"] = exc
+
+    round_id = str(context.get("roundId") or "").strip()
+    worker = threading.Thread(
+        target=target,
+        name=f"chat-room-speaker-call:{round_id}",
+        daemon=True,
+    )
+    worker.start()
+    worker.join(timeout_seconds)
+    if worker.is_alive():
+        _record_speaker_watchdog_timeout_event(context, timeout_seconds=timeout_seconds)
+        raise SpeakerCallWatchdogTimeout(
+            f"speaker call exceeded its per-call budget of {timeout_seconds:.0f}s "
+            "and was abandoned; the runner thread was left running in the background"
+        )
+    error = outcome.get("error")
+    if error is not None:
+        raise error
+    return outcome.get("result")
+
+
 def _run_one_speaker(
     participant: dict[str, Any],
     prompt: str,
@@ -2484,7 +2590,7 @@ def _run_one_speaker(
         stage_started_at = _perf_counter()
         heartbeat_stop, heartbeat_thread = _start_challenge_speaker_heartbeat(context)
         try:
-            result = runner(participant, prompt, context)
+            result = _invoke_speaker_runner_with_watchdog(runner, participant, prompt, context)
         finally:
             heartbeat_stop.set()
             if heartbeat_thread is not None:
@@ -5278,6 +5384,74 @@ def _terminal_chat_room_status_from_work_run(snapshot: dict[str, Any] | None) ->
     return ""
 
 
+def _parse_utc_datetime(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _chat_room_work_run_heartbeat_fresh(work_run: Mapping[str, Any] | None) -> bool:
+    """True when a running WorkRun snapshot was renewed inside the heartbeat window.
+
+    A round executor renews its WorkRun every ``_CHALLENGE_ROOM_HEARTBEAT_INTERVAL_SECONDS``
+    while a speaker call runs, and every speaker completion persists the snapshot
+    too.  A fresh heartbeat therefore proves the owning backend process is alive,
+    even when the in-memory round control record went missing; a genuinely dead
+    process stops renewing and the snapshot ages out of the window.  Terminal or
+    missing snapshots never count as fresh.
+    """
+
+    payload = work_run if isinstance(work_run, Mapping) else {}
+    if str(payload.get("finishedAt") or "").strip():
+        return False
+    status = str(
+        payload.get("status") or payload.get("currentPhase") or payload.get("phase") or ""
+    ).strip().lower()
+    if status and status not in RUNNING_ROUND_STATUSES:
+        return False
+    updated_at = _parse_utc_datetime(payload.get("updatedAt"))
+    if updated_at is None:
+        return False
+    age_seconds = (datetime.now(timezone.utc) - updated_at).total_seconds()
+    return 0.0 <= age_seconds < _CHAT_ROOM_WORK_RUN_HEARTBEAT_FRESH_SECONDS
+
+
+def _record_round_heartbeat_exempt_event(
+    room_id: str,
+    round_id: str,
+    *,
+    stage: str,
+) -> None:
+    try:
+        record_runtime_scene_event(
+            "chat_room",
+            "reconcile",
+            "chat_room.round.orphan_heartbeat_exempt",
+            message=(
+                "Running chat room round without an in-process controller kept alive "
+                "by a fresh WorkRun heartbeat; orphan close-out skipped."
+            ),
+            outcome="exempted",
+            fields={
+                "roomId": str(room_id or "").strip(),
+                "roundId": str(round_id or "").strip(),
+                "stage": str(stage or "").strip(),
+                "heartbeatWindowSeconds": _CHAT_ROOM_WORK_RUN_HEARTBEAT_FRESH_SECONDS,
+            },
+        )
+    except Exception:
+        return
+
+
 def _chat_room_reconciliation_reason(snapshot: dict[str, Any], *, final_status: str) -> str:
     reason = trim_lines(
         str(
@@ -5363,8 +5537,37 @@ def _reconcile_chat_room_round_state() -> list[dict[str, Any]]:
         return []
     try:
         return _reconcile_chat_room_round_state_locked_gate()
+    except ChatRoomStoreReadError as exc:
+        # An unreadable room store means the durable state is unknown.  Skip
+        # this pass instead of treating it as an empty store: closing rounds
+        # (or overwriting state) from an unknown baseline would be unsafe, and
+        # the next read retries the reconciliation.
+        _record_store_read_failed_event(exc)
+        return []
     finally:
         _release_chat_room_reconcile_run()
+
+
+def _record_store_read_failed_event(exc: ChatRoomStoreReadError) -> None:
+    try:
+        record_runtime_scene_event(
+            "chat_room",
+            "reconcile",
+            "chat_room.store.read_failed",
+            message=(
+                "Chat room state file could not be read; reconciliation skipped "
+                "instead of treating the store as empty."
+            ),
+            level="warning",
+            outcome="failed",
+            fields={
+                "path": str(getattr(exc, "path", "")),
+                "errorType": type(exc).__name__,
+                "errorPreview": trim_lines(str(exc), max_lines=2),
+            },
+        )
+    except Exception:
+        return
 
 
 def _reconcile_chat_room_round_state_locked_gate() -> list[dict[str, Any]]:
@@ -5402,6 +5605,15 @@ def _reconcile_chat_room_round_state_locked_gate() -> list[dict[str, Any]]:
         final_status = _terminal_chat_room_status_from_work_run(work_run)
         reconciliation_source = "terminal_work_run"
         if not final_status and not _chat_room_round_has_process_control(round_id):
+            # A fresh WorkRun heartbeat proves the round's backend process is
+            # alive; a missing in-memory control record must never kill such a
+            # round (the historical mis-kill restarted live meetings from
+            # round 1 in a loop).  A genuinely dead process stops renewing the
+            # heartbeat and expires out of the window, so this exemption only
+            # spares live rounds.
+            if _chat_room_work_run_heartbeat_fresh(work_run):
+                _record_round_heartbeat_exempt_event(room_id, round_id, stage="first_pass")
+                continue
             final_status = "stopped"
             reconciliation_source = "missing_process_controller"
         if final_status:
@@ -5433,11 +5645,21 @@ def _reconcile_chat_room_round_state_locked_gate() -> list[dict[str, Any]]:
                 # A user stop can create a process control record while this
                 # reconciliation is resolving its WorkRun snapshot.  Do not
                 # replace that live, user-owned stop with an orphan recovery.
-                if (
-                    candidate["reconciliationSource"] == "missing_process_controller"
-                    and _chat_room_round_has_process_control(round_id)
-                ):
-                    continue
+                # The same protection applies to a heartbeat that turned fresh
+                # between the two passes: re-read the WorkRun snapshot so a
+                # live round that renewed its heartbeat is exempted here too.
+                if candidate["reconciliationSource"] == "missing_process_controller":
+                    if _chat_room_round_has_process_control(round_id):
+                        continue
+                    if _chat_room_work_run_heartbeat_fresh(
+                        store.load_snapshot(RUN_KIND, round_id)
+                    ):
+                        _record_round_heartbeat_exempt_event(
+                            str(candidate["roomId"]),
+                            round_id,
+                            stage="reconfirm",
+                        )
+                        continue
                 work_run = candidate["workRun"]
                 final_status = str(candidate["finalStatus"])
                 reconciliation_source = str(candidate["reconciliationSource"])
@@ -5791,7 +6013,15 @@ def _fail_chat_room_round(
     *,
     lang: str,
 ) -> None:
-    _clear_chat_room_round_control(round_id)
+    # The in-memory round control record must outlive any failed store
+    # finalization.  Popping it before the durable terminal state is written
+    # used to create "running without a controller" zombie rounds: the next
+    # reconcile pass then force-stopped them as orphans (the backend had
+    # never restarted), which restarted the same meeting from round 1 and
+    # looped.  The control record is therefore cleared only after the store
+    # holds a terminal state (or after the round was already terminal); a
+    # store read/write failure keeps it so the finalization can be retried
+    # or the heartbeat-aware reconcile path can close the round correctly.
     failed_at = utc_now_iso()
     summary = text_for(
         lang,
@@ -5799,6 +6029,7 @@ def _fail_chat_room_round(
         en=f"Chat room background round failed: {type(exc).__name__}: {exc}",
     )
     already_terminal = False
+    store_finalized = False
     with _CHAT_ROOM_LOCK:
         state = _store().load()
         live_room = _find_room(state, room_id)
@@ -5819,11 +6050,19 @@ def _fail_chat_room_round(
             live_room["updatedAt"] = failed_at
             if _find_room(state, room_id) is not None:
                 _store().save(state)
+            # Either the terminal state is durable now, or the room is gone
+            # from the store entirely (nothing left to converge); both make
+            # it safe to drop the control record.  A save failure above
+            # propagates and leaves the control record in place.
+            store_finalized = True
 
     if already_terminal:
+        _clear_chat_room_round_control(round_id)
         _publish_chat_room_detail_snapshot(room_id)
         return
 
+    if store_finalized:
+        _clear_chat_room_round_control(round_id)
     _persist_chat_room_work_run(live_room, target_round, status="failed", summary=summary)
     _sync_stopped_round_to_sessions_if_needed(live_room, target_round)
     _record_room_event(
