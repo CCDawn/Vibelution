@@ -52,6 +52,7 @@ def _receipt() -> dict:
         finished_at_ms=120,
         token_usage={
             "inputTokens": 10,
+            "cachedInputTokens": 4,
             "outputTokens": 5,
             "totalTokens": 15,
             "reasoningTokens": 3,
@@ -149,6 +150,10 @@ def test_receipt_intent_and_budget_usage_commit_exactly_once(tmp_path: Path) -> 
         assert window["used"] == 15
         assert window["remaining"] == 24_985
         assert settled_payload["usage"]["reasoningTokens"] == 3
+        assert settled_payload["usage"]["cachedInputTokens"] == 4
+        assert settled_payload["usage"]["uncachedInputTokens"] == 6
+        assert settled_payload["usage"]["toolCalls"] == 1
+        assert settled_payload["usage"]["wallClockSeconds"] == 1
         assert len(settled_payload["invocations"]) == 1
     finally:
         harness.close()

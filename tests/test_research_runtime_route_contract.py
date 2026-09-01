@@ -592,3 +592,121 @@ def test_research_runtime_stream_keeps_event_stream_media_type_and_frames(monkey
     assert "id: run-1:1" in response.text
     assert "event: node_running" in response.text
     assert '"customEvent":true' in response.text.replace(" ", "")
+
+
+def test_research_runtime_budget_projects_canonical_receipt_usage(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    run_id = "run-http-budget"
+    node_run_id = "nr-http-budget-source-finding-1"
+    limits = {
+        "tokens": 2_000_000,
+        "toolCalls": 600,
+        "seconds": 14_400,
+        "retries": 3,
+    }
+    reserved = {
+        "estimatedTokens": 250_000,
+        "tokens": 250_000,
+        "toolCalls": 30,
+        "seconds": 900,
+        "retries": 1,
+    }
+    actual = {
+        "inputTokens": 150,
+        "cachedInputTokens": 100,
+        "uncachedInputTokens": 50,
+        "outputTokens": 25,
+        "tokens": 175,
+        "toolCalls": 7,
+        "wallClockSeconds": 181,
+    }
+
+    with ledger_http_client(tmp_path, monkeypatch) as (client, runtime):
+        run = build_run_record(run_id=run_id, status="running", last_event_sequence=1)
+
+        def seed(uow) -> None:
+            uow.repository.insert_run(run)
+            uow.repository.insert_event(
+                build_event_record(
+                    sequence=1,
+                    run_id=run_id,
+                    event_id=f"evt-created-{run_id}",
+                )
+            )
+            uow.repository.insert_command(
+                build_command_record(
+                    command_id="cmd-http-budget-1",
+                    run_id=run_id,
+                    node_id="source_finding",
+                    idempotency_key="seed-http-budget-1",
+                )
+            )
+            uow.repository.insert_attempt(
+                build_attempt_record(
+                    node_run_id=node_run_id,
+                    run_id=run_id,
+                    node_id="source_finding",
+                    status="succeeded",
+                    command_id="cmd-http-budget-1",
+                )
+            )
+            uow.repository.insert_budget_receipt(
+                receipt_id="budget-receipt-http-1",
+                run_id=run_id,
+                node_run_id=node_run_id,
+                reservation_id="reservation-http-1",
+                stage_id="knowledge_collection",
+                policy_hash="policy-http-1",
+                reserved_json=json.dumps({"reserved": reserved, "limits": limits}),
+                created_at_ms=FIXED_NOW_MS,
+            )
+            uow.repository.update_budget_receipt(
+                "budget-receipt-http-1",
+                status="settled",
+                now_ms=FIXED_NOW_MS + 181_000,
+                settled_json=json.dumps({"usage": actual}),
+            )
+
+        runtime.store.submit(seed, force_flush=True).result(timeout=10)
+        response = client.get(
+            f"/api/research/workflow-runs/{run_id}/budget",
+            params={"teamId": "research-team"},
+        )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert len(payload["budgetLedgers"]) == 1
+    ledger = payload["budgetLedgers"][0]
+    assert ledger["stageId"] == "knowledge_collection"
+    assert ledger["limits"] == {
+        "tokens": 2_000_000,
+        "toolCalls": 600,
+        "wallClockSeconds": 14_400,
+        "maxRetries": 3,
+    }
+    assert ledger["reserved"] == {
+        "tokens": 0,
+        "toolCalls": 0,
+        "wallClockSeconds": 0,
+        "maxRetries": 0,
+    }
+    assert ledger["consumed"] == {
+        "tokens": 175,
+        "toolCalls": 7,
+        "wallClockSeconds": 181,
+        "maxRetries": 0,
+    }
+
+    assert len(payload["budgetReservations"]) == 1
+    reservation = payload["budgetReservations"][0]
+    assert reservation["reservationId"] == "reservation-http-1"
+    assert reservation["requested"] == {
+        "tokens": 250_000,
+        "toolCalls": 30,
+        "wallClockSeconds": 900,
+        "maxRetries": 1,
+    }
+    assert reservation["actual"] == actual
+    assert reservation["status"] == "settled"

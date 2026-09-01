@@ -198,15 +198,27 @@ class AgentBindingSummary:
 class BudgetReceiptRef:
     receipt_id: str | None = None
     node_run_id: str | None = None
+    reservation_id: str | None = None
+    stage_id: str | None = None
     status: str | None = None
     policy_hash: str | None = None
+    reserved_payload: Mapping[str, Any] = field(default_factory=dict)
+    settled_payload: Mapping[str, Any] = field(default_factory=dict)
+    created_at_ms: int | None = None
+    updated_at_ms: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "receiptId": self.receipt_id,
             "nodeRunId": self.node_run_id,
+            "reservationId": self.reservation_id,
+            "stageId": self.stage_id,
             "status": self.status,
             "policyHash": self.policy_hash,
+            "reservedPayload": dict(self.reserved_payload),
+            "settledPayload": dict(self.settled_payload),
+            "createdAtMs": self.created_at_ms,
+            "updatedAtMs": self.updated_at_ms,
         }
 
 
