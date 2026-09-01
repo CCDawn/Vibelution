@@ -39,7 +39,9 @@ def history_search_tool(
     resolved_session_id = _resolve_session_id(session_id)
     if not resolved_session_id:
         return _json_error("missing_session_id", "找不到当前会话 ID，无法查询会话历史。")
-    messages = _messages_for_session(resolved_session_id)
+    messages, error = _messages_for_session_checked(resolved_session_id)
+    if error:
+        return error
     events = build_history_events(messages, session_id=resolved_session_id)
     matches = search_history_events(
         events,
@@ -61,7 +63,9 @@ def history_fetch_tool(event_id: str, session_id: str = "") -> str:
     normalized_event_id = str(event_id or "").strip()
     if not normalized_event_id:
         return _json_error("missing_event_id", "event_id 不能为空。")
-    messages = _messages_for_session(resolved_session_id)
+    messages, error = _messages_for_session_checked(resolved_session_id)
+    if error:
+        return error
     events = build_history_events(messages, session_id=resolved_session_id)
     event = fetch_history_event(events, normalized_event_id)
     if event is None:
@@ -75,7 +79,9 @@ def history_timeline_tool(start: int = 0, limit: int = 20, include_tools: bool =
     resolved_session_id = _resolve_session_id(session_id)
     if not resolved_session_id:
         return _json_error("missing_session_id", "找不到当前会话 ID，无法读取会话时间线。")
-    messages = _messages_for_session(resolved_session_id)
+    messages, error = _messages_for_session_checked(resolved_session_id)
+    if error:
+        return error
     events = build_history_events(messages, session_id=resolved_session_id)
     return render_events_for_tool(
         timeline_events(events, start=start, limit=limit, include_tools=include_tools),
@@ -89,7 +95,9 @@ def history_checkpoint_tool(session_id: str = "") -> str:
     resolved_session_id = _resolve_session_id(session_id)
     if not resolved_session_id:
         return _json_error("missing_session_id", "找不到当前会话 ID，无法读取会话检查点。")
-    messages = _messages_for_session(resolved_session_id)
+    messages, error = _messages_for_session_checked(resolved_session_id)
+    if error:
+        return error
     checkpoint = latest_checkpoint(build_history_events(messages, session_id=resolved_session_id))
     if checkpoint is None:
         return json.dumps({"checkpoint": None, "message": "当前会话还没有历史检查点。"}, ensure_ascii=False)
@@ -154,14 +162,7 @@ def _resolve_session_id(session_id: str = "") -> str:
     return ""
 
 
-def _messages_for_session(session_id: str) -> list[dict[str, Any]]:
-    if not _session_exists(session_id):
-        return []
-    events = load_conversation_events(PROJECT_ROOT, session_id)
-    return conversation_visible_messages_from_events(events)
-
-
-def _session_exists(session_id: str) -> bool:
+def _find_session_conversation(session_id: str) -> dict[str, Any] | None:
     payload = load_chat_state(PROJECT_ROOT)
     for conversation in list(payload.get("conversations") or []):
         if not isinstance(conversation, dict):
@@ -173,8 +174,77 @@ def _session_exists(session_id: str) -> bool:
             or ""
         ).strip()
         if candidate_id == session_id:
-            return True
-    return False
+            return conversation
+    return None
+
+
+def _session_exists(session_id: str) -> bool:
+    return _find_session_conversation(session_id) is not None
+
+
+def _session_read_requester() -> Any:
+    """Resolve the acting agent identity for the candidate read gate.
+
+    Returns ``None`` (operator/console channel default) when no agent runtime
+    identity is bound; otherwise the agent channel with the scope bound to its
+    own session, resolved server-side from the durable experiment binding.
+    """
+
+    try:
+        from core.web.services.agent_directory_service import current_agent_runtime
+
+        runtime = current_agent_runtime()
+    except Exception:
+        runtime = {}
+    if not isinstance(runtime, dict):
+        return None
+    agent_id = str(runtime.get("agentId") or "").strip()
+    session_id = str(runtime.get("sessionId") or runtime.get("directSessionId") or "").strip()
+    if not agent_id and not session_id:
+        return None
+    requester: dict[str, Any] = {"channel": "agent", "agentId": agent_id, "sessionId": session_id}
+    if session_id:
+        try:
+            from core.web.services.session.candidate_read_gate import (
+                candidate_binding_from_conversation,
+            )
+
+            binding = candidate_binding_from_conversation(_find_session_conversation(session_id))
+        except Exception:
+            binding = None
+        if binding:
+            requester["selectionId"] = binding["selectionId"]
+            requester["candidateId"] = binding["candidateId"]
+            requester["workflowRunId"] = binding["workflowRunId"]
+    return requester
+
+
+def _messages_for_session_checked(session_id: str) -> tuple[list[dict[str, Any]], str]:
+    """Load visible messages after the candidate read gate.
+
+    Returns ``(messages, "")`` on allow and ``([], error_json)`` when the gate
+    denies a sibling candidate transcript read.
+    """
+
+    conversation = _find_session_conversation(session_id)
+    if conversation is None:
+        return [], ""
+    try:
+        from core.web.services.session.candidate_read_gate import (
+            evaluate_candidate_session_read,
+        )
+
+        evaluate_candidate_session_read(conversation, _session_read_requester())
+    except Exception as exc:
+        code = getattr(exc, "code", "") or "sibling_hypothesis_session_access_denied"
+        return [], _json_error(code, str(exc) or "无权读取该候选假说会话。")
+    events = load_conversation_events(PROJECT_ROOT, session_id)
+    return conversation_visible_messages_from_events(events), ""
+
+
+def _messages_for_session(session_id: str) -> list[dict[str, Any]]:
+    messages, _ = _messages_for_session_checked(session_id)
+    return messages
 
 
 def _drop_session_messages_field(session_id: str) -> None:
