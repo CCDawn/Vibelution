@@ -86,6 +86,7 @@ _CAPABILITY_FIELD_ALIASES = {
     "strictJsonSchema": "supports_strict_json_schema",
     "supportsStrictJsonSchema": "supports_strict_json_schema",
     "supports_strict_json_schema": "supports_strict_json_schema",
+    "strict_json_schema": "supports_strict_json_schema",
     "responsesTransport": "supports_responses_transport",
     "supportsResponsesTransport": "supports_responses_transport",
     "supports_responses_transport": "supports_responses_transport",

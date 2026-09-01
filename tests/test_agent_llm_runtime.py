@@ -88,6 +88,32 @@ def test_resolve_agent_llm_maps_slot_model_to_runtime_primary_profile():
     assert resolved.log_fields()["supportsImageInput"] is True
 
 
+def test_resolve_agent_llm_accepts_snake_case_strict_json_schema_capability():
+    config = _config_with_agent_models()
+    config.llm.model_library["vision-model"]["capabilities"] = {"strict_json_schema": True}
+    agent = {
+        "agentId": "agent-a",
+        "llmBindings": {"vision": {"modelId": "vision-model"}},
+    }
+
+    resolved = resolve_agent_llm(agent, "vision", config=config)
+
+    assert resolved.capabilities.supports_strict_json_schema is True
+
+
+def test_resolve_agent_llm_keeps_existing_strict_json_schema_aliases_working():
+    config = _config_with_agent_models()
+    config.llm.model_library["vision-model"]["capabilities"] = {"supports_strict_json_schema": True}
+    agent = {
+        "agentId": "agent-a",
+        "llmBindings": {"vision": {"modelId": "vision-model"}},
+    }
+
+    resolved = resolve_agent_llm(agent, "vision", config=config)
+
+    assert resolved.capabilities.supports_strict_json_schema is True
+
+
 def test_resolve_agent_llm_preserves_model_library_protocol_and_compat():
     config = _config_with_agent_models()
     config.llm.model_library["vision-model"]["protocol"] = "llamacpp_qwen_thinking"
