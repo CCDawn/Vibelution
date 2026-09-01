@@ -192,8 +192,14 @@ def build_research_workflow_snapshot(inputs: ProjectionInputs) -> ResearchWorkfl
                 BudgetReceiptRef(
                     receipt_id=_as_optional_str(item.get("receiptId")),
                     node_run_id=_as_optional_str(item.get("nodeRunId")),
+                    reservation_id=_as_optional_str(item.get("reservationId")),
+                    stage_id=_as_optional_str(item.get("stageId")),
                     status=_as_optional_str(item.get("status")),
                     policy_hash=_as_optional_str(item.get("policyHash")),
+                    reserved_payload=dict(item.get("reservedPayload") or {}),
+                    settled_payload=dict(item.get("settledPayload") or {}),
+                    created_at_ms=_as_optional_int(item.get("createdAtMs")),
+                    updated_at_ms=_as_optional_int(item.get("updatedAtMs")),
                 )
                 for item in inputs.budget_receipts
             ),

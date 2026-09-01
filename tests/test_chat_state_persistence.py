@@ -1443,6 +1443,53 @@ def test_turn_completion_snapshot_ignores_tool_result_compatibility_shell(tmp_pa
     assert snapshot["assistantTurnId"] == ""
 
 
+def test_turn_completion_snapshot_projects_continuation_progress_evidence(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_two_runtime_rows(tmp_path, status_a="paused_limit")
+    monkeypatch.setattr(
+        session_service,
+        "reconcile_stale_chat_turn_work_runs",
+        lambda **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_repair_stale_running_conversation",
+        lambda *_args, **_kwargs: False,
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_session_ledger_visible_messages",
+        lambda *_args, **_kwargs: [],
+    )
+    assistant = {
+        "role": "assistant",
+        "content": "连续多轮没有产生新的任务进展。",
+        "turnId": "turn-progress",
+        "metadata": {
+            "continuation_pause_reason": "runaway_no_progress",
+            "continuation_no_progress_count": 3,
+            "continuation_progress_advanced": True,
+        },
+    }
+    monkeypatch.setattr(
+        session_service,
+        "_find_turn_scoped_assistant_message",
+        lambda *_args, **_kwargs: assistant,
+    )
+
+    snapshot = session_service.get_session_turn_completion_snapshot(
+        "session-a",
+        "turn-progress",
+    )
+
+    assert snapshot["continuationPauseReason"] == "runaway_no_progress"
+    assert snapshot["continuationNoProgressCount"] == 3
+    assert snapshot["continuationProgressAdvanced"] is True
+
+
 def test_settle_stale_chat_turn_writes_only_target_session_row(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     _seed_two_runtime_rows(tmp_path)

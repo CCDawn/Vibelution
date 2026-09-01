@@ -10,6 +10,8 @@ persist, capture, live_output) remain effective.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import time
 from pathlib import Path
@@ -45,6 +47,88 @@ DEFAULT_SESSION_TOKEN_BUDGET = 2_000_000
 # VIBELUTION_MIN_INVOCATION_OUTPUT_TOKENS.
 MIN_INVOCATION_OUTPUT_TOKENS = 4_096
 _MIN_INVOCATION_OUTPUT_TOKENS_ENV = "VIBELUTION_MIN_INVOCATION_OUTPUT_TOKENS"
+
+_CONTINUATION_TOOL_FAILURE_STATUSES = frozenset(
+    {"error", "failed", "failure", "timeout", "timed_out"}
+)
+
+
+def _normalized_tool_signature_value(value: Any) -> Any:
+    """Build a stable, JSON-safe tool observation without call-local noise."""
+
+    if isinstance(value, dict):
+        return {
+            str(key): _normalized_tool_signature_value(item)
+            for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
+            if str(key) not in {"callId", "toolCallId", "tool_call_id", "durationMs"}
+        }
+    if isinstance(value, (list, tuple)):
+        return [_normalized_tool_signature_value(item) for item in value]
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    text = " ".join(str(value).split())
+    if text.startswith(("{", "[")):
+        try:
+            return _normalized_tool_signature_value(json.loads(text))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            pass
+    return text
+
+
+def _continuation_tool_observations(result: Any) -> list[tuple[str, bool]]:
+    """Return ``(signature, succeeded)`` for each observable tool call.
+
+    A signature deliberately binds the tool name, normalized arguments, and
+    result/error code. Invocation ids and durations are excluded so retrying
+    the same action remains detectable across model turns.
+    """
+
+    if not isinstance(result, dict):
+        return []
+    s = _service()
+    observations: list[tuple[str, bool]] = []
+    for raw in list(result.get("tool_trace") or result.get("tool_calls") or []):
+        if not isinstance(raw, dict):
+            continue
+        name = s._tool_call_name(raw)
+        if not name:
+            continue
+        function = raw.get("function") if isinstance(raw.get("function"), dict) else {}
+        arguments = raw.get("arguments")
+        if arguments is None:
+            arguments = raw.get("args")
+        if arguments is None:
+            arguments = function.get("arguments")
+        error_code = str(raw.get("errorCode") or raw.get("error_code") or "").strip()
+        error = raw.get("error")
+        result_value = raw.get("result")
+        if result_value is None:
+            result_value = raw.get("resultPreview") or raw.get("result_preview")
+        if result_value is None:
+            result_value = raw.get("summary")
+        status = str(raw.get("semanticStatus") or raw.get("status") or "done").strip().lower()
+        failed = bool(
+            status in _CONTINUATION_TOOL_FAILURE_STATUSES
+            or error_code
+            or error
+            or s._looks_like_tool_call_failure_summary(result_value)
+        )
+        signature_payload = {
+            "name": name,
+            "arguments": _normalized_tool_signature_value(arguments),
+            "status": status,
+            "observation": _normalized_tool_signature_value(
+                error_code or error or result_value
+            ),
+        }
+        encoded = json.dumps(
+            signature_payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        observations.append((hashlib.sha256(encoded).hexdigest(), not failed))
+    return observations
 
 
 def _min_invocation_output_tokens() -> int:
@@ -390,29 +474,22 @@ def _challenge_invocation_budget_preflight(
     profile_limit = max(0, int(max_output_tokens or 0))
     headroom = remaining - estimated_input
     min_output = _min_invocation_output_tokens()
-    if headroom < min_output:
-        # Fail closed with the explicit budget_exhausted decision instead of
-        # silently clamping max_output_tokens to an unusable sliver. The two
-        # failure sides stay distinguishable: input overruns the remaining
-        # budget (the compression/truncation responsibility surface) versus an
-        # output space below the usable floor.
-        if headroom < 0:
-            reason = "input_exceeds_remaining"
-        else:
-            reason = "insufficient_budget"
-        return {
-            "remainingTokens": remaining,
-            "estimatedInputTokens": estimated_input,
-            "maxOutputTokens": 0,
-            "budgetExhausted": True,
-            "reason": reason,
-            "requiredMinOutput": min_output,
-        }
-    return {
+    budget_pressure = headroom < profile_limit
+    decision: dict[str, int | str | bool] = {
         "remainingTokens": remaining,
         "estimatedInputTokens": estimated_input,
-        "maxOutputTokens": min(profile_limit, headroom),
+        # The reservation is an accounting/capacity signal. It must not revoke
+        # a progressing formal Agent invocation by shrinking its model profile.
+        "maxOutputTokens": profile_limit,
+        "budgetPressure": budget_pressure,
+        "softLimitExceeded": headroom < min_output,
+        "requiredMinOutput": min_output,
     }
+    if budget_pressure:
+        decision["reason"] = (
+            "input_exceeds_remaining" if headroom < 0 else "insufficient_budget"
+        )
+    return decision
 
 
 def _service():
@@ -1921,14 +1998,13 @@ def _session_turn_token_budget_line(
 ) -> tuple[int, str]:
     """Resolve the real-time token circuit-breaker line for one session turn.
 
-    Formal Challenge turns read the canonical Workflow Ledger reservation.
-    Ordinary chat keeps the conservative session default.  There is no legacy
-    run-JSON fallback and no client metadata authority.
+    Workflow Ledger reservations are soft accounting signals and therefore do
+    not own termination. Formal Challenge turns retain the session emergency
+    line; ordinary chat keeps the same default under its existing source name.
     """
 
     if isinstance(receipt_context, dict):
-        window = _challenge_budget_window(receipt_context)
-        return max(0, int(window.get("remaining") or 0)), "workflow_ledger_reservation"
+        return DEFAULT_SESSION_TOKEN_BUDGET, "challenge_emergency_default"
     return DEFAULT_SESSION_TOKEN_BUDGET, "session_default"
 
 
@@ -2025,6 +2101,9 @@ def _run_session_continuation_loop(
     result: Any = None
     last_visible_result: dict[str, Any] | None = None
     observed_required_tool_names: set[str] = set()
+    observed_tool_signatures: set[str] = set()
+    consecutive_no_progress_turns = 0
+    continuation_progress_advanced = False
     if not history_messages:
         clear_provider_replay = getattr(agent, "clear_chat_provider_replay_state", None)
         if callable(clear_provider_replay):
@@ -2297,6 +2376,24 @@ def _run_session_continuation_loop(
                 },
             )
 
+        tool_observations = _continuation_tool_observations(result)
+        canonical_progress_advanced = any(
+            succeeded and signature not in observed_tool_signatures
+            for signature, succeeded in tool_observations
+        )
+        repeated_tool_observation = any(
+            signature in observed_tool_signatures
+            for signature, _succeeded in tool_observations
+        )
+        observed_tool_signatures.update(
+            signature for signature, _succeeded in tool_observations
+        )
+        if canonical_progress_advanced:
+            continuation_progress_advanced = True
+            consecutive_no_progress_turns = 0
+        else:
+            consecutive_no_progress_turns += 1
+
         if not allow_internal_auto_continue:
             paused_result = s._build_auto_continue_paused_result(result, last_visible_result, turn_index)
             s._record_session_turn_lifecycle_event(
@@ -2312,17 +2409,30 @@ def _run_session_continuation_loop(
             )
             return paused_result
 
-        if turn_index >= auto_continue_turn_limit:
+        if consecutive_no_progress_turns >= auto_continue_turn_limit:
             paused_result = s._build_auto_continue_paused_result(
                 result,
                 last_visible_result,
                 turn_index,
-                pause_reason="internal_auto_continue_limit_reached",
+                pause_reason="runaway_no_progress",
                 status="paused_limit",
-                fallback_visible="本轮已达到内部自动续跑上限，已保留当前执行进度；发送“继续”可衔接上一轮继续。",
+                fallback_visible="连续多轮没有产生新的任务进展，已保留当前执行进度；发送“继续”可在修正后衔接上一轮。",
                 internal_auto_continue_blocked=False,
                 reached_limit=True,
             )
+            if isinstance(paused_result, dict):
+                metadata = (
+                    dict(paused_result.get("metadata") or {})
+                    if isinstance(paused_result.get("metadata"), dict)
+                    else {}
+                )
+                metadata["continuation_no_progress_count"] = (
+                    consecutive_no_progress_turns
+                )
+                metadata["continuation_progress_advanced"] = (
+                    continuation_progress_advanced
+                )
+                paused_result["metadata"] = metadata
             s._record_session_turn_lifecycle_event(
                 session_id,
                 "followup_prompt_blocked",
@@ -2330,9 +2440,12 @@ def _run_session_continuation_loop(
                 outcome="paused_limit",
                 fields={
                     "turnIndex": turn_index,
-                    "reason": "internal_auto_continue_limit_reached",
+                    "reason": "runaway_no_progress",
                     "userMessageSource": normalized_user_message_source,
                     "internalAutoContinueMaxTurns": auto_continue_turn_limit,
+                    "consecutiveNoProgressTurns": consecutive_no_progress_turns,
+                    "canonicalProgressAdvanced": canonical_progress_advanced,
+                    "repeatedToolObservation": repeated_tool_observation,
                 },
             )
             return paused_result
@@ -2366,5 +2479,8 @@ def _run_session_continuation_loop(
             fields={
                 "turnIndex": turn_index,
                 "nextPromptLength": len(prompt),
+                "consecutiveNoProgressTurns": consecutive_no_progress_turns,
+                "canonicalProgressAdvanced": canonical_progress_advanced,
+                "repeatedToolObservation": repeated_tool_observation,
             },
         )

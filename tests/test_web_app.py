@@ -7077,7 +7077,7 @@ def test_source_collection_stage_task_waits_for_all_required_tools_across_contin
     assert "source_collection_stage_writeback_tool" in prompts[1]
 
 
-def test_session_continuation_auto_continue_pauses_at_bounded_limit(tmp_path, monkeypatch):
+def test_session_continuation_pauses_after_bounded_no_progress_streak(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda _session_id: None)
     prompts: list[str] = []
@@ -7110,12 +7110,15 @@ def test_session_continuation_auto_continue_pauses_at_bounded_limit(tmp_path, mo
     finally:
         session_service._clear_session_turn_control("session-auto-limit", turn_id=turn_control.turn_id)
 
-    assert len(prompts) == 2
+    # The first successful tool observation is progress. Only the next two
+    # identical observations consume the consecutive no-progress allowance.
+    assert len(prompts) == 3
     assert isinstance(result, dict)
     assert result["status"] == "paused_limit"
     assert result["metadata"]["continuation_limit_reached"] is True
-    assert result["metadata"]["continuation_pause_reason"] == "internal_auto_continue_limit_reached"
-    assert "自动续跑上限" in result["raw_output"]
+    assert result["metadata"]["continuation_pause_reason"] == "runaway_no_progress"
+    assert result["metadata"]["continuation_no_progress_count"] == 2
+    assert "没有产生新的任务进展" in result["raw_output"]
 
 
 def test_capture_session_ui_stream_merges_incremental_thought_updates(tmp_path, monkeypatch):

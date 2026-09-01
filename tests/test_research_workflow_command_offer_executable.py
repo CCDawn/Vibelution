@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 
 from core.research.workflow.contracts import WorkflowCommandKind
 from core.research.workflow.definition import build_challenge_cup_workflow_definition
+from core.research.workflow.definition_registry import register_or_resolve
 from core.research.workflow.transitions import RunStatus
 from core.web.services.team_workflow.research_runtime.command_offers import (
     build_command_offers,
@@ -17,6 +19,9 @@ from core.web.services.team_workflow.research_runtime.command_offers.cancel_run 
 )
 from core.web.services.team_workflow.research_runtime.query_service import (
     WorkflowQueryService,
+)
+from core.web.services.team_workflow.research_runtime.command_service import (
+    WorkflowCommandError,
 )
 from tests._support.command_helpers import CommandHarness
 from tests._support.readiness_fakes import FakeDomainContext
@@ -354,6 +359,109 @@ def test_offer_builder_covers_required_command_kinds(tmp_path: Path) -> None:
         harness.close()
 
 
+@pytest.mark.parametrize(
+    "limits",
+    [
+        {},
+        {"toolCalls": 600},
+        {"toolCalls": 0},
+        {"toolCalls": -1},
+        {"toolCalls": True},
+        {"stageTokens": {}},
+        {"stageTokens": {"knowledge_collection": 2_000_000}},
+        {"stageTokens": {"knowledge_collection": 0}},
+        {"unknownLimit": 1},
+    ],
+)
+def test_extend_budget_rejects_empty_invalid_or_non_increasing_limits(
+    tmp_path: Path,
+    limits: dict,
+) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run()
+        harness.store.submit(
+            lambda uow: uow.repository.update_run_safety_limits(
+                "run-test",
+                "research-team",
+                json.dumps(
+                {
+                    "stageTokens": {"knowledge_collection": 2_000_000},
+                    "toolCalls": 600,
+                    "wallClockSeconds": 14_400,
+                    "maxRetries": 3,
+                }
+                ),
+                FIXED_NOW_MS,
+            ),
+            force_flush=True,
+        ).result(timeout=10)
+        with pytest.raises(WorkflowCommandError, match="budget"):
+            harness.service.submit(
+                harness.request(
+                    command=WorkflowCommandKind.EXTEND_BUDGET,
+                    node_id=None,
+                    payload={"limits": limits},
+                )
+            )
+        run = harness.store.get_run("run-test")
+        assert run is not None
+        assert run.run_version == 1
+    finally:
+        harness.close()
+
+
+def test_extend_budget_merges_one_concrete_monotonic_extension(tmp_path: Path) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run()
+        harness.store.submit(
+            lambda uow: uow.repository.update_run_safety_limits(
+                "run-test",
+                "research-team",
+                json.dumps(
+                {
+                    "stageTokens": {
+                        "knowledge_collection": 2_000_000,
+                        "experiment_design": 2_000_000,
+                    },
+                    "toolCalls": 600,
+                    "wallClockSeconds": 14_400,
+                    "maxRetries": 3,
+                }
+                ),
+                FIXED_NOW_MS,
+            ),
+            force_flush=True,
+        ).result(timeout=10)
+        receipt = harness.service.submit(
+            harness.request(
+                command=WorkflowCommandKind.EXTEND_BUDGET,
+                node_id=None,
+                payload={
+                    "limits": {
+                        "stageTokens": {"knowledge_collection": 2_500_000},
+                        "toolCalls": 700,
+                    }
+                },
+            )
+        )
+        assert receipt.status == "accepted"
+        run = harness.store.get_run("run-test")
+        assert run is not None
+        assert json.loads(run.safety_limits_json) == {
+            "stageTokens": {
+                "knowledge_collection": 2_500_000,
+                "experiment_design": 2_000_000,
+            },
+            "toolCalls": 700,
+            "wallClockSeconds": 14_400,
+            "maxRetries": 3,
+        }
+    finally:
+        harness.close()
+
+
 def test_start_offer_payload_carries_blocker_wording(tmp_path: Path) -> None:
     """The UI's disabled reason must come from the blocker itself, not a
     frontend guess keyed on the coarse reason code."""
@@ -431,10 +539,16 @@ def _seed_finding_rerun_run(
         build_run_record,
     )
 
+    identity = register_or_resolve(build_challenge_cup_workflow_definition())
     run = replace(
         build_run_record(
-            run_id=run_id, status=run_status, run_version=2, last_event_sequence=1
+            run_id=run_id,
+            status=run_status,
+            run_version=2,
+            last_event_sequence=1,
+            workflow_version_id=identity.workflowVersionId,
         ),
+        structure_hash=identity.structureHash,
         blocked_problem_json=blocked_problem_json,
     )
 

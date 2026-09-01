@@ -72,17 +72,15 @@ from core.web.services.team_workflow.research_runtime.catalog_run_authorization 
 from core.web.services.team_workflow.research_runtime.catalog_run_authorization import (
     record_catalog_run_authorization as _record_catalog_run_authorization,
 )
+from core.web.services.team_workflow.research_runtime.budget_contract import (
+    default_safety_limits,
+)
 
 CONTROLS_DIRNAME = "challenge_cup_real_batch"
 BATCHES_DIRNAME = "batches"
 ENVELOPE_SCHEMA_VERSION = 1
 AWAITING_APPROVAL_BLOCKED_PREFIX = "awaiting_human_approval"
 CANCELLED_BLOCKED_REASON = "cancelled_by_operator"
-
-DEFAULT_STAGE_TOKENS = 200_000
-DEFAULT_TOOL_CALLS = 600
-DEFAULT_WALL_CLOCK_SECONDS = 4 * 60 * 60
-DEFAULT_MAX_RETRIES = 3
 
 _AUTHORIZATION_BINDING_FIELDS = (
     "authorizationId",
@@ -131,17 +129,8 @@ def _envelope_path(team_id: str, plan_id: str) -> Path:
     return _batches_root(team_id) / f"{plan_id}.json"
 
 
-def _default_safety_limits() -> dict[str, int]:
-    return {
-        "stageTokens": {
-            "knowledge_collection": DEFAULT_STAGE_TOKENS,
-            "experiment_design": DEFAULT_STAGE_TOKENS,
-            "execution_iteration": DEFAULT_STAGE_TOKENS,
-        },
-        "toolCalls": DEFAULT_TOOL_CALLS,
-        "wallClockSeconds": DEFAULT_WALL_CLOCK_SECONDS,
-        "maxRetries": DEFAULT_MAX_RETRIES,
-    }
+def _default_safety_limits() -> dict[str, Any]:
+    return default_safety_limits()
 
 
 def _default_question_run_launcher(

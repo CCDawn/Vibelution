@@ -15,23 +15,18 @@ from typing import Any
 from core.research.workflow.contracts import PendingAction
 from core.research.workflow.ledger import WorkflowLedgerStore
 
+from .budget_contract import (
+    DEFAULT_FORMAL_TOKEN_BUDGET,
+    DEFAULT_MAX_RETRIES,
+    DEFAULT_STAGE_TOKENS,
+    DEFAULT_TOOL_CALLS,
+    DEFAULT_WALL_CLOCK_SECONDS,
+)
 from .ids import new_id
 
-# Missing-contract budget scale for the formal runtime. Real single model
-# invocations already carry ~24K input tokens and a settled formal node can
-# consume ~300K; the previous 250K stage default permanently rejected any
-# stage attempt after one real node settled. Aligned with the conservative
-# task budget fallback (session worker ``DEFAULT_SESSION_TOKEN_BUDGET``) and
-# the 2026-08-29 修复方案 contract: explicit task budget first, 2,000,000 as
-# the conservative fallback when no contract exists.
-DEFAULT_FORMAL_TOKEN_BUDGET = 2_000_000
-DEFAULT_STAGE_TOKENS = DEFAULT_FORMAL_TOKEN_BUDGET
 # Per-Agent-node-attempt reservation fallback (the turn-budget scale), used
 # only when neither a task budgetRequest nor a frozen stage budget exists.
 DEFAULT_AGENT_NODE_RESERVE_TOKENS = DEFAULT_FORMAL_TOKEN_BUDGET
-DEFAULT_TOOL_CALLS = 300
-DEFAULT_WALL_CLOCK_SECONDS = 21_600
-DEFAULT_AUTO_RETRIES = 2
 
 # ``settled_json`` is the existing budget-receipt projection column.  Keep the
 # invocation index deliberately bounded: an exhausted index fails closed
@@ -39,6 +34,7 @@ DEFAULT_AUTO_RETRIES = 2
 MAX_RECORDED_INVOCATIONS = 256
 
 _STAGE_BY_NODE: dict[str, str] = {
+    "problem_understanding": "knowledge_collection",
     "source_finding": "knowledge_collection",
     "source_extraction": "knowledge_collection",
     "evidence_relations": "knowledge_collection",
@@ -68,7 +64,18 @@ def stage_for_node(node_id: str) -> str:
     return _STAGE_BY_NODE.get(node_id, "execution_iteration")
 
 
-def _policy_limits(snapshot: dict[str, Any], stage_id: str) -> dict[str, int]:
+def _positive_policy_int(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return None
+    return int(value)
+
+
+def _policy_limits(
+    snapshot: dict[str, Any],
+    stage_id: str,
+    *,
+    operator_limits: Mapping[str, Any] | None = None,
+) -> dict[str, int]:
     policy = snapshot.get("budgetPolicy") or {}
     stage_budgets = policy.get("stageBudgets") or {}
     stage = stage_budgets.get(stage_id) if isinstance(stage_budgets, dict) else {}
@@ -83,7 +90,29 @@ def _policy_limits(snapshot: dict[str, Any], stage_id: str) -> dict[str, int]:
         or policy.get("wallClockSeconds")
         or DEFAULT_WALL_CLOCK_SECONDS
     )
-    retries = int(policy.get("autoRetries") or DEFAULT_AUTO_RETRIES)
+    retries = int(policy.get("maxRetries") or DEFAULT_MAX_RETRIES)
+
+    # ``safety_limits_json`` is the operator-owned, auditable extension delta
+    # for an immutable run snapshot.  It may only widen capacity; it never
+    # rewrites or lowers the frozen launch contract.
+    override = operator_limits if isinstance(operator_limits, Mapping) else {}
+    stage_tokens = override.get("stageTokens")
+    stage_token_override = (
+        _positive_policy_int(stage_tokens.get(stage_id))
+        if isinstance(stage_tokens, Mapping)
+        else None
+    )
+    tool_override = _positive_policy_int(override.get("toolCalls"))
+    seconds_override = _positive_policy_int(override.get("wallClockSeconds"))
+    retries_override = _positive_policy_int(override.get("maxRetries"))
+    if stage_token_override is not None:
+        tokens = max(tokens, stage_token_override)
+    if tool_override is not None:
+        tool_calls = max(tool_calls, tool_override)
+    if seconds_override is not None:
+        seconds = max(seconds, seconds_override)
+    if retries_override is not None:
+        retries = max(retries, retries_override)
     return {
         "tokens": tokens,
         "toolCalls": tool_calls,
@@ -93,9 +122,7 @@ def _policy_limits(snapshot: dict[str, Any], stage_id: str) -> dict[str, int]:
 
 
 def _positive_contract_tokens(value: object) -> int | None:
-    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-        return None
-    return int(value)
+    return _positive_policy_int(value)
 
 
 def stage_budget_tokens(snapshot: Mapping[str, Any] | None, node_id: str) -> int | None:
@@ -380,7 +407,6 @@ def reserve_budget_authority(
 ) -> dict[str, Any]:
     snapshot = dict(input_snapshot or {})
     stage_id = stage_for_node(action.node_id)
-    limits = _policy_limits(snapshot, stage_id)
     reservation_id = f"reservation-{action.node_run_id}"
     estimate = max(0, int(estimate_tokens))
 
@@ -388,6 +414,21 @@ def reserve_budget_authority(
     receipt_id = new_id("br")
 
     def mutate(uow):
+        run = uow.repository.get_run(action.run_id)
+        if run is None:
+            raise BudgetAuthorityError(
+                f"workflow run not found: {action.run_id}",
+                code="budget_binding_missing",
+            )
+        operator_limits = _payload(
+            run.safety_limits_json,
+            label="workflow_runs.safety_limits_json",
+        )
+        limits = _policy_limits(
+            snapshot,
+            stage_id,
+            operator_limits=operator_limits,
+        )
         # Keep the idempotency lookup, stage admission check, and INSERT in
         # this one writer transaction.  A read-before-submit check permits two
         # concurrent callers to over-reserve the same stage.
@@ -532,6 +573,14 @@ def _validated_usage(usage: Mapping[str, Any]) -> dict[str, Any]:
         "completionTokens",
         "reasoningTokens",
         "reasoning_tokens",
+        "cachedInputTokens",
+        "cached_input_tokens",
+        "uncachedInputTokens",
+        "uncached_input_tokens",
+        "toolCalls",
+        "tool_calls",
+        "wallClockSeconds",
+        "wall_clock_seconds",
     ):
         if key in result and result[key] is not None:
             _counter(result[key], key)
@@ -590,6 +639,12 @@ def _merge_usage_projection(
     incoming_reasoning, _ = _optional_counter(
         incoming, "reasoningTokens", "reasoning_tokens"
     )
+    supplemental_counters = (
+        ("cachedInputTokens", ("cachedInputTokens", "cached_input_tokens")),
+        ("uncachedInputTokens", ("uncachedInputTokens", "uncached_input_tokens")),
+        ("toolCalls", ("toolCalls", "tool_calls")),
+        ("wallClockSeconds", ("wallClockSeconds", "wall_clock_seconds")),
+    )
 
     has_prior_actual = bool(invocations) or any(
         key in current_usage
@@ -633,6 +688,14 @@ def _merge_usage_projection(
         if "usageEstimated" in current_usage:
             merged_usage["usageEstimated"] = bool(current_usage["usageEstimated"])
 
+    for canonical_key, aliases in supplemental_counters:
+        prior_value, prior_present = _optional_counter(current_usage, *aliases)
+        incoming_value, incoming_present = _optional_counter(incoming, *aliases)
+        if incoming_present:
+            merged_usage[canonical_key] = max(prior_value, incoming_value)
+        elif prior_present:
+            merged_usage[canonical_key] = prior_value
+
     payload = dict(current_payload)
     payload["usage"] = merged_usage
     payload["invocations"] = invocations
@@ -668,8 +731,12 @@ def record_budget_usage_in_uow(
     reservation_id: str,
     invocation_id: str,
     input_tokens: int = 0,
+    cached_input_tokens: int = 0,
+    uncached_input_tokens: int = 0,
     output_tokens: int = 0,
     reasoning_tokens: int = 0,
+    tool_calls: int = 0,
+    wall_clock_seconds: int = 0,
     usage_estimated: bool = False,
 ) -> dict[str, Any]:
     """Append one provider invocation inside an existing Ledger transaction.
@@ -685,8 +752,17 @@ def record_budget_usage_in_uow(
     reservation_id = _identity(reservation_id, "reservation_id")
     invocation_id = _identity(invocation_id, "invocation_id")
     input_count = _counter(input_tokens, "input_tokens")
+    cached_input_count = _counter(cached_input_tokens, "cached_input_tokens")
+    uncached_input_count = _counter(uncached_input_tokens, "uncached_input_tokens")
     output_count = _counter(output_tokens, "output_tokens")
     reasoning_count = _counter(reasoning_tokens, "reasoning_tokens")
+    tool_call_count = _counter(tool_calls, "tool_calls")
+    wall_clock_count = _counter(wall_clock_seconds, "wall_clock_seconds")
+    if cached_input_count + uncached_input_count > input_count:
+        raise BudgetAuthorityError(
+            "cached and uncached input tokens exceed input_tokens",
+            code="budget_usage_invalid",
+        )
     if not isinstance(usage_estimated, bool):
         raise BudgetAuthorityError(
             "usage_estimated must be boolean", code="budget_usage_invalid"
@@ -694,8 +770,12 @@ def record_budget_usage_in_uow(
 
     invocation_usage = {
         "inputTokens": input_count,
+        "cachedInputTokens": cached_input_count,
+        "uncachedInputTokens": uncached_input_count,
         "outputTokens": output_count,
         "reasoningTokens": reasoning_count,
+        "toolCalls": tool_call_count,
+        "wallClockSeconds": wall_clock_count,
         # Provider reasoning tokens are a completion detail and are already
         # included in outputTokens for the relay response.
         "tokens": input_count + output_count,
@@ -770,12 +850,26 @@ def record_budget_usage_in_uow(
     prior_reasoning, _ = _optional_counter(
         prior_usage, "reasoningTokens", "reasoning_tokens"
     )
+    prior_cached, _ = _optional_counter(
+        prior_usage, "cachedInputTokens", "cached_input_tokens"
+    )
+    prior_uncached, _ = _optional_counter(
+        prior_usage, "uncachedInputTokens", "uncached_input_tokens"
+    )
+    prior_tool_calls, _ = _optional_counter(prior_usage, "toolCalls", "tool_calls")
+    prior_wall_clock, _ = _optional_counter(
+        prior_usage, "wallClockSeconds", "wall_clock_seconds"
+    )
     aggregate = dict(prior_usage)
     aggregate.update(
         {
             "inputTokens": prior_input + input_count,
+            "cachedInputTokens": prior_cached + cached_input_count,
+            "uncachedInputTokens": prior_uncached + uncached_input_count,
             "outputTokens": prior_output + output_count,
             "reasoningTokens": prior_reasoning + reasoning_count,
+            "toolCalls": prior_tool_calls + tool_call_count,
+            "wallClockSeconds": prior_wall_clock + wall_clock_count,
             "tokens": prior_tokens + input_count + output_count,
             "usageEstimated": _usage_estimated(prior_usage) or usage_estimated,
         }

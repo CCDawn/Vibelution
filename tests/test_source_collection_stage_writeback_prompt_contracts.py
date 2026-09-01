@@ -34,6 +34,16 @@ def test_finding_prompt_requires_counter_search_without_fabrication() -> None:
     assert "不得伪造负面资料" in prompt
 
 
+def test_finding_prompt_names_the_writeback_result_argument_and_rejects_payload_json() -> None:
+    # 真实故障：模型把结构化候选传给不存在的 payload_json，工具签名拒绝后
+    # 耗尽本轮 token 预算。Prompt 必须直接固定正式参数名，不能只描述 result 形状。
+    prompt = "\n".join(stage_writeback_prompt_lines("finding"))
+
+    assert "参数 `result_json`" in prompt
+    assert "没有 `payload_json` 参数" in prompt
+    assert "禁止使用 `payload_json`" in prompt
+
+
 def test_finding_prompt_requires_rolling_writeback_bounded_verification_and_no_fabricated_doi() -> None:
     # 真实故障：模型把契约读成"攒齐并验证完再一次性写回"，61 分钟零写回；
     # 又自行构造错误 DOI 后在 crossref/doi.org 上试 17 次变体。契约必须

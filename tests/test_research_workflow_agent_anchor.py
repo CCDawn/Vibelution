@@ -445,6 +445,7 @@ def test_live_turn_wait_heartbeat_does_not_consume_transient_budget(
                 "continuationTurnId": "turn-cont-1",
                 "continuationTurnChain": ["turn-main", "turn-cont-1"],
                 "continuationsUsed": 1,
+                "continuationNoProgressCount": 2,
             },
         )
 
@@ -457,6 +458,7 @@ def test_live_turn_wait_heartbeat_does_not_consume_transient_budget(
         assert problem["continuationTurnId"] == "turn-cont-1"
         assert problem["continuationTurnChain"] == ["turn-main", "turn-cont-1"]
         assert problem["continuationsUsed"] == 1
+        assert problem["continuationNoProgressCount"] == 2
         assert problem.get("code") == "live_turn_wait"
     finally:
         harness.close()
