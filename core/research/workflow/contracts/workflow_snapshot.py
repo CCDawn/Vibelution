@@ -215,10 +215,6 @@ class BudgetReceiptRef:
             "stageId": self.stage_id,
             "status": self.status,
             "policyHash": self.policy_hash,
-            "reservedPayload": dict(self.reserved_payload),
-            "settledPayload": dict(self.settled_payload),
-            "createdAtMs": self.created_at_ms,
-            "updatedAtMs": self.updated_at_ms,
         }
 
 

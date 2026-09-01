@@ -674,6 +674,10 @@ def test_research_runtime_budget_projects_canonical_receipt_usage(
             f"/api/research/workflow-runs/{run_id}/budget",
             params={"teamId": "research-team"},
         )
+        snapshot_response = client.get(
+            f"/api/research/workflow-runs/{run_id}/snapshot",
+            params={"teamId": "research-team"},
+        )
 
     assert response.status_code == 200, response.text
     payload = response.json()
@@ -710,3 +714,6 @@ def test_research_runtime_budget_projects_canonical_receipt_usage(
     }
     assert reservation["actual"] == actual
     assert reservation["status"] == "settled"
+    snapshot_ref = snapshot_response.json()["budgetSummary"]["receiptRefs"][0]
+    assert "reservedPayload" not in snapshot_ref
+    assert "settledPayload" not in snapshot_ref
