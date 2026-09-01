@@ -61,8 +61,9 @@ _EVIDENCE_REF = (
 
 
 class _FakeResponse:
-    def __init__(self, content: str):
+    def __init__(self, content: str, *, response_metadata: dict | None = None):
         self.content = content
+        self.response_metadata = dict(response_metadata or {})
 
 
 def _install_fake_llm(monkeypatch, payloads: list[str]):
@@ -241,6 +242,154 @@ def test_digest_drafter_uses_llm_markdown_and_server_owned_refs(monkeypatch):
     # sourceMessageRefs are server-owned: only completed, non-pass messages.
     refs = digest["sourceMessageRefs"]
     assert isinstance(refs, list) and len(refs) == 2
+
+
+def test_digest_observability_records_bounded_chain_metrics(monkeypatch):
+    from core.web.services import runtime_scene_service
+    from core.web.services.team_workflow import meeting_runtime
+
+    payload = """# 候选 A/B 评审纪要
+
+## 会议结论
+
+评审完成，倾向候选 A。
+
+## 关键讨论
+
+- 仅保留必要结论。
+"""
+    events: list[dict] = []
+
+    def capture_event(component, phase, event_code, **kwargs):
+        events.append(
+            {
+                "component": component,
+                "phase": phase,
+                "eventCode": event_code,
+                **kwargs,
+            }
+        )
+        return {"accepted": True}
+
+    def fake_invoke_llm(client, messages, tools=None, context=None, **kwargs):
+        return _FakeResponse(
+            payload,
+            response_metadata={
+                "finish_reason": "stop",
+                "usage_observation": {
+                    "input_tokens": 120,
+                    "output_tokens": 45,
+                    "reasoning_output_tokens": 11,
+                    "total_tokens": 165,
+                },
+            },
+        )
+
+    monkeypatch.setattr(
+        runtime_scene_service,
+        "record_runtime_scene_event_quietly",
+        capture_event,
+    )
+    monkeypatch.setattr(llm_review_runners, "invoke_llm", fake_invoke_llm)
+
+    drafter = llm_review_runners.build_meeting_digest_drafter(
+        {
+            **_FAKE_LLM,
+            "providerId": "fake-provider",
+            "modelRef": "fake-provider/fake-review-model",
+        }
+    )
+    assert drafter is not None
+    digest = drafter(_meeting_round(), _source_messages())
+    monkeypatch.setattr(
+        meeting_runtime.meeting_rounds,
+        "completed_meeting_source_messages",
+        lambda _meeting_round: _source_messages()[:2],
+    )
+    meeting_runtime.build_meeting_digest_draft(
+        _meeting_round(),
+        _source_messages(),
+        drafter=lambda *_args: digest,
+    )
+
+    by_code = {event["eventCode"]: event for event in events}
+    started = by_code["meeting_digest.llm.started"]["fields"]
+    completed = by_code["meeting_digest.llm.completed"]["fields"]
+    contract = by_code["meeting_digest.contract.validated"]["fields"]
+    ledger = by_code["meeting_digest.fact_ledger.projected"]["fields"]
+
+    assert started["meetingRoundId"] == "meeting-1"
+    assert started["providerId"] == "fake-provider"
+    assert started["messageCount"] == 2
+    assert started["inputChars"] > 0
+    assert completed["finishReason"] == "stop"
+    assert completed["inputTokens"] == 120
+    assert completed["outputTokens"] == 45
+    assert completed["reasoningOutputTokens"] == 11
+    assert completed["outputChars"] == len(payload)
+    assert contract == {
+        "teamId": "team-1",
+        "meetingRoundId": "meeting-1",
+        "hasH1": True,
+        "hasConclusionSection": True,
+        "sectionCount": 2,
+        "documentChars": len(payload.strip()),
+    }
+    assert ledger["sourceMessageRefCount"] == 2
+    serialized_events = json.dumps(events, ensure_ascii=False)
+    assert "候选 A 更契合赛题" not in serialized_events
+    assert "只依据给出的会议发言" not in serialized_events
+
+
+def test_digest_observability_classifies_timeout_without_logging_content(monkeypatch):
+    from core.web.services import runtime_scene_service
+
+    events: list[dict] = []
+
+    monkeypatch.setattr(
+        runtime_scene_service,
+        "record_runtime_scene_event_quietly",
+        lambda component, phase, event_code, **kwargs: events.append(
+            {"eventCode": event_code, **kwargs}
+        ),
+    )
+
+    def timeout(*_args, **_kwargs):
+        raise llm_review_runners.ReviewLLMTimeoutError(
+            purpose="meeting_digest", timeout_seconds=450
+        )
+
+    monkeypatch.setattr(llm_review_runners, "_invoke_llm_with_timeout", timeout)
+    drafter = llm_review_runners.build_meeting_digest_drafter(dict(_FAKE_LLM))
+
+    with pytest.raises(llm_review_runners.ReviewLLMTimeoutError):
+        drafter(_meeting_round(), _source_messages())
+
+    failed = next(
+        event for event in events if event["eventCode"] == "meeting_digest.llm.failed"
+    )
+    assert failed["fields"]["errorCategory"] == "timeout"
+    assert failed["fields"]["errorType"] == "ReviewLLMTimeoutError"
+    assert "候选 A 更契合赛题" not in json.dumps(events, ensure_ascii=False)
+
+
+def test_digest_observability_outage_does_not_change_business_result(monkeypatch):
+    from core.web.services import runtime_scene_service
+
+    _install_fake_llm(
+        monkeypatch,
+        ["# 评审纪要\n\n## 会议结论\n\n纪要仍应正常生成。"],
+    )
+    monkeypatch.setattr(
+        runtime_scene_service,
+        "record_runtime_scene_event_quietly",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("scene down")),
+    )
+    drafter = llm_review_runners.build_meeting_digest_drafter(dict(_FAKE_LLM))
+
+    digest = drafter(_meeting_round(), _source_messages())
+
+    assert digest["summary"] == "纪要仍应正常生成。"
 
 
 def test_digest_prompt_requests_open_markdown_instead_of_protocol_fact_json():

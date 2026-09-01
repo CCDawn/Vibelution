@@ -71,6 +71,95 @@ REVIEW_LLM_CALL_TIMEOUT_SECONDS = 450.0
 _REVIEW_LLM_CALL_TIMEOUT_ENV = "VIBELUTION_REVIEW_LLM_CALL_TIMEOUT_SECONDS"
 
 
+def _record_meeting_digest_scene_event(
+    event_code: str,
+    *,
+    outcome: str,
+    fields: Mapping[str, Any],
+    level: str = "info",
+) -> None:
+    """Emit bounded digest diagnostics without affecting model execution."""
+
+    try:
+        from core.web.services.runtime_scene_service import (
+            record_runtime_scene_event_quietly,
+        )
+
+        record_runtime_scene_event_quietly(
+            "team_workflow",
+            "meeting_digest",
+            event_code,
+            message="Meeting digest LLM stage observed.",
+            level=level,
+            outcome=outcome,
+            fields=dict(fields),
+            lifecycle=False,
+        )
+    except Exception:  # noqa: BLE001 - diagnostics must never fail the LLM call
+        # Diagnostics are never allowed to change the digest contract.
+        return
+
+
+def _meeting_digest_error_category(error: Exception) -> str:
+    if isinstance(error, ReviewLLMTimeoutError):
+        return "timeout"
+    if isinstance(error, ContractValidationError):
+        return "contract_validation"
+    if isinstance(error, LLMError):
+        return "provider_error"
+    return "runtime_error"
+
+
+def _response_usage_fields(response: Any) -> dict[str, Any]:
+    metadata = getattr(response, "response_metadata", None)
+    metadata = metadata if isinstance(metadata, Mapping) else {}
+    usage = metadata.get("usage_observation")
+    usage = usage if isinstance(usage, Mapping) else {}
+
+    def nonnegative_int(key: str) -> int:
+        value = usage.get(key)
+        if isinstance(value, bool):
+            return 0
+        try:
+            return max(0, int(value or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    finish_reason = str(
+        metadata.get("finish_reason") or metadata.get("finishReason") or ""
+    ).strip()
+    additional_kwargs = getattr(response, "additional_kwargs", None)
+    additional_kwargs = (
+        additional_kwargs if isinstance(additional_kwargs, Mapping) else {}
+    )
+    outcome = additional_kwargs.get("turn_outcome")
+    outcome_kind = str(getattr(outcome, "kind", "") or "").strip()
+    terminal_event = next(
+        (
+            event
+            for event in reversed(tuple(getattr(outcome, "events", ()) or ()))
+            if bool(getattr(event, "terminal", False))
+        ),
+        None,
+    )
+    provider_terminal = str(
+        getattr(terminal_event, "provider_event_type", "") or ""
+    ).strip()
+    if not finish_reason and provider_terminal.startswith("chat.finish."):
+        finish_reason = provider_terminal.removeprefix("chat.finish.")
+    elif not finish_reason and provider_terminal:
+        finish_reason = provider_terminal
+    return {
+        "inputTokens": nonnegative_int("input_tokens"),
+        "outputTokens": nonnegative_int("output_tokens"),
+        "reasoningOutputTokens": nonnegative_int("reasoning_output_tokens"),
+        "totalTokens": nonnegative_int("total_tokens"),
+        "finishReason": finish_reason,
+        "outcomeKind": outcome_kind,
+        "usageObserved": bool(usage),
+    }
+
+
 def review_llm_call_timeout_seconds(*, model_ref: str = "") -> float:
     """Return the receipt-derived review-call budget.
 
@@ -277,11 +366,12 @@ def _invoke_review_llm(
 ) -> dict[str, Any] | str | ProviderBoundReviewResult:
     """Run one review model call and return its requested response form."""
 
+    user_content = json.dumps(dict(user_payload), ensure_ascii=False)
     messages: list[Any] = [
         build_cacheable_system_message(system_prompt),
         {
             "role": "user",
-            "content": json.dumps(dict(user_payload), ensure_ascii=False),
+            "content": user_content,
         },
     ]
     receipt_binding = (
@@ -326,33 +416,98 @@ def _invoke_review_llm(
         },
     )
     if not require_provider_receipt:
-        response = _invoke_llm_with_timeout(
-            lambda: invoke_llm(
-                llm["client"],
-                messages,
-                context=invocation_context,
-            ),
-            purpose=purpose,
-            timeout_seconds=review_llm_call_timeout_seconds(
-                model_ref=str(llm.get("modelRef") or "")
-            ),
-            deadline_at_ms=deadline_at_ms,
+        timeout_seconds = review_llm_call_timeout_seconds(
+            model_ref=str(llm.get("modelRef") or "")
         )
-        content = str(getattr(response, "content", "") or "")
-        if response_mode == "text":
-            normalized = content.strip()
-            if normalized.startswith("```markdown") and normalized.endswith("```"):
-                normalized = normalized[len("```markdown") : -len("```")].strip()
-            elif normalized.startswith("```") and normalized.endswith("```"):
-                normalized = normalized[len("```") : -len("```")].strip()
-            if not normalized:
-                raise ContractValidationError(
-                    f"review step `{purpose}` returned empty text"
+        digest_observation = purpose == "meeting_digest"
+        started_at = time.monotonic()
+        base_fields = {
+            "teamId": session_id,
+            "meetingRoundId": str(user_payload.get("meetingRoundId") or ""),
+            "purpose": purpose,
+            "providerId": str(llm.get("providerId") or ""),
+            "modelId": str(llm.get("modelId") or ""),
+            "modelRef": str(llm.get("modelRef") or ""),
+            "profileId": str(llm.get("profileId") or ""),
+            "responseMode": response_mode,
+            "messageCount": len(messages),
+            "inputChars": len(system_prompt) + len(user_content),
+            "timeoutMs": max(0, int(timeout_seconds * 1000)),
+            "deadlinePresent": bool(deadline_at_ms),
+            "deadlineRemainingMs": max(0, int(deadline_at_ms - time.time() * 1000))
+            if deadline_at_ms
+            else 0,
+        }
+        if digest_observation:
+            _record_meeting_digest_scene_event(
+                "meeting_digest.llm.started",
+                outcome="started",
+                fields=base_fields,
+            )
+        response: Any = None
+        content = ""
+        try:
+            response = _invoke_llm_with_timeout(
+                lambda: invoke_llm(
+                    llm["client"],
+                    messages,
+                    context=invocation_context,
+                ),
+                purpose=purpose,
+                timeout_seconds=timeout_seconds,
+                deadline_at_ms=deadline_at_ms,
+            )
+            content = str(getattr(response, "content", "") or "")
+            if response_mode == "text":
+                normalized = content.strip()
+                if normalized.startswith("```markdown") and normalized.endswith("```"):
+                    normalized = normalized[len("```markdown") : -len("```")].strip()
+                elif normalized.startswith("```") and normalized.endswith("```"):
+                    normalized = normalized[len("```") : -len("```")].strip()
+                if not normalized:
+                    raise ContractValidationError(
+                        f"review step `{purpose}` returned empty text"
+                    )
+                produced: dict[str, Any] | str = normalized
+            else:
+                if response_mode != "json_object":
+                    raise ValueError(
+                        f"unsupported review response mode: {response_mode}"
+                    )
+                produced = _parse_json_object(content, what=f"review step `{purpose}`")
+        except Exception as exc:  # noqa: BLE001 - classify, record, and re-raise unchanged
+            if digest_observation:
+                _record_meeting_digest_scene_event(
+                    "meeting_digest.llm.failed",
+                    outcome="failed",
+                    level="error",
+                    fields={
+                        **base_fields,
+                        **_response_usage_fields(response),
+                        "latencyMs": max(
+                            0, int((time.monotonic() - started_at) * 1000)
+                        ),
+                        "outputChars": len(content),
+                        "errorCategory": _meeting_digest_error_category(exc),
+                        "errorType": type(exc).__name__,
+                        "llmErrorCategory": (
+                            str(exc.category) if isinstance(exc, LLMError) else ""
+                        ),
+                    },
                 )
-            return normalized
-        if response_mode != "json_object":
-            raise ValueError(f"unsupported review response mode: {response_mode}")
-        return _parse_json_object(content, what=f"review step `{purpose}`")
+            raise
+        if digest_observation:
+            _record_meeting_digest_scene_event(
+                "meeting_digest.llm.completed",
+                outcome="succeeded",
+                fields={
+                    **base_fields,
+                    **_response_usage_fields(response),
+                    "latencyMs": max(0, int((time.monotonic() - started_at) * 1000)),
+                    "outputChars": len(content),
+                },
+            )
+        return produced
 
     if response_mode != "json_object":
         raise ValueError("provider-bound review results require JSON object output")
@@ -477,6 +632,17 @@ def _summary_from_digest_markdown(markdown: str) -> str:
     return summary
 
 
+def _digest_markdown_contract_fields(markdown: str) -> dict[str, Any]:
+    lines = [line.strip() for line in str(markdown or "").splitlines()]
+    first_content = next((line for line in lines if line), "")
+    return {
+        "hasH1": first_content.startswith("# "),
+        "hasConclusionSection": "## 会议结论" in lines,
+        "sectionCount": sum(1 for line in lines if line.startswith("## ")),
+        "documentChars": len(str(markdown or "")),
+    }
+
+
 def build_meeting_digest_drafter(llm: Mapping[str, Any] | None = None):
     """Return the real-LLM Coordinator digest drafter, or ``None`` if unavailable."""
 
@@ -514,6 +680,30 @@ def build_meeting_digest_drafter(llm: Mapping[str, Any] | None = None):
         )
         if not isinstance(produced, str):
             raise ContractValidationError("digest drafter requires Markdown text")
+        contract_fields = {
+            "teamId": str(meeting_round.get("teamId") or ""),
+            "meetingRoundId": str(meeting_round.get("meetingRoundId") or ""),
+            **_digest_markdown_contract_fields(produced),
+        }
+        try:
+            summary = _summary_from_digest_markdown(produced)
+        except ContractValidationError as exc:
+            _record_meeting_digest_scene_event(
+                "meeting_digest.contract.validated",
+                outcome="failed",
+                level="error",
+                fields={
+                    **contract_fields,
+                    "errorCategory": "contract_validation",
+                    "errorType": type(exc).__name__,
+                },
+            )
+            raise
+        _record_meeting_digest_scene_event(
+            "meeting_digest.contract.validated",
+            outcome="succeeded",
+            fields=contract_fields,
+        )
         # Server-owned fields: source refs are computed from the bound
         # messages, never delegated to the model.
         source_refs = [
@@ -528,7 +718,7 @@ def build_meeting_digest_drafter(llm: Mapping[str, Any] | None = None):
             if str(item).strip()
         ]
         return {
-            "summary": _summary_from_digest_markdown(produced),
+            "summary": summary,
             "agendaSummary": "；".join(agenda),
             "discussionTopics": agenda,
             "documentMarkdown": produced,

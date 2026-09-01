@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 from core.research.workflow.contracts import ContractValidationError
-from core.web.services import chat_room_service
+from core.web.services import chat_room_service, runtime_scene_service
 from core.web.services.team_workflow import meeting_rounds as meetings
 from core.web.services.team_workflow import meeting_runtime
 from core.web.services.team_workflow.research_runtime import (
@@ -157,13 +157,24 @@ def test_summary_draft_open_to_awaiting_approval_is_idempotent(
     monkeypatch.setattr(meeting_runtime, "maybe_auto_draft_meeting", lambda *a, **k: None)
     agent_ids = [agents[role] for role in _ROLES]
     build_calls = {"count": 0}
+    digest_events: list[dict] = []
     original = meeting_runtime.build_meeting_digest_draft
+
+    def capture_digest_event(component, phase, event_code, **kwargs):
+        if event_code.startswith("meeting_digest."):
+            digest_events.append({"eventCode": event_code, **kwargs})
+        return {"accepted": True}
 
     def counting_builder(*args, **kwargs):
         build_calls["count"] += 1
         return original(*args, **kwargs)
 
     monkeypatch.setattr(meeting_runtime, "build_meeting_digest_draft", counting_builder)
+    monkeypatch.setattr(
+        runtime_scene_service,
+        "record_runtime_scene_event_quietly",
+        capture_digest_event,
+    )
     with server_operator_scope("u-1", roles=("operator",)):
         recorded = _open_first_meeting(team_id, agent_ids)
         meeting_id = recorded["reviewMeeting"]["meetingRound"]["meetingRoundId"]
@@ -184,6 +195,27 @@ def test_summary_draft_open_to_awaiting_approval_is_idempotent(
             == first["digestDraft"]["sourceMessageContentHash"]
         )
         assert build_calls["count"] == 1
+        event_codes = [event["eventCode"] for event in digest_events]
+        assert event_codes.count("meeting_digest.prepare.started") == 2
+        assert "meeting_digest.draft.started" in event_codes
+        assert "meeting_digest.draft.persisted" in event_codes
+        assert "meeting_digest.prepare.reused" in event_codes
+        started = next(
+            event
+            for event in digest_events
+            if event["eventCode"] == "meeting_digest.prepare.started"
+        )["fields"]
+        assert started["teamId"] == team_id
+        assert started["meetingRoundId"] == meeting_id
+        assert started["completedSourceMessageCount"] > 0
+        assert started["transcriptChars"] > 0
+        persisted = next(
+            event
+            for event in digest_events
+            if event["eventCode"] == "meeting_digest.draft.persisted"
+        )["fields"]
+        assert persisted["meetingStatus"] == "awaiting_approval"
+        assert persisted["drafterMode"] == "deterministic"
 
 
 def test_summary_draft_concurrent_requests_share_one_generation(
