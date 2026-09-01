@@ -896,3 +896,147 @@ def test_readiness_real_usage_exhaustion_still_rejects(tmp_path: Path) -> None:
         assert reason == "stage_tokens_limit_reached"
     finally:
         harness.close()
+
+
+def test_extend_budget_safety_limits_reopen_exhausted_readiness_window(
+    tmp_path: Path,
+) -> None:
+    """T2: raising this run's own ceiling through extend_budget reopens the
+    mid-run readiness gate, so retry is a real in-run exit instead of a
+    permanent 412 with run abandonment as the only way out.  The frozen
+    snapshot contract stays untouched (per-run, only-widen)."""
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run()
+        _write_snapshot(
+            harness,
+            {"stageBudgets": {"knowledge_collection": {"tokens": 250_000}}},
+        )
+        _insert_budget_receipt(
+            harness,
+            receipt_id="br-exit-x",
+            node_id="source_finding",
+            node_run_id="nr-run-test-source_finding-a1",
+            estimate=250_000,
+            status="settled",
+            usage={"tokens": 130_000},
+        )
+        _insert_budget_receipt(
+            harness,
+            receipt_id="br-exit-y",
+            node_id="evidence_relations",
+            node_run_id="nr-run-test-evidence_relations-a1",
+            estimate=250_000,
+            status="settled",
+            usage={"tokens": 130_000},
+        )
+        _, exhausted = _readiness_budget(harness)
+        assert exhausted.available() == (False, "stage_tokens_limit_reached")
+
+        # Exactly the payload extend_budget persists (only-widen, per run).
+        _write_safety_limits(
+            harness,
+            {"stageTokens": {"knowledge_collection": 300_000}},
+        )
+        _, reopened = _readiness_budget(harness)
+        assert reopened.available() == (True, "")
+
+        # The frozen snapshot contract is untouched: the widening lives only
+        # in the operator-owned safety-limits extension.
+        row = harness.store.submit(
+            lambda uow: uow.repository.get_run("run-test"),
+            force_flush=True,
+        ).result(timeout=10)
+        assert json.loads(row.input_snapshot_json)["budgetPolicy"][
+            "stageBudgets"
+        ] == {"knowledge_collection": {"tokens": 250_000}}
+    finally:
+        harness.close()
+
+
+def test_budget_authority_dual_reads_legacy_and_canonical_retry_fields() -> None:
+    """T3: retry limits are dual-read — legacy snapshots carry ``autoRetries``
+    while newer surfaces (and extend_budget) write ``maxRetries``; reading
+    only one key silently dropped the other back to the default."""
+    from core.web.services.team_workflow.research_runtime import (
+        budget_authority_adapter,
+    )
+    from core.web.services.team_workflow.research_runtime.budget_contract import (
+        DEFAULT_MAX_RETRIES,
+    )
+
+    legacy = budget_authority_adapter._policy_limits(
+        {"budgetPolicy": {"tokens": FALLBACK_TOKENS, "autoRetries": 5}},
+        "knowledge_collection",
+    )
+    assert legacy["retries"] == 5
+
+    canonical = budget_authority_adapter._policy_limits(
+        {
+            "budgetPolicy": {
+                "tokens": FALLBACK_TOKENS,
+                "autoRetries": 5,
+                "maxRetries": 1,
+            }
+        },
+        "knowledge_collection",
+    )
+    assert canonical["retries"] == 1
+
+    missing = budget_authority_adapter._policy_limits(
+        {"budgetPolicy": {"tokens": FALLBACK_TOKENS}},
+        "knowledge_collection",
+    )
+    assert missing["retries"] == DEFAULT_MAX_RETRIES
+
+    # The operator extension accepts both spellings too (only-widen).
+    legacy_override = budget_authority_adapter._policy_limits(
+        {"budgetPolicy": {"tokens": FALLBACK_TOKENS}},
+        "knowledge_collection",
+        operator_limits={"autoRetries": 7},
+    )
+    assert legacy_override["retries"] == 7
+    canonical_override = budget_authority_adapter._policy_limits(
+        {"budgetPolicy": {"tokens": FALLBACK_TOKENS}},
+        "knowledge_collection",
+        operator_limits={"maxRetries": 4},
+    )
+    assert canonical_override["retries"] == 4
+
+
+def test_readiness_snapshot_dual_reads_retry_vocabulary(tmp_path: Path) -> None:
+    """T3: the readiness budget snapshot honors ``maxRetries`` snapshots, not
+    just the legacy ``autoRetries`` key (and vice versa)."""
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run()
+        _write_snapshot(
+            harness,
+            {"stageBudgets": {"knowledge_collection": {"tokens": 250_000}}},
+        )
+
+        def _auto_retries() -> int:
+            _, budget = _readiness_budget(harness)
+            return budget.auto_retries
+
+        assert _auto_retries() == 2  # default when neither key is present
+
+        _write_snapshot(
+            harness,
+            {
+                "maxRetries": 4,
+                "stageBudgets": {"knowledge_collection": {"tokens": 250_000}},
+            },
+        )
+        assert _auto_retries() == 4
+
+        _write_snapshot(
+            harness,
+            {
+                "autoRetries": 6,
+                "stageBudgets": {"knowledge_collection": {"tokens": 250_000}},
+            },
+        )
+        assert _auto_retries() == 6
+    finally:
+        harness.close()
