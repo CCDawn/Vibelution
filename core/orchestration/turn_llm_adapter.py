@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 import traceback
@@ -213,6 +214,36 @@ def sanitize_llm_turn_messages(messages: list) -> list:
     return clean_messages
 
 
+def _message_digest_entries(messages: list) -> list[Dict[str, Any]]:
+    """Summarize outgoing LLM messages as role + SHA-256 prefix + char count.
+
+    Provider implicit caches key on the byte prefix of the request payload.
+    Recording a per-message digest (no content) lets future cache-miss
+    investigations attribute drift to the exact message that changed without
+    dumping payload text into logs.
+    """
+    entries: list[Dict[str, Any]] = []
+    for index, msg in enumerate(_coerce_message_list(messages)):
+        if isinstance(msg, Mapping):
+            role = _coerce_text(msg.get("role", "type")).strip().lower()
+            content = msg.get("content")
+        else:
+            role = _coerce_text(getattr(msg, "type", "") or getattr(msg, "role", "")).strip().lower()
+            content = getattr(msg, "content", "")
+        if isinstance(content, list):
+            content = json.dumps(content, ensure_ascii=False, default=str)
+        text = _coerce_text(content)
+        entries.append(
+            {
+                "index": index,
+                "role": role or "unknown",
+                "sha256": hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()[:16],
+                "chars": len(text),
+            }
+        )
+    return entries
+
+
 def _schema_json_text(schema: Any) -> str:
     """Return a compact JSON rendering of a (possibly frozen) schema mapping."""
 
@@ -303,6 +334,16 @@ def invoke_agent_llm_turn(
         clean_messages = clean_messages + [
             _structured_output_disclosure_message(hooks.structured_output_contract)
         ]
+    # Per-message digests cover every caller of this seam (session turns and
+    # meeting rounds alike), so provider-cache drift can be attributed to the
+    # exact message that changed. Digest only; no payload text is logged.
+    hooks.record_scene_event(
+        "llm_route",
+        "llm_request_messages_digest",
+        message="Outgoing LLM payload per-message SHA-256 digests recorded for cache attribution.",
+        fields={"messageDigests": _message_digest_entries(clean_messages)},
+        level="debug",
+    )
 
     with ui.thinking("?? 思考中..."), hooks.llm_cancel_context(hooks.current_stop_reason):
         route_attempt = 0

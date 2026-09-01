@@ -21,6 +21,7 @@ def _use_tmp_project_root(tmp_path, monkeypatch):
         context_engine._PROJECT_AGENT_REGISTRY_CACHE.clear()
     with context_engine._ACTIVE_AGENT_DIRECTORY_CACHE_LOCK:
         context_engine._ACTIVE_AGENT_DIRECTORY_CACHE.clear()
+    context_engine.reset_session_context_freeze_cache()
 
 
 class _FakeResearchWorkspace:
@@ -309,6 +310,7 @@ def test_build_research_agent_context_reuses_short_lived_research_org_snapshot(t
 
 
 def test_build_research_agent_context_cache_invalidates_when_research_org_changes(tmp_path, monkeypatch):
+    """会话内冻结花名册字节（缓存前缀稳定），新 session 才重建出新快照。"""
     _use_tmp_project_root(tmp_path, monkeypatch)
     workspace = _use_tmp_research_org_workspace(tmp_path, monkeypatch)
     agent = agent_directory_service.create_agent_instance(
@@ -349,16 +351,36 @@ def test_build_research_agent_context_cache_invalidates_when_research_org_change
         *(organization.get("auditEvents") or []),
         {"eventType": "test_cache_invalidation", "allowed": True},
     ]
+    organization["agents"].append(
+        {
+            "nodeId": "agent-newcomer-invalidate",
+            "agentId": "agent-newcomer-invalidate",
+            "role": "research_specialist",
+            "employeeRank": "member",
+            "status": "active",
+        }
+    )
     workspace.write_research_organization(organization)
     second = context_engine.build_agent_context(
         agent["agentId"],
         session_id="session-research-cache-invalidate",
         run_id="turn-2",
     )
+    refreshed = context_engine.build_agent_context(
+        agent["agentId"],
+        session_id="session-research-cache-invalidate-next",
+        run_id="turn-1",
+    )
 
+    # 同一 session：花名册字节被会话级冻结，底层不重算。
     assert calls == [agent["agentId"], agent["agentId"]]
     assert first.timings["researchOrgContextCacheHit"] is False
-    assert second.timings["researchOrgContextCacheHit"] is False
+    assert second.timings["researchOrgContextCacheHit"] is True
+    assert second.timings["researchOrgContextFrozen"] is True
+    assert first.static_context_block == second.static_context_block
+    # 新 session：拿到的才是组织变更后的新快照。
+    assert refreshed.static_context_block != first.static_context_block
+    assert refreshed.timings["researchOrgContextFrozen"] is not True
 
 
 def test_build_agent_context_leaves_agents_md_to_prompt_manager_or_session_snapshot(tmp_path, monkeypatch):

@@ -233,7 +233,10 @@ def make_user_profile_section() -> SystemPromptSection:
     return SystemPromptSection(
         name="USER_PROFILE",
         compute=compute,
-        cache_break=True,
+        # 静态章节：compute 只读公开配置的用户画像，无任何逐轮动态依赖，
+        # 文本跨轮字节稳定。cache_break=True 的每轮重算只会制造无谓的
+        # 前缀漂移风险与重复 IO。语义：设置区编辑在运行时重启后生效。
+        cache_break=False,
         cache_prefix=True,
         priority=19,
         description="用户在设置区维护的身份、背景与协作偏好",
@@ -537,7 +540,10 @@ def make_delegation_rules_section() -> SystemPromptSection:
     return SystemPromptSection(
         name="DELEGATION_RULES",
         compute=compute,
-        cache_break=True,
+        # 静态章节：render_delegation_static_rules 返回固定规则文本（无
+        # session 状态依赖），逐轮重算不产生任何新信息，只会让每轮构建
+        # 多做一次字符串拼接。动态委派状态由 DELEGATION_STATE 负责。
+        cache_break=False,
         cache_prefix=True,
         priority=36,
         description="主脑调度、子代理边界、结果回收与失败接管规则",

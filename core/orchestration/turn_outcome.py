@@ -444,7 +444,11 @@ class TurnOutcomeController:
         if not context:
             return _coerce_message_list(messages)
         normalized = TurnOutcomeController.sanitize_provider_turn_carryover(_coerce_message_list(messages))
-        insert_at = 1 if normalized else 0
+        # No user-message fallback (resume/carryover payloads without a user
+        # turn): append after the tail instead of index 1.  Inserting volatile
+        # context right after the system message would place it ahead of the
+        # existing history and invalidate the stable provider-cache prefix.
+        insert_at = len(normalized)
         for index in range(len(normalized) - 1, -1, -1):
             item = normalized[index]
             role = ""

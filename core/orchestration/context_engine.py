@@ -8,6 +8,7 @@ import hashlib
 import threading
 import time
 import copy
+from collections import OrderedDict
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
@@ -43,6 +44,24 @@ _PROJECT_AGENT_REGISTRY_CACHE_LOCK = threading.Lock()
 _PROJECT_AGENT_REGISTRY_CACHE: dict[tuple[str, int, int], dict[str, Any]] = {}
 _ACTIVE_AGENT_DIRECTORY_CACHE_LOCK = threading.Lock()
 _ACTIVE_AGENT_DIRECTORY_CACHE: dict[tuple[str, int, int], list[dict[str, Any]]] = {}
+# Session-scoped byte freeze for cache-prefix context segments.
+#
+# The first system message merges the ContextEngine "cache_prefix" blocks
+# (agent static runtime header, research organization roster, prompt template,
+# public structure catalog). Those blocks drift across turns (catalog refresh
+# ordering / conflict queue state, roster onboarding progress, template edits),
+# which silently invalidates the provider implicit cache every round even
+# though the chat history itself is append-only and byte-stable. Freezing the
+# rendered bytes per (session, agent) keeps the prefix stable for the session
+# lifetime; the shared services underneath stay unfrozen so tool callers and
+# other consumers still read fresh data. Frozen semantics: the prompt block is
+# a session-start snapshot of low-frequency reference information.
+_STATIC_CONTEXT_FREEZE_LOCK = threading.Lock()
+_STATIC_CONTEXT_FREEZE_MAX_ENTRIES = 512
+# 0 = freeze for the whole session lifetime. A positive value would refresh a
+# segment after the TTL elapses (one extra provider cache rebuild per refresh).
+_STATIC_CONTEXT_FREEZE_TTL_SECONDS = 0.0
+_STATIC_CONTEXT_FREEZE_CACHE: "OrderedDict[tuple[str, str, str], dict[str, Any]]" = OrderedDict()
 
 
 class AgentContextInterrupted(RuntimeError):
@@ -257,6 +276,57 @@ def _split_agent_runtime_context_block(block: str) -> tuple[str, str]:
     return "\n".join(lines[:dynamic_start]).strip(), "\n".join(lines[dynamic_start:]).strip()
 
 
+def _session_frozen_context_block(
+    segment_key: str,
+    *,
+    agent_id: str,
+    session_id: str,
+    produce: Any,
+    ttl_seconds: float | None = None,
+) -> tuple[str, bool]:
+    """Return session-frozen bytes for a cache-prefix context segment.
+
+    The first call inside a session invokes ``produce`` and freezes the
+    rendered bytes; later calls in the same session reuse those bytes so the
+    merged first system message stays byte-stable across turns. A positive
+    ``ttl_seconds`` lets the segment refresh after the TTL elapses at the cost
+    of one provider cache rebuild. Empty session identity disables the freeze
+    (callers without a session cannot scope stable bytes).
+    """
+    normalized_key = _coerce_text(segment_key).strip()
+    normalized_agent = _coerce_text(agent_id).strip()
+    normalized_session = _coerce_text(session_id).strip()
+    if not normalized_key or not normalized_agent or not normalized_session:
+        return _coerce_text(produce() or "").strip(), False
+    effective_ttl = (
+        _STATIC_CONTEXT_FREEZE_TTL_SECONDS if ttl_seconds is None else float(ttl_seconds)
+    )
+    cache_key = (normalized_session, normalized_agent, normalized_key)
+    now = time.perf_counter()
+    with _STATIC_CONTEXT_FREEZE_LOCK:
+        cached = _STATIC_CONTEXT_FREEZE_CACHE.get(cache_key)
+        if cached is not None:
+            age_seconds = now - float(cached.get("createdAt") or 0.0)
+            expired = effective_ttl > 0 and age_seconds > effective_ttl
+            if not expired:
+                _STATIC_CONTEXT_FREEZE_CACHE.move_to_end(cache_key)
+                return _coerce_text(cached.get("block") or "").strip(), True
+            _STATIC_CONTEXT_FREEZE_CACHE.pop(cache_key, None)
+    block = _coerce_text(produce() or "").strip()
+    with _STATIC_CONTEXT_FREEZE_LOCK:
+        _STATIC_CONTEXT_FREEZE_CACHE[cache_key] = {"block": block, "createdAt": time.perf_counter()}
+        _STATIC_CONTEXT_FREEZE_CACHE.move_to_end(cache_key)
+        while len(_STATIC_CONTEXT_FREEZE_CACHE) > _STATIC_CONTEXT_FREEZE_MAX_ENTRIES:
+            _STATIC_CONTEXT_FREEZE_CACHE.popitem(last=False)
+    return block, False
+
+
+def reset_session_context_freeze_cache() -> None:
+    """Drop every frozen session block (test and maintenance seam)."""
+    with _STATIC_CONTEXT_FREEZE_LOCK:
+        _STATIC_CONTEXT_FREEZE_CACHE.clear()
+
+
 def _context_segment_log_summary(segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
     summaries: list[dict[str, Any]] = []
     for segment in list(segments or []):
@@ -422,19 +492,50 @@ def build_agent_context(
         memory_policy_snapshot=memory_policy,
     )
     timings["runtimeContextBlockMs"] = _elapsed_ms(stage_started_at)
-    agent_static_context_block, agent_dynamic_context_block = _split_agent_runtime_context_block(raw_runtime_context_block)
+
+    def _produce_agent_static_block() -> str:
+        static_part, _dynamic_part = _split_agent_runtime_context_block(raw_runtime_context_block)
+        return static_part
+
+    agent_static_context_block, agent_static_frozen = _session_frozen_context_block(
+        "agent_runtime",
+        agent_id=normalized_agent_id,
+        session_id=session_id,
+        produce=_produce_agent_static_block,
+    )
+    timings["agentRuntimeStaticFrozen"] = bool(agent_static_frozen)
+    # The dynamic half (episodes / group events / inbox) stays per-turn fresh;
+    # only the static header bytes are session-frozen.
+    _static_probe, agent_dynamic_context_block = _split_agent_runtime_context_block(raw_runtime_context_block)
     research_org_context_block = ""
+    research_org_frozen = False
     if _agent_needs_research_organization_context(agent):
         _stop("research_organization")
         stage_started_at = _perf_counter()
-        research_org_result = _build_research_organization_context_block(
-            normalized_agent_id,
-            limit=bounded_limit,
+        research_org_probe: dict[str, Any] = {}
+
+        def _produce_research_org_block() -> str:
+            research_org_result = _build_research_organization_context_block(
+                normalized_agent_id,
+                limit=bounded_limit,
+            )
+            research_org_probe.update(research_org_result)
+            return str(research_org_result.get("contextBlock") or "")
+
+        research_org_context_block, research_org_frozen = _session_frozen_context_block(
+            "research_organization",
+            agent_id=normalized_agent_id,
+            session_id=session_id,
+            produce=_produce_research_org_block,
         )
-        research_org_context_block = research_org_result["contextBlock"]
+        timings["researchOrgContextFrozen"] = bool(research_org_frozen)
+        if research_org_frozen:
+            timings["researchOrgContextCacheHit"] = True
+            timings["researchOrgContextCacheAgeMs"] = 0
+        elif "cacheHit" in research_org_probe:
+            timings["researchOrgContextCacheHit"] = bool(research_org_probe.get("cacheHit"))
+            timings["researchOrgContextCacheAgeMs"] = research_org_probe.get("cacheAgeMs")
         timings["researchOrgContextMs"] = _elapsed_ms(stage_started_at)
-        timings["researchOrgContextCacheHit"] = research_org_result["cacheHit"]
-        timings["researchOrgContextCacheAgeMs"] = research_org_result["cacheAgeMs"]
     else:
         timings["researchOrgContextMs"] = 0
         timings["researchOrgContextSkipped"] = True
@@ -442,20 +543,31 @@ def build_agent_context(
         _mapping_get(agent, "promptTemplateId", "prompt_template_id")
     ).strip()
     prompt_context_block = ""
+    prompt_template_frozen = False
     if include_prompt_template_context:
         _stop("prompt_template")
         stage_started_at = _perf_counter()
-        prompt_context_block = _build_prompt_template_context_block(
-            prompt_template_id,
-            project_root=agent_directory_service.PROJECT_ROOT,
+
+        def _produce_prompt_template_block() -> str:
+            return _build_prompt_template_context_block(
+                prompt_template_id,
+                project_root=agent_directory_service.PROJECT_ROOT,
+                agent_id=normalized_agent_id,
+                session_id=session_id,
+                run_id=run_id,
+                include_chat_base=_coerce_text(
+                    _mapping_get(agent, "primaryMode", "primary_mode")
+                ).strip().lower()
+                == "chat",
+            )
+
+        prompt_context_block, prompt_template_frozen = _session_frozen_context_block(
+            "prompt_template",
             agent_id=normalized_agent_id,
             session_id=session_id,
-            run_id=run_id,
-            include_chat_base=_coerce_text(
-                _mapping_get(agent, "primaryMode", "primary_mode")
-            ).strip().lower()
-            == "chat",
+            produce=_produce_prompt_template_block,
         )
+        timings["promptTemplateContextFrozen"] = bool(prompt_template_frozen)
         timings["promptTemplateContextMs"] = _elapsed_ms(stage_started_at)
     else:
         timings["promptTemplateContextMs"] = 0
@@ -479,15 +591,41 @@ def build_agent_context(
         timings["projectAgentRegistryContextMs"] = 0
         timings["projectAgentRegistryContextSkipped"] = True
     public_structure_context_block = ""
+    public_structure_frozen = False
     if _agent_allows_public_structure_context(agent):
         _stop("public_structure")
         stage_started_at = _perf_counter()
-        public_structure_result = _build_public_structure_context_block(agent_directory_service.PROJECT_ROOT, agent_id=normalized_agent_id)
-        public_structure_context_block = public_structure_result["contextBlock"]
+
+        def _produce_public_structure_block() -> str:
+            public_structure_result = _build_public_structure_context_block(
+                agent_directory_service.PROJECT_ROOT,
+                agent_id=normalized_agent_id,
+            )
+            return str(public_structure_result.get("contextBlock") or "")
+
+        public_structure_context_block, public_structure_frozen = _session_frozen_context_block(
+            "public_structure",
+            agent_id=normalized_agent_id,
+            session_id=session_id,
+            produce=_produce_public_structure_block,
+        )
+        timings["publicStructureContextFrozen"] = bool(public_structure_frozen)
         timings["publicStructureContextMs"] = _elapsed_ms(stage_started_at)
     else:
         timings["publicStructureContextMs"] = 0
         timings["publicStructureContextSkipped"] = True
+    frozen_static_segments = [
+        segment_key
+        for segment_key, frozen_flag in (
+            ("agent_runtime", agent_static_frozen),
+            ("research_organization", research_org_frozen),
+            ("prompt_template", prompt_template_frozen),
+            ("public_structure", public_structure_frozen),
+        )
+        if frozen_flag
+    ]
+    if frozen_static_segments:
+        timings["staticContextFrozenSegments"] = list(frozen_static_segments)
     context_segments = [
         segment
         for segment in (
@@ -621,6 +759,7 @@ def build_agent_context(
             "dynamicContextChars": timings["dynamicContextChars"],
             "staticContextHash": timings["staticContextHash"],
             "dynamicContextHash": timings["dynamicContextHash"],
+            "staticContextFrozenSegments": timings.get("staticContextFrozenSegments", []),
             "contextSegmentCount": timings["contextSegmentCount"],
             "contextSegments": _context_segment_log_summary(context_segments),
             "source": "ContextEngine",
