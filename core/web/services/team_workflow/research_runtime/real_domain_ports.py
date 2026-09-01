@@ -1443,7 +1443,8 @@ class RealDomainPorts:
                 }
                 source_fragment_ref = (
                     f"hypothesis_fragment:{reusable.get('selectionId')}:"
-                    f"{reusable.get('candidateId')}:{reusable.get('nodeRunId')}"
+                    f"{reusable.get('candidateId')}:{reusable.get('nodeRunId')}:"
+                    f"{reusable.get('sessionAttempt')}"
                 )
                 for row in fragment_rows:
                     row_payload = row.get("payload") if isinstance(row, dict) else None
@@ -1493,10 +1494,6 @@ class RealDomainPorts:
                     payload=replay_payload,
                     persist=True,
                     artifact_sink=put_workflow_artifact,
-                    artifact_identity=(
-                        f"hypothesis_fragment:{child.selection_id}:"
-                        f"{child.candidate_id}:{action.node_run_id}"
-                    ),
                 )
                 fragment = dict(replayed["fragment"])
             # Re-parse through the canonical writer contract.  This ensures
@@ -1534,7 +1531,8 @@ class RealDomainPorts:
                 )
                 or (
                     f"hypothesis_fragment:{child.selection_id}:"
-                    f"{child.candidate_id}:{action.node_run_id}"
+                    f"{child.candidate_id}:{action.node_run_id}:"
+                    f"{int(child.session_attempt or 1)}"
                 )
             )
             _mark_candidate_task_completed(
