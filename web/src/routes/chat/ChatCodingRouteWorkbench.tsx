@@ -535,7 +535,7 @@ export function useStableSessionDetailPaint(options: {
   );
 }
 
-export function ChatCodingRoute() {
+export function ChatCodingRouteWorkbench() {
   // pet + evolution: companion rail shows mental/pet labels (otherwise raw keys leak).
   const { lang, t, statusLabel } = useAppI18n({ domains: ["chat", "agents", "pet", "evolution"] });
   const queryClient = useQueryClient();
