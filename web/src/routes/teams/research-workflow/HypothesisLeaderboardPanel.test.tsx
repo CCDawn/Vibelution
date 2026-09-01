@@ -14,9 +14,13 @@ import {
 } from "./HypothesisLeaderboardPanel";
 
 const fetchRoundsMock = vi.hoisted(() => vi.fn());
+const fetchTrailMock = vi.hoisted(() => vi.fn());
+const fetchSourceMessagesMock = vi.hoisted(() => vi.fn());
 
 vi.mock("../../../api/hypothesisFirst", () => ({
   fetchHypothesisRounds: (...args: unknown[]) => fetchRoundsMock(...args),
+  fetchCandidateEvidenceTrail: (...args: unknown[]) => fetchTrailMock(...args),
+  fetchMeetingRoundSourceMessages: (...args: unknown[]) => fetchSourceMessagesMock(...args),
 }));
 
 // ---------------------------------------------------------------------------
@@ -156,6 +160,66 @@ function makePayload() {
 }
 
 // ---------------------------------------------------------------------------
+// Evidence drill-down fixture: one candidate whose seven-dimension review
+// carries a drillable source-message backlink, a lineage text label and a
+// malformed ref, plus bound meeting rounds for the fallback lookup path.
+// ---------------------------------------------------------------------------
+
+function makeDrilldownPayload() {
+  return {
+    schemaVersion: 1,
+    teamId: "research-team",
+    roundCount: 1,
+    rounds: [
+      {
+        roundId: "hr-drill",
+        question: "SCI-096",
+        status: "reviewed",
+        createdAt: "2026-08-03T00:00:00.000Z",
+        meetingRefs: [
+          { kind: "meeting_round", id: "meeting-drill-1" },
+          { kind: "meeting_round", id: "meeting-drill-2" },
+          { kind: "meeting_digest", id: "digest-1" },
+        ],
+        candidates: [
+          {
+            candidateId: "c-drill",
+            claim: "Drill 假设：梯度稀疏训练更稳。",
+            rationale: "",
+            differenceFromAlternatives: "",
+            lineageRefs: [],
+            scores: { evidenceSupport: 3 },
+            dimensionReviews: [
+              {
+                dimension: "evidenceSupport",
+                rating: "adequate",
+                rationale: "引用了源讨论。",
+                evidence_refs: [
+                  "room-1/round-11/msg-101",
+                  "round:cand-7",
+                  "room-1//msg-bad",
+                ],
+                reviewer: "agent-reviewer",
+              },
+            ],
+            reviewedBy: "agent-reviewer",
+            status: "reviewed",
+          },
+        ],
+        pairwiseComparisons: [],
+        pareto: {
+          paretoFrontCandidateIds: ["c-drill"],
+          dominatedCandidateIds: [],
+          analystAgentId: "agent-analyst",
+          notes: "",
+        },
+        metaReview: null,
+      },
+    ],
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Render harness
 // ---------------------------------------------------------------------------
 
@@ -195,6 +259,17 @@ async function clickToggle(container: HTMLElement, testId: string) {
     button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     await new Promise((resolveTick) => setTimeout(resolveTick, 10));
   });
+}
+
+/** Lets lazily-triggered react-query reads settle across separate act ticks. */
+async function waitFor(container: HTMLElement, predicate: () => boolean, ticks = 40) {
+  for (let tick = 0; tick < ticks; tick += 1) {
+    if (predicate()) return;
+    await act(async () => {
+      await new Promise((resolveTick) => setTimeout(resolveTick, 25));
+    });
+  }
+  if (!predicate()) throw new Error("waitFor: condition not met within budget");
 }
 
 async function unmount(rendered: Awaited<ReturnType<typeof renderPanel>>) {
@@ -319,6 +394,8 @@ describe("HypothesisLeaderboardPanel rendering", () => {
   afterEach(() => {
     document.body.innerHTML = "";
     fetchRoundsMock.mockReset();
+    fetchTrailMock.mockReset();
+    fetchSourceMessagesMock.mockReset();
   });
 
   it("shows the loading state before the query settles", async () => {
@@ -459,6 +536,221 @@ describe("HypothesisLeaderboardPanel rendering", () => {
     const reviews = rendered.container.querySelector('[data-testid="leaderboard-reviews-c-alpha"]');
     expect(reviews?.textContent).toContain("Novelty");
     expect(reviews?.textContent).toContain("Strong");
+    await unmount(rendered);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Evidence-ref drill-down: source-message backlinks resolve lazily through
+// the evidence trail first, then bound meeting rounds; everything else stays
+// plain text.
+// ---------------------------------------------------------------------------
+
+describe("HypothesisLeaderboardPanel evidence drill-down", () => {
+  afterEach(() => {
+    document.body.innerHTML = "";
+    fetchRoundsMock.mockReset();
+    fetchTrailMock.mockReset();
+    fetchSourceMessagesMock.mockReset();
+  });
+
+  it("keeps non-backlink evidence refs as plain text without toggles", async () => {
+    fetchRoundsMock.mockResolvedValue(makeDrilldownPayload());
+    const rendered = await renderPanel("zh");
+    await clickToggle(rendered.container, "leaderboard-toggle-reviews-c-drill");
+    const block = rendered.container.querySelector('[data-testid="leaderboard-evidence-refs-evidenceSupport-0"]');
+    expect(block).not.toBeNull();
+    expect(block?.textContent).toContain("round:cand-7");
+    expect(block?.textContent).toContain("room-1//msg-bad");
+    // Two malformed/text refs stay plain; only the well-formed backlink is a button.
+    expect(rendered.container.querySelectorAll('[data-testid="leaderboard-evidence-ref-text"]'))
+      .toHaveLength(2);
+    expect(
+      rendered.container.querySelector<HTMLButtonElement>(
+        '[data-testid="leaderboard-evidence-ref-evidenceSupport-0-0"]',
+      )?.textContent,
+    ).toContain("room-1/round-11/msg-101");
+    await unmount(rendered);
+  });
+
+  it("lazily fetches the evidence trail on first drill-down and shows the excerpt", async () => {
+    fetchRoundsMock.mockResolvedValue(makeDrilldownPayload());
+    fetchTrailMock.mockResolvedValue({
+      schemaVersion: 1,
+      teamId: "research-team",
+      questionId: "SCI-096",
+      trails: [
+        {
+          candidateId: "c-drill",
+          entries: [
+            {
+              meetingRoundId: "meeting-drill-1",
+              meetingLabel: "证据评审会 1",
+              messageId: "msg-101",
+              speaker: "A014 · 科研协调",
+              excerpt: "……梯度稀疏约束在折叠数据上更稳……",
+              createdAt: "2026-08-03T01:00:00.000Z",
+            },
+          ],
+        },
+      ],
+    });
+    const rendered = await renderPanel("zh");
+    await clickToggle(rendered.container, "leaderboard-toggle-reviews-c-drill");
+    // Lazy: expanding the review card alone must not read the trail.
+    expect(fetchTrailMock).not.toHaveBeenCalled();
+
+    await clickToggle(rendered.container, "leaderboard-evidence-ref-evidenceSupport-0-0");
+    await waitFor(
+      rendered.container,
+      () => fetchTrailMock.mock.calls.length > 0
+        && rendered.container.querySelector('[data-testid="leaderboard-evidence-source"]') !== null,
+    );
+    expect(fetchTrailMock).toHaveBeenCalledTimes(1);
+    expect(fetchTrailMock.mock.calls[0][0]).toBe("research-team");
+    expect(fetchTrailMock.mock.calls[0][1]).toBe("SCI-096");
+    const detail = rendered.container.querySelector('[data-testid="leaderboard-evidence-source"]');
+    expect(detail?.textContent).toContain("证据评审会 1");
+    expect(detail?.textContent).toContain("A014 · 科研协调");
+    expect(detail?.textContent).toContain("梯度稀疏约束在折叠数据上更稳");
+    // Trail hit short-circuits: bound meeting rounds are never read.
+    expect(fetchSourceMessagesMock).not.toHaveBeenCalled();
+    await unmount(rendered);
+  });
+
+  it("falls back to bound meeting-round source messages on trail miss", async () => {
+    fetchRoundsMock.mockResolvedValue(makeDrilldownPayload());
+    fetchTrailMock.mockResolvedValue({
+      schemaVersion: 1,
+      teamId: "research-team",
+      questionId: "SCI-096",
+      trails: [],
+    });
+    fetchSourceMessagesMock.mockImplementation((teamId: string, meetingRoundId: string) => {
+      if (meetingRoundId === "meeting-drill-1") {
+        return Promise.resolve({
+          schemaVersion: 1,
+          teamId,
+          meetingRoundId,
+          messageCount: 1,
+          messages: [
+            {
+              messageId: "msg-101",
+              roomId: "room-1",
+              roundId: "round-11",
+              speakerTitle: "A014 · 科研协调",
+              content: "梯度稀疏约束的完整讨论原文。",
+              createdAt: "2026-08-03T01:02:00.000Z",
+            },
+          ],
+        });
+      }
+      return Promise.resolve({
+        schemaVersion: 1,
+        teamId,
+        meetingRoundId,
+        messageCount: 0,
+        messages: [],
+      });
+    });
+    const rendered = await renderPanel("zh");
+    await clickToggle(rendered.container, "leaderboard-toggle-reviews-c-drill");
+    await clickToggle(rendered.container, "leaderboard-evidence-ref-evidenceSupport-0-0");
+    await waitFor(
+      rendered.container,
+      () => rendered.container.querySelector('[data-testid="leaderboard-evidence-source"]') !== null,
+    );
+    expect(fetchSourceMessagesMock).toHaveBeenCalledWith(
+      "research-team",
+      "meeting-drill-1",
+      expect.objectContaining({ signal: expect.anything() }),
+    );
+    const detail = rendered.container.querySelector('[data-testid="leaderboard-evidence-source"]');
+    expect(detail?.textContent).toContain("来源消息");
+    expect(detail?.textContent).toContain("A014 · 科研协调");
+    expect(detail?.textContent).toContain("meeting-drill-1");
+    expect(detail?.textContent).toContain("梯度稀疏约束的完整讨论原文。");
+    await unmount(rendered);
+  });
+
+  it("scans the next bound meeting round when the first one misses", async () => {
+    fetchRoundsMock.mockResolvedValue(makeDrilldownPayload());
+    fetchTrailMock.mockResolvedValue({ schemaVersion: 1, teamId: "research-team", questionId: "SCI-096", trails: [] });
+    fetchSourceMessagesMock.mockImplementation((_teamId: string, meetingRoundId: string) => {
+      if (meetingRoundId === "meeting-drill-2") {
+        return Promise.resolve({
+          schemaVersion: 1,
+          teamId: "research-team",
+          meetingRoundId,
+          messageCount: 1,
+          messages: [
+            {
+              messageId: "msg-101",
+              content: "第二轮会议中的源消息。",
+              speakerTitle: "A007 · 评审",
+            },
+          ],
+        });
+      }
+      return Promise.resolve({
+        schemaVersion: 1,
+        teamId: "research-team",
+        meetingRoundId,
+        messageCount: 0,
+        messages: [],
+      });
+    });
+    const rendered = await renderPanel("zh");
+    await clickToggle(rendered.container, "leaderboard-toggle-reviews-c-drill");
+    await clickToggle(rendered.container, "leaderboard-evidence-ref-evidenceSupport-0-0");
+    await waitFor(
+      rendered.container,
+      () => rendered.container.textContent?.includes("第二轮会议中的源消息。") === true,
+    );
+    expect(
+      rendered.container.querySelector('[data-testid="leaderboard-evidence-source"]')?.textContent,
+    ).toContain("meeting-drill-2");
+    await unmount(rendered);
+  });
+
+  it("degrades to the raw reference when trail and meeting rounds both fail", async () => {
+    fetchRoundsMock.mockResolvedValue(makeDrilldownPayload());
+    fetchTrailMock.mockRejectedValue(new Error("trail unavailable"));
+    fetchSourceMessagesMock.mockRejectedValue(new Error("source messages unavailable"));
+    const rendered = await renderPanel("zh");
+    await clickToggle(rendered.container, "leaderboard-toggle-reviews-c-drill");
+    await clickToggle(rendered.container, "leaderboard-evidence-ref-evidenceSupport-0-0");
+    await waitFor(
+      rendered.container,
+      () => rendered.container.querySelector('[data-testid="leaderboard-evidence-source-missing"]') !== null,
+    );
+    const missing = rendered.container.querySelector('[data-testid="leaderboard-evidence-source-missing"]');
+    expect(missing?.textContent).toContain("未能定位源消息");
+    expect(missing?.textContent).toContain("room-1/round-11/msg-101");
+    // The panel stays usable — the candidate card and other refs still render.
+    expect(rendered.container.querySelector('[data-candidate-id="c-drill"]')).not.toBeNull();
+    expect(rendered.container.textContent).toContain("round:cand-7");
+    await unmount(rendered);
+  });
+
+  it("renders drill-down chrome bilingually", async () => {
+    fetchRoundsMock.mockResolvedValue(makeDrilldownPayload());
+    fetchTrailMock.mockRejectedValue(new Error("trail unavailable"));
+    fetchSourceMessagesMock.mockRejectedValue(new Error("source messages unavailable"));
+    const rendered = await renderPanel("en");
+    await clickToggle(rendered.container, "leaderboard-toggle-reviews-c-drill");
+    const toggle = rendered.container.querySelector<HTMLButtonElement>(
+      '[data-testid="leaderboard-evidence-ref-evidenceSupport-0-0"]',
+    );
+    expect(toggle?.textContent).toContain("source");
+    await clickToggle(rendered.container, "leaderboard-evidence-ref-evidenceSupport-0-0");
+    await waitFor(
+      rendered.container,
+      () => rendered.container.querySelector('[data-testid="leaderboard-evidence-source-missing"]') !== null,
+    );
+    expect(
+      rendered.container.querySelector('[data-testid="leaderboard-evidence-source-missing"]')?.textContent,
+    ).toContain("showing the raw reference");
     await unmount(rendered);
   });
 });

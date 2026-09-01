@@ -38,6 +38,17 @@ export default {
   reviewHead: "flex flex-wrap items-center gap-1.5",
   reviewMeta: "wrap-anywhere text-[var(--fg-tertiary)]",
   reviewText: "wrap-anywhere text-[var(--fg-secondary)]",
+  evidenceBlock: "grid gap-1",
+  evidenceRow: "flex flex-wrap items-center gap-1",
+  evidenceRefText:
+    "wrap-anywhere rounded border border-[var(--vui-border-subtle)] px-1.5 py-0.5 text-[var(--fg-tertiary)]",
+  evidenceRefToggle:
+    "wrap-anywhere h-auto min-w-0 justify-start px-1 py-0.5 text-left normal-case [font-size:var(--vui-font-2xs)]",
+  evidenceDetail:
+    "grid gap-1 rounded border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-inset)] px-2 py-1.5 [font-size:var(--vui-font-2xs)]",
+  evidenceSourceLine: "wrap-anywhere text-[var(--fg-tertiary)]",
+  evidenceExcerpt: "wrap-anywhere m-0 text-[var(--fg-secondary)]",
+  evidenceFallback: "wrap-anywhere text-[var(--fg-tertiary)]",
   empty: "h-auto w-full border-0 bg-transparent",
   fill: "min-h-24",
 } as const;

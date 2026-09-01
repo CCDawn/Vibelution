@@ -17,9 +17,17 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 
-import { fetchHypothesisRounds } from "../../../api/hypothesisFirst";
+import {
+  fetchCandidateEvidenceTrail,
+  fetchHypothesisRounds,
+  fetchMeetingRoundSourceMessages,
+} from "../../../api/hypothesisFirst";
 import { queryKeys } from "../../../api/queryKeys";
-import type { HypothesisRoundListResponse } from "../../../api/types/hypothesisFirst";
+import type {
+  CandidateEvidenceEntry,
+  HypothesisRoundListResponse,
+  MeetingSourceMessage,
+} from "../../../api/types/hypothesisFirst";
 import type { ChallengeQuestionDimensionReview } from "../../../api/types/teams";
 import {
   VButton,
@@ -38,6 +46,13 @@ import {
   challengeRatingLabel,
 } from "../challenge-cup/ChallengeQuestionDetailPrimitives";
 import styles from "./HypothesisLeaderboardPanel.styles";
+import {
+  collectMeetingRoundIds,
+  parseLeaderboardEvidenceRef,
+  sourceMessageForRef,
+  sourceMessageSpeaker,
+  trailEntryForRef,
+} from "./leaderboardEvidenceRef";
 
 export type HypothesisLeaderboardPanelProps = {
   teamId: string;
@@ -164,6 +179,9 @@ export type LeaderboardRoundView = {
   paretoFrontCandidateIds: string[];
   dominatedCandidateIds: string[];
   paretoNotes: string;
+  /** `meeting_round` ref ids from the round's meetingRefs — the only rounds
+   * whose source messages may be pulled for evidence drill-down. */
+  meetingRoundIds: string[];
   metaReview: {
     reviewerAgentId: string;
     recommendationCandidateId: string;
@@ -347,6 +365,7 @@ function parseLeaderboardRound(raw: unknown, displayIndex: number): LeaderboardR
     paretoFrontCandidateIds,
     dominatedCandidateIds,
     paretoNotes: asText(pareto.notes),
+    meetingRoundIds: collectMeetingRoundIds(round.meetingRefs),
     metaReview,
     candidates,
   };
@@ -495,12 +514,269 @@ function PairwiseDetails({
   );
 }
 
+// ---------------------------------------------------------------------------
+// Evidence-ref drill-down (seven-dimension review rows)
+//
+// `evidence_refs` come in two families: digest source-message backlinks
+// (`roomId/roundId/messageId`) and plain lineage/text labels. Backlinks are
+// drillable to the referenced discussion message with a fully lazy, bounded
+// resolution chain:
+//   1. the candidate evidence trail (fetched once per question on first
+//      drill-down, react-query cached) carries the message excerpt;
+//   2. on trail miss, the source messages of only the meeting rounds the
+//      round's `meetingRefs` bind (kind=meeting_round) are scanned;
+//   3. otherwise the raw ref degrades to plain text — never an error.
+// ---------------------------------------------------------------------------
+
+const EVIDENCE_TRAIL_QUERY_KEY_STALE_TIME = 30_000;
+
+function EvidenceSourceDetail({
+  teamId,
+  questionId,
+  candidateId,
+  rawRef,
+  parsed,
+  meetingRoundIds,
+  isZh,
+}: {
+  teamId: string;
+  questionId: string;
+  candidateId: string;
+  rawRef: string;
+  parsed: Extract<ReturnType<typeof parseLeaderboardEvidenceRef>, { kind: "source_message" }>;
+  meetingRoundIds: string[];
+  isZh: boolean;
+}) {
+  const canQueryTrail = Boolean(teamId.trim() && questionId.trim());
+  const trailQuery = useQuery({
+    queryKey: ["hypothesis-first", "candidate-evidence-trail", teamId, questionId],
+    queryFn: ({ signal }) => fetchCandidateEvidenceTrail(teamId, questionId, { signal }),
+    enabled: canQueryTrail,
+    staleTime: EVIDENCE_TRAIL_QUERY_KEY_STALE_TIME,
+    retry: false,
+  });
+  const trailEntry = useMemo<CandidateEvidenceEntry | null>(() => {
+    for (const trail of trailQuery.data?.trails ?? []) {
+      if (trail.candidateId !== candidateId) continue;
+      const hit = trailEntryForRef(trail.entries, parsed);
+      if (hit) return hit;
+    }
+    return null;
+  }, [trailQuery.data, candidateId, parsed]);
+  // A disabled query also reports isPending — only a real in-flight read is a
+  // loading state; errors fall through to the source-messages path.
+  const trailLoading = canQueryTrail && trailQuery.isPending && trailQuery.fetchStatus === "fetching";
+
+  if (trailLoading) {
+    return (
+      <div className={styles.evidenceDetail} data-testid="leaderboard-evidence-source-loading">
+        <span className={styles.evidenceFallback} role="status">
+          {isZh ? "正在定位源消息…" : "Locating the source message…"}
+        </span>
+      </div>
+    );
+  }
+  if (trailEntry) {
+    return (
+      <div className={styles.evidenceDetail} data-testid="leaderboard-evidence-source">
+        <span className={styles.evidenceSourceLine}>
+          {trailEntry.meetingLabel || trailEntry.meetingRoundId}
+          {trailEntry.speaker ? ` · ${trailEntry.speaker}` : ""}
+          {trailEntry.createdAt ? ` · ${trailEntry.createdAt}` : ""}
+        </span>
+        <p className={styles.evidenceExcerpt}>{trailEntry.excerpt}</p>
+      </div>
+    );
+  }
+  if (meetingRoundIds.length > 0) {
+    return (
+      <MeetingSourceLookup
+        teamId={teamId}
+        meetingRoundIds={meetingRoundIds}
+        rawRef={rawRef}
+        parsed={parsed}
+        isZh={isZh}
+      />
+    );
+  }
+  return (
+    <div className={styles.evidenceDetail} data-testid="leaderboard-evidence-source-missing">
+      <span className={styles.evidenceFallback}>
+        {isZh
+          ? "未能定位源消息，仅展示原引用。"
+          : "Source message could not be located; showing the raw reference."}
+      </span>
+      <span className={styles.evidenceRefText}>{rawRef}</span>
+    </div>
+  );
+}
+
+function MeetingSourceLookup({
+  teamId,
+  meetingRoundIds,
+  rawRef,
+  parsed,
+  isZh,
+}: {
+  teamId: string;
+  meetingRoundIds: string[];
+  rawRef: string;
+  parsed: Extract<ReturnType<typeof parseLeaderboardEvidenceRef>, { kind: "source_message" }>;
+  isZh: boolean;
+}) {
+  const lookupKey = meetingRoundIds.join("\u0000");
+  const lookupQuery = useQuery({
+    // Bounded scan: only the meeting rounds the round itself binds, stopping
+    // at the first hit; each round is read at most once per drill-down.
+    queryKey: ["hypothesis-first", "evidence-ref-source-messages", teamId, parsed.messageId, lookupKey],
+    queryFn: async ({ signal }): Promise<{ meetingRoundId: string; message: MeetingSourceMessage } | null> => {
+      for (const meetingRoundId of meetingRoundIds) {
+        try {
+          const response = await fetchMeetingRoundSourceMessages(teamId, meetingRoundId, { signal });
+          const message = sourceMessageForRef(response.messages, parsed);
+          if (message) return { meetingRoundId, message };
+        } catch (error) {
+          if (signal.aborted) throw error;
+          // A single unreadable round must not break the remaining lookups.
+        }
+      }
+      return null;
+    },
+    enabled: meetingRoundIds.length > 0,
+    staleTime: EVIDENCE_TRAIL_QUERY_KEY_STALE_TIME,
+    retry: false,
+  });
+
+  if (lookupQuery.isPending && lookupQuery.fetchStatus === "fetching") {
+    return (
+      <div className={styles.evidenceDetail} data-testid="leaderboard-evidence-source-loading">
+        <span className={styles.evidenceFallback} role="status">
+          {isZh ? "正在读取会议源消息…" : "Reading meeting source messages…"}
+        </span>
+      </div>
+    );
+  }
+  const hit = lookupQuery.data;
+  if (hit) {
+    const speaker = sourceMessageSpeaker(hit.message);
+    const content = String(hit.message.content ?? "").trim();
+    const createdAt = String(hit.message.createdAt ?? "").trim();
+    return (
+      <div className={styles.evidenceDetail} data-testid="leaderboard-evidence-source">
+        <span className={styles.evidenceSourceLine}>
+          {isZh ? "来源消息" : "Source message"}
+          {speaker ? ` · ${speaker}` : ""}
+          {` · ${hit.meetingRoundId}`}
+          {createdAt ? ` · ${createdAt}` : ""}
+        </span>
+        {content ? <p className={styles.evidenceExcerpt}>{content}</p> : null}
+      </div>
+    );
+  }
+  return (
+    <div className={styles.evidenceDetail} data-testid="leaderboard-evidence-source-missing">
+      <span className={styles.evidenceFallback}>
+        {isZh
+          ? "未能定位源消息，仅展示原引用。"
+          : "Source message could not be located; showing the raw reference."}
+      </span>
+      <span className={styles.evidenceRefText}>{rawRef}</span>
+    </div>
+  );
+}
+
+function DimensionEvidenceRefs({
+  review,
+  reviewKey,
+  teamId,
+  questionId,
+  candidateId,
+  meetingRoundIds,
+  isZh,
+}: {
+  review: LeaderboardDimensionReviewView;
+  /** Disambiguates test ids when one card carries several review rows. */
+  reviewKey: string;
+  teamId: string;
+  questionId: string;
+  candidateId: string;
+  meetingRoundIds: string[];
+  isZh: boolean;
+}) {
+  const [openRefIndex, setOpenRefIndex] = useState<number | null>(null);
+  const parsedRefs = useMemo(
+    () => review.evidenceRefs.map((rawRef) => parseLeaderboardEvidenceRef(rawRef)),
+    [review.evidenceRefs],
+  );
+  const openParsed = openRefIndex !== null ? parsedRefs[openRefIndex] : null;
+  return (
+    <div className={styles.evidenceBlock} data-testid={`leaderboard-evidence-refs-${reviewKey}`}>
+      <div className={styles.evidenceRow}>
+        <span className={styles.reviewMeta}>{isZh ? "证据" : "Evidence"}:</span>
+        {review.evidenceRefs.map((rawRef, index) => {
+          const parsed = parsedRefs[index];
+          if (!parsed || parsed.kind !== "source_message") {
+            return (
+              <span
+                key={`${reviewKey}-ref-${index}`}
+                className={styles.evidenceRefText}
+                data-testid="leaderboard-evidence-ref-text"
+              >
+                {rawRef}
+              </span>
+            );
+          }
+          const isOpen = openRefIndex === index;
+          return (
+            <VButton
+              key={`${reviewKey}-ref-${index}`}
+              type="button"
+              density="compact"
+              variant="ghost"
+              className={styles.evidenceRefToggle}
+              aria-expanded={isOpen}
+              aria-label={
+                isOpen
+                  ? (isZh ? `收起来源消息 ${rawRef}` : `Hide source message ${rawRef}`)
+                  : (isZh ? `查看来源消息 ${rawRef}` : `View source message ${rawRef}`)
+              }
+              onClick={() => setOpenRefIndex((current) => (current === index ? null : index))}
+              data-testid={`leaderboard-evidence-ref-${reviewKey}-${index}`}
+            >
+              {isOpen
+                ? (isZh ? "收起来源" : "Hide source")
+                : `${rawRef} · ${isZh ? "来源" : "source"}`}
+            </VButton>
+          );
+        })}
+      </div>
+      {openParsed?.kind === "source_message" ? (
+        <EvidenceSourceDetail
+          teamId={teamId}
+          questionId={questionId}
+          candidateId={candidateId}
+          rawRef={review.evidenceRefs[openRefIndex ?? 0] ?? ""}
+          parsed={openParsed}
+          meetingRoundIds={meetingRoundIds}
+          isZh={isZh}
+        />
+      ) : null}
+    </div>
+  );
+}
+
 function DimensionReviewCard({
   candidate,
+  teamId,
+  questionId,
+  meetingRoundIds,
   lang,
   isZh,
 }: {
   candidate: LeaderboardCandidateView;
+  teamId: string;
+  questionId: string;
+  meetingRoundIds: string[];
   lang: "zh" | "en";
   isZh: boolean;
 }) {
@@ -517,10 +793,11 @@ function DimensionReviewCard({
         const ratingLabel = RATING_KEYS.has(review.rating)
           ? challengeRatingLabel(review.rating as ChallengeQuestionDimensionReview["rating"], lang)
           : review.rating;
+        const reviewKey = `${review.dimension}-${index}`;
         return (
           <div
             className={styles.reviewRow}
-            key={`${review.dimension}-${index}`}
+            key={reviewKey}
             data-testid="leaderboard-dimension-review-row"
           >
             <div className={styles.reviewHead}>
@@ -540,9 +817,15 @@ function DimensionReviewCard({
             </div>
             {review.rationale ? <p className={styles.reviewText}>{review.rationale}</p> : null}
             {review.evidenceRefs.length > 0 ? (
-              <p className={styles.reviewMeta}>
-                {isZh ? "证据" : "Evidence"}: {review.evidenceRefs.join("、")}
-              </p>
+              <DimensionEvidenceRefs
+                review={review}
+                reviewKey={reviewKey}
+                teamId={teamId}
+                questionId={questionId}
+                candidateId={candidate.candidateId}
+                meetingRoundIds={meetingRoundIds}
+                isZh={isZh}
+              />
             ) : null}
           </div>
         );
@@ -554,6 +837,9 @@ function DimensionReviewCard({
 function CandidateCard({
   candidate,
   stateKey,
+  teamId,
+  questionId,
+  meetingRoundIds,
   lang,
   isZh,
   expanded,
@@ -563,6 +849,9 @@ function CandidateCard({
   /** Expansion state is keyed per round so same-id candidates in different
    * rounds never share expand state. */
   stateKey: string;
+  teamId: string;
+  questionId: string;
+  meetingRoundIds: string[];
   lang: "zh" | "en";
   isZh: boolean;
   expanded: { pairs: boolean; reviews: boolean };
@@ -634,7 +923,14 @@ function CandidateCard({
       ) : null}
       {expanded.reviews ? (
         <div data-testid={`leaderboard-reviews-${candidate.candidateId}`}>
-          <DimensionReviewCard candidate={candidate} lang={lang} isZh={isZh} />
+          <DimensionReviewCard
+            candidate={candidate}
+            teamId={teamId}
+            questionId={questionId}
+            meetingRoundIds={meetingRoundIds}
+            lang={lang}
+            isZh={isZh}
+          />
         </div>
       ) : null}
     </article>
@@ -643,10 +939,14 @@ function CandidateCard({
 
 function LeaderboardContent({
   model,
+  teamId,
+  questionId,
   lang,
   isZh,
 }: {
   model: HypothesisLeaderboardModel;
+  teamId: string;
+  questionId: string;
   lang: "zh" | "en";
   isZh: boolean;
 }) {
@@ -753,6 +1053,9 @@ function LeaderboardContent({
               key={candidate.candidateId}
               candidate={candidate}
               stateKey={stateKey}
+              teamId={teamId}
+              questionId={questionId}
+              meetingRoundIds={activeRound.meetingRoundIds}
               lang={lang}
               isZh={isZh}
               expanded={state}
@@ -834,7 +1137,7 @@ export function HypothesisLeaderboardPanel({
             : "Round records are generated when review meetings close; the leaderboard will appear then."}
         </VEmptyState>
       ) : (
-        <LeaderboardContent model={model} lang={lang} isZh={isZh} />
+        <LeaderboardContent model={model} teamId={teamId} questionId={questionId} lang={lang} isZh={isZh} />
       )}
     </VSurface>
   );
