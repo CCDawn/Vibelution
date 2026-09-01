@@ -192,6 +192,52 @@ def _enforce_source_collection_finding_writeback_batch_limits(
     ]
 
 
+def source_collection_finding_writeback_close_status(
+    task: dict[str, Any],
+    result: dict[str, Any],
+) -> str:
+    """Resolve the server-owned terminal status at a frozen finding limit."""
+
+    s = _service()
+    stage_id = s._normalize_source_collection_stage_id(task.get("stageId"), default="")
+    agent_role = s._normalize_source_collection_agent_role(task.get("agentRole"))
+    if stage_id != "finding" and agent_role != "source_finder":
+        return ""
+    envelope = _finding_search_envelope_for_task(task)
+    ledger = [
+        item
+        for item in list(task.get("sourceCollectionWritebackBatches") or [])
+        if isinstance(item, dict)
+        and s._trim_text(item.get("batchFingerprint"), max_length=64)
+    ]
+    accepted_fingerprints = {
+        s._trim_text(fingerprint, max_length=240)
+        for item in ledger
+        for fingerprint in list(item.get("leadFingerprints") or [])
+        if s._trim_text(fingerprint, max_length=240)
+    }
+    accepted_limit = max(1, int(envelope.get("effectiveAcceptedLeadLimit") or 1))
+    batch_limit = max(1, int(envelope.get("maxWritebackBatches") or 1))
+    if len(accepted_fingerprints) < accepted_limit and len(ledger) < batch_limit:
+        return ""
+    required_perspectives = {
+        s._trim_text(item, max_length=80).lower()
+        for item in list(envelope.get("requiredPerspectives") or [])
+        if s._trim_text(item, max_length=80)
+    }
+    observed_perspectives = {
+        s._trim_text(item.get("perspective"), max_length=80).lower()
+        for item in s._source_collection_stage_writeback_source_leads(result)
+        if isinstance(item, dict)
+        and s._trim_text(item.get("perspective"), max_length=80)
+    }
+    return (
+        "completed"
+        if required_perspectives.issubset(observed_perspectives)
+        else "needs_review"
+    )
+
+
 def _service():
     from core.web.services import team_workflow_orchestration_service
 
@@ -842,11 +888,22 @@ def _materialize_source_collection_stage_writeback_sources(
     run_id: str,
     task: dict[str, Any],
     writeback: dict[str, Any],
+    *,
+    incoming_result: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     s = _service()
     status = s._trim_text(writeback.get("status"), max_length=80).lower()
     result = writeback.get("result") if isinstance(writeback.get("result"), dict) else {}
-    if status not in s.SOURCE_COLLECTION_STAGE_WRITEBACK_MATERIALIZED_STATUSES:
+    stage_id = s._normalize_source_collection_stage_id(task.get("stageId"), default="")
+    agent_role = s._normalize_source_collection_agent_role(task.get("agentRole"))
+    rolling_finding_writeback = bool(
+        status == "running"
+        and (stage_id == "finding" or agent_role == "source_finder")
+    )
+    if (
+        status not in s.SOURCE_COLLECTION_STAGE_WRITEBACK_MATERIALIZED_STATUSES
+        and not rolling_finding_writeback
+    ):
         return s._source_collection_stage_writeback_materialization_summary(status="skipped_status")
 
     records = s._source_collection_stage_records_for_run(run_id)
@@ -869,7 +926,10 @@ def _materialize_source_collection_stage_writeback_sources(
             f"{task_id}|{fingerprint}".encode("utf-8", errors="replace")
         ).hexdigest()[:24]
     # finding 写回批次硬上限（O5）：在物化任何来源前强制，超限即拒绝整批。
-    _enforce_source_collection_finding_writeback_batch_limits(task, leads)
+    incoming_leads = s._source_collection_stage_writeback_source_leads(
+        incoming_result if isinstance(incoming_result, dict) else result
+    )
+    _enforce_source_collection_finding_writeback_batch_limits(task, incoming_leads)
     invalid_sources = s._source_collection_stage_writeback_invalid_sources(result)
     excluded_sources, invalid_skipped = s._materialize_source_collection_stage_invalid_sources(
         team_id,
