@@ -204,6 +204,14 @@
 | FR-37 | 虚构物品与资产库 | P0 / 第四阶段 | 手机、电脑等物品有品牌/型号/状态/位置/取得与处置事件，不凭空出现或瞬移 |
 | FR-38 | 虚构财务账本 | P0 / 第四阶段 | 现金、账户、工资/奖学金、周期支出和交易使用整数金额、币种、幂等 receipt 与守恒校验 |
 | FR-39 | 配对生活管家 Agent | P0 / 第四阶段 | 一人一管家，复用隐藏原生 Session 和独立 Prompt/ToolPolicy，只通过受控工具管理生活世界 |
+| FR-40 | 动态连续对话 burst | P0 / 对话 V2 | 不再把两个人物气泡作为产品上限；每条人物消息送达后重新判断继续、提问或停止，且每条消息仍是一条原生 Session Turn |
+| FR-41 | 连续消息期间用户可插话 | P0 / 对话 V2 | 输入框始终可用；用户消息到达即推进 generation、取消尚未送达续话并优先进入 Companion mailbox，不生成第二 transcript |
+| FR-42 | 自然主动提问与等待 | P0 / 对话 V2 | 人物可按语境主动问相关问题；需要用户回答的问题送达后进入 `await_user`，不得连环自问自答 |
+| FR-43 | 可确认的对话偏好建议 | P1 / 对话 V2 | 从用户明确表达生成结构化 proposal；只有用户确认后才写入原生 Agent episodic memory，不把猜测当偏好 |
+| FR-44 | 相关共享记忆召回 | P0 / 对话 V2 | 每轮只读召回少量相关、有效、有来源且非敏感的原生 Agent episodic memory，不引入第二记忆库 |
+| FR-45 | 误解修复与话题退出 | P0 / 对话 V2 | 识别误解、重述、不耐烦和结束话题，立即取消未送达续话并简短修复，不因单次误解惩罚关系 |
+| FR-46 | 自我披露新鲜度 | P1 / 对话 V2 | 自我披露只能来自已完成生活事件或有效人物记忆，并用 event receipt 避免反复讲同一经历 |
+| FR-47 | Companion 专属对话偏好配置 | P1 / 对话 V2 | 在人物会话头部提供主动性、提问主动性和偏好建议方式；普通会话不读取、不展示这些配置 |
 
 ## 8. 非功能需求
 
@@ -1872,7 +1880,7 @@ Task 34 只拥有状态 resolver、资产 manifest 和授权回退；Task 26 继
 
 ### 31.10 实施任务图
 
-Task 22—27 的定义继续以 §30.10 为准，本节只增加输入、依赖和验收，不创建重复 owner：Task 22 吸收稳定说话习惯与心情/体力/熟悉度联动；Task 24 继续复用 Agent episodic memory 的时态/来源/失效语义；Task 25 吸收多气泡、用户插话和 generation cancel，首版每次人物回复最多追加一个 follow-up，即一次交付总计最多两个人物气泡；Task 26 消费 Task 34 的 `EmbodimentState` 并保持原人物头像与单一“正在输入…”；Task 27 先完成文字会话与视觉存在的阶段收口。
+Task 22—27 的定义继续以 §30.10 为准，本节只增加输入、依赖和验收，不创建重复 owner：Task 22 吸收稳定说话习惯与心情/体力/熟悉度联动；Task 24 继续复用 Agent episodic memory 的时态/来源/失效语义；Task 25 已完成的 v1 基线包含用户插话、generation cancel 和“最多追加一个 follow-up”，因此一次交付当前最多两个人物气泡；该固定预算不是最终产品目标，已由 §32 的 Dialogue V2 动态 burst 目标替代。Task 26 消费 Task 34 的 `EmbodimentState` 并保持原人物头像与单一“正在输入…”；Task 27 先完成文字会话与视觉存在的阶段收口。
 
 #### Task 33：建立 Character Card V3 安全导入与预览事务
 
@@ -1942,7 +1950,7 @@ Task 37：Task 25 + Task 36 后的 Deferred 独立 lane，不阻塞文字或媒�
 
 | 交付包 | 必需任务 | 完成定义 |
 | --- | --- | --- |
-| 核心真人化 | Task 22—27、Task 34、Task 38 | 文字对话、插话、最多两个气泡、视觉存在及普通 Agent 零差异闭合 |
+| 核心真人化 v1 | Task 22—27、Task 34、Task 38 | 文字对话、插话、当前固定两气泡基线、视觉存在及普通 Agent 零差异闭合；动态多消息由 §32 独立升级，不回写本阶段历史完成状态 |
 | 角色卡导入 | Task 33 | 独立完成安全 staging、预览、确认事务和回滚，不改变核心完成状态 |
 | 媒体陪伴 | Task 35—36 | 独立完成明信片与语音便签来源/receipt/降级；无普通附件复用条件时走 Companion-only artifact 卡片 |
 
@@ -1971,3 +1979,291 @@ Task 37 保持 Deferred；只有用户重新明确启用全双工语音目标后
 第五阶段完成时，用户应能观察到：人物说话长度、追问、称呼、玩笑和主动性与其稳定人格、当前心情、体力和熟悉度一致；输入状态始终保留人物头像且只显示一个“正在输入…”；用户在人物输出期间仍可发消息，未送达内容会按到达顺序取消或重排；头像和背景随可信生活状态自然变化且无资产时稳定回退；角色卡导入可预览、可拒绝、不执行卡内指令；生活明信片和语音便签可追溯到完成事件与 receipt；普通 Agent 的目录、Prompt、工具、会话、未读和实时输出零差异。
 
 自动验收使用可注入时钟和短脚本覆盖跨时段、恢复与主动投递，不等待真实 7 天。Launcher 运行态刷新、桌面浏览器、后端接口、前端控制台/网络和实际音频设备仍按各任务风险分别取证，不能用单元测试或构建结果互相替代。
+
+## 32. 第六阶段：Companion Dialogue V2 动态真人对话
+
+### 32.1 决策结论
+
+Dialogue V2 将“一个用户回合最多两个人物气泡”从产品策略中移除，改为**逐条送达、逐条重判、可被用户随时插话终止**的动态对话 burst。人物可以只说一句，也可以自然连续说多句并主动提问；连续多少条由当前语境、人物主动性、心情、体力、熟悉度、是否有新信息和用户是否正在等待回答共同决定，不由固定气泡数量或 `turnOrdinal % N` 决定。
+
+本阶段不是新建会话引擎。每个用户气泡和人物气泡仍与一条原生 Session Journal 终态一一对应，原生 worker、Journal、SSE、persist 和 transcript 继续是唯一权威。Companion 只在 Session admission 之前保存到达顺序和下一步结构化意图；它不保存预生成回答、不切割模型长文本，也不维护第二 transcript。
+
+### 32.2 根因与替换范围
+
+当前 v1 的不自然感来自两个确定性策略，而不是原生会话能力不足：
+
+- `delivery_plan.py` 把有 follow-up 的交付写死为 `bubbleBudget=2`，所以无论人物多健谈、语境是否适合，都只能追加一个气泡；
+- `interaction_expression.py` 使用 `turnOrdinal % 3` 等轮次规律决定追问/续话，长期使用后会显得机械；
+- `12_companion_followup_delivery.md` 把 follow-up 定义成“第二个气泡”并禁止继续提问，模型无法根据刚送达内容再做动态决策。
+
+V2 只替换 Companion-owned 的决定、计划、mailbox admission 和 Prompt pack：
+
+| 当前 v1 | Dialogue V2 |
+| --- | --- |
+| 创建计划时固定 `bubbleBudget` | 每条终态后读取结构化 `nextAct`，再决定是否创建下一条 |
+| 第一条后最多一个 `followup` | `burst_continuation` 可逐条延续，直到自然停止、用户插话或异常硬闸 |
+| 用轮次取模决定是否追问 | 由人物当前 Turn 声明 `continue_dialogue / ask_user / stop`，并由确定性策略校验 |
+| follow-up Prompt 固定“第二气泡且不要提问” | continuation Prompt 只约束不重复、不越界和围绕当前语境，不预设序号 |
+| v1 `delivery_plan` 兼顾计划和两气泡预算 | V2 plan 只保存 burst 身份、generation、状态、计数、意图和 receipt |
+
+不得借本阶段修改普通 Agent 的 Session admission、Journal、worker、persist/projection、SSE、`ConversationStore`、普通 composer、follow-up、attachment、retry 或 cancel 语义。若实现必须触碰这些普通链路 owner，停止本阶段并拆成独立普通会话任务。
+
+### 32.3 用户可见行为
+
+1. 用户发送消息后，人物可以直接回答并自然结束，也可以把不同语义拆成连续短消息。
+2. 每条消息都是模型当下生成的完整人物消息，不把一段长文本按标点机械切开。
+3. 人物可补充细节、表达情绪、讲一段相关经历、转回未完话题或主动问一个自然问题。
+4. 当人物的问题明显需要用户回答时，该 burst 进入 `await_user`，不再继续替用户回答或连续盘问。
+5. 用户在人物生成或连续发送期间都能继续输入和发送。用户新消息一到达，尚未进入原生 Session 的续话全部取消；当前已经由原生 Session 接管的 Turn 按原生规则收口，随后优先处理用户消息。
+6. 已取消、过期或未 admission 的续话不出现在 transcript、不扣主动消息额度、不写关系互动，也不产生长期记忆。
+7. 前端任何时刻最多显示一个带当前人物头像的“正在输入…”。人物终态到达即消失；内部推理、工具调用、队列、burst 编号和评分不展示。
+8. 默认不人为延迟消息，也不为了模拟真人使用逐字假流式。连续消息之间只受真实 Session 调度和模型执行时间影响。
+
+### 32.4 动态决定契约
+
+不新增独立 planner LLM 调用。当前人物模型在 Companion 专属 ToolPolicy 下，可在本 Turn 内调用一个轻量结构化工具声明下一步：
+
+```json
+{
+  "act": "continue_dialogue | ask_user | stop",
+  "reasonCode": "unfinished_thought | emotional_afterthought | relevant_detail | self_disclosure | open_loop | natural_question | repaired_misunderstanding | complete",
+  "topicKey": "bounded-stable-topic-key",
+  "expectsUserReply": true,
+  "sourceRefs": ["journal-turn-id", "event-id-or-memory-receipt"]
+}
+```
+
+约束：
+
+- 工具只对验证后的 Companion Agent/Session 可见；普通 Agent 的工具列表与 Prompt 完全不变；
+- 工具只写结构化意图，不写下一条人物文本；下一条文本必须在下一条原生 assistant-only Turn 中生成；
+- `sourceRefs` 只允许引用当前 Journal Turn、已完成 Life Event、有效原生 episodic memory 或未完话题 receipt；
+- `continue_dialogue` 只表示还有一个紧邻且相关的表达动作，不保证下一条一定 admission；
+- `ask_user` 必须对应当前气泡中已经提出、且确实需要用户回应的问题；送达后进入 `await_user`；
+- 未调用工具、工具参数无效、当前 Turn 失败或 receipt 未确认时均按 `stop` 收口；
+- 确定性 validator 可把不合规意图降级为 `stop`，但不得通过兜底生成另一段回答。
+
+### 32.5 Burst 状态机与到达排序
+
+```text
+IDLE
+  │ 用户消息或已通过主动候选复核的首条消息
+  ▼
+ROOT_QUEUED ──mailbox admission──→ ASSISTANT_RUNNING
+                                        │ 原生终态 + delivery receipt
+                                        ▼
+                                  DECISION_READY
+                                  ├─ stop ─────────────→ COMPLETED
+                                  ├─ ask_user ─────────→ AWAIT_USER
+                                  └─ continue_dialogue
+                                           │ 校验 generation 未变化
+                                           ▼
+                                  CONTINUATION_QUEUED
+                                           │ 原生 admission
+                                           └────────────→ ASSISTANT_RUNNING
+
+任意非终态阶段收到用户消息：
+  generation + 1 → CANCEL_NOT_ADMITTED → ROOT_QUEUED
+  已 admission 的原生 Turn 正常收口；未 admission 的 continuation 永不进入 Journal。
+```
+
+mailbox 的排序规则固定为：
+
+1. 已到达的用户消息；
+2. 已经通过主动候选发送前复核的首条主动消息；
+3. 当前 burst 的 continuation。
+
+同一优先级按 `arrivalSequence` 稳定排序。用户连续发送多条时保持原始到达顺序，不把后一条合并进前一条，也不丢弃；只有在前一条用户消息产生的人物 burst 尚未 admission 的 continuation 会被新 generation 取消。主动心跳不得插到已到达用户消息之前，continuation 不计入主动消息日额度。
+
+### 32.6 `ConversationBurstPlanV2` 数据契约
+
+V2 计划只保存恢复与幂等所需元数据：
+
+| 字段 | 含义 |
+| --- | --- |
+| `schemaVersion` | 固定 `companion.dialogue_burst.v2` |
+| `burstId` | 一个连续人物表达 burst 的稳定 ID |
+| `agentId` / `sessionId` | 已验证绑定的人物和原生 Session |
+| `rootEntryId` | 触发本 burst 的 mailbox entry |
+| `generation` | 用户插话栅栏；不一致时禁止 continuation admission |
+| `status` | `queued/running/decision_ready/await_user/completed/cancelled/failed` |
+| `deliveredCount` | 已获得原生终态与 delivery receipt 的人物消息数量 |
+| `questionCount` | 已送达且期望用户回答的问题动作数量 |
+| `nextAct` | 最后一次已校验结构化决定；不含人物文本 |
+| `latestJournalTurnId` | 最近已 admission 的原生 Turn |
+| `latestReceiptId` | 最近已确认投递 receipt |
+| `stopReason` | `natural_stop/await_user/user_interjected/hard_guard/expired/failed` |
+| `version` | 乐观并发版本 |
+
+禁止保存：未来人物消息文本、完整 Prompt、复制的 transcript、推理过程、工具过程或原生记忆正文。plan 可从 `latestJournalTurnId + latestReceiptId + mailbox identity` 恢复；恢复时若不能证明下一条尚未 admission，则停止而不是重复发送。
+
+### 32.7 自然多说、提问与异常硬闸
+
+动态策略以“是否还有新的、紧邻且值得单独说的信息”为继续条件，不以目标气泡数量为继续条件：
+
+- 人物稳定人格、当前心情、体力、熟悉度和用户配置共同影响继续倾向，但任何单一数值都不直接决定条数；
+- 低体力、用户表现不耐烦、明确要求简短或刚发生误解时更早停止；健谈、熟悉、情绪活跃且有真实新内容时可多说；
+- 每条 continuation 必须引入新信息、情绪或问题，不能换句话重复、总结刚说完的内容或制造无来源经历；
+- 默认模式中，一个需要回答的自然问题送达后即 `await_user`；“主动”提问模式可在同一语义动作中提出最多两个紧密相关的小问题，但仍在该气泡后等待用户，不允许连续多个气泡盘问；
+- 修辞问句、口头语和不要求用户回答的反问不触发 `await_user`，但 validator 不能仅靠问号判断，应以 `expectsUserReply` 与实际文本共同校验；
+- 自我披露每个 burst 最多选择一个新主题，来源必须是已完成 Life Event 或当前有效人物记忆。
+
+系统内部保留单个不间断 burst 最多 8 条已送达人物消息的异常硬停止，防止模型或恢复循环失控。该数字不是人物应达到的目标，不出现在产品文案或普通策略 Prompt 中；到达硬闸时记录 `stopReason=hard_guard` 并自然停止，不追加解释系统限制的消息。后续只能基于真实运行分布和事故证据调整该闸，不能把它退化成新的固定说话预算。
+
+### 32.8 用户插话、取消与恢复
+
+- 用户提交入口保持可用，不因 `assistant_running` 或 `continuation_queued` 禁用；仍复用现有 Companion composer adapter，不新增普通 composer 分支。
+- 新用户 entry 持久化成功后立即推进 mailbox generation。所有旧 generation 且尚未 admission 的 continuation 原子转为 `cancelled`。
+- 已由原生 Session admission 的人物 Turn 不做 Companion 强杀，不修改原生 cancel；它的终态仍可展示，但其声明的后续意图因 generation 过期而无效。
+- 用户 entry 获得 admission 后才进入原生 Journal；mailbox 不向前端伪造一个“第二用户气泡”。
+- 应用重启时先以 Journal 终态和 delivery receipt 对账，再恢复 mailbox。已送达不重发，已取消不复活，`running` 但无可证明 admission 的 continuation 过期停止。
+- 一个 receipt 只能推进一次 `deliveredCount`；重复 SSE、重复恢复或重复 receipt 都必须幂等。
+
+### 32.9 偏好建议与相关共享记忆
+
+#### 可确认偏好 proposal
+
+只有用户明确表达“回复短一点”“可以多说几句”“别总问我”“你可以主动问”“以后这样称呼我”等可执行偏好时，才生成：
+
+```json
+{
+  "proposalId": "stable-id",
+  "preferenceType": "verbosity | question_initiative | address | humor | proactive_contact",
+  "candidateValue": "bounded-enum-or-short-value",
+  "sourceTurnId": "native-user-turn-id",
+  "status": "pending | accepted | rejected | expired",
+  "receiptId": "confirmation-receipt"
+}
+```
+
+插件不复制保存用户原文。`pending` 只在 Companion UI 以轻量确认呈现；接受后复用现有 `CompanionPreferenceManager` 写入原生 Agent episodic memory，并保留来源、确认、失效和纠错 receipt；拒绝或忽略不改变人物。默认模式为“先询问”，用户可设为“仅手动”。
+
+#### 相关共享记忆召回
+
+- 只读人物所属原生 Agent episodic memory，不访问其他 Agent 或普通 Session 的记忆；
+- 每轮最多注入 1—3 条与当前消息相关、当前有效、有来源、非敏感且未被 supersede 的记忆摘要；
+- 排序综合当前语义相关性、确认状态、时间新鲜度、关系对象和失效/纠错关系；
+- 用户刚纠正的事实优先于旧记忆，冲突记忆只注入已确认的当前版本；
+- 不引入 Mem0、LangMem、Graphiti 服务、第二向量库或 Life World 对话记忆表；
+- 召回失败时继续当前对话，不用无来源内容补齐。
+
+### 32.10 误解修复与自我披露新鲜度
+
+Companion-only intent 增加 `misunderstanding / restate_request / user_impatient / end_topic`。命中后：
+
+1. 推进 generation 并取消未送达 continuation；
+2. 下一条人物回复优先简短承认、重述当前理解或停止该话题；
+3. 不在同一 burst 中继续旧自我披露、玩笑或追问；
+4. 单次误解不自动降低亲密度、信任或长期关系阶段，也不把临时不耐烦写成用户人格事实；
+5. 只有用户明确确认的新偏好才进入 §32.9 proposal。
+
+自我披露候选只从已完成 Life Event 或有效人物记忆中选择。插件只保存 `eventId + disclosedAt + deliveryReceiptId`，不复制 assistant 文本；同一事件在新鲜度窗口内不重复作为披露主题，除非用户主动追问该事件。候选已过期、事件被纠正或 receipt 失败时不得标记为已披露。
+
+### 32.11 前端配置与视觉合同
+
+在现有 Companion 会话头部使用 VUI 产品 API 增加紧凑配置，不新增第二设计系统：
+
+| 配置 | 选项 | 默认 |
+| --- | --- | --- |
+| 说话主动性 | 克制 / 自然 / 健谈 | 自然 |
+| 提问主动性 | 少 / 自然 / 主动 | 自然 |
+| 偏好建议 | 仅手动 / 先询问 | 先询问 |
+
+配置属于 Agent-scoped Companion 设置，不写普通 Session，不改变普通 `/chat`。UI 只用人类可理解的行为词，不展示 `burst`、generation、队列、评分、Token、ToolPolicy 或模型名。偏好 proposal 使用可接受/拒绝的小提示，不混入 transcript；拒绝后立即消失且可在设置中再次开启。
+
+人物消息继续复用原生 ConversationView 的人物头像和消息轨道。活动期间只显示一个带人物头像的“正在输入…”，即使后台正在从一个 continuation 进入下一个，也不得并排出现多个输入状态；终态、失败、取消和用户插话都要清理该状态。底部不得露出原生文件输入，除非未来另有 Companion 附件任务明确授权。
+
+任何用户可见新增 VUI 元素实施时，都必须先更新 `web/src/components/vui/designs/virtual-human-companion.md` 和 `designs/INDEX.md`，并通过 VUI shadcn route/component contract；本规划不预先创建新 VUI primitive。
+
+### 32.12 兼容与迁移
+
+- 保留 `delivery_plan.v1`、`deliveryKind=followup` 和现有 receipt 的只读兼容，不重写历史 Journal。
+- 新用户消息从 Dialogue V2 启用时刻起创建 `companion.dialogue_burst.v2`；旧 v1 计划不原地扩字段伪装成 V2。
+- 升级时已 admission 的旧 `delivering` follow-up 正常收口；未 admission 的旧 follow-up 遇到新用户 generation 时仍按现有 fence 取消。
+- V2 continuation 使用独立 `deliveryKind=burst_continuation`，继续免主动额度，但不能被主动候选查询当成新主动联系。
+- 回滚到 v1 时忽略 V2 未 admission 计划并标记过期；已写入原生 Journal 的消息保持可读，不删除、不改序。
+- API 仅在 Companion 路由增加 V2 DTO；普通会话 DTO、SSE event 和 URL 不新增 Companion 字段。
+
+### 32.13 实施任务图
+
+#### Task 39：建立 `CompanionDialogueDecisionV2`
+
+- Owner/Boundary: `interaction_expression.py`、`dialogue_context.py`、Companion 专属结构化决定工具、Prompt pack 和 validator；删除产品级轮次取模与两气泡决定，不改普通 Agent Prompt/ToolPolicy。
+- Dependency: 复用 Task 22 的人格/心情/体力/熟悉度与已确认偏好输入，复用现有 Companion tool scope。
+- Verification: 表驱动覆盖克制/自然/健谈、初识/熟悉、不同心情体力、无新信息、自然提问、误解和工具参数非法；同一输入决定可解释，不新增 planner LLM 调用。
+- Stop: 普通 Agent 可见新工具或 Prompt 变化、决定工具能写人物文本、仍使用固定目标条数或轮次取模。
+
+#### Task 40：建立动态 continuation chain、插话与恢复
+
+- Owner/Boundary: `delivery_plan.py`、`delivery_runtime.py`、`mailbox.py`、`service.py` 的 Companion-owned adapter 和 continuation Prompt；实现 V2 plan、逐条 admission、generation cancel、receipt reconciliation 和重启幂等。
+- Dependency: Task 39 的 `nextAct` schema 冻结后开始；与任何修改上述文件的 Companion delivery 任务保持串行。
+- Verification: 1、3、5、8 条连续人物消息均逐条获得真实 Journal/SSE 终态；用户可在任意序号之间插话；取消内容不入 transcript；重启、重复 receipt、admission 失败和过期不重发。
+- Stop: 需要修改原生 Session scheduler/Journal/SSE、mailbox 保存回复文本、无法证明一气泡一终态或普通主动额度被 continuation 扣减。
+
+#### Task 41：建立偏好 proposal 与原生记忆召回
+
+- Owner/Boundary: 扩展现有 `companion_preferences.py`、原生 episodic memory 只读 selector、Companion DTO/API；不创建第二 profile/向量库，不自动确认用户偏好。
+- Dependency: Task 39 的行为枚举稳定；复用现有 preference receipt 与 episodic supersede 语义。
+- Verification: 明确偏好可确认/拒绝/过期/纠错，含糊表达不生成 proposal；召回跨 Agent 隔离、只返回有效来源、冲突时使用当前版本、失败不阻塞对话。
+- Stop: 保存原始用户文本副本、未确认偏好影响模型、读取其他 Agent 记忆或新增第二记忆权威。
+
+#### Task 42：建立误解修复和自我披露新鲜度
+
+- Owner/Boundary: Companion intent、continuity selector、Life Event/episodic memory 只读候选与 disclosure receipt；不写关系惩罚，不生成虚构经历。
+- Dependency: Task 40 的 cancel/receipt 已闭合，Task 41 的当前有效记忆 selector 可用。
+- Verification: 误解、重述、不耐烦、结束话题均取消旧续话并简短收口；同一事件不重复披露，用户追问可恢复，失败 receipt 不错误去重。
+- Stop: 单次误解直接改变关系阶段、无来源披露、保存 assistant 文本副本或修复后继续旧 burst。
+
+#### Task 43：建立 VUI 对话偏好配置
+
+- Owner/Boundary: `CompanionConversationHeader` 邻近 VUI、Agent-scoped Companion 设置 API、设计文档和前端 contract；不修改普通 composer、普通会话头和 ConversationStore。
+- Dependency: Task 41 DTO 稳定后开始；只消费 Task 39 的枚举，不读取内部 burst plan。
+- Verification: 三组配置读写、刷新恢复、Agent 切换隔离、键盘/屏幕阅读器、窄屏、暗色、减少动态；普通 `/chat` DOM 与行为零差异。
+- Stop: UI 展示内部技术状态、普通 Session 获得配置字段、创建第二套控件或破坏人物头像/单一输入状态。
+
+#### Task 44：Dialogue V2 全链路与普通 Session 零差异收口
+
+- Owner/Boundary: 只负责 V2 集成、自审和分层验收；不把角色卡、媒体或全双工语音并入完成条件，不 push、不发布。
+- Dependency: Task 39 → Task 40 → Task 42；Task 41 → Task 43；全部进入 Task 44。
+- Verification: backend selector、普通 Session 回归、frontend VUI contracts、`tsc -b`、production build、Launcher 刷新后的已认证桌面浏览器场景分别取证；不等待真实 7 天，使用可注入时钟和脚本化到达序列。
+- Stop: 任何普通会话核心差异、串 Session/Agent、残留输入状态、重复发送、目标 404/500、第二 transcript 或不能解释的历史迁移。
+
+Critical Path：
+
+```text
+Task 39 → Task 40 → Task 42 ─────────────┐
+     └────────→ Task 41 → Task 43 ───────┤
+                                         ▼
+                                      Task 44
+```
+
+`service.py`、mailbox、Prompt 注入和 preference/memory selector 共享 Companion 事实源，实际开发默认单 writer 串行推进；前端 Task 43 只在 DTO 稳定后独立写入。每个任务重新创建 worktree、claim 和复用裁决，不继承本规划任务资源。
+
+### 32.14 验收矩阵
+
+| 层级 | 必须证明 |
+| --- | --- |
+| 决定单测 | 不再有固定两气泡目标或轮次取模；继续/提问/停止消费人物状态和显式用户偏好；非法决定安全停止 |
+| Mailbox/计划测试 | 用户优先、稳定 arrival order、generation cancel、8 条异常硬闸、重复 receipt 幂等、重启不重发 |
+| 原生会话集成 | 1/3/5/8 条人物消息分别对应 1/3/5/8 个原生 assistant 终态；取消内容为 0 个 Journal Turn |
+| 插话场景 | 用户在生成中及第 1/3/7 条后发送均可被接收；尚未 admission 的 continuation 取消，用户消息优先且顺序不乱 |
+| 提问场景 | 自然问题送达后进入 `await_user`；主动模式可问紧密相关问题但不跨气泡连续盘问；用户回答创建新 burst |
+| 偏好/记忆 | proposal 先确认后生效；拒绝、过期、纠错闭合；每轮只读 1—3 条当前有效且 Agent-scoped 的原生记忆 |
+| 误解/披露 | 误解后旧续话停止、关系不被单次惩罚；披露有 Life Event/Memory 来源且不重复 |
+| 普通 Session 零差异 | 普通 `/chat` 不调用 Companion API、不读取 burst/preference/memory 投影；Prompt、工具、composer、follow-up、retry/cancel、Journal/SSE/DTO 与基线一致 |
+| 前端 contract | 始终只有一个带人物头像的“正在输入…”；不显示推理/工具/队列；底部无原生文件控件；配置仅在已验证 Companion 页面出现 |
+| 运行态 | Launcher 正式刷新后 backend/frontend 指纹一致；不同人物和普通 Session 不串线；目标接口无 404/500，控制台与网络无目标错误 |
+
+### 32.15 完成定义与停止条件
+
+Dialogue V2 完成时，用户可观察到人物有时一句说完、有时自然连续多说几句，也会在合适时主动提问；用户不必等待人物全部说完，随时发出的消息都按到达顺序优先处理。连续消息数量不再由产品固定为两条，且不会用机械取模形成规律。所有可见消息仍可追溯到原生 Journal/SSE 终态，普通 Agent 会话行为保持零差异。
+
+出现以下任一情况，停止受影响任务并重新对齐：
+
+- 需要修改普通 Agent 会话核心或让普通 API/DTO 理解 Companion burst；
+- 无法证明一个人物气泡对应一个原生终态，或 mailbox 开始保存人物文本/transcript；
+- 用户插话后仍可能 admission 旧 generation continuation，或恢复可能重复发送；
+- 动态策略退化成另一个固定条数目标、固定延迟或轮次取模；
+- 未确认偏好、无来源记忆或虚构生活经历进入 Prompt；
+- 新配置、权限、网络依赖或数据迁移超出本节范围；
+- 任何不同人物、隐藏 Companion Session 与普通 Session 串线证据。
