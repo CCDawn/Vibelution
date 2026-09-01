@@ -22,12 +22,14 @@ queues its post-opening rounds on a bounded in-process executor.
 
 from __future__ import annotations
 
+import os
 import threading
 import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from typing import Any
 
 from core.research.competition.resources import (
@@ -67,6 +69,17 @@ MEETING_SOURCE = "hypothesis_first_meeting"
 # topic cap: 3 framing lines + rules + host line + one line per candidate.
 MEETING_TOPIC_MAX_LINES = MAX_SELECTED_CANDIDATES + 8
 _MEETING_RECEIPT_AUTHORITY_SCHEMA_VERSION = 1
+
+# Digest-wait stop-loss (SCI-001 B-track burn): once a meeting has produced
+# its Coordinator digest draft (summarizing/awaiting_approval) and no operator
+# closes it, automatic discussion re-drives must stop burning speaker calls
+# after a configurable TTL measured from the digest generation time.  The
+# pause is reversible: approve/reject/close keep working unchanged, and
+# meetings with an explicit persisted deadline keep deadline semantics only.
+DEFAULT_MEETING_DIGEST_TTL_MS = 45 * 60 * 1000
+_MEETING_DIGEST_TTL_OVERRIDE_ENV = "VIBELUTION_MEETING_DIGEST_TTL_MS"
+_DIGEST_TTL_MUTED_STATUSES = frozenset({"summarizing", "awaiting_approval"})
+MEETING_DIGEST_TTL_STOP_REASON = "meeting_digest_ttl_muted"
 
 _DEFAULT_AGENDA = (
     "回顾入选假说候选与赛题已有证据",
@@ -2055,6 +2068,148 @@ def _handle_wedged_discussion(
         return
 
 
+def _meeting_digest_ttl_ms() -> int:
+    """Configured digest-wait TTL; the env override is a positive int in ms."""
+
+    raw = str(os.environ.get(_MEETING_DIGEST_TTL_OVERRIDE_ENV) or "").strip()
+    if raw:
+        try:
+            normalized = int(raw)
+        except ValueError:
+            normalized = 0
+        if normalized > 0:
+            return normalized
+    return DEFAULT_MEETING_DIGEST_TTL_MS
+
+
+def _meeting_timestamp_ms(value: Any) -> int | None:
+    """Parse one meeting-record ISO timestamp into epoch ms (tolerant, fail-open)."""
+
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return int(parsed.timestamp() * 1000)
+
+
+def meeting_digest_ttl_mute_state(
+    meeting_round: Mapping[str, Any],
+    *,
+    now_ms: int | None = None,
+) -> dict[str, Any] | None:
+    """Pure digest-wait TTL projection: ``None`` means the mute must not engage.
+
+    Engages only when the meeting has produced its digest draft (status
+    ``summarizing``/``awaiting_approval`` with draft or summary-start
+    evidence) and the digest age exceeds the configured TTL.  A persisted
+    deadline (``challengeDeadlineAtMs``/``meetingDeadlineAtMs``) keeps
+    deadline semantics and always disables the TTL mute for that meeting.
+    """
+
+    status = str(meeting_round.get("status") or "").strip().lower()
+    if status not in _DIGEST_TTL_MUTED_STATUSES:
+        return None
+    # Deadline semantics take priority: a meeting with an explicit persisted
+    # wall-clock policy is governed by that deadline alone.
+    if _digest_recovery_deadline_ms(meeting_round) > 0:
+        return None
+    digest_draft = (
+        dict(meeting_round.get("digestDraft"))
+        if isinstance(meeting_round.get("digestDraft"), Mapping)
+        else {}
+    )
+    digest_source_value: Any = ""
+    for key in ("generatedAt", "createdAt"):
+        if str(digest_draft.get(key) or "").strip():
+            digest_source_value = digest_draft.get(key)
+            break
+    digest_source_field = "digestDraft.generatedAt" if digest_source_value else ""
+    if not digest_source_value:
+        digest_source_value = meeting_round.get("summaryStartedAt") or ""
+        digest_source_field = "summaryStartedAt" if digest_source_value else ""
+    if not digest_source_value:
+        digest_source_value = meeting_round.get("updatedAt") or ""
+        digest_source_field = "updatedAt" if digest_source_value else ""
+    digest_at_ms = _meeting_timestamp_ms(digest_source_value)
+    if digest_at_ms is None:
+        return None
+    ttl_ms = _meeting_digest_ttl_ms()
+    normalized_now_ms = int(now_ms if now_ms is not None else time.time() * 1000)
+    overdue_ms = normalized_now_ms - digest_at_ms - ttl_ms
+    if overdue_ms <= 0:
+        return None
+    bound_round_count = len(_normalized_str_list(meeting_round.get("chatRoomRoundIds")))
+    round_budget = int(meeting_round.get("rounds") or 3)
+    return {
+        "meetingStatus": status,
+        "digestAtMs": digest_at_ms,
+        "digestAt": str(digest_source_value),
+        "digestAtSource": digest_source_field,
+        "ttlMs": ttl_ms,
+        "overdueMs": overdue_ms,
+        "boundRoundCount": bound_round_count,
+        "roundBudget": round_budget,
+        "pausedRoundRange": [bound_round_count + 1, max(bound_round_count, round_budget)],
+    }
+
+
+def meeting_digest_ttl_mute(
+    team_id: str,
+    meeting_round_id: str,
+) -> dict[str, Any] | None:
+    """Read-only TTL-mute probe for room-level speaker fences (no writes)."""
+
+    normalized_team_id = str(team_id or "").strip()
+    normalized_round_id = str(meeting_round_id or "").strip()
+    if not normalized_team_id or not normalized_round_id:
+        return None
+    try:
+        meeting_round = meeting_rounds.get_meeting_round(
+            normalized_team_id, normalized_round_id
+        )["meetingRound"]
+    except Exception:  # noqa: BLE001 - a probe outage must never stop a room
+        return None
+    return meeting_digest_ttl_mute_state(meeting_round)
+
+
+def record_meeting_digest_ttl_mute_event(
+    team_id: str,
+    meeting_round_id: str,
+    *,
+    surface: str,
+    room_id: str = "",
+    room_round_id: str = "",
+) -> None:
+    """Emit the structured TTL-pause evidence (no LLM call, no state write)."""
+
+    mute = meeting_digest_ttl_mute(team_id, meeting_round_id)
+    if mute is None:
+        return
+    _record_meeting_discussion_driver_event(
+        team_id,
+        meeting_round_id,
+        "meeting_discussion.ttl_mute.engaged",
+        outcome="muted",
+        fields={
+            "roomId": str(room_id or ""),
+            "roomRoundId": str(room_round_id or ""),
+            "surface": str(surface or ""),
+            "meetingStatus": mute["meetingStatus"],
+            "digestAtMs": mute["digestAtMs"],
+            "digestAt": mute["digestAt"],
+            "digestAtSource": mute["digestAtSource"],
+            "ttlMs": mute["ttlMs"],
+            "overdueMs": mute["overdueMs"],
+            "pausedRoundRange": mute["pausedRoundRange"],
+        },
+    )
+
+
 def _digest_recovery_deadline_ms(meeting_round: Mapping[str, Any]) -> int:
     """Earliest governed deadline bounding any re-drive for this meeting.
 
@@ -2207,6 +2362,23 @@ def schedule_meeting_discussion(team_id: str, meeting_round_id: str) -> dict[str
     meeting_round = meeting_rounds.get_meeting_round(
         normalized_team_id, normalized_round_id
     )["meetingRound"]
+    digest_ttl_mute = meeting_digest_ttl_mute_state(meeting_round)
+    if digest_ttl_mute is not None:
+        # Stop-loss: the digest draft has been waiting past the TTL, so no
+        # automatic re-drive may open another discussion round.  Approve,
+        # reject and close are untouched; nothing is auto-closed.
+        record_meeting_digest_ttl_mute_event(
+            normalized_team_id,
+            normalized_round_id,
+            surface="schedule_meeting_discussion",
+            room_id=str(meeting_round.get("linkedChatRoomId") or ""),
+        )
+        return {
+            "status": "ttl_muted",
+            "teamId": normalized_team_id,
+            "meetingRoundId": normalized_round_id,
+            "digestTtl": digest_ttl_mute,
+        }
     if str(meeting_round.get("status") or "").strip().lower() != "open":
         return {
             "status": "not_open",
@@ -2527,6 +2699,20 @@ def _run_meeting_discussion_impl(
             and int(time.time() * 1000) >= challenge_deadline_at_ms
         ):
             stop_reason = "challenge_deadline"
+            break
+        digest_ttl_mute = meeting_digest_ttl_mute_state(meeting_round)
+        if digest_ttl_mute is not None:
+            # Digest-wait stop-loss: never open another follow-up round for a
+            # meeting whose digest draft has been waiting past the TTL.  The
+            # idempotent summary draft below reuses the existing draft, so no
+            # extra LLM call is introduced by this exit.
+            stop_reason = MEETING_DIGEST_TTL_STOP_REASON
+            record_meeting_digest_ttl_mute_event(
+                normalized_team_id,
+                normalized_round_id,
+                surface="discussion_driver",
+                room_id=room_id,
+            )
             break
         all_messages = meeting_rounds.meeting_source_messages(meeting_round)
         completed = [
@@ -3791,6 +3977,16 @@ def finalize_stopped_meeting_after_chat_round(
             "schemaVersion": meeting_rounds.SCHEMA_VERSION,
             "teamId": team_id,
             "status": "already_terminal",
+            "meetingRound": meeting_round,
+        }
+    if terminal_reason == MEETING_DIGEST_TTL_STOP_REASON:
+        # The TTL pause is a burn stop, never a closure: a digest-wait mute
+        # that cuts a still-running room round must not execution-terminate
+        # the meeting.  Operator approve/reject/close stays the only closer.
+        return {
+            "schemaVersion": meeting_rounds.SCHEMA_VERSION,
+            "teamId": team_id,
+            "status": "ttl_mute_paused",
             "meetingRound": meeting_round,
         }
     terminal = meeting_rounds.terminate_meeting_execution(

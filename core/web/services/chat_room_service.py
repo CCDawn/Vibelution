@@ -209,6 +209,11 @@ _CHALLENGE_ROOM_PER_CALL_STOP_REASON = "challenge_per_call_budget_exhausted"
 _CHALLENGE_ROOM_RUN_STOP_REASON_PREFIX = "challenge_workflow_run_"
 _CHALLENGE_ROOM_RUN_POLL_INTERVAL_SECONDS = 0.5
 _CHALLENGE_ROOM_HEARTBEAT_INTERVAL_SECONDS = 30.0
+# Digest-wait TTL stop-loss: a meeting-bound round whose meeting has a digest
+# draft waiting past the TTL stops before the next speaker call.  It fences
+# the room round only; the meeting state machine and its digest stay intact.
+_MEETING_DIGEST_TTL_STOP_REASON = "meeting_digest_ttl_muted"
+_MEETING_DIGEST_TTL_POLL_INTERVAL_SECONDS = 15.0
 _CHAT_ROOM_PARTICIPANT_INDEX_CACHE_LOCK = threading.Lock()
 _CHAT_ROOM_PARTICIPANT_INDEX_CACHE_CONDITION = threading.Condition(_CHAT_ROOM_PARTICIPANT_INDEX_CACHE_LOCK)
 _CHAT_ROOM_PARTICIPANT_INDEX_CACHE: dict[tuple[Any, ...], dict[str, dict[str, dict[str, Any]]]] = {}
@@ -1891,6 +1896,38 @@ def _run_chat_room_round_background(
         _fail_chat_room_round(room_id, round_id, room, round_payload, exc, lang=lang)
 
 
+def _meeting_digest_ttl_mute_for_context(
+    context: Mapping[str, Any],
+    probe: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Digest-wait TTL projection for one meeting-bound speaker boundary.
+
+    ``probe`` outlives the per-speaker context rebuilds: the meeting record
+    is re-read at most once per poll interval.  The mute engages
+    monotonically (digest age only grows), so the short cache keeps the
+    per-speaker cost flat without delaying the stop-loss meaningfully.
+    """
+
+    meeting_round_id = str(context.get("meetingRoundId") or "").strip()
+    team_id = str(context.get("teamId") or "").strip()
+    if not meeting_round_id or not team_id:
+        return None
+    now = time.monotonic()
+    read_at = probe.get("readAtMonotonic")
+    if (
+        isinstance(read_at, (int, float))
+        and now - float(read_at) < _MEETING_DIGEST_TTL_POLL_INTERVAL_SECONDS
+    ):
+        mute = probe.get("mute")
+        return mute if isinstance(mute, dict) else None
+    from core.web.services.team_workflow import meeting_runtime
+
+    mute = meeting_runtime.meeting_digest_ttl_mute(team_id, meeting_round_id)
+    probe["readAtMonotonic"] = now
+    probe["mute"] = mute
+    return mute
+
+
 def _execute_chat_room_round(
     normalized_room_id: str,
     round_id: str,
@@ -1906,6 +1943,10 @@ def _execute_chat_room_round(
     normalized_topic = str(round_payload.get("topic") or "").strip()
 
     messages: list[dict[str, Any]] = []
+    # Digest-wait TTL probe cache; it outlives the per-speaker context
+    # rebuild so one round re-reads the meeting record at most once per
+    # poll interval.
+    meeting_ttl_probe: dict[str, Any] = {"readAtMonotonic": 0.0, "mute": None}
     for index, participant in enumerate(speakers):
         speaker_started_at = _perf_counter()
         stopped_detail = _stopped_chat_room_round_detail(normalized_room_id, round_id)
@@ -1961,6 +2002,30 @@ def _execute_chat_room_round(
         # the next prompt so an expired formal round never starts another
         # speaker, even when the previous runner returned a late result.
         if _request_challenge_room_execution_stop(round_id, context, force_run_read=True):
+            stopped_detail = _stopped_chat_room_round_detail(normalized_room_id, round_id)
+            if stopped_detail is not None:
+                _clear_chat_room_round_control(round_id)
+                return stopped_detail
+        # Digest-wait TTL stop-loss: a meeting whose digest draft has been
+        # waiting past the TTL gets no further speaker calls.  Completed
+        # speakers stay persisted; the meeting record, its digest draft and
+        # operator approve/close are untouched (finalize guard in
+        # meeting_runtime keeps the TTL stop from terminating the meeting).
+        meeting_ttl_mute = _meeting_digest_ttl_mute_for_context(context, meeting_ttl_probe)
+        if meeting_ttl_mute is not None:
+            _request_chat_room_round_stop(round_id, _MEETING_DIGEST_TTL_STOP_REASON)
+            try:
+                from core.web.services.team_workflow import meeting_runtime
+
+                meeting_runtime.record_meeting_digest_ttl_mute_event(
+                    str(context.get("teamId") or ""),
+                    str(context.get("meetingRoundId") or ""),
+                    surface="chat_room_round",
+                    room_id=normalized_room_id,
+                    room_round_id=round_id,
+                )
+            except Exception:  # noqa: BLE001 - evidence never blocks the fence
+                pass
             stopped_detail = _stopped_chat_room_round_detail(normalized_room_id, round_id)
             if stopped_detail is not None:
                 _clear_chat_room_round_control(round_id)
