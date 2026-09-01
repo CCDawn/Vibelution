@@ -4,14 +4,19 @@ Covers the real-model wiring layer for the human-click review chain:
 
 * availability resolution is fail-open at the fixture boundary (no model →
   DEV fixtures stay in charge) and the conftest autouse fixture pins it to
-  ``None`` so the suite never touches real provider credentials;
+  ``None`` so the suite never touches real provider credentials; every
+  fallback branch announces itself with a warning log and a quiet scene
+  event naming the missing configuration, so the fallback is never silent;
 * an injected fake LLM produces executor-compatible outputs for the digest
   drafter and the four review runners (reflection / pairwise / Pareto /
   MetaReview), including the server-owned ``sourceMessageRefs`` and the
   ``llm:<model>`` reviewer attribution;
 * malformed model output fails closed with ``ContractValidationError``
   before anything is persisted;
-* the runners compose with ``execute_hypothesis_review`` end to end.
+* the runners compose with ``execute_hypothesis_review`` end to end;
+* a ``mode=formal`` hypothesis-review meeting fails closed at closure time
+  when no real receipt-bound runners resolve, while dev/platform scopes and
+  candidate-generation closures keep the fixture fallback.
 
 No real model or network is involved.
 """
@@ -19,9 +24,11 @@ No real model or network is involved.
 from __future__ import annotations
 
 import json
+import logging
 import threading
 import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -45,6 +52,9 @@ from core.web.services.team_workflow.hypothesis_review_executor import (
     execute_hypothesis_review,
 )
 from core.web.services.team_workflow.research_runtime import meeting_receipt_authority
+from core.web.services.team_workflow.research_runtime.hypothesis_first_chain import (
+    HypothesisFirstChainError,
+)
 
 _RESOLVE_REVIEW_LLM_UNDER_TEST = llm_review_runners.resolve_review_llm
 _FAKE_LLM = {"client": object(), "profileId": "primary", "modelId": "fake-review-model"}
@@ -188,6 +198,358 @@ def test_close_review_meeting_and_digest_keep_fixture_defaults():
     # DEV fixture semantics: markers extracted from the completed messages.
     assert draft["sourceMessageRefs"] == draft["sourceMessageRefs"]
     assert isinstance(draft["summary"], str) and draft["summary"]
+
+
+# ---------------------------------------------------------------------------
+# Unavailable diagnostics: the fixture fallback is never silent
+# ---------------------------------------------------------------------------
+
+_REVIEW_LLM_LOGGER = "core.web.services.team_workflow.llm_review_runners"
+
+
+@pytest.fixture()
+def review_llm_scene_events(monkeypatch):
+    """Capture the quiet scene events emitted by the resolution fallback."""
+
+    from core.web.services import runtime_scene_service
+
+    events: list[dict[str, Any]] = []
+
+    def _capture(*args, **kwargs):
+        events.append({"args": args, "kwargs": kwargs})
+        return {"accepted": True}
+
+    monkeypatch.setattr(
+        runtime_scene_service,
+        "record_runtime_scene_event_quietly",
+        _capture,
+    )
+    return events
+
+
+def _assert_unavailable_scene_event(events, reason: str) -> dict[str, Any]:
+    matching = [
+        event
+        for event in events
+        if event["args"][2:3] == ("review_llm.resolve.unavailable",)
+        and isinstance(event["kwargs"].get("fields"), dict)
+        and event["kwargs"]["fields"].get("reason") == reason
+    ]
+    assert matching, f"expected an unavailable scene event for {reason}: {events}"
+    event = matching[0]
+    assert event["args"][:2] == ("team_workflow", "review_llm")
+    assert event["kwargs"]["level"] == "warning"
+    assert event["kwargs"]["outcome"] == "fallback_dev_fixture"
+    assert event["kwargs"]["lifecycle"] is False
+    return event
+
+
+def _patch_review_team(monkeypatch, *, team, agent):
+    monkeypatch.setattr(team_service, "get_team_light", lambda team_id: team)
+    monkeypatch.setattr(
+        agent_directory_service,
+        "get_agent",
+        lambda agent_id, **kwargs: agent,
+    )
+
+
+def _evaluator_team(agent_id: str | None = "agent-evaluator"):
+    members = [] if agent_id is None else [
+        {"role": "challenge_cup_evaluator", "agentId": agent_id},
+    ]
+    return {"teamId": "challenge-cup", "members": members}
+
+
+def _bound_evaluator_agent(model_id: str = "relay_openai/gpt-5.6-luna"):
+    return {
+        "agentId": "agent-evaluator",
+        "llmBindings": {"dialogue": {"modelId": model_id}},
+    }
+
+
+class _UnavailableClient:
+    """Provider/profile pair driving the post-client fallback branches."""
+
+    def __init__(
+        self,
+        *,
+        model: str = "",
+        api_key: str = "",
+        api_key_env: str = "",
+        requires_api_key: bool = True,
+    ):
+        self.profile = type("Profile", (), {"model": model})()
+        self.provider = type(
+            "Provider",
+            (),
+            {
+                "provider_id": "team-provider",
+                "api_key": api_key,
+                "api_key_env": api_key_env,
+                "requires_api_key": requires_api_key,
+            },
+        )()
+
+
+def test_resolve_review_llm_reports_resolve_error_instead_of_silent_fallback(
+    monkeypatch, caplog, review_llm_scene_events
+):
+    def broken_team_lookup(team_id):
+        raise RuntimeError("team store unavailable")
+
+    monkeypatch.setattr(team_service, "get_team_light", broken_team_lookup)
+
+    with caplog.at_level(logging.WARNING, logger=_REVIEW_LLM_LOGGER):
+        resolved = _RESOLVE_REVIEW_LLM_UNDER_TEST()
+
+    assert resolved is None
+    assert "resolve_error" in caplog.text
+    assert "RuntimeError: team store unavailable" in caplog.text
+    _assert_unavailable_scene_event(review_llm_scene_events, "resolve_error")
+
+
+def test_resolve_review_llm_reports_missing_evaluator_role(
+    monkeypatch, caplog, review_llm_scene_events
+):
+    _patch_review_team(
+        monkeypatch,
+        team=_evaluator_team(agent_id=None),
+        agent=None,
+    )
+
+    with caplog.at_level(logging.WARNING, logger=_REVIEW_LLM_LOGGER):
+        resolved = _RESOLVE_REVIEW_LLM_UNDER_TEST()
+
+    assert resolved is None
+    assert "evaluator_agent_missing" in caplog.text
+    assert "challenge_cup_evaluator role" in caplog.text
+    _assert_unavailable_scene_event(review_llm_scene_events, "evaluator_agent_missing")
+
+
+def test_resolve_review_llm_reports_missing_or_archived_evaluator_agent(
+    monkeypatch, caplog, review_llm_scene_events
+):
+    _patch_review_team(
+        monkeypatch,
+        team=_evaluator_team(),
+        agent=None,
+    )
+
+    with caplog.at_level(logging.WARNING, logger=_REVIEW_LLM_LOGGER):
+        resolved = _RESOLVE_REVIEW_LLM_UNDER_TEST()
+
+    assert resolved is None
+    assert "evaluator_agent_missing" in caplog.text
+    assert "agent-evaluator" in caplog.text
+    _assert_unavailable_scene_event(review_llm_scene_events, "evaluator_agent_missing")
+
+
+def test_resolve_review_llm_reports_unbound_evaluator_model(
+    monkeypatch, caplog, review_llm_scene_events
+):
+    _patch_review_team(
+        monkeypatch,
+        team=_evaluator_team(),
+        agent={"agentId": "agent-evaluator", "llmBindings": {}},
+    )
+
+    with caplog.at_level(logging.WARNING, logger=_REVIEW_LLM_LOGGER):
+        resolved = _RESOLVE_REVIEW_LLM_UNDER_TEST()
+
+    assert resolved is None
+    assert "evaluator_model_unbound" in caplog.text
+    assert "agent-evaluator" in caplog.text
+    _assert_unavailable_scene_event(review_llm_scene_events, "evaluator_model_unbound")
+
+
+def test_resolve_review_llm_reports_client_build_error(
+    monkeypatch, caplog, review_llm_scene_events
+):
+    _patch_review_team(
+        monkeypatch,
+        team=_evaluator_team(),
+        agent=_bound_evaluator_agent(),
+    )
+
+    def broken_client_build(*args, **kwargs):
+        raise RuntimeError("runtime profile projection failed")
+
+    monkeypatch.setattr(
+        llm_review_runners, "config_for_agent_llm_model", broken_client_build
+    )
+
+    with caplog.at_level(logging.WARNING, logger=_REVIEW_LLM_LOGGER):
+        resolved = _RESOLVE_REVIEW_LLM_UNDER_TEST()
+
+    assert resolved is None
+    assert "client_build_error" in caplog.text
+    assert "RuntimeError: runtime profile projection failed" in caplog.text
+    _assert_unavailable_scene_event(review_llm_scene_events, "client_build_error")
+
+
+def test_resolve_review_llm_reports_unresolved_profile_model(
+    monkeypatch, caplog, review_llm_scene_events
+):
+    _patch_review_team(
+        monkeypatch,
+        team=_evaluator_team(),
+        agent=_bound_evaluator_agent(),
+    )
+    monkeypatch.setattr(
+        llm_review_runners,
+        "get_llm_client",
+        lambda **kwargs: _UnavailableClient(model="  "),
+    )
+
+    with caplog.at_level(logging.WARNING, logger=_REVIEW_LLM_LOGGER):
+        resolved = _RESOLVE_REVIEW_LLM_UNDER_TEST()
+
+    assert resolved is None
+    assert "model_unresolved" in caplog.text
+    _assert_unavailable_scene_event(review_llm_scene_events, "model_unresolved")
+
+
+def test_resolve_review_llm_reports_missing_provider_credentials(
+    monkeypatch, caplog, review_llm_scene_events
+):
+    _patch_review_team(
+        monkeypatch,
+        team=_evaluator_team(),
+        agent=_bound_evaluator_agent(),
+    )
+    monkeypatch.setattr(
+        llm_review_runners,
+        "get_llm_client",
+        lambda **kwargs: _UnavailableClient(model="team-model"),
+    )
+
+    with caplog.at_level(logging.WARNING, logger=_REVIEW_LLM_LOGGER):
+        resolved = _RESOLVE_REVIEW_LLM_UNDER_TEST()
+
+    assert resolved is None
+    assert "provider_credentials_missing" in caplog.text
+    assert "team-provider" in caplog.text
+    _assert_unavailable_scene_event(review_llm_scene_events, "provider_credentials_missing")
+
+
+def test_resolve_review_llm_still_resolves_via_api_key_env_fallback(
+    monkeypatch, review_llm_scene_events
+):
+    """The env-var credential fallback must keep resolving (no over-blocking)."""
+
+    _patch_review_team(
+        monkeypatch,
+        team=_evaluator_team(),
+        agent=_bound_evaluator_agent(),
+    )
+    monkeypatch.setattr(
+        llm_review_runners,
+        "get_llm_client",
+        lambda **kwargs: _UnavailableClient(
+            model="team-model", api_key_env="VIBELUTION_TEST_REVIEW_API_KEY"
+        ),
+    )
+    monkeypatch.setenv("VIBELUTION_TEST_REVIEW_API_KEY", "env-provided")
+
+    resolved = _RESOLVE_REVIEW_LLM_UNDER_TEST()
+
+    assert resolved is not None
+    assert resolved["modelId"] == "team-model"
+    assert review_llm_scene_events == []
+
+
+# ---------------------------------------------------------------------------
+# Formal fence: formal review meetings never close onto DEV fixtures
+# ---------------------------------------------------------------------------
+
+
+def _formal_fence_env(monkeypatch, *, mode: str, meeting_type: str = "hypothesis_review"):
+    from core.web.services.team_workflow import meeting_rounds
+    from core.web.services.team_workflow.research_runtime import hypothesis_first_chain
+
+    meeting_round = _meeting_round(mode=mode, meetingType=meeting_type)
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda team_id: team_id)
+    monkeypatch.setattr(
+        meeting_rounds,
+        "get_meeting_round",
+        lambda team_id, round_id: {"meetingRound": meeting_round},
+    )
+    captured: dict[str, Any] = {}
+
+    def fake_build_runners(*args, **kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(
+        llm_review_runners, "build_hypothesis_review_runners", fake_build_runners
+    )
+    return hypothesis_first_chain, meeting_rounds, meeting_round, captured
+
+
+def test_formal_review_meeting_close_fails_closed_without_real_runners(monkeypatch):
+    chain, meeting_rounds, _meeting_round, captured = _formal_fence_env(
+        monkeypatch, mode="formal"
+    )
+
+    def _must_not_close(*args, **kwargs):
+        raise AssertionError("formal closure must fail before approve_meeting_closure")
+
+    monkeypatch.setattr(meeting_rounds, "approve_meeting_closure", _must_not_close)
+
+    with pytest.raises(HypothesisFirstChainError) as excinfo:
+        chain.close_review_meeting("team-1", "meeting-1", {})
+
+    assert captured == {"require_provider_receipts": True}
+    message = str(excinfo.value)
+    assert "meeting-1" in message
+    assert "cannot close" in message
+    assert "receipt-bound review runners" in message
+    assert "dev/platform scope" in message
+
+
+def test_dev_review_meeting_close_keeps_fixture_fallback(monkeypatch):
+    chain, meeting_rounds, meeting_round, captured = _formal_fence_env(
+        monkeypatch, mode="dev"
+    )
+    approved: list[str] = []
+    monkeypatch.setattr(
+        meeting_rounds,
+        "approve_meeting_closure",
+        lambda team_id, round_id, request: approved.append(round_id)
+        or {"meetingRound": {**meeting_round, "status": "closed"}},
+    )
+    monkeypatch.setattr(
+        chain,
+        "_process_collection_decisions",
+        lambda *args, **kwargs: {"requests": [], "skipped": []},
+    )
+    monkeypatch.setattr(
+        chain,
+        "_generate_hypothesis_round",
+        lambda *args, **kwargs: {"status": "created", "round": {"status": "closed"}},
+    )
+    monkeypatch.setattr(chain, "_record_policy_shadow_decisions", lambda *a, **k: None)
+    monkeypatch.setattr(chain, "_auto_advance_converge_tick", lambda *a, **k: None)
+
+    result = chain.close_review_meeting("team-1", "meeting-1", {})
+
+    assert approved == ["meeting-1"]
+    assert captured == {"require_provider_receipts": False}
+    assert result["hypothesisRound"]["status"] == "created"
+
+
+def test_formal_generation_meeting_close_does_not_require_review_runners(monkeypatch):
+    """Candidate-generation closures never consume review runners."""
+
+    chain, _meeting_rounds, meeting_round, captured = _formal_fence_env(
+        monkeypatch, mode="formal", meeting_type="hypothesis_candidate_generation"
+    )
+    sentinel = {"status": "closed", "meetingRound": meeting_round}
+    monkeypatch.setattr(chain, "_close_generation_meeting", lambda *args, **k: sentinel)
+
+    result = chain.close_review_meeting("team-1", "meeting-1", {})
+
+    assert result is sentinel
+    assert captured == {"require_provider_receipts": True}
 
 
 # ---------------------------------------------------------------------------

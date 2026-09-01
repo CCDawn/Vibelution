@@ -5898,7 +5898,8 @@ def test_candidate_evidence_trail_cites_discussion_messages(
 # ---------------------------------------------------------------------------
 # close_review_meeting: the meeting's server-owned scope mode fences the
 # auto-injected review runners (formal -> provider-bound receipts required,
-# dev -> receipt-free path unchanged)
+# and without real runners the closure fails closed instead of sliding onto
+# the DEV fixtures; dev -> receipt-free fixture fallback unchanged)
 # ---------------------------------------------------------------------------
 
 
@@ -5914,6 +5915,7 @@ def test_close_review_meeting_fences_auto_injected_runners_by_meeting_mode(
     team_id = f"team-fence-{mode}"
     meeting_round_id = f"meeting-fence-{mode}"
     build_calls: list[dict[str, object]] = []
+    closure_calls: list[dict[str, object]] = []
 
     def fake_get_meeting_round(_team_id, round_id):
         assert round_id == meeting_round_id
@@ -5927,6 +5929,7 @@ def test_close_review_meeting_fences_auto_injected_runners_by_meeting_mode(
         }
 
     def fake_approve_meeting_closure(_team_id, _round_id, _request):
+        closure_calls.append({"roundId": _round_id})
         return {
             "meetingRound": {
                 "meetingRoundId": meeting_round_id,
@@ -5963,9 +5966,25 @@ def test_close_review_meeting_fences_auto_injected_runners_by_meeting_mode(
         },
     )
 
+    if mode == chain.HYPOTHESIS_REVIEW_FORMAL_MODE:
+        # Formal fence: without real receipt-bound runners a formal review
+        # meeting must never close onto the deterministic DEV fixtures; the
+        # closure fails fast with an actionable structured error.
+        with pytest.raises(chain.HypothesisFirstChainError) as excinfo:
+            chain.close_review_meeting(team_id, meeting_round_id)
+
+        assert build_calls == [{"require_provider_receipts": expected_receipts}]
+        assert closure_calls == []
+        message = str(excinfo.value)
+        assert meeting_round_id in message
+        assert "receipt-bound review runners" in message
+        assert "dev/platform scope" in message
+        return
+
     result = chain.close_review_meeting(team_id, meeting_round_id)
 
     assert build_calls == [{"require_provider_receipts": expected_receipts}]
+    assert closure_calls
     assert result["hypothesisRound"]["status"] == "created"
 
 

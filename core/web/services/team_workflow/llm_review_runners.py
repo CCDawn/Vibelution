@@ -12,7 +12,10 @@ service-layer defaults:
 
 Resolution is lazy and fail-open at *availability* level only: when no model
 is configured the callers keep the DEV fixture behaviour, so DEV/CI stays
-deterministic.  Once a runner runs, it fails closed — any malformed model
+deterministic.  Every fallback branch announces itself (warning log plus a
+quiet ``review_llm.resolve.unavailable`` scene event naming the missing
+configuration), so fixture reviews are never silent.  Once a runner runs, it
+fails closed — any malformed model
 output raises ``ContractValidationError`` before anything is persisted,
 mirroring the executor contract.
 """
@@ -20,6 +23,7 @@ mirroring the executor contract.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -53,6 +57,8 @@ from core.web.services.team_workflow.hypothesis_review_executor import (
 REVIEW_LLM_PROFILE_ID = "primary"
 REVIEW_LLM_SURFACE = "team_workflow_review"
 REVIEW_LLM_CACHE_SCOPE = "team_workflow_review"
+
+logger = logging.getLogger(__name__)
 
 _MAX_MESSAGES = 40
 
@@ -261,6 +267,44 @@ def _invoke_llm_with_timeout(
     return value
 
 
+def _record_review_llm_unavailable(reason: str, *, detail: str = "") -> None:
+    """Explain one DEV fixture fallback of the review LLM resolution.
+
+    The fail-open fallback at the fixture boundary is intentional (DEV/CI
+    stays deterministic without a configured model), but it must never be
+    silent: every unreachable branch emits one bounded warning log plus one
+    quiet scene event naming the missing configuration.  Details are
+    truncated and never include credentials or prompts.
+    """
+
+    safe_detail = str(detail or "").strip().replace("\n", " ")[:200]
+    logger.warning(
+        "review LLM unavailable; keeping deterministic DEV fixtures (%s)%s",
+        reason,
+        f": {safe_detail}" if safe_detail else "",
+    )
+    try:
+        from core.web.services.runtime_scene_service import (
+            record_runtime_scene_event_quietly,
+        )
+
+        record_runtime_scene_event_quietly(
+            "team_workflow",
+            "review_llm",
+            "review_llm.resolve.unavailable",
+            message="Review LLM unavailable; deterministic DEV fixtures stay in charge.",
+            level="warning",
+            outcome="fallback_dev_fixture",
+            fields={
+                "reason": str(reason),
+                **({"detail": safe_detail} if safe_detail else {}),
+            },
+            lifecycle=False,
+        )
+    except Exception:  # noqa: BLE001 - diagnostics must never fail resolution
+        return
+
+
 def resolve_review_llm() -> dict[str, Any] | None:
     """Resolve the Challenge Cup team LLM for review calls.
 
@@ -270,7 +314,9 @@ def resolve_review_llm() -> dict[str, Any] | None:
     projected onto an isolated runtime config; no operator config is mutated.
 
     A provider without usable credentials is treated as unavailable and the
-    deterministic DEV fixtures stay in charge.
+    deterministic DEV fixtures stay in charge.  The fallback itself is
+    fail-open at availability level only, but never silent: every branch
+    records why via :func:`_record_review_llm_unavailable`.
     """
 
     try:
@@ -297,8 +343,30 @@ def resolve_review_llm() -> dict[str, Any] | None:
             else None
         )
         model_ref = agent_dialogue_model_id(evaluator)
-        if not evaluator or not model_ref:
-            return None
+    except Exception as exc:  # noqa: BLE001 - availability probe must stay fail-open
+        _record_review_llm_unavailable(
+            "resolve_error",
+            detail=f"{type(exc).__name__}: {exc}",
+        )
+        return None
+    if not evaluator:
+        _record_review_llm_unavailable(
+            "evaluator_agent_missing",
+            detail=(
+                f"agent={evaluator_agent_id} is missing or archived"
+                if evaluator_agent_id
+                else "no Challenge Cup team member carries the "
+                "challenge_cup_evaluator role"
+            ),
+        )
+        return None
+    if not model_ref:
+        _record_review_llm_unavailable(
+            "evaluator_model_unbound",
+            detail=f"agent={evaluator_agent_id} has no dialogue llmBindings.modelId",
+        )
+        return None
+    try:
         runtime_config = config_for_agent_llm_model(
             get_config(),
             model_id=model_ref,
@@ -314,11 +382,27 @@ def resolve_review_llm() -> dict[str, Any] | None:
         api_key = str(getattr(provider, "api_key", "") or "").strip()
         api_key_env = str(getattr(provider, "api_key_env", "") or "").strip()
         requires_api_key = bool(getattr(provider, "requires_api_key", True))
-    except Exception:
+    except Exception as exc:  # noqa: BLE001 - availability probe must stay fail-open
+        _record_review_llm_unavailable(
+            "client_build_error",
+            detail=f"model_ref={model_ref} {type(exc).__name__}: {exc}",
+        )
         return None
     if not model_id:
+        _record_review_llm_unavailable(
+            "model_unresolved",
+            detail=f"model_ref={model_ref} resolved to an empty profile model",
+        )
         return None
     if requires_api_key and not api_key and not (api_key_env and os.environ.get(api_key_env)):
+        _record_review_llm_unavailable(
+            "provider_credentials_missing",
+            detail=(
+                f"provider={getattr(provider, 'provider_id', '') or ''} "
+                "requires an api key but none is configured or present in the "
+                "environment"
+            ),
+        )
         return None
     return {
         "client": client,

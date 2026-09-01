@@ -8207,11 +8207,14 @@ def close_review_meeting(
 
     When no review runner is injected the operator-configured LLM is tried
     first; when no model is configured the deterministic DEV fixtures keep
-    the previous behaviour.  A ``mode=formal`` review meeting additionally
-    demands provider-bound receipts: without a configured model — or without
-    the meeting's server-owned receipt authority — the HypothesisRound
-    generation fails closed and is reported structurally without rolling the
-    closure back.
+    the previous behaviour for dev/platform scopes.  A ``mode=formal`` review
+    meeting is fenced: it must never close onto fixture output, so when no
+    real receipt-bound runners resolve the closure fails fast with a
+    structured :class:`HypothesisFirstChainError` (the missing configuration
+    is named by the ``review_llm.resolve.unavailable`` diagnostics); when
+    runners exist but the meeting's server-owned receipt authority is
+    missing, the HypothesisRound generation fails closed and is reported
+    structurally without rolling the closure back.
     """
     from core.web.services import team_service
     from core.web.services.team_workflow import meeting_rounds
@@ -8223,6 +8226,7 @@ def close_review_meeting(
     meeting_round = meeting_rounds.get_meeting_round(normalized_team_id, normalized_round_id)[
         "meetingRound"
     ]
+    meeting_type = str(meeting_round.get("meetingType") or "")
     # The meeting's server-owned scope mode is the explicit execution fence:
     # formal review meetings require provider-bound receipts from the
     # auto-injected runners; DEV/platform scopes keep the receipt-free path.
@@ -8250,8 +8254,20 @@ def close_review_meeting(
             pareto_runner = real_runners["pareto_runner"]
             metareview_runner = real_runners["metareview_runner"]
             revision_runner = real_runners["revision_runner"]
+        elif formal_meeting and meeting_type == HYPOTHESIS_REVIEW_MEETING_TYPE:
+            # Formal fence (fail closed): a formal review meeting must never
+            # slide into the deterministic DEV fixtures.  Candidate-generation
+            # closures and dev/platform scopes do not consume review runners
+            # and keep their previous behaviour.
+            raise HypothesisFirstChainError(
+                f"Formal review meeting {normalized_round_id} cannot close: "
+                "no real receipt-bound review runners resolved from the "
+                "Challenge Cup evaluator LLM (see review_llm.resolve."
+                "unavailable diagnostics for the missing configuration). "
+                "Configure the evaluator agent model and provider "
+                "credentials, or close this meeting in a dev/platform scope."
+            )
     request = dict(payload) if isinstance(payload, Mapping) else {}
-    meeting_type = str(meeting_round.get("meetingType") or "")
     if meeting_type == CANDIDATE_GENERATION_MEETING_TYPE:
         return _close_generation_meeting(normalized_team_id, meeting_round, request)
     if meeting_type != HYPOTHESIS_REVIEW_MEETING_TYPE:
