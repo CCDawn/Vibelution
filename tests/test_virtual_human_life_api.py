@@ -385,6 +385,84 @@ def test_binding_transition_hides_and_restores_only_the_companion_directory_entr
         set_virtual_human_life_service_for_tests(None)
 
 
+def test_enabled_legacy_binding_reconciles_companion_directory_visibility_once(
+    tmp_path,
+) -> None:
+    from core.web.services import virtual_human_life_service as facade
+
+    agent = {
+        "agentId": "agent-a",
+        "status": "active",
+        "primaryMode": "chat",
+        "directSessionId": "session-a",
+        "metadata": {
+            "conversationIndexKind": "personal_agent",
+            "conversationIndexVisibility": "user_visible",
+            "showInSessionIndex": True,
+            "directSessionVisibility": "active_session",
+        },
+    }
+    calls: list[dict] = []
+
+    def directory_manager(agent_id: str, *, action: str, restore=None):
+        calls.append({"agentId": agent_id, "action": action, "restore": restore})
+        assert action == "hide"
+        previous = dict(agent["metadata"])
+        agent["metadata"].update({
+            "conversationIndexKind": "hidden",
+            "conversationIndexVisibility": "hidden",
+            "showInSessionIndex": False,
+            "virtualHumanCompanion": True,
+        })
+        return previous
+
+    service = VirtualHumanLifeService(
+        tmp_path,
+        agent_loader=lambda agent_id, include_archived=False: (
+            agent if agent_id == "agent-a" else None
+        ),
+        agent_lister=lambda: [agent],
+        plugin_root_resolver=lambda agent_id: (
+            tmp_path / "agents" / agent_id / "plugins" / "virtual-human-life"
+        ),
+        directory_visibility_manager=directory_manager,
+        now_provider=lambda: datetime(2026, 8, 27, 9, 0, tzinfo=timezone.utc),
+    )
+    legacy = service.set_binding(
+        "agent-a",
+        enabled=True,
+        expected_version=0,
+        config={},
+    )
+
+    migrated = facade._reconcile_enabled_companion_directory_visibility(
+        service,
+        agent_id="agent-a",
+        binding=legacy,
+    )
+
+    assert calls == [{"agentId": "agent-a", "action": "hide", "restore": None}]
+    assert migrated["directoryVisibility"] == {
+        "state": "hidden",
+        "restore": {
+            "conversationIndexKind": "personal_agent",
+            "conversationIndexVisibility": "user_visible",
+            "showInSessionIndex": True,
+            "directSessionVisibility": "active_session",
+        },
+    }
+    assert migrated["configVersion"] == legacy["configVersion"] + 1
+
+    reconciled_again = facade._reconcile_enabled_companion_directory_visibility(
+        service,
+        agent_id="agent-a",
+        binding=migrated,
+    )
+
+    assert reconciled_again == migrated
+    assert calls == [{"agentId": "agent-a", "action": "hide", "restore": None}]
+
+
 def test_life_draft_update_and_confirm_provisions_one_hidden_steward(
     tmp_path,
     monkeypatch,
@@ -1110,10 +1188,10 @@ def test_companion_lobby_omits_unbound_and_sessionless_agents(tmp_path, monkeypa
 def test_companion_activity_reuses_hidden_native_session_summary(monkeypatch) -> None:
     calls: list[dict[str, object]] = []
 
-    def fake_list_sessions(**kwargs):
+    def fake_query_sessions(**kwargs):
         calls.append(kwargs)
-        return [
-            {
+        return {
+            "items": [{
                 "id": "session-nora",
                 "status": "ready",
                 "currentPhase": "ready",
@@ -1121,12 +1199,18 @@ def test_companion_activity_reuses_hidden_native_session_summary(monkeypatch) ->
                 "updatedAt": "2026-08-27T09:01:00Z",
                 "messages": [{"role": "assistant", "content": "must not leak"}],
                 "workspacePath": "private/path",
-            }
-        ]
+            }],
+        }
 
     monkeypatch.setattr(
+        "core.web.services.session_service.query_sessions",
+        fake_query_sessions,
+    )
+    monkeypatch.setattr(
         "core.web.services.session_service.list_sessions",
-        fake_list_sessions,
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("Companion activity must not enumerate every Session")
+        ),
     )
     from types import SimpleNamespace
 
@@ -1142,7 +1226,10 @@ def test_companion_activity_reuses_hidden_native_session_summary(monkeypatch) ->
     )
     from core.web.services.agent_plugin_service import _native_session_activity_by_id
 
-    assert _native_session_activity_by_id({"session-nora"}) == {
+    assert _native_session_activity_by_id([{
+        "agentId": "agent-nora",
+        "directSessionId": "session-nora",
+    }]) == {
         "session-nora": {
             "id": "session-nora",
             "status": "ready",
@@ -1152,7 +1239,7 @@ def test_companion_activity_reuses_hidden_native_session_summary(monkeypatch) ->
             "activityStamp": "turn:turn-nora-1:turn_completed",
         }
     }
-    assert calls == [{"include_hidden_internal": True, "repair_collisions": False}]
+    assert calls == [{"limit": 1, "agent_id": "agent-nora"}]
 
 
 def test_virtual_human_command_rejects_agent_id_mismatch_and_stale_version(tmp_path) -> None:

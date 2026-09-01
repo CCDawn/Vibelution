@@ -6,6 +6,7 @@ import {
   buildAgentDirectoryPartition,
   compareAgentDirectoryStableOrder,
   isConversationDirectoryAgent,
+  isEligibleDirectoryAgent,
 } from "./agentConversationDirectoryModel";
 
 function agent(overrides: Partial<AgentInstance> = {}): AgentInstance {
@@ -75,6 +76,24 @@ function team(overrides: Partial<Team> = {}): Team {
 }
 
 describe("agentConversationDirectoryModel", () => {
+  it("keeps Companion-owned Agents out of the ordinary chat directory", () => {
+    const companion = agent({
+      agentId: "agent-companion",
+      metadata: {
+        conversationIndexKind: "hidden",
+        conversationIndexVisibility: "hidden",
+        virtualHumanCompanion: true,
+      },
+    });
+
+    expect(isEligibleDirectoryAgent(companion)).toBe(false);
+    expect(buildAgentDirectoryPartition({ agents: [companion], teams: [] })).toEqual({
+      conversationAgents: [],
+      specialAgents: [],
+      teamBlocks: [],
+      listedAgentIds: [],
+    });
+  });
   it("classifies pure chat agents as conversation and role agents as special when unassigned", () => {
     const chat = agent();
     const observer = agent({
