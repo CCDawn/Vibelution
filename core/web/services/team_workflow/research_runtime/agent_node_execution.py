@@ -1319,7 +1319,9 @@ def _retry_candidate_task(
                 "sessionAttempt": int(anchor["sessionAttempt"]),
                 "taskId": str(anchor["taskId"]),
                 "turnId": str(anchor["turnId"]),
-                "checkpointId": str(node_run.get("checkpointId") or ""),
+                # Audit reference captured at attempt start, not a recovery
+                # pointer: it is already superseded once the graph advances.
+                "anchoredAtCheckpointId": str(node_run.get("checkpointId") or ""),
             },
         )
 
@@ -1670,7 +1672,9 @@ def start_agent_node_execution(
                     "sessionAttempt": int(primary["sessionAttempt"]),
                     "taskId": str(primary["taskId"]),
                     "turnId": str(primary["turnId"]),
-                    "checkpointId": str(node_run.get("checkpointId") or ""),
+                    # Audit reference captured at attempt start, not a
+                    # recovery pointer: superseded once the graph advances.
+                    "anchoredAtCheckpointId": str(node_run.get("checkpointId") or ""),
                 },
             )
             start_node_execution(
@@ -1789,7 +1793,9 @@ def start_agent_node_execution(
                 "sessionAttempt": int(anchor["sessionAttempt"]),
                 "taskId": str(anchor["taskId"]),
                 "turnId": str(anchor["turnId"]),
-                "checkpointId": str(node_run.get("checkpointId") or ""),
+                # Audit reference captured at attempt start, not a recovery
+                # pointer: superseded once the graph advances.
+                "anchoredAtCheckpointId": str(node_run.get("checkpointId") or ""),
             },
         )
         start_node_execution(

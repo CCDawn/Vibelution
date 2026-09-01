@@ -22,7 +22,9 @@ class ExecutionAnchor:
     turn_id: str | None = None
     system_action_id: str | None = None
     human_task_id: str | None = None
-    checkpoint_id: str | None = None
+    # Audit reference captured when the anchored attempt started, not a
+    # recovery pointer: the graph has usually advanced past it.
+    anchored_at_checkpoint_id: str | None = None
     status: str = "bound"
     created_at_ms: int = 0
 
@@ -73,7 +75,7 @@ class ExecutionAnchor:
             "turn_id",
             "system_action_id",
             "human_task_id",
-            "checkpoint_id",
+            "anchored_at_checkpoint_id",
         ):
             value = getattr(self, name)
             if value is not None:
@@ -96,7 +98,7 @@ class ExecutionAnchor:
             turn_id=payload.get("turnId"),
             system_action_id=payload.get("systemActionId"),
             human_task_id=payload.get("humanTaskId"),
-            checkpoint_id=payload.get("checkpointId"),
+            anchored_at_checkpoint_id=payload.get("anchoredAtCheckpointId"),
             status=str(payload.get("status") or "bound"),
             created_at_ms=int(payload.get("createdAtMs") or 0),
         )

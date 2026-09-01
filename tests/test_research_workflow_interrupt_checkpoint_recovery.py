@@ -415,3 +415,69 @@ def test_old_version_checkpoint_is_discarded_and_rebuilt_from_ledger(
     finally:
         monkeypatch.undo()
         harness.close()
+
+
+def test_checkpoint_version_bump_discards_v2_checkpoints() -> None:
+    """v3 renamed ``artifact_refs`` to ``latest_node_artifact_refs``.
+
+    Checkpoints written by schema version 2 carry the retired channel set and
+    must be discarded (rebuilt from Ledger authority), never resumed.
+    """
+
+    assert challenge_cup_runtime.CHALLENGE_CUP_CHECKPOINT_VERSION == 3
+    assert (
+        challenge_cup_runtime.checkpoint_values_discarded({"checkpoint_version": 2})
+        is True
+    )
+    assert (
+        challenge_cup_runtime.checkpoint_values_discarded({"checkpoint_version": 3})
+        is False
+    )
+
+
+def test_renamed_latest_node_artifact_refs_channel_round_trips(tmp_path: Path) -> None:
+    """The renamed last-value channel persists; the retired key is dropped.
+
+    langgraph silently discards patch keys that are not declared channels, so
+    this read-back pins the write/read consistency of the rename: production
+    write sites emit ``latest_node_artifact_refs`` and the declared channel
+    persists, while a stray legacy ``artifact_refs`` key cannot survive.
+    """
+
+    from core.research.workflow.challenge_cup_graph import (
+        compile_challenge_cup_graph,
+    )
+    from core.research.workflow.checkpoint_store import open_sqlite_checkpointer
+    from core.web.services.team_workflow.research_runtime.checkpoint_lifecycle import (
+        advance_checkpoint,
+        prepare_initial_checkpoint,
+    )
+
+    def thread_values() -> dict:
+        with open_sqlite_checkpointer(str(tmp_path / "checkpoints.sqlite")) as cp:
+            graph = compile_challenge_cup_graph(cp)
+            state = graph.get_state(
+                {"configurable": {"thread_id": "thread-channel-rename"}}
+            )
+            return dict(state.values or {})
+
+    checkpoint_id = prepare_initial_checkpoint(
+        str(tmp_path / "checkpoints.sqlite"),
+        "thread-channel-rename",
+    )
+
+    next_id, _ = advance_checkpoint(
+        str(tmp_path / "checkpoints.sqlite"),
+        thread_id="thread-channel-rename",
+        checkpoint_id=checkpoint_id,
+        completed_node_id="problem_understanding",
+        state_patch={
+            "latest_node_artifact_refs": ["problem_understanding:1"],
+            "artifact_refs": ["legacy:1"],
+        },
+    )
+    assert next_id
+
+    values = thread_values()
+    assert values.get("latest_node_artifact_refs") == ["problem_understanding:1"]
+    assert "artifact_refs" not in values

@@ -49,7 +49,10 @@ from core.research.workflow.stage_one_completion import route_after_stage_one_cl
 # every channel-set change so stale schemas fail closed instead of silently
 # dropping writes (langgraph discards input keys that are not declared
 # channels).
-CHALLENGE_CUP_CHECKPOINT_VERSION = 2
+# v3: renamed the last-value ``artifact_refs`` channel to
+# ``latest_node_artifact_refs`` to make its overwrite-only semantics
+# explicit (cumulative lineage stays on the run record).
+CHALLENGE_CUP_CHECKPOINT_VERSION = 3
 
 
 def merge_node_attempts(

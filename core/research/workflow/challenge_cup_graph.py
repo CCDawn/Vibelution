@@ -31,7 +31,13 @@ from .stage_one_completion import route_after_stage_one_closure
 class ChallengeCupState(TypedDict, total=False):
     current_node_id: str
     completed_node_ids: list[str]
-    artifact_refs: list[str]
+    # Last-value channel holding ONLY the most recent completed node's
+    # artifact ids (overwritten on every node completion).  Cumulative
+    # artifact lineage authority lives on the run record's
+    # ``artifactManifests``, never here.  Renamed from ``artifact_refs``;
+    # checkpoints carrying the old channel are discarded via the
+    # CHALLENGE_CUP_CHECKPOINT_VERSION bump (no migration).
+    latest_node_artifact_refs: list[str]
     handoff_ids: list[str]
     iteration_decision: dict[str, Any]
     controlled_run_attempt: int

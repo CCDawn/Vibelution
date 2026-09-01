@@ -1027,6 +1027,61 @@ def test_start_agent_task_retry_first_candidate_syncs_node_run_and_binding(
         "turnId": "turn-h1-retry",
         "sessionAttempt": 2,
     }
+    # The retry binding echoes the attempt-start checkpoint as an audit
+    # reference under the renamed key, never as a recovery pointer.
+    assert binding["anchoredAtCheckpointId"] == ""
+    assert "checkpointId" not in binding
+
+
+def test_session_binding_anchor_checkpoint_is_audit_reference(tmp_path) -> None:
+    """anchoredAtCheckpointId is attempt-start provenance, not a resume pointer."""
+
+    from core.web.services.team_workflow.research_runtime.session_binding_bridge import (
+        SessionBindingBridge,
+    )
+
+    store = WorkflowRunStore(tmp_path / "runs")
+    store.create_run(
+        {
+            "runId": "run-anchor-1",
+            **_registered_run_identity(),
+            "threadId": "thread-anchor-1",
+            "bindingSnapshots": [
+                {
+                    "nodeId": "hypothesis_design",
+                    "agentId": "agent-hypothesis",
+                    "roleKey": "hypothesis_designer",
+                }
+            ],
+            "nodeRuns": [
+                {
+                    "nodeRunId": "node-run-anchor-1",
+                    "nodeId": "hypothesis_design",
+                    "attempt": 1,
+                    "status": "running",
+                    "checkpointId": "ckpt-at-attempt-start",
+                }
+            ],
+            "events": [],
+            "status": "running",
+        }
+    )
+    binding = SessionBindingBridge(store).put(
+        store.get_run("run-anchor-1"),
+        "hypothesis_design",
+        {
+            "agentId": "agent-hypothesis",
+            "nodeRunId": "node-run-anchor-1",
+            "nodeAttempt": 1,
+            "sessionId": "session-anchor-1",
+            "sessionAttempt": 1,
+            "taskId": "task-anchor-1",
+            "turnId": "turn-anchor-1",
+            "anchoredAtCheckpointId": "ckpt-at-attempt-start",
+        },
+    )
+    assert binding["anchoredAtCheckpointId"] == "ckpt-at-attempt-start"
+    assert "checkpointId" not in binding
 
 
 def test_partial_candidate_start_binds_and_reconciles_started_siblings(

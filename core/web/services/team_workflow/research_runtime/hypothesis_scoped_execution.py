@@ -305,12 +305,30 @@ def record_candidate_fragment_and_maybe_aggregate(
     )
 
     from core.web.services.team_workflow.research_project_agent_tasks import (
+        TERMINAL_STATUSES,
+        get_research_project_agent_task_status,
         update_research_project_agent_task_status,
     )
+
+    # Fan-in must not rewind siblings that already reached a terminal status
+    # (completed/failed/...): only still-active candidates are held at
+    # "running" until their own completion writeback lands.
+    status_by_task = {
+        _text(item.get("taskId")): _text(item.get("status"))
+        for item in (
+            get_research_project_agent_task_status(
+                team_id,
+                _text(task["researchProjectId"]),
+            ).get("tasks")
+            or []
+        )
+    }
 
     for candidate_binding in bindings.values():
         task_id = _text(candidate_binding.get("taskId"))
         if not task_id:
+            continue
+        if status_by_task.get(task_id, "") in TERMINAL_STATUSES:
             continue
         own_fragment_ref = next(
             (
