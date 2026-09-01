@@ -16,6 +16,8 @@ from dataclasses import replace
 from pathlib import Path
 
 from core.research.workflow.contracts import WorkflowCommandKind
+from core.research.workflow.definition import build_challenge_cup_workflow_definition
+from core.research.workflow.definition_registry import register_or_resolve
 from core.research.workflow.ledger.outbox import lease_ready_actions
 from core.research.workflow.transitions import RunStatus, require_run_transition
 from core.web.services.team_workflow.research_runtime.command_offers.reconcile_run import (
@@ -48,7 +50,15 @@ def _seed_stuck_production_shape(
 ) -> None:
     """Ledger shape observed in run-d02722658d8b: a succeeded attempt plus a
     terminal-failed resume dispatch and no live graph_dispatch left."""
-    record = build_run_record(run_id=run_id, status=run_status)
+    identity = register_or_resolve(build_challenge_cup_workflow_definition())
+    record = replace(
+        build_run_record(
+            run_id=run_id,
+            status=run_status,
+            workflow_version_id=identity.workflowVersionId,
+        ),
+        structure_hash=identity.structureHash,
+    )
     store = commands.store
 
     def mutate(uow):
