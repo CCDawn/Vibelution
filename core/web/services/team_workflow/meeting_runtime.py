@@ -539,9 +539,10 @@ def _resolve_preformal_candidate_review_room(
     runtime, so it intentionally has no ``WorkflowDiscussionScopeV1`` yet.
     It must nevertheless not reuse the team room: a background round makes
     that room busy and prevents sibling candidate reviews from ever opening.
-    These rooms retain the exact server-resolved roster and carry a compact
-    preformal binding, while formal flows continue to use child-session rooms
-    through ``_resolve_scoped_meeting_room`` above.
+    These rooms retain the exact server-resolved roster and bind every
+    participant to a hidden Child Session resolved from the room scope plus the
+    Agent identity, exactly like the formal flows above, so a group round
+    transcript can never land in an Agent's long-lived direct Session.
     """
 
     selected = _normalized_str_list(selected_candidate_ids)
@@ -587,8 +588,11 @@ def _resolve_preformal_candidate_review_room(
         roomId=room_id,
     )
     existing = chat_room_service.get_chat_room_detail(room_id)
+    stored_config: dict[str, Any] = {}
+    bound_by_agent_id: dict[str, str] = {}
     if isinstance(existing, Mapping):
         config = existing.get("config") if isinstance(existing.get("config"), Mapping) else {}
+        stored_config = dict(config)
         if any(str(config.get(key) or "") != value for key, value in expected_config.items()):
             raise ResearchMeetingRuntimeError(
                 "preformal candidate review room is already bound to different content"
@@ -607,7 +611,15 @@ def _resolve_preformal_candidate_review_room(
                 raise ResearchMeetingRuntimeError(
                     "preformal candidate review room is already bound to different content"
                 )
-        return room_id, discussion_scope
+        for participant in list(existing.get("participants") or []):
+            if not isinstance(participant, Mapping):
+                continue
+            participant_agent_id = str(participant.get("agentId") or "").strip()
+            participant_session_id = str(participant.get("sessionId") or "").strip()
+            if participant_agent_id and participant_session_id:
+                bound_by_agent_id.setdefault(
+                    participant_agent_id, participant_session_id
+                )
 
     participant_agent_ids = _normalized_str_list(participant_resolution.get("participants"))
     if not participant_agent_ids:
@@ -619,25 +631,135 @@ def _resolve_preformal_candidate_review_room(
         participant_resolution,
         participant_agent_ids,
     )
+    role_by_agent_id = {
+        str(item.get("agentId") or "").strip(): item
+        for item in list(participant_resolution.get("participantRoleSnapshot") or [])
+        if isinstance(item, Mapping) and str(item.get("agentId") or "").strip()
+    }
+    created_from_task_id = str(
+        request.get("createdFromTaskId")
+        or request.get("taskId")
+        or request.get("workflowTaskId")
+        or meeting_round_id
+    ).strip()
+
+    from core.web.services.team_workflow.discussion_room_runtime import (
+        DiscussionRoomBindingError,
+        validate_scoped_child_session_bindings,
+    )
+    from core.web.services.team_workflow.preformal_review_sessions import (
+        PreformalReviewSessionError,
+        resolve_preformal_review_session,
+    )
+
+    bindings: list[dict[str, Any]] = []
+    for agent_id in participant_agent_ids:
+        role = role_by_agent_id.get(agent_id) or {}
+        try:
+            resolved = resolve_preformal_review_session(
+                team_id,
+                discussion_scope=discussion_scope,
+                agent_id=agent_id,
+                role_key=str(role.get("roleId") or "").strip(),
+                role_label=str(role.get("observedRole") or "").strip(),
+                created_from_task_id=created_from_task_id,
+                bound_session_id=bound_by_agent_id.get(agent_id, ""),
+            )
+        except PreformalReviewSessionError as exc:
+            raise ResearchMeetingRuntimeError(str(exc)) from exc
+        session_id = str(resolved.get("sessionId") or "").strip()
+        if not session_id or str(resolved.get("sessionKind") or "").lower() != "child":
+            raise ResearchMeetingRuntimeError(
+                "preformal discussion participant did not resolve to a hidden Child Session"
+            )
+        bindings.append(
+            {
+                "agentId": agent_id,
+                "sessionId": session_id,
+                "discussionScope": discussion_scope.to_dict(),
+                "discussionScopeHash": discussion_scope.scope_hash,
+                "discussionSessionScopeKey": str(
+                    resolved.get("discussionSessionScopeKey") or ""
+                ),
+            }
+        )
+
+    try:
+        session_ids, expected_by_agent_id = validate_scoped_child_session_bindings(
+            discussion_scope, bindings
+        )
+    except DiscussionRoomBindingError as exc:
+        raise ResearchMeetingRuntimeError(
+            f"preformal candidate review room binding is invalid: {exc}"
+        ) from exc
+
+    room_config = {
+        **expected_config,
+        "scopeAuthority": _PREFORMAL_DISCUSSION_SCOPE_AUTHORITY,
+        "discussionScope": discussion_scope.to_dict(),
+        "discussionScopeHash": discussion_scope.scope_hash,
+        "scopeHash": discussion_scope.scope_hash,
+    }
+    title = f"{question_id} | 候选评审 | {candidate_id}"
+
+    if isinstance(existing, Mapping):
+        if bound_by_agent_id != expected_by_agent_id:
+            if set(bound_by_agent_id) != set(expected_by_agent_id):
+                raise ResearchMeetingRuntimeError(
+                    "preformal candidate review room roster does not match the resolved participants"
+                )
+            try:
+                rebound = chat_room_service.update_chat_room(
+                    room_id,
+                    participant_session_ids=session_ids,
+                    participant_contexts_by_agent_id=participant_contexts,
+                    config={**stored_config, **room_config},
+                )
+            except chat_room_service.ChatRoomBusyError as exc:
+                raise ResearchMeetingRuntimeError(
+                    "preformal candidate review room is busy and cannot be rebound"
+                    " to its participant Child Sessions"
+                ) from exc
+            if _room_participant_bindings(rebound) != expected_by_agent_id:
+                raise ResearchMeetingRuntimeError(
+                    "preformal candidate review room participant Child Sessions"
+                    " do not match the scope"
+                )
+        return room_id, discussion_scope
+
     created = chat_room_service.create_chat_room(
         room_id=room_id,
-        title=f"{question_id} | 候选评审 | {candidate_id}",
-        participant_agent_ids=participant_agent_ids,
+        title=title,
+        participant_session_ids=session_ids,
         participant_contexts_by_agent_id=participant_contexts,
         mode="round_robin",
         purpose="meeting",
-        config={
-            **expected_config,
-            "scopeAuthority": _PREFORMAL_DISCUSSION_SCOPE_AUTHORITY,
-            "discussionScope": discussion_scope.to_dict(),
-            "discussionScopeHash": discussion_scope.scope_hash,
-            "scopeHash": discussion_scope.scope_hash,
-        },
+        config=room_config,
     )
     created_room_id = str(created.get("roomId") or "").strip()
     if created_room_id != room_id:
         raise ResearchMeetingRuntimeError("preformal candidate room resolver returned no roomId")
+    if _room_participant_bindings(created) != expected_by_agent_id:
+        raise ResearchMeetingRuntimeError(
+            "preformal candidate review room participant Child Sessions"
+            " do not match the scope"
+        )
     return room_id, discussion_scope
+
+
+def _room_participant_bindings(room: Mapping[str, Any] | None) -> dict[str, str]:
+    """Read the Agent-to-Child-Session bindings persisted on a room payload."""
+
+    bindings: dict[str, str] = {}
+    for participant in list((room or {}).get("participants") or []):
+        if not isinstance(participant, Mapping):
+            continue
+        agent_id = str(participant.get("agentId") or "").strip()
+        session_id = str(participant.get("sessionId") or "").strip()
+        if not agent_id or not session_id or agent_id in bindings:
+            return {}
+        bindings[agent_id] = session_id
+    return bindings
 
 
 def _derived_room_participant_contexts(

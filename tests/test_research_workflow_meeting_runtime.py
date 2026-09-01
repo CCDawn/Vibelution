@@ -613,6 +613,198 @@ def test_open_hypothesis_review_meeting_binds_room_round_both_ways(tmp_path, mon
     assert reopened["chatRoomRoundIds"] == [round_id]
 
 
+def _direct_session_id(agent_id: str) -> str:
+    return str(
+        (session_service.ensure_agent_direct_session(agent_id=agent_id) or {}).get("id")
+        or ""
+    )
+
+
+def _session_transcript(session_id: str) -> str:
+    detail = session_service.get_session_detail(session_id) or {}
+    return json.dumps(detail.get("messages") or [], ensure_ascii=False)
+
+
+_PREFORMAL_FIXTURE_LINE = "cand-a 的机制证据最完整"
+
+
+def test_preformal_review_room_binds_participants_to_hidden_child_sessions(
+    tmp_path, monkeypatch
+):
+    """A preformal review speaks through Child Sessions, never direct Sessions."""
+
+    team_id, agents, opened = _open_meeting(
+        tmp_path,
+        monkeypatch,
+        meetingRoundId="meeting-t7-bound",
+        selectedCandidateIds=["cand-a"],
+    )
+    room_id = opened["roomId"]
+    room = chat_room_service.get_chat_room_detail(room_id)
+    assert room["config"]["scopeAuthority"] == "preformal_candidate_review_scope.v1"
+
+    direct_ids = {agent_id: _direct_session_id(agent_id) for agent_id in agents.values()}
+    bound = {
+        str(participant["agentId"]): str(participant.get("sessionId") or "")
+        for participant in room["participants"]
+    }
+    assert set(bound) == set(direct_ids)
+    for agent_id, session_id in bound.items():
+        assert session_id
+        assert session_id != direct_ids[agent_id]
+        detail = session_service.get_session_detail(session_id)
+        assert detail["sessionKind"] == "child"
+        assert detail["hiddenFromIndex"] is True
+        assert detail["parentSessionId"] == detail["rootSessionId"]
+        assert detail["parentSessionId"] != direct_ids[agent_id]
+        assert (
+            detail["experimentBinding"]["discussionScope"]
+            == room["config"]["discussionScope"]
+        )
+        assert (
+            detail["experimentBinding"]["discussionScopeHash"]
+            == room["config"]["scopeHash"]
+        )
+        direct_detail = session_service.get_session_detail(direct_ids[agent_id])
+        assert not direct_detail["childSessionIds"]
+
+    assert any(
+        _PREFORMAL_FIXTURE_LINE in _session_transcript(session_id)
+        for session_id in bound.values()
+    )
+    for agent_id in direct_ids:
+        assert _PREFORMAL_FIXTURE_LINE not in _session_transcript(direct_ids[agent_id])
+
+    reread = chat_room_service.get_chat_room_detail(room_id)
+    assert {
+        str(participant["agentId"]): str(participant.get("sessionId") or "")
+        for participant in reread["participants"]
+    } == bound
+
+
+def test_preformal_review_room_reuses_the_same_child_sessions_on_reopen(
+    tmp_path, monkeypatch
+):
+    team_id, agents, opened = _open_meeting(
+        tmp_path,
+        monkeypatch,
+        meetingRoundId="meeting-t7-reopen",
+        selectedCandidateIds=["cand-a"],
+    )
+    room_id = opened["roomId"]
+    first = chat_room_service.get_chat_room_detail(room_id)
+    bound = {
+        str(participant["agentId"]): str(participant.get("sessionId") or "")
+        for participant in first["participants"]
+    }
+
+    payload = _selection_payload(
+        list(agents.values()),
+        meetingRoundId="meeting-t7-reopen",
+        selectedCandidateIds=["cand-a"],
+    )
+    reopened = meeting_runtime.open_hypothesis_review_meeting(
+        team_id, payload, agent_runner=_marker_runner, background=False
+    )
+    second = chat_room_service.get_chat_room_detail(room_id)
+
+    assert reopened["status"] == "reused"
+    assert {
+        str(participant["agentId"]): str(participant.get("sessionId") or "")
+        for participant in second["participants"]
+    } == bound
+    for agent_id, session_id in bound.items():
+        root = session_service.get_session_detail(session_id)["rootSessionId"]
+        assert session_service.get_session_detail(root)["childSessionIds"] == [session_id]
+
+
+def test_legacy_preformal_review_room_rebinds_off_direct_sessions(
+    tmp_path, monkeypatch
+):
+    """A room created before Session isolation self-heals without touching history."""
+
+    team_id, agents, opened = _open_meeting(
+        tmp_path,
+        monkeypatch,
+        meetingRoundId="meeting-t7-legacy",
+        selectedCandidateIds=["cand-a"],
+    )
+    room_id = opened["roomId"]
+    room = chat_room_service.get_chat_room_detail(room_id)
+    expected_scope_hash = room["config"]["scopeHash"]
+    direct_ids = {
+        str(participant["agentId"]): _direct_session_id(str(participant["agentId"]))
+        for participant in room["participants"]
+    }
+    legacy_room = chat_room_service.update_chat_room(
+        room_id,
+        participant_session_ids=list(direct_ids.values()),
+        config=dict(room["config"]),
+    )
+    assert {
+        str(participant["agentId"]): str(participant.get("sessionId") or "")
+        for participant in legacy_room["participants"]
+    } == direct_ids
+
+    reopened = meeting_runtime.open_hypothesis_review_meeting(
+        team_id,
+        _selection_payload(
+            list(agents.values()),
+            meetingRoundId="meeting-t7-legacy",
+            selectedCandidateIds=["cand-a"],
+        ),
+        agent_runner=_marker_runner,
+        background=False,
+    )
+    rebound = chat_room_service.get_chat_room_detail(room_id)
+
+    assert reopened["status"] == "reused"
+    assert rebound["config"]["scopeHash"] == expected_scope_hash
+    for participant in rebound["participants"]:
+        session_id = str(participant.get("sessionId") or "")
+        agent_id = str(participant["agentId"])
+        assert session_id
+        assert session_id != direct_ids[agent_id]
+        detail = session_service.get_session_detail(session_id)
+        assert detail["sessionKind"] == "child"
+        assert detail["hiddenFromIndex"] is True
+        assert detail["experimentBinding"]["discussionScopeHash"] == expected_scope_hash
+
+
+def test_preformal_review_room_refuses_a_mismatched_participant_roster(
+    tmp_path, monkeypatch
+):
+    team_id, agents, opened = _open_meeting(
+        tmp_path,
+        monkeypatch,
+        meetingRoundId="meeting-t7-roster",
+        selectedCandidateIds=["cand-a"],
+    )
+    room_id = opened["roomId"]
+    room = chat_room_service.get_chat_room_detail(room_id)
+    kept = room["participants"][0]
+    chat_room_service.update_chat_room(
+        room_id,
+        participant_session_ids=[str(kept["sessionId"])],
+        config=dict(room["config"]),
+    )
+
+    with pytest.raises(
+        meeting_runtime.ResearchMeetingRuntimeError,
+        match="roster does not match the resolved participants",
+    ):
+        meeting_runtime.open_hypothesis_review_meeting(
+            team_id,
+            _selection_payload(
+                list(agents.values()),
+                meetingRoundId="meeting-t7-roster",
+                selectedCandidateIds=["cand-a"],
+            ),
+            agent_runner=_marker_runner,
+            background=False,
+        )
+
+
 def test_open_hypothesis_review_meeting_validates_selection_and_participants(tmp_path, monkeypatch):
     team_id, agents = _team_with_room(tmp_path, monkeypatch)
     agent_ids = list(agents.values())

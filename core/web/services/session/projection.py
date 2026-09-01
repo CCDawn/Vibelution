@@ -13,6 +13,9 @@ import json
 from pathlib import Path
 from typing import Any, Mapping
 
+from core.research.workflow.contracts.discussion_scope import (
+    PREFORMAL_CANDIDATE_REVIEW_SCOPE_KIND,
+)
 from core.web.services.session.timebase import parse_timestamp_utc
 
 
@@ -720,7 +723,18 @@ def _public_experiment_binding(value: Any) -> dict[str, Any] | None:
         return None
     research_project_id = str(value.get("researchProjectId") or "").strip()[:160]
     agent_id = str(value.get("agentId") or "").strip()[:160]
-    if not research_project_id or not agent_id:
+    raw_discussion_scope = value.get("discussionScope")
+    is_preformal_review = bool(
+        isinstance(raw_discussion_scope, dict)
+        and str(raw_discussion_scope.get("kind") or "").strip()
+        == PREFORMAL_CANDIDATE_REVIEW_SCOPE_KIND
+    )
+    if is_preformal_review:
+        if research_project_id or value.get("workflowRunId") or value.get("workflowNodeId"):
+            return None
+    elif not research_project_id or not agent_id:
+        return None
+    if not agent_id:
         return None
     try:
         attempt = max(1, int(value.get("attempt") or 1))
@@ -750,7 +764,7 @@ def _public_experiment_binding(value: Any) -> dict[str, Any] | None:
     if bool(selection_id) != bool(candidate_id):
         return None
     if selection_id and candidate_id:
-        if not workflow_run_id or not workflow_node_id:
+        if not is_preformal_review and (not workflow_run_id or not workflow_node_id):
             return None
         binding["selectionId"] = selection_id
         binding["candidateId"] = candidate_id

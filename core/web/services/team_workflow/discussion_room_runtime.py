@@ -11,8 +11,10 @@ from collections.abc import Mapping, Sequence
 from typing import Any, Protocol
 
 from core.research.workflow.contracts.discussion_scope import (
+    DiscussionScopeEnvelope,
     WorkflowDiscussionScopeV1,
     parse_discussion_scope,
+    parse_discussion_scope_envelope,
     session_scope_key,
 )
 
@@ -43,8 +45,17 @@ def _text(value: Any, *, limit: int = 200) -> str:
     return str(value or "").strip()[:limit]
 
 
+def validate_scoped_child_session_bindings(
+    scope: DiscussionScopeEnvelope | Mapping[str, Any],
+    bindings: Sequence[Mapping[str, Any]],
+) -> tuple[list[str], dict[str, str]]:
+    """Check the Child Sessions one scoped room owns and return their order."""
+
+    return _participant_bindings(parse_discussion_scope_envelope(scope), bindings)
+
+
 def _participant_bindings(
-    scope: WorkflowDiscussionScopeV1,
+    scope: DiscussionScopeEnvelope,
     bindings: Sequence[Mapping[str, Any]],
 ) -> tuple[list[str], dict[str, str]]:
     session_ids: list[str] = []
@@ -59,11 +70,11 @@ def _participant_bindings(
         session_id = _text(raw.get("sessionId"))
         if not agent_id or not session_id:
             raise DiscussionRoomBindingError(
-                "formal discussion participants require agentId and scoped sessionId"
+                "scoped discussion participants require agentId and scoped sessionId"
             )
         if agent_id in by_agent_id or session_id in seen_session_ids:
             raise DiscussionRoomBindingError(
-                "formal discussion participant Agent and session bindings must be unique"
+                "scoped discussion participant Agent and session bindings must be unique"
             )
         raw_scope = raw.get("discussionScope")
         if not isinstance(raw_scope, Mapping):
@@ -71,7 +82,7 @@ def _participant_bindings(
                 f"participant {agent_id} is missing discussionScope"
             )
         try:
-            participant_scope = parse_discussion_scope(raw_scope)
+            participant_scope = parse_discussion_scope_envelope(raw_scope)
         except Exception as exc:
             raise DiscussionRoomBindingError(
                 f"participant {agent_id} has an invalid discussionScope"
@@ -92,7 +103,7 @@ def _participant_bindings(
         session_ids.append(session_id)
     if not session_ids:
         raise DiscussionRoomBindingError(
-            "formal discussion room requires scoped participant Child Sessions"
+            "scoped discussion room requires participant Child Sessions"
         )
     return session_ids, by_agent_id
 
@@ -240,4 +251,5 @@ __all__ = [
     "ROOM_SCOPE_AUTHORITY",
     "ROOM_SCOPE_SOURCE",
     "resolve_scoped_discussion_room",
+    "validate_scoped_child_session_bindings",
 ]

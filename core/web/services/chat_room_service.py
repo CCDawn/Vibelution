@@ -550,7 +550,7 @@ def get_chat_room_detail(room_id: str) -> dict[str, Any] | None:
         session_summaries=participant_indexes["session_summaries"],
         active_agents_by_id=participant_indexes["active_agents_by_id"],
         active_agents_by_session_id=participant_indexes["active_agents_by_session_id"],
-        preserve_scoped_session_ids=_is_scoped_discussion_room(room),
+        preserve_scoped_session_ids=_is_challenge_discussion_room(room),
     )
     _append_chat_room_detail_timing(phase_timings, "participant_repair", stage_started_at)
     if repaired:
@@ -1256,7 +1256,7 @@ def start_chat_room_round(
         stage_started_at = _perf_counter()
         refreshed_participants = _refresh_chat_room_round_participants(
             participant_seed,
-            preserve_scoped_session_ids=_is_scoped_discussion_room(room),
+            preserve_scoped_session_ids=_is_challenge_discussion_room(room),
         )
         refreshed_participant_count = len(refreshed_participants)
         participants = _dedupe_chat_room_participants(refreshed_participants)
@@ -4609,7 +4609,7 @@ def _repair_room_participants_in_state(
             session_summaries=session_summaries,
             active_agents_by_id=indexes["by_id"],
             active_agents_by_session_id=indexes["by_session_id"],
-            preserve_scoped_session_ids=_is_scoped_discussion_room(room),
+            preserve_scoped_session_ids=_is_challenge_discussion_room(room),
             deferred_events=deferred_events,
         ):
             changed = True

@@ -6,7 +6,11 @@ from collections.abc import Mapping
 from typing import Any
 
 from core.research.workflow.contracts._validation import ContractValidationError
-from core.research.workflow.contracts.discussion_scope import parse_discussion_scope
+from core.research.workflow.contracts.discussion_scope import (
+    PREFORMAL_CANDIDATE_REVIEW_SCOPE_KIND,
+    PreformalCandidateReviewScopeV1,
+    parse_discussion_scope,
+)
 
 
 class DiscussionScopeBindingError(ValueError):
@@ -33,6 +37,19 @@ def normalize_discussion_scope_binding(
         raise DiscussionScopeBindingError(
             "Discussion scope binding requires discussionScope and discussionScopeHash."
         )
+    if str(raw_scope.get("kind") or "").strip() == PREFORMAL_CANDIDATE_REVIEW_SCOPE_KIND:
+        return _normalize_preformal_binding(
+            raw_scope,
+            raw_hash,
+            team_id=team_id,
+            selection_id=selection_id,
+            candidate_id=candidate_id,
+            formal_identity={
+                "researchProjectId": research_project_id,
+                "workflowRunId": workflow_run_id,
+                "workflowNodeId": workflow_node_id,
+            },
+        )
     try:
         scope = parse_discussion_scope(raw_scope)
     except ContractValidationError as exc:
@@ -56,6 +73,55 @@ def normalize_discussion_scope_binding(
     if actual != expected:
         raise DiscussionScopeBindingError(
             "Discussion scope identity does not match the Session experiment binding."
+        )
+    if raw_hash != scope.scope_hash:
+        raise DiscussionScopeBindingError(
+            "Discussion scope hash does not match the Session experiment binding."
+        )
+    return {
+        "discussionScope": scope.to_dict(),
+        "discussionScopeHash": scope.scope_hash,
+    }
+
+
+def _normalize_preformal_binding(
+    raw_scope: Mapping[str, Any],
+    raw_hash: str,
+    *,
+    team_id: str,
+    selection_id: str,
+    candidate_id: str,
+    formal_identity: Mapping[str, str],
+) -> dict[str, Any]:
+    """Bind a pre-formal candidate review without inventing run or project identity."""
+
+    claimed = {
+        key: str(value or "").strip()
+        for key, value in formal_identity.items()
+        if str(value or "").strip()
+    }
+    if claimed:
+        raise DiscussionScopeBindingError(
+            "Preformal discussion scope binding must not claim "
+            + ", ".join(sorted(claimed))
+        )
+    try:
+        scope = PreformalCandidateReviewScopeV1.from_mapping(raw_scope)
+    except ContractValidationError as exc:
+        raise DiscussionScopeBindingError(str(exc)) from exc
+    expected = {
+        "teamId": str(team_id or "").strip(),
+        "selectionId": str(selection_id or "").strip(),
+        "candidateId": str(candidate_id or "").strip(),
+    }
+    actual = {
+        "teamId": scope.teamId,
+        "selectionId": scope.selectionId,
+        "candidateId": scope.candidateId,
+    }
+    if actual != expected:
+        raise DiscussionScopeBindingError(
+            "Preformal discussion scope identity does not match the Session experiment binding."
         )
     if raw_hash != scope.scope_hash:
         raise DiscussionScopeBindingError(

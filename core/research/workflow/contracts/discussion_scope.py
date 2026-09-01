@@ -535,9 +535,15 @@ canonical_discussion_scope_json = canonical_discussion_scope
 
 
 def session_scope_key(
-    payload: WorkflowDiscussionScopeV1 | Mapping[str, Any], agent_id: Any
+    payload: DiscussionScopeEnvelope | Mapping[str, Any], agent_id: Any
 ) -> str:
-    scope = parse_discussion_scope(payload)
+    """Derive the one canonical Agent-session key for a formal or preformal room scope.
+
+    Preformal candidate reviews resolve hidden Child Sessions too, so they must
+    share this serializer instead of inventing a second key formula.
+    """
+
+    scope = parse_discussion_scope_envelope(payload)
     return f"v3|session|{_required_text(agent_id, 'agentId')}|{scope.key}"
 
 

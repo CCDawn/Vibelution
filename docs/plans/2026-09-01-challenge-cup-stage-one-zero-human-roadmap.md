@@ -47,8 +47,8 @@
 完整合同见 [可靠性计划](2026-08-30-challenge-cup-automatic-chain-reliability-plan.md)，此处不重复，只列与本路线图的依赖关系：
 
 - T1（deadline + provider cancel）、T2（durable meeting driver）、T3（durable summary/review）、T4（reconcile 死态）全绿是自动化合闸的**必要条件**；
-- 生产证据锚点：`run-16cfab646d08` 仍为 `running + zero active outbox` 死态；会议无 deadline、`summarizing` 悬挂均已发生；
-- T5–T7 可与 Phase 3 的开发并行推进，但 **T8/Phase 2 合闸前必须全绿**（母计划 §8：T8 之前要求 T1–T7 全绿）；其中 T7（Child Session 有界上下文）另是 125 批量前的硬前置——批量放大上下文污染风险。
+- 生产证据锚点（2026-09-01 复核更新）：`run-16cfab646d08` 已不在 ledger，当前唯一 run `run-882610596ddb` 为 `blocked@source_finding` 且 fail-closed 形状正确（母计划 §2.3 第 4 项）；遗留无身份悬挂会议由 N1/N2 收口路径处理；
+- T5–T7 可与 Phase 3 的开发并行推进，但 **T8/Phase 2 合闸前必须全绿**（母计划 §8：T8 之前要求 T1–T7 全绿）；其中 T7（Child Session 有界上下文）另是 125 批量前的硬前置——批量放大上下文污染风险。**当前状态：T5（证伪，无业务 diff）、T2、T3、T7 已合入，T1–T7 代码门已满足，剩余为 N2 与第 1 项的生产核对（母计划 §2.3 复核结论）。**
 
 ## 4. 决策层自动化（Phase 2）
 
