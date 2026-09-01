@@ -21,6 +21,7 @@ def record_core_hypothesis_coherence_artifact(
     *,
     team_id: str,
     workflow_run_id: str,
+    source_collection_run_id: str = "",
     review_context_id: str,
     results: Sequence[Mapping[str, Any]],
     require_receipts: bool,
@@ -46,16 +47,20 @@ def record_core_hypothesis_coherence_artifact(
         team_id,
         kind=ARTIFACT_KIND,
         workflow_run_id=workflow_run_id,
+        source_collection_run_id=source_collection_run_id,
         artifact_identity=identity,
         payload=payload,
     )
+    authority_run_id = str(
+        record.get("sourceCollectionRunId")
+        or source_collection_run_id
+        or workflow_run_id
+    ).strip()
     envelope = {
         "teamId": str(team_id or "").strip(),
         "kind": ARTIFACT_KIND,
         "workflowRunId": str(record.get("workflowRunId") or workflow_run_id),
-        "sourceCollectionRunId": str(
-            record.get("sourceCollectionRunId") or workflow_run_id
-        ),
+        "sourceCollectionRunId": authority_run_id,
         "payload": payload,
     }
     content_hash = canonical_sha256(envelope)
@@ -65,7 +70,7 @@ def record_core_hypothesis_coherence_artifact(
         "canonicalRef": build_canonical_ref(
             kind=ARTIFACT_KIND,
             team_id=team_id,
-            authority_run_id=workflow_run_id,
+            authority_run_id=authority_run_id,
             content_hash=content_hash,
         ),
     }

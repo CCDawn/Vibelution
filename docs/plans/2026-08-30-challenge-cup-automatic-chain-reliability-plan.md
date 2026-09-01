@@ -2,7 +2,7 @@
 
 > 文档 ID：`CC-AUTOMATIC-CHAIN-RELIABILITY-20260830`
 >
-> 状态：`USER-REQUESTED / ACTIVE PLAN / IMPLEMENTATION NOT STARTED`
+> 状态：`USER-REQUESTED / ACTIVE PLAN / PARTIALLY LANDED（复核缩表见 §2.3）`
 >
 > 权威路径：根 `main` 的 `docs/plans/2026-08-30-challenge-cup-automatic-chain-reliability-plan.md`；任务 worktree 只用于隔离编辑，不作为交付路径
 >
@@ -56,6 +56,34 @@
 - run/outbox/attempt：`<activePaths.data>/research_workflows/workflow-ledger.sqlite`，只读查询 `run-16cfab646d08`。
 - meeting：`<activePaths.workspace>/teams/research-team/research_workflow/meeting_rounds.jsonl`，只投影 ID、run、status、deadline、bound round count 与 problem code，不复制 transcript。
 - latency：`<activePaths.workspace>/teams/research-team/challenge_program/model_invocation_receipts/`，按唯一 `receiptId` 去重，只统计 `status=succeeded` 的 `latencyMs`；不把 request/response excerpt 写入 fixture 或本文。
+
+### 2.3 T0 复核缩表（2026-09-01，`main@321be72e6`）
+
+本节是 §2 表格在 `2026-09-01` 的只读复核结果（复核窗口内 main 曾由 `00d1ccf73` ff 至 `321be72e6`，差异仅 `challenge-stage1-lineage-writers` 面，锚点已按新 SHA 复验）。§2 原表保留为 `9ea07665d` 历史快照，本节为当前权威。自基线以来共 159+ 提交，其中直接相关的修复：`cd08ef549`（durable deadline 派生）、`5c5cff9ac`（per-call/会议 deadline 分离）、`33bcfc15b`（durable meeting driver + 启动恢复）、`68d9bee4c`（zero-work reconcile fail-closed）、`fd44c0c8b`（评审并发 4 工）、`0a2990bb4`（chat-room 锁序）、`ab8cd9179`（AutoAdvancePolicyV2 受控激活分支）。
+
+| 原问题 | 复核状态 | 复核证据锚点 | 下一动作 |
+| --- | --- | --- | --- |
+| preformal Challenge 会议无 deadline | `PARTIAL / P1` | 代码面已闭合：`challenge_deadline_policy.py:29-31` 的 `_CHALLENGE_SCOPE_AUTHORITIES` 已含 `preformal_candidate_review_scope.v1`；`meeting_runtime.py:1136` 创建会议即写 `challengeDeadlineAtMs`（`cd08ef549`、`5c5cff9ac`）。生产面：当前唯一正式会议已带 deadline；无新 preformal 样本。**剩余缺口**：无 deadline 的遗留会议不在恢复扫描覆盖内（见 N1/N2） | T1 剩余：实现遗留无 deadline 会议的 backfill 或可审计归档；验证新 preformal 会议必带 deadline |
+| 会议续轮依赖进程内 executor/job set | `PARTIAL / P1` | `meeting_runtime.py:151-157` 的 `_MEETING_DISCUSSION_EXECUTOR`（max_workers=4，`fd44c0c8b`）仍是唯一调度 owner；但派发前先持久化 intent（`meeting_runtime.py:1791-1794,1894`），`meeting_driver_work.py` 提供 durable intent 存储，`lifecycle.py:91-96,203` 启动挂载恢复扫描（`33bcfc15b`）。lease/heartbeat 未落地（模块 docstring 自述为 T3 future work） | T2 剩余：为 digest/review 工作补 lease/heartbeat 或等价崩溃恢复合同 |
+| `summarizing` 无 durable invocation intent | `PARTIAL / P1` | intent 存储只覆盖 `ACTION_RUN_DISCUSSION`（`meeting_driver_work.py:29`）；扫描可 fence deadline 过期的 summarizing 会议（`meeting_driver_work.py:244,276-284`）；digest 调用已有 450s 有限超时与 `summaryDraftError` 暴露（`llm_review_runners.py:70`、`meeting_runtime.py:3113`）。deadline 前崩溃的 summarizing 不会被 re-drive；生产仍有 2 个遗留悬挂（N2） | T3：digest/review 变 durable work（lease + deadline + sourceHash）；收口 2 个遗留悬挂会议 |
+| reconcile zero-work 死态 | `CLOSED_REGRESSION` | `command_service.py:1256-1292`：`revived=0 + zero active work` 落 `RECONCILIATION_REQUIRED + reconcile_no_active_work`，不再先写 RUNNING（`68d9bee4c`）。生产锚点更替：`run-16cfab646d08` 已不在 ledger（只读查询无该行）；当前唯一 run `run-882610596ddb` 为 `blocked@source_finding`，outbox 无 pending/leased，reconcile 成功 16 次无错误复活——fail-closed 形状正确 | T4 转入回归保留；新 blocked 根因另立调查（N3） |
+| review LLM 600 秒 daemon timeout | `CLOSED_REGRESSION` | `llm_review_runners.py:215-246`：deadline 派生超时（与外层取最早）+ `llm_cancel_context(enable_chat_provider_abort=True)` provider cancel bridge + `challenge_review_deadline_exceeded` 分类；默认上限 450s（`llm_review_runners.py:70`）。小偏差：第 59-69 行注释按 600s 余量行文，常量为 450，二选一修正 | 回归保留；orphan daemon 路径已闭合，禁止重新引入无 cancel 的超时 |
+| workflowRunId 跨 run 隔离 | `CLOSED_REGRESSION` | 测试仍在，行号漂移：`tests/test_research_workflow_hypothesis_first_chain.py:651,1719` | T6 保留，不重写 |
+| stopped/failed meeting 被 heal/promote/reuse | `CLOSED_REGRESSION` | 测试仍在：`tests/test_research_workflow_hypothesis_first_chain.py:4554,4615` | T6 保留，不重写 |
+| parent `blocked/cancelled` 未传播 | `CLOSED_REGRESSION` | `meeting_receipt_authority.py:18-21` 的 `_EXECUTION_INACTIVE_RUN_STATUSES` 仍含 `blocked/reconciliation_required`。原测试 `test_challenge_workflow_run_blocked` 已更名拆分，语义由 `tests/test_chat_room_service.py:2931,3284-3290` 与 `tests/test_research_workflow_hypothesis_first_chain.py:150-154` 覆盖 | T6 补 Session→meeting→active-work 端到端回归 |
+| attempt exhaustion 自动复活/活锁 | `VERIFY_FIRST / P2` | 锚点迁移：`ledger/repository.py` 已不存在；现为 `adapter_dispatch_worker.py:288-383` 的 `_repair_terminal_failed_adapter_dispatch` 修复 `lease_attempt_exhausted` 行，且 `command_service.py:1246-1252` 对 `auto_advance_not_ready` 的 blocked attempt 明确不复活。仍无 tight-loop 复现时间线 | T5 不变：先做时间推进与事件增长测试，未复现不得改业务代码 |
+| preformal 长期使用 direct Session | `OPEN / P2` | `meeting_runtime.py:526-640` 的 `_resolve_preformal_candidate_review_room` 仍用 roster 直连房间（docstring 自述 formal 才走 child-session）；新增 `PreformalCandidateReviewScopeV1` 身份与内容绑定校验属改善但未解决 Session 有界性；`chat_room_service.py:662,761,864` 仍解析 `directSessionId` | T7 不变：改为 meeting/attempt-scoped Child Session 或等价有界投影，普通 Session 零差异 |
+| 自动策略仍为 preview/shadow | `PARTIAL / P2` | `automation_policy_service.py:212-213,265-266` 仍 `previewOnly / executed=False`；shadow 测试 `tests/test_research_workflow_policy_shadow_evaluator.py` 仍在。但 `ab8cd9179` 新增 `automation_policy_executor.py`：activation 阶段（`approved + approvedBy` fail-closed）、安全梯（kill switch env / activation credential / calibration gate / drain / capability switch），链路已接 3 个决策触点（`hypothesis_first_chain.py:204,230,244,5415,7865`）。生产侧未激活 | T8：稳定性任务全绿后按安全梯走受控激活；此前保持 previewOnly |
+
+**复核新发现（不在原 11 项内）：**
+
+| 编号 | 发现 | 证据锚点 | 下一动作 |
+| --- | --- | --- | --- |
+| N1 | 悬空引用：`meeting_driver_work.py:291-292` 注释声称「preformal deadline backfill task owns these meetings」，但 `core/` 全量检索 `backfill` 无此任务（仅 `session_catalog`/`scene_logging` 无关命中）→ 无 intent 且无 deadline 的遗留会议被恢复扫描永久跳过，无任何收口者 | `meeting_driver_work.py:291-292` | 实现 backfill 任务或按可审计方式归档遗留会议；二选一，不得留悬空注释 |
+| N2 | 生产遗留悬挂：`hf-candgen-80e9711246ab2b0c`、`hf-candgen-ca2e9a04026b229b` 停在 `summarizing`，无 `challengeDeadlineAtMs`、无 `workflowRunId`、无 durable intent → sweep 既不能 fence 也不能 re-drive，永久悬挂；属第 1/3 项剩余与 N1 的交集 | `meeting_rounds.jsonl`（latest-wins 投影，2026-09-01 只读） | 与 N1 同批收口：backfill deadline 后由扫描 fence，或显式归档 |
+| N3 | 新生产锚点：`run-882610596ddb`（SCI-091，2026-09-01 16:52 创建）`blocked@source_finding`，原因 `adapter_execution_exception → agent_turn_terminal_failed`（`session-20260901-183944-977056`）。fail-closed 生效，但运行中断根因未查 | `workflow-ledger.sqlite` 只读查询（2026-09-01） | 另行根因调查；不并入本计划 T 序列，避免扩大闸门 |
+
+**复核结论：** 11 项中 `CLOSED_REGRESSION` 5 项（4、5、6、7、8）、`PARTIAL` 4 项（1、2、3、11）、`OPEN` 1 项（10）、`VERIFY_FIRST` 1 项（9）。对 [全零人工路线图](2026-09-01-challenge-cup-stage-one-zero-human-roadmap.md) Phase 1 闸门的影响：T1–T7 尚未全绿，剩余代码缺口收敛为 4 处——N1/N2 遗留会议收口、T2 lease/heartbeat、T3 digest durable work、T7 有界 Session——外加 T5 证伪测试。这些缺口闭合前不得合闸自动推进（路线图 §9 停止条件继续有效）。
 
 ## 3. 保护边界
 

@@ -918,6 +918,29 @@ def test_formal_review_accepts_one_unique_provider_receipt_per_model_call():
     assert all("review" in item["metadata"]["outcomeKinds"] for item in receipts)
 
 
+def test_formal_artifact_scope_reads_source_collection_run_from_ledger_snapshot(
+    monkeypatch,
+):
+    from core.web.services.team_workflow.research_runtime import formal_write_runtime
+
+    run = type(
+        "Run",
+        (),
+        {
+            "input_snapshot_json": '{"sourceCollectionRunId":"source-run-formal"}'
+        },
+    )()
+    store = type("Store", (), {"get_run": lambda self, run_id: run})()
+    monkeypatch.setattr(formal_write_runtime, "get_write_store", lambda: store)
+
+    assert (
+        hypothesis_review_executor._source_collection_run_id_for_formal_workflow(
+            "workflow-run-formal"
+        )
+        == "source-run-formal"
+    )
+
+
 def test_formal_stage_one_coherence_artifact_is_receipt_bound_and_readable(
     tmp_path, monkeypatch
 ):
@@ -927,6 +950,15 @@ def test_formal_stage_one_coherence_artifact_is_receipt_bound_and_readable(
     )
 
     monkeypatch.setattr(workflow_artifact_store, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        hypothesis_review_executor,
+        "_source_collection_run_id_for_formal_workflow",
+        lambda workflow_run_id: (
+            "source-run-formal"
+            if workflow_run_id == "workflow-run-formal"
+            else ""
+        ),
+    )
     runners = _complete_review_runners()
     base_reflection = runners["reflection_runner"]
 
@@ -941,8 +973,9 @@ def test_formal_stage_one_coherence_artifact_is_receipt_bound_and_readable(
     context = {
         **_direct_review_context(),
         "teamId": "team-stage-one",
+        "questionId": "SCI-091",
         "_modelInvocationReceiptAuthority": {
-            "workflowRunId": "workflow-run-formal"
+            "workflowRunId": "workflow-run-formal",
         },
     }
     context["candidates"] = [
@@ -958,6 +991,9 @@ def test_formal_stage_one_coherence_artifact_is_receipt_bound_and_readable(
     )
 
     artifact_ref = result["coreHypothesisCoherenceArtifactRef"]
+    parsed_ref = artifact_readback_registry.parse_canonical_ref(artifact_ref)
+    assert parsed_ref is not None
+    assert parsed_ref["authorityRunId"] == "source-run-formal"
     assert artifact_readback_registry.read_domain_artifact(artifact_ref) is not None
     coherence = result["coreHypothesisCoherence"]
     assert all(item["receiptRef"] for item in coherence)

@@ -28,6 +28,56 @@ def _unique_text(values: list[object]) -> list[str]:
     return result
 
 
+def _stage_one_completion_payloads(
+    record: dict[str, Any],
+    *,
+    node_id: str,
+    produced_kinds: tuple[str, ...],
+) -> dict[str, dict[str, Any]]:
+    snapshot = (
+        record.get("inputSnapshot")
+        if isinstance(record.get("inputSnapshot"), dict)
+        else {}
+    )
+    policy = (
+        snapshot.get("stageOneCompletionPolicy")
+        if isinstance(snapshot.get("stageOneCompletionPolicy"), dict)
+        else None
+    )
+    if policy is None or str(policy.get("closureNodeId") or "") != node_id:
+        return {}
+    raw_required = policy.get("requiredArtifactKinds")
+    if not isinstance(raw_required, list) or not raw_required:
+        raise ValueError("stage-one completion policy artifact kinds are missing")
+    required = [str(item).strip() for item in raw_required]
+    if any(not item for item in required) or len(required) != len(set(required)):
+        raise ValueError("stage-one completion policy artifact kinds are invalid")
+    team_id = str(record.get("teamId") or "").strip()
+    workflow_run_id = str(record.get("runId") or "").strip()
+    authority_run_id = str(
+        snapshot.get("sourceCollectionRunId") or workflow_run_id
+    ).strip()
+    if not team_id or not workflow_run_id or not authority_run_id:
+        raise ValueError("stage-one completion artifact scope is incomplete")
+    extras: dict[str, dict[str, Any]] = {}
+    for kind in required:
+        if kind in produced_kinds:
+            continue
+        envelope = load_scoped_artifact_payload(
+            kind,
+            team_id=team_id,
+            authority_run_id=authority_run_id,
+            workflow_run_id=workflow_run_id,
+        )
+        payload = envelope.get("payload") if isinstance(envelope, dict) else None
+        if not isinstance(payload, dict) or not payload:
+            raise ValueError(
+                f"stage-one canonical artifact is missing or unreadable: {kind}"
+            )
+        extras[kind] = dict(payload)
+    return extras
+
+
 def _source_artifact_ids(record: dict[str, Any], node_id: str) -> list[str]:
     definition = resolve_definition_for_run_record(
         record,
@@ -519,15 +569,24 @@ def build_agent_task_artifacts(
         if node_spec.nodeId == "protocol_design"
         else None
     )
-    for artifact_kind in node_spec.producesArtifactKinds:
-        payload = _payload_for_kind(
-            record,
-            node_spec,
-            node_run,
-            task,
-            artifact_kind,
-            protocol_artifact_payloads=protocol_artifact_payloads,
-        )
+    produced_kinds = tuple(node_spec.producesArtifactKinds)
+    stage_one_payloads = _stage_one_completion_payloads(
+        record,
+        node_id=node_spec.nodeId,
+        produced_kinds=produced_kinds,
+    )
+    artifact_kinds = (*produced_kinds, *stage_one_payloads)
+    for artifact_kind in artifact_kinds:
+        payload = stage_one_payloads.get(artifact_kind)
+        if payload is None:
+            payload = _payload_for_kind(
+                record,
+                node_spec,
+                node_run,
+                task,
+                artifact_kind,
+                protocol_artifact_payloads=protocol_artifact_payloads,
+            )
         content_hash = canonical_sha256(payload)
         artifact_id = f"{artifact_kind}:{content_hash[:16]}"
         manifest = ArtifactManifest.from_dict(

@@ -1367,6 +1367,251 @@ def test_generate_round_writes_all_three_review_authorities(
     ]
 
 
+def _canonical_stage_one_question_detail() -> dict[str, Any]:
+    return {
+        "record": {
+            "runId": "workflow-authorities",
+            "questionId": "SCI-091",
+            "schemaVersion": 2,
+            "status": "approved",
+            "validation": {
+                "schemaValidation": "passed",
+                "citationValidation": "passed",
+                "officialModelCall": True,
+            },
+        },
+        "artifact": {"sha256": "f" * 64, "immutable": True},
+        "output": {
+            "schema_version": 2,
+            "identity": {
+                "catalog_id": "science-125-questions-2021",
+                "question_id": "SCI-091",
+                "question_en": "Canonical question",
+            },
+            "hypotheses": [
+                {
+                    "hypothesis_id": "hyp-a",
+                    "statement": "Canonical selected hypothesis",
+                }
+            ],
+            "selection": {
+                "selected_hypothesis_id": "hyp-a",
+                "human_gate": {"decision": "approved"},
+            },
+            "research_plan": {
+                "proposal_only": True,
+                "objective": "Test the selected hypothesis.",
+                "human_gate": {"decision": "approved"},
+            },
+            "competition_result_view": {
+                "problem_statement": "Canonical competition problem.",
+                "rationale": "Why the selected hypothesis matters.",
+                "technical_details": "Bounded technical approach.",
+                "datasets": {"planned": ["dataset-a"], "used": ["not executed"]},
+                "methods": ["planned method"],
+                "experiments": ["planned experiment"],
+                "results": ["not executed"],
+                "references": ["source://canonical"],
+                "paper_title": "Planned paper",
+                "paper_abstract": "Proposal only.",
+            },
+        },
+    }
+
+
+def test_stage_one_plan_writer_projects_only_canonical_question_sections(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.web.services.team_workflow.research_runtime import (
+        stage_one_plan_artifact_writer as writer,
+    )
+    from core.web.services.team_workflow.research_runtime import (
+        artifact_readback_registry,
+        workflow_artifact_store,
+    )
+
+    rows: list[dict[str, Any]] = []
+
+    def fake_put(team_id: str, **kwargs):
+        record = {
+            "recordId": kwargs["artifact_identity"],
+            "teamId": team_id,
+            "kind": kwargs["kind"],
+            "workflowRunId": kwargs["workflow_run_id"],
+            "sourceCollectionRunId": kwargs["source_collection_run_id"],
+            "contentHash": writer.canonical_sha256(kwargs["payload"]),
+            "payload": kwargs["payload"],
+        }
+        rows.append(record)
+        return record
+
+    monkeypatch.setattr(writer, "put_workflow_artifact", fake_put)
+    detail = _canonical_stage_one_question_detail()
+
+    result = writer.write_stage_one_plan_artifacts(
+        team_id="team-review-authorities",
+        workflow_run_id="workflow-authorities",
+        node_run_id="node-authorities",
+        question_id="SCI-091",
+        selected_candidate_id="hyp-a",
+        question_detail=detail,
+        source_collection_run_id="source-authorities",
+    )
+
+    assert result["status"] == "written"
+    assert "stage1_research_plan" in workflow_artifact_store._SUPPORTED_KINDS
+    assert "competition_alignment" in workflow_artifact_store._SUPPORTED_KINDS
+    assert "stage_one_completion_manifest" in workflow_artifact_store._SUPPORTED_KINDS
+    assert artifact_readback_registry.resolve_artifact_authority(
+        "stage1_research_plan"
+    ) is not None
+    assert artifact_readback_registry.resolve_artifact_authority(
+        "competition_alignment"
+    ) is not None
+    assert artifact_readback_registry.resolve_artifact_authority(
+        "stage_one_completion_manifest"
+    ) is not None
+    assert [row["kind"] for row in rows] == [
+        "stage1_research_plan",
+        "competition_alignment",
+    ]
+    assert rows[0]["payload"] == detail["output"]["research_plan"]
+    alignment = rows[1]["payload"]
+    assert alignment["questionIdentity"] == detail["output"]["identity"]
+    assert alignment["selectedHypothesis"] == {
+        "hypothesisId": "hyp-a",
+        "statement": "Canonical selected hypothesis",
+    }
+    assert alignment["competitionResultView"] == detail["output"][
+        "competition_result_view"
+    ]
+
+
+def test_stage_one_plan_writer_blocks_before_store_when_canonical_sections_are_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.web.services.team_workflow.research_runtime import (
+        stage_one_plan_artifact_writer as writer,
+    )
+
+    calls: list[str] = []
+    monkeypatch.setattr(
+        writer,
+        "put_workflow_artifact",
+        lambda *args, **kwargs: calls.append("put"),
+    )
+    detail = _canonical_stage_one_question_detail()
+    del detail["output"]["competition_result_view"]
+
+    result = writer.write_stage_one_plan_artifacts(
+        team_id="team-review-authorities",
+        workflow_run_id="workflow-authorities",
+        node_run_id="node-authorities",
+        question_id="SCI-091",
+        selected_candidate_id="hyp-a",
+        question_detail=detail,
+        source_collection_run_id="source-authorities",
+    )
+
+    assert result["status"] == "blocked"
+    assert "competition_alignment_source_missing" in result["blockerCodes"]
+    assert calls == []
+
+
+def test_round_revision_authority_requires_explicit_hash_bound_envelope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.web.services.team_workflow.research_runtime import (
+        feedback_iterations_artifact_writer as writer,
+    )
+
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        writer,
+        "write_feedback_iterations_artifact",
+        lambda **kwargs: calls.append(kwargs) or {"status": "recorded"},
+    )
+    missing = chain._materialize_hypothesis_revision_authority(
+        team_id="team-review-authorities",
+        workflow_run_id="workflow-authorities",
+        node_run_id="node-authorities",
+        question_id="SCI-091",
+        source_collection_run_id="source-authorities",
+        round_record={"metaReview": {"accepted": True}},
+    )
+    evidence = {
+        "feedback": {
+            "trigger": "Grounding changed the hypothesis.",
+            "humanFeedback": "Keep the claim within the cited population.",
+            "inputRefs": ["hypothesis_set://team/source/r0"],
+            "inputHash": "a" * 64,
+        },
+        "revision": {
+            "changes": ["Narrowed the claim."],
+            "unresolvedIssues": ["External validity remains open."],
+            "outputRefs": ["hypothesis_set://team/source/r1"],
+            "outputHash": "b" * 64,
+            "status": "completed",
+        },
+    }
+    written = chain._materialize_hypothesis_revision_authority(
+        team_id="team-review-authorities",
+        workflow_run_id="workflow-authorities",
+        node_run_id="node-authorities",
+        question_id="SCI-091",
+        source_collection_run_id="source-authorities",
+        round_record={
+            "revisionEnvelope": {"phase": "grounded_revision", **evidence}
+        },
+    )
+
+    assert missing["status"] == "blocked"
+    assert "hypothesis_revision_evidence_missing" in missing["blockerCodes"]
+    assert written["status"] == "recorded"
+    assert calls[0]["node_id"] == "hypothesis_design"
+    assert calls[0]["revision_phase"] == "grounded_revision"
+    assert calls[0]["iteration_round"] == 1
+
+
+def test_accepted_round_materializes_stage_one_plan_from_approved_question_authority(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.web.services.team_workflow.research_runtime import question_launch
+    from core.web.services.team_workflow.research_runtime import (
+        stage_one_plan_artifact_writer as writer,
+    )
+
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        question_launch,
+        "_approved_details",
+        lambda _team_id: {"SCI-091": _canonical_stage_one_question_detail()},
+    )
+    monkeypatch.setattr(
+        writer,
+        "write_stage_one_plan_artifacts",
+        lambda **kwargs: calls.append(kwargs) or {"status": "written"},
+    )
+
+    result = chain._materialize_stage_one_plan_authority(
+        team_id="team-review-authorities",
+        workflow_run_id="workflow-authorities",
+        node_run_id="node-authorities",
+        question_id="SCI-091",
+        source_collection_run_id="source-authorities",
+        round_record={
+            "metaReview": {
+                "accepted": True,
+                "recommendationCandidateId": "hyp-a",
+            }
+        },
+    )
+
+    assert result["status"] == "written"
+    assert calls[0]["selected_candidate_id"] == "hyp-a"
+    assert calls[0]["question_detail"] == _canonical_stage_one_question_detail()
+
+
 def test_chain_state_projects_first_open_candidate_anchor(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

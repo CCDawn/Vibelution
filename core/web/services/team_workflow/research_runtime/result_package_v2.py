@@ -473,6 +473,83 @@ def _hypotheses(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
     return result
 
 
+def _same_run_hypothesis_feedback_iterations(
+    artifacts: Sequence[Mapping[str, Any]],
+    *,
+    workflow_run_id: str,
+) -> list[dict[str, Any]] | None:
+    """Read the node-7 R0->R1->R2 lineage recorded inside one WorkflowRun."""
+
+    payloads = [
+        _mapping(item.get("payload"))
+        for item in artifacts
+        if _text(item.get("workflowRunId")) == workflow_run_id
+        and _mapping(item.get("payload")).get("schemaVersion") == 2
+        and _text(_mapping(item.get("payload")).get("nodeId"))
+        == "hypothesis_design"
+    ]
+    if not payloads:
+        return None
+    expected_phases = {1: "grounded_revision", 2: "review_revision"}
+    if len(payloads) != len(expected_phases):
+        raise ResultPackageV2Error(
+            "canonical same-run hypothesis feedback lineage is incomplete",
+            code="challenge_v2_feedback_conflict",
+        )
+    by_round: dict[int, tuple[dict[str, Any], dict[str, Any], dict[str, Any]]] = {}
+    for payload in payloads:
+        iteration_round = payload.get("iterationRound")
+        phase = _text(payload.get("revisionPhase"))
+        envelope = _mapping(payload.get("revisionEnvelope"))
+        row = _mapping(payload.get("feedbackIteration"))
+        if (
+            isinstance(iteration_round, bool)
+            or not isinstance(iteration_round, int)
+            or expected_phases.get(iteration_round) != phase
+            or _text(envelope.get("phase")) != phase
+            or row.get("round") != iteration_round
+            or iteration_round in by_round
+        ):
+            raise ResultPackageV2Error(
+                "canonical same-run hypothesis feedback lineage is invalid",
+                code="challenge_v2_feedback_conflict",
+            )
+        parent = _mapping(envelope.get("parentOutput"))
+        child = _mapping(envelope.get("childOutput"))
+        for endpoint in (parent, child):
+            refs = endpoint.get("refs")
+            sha256 = _text(endpoint.get("sha256")).lower()
+            if (
+                not isinstance(refs, list)
+                or not refs
+                or any(not _text(ref) for ref in refs)
+                or len(sha256) != 64
+                or any(char not in "0123456789abcdef" for char in sha256)
+            ):
+                raise ResultPackageV2Error(
+                    "canonical same-run hypothesis feedback lineage is invalid",
+                    code="challenge_v2_feedback_conflict",
+                )
+        by_round[iteration_round] = (row, parent, child)
+    if set(by_round) != set(expected_phases):
+        raise ResultPackageV2Error(
+            "canonical same-run hypothesis feedback lineage is incomplete",
+            code="challenge_v2_feedback_conflict",
+        )
+    first_child = by_round[1][2]
+    second_parent = by_round[2][1]
+    if (
+        first_child.get("refs") != second_parent.get("refs")
+        or _text(first_child.get("sha256")).lower()
+        != _text(second_parent.get("sha256")).lower()
+    ):
+        raise ResultPackageV2Error(
+            "canonical same-run hypothesis feedback lineage is discontinuous",
+            code="challenge_v2_feedback_conflict",
+        )
+    return [deepcopy(by_round[index][0]) for index in sorted(by_round)]
+
+
 def _feedback_iterations(
     *, team_id: str, workflow_run_id: str, authority_run_id: str
 ) -> list[dict[str, Any]]:
@@ -482,6 +559,12 @@ def _feedback_iterations(
         if _text(item.get("sourceCollectionRunId")) == authority_run_id
         and isinstance(item.get("payload"), Mapping)
     ]
+    same_run_rows = _same_run_hypothesis_feedback_iterations(
+        artifacts,
+        workflow_run_id=workflow_run_id,
+    )
+    if same_run_rows is not None:
+        return same_run_rows
     rows: list[dict[str, Any]] = []
     cursor = workflow_run_id
     seen_runs: set[str] = set()

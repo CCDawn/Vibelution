@@ -330,7 +330,23 @@ class RealDomainPorts:
             },
             expected_node_ids=[action.node_id],
         )
-        return required_artifact_kinds(action.node_id, definition=definition)
+        produced = required_artifact_kinds(action.node_id, definition=definition)
+        snapshot = self._run_input_snapshot(action.run_id)
+        policy = snapshot.get("stageOneCompletionPolicy")
+        if not isinstance(policy, Mapping):
+            return produced
+        closure_node_id = str(policy.get("closureNodeId") or "").strip()
+        raw_required = policy.get("requiredArtifactKinds")
+        if closure_node_id != action.node_id:
+            return produced
+        if not isinstance(raw_required, list) or not raw_required:
+            raise RuntimeError("stage-one completion policy artifact kinds are missing")
+        stage_one_required = tuple(
+            str(item).strip() for item in raw_required if str(item).strip()
+        )
+        if len(stage_one_required) != len(raw_required):
+            raise RuntimeError("stage-one completion policy artifact kinds are invalid")
+        return tuple(dict.fromkeys((*produced, *stage_one_required)))
 
     def _run_input_snapshot(self, run_id: str) -> dict[str, Any]:
         run = self._store.get_run(run_id)

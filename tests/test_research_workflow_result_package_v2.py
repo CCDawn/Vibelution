@@ -242,6 +242,112 @@ def test_feedback_iterations_follow_revision_parent_lineage(monkeypatch) -> None
     ) == [{"round": 1}, {"round": 2}]
 
 
+def test_feedback_iterations_accept_two_phase_same_run_lineage(monkeypatch) -> None:
+    monkeypatch.setattr(
+        result_package_v2,
+        "list_workflow_artifacts",
+        lambda *_args, **_kwargs: [
+            {
+                "workflowRunId": "run-stage-one",
+                "sourceCollectionRunId": "source-sci-096",
+                "payload": {
+                    "schemaVersion": 1,
+                    "nodeId": "iteration_decision",
+                    "feedbackIteration": {"round": 9},
+                },
+            },
+            {
+                "workflowRunId": "run-stage-one",
+                "sourceCollectionRunId": "source-sci-096",
+                "payload": {
+                    "schemaVersion": 2,
+                    "nodeId": "hypothesis_design",
+                    "iterationRound": 2,
+                    "revisionPhase": "review_revision",
+                    "revisionEnvelope": {
+                        "phase": "review_revision",
+                        "parentOutput": {"refs": ["hypothesis:r1"], "sha256": "b" * 64},
+                        "childOutput": {"refs": ["hypothesis:r2"], "sha256": "c" * 64},
+                    },
+                    "feedbackIteration": {"round": 2, "changes": ["reviewed"]},
+                },
+            },
+            {
+                "workflowRunId": "run-stage-one",
+                "sourceCollectionRunId": "source-sci-096",
+                "payload": {
+                    "schemaVersion": 2,
+                    "nodeId": "hypothesis_design",
+                    "iterationRound": 1,
+                    "revisionPhase": "grounded_revision",
+                    "revisionEnvelope": {
+                        "phase": "grounded_revision",
+                        "parentOutput": {"refs": ["hypothesis:r0"], "sha256": "a" * 64},
+                        "childOutput": {"refs": ["hypothesis:r1"], "sha256": "b" * 64},
+                    },
+                    "feedbackIteration": {"round": 1, "changes": ["grounded"]},
+                },
+            },
+        ],
+    )
+
+    assert result_package_v2._feedback_iterations(
+        team_id="research-team",
+        workflow_run_id="run-stage-one",
+        authority_run_id="source-sci-096",
+    ) == [
+        {"round": 1, "changes": ["grounded"]},
+        {"round": 2, "changes": ["reviewed"]},
+    ]
+
+
+def test_feedback_iterations_reject_discontinuous_same_run_lineage(monkeypatch) -> None:
+    def artifact(round_value: int, phase: str, parent_hash: str, child_hash: str) -> dict:
+        return {
+            "workflowRunId": "run-stage-one",
+            "sourceCollectionRunId": "source-sci-096",
+            "payload": {
+                "schemaVersion": 2,
+                "nodeId": "hypothesis_design",
+                "iterationRound": round_value,
+                "revisionPhase": phase,
+                "revisionEnvelope": {
+                    "phase": phase,
+                    "parentOutput": {
+                        "refs": [f"hypothesis:{parent_hash}"],
+                        "sha256": parent_hash * 64,
+                    },
+                    "childOutput": {
+                        "refs": [f"hypothesis:{child_hash}"],
+                        "sha256": child_hash * 64,
+                    },
+                },
+                "feedbackIteration": {"round": round_value},
+            },
+        }
+
+    monkeypatch.setattr(
+        result_package_v2,
+        "list_workflow_artifacts",
+        lambda *_args, **_kwargs: [
+            artifact(1, "grounded_revision", "a", "b"),
+            artifact(2, "review_revision", "c", "d"),
+        ],
+    )
+
+    with pytest.raises(
+        result_package_v2.ResultPackageV2Error,
+        match="same-run hypothesis feedback lineage is discontinuous",
+    ) as exc_info:
+        result_package_v2._feedback_iterations(
+            team_id="research-team",
+            workflow_run_id="run-stage-one",
+            authority_run_id="source-sci-096",
+        )
+
+    assert exc_info.value.code == "challenge_v2_feedback_conflict"
+
+
 def test_feedback_iterations_reject_parent_cycle(monkeypatch) -> None:
     monkeypatch.setattr(
         result_package_v2,
