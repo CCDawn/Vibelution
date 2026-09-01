@@ -390,7 +390,7 @@ def test_completed_extraction_writeback_without_quote_anchor_is_rejected(tmp_pat
 
 
 def test_completed_extraction_writeback_rejects_paraphrased_quote(tmp_path, monkeypatch):
-    """quote 不是存储 summary 的逐字子串 → 拒绝。"""
+    """quote 不是存储 summary 的逐字子串 → 首次停靠 needs_review 给修正反馈，二次拒绝。"""
     setup = _seed_completed_extraction_task(tmp_path, monkeypatch)
     task = setup["task"]
     _append_stage_task_tool_trace(tmp_path, task["task"])
@@ -398,6 +398,36 @@ def test_completed_extraction_writeback_rejects_paraphrased_quote(tmp_path, monk
     entry = _anchored_extraction_entry(setup["candidates"][0])
     entry["evidenceRefs"][0]["quote"] = "预测编码证据支持内容提炼覆盖。"
 
+    # 一次性修正反馈：首个只含"quote 不匹配"的 completed 回写不拒绝，
+    # 停靠 needs_review 并携带结构化 quoteAnchorRemediation。
+    parked = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        setup["teamId"],
+        task["taskId"],
+        {
+            "status": "completed",
+            "summary": "完成资料提炼（quote 首次不匹配）。",
+            "result": {"candidateExtractions": [entry]},
+            "recordedByAgent": task["task"]["agentId"],
+        },
+    )
+    assert parked["task"]["status"] == "needs_review"
+    assert parked["writeback"]["status"] == "needs_review"
+    assert parked["writeback"]["agentRequestedStatus"] == "completed"
+    remediation = parked["writeback"]["quoteAnchorRemediation"]
+    assert remediation["attempt"] == 1
+    assert remediation["findings"][0]["sourceId"] == setup["candidates"][0]["candidateId"]
+    assert remediation["findings"][0]["finding"] == "mismatched_quote"
+    assert remediation["findings"][0]["nearestMatch"]["snippet"]
+
+    stored_task, _run_id = team_workflow_orchestration_service._find_source_collection_stage_session_task_by_id(
+        setup["teamId"], task["taskId"]
+    )
+    assert stored_task["status"] == "needs_review"
+    assert stored_task["quoteAnchorRemediation"]["attempt"] == 1
+    # 停靠路径不落 agent 原始 result：改写 quote 不得泄漏进 canonical 存储。
+    assert not stored_task.get("result")
+
+    # 修正机会只有一次：再次不匹配走既有契约拒绝语义。
     with pytest.raises(
         team_workflow_orchestration_service.TeamWorkflowOrchestrationError,
         match="逐字子串",
@@ -407,7 +437,7 @@ def test_completed_extraction_writeback_rejects_paraphrased_quote(tmp_path, monk
             task["taskId"],
             {
                 "status": "completed",
-                "summary": "完成资料提炼。",
+                "summary": "完成资料提炼（quote 二次不匹配）。",
                 "result": {"candidateExtractions": [entry]},
                 "recordedByAgent": task["task"]["agentId"],
             },

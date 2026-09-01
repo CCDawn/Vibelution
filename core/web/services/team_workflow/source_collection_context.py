@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from .source_collection.extraction_quote_anchor_supply import (
+    QUOTE_BLOCK_MAX_CHARS,
+    QUOTE_SOURCES_TOTAL_CHAR_BUDGET,
+)
 from .source_collection_common import normalize_metadata, normalize_text_list, source_collection_count, trim_text
 
 
@@ -58,6 +62,16 @@ def compact_source_collection_stage_task_context(context: dict[str, Any]) -> dic
         compact_usage["retryInstruction"] = trim_text(usage.get("retryInstruction"), max_length=1000)
     if trim_text(usage.get("evidenceInstruction"), max_length=1000):
         compact_usage["evidenceInstruction"] = trim_text(usage.get("evidenceInstruction"), max_length=1000)
+    if trim_text(usage.get("quoteAnchorInstruction"), max_length=1200):
+        # Quote-anchor supply instructions must survive compaction: the
+        # extraction agent reads the compact context by default, and without
+        # this line it never learns the verbatim-copy rules (run-882610596ddb).
+        compact_usage["quoteAnchorInstruction"] = trim_text(usage.get("quoteAnchorInstruction"), max_length=1200)
+    if trim_text(usage.get("extractionWritebackContract"), max_length=2000):
+        compact_usage["extractionWritebackContract"] = trim_text(
+            usage.get("extractionWritebackContract"),
+            max_length=2000,
+        )
     records = [
         compact_source_collection_context_record(item, evidence=evidence_mode)
         for item in list(context.get("records") or [])
@@ -106,6 +120,11 @@ def compact_source_collection_stage_task_context(context: dict[str, Any]) -> dic
         )
     if isinstance(context.get("retryFocus"), dict):
         compact["retryFocus"] = normalize_metadata(context["retryFocus"])
+    quotable_sources = compact_source_collection_quotable_sources(context.get("quotableSources"))
+    if quotable_sources:
+        compact["quotableSources"] = quotable_sources
+    if isinstance(context.get("quoteAnchorRemediation"), dict) and context.get("quoteAnchorRemediation"):
+        compact["quoteAnchorRemediation"] = normalize_metadata(context["quoteAnchorRemediation"])
     compact_record_ids = [
         trim_text(item.get("recordId"), max_length=160)
         for item in records
@@ -130,6 +149,60 @@ def compact_source_collection_excluded_summary(summary: dict[str, Any]) -> dict[
         for key in ("excludedCount", "activeRecordCount", "rawRecordCount")
         if key in summary
     }
+
+
+def compact_source_collection_quotable_sources(sources: Any) -> list[dict[str, Any]]:
+    """Carry the extraction quotable-source blocks through compaction.
+
+    The full context already applied the per-source block cap and the total
+    char budget; compaction re-applies the same bounds defensively so the
+    payload can never grow.  Block text is the verbatim-copy material — it
+    must not be preview-truncated like the candidate summaries.
+    """
+    if not isinstance(sources, list):
+        return []
+    compact_sources: list[dict[str, Any]] = []
+    used = 0
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        blocks_out: list[dict[str, Any]] = []
+        for block in list(source.get("blocks") or []):
+            if not isinstance(block, dict):
+                continue
+            text = trim_text(block.get("text"), max_length=QUOTE_BLOCK_MAX_CHARS)
+            if not text or used + len(text) > QUOTE_SOURCES_TOTAL_CHAR_BUDGET:
+                break
+            used += len(text)
+            blocks_out.append(
+                {
+                    "origin": trim_text(block.get("origin"), max_length=40),
+                    "text": text,
+                    "chars": len(text),
+                    "truncated": bool(block.get("truncated")),
+                }
+            )
+        entry = {
+            "sourceId": trim_text(source.get("sourceId"), max_length=160),
+            "sourceKind": trim_text(source.get("sourceKind"), max_length=40),
+            "title": trim_text(source.get("title"), max_length=240),
+            "quoteAvailable": bool(source.get("quoteAvailable")),
+            "blocks": blocks_out,
+            "blockOrigin": trim_text(source.get("blockOrigin"), max_length=40),
+            "sourceAccess": normalize_metadata(source.get("sourceAccess")),
+        }
+        if source.get("blockOmitted"):
+            entry["blockOmitted"] = trim_text(source.get("blockOmitted"), max_length=40)
+        # ``blocks`` stays explicit even when empty: "no quotable text" is a
+        # meaningful supply state for the agent, not a missing field.
+        compact_sources.append(
+            {
+                key: value
+                for key, value in entry.items()
+                if value not in ("", [], None) or key == "blocks"
+            }
+        )
+    return compact_sources
 
 
 def compact_source_collection_context_record(record: dict[str, Any], *, evidence: bool = False) -> dict[str, Any]:

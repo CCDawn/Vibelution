@@ -8,6 +8,16 @@ from __future__ import annotations
 from typing import Any
 
 from ..source_collection_common import project_source_version_families
+from .extraction_quote_anchor_supply import (
+    QUOTE_BLOCK_MAX_CHARS,
+    QUOTE_SOURCES_TOTAL_CHAR_BUDGET,
+    audit_extraction_quote_anchors,
+    build_quote_anchor_remediation,
+    extraction_quotable_sources,
+    latest_failed_fetch_attempts,
+    quote_anchor_error_message,
+    source_quotable_blocks,
+)
 from .extraction_retrieved_at_backfill import (
     backfill_source_collection_stage_writeback_retrieved_at,
 )
@@ -87,51 +97,6 @@ def _normalize_extraction_evidence_status_aliases_in_payload(
     return result
 
 
-def _extraction_entry_quote_anchor(
-    entry: dict[str, Any],
-    source_summary: str,
-) -> tuple[bool, bool]:
-    """Return ``(has_verbatim_anchor, supplied_quote_without_anchor)``.
-
-    A valid anchor is a nested ``claims[]``/``keyFindings[]`` item with a
-    ``quote`` or an ``evidenceRefs[]`` item with ``{id, quote}`` whose quote is
-    a verbatim substring of the stored source summary.  A supplied quote that
-    never matches verbatim is the strong paraphrase signal the contract
-    rejects.
-    """
-    s = _service()
-    supplied_quote = False
-    for key in ("claims", "keyFindings", "key_findings", "findings"):
-        items = entry.get(key)
-        if not isinstance(items, list):
-            continue
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            quote = s._trim_text(item.get("quote"), max_length=4000)
-            if not quote:
-                continue
-            supplied_quote = True
-            if quote in source_summary:
-                return True, False
-    refs = entry.get("evidenceRefs") or entry.get("evidence_refs")
-    if isinstance(refs, list):
-        for item in refs:
-            if not isinstance(item, dict):
-                continue
-            quote = s._trim_text(item.get("quote"), max_length=4000)
-            if not quote:
-                continue
-            supplied_quote = True
-            ref_id = s._trim_text(
-                item.get("id") or item.get("evidenceRefId") or item.get("refId"),
-                max_length=240,
-            )
-            if ref_id and quote in source_summary:
-                return True, False
-    return False, supplied_quote
-
-
 def _source_collection_stage_writeback_formal_claim_bound(
     task: dict[str, Any],
     run_id: str,
@@ -153,94 +118,129 @@ def _source_collection_stage_writeback_formal_claim_bound(
     return bool(s._trim_text(run_scope.get("workflowRunId"), max_length=160))
 
 
-def _source_collection_stage_writeback_quote_anchor_errors(
+def _source_collection_stage_writeback_quote_anchor_blocks(
     team_id: str,
     run_id: str,
-    task: dict[str, Any],
-    result_payload: dict[str, Any],
-) -> list[str]:
-    """Validate completed extraction writebacks against verbatim quote anchors.
+) -> tuple[dict[str, list[dict[str, Any]]], set[str]]:
+    """Build the audit blocks for every known source id of the run.
 
-    Per non-exclude entry whose source summary is stored non-empty: require at
-    least one verbatim quote anchor and reject any paraphrased quote.  Sources
-    with an empty stored summary must honestly declare
-    ``evidenceStatus=missing_evidence_anchor`` (the materializer skips those).
-    Returns human-readable errors; an empty list means the writeback passes.
+    One authoritative quotable-text index shared by the context supply and
+    the writeback gate: candidates index their stored summary plus the
+    linked data record's content/abstract; records index their own
+    ``content``/``summary``.  The 4000-char block bound is the historical
+    gate trim, so every quote the previous validator accepted is still a
+    verbatim block substring (zero-diff for the compliant path).  Sources
+    with no stored text map to an empty block list.
     """
     s = _service()
-    stage_id = s._trim_text(task.get("stageId"), max_length=80)
-    agent_role = s._trim_text(task.get("agentRole"), max_length=80)
-    if stage_id != "extraction" and agent_role != "source_extractor":
-        return []
-    if not _source_collection_stage_writeback_formal_claim_bound(task, run_id):
-        return []
-    summary_by_id: dict[str, str] = {}
-    known_source_ids: set[str] = set()
-    for candidate in s._source_collection_candidates_for_run(team_id, run_id):
-        candidate_id = s._trim_text(candidate.get("candidateId"), max_length=160)
-        if not candidate_id:
-            continue
-        known_source_ids.add(candidate_id)
-        summary = s._trim_text(candidate.get("summary"), max_length=4000)
-        if summary:
-            summary_by_id[candidate_id] = summary
     records = s._source_collection_stage_records_for_run(run_id)
     try:
         run = s.data_processing_service.get_processing_run(run_id)
         records, _excluded_source_summary = s._source_collection_filter_active_records(team_id, run, records)
     except s.data_processing_service.DataProcessingError:
         pass
-    for record in records:
-        record_id = s._trim_text(record.get("recordId"), max_length=160)
-        if not record_id:
+    record_by_id = {
+        s._trim_text(record.get("recordId"), max_length=160): record
+        for record in records
+        if s._trim_text(record.get("recordId"), max_length=160)
+    }
+    blocks_by_id: dict[str, list[dict[str, Any]]] = {}
+    for candidate in s._source_collection_candidates_for_run(team_id, run_id):
+        candidate_id = s._trim_text(candidate.get("candidateId"), max_length=160)
+        if not candidate_id:
             continue
-        known_source_ids.add(record_id)
-        summary = s._trim_text(record.get("summary") or record.get("content"), max_length=4000)
-        if summary:
-            summary_by_id.setdefault(record_id, summary)
-    errors: list[str] = []
-    entries = list(s._source_collection_stage_writeback_candidate_extractions(result_payload))
-    entries.extend(
-        s._source_collection_stage_writeback_record_extractions(
-            result_payload,
-            include_candidate_fallback=False,
+        blocks_by_id[candidate_id] = source_quotable_blocks(
+            candidate,
+            record_by_id,
+            block_max_chars=4000,
+        )
+    for record_id, record in record_by_id.items():
+        blocks_by_id.setdefault(record_id, [])
+        if not blocks_by_id[record_id]:
+            blocks_by_id[record_id] = source_quotable_blocks(
+                record,
+                {},
+                block_max_chars=4000,
+            )
+    return blocks_by_id, set(blocks_by_id)
+
+
+def _source_collection_stage_writeback_quote_anchor_audit(
+    team_id: str,
+    run_id: str,
+    task: dict[str, Any],
+    result_payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Audit completed extraction writebacks against verbatim quote anchors.
+
+    Per non-exclude entry whose source stores quotable text: require at least
+    one verbatim quote anchor and classify any paraphrased quote as a
+    remediation-eligible mismatch.  Sources with no stored quotable text must
+    honestly declare ``evidenceStatus=missing_evidence_anchor`` (the
+    materializer skips those).  Returns ``hard_errors`` (rendered
+    human-readable rejections: missing quote, dishonest empty source),
+    ``mismatches`` (structured mismatch findings for the one-shot
+    remediation) and the ``blocks_by_id`` index backing the feedback.
+    """
+    s = _service()
+    stage_id = s._trim_text(task.get("stageId"), max_length=80)
+    agent_role = s._trim_text(task.get("agentRole"), max_length=80)
+    if stage_id != "extraction" and agent_role != "source_extractor":
+        return {"hard_errors": [], "mismatches": [], "blocks_by_id": {}}
+    if not _source_collection_stage_writeback_formal_claim_bound(task, run_id):
+        return {"hard_errors": [], "mismatches": [], "blocks_by_id": {}}
+    blocks_by_id, _known_source_ids = _source_collection_stage_writeback_quote_anchor_blocks(
+        team_id,
+        run_id,
+    )
+
+    def _is_honest_skip(entry: dict[str, Any]) -> bool:
+        normalized_entry = _extraction_entry_with_normalized_evidence_status(entry)
+        return (
+            s._trim_text(normalized_entry.get("evidenceStatus"), max_length=80).lower()
+            == "missing_evidence_anchor"
+        )
+
+    candidate_entries = s._source_collection_stage_writeback_candidate_extractions(result_payload)
+    record_entries = s._source_collection_stage_writeback_record_extractions(
+        result_payload,
+        include_candidate_fallback=False,
+    )
+    findings = audit_extraction_quote_anchors(
+        candidate_entries,
+        blocks_by_id,
+        resolve_source_id=s._source_collection_stage_writeback_candidate_id,
+        is_honest_skip=_is_honest_skip,
+        entry_path_prefix="candidateExtractions",
+        source_kind="candidate",
+    )
+    findings.extend(
+        audit_extraction_quote_anchors(
+            record_entries,
+            blocks_by_id,
+            # Historical resolution order: candidateId wins over recordId for
+            # record-shaped entries, and the error label follows that choice.
+            resolve_source_id=lambda entry: (
+                s._source_collection_stage_writeback_candidate_id(entry)
+                or s._source_collection_stage_writeback_record_id(entry)
+            ),
+            resolve_source_kind=lambda entry: (
+                "candidate"
+                if s._source_collection_stage_writeback_candidate_id(entry)
+                else "record"
+            ),
+            is_honest_skip=_is_honest_skip,
+            entry_path_prefix="recordExtractions",
+            source_kind="record",
         )
     )
-    for entry in entries:
-        decision = s._trim_text(entry.get("decision"), max_length=80).lower()
-        if decision == "exclude":
-            continue
-        candidate_id = s._source_collection_stage_writeback_candidate_id(entry)
-        record_id = s._source_collection_stage_writeback_record_id(entry)
-        source_id = candidate_id or record_id
-        if not source_id or source_id not in known_source_ids:
-            # Unknown ids stay with candidate-coverage invalid-id handling.
-            continue
-        source_summary = summary_by_id.get(source_id, "")
-        source_label = f"candidate {source_id}" if candidate_id else f"record {source_id}"
-        if not source_summary:
-            normalized_entry = _extraction_entry_with_normalized_evidence_status(entry)
-            evidence_status = s._trim_text(normalized_entry.get("evidenceStatus"), max_length=80).lower()
-            if evidence_status != "missing_evidence_anchor":
-                errors.append(
-                    f"{source_label} 存储摘要为空：条目必须声明 evidenceStatus=missing_evidence_anchor 诚实跳过，"
-                    "不能在没有任何锚点的情况下声称证据。"
-                )
-            continue
-        has_anchor, supplied_quote = _extraction_entry_quote_anchor(entry, source_summary)
-        if has_anchor:
-            continue
-        if supplied_quote:
-            errors.append(
-                f"{source_label} 的 quote 不是存储 summary 的逐字子串："
-                "quote 必须从 candidates[].summary 原样复制，禁止改写、拼接或凭记忆重写。"
-            )
-        else:
-            errors.append(
-                f"{source_label} 缺少逐字 quote 锚：嵌套 claims[]/keyFindings[] 项需含 quote，"
-                "或 evidenceRefs[] 项需含 {id, quote}（quote 为存储 summary 的逐字子串）。"
-            )
-    return errors
+    hard_findings = [item for item in findings if item.get("finding") in {"missing_quote", "empty_source"}]
+    mismatches = [item for item in findings if item.get("finding") == "mismatched_quote"]
+    return {
+        "hard_errors": quote_anchor_error_message(hard_findings),
+        "mismatches": mismatches,
+        "blocks_by_id": blocks_by_id,
+    }
 
 
 def _source_collection_stage_writeback_extraction_card_contract_errors(
@@ -292,6 +292,87 @@ def _source_collection_stage_writeback_extraction_card_contract_errors(
     return errors
 
 
+def _park_source_collection_stage_task_quote_anchor_remediation(
+    team_id: str,
+    run_id: str,
+    task: dict[str, Any],
+    request_payload: dict[str, Any],
+    quote_audit: dict[str, Any],
+) -> dict[str, Any]:
+    """Park a first-time mismatching extraction writeback for one rewrite.
+
+    Mirrors the ``needs_review``/remediation shape of the claim-materialization
+    gate: the canonical task lands at ``needs_review`` with a structured
+    ``quoteAnchorRemediation`` payload (nearest block snippets + similarity)
+    instead of raising.  Deliberately minimal persistence: the agent's raw
+    result payload is NOT stored on the task and no materializer runs, so a
+    paraphrased quote can never leak into candidate stores or a later merge;
+    the stale result of a rejected writeback stays unwritten exactly like the
+    hard-rejection path.
+    """
+    s = _service()
+    task_id = s._trim_text(task.get("taskId"), max_length=160)
+    stage_id = s._trim_text(task.get("stageId"), max_length=80)
+    agent_role = s._trim_text(task.get("agentRole"), max_length=80)
+    now = s.utc_now_iso()
+    remediation = build_quote_anchor_remediation(
+        quote_audit["mismatches"],
+        quote_audit["blocks_by_id"],
+        recorded_at=now,
+        attempt=1,
+    )
+    parked_task = dict(task)
+    parked_task["status"] = "needs_review"
+    summary = s._trim_text(request_payload.get("summary"), max_length=4000)
+    if summary:
+        parked_task["summary"] = summary
+    parked_task["quoteAnchorRemediation"] = remediation
+    turn = parked_task.get("turn") if isinstance(parked_task.get("turn"), dict) else {}
+    if turn:
+        parked_task["turn"] = {**turn, "status": "needs_review"}
+    parked_task["updatedAt"] = now
+    s._upsert_source_collection_stage_session_task(team_id, run_id, parked_task)
+    if parked_task.get("status") != task.get("status"):
+        # Same guard shape as the claim-materialization gate: sync the stage
+        # round card only when the parking actually changed the task status.
+        s._sync_stage_round_with_source_collection_stage_task(team_id, run_id, parked_task)
+    s._record_workflow_event(
+        "source_collection.stage_session_task_quote_anchor_remediation",
+        team_id,
+        fields={
+            "runId": run_id,
+            "taskId": task_id,
+            "stageId": stage_id,
+            "agentId": s._trim_text(task.get("agentId"), max_length=160),
+            "parkedStatus": "needs_review",
+            "mismatchCount": len(quote_audit["mismatches"]),
+            "remediationAttempt": 1,
+        },
+        level="warning",
+        outcome="needs_review",
+    )
+    return {
+        "schemaVersion": s.SCHEMA_VERSION,
+        "teamId": team_id,
+        "runId": run_id,
+        "taskId": task_id,
+        "stageId": stage_id,
+        "agentId": s._trim_text(task.get("agentId"), max_length=160),
+        "agentRole": agent_role,
+        "task": parked_task,
+        "writeback": {
+            "status": "needs_review",
+            "agentRequestedStatus": "completed",
+            "quoteAnchorRemediation": remediation,
+            "recordedAt": now,
+        },
+        "boundaries": s._source_collection_stage_session_task_boundaries(
+            stage_id=stage_id,
+            agent_role=agent_role,
+        ),
+    }
+
+
 def writeback_source_collection_stage_session_task(
     team_id: str,
     task_id: str,
@@ -329,17 +410,43 @@ def writeback_source_collection_stage_session_task(
         # without verbatim quote anchors used to be accepted and then
         # silently materialize zero claims (production incident
         # stagetask-20260831142807-d31d5a7d).  Reject it at the door instead.
-        quote_anchor_errors = _source_collection_stage_writeback_quote_anchor_errors(
+        # One-shot remediation: a FIRST completed writeback whose quotes are
+        # all supplied but never verbatim is not rejected outright — the task
+        # is parked at needs_review with a structured ``quoteAnchorRemediation``
+        # payload (nearest matching block snippets) so the agent can copy the
+        # exact text and rewrite.  A second mismatch, any missing-quote /
+        # dishonest-empty-source error, or an empty quote falls through to the
+        # historical hard rejection, so the loop is bounded by construction.
+        quote_audit = _source_collection_stage_writeback_quote_anchor_audit(
             normalized_team_id,
             run_id,
             task,
             incoming_result_payload,
         )
-        if quote_anchor_errors:
-            raise s.TeamWorkflowOrchestrationError(
-                "extraction writeback rejected: 提炼回写缺少逐字 quote 锚 —— "
-                + " ".join(quote_anchor_errors[:_EXTRACTION_QUOTE_ANCHOR_ERROR_LIMIT])
+        if quote_audit["hard_errors"] or quote_audit["mismatches"]:
+            prior_quote_remediation = (
+                task.get("quoteAnchorRemediation")
+                if isinstance(task.get("quoteAnchorRemediation"), dict)
+                else {}
             )
+            if quote_audit["hard_errors"] or prior_quote_remediation:
+                rejection_errors = list(quote_audit["hard_errors"]) + quote_anchor_error_message(
+                    quote_audit["mismatches"]
+                )
+                raise s.TeamWorkflowOrchestrationError(
+                    "extraction writeback rejected: 提炼回写缺少逐字 quote 锚 —— "
+                    + " ".join(rejection_errors[:_EXTRACTION_QUOTE_ANCHOR_ERROR_LIMIT])
+                )
+            return _park_source_collection_stage_task_quote_anchor_remediation(
+                normalized_team_id,
+                run_id,
+                task,
+                request_payload,
+                quote_audit,
+            )
+        # Compliant writeback: clear any stale remediation marker so the next
+        # mismatch starts a fresh one-shot cycle.
+        task.pop("quoteAnchorRemediation", None)
         # Fail-closed Challenge v2 evidence-card contract at the acceptance
         # boundary (production blocker run-882610596ddb), layered behind the
         # server-side ``retrieved_at`` backfill above: the backfill resolves
@@ -845,7 +952,52 @@ def get_source_collection_stage_task_context(
             "candidates[].summary 是搜集阶段保存的摘要或元数据，不等于全文；"
             "quote 只能从 candidates[].summary 逐字复制，不能虚构页码、原文引语或全文结论。"
         )
-    if normalized_stage_id == "extraction" or task_agent_role == "source_extractor":
+    if (normalized_stage_id == "extraction" or task_agent_role == "source_extractor") and (
+        normalized_context_mode != "minimal"
+    ):
+        # Quote-anchor supply (run-882610596ddb): the agent can only write a
+        # verbatim quote when the context carries copyable source text, so
+        # every page candidate/record ships its quotable blocks (fetched body
+        # → abstract → stored summary) with explicit per-source access
+        # markers.  The same block texts back the writeback gate, so a quote
+        # copied from ``quotableSources`` always validates.  Minimal mode
+        # stays id-and-locator-only: it can re-read with compact mode to get
+        # the block text.
+        failed_fetch_by_candidate_id = latest_failed_fetch_attempts(
+            [
+                item.get("result")
+                for item in s._source_collection_stage_session_tasks(
+                    normalized_team_id,
+                    normalized_run_id,
+                )
+            ]
+        )
+        context["quotableSources"] = extraction_quotable_sources(
+            [item for item in selected_candidates if isinstance(item, dict)],
+            [item for item in selected_records if isinstance(item, dict)],
+            failed_fetch_by_candidate_id=failed_fetch_by_candidate_id,
+            block_max_chars=QUOTE_BLOCK_MAX_CHARS,
+            total_char_budget=QUOTE_SOURCES_TOTAL_CHAR_BUDGET,
+        )
+        context["usage"]["quoteAnchorInstruction"] = (
+            "quote 锚供给：quotableSources[] 为每个候选/记录给出可逐字复制的原文块"
+            "（blocks[].text，来源优先级 fetched_body>abstract>stored_summary，"
+            "超长块已截断并标注 truncated=true，只允许引用块内文本）；"
+            "claims[].quote 与 evidenceRefs[].quote 必须逐字取自对应 sourceId 的 blocks[].text，"
+            "原样复制，禁止改写、拼接、凭记忆重写或写空串；"
+            "sourceAccess.access=abstract_only 的来源只有摘要级原文"
+            "（引用时写 evidenceStatus=verified_abstract）；"
+            "sourceAccess.access=no_quotable_text 的来源没有可引用原文："
+            "跳过其 quote 并声明 evidenceStatus=missing_evidence_anchor，"
+            "不要为它产出 claim 或空 quote。"
+        )
+        prior_quote_remediation = (
+            task.get("quoteAnchorRemediation")
+            if isinstance(task.get("quoteAnchorRemediation"), dict)
+            else {}
+        )
+        if prior_quote_remediation:
+            context["quoteAnchorRemediation"] = prior_quote_remediation
         # Hard writeback contract for the formal claim path: the server
         # rejects completed extraction writebacks without verbatim quote
         # anchors, so the agent must see the exact field names and quote
@@ -854,12 +1006,18 @@ def get_source_collection_stage_task_context(
             "正式 claim 路径的 completed 提炼回写会被服务端逐条校验："
             "(1) 证据状态字段名是 evidenceStatus（不是 verification_status；"
             "verification_status 只属于 Challenge v2 证据卡元数据）；"
-            "(2) 候选/记录的存储 summary 非空时，每条非 exclude 条目必须至少带一个逐字 quote 锚："
+            "(2) 候选/记录有可引用原文块（quotableSources blocks）或存储 summary 非空时，"
+            "每条非 exclude 条目必须至少带一个逐字 quote 锚："
             "嵌套 claims[]/keyFindings[] 项含 quote，或 evidenceRefs[] 项含 {id, quote}；"
-            "(3) quote 必须是 candidates[].summary 的逐字子串，从上下文原样复制，禁止改写；"
+            "(3) quote 必须是 quotableSources 对应 sourceId 原文块/存储 summary 的逐字子串，"
+            "从上下文原样复制，禁止改写；"
             "引述存储摘要时写 evidenceStatus=verified_abstract；"
-            "(4) 存储 summary 为空的来源必须声明 evidenceStatus=missing_evidence_anchor（诚实跳过，不物化）；"
-            "(5) 缺少逐字 quote 锚的 completed 回写会被拒绝并要求重写。"
+            "(4) 无可引用原文（sourceAccess=no_quotable_text）或存储 summary 为空的来源，"
+            "必须声明 evidenceStatus=missing_evidence_anchor（诚实跳过，不物化），不产空 quote；"
+            "(5) quote 非逐字子串时，首次回写不拒绝：任务停靠 needs_review 并返回"
+            " quoteAnchorRemediation 结构化修正反馈（含最近匹配块片段），只有一次机会；"
+            "修正后重写 completed 即清掉该标记；再次不匹配按契约直接拒绝；"
+            "(6) 空 quote/缺锚的 completed 回写始终被直接拒绝，不进入修正反馈。"
         )
     context["usage"]["continuationHint"] = s._source_collection_context_continuation_hint(
         context["candidatePage"],
