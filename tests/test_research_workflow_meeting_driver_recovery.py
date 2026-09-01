@@ -77,6 +77,7 @@ def _isolate(tmp_path, monkeypatch):
         lambda *_args, **_kwargs: None,
     )
     meeting_driver_work.reset_for_tests()
+    meeting_driver_work.reset_digest_stuck_sweep_throttle_for_tests()
     with meeting_runtime._MEETING_DISCUSSION_JOBS_LOCK:
         meeting_runtime._MEETING_DISCUSSION_JOBS.clear()
     with meeting_runtime._MEETING_DIGEST_JOBS_LOCK:
@@ -1414,3 +1415,162 @@ def test_lapsed_heartbeat_exits_and_never_adopts_successor_lease(
     assert after["workId"] == successor["workId"]
     assert after["leaseExpiresAtMs"] == successor["leaseExpiresAtMs"]
     stop.set()
+
+
+def test_stuck_digest_watchdog_fences_expired_lease_and_writes_retry_entry(
+    tmp_path, monkeypatch
+):
+    """In-process watchdog (2026-09 ghost-lock incident): fence, never re-drive.
+
+    A same-boot ``run_digest`` intent whose crash-fence lease has passed proves
+    its holder wedged inside an unbounded call (the incident's ``submit`` lock
+    wait).  The watchdog must fail the attempt, write the meeting's structured
+    ``summaryDraftError`` retry entry, leave a fresh-lease draft untouched, and
+    never re-run the LLM (that stays the startup sweep's job).
+    """
+    _isolate(tmp_path, monkeypatch)
+    team_id, agent_ids = _team(tmp_path, monkeypatch)
+
+    stuck = _amend_meeting(
+        team_id,
+        _create_open_meeting(team_id, agent_ids, "meeting-digest-watchdog-stuck"),
+        status="summarizing",
+    )
+    _append_intent(
+        team_id,
+        stuck["meetingRoundId"],
+        actionKind=meeting_driver_work.ACTION_RUN_DIGEST,
+        workerBootId=meeting_driver_work.worker_boot_id(),
+        leaseExpiresAtMs=int(time.time() * 1000) - 5_000,
+        sourceHash="c" * 64,
+    )
+    healthy = _amend_meeting(
+        team_id,
+        _create_open_meeting(team_id, agent_ids, "meeting-digest-watchdog-ok"),
+        status="summarizing",
+    )
+    meeting_driver_work.record_intent(
+        team_id,
+        healthy["meetingRoundId"],
+        status="running",
+        action_kind=meeting_driver_work.ACTION_RUN_DIGEST,
+        source_hash="d" * 64,
+    )
+
+    def _no_redrive(*_args, **_kwargs):
+        raise AssertionError("the watchdog must never re-drive digest work")
+
+    monkeypatch.setattr(
+        meeting_runtime, "schedule_meeting_digest_redrive", _no_redrive
+    )
+
+    summary = meeting_driver_work.sweep_stuck_digest_works(force=True)
+
+    assert summary["scanned"] == 2
+    assert summary["fenced"] == 1
+    assert summary["summaryErrors"] == 1
+    fenced = meeting_driver_work.latest_intent(
+        team_id, stuck["meetingRoundId"], action_kind=meeting_driver_work.ACTION_RUN_DIGEST
+    )
+    assert fenced["status"] == "failed"
+    assert fenced["lastProblem"] == meeting_driver_work.STUCK_DIGEST_PROBLEM
+    assert fenced["sourceHash"] == "c" * 64
+    guarded = meetings.get_meeting_round(team_id, stuck["meetingRoundId"])["meetingRound"]
+    assert guarded["status"] == "summarizing"
+    assert guarded["summaryDraftError"]["code"] == "summary_draft_stuck"
+    assert guarded["summaryDraftError"]["remediationLabel"] == "重试生成纪要"
+    still_running = meeting_driver_work.latest_intent(
+        team_id, healthy["meetingRoundId"], action_kind=meeting_driver_work.ACTION_RUN_DIGEST
+    )
+    assert still_running["status"] == "running"
+
+    # Idempotent: the fenced attempt is terminal, the second pass fences nothing.
+    second = meeting_driver_work.sweep_stuck_digest_works(force=True)
+    assert second["fenced"] == 0
+    assert second["summaryErrors"] == 0
+
+
+def test_stuck_digest_watchdog_uses_deadline_and_skips_progressed_meetings(
+    tmp_path, monkeypatch
+):
+    """Deadline-only intents go stale at the governed deadline; done meetings
+    keep their state (the stale work record is fenced without writing an
+    error entry over a draft that already persisted)."""
+    _isolate(tmp_path, monkeypatch)
+    team_id, agent_ids = _team(tmp_path, monkeypatch)
+    now_ms = int(time.time() * 1000)
+
+    deadline_passed = _amend_meeting(
+        team_id,
+        _create_open_meeting(team_id, agent_ids, "meeting-watchdog-deadline"),
+        status="summarizing",
+    )
+    _append_intent(
+        team_id,
+        deadline_passed["meetingRoundId"],
+        actionKind=meeting_driver_work.ACTION_RUN_DIGEST,
+        workerBootId=meeting_driver_work.worker_boot_id(),
+        leaseExpiresAtMs=0,
+        deadlineAtMs=now_ms - 1_000,
+    )
+    progressed = _amend_meeting(
+        team_id,
+        _create_open_meeting(team_id, agent_ids, "meeting-watchdog-approved"),
+        status="awaiting_approval",
+    )
+    _append_intent(
+        team_id,
+        progressed["meetingRoundId"],
+        actionKind=meeting_driver_work.ACTION_RUN_DIGEST,
+        workerBootId=meeting_driver_work.worker_boot_id(),
+        leaseExpiresAtMs=now_ms - 1_000,
+    )
+
+    summary = meeting_driver_work.sweep_stuck_digest_works(force=True)
+
+    assert summary["scanned"] == 2
+    assert summary["fenced"] == 2
+    assert summary["summaryErrors"] == 1
+    fenced_deadline = meeting_driver_work.latest_intent(
+        team_id, deadline_passed["meetingRoundId"], action_kind=meeting_driver_work.ACTION_RUN_DIGEST
+    )
+    assert fenced_deadline["status"] == "failed"
+    assert (
+        fenced_deadline["lastProblem"] == meeting_driver_work.STUCK_DIGEST_PROBLEM
+    )
+    guarded = meetings.get_meeting_round(
+        team_id, deadline_passed["meetingRoundId"]
+    )["meetingRound"]
+    assert guarded["summaryDraftError"]["code"] == "summary_draft_stuck"
+    approved = meetings.get_meeting_round(
+        team_id, progressed["meetingRoundId"]
+    )["meetingRound"]
+    assert approved["status"] == "awaiting_approval"
+    assert "summaryDraftError" not in approved
+
+
+def test_stuck_digest_watchdog_throttles_between_ticks(tmp_path, monkeypatch):
+    """The watchdog is hosted by a fast tick, so it self-throttles; tests can
+    bypass with force=True or reset the stamp."""
+    _isolate(tmp_path, monkeypatch)
+    base_ms = 1_000_000_000
+
+    first = meeting_driver_work.sweep_stuck_digest_works(now_ms=base_ms)
+    assert first.get("throttled") is None
+    throttled = meeting_driver_work.sweep_stuck_digest_works(
+        now_ms=base_ms + 1_000
+    )
+    assert throttled.get("throttled") is True
+    assert throttled["fenced"] == 0
+    after_interval = meeting_driver_work.sweep_stuck_digest_works(
+        now_ms=base_ms + meeting_driver_work.DIGEST_STUCK_SWEEP_INTERVAL_MS + 1
+    )
+    assert after_interval.get("throttled") is None
+    forced = meeting_driver_work.sweep_stuck_digest_works(
+        now_ms=base_ms + meeting_driver_work.DIGEST_STUCK_SWEEP_INTERVAL_MS + 2,
+        force=True,
+    )
+    assert forced.get("throttled") is None
+    meeting_driver_work.reset_digest_stuck_sweep_throttle_for_tests()
+    after_reset = meeting_driver_work.sweep_stuck_digest_works(now_ms=base_ms)
+    assert after_reset.get("throttled") is None

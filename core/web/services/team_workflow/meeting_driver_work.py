@@ -35,6 +35,14 @@ progress is recent.  A driver wedged inside an unbounded blocking call stops
 advancing its stamp, so the heartbeat stops renewing, fences the attempt as
 ``failed`` once, and hands the meeting back to recovery — a same-boot wedge
 therefore has a real in-run exit instead of a permanently renewed lease.
+
+Digest wedges have no heartbeat (the lease is a crash fence), so an in-process
+watchdog (:func:`sweep_stuck_digest_works`, hosted by the production
+maintenance tick) fences ``run_digest`` intents still ``running`` past their
+lease or governed deadline and writes the meeting's structured
+``summaryDraftError`` retry entry.  It never re-drives: re-running the LLM
+stays the startup sweep's job, and a restarted backend re-drives the fenced
+failed attempt through the existing ``_recover_one_digest`` path.
 """
 
 from __future__ import annotations
@@ -757,6 +765,255 @@ def _recover_one_digest(
 
     result = meeting_runtime.schedule_meeting_digest_redrive(team_id, meeting_round_id)
     return "rescheduled" if str(result.get("status") or "") == "scheduled" else "skipped"
+
+
+# Bounded problem marker stamped by the in-process digest watchdog.
+STUCK_DIGEST_PROBLEM = "digest_draft_stuck_past_bounded_window"
+# In-process watchdog cadence: the production maintenance tick calls
+# ``sweep_stuck_digest_works`` far more often than the scan needs to run.
+DIGEST_STUCK_SWEEP_INTERVAL_MS = 30_000
+DIGEST_STUCK_SWEEP_INTERVAL_ENV = "VIBELUTION_DIGEST_STUCK_SWEEP_INTERVAL_MS"
+# Structured summaryDraftError written for a fenced stuck digest so the
+# meeting projection exposes a working retry entry without a restart.
+_STUCK_SUMMARY_DRAFT_ERROR = {
+    "code": "summary_draft_stuck",
+    "message": "纪要生成超时未完成，已结束本次尝试；请重试生成纪要。",
+    "remediationLabel": "重试生成纪要",
+}
+# Throttle stamp for the watchdog; touched only under _LOCK.
+_LAST_DIGEST_STUCK_SWEEP_MS: int | None = None
+
+
+def _digest_stuck_sweep_interval_ms() -> int:
+    raw = str(os.environ.get(DIGEST_STUCK_SWEEP_INTERVAL_ENV) or "").strip()
+    if raw:
+        try:
+            value = int(raw)
+        except ValueError:
+            return DIGEST_STUCK_SWEEP_INTERVAL_MS
+        if value > 0:
+            return max(value, 1000)
+    return DIGEST_STUCK_SWEEP_INTERVAL_MS
+
+
+def _digest_stuck_sweep_due(now_ms: int) -> bool:
+    global _LAST_DIGEST_STUCK_SWEEP_MS
+    interval = _digest_stuck_sweep_interval_ms()
+    with _LOCK:
+        last = _LAST_DIGEST_STUCK_SWEEP_MS
+        if last is not None and now_ms - last < interval:
+            return False
+        _LAST_DIGEST_STUCK_SWEEP_MS = now_ms
+        return True
+
+
+def reset_digest_stuck_sweep_throttle_for_tests() -> None:
+    """Test seam: forget the last watchdog run so the next sweep executes."""
+
+    global _LAST_DIGEST_STUCK_SWEEP_MS
+    with _LOCK:
+        _LAST_DIGEST_STUCK_SWEEP_MS = None
+
+
+def _digest_work_stuck(work: Mapping[str, Any], now_ms: int) -> bool:
+    """A running digest intent whose fence has passed proves a wedged holder.
+
+    The digest lease derives from the bounded review-call budget actually in
+    effect and is clamped to the meeting deadline, so a lease that expired
+    in-process cannot belong to a healthy call; deadline-only records (no
+    lease) go stale exactly when their governed deadline passes.
+    """
+
+    if str(work.get("status") or "").strip().lower() != STATUS_RUNNING:
+        return False
+    if _lease_expired(work, now_ms):
+        return True
+    deadline_at_ms = work.get("deadlineAtMs")
+    return (
+        isinstance(deadline_at_ms, int)
+        and not isinstance(deadline_at_ms, bool)
+        and deadline_at_ms > 0
+        and now_ms >= deadline_at_ms
+    )
+
+
+def sweep_stuck_digest_works(
+    *,
+    now_ms: int | None = None,
+    force: bool = False,
+) -> dict[str, Any]:
+    """In-process watchdog: fail ``run_digest`` intents stuck past their fence.
+
+    The 2026-09 ghost-lock incident left digest drafts waiting on the module
+    lock forever while their durable intent stayed ``running``; only a
+    restart-time sweep could recover them.  This sweep is hosted by the
+    resident maintenance tick (no second scheduler): for every meeting whose
+    latest ``run_digest`` intent is ``running`` past its lease or governed
+    deadline it fences the attempt ``failed`` and writes a structured
+    ``summaryDraftError`` (``summary_draft_stuck``, retry label) so the
+    projection offers a working retry entry.  It never re-drives — re-running
+    the LLM stays the startup sweep's job — and it never raises: one broken
+    team or meeting is isolated into ``skipped``.  Self-throttled; pass
+    ``force=True`` (tests) to bypass the throttle.
+    """
+
+    summary: dict[str, Any] = {
+        "teams": 0,
+        "scanned": 0,
+        "fenced": 0,
+        "summaryErrors": 0,
+        "skipped": 0,
+    }
+    current_ms = int(time.time() * 1000) if now_ms is None else int(now_ms)
+    if not force and not _digest_stuck_sweep_due(current_ms):
+        summary["throttled"] = True
+        return summary
+    try:
+        team_ids = _team_ids_with_meeting_rounds()
+    except Exception:  # noqa: BLE001 - the watchdog must never break its host
+        _record_digest_stuck_sweep_event(summary)
+        return summary
+    for team_id in team_ids:
+        summary["teams"] += 1
+        try:
+            _sweep_team_stuck_digest_works(team_id, summary, current_ms)
+        except Exception:  # noqa: BLE001 - one broken team cannot stop the sweep
+            summary["skipped"] += 1
+    _record_digest_stuck_sweep_event(summary)
+    return summary
+
+
+def _sweep_team_stuck_digest_works(
+    team_id: str,
+    summary: dict[str, Any],
+    now_ms: int,
+) -> None:
+    latest: dict[str, Mapping[str, Any]] = {}
+    for record in _read_records(work_path(team_id)):
+        if str(record.get("actionKind") or "") != ACTION_RUN_DIGEST:
+            continue
+        meeting_round_id = str(record.get("meetingRoundId") or "")
+        if meeting_round_id:
+            latest[meeting_round_id] = record
+    meeting_rounds = _meeting_rounds()
+    for meeting_round_id, work in latest.items():
+        summary["scanned"] += 1
+        if not _digest_work_stuck(work, now_ms):
+            summary["skipped"] += 1
+            continue
+        work_id = str(work.get("workId") or "")
+        overdue_ms = _stuck_overdue_ms(work, now_ms)
+        record_intent(
+            team_id,
+            meeting_round_id,
+            status=STATUS_FAILED,
+            action_kind=ACTION_RUN_DIGEST,
+            last_problem=STUCK_DIGEST_PROBLEM,
+        )
+        summary["fenced"] += 1
+        summary_error_written = False
+        try:
+            meeting = meeting_rounds.get_meeting_round(team_id, meeting_round_id)[
+                "meetingRound"
+            ]
+        except Exception:  # noqa: BLE001 - meeting read failure skips the error write
+            meeting = None
+        if meeting is not None and (
+            str(meeting.get("status") or "").strip().lower() == "summarizing"
+        ):
+            try:
+                meeting_rounds.record_meeting_summary_draft_error(
+                    team_id,
+                    meeting_round_id,
+                    dict(_STUCK_SUMMARY_DRAFT_ERROR),
+                )
+                summary_error_written = True
+                summary["summaryErrors"] += 1
+            except Exception:  # noqa: BLE001 - retry entry is best-effort; the fenced work stays failed
+                summary_error_written = False
+        _record_digest_stuck_event(
+            team_id,
+            meeting_round_id,
+            work_id=work_id,
+            overdue_ms=overdue_ms,
+            summary_error_written=summary_error_written,
+        )
+
+
+def _stuck_overdue_ms(work: Mapping[str, Any], now_ms: int) -> int:
+    """How far past its fence the stuck intent was when fenced."""
+
+    expires_at_ms = work.get("leaseExpiresAtMs")
+    if isinstance(expires_at_ms, int) and not isinstance(expires_at_ms, bool) and expires_at_ms > 0:
+        return max(0, now_ms - expires_at_ms)
+    deadline_at_ms = work.get("deadlineAtMs")
+    if isinstance(deadline_at_ms, int) and not isinstance(deadline_at_ms, bool) and deadline_at_ms > 0:
+        return max(0, now_ms - deadline_at_ms)
+    return 0
+
+
+def _record_digest_stuck_event(
+    team_id: str,
+    meeting_round_id: str,
+    *,
+    work_id: str,
+    overdue_ms: int,
+    summary_error_written: bool,
+) -> None:
+    """Bounded ghost-lock triage evidence for one fenced digest attempt."""
+
+    try:
+        from core.web.services.runtime_scene_service import (
+            record_runtime_scene_event_quietly,
+        )
+
+        record_runtime_scene_event_quietly(
+            "team_workflow",
+            "meeting_digest_stuck",
+            "meeting_digest.stuck_fenced",
+            message="Running digest intent fenced after its bounded fence passed.",
+            level="warning",
+            outcome="failed",
+            fields={
+                "teamId": str(team_id),
+                "meetingRoundId": str(meeting_round_id),
+                "workId": str(work_id),
+                "overdueMs": max(0, int(overdue_ms)),
+                "summaryDraftErrorWritten": bool(summary_error_written),
+            },
+            lifecycle=True,
+        )
+    except Exception:  # noqa: BLE001 - diagnostics must never alter recovery
+        return
+
+
+def _record_digest_stuck_sweep_event(summary: Mapping[str, Any]) -> None:
+    """Bounded watchdog evidence, following the startup sweep quiet pattern."""
+
+    try:
+        from core.web.services.runtime_scene_service import (
+            record_runtime_scene_event_quietly,
+        )
+
+        record_runtime_scene_event_quietly(
+            "team_workflow",
+            "meeting_digest_stuck",
+            "meeting_digest.stuck_sweep_completed",
+            message="Stuck digest work watchdog sweep finished.",
+            level="info",
+            outcome="completed",
+            fields={
+                "teams": int(summary.get("teams") or 0),
+                "scanned": int(summary.get("scanned") or 0),
+                "fenced": int(summary.get("fenced") or 0),
+                "summaryErrors": int(summary.get("summaryErrors") or 0),
+                "skipped": int(summary.get("skipped") or 0),
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        # A diagnostic outage must not alter the watchdog outcome.
+        return
 
 
 def _close_or_backfill_identity_gap(

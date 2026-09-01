@@ -218,6 +218,22 @@ export function HypothesisFirstMeetingOps(props: {
       );
       invalidate();
     },
+    onError: (error) => {
+      refreshOnConflict(error);
+      // A rejected draft request (bounded server lock timeout 503, network
+      // fault, state conflict) must be visible: surface the error text —
+      // including the 503 detail the API client already unwraps — through
+      // the same notice path as a blocked prepare, so the round never sits
+      // silently without a digest while the request already failed.
+      setDraftBlockedNotice(
+        isHypothesisFirstCommandStateConflict(error)
+          ? (isZh
+            ? "状态已更新，请重新确认。"
+            : "The workflow state changed. Review it and confirm again.")
+          : (isZh ? "纪要生成请求失败：" : "The digest request failed: ")
+            + (error instanceof Error && error.message ? error.message : String(error)),
+      );
+    },
   });
   const autoDraftedMeetingIds = useRef(new Set<string>());
   const roundStatus = roundQuery.data?.meetingRound?.status ?? "";
@@ -423,6 +439,7 @@ export function HypothesisFirstMeetingOps(props: {
       setApproveBlockedReason(null);
       invalidate();
     },
+    onError: refreshOnConflict,
   });
   const reopenReviewMutation = useMutation<unknown, Error, void>({
     mutationFn: () => {
@@ -453,6 +470,7 @@ export function HypothesisFirstMeetingOps(props: {
       );
       invalidate();
     },
+    onError: refreshOnConflict,
   });
   const collectionRunId = props.nextAction.collectionRunId || "";
   const canHandoff = props.nextAction.command === "retry_handoff"

@@ -21,6 +21,7 @@ from core.web.services import (
     team_service,
     team_workflow_orchestration_service as s,
 )
+from core.web.services.team_workflow import meeting_driver_work
 from core.web.services.team_workflow.research_runtime import (
     service as research_runtime_service_module,
 )
@@ -444,3 +445,34 @@ def test_worker_tick_reconciles_expired_task_bundles(
         and str(item.get("idempotencyKey") or "").startswith("expire:")
     ]
     assert expire_receipts
+
+
+def test_maintenance_tick_hosts_stuck_digest_watchdog(
+    tmp_path, monkeypatch, restore_runtime_service_singleton
+):
+    """run_maintenance_once is the in-process digest watchdog host.
+
+    The 2026-09 ghost-lock incident left stuck ``run_digest`` work recoverable
+    only by a restart.  The serial maintenance tick must peek the meeting
+    driver watchdog (same host pattern as the task-bundle reconcile) so a
+    wedged digest is fenced and given a retry entry without a restart; the
+    sweep itself is owned and covered by the meeting-driver recovery tests.
+    """
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    runtime = build_workflow_runtime(
+        tmp_path / "ledger.sqlite3",
+        checkpoint_path=tmp_path / "ledger-checkpoints.sqlite",
+    )
+    calls: list[dict] = []
+
+    def _sweep(*args, **kwargs):
+        calls.append(kwargs)
+        return {"teams": 0, "scanned": 0, "fenced": 0, "summaryErrors": 0, "skipped": 0}
+
+    monkeypatch.setattr(meeting_driver_work, "sweep_stuck_digest_works", _sweep)
+    try:
+        handled = runtime.run_maintenance_once(limit=2)
+    finally:
+        runtime.close()
+    assert calls == [{}]
+    assert handled >= 0

@@ -37,7 +37,8 @@ import os
 import re
 import tempfile
 import threading
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -58,6 +59,14 @@ SCHEMA_VERSION = 2
 LEGACY_DIGEST_SCHEMA_VERSION = 1
 DEFAULT_MODE = "formal"
 _LOCK = threading.RLock()
+# Bounded waits for the module lock (2026-09 ghost-lock incident): every
+# acquirer must either enter within its budget or fail with a structured
+# timeout instead of blocking its thread forever.  Writers persist under the
+# lock (append + fsync) and get the larger budget; readers only parse JSONL.
+DEFAULT_WRITE_LOCK_TIMEOUT_SECONDS = 60.0
+DEFAULT_READ_LOCK_TIMEOUT_SECONDS = 10.0
+_WRITE_LOCK_TIMEOUT_ENV = "VIBELUTION_MEETING_ROUNDS_WRITE_LOCK_TIMEOUT_SECONDS"
+_READ_LOCK_TIMEOUT_ENV = "VIBELUTION_MEETING_ROUNDS_READ_LOCK_TIMEOUT_SECONDS"
 _SCOPE_FIELDS = ("program", "theme", "campaign", "question", "branch", "workflow")
 
 _MARKER_PREFIXES = (
@@ -84,6 +93,99 @@ class ResearchMeetingRoundError(RuntimeError):
 
 class ResearchMeetingRoundNotFoundError(ResearchMeetingRoundError):
     """Raised when a meeting round does not exist."""
+
+
+class MeetingRoundsLockTimeoutError(ResearchMeetingRoundError):
+    """Raised when acquiring the module lock exceeds its bounded wait.
+
+    Carries the waiter identity (``caller``) and the budget it exceeded
+    (``waited_seconds``) so the route layer can surface a structured 503 and
+    the timeout event can pin down where the next ghost-lock wait happened.
+    """
+
+    code = "meeting_rounds_lock_timeout"
+
+    def __init__(self, *, caller: str, timeout_seconds: float) -> None:
+        self.caller = str(caller)
+        self.waited_seconds = float(timeout_seconds)
+        super().__init__(
+            f"meeting rounds lock wait exceeded {self.waited_seconds:.1f}s "
+            f"(caller={self.caller})"
+        )
+
+
+def _lock_timeout_seconds(env_var: str, default_seconds: float) -> float:
+    raw = str(os.environ.get(env_var) or "").strip()
+    if not raw:
+        return default_seconds
+    try:
+        value = float(raw)
+    except ValueError:
+        return default_seconds
+    return value if value > 0 else default_seconds
+
+
+def _record_lock_timeout_scene(exc: MeetingRoundsLockTimeoutError) -> None:
+    """Best-effort ghost-lock evidence: waiter identity and wait budget."""
+
+    try:
+        from core.web.services.runtime_scene_service import (
+            record_runtime_scene_event_quietly,
+        )
+
+        record_runtime_scene_event_quietly(
+            "team_workflow",
+            "meeting_rounds_lock",
+            "meeting_rounds.lock_timeout",
+            message="Bounded meeting rounds lock wait expired without entering.",
+            level="error",
+            outcome="failed",
+            fields={
+                "caller": exc.caller,
+                "waitedSeconds": exc.waited_seconds,
+            },
+            lifecycle=True,
+        )
+    except Exception:  # noqa: BLE001 - diagnostics must never alter control flow
+        return
+
+
+@contextmanager
+def _bounded_lock(caller: str, *, timeout_seconds: float) -> Iterator[None]:
+    # RLock reentrancy is preserved: a same-thread reacquire returns True
+    # immediately, and each enter releases exactly once.
+    if not _LOCK.acquire(timeout=timeout_seconds):
+        exc = MeetingRoundsLockTimeoutError(
+            caller=caller, timeout_seconds=timeout_seconds
+        )
+        _record_lock_timeout_scene(exc)
+        raise exc
+    try:
+        yield
+    finally:
+        _LOCK.release()
+
+
+@contextmanager
+def _write_lock(caller: str) -> Iterator[None]:
+    with _bounded_lock(
+        caller,
+        timeout_seconds=_lock_timeout_seconds(
+            _WRITE_LOCK_TIMEOUT_ENV, DEFAULT_WRITE_LOCK_TIMEOUT_SECONDS
+        ),
+    ):
+        yield
+
+
+@contextmanager
+def _read_lock(caller: str) -> Iterator[None]:
+    with _bounded_lock(
+        caller,
+        timeout_seconds=_lock_timeout_seconds(
+            _READ_LOCK_TIMEOUT_ENV, DEFAULT_READ_LOCK_TIMEOUT_SECONDS
+        ),
+    ):
+        yield
 
 
 def _project_root() -> Path:
@@ -361,7 +463,7 @@ def create_meeting_round(team_id: str, payload: Mapping[str, Any] | None = None)
         raise ContractValidationError("a meeting round requires at least one participant")
     parsed = MeetingRound.from_dict(record)
     record["rounds"] = parsed.rounds
-    with _LOCK:
+    with _write_lock("create_meeting_round"):
         existing = _latest_by_id(_read_jsonl(_rounds_path(normalized_team_id)), "meetingRoundId", meeting_round_id)
         if existing is not None and existing.get("schemaVersion") is not None:
             if _meeting_definition(existing) != _meeting_definition(record):
@@ -451,7 +553,7 @@ def persist_meeting_discussion_scope(
         raise ContractValidationError(
             "discussionScopeHash does not match the discussion scope"
         )
-    with _LOCK:
+    with _write_lock("persist_meeting_discussion_scope"):
         meeting = _load_meeting_round(normalized_team_id, normalized_meeting_id)
         existing = meeting.get("discussionScope")
         if isinstance(existing, Mapping):
@@ -504,7 +606,7 @@ def persist_preformal_meeting_discussion_scope(
         raise ContractValidationError(
             "discussionScopeHash does not match the preformal discussion scope"
         )
-    with _LOCK:
+    with _write_lock("persist_preformal_meeting_discussion_scope"):
         meeting = _load_meeting_round(normalized_team_id, normalized_meeting_id)
         existing = meeting.get("discussionScope")
         if isinstance(existing, Mapping):
@@ -565,7 +667,7 @@ def persist_challenge_meeting_deadline_policy(
 
     normalized_team_id = assert_team_exists(team_id)
     normalized_meeting_id = str(meeting_round_id or "").strip()
-    with _LOCK:
+    with _write_lock("persist_challenge_meeting_deadline_policy"):
         meeting = _load_meeting_round(normalized_team_id, normalized_meeting_id)
         if not is_challenge_meeting(meeting):
             return meeting
@@ -620,7 +722,7 @@ def bind_meeting_chat_room_round(
         raise ResearchMeetingRoundError("Meeting round id is required.")
     if not normalized_room_id or not normalized_room_round_id:
         raise ContractValidationError("binding a meeting round requires roomId and roundId")
-    with _LOCK:
+    with _write_lock("bind_meeting_chat_room_round"):
         meeting_round = _load_meeting_round(normalized_team_id, normalized_round_id)
         status = str(meeting_round.get("status") or "").strip().lower()
         if status != "open":
@@ -742,7 +844,7 @@ def supersede_empty_discussion_meeting(
     normalized_round_id = str(meeting_round_id or "").strip()
     if not normalized_round_id:
         raise ResearchMeetingRoundError("Meeting round id is required.")
-    with _LOCK:
+    with _read_lock("supersede_empty_discussion_meeting.check"):
         meeting_round = _load_meeting_round(normalized_team_id, normalized_round_id)
     status = str(meeting_round.get("status") or "").strip().lower()
     if status == "closed" and str(meeting_round.get("recoveryReason") or "") == (
@@ -787,7 +889,7 @@ def supersede_empty_discussion_meeting(
         "remediationLabel": "重新发起讨论",
     }
     closed_record["updatedAt"] = now
-    with _LOCK:
+    with _write_lock("supersede_empty_discussion_meeting.commit"):
         latest = _load_meeting_round(normalized_team_id, normalized_round_id)
         if str(latest.get("status") or "").strip().lower() != status:
             raise ResearchMeetingRoundError(
@@ -819,7 +921,7 @@ def terminate_meeting_execution(
     normalized_reason = str(reason or "").strip()
     if not normalized_round_id or not normalized_reason:
         raise ResearchMeetingRoundError("meeting id and terminal reason are required")
-    with _LOCK:
+    with _write_lock("terminate_meeting_execution"):
         meeting_round = _load_meeting_round(normalized_team_id, normalized_round_id)
         status = str(meeting_round.get("status") or "").strip().lower()
         if status == "closed" and str(meeting_round.get("executionStatus") or "") == "stopped":
@@ -895,7 +997,7 @@ def stop_discussion_meeting(
     normalized_reason = str(reason or "").strip() or "operator_stop_discussion"
     if not normalized_round_id:
         raise ResearchMeetingRoundError("Meeting round id is required.")
-    with _LOCK:
+    with _read_lock("stop_discussion_meeting.check"):
         meeting_round = _load_meeting_round(normalized_team_id, normalized_round_id)
     if (
         str(meeting_round.get("meetingType") or "").strip().lower()
@@ -957,7 +1059,7 @@ def stop_discussion_meeting(
         }
         result_status = "superseded"
     closed_record["updatedAt"] = now
-    with _LOCK:
+    with _write_lock("stop_discussion_meeting.commit"):
         latest = _load_meeting_round(normalized_team_id, normalized_round_id)
         if str(latest.get("status") or "").strip().lower() != status:
             raise ResearchMeetingRoundError(
@@ -1346,7 +1448,7 @@ def record_meeting_summary_draft_error(
     normalized_round_id = str(meeting_round_id or "").strip()
     if not normalized_round_id:
         raise ResearchMeetingRoundError("Meeting round id is required.")
-    with _LOCK:
+    with _write_lock("record_meeting_summary_draft_error"):
         meeting_round = _load_meeting_round(normalized_team_id, normalized_round_id)
         updated = dict(meeting_round)
         if str(updated.get("status") or "").strip().lower() == "open":
@@ -1385,7 +1487,7 @@ def begin_meeting_summary(
     normalized_round_id = str(meeting_round_id or "").strip()
     if not normalized_round_id:
         raise ResearchMeetingRoundError("Meeting round id is required.")
-    with _LOCK:
+    with _read_lock("begin_meeting_summary.check"):
         meeting_round = _load_meeting_round(normalized_team_id, normalized_round_id)
         _ensure_transition_from(meeting_round, "open", "summarizing")
         bound_round_ids = _normalized_str_list(meeting_round.get("chatRoomRoundIds"))
@@ -1403,7 +1505,7 @@ def begin_meeting_summary(
             raise ResearchMeetingRoundError(
                 "discussion round is still running; wait for completion or pass human_triggered=True"
             )
-    with _LOCK:
+    with _write_lock("begin_meeting_summary.commit"):
         meeting_round = _load_meeting_round(normalized_team_id, normalized_round_id)
         _ensure_transition_from(meeting_round, "open", "summarizing")
         updated = dict(meeting_round)
@@ -1462,7 +1564,7 @@ def submit_meeting_digest_draft(
     if not normalized_round_id:
         raise ResearchMeetingRoundError("Meeting round id is required.")
     normalized_draft = dict(draft) if isinstance(draft, Mapping) else {}
-    with _LOCK:
+    with _write_lock("submit_meeting_digest_draft"):
         meeting_round = _load_meeting_round(normalized_team_id, normalized_round_id)
         _ensure_transition_from(meeting_round, "summarizing", "awaiting_approval")
         _validate_digest_draft(normalized_draft)
@@ -1521,7 +1623,7 @@ def reject_meeting_digest_draft(
     normalized_round_id = str(meeting_round_id or "").strip()
     if not normalized_round_id:
         raise ResearchMeetingRoundError("Meeting round id is required.")
-    with _LOCK:
+    with _write_lock("reject_meeting_digest_draft"):
         meeting_round = _load_meeting_round(normalized_team_id, normalized_round_id)
         _ensure_transition_from(meeting_round, "awaiting_approval", "summarizing")
         updated = dict(meeting_round)
@@ -1763,7 +1865,7 @@ def _persist_closure_artifacts(
         record_personal_memory_candidates,
     )
 
-    with _LOCK:
+    with _write_lock("_persist_closure_artifacts"):
         appended_digest = _latest_by_id(
             _read_jsonl(_digests_path(normalized_team_id)),
             "digestId",
@@ -1893,7 +1995,7 @@ def approve_meeting_closure(
     if not normalized_round_id:
         raise ResearchMeetingRoundError("Meeting round id is required.")
     request = dict(payload) if isinstance(payload, Mapping) else {}
-    with _LOCK:
+    with _read_lock("approve_meeting_closure.check"):
         meeting_round = _load_meeting_round(normalized_team_id, normalized_round_id)
         current = str(meeting_round.get("status") or "").strip().lower()
         if current == "closed":
@@ -1954,7 +2056,7 @@ def approve_meeting_closure(
         now,
         closure_hash=_approval_closure_hash(request, digest_draft),
     )
-    with _LOCK:
+    with _write_lock("approve_meeting_closure.commit"):
         _append_round_record(normalized_team_id, closed_record)
     return {
         "schemaVersion": SCHEMA_VERSION,
@@ -1994,7 +2096,7 @@ def close_meeting_round(
     if not normalized_round_id:
         raise ResearchMeetingRoundError("Meeting round id is required.")
     request = dict(payload) if isinstance(payload, Mapping) else {}
-    with _LOCK:
+    with _read_lock("close_meeting_round.check"):
         meeting_round = _load_meeting_round(normalized_team_id, normalized_round_id)
         current_status = str(meeting_round.get("status") or "").strip().lower()
         if current_status == "closed":
@@ -2036,7 +2138,7 @@ def close_meeting_round(
         now,
         closure_hash=_closure_hash(request),
     )
-    with _LOCK:
+    with _write_lock("close_meeting_round.commit"):
         _append_round_record(normalized_team_id, closed_record)
     return {
         "schemaVersion": SCHEMA_VERSION,
@@ -2072,7 +2174,7 @@ def list_meeting_rounds(
         )
         if str(item or "").strip()
     }
-    with _LOCK:
+    with _read_lock("list_meeting_rounds"):
         records = _read_jsonl(_rounds_path(normalized_team_id))
     latest: dict[str, dict[str, Any]] = {}
     for record in records:
@@ -2100,7 +2202,7 @@ def get_meeting_round(team_id: str, meeting_round_id: str) -> dict[str, Any]:
 
     normalized_team_id = assert_team_exists(team_id)
     normalized_round_id = str(meeting_round_id or "").strip()
-    with _LOCK:
+    with _read_lock("get_meeting_round"):
         record = _load_meeting_round(normalized_team_id, normalized_round_id)
     return {
         "schemaVersion": SCHEMA_VERSION,

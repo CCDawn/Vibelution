@@ -504,3 +504,91 @@ def test_stop_discussion_meeting_refuses_still_running_rounds(tmp_path, monkeypa
         meetings.stop_discussion_meeting(team_id, "meeting-stop-live")
     live = meetings.get_meeting_round(team_id, "meeting-stop-live")["meetingRound"]
     assert live["status"] == "open"
+
+
+def test_module_lock_timeouts_are_bounded_and_structured(tmp_path, monkeypatch):
+    """The module lock is bounded: a blocked waiter fails with the structured
+    timeout instead of hanging forever (2026-09 ghost-lock incident)."""
+
+    import threading
+
+    team_id = _team(tmp_path, monkeypatch)
+    meetings.create_meeting_round(team_id, _meeting())
+    monkeypatch.setenv("VIBELUTION_MEETING_ROUNDS_READ_LOCK_TIMEOUT_SECONDS", "0.05")
+    monkeypatch.setenv("VIBELUTION_MEETING_ROUNDS_WRITE_LOCK_TIMEOUT_SECONDS", "0.05")
+
+    acquired = threading.Event()
+    release = threading.Event()
+
+    def _hold_lock_forever():
+        meetings._LOCK.acquire()
+        acquired.set()
+        release.wait(5.0)
+        meetings._LOCK.release()
+
+    holder = threading.Thread(target=_hold_lock_forever, daemon=True)
+    holder.start()
+    assert acquired.wait(5.0)
+    try:
+        with pytest.raises(meetings.MeetingRoundsLockTimeoutError) as read_error:
+            meetings.get_meeting_round(team_id, "meeting-demo-1")
+        assert read_error.value.code == "meeting_rounds_lock_timeout"
+        assert read_error.value.caller == "get_meeting_round"
+        assert read_error.value.waited_seconds == 0.05
+
+        with pytest.raises(meetings.MeetingRoundsLockTimeoutError) as write_error:
+            meetings.submit_meeting_digest_draft(
+                team_id, "meeting-demo-1", {"summary": "blocked draft"}
+            )
+        assert write_error.value.code == "meeting_rounds_lock_timeout"
+        assert write_error.value.caller == "submit_meeting_digest_draft"
+        assert "60.0" not in str(write_error.value)
+    finally:
+        release.set()
+        holder.join(timeout=5.0)
+    assert not holder.is_alive()
+
+    # With the lock healthy again the same calls succeed.
+    record = meetings.get_meeting_round(team_id, "meeting-demo-1")["meetingRound"]
+    assert record["meetingRoundId"] == "meeting-demo-1"
+
+
+def test_module_lock_keeps_same_thread_reentrancy():
+    """RLock reentrancy survives the bounded wrapper: same-thread nested
+    acquisition (any mix of read/write budgets) never times out."""
+
+    with meetings._write_lock("test.write.outer"):
+        with meetings._write_lock("test.write.inner"):
+            pass
+        with meetings._read_lock("test.read.inner"):
+            pass
+
+
+def test_lock_timeout_env_override_falls_back_to_defaults(monkeypatch):
+    """Invalid or non-positive env overrides fall back to the defaults."""
+
+    monkeypatch.delenv(
+        "VIBELUTION_MEETING_ROUNDS_READ_LOCK_TIMEOUT_SECONDS", raising=False
+    )
+    monkeypatch.delenv(
+        "VIBELUTION_MEETING_ROUNDS_WRITE_LOCK_TIMEOUT_SECONDS", raising=False
+    )
+    assert (
+        meetings._lock_timeout_seconds("VIBELUTION_MEETING_ROUNDS_READ_LOCK_TIMEOUT_SECONDS", 10.0)
+        == 10.0
+    )
+    monkeypatch.setenv("VIBELUTION_MEETING_ROUNDS_READ_LOCK_TIMEOUT_SECONDS", "abc")
+    assert (
+        meetings._lock_timeout_seconds("VIBELUTION_MEETING_ROUNDS_READ_LOCK_TIMEOUT_SECONDS", 10.0)
+        == 10.0
+    )
+    monkeypatch.setenv("VIBELUTION_MEETING_ROUNDS_READ_LOCK_TIMEOUT_SECONDS", "-3")
+    assert (
+        meetings._lock_timeout_seconds("VIBELUTION_MEETING_ROUNDS_READ_LOCK_TIMEOUT_SECONDS", 10.0)
+        == 10.0
+    )
+    monkeypatch.setenv("VIBELUTION_MEETING_ROUNDS_WRITE_LOCK_TIMEOUT_SECONDS", "2.5")
+    assert (
+        meetings._lock_timeout_seconds("VIBELUTION_MEETING_ROUNDS_WRITE_LOCK_TIMEOUT_SECONDS", 60.0)
+        == 2.5
+    )

@@ -160,6 +160,26 @@ def _selection_read_scope(team_id: str, question_id: str) -> dict[str, str]:
 
 def _map_domain_error(action: str, team_id: str, exc: Exception) -> NoReturn:
     """Map service exceptions to HTTP errors with route-error diagnostics."""
+    if isinstance(exc, meeting_rounds.MeetingRoundsLockTimeoutError):
+        # A bounded lock wait that expired is a transient capacity failure,
+        # not a client fault: 503 with structured detail lets the client show
+        # a retryable error instead of hanging or reading a 500 as a fault.
+        _raise_team_workflow_route_error(
+            action,
+            team_id,
+            exc,
+            status_code=503,
+            fields={
+                "lockCaller": exc.caller,
+                "lockWaitedSeconds": f"{exc.waited_seconds:.3f}",
+            },
+            detail={
+                "code": exc.code,
+                "message": str(exc),
+                "caller": exc.caller,
+                "waitedSeconds": exc.waited_seconds,
+            },
+        )
     if isinstance(exc, TeamNotFoundError):
         status_code = 404
     elif isinstance(

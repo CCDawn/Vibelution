@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
@@ -1747,3 +1748,28 @@ def test_state_v2_route_serializes_create_stage_one_run_offer(monkeypatch) -> No
     )
     assert offer["command"] == "create_stage_one_run"
     assert offer["payload"] == {"questionId": "SCI-091"}
+
+
+def test_digest_draft_route_maps_lock_timeout_to_structured_503() -> None:
+    """A bounded meeting-rounds lock wait that expires is a retryable 503.
+
+    2026-09 ghost-lock incident: digest submit/read threads used to block on
+    the module lock forever while the user's retry POST queued behind them;
+    the route must convert the structured timeout into a 503 with code and
+    wait evidence instead of hanging or reading as a 500 fault.
+    """
+
+    exc = meeting_rounds.MeetingRoundsLockTimeoutError(
+        caller="submit_meeting_digest_draft", timeout_seconds=60.0
+    )
+    with pytest.raises(HTTPException) as raised:
+        hf_routes._map_domain_error(
+            "meeting_round.submit_digest_draft",
+            "team-1",
+            exc,
+        )
+    assert raised.value.status_code == 503
+    detail = raised.value.detail
+    assert detail["code"] == "meeting_rounds_lock_timeout"
+    assert detail["caller"] == "submit_meeting_digest_draft"
+    assert detail["waitedSeconds"] == 60.0

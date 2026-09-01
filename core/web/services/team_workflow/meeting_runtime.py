@@ -2237,11 +2237,11 @@ def _record_digest_work_state(
     deadline_at_ms: int = 0,
     error: Exception | None = None,
     problem: str = "",
-) -> None:
+) -> dict[str, Any] | None:
     """Persist the durable digest intent; storage outages never alter the draft."""
 
     try:
-        meeting_driver_work.record_intent(
+        return meeting_driver_work.record_intent(
             team_id,
             meeting_round_id,
             status=status,
@@ -2255,7 +2255,7 @@ def _record_digest_work_state(
             ),
         )
     except Exception:  # noqa: BLE001 - durable intent accelerates recovery only
-        return
+        return None
 
 
 def _run_scheduled_meeting_discussion(
@@ -3363,12 +3363,29 @@ def draft_meeting_digest(
             normalized_team_id, normalized_round_id, draft
         )
     except Exception as exc:
-        _record_digest_work_state(
+        failed_work = _record_digest_work_state(
             normalized_team_id,
             normalized_round_id,
             status=meeting_driver_work.STATUS_FAILED,
             error=exc,
         )
+        if isinstance(exc, meeting_rounds.MeetingRoundsLockTimeoutError):
+            # Ghost-lock evidence (2026-09 incident): pin the bounded wait,
+            # the waiter identity, and the durable work id next to the meeting
+            # identity so the next stuck submit can be triaged offline.
+            _record_meeting_digest_scene_event(
+                "meeting_digest.draft.lock_timeout",
+                outcome="failed",
+                level="error",
+                fields={
+                    "teamId": normalized_team_id,
+                    "meetingRoundId": normalized_round_id,
+                    "workId": str((failed_work or {}).get("workId") or ""),
+                    "lockCaller": exc.caller,
+                    "waitedSeconds": exc.waited_seconds,
+                },
+                lifecycle=True,
+            )
         raise
     _record_digest_work_state(
         normalized_team_id,

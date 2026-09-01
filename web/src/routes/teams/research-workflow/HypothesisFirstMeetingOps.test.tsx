@@ -467,6 +467,28 @@ describe("HypothesisFirstMeetingOps automatic organization", () => {
     expect(container.textContent).toContain("重新发起讨论");
   });
 
+  it("surfaces a failed draft request (e.g. 503 lock timeout) through the draft notice", async () => {
+    // 2026-09 ghost-lock incident shape: the server answered with a bounded
+    // lock timeout (503) whose detail the API client unwraps into the error
+    // message. The notice must show it instead of failing silently.
+    mockedDraftMeetingSummary.mockRejectedValueOnce(
+      new Error("meeting rounds lock wait exceeded 60.0s (caller=submit_meeting_digest_draft)"),
+    );
+    render(AUTO_ACTION);
+    await act(async () => {
+      await vi.waitFor(() => expect(mockedDraftMeetingSummary).toHaveBeenCalledTimes(1));
+    });
+    await act(async () => {
+      await vi.waitFor(() =>
+        expect(container.textContent).toContain("纪要生成请求失败"),
+      );
+    });
+    expect(container.querySelector('[data-testid="draft-blocked-notice"]')).toBeTruthy();
+    expect(container.textContent).toContain(
+      "meeting rounds lock wait exceeded 60.0s",
+    );
+  });
+
   it("reports the number of running rounds when organization is blocked on them", async () => {
     mockedDraftMeetingSummary.mockResolvedValueOnce({
       schemaVersion: 1,

@@ -122,6 +122,7 @@ class WorkflowRuntime:
         handled += self.graph_worker.run_repairs_once()
         handled += self.adapter_worker.run_repairs_once(limit=limit)
         self._reconcile_expired_task_bundles_best_effort()
+        self._sweep_stuck_digest_works_best_effort()
         return handled
 
     def _reconcile_expired_task_bundles_best_effort(self) -> None:
@@ -144,6 +145,24 @@ class WorkflowRuntime:
                 service.reconcile_all_expired_task_bundles()
         except Exception:  # noqa: BLE001 - deadline repair is best-effort
             logger.exception("task bundle deadline reconciliation failed")
+
+    def _sweep_stuck_digest_works_best_effort(self) -> None:
+        """Fail stuck in-process digest intents from the serial maintenance tick.
+
+        The 2026-09 ghost-lock incident left ``run_digest`` work running
+        forever with only a backend restart to recover it.  The maintenance
+        loop is the resident serial host (same minimal-intrusion pattern as
+        the task-bundle reconcile): the meeting-driver watchdog is peeked
+        (not created), self-throttled, and never re-drives — it only fences
+        digest work whose bounded fence has passed and exposes the meeting's
+        retry entry.  Any failure is swallowed after logging.
+        """
+        try:
+            from core.web.services.team_workflow import meeting_driver_work
+
+            meeting_driver_work.sweep_stuck_digest_works()
+        except Exception:  # noqa: BLE001 - watchdog must never break maintenance
+            logger.exception("stuck digest work sweep failed")
 
     def close(self) -> None:
         from .budget_window_resolver import (
