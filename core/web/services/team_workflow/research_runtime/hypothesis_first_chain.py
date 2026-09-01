@@ -30,7 +30,7 @@ import hashlib
 import json
 import threading
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -4854,6 +4854,125 @@ def _append_generation_candidates(
     return appended
 
 
+def _materialize_grounded_revision_authority(
+    team_id: str,
+    meeting_round: Mapping[str, Any],
+    candidates: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Write the real R0 -> R1 lineage from a formal grounded meeting."""
+
+    if (
+        str(meeting_round.get("mode") or "").strip().lower() != "formal"
+        or _meeting_candidate_authority(meeting_round)
+        != FORMAL_GROUNDED_CANDIDATE_AUTHORITY
+    ):
+        return {"status": "not_applicable"}
+    authority = (
+        dict(meeting_round.get("modelInvocationReceiptAuthority"))
+        if isinstance(meeting_round.get("modelInvocationReceiptAuthority"), Mapping)
+        else {}
+    )
+    workflow_run_id = str(
+        authority.get("workflowRunId") or meeting_round.get("workflowRunId") or ""
+    ).strip()
+    question_id = str(meeting_round.get("question") or "").strip().upper()
+    meeting_round_id = str(meeting_round.get("meetingRoundId") or "").strip()
+    from core.web.services.team_workflow import hypothesis_review_executor
+
+    from .model_invocation_receipt_registry import (
+        question_model_invocation_receipt_refs,
+    )
+
+    receipt_refs = question_model_invocation_receipt_refs(
+        team_id,
+        question_id=question_id,
+        workflow_run_id=workflow_run_id,
+    )
+    revision_receipts = [
+        dict(item)
+        for item in receipt_refs
+        if "revision" in list(item.get("outcomeKinds") or [])
+        and isinstance(item.get("evidenceLocator"), Mapping)
+        and str((item.get("evidenceLocator") or {}).get("meetingRoundId") or "")
+        == meeting_round_id
+    ]
+    if not revision_receipts:
+        return _blocked_round_authority(
+            "feedback_iterations", "hypothesis_grounded_revision_receipt_missing"
+        )
+    draft_refs = _normalized_str_list(meeting_round.get("exploratoryDraftRefs"))
+    draft_ids = [item.split(":", 1)[-1].strip() for item in draft_refs]
+    available_drafts = list_exploratory_drafts(
+        team_id,
+        question_id=question_id,
+        workflow_run_id=workflow_run_id,
+    )["drafts"]
+    drafts_by_id = {
+        str(item.get("draftId") or item.get("candidateId") or "").strip(): item
+        for item in available_drafts
+        if isinstance(item, Mapping)
+    }
+    drafts = [drafts_by_id[item] for item in draft_ids if item in drafts_by_id]
+    if not draft_ids or len(drafts) != len(draft_ids) or not candidates:
+        return _blocked_round_authority(
+            "feedback_iterations", "hypothesis_grounded_revision_source_missing"
+        )
+    r0_snapshot = hypothesis_review_executor.canonical_hypothesis_revision_snapshot(
+        drafts
+    )
+    r1_snapshot = hypothesis_review_executor.canonical_hypothesis_revision_snapshot(
+        candidates
+    )
+    r1_refs = [
+        f"hypothesis_candidate:{item['candidateId']}:r1" for item in r1_snapshot
+    ]
+    source_collection_run_id = str(
+        authority.get("sourceCollectionRunId")
+        or meeting_round.get("sourceCollectionRunId")
+        or hypothesis_review_executor._source_collection_run_id_for_formal_workflow(
+            workflow_run_id
+        )
+        or workflow_run_id
+    ).strip()
+    from .feedback_iterations_artifact_writer import (
+        write_feedback_iterations_artifact,
+    )
+
+    return write_feedback_iterations_artifact(
+        team_id=team_id,
+        workflow_run_id=workflow_run_id,
+        node_run_id=str(revision_receipts[0].get("nodeRunId") or "").strip(),
+        question_id=question_id,
+        iteration_round=1,
+        feedback={
+            "trigger": "formal_grounded_generation",
+            "humanFeedback": (
+                "Use the approved evidence whitelist and R0 lineage to produce "
+                "testable, falsifiable hypotheses."
+            ),
+            "inputRefs": [
+                f"exploratory_draft:{item['candidateId']}:r0" for item in r0_snapshot
+            ],
+            "inputHash": _stable_hash(r0_snapshot),
+        },
+        revision={
+            "changes": [
+                f"Grounded {len(r1_snapshot)} hypotheses against the approved evidence whitelist."
+            ],
+            "unresolvedIssues": [
+                "Independent review and MetaReview remain pending."
+            ],
+            "outputRefs": r1_refs,
+            "outputHash": _stable_hash(r1_snapshot),
+            "status": "completed",
+            "actual": True,
+        },
+        source_collection_run_id=source_collection_run_id,
+        node_id="hypothesis_design",
+        revision_phase="grounded_revision",
+    )
+
+
 def open_candidate_generation_meeting(
     team_id: str,
     question_id: str,
@@ -5409,6 +5528,20 @@ def _close_generation_meeting(
     )
     candidates = [] if exploratory else generated_records
     drafts = generated_records if exploratory else []
+    grounded_revision_authority: dict[str, Any] | None = None
+    if not exploratory:
+        try:
+            grounded_revision_authority = _materialize_grounded_revision_authority(
+                normalized_team_id, closed_record, candidates
+            )
+        except Exception as exc:  # noqa: BLE001 - closure fact stays append-only
+            grounded_revision_authority = {
+                **_blocked_round_authority(
+                    "feedback_iterations",
+                    "hypothesis_grounded_revision_authority_persistence_failed",
+                ),
+                "error": str(exc) or type(exc).__name__,
+            }
     # Active-policy hook (autoSelectCandidates): gated, audited, quiet.  With
     # no active policy configured this is a no-op before any I/O.
     if not exploratory:
@@ -5452,6 +5585,11 @@ def _close_generation_meeting(
         "candidateCount": len(candidates),
         "drafts": drafts,
         "draftCount": len(drafts),
+        **(
+            {"feedbackIterationsAuthority": grounded_revision_authority}
+            if grounded_revision_authority is not None
+            else {}
+        ),
     }
 
 
@@ -6408,6 +6546,152 @@ def _materialize_hypothesis_revision_authority(
         return _blocked_round_authority(
             "feedback_iterations", "hypothesis_revision_evidence_missing"
         )
+    if phase == "review_revision":
+        receipt_ref = str(envelope.get("revisionReceiptRef") or "").strip()
+        matching_receipts = [
+            item
+            for item in list(round_record.get("modelInvocationReceipts") or [])
+            if isinstance(item, Mapping)
+            and str(item.get("receiptId") or "").strip() == receipt_ref
+            and "revision"
+            in list(
+                (
+                    item.get("metadata")
+                    if isinstance(item.get("metadata"), Mapping)
+                    else {}
+                ).get("outcomeKinds")
+                or []
+            )
+        ]
+        if len(matching_receipts) != 1:
+            return _blocked_round_authority(
+                "feedback_iterations", "hypothesis_revision_receipt_missing"
+            )
+        from .workflow_artifact_store import list_workflow_artifacts
+
+        prior = [
+            item
+            for item in list_workflow_artifacts(
+                team_id,
+                kind="feedback_iterations",
+                workflow_run_id=workflow_run_id,
+            )
+            if isinstance(item.get("payload"), Mapping)
+            and item["payload"].get("iterationRound") == 1
+            and str(item["payload"].get("revisionPhase") or "")
+            == "grounded_revision"
+        ]
+        if len(prior) != 1:
+            return _blocked_round_authority(
+                "feedback_iterations", "hypothesis_grounded_revision_authority_missing"
+            )
+        prior_envelope = (
+            prior[0]["payload"].get("revisionEnvelope")
+            if isinstance(prior[0]["payload"].get("revisionEnvelope"), Mapping)
+            else {}
+        )
+        prior_child = (
+            prior_envelope.get("childOutput")
+            if isinstance(prior_envelope.get("childOutput"), Mapping)
+            else {}
+        )
+        from core.web.services.team_workflow import hypothesis_review_executor
+
+        candidate_result = list_hypothesis_candidates(
+            team_id,
+            question_id=question_id,
+            workflow_run_id=workflow_run_id,
+        )
+        r1_candidates = [
+            dict(item)
+            for item in list(candidate_result.get("candidates") or [])
+            if isinstance(item, Mapping)
+        ]
+        try:
+            r1_snapshot = (
+                hypothesis_review_executor.canonical_hypothesis_revision_snapshot(
+                    r1_candidates
+                )
+            )
+        except ContractValidationError:
+            return _blocked_round_authority(
+                "feedback_iterations", "hypothesis_revision_lineage_discontinuous"
+            )
+        r1_refs = [
+            f"hypothesis_candidate:{item['candidateId']}:r1"
+            for item in r1_snapshot
+        ]
+        r1_hash = _stable_hash(r1_snapshot)
+        if (
+            r1_refs != list(prior_child.get("refs") or [])
+            or r1_hash
+            != str(prior_child.get("sha256") or "").strip().lower()
+        ):
+            return _blocked_round_authority(
+                "feedback_iterations", "hypothesis_revision_lineage_discontinuous"
+            )
+        revision_output = (
+            revision.get("output")
+            if isinstance(revision.get("output"), Mapping)
+            else {}
+        )
+        revised_candidates = [
+            dict(item)
+            for item in list(revision_output.get("candidates") or [])
+            if isinstance(item, Mapping)
+        ]
+        revised_candidate_id = str(
+            envelope.get("parentCandidateId") or ""
+        ).strip()
+        revised_matches = [
+            item
+            for item in revised_candidates
+            if str(item.get("candidateId") or "").strip() == revised_candidate_id
+        ]
+        if (
+            not revised_candidate_id
+            or len(revised_matches) != 1
+            or revised_candidate_id
+            not in {str(item["candidateId"]) for item in r1_snapshot}
+        ):
+            return _blocked_round_authority(
+                "feedback_iterations", "hypothesis_revision_evidence_missing"
+            )
+        revised_candidate = revised_matches[0]
+        try:
+            r2_snapshot = (
+                hypothesis_review_executor.canonical_hypothesis_revision_snapshot(
+                    [
+                        revised_candidate
+                        if str(item.get("candidateId") or "").strip()
+                        == revised_candidate_id
+                        else item
+                        for item in r1_snapshot
+                    ]
+                )
+            )
+        except ContractValidationError:
+            return _blocked_round_authority(
+                "feedback_iterations", "hypothesis_revision_evidence_missing"
+            )
+        if r2_snapshot == r1_snapshot:
+            return _blocked_round_authority(
+                "feedback_iterations", "hypothesis_revision_evidence_missing"
+            )
+        feedback = {
+            **dict(feedback),
+            "inputRefs": r1_refs,
+            "inputHash": r1_hash,
+        }
+        revision = {
+            **dict(revision),
+            "outputRefs": [
+                f"hypothesis_candidate:{item['candidateId']}:r2"
+                for item in r2_snapshot
+            ],
+            "outputHash": _stable_hash(r2_snapshot),
+            "output": {"candidates": r2_snapshot},
+        }
     from .feedback_iterations_artifact_writer import (
         write_feedback_iterations_artifact,
     )
@@ -6476,6 +6760,7 @@ def _generate_hypothesis_round(
     pairwise_runner: Any = None,
     pareto_runner: Any = None,
     metareview_runner: Any = None,
+    revision_runner: Any = None,
 ) -> dict[str, Any]:
     """Best-effort selection-level HypothesisRound fan-in after closure.
 
@@ -6575,6 +6860,7 @@ def _generate_hypothesis_round(
             pairwise_runner=pairwise_runner,
             pareto_runner=pareto_runner,
             metareview_runner=metareview_runner,
+            revision_runner=revision_runner,
         )
         round_record = result.get("round") if isinstance(result.get("round"), Mapping) else {}
         receipt_authority = (
@@ -6592,6 +6878,31 @@ def _generate_hypothesis_round(
             or (receipt_authority or {}).get("nodeRunId")
             or ""
         ).strip()
+        revision_receipt_ref = str(
+            (
+                round_record.get("revisionEnvelope")
+                if isinstance(round_record.get("revisionEnvelope"), Mapping)
+                else {}
+            ).get("revisionReceiptRef")
+            or ""
+        ).strip()
+        if revision_receipt_ref:
+            revision_receipt = next(
+                (
+                    item
+                    for item in list(
+                        round_record.get("modelInvocationReceipts") or []
+                    )
+                    if isinstance(item, Mapping)
+                    and str(item.get("receiptId") or "").strip()
+                    == revision_receipt_ref
+                ),
+                None,
+            )
+            if isinstance(revision_receipt, Mapping):
+                node_run_id = str(
+                    revision_receipt.get("nodeRunId") or node_run_id
+                ).strip()
         source_collection_run_id = str(
             (receipt_authority or {}).get("sourceCollectionRunId")
             or primary_meeting.get("sourceCollectionRunId")
@@ -7704,6 +8015,7 @@ def close_review_meeting(
     pairwise_runner: Any = None,
     pareto_runner: Any = None,
     metareview_runner: Any = None,
+    revision_runner: Any = None,
 ) -> dict[str, Any]:
     """Approve one hypothesis-review closure, then apply chain effects.
 
@@ -7746,6 +8058,7 @@ def close_review_meeting(
         and pairwise_runner is None
         and pareto_runner is None
         and metareview_runner is None
+        and revision_runner is None
     ):
         from core.web.services.team_workflow.llm_review_runners import (
             build_hypothesis_review_runners,
@@ -7759,6 +8072,7 @@ def close_review_meeting(
             pairwise_runner = real_runners["pairwise_runner"]
             pareto_runner = real_runners["pareto_runner"]
             metareview_runner = real_runners["metareview_runner"]
+            revision_runner = real_runners["revision_runner"]
     request = dict(payload) if isinstance(payload, Mapping) else {}
     meeting_type = str(meeting_round.get("meetingType") or "")
     if meeting_type == CANDIDATE_GENERATION_MEETING_TYPE:
@@ -7781,6 +8095,7 @@ def close_review_meeting(
         pairwise_runner=pairwise_runner,
         pareto_runner=pareto_runner,
         metareview_runner=metareview_runner,
+        revision_runner=revision_runner,
     )
     resume = None
     if (

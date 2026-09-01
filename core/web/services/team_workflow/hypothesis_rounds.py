@@ -165,6 +165,7 @@ def _round_definition(record: Mapping[str, Any]) -> dict[str, Any]:
             "positionSeed",
             "roles",
             "modelInvocationReceipts",
+            "revisionEnvelope",
             "lineage",
             "meetingRefs",
         )
@@ -250,6 +251,8 @@ def create_hypothesis_round(team_id: str, payload: Mapping[str, Any] | None = No
                 ],
             }
         )
+    if isinstance(request.get("revisionEnvelope"), Mapping):
+        record["revisionEnvelope"] = dict(request["revisionEnvelope"])
     # Fail closed before persistence: parse validates shape, completeness of
     # candidates and scope; a complete round must pass validate_complete().
     parsed = HypothesisRound.from_dict(record)
@@ -359,6 +362,7 @@ def generate_hypothesis_round_from_meeting(
     pairwise_runner: Any = None,
     pareto_runner: Any = None,
     metareview_runner: Any = None,
+    revision_runner: Any = None,
 ) -> dict[str, Any]:
     """Generate one closed HypothesisRound after its bound review meetings close.
 
@@ -504,6 +508,19 @@ def generate_hypothesis_round_from_meeting(
                 "claim": claim,
                 "rationale": str(item.get("rationale") or "").strip(),
                 "differenceFromAlternatives": difference,
+                "candidateAuthority": str(
+                    item.get("candidateAuthority") or ""
+                ).strip(),
+                "lineageRefs": _normalized_str_list(item.get("lineageRefs")),
+                "testablePrediction": str(
+                    item.get("testablePrediction") or ""
+                ).strip(),
+                "falsifier": str(item.get("falsifier") or "").strip(),
+                "axisProfile": (
+                    dict(item.get("axisProfile"))
+                    if isinstance(item.get("axisProfile"), Mapping)
+                    else {}
+                ),
             }
         )
 
@@ -674,6 +691,7 @@ def generate_hypothesis_round_from_meeting(
         pairwise_runner=pairwise_runner,
         pareto_runner=pareto_runner,
         metareview_runner=metareview_runner,
+        revision_runner=revision_runner,
         reviewer_assignments={"metareview": coordinator_agent},
         position_seed=str(request.get("positionSeed") or "").strip(),
     )
@@ -708,6 +726,11 @@ def generate_hypothesis_round_from_meeting(
             "positionSeed": review["positionSeed"],
             "roles": review["roles"],
             "modelInvocationReceipts": review.get("modelInvocationReceipts", []),
+            **(
+                {"revisionEnvelope": dict(review["revisionEnvelope"])}
+                if isinstance(review.get("revisionEnvelope"), Mapping)
+                else {}
+            ),
             "meetingRefs": meeting_refs,
             "lineage": lineage,
             "status": "closed",
