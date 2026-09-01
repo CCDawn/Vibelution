@@ -6603,3 +6603,108 @@ def test_v2_rejected_adjudication_reselect_command_carries_previous_selection(
     assert replay["status"] == "reused"
     assert replay["result"]["selectionId"] == "selection-2"
     assert len(calls) == 1
+
+
+def test_v2_reselect_after_rejection_wire_envelope_without_command_binds_selection_locals(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The V2 wire request carries no ``command``; the reselect must still bind.
+
+    ``HypothesisFirstCommandRequest`` (StrictWireModel) rejects a ``command``
+    field, so production resolves the command from the actionId alone.  When
+    the rejected-adjudication recovery offer was not mapped, the pre-CAS
+    selection fence was skipped and the execution block raised
+    ``UnboundLocalError: selection_scope_hash`` after the owning selection
+    service had already committed (live SCI-001 reselect, 2026-09-02).
+    """
+
+    from core.web.services import team_service
+    from core.web.services.team_workflow import hypothesis_selection
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_first_chain,
+        hypothesis_first_state_v2,
+    )
+
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
+    monkeypatch.setattr(hypothesis_first_chain, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        hypothesis_first_chain,
+        "_question_scope_envelope",
+        lambda *_args: {"question": "SCI-001"},
+    )
+    offer_payload = {
+        "questionId": "SCI-001",
+        "generationAttemptId": "attempt-1",
+        "previousSelectionId": "selection-1",
+    }
+    snapshot = {
+        "stateVersion": "hf2-action:origin:selection",
+        "resetBoundary": {"resetId": "origin"},
+        "allowedActions": [
+            {
+                "kind": "command",
+                "actionId": "reselect-after-rejection:selection-1",
+                "command": "record_selection",
+                "payload": offer_payload,
+                "enabled": True,
+                "idempotencyKey": "hf2:reselect-after-rejection:selection-1:k1",
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        hypothesis_first_state_v2,
+        "project_hypothesis_first_state_v2",
+        lambda *_args, **_kwargs: snapshot,
+    )
+    calls: list[dict[str, object]] = []
+
+    def record_selection(_team_id: str, payload: dict[str, object], **_kwargs):
+        calls.append(dict(payload))
+        return {
+            "status": "created",
+            "selection": {
+                "selectionId": "selection-2",
+                "questionId": "SCI-001",
+                "selectedCandidateIds": ["candidate-a", "candidate-b"],
+                "previousSelectionId": "selection-1",
+            },
+            "reviewMeeting": {"status": "opened"},
+        }
+
+    monkeypatch.setattr(
+        hypothesis_selection, "record_hypothesis_selection", record_selection
+    )
+
+    envelope = hypothesis_first_chain.execute_v2_command(
+        "team-1",
+        {
+            "actionId": "reselect-after-rejection:selection-1",
+            "idempotencyKey": "hf2:reselect-after-rejection:selection-1:k1",
+            "expectedStateVersion": "hf2-action:origin:selection",
+            "payload": offer_payload,
+            "input": {"candidateIds": ["candidate-a", "candidate-b"]},
+        },
+        question_id="SCI-001",
+    )
+
+    assert envelope["result"]["selection"]["selectionId"] == "selection-2"
+    assert calls[0]["previousSelectionId"] == "selection-1"
+    outcomes = [
+        record
+        for record in hypothesis_first_chain._records("team-1")
+        if record.get("recordKind")
+        == hypothesis_first_chain.SELECTION_COMMAND_OUTCOME_KIND
+    ]
+    assert len(outcomes) == 1
+    # The outcome was recorded under the pre-CAS fence identity, proving the
+    # selection locals were bound on the wire path (no UnboundLocalError).
+    expected_version = hypothesis_first_chain.selection_version_for(
+        question_id="SCI-001",
+        selected_candidate_ids=["candidate-a", "candidate-b"],
+        previous_selection_id="selection-1",
+        reset_id="origin",
+        scope_hash="",
+        workflow_run_id="",
+    )
+    assert outcomes[0]["selectionVersion"] == expected_version

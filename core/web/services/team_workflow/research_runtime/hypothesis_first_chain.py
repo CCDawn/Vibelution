@@ -1186,6 +1186,14 @@ def _selection_command_action_id(action_id: str, command: str) -> str:
         "record-selection:"
     ):
         return "record_selection"
+    # The rejected-adjudication recovery offer re-enters record_selection under
+    # a different actionId prefix.  The V2 wire request carries no ``command``
+    # field (StrictWireModel), so without this mapping the pre-CAS selection
+    # fence is skipped and the execution block reads unbound selection locals.
+    if normalized_action_id == "reselect-after-rejection" or (
+        normalized_action_id.startswith("reselect-after-rejection:")
+    ):
+        return "record_selection"
     return ""
 
 
