@@ -104,3 +104,48 @@ def test_fork_existing_child_thread_same_resume_is_idempotent(tmp_path: Path) ->
             )
     finally:
         harness.close()
+
+
+def test_fork_state_patch_declared_channels_reach_child_checkpoint(
+    tmp_path: Path,
+) -> None:
+    """Fork patches must persist their contract/parent identity channels.
+
+    Before ``parent_run_id`` and ``evidence_remediation_contract`` were
+    declared graph channels, langgraph silently dropped them from the fork
+    state patch, so child checkpoints lost the fork contract.
+    """
+
+    harness = GraphHarness(tmp_path)
+    try:
+        harness.seed(run_id="run-parent")
+        harness.start_thread_to("source_finding", run_id="run-parent")
+        parent_snapshot = harness.coordinator.snapshot("run-parent")
+        contract = {
+            "schemaVersion": 1,
+            "parentRunId": "run-parent",
+            "sourceNodeId": "source_extraction",
+            "resolutionKind": "add_budget",
+        }
+        harness.coordinator.fork_from_checkpoint(
+            source_thread_id="run-parent",
+            source_checkpoint_id=parent_snapshot["checkpointId"],
+            child_thread_id="run-child",
+            resume_node_id="source_finding",
+            state_patch={
+                "parent_run_id": "run-parent",
+                "evidence_remediation_contract": contract,
+            },
+        )
+        child_values = dict(
+            harness.coordinator.snapshot("run-child").get("values") or {}
+        )
+        assert child_values.get("parent_run_id") == "run-parent"
+        assert child_values.get("evidence_remediation_contract") == contract
+        # The parent thread keeps its own state (no patch leakage).
+        parent_again = harness.coordinator.snapshot("run-parent")
+        parent_values = dict(parent_again.get("values") or {})
+        assert "parent_run_id" not in parent_values
+        assert "evidence_remediation_contract" not in parent_values
+    finally:
+        harness.close()

@@ -38,6 +38,14 @@ class ChallengeCupState(TypedDict, total=False):
     blocked_reason: str
     pending_fork: bool
     stage_one_completion_state: str
+    # Declared last-value channels for fork/state patches.  Declaring them on
+    # both graph schemas is intentional (extra channels are harmless): before
+    # they were declared, langgraph silently dropped these keys from
+    # checkpoint writes, so fork contracts never reached child checkpoints.
+    evidence_remediation_contract: dict[str, Any]
+    parent_run_id: str
+    binding_snapshot_id: str | None
+    budget_policy_hash: str
 
 
 def _node_order(definition: WorkflowDefinition) -> list[str]:

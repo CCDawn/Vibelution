@@ -7,6 +7,8 @@ from pathlib import Path
 import pytest
 
 from core.research.workflow.bindings import AgentBindingLayers
+from core.research.workflow.challenge_cup_graph import compile_challenge_cup_graph
+from core.research.workflow.checkpoint_store import open_sqlite_checkpointer
 from core.research.workflow.definition import CHALLENGE_CUP_WORKFLOW_ID
 from core.web.services.team_workflow.research_runtime.checkpoint_lifecycle import (
     advance_checkpoint,
@@ -263,6 +265,38 @@ def test_exhausted_evidence_gap_forks_child_from_source_checkpoint(
     reopened = _service(tmp_path)
     assert reopened.get_run(parent["runId"])["childRunIds"] == [child["runId"]]
     assert reopened.get_run(child["runId"])["evidenceRemediationContract"] == contract
+
+
+def test_evidence_remediation_contract_is_persisted_in_child_checkpoint(
+    tmp_path: Path,
+) -> None:
+    """The fork state patch must survive into the child LangGraph checkpoint.
+
+    ``evidence_remediation_contract`` is a declared channel of the store-side
+    graph schema; before declaration langgraph dropped it from the fork patch
+    and the contract only lived in the child run's input snapshot.
+    """
+
+    service = _service(tmp_path)
+    parent = _blocked_exhausted_extraction(service)
+
+    revised = service.apply_node_command(
+        parent["runId"],
+        "source_extraction",
+        "fork_evidence_remediation",
+        payload=_command_payload(),
+    )
+    child = service.get_run(revised["childRunIds"][0])
+    contract = child["evidenceRemediationContract"]
+
+    with open_sqlite_checkpointer(service._checkpoint_path) as checkpointer:
+        graph = compile_challenge_cup_graph(checkpointer)
+        state = graph.get_state(
+            {"configurable": {"thread_id": child["threadId"]}}
+        )
+    values = dict(state.values or {})
+    assert values.get("evidence_remediation_contract") == contract
+    assert values.get("current_node_id") == "source_finding"
 
 
 def test_evidence_remediation_requires_exhausted_durable_failure(
