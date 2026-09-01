@@ -939,8 +939,12 @@ def test_formal_review_accepts_one_unique_provider_receipt_per_model_call():
     )
 
     receipts = result["modelInvocationReceipts"]
-    assert len(receipts) == 6  # 2 reflection + pairwise + Pareto + MetaReview + revision
-    assert len({item["receiptId"] for item in receipts}) == 6
+    # 2 reflection + pairwise + MetaReview + revision.  The N=2 Pareto step is
+    # a deterministic dominance decision over the recorded scores and consumes
+    # no model call, so it carries no receipt; every *model* call still has
+    # exactly one unique receipt.
+    assert len(receipts) == 5
+    assert len({item["receiptId"] for item in receipts}) == 5
     assert {item["metadata"]["questionStage"] for item in receipts} == {"review"}
     assert all("review" in item["metadata"]["outcomeKinds"] for item in receipts)
     assert receipts[-1]["metadata"]["outcomeKinds"] == ["review", "revision"]
@@ -948,6 +952,13 @@ def test_formal_review_accepts_one_unique_provider_receipt_per_model_call():
     assert result["revisionEnvelope"]["revision"]["output"]["candidates"][0][
         "claim"
     ].endswith("（根据评审收窄边界）")
+    pareto = result["pareto"]
+    # Identical scores: neither candidate dominates the other, so the local
+    # N=2 dominance decision puts both on the front.
+    assert pareto["paretoFrontCandidateIds"] == ["cand-a", "cand-b"]
+    assert pareto["dominatedCandidateIds"] == []
+    assert pareto["analystAgentId"] == "research_theme_synthesizer"
+    assert pareto["notes"]
 
 
 def test_formal_review_rejects_revision_that_copies_the_r1_claim():
@@ -1662,3 +1673,307 @@ def test_formal_review_fails_closed_when_recorded_budget_deviates_from_formula(
             **_provider_bound_review_runners(),
             reviewer_assignments={"metareview": "coordinator"},
         )
+
+
+# ---------------------------------------------------------------------------
+# Pairwise/Pareto shared concurrency wave and local N=2 Pareto decision
+# ---------------------------------------------------------------------------
+
+
+def _dominance_reflection_payload(candidate: dict, *, leader: str | None = None) -> dict:
+    """Score ``leader`` strictly above the other candidate on every dimension."""
+
+    candidate_id = str(candidate["candidateId"])
+    scores = {dimension: 0.5 for dimension in SCORE_DIMENSIONS}
+    if leader is not None and candidate_id == leader:
+        scores = {dimension: 0.9 for dimension in SCORE_DIMENSIONS}
+    return {
+        "claim": str(candidate["claim"]),
+        "rationale": f"rationale:{candidate_id}",
+        "differenceFromAlternatives": str(candidate["differenceFromAlternatives"]),
+        "scores": scores,
+    }
+
+
+def test_pairwise_and_pareto_calls_share_one_concurrency_wave():
+    # N=3 keeps the Pareto model call (N=2 is decided locally), so the wave
+    # carries 3 pairwise calls + 1 Pareto call and they must overlap.
+    pareto_started = threading.Event()
+    pairwise_calls = []
+    pairwise_lock = threading.Lock()
+
+    def reflection(candidate, context):
+        return _marker_reflection_payload(candidate)
+
+    def pairwise(left, right, context):
+        # Serial pairwise->pareto execution can never satisfy this wait.
+        assert pareto_started.wait(5.0), (
+            "the Pareto call must overlap the pairwise wave"
+        )
+        with pairwise_lock:
+            pairwise_calls.append((left["candidateId"], right["candidateId"]))
+        return {"outcome": "left_wins", "justification": "justify:pairwise"}
+
+    def pareto(scores_by_candidate, context):
+        pareto_started.set()
+        ordered = sorted(scores_by_candidate)
+        return {
+            "paretoFrontCandidateIds": ordered[:1],
+            "dominatedCandidateIds": ordered[1:],
+            "notes": "classify",
+        }
+
+    result = hypothesis_review_executor.execute_hypothesis_review(
+        _parallel_reflection_context("cand-a", "cand-b", "cand-c"),
+        round_id="round-shared-wave",
+        reflection_runner=reflection,
+        pairwise_runner=pairwise,
+        pareto_runner=pareto,
+        reviewer_assignments={"metareview": "coordinator"},
+        position_seed="shared-wave",
+    )
+
+    assert len(pairwise_calls) == 3
+    assert result["pareto"]["paretoFrontCandidateIds"] == ["cand-a"]
+    assert result["pareto"]["dominatedCandidateIds"] == ["cand-b", "cand-c"]
+
+
+def test_bounded_pool_caps_the_shared_pairwise_pareto_wave():
+    ids = ["cand-a", "cand-b", "cand-c"]
+    probe = _InFlightProbe()
+    pair_count = len(
+        hypothesis_review_executor.deterministic_pairwise_order(ids, "cap-seed")
+    )
+
+    def reflection(candidate, context):
+        return _marker_reflection_payload(candidate)
+
+    def pairwise(left, right, context):
+        probe.enter()
+        try:
+            time.sleep(0.02)
+            return {"outcome": "left_wins", "justification": "justify"}
+        finally:
+            probe.exit()
+
+    def pareto(scores_by_candidate, context):
+        probe.enter()
+        try:
+            time.sleep(0.02)
+            return {
+                "paretoFrontCandidateIds": [sorted(scores_by_candidate)[0]],
+                "dominatedCandidateIds": sorted(scores_by_candidate)[1:],
+                "notes": "classify",
+            }
+        finally:
+            probe.exit()
+
+    result = hypothesis_review_executor.execute_hypothesis_review(
+        _parallel_reflection_context(*ids),
+        round_id="round-wave-cap",
+        reflection_runner=reflection,
+        pairwise_runner=pairwise,
+        pareto_runner=pareto,
+        reviewer_assignments={"metareview": "coordinator"},
+        position_seed="cap-seed",
+        max_concurrent_calls=2,
+    )
+
+    assert len(result["pairwiseComparisons"]) == pair_count
+    # 3 pairwise calls + 1 Pareto call share one pool capped at 2 in flight.
+    assert probe.max_inflight <= 2
+
+
+def test_two_candidate_pareto_needs_no_model_call_and_stays_dominance_correct():
+    pareto_calls = []
+
+    def reflection(candidate, context):
+        return _dominance_reflection_payload(candidate, leader="cand-a")
+
+    def pairwise(left, right, context):
+        return {"outcome": "left_wins", "justification": "justify"}
+
+    def pareto(scores_by_candidate, context):
+        pareto_calls.append("called")
+        return {
+            "paretoFrontCandidateIds": sorted(scores_by_candidate)[:1],
+            "dominatedCandidateIds": sorted(scores_by_candidate)[1:],
+            "notes": "llm classification must never run for N=2",
+        }
+
+    result = hypothesis_review_executor.execute_hypothesis_review(
+        _parallel_reflection_context("cand-a", "cand-b"),
+        round_id="round-local-pareto",
+        reflection_runner=reflection,
+        pairwise_runner=pairwise,
+        pareto_runner=pareto,
+        reviewer_assignments={"metareview": "coordinator"},
+    )
+
+    assert pareto_calls == []
+    assert result["pareto"]["paretoFrontCandidateIds"] == ["cand-a"]
+    assert result["pareto"]["dominatedCandidateIds"] == ["cand-b"]
+    assert result["pareto"]["analystAgentId"] == "research_theme_synthesizer"
+    assert "dominance" in result["pareto"]["notes"]
+
+
+def test_three_candidates_still_classify_pareto_with_one_model_call():
+    pareto_calls = []
+
+    def reflection(candidate, context):
+        return _dominance_reflection_payload(candidate, leader="cand-a")
+
+    def pairwise(left, right, context):
+        return {"outcome": "left_wins", "justification": "justify"}
+
+    def pareto(scores_by_candidate, context):
+        pareto_calls.append(dict(scores_by_candidate))
+        return {
+            "paretoFrontCandidateIds": ["cand-a"],
+            "dominatedCandidateIds": ["cand-b", "cand-c"],
+            "notes": "llm classification",
+        }
+
+    result = hypothesis_review_executor.execute_hypothesis_review(
+        _parallel_reflection_context("cand-a", "cand-b", "cand-c"),
+        round_id="round-n3-pareto",
+        reflection_runner=reflection,
+        pairwise_runner=pairwise,
+        pareto_runner=pareto,
+        reviewer_assignments={"metareview": "coordinator"},
+    )
+
+    assert len(pareto_calls) == 1
+    assert set(pareto_calls[0]) == {"cand-a", "cand-b", "cand-c"}
+    assert result["pareto"]["notes"] == "llm classification"
+
+
+@pytest.mark.parametrize(
+    ("scores_a", "scores_b", "expected_front", "expected_dominated"),
+    [
+        ("dominating", "dominated", ["cand-a"], ["cand-b"]),
+        ("dominated", "dominating", ["cand-b"], ["cand-a"]),
+        ("leads_novelty", "leads_feasibility", ["cand-a", "cand-b"], []),
+        ("flat", "flat", ["cand-a", "cand-b"], []),
+    ],
+)
+def test_two_candidate_pareto_matches_reference_dominance_semantics(
+    scores_a, scores_b, expected_front, expected_dominated
+):
+    """The local N=2 decision equals the reference Pareto partition.
+
+    The reference below is the textbook dominance definition: a candidate is
+    on the front unless another candidate is >= on every dimension and > on
+    at least one.  It is exactly what a correct LLM classification must
+    return for two candidates, so the local decision is semantically
+    equivalent while removing the model call.
+    """
+
+    def scores(kind: str) -> dict[str, float]:
+        base = {dimension: 0.5 for dimension in SCORE_DIMENSIONS}
+        if kind == "dominating":
+            return {dimension: 0.9 for dimension in SCORE_DIMENSIONS}
+        if kind == "leads_novelty":
+            base["novelty"] = 0.9
+        elif kind == "leads_feasibility":
+            base["feasibility"] = 0.9
+        return base
+
+    candidates = [
+        {"candidateId": "cand-a", "scores": scores(scores_a)},
+        {"candidateId": "cand-b", "scores": scores(scores_b)},
+    ]
+    scores_by_candidate = {
+        str(item["candidateId"]): dict(item["scores"]) for item in candidates
+    }
+
+    def reference_partition():
+        ids = list(scores_by_candidate)
+
+        def dominates(left: str, right: str) -> bool:
+            return all(
+                float(scores_by_candidate[left][dimension])
+                >= float(scores_by_candidate[right][dimension])
+                for dimension in SCORE_DIMENSIONS
+            ) and any(
+                float(scores_by_candidate[left][dimension])
+                > float(scores_by_candidate[right][dimension])
+                for dimension in SCORE_DIMENSIONS
+            )
+
+        front = [
+            candidate_id
+            for candidate_id in ids
+            if not any(
+                other != candidate_id and dominates(other, candidate_id)
+                for other in ids
+            )
+        ]
+        return front, [candidate_id for candidate_id in ids if candidate_id not in front]
+
+    localized = hypothesis_review_executor._pareto_step(
+        {},
+        candidates,
+        runner=lambda *_args: (_ for _ in ()).throw(
+            AssertionError("N=2 pareto must not call the model")
+        ),
+        agent_id="research_theme_synthesizer",
+        formal_receipts=None,
+    )
+    reference_front, reference_dominated = reference_partition()
+
+    assert localized["paretoFrontCandidateIds"] == expected_front == reference_front
+    assert (
+        localized["dominatedCandidateIds"]
+        == expected_dominated
+        == reference_dominated
+    )
+    # Output shape is identical to the LLM classification contract.
+    assert set(localized) == {
+        "paretoFrontCandidateIds",
+        "dominatedCandidateIds",
+        "analystAgentId",
+        "notes",
+    }
+    assert localized["analystAgentId"] == "research_theme_synthesizer"
+    assert localized["notes"]
+
+
+def test_shared_wave_output_is_identical_to_serial_output():
+    ids = ["cand-a", "cand-b", "cand-c"]
+
+    def build_runners():
+        def reflection(candidate, context):
+            return _marker_reflection_payload(candidate)
+
+        def pairwise(left, right, context):
+            key = f"{left['candidateId']}>{right['candidateId']}"
+            return {"outcome": "left_wins", "justification": f"justify:{key}"}
+
+        def pareto(scores_by_candidate, context):
+            ordered = sorted(scores_by_candidate)
+            return {
+                "paretoFrontCandidateIds": ordered[:1],
+                "dominatedCandidateIds": ordered[1:],
+                "notes": "classify",
+            }
+
+        return {
+            "reflection_runner": reflection,
+            "pairwise_runner": pairwise,
+            "pareto_runner": pareto,
+        }
+
+    def run(**kwargs):
+        return hypothesis_review_executor.execute_hypothesis_review(
+            _parallel_reflection_context(*ids),
+            round_id="round-wave-equivalence",
+            reviewer_assignments={"metareview": "coordinator"},
+            position_seed="wave-equivalence",
+            **kwargs,
+        )
+
+    serial = run(**build_runners(), max_concurrent_calls=1)
+    parallel = run(**build_runners())
+
+    assert parallel == serial

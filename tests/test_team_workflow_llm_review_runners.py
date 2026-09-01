@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 import time
 from pathlib import Path
@@ -89,6 +90,19 @@ def _install_fake_llm(monkeypatch, payloads: list[str]):
 
     monkeypatch.setattr(llm_review_runners, "invoke_llm", fake_invoke_llm)
     return queue
+
+
+@pytest.fixture(autouse=True)
+def _redirect_failure_dumps_to_tmp(tmp_path, monkeypatch):
+    """Keep failure-dump evidence inside the per-test temp directory."""
+
+    dump_dir = tmp_path / "review-llm-failure-dumps"
+    monkeypatch.setattr(
+        llm_review_runners,
+        "_REVIEW_LLM_FAILURE_DUMP_DIR_OVERRIDE",
+        str(dump_dir),
+    )
+    yield dump_dir
 
 
 # ---------------------------------------------------------------------------
@@ -1328,16 +1342,18 @@ def test_formal_parallel_runner_calls_see_only_their_own_receipt_scope(monkeypat
         reviewer_assignments={"metareview": "coordinator"},
     )
 
-    # Two concurrent reflections plus pairwise/pareto/metareview/revision: every call
-    # must read back exactly its own binding while others are in flight.
+    # Two concurrent reflections plus pairwise/metareview/revision: every call
+    # must read back exactly its own binding while others are in flight.  The
+    # N=2 Pareto step is decided locally and issues no provider call.
     purposes = [record["purpose"] for record in captured]
     assert purposes.count("hypothesis_reflection") == 2
+    assert "hypothesis_pareto" not in purposes
     for record in captured:
         assert record["scopeInvocationId"] == record["invocationId"]
     assert len({record["invocationId"] for record in captured}) == len(captured)
     receipts = result["modelInvocationReceipts"]
-    assert [item["status"] for item in receipts] == ["succeeded"] * 6
-    assert len({item["receiptId"] for item in receipts}) == 6
+    assert [item["status"] for item in receipts] == ["succeeded"] * 5
+    assert len({item["receiptId"] for item in receipts}) == 5
     assert receipts[-1]["metadata"]["outcomeKinds"] == ["review", "revision"]
 
 
@@ -1373,16 +1389,8 @@ def test_runners_compose_with_execute_hypothesis_review(monkeypatch):
         )
     # pairwise for the single pair
     payloads.append(json.dumps({"outcome": "left_wins", "justification": "A 领先。"}))
-    # pareto
-    payloads.append(
-        json.dumps(
-            {
-                "paretoFrontCandidateIds": ["cand-a"],
-                "dominatedCandidateIds": ["cand-b"],
-                "notes": "B 被全维占优。",
-            }
-        )
-    )
+    # pareto: N=2 is decided locally by deterministic dominance, so the model
+    # is never called for the Pareto step and no payload is queued for it.
     # metareview
     payloads.append(
         json.dumps(
@@ -1394,7 +1402,7 @@ def test_runners_compose_with_execute_hypothesis_review(monkeypatch):
             }
         )
     )
-    _install_fake_llm(monkeypatch, payloads)
+    queue = _install_fake_llm(monkeypatch, payloads)
 
     result = execute_hypothesis_review(
         _review_context(),
@@ -1408,6 +1416,10 @@ def test_runners_compose_with_execute_hypothesis_review(monkeypatch):
     assert result["candidates"][0]["reviewedBy"] == f"llm:{_FAKE_LLM['modelId']}"
     assert result["metaReview"]["recommendationCandidateId"] == "cand-a"
     assert result["metaReview"]["accepted"] is True
+    # The Pareto partition came from the local dominance decision, not a call.
+    assert queue == []
+    assert result["pareto"]["paretoFrontCandidateIds"] == ["cand-a"]
+    assert result["pareto"]["dominatedCandidateIds"] == ["cand-b"]
 
 
 def test_runner_executor_round_and_review_artifacts_integrate(
@@ -1679,3 +1691,189 @@ def test_receipt_bound_runner_times_out_with_structured_error(monkeypatch):
     assert exc_info.value.purpose == "hypothesis_pairwise"
     assert exc_info.value.category == "cancelled"
     assert exc_info.value.retryable is False
+
+
+# ---------------------------------------------------------------------------
+# Failed-response evidence dump (offline attribution support)
+# ---------------------------------------------------------------------------
+
+
+def _failure_dump_dir(dump_dir: Path) -> list[Path]:
+    if not dump_dir.exists():
+        return []
+    return sorted(dump_dir.glob("*.json"))
+
+
+def _read_dump(path: Path) -> dict[str, Any]:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def test_failed_review_call_dumps_raw_response_for_offline_triage(
+    monkeypatch, _redirect_failure_dumps_to_tmp
+):
+    dump_dir = _redirect_failure_dumps_to_tmp
+    malformed = "这是非 JSON 的模型回复 {broken"
+    _install_fake_llm(monkeypatch, [malformed])
+    runners = llm_review_runners.build_hypothesis_review_runners(dict(_FAKE_LLM))
+    context = _review_context()
+
+    with pytest.raises(ContractValidationError, match="did not return valid JSON"):
+        runners["reflection_runner"](_candidate("cand-a", "假说 A"), context)
+
+    dumps = _failure_dump_dir(dump_dir)
+    assert len(dumps) == 1
+    record = _read_dump(dumps[0])
+    assert record["schemaVersion"] == 1
+    assert record["purpose"] == "hypothesis_reflection"
+    assert record["failureCategory"] == "contract_validation"
+    assert record["errorType"] == "ContractValidationError"
+    assert record["rawResponse"] == malformed
+    assert record["responseChars"] == len(malformed)
+    assert record["sessionId"] == "team-1"
+    assert record["contextId"] == "ctx-1"
+    assert record["capturedAt"]
+    # Bounded identity only: no credentials or prompt material in the dump.
+    assert "api_key" not in json.dumps(record)
+    assert "messages" not in record
+
+
+def test_timeout_failure_dumps_with_timeout_category_and_empty_response(
+    monkeypatch, _redirect_failure_dumps_to_tmp
+):
+    dump_dir = _redirect_failure_dumps_to_tmp
+    now = [1_000.0]
+    monkeypatch.setattr(llm_review_runners.time, "time", lambda: now[0])
+
+    def hanging_invoke_llm(client, messages, tools=None, context=None, **kwargs):
+        now[0] = 1_001.0
+        return _FakeResponse("{}")
+
+    monkeypatch.setattr(llm_review_runners, "invoke_llm", hanging_invoke_llm)
+    monkeypatch.setattr(
+        llm_review_runners, "review_llm_call_timeout_seconds", lambda **_kwargs: 0.2
+    )
+    drafter = llm_review_runners.build_meeting_digest_drafter(dict(_FAKE_LLM))
+    with pytest.raises(llm_review_runners.ReviewLLMTimeoutError):
+        drafter(_meeting_round(), _source_messages())
+
+    dumps = _failure_dump_dir(dump_dir)
+    assert len(dumps) == 1
+    record = _read_dump(dumps[0])
+    assert record["purpose"] == "meeting_digest"
+    assert record["failureCategory"] == "timeout"
+    assert record["errorType"] == "ReviewLLMTimeoutError"
+    # The call never returned, so there is no raw response to keep.
+    assert record["rawResponse"] == ""
+    assert record["meetingRoundId"] == "meeting-1"
+
+
+def test_receipt_bound_runner_invalid_json_dumps_outcome_final_text(
+    monkeypatch, _redirect_failure_dumps_to_tmp
+):
+    dump_dir = _redirect_failure_dumps_to_tmp
+    malformed = "模型说：这不是 JSON"
+
+    def fake_invoke_llm_outcome(client, messages, context=None, **kwargs):
+        invocation_id = str(context.metadata.get("invocationId") or "")
+        return _final_outcome(
+            context,
+            receipt=_formal_step_receipt("hypothesis_pareto", invocation_id),
+            final_text=malformed,
+        )
+
+    monkeypatch.setattr(
+        llm_review_runners, "invoke_llm_outcome", fake_invoke_llm_outcome
+    )
+    runners = llm_review_runners.build_hypothesis_review_runners(
+        dict(_FORMAL_FAKE_LLM), require_provider_receipts=True
+    )
+    context = _formal_review_context()
+
+    with pytest.raises(ContractValidationError, match="did not return valid JSON"):
+        runners["pareto_runner"]({"cand-a": {}, "cand-b": {}}, context)
+
+    dumps = _failure_dump_dir(dump_dir)
+    assert len(dumps) == 1
+    record = _read_dump(dumps[0])
+    assert record["purpose"] == "hypothesis_pareto"
+    assert record["failureCategory"] == "contract_validation"
+    assert record["rawResponse"] == malformed
+    assert record["runId"]
+    assert record["modelRef"] == "opencode/deepseek-v4-flash"
+
+
+def test_dump_failure_never_breaks_the_call_contract(
+    monkeypatch, _redirect_failure_dumps_to_tmp, caplog
+):
+    dump_dir = _redirect_failure_dumps_to_tmp
+    dump_dir.mkdir(parents=True)
+    # A regular file where the dump directory should be makes every write fail.
+    blocker = dump_dir / "blocker.json"
+    blocker.write_text("not a directory", encoding="utf-8")
+    monkeypatch.setattr(
+        llm_review_runners,
+        "_review_llm_failure_dump_dir",
+        lambda: str(blocker),
+    )
+    _install_fake_llm(monkeypatch, ["{broken json"])
+    runners = llm_review_runners.build_hypothesis_review_runners(dict(_FAKE_LLM))
+
+    with caplog.at_level("WARNING", logger=llm_review_runners.logger.name):
+        with pytest.raises(ContractValidationError, match="did not return valid JSON"):
+            runners["pairwise_runner"](
+                _candidate("cand-a", "假说 A"),
+                _candidate("cand-b", "假说 B"),
+                _review_context(),
+            )
+
+    assert any("failure dump" in record.message for record in caplog.records)
+
+
+def test_successful_review_call_writes_no_dump(
+    monkeypatch, _redirect_failure_dumps_to_tmp
+):
+    dump_dir = _redirect_failure_dumps_to_tmp
+    payloads = [
+        json.dumps(
+            {
+                "claim": "假说 A",
+                "rationale": "评分依据。",
+                "differenceFromAlternatives": "不同",
+                "lineageRefs": [],
+                "scores": {dimension: 0.6 for dimension in HYPOTHESIS_SCORE_DIMENSIONS},
+                "status": "reviewed",
+                "dimensionReviews": _dimension_review_rows("cand-a"),
+            },
+            ensure_ascii=False,
+        )
+    ]
+    queue = _install_fake_llm(monkeypatch, payloads)
+    runners = llm_review_runners.build_hypothesis_review_runners(dict(_FAKE_LLM))
+
+    produced = runners["reflection_runner"](_candidate("cand-a", "假说 A"), _review_context())
+
+    assert queue == []
+    assert produced["scores"]["novelty"] == 0.6
+    assert not dump_dir.exists() or _failure_dump_dir(dump_dir) == []
+
+
+def test_failure_dump_retention_sweeps_files_older_than_24h(
+    tmp_path, _redirect_failure_dumps_to_tmp
+):
+    dump_dir = _redirect_failure_dumps_to_tmp
+    dump_dir.mkdir(parents=True)
+    stale = dump_dir / "20260101T000000-deadbeef-purpose-failure-session.json"
+    fresh = dump_dir / "20260902T000000-deadbeef-purpose-failure-session.json"
+    for path in (stale, fresh):
+        path.write_text("{}", encoding="utf-8")
+    # 25 hours old vs 1 hour old.
+    now = time.time()
+    os.utime(stale, (now - 25 * 3600, now - 25 * 3600))
+    os.utime(fresh, (now - 1 * 3600, now - 1 * 3600))
+
+    llm_review_runners._sweep_expired_failure_dumps(
+        str(dump_dir), now_s=now
+    )
+
+    assert not stale.exists()
+    assert fresh.exists()

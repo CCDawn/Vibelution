@@ -17,7 +17,11 @@ quiet ``review_llm.resolve.unavailable`` scene event naming the missing
 configuration), so fixture reviews are never silent.  Once a runner runs, it
 fails closed — any malformed model
 output raises ``ContractValidationError`` before anything is persisted,
-mirroring the executor contract.
+mirroring the executor contract.  A failed call (timeout, provider error,
+invalid JSON) also persists its raw response — when one was received — under
+the system temp directory (24h self-cleaning sweep, no credentials, no
+prompts) so malformed provider output can be attributed offline; success
+paths never write anything, and a dump failure only logs.
 """
 
 from __future__ import annotations
@@ -25,8 +29,11 @@ from __future__ import annotations
 import json
 import logging
 import os
+import tempfile
 import time
+import uuid
 from collections.abc import Callable, Mapping, Sequence
+from datetime import datetime, timezone
 from typing import Any
 
 from config import get_config
@@ -110,7 +117,7 @@ def _record_meeting_digest_scene_event(
         return
 
 
-def _meeting_digest_error_category(error: Exception) -> str:
+def _review_llm_error_category(error: Exception) -> str:
     if isinstance(error, ReviewLLMTimeoutError):
         return "timeout"
     if isinstance(error, ContractValidationError):
@@ -118,6 +125,132 @@ def _meeting_digest_error_category(error: Exception) -> str:
     if isinstance(error, LLMError):
         return "provider_error"
     return "runtime_error"
+
+
+# Backwards-compatible alias: the category helper predates the review-wide
+# failure dump and was originally named for the digest drafter.
+_meeting_digest_error_category = _review_llm_error_category
+
+
+# ---------------------------------------------------------------------------
+# Failed-response evidence dump (offline attribution support)
+# ---------------------------------------------------------------------------
+
+
+# A review LLM call that fails (timeout, invalid JSON, provider error) used to
+# lose its raw response: only outputChars/errorCategory survived, so malformed
+# provider output could not be attributed offline.  Failed raw responses are
+# now persisted under the system temp directory only — never the checkout root
+# or any product directory.  Retention is self-cleaning: every dump sweeps
+# sibling files older than 24 hours, and the timestamped names make manual
+# cleanup trivial.  Successful calls never write anything.
+_REVIEW_LLM_FAILURE_DUMP_DIRNAME = "vibelution-review-llm-failures"
+_REVIEW_LLM_FAILURE_RETENTION_SECONDS = 24 * 3600
+_REVIEW_LLM_FAILURE_MAX_CHARS = 1_000_000
+
+# Tests redirect this to a per-test directory; production always resolves the
+# system temp directory.
+_REVIEW_LLM_FAILURE_DUMP_DIR_OVERRIDE: str | None = None
+
+
+def _review_llm_failure_dump_dir() -> str:
+    if _REVIEW_LLM_FAILURE_DUMP_DIR_OVERRIDE:
+        return str(_REVIEW_LLM_FAILURE_DUMP_DIR_OVERRIDE)
+    return os.path.join(tempfile.gettempdir(), _REVIEW_LLM_FAILURE_DUMP_DIRNAME)
+
+
+def _safe_filename_part(value: Any, *, fallback: str, limit: int = 32) -> str:
+    part = "".join(
+        character if character.isalnum() or character in "._-" else "-"
+        for character in str(value or "").strip()
+    )
+    return part[:limit].strip("-.") or fallback
+
+
+def _sweep_expired_failure_dumps(directory: str, *, now_s: float) -> None:
+    """Delete dump files older than the retention window (best effort)."""
+
+    for name in os.listdir(directory):
+        if not name.endswith(".json"):
+            continue
+        path = os.path.join(directory, name)
+        try:
+            if now_s - os.path.getmtime(path) > _REVIEW_LLM_FAILURE_RETENTION_SECONDS:
+                os.remove(path)
+        except OSError:
+            continue
+
+
+def _dump_failed_review_response(
+    *,
+    purpose: str,
+    failure_category: str,
+    error: Exception,
+    raw_response: str,
+    session_id: str = "",
+    meeting_round_id: str = "",
+    context_id: str = "",
+    run_id: str = "",
+    model_ref: str = "",
+) -> None:
+    """Persist one failed review LLM raw response for offline triage.
+
+    Diagnostics only: this must never change the call's contract, so any
+    failure inside is swallowed with one bounded warning log.  The file
+    carries the raw model response plus bounded identity fields (purpose,
+    failure category, timestamps, run/meeting/session ids) and never
+    credentials or prompts.
+    """
+
+    try:
+        directory = _review_llm_failure_dump_dir()
+        now_s = time.time()
+        os.makedirs(directory, exist_ok=True)
+        _sweep_expired_failure_dumps(directory, now_s=now_s)
+        captured_at = datetime.now(timezone.utc)
+        safe_response = str(raw_response or "")[:_REVIEW_LLM_FAILURE_MAX_CHARS]
+        record = {
+            "schemaVersion": 1,
+            "purpose": str(purpose),
+            "failureCategory": str(failure_category),
+            "errorType": type(error).__name__,
+            "errorSummary": f"{type(error).__name__}: {error}".replace("\n", " ")[:200],
+            "runId": str(run_id or ""),
+            "sessionId": str(session_id or ""),
+            "meetingRoundId": str(meeting_round_id or ""),
+            "contextId": str(context_id or ""),
+            "modelRef": str(model_ref or ""),
+            "capturedAt": captured_at.isoformat(),
+            "responseChars": len(safe_response),
+            "rawResponse": safe_response,
+        }
+        filename = "-".join(
+            (
+                captured_at.strftime("%Y%m%dT%H%M%S"),
+                uuid.uuid4().hex[:8],
+                _safe_filename_part(purpose, fallback="purpose"),
+                _safe_filename_part(failure_category, fallback="failure"),
+                _safe_filename_part(session_id or run_id, fallback="session"),
+            )
+        )
+        path = os.path.join(directory, f"{filename}.json")
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(record, handle, ensure_ascii=False, indent=2)
+    except Exception as exc:  # noqa: BLE001 - diagnostics must never fail the call
+        logger.warning(
+            "review LLM failure dump was not written (%s/%s): %s: %s",
+            purpose,
+            failure_category,
+            type(exc).__name__,
+            exc,
+        )
+
+
+def _user_payload_context_id(user_payload: Mapping[str, Any]) -> str:
+    context = user_payload.get("context")
+    if isinstance(context, Mapping):
+        return str(context.get("contextId") or "").strip()
+    return ""
 
 
 def _response_usage_fields(response: Any) -> dict[str, Any]:
@@ -576,13 +709,26 @@ def _invoke_review_llm(
                             0, int((time.monotonic() - started_at) * 1000)
                         ),
                         "outputChars": len(content),
-                        "errorCategory": _meeting_digest_error_category(exc),
+                        "errorCategory": _review_llm_error_category(exc),
                         "errorType": type(exc).__name__,
                         "llmErrorCategory": (
                             str(exc.category) if isinstance(exc, LLMError) else ""
                         ),
                     },
                 )
+            # Offline attribution evidence: the raw (possibly malformed)
+            # response survives on disk even though the call itself fails
+            # closed.  Best-effort; never changes the raised error.
+            _dump_failed_review_response(
+                purpose=purpose,
+                failure_category=_review_llm_error_category(exc),
+                error=exc,
+                raw_response=content,
+                session_id=session_id,
+                meeting_round_id=str(user_payload.get("meetingRoundId") or ""),
+                context_id=_user_payload_context_id(user_payload),
+                model_ref=str(llm.get("modelRef") or ""),
+            )
             raise
         if digest_observation:
             _record_meeting_digest_scene_event(
@@ -610,33 +756,48 @@ def _invoke_review_llm(
                 context=invocation_context,
             )
 
-    outcome = _invoke_llm_with_timeout(
-        _invoke_bound_outcome,
-        purpose=purpose,
-        timeout_seconds=review_llm_call_timeout_seconds(
-            model_ref=str(llm.get("modelRef") or "")
-        ),
-        deadline_at_ms=deadline_at_ms,
-    )
-    identity = getattr(outcome, "identity", None)
-    if (
-        str(getattr(outcome, "kind", "") or "") != "final_answer"
-        or str(getattr(identity, "session_id", "") or "") != receipt_session_id
-        or str(getattr(identity, "turn_id", "") or "") != turn_id
-        or str(getattr(identity, "invocation_id", "") or "") != invocation_id
-    ):
-        raise ContractValidationError(
-            f"review step `{purpose}` did not return the bound final provider outcome"
+    final_text = ""
+    try:
+        outcome = _invoke_llm_with_timeout(
+            _invoke_bound_outcome,
+            purpose=purpose,
+            timeout_seconds=review_llm_call_timeout_seconds(
+                model_ref=str(llm.get("modelRef") or "")
+            ),
+            deadline_at_ms=deadline_at_ms,
         )
-    raw_receipt = getattr(outcome, "model_invocation_receipt", None)
-    if not isinstance(raw_receipt, Mapping) or not raw_receipt:
-        raise ContractValidationError(
-            f"review step `{purpose}` completed without a provider receipt"
+        final_text = str(getattr(outcome, "final_text", "") or "")
+        identity = getattr(outcome, "identity", None)
+        if (
+            str(getattr(outcome, "kind", "") or "") != "final_answer"
+            or str(getattr(identity, "session_id", "") or "") != receipt_session_id
+            or str(getattr(identity, "turn_id", "") or "") != turn_id
+            or str(getattr(identity, "invocation_id", "") or "") != invocation_id
+        ):
+            raise ContractValidationError(
+                f"review step `{purpose}` did not return the bound final provider outcome"
+            )
+        raw_receipt = getattr(outcome, "model_invocation_receipt", None)
+        if not isinstance(raw_receipt, Mapping) or not raw_receipt:
+            raise ContractValidationError(
+                f"review step `{purpose}` completed without a provider receipt"
+            )
+        payload = _parse_json_object(
+            final_text,
+            what=f"review step `{purpose}`",
         )
-    payload = _parse_json_object(
-        str(getattr(outcome, "final_text", "") or ""),
-        what=f"review step `{purpose}`",
-    )
+    except Exception as exc:  # noqa: BLE001 - dump raw evidence, re-raise unchanged
+        _dump_failed_review_response(
+            purpose=purpose,
+            failure_category=_review_llm_error_category(exc),
+            error=exc,
+            raw_response=final_text,
+            session_id=receipt_session_id,
+            context_id=_user_payload_context_id(user_payload),
+            run_id=invocation_id,
+            model_ref=str(llm.get("modelRef") or ""),
+        )
+        raise
     return ProviderBoundReviewResult(
         payload=payload,
         model_invocation_receipt=dict(raw_receipt),

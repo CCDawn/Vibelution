@@ -13,7 +13,9 @@ candidate hypotheses + evidence refs) into the content of a closable
    order that was debated; owning role ``research_theme_synthesizer``.
 3. **Pareto classification** — every candidate is classified as front or
    dominated over the five dimensions (no Elo-style single total score,
-   D-02); owning role ``research_theme_synthesizer``.
+   D-02); owning role ``research_theme_synthesizer``.  The classification
+   call shares the pairwise concurrency wave, and with exactly two
+   candidates it is a deterministic dominance decision (no model call).
 4. **MetaReview** — one recommendation with rationale, risk notes, and an
    acceptance flag; owning role is the meeting Coordinator.
 
@@ -327,6 +329,78 @@ def _collect_runner_outputs(
     return outputs
 
 
+# Sentinel for "no raw output was collected for this step" that stays distinct
+# from a collected ``None`` output (``None`` is a legal runner result that must
+# still flow into sequential validation and fail closed there).
+_PARETO_OUTPUT_NOT_COLLECTED = object()
+
+
+def _pareto_model_call_required(candidate_count: int) -> bool:
+    """N=2 Pareto is a pure two-way dominance decision over recorded scores.
+
+    With exactly two candidates the Pareto partition is fully determined by
+    the reflection scores (one dominates the other, or they are incomparable
+    and share the front), so the deterministic ``_fixture_pareto`` dominance
+    computation replaces the model call.  N>2 keeps the LLM classification.
+    """
+
+    return candidate_count != 2
+
+
+def _collect_pairwise_and_pareto_outputs(
+    context: Mapping[str, Any],
+    reviewed_candidates: list[dict[str, Any]],
+    *,
+    pairwise_runner: PairwiseRunner | None,
+    pareto_runner: ParetoRunner | None,
+    position_seed: str,
+    max_concurrent_calls: int,
+) -> tuple[list[ReviewRunnerResult] | None, Any]:
+    """Collect the pairwise and Pareto raw runner outputs in one bounded wave.
+
+    Pareto only consumes the reflection scores, so its single call shares the
+    pairwise fan-out wave (under the same ``max_concurrent_calls`` cap)
+    instead of serializing behind the pairwise step.  Raw outputs are returned
+    unvalidated: receipt verification and payload validation stay sequential
+    in :func:`_pairwise_step` (pair order first) and then :func:`_pareto_step`,
+    exactly like the previous serial arrangement.  A runner failure still
+    re-raises the failing input's own exception in input order, and with
+    ``max_concurrent_calls`` below 2 the wave degrades to the same serial
+    order as before (all pairwise calls, then Pareto).
+    """
+
+    by_id = {str(item["candidateId"]): item for item in reviewed_candidates}
+    pairs = deterministic_pairwise_order(list(by_id), position_seed)
+    calls: list[Callable[[], ReviewRunnerResult]] = []
+    if pairwise_runner is not None:
+        calls.extend(
+            lambda left=by_id[left_id], right=by_id[right_id]: pairwise_runner(
+                dict(left), dict(right), dict(context)
+            )
+            for left_id, right_id in pairs
+        )
+    pairwise_count = len(calls)
+    pareto_output: Any = _PARETO_OUTPUT_NOT_COLLECTED
+    if pareto_runner is not None and _pareto_model_call_required(
+        len(reviewed_candidates)
+    ):
+        scores_by_candidate = {
+            str(item["candidateId"]): dict(item["scores"])
+            for item in reviewed_candidates
+        }
+        calls.append(lambda: pareto_runner(scores_by_candidate, dict(context)))
+    if calls:
+        outputs = _collect_runner_outputs(
+            calls, max_concurrent_calls=max_concurrent_calls
+        )
+        pairwise_outputs = outputs[:pairwise_count]
+        if len(outputs) > pairwise_count:
+            pareto_output = outputs[pairwise_count]
+    else:
+        pairwise_outputs = None
+    return pairwise_outputs, pareto_output
+
+
 def deterministic_pairwise_order(
     candidate_ids: Sequence[str],
     position_seed: str,
@@ -617,22 +691,31 @@ def _pairwise_step(
     round_id: str,
     formal_receipts: list[dict[str, Any]] | None,
     max_concurrent_calls: int = MAX_CONCURRENT_REVIEW_CALLS,
+    precomputed_outputs: Sequence[ReviewRunnerResult] | None = None,
 ) -> list[dict[str, Any]]:
-    """Compare every unordered pair once, in the recorded randomized order."""
+    """Compare every unordered pair once, in the recorded randomized order.
+
+    ``precomputed_outputs`` carries the raw runner outputs already collected
+    by :func:`_collect_pairwise_and_pareto_outputs`; when it is ``None`` the
+    step collects its own wave (serial or pooled) exactly as before.
+    """
 
     by_id = {str(item["candidateId"]): item for item in candidates}
     pairs = deterministic_pairwise_order(list(by_id), position_seed)
     produced_by_pair: list[ReviewRunnerResult] = []
     if runner is not None:
-        produced_by_pair = _collect_runner_outputs(
-            [
-                lambda left=by_id[left_id], right=by_id[right_id]: runner(
-                    dict(left), dict(right), dict(context)
-                )
-                for left_id, right_id in pairs
-            ],
-            max_concurrent_calls=max_concurrent_calls,
-        )
+        if precomputed_outputs is not None:
+            produced_by_pair = list(precomputed_outputs)
+        else:
+            produced_by_pair = _collect_runner_outputs(
+                [
+                    lambda left=by_id[left_id], right=by_id[right_id]: runner(
+                        dict(left), dict(right), dict(context)
+                    )
+                    for left_id, right_id in pairs
+                ],
+                max_concurrent_calls=max_concurrent_calls,
+            )
     comparisons: list[dict[str, Any]] = []
     for index, (left_id, right_id) in enumerate(pairs):
         left = by_id[left_id]
@@ -710,6 +793,24 @@ def _fixture_pareto(scores_by_candidate: Mapping[str, Mapping[str, float]]) -> t
     return front, dominated
 
 
+def _two_candidate_pareto_note(
+    front: Sequence[str],
+    dominated: Sequence[str],
+) -> str:
+    """Explain the deterministic N=2 dominance decision in review notes."""
+
+    if dominated:
+        return (
+            "候选恰好 2 条：Pareto 分类由五维评分 dominance 确定性判定，"
+            f"{dominated[0]} 在全部五维不高于 {front[0]} 且至少一维更低，"
+            f"判为被支配，{front[0]} 位于前沿。"
+        )
+    return (
+        "候选恰好 2 条：Pareto 分类由五维评分 dominance 确定性判定，"
+        "两候选互不全维占优（各有领先维度或五维全相等），同处前沿。"
+    )
+
+
 def _pareto_step(
     context: Mapping[str, Any],
     candidates: list[dict[str, Any]],
@@ -717,15 +818,32 @@ def _pareto_step(
     runner: ParetoRunner | None,
     agent_id: str,
     formal_receipts: list[dict[str, Any]] | None,
+    precomputed_output: Any = _PARETO_OUTPUT_NOT_COLLECTED,
 ) -> dict[str, Any]:
-    """Classify every candidate as Pareto front or dominated (fail closed)."""
+    """Classify every candidate as Pareto front or dominated (fail closed).
+
+    With exactly two candidates the partition is a pure dominance decision
+    over the recorded reflection scores, so the deterministic computation
+    replaces the model call (``_pareto_model_call_required``); the output
+    shape is identical to the LLM classification.
+    """
 
     scores_by_candidate = {
         str(item["candidateId"]): dict(item["scores"]) for item in candidates
     }
-    if runner is not None:
+    if runner is not None and not _pareto_model_call_required(
+        len(scores_by_candidate)
+    ):
+        front, dominated = _fixture_pareto(scores_by_candidate)
+        notes = _two_candidate_pareto_note(front, dominated)
+    elif runner is not None:
+        raw_produced = (
+            runner(scores_by_candidate, dict(context))
+            if precomputed_output is _PARETO_OUTPUT_NOT_COLLECTED
+            else precomputed_output
+        )
         produced = _validated_runner_payload(
-            runner(scores_by_candidate, dict(context)),
+            raw_produced,
             step_label="Pareto classification",
             formal_receipts=formal_receipts,
         )
@@ -1021,9 +1139,15 @@ def execute_hypothesis_review(
     upstream screening, never to this executor.
     The reflection and pairwise runner calls run with bounded parallelism
     (``max_concurrent_calls``; default ``MAX_CONCURRENT_REVIEW_CALLS``, values
-    below 2 fall back to fully serial invocation); results are always
-    assembled in input order and every step still fails closed on any
-    incomplete output.
+    below 2 fall back to fully serial invocation); the single Pareto model
+    call shares the pairwise wave because it only consumes the reflection
+    scores.  Raw outputs are always validated sequentially in step order
+    (reflection, pairwise, Pareto, MetaReview) and every step still fails
+    closed on any incomplete output.  With exactly two candidates the Pareto
+    classification is a pure dominance decision over the recorded scores, so
+    it is computed locally and consumes no model call; the budget record
+    still counts the Pareto step, mirroring the DEV fixture convention where
+    the structural step count is reconciled while zero model calls are spent.
     ``expected_review_call_budget`` lets the caller pass the budget it derived
     upstream; a disagreement with the actual candidate set fails closed before
     any review call.
@@ -1186,6 +1310,18 @@ def execute_hypothesis_review(
             )
     else:
         coherence_artifact_ref = ""
+    # One bounded wave carries the pairwise fan-out and the single Pareto
+    # call (Pareto only consumes the reflection scores); the raw outputs are
+    # then validated sequentially — pairwise first, then Pareto — so the
+    # fail-closed aggregation order is unchanged.
+    pairwise_outputs, pareto_output = _collect_pairwise_and_pareto_outputs(
+        context,
+        reviewed_candidates,
+        pairwise_runner=pairwise_runner,
+        pareto_runner=pareto_runner,
+        position_seed=seed,
+        max_concurrent_calls=effective_concurrency,
+    )
     comparisons = _pairwise_step(
         context,
         reviewed_candidates,
@@ -1195,6 +1331,7 @@ def execute_hypothesis_review(
         round_id=round_id,
         formal_receipts=formal_receipts,
         max_concurrent_calls=effective_concurrency,
+        precomputed_outputs=pairwise_outputs,
     )
     pareto = _pareto_step(
         context,
@@ -1202,6 +1339,7 @@ def execute_hypothesis_review(
         runner=pareto_runner,
         agent_id=pareto_agent,
         formal_receipts=formal_receipts,
+        precomputed_output=pareto_output,
     )
     meta_review = _metareview_step(
         context,
