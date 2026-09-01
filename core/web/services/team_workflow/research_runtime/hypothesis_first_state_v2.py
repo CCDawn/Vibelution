@@ -2382,6 +2382,39 @@ def _claim_belief_gate_verdict(
     ) or _blocked_gate_verdict(candidate_id, "claim_data_missing")
 
 
+def _direction_1a_submission_section(
+    requirement_matrix: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Project the §2.5 official requirement matrix into the V2 state.
+
+    ``STAGE1_G1_ACCEPTED`` never implies direction-1A submission readiness:
+    the aggregate is true only when every row across all four delivery
+    classes holds real evidence (contract §8.2 counterexample 21).
+    """
+
+    from core.research.competition.stage_one_requirement_matrix import (
+        direction_1a_submission_ready,
+        evaluate_stage_one_requirement_matrix,
+        not_yet_evidenced_ids,
+        requirement_matrix_from_dict,
+        unmet_g1_required,
+    )
+
+    if requirement_matrix is None:
+        items = evaluate_stage_one_requirement_matrix(None)
+        source = "not_materialized"
+    else:
+        items = requirement_matrix_from_dict(dict(requirement_matrix))
+        source = "competition_alignment"
+    return {
+        "source": source,
+        "submissionReady": direction_1a_submission_ready(items),
+        "g1RequiredUnmet": list(unmet_g1_required(items)),
+        "notYetEvidenced": list(not_yet_evidenced_ids(items)),
+        "items": [item.to_dict() for item in items],
+    }
+
+
 def project_state_from_records(
     *,
     team_id: str,
@@ -2397,6 +2430,7 @@ def project_state_from_records(
     formal_snapshots: Mapping[str, Mapping[str, Any]] | None = None,
     program_output: Mapping[str, Any] | None = None,
     chat_room_round_snapshots: Mapping[str, Mapping[str, Any]] | None = None,
+    requirement_matrix: Mapping[str, Any] | None = None,
     workflow_run_id: str = "",
     return_to: str = "",
     include_source_cursor: bool = False,
@@ -3644,6 +3678,7 @@ def project_state_from_records(
         + int(convergence.get("lifecycle") == "waiting_human")
         + int(program_delivery.get("humanReviewStatus") == "waiting_human")
     )
+    direction1a_submission = _direction_1a_submission_section(requirement_matrix)
     raw: dict[str, Any] = {
         "schemaVersion": 2,
         "contract": "hypothesis-first-state/v2",
@@ -3672,12 +3707,38 @@ def project_state_from_records(
         "convergence": convergence,
         "formalRuntime": formal_runtime,
         "programDelivery": program_delivery,
+        "direction1ASubmissionReady": direction1a_submission["submissionReady"],
+        "direction1aSubmission": direction1a_submission,
         "allowedActions": allowed_actions,
         "problems": all_problems,
     }
     if include_source_cursor:
         raw["sourceCursor"] = source_cursor
     return finalize_state_versions(raw, reset_id=reset_id)
+
+
+def _latest_requirement_matrix(
+    team_id: str,
+    run_ids: Sequence[str],
+) -> dict[str, Any] | None:
+    """Return the newest competition-alignment payload across the scoped runs."""
+
+    from .workflow_artifact_store import list_workflow_artifacts
+
+    best: tuple[str, dict[str, Any]] | None = None
+    for run_id in run_ids:
+        for row in list_workflow_artifacts(
+            team_id,
+            kind="competition_alignment",
+            workflow_run_id=run_id,
+        ):
+            payload = row.get("payload")
+            if not isinstance(payload, Mapping):
+                continue
+            updated = str(row.get("updatedAt") or "")
+            if best is None or updated > best[0]:
+                best = (updated, dict(payload))
+    return best[1] if best else None
 
 
 def _scope_records(
@@ -3818,6 +3879,14 @@ def _scope_records(
             if not isinstance(projected, Mapping):
                 raise TypeError("formal workflow snapshot is not a mapping")
             formal_snapshots[run_id] = dict(projected)
+        requirement_matrix = _latest_requirement_matrix(
+            team_id,
+            [
+                str(run.get("runId") or "").strip()
+                for run in formal_runs
+                if str(run.get("runId") or "").strip()
+            ],
+        )
         try:
             program_output = challenge_question_runs.get_challenge_question_run_detail(
                 team_id,
@@ -3885,6 +3954,7 @@ def _scope_records(
         "formal_snapshots": formal_snapshots,
         "program_output": program_output,
         "chat_room_round_snapshots": chat_room_round_snapshots,
+        "requirement_matrix": requirement_matrix,
     }
 
 

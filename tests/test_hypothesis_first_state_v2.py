@@ -185,6 +185,27 @@ def _initial_snapshot() -> dict[str, object]:
             "approvedGateCount": 0,
             "requiredGateCount": 4,
         },
+        "direction1ASubmissionReady": False,
+        "direction1aSubmission": {
+            "source": "not_materialized",
+            "submissionReady": False,
+            "g1RequiredUnmet": [
+                "official_core_hypothesis_novelty_coherence",
+                "official_plan_executability_six_facets",
+                "official_two_round_revision",
+            ],
+            "notYetEvidenced": [
+                "official_core_hypothesis_novelty_coherence",
+                "official_plan_executability_six_facets",
+                "official_two_round_revision",
+                "official_scale_out_125_questions",
+                "official_technical_depth_multimodal",
+                "official_application_evidence",
+                "official_submission_materials",
+                "official_phase2_experiments",
+            ],
+            "items": [],
+        },
         "allowedActions": [
             {
                 "kind": "command",

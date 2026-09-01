@@ -634,6 +634,34 @@ class ResetBoundary(StrictWireModel):
     source: Literal["question_reset_audit", "origin"]
 
 
+RequirementDeliveryClass = Literal[
+    "G1_REQUIRED",
+    "STAGE1_SCALE_OUT",
+    "SUBMISSION_PACKAGE",
+    "PHASE2_USER",
+]
+RequirementCoverageStatus = Literal["evidenced", "not_yet_evidenced"]
+
+
+class Direction1ARequirementState(StrictWireModel):
+    requirementId: str = Field(..., min_length=1)
+    requirement: str = Field(..., min_length=1)
+    officialDimension: str
+    officialScoringPoints: list[str]
+    deliveryClass: RequirementDeliveryClass
+    coverageStatus: RequirementCoverageStatus
+    evidenceRefs: list[str]
+    deferredOwner: str
+
+
+class Direction1ASubmissionState(StrictWireModel):
+    source: Literal["competition_alignment", "not_materialized"]
+    submissionReady: bool
+    g1RequiredUnmet: list[str]
+    notYetEvidenced: list[str]
+    items: list[Direction1ARequirementState]
+
+
 class HypothesisFirstStateV2(StrictWireModel):
     schemaVersion: Literal[2]
     contract: Literal["hypothesis-first-state/v2"]
@@ -655,6 +683,8 @@ class HypothesisFirstStateV2(StrictWireModel):
     convergence: ConvergenceState
     formalRuntime: FormalRuntimeState
     programDelivery: ProgramDeliveryState
+    direction1ASubmissionReady: bool
+    direction1aSubmission: Direction1ASubmissionState
     allowedActions: list[AllowedAction]
     problems: list[WorkflowProblem]
     sourceCursor: dict[str, str] | None = None
