@@ -194,9 +194,16 @@ def record_hypothesis_fragment(
     task = _task(task_context)
     workflow_run_id = fragment.workflowRunId
     source_collection_run_id = _text(task.get("sourceCollectionRunId"))
+    # The artifact identity carries the retry dimension (sessionAttempt): a
+    # formal retry binds a new task to the same candidate/nodeRun and may
+    # rewrite the claim, so a retry-improved fragment must land on its own
+    # immutable identity instead of colliding with the superseded attempt.
+    # Replaying the same attempt with identical content still resolves to the
+    # same identity and stays idempotent in the artifact store.
     default_artifact_ref = (
         f"{HYPOTHESIS_FRAGMENT_KIND}:{fragment.selectionId}:"
-        f"{fragment.candidateId}:{fragment.nodeRunId}"
+        f"{fragment.candidateId}:{fragment.nodeRunId}:"
+        f"{fragment.sessionAttempt}"
     )
     artifact_ref = _text(artifact_identity) or default_artifact_ref
     artifact: dict[str, Any] = {

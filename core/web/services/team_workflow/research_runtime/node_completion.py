@@ -237,7 +237,10 @@ def complete_node_execution(
     state_patch: dict[str, Any] = {
         "current_node_id": node_id,
         "completed_node_ids": completed_ids,
-        "artifact_refs": [item.artifactId for item in manifests],
+        # Last-value channel: ONLY this node's artifact ids.  Cumulative
+        # artifact lineage authority stays on the run record's
+        # ``artifactManifests``.
+        "latest_node_artifact_refs": [item.artifactId for item in manifests],
         "artifacts": {
             item.artifactId.split(":", 1)[0]: item.contentHash for item in manifests
         },

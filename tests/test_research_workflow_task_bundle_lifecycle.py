@@ -7,6 +7,8 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from core.research.workflow.contracts import ContractValidationError, ResearchTaskBundle
+from core.research.workflow.definition import build_challenge_cup_workflow_definition
+from core.research.workflow.definition_registry import register_or_resolve
 from core.research.workflow.models import ActorKind, WorkflowNodeSpec, WorkflowStageId
 from core.web.services.team_workflow.research_runtime.agent_node_execution import (
     AgentNodeExecutionError,
@@ -20,6 +22,7 @@ from core.web.services.team_workflow.research_runtime.task_bundle_lifecycle impo
     TaskBundleError,
     bind_agent_task_bundle,
     cancel_task_bundle,
+    complete_agent_task_bundle_subtask,
     complete_task_bundle_records,
     create_agent_task_bundle,
     fail_agent_task_bundle_subtask,
@@ -39,11 +42,24 @@ def _node_spec() -> WorkflowNodeSpec:
     )
 
 
+def _registered_run_identity() -> dict:
+    """Pin the fixture run like production run creation does.
+
+    The definition registry resolves fail-closed, so the fixture must carry
+    the workflow identity of the current built definition.
+    """
+
+    identity = register_or_resolve(build_challenge_cup_workflow_definition())
+    return {
+        "workflowId": identity.workflowId,
+        "workflowVersionId": identity.workflowVersionId,
+    }
+
+
 def _record() -> dict:
     return {
         "runId": "run-1",
-        "workflowId": "challenge_cup",
-        "workflowVersionId": "v1",
+        **_registered_run_identity(),
         "threadId": "thread-1",
         "inputSnapshot": {
             "budgetPolicy": {"maxParallelTasks": 4},
@@ -698,65 +714,138 @@ def test_start_agent_task_retry_candidate_replaces_only_h2_and_replays(
     assert len(calls) == 1
 
 
-def test_candidate_fan_out_fails_closed_when_selection_exceeds_effective_concurrency(
+def test_candidate_fan_out_queues_excess_candidate_until_slot_frees(
     monkeypatch, tmp_path
 ) -> None:
     store = WorkflowRunStore(tmp_path)
-    record = _record()
-    record["nodeRuns"][0].update(
-        {
-            "actorType": "agent",
-            "agentId": "agent-hypothesis",
-            "status": "ready",
-            "inputSnapshotHash": "a" * 64,
-        }
-    )
-    store.create_run(record)
-    monkeypatch.setattr(
-        "core.web.services.team_workflow.research_runtime.agent_node_execution.load_hypothesis_fan_out_input",
-        lambda _record: {
-            "selectionId": "selection-1",
-            "selectedCandidateIds": ["H1", "H2", "H3"],
-            "candidateSnapshots": [
-                {"candidateId": candidate} for candidate in ("H1", "H2", "H3")
-            ],
-            "selection": {
-                "selectionId": "selection-1",
-                "selectedCandidateIds": ["H1", "H2", "H3"],
-            },
-        },
-    )
-    monkeypatch.setattr(
-        "core.web.services.team_workflow.research_runtime.agent_node_execution.select_model_route",
-        lambda *_args, **_kwargs: {
-            "decisionId": "route-1",
-            "nodeRunId": "node-run-1",
-            "modelRef": "model-1",
-            "purpose": "hypothesis",
-            "estimatedCost": 1.0,
-            "escalationReason": "",
-        },
-    )
-    starts: list[dict] = []
+    store.create_run(_candidate_ready_record())
+    _patch_candidate_start_dependencies(monkeypatch)
+    started: list[str] = []
+
+    def recording_start(_store, current, **kwargs):
+        candidate_id = str(kwargs["payload"]["candidateId"])
+        started.append(candidate_id)
+        return current, _candidate_started(candidate_id)
+
     monkeypatch.setattr(
         "core.web.services.team_workflow.research_runtime.agent_node_execution._start_external_task",
-        lambda *_args, **kwargs: starts.append(dict(kwargs)),
+        recording_start,
     )
 
-    with pytest.raises(
-        AgentNodeExecutionError,
-        match="selected candidate count exceeds the effective maxConcurrency",
-    ) as exc_info:
-        start_agent_node_execution(
+    result = start_agent_node_execution(
+        store,
+        record=store.get_run("run-1"),
+        node_id="hypothesis_design",
+        payload={"idempotencyKey": "dispatch-queued", "maxConcurrency": 2},
+    )
+
+    # Only the first maxConcurrency candidates start; the excess candidate
+    # stays pending in the bundle instead of failing the dispatch.
+    assert started == ["H1", "H2"]
+    assert result["taskBundle"]["maxConcurrency"] == 2
+    assert result["taskIds"] == ["task-h1", "task-h2"]
+    assert [item["candidateId"] for item in result["scopedSessions"]] == [
+        "H1",
+        "H2",
+    ]
+    persisted = store.get_run("run-1")
+    subtasks = persisted["taskBundles"][0]["subtasks"]
+    assert [item["status"] for item in subtasks] == [
+        "running",
+        "running",
+        "pending",
+    ]
+    assert subtasks[2]["taskId"] == ""
+
+    completed = complete_agent_task_bundle_subtask(
+        store,
+        run_id="run-1",
+        node_run_id="node-run-1",
+        subtask_id="node-run-1:selection-1:H1",
+        output_artifact_refs=["fragment-h1"],
+        attempt=1,
+    )
+
+    # The terminal candidate hands its slot to the queued candidate.  The
+    # dispatch runs after the terminal mutation, so read the persisted bundle.
+    assert started == ["H1", "H2", "H3"]
+    completed = store.get_run("run-1")["taskBundles"][0]
+    assert [item["status"] for item in completed["subtasks"]] == [
+        "succeeded",
+        "running",
+        "running",
+    ]
+    assert completed["subtasks"][2]["taskId"] == "task-h3"
+
+
+def test_running_candidate_failure_starts_pending_candidate_and_keeps_siblings(
+    monkeypatch, tmp_path
+) -> None:
+    store = WorkflowRunStore(tmp_path)
+    store.create_run(_candidate_ready_record())
+    _patch_candidate_start_dependencies(monkeypatch)
+    started: list[str] = []
+
+    def recording_start(_store, current, **kwargs):
+        candidate_id = str(kwargs["payload"]["candidateId"])
+        started.append(candidate_id)
+        return current, _candidate_started(candidate_id)
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.agent_node_execution._start_external_task",
+        recording_start,
+    )
+
+    bundle = create_agent_task_bundle(
+        store,
+        record=_candidate_ready_record(),
+        node_run=_node_run(),
+        node_spec=_node_spec(),
+        model_route=_route(),
+        budget_reservation_ref="budget-1",
+        idempotency_key="dispatch-fail-queue",
+        deadline_seconds=300,
+        subtask_specs=[
+            {"selectionId": "selection-1", "candidateId": candidate_id}
+            for candidate_id in ("H1", "H2", "H3")
+        ],
+        max_concurrency=2,
+    )
+    for candidate_id in ("H1", "H2"):
+        bind_agent_task_bundle(
             store,
-            record=store.get_run("run-1"),
-            node_id="hypothesis_design",
-            payload={"idempotencyKey": "dispatch-too-wide", "maxConcurrency": 2},
+            run_id="run-1",
+            bundle_id=bundle["bundleId"],
+            subtask_id=f"node-run-1:selection-1:{candidate_id}",
+            task_id=f"task-{candidate_id.lower()}",
+            session_id=f"session-{candidate_id.lower()}",
+            turn_id=f"turn-{candidate_id.lower()}",
         )
 
-    assert exc_info.value.code == "candidate_fan_out_concurrency_exceeded"
-    assert starts == []
-    assert store.get_run("run-1")["taskBundles"] == []
+    failed = fail_agent_task_bundle_subtask(
+        store,
+        run_id="run-1",
+        node_run_id="node-run-1",
+        subtask_id="node-run-1:selection-1:H1",
+        failure_code="external_task_failed",
+        failure_summary="H1 failed",
+        attempt=1,
+    )
+
+    # The failed running candidate preserves its siblings and the freed slot
+    # starts the pending candidate normally.  The dispatch runs after the
+    # terminal mutation, so read the persisted bundle.
+    assert started == ["H3"]
+    failed = store.get_run("run-1")["taskBundles"][0]
+    assert [item["status"] for item in failed["subtasks"]] == [
+        "failed",
+        "running",
+        "running",
+    ]
+    assert failed["subtasks"][1]["taskId"] == "task-h2"
+    assert not failed["subtasks"][1].get("failureCode")
+    assert failed["subtasks"][2]["taskId"] == "task-h3"
+    assert not failed["subtasks"][2].get("failureCode")
 
 
 def test_shadow_candidate_scope_keeps_legacy_single_session_execution(
@@ -938,6 +1027,61 @@ def test_start_agent_task_retry_first_candidate_syncs_node_run_and_binding(
         "turnId": "turn-h1-retry",
         "sessionAttempt": 2,
     }
+    # The retry binding echoes the attempt-start checkpoint as an audit
+    # reference under the renamed key, never as a recovery pointer.
+    assert binding["anchoredAtCheckpointId"] == ""
+    assert "checkpointId" not in binding
+
+
+def test_session_binding_anchor_checkpoint_is_audit_reference(tmp_path) -> None:
+    """anchoredAtCheckpointId is attempt-start provenance, not a resume pointer."""
+
+    from core.web.services.team_workflow.research_runtime.session_binding_bridge import (
+        SessionBindingBridge,
+    )
+
+    store = WorkflowRunStore(tmp_path / "runs")
+    store.create_run(
+        {
+            "runId": "run-anchor-1",
+            **_registered_run_identity(),
+            "threadId": "thread-anchor-1",
+            "bindingSnapshots": [
+                {
+                    "nodeId": "hypothesis_design",
+                    "agentId": "agent-hypothesis",
+                    "roleKey": "hypothesis_designer",
+                }
+            ],
+            "nodeRuns": [
+                {
+                    "nodeRunId": "node-run-anchor-1",
+                    "nodeId": "hypothesis_design",
+                    "attempt": 1,
+                    "status": "running",
+                    "checkpointId": "ckpt-at-attempt-start",
+                }
+            ],
+            "events": [],
+            "status": "running",
+        }
+    )
+    binding = SessionBindingBridge(store).put(
+        store.get_run("run-anchor-1"),
+        "hypothesis_design",
+        {
+            "agentId": "agent-hypothesis",
+            "nodeRunId": "node-run-anchor-1",
+            "nodeAttempt": 1,
+            "sessionId": "session-anchor-1",
+            "sessionAttempt": 1,
+            "taskId": "task-anchor-1",
+            "turnId": "turn-anchor-1",
+            "anchoredAtCheckpointId": "ckpt-at-attempt-start",
+        },
+    )
+    assert binding["anchoredAtCheckpointId"] == "ckpt-at-attempt-start"
+    assert "checkpointId" not in binding
 
 
 def test_partial_candidate_start_binds_and_reconciles_started_siblings(

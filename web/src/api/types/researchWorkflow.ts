@@ -227,7 +227,8 @@ export type NodeAgentSessionBinding = {
   sessionAttempt: number;
   taskId: string;
   turnId: string;
-  checkpointId: string;
+  /** Audit reference captured at attempt start, not a recovery pointer. */
+  anchoredAtCheckpointId: string;
   status: string;
   boundAt: string;
   supersedesBindingId?: string;

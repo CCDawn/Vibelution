@@ -338,7 +338,8 @@ class NodeAgentSessionBinding:
     sessionAttempt: int
     taskId: str
     turnId: str
-    checkpointId: str
+    # Audit reference captured at attempt start, not a recovery pointer.
+    anchoredAtCheckpointId: str
     status: str
     boundAt: str
     supersedesBindingId: str = ""

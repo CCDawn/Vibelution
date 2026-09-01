@@ -10,6 +10,8 @@ const card = "relative isolate grid min-h-[min(590px,calc(100dvh-250px))] min-w-
 const cardGridLines = "pointer-events-none absolute inset-0 -z-[1] opacity-40 [background:linear-gradient(90deg,transparent_49.9%,color-mix(in_srgb,var(--vui-border-subtle)_68%,transparent)_50%,transparent_50.1%),linear-gradient(color-mix(in_srgb,var(--vui-border-subtle)_48%,transparent)_1px,transparent_1px)_0_0/100%_72px]";
 const cardCopy = "flex min-w-0 flex-col p-[clamp(30px,4vh,48px)_clamp(26px,3vw,42px)_clamp(28px,4vh,42px)_clamp(34px,4.4vw,64px)] max-[960px]:p-8";
 const presenceRow = "flex items-center justify-between gap-4";
+const presenceStatus = "flex min-w-0 items-center gap-2";
+const unreadBadge = "inline-flex h-6 items-center rounded-full bg-[var(--accent-cool)] px-2.5 [font-size:0.62rem] font-bold text-[var(--bg-primary)] shadow-[0_0_0_3px_color-mix(in_srgb,var(--accent-cool)_12%,transparent)]";
 const localTime = "shrink-0 font-mono text-[0.66rem] text-vui-fg-tertiary";
 const identityBlock = "mt-auto min-w-0 [&>h2]:m-0 [&>h2]:mt-3 [&>h2]:text-[clamp(3rem,4vw,4.2rem)] [&>h2]:font-[760] [&>h2]:leading-none [&>h2]:tracking-[-0.06em] [&>h2]:text-vui-fg-primary";
 const identityCode = "m-0 font-mono text-[0.64rem] font-bold tracking-[0.12em] text-[var(--accent-cool)]";
@@ -24,12 +26,15 @@ const cardActions = "mt-[clamp(18px,2.8vh,26px)] flex flex-wrap items-center gap
 const primaryAction = "!h-11 !min-h-11 !px-5";
 const secondaryAction = "!h-11 !min-h-11 !px-4";
 const cardPortrait = "!min-h-full max-[960px]:!min-h-[420px]";
-const portrait = "relative isolate block min-h-[430px] overflow-hidden bg-[radial-gradient(circle_at_50%_24%,color-mix(in_srgb,var(--accent-cool)_24%,transparent),transparent_43%),var(--vui-surface-rail)] before:pointer-events-none before:absolute before:inset-[11%_6%_0_5%] before:rounded-[48%_48%_0_0] before:border before:border-vui-border-subtle before:content-['']";
-const avatar = "relative isolate grid size-11 shrink-0 place-items-center overflow-hidden rounded-full border border-[color-mix(in_srgb,var(--accent-cool)_38%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_16%,var(--vui-surface-row))]";
-const portraitImage = "absolute bottom-[-2%] left-1/2 z-[2] h-[98%] w-[110%] max-w-none -translate-x-1/2 object-contain object-bottom drop-shadow-[0_24px_28px_rgba(0,0,0,0.38)]";
-const avatarImage = "absolute inset-0 z-[2] h-full w-full object-cover object-[50%_24%]";
+const portrait = "group relative isolate block min-h-[430px] overflow-hidden bg-[radial-gradient(circle_at_50%_24%,color-mix(in_srgb,var(--accent-cool)_24%,transparent),transparent_43%),var(--vui-surface-rail)] data-[scene-key=campus-day]:bg-[radial-gradient(circle_at_54%_20%,color-mix(in_srgb,var(--accent-cool)_28%,transparent),transparent_40%),linear-gradient(160deg,var(--vui-surface-rail),color-mix(in_srgb,var(--state-success)_10%,var(--vui-surface-rail)))] data-[scene-key=office-day]:bg-[radial-gradient(circle_at_52%_18%,color-mix(in_srgb,var(--state-warning)_18%,transparent),transparent_40%),linear-gradient(160deg,var(--vui-surface-rail),var(--vui-surface-workspace))] data-[scene-key=home-evening]:bg-[radial-gradient(circle_at_50%_20%,color-mix(in_srgb,var(--state-warning)_24%,transparent),transparent_42%),linear-gradient(165deg,var(--vui-surface-rail),color-mix(in_srgb,var(--accent-cool)_8%,black))] data-[scene-key=home-night]:bg-[radial-gradient(circle_at_50%_20%,color-mix(in_srgb,var(--accent-cool)_18%,transparent),transparent_40%),linear-gradient(165deg,var(--vui-surface-rail),color-mix(in_srgb,var(--vui-surface-workspace)_72%,black))] data-[scene-key=outdoors-rain]:bg-[radial-gradient(circle_at_50%_16%,color-mix(in_srgb,var(--accent-cool)_22%,transparent),transparent_38%),linear-gradient(165deg,color-mix(in_srgb,var(--vui-surface-rail)_84%,var(--accent-cool)),var(--vui-surface-workspace))] before:pointer-events-none before:absolute before:inset-[11%_6%_0_5%] before:z-[1] before:rounded-[48%_48%_0_0] before:border before:border-vui-border-subtle before:content-['']";
+const avatar = "group relative isolate grid size-11 shrink-0 place-items-center overflow-hidden rounded-full border border-[color-mix(in_srgb,var(--accent-cool)_38%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_16%,var(--vui-surface-row))] data-[expression-id=happy]:border-[color-mix(in_srgb,var(--state-success)_55%,var(--vui-border-subtle))] data-[expression-id=low]:saturate-[0.72] data-[expression-id=tired]:brightness-90";
+const portraitFigure = "pointer-events-none absolute inset-0 z-[2] origin-bottom";
+const portraitSceneImage = "pointer-events-none absolute inset-0 z-0 h-full w-full object-cover opacity-35 saturate-75";
+const portraitImage = "absolute bottom-[-2%] left-1/2 h-[98%] w-[110%] max-w-none -translate-x-1/2 object-contain object-bottom drop-shadow-[0_24px_28px_rgba(0,0,0,0.38)] group-data-[expression-id=happy]:saturate-[1.08] group-data-[expression-id=low]:saturate-[0.72] group-data-[expression-id=tired]:brightness-90";
+const avatarImage = "absolute inset-0 h-full w-full object-cover object-[50%_24%]";
 const portraitInitials = "absolute left-1/2 top-[38%] z-[1] -translate-x-1/2 -translate-y-1/2 font-mono text-[clamp(1rem,2vw,1.55rem)] font-extrabold tracking-[0.08em] text-vui-fg-primary";
 const portraitGlow = "pointer-events-none absolute left-1/2 top-[17%] z-[1] size-[min(30vw,390px)] -translate-x-1/2 rounded-full border border-[color-mix(in_srgb,var(--accent-cool)_20%,transparent)] shadow-[0_0_0_50px_color-mix(in_srgb,var(--vui-border-subtle)_14%,transparent),0_0_100px_color-mix(in_srgb,var(--accent-cool)_16%,transparent)]";
+const portraitBlink = "pointer-events-none absolute left-1/2 top-[31%] z-[3] flex -translate-x-1/2 gap-[clamp(10px,2.2vw,28px)] opacity-0 [&>i]:block [&>i]:h-[2px] [&>i]:w-[clamp(7px,1.1vw,13px)] [&>i]:rounded-full [&>i]:bg-[color-mix(in_srgb,var(--vui-fg-primary)_62%,transparent)] group-data-[companion-portrait=avatar]:hidden";
 const onlineDot = "absolute bottom-3 right-3 z-[3] size-2.5 rounded-full border-2 border-vui-surface-rail bg-[var(--state-success)] shadow-[0_0_0_3px_color-mix(in_srgb,var(--state-success)_12%,transparent)] data-[compact=true]:bottom-0 data-[compact=true]:right-0";
 const footer = "mx-auto mt-4 flex max-w-[1220px] items-center justify-between gap-5 [font-size:var(--vui-font-xs)] text-vui-fg-tertiary max-[760px]:flex-col max-[760px]:items-start";
 const stateHost = "mx-auto max-w-[860px] py-12";
@@ -47,6 +52,8 @@ export default {
   cardGridLines,
   cardCopy,
   presenceRow,
+  presenceStatus,
+  unreadBadge,
   localTime,
   identityBlock,
   identityCode,
@@ -63,10 +70,13 @@ export default {
   cardPortrait,
   portrait,
   avatar,
+  portraitFigure,
+  portraitSceneImage,
   portraitImage,
   avatarImage,
   portraitInitials,
   portraitGlow,
+  portraitBlink,
   onlineDot,
   footer,
   stateHost,

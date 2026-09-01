@@ -95,6 +95,12 @@ RUN_LEASES = [READONLY_CHAT_LEASE]
 DEFAULT_MODE = "round_robin"
 DEFAULT_PURPOSE = "discussion"
 CHAT_ROOM_AGENT_LLM_SLOT = "dialogue"
+_CHALLENGE_PRIOR_SEMANTIC_MEETING_TYPES = frozenset(
+    {
+        "hypothesis_candidate_generation",
+        "hypothesis_review",
+    }
+)
 _CASUAL_CHAT_TOPIC_RE = re.compile(
     r"^\s*(?:你们好|大家好|你好|您好|hello|hi|hey|嗨|哈喽|在吗|有人吗|辛苦了)[。！!,.，\s]*$",
     re.IGNORECASE,
@@ -2943,7 +2949,6 @@ def _build_participant_prompt(
     prior_messages: list[dict[str, Any]],
 ) -> str:
     recent_session_lines = _format_recent_session_messages(participant.get("recentMessages") or [])
-    prior_lines = _format_prior_room_messages(prior_messages)
     purpose = _normalize_purpose(round_payload.get("purpose") or room.get("purpose") or DEFAULT_PURPOSE)
     case_state = round_payload.get("caseState") if isinstance(round_payload.get("caseState"), dict) else {}
     case_state_lines = format_case_state_prompt(case_state)
@@ -2954,6 +2959,10 @@ def _build_participant_prompt(
     team_context_lines = _format_participant_team_context(participant)
     structured_meeting_message = _uses_structured_meeting_message(
         room, round_payload
+    )
+    prior_lines = _format_prior_room_messages(
+        prior_messages,
+        preserve_meeting_semantics=_is_challenge_meeting_round(round_payload),
     )
     challenge_short_answer_lines = (
         [
@@ -3115,11 +3124,20 @@ def _format_recent_session_messages(messages: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def _format_prior_room_messages(messages: list[dict[str, Any]]) -> str:
+def _format_prior_room_messages(
+    messages: list[dict[str, Any]],
+    *,
+    preserve_meeting_semantics: bool = False,
+) -> str:
     lines: list[str] = []
     for item in messages[-8:]:
         speaker = str(item.get("speakerTitle") or item.get("participantId") or "speaker").strip()
-        content = trim_lines(str(item.get("content") or item.get("summary") or ""), max_lines=3)
+        raw_content = str(item.get("content") or item.get("summary") or "")
+        content = (
+            raw_content.strip()
+            if preserve_meeting_semantics
+            else trim_lines(raw_content, max_lines=3)
+        )
         if content:
             lines.append(f"- {speaker}: {content}")
     return "\n".join(lines)
@@ -4028,6 +4046,24 @@ def _uses_structured_meeting_message(
         and str(config.get("candidateAuthority") or "").strip().lower()
         == "formal_grounded_candidate"
     )
+
+
+def _is_challenge_meeting_round(
+    round_payload: Mapping[str, Any] | None,
+) -> bool:
+    """Identify candidate-generation/review context for prompt hydration."""
+
+    if not isinstance(round_payload, Mapping):
+        return False
+    config = (
+        round_payload.get("config")
+        if isinstance(round_payload.get("config"), Mapping)
+        else {}
+    )
+    meeting_type = str(
+        config.get("meetingType") or round_payload.get("meetingType") or ""
+    ).strip().lower()
+    return meeting_type in _CHALLENGE_PRIOR_SEMANTIC_MEETING_TYPES
 
 
 def _refresh_participants(

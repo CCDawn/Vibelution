@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import pytest
 
+from core.research.workflow.definition import build_challenge_cup_workflow_definition
+from core.research.workflow.definition_registry import register_or_resolve
 from core.web.services.team_workflow import research_project_agent_tasks
 from core.web.services.team_workflow.research_runtime import (
     agent_node_execution,
@@ -17,6 +19,12 @@ from core.web.services.team_workflow.research_runtime.hypothesis_scoped_executio
     record_candidate_fragment_and_maybe_aggregate,
 )
 from core.web.services.team_workflow.research_runtime.store import WorkflowRunStore
+
+
+def _registered_workflow_version_id() -> str:
+    """Pin fixture runs like production run creation does (fail-closed registry)."""
+
+    return register_or_resolve(build_challenge_cup_workflow_definition()).workflowVersionId
 
 
 def _task(candidate_id: str) -> dict:
@@ -202,10 +210,22 @@ def test_fragments_close_independent_subtasks_and_last_one_fans_in(
         )
         or {"taskId": task_id, "status": status},
     )
+    monkeypatch.setattr(
+        research_project_agent_tasks,
+        "get_research_project_agent_task_status",
+        lambda _team, _project: {
+            "tasks": [
+                {"taskId": "task-H1", "status": "running"},
+                {"taskId": "task-H2", "status": "running"},
+            ]
+        },
+    )
     store = WorkflowRunStore(tmp_path / "runs")
     store.create_run(
         {
             "runId": "run-1",
+            "workflowId": "challenge-cup-research",
+            "workflowVersionId": _registered_workflow_version_id(),
             "teamId": "team-1",
             "projectId": "project-1",
             "inputSnapshot": {"questionId": "SCI-096"},
@@ -287,7 +307,118 @@ def test_fragments_close_independent_subtasks_and_last_one_fans_in(
             "team-1", kind="hypothesis_set", workflow_run_id="run-1"
         )[0]["payload"]["candidates"]
     ] == ["H1", "H2"]
+    # Every candidate carries its own task/session anchoring in the persisted
+    # record; createdFrom* only names the fan-in trigger task.
+    persisted_payload = workflow_artifact_store.list_workflow_artifacts(
+        "team-1", kind="hypothesis_set", workflow_run_id="run-1"
+    )[0]["payload"]
+    anchors_by_candidate = {
+        item["candidateId"]: item for item in persisted_payload["candidateSessionAnchors"]
+    }
+    assert set(anchors_by_candidate) == {"H1", "H2"}
+    assert {
+        (item["taskId"], item["sessionId"])
+        for item in anchors_by_candidate.values()
+    } == {("task-H1", "child-H1"), ("task-H2", "child-H2")}
     assert {task_id for task_id, _refs in updates} == {"task-H1", "task-H2"}
+
+
+def test_fan_in_does_not_rewind_terminal_sibling_statuses(
+    tmp_path, monkeypatch
+) -> None:
+    """Aggregation holds active candidates at running but never rewinds
+    siblings that already reached a terminal status."""
+    monkeypatch.setattr(workflow_artifact_store, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        hypothesis_scoped_execution,
+        "_current_selection",
+        lambda *_args: {
+            "selectionId": "selection-1",
+            "selectedCandidateIds": ["H1", "H2"],
+        },
+    )
+    updates: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        research_project_agent_tasks,
+        "update_research_project_agent_task_status",
+        lambda _team, _project, task_id, *, status, result_refs: updates.append(
+            (task_id, status)
+        )
+        or {"taskId": task_id, "status": status},
+    )
+    monkeypatch.setattr(
+        research_project_agent_tasks,
+        "get_research_project_agent_task_status",
+        lambda _team, _project: {
+            "tasks": [
+                # H1 already reached a terminal status (e.g. reconciler
+                # writeback); fan-in must leave it alone.
+                {"taskId": "task-H1", "status": "completed"},
+                {"taskId": "task-H2", "status": "running"},
+            ]
+        },
+    )
+    store = WorkflowRunStore(tmp_path / "runs")
+    store.create_run(
+        {
+            "runId": "run-1",
+            "workflowId": "challenge-cup-research",
+            "workflowVersionId": _registered_workflow_version_id(),
+            "teamId": "team-1",
+            "projectId": "project-1",
+            "inputSnapshot": {"questionId": "SCI-096"},
+            "taskBundles": [
+                {
+                    "bundleId": "bundle-terminal-1",
+                    "parentNodeRunId": "node-run-1",
+                    "status": "running",
+                    "subtasks": [
+                        {
+                            "subtaskId": "node-run-1:selection-1:H1",
+                            "scope": {
+                                "selectionId": "selection-1",
+                                "candidateId": "H1",
+                            },
+                            "attempt": 1,
+                            "status": "running",
+                            "taskId": "task-H1",
+                            "sessionId": "child-H1",
+                            "outputArtifactRefs": [],
+                        },
+                        {
+                            "subtaskId": "node-run-1:selection-1:H2",
+                            "scope": {
+                                "selectionId": "selection-1",
+                                "candidateId": "H2",
+                            },
+                            "attempt": 1,
+                            "status": "running",
+                            "taskId": "task-H2",
+                            "sessionId": "child-H2",
+                            "outputArtifactRefs": [],
+                        },
+                    ],
+                }
+            ],
+        }
+    )
+
+    first = record_candidate_fragment_and_maybe_aggregate(
+        team_id="team-1",
+        task_context=_task("H1"),
+        payload=_fragment("H1"),
+        store=store,
+    )
+    second = record_candidate_fragment_and_maybe_aggregate(
+        team_id="team-1",
+        task_context=_task("H2"),
+        payload=_fragment("H2"),
+        store=store,
+    )
+
+    assert first["status"] == "fragment_recorded"
+    assert second["status"] == "aggregated"
+    assert [task_id for task_id, _status in updates] == ["task-H2"]
 
 
 def test_agent_node_execution_fans_selection_into_ordered_child_tasks(
@@ -298,7 +429,7 @@ def test_agent_node_execution_fans_selection_into_ordered_child_tasks(
         {
             "runId": "run-1",
             "workflowId": "challenge-cup-research",
-            "workflowVersionId": "2.1.0",
+            "workflowVersionId": _registered_workflow_version_id(),
             "teamId": "team-1",
             "projectId": "project-1",
             "threadId": "thread-1",
@@ -432,7 +563,7 @@ def test_agent_node_execution_uses_bounded_legacy_fallback_without_selection(
         {
             "runId": "run-legacy-1",
             "workflowId": "challenge-cup-research",
-            "workflowVersionId": "2.1.0",
+            "workflowVersionId": _registered_workflow_version_id(),
             "teamId": "team-1",
             "projectId": "project-1",
             "threadId": "thread-legacy-1",

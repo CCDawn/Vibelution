@@ -9,6 +9,7 @@ export type DesktopConversationCompletionNotification = {
   terminalStatus?: string;
   sessionLabel?: string;
   suppressWhenFocused?: boolean;
+  companionAgentId?: string;
 };
 
 export type DesktopConversationNotificationStatus =
@@ -165,7 +166,8 @@ export function createConversationNotificationService(
         focused,
         unreadCount,
         status,
-        suppressWhenFocused: payload.suppressWhenFocused !== false
+        suppressWhenFocused: payload.suppressWhenFocused !== false,
+        ...(payload.companionAgentId ? { companionAgentId: payload.companionAgentId } : {})
       }
     });
   }
@@ -184,7 +186,9 @@ export function createConversationNotificationService(
     async notify(payload) {
       const notificationKey = String(payload?.notificationKey || "").trim();
       const sessionId = String(payload?.sessionId || "").trim();
-      if (payload?.schemaVersion !== 1 || !notificationKey || !sessionId) {
+      const companionAgentId = String(payload?.companionAgentId || "").trim();
+      const companionAgentIdValid = !companionAgentId || /^[A-Za-z0-9._:-]{1,128}$/.test(companionAgentId);
+      if (payload?.schemaVersion !== 1 || !notificationKey || !sessionId || !companionAgentIdValid) {
         const focused = options.windowProvider.isWorkbenchFocused();
         unreadCount = Math.max(0, unreadCount);
         const invalidPayload: DesktopConversationCompletionNotification = {
@@ -221,7 +225,8 @@ export function createConversationNotificationService(
         completedAt: String(payload.completedAt || "").trim() || undefined,
         terminalStatus,
         sessionLabel,
-        suppressWhenFocused
+        suppressWhenFocused,
+        ...(companionAgentId ? { companionAgentId } : {})
       };
       const focused = options.windowProvider.isWorkbenchFocused();
 
@@ -269,7 +274,8 @@ export function createConversationNotificationService(
             void options.windowProvider.focusWorkbench();
             options.windowProvider.sendToWorkbench(options.notificationOpenedChannel, {
               schemaVersion: 1,
-              sessionId
+              sessionId,
+              ...(companionAgentId ? { companionAgentId } : {})
             });
           }
         });

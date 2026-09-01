@@ -46,12 +46,17 @@ def test_sparse_samples_use_audited_default(monkeypatch):
         lambda _team: [{"provider": "p", "model": "m", "latencyMs": 10_000}],
     )
 
-    result = policy.derive_per_call_budget(
+    speaker_result = policy.derive_per_call_budget(
         "research-team", model_refs=["p/m"], purpose="meeting_speaker"
     )
+    review_result = policy.derive_per_call_budget(
+        "research-team", model_refs=["p/m"], purpose="team_workflow_review"
+    )
 
-    assert result["sampleSource"] == "audited_default"
-    assert result["perCallBudgetMs"] == 450_000
+    assert speaker_result["sampleSource"] == "audited_default"
+    assert speaker_result["perCallBudgetMs"] == 450_000
+    assert review_result["sampleSource"] == "audited_default"
+    assert review_result["perCallBudgetMs"] == 600_000
 
 
 def test_operator_override_is_bounded(monkeypatch):

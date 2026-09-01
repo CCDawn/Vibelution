@@ -147,7 +147,12 @@ class SessionBindingBridge:
             "sessionAttempt": int(binding.get("sessionAttempt") or 1),
             "taskId": str(binding.get("taskId") or ""),
             "turnId": str(binding.get("turnId") or ""),
-            "checkpointId": str(binding.get("checkpointId") or ""),
+            # anchoredAtCheckpointId is the audit reference captured when the
+            # attempt started, NOT a recovery pointer: by the time this
+            # binding is read the graph has usually advanced past it.
+            "anchoredAtCheckpointId": str(
+                binding.get("anchoredAtCheckpointId") or ""
+            ),
             "status": "degraded" if missing else "bound",
             "boundAt": _utc_now(),
             "supersedesBindingId": supersedes,

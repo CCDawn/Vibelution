@@ -42,6 +42,18 @@ from core.research.workflow.iteration_decisions import (
 from core.research.workflow.models import ActorKind
 from core.research.workflow.stage_one_completion import route_after_stage_one_closure
 
+# Durable checkpoint schema identity for the formal Challenge Cup graph.  A
+# checkpoint whose stored version differs from this constant is discarded, not
+# migrated: readers must treat the thread as absent and rebuild it from the
+# Ledger attempt authority (start/retry/entry paths).  Bump this constant on
+# every channel-set change so stale schemas fail closed instead of silently
+# dropping writes (langgraph discards input keys that are not declared
+# channels).
+# v3: renamed the last-value ``artifact_refs`` channel to
+# ``latest_node_artifact_refs`` to make its overwrite-only semantics
+# explicit (cumulative lineage stays on the run record).
+CHALLENGE_CUP_CHECKPOINT_VERSION = 3
+
 
 def merge_node_attempts(
     current: Mapping[str, int] | None,
@@ -91,6 +103,13 @@ class ChallengeCupGraphState(TypedDict, total=False):
     scope_binding_status: str
     scope_binding_problem: dict[str, Any]
     stage_one_completion_state: str
+    # Declared last-value channels.  Fork/state patches write these keys and
+    # they must survive into the persisted checkpoint instead of being dropped
+    # as undeclared input.
+    parent_run_id: str
+    binding_snapshot_id: str | None
+    budget_policy_hash: str
+    evidence_remediation_contract: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -544,7 +563,9 @@ def _make_node_fn(node_id: str) -> Callable[[ChallengeCupGraphState], ChallengeC
             "active_attempt": pending.attempt,
             "pending_action_id": pending.action_id,
             "last_receipt_id": receipt.action_id,
-            "checkpoint_version": int(state.get("checkpoint_version") or 0) + 1,
+            # Schema identity, not a counter: completed nodes stamp the current
+            # version so a resumed legacy checkpoint is re-validated everywhere.
+            "checkpoint_version": CHALLENGE_CUP_CHECKPOINT_VERSION,
         }
         if receipt.outcome != "succeeded":
             # 失败/阻塞/取消的 receipt 不推进业务：路由见 blocked_outcome
@@ -770,7 +791,7 @@ class ChallengeCupGraphCoordinator:
             "active_node_id": dispatch.node_id,
             "active_attempt": dispatch.attempt,
             "node_attempts": {dispatch.node_id: dispatch.attempt},
-            "checkpoint_version": 1,
+            "checkpoint_version": CHALLENGE_CUP_CHECKPOINT_VERSION,
         }
         state.update(_scope_update_for_dispatch(dispatch))
         # Validate before the first graph write as well as after every read.
@@ -985,6 +1006,8 @@ class ChallengeCupGraphCoordinator:
                 "active_node_id": dispatch.node_id,
                 "active_attempt": dispatch.attempt,
                 "node_attempts": {dispatch.node_id: dispatch.attempt},
+                # The Ledger replay rebuilds a current-schema checkpoint.
+                "checkpoint_version": CHALLENGE_CUP_CHECKPOINT_VERSION,
             }
             if dispatch.team_id:
                 replay_values["team_id"] = dispatch.team_id
@@ -1007,6 +1030,11 @@ class ChallengeCupGraphCoordinator:
         try:
             state = self._read_state(graph, self._config(run_id), heal=True)
             _validate_state_scope_binding(dict(state.values or {}))
+            values = dict(state.values or {})
+            if checkpoint_values_discarded(values):
+                # Old-schema checkpoint: discarded by ruling.  Report the
+                # thread as absent so callers rebuild from Ledger authority.
+                return _discarded_checkpoint_snapshot()
             pending = _pending_from_state(state)
             return {
                 "checkpointId": _checkpoint_id_of(state),
@@ -1278,6 +1306,46 @@ def _pending_from_state(state: Any) -> PendingAction | None:
 def _checkpoint_id_of(state: Any) -> str | None:
     configurable = (state.config or {}).get("configurable") or {}
     return str(configurable.get("checkpoint_id") or "") or None
+
+
+def checkpoint_values_discarded(values: Mapping[str, Any]) -> bool:
+    """True when persisted values carry a mismatched checkpoint schema version.
+
+    Formal checkpoints written by another ``CHALLENGE_CUP_CHECKPOINT_VERSION``
+    are discarded, never migrated.  Callers treat the thread as absent and
+    rebuild it from the Ledger attempt authority instead of resuming
+    partially-dropped state.  Values without a ``checkpoint_version`` channel
+    are not formal-graph checkpoints (e.g. store-side initial checkpoints read
+    through the coordinator); they carry no schema identity to invalidate.
+    """
+
+    if not values:
+        return False
+    raw = values.get("checkpoint_version")
+    if raw is None:
+        return False
+    try:
+        observed = int(raw)
+    except (TypeError, ValueError):
+        return True
+    return observed != CHALLENGE_CUP_CHECKPOINT_VERSION
+
+
+def _discarded_checkpoint_snapshot() -> dict[str, Any]:
+    """Snapshot payload reporting a discarded thread as absent.
+
+    Consumers (graph dispatch worker decisions, fork validation) already
+    handle an absent thread by rebuilding from Ledger authority, so a stale
+    checkpoint fails closed without raising to the user.
+    """
+
+    return {
+        "checkpointId": "",
+        "nextNodeIds": [],
+        "values": {},
+        "pendingAction": None,
+        "checkpointDiscarded": True,
+    }
 
 
 def serialize_state_values(values: Mapping[str, Any]) -> str:

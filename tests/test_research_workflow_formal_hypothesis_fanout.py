@@ -22,6 +22,18 @@ from core.web.services.team_workflow.research_runtime.domain_ports import (
     BindingResolution,
     ScopedAgentTaskHandle,
 )
+from core.web.services.team_workflow.research_runtime.adapter_dispatch_worker import (
+    AdapterDispatchWorker,
+)
+from core.web.services.team_workflow.research_runtime.adapters.domain_adapters import (
+    register_default_adapters,
+)
+from core.web.services.team_workflow.research_runtime.action_registry import (
+    ActionRegistry,
+)
+from core.web.services.team_workflow.research_runtime.agent_turn_completion import (
+    TurnNotReadyError,
+)
 from core.web.services.team_workflow.research_runtime.hypothesis_scope_events import (
     HypothesisScopeEventConflict,
     record_hypothesis_scope_event,
@@ -29,10 +41,13 @@ from core.web.services.team_workflow.research_runtime.hypothesis_scope_events im
 from core.web.services.team_workflow.research_runtime.real_domain_ports import (
     RealDomainPorts,
 )
+from tests._support.adapter_fakes import FakeDomainPorts
 from tests._support.command_helpers import CommandHarness
 from tests._support.workflow_ledger_helpers import (
+    FIXED_NOW_MS,
     build_attempt_record,
     build_command_record,
+    build_outbox_record,
 )
 
 
@@ -1194,6 +1209,8 @@ def test_formal_child_turn_failure_closes_live_anchor_and_emits_blocked_event(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Legacy blocking semantics (flag=true): a failed child fails the node."""
+
     harness = CommandHarness(tmp_path / "ledger.sqlite3")
     try:
         harness.seed_run(run_id="run-1")
@@ -1227,6 +1244,11 @@ def test_formal_child_turn_failure_closes_live_anchor_and_emits_blocked_event(
         )
         ports = RealDomainPorts(harness.store)
         monkeypatch.setattr(ports, "resolve_binding", lambda _action: binding)
+        monkeypatch.setattr(
+            real_ports_module,
+            "_blocking_hypothesis_fan_out_wait_enabled",
+            lambda: True,
+        )
         ports._persist_hypothesis_anchor_draft(
             action=action,
             binding=binding,
@@ -1493,6 +1515,12 @@ def test_formal_retry_reuses_successful_children_and_rebinds_replayed_fragments(
     """A partial retry opens only the failed child and rebinds sibling output."""
 
     monkeypatch.setattr(workflow_artifact_store, "PROJECT_ROOT", tmp_path)
+    # Legacy blocking semantics regression anchor (flag=true).
+    monkeypatch.setattr(
+        real_ports_module,
+        "_blocking_hypothesis_fan_out_wait_enabled",
+        lambda: True,
+    )
     harness = CommandHarness(tmp_path / "ledger.sqlite3")
     try:
         harness.seed_run(run_id="run-1")
@@ -1809,7 +1837,7 @@ def test_formal_retry_reuses_successful_children_and_rebinds_replayed_fragments(
             assert provenance["replayedFromNodeRunId"] == "node-1"
             assert provenance["replayedFromTaskId"] == f"task-{candidate_id}"
             assert provenance["replayedFromFragmentRef"].endswith(
-                f":{candidate_id}:node-1"
+                f":{candidate_id}:node-1:1"
             )
 
         hypothesis_sets = workflow_artifact_store.list_workflow_artifacts(
@@ -1835,5 +1863,670 @@ def test_formal_retry_reuses_successful_children_and_rebinds_replayed_fragments(
             ).fetchone()[0]
         )
         assert anchor_count == 1
+    finally:
+        harness.close()
+
+
+# ---------------------------------------------------------------------------
+# Non-blocking candidate fan-out (default; [research] blocking_fanout_wait=false)
+# ---------------------------------------------------------------------------
+
+
+def _nonblocking_child(candidate_id: str) -> ScopedAgentTaskHandle:
+    return ScopedAgentTaskHandle(
+        selection_id="selection-1",
+        candidate_id=candidate_id,
+        session_id=f"child-{candidate_id}",
+        session_attempt=1,
+        task_id=f"task-{candidate_id}",
+        turn_id=f"turn-{candidate_id}",
+        parent_session_id="root-1",
+        root_session_id="root-1",
+    )
+
+
+def _fragment_context(child: ScopedAgentTaskHandle, node_run_id: str) -> dict:
+    return {
+        "task": {
+            "taskKind": "hypothesis_design",
+            "workflowRunId": "run-1",
+            "workflowNodeId": "hypothesis_design",
+            "nodeRunId": node_run_id,
+            "sourceCollectionRunId": "source-1",
+            "selectionId": child.selection_id,
+            "candidateId": child.candidate_id,
+            "sessionId": child.session_id,
+            "sessionAttempt": child.session_attempt,
+            "taskId": child.task_id,
+            "turn": {"turnId": child.turn_id},
+        },
+        "hypothesisInput": {
+            "status": "ready",
+            "allowedEvidenceRefs": ["counter-1"],
+        },
+    }
+
+
+def _fragment_payload(candidate_id: str) -> dict:
+    return {
+        "statement": f"statement-{candidate_id}",
+        "mechanism": f"mechanism-{candidate_id}",
+        "novelty_basis": f"novelty basis-{candidate_id}",
+        "predictions": [f"prediction-{candidate_id}"],
+        "falsificationCriteria": [f"falsify-{candidate_id}"],
+        "evidenceRefs": ["counter-1"],
+        "counterEvidenceRefs": ["counter-1"],
+        "boundary_conditions": [f"boundary-{candidate_id}"],
+        "scores": {
+            "novelty": 0.8,
+            "competitionFit": 0.7,
+            "falsifiability": 0.9,
+            "evidenceSupport": 0.6,
+            "feasibility": 0.75,
+        },
+    }
+
+
+def _seed_nonblocking_fan_out(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    candidate_ids: list[str],
+    *,
+    idempotency_key: str,
+):
+    """Shared stubs: frozen selection, live anchor, terminal-state probe map."""
+
+    monkeypatch.setattr(workflow_artifact_store, "PROJECT_ROOT", tmp_path)
+    harness = CommandHarness(tmp_path / f"ledger-{idempotency_key}.sqlite3")
+    monkeypatch.setattr(
+        real_ports_module,
+        "_blocking_hypothesis_fan_out_wait_enabled",
+        lambda: False,
+    )
+    harness.seed_run(run_id="run-1")
+    harness.service.submit(
+        harness.request(run_id="run-1", idempotency_key=idempotency_key)
+    )
+    latest = harness.store.latest_attempt("run-1", "source_finding")
+    assert latest is not None
+    action = _action(node_run_id=latest.node_run_id)
+    children = [_nonblocking_child(item) for item in candidate_ids]
+    handle = AgentTaskHandle(
+        session_id="root-1",
+        session_attempt=1,
+        task_id="",
+        turn_id="",
+        root_session_id="root-1",
+        root_session_attempt=1,
+        scoped_handles=tuple(children),
+    )
+    binding = BindingResolution(agent_id="agent-1", role_key="hypothesis_designer")
+    ports = RealDomainPorts(harness.store)
+    monkeypatch.setattr(ports, "resolve_binding", lambda _action: binding)
+    monkeypatch.setattr(
+        real_ports_module,
+        "_formal_hypothesis_fan_out_input",
+        lambda **_kwargs: {
+            "selection": {
+                "selectionId": "selection-1",
+                "selectedCandidateIds": list(candidate_ids),
+            },
+            "selectionId": "selection-1",
+            "selectedCandidateIds": list(candidate_ids),
+        },
+    )
+    ports._persist_hypothesis_anchor_draft(
+        action=action,
+        binding=binding,
+        root_session_id="root-1",
+        root_session_attempt=1,
+        selection_id="selection-1",
+        selected_candidate_ids=list(candidate_ids),
+        handles=children,
+    )
+    monkeypatch.setattr(
+        real_ports_module,
+        "_candidate_hypothesis_task_context",
+        lambda **kwargs: _fragment_context(kwargs["child"], latest.node_run_id),
+    )
+    completed: list[dict] = []
+    monkeypatch.setattr(
+        real_ports_module,
+        "_mark_candidate_task_completed",
+        lambda **kwargs: completed.append(dict(kwargs)),
+    )
+    turn_state: dict[str, str] = {
+        child.turn_id: "running" for child in children
+    }
+    probes: list[str] = []
+
+    def probe(session_id: str, turn_id: str) -> dict:
+        probes.append(turn_id)
+        state = turn_state[turn_id]
+        if state == "failed":
+            raise RuntimeError(
+                json.dumps(
+                    {
+                        "code": "agent_turn_terminal_failed",
+                        "sessionId": session_id,
+                        "turnId": turn_id,
+                        "terminalStatus": "failed",
+                        "failureClass": "terminal_failure",
+                    },
+                    ensure_ascii=False,
+                )
+            )
+        if state == "completed":
+            return {
+                "terminal": True,
+                "terminalStatus": "completed",
+                "completionSource": "turn_terminal",
+            }
+        return {
+            "terminal": False,
+            "completionSource": "running",
+            "turnCurrent": True,
+            "messageCount": 3,
+        }
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.agent_turn_completion.probe_agent_turn_terminal",
+        probe,
+    )
+
+    def unexpected_block(*_args: Any, **_kwargs: Any) -> None:
+        raise AssertionError("blocking wait_for_agent_turn_terminal must not run")
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.agent_turn_completion.wait_for_agent_turn_terminal",
+        unexpected_block,
+    )
+    return (
+        harness,
+        latest,
+        action,
+        handle,
+        ports,
+        turn_state,
+        probes,
+        completed,
+        latest.node_run_id,
+    )
+
+
+def test_nonblocking_fan_out_returns_pending_until_last_candidate_fans_in_once(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Default path: probe, requeue pending, and fan in exactly once at the end."""
+
+    harness, latest, action, handle, ports, turn_state, probes, completed, node_run_id = (
+        _seed_nonblocking_fan_out(
+            tmp_path, monkeypatch, ["H1", "H2", "H3"], idempotency_key="nb-fan-out"
+        )
+    )
+    try:
+        snapshot = {
+            "teamId": "team-1",
+            "projectId": "project-1",
+            "sourceCollectionRunId": "source-1",
+        }
+
+        def execute() -> Any:
+            return ports._execute_hypothesis_fan_out(
+                action=action, handle=handle, snapshot=snapshot
+            )
+
+        # Pass 1: only H1 is terminal. The call must return promptly with a
+        # durable pending signal (no wait primitive, no aggregation yet).
+        # Its fragment arrived through the single-shot fan-in writeback when
+        # the candidate's turn went terminal.
+        hypothesis_fragment_writer.record_hypothesis_fragment(
+            team_id="team-1",
+            task_context=_fragment_context(handle.scoped_handles[0], node_run_id),
+            payload=_fragment_payload("H1"),
+            persist=True,
+            artifact_sink=workflow_artifact_store.put_workflow_artifact,
+        )
+        turn_state["turn-H1"] = "completed"
+        with pytest.raises(TurnNotReadyError) as pending1:
+            execute()
+        detail1 = json.loads(str(pending1.value))
+        assert detail1["code"] == "hypothesis_fan_out_pending"
+        assert detail1["selectionId"] == "selection-1"
+        assert detail1["pendingCandidateIds"] == ["H2", "H3"]
+        assert pending1.value.snapshot["terminal"] is False
+        assert pending1.value.snapshot["completionSource"] == "running"
+        assert pending1.value.snapshot["turnCurrent"] is True
+        assert probes == ["turn-H1", "turn-H2", "turn-H3"]
+        assert workflow_artifact_store.list_workflow_artifacts(
+            "team-1", kind="hypothesis_set", workflow_run_id="run-1"
+        ) == []
+
+        # H3 finishes out of order (its fragment arrived through the
+        # single-shot fan-in writeback before H2's).
+        hypothesis_fragment_writer.record_hypothesis_fragment(
+            team_id="team-1",
+            task_context=_fragment_context(handle.scoped_handles[2], node_run_id),
+            payload=_fragment_payload("H3"),
+            persist=True,
+            artifact_sink=workflow_artifact_store.put_workflow_artifact,
+        )
+        turn_state["turn-H3"] = "completed"
+
+        # Pass 2: H1 reprocessed idempotently, H3 closed, H2 still pending.
+        with pytest.raises(TurnNotReadyError) as pending2:
+            execute()
+        assert json.loads(str(pending2.value))["pendingCandidateIds"] == ["H2"]
+        assert probes[-3:] == ["turn-H1", "turn-H2", "turn-H3"]
+
+        hypothesis_fragment_writer.record_hypothesis_fragment(
+            team_id="team-1",
+            task_context=_fragment_context(handle.scoped_handles[1], node_run_id),
+            payload=_fragment_payload("H2"),
+            persist=True,
+            artifact_sink=workflow_artifact_store.put_workflow_artifact,
+        )
+        turn_state["turn-H2"] = "completed"
+
+        # Final pass: all terminal -> deterministic fan-in exactly once.
+        result = execute()
+        assert result.materialized_refs
+        assert result.handle.root_status == "succeeded"
+        by_candidate = {
+            item.candidate_id: item for item in result.handle.scoped_handles
+        }
+        assert {item.status for item in by_candidate.values()} == {"succeeded"}
+        assert by_candidate["H2"].fragment_refs
+
+        hypothesis_sets = workflow_artifact_store.list_workflow_artifacts(
+            "team-1", kind="hypothesis_set", workflow_run_id="run-1"
+        )
+        assert len(hypothesis_sets) == 1
+        assert [
+            item["candidateId"]
+            for item in hypothesis_sets[0]["payload"]["candidates"]
+        ] == ["H1", "H2", "H3"]
+
+        fragment_rows = workflow_artifact_store.list_workflow_artifacts(
+            "team-1", kind="hypothesis_fragment", workflow_run_id="run-1"
+        )
+        assert sorted(
+            str(row["payload"]["candidateId"]) for row in fragment_rows
+        ) == ["H1", "H2", "H3"]
+        assert {item["task_id"] for item in completed} == {
+            "task-H1",
+            "task-H2",
+            "task-H3",
+        }
+
+        anchor = harness.store.read(
+            lambda repo: repo.get_anchor_by_node_run(latest.node_run_id)
+        )
+        anchor_payload = json.loads(anchor[13])
+        assert anchor_payload["rootSession"]["status"] == "succeeded"
+        assert any(
+            item.event_type == "workflow.hypothesis_aggregation.completed"
+            for item in harness.store.list_events("run-1")
+        )
+    finally:
+        harness.close()
+
+
+def test_nonblocking_fan_out_candidate_failure_keeps_running_sibling_unchanged(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A terminal-failed candidate fails the node without rewriting the sibling."""
+
+    harness, latest, action, handle, ports, turn_state, probes, _completed, node_run_id = (
+        _seed_nonblocking_fan_out(
+            tmp_path, monkeypatch, ["H1", "H2"], idempotency_key="nb-failure"
+        )
+    )
+    try:
+        turn_state["turn-H1"] = "failed"
+        with pytest.raises(RuntimeError, match="agent_turn_terminal_failed"):
+            ports._execute_hypothesis_fan_out(
+                action=action,
+                handle=handle,
+                snapshot={
+                    "teamId": "team-1",
+                    "projectId": "project-1",
+                    "sourceCollectionRunId": "source-1",
+                },
+            )
+
+        anchor = harness.store.read(
+            lambda repo: repo.get_anchor_by_node_run(latest.node_run_id)
+        )
+        anchor_payload = json.loads(anchor[13])
+        assert anchor_payload["rootSession"]["status"] == "failed"
+        by_candidate = {
+            item["candidateId"]: item
+            for item in anchor_payload["scopedSessions"]
+        }
+        assert by_candidate["H1"]["status"] == "failed"
+        assert by_candidate["H2"]["status"] == "running"
+        assert any(
+            item.event_type == "workflow.hypothesis_aggregation.blocked"
+            and json.loads(item.payload_json).get("errorCode")
+            == "candidate_turn_failed"
+            and json.loads(item.payload_json).get("candidateId") == "H1"
+            for item in harness.store.list_events("run-1")
+        )
+    finally:
+        harness.close()
+
+
+def test_blocking_flag_restores_in_thread_child_wait(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``[research] blocking_fanout_wait=true`` keeps the legacy wait semantics."""
+
+    monkeypatch.setattr(workflow_artifact_store, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        real_ports_module,
+        "_blocking_hypothesis_fan_out_wait_enabled",
+        lambda: True,
+    )
+    harness = CommandHarness(tmp_path / "ledger-blocking-flag.sqlite3")
+    try:
+        harness.seed_run(run_id="run-1")
+        harness.service.submit(
+            harness.request(run_id="run-1", idempotency_key="blocking-flag")
+        )
+        latest = harness.store.latest_attempt("run-1", "source_finding")
+        assert latest is not None
+        action = _action(node_run_id=latest.node_run_id)
+        children = [_nonblocking_child(item) for item in ("H1", "H2")]
+        handle = AgentTaskHandle(
+            session_id="root-1",
+            session_attempt=1,
+            task_id="",
+            turn_id="",
+            root_session_id="root-1",
+            root_session_attempt=1,
+            scoped_handles=tuple(children),
+        )
+        binding = BindingResolution(agent_id="agent-1", role_key="hypothesis_designer")
+        ports = RealDomainPorts(harness.store)
+        monkeypatch.setattr(ports, "resolve_binding", lambda _action: binding)
+        monkeypatch.setattr(
+            real_ports_module,
+            "_formal_hypothesis_fan_out_input",
+            lambda **_kwargs: {
+                "selection": {
+                    "selectionId": "selection-1",
+                    "selectedCandidateIds": ["H1", "H2"],
+                },
+                "selectionId": "selection-1",
+                "selectedCandidateIds": ["H1", "H2"],
+            },
+        )
+        ports._persist_hypothesis_anchor_draft(
+            action=action,
+            binding=binding,
+            root_session_id="root-1",
+            root_session_attempt=1,
+            selection_id="selection-1",
+            selected_candidate_ids=["H1", "H2"],
+            handles=children,
+        )
+        monkeypatch.setattr(
+            real_ports_module,
+            "_candidate_hypothesis_task_context",
+            lambda **kwargs: _fragment_context(kwargs["child"], latest.node_run_id),
+        )
+        monkeypatch.setattr(
+            real_ports_module,
+            "_mark_candidate_task_completed",
+            lambda **kwargs: None,
+        )
+        waited_turns: list[str] = []
+
+        def wait(session_id: str, turn_id: str, **_kwargs: Any) -> dict:
+            waited_turns.append(turn_id)
+            return {
+                "terminal": True,
+                "terminalStatus": "completed",
+                "completionSource": "turn_terminal",
+            }
+
+        monkeypatch.setattr(
+            "core.web.services.team_workflow.research_runtime.agent_turn_completion.wait_for_agent_turn_terminal",
+            wait,
+        )
+
+        def unexpected_probe(*_args: Any, **_kwargs: Any) -> dict:
+            raise AssertionError("blocking flag must use wait_for_agent_turn_terminal")
+
+        monkeypatch.setattr(
+            "core.web.services.team_workflow.research_runtime.agent_turn_completion.probe_agent_turn_terminal",
+            unexpected_probe,
+        )
+        for child in children:
+            hypothesis_fragment_writer.record_hypothesis_fragment(
+                team_id="team-1",
+                task_context=_fragment_context(child, latest.node_run_id),
+                payload=_fragment_payload(child.candidate_id),
+                persist=True,
+                artifact_sink=workflow_artifact_store.put_workflow_artifact,
+            )
+
+        result = ports._execute_hypothesis_fan_out(
+            action=action,
+            handle=handle,
+            snapshot={
+                "teamId": "team-1",
+                "projectId": "project-1",
+                "sourceCollectionRunId": "source-1",
+            },
+        )
+
+        assert waited_turns == ["turn-H1", "turn-H2"]
+        assert result.handle.root_status == "succeeded"
+    finally:
+        harness.close()
+
+
+def test_nonblocking_fan_out_config_flag_defaults_and_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from config.models import ResearchConfig
+
+    assert ResearchConfig().blocking_fanout_wait is False
+    assert ResearchConfig(blocking_fanout_wait=True).blocking_fanout_wait is True
+    # Invalid values never block startup and never enable the legacy wait.
+    assert ResearchConfig(blocking_fanout_wait="yes").blocking_fanout_wait is False
+    assert ResearchConfig(blocking_fanout_wait=1).blocking_fanout_wait is False
+    assert ResearchConfig(blocking_fanout_wait=None).blocking_fanout_wait is False
+
+    class _BrokenConfig:
+        def __getattr__(self, _name: str) -> Any:
+            raise RuntimeError("config authority unavailable")
+
+    monkeypatch.setattr(
+        "config.settings.get_config", lambda **_kwargs: _BrokenConfig()
+    )
+    assert real_ports_module._blocking_hypothesis_fan_out_wait_enabled() is False
+
+    class _LegacyConfig:
+        research = ResearchConfig(blocking_fanout_wait=True)
+
+    monkeypatch.setattr(
+        "config.settings.get_config", lambda **_kwargs: _LegacyConfig()
+    )
+    assert real_ports_module._blocking_hypothesis_fan_out_wait_enabled() is True
+
+
+def _seed_pending_worker_action(
+    harness: CommandHarness,
+    *,
+    outbox_id: str,
+    created_at_ms: int = FIXED_NOW_MS,
+) -> None:
+    action = PendingAction(
+        action_id=outbox_id,
+        run_id="run-test",
+        node_run_id="nr-run-test-hypothesis_design-a1",
+        node_id="hypothesis_design",
+        attempt=1,
+        actor_kind=ActorKind.AGENT,
+        action_kind="start_agent_task",
+        input_snapshot_hash="a" * 64,
+        input_artifact_refs=(),
+        binding_snapshot_id=None,
+        budget_policy_hash="policy-1",
+    )
+
+    def mutate(uow) -> None:
+        uow.repository.insert_command(
+            build_command_record(
+                command_id=f"cmd-{outbox_id}",
+                run_id=action.run_id,
+                node_id=action.node_id,
+            )
+        )
+        uow.repository.insert_attempt(
+            build_attempt_record(
+                node_run_id=action.node_run_id,
+                run_id=action.run_id,
+                node_id=action.node_id,
+                attempt=1,
+                status="running",
+                command_id=f"cmd-{outbox_id}",
+                started_at_ms=FIXED_NOW_MS,
+            )
+        )
+        uow.repository.insert_outbox(
+            replace(
+                build_outbox_record(
+                    outbox_id,
+                    run_id=action.run_id,
+                    command_id=f"cmd-{outbox_id}",
+                    action_kind="adapter_dispatch",
+                    available_at_ms=FIXED_NOW_MS,
+                ),
+                node_run_id=action.node_run_id,
+                payload_json=json.dumps(action.to_dict()),
+                created_at_ms=created_at_ms,
+            )
+        )
+
+    harness.store.submit(mutate, force_flush=True).result(timeout=10)
+
+
+def _pending_fan_out_error() -> TurnNotReadyError:
+    return real_ports_module._hypothesis_fan_out_pending_error(
+        fan_out={"selectionId": "selection-1"},
+        pending_children=[
+            (
+                _nonblocking_child("H1"),
+                {
+                    "terminal": False,
+                    "completionSource": "running",
+                    "turnCurrent": True,
+                    "messageCount": 3,
+                },
+            )
+        ],
+    )
+
+
+def test_pending_fan_out_requeues_action_without_consuming_failure_budget(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The pump stays free: a pending fan-out becomes a durable live-wait requeue."""
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.challenge_turn_policy.CHALLENGE_LOGICAL_TASK_TIMEOUT_MS",
+        1_800_000,
+    )
+    harness = CommandHarness(tmp_path / "ledger-requeue.sqlite3")
+    try:
+        harness.seed_run(status="running")
+        _seed_pending_worker_action(harness, outbox_id="act-pending-fanout")
+        ports = FakeDomainPorts()
+        error = _pending_fan_out_error()
+
+        def raise_pending(*, action, handle):
+            raise error
+
+        monkeypatch.setattr(ports, "execute_agent_turn", raise_pending)
+        registry = ActionRegistry()
+        register_default_adapters(registry, ports)
+        worker = AdapterDispatchWorker(
+            store=harness.store,
+            registry=registry,
+            ports=ports,
+            owner_id="adapter-worker-test",
+            now_provider=lambda: FIXED_NOW_MS + 1_000,
+        )
+
+        assert worker.run_once() == 1
+
+        outbox = harness.store.read(lambda repo: repo.get_outbox("act-pending-fanout"))
+        assert outbox is not None and outbox.status == "pending"
+        problem = json.loads(str(outbox.last_problem_json))
+        assert problem["code"] == "live_turn_wait"
+        assert outbox.available_at_ms == FIXED_NOW_MS + 1_000 + 5_000
+        # The requeue must not consume the transient-failure budget.
+        assert outbox.attempt_count == 0
+        attempt = harness.store.latest_attempt("run-test", "hypothesis_design")
+        assert attempt is not None and attempt.status == "running"
+        assert harness.store.get_run("run-test").status == "running"
+        # The park is durable: an immediate second tick must not busy-loop it.
+        assert worker.run_once() == 0
+    finally:
+        harness.close()
+
+
+def test_pending_fan_out_deadline_exhaustion_fails_the_node(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Timeout fallback: an exhausted wall-clock cap fails the pending fan-out."""
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.challenge_turn_policy.CHALLENGE_LOGICAL_TASK_TIMEOUT_MS",
+        1_800_000,
+    )
+    harness = CommandHarness(tmp_path / "ledger-expired.sqlite3")
+    try:
+        harness.seed_run(status="running")
+        _seed_pending_worker_action(
+            harness,
+            outbox_id="act-expired-fanout",
+            created_at_ms=FIXED_NOW_MS - 2_000_000,
+        )
+        ports = FakeDomainPorts()
+        monkeypatch.setattr(
+            ports, "execute_agent_turn", lambda *, action, handle: (_ for _ in ()).throw(
+                _pending_fan_out_error()
+            )
+        )
+        registry = ActionRegistry()
+        register_default_adapters(registry, ports)
+        worker = AdapterDispatchWorker(
+            store=harness.store,
+            registry=registry,
+            ports=ports,
+            owner_id="adapter-worker-test",
+            now_provider=lambda: FIXED_NOW_MS + 1_000,
+        )
+
+        assert worker.run_once() == 1
+
+        outbox = harness.store.read(lambda repo: repo.get_outbox("act-expired-fanout"))
+        assert outbox is not None and outbox.status == "failed"
+        problem = json.loads(str(outbox.last_problem_json))
+        assert problem["code"] == "live_turn_wait_timeout"
+        attempt = harness.store.latest_attempt("run-test", "hypothesis_design")
+        assert attempt is not None and attempt.status == "failed"
+        run = harness.store.get_run("run-test")
+        assert run.status == "blocked"
     finally:
         harness.close()

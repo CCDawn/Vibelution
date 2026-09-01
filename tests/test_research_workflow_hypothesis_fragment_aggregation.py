@@ -151,8 +151,121 @@ def test_fragment_identity_is_unique_per_node_run_for_retry_rebinding() -> None:
     )
 
     assert first["artifact"]["recordId"] != retry["artifact"]["recordId"]
-    assert first["artifact"]["recordId"].endswith(":node-run-1")
-    assert retry["artifact"]["recordId"].endswith(":node-run-2")
+    assert first["artifact"]["recordId"].endswith(":node-run-1:1")
+    assert retry["artifact"]["recordId"].endswith(":node-run-2:1")
+
+
+def _persist_fragment(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+    *,
+    team_id: str,
+    task_context: dict,
+    payload: dict,
+):
+    from core.web.services.team_workflow.research_runtime import workflow_artifact_store
+
+    monkeypatch.setattr(workflow_artifact_store, "PROJECT_ROOT", tmp_path)
+    return record_hypothesis_fragment(
+        team_id=team_id,
+        task_context=task_context,
+        payload=payload,
+        persist=True,
+        artifact_sink=workflow_artifact_store.put_workflow_artifact,
+    )
+
+
+def test_fragment_retry_with_changed_content_uses_new_attempt_identity(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """A content-rewriting retry on the same candidate/nodeRun must not conflict."""
+    from core.web.services.team_workflow.research_runtime import workflow_artifact_store
+
+    first_context = _context()
+    first = _persist_fragment(
+        monkeypatch,
+        tmp_path,
+        team_id="team-1",
+        task_context=first_context,
+        payload=_fragment("hyp-a", statement="statement-v1"),
+    )
+    retry_context = copy.deepcopy(first_context)
+    retry_context["task"]["sessionAttempt"] = 2
+    retry_context["task"]["taskId"] = "task-hyp-a-retry"
+    retry = _persist_fragment(
+        monkeypatch,
+        tmp_path,
+        team_id="team-1",
+        task_context=retry_context,
+        payload=_fragment(
+            "hyp-a",
+            sessionAttempt=2,
+            taskId="task-hyp-a-retry",
+            statement="statement-v2",
+        ),
+    )
+
+    assert first["artifact"]["recordId"] == (
+        "hypothesis_fragment:selection-1:hyp-a:node-run-1:1"
+    )
+    assert retry["artifact"]["recordId"] == (
+        "hypothesis_fragment:selection-1:hyp-a:node-run-1:2"
+    )
+    stored = workflow_artifact_store.list_workflow_artifacts(
+        "team-1", kind="hypothesis_fragment", workflow_run_id="run-1"
+    )
+    assert len(stored) == 2
+
+
+def test_fragment_same_attempt_replay_returns_the_existing_record(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    from core.web.services.team_workflow.research_runtime import workflow_artifact_store
+
+    context = _context()
+    payload = _fragment("hyp-a")
+    first = _persist_fragment(
+        monkeypatch, tmp_path, team_id="team-1", task_context=context, payload=payload
+    )
+    replay = _persist_fragment(
+        monkeypatch, tmp_path, team_id="team-1", task_context=context, payload=payload
+    )
+
+    assert replay["artifact"]["recordId"] == first["artifact"]["recordId"]
+    assert replay["artifact"]["contentHash"] == first["artifact"]["contentHash"]
+    assert (
+        len(
+            workflow_artifact_store.list_workflow_artifacts(
+                "team-1", kind="hypothesis_fragment", workflow_run_id="run-1"
+            )
+        )
+        == 1
+    )
+
+
+def test_fragment_same_attempt_changed_content_still_conflicts(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    from core.web.services.team_workflow.research_runtime.workflow_artifact_store import (
+        WorkflowArtifactConflictError,
+    )
+
+    context = _context()
+    _persist_fragment(
+        monkeypatch,
+        tmp_path,
+        team_id="team-1",
+        task_context=context,
+        payload=_fragment("hyp-a"),
+    )
+    with pytest.raises(WorkflowArtifactConflictError):
+        _persist_fragment(
+            monkeypatch,
+            tmp_path,
+            team_id="team-1",
+            task_context=context,
+            payload=_fragment("hyp-a", statement="a rewritten claim within one attempt"),
+        )
 
 
 def test_hypothesis_set_supports_node_run_scoped_artifact_identity() -> None:
@@ -245,8 +358,8 @@ def test_aggregator_orders_by_selection_and_emits_deterministic_portfolio_payloa
         "boundary-hyp-a"
     ]
     assert first["provenance"]["fragmentRefs"] == [
-        "hypothesis_fragment:selection-1:hyp-a:node-run-1",
-        "hypothesis_fragment:selection-1:hyp-b:node-run-1",
+        "hypothesis_fragment:selection-1:hyp-a:node-run-1:1",
+        "hypothesis_fragment:selection-1:hyp-b:node-run-1:1",
     ]
 
 
@@ -275,6 +388,91 @@ def test_aggregator_rejects_missing_duplicate_and_out_of_selection_fragments(
                 "workflowRunId": "run-1",
                 "workflowNodeId": "hypothesis_design",
                 "nodeRunId": "node-run-1",
+            },
+        )
+
+
+def test_aggregator_takes_latest_attempt_fragment_and_keeps_history() -> None:
+    """Superseded retry attempts stay as history; aggregation fans in the latest."""
+    superseded = _fragment("hyp-a", statement="statement-v1")
+    latest = _fragment(
+        "hyp-a",
+        sessionAttempt=2,
+        taskId="task-hyp-a-retry",
+        sessionId="child-hyp-a-retry",
+        statement="statement-v2",
+    )
+    selection = {
+        "selectionId": "selection-1",
+        "selectedCandidateIds": ["hyp-a", "hyp-b"],
+    }
+
+    payload = aggregate_hypothesis_fragments(
+        selection=selection,
+        fragments=[latest, superseded, _fragment("hyp-b")],
+        scope={
+            "workflowRunId": "run-1",
+            "workflowNodeId": "hypothesis_design",
+            "nodeRunId": "node-run-1",
+        },
+    )
+
+    assert [item["claim"] for item in payload["candidates"]] == [
+        "statement-v2",
+        "statement-hyp-b",
+    ]
+    anchor_by_candidate = {
+        item["candidateId"]: item for item in payload["candidateSessionAnchors"]
+    }
+    assert anchor_by_candidate["hyp-a"]["sessionAttempt"] == 2
+    assert anchor_by_candidate["hyp-a"]["taskId"] == "task-hyp-a-retry"
+    assert anchor_by_candidate["hyp-a"]["fragmentRef"] == (
+        "hypothesis_fragment:selection-1:hyp-a:node-run-1:2"
+    )
+    assert payload["provenance"]["fragmentRefs"] == [
+        "hypothesis_fragment:selection-1:hyp-a:node-run-1:2",
+        "hypothesis_fragment:selection-1:hyp-b:node-run-1:1",
+    ]
+
+
+def test_aggregator_still_rejects_same_attempt_duplicate_content() -> None:
+    mutated = _fragment("hyp-a", statement="a second variant of the same attempt")
+
+    with pytest.raises(ValueError, match="duplicate"):
+        aggregate_hypothesis_fragments(
+            selection={
+                "selectionId": "selection-1",
+                "selectedCandidateIds": ["hyp-a"],
+            },
+            fragments=[_fragment("hyp-a"), mutated],
+            scope={
+                "workflowRunId": "run-1",
+                "workflowNodeId": "hypothesis_design",
+                "nodeRunId": "node-run-1",
+            },
+        )
+
+
+def test_aggregator_scope_pinned_attempt_still_rejects_other_attempts() -> None:
+    latest = _fragment(
+        "hyp-a",
+        sessionAttempt=2,
+        taskId="task-hyp-a-retry",
+        sessionId="child-hyp-a-retry",
+    )
+
+    with pytest.raises(ValueError, match="scope mismatch"):
+        aggregate_hypothesis_fragments(
+            selection={
+                "selectionId": "selection-1",
+                "selectedCandidateIds": ["hyp-a"],
+            },
+            fragments=[latest],
+            scope={
+                "workflowRunId": "run-1",
+                "workflowNodeId": "hypothesis_design",
+                "nodeRunId": "node-run-1",
+                "sessionAttempt": 1,
             },
         )
 

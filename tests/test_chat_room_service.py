@@ -3141,6 +3141,70 @@ def test_candidate_generation_uses_trusted_short_answer_contract():
     assert "挑战杯会议结构化输出合同" in grounded_prompt
     assert "只输出一条 CANDIDATE 标记" not in grounded_prompt
 
+
+def test_challenge_meeting_prior_prompt_keeps_late_candidate_and_review_rows():
+    prior_messages = [
+        {
+            "speakerTitle": "A015 · 搜索 Agent",
+            "content": (
+                "先给出本轮检索的背景说明。\n"
+                "前两行只是帮助理解的普通说明。\n"
+                "CANDIDATE: C1 | 机制候选一 | 解释理由一\n"
+                "CANDIDATE: C2 | 机制候选二 | 解释理由二\n"
+                "[REV] C1 -> 补充边界条件与可证伪预测\n"
+                "DISAGREE: C2 的干预路径仍缺少直接证据\n"
+                "CONCLUSION: 保留 C1，要求下一步补充证据"
+            ),
+        }
+    ]
+
+    for meeting_type in ("hypothesis_candidate_generation", "hypothesis_review"):
+        prompt = chat_room_service._build_participant_prompt(
+            room={"roomId": "room-challenge", "title": "Challenge Cup"},
+            round_payload={
+                "topic": "候选讨论",
+                "purpose": "meeting",
+                "mode": "round_robin",
+                "config": {"meetingType": meeting_type},
+            },
+            participant={"participantId": "participant-next", "sessionId": "session-next"},
+            prior_messages=prior_messages,
+        )
+        assert "CANDIDATE: C1 | 机制候选一 | 解释理由一" in prompt
+        assert "CANDIDATE: C2 | 机制候选二 | 解释理由二" in prompt
+        assert "[REV] C1 -> 补充边界条件与可证伪预测" in prompt
+        assert "DISAGREE: C2 的干预路径仍缺少直接证据" in prompt
+        assert "CONCLUSION: 保留 C1，要求下一步补充证据" in prompt
+
+
+def test_ordinary_prior_prompt_keeps_existing_three_line_compression():
+    prompt = chat_room_service._build_participant_prompt(
+        room={"roomId": "room-ordinary", "title": "普通群聊"},
+        round_payload={
+            "topic": "普通讨论",
+            "purpose": "discussion",
+            "mode": "round_robin",
+        },
+        participant={"participantId": "participant-next", "sessionId": "session-next"},
+        prior_messages=[
+            {
+                "speakerTitle": "普通成员",
+                "content": (
+                    "普通说明第一行\n"
+                    "普通说明第二行\n"
+                    "普通说明第三行\n"
+                    "普通说明第四行"
+                ),
+            }
+        ],
+    )
+
+    assert "普通说明第一行" in prompt
+    assert "普通说明第二行" in prompt
+    assert "普通说明第三行" in prompt
+    assert "普通说明第四行" not in prompt
+
+
 def test_ordinary_room_does_not_inherit_challenge_deadline(tmp_path, monkeypatch):
     _isolate_chat_room_kernel(tmp_path, monkeypatch)
     _seed_chat_sessions(tmp_path)

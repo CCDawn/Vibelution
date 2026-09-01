@@ -9,6 +9,8 @@ describe("virtual human life frontend API", () => {
     expect(apiSource).toContain("listAgentPlugins");
     expect(apiSource).toContain("updateAgentPluginBinding");
     expect(apiSource).toContain("listVirtualHumanCompanions");
+    expect(apiSource).toContain("listVirtualHumanCompanionActivity");
+    expect(apiSource).toContain("/api/agent-plugins/virtual-human-life/companion-activity");
     expect(apiSource).toContain("listVirtualHumanLocations");
     expect(apiSource).toContain("/api/agent-plugins/virtual-human-life/companions");
     expect(apiSource).toContain("/api/agent-plugins/virtual-human-life/locations");

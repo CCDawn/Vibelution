@@ -53,7 +53,19 @@ class VirtualHumanCompanionResponse(BaseModel):
     avatarImageUrl: str = ""
     personaProfile: dict[str, Any] = Field(default_factory=dict)
     status: str
+    sessionActivity: dict[str, Any] | None = None
     snapshot: dict[str, Any]
+
+
+class VirtualHumanCompanionActivityResponse(BaseModel):
+    """Lightweight native Session activity for hidden Companion entries."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    agentId: str
+    displayName: str
+    directSessionId: str
+    sessionActivity: dict[str, Any] | None = None
 
 
 class AgentPluginBindingUpdateRequest(BaseModel):

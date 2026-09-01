@@ -141,6 +141,11 @@ def retry_node_execution(
                 code="retry_budget_exhausted",
             )
         next_run = {
+            # NOTE: the spread intentionally carries the prior attempt's
+            # checkpointId forward.  That value is an audit reference captured
+            # when the attempt started, not a recovery pointer; it is expected
+            # to be stale (superseded) as soon as this new attempt advances the
+            # graph.  Consumers must treat it as provenance only.
             **prior_run,
             "nodeRunId": f"nr-{run_id}-{node_id}-a{attempt}",
             "attempt": attempt,

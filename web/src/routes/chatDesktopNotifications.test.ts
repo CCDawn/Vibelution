@@ -7,6 +7,7 @@ import {
   createDesktopConversationNotifier,
   parseConversationNotificationOpenPayload,
   sanitizeSessionLabel,
+  subscribeCompanionNotificationOpened,
   subscribeConversationNotificationOpened,
 } from "./chatDesktopNotifications";
 
@@ -94,6 +95,7 @@ describe("desktop conversation notifier", () => {
         terminalStatus: "completed",
       }),
     );
+    expect(notify.mock.calls[0]?.[0]).not.toHaveProperty("companionAgentId");
     expect(telemetry).toHaveBeenCalledWith(
       expect.objectContaining({
         eventCode: "browser.desktop_notification.conversation_completed_emitted",
@@ -322,6 +324,43 @@ describe("desktop conversation notifier", () => {
     expect(notify).not.toHaveBeenCalled();
   });
 
+  it("notifies a Companion when its native completion identity changes without a sampled busy phase", () => {
+    const notify = vi.fn();
+    const notifier = createDesktopConversationNotifier({
+      bridge: { notifyConversationCompleted: notify },
+      postTelemetry: vi.fn(),
+    });
+
+    notifier.handleSessionSummaries([
+      {
+        id: "session-nora",
+        title: "Nora",
+        status: "ready",
+        currentPhase: "ready",
+        companionAgentId: "agent-nora",
+        completionIdentity: "completion-1",
+      },
+    ]);
+    notifier.handleSessionSummaries([
+      {
+        id: "session-nora",
+        title: "Nora",
+        status: "ready",
+        currentPhase: "ready",
+        companionAgentId: "agent-nora",
+        completionIdentity: "completion-2",
+      },
+    ]);
+
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({
+      notificationKey: "session-nora:completion-2:completed",
+      sessionId: "session-nora",
+      companionAgentId: "agent-nora",
+      suppressWhenFocused: false,
+    }));
+  });
+
   it("returns no bridge when the launcher API is unavailable", () => {
     expect(browserDesktopNotificationBridge({})).toBeUndefined();
     expect(browserDesktopNotificationBridge({ vibelutionLauncher: {} })).toBeUndefined();
@@ -362,6 +401,47 @@ describe("desktop conversation notifier", () => {
     expect(parseConversationNotificationOpenPayload({ schemaVersion: 1, sessionId: "session-safe" })).toEqual({
       schemaVersion: 1,
       sessionId: "session-safe",
+    });
+  });
+
+  it("routes Companion notification clicks separately while preserving ordinary payloads", () => {
+    const ordinaryOpened: string[] = [];
+    const companionOpened: Array<{ sessionId: string; companionAgentId: string }> = [];
+    const listeners: Array<(payload: unknown) => void> = [];
+    const bridge = {
+      onConversationNotificationOpened: (listener: (payload: unknown) => void) => {
+        listeners.push(listener);
+        return () => undefined;
+      },
+    };
+    subscribeConversationNotificationOpened(bridge, (sessionId) => ordinaryOpened.push(sessionId));
+    subscribeCompanionNotificationOpened(bridge, (payload) => companionOpened.push(payload));
+
+    listeners.forEach((listener) => listener({ schemaVersion: 1, sessionId: "session-normal" }));
+    listeners.forEach((listener) => listener({
+      schemaVersion: 1,
+      sessionId: "session-nora",
+      companionAgentId: "agent-nora",
+    }));
+    listeners.forEach((listener) => listener({
+      schemaVersion: 1,
+      sessionId: "session-nora",
+      companionAgentId: "../unsafe",
+    }));
+
+    expect(ordinaryOpened).toEqual(["session-normal"]);
+    expect(companionOpened).toEqual([{
+      sessionId: "session-nora",
+      companionAgentId: "agent-nora",
+    }]);
+    expect(parseConversationNotificationOpenPayload({
+      schemaVersion: 1,
+      sessionId: "session-nora",
+      companionAgentId: "agent-nora",
+    })).toEqual({
+      schemaVersion: 1,
+      sessionId: "session-nora",
+      companionAgentId: "agent-nora",
     });
   });
 });

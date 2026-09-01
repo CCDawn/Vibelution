@@ -1,4 +1,5 @@
 import type { AgentPersonaProfile } from "./agents";
+import type { SessionSummary } from "./chat";
 
 export type AgentPluginBinding = {
   agentId: string;
@@ -498,12 +499,31 @@ export type VirtualHumanExpressionRule = {
 };
 
 export type VirtualHumanEmbodiment = {
+  schemaVersion?: number;
+  assetManifestVersion?: number;
   enabled?: boolean;
   requestedMode?: string;
   activeMode?: string;
   providerId?: string;
   assetRef?: string;
+  expressionId?: string;
+  motionPreset?: string;
+  blinkProfile?: {
+    enabled?: boolean;
+    minIntervalMs?: number;
+    maxIntervalMs?: number;
+  };
+  sceneKey?: string;
+  assetRefs?: {
+    primary?: string;
+    expression?: string;
+    background?: string;
+  };
+  assetReceipts?: Record<string, { licenseReceipt?: string; sourceRef?: string }>;
+  sourceRefs?: Array<{ kind?: string; ref?: string }>;
+  validUntil?: string;
   fallbackReason?: string;
+  fallbackReasons?: string[];
   textChatUnaffected?: boolean;
 };
 
@@ -733,8 +753,25 @@ export type VirtualHumanCompanion = {
   avatarImageUrl: string;
   personaProfile: Partial<AgentPersonaProfile>;
   status: string;
+  sessionActivity?: (Pick<
+    SessionSummary,
+    | "id"
+    | "status"
+    | "currentPhase"
+    | "lastTurnStatus"
+    | "terminalReason"
+    | "taskSummary"
+    | "updatedAt"
+    | "lastActive"
+    | "agentInboxPendingCount"
+  > & { activityStamp?: string }) | null;
   snapshot: VirtualHumanSnapshot;
 };
+
+export type VirtualHumanCompanionActivity = Pick<
+  VirtualHumanCompanion,
+  "agentId" | "displayName" | "directSessionId" | "sessionActivity"
+>;
 
 export type AgentPluginBindingUpdate = {
   enabled: boolean;

@@ -107,6 +107,7 @@ import { useShellStore } from "../store/shellStore";
 import styles from "./AppShell.styles";
 import { shareRuntimeSummaryIfOnlyVolatileChanged } from "./runtimeSummaryQueryShare";
 import packageJson from "../../package.json";
+import { CompanionDesktopAttention } from "../routes/companions/CompanionDesktopAttention";
 
 const LazyAppShellUtilityMenu = lazy(() =>
   import("./AppShellUtilityMenu")
@@ -2587,6 +2588,7 @@ export function AppShell() {
       </header>
 
       <main className={styles.mainArea}>
+        <CompanionDesktopAttention />
         <Outlet />
       </main>
     </div>

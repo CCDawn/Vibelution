@@ -14,7 +14,7 @@ from __future__ import annotations
 import hashlib
 import json
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from typing import Any
 
@@ -22,6 +22,7 @@ from core.research.workflow.contracts import PendingAction, WorkflowSessionScope
 from core.research.workflow.ledger import WorkflowLedgerStore
 from core.research.workflow.models import ActorKind
 
+from .agent_turn_completion import TurnNotReadyError
 from .domain_ports import (
     AgentTaskHandle,
     AgentTurnResult,
@@ -184,6 +185,68 @@ def resolve_agent_reserve_tokens(
     )
 
     return stage_budget_tokens(snapshot, node_id) or DEFAULT_AGENT_NODE_RESERVE_TOKENS
+
+
+def _blocking_hypothesis_fan_out_wait_enabled() -> bool:
+    """Operator rollback switch for the blocking candidate fan-out wait.
+
+    The workflow dispatch pump is single-threaded, so waiting for every
+    candidate turn inside the node action blocked all other runs for minutes.
+    The packaged default (``[research] blocking_fanout_wait = false``) is the
+    non-blocking contract: probe each candidate once, process the terminal
+    ones, and requeue the node action durably while candidates stay live.
+    ``true`` restores the legacy synchronous wait for one release window.
+    Missing/unreadable config fails to the packaged default (non-blocking).
+    """
+
+    try:
+        from config.settings import get_config
+
+        value = get_config().research.blocking_fanout_wait
+    except Exception:  # noqa: BLE001 - rollout gating must never break dispatch
+        return False
+    return value if isinstance(value, bool) else False
+
+
+def _hypothesis_fan_out_pending_error(
+    *,
+    fan_out: Mapping[str, Any],
+    pending_children: Sequence[tuple["ScopedAgentTaskHandle", dict[str, Any]]],
+) -> TurnNotReadyError:
+    """Build the durable "fan-out in progress" requeue signal.
+
+    The snapshot keeps the adapter worker on the live-turn-wait requeue path
+    (``completionSource: "running"`` -> no transient-failure budget), carries
+    the bounded fan-out progress for observability, and aggregates the
+    children's session-side liveness so the no-progress bound only fires when
+    every pending candidate is truly silent.
+    """
+
+    pending_ids = [child.candidate_id for child, _live in pending_children]
+    detail = {
+        "code": "hypothesis_fan_out_pending",
+        "selectionId": str(fan_out.get("selectionId") or ""),
+        "pendingCandidateIds": pending_ids,
+        "pendingCount": len(pending_ids),
+    }
+    live_snapshots = [dict(live) for _child, live in pending_children]
+    return TurnNotReadyError(
+        json.dumps(detail, ensure_ascii=False),
+        snapshot={
+            "terminal": False,
+            # Live fan-out work: the adapter worker must requeue durably
+            # (live_turn_wait), never consume the transient-failure budget.
+            "completionSource": "running",
+            "turnCurrent": any(
+                bool(live.get("turnCurrent")) for live in live_snapshots
+            ),
+            "messageCount": max(
+                (int(live.get("messageCount") or 0) for live in live_snapshots),
+                default=0,
+            ),
+            "hypothesisFanOut": detail,
+        },
+    )
 
 
 def _hypothesis_fan_out_wait_timeout_ms(*, child_turn_id: str) -> int:
@@ -1173,11 +1236,19 @@ class RealDomainPorts:
         handle: AgentTaskHandle,
         snapshot: dict[str, Any],
     ) -> AgentTurnResult:
-        """Wait for children, read fragments, deterministically fan in a set."""
+        """Collect candidate fragments and deterministically fan in a set.
+
+        Default (non-blocking): probe each candidate turn once, process the
+        already-terminal ones, and raise the durable ``fan-out pending``
+        requeue signal while any candidate is still live — the pump thread is
+        never held waiting for children.  ``[research] blocking_fanout_wait``
+        restores the legacy in-thread wait-per-child semantics.
+        """
 
         from .agent_turn_completion import (
             TurnNotReadyError,
             collect_required_artifact_refs,
+            probe_agent_turn_terminal,
             wait_for_agent_turn_terminal,
         )
         from .hypothesis_artifact_writer import record_hypothesis_set_from_fragments
@@ -1249,20 +1320,38 @@ class RealDomainPorts:
             == str(fan_out["selectionId"])
             and str(item.get("candidateId") or "").strip()
         }
+        # Non-blocking by default: the dispatch pump is single-threaded, so
+        # sleeping here for every candidate turn starved all other runs.  The
+        # blocking legacy semantics stay one operator flag away for rollback.
+        blocking_wait = _blocking_hypothesis_fan_out_wait_enabled()
+        pending_live_children: list[
+            tuple[ScopedAgentTaskHandle, dict[str, Any]]
+        ] = []
         for child in handle.scoped_handles:
             if not child.session_id or not child.task_id or not child.turn_id:
                 raise RuntimeError(
                     "hypothesis candidate anchor is incomplete: " + child.candidate_id
                 )
             try:
-                child_wait_timeout_ms = _hypothesis_fan_out_wait_timeout_ms(
-                    child_turn_id=child.turn_id,
-                )
-                completion = wait_for_agent_turn_terminal(
-                    child.session_id,
-                    child.turn_id,
-                    timeout_ms=child_wait_timeout_ms,
-                )
+                if blocking_wait:
+                    child_wait_timeout_ms = _hypothesis_fan_out_wait_timeout_ms(
+                        child_turn_id=child.turn_id,
+                    )
+                    completion = wait_for_agent_turn_terminal(
+                        child.session_id,
+                        child.turn_id,
+                        timeout_ms=child_wait_timeout_ms,
+                    )
+                else:
+                    # One probe, no sleep: a still-live candidate parks this
+                    # node action on the durable live-turn-wait requeue while
+                    # the pump advances other actions; its fragment is
+                    # processed on a later pass (all child processing below is
+                    # idempotent per candidate).
+                    completion = probe_agent_turn_terminal(
+                        child.session_id,
+                        child.turn_id,
+                    )
             except TurnNotReadyError:
                 raise
             except RuntimeError:
@@ -1299,6 +1388,9 @@ class RealDomainPorts:
                     ),
                 )
                 raise
+            if not blocking_wait and not bool(completion.get("terminal")):
+                pending_live_children.append((child, dict(completion)))
+                continue
             fragment_rows = list_workflow_artifacts(
                 team_id,
                 kind="hypothesis_fragment",
@@ -1391,7 +1483,8 @@ class RealDomainPorts:
                 }
                 source_fragment_ref = (
                     f"hypothesis_fragment:{reusable.get('selectionId')}:"
-                    f"{reusable.get('candidateId')}:{reusable.get('nodeRunId')}"
+                    f"{reusable.get('candidateId')}:{reusable.get('nodeRunId')}:"
+                    f"{reusable.get('sessionAttempt')}"
                 )
                 for row in fragment_rows:
                     row_payload = row.get("payload") if isinstance(row, dict) else None
@@ -1441,10 +1534,6 @@ class RealDomainPorts:
                     payload=replay_payload,
                     persist=True,
                     artifact_sink=put_workflow_artifact,
-                    artifact_identity=(
-                        f"hypothesis_fragment:{child.selection_id}:"
-                        f"{child.candidate_id}:{action.node_run_id}"
-                    ),
                 )
                 fragment = dict(replayed["fragment"])
             # Re-parse through the canonical writer contract.  This ensures
@@ -1482,7 +1571,8 @@ class RealDomainPorts:
                 )
                 or (
                     f"hypothesis_fragment:{child.selection_id}:"
-                    f"{child.candidate_id}:{action.node_run_id}"
+                    f"{child.candidate_id}:{action.node_run_id}:"
+                    f"{int(child.session_attempt or 1)}"
                 )
             )
             _mark_candidate_task_completed(
@@ -1536,6 +1626,16 @@ class RealDomainPorts:
                 discriminator=(
                     f"{child.candidate_id}:{child.session_attempt}:{fragment_ref}"
                 ),
+            )
+
+        if pending_live_children:
+            # Still-running candidates keep this node action in the durable
+            # "accepted/in progress" state: requeue, never succeeded/failed.
+            # Terminal fan-in runs once, on the pass where the last candidate
+            # reaches its success terminal state.
+            raise _hypothesis_fan_out_pending_error(
+                fan_out=fan_out,
+                pending_children=pending_live_children,
             )
 
         candidate_scopes = {

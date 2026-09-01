@@ -74,6 +74,12 @@ def record_hypothesis_set(
         **portfolio.to_dict(),
         "hypothesis_count": len(portfolio.candidates),
         "currentEvolutionRound": current_round,
+        # createdFrom* identify ONLY the candidate task whose completion
+        # triggered this write (the fan-in trigger).  They are kept for
+        # backward compatibility; per-candidate anchoring for EVERY selected
+        # candidate (taskId/sessionId/sessionAttempt) lives in
+        # ``candidateSessionAnchors`` below — read that field for full
+        # provenance, never these.
         "createdFromTaskId": _text(task.get("taskId")),
         "createdFromSessionId": _text(task.get("sessionId")),
         "createdFromTurnId": _text((task.get("turn") or {}).get("turnId")),
