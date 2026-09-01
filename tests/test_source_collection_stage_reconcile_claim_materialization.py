@@ -23,6 +23,14 @@ evidenceRefs 无 quote），物化静默为 0。锁定：
 7. completed 任务物化出 0 条 claim 但 run 存在带摘要候选 → 停靠
    needs_review 并给 remediation（不自动重开）；全空摘要诚实跳过 → 正常
    completed。
+
+生产实锤（run SCI-091，2026-09-01 source_extraction 被 fail-closed 证据契约
+拒绝）追加的 retrieved_at 兜底契约：
+
+8. 提炼回写条目缺 retrieved_at（或值不带时区）→ 服务端在回写边界用真实
+   链上时间（record/candidate 的 createdAt，最后兜底当前回写时间）补齐；
+   agent 显式写的合规值（含 retrievedAt 别名）不覆盖；canonical result
+   必须直接通过 build_source_extraction_evidence_cards 契约。
 """
 
 from __future__ import annotations
@@ -442,6 +450,118 @@ def test_verification_status_alias_routes_by_value(tmp_path, monkeypatch):
     second_entry = second["task"]["result"]["candidateExtractions"][-1]
     assert not second_entry.get("evidenceStatus")
     assert second_entry["verification_status"] == "metadata_checked"
+
+
+# ---------------------------------------------------------------------------
+# Challenge v2 retrieved_at 回写兜底（生产实锤 SCI-091）
+# ---------------------------------------------------------------------------
+
+
+def _untimestamped_extraction_entry(candidate) -> dict:
+    """SCI-091 实锤形状：契约字段齐全但缺 retrieved_at（带逐字 quote 锚）。"""
+    entry = _anchored_extraction_entry(candidate)
+    entry.pop("retrieved_at")
+    # 引用锚带 sourceRef，满足 Challenge v2 卡的 citationLocator 要求。
+    entry["evidenceRefs"][0]["sourceRef"] = candidate["sourceUrl"]
+    return entry
+
+
+def test_completed_extraction_writeback_backfills_missing_retrieved_at(tmp_path, monkeypatch):
+    """SCI-091 复现：回写缺 retrieved_at → 服务端按候选真实时间兜底，产物过契约。"""
+    from datetime import datetime
+
+    from core.web.services.team_workflow.research_runtime.source_extraction_evidence_cards import (
+        build_source_extraction_evidence_cards,
+    )
+
+    setup = _seed_completed_extraction_task(tmp_path, monkeypatch)
+    task = setup["task"]
+    _append_stage_task_tool_trace(tmp_path, task["task"])
+
+    complete = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        setup["teamId"],
+        task["taskId"],
+        {
+            "status": "completed",
+            "summary": "完成 3/3 条候选资料提炼（条目省略 retrieved_at）。",
+            "result": {
+                "candidateExtractions": [
+                    _untimestamped_extraction_entry(item)
+                    for item in setup["candidates"]
+                ]
+            },
+            "recordedByAgent": task["task"]["agentId"],
+        },
+    )
+    assert complete["task"]["status"] in {"completed", "needs_review"}
+
+    created_by_id = {
+        item["candidateId"]: item["createdAt"] for item in setup["candidates"]
+    }
+    stored_entries = complete["task"]["result"]["candidateExtractions"]
+    assert len(stored_entries) == 3
+    for entry in stored_entries:
+        backfilled = entry["retrieved_at"]
+        # 兜底值 = 该候选被检索注册的真实时间，且满足 RFC3339 带时区。
+        assert backfilled == created_by_id[entry["candidateId"]]
+        parsed = datetime.fromisoformat(backfilled.replace("Z", "+00:00"))
+        assert parsed.tzinfo is not None
+
+    # writer 产物（canonical task result）必须直接通过 fail-closed 契约校验器。
+    cards = build_source_extraction_evidence_cards(complete["task"]["result"])
+    assert len(cards) == 3
+    assert all(card["retrieved_at"] for card in cards)
+
+
+def test_backfill_preserves_explicit_retrieved_at_alias(tmp_path, monkeypatch):
+    """agent 已显式写 retrievedAt 别名 → 兜底不得覆盖。"""
+    setup = _seed_completed_extraction_task(tmp_path, monkeypatch)
+    task = setup["task"]
+    _append_stage_task_tool_trace(tmp_path, task["task"])
+
+    entry = _untimestamped_extraction_entry(setup["candidates"][0])
+    entry["retrievedAt"] = "2026-08-31T14:28:07+08:00"
+    complete = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        setup["teamId"],
+        task["taskId"],
+        {
+            "status": "completed",
+            "summary": "完成 1/3 条候选资料提炼（其余见后续批次）。",
+            "result": {"candidateExtractions": [entry]},
+            "recordedByAgent": task["task"]["agentId"],
+        },
+    )
+    stored_entry = complete["task"]["result"]["candidateExtractions"][0]
+    assert stored_entry["retrievedAt"] == "2026-08-31T14:28:07+08:00"
+    assert "retrieved_at" not in stored_entry
+
+
+def test_backfill_replaces_malformed_retrieved_at(tmp_path, monkeypatch):
+    """agent 写了不带时区的伪时间戳 → 兜底替换为真实链上时间，不再卡契约。"""
+    from datetime import datetime
+
+    setup = _seed_completed_extraction_task(tmp_path, monkeypatch)
+    task = setup["task"]
+    _append_stage_task_tool_trace(tmp_path, task["task"])
+
+    entry = _untimestamped_extraction_entry(setup["candidates"][0])
+    entry["retrieved_at"] = "2026-08-31 14:28:07"
+    complete = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        setup["teamId"],
+        task["taskId"],
+        {
+            "status": "completed",
+            "summary": "完成 1/3 条候选资料提炼（其余见后续批次）。",
+            "result": {"candidateExtractions": [entry]},
+            "recordedByAgent": task["task"]["agentId"],
+        },
+    )
+    stored_entry = complete["task"]["result"]["candidateExtractions"][0]
+    backfilled = stored_entry["retrieved_at"]
+    assert backfilled != "2026-08-31 14:28:07"
+    assert backfilled == setup["candidates"][0]["createdAt"]
+    parsed = datetime.fromisoformat(backfilled.replace("Z", "+00:00"))
+    assert parsed.tzinfo is not None
 
 
 def _seed_empty_summary_candidate_run(tmp_path, monkeypatch):
