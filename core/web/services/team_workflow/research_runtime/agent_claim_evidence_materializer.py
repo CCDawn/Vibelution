@@ -17,6 +17,14 @@ Candidate dimensions: extraction records anchor source facts to *source*
 candidate ids.  Hypothesis candidates receive separate core-claim rows only
 when their own ``lineageRefs`` cite the exact source.  Evidence is never copied
 across every hypothesis id, so one candidate cannot unlock another.
+
+Chain-level collections (the hypothesis-first chain's ``request_new_evidence``
+runs) never open an extraction stage task and never own a formal workflow run,
+so the stage-task entry points above can never fire for them.  The chain-level
+bridge (:func:`materialize_chain_collection_evidence`) crosses the same
+boundary for their collected source candidates at handoff time, binding the
+request's review decision candidates (``hypothesisCandidateIds``) instead of
+formal ``lineageRefs``.
 """
 
 from __future__ import annotations
@@ -793,3 +801,265 @@ def materialize_completed_extraction_task(
             source_collection_run_id
         ),
     )
+
+
+# ---------------------------------------------------------------------------
+# chain-level collection bridge (hypothesis-first chain, no formal run)
+#
+# Production incident (SCI-001, 2026-09-01): the chain drove five completed
+# ``request_new_evidence`` collections for question SCI-001, but the team's
+# claim ledger was never created, so ``evaluate_claim_belief_gate`` failed
+# closed with ``claim_data_missing`` and the operator's accepted convergence
+# was rejected forever.  Both stage-task entry points above require a formal
+# workflow run (``_formal_question_scope``) and an extraction stage task;
+# chain-level collection runs have neither.  The bridge below crosses the
+# same Evidence Store boundary from the chain's own handoff authority.
+
+
+def _chain_source_collection_candidates(
+    team_id: str,
+    collection_run_id: str,
+) -> list[dict[str, Any]]:
+    """Read one chain collection run's canonical source candidates."""
+    from core.web.services.team_workflow.source_collection.candidates import (
+        list_candidate_store,
+    )
+
+    response = list_candidate_store(_text(team_id), run_id=_text(collection_run_id), limit=500)
+    return [
+        dict(item)
+        for item in list(response.get("candidates") or [])
+        if isinstance(item, dict)
+    ]
+
+
+def _chain_candidate_anchor(candidate: dict[str, Any]) -> dict[str, Any] | None:
+    """Resolve the verbatim, locatable anchor of one collected source candidate.
+
+    A candidate without a non-empty collected summary, or without any source
+    locator (url, doi, or provider identity key), is not evidence: anchoring
+    is what keeps the claim belief gate's inputs verifiable.
+    """
+    quote = _text(candidate.get("summary"))[:4000]
+    if not quote:
+        return None
+    metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+    record_metadata = (
+        metadata.get("dataProcessingRecordMetadata")
+        if isinstance(metadata.get("dataProcessingRecordMetadata"), dict)
+        else {}
+    )
+    source_url = _text(candidate.get("sourceUrl")) or _text(metadata.get("sourceUrl"))
+    doi = _text(metadata.get("doi")) or _text(record_metadata.get("doi"))
+    identity_key = _text(record_metadata.get("sourceIdentityKey"))
+    if source_url:
+        source_ref = source_url
+        locator = {"kind": "url", "url": source_url}
+    elif doi:
+        source_ref = f"doi:{doi}"
+        locator = {"kind": "citation", "anchor": source_ref}
+    elif identity_key:
+        source_ref = identity_key
+        locator = {"kind": "evidence_ref", "anchor": identity_key}
+    else:
+        return None
+    title = _text(candidate.get("title")) or source_ref
+    source_type = (
+        _text(candidate.get("sourceKind"))
+        or _text(candidate.get("candidateType"))
+        or "collected_source"
+    )
+    return {
+        "quote": quote,
+        "sourceRef": source_ref,
+        "locator": locator,
+        "title": title[:500],
+        "sourceType": source_type[:80],
+        "sourceUrl": source_url,
+        "retrievedAt": _text(candidate.get("createdAt")),
+        "extractorAgentId": _text(candidate.get("createdByAgent")) or "source_collection",
+    }
+
+
+def _chain_agent_model_ref(agent_id: str) -> str:
+    """Best-effort dialogue model ref for one collection agent."""
+    from core.web.services import agent_directory_service
+
+    agent = agent_directory_service.get_agent(_text(agent_id)) if _text(agent_id) else None
+    bindings = agent.get("llmBindings") if isinstance(agent, dict) else {}
+    dialogue = bindings.get("dialogue") if isinstance(bindings, dict) else {}
+    return _text(dialogue.get("modelId")) if isinstance(dialogue, dict) else ""
+
+
+def _chain_hypothesis_candidate_statements(
+    team_id: str,
+    question_scope: Mapping[str, Any],
+    candidate_ids: list[str],
+) -> dict[str, str]:
+    """Resolve the formal statement of each request-bound hypothesis candidate.
+
+    The collection request's persisted ``hypothesisCandidateIds`` (the review
+    decision's ``candidateRefs``) are the binding authority here, not agent
+    authored ``lineageRefs``: the review round explicitly requested evidence
+    for exactly these candidates.  Candidates without a statement are skipped,
+    so an empty statement can never mint a claim row.
+    """
+    from .hypothesis_first_chain import list_hypothesis_candidates
+
+    listing = list_hypothesis_candidates(
+        _text(team_id),
+        question_id=_text(question_scope.get("question")).upper(),
+    )
+    statements = {
+        _text(item.get("candidateId")): _text(item.get("statement"))[:4000]
+        for item in list(listing.get("candidates") or [])
+        if isinstance(item, Mapping) and _text(item.get("candidateId"))
+    }
+    return {
+        candidate_id: statements[candidate_id]
+        for candidate_id in candidate_ids
+        if candidate_id in statements and statements[candidate_id]
+    }
+
+
+def materialize_chain_collection_evidence(
+    *,
+    project_root: str | Path,
+    team_id: str,
+    question_scope: Mapping[str, Any],
+    collection_run_id: str,
+    hypothesis_candidate_ids: object = None,
+) -> dict[str, Any]:
+    """Bridge one chain-level collection run into the claim ledger (idempotent).
+
+    Chain ``request_new_evidence`` runs never own a formal workflow run or an
+    extraction stage task, so neither stage-task entry point can materialize
+    them.  This bridge proposes, for every collected source candidate with a
+    verbatim anchored summary:
+
+    - one question-scoped fact claim row (content-hash identity, so identical
+      collected facts collapse) with a fact evidence record anchored to the
+      source candidate dimension, and
+    - for each hypothesis candidate the collection request explicitly served
+      (its persisted ``hypothesisCandidateIds``), the candidate's core-claim
+      row (candidate-dimensioned, replay-stable id) plus one evidence record
+      per collected source in that candidate's dimension.
+
+    Hypothesis-dimension evidence registers with ``reasoningRole=fact``: the
+    chain's review/adjudication rounds are the acceptance authority for these
+    claims, and hypothesis-role rows would wrongly pull legacy chain
+    candidates onto the formal strict gate path, which demands an accepted
+    evidence review the chain never runs.  ``contradicted``/``disputed``
+    belief states still block; nothing about the gate changes.
+
+    Ledger failures raise :class:`EvidenceMaterializationError`; repeated
+    calls for the same run reuse every row and register no duplicates.
+    """
+    from core.research.evidence import ClaimEvidenceStore
+
+    if not isinstance(question_scope, Mapping):
+        raise EvidenceMaterializationError(
+            "question claim scope is required to bridge chain collection "
+            "evidence to the claim ledger"
+        )
+    normalized_team = _text(team_id)
+    normalized_run = _text(collection_run_id)
+    if not normalized_run:
+        raise EvidenceMaterializationError(
+            "chain claim materialization requires a collection run id"
+        )
+    bridged_candidate_ids = _normalized_hypothesis_candidate_ids(
+        hypothesis_candidate_ids
+    )
+    statements = _chain_hypothesis_candidate_statements(
+        normalized_team,
+        question_scope,
+        bridged_candidate_ids,
+    )
+    anchored: list[tuple[str, dict[str, Any]]] = []
+    for candidate in _chain_source_collection_candidates(normalized_team, normalized_run):
+        anchor = _chain_candidate_anchor(candidate)
+        candidate_id = _text(candidate.get("candidateId"))
+        if anchor is not None and candidate_id:
+            anchored.append((candidate_id, anchor))
+    # Without anchored collected sources there is no evidence to bridge; core
+    # claim rows must never be minted empty, or the gate would read a claim
+    # row that no evidence dimension can ever reach.
+    if not anchored:
+        return {
+            "status": "skipped",
+            "reason": "no_anchored_candidates",
+            "collectionRunId": normalized_run,
+            "sourceCandidateCount": 0,
+            "factClaimCount": 0,
+            "candidateClaimCount": 0,
+            "evidenceCount": 0,
+        }
+    store = ClaimEvidenceStore(project_root)
+    fact_claim_count = 0
+    candidate_claim_ids: set[str] = set()
+    evidence_count = 0
+    for candidate_id, anchor in anchored:
+        model_ref = _chain_agent_model_ref(anchor["extractorAgentId"])
+        source_revision = "sha256:" + _sha256(
+            {
+                "sourceRef": anchor["sourceRef"],
+                "locator": anchor["locator"],
+                "quote": anchor["quote"],
+                "title": anchor["title"],
+                "source_type": anchor["sourceType"],
+                "source_url": anchor["sourceUrl"],
+                "retrieved_at": anchor["retrievedAt"],
+                "fact": anchor["quote"],
+                "relation": "supports",
+                "verification_status": "collected_source_summary",
+            }
+        )
+        fact_claim = _propose_ledger_claim(
+            team_id=normalized_team,
+            question_scope=question_scope,
+            claim_text=anchor["quote"],
+        )
+        fact_claim_count += 1
+        evidence_payload = {
+            "claimId": fact_claim["claimId"],
+            "candidateId": candidate_id,
+            "sourceId": anchor["sourceRef"],
+            "sourceRevision": source_revision,
+            "locator": anchor["locator"],
+            "quote": anchor["quote"],
+            "evidenceKind": "primary_result",
+            "reasoningRole": "fact",
+            "supportLevel": "supports",
+            "extractionMethod": "model" if model_ref else "manual",
+            "extractorAgentId": anchor["extractorAgentId"],
+            "modelRef": model_ref,
+            "sourceCollectionRunId": normalized_run,
+        }
+        store.register(normalized_team, evidence_payload)
+        evidence_count += 1
+        for bridged_candidate_id, statement in statements.items():
+            core_claim = _propose_ledger_claim(
+                team_id=normalized_team,
+                question_scope=question_scope,
+                claim_text=statement,
+                candidate_id=bridged_candidate_id,
+            )
+            candidate_claim_ids.add(core_claim["claimId"])
+            store.register(
+                normalized_team,
+                {
+                    **evidence_payload,
+                    "claimId": core_claim["claimId"],
+                    "candidateId": bridged_candidate_id,
+                },
+            )
+            evidence_count += 1
+    return {
+        "status": "materialized",
+        "collectionRunId": normalized_run,
+        "sourceCandidateCount": len(anchored),
+        "factClaimCount": fact_claim_count,
+        "candidateClaimCount": len(candidate_claim_ids),
+        "evidenceCount": evidence_count,
+    }

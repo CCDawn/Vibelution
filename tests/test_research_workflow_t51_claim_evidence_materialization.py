@@ -1240,3 +1240,257 @@ def test_replay_fail_closed_on_remaining_contract_violation(
         )
     # 精确 path 指到嵌套 claim，可诊断性不因读点兜底而退化。
     assert "claims[0]" in str(excinfo.value)
+
+
+# ---------------------------------------------------------------------------
+# Chain-level collection bridge (hypothesis-first chain, no formal run)
+
+
+def _seed_chain_collection_candidates(
+    monkeypatch: pytest.MonkeyPatch, candidates: list[dict]
+) -> None:
+    from core.web.services.team_workflow.source_collection import (
+        candidates as candidates_module,
+    )
+
+    monkeypatch.setattr(
+        candidates_module,
+        "list_candidate_store",
+        lambda *args, **kwargs: {"schemaVersion": 1, "candidates": list(candidates)},
+    )
+
+
+def _collected_source_candidate(
+    candidate_id: str, *, summary: str = "", url: str = ""
+) -> dict:
+    return {
+        "candidateId": candidate_id,
+        "candidateType": "source_manifest",
+        "sourceKind": "paper",
+        "title": f"Collected source {candidate_id}",
+        "summary": summary,
+        "sourceUrl": url,
+        "createdAt": "2026-09-01T15:18:49Z",
+        "createdByAgent": "source_finder",
+    }
+
+
+def _seed_chain_hypothesis_candidates(
+    team_id: str, question_id: str, statements: dict[str, str]
+) -> None:
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_first_chain as chain,
+    )
+
+    for candidate_id, statement in statements.items():
+        chain._append_jsonl(
+            chain._storage_path(team_id),
+            {
+                "schemaVersion": chain.SCHEMA_VERSION,
+                "recordKind": chain.CANDIDATE_KIND,
+                "candidateId": candidate_id,
+                "questionId": question_id,
+                "statement": statement,
+                "meetingRoundId": "hf-candgen-test",
+                "createdAt": "2026-09-01T15:00:00Z",
+            },
+        )
+
+
+def test_chain_collection_materializes_candidate_bound_claim_rows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Chain collection evidence lands claim rows in the gate's dimension.
+
+    The chain-level bridge proposes one fact row per anchored collected
+    source plus one candidate-dimensioned core-claim row per request-bound
+    hypothesis candidate, and registers evidence in both dimensions so the
+    claim belief gate evaluates the hypothesis candidates instead of failing
+    closed with claim_data_missing.
+    """
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_first_chain as chain,
+    )
+    from core.web.services.team_workflow.research_runtime.agent_claim_evidence_materializer import (
+        materialize_chain_collection_evidence,
+    )
+
+    team_id, scope = _claim_bridge_env(tmp_path, monkeypatch)
+    _seed_chain_collection_candidates(
+        monkeypatch,
+        [
+            _collected_source_candidate(
+                "candidate-run-a-1",
+                summary="The collected abstract states a bounded mechanism.",
+                url="https://example.org/paper-a",
+            ),
+            _collected_source_candidate(
+                "candidate-run-a-2",
+                summary="A second collected abstract reports a counter case.",
+                url="https://example.org/paper-b",
+            ),
+            # No summary and no locator: never evidence, must be skipped.
+            _collected_source_candidate("candidate-run-a-3"),
+        ],
+    )
+    _seed_chain_hypothesis_candidates(
+        team_id,
+        _QUESTION_ID,
+        {HYPOTHESIS_CANDIDATE_ID: "Candidate A predicts a bounded mechanism."},
+    )
+
+    result = materialize_chain_collection_evidence(
+        project_root=tmp_path,
+        team_id=team_id,
+        question_scope=scope,
+        collection_run_id="dprun-chain-1",
+        hypothesis_candidate_ids=[HYPOTHESIS_CANDIDATE_ID, "sci-mtz-1-unknown"],
+    )
+    assert result["status"] == "materialized"
+    assert result["sourceCandidateCount"] == 2
+    assert result["factClaimCount"] == 2
+    assert result["candidateClaimCount"] == 1
+
+    rows = {item["claim"]: item for item in claim_ledger.list_claims(team_id)["claims"]}
+    fact_row = rows["The collected abstract states a bounded mechanism."]
+    assert fact_row["question"] == _QUESTION_ID
+    core_row = rows["Candidate A predicts a bounded mechanism."]
+    assert core_row["question"] == _QUESTION_ID
+
+    stored = ClaimEvidenceStore(tmp_path).list(team_id)
+    by_dimension = {(item["candidateId"], item["claimId"]) for item in stored}
+    assert ("candidate-run-a-1", fact_row["claimId"]) in by_dimension
+    assert (HYPOTHESIS_CANDIDATE_ID, core_row["claimId"]) in by_dimension
+    # Evidence is never copied to candidates the request did not serve.
+    assert not any(item["candidateId"] == "sci-mtz-1-unknown" for item in stored)
+    hypothesis_dimension = [
+        item for item in stored if item["candidateId"] == HYPOTHESIS_CANDIDATE_ID
+    ]
+    assert len(hypothesis_dimension) == 2
+    assert {item["sourceCollectionRunId"] for item in hypothesis_dimension} == {"dprun-chain-1"}
+    assert all(item["reasoningRole"] == "fact" for item in hypothesis_dimension)
+
+    # The gate evaluates instead of failing closed with claim_data_missing.
+    verdict = chain.evaluate_claim_belief_gate(
+        team_id, _QUESTION_ID, [HYPOTHESIS_CANDIDATE_ID]
+    )
+    assert verdict[HYPOTHESIS_CANDIDATE_ID]["status"] == "allowed"
+    assert verdict[HYPOTHESIS_CANDIDATE_ID]["reason"] == ""
+
+
+def test_chain_collection_gate_stays_fail_closed_without_bridge_input(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No anchored collection evidence keeps the gate claim_data_missing.
+
+    A run without anchorable sources must not mint any row, and candidates
+    without bridge input stay blocked exactly as before the bridge existed.
+    """
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_first_chain as chain,
+    )
+    from core.web.services.team_workflow.research_runtime.agent_claim_evidence_materializer import (
+        materialize_chain_collection_evidence,
+    )
+
+    team_id, scope = _claim_bridge_env(tmp_path, monkeypatch)
+    _seed_chain_collection_candidates(
+        monkeypatch,
+        [_collected_source_candidate("candidate-run-a-3")],
+    )
+    _seed_chain_hypothesis_candidates(
+        team_id,
+        _QUESTION_ID,
+        {HYPOTHESIS_CANDIDATE_ID: "Candidate A predicts a bounded mechanism."},
+    )
+
+    result = materialize_chain_collection_evidence(
+        project_root=tmp_path,
+        team_id=team_id,
+        question_scope=scope,
+        collection_run_id="dprun-chain-1",
+        hypothesis_candidate_ids=[HYPOTHESIS_CANDIDATE_ID],
+    )
+    assert result["status"] == "skipped"
+    assert result["reason"] == "no_anchored_candidates"
+    assert claim_ledger.list_claims(team_id)["claimCount"] == 0
+    assert ClaimEvidenceStore(tmp_path).list(team_id) == []
+    verdict = chain.evaluate_claim_belief_gate(
+        team_id, _QUESTION_ID, [HYPOTHESIS_CANDIDATE_ID]
+    )
+    assert verdict[HYPOTHESIS_CANDIDATE_ID]["status"] == "blocked"
+    assert verdict[HYPOTHESIS_CANDIDATE_ID]["reason"] == "claim_data_missing"
+
+
+def test_chain_collection_materialization_replay_is_idempotent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Repeated collection materialization never duplicates any row."""
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_first_chain as chain,
+    )
+    from core.web.services.team_workflow.research_runtime.agent_claim_evidence_materializer import (
+        materialize_chain_collection_evidence,
+    )
+
+    team_id, scope = _claim_bridge_env(tmp_path, monkeypatch)
+    _seed_chain_collection_candidates(
+        monkeypatch,
+        [
+            _collected_source_candidate(
+                "candidate-run-a-1",
+                summary="The collected abstract states a bounded mechanism.",
+                url="https://example.org/paper-a",
+            ),
+        ],
+    )
+    _seed_chain_hypothesis_candidates(
+        team_id,
+        _QUESTION_ID,
+        {HYPOTHESIS_CANDIDATE_ID: "Candidate A predicts a bounded mechanism."},
+    )
+    kwargs = {
+        "project_root": tmp_path,
+        "team_id": team_id,
+        "question_scope": scope,
+        "collection_run_id": "dprun-chain-1",
+        "hypothesis_candidate_ids": [HYPOTHESIS_CANDIDATE_ID],
+    }
+    first = materialize_chain_collection_evidence(**kwargs)
+    assert first["status"] == "materialized"
+    replay = materialize_chain_collection_evidence(**kwargs)
+
+    assert replay["status"] == "materialized"
+    assert replay["factClaimCount"] == first["factClaimCount"]
+    assert replay["candidateClaimCount"] == first["candidateClaimCount"]
+    assert replay["evidenceCount"] == first["evidenceCount"]
+    assert claim_ledger.list_claims(team_id)["claimCount"] == 2
+    assert (
+        len({item["claimEvidenceId"] for item in ClaimEvidenceStore(tmp_path).list(team_id)})
+        == 2
+    )
+
+    # The gate verdict is stable across replays.
+    verdict = chain.evaluate_claim_belief_gate(
+        team_id, _QUESTION_ID, [HYPOTHESIS_CANDIDATE_ID]
+    )
+    assert verdict[HYPOTHESIS_CANDIDATE_ID]["status"] == "allowed"
+
+
+def test_chain_collection_materialization_requires_question_scope(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from core.web.services.team_workflow.research_runtime.agent_claim_evidence_materializer import (
+        EvidenceMaterializationError,
+        materialize_chain_collection_evidence,
+    )
+
+    team_id, _scope = _claim_bridge_env(tmp_path, monkeypatch)
+    with pytest.raises(EvidenceMaterializationError, match="question claim scope"):
+        materialize_chain_collection_evidence(
+            project_root=tmp_path,
+            team_id=team_id,
+            question_scope=None,
+            collection_run_id="dprun-chain-1",
+            hypothesis_candidate_ids=[],
+        )

@@ -8722,9 +8722,16 @@ def record_collection_handoff(
 ) -> dict[str, Any]:
     """Record one child collection run's knowledge handoff (idempotent).
 
-    Marks the request ``handed_off``, auto-opens the next review meeting
+    Marks the request ``handed_off``, materializes the collected evidence into
+    the question-scoped claim ledger (idempotently, before the next round can
+    read the claim belief gate), auto-opens the next review meeting
     (budget-gated, lineage-linked), and re-checks the parent runs'
     ``hypothesis_design`` readiness outside any writer transaction.
+
+    Replays (an already ``handed_off`` request) re-run the claim
+    materialization on purpose: requests handed off before the chain-level
+    bridge existed recover their claim rows this way without re-running the
+    collection or the review rounds.
     """
     from core.web.services import team_service
 
@@ -8752,6 +8759,9 @@ def record_collection_handoff(
                 "handoffRef": str(handoff_ref or "").strip(),
             }
             _append_jsonl(_storage_path(normalized_team_id), latest)
+    claim_materialization = _materialize_request_collection_claims(
+        normalized_team_id, latest
+    )
     next_meeting = open_next_review_meeting(
         normalized_team_id,
         previous_meeting_round_id=str(latest.get("meetingRoundId") or ""),
@@ -8774,9 +8784,76 @@ def record_collection_handoff(
         "teamId": normalized_team_id,
         "status": "reused" if reused else "handed_off",
         "request": latest,
+        "claimMaterialization": claim_materialization,
         "nextMeeting": next_meeting,
         "resume": resume,
     }
+
+
+def _materialize_request_collection_claims(
+    team_id: str, request: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Bridge one collection request's run into the claim ledger (idempotent).
+
+    This is the chain-level claim bridge: chain collections own neither a
+    formal workflow run nor an extraction stage task, so the stage-task
+    materialization entry points can never fire for them and the claim belief
+    gate stayed ``claim_data_missing`` forever (SCI-001).  A failure is
+    recorded as a scene event and returned for diagnosis; the handoff itself
+    never blocks, and the identical idempotent call retries the bridge (the
+    operator handoff endpoint re-invocation is the recovery path).
+    """
+    collection_run_id = str(request.get("collectionRunId") or "").strip()
+    if not collection_run_id:
+        return {"status": "skipped", "reason": "collection_run_missing"}
+    question_id = str(request.get("questionId") or "").strip()
+    if not question_id:
+        return {"status": "skipped", "reason": "question_missing"}
+    hypothesis_candidate_ids = list(
+        dict.fromkeys(_normalized_str_list(request.get("hypothesisCandidateIds")))
+    )
+    try:
+        from .agent_claim_evidence_materializer import (
+            materialize_chain_collection_evidence,
+        )
+
+        result = materialize_chain_collection_evidence(
+            project_root=_project_root(),
+            team_id=team_id,
+            question_scope=_question_scope_envelope(team_id, question_id),
+            collection_run_id=collection_run_id,
+            hypothesis_candidate_ids=hypothesis_candidate_ids,
+        )
+    except Exception as exc:  # noqa: BLE001 - diagnostics only, never a handoff failure
+        _record_scene_event(
+            "hypothesis_first.chain_collection_claim_materialization_failed",
+            outcome="error",
+            level="warning",
+            fields={
+                "requestId": str(request.get("requestId") or ""),
+                "collectionRunId": collection_run_id,
+                "questionId": question_id,
+                "hypothesisCandidateIds": hypothesis_candidate_ids,
+                "errorType": type(exc).__name__,
+                "error": str(exc)[:400],
+            },
+        )
+        return {"status": "failed", "errorType": type(exc).__name__, "error": str(exc)[:400]}
+    if result.get("status") == "materialized":
+        _record_scene_event(
+            "hypothesis_first.chain_collection_claim_materialized",
+            outcome="ok",
+            fields={
+                "requestId": str(request.get("requestId") or ""),
+                "collectionRunId": collection_run_id,
+                "questionId": question_id,
+                "hypothesisCandidateIds": hypothesis_candidate_ids,
+                "factClaimCount": result.get("factClaimCount"),
+                "candidateClaimCount": result.get("candidateClaimCount"),
+                "evidenceCount": result.get("evidenceCount"),
+            },
+        )
+    return result
 
 
 # ---------------------------------------------------------------------------
