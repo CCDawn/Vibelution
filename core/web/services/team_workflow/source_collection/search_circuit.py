@@ -748,3 +748,97 @@ def build_exhausted_duplicate_result(
             "Consume the structured evidenceGap marker when planning the next review round.",
         ],
     }
+
+
+# ---------------------------------------------------------------------------
+# Review-side consumer API (read / clear).  Pure additions on top of the
+# retrieval kernel: no circuit decision path imports or changes below.
+
+
+def live_evidence_gap_marker_for_goal(
+    team_id: str,
+    search_envelope: dict[str, Any] | None,
+    *,
+    goal_key: str = "",
+) -> dict[str, Any]:
+    """Return the live ``evidence_gap_unavailable`` marker for one goal, else {}.
+
+    Read-only consumer API for the hypothesis-first chain: checked before an
+    evidence request reaches the collection facade so an already-exhausted
+    goal never triggers a new retrieval attempt.  Fail-open: an unreadable
+    ledger behaves exactly like "no marker" (legacy path).
+    """
+    try:
+        key = goal_key or canonical_goal_key(search_envelope)
+        if not key:
+            return {}
+        store = load_circuit_store(team_id)
+        for marker in reversed(list(store.get("markers") or [])):
+            if not isinstance(marker, dict):
+                continue
+            if str(marker.get("marker") or "") != CIRCUIT_MARKER_KIND:
+                continue
+            if str(marker.get("goalKey") or "") == key:
+                return dict(marker)
+        return {}
+    except Exception:  # noqa: BLE001 - a missing marker must never block collection
+        return {}
+
+
+def marker_retry_hint(marker: dict[str, Any]) -> str:
+    """Operator-facing hint returned when clearing one marker (pure).
+
+    The quote-anchor remediation (verbatim quote-anchor blocks plus
+    abstract-only degradation) makes sources that previously failed full-text
+    fetch (auth wall / fetch failures) usable as abstract-level evidence.  A
+    marker whose attempts did retrieve results that never converted into new
+    relevant records is exactly that failure class, so a retry may now
+    succeed.  Attempts that retrieved nothing at all stay unpromising.
+    """
+    attempts = [item for item in list((marker or {}).get("attempts") or []) if isinstance(item, dict)]
+    saw_results = any(
+        _int_or_zero((item.get("outcome") if isinstance(item.get("outcome"), dict) else {}).get("resultCount")) > 0
+        for item in attempts
+    )
+    if saw_results:
+        return (
+            "该判定期间检索曾命中结果但未能形成新增相关记录；quote 锚摘要降级已上线，"
+            "原 auth wall/fetch 失败的源现可以摘要级证据参与，重试可能可得。"
+        )
+    return "清除后该证据请求将重新走检索熔断判定（重新检索/重判）。"
+
+
+def clear_evidence_gap_marker(team_id: str, marker_id: str) -> dict[str, Any]:
+    """Remove one ``evidence_gap_unavailable`` marker by id (operator action).
+
+    No TTL/auto-expiry by design: reopening a dead retrieval goal is an
+    explicit operator decision, never a silent background restart.  After a
+    successful clear the same goal re-enters the circuit as a brand-new
+    request.  Returns ``{"cleared": bool, "marker": dict, "retryHint": str}``
+    plus ``"error"`` only when persistence failed (the operator retry is
+    safe; an unknown id simply reports ``cleared: False``).
+    """
+    normalized = _collapse(marker_id)[:80]
+    if not normalized:
+        return {"cleared": False, "marker": {}, "retryHint": "", "error": "marker_id is required"}
+    try:
+        store = load_circuit_store(team_id)
+        markers = [item for item in list(store.get("markers") or []) if isinstance(item, dict)]
+        found: dict[str, Any] | None = None
+        kept: list[dict[str, Any]] = []
+        for marker in markers:
+            if found is None and str(marker.get("markerId") or "") == normalized:
+                found = marker
+                continue
+            kept.append(marker)
+        if found is None:
+            return {"cleared": False, "marker": {}, "retryHint": ""}
+        store["markers"] = kept
+        save_circuit_store(team_id, store)
+        return {
+            "cleared": True,
+            "marker": dict(found),
+            "retryHint": marker_retry_hint(found),
+        }
+    except Exception as exc:  # noqa: BLE001 - surface failure, never corrupt the ledger
+        return {"cleared": False, "marker": {}, "retryHint": "", "error": str(exc) or type(exc).__name__}

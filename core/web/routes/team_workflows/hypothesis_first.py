@@ -62,6 +62,8 @@ from .hypothesis_first_models import (
     AnomalyInboxResponse,
     CandidateEvidenceTrailResponse,
     ChainStateResponse,
+    ClearEvidenceGapMarkerPayload,
+    ClearEvidenceGapMarkerResponse,
     CloseReviewMeetingResponse,
     CollectionHandoffPayload,
     CollectionHandoffResponse,
@@ -1327,3 +1329,31 @@ def team_workflow_hypothesis_first_collection_recover(
         return hypothesis_first_chain.recover_collection_request(team_id, request_id)
     except _DOMAIN_ERRORS as exc:
         _map_domain_error("hypothesis_first.chain.collection_recover", team_id, exc)
+
+
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/hypothesis-first/chain/evidence-gap-markers/{marker_id}/clear",
+    response_model=ClearEvidenceGapMarkerResponse,
+    response_model_exclude_unset=True,
+)
+def team_workflow_hypothesis_first_clear_evidence_gap_marker(
+    team_id: str,
+    marker_id: str,
+    payload: ClearEvidenceGapMarkerPayload,
+) -> dict:
+    """Clear one evidence-gap marker so the same goal can be re-collected.
+
+    Operator retry path for ``evidence_gap_unavailable`` verdicts: after a
+    remediation that changes what is retrievable (for example the quote-anchor
+    abstract-level degradation), clearing the marker lets the next identical
+    evidence request run a fresh search instead of being stopped by the
+    circuit.  The response carries an operator-facing retryHint.
+    """
+    try:
+        return hypothesis_first_chain.clear_evidence_gap_marker(
+            team_id,
+            marker_id,
+            reason=payload.reason,
+        )
+    except _DOMAIN_ERRORS as exc:
+        _map_domain_error("hypothesis_first.chain.clear_evidence_gap_marker", team_id, exc)

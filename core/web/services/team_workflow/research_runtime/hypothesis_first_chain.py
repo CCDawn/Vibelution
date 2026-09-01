@@ -54,6 +54,11 @@ HUMAN_ADJUDICATION_KIND = "human_adjudication"
 QUESTION_RESET_AUDIT_KIND = "question_reset_audit"
 SELECTION_COMMAND_OUTCOME_KIND = "selection_command_outcome"
 REQUEST_EVIDENCE_DECISION = "request_new_evidence"
+# Retrieval-circuit gap consumption: a live ``evidence_gap_unavailable``
+# marker for the same goal stops new collection runs and lets the review
+# converge with an explicit gap manifest instead of re-requesting forever.
+EVIDENCE_GAP_STATUS = "evidence_gap_unavailable"
+GAP_CONVERGENCE_KIND = "hypothesis_gap_convergence"
 HYPOTHESIS_REVIEW_MEETING_TYPE = "hypothesis_review"
 CANDIDATE_GENERATION_MEETING_TYPE = "hypothesis_candidate_generation"
 # Server-owned scope mode that fences formal review: only this marker makes
@@ -4269,6 +4274,21 @@ def open_review_meeting_for_selection(
         extra_refs.append(f"meeting_round:{normalized_previous_id}")
     if normalized_request_id:
         extra_refs.append(f"collection_request:{normalized_request_id}")
+    # Gap-notice injection (bounded side channel): a gap-resolved collection
+    # request carries its unavailability verdict into the next round's
+    # meeting agenda and input refs, so reviewers stop re-requesting the
+    # same dead goal and can legally converge with gaps.  The notice never
+    # participates in meeting/context identity seeds — without a gap the
+    # payload below is byte-identical to the legacy path.
+    gap_notices = _collection_request_gap_notice(
+        normalized_team_id, normalized_request_id
+    )
+    if gap_notices:
+        extra_refs.extend(
+            f"evidence_gap_marker:{item['markerId']}"
+            for item in gap_notices
+            if item.get("markerId")
+        )
 
     payload: dict[str, Any] = {
         key: selection_record.get(key)
@@ -4293,6 +4313,18 @@ def open_review_meeting_for_selection(
             "meetingRoundId": normalized_meeting_round_id,
             **participant_resolution,
             "inputArtifactRefs": extra_refs,
+            # Default agenda stays first when a gap notice exists: the notice
+            # is appended to the standard agenda, never replaces it.
+            **(
+                {
+                    "agenda": [
+                        *list(getattr(meeting_runtime, "_DEFAULT_AGENDA", ()) or ()),
+                        *(str(item.get("agendaLine") or "") for item in gap_notices),
+                    ]
+                }
+                if gap_notices
+                else {}
+            ),
         }
     )
     candidate_contexts = _build_round_candidates(
@@ -6164,6 +6196,7 @@ def _process_collection_decisions(
     request: Mapping[str, Any],
 ) -> dict[str, Any]:
     from core.web.services.team_workflow.source_collection import facade
+    from core.web.services.team_workflow.source_collection import search_circuit
     from core.web.services.team_workflow.source_collection import (
         runs as source_collection_runs,
     )
@@ -6185,6 +6218,7 @@ def _process_collection_decisions(
     requests_out: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
     start_candidates: dict[str, list[dict[str, Any]]] = {}
+    gap_resolved: list[dict[str, Any]] = []
     raw_decisions = [
         item for item in list(request.get("decisions") or []) if isinstance(item, Mapping)
     ]
@@ -6240,6 +6274,30 @@ def _process_collection_decisions(
         hypothesis_candidate_ids = list(
             dict.fromkeys(_normalized_str_list(raw.get("candidateRefs")))
         )
+        # Retrieval-circuit consumption: a live evidence_gap_unavailable
+        # marker for this exact goal means the rewrite budget is already
+        # exhausted.  Never ensure a new collection run for it — record the
+        # request in gap state and hand off to the next round carrying the
+        # gap notice, so the review can converge with gaps instead of
+        # re-running (and re-paying for) the same dead retrieval.
+        gap_marker = search_circuit.live_evidence_gap_marker_for_goal(team_id, envelope)
+        if gap_marker:
+            record = _append_collection_request(
+                team_id,
+                meeting_round,
+                decision_id,
+                envelope,
+                requirements,
+                writeback_policy,
+                "",
+                hypothesis_candidate_ids=hypothesis_candidate_ids,
+            )
+            resolved = _resolve_request_evidence_gap(
+                team_id, str(record.get("requestId") or ""), gap_marker
+            )
+            requests_out.append(resolved["request"])
+            gap_resolved.append(resolved)
+            continue
         ensured = facade.research_knowledge_collection_facade(
             action="ensure",
             scope=scope_envelope,
@@ -6316,7 +6374,11 @@ def _process_collection_decisions(
                 failed_by_request_id.get(str(record.get("requestId") or ""), record)
                 for record in requests_out
             ]
-    return {"requests": requests_out, "skipped": skipped}
+    return {
+        "requests": requests_out,
+        "skipped": skipped,
+        **({"evidenceGaps": gap_resolved} if gap_resolved else {}),
+    }
 
 
 def _hypothesis_collection_background_payload() -> dict[str, Any]:
@@ -7474,6 +7536,240 @@ def _update_collection_request(
         return updated
 
 
+def _bounded_evidence_gap_payload(marker: Mapping[str, Any]) -> dict[str, Any]:
+    """Bounded projection of a circuit gap marker onto chain records.
+
+    Only the audit-relevant fields survive; the raw marker (with full attempt
+    envelopes) stays authoritative in the circuit ledger.
+    """
+    summary = (
+        marker.get("unavailableReasonsSummary")
+        if isinstance(marker.get("unavailableReasonsSummary"), Mapping)
+        else {}
+    )
+    try:
+        rewrite_count = int(marker.get("rewriteAttemptCount") or 0)
+    except (TypeError, ValueError):
+        rewrite_count = 0
+    return {
+        "status": EVIDENCE_GAP_STATUS,
+        "markerId": str(marker.get("markerId") or "")[:80],
+        "goalKey": str(marker.get("goalKey") or "")[:64],
+        "question": str(marker.get("question") or "")[:200],
+        "summary": str(summary.get("summary") or "")[:600],
+        "markedAt": str(marker.get("markedAt") or "")[:40],
+        "rewriteAttemptCount": max(0, rewrite_count),
+    }
+
+
+def _resolve_request_evidence_gap(
+    team_id: str,
+    request_id: str,
+    marker: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Mark one collection request gap-resolved and open the next review round.
+
+    Stop-dispatch alone would deadlock the loop: the next round normally opens
+    through the collection-run handoff.  A gap-resolved request therefore
+    reuses the idempotent handoff machinery with an
+    ``evidence_gap:<markerId>`` handoffRef — no child run, no provider calls,
+    but the next round opens and carries the gap notice in its bounded agenda
+    so the review can converge with gaps instead of re-requesting.
+    """
+    gap_payload = _bounded_evidence_gap_payload(marker)
+    updated = _update_collection_request(
+        team_id,
+        request_id,
+        status=EVIDENCE_GAP_STATUS,
+        collectionRunStatus=EVIDENCE_GAP_STATUS,
+        startError={},
+        evidenceGap=gap_payload,
+    )
+    _record_scene_event(
+        "collection_request.evidence_gap_unavailable",
+        outcome="recorded",
+        fields={
+            "teamId": team_id,
+            "requestId": str(request_id)[:80],
+            "markerId": gap_payload["markerId"],
+            "goalKey": gap_payload["goalKey"],
+        },
+    )
+    next_meeting: dict[str, Any] = {}
+    handoff_error: dict[str, Any] = {}
+    try:
+        handoff = record_collection_handoff(
+            team_id,
+            request_id,
+            handoff_ref=f"evidence_gap:{gap_payload['markerId']}",
+        )
+        next_meeting = (
+            dict(handoff.get("nextMeeting"))
+            if isinstance(handoff.get("nextMeeting"), Mapping)
+            else {}
+        )
+    except Exception as exc:  # noqa: BLE001 - gap fact stays durable and retryable
+        handoff_error = {
+            "code": "gap_handoff_failed",
+            "message": str(exc) or type(exc).__name__,
+        }
+    resolved = {
+        "status": EVIDENCE_GAP_STATUS,
+        "request": updated,
+        "evidenceGap": gap_payload,
+        "nextMeeting": next_meeting,
+    }
+    if handoff_error:
+        resolved["request"] = {**updated, "handoffError": handoff_error}
+        resolved["handoffError"] = handoff_error
+    return resolved
+
+
+def _collection_request_gap_notice(
+    team_id: str, request_id: str
+) -> list[dict[str, str]]:
+    """Bounded gap-notice agenda entries carried by a gap-resolved request.
+
+    Read at next-round opening time so the reviewers who would re-issue the
+    same evidence request see the unavailability verdict with its reason
+    summary.  Side-channel only: nothing here participates in meeting or
+    context identity hashes.
+    """
+    normalized_request_id = str(request_id or "").strip()
+    if not normalized_request_id:
+        return []
+    request = _latest_by_id(
+        [
+            item
+            for item in _records(team_id)
+            if item.get("recordKind") == COLLECTION_REQUEST_KIND
+        ],
+        "requestId",
+        normalized_request_id,
+    )
+    if request is None:
+        return []
+    gap = (
+        request.get("evidenceGap")
+        if isinstance(request.get("evidenceGap"), Mapping)
+        else {}
+    )
+    marker_id = str(gap.get("markerId") or "").strip()
+    if not marker_id:
+        return []
+    envelope = (
+        request.get("searchEnvelope")
+        if isinstance(request.get("searchEnvelope"), Mapping)
+        else {}
+    )
+    keywords = _normalized_str_list(envelope.get("keywords"))[:6]
+    summary = str(gap.get("summary") or "").strip()
+    agenda_line = (
+        f"证据缺口提示：证据请求（{'、'.join(keywords) or '同前轮请求'}）已由检索熔断判定当前不可得"
+        f"（marker {marker_id[:24]}）——{summary[:400] or '原因见 marker 审计'}。"
+        "评审可基于现有证据带缺口收敛，请勿再次请求同一证据。"
+    )
+    return [
+        {
+            "markerId": marker_id[:80],
+            "agendaLine": agenda_line[:900],
+        }
+    ]
+
+
+def _record_gap_convergence(
+    team_id: str,
+    meeting_round: Mapping[str, Any],
+    gap_manifest: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Durable ``hypothesis_gap_convergence`` audit record (idempotent).
+
+    Records that one review round legally converged while its evidence
+    requests were all judged unavailable, together with the full gap
+    manifest — the auditable "converged with gaps" fact beside the persisted
+    close_round decision.
+    """
+    meeting_round_id = str(meeting_round.get("meetingRoundId") or "")
+    marker_ids = [str(item.get("markerId") or "") for item in gap_manifest]
+    convergence_id = f"hfgap-{_stable_hash({'meetingRoundId': meeting_round_id, 'markerIds': marker_ids})[:16]}"
+    with _LOCK:
+        records = _read_jsonl(_storage_path(team_id))
+        existing = _latest_by_id(
+            [item for item in records if item.get("recordKind") == GAP_CONVERGENCE_KIND],
+            "convergenceId",
+            convergence_id,
+        )
+        if existing is not None:
+            return existing
+        record = {
+            "schemaVersion": SCHEMA_VERSION,
+            "recordKind": GAP_CONVERGENCE_KIND,
+            "convergenceId": convergence_id,
+            "teamId": team_id,
+            "meetingRoundId": meeting_round_id,
+            "questionId": str(meeting_round.get("question") or ""),
+            "decision": "close_round",
+            "evidenceGaps": [dict(item) for item in gap_manifest],
+            "createdAt": _utc_now(),
+        }
+        _append_jsonl(_storage_path(team_id), record)
+    _record_scene_event(
+        "hypothesis_review.converged_with_gaps",
+        outcome="recorded",
+        fields={
+            "teamId": team_id,
+            "meetingRoundId": meeting_round_id[:80],
+            "gapCount": len(gap_manifest),
+        },
+    )
+    return record
+
+
+def _converge_with_gaps_decision(
+    meeting_round: Mapping[str, Any],
+    gap_manifest: list[dict[str, Any]],
+    *,
+    closed_by: str,
+    source_refs: list[str],
+) -> dict[str, Any]:
+    """close_round decision that explicitly records the gap manifest.
+
+    The persisted DecisionRecord keeps only the contract fields, so the gap
+    manifest is carried by the rationale text plus ``evidence_gap_marker:``
+    evidence refs; the full manifest lives in the dedicated
+    ``hypothesis_gap_convergence`` ledger record.
+    """
+    meeting_round_id = str(meeting_round.get("meetingRoundId") or "")
+    marker_ids = "、".join(
+        str(item.get("markerId") or "")[:24] for item in gap_manifest[:4]
+    )
+    evidence_refs = [
+        f"evidence_gap_marker:{str(item.get('markerId') or '')[:80]}"
+        for item in gap_manifest
+        if str(item.get("markerId") or "").strip()
+    ]
+    fallback_ref = source_refs[:1] if source_refs else [f"meeting_round:{meeting_round_id}"]
+    for ref in fallback_ref:
+        if ref and ref not in evidence_refs:
+            evidence_refs.append(ref)
+    return {
+        "decision": "close_round",
+        "rationale": (
+            f"带缺口收敛：本轮 {len(gap_manifest)} 项证据请求均已由检索熔断判定当前不可得"
+            f"（marker {marker_ids}），不再合成新的资料搜集；"
+            "评审基于现有证据带缺口收敛。"
+        ),
+        "decidedBy": closed_by,
+        "candidateRefs": [
+            ref.split(":", 1)[-1]
+            for ref in _normalized_str_list(meeting_round.get("discussionItemRefs"))
+            if ref.startswith("hypothesis_candidate:")
+        ],
+        "evidenceRefs": evidence_refs or [f"meeting_round:{meeting_round_id}"],
+        "status": "adopted",
+    }
+
+
 def _scope_envelope_for_collection_request(
     request: Mapping[str, Any],
 ) -> dict[str, str]:
@@ -7532,6 +7828,7 @@ def _recover_collection_request_locked(
     """
     from core.web.services import team_service
     from core.web.services.team_workflow.source_collection import facade
+    from core.web.services.team_workflow.source_collection import search_circuit
     from core.web.services.team_workflow.source_collection import (
         runs as source_collection_runs,
     )
@@ -7580,6 +7877,17 @@ def _recover_collection_request_locked(
     search_envelope = request.get("searchEnvelope") if isinstance(request.get("searchEnvelope"), Mapping) else {}
     requirements = request.get("requirements") if isinstance(request.get("requirements"), Mapping) else {}
     writeback_policy = request.get("writebackPolicy") if isinstance(request.get("writebackPolicy"), Mapping) else {}
+    # Retrieval-circuit consumption on the recovery path: an orphaned/failed
+    # request whose goal already carries a live gap marker must not re-bind
+    # and restart a search.  Resolve it as gap-resolved (same stop-dispatch +
+    # next-round-with-gap-notice semantics as the close path).
+    recovery_gap_marker = search_circuit.live_evidence_gap_marker_for_goal(
+        normalized_team_id, dict(search_envelope)
+    )
+    if recovery_gap_marker:
+        return _resolve_request_evidence_gap(
+            normalized_team_id, normalized_request_id, recovery_gap_marker
+        )
     workflow_run_id, research_project_id = _recovery_workflow_run_binding(
         normalized_team_id, request
     )
@@ -7707,6 +8015,60 @@ def recover_collection_request(
             normalized_request_id,
             reset_auto_retry=reset_auto_retry,
         )
+
+
+def clear_evidence_gap_marker(
+    team_id: str,
+    marker_id: str,
+    *,
+    reason: str = "",
+) -> dict[str, Any]:
+    """Operator action: clear one evidence-gap marker by id.
+
+    Clearing lets the same retrieval goal re-enter the search circuit as a
+    brand-new request (fresh original run plus rewrite budget) on its next
+    evidence request — the sanctioned path after remediations that change
+    what is retrievable (for example the quote-anchor abstract-level
+    degradation).  There is deliberately no TTL: reopening a dead goal is an
+    explicit operator decision, never a silent background restart.  The
+    result carries an operator-facing ``retryHint``; markers whose attempts
+    retrieved results that never became new records note that the
+    quote-anchor remediation may make a retry succeed.
+    """
+    from core.web.services import team_service
+    from core.web.services.team_workflow.source_collection import search_circuit
+
+    normalized_team_id = team_service.assert_team_exists(team_id)
+    normalized_marker_id = str(marker_id or "").strip()
+    if not normalized_marker_id:
+        raise HypothesisFirstChainError("Evidence gap marker id is required.")
+    result = search_circuit.clear_evidence_gap_marker(
+        normalized_team_id, normalized_marker_id
+    )
+    error = str(result.get("error") or "").strip()
+    if error:
+        raise HypothesisFirstChainError(
+            f"clearing evidence gap marker {normalized_marker_id} failed: {error}"
+        )
+    cleared = bool(result.get("cleared"))
+    _record_scene_event(
+        "evidence_gap_marker.clear",
+        outcome="cleared" if cleared else "not_found",
+        fields={
+            "teamId": normalized_team_id,
+            "markerId": normalized_marker_id[:80],
+            "reason": str(reason or "")[:200],
+        },
+    )
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": normalized_team_id,
+        "markerId": normalized_marker_id,
+        "cleared": cleared,
+        "retryHint": str(result.get("retryHint") or ""),
+        "marker": dict(result.get("marker") or {}),
+        "reason": str(reason or "")[:300],
+    }
 
 
 def stop_collection_request(team_id: str, request_id: str) -> dict[str, Any]:
@@ -7899,13 +8261,64 @@ def approve_meeting_digest(
             "validationErrors": validation_errors,
         }
     if valid_requests:
-        decisions = [
-            _merge_evidence_requests(
-                valid_requests,
-                closed_by=closed_by_id,
-                meeting_round_id=normalized_round_id,
+        from core.web.services.team_workflow.source_collection import search_circuit
+
+        # Gap-aware close semantics: requests whose goal already carries a
+        # live evidence_gap_unavailable marker are "already satisfied by a
+        # verdict", not outstanding.  As long as at least one open request
+        # remains, the legacy merge runs unchanged; when EVERY requested
+        # piece of evidence is already judged unavailable, the round legally
+        # converges with gaps instead of synthesizing another dead
+        # request_new_evidence decision.
+        open_requests: list[Mapping[str, Any]] = []
+        gap_requests: list[tuple[Mapping[str, Any], dict[str, Any]]] = []
+        for normalized_request in valid_requests:
+            request_envelope = (
+                normalized_request.get("searchEnvelope")
+                if isinstance(normalized_request.get("searchEnvelope"), Mapping)
+                else {}
             )
-        ]
+            marker = search_circuit.live_evidence_gap_marker_for_goal(
+                normalized_team_id, dict(request_envelope)
+            )
+            if marker:
+                gap_requests.append((normalized_request, marker))
+            else:
+                open_requests.append(normalized_request)
+        if open_requests:
+            decisions = [
+                _merge_evidence_requests(
+                    valid_requests,
+                    closed_by=closed_by_id,
+                    meeting_round_id=normalized_round_id,
+                )
+            ]
+        else:
+            gap_manifest = [
+                _bounded_evidence_gap_payload(marker) for _, marker in gap_requests
+            ]
+            decisions = [
+                _converge_with_gaps_decision(
+                    meeting_round,
+                    gap_manifest,
+                    closed_by=closed_by_id,
+                    source_refs=source_refs,
+                )
+            ]
+            close_result = close_review_meeting(
+                normalized_team_id,
+                normalized_round_id,
+                {"closedBy": closed_by_id, "decisions": decisions},
+                runtime=runtime,
+            )
+            # Durable "converged with gaps" audit record with the full gap
+            # manifest (the persisted decision keeps only rationale + marker
+            # refs).  Recorded after the closure settled so it never claims a
+            # close that failed; idempotent on replay.
+            _record_gap_convergence(
+                normalized_team_id, meeting_round, gap_manifest
+            )
+            return close_result
     else:
         decisions = [
             {

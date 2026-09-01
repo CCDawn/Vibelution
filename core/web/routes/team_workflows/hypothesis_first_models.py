@@ -183,6 +183,16 @@ class CollectionHandoffPayload(BaseModel):
     handoffRef: str = Field("", max_length=500)
 
 
+class ClearEvidenceGapMarkerPayload(BaseModel):
+    """Payload for ``POST .../chain/evidence-gap-markers/{marker_id}/clear``.
+
+    Operator-supplied reason is audit metadata only; the clear itself is
+    keyed by the marker id and never auto-expires markers.
+    """
+
+    reason: str = Field("", max_length=300)
+
+
 class QuestionRunResetPayload(BaseModel):
     """Typed confirmation for a destructive, question-scoped reset."""
 
@@ -428,6 +438,20 @@ class CollectionHandoffResponse(BaseModel):
     request: dict[str, Any] = Field(default_factory=dict)
     nextMeeting: dict[str, Any] | None = None
     resume: dict[str, Any] | None = None
+
+
+class ClearEvidenceGapMarkerResponse(BaseModel):
+    """Result of ``clear_evidence_gap_marker`` (operator retry path)."""
+
+    model_config = ConfigDict(extra="allow")
+
+    schemaVersion: int = 0
+    teamId: str = ""
+    markerId: str = ""
+    cleared: bool = False
+    retryHint: str = ""
+    marker: dict[str, Any] = Field(default_factory=dict)
+    reason: str = ""
 
 
 class QuestionRunResetPreviewResponse(BaseModel):
