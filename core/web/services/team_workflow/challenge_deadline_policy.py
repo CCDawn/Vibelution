@@ -29,6 +29,10 @@ _PER_CALL_OVERRIDE_ENV = "VIBELUTION_CHALLENGE_MEETING_PER_CALL_BUDGET_MS"
 _CHALLENGE_SCOPE_AUTHORITIES = frozenset(
     {"workflow_discussion_scope.v1", "preformal_candidate_review_scope.v1"}
 )
+_HYPOTHESIS_REVIEW_MEETING_TYPE = "hypothesis_review"
+_HYPOTHESIS_CANDIDATE_REF_PREFIX = "hypothesis_candidate:"
+_PLANNED_CALL_COUNT_BASIS_DIGEST = "speakers_plus_digest"
+_PLANNED_CALL_COUNT_BASIS_REVIEW_BUDGET = "speakers_digest_review_call_budget"
 
 
 class ChallengeMeetingDeadlinePolicyError(ValueError):
@@ -192,6 +196,52 @@ def is_challenge_meeting(value: Mapping[str, Any]) -> bool:
     ).strip() in _CHALLENGE_SCOPE_AUTHORITIES
 
 
+def _hypothesis_review_finalist_count(meeting: Mapping[str, Any]) -> int:
+    """Count the distinct finalists one review round would actually score."""
+
+    finalist_ids: set[str] = set()
+    for item in list(meeting.get("discussionItemRefs") or []):
+        ref = str(item or "").strip()
+        if not ref.startswith(_HYPOTHESIS_CANDIDATE_REF_PREFIX):
+            continue
+        finalist_id = ref[len(_HYPOTHESIS_CANDIDATE_REF_PREFIX) :].strip()
+        if finalist_id:
+            finalist_ids.add(finalist_id)
+    return len(finalist_ids)
+
+
+def _review_round_call_budget(meeting: Mapping[str, Any]) -> tuple[int, int] | None:
+    """Return ``(finalistCount, reviewCalls)`` for a formal review, or ``None``.
+
+    The exact Stage-1 review budget is the ``review_call_budget`` contract's
+    ``n + n(n-1)/2 + 2``.  That contract counts every call and has no separate
+    serial-wave number; even though the pairwise/pareto wave shares one
+    bounded-concurrency execution, this conservative projection never assumes
+    parallelism, so ``totalReviewCalls`` is the serial figure.  Meetings that
+    are not ``hypothesis_review`` rounds — or that carry no candidate refs —
+    return ``None`` and keep the legacy speakers-plus-digest estimate.
+    """
+
+    if (
+        str(meeting.get("meetingType") or "").strip().lower()
+        != _HYPOTHESIS_REVIEW_MEETING_TYPE
+    ):
+        return None
+    finalist_count = _hypothesis_review_finalist_count(meeting)
+    if finalist_count < 1:
+        return None
+    from core.research.workflow.contracts.review_call_budget import (
+        MAX_BUDGET_FINALIST_COUNT,
+        review_call_budget_for,
+    )
+
+    # The bounded review context truncates candidates at the same cap
+    # (research_memory_context.MAX_REVIEW_CANDIDATES), so a larger selection
+    # can never spend more review calls than the capped budget.
+    finalist_count = min(finalist_count, MAX_BUDGET_FINALIST_COUNT)
+    return finalist_count, review_call_budget_for(finalist_count).totalReviewCalls
+
+
 def derive_meeting_deadline_policy(
     team_id: str,
     meeting: Mapping[str, Any],
@@ -212,10 +262,22 @@ def derive_meeting_deadline_policy(
         if str(item or "").strip()
     ]
     rounds = _positive_int(meeting.get("rounds")) or 1
-    # One model call per serial speaker plus one digest/review call.  A later
+    # One model call per serial speaker plus one digest call.  A later
     # durable driver may lower this only when its execution graph proves calls
     # are parallel; this conservative projection never assumes parallelism.
     planned_serial_call_count = max(1, len(participants)) * rounds + 1
+    planned_call_count_basis = _PLANNED_CALL_COUNT_BASIS_DIGEST
+    review_round_budget = _review_round_call_budget(meeting)
+    if review_round_budget is not None:
+        # Formal candidate review: after the discussion digest, the closed
+        # review round spends the exact Stage-1 budget n + n(n-1)/2 + 2
+        # (review-call-budget-v1), so the linear speakers-only estimate would
+        # under-count the quadratic pairwise growth and starve the fence.
+        review_finalist_count, review_calls = review_round_budget
+        planned_serial_call_count += review_calls
+        planned_call_count_basis = _PLANNED_CALL_COUNT_BASIS_REVIEW_BUDGET
+    else:
+        review_finalist_count = 0
     model_refs = _participant_model_refs(participants)
     call_policy = derive_per_call_budget(
         team_id,
@@ -238,6 +300,12 @@ def derive_meeting_deadline_policy(
     policy_seed = {
         "deadlinePolicyVersion": DEADLINE_POLICY_VERSION,
         "plannedSerialCallCount": planned_serial_call_count,
+        # Identifies which derivation produced this count without bumping
+        # DEADLINE_POLICY_VERSION: persisted v1 policies are never recomputed,
+        # so old meetings stay readable as-is while new meetings carry the
+        # review-budget-aware basis string.
+        "plannedCallCountBasis": planned_call_count_basis,
+        "reviewFinalistCount": review_finalist_count,
         "perCallBudgetMs": per_call_budget_ms,
         "meetingBudgetMs": meeting_budget_ms,
         "sampleSource": call_policy["sampleSource"],
