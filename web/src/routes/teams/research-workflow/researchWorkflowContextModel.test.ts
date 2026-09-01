@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { CHALLENGE_CUP_WORKFLOW_ID } from "../../../api/types/researchWorkflow";
+import type { CommandAction } from "../../../api/types/hypothesisFirst";
 import { resolveHypothesisFirstNextAction } from "./hypothesisFirstNextAction";
 import {
   buildResearchWorkflowContext,
@@ -8,6 +9,7 @@ import {
   researchWorkflowDispatchStatus,
   researchWorkflowScopeMismatch,
 } from "./researchWorkflowContextModel";
+import type { ResearchWorkflowWorkspaceModel } from "./researchWorkflowWorkspaceModel";
 
 const base = {
   teamId: "research-team",
@@ -305,5 +307,113 @@ describe("researchWorkflowContextModel", () => {
       "upcoming",
       "upcoming",
     ]);
+  });
+
+  it("falls back to the canonical channel when a V2 command has no legacy mapping", () => {
+    const canonicalAction: CommandAction = {
+      kind: "command",
+      actionId: "stop-collection:req-1",
+      label: "停止资料搜集",
+      enabled: true,
+      disabledReason: null,
+      targetPhase: "collection",
+      targetNodeId: "hf_collection_req-1",
+      command: "stop_collection",
+      payload: { requestId: "req-1", childRunId: "child-1" },
+      inputSchemaRef: null,
+      idempotencyKey: "hf2:stop-collection:req-1",
+      expectedStateVersion: "hf2-action:origin:current",
+      requiresConfirmation: false,
+      confirmationText: null,
+    };
+    const canonicalOnlyAction = {
+      stage: "collecting" as const,
+      targetNodeId: "hf_collection_req-1",
+      navigationLabel: "前往资料搜集",
+      command: undefined,
+      commandLabel: "停止资料搜集",
+      commandDetail: "停止后可重新发起搜集",
+      statusMessage: "资料搜集中",
+      stateSource: "v2_canonical" as const,
+      canonicalCommand: "stop_collection" as const,
+      canonicalAction,
+      expectedStateVersion: "hf2-action:origin:current",
+    };
+
+    // Direct (non-workspace-model) path.
+    const context = buildResearchWorkflowContext({ ...base, nextAction: canonicalOnlyAction });
+    expect(context.currentTask?.commandAction).toEqual({
+      command: undefined,
+      canonicalCommand: "stop_collection",
+      canonicalAction,
+      label: "停止资料搜集",
+      detail: "停止后可重新发起搜集",
+      disabledReason: undefined,
+    });
+
+    // Workspace-model path keeps the same fallback.
+    const workspaceModel = {
+      scope: {
+        teamId: "research-team",
+        workflowId: CHALLENGE_CUP_WORKFLOW_ID,
+        questionId: "SCI-004",
+        runId: "run-4",
+        runVersion: 2,
+      },
+      scopeKey: "research-team::challenge-cup-research::SCI-004::run-4::2",
+      loadState: "ready",
+      source: "hypothesis_first",
+      scopeMismatch: false,
+      snapshot: null,
+      sequence: 1,
+      progress: null,
+      currentTask: {
+        source: "hypothesis_first",
+        authority: "hypothesis_first",
+        key: "task-stop-collection",
+        status: "waiting_system",
+        title: "正在补充证据",
+        detail: "资料搜集中",
+        targetNodeId: "hf_collection_req-1",
+        primaryAction: null,
+        nextAction: canonicalOnlyAction,
+      },
+      primaryAction: null,
+      legacyNextAction: canonicalOnlyAction,
+      view: {
+        panel: "node" as const,
+        selectedNodeId: null,
+        selectedIsCurrentTask: false,
+        archiveMode: false,
+      },
+      resyncRequired: false,
+      error: null,
+    } as ResearchWorkflowWorkspaceModel;
+    const fromModel = buildResearchWorkflowContext({
+      ...base,
+      workspaceModel,
+      panel: "node",
+    });
+    expect(fromModel.currentTask?.commandAction).toEqual({
+      command: undefined,
+      canonicalCommand: "stop_collection",
+      canonicalAction,
+      label: "停止资料搜集",
+      detail: "停止后可重新发起搜集",
+      disabledReason: undefined,
+    });
+  });
+
+  it("keeps legacy commands on the legacy channel without canonical fields", () => {
+    const context = buildResearchWorkflowContext({
+      ...base,
+      nextAction: {
+        stage: "collecting",
+        targetNodeId: "source_finding",
+        navigationLabel: "前往资料搜集",
+        statusMessage: "资料搜集中",
+      },
+    });
+    expect(context.currentTask?.commandAction).toBeNull();
   });
 });

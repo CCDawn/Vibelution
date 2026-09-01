@@ -479,6 +479,24 @@ export function HypothesisFirstMeetingOps(props: {
     onSuccess: invalidate,
     onError: refreshOnConflict,
   });
+  // V2 canonical-only commands (stop_collection / cancel_run / archive_run)
+  // have no legacy endpoint: the adapter leaves `command` undefined but still
+  // emits commandLabel/commandDetail and the signed canonical action, so the
+  // primary button renders and dispatches straight through the command channel.
+  const canonicalOnlyMutation = useMutation<unknown, Error, void>({
+    mutationFn: () => {
+      if (!canonicalAction) return canonicalActionUnavailable();
+      return executeHypothesisFirstCommand(
+        props.teamId,
+        props.questionId,
+        canonicalAction,
+        undefined,
+        { runId: props.runId },
+      );
+    },
+    onSuccess: invalidate,
+    onError: refreshOnConflict,
+  });
 
   if (roundQuery.isPending) {
     return <VStateSurface title={isZh ? "正在读取讨论" : "Loading discussion"} tone="loading" />;
@@ -508,6 +526,12 @@ export function HypothesisFirstMeetingOps(props: {
   const command = allowLegacyMutation
     ? legacyCommand
     : (commandEnabled && canonicalAction ? props.nextAction.command : undefined);
+  // Canonical-only when the signed action exists but no legacy command is
+  // mapped; the button then dispatches via canonicalOnlyMutation.
+  const canonicalOnlyCommand = !allowLegacyMutation
+    && commandEnabled
+    && Boolean(canonicalAction)
+    && !props.nextAction.command;
   const legacyCommandLabel = interruptedCandidateDiscussion
     ? (isZh ? "重试启动候选讨论" : "Retry candidate discussion")
     : failedCandidateDiscussion
@@ -537,6 +561,7 @@ export function HypothesisFirstMeetingOps(props: {
     || generationMutation.isPending
     || reopenReviewMutation.isPending
     || handoffMutation.isPending
+    || canonicalOnlyMutation.isPending
     || closeCorrectionMutation.isPending;
   const error =
     draftMutation.error
@@ -545,6 +570,7 @@ export function HypothesisFirstMeetingOps(props: {
     || generationMutation.error
     || reopenReviewMutation.error
     || handoffMutation.error
+    || canonicalOnlyMutation.error
     || closeCorrectionMutation.error;
   const displayRound = props.nextAction.command === "draft_summary"
     && roundQuery.data.meetingRound.status === "open"
@@ -586,7 +612,7 @@ export function HypothesisFirstMeetingOps(props: {
   };
 
   const showPrimaryCommand = Boolean(
-    command
+    (command || canonicalOnlyCommand)
     && commandLabel
     && command !== "draft_summary"
     && command !== "record_selection"
@@ -608,6 +634,10 @@ export function HypothesisFirstMeetingOps(props: {
             isDisabled={Boolean(commandDisabledReason)}
             disabledReason={commandDisabledReason}
             onPress={() => {
+              if (canonicalOnlyCommand) {
+                canonicalOnlyMutation.mutate();
+                return;
+              }
               if (!command) return;
               runCommand(command);
             }}

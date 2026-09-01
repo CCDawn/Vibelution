@@ -1,7 +1,12 @@
 import { useCallback, useMemo, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { CHALLENGE_CUP_WORKFLOW_ID } from "../../../api/types/researchWorkflow";
+import {
+  executeHypothesisFirstCommand,
+  isHypothesisFirstCommandStateConflict,
+} from "../../../api/hypothesisFirst";
 import { WORKBENCH_LAYOUT_IDS } from "../../../components/layout/workbenchLayoutIds";
 import { VButton, VCanvasWorkbenchPage } from "../../../components/vui";
 import {
@@ -58,6 +63,7 @@ import { createResearchRunSafetyBudget } from "./researchRunSafetyBudget";
 import { buildScopedDiscussionModel } from "./scopedDiscussionModel";
 import type { ScopedDiscussionModel } from "./scopedDiscussionModel";
 import {
+  invalidateHypothesisFirstQueries,
   resolveHypothesisFirstRoundBudget,
   useHypothesisFirstChain,
   useHypothesisFirstChainInvalidation,
@@ -728,6 +734,41 @@ export function ResearchProcessWorkspace({
         requestId: workflowContext.currentTask.collectionRequestId,
       }
     : null;
+  // Canonical-only phase commands (stop_collection / cancel_run / archive_run)
+  // have no legacy endpoint or chain-hook runner; the workspace CTA is their
+  // consumer and dispatches the signed canonical action directly.
+  const queryClient = useQueryClient();
+  const canonicalTaskCommand = currentTaskActionsReady
+    && !collectionRecoveryAction
+    && currentTaskCommand?.canonicalAction
+    ? currentTaskCommand
+    : null;
+  const canonicalCommandMutation = useMutation({
+    mutationFn: () => {
+      const action = canonicalTaskCommand?.canonicalAction;
+      if (!action) return Promise.reject(new Error("canonical_action_unavailable"));
+      return executeHypothesisFirstCommand(teamId, chainQuestionId, action, undefined, {
+        runId: location.runId,
+      });
+    },
+    onSuccess: () => {
+      invalidateHypothesisFirstQueries(queryClient, teamId, chainQuestionId, location.runId);
+    },
+    onError: (error) => {
+      if (isHypothesisFirstCommandStateConflict(error)) {
+        invalidateHypothesisFirstQueries(queryClient, teamId, chainQuestionId, location.runId);
+      }
+    },
+  });
+  const canonicalCommandError = !canonicalCommandMutation.error
+    ? null
+    : isHypothesisFirstCommandStateConflict(canonicalCommandMutation.error)
+      ? (isZh
+        ? "状态已更新，请重新确认。"
+        : "The workflow state changed. Review it and confirm again.")
+      : canonicalCommandMutation.error instanceof Error
+        ? canonicalCommandMutation.error.message
+        : String(canonicalCommandMutation.error);
 
   const inspectorPane = showInspector && (currentTaskActionsReady || location.panel === "question") ? (
     <ResearchProcessInspectorPane
@@ -923,6 +964,29 @@ export function ResearchProcessWorkspace({
                     role="alert"
                   >
                     恢复搜集失败：{hypothesisFirstChain.recoveryError}
+                  </div>
+                ) : null}
+              </>
+            ) : canonicalTaskCommand ? (
+              <>
+                <VButton
+                  type="button"
+                  variant="primary"
+                  isPending={canonicalCommandMutation.isPending}
+                  isDisabled={canonicalCommandMutation.isPending}
+                  onClick={() => {
+                    if (canonicalCommandMutation.isPending) return;
+                    canonicalCommandMutation.mutate();
+                  }}
+                >
+                  {canonicalTaskCommand.label}
+                </VButton>
+                {canonicalCommandError ? (
+                  <div
+                    className="mt-2 [font-size:var(--vui-font-xs)] leading-4 text-[var(--fg-danger)]"
+                    role="alert"
+                  >
+                    {canonicalCommandError}
                   </div>
                 ) : null}
               </>

@@ -1,4 +1,8 @@
 import type { ResearchProcessPanel } from "./researchProcessPanelSelection";
+import type {
+  ActionCommand,
+  CommandAction,
+} from "../../../api/types/hypothesisFirst";
 import {
   type HypothesisFirstCommand,
   type HypothesisFirstNextAction,
@@ -54,7 +58,12 @@ type ResearchWorkflowNodeAttemptProjection = {
 };
 
 export type ResearchWorkflowCommandAction = {
-  command: HypothesisFirstCommand;
+  /** Legacy-channel command; undefined when the action is canonical-only. */
+  command?: HypothesisFirstCommand;
+  /** V2-only command with no legacy endpoint backing this CTA. */
+  canonicalCommand?: ActionCommand;
+  /** Signed canonical action to dispatch for a canonical-only CTA. */
+  canonicalAction?: CommandAction;
   label: string;
   detail?: string;
   disabledReason?: string;
@@ -261,6 +270,38 @@ function dispatchPresentation(status: ResearchWorkflowDispatchStatus): TaskPrese
 function reviewTitle(action: HypothesisFirstNextAction, suffix: string): string {
   const round = action.meetingRoundId ? "本轮" : "评审";
   return `${round}${suffix}`;
+}
+
+/**
+ * Build the workspace CTA from a next action. Legacy commands keep the old
+ * shape; V2 canonical-only commands (stop_collection / cancel_run /
+ * archive_run) have no legacy endpoint — `command` is undefined while the
+ * signed action and server label are complete — so the CTA falls back to the
+ * canonical channel instead of disappearing.
+ */
+function commandActionFor(
+  action: HypothesisFirstNextAction,
+  command = action.command,
+  label = action.commandLabel,
+): ResearchWorkflowCommandAction | null {
+  if (command && label) {
+    return {
+      command,
+      label,
+      detail: action.commandDetail,
+      disabledReason: action.disabledReason,
+    };
+  }
+  if (!command && action.canonicalCommand && action.canonicalAction && action.commandLabel) {
+    return {
+      canonicalCommand: action.canonicalCommand,
+      canonicalAction: action.canonicalAction,
+      label: action.commandLabel,
+      detail: action.commandDetail,
+      disabledReason: action.disabledReason,
+    };
+  }
+  return null;
 }
 
 function presentationFor(action: HypothesisFirstNextAction): TaskPresentation {
@@ -515,14 +556,7 @@ function contextTaskFromWorkspaceTask(
       navigationAction: task.targetNodeId
         ? { targetNodeId: task.targetNodeId, label: task.nextAction.navigationLabel }
         : null,
-      commandAction: task.nextAction.command && task.nextAction.commandLabel
-        ? {
-            command: task.nextAction.command,
-            label: task.nextAction.commandLabel,
-            detail: task.nextAction.commandDetail,
-            disabledReason: task.nextAction.disabledReason,
-          }
-        : null,
+      commandAction: commandActionFor(task.nextAction),
       blocker: task.nextAction.disabledReason
         ? {
             code: task.nextAction.stage === "blocked" ? "workflow_blocked" : "command_blocked",
@@ -636,8 +670,6 @@ export function buildResearchWorkflowContext(
   if (!mismatch && !input.loading && (input.nextAction || dispatchStatus)) {
     const action = input.nextAction;
     const presentation = dispatchStatus ? dispatchPresentation(dispatchStatus) : presentationFor(action!);
-    const command = action?.command || action?.recovery?.command;
-    const commandLabel = action?.commandLabel || action?.recovery?.label;
     currentTask = {
       key: [
         scope.key,
@@ -661,13 +693,12 @@ export function buildResearchWorkflowContext(
       navigationAction: action?.targetNodeId
         ? { targetNodeId: action.targetNodeId, label: action.navigationLabel }
         : null,
-      commandAction: !dispatchStatus && command && commandLabel
-        ? {
-            command,
-            label: commandLabel,
-            detail: action?.commandDetail,
-            disabledReason: action?.disabledReason,
-          }
+      commandAction: !dispatchStatus && action
+        ? commandActionFor(
+            action,
+            action.command || action.recovery?.command,
+            action.commandLabel || action.recovery?.label,
+          )
         : null,
       retryAction: dispatchStatus
         ? { label: "重试启动", detail: presentation.detail }

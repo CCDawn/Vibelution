@@ -976,4 +976,60 @@ describe("HypothesisFirstMeetingOps automatic organization", () => {
       { runId: undefined },
     );
   });
+
+  it("renders and dispatches a canonical-only command that has no legacy equivalent", async () => {
+    mockedFetchMeetingRound.mockResolvedValue({
+      schemaVersion: 1,
+      teamId: "team-1",
+      meetingRound: { ...meetingRound("open"), meetingType: "hypothesis_review" },
+    });
+    const canonicalAction = {
+      kind: "command" as const,
+      actionId: "stop-collection:req-1",
+      label: "停止资料搜集",
+      enabled: true,
+      disabledReason: null,
+      targetPhase: "collection" as const,
+      targetNodeId: "hf_collection_req-1",
+      command: "stop_collection" as const,
+      payload: { requestId: "req-1", childRunId: "child-1" },
+      inputSchemaRef: null,
+      idempotencyKey: "hf2:stop-collection:req-1",
+      expectedStateVersion: "hf2-action:origin:current",
+      requiresConfirmation: false,
+      confirmationText: null,
+    };
+
+    render({
+      ...AUTO_ACTION,
+      stage: "collecting",
+      stateSource: "v2_canonical",
+      command: undefined,
+      commandLabel: "停止资料搜集",
+      commandDetail: "停止后可重新发起搜集",
+      meetingRoundId: "meeting-1",
+      canonicalAction,
+      canonicalActions: [canonicalAction],
+    });
+
+    await act(async () => {
+      await vi.waitFor(() => expect(container.textContent).toContain("停止资料搜集"));
+      const stop = [...container.querySelectorAll("button")]
+        .find((button) => button.textContent?.includes("停止资料搜集"));
+      expect(stop).toBeTruthy();
+      expect((stop as HTMLButtonElement).disabled).toBe(false);
+      stop?.click();
+      await vi.waitFor(() => expect(mockedExecuteCommand).toHaveBeenCalledTimes(1));
+    });
+
+    expect(mockedExecuteCommand).toHaveBeenCalledWith(
+      "team-1",
+      "Q-01",
+      canonicalAction,
+      undefined,
+      { runId: undefined },
+    );
+    expect(mockedDraftMeetingSummary).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("停止后可重新发起搜集");
+  });
 });

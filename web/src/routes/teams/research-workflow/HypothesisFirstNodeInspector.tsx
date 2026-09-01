@@ -55,7 +55,6 @@ import {
   currentProjectedReview,
 } from "./hypothesisFirstMeetingProjection";
 import {
-  boundChatRoundsAreTerminal,
   meetingsForHypothesisFirstQuestion,
   resolveHypothesisFirstNextAction,
   type HypothesisFirstNextAction,
@@ -426,10 +425,12 @@ export function HypothesisFirstNodeInspector({
     questionId,
     selection: chain.selection,
     collectionRequests: chain.collectionRequests,
-    boundChatRoundsTerminal: boundChatRoundsAreTerminal({
-      meeting: activeMeeting,
-      chatRounds: roomQuery.data?.rounds,
-    }),
+    // Bound chat-round statuses let the resolver tell an ended room from one
+    // still discussing, per meeting. The server-persisted terminal flag on the
+    // meeting record still wins inside the resolver; a room that has not
+    // loaded yet derives the same "not terminal" as the previous
+    // always-computed boolean did.
+    chatRounds: roomQuery.data?.rounds,
     collectionChildStatus,
     selectedNodeId: nodeId,
     });

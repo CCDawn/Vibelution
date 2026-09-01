@@ -311,6 +311,56 @@ describe("HypothesisFirstNodeInspector", () => {
     expect(queriedRoomIds).not.toContain("team-public-room");
   });
 
+  it("advances the legacy stage once bound chatRounds are terminal instead of staying in discussion", async () => {
+    // The room's round statuses are the only terminal signal (no
+    // boundChatRoundsTerminal flag on the meeting): feeding them into the
+    // resolver must move the legacy stage past "discussion running".
+    mockedChain.mockReturnValue(chainData({
+      meetings: [scopeMeeting({ chatRoomRoundIds: ["round-1"] })],
+      chainState: { candidateCount: 0 } as HypothesisFirstChainData["chainState"],
+    }));
+    mockedFetchChatRoomDetail.mockResolvedValueOnce({
+      rounds: [{ roundId: "round-1", status: "completed" }],
+    } as never);
+    render(
+      <HypothesisFirstNodeInspector
+        teamId="team-1"
+        questionId="Q-01"
+        nodeId="hf_generation"
+        runId="run-1"
+        discussionModel={{
+          status: "ready",
+          degradedReason: "",
+          scope: {
+            version: 1,
+            kind: "question_generation",
+            teamId: "team-1",
+            researchProjectId: "project-1",
+            workflowRunId: "run-1",
+            workflowNodeId: "hf_generation",
+            questionId: "Q-01",
+          },
+          scopeHash: "scope-hash",
+          roomId: "scoped-room-1",
+          meetingRoundId: "hf-gen-1",
+          questionId: "Q-01",
+          selectionId: "",
+          candidateId: "",
+          query: { kind: "room", room: "scoped-room-1" },
+          search: "?room=scoped-room-1",
+          deepLink: "/chat?room=scoped-room-1",
+          selectedRoundId: "",
+        }}
+        onOpenQuestion={() => {}}
+      />,
+    );
+    await act(async () => {
+      await vi.waitFor(() => expect(container.textContent).toContain("整理候选清单"));
+    });
+    expect(container.textContent).not.toContain("generation_running");
+    expect(container.querySelector('[data-testid="meeting-round-id"]')?.textContent).toBe("hf-gen-1");
+  });
+
   it("does not read any room when the canonical anchor is degraded", async () => {
     mockedChain.mockReturnValue(chainData({
       meetings: [scopeMeeting({ linkedChatRoomId: "team-public-room" })],
