@@ -33,6 +33,12 @@ from .calendar import (
     merge_calendar_into_schedule,
     project_calendar_for_date,
 )
+from .companion_preferences import (
+    CompanionPreferenceError,
+    CompanionPreferenceManager,
+    CompanionPreferencePersistenceError,
+    project_companion_preferences,
+)
 from .causal_contracts import CAUSAL_SCHEMA_VERSION, authorized_reuse_receipt
 from .conversation_continuity import (
     build_proactive_candidate,
@@ -3057,6 +3063,7 @@ class VirtualHumanLifeService:
                 if isinstance(value, Mapping)
             },
         )
+        companion_preferences = self.list_companion_preferences(agent_id)
         return {
             "schemaVersion": CAUSAL_SCHEMA_VERSION,
             "drives": drives,
@@ -3090,6 +3097,7 @@ class VirtualHumanLifeService:
             "lifeFeed": life_feed,
             "expression": expression,
             "embodiment": embodiment,
+            "companionPreferences": companion_preferences,
             "reuseReceipt": authorized_reuse_receipt(),
         }
 
@@ -3232,6 +3240,28 @@ class VirtualHumanLifeService:
             )
             return []
         return [item for item in list(rows or []) if isinstance(item, dict)]
+
+    def list_companion_preferences(self, agent_id: str) -> dict[str, Any]:
+        """Return reviewed Agent-scoped preferences without creating storage."""
+
+        self.require_agent(agent_id)
+        return project_companion_preferences(
+            str(agent_id).strip(),
+            self._list_current_episodic_events(agent_id),
+        )
+
+    def _companion_preference_manager(self) -> CompanionPreferenceManager:
+        return CompanionPreferenceManager(
+            episodic_writer=self.episodic_writer,
+            episodic_lister=self._list_current_episodic_events,
+            episodic_superseder=self.episodic_superseder,
+            receipt_appender=lambda agent_id, receipt: self.store.append_jsonl(
+                agent_id,
+                "memory/preference_reconciliation_receipts.jsonl",
+                receipt,
+            ),
+            now_iso=lambda: _iso(self._now()),
+        )
 
     def _health_projection(
         self,
@@ -4453,6 +4483,29 @@ class VirtualHumanLifeService:
         local_now = self._local_now(binding)
         local_date = str(arguments.get("localDate") or local_now.date().isoformat()).strip()
         date.fromisoformat(local_date)
+        if command == "upsertCompanionPreference":
+            try:
+                return self._companion_preference_manager().upsert(
+                    agent_id,
+                    preference_kind=str(arguments.get("preferenceKind") or ""),
+                    value=arguments.get("value"),
+                )
+            except (
+                CompanionPreferenceError,
+                CompanionPreferencePersistenceError,
+            ) as exc:
+                raise VirtualHumanLifeError(str(exc)) from exc
+        if command == "deleteCompanionPreference":
+            try:
+                return self._companion_preference_manager().delete(
+                    agent_id,
+                    preference_kind=str(arguments.get("preferenceKind") or ""),
+                )
+            except (
+                CompanionPreferenceError,
+                CompanionPreferencePersistenceError,
+            ) as exc:
+                raise VirtualHumanLifeError(str(exc)) from exc
         if command in {"pauseLife", "resumeLife"}:
             paused = command == "pauseLife"
             state["lifePaused"] = paused

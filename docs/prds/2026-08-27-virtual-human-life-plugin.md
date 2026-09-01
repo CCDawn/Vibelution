@@ -1477,7 +1477,7 @@ Task 17—21 已在 `codex/companion-full-life-reuse` 完成实现，仍保持�
 - 前端继续复用人物大厅、当前人物栏、原生 Direct Session Chat 和右侧“现在 / 今天 / 记忆”；Task 17—21 没有新增 Session、SSE、Composer、记忆库或权限系统。第四阶段 Task 31 计划新增的是配对的 hidden 原生管理 Session，仍复用同一 Session 引擎、Journal、Composer 和 SSE，不改变本段历史实施事实。
 - 自动验证使用注入时钟覆盖跨日和长期场景，不等待真实 7 天；桌面运行态验收仍按本章目标视口和原生会话边界在本地集成后执行，push/发布不属于本轮。
 
-## 30. 第四阶段：真人化会话表达与消息到达（需求收集中，待开发）
+## 30. 第四阶段：真人化会话表达与消息到达（实施中）
 
 2026-08-30，用户要求先把已确认的真人化对话优化落盘为开发任务，再继续追加需求；后续又批准自审建议、城市级地理方案，以及“一名虚拟人配一名生活管家 Agent、隐藏原生管理会话、独立 Prompt/ToolPolicy、Agent-scoped SQLite 生活世界库”的推荐方案。本阶段当前只固定需求、复用裁决、任务边界和验收契约，不表示已经开始实现。新增需求继续追加到本节；在用户明确要求开始本阶段开发前，不修改产品代码或运行数据。
 
@@ -1663,6 +1663,7 @@ Task 17—21 已在 `codex/companion-full-life-reuse` 完成实现，仍保持�
 - Dependency: Task 22。
 - Mode: BDD/TDD。
 - Verification/Stop: 冲突偏好使用 supersede 保留历史；未经审核、敏感推断和跨 Agent 记忆不进入表达决定；用户可查看、纠正和删除；相关话题之外不主动提及记忆；Life World 不保存用户陪伴画像，不创建第二 profile 数据库或热路径 LLM 调用。
+- Implementation status (2026-09-01): 已实现独立 `companion_preferences.py`，以版本化封闭 envelope 从原生 Agent episodic memory 投影七类已审核偏好；纠正和删除复用原生 supersede，插件只保存不含偏好正文的 reconciliation receipt。现有 `CompanionExpressionDecision` 消费称呼、回答长度、追问、幽默、主动联系和隐私边界，兴趣仅保留为可审阅卡片，不在无话题相关性证据时注入 Prompt；`/companions` 右侧“记忆”区复用 VUI 提供查看、纠正和删除。
 
 #### Task 25：设计并实现 Companion 多气泡交付与用户插话
 
@@ -1720,7 +1721,7 @@ Task 17—21 已在 `codex/companion-full-life-reuse` 完成实现，仍保持�
 - Mode: HIGH_RISK BDD/TDD + frontend contract + desktop browser acceptance。
 - Verification/Stop: 学生/员工/自由职业/待业或退休至少各有一组可编辑草案和工作日/周末/假期测试；学校/单位、专业/职位、通勤、作息、初始物品、账户与周期收入支出在确认前不是事实；确认后夜间计划尊重有效 affiliation/routine/calendar，机构变更只重算未发生计划；工资/奖学金到期只产生一次交易；LLM 失败回退身份感知确定性计划而非通用四段模板；普通 Agent 创建、Prompt、目录和 Session 零差异。
 
-Critical Path 为 Task 28 → Task 29 → Task 30 → Task 31 → Task 32 → Task 22 → Task 23 → Task 25 → Task 27。Task 24 和 Task 26 在 Task 22 后可在文件边界不重叠时推进，但 Task 28 与 Task 25 不并行，Task 30—32 因共享 binding/lifecycle/Life World 事实源保持串行；目录隔离、数据库事务、管家配对和生活草案必须先于表达、多气泡与全链路收口。用户已批准先实施本节中的 Task 28—32；其余任务继续按依赖与后续新增需求保持规划态，不扩大本轮实现范围。
+Critical Path 为 Task 28 → Task 29 → Task 30 → Task 31 → Task 32 → Task 22 → Task 23 → Task 25 → Task 27。Task 22—25 与 Task 28—32 已完成代码实施；Task 26 和 Task 27 仍按依赖推进。Task 30—32 因共享 binding/lifecycle/Life World 事实源保持串行；目录隔离、数据库事务、管家配对和生活草案必须先于表达、多气泡与全链路收口。
 
 ## 31. 第五阶段：对话人格化、视觉存在与角色生态（调研收口，待开发）
 
@@ -1730,11 +1731,11 @@ Critical Path 为 Task 28 → Task 29 → Task 30 → Task 31 → Task 32 → Ta
 
 当前本地 `main` 的代码基线已经包含城市地理、Agent-scoped `life_world.sqlite3`、学生/员工等生活草案、物品与虚构财务、配对 hidden 生活管家 Agent/Session 及身份感知日程能力，因此 Task 28—32 作为本阶段的已实现底座，不再重复拆分。运行态刷新与桌面浏览器验收仍是独立证据层，不能仅凭代码存在宣称通过。
 
-Task 22—27 仍是最直接影响“像真人聊天”的未完成主线：
+Task 22—25 已完成代码实施；Task 26—27 仍是最直接影响“像真人聊天”的剩余核心主线：
 
-- `expression_policy.py` 目前拥有可解释规则排序，但没有形成每轮统一的 `CompanionExpressionDecision`；短答、追问预算、称呼、幽默、自我披露、纠错顺序尚未稳定地与关系、心情和体力联动。
+- `CompanionExpressionDecision` 已统一短答、追问预算、称呼、幽默、自我披露与纠错顺序，并消费 Agent episodic memory 中已审核的陪伴偏好；普通 Agent 不读取该投影。
 - `embodiment.py` 目前只负责 provider 可用性、授权资产和静态回退，没有把 mood、activity、location 转成可持续的眨眼、呼吸、表情和场景状态。
-- Companion mailbox 已承担到达顺序和 generation fence，但多气泡、用户插话和未送达内容取消仍必须在 Task 25 内证明原生 Journal/SSE 权威，不能用前端假消息代替。
+- Companion mailbox 已承担到达顺序、generation fence、多气泡与用户插话；每个已展示气泡仍由原生 Journal/SSE 拥有，未送达 follow-up 可在新用户 generation 到达时取消。
 - Agent episodic memory、Reflection receipt、Life Event、作品/图片 receipt 和生活动态已经存在，不应继续增加相似的状态字段、第二 profile 库、第二向量库或第二 transcript。
 
 ### 31.2 ROI 优先级与任务归并

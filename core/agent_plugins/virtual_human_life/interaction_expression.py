@@ -102,6 +102,7 @@ class CompanionExpressionDecision:
     directness: str
     humorMode: str
     addressStyle: str
+    preferredAddress: str
     memoryMention: str
     emotionalAttribution: str
     reasonCodes: tuple[str, ...]
@@ -263,6 +264,17 @@ def build_companion_expression_decision(
         reasons.append("positive_stable_affect_within_stage_cap")
 
     prefs = _preference_map(preferences)
+    preferred_address = " ".join(str(prefs.get("preferredAddress") or "").split())[:40]
+    preferred_response_length = str(prefs.get("responseLength") or "").strip().lower()
+    if (
+        preferred_response_length in {"brief", "compact", "balanced", "detailed"}
+        and intent not in {"acknowledgement", "correction", "support", "end", "proactive"}
+        and not low_state
+    ):
+        response_length = (
+            "normal" if preferred_response_length == "balanced" else preferred_response_length
+        )
+        reasons.append("preference_response_length_applied")
     if prefs.get("questionsAllowed") is False:
         question_budget = 0
         followup = False
@@ -273,6 +285,9 @@ def build_companion_expression_decision(
     if prefs.get("memoryMentionsAllowed") is False:
         defaults["memoryMention"] = "none"
         reasons.append("preference_memory_mentions_disabled")
+    if str(prefs.get("proactiveFrequency") or "") == "low":
+        defaults["initiative"] = "reply_only"
+        reasons.append("preference_proactive_frequency_low")
 
     return CompanionExpressionDecision(
         contractVersion=EXPRESSION_DECISION_VERSION,
@@ -287,6 +302,7 @@ def build_companion_expression_decision(
         directness=directness,
         humorMode=str(defaults["humorMode"]),
         addressStyle=str(defaults["addressStyle"]),
+        preferredAddress=preferred_address,
         memoryMention=str(defaults["memoryMention"]),
         emotionalAttribution=emotional_attribution,
         reasonCodes=tuple(dict.fromkeys(reasons)),

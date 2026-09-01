@@ -11,6 +11,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any
 
+from .companion_preferences import expression_preferences
 from .interaction_expression import (
     build_companion_expression_decision,
     classify_companion_user_intent,
@@ -320,6 +321,11 @@ def project_companion_expression_for_turn(
                 or str(interaction_context.get("userIntent") or "small_talk")
             ),
             turn_ordinal=interaction_context.get("turnOrdinal"),
+            preferences=expression_preferences(
+                causal.get("companionPreferences")
+                if isinstance(causal.get("companionPreferences"), Mapping)
+                else {}
+            ),
         ),
     }
 

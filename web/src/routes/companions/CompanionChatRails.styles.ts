@@ -54,6 +54,13 @@ const memoryMeta = "font-mono text-[0.6rem] text-[var(--accent-cool)]";
 const memoryText = "m-0 line-clamp-3 [font-size:var(--vui-font-xs)] leading-[1.55] text-vui-fg-secondary";
 const memoryMetaRow = "flex min-w-0 flex-wrap gap-x-2 gap-y-0.5 [font-size:0.6rem] leading-[1.4] text-vui-fg-tertiary [&>span]:truncate";
 const memoryOverview = "flex min-w-0 items-center justify-between gap-2 [&>strong]:font-mono [&>strong]:text-[0.72rem] [&>strong]:text-vui-fg-primary";
+const preferenceGrid = "grid grid-cols-2 gap-1.5 max-[1100px]:grid-cols-1";
+const preferenceItem = "grid min-w-0 cursor-pointer gap-0.5 rounded-[var(--radius-control)] border border-transparent bg-vui-surface-panel px-2 py-1.5 text-left transition-colors hover:border-vui-border-subtle data-[active=true]:border-[color-mix(in_srgb,var(--accent-cool)_46%,var(--vui-border-subtle))] data-[active=true]:bg-[color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-panel))] [&>span]:text-[0.58rem] [&>span]:text-vui-fg-tertiary [&>strong]:truncate [&>strong]:text-[0.68rem] [&>strong]:text-vui-fg-secondary";
+const preferenceEmpty = "m-0 rounded-[var(--radius-control)] bg-vui-surface-panel px-2 py-2 text-[0.62rem] text-vui-fg-tertiary";
+const preferenceForm = "grid min-w-0 gap-2 border-t border-vui-border-subtle p-2";
+const preferenceField = "grid min-w-0 gap-1 [&>span]:text-[0.6rem] [&>span]:font-bold [&>span]:text-vui-fg-tertiary";
+const preferenceActions = "flex min-w-0 flex-wrap justify-end gap-1.5";
+const preferenceNotice = "m-0 rounded-[var(--radius-control)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] px-2 py-1.5 text-[0.62rem] leading-[1.45] text-vui-fg-secondary";
 const relationshipGrid = "grid gap-1.5";
 const relationshipItem = "grid min-w-0 gap-0.5 rounded-[var(--radius-control)] bg-vui-surface-row px-2 py-1.5 [&>span]:text-[0.6rem] [&>span]:text-vui-fg-tertiary [&>strong]:[font-size:var(--vui-font-xs)] [&>strong]:leading-[1.45] [&>strong]:text-vui-fg-secondary [&>small]:line-clamp-2 [&>small]:text-[0.6rem] [&>small]:leading-[1.4] [&>small]:text-vui-fg-tertiary";
 const moodRow = "flex items-center justify-between gap-2 [&>strong]:text-[0.82rem] [&>span]:font-mono [&>span]:text-[0.62rem] [&>span]:text-vui-fg-tertiary";
@@ -130,6 +137,13 @@ export default {
   memoryText,
   memoryMetaRow,
   memoryOverview,
+  preferenceGrid,
+  preferenceItem,
+  preferenceEmpty,
+  preferenceForm,
+  preferenceField,
+  preferenceActions,
+  preferenceNotice,
   relationshipGrid,
   relationshipItem,
   moodRow,

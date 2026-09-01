@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import railSource from "./CompanionLifeRail.tsx?raw";
+import preferenceSource from "./CompanionPreferenceCard.tsx?raw";
 import styles from "./CompanionChatRails.styles";
 
 describe("virtual-human life rail memory projection", () => {
@@ -65,6 +66,18 @@ describe("virtual-human life rail memory projection", () => {
     expect(railSource).toContain("长期记忆暂不可用");
     expect(railSource).toContain("日记和关系仍可查看");
     expect(railSource).toContain("retry: false");
+  });
+
+  it("reviews, corrects, and deletes Agent-scoped companion preferences", () => {
+    expect(railSource).toContain("CompanionPreferenceCard");
+    expect(preferenceSource).toContain('command: operation === "upsert" ? "upsertCompanionPreference" : "deleteCompanionPreference"');
+    expect(preferenceSource).not.toContain("fetchVirtualHumanMemories");
+    expect(preferenceSource).toContain("只使用你确认过的偏好");
+    expect(preferenceSource).toContain("VSelect");
+    expect(preferenceSource).toContain("VInput");
+    expect(preferenceSource).toContain("VButton");
+    expect(preferenceSource).toContain("expectedVersion: stateVersion");
+    expect(preferenceSource).not.toContain("/api/sessions/");
   });
 
   it("uses a stable visual desktop rail with progressive detail disclosure", () => {

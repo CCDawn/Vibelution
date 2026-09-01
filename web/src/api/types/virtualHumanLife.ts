@@ -535,6 +535,29 @@ export type VirtualHumanLocationMovement = {
   arrivedAt?: string;
 };
 
+export type VirtualHumanCompanionPreferenceKind =
+  | "address"
+  | "response_length"
+  | "question_tolerance"
+  | "humor"
+  | "proactive_frequency"
+  | "interests"
+  | "privacy";
+
+export type VirtualHumanCompanionPreferenceCard = {
+  preferenceKind: VirtualHumanCompanionPreferenceKind;
+  value: string | string[];
+  episodeId: string;
+  reviewStatus: "user_confirmed" | "operator_reviewed" | string;
+  occurredAt?: string;
+};
+
+export type VirtualHumanCompanionPreferenceProjection = {
+  schemaVersion: number;
+  cards: VirtualHumanCompanionPreferenceCard[];
+  values: Partial<Record<VirtualHumanCompanionPreferenceKind, string | string[]>>;
+};
+
 export type VirtualHumanCausalProjection = {
   schemaVersion: number;
   drives?: VirtualHumanDriveProjection;
@@ -569,6 +592,7 @@ export type VirtualHumanCausalProjection = {
     trace?: Array<{ ruleId?: string; matched?: boolean; reason?: string }>;
   };
   embodiment?: VirtualHumanEmbodiment;
+  companionPreferences?: VirtualHumanCompanionPreferenceProjection;
 };
 
 /**
