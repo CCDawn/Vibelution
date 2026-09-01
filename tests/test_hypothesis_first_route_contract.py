@@ -1629,3 +1629,121 @@ def test_collection_recovery_route_calls_idempotent_service(monkeypatch) -> None
     assert response.status_code == 200, response.text
     assert calls == [("team-1", "req-1")]
     assert response.json()["request"]["collectionRunId"] == "child-1"
+
+
+# ---------------------------------------------------------------------------
+# state-v2 route serialization contract: the batch-A stage-one offers exist
+# only as dicts in service-layer tests; the FastAPI response model must
+# serialize them (regression for the live 500: payload.runId extra_forbidden).
+# ---------------------------------------------------------------------------
+
+
+def _stage_one_route_snapshot(**overrides):
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_first_state_v2,
+    )
+
+    drafts = [
+        {
+            "recordKind": "hypothesis_exploratory_draft",
+            "draftId": f"draft-{index}",
+            "candidateId": f"draft-{index}",
+            "questionId": "SCI-091",
+            "statement": f"draft statement {index}",
+            "meetingRoundId": "hf-candgen-run-r0",
+            "candidateAuthority": "exploratory_draft",
+            "createdAt": f"2026-08-25T00:0{index}:00Z",
+        }
+        for index in range(2)
+    ]
+    payload = {
+        "team_id": "team-1",
+        "question_id": "SCI-091",
+        "reset_boundary": None,
+        "chain_records": drafts,
+        "selection_records": [],
+        "meeting_records": [],
+        "digest_records": [],
+        "decision_records": [],
+        "hypothesis_round_records": [],
+    }
+    payload.update(overrides)
+    return hypothesis_first_state_v2.project_state_from_records(**payload)
+
+
+def test_state_v2_route_serializes_grounded_r1_offer_with_run_id(
+    monkeypatch,
+) -> None:
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_first_state_v2,
+    )
+
+    snapshot = _stage_one_route_snapshot(
+        formal_runs=[
+            {
+                "runId": "run-882610596ddb",
+                "status": "queued",
+                "questionId": "SCI-091",
+                "createdAt": "2026-08-25T00:00:00Z",
+            }
+        ],
+    )
+    assert any(
+        action.get("actionId") == "open-stage-one-generation"
+        for action in snapshot["allowedActions"]
+    )
+    monkeypatch.setattr(
+        hypothesis_first_state_v2,
+        "project_hypothesis_first_state_v2",
+        lambda *_args, **_kwargs: snapshot,
+    )
+    client = _client()
+
+    response = client.get(
+        "/api/teams/team-1/workflow-orchestration/hypothesis-first/chain/state-v2",
+        params={"questionId": "SCI-091"},
+    )
+
+    assert response.status_code == 200, response.text
+    offer = next(
+        action
+        for action in response.json()["allowedActions"]
+        if action["actionId"] == "open-stage-one-generation"
+    )
+    assert offer["command"] == "open_generation"
+    assert offer["payload"]["runId"] == "run-882610596ddb"
+    assert offer["payload"]["questionId"] == "SCI-091"
+
+
+def test_state_v2_route_serializes_create_stage_one_run_offer(monkeypatch) -> None:
+    """A fresh policy-covered question offers run creation through the wire."""
+
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_first_state_v2,
+    )
+
+    snapshot = _stage_one_route_snapshot()
+    assert any(
+        action.get("actionId") == "create-stage-one-run"
+        for action in snapshot["allowedActions"]
+    )
+    monkeypatch.setattr(
+        hypothesis_first_state_v2,
+        "project_hypothesis_first_state_v2",
+        lambda *_args, **_kwargs: snapshot,
+    )
+    client = _client()
+
+    response = client.get(
+        "/api/teams/team-1/workflow-orchestration/hypothesis-first/chain/state-v2",
+        params={"questionId": "SCI-091"},
+    )
+
+    assert response.status_code == 200, response.text
+    offer = next(
+        action
+        for action in response.json()["allowedActions"]
+        if action["actionId"] == "create-stage-one-run"
+    )
+    assert offer["command"] == "create_stage_one_run"
+    assert offer["payload"] == {"questionId": "SCI-091"}

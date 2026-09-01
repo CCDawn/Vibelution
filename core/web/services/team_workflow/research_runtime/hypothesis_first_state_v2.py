@@ -3463,6 +3463,47 @@ def project_state_from_records(
                 input_schema_ref="hypothesis-first/record-selection/v1",
             )
         )
+    elif (
+        adjudication_rejected
+        and selection_id
+        and any(
+            str(item.get("selectionId") or "").strip() == selection_id
+            for item in review_link_records
+        )
+        and (
+            not latest_round_meeting_ids
+            or any(
+                str(item.get("selectionId") or "").strip() == selection_id
+                and str(item.get("meetingRoundId") or "") in latest_round_meeting_ids
+                for item in review_link_records
+            )
+        )
+    ):
+        # A rejected human adjudication is terminal for the rejected round but
+        # must not dead-end the question: re-open the selector as a new
+        # append-only selection chain.  ``previousSelectionId`` mirrors the
+        # legacy re-selection recovery so the owning selection service can
+        # re-authorize under its lock.  The offer disappears as soon as a
+        # newer selection chain exists, because the latest selection's links
+        # no longer belong to the adjudicated round.  The offer targets the
+        # convergence phase: that is the authoritative current phase after a
+        # rejected adjudication, and the phase fence drops offers from any
+        # other phase.
+        allowed_actions.append(
+            _command_action(
+                "record_selection",
+                action_id=f"reselect-after-rejection:{selection_id}",
+                label="裁决否决后重新选择候选假说",
+                target_phase="convergence",
+                target_node_id="hf_convergence",
+                payload={
+                    "questionId": normalized_question_id,
+                    "generationAttemptId": generation["generationMeetingId"] or f"legacy:{_canonical_hash(candidate_ids)}",
+                    "previousSelectionId": selection_id,
+                },
+                input_schema_ref="hypothesis-first/record-selection/v1",
+            )
+        )
     if review_candidates:
         if (
             (review_aggregate["blocked"] or review_aggregate["failed"])

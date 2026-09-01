@@ -1346,7 +1346,120 @@ def test_rejected_human_adjudication_is_terminal_and_not_reoffered() -> None:
     assert state.convergence.lifecycle == "completed"
     assert state.convergence.outcome == "rejected"
     assert state.convergence.actionability == "terminal"
-    assert not any(action.kind == "command" for action in state.allowedActions)
+    commands = [
+        action.command for action in state.allowedActions if action.kind == "command"
+    ]
+    # The rejected round itself stays terminal: neither a next review round
+    # nor a second adjudication of the same round is re-offered.
+    assert "open_next_review" not in commands
+    assert "human_adjudication" not in commands
+    # The rejection must not dead-end the question: the selector re-opens as
+    # a new append-only selection chain rooted at the rejected selection.
+    assert commands == ["record_selection"]
+    reselect = next(
+        action
+        for action in state.allowedActions
+        if action.kind == "command" and action.command == "record_selection"
+    )
+    assert reselect.actionId == "reselect-after-rejection:selection-1"
+    assert reselect.payload.previousSelectionId == "selection-1"
+
+
+def test_rejected_adjudication_offer_disappears_after_new_selection_chain() -> None:
+    """A newer selection chain owns the question: no second re-selection."""
+
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[
+                {
+                    "recordKind": "hypothesis_candidate",
+                    "candidateId": "candidate-1",
+                    "questionId": "SCI-001",
+                },
+                {
+                    "recordKind": "review_round_link",
+                    "linkId": "link-1",
+                    "selectionId": "selection-1",
+                    "candidateId": "candidate-1",
+                    "candidateOrder": 0,
+                    "roundIndex": 1,
+                    "roundBudget": 3,
+                    "meetingRoundId": "review-1",
+                    "questionId": "SCI-001",
+                },
+                {
+                    "recordKind": "review_round_link",
+                    "linkId": "link-2",
+                    "selectionId": "selection-2",
+                    "candidateId": "candidate-1",
+                    "candidateOrder": 0,
+                    "roundIndex": 1,
+                    "roundBudget": 3,
+                    "meetingRoundId": "review-2",
+                    "questionId": "SCI-001",
+                    "createdAt": "2026-08-25T01:00:00Z",
+                },
+                {
+                    "recordKind": "human_adjudication",
+                    "adjudicationId": "adjudication-1",
+                    "hypothesisRoundId": "round-1",
+                    "decision": "rejected",
+                    "questionId": "SCI-001",
+                    "updatedAt": "2026-08-25T00:05:00Z",
+                },
+            ],
+            selection_records=[
+                {
+                    "selectionId": "selection-1",
+                    "questionId": "SCI-001",
+                    "selectedCandidateIds": ["candidate-1"],
+                    "createdAt": "2026-08-25T00:00:00Z",
+                },
+                {
+                    "selectionId": "selection-2",
+                    "questionId": "SCI-001",
+                    "selectedCandidateIds": ["candidate-1"],
+                    "previousSelectionId": "selection-1",
+                    "createdAt": "2026-08-25T01:00:00Z",
+                },
+            ],
+            meeting_records=[
+                {
+                    "meetingRoundId": "review-1",
+                    "meetingType": "hypothesis_review",
+                    "question": "SCI-001",
+                    "status": "closed",
+                },
+                {
+                    "meetingRoundId": "review-2",
+                    "meetingType": "hypothesis_review",
+                    "question": "SCI-001",
+                    "status": "open",
+                },
+            ],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[
+                {
+                    "roundId": "round-1",
+                    "question": "SCI-001",
+                    "roundIndex": 1,
+                    "status": "closed",
+                    "metaReview": {"accepted": False},
+                    "meetingRefs": [{"kind": "meeting_round", "id": "review-1"}],
+                    "createdAt": "2026-08-25T00:00:00Z",
+                }
+            ],
+        )
+    )
+
+    commands = [
+        action.command for action in state.allowedActions if action.kind == "command"
+    ]
+    assert "record_selection" not in commands
 
 
 # ---------------------------------------------------------------------------
@@ -6368,3 +6481,125 @@ def test_v2_stage_one_generation_offer_routes_run_from_payload(
     assert authority_calls == [("team-1", "SCI-091", "run-from-payload")]
     assert captured["_candidate_authority"] == "formal_grounded_candidate"
     assert captured["_generation_context"] == context
+
+
+def test_v2_rejected_adjudication_reselect_command_carries_previous_selection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The rejected-adjudication recovery re-selects through a new chain.
+
+    Executing the V2 ``reselect-after-rejection`` offer must reach the owning
+    selection service with ``previousSelectionId`` (the legacy re-selection
+    re-authorization semantics) and record the outcome under the same
+    selection version identity the pre-command fence computed — including the
+    previous selection.
+    """
+    from core.web.services import team_service
+    from core.web.services.team_workflow import hypothesis_selection
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_first_chain,
+        hypothesis_first_state_v2,
+    )
+
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
+    monkeypatch.setattr(hypothesis_first_chain, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        hypothesis_first_chain,
+        "_question_scope_envelope",
+        lambda *_args: {"question": "SCI-001"},
+    )
+    offer_payload = {
+        "questionId": "SCI-001",
+        "generationAttemptId": "attempt-1",
+        "previousSelectionId": "selection-1",
+    }
+    snapshot = {
+        "stateVersion": "hf2-action:origin:selection",
+        "resetBoundary": {"resetId": "origin"},
+        "allowedActions": [
+            {
+                "kind": "command",
+                "actionId": "reselect-after-rejection:selection-1",
+                "command": "record_selection",
+                "payload": offer_payload,
+                "enabled": True,
+                "idempotencyKey": "hf2:reselect-after-rejection:selection-1:k1",
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        hypothesis_first_state_v2,
+        "project_hypothesis_first_state_v2",
+        lambda *_args, **_kwargs: snapshot,
+    )
+    calls: list[dict[str, object]] = []
+
+    def record_selection(_team_id: str, payload: dict[str, object], **_kwargs):
+        calls.append(dict(payload))
+        return {
+            "status": "created",
+            "selection": {
+                "selectionId": "selection-2",
+                "questionId": "SCI-001",
+                "selectedCandidateIds": ["candidate-a", "candidate-b"],
+                "previousSelectionId": "selection-1",
+            },
+            "reviewMeeting": {"status": "opened"},
+        }
+
+    monkeypatch.setattr(
+        hypothesis_selection, "record_hypothesis_selection", record_selection
+    )
+
+    envelope = hypothesis_first_chain.execute_v2_command(
+        "team-1",
+        {
+            "actionId": "reselect-after-rejection:selection-1",
+            "idempotencyKey": "hf2:reselect-after-rejection:selection-1:k1",
+            "expectedStateVersion": "hf2-action:origin:selection",
+            "command": "record_selection",
+            "payload": offer_payload,
+            "input": {"candidateIds": ["candidate-a", "candidate-b"]},
+        },
+        question_id="SCI-001",
+    )
+
+    assert envelope["result"]["selection"]["selectionId"] == "selection-2"
+    assert calls[0]["previousSelectionId"] == "selection-1"
+    # The durable outcome's selection version must include the previous
+    # selection so the version fence and the read model agree with the record
+    # hypothesis_selection actually persisted.
+    outcomes = [
+        record
+        for record in hypothesis_first_chain._records("team-1")
+        if record.get("recordKind")
+        == hypothesis_first_chain.SELECTION_COMMAND_OUTCOME_KIND
+    ]
+    assert len(outcomes) == 1
+    expected_version = hypothesis_first_chain.selection_version_for(
+        question_id="SCI-001",
+        selected_candidate_ids=["candidate-a", "candidate-b"],
+        previous_selection_id="selection-1",
+        reset_id="origin",
+        scope_hash="",
+        workflow_run_id="",
+    )
+    assert outcomes[0]["selectionVersion"] == expected_version
+
+    # Replaying the same offer key reuses the durable outcome.
+    replay = hypothesis_first_chain.execute_v2_command(
+        "team-1",
+        {
+            "actionId": "reselect-after-rejection:selection-1",
+            "idempotencyKey": "hf2:reselect-after-rejection:selection-1:k1",
+            "expectedStateVersion": "hf2-action:stale:after-reselect",
+            "command": "record_selection",
+            "payload": offer_payload,
+            "input": {"candidateIds": ["candidate-a", "candidate-b"]},
+        },
+        question_id="SCI-001",
+    )
+    assert replay["status"] == "reused"
+    assert replay["result"]["selectionId"] == "selection-2"
+    assert len(calls) == 1

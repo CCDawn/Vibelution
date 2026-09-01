@@ -72,6 +72,7 @@ ActionCommand = Literal[
     "retry_program_handoff",
     "record_program_review",
     "create_formal_revision",
+    "create_stage_one_run",
 ]
 ProgramHumanGateKey = Literal[
     "H1_problem_understanding",
@@ -173,8 +174,18 @@ class RetryGenerationPayload(QuestionActionPayload):
     previousAttemptId: str = Field(..., min_length=1)
 
 
+class OpenGenerationPayload(QuestionActionPayload):
+    # The stage-one grounded R1 re-entry carries the run to re-open so the
+    # origin-level projection can route the command without a separate runId
+    # query; the bare origin-level entry omits it.
+    runId: str = ""
+
+
 class RecordSelectionPayload(QuestionActionPayload):
     generationAttemptId: str = Field(..., min_length=1)
+    # Only the rejected-adjudication re-selection re-offer carries this: it
+    # roots the new append-only selection chain at the rejected selection.
+    previousSelectionId: str = ""
 
 
 class RetryReviewDispatchPayload(StrictWireModel):
@@ -231,6 +242,7 @@ class CreateFormalRevisionPayload(RunActionPayload):
 
 ActionPayload = (
     QuestionActionPayload
+    | OpenGenerationPayload
     | RetryGenerationPayload
     | RecordSelectionPayload
     | RetryReviewDispatchPayload
@@ -248,7 +260,7 @@ ActionPayload = (
 )
 
 _ACTION_PAYLOAD_TYPES: dict[str, type[StrictWireModel]] = {
-    "open_generation": QuestionActionPayload,
+    "open_generation": OpenGenerationPayload,
     "retry_generation": RetryGenerationPayload,
     "record_selection": RecordSelectionPayload,
     "retry_review_dispatch": RetryReviewDispatchPayload,
@@ -264,6 +276,7 @@ _ACTION_PAYLOAD_TYPES: dict[str, type[StrictWireModel]] = {
     "open_next_review": OpenNextReviewPayload,
     "human_adjudication": HumanAdjudicationPayload,
     "create_formal_run": CreateFormalRunPayload,
+    "create_stage_one_run": QuestionActionPayload,
     "retry_formal_node": RetryFormalNodePayload,
     "reconcile_formal_run": RunActionPayload,
     "cancel_run": RunActionPayload,

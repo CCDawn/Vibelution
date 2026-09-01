@@ -2950,6 +2950,14 @@ def _execute_v2_command_impl(
                     "record_selection requires input.candidateIds"
                 )
             selected_candidate_ids = sorted(selected_candidate_ids)
+            # The rejected-adjudication recovery re-offer carries the selection
+            # the operator is re-selecting from; hypothesis_selection requires
+            # it to open a second append-only selection chain.
+            previous_selection_id = str(
+                payload.get("previousSelectionId")
+                or action_input.get("previousSelectionId")
+                or ""
+            ).strip()
             selection_scope = _question_scope_envelope(
                 normalized_team_id,
                 normalized_question_id,
@@ -2970,6 +2978,8 @@ def _execute_v2_command_impl(
                 "selectedCandidateIds": selected_candidate_ids,
                 "decidedBy": _OPERATOR_AGENT_ID,
             }
+            if previous_selection_id:
+                selection_payload["previousSelectionId"] = previous_selection_id
             result = hypothesis_selection.record_hypothesis_selection(
                 normalized_team_id,
                 selection_payload,
@@ -2984,6 +2994,7 @@ def _execute_v2_command_impl(
             selection_version = selection_version_for(
                 question_id=normalized_question_id,
                 selected_candidate_ids=selected_candidate_ids,
+                previous_selection_id=previous_selection_id,
                 reset_id=reset_id,
                 scope_hash=selection_scope_hash,
                 workflow_run_id=normalized_workflow_run_id,
@@ -3068,7 +3079,13 @@ def _execute_v2_command_impl(
                 str(payload.get("meetingRoundId") or ""),
             )
         elif command == "stop_discussion":
-            result = meeting_rounds.supersede_empty_discussion_meeting(
+            # The owning service picks the terminal shape: an attempt with
+            # citable messages is closed as a stopped execution while the
+            # transcript and produced drafts survive; an empty attempt keeps
+            # the exact superseded-attempt recovery semantics.  Both reuse
+            # idempotently, so a stalled meeting's stop action can never hit
+            # a "cannot be superseded" dead end.
+            result = meeting_rounds.stop_discussion_meeting(
                 normalized_team_id,
                 str(payload.get("meetingRoundId") or ""),
                 actor="operator:v2-stop-discussion",

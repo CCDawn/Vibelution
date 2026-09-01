@@ -323,3 +323,117 @@ def test_close_meeting_fails_closed_without_digest_or_decision(tmp_path, monkeyp
         meetings.close_meeting_round(
             team_id, "meeting-demo-1", _closure(decisions=[])
         )
+
+
+# ---------------------------------------------------------------------------
+# V2 operator stop: a stalled discussion with completed messages must have a
+# real terminal path (stopped execution, transcript preserved); an empty
+# attempt keeps the superseded-attempt recovery semantics.
+# ---------------------------------------------------------------------------
+
+
+def _room_detail(round_id: str, messages: list[dict]) -> dict:
+    return {
+        "roomId": "room-stop-1",
+        "rounds": [
+            {
+                "roundId": round_id,
+                "status": "completed",
+                "messages": messages,
+            }
+        ],
+    }
+
+
+def _bind_stop_room(monkeypatch, round_id: str, messages: list[dict]) -> None:
+    from core.web.services import chat_room_service
+
+    monkeypatch.setattr(
+        chat_room_service,
+        "get_chat_room_detail",
+        lambda room_id: _room_detail(round_id, messages)
+        if room_id == "room-stop-1"
+        else None,
+    )
+
+
+def test_stop_discussion_meeting_stops_attempt_and_keeps_completed_messages(
+    tmp_path, monkeypatch
+):
+    team_id = _team(tmp_path, monkeypatch)
+    meetings.create_meeting_round(team_id, _meeting(meetingRoundId="meeting-stop-msg"))
+    meetings.bind_meeting_chat_room_round(
+        team_id, "meeting-stop-msg", "room-stop-1", "round-stop-1"
+    )
+    _bind_stop_room(
+        monkeypatch,
+        "round-stop-1",
+        [
+            {
+                "status": "completed",
+                "speakerTitle": "研究员",
+                "content": "DISAGREE: hyp-b 的泛化证据不足",
+            }
+        ],
+    )
+
+    stopped = meetings.stop_discussion_meeting(
+        team_id, "meeting-stop-msg", actor="operator:v2-stop-discussion"
+    )
+
+    assert stopped["status"] == "stopped"
+    record = stopped["meetingRound"]
+    assert record["status"] == "closed"
+    assert record["executionStatus"] == "stopped"
+    assert record["recoveryReason"] == "operator_stop_discussion"
+    assert record["summaryDraftError"]["code"] == "operator_stop_discussion"
+    assert record["summaryDraftError"]["remediationLabel"] == "重新发起讨论"
+    assert record["closedBy"] == "operator:v2-stop-discussion"
+    # The transcript stays citable: no digest or decision was promoted, but
+    # the completed messages survive the stop.
+    assert not record.get("digestId")
+    assert len(meetings.completed_meeting_source_messages(record)) == 1
+
+    reused = meetings.stop_discussion_meeting(team_id, "meeting-stop-msg")
+    assert reused["status"] == "reused"
+    assert reused["meetingRound"]["executionStatus"] == "stopped"
+
+
+def test_stop_discussion_meeting_supersedes_empty_attempt_with_existing_semantics(
+    tmp_path, monkeypatch
+):
+    team_id = _team(tmp_path, monkeypatch)
+    meetings.create_meeting_round(team_id, _meeting(meetingRoundId="meeting-stop-empty"))
+    meetings.bind_meeting_chat_room_round(
+        team_id, "meeting-stop-empty", "room-stop-1", "round-stop-empty"
+    )
+    _bind_stop_room(monkeypatch, "round-stop-empty", [])
+
+    stopped = meetings.stop_discussion_meeting(team_id, "meeting-stop-empty")
+    assert stopped["status"] == "superseded"
+    record = stopped["meetingRound"]
+    assert record["status"] == "closed"
+    assert record["recoveryReason"] == "discussion_has_no_completed_messages"
+    assert (
+        record["summaryDraftError"]["code"] == "discussion_has_no_completed_messages"
+    )
+    assert record["summaryDraftError"]["remediationLabel"] == "重新发起讨论"
+    assert record["closedBy"] == "operator:v2-stop-discussion"
+
+    reused = meetings.stop_discussion_meeting(team_id, "meeting-stop-empty")
+    assert reused["status"] == "reused"
+
+
+def test_stop_discussion_meeting_refuses_still_running_rounds(tmp_path, monkeypatch):
+    team_id = _team(tmp_path, monkeypatch)
+    meetings.create_meeting_round(team_id, _meeting(meetingRoundId="meeting-stop-live"))
+    monkeypatch.setattr(
+        meetings, "running_bound_round_ids", lambda _meeting: ["round-live"]
+    )
+
+    with pytest.raises(
+        meetings.ResearchMeetingRoundError, match="still running and cannot be stopped"
+    ):
+        meetings.stop_discussion_meeting(team_id, "meeting-stop-live")
+    live = meetings.get_meeting_round(team_id, "meeting-stop-live")["meetingRound"]
+    assert live["status"] == "open"

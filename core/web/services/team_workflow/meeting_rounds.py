@@ -858,6 +858,121 @@ def terminate_meeting_execution(
     }
 
 
+_STOP_DISCUSSION_ELIGIBLE_STATUSES = {
+    "open",
+    "summarizing",
+    "awaiting_approval",
+    # Legacy records may expose the terminal markers the V2 recovery
+    # projection reads; an operator stop must stay executable for them.
+    "blocked",
+    "stalled",
+}
+
+
+def stop_discussion_meeting(
+    team_id: str,
+    meeting_round_id: str,
+    *,
+    actor: str = "operator:v2-stop-discussion",
+    reason: str = "operator_stop_discussion",
+) -> dict[str, Any]:
+    """Operator stop for one stalled discussion attempt (V2 ``stop_discussion``).
+
+    This is the terminal path for a stuck meeting that already produced
+    citable messages: the attempt is closed with ``executionStatus: stopped``
+    while the transcript and any produced draft stay untouched.  An attempt
+    without citable messages keeps the exact empty-discussion recovery
+    semantics of ``supersede_empty_discussion_meeting`` (an abandoned attempt
+    carrying no digest or decisions), so one operator command covers both
+    shapes without ever raising for a meeting the V2 projection may offer the
+    stop action for.
+    """
+
+    from core.web.services.team_service import assert_team_exists
+
+    normalized_team_id = assert_team_exists(team_id)
+    normalized_round_id = str(meeting_round_id or "").strip()
+    normalized_reason = str(reason or "").strip() or "operator_stop_discussion"
+    if not normalized_round_id:
+        raise ResearchMeetingRoundError("Meeting round id is required.")
+    with _LOCK:
+        meeting_round = _load_meeting_round(normalized_team_id, normalized_round_id)
+    if (
+        str(meeting_round.get("meetingType") or "").strip().lower()
+        not in _EMPTY_DISCUSSION_RECOVERY_TYPES
+    ):
+        raise ResearchMeetingRoundError(
+            "only discussion meetings may use empty-discussion recovery"
+        )
+    status = str(meeting_round.get("status") or "").strip().lower()
+    if (
+        status == "closed"
+        and str(meeting_round.get("recoveryReason") or "")
+        == "discussion_has_no_completed_messages"
+    ):
+        return supersede_empty_discussion_meeting(
+            normalized_team_id, normalized_round_id, actor=actor
+        )
+    if (
+        status == "closed"
+        and str(meeting_round.get("executionStatus") or "") == "stopped"
+    ):
+        return {
+            "schemaVersion": SCHEMA_VERSION,
+            "teamId": normalized_team_id,
+            "status": "reused",
+            "meetingRound": meeting_round,
+            "storagePath": str(_rounds_path(normalized_team_id)),
+        }
+    if status not in _STOP_DISCUSSION_ELIGIBLE_STATUSES:
+        raise ResearchMeetingRoundError(
+            f"meeting status {status or '<unknown>'} cannot be stopped"
+        )
+    if running_bound_round_ids(meeting_round):
+        raise ResearchMeetingRoundError(
+            "discussion round is still running and cannot be stopped"
+        )
+
+    now = _utc_now()
+    closed_record = dict(meeting_round)
+    closed_record["status"] = "closed"
+    closed_record["closedAt"] = now
+    closed_record["closedBy"] = str(actor or "").strip() or "operator:v2-stop-discussion"
+    if completed_meeting_source_messages(meeting_round):
+        closed_record["executionStatus"] = "stopped"
+        closed_record["terminalReason"] = normalized_reason
+        closed_record["recoveryReason"] = normalized_reason
+        closed_record["summaryDraftError"] = {
+            "code": normalized_reason,
+            "message": "讨论已由操作者停止，已产出发言与草稿全部保留。",
+            "remediationLabel": "重新发起讨论",
+        }
+        result_status = "stopped"
+    else:
+        closed_record["recoveryReason"] = "discussion_has_no_completed_messages"
+        closed_record["summaryDraftError"] = {
+            "code": "discussion_has_no_completed_messages",
+            "message": "讨论未产出可引用的成功发言，已结束本次失败尝试",
+            "remediationLabel": "重新发起讨论",
+        }
+        result_status = "superseded"
+    closed_record["updatedAt"] = now
+    with _LOCK:
+        latest = _load_meeting_round(normalized_team_id, normalized_round_id)
+        if str(latest.get("status") or "").strip().lower() != status:
+            raise ResearchMeetingRoundError(
+                "meeting status changed while the operator stop was running"
+            )
+        _append_round_record(normalized_team_id, closed_record)
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": normalized_team_id,
+        "status": result_status,
+        "meetingRound": closed_record,
+        "storagePath": str(_rounds_path(normalized_team_id)),
+    }
+
+
 def message_source_ref(message: Mapping[str, Any]) -> str:
     """Stable digest -> room message backlink: ``roomId/roundId/messageId``."""
 

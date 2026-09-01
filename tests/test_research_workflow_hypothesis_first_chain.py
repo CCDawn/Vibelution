@@ -1367,6 +1367,118 @@ def test_generate_round_writes_all_three_review_authorities(
     ]
 
 
+def test_dimension_reviews_persistence_failure_keeps_run_identity_bound(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: a failing dimension-reviews write must not unbind the run.
+
+    The receipt-derived ``workflow_run_id``/``node_run_id`` are bound before
+    the dimension-reviews try block.  A persistence failure (or an import
+    failure) there surfaces as the real error on the blocked dimension
+    authority and must never leak a ``NameError`` into the downstream
+    review-independence authority.
+    """
+    from core.web.services.team_workflow import hypothesis_rounds as hrounds
+    from core.web.services.team_workflow import hypothesis_selection as selections
+    from core.web.services.team_workflow.research_runtime import (
+        dimension_reviews_artifact_writer,
+        review_independence_artifact_writer,
+    )
+
+    team_id = "team-review-authorities"
+    meeting = {
+        "meetingRoundId": "meeting-authorities",
+        "question": "SCI-091",
+        "scopeHash": "scope-authorities",
+        "discussionScope": {"workflowRunId": "workflow-authorities"},
+        "modelInvocationReceiptAuthority": {
+            "workflowRunId": "workflow-authorities",
+            "sourceCollectionRunId": "source-authorities",
+        },
+        "nodeRunId": "node-authorities",
+        "inputSnapshotHash": "a" * 64,
+        "inputArtifactRefs": ["evidence_card_batch://team/source/hash"],
+    }
+    candidates = [
+        {"candidateId": "H1", "claim": "claim one"},
+        {"candidateId": "H2", "claim": "claim two"},
+    ]
+    round_record = {
+        "roundId": "round-authorities",
+        "reviewContextId": "context-authorities",
+        "executionMode": "formal",
+        "roles": {"metareview": "coordinator-1"},
+        "modelInvocationReceipts": [],
+        "candidates": candidates,
+        "pairwiseComparisons": [],
+        "pareto": {},
+        "metaReview": {},
+    }
+    monkeypatch.setattr(
+        chain,
+        "_review_meeting_fan_in_group",
+        lambda *_args, **_kwargs: {
+            "status": "ready",
+            "selectionId": "selection-authorities",
+            "roundIndex": 1,
+            "meetings": [meeting],
+        },
+    )
+    monkeypatch.setattr(
+        selections,
+        "get_hypothesis_selection",
+        lambda *_args, **_kwargs: {
+            "selection": {
+                "scopeHash": "scope-authorities",
+                "questionId": "SCI-091",
+                "selectedCandidateIds": ["H1", "H2"],
+            }
+        },
+    )
+    monkeypatch.setattr(chain, "_build_round_candidates", lambda *_a, **_k: candidates)
+    monkeypatch.setattr(
+        hrounds,
+        "generate_hypothesis_round_from_meeting",
+        lambda *_args, **_kwargs: {"status": "created", "round": round_record},
+    )
+
+    def explode(**_kwargs):
+        raise RuntimeError("dimension artifact store unavailable")
+
+    monkeypatch.setattr(
+        dimension_reviews_artifact_writer,
+        "materialize_dimension_reviews_authority",
+        explode,
+    )
+    independence_calls: list[dict[str, object]] = []
+
+    def write_independence(**kwargs):
+        independence_calls.append(kwargs)
+        return {"status": "written"}
+
+    monkeypatch.setattr(
+        review_independence_artifact_writer,
+        "write_review_independence_artifacts",
+        write_independence,
+    )
+
+    result = chain._generate_hypothesis_round(team_id, meeting)
+
+    dimension_authority = result["dimensionReviewsAuthority"]
+    assert dimension_authority["status"] == "blocked"
+    assert (
+        dimension_authority["blockerCodes"]
+        == ["dimension_reviews_authority_persistence_failed"]
+    )
+    # The real failure surfaces verbatim; no swallowed NameError.
+    assert "dimension artifact store unavailable" in str(dimension_authority["error"])
+    assert "NameError" not in str(dimension_authority["error"])
+    # The downstream authority still receives the bound run identity.
+    assert result["reviewIndependenceAuthority"]["status"] == "written"
+    assert independence_calls[0]["workflow_run_id"] == "workflow-authorities"
+    assert independence_calls[0]["node_run_id"] == "node-authorities"
+
+
 def _canonical_stage_one_question_detail() -> dict[str, Any]:
     return {
         "record": {
@@ -6587,3 +6699,168 @@ def test_round_failure_traces_persist_and_backfill_on_retry(
             )
     finally:
         runtime.close()
+# ---------------------------------------------------------------------------
+# V2 operator stop semantics: a stalled meeting that already produced
+# completed messages must terminate through a real stopped-execution close
+# instead of raising "cannot be superseded"; an empty attempt keeps the
+# superseded recovery semantics.
+# ---------------------------------------------------------------------------
+
+
+def _stage_stopped_v2_meeting(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
+    """Create one open review meeting bound to a room round with one
+    completed, citable message; project the exact V2 stop offer."""
+
+    from core.web.services.team_workflow.research_runtime import hypothesis_first_state_v2
+
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
+    monkeypatch.setattr(chain, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(meetings, "PROJECT_ROOT", tmp_path)
+    meetings.create_meeting_round(
+        "team-1",
+        {
+            "program": "XH-202619",
+            "theme": "cc-gpu-operator-001",
+            "campaign": "cc-campaign-gpu-operator-001",
+            "question": "SCI-091",
+            "branch": "main",
+            "workflow": "hypothesis_and_plan",
+            "agentId": "agent-coordinator",
+            "mode": "formal",
+            "meetingRoundId": "meeting-v2-stop",
+            "meetingType": "hypothesis_review",
+            "participants": ["agent-alpha", "agent-beta"],
+            "discussionItemRefs": ["hypothesis_round:hround-demo-1"],
+        },
+    )
+    meetings.bind_meeting_chat_room_round(
+        "team-1", "meeting-v2-stop", "room-stop-1", "round-stop-1"
+    )
+    monkeypatch.setattr(
+        chat_room_service,
+        "get_chat_room_detail",
+        lambda room_id: (
+            {
+                "roomId": "room-stop-1",
+                "rounds": [
+                    {
+                        "roundId": "round-stop-1",
+                        "status": "completed",
+                        "messages": [
+                            {
+                                "status": "completed",
+                                "speakerTitle": "研究员",
+                                "content": "DISAGREE: hyp-b 的泛化证据不足",
+                            }
+                        ],
+                    }
+                ],
+            }
+            if room_id == "room-stop-1"
+            else None
+        ),
+    )
+    snapshot = {
+        "stateVersion": "hf2-action:pending:pending",
+        "allowedActions": [
+            {
+                "kind": "command",
+                "actionId": "stop-discussion:meeting-v2-stop",
+                "command": "stop_discussion",
+                "payload": {"meetingRoundId": "meeting-v2-stop"},
+                "enabled": True,
+                "idempotencyKey": "hf2:stop-discussion:meeting-v2-stop:k1",
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        hypothesis_first_state_v2,
+        "project_hypothesis_first_state_v2",
+        lambda *_args, **_kwargs: snapshot,
+    )
+    return "team-1"
+
+
+def test_v2_stop_discussion_terminates_stalled_meeting_with_completed_messages(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    team_id = _stage_stopped_v2_meeting(tmp_path, monkeypatch)
+
+    envelope = chain.execute_v2_command(
+        team_id,
+        {
+            "actionId": "stop-discussion:meeting-v2-stop",
+            "idempotencyKey": "hf2:stop-discussion:meeting-v2-stop:k1",
+            "expectedStateVersion": "hf2-action:pending:pending",
+            "command": "stop_discussion",
+            "payload": {"meetingRoundId": "meeting-v2-stop"},
+        },
+        question_id="SCI-091",
+    )
+
+    assert envelope["result"]["status"] == "stopped"
+    meeting = meetings.get_meeting_round(team_id, "meeting-v2-stop")["meetingRound"]
+    assert meeting["status"] == "closed"
+    assert meeting["executionStatus"] == "stopped"
+    assert meeting["recoveryReason"] == "operator_stop_discussion"
+    assert meeting["closedBy"] == "operator:v2-stop-discussion"
+    # The transcript and any produced draft survive the stop; only the digest
+    # promotion is withheld.
+    assert len(meetings.completed_meeting_source_messages(meeting)) == 1
+    assert not meeting.get("digestId")
+
+    # Replaying the same command idempotently reuses the stopped record.
+    replay = chain.execute_v2_command(
+        team_id,
+        {
+            "actionId": "stop-discussion:meeting-v2-stop",
+            "idempotencyKey": "hf2:stop-discussion:meeting-v2-stop:k1",
+            "expectedStateVersion": "hf2-action:pending:pending",
+            "command": "stop_discussion",
+            "payload": {"meetingRoundId": "meeting-v2-stop"},
+        },
+        question_id="SCI-091",
+    )
+    assert replay["result"]["status"] == "reused"
+
+
+def test_v2_stop_discussion_keeps_supersede_semantics_for_empty_attempts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    team_id = _stage_stopped_v2_meeting(tmp_path, monkeypatch)
+    # Empty attempt: the bound room round carries no citable message.
+    monkeypatch.setattr(
+        chat_room_service,
+        "get_chat_room_detail",
+        lambda room_id: (
+            {
+                "roomId": "room-stop-1",
+                "rounds": [
+                    {"roundId": "round-stop-1", "status": "completed", "messages": []}
+                ],
+            }
+            if room_id == "room-stop-1"
+            else None
+        ),
+    )
+
+    envelope = chain.execute_v2_command(
+        team_id,
+        {
+            "actionId": "stop-discussion:meeting-v2-stop",
+            "idempotencyKey": "hf2:stop-discussion:meeting-v2-stop:k1",
+            "expectedStateVersion": "hf2-action:pending:pending",
+            "command": "stop_discussion",
+            "payload": {"meetingRoundId": "meeting-v2-stop"},
+        },
+        question_id="SCI-091",
+    )
+
+    assert envelope["result"]["status"] == "superseded"
+    meeting = meetings.get_meeting_round(team_id, "meeting-v2-stop")["meetingRound"]
+    assert meeting["status"] == "closed"
+    assert meeting["recoveryReason"] == "discussion_has_no_completed_messages"
+    assert (
+        meeting["summaryDraftError"]["code"] == "discussion_has_no_completed_messages"
+    )
+    assert not meeting.get("executionStatus")
