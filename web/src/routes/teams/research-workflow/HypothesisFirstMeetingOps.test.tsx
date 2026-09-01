@@ -74,6 +74,32 @@ const AUTO_ACTION: HypothesisFirstNextAction = {
   recovery: null,
 };
 
+const APPROVE_SUMMARY_ACTION = {
+  kind: "command" as const,
+  actionId: "approve-summary:meeting-1",
+  label: "确认本轮结论",
+  enabled: true,
+  disabledReason: null,
+  targetPhase: "review" as const,
+  targetNodeId: "hf_review",
+  command: "approve_summary" as const,
+  payload: { meetingRoundId: "meeting-1" },
+  inputSchemaRef: "hypothesis-first/approve-summary/v1",
+  idempotencyKey: "hf2:approve-summary:meeting-1",
+  expectedStateVersion: "hf2-action:origin:current",
+  requiresConfirmation: false,
+  confirmationText: null,
+};
+
+const AWAITING_REVIEW_ACTION: HypothesisFirstNextAction = {
+  ...AUTO_ACTION,
+  stateSource: "v2_canonical",
+  stage: "review_awaiting_approval",
+  command: "approve_review_digest",
+  commandLabel: "确认并结束本轮",
+  canonicalAction: APPROVE_SUMMARY_ACTION,
+};
+
 let container: HTMLDivElement;
 let root: Root;
 let queryClient: QueryClient;
@@ -109,6 +135,36 @@ function renderScoped(nextAction: HypothesisFirstNextAction, runId: string) {
       </QueryClientProvider>,
     );
   });
+}
+
+function renderApproved(nextAction: HypothesisFirstNextAction, onApproved: () => void) {
+  act(() => {
+    root.render(
+      <QueryClientProvider client={queryClient}>
+        <HypothesisFirstMeetingOps
+          teamId="team-1"
+          questionId="Q-01"
+          meetingRoundId="meeting-1"
+          nextAction={nextAction}
+          compact
+          onApproved={onApproved}
+        />
+      </QueryClientProvider>,
+    );
+  });
+}
+
+function commandReceipt(result: Record<string, unknown>) {
+  return {
+    schemaVersion: 2,
+    teamId: "team-1",
+    questionId: "Q-01",
+    command: "approve_summary",
+    actionId: "approve-summary:meeting-1",
+    idempotencyKey: "hf2:approve-summary:meeting-1",
+    acceptedStateVersion: "hf2-action:origin:current",
+    result,
+  } as never;
 }
 
 describe("HypothesisFirstMeetingOps automatic organization", () => {
@@ -690,5 +746,151 @@ describe("HypothesisFirstMeetingOps automatic organization", () => {
       await Promise.resolve();
     });
     expect(mockedDraftMeetingSummary).toHaveBeenCalledTimes(2);
+  });
+
+  it("surfaces skipped evidence requests with readable reasons on a successful close", async () => {
+    const mockedApprove = vi.mocked(approveHypothesisDigest);
+    mockedApprove.mockResolvedValueOnce({
+      closed: true,
+      collection: {
+        skipped: [
+          { decisionId: "d-1", reason: "search_envelope_missing" },
+          { decisionId: "d-2", reason: "collection_payload_invalid" },
+        ],
+      },
+      hypothesisRound: { roundId: "r-1", status: "open" },
+    } as never);
+    mockedFetchMeetingRound.mockResolvedValue({
+      schemaVersion: 1,
+      teamId: "team-1",
+      meetingRound: meetingRound("awaiting_approval"),
+    });
+    render({
+      ...AUTO_ACTION,
+      stage: "review_awaiting_approval",
+      command: "approve_review_digest",
+      commandLabel: "确认并结束本轮",
+    });
+
+    await act(async () => {
+      await vi.waitFor(() => {
+        const button = [...container.querySelectorAll("button")]
+          .find((item) => item.textContent?.includes("确认并结束本轮"));
+        expect(button).toBeTruthy();
+        button?.click();
+      });
+      await vi.waitFor(() => expect(mockedApprove).toHaveBeenCalledTimes(1));
+    });
+
+    const notice = container.querySelector('[data-testid="dropped-request-notice"]');
+    expect(notice?.textContent).toContain("2 条证据请求被跳过");
+    expect(notice?.textContent).toContain("缺少检索关键词");
+    expect(notice?.textContent).toContain("搜集要求无效");
+  });
+
+  it("treats a canonical rejection as a redraft instead of an approval", async () => {
+    const onApproved = vi.fn();
+    mockedFetchMeetingRound.mockResolvedValue({
+      schemaVersion: 1,
+      teamId: "team-1",
+      meetingRound: { ...meetingRound("awaiting_approval"), meetingType: "hypothesis_review" },
+    });
+    mockedExecuteCommand.mockResolvedValueOnce(commandReceipt({
+      schemaVersion: 1,
+      teamId: "team-1",
+      status: "summarizing",
+      meetingRound: meetingRound("summarizing"),
+    }));
+    renderApproved(AWAITING_REVIEW_ACTION, onApproved);
+
+    await act(async () => {
+      await vi.waitFor(() => expect(container.textContent).toContain("退回重新整理"));
+      const reject = [...container.querySelectorAll("button")]
+        .find((button) => button.textContent?.includes("退回重新整理"));
+      reject?.click();
+      await vi.waitFor(() => expect(mockedExecuteCommand).toHaveBeenCalledTimes(1));
+    });
+
+    expect(mockedExecuteCommand).toHaveBeenCalledWith(
+      "team-1",
+      "Q-01",
+      APPROVE_SUMMARY_ACTION,
+      { decision: "rejected" },
+      { runId: undefined },
+    );
+    const notice = container.querySelector('[data-testid="reject-notice"]');
+    expect(notice?.textContent).toContain("已退回");
+    expect(notice?.textContent).toContain("重新整理");
+    expect(mockedDraftMeetingSummary).not.toHaveBeenCalled();
+    expect(onApproved).not.toHaveBeenCalled();
+  });
+
+  it("surfaces the prepare blocker when a rejection cannot re-organize the draft", async () => {
+    const onApproved = vi.fn();
+    mockedFetchMeetingRound.mockResolvedValue({
+      schemaVersion: 1,
+      teamId: "team-1",
+      meetingRound: { ...meetingRound("awaiting_approval"), meetingType: "hypothesis_review" },
+    });
+    mockedExecuteCommand.mockResolvedValueOnce(commandReceipt({
+      schemaVersion: 1,
+      teamId: "team-1",
+      status: "blocked",
+      blocker: {
+        code: "discussion_has_no_completed_messages",
+        message: "讨论未产出可引用的成功发言，不能生成纪要",
+      },
+      meetingRound: meetingRound("awaiting_approval"),
+    }));
+    renderApproved(AWAITING_REVIEW_ACTION, onApproved);
+
+    await act(async () => {
+      await vi.waitFor(() => expect(container.textContent).toContain("退回重新整理"));
+      const reject = [...container.querySelectorAll("button")]
+        .find((button) => button.textContent?.includes("退回重新整理"));
+      reject?.click();
+      await vi.waitFor(() => expect(mockedExecuteCommand).toHaveBeenCalledTimes(1));
+    });
+
+    const notice = container.querySelector('[data-testid="reject-notice"]');
+    expect(notice?.textContent).toContain("已退回");
+    expect(notice?.textContent).toContain("不能重新整理结论");
+    expect(onApproved).not.toHaveBeenCalled();
+  });
+
+  it("still triggers onApproved after a canonical confirmation succeeds", async () => {
+    const onApproved = vi.fn();
+    mockedFetchMeetingRound.mockResolvedValue({
+      schemaVersion: 1,
+      teamId: "team-1",
+      meetingRound: { ...meetingRound("awaiting_approval"), meetingType: "hypothesis_review" },
+    });
+    mockedExecuteCommand.mockResolvedValueOnce(commandReceipt({
+      closed: true,
+      collection: { requests: [], skipped: [] },
+      hypothesisRound: { roundId: "r-1", status: "open" },
+      meetingRound: meetingRound("closed"),
+      digest: {},
+      decisions: [],
+    }));
+    renderApproved(AWAITING_REVIEW_ACTION, onApproved);
+
+    await act(async () => {
+      await vi.waitFor(() => {
+        const button = [...container.querySelectorAll("button")]
+          .find((item) => item.textContent?.includes("确认并结束本轮"));
+        expect(button).toBeTruthy();
+        button?.click();
+      });
+      await vi.waitFor(() => expect(onApproved).toHaveBeenCalledTimes(1));
+    });
+
+    expect(mockedExecuteCommand).toHaveBeenCalledWith(
+      "team-1",
+      "Q-01",
+      APPROVE_SUMMARY_ACTION,
+      { decision: "accepted" },
+      { runId: undefined },
+    );
   });
 });

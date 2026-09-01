@@ -234,12 +234,27 @@ export type MeetingRoundGetResponse = {
   storagePath?: string;
 };
 
+/**
+ * One evidence request dropped while closing a review meeting; reported in
+ * the close result's `collection.skipped` so the UI can surface the cause
+ * instead of silently leaving the request pending.
+ */
+export type MeetingCollectionSkippedItem = {
+  decisionId: string;
+  reason: string;
+  error?: string;
+};
+
 export type MeetingRoundMutationResponse = {
   schemaVersion: number;
   teamId: string;
   status: string;
   meetingRound: MeetingRoundRecord;
   digestDraft?: MeetingDigestDraft | null;
+  /** Present when a close reports dropped evidence requests. */
+  collection?: {
+    skipped?: MeetingCollectionSkippedItem[];
+  };
   storagePath?: string;
 };
 
@@ -968,7 +983,7 @@ export type CloseReviewMeetingResponse = {
   decisions: DecisionRecordView[];
   collection: {
     requests?: CollectionRequestRecord[];
-    skipped?: Array<Record<string, unknown>>;
+    skipped?: MeetingCollectionSkippedItem[];
   };
   hypothesisRound?: HypothesisRoundRecord | null;
   resume?: Record<string, unknown> | null;

@@ -29,6 +29,80 @@ import styles from "./HypothesisFirstMeetingOps.styles";
 
 type Language = "zh" | "en";
 
+/**
+ * Human-readable reasons for evidence requests dropped during a successful
+ * close. Mirrors the `reason` values built by the chain's collection step
+ * (`decision_not_persisted`, `search_envelope_missing`/`invalid`,
+ * `collection_payload_invalid`); unknown codes fall through verbatim.
+ */
+const SKIPPED_REASON_LABELS: Record<string, { zh: string; en: string }> = {
+  decision_not_persisted: {
+    zh: "该请求未随结论持久化",
+    en: "the decision was not persisted with the closure",
+  },
+  search_envelope_missing: {
+    zh: "缺少检索关键词",
+    en: "search keywords are missing",
+  },
+  search_envelope_invalid: {
+    zh: "检索参数无效",
+    en: "the search parameters are invalid",
+  },
+  collection_payload_invalid: {
+    zh: "搜集要求无效",
+    en: "the collection requirements are invalid",
+  },
+};
+
+function describeSkippedReason(reason: string, isZh: boolean): string {
+  const label = SKIPPED_REASON_LABELS[reason];
+  if (label) return isZh ? label.zh : label.en;
+  return reason;
+}
+
+/** Readable text for a prepare-draft `{status:"blocked", blocker}` response. */
+const PREPARE_BLOCKER_LABELS: Record<string, { zh: string; en: string }> = {
+  discussion_round_running: {
+    zh: "讨论回合仍在进行，全部结束后才能重新整理结论",
+    en: "A discussion round is still running; the conclusion can be re-organized only after all rounds finish",
+  },
+  discussion_has_no_completed_messages: {
+    zh: "讨论未产出可引用的成功发言，不能重新整理结论",
+    en: "The discussion produced no successful statements to cite; the conclusion cannot be re-organized",
+  },
+};
+
+function describePrepareBlocker(payload: unknown, isZh: boolean): string | null {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  const record = payload as Record<string, unknown>;
+  if (String(record.status ?? "") !== "blocked") return null;
+  const blocker = record.blocker;
+  if (!blocker || typeof blocker !== "object") {
+    return isZh ? "系统暂时无法重新整理结论" : "The system cannot re-organize the conclusion right now";
+  }
+  const info = blocker as Record<string, unknown>;
+  const label = PREPARE_BLOCKER_LABELS[String(info.code ?? "")];
+  if (label) return isZh ? label.zh : label.en;
+  const message = String(info.message ?? "").trim();
+  if (message) return message;
+  const code = String(info.code ?? "").trim();
+  return code || (isZh ? "系统暂时无法重新整理结论" : "The system cannot re-organize the conclusion right now");
+}
+
+/**
+ * Reject responses come in two envelopes: a V2 command receipt wraps the
+ * prepare-draft result in `result`, while the legacy digest-reject endpoint
+ * returns the prepare/blocked shape directly. Unwrap to the inner response.
+ */
+function prepareResponseFromMutationPayload(payload: unknown): unknown {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return payload;
+  if ("result" in payload) {
+    const result = (payload as { result?: unknown }).result;
+    if (result && typeof result === "object" && !Array.isArray(result)) return result;
+  }
+  return payload;
+}
+
 export function HypothesisFirstMeetingOps(props: {
   lang?: Language;
   teamId: string;
@@ -153,6 +227,7 @@ export function HypothesisFirstMeetingOps(props: {
       });
     },
     onSuccess: (payload) => {
+      setRejectNotice(null);
       // The API returns 200 with closed=false + validationErrors when the
       // digest cannot be confirmed; surface it instead of a silent no-op.
       if (payload && payload.closed === false) {
@@ -173,14 +248,22 @@ export function HypothesisFirstMeetingOps(props: {
         );
       } else {
         setApproveBlockedReason(null);
-        // Partially-invalid requests are dropped on a successful close; make
-        // that visible so the affected candidates are not silently waiting.
-        const dropped = (payload?.validationErrors ?? []).map((item) => item.message).filter(Boolean);
+        // Partially-invalid evidence requests are dropped on a successful
+        // close and reported in collection.skipped ({decisionId, reason,
+        // error?}); validationErrors only exists on the closed=false branch.
+        const skipped = payload?.collection?.skipped ?? [];
+        const reasons = [
+          ...new Set(
+            skipped
+              .map((item) => describeSkippedReason(String(item?.reason ?? ""), isZh))
+              .filter(Boolean),
+          ),
+        ];
         setDroppedRequestNotice(
-          dropped.length
+          skipped.length
             ? (isZh
-              ? `本轮已确认，但 ${dropped.length} 条证据请求因格式无效被跳过：${dropped.join("；")}`
-              : `The round was confirmed, but ${dropped.length} invalid evidence requests were skipped: ${dropped.join("; ")}`)
+              ? `本轮已确认，但 ${skipped.length} 条证据请求被跳过：${reasons.join("；")}`
+              : `The round was confirmed, but ${skipped.length} evidence requests were skipped: ${reasons.join("; ")}`)
             : null,
         );
       }
@@ -221,8 +304,25 @@ export function HypothesisFirstMeetingOps(props: {
       }
       return canonicalActionUnavailable();
     },
-    onSuccess: () => {
+    onSuccess: (payload) => {
       setApproveBlockedReason(null);
+      setDroppedRequestNotice(null);
+      // A rejection is never a confirmation: never call onApproved here.
+      // V2 responds with the re-prepared draft (or a blocked prepare result);
+      // surface the blocker instead of pretending the redraft is running.
+      const blockerText = describePrepareBlocker(
+        prepareResponseFromMutationPayload(payload),
+        isZh,
+      );
+      setRejectNotice(
+        blockerText
+          ? (isZh
+            ? `结论已退回，但系统暂时无法重新整理：${blockerText}`
+            : `The conclusion was sent back, but it cannot be re-organized yet: ${blockerText}`)
+          : (isZh
+            ? "系统正在重新整理结论，请稍候查看新版结论。"
+            : "The system is re-organizing the conclusion; the new version will appear shortly."),
+      );
       invalidate();
       // Reject clears the draft server-side but never re-summarizes; kick the
       // draft immediately so the round does not sit in summarizing with no
@@ -256,6 +356,7 @@ export function HypothesisFirstMeetingOps(props: {
   });
   const [reopenBlockedReason, setReopenBlockedReason] = useState<string | null>(null);
   const [droppedRequestNotice, setDroppedRequestNotice] = useState<string | null>(null);
+  const [rejectNotice, setRejectNotice] = useState<string | null>(null);
   const closeCorrectionMutation = useMutation({
     mutationFn: () =>
       closeReviewMeeting(props.teamId, props.meetingRoundId, {
@@ -511,6 +612,16 @@ export function HypothesisFirstMeetingOps(props: {
             </VButton>
           ) : undefined}
         />
+      ) : null}
+      {rejectNotice ? (
+        <VStateSurface
+          tone="info"
+          density="compact"
+          title={isZh ? "本轮结论已退回" : "Conclusion sent back"}
+          data-testid="reject-notice"
+        >
+          {rejectNotice}
+        </VStateSurface>
       ) : null}
       {droppedRequestNotice ? (
         <VErrorSummary
