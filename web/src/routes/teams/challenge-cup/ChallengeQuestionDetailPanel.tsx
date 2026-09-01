@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, MoreHorizontal, RotateCcw } from "lucide-react";
+import { ArrowLeft, Download, MoreHorizontal, RotateCcw } from "lucide-react";
 
 import { queryKeys } from "../../../api/queryKeys";
 import { fetchChallengeCupTokenUsage } from "../../../api/teamExperiment";
+import { fetchHypothesisRounds } from "../../../api/hypothesisFirst";
 
 import type { ChallengeQuestionRunDetailPayload } from "../../../api/types";
 import {
@@ -29,6 +30,9 @@ import { ChallengeQuestionRunResetDialog } from "./ChallengeQuestionRunResetDial
 import { HypothesisSelectionPanel } from "./HypothesisSelectionPanel";
 import { ChallengeQuestionTokenUsage } from "./ChallengeTokenUsageStrip";
 import { isTokenUsageOverview, questionTokenUsage } from "./challengeTokenUsageModel";
+import {
+  exportQuestionArchivePage,
+} from "./questionArchiveExport";
 import {
   challengeRecordStatusLabel,
   ChallengeQuestionSectionHeading,
@@ -108,6 +112,8 @@ export function ChallengeQuestionDetailPanel({
 }: ChallengeQuestionDetailPanelProps) {
   const [reviseDialogOpen, setReviseDialogOpen] = useState(false);
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
+  const [archiveExportState, setArchiveExportState] = useState<"idle" | "pending" | "error">("idle");
+  const [archiveExportError, setArchiveExportError] = useState("");
   const { lang } = useShellI18n();
   const isZh = lang === "zh";
   const detailAnchors = isZh ? DETAIL_ANCHORS_ZH : DETAIL_ANCHORS_EN;
@@ -129,7 +135,32 @@ export function ChallengeQuestionDetailPanel({
       : "success";
   const resetTargetTeamId = detail?.teamId || teamId;
   const canResetQuestionRun = Boolean(resetTargetTeamId.trim() && requestedQuestionId.trim());
-  const questionResetMenu = canResetQuestionRun ? (
+  const archiveExportPending = archiveExportState === "pending";
+  /**
+   * Single-file HTML artifact page export (judge/demo handoff). Runs from the
+   * in-memory detail payload; the review-round ledger is fetched lazily and a
+   * failure only degrades that section instead of blocking the export.
+   */
+  const handleExportArchivePage = () => {
+    if (!detail || archiveExportState === "pending") return;
+    setArchiveExportState("pending");
+    setArchiveExportError("");
+    const exportTeamId = detail.teamId || teamId;
+    void exportQuestionArchivePage({
+      detail,
+      teamId: exportTeamId,
+      lang: isZh ? "zh" : "en",
+      fetchRounds: fetchHypothesisRounds,
+    })
+      .then(() => {
+        setArchiveExportState("idle");
+      })
+      .catch((error: unknown) => {
+        setArchiveExportState("error");
+        setArchiveExportError(error instanceof Error ? error.message : String(error));
+      });
+  };
+  const questionResetMenu = (canResetQuestionRun || detail) ? (
     <VDropdownMenu
       aria-label={isZh ? "本题更多操作" : "More actions for this question"}
       trigger={
@@ -143,13 +174,22 @@ export function ChallengeQuestionDetailPanel({
         </VButton>
       }
       items={[
-        {
+        ...(detail ? [{
+          id: "export-question-archive",
+          label: archiveExportPending
+            ? (isZh ? "正在导出产物页…" : "Exporting artifact page…")
+            : (isZh ? "导出产物页" : "Export artifact page"),
+          icon: <Download size={15} aria-hidden="true" />,
+          disabled: archiveExportPending,
+          onSelect: handleExportArchivePage,
+        }] : []),
+        ...(canResetQuestionRun ? [{
           id: "reset-question-run",
           label: isZh ? "重置本题运行" : "Reset this question run",
           icon: <RotateCcw size={15} aria-hidden="true" />,
           danger: true,
           onSelect: () => setResetDialogOpen(true),
-        },
+        }] : []),
       ]}
     />
   ) : null;
@@ -288,12 +328,41 @@ export function ChallengeQuestionDetailPanel({
               {isZh ? "登记修订产出" : "Register revision output"}
             </VButton>
           ) : null}
+          {readOnlyArchive ? (
+            <VButton
+              density="compact"
+              variant="secondary"
+              data-testid="question-archive-export"
+              icon={<Download size={15} aria-hidden="true" />}
+              isPending={archiveExportPending}
+              onPress={handleExportArchivePage}
+            >
+              {archiveExportPending
+                ? (isZh ? "导出中…" : "Exporting…")
+                : (isZh ? "导出产物页" : "Export artifact page")}
+            </VButton>
+          ) : null}
           {readOnlyArchive ? null : questionResetMenu}
           <VButton density="compact" icon={<ArrowLeft size={15} aria-hidden="true" />} onPress={onClose} variant="secondary">
             {isZh ? (readOnlyArchive ? "返回当前任务" : "返回题目列表") : (readOnlyArchive ? "Back to current task" : "Back to question list")}
           </VButton>
         </div>
       </header>
+
+      {archiveExportState === "error" ? (
+        <div className={css.headerActions} data-testid="question-archive-export-error">
+          <VErrorSummary
+            tone="warning"
+            label={isZh ? "导出产物页失败" : "Artifact page export failed"}
+            summary={isZh
+              ? "产物页未导出，当前任务不受影响；可通过“导出产物页”重试。"
+              : "The artifact page was not exported; the current task is unaffected. Retry via Export artifact page."}
+            details={archiveExportError ? <code>{archiveExportError}</code> : undefined}
+            openLabel={isZh ? "技术细节" : "Technical details"}
+            closeLabel={isZh ? "收起" : "Hide details"}
+          />
+        </div>
+      ) : null}
 
       <nav className={css.anchorNav} aria-label={isZh ? (readOnlyArchive ? "题目档案章节" : "单题验收章节") : (readOnlyArchive ? "Question archive sections" : "Acceptance sections")}>
         {(readOnlyArchive

@@ -168,6 +168,43 @@ function detail(): ChallengeQuestionRunDetailPayload {
   };
 }
 
+describe("ChallengeQuestionDetailPanel archive export", () => {
+  it("offers the single-file artifact page export in the question's more-actions menu", () => {
+    expect(detailPanelSource).toContain("export-question-archive");
+    expect(detailPanelSource).toContain("导出产物页");
+    expect(detailPanelSource).toContain("handleExportArchivePage");
+    expect(detailPanelSource).toContain("exportQuestionArchivePage");
+    expect(detailPanelSource).toContain("fetchHypothesisRounds");
+
+    const markup = renderPanel(
+      <ChallengeQuestionDetailPanel
+        requestedQuestionId="SCI-096"
+        detail={detail()}
+        isLoading={false}
+        onClose={() => undefined}
+      />,
+    );
+    expect(markup).toContain('aria-label="本题更多操作"');
+  });
+
+  it("exposes a direct export entry on the read-only archive surface", () => {
+    const markup = renderPanel(
+      <ChallengeQuestionDetailPanel
+        requestedQuestionId="SCI-096"
+        detail={detail()}
+        isLoading={false}
+        readOnlyArchive
+        onClose={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain('data-testid="question-archive-export"');
+    expect(markup).toContain("导出产物页");
+    // The archive stays free of the acceptance more-actions surface.
+    expect(markup).not.toContain("更多操作");
+  });
+});
+
 describe("ChallengeQuestionDetailPanel reset entry", () => {
   it("keeps the destructive action in this question's header menu", () => {
     expect(detailPanelSource).toContain("本题更多操作");
