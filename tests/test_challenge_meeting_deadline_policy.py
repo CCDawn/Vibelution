@@ -7,6 +7,10 @@ import pytest
 from core.research.workflow.contracts.model_invocation_receipt import (
     ModelInvocationReceipt,
 )
+from core.research.workflow.contracts.review_call_budget import (
+    MAX_BUDGET_FINALIST_COUNT,
+    review_call_budget_for,
+)
 from core.web.services.team_workflow import challenge_deadline_policy as policy
 from core.web.services.team_workflow.research_runtime import (
     model_invocation_receipt_registry as receipt_registry,
@@ -74,19 +78,23 @@ def test_operator_override_is_bounded(monkeypatch):
     }
 
 
-def test_meeting_budget_sums_serial_speakers_and_digest(monkeypatch):
+def _stub_call_budget(monkeypatch, per_call_ms: int = 300_000) -> None:
     monkeypatch.setattr(policy, "_participant_model_refs", lambda _ids: ["p/m"])
     monkeypatch.setattr(
         policy,
         "derive_per_call_budget",
         lambda *_args, **_kwargs: {
-            "perCallBudgetMs": 300_000,
+            "perCallBudgetMs": per_call_ms,
             "latencyP95Ms": 100_000,
             "sampleCount": 24,
             "sampleSource": "provider_model_purpose_p95",
             "overrideEnv": "",
         },
     )
+
+
+def test_meeting_budget_sums_serial_speakers_and_digest(monkeypatch):
+    _stub_call_budget(monkeypatch)
 
     result = policy.derive_meeting_deadline_policy(
         "research-team",
@@ -95,6 +103,8 @@ def test_meeting_budget_sums_serial_speakers_and_digest(monkeypatch):
     )
 
     assert result["plannedSerialCallCount"] == 9
+    assert result["plannedCallCountBasis"] == "speakers_plus_digest"
+    assert result["reviewFinalistCount"] == 0
     assert result["meetingBudgetMs"] == 2_700_000
     assert result["meetingDeadlineAtMs"] == 3_700_000
     assert result["challengeDeadlineAtMs"] == 3_700_000
@@ -115,6 +125,129 @@ def test_meeting_budget_sums_serial_speakers_and_digest(monkeypatch):
         "outerDeadlineAtMs": 2_000_000,
         "meetingDeadlineAtMs": 3_700_000,
     }
+
+
+def test_hypothesis_review_budget_adds_exact_review_call_budget(monkeypatch):
+    _stub_call_budget(monkeypatch)
+    # Cross-check the fixture against the live contract: n=3 -> 3 + 3 + 2 = 8.
+    assert review_call_budget_for(3).totalReviewCalls == 8
+
+    result = policy.derive_meeting_deadline_policy(
+        "research-team",
+        {
+            "meetingType": "hypothesis_review",
+            "participants": ["a", "b"],
+            "rounds": 1,
+            "discussionItemRefs": [
+                "hypothesis_candidate:c1",
+                "hypothesis_candidate:c2",
+                "hypothesis_candidate:c3",
+            ],
+        },
+        server_created_at_ms=1_000_000,
+    )
+
+    assert result["reviewFinalistCount"] == 3
+    assert result["plannedCallCountBasis"] == "speakers_digest_review_call_budget"
+    # 2 speakers x 1 round + 1 digest + the exact review budget = 11.
+    assert (
+        result["plannedSerialCallCount"]
+        == 2 * 1 + 1 + review_call_budget_for(3).totalReviewCalls
+    )
+    assert result["meetingBudgetMs"] == 3_300_000
+    assert result["meetingDeadlineAtMs"] == 4_300_000
+    assert result["challengeDeadlineAtMs"] == 4_300_000
+
+
+def test_review_meeting_counts_distinct_refs_and_ignores_foreign_ones(monkeypatch):
+    _stub_call_budget(monkeypatch)
+
+    result = policy.derive_meeting_deadline_policy(
+        "research-team",
+        {
+            "meetingType": "hypothesis_review",
+            "participants": ["a"],
+            "rounds": 1,
+            "discussionItemRefs": [
+                "hypothesis_candidate:c1",
+                "hypothesis_candidate:c1",
+                "hypothesis_candidate:",
+                "other_ref:keep-out",
+            ],
+        },
+        server_created_at_ms=1_000_000,
+    )
+
+    # n=1 -> 1 + 0 + 2 = 3 review calls; 1 speaker + 1 digest + 3 = 5.
+    assert result["reviewFinalistCount"] == 1
+    assert (
+        result["plannedSerialCallCount"]
+        == 2 + review_call_budget_for(1).totalReviewCalls
+    )
+    assert result["plannedCallCountBasis"] == "speakers_digest_review_call_budget"
+
+
+def test_review_budget_clamps_to_bounded_review_context_cap(monkeypatch):
+    _stub_call_budget(monkeypatch)
+    overflow = MAX_BUDGET_FINALIST_COUNT + 1
+
+    result = policy.derive_meeting_deadline_policy(
+        "research-team",
+        {
+            "meetingType": "hypothesis_review",
+            "participants": ["a"],
+            "rounds": 1,
+            "discussionItemRefs": [
+                f"hypothesis_candidate:c{index}" for index in range(overflow)
+            ],
+        },
+        server_created_at_ms=1_000_000,
+    )
+
+    # The bounded review context truncates at the same cap, so the unreachable
+    # overflow candidates must not inflate the budget beyond the n=16 formula.
+    assert result["reviewFinalistCount"] == MAX_BUDGET_FINALIST_COUNT
+    assert (
+        result["plannedSerialCallCount"]
+        == 2 + review_call_budget_for(MAX_BUDGET_FINALIST_COUNT).totalReviewCalls
+    )
+
+
+def test_review_meeting_without_candidate_refs_keeps_legacy_estimate(monkeypatch):
+    _stub_call_budget(monkeypatch)
+
+    result = policy.derive_meeting_deadline_policy(
+        "research-team",
+        {
+            "meetingType": "hypothesis_review",
+            "participants": ["a", "b", "c", "d"],
+            "rounds": 2,
+            "discussionItemRefs": [],
+        },
+        server_created_at_ms=1_000_000,
+    )
+
+    assert result["plannedSerialCallCount"] == 9
+    assert result["plannedCallCountBasis"] == "speakers_plus_digest"
+    assert result["reviewFinalistCount"] == 0
+
+
+def test_candidate_generation_meeting_keeps_legacy_estimate(monkeypatch):
+    _stub_call_budget(monkeypatch)
+
+    result = policy.derive_meeting_deadline_policy(
+        "research-team",
+        {
+            "meetingType": "hypothesis_candidate_generation",
+            "participants": ["a", "b", "c", "d"],
+            "rounds": 2,
+        },
+        server_created_at_ms=1_000_000,
+    )
+
+    assert result["plannedSerialCallCount"] == 9
+    assert result["plannedCallCountBasis"] == "speakers_plus_digest"
+    assert result["reviewFinalistCount"] == 0
 
 
 def test_effective_call_deadline_uses_earliest_clock():
