@@ -182,6 +182,10 @@ def default_leases_for_run_kind(run_kind: str) -> list[str]:
         return [EVOLUTION_TRANSACTION_LEASE, WORKTREE_WRITE_LEASE, MEMORY_WRITE_LEASE]
     if kind == "proposal_action":
         return [POLICY_WRITE_LEASE]
+    if kind == "formal_run":
+        # A formal full run is a long, bounded local training/evaluation lane;
+        # keep concurrent evaluation work (evolution runs) off the host.
+        return [EVALUATION_LEASE]
     return []
 
 
@@ -215,6 +219,8 @@ def run_kind_from_snapshot(snapshot: dict[str, Any]) -> str:
         return "supervised_worktree_evolution_run"
     if run_id.startswith("chat-turn-"):
         return "chat_turn"
+    if run_id.startswith("full-run-execution-"):
+        return "formal_run"
     return ""
 
 

@@ -16,6 +16,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from core.infrastructure.atomic_io import atomic_write_json
 from scripts.windowless_subprocess import no_window_subprocess_kwargs
 from vibelution_storage import resolve_project_data_home
 
@@ -273,9 +274,11 @@ def run_full_run(
     output_root.mkdir(parents=True, exist_ok=True)
     log_path = output_root / "formal-run-log.json"
     result_path = output_root / "formal-run-result.json"
-    log_path.write_text(
-        json.dumps({"adapterId": adapter_id, "processes": process_records}, ensure_ascii=False, indent=2),
-        encoding="utf-8",
+    # Shared atomic-write helper (temp + fsync + os.replace) so an interrupted
+    # backend can never leave a half-written summary behind.
+    atomic_write_json(
+        log_path,
+        {"adapterId": adapter_id, "processes": process_records},
     )
     result = {
         "adapterId": FASHION_MNIST_MULTI_SEED_ADAPTER,
@@ -293,7 +296,7 @@ def run_full_run(
         "automaticPromotion": False,
         "boundaries": list(prepared["boundaries"]),
     }
-    result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    atomic_write_json(result_path, result)
     return result
 
 

@@ -230,6 +230,66 @@ def test_prepare_full_run_reports_a_bounded_self_check_timeout(tmp_path, monkeyp
         )
 
 
+def test_run_full_run_writes_summaries_atomically(tmp_path, monkeypatch):
+    from core.infrastructure import atomic_io
+
+    project_root = tmp_path / "project"
+    script_path = project_root / "experiments" / "challenge_cup_predictive_coding" / "fashion_mnist_smoke.py"
+    script_path.parent.mkdir(parents=True)
+    script_path.write_text("# trusted runner placeholder", encoding="utf-8")
+
+    def fake_run(args, **kwargs):
+        command = list(args)
+        if "--self-check" in command:
+            return subprocess.CompletedProcess(command, 0, stdout='{"status":"ok"}', stderr="")
+        output_dir = Path(command[command.index("--output-dir") + 1])
+        seed = int(command[command.index("--seed") + 1])
+        output_dir.mkdir(parents=True, exist_ok=True)
+        result = {
+            "artifactHash": f"sha256:seed-{seed}",
+            "metrics": {
+                "delta": {"mse_improvement": seed / 10000, "masked_mse_improvement": seed / 20000},
+                "variant": {"reconstruction_mse": 0.2},
+            },
+            "decision": {"status": "support"},
+        }
+        (output_dir / "result.json").write_text(json.dumps(result), encoding="utf-8")
+        return subprocess.CompletedProcess(command, 0, stdout=json.dumps(result), stderr="")
+
+    monkeypatch.setattr(formal_runner.subprocess, "run", fake_run)
+
+    # Spy on the shared atomic write helper: summaries must go through
+    # temp-file + fsync + os.replace so an interrupted run cannot leave a
+    # half-written formal-run-log.json / formal-run-result.json behind.
+    calls: list[Path] = []
+    real_atomic_write_json = atomic_io.atomic_write_json
+
+    def spy_atomic_write_json(path, payload, **kwargs):
+        calls.append(Path(path))
+        real_atomic_write_json(path, payload, **kwargs)
+
+    monkeypatch.setattr(formal_runner, "atomic_write_json", spy_atomic_write_json)
+
+    result = formal_runner.run_full_run(
+        formal_runner.FASHION_MNIST_MULTI_SEED_ADAPTER,
+        method_config=_method_config(),
+        execution_config=_execution_config(tmp_path, project_root),
+        project_root=project_root,
+    )
+
+    log_path = Path(result["logRef"])
+    result_summary_path = Path(result["resultPath"])
+    assert calls == [log_path, result_summary_path]
+    log_payload = json.loads(log_path.read_text(encoding="utf-8"))
+    assert log_payload["adapterId"] == formal_runner.FASHION_MNIST_MULTI_SEED_ADAPTER
+    assert [item["seed"] for item in log_payload["processes"]] == [17, 42, 101]
+    stored_summary = json.loads(result_summary_path.read_text(encoding="utf-8"))
+    assert stored_summary["status"] == "completed"
+    assert stored_summary["seedCount"] == 3
+    assert stored_summary["resultPath"] == str(result_summary_path)
+    assert stored_summary["aggregate"]["supportCount"] == 3
+
+
 def test_run_full_run_aggregates_fixed_seed_artifacts_without_promoting_a_research_conclusion(tmp_path, monkeypatch):
     project_root = tmp_path / "project"
     script_path = project_root / "experiments" / "challenge_cup_predictive_coding" / "fashion_mnist_smoke.py"

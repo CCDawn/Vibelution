@@ -1180,6 +1180,14 @@ def launcher_active_work_runs() -> list[dict[str, str]]:
                 force_current=str(payload.get("runId") or "").strip() == active_run_id,
             )
 
+    for payload in store.list_snapshots("formal_run"):
+        _append_active_work_run(
+            items,
+            seen,
+            kind="formal_run",
+            payload=payload,
+        )
+
     worktree_run = store.load_active_snapshot("supervised_worktree_evolution_run")
     _append_active_work_run(
         items,

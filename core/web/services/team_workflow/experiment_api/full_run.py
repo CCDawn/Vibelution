@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+from core.runtime_manager import formal_run_registry
 from core.web.services.team_workflow import experiment_kernel as _experiment_kernel
 
 _FORMAL_EXECUTION_PATH_KEYS = ("pythonExecutable", "dataRoot", "outputRoot")
@@ -217,6 +218,27 @@ def prepare_experiment_full_run(team_id: str, plan_id: str, payload: dict[str, A
         },
     }
 
+def _assert_exclusive_formal_output_root(execution_config: dict[str, Any] | None) -> None:
+    """Refuse to start when another active formal run owns an overlapping outputRoot.
+
+    The per-plan ``activeFullRunExecution`` guard cannot see a concurrent run of
+    a different plan.  Two formal runs sharing or nesting an outputRoot would
+    overwrite each other's seed directories and summary artifacts, so the check
+    fails closed (including when the snapshot store itself is unreadable).
+    """
+
+    output_root = str((execution_config or {}).get("outputRoot") or "").strip()
+    s = _service()
+    try:
+        formal_run_registry.assert_output_root_is_exclusive(output_root)
+    except formal_run_registry.FormalRunOutputRootConflict as exc:
+        raise s.TeamWorkflowOrchestrationError(str(exc)) from exc
+    except OSError as exc:
+        raise s.TeamWorkflowOrchestrationError(
+            f"Unable to inspect active formal runs before start: {exc}"
+        ) from exc
+
+
 def execute_experiment_full_run(team_id: str, plan_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     """Run an explicitly selected formal adapter and store review-only artifacts.
 
@@ -271,6 +293,18 @@ def execute_experiment_full_run(team_id: str, plan_id: str, payload: dict[str, A
                 "A formal full run is already executing for this plan."
             )
         s._require_formal_full_run_ready(plan)
+        # C7 active-work registration: check outputRoot exclusivity and publish
+        # the running snapshot before the plan flips to full_run_running, so a
+        # restart/Launcher probe can never miss a synchronous training run.
+        _assert_exclusive_formal_output_root(execution_config)
+        formal_run_registry.register_active_formal_run(
+            run_id=execution_id,
+            output_root=str(execution_config.get("outputRoot") or ""),
+            team_id=normalized_team_id,
+            plan_id=normalized_plan_id,
+            adapter_id=adapter_id,
+            started_at=started_at,
+        )
         plan["status"] = "full_run_running"
         plan["activeFullRunExecution"] = {
             "executionId": execution_id,
@@ -310,6 +344,7 @@ def execute_experiment_full_run(team_id: str, plan_id: str, payload: dict[str, A
             project_root=s.PROJECT_ROOT,
         )
     except s.formal_runner.FormalRunnerError as exc:
+        formal_run_registry.complete_formal_run(run_id=execution_id, status="failed", error=str(exc))
         s._record_formal_full_run_execution(
             normalized_team_id,
             normalized_plan_id,
@@ -327,21 +362,30 @@ def execute_experiment_full_run(team_id: str, plan_id: str, payload: dict[str, A
         )
         raise s.TeamWorkflowOrchestrationError(str(exc)) from exc
 
-    execution_record = s._record_formal_full_run_execution(
-        normalized_team_id,
-        normalized_plan_id,
-        execution_id=execution_id,
-        adapter_id=adapter_id,
-        recorded_by_agent=recorded_by_agent,
-        started_at=started_at,
-        status="completed",
-        result=runner_result,
-        preparation=preparation_snapshot,
-        plan_revision=plan_revision,
-        execution_config=execution_config,
-        method_config=method_config,
-        method_config_digest=method_config_digest,
-    )
+    try:
+        execution_record = s._record_formal_full_run_execution(
+            normalized_team_id,
+            normalized_plan_id,
+            execution_id=execution_id,
+            adapter_id=adapter_id,
+            recorded_by_agent=recorded_by_agent,
+            started_at=started_at,
+            status="completed",
+            result=runner_result,
+            preparation=preparation_snapshot,
+            plan_revision=plan_revision,
+            execution_config=execution_config,
+            method_config=method_config,
+            method_config_digest=method_config_digest,
+        )
+    except BaseException:
+        formal_run_registry.complete_formal_run(
+            run_id=execution_id,
+            status="failed",
+            error="formal run execution record failed",
+        )
+        raise
+    formal_run_registry.complete_formal_run(run_id=execution_id, status="completed")
     with s._WORKFLOW_LOCK:
         plan_store = s._load_experiment_plan_store(normalized_team_id)
         plan = s._find_experiment_plan(plan_store, normalized_plan_id)

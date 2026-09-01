@@ -336,6 +336,7 @@ def _runtime_manager_active_work_runs() -> list[dict[str, str]]:
         "chat_turn",
         "chat_room_round",
         "supervised_worktree_evolution_run",
+        "formal_run",
     ):
         source = f"work_run_store:{kind}"
         try:
@@ -388,6 +389,7 @@ def _persistent_active_work_run_snapshots() -> list[dict[str, Any]]:
         "self_evolution_run",
         "supervised_evolution_run",
         "supervised_worktree_evolution_run",
+        "formal_run",
     ):
         source = f"work_run_store:{kind}"
         try:
