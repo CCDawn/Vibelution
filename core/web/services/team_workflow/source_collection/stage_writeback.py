@@ -5,10 +5,12 @@ Clarity B6: split from stages.py. Shared gates/helpers import from stage_session
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any
 
 from ..source_collection_common import project_source_version_families
+from .extraction_retrieved_at_backfill import (
+    backfill_source_collection_stage_writeback_retrieved_at,
+)
 
 from .stage_session import (
     _AUTO_FORMAL_RETRY_STATUSES,
@@ -35,91 +37,6 @@ _EXTRACTION_EVIDENCE_STATUS_VALUES = {
 # surfaced in the rejection message.
 _EXTRACTION_QUOTE_ANCHOR_ERROR_LIMIT = 3
 
-# Challenge v2 card metadata keys accepted for the retrieval timestamp.  The
-# fail-closed evidence contract accepts either spelling, so the backfill must
-# respect both and never overwrite an explicit value.
-_EXTRACTION_RETRIEVED_AT_KEYS = ("retrieved_at", "retrievedAt")
-
-
-def _is_timezone_aware_rfc3339_timestamp(value: object) -> bool:
-    """True when ``value`` parses as an RFC3339 timestamp with a timezone."""
-    text = str(value or "").strip()
-    if not text:
-        return False
-    try:
-        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
-    except ValueError:
-        return False
-    return parsed.tzinfo is not None
-
-
-def _source_collection_stage_backfill_extraction_retrieved_at(
-    team_id: str,
-    run_id: str,
-    task: dict[str, Any],
-    result_payload: dict[str, Any],
-) -> dict[str, Any]:
-    """Backfill the Challenge v2 ``retrieved_at`` on extraction writebacks.
-
-    The formal evidence contract fails closed on an extraction without an
-    explicit retrieval timestamp (production run SCI-091 was blocked at
-    source_extraction because the extraction agent omitted it, and the stage
-    context never shows the agent a timestamp it could copy).  The writeback
-    boundary owns real upstream retrieval times, so it supplies them here
-    instead of letting the node fail later: the extraction's source record
-    ``createdAt`` (when that content was fetched into the run), else the
-    source candidate's ``createdAt`` (when it was registered), else the real
-    writeback time.  Never invents a historical time and never overwrites an
-    explicit, contract-compliant value from the agent.
-    """
-    s = _service()
-    stage_id = s._trim_text(task.get("stageId"), max_length=80)
-    agent_role = s._trim_text(task.get("agentRole"), max_length=80)
-    if stage_id != "extraction" and agent_role != "source_extractor":
-        return result_payload
-    entries_by_collection: list[tuple[str, list[Any]]] = []
-    for key in ("candidateExtractions", "recordExtractions"):
-        entries = result_payload.get(key)
-        if isinstance(entries, list) and entries:
-            entries_by_collection.append((key, entries))
-    if not entries_by_collection:
-        return result_payload
-    candidates_by_id: dict[str, dict[str, Any]] = {}
-    records_by_id: dict[str, dict[str, Any]] = {}
-    for candidate in s._source_collection_candidates_for_run(team_id, run_id):
-        candidate_id = s._trim_text(candidate.get("candidateId"), max_length=160)
-        if candidate_id:
-            candidates_by_id.setdefault(candidate_id, candidate)
-    for record in s._source_collection_stage_records_for_run(run_id):
-        record_id = s._trim_text(record.get("recordId"), max_length=160)
-        if record_id:
-            records_by_id.setdefault(record_id, record)
-    for _key, entries in entries_by_collection:
-        for index, entry in enumerate(entries):
-            if not isinstance(entry, dict):
-                continue
-            if any(
-                _is_timezone_aware_rfc3339_timestamp(entry.get(name))
-                for name in _EXTRACTION_RETRIEVED_AT_KEYS
-            ):
-                continue
-            candidate = candidates_by_id.get(
-                s._source_collection_stage_writeback_candidate_id(entry)
-            )
-            record = records_by_id.get(
-                s._source_collection_stage_writeback_record_id(entry)
-            )
-            source_time = s._trim_text(
-                (record or {}).get("createdAt")
-                or (candidate or {}).get("createdAt"),
-                max_length=120,
-            )
-            if not _is_timezone_aware_rfc3339_timestamp(source_time):
-                source_time = s.utc_now_iso()
-            normalized = dict(entry)
-            normalized["retrieved_at"] = source_time
-            entries[index] = normalized
-    return result_payload
 
 # Bounded diagnostics: at most this many Challenge v2 evidence-card contract
 # errors are surfaced in the rejection message.
@@ -397,11 +314,15 @@ def writeback_source_collection_stage_session_task(
     incoming_result_payload = result_payload
     result_payload = s._merge_source_collection_stage_writeback_result_payload(normalized_team_id, run_id, task, result_payload)
     result_payload = _normalize_extraction_evidence_status_aliases_in_payload(result_payload)
-    result_payload = _source_collection_stage_backfill_extraction_retrieved_at(
-        normalized_team_id,
-        run_id,
+    # Single-authoritative Challenge v2 ``retrieved_at`` backfill (parent
+    # extraction entries AND every materializable nested claim); the same
+    # implementation also normalizes replayed persisted results at the claim
+    # materializer read point, so both consumption paths agree.
+    result_payload = backfill_source_collection_stage_writeback_retrieved_at(
         task,
         result_payload,
+        team_id=normalized_team_id,
+        run_id=run_id,
     )
     if status == "completed":
         # Fail-closed quote-anchor contract: a completed extraction writeback

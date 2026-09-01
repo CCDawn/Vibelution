@@ -320,6 +320,25 @@ def _collection_run_hypothesis_candidate_ids(source_collection_run_id: str) -> l
     return _normalized_hypothesis_candidate_ids(scope.get("hypothesisCandidateIds"))
 
 
+def _backfill_replayed_task_retrieved_at(task: dict[str, Any]) -> dict[str, Any]:
+    """Normalize a persisted task result at the materializer read point.
+
+    Production run-882610596ddb: a node retry (RETRY_NODE) replays the
+    previously persisted task result straight into materialization without
+    crossing the writeback boundary, so the writeback's ``retrieved_at``
+    backfill never ran for it and the fail-closed contract rejected the
+    replayed data 3 seconds after dispatch.  The same single-authoritative
+    backfill (parent entries AND materializable nested claims) therefore runs
+    here, on the read point, before the contract validator.  Read-point only:
+    the canonical store keeps what the writeback boundary accepted.
+    """
+    from core.web.services.team_workflow.source_collection.extraction_retrieved_at_backfill import (
+        backfill_persisted_extraction_task_retrieved_at,
+    )
+
+    return backfill_persisted_extraction_task_retrieved_at(task)
+
+
 def materialize_claim_evidence_from_task(
     *,
     project_root: str | Path,
@@ -360,6 +379,11 @@ def materialize_claim_evidence_from_task(
         raise EvidenceMaterializationError("stage task source collection run does not match the formal workflow")
     if _text(task.get("stageId")).lower() != "extraction":
         raise EvidenceMaterializationError("only extraction stage tasks may materialize ClaimEvidence")
+    # Replay/read-point normalization before the fail-closed contract
+    # validator: fresh writebacks were already backfilled at the writeback
+    # boundary; replayed persisted results (node retry) are repaired here, so
+    # both paths reach the validator with server-authoritative times.
+    task = _backfill_replayed_task_retrieved_at(task)
 
     extractor_agent_id = _text(task.get("agentId"))
     normalized_model_ref = _text(model_ref)

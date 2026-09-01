@@ -31,6 +31,14 @@ evidenceRefs 无 quote），物化静默为 0。锁定：
    链上时间（record/candidate 的 createdAt，最后兜底当前回写时间）补齐；
    agent 显式写的合规值（含 retrievedAt 别名）不覆盖；canonical result
    必须直接通过 build_source_extraction_evidence_cards 契约。
+
+生产实锤（run-882610596ddb，RETRY_NODE 重放直通 materialize）追加的叠加
+缺口契约：
+
+9. 兜底扩展到嵌套 claims/keyFindings 级（materializable claim 继承所属
+   父项同源时间，显式合规 claim 值不覆盖）；且 node retry 重放历史持久化
+   result 不经回写边界时，materialize 读点用同一权威 backfill 先修复再过
+   契约——读点只修消费侧，不回写 canonical 存储。
 """
 
 from __future__ import annotations
@@ -1070,3 +1078,238 @@ def test_card_gate_skips_missing_evidence_anchor_alias_entry(tmp_path, monkeypat
     assert complete["task"]["result"]["candidateExtractions"][0]["evidenceStatus"] == (
         "missing_evidence_anchor"
     )
+
+
+# ---------------------------------------------------------------------------
+# retrieved_at 兜底扩展到嵌套 claims 级 + materialize 读点重放兜底
+# （生产实锤 run-882610596ddb 叠加缺口）
+#
+# 缺口一：兜底只补 candidateExtractions/recordExtractions 父项级，嵌套
+# claims[]/keyFindings[] 项缺 retrieved_at（或不带时区伪值）时，物化校验器
+# 读 item 优先，仍会在 claims 级 fail-closed。
+# 缺口二：RETRY_NODE 重试重放上次持久化的 result 直通 materialize，不经过
+# 回写边界，兜底与契约门都被绕过。
+# 修复：单一权威 backfill（父项+materializable claims）同时服务回写边界与
+# materialize 读点（agent_claim_evidence_materializer）。
+# ---------------------------------------------------------------------------
+
+
+def _claims_anchored_extraction_entry(candidate, *, index: int = 1) -> dict:
+    """嵌套 claims 形态：quote 锚在 claims 项上，父项与 claim 都可带/缺 retrieved_at。"""
+    entry = _anchored_extraction_entry(candidate, index=index)
+    entry["claims"] = [
+        {
+            "fact": f"{candidate['title']} 的摘要支持内容提炼结论。",
+            "quote": _CANDIDATE_SUMMARY_QUOTE,
+            "sourceRef": candidate["sourceUrl"],
+            "evidenceRef": f"abstract-quote-{index}",
+        }
+    ]
+    return entry
+
+
+def _patch_claim_materialization_env(tmp_path, monkeypatch, team_id):
+    """与真实物化链路对齐：ledger/链根 + 问题 scope + agent modelRef。"""
+    from core.web.services.team_workflow import claim_ledger
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_first_chain as chain,
+    )
+
+    monkeypatch.setattr(claim_ledger, "PROJECT_ROOT", tmp_path, raising=False)
+    monkeypatch.setattr(chain, "PROJECT_ROOT", tmp_path, raising=False)
+    scope = chain._question_scope_envelope(team_id, "SCI-096")
+    monkeypatch.setattr(
+        agent_claim_evidence_materializer,
+        "_formal_question_scope",
+        lambda team_id, workflow_run_id: scope,
+    )
+    real_get_agent = agent_directory_service.get_agent
+
+    def fake_get_agent(agent_id, **kwargs):
+        agent = dict(real_get_agent(agent_id, **kwargs) or {})
+        bindings = dict(agent.get("llmBindings") or {})
+        bindings.setdefault("dialogue", {"modelId": "local/qwen3.5-9b"})
+        agent["llmBindings"] = bindings
+        return agent
+
+    monkeypatch.setattr(agent_directory_service, "get_agent", fake_get_agent)
+
+
+def test_backfill_extends_to_nested_claims_inheriting_parent_value(
+    tmp_path, monkeypatch
+):
+    """①a 父项有显式 retrieved_at、嵌套 claim 缺失 → claim 继承父项同源时间。
+
+    回写被接受、canonical result 的 claim 带父项时间，且真实 materializer
+    在 claims 级校验通过并物化出 ledger 行 + ClaimEvidence。
+    """
+    setup = _seed_completed_extraction_task(tmp_path, monkeypatch)
+    task = setup["task"]
+    _append_stage_task_tool_trace(tmp_path, task["task"])
+
+    complete = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        setup["teamId"],
+        task["taskId"],
+        {
+            "status": "completed",
+            "summary": "完成 3/3 条候选资料提炼（嵌套 claims 省略 retrieved_at）。",
+            "result": {
+                "candidateExtractions": [
+                    _claims_anchored_extraction_entry(item, index=index)
+                    for index, item in enumerate(setup["candidates"], start=1)
+                ]
+            },
+            "recordedByAgent": task["task"]["agentId"],
+        },
+    )
+    assert complete["task"]["status"] == "completed"
+
+    stored_entries = complete["task"]["result"]["candidateExtractions"]
+    assert len(stored_entries) == 3
+    for entry in stored_entries:
+        # 父项显式合规值不动；缺时间的 claim 继承父项同源时间。
+        assert entry["retrieved_at"] == "2026-08-31T14:28:07Z"
+        assert entry["claims"][0]["retrieved_at"] == entry["retrieved_at"]
+
+    _patch_claim_materialization_env(tmp_path, monkeypatch, setup["teamId"])
+    result = team_workflow_orchestration_service.reconcile_source_collection_stage_session_task_after_turn(
+        setup["teamId"],
+        task["taskId"],
+        run_id=setup["runId"],
+        session_id=task["sessionId"],
+        turn_id=task["task"]["turn"]["turnId"],
+        final_status="completed",
+    )
+    assert result["taskStatus"] == "completed"
+    assert result["claimMaterialization"]["status"] == "materialized"
+    assert result["claimMaterialization"]["claimEvidenceCount"] == 3
+
+
+def test_backfill_extends_to_nested_claims_when_parent_time_missing(
+    tmp_path, monkeypatch
+):
+    """①b 父项与嵌套 claim 都缺 retrieved_at → 两级同补该候选真实链上时间。"""
+    from datetime import datetime
+
+    setup = _seed_completed_extraction_task(tmp_path, monkeypatch)
+    task = setup["task"]
+    _append_stage_task_tool_trace(tmp_path, task["task"])
+
+    entries = []
+    for index, item in enumerate(setup["candidates"], start=1):
+        entry = _claims_anchored_extraction_entry(item, index=index)
+        entry.pop("retrieved_at")
+        entries.append(entry)
+    complete = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        setup["teamId"],
+        task["taskId"],
+        {
+            "status": "completed",
+            "summary": "完成 3/3 条候选资料提炼（父项与 claims 均缺 retrieved_at）。",
+            "result": {"candidateExtractions": entries},
+            "recordedByAgent": task["task"]["agentId"],
+        },
+    )
+    assert complete["task"]["status"] == "completed"
+
+    created_by_id = {item["candidateId"]: item["createdAt"] for item in setup["candidates"]}
+    stored_entries = complete["task"]["result"]["candidateExtractions"]
+    for entry in stored_entries:
+        expected = created_by_id[entry["candidateId"]]
+        assert entry["retrieved_at"] == expected
+        assert entry["claims"][0]["retrieved_at"] == expected
+        parsed = datetime.fromisoformat(expected.replace("Z", "+00:00"))
+        assert parsed.tzinfo is not None
+
+
+def test_backfill_preserves_explicit_compliant_claim_retrieved_at(
+    tmp_path, monkeypatch
+):
+    """③ claim 已显式写合规 retrieved_at → 不被父项时间覆盖。"""
+    setup = _seed_completed_extraction_task(tmp_path, monkeypatch)
+    task = setup["task"]
+    _append_stage_task_tool_trace(tmp_path, task["task"])
+
+    entry = _claims_anchored_extraction_entry(setup["candidates"][0])
+    entry["claims"][0]["retrieved_at"] = "2026-08-01T00:00:00+08:00"
+    complete = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        setup["teamId"],
+        task["taskId"],
+        {
+            "status": "completed",
+            "summary": "完成 1/3 条候选资料提炼（claim 自带合规时间）。",
+            "result": {"candidateExtractions": [entry]},
+            "recordedByAgent": task["task"]["agentId"],
+        },
+    )
+    assert complete["task"]["status"] in {"completed", "needs_review"}
+    stored_entry = complete["task"]["result"]["candidateExtractions"][0]
+    assert stored_entry["claims"][0]["retrieved_at"] == "2026-08-01T00:00:00+08:00"
+
+
+def test_replayed_persisted_result_backfilled_at_materialize_read_point(
+    tmp_path, monkeypatch
+):
+    """②RETRY_NODE 重放路径：持久化 result 缺两级 retrieved_at → 读点兜底后物化成功。
+
+    防线合入前的历史持久化数据没有兜底时间。把 canonical task 的 result（含
+    writeback envelope 副本）剥成历史形态原样落盘，再走 reconcile →
+    materialize_completed_extraction_task 重放，读点 backfill 必须把它修好。
+    """
+    setup = _seed_completed_extraction_task(tmp_path, monkeypatch)
+    task = setup["task"]
+    _append_stage_task_tool_trace(tmp_path, task["task"])
+
+    entries = [
+        _claims_anchored_extraction_entry(item, index=index)
+        for index, item in enumerate(setup["candidates"], start=1)
+    ]
+    complete = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        setup["teamId"],
+        task["taskId"],
+        {
+            "status": "completed",
+            "summary": "完成 3/3 条候选资料提炼。",
+            "result": {"candidateExtractions": entries},
+            "recordedByAgent": task["task"]["agentId"],
+        },
+    )
+    assert complete["task"]["status"] == "completed"
+
+    stored_task, run_id = team_workflow_orchestration_service._find_source_collection_stage_session_task_by_id(
+        setup["teamId"], task["taskId"]
+    )
+    # 模拟历史持久化数据：剥掉 result 与 writeback envelope 里两级的 retrieved_at。
+    for payload_key in ("result", "writeback"):
+        payload = stored_task.get(payload_key)
+        if not isinstance(payload, dict):
+            continue
+        for entry in payload.get("candidateExtractions") or []:
+            if isinstance(entry, dict):
+                entry.pop("retrieved_at", None)
+                for claim in entry.get("claims") or []:
+                    if isinstance(claim, dict):
+                        claim.pop("retrieved_at", None)
+    team_workflow_orchestration_service._upsert_source_collection_stage_session_task(
+        setup["teamId"], run_id, stored_task
+    )
+
+    _patch_claim_materialization_env(tmp_path, monkeypatch, setup["teamId"])
+    result = team_workflow_orchestration_service.reconcile_source_collection_stage_session_task_after_turn(
+        setup["teamId"],
+        task["taskId"],
+        run_id=setup["runId"],
+        session_id=task["sessionId"],
+        turn_id=task["task"]["turn"]["turnId"],
+        final_status="completed",
+    )
+    # 不修复的话：claims 级缺 retrieved_at 会在 materialize fail-closed。
+    assert result["claimMaterialization"]["status"] == "materialized"
+    assert result["claimMaterialization"]["claimEvidenceCount"] == 3
+
+    # 读点兜底只修消费侧：canonical 存储保持回写边界接受的原始形态。
+    reread, _run_id = team_workflow_orchestration_service._find_source_collection_stage_session_task_by_id(
+        setup["teamId"], task["taskId"]
+    )
+    for entry in reread["result"]["candidateExtractions"]:
+        assert "retrieved_at" not in entry

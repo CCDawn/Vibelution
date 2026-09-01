@@ -1126,3 +1126,117 @@ def test_completed_extraction_without_run_scope_keeps_legacy_dimension(
 
     monkeypatch.setattr(dps, "get_processing_run", _missing)
     assert materializer._collection_run_hypothesis_candidate_ids("sc-run-a") == []
+
+
+# ---------------------------------------------------------------------------
+# materialize 读点 retrieved_at 兜底（生产实锤 run-882610596ddb）
+#
+# RETRY_NODE 重试重放上次持久化的 task result 直通 materialize，不经过回写
+# 边界，回写侧兜底与契约门都被绕过。materialize 入口在读点用同一权威
+# backfill（父项 + materializable claims）修复后再过 fail-closed 契约；
+# 仍违约的其他字段继续以 SourceExtractionEvidenceContractError 上抛（上游
+# 映射为专用 problem code source_extraction_contract_violation）。
+# ---------------------------------------------------------------------------
+
+
+def _strip_all_retrieved_at(task: dict) -> dict:
+    """把 task result 剥成防线合入前的历史持久化形态：两级 retrieved_at 全缺。"""
+    for collection in ("candidateExtractions", "recordExtractions"):
+        for entry in task["result"].get(collection) or []:
+            if not isinstance(entry, dict):
+                continue
+            entry.pop("retrieved_at", None)
+            entry.pop("retrievedAt", None)
+            for key in ("claims", "keyFindings"):
+                for claim in entry.get(key) or []:
+                    if isinstance(claim, dict):
+                        claim.pop("retrieved_at", None)
+                        claim.pop("retrievedAt", None)
+    return task
+
+
+def test_replay_backfills_missing_retrieved_at_at_materialize_read_point(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """重放：持久化 result 缺两级 retrieved_at → 读点兜底后物化成功。
+
+    时间源不可得（伪 run 无候选/记录存储）→ 按既有语义兜底真实当前时间。
+    """
+    from datetime import datetime, timedelta, timezone
+
+    team_id, scope = _claim_bridge_env(tmp_path, monkeypatch)
+    task = _strip_all_retrieved_at(_verified_task(team_id=team_id))
+
+    created = materialize_claim_evidence_from_task(
+        project_root=tmp_path,
+        team_id=team_id,
+        workflow_run_id="wf-run-a",
+        source_collection_run_id="sc-run-a",
+        task=task,
+        model_ref="provider/model-a",
+        question_scope=scope,
+    )
+
+    assert len(created) == 1
+    retrieved_at = created[0]["challengeEvidence"]["retrieved_at"]
+    parsed = datetime.fromisoformat(retrieved_at.replace("Z", "+00:00"))
+    assert parsed.tzinfo is not None
+    assert parsed >= datetime.now(timezone.utc) - timedelta(minutes=5)
+    # 读点兜底在内存中修补被消费的 task result（父项与 claims 同源时间）；
+    # 「不回写 canonical 存储」由 stage reconcile 侧重放用例锁定。
+    replayed_entry = task["result"]["candidateExtractions"][0]
+    replayed_parent = datetime.fromisoformat(
+        replayed_entry["retrieved_at"].replace("Z", "+00:00")
+    )
+    assert replayed_parent.tzinfo is not None
+    assert replayed_entry["claims"][0]["retrieved_at"] == replayed_entry["retrieved_at"]
+
+
+def test_replay_preserves_explicit_compliant_claim_retrieved_at(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """重放③：claim 自带合规 retrieved_at 不被兜底覆盖（父项缺失也照读 claim 值）。"""
+    team_id, scope = _claim_bridge_env(tmp_path, monkeypatch)
+    task = _verified_task(team_id=team_id)
+    entry = task["result"]["candidateExtractions"][0]
+    entry.pop("retrieved_at")
+    entry["claims"][0]["retrieved_at"] = "2026-08-01T00:00:00+08:00"
+
+    created = materialize_claim_evidence_from_task(
+        project_root=tmp_path,
+        team_id=team_id,
+        workflow_run_id="wf-run-a",
+        source_collection_run_id="sc-run-a",
+        task=task,
+        model_ref="provider/model-a",
+        question_scope=scope,
+    )
+
+    assert len(created) == 1
+    assert created[0]["challengeEvidence"]["retrieved_at"] == "2026-08-01T00:00:00+08:00"
+
+
+def test_replay_fail_closed_on_remaining_contract_violation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """重放④：兜底后仍违约的其他字段仍 fail-closed，报精确 path 的契约错误。"""
+    from core.web.services.team_workflow.research_runtime.source_extraction_evidence_cards import (
+        SourceExtractionEvidenceContractError,
+    )
+
+    team_id, scope = _claim_bridge_env(tmp_path, monkeypatch)
+    task = _strip_all_retrieved_at(_verified_task(team_id=team_id))
+    task["result"]["candidateExtractions"][0].pop("title")
+
+    with pytest.raises(SourceExtractionEvidenceContractError, match="title") as excinfo:
+        materialize_claim_evidence_from_task(
+            project_root=tmp_path,
+            team_id=team_id,
+            workflow_run_id="wf-run-a",
+            source_collection_run_id="sc-run-a",
+            task=task,
+            model_ref="provider/model-a",
+            question_scope=scope,
+        )
+    # 精确 path 指到嵌套 claim，可诊断性不因读点兜底而退化。
+    assert "claims[0]" in str(excinfo.value)
