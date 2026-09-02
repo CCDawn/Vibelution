@@ -7082,6 +7082,61 @@ def test_execute_source_collection_search_runs_default_provider_set_with_merge_a
         team_workflow_orchestration_service.SOURCE_COLLECTION_SEARCH_PROVIDER_OPENALEX,
     }
 
+def test_execute_source_collection_search_marks_cooldown_skip_events(tmp_path, monkeypatch):
+    """A 429-cooldown skip reuses the blocked search.failed shape with reason=cooldown."""
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+
+    def cooldown_crossref_fake(query, *, max_results, provider):
+        if provider == team_workflow_orchestration_service.SOURCE_COLLECTION_SEARCH_PROVIDER_CROSSREF:
+            return {
+                "provider": provider,
+                "results": [],
+                "error": (
+                    "crossref_rest_api is in a 429 cooldown window for another 240s; "
+                    "the provider stayed rate-limited, so this search skipped it without an HTTP call."
+                ),
+                "errorReason": "cooldown",
+            }
+        if provider == team_workflow_orchestration_service.SOURCE_COLLECTION_SEARCH_PROVIDER_OPENALEX:
+            return {"provider": provider, "searchUrl": "https://api.openalex.org/works?search=predictive", "results": []}
+        return _fake_arxiv_search_response(query, max_results=max_results, provider=provider)
+
+    monkeypatch.setattr(team_workflow_orchestration_service, "_execute_source_collection_query", cooldown_crossref_fake)
+    team = team_service.create_team(name="ai科学研究团队")
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "title": "Cooldown skip batch",
+            "topic": "predictive coding cortical hierarchy",
+            "querySeeds": ["predictive coding cortical hierarchy"],
+            "searchLanguages": ["en"],
+            "sourceTypes": ["paper"],
+            "agentRoles": ["source_finder"],
+        },
+    )
+    execution = team_workflow_orchestration_service.execute_source_collection_search(
+        team["teamId"],
+        run_response["run"]["runId"],
+        {"maxQueries": 1, "maxResultsPerQuery": 2},
+    )
+    failed_events = [event for event in execution["executionEvents"] if event["eventType"] == "search.failed"]
+    assert [event["provider"] for event in failed_events] == [
+        team_workflow_orchestration_service.SOURCE_COLLECTION_SEARCH_PROVIDER_CROSSREF
+    ]
+    assert failed_events[0]["status"] == "blocked"
+    assert failed_events[0]["reason"] == "cooldown"
+    assert "cooldown" in failed_events[0]["summary"]
+    # The collection loop moved on: the other providers still served the query.
+    executed_events = [event for event in execution["executionEvents"] if event["eventType"] == "search.executed"]
+    assert {event["provider"] for event in executed_events} == {
+        team_workflow_orchestration_service.SOURCE_COLLECTION_SEARCH_PROVIDER_ARXIV,
+        team_workflow_orchestration_service.SOURCE_COLLECTION_SEARCH_PROVIDER_OPENALEX,
+    }
+    assert execution["executedQueryCount"] == 1
+    assert execution["failedQueryCount"] == 0
+    assert execution["recordCount"] == 2
+
 def test_execute_source_collection_search_applies_quality_gate_to_arxiv_results(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)

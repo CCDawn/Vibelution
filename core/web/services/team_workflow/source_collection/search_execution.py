@@ -91,6 +91,26 @@ _SOURCE_COLLECTION_BACKOFF_BUDGET_SECONDS_ENV = "VIBELUTION_SOURCE_COLLECTION_BA
 # keeps direct helper calls (and existing tests) on the legacy behavior.
 _SOURCE_COLLECTION_BACKOFF_BUDGET_STATE = threading.local()
 
+# Provider-level 429 cooldown windows (process-wide, shared across threads).
+#
+# When one provider proves hard-throttled — a 429 whose Retry-After exceeds
+# the honored cap, or a 429 that survives the whole bounded retry ladder —
+# later searches skip that provider for a cooldown window instead of burning
+# wall-clock on doomed HTTP attempts (live evidence 2026-09-02: openalex_api
+# answered 429 through an entire run while every retry still waited out its
+# Retry-After clamp, costing 1-2 minutes per query).  Cooldowns expire on
+# their own, escalate when a provider relapses without a successful call in
+# between, and never permanently drop a provider: the first successful call
+# resets everything.  Provider etiquette limiters above are unaffected.
+_SOURCE_COLLECTION_429_COOLDOWN_DEFAULT_SECONDS = 300.0
+_SOURCE_COLLECTION_429_COOLDOWN_MIN_SECONDS = 60.0
+_SOURCE_COLLECTION_429_COOLDOWN_MAX_SECONDS = 1800.0
+_SOURCE_COLLECTION_429_COOLDOWN_SECONDS_ENV = "VIBELUTION_SOURCE_COLLECTION_429_COOLDOWN_SECONDS"
+_SOURCE_COLLECTION_429_COOLDOWN_LOCK = threading.Lock()
+# provider -> {"until": monotonic deadline seconds, "streak": float count of
+# consecutive cooldowns without an intervening successful call}
+_SOURCE_COLLECTION_429_COOLDOWNS: dict[str, dict[str, float]] = {}
+
 
 def _source_collection_rate_limiter(provider: str) -> Limiter | None:
     """Return the shared limiter for one provider (``None`` = unlimited)."""
@@ -174,6 +194,22 @@ def _source_collection_backoff_sleep(seconds: float) -> None:
     time.sleep(seconds)
 
 
+def _source_collection_retry_after_raw_seconds(headers: Any) -> float | None:
+    """Raw numeric ``Retry-After`` seconds, or ``None`` when absent/unusable.
+
+    Only the numeric form counts; missing headers, HTTP-date values, and
+    parse failures return ``None`` so callers can distinguish an unusable
+    header from an explicit (possibly too long) server-provided wait.
+    """
+    raw = headers.get("Retry-After") if headers is not None else None
+    if not raw:
+        return None
+    try:
+        return float(str(raw).strip())
+    except ValueError:
+        return None
+
+
 def _source_collection_retry_after_seconds(headers: Any) -> float:
     """Read ``Retry-After`` seconds from a 429 response's headers.
 
@@ -184,14 +220,87 @@ def _source_collection_retry_after_seconds(headers: Any) -> float:
     default backoff and non-positive values keep the pre-existing
     ``max(0.0, ...)`` clamp.
     """
-    raw = headers.get("Retry-After") if headers is not None else None
-    if raw:
-        try:
-            parsed = max(0.0, float(str(raw).strip()))
-        except ValueError:
-            return _SOURCE_COLLECTION_SEARCH_RATE_LIMIT_DEFAULT_BACKOFF_SECONDS
-        return min(parsed, _source_collection_retry_after_max_seconds())
-    return _SOURCE_COLLECTION_SEARCH_RATE_LIMIT_DEFAULT_BACKOFF_SECONDS
+    raw = _source_collection_retry_after_raw_seconds(headers)
+    if raw is None:
+        return _SOURCE_COLLECTION_SEARCH_RATE_LIMIT_DEFAULT_BACKOFF_SECONDS
+    return min(max(0.0, raw), _source_collection_retry_after_max_seconds())
+
+
+def _source_collection_retry_after_requests_cooldown(headers: Any) -> bool:
+    """True when a 429 asked for a wait beyond the honored Retry-After cap.
+
+    Such a provider is throttled on its own (much longer) schedule: waiting
+    out the clamp and retrying cannot rescue this call, and follow-up calls
+    should skip the provider for a cooldown window instead of repeating the
+    clamp-and-retry ladder.
+    """
+    raw = _source_collection_retry_after_raw_seconds(headers)
+    return raw is not None and raw > _source_collection_retry_after_max_seconds()
+
+
+def _source_collection_429_cooldown_seconds() -> float:
+    """Base 429 cooldown window, clamped to [60s, 30min] (default 5min)."""
+    default = _SOURCE_COLLECTION_429_COOLDOWN_DEFAULT_SECONDS
+    raw = str(os.environ.get(_SOURCE_COLLECTION_429_COOLDOWN_SECONDS_ENV) or "").strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        return default
+    if value <= 0:
+        return default
+    return min(
+        max(value, _SOURCE_COLLECTION_429_COOLDOWN_MIN_SECONDS),
+        _SOURCE_COLLECTION_429_COOLDOWN_MAX_SECONDS,
+    )
+
+
+def _source_collection_provider_cooldown_remaining(provider: str) -> float:
+    """Seconds left in one provider's 429 cooldown window (0 = not cooling)."""
+    with _SOURCE_COLLECTION_429_COOLDOWN_LOCK:
+        state = _SOURCE_COLLECTION_429_COOLDOWNS.get(provider)
+        if state is None:
+            return 0.0
+        return max(0.0, float(state.get("until") or 0.0) - time.monotonic())
+
+
+def _source_collection_enter_provider_cooldown(provider: str) -> float:
+    """Open one provider's 429 cooldown window; returns the window length.
+
+    Consecutive cooldowns without an intervening successful call double the
+    window (capped at 30min); any later successful call resets the streak.
+    """
+    base = _source_collection_429_cooldown_seconds()
+    with _SOURCE_COLLECTION_429_COOLDOWN_LOCK:
+        state = _SOURCE_COLLECTION_429_COOLDOWNS.get(provider)
+        streak = int((state or {}).get("streak") or 0) + 1
+        duration = min(
+            base * (2 ** (streak - 1)),
+            _SOURCE_COLLECTION_429_COOLDOWN_MAX_SECONDS,
+        )
+        _SOURCE_COLLECTION_429_COOLDOWNS[provider] = {
+            "until": time.monotonic() + duration,
+            "streak": float(streak),
+        }
+        return duration
+
+
+def _source_collection_clear_provider_cooldown(provider: str) -> None:
+    """Forget one provider's cooldown state (successful-call reset)."""
+    with _SOURCE_COLLECTION_429_COOLDOWN_LOCK:
+        _SOURCE_COLLECTION_429_COOLDOWNS.pop(provider, None)
+
+
+def _source_collection_provider_cooldown_error(provider: str) -> str:
+    """Fast-fail message while a provider is cooling down ("" = search freely)."""
+    remaining = _source_collection_provider_cooldown_remaining(provider)
+    if remaining <= 0:
+        return ""
+    return (
+        f"{provider} is in a 429 cooldown window for another {int(remaining)}s; "
+        "the provider stayed rate-limited, so this search skipped it without an HTTP call."
+    )
 
 
 def _source_collection_rate_limited_http_get(
@@ -210,10 +319,19 @@ def _source_collection_rate_limited_http_get(
     against the calling execution's backoff budget when one is active.  Other
     client errors (4xx) are raised immediately.  The last error is re-raised
     so callers keep their existing failure semantics.
+
+    A 429 that asks for more than the Retry-After cap opens the provider's
+    429 cooldown window immediately (concurrent searches stop repeating the
+    clamp ladder), and a provider still answering 429 after the whole retry
+    ladder opens it too.  A successful response clears the provider's
+    cooldown state — except when this same call just opened it via an
+    explicit over-cap Retry-After, where the server's back-off instruction
+    outranks one lucky retry.
     """
     limiter = _source_collection_rate_limiter(provider)
     last_error: Exception | None = None
     next_delay = 1.0
+    cooled_this_call = False
     for attempt in range(_SOURCE_COLLECTION_SEARCH_HTTP_MAX_ATTEMPTS):
         if attempt:
             _source_collection_backoff_sleep(next_delay)
@@ -224,10 +342,16 @@ def _source_collection_rate_limited_http_get(
             with urllib.request.urlopen(
                 request, timeout=_SOURCE_COLLECTION_SEARCH_HTTP_TIMEOUT_SECONDS
             ) as response:
-                return response.read()
+                payload = response.read()
+            if not cooled_this_call:
+                _source_collection_clear_provider_cooldown(provider)
+            return payload
         except urllib.error.HTTPError as exc:
             if exc.code == 429:
                 next_delay = _source_collection_retry_after_seconds(exc.headers)
+                if _source_collection_retry_after_requests_cooldown(exc.headers):
+                    _source_collection_enter_provider_cooldown(provider)
+                    cooled_this_call = True
             elif exc.code >= 500:
                 next_delay = 2.0**attempt
             else:
@@ -237,6 +361,10 @@ def _source_collection_rate_limited_http_get(
             next_delay = 2.0**attempt
             last_error = exc
     assert last_error is not None
+    if isinstance(last_error, urllib.error.HTTPError) and last_error.code == 429:
+        # Still throttled after the whole polite retry ladder: stop paying
+        # the Retry-After waits on every following query for this provider.
+        _source_collection_enter_provider_cooldown(provider)
     raise last_error
 
 
@@ -496,6 +624,7 @@ def _execute_source_collection_search_body(team_id: str, run_id: str, payload: d
                             summary=s._trim_text(search_response.get("error"), max_length=500),
                             refs=[query_id, query_provider],
                             provider=query_provider,
+                            reason=s._trim_text(search_response.get("errorReason"), max_length=80),
                         )
                     )
                     continue
@@ -1052,6 +1181,12 @@ def _execute_source_collection_query(query: dict[str, Any], *, max_results: int,
     query_text = s._trim_text(query.get("query"), max_length=1000)
     if not query_text:
         return {"provider": provider, "results": [], "error": "Search query is empty."}
+    cooldown_error = _source_collection_provider_cooldown_error(provider)
+    if cooldown_error:
+        # 429 cooldown fast-fail: no HTTP call, no limiter permit, no backoff
+        # budget.  The collection loop moves on to the remaining providers and
+        # the search event timeline carries reason="cooldown" for audit.
+        return {"provider": provider, "results": [], "error": cooldown_error, "errorReason": "cooldown"}
     rows = s._normalize_int(max_results, default=s.SOURCE_COLLECTION_SEARCH_EXECUTION_DEFAULT_RESULTS_PER_QUERY, minimum=1, maximum=s.SOURCE_COLLECTION_SEARCH_EXECUTION_MAX_RESULTS_PER_QUERY)
     if provider == s.SOURCE_COLLECTION_SEARCH_PROVIDER_ARXIV:
         return s._execute_arxiv_source_collection_query(query_text, rows=rows, provider=provider, fallback_source_type=str(query.get("sourceType") or ""))
@@ -1423,6 +1558,7 @@ def _source_collection_execution_event(
     raw_location: str = "",
     storage_refs: list[str] | None = None,
     provider: str = "",
+    reason: str = "",
 ) -> dict[str, Any]:
     s = _service()
     now = s.utc_now_iso()
@@ -1433,6 +1569,7 @@ def _source_collection_execution_event(
         "status": s._trim_text(status, max_length=80) or "completed",
         "title": s._trim_text(title, max_length=260),
         "summary": s._trim_text(summary, max_length=1200),
+        "reason": s._trim_text(reason, max_length=80),
         "agentRole": s._trim_text(assignment.get("agentRole"), max_length=80),
         "agentId": s._trim_text(assignment.get("agentId"), max_length=160),
         "assignmentId": s._trim_text(assignment.get("assignmentId"), max_length=128),

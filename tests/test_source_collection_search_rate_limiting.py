@@ -64,6 +64,14 @@ def unlimited_rate_limits(monkeypatch):
     search_execution._SOURCE_COLLECTION_RATE_LIMITERS.clear()
 
 
+@pytest.fixture(autouse=True)
+def clear_429_cooldown_windows():
+    """Keep the process-wide 429 cooldown registry from leaking across tests."""
+    search_execution._SOURCE_COLLECTION_429_COOLDOWNS.clear()
+    yield
+    search_execution._SOURCE_COLLECTION_429_COOLDOWNS.clear()
+
+
 def _install_fake_transport(monkeypatch, handler) -> None:
     monkeypatch.setattr(urllib.request, "urlopen", handler)
 
@@ -449,3 +457,170 @@ def test_search_execution_budget_default_without_env(monkeypatch):
     monkeypatch.setenv("VIBELUTION_SOURCE_COLLECTION_RETRY_AFTER_MAX_SECONDS", "0")
     assert search_execution._source_collection_backoff_budget_seconds() == 120.0
     assert search_execution._source_collection_retry_after_max_seconds() == 30.0
+
+
+# ---------------------------------------------------------------------------
+# 6. Provider-level 429 cooldown windows.
+#
+# Live evidence 2026-09-02: openalex_api answered 429 through an entire run
+# while every retry still waited out its Retry-After clamp, burning 1-2
+# minutes of wall-clock per query.  A provider that proves hard-throttled is
+# skipped without any HTTP call for a cooldown window instead; the window
+# expires on its own, escalates on relapse, and any successful call resets
+# the provider completely.
+# ---------------------------------------------------------------------------
+
+
+def _throttled_crossref_errors(count: int, headers: dict | None = None) -> list:
+    return [
+        urllib.error.HTTPError(
+            "https://api.crossref.org/works",
+            429,
+            "Too Many Requests",
+            headers or {},
+            None,
+        )
+        for _ in range(count)
+    ]
+
+
+def test_429_exhaustion_cools_provider_and_next_query_fast_fails(monkeypatch, unlimited_rate_limits):
+    recorder: list[str] = []
+    delays: list[float] = []
+    monkeypatch.setattr(search_execution, "_source_collection_backoff_sleep", delays.append)
+    # No Retry-After header: the provider is throttled but never says for how
+    # long, so the cooldown opens only once the whole retry ladder failed.
+    sequence = _throttled_crossref_errors(8)
+    _install_fake_transport(monkeypatch, _crossref_handler(recorder, sequence))
+
+    throttled = _run_crossref_query()
+    assert throttled.get("error")
+    assert len(recorder) == search_execution._SOURCE_COLLECTION_SEARCH_HTTP_MAX_ATTEMPTS
+    assert search_execution._source_collection_provider_cooldown_remaining("crossref_rest_api") > 0
+
+    # The next query skips the provider entirely: no HTTP call, no backoff.
+    cooled = _run_crossref_query()
+    assert cooled.get("errorReason") == "cooldown"
+    assert "cooldown" in str(cooled.get("error"))
+    assert len(recorder) == search_execution._SOURCE_COLLECTION_SEARCH_HTTP_MAX_ATTEMPTS
+    # 429 waits follow Retry-After (5s default without a header), not the
+    # exponential ladder; the cooled second query adds no waits at all.
+    assert delays == [5.0, 5.0, 5.0]
+
+
+def test_retry_after_beyond_cap_enters_cooldown_at_first_429(monkeypatch, unlimited_rate_limits):
+    monkeypatch.setenv("VIBELUTION_SOURCE_COLLECTION_RETRY_AFTER_MAX_SECONDS", "30")
+    recorder: list[str] = []
+    delays: list[float] = []
+    monkeypatch.setattr(search_execution, "_source_collection_backoff_sleep", delays.append)
+    sequence = [
+        *_throttled_crossref_errors(1, {"Retry-After": "3600"}),
+        _FakeJsonResponse(_CROSSREF_PAYLOAD),
+    ]
+    _install_fake_transport(monkeypatch, _crossref_handler(recorder, sequence))
+
+    response = _run_crossref_query()
+    # The lucky retry still succeeds within this call, but the provider asked
+    # for an hour: the cooldown window stays open so concurrent or follow-up
+    # queries skip the clamp ladder instead of repeating it.
+    assert not response.get("error")
+    assert search_execution._source_collection_provider_cooldown_remaining("crossref_rest_api") > 0
+
+    cooled = _run_crossref_query()
+    assert cooled.get("errorReason") == "cooldown"
+    assert len(recorder) == 2
+
+
+def test_cooldown_expiry_recovers_and_success_resets_state(monkeypatch, unlimited_rate_limits):
+    recorder: list[str] = []
+    monkeypatch.setattr(search_execution, "_source_collection_backoff_sleep", lambda _seconds: None)
+    sequence = _throttled_crossref_errors(4)
+    _install_fake_transport(monkeypatch, _crossref_handler(recorder, sequence))
+    assert _run_crossref_query().get("error")
+    assert search_execution._source_collection_provider_cooldown_remaining("crossref_rest_api") > 0
+
+    # Simulate the cooldown window elapsing.
+    search_execution._SOURCE_COLLECTION_429_COOLDOWNS["crossref_rest_api"]["until"] = time.monotonic() - 1.0
+
+    sequence.append(_FakeJsonResponse(_CROSSREF_PAYLOAD))
+    recovered = _run_crossref_query()
+    assert not recovered.get("error")
+    assert len(recorder) == 5
+    # The successful call resets the cooldown state and escalation streak.
+    assert search_execution._SOURCE_COLLECTION_429_COOLDOWNS.get("crossref_rest_api") is None
+
+
+def test_consecutive_cooldowns_escalate_and_success_resets_streak(monkeypatch):
+    monkeypatch.setenv("VIBELUTION_SOURCE_COLLECTION_429_COOLDOWN_SECONDS", "60")
+    assert search_execution._source_collection_enter_provider_cooldown("openalex_api") == 60.0
+    search_execution._SOURCE_COLLECTION_429_COOLDOWNS["openalex_api"]["until"] = time.monotonic() - 1.0
+    assert search_execution._source_collection_enter_provider_cooldown("openalex_api") == 120.0
+    search_execution._SOURCE_COLLECTION_429_COOLDOWNS["openalex_api"]["until"] = time.monotonic() - 1.0
+    assert search_execution._source_collection_enter_provider_cooldown("openalex_api") == 240.0
+
+    # A successful call resets the streak back to the base window.
+    search_execution._source_collection_clear_provider_cooldown("openalex_api")
+    assert search_execution._source_collection_enter_provider_cooldown("openalex_api") == 60.0
+
+
+def test_cooldown_escalation_is_capped_at_30_minutes(monkeypatch):
+    monkeypatch.setenv("VIBELUTION_SOURCE_COLLECTION_429_COOLDOWN_SECONDS", "300")
+    search_execution._SOURCE_COLLECTION_429_COOLDOWNS["openalex_api"] = {
+        "until": time.monotonic() - 1.0,
+        "streak": 12.0,
+    }
+    assert search_execution._source_collection_enter_provider_cooldown("openalex_api") == 1800.0
+
+
+def test_429_cooldown_env_is_clamped_or_defaults(monkeypatch):
+    monkeypatch.delenv("VIBELUTION_SOURCE_COLLECTION_429_COOLDOWN_SECONDS", raising=False)
+    assert search_execution._source_collection_429_cooldown_seconds() == 300.0
+    monkeypatch.setenv("VIBELUTION_SOURCE_COLLECTION_429_COOLDOWN_SECONDS", "10")
+    assert search_execution._source_collection_429_cooldown_seconds() == 60.0
+    monkeypatch.setenv("VIBELUTION_SOURCE_COLLECTION_429_COOLDOWN_SECONDS", "99999")
+    assert search_execution._source_collection_429_cooldown_seconds() == 1800.0
+    monkeypatch.setenv("VIBELUTION_SOURCE_COLLECTION_429_COOLDOWN_SECONDS", "nonsense")
+    assert search_execution._source_collection_429_cooldown_seconds() == 300.0
+    monkeypatch.setenv("VIBELUTION_SOURCE_COLLECTION_429_COOLDOWN_SECONDS", "0")
+    assert search_execution._source_collection_429_cooldown_seconds() == 300.0
+
+
+def test_cooldown_is_scoped_per_provider(monkeypatch, unlimited_rate_limits):
+    search_execution._source_collection_enter_provider_cooldown("openalex_api")
+    assert search_execution._source_collection_provider_cooldown_error("openalex_api")
+    # Another provider is untouched and still performs real HTTP.
+    assert search_execution._source_collection_provider_cooldown_error("crossref_rest_api") == ""
+    recorder: list[str] = []
+    _install_fake_transport(
+        monkeypatch, _crossref_handler(recorder, [_FakeJsonResponse(_CROSSREF_PAYLOAD)])
+    )
+    response = _run_crossref_query()
+    assert not response.get("error")
+    assert len(recorder) == 1
+
+
+def test_execution_event_carries_reason_field():
+    assignment = {"agentRole": "source_finder", "agentId": "agent-1", "assignmentId": "asg-1"}
+    event = search_execution._source_collection_execution_event(
+        "search.failed",
+        assignment=assignment,
+        title="Search failed: predictive coding",
+        summary="crossref_rest_api is in a 429 cooldown window for another 240s.",
+        status="blocked",
+        query={"queryId": "q-1", "query": "predictive coding"},
+        refs=["q-1", "crossref_rest_api"],
+        provider="crossref_rest_api",
+        reason="cooldown",
+    )
+    # The cooldown skip reuses the blocked search.failed shape plus a reason.
+    assert event["eventType"] == "search.failed"
+    assert event["status"] == "blocked"
+    assert event["reason"] == "cooldown"
+    default_event = search_execution._source_collection_execution_event(
+        "search.executed",
+        assignment=assignment,
+        title="Searched crossref_rest_api",
+        summary="Fetched 1 metadata result(s).",
+        status="completed",
+    )
+    assert default_event["reason"] == ""
