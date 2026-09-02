@@ -6337,6 +6337,80 @@ def test_v2_claim_belief_gate_projects_evidence_gaps(
     assert state.convergence.claimBeliefGate["evidenceGaps"] == []
 
 
+def test_exhausted_round_projects_gate_verdict_without_accepted_record(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The exhausted surface evaluates the gate when a candidate is known.
+
+    Budget-exhausted rounds without an accepted adjudication used to leave
+    ``claimBeliefGate`` null, so the anomaly-inbox entry could only say
+    "budget exhausted" even when the real blocker was the claim belief gate.
+    With a recommended candidate the verdict rides on the convergence payload
+    (read-only presentation: a blocked verdict must not flip anything here —
+    the round is already unconverged), and without a candidate the payload
+    stays null.
+    """
+    _blocked_claim_belief_gate(monkeypatch, "claim_data_missing")
+
+    def _exhausted_records(with_candidate: bool) -> list[dict[str, object]]:
+        meta_review: dict[str, object] = {"accepted": False}
+        if with_candidate:
+            meta_review["recommendationCandidateId"] = "candidate-1"
+        return [
+            {
+                "recordKind": "hypothesis_round",
+                "roundId": "round-5",
+                "question": "SCI-001",
+                "roundIndex": 5,
+                "status": "closed",
+                "createdAt": "2026-08-25T00:00:00Z",
+                "metaReview": meta_review,
+            }
+        ]
+
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[],
+            selection_records=[],
+            meeting_records=[],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=_exhausted_records(with_candidate=True),
+            formal_runs=[],
+        )
+    )
+
+    assert state.convergence.outcome == "exhausted"
+    assert state.convergence.accepted is False
+    assert state.convergence.claimBeliefGate is not None
+    assert state.convergence.claimBeliefGate["status"] == "blocked"
+    assert state.convergence.claimBeliefGate["reason"] == "claim_data_missing"
+    assert state.convergence.claimBeliefGate["candidateId"] == "candidate-1"
+
+    # No recommended candidate: nothing to evaluate, the payload stays null
+    # (the inbox entry falls back to pointing at the gate state).
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[],
+            selection_records=[],
+            meeting_records=[],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=_exhausted_records(with_candidate=False),
+            formal_runs=[],
+        )
+    )
+
+    assert state.convergence.outcome == "exhausted"
+    assert state.convergence.claimBeliefGate is None
+
+
 def test_v2_convergence_matches_real_claim_ledger_gate(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

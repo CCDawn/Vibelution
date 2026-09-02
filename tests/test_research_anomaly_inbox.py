@@ -569,9 +569,128 @@ def test_convergence_exhausted_becomes_one_human_gate_item() -> None:
     item = inbox.items[0]
     assert item.severity == "high"
     assert item.summary.startswith("收敛评审轮预算已耗尽（第 5/5 轮）")
+    # Gate verdict unavailable (never evaluated for this snapshot): the item
+    # must not leave a pure "budget exhausted" reading — it points at the
+    # convergence gate state instead of inventing a reason.
+    assert "原因见收敛门状态" in item.summary
+    assert "claimGateStatus:unavailable" in item.evidence
     assert "convergence:exhausted" in item.evidence
     assert "convergenceRound:5/5" in item.evidence
     assert item.firstSeenAt == "2026-08-28T00:30:00Z"
+
+
+def _exhausted_state_with_gate(gate: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **_TEAM_QUESTION,
+        "computedAt": _GENERATED_AT,
+        "convergence": {
+            "lifecycle": "completed",
+            "outcome": "exhausted",
+            "actionability": "waiting_user",
+            "updatedAt": "2026-08-28T00:30:00Z",
+            "roundIndex": 5,
+            "roundBudget": 5,
+            "latestHypothesisRoundId": "round-5",
+            "claimBeliefGate": gate,
+        },
+    }
+
+
+def test_convergence_exhausted_gate_allowed_keeps_plain_budget_summary() -> None:
+    """An allowed verdict is not the blocker: no gate enrichment, no invented
+    reason — the entry stays the plain budget-exhaustion human gate."""
+    state = _exhausted_state_with_gate(
+        {
+            "decisionPoint": "converge_question",
+            "roundId": "round-5",
+            "candidateId": "candidate-1",
+            "status": "allowed",
+            "reason": "",
+            "claims": [],
+            "blockedClaims": [],
+            "evidenceGaps": [],
+        }
+    )
+    inbox = anomaly_inbox_service.build_anomaly_inbox(
+        state, generated_at=_GENERATED_AT
+    )
+    item = inbox.items[0]
+    assert item.summary == (
+        "收敛评审轮预算已耗尽（第 5/5 轮），"
+        "等待人工决定后续动作（接受结论、分叉修订或重置题目）"
+    )
+    assert not any(ref.startswith("claimGate") for ref in item.evidence)
+
+
+def test_convergence_exhausted_gate_blocked_carries_reason_and_guidance() -> None:
+    """A blocked verdict is passed through: reason, blocked claim ids and the
+    supersede/retract recovery guidance ride on the item itself, so the
+    operator no longer has to open the adjudication structured error to learn
+    why the chain will not advance."""
+    state = _exhausted_state_with_gate(
+        {
+            "decisionPoint": "converge_question",
+            "roundId": "round-5",
+            "candidateId": "candidate-1",
+            "status": "blocked",
+            "reason": "claim_belief_state_blocked",
+            "claims": [],
+            "blockedClaims": [
+                {
+                    "claimId": "claim-7",
+                    "beliefState": "contradicted",
+                    "acceptedSupportCount": 1,
+                    "acceptedCounterCount": 2,
+                    "counterEvidenceIds": ["ce-1"],
+                },
+                {
+                    "claimId": "claim-3",
+                    "beliefState": "disputed",
+                    "acceptedSupportCount": 1,
+                    "acceptedCounterCount": 1,
+                    "counterEvidenceIds": [],
+                },
+            ],
+            "evidenceGaps": [],
+        }
+    )
+    inbox = anomaly_inbox_service.build_anomaly_inbox(
+        state, generated_at=_GENERATED_AT
+    )
+    item = inbox.items[0]
+    assert "收敛门被挡（claim_belief_state_blocked）" in item.summary
+    assert "claim-7" in item.summary
+    assert "claim-3" in item.summary
+    assert "supersede/retract" in item.summary
+    assert "原因见收敛门状态" not in item.summary
+    assert "claimGateReason:claim_belief_state_blocked" in item.evidence
+    assert "blockedClaim:claim-7" in item.evidence
+    assert "blockedClaim:claim-3" in item.evidence
+
+
+def test_convergence_exhausted_gate_blocked_surfaces_evidence_gaps() -> None:
+    state = _exhausted_state_with_gate(
+        {
+            "decisionPoint": "converge_question",
+            "roundId": "round-5",
+            "candidateId": "candidate-1",
+            "status": "blocked",
+            "reason": "candidate_evidence_gap",
+            "claims": [],
+            "blockedClaims": [],
+            "evidenceGaps": [
+                {"claimId": "claim-2", "gap": "accepted_support_missing"}
+            ],
+        }
+    )
+    inbox = anomaly_inbox_service.build_anomaly_inbox(
+        state, generated_at=_GENERATED_AT
+    )
+    item = inbox.items[0]
+    assert "收敛门被挡（candidate_evidence_gap）" in item.summary
+    assert "证据缺口：claim-2:accepted_support_missing" in item.summary
+    assert "supersede/retract" in item.summary
+    assert "evidenceGap:claim-2:accepted_support_missing" in item.evidence
 
 
 def test_convergence_not_exhausted_stays_silent() -> None:

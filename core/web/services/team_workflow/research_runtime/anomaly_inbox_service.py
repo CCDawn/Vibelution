@@ -464,6 +464,13 @@ def _convergence_exhausted_item(
     ``outcome == "exhausted"`` with ``actionability == "waiting_user"`` when
     the hard round limit is reached without an accepted verdict): the chain
     cannot advance by itself, so this is a human gate, not a retry.
+
+    The snapshot's ``claimBeliefGate`` verdict is passed through verbatim when
+    it is present and blocked: the item then names the gate reason, the
+    blocked claim ids and the supersede/retract recovery guidance instead of
+    masquerading a gate block as pure budget exhaustion.  When the verdict is
+    unavailable the item says so and points at the convergence gate state —
+    it never invents a reason.
     """
 
     convergence = _get(state, "convergence")
@@ -478,23 +485,65 @@ def _convergence_exhausted_item(
         _first_non_empty(_text(convergence, "updatedAt"), fallback_at),
         fallback_at,
     )
+    summary = (
+        f"收敛评审轮预算已耗尽（第 {round_index}/{round_budget} 轮），"
+        "等待人工决定后续动作（接受结论、分叉修订或重置题目）"
+    )
+    evidence = _clean_evidence(
+        "convergence:exhausted",
+        f"convergenceRound:{round_index}/{round_budget}",
+        _evidence_ref(
+            "convergenceRoundId", _text(convergence, "latestHypothesisRoundId")
+        ),
+    )
+    gate = _get(convergence, "claimBeliefGate")
+    gate_status = (
+        _text(gate, "status").lower() if isinstance(gate, Mapping) else ""
+    )
+    if gate_status == "blocked":
+        reason = _text(gate, "reason") or "claim_belief_gate_unavailable"
+        blocked_claim_ids = sorted(
+            {
+                _text(item, "claimId")
+                for item in _as_iterable(_get(gate, "blockedClaims"))
+                if isinstance(item, Mapping) and _text(item, "claimId")
+            }
+        )
+        evidence_gap_refs = [
+            f"{_text(item, 'claimId')}:{_text(item, 'gap')}"
+            for item in _as_iterable(_get(gate, "evidenceGaps"))
+            if isinstance(item, Mapping) and _text(item, "claimId")
+        ]
+        claim_part = (
+            "、".join(blocked_claim_ids) if blocked_claim_ids else "见收敛门载荷"
+        )
+        summary += (
+            f"；收敛门被挡（{reason}），被挡主张：{claim_part}，"
+            "需先 supersede/retract 被挡主张或修复证据评审后再裁决/推进"
+        )
+        if evidence_gap_refs:
+            summary += f"；证据缺口：{'、'.join(evidence_gap_refs)}"
+        evidence = _clean_evidence(
+            *evidence,
+            f"claimGateReason:{reason}",
+            *(f"blockedClaim:{claim_id}" for claim_id in blocked_claim_ids),
+            *(f"evidenceGap:{ref}" for ref in evidence_gap_refs),
+        )
+    elif gate_status != "allowed":
+        # Verdict unavailable (never evaluated / malformed): keep the item
+        # honest — point at the convergence gate state (and the structured
+        # adjudication error that carries the recovery guidance) instead of
+        # leaving a pure "budget exhausted" reading.
+        summary += "；实际被挡原因见收敛门状态（convergence.claimBeliefGate / 人工裁决的结构化错误）"
+        evidence = _clean_evidence(*evidence, "claimGateStatus:unavailable")
     return AnomalyInboxItem.create(
         kind=ANOMALY_KIND_NEEDS_HUMAN_GATE,
         scope=base,
         first_seen_at=updated_at,
         last_seen_at=fallback_at,
-        summary=(
-            f"收敛评审轮预算已耗尽（第 {round_index}/{round_budget} 轮），"
-            "等待人工决定后续动作（接受结论、分叉修订或重置题目）"
-        ),
+        summary=summary,
         recommended_action=None,
-        evidence=_clean_evidence(
-            "convergence:exhausted",
-            f"convergenceRound:{round_index}/{round_budget}",
-            _evidence_ref(
-                "convergenceRoundId", _text(convergence, "latestHypothesisRoundId")
-            ),
-        ),
+        evidence=evidence,
     )
 
 

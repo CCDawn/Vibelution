@@ -3245,13 +3245,32 @@ def project_state_from_records(
     # unrefuted claim belief must not project ``converged`` (and must not
     # offer ``create_formal_run``) while formal readiness stays blocked.
     # The verdict is surfaced on the convergence payload for UI presentation.
+    round_index = int((latest_round or {}).get("roundIndex") or active_round or 0)
+    # The review chain has one server-owned hard limit. Historical links may
+    # still carry the retired default budget of 3; those values are replay
+    # data and must not suppress rounds 4-5 for an unconverged hypothesis.
+    round_budget = hypothesis_first_chain.HARD_ROUND_LIMIT
+    gate_candidate_id = (
+        str(meta_review.get("recommendationCandidateId") or "").strip()
+        if isinstance(meta_review, Mapping)
+        else ""
+    )
+    # The exhausted surface (a closed round at/after the hard limit, not yet
+    # terminally rejected) evaluates the same verdict when it carries a
+    # concrete recommended candidate, so the anomaly-inbox entry can name the
+    # real blocker instead of masquerading a gate block as pure budget
+    # exhaustion.  Without a candidate there is nothing to evaluate and the
+    # payload stays null; the inbox entry then points at the convergence gate
+    # state instead of inventing a reason.
+    exhausted_surface = bool(
+        latest_round
+        and str(latest_round.get("status") or "").lower() == "closed"
+        and round_index >= round_budget
+        and not adjudication_rejected
+        and gate_candidate_id
+    )
     claim_belief_gate: dict[str, Any] | None = None
-    if converged:
-        gate_candidate_id = (
-            str(meta_review.get("recommendationCandidateId") or "").strip()
-            if isinstance(meta_review, Mapping)
-            else ""
-        )
+    if converged or exhausted_surface:
         try:
             verdict = _claim_belief_gate_verdict(
                 team_id, normalized_question_id, gate_candidate_id
@@ -3278,13 +3297,8 @@ def project_state_from_records(
             # an empty list for null-safe UI consumption.
             "evidenceGaps": list(verdict.get("evidenceGaps") or []),
         }
-        if claim_belief_gate["status"] != "allowed":
+        if converged and claim_belief_gate["status"] != "allowed":
             converged = False
-    round_index = int((latest_round or {}).get("roundIndex") or active_round or 0)
-    # The review chain has one server-owned hard limit. Historical links may
-    # still carry the retired default budget of 3; those values are replay
-    # data and must not suppress rounds 4-5 for an unconverged hypothesis.
-    round_budget = hypothesis_first_chain.HARD_ROUND_LIMIT
     if adjudication_rejected:
         convergence_phase = _phase(
             "completed",
