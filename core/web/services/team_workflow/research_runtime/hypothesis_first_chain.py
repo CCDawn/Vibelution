@@ -123,6 +123,24 @@ _AUTO_RETRY_HANDOFF_GRACE_OVERRIDE_ENV = "VIBELUTION_AUTO_RETRY_HANDOFF_GRACE_MS
 # Deliberately an independent threshold from the digest TTL above.
 DEFAULT_AUTO_REGEN_ROUND_GRACE_MS = 120_000
 _AUTO_REGEN_ROUND_GRACE_OVERRIDE_ENV = "VIBELUTION_AUTO_REGEN_ROUND_GRACE_MS"
+
+# Knowledge-handoff auto-accept (auto-advance, after formal-run creation):
+# operator decision (2026-09) — the knowledge ingestion governance chain
+# (source review accepted -> knowledge review approved -> official sync) is
+# itself the human decision, so the residual ``knowledge_handoff`` click on
+# the formal run is accepted automatically once that chain passed.  Every
+# other human gate (protocol_freeze / smoke_gate / candidate_promotion) keeps
+# its real human decision semantics and is never touched here.
+KNOWLEDGE_HANDOFF_NODE_ID = "knowledge_handoff"
+KNOWLEDGE_HANDOFF_TASK_KIND = f"gate:{KNOWLEDGE_HANDOFF_NODE_ID}"
+KNOWLEDGE_PACKAGE_DRAFT_KIND = "knowledge_package_draft"
+AUTO_KNOWLEDGE_HANDOFF_ACTOR_ID = "system:auto-advance:knowledge-handoff"
+AUTO_KNOWLEDGE_HANDOFF_REASON = (
+    "auto-advance: knowledge ingestion review chain passed (source review "
+    "accepted + knowledge review approved); knowledge handoff accepted per "
+    "operator automation policy"
+)
+
 # In-flight marker, one regeneration per (teamId, questionId) per process.
 # The maintenance tick is serial, but one regeneration can spend the whole
 # review-LLM budget (minutes) while the sweep interval is 30s, so any
@@ -3823,6 +3841,346 @@ def auto_retry_pending_collection_handoffs(
     return summary
 
 
+def auto_accept_knowledge_handoffs(
+    team_id: str,
+    *,
+    question_id: str,
+) -> dict[str, Any]:
+    """Auto-accept pending ``knowledge_handoff`` human gates on formal runs.
+
+    Budget-exhaustion auto-advance, after formal-run creation (safe to call
+    standalone).  The knowledge ingestion governance chain (source review
+    accepted -> knowledge review approved -> official sync) is itself the
+    human decision, so per operator policy the residual ``knowledge_handoff``
+    click is accepted automatically instead of dead-waiting on a human.  The
+    helper enumerates the question's non-archived formal runs (the same
+    ``list_runs`` read as the auto-retry / auto-create steps) and, per run,
+    resolves every pending ``knowledge_handoff`` human task through the exact
+    formal command SSOT the manual accept uses
+    (``WorkflowCommandKind.RESOLVE_HUMAN_TASK``, deterministic idempotency key
+    ``hf2:auto-knowledge-handoff:<runId>:<taskId>``).
+
+    Fail-closed scoping: only ``nodeId == knowledge_handoff`` tasks are
+    touched (task kind and the node attempt must both agree); the inbound
+    ``e_ingest_handoff`` handoff must carry a ``knowledge_package_draft``
+    artifact reference (proof the governed ingestion completed), otherwise the
+    task is skipped unsubmitted; and the command service still re-verifies the
+    materialized accepted knowledge package at accept time, so a missing
+    package ends as a structured skip, never a blind accept.  Every other
+    human gate (protocol_freeze / smoke_gate / candidate_promotion) keeps its
+    human decision semantics and is never touched.
+
+    Isolation and idempotency: typed command rejections (already resolved,
+    stale run version, forbidden, artifact not materialized) count as
+    ``skipped`` for the next tick, unexpected errors count as ``failed``, a
+    previous auto-accept replayed from the bounded event window counts as
+    ``reused``, and nothing here raises.  Every outcome is recorded as a
+    ``hypothesis_first.auto_accept_knowledge_handoff`` scene event.
+    """
+    normalized_question_id = str(question_id or "").strip().upper()
+    summary: dict[str, Any] = {
+        "runsScanned": 0,
+        "pendingTasks": 0,
+        "accepted": 0,
+        "reused": 0,
+        "skipped": 0,
+        "failed": 0,
+    }
+    try:
+        from .formal_read_runtime import get_query_service
+
+        payload = get_query_service().list_runs(
+            team_id=team_id, workflow_id=CHALLENGE_CUP_WORKFLOW_ID
+        )
+    except Exception:  # noqa: BLE001 - formal runtime absent (command line)
+        return summary
+    from .runtime_factory import production_workflow_runtime
+
+    runtime = production_workflow_runtime()
+    if runtime is None:
+        return summary
+    runs = [
+        run
+        for run in list((payload or {}).get("runs") or [])
+        if isinstance(run, Mapping)
+        and str(run.get("questionId") or "").strip().upper()
+        == normalized_question_id
+        and str(run.get("status") or "").strip().lower() != "archived"
+    ]
+    for run in runs:
+        summary["runsScanned"] += 1
+        run_id = str(run.get("runId") or "").strip()
+        if not run_id:
+            continue
+        try:
+            scan = runtime.store.read(
+                lambda repo: _scan_knowledge_handoff_targets(repo, run_id)
+            )
+        except Exception as exc:  # noqa: BLE001 - one broken run is isolated
+            summary["failed"] += 1
+            _record_scene_event(
+                "hypothesis_first.auto_accept_knowledge_handoff",
+                outcome="failed",
+                level="warning",
+                fields={
+                    "teamId": team_id,
+                    "questionId": normalized_question_id,
+                    "runId": run_id,
+                    "reason": type(exc).__name__,
+                    "error": str(exc)[:400],
+                },
+            )
+            continue
+        # Replays of this sweep's own earlier accepts (bounded event window,
+        # same discipline as the snapshot) are reported as reused — the task
+        # is already resolved, so there is nothing pending to resubmit.
+        for task_id in sorted(scan.get("autoAcceptedTaskIds") or []):
+            summary["reused"] += 1
+            _record_scene_event(
+                "hypothesis_first.auto_accept_knowledge_handoff",
+                outcome="reused",
+                fields={
+                    "teamId": team_id,
+                    "questionId": normalized_question_id,
+                    "runId": run_id,
+                    "taskId": task_id,
+                    "reason": "already_auto_accepted",
+                },
+            )
+        for target in scan.get("pendingTargets") or []:
+            task_id = str(target.get("taskId") or "")
+            summary["pendingTasks"] += 1
+            if not target.get("eligible"):
+                # The nodeId could not be double-confirmed from the node
+                # attempt: fail closed, never guess.
+                reason = str(target.get("reason") or "task_not_eligible")
+                summary["skipped"] += 1
+                _record_scene_event(
+                    "hypothesis_first.auto_accept_knowledge_handoff",
+                    outcome="skipped",
+                    fields={
+                        "teamId": team_id,
+                        "questionId": normalized_question_id,
+                        "runId": run_id,
+                        "taskId": task_id,
+                        "reason": reason,
+                    },
+                )
+                continue
+            if not target.get("draftRefPresent"):
+                # Without a knowledge_package_draft reference on the inbound
+                # e_ingest_handoff the governance chain has not demonstrably
+                # passed — the auto-accept never fires on a guess.
+                summary["skipped"] += 1
+                _record_scene_event(
+                    "hypothesis_first.auto_accept_knowledge_handoff",
+                    outcome="skipped",
+                    fields={
+                        "teamId": team_id,
+                        "questionId": normalized_question_id,
+                        "runId": run_id,
+                        "taskId": task_id,
+                        "reason": "artifact_refs_missing",
+                    },
+                )
+                continue
+            outcome, reason = _submit_auto_knowledge_handoff_accept(
+                runtime,
+                team_id=team_id,
+                run_id=run_id,
+                task_id=task_id,
+            )
+            summary[outcome] += 1
+            _record_scene_event(
+                "hypothesis_first.auto_accept_knowledge_handoff",
+                outcome=outcome,
+                level="warning" if outcome == "failed" else "info",
+                fields={
+                    "teamId": team_id,
+                    "questionId": normalized_question_id,
+                    "runId": run_id,
+                    "taskId": task_id,
+                    "reason": reason,
+                },
+            )
+    return summary
+
+
+def _scan_knowledge_handoff_targets(repo: Any, run_id: str) -> dict[str, Any]:
+    """Read-only scan of one run's knowledge_handoff gate state.
+
+    Returns the pending ``knowledge_handoff`` human tasks (each double-checked
+    against its node attempt), whether the latest inbound
+    ``e_ingest_handoff`` carries a ``knowledge_package_draft`` artifact
+    reference, and the task ids this sweep already auto-accepted earlier
+    (``handoff_accepted`` events carrying this sweep's idempotency prefix,
+    read through the same bounded head+tail event window as the snapshot).
+    """
+    # The latest inbound handoff into knowledge_handoff (edge
+    # knowledge_ingestion->knowledge_handoff) carries the draft refs bound at
+    # agent-commit time; retries leave the newest row authoritative.
+    inbound_handoff_id = ""
+    for handoff_row in repo.list_handoffs_for_node(
+        run_id, KNOWLEDGE_HANDOFF_NODE_ID
+    ) or []:
+        inbound_handoff_id = str(handoff_row[0] or "")
+    draft_ref_present = False
+    if inbound_handoff_id:
+        for ref_row in repo.list_handoff_artifact_refs_for_run(run_id) or []:
+            if str(ref_row[0] or "") != inbound_handoff_id:
+                continue
+            if str(ref_row[2] or "").startswith(KNOWLEDGE_PACKAGE_DRAFT_KIND):
+                draft_ref_present = True
+                break
+    pending_targets: list[dict[str, Any]] = []
+    for row in repo.list_pending_human_tasks(run_id) or []:
+        if str(row[4] or "") != KNOWLEDGE_HANDOFF_TASK_KIND:
+            # Other human gates (protocol_freeze / smoke_gate / ...) are real
+            # human decisions: never selected, never touched.
+            continue
+        node_run_id = str(row[2] or "")
+        attempt = repo.get_attempt(node_run_id) if node_run_id else None
+        node_id = str(getattr(attempt, "node_id", "") or "")
+        pending_targets.append(
+            {
+                "taskId": str(row[0] or ""),
+                "nodeRunId": node_run_id,
+                "handoffId": str(row[3] or ""),
+                "eligible": node_id == KNOWLEDGE_HANDOFF_NODE_ID,
+                "reason": ""
+                if node_id == KNOWLEDGE_HANDOFF_NODE_ID
+                else "task_node_unverifiable",
+                "draftRefPresent": draft_ref_present,
+            }
+        )
+    auto_accepted_task_ids: set[str] = set()
+    latest_sequence = int(repo.latest_event_sequence(run_id) or 0)
+    head = repo.list_events(run_id, 0, 250)
+    tail = repo.list_events(run_id, max(0, latest_sequence - 250), 500)
+    seen: set[tuple[int, str]] = set()
+    idempotency_prefix = f"hf2:auto-knowledge-handoff:{run_id}:"
+    for event in (*head, *tail):
+        key = (
+            int(getattr(event, "sequence", 0) or 0),
+            str(getattr(event, "event_id", "") or ""),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        if str(getattr(event, "event_type", "") or "") != "handoff_accepted":
+            continue
+        correlation_id = str(getattr(event, "correlation_id", "") or "")
+        if not correlation_id.startswith(idempotency_prefix):
+            continue
+        try:
+            event_payload = json.loads(str(getattr(event, "payload_json", "") or "{}"))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            event_payload = {}
+        task_id = str(
+            event_payload.get("taskId")
+            if isinstance(event_payload, dict)
+            else ""
+        ).strip()
+        if task_id:
+            auto_accepted_task_ids.add(task_id)
+    return {
+        "pendingTargets": pending_targets,
+        "draftRefPresent": draft_ref_present,
+        "autoAcceptedTaskIds": auto_accepted_task_ids,
+    }
+
+
+def _submit_auto_knowledge_handoff_accept(
+    runtime: Any,
+    *,
+    team_id: str,
+    run_id: str,
+    task_id: str,
+) -> tuple[str, str]:
+    """Submit one ``resolve_human_task`` accept through the command SSOT.
+
+    Returns ``(summary_key, reason)`` where ``summary_key`` is ``accepted``,
+    ``skipped``, or ``failed``.  The submit runs under a server-bound system
+    operator scope (``AUTO_KNOWLEDGE_HANDOFF_ACTOR_ID`` with the operator
+    role) because ``resolve_human_task`` is a high-impact command whose
+    authorization must come from server context, never a client body; the
+    identity mirrors the ``local_control_operator`` control-plane precedent.
+    Typed command rejections (already resolved, stale run version, artifact
+    not materialized, forbidden, conflict) are structured skips for the next
+    tick; anything else is an unexpected failure.
+    """
+
+    from core.research.workflow.contracts import (
+        ActorRef,
+        CommandRequest,
+        WorkflowCommandKind,
+    )
+    from core.research.workflow.ledger import (
+        CommandNotAllowedError as LedgerCommandNotAllowedError,
+        IdempotencyConflictError as LedgerIdempotencyConflictError,
+        RunVersionConflictError as LedgerRunVersionConflictError,
+    )
+
+    from .command_service import WorkflowCommandError
+    from .ids import new_id
+    from .operator_authorization import server_operator_scope
+
+    run = runtime.store.get_run(run_id)
+    if run is None or str(run.team_id or "") != team_id:
+        return "skipped", "formal_run_unavailable"
+    try:
+        with server_operator_scope(
+            AUTO_KNOWLEDGE_HANDOFF_ACTOR_ID,
+            display_name="Auto-advance knowledge handoff acceptance",
+            # resolve_human_task is operator-gated; the sweep is a
+            # server-internal control-plane caller, so it binds the same
+            # privileged role the local control operator carries.
+            roles=("operator",),
+        ):
+            receipt = runtime.command_service.submit(
+                CommandRequest(
+                    command_id=new_id("cmd"),
+                    run_id=run_id,
+                    team_id=team_id,
+                    command=WorkflowCommandKind.RESOLVE_HUMAN_TASK,
+                    node_id=KNOWLEDGE_HANDOFF_NODE_ID,
+                    expected_run_version=int(run.run_version),
+                    idempotency_key=f"hf2:auto-knowledge-handoff:{run_id}:{task_id}",
+                    payload={
+                        "taskId": task_id,
+                        "decision": "accept",
+                        "reason": AUTO_KNOWLEDGE_HANDOFF_REASON,
+                    },
+                    requested_by=ActorRef(
+                        "system", AUTO_KNOWLEDGE_HANDOFF_ACTOR_ID
+                    ),
+                    requested_at_ms=int(time.time() * 1000),
+                )
+            )
+    except HypothesisFirstChainError as exc:
+        return "skipped", str(exc)[:200] or type(exc).__name__
+    except (
+        WorkflowCommandError,
+        LedgerRunVersionConflictError,
+        LedgerIdempotencyConflictError,
+        LedgerCommandNotAllowedError,
+    ) as exc:
+        # Typed command rejection (InvalidHumanTaskStateError and friends are
+        # WorkflowCommandError subclasses): a structured wait, never a crash.
+        return "skipped", str(exc)[:200] or type(exc).__name__
+    except Exception as exc:  # noqa: BLE001 - one submit is isolated
+        return "failed", f"{type(exc).__name__}: {str(exc)[:180]}"
+    receipt_status = ""
+    try:
+        receipt_payload = receipt.to_dict()
+        receipt_status = str(receipt_payload.get("status") or "")
+    except Exception:  # noqa: BLE001 - receipt shape is advisory only
+        receipt_status = ""
+    if receipt_status == "rejected":
+        return "skipped", "command_rejected_by_runtime"
+    return "accepted", f"resolve_human_task:{receipt_status or 'submitted'}"
+
+
 def sweep_auto_advance_closure() -> dict[str, Any]:
     """Maintenance sweep: auto-advance every exhausted hypothesis chain.
 
@@ -3830,7 +4188,8 @@ def sweep_auto_advance_closure() -> dict[str, Any]:
     closing tick may be long gone by the time this runs).  Enumerates the
     team ids that own a hypothesis-first chain ledger read-only, then walks
     each question through approve -> regenerate -> retry-handoffs ->
-    adjudicate -> create -> retry: review digests that waited beyond the TTL
+    adjudicate -> create -> accept-knowledge-handoffs -> retry: review
+    digests that waited beyond the TTL
     get approved and closed first (so the fan-in / next-round advance can
     still progress within the same pass), a newest review round whose fan-in
     round generation never landed (the closure LLM died mid-close) gets its
@@ -3854,6 +4213,7 @@ def sweep_auto_advance_closure() -> dict[str, Any]:
         "adjudicated": 0,
         "rejected": 0,
         "formalRuns": 0,
+        "knowledgeHandoffsAccepted": 0,
         "retried": 0,
         "failed": 0,
         "skipped": 0,
@@ -3929,6 +4289,17 @@ def sweep_auto_advance_closure() -> dict[str, Any]:
                         summary["formalRuns"] += 1
                     elif str(formal_run.get("status") or "") == "failed":
                         summary["failed"] += 1
+                # Step two-five, every question every pass: accept the
+                # knowledge_handoff human gate on formal runs whose ingestion
+                # governance chain already passed (the operator-automation
+                # policy removes the residual click).  Newly created runs have
+                # no such task yet; live runs stuck on the gate unblock here.
+                handoff_accept = auto_accept_knowledge_handoffs(
+                    team_id, question_id=question_id
+                )
+                summary["knowledgeHandoffsAccepted"] += int(
+                    handoff_accept.get("accepted") or 0
+                )
                 # Step three, every question every pass: resubmit the
                 # offer-gated retry for formal nodes blocked on the transient
                 # auto_advance_not_ready verdict (read-only unless an eligible
@@ -3951,6 +4322,7 @@ def sweep_auto_advance_closure() -> dict[str, Any]:
             "adjudicated": int(summary["adjudicated"]),
             "rejected": int(summary["rejected"]),
             "formalRuns": int(summary["formalRuns"]),
+            "knowledgeHandoffsAccepted": int(summary["knowledgeHandoffsAccepted"]),
             "retried": int(summary["retried"]),
             "failed": int(summary["failed"]),
             "skipped": int(summary["skipped"]),

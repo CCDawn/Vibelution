@@ -18,8 +18,10 @@ No real model, network, or research activity is involved.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -2110,3 +2112,853 @@ def test_exhausted_round_budget_counts_superseded_newest_round(
     adjudications = _adjudications(ledger_path)
     assert len(adjudications) == 1
     assert adjudications[0]["hypothesisRoundId"] == _ROUND_ID
+
+
+# ---------------------------------------------------------------------------
+# knowledge-handoff auto-accept: the ingestion governance chain (source review
+# accepted -> knowledge review approved -> official sync) is itself the human
+# decision, so the residual knowledge_handoff click on formal runs is accepted
+# automatically through the resolve_human_task command SSOT — never for other
+# human gates and never without the knowledge_package_draft artifact proof.
+
+
+from tests._support.command_helpers import CommandHarness
+from tests._support.workflow_ledger_helpers import (
+    FIXED_NOW_MS,
+    build_attempt_record,
+    build_command_record,
+    build_event_record,
+    build_run_record,
+)
+
+_KH_RUN_ID = "run-knowledge-handoff"
+_KH_TASK_ID = "ht-knowledge-auto"
+_KH_NODE_RUN_ID = "nr-run-knowledge-handoff-knowledge_handoff-a1"
+_KH_TEAM_ID = "research-team"
+
+
+def _accepted_knowledge_package() -> dict[str, object]:
+    return {
+        "teamId": _KH_TEAM_ID,
+        "sourceCollectionRunId": "sc-run-1",
+        "accepted": True,
+        "knowledgeItems": [
+            {"knowledgeItemId": "ki-1", "contentHash": "b" * 64}
+        ],
+    }
+
+
+class _FakeAttemptRecord:
+    def __init__(self, node_id: str) -> None:
+        self.node_id = node_id
+
+
+class _FakeEvent:
+    def __init__(
+        self,
+        *,
+        sequence: int,
+        event_id: str,
+        event_type: str,
+        correlation_id: str,
+        payload: dict[str, Any],
+    ) -> None:
+        self.sequence = sequence
+        self.event_id = event_id
+        self.event_type = event_type
+        self.correlation_id = correlation_id
+        self.payload_json = json.dumps(payload, ensure_ascii=False)
+
+
+class _FakeHandoffRepo:
+    """In-memory stand-in for the ledger repository reads the scan needs."""
+
+    def __init__(
+        self,
+        *,
+        pending_tasks: list[tuple] | None = None,
+        attempts: dict[str, _FakeAttemptRecord] | None = None,
+        handoffs_by_node: dict[str, list[tuple]] | None = None,
+        artifact_refs: list[tuple] | None = None,
+        events: list[_FakeEvent] | None = None,
+    ) -> None:
+        self._pending_tasks = pending_tasks or []
+        self._attempts = attempts or {}
+        self._handoffs_by_node = handoffs_by_node or {}
+        self._artifact_refs = artifact_refs or []
+        self._events = events or []
+
+    def list_pending_human_tasks(self, run_id: str) -> list[tuple]:
+        return list(self._pending_tasks)
+
+    def get_attempt(self, node_run_id: str) -> _FakeAttemptRecord | None:
+        return self._attempts.get(node_run_id)
+
+    def list_handoffs_for_node(self, run_id: str, to_node_id: str) -> list[tuple]:
+        return list(self._handoffs_by_node.get(to_node_id) or [])
+
+    def list_handoff_artifact_refs_for_run(self, run_id: str) -> list[tuple]:
+        return list(self._artifact_refs)
+
+    def latest_event_sequence(self, run_id: str) -> int:
+        return max((item.sequence for item in self._events), default=0)
+
+    def list_events(
+        self, run_id: str, after_sequence: int = 0, limit: int = 500
+    ) -> list[_FakeEvent]:
+        return [
+            item
+            for item in self._events
+            if item.sequence > after_sequence
+        ][:limit]
+
+
+class _FakeHandoffStore:
+    def __init__(self, repo: _FakeHandoffRepo, run_version: int = 7) -> None:
+        self.repo = repo
+        self.run_version = run_version
+
+    def read(self, fn):
+        return fn(self.repo)
+
+    def get_run(self, run_id: str):
+        return SimpleNamespace(team_id=_TEAM_ID, run_version=self.run_version)
+
+
+class _FakeHandoffCommandService:
+    def __init__(
+        self,
+        *,
+        receipt: dict[str, Any] | None = None,
+        error: Exception | None = None,
+    ) -> None:
+        self.requests: list[Any] = []
+        self.operator_ids: list[str] = []
+        self._receipt = receipt or {"status": "accepted"}
+        self._error = error
+
+    def submit(self, request: Any):
+        from core.web.services.team_workflow.research_runtime.operator_authorization import (
+            current_server_operator,
+        )
+
+        self.requests.append(request)
+        operator = current_server_operator()
+        self.operator_ids.append(
+            str(operator.operator_id) if operator is not None else ""
+        )
+        if self._error is not None:
+            raise self._error
+        payload = dict(self._receipt)
+
+        class _Receipt:
+            def to_dict(self) -> dict[str, Any]:
+                return dict(payload)
+
+        return _Receipt()
+
+
+def _pending_knowledge_task_tuple(
+    task_id: str = _KH_TASK_ID,
+    *,
+    node_run_id: str = _KH_NODE_RUN_ID,
+    task_kind: str = chain.KNOWLEDGE_HANDOFF_TASK_KIND,
+) -> tuple:
+    return (
+        task_id,
+        "run-1",
+        node_run_id,
+        "ho-outbound-1",
+        task_kind,
+        json.dumps({"nodeId": "knowledge_handoff"}),
+        "pending",
+        None,
+        FIXED_NOW_MS,
+        None,
+    )
+
+
+def _inbound_handoff_rows() -> list[tuple]:
+    return [
+        (
+            "ho-inbound-1",
+            "run-1",
+            "knowledge_ingestion->knowledge_handoff",
+            "nr-run-1-knowledge_ingestion-a1",
+            "knowledge_handoff",
+            None,
+            "human",
+            "a" * 64,
+            "ready",
+            None,
+            None,
+            None,
+            FIXED_NOW_MS,
+            None,
+        )
+    ]
+
+
+def _draft_artifact_refs() -> list[tuple]:
+    return [
+        (
+            "ho-inbound-1",
+            "ar-draft-1",
+            "knowledge_package_draft",
+            json.dumps({"canonicalRef": "knowledge_package_draft://x"}),
+            "1.0.0",
+            "c" * 64,
+        )
+    ]
+
+
+def _auto_accepted_event(
+    task_id: str = _KH_TASK_ID,
+    *,
+    sequence: int = 2,
+    correlation_id: str = "",
+) -> _FakeEvent:
+    return _FakeEvent(
+        sequence=sequence,
+        event_id=f"evt-{sequence}",
+        event_type="handoff_accepted",
+        correlation_id=(
+            correlation_id
+            or f"hf2:auto-knowledge-handoff:run-1:{task_id}"
+        ),
+        payload={"taskId": task_id, "decision": "accept"},
+    )
+
+
+def _unit_env(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    repo: _FakeHandoffRepo,
+    *,
+    command: _FakeHandoffCommandService | None = None,
+    runs: list[dict[str, Any]] | None = None,
+    run_version: int = 7,
+) -> tuple[list[dict[str, Any]], _FakeHandoffCommandService]:
+    """Tmp isolation + fake formal runtime; returns (captured events, command)."""
+    from core.web.services.team_workflow.research_runtime import (
+        formal_read_runtime,
+    )
+
+    events = _approve_env(tmp_path, monkeypatch)
+    command = command or _FakeHandoffCommandService()
+    monkeypatch.setattr(
+        formal_read_runtime,
+        "get_query_service",
+        lambda: _FakeQueryService(
+            runs
+            if runs is not None
+            else [
+                {
+                    "runId": "run-1",
+                    "questionId": _QUESTION_ID,
+                    "status": "waiting_human",
+                }
+            ]
+        ),
+    )
+    store = _FakeHandoffStore(repo, run_version=run_version)
+    monkeypatch.setattr(
+        runtime_factory,
+        "production_workflow_runtime",
+        lambda: _FakeUnitRuntime(store, command),
+    )
+    return events, command
+
+
+class _FakeUnitRuntime:
+    def __init__(self, store: _FakeHandoffStore, command: Any) -> None:
+        self.store = store
+        self.command_service = command
+
+
+class _CapturingCommandService:
+    """Wraps the real command SSOT, capturing requests + operator context."""
+
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
+        self.requests: list[Any] = []
+        self.operator_ids: list[str] = []
+
+    def submit(self, request: Any):
+        from core.web.services.team_workflow.research_runtime.operator_authorization import (
+            current_server_operator,
+        )
+
+        operator = current_server_operator()
+        self.operator_ids.append(
+            str(operator.operator_id) if operator is not None else ""
+        )
+        self.requests.append(request)
+        return self._inner.submit(request)
+
+
+def _seed_auto_accept_gate(harness: CommandHarness) -> None:
+    """Real ledger shape: pending knowledge_handoff gate with draft refs."""
+    from core.research.workflow.definition import (
+        build_challenge_cup_workflow_definition,
+    )
+    from core.research.workflow.definition_registry import register_or_resolve
+
+    identity = register_or_resolve(build_challenge_cup_workflow_definition())
+    run = replace(
+        build_run_record(
+            run_id=_KH_RUN_ID,
+            workflow_version_id=identity.workflowVersionId,
+            last_event_sequence=1,
+        ),
+        structure_hash=identity.structureHash,
+        input_snapshot_json=json.dumps(
+            {
+                "snapshotHash": "a" * 64,
+                "sourceCollectionRunId": "sc-run-1",
+            }
+        ),
+    )
+    attempt = replace(
+        build_attempt_record(
+            node_run_id=_KH_NODE_RUN_ID,
+            node_id="knowledge_handoff",
+            actor_kind="human",
+            status="waiting_human",
+            command_id="cmd-seed-kh",
+        ),
+        run_id=_KH_RUN_ID,
+        pending_action_id="act-knowledge-human",
+    )
+
+    def mutate(uow):
+        uow.repository.insert_run(run)
+        uow.repository.insert_event(
+            build_event_record(
+                sequence=1,
+                run_id=_KH_RUN_ID,
+                event_id="evt-created-run-kh",
+            )
+        )
+        uow.repository.insert_command(
+            build_command_record(
+                command_id="cmd-seed-kh",
+                run_id=_KH_RUN_ID,
+                command_kind="start_node",
+                node_id="knowledge_handoff",
+            )
+        )
+        uow.repository.insert_attempt(attempt)
+        # Outbound handoff: the selector the accept binds its
+        # knowledge_package receipt to (task.handoffId points here).
+        uow.repository.insert_handoff(
+            handoff_id="ho-knowledge-hypothesis",
+            run_id=_KH_RUN_ID,
+            edge_id="knowledge_handoff->hypothesis_design",
+            from_node_run_id=attempt.node_run_id,
+            to_node_id="hypothesis_design",
+            to_node_run_id=None,
+            gate_kind="knowledge_package",
+            input_snapshot_hash="a" * 64,
+            offered_at_ms=FIXED_NOW_MS,
+        )
+        uow.repository.update_handoff_status(
+            "ho-knowledge-hypothesis", "waiting_human", FIXED_NOW_MS
+        )
+        # Inbound handoff: knowledge_ingestion -> knowledge_handoff, carrying
+        # the knowledge_package_draft artifact refs bound at agent-commit.
+        uow.repository.insert_attempt(
+            build_attempt_record(
+                node_run_id="nr-run-knowledge-handoff-knowledge_ingestion-a1",
+                run_id=_KH_RUN_ID,
+                node_id="knowledge_ingestion",
+                actor_kind="agent",
+                status="succeeded",
+                command_id="cmd-seed-kh",
+            )
+        )
+        uow.repository.insert_handoff(
+            handoff_id="ho-ingest-knowledge",
+            run_id=_KH_RUN_ID,
+            edge_id="knowledge_ingestion->knowledge_handoff",
+            from_node_run_id="nr-run-knowledge-handoff-knowledge_ingestion-a1",
+            to_node_id="knowledge_handoff",
+            to_node_run_id=None,
+            gate_kind="human",
+            input_snapshot_hash="a" * 64,
+            offered_at_ms=FIXED_NOW_MS,
+        )
+        uow.repository.update_handoff_status(
+            "ho-ingest-knowledge", "ready", FIXED_NOW_MS
+        )
+        uow.repository.insert_artifact_receipt(
+            receipt_id="ar-draft-1",
+            run_id=_KH_RUN_ID,
+            node_run_id="nr-run-knowledge-handoff-knowledge_ingestion-a1",
+            team_id=_KH_TEAM_ID,
+            artifact_kind="knowledge_package_draft",
+            canonical_ref_json=json.dumps(
+                {"canonicalRef": "knowledge_package_draft://sc-run-1"}
+            ),
+            artifact_version="1.0.0",
+            sha256="c" * 64,
+            domain_revision="d" * 32,
+            materialized=1,
+            verified_at_ms=FIXED_NOW_MS,
+        )
+        uow.repository.insert_handoff_receipt("ho-ingest-knowledge", "ar-draft-1", 0)
+        uow.repository.insert_human_task(
+            task_id=_KH_TASK_ID,
+            run_id=_KH_RUN_ID,
+            node_run_id=attempt.node_run_id,
+            handoff_id="ho-knowledge-hypothesis",
+            task_kind="gate:knowledge_handoff",
+            prompt_json='{"nodeId":"knowledge_handoff"}',
+            created_at_ms=FIXED_NOW_MS,
+        )
+
+    harness.store.submit(mutate, force_flush=True).result(timeout=10)
+
+
+def _kh_integration_env(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    harness: CommandHarness,
+    capturing: _CapturingCommandService,
+) -> None:
+    """Point the auto-accept helper at the real ledger + command SSOT."""
+    from core.web.services.team_workflow.research_runtime import (
+        formal_read_runtime,
+    )
+
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        formal_read_runtime,
+        "get_query_service",
+        lambda: _FakeQueryService(
+            [
+                {
+                    "runId": _KH_RUN_ID,
+                    "questionId": "SCI-096",
+                    "status": "waiting_human",
+                }
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        runtime_factory,
+        "production_workflow_runtime",
+        lambda: SimpleNamespace(
+            store=harness.store, command_service=capturing
+        ),
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime."
+        "human_acceptance_artifact.load_scoped_artifact_payload",
+        lambda *args, **kwargs: _accepted_knowledge_package(),
+    )
+
+
+def test_auto_accept_submits_command_then_replays_as_reused(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """pending + 入边 draft 引用 → 走正式命令 SSOT accept（system 身份、
+    幂等键、任务翻 accepted 落盘）；再跑一次 → reused 不重复提交。"""
+    from core.research.workflow.contracts import (
+        ActorRef,
+        WorkflowCommandKind,
+    )
+
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        _seed_auto_accept_gate(harness)
+        capturing = _CapturingCommandService(harness.command_service)
+        _kh_integration_env(tmp_path, monkeypatch, harness, capturing)
+        events = _capture_scene_events(monkeypatch)
+
+        summary = chain.auto_accept_knowledge_handoffs(
+            _KH_TEAM_ID, question_id="SCI-096"
+        )
+
+        assert summary == {
+            "runsScanned": 1,
+            "pendingTasks": 1,
+            "accepted": 1,
+            "reused": 0,
+            "skipped": 0,
+            "failed": 0,
+        }
+        assert len(capturing.requests) == 1
+        request = capturing.requests[0]
+        assert request.command is WorkflowCommandKind.RESOLVE_HUMAN_TASK
+        assert request.node_id == "knowledge_handoff"
+        assert request.idempotency_key == (
+            f"hf2:auto-knowledge-handoff:{_KH_RUN_ID}:{_KH_TASK_ID}"
+        )
+        assert request.expected_run_version == 1
+        assert request.payload["taskId"] == _KH_TASK_ID
+        assert request.payload["decision"] == "accept"
+        assert (
+            "auto-advance: knowledge ingestion review chain passed"
+            in request.payload["reason"]
+        )
+        assert request.requested_by == ActorRef(
+            "system", "system:auto-advance:knowledge-handoff"
+        )
+        # The server-bound operator scope the helper carries (authorization
+        # reached the raw command service, so the accept is not forbidden).
+        assert capturing.operator_ids == [
+            "system:auto-advance:knowledge-handoff"
+        ]
+
+        # System identity and accept decision are durable on the task row.
+        row = harness.store.read(
+            lambda repo: repo.get_human_task(_KH_TASK_ID)
+        )
+        assert row is not None and row[6] == "accepted"
+        assert "system:auto-advance:knowledge-handoff" in str(row[7])
+        command_row = harness.store.get_command_by_idempotency(
+            _KH_RUN_ID,
+            f"hf2:auto-knowledge-handoff:{_KH_RUN_ID}:{_KH_TASK_ID}",
+        )
+        assert command_row is not None
+        accepted_events = [
+            item
+            for item in events
+            if item["code"] == "hypothesis_first.auto_accept_knowledge_handoff"
+            and item["outcome"] == "accepted"
+        ]
+        assert len(accepted_events) == 1
+        assert accepted_events[0]["fields"]["runId"] == _KH_RUN_ID
+        assert accepted_events[0]["fields"]["taskId"] == _KH_TASK_ID
+
+        # Second pass: the task is resolved, the sweep's own accept replays
+        # from the ledger as reused — no second command.
+        replay = chain.auto_accept_knowledge_handoffs(
+            _KH_TEAM_ID, question_id="SCI-096"
+        )
+        assert replay["accepted"] == 0
+        assert replay["reused"] == 1
+        assert replay["failed"] == 0
+        assert len(capturing.requests) == 1
+    finally:
+        harness.close()
+
+
+def test_auto_accept_skips_when_no_pending_task(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """无 pending task → runsScanned 计数但零动作、零提交。"""
+    repo = _FakeHandoffRepo()
+    _events, command = _unit_env(monkeypatch, tmp_path, repo)
+
+    summary = chain.auto_accept_knowledge_handoffs(
+        _TEAM_ID, question_id=_QUESTION_ID
+    )
+
+    assert summary["runsScanned"] == 1
+    assert summary["pendingTasks"] == 0
+    assert summary["accepted"] == 0
+    assert summary["reused"] == 0
+    assert summary["skipped"] == 0
+    assert summary["failed"] == 0
+    assert command.requests == []
+
+
+def test_auto_accept_fails_closed_without_draft_artifact_ref(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """入边缺 knowledge_package_draft 引用（或无入边）→ skipped
+    artifact_refs_missing，任务保持 pending，绝不猜。"""
+    # Inbound handoff exists but only carries a non-draft ref.
+    repo = _FakeHandoffRepo(
+        pending_tasks=[_pending_knowledge_task_tuple()],
+        attempts={_KH_NODE_RUN_ID: _FakeAttemptRecord("knowledge_handoff")},
+        handoffs_by_node={"knowledge_handoff": _inbound_handoff_rows()},
+        artifact_refs=[
+            (
+                "ho-inbound-1",
+                "ar-graph-1",
+                "evidence_relation_graph",
+                "{}",
+                "1.0.0",
+                "c" * 64,
+            )
+        ],
+    )
+    _events, command = _unit_env(monkeypatch, tmp_path, repo)
+
+    summary = chain.auto_accept_knowledge_handoffs(
+        _TEAM_ID, question_id=_QUESTION_ID
+    )
+
+    assert summary["pendingTasks"] == 1
+    assert summary["skipped"] == 1
+    assert summary["accepted"] == 0
+    assert command.requests == []
+    skipped = [
+        item
+        for item in _events
+        if item["code"] == "hypothesis_first.auto_accept_knowledge_handoff"
+    ]
+    assert len(skipped) == 1
+    assert skipped[0]["outcome"] == "skipped"
+    assert skipped[0]["fields"]["reason"] == "artifact_refs_missing"
+
+    # No inbound handoff at all: the same fail-closed skip.
+    repo_no_handoff = _FakeHandoffRepo(
+        pending_tasks=[_pending_knowledge_task_tuple()],
+        attempts={_KH_NODE_RUN_ID: _FakeAttemptRecord("knowledge_handoff")},
+    )
+    _events_2, command_2 = _unit_env(monkeypatch, tmp_path, repo_no_handoff)
+    summary_2 = chain.auto_accept_knowledge_handoffs(
+        _TEAM_ID, question_id=_QUESTION_ID
+    )
+    assert summary_2["skipped"] == 1
+    assert command_2.requests == []
+    reasons = {
+        item["fields"].get("reason")
+        for item in _events_2
+        if item["code"] == "hypothesis_first.auto_accept_knowledge_handoff"
+    }
+    assert reasons == {"artifact_refs_missing"}
+
+
+def test_auto_accept_ignores_human_decided_tasks(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """人工已决策（事件 correlation 是人工键）→ 既不重放为 reused，
+    也绝不改写；零提交。"""
+    repo = _FakeHandoffRepo(
+        # The task was resolved by a human operator: not pending anymore.
+        pending_tasks=[],
+        events=[
+            _FakeEvent(
+                sequence=2,
+                event_id="evt-human-accept",
+                event_type="handoff_accepted",
+                correlation_id="ui:human-accept-1",
+                payload={"taskId": _KH_TASK_ID, "decision": "accept"},
+            )
+        ],
+    )
+    _events, command = _unit_env(monkeypatch, tmp_path, repo)
+
+    summary = chain.auto_accept_knowledge_handoffs(
+        _TEAM_ID, question_id=_QUESTION_ID
+    )
+
+    assert summary == {
+        "runsScanned": 1,
+        "pendingTasks": 0,
+        "accepted": 0,
+        "reused": 0,
+        "skipped": 0,
+        "failed": 0,
+    }
+    assert command.requests == []
+
+
+def test_auto_accept_never_touches_other_human_gates(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """smoke_gate 等其它人工门（真人工决策语义）→ 完全不动；task_kind 与
+    node attempt 不一致的 gate 也不碰（fail-closed）。"""
+    repo = _FakeHandoffRepo(
+        pending_tasks=[
+            _pending_knowledge_task_tuple(
+                "ht-smoke",
+                node_run_id="nr-run-1-smoke_gate-a1",
+                task_kind="gate:smoke_gate",
+            ),
+            _pending_knowledge_task_tuple(
+                "ht-mismatch",
+                node_run_id="nr-run-1-protocol_freeze-a1",
+            ),
+        ],
+        attempts={
+            "nr-run-1-smoke_gate-a1": _FakeAttemptRecord("smoke_gate"),
+            "nr-run-1-protocol_freeze-a1": _FakeAttemptRecord(
+                "protocol_freeze"
+            ),
+        },
+        handoffs_by_node={"knowledge_handoff": _inbound_handoff_rows()},
+        artifact_refs=_draft_artifact_refs(),
+    )
+    _events, command = _unit_env(monkeypatch, tmp_path, repo)
+
+    summary = chain.auto_accept_knowledge_handoffs(
+        _TEAM_ID, question_id=_QUESTION_ID
+    )
+
+    # smoke_gate stays invisible to the helper; the knowledge-handoff-kind
+    # task whose node attempt disagrees is fail-closed skipped, not accepted.
+    assert summary["pendingTasks"] == 1
+    assert summary["accepted"] == 0
+    assert summary["skipped"] == 1
+    assert summary["failed"] == 0
+    assert command.requests == []
+    skipped = [
+        item
+        for item in _events
+        if item["code"] == "hypothesis_first.auto_accept_knowledge_handoff"
+    ]
+    assert len(skipped) == 1
+    assert skipped[0]["fields"]["taskId"] == "ht-mismatch"
+    assert skipped[0]["fields"]["reason"] == "task_node_unverifiable"
+
+
+def test_auto_accept_isolates_rejections_and_failures(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """命令域拒绝（已决策/版本冲突等）→ skipped；意外异常 → failed；
+    均不外抛。"""
+    # Typed domain rejection.
+    repo = _FakeHandoffRepo(
+        pending_tasks=[_pending_knowledge_task_tuple()],
+        attempts={_KH_NODE_RUN_ID: _FakeAttemptRecord("knowledge_handoff")},
+        handoffs_by_node={"knowledge_handoff": _inbound_handoff_rows()},
+        artifact_refs=_draft_artifact_refs(),
+    )
+    rejected = _FakeHandoffCommandService(
+        error=chain.HypothesisFirstChainError("human task 已被并发决策")
+    )
+    events, _command = _unit_env(monkeypatch, tmp_path, repo, command=rejected)
+
+    summary = chain.auto_accept_knowledge_handoffs(
+        _TEAM_ID, question_id=_QUESTION_ID
+    )
+    assert summary["accepted"] == 0
+    assert summary["skipped"] == 1
+    assert summary["failed"] == 0
+    outcomes = {
+        item["outcome"]: item
+        for item in events
+        if item["code"] == "hypothesis_first.auto_accept_knowledge_handoff"
+    }
+    assert "skipped" in outcomes
+    assert "并发决策" in str(outcomes["skipped"]["fields"]["reason"])
+
+    # Unexpected storage explosion.
+    repo_boom = _FakeHandoffRepo(
+        pending_tasks=[_pending_knowledge_task_tuple()],
+        attempts={_KH_NODE_RUN_ID: _FakeAttemptRecord("knowledge_handoff")},
+        handoffs_by_node={"knowledge_handoff": _inbound_handoff_rows()},
+        artifact_refs=_draft_artifact_refs(),
+    )
+    exploded = _FakeHandoffCommandService(error=RuntimeError("disk on fire"))
+    events_boom, _command_boom = _unit_env(
+        monkeypatch, tmp_path, repo_boom, command=exploded
+    )
+    summary_boom = chain.auto_accept_knowledge_handoffs(
+        _TEAM_ID, question_id=_QUESTION_ID
+    )
+    assert summary_boom["failed"] == 1
+    assert summary_boom["skipped"] == 0
+    failed = [
+        item
+        for item in events_boom
+        if item["code"] == "hypothesis_first.auto_accept_knowledge_handoff"
+        and item["outcome"] == "failed"
+    ]
+    assert len(failed) == 1
+    assert failed[0]["level"] == "warning"
+    assert "disk on fire" in str(failed[0]["fields"]["reason"])
+
+
+def _capture_scene_events(
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[dict[str, Any]]:
+    """Swap the chain's scene event recorder for a capturing list."""
+    events: list[dict[str, Any]] = []
+
+    def _capture(
+        event_code: str,
+        *,
+        outcome: str,
+        fields: dict[str, Any] | None = None,
+        level: str = "info",
+    ) -> None:
+        events.append(
+            {
+                "code": event_code,
+                "outcome": outcome,
+                "fields": dict(fields or {}),
+                "level": level,
+            }
+        )
+
+    monkeypatch.setattr(chain, "_record_scene_event", _capture)
+    return events
+
+
+def test_maintenance_sweep_accepts_knowledge_handoffs_after_create(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """sweep 每题顺序：adjudicate → create(+start) → knowledge-handoff-accept
+    → retry；knowledgeHandoffsAccepted 计数汇入 summary 与 sweep scene event。"""
+    from core.web.services.team_workflow.research_runtime import run_creation
+
+    ledger_path = _sweep_env(tmp_path, monkeypatch)
+    order: list[str] = []
+    monkeypatch.setattr(
+        run_creation,
+        "create_question_run",
+        lambda *_args, **kwargs: (
+            order.append("create") or {"runId": "run-sweep-kh", "questionId": _QUESTION_ID}
+        ),
+    )
+    monkeypatch.setattr(
+        chain,
+        "_auto_start_created_formal_run",
+        lambda _team_id, *, run, idempotency_key: order.append("start") or None,
+    )
+
+    def _record_accept(team_id: str, *, question_id: str) -> dict[str, Any]:
+        order.append(f"knowledge-handoff:{question_id}")
+        return {
+            "runsScanned": 1,
+            "pendingTasks": 1,
+            "accepted": 1,
+            "reused": 0,
+            "skipped": 0,
+            "failed": 0,
+        }
+
+    monkeypatch.setattr(chain, "auto_accept_knowledge_handoffs", _record_accept)
+
+    def _record_retry(team_id: str, *, question_id: str) -> dict[str, Any]:
+        order.append(f"retry:{question_id}")
+        return {"blockedRuns": 1, "retried": 1, "skipped": 0, "failed": 0}
+
+    monkeypatch.setattr(chain, "auto_retry_blocked_formal_nodes", _record_retry)
+    events = _capture_scene_events(monkeypatch)
+
+    summary = chain.sweep_auto_advance_closure()
+
+    assert order == [
+        "create",
+        "start",
+        f"knowledge-handoff:{_QUESTION_ID}",
+        f"retry:{_QUESTION_ID}",
+    ]
+    assert summary["knowledgeHandoffsAccepted"] == 1
+    assert summary["adjudicated"] == 1
+    assert summary["formalRuns"] == 1
+    sweep_events = [
+        item
+        for item in events
+        if item["code"] == "hypothesis_first.auto_advance_sweep"
+    ]
+    assert sweep_events and sweep_events[-1]["outcome"] == "completed"
+    assert sweep_events[-1]["fields"]["knowledgeHandoffsAccepted"] == 1
+    adjudications = _adjudications(ledger_path)
+    assert len(adjudications) == 1
+    assert adjudications[0]["decision"] == "accepted"
