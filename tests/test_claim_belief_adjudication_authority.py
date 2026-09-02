@@ -12,8 +12,15 @@ claim evidence store.  These tests pin:
   carry the acceptance audit fields plus the claim scope, replaying the same
   idempotency key appends nothing, and untouched source-fact records stay
   pending;
+- case A2: with no contradicts/counter_evidence record at all (the live
+  SCI-091 shape: 34 pending supports, zero counters), the counter-review
+  requirement is vacuous, so the same accepted adjudication passes the gate
+  and the authority record lands;
 - case B: a contradicted/contested claim still blocks the adjudication
   (``ClaimBeliefGateBlockedError``) and the authority record is not appended;
+- case B2: a single pending contradicts record is belief-neutral (fail-closed
+  pending counters) but still demands its accepted version, so the gate stays
+  blocked on ``accepted_counter_or_boundary_missing``;
 - case C: a ``rejected`` adjudication neither writes acceptances nor runs the
   gate.
 """
@@ -204,10 +211,20 @@ def _seed_unconverged_candidate(
     a fact-dimension record (candidateId of the source candidate), while the
     candidate-dimension bindings exist in both fact and hypothesis roles (live
     stores carry both after historical repairs).  ``boundary`` selects the
-    accepted refutation flavour: ``"contradicts"`` mixes an accepted
-    contradicted ref into the claim (ref snapshot semantics — an unmatched ref
-    keeps its own state — plus its store record so the boundary check sees it),
-    which must keep the adjudication blocked.
+    refutation flavour:
+
+    - ``"contradicts"`` mixes an accepted contradicted ref into the claim
+      (ref snapshot semantics — an unmatched ref keeps its own state — plus
+      its store record so the conditional counter check sees it), which must
+      keep the adjudication blocked on the disputed belief state;
+    - ``"pending_contradicts"`` registers a *pending* contradicts record and
+      cites it: belief stays non-blocking (pending counters never demote) but
+      the unreviewed counter record still demands its accepted version;
+    - ``"none"`` leaves the candidate with zero contradicts/counter_evidence
+      records (the live SCI-091 shape), so the counter-review requirement is
+      vacuous;
+    - ``"counter_evidence"`` seeds an accepted, neutral boundary record the
+      formal review produced.
     """
     cited_fact = _register(
         store,
@@ -268,7 +285,29 @@ def _seed_unconverged_candidate(
                 "sourceId": "artifact:refuted-claim-observation",
             }
         )
-    else:
+    elif boundary == "pending_contradicts":
+        # A pending contradicts record on the core claim, cited by the claim
+        # row: pending counters are belief-neutral, but the counter record
+        # exists, so its accepted version is required before the gate allows.
+        contradicts_record = _register(
+            store,
+            team_id,
+            claim_id="claim-core",
+            candidate_id=_CANDIDATE_ID,
+            reasoning_role="hypothesis",
+            support_level="contradicts",
+            quote="Unreviewed refutation record for the core claim.",
+        )
+        evidence_refs.append(
+            {
+                "claimEvidenceId": contradicts_record["claimEvidenceId"],
+                "scopeHash": _scope_hash(),
+                "reviewStatus": "pending",
+                "supportLevel": "contradicts",
+                "sourceId": contradicts_record["sourceId"],
+            }
+        )
+    elif boundary == "counter_evidence":
         # An accepted, neutral boundary record the formal review produced.
         boundary_record = _register(
             store,
@@ -411,6 +450,75 @@ def test_accepted_adjudication_upgrades_pending_support_and_passes_gate(
 
 
 # ---------------------------------------------------------------------------
+# Case A2 — zero counter records: the counter-review requirement is vacuous
+# ---------------------------------------------------------------------------
+
+
+def test_accepted_adjudication_passes_when_no_counter_record_exists(
+    tmp_path, monkeypatch
+):
+    """Evidence-clean strict candidates must not be blocked by a phantom review.
+
+    Live shape (SCI-091): every record under the core claim is a pending
+    supports/primary_result record; no contradicts/counter_evidence record
+    exists at all.  After the acceptance authority promotes the pending
+    supports, the gate must allow the candidate and the adjudication must
+    land, instead of demanding an accepted review of a record that does not
+    exist.
+    """
+    team_id, store = _env(tmp_path, monkeypatch)
+    seed = _seed_unconverged_candidate(store, team_id, boundary="none")
+    _install_sources(
+        monkeypatch,
+        store,
+        team_id,
+        claim_rows=seed["claim_rows"],
+        formal_candidate_ids={_CANDIDATE_ID},
+    )
+    _install_round_reader(monkeypatch)
+
+    # Precondition: only the missing accepted support blocks; with zero
+    # counter records the counter-review requirement is already vacuous.
+    pre_verdict = chain.evaluate_claim_belief_gate(
+        team_id, _QUESTION_ID, [_CANDIDATE_ID]
+    )[_CANDIDATE_ID]
+    assert pre_verdict["status"] == "blocked"
+    assert pre_verdict["reason"] == "candidate_evidence_gap"
+    assert {item["gap"] for item in pre_verdict["evidenceGaps"]} == {
+        "accepted_support_missing"
+    }
+
+    result = _adjudicate(team_id, decision="accepted", key="authority-clean-1")
+    assert result["status"] == "created"
+
+    # The acceptance authority promoted exactly the pending support surface.
+    twins = _accepted_twins(store, team_id)
+    assert {twin["claimEvidenceId"] for twin in twins} == {
+        seed["cited_fact"]["claimEvidenceId"],
+        seed["candidate_fact"]["claimEvidenceId"],
+        seed["candidate_hypothesis"]["claimEvidenceId"],
+    }
+
+    # The gate now allows the evidence-clean candidate…
+    post_verdict = chain.evaluate_claim_belief_gate(
+        team_id, _QUESTION_ID, [_CANDIDATE_ID]
+    )[_CANDIDATE_ID]
+    assert post_verdict["status"] == "allowed"
+    assert post_verdict["claims"][0]["beliefState"] == "supported"
+    assert post_verdict["claims"][0]["acceptedCounterCount"] == 0
+
+    # …and the human authority record landed (裁决落账).
+    authority_records = [
+        dict(item)
+        for item in chain._records(team_id)
+        if item.get("recordKind") == "human_adjudication"
+    ]
+    assert len(authority_records) == 1
+    assert authority_records[0]["decision"] == "accepted"
+    assert authority_records[0]["hypothesisRoundId"] == _ROUND_ID
+
+
+# ---------------------------------------------------------------------------
 # Case B — contradicted claims still block the adjudication
 # ---------------------------------------------------------------------------
 
@@ -441,6 +549,69 @@ def test_accepted_adjudication_still_blocked_by_contradicted_claim(
     # The acceptance write ran before the gate (per its audit semantics), but
     # the blocked authority record itself was never appended.
     assert len(_accepted_twins(store, team_id)) == 3
+    assert chain._records(team_id) == []
+
+
+# ---------------------------------------------------------------------------
+# Case B2 — an unreviewed contradicts record still demands its accepted version
+# ---------------------------------------------------------------------------
+
+
+def test_accepted_adjudication_blocked_by_pending_contradicts_record(
+    tmp_path, monkeypatch
+):
+    """A pending counter record is belief-neutral but not review-free.
+
+    The conditional counter check only relaxes the requirement when *no*
+    counter record exists.  A single pending contradicts record keeps the
+    belief state non-blocking (fail-closed pending counters never demote),
+    yet the gate must still block until that record has its accepted
+    version — refuting material cannot slip through unreviewed.
+    """
+    team_id, store = _env(tmp_path, monkeypatch)
+    seed = _seed_unconverged_candidate(
+        store, team_id, boundary="pending_contradicts"
+    )
+    _install_sources(
+        monkeypatch,
+        store,
+        team_id,
+        claim_rows=seed["claim_rows"],
+        formal_candidate_ids={_CANDIDATE_ID},
+    )
+    _install_round_reader(monkeypatch)
+
+    with pytest.raises(chain.ClaimBeliefGateBlockedError) as excinfo:
+        _adjudicate(team_id, decision="accepted", key="authority-pending-counter-1")
+    error = excinfo.value
+    assert error.code == "claim_belief_gate_blocked"
+    assert error.status_code == 422
+    assert error.stage == "human_adjudication"
+    assert error.candidate_id == _CANDIDATE_ID
+    blocker = error.blockers[0]
+    # Pending counters never demote the belief (accepted supports win), so
+    # the block comes from the unreviewed counter record, not the state: the
+    # blocker carries no blocked claim and the gap names the missing review.
+    assert blocker["reason"] == "candidate_evidence_gap"
+    assert blocker["claims"] == []
+    assert {
+        (item["claimId"], item["gap"]) for item in blocker["evidenceGaps"]
+    } == {("claim-core", "accepted_counter_or_boundary_missing")}
+    post_verdict = chain.evaluate_claim_belief_gate(
+        team_id, _QUESTION_ID, [_CANDIDATE_ID]
+    )[_CANDIDATE_ID]
+    assert post_verdict["claims"][0]["beliefState"] == "supported"
+    assert post_verdict["claims"][0]["acceptedCounterCount"] == 0
+
+    # The acceptance write ran before the gate, the contradicts record stayed
+    # pending, and the blocked authority record was never appended.
+    assert len(_accepted_twins(store, team_id)) == 3
+    contradicts_states = [
+        record["reviewStatus"]
+        for record in store.list(team_id)
+        if record.get("supportLevel") == "contradicts"
+    ]
+    assert contradicts_states == ["pending"]
     assert chain._records(team_id) == []
 
 

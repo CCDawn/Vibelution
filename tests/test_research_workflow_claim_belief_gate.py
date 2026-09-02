@@ -296,13 +296,22 @@ def test_gate_blocks_candidate_core_claim_without_accepted_support(monkeypatch):
     assert verdict["reason"] == "candidate_evidence_gap"
     states = {item["claimId"]: item["beliefState"] for item in verdict["claims"]}
     assert states == {"claim-pending": "weakly_supported", "claim-untested": "untested"}
+    # Neither claim carries any contradicts/counter_evidence record, so the
+    # counter-review requirement is vacuous: only the missing accepted
+    # support blocks.
     assert {item["gap"] for item in verdict["evidenceGaps"]} == {
         "accepted_support_missing",
-        "accepted_counter_or_boundary_missing",
     }
 
 
-def test_gate_blocks_supported_candidate_core_claim_without_counter_or_boundary(monkeypatch):
+def test_gate_allows_supported_candidate_core_claim_without_any_counter_record(monkeypatch):
+    """Zero contradicts/counter_evidence records means nothing to review.
+
+    The counter-review requirement is conditional: with no counter record at
+    all (pending or accepted) on the claim+candidate, the requirement is
+    vacuously satisfied and an evidence-clean candidate is allowed instead of
+    being blocked by a review of a record that does not exist.
+    """
     claim_rows = [_claim_row("claim-core", [_ref("ce-support")], status="supported")]
     evidence_records = [
         _evidence_record(
@@ -320,14 +329,9 @@ def test_gate_blocks_supported_candidate_core_claim_without_counter_or_boundary(
         "team-gate", _QUESTION_ID, [_CANDIDATE_ID]
     )[_CANDIDATE_ID]
 
-    assert verdict["status"] == "blocked"
-    assert verdict["reason"] == "candidate_evidence_gap"
-    assert verdict["evidenceGaps"] == [
-        {
-            "claimId": "claim-core",
-            "gap": "accepted_counter_or_boundary_missing",
-        }
-    ]
+    assert verdict["status"] == "allowed"
+    assert verdict["blockedClaims"] == []
+    assert "evidenceGaps" not in verdict or verdict["evidenceGaps"] == []
 
 
 def test_gate_keeps_candidate_specific_evidence_isolated(monkeypatch):

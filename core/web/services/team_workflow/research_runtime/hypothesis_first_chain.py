@@ -1944,20 +1944,30 @@ def evaluate_claim_belief_gate(
                     evidence_gaps.append(
                         {"claimId": claim_id, "gap": "accepted_support_missing"}
                     )
-                accepted_boundary_or_counter = any(
-                    str(record.get("candidateId") or "").strip() == candidate_id
+                # Counter review is conditional, not a blanket requirement: a
+                # claim+candidate with no contradicts/counter_evidence record
+                # at all has nothing to review (vacuously satisfied), so an
+                # evidence-clean candidate is never blocked by a review of a
+                # record that does not exist.  Only when such a record exists
+                # (pending or accepted) must its accepted version be on file,
+                # so refuting material still cannot slip through unreviewed.
+                counter_records = [
+                    record
+                    for record in evidence_records
+                    if str(record.get("candidateId") or "").strip() == candidate_id
                     and str(record.get("claimId") or "").strip() == claim_id
-                    and str(record.get("reviewStatus") or "").strip().lower()
-                    == "accepted"
                     and (
                         str(record.get("supportLevel") or "").strip().lower()
                         == "contradicts"
                         or str(record.get("evidenceKind") or "").strip().lower()
                         == "counter_evidence"
                     )
-                    for record in evidence_records
-                )
-                if not accepted_boundary_or_counter:
+                ]
+                if counter_records and not any(
+                    str(record.get("reviewStatus") or "").strip().lower()
+                    == "accepted"
+                    for record in counter_records
+                ):
                     evidence_gaps.append(
                         {
                             "claimId": claim_id,
