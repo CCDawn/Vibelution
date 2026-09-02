@@ -74,6 +74,12 @@ from core.ui.chat_state import chat_state_path, load_chat_state, save_chat_state
 
 from . import agent_directory_service, session_service
 from .agent_directory_service import active_agent_runtime, evaluate_agent_workspace_write, write_group_context_event
+from .chat_room_stream_capture import (
+    CHAT_ROOM_SPEAKER_DELTA_ENABLED,
+    close_speaker_delta,
+    set_delta_publisher,
+    speaker_delta_capture,
+)
 from .i18n import get_web_language, text_for
 from .runtime_scene_service import record_runtime_scene_event
 from .team_case_orchestrator import (
@@ -101,6 +107,9 @@ _CHALLENGE_PRIOR_SEMANTIC_MEETING_TYPES = frozenset(
         "hypothesis_review",
     }
 )
+# Speaker delta fan-out scope (MVP): only ordinary rounds stream answer
+# deltas.  Challenge rooms keep receipt semantics and stay silent.
+_CHAT_ROOM_SPEAKER_DELTA_ROUND_MODES = frozenset({"round_robin", "meeting", "discussion"})
 _CASUAL_CHAT_TOPIC_RE = re.compile(
     r"^\s*(?:你们好|大家好|你好|您好|hello|hi|hey|嗨|哈喽|在吗|有人吗|辛苦了)[。！!,.，\s]*$",
     re.IGNORECASE,
@@ -1994,6 +2003,13 @@ def _execute_chat_room_round(
                 room, round_payload
             ),
             "_modelInvocationReceiptAuthority": receipt_authority,
+            "_speakerDeltaCapture": _speaker_delta_capture_enabled(
+                room,
+                round_payload,
+                round_mode,
+                round_config,
+                receipt_authority,
+            ),
         }
         per_call_budget_ms = _positive_int(round_config.get("perCallBudgetMs"))
         if per_call_budget_ms is None:
@@ -2508,6 +2524,38 @@ def _record_speaker_watchdog_timeout_event(
         return
 
 
+def _speaker_delta_terminal_status(message_status: str) -> str:
+    normalized = str(message_status or "").strip().lower()
+    if normalized in {"completed", "partial"}:
+        # The stream itself finished; snapshot state stays authoritative for
+        # result quality (partial/degraded).
+        return "completed"
+    if normalized in {"stopped", "blocked"}:
+        return "stopped"
+    return "failed"
+
+
+def _close_chat_room_speaker_delta(
+    context: Mapping[str, Any],
+    participant: Mapping[str, Any],
+    status: str,
+) -> None:
+    """Invalidate this turn's delta ticket and emit its terminal frame.
+
+    No-op when the turn never opened a capture (disabled room kinds,
+    supervision blocks) or when a terminal frame was already published.
+    """
+
+    try:
+        close_speaker_delta(
+            round_id=str(context.get("roundId") or "").strip(),
+            participant_id=str(participant.get("participantId") or "").strip(),
+            status=status,
+        )
+    except Exception:
+        return
+
+
 def _invoke_speaker_runner_with_watchdog(
     runner: AgentRunner,
     participant: dict[str, Any],
@@ -2617,6 +2665,9 @@ def _run_one_speaker(
         summary = _enforce_case_visible_output_boundary(summary, context, participant, record_event=False)
         result_timings = dict(result.get("timings") or {}) if isinstance(result, dict) else {}
         message_status, result_status = _structured_speaker_result_status(result)
+        _close_chat_room_speaker_delta(
+            context, participant, _speaker_delta_terminal_status(message_status)
+        )
         error_type = _structured_speaker_result_error_type(result) if message_status == "failed" else ""
         timestamp = utc_now_iso()
         return {
@@ -2650,6 +2701,14 @@ def _run_one_speaker(
             stop_reason = _challenge_room_speaker_abort_reason(
                 normalized_round_id,
                 context,
+            )
+        if stop_reason:
+            _close_chat_room_speaker_delta(context, participant, "stopped")
+        else:
+            _close_chat_room_speaker_delta(
+                context,
+                participant,
+                "aborted" if isinstance(exc, SpeakerCallWatchdogTimeout) else "failed",
             )
         if stop_reason:
             timestamp = utc_now_iso()
@@ -3015,6 +3074,13 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
                 with model_invocation_receipt_context_scope(receipt_context), llm_status_context(
                     session_id=session_id,
                     turn_id=turn_identity,
+                ), speaker_delta_capture(
+                    room_id=str(context.get("roomId") or "").strip(),
+                    round_id=round_id,
+                    participant_id=participant_id,
+                    session_id=session_id,
+                    turn_id=turn_identity,
+                    enabled=bool(context.get("_speakerDeltaCapture")),
                 ):
                     result = run_existing_agent_single_turn(
                         agent_runtime,
@@ -4196,6 +4262,45 @@ def _is_challenge_discussion_room(value: Mapping[str, Any] | None) -> bool:
     return isinstance(config.get("discussionScope"), Mapping) and bool(
         str(config.get("discussionScopeHash") or config.get("scopeHash") or "").strip()
     )
+
+
+def _speaker_delta_capture_enabled(
+    room: Mapping[str, Any] | None,
+    round_payload: Mapping[str, Any] | None,
+    round_mode: str,
+    round_config: Mapping[str, Any] | None,
+    receipt_authority: Any,
+) -> bool:
+    """Gate speaker delta streaming to ordinary meeting/discussion rounds.
+
+    Challenge rooms (receipt-authority formal meetings, server-scoped
+    Challenge discussions, and challenge-meeting typed rounds) never stream
+    deltas this MVP; their turn semantics are receipt-sensitive.
+    """
+
+    if not CHAT_ROOM_SPEAKER_DELTA_ENABLED:
+        return False
+    if str(round_mode or "").strip().lower() not in _CHAT_ROOM_SPEAKER_DELTA_ROUND_MODES:
+        return False
+    if receipt_authority is not None:
+        return False
+    if _is_challenge_discussion_room(room):
+        return False
+    config = round_config if isinstance(round_config, Mapping) else {}
+    if str(config.get("meetingType") or "").strip().lower() in _CHALLENGE_PRIOR_SEMANTIC_MEETING_TYPES:
+        return False
+    if isinstance(round_payload, Mapping):
+        payload_config = (
+            round_payload.get("config")
+            if isinstance(round_payload.get("config"), Mapping)
+            else {}
+        )
+        if (
+            str(payload_config.get("meetingType") or "").strip().lower()
+            in _CHALLENGE_PRIOR_SEMANTIC_MEETING_TYPES
+        ):
+            return False
+    return True
 
 
 def _uses_structured_meeting_message(
@@ -6123,6 +6228,34 @@ def _publish_chat_room_detail_snapshot(room_id: str) -> None:
                 subscriber.put_nowait(event)
             except queue.Full:
                 continue
+
+
+def _publish_chat_room_speaker_delta(event: dict[str, Any]) -> None:
+    """Fan one speaker delta frame out to every room SSE subscriber.
+
+    Queue protection: delta frames are droppable by design (content is the
+    full accumulated text and the snapshot stays authoritative), so a full
+    subscriber queue drops the delta instead of evicting a
+    ``chat_room_detail`` snapshot or keep-alive frame.
+    """
+
+    if not isinstance(event, dict) or str(event.get("type") or "") != "chat_room_speaker_delta":
+        return
+    normalized_room_id = str(event.get("roomId") or "").strip()
+    if not normalized_room_id:
+        return
+    with _CHAT_ROOM_STREAM_SUBSCRIBERS_LOCK:
+        subscribers = list(_CHAT_ROOM_STREAM_SUBSCRIBERS.get(normalized_room_id) or [])
+    for subscriber in subscribers:
+        try:
+            subscriber.put_nowait(event)
+        except queue.Full:
+            continue
+
+
+# Wire the capture module to this module's fan-out so speaker turns emit
+# deltas without creating an import cycle at module-load time.
+set_delta_publisher(_publish_chat_room_speaker_delta)
 
 
 def _encode_chat_room_sse_event(event_name: str, payload: dict[str, Any]) -> str:
