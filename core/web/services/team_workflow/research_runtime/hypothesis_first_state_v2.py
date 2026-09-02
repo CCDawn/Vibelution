@@ -36,6 +36,15 @@ _EPOCH = "1970-01-01T00:00:00Z"
 _FORMAL_RUN_TERMINAL_STATUSES = frozenset(
     {"succeeded", "failed", "cancelled", "archived"}
 )
+# Challenge-cup topology (challenge-cup-research@2.1.0+): the formal run's
+# hypothesis stage is the single ``hypothesis_design`` node.  Once that node
+# has succeeded, the hf review phase it fed can no longer be recovered by
+# re-dispatching review meetings — that would re-run an already-successful
+# stage — so fenced review candidates project as ``superseded`` instead of
+# failed/blocked and the round-level retry_review_dispatch offer stays
+# suppressed.  A run still failing at the hypothesis stage keeps the classic
+# blocked-candidates + retry-offer recovery contract.
+_HYPOTHESIS_STAGE_NODE_IDS = frozenset({"hypothesis_design"})
 _ACTIVE_GENERATION_MEETING_STATUSES = frozenset(
     {"open", "summarizing", "awaiting_approval"}
 )
@@ -1506,9 +1515,20 @@ def _meeting_recovery_actions(
 
 
 def _aggregate(states: Sequence[Mapping[str, Any]]) -> dict[str, int]:
-    result = {"total": len(states), "completed": 0, "pending": 0, "failed": 0, "blocked": 0}
+    result = {
+        "total": len(states),
+        "completed": 0,
+        "pending": 0,
+        "failed": 0,
+        "blocked": 0,
+        # Overtaken-by-the-formal-chain items: neither failed/blocked (they
+        # need no recovery) nor completed (they never finished).
+        "superseded": 0,
+    }
     for state in states:
-        if state.get("actionability") == "blocked":
+        if state.get("lifecycle") == "superseded":
+            result["superseded"] += 1
+        elif state.get("actionability") == "blocked":
             result["blocked"] += 1
         elif state.get("lifecycle") == "failed":
             result["failed"] += 1
@@ -2001,6 +2021,47 @@ def _project_program_output_record(
         actions,
         phase,
     )
+
+
+def _formal_hypothesis_stage_succeeded(snapshot: Mapping[str, Any]) -> bool:
+    """Return whether the formal snapshot completed the hypothesis stage.
+
+    ``progress.completedNodeIds`` is the canonical signal (the projection
+    builder lists a node there exactly when its latest attempt succeeded);
+    ``nodeAttempts`` is the fail-soft fallback for snapshots that predate the
+    progress summary.  Absent or unreadable data returns False, which keeps
+    the classic blocked-candidates recovery contract.
+    """
+
+    if not isinstance(snapshot, Mapping):
+        return False
+    progress = snapshot.get("progress")
+    if isinstance(progress, Mapping):
+        completed = progress.get("completedNodeIds")
+        if isinstance(completed, Sequence) and not isinstance(completed, (str, bytes)):
+            return bool(
+                _HYPOTHESIS_STAGE_NODE_IDS.intersection(
+                    str(item) for item in completed
+                )
+            )
+    node_attempts = snapshot.get("nodeAttempts")
+    if not isinstance(node_attempts, Mapping):
+        return False
+    for node_id in _HYPOTHESIS_STAGE_NODE_IDS:
+        attempts = node_attempts.get(node_id)
+        if not isinstance(attempts, Sequence) or isinstance(attempts, (str, bytes)):
+            continue
+        latest: Mapping[str, Any] | None = None
+        for attempt in attempts:
+            if not isinstance(attempt, Mapping):
+                continue
+            if latest is None or int(attempt.get("attempt") or 0) >= int(
+                latest.get("attempt") or 0
+            ):
+                latest = attempt
+        if latest is not None and str(latest.get("status") or "").lower() == "succeeded":
+            return True
+    return False
 
 
 def _project_formal_and_program(
@@ -3055,6 +3116,25 @@ def project_state_from_records(
             if candidate_id not in review_candidate_ids
         )
 
+    (
+        formal_runtime,
+        program_delivery,
+        _formal_problems,
+        formal_actions,
+        formal_phase,
+    ) = _project_formal_and_program(
+        question_id=normalized_question_id,
+        formal_runs=formal_runs,
+        formal_snapshots=formal_snapshots or {},
+        program_output=program_output,
+    )
+    # Once the resolved formal run's hypothesis stage has succeeded, the hf
+    # review phase it fed was overtaken by the formal chain (e.g. the stage
+    # was retried to success via retry_node after a fenced round): fenced
+    # review candidates are stale, not recoverable failures.
+    hypothesis_stage_superseded = _formal_hypothesis_stage_succeeded(
+        dict(formal_snapshots or {}).get(str(formal_runtime.get("runId") or "")) or {}
+    )
     review_candidates = []
     for order, candidate_id in enumerate(review_candidate_ids):
         link = link_by_candidate.get(candidate_id)
@@ -3073,6 +3153,18 @@ def project_state_from_records(
                 chat_room_round_snapshots=room_round_snapshots,
             )
         )
+    if hypothesis_stage_superseded:
+        # Fenced/failed review candidates become ``superseded``: visibly
+        # non-actionable (their problems stay attached for transparency) but
+        # no longer blocked, so the checklist and the page header stop
+        # demanding a recovery that would re-run a succeeded stage.
+        for candidate in review_candidates:
+            if (
+                candidate.get("lifecycle") == "failed"
+                or candidate.get("actionability") == "blocked"
+            ):
+                candidate["lifecycle"] = "superseded"
+                candidate["actionability"] = "terminal"
     review_aggregate = _aggregate(review_candidates)
     if selection_integrity_problems:
         review_phase = _phase(
@@ -3337,19 +3429,6 @@ def project_state_from_records(
         "claimBeliefGate": claim_belief_gate,
     }
 
-    (
-        formal_runtime,
-        program_delivery,
-        _formal_problems,
-        formal_actions,
-        formal_phase,
-    ) = _project_formal_and_program(
-        question_id=normalized_question_id,
-        formal_runs=formal_runs,
-        formal_snapshots=formal_snapshots or {},
-        program_output=program_output,
-    )
-
     allowed_actions: list[dict[str, Any]] = []
     # Stage-one bridge (R0 -> R1): the origin-level "open generation" entry on
     # a policy-covered question is redirected to the run creation service.
@@ -3542,6 +3621,11 @@ def project_state_from_records(
     if review_candidates:
         if (
             (review_aggregate["blocked"] or review_aggregate["failed"])
+            # Superseded stage: the whole offer is skipped, not just emptied.
+            # Falling back to ``selected_candidate_ids`` here would re-run a
+            # review round for an already-succeeded hypothesis stage and burn
+            # review LLM budget on a stale phase.
+            and not hypothesis_stage_superseded
             and selection_id
             and not selection_integrity_problems
             and not any(

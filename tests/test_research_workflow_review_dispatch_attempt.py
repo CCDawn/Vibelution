@@ -230,7 +230,7 @@ def test_failed_candidate_keeps_durable_error_and_projects_retry(
     assert by_candidate["hyp-b"]["attempt"]["number"] == 1
 
     aggregate = state["review"]["aggregate"]
-    assert aggregate == {"total": 2, "completed": 0, "pending": 1, "failed": 1, "blocked": 0}
+    assert aggregate == {"total": 2, "completed": 0, "pending": 1, "failed": 1, "blocked": 0, "superseded": 0}
     assert state["review"]["lifecycle"] == "failed"
     assert state["review"]["actionability"] == "available"
 
@@ -289,7 +289,7 @@ def test_retry_bumps_attempt_number_and_recovers(tmp_path, monkeypatch) -> None:
     ]
     projected = _project(team_id, selection, succeeded_meetings)
     aggregate = projected["review"]["aggregate"]
-    assert aggregate == {"total": 2, "completed": 0, "pending": 2, "failed": 0, "blocked": 0}
+    assert aggregate == {"total": 2, "completed": 0, "pending": 2, "failed": 0, "blocked": 0, "superseded": 0}
 
 
 def test_replay_does_not_stack_attempts(tmp_path, monkeypatch) -> None:
@@ -347,6 +347,7 @@ def test_queued_attempt_projects_waiting_system_not_blocked() -> None:
         "pending": 2,
         "failed": 0,
         "blocked": 0,
+        "superseded": 0,
     }
     for candidate in state["review"]["candidates"]:
         assert candidate["lifecycle"] == "queued"
@@ -468,6 +469,7 @@ def test_round_projection_uses_durable_fanout_candidates() -> None:
         "pending": 1,
         "failed": 0,
         "blocked": 0,
+        "superseded": 0,
     }
     assert state["review"]["lifecycle"] == "waiting_human"
     assert not any(

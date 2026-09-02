@@ -479,12 +479,23 @@ class StateAggregate(StrictWireModel):
     pending: int = Field(..., ge=0)
     failed: int = Field(..., ge=0)
     blocked: int = Field(..., ge=0)
+    # Overtaken-by-the-formal-chain items (superseded hypothesis stage):
+    # additive with a default so older serialized snapshots still validate.
+    superseded: int = Field(default=0, ge=0)
 
 
 def _aggregate_for_states(states: list[PhaseState]) -> StateAggregate:
-    counts = {"completed": 0, "pending": 0, "failed": 0, "blocked": 0}
+    counts = {
+        "completed": 0,
+        "pending": 0,
+        "failed": 0,
+        "blocked": 0,
+        "superseded": 0,
+    }
     for state in states:
-        if state.actionability == "blocked":
+        if state.lifecycle == "superseded":
+            counts["superseded"] += 1
+        elif state.actionability == "blocked":
             counts["blocked"] += 1
         elif state.lifecycle == "failed":
             counts["failed"] += 1

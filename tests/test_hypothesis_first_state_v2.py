@@ -4155,6 +4155,249 @@ def test_converged_formal_phase_stale_dispatch_keeps_retry_review_dispatch() -> 
     assert retry.payload.candidateIds == ["candidate-a"]
 
 
+# ---------------------------------------------------------------------------
+# Superseded hypothesis stage: fenced review candidates vs the formal chain
+# ---------------------------------------------------------------------------
+
+
+def _fenced_round5_review_fixture(
+    *,
+    formal_run_status: str,
+    formal_snapshot: dict[str, object],
+) -> dict[str, Any]:
+    """Two execution-fenced candidate review meetings plus a formal run.
+
+    Mirrors the production defect (run-2e157e016745): the hypothesis_design
+    node failed once, the workflow-run stop fence terminated both round-5
+    candidate review meetings (closed + summaryDraftError), and a later
+    retry_node attempt completed the stage so the run moved on.  The formal
+    snapshot is caller-controlled so the same chain facts can model the
+    superseded stage and the still-stuck stage.
+    """
+
+    meetings = [
+        {
+            "meetingRoundId": f"meet-{candidate_id}",
+            "meetingType": "hypothesis_review",
+            "question": "SCI-001",
+            "selectionId": "selection-1",
+            "status": "closed",
+            "executionStatus": "stopped",
+            "closedBy": "system:challenge-execution-fence",
+            "terminalReason": "challenge_execution_fence",
+            "summaryDraftError": {
+                "code": "challenge_execution_fence",
+                "message": "正式会议已由服务端执行边界终止，未生成或晋升纪要。",
+            },
+            "createdAt": "2026-08-25T02:00:00Z",
+            "updatedAt": "2026-08-25T02:10:00Z",
+        }
+        for candidate_id in ("cand-a", "cand-b")
+    ]
+    return {
+        "team_id": "team-1",
+        "question_id": "SCI-001",
+        "reset_boundary": None,
+        "chain_records": [
+            {
+                "recordKind": "hypothesis_candidate",
+                "candidateId": candidate_id,
+                "questionId": "SCI-001",
+                "createdAt": f"2026-08-25T00:0{index}:00Z",
+            }
+            for index, candidate_id in enumerate(("cand-a", "cand-b"))
+        ]
+        + [
+            {
+                "recordKind": "review_round_link",
+                "linkId": f"link-{candidate_id}",
+                "questionId": "SCI-001",
+                "selectionId": "selection-1",
+                "candidateId": candidate_id,
+                "candidateOrder": index,
+                "roundIndex": 5,
+                "meetingRoundId": f"meet-{candidate_id}",
+                "createdAt": "2026-08-25T02:00:00Z",
+            }
+            for index, candidate_id in enumerate(("cand-a", "cand-b"))
+        ],
+        "selection_records": [
+            {
+                "selectionId": "selection-1",
+                "questionId": "SCI-001",
+                "selectedCandidateIds": ["cand-a", "cand-b"],
+                "createdAt": "2026-08-25T01:30:00Z",
+            }
+        ],
+        "meeting_records": meetings,
+        "digest_records": [],
+        "decision_records": [],
+        "hypothesis_round_records": [],
+        "formal_runs": [
+            {
+                "runId": "run-2e157e016745",
+                "teamId": "team-1",
+                "questionId": "SCI-001",
+                "status": formal_run_status,
+                "runVersion": 9,
+                "updatedAt": "2026-08-25T03:00:00Z",
+            }
+        ],
+        "formal_snapshots": {"run-2e157e016745": formal_snapshot},
+    }
+
+
+def test_formal_hypothesis_stage_success_supersedes_fenced_review_candidates() -> None:
+    """A succeeded hypothesis stage retires fenced review candidates.
+
+    The stale projection used to keep lifecycle=failed forever (checklist
+    showed "已阻塞 2" and the header stayed blocked) and still offered
+    retry_review_dispatch — clicking it re-ran review meetings for a stage
+    the formal run had already completed.  The candidates must project as
+    superseded (visible fence problems retained, no blocked actionability)
+    and the retry offer must disappear entirely.
+    """
+
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            **_fenced_round5_review_fixture(
+                formal_run_status="running",
+                formal_snapshot={
+                    "activeNodeIds": ["protocol_design"],
+                    "progress": {
+                        "completedNodeIds": ["knowledge_handoff", "hypothesis_design"],
+                    },
+                },
+            )
+        )
+    )
+
+    assert state.currentPhase == "review"
+    assert {item.candidateId for item in state.review.candidates} == {"cand-a", "cand-b"}
+    for candidate in state.review.candidates:
+        assert candidate.lifecycle == "superseded"
+        assert candidate.actionability == "terminal"
+        # Transparency: the fence fact stays visible on the candidate.
+        assert [
+            problem.code for problem in candidate.problems
+        ] == ["challenge_execution_fence"]
+    aggregate = state.review.aggregate
+    assert aggregate.blocked == 0
+    assert aggregate.failed == 0
+    assert aggregate.superseded == 2
+    # The review phase itself must stop projecting failed/blocked; the wire
+    # aggregate validator above guarantees it stays consistent with the
+    # superseded candidates.
+    assert state.review.lifecycle != "failed"
+    assert state.review.actionability != "blocked"
+    assert not any(
+        action.kind == "command" and action.command == "retry_review_dispatch"
+        for action in state.allowedActions
+    )
+
+
+def test_formal_hypothesis_stage_failure_keeps_fenced_candidates_recoverable() -> None:
+    """Regression red line: a run stuck at the hypothesis stage is unchanged.
+
+    When the formal run's hypothesis stage has NOT succeeded (blocked on
+    hypothesis_design), the fenced review candidates must stay failed and the
+    retry_review_dispatch offer must remain — that offer is the sanctioned
+    recovery for the classic fence scenario.
+    """
+
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            **_fenced_round5_review_fixture(
+                formal_run_status="blocked",
+                formal_snapshot={
+                    "activeNodeIds": ["hypothesis_design"],
+                    "progress": {"completedNodeIds": ["knowledge_handoff"]},
+                    "commandOffers": [
+                        {
+                            "available": True,
+                            "command": "retry_node",
+                            "nodeId": "hypothesis_design",
+                            "idempotencyKey": "offer:retry-hypothesis-design",
+                            "label": "重试假设设计",
+                        }
+                    ],
+                },
+            )
+        )
+    )
+
+    assert state.currentPhase == "review"
+    for candidate in state.review.candidates:
+        assert candidate.lifecycle == "failed"
+    assert state.review.aggregate.failed == 2
+    assert state.review.aggregate.superseded == 0
+    assert state.review.lifecycle == "failed"
+    assert state.review.actionability == "available"
+    retry = next(
+        action
+        for action in state.allowedActions
+        if action.kind == "command" and action.command == "retry_review_dispatch"
+    )
+    assert retry.payload.selectionId == "selection-1"
+    assert retry.payload.candidateIds == ["cand-a", "cand-b"]
+
+
+def test_superseded_stage_rejects_stale_retry_review_dispatch_envelope(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A replayed offer envelope must fail the fresh-state reauthorization.
+
+    Even if a client kept the pre-supersession envelope, the chain re-reads
+    the canonical state before executing; with the offer suppressed the
+    reauthorization must refuse instead of opening new review meetings.
+    """
+
+    from core.web.services import team_service
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_first_chain,
+        hypothesis_first_state_v2,
+    )
+
+    snapshot = project_state_from_records(
+        **_fenced_round5_review_fixture(
+            formal_run_status="running",
+            formal_snapshot={
+                "activeNodeIds": ["protocol_design"],
+                "progress": {
+                    "completedNodeIds": ["knowledge_handoff", "hypothesis_design"],
+                },
+            },
+        )
+    )
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
+    monkeypatch.setattr(hypothesis_first_chain, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        hypothesis_first_state_v2,
+        "project_hypothesis_first_state_v2",
+        lambda *_args, **_kwargs: snapshot,
+    )
+
+    with pytest.raises(
+        hypothesis_first_chain.HypothesisFirstChainError,
+        match="no longer allowed",
+    ):
+        hypothesis_first_chain.execute_v2_command(
+            "team-1",
+            {
+                "actionId": "retry-review-dispatch",
+                "idempotencyKey": "hf2:retry-review-dispatch:stale",
+                "expectedStateVersion": str(snapshot["stateVersion"]),
+                "command": "retry_review_dispatch",
+                "payload": {
+                    "selectionId": "selection-1",
+                    "candidateIds": ["cand-a", "cand-b"],
+                },
+            },
+            question_id="SCI-001",
+        )
+
+
 def test_v2_retry_generation_command_opens_generation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
