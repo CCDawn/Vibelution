@@ -94,6 +94,7 @@ def _stored_run(
     *,
     updated_at: str,
     fingerprint: str = "",
+    status: str = "",
 ) -> dict:
     """Build a stored source-collection run as list_processing_runs returns it."""
     metadata: dict = {
@@ -102,13 +103,16 @@ def _stored_run(
     }
     if fingerprint:
         metadata["searchEnvelopeFingerprint"] = fingerprint
-    return {
+    run = {
         "runId": run_id,
         "updatedAt": updated_at,
         "createdAt": updated_at,
         "metadata": metadata,
         "scope": {"researchScopeHash": _valid_envelope()["scopeHash"]},
     }
+    if status:
+        run["status"] = status
+    return run
 
 
 def _fake_summary(*, record_count=0, candidate_count=0):
@@ -839,6 +843,149 @@ def test_facade_ensure_replays_same_envelope_idempotently(monkeypatch):
     assert result["idempotent"] is True
     assert result["locator"]["runId"] == "dprun-same"
     assert created == []
+
+
+def test_facade_ensure_creates_new_run_after_cancelled_attempt(monkeypatch):
+    """A cancelled attempt is dead state: ensure must re-create, not re-bind.
+
+    Regression guard for the stop→retry livelock: recovery reused the cancelled
+    run id, restarted a search on a terminal run, and every retry settled back
+    to failed/cancelled without executing anything.
+    """
+    created = []
+    fingerprint = _request_fingerprint()
+    cancelled = _stored_run(
+        "dprun-stopped",
+        updated_at="2026-09-01T23:49:00Z",
+        fingerprint=fingerprint,
+        status="cancelled",
+    )
+    monkeypatch.setattr(
+        data_processing_service,
+        "list_processing_runs",
+        _fake_list_runs([cancelled]),
+    )
+    monkeypatch.setattr(
+        source_collection_runs,
+        "start_source_collection_run",
+        lambda *args, **kwargs: created.append(args) or {"runId": "dprun-fresh", "run": {"runId": "dprun-fresh"}},
+    )
+    monkeypatch.setattr(
+        source_collection_runs,
+        "get_source_collection_summary",
+        _fake_summary(),
+    )
+
+    result = facade.research_knowledge_collection_facade(
+        action="ensure",
+        scope=_valid_envelope(),
+        searchEnvelope=_valid_search_envelope(),
+    )
+
+    assert result["created"] is True
+    assert result["idempotent"] is False
+    assert result["locator"]["runId"] == "dprun-fresh"
+    assert created
+
+
+def test_facade_ensure_creates_new_run_after_failed_attempt(monkeypatch):
+    created = []
+    failed = _stored_run(
+        "dprun-errored",
+        updated_at="2026-09-01T23:49:00Z",
+        fingerprint=_request_fingerprint(),
+        status="failed",
+    )
+    monkeypatch.setattr(
+        data_processing_service,
+        "list_processing_runs",
+        _fake_list_runs([failed]),
+    )
+    monkeypatch.setattr(
+        source_collection_runs,
+        "start_source_collection_run",
+        lambda *args, **kwargs: created.append(args) or {"runId": "dprun-retry", "run": {"runId": "dprun-retry"}},
+    )
+    monkeypatch.setattr(
+        source_collection_runs,
+        "get_source_collection_summary",
+        _fake_summary(),
+    )
+
+    result = facade.research_knowledge_collection_facade(
+        action="ensure",
+        scope=_valid_envelope(),
+        searchEnvelope=_valid_search_envelope(),
+    )
+
+    assert result["created"] is True
+    assert result["locator"]["runId"] == "dprun-retry"
+
+
+def test_facade_ensure_still_reuses_completed_run(monkeypatch):
+    """Completed runs remain idempotent reusable state (double-click guard)."""
+    created = []
+    fingerprint = _request_fingerprint()
+    completed = _stored_run(
+        "dprun-done",
+        updated_at="2026-09-01T22:16:03Z",
+        fingerprint=fingerprint,
+        status="completed",
+    )
+    monkeypatch.setattr(
+        data_processing_service,
+        "list_processing_runs",
+        _fake_list_runs([completed]),
+    )
+    monkeypatch.setattr(
+        source_collection_runs,
+        "start_source_collection_run",
+        lambda *args, **kwargs: created.append(args) or {},
+    )
+    monkeypatch.setattr(
+        source_collection_runs,
+        "get_source_collection_summary",
+        _fake_summary(record_count=7),
+    )
+
+    result = facade.research_knowledge_collection_facade(
+        action="ensure",
+        scope=_valid_envelope(),
+        searchEnvelope=_valid_search_envelope(),
+    )
+
+    assert result["created"] is False
+    assert result["idempotent"] is True
+    assert result["locator"]["runId"] == "dprun-done"
+    assert created == []
+
+
+def test_facade_inspect_still_finds_latest_cancelled_run(monkeypatch):
+    """inspect keeps surfacing the latest run regardless of terminal status."""
+    cancelled = _stored_run(
+        "dprun-stopped",
+        updated_at="2026-09-01T23:49:00Z",
+        status="cancelled",
+    )
+    monkeypatch.setattr(
+        data_processing_service,
+        "list_processing_runs",
+        _fake_list_runs([cancelled]),
+    )
+    monkeypatch.setattr(
+        source_collection_runs,
+        "get_source_collection_summary",
+        _fake_summary(),
+    )
+
+    result = facade.research_knowledge_collection_facade(
+        action="inspect",
+        scope=_valid_envelope(),
+        searchEnvelope=_valid_search_envelope(),
+    )
+
+    assert result["found"] is True
+    assert result["locator"]["runId"] == "dprun-stopped"
 
 
 def test_facade_ensure_creates_new_run_for_new_requirements(monkeypatch):
