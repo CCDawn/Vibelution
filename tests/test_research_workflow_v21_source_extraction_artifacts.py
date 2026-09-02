@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from core.research.workflow.definition import build_challenge_cup_workflow_definition
+from core.research.workflow.definition_registry import register_or_resolve
 from core.web.services.team_workflow.research_runtime.agent_task_artifact_builder import (
     build_agent_task_artifacts,
 )
@@ -26,6 +27,28 @@ def _source_fields(**overrides: object) -> dict[str, object]:
         "relation": "supports",
         "verification_status": "full_text_checked",
         **overrides,
+    }
+
+
+def _pinned_record(definition) -> dict[str, object]:
+    """Run record pinned to the resolved definition identity.
+
+    Production runs bind ``workflowId``/``workflowVersionId``/``structureHash``
+    at run creation via ``register_or_resolve``; hand-built records must pin
+    the same way or the fail-closed definition resolver refuses to compile the
+    graph (the legacy ``workflowId@schemaVersion`` spelling is not a version
+    id the registry knows).
+    """
+    identity = register_or_resolve(definition)
+    return {
+        "runId": "run-extraction",
+        "workflowId": identity.workflowId,
+        "workflowVersionId": identity.workflowVersionId,
+        "structureHash": identity.structureHash,
+        "inputSnapshot": {"environmentSnapshotRef": "fixture://environment"},
+        "artifactManifests": [
+            {"artifactId": "source_candidate_batch:input"}
+        ],
     }
 
 
@@ -137,14 +160,7 @@ def test_nested_agent_result_passes_the_source_extraction_quality_contract() -> 
     node_spec = next(
         node for node in definition.nodes if node.nodeId == "source_extraction"
     )
-    record = {
-        "runId": "run-extraction",
-        "workflowVersionId": f"{definition.workflowId}@{definition.schemaVersion}",
-        "inputSnapshot": {"environmentSnapshotRef": "fixture://environment"},
-        "artifactManifests": [
-            {"artifactId": "source_candidate_batch:input"}
-        ],
-    }
+    record = _pinned_record(definition)
     task = {
         "taskId": "task-extraction",
         "sessionId": "session-extraction",
@@ -196,14 +212,7 @@ def test_real_agent_writeback_claim_anchor_passes_the_quality_contract() -> None
     node_spec = next(
         node for node in definition.nodes if node.nodeId == "source_extraction"
     )
-    record = {
-        "runId": "run-extraction",
-        "workflowVersionId": f"{definition.workflowId}@{definition.schemaVersion}",
-        "inputSnapshot": {"environmentSnapshotRef": "fixture://environment"},
-        "artifactManifests": [
-            {"artifactId": "source_candidate_batch:input"}
-        ],
-    }
+    record = _pinned_record(definition)
     task = {
         "taskId": "task-extraction",
         "sessionId": "session-extraction",
@@ -264,6 +273,86 @@ def test_real_agent_writeback_claim_anchor_passes_the_quality_contract() -> None
     assert quality is not None
     assert quality["status"] == "passed"
     assert records == {}
+
+
+def test_artifact_builder_backfills_retrieved_at_at_the_read_point() -> None:
+    """A persisted task predating the writeback backfill must still build cards.
+
+    The writeback boundary and the claim materializer read point both run the
+    single-authoritative ``retrieved_at`` backfill; the artifact builder read
+    point fed the raw persisted result straight into the fail-closed card
+    contract and raised on the missing timestamp.  It must normalize through
+    the same backfill — on a detached copy, without mutating the caller's
+    canonical task object.
+    """
+    from core.web.services.team_workflow.source_collection.extraction_retrieved_at_backfill import (
+        is_timezone_aware_rfc3339_timestamp,
+    )
+
+    definition = build_challenge_cup_workflow_definition()
+    node_spec = next(
+        node for node in definition.nodes if node.nodeId == "source_extraction"
+    )
+    record = _pinned_record(definition)
+    legacy_fields = {
+        key: value for key, value in _source_fields().items() if key != "retrieved_at"
+    }
+    task = {
+        "taskId": "task-extraction-legacy",
+        "sessionId": "session-extraction",
+        "stageId": "extraction",
+        "result": {
+            "candidateExtractions": [
+                {
+                    "candidateId": "candidate-legacy",
+                    "decision": "keep",
+                    "evidenceStatus": "verified_abstract",
+                    **legacy_fields,
+                    "evidenceRefs": [
+                        {
+                            "id": "record-anchor-legacy",
+                            "quote": "Dynamic thresholds reduce redundant updates.",
+                            "type": "abstract",
+                        }
+                    ],
+                    "claims": [
+                        {
+                            "fact": "Dynamic thresholds reduce redundant updates.",
+                            "quote": "Dynamic thresholds reduce redundant updates.",
+                            "sourceRef": "https://example.test/a",
+                        }
+                    ],
+                }
+            ]
+        },
+    }
+    manifests, payloads = build_agent_task_artifacts(
+        record=record,
+        node_spec=node_spec,
+        node_run={
+            "nodeRunId": "node-run-extraction",
+            "attempt": 1,
+            "inputSnapshotHash": "a" * 64,
+            "agentId": "agent-extraction",
+            "modelRef": "fixture-model",
+        },
+        task=task,
+        created_at="2026-08-10T00:00:00Z",
+    )
+
+    cards = payloads[next(
+        item.artifactId
+        for item in manifests
+        if item.artifactId.startswith("evidence_card_batch:")
+    )]["evidenceCards"]
+    assert cards
+    assert all(
+        is_timezone_aware_rfc3339_timestamp(card["retrieved_at"]) for card in cards
+    )
+    # Read-point purity: the caller's canonical task object is untouched.
+    entry = task["result"]["candidateExtractions"][0]
+    assert "retrieved_at" not in entry
+    assert "retrieved_at" not in entry["claims"][0]
 
 
 def test_formal_cards_fail_closed_without_explicit_facts_or_source_type() -> None:

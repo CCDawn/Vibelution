@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from typing import Any
 
 from core.research.workflow.contracts import ArtifactManifest
@@ -216,7 +217,23 @@ def _source_finding_payload(
 
 
 def _source_extraction_payload(task: dict[str, Any]) -> dict[str, Any]:
-    result = dict(task.get("result") or {})
+    from core.web.services.team_workflow.source_collection.extraction_retrieved_at_backfill import (
+        backfill_persisted_extraction_task_retrieved_at,
+    )
+
+    # Read-point Challenge v2 ``retrieved_at`` backfill — the same single
+    # authoritative implementation the writeback boundary and the claim
+    # materializer read point run.  A persisted extraction task that predates
+    # that backfill would otherwise fail the card builder's fail-closed
+    # timestamp contract here at artifact-build time.  The backfill mutates
+    # ``task["result"]`` in place, so it runs on a detached copy: this builder
+    # is a read point and never touches the caller's canonical task object.
+    task_view = dict(task)
+    task_view["result"] = copy.deepcopy(task.get("result") or {})
+    result = dict(
+        backfill_persisted_extraction_task_retrieved_at(task_view).get("result")
+        or {}
+    )
     return {
         **result,
         "evidenceCards": build_source_extraction_evidence_cards(result),

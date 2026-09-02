@@ -61,7 +61,28 @@ def _sha256(payload: object) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _claim_locator(claim: dict[str, Any]) -> dict[str, Any] | None:
+def _evidence_ref_id(raw_ref: object) -> str:
+    if not isinstance(raw_ref, dict):
+        return ""
+    return _text(raw_ref.get("id") or raw_ref.get("evidenceRefId") or raw_ref.get("refId"))
+
+
+def _claim_locator(
+    claim: dict[str, Any],
+    extraction: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Resolve the explicit anchor of one nested claim, with evidenceRef bridges.
+
+    Resolution order: the claim's own explicit locator fields first
+    (``citationLocator``, ``page``/``pageRange``/``citation``, scalar
+    ``evidenceRef``), then two bridges that only fire when the claim names no
+    anchor at all — its own ``evidenceRefs`` list (the first entry with a
+    non-empty id is the anchor the agent already named for this quote), and
+    finally the parent extraction's ``evidenceRefs`` entry whose quote matches
+    the claim quote verbatim (equivalent to the agent having written
+    ``claim.evidenceRef``).  A claim that none of these can anchor returns
+    ``None`` and stays silently skipped, exactly as before.
+    """
     explicit = claim.get("citationLocator")
     if isinstance(explicit, dict) and _text(explicit.get("kind")):
         locator = dict(explicit)
@@ -81,6 +102,32 @@ def _claim_locator(claim: dict[str, Any]) -> dict[str, Any] | None:
     evidence_ref = _text(claim.get("evidenceRef"))
     if evidence_ref:
         return {"kind": "evidence_ref", "anchor": evidence_ref, **({"url": source_ref} if source_ref else {})}
+    # Production stagetask-20260902062113-59c12d89: the agent attached an
+    # ``evidenceRefs`` list directly on the nested claim (the scalar
+    # ``evidenceRef`` field is only one of the anchor spellings the writeback
+    # contract lists).  The first entry carrying a non-empty id is an anchor
+    # the agent explicitly named, so read it as one.
+    for raw_ref in claim.get("evidenceRefs") or []:
+        ref_id = _evidence_ref_id(raw_ref)
+        if ref_id:
+            return {"kind": "evidence_ref", "anchor": ref_id, **({"url": source_ref} if source_ref else {})}
+    # Production run-2e157e016745: nested claims quoted their parent
+    # extraction's evidenceRef verbatim yet carried no locator field, so every
+    # claim was silently skipped (claimEvidenceCount=0) and the run parked at
+    # ``needs_quote_anchor_retry`` although every quote was compliant.  When
+    # the parent holds an evidenceRef whose quote equals the claim quote
+    # verbatim, borrow its id — the same bridge the flat-extraction shape
+    # already relies on below.
+    claim_quote = _text(claim.get("quote"))
+    if extraction is not None and claim_quote:
+        for raw_ref in extraction.get("evidenceRefs") or []:
+            if not isinstance(raw_ref, dict):
+                continue
+            if _text(raw_ref.get("quote")) != claim_quote:
+                continue
+            ref_id = _evidence_ref_id(raw_ref)
+            if ref_id:
+                return {"kind": "evidence_ref", "anchor": ref_id, **({"url": source_ref} if source_ref else {})}
     return None
 
 
@@ -433,7 +480,7 @@ def materialize_claim_evidence_from_task(
         source_ref = _text(
             claim.get("sourceRef") or challenge_evidence.get("source_url")
         )
-        locator = _claim_locator(claim)
+        locator = _claim_locator(claim, extraction)
         if not all((candidate_id, claim_text, quote, source_ref, locator)):
             continue
         if not extractor_agent_id or not normalized_model_ref:

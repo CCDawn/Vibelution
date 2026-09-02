@@ -295,6 +295,198 @@ def test_materializes_flat_extractions_with_evidence_ref_quotes(
     assert created[0]["locator"]["anchor"] == "dprec-flat-abstract"
 
 
+def test_materializes_nested_claims_bridged_from_parent_evidence_ref_quotes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Production run-2e157e016745 shape: nested claims quote the parent ref verbatim.
+
+    Every nested claim carried a compliant quote but no locator field, so all
+    claims were silently skipped and the run parked at
+    ``needs_quote_anchor_retry``.  When the parent extraction holds an
+    evidenceRef whose quote matches the claim quote verbatim, its id anchors
+    the claim exactly as if the agent had written ``claim.evidenceRef``.
+    """
+    task = {
+        "taskId": "task-extract-parent-bridge",
+        "teamId": "team-a",
+        "runId": "sc-run-a",
+        "stageId": "extraction",
+        "agentId": "agent-a",
+        "result": {
+            "candidateExtractions": [
+                {
+                    "candidateId": "candidate-parent-bridge",
+                    "decision": "keep",
+                    "evidenceStatus": "verified_abstract",
+                    **_v2_source_fields(
+                        fact="The abstract reports a bounded result.",
+                    ),
+                    "evidenceRefs": [
+                        {
+                            "id": "dprec-parent-abstract",
+                            "quote": "A bounded verbatim excerpt from the abstract.",
+                            "type": "abstract",
+                        }
+                    ],
+                    "claims": [
+                        {
+                            "fact": "The abstract reports a bounded result.",
+                            "quote": "A bounded verbatim excerpt from the abstract.",
+                            "sourceRef": "https://example.org/paper-a",
+                        }
+                    ],
+                }
+            ]
+        },
+    }
+
+    team_id, scope = _claim_bridge_env(tmp_path, monkeypatch)
+    task["teamId"] = team_id
+    created = materialize_claim_evidence_from_task(
+        project_root=tmp_path,
+        team_id=team_id,
+        workflow_run_id="wf-run-a",
+        source_collection_run_id="sc-run-a",
+        task=task,
+        model_ref="provider/model-a",
+        question_scope=scope,
+    )
+
+    assert len(created) == 1
+    assert created[0]["candidateId"] == "candidate-parent-bridge"
+    assert created[0]["quote"] == "A bounded verbatim excerpt from the abstract."
+    assert created[0]["locator"] == {
+        "kind": "evidence_ref",
+        "anchor": "dprec-parent-abstract",
+        "url": "https://example.org/paper-a",
+    }
+
+
+def test_nested_claims_without_matching_parent_quote_stay_skipped(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    task = {
+        "taskId": "task-extract-parent-bridge-gap",
+        "teamId": "team-a",
+        "runId": "sc-run-a",
+        "stageId": "extraction",
+        "agentId": "agent-a",
+        "result": {
+            "candidateExtractions": [
+                {
+                    "candidateId": "candidate-parent-bridge-gap",
+                    "decision": "keep",
+                    "evidenceStatus": "verified_abstract",
+                    **_v2_source_fields(
+                        fact="The abstract reports a bounded result.",
+                    ),
+                    "evidenceRefs": [
+                        {
+                            "id": "dprec-parent-abstract",
+                            "quote": "A different verbatim excerpt entirely.",
+                            "type": "abstract",
+                        },
+                        {
+                            "id": "dprec-parent-no-quote",
+                            "type": "abstract",
+                        },
+                    ],
+                    "claims": [
+                        {
+                            "fact": "The abstract reports a bounded result.",
+                            "quote": "A bounded verbatim excerpt from the abstract.",
+                            "sourceRef": "https://example.org/paper-a",
+                        }
+                    ],
+                }
+            ]
+        },
+    }
+
+    team_id, scope = _claim_bridge_env(tmp_path, monkeypatch)
+    task["teamId"] = team_id
+    created = materialize_claim_evidence_from_task(
+        project_root=tmp_path,
+        team_id=team_id,
+        workflow_run_id="wf-run-a",
+        source_collection_run_id="sc-run-a",
+        task=task,
+        model_ref="provider/model-a",
+        question_scope=scope,
+    )
+
+    assert created == []
+    assert ClaimEvidenceStore(tmp_path).list(team_id) == []
+
+
+def test_materializes_nested_claims_with_own_evidence_refs_list(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Production stagetask-20260902062113-59c12d89 shape: the claim carries its own evidenceRefs list.
+
+    The scalar ``evidenceRef`` field is only one anchor spelling; a claim that
+    attaches an ``evidenceRefs`` list already names its anchor, so the first
+    entry with a non-empty id resolves the locator.  The parent holds no
+    evidenceRefs at all, proving the anchor came from the claim's own list.
+    """
+    task = {
+        "taskId": "task-extract-own-refs",
+        "teamId": "team-a",
+        "runId": "sc-run-a",
+        "stageId": "extraction",
+        "agentId": "agent-a",
+        "result": {
+            "candidateExtractions": [
+                {
+                    "candidateId": "candidate-own-refs",
+                    "decision": "keep",
+                    "evidenceStatus": "verified_abstract",
+                    **_v2_source_fields(
+                        fact="The abstract reports a bounded result.",
+                    ),
+                    "claims": [
+                        {
+                            "fact": "The abstract reports a bounded result.",
+                            "quote": "A bounded verbatim excerpt from the abstract.",
+                            "sourceRef": "https://example.org/paper-a",
+                            "evidenceRefs": [
+                                {
+                                    "id": "dprec-own-abstract",
+                                    "quote": "A bounded verbatim excerpt from the abstract.",
+                                    "type": "abstract",
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ]
+        },
+    }
+
+    team_id, scope = _claim_bridge_env(tmp_path, monkeypatch)
+    task["teamId"] = team_id
+    created = materialize_claim_evidence_from_task(
+        project_root=tmp_path,
+        team_id=team_id,
+        workflow_run_id="wf-run-a",
+        source_collection_run_id="sc-run-a",
+        task=task,
+        model_ref="provider/model-a",
+        question_scope=scope,
+    )
+
+    assert len(created) == 1
+    assert created[0]["candidateId"] == "candidate-own-refs"
+    assert created[0]["locator"] == {
+        "kind": "evidence_ref",
+        "anchor": "dprec-own-abstract",
+        "url": "https://example.org/paper-a",
+    }
+
+
 def test_verified_materialization_fails_closed_when_v2_fields_are_missing(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
