@@ -630,6 +630,124 @@ def test_chain_commands_map_runtime_guard_rejection_to_409(monkeypatch) -> None:
     assert "blockers" not in detail
 
 
+# ---------------------------------------------------------------------------
+# chain/commands wire round-trip: ``_find_allowed_command`` re-authorizes by
+# strict payload equality against the projected offer, so the route must not
+# let wire-model defaults (RecordSelectionPayload.previousSelectionId,
+# OpenGenerationPayload.runId) materialize inside a verbatim offer echo.
+# Regression for the live 422 "command is no longer allowed" that killed every
+# plain record-selection/open_generation click after those defaults landed.
+# ---------------------------------------------------------------------------
+
+
+def _captured_execute(capture: list[dict[str, object]]):
+    def fake_execute(team_id, payload, *, question_id="", workflow_run_id=""):
+        capture.append(
+            {
+                "teamId": team_id,
+                "questionId": question_id,
+                "workflowRunId": workflow_run_id,
+                "request": dict(payload),
+            }
+        )
+        return {"schemaVersion": 2, "status": "executed"}
+
+    return fake_execute
+
+
+def test_chain_commands_round_trip_plain_record_selection_payload(
+    monkeypatch,
+) -> None:
+    capture: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        hypothesis_first_chain, "execute_v2_command", _captured_execute(capture)
+    )
+    client = _client()
+    response = client.post(
+        "/api/teams/research-team/workflow-orchestration/hypothesis-first/chain/commands",
+        params={"questionId": "SCI-001", "runId": "run-2e157e016745"},
+        json={
+            "actionId": "record-selection",
+            "idempotencyKey": "hf2:record-selection:3a3f495a8fe91f64",
+            "expectedStateVersion": "hf2-action:hf-reset-b5c1898fe76a516f:e0b73e7ad7d48ae8",
+            "payload": {
+                "questionId": "SCI-001",
+                "generationAttemptId": "hf-candgen-80e9711246ab2b0c-a2",
+            },
+            "input": {
+                "candidateIds": ["sci-001-c2cf3fdbf", "sci-001-c36554759"]
+            },
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert len(capture) == 1
+    request = capture[0]["request"]
+    # The plain offer payload carries exactly these two keys; a model-injected
+    # ``previousSelectionId: ""`` would break strict re-authorization.
+    assert request["payload"] == {
+        "questionId": "SCI-001",
+        "generationAttemptId": "hf-candgen-80e9711246ab2b0c-a2",
+    }
+    assert request["input"] == {
+        "candidateIds": ["sci-001-c2cf3fdbf", "sci-001-c36554759"]
+    }
+    assert capture[0]["workflowRunId"] == "run-2e157e016745"
+
+
+def test_chain_commands_round_trip_explicit_previous_selection_id(
+    monkeypatch,
+) -> None:
+    """The rejected-adjudication re-selection offer keeps its rooted chain."""
+
+    capture: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        hypothesis_first_chain, "execute_v2_command", _captured_execute(capture)
+    )
+    client = _client()
+    response = client.post(
+        "/api/teams/research-team/workflow-orchestration/hypothesis-first/chain/commands",
+        params={"questionId": "SCI-001"},
+        json={
+            "actionId": "record-selection",
+            "idempotencyKey": "hf2:record-selection:reselect-1",
+            "expectedStateVersion": "hf2-action:hf-reset-x:reselect",
+            "payload": {
+                "questionId": "SCI-001",
+                "generationAttemptId": "hf-candgen-80e9711246ab2b0c-a2",
+                "previousSelectionId": "hsel-3e278e50b271d28b",
+            },
+        },
+    )
+    assert response.status_code == 200, response.text
+    request = capture[0]["request"]
+    assert request["payload"]["previousSelectionId"] == "hsel-3e278e50b271d28b"
+
+
+def test_chain_commands_round_trip_plain_open_generation_payload(
+    monkeypatch,
+) -> None:
+    capture: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        hypothesis_first_chain, "execute_v2_command", _captured_execute(capture)
+    )
+    client = _client()
+    response = client.post(
+        "/api/teams/research-team/workflow-orchestration/hypothesis-first/chain/commands",
+        params={"questionId": "SCI-096"},
+        json={
+            "actionId": "open-generation",
+            "idempotencyKey": "hf2:open-generation:1",
+            "expectedStateVersion": "hf2-action:hf-reset-y:open",
+            "payload": {"questionId": "SCI-096"},
+        },
+    )
+    assert response.status_code == 200, response.text
+    request = capture[0]["request"]
+    # The bare origin-level offer payload has no runId; injecting an empty
+    # default would break re-authorization for non-stage-one questions.
+    assert request["payload"] == {"questionId": "SCI-096"}
+
+
 def test_selection_context_derives_scope_from_frozen_registry(monkeypatch) -> None:
     monkeypatch.setattr(
         hf_routes,

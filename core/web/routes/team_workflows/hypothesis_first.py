@@ -1137,7 +1137,16 @@ def team_workflow_hypothesis_first_command(
         with server_operator_scope_from_http(http_request):
             return hypothesis_first_chain.execute_v2_command(
                 team_id,
-                payload.model_dump(),
+                # ``_find_allowed_command`` re-authorizes by strict payload
+                # equality against the projected offer.  Wire models with
+                # defaulted fields (RecordSelectionPayload.previousSelectionId,
+                # OpenGenerationPayload.runId) inject those defaults into a
+                # plain dump, so a verbatim echo of a two-key offer would gain
+                # a third key and never re-authorize.  ``exclude_unset`` keeps
+                # the request wire-symmetric with the response side's
+                # ``response_model_exclude_unset``: only client-declared
+                # fields reach the command envelope.
+                payload.model_dump(exclude_unset=True),
                 question_id=question_id,
                 workflow_run_id=workflow_run_id,
             )
