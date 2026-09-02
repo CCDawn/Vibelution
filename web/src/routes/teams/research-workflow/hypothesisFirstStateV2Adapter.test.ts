@@ -448,6 +448,79 @@ describe("resolveHypothesisFirstNextActionFromV2", () => {
     expect(action.disabledReason).toBeUndefined();
   });
 
+  it("keeps a superseded-only review phase out of the blocked stage", () => {
+    // Fence-terminated review candidates after the formal run's hypothesis
+    // stage succeeded: visible history, no longer an actionable block.
+    const supersededCandidate = (candidateId: string): ReviewCandidateState => ({
+      ...idle,
+      lifecycle: "superseded",
+      actionability: "terminal",
+      candidateId,
+      candidateOrder: candidateId === "cand-1" ? 1 : 2,
+      selectionId: "selection-1",
+      roundIndex: 5,
+      meetingRoundId: `meeting-${candidateId}`,
+      discussionAnchor: null,
+      discussion: { ...idle, lifecycle: "failed", actionability: "available" },
+      summarization: { ...idle },
+      approval: { ...idle },
+    });
+    const state = stateV2({
+      isInitial: false,
+      currentPhase: "review",
+      review: {
+        ...stateV2().review,
+        lifecycle: "running",
+        actionability: "waiting_system",
+        activeRoundIndex: 5,
+        aggregate: { total: 2, completed: 0, pending: 0, failed: 0, blocked: 0, superseded: 2 },
+        candidates: [supersededCandidate("cand-1"), supersededCandidate("cand-2")],
+      },
+      allowedActions: [],
+    });
+
+    const action = resolveHypothesisFirstNextActionFromV2(state);
+
+    expect(action.stage).not.toBe("blocked");
+    expect(action.stage).toBe("review_running");
+    expect(action.disabledReason).toBeUndefined();
+  });
+
+  it("still marks a failed review candidate as blocked for recovery", () => {
+    // Regression red line: the classic fence scenario (run stuck failed at
+    // the hypothesis stage) must keep surfacing the blocked stage so the
+    // retry_review_dispatch recovery stays reachable.
+    const failedCandidate = {
+      ...reviewCandidate("cand-1", "failed"),
+      actionability: "available" as const,
+      discussion: { ...idle, lifecycle: "failed" as const, actionability: "available" as const },
+      summarization: { ...idle },
+      approval: { ...idle },
+    };
+    const redispatch = command({
+      command: "retry_review_dispatch",
+      payload: { selectionId: "selection-1", candidateIds: ["cand-1"] },
+    }, "重试候选评审分发");
+    const state = stateV2({
+      isInitial: false,
+      currentPhase: "review",
+      review: {
+        ...stateV2().review,
+        lifecycle: "failed",
+        actionability: "available",
+        activeRoundIndex: 5,
+        aggregate: { total: 1, completed: 0, pending: 0, failed: 1, blocked: 0 },
+        candidates: [failedCandidate],
+      },
+      allowedActions: [redispatch],
+    });
+
+    const action = resolveHypothesisFirstNextActionFromV2(state);
+
+    expect(action.stage).toBe("blocked");
+    expect(action.canonicalAction?.command).toBe("retry_review_dispatch");
+  });
+
   it("surfaces the canonical reopen action for an orphaned review round", () => {
     const blockedCandidate = {
       ...reviewCandidate("cand-1", "failed"),

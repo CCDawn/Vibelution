@@ -2458,6 +2458,80 @@ describe("HypothesisFirstNodeInspector", () => {
     expect(checklist?.textContent).not.toContain("排队等待");
   });
 
+  it("renders superseded review candidates neutrally instead of blocked", () => {
+    // Fence-terminated candidates after the formal run's hypothesis stage
+    // succeeded: the checklist shows a superseded state, not 已阻塞/待确认.
+    const fenceProblem = {
+      code: "challenge_execution_fence",
+      category: "execution",
+      severity: "error",
+      message: "正式会议已由服务端执行边界终止，未生成或晋升纪要。",
+      recoverable: true,
+      sourceKind: "meeting_round",
+      sourceId: "meeting-cand-a",
+      detectedAt: "2026-08-25T02:10:00Z",
+      lastHeartbeatAt: null,
+    };
+    const supersededCandidate = (candidateId: string) => ({
+      ...v2ReviewCandidateFixture(candidateId),
+      lifecycle: "superseded",
+      outcome: "none",
+      actionability: "terminal",
+      problems: [fenceProblem],
+      discussion: {
+        lifecycle: "failed",
+        outcome: "none",
+        actionability: "available",
+        attempt: null,
+        updatedAt: null,
+        problems: [fenceProblem],
+      },
+      summarization: {
+        lifecycle: "not_started",
+        outcome: "none",
+        actionability: "idle",
+        attempt: null,
+        updatedAt: null,
+        problems: [],
+      },
+      approval: {
+        lifecycle: "not_started",
+        outcome: "none",
+        actionability: "idle",
+        attempt: null,
+        updatedAt: null,
+        problems: [],
+      },
+    });
+    mockedChain.mockReturnValue(chainData({
+      stateV2: {
+        currentPhase: "review",
+        generation: { generationMeetingId: null },
+        review: {
+          ...v2CollectionPhase(),
+          activeRoundIndex: 5,
+          aggregate: { total: 2, completed: 0, pending: 0, failed: 0, blocked: 0, superseded: 2 },
+          candidates: [supersededCandidate("cand-a"), supersededCandidate("cand-b")],
+        },
+        collection: { requests: [] },
+        allowedActions: [],
+        problems: [],
+      } as unknown as HypothesisFirstStateV2,
+    }));
+    render(
+      <HypothesisFirstNodeInspector
+        teamId="team-1"
+        questionId="Q-01"
+        nodeId="hf_review"
+        onOpenQuestion={() => {}}
+      />,
+    );
+    const checklist = container.querySelector('[data-testid="candidate-confirmation-checklist"]');
+    expect(checklist?.textContent).toContain("已被取代 2");
+    expect(checklist?.textContent).toContain("已被正式链路取代");
+    expect(checklist?.textContent).not.toContain("已阻塞");
+  });
+
   // ---------------------------------------------------------------------------
   // Discussion member completion (x/y members have spoken)
   // ---------------------------------------------------------------------------

@@ -858,6 +858,8 @@ export type StateAggregate = {
   pending: number;
   failed: number;
   blocked: number;
+  /** Overtaken-by-the-formal-chain items; absent in older snapshots. */
+  superseded?: number;
 };
 
 export type CollectionRequestListResponse = {

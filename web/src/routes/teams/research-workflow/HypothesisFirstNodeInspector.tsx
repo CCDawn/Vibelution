@@ -494,6 +494,7 @@ export function HypothesisFirstNodeInspector({
       if (
         candidate.lifecycle === "completed"
         || candidate.lifecycle === "failed"
+        || candidate.lifecycle === "superseded"
         || candidate.actionability === "blocked"
       ) {
         return undefined;
@@ -513,9 +514,11 @@ export function HypothesisFirstNodeInspector({
       nodeId: `hf_meeting_${candidate.roundIndex}_${encodeURIComponent(candidate.candidateId)}`,
       kind: candidate.lifecycle === "completed"
         ? "confirmed" as const
-        : candidate.lifecycle === "failed" || candidate.actionability === "blocked"
-          ? "blocked" as const
-          : "pending" as const,
+        : candidate.lifecycle === "superseded"
+          ? "superseded" as const
+          : candidate.lifecycle === "failed" || candidate.actionability === "blocked"
+            ? "blocked" as const
+            : "pending" as const,
       queueKind: pendingQueueKind,
     };
   }) ?? null;
@@ -719,7 +722,7 @@ function ReviewCandidateChecklist({
     candidateId: string;
     roundIndex: number;
     nodeId: string;
-    kind: "confirmed" | "blocked" | "pending";
+    kind: "confirmed" | "blocked" | "pending" | "superseded";
     /** V2-only queue awareness; legacy projection rows omit it. */
     queueKind?: "discussing" | "inflight" | "queued";
   }[];
@@ -733,7 +736,8 @@ function ReviewCandidateChecklist({
   if (!currentRounds.length) return null;
   const confirmed = currentRounds.filter((state) => state.kind === "confirmed").length;
   const blocked = currentRounds.filter((state) => state.kind === "blocked").length;
-  const pending = currentRounds.length - confirmed - blocked;
+  const superseded = currentRounds.filter((state) => state.kind === "superseded").length;
+  const pending = currentRounds.length - confirmed - blocked - superseded;
   // 位次感知只在 V2 canonical rows 提供完整 queue 标签时启用，避免用旧会议
   // 投影猜出一个假的排队数。
   const allPendingTagged = currentRounds
@@ -750,8 +754,8 @@ function ReviewCandidateChecklist({
       <div className={styles.candidateChecklistSummary}>
         <strong>{isZh ? "候选确认清单" : "Candidate confirmation checklist"}</strong>
         <span>{isZh
-          ? `共 ${currentRounds.length} · 已确认 ${confirmed} · 待确认 ${pending}${blocked ? ` · 已阻塞 ${blocked}` : ""}${discussing || queued ? ` · 正在讨论 ${discussing} 个 · 排队等待 ${queued} 个` : ""}`
-          : `${currentRounds.length} total · ${confirmed} confirmed · ${pending} pending${blocked ? ` · ${blocked} blocked` : ""}${discussing || queued ? ` · ${discussing} in discussion · ${queued} queued` : ""}`}
+          ? `共 ${currentRounds.length} · 已确认 ${confirmed} · 待确认 ${pending}${blocked ? ` · 已阻塞 ${blocked}` : ""}${superseded ? ` · 已被取代 ${superseded}` : ""}${discussing || queued ? ` · 正在讨论 ${discussing} 个 · 排队等待 ${queued} 个` : ""}`
+          : `${currentRounds.length} total · ${confirmed} confirmed · ${pending} pending${blocked ? ` · ${blocked} blocked` : ""}${superseded ? ` · ${superseded} superseded` : ""}${discussing || queued ? ` · ${discussing} in discussion · ${queued} queued` : ""}`}
         </span>
       </div>
       <ol className={styles.candidateChecklistList}>
@@ -760,9 +764,11 @@ function ReviewCandidateChecklist({
           const identity = isZh ? `候选 ${round.candidateId}` : `Candidate ${round.candidateId}`;
           const label = state === "confirmed"
             ? (isZh ? "已确认" : "Confirmed")
-            : state === "blocked"
-              ? (isZh ? "已阻塞" : "Blocked")
-              : (isZh ? "待确认" : "Pending");
+            : state === "superseded"
+              ? (isZh ? "已被正式链路取代" : "Superseded by formal run")
+              : state === "blocked"
+                ? (isZh ? "已阻塞" : "Blocked")
+                : (isZh ? "待确认" : "Pending");
           const tone = state === "confirmed" ? "success" : state === "blocked" ? "warning" : "neutral";
           return (
             <li className={styles.candidateChecklistItem} key={round.nodeId}>
