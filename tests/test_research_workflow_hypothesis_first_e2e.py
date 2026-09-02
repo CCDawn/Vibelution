@@ -438,11 +438,21 @@ def _build_runtime(tmp_path: Path):
 
 
 def _seed_parent_run(runtime, team_id: str, planner_agent_id: str) -> None:
+    # Registry-era runs must pin a registered wv-* identity: the mutation
+    # fail-closed gate refuses runs pinned to the legacy literal version id.
+    from core.research.workflow.definition import (
+        build_challenge_cup_workflow_definition,
+    )
+    from core.research.workflow.definition_registry import register_or_resolve
+
+    pinned_version_id = register_or_resolve(
+        build_challenge_cup_workflow_definition()
+    ).workflowVersionId
     input_snapshot = {
         "teamId": team_id,
         "projectId": "challenge-sci-096",
         "questionId": _QUESTION_ID,
-        "workflowVersionId": "challenge-cup-research-v2.1.0",
+        "workflowVersionId": pinned_version_id,
         "researchBriefHash": "b" * 64,
         "datasetRefs": [],
         "metricContract": {},
@@ -488,6 +498,7 @@ def _seed_parent_run(runtime, team_id: str, planner_agent_id: str) -> None:
     record = build_run_record(
         run_id=_RUN_ID,
         team_id=team_id,
+        workflow_version_id=pinned_version_id,
         last_event_sequence=1,
         input_snapshot_hash="c" * 64,
         thread_id=_RUN_ID,
@@ -755,6 +766,12 @@ def test_end_to_end_fixture_chain_with_ledger_audit(
     _seed_claim_belief_gate_fixture(
         monkeypatch, team_id, _QUESTION_ID, ["hyp-a", "hyp-b"]
     )
+    # The opened meeting's background chat round otherwise auto-drafts the
+    # meeting to awaiting_approval before the manual multi-round discussion
+    # below can run. Pin the discussion-driver-owned semantics: while a
+    # driver owns the meeting the auto draft stands down and this test
+    # drives the discussion and closure states explicitly.
+    monkeypatch.setattr(meeting_runtime, "discussion_driver_active", lambda: True)
     created_runs, facade_calls = _stateful_collection_fakes(monkeypatch)
     runtime = _build_runtime(tmp_path)
     try:
@@ -977,11 +994,13 @@ def test_end_to_end_fixture_chain_with_ledger_audit(
             links = chain.list_review_round_links(team_id, question_id=_QUESTION_ID)[
                 "links"
             ]
-            assert [link["roundIndex"] for link in links] == [1, 1, 2]
+            assert [link["roundIndex"] for link in links] == [1, 1, 2, 2]
             assert links[0]["meetingRoundId"] == first_meeting_id
             assert links[1]["meetingRoundId"] == sibling_meeting_id
             assert links[2]["previousMeetingRoundId"] == first_meeting_id
             assert links[2]["collectionRequestId"] == request["requestId"]
+            assert links[3]["previousMeetingRoundId"] == first_meeting_id
+            assert links[3]["candidateId"] == "hyp-b"
 
             # 6. 第二轮关门（select_candidate，无新缺口）→ 第二个
             #    HypothesisRound lineage 回链第一轮；随后冻结模板基线。
@@ -994,14 +1013,17 @@ def test_end_to_end_fixture_chain_with_ledger_audit(
             )
             assert closed_second["collection"]["requests"] == []
             assert len(created_runs) == 1
-            second_round = closed_second["hypothesisRound"]["round"]
+            sibling_closed_second = _close_sibling_meetings(
+                team_id, agent_ids, second_meeting_id, runtime
+            )
+            second_round = sibling_closed_second["hypothesisRound"]["round"]
             assert second_round["status"] == "closed"
             assert second_round["metaReview"]["accepted"] is True
             assert {
                 item["id"]
                 for item in second_round["meetingRefs"]
                 if item["kind"] == "meeting_round"
-            } == {second_meeting_id}
+            } == {second_meeting_id, links[3]["meetingRoundId"]}
             assert [
                 item["id"] for item in second_round["lineage"] if item["kind"] == "round"
             ] == [first_round["roundId"]]
@@ -1057,7 +1079,7 @@ def test_end_to_end_fixture_chain_with_ledger_audit(
             assert state["selectionId"] == selection["selectionId"]
             assert state["firstMeetingClosed"] is True
             assert state["collectionReady"] is True
-            assert state["meetingCount"] == 3
+            assert state["meetingCount"] == 4
             assert state["hypothesisRoundCount"] == 2
     finally:
         runtime.close()
@@ -1073,6 +1095,12 @@ def test_unclosed_or_artifactless_round_never_feeds_readiness(
 ) -> None:
     team_id, agents = _hf_env(tmp_path, monkeypatch)
     _patch_approved_question(tmp_path, monkeypatch)
+    # The opened meeting's background chat round otherwise auto-drafts the
+    # meeting straight to awaiting_approval before this test can walk the
+    # open -> summarizing -> awaiting_approval states itself. Pin the
+    # discussion-driver-owned semantics: while a driver owns the meeting the
+    # auto draft stands down and the test drives each state explicitly.
+    monkeypatch.setattr(meeting_runtime, "discussion_driver_active", lambda: True)
     _stateful_collection_fakes(monkeypatch)
     runtime = _build_runtime(tmp_path)
     try:
@@ -1166,13 +1194,19 @@ def test_reselection_chain_and_round_lineage_walk(
                 "meetingRoundId"
             ]
             _drive_to_awaiting_approval(team_id, second_meeting_id, agent_ids[0])
-            closed_second = chain.close_review_meeting(
+            chain.close_review_meeting(
                 team_id,
                 second_meeting_id,
                 _closure_payload(agent_ids, [_select_decision(agent_ids[0])]),
                 runtime=runtime,
             )
-            second_round = closed_second["hypothesisRound"]["round"]
+            # Round 2 is also a per-candidate fan-out: the selection-level
+            # HypothesisRound only generates after the whole sibling group
+            # closes (fan-in contract), so archive the remaining sibling.
+            sibling_closed_second = _close_sibling_meetings(
+                team_id, agent_ids, second_meeting_id, runtime
+            )
+            second_round = sibling_closed_second["hypothesisRound"]["round"]
 
             # 从最新轮次沿 lineage 走查：无环、途经轮次全部 closed、
             # 终止于选题 artifact 的候选集合。
@@ -1509,11 +1543,13 @@ def test_interruption_replay_across_chain_points(
                 rehandoff["nextMeeting"]["meetingRound"]["meetingRoundId"]
                 == second_meeting_id
             )
+            # Round 2 is a per-candidate fan-out too: both candidates carry
+            # their own link, so the replayed handoff must not add links.
             assert (
                 chain.list_review_round_links(team_id, question_id=_QUESTION_ID)[
                     "linkCount"
                 ]
-                == 3
+                == 4
             )
 
         # 点位 D：进程重启（全新 runtime 读同一 ledger）→ 状态完整重放，
@@ -1528,7 +1564,9 @@ def test_interruption_replay_across_chain_points(
             assert state["collectionRequestCount"] == 1
             assert state["pendingCollectionCount"] == 0
             assert state["collectionReady"] is True
-            assert state["meetingCount"] == 3
+            # Both round-2 fan-out meetings exist: the replayed handoff
+            # opened them once and did not stack extras on replay.
+            assert state["meetingCount"] == 4
             assert state["hypothesisRoundCount"] == 1
 
             design = _evaluate(runtime, team_id, "hypothesis_design")
@@ -1542,16 +1580,20 @@ def test_interruption_replay_across_chain_points(
             assert resumed["runs"][0]["action"] == "not_ready"
             assert runtime.store.latest_attempt(_RUN_ID, "hypothesis_design") is None
 
-            # 重启后继续推进链路：第二轮关门 → 冻结 → 恢复派发；
-            # 同 trigger 重放复用命令，ledger 中只有一个 hypothesis_design attempt。
+            # 重启后继续推进链路：第二轮关门（fan-in 归档全组兄弟）→ 冻结 →
+            # 恢复派发；同 trigger 重放复用命令，ledger 中只有一个
+            # hypothesis_design attempt。
             _drive_to_awaiting_approval(team_id, second_meeting_id, agent_ids[0])
-            closed_second = chain.close_review_meeting(
+            chain.close_review_meeting(
                 team_id,
                 second_meeting_id,
                 _closure_payload(agent_ids, [_select_decision(agent_ids[0])]),
                 runtime=runtime,
             )
-            assert closed_second["hypothesisRound"]["status"] == "created"
+            sibling_closed_second = _close_sibling_meetings(
+                team_id, agent_ids, second_meeting_id, runtime
+            )
+            assert sibling_closed_second["hypothesisRound"]["status"] == "created"
             _freeze_template_baseline(team_id, agent_ids[0])
             resumed = chain.resume_parent_runs(
                 team_id,

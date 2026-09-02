@@ -21,11 +21,16 @@ from tests.test_research_workflow_hypothesis_first_chain import (
     _ROLES,
     _build_runtime,
     _close_first_meeting_with_envelope,
+    _closure_payload,
+    _drive_to_awaiting_approval,
     _fake_collection_runs,
     _hf_env,
+    _marker_runner,
     _open_first_meeting,
     _patch_approved_question,
+    _review_meetings,
     _seed_parent_run,
+    _select_decision,
 )
 
 
@@ -37,11 +42,40 @@ def _closed_collection_request(tmp_path, monkeypatch):
     _seed_parent_run(runtime, team_id, agents["experiment_planner"])
     agent_ids = [agents[role] for role in _ROLES]
     recorded = _open_first_meeting(team_id, agent_ids)
-    meeting_id = recorded["reviewMeeting"]["meetingRound"]["meetingRoundId"]
+    first_round = _review_meetings(recorded)
+    meeting_id = first_round[0]["meetingRoundId"]
+    sibling_ids = [item["meetingRoundId"] for item in first_round[1:]]
     closed = _close_first_meeting_with_envelope(
         team_id, agent_ids, meeting_id, runtime
     )
     request = closed["collection"]["requests"][0]
+    # The sibling archive gate defers the next review round while any
+    # sibling digest still awaits confirmation; the handoff tests below pin
+    # the completed-handoff -> open-next contract, so the whole logical
+    # round must be archived first (sibling closes with a select decision
+    # so no extra collection request appears).
+    for sibling_id in sibling_ids:
+        _drive_to_awaiting_approval(team_id, sibling_id, agent_ids[0])
+        chain.close_review_meeting(
+            team_id,
+            sibling_id,
+            _closure_payload(agent_ids, [_select_decision(agent_ids[0])]),
+            runtime=runtime,
+            agent_runner=_marker_runner,
+        )
+    # notify_collection_run_terminal has no agent_runner parameter; the
+    # opened next round would otherwise drive its chat room with the real
+    # agent runner. Wrap the handoff entry to inject the marker runner while
+    # keeping the whole notify -> handoff -> open-next chain intact.
+    original_handoff = chain.record_collection_handoff
+
+    def _handoff_with_marker_runner(team_id_arg, request_id_arg, **kwargs):
+        kwargs.setdefault("agent_runner", _marker_runner)
+        return original_handoff(team_id_arg, request_id_arg, **kwargs)
+
+    monkeypatch.setattr(
+        chain, "record_collection_handoff", _handoff_with_marker_runner
+    )
     return team_id, agents, runtime, request
 
 
@@ -60,6 +94,9 @@ def test_completed_collection_handoffs_and_opens_next_review(
             assert first["request"]["status"] == "handed_off"
             assert first["request"]["handoffRef"].startswith("source_collection_run:")
             next_meeting = first["nextMeeting"]
+            # Siblings are fully archived in the helper, so the sibling
+            # archive gate (a88e6f9d6) must not defer this open: the
+            # completed handoff opens the next review round directly.
             assert next_meeting["status"] in {"opened", "reused", "budget_exhausted"}
             if next_meeting["status"] != "budget_exhausted":
                 assert next_meeting["meetingRound"]["meetingRoundId"]
