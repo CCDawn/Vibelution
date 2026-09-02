@@ -482,3 +482,106 @@ def test_deepseek_compat_override_omits_stream_usage_options_from_payload():
     payload = client._build_payload([{"role": "user", "content": "ping"}], stream=True)
 
     assert "stream_options" not in payload
+
+
+# ---------------------------------------------------------------------------
+# relay_autodl/GLM-5.3-flash prompt cache (mirrors the operator profile) and
+# the controlled per-call max_output_tokens override
+# ---------------------------------------------------------------------------
+
+
+def _relay_autodl_glm_config(**overrides):
+    values = {
+        "llm.providers.default.kind": "autodl",
+        "llm.providers.default.api_key": "test-key",
+        "llm.providers.default.base_url": "https://www.autodl.art/api/v1",
+        "llm.providers.default.api": "chat-completions",
+        "llm.providers.default.compat_mode": "openai",
+        "llm.profiles.primary.provider_id": "default",
+        "llm.profiles.primary.model": "GLM-5.3-flash",
+        "llm.profiles.primary.transport": "chat_completions",
+        "llm.profiles.primary.max_output_tokens": 32768,
+        "llm.profiles.primary.prompt_cache.mode": "automatic",
+    }
+    values.update(overrides)
+    return make_config(**values)
+
+
+def test_relay_autodl_automatic_prompt_cache_injects_key_and_retention():
+    config = _relay_autodl_glm_config()
+    client = LLMClient(config=config, backend=lambda payload: payload)
+
+    payload = client._build_payload([{"role": "user", "content": "评审输入"}])
+
+    assert payload["prompt_cache_key"].startswith("vibelution:autodl:primary:")
+    assert payload["prompt_cache_retention"] == "in_memory"
+    assert payload["max_tokens"] == 32768
+
+
+def test_relay_autodl_disabled_prompt_cache_keeps_payload_free_of_cache_fields():
+    config = _relay_autodl_glm_config(**{"llm.profiles.primary.prompt_cache.mode": "disabled"})
+    client = LLMClient(config=config, backend=lambda payload: payload)
+
+    payload = client._build_payload([{"role": "user", "content": "ping"}])
+
+    assert "prompt_cache_key" not in payload
+    assert "prompt_cache_retention" not in payload
+
+
+def test_relay_autodl_prompt_cache_partition_scopes_the_cache_key():
+    from core.llm.payload_builder import prompt_cache_partition_scope
+
+    config = _relay_autodl_glm_config()
+    client = LLMClient(config=config, backend=lambda payload: payload)
+
+    unpartitioned = client._build_payload([{"role": "user", "content": "讲者输入"}])
+    with prompt_cache_partition_scope("team-1:meeting_digest"):
+        partitioned = client._build_payload([{"role": "user", "content": "讲者输入"}])
+
+    assert ":team-1:meeting_digest:" in partitioned["prompt_cache_key"]
+    assert partitioned["prompt_cache_key"] != unpartitioned["prompt_cache_key"]
+    assert partitioned["prompt_cache_retention"] == "in_memory"
+
+
+def test_metadata_override_clamps_max_output_tokens_and_ignores_invalid_values():
+    from core.llm.client import MAX_OUTPUT_TOKENS_OVERRIDE_METADATA_KEY
+
+    config = _relay_autodl_glm_config()
+    client = LLMClient(config=config, backend=lambda payload: payload)
+    messages = [{"role": "user", "content": "评审输入"}]
+
+    clamped = client._build_payload(
+        messages, metadata={MAX_OUTPUT_TOKENS_OVERRIDE_METADATA_KEY: 8192}
+    )
+
+    assert clamped["max_tokens"] == 8192
+    assert clamped["prompt_cache_key"]  # cache wiring is orthogonal to the clamp
+
+    for bogus in ("8192", 0, -5, True, 3.5, None):
+        payload = client._build_payload(
+            messages, metadata={MAX_OUTPUT_TOKENS_OVERRIDE_METADATA_KEY: bogus}
+        )
+        assert payload["max_tokens"] == 32768
+
+    assert client._build_payload(messages)["max_tokens"] == 32768
+
+
+def test_metadata_override_clamps_responses_transport_payload():
+    from core.llm.client import MAX_OUTPUT_TOKENS_OVERRIDE_METADATA_KEY
+
+    config = _relay_autodl_glm_config(
+        **{
+            "llm.providers.default.api": "responses",
+            "llm.profiles.primary.transport": "responses",
+        }
+    )
+    client = LLMClient(config=config, backend=lambda payload: payload)
+    messages = [{"role": "user", "content": "评审输入"}]
+
+    clamped = client._build_payload(
+        messages, metadata={MAX_OUTPUT_TOKENS_OVERRIDE_METADATA_KEY: 8192}
+    )
+    untouched = client._build_payload(messages)
+
+    assert clamped["max_output_tokens"] == 8192
+    assert untouched["max_output_tokens"] == 32768

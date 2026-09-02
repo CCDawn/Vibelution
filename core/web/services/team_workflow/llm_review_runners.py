@@ -42,8 +42,13 @@ from config import get_config
 from core.infrastructure.llm_utils import build_cacheable_system_message
 from core.llm import LLMInvocationContext, get_llm_client, invoke_llm
 from core.llm.agent_runtime import agent_dialogue_model_id, config_for_agent_llm_model
-from core.llm.client import llm_cancel_context, model_invocation_receipt_context_scope
+from core.llm.client import (
+    MAX_OUTPUT_TOKENS_OVERRIDE_METADATA_KEY,
+    llm_cancel_context,
+    model_invocation_receipt_context_scope,
+)
 from core.llm.invocation import invoke_llm_outcome
+from core.llm.semantic_messages import SemanticOutputSchema
 from core.llm.types import LLMError
 from core.research.competition.question_result_package import (
     REQUIRED_REVIEW_DIMENSIONS,
@@ -88,6 +93,254 @@ _MAX_MESSAGES = 40
 # attempts.
 REVIEW_LLM_CALL_TIMEOUT_SECONDS = 450.0
 _REVIEW_LLM_CALL_TIMEOUT_ENV = "VIBELUTION_REVIEW_LLM_CALL_TIMEOUT_SECONDS"
+
+# ---------------------------------------------------------------------------
+# Per-purpose output-token clamp and structured-output schema
+# ---------------------------------------------------------------------------
+#
+# The operator profile for short structured review calls historically ran with
+# the profile-wide ``max_output_tokens`` (32768 on relay_autodl/GLM-5.3-flash)
+# while the runtime receipts show review outputs averaging ~2K tokens.  These
+# clamps cap each structured call's ``max_tokens`` so a runaway/looping
+# generation cannot burn the full profile budget (a malformed call already
+# fails closed and is re-burned at full price).  The clamp is an *upper*
+# bound: responses stay well under it, leaving ~4x headroom over the observed
+# mean.
+#
+# - ``VIBELUTION_REVIEW_JSON_MAX_OUTPUT_TOKENS``: reflection / pairwise /
+#   pareto / metareview JSON review calls (default 8192).
+# - ``VIBELUTION_DIGEST_MAX_OUTPUT_TOKENS``: the meeting digest Markdown call
+#   (default 8192; medium-length output).
+# - The revision runner (long revised candidate prose) and every speaker /
+#   chat path are deliberately NOT clamped and keep the profile default.
+_REVIEW_JSON_MAX_OUTPUT_TOKENS_ENV = "VIBELUTION_REVIEW_JSON_MAX_OUTPUT_TOKENS"
+_DIGEST_MAX_OUTPUT_TOKENS_ENV = "VIBELUTION_DIGEST_MAX_OUTPUT_TOKENS"
+_REVIEW_MAX_OUTPUT_TOKENS_DEFAULT = 8192
+_REVIEW_MAX_OUTPUT_TOKENS_MIN = 512
+_REVIEW_MAX_OUTPUT_TOKENS_MAX = 65536
+
+
+def _env_int(name: str, default: int, *, minimum: int, maximum: int) -> int:
+    raw = str(os.environ.get(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return min(maximum, max(minimum, value))
+
+
+def review_json_max_output_tokens() -> int:
+    """Per-call ``max_tokens`` clamp for the structured JSON review calls."""
+
+    return _env_int(
+        _REVIEW_JSON_MAX_OUTPUT_TOKENS_ENV,
+        _REVIEW_MAX_OUTPUT_TOKENS_DEFAULT,
+        minimum=_REVIEW_MAX_OUTPUT_TOKENS_MIN,
+        maximum=_REVIEW_MAX_OUTPUT_TOKENS_MAX,
+    )
+
+
+def digest_max_output_tokens() -> int:
+    """Per-call ``max_tokens`` clamp for the meeting digest draft call."""
+
+    return _env_int(
+        _DIGEST_MAX_OUTPUT_TOKENS_ENV,
+        _REVIEW_MAX_OUTPUT_TOKENS_DEFAULT,
+        minimum=_REVIEW_MAX_OUTPUT_TOKENS_MIN,
+        maximum=_REVIEW_MAX_OUTPUT_TOKENS_MAX,
+    )
+
+
+def _purpose_max_output_tokens(purpose: str) -> int | None:
+    """Return the per-call output clamp for ``purpose`` (``None`` = profile)."""
+
+    normalized = str(purpose or "").strip()
+    if normalized == "meeting_digest":
+        return digest_max_output_tokens()
+    if normalized in {
+        "hypothesis_reflection",
+        "hypothesis_pairwise",
+        "hypothesis_pareto",
+        "hypothesis_metareview",
+    }:
+        return review_json_max_output_tokens()
+    return None
+
+
+# Strict JSON schemas for the structured review calls.  They only constrain
+# generation when the resolved provider capability
+# ``supports_strict_json_schema`` is true (the client-side gate in
+# ``LLMClient._build_payload`` would otherwise reject the call); the existing
+# brace-tolerant parsing plus contract validation below stay authoritative
+# either way, so capability=false or an unexpected provider answer keeps the
+# previous behavior.  Optional top-level fields (noveltyContrast,
+# coreHypothesisCoherence) are intentionally left out of ``required`` because
+# the prompts allow omitting them.
+_REVIEW_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
+    "hypothesis_reflection": {
+        "type": "object",
+        "properties": {
+            "claim": {"type": "string"},
+            "rationale": {"type": "string"},
+            "differenceFromAlternatives": {"type": "string"},
+            "lineageRefs": {"type": "array", "items": {"type": "string"}},
+            "scores": {
+                "type": "object",
+                "properties": {
+                    dimension: {"type": "number"}
+                    for dimension in HYPOTHESIS_SCORE_DIMENSIONS
+                },
+                "required": list(HYPOTHESIS_SCORE_DIMENSIONS),
+                "additionalProperties": False,
+            },
+            "reviewedBy": {"type": "string"},
+            "status": {"type": "string"},
+            "dimensionReviews": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "hypothesis_id": {"type": "string"},
+                        "dimension": {"type": "string"},
+                        "rating": {"type": "string"},
+                        "rationale": {"type": "string"},
+                        "reviewer": {"type": "string"},
+                        "evidence_refs": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                    },
+                    "required": [
+                        "hypothesis_id",
+                        "dimension",
+                        "rating",
+                        "rationale",
+                        "reviewer",
+                        "evidence_refs",
+                    ],
+                    "additionalProperties": False,
+                },
+            },
+            "noveltyContrast": {
+                "type": "object",
+                "properties": {
+                    "overlapPapers": {"type": "array", "items": {"type": "string"}},
+                    "deltaStatement": {"type": "string"},
+                    "basis": {"type": "string"},
+                },
+                "required": ["overlapPapers", "deltaStatement", "basis"],
+                "additionalProperties": False,
+            },
+            "coreHypothesisCoherence": {
+                "type": "object",
+                "properties": {
+                    "candidateId": {"type": "string"},
+                    "reviewer": {"type": "string"},
+                    "checks": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "checkId": {"type": "string"},
+                                "passed": {"type": "boolean"},
+                                "rationale": {"type": "string"},
+                                "claimRefs": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                },
+                                "evidenceRefs": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                },
+                            },
+                            "required": [
+                                "checkId",
+                                "passed",
+                                "rationale",
+                                "claimRefs",
+                                "evidenceRefs",
+                            ],
+                            "additionalProperties": False,
+                        },
+                    },
+                },
+                "required": ["candidateId", "reviewer", "checks"],
+                "additionalProperties": False,
+            },
+        },
+        "required": [
+            "claim",
+            "rationale",
+            "differenceFromAlternatives",
+            "lineageRefs",
+            "scores",
+            "reviewedBy",
+            "status",
+            "dimensionReviews",
+        ],
+        "additionalProperties": False,
+    },
+    "hypothesis_pairwise": {
+        "type": "object",
+        "properties": {
+            "outcome": {"type": "string"},
+            "justification": {"type": "string"},
+        },
+        "required": ["outcome", "justification"],
+        "additionalProperties": False,
+    },
+    "hypothesis_pareto": {
+        "type": "object",
+        "properties": {
+            "paretoFrontCandidateIds": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+            "dominatedCandidateIds": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+            "notes": {"type": "string"},
+        },
+        "required": ["paretoFrontCandidateIds", "dominatedCandidateIds", "notes"],
+        "additionalProperties": False,
+    },
+    "hypothesis_metareview": {
+        "type": "object",
+        "properties": {
+            "recommendationCandidateId": {"type": "string"},
+            "rationale": {"type": "string"},
+            "riskNotes": {"type": "string"},
+            "accepted": {"type": "boolean"},
+        },
+        "required": [
+            "recommendationCandidateId",
+            "rationale",
+            "riskNotes",
+            "accepted",
+        ],
+        "additionalProperties": False,
+    },
+}
+
+
+def _purpose_output_schema(purpose: str, llm: Mapping[str, Any]) -> SemanticOutputSchema | None:
+    """Structured-output schema for ``purpose`` when the provider supports it.
+
+    Returns ``None`` — keeping the prompt + brace-tolerant parsing path — for
+    text-mode purposes, unstructured purposes (revision), and providers whose
+    resolved capability ``supports_strict_json_schema`` is false or missing.
+    """
+
+    schema_body = _REVIEW_JSON_SCHEMAS.get(str(purpose or "").strip())
+    if schema_body is None:
+        return None
+    capabilities = getattr(llm.get("client"), "capabilities", None)
+    if not bool(getattr(capabilities, "supports_strict_json_schema", False)):
+        return None
+    return SemanticOutputSchema(name=f"{purpose}_v1", schema=schema_body)
 
 
 def _record_meeting_digest_scene_event(
@@ -904,6 +1157,16 @@ def _invoke_review_llm(
         timeout_seconds = review_llm_call_timeout_seconds(
             model_ref=str(llm.get("modelRef") or "")
         )
+        # Per-call output clamp (structured review/digest) and optional strict
+        # JSON schema (capability-gated); both stay None/unset for purposes
+        # that keep the profile default (revision) or text-unstructured paths.
+        max_output_tokens = _purpose_max_output_tokens(purpose)
+        output_schema = _purpose_output_schema(purpose, llm)
+        override_metadata = (
+            {MAX_OUTPUT_TOKENS_OVERRIDE_METADATA_KEY: max_output_tokens}
+            if max_output_tokens
+            else None
+        )
         digest_observation = purpose == "meeting_digest"
         started_at = time.monotonic()
         base_fields = {
@@ -937,6 +1200,8 @@ def _invoke_review_llm(
                     llm["client"],
                     messages,
                     context=invocation_context,
+                    metadata=override_metadata,
+                    output_schema=output_schema,
                 ),
                 purpose=purpose,
                 timeout_seconds=timeout_seconds,
@@ -1017,11 +1282,19 @@ def _invoke_review_llm(
     def _invoke_bound_outcome() -> Any:
         # The receipt scope is a ContextVar: it must wrap the invocation
         # inside the timeout worker so the nested client call still sees it.
+        bound_max_output_tokens = _purpose_max_output_tokens(purpose)
+        bound_override_metadata = (
+            {MAX_OUTPUT_TOKENS_OVERRIDE_METADATA_KEY: bound_max_output_tokens}
+            if bound_max_output_tokens
+            else None
+        )
         with model_invocation_receipt_context_scope(receipt_context):
             return invoke_llm_outcome(
                 llm["client"],
                 messages,
                 context=invocation_context,
+                metadata=bound_override_metadata,
+                output_schema=_purpose_output_schema(purpose, llm),
             )
 
     final_text = ""

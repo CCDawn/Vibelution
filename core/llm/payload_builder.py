@@ -66,6 +66,17 @@ class PayloadBuildInput:
     api_key: str
     profile_id: str
     config: AppConfig
+    # Per-call ephemeral clamp for short structured outputs (review JSON etc.).
+    # None keeps ``profile.max_output_tokens``. Positive int only; the
+    # invocation budget preflight stays authoritative on top of this.
+    max_output_tokens_override: int | None = None
+
+
+def _effective_max_output_tokens(build_input: PayloadBuildInput) -> Any:
+    override = getattr(build_input, "max_output_tokens_override", None)
+    if isinstance(override, bool) or not isinstance(override, int) or override <= 0:
+        return build_input.profile.max_output_tokens
+    return override
 
 
 @dataclass(frozen=True)
@@ -953,7 +964,7 @@ def build_llm_payload(
                 adapter.messages(normalized_messages),
                 convert_content_blocks_for_transport=convert_content_blocks_for_transport,
             ),
-            "max_output_tokens": profile.max_output_tokens,
+            "max_output_tokens": _effective_max_output_tokens(build_input),
             "timeout": _provider_timeout(profile),
             "stream": build_input.stream,
             "api_key": build_input.api_key,
@@ -963,7 +974,7 @@ def build_llm_payload(
         payload = {
             "model": adapter.litellm_model_name(),
             "messages": adapter.messages(normalized_messages),
-            "max_tokens": profile.max_output_tokens,
+            "max_tokens": _effective_max_output_tokens(build_input),
             "timeout": _provider_timeout(profile),
             "stream": build_input.stream,
             "api_key": build_input.api_key,

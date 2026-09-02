@@ -98,6 +98,13 @@ _PROXY_ENV_NAMES = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "htt
 _PROXY_ENV_CONDITION = threading.Condition(threading.RLock())
 _PROXY_ENV_STATE = {"readers": 0, "writer": False}
 PROMPT_CACHE_OPPORTUNITY_PREFIX_CHARS = 4096
+# Controlled per-call output clamp channel: callers (e.g. the structured
+# review chain) may pass this metadata key with a positive int so the payload
+# carries a smaller ``max_tokens``/``max_output_tokens`` than the profile
+# default, without mutating operator config or the shared profile.  Invalid
+# values are ignored and the profile default stays authoritative; the
+# invocation budget preflight still clamps on top of the result.
+MAX_OUTPUT_TOKENS_OVERRIDE_METADATA_KEY = "llmMaxOutputTokensOverride"
 _CANONICAL_WIRE_ADAPTERS = build_default_wire_adapter_registry()
 _PROVIDER_ABORT_UNAVAILABLE_EVENT_CODE = "llm.provider_abort_unavailable"
 # Bounded residual-risk diagnostics: emit at most one scene event per
@@ -105,6 +112,19 @@ _PROVIDER_ABORT_UNAVAILABLE_EVENT_CODE = "llm.provider_abort_unavailable"
 # cannot flood the scene log on long Challenge sessions.
 _PROVIDER_ABORT_UNAVAILABLE_EMIT_LOCK = threading.Lock()
 _PROVIDER_ABORT_UNAVAILABLE_EMITTED: set[tuple[str, str, str]] = set()
+
+
+def _max_output_tokens_override_from_metadata(
+    metadata: Optional[Mapping[str, Any]],
+) -> int | None:
+    """Resolve the controlled per-call output clamp from invocation metadata."""
+
+    if not isinstance(metadata, Mapping):
+        return None
+    value = metadata.get(MAX_OUTPUT_TOKENS_OVERRIDE_METADATA_KEY)
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value if value > 0 else None
 
 
 @contextmanager
@@ -2688,6 +2708,7 @@ class LLMClient:
         output_schema: SemanticOutputSchema | None = None,
     ) -> Dict[str, Any]:
         wire_adapter = self._required_wire_adapter()
+        max_output_tokens_override = _max_output_tokens_override_from_metadata(metadata)
         if output_schema is not None and not self.capabilities.supports_strict_json_schema:
             raise LLMError(
                 "capability_error",
@@ -2873,6 +2894,7 @@ class LLMClient:
             api_key=self.config.get_api_key_for_profile(profile_id=self.profile_id),
             profile_id=self.profile_id,
             config=self.config,
+            max_output_tokens_override=max_output_tokens_override,
         )
         # Chat-shaped wires (incl. LiteLLM-backed anthropic/gemini) share encode path.
         if self.protocol_route.wire_protocol in {
@@ -2898,7 +2920,11 @@ class LLMClient:
                     tools=tuple(selected_tools),
                     scope=invocation_scope or invocation_scope_from_metadata(metadata),
                     settings=SemanticGenerationSettings(
-                        max_output_tokens=self.profile.max_output_tokens,
+                        max_output_tokens=(
+                            max_output_tokens_override
+                            if max_output_tokens_override is not None
+                            else self.profile.max_output_tokens
+                        ),
                         stream=stream,
                         tool_choice=(
                             "auto"

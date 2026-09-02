@@ -1877,3 +1877,239 @@ def test_failure_dump_retention_sweeps_files_older_than_24h(
 
     assert not stale.exists()
     assert fresh.exists()
+
+
+# ---------------------------------------------------------------------------
+# Structured review calls: per-purpose max_tokens clamp + capability-gated
+# strict JSON schema (falls back to prompt + brace parsing without capability)
+# ---------------------------------------------------------------------------
+
+
+def _install_capturing_fake_llm(monkeypatch, payloads: list[str]):
+    """Patch ``invoke_llm`` to queue payloads and capture call kwargs."""
+
+    queue = list(payloads)
+    captured: list[dict[str, Any]] = []
+
+    def fake_invoke_llm(client, messages, tools=None, context=None, **kwargs):
+        captured.append(dict(kwargs))
+        return _FakeResponse(queue.pop(0))
+
+    monkeypatch.setattr(llm_review_runners, "invoke_llm", fake_invoke_llm)
+    return queue, captured
+
+
+def _fake_llm_with_strict_json_capability(*, supported: bool) -> dict[str, Any]:
+    from types import SimpleNamespace
+
+    return {
+        **_FAKE_LLM,
+        "client": SimpleNamespace(
+            capabilities=SimpleNamespace(supports_strict_json_schema=supported)
+        ),
+    }
+
+
+def _reflection_output_payload() -> str:
+    return json.dumps(
+        {
+            "claim": "假说 A",
+            "rationale": "五维评分依据。",
+            "differenceFromAlternatives": "机制不同",
+            "lineageRefs": [],
+            "scores": {
+                "novelty": 0.72,
+                "competitionFit": 0.65,
+                "falsifiability": 0.6,
+                "evidenceSupport": 0.55,
+                "feasibility": 0.8,
+            },
+            "reviewedBy": "llm",
+            "status": "reviewed",
+            "dimensionReviews": _dimension_review_rows("cand-a"),
+        },
+        ensure_ascii=False,
+    )
+
+
+def test_structured_review_calls_carry_schema_and_clamp_when_capability_allows(
+    monkeypatch,
+):
+    llm = _fake_llm_with_strict_json_capability(supported=True)
+    queue, captured = _install_capturing_fake_llm(
+        monkeypatch,
+        [
+            _reflection_output_payload(),
+            json.dumps({"outcome": "left_wins", "justification": "A 维度领先更多。"}),
+        ],
+    )
+    runners = llm_review_runners.build_hypothesis_review_runners(dict(llm))
+
+    context = _review_context()
+    reflection = runners["reflection_runner"](_candidate("cand-a", "假说 A"), context)
+    pairwise = runners["pairwise_runner"](
+        _candidate("cand-a", "假说 A"),
+        _candidate("cand-b", "假说 B"),
+        context,
+    )
+
+    assert queue == []
+    reflection_schema = captured[0]["output_schema"]
+    pairwise_schema = captured[1]["output_schema"]
+    assert reflection_schema is not None and pairwise_schema is not None
+    assert reflection_schema.name == "hypothesis_reflection_v1"
+    assert pairwise_schema.name == "hypothesis_pairwise_v1"
+    assert reflection_schema.schema["type"] == "object"
+    assert set(reflection_schema.schema["required"]) >= {"claim", "scores", "dimensionReviews"}
+    assert captured[0]["metadata"] == {"llmMaxOutputTokensOverride": 8192}
+    assert captured[1]["metadata"] == {"llmMaxOutputTokensOverride": 8192}
+    assert reflection["reviewedBy"].startswith("llm:")
+    assert pairwise["outcome"] == "left_wins"
+
+
+def test_review_schema_is_skipped_without_capability_while_clamp_remains(monkeypatch):
+    queue, captured = _install_capturing_fake_llm(
+        monkeypatch,
+        [json.dumps({"outcome": "tie", "justification": "势均力敌。"})],
+    )
+    runners = llm_review_runners.build_hypothesis_review_runners(dict(_FAKE_LLM))
+
+    produced = runners["pairwise_runner"](
+        _candidate("cand-a", "假说 A"),
+        _candidate("cand-b", "假说 B"),
+        _review_context(),
+    )
+
+    assert queue == []
+    assert produced["outcome"] == "tie"
+    assert captured[0]["output_schema"] is None
+    assert captured[0]["metadata"] == {"llmMaxOutputTokensOverride": 8192}
+
+
+def test_capability_true_but_explicit_false_resolves_through_client_capability(monkeypatch):
+    llm = _fake_llm_with_strict_json_capability(supported=False)
+    queue, captured = _install_capturing_fake_llm(
+        monkeypatch,
+        [json.dumps({"outcome": "tie", "justification": "势均力敌。"})],
+    )
+    runners = llm_review_runners.build_hypothesis_review_runners(dict(llm))
+
+    runners["pairwise_runner"](
+        _candidate("cand-a", "假说 A"),
+        _candidate("cand-b", "假说 B"),
+        _review_context(),
+    )
+
+    assert queue == []
+    assert captured[0]["output_schema"] is None
+
+
+def test_revision_runner_keeps_profile_max_tokens_and_skips_schema(monkeypatch):
+    llm = _fake_llm_with_strict_json_capability(supported=True)
+    revision_payload = json.dumps(
+        {
+            "revisedCandidate": {
+                **_candidate("cand-a", "假说 A（收窄到目标人群）"),
+            },
+            "changes": ["收窄目标人群"],
+            "unresolvedIssues": ["外部有效性待验证"],
+        },
+        ensure_ascii=False,
+    )
+    queue, captured = _install_capturing_fake_llm(monkeypatch, [revision_payload])
+    runners = llm_review_runners.build_hypothesis_review_runners(dict(llm))
+
+    produced = runners["revision_runner"](
+        _review_context(),
+        _candidate("cand-a", "假说 A"),
+        [_candidate("cand-a", "假说 A")],
+        {"metaReviewId": "meta-1", "recommendationCandidateId": "cand-a"},
+    )
+
+    assert queue == []
+    assert produced["revisedCandidate"]["claim"].startswith("假说 A")
+    assert captured[0]["output_schema"] is None
+    assert captured[0]["metadata"] is None
+
+
+def test_digest_drafter_clamps_output_tokens_and_never_sends_schema(monkeypatch):
+    monkeypatch.setenv("VIBELUTION_DIGEST_MAX_OUTPUT_TOKENS", "4096")
+    payload = """# 候选 A/B 评审纪要
+
+## 会议结论
+
+评审完成，倾向候选 A。
+"""
+    llm = _fake_llm_with_strict_json_capability(supported=True)
+    queue, captured = _install_capturing_fake_llm(monkeypatch, [payload])
+    drafter = llm_review_runners.build_meeting_digest_drafter(dict(llm))
+
+    digest = drafter(_meeting_round(), _source_messages())
+
+    assert queue == []
+    assert digest["summary"].startswith("评审完成")
+    assert captured[0]["metadata"] == {"llmMaxOutputTokensOverride": 4096}
+    assert captured[0]["output_schema"] is None
+
+
+def test_review_max_output_tokens_env_overrides_and_defaults(monkeypatch):
+    monkeypatch.delenv("VIBELUTION_REVIEW_JSON_MAX_OUTPUT_TOKENS", raising=False)
+    monkeypatch.delenv("VIBELUTION_DIGEST_MAX_OUTPUT_TOKENS", raising=False)
+
+    assert llm_review_runners.review_json_max_output_tokens() == 8192
+    assert llm_review_runners.digest_max_output_tokens() == 8192
+    assert (
+        llm_review_runners._purpose_max_output_tokens("hypothesis_metareview") == 8192
+    )
+    assert llm_review_runners._purpose_max_output_tokens("meeting_digest") == 8192
+    assert llm_review_runners._purpose_max_output_tokens("hypothesis_revision") is None
+
+    monkeypatch.setenv("VIBELUTION_REVIEW_JSON_MAX_OUTPUT_TOKENS", "4096")
+    monkeypatch.setenv("VIBELUTION_DIGEST_MAX_OUTPUT_TOKENS", "6144")
+    assert llm_review_runners.review_json_max_output_tokens() == 4096
+    assert llm_review_runners.digest_max_output_tokens() == 6144
+    assert (
+        llm_review_runners._purpose_max_output_tokens("hypothesis_pairwise") == 4096
+    )
+    assert llm_review_runners._purpose_max_output_tokens("hypothesis_pareto") == 4096
+
+    monkeypatch.setenv("VIBELUTION_REVIEW_JSON_MAX_OUTPUT_TOKENS", "not-a-number")
+    assert llm_review_runners.review_json_max_output_tokens() == 8192
+
+    monkeypatch.setenv("VIBELUTION_REVIEW_JSON_MAX_OUTPUT_TOKENS", "1")
+    assert llm_review_runners.review_json_max_output_tokens() == 512
+
+    monkeypatch.setenv("VIBELUTION_REVIEW_JSON_MAX_OUTPUT_TOKENS", "999999")
+    assert llm_review_runners.review_json_max_output_tokens() == 65536
+
+
+def test_receipt_bound_structured_call_passes_schema_and_clamp(monkeypatch):
+    llm = {
+        **_fake_llm_with_strict_json_capability(supported=True),
+        "providerId": "opencode",
+        "modelId": "deepseek-v4-flash",
+        "modelRef": "opencode/deepseek-v4-flash",
+    }
+    receipt = {"receiptId": "provider-review-receipt", "status": "succeeded"}
+    captured: list[dict[str, Any]] = []
+
+    def fake_invoke_llm_outcome(_client, _messages, **kwargs):
+        captured.append(dict(kwargs))
+        return _final_outcome(kwargs["context"], receipt=receipt)
+
+    monkeypatch.setattr(llm_review_runners, "invoke_llm_outcome", fake_invoke_llm_outcome)
+    runners = llm_review_runners.build_hypothesis_review_runners(
+        dict(llm), require_provider_receipts=True
+    )
+
+    result = runners["pairwise_runner"](
+        _candidate("cand-a", "假说 A"),
+        _candidate("cand-b", "假说 B"),
+        _formal_review_context(),
+    )
+
+    assert isinstance(result, ProviderBoundReviewResult)
+    assert result.payload["outcome"] == "left_wins"
+    assert captured[0]["output_schema"] is not None
+    assert captured[0]["output_schema"].name == "hypothesis_pairwise_v1"
+    assert captured[0]["metadata"] == {"llmMaxOutputTokensOverride": 8192}
