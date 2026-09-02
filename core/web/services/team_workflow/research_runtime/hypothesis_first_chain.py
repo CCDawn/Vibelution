@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -94,6 +95,16 @@ SOURCE_COLLECTION_AUTO_RETRY_INITIAL_DELAY_SECONDS = 30.0
 SOURCE_COLLECTION_AUTO_RETRY_BACKOFF_FACTOR = 2.0
 SOURCE_COLLECTION_AUTO_RETRY_MAX_DELAY_SECONDS = 120.0
 COLLECTION_AUTO_RETRY_TAXONOMY_CODE = "collection_auto_retry_exhausted"
+
+# Review-digest auto-approval (auto-advance, step zero): how long a
+# hypothesis-review digest may sit in ``awaiting_approval`` before the
+# maintenance sweep approves it.  Deliberately an independent pair from the
+# anomaly-inbox digest TTL (that one raises a "waiting too long" alarm while
+# this one acts on the wait), so the two thresholds never move together.
+AUTO_APPROVE_REVIEW_DIGEST_CLOSED_BY = "system:auto-approve:review-digest"
+DEFAULT_AUTO_APPROVE_DIGEST_TTL_MS = 600_000
+AUTO_APPROVE_DIGEST_TTL_MIN_MS = 60_000
+_AUTO_APPROVE_DIGEST_TTL_OVERRIDE_ENV = "VIBELUTION_AUTO_APPROVE_DIGEST_TTL_MS"
 
 PROJECT_ROOT = Path(__file__).resolve().parents[5]
 _LOCK = threading.RLock()
@@ -2879,23 +2890,259 @@ def auto_retry_blocked_formal_nodes(
     return summary
 
 
+def _auto_approve_digest_ttl_ms() -> int:
+    """Configured auto-approve wait TTL; the env override is clamped to >=60s."""
+
+    raw = str(os.environ.get(_AUTO_APPROVE_DIGEST_TTL_OVERRIDE_ENV) or "").strip()
+    if raw:
+        try:
+            normalized = int(raw)
+        except ValueError:
+            normalized = 0
+        if normalized > 0:
+            return max(normalized, AUTO_APPROVE_DIGEST_TTL_MIN_MS)
+    return DEFAULT_AUTO_APPROVE_DIGEST_TTL_MS
+
+
+def _iso_timestamp_ms(value: Any) -> int | None:
+    """Parse one record ISO timestamp into epoch ms (tolerant, fail-open)."""
+
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return int(parsed.timestamp() * 1000)
+
+
+def auto_approve_awaiting_review_digests(
+    team_id: str,
+    *,
+    question_id: str,
+    now_ms: int | None = None,
+) -> dict[str, Any]:
+    """Auto-approve stale review digests (auto-advance step zero).
+
+    The digest approval is the last per-round human gate of the
+    hypothesis-first chain: every round parks at ``awaiting_approval`` once
+    the digest draft lands and waits for the ``approve_summary`` command.
+    This helper removes that wait by resolving it exactly the way the manual
+    command resolves it — it calls the same ``approve_meeting_digest`` domain
+    implementation the ``approve_summary`` command branch reaches, with the
+    system identity as ``closed_by`` so the persisted decisions carry
+    ``decidedBy=system:auto-approve:review-digest`` and every standard
+    closure effect (request_new_evidence collection, fan-in round, deferred
+    next review) runs unchanged through the owning services.
+
+    Eligibility is strict, per meeting: the hypothesis-review type only,
+    status ``awaiting_approval`` for this question, a real digest draft (a
+    non-empty ``summaryDraftError`` or a missing draft is a failure state
+    that belongs to the stuck-digest recovery, never to an approval), and an
+    ``updatedAt`` older than the configured TTL.  No offer/idempotency layer
+    is re-invented: the closure is idempotent on its closure hash and a
+    meeting that closed in the meantime is rejected by the domain status
+    assertion, so a replay can never approve twice.
+
+    Best-effort like every auto-advance helper: nothing raises, each meeting
+    is isolated, and every outcome lands as a
+    ``hypothesis_first.auto_approve_review_digest`` scene event.
+    """
+    normalized_team_id = str(team_id or "").strip()
+    normalized_question_id = str(question_id or "").strip().upper()
+    summary: dict[str, Any] = {
+        "awaitingApproval": 0,
+        "approved": 0,
+        "reused": 0,
+        "skipped": 0,
+        "failed": 0,
+    }
+    if not normalized_team_id or not normalized_question_id:
+        return summary
+    try:
+        from core.web.services.team_workflow import meeting_rounds
+
+        meetings = list(
+            meeting_rounds.list_meeting_rounds(
+                normalized_team_id, status="awaiting_approval"
+            )["meetings"]
+        )
+    except Exception:  # noqa: BLE001 - enumeration outages stay invisible
+        return summary
+    now_value = int(now_ms if now_ms is not None else time.time() * 1000)
+    ttl_ms = _auto_approve_digest_ttl_ms()
+    for meeting in meetings:
+        if not isinstance(meeting, Mapping):
+            continue
+        if (
+            str(meeting.get("meetingType") or "").strip().lower()
+            != HYPOTHESIS_REVIEW_MEETING_TYPE
+        ):
+            # Only hypothesis-review rounds own the digest approval gate;
+            # other meeting types keep their own lifecycle owners.
+            continue
+        if (
+            str(meeting.get("question") or "").strip().upper()
+            != normalized_question_id
+        ):
+            continue
+        summary["awaitingApproval"] += 1
+        meeting_round_id = str(meeting.get("meetingRoundId") or "").strip()
+        fields = {
+            "teamId": normalized_team_id,
+            "questionId": normalized_question_id,
+            "meetingRoundId": meeting_round_id,
+            "ttlMs": ttl_ms,
+        }
+        draft = (
+            dict(meeting.get("digestDraft"))
+            if isinstance(meeting.get("digestDraft"), Mapping)
+            else {}
+        )
+        if str(meeting.get("summaryDraftError") or "").strip():
+            summary["skipped"] += 1
+            _record_scene_event(
+                "hypothesis_first.auto_approve_review_digest",
+                outcome="skipped",
+                fields={**fields, "reason": "summary_draft_error"},
+            )
+            continue
+        content_hash = str(draft.get("contentHash") or "").strip()
+        if not content_hash:
+            summary["skipped"] += 1
+            _record_scene_event(
+                "hypothesis_first.auto_approve_review_digest",
+                outcome="skipped",
+                fields={**fields, "reason": "digest_missing"},
+            )
+            continue
+        updated_at_ms = _iso_timestamp_ms(meeting.get("updatedAt"))
+        if updated_at_ms is None:
+            summary["skipped"] += 1
+            _record_scene_event(
+                "hypothesis_first.auto_approve_review_digest",
+                outcome="skipped",
+                fields={**fields, "reason": "unreadable_updated_at"},
+            )
+            continue
+        digest_age_ms = max(now_value - updated_at_ms, 0)
+        if digest_age_ms < ttl_ms:
+            summary["skipped"] += 1
+            _record_scene_event(
+                "hypothesis_first.auto_approve_review_digest",
+                outcome="skipped",
+                fields={
+                    **fields,
+                    "digestAgeMs": digest_age_ms,
+                    "reason": "within_ttl",
+                },
+            )
+            continue
+        try:
+            result = approve_meeting_digest(
+                normalized_team_id,
+                meeting_round_id,
+                closed_by=AUTO_APPROVE_REVIEW_DIGEST_CLOSED_BY,
+                expected_digest_content_hash=content_hash,
+            )
+        except HypothesisFirstChainError as exc:
+            # The domain gate kept the approval out (status moved on, digest
+            # regenerated between the read and the approve): a structured
+            # wait, never an error — the next tick re-reads fresh state.
+            summary["skipped"] += 1
+            _record_scene_event(
+                "hypothesis_first.auto_approve_review_digest",
+                outcome="skipped",
+                fields={
+                    **fields,
+                    "digestAgeMs": digest_age_ms,
+                    "reason": str(exc)[:200],
+                },
+            )
+        except Exception as exc:  # noqa: BLE001 - one broken meeting is isolated
+            summary["failed"] += 1
+            _record_scene_event(
+                "hypothesis_first.auto_approve_review_digest",
+                outcome="failed",
+                level="warning",
+                fields={
+                    **fields,
+                    "digestAgeMs": digest_age_ms,
+                    "reason": type(exc).__name__,
+                    "error": str(exc)[:400],
+                },
+            )
+        else:
+            status = str(result.get("status") or "")
+            if status == "awaiting_approval":
+                # Every drafted evidence request failed validation, so the
+                # digest cannot close as-is: regenerate/human owns it now.
+                summary["skipped"] += 1
+                _record_scene_event(
+                    "hypothesis_first.auto_approve_review_digest",
+                    outcome="skipped",
+                    fields={
+                        **fields,
+                        "digestAgeMs": digest_age_ms,
+                        "reason": "digest_requests_invalid",
+                    },
+                )
+            elif status in {"created", "reused"}:
+                summary["approved" if status == "created" else "reused"] += 1
+                _record_scene_event(
+                    "hypothesis_first.auto_approve_review_digest",
+                    outcome="approved" if status == "created" else "reused",
+                    fields={
+                        **fields,
+                        "digestAgeMs": digest_age_ms,
+                        "closedBy": AUTO_APPROVE_REVIEW_DIGEST_CLOSED_BY,
+                        # Deterministic identity of the automatic approval
+                        # (no timestamps): meetingRoundId + TTL semantics.
+                        "rationale": (
+                            "auto-approve: hypothesis review digest awaited "
+                            f"beyond ttl ({ttl_ms} ms); meeting "
+                            f"{meeting_round_id} approved with the standard "
+                            "closure chain per auto-advance policy"
+                        ),
+                    },
+                )
+            else:
+                summary["skipped"] += 1
+                _record_scene_event(
+                    "hypothesis_first.auto_approve_review_digest",
+                    outcome="skipped",
+                    fields={
+                        **fields,
+                        "digestAgeMs": digest_age_ms,
+                        "reason": "unexpected_status",
+                    },
+                )
+    return summary
+
+
 def sweep_auto_advance_closure() -> dict[str, Any]:
     """Maintenance sweep: auto-advance every exhausted hypothesis chain.
 
-    Restart-time recovery for chains stuck at the adjudication gate (the
+    Restart-time recovery for chains stuck at an auto-advance gate (the
     closing tick may be long gone by the time this runs).  Enumerates the
     team ids that own a hypothesis-first chain ledger read-only, then walks
-    each question through adjudicate -> create -> retry: exhausted rounds get
-    their accepted adjudication, converged chains get the formal run created
-    and started, and formal nodes blocked on the transient
-    ``auto_advance_not_ready`` gate get their offer-gated retry resubmitted.
-    Nothing here raises: one broken team or question is isolated and counted;
-    questions whose latest round is not an unadjudicated exhausted round cost
-    one cheap guard read.
+    each question through approve -> adjudicate -> create -> retry: review
+    digests that waited beyond the TTL get approved and closed first (so the
+    fan-in / next-round advance can still progress within the same pass),
+    exhausted rounds get their accepted adjudication, converged chains get
+    the formal run created and started, and formal nodes blocked on the
+    transient ``auto_advance_not_ready`` gate get their offer-gated retry
+    resubmitted.  Nothing here raises: one broken team or question is
+    isolated and counted; questions whose latest round is not an
+    unadjudicated exhausted round cost one cheap guard read.
     """
     summary: dict[str, Any] = {
         "teams": 0,
         "questions": 0,
+        "approved": 0,
         "adjudicated": 0,
         "rejected": 0,
         "formalRuns": 0,
@@ -2923,6 +3170,13 @@ def sweep_auto_advance_closure() -> dict[str, Any]:
         for question_id in question_ids:
             summary["questions"] += 1
             try:
+                # Step zero, before adjudication: approve review digests that
+                # waited beyond the TTL so the closure chain (fan-in, next
+                # round) can still progress within this same pass.
+                approval = auto_approve_awaiting_review_digests(
+                    team_id, question_id=question_id
+                )
+                summary["approved"] += int(approval.get("approved") or 0)
                 adjudication = auto_adjudicate_exhausted_round(
                     team_id, question_id=question_id
                 )
@@ -2959,6 +3213,7 @@ def sweep_auto_advance_closure() -> dict[str, Any]:
         fields={
             "teams": int(summary["teams"]),
             "questions": int(summary["questions"]),
+            "approved": int(summary["approved"]),
             "adjudicated": int(summary["adjudicated"]),
             "rejected": int(summary["rejected"]),
             "formalRuns": int(summary["formalRuns"]),
