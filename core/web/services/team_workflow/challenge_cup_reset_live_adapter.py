@@ -52,6 +52,14 @@ ARTIFACT_KINDS = (
     "problem_understanding",
     "dimension_reviews",
     "feedback_iterations",
+    "stage1_research_plan",
+    "competition_alignment",
+    "stage_one_completion_manifest",
+    "evolution_lineage",
+    "candidate_screening",
+    "core_hypothesis_coherence",
+    "review_independence",
+    "review_disagreement",
 )
 ARTIFACT_FAMILY_BY_KIND = {
     "research_plan": "plans",
