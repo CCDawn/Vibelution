@@ -6061,6 +6061,79 @@ def test_gate_blocked_round_no_longer_projects_converged_or_create_formal_run(
     assert state.currentPhase == "convergence"
 
 
+def test_v2_claim_belief_gate_projects_evidence_gaps(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The v2 gate payload carries the verdict's ``evidenceGaps`` (v1 parity).
+
+    The v1 chain state appends ``evidenceGaps`` from the same verdict; the v2
+    projection dropped it, so evidence-gap manifests never reached the UI on
+    the v2 path.  Both verdict shapes are covered: a blocked verdict with a
+    gap manifest forwards it unchanged, and a verdict without the key (the
+    unavailable-gate fallback shape) projects an empty list.
+    """
+
+    def _verdict_with_gaps(_team_id: str, _question_id: str, candidate_id: str):
+        return {
+            "candidateId": candidate_id,
+            "status": "blocked",
+            "reason": "candidate_evidence_gap",
+            "claims": [],
+            "blockedClaims": [],
+            "evidenceGaps": [
+                {
+                    "claimId": "claim-1",
+                    "gap": "accepted_counter_or_boundary_missing",
+                }
+            ],
+        }
+
+    monkeypatch.setattr(
+        hf_state_v2_module, "_claim_belief_gate_verdict", _verdict_with_gaps
+    )
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[],
+            selection_records=[],
+            meeting_records=[],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=_converged_chain_records(),
+            formal_runs=[],
+        )
+    )
+
+    assert state.convergence.claimBeliefGate is not None
+    assert state.convergence.claimBeliefGate["status"] == "blocked"
+    assert state.convergence.claimBeliefGate["evidenceGaps"] == [
+        {"claimId": "claim-1", "gap": "accepted_counter_or_boundary_missing"}
+    ]
+
+    # A verdict without the key (the unavailable-gate fallback shape) stays
+    # null-safe: the projection emits an empty list, not a missing field.
+    _blocked_claim_belief_gate(monkeypatch, "claim_belief_state_blocked")
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[],
+            selection_records=[],
+            meeting_records=[],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=_converged_chain_records(),
+            formal_runs=[],
+        )
+    )
+
+    assert state.convergence.claimBeliefGate is not None
+    assert state.convergence.claimBeliefGate["evidenceGaps"] == []
+
+
 def test_v2_convergence_matches_real_claim_ledger_gate(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

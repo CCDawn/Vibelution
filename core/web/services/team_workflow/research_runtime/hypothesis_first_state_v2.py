@@ -3272,6 +3272,11 @@ def project_state_from_records(
             "reason": str(verdict.get("reason") or ""),
             "claims": list(verdict.get("claims") or []),
             "blockedClaims": list(verdict.get("blockedClaims") or []),
+            # Mirror the v1 chain state payload: the evidence-gap manifest
+            # rides on the same verdict (``candidate_evidence_gap``), and the
+            # unavailable-gate fallback omits the key entirely, so default to
+            # an empty list for null-safe UI consumption.
+            "evidenceGaps": list(verdict.get("evidenceGaps") or []),
         }
         if claim_belief_gate["status"] != "allowed":
             converged = False
