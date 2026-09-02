@@ -2239,14 +2239,19 @@ def _round_index_from_review_links(
     question_id: str,
     round_record: Mapping[str, Any],
 ) -> int | None:
-    """Resolve one round's index from its review-round lineage links.
+    """Resolve the selection's spent review-round budget from lineage links.
 
     Persisted HypothesisRound records carry no ``roundIndex`` of their own
-    (see :func:`_round_refs_meeting_ids`): the review-round links bound to
-    the round's meetings are the durable lineage authority.  Returns the
-    highest ``roundIndex`` across the links bound to the round's meeting
-    refs, or ``None`` when nothing matches — exhaustion is never guessed,
-    so a linkless round stays fail-closed.
+    (see :func:`_round_refs_meeting_ids`).  The exhaustion gate this feeds
+    asks whether the SELECTION spent its whole meeting-round budget, so the
+    answer is the highest ``roundIndex`` across the selection's links — not
+    the round's own group.  A superseded budget-round closure (e.g. the
+    newest round force-closed without a digest by a blocked-run recovery)
+    never generates a round of its own; the fan-in correctly falls back to
+    the older authoritative group, whose own link index would under-report
+    the budget actually spent.  Selections are resolved through the links
+    bound to the round's meeting refs; a round matching no link stays
+    fail-closed (``None``) — exhaustion is never guessed.
     """
     meeting_ids = _round_refs_meeting_ids(round_record)
     if not meeting_ids:
@@ -2254,9 +2259,17 @@ def _round_index_from_review_links(
     links = (list_review_round_links(team_id, question_id=question_id) or {}).get(
         "links"
     ) or []
+    selection_ids = {
+        str(link.get("selectionId") or "").strip()
+        for link in links
+        if str(link.get("meetingRoundId") or "").strip() in meeting_ids
+        and str(link.get("selectionId") or "").strip()
+    }
+    if not selection_ids:
+        return None
     highest: int | None = None
     for link in links:
-        if str(link.get("meetingRoundId") or "").strip() not in meeting_ids:
+        if str(link.get("selectionId") or "").strip() not in selection_ids:
             continue
         try:
             link_index = int(link.get("roundIndex") or 0)

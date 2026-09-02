@@ -2055,3 +2055,58 @@ def test_exhausted_round_guard_stays_fail_closed_without_link_match(
         _TEAM_ID, question_id=_QUESTION_ID
     )
     assert result == {"status": "skipped", "reason": "round_not_exhausted"}
+
+
+def test_exhausted_round_budget_counts_superseded_newest_round(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """预算轮被取代的活形状（SCI-001 2026-09-02 复现）：
+
+    最权威 round 覆盖 r4 会议（自身 link roundIndex=4），但该 selection 的
+    r5 会议被 blocked-run 恢复无摘要关闭、永远不产 round——fan-in 正确落回
+    r4 组。耗尽判定必须看 selection 的会议轮预算（最新 link=5），而不是
+    round 自身组的轮号（4），否则这条链永远到不了裁决。
+    """
+    ledger_path = _sweep_env_with_linkless_round(
+        tmp_path, monkeypatch, meeting_ids=[_MEETING_ID], seed_links=False
+    )
+    # The round's own meetings sit at round 4 of the selection...
+    for link_meeting_id in (_MEETING_ID,):
+        _seed_review_link(
+            link_meeting_id,
+            round_index=4,
+            selection_id=_REGEN_SELECTION_ID,
+            created_at="2026-09-02T04:38:00Z",
+        )
+    # ...while the selection's round-5 budget meetings were force-closed
+    # without a digest (superseded; they never generate a round of their own).
+    for index, superseded_meeting_id in enumerate(
+        ("superseded-r5-alpha", "superseded-r5-beta")
+    ):
+        _seed_review_link(
+            superseded_meeting_id,
+            round_index=5,
+            candidate_id=f"cand-r5-{index}",
+            selection_id=_REGEN_SELECTION_ID,
+            created_at="2026-09-02T06:11:00Z",
+        )
+    # A different selection's rounds must not leak into this budget.
+    _seed_review_link(
+        "other-selection-r7",
+        round_index=7,
+        selection_id="hsel-other-selection",
+        created_at="2026-09-02T06:12:00Z",
+    )
+
+    latest = chain._latest_closed_exhausted_round(_TEAM_ID, _QUESTION_ID)
+    assert latest is not None
+    assert latest["roundId"] == _ROUND_ID
+
+    result = chain.auto_adjudicate_exhausted_round(
+        _TEAM_ID, question_id=_QUESTION_ID
+    )
+    assert result["status"] == "created"
+    adjudications = _adjudications(ledger_path)
+    assert len(adjudications) == 1
+    assert adjudications[0]["hypothesisRoundId"] == _ROUND_ID
