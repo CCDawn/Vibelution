@@ -2055,6 +2055,154 @@ def _assert_claim_belief_gate_allows(
     )
 
 
+def _apply_human_acceptance_for_recommended_candidate(
+    team_id: str,
+    question_id: str,
+    candidate_id: str,
+    *,
+    hypothesis_round_id: str,
+    accepted_by: str,
+) -> dict[str, Any]:
+    """Exercise the human acceptance authority over pending support evidence.
+
+    Chain evidence collection never runs an evidence review round
+    (``materialize_chain_collection_evidence`` registers its bridged evidence
+    ``pending`` by design), so without an acceptance write the claim belief
+    gate's ``acceptedSupportCount >= 1`` requirement could never be met and an
+    accepted human adjudication — the designed acceptance authority — would be
+    deadlocked.  Before the gate pre-check of an ``accepted`` adjudication,
+    the recommended candidate's pending supporting evidence is promoted by
+    appending audited accepted twin records (the evidence store is append-only
+    with content-hash ids, so history is preserved, never rewritten):
+
+    - the pending ``supports`` records the candidate's core claim rows
+      actually cite (the records the belief table counts), and
+    - the candidate-dimension records bound to those core claim rows
+      (``reasoningRole`` fact or hypothesis — live stores carry both for the
+      same claim after historical repairs).
+
+    Pure source-fact records on their own fact claim rows that the core claims
+    do not cite are never touched, ``contradicts``/boundary records are never
+    auto-accepted, and the gate's ``contradicted``/``disputed`` blocking
+    states stay fully in force.
+    """
+    normalized_candidate = str(candidate_id or "").strip()
+    normalized_question = str(question_id or "").strip().upper()
+    if not normalized_candidate:
+        return {
+            "status": "skipped",
+            "reason": "recommended_candidate_missing",
+            "acceptedTwinCount": 0,
+        }
+    claim_rows_by_id = {
+        str(row.get("claimId") or "").strip(): dict(row)
+        for row in _question_claim_rows_for_gate(team_id, normalized_question)
+        if isinstance(row, Mapping) and str(row.get("claimId") or "").strip()
+    }
+    evidence_records = [
+        dict(record)
+        for record in _claim_evidence_records(team_id)
+        if isinstance(record, Mapping)
+    ]
+    core_claim_ids = {
+        str(record.get("claimId") or "").strip()
+        for record in evidence_records
+        if str(record.get("candidateId") or "").strip() == normalized_candidate
+        and str(record.get("claimId") or "").strip() in claim_rows_by_id
+    }
+    if not core_claim_ids:
+        return {
+            "status": "skipped",
+            "reason": "core_claim_rows_missing",
+            "candidateId": normalized_candidate,
+            "acceptedTwinCount": 0,
+        }
+    cited_evidence_ids = {
+        str(ref.get("claimEvidenceId") or "").strip()
+        for claim_id in core_claim_ids
+        for ref in list(claim_rows_by_id[claim_id].get("evidenceRefs") or [])
+        if isinstance(ref, Mapping) and str(ref.get("claimEvidenceId") or "").strip()
+    }
+    # Belief readers resolve a cited record's scope against the claim's
+    # scopeHash, and the store records carry none of their own: without the
+    # claim scope on the twin, an accepted twin would stay neutral and the
+    # acceptance would never count.  Refs are scope-consistent by ledger
+    # contract, so the core claim's scopeHash is the twin's scope either way.
+    scope_hash_by_claim = {
+        claim_id: str(claim_rows_by_id[claim_id].get("scopeHash") or "")
+        .strip()
+        .lower()
+        for claim_id in core_claim_ids
+    }
+    surface: list[dict[str, Any]] = []
+    seen_evidence_ids: set[str] = set()
+    for record in evidence_records:
+        evidence_id = str(record.get("claimEvidenceId") or "").strip()
+        if not evidence_id or evidence_id in seen_evidence_ids:
+            continue
+        claim_id = str(record.get("claimId") or "").strip()
+        candidate_bound = (
+            str(record.get("candidateId") or "").strip() == normalized_candidate
+            and claim_id in core_claim_ids
+        )
+        if not (candidate_bound or evidence_id in cited_evidence_ids):
+            continue
+        if str(record.get("reviewStatus") or "").strip().lower() != "pending":
+            continue
+        if str(record.get("supportLevel") or "").strip().lower() not in {
+            "supports",
+            "",
+        }:
+            continue
+        if candidate_bound:
+            scope_hash = scope_hash_by_claim.get(claim_id, "")
+        else:
+            scope_hash = next(
+                (
+                    scope_hash_by_claim[core_id]
+                    for core_id in core_claim_ids
+                    if any(
+                        isinstance(ref, Mapping)
+                        and str(ref.get("claimEvidenceId") or "").strip()
+                        == evidence_id
+                        for ref in list(
+                            claim_rows_by_id[core_id].get("evidenceRefs") or []
+                        )
+                    )
+                ),
+                "",
+            )
+        entry = dict(record)
+        if scope_hash:
+            entry["scopeHash"] = scope_hash
+        surface.append(entry)
+        seen_evidence_ids.add(evidence_id)
+    if not surface:
+        return {
+            "status": "no_pending_support_evidence",
+            "candidateId": normalized_candidate,
+            "coreClaimIds": sorted(core_claim_ids),
+            "acceptedTwinCount": 0,
+        }
+    from core.research.evidence import ClaimEvidenceStore
+
+    twins = ClaimEvidenceStore(_project_root()).append_accepted_review_twins(
+        team_id,
+        surface,
+        accepted_by=accepted_by,
+        accepted_at_ms=int(datetime.now(timezone.utc).timestamp() * 1000),
+        acceptance_round_id=str(hypothesis_round_id or "").strip(),
+        acceptance_source="human_adjudication",
+    )
+    return {
+        "status": "applied",
+        "candidateId": normalized_candidate,
+        "coreClaimIds": sorted(core_claim_ids),
+        "sourceCount": len(surface),
+        "acceptedTwinCount": len(twins),
+    }
+
+
 def record_human_adjudication(
     team_id: str,
     *,
@@ -2161,7 +2309,11 @@ def record_human_adjudication(
             # adjudication is a convergence authority for the formal path, so
             # the round's recommended candidate must pass the claim belief
             # gate before the authority is appended.  Replays above are not
-            # re-gated; rejecting (elimination) is never gated.
+            # re-gated; rejecting (elimination) is never gated.  The human
+            # acceptance authority is exercised first: the recommended
+            # candidate's pending supporting evidence gets audited accepted
+            # twins (the chain never runs an evidence review round), then the
+            # unchanged gate still blocks contradicted/disputed claims.
             meta_review = (
                 round_record.get("metaReview")
                 if isinstance(round_record.get("metaReview"), Mapping)
@@ -2170,6 +2322,46 @@ def record_human_adjudication(
             recommended_candidate_id = str(
                 meta_review.get("recommendationCandidateId") or ""
             ).strip()
+            try:
+                acceptance = _apply_human_acceptance_for_recommended_candidate(
+                    team_id,
+                    normalized_question_id,
+                    recommended_candidate_id,
+                    hypothesis_round_id=normalized_round_id,
+                    accepted_by=normalized_decided_by,
+                )
+            except Exception as exc:  # noqa: BLE001 - the gate stays fail-closed
+                _record_scene_event(
+                    "human_adjudication_acceptance_failed",
+                    outcome="failed",
+                    level="warning",
+                    fields={
+                        "questionId": normalized_question_id,
+                        "candidateId": recommended_candidate_id,
+                        "hypothesisRoundId": normalized_round_id,
+                        "acceptedBy": normalized_decided_by,
+                        "error": str(exc)[:200],
+                    },
+                )
+            else:
+                _record_scene_event(
+                    "human_adjudication_acceptance_applied",
+                    outcome=(
+                        "applied" if acceptance.get("acceptedTwinCount") else "skipped"
+                    ),
+                    fields={
+                        "questionId": normalized_question_id,
+                        "candidateId": recommended_candidate_id,
+                        "hypothesisRoundId": normalized_round_id,
+                        "acceptedBy": normalized_decided_by,
+                        "acceptanceStatus": str(acceptance.get("status") or ""),
+                        "acceptedTwinCount": int(
+                            acceptance.get("acceptedTwinCount") or 0
+                        ),
+                        "sourceCount": int(acceptance.get("sourceCount") or 0),
+                        "coreClaimIds": list(acceptance.get("coreClaimIds") or []),
+                    },
+                )
             _assert_claim_belief_gate_allows(
                 team_id,
                 normalized_question_id,

@@ -8,9 +8,10 @@ import os
 import re
 import tempfile
 import threading
+from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from vibelution_storage import resolve_project_workspace_home
 
@@ -162,6 +163,131 @@ class ClaimEvidenceStore:
             },
         )
         return record
+
+    def append_accepted_review_twins(
+        self,
+        team_id: str,
+        sources: Iterable[Mapping[str, Any]],
+        *,
+        accepted_by: str,
+        accepted_at_ms: int,
+        acceptance_round_id: str,
+        acceptance_source: str,
+    ) -> list[dict[str, Any]]:
+        """Append accepted twins of pending evidence (append-only acceptance).
+
+        The store is append-only and ``claimEvidenceId`` is a content hash, so
+        an acceptance cannot edit the pending record in place.  Each twin keeps
+        the exact content identity (hence the same evidence id) and carries
+        ``reviewStatus="accepted"`` plus the acceptance audit fields.  Belief
+        readers resolve evidence state by id with latest-record-wins, so the
+        twin becomes the effective review state while the pending original
+        preserves its history.
+
+        Idempotent on (claimId, candidateId, reasoningRole, acceptedBy,
+        acceptanceRoundId, acceptanceSource): when an equivalent accepted twin
+        already exists in the store — or was appended earlier in this batch —
+        the source is skipped.  Malformed sources are skipped instead of
+        raised: an acceptance write must never corrupt the payload contract.
+        """
+        team = _safe_id(team_id, field="teamId")
+        reviewer = _required_text(accepted_by, "acceptedBy", 200)
+        round_id = _required_text(acceptance_round_id, "acceptanceRoundId", 200)
+        source_tag = _optional_text(acceptance_source, 80) or "human_adjudication"
+        try:
+            accepted_ms = int(accepted_at_ms)
+        except (TypeError, ValueError) as exc:
+            raise ClaimEvidenceError("acceptedAtMs must be an integer") from exc
+        payload_keys = (
+            "claimId",
+            "candidateId",
+            "sourceId",
+            "sourceRevision",
+            "locator",
+            "quote",
+            "evidenceKind",
+            "reasoningRole",
+            "supportLevel",
+            "extractionMethod",
+            "extractorAgentId",
+            "modelRef",
+        )
+        path = self._path(team)
+        appended: list[dict[str, Any]] = []
+        with _LOCK:
+            records = _read_jsonl(path)
+            existing_twins = {
+                (
+                    str(item.get("claimId") or ""),
+                    str(item.get("candidateId") or ""),
+                    str(item.get("reasoningRole") or "").strip().lower(),
+                    str(item.get("acceptedBy") or ""),
+                    str(item.get("acceptanceRoundId") or ""),
+                    str(item.get("acceptanceSource") or ""),
+                )
+                for item in records
+                if str(item.get("reviewStatus") or "").strip().lower() == "accepted"
+            }
+            now = _now_utc()
+            for source in sources:
+                if not isinstance(source, Mapping):
+                    continue
+                payload: dict[str, Any] = {key: source.get(key) for key in payload_keys}
+                for optional_key in ("sourceCollectionRunId", "workflowRunId"):
+                    if source.get(optional_key):
+                        payload[optional_key] = source.get(optional_key)
+                try:
+                    normalized = _normalize_payload(payload)
+                except ClaimEvidenceError:
+                    continue
+                # Belief readers resolve a cited record's scope against the
+                # claim's scopeHash; a twin without it would be neutralized,
+                # so the caller-supplied scope travels onto the twin.
+                scope_hash = str(source.get("scopeHash") or "").strip().lower()
+                identity = (
+                    normalized["claimId"],
+                    normalized["candidateId"],
+                    normalized["reasoningRole"],
+                    reviewer,
+                    round_id,
+                    source_tag,
+                )
+                if identity in existing_twins:
+                    continue
+                record = {
+                    "schemaVersion": SCHEMA_VERSION,
+                    "claimEvidenceId": _evidence_id(normalized),
+                    **normalized,
+                    **({"scopeHash": scope_hash} if scope_hash else {}),
+                    "quoteHash": _sha256_text(normalized["quote"]),
+                    "reviewStatus": "accepted",
+                    "reviewedBy": reviewer,
+                    "shadowOnly": False,
+                    "formalKnowledgeWriteAllowed": False,
+                    "createdAt": now,
+                    "updatedAt": now,
+                    "acceptedBy": reviewer,
+                    "acceptedAtMs": accepted_ms,
+                    "acceptanceRoundId": round_id,
+                    "acceptanceSource": source_tag,
+                }
+                records.append(record)
+                existing_twins.add(identity)
+                appended.append(record)
+            if appended:
+                _write_jsonl_atomic(path, records)
+        if appended:
+            _record_event(
+                "research_evidence.acceptance_twins_appended",
+                team_id=team,
+                fields={
+                    "acceptedTwinCount": len(appended),
+                    "acceptedBy": reviewer,
+                    "acceptanceRoundId": round_id,
+                    "acceptanceSource": source_tag,
+                },
+            )
+        return appended
 
     def coverage(self, team_id: str, *, candidate_id: str = "") -> dict[str, Any]:
         team = _safe_id(team_id, field="teamId")

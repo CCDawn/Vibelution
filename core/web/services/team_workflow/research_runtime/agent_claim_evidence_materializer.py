@@ -1105,11 +1105,18 @@ def materialize_chain_collection_evidence(
     here).
 
     Hypothesis-dimension evidence registers with ``reasoningRole=fact``: the
-    chain's review/adjudication rounds are the acceptance authority for these
-    claims, and hypothesis-role rows would wrongly pull legacy chain
-    candidates onto the formal strict gate path, which demands an accepted
-    evidence review the chain never runs.  ``contradicted``/``disputed``
-    belief states still block; nothing about the gate changes.
+    chain runs no evidence review round of its own, so these rows register
+    ``pending`` and the chain's human adjudication is the acceptance
+    authority.  That authority is exercised by
+    ``hypothesis_first_chain.record_human_adjudication``: an ``accepted``
+    adjudication first appends audited accepted twin records over the
+    recommended candidate's pending supporting evidence (the records its core
+    claim rows cite, plus the candidate-dimension bindings; ``reasoningRole``
+    is preserved) and only then runs the claim belief gate, whose
+    ``contradicted``/``disputed`` blocking states and remaining strict-gate
+    checks are unchanged.  Hypothesis-role rows would wrongly pull legacy
+    chain candidates onto the formal strict gate path; this bridge keeps
+    registering ``fact`` so registration itself never decides acceptance.
 
     Ledger failures raise :class:`EvidenceMaterializationError`; repeated
     calls for the same run reuse every row and register no duplicates.

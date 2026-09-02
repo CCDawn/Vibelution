@@ -1600,6 +1600,110 @@ def _validate_digest_draft(draft: Mapping[str, Any]) -> None:
         )
 
 
+def _digest_ref_tail(ref: str) -> str:
+    """Comparable tail token of an evidence ref (last dash segment or whole)."""
+    normalized = ref.strip()
+    tail = normalized.rsplit("-", 1)[-1].strip().lower()
+    return tail or normalized.lower()
+
+
+def _sanitize_digest_proposed_candidate_refs(
+    draft: dict[str, Any],
+    meeting_round: Mapping[str, Any],
+) -> None:
+    """Deterministically clean ``proposedCandidates`` lineageRefs in place.
+
+    LLM digest drafts cite refs that drift out of the meeting's
+    ``allowedEvidenceRefs`` whitelist (timestamp prefix transposition,
+    truncated prefixes, discussion ``msg:`` refs).  Saved unvalidated, such a
+    draft only explodes later in ``approve_meeting_digest`` candidate
+    registration with a 422 after partial closure side effects.  Cleaning is
+    deliberately narrow and runs before the draft's content hash is computed:
+
+    - refs already in the whitelist are kept;
+    - out-of-whitelist ``msg:`` refs are dropped (discussion messages are not
+      evidence) without invalidating the candidate;
+    - other out-of-whitelist refs are repaired when their tail token
+      (``-<suffix>``) uniquely matches one whitelist ref's tail token;
+    - a candidate whose lineageRefs end up empty — or that still carries an
+      unresolvable out-of-whitelist ref — is dropped from proposedCandidates
+      with a ``validationErrors`` entry instead of failing the whole save.
+
+    Only ``proposedCandidates[].lineageRefs`` (plus appended
+    ``validationErrors``) are touched; every other draft field is preserved.
+    """
+
+    allowed_refs = _normalized_str_list(meeting_round.get("allowedEvidenceRefs"))
+    raw_candidates = [
+        dict(item)
+        for item in list(draft.get("proposedCandidates") or [])
+        if isinstance(item, Mapping)
+    ]
+    if not raw_candidates or not allowed_refs:
+        # No candidates, or a meeting without an evidence whitelist (the
+        # registration whitelist check only exists for formal grounded
+        # meetings): nothing this sanitizer is allowed to decide.
+        return
+    allowed_set = set(allowed_refs)
+    refs_by_tail: dict[str, list[str]] = {}
+    for ref in allowed_refs:
+        refs_by_tail.setdefault(_digest_ref_tail(ref), []).append(ref)
+    kept_candidates: list[dict[str, Any]] = []
+    dropped_errors: list[dict[str, str]] = []
+    for candidate in raw_candidates:
+        candidate_id = str(candidate.get("candidateId") or "").strip()
+        original_refs = _normalized_str_list(candidate.get("lineageRefs"))
+        cleaned_refs: list[str] = []
+        unresolvable_refs: list[str] = []
+        for ref in original_refs:
+            if ref in allowed_set:
+                if ref not in cleaned_refs:
+                    cleaned_refs.append(ref)
+                continue
+            if ref.startswith("msg:"):
+                # Discussion messages are not evidence: drop quietly.
+                continue
+            matches = refs_by_tail.get(_digest_ref_tail(ref)) or []
+            if len(matches) == 1 and matches[0] not in cleaned_refs:
+                cleaned_refs.append(matches[0])
+                continue
+            unresolvable_refs.append(ref)
+        if not cleaned_refs:
+            dropped_errors.append(
+                {
+                    "candidateId": candidate_id,
+                    "reason": (
+                        "lineage_refs_empty_after_sanitization: "
+                        + (", ".join(original_refs) or "(no lineageRefs)")
+                    )[:500],
+                }
+            )
+            continue
+        if unresolvable_refs:
+            dropped_errors.append(
+                {
+                    "candidateId": candidate_id,
+                    "reason": (
+                        "lineage_refs_outside_evidence_whitelist: "
+                        + ", ".join(unresolvable_refs)
+                    )[:500],
+                }
+            )
+            continue
+        candidate["lineageRefs"] = cleaned_refs
+        kept_candidates.append(candidate)
+    # Always write back: even an all-surviving draft carries repaired refs.
+    draft["proposedCandidates"] = kept_candidates
+    if len(kept_candidates) == len(raw_candidates):
+        return
+    existing_errors = [
+        dict(item)
+        for item in list(draft.get("validationErrors") or [])
+        if isinstance(item, Mapping)
+    ]
+    draft["validationErrors"] = existing_errors + dropped_errors
+
+
 def submit_meeting_digest_draft(
     team_id: str,
     meeting_round_id: str,
@@ -1617,6 +1721,11 @@ def submit_meeting_digest_draft(
         meeting_round = _load_meeting_round(normalized_team_id, normalized_round_id)
         _ensure_transition_from(meeting_round, "summarizing", "awaiting_approval")
         _validate_digest_draft(normalized_draft)
+        # Sanitize LLM-proposed candidate lineage refs against the meeting's
+        # evidence whitelist BEFORE the content hash is computed, so the saved
+        # hash always covers the cleaned content and approve_meeting_digest's
+        # candidate registration can never 422 on out-of-whitelist refs.
+        _sanitize_digest_proposed_candidate_refs(normalized_draft, meeting_round)
         probe = {
             "digestId": "digest-draft-probe",
             "meetingRoundId": normalized_round_id,
