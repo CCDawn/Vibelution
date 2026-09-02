@@ -3224,7 +3224,11 @@ def _build_participant_prompt(
     participant: dict[str, Any],
     prior_messages: list[dict[str, Any]],
 ) -> str:
-    recent_session_lines = _format_recent_session_messages(participant.get("recentMessages") or [])
+    # Session history is NOT embedded here: _run_participant_agent already
+    # replays the speaker session's full ledger as seeded chat history, so a
+    # "recent session messages" text block would inject the same turns twice
+    # into the speaker LLM payload. Only room-round messages that are not in
+    # the speaker's ledger yet belong in this prompt.
     purpose = _normalize_purpose(round_payload.get("purpose") or room.get("purpose") or DEFAULT_PURPOSE)
     case_state = round_payload.get("caseState") if isinstance(round_payload.get("caseState"), dict) else {}
     case_state_lines = format_case_state_prompt(case_state)
@@ -3279,9 +3283,6 @@ def _build_participant_prompt(
             "",
             "你的团队岗位上下文:",
             team_context_lines or "- 当前群聊未绑定团队岗位；按会话 Agent 的可用上下文发言。",
-            "",
-            "你的会话近况:",
-            recent_session_lines or "- 暂无可用会话消息。",
             "",
             "本轮已经出现的群聊发言:",
             prior_lines or "- 你是本轮第一位发言者。",
@@ -3388,16 +3389,6 @@ def _strip_redundant_speaker_prefix(text: str, participant: dict[str, Any]) -> s
             count=1,
         ).strip()
     return content
-
-
-def _format_recent_session_messages(messages: list[dict[str, Any]]) -> str:
-    lines: list[str] = []
-    for item in messages[-6:]:
-        role = str(item.get("role") or "").strip() or "message"
-        content = trim_lines(str(item.get("content") or ""), max_lines=2)
-        if content:
-            lines.append(f"- {role}: {content}")
-    return "\n".join(lines)
 
 
 def _format_prior_room_messages(

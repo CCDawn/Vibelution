@@ -3592,6 +3592,7 @@ def test_speaker_prompt_cache_partition_requires_session_id():
     assert chat_room_service._speaker_prompt_cache_partition("  ", "room-1") == ""
 
 
+
 def test_chat_room_chat_agent_factory_disables_auto_delegation(monkeypatch):
     """Chat-surface runtimes must carry the stable-session prompt-goal flag.
 
@@ -3622,6 +3623,92 @@ def test_chat_room_chat_agent_factory_disables_auto_delegation(monkeypatch):
         "runtime_agent_binding": None,
     }
     assert created._allow_session_subagent_auto_delegation is False
+
+def test_speaker_payload_contains_each_message_exactly_once(tmp_path, monkeypatch):
+    """Speaker LLM payload must not inject one message twice.
+
+    The speaker turn seeds the session's full ledger replay as chat history;
+    the prompt text must not re-embed that same session tail and only add
+    room-round messages that are not in the speaker's ledger yet.
+    """
+    _isolate_chat_room_kernel(tmp_path, monkeypatch)
+    session = session_service.create_chat_session(title="去重发言者")
+    session_id = str(session.get("id") or "").strip()
+    assert session_id
+    room = chat_room_service.create_chat_room(
+        title="去重群聊",
+        participant_session_ids=[session_id],
+    )
+    participant = next(
+        p for p in room["participants"] if str(p.get("sessionId") or "") == session_id
+    )
+    session_tail_user = "上一轮用户推进提示：收敛到唯一候选。"
+    session_tail_assistant = "上一轮讲者结论：保留候选一并补充证据。"
+    _append_session_ledger_message(
+        tmp_path,
+        session_id,
+        {"role": "user", "content": session_tail_user},
+        turn_id=f"{session_id}-tail-1",
+    )
+    _append_session_ledger_message(
+        tmp_path,
+        session_id,
+        {"role": "assistant", "content": session_tail_assistant},
+        turn_id=f"{session_id}-tail-2",
+    )
+    # Chat-state projection of the same session tail: before the dedup this
+    # block duplicated the seeded ledger replay in the same payload.
+    participant = {
+        **participant,
+        "recentMessages": [
+            {"role": "user", "content": session_tail_user},
+            {"role": "assistant", "content": session_tail_assistant},
+        ],
+    }
+    room_message = "评审 Agent 本轮的独有房间发言。"
+    prompt = chat_room_service._build_participant_prompt(
+        room={"roomId": "room-dedup", "title": "去重群聊"},
+        round_payload={"topic": "讨论去重", "mode": "round_robin", "purpose": "discussion"},
+        participant=participant,
+        prior_messages=[{"speakerTitle": "B002 · 评审 Agent", "content": room_message}],
+    )
+
+    captured: list[dict] = []
+
+    def fake_runner(_agent, **kwargs):
+        captured.append(dict(kwargs))
+        return {"status": "completed", "raw_output": "ok", "summary": "ok"}
+
+    monkeypatch.setattr(chat_room_service, "run_existing_agent_single_turn", fake_runner)
+    result = chat_room_service._run_participant_agent(
+        participant,
+        prompt,
+        {
+            "roomId": str(room.get("roomId") or ""),
+            "roundId": "round-dedup",
+            "topic": "讨论去重",
+            "purpose": "discussion",
+        },
+    )
+    assert result["status"] == "completed"
+    assert captured
+    history_text = "\n".join(
+        str(item.get("content") or "") for item in (captured[0].get("chat_history") or [])
+    )
+    # Ledger replay stays the only copy of the session tail.
+    assert session_tail_user in history_text
+    assert session_tail_assistant in history_text
+    assert session_tail_user not in prompt
+    assert session_tail_assistant not in prompt
+    assert "你的会话近况" not in prompt
+    # Room-round messages are unique to the prompt and appear exactly once.
+    assert prompt.count(room_message) == 1
+    # Whole-payload invariant: no session or room message content twice.
+    combined_payload = f"{history_text}\n{prompt}"
+    assert combined_payload.count(session_tail_user) == 1
+    assert combined_payload.count(session_tail_assistant) == 1
+    assert combined_payload.count(room_message) == 1
+
 
 
 def test_update_agent_chat_room_membership_only_changes_selected_agent(tmp_path, monkeypatch):
