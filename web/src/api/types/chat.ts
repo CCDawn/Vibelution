@@ -1192,3 +1192,27 @@ export type ChatRoomStreamEvent = {
   roomId: string;
   detail: ChatRoomDetail;
 };
+
+/**
+ * Speaker streaming delta frame pushed on the group room SSE stream.
+ * Field-level contract with the backend chat_room_stream_capture fan-out:
+ * `content` is the CUMULATIVE answer text (a full snapshot per frame, not an
+ * append-only chunk); `seq` is monotonically increasing per
+ * (roundId, participantId), so frames that are not strictly newer are dropped
+ * as late/reordered; a `done` frame with a terminal `status` ends the stream,
+ * and the authoritative `chat_room_detail` snapshot always overrides whatever
+ * the streaming buffer holds.
+ */
+export type ChatRoomSpeakerDeltaEvent = {
+  type: "chat_room_speaker_delta";
+  roomId: string;
+  roundId: string;
+  participantId: string;
+  sessionId: string;
+  turnId: string;
+  seq: number;
+  stage: string;
+  content: string;
+  done: boolean;
+  status: string;
+};

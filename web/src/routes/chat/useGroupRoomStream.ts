@@ -2,7 +2,11 @@ import { useEffect, useRef, useState } from "react";
 
 import { postBrowserTelemetry } from "../../app/browserTelemetry";
 import { isFetchAbortError } from "../../api/chat";
-import type { ChatRoomDetail, ChatRoomStreamEvent } from "../../api/types";
+import type {
+  ChatRoomDetail,
+  ChatRoomSpeakerDeltaEvent,
+  ChatRoomStreamEvent,
+} from "../../api/types";
 import { consumeChatRoomEventStream } from "./chatRoomEventStream";
 
 export type UseGroupRoomStreamOptions = {
@@ -10,6 +14,26 @@ export type UseGroupRoomStreamOptions = {
   groupStreamShouldConnect: boolean;
   syncChatRoomDetail: (room: ChatRoomDetail) => void;
 };
+
+/** Live streaming state for one (roundId, participantId) speaker. */
+export type GroupSpeakerStreamEntry = {
+  roundId: string;
+  participantId: string;
+  sessionId: string;
+  turnId: string;
+  seq: number;
+  /** Cumulative answer text from the latest accepted delta frame. */
+  content: string;
+  /** Client arrival time (Date.now) of the last accepted delta frame. */
+  lastDeltaAtMs: number;
+};
+
+/** Streaming buffers keyed by roundId then participantId. */
+export type GroupSpeakerStreamMap = Record<string, Record<string, GroupSpeakerStreamEntry>>;
+
+// Low-latency publish cadence for the streaming buffer: well below the 350ms
+// detail coalescing, still batching delta bursts into one React commit.
+const SPEAKER_STREAM_FLUSH_DELAY_MS = 50;
 
 /**
  * Sole owner of the authenticated group chat-room event stream.
@@ -19,8 +43,12 @@ export function useGroupRoomStream({
   activeGroupRoomId,
   groupStreamShouldConnect,
   syncChatRoomDetail,
-}: UseGroupRoomStreamOptions): { groupStreamConnected: boolean } {
+}: UseGroupRoomStreamOptions): {
+  groupStreamConnected: boolean;
+  groupSpeakerStreams: GroupSpeakerStreamMap;
+} {
   const [groupStreamConnected, setGroupStreamConnected] = useState(false);
+  const [groupSpeakerStreams, setGroupSpeakerStreams] = useState<GroupSpeakerStreamMap>({});
   const groupStreamErrorLoggedRef = useRef<Record<string, boolean>>({});
   const groupStreamPayloadErrorLoggedRef = useRef<Record<string, boolean>>({});
 
@@ -52,6 +80,135 @@ export function useGroupRoomStream({
     let reconnectTimer: number | null = null;
     let livenessTimer: number | null = null;
     let streamController: AbortController | null = null;
+    // Speaker streaming buffers: source of truth lives in this closure and is
+    // published to React state on a 50ms trailing-edge schedule, mirroring the
+    // direct-chat assistant delta enqueue+drain pattern at a lighter weight.
+    let speakerStreams: GroupSpeakerStreamMap = {};
+    let speakerStreamFlushTimer: number | null = null;
+    let speakerDeltaTelemetryLogged = false;
+
+    function clearSpeakerStreams() {
+      if (speakerStreamFlushTimer !== null) {
+        window.clearTimeout(speakerStreamFlushTimer);
+        speakerStreamFlushTimer = null;
+      }
+      speakerStreams = {};
+      setGroupSpeakerStreams((previous) => (Object.keys(previous).length ? {} : previous));
+    }
+
+    function publishSpeakerStreams() {
+      speakerStreamFlushTimer = null;
+      setGroupSpeakerStreams({ ...speakerStreams });
+    }
+
+    function flushSpeakerStreamsNow() {
+      if (speakerStreamFlushTimer !== null) {
+        window.clearTimeout(speakerStreamFlushTimer);
+        speakerStreamFlushTimer = null;
+      }
+      if (!disposed) {
+        publishSpeakerStreams();
+      }
+    }
+
+    function scheduleSpeakerStreamFlush() {
+      if (speakerStreamFlushTimer !== null || disposed) return;
+      speakerStreamFlushTimer = window.setTimeout(() => {
+        publishSpeakerStreams();
+      }, SPEAKER_STREAM_FLUSH_DELAY_MS);
+    }
+
+    function removeSpeakerStreamEntry(roundId: string, participantId: string) {
+      const roundStreams = speakerStreams[roundId];
+      if (!roundStreams || !roundStreams[participantId]) {
+        return false;
+      }
+      const nextRoundStreams = { ...roundStreams };
+      delete nextRoundStreams[participantId];
+      const nextStreams = { ...speakerStreams };
+      if (Object.keys(nextRoundStreams).length) {
+        nextStreams[roundId] = nextRoundStreams;
+      } else {
+        delete nextStreams[roundId];
+      }
+      speakerStreams = nextStreams;
+      return true;
+    }
+
+    function handleSpeakerDelta(payload: ChatRoomSpeakerDeltaEvent) {
+      const roundId = String(payload?.roundId || "").trim();
+      const participantId = String(payload?.participantId || "").trim();
+      const seq = Number(payload?.seq);
+      if (
+        !roundId
+        || !participantId
+        || !Number.isInteger(seq)
+      ) {
+        return;
+      }
+      const existing = speakerStreams[roundId]?.[participantId];
+      // content is a cumulative snapshot: only a strictly newer seq may move
+      // the visible text, so late/reordered frames are dropped.
+      if (existing && seq <= existing.seq) {
+        return;
+      }
+      speakerStreams = {
+        ...speakerStreams,
+        [roundId]: {
+          ...speakerStreams[roundId],
+          [participantId]: {
+            roundId,
+            participantId,
+            sessionId: String(payload.sessionId || ""),
+            turnId: String(payload.turnId || ""),
+            seq,
+            content: String(payload.content ?? ""),
+            lastDeltaAtMs: Date.now(),
+          },
+        },
+      };
+      if (!speakerDeltaTelemetryLogged) {
+        speakerDeltaTelemetryLogged = true;
+        postBrowserTelemetry({
+          phase: "chat_room_stream",
+          eventCode: "browser.chat_room_stream.speaker_delta_started",
+          message: "Chat room speaker delta streaming started.",
+          level: "info",
+          fields: {
+            roomId: streamRoomId,
+            roundId,
+            participantId,
+            seq,
+          },
+        });
+      }
+      scheduleSpeakerStreamFlush();
+    }
+
+    function finishSpeakerDelta(payload: ChatRoomSpeakerDeltaEvent) {
+      const roundId = String(payload.roundId || "").trim();
+      const participantId = String(payload.participantId || "").trim();
+      const hadEntry = removeSpeakerStreamEntry(roundId, participantId);
+      if (!hadEntry) {
+        return;
+      }
+      // Terminal frame: the authoritative snapshot message (or the failure
+      // bubble) replaces the streamed text, so drop the buffer instead of
+      // freezing half a turn on screen.
+      flushSpeakerStreamsNow();
+      postBrowserTelemetry({
+        phase: "chat_room_stream",
+        eventCode: "browser.chat_room_stream.speaker_delta_finished",
+        message: "Chat room speaker delta streaming finished.",
+        level: "info",
+        fields: {
+          roomId: streamRoomId,
+          roundId,
+          participantId,
+          status: String(payload.status || ""),
+        },
+      });
+    }
 
     function flushPendingDetail() {
       if (applyTimer !== null) {
@@ -107,6 +264,9 @@ export function useGroupRoomStream({
 
     function handleOpen() {
       if (!disposed) {
+        // Fresh connection: drop every streaming buffer instead of replaying.
+        // content is cumulative, so the next delta frames rebuild the text.
+        clearSpeakerStreams();
         setGroupStreamConnected(true);
         feedStreamLivenessWatchdog();
         groupStreamErrorLoggedRef.current[streamRoomId] = false;
@@ -162,8 +322,28 @@ export function useGroupRoomStream({
       if (payload.roomId !== streamRoomId || payload.detail?.roomId !== streamRoomId) {
         return;
       }
+      // The snapshot is authoritative: it overrides any streaming buffer on
+      // arrival, so delivered messages can never keep a stale streaming tail.
+      clearSpeakerStreams();
       setGroupStreamConnected(true);
       scheduleChatRoomDetail(payload.detail);
+    }
+
+    function handleSpeakerDeltaPayload(data: string) {
+      let payload: ChatRoomSpeakerDeltaEvent;
+      try {
+        payload = JSON.parse(data) as ChatRoomSpeakerDeltaEvent;
+      } catch {
+        return;
+      }
+      if (payload?.type !== "chat_room_speaker_delta" || payload.roomId !== streamRoomId) {
+        return;
+      }
+      if (payload.done) {
+        finishSpeakerDelta(payload);
+        return;
+      }
+      handleSpeakerDelta(payload);
     }
 
     function scheduleReconnect() {
@@ -189,6 +369,8 @@ export function useGroupRoomStream({
           onFrame: (frame) => {
             if (frame.event === "chat_room_detail") {
               handleChatRoomDetail(frame.data);
+            } else if (frame.event === "chat_room_speaker_delta") {
+              handleSpeakerDeltaPayload(frame.data);
             }
           },
         });
@@ -214,6 +396,9 @@ export function useGroupRoomStream({
     return () => {
       disposed = true;
       flushPendingDetail();
+      // Route switch/unmount: the buffers belong to the closed stream and must
+      // not leak into the next room or reconnection cycle.
+      clearSpeakerStreams();
       setGroupStreamConnected(false);
       clearStreamLivenessWatchdog();
       if (reconnectTimer !== null) {
@@ -233,5 +418,5 @@ export function useGroupRoomStream({
     };
   }, [activeGroupRoomId, groupStreamShouldConnect, syncChatRoomDetail]);
 
-  return { groupStreamConnected };
+  return { groupStreamConnected, groupSpeakerStreams };
 }

@@ -454,4 +454,145 @@ describe("ChatGroupCenterSurface hand-test substitutes", () => {
       expect(html).not.toContain("实时连接已断开");
     });
   });
+
+  describe("streaming speaker bubble", () => {
+    const pendingParticipant = {
+      participantId: "p1",
+      kind: "session_agent",
+      agentId: "a1",
+      agentCode: "A01",
+      sessionId: "s1",
+      title: "分析员",
+      enabled: true,
+      status: "ready",
+    };
+
+    function streamingRoomProps(overrides: {
+      updatedAt?: string;
+      streams?: ChatGroupCenterSurfaceProps["groupSpeakerStreams"];
+      groupStreamConnected?: boolean;
+    } = {}): Partial<ChatGroupCenterSurfaceProps> {
+      const updatedAt = overrides.updatedAt ?? new Date(Date.now() - 5_000).toISOString();
+      return {
+        activeGroupRoom: {
+          roomId: "room-1",
+          title: "研究组",
+          mode: "round_robin",
+          purpose: "discussion",
+          status: "running",
+          participants: [pendingParticipant],
+          rounds: [
+            {
+              roundId: "r1",
+              status: "running",
+              mode: "round_robin",
+              purpose: "discussion",
+              topic: "流式发言",
+              startedAt: updatedAt,
+              updatedAt,
+              speakerOrder: ["p1"],
+              messages: [],
+              summary: "",
+            },
+          ],
+        } as never,
+        activeGroupParticipantById: new Map([["p1", pendingParticipant as never]]),
+        groupSpeakerStreams: overrides.streams,
+        groupStreamConnected: overrides.groupStreamConnected,
+      };
+    }
+
+    function speakerStream(content: string, lastDeltaAtMs: number) {
+      return {
+        r1: {
+          p1: {
+            roundId: "r1",
+            participantId: "p1",
+            sessionId: "s1",
+            turnId: "t1",
+            seq: 3,
+            content,
+            lastDeltaAtMs,
+          },
+        },
+      };
+    }
+
+    it("renders the accumulated speaker text inside the pending bubble while streaming", () => {
+      const html = renderToStaticMarkup(
+        <ChatGroupCenterSurface
+          {...baseProps(streamingRoomProps({ streams: speakerStream("流式发言内容", Date.now()) }))}
+        />,
+      );
+      expect(html).toContain("流式发言内容");
+      expect(html).toContain("正在输入");
+      expect(html).not.toContain("groupTypingDots");
+      expect(html).not.toContain("该发言已等待较久");
+    });
+
+    it("does not mark an actively streaming speaker stale when round.updatedAt is frozen", () => {
+      const html = renderToStaticMarkup(
+        <ChatGroupCenterSurface
+          {...baseProps(streamingRoomProps({
+            updatedAt: new Date(Date.now() - 10 * 60_000).toISOString(),
+            streams: speakerStream("持续产出中的文本", Date.now()),
+          }))}
+        />,
+      );
+      expect(html).toContain("持续产出中的文本");
+      expect(html).toContain("正在输入");
+      expect(html).not.toContain("等待中");
+      expect(html).not.toContain("该发言已等待较久，仍在等待后端响应…");
+    });
+
+    it("keeps the frozen text and adds the stale note once deltas stall past the threshold", () => {
+      const html = renderToStaticMarkup(
+        <ChatGroupCenterSurface
+          {...baseProps(streamingRoomProps({
+            updatedAt: new Date(Date.now() - 10 * 60_000).toISOString(),
+            streams: speakerStream("停滞的半截文本", Date.now() - 11 * 60_000),
+          }))}
+        />,
+      );
+      expect(html).toContain("停滞的半截文本");
+      expect(html).toContain("等待中");
+      expect(html).toContain("该发言已等待较久，仍在等待后端响应…");
+      expect(html).not.toContain("groupTypingDots");
+    });
+
+    it("shows the frozen buffer with the disconnected copy while the stream is down and stale", () => {
+      const html = renderToStaticMarkup(
+        <ChatGroupCenterSurface
+          {...baseProps(streamingRoomProps({
+            updatedAt: new Date(Date.now() - 10 * 60_000).toISOString(),
+            streams: speakerStream("断连前的文本", Date.now() - 11 * 60_000),
+            groupStreamConnected: false,
+          }))}
+        />,
+      );
+      expect(html).toContain("断连前的文本");
+      expect(html).toContain("实时连接已断开，正在重连");
+      expect(html).not.toContain("groupTypingDots");
+    });
+
+    it("applies the same long-message collapse rule to streamed text", () => {
+      const longContent = Array.from({ length: 20 }, (_, index) => `流式第${index}行`).join("\n");
+      const html = renderToStaticMarkup(
+        <ChatGroupCenterSurface
+          {...baseProps(streamingRoomProps({ streams: speakerStream(longContent, Date.now()) }))}
+        />,
+      );
+      expect(html).toContain("展开全文");
+      expect(html).toContain("groupBubbleBodyCollapsed");
+    });
+
+    it("keeps the typing animation when no delta buffer exists for the speaker", () => {
+      const html = renderToStaticMarkup(
+        <ChatGroupCenterSurface {...baseProps(streamingRoomProps({ streams: {} }))} />,
+      );
+      expect(html).toContain("groupTypingDots");
+      expect(html).toContain("正在输入");
+      expect(html).not.toContain("该发言已等待较久");
+    });
+  });
 });
