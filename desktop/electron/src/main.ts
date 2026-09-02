@@ -4572,6 +4572,21 @@ async function handleSecondInstanceLifecycleCommand(
     }
     return;
   }
+  if (command === "close-window") {
+    // Window-level close intent forwarded by the Runtime Manager queue
+    // (browser-missing auto-close and request-exit enqueue close_workbench
+    // without stopManager). It runs the same controlled workbench close
+    // transaction the workbench window close button uses - never an app-shell
+    // "stop", and entirely in-process: no console window is created and no
+    // subprocess is spawned on this lane.
+    try {
+      await requestTransactionalWorkbenchClose(createDesktopPathsForApp(), launcherBootstrap);
+    } catch (error: unknown) {
+      const detail = error instanceof Error ? error.message : String(error);
+      notifyDesktopTray("Vibelution", `关闭工作台失败：${detail.slice(0, 300)}`, "warning");
+    }
+    return;
+  }
   const operation = command === "rebuild-and-start" ? "rebuild-and-start" : command;
   try {
     await orchestrateLauncherLifecycle(operation, { schemaVersion: 1, path: command }, provenance);

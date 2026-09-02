@@ -79,6 +79,36 @@ describe("desktop CLI arguments", () => {
     ).toMatchObject({ lifecycleCommand: "" });
   });
 
+  it("parses the Runtime Manager window-level close-window intent with its provenance", () => {
+    // core/runtime_manager/workbench_controller.py forwards close_workbench
+    // without stopManager as the close-window token through the second-instance
+    // channel; the desktop parser must recognize it so the desktop lane can
+    // route the window-level close transaction.
+    expect(parseDesktopCliArgs(["--workspace", "C:/repo", "close-window"]).lifecycleCommand).toBe(
+      "close-window"
+    );
+    expect(
+      parseDesktopLifecycleLaunchMetadata(
+        [
+          "--workspace",
+          "C:/repo",
+          "close-window",
+          "--lifecycle-source",
+          "runtime_manager_queue",
+          "--lifecycle-reason",
+          "browser_missing_auto_close"
+        ],
+        {}
+      )
+    ).toEqual({
+      command: "close-window",
+      source: "runtime_manager_queue",
+      reason: "browser_missing_auto_close",
+      stopManager: false,
+      explicitlyForwarded: true
+    });
+  });
+
   it("accepts environment forwarding markers when an older argv path is used", () => {
     expect(
       parseDesktopLifecycleLaunchMetadata(["--project", "C:/repo", "stop"], {

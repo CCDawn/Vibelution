@@ -29,7 +29,13 @@ const LIFECYCLE_COMMANDS = new Set([
   "rebuild-and-start",
   "toggle",
   "status",
-  "open"
+  "open",
+  // Window-level workbench close intent forwarded by the Runtime Manager queue
+  // (core/runtime_manager/workbench_controller.py maps close_workbench without
+  // stopManager onto this token). It must stay parseable so the desktop lane
+  // can route it into the workbench close transaction; it is deliberately NOT
+  // an app-shell "stop".
+  "close-window"
 ]);
 
 export function parseDesktopCliArgs(argv: string[]): DesktopCliArgs {

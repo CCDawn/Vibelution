@@ -308,4 +308,31 @@ describe("Electron main Launcher IPC facade", () => {
       "clearSlotIfCurrent(intentLease)",
     );
   });
+
+  it("routes the forwarded close-window intent into the controlled workbench close transaction", () => {
+    const secondInstanceStart = mainSource.indexOf("async function handleSecondInstanceLifecycleCommand");
+    const secondInstanceEnd = mainSource.indexOf('app.on("open-url"', secondInstanceStart);
+    const secondInstanceBody = mainSource.slice(secondInstanceStart, secondInstanceEnd);
+    // The Runtime Manager queue forwards close_workbench without stopManager as
+    // the close-window token; the desktop lane must act on it instead of
+    // ignoring it, and it must run the same controlled close transaction the
+    // workbench window close button uses - never an app-shell "stop".
+    expect(secondInstanceBody).toContain('command === "close-window"');
+    const closeWindowStart = secondInstanceBody.indexOf('command === "close-window"');
+    const closeWindowEnd = secondInstanceBody.indexOf("return;", closeWindowStart);
+    const closeWindowBody = secondInstanceBody.slice(closeWindowStart, closeWindowEnd);
+    expect(closeWindowBody).toContain(
+      "requestTransactionalWorkbenchClose(createDesktopPathsForApp(), launcherBootstrap)"
+    );
+    // The close-window lane is not misrouted through the app-shell lifecycle
+    // orchestrator (close-window is not a supervised lifecycle operation).
+    expect(closeWindowBody).not.toContain("orchestrateLauncherLifecycle");
+    // No visible console and no subprocess may be launched on this lane;
+    // comment lines are stripped so prose cannot trip the assertion.
+    const closeWindowCode = closeWindowBody
+      .split("\n")
+      .filter((line) => !line.trim().startsWith("//"))
+      .join("\n");
+    expect(closeWindowCode).not.toMatch(/AllocConsole|spawn|execFile|powershell|cmd\.exe/i);
+  });
 });
