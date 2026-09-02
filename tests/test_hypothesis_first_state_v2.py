@@ -1296,7 +1296,7 @@ def test_legacy_running_formal_run_does_not_hide_unstarted_hypothesis_generation
 
 @pytest.mark.parametrize(
     ("round_index", "expected_commands"),
-    [(3, {"open_next_review", "human_adjudication"}), (5, {"human_adjudication"})],
+    [(2, {"open_next_review", "human_adjudication"}), (3, {"human_adjudication"})],
 )
 def test_unaccepted_closed_round_uses_budget_before_human_adjudication(
     round_index: int,
@@ -1368,7 +1368,7 @@ def test_unaccepted_closed_round_uses_budget_before_human_adjudication(
     if "open_next_review" in expected_commands:
         action = commands["open_next_review"]
         assert action.payload.previousMeetingRoundId == f"review-{round_index}"
-        assert action.payload.roundBudget == 5
+        assert action.payload.roundBudget == 3
         assert state.convergence.lifecycle == "waiting_human"
         assert state.convergence.outcome == "none"
     else:
@@ -2003,8 +2003,8 @@ def test_unadjudicated_new_requests_within_budget_offers_open_next_review() -> N
                     "candidateId": "candidate-1",
                     "questionId": "SCI-001",
                 },
-                _convergence_link_record(3),
-                _convergence_request_record("request-1", 3, handed_off=True),
+                _convergence_link_record(2),
+                _convergence_request_record("request-1", 2, handed_off=True),
             ],
             selection_records=[
                 {
@@ -2015,7 +2015,7 @@ def test_unadjudicated_new_requests_within_budget_offers_open_next_review() -> N
             ],
             meeting_records=[
                 {
-                    "meetingRoundId": "review-3",
+                    "meetingRoundId": "review-2",
                     "meetingType": "hypothesis_review",
                     "question": "SCI-001",
                     "status": "closed",
@@ -2023,7 +2023,7 @@ def test_unadjudicated_new_requests_within_budget_offers_open_next_review() -> N
             ],
             digest_records=[],
             decision_records=[],
-            hypothesis_round_records=[_convergence_round_record(3)],
+            hypothesis_round_records=[_convergence_round_record(2)],
         )
     )
 
@@ -2033,7 +2033,7 @@ def test_unadjudicated_new_requests_within_budget_offers_open_next_review() -> N
     assert state.convergence.lifecycle == "waiting_human"
     assert "open_next_review" in commands
     assert "human_adjudication" in commands
-    assert commands["human_adjudication"].payload.hypothesisRoundId == "round-3"
+    assert commands["human_adjudication"].payload.hypothesisRoundId == "round-2"
 
 
 def test_program_output_waits_for_exact_h1_h4_review() -> None:

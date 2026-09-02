@@ -42,7 +42,7 @@ from core.research.workflow.contracts import ContractValidationError, scope_hash
 from core.research.workflow.definition import CHALLENGE_CUP_WORKFLOW_ID
 
 SCHEMA_VERSION = 1
-HARD_ROUND_LIMIT = 5
+HARD_ROUND_LIMIT = 3
 COLLECTION_REQUEST_KIND = "collection_request"
 REVIEW_ROUND_LINK_KIND = "review_round_link"
 CANDIDATE_KIND = "hypothesis_candidate"

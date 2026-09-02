@@ -4363,7 +4363,7 @@ def test_chain_state_budget_tracks_current_selection_not_history(
 
     recorded = _open_first_meeting(team_id, agent_ids)
     previous_id = recorded["reviewMeeting"]["meetingRound"]["meetingRoundId"]
-    for _ in range(4):
+    for _ in range(2):
         opened = chain.open_next_review_meeting(
             team_id,
             previous_meeting_round_id=previous_id,
@@ -4374,7 +4374,7 @@ def test_chain_state_budget_tracks_current_selection_not_history(
 
     exhausted_state = chain.chain_state(team_id, _QUESTION_ID)
     assert exhausted_state["budgetExhausted"] is True
-    assert exhausted_state["roundBudget"] == 5
+    assert exhausted_state["roundBudget"] == 3
 
     # Re-selecting candidates starts a fresh selection: its rounds restart at 1
     # and budget exhaustion must clear even though the question keeps all old
@@ -4387,7 +4387,7 @@ def test_chain_state_budget_tracks_current_selection_not_history(
     assert reselected["status"] == "created"
     refreshed_state = chain.chain_state(team_id, _QUESTION_ID)
     assert refreshed_state["budgetExhausted"] is False
-    assert refreshed_state["roundBudget"] == 5
+    assert refreshed_state["roundBudget"] == 3
 
 
 def test_round_budget_exhaustion_requires_manual_decision(
@@ -4402,7 +4402,7 @@ def test_round_budget_exhaustion_requires_manual_decision(
     first_meeting_id = recorded["reviewMeeting"]["meetingRound"]["meetingRoundId"]
 
     # The limit is server-owned: callers cannot shrink or raise it.
-    with pytest.raises(ValueError, match="fixed at 5"):
+    with pytest.raises(ValueError, match="fixed at 3"):
         chain.open_next_review_meeting(
             team_id,
             previous_meeting_round_id=first_meeting_id,
@@ -4411,7 +4411,7 @@ def test_round_budget_exhaustion_requires_manual_decision(
         )
 
     previous_id = first_meeting_id
-    for expected_round in range(2, 6):
+    for expected_round in range(2, 4):
         opened = chain.open_next_review_meeting(
             team_id,
             previous_meeting_round_id=previous_id,
@@ -4427,8 +4427,8 @@ def test_round_budget_exhaustion_requires_manual_decision(
         agent_runner=_marker_runner,
     )
     assert exhausted["status"] == "budget_exhausted"
-    assert exhausted["roundIndex"] == 6
-    assert exhausted["budget"] == 5
+    assert exhausted["roundIndex"] == 4
+    assert exhausted["budget"] == 3
 
 
 def test_canonical_next_review_round_fans_out_the_full_selection(
@@ -7924,7 +7924,7 @@ _AUTO_MEETING_ID = "meeting-auto-5"
 _AUTO_CANDIDATE_ID = "hyp-auto-a"
 _AUTO_ADJUDICATION_KEY = f"hf2:auto-adjudication:{_AUTO_ROUND_ID}"
 _AUTO_RATIONALE = (
-    "auto-advance: review round budget exhausted (5/5); "
+    "auto-advance: review round budget exhausted (5/3); "
     "auto-advanced per budget-exhaustion policy"
 )
 
@@ -8138,7 +8138,7 @@ def test_auto_adjudicate_gate_blocked_records_rejected_outcome(
         f"hf2:auto-adjudication-rejected:{_AUTO_ROUND_ID}"
     )
     assert "(claim_data_missing)" in adjudication["rationale"]
-    assert "budget exhausted (5/5)" in adjudication["rationale"]
+    assert "budget exhausted (5/3)" in adjudication["rationale"]
     assert "challenge-cup retention policy" in adjudication["rationale"]
     events = [
         fields
