@@ -738,6 +738,12 @@ def _release_stale_chat_turn_work_run(*, session_id: str, finished_at: str, summ
 # C1: tool-timeout hang and absolute stale running work-run settlement.
 _CHAT_TURN_TOOL_TIMEOUT_HANG_SECONDS = 180.0
 _CHAT_TURN_ABSOLUTE_STALE_SECONDS = 30.0 * 60.0
+# A worker_gone verdict (in-memory running registration absent/mismatched) must
+# not settle a *young* snapshot: the running set is process-local and volatile
+# (restart, stop-request cooperative window, submit cleanup paths), while the
+# persisted work-run snapshot is the cross-process authority.  Give any
+# registration-visibility gap a bounded recovery window before killing the run.
+_CHAT_TURN_WORKER_GONE_GRACE_SECONDS = 120.0
 
 
 def _parse_work_run_timestamp(value: Any) -> datetime | None:
@@ -777,8 +783,16 @@ def _chat_turn_work_run_hang_reason(
     tool_error = payload.get("lastToolError") if isinstance(payload.get("lastToolError"), dict) else {}
     tool_error_at = _parse_work_run_timestamp(tool_error.get("updatedAt") if tool_error else "")
 
-    # Worker gone: disk still says running → settle immediately.
+    # Worker gone: disk still says running → settle only after the grace
+    # window.  A missing in-process registration alone does not prove the
+    # worker is gone (process-local visibility gap, stop-request cooperative
+    # window, restart recovery); a young snapshot gets the benefit of the
+    # doubt exactly like `_stale_running_live_owner_reason` does for the
+    # stale-running repair path.
     if not worker_owns_turn:
+        anchor = updated or started
+        if anchor is not None and (now - anchor).total_seconds() < _CHAT_TURN_WORKER_GONE_GRACE_SECONDS:
+            return ""
         return "worker_gone"
 
     # Worker still claims the turn but tool timeout hang left no progress.
@@ -792,6 +806,53 @@ def _chat_turn_work_run_hang_reason(
         return "absolute_stale"
 
     return ""
+
+
+def _revive_registration_from_turn_control(payload: dict[str, Any], *, run_id: str, session_id: str) -> bool:
+    """Re-arm a lost running registration when the live turn control still owns the run.
+
+    The running set / active-turn map is process-local and volatile, while the
+    SessionTurnControl is created at submit and cleared only at terminal.  When
+    the control still holds this run and no stop was requested, the worker is
+    provably alive: restore the registration the reconcile depends on instead of
+    settling a live turn (self-healing visibility gap, e.g. after an
+    unconditional `_set_session_running(False)` cleanup path or a restart race).
+    Returns True when the registration was revived and the run must not settle.
+    """
+
+    s = _service()
+    try:
+        control = s._get_session_turn_control(session_id)
+    except Exception:
+        return False
+    if control is None:
+        return False
+    if str(getattr(control, "turn_id", "") or "").strip() != run_id:
+        return False
+    if bool(getattr(control, "stop_requested", False)):
+        return False
+    status = str(payload.get("status") or payload.get("currentPhase") or "").strip().lower()
+    if status != "running":
+        return False
+    leases = payload.get("leases") if isinstance(payload.get("leases"), list) else []
+    s._set_session_running(session_id, True, turn_id=run_id, leases=[str(item) for item in leases] or None)
+    try:
+        s.record_runtime_scene_event(
+            "conversation",
+            "turn_recovery",
+            "conversation.stale_run_registration_revived",
+            level="warning",
+            outcome="revived",
+            message="Restored a lost running registration for a live chat turn.",
+            fields={
+                "sessionId": session_id,
+                "turnId": run_id,
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        pass
+    return True
 
 
 def _settle_stale_chat_turn_work_run(
@@ -957,6 +1018,14 @@ def reconcile_stale_chat_turn_work_runs(*, now: datetime | None = None) -> list[
                 and session_id in running_session_ids
                 and str(active_turn_ids.get(session_id) or "").strip() == run_id
             ) or (bool(session_id) and (session_id, run_id) in queued_scheduler_turns)
+            if not worker_owns_turn and _revive_registration_from_turn_control(
+                payload,
+                run_id=run_id,
+                session_id=session_id,
+            ):
+                # Live turn control still owns the run: the registration gap was
+                # a visibility problem, not a dead worker.  Healed above.
+                continue
             reason = _chat_turn_work_run_hang_reason(
                 payload,
                 now=clock,
