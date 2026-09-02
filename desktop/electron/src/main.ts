@@ -2956,8 +2956,9 @@ async function orchestrateLauncherLifecycle(
   let lifecycleOperation: WorkbenchLifecycleOperation = operation as WorkbenchLifecycleOperation;
   const stopJoinDecision = joinDecisionForLauncherLifecycleStop(operation, provenance);
   if (stopJoinDecision.waitForInFlightRestart) {
-    // A window-level stop must not abort an in-flight restart; wait for the
-    // restart mutation to settle first, then stop the (restarted) backend.
+    // A window-level stop must not abort an in-flight restart or
+    // rebuild-and-start; wait for the mutation to settle first, then stop the
+    // (restarted) backend.
     await waitForInFlightRestartSettlement("main", WORKBENCH_CLOSE_RESTART_JOIN_WAIT_MS);
   }
   const begunIntent = launcherLifecycleSupervisor.beginIntentWithOptions(
@@ -2969,16 +2970,16 @@ async function orchestrateLauncherLifecycle(
     { joinInFlightRestart: stopJoinDecision.joinInFlightRestart }
   );
   if (begunIntent.outcome === "joined-in-flight-restart") {
-    // A forwarded stop never aborts the in-flight restart; report it as
-    // accepted so the forwarding side settles without a failure, while the
-    // restart keeps running to completion.
+    // A forwarded stop never aborts an in-flight restart or rebuild-and-start;
+    // report it as accepted so the forwarding side settles without a failure,
+    // while the running mutation keeps going to completion.
     return {
       schemaVersion: 1,
       accepted: true,
       operation,
       commandId: randomUUID(),
       code: "joined_in_flight_restart",
-      message: "在途 Launcher restart 正在执行；本次转发的 stop 未中断它。"
+      message: "在途 Launcher restart/rebuild-and-start 正在执行；本次转发的 stop 未中断它。"
     };
   }
   const intentLease = begunIntent.lease;
@@ -3256,16 +3257,18 @@ const RESTART_SETTLEMENT_POLL_INTERVAL_MS = 250;
 const WORKBENCH_CLOSE_RESTART_JOIN_WAIT_MS = 90_000;
 
 /**
- * A restart lease is "in flight" while it occupies the supervisor slot in
- * intent phase (its stop+start mutation runs in that phase; bindCommand only
- * moves it to observing after the mutation settled). The wait ends when the
- * slot is gone (cleared after a failed mutation), is no longer a restart, or
- * has left the intent phase.
+ * A restart or rebuild-and-start lease is "in flight" while it occupies the
+ * supervisor slot in intent phase (its stop+start mutation runs in that phase;
+ * bindCommand only moves it to observing after the mutation settled). The wait
+ * ends when the slot is gone (cleared after a failed mutation), is no longer a
+ * restart/rebuild, or has left the intent phase.
  */
 function inFlightRestartLeaseSettled(instanceId: string): boolean {
   const snapshot = launcherLifecycleSupervisor.snapshot(instanceId);
+  const joinableMutation = snapshot !== null
+    && (snapshot.operation === "restart" || snapshot.operation === "rebuild-and-start");
   return snapshot === null
-    || snapshot.operation !== "restart"
+    || !joinableMutation
     || snapshot.phase !== "intent";
 }
 
@@ -3274,8 +3277,8 @@ async function waitForInFlightRestartSettlement(instanceId: string, timeoutMs: n
   while (!inFlightRestartLeaseSettled(instanceId)) {
     if (Date.now() >= deadlineMs) {
       throw new Error(
-        `In-flight Launcher restart did not settle within ${Math.round(timeoutMs / 1000)}s; `
-        + "the window close stop was not accepted because it must not abort a running restart."
+        `In-flight Launcher restart/rebuild-and-start did not settle within ${Math.round(timeoutMs / 1000)}s; `
+        + "the window close stop was not accepted because it must not abort a running mutation."
       );
     }
     await new Promise<void>((resolve) => {

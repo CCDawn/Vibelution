@@ -38,12 +38,13 @@ export type LauncherLifecycleSnapshot = Omit<LauncherLifecycleLease, "signal"> &
 export type LauncherLifecycleBeginOptions = {
   /**
    * Window-level and forwarded stop provenance must never abort an in-flight
-   * restart lease: killing the restart mid stop+start leaves the backend down
-   * and the restart command never settles. When set and the current lease for
-   * this instance is an actively running restart (intent phase, mutation still
-   * executing), the begin returns that lease for joining instead of aborting.
-   * Every other in-flight lease keeps the unconditional supersede semantics,
-   * and an operator stop supersedes a restart exactly as before.
+   * restart or rebuild-and-start lease: killing the mutation mid stop+start
+   * leaves the backend down and the command never settles. When set and the
+   * current lease for this instance is an actively running restart or
+   * rebuild-and-start (intent phase, mutation still executing), the begin
+   * returns that lease for joining instead of aborting. Every other in-flight
+   * lease keeps the unconditional supersede semantics, and an operator stop
+   * supersedes a restart or rebuild exactly as before.
    */
   joinInFlightRestart?: boolean;
 };
@@ -110,7 +111,7 @@ export class LauncherLifecycleSupervisor {
       throw new Error("launcher lifecycle instance id is required");
     }
     if (options.joinInFlightRestart === true) {
-      const joinable = this.joinableInFlightRestartSlot(instanceId);
+      const joinable = this.joinableInFlightMutationSlot(instanceId);
       if (joinable) {
         return { outcome: "joined-in-flight-restart", lease: joinable.lease };
       }
@@ -142,16 +143,19 @@ export class LauncherLifecycleSupervisor {
   }
 
   /**
-   * A restart lease is joinable only while its mutation may still be executing
-   * (intent phase). Once the mutation settles, bindCommand moves the lease to
-   * observing and a later stop may supersede it exactly as before.
+   * A restart or rebuild-and-start lease is joinable only while its mutation
+   * may still be executing (intent phase). Once the mutation settles,
+   * bindCommand moves the lease to observing and a later stop may supersede it
+   * exactly as before.
    */
-  private joinableInFlightRestartSlot(instanceId: string): LifecycleSlot | null {
+  private joinableInFlightMutationSlot(instanceId: string): LifecycleSlot | null {
     const slot = this.slots.get(instanceId);
     if (!slot || slot.controller.signal.aborted) {
       return null;
     }
-    if (slot.lease.operation !== "restart" || slot.phase !== "intent") {
+    const joinableOperation = slot.lease.operation === "restart"
+      || slot.lease.operation === "rebuild-and-start";
+    if (!joinableOperation || slot.phase !== "intent") {
       return null;
     }
     return slot;

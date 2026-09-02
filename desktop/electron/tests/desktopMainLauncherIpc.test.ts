@@ -309,6 +309,34 @@ describe("Electron main Launcher IPC facade", () => {
     );
   });
 
+  it("gives an in-flight rebuild-and-start the same forwarded-stop protection as a restart", () => {
+    // The settle helper drives both the window-close wait and the join
+    // classification: rebuild-and-start must count as in-flight there, or a
+    // forwarded stop would still abort a CLI rebuild 1-5s into its mutation.
+    const settleStart = mainSource.indexOf("function inFlightRestartLeaseSettled");
+    const settleEnd = mainSource.indexOf("\nfunction ", settleStart + 1);
+    const settleBody = mainSource.slice(settleStart, settleEnd);
+    expect(settleBody).toContain('snapshot.operation === "restart"');
+    expect(settleBody).toContain('snapshot.operation === "rebuild-and-start"');
+
+    // The join no-op stays an accepted result so the forwarding side settles
+    // without a failure while the rebuild keeps running.
+    const lifecycleStart = mainSource.indexOf("async function orchestrateLauncherLifecycle");
+    const lifecycleBody = mainSource.slice(lifecycleStart, mainSource.indexOf("async function orchestrateBranchInstanceLifecycle"));
+    expect(lifecycleBody).toContain("joined_in_flight_restart");
+
+    // The provenance gates keep the operator protections intact: only the
+    // plain stop with forwarded/window-close provenance relaxes, so an
+    // operator stop and force-stop still supersede a rebuild unconditionally.
+    const decisionStart = mainSource.indexOf("function joinDecisionForLauncherLifecycleStop");
+    const decisionEnd = mainSource.indexOf("\n}", decisionStart);
+    const decisionBody = mainSource.slice(decisionStart, decisionEnd);
+    expect(decisionBody).toContain('if (operation !== "stop")');
+    expect(decisionBody).toContain('provenance === "forwarded"');
+    expect(decisionBody).toContain('provenance === "window-close"');
+    expect(decisionBody).toContain('return { joinInFlightRestart: false, waitForInFlightRestart: false };');
+  });
+
   it("routes the forwarded close-window intent into the controlled workbench close transaction", () => {
     const secondInstanceStart = mainSource.indexOf("async function handleSecondInstanceLifecycleCommand");
     const secondInstanceEnd = mainSource.indexOf('app.on("open-url"', secondInstanceStart);

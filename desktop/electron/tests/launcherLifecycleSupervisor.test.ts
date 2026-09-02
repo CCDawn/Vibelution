@@ -182,6 +182,48 @@ describe("LauncherLifecycleSupervisor", () => {
     expect(supervisor.snapshot("main")).toMatchObject({ operation: "restart", phase: "intent" });
   });
 
+  it("joins an in-flight rebuild-and-start instead of aborting it when joinInFlightRestart is set", () => {
+    const supervisor = new LauncherLifecycleSupervisor();
+    const rebuild = supervisor.beginIntent({
+      instanceId: "main",
+      operation: "rebuild-and-start",
+      desiredState: "open"
+    });
+
+    const stop = supervisor.beginIntentWithOptions(
+      { instanceId: "main", operation: "stop", desiredState: "closed" },
+      { joinInFlightRestart: true },
+    );
+
+    // A forwarded stop must not kill a rebuild mid mutation, exactly like a
+    // restart: the join returns the actively running rebuild lease.
+    expect(stop.outcome).toBe("joined-in-flight-restart");
+    if (stop.outcome !== "joined-in-flight-restart") {
+      throw new Error("expected join outcome");
+    }
+    expect(stop.lease.revision).toBe(rebuild.revision);
+    expect(rebuild.signal.aborted).toBe(false);
+    expect(supervisor.isCurrent(rebuild)).toBe(true);
+    expect(supervisor.snapshot("main")).toMatchObject({ operation: "rebuild-and-start", phase: "intent" });
+  });
+
+  it("keeps operator stop semantics: a default beginIntent still supersedes an in-flight rebuild-and-start", () => {
+    const supervisor = new LauncherLifecycleSupervisor();
+    const rebuild = supervisor.beginIntent({
+      instanceId: "main",
+      operation: "rebuild-and-start",
+      desiredState: "open"
+    });
+
+    // No join options: an operator-proven stop keeps the unconditional
+    // supersede semantics against a rebuild exactly as before.
+    const stop = supervisor.beginIntent({ instanceId: "main", operation: "stop", desiredState: "closed" });
+
+    expect(rebuild.signal.aborted).toBe(true);
+    expect(stop.revision).toBeGreaterThan(rebuild.revision);
+    expect(supervisor.isCurrent(rebuild)).toBe(false);
+  });
+
   it("keeps operator stop semantics: a default beginIntent still supersedes an in-flight restart", () => {
     const supervisor = new LauncherLifecycleSupervisor();
     const restart = supervisor.beginIntent({ instanceId: "main", operation: "restart", desiredState: "open" });
@@ -235,6 +277,20 @@ describe("LauncherLifecycleSupervisor", () => {
     );
     expect(startJoin.outcome).toBe("begun");
     expect(start.signal.aborted).toBe(true);
+
+    // The intent-phase gate applies to rebuild-and-start too: a rebuild whose
+    // mutation settled is superseded by a join-eligible stop, never joined.
+    const settledRebuild = bind(
+      supervisor,
+      supervisor.beginIntent({ instanceId: "main", operation: "rebuild-and-start", desiredState: "open" }),
+      "cmd-rebuild-settled",
+    );
+    const settledRebuildJoin = supervisor.beginIntentWithOptions(
+      { instanceId: "main", operation: "stop", desiredState: "closed" },
+      { joinInFlightRestart: true },
+    );
+    expect(settledRebuildJoin.outcome).toBe("begun");
+    expect(settledRebuild.signal.aborted).toBe(true);
   });
 
   it("keeps beginIntentWithOptions without options identical to beginIntent", () => {
