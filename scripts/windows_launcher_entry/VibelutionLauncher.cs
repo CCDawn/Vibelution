@@ -1027,6 +1027,39 @@ internal static class VibelutionLauncher
     [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
     private static extern IntPtr GetStdHandle(int handle);
 
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    private static extern uint GetFileType(IntPtr hFile);
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode, SetLastError = true)]
+    private static extern bool WriteConsoleW(IntPtr hConsoleOutput, string lpszBuffer, uint cchToWrite, out uint lpNumberOfCharsWritten, IntPtr lpReserved);
+
+    // FILE_TYPE_CHAR: the handle is a console screen buffer.
+    private const uint FileTypeChar = 0x0002;
+
+    /// <summary>
+    /// Writes UTF-16 text straight to the attached console via WriteConsoleW.
+    /// The console line discipline renders wide characters regardless of the
+    /// active code page (chcp 936/GBK included), so the Chinese failure message
+    /// no longer depends on the console code page matching this shim's byte
+    /// encoding. Returns false when the handle is not a console (redirected to
+    /// a file or pipe) or the wide-character write fails; the caller then falls
+    /// back to the UTF-8 byte path, which is the correct encoding for those
+    /// consumers.
+    /// </summary>
+    private static bool TryWriteParentConsoleWideChar(IntPtr stdOutput, string text)
+    {
+        if (stdOutput == IntPtr.Zero || stdOutput == (IntPtr)(-1) || string.IsNullOrEmpty(text))
+        {
+            return false;
+        }
+        if (GetFileType(stdOutput) != FileTypeChar)
+        {
+            return false;
+        }
+        uint written;
+        return WriteConsoleW(stdOutput, text, (uint)text.Length, out written, IntPtr.Zero);
+    }
+
     private static void ReportBridgeFailureToParentConsole(BridgeFailureException failure)
     {
         // A WinExe process has no console of its own. When the shim was driven
@@ -1048,12 +1081,23 @@ internal static class VibelutionLauncher
             }
             string settlement = ExtractBridgeSettlementMessage(failure.BridgeStdout);
             string message = !string.IsNullOrWhiteSpace(settlement) ? settlement : ShortStaticMessage(failure.Message);
+            string settlementLine = "Vibelution 请求未完成：" + message;
+            string exitCodeLine = "(desktop entry bridge exitCode=" + failure.ExitCode.ToString() + ")";
+            // Console-attached first: WriteConsoleW is codepage-independent, so
+            // a chcp 936 terminal renders the Chinese message correctly instead
+            // of showing mojibake for UTF-8 bytes.
+            if (TryWriteParentConsoleWideChar(stdOutput, settlementLine + "\r\n" + exitCodeLine + "\r\n"))
+            {
+                return;
+            }
+            // Redirected-handle fallback: a file or pipe consumer receives
+            // UTF-8 bytes exactly as before.
             var stream = new FileStream(new Microsoft.Win32.SafeHandles.SafeFileHandle(stdOutput, false), FileAccess.Write);
             using (var writer = new StreamWriter(stream, new UTF8Encoding(false)) { AutoFlush = true })
             {
                 Console.SetOut(writer);
-                Console.Out.WriteLine("Vibelution 请求未完成：" + message);
-                Console.Out.WriteLine("(desktop entry bridge exitCode=" + failure.ExitCode.ToString() + ")");
+                Console.Out.WriteLine(settlementLine);
+                Console.Out.WriteLine(exitCodeLine);
                 Console.Out.Flush();
             }
         }

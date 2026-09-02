@@ -161,6 +161,32 @@ def test_native_launcher_forwards_bridge_exit_code_and_parent_console_message():
     assert "AllocConsole" not in source
 
 
+def test_native_launcher_failure_message_uses_codepage_independent_console_output():
+    source = _source()
+
+    # A chcp 936 (GBK) terminal renders UTF-8 bytes as mojibake, so the Chinese
+    # settlement failure message must go through the wide-char console API
+    # (WriteConsoleW), whose output the console renders regardless of the
+    # active code page.
+    assert "WriteConsoleW" in source
+    assert "CharSet = System.Runtime.InteropServices.CharSet.Unicode" in source
+    assert "TryWriteParentConsoleWideChar" in source
+    assert "GetFileType" in source
+    assert "FileTypeChar" in source
+
+    report = source.split("private static void ReportBridgeFailureToParentConsole", 1)[1].split(
+        "private static string ExtractBridgeSettlementMessage", 1
+    )[0]
+    # The attached-console path writes the failure message through the
+    # wide-char helper first; the UTF-8 byte writer remains only as the
+    # redirected-handle (file/pipe) fallback.
+    assert "TryWriteParentConsoleWideChar(stdOutput," in report
+    assert "请求未完成" in report
+    assert report.index("TryWriteParentConsoleWideChar(stdOutput,") < report.index(
+        "new UTF8Encoding(false)"
+    )
+
+
 def test_native_launcher_python_bridge_uses_no_console_outer_runtime():
     source = _source()
     bridge_source = source.split("private static void RunPythonBridge", maxsplit=1)[1].split(
