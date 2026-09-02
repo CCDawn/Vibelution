@@ -1261,18 +1261,26 @@ def _seed_chain_collection_candidates(
 
 
 def _collected_source_candidate(
-    candidate_id: str, *, summary: str = "", url: str = ""
+    candidate_id: str,
+    *,
+    summary: str = "",
+    url: str = "",
+    title: str = "",
+    metadata: dict | None = None,
 ) -> dict:
-    return {
+    candidate = {
         "candidateId": candidate_id,
         "candidateType": "source_manifest",
         "sourceKind": "paper",
-        "title": f"Collected source {candidate_id}",
+        "title": title or f"Collected source {candidate_id}",
         "summary": summary,
         "sourceUrl": url,
         "createdAt": "2026-09-01T15:18:49Z",
         "createdByAgent": "source_finder",
     }
+    if metadata is not None:
+        candidate["metadata"] = metadata
+    return candidate
 
 
 def _seed_chain_hypothesis_candidates(
@@ -1494,3 +1502,262 @@ def test_chain_collection_materialization_requires_question_scope(
             collection_run_id="dprun-chain-1",
             hypothesis_candidate_ids=[],
         )
+
+
+def test_chain_collection_metadata_only_summary_never_mints_a_claim(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Production pollution shape: 'Container:/Published:' rows are not facts.
+
+    Crossref provider summaries pack ``Container:/Published:`` metadata in
+    front of the abstract; rows whose provider returned no abstract are pure
+    metadata.  Materializing such a row must not mint a claim whose body is
+    venue/date bookkeeping — the run is reported as skipped with the polluted
+    candidate ids observable under ``metadataOnlySkipped``.
+    """
+    from core.web.services.team_workflow.research_runtime.agent_claim_evidence_materializer import (
+        materialize_chain_collection_evidence,
+    )
+
+    team_id, scope = _claim_bridge_env(tmp_path, monkeypatch)
+    _seed_chain_collection_candidates(
+        monkeypatch,
+        [
+            _collected_source_candidate(
+                "candidate-meta-1",
+                summary="Container: Lecture Notes in Computer Science Published: 1994",
+                url="https://example.org/meta-1",
+            ),
+            _collected_source_candidate(
+                "candidate-meta-2",
+                summary="Published: 2022-06-06",
+            ),
+        ],
+    )
+
+    result = materialize_chain_collection_evidence(
+        project_root=tmp_path,
+        team_id=team_id,
+        question_scope=scope,
+        collection_run_id="dprun-chain-meta",
+        hypothesis_candidate_ids=[],
+    )
+
+    assert result["status"] == "skipped"
+    assert result["reason"] == "no_anchored_candidates"
+    assert result["metadataOnlySkipped"] == ["candidate-meta-1", "candidate-meta-2"]
+    assert claim_ledger.list_claims(team_id)["claimCount"] == 0
+    assert ClaimEvidenceStore(tmp_path).list(team_id) == []
+
+
+def test_chain_collection_metadata_prefix_is_stripped_from_claim_body(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The claim body is the cleaned abstract, never the metadata line."""
+    from core.web.services.team_workflow.research_runtime.agent_claim_evidence_materializer import (
+        materialize_chain_collection_evidence,
+    )
+
+    team_id, scope = _claim_bridge_env(tmp_path, monkeypatch)
+    _seed_chain_collection_candidates(
+        monkeypatch,
+        [
+            _collected_source_candidate(
+                "candidate-prefix-1",
+                summary=(
+                    "Container: 雙清學術预印本 Published: 2023-03-04 "
+                    "人工智能是利用大数据的方式来回答更准确的问题。"
+                ),
+                url="https://example.org/prefix-1",
+            ),
+            _collected_source_candidate(
+                "candidate-prefix-2",
+                summary=(
+                    "Published: 2025-05-19 Abstract:\r\n"
+                    "The Prime Spectrum Model investigates the zeta zeros."
+                ),
+                url="https://example.org/prefix-2",
+            ),
+            # A provider summary without any metadata prefix stays verbatim.
+            _collected_source_candidate(
+                "candidate-plain-1",
+                summary="The collected abstract states a bounded mechanism.",
+                url="https://example.org/plain-1",
+            ),
+        ],
+    )
+
+    result = materialize_chain_collection_evidence(
+        project_root=tmp_path,
+        team_id=team_id,
+        question_scope=scope,
+        collection_run_id="dprun-chain-prefix",
+        hypothesis_candidate_ids=[],
+    )
+
+    assert result["status"] == "materialized"
+    assert result["factClaimCount"] == 3
+    rows = {item["claim"] for item in claim_ledger.list_claims(team_id)["claims"]}
+    assert "人工智能是利用大数据的方式来回答更准确的问题。" in rows
+    assert "The Prime Spectrum Model investigates the zeta zeros." in rows
+    assert "The collected abstract states a bounded mechanism." in rows
+    # No claim body carries the provider metadata line any more.
+    assert not any(claim.startswith(("Container:", "Published:")) for claim in rows)
+
+
+def test_chain_collection_offtopic_candidate_is_skipped_observably(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Zero lexical overlap with the candidate's own query skips the row.
+
+    Deterministic, fail-open rule: only same-script, zero-overlap candidates
+    with a usable query are dropped, and every drop is reported under
+    ``offtopicSkipped``.  Language-mismatched and query-less candidates are
+    always kept.
+    """
+    from core.web.services.team_workflow.research_runtime.agent_claim_evidence_materializer import (
+        materialize_chain_collection_evidence,
+    )
+
+    team_id, scope = _claim_bridge_env(tmp_path, monkeypatch)
+    _seed_chain_collection_candidates(
+        monkeypatch,
+        [
+            # On-topic: query tokens recur in the abstract.
+            _collected_source_candidate(
+                "candidate-topic-1",
+                summary=(
+                    "We bound the computation rate of integer factorization "
+                    "hardware by number theoretic limits."
+                ),
+                url="https://example.org/topic-1",
+                metadata={"query": "integer factorization complexity class P"},
+            ),
+            # Off-topic: shares no significant token with its own query.
+            _collected_source_candidate(
+                "candidate-offtopic-1",
+                summary=(
+                    "Deep reinforcement learning improves robot grasping "
+                    "under cluttered warehouse scenes."
+                ),
+                url="https://example.org/offtopic-1",
+                metadata={"query": "integer factorization complexity class P"},
+            ),
+            # Language mismatch (English query, Chinese body): kept, not
+            # filtered — the lexical rule has no cross-script authority.
+            _collected_source_candidate(
+                "candidate-cjk-1",
+                title="人类意识原理",
+                summary="人类意识原理下的自动运动模型研究。",
+                url="https://example.org/cjk-1",
+                metadata={"query": "integer factorization complexity class P"},
+            ),
+            # No usable query: never filtered.
+            _collected_source_candidate(
+                "candidate-noquery-1",
+                summary="Reinforcement learning for robot grasping.",
+                url="https://example.org/noquery-1",
+            ),
+        ],
+    )
+
+    result = materialize_chain_collection_evidence(
+        project_root=tmp_path,
+        team_id=team_id,
+        question_scope=scope,
+        collection_run_id="dprun-chain-offtopic",
+        hypothesis_candidate_ids=[],
+    )
+
+    assert result["status"] == "materialized"
+    assert result["sourceCandidateCount"] == 3
+    assert result["offtopicSkipped"] == [
+        {"candidateId": "candidate-offtopic-1", "reason": "no_query_token_overlap"}
+    ]
+    stored_claims = {
+        item["claim"] for item in claim_ledger.list_claims(team_id)["claims"]
+    }
+    # The dropped candidate's claim body never lands; the kept ones do.
+    assert not any(
+        "Deep reinforcement learning" in claim for claim in stored_claims
+    )
+    assert any("integer factorization" in claim for claim in stored_claims)
+    assert any("Reinforcement learning for robot grasping" in claim for claim in stored_claims)
+
+
+def test_chain_collection_core_claims_cite_collected_evidence_refs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Candidate core-claim rows carry a resolvable pending evidence ref.
+
+    The fact evidence record is registered before the core-claim proposal, so
+    the core claim's ``evidenceRefs`` cite it (claimEvidenceId + matching
+    scopeHash).  Pending refs keep the claim ``proposed`` at most
+    ``weakly_supported`` — the gate's blocking states and allow verdict stay
+    unchanged.  Fact rows remain ref-less: the ledger binds claim content at
+    first proposal, before the evidence id can exist.
+    """
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_first_chain as chain,
+    )
+    from core.web.services.team_workflow.research_runtime.agent_claim_evidence_materializer import (
+        materialize_chain_collection_evidence,
+    )
+
+    team_id, scope = _claim_bridge_env(tmp_path, monkeypatch)
+    _seed_chain_collection_candidates(
+        monkeypatch,
+        [
+            _collected_source_candidate(
+                "candidate-run-ref-1",
+                summary="The collected abstract states a bounded mechanism.",
+                url="https://example.org/paper-ref-1",
+            ),
+        ],
+    )
+    _seed_chain_hypothesis_candidates(
+        team_id,
+        _QUESTION_ID,
+        {HYPOTHESIS_CANDIDATE_ID: "Candidate A predicts a bounded mechanism."},
+    )
+
+    result = materialize_chain_collection_evidence(
+        project_root=tmp_path,
+        team_id=team_id,
+        question_scope=scope,
+        collection_run_id="dprun-chain-refs",
+        hypothesis_candidate_ids=[HYPOTHESIS_CANDIDATE_ID],
+    )
+    assert result["status"] == "materialized"
+
+    stored = ClaimEvidenceStore(tmp_path).list(team_id)
+    evidence_ids = {item["claimEvidenceId"] for item in stored}
+    rows = {
+        item["claimId"]: item for item in claim_ledger.list_claims(team_id)["claims"]
+    }
+    fact_row = next(
+        item
+        for item in rows.values()
+        if item["claim"] == "The collected abstract states a bounded mechanism."
+    )
+    core_row = next(
+        item
+        for item in rows.values()
+        if item["claim"] == "Candidate A predicts a bounded mechanism."
+    )
+    # Fact rows cannot self-cite (content-binding contract); core rows must.
+    assert fact_row["evidenceRefs"] == []
+    assert len(core_row["evidenceRefs"]) == 1
+    ref = core_row["evidenceRefs"][0]
+    assert ref["claimEvidenceId"] in evidence_ids
+    assert ref["scopeHash"] == core_row["scopeHash"]
+    assert ref["reviewStatus"] == "pending"
+    assert ref["supportLevel"] == "supports"
+    assert ref["sourceId"] == "https://example.org/paper-ref-1"
+
+    # Pending refs never flip the gate: still allowed, still unblocked.
+    verdict = chain.evaluate_claim_belief_gate(
+        team_id, _QUESTION_ID, [HYPOTHESIS_CANDIDATE_ID]
+    )
+    assert verdict[HYPOTHESIS_CANDIDATE_ID]["status"] == "allowed"
+    assert verdict[HYPOTHESIS_CANDIDATE_ID]["reason"] == ""

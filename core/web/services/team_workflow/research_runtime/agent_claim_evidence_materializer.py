@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
@@ -195,6 +196,7 @@ def _propose_ledger_claim(
     question_scope: Mapping[str, Any],
     claim_text: str,
     candidate_id: str = "",
+    evidence_refs: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Propose one anchored claim in the question-scoped claim ledger.
 
@@ -204,10 +206,14 @@ def _propose_ledger_claim(
     evidence into a single belief entry.  Source fact claims deliberately omit
     the dimension so identical facts across source candidates still collapse
     into one ledger row (the reconcile contract asserts that dedup, and fact
-    rows never enter the hypothesis candidates' strict gate path).  Failures
-    are surfaced as ``EvidenceMaterializationError`` instead of being
-    swallowed, so an unproposable claim can never silently skip the claim
-    belief gate.
+    rows never enter the hypothesis candidates' strict gate path).
+
+    ``evidence_refs`` binds already-registered canonical ClaimEvidence records
+    into the proposal (agent-sourced proposals may carry refs; meeting text
+    may never).  Refs must be resolvable records — the ledger's own
+    contract validation rejects dangling or malformed ones.  Failures are
+    surfaced as ``EvidenceMaterializationError`` instead of being swallowed,
+    so an unproposable claim can never silently skip the claim belief gate.
     """
     from core.web.services.team_workflow import claim_ledger
 
@@ -228,6 +234,8 @@ def _propose_ledger_claim(
         "createdBy": agent_id,
         "source": "agent",
     }
+    if evidence_refs:
+        payload["evidenceRefs"] = list(evidence_refs)
     if _text(candidate_id):
         payload["claimId"] = _ledger_claim_id(
             question_scope=question_scope,
@@ -246,7 +254,11 @@ def _propose_ledger_claim(
         raise EvidenceMaterializationError(
             "claim ledger proposal returned no claim id"
         )
-    return {"claimId": claim_id, "status": _text(proposed.get("status"))}
+    return {
+        "claimId": claim_id,
+        "status": _text(proposed.get("status")),
+        "scopeHash": _text(claim.get("scopeHash")) if isinstance(claim, Mapping) else "",
+    }
 
 
 def _normalized_hypothesis_candidate_ids(value: object) -> list[str]:
@@ -833,14 +845,101 @@ def _chain_source_collection_candidates(
     ]
 
 
+# Crossref provider summaries are assembled as
+# ``"Container: <venue> Published: <date> <abstract>"`` (single line, see the
+# source-collection crossref result builder); entries without an abstract are
+# pure metadata.  The claim ledger must read the abstract body as the claim
+# text, never the metadata line.
+_CHAIN_SUMMARY_METADATA_PREFIX_RE = re.compile(
+    r"^\s*(?:Container:\s*(?P<container>.*?)\s+)?"
+    r"Published:\s*(?P<issued>\d{4}(?:-\d{1,2}(?:-\d{1,2})?)?)\s*"
+    r"(?P<body>.*)$",
+    re.DOTALL,
+)
+_CHAIN_SUMMARY_ABSTRACT_LABEL_RE = re.compile(r"^\s*Abstract\b[\s:．.]*", re.IGNORECASE)
+_CHAIN_WHITESPACE_RUN_RE = re.compile(r"\s+")
+_LATIN_QUERY_TOKEN_RE = re.compile(r"[a-z0-9]{3,}")
+_CJK_RUN_RE = re.compile(r"[\u4e00-\u9fff]{2,}")
+_QUERY_STOPWORDS = frozenset(
+    {
+        "the", "and", "for", "with", "from", "that", "this", "these", "those",
+        "are", "was", "were", "been", "not", "but", "all", "can", "could",
+        "may", "might", "will", "would", "shall", "should", "must", "has",
+        "have", "had", "its", "their", "into", "onto", "about", "between",
+        "also", "than", "then", "when", "what", "which", "while", "who",
+        "how", "why", "where",
+    }
+)
+
+
+def _clean_chain_collection_summary(summary: str) -> str:
+    """Return the quotable body of one collected source summary.
+
+    Strips the leading ``Container: ... Published: <date>`` provider metadata
+    prefix and a leading ``Abstract`` label, then collapses whitespace runs.
+    A summary that is pure metadata (no abstract was collected) cleans to an
+    empty string, which callers must treat as "no quotable body".  Text that
+    does not match the known prefix shapes is returned unchanged: over-strip
+    ping real claim content is worse than keeping a cosmetic prefix.
+    """
+    text = _text(summary)
+    match = _CHAIN_SUMMARY_METADATA_PREFIX_RE.match(text)
+    if match:
+        text = match.group("body")
+    text = _CHAIN_SUMMARY_ABSTRACT_LABEL_RE.sub("", text, count=1)
+    return _CHAIN_WHITESPACE_RUN_RE.sub(" ", text).strip()
+
+
+def _query_overlap_tokens(text: str) -> tuple[set[str], set[str]]:
+    """Split text into latin keyword tokens and CJK character bigrams."""
+    latin = set(_LATIN_QUERY_TOKEN_RE.findall(text.lower())) - _QUERY_STOPWORDS
+    cjk = {
+        run[index : index + 2]
+        for run in _CJK_RUN_RE.findall(text)
+        for index in range(len(run) - 1)
+    }
+    return latin, cjk
+
+
+def _chain_candidate_off_topic_reason(candidate: dict[str, Any], anchor: dict[str, Any]) -> str:
+    """Return a reason string when a candidate shares nothing with its query.
+
+    Deterministic, fail-open lexical rule: the collected candidate's own
+    search query (``metadata.query``) must overlap the candidate's title or
+    cleaned body by at least one significant token/bigram, and only when both
+    sides carry usable tokens of the same script.  Queries that yield fewer
+    than three usable tokens, script-mismatched pairs and metadata without a
+    query never filter: this bridge has no semantic relevance authority, so
+    the rule may only discard clearly unrelated rows and must stay observable
+    through the materialization result's ``offtopicSkipped`` list.
+    """
+    metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+    query_latin, query_cjk = _query_overlap_tokens(_text(metadata.get("query")))
+    if len(query_latin) + len(query_cjk) < 3:
+        return ""
+    body_latin, body_cjk = _query_overlap_tokens(
+        f"{anchor['title']} {anchor['quote']}"
+    )
+    if not body_latin and not body_cjk:
+        return ""
+    if query_latin and body_latin and not (query_latin & body_latin):
+        return "no_query_token_overlap"
+    if query_cjk and body_cjk and not (query_cjk & body_cjk):
+        return "no_query_token_overlap"
+    return ""
+
+
 def _chain_candidate_anchor(candidate: dict[str, Any]) -> dict[str, Any] | None:
     """Resolve the verbatim, locatable anchor of one collected source candidate.
 
-    A candidate without a non-empty collected summary, or without any source
-    locator (url, doi, or provider identity key), is not evidence: anchoring
-    is what keeps the claim belief gate's inputs verifiable.
+    A candidate without a non-empty *quotable* collected summary — after
+    stripping the crossref provider's ``Container:/Published:`` metadata
+    prefix — or without any source locator (url, doi, or provider identity
+    key), is not evidence: anchoring is what keeps the claim belief gate's
+    inputs verifiable.  Metadata-only summary rows therefore never mint a
+    claim whose body is venue/date bookkeeping.
     """
-    quote = _text(candidate.get("summary"))[:4000]
+    quote = _clean_chain_collection_summary(_text(candidate.get("summary")))[:4000]
     if not quote:
         return None
     metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
@@ -943,7 +1042,20 @@ def materialize_chain_collection_evidence(
     - for each hypothesis candidate the collection request explicitly served
       (its persisted ``hypothesisCandidateIds``), the candidate's core-claim
       row (candidate-dimensioned, replay-stable id) plus one evidence record
-      per collected source in that candidate's dimension.
+      per collected source in that candidate's dimension, cited on the core
+      claim row as a pending ``evidenceRefs`` entry (the fact evidence record
+      is registered before the core-claim proposal, so the citation is
+      resolvable; pending refs never promote the claim past
+      ``weakly_supported`` and leave the gate's blocking states unchanged).
+
+    Ledger hygiene at this read point: the crossref provider packs collected
+    summaries as ``"Container: <venue> Published: <date> <abstract>"``, so
+    the claim body is the cleaned abstract — metadata-only rows (no abstract
+    was collected) are skipped instead of minting venue/date bookkeeping as a
+    claim, and candidates sharing no significant token with their own search
+    query are skipped as observable ``offtopicSkipped`` rows (deterministic,
+    fail-open lexical rule; no semantic relevance authority is invented
+    here).
 
     Hypothesis-dimension evidence registers with ``reasoningRole=fact``: the
     chain's review/adjudication rounds are the acceptance authority for these
@@ -977,11 +1089,30 @@ def materialize_chain_collection_evidence(
         bridged_candidate_ids,
     )
     anchored: list[tuple[str, dict[str, Any]]] = []
+    metadata_only_skipped: list[str] = []
+    offtopic_skipped: list[dict[str, str]] = []
     for candidate in _chain_source_collection_candidates(normalized_team, normalized_run):
         anchor = _chain_candidate_anchor(candidate)
         candidate_id = _text(candidate.get("candidateId"))
-        if anchor is not None and candidate_id:
-            anchored.append((candidate_id, anchor))
+        if anchor is None:
+            # Distinguish "never had a summary" from "summary was pure
+            # provider metadata": only the latter is ledger pollution the
+            # cleaning layer just removed.
+            if _text(candidate.get("summary")) and not _clean_chain_collection_summary(
+                _text(candidate.get("summary"))
+            ):
+                if candidate_id:
+                    metadata_only_skipped.append(candidate_id)
+            continue
+        if not candidate_id:
+            continue
+        off_topic_reason = _chain_candidate_off_topic_reason(candidate, anchor)
+        if off_topic_reason:
+            offtopic_skipped.append(
+                {"candidateId": candidate_id, "reason": off_topic_reason}
+            )
+            continue
+        anchored.append((candidate_id, anchor))
     # Without anchored collected sources there is no evidence to bridge; core
     # claim rows must never be minted empty, or the gate would read a claim
     # row that no evidence dimension can ever reach.
@@ -994,11 +1125,17 @@ def materialize_chain_collection_evidence(
             "factClaimCount": 0,
             "candidateClaimCount": 0,
             "evidenceCount": 0,
+            **({"metadataOnlySkipped": metadata_only_skipped} if metadata_only_skipped else {}),
+            **({"offtopicSkipped": offtopic_skipped} if offtopic_skipped else {}),
         }
     store = ClaimEvidenceStore(project_root)
     fact_claim_count = 0
     candidate_claim_ids: set[str] = set()
     evidence_count = 0
+    # Phase 1 — fact dimension: one fact claim + fact evidence record per
+    # anchored source, collecting one pending evidence ref per source.
+    collected_refs: list[dict[str, Any]] = []
+    collected_payloads: list[dict[str, Any]] = []
     for candidate_id, anchor in anchored:
         model_ref = _chain_agent_model_ref(anchor["extractorAgentId"])
         source_revision = "sha256:" + _sha256(
@@ -1036,16 +1173,39 @@ def materialize_chain_collection_evidence(
             "modelRef": model_ref,
             "sourceCollectionRunId": normalized_run,
         }
-        store.register(normalized_team, evidence_payload)
+        stored = store.register(normalized_team, evidence_payload)
         evidence_count += 1
-        for bridged_candidate_id, statement in statements.items():
-            core_claim = _propose_ledger_claim(
-                team_id=normalized_team,
-                question_scope=question_scope,
-                claim_text=statement,
-                candidate_id=bridged_candidate_id,
-            )
-            candidate_claim_ids.add(core_claim["claimId"])
+        collected_payloads.append(evidence_payload)
+        collected_refs.append(
+            {
+                "claimEvidenceId": _text(stored.get("claimEvidenceId")),
+                "scopeHash": fact_claim["scopeHash"],
+                "reviewStatus": "pending",
+                "supportLevel": "supports",
+                "sourceId": anchor["sourceRef"],
+            }
+        )
+    # Phase 2 — hypothesis dimension: one core-claim row per served
+    # candidate, citing every collected source of the run.  The refs are
+    # complete before the single proposal so replayed runs re-propose the
+    # identical definition (the ledger binds claim id to content at first
+    # proposal).  Unreviewed (pending) refs keep the claim ``proposed`` and
+    # the belief state at most ``weakly_supported`` — the gate's blocking
+    # states are untouched.  Fact rows themselves stay ref-less: the ledger
+    # binds a claim id to its definition (including evidenceRefs) at first
+    # proposal, while the evidence id is only resolvable after the claim id
+    # exists, so a fact row cannot cite its own evidence without breaking
+    # the ledger's content-binding contract.
+    for bridged_candidate_id, statement in statements.items():
+        core_claim = _propose_ledger_claim(
+            team_id=normalized_team,
+            question_scope=question_scope,
+            claim_text=statement,
+            candidate_id=bridged_candidate_id,
+            evidence_refs=collected_refs,
+        )
+        candidate_claim_ids.add(core_claim["claimId"])
+        for evidence_payload in collected_payloads:
             store.register(
                 normalized_team,
                 {
@@ -1062,4 +1222,6 @@ def materialize_chain_collection_evidence(
         "factClaimCount": fact_claim_count,
         "candidateClaimCount": len(candidate_claim_ids),
         "evidenceCount": evidence_count,
+        **({"metadataOnlySkipped": metadata_only_skipped} if metadata_only_skipped else {}),
+        **({"offtopicSkipped": offtopic_skipped} if offtopic_skipped else {}),
     }
