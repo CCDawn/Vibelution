@@ -7,6 +7,7 @@ receipts only after domain read-back. Human adapters never reserve tokens.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from core.research.workflow.contracts import PendingAction
@@ -104,6 +105,32 @@ class AgentActionAdapter:
             reserved=dict(reservation),
         )
 
+    def _chain_authority_problem(
+        self, action: PendingAction, problem: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Attach the stage-one chain materialization report to a blocked problem.
+
+        The report explains WHY the closure authorities are missing (per-kind
+        blocker codes from the chain writers); it never changes the outcome.
+        """
+        probe = getattr(self._ports, "chain_authority_materialization_report", None)
+        if not callable(probe):
+            return problem
+        try:
+            report = probe(action)
+        except Exception:  # noqa: BLE001 - diagnostics must not mask the block
+            return problem
+        if not isinstance(report, Mapping) or not report:
+            return problem
+        summary = {
+            key: report[key]
+            for key in ("status", "reason", "roundId", "missingKinds", "blockerCodes")
+            if key in report
+        }
+        if summary:
+            problem["chainAuthorityMaterialization"] = summary
+        return problem
+
     def verify(self, action: PendingAction, result: AdapterResult) -> VerifiedDomainResult:
         if result.observation_only:
             return VerifiedDomainResult(
@@ -121,10 +148,13 @@ class AgentActionAdapter:
                 artifact_receipts=(),
                 anchor=result.anchor,
                 budget_receipt=None,
-                problem={
-                    "code": "required_artifact_missing",
-                    "detail": f"{action.node_id} requires {list(required)}",
-                },
+                problem=self._chain_authority_problem(
+                    action,
+                    {
+                        "code": "required_artifact_missing",
+                        "detail": f"{action.node_id} requires {list(required)}",
+                    },
+                ),
             )
         receipts: list[dict[str, Any]] = []
         for ref in result.materialized_refs:
@@ -201,10 +231,13 @@ class AgentActionAdapter:
                 artifact_receipts=(),
                 anchor=result.anchor,
                 budget_receipt=None,
-                problem={
-                    "code": "required_artifact_missing",
-                    "detail": f"missing kinds: {missing}",
-                },
+                problem=self._chain_authority_problem(
+                    action,
+                    {
+                        "code": "required_artifact_missing",
+                        "detail": f"missing kinds: {missing}",
+                    },
+                ),
             )
         reserved = result.reserved or {}
         reservation_id = str(

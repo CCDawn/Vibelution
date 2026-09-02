@@ -36,6 +36,12 @@ class ArtifactAuthoritySpec:
 ARTIFACT_AUTHORITY: dict[str, ArtifactAuthoritySpec] = {
     "problem_understanding": ArtifactAuthoritySpec("problem_understanding", "workflow_system"),
     "dimension_reviews": ArtifactAuthoritySpec("dimension_reviews", "experiment"),
+    "review_independence": ArtifactAuthoritySpec(
+        "review_independence", "workflow_system"
+    ),
+    "review_disagreement": ArtifactAuthoritySpec(
+        "review_disagreement", "workflow_system"
+    ),
     "feedback_iterations": ArtifactAuthoritySpec("feedback_iterations", "workflow_system"),
     "candidate_screening": ArtifactAuthoritySpec("candidate_screening", "workflow_system"),
     "core_hypothesis_coherence": ArtifactAuthoritySpec(
@@ -517,6 +523,8 @@ def load_scoped_artifact_payload(
         "delivery_orchestration_result",
         "problem_understanding",
         "dimension_reviews",
+        "review_independence",
+        "review_disagreement",
         "feedback_iterations",
         "candidate_screening",
         "core_hypothesis_coherence",

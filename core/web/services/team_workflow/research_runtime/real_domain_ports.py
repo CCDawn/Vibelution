@@ -982,6 +982,16 @@ class RealDomainPorts:
             return AgentTurnResult(materialized_refs=(), handle=handle)
 
         snapshot = self._run_input_snapshot(action.run_id)
+        if action.node_id == "hypothesis_design":
+            # Stage-one closure authorities live in the hypothesis-first chain,
+            # not in the Agent turn output.  When the question's review chain
+            # already converged (accepted closed round), bind its canonical
+            # artifacts to the live node run before the completion gate reads
+            # them; a skipped/blocked materialization keeps the existing
+            # fail-closed ``required_artifact_missing`` semantics untouched.
+            self._materialize_stage_one_chain_authority(
+                action=action, snapshot=snapshot
+            )
         bounded = _bounded_agent_node_can_complete(
             action.node_id,
             team_id=str(snapshot.get("teamId") or ""),
@@ -1019,6 +1029,66 @@ class RealDomainPorts:
             required_kinds=self.required_artifact_kinds(action),
             return_result=True,
         )
+
+    _CHAIN_AUTHORITY_REPORT_LIMIT = 32
+
+    def _remember_chain_authority_report(
+        self, action: PendingAction, report: Mapping[str, Any]
+    ) -> None:
+        """Keep the latest materialization report per action for problem detail."""
+        reports = getattr(self, "_chain_authority_reports", None)
+        if not isinstance(reports, dict):
+            reports = {}
+            self._chain_authority_reports = reports
+        reports.pop(str(action.action_id), None)
+        reports[str(action.action_id)] = dict(report)
+        while len(reports) > self._CHAIN_AUTHORITY_REPORT_LIMIT:
+            reports.pop(next(iter(reports)))
+
+    def chain_authority_materialization_report(
+        self, action: PendingAction
+    ) -> dict[str, Any] | None:
+        """Return the node's last stage-one chain authority report, if any."""
+        reports = getattr(self, "_chain_authority_reports", None)
+        if not isinstance(reports, dict):
+            return None
+        report = reports.get(str(action.action_id))
+        return dict(report) if isinstance(report, Mapping) else None
+
+    def _materialize_stage_one_chain_authority(
+        self, *, action: PendingAction, snapshot: Mapping[str, Any]
+    ) -> dict[str, Any] | None:
+        """Best-effort chain authority materialization for the closure node.
+
+        Never raises and never fakes success: on any failure the report records
+        the error and the artifact requirement gate keeps its existing
+        fail-closed behaviour.
+        """
+        team_id = str(snapshot.get("teamId") or "").strip()
+        question_id = str(snapshot.get("questionId") or "").strip()
+        if not team_id or not question_id:
+            return None
+        try:
+            from .hypothesis_first_chain import materialize_stage_one_node_authority
+
+            report = materialize_stage_one_node_authority(
+                team_id,
+                question_id,
+                workflow_run_id=str(action.run_id or "").strip(),
+                node_run_id=str(action.node_run_id or "").strip(),
+                input_snapshot_hash=str(action.input_snapshot_hash or "").strip(),
+                source_collection_run_id=str(
+                    snapshot.get("sourceCollectionRunId") or ""
+                ).strip(),
+            )
+        except Exception as exc:  # noqa: BLE001 - diagnostic only, gate still authoritative
+            report = {
+                "status": "error",
+                "reason": str(exc) or type(exc).__name__,
+                "missingKinds": [],
+            }
+        self._remember_chain_authority_report(action, report)
+        return report
 
     def _create_hypothesis_fan_out(
         self,

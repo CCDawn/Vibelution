@@ -9706,6 +9706,463 @@ def _record_round_persistence_failure(
         return {"failureRecordError": str(exc) or type(exc).__name__}
 
 
+# Stage-one closure authorities the hypothesis_design node readback expects on
+# top of the node's own hypothesis_set (challenge_cup_stage_one_scope_v1).
+STAGE_ONE_NODE_AUTHORITY_KINDS: tuple[str, ...] = (
+    "dimension_reviews",
+    "review_independence",
+    "review_disagreement",
+    "feedback_iterations",
+    "core_hypothesis_coherence",
+    "stage1_research_plan",
+    "competition_alignment",
+)
+
+
+def _stage_one_node_kind_readable(
+    kind: str,
+    *,
+    team_id: str,
+    workflow_run_id: str,
+    source_collection_run_id: str,
+) -> bool:
+    """Mirror the closure readback scope used by ``collect_required_artifact_refs``."""
+    try:
+        from .artifact_readback_registry import load_scoped_artifact_payload
+
+        payload = load_scoped_artifact_payload(
+            kind,
+            team_id=team_id,
+            authority_run_id=str(source_collection_run_id or workflow_run_id or "").strip(),
+            workflow_run_id=str(workflow_run_id or "").strip(),
+        )
+    except Exception:  # noqa: BLE001 - unreadable means not satisfied
+        return False
+    return isinstance(payload, Mapping) and bool(payload.get("payload"))
+
+
+def _formal_source_collection_run_id(workflow_run_id: str) -> str:
+    """Resolve the formal run's artifact authority run id (shared resolver)."""
+    from core.web.services.team_workflow import hypothesis_review_executor
+
+    return str(
+        hypothesis_review_executor._source_collection_run_id_for_formal_workflow(
+            workflow_run_id
+        )
+        or ""
+    ).strip()
+
+
+def materialize_stage_one_node_authority(
+    team_id: str,
+    question_id: str,
+    *,
+    workflow_run_id: str,
+    node_run_id: str,
+    input_snapshot_hash: str = "",
+    source_collection_run_id: str = "",
+) -> dict[str, Any]:
+    """Bind an already-accepted chain round's stage-one authorities to a live node.
+
+    Integration repair for the hypothesis-first closure node: the round is
+    generated (and its authorities materialized) before adjudication and
+    inside whatever node context triggered the review, so when adjudication
+    lands later the current ``hypothesis_design`` attempt finds no readable
+    closure authority and blocks on ``required_artifact_missing``.  This
+    function re-runs the exact same fail-closed writer set as
+    ``_generate_hypothesis_round``, re-bound to the live formal run
+    (``workflow_run_id``/``node_run_id``/``input_snapshot_hash``), for any
+    question whose latest closed HypothesisRound is meta-review accepted.
+
+    Idempotency: every kind is first probed through the same scoped readback
+    the completion gate uses; a readable authority is reused (the store is
+    append-only) and never rewritten, so replays neither duplicate rows nor
+    raise ``WorkflowArtifactConflictError``.  Writers stay fail-closed: any
+    blocker is reported per kind and never faked into success.  A missing
+    ``core_hypothesis_coherence`` authority cannot be rebuilt from chain
+    records (the coherence verdicts are not persisted in the round) and is
+    reported as missing instead of being regenerated.
+    """
+    from core.web.services.team_service import assert_team_exists
+
+    team = str(assert_team_exists(team_id) or "").strip()
+    question = str(question_id or "").strip().upper()
+    run = str(workflow_run_id or "").strip()
+    node = str(node_run_id or "").strip()
+    snapshot_hash = str(input_snapshot_hash or "").strip().lower()
+    if not team or not question or not run or not node:
+        return {
+            "status": "skipped",
+            "reason": "node_binding_missing",
+            "missingKinds": [],
+        }
+    meetings = _question_meetings(team, question, workflow_run_id=run)
+    meeting_ids = {
+        str(meeting.get("meetingRoundId") or "").strip() for meeting in meetings
+    }
+    rounds = [
+        round_record
+        for round_record in _question_hypothesis_rounds(team, question)
+        if any(
+            isinstance(ref, Mapping)
+            and str(ref.get("kind") or "") == "meeting_round"
+            and str(ref.get("id") or "") in meeting_ids
+            for ref in list(round_record.get("meetingRefs") or [])
+        )
+    ]
+    closed_rounds = [
+        round_record
+        for round_record in rounds
+        if str(round_record.get("status") or "") == "closed"
+    ]
+    if not closed_rounds:
+        return {
+            "status": "skipped",
+            "reason": "hypothesis_round_missing",
+            "missingKinds": [],
+        }
+    # The LATEST closed round is the convergence authority (mirrors
+    # ``chain_state``): a newer rejected/unaccepted round means the chain
+    # moved past the older acceptance, so nothing may be re-materialized.
+    latest_round = closed_rounds[-1]
+    latest_meta_review = (
+        dict(latest_round.get("metaReview"))
+        if isinstance(latest_round.get("metaReview"), Mapping)
+        else {}
+    )
+    if latest_meta_review.get("accepted") is not True:
+        return {
+            "status": "skipped",
+            "reason": "hypothesis_round_not_accepted",
+            "missingKinds": [],
+        }
+    accepted_round = latest_round
+    source = str(
+        source_collection_run_id
+        or _formal_source_collection_run_id(run)
+        or run
+    ).strip()
+    meeting_by_id = {
+        str(meeting.get("meetingRoundId") or ""): meeting for meeting in meetings
+    }
+    primary_meeting: dict[str, Any] = {}
+    for ref in list(accepted_round.get("meetingRefs") or []):
+        if not isinstance(ref, Mapping) or str(ref.get("kind") or "") != "meeting_round":
+            continue
+        bound = meeting_by_id.get(str(ref.get("id") or "").strip())
+        if bound is not None:
+            primary_meeting = dict(bound)
+            break
+    if not primary_meeting:
+        return {
+            "status": "skipped",
+            "reason": "primary_meeting_missing",
+            "missingKinds": list(STAGE_ONE_NODE_AUTHORITY_KINDS),
+        }
+    try:
+        fan_in = _review_meeting_fan_in_group(team, primary_meeting)
+    except Exception as exc:  # noqa: BLE001 - stay fail-closed, never fake success
+        return {
+            "status": "skipped",
+            "reason": "fan_in_resolution_failed",
+            "error": str(exc) or type(exc).__name__,
+            "missingKinds": list(STAGE_ONE_NODE_AUTHORITY_KINDS),
+        }
+    if fan_in.get("status") != "ready":
+        return {
+            "status": "skipped",
+            "reason": "fan_in_not_ready",
+            "missingKinds": list(STAGE_ONE_NODE_AUTHORITY_KINDS),
+        }
+    bound_meetings = [
+        dict(item)
+        for item in list(fan_in.get("meetings") or [])
+        if isinstance(item, Mapping)
+    ]
+    selection_id = str(fan_in.get("selectionId") or "").strip()
+    selected_candidate_ids = _normalized_str_list(
+        fan_in.get("selectedCandidateIds")
+    ) or _normalized_str_list(primary_meeting.get("selectedCandidateIds"))
+    if not selected_candidate_ids:
+        try:
+            from core.web.services.team_workflow import (
+                hypothesis_selection as selections,
+            )
+
+            selected = selections.get_hypothesis_selection(team, selection_id)[
+                "selection"
+            ]
+            selected_candidate_ids = _normalized_str_list(
+                selected.get("selectedCandidateIds")
+            )
+        except Exception:  # noqa: BLE001 - candidates stay a writer precondition
+            selected_candidate_ids = []
+    if snapshot_hash:
+        input_snapshot_hash = snapshot_hash
+    else:
+        input_snapshot_hash = str(
+            primary_meeting.get("inputSnapshotHash")
+            or accepted_round.get("inputSnapshotHash")
+            or ""
+        ).strip().lower()
+    # Re-bound receipt authority: the historical meeting authority may point at
+    # a predecessor node run (or none), so the writers validate against the
+    # live formal-run binding instead.
+    workflow_authority = {
+        "teamId": team,
+        "workflowRunId": run,
+        "questionId": question,
+        "nodeRunId": node,
+        "sourceCollectionRunId": source,
+        "inputSnapshotHash": input_snapshot_hash,
+    }
+    input_refs = [
+        *[
+            ref
+            for bound_meeting in bound_meetings
+            for ref in _normalized_str_list(bound_meeting.get("inputArtifactRefs"))
+        ],
+        *[
+            ref
+            for bound_meeting in bound_meetings
+            for ref in _normalized_str_list(bound_meeting.get("discussionItemRefs"))
+        ],
+    ]
+    round_id = str(accepted_round.get("roundId") or "")
+    reviewer_assignments = (
+        dict(accepted_round.get("roles"))
+        if isinstance(accepted_round.get("roles"), Mapping)
+        else {}
+    )
+    receipt_contexts = [
+        dict(item)
+        for item in list(accepted_round.get("modelInvocationReceipts") or [])
+        if isinstance(item, Mapping)
+    ]
+    try:
+        candidates = _build_round_candidates(
+            team,
+            primary_meeting,
+            candidate_ids=selected_candidate_ids,
+            workflow_run_id=run,
+        )
+    except Exception as exc:  # noqa: BLE001 - reported, never faked
+        candidates = []
+        candidate_error = str(exc) or type(exc).__name__
+    else:
+        candidate_error = ""
+
+    def _probe(kind: str) -> bool:
+        return _stage_one_node_kind_readable(
+            kind,
+            team_id=team,
+            workflow_run_id=run,
+            source_collection_run_id=source,
+        )
+
+    satisfied: list[str] = []
+    written: list[str] = []
+    reused: list[str] = []
+    blockers_by_kind: dict[str, list[str]] = {}
+    errors: dict[str, str] = {}
+
+    # dimension_reviews — canonical audit projection of the accepted round.
+    if _probe("dimension_reviews"):
+        satisfied.append("dimension_reviews")
+        reused.append("dimension_reviews")
+    elif candidate_error:
+        blockers_by_kind["dimension_reviews"] = ["round_candidates_unavailable"]
+        errors["dimension_reviews"] = candidate_error
+    else:
+        try:
+            from .dimension_reviews_artifact_writer import (
+                materialize_dimension_reviews_authority,
+            )
+
+            dimension_authority = materialize_dimension_reviews_authority(
+                team_id=team,
+                workflow_run_id=run,
+                node_run_id=node,
+                question_id=question,
+                selection_id=selection_id,
+                review_round_id=round_id,
+                input_refs=input_refs,
+                input_snapshot_hash=input_snapshot_hash,
+                candidates=candidates,
+                review=accepted_round,
+                workflow_authority=workflow_authority,
+                source_collection_run_id=source,
+            )
+        except Exception as exc:  # noqa: BLE001 - fail-closed blocker
+            dimension_authority = {
+                "status": "blocked",
+                "blockerCodes": ["dimension_reviews_authority_persistence_failed"],
+                "error": str(exc) or type(exc).__name__,
+            }
+        if str(dimension_authority.get("status") or "") == "written":
+            satisfied.append("dimension_reviews")
+            written.append("dimension_reviews")
+        else:
+            blockers_by_kind["dimension_reviews"] = [
+                str(item)
+                for item in list(dimension_authority.get("blockerCodes") or [])
+                if str(item).strip()
+            ] or ["dimension_reviews_authority_persistence_failed"]
+            error = str(dimension_authority.get("error") or "").strip()
+            if error:
+                errors["dimension_reviews"] = error
+
+    # review_independence + review_disagreement — one shared writer pair.
+    if _probe("review_independence") and _probe("review_disagreement"):
+        satisfied.extend(("review_independence", "review_disagreement"))
+        reused.extend(("review_independence", "review_disagreement"))
+    else:
+        try:
+            from .review_independence_artifact_writer import (
+                write_review_independence_artifacts,
+            )
+
+            independence_authority = write_review_independence_artifacts(
+                team_id=team,
+                workflow_run_id=run,
+                node_run_id=node,
+                review_round_id=round_id,
+                review=accepted_round,
+                reviewer_assignments=reviewer_assignments,
+                receipt_contexts=receipt_contexts,
+                source_collection_run_id=source,
+            )
+        except Exception as exc:  # noqa: BLE001 - fail-closed blocker
+            independence_authority = {
+                "status": "blocked",
+                "blockerCodes": ["review_independence_authority_persistence_failed"],
+                "error": str(exc) or type(exc).__name__,
+            }
+        if str(independence_authority.get("status") or "") == "written":
+            satisfied.extend(("review_independence", "review_disagreement"))
+            written.extend(("review_independence", "review_disagreement"))
+        else:
+            pair_blockers = [
+                str(item)
+                for item in list(independence_authority.get("blockerCodes") or [])
+                if str(item).strip()
+            ] or ["review_independence_authority_persistence_failed"]
+            blockers_by_kind["review_independence"] = pair_blockers
+            blockers_by_kind["review_disagreement"] = list(pair_blockers)
+            error = str(independence_authority.get("error") or "").strip()
+            if error:
+                errors["review_independence"] = error
+
+    # feedback_iterations — every closed round's revision envelope replays in
+    # chain order until the run-scope iteration authority is readable.
+    if _probe("feedback_iterations"):
+        satisfied.append("feedback_iterations")
+        reused.append("feedback_iterations")
+    else:
+        feedback_blockers: list[str] = []
+        for round_record in closed_rounds:
+            envelope = (
+                dict(round_record.get("revisionEnvelope"))
+                if isinstance(round_record.get("revisionEnvelope"), Mapping)
+                else {}
+            )
+            if not envelope:
+                continue
+            try:
+                recorded = _materialize_hypothesis_revision_authority(
+                    team_id=team,
+                    workflow_run_id=run,
+                    node_run_id=node,
+                    question_id=question,
+                    source_collection_run_id=source,
+                    round_record=round_record,
+                )
+            except Exception as exc:  # noqa: BLE001 - try the next round
+                feedback_blockers = ["hypothesis_revision_authority_persistence_failed"]
+                errors["feedback_iterations"] = str(exc) or type(exc).__name__
+                continue
+            if str(recorded.get("status") or "").strip().lower() in {
+                "recorded",
+                "written",
+            }:
+                satisfied.append("feedback_iterations")
+                written.append("feedback_iterations")
+                feedback_blockers = []
+                break
+            feedback_blockers = [
+                str(item)
+                for item in list(recorded.get("blockerCodes") or [])
+                if str(item).strip()
+            ] or ["hypothesis_revision_evidence_missing"]
+        if "feedback_iterations" not in satisfied:
+            blockers_by_kind["feedback_iterations"] = feedback_blockers or [
+                "hypothesis_revision_evidence_missing"
+            ]
+
+    # core_hypothesis_coherence — never rebuilt here: the coherence verdicts
+    # live only in the review executor's reflection output, so a readable
+    # authority is reused and an absent one is reported as missing.
+    if _probe("core_hypothesis_coherence"):
+        satisfied.append("core_hypothesis_coherence")
+        reused.append("core_hypothesis_coherence")
+    else:
+        blockers_by_kind["core_hypothesis_coherence"] = [
+            "core_hypothesis_coherence_authority_missing"
+        ]
+
+    # stage1_research_plan + competition_alignment — projected from the
+    # approved question authority under the accepted round's recommendation.
+    if _probe("stage1_research_plan") and _probe("competition_alignment"):
+        satisfied.extend(("stage1_research_plan", "competition_alignment"))
+        reused.extend(("stage1_research_plan", "competition_alignment"))
+    else:
+        try:
+            stage_one_plan_authority = _materialize_stage_one_plan_authority(
+                team_id=team,
+                workflow_run_id=run,
+                node_run_id=node,
+                question_id=question,
+                source_collection_run_id=source,
+                round_record=accepted_round,
+            )
+        except Exception as exc:  # noqa: BLE001 - fail-closed blocker
+            stage_one_plan_authority = _blocked_round_authority(
+                "stage1_research_plan",
+                "stage_one_plan_authority_persistence_failed",
+            )
+            errors["stage1_research_plan"] = str(exc) or type(exc).__name__
+        if str(stage_one_plan_authority.get("status") or "") == "written":
+            satisfied.extend(("stage1_research_plan", "competition_alignment"))
+            written.extend(("stage1_research_plan", "competition_alignment"))
+        else:
+            plan_blockers = [
+                str(item)
+                for item in list(stage_one_plan_authority.get("blockerCodes") or [])
+                if str(item).strip()
+            ] or ["stage_one_plan_authority_persistence_failed"]
+            blockers_by_kind["stage1_research_plan"] = plan_blockers
+            blockers_by_kind["competition_alignment"] = list(plan_blockers)
+
+    ordered = list(STAGE_ONE_NODE_AUTHORITY_KINDS)
+    missing = [kind for kind in ordered if kind not in satisfied]
+    return {
+        "status": "materialized" if not missing else "blocked",
+        "reason": "" if not missing else "stage_one_authority_missing",
+        "teamId": team,
+        "questionId": question,
+        "workflowRunId": run,
+        "nodeRunId": node,
+        "roundId": round_id,
+        "selectionId": selection_id,
+        "satisfiedKinds": [kind for kind in ordered if kind in satisfied],
+        "writtenKinds": written,
+        "reusedKinds": reused,
+        "missingKinds": missing,
+        "blockerCodes": blockers_by_kind,
+        **({"errors": errors} if errors else {}),
+    }
+
+
 def _generate_hypothesis_round(
     team_id: str,
     meeting_round: Mapping[str, Any],
