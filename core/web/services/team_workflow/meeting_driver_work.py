@@ -52,6 +52,7 @@ import threading
 import time
 import uuid
 from collections.abc import Callable, Mapping
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -813,6 +814,219 @@ def reset_digest_stuck_sweep_throttle_for_tests() -> None:
     global _LAST_DIGEST_STUCK_SWEEP_MS
     with _LOCK:
         _LAST_DIGEST_STUCK_SWEEP_MS = None
+
+
+# --- Queued-driver activity sweep ------------------------------------------
+#
+# The discussion driver executor is process-wide with four workers and an
+# unbounded submission queue.  Under multi-question x multi-candidate fan-out
+# a freshly scheduled driver can legitimately wait far longer than the
+# 15-minute execution-heartbeat window the V2 projection uses to flag zombie
+# meetings and expose the ``reopen_review`` recovery.  A queued driver writes
+# no meeting or WorkRun activity by design — its running intent, progress
+# stamps, and lease heartbeat all start only when the executor picks the job
+# up — so queue depth used to read exactly like a dead executor.
+#
+# The sweep below renews those meetings' last-activity stamp instead.  It is
+# deliberately narrow: only a meeting whose latest ``run_discussion`` intent
+# is still ``pending`` (scheduled, executor has not started it) is touched,
+# so a genuinely wedged RUNNING driver keeps going stale and its existing
+# progress-gated heartbeat fence stays the sole wedge authority.  It lives on
+# the resident maintenance tick (same minimal-intrusion host as
+# :func:`sweep_stuck_digest_works`) — no second scheduler.
+QUEUE_SWEEP_INTERVAL_MS = 30_000
+QUEUE_SWEEP_INTERVAL_ENV = "VIBELUTION_MEETING_QUEUE_SWEEP_INTERVAL_MS"
+# Renew strictly inside the projection's 15-minute stale window with slack
+# for missed sweeps: a queued meeting whose last activity is older than this
+# gets exactly one bounded activity stamp per window, bounding record churn.
+QUEUE_ACTIVITY_RENEW_AFTER_MS = 7 * 60_000
+# Bounded scan per tick: live scheduled jobs are realistically far below
+# this; the jobs registry preserves insertion order, so the oldest (longest
+# queued) meetings are scanned first.
+QUEUE_SWEEP_SCAN_LIMIT = 256
+# Throttle stamp for the sweep; touched only under _LOCK.
+_LAST_QUEUE_SWEEP_MS: int | None = None
+
+
+def _queue_sweep_interval_ms() -> int:
+    raw = str(os.environ.get(QUEUE_SWEEP_INTERVAL_ENV) or "").strip()
+    if raw:
+        try:
+            value = int(raw)
+        except ValueError:
+            return QUEUE_SWEEP_INTERVAL_MS
+        if value > 0:
+            return max(value, 1000)
+    return QUEUE_SWEEP_INTERVAL_MS
+
+
+def _queue_sweep_due(now_ms: int) -> bool:
+    global _LAST_QUEUE_SWEEP_MS
+    interval = _queue_sweep_interval_ms()
+    with _LOCK:
+        last = _LAST_QUEUE_SWEEP_MS
+        if last is not None and now_ms - last < interval:
+            return False
+        _LAST_QUEUE_SWEEP_MS = now_ms
+        return True
+
+
+def reset_queue_sweep_throttle_for_tests() -> None:
+    """Test seam: forget the last queue sweep run so the next sweep executes."""
+
+    global _LAST_QUEUE_SWEEP_MS
+    with _LOCK:
+        _LAST_QUEUE_SWEEP_MS = None
+
+
+def _parse_iso_epoch_ms(value: Any) -> int | None:
+    """Tolerant ISO-8601 to epoch-ms parse; ``None`` when unreadable."""
+
+    text = str(value or "").strip()
+    if not text:
+        return None
+    normalized = text.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return int(parsed.timestamp() * 1000)
+
+
+def _queued_discussion_job_keys() -> list[tuple[str, str]]:
+    """Live scheduled jobs whose latest ``run_discussion`` intent is pending.
+
+    A key present in the runtime's dedup registry is scheduled; only the
+    durable ``pending`` intent proves the executor has not started it yet
+    (starting flips the intent to ``running`` before any driver step).  Keys
+    whose intent is missing, unreadable, or already running are skipped:
+    staleness must be provable from durable facts, never guessed.
+    """
+
+    from core.web.services.team_workflow import meeting_runtime
+
+    with meeting_runtime._MEETING_DISCUSSION_JOBS_LOCK:
+        scheduled = list(meeting_runtime._MEETING_DISCUSSION_JOBS.keys())[
+            :QUEUE_SWEEP_SCAN_LIMIT
+        ]
+    queued: list[tuple[str, str]] = []
+    for team_id, meeting_round_id in scheduled:
+        try:
+            intent = latest_intent(
+                str(team_id), str(meeting_round_id), action_kind=ACTION_RUN_DISCUSSION
+            )
+        except Exception:  # noqa: BLE001 - one broken read must not stop the sweep
+            continue
+        if intent is None:
+            continue
+        if str(intent.get("status") or "").strip().lower() != STATUS_PENDING:
+            continue
+        queued.append((str(team_id), str(meeting_round_id)))
+    return queued
+
+
+def refresh_queued_meeting_activity(
+    *,
+    now_ms: int | None = None,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Renew last-activity stamps of meetings whose driver is still queued.
+
+    Queued discussion drivers legitimately stay silent, so without this sweep
+    the V2 projection would expose ``review_heartbeat_stale`` (and the
+    ``reopen_review`` recovery) for healthy meetings whose drivers are merely
+    waiting for one of the four executor workers.  For every scheduled
+    meeting whose latest ``run_discussion`` intent is still ``pending`` and
+    whose meeting record has been quiet past
+    ``QUEUE_ACTIVITY_RENEW_AFTER_MS``, one bounded
+    ``meeting_rounds.record_meeting_queue_activity`` stamp is appended.  A
+    running (or terminal) intent is never touched — a real wedge keeps going
+    stale and the progress-gated heartbeat fence stays authoritative.  The
+    sweep is self-throttled, hosted by the resident maintenance tick, never
+    re-drives, and never raises: one broken meeting is isolated into
+    ``skipped``.
+    """
+
+    current_ms = int(time.time() * 1000) if now_ms is None else int(now_ms)
+    summary: dict[str, Any] = {
+        "scanned": 0,
+        "queued": 0,
+        "renewed": 0,
+        "skipped": 0,
+    }
+    if not force and not _queue_sweep_due(current_ms):
+        summary["throttled"] = True
+        return summary
+    try:
+        queued_keys = _queued_discussion_job_keys()
+    except Exception:  # noqa: BLE001 - the sweep must never break its host
+        _record_queue_sweep_event(summary)
+        return summary
+    from core.web.services.team_workflow import meeting_rounds
+
+    for team_id, meeting_round_id in queued_keys:
+        summary["scanned"] += 1
+        try:
+            meeting = meeting_rounds.get_meeting_round(team_id, meeting_round_id)[
+                "meetingRound"
+            ]
+        except Exception:  # noqa: BLE001 - one broken meeting cannot stop the sweep
+            summary["skipped"] += 1
+            continue
+        summary["queued"] += 1
+        last_activity_ms = _parse_iso_epoch_ms(
+            meeting.get("updatedAt") or meeting.get("createdAt")
+        )
+        if last_activity_ms is None:
+            summary["skipped"] += 1
+            continue
+        if current_ms - last_activity_ms <= QUEUE_ACTIVITY_RENEW_AFTER_MS:
+            summary["skipped"] += 1
+            continue
+        try:
+            updated = meeting_rounds.record_meeting_queue_activity(
+                team_id, meeting_round_id
+            )
+        except Exception:  # noqa: BLE001 - one broken meeting cannot stop the sweep
+            summary["skipped"] += 1
+            continue
+        if updated is None:
+            summary["skipped"] += 1
+        else:
+            summary["renewed"] += 1
+    if summary["renewed"]:
+        _record_queue_sweep_event(summary)
+    return summary
+
+
+def _record_queue_sweep_event(summary: Mapping[str, Any]) -> None:
+    """Bounded queue-sweep evidence, following the digest watchdog pattern."""
+
+    try:
+        from core.web.services.runtime_scene_service import (
+            record_runtime_scene_event_quietly,
+        )
+
+        record_runtime_scene_event_quietly(
+            "team_workflow",
+            "meeting_discussion_queue",
+            "meeting_discussion.queue_activity_renewed",
+            message="Queued discussion driver meeting activity renewed.",
+            level="info",
+            outcome="completed",
+            fields={
+                "scanned": int(summary.get("scanned") or 0),
+                "queued": int(summary.get("queued") or 0),
+                "renewed": int(summary.get("renewed") or 0),
+                "skipped": int(summary.get("skipped") or 0),
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        # A diagnostic outage must not alter the sweep outcome.
+        return
 
 
 def _digest_work_stuck(work: Mapping[str, Any], now_ms: int) -> bool:

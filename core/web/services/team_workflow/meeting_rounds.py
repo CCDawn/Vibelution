@@ -1473,6 +1473,55 @@ def record_meeting_summary_draft_error(
     }
 
 
+# Queue-activity heartbeat marker.  A scheduled discussion driver may wait in
+# the process-wide meeting executor queue (4 workers, unbounded backlog under
+# multi-question fan-out) far longer than the 15-minute execution-heartbeat
+# window the V2 projection uses to flag zombie meetings and expose
+# ``reopen_review``.  While a driver is merely queued it legitimately produces
+# no meeting or WorkRun activity, so the projection would misread queue depth
+# as death.  The queue sweep in ``meeting_driver_work`` stamps this bounded
+# marker instead; it never changes status, digest, or decision fields, so a
+# genuinely wedged RUNNING driver keeps going stale and stays provable.
+QUEUE_ACTIVITY_MARKER = "queueActivityAt"
+
+
+def record_meeting_queue_activity(
+    team_id: str,
+    meeting_round_id: str,
+    *,
+    now: str | None = None,
+) -> dict[str, Any] | None:
+    """Stamp the queue-heartbeat marker onto one still-open meeting record.
+
+    Called by the meeting-driver queue sweep while a scheduled discussion
+    driver is still waiting in the executor queue.  Append-only latest-wins:
+    the record content is unchanged except ``updatedAt`` and the
+    ``queueActivityAt`` marker, so every downstream reader sees exactly the
+    meeting it saw before with a fresher last-activity timestamp.  Returns
+    ``None`` without writing when the meeting is missing or no longer open or
+    summarizing: a terminal meeting must keep its real timestamps so genuine
+    staleness stays provable.
+    """
+
+    from core.web.services.team_service import assert_team_exists
+
+    normalized_team_id = assert_team_exists(team_id)
+    normalized_round_id = str(meeting_round_id or "").strip()
+    if not normalized_round_id:
+        raise ResearchMeetingRoundError("Meeting round id is required.")
+    stamp = str(now or _utc_now())
+    with _write_lock("record_meeting_queue_activity"):
+        meeting_round = _load_meeting_round(normalized_team_id, normalized_round_id)
+        status = str(meeting_round.get("status") or "").strip().lower()
+        if status not in {"open", "summarizing"}:
+            return None
+        updated = dict(meeting_round)
+        updated[QUEUE_ACTIVITY_MARKER] = stamp
+        updated["updatedAt"] = stamp
+        _append_round_record(normalized_team_id, updated)
+    return updated
+
+
 def begin_meeting_summary(
     team_id: str,
     meeting_round_id: str,

@@ -161,6 +161,7 @@ class WorkflowRuntime:
         handled += self.adapter_worker.run_repairs_once(limit=limit)
         self._reconcile_expired_task_bundles_best_effort()
         self._sweep_stuck_digest_works_best_effort()
+        self._refresh_queued_meeting_activity_best_effort()
         self._sweep_auto_advance_closure_best_effort()
         return handled
 
@@ -202,6 +203,26 @@ class WorkflowRuntime:
             meeting_driver_work.sweep_stuck_digest_works()
         except Exception:  # noqa: BLE001 - watchdog must never break maintenance
             logger.exception("stuck digest work sweep failed")
+
+    def _refresh_queued_meeting_activity_best_effort(self) -> None:
+        """Renew queued discussion drivers' meeting activity from this tick.
+
+        The 4-worker meeting executor queues scheduled discussion drivers with
+        no activity by design, and a multi-question fan-out can hold a driver
+        there far past the 15-minute execution-heartbeat window the V2
+        projection uses to flag zombie meetings and expose ``reopen_review``
+        for a healthy meeting.  The queue sweep is peeked (not created),
+        self-throttled, and only stamps meeting activity for meetings whose
+        driver intent is still ``pending`` — a wedged RUNNING driver keeps
+        going stale.  Same discipline as the digest watchdog: never re-drives,
+        any failure is swallowed after logging.
+        """
+        try:
+            from core.web.services.team_workflow import meeting_driver_work
+
+            meeting_driver_work.refresh_queued_meeting_activity()
+        except Exception:  # noqa: BLE001 - queue sweep must never break maintenance
+            logger.exception("queued meeting activity refresh failed")
 
     def _sweep_auto_advance_closure_best_effort(self) -> None:
         """Auto-advance budget-exhausted hypothesis chains from this tick.
