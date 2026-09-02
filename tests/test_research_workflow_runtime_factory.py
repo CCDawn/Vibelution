@@ -64,8 +64,18 @@ def _seed_with_snapshot(store, *, run_id: str = "run-test") -> None:
     # The run is intentionally fresh for production-worker coverage.  The P0
     # reconciliation must still reap genuinely stale ``created`` runs, so do
     # not seed this fixture with the historical fixed timestamp.
+    # Registry-era runs must pin a registered wv-* identity: the mutation
+    # fail-closed gate refuses runs pinned to the legacy literal version id.
+    # Register the built-in definition and pin the run to that identity.
+    from core.research.workflow.definition import build_challenge_cup_workflow_definition
+    from core.research.workflow.definition_registry import register_or_resolve
+
+    pinned_version_id = register_or_resolve(
+        build_challenge_cup_workflow_definition()
+    ).workflowVersionId
     record = build_run_record(
         run_id=run_id,
+        workflow_version_id=pinned_version_id,
         last_event_sequence=1,
         created_at_ms=int(time.time() * 1000),
     )
