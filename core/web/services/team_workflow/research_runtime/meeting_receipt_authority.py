@@ -54,10 +54,21 @@ def _is_chain_resolvable_hypothesis_block(run: Any) -> bool:
         )
     except (TypeError, ValueError, json.JSONDecodeError):
         return False
-    return isinstance(problem, Mapping) and (
-        problem.get("code") == "auto_advance_not_ready"
-        and isinstance(problem.get("detail"), str)
-        and problem.get("detail") in _CHAIN_RESOLVABLE_HYPOTHESIS_BLOCK_DETAILS
+    if not (isinstance(problem, Mapping) and problem.get("code") == "auto_advance_not_ready"):
+        return False
+    detail = problem.get("detail")
+    if not isinstance(detail, str):
+        return False
+    # Readiness lands one joined detail when several gates fail together
+    # ("hypothesis_round_unconverged; template_baseline_missing").  The stale
+    # joined verdict is not re-landed until the node re-dispatches, so an
+    # exact-match whitelist would deadlock: the gate that the meeting itself
+    # resolves can never clear while the fence strangles that meeting.  Any
+    # chain-resolvable cause therefore keeps the meeting alive; the remaining
+    # causes still gate the node dispatch independently.
+    return any(
+        cause.strip() in _CHAIN_RESOLVABLE_HYPOTHESIS_BLOCK_DETAILS
+        for cause in detail.split(";")
     )
 
 

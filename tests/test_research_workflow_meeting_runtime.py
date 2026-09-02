@@ -1711,6 +1711,77 @@ def test_workflow_run_stop_reason_allows_only_chain_resolvable_readiness_blocks(
         )
 
 
+def test_workflow_run_stop_reason_allows_mixed_chain_resolvable_details(monkeypatch):
+    problem_jsons = iter(
+        [
+            json.dumps(
+                {
+                    "code": "auto_advance_not_ready",
+                    "detail": "hypothesis_round_unconverged; template_baseline_missing",
+                }
+            ),
+            json.dumps(
+                {
+                    "code": "auto_advance_not_ready",
+                    "detail": "template_baseline_missing; hypothesis_round_unconverged",
+                }
+            ),
+            json.dumps(
+                {
+                    "code": "auto_advance_not_ready",
+                    "detail": "template_baseline_missing",
+                }
+            ),
+            json.dumps(
+                {
+                    "code": "auto_advance_not_ready",
+                    "detail": "source_candidates_missing; template_baseline_missing",
+                }
+            ),
+            json.dumps(
+                {
+                    "code": "auto_advance_not_ready",
+                    "detail": "hypothesis_round_unconverged ; hypothesis_first_meeting_open",
+                }
+            ),
+        ]
+    )
+
+    class FakeStore:
+        def get_run(self, _run_id):
+            return type(
+                "Run",
+                (),
+                {
+                    "status": "blocked",
+                    "blocked_problem_json": next(problem_jsons),
+                },
+            )()
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.formal_write_runtime.get_write_store",
+        lambda: FakeStore(),
+    )
+    authority = {"workflowRunId": "run-mixed-readiness-block"}
+
+    # A joined readiness verdict stays meeting-permissive while any of its
+    # causes is one the chain's own meetings resolve; the stale joined string
+    # is not re-landed until the node re-dispatches, so exact matching here
+    # deadlocked generation on runs blocked by several gates at once.
+    assert meeting_receipt_authority.workflow_run_stop_reason(authority) == ""
+    assert meeting_receipt_authority.workflow_run_stop_reason(authority) == ""
+    # Details with no chain-resolvable cause stay fail-closed.
+    assert (
+        meeting_receipt_authority.workflow_run_stop_reason(authority)
+        == "challenge_workflow_run_blocked"
+    )
+    assert (
+        meeting_receipt_authority.workflow_run_stop_reason(authority)
+        == "challenge_workflow_run_blocked"
+    )
+    assert meeting_receipt_authority.workflow_run_stop_reason(authority) == ""
+
+
 def test_workflow_run_stop_reason_keeps_terminal_statuses_fail_closed(monkeypatch):
     statuses = iter(["cancelled", "failed"])
 
