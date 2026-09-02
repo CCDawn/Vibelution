@@ -6,6 +6,39 @@ from typing import Any
 
 MISSING_CANONICAL_SESSION_FAILURE = "project_agent_session_missing"
 
+# The poisoned-session retry loop: a failed turn whose classification is
+# context-budget exhaustion (or the historical unexplained-failure fallback it
+# used to surface as) carries its error summary into the reused session
+# history via carryover, re-inflating the context until the budget gate kills
+# the next turn again. Only this explicit loop form switches to a fresh
+# session; every other failed task keeps the reuse semantics.
+_CONTEXT_BUDGET_LOOP_MARKERS = (
+    "context_budget_exhausted",
+    "agent_turn_failed_without_diagnostics",
+    "未返回结构化失败诊断",
+)
+CONTEXT_BUDGET_RETRY_NEW_SESSION = "context_budget_retry_new_session"
+
+
+def _failed_on_context_budget_loop(task: dict[str, Any]) -> bool:
+    """True for a failed task whose recorded failure matches the loop form."""
+
+    turn = task.get("turn") if isinstance(task.get("turn"), dict) else {}
+    fields = (
+        task.get("failureCode"),
+        task.get("failureMessage"),
+        task.get("summary"),
+        turn.get("failureCode"),
+        turn.get("failureMessage"),
+        turn.get("summary"),
+    )
+    haystack = " ".join(
+        str(value or "").strip() for value in fields if value
+    ).lower()
+    if not haystack:
+        return False
+    return any(marker in haystack for marker in _CONTEXT_BUDGET_LOOP_MARKERS)
+
 
 def _service():
     from core.web.services import team_workflow_orchestration_service
@@ -97,6 +130,26 @@ def prepare_source_collection_stage_task_replay(
             },
         )
         return {"action": "resume_same_task", "task": current}
+
+    if status == "failed" and _failed_on_context_budget_loop(current):
+        # Reusing the poisoned session would feed the failed turn's error
+        # summary back into the history and re-trigger the context budget
+        # gate. Retry the same task on a fresh session instead.
+        s._record_workflow_event(
+            "source_collection.stage_session_task_context_budget_retry",
+            team_id,
+            fields={
+                "runId": run_id,
+                "taskId": task_id,
+                "sessionId": session_id,
+                "recovery": "formal_retry_same_task",
+            },
+        )
+        return {
+            "action": "formal_retry_same_task",
+            "task": current,
+            "recoveryReason": CONTEXT_BUDGET_RETRY_NEW_SESSION,
+        }
 
     return {"action": "reuse", "task": current}
 

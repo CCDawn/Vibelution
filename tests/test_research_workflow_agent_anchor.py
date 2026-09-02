@@ -1042,6 +1042,101 @@ def test_turn_alive_progressing_requires_running_source() -> None:
     assert _turn_alive_progressing(empty) is False
 
 
+def test_turn_alive_progressing_rejects_terminal_receipt_pending() -> None:
+    """Turn 已终态但 receipt registry 仍 pending 时不得继续空等：
+    _turn_alive_progressing 必须放行到快速失败路径，turn 未终态时仍续等。"""
+    from core.web.services.team_workflow.research_runtime.adapter_dispatch_worker import (
+        _receipt_persistence_pending_terminal,
+        _turn_alive_progressing,
+    )
+    from core.web.services.team_workflow.research_runtime.agent_turn_completion import (
+        TurnNotReadyError,
+    )
+
+    terminal_receipt_pending = TurnNotReadyError(
+        "model invocation receipt persistence is pending",
+        snapshot={
+            "terminal": False,
+            "terminalStatus": "",
+            "completionSource": "receipt_registry_pending",
+            "turnTerminal": True,
+            "turnTerminalStatus": "completed",
+            "receiptPersistencePending": True,
+        },
+    )
+    running_receipt_pending = TurnNotReadyError(
+        "wait",
+        snapshot={
+            "terminal": False,
+            "completionSource": "receipt_registry_pending",
+            "turnTerminal": False,
+            "receiptPersistencePending": True,
+        },
+    )
+
+    assert _receipt_persistence_pending_terminal(terminal_receipt_pending) is True
+    assert _receipt_persistence_pending_terminal(running_receipt_pending) is False
+    assert _turn_alive_progressing(terminal_receipt_pending) is False
+    assert _turn_alive_progressing(running_receipt_pending) is True
+
+
+def test_receipt_persistence_pending_terminal_fails_fast_with_dedicated_code(
+    tmp_path: Path,
+) -> None:
+    """终态 turn 的 receipt 永不落库时必须快速失败（专用 code），不再走
+    10 分钟 live-wait 空等。"""
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run()
+        action = _agent_action()
+        _seed(harness, action, "source_finding")
+        worker = _worker(harness)
+        outbox = _leased_outbox(harness, action, attempt_count=99)
+
+        worker._requeue_receipt_persistence_pending(
+            outbox,
+            action,
+            "model invocation receipt persistence is pending",
+            snapshot={"turnTerminalStatus": "completed"},
+        )
+
+        row = _outbox_row(harness, f"adapter-outbox-{action.action_id}")
+        assert row is not None
+        assert row.status == "failed"
+        problem = json.loads(row.last_problem_json or "{}")
+        assert problem.get("code") == "receipt_persistence_pending_terminal"
+        assert problem.get("turnTerminalStatus") == "completed"
+    finally:
+        harness.close()
+
+
+def test_receipt_persistence_pending_within_budget_requeues_with_dedicated_problem(
+    tmp_path: Path,
+) -> None:
+    """transient 预算内仍先重排（慢 receipt worker 有界重试），problem 带专用 code。"""
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run()
+        action = _agent_action()
+        _seed(harness, action, "source_finding")
+        worker = _worker(harness)
+        outbox = _leased_outbox(harness, action, attempt_count=1)
+
+        worker._requeue_receipt_persistence_pending(
+            outbox,
+            action,
+            "model invocation receipt persistence is pending",
+        )
+
+        row = _outbox_row(harness, f"adapter-outbox-{action.action_id}")
+        assert row is not None
+        assert row.status == "pending"
+        problem = json.loads(row.last_problem_json or "{}")
+        assert problem.get("code") == "receipt_persistence_pending"
+    finally:
+        harness.close()
+
+
 def test_project_task_reconcile_lag_is_live_progressing(monkeypatch) -> None:
     """turn 完成但 project task 记录仍在 running：等待必须走 live-wait，
     不得消耗 transient 预算（慢模型下 5 次重排就误判 transient_exhausted）。"""

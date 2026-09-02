@@ -841,6 +841,7 @@ def start_source_collection_stage_session_task(
     )
     replay_task: dict[str, Any] | None = None
     missing_session_recovery = False
+    replay_recovery_reason = ""
     if idempotency_key:
         existing_task = s._find_source_collection_stage_session_task(
             normalized_team_id,
@@ -862,6 +863,7 @@ def start_source_collection_stage_session_task(
             if replay_action != "reuse":
                 task_id = s._trim_text(replay_task.get("taskId"), max_length=160)
                 missing_session_recovery = replay_action == "formal_retry_same_task"
+                replay_recovery_reason = str(replay.get("recoveryReason") or "").strip()
             else:
                 existing_task = replay_task
         if existing_task is not None and replay_task is not None and replay_action == "reuse":
@@ -1035,10 +1037,11 @@ def start_source_collection_stage_session_task(
     )
     formal_retry = formal_retry_requested or auto_formal_retry
     formal_retry_reason = (
-        "missing_canonical_session"
+        replay_recovery_reason
+        if replay_recovery_reason
+        else "missing_canonical_session"
         if missing_session_recovery
-        else
-        "requested"
+        else "requested"
         if formal_retry_requested
         else "previous_stage_task_failed"
         if auto_formal_retry

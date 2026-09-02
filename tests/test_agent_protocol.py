@@ -98,6 +98,45 @@ def test_turn_failure_diagnostic_includes_prompt_free_turn_correlation(monkeypat
     assert "No successful terminal outcome was available." not in str(scene_fields)
 
 
+def test_context_budget_preflight_guard_records_structured_diagnostic(monkeypatch):
+    """context_budget 硬闸必须留下结构化诊断（context_error/context_budget_exhausted），
+    而不是静默置 failed 后落到 failed_runtime 误判。"""
+    monkeypatch.setattr(agent_module, "_record_agent_scene_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        agent_module,
+        "get_ui",
+        lambda: SimpleNamespace(add_log=lambda *args, **kwargs: None),
+    )
+    agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+    agent.runtime_agent_binding = {}
+    agent._context_input_hard_limit = 1000
+    agent._last_llm_error_details = {}
+    agent._last_llm_failure_attempts = 0
+    agent._last_llm_failure_max_attempts = 0
+    agent._last_turn_metadata = {}
+    agent._last_turn_failed = False
+
+    blocked = agent._context_budget_preflight_guard(
+        estimated_tokens=5000,
+        iteration=3,
+        message_count=40,
+    )
+    not_blocked = agent._context_budget_preflight_guard(
+        estimated_tokens=100,
+        iteration=4,
+        message_count=41,
+    )
+
+    assert blocked is True
+    assert not_blocked is False
+    failure = dict(agent._last_turn_metadata["llm_failure"])
+    assert failure["category"] == "context_error"
+    assert failure["reason_code"] == "context_budget_exhausted"
+    assert failure["chain_stage"] == "llm_preflight"
+    assert failure["recovery_action"] == "compress_context_or_new_session"
+    assert agent._last_turn_failed is True
+
+
 def test_session_turn_reuse_refreshes_turn_scoped_tool_authorization(monkeypatch):
     agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
     agent.key_tools = [SimpleNamespace(name="git_status")]
@@ -4265,6 +4304,111 @@ class TestToolMessageFlow:
         assert result["llm_failure"]["chain_stage"] == "llm_response_normalization"
         assert result["llm_failure"]["event_code"] == "llm.turn_outcome.missing"
         assert "secret prompt" not in str(result["llm_failure"])
+
+    def _build_single_turn_agent(self):
+        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent.name = "tester"
+        agent.config = SimpleNamespace(
+            llm=SimpleNamespace(model_name="demo"),
+            agent=SimpleNamespace(max_iterations=3, awake_interval=1),
+        )
+        agent.mode_policy = ModePolicy(
+            mode=AgentMode.CHAT,
+            orchestrator_kind="chat",
+            keep_multi_turn_context=True,
+            allow_auto_loop=False,
+            capture_chat_dataset_candidates=False,
+            reset_context_before_turn=False,
+            reset_context_between_cases=False,
+            allow_direct_supervised_payload=False,
+            finish_after_direct_response=False,
+            runtime_input_builder=lambda text: text,
+        )
+        agent._effective_max_token_limit = 1024
+        agent.key_tools = [object()]
+        agent._last_turn_failed = False
+        agent._last_turn_metadata = {}
+        return agent
+
+    def _patch_single_turn_env(self, monkeypatch):
+        monkeypatch.setattr(agent_module.logger, "start_session", lambda metadata=None, **kwargs: None)
+        monkeypatch.setattr(agent_module.logger, "end_session", lambda summary=None: None)
+        monkeypatch.setattr(agent_module._debug_logger, "start_session", lambda session_id: None)
+        monkeypatch.setattr(agent_module._debug_logger, "system", lambda *args, **kwargs: None)
+        monkeypatch.setattr(agent_module._debug_logger, "info", lambda *args, **kwargs: None)
+        monkeypatch.setattr(agent_module._debug_logger, "end_session", lambda: None)
+        monkeypatch.setattr(
+            agent_module,
+            "get_session_state",
+            lambda: SimpleNamespace(get_attention_snapshot=lambda: {}),
+        )
+
+    def test_run_single_turn_unexplained_failure_with_final_answer_is_stopped(self, monkeypatch):
+        """_last_turn_failed 但无任何结构化诊断 + 可见最终回复 + 无未完成工具调用
+        → 收口为 stopped，不再误判 failed_runtime。"""
+        agent = self._build_single_turn_agent()
+        self._patch_single_turn_env(monkeypatch)
+
+        def fake_think_and_act(user_prompt=None, goal_override=None, attachments=None, **kwargs):
+            agent._last_visible_response_text = "阶段结论已经写回完成。"
+            agent._last_response_tool_calls = 0
+            agent._recent_tool_records = []
+            agent._last_turn_failed = True
+            return True
+
+        agent.think_and_act = fake_think_and_act
+
+        result = agent.run_single_turn(initial_prompt="probe")
+
+        assert result["status"] == "stopped"
+        assert result["summary"] == "阶段结论已经写回完成。"
+        assert "llm_failure" not in result
+
+    def test_run_single_turn_unexplained_failure_with_pending_tool_calls_stays_failed(self, monkeypatch):
+        """可见回复但最后一步仍有未完成工具调用时，保持 failed（不放宽过头）。"""
+        agent = self._build_single_turn_agent()
+        self._patch_single_turn_env(monkeypatch)
+
+        def fake_think_and_act(user_prompt=None, goal_override=None, attachments=None, **kwargs):
+            agent._last_visible_response_text = "中途片段"
+            agent._last_response_tool_calls = 2
+            agent._recent_tool_records = []
+            agent._last_turn_failed = True
+            return True
+
+        agent.think_and_act = fake_think_and_act
+
+        result = agent.run_single_turn(initial_prompt="probe")
+
+        assert result["status"] == "failed"
+
+    def test_run_single_turn_llm_failure_with_visible_answer_stays_failed(self, monkeypatch):
+        """有 llm_failure 结构化诊断时即使有可见回复也必须保持 failed（回归）。"""
+        agent = self._build_single_turn_agent()
+        self._patch_single_turn_env(monkeypatch)
+        monkeypatch.setattr(agent_module, "_record_agent_scene_event", lambda *args, **kwargs: None)
+
+        def fake_think_and_act(user_prompt=None, goal_override=None, attachments=None, **kwargs):
+            agent._last_visible_response_text = "已有可见回复"
+            agent._last_response_tool_calls = 0
+            agent._recent_tool_records = []
+            agent._record_turn_failure_diagnostic(
+                category="context_error",
+                reason_code="context_budget_exhausted",
+                reason_summary="上下文预算超出硬上限",
+                reason_detail="估算输入 tokens 超过硬上限。",
+                chain_stage="llm_preflight",
+                event_code="agent.context_budget_exhausted",
+            )
+            return True
+
+        agent.think_and_act = fake_think_and_act
+
+        result = agent.run_single_turn(initial_prompt="probe")
+
+        assert result["status"] == "failed"
+        assert result["llm_failure"]["reason_code"] == "context_budget_exhausted"
+        assert result["llm_failure"]["category"] == "context_error"
 
     def test_run_single_turn_preserves_tool_progress_without_loop_guard_reply(self, monkeypatch):
         agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)

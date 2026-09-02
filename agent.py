@@ -1004,6 +1004,31 @@ class SelfEvolvingAgent:
             )
         except Exception:
             pass
+        # The hard gate must leave a structured, prompt-free diagnostic:
+        # without it the turn fell into the generic
+        # ``agent_turn_failed_without_diagnostics`` fallback and was
+        # misclassified as a runtime failure.
+        self._record_turn_failure_diagnostic(
+            category="context_error",
+            reason_code="context_budget_exhausted",
+            reason_summary="上下文预算超出硬上限",
+            reason_detail=(
+                "估算输入 tokens 超过硬上限，模型调用被前置闸拒绝；"
+                "请压缩会话上下文或为新任务改用新会话后重试"
+                "（context_budget_exhausted）。"
+            ),
+            chain_stage="llm_preflight",
+            event_code="agent.context_budget_exhausted",
+            retryable=False,
+            recovery_action="compress_context_or_new_session",
+            fields={
+                "iteration": iteration,
+                "estimatedTokens": decision["estimatedTokens"],
+                "contextInputHardLimit": decision["hardLimit"],
+                "messageCount": message_count,
+                "guardReason": decision["guardReason"],
+            },
+        )
         return True
 
     def _init_llm(self):
@@ -2480,7 +2505,9 @@ class SelfEvolvingAgent:
                     iteration=iteration,
                     message_count=len(messages),
                 ):
-                    self._last_turn_failed = True
+                    # The guard already recorded the structured
+                    # context_budget_exhausted diagnostic and set
+                    # _last_turn_failed; just close the turn here.
                     break
                 if policy.mode == AgentMode.CHAT:
                     messages, reconcile_ok = self._reconcile_chat_conversation_before_llm(messages)
@@ -3519,8 +3546,21 @@ class SelfEvolvingAgent:
                 dict,
             ) and bool((getattr(self, "_last_turn_metadata", {}) or {}).get("llm_failure"))
             status = "completed"
-            if self._last_turn_failed or has_llm_failure or metadata_status in {"failed", "error", "timeout"}:
+            if has_llm_failure or metadata_status in {"failed", "error", "timeout"}:
                 status = "failed"
+            elif self._last_turn_failed:
+                # Misclassification guard: a bare ``_last_turn_failed`` without
+                # any structured failure evidence (no llm_failure, metadata not
+                # failed/error/timeout) must not downgrade a turn that already
+                # produced a visible final answer with no pending tool calls
+                # into a runtime failure.
+                has_unfinished_tool_calls = (
+                    int(getattr(self, "_last_response_tool_calls", 0) or 0) > 0
+                )
+                if partial_visible and not has_unfinished_tool_calls:
+                    status = "stopped"
+                else:
+                    status = "failed"
             elif metadata_status == "stopped" or not ok:
                 status = "stopped"
             if status == "failed" and not has_llm_failure:
