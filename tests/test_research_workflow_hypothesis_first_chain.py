@@ -1478,6 +1478,113 @@ def test_dimension_reviews_persistence_failure_keeps_run_identity_bound(
     assert independence_calls[0]["workflow_run_id"] == "workflow-authorities"
     assert independence_calls[0]["node_run_id"] == "node-authorities"
 
+def test_dimension_reviews_import_failure_carries_real_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: a missing dimension-reviews dependency fails truthfully.
+
+    The audited distortion: the ``workflow_run_id`` binding used to live
+    inside the dimension-reviews try block, so an import failure left it
+    unbound and the downstream review-independence try surfaced a swallowed
+    ``NameError`` masquerading as a persistence blocker.  The run identity is
+    now bound before any authority try block, and an import failure surfaces
+    as the real dependency error on the blocked dimension authority while the
+    downstream authority still writes with the bound identity.
+    """
+    import sys
+
+    from core.web.services.team_workflow.research_runtime import (
+        review_independence_artifact_writer,
+    )
+
+    team_id = "team-review-authorities"
+    meeting = {
+        "meetingRoundId": "meeting-authorities",
+        "question": "SCI-091",
+        "scopeHash": "scope-authorities",
+        "discussionScope": {"workflowRunId": "workflow-authorities"},
+        "modelInvocationReceiptAuthority": {
+            "workflowRunId": "workflow-authorities",
+            "sourceCollectionRunId": "source-authorities",
+        },
+        "nodeRunId": "node-authorities",
+        "inputSnapshotHash": "a" * 64,
+        "inputArtifactRefs": ["evidence_card_batch://team/source/hash"],
+    }
+    candidates = [
+        {"candidateId": "H1", "claim": "claim one"},
+        {"candidateId": "H2", "claim": "claim two"},
+    ]
+    round_record = {
+        "roundId": "round-authorities",
+        "reviewContextId": "context-authorities",
+        "executionMode": "formal",
+        "roles": {"metareview": "coordinator-1"},
+        "modelInvocationReceipts": [],
+        "candidates": candidates,
+        "pairwiseComparisons": [],
+        "pareto": {},
+        "metaReview": {},
+    }
+    monkeypatch.setattr(
+        chain,
+        "_review_meeting_fan_in_group",
+        lambda *_args, **_kwargs: {
+            "status": "ready",
+            "selectionId": "selection-authorities",
+            "roundIndex": 1,
+            "meetings": [meeting],
+        },
+    )
+    monkeypatch.setattr(
+        selections,
+        "get_hypothesis_selection",
+        lambda *_args, **_kwargs: {
+            "selection": {
+                "scopeHash": "scope-authorities",
+                "questionId": "SCI-091",
+                "selectedCandidateIds": ["H1", "H2"],
+            }
+        },
+    )
+    monkeypatch.setattr(chain, "_build_round_candidates", lambda *_a, **_k: candidates)
+    monkeypatch.setattr(
+        hrounds,
+        "generate_hypothesis_round_from_meeting",
+        lambda *_args, **_kwargs: {"status": "created", "round": round_record},
+    )
+    # Simulate the dependency being unavailable at import time (the audited
+    # scenario), not just the materialization call failing.
+    monkeypatch.setitem(
+        sys.modules,
+        "core.web.services.team_workflow.research_runtime.dimension_reviews_artifact_writer",
+        None,
+    )
+    independence_calls: list[dict[str, object]] = []
+
+    def write_independence(**kwargs):
+        independence_calls.append(kwargs)
+        return {"status": "written"}
+
+    monkeypatch.setattr(
+        review_independence_artifact_writer,
+        "write_review_independence_artifacts",
+        write_independence,
+    )
+
+    result = chain._generate_hypothesis_round(team_id, meeting)
+
+    dimension_authority = result["dimensionReviewsAuthority"]
+    assert dimension_authority["status"] == "blocked"
+    # The real cause (the unavailable dependency) is surfaced verbatim.
+    assert "dimension_reviews_artifact_writer" in str(dimension_authority["error"])
+    # No NameError distortion anywhere: the run identity was never unbound.
+    assert "NameError" not in str(dimension_authority["error"])
+    assert "NameError" not in str(result["reviewIndependenceAuthority"])
+    assert result["reviewIndependenceAuthority"]["status"] == "written"
+    assert independence_calls[0]["workflow_run_id"] == "workflow-authorities"
+    assert independence_calls[0]["node_run_id"] == "node-authorities"
+
 
 def _canonical_stage_one_question_detail() -> dict[str, Any]:
     return {
