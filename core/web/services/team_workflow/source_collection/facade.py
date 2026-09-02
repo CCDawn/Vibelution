@@ -435,6 +435,15 @@ def _find_existing_run(
             not search_fingerprint
             or _run_fingerprint(item) == search_fingerprint
         )
+        # A cancelled/failed attempt is not reusable idempotent state: ensure
+        # callers (notably collection-request recovery) would bind the dead run
+        # again and every retry would immediately settle back to terminal.  A
+        # terminal-unsuccessful run must re-create; completed runs stay
+        # reusable and inspect (empty fingerprint) is unaffected.
+        and (
+            not search_fingerprint
+            or _text(item.get("status")).lower() not in {"cancelled", "failed"}
+        )
     ]
     if not runs:
         return None
