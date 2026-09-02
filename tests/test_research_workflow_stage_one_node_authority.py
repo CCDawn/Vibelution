@@ -11,9 +11,12 @@ converged.  These tests pin the repair:
   writer set, re-bound to the CURRENT node run (nodeRunId in every binding and
   identity), and the completion-gate readback then resolves all seven chain
   authority kinds;
-- ``core_hypothesis_coherence`` is reuse-only (its verdicts are not persisted
-  in the round), so a store row written at generation time is reused and an
-  absent one is reported as a missing authority instead of being faked;
+- ``core_hypothesis_coherence`` is reused when a store row was already written
+  at generation time (formal scope); when the row is absent — the dev/platform
+  round case, where the review executor skips the artifact write — the
+  authority is recovered from the round's persisted per-candidate verdicts,
+  and verdict data that is absent, incomplete, or not fully passed keeps the
+  fail-closed missing-authority blocker instead of being faked;
 - replaying the materialization reuses existing rows (append-only store,
   no ``WorkflowArtifactConflictError``) and writes nothing new;
 - the agent-turn path runs the materialization before the completion gate and
@@ -125,14 +128,52 @@ def _seed_evidence_ref(team_id: str) -> str:
     )
 
 
+def _round_coherence_result(
+    candidate_id: str,
+    *,
+    passed: bool = True,
+) -> dict[str, Any]:
+    """Per-candidate coherence verdict exactly as a dev-mode round persists it.
+
+    Mirrors the live chain-driven rounds: five canonical checks, an ``llm``
+    reviewer and an empty ``receiptRef`` (dev/platform rounds carry no model
+    invocation receipts), with the contract self-verifying ``artifactHash``.
+    """
+    checks = [
+        {
+            "checkId": check_id,
+            "passed": passed,
+            "rationale": (
+                f"{check_id} holds for {candidate_id}."
+                if passed
+                else f"{check_id} fails for {candidate_id}."
+            ),
+            "claimRefs": [f"claim:{candidate_id}"],
+        }
+        for check_id in CORE_HYPOTHESIS_COHERENCE_CHECK_IDS
+    ]
+    return CoreHypothesisCoherenceResult.from_review_payload(
+        {"checks": checks},
+        candidate_id=candidate_id,
+        reviewer="llm",
+        receipt_ref="",
+    ).to_dict()
+
+
 def _seed_closed_round(
     team_id: str,
     *,
     round_id: str,
     accepted: bool,
     revision_envelope: dict[str, Any] | None = None,
+    coherence_passed: bool | None = True,
 ) -> dict[str, Any]:
-    """Seed one closed hypothesis round plus its review meeting (dev review)."""
+    """Seed one closed hypothesis round plus its review meeting (dev review).
+
+    ``coherence_passed=True`` attaches valid all-passed coherence verdicts to
+    every candidate (the default live shape); ``False`` attaches failing
+    verdicts; ``None`` omits the verdicts entirely (no recoverable data).
+    """
     evidence_ref = _seed_evidence_ref(team_id)
     meeting = {
         "schemaVersion": 1,
@@ -162,7 +203,7 @@ def _seed_closed_round(
     meetings._append_jsonl(meetings._rounds_path(team_id), meeting)
 
     def _candidate(candidate_id: str, claim: str, reviewer: str) -> dict[str, Any]:
-        return {
+        candidate = {
             "candidateId": candidate_id,
             "claim": claim,
             "rationale": f"rationale for {candidate_id}",
@@ -195,6 +236,11 @@ def _seed_closed_round(
                 )
             ],
         }
+        if coherence_passed is not None:
+            candidate["coreHypothesisCoherence"] = _round_coherence_result(
+                candidate_id, passed=coherence_passed
+            )
+        return candidate
 
     payload: dict[str, Any] = {
         **_scope_identity(),
@@ -635,6 +681,238 @@ def test_node_agent_turn_materializes_chain_authority_before_completion_gate(
     assert verified.outcome == "succeeded", verified.problem
     receipts = {item["artifactType"] for item in verified.artifact_receipts}
     assert set(required_kinds) <= receipts
+
+
+def test_dev_mode_round_recovers_coherence_authority_from_round(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Dev/platform rounds recover the coherence authority from round verdicts.
+
+    A chain-driven review round runs with ``executionMode=dev`` and no model
+    invocation receipts, so the review executor never writes the coherence
+    artifact at generation time.  The verdicts themselves persist on the round
+    candidates, so the node materialization must recover and persist them
+    (``require_receipts=False``) instead of blocking; the node verify gate then
+    resolves every required ref including the recovered authority.
+    """
+    from core.web.services.team_workflow.research_runtime import (
+        agent_turn_completion,
+        question_launch,
+        real_domain_ports,
+    )
+    from core.web.services.team_workflow.research_runtime.adapters.domain_adapters import (
+        AgentActionAdapter,
+    )
+    from core.web.services.team_workflow.research_runtime.action_registry import (
+        AdapterResult,
+    )
+    from core.web.services.team_workflow.research_runtime.domain_ports import (
+        AgentTaskHandle,
+    )
+
+    team_id = _env(tmp_path, monkeypatch)
+    _seed_closed_round(
+        team_id,
+        round_id="hround-stage-one-authority-1",
+        accepted=True,
+        revision_envelope=_revision_envelope(),
+    )
+    monkeypatch.setattr(
+        question_launch,
+        "_approved_details",
+        lambda _team_id: _question_authority(),
+    )
+    workflow_artifact_store.put_workflow_artifact(
+        team_id,
+        kind="hypothesis_set",
+        workflow_run_id=_RUN_ID,
+        source_collection_run_id=_SC_RUN_ID,
+        payload={"hypotheses": [{"hypothesis_id": "cand-a"}]},
+    )
+
+    snapshot = {
+        "teamId": team_id,
+        "questionId": _QUESTION_ID,
+        "sourceCollectionRunId": _SC_RUN_ID,
+    }
+    action = _pending_action("action-stage-one-coherence")
+    required_kinds = ("hypothesis_set", *chain.STAGE_ONE_NODE_AUTHORITY_KINDS)
+
+    def fake_complete(**kwargs):
+        refs = agent_turn_completion.collect_required_artifact_refs(
+            required_kinds=kwargs["required_kinds"],
+            team_id=kwargs["input_snapshot"]["teamId"],
+            workflow_run_id=kwargs["action"].run_id,
+            source_collection_run_id=(
+                kwargs["input_snapshot"].get("sourceCollectionRunId")
+                or kwargs["action"].run_id
+            ),
+        )
+        return agent_turn_completion.AgentTurnResult(
+            materialized_refs=tuple(refs),
+            handle=kwargs["handle"],
+            usage=None,
+        )
+
+    ports = real_domain_ports.RealDomainPorts(object())
+    monkeypatch.setattr(
+        ports, "_run_input_snapshot", lambda _run_id: dict(snapshot)
+    )
+    monkeypatch.setattr(
+        ports,
+        "required_artifact_kinds",
+        lambda _action: required_kinds,
+    )
+    monkeypatch.setattr(
+        agent_turn_completion, "complete_agent_turn_outputs", fake_complete
+    )
+    handle = AgentTaskHandle(
+        session_id="session-stage-one",
+        session_attempt=2,
+        task_id="task-stage-one",
+        turn_id="turn-stage-one",
+    )
+
+    result = ports.execute_agent_turn(action=action, handle=handle)
+
+    ref_kinds = {item["kind"] for item in result.materialized_refs}
+    assert ref_kinds == set(required_kinds)
+
+    # The node verify gate that blocked dev-mode runs now succeeds.
+    adapter = AgentActionAdapter(ports)
+    verified = adapter.verify(
+        action,
+        AdapterResult(
+            action_id=action.action_id,
+            outcome="succeeded",
+            materialized_refs=result.materialized_refs,
+            anchor={"actionId": action.action_id},
+            usage={"estimate_tokens": 1},
+            reserved={"reservationId": "res-stage-one"},
+        ),
+    )
+    assert verified.outcome == "succeeded", verified.problem
+    receipts = {item["artifactType"] for item in verified.artifact_receipts}
+    assert set(required_kinds) <= receipts
+
+    # The recovered authority is the round's persisted verdicts, replayed
+    # through the same contract (empty receiptRefs, self-verifying hashes).
+    rows = workflow_artifact_store.list_workflow_artifacts(
+        team_id, kind="core_hypothesis_coherence", workflow_run_id=_RUN_ID
+    )
+    assert len(rows) == 1
+    payload = rows[-1]["payload"]
+    assert payload["reviewContextId"] == "ctx-stage-one-authority"
+    assert payload["passed"] is True
+    parsed = [
+        CoreHypothesisCoherenceResult.from_dict(item)
+        for item in payload["results"]
+    ]
+    assert {item.candidateId for item in parsed} == {"cand-a", "cand-b"}
+    assert all(item.passed for item in parsed)
+    assert all(item.receiptRef == "" for item in parsed)
+
+    # Idempotent replay: the recovered row is probed and reused, not rewritten.
+    replay = chain.materialize_stage_one_node_authority(
+        team_id,
+        _QUESTION_ID,
+        workflow_run_id=_RUN_ID,
+        node_run_id=_NODE_RUN_ID,
+        input_snapshot_hash=_SNAPSHOT_HASH,
+        source_collection_run_id=_SC_RUN_ID,
+    )
+    assert replay["status"] == "materialized"
+    assert replay["writtenKinds"] == []
+    assert set(replay["reusedKinds"]) == set(chain.STAGE_ONE_NODE_AUTHORITY_KINDS)
+    assert (
+        len(
+            workflow_artifact_store.list_workflow_artifacts(
+                team_id, kind="core_hypothesis_coherence", workflow_run_id=_RUN_ID
+            )
+        )
+        == 1
+    )
+
+
+def test_round_without_coherence_verdicts_stays_fail_closed(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No persisted verdicts on the round: the blocker stays, nothing faked."""
+    from core.web.services.team_workflow.research_runtime import question_launch
+
+    team_id = _env(tmp_path, monkeypatch)
+    _seed_closed_round(
+        team_id,
+        round_id="hround-stage-one-authority-1",
+        accepted=True,
+        revision_envelope=_revision_envelope(),
+        coherence_passed=None,
+    )
+    monkeypatch.setattr(
+        question_launch,
+        "_approved_details",
+        lambda _team_id: _question_authority(),
+    )
+
+    report = chain.materialize_stage_one_node_authority(
+        team_id,
+        _QUESTION_ID,
+        workflow_run_id=_RUN_ID,
+        node_run_id=_NODE_RUN_ID,
+        input_snapshot_hash=_SNAPSHOT_HASH,
+        source_collection_run_id=_SC_RUN_ID,
+    )
+
+    assert report["status"] == "blocked"
+    assert report["missingKinds"] == ["core_hypothesis_coherence"]
+    assert report["blockerCodes"] == {
+        "core_hypothesis_coherence": ["core_hypothesis_coherence_authority_missing"]
+    }
+    assert not workflow_artifact_store.list_workflow_artifacts(
+        team_id, kind="core_hypothesis_coherence", workflow_run_id=_RUN_ID
+    )
+
+
+def test_round_with_failing_coherence_verdict_stays_fail_closed(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A not-fully-passed verdict set is never materialized as satisfied."""
+    from core.web.services.team_workflow.research_runtime import question_launch
+
+    team_id = _env(tmp_path, monkeypatch)
+    _seed_closed_round(
+        team_id,
+        round_id="hround-stage-one-authority-1",
+        accepted=True,
+        revision_envelope=_revision_envelope(),
+        coherence_passed=False,
+    )
+    monkeypatch.setattr(
+        question_launch,
+        "_approved_details",
+        lambda _team_id: _question_authority(),
+    )
+
+    report = chain.materialize_stage_one_node_authority(
+        team_id,
+        _QUESTION_ID,
+        workflow_run_id=_RUN_ID,
+        node_run_id=_NODE_RUN_ID,
+        input_snapshot_hash=_SNAPSHOT_HASH,
+        source_collection_run_id=_SC_RUN_ID,
+    )
+
+    assert report["status"] == "blocked"
+    assert report["missingKinds"] == ["core_hypothesis_coherence"]
+    assert report["blockerCodes"] == {
+        "core_hypothesis_coherence": ["core_hypothesis_coherence_authority_missing"]
+    }
+    assert not workflow_artifact_store.list_workflow_artifacts(
+        team_id, kind="core_hypothesis_coherence", workflow_run_id=_RUN_ID
+    )
 
 
 def test_blocked_node_problem_carries_chain_authority_reason(

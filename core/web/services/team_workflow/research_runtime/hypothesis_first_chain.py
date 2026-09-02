@@ -9779,9 +9779,11 @@ def materialize_stage_one_node_authority(
     append-only) and never rewritten, so replays neither duplicate rows nor
     raise ``WorkflowArtifactConflictError``.  Writers stay fail-closed: any
     blocker is reported per kind and never faked into success.  A missing
-    ``core_hypothesis_coherence`` authority cannot be rebuilt from chain
-    records (the coherence verdicts are not persisted in the round) and is
-    reported as missing instead of being regenerated.
+    ``core_hypothesis_coherence`` authority is recovered from the accepted
+    round's persisted per-candidate coherence verdicts (dev/platform rounds
+    skip the artifact write at generation time, so the recovery replays it
+    with ``require_receipts=False``); verdict data that is absent, incomplete,
+    or not fully passed is reported as missing instead of being regenerated.
     """
     from core.web.services.team_service import assert_team_exists
 
@@ -10099,16 +10101,65 @@ def materialize_stage_one_node_authority(
                 "hypothesis_revision_evidence_missing"
             ]
 
-    # core_hypothesis_coherence — never rebuilt here: the coherence verdicts
-    # live only in the review executor's reflection output, so a readable
-    # authority is reused and an absent one is reported as missing.
+    # core_hypothesis_coherence — a readable authority is reused. An absent one
+    # is recovered from the accepted round's persisted per-candidate verdicts:
+    # chain-driven reviews may run with executionMode=dev, in which case the
+    # review executor never wrote the artifact (no formal receipts), but the
+    # complete verdict itself is persisted on every round candidate. Recovery
+    # replays the exact same fail-closed writer (probe first, so replays stay
+    # idempotent); fewer than two unique candidates, any non-passed verdict, or
+    # a persistence error keeps the fail-closed blocker — nothing is faked.
     if _probe("core_hypothesis_coherence"):
         satisfied.append("core_hypothesis_coherence")
         reused.append("core_hypothesis_coherence")
     else:
-        blockers_by_kind["core_hypothesis_coherence"] = [
-            "core_hypothesis_coherence_authority_missing"
+        coherence_results = [
+            dict(item.get("coreHypothesisCoherence"))
+            for item in list(accepted_round.get("candidates") or [])
+            if isinstance(item, Mapping)
+            and isinstance(item.get("coreHypothesisCoherence"), Mapping)
         ]
+        coherence_ids = {
+            str(item.get("candidateId") or "").strip()
+            for item in coherence_results
+        }
+        if (
+            len(coherence_ids) < 2
+            or "" in coherence_ids
+            or not all(item.get("passed") is True for item in coherence_results)
+        ):
+            blockers_by_kind["core_hypothesis_coherence"] = [
+                "core_hypothesis_coherence_authority_missing"
+            ]
+        else:
+            try:
+                from core.web.services.team_workflow.research_runtime.core_hypothesis_coherence_artifact_writer import (
+                    record_core_hypothesis_coherence_artifact,
+                )
+
+                record_core_hypothesis_coherence_artifact(
+                    team_id=team,
+                    workflow_run_id=run,
+                    source_collection_run_id=source,
+                    review_context_id=str(
+                        accepted_round.get("reviewContextId") or ""
+                    ),
+                    results=coherence_results,
+                    # Dev/platform rounds carry no model-invocation receipts by
+                    # design; an empty receiptRef is the persisted truth here,
+                    # not a defect. Formal callers keep require_receipts=True.
+                    require_receipts=False,
+                )
+            except Exception as exc:  # noqa: BLE001 - fail-closed blocker
+                blockers_by_kind["core_hypothesis_coherence"] = [
+                    "core_hypothesis_coherence_authority_persistence_failed"
+                ]
+                errors["core_hypothesis_coherence"] = (
+                    str(exc) or type(exc).__name__
+                )
+            else:
+                satisfied.append("core_hypothesis_coherence")
+                written.append("core_hypothesis_coherence")
 
     # stage1_research_plan + competition_alignment — projected from the
     # approved question authority under the accepted round's recommendation.
