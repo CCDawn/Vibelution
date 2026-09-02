@@ -39,6 +39,22 @@ _FORMAL_RUN_TERMINAL_STATUSES = frozenset(
 _ACTIVE_GENERATION_MEETING_STATUSES = frozenset(
     {"open", "summarizing", "awaiting_approval"}
 )
+# Meeting-scoped recovery commands that must survive the phase fence.  A
+# review round opened after convergence (the sanctioned next-round recovery
+# route has no convergence gate) can stall in a formal-authoritative phase;
+# these repairs are meeting/request-scoped, not phase transitions, so the
+# projection re-targets them to the authoritative current phase instead of
+# dropping them and dead-ending the meeting behind a direct-route-only fix.
+_MEETING_RECOVERY_COMMANDS = frozenset(
+    {
+        "approve_summary",
+        "regenerate_summary",
+        "resume_discussion",
+        "stop_discussion",
+        "reopen_review",
+        "retry_review_dispatch",
+    }
+)
 _TIMESTAMP_KEYS = {
     "createdAt",
     "updatedAt",
@@ -3891,11 +3907,28 @@ def project_state_from_records(
     # Capabilities belong to the authoritative current phase.  Without this
     # fence, a succeeded formal run whose delivery is blocked can still expose
     # an upstream generation action and send first-action clients backwards.
-    allowed_actions = [
+    fenced_actions = [
         action
         for action in allowed_actions
         if str(action.get("targetPhase") or "") == current_phase
     ]
+    # Meeting-scoped recovery survives the fence: the review round opened
+    # after convergence is still live (open/awaiting/failed dispatch), and its
+    # reopen/resume/approve repairs must reach the UI instead of leaving the
+    # direct reopen route as the only entry.  The re-offer keeps the action's
+    # identity (actionId, idempotencyKey, payload) and only re-targets the
+    # phase so phase-equal consumers keep receiving it.
+    for action in allowed_actions:
+        if str(action.get("targetPhase") or "") == current_phase:
+            continue
+        if (
+            action.get("kind") == "command"
+            and str(action.get("command") or "") in _MEETING_RECOVERY_COMMANDS
+        ):
+            retargeted = deepcopy(action)
+            retargeted["targetPhase"] = current_phase
+            fenced_actions.append(retargeted)
+    allowed_actions = fenced_actions
     # Dead-state sentinel: a finished (or failed) generation with no
     # candidates, no formal run to fall back on, and no offered command
     # transition would leave the question with no way forward.  A bare

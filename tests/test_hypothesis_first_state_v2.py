@@ -3729,6 +3729,229 @@ def test_stale_review_dispatch_intent_offers_retry_dispatch() -> None:
     assert retry.payload.candidateIds == ["candidate-1"]
 
 
+# ---------------------------------------------------------------------------
+# Formal-phase review recovery vs the capability fence
+# ---------------------------------------------------------------------------
+
+
+def _converged_chain_with_review_fixture(
+    *,
+    meeting_status: str,
+    minutes_ago: float,
+    with_meeting: bool = True,
+) -> HypothesisFirstStateV2:
+    """A chain whose round-1 meta-review accepted, plus a live round-2 review.
+
+    Mirrors the sanctioned post-convergence recovery: ``open_next_review``
+    has no convergence gate, so an operator-opened next round can coexist
+    with ``hypothesisConverged`` from round 1 and put a live review meeting
+    under a formal-authoritative current phase.
+    """
+    chain_records: list[dict[str, object]] = [
+        {
+            "recordKind": "hypothesis_candidate",
+            "candidateId": "candidate-a",
+            "questionId": "SCI-001",
+            "createdAt": _iso_minute_offset(minutes_ago + 60),
+        }
+    ]
+    meeting_records: list[dict[str, object]] = []
+    if with_meeting:
+        chain_records.append(
+            {
+                "recordKind": "review_round_link",
+                "linkId": "link-r2-candidate-a",
+                "questionId": "SCI-001",
+                "selectionId": "selection-1",
+                "candidateId": "candidate-a",
+                "candidateOrder": 0,
+                "roundIndex": 2,
+                "meetingRoundId": "meeting-post-convergence",
+                "createdAt": _iso_minute_offset(minutes_ago + 5),
+            }
+        )
+        meeting_records.append(
+            {
+                "meetingRoundId": "meeting-post-convergence",
+                "meetingType": "hypothesis_review",
+                "question": "SCI-001",
+                "selectionId": "selection-1",
+                "status": meeting_status,
+                "linkedChatRoomId": "room-1",
+                "createdAt": _iso_minute_offset(minutes_ago + 5),
+                "heartbeatAt": _iso_minute_offset(minutes_ago),
+            }
+        )
+    return HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=chain_records,
+            selection_records=[
+                {
+                    "selectionId": "selection-1",
+                    "questionId": "SCI-001",
+                    "selectedCandidateIds": ["candidate-a"],
+                    "createdAt": _iso_minute_offset(minutes_ago + 70),
+                }
+            ],
+            meeting_records=meeting_records,
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[
+                {
+                    "recordKind": "hypothesis_round",
+                    "roundId": "round-accepted",
+                    "question": "SCI-001",
+                    "roundIndex": 1,
+                    "status": "closed",
+                    "createdAt": _iso_minute_offset(minutes_ago + 30),
+                    "metaReview": {
+                        "accepted": True,
+                        "recommendationCandidateId": "candidate-a",
+                    },
+                }
+            ],
+            formal_runs=[],
+        )
+    )
+
+
+def test_converged_formal_phase_stalled_review_meeting_keeps_reopen_recovery() -> None:
+    """The phase fence must not swallow post-convergence review recovery.
+
+    A review meeting opened after convergence (the next-round route has no
+    convergence gate) can stall heartbeat-stale while the authoritative
+    current phase is ``formal_runtime``.  Dropping its ``reopen_review``
+    repair left the direct reopen route as the only entry; the projection
+    must re-target the meeting-scoped recovery to the current phase.
+    """
+    state = _converged_chain_with_review_fixture(
+        meeting_status="open", minutes_ago=30 * 60 + 5
+    )
+
+    assert state.convergence.accepted is True
+    assert state.currentPhase == "formal_runtime"
+    assert any(
+        problem.code == "review_heartbeat_stale" for problem in state.problems
+    )
+    reopen = next(
+        action
+        for action in state.allowedActions
+        if action.kind == "command" and action.command == "reopen_review"
+    )
+    assert reopen.targetPhase == "formal_runtime"
+    assert reopen.payload.meetingRoundId == "meeting-post-convergence"
+    assert reopen.actionId == "reopen-review:meeting-post-convergence"
+    assert reopen.enabled is True
+    # The fence keeps its core contract: upstream navigation and phase
+    # transitions stay dropped, and the formal capability survives untouched.
+    assert not any(
+        action.kind == "navigation"
+        and action.targetPhase == "formal_runtime"
+        and action.actionId.startswith("open-review-room")
+        for action in state.allowedActions
+    )
+    assert not any(
+        action.kind == "command"
+        and action.command in {"open_next_review", "human_adjudication"}
+        for action in state.allowedActions
+    )
+    assert any(
+        action.kind == "command" and action.command == "create_formal_run"
+        for action in state.allowedActions
+    )
+
+
+def test_converged_formal_phase_awaiting_review_meeting_keeps_digest_approval() -> None:
+    """A post-convergence meeting awaiting digest approval keeps its entry."""
+
+    state = _converged_chain_with_review_fixture(
+        meeting_status="awaiting_approval", minutes_ago=30 * 60 + 5
+    )
+
+    assert state.currentPhase == "formal_runtime"
+    approve = next(
+        action
+        for action in state.allowedActions
+        if action.kind == "command" and action.command == "approve_summary"
+    )
+    assert approve.targetPhase == "formal_runtime"
+    assert approve.payload.meetingRoundId == "meeting-post-convergence"
+
+
+def test_converged_formal_phase_stale_dispatch_keeps_retry_review_dispatch() -> None:
+    """A stale post-convergence dispatch keeps its guarded retry offer."""
+
+    # A round-2 dispatch attempt that never became a meeting: heartbeat stale
+    # for hours, so the aggregate is blocked and the guarded retry applies.
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[
+                {
+                    "recordKind": "hypothesis_candidate",
+                    "candidateId": "candidate-a",
+                    "questionId": "SCI-001",
+                    "createdAt": _iso_minute_offset(30 * 60 + 65),
+                },
+                {
+                    "recordKind": "review_dispatch_attempt",
+                    "attemptId": "dispatch-r2-1",
+                    "attemptNumber": 1,
+                    "selectionId": "selection-1",
+                    "candidateId": "candidate-a",
+                    "roundIndex": 2,
+                    "questionId": "SCI-001",
+                    "lifecycle": "running",
+                    "createdAt": _iso_minute_offset(30 * 60 + 5),
+                    "updatedAt": _iso_minute_offset(30 * 60),
+                },
+            ],
+            selection_records=[
+                {
+                    "selectionId": "selection-1",
+                    "questionId": "SCI-001",
+                    "selectedCandidateIds": ["candidate-a"],
+                    "createdAt": _iso_minute_offset(30 * 60 + 70),
+                }
+            ],
+            meeting_records=[],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[
+                {
+                    "recordKind": "hypothesis_round",
+                    "roundId": "round-accepted",
+                    "question": "SCI-001",
+                    "roundIndex": 1,
+                    "status": "closed",
+                    "createdAt": _iso_minute_offset(30 * 60 + 30),
+                    "metaReview": {
+                        "accepted": True,
+                        "recommendationCandidateId": "candidate-a",
+                    },
+                }
+            ],
+            formal_runs=[],
+        )
+    )
+
+    assert state.convergence.accepted is True
+    assert state.currentPhase == "formal_runtime"
+    retry = next(
+        action
+        for action in state.allowedActions
+        if action.kind == "command" and action.command == "retry_review_dispatch"
+    )
+    assert retry.targetPhase == "formal_runtime"
+    assert retry.payload.selectionId == "selection-1"
+    assert retry.payload.candidateIds == ["candidate-a"]
+
+
 def test_v2_retry_generation_command_opens_generation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
