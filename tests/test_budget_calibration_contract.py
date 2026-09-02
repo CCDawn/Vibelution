@@ -154,6 +154,35 @@ def test_real_batch_uses_the_formal_budget_capacity_contract() -> None:
     }
 
 
+def test_launch_stage_capacity_covers_observed_max_attempt() -> None:
+    """Every launch stage default must admit the observed worst single real
+    attempt with headroom (SCI-091 production: one source_finding attempt
+    settled ~407K tokens, metering allowed overrun to 460K+).  A stage limit
+    below one real attempt deadlocks the stage after the first settle and
+    forces a manual extend_budget, so the 1M calibration floor is a contract.
+    The other stages stay at the shared uniform DEFAULT (2M): unchanged."""
+    from core.web.services.team_workflow.research_runtime.budget_contract import (
+        DEFAULT_STAGE_TOKENS,
+        FORMAL_STAGE_IDS,
+        default_safety_limits,
+    )
+    from core.web.services.team_workflow.research_runtime.hypothesis_first_chain import (
+        _formal_run_safety_limits,
+    )
+
+    OBSERVED_MAX_ATTEMPT_TOKENS = 460_000
+    CALIBRATION_FLOOR_TOKENS = 1_000_000
+
+    for limits in (default_safety_limits(), _formal_run_safety_limits()):
+        assert set(limits["stageTokens"]) == set(FORMAL_STAGE_IDS)
+        assert (
+            limits["stageTokens"]["knowledge_collection"] >= CALIBRATION_FLOOR_TOKENS
+        )
+        for stage_id in FORMAL_STAGE_IDS:
+            assert limits["stageTokens"][stage_id] == DEFAULT_STAGE_TOKENS
+            assert limits["stageTokens"][stage_id] >= OBSERVED_MAX_ATTEMPT_TOKENS * 2
+
+
 def test_question_launch_accepts_the_formal_budget_capacity_contract() -> None:
     """The launch validator must accept the same 2M capacity as the runtime."""
     from core.web.services.team_workflow.research_runtime.question_launch import (

@@ -16,9 +16,9 @@ describe("buildResearchRunInput", () => {
       questionId: "SCI-096",
       safetyLimits: {
         stageTokens: {
-          knowledge_collection: 250000,
-          experiment_design: 250000,
-          execution_iteration: 250000,
+          knowledge_collection: 1000000,
+          experiment_design: 1000000,
+          execution_iteration: 1000000,
         },
         toolCalls: 300,
         wallClockSeconds: 21600,

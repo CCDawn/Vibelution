@@ -14,13 +14,21 @@ export type ResearchRunSafetyBudget = {
   maxRetries: number;
 };
 
+// Stage token presets must stay above the observed worst single formal-node
+// attempt (production: one source_finding attempt settled ~407K tokens,
+// metering allowed overrun to 460K+).  A stage limit below one real attempt
+// deadlocks the stage after the first attempt settles (remaining 0 < the
+// admission reference), forcing a manual extend_budget.  The default
+// (recommended) preset therefore calibrates at 1M tokens per stage, matching
+// the backend launch authority (budget_contract DEFAULT_STAGE_TOKENS = 2M,
+// never below the observed attempt scale).
 export const RESEARCH_RUN_SAFETY_PRESETS: Record<
   ResearchRunSafetyPresetId,
   { label: string; tokens: number; toolCalls: number; wallClockSeconds: number; maxRetries: number }
 > = {
-  steady: { label: "稳妥", tokens: 180000, toolCalls: 220, wallClockSeconds: 14400, maxRetries: 2 },
-  recommended: { label: "推荐", tokens: 250000, toolCalls: 300, wallClockSeconds: 21600, maxRetries: 2 },
-  extended: { label: "宽裕", tokens: 400000, toolCalls: 480, wallClockSeconds: 28800, maxRetries: 2 },
+  steady: { label: "稳妥", tokens: 800000, toolCalls: 220, wallClockSeconds: 14400, maxRetries: 2 },
+  recommended: { label: "推荐", tokens: 1000000, toolCalls: 300, wallClockSeconds: 21600, maxRetries: 2 },
+  extended: { label: "宽裕", tokens: 1500000, toolCalls: 480, wallClockSeconds: 28800, maxRetries: 2 },
 };
 
 const DEFAULT_PRESET_ID: ResearchRunSafetyPresetId = "recommended";
