@@ -2904,6 +2904,40 @@ def _supervision_decision_to_message(decision: Any) -> dict[str, Any]:
     }
 
 
+def _speaker_prompt_cache_partition(session_id: str, room_id: str) -> str:
+    """Build a stable provider prompt-cache partition for chat room speaker calls.
+
+    Speaker turns replay the agent session's full ledger history on every call,
+    so provider-side prefix caching only helps when consecutive calls land on
+    the same cache shard. The partition feeds
+    ``core.llm.payload_builder._default_prompt_cache_key`` as one namespace
+    component (hashed into the prompt_cache_key together with provider/profile/
+    model/agent), which means:
+
+    - the key must stay identical across every turn of one speaker session in
+      one room, so the append-only history prefix keeps hitting the cache;
+    - different rooms/sessions must hash to different keys, so their histories
+      never share (and evict) each other's shard.
+
+    Therefore the key is ``chat-room:<room_id>:<session_id>``: room- and
+    session-scoped, stable while both ids are stable, and disjoint across
+    meetings. Without a session id there is no replayed history to protect, so
+    we return "" and keep the legacy unpartitioned behavior. The sandbox
+    wrapper matches the ordinary chat surface so developer sandboxes never
+    share cache shards with production.
+    """
+    normalized_session = str(session_id or "").strip()
+    if not normalized_session:
+        return ""
+    normalized_room = str(room_id or "").strip() or "-"
+    raw = f"chat-room:{normalized_room}:{normalized_session}"
+    return developer_sandbox.sandbox_prompt_cache_partition(
+        raw,
+        surface="chat",
+        project_root=PROJECT_ROOT,
+    )
+
+
 def _run_participant_agent(participant: dict[str, Any], prompt: str, context: dict[str, Any]) -> dict[str, Any]:
     prepare_started_at = _perf_counter()
     timings: dict[str, Any] = {}
@@ -2918,6 +2952,10 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
     round_id = str(context.get("roundId") or "").strip()
     participant_id = str(participant.get("participantId") or agent_id or session_id).strip()
     turn_identity = f"chat-room:{round_id}:{participant_id}"
+    speaker_prompt_cache_partition = _speaker_prompt_cache_partition(
+        session_id,
+        str(context.get("roomId") or "").strip(),
+    )
     interrupt_checker = _chat_room_interrupt_checker(round_id, context)
     from core.web.services.team_workflow.research_runtime.meeting_receipt_authority import (
         build_speaker_receipt_context,
@@ -3086,6 +3124,7 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
                         agent_runtime,
                         initial_prompt=prompt,
                         disable_tools=True,
+                        prompt_cache_partition=speaker_prompt_cache_partition,
                         turn_identity=turn_identity,
                         interrupt_checker=interrupt_checker,
                         chat_history=canonical_chat_history,

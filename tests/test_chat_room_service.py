@@ -3515,6 +3515,83 @@ def test_chat_room_participant_runner_rejects_archived_agent_before_runtime(tmp_
     assert archived_events[0][1]["fields"]["agentId"] == detail["agentId"]
 
 
+def test_chat_room_speaker_turn_passes_stable_prompt_cache_partition(tmp_path, monkeypatch):
+    """Speaker LLM calls bind a non-empty, stable per-(room, session) cache partition.
+
+    The speaker path replays the session ledger history on every call, so the
+    partition handed to run_existing_agent_single_turn must stay identical
+    across turns of one speaker session in one room (prefix cache hits) while
+    staying disjoint across sessions and rooms (no shard sharing).
+    """
+    _isolate_chat_room_kernel(tmp_path, monkeypatch)
+    alpha = session_service.create_chat_session(title="分区发言者甲")
+    beta = session_service.create_chat_session(title="分区发言者乙")
+    alpha_session_id = str(alpha.get("id") or "").strip()
+    beta_session_id = str(beta.get("id") or "").strip()
+    assert alpha_session_id and beta_session_id
+    room_one = chat_room_service.create_chat_room(
+        title="分区房间一",
+        participant_session_ids=[alpha_session_id, beta_session_id],
+    )
+    room_two = chat_room_service.create_chat_room(
+        title="分区房间二",
+        participant_session_ids=[alpha_session_id],
+    )
+
+    def participant_in(room, session_id):
+        return next(
+            p for p in room["participants"] if str(p.get("sessionId") or "") == session_id
+        )
+
+    captured: list[dict] = []
+
+    def fake_runner(_agent, **kwargs):
+        captured.append(dict(kwargs))
+        return {"status": "completed", "raw_output": "ok", "summary": "ok"}
+
+    monkeypatch.setattr(chat_room_service, "run_existing_agent_single_turn", fake_runner)
+
+    def run_speaker(participant, room_id):
+        return chat_room_service._run_participant_agent(
+            participant,
+            "请发言",
+            {
+                "roomId": room_id,
+                "roundId": "round-partition",
+                "topic": "缓存分区",
+                "purpose": "discussion",
+            },
+        )
+
+    alpha_one = participant_in(room_one, alpha_session_id)
+    beta_one = participant_in(room_one, beta_session_id)
+    alpha_two = participant_in(room_two, alpha_session_id)
+
+    assert run_speaker(alpha_one, room_one["roomId"])["status"] == "completed"
+    assert run_speaker(alpha_one, room_one["roomId"])["status"] == "completed"
+    assert run_speaker(beta_one, room_one["roomId"])["status"] == "completed"
+    assert run_speaker(alpha_two, room_two["roomId"])["status"] == "completed"
+
+    assert len(captured) == 4
+    partition_alpha = captured[0]["prompt_cache_partition"]
+    # Non-empty and scoped to the (room, session) pair.
+    assert partition_alpha
+    assert partition_alpha.startswith("chat-room:")
+    assert room_one["roomId"] in partition_alpha
+    assert alpha_session_id in partition_alpha
+    # Same room + session across turns -> identical partition (cache hits).
+    assert captured[1]["prompt_cache_partition"] == partition_alpha
+    # Different session in the same room -> different partition.
+    assert captured[2]["prompt_cache_partition"] != partition_alpha
+    # Same session in a different room -> different partition.
+    assert captured[3]["prompt_cache_partition"] != partition_alpha
+
+
+def test_speaker_prompt_cache_partition_requires_session_id():
+    assert chat_room_service._speaker_prompt_cache_partition("", "room-1") == ""
+    assert chat_room_service._speaker_prompt_cache_partition("  ", "room-1") == ""
+
+
 def test_update_agent_chat_room_membership_only_changes_selected_agent(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
