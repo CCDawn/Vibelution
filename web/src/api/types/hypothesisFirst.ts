@@ -912,7 +912,12 @@ export type HypothesisFirstClaimBeliefGate = {
   reason: string;
   claims: HypothesisFirstClaimGateEntry[];
   blockedClaims: HypothesisFirstClaimGateEntry[];
-  evidenceGaps: HypothesisFirstClaimGateEvidenceGap[];
+  /**
+   * Server optionality is asymmetric: the V1 chain state always copies the
+   * verdict's `evidenceGaps`, while the V2 state projection omits the field
+   * entirely. `parseClaimBeliefGate` normalizes both to an array.
+   */
+  evidenceGaps?: HypothesisFirstClaimGateEvidenceGap[];
 };
 
 // ---------------------------------------------------------------------------

@@ -29,6 +29,7 @@ const styles = {
   task: "flex min-h-0 flex-col gap-3",
   fill: "h-full",
   bulletedList: "m-0 grid list-disc gap-1 pl-4",
+  gateFold: "m-0 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&>summary]:cursor-pointer [&>summary]:text-[var(--fg-tertiary)] [&>ul]:mt-2",
 } as const;
 
 export default styles;

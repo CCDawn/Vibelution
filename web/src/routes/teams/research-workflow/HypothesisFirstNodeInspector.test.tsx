@@ -1258,6 +1258,168 @@ describe("HypothesisFirstNodeInspector", () => {
     expect(panel?.textContent).not.toContain("未通过");
   });
 
+  it("renders no gate explanation when the verdict is allowed", () => {
+    mockedChain.mockReturnValue(chainData({
+      stateV2: {
+        currentPhase: "convergence",
+        generation: { generationMeetingId: null },
+        review: { candidates: [], aggregate: { total: 0, completed: 0, pending: 0, failed: 0, blocked: 0 } },
+        collection: { requests: [] },
+        convergence: {
+          lifecycle: "waiting_human",
+          outcome: "none",
+          actionability: "waiting_user",
+          attempt: null,
+          updatedAt: null,
+          problems: [],
+          accepted: true,
+          latestHypothesisRoundId: "hr-2",
+          roundIndex: 2,
+          roundBudget: 5,
+          claimBeliefGate: {
+            decisionPoint: "converge_question",
+            roundId: "hr-2",
+            candidateId: "cand-1",
+            status: "allowed",
+            reason: "",
+            claims: [],
+            blockedClaims: [],
+          },
+        },
+        allowedActions: [],
+        problems: [],
+      } as unknown as HypothesisFirstStateV2,
+    }));
+    render(
+      <HypothesisFirstNodeInspector
+        teamId="team-1"
+        questionId="Q-01"
+        nodeId="hf_convergence_gate"
+        runId="run-1"
+        onOpenQuestion={() => {}}
+      />,
+    );
+
+    expect(container.querySelector('[data-testid="claim-belief-gate-panel"]')).toBeNull();
+    expect(container.textContent).not.toContain("claim 证据门拦截");
+  });
+
+  it("renders a blocked V2 verdict that omits evidenceGaps without crashing", () => {
+    mockedChain.mockReturnValue(chainData({
+      stateV2: {
+        currentPhase: "convergence",
+        generation: { generationMeetingId: null },
+        review: { candidates: [], aggregate: { total: 0, completed: 0, pending: 0, failed: 0, blocked: 0 } },
+        collection: { requests: [] },
+        convergence: {
+          lifecycle: "waiting_human",
+          outcome: "none",
+          actionability: "waiting_user",
+          attempt: null,
+          updatedAt: null,
+          problems: [],
+          accepted: false,
+          latestHypothesisRoundId: "hr-2",
+          roundIndex: 2,
+          roundBudget: 5,
+          // V2 state projection shape: no evidenceGaps key at all.
+          claimBeliefGate: {
+            decisionPoint: "converge_question",
+            roundId: "hr-2",
+            candidateId: "cand-1",
+            status: "blocked",
+            reason: "candidate_evidence_gap",
+            claims: [
+              { claimId: "claim-7", beliefState: "supported", acceptedSupportCount: 0 },
+            ],
+            blockedClaims: [
+              { claimId: "claim-7", beliefState: "supported", acceptedSupportCount: 0 },
+            ],
+          },
+        },
+        allowedActions: [],
+        problems: [],
+      } as unknown as HypothesisFirstStateV2,
+    }));
+    render(
+      <HypothesisFirstNodeInspector
+        teamId="team-1"
+        questionId="Q-01"
+        nodeId="hf_convergence_gate"
+        runId="run-1"
+        onOpenQuestion={() => {}}
+      />,
+    );
+
+    const panel = container.querySelector('[data-testid="claim-belief-gate-panel"]');
+    expect(panel).toBeTruthy();
+    expect(panel?.textContent).toContain("未通过");
+    expect(panel?.textContent).toContain("已接受证据存在缺口");
+    expect(panel?.textContent).toContain("claim-7");
+  });
+
+  it("folds long blocked-claim lists behind an expander", () => {
+    const blockedClaims = ["claim-1", "claim-2", "claim-3", "claim-4", "claim-5"].map((claimId) => ({
+      claimId,
+      beliefState: "contradicted",
+    }));
+    mockedChain.mockReturnValue(chainData({
+      stateV2: {
+        currentPhase: "convergence",
+        generation: { generationMeetingId: null },
+        review: { candidates: [], aggregate: { total: 0, completed: 0, pending: 0, failed: 0, blocked: 0 } },
+        collection: { requests: [] },
+        convergence: {
+          lifecycle: "waiting_human",
+          outcome: "none",
+          actionability: "waiting_user",
+          attempt: null,
+          updatedAt: null,
+          problems: [],
+          accepted: false,
+          latestHypothesisRoundId: "hr-2",
+          roundIndex: 2,
+          roundBudget: 5,
+          claimBeliefGate: {
+            decisionPoint: "converge_question",
+            roundId: "hr-2",
+            candidateId: "cand-1",
+            status: "blocked",
+            reason: "claim_belief_state_blocked",
+            claims: blockedClaims,
+            blockedClaims,
+          },
+        },
+        allowedActions: [],
+        problems: [],
+      } as unknown as HypothesisFirstStateV2,
+    }));
+    render(
+      <HypothesisFirstNodeInspector
+        teamId="team-1"
+        questionId="Q-01"
+        nodeId="hf_convergence_gate"
+        runId="run-1"
+        onOpenQuestion={() => {}}
+      />,
+    );
+
+    const panel = container.querySelector('[data-testid="claim-belief-gate-panel"]');
+    expect(panel).toBeTruthy();
+    const fold = panel?.querySelector("details");
+    expect(fold).toBeTruthy();
+    expect(fold?.querySelector("summary")?.textContent).toContain("展开其余 2 条阻断 claim");
+    // The preview stays outside the fold; the tail stays inside it.
+    const previewText = Array.from(panel?.querySelectorAll("ul") ?? [])
+      .filter((list) => !fold?.contains(list))
+      .map((list) => list.textContent)
+      .join("");
+    expect(previewText).toContain("claim-3");
+    expect(previewText).not.toContain("claim-4");
+    expect(fold?.textContent).toContain("claim-4");
+    expect(fold?.textContent).toContain("claim-5");
+  });
+
   it("opens the created formal run from the signed convergence command result", async () => {
     const phase = {
       lifecycle: "completed",

@@ -23,6 +23,7 @@ import type {
   CommandAction,
   HypothesisFirstChainState,
   HypothesisFirstClaimBeliefGate,
+  HypothesisFirstClaimGateEvidenceGap,
   HypothesisFirstStateV2,
   MeetingRoundRecord,
   WorkflowProblem,
@@ -271,9 +272,47 @@ function claimGateStatusView(status: HypothesisFirstClaimBeliefGate["status"], i
   return { label: isZh ? "门禁状态未知" : "Gate status unknown", tone: "neutral" };
 }
 
+/** Entries shown before each gate list folds its tail behind a details expander. */
+const CLAIM_GATE_LIST_PREVIEW_LIMIT = 3;
+
+function claimGateClaimItem(claim: HypothesisFirstClaimBeliefGate["blockedClaims"][number], index: number, isZh: boolean) {
+  return (
+    <li className={styles.candidateChecklistItem} key={`${claim.claimId}:${index}`}>
+      <div className={styles.candidateChecklistIdentity}>
+        <strong>{claim.claimId}</strong>
+        <span>{claimGateBlockedClaimLabel(claim, isZh)}</span>
+      </div>
+      <VStatusChip tone="danger">{isZh ? "阻断收敛" : "Blocking"}</VStatusChip>
+    </li>
+  );
+}
+
+function claimGateGapItem(gap: HypothesisFirstClaimGateEvidenceGap, index: number, isZh: boolean) {
+  const mapped = CLAIM_GATE_GAPS[String(gap.gap || "")];
+  return (
+    <li key={`${gap.claimId}:${gap.gap}:${index}`}>
+      {gap.claimId}
+      {isZh ? "：" : ": "}
+      {mapped ? (isZh ? mapped.zh : mapped.en) : gap.gap}
+    </li>
+  );
+}
+
+/**
+ * Neutral "why is convergence stuck" panel for a non-allowed gate verdict.
+ * The mount site suppresses `allowed` verdicts entirely: a passed gate must
+ * not add explanation noise on top of the converged success state.
+ */
 function ClaimBeliefGatePanel({ gate, lang }: { gate: HypothesisFirstClaimBeliefGate; lang: Language }) {
   const isZh = lang === "zh";
   const status = claimGateStatusView(gate.status, isZh);
+  // The V2 state projection omits `evidenceGaps` while the V1 chain state
+  // always copies it; stay defensive so either payload shape renders.
+  const evidenceGaps = gate.evidenceGaps ?? [];
+  const blockedPreview = gate.blockedClaims.slice(0, CLAIM_GATE_LIST_PREVIEW_LIMIT);
+  const blockedTail = gate.blockedClaims.slice(CLAIM_GATE_LIST_PREVIEW_LIMIT);
+  const gapPreview = evidenceGaps.slice(0, CLAIM_GATE_LIST_PREVIEW_LIMIT);
+  const gapTail = evidenceGaps.slice(CLAIM_GATE_LIST_PREVIEW_LIMIT);
   return (
     <section
       className={styles.candidateChecklist}
@@ -284,41 +323,50 @@ function ClaimBeliefGatePanel({ gate, lang }: { gate: HypothesisFirstClaimBelief
         <strong>{isZh ? "claim 置信门" : "Claim belief gate"}</strong>
         <VStatusChip tone={status.tone}>{status.label}</VStatusChip>
       </div>
-      <p className={styles.status}>
-        {isZh ? "原因：" : "Reason: "}
-        {claimGateReasonLabel(gate.reason, isZh)}
-      </p>
+      {gate.reason ? (
+        <p className={styles.status}>
+          {isZh ? "原因：" : "Reason: "}
+          {claimGateReasonLabel(gate.reason, isZh)}
+        </p>
+      ) : null}
       {gate.candidateId ? (
         <p className={styles.status}>
           {isZh ? `入选候选：${gate.candidateId}` : `Recommended candidate: ${gate.candidateId}`}
         </p>
       ) : null}
-      {gate.blockedClaims.length ? (
+      {blockedPreview.length ? (
         <ul className={styles.candidateChecklistList}>
-          {gate.blockedClaims.map((claim, index) => (
-            <li className={styles.candidateChecklistItem} key={`${claim.claimId}:${index}`}>
-              <div className={styles.candidateChecklistIdentity}>
-                <strong>{claim.claimId}</strong>
-                <span>{claimGateBlockedClaimLabel(claim, isZh)}</span>
-              </div>
-              <VStatusChip tone="danger">{isZh ? "阻断收敛" : "Blocking"}</VStatusChip>
-            </li>
-          ))}
+          {blockedPreview.map((claim, index) => claimGateClaimItem(claim, index, isZh))}
         </ul>
       ) : null}
-      {gate.evidenceGaps.length ? (
+      {blockedTail.length ? (
+        <details className={styles.gateFold}>
+          <summary>
+            {isZh
+              ? `展开其余 ${blockedTail.length} 条阻断 claim`
+              : `Show ${blockedTail.length} more blocked claim(s)`}
+          </summary>
+          <ul className={styles.candidateChecklistList}>
+            {blockedTail.map((claim, index) => claimGateClaimItem(claim, index + CLAIM_GATE_LIST_PREVIEW_LIMIT, isZh))}
+          </ul>
+        </details>
+      ) : null}
+      {gapPreview.length ? (
         <ul className={styles.bulletedList}>
-          {gate.evidenceGaps.map((gap, index) => {
-            const mapped = CLAIM_GATE_GAPS[String(gap.gap || "")];
-            return (
-              <li key={`${gap.claimId}:${gap.gap}:${index}`}>
-                {gap.claimId}
-                {isZh ? "：" : ": "}
-                {mapped ? (isZh ? mapped.zh : mapped.en) : gap.gap}
-              </li>
-            );
-          })}
+          {gapPreview.map((gap, index) => claimGateGapItem(gap, index, isZh))}
         </ul>
+      ) : null}
+      {gapTail.length ? (
+        <details className={styles.gateFold}>
+          <summary>
+            {isZh
+              ? `展开其余 ${gapTail.length} 条证据缺口`
+              : `Show ${gapTail.length} more evidence gap(s)`}
+          </summary>
+          <ul className={styles.bulletedList}>
+            {gapTail.map((gap, index) => claimGateGapItem(gap, index + CLAIM_GATE_LIST_PREVIEW_LIMIT, isZh))}
+          </ul>
+        </details>
       ) : null}
     </section>
   );
@@ -1034,7 +1082,9 @@ function InspectorBody(props: {
     }
     return (
       <div className={styles.task}>
-        {claimGate ? <ClaimBeliefGatePanel gate={claimGate} lang={lang} /> : null}
+        {claimGate && claimGate.status !== "allowed" ? (
+          <ClaimBeliefGatePanel gate={claimGate} lang={lang} />
+        ) : null}
         <VStateRow tone={nextAction.stage === "converged" ? "success" : "warning"}>
           {nextAction.statusMessage || nextAction.disabledReason || (isZh ? "待收敛" : "Awaiting convergence")}
         </VStateRow>
