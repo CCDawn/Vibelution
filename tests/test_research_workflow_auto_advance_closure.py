@@ -1623,3 +1623,435 @@ def test_maintenance_sweep_counts_regenerated_round_in_summary(
     assert summary["roundsRegenerated"] == 1
     assert summary["failed"] == 0
     assert _adjudications(ledger_path) == []
+
+
+# ---------------------------------------------------------------------------
+# review round link: sibling fan-out tolerance — the two sibling collection
+# requests of one logical round both hand off into the same next-round
+# meeting fan-out, so both race to bind the identical link; the late sibling
+# must reuse the existing link instead of wedging its writeback
+
+
+def _chain_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    """Tmp-isolated chain ledger plus captured scene events."""
+    events = _approve_env(tmp_path, monkeypatch)
+    monkeypatch.setattr(chain, "PROJECT_ROOT", tmp_path)
+    return events
+
+
+def _seed_review_round_link(
+    meeting_round_id: str,
+    *,
+    collection_request_id: str,
+    selection_id: str = "hsel-sibling-1",
+    round_index: int = 5,
+    candidate_id: str = "hyp-sib-a",
+) -> dict[str, Any]:
+    return chain._record_review_round_link(
+        _TEAM_ID,
+        meeting_round_id=meeting_round_id,
+        previous_meeting_round_id="meeting-prev-1",
+        selection_id=selection_id,
+        collection_request_id=collection_request_id,
+        question_id=_QUESTION_ID,
+        round_index=round_index,
+        candidate_id=candidate_id,
+        candidate_order=1,
+        selection_version="v7",
+    )
+
+
+def _links(ledger_path: Path) -> list[dict[str, Any]]:
+    return [
+        item
+        for item in chain._read_jsonl(ledger_path)
+        if str(item.get("recordKind") or "") == chain.REVIEW_ROUND_LINK_KIND
+    ]
+
+
+def test_review_round_link_reuses_existing_when_only_request_id_differs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """同一逻辑轮的两个兄弟请求交接双写同一 link：仅 collectionRequestId
+    不同 → reuse 返回首写 link，不 raise，账本不追加重复 link。"""
+    _chain_env(tmp_path, monkeypatch)
+    ledger_path = chain._storage_path(_TEAM_ID)
+    first = _seed_review_round_link(
+        "meeting-next-5", collection_request_id="request-sib-1"
+    )
+
+    second = chain._record_review_round_link(
+        _TEAM_ID,
+        meeting_round_id="meeting-next-5",
+        previous_meeting_round_id="meeting-prev-1",
+        selection_id="hsel-sibling-1",
+        collection_request_id="request-sib-2",
+        question_id=_QUESTION_ID,
+        round_index=5,
+        candidate_id="hyp-sib-a",
+        candidate_order=1,
+        selection_version="v7",
+    )
+
+    assert second == first
+    assert second["collectionRequestId"] == "request-sib-1"
+    assert len(_links(ledger_path)) == 1
+
+
+def test_review_round_link_still_rejects_other_content_differences(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """除 collectionRequestId 外任一字段不同（如 selectionId 漂移）→ 仍按
+    现状 raise already bound to different content。"""
+    _chain_env(tmp_path, monkeypatch)
+    _seed_review_round_link("meeting-next-5", collection_request_id="request-sib-1")
+
+    with pytest.raises(chain.HypothesisFirstChainError) as excinfo:
+        chain._record_review_round_link(
+            _TEAM_ID,
+            meeting_round_id="meeting-next-5",
+            previous_meeting_round_id="meeting-prev-1",
+            selection_id="hsel-sibling-OTHER",
+            collection_request_id="request-sib-2",
+            question_id=_QUESTION_ID,
+            round_index=5,
+            candidate_id="hyp-sib-a",
+            candidate_order=1,
+            selection_version="v7",
+        )
+    assert "already bound to different content" in str(excinfo.value)
+
+
+# ---------------------------------------------------------------------------
+# zombie handoff retry: a collection request parked in handoff_pending by a
+# once-failed writeback (its run already completed) is retried by the sweep
+# past the grace — unblocking the pending count that permanently blocked
+# budget-exhaustion adjudication
+
+
+_ZOMBIE_REQUEST_ID = "request-zombie-1"
+_ZOMBIE_RUN_ID = "crun-zombie-1"
+
+
+def _seed_zombie_handoff_request(
+    *,
+    request_id: str = _ZOMBIE_REQUEST_ID,
+    run_id: str = _ZOMBIE_RUN_ID,
+    status: str = "handoff_pending",
+    collection_run_status: str = "completed",
+    handed_off_at: str = "",
+    last_auto_retry_at: str = "",
+) -> dict[str, Any]:
+    record = {
+        "schemaVersion": 1,
+        "recordKind": chain.COLLECTION_REQUEST_KIND,
+        "requestId": request_id,
+        "questionId": _QUESTION_ID,
+        "meetingRoundId": _MEETING_ID,
+        "collectionRunId": run_id,
+        "status": status,
+        "collectionRunStatus": collection_run_status,
+        "handoffRef": f"source_collection_run:{run_id}",
+        "handoffError": {
+            "code": "handoff_failed",
+            "message": "review round link ... is already bound to different content",
+        },
+        "handedOffAt": handed_off_at or _offset_iso(0),
+        "createdAt": _offset_iso(0),
+    }
+    if last_auto_retry_at:
+        record["lastAutoRetryAt"] = last_auto_retry_at
+    chain._append_jsonl(chain._storage_path(_TEAM_ID), record)
+    return record
+
+
+def _fake_handoff_success(
+    monkeypatch: pytest.MonkeyPatch, calls: list[dict[str, Any]]
+) -> None:
+    """Replace record_collection_handoff with the domain success shape."""
+
+    def _handoff(team_id, request_id, *, handoff_ref="", **_kwargs):
+        calls.append({"requestId": request_id, "handoffRef": handoff_ref})
+        updated = chain._update_collection_request(
+            team_id,
+            request_id,
+            status="handed_off",
+            handedOffAt=_offset_iso(900),
+            handoffRef=handoff_ref,
+            handoffError={},
+        )
+        return {"status": "handed_off", "request": updated}
+
+    monkeypatch.setattr(chain, "record_collection_handoff", _handoff)
+
+
+def _latest_request(request_id: str = _ZOMBIE_REQUEST_ID) -> dict[str, Any]:
+    return chain._latest_by_id(
+        [
+            item
+            for item in chain._read_jsonl(chain._storage_path(_TEAM_ID))
+            if item.get("recordKind") == chain.COLLECTION_REQUEST_KIND
+        ],
+        "requestId",
+        request_id,
+    )
+
+
+def test_auto_retry_recovers_zombie_handoff_pending_request(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """僵尸请求（handoff_pending + completed run + 过宽限）→ 幂等交接重试，
+    请求转 handed_off，pending 计数归零（adjudicate 守卫解除）。"""
+    events = _chain_env(tmp_path, monkeypatch)
+    _seed_zombie_handoff_request()
+    assert chain._pending_handoff_count(_TEAM_ID, _QUESTION_ID) == 1
+    calls: list[dict[str, Any]] = []
+    _fake_handoff_success(monkeypatch, calls)
+
+    summary = chain.auto_retry_pending_collection_handoffs(
+        _TEAM_ID, question_id=_QUESTION_ID, now_ms=_offset_ms(600)
+    )
+
+    assert summary["status"] == "retried"
+    assert summary["retried"] == 1
+    assert summary["failed"] == 0
+    assert calls == [
+        {
+            "requestId": _ZOMBIE_REQUEST_ID,
+            "handoffRef": f"source_collection_run:{_ZOMBIE_RUN_ID}",
+        }
+    ]
+    recovered = _latest_request()
+    assert recovered["status"] == "handed_off"
+    assert recovered["lastAutoRetryAt"]
+    # The pending-collection guard that blocked adjudication is gone.
+    assert chain._pending_handoff_count(_TEAM_ID, _QUESTION_ID) == 0
+    retried_events = [
+        item
+        for item in events
+        if item["code"] == "hypothesis_first.auto_retry_handoff"
+    ]
+    assert retried_events and retried_events[-1]["outcome"] == "retried"
+
+
+def test_auto_retry_skips_within_grace_period(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """上次尝试在宽限内 → skipped within_grace_period，不触碰交接。"""
+    _chain_env(tmp_path, monkeypatch)
+    _seed_zombie_handoff_request(last_auto_retry_at=_offset_iso(0))
+    calls: list[dict[str, Any]] = []
+    _fake_handoff_success(monkeypatch, calls)
+
+    summary = chain.auto_retry_pending_collection_handoffs(
+        _TEAM_ID, question_id=_QUESTION_ID, now_ms=_offset_ms(30)
+    )
+
+    assert summary["status"] == "skipped"
+    assert summary["retried"] == 0
+    assert summary["skipped"] == 1
+    assert calls == []
+    assert _latest_request()["status"] == "handoff_pending"
+
+    # The env override clamps to the 10s floor (a 5s override stays 10s).
+    monkeypatch.setenv("VIBELUTION_AUTO_RETRY_HANDOFF_GRACE_MS", "5000")
+    assert chain._auto_retry_handoff_grace_ms() == 10_000
+
+
+def test_auto_retry_skips_when_collection_run_not_completed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """run 还在跑（collectionRunStatus=running）→ skipped run_not_completed，
+    writeback 归 writeback，重试不抢跑。"""
+    events = _chain_env(tmp_path, monkeypatch)
+    _seed_zombie_handoff_request(collection_run_status="running")
+    calls: list[dict[str, Any]] = []
+    _fake_handoff_success(monkeypatch, calls)
+
+    summary = chain.auto_retry_pending_collection_handoffs(
+        _TEAM_ID, question_id=_QUESTION_ID, now_ms=_offset_ms(600)
+    )
+
+    assert summary["status"] == "skipped"
+    assert summary["retried"] == 0
+    assert summary["skipped"] == 1
+    assert calls == []
+    assert _latest_request()["status"] == "handoff_pending"
+    skipped_events = [
+        item
+        for item in events
+        if item["code"] == "hypothesis_first.auto_retry_handoff"
+    ]
+    assert skipped_events and skipped_events[-1]["fields"]["reason"] == (
+        "run_not_completed"
+    )
+
+
+def test_auto_retry_isolates_domain_failure_and_restores_pending(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """交接域拒绝 → failed 不外抛，请求打回 handoff_pending 下轮再试。"""
+    events = _chain_env(tmp_path, monkeypatch)
+    _seed_zombie_handoff_request()
+
+    def _handoff_rejects(team_id, request_id, *, handoff_ref="", **_kwargs):
+        raise chain.HypothesisFirstChainError("domain guard disagreed")
+
+    monkeypatch.setattr(chain, "record_collection_handoff", _handoff_rejects)
+
+    summary = chain.auto_retry_pending_collection_handoffs(
+        _TEAM_ID, question_id=_QUESTION_ID, now_ms=_offset_ms(600)
+    )
+
+    assert summary["status"] == "failed"
+    assert summary["failed"] == 1
+    assert summary["retried"] == 0
+    restored = _latest_request()
+    assert restored["status"] == "handoff_pending"
+    assert restored["handoffError"]["code"] == "handoff_failed"
+    # The throttling timestamp advanced even on failure: the next pass waits
+    # out the grace instead of hammering the same rejection every sweep.
+    assert restored["lastAutoRetryAt"]
+    failed_events = [
+        item
+        for item in events
+        if item["code"] == "hypothesis_first.auto_retry_handoff"
+    ]
+    assert failed_events and failed_events[-1]["outcome"] == "failed"
+
+
+def test_maintenance_sweep_retries_zombie_handoff_before_adjudicating(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """sweep 同一 pass 内先重试僵尸交接再裁决：handoffsRetried 汇入 summary，
+    adjudicate 不再被 pending 计数挡住，accepted 裁决真实落账。"""
+    ledger_path = _sweep_env(tmp_path, monkeypatch)
+    # The sweep env seeds a handed_off request; add the zombie that used to
+    # wedge the chain (the live SCI-001 shape).
+    _seed_zombie_handoff_request()
+    assert chain._pending_handoff_count(_TEAM_ID, _QUESTION_ID) == 1
+    calls: list[dict[str, Any]] = []
+    _fake_handoff_success(monkeypatch, calls)
+
+    summary = chain.sweep_auto_advance_closure()
+
+    assert summary["handoffsRetried"] == 1
+    assert summary["adjudicated"] == 1
+    assert calls and calls[0]["requestId"] == _ZOMBIE_REQUEST_ID
+    assert _latest_request()["status"] == "handed_off"
+    adjudications = _adjudications(ledger_path)
+    assert len(adjudications) == 1
+    assert adjudications[0]["decision"] == "accepted"
+
+
+# ---------------------------------------------------------------------------
+# the auto-approval wait is an operator decision pinned to 3 minutes
+
+
+def test_auto_approve_digest_default_ttl_is_three_minutes() -> None:
+    """自动批准等待默认值钉在 3 分钟（10 分钟收紧到 3 分钟的 operator 决定）。"""
+    assert chain.DEFAULT_AUTO_APPROVE_DIGEST_TTL_MS == 180_000
+
+
+# ---------------------------------------------------------------------------
+# appended fix: generated HypothesisRound records carry no roundIndex of
+# their own — the exhausted-round guard falls back to the review-round
+# lineage links instead of collapsing to round 0 (which silently disabled
+# budget-exhaustion adjudication on every live chain, e.g. SCI-001)
+
+
+def _sweep_env_with_linkless_round(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    meeting_ids: list[str],
+    seed_links: bool = True,
+) -> Path:
+    """The sweep read seams, but the latest round record has no roundIndex —
+    the exact shape a generated round persists on live data."""
+    ledger_path = _sweep_env(tmp_path, monkeypatch)
+    round_record = {
+        "roundId": _ROUND_ID,
+        "question": _QUESTION_ID,
+        "status": "closed",
+        "metaReview": {
+            "metaReviewId": "mr-sweep-5",
+            "recommendationCandidateId": _CANDIDATE_ID,
+            "accepted": False,
+        },
+        "meetingRefs": [
+            {"kind": "meeting_round", "id": meeting_id}
+            for meeting_id in meeting_ids
+        ],
+        "createdAt": "2026-09-01T00:00:00Z",
+    }
+    monkeypatch.setattr(
+        chain,
+        "_question_hypothesis_rounds",
+        lambda _team_id, _question: [round_record]
+        if str(_question).upper() == _QUESTION_ID
+        else [],
+    )
+    monkeypatch.setattr(
+        hrounds,
+        "get_hypothesis_round",
+        lambda _team_id, _round_id: {"round": round_record},
+    )
+    if seed_links:
+        for meeting_id in meeting_ids:
+            _seed_review_link(
+                meeting_id,
+                round_index=5,
+                selection_id=_REGEN_SELECTION_ID,
+            )
+    return ledger_path
+
+
+def test_exhausted_round_guard_resolves_index_from_review_links(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """round 记录无 roundIndex（活数据真实形状）→ 从 review round links 反查
+    roundIndex=5，auto_adjudicate 正常开火（SCI-001 复现形状）。"""
+    ledger_path = _sweep_env_with_linkless_round(
+        tmp_path, monkeypatch, meeting_ids=[_MEETING_ID]
+    )
+
+    latest = chain._latest_closed_exhausted_round(_TEAM_ID, _QUESTION_ID)
+    assert latest is not None
+    assert latest["roundId"] == _ROUND_ID
+
+    result = chain.auto_adjudicate_exhausted_round(
+        _TEAM_ID, question_id=_QUESTION_ID
+    )
+    assert result["status"] == "created"
+    adjudications = _adjudications(ledger_path)
+    assert len(adjudications) == 1
+    assert adjudications[0]["decision"] == "accepted"
+
+
+def test_exhausted_round_guard_stays_fail_closed_without_link_match(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """round 无 roundIndex 且 links 反查不到任何会议 → fail-closed 返回 None，
+    adjudicate 保持 skipped round_not_exhausted（绝不猜测）。"""
+    _sweep_env_with_linkless_round(
+        tmp_path,
+        monkeypatch,
+        meeting_ids=["meeting-never-linked"],
+        seed_links=False,
+    )
+
+    assert chain._latest_closed_exhausted_round(_TEAM_ID, _QUESTION_ID) is None
+    result = chain.auto_adjudicate_exhausted_round(
+        _TEAM_ID, question_id=_QUESTION_ID
+    )
+    assert result == {"status": "skipped", "reason": "round_not_exhausted"}

@@ -102,9 +102,19 @@ COLLECTION_AUTO_RETRY_TAXONOMY_CODE = "collection_auto_retry_exhausted"
 # anomaly-inbox digest TTL (that one raises a "waiting too long" alarm while
 # this one acts on the wait), so the two thresholds never move together.
 AUTO_APPROVE_REVIEW_DIGEST_CLOSED_BY = "system:auto-approve:review-digest"
-DEFAULT_AUTO_APPROVE_DIGEST_TTL_MS = 600_000
+# Operator decision (2026-09): the automatic approval wait shrinks from 10
+# minutes to 3 so a stalled chain reaches its next review round sooner.
+DEFAULT_AUTO_APPROVE_DIGEST_TTL_MS = 180_000
 AUTO_APPROVE_DIGEST_TTL_MIN_MS = 60_000
 _AUTO_APPROVE_DIGEST_TTL_OVERRIDE_ENV = "VIBELUTION_AUTO_APPROVE_DIGEST_TTL_MS"
+
+# Zombie-handoff retry (auto-advance, before adjudication): how long a
+# ``handoff_pending`` collection request whose run already completed must
+# wait since its last retry attempt before the sweep re-runs the idempotent
+# handoff.  Deliberately an independent threshold from the digest TTL above.
+DEFAULT_AUTO_RETRY_HANDOFF_GRACE_MS = 60_000
+AUTO_RETRY_HANDOFF_GRACE_MIN_MS = 10_000
+_AUTO_RETRY_HANDOFF_GRACE_OVERRIDE_ENV = "VIBELUTION_AUTO_RETRY_HANDOFF_GRACE_MS"
 
 # Missing-HypothesisRound auto-regeneration (auto-advance, after the digest
 # approval): how long the newest review round must have been fully closed
@@ -2224,6 +2234,39 @@ def _latest_round_adjudication(
 # ---------------------------------------------------------------------------
 
 
+def _round_index_from_review_links(
+    team_id: str,
+    question_id: str,
+    round_record: Mapping[str, Any],
+) -> int | None:
+    """Resolve one round's index from its review-round lineage links.
+
+    Persisted HypothesisRound records carry no ``roundIndex`` of their own
+    (see :func:`_round_refs_meeting_ids`): the review-round links bound to
+    the round's meetings are the durable lineage authority.  Returns the
+    highest ``roundIndex`` across the links bound to the round's meeting
+    refs, or ``None`` when nothing matches — exhaustion is never guessed,
+    so a linkless round stays fail-closed.
+    """
+    meeting_ids = _round_refs_meeting_ids(round_record)
+    if not meeting_ids:
+        return None
+    links = (list_review_round_links(team_id, question_id=question_id) or {}).get(
+        "links"
+    ) or []
+    highest: int | None = None
+    for link in links:
+        if str(link.get("meetingRoundId") or "").strip() not in meeting_ids:
+            continue
+        try:
+            link_index = int(link.get("roundIndex") or 0)
+        except (TypeError, ValueError):
+            continue
+        if highest is None or link_index > highest:
+            highest = link_index
+    return highest
+
+
 def _latest_closed_exhausted_round(
     team_id: str, question_id: str
 ) -> dict[str, Any] | None:
@@ -2232,10 +2275,20 @@ def _latest_closed_exhausted_round(
     latest = rounds[-1] if rounds else None
     if not latest or str(latest.get("status") or "").strip().lower() != "closed":
         return None
-    try:
-        round_index = int(latest.get("roundIndex") or 0)
-    except (TypeError, ValueError):
-        return None
+    raw_index = latest.get("roundIndex")
+    if raw_index is None:
+        # Generated round records carry no roundIndex of their own; fall
+        # back to the review-round lineage links.  No link match stays
+        # fail-closed (None) instead of collapsing to round 0 and silently
+        # disabling budget-exhaustion adjudication forever.
+        round_index = _round_index_from_review_links(team_id, question_id, latest)
+        if round_index is None:
+            return None
+    else:
+        try:
+            round_index = int(raw_index)
+        except (TypeError, ValueError):
+            return None
     if round_index < HARD_ROUND_LIMIT:
         return None
     return latest
@@ -2931,6 +2984,20 @@ def _auto_regen_round_grace_ms() -> int:
     return DEFAULT_AUTO_REGEN_ROUND_GRACE_MS
 
 
+def _auto_retry_handoff_grace_ms() -> int:
+    """Configured zombie-handoff grace; the env override is clamped to >=10s."""
+
+    raw = str(os.environ.get(_AUTO_RETRY_HANDOFF_GRACE_OVERRIDE_ENV) or "").strip()
+    if raw:
+        try:
+            normalized = int(raw)
+        except ValueError:
+            normalized = 0
+        if normalized > 0:
+            return max(normalized, AUTO_RETRY_HANDOFF_GRACE_MIN_MS)
+    return DEFAULT_AUTO_RETRY_HANDOFF_GRACE_MS
+
+
 def _iso_timestamp_ms(value: Any) -> int | None:
     """Parse one record ISO timestamp into epoch ms (tolerant, fail-open)."""
 
@@ -3544,20 +3611,222 @@ def auto_regenerate_missing_hypothesis_round(
             _ROUND_REGEN_INFLIGHT.pop(inflight_key, None)
 
 
+def auto_retry_pending_collection_handoffs(
+    team_id: str,
+    *,
+    question_id: str,
+    now_ms: int | None = None,
+) -> dict[str, Any]:
+    """Re-run the idempotent handoff for zombie ``handoff_pending`` requests.
+
+    Auto-advance step between round regeneration and adjudication.  The live
+    break this closes: ``notify_collection_run_terminal`` runs the collection
+    writeback exactly once when a run completes, and a handoff rejection
+    there (historically: a review-round link already bound by a sibling
+    request's fan-out) parked the request in ``handoff_pending`` forever —
+    the run never completes again and no other path retried it, so the
+    pending count blocked budget-exhaustion adjudication permanently.  A
+    request is retried only when it is still ``handoff_pending`` AND its
+    collection run already reached ``completed`` (a running or failed run
+    stays owned by collection recovery) AND the configured grace since its
+    last attempt has elapsed, so a persistently failing request is
+    throttled by the grace instead of being hammered by every 30s sweep.
+
+    The action reuses :func:`record_collection_handoff` unchanged (idempotent
+    ``handed_off``/``reused`` semantics, claim materialization, and the
+    newest-round guard that keeps a late handoff from stacking another
+    round).  Every request is isolated: a domain rejection stays pending and
+    retries on the next pass, nothing here raises, and each outcome lands as
+    a ``hypothesis_first.auto_retry_handoff`` scene event.
+    """
+    normalized_team_id = str(team_id or "").strip()
+    normalized_question_id = str(question_id or "").strip().upper()
+    summary: dict[str, Any] = {
+        "status": "skipped",
+        "reason": "",
+        "retried": 0,
+        "skipped": 0,
+        "failed": 0,
+    }
+    if not normalized_team_id or not normalized_question_id:
+        summary["reason"] = "missing_identity"
+        return summary
+    now_value = int(now_ms if now_ms is not None else time.time() * 1000)
+    grace_ms = _auto_retry_handoff_grace_ms()
+    try:
+        requests = [
+            record
+            for record in _collection_requests(_records(normalized_team_id))
+            if str(record.get("questionId") or "").strip().upper()
+            == normalized_question_id
+        ]
+    except Exception as exc:  # noqa: BLE001 - detection stays best-effort
+        summary["status"] = "failed"
+        summary["reason"] = "detection_failed"
+        summary["error"] = str(exc)[:400]
+        _record_scene_event(
+            "hypothesis_first.auto_retry_handoff",
+            outcome="failed",
+            level="warning",
+            fields={
+                "teamId": normalized_team_id,
+                "questionId": normalized_question_id,
+                "reason": "detection_failed",
+                "errorType": type(exc).__name__,
+                "error": str(exc)[:400],
+            },
+        )
+        return summary
+    for request in requests:
+        request_id = str(request.get("requestId") or "").strip()
+        if not request_id:
+            continue
+        fields = {
+            "teamId": normalized_team_id,
+            "questionId": normalized_question_id,
+            "requestId": request_id,
+            "collectionRunId": str(request.get("collectionRunId") or ""),
+            "graceMs": grace_ms,
+        }
+        if str(request.get("status") or "") != "handoff_pending":
+            continue
+        if str(request.get("collectionRunStatus") or "").strip().lower() != (
+            "completed"
+        ):
+            # The run has not finished (or recovery owns a failed run): the
+            # writeback will arrive on its own, retrying here would race it.
+            summary["skipped"] += 1
+            _record_scene_event(
+                "hypothesis_first.auto_retry_handoff",
+                outcome="skipped",
+                fields={**fields, "reason": "run_not_completed"},
+            )
+            continue
+        last_attempt_ms = _iso_timestamp_ms(
+            request.get("lastAutoRetryAt") or request.get("handedOffAt")
+        )
+        if last_attempt_ms is not None and (
+            now_value - last_attempt_ms
+        ) < grace_ms:
+            summary["skipped"] += 1
+            _record_scene_event(
+                "hypothesis_first.auto_retry_handoff",
+                outcome="skipped",
+                fields={**fields, "reason": "within_grace_period"},
+            )
+            continue
+        try:
+            # Refresh the attempt timestamp BEFORE the retry so a crashing
+            # or hanging handoff still respects the grace on the next pass.
+            _update_collection_request(
+                normalized_team_id, request_id, lastAutoRetryAt=_utc_now()
+            )
+            handoff_ref = str(request.get("handoffRef") or "").strip()
+            if not handoff_ref:
+                run_id = str(request.get("collectionRunId") or "").strip()
+                handoff_ref = (
+                    f"source_collection_run:{run_id}" if run_id else ""
+                )
+            result = record_collection_handoff(
+                normalized_team_id,
+                request_id,
+                handoff_ref=handoff_ref,
+            )
+        except HypothesisFirstChainError as exc:
+            # Domain rejection (a guard disagrees): restore the pending
+            # state the writeback would have left — the handoff already
+            # flipped the record to handed_off before the rejection fired —
+            # so the request stays visibly retryable on the next pass.
+            summary["failed"] += 1
+            try:
+                _update_collection_request(
+                    normalized_team_id,
+                    request_id,
+                    status="handoff_pending",
+                    handoffError={
+                        "code": "handoff_failed",
+                        "message": str(exc)[:500],
+                    },
+                )
+            except Exception:  # noqa: BLE001 - never mask the handoff error
+                pass
+            _record_scene_event(
+                "hypothesis_first.auto_retry_handoff",
+                outcome="failed",
+                fields={
+                    **fields,
+                    "reason": "domain_rejected",
+                    "error": str(exc)[:400],
+                },
+            )
+            continue
+        except Exception as exc:  # noqa: BLE001 - one request is isolated
+            summary["failed"] += 1
+            try:
+                _update_collection_request(
+                    normalized_team_id,
+                    request_id,
+                    status="handoff_pending",
+                    handoffError={
+                        "code": "handoff_failed",
+                        "message": str(exc)[:500],
+                    },
+                )
+            except Exception:  # noqa: BLE001 - never mask the retry error
+                pass
+            _record_scene_event(
+                "hypothesis_first.auto_retry_handoff",
+                outcome="failed",
+                level="warning",
+                fields={
+                    **fields,
+                    "reason": type(exc).__name__,
+                    "error": str(exc)[:400],
+                },
+            )
+            continue
+        result_status = str(result.get("status") or "")
+        if result_status in {"handed_off", "reused"}:
+            summary["retried"] += 1
+            _record_scene_event(
+                "hypothesis_first.auto_retry_handoff",
+                outcome="retried",
+                fields={**fields, "handoffStatus": result_status},
+            )
+        else:
+            summary["skipped"] += 1
+            _record_scene_event(
+                "hypothesis_first.auto_retry_handoff",
+                outcome="skipped",
+                fields={
+                    **fields,
+                    "reason": f"unexpected_status:{result_status}",
+                },
+            )
+    if summary["retried"]:
+        summary["status"] = "retried"
+    elif summary["failed"]:
+        summary["status"] = "failed"
+    return summary
+
+
 def sweep_auto_advance_closure() -> dict[str, Any]:
     """Maintenance sweep: auto-advance every exhausted hypothesis chain.
 
     Restart-time recovery for chains stuck at an auto-advance gate (the
     closing tick may be long gone by the time this runs).  Enumerates the
     team ids that own a hypothesis-first chain ledger read-only, then walks
-    each question through approve -> regenerate -> adjudicate -> create ->
-    retry: review digests that waited beyond the TTL get approved and closed
-    first (so the fan-in / next-round advance can still progress within the
-    same pass), a newest review round whose fan-in round generation never
-    landed (the closure LLM died mid-close) gets its HypothesisRound
-    regenerated before anything downstream could block on it, exhausted
-    rounds get their accepted adjudication, converged chains get the formal
-    run created and started, and formal nodes blocked on the transient
+    each question through approve -> regenerate -> retry-handoffs ->
+    adjudicate -> create -> retry: review digests that waited beyond the TTL
+    get approved and closed first (so the fan-in / next-round advance can
+    still progress within the same pass), a newest review round whose fan-in
+    round generation never landed (the closure LLM died mid-close) gets its
+    HypothesisRound regenerated before anything downstream could block on
+    it, zombie collection requests parked in ``handoff_pending`` by a
+    once-failed writeback get their idempotent handoff retried past the
+    grace (unblocking the pending count in the same pass), exhausted rounds
+    get their accepted adjudication, converged chains get the formal run
+    created and started, and formal nodes blocked on the transient
     ``auto_advance_not_ready`` gate get their offer-gated retry resubmitted.
     Nothing here raises: one broken team or question is isolated and
     counted; questions whose latest round is not an unadjudicated exhausted
@@ -3568,6 +3837,7 @@ def sweep_auto_advance_closure() -> dict[str, Any]:
         "questions": 0,
         "approved": 0,
         "roundsRegenerated": 0,
+        "handoffsRetried": 0,
         "adjudicated": 0,
         "rejected": 0,
         "formalRuns": 0,
@@ -3614,6 +3884,18 @@ def sweep_auto_advance_closure() -> dict[str, Any]:
                     summary["roundsRegenerated"] += 1
                 elif str(regeneration.get("status") or "") == "failed":
                     summary["failed"] += 1
+                # Step zero-eight, after regeneration and before
+                # adjudication: a collection request left in handoff_pending
+                # by a once-failed writeback (its run already completed) is
+                # retried here — past the grace it unblocks the pending
+                # count, so a chain rescued in this pass can be adjudicated
+                # in the same pass instead of waiting another tick.
+                handoff_retry = auto_retry_pending_collection_handoffs(
+                    team_id, question_id=question_id
+                )
+                summary["handoffsRetried"] += int(
+                    handoff_retry.get("retried") or 0
+                )
                 adjudication = auto_adjudicate_exhausted_round(
                     team_id, question_id=question_id
                 )
@@ -3652,6 +3934,7 @@ def sweep_auto_advance_closure() -> dict[str, Any]:
             "questions": int(summary["questions"]),
             "approved": int(summary["approved"]),
             "roundsRegenerated": int(summary["roundsRegenerated"]),
+            "handoffsRetried": int(summary["handoffsRetried"]),
             "adjudicated": int(summary["adjudicated"]),
             "rejected": int(summary["rejected"]),
             "formalRuns": int(summary["formalRuns"]),
@@ -5331,6 +5614,7 @@ def _record_review_round_link(
         )
         if existing is not None:
             backfilled = dict(existing)
+            sibling_request_only = False
             for key in (
                 "previousMeetingRoundId",
                 "collectionRequestId",
@@ -5353,9 +5637,26 @@ def _record_review_round_link(
                         backfilled[key] = record[key]
                     continue
                 if existing_value != record.get(key):
+                    if key == "collectionRequestId":
+                        # Defer the decision: a difference confined to the
+                        # collectionRequestId is sibling fan-out (below);
+                        # any other difference still rejects, so keep
+                        # scanning and only decide after the loop.
+                        sibling_request_only = True
+                        continue
                     raise HypothesisFirstChainError(
                         f"review round link for {meeting_round_id} is already bound to different content"
                     )
+            if sibling_request_only:
+                # Sibling fan-out: the two sibling collection requests of one
+                # logical round both hand off into the same fan-out of
+                # next-round meetings, so both legitimately race to bind the
+                # identical link.  That double-write is competition, not
+                # content drift — reuse the existing link with the first
+                # writer's collectionRequestId kept as provenance instead of
+                # rejecting the late sibling (which used to park its request
+                # in handoff_pending forever with no retry path).
+                return existing
             if backfilled != existing:
                 _append_jsonl(_storage_path(team_id), backfilled)
                 return backfilled
