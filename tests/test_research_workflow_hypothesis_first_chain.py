@@ -2439,25 +2439,81 @@ def test_collection_decisions_carry_hypothesis_candidate_refs_to_request_and_run
     assert request["hypothesisCandidateIds"] == expected_refs
     assert facade_calls[0]["hypothesisCandidateIds"] == expected_refs
 
-    # A decision without candidateRefs keeps the field present but empty, so
-    # manually created runs and legacy decisions behave exactly as before.
-    legacy = [
+
+def test_collection_decision_without_candidate_refs_is_rejected_structurally(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A request_new_evidence decision without candidateRefs never silently runs.
+
+    The claim belief gate aggregates evidence on the decision's candidateRefs
+    dimension, so a decision without them can only materialize an empty
+    dimension and fail that gate closed at convergence.  The consumer-side
+    contract check rejects it with a structured skip plus a scene event
+    instead of creating a request doomed to ``claim_data_missing``.
+    """
+    scene_events: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        chain,
+        "_record_scene_event",
+        lambda event_code, **kwargs: scene_events.append(
+            {"eventCode": event_code, **kwargs}
+        ),
+    )
+    decisions = [
         {
             "decision": chain.REQUEST_EVIDENCE_DECISION,
             "evidenceRefs": ["message-b"],
             "searchEnvelope": {"keywords": ["predictive coding"]},
         },
     ]
-    legacy_meeting, legacy_close = _process_collection_decisions_fixture(
-        tmp_path, monkeypatch, decisions=legacy
+    meeting, close_result = _process_collection_decisions_fixture(
+        tmp_path, monkeypatch, decisions=decisions
     )
-    legacy_result = chain._process_collection_decisions(
+    facade_calls: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        facade,
+        "research_knowledge_collection_facade",
+        lambda **kwargs: facade_calls.append(dict(kwargs)) or {},
+    )
+
+    result = chain._process_collection_decisions(
         "team-hf-start",
-        legacy_meeting,
-        legacy_close,
-        {"decisions": legacy},
+        meeting,
+        close_result,
+        {"decisions": decisions},
     )
-    assert legacy_result["requests"][0]["hypothesisCandidateIds"] == []
+
+    assert result["requests"] == []
+    assert len(result["skipped"]) == 1
+    skipped = result["skipped"][0]
+    assert skipped["decisionId"] == chain._decision_id_for(meeting, decisions[0])
+    assert skipped["reason"] == "candidate_refs_missing"
+    assert "candidateRefs" in str(skipped["error"])
+    assert facade_calls == []
+    assert len(scene_events) == 1
+    assert (
+        scene_events[0]["eventCode"]
+        == "hypothesis_first.collection_decision_candidate_refs_missing"
+    )
+    assert scene_events[0]["outcome"] == "blocked"
+    assert scene_events[0]["fields"]["decisionId"] == skipped["decisionId"]
+
+    # Replays stay idempotent: the skipped decision leaves no request behind,
+    # so a corrected closure (with candidateRefs) creates exactly one request.
+    corrected = [dict(decisions[0], candidateRefs=["sci-mtz-1-c1a2b3c4"])]
+    corrected_meeting, corrected_close = _process_collection_decisions_fixture(
+        tmp_path, monkeypatch, decisions=corrected
+    )
+    corrected_result = chain._process_collection_decisions(
+        "team-hf-start",
+        corrected_meeting,
+        corrected_close,
+        {"decisions": corrected},
+    )
+    assert len(corrected_result["requests"]) == 1
+    assert corrected_result["requests"][0]["hypothesisCandidateIds"] == [
+        "sci-mtz-1-c1a2b3c4"
+    ]
 
 
 def test_collection_decisions_pin_workflow_run_and_question_project(

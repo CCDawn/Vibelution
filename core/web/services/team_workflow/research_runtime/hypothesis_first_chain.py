@@ -6327,6 +6327,38 @@ def _process_collection_decisions(
         if existing is not None:
             requests_out.append(existing)
             continue
+        # ``candidateRefs`` on a request_new_evidence decision are hypothesis
+        # candidate ids — the claim belief gate's aggregation dimension.  A
+        # decision without them can only materialize an empty dimension and
+        # fail that gate closed at convergence, so it is rejected structurally
+        # here (visible in ``collection.skipped`` plus a scene event) instead
+        # of silently creating a request.  Replays with an already persisted
+        # request stay above and keep their idempotent reuse.
+        hypothesis_candidate_ids = list(
+            dict.fromkeys(_normalized_str_list(raw.get("candidateRefs")))
+        )
+        if not hypothesis_candidate_ids:
+            skipped.append(
+                {
+                    "decisionId": decision_id,
+                    "reason": "candidate_refs_missing",
+                    "error": (
+                        "request_new_evidence decision carries no candidateRefs; "
+                        "the claim belief gate aggregates evidence on this dimension"
+                    ),
+                }
+            )
+            _record_scene_event(
+                "hypothesis_first.collection_decision_candidate_refs_missing",
+                outcome="blocked",
+                level="warning",
+                fields={
+                    "teamId": team_id,
+                    "meetingRoundId": str(meeting_round.get("meetingRoundId") or ""),
+                    "decisionId": decision_id,
+                },
+            )
+            continue
         try:
             envelope = facade._normalize_search_envelope(
                 raw.get("searchEnvelope"), require_keywords=True
@@ -6356,14 +6388,6 @@ def _process_collection_decisions(
             )
             continue
         scope_envelope = _scope_envelope_for_meeting(meeting_round)
-        # ``candidateRefs`` on a request_new_evidence decision are hypothesis
-        # candidate ids (the gate's aggregation dimension).  Keep them on the
-        # collection request and on the collection run so materialization can
-        # bridge canonical evidence back to that dimension; decisions without
-        # candidateRefs keep the previous behavior unchanged.
-        hypothesis_candidate_ids = list(
-            dict.fromkeys(_normalized_str_list(raw.get("candidateRefs")))
-        )
         # Retrieval-circuit consumption: a live evidence_gap_unavailable
         # marker for this exact goal means the rewrite budget is already
         # exhausted.  Never ensure a new collection run for it — record the

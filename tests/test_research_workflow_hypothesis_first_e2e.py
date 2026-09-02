@@ -19,6 +19,11 @@
   => test_participant_role_tool_snapshot_and_single_collection_facade
 - §8.6 中断恢复：链路各点位重放不丢轮次、无重复副作用（含全新 runtime 重读）
   => test_interruption_replay_across_chain_points
+- §8.7 全新跑、零 claim 种子：candidateRefs → 链级搜集 → handoff claim 桥接 →
+  收敛/裁决 claim belief 门放行 → accepted 落账（R2.2 真实数据链验收）
+  => test_fresh_run_zero_seed_bridge_fed_gate_allows_and_accepts；
+  零 collection 收敛路径的 fail-closed 表征（pending decision）
+  => test_zero_collection_convergence_gate_fails_closed_pending_decision
 
 任务 #4（platform readiness 门）：platform readiness 汇总实现
 （core/research/competition/platform_flow_ready.py）不在本批次允许路径内，
@@ -37,6 +42,7 @@ from pathlib import Path
 
 import pytest
 
+from core.research.evidence import ClaimEvidenceStore
 from core.research.workflow.contracts import (
     CURRENT_RESEARCH_TEAM_ROLE_CONTRACT,
     ActorRef,
@@ -52,6 +58,7 @@ from core.web.services import (
     session_service,
     team_service,
 )
+from core.web.services.team_workflow import claim_ledger
 from core.web.services.team_workflow import hypothesis_rounds as hrounds
 from core.web.services.team_workflow import hypothesis_selection as selections
 from core.web.services.team_workflow import meeting_rounds as meetings
@@ -1569,5 +1576,307 @@ def test_interruption_replay_across_chain_points(
             ]
             assert len(attempts) == 1
             assert attempts[0].node_run_id == attempt.node_run_id
+    finally:
+        runtime.close()
+
+
+# ---------------------------------------------------------------------------
+# §8.7 全新跑、零 claim 种子：评审决策 candidateRefs → 链级搜集 → handoff
+# claim 桥接 → 收敛/裁决 claim belief 门放行 → accepted 落账
+# ---------------------------------------------------------------------------
+
+
+def _seed_ledger_candidates(team_id: str, statements: dict[str, str]) -> None:
+    """Register the selection's candidate identities in the chain ledger.
+
+    Candidate identity is a chain precondition, not claim data: the bridge
+    reads each request-bound candidate's formal statement from these records,
+    while every claim row the gate later reads must come from the real
+    chain-collection materialization bridge.
+    """
+    for candidate_id, statement in statements.items():
+        chain._append_jsonl(
+            chain._storage_path(team_id),
+            {
+                "schemaVersion": chain.SCHEMA_VERSION,
+                "recordKind": chain.CANDIDATE_KIND,
+                "candidateId": candidate_id,
+                "questionId": _QUESTION_ID,
+                "statement": statement,
+                "meetingRoundId": "hf-e2e-candgen",
+                "createdAt": "2026-08-18T00:00:00Z",
+            },
+        )
+
+
+def _collected_source(candidate_id: str, summary: str, url: str) -> dict:
+    return {
+        "candidateId": candidate_id,
+        "candidateType": "source_manifest",
+        "sourceKind": "paper",
+        "title": f"Collected source {candidate_id}",
+        "summary": summary,
+        "sourceUrl": url,
+        "createdAt": "2026-08-18T00:05:00Z",
+        "createdByAgent": "source_finder",
+    }
+
+
+def _seed_collected_sources(
+    monkeypatch: pytest.MonkeyPatch, sources_by_run: dict[str, list[dict]]
+) -> None:
+    """Anchor the collection run's canonical source candidates per run id."""
+
+    from core.web.services.team_workflow.source_collection import (
+        candidates as candidates_module,
+    )
+
+    def fake_list_candidate_store(team_id, *, run_id="", limit=500, **_):
+        return {
+            "schemaVersion": 1,
+            "candidates": [
+                dict(item) for item in sources_by_run.get(str(run_id), [])
+            ],
+        }
+
+    monkeypatch.setattr(
+        candidates_module, "list_candidate_store", fake_list_candidate_store
+    )
+
+
+_CORE_CLAIM_STATEMENTS = {
+    "hyp-a": "hyp-a predicts predictive coding stabilizes spike timing.",
+    "hyp-b": "hyp-b predicts spike train coding maximizes information rate.",
+}
+
+
+def test_fresh_run_zero_seed_bridge_fed_gate_allows_and_accepts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fresh selection, zero claim seeds, bridge-fed gate allow, accepted.
+
+    The two earlier full-chain e2e tests hand-seed review-supported claims
+    before convergence.  This one never seeds claim data: the review
+    decision's ``candidateRefs`` drive a real chain collection, the handoff
+    runs ``materialize_chain_collection_evidence`` so the claim ledger gains
+    candidate-dimensioned rows, and the convergence/adjudication claim belief
+    gate evaluates allowed on exactly that bridged data before the final
+    acceptance lands and the parent run resumes.
+    """
+    team_id, agents = _hf_env(tmp_path, monkeypatch)
+    _patch_approved_question(tmp_path, monkeypatch)
+    monkeypatch.setattr(claim_ledger, "PROJECT_ROOT", tmp_path, raising=False)
+    _seed_ledger_candidates(team_id, _CORE_CLAIM_STATEMENTS)
+    _seed_collected_sources(
+        monkeypatch,
+        {
+            "dprun-hf7-1": [
+                _collected_source(
+                    "candidate-src-1",
+                    "Collected abstract: predictive coding stabilizes spike timing.",
+                    "https://example.org/paper-a",
+                ),
+                _collected_source(
+                    "candidate-src-2",
+                    "Collected abstract: spike train coding maximizes information rate.",
+                    "https://example.org/paper-b",
+                ),
+            ]
+        },
+    )
+    created_runs, _facade_calls = _stateful_collection_fakes(monkeypatch)
+    runtime = _build_runtime(tmp_path)
+    try:
+        _seed_parent_run(runtime, team_id, agents["experiment_planner"])
+        agent_ids = [agents[role] for role in _ROLES]
+
+        with server_operator_scope("u-1", roles=("operator",)):
+            recorded = _open_first_meeting(team_id, agent_ids)
+            first_meeting_id = recorded["reviewMeeting"]["meetingRound"][
+                "meetingRoundId"
+            ]
+
+            # 零 claim 种子：handoff 前候选在 gate 下没有任何 claim 数据。
+            verdict = chain.evaluate_claim_belief_gate(team_id, _QUESTION_ID, ["hyp-a"])
+            assert verdict["hyp-a"]["status"] == "blocked"
+            assert verdict["hyp-a"]["reason"] == "claim_data_missing"
+
+            # 评审决策带 candidateRefs → request 携带候选维度，不被拒绝。
+            _drive_to_awaiting_approval(team_id, first_meeting_id, agent_ids[0])
+            closed = chain.close_review_meeting(
+                team_id,
+                first_meeting_id,
+                _closure_payload(
+                    agent_ids,
+                    [
+                        _envelope_decision(
+                            agent_ids[0], candidateRefs=["hyp-a", "hyp-b"]
+                        )
+                    ],
+                ),
+                runtime=runtime,
+            )
+            assert closed["collection"]["skipped"] == []
+            request = closed["collection"]["requests"][0]
+            assert request["hypothesisCandidateIds"] == ["hyp-a", "hyp-b"]
+            assert request["status"] == "pending"
+            assert request["collectionRunId"] == "dprun-hf7-1"
+            assert len(created_runs) == 1
+
+            sibling_closed = _close_sibling_meetings(
+                team_id, agent_ids, first_meeting_id, runtime
+            )
+            first_round = sibling_closed["hypothesisRound"]["round"]
+            assert first_round["status"] == "closed"
+
+            # handoff：链级 claim 桥接真实发生（不是种子、不是绕过）。
+            handoff = chain.record_collection_handoff(
+                team_id,
+                request["requestId"],
+                handoff_ref="knowledge_package:pkg-1",
+                runtime=runtime,
+                agent_runner=_marker_runner,
+            )
+            assert handoff["request"]["status"] == "handed_off"
+            materialization = handoff["claimMaterialization"]
+            assert materialization["status"] == "materialized"
+            assert materialization["collectionRunId"] == "dprun-hf7-1"
+            assert materialization["sourceCandidateCount"] == 2
+            assert materialization["candidateClaimCount"] == 2
+            next_meeting = handoff["nextMeeting"]
+            assert next_meeting["status"] == "opened"
+
+            # claim 账本出现候选维度行：每个候选一行核心 claim（question 作用域），
+            # 证据记录落在 (候选, claim) 维度且回链本次搜集 run。
+            ledger_rows = {
+                str(item.get("claim")): item
+                for item in claim_ledger.list_claims(team_id)["claims"]
+            }
+            core_rows = {
+                candidate_id: ledger_rows[statement]
+                for candidate_id, statement in _CORE_CLAIM_STATEMENTS.items()
+            }
+            assert all(
+                row["question"] == _QUESTION_ID for row in core_rows.values()
+            )
+            stored = ClaimEvidenceStore(tmp_path).list(team_id)
+            dimensions = {(item["candidateId"], item["claimId"]) for item in stored}
+            assert ("hyp-a", core_rows["hyp-a"]["claimId"]) in dimensions
+            assert ("hyp-b", core_rows["hyp-b"]["claimId"]) in dimensions
+            hypothesis_dimension = [
+                item for item in stored if item["candidateId"] in {"hyp-a", "hyp-b"}
+            ]
+            assert hypothesis_dimension
+            assert {
+                item["sourceCollectionRunId"] for item in hypothesis_dimension
+            } == {"dprun-hf7-1"}
+
+            # 第二轮关门（select，无新搜集）：handoff 的 fan-out 为每个选中
+            # 候选各开一场 r2 会议，候选 fan-in 契约要求整组关闭后才生成
+            # 第二个 HypothesisRound。
+            second_meeting_id = handoff["nextMeeting"]["meetingRound"][
+                "meetingRoundId"
+            ]
+            closed_second: dict = {}
+            for group_meeting_id in [
+                second_meeting_id,
+                *_sibling_meeting_ids(team_id, second_meeting_id),
+            ]:
+                _drive_to_awaiting_approval(team_id, group_meeting_id, agent_ids[0])
+                closed_second = chain.close_review_meeting(
+                    team_id,
+                    group_meeting_id,
+                    _closure_payload(agent_ids, [_select_decision(agent_ids[0])]),
+                    runtime=runtime,
+                )
+            second_round = closed_second["hypothesisRound"]["round"]
+            recommended = str(
+                second_round["metaReview"]["recommendationCandidateId"] or ""
+            )
+            assert recommended in {"hyp-a", "hyp-b"}
+
+            _freeze_template_baseline(team_id, agent_ids[0])
+            state = chain.chain_state(team_id, _QUESTION_ID)
+            assert state["hypothesisConverged"] is True
+            gate = state["claimBeliefGate"]
+            assert gate["decisionPoint"] == "converge_question"
+            assert gate["candidateId"] == recommended
+            assert gate["status"] == "allowed"
+            assert gate["reason"] == ""
+
+            # 最终 accepted：人工裁决权威在同一个 fail-closed 门上通过；
+            # 收敛后的 hypothesis_design readiness 在真实桥接数据上放行。
+            adjudication = chain.record_human_adjudication(
+                team_id,
+                question_id=_QUESTION_ID,
+                hypothesis_round_id=second_round["roundId"],
+                decision="accepted",
+                rationale="bridge-fed claim data supports the recommendation",
+                idempotency_key="hf-e2e-accept-1",
+                workflow_run_id=_RUN_ID,
+                decided_by=agent_ids[0],
+            )
+            assert adjudication["status"] == "created"
+            design = _evaluate(runtime, team_id, "hypothesis_design")
+            assert design.ready, [b.code for b in design.blockers]
+    finally:
+        runtime.close()
+
+
+def test_zero_collection_convergence_gate_fails_closed_pending_decision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PENDING DECISION (no behavior change): zero-collection convergence.
+
+    Characterization only.  A selection whose review rounds never raise an
+    EVIDENCE_REQUEST has no collection bridge input, so the convergence claim
+    belief gate fails closed with an identifiable ``claim_data_missing`` even
+    though every structural gate passed.  Whether such a path also needs a
+    claim write-in point is deferred to the storage-sharding batch decision;
+    this test pins today's visible, diagnosable rejection.
+    """
+    team_id, agents = _hf_env(tmp_path, monkeypatch)
+    _patch_approved_question(tmp_path, monkeypatch)
+    monkeypatch.setattr(claim_ledger, "PROJECT_ROOT", tmp_path, raising=False)
+    _stateful_collection_fakes(monkeypatch)
+    runtime = _build_runtime(tmp_path)
+    try:
+        _seed_parent_run(runtime, team_id, agents["experiment_planner"])
+        agent_ids = [agents[role] for role in _ROLES]
+
+        with server_operator_scope("u-1", roles=("operator",)):
+            recorded = _open_first_meeting(team_id, agent_ids)
+            first_meeting_id = recorded["reviewMeeting"]["meetingRound"][
+                "meetingRoundId"
+            ]
+
+            # 首轮只做 select 决策：零 EVIDENCE_REQUEST、零搜集、零 claim 数据。
+            _drive_to_awaiting_approval(team_id, first_meeting_id, agent_ids[0])
+            closed = chain.close_review_meeting(
+                team_id,
+                first_meeting_id,
+                _closure_payload(agent_ids, [_select_decision(agent_ids[0])]),
+                runtime=runtime,
+            )
+            assert closed["collection"]["requests"] == []
+            sibling_closed = _close_sibling_meetings(
+                team_id, agent_ids, first_meeting_id, runtime
+            )
+            first_round = sibling_closed["hypothesisRound"]["round"]
+            assert first_round["status"] == "closed"
+            assert first_round["metaReview"]["accepted"] is True
+            assert claim_ledger.list_claims(team_id)["claimCount"] == 0
+
+            state = chain.chain_state(team_id, _QUESTION_ID)
+            gate = state["claimBeliefGate"]
+            assert gate is not None
+            assert gate["decisionPoint"] == "converge_question"
+            assert gate["candidateId"] == (
+                first_round["metaReview"]["recommendationCandidateId"]
+            )
+            assert gate["status"] == "blocked"
+            assert gate["reason"] == "claim_data_missing"
+            assert state["hypothesisConverged"] is False
+            assert "claim 数据无法评估" in str(state["convergenceDetail"])
     finally:
         runtime.close()
