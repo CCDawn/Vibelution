@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -48,6 +49,43 @@ logger = logging.getLogger(__name__)
 # task-queue pollers). ``VIBELUTION_WORKFLOW_WORKERS`` overrides it.
 DEFAULT_WORKFLOW_WORKERS = 10
 WORKFLOW_WORKERS_ENV = "VIBELUTION_WORKFLOW_WORKERS"
+
+# Budget-exhaustion auto-advance sweep cadence: the maintenance tick runs far
+# more often than the scan needs to (same self-throttle pattern as the stuck
+# digest watchdog in meeting_driver_work).
+AUTO_ADVANCE_SWEEP_INTERVAL_MS = 30_000
+AUTO_ADVANCE_SWEEP_INTERVAL_ENV = "VIBELUTION_AUTO_ADVANCE_SWEEP_INTERVAL_MS"
+_LAST_AUTO_ADVANCE_SWEEP_MS: int | None = None
+_AUTO_ADVANCE_SWEEP_LOCK = threading.Lock()
+
+
+def _auto_advance_sweep_interval_ms() -> int:
+    raw = str(os.environ.get(AUTO_ADVANCE_SWEEP_INTERVAL_ENV) or "").strip()
+    if raw:
+        try:
+            value = int(raw)
+        except ValueError:
+            return AUTO_ADVANCE_SWEEP_INTERVAL_MS
+        if value > 0:
+            return max(value, 1000)
+    return AUTO_ADVANCE_SWEEP_INTERVAL_MS
+
+
+def _auto_advance_sweep_due(now_ms: int) -> bool:
+    global _LAST_AUTO_ADVANCE_SWEEP_MS
+    with _AUTO_ADVANCE_SWEEP_LOCK:
+        last = _LAST_AUTO_ADVANCE_SWEEP_MS
+        if last is not None and now_ms - last < _auto_advance_sweep_interval_ms():
+            return False
+        _LAST_AUTO_ADVANCE_SWEEP_MS = now_ms
+        return True
+
+
+def reset_auto_advance_sweep_throttle_for_tests() -> None:
+    """Test seam: forget the last sweep run so the next tick executes."""
+    global _LAST_AUTO_ADVANCE_SWEEP_MS
+    with _AUTO_ADVANCE_SWEEP_LOCK:
+        _LAST_AUTO_ADVANCE_SWEEP_MS = None
 
 
 def workflow_worker_count() -> int:
@@ -123,6 +161,7 @@ class WorkflowRuntime:
         handled += self.adapter_worker.run_repairs_once(limit=limit)
         self._reconcile_expired_task_bundles_best_effort()
         self._sweep_stuck_digest_works_best_effort()
+        self._sweep_auto_advance_closure_best_effort()
         return handled
 
     def _reconcile_expired_task_bundles_best_effort(self) -> None:
@@ -163,6 +202,36 @@ class WorkflowRuntime:
             meeting_driver_work.sweep_stuck_digest_works()
         except Exception:  # noqa: BLE001 - watchdog must never break maintenance
             logger.exception("stuck digest work sweep failed")
+
+    def _sweep_auto_advance_closure_best_effort(self) -> None:
+        """Auto-advance budget-exhausted hypothesis chains from this tick.
+
+        Backlog recovery: chains that exhausted the review-round budget before
+        the in-place close hook existed (or whose process died between closure
+        and advance) are picked up here — the sweep reuses the chain's own
+        idempotent helpers (adjudicate accepted, then create + auto-start the
+        formal run), so replays converge instead of duplicating.  Hosted on
+        the serial maintenance tick with the same peek + self-throttle
+        discipline as the digest watchdog; never raises, never re-drives.
+        """
+        now_ms = int(time.time() * 1000)
+        if not _auto_advance_sweep_due(now_ms):
+            return
+        try:
+            from . import hypothesis_first_chain
+
+            summary = hypothesis_first_chain.sweep_auto_advance_closure()
+            if int(summary.get("adjudicated") or 0) or int(
+                summary.get("formalRuns") or 0
+            ):
+                logger.info(
+                    "auto-advance closure sweep advanced %s adjudication(s) "
+                    "and %s formal run(s)",
+                    summary.get("adjudicated"),
+                    summary.get("formalRuns"),
+                )
+        except Exception:  # noqa: BLE001 - sweep must never break maintenance
+            logger.exception("auto-advance closure sweep failed")
 
     def close(self) -> None:
         from .budget_window_resolver import (

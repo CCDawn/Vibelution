@@ -442,7 +442,17 @@ def _formal_command_rejection(exc: Exception) -> HypothesisFirstChainError:
         NodeNotReadyError,
         WorkflowCommandError,
     )
+    from .service import ResearchWorkflowError
 
+    if isinstance(exc, ResearchWorkflowError):
+        # Run-creation contract rejections (catalog_run_authorization_required,
+        # catalog_run_authorization_replay_mismatch, idempotency_conflict, ...)
+        # keep their stable code on the HTTP error contract instead of a 500.
+        return FormalCommandRejectedError(
+            str(exc) or str(getattr(exc, "code", "") or "run_creation_rejected"),
+            code=str(getattr(exc, "code", "") or "run_creation_rejected"),
+            status_code=409 if getattr(exc, "code", "") == "idempotency_conflict" else 422,
+        )
     if isinstance(exc, NodeNotReadyError):
         readiness = getattr(exc, "readiness", None)
         blockers: list[dict[str, Any]] = []
@@ -2174,6 +2184,630 @@ def _latest_round_adjudication(
     return None
 
 
+# ---------------------------------------------------------------------------
+# Budget-exhaustion auto-advance (adjudication -> formal run creation)
+#
+# The review-round budget is a frozen server constant; once it is spent and
+# the fan-in round closed, the chain used to dead-end on a human
+# adjudication.  The closed loop below presses the chain's OWN idempotent
+# buttons instead of waiting: ``auto_adjudicate_exhausted_round`` reuses
+# ``record_human_adjudication`` (the claim-belief hard gate keeps its
+# fail-closed semantics) and ``auto_create_formal_run_after_convergence``
+# reuses the ``create_formal_run`` create + auto-start channel.  Both are
+# best-effort: they never raise, blocked hard gates stay a structured
+# ``failed`` left to the human (correct behavior, not a bug), and every
+# outcome leaves a scene-event trail.
+# ---------------------------------------------------------------------------
+
+
+def _latest_closed_exhausted_round(
+    team_id: str, question_id: str
+) -> dict[str, Any] | None:
+    """The fan-in latest hypothesis round once the hard budget is spent."""
+    rounds = _question_hypothesis_rounds(team_id, question_id)
+    latest = rounds[-1] if rounds else None
+    if not latest or str(latest.get("status") or "").strip().lower() != "closed":
+        return None
+    try:
+        round_index = int(latest.get("roundIndex") or 0)
+    except (TypeError, ValueError):
+        return None
+    if round_index < HARD_ROUND_LIMIT:
+        return None
+    return latest
+
+
+def _auto_adjudication_idempotency_key(round_id: str) -> str:
+    return f"hf2:auto-adjudication:{str(round_id or '').strip()}"
+
+
+def _auto_adjudication_rejected_key(round_id: str) -> str:
+    """Distinct key for the auto-recorded rejected (gate-blocked) outcome."""
+    return f"hf2:auto-adjudication-rejected:{str(round_id or '').strip()}"
+
+
+def _claim_gate_block_reason(exc: ClaimBeliefGateBlockedError) -> str:
+    """The stable gate reason carried by the blocked verdict's blockers."""
+    for blocker in list(getattr(exc, "blockers", None) or []):
+        if isinstance(blocker, Mapping) and str(blocker.get("reason") or "").strip():
+            return str(blocker["reason"]).strip()
+    return "claim_belief_gate_blocked"
+
+
+def auto_adjudicate_exhausted_round(
+    team_id: str,
+    *,
+    question_id: str,
+) -> dict[str, Any]:
+    """Record the missing accepted adjudication for an exhausted review round.
+
+    Budget-exhaustion auto-advance, step one.  Fires only when the question's
+    latest HypothesisRound is ``closed`` with ``roundIndex >= HARD_ROUND_LIMIT``,
+    no adjudication exists for it yet, and no collection request is still
+    pending (the same pending-collection clause that blocks an accepted
+    adjudication in the convergence read model).  The appended record is the
+    ordinary convergence authority: deterministic rationale (no timestamps),
+    idempotency key ``hf2:auto-adjudication:<roundId>`` and
+    ``decidedBy=system:auto-advance:budget-exhausted`` keep replays returning
+    ``reused`` forever.  A pre-existing human (or foreign-policy) adjudication
+    is never overwritten — ``skipped``.
+
+    Claim-belief hard gate: the gate keeps its fail-closed semantics (blocked
+    never reaches the formal path), but per the challenge-cup retention policy
+    the chain must still land in a terminal state with a formal result record.
+    A blocked gate therefore auto-records a REJECTED adjudication
+    (``hf2:auto-adjudication-rejected:<roundId>``,
+    ``system:auto-advance:gate-blocked`` — rejecting is never gated, so this
+    cannot self-lock) and returns ``rejected``; the projection flips to
+    completed/rejected/terminal and the exhausted anomaly item disappears,
+    while the re-selection unlock stays the existing human path.  Only the
+    gate-blocked failure records an outcome — transient errors (storage etc.)
+    return ``failed`` with no record so the sweep can retry.  No exception
+    ever escapes this helper.
+    """
+    from core.web.services import team_service
+
+    round_id = ""
+    round_index = 0
+    normalized_team_id = team_id
+    normalized_question_id = str(question_id or "").strip().upper()
+    try:
+        normalized_team_id = team_service.assert_team_exists(team_id)
+        latest_round = _latest_closed_exhausted_round(
+            normalized_team_id, normalized_question_id
+        )
+        if latest_round is None:
+            return {"status": "skipped", "reason": "round_not_exhausted"}
+        round_id = str(latest_round.get("roundId") or "").strip()
+        try:
+            round_index = int(latest_round.get("roundIndex") or 0)
+        except (TypeError, ValueError):
+            round_index = 0
+        idempotency_key = _auto_adjudication_idempotency_key(round_id)
+        existing = _latest_round_adjudication(
+            _records(normalized_team_id),
+            question_id=normalized_question_id,
+            round_id=round_id,
+        )
+        if existing is not None:
+            existing_key = str(existing.get("idempotencyKey") or "")
+            if existing_key == _auto_adjudication_rejected_key(round_id):
+                # Our rejected outcome is already the recorded terminal
+                # result; replays report reused and never flip it to accepted
+                # (a repaired claim re-opens through the human selection
+                # path, not by overwriting this verdict).
+                return {
+                    "status": "reused",
+                    "reason": "claim_belief_gate_blocked",
+                    "roundId": round_id,
+                    "decision": "rejected",
+                }
+            if existing_key != idempotency_key:
+                return {
+                    "status": "skipped",
+                    "reason": "adjudication_exists",
+                    "roundId": round_id,
+                    "decision": str(existing.get("decision") or ""),
+                }
+        if _pending_handoff_count(normalized_team_id, normalized_question_id):
+            return {
+                "status": "skipped",
+                "reason": "pending_collection",
+                "roundId": round_id,
+            }
+        result = record_human_adjudication(
+            normalized_team_id,
+            question_id=normalized_question_id,
+            hypothesis_round_id=round_id,
+            decision="accepted",
+            rationale=(
+                "auto-advance: review round budget exhausted "
+                f"({round_index}/{HARD_ROUND_LIMIT}); auto-advanced per "
+                "budget-exhaustion policy"
+            ),
+            idempotency_key=idempotency_key,
+            decided_by="system:auto-advance:budget-exhausted",
+        )
+        status = str(result.get("status") or "")
+        adjudication = result.get("adjudication")
+        _record_scene_event(
+            "hypothesis_first.auto_adjudication",
+            outcome=status,
+            fields={
+                "teamId": normalized_team_id,
+                "questionId": normalized_question_id,
+                "roundId": round_id,
+                "roundIndex": round_index,
+                "adjudicationId": str(
+                    (adjudication or {}).get("adjudicationId") or ""
+                )
+                if isinstance(adjudication, Mapping)
+                else "",
+            },
+        )
+        return {
+            "status": status,
+            "roundId": round_id,
+            "decision": "accepted",
+            "adjudicationId": str(
+                (adjudication or {}).get("adjudicationId") or ""
+            )
+            if isinstance(adjudication, Mapping)
+            else "",
+        }
+    except ClaimBeliefGateBlockedError as exc:
+        # Fail-closed hard gate: the recommended candidate must not reach the
+        # formal path.  The gate verdict is final for this chain, so the
+        # formal failure outcome is recorded right here (challenge-cup
+        # retention policy: even a rejected convergence must leave a
+        # queryable result, not a dangling human wait).
+        gate_reason = _claim_gate_block_reason(exc)
+        _record_scene_event(
+            "hypothesis_first.auto_adjudication",
+            outcome="blocked_by_claim_gate",
+            level="warning",
+            fields={
+                "teamId": normalized_team_id,
+                "questionId": normalized_question_id,
+                "roundId": round_id,
+                "candidateId": str(getattr(exc, "candidate_id", "") or ""),
+                "reason": "claim_belief_gate_blocked",
+                "gateReason": gate_reason,
+                "error": str(exc)[:400],
+            },
+        )
+        try:
+            result = record_human_adjudication(
+                normalized_team_id,
+                question_id=normalized_question_id,
+                hypothesis_round_id=round_id,
+                decision="rejected",
+                rationale=(
+                    "auto-advance: claim belief gate blocked "
+                    f"({gate_reason}); review round budget exhausted "
+                    f"({round_index}/{HARD_ROUND_LIMIT}); unconverged outcome "
+                    "recorded per challenge-cup retention policy"
+                ),
+                idempotency_key=_auto_adjudication_rejected_key(round_id),
+                decided_by="system:auto-advance:gate-blocked",
+            )
+        except Exception as record_exc:  # noqa: BLE001 - stay retryable
+            # Even the outcome record failed (transient): leave nothing
+            # behind so the sweep can retry the whole advance.
+            _record_scene_event(
+                "hypothesis_first.auto_adjudication",
+                outcome="failed",
+                level="warning",
+                fields={
+                    "teamId": normalized_team_id,
+                    "questionId": normalized_question_id,
+                    "roundId": round_id,
+                    "reason": "claim_belief_gate_blocked",
+                    "rejectedRecordError": str(record_exc)[:400],
+                },
+            )
+            return {
+                "status": "failed",
+                "reason": "claim_belief_gate_blocked",
+                "detail": str(record_exc)[:200],
+            }
+        rejected_status = str(result.get("status") or "")
+        adjudication = result.get("adjudication")
+        _record_scene_event(
+            "hypothesis_first.auto_adjudication",
+            outcome=rejected_status,
+            fields={
+                "teamId": normalized_team_id,
+                "questionId": normalized_question_id,
+                "roundId": round_id,
+                "roundIndex": round_index,
+                "decision": "rejected",
+                "gateReason": gate_reason,
+            },
+        )
+        return {
+            # A fresh rejected outcome reads as "rejected"; replays read as
+            # the ordinary idempotent "reused".
+            "status": "rejected" if rejected_status == "created" else rejected_status,
+            "reason": "claim_belief_gate_blocked",
+            "roundId": round_id,
+            "decision": "rejected",
+            "adjudicationId": str(
+                (adjudication or {}).get("adjudicationId") or ""
+            )
+            if isinstance(adjudication, Mapping)
+            else "",
+        }
+    except Exception as exc:  # noqa: BLE001 - auto-advance is best-effort
+        _record_scene_event(
+            "hypothesis_first.auto_adjudication",
+            outcome="failed",
+            level="warning",
+            fields={
+                "teamId": normalized_team_id,
+                "questionId": normalized_question_id,
+                "roundId": round_id,
+                "reason": type(exc).__name__,
+                "error": str(exc)[:400],
+            },
+        )
+        return {
+            "status": "failed",
+            "reason": type(exc).__name__,
+            "detail": str(exc)[:200],
+        }
+
+
+def _formal_run_safety_limits() -> dict[str, Any]:
+    """The create-formal-run safety limits (fresh copy per call).
+
+    Stage token capacity must come from the shared budget contract (the 2M
+    calibrated authority), never a copied literal: readiness compares
+    run-cumulative settled usage against this frozen limit, and a stale
+    smaller value false-rejects after 1-2 real nodes.
+    """
+    from .budget_contract import DEFAULT_STAGE_TOKENS, FORMAL_STAGE_IDS
+
+    return {
+        "stageTokens": {
+            stage: DEFAULT_STAGE_TOKENS for stage in FORMAL_STAGE_IDS
+        },
+        "toolCalls": 300,
+        "wallClockSeconds": 21_600,
+        "maxRetries": 2,
+    }
+
+
+def _stage_one_catalog_run_authorization(
+    team_id: str, question_id: str
+) -> dict[str, Any] | None:
+    """Durable catalog authorization for stage-one policy-covered questions.
+
+    Returns ``None`` (no authorization needed) for uncovered questions;
+    raises ``ChallengeCupRealBatchError`` when a covered question has no
+    current authorization — callers translate that into their own structured
+    failure.  Same pattern as ``_create_stage_one_question_run``.
+    """
+    from core.research.competition.stage_one_completion_policy import (
+        STAGE_ONE_POLICY_QUESTION_IDS,
+    )
+
+    if str(question_id or "").strip().upper() not in STAGE_ONE_POLICY_QUESTION_IDS:
+        return None
+    from core.web.services.team_workflow import challenge_cup_real_batch
+
+    return challenge_cup_real_batch._current_catalog_run_authorization(
+        team_id,
+        "real-1",
+    )
+
+
+def _question_non_archived_formal_run_exists(
+    team_id: str, question_id: str
+) -> bool | None:
+    """Whether the question already owns a live formal run.
+
+    Mirrors the ``formal_phase is None`` clause of the v2
+    ``create_formal_run`` offer (non-archived runs only).  ``None`` means the
+    formal read runtime is unavailable, so the guard cannot answer — callers
+    must skip rather than risk a duplicate creation.
+    """
+    from .formal_read_runtime import get_query_service
+
+    try:
+        query_service = get_query_service()
+        payload = query_service.list_runs(
+            team_id=team_id, workflow_id=CHALLENGE_CUP_WORKFLOW_ID
+        )
+    except Exception:  # noqa: BLE001 - formal runtime absent (command line)
+        return None
+    normalized_question_id = str(question_id or "").strip().upper()
+    return any(
+        isinstance(run, Mapping)
+        and str(run.get("questionId") or "").strip().upper()
+        == normalized_question_id
+        and str(run.get("status") or "").strip().lower() != "archived"
+        for run in list((payload or {}).get("runs") or [])
+    )
+
+
+def auto_create_formal_run_after_convergence(
+    team_id: str,
+    *,
+    question_id: str,
+) -> dict[str, Any]:
+    """Create + auto-start the formal run behind a converged review chain.
+
+    Budget-exhaustion auto-advance, step two (safe to call standalone).  The
+    guard mirrors the v2 ``create_formal_run`` offer projection exactly: the
+    latest round holds an accepted adjudication, no collection request is
+    pending, the claim-belief hard gate allows the confirmed candidate, the
+    question owns no live formal run yet, and the recommended candidate id is
+    present.  The action reuses the exact ``create_formal_run`` command
+    channel — ``create_question_run`` plus ``_auto_start_created_formal_run``
+    (the start rides its own offer gate; readiness is never bypassed) — with
+    the deterministic idempotency key
+    ``hf2:auto-formal-run:<questionId>:<roundId>``.  Stage-one policy-covered
+    questions carry the durable CatalogRunAuthorization like the
+    ``_create_stage_one_question_run`` precedent; a missing authorization or
+    an authorization replay mismatch is a structured ``failed`` plus scene
+    event, never a raise.
+    """
+    from core.web.services import team_service
+
+    from core.web.services.team_workflow.research_runtime.run_creation import (
+        create_question_run,
+    )
+    from .service import ResearchWorkflowError
+
+    try:
+        normalized_team_id = team_service.assert_team_exists(team_id)
+        normalized_question_id = str(question_id or "").strip().upper()
+        rounds = _question_hypothesis_rounds(
+            normalized_team_id, normalized_question_id
+        )
+        latest_round = rounds[-1] if rounds else None
+        round_id = str((latest_round or {}).get("roundId") or "").strip()
+        if (
+            not round_id
+            or str((latest_round or {}).get("status") or "").strip().lower()
+            != "closed"
+        ):
+            return {"status": "skipped", "reason": "no_closed_round"}
+        adjudication = _latest_round_adjudication(
+            _records(normalized_team_id),
+            question_id=normalized_question_id,
+            round_id=round_id,
+        )
+        if (
+            adjudication is None
+            or str(adjudication.get("decision") or "").strip().lower()
+            != "accepted"
+        ):
+            return {"status": "skipped", "reason": "no_accepted_adjudication"}
+        if _pending_handoff_count(normalized_team_id, normalized_question_id):
+            return {
+                "status": "skipped",
+                "reason": "pending_collection",
+                "roundId": round_id,
+            }
+        meta_review = (
+            latest_round.get("metaReview")
+            if isinstance(latest_round.get("metaReview"), Mapping)
+            else {}
+        )
+        confirmed_candidate_id = str(
+            meta_review.get("recommendationCandidateId") or ""
+        ).strip()
+        if not confirmed_candidate_id:
+            return {
+                "status": "skipped",
+                "reason": "confirmed_candidate_missing",
+                "roundId": round_id,
+            }
+        gate_verdict = evaluate_claim_belief_gate(
+            normalized_team_id,
+            normalized_question_id,
+            [confirmed_candidate_id],
+        ).get(confirmed_candidate_id) or _blocked_gate_verdict(
+            confirmed_candidate_id, "claim_belief_evaluation_failed"
+        )
+        if str(gate_verdict.get("status") or "") != "allowed":
+            return {
+                "status": "skipped",
+                "reason": "claim_belief_gate_not_allowed",
+                "roundId": round_id,
+                "gateReason": str(gate_verdict.get("reason") or ""),
+            }
+        formal_run_exists = _question_non_archived_formal_run_exists(
+            normalized_team_id, normalized_question_id
+        )
+        if formal_run_exists is None:
+            return {"status": "skipped", "reason": "formal_runtime_unavailable"}
+        if formal_run_exists:
+            return {
+                "status": "skipped",
+                "reason": "formal_run_exists",
+                "roundId": round_id,
+            }
+        idempotency_key = f"hf2:auto-formal-run:{normalized_question_id}:{round_id}"
+        authorization = _stage_one_catalog_run_authorization(
+            normalized_team_id, normalized_question_id
+        )
+        result = create_question_run(
+            CHALLENGE_CUP_WORKFLOW_ID,
+            team_id=normalized_team_id,
+            question_id=normalized_question_id,
+            safety_limits=_formal_run_safety_limits(),
+            idempotency_key=idempotency_key,
+            formal_hypothesis_round_id=round_id,
+            catalog_run_authorization=authorization,
+        )
+        run_id = (
+            str(result.get("runId") or "").strip()
+            if isinstance(result, Mapping)
+            else ""
+        )
+        if run_id:
+            # Same channel as the create_formal_run command: the entry
+            # start_node rides the offer gate; readiness-blocked offers keep
+            # the historical wait-for-manual-start behavior.
+            _auto_start_created_formal_run(
+                normalized_team_id,
+                run=result,
+                idempotency_key=idempotency_key,
+            )
+        _record_scene_event(
+            "hypothesis_first.auto_formal_run",
+            outcome="created",
+            fields={
+                "teamId": normalized_team_id,
+                "questionId": normalized_question_id,
+                "roundId": round_id,
+                "runId": run_id,
+            },
+        )
+        return {"status": "created", "roundId": round_id, "runId": run_id}
+    except Exception as exc:  # noqa: BLE001 - auto-advance is best-effort
+        # Run-creation contract errors (catalog_run_authorization_required /
+        # catalog_run_authorization_replay_mismatch / idempotency_conflict)
+        # and the real-batch authorization lookup keep their stable codes;
+        # everything else degrades to the exception type name.
+        from core.web.services.team_workflow.challenge_cup_real_batch import (
+            ChallengeCupRealBatchError,
+        )
+
+        reason = (
+            str(getattr(exc, "code", "") or "")
+            if isinstance(exc, (ResearchWorkflowError, ChallengeCupRealBatchError))
+            else type(exc).__name__
+        )
+        _record_scene_event(
+            "hypothesis_first.auto_formal_run",
+            outcome="failed",
+            level="warning",
+            fields={
+                "teamId": team_id,
+                "questionId": str(question_id or "").strip().upper(),
+                "reason": reason or type(exc).__name__,
+                "error": str(exc)[:400],
+            },
+        )
+        return {
+            "status": "failed",
+            "reason": reason or type(exc).__name__,
+            "detail": str(exc)[:200],
+        }
+
+
+def sweep_auto_advance_closure() -> dict[str, Any]:
+    """Maintenance sweep: auto-advance every exhausted hypothesis chain.
+
+    Restart-time recovery for chains stuck at the adjudication gate (the
+    closing tick may be long gone by the time this runs).  Enumerates the
+    team ids that own a hypothesis-first chain ledger read-only, then walks
+    each question through adjudicate -> create.  Nothing here raises: one
+    broken team or question is isolated and counted; questions whose latest
+    round is not an unadjudicated exhausted round cost one cheap guard read.
+    """
+    summary: dict[str, Any] = {
+        "teams": 0,
+        "questions": 0,
+        "adjudicated": 0,
+        "rejected": 0,
+        "formalRuns": 0,
+        "failed": 0,
+        "skipped": 0,
+    }
+    try:
+        team_ids = _team_ids_with_chain_storage()
+    except Exception:  # noqa: BLE001 - the sweep must never break its host
+        _record_scene_event(
+            "hypothesis_first.auto_advance_sweep",
+            outcome="failed",
+            level="warning",
+            fields={"reason": "team_enumeration_failed"},
+        )
+        return summary
+    for team_id in team_ids:
+        summary["teams"] += 1
+        try:
+            question_ids = question_ids_with_chain_records(team_id)
+        except Exception:  # noqa: BLE001 - one broken team cannot stop the sweep
+            summary["skipped"] += 1
+            continue
+        for question_id in question_ids:
+            summary["questions"] += 1
+            try:
+                adjudication = auto_adjudicate_exhausted_round(
+                    team_id, question_id=question_id
+                )
+                status = str(adjudication.get("status") or "")
+                if status == "created":
+                    summary["adjudicated"] += 1
+                elif status == "rejected":
+                    summary["rejected"] += 1
+                elif status == "failed":
+                    summary["failed"] += 1
+                else:
+                    summary["skipped"] += 1
+                if status in {"created", "reused"}:
+                    formal_run = auto_create_formal_run_after_convergence(
+                        team_id, question_id=question_id
+                    )
+                    if str(formal_run.get("status") or "") == "created":
+                        summary["formalRuns"] += 1
+                    elif str(formal_run.get("status") or "") == "failed":
+                        summary["failed"] += 1
+            except Exception:  # noqa: BLE001 - one broken question is isolated
+                summary["failed"] += 1
+    _record_scene_event(
+        "hypothesis_first.auto_advance_sweep",
+        outcome="completed",
+        fields={
+            "teams": int(summary["teams"]),
+            "questions": int(summary["questions"]),
+            "adjudicated": int(summary["adjudicated"]),
+            "rejected": int(summary["rejected"]),
+            "formalRuns": int(summary["formalRuns"]),
+            "failed": int(summary["failed"]),
+            "skipped": int(summary["skipped"]),
+        },
+    )
+    return summary
+
+
+def _team_ids_with_chain_storage() -> list[str]:
+    """Team ids that own a hypothesis-first chain ledger (read-only)."""
+    root = developer_sandbox.seeded_sandbox_workspace_path(
+        _project_root(), "teams"
+    )
+    if not root.exists():
+        return []
+    team_ids = [
+        path.parts[-3]
+        for path in root.glob("*/research_workflow/hypothesis_first_chain.jsonl")
+        if path.is_file() and len(path.parts) >= 3 and path.parts[-3]
+    ]
+    return sorted(set(team_ids))
+
+
+def question_ids_with_chain_records(team_id: str) -> list[str]:
+    """Question ids present in one team's chain ledger (read-only scan).
+
+    Reset questions have no remaining chain records, so a reset can never be
+    resurrected from history.  Used by the maintenance sweep as the cheap
+    enumeration step before the per-question guards run.
+    """
+    records = _read_jsonl(_storage_path(team_id))
+    question_ids = {
+        str(item.get("questionId") or "").strip().upper()
+        for item in records
+        if str(item.get("questionId") or "").strip().upper()
+    }
+    return sorted(question_ids)
+
+
 def _submit_formal_v2_command(
     team_id: str,
     *,
@@ -3168,31 +3802,41 @@ def _execute_v2_command_impl(
                 workflow_run_id=normalized_workflow_run_id,
             )
         elif command == "create_formal_run":
-            from .budget_contract import DEFAULT_STAGE_TOKENS, FORMAL_STAGE_IDS
-            from .run_creation import create_question_run
-
-            # Stage token capacity must come from the shared budget contract
-            # (the 2M calibrated authority), never a copied literal: readiness
-            # compares run-cumulative settled usage against this frozen limit,
-            # and a stale smaller value false-rejects after 1-2 real nodes.
-            result = create_question_run(
-                CHALLENGE_CUP_WORKFLOW_ID,
-                team_id=normalized_team_id,
-                question_id=normalized_question_id,
-                safety_limits={
-                    "stageTokens": {
-                        stage: DEFAULT_STAGE_TOKENS
-                        for stage in FORMAL_STAGE_IDS
-                    },
-                    "toolCalls": 300,
-                    "wallClockSeconds": 21_600,
-                    "maxRetries": 2,
-                },
-                idempotency_key=idempotency_key,
-                formal_hypothesis_round_id=str(
-                    payload.get("hypothesisRoundId") or ""
-                ),
+            from core.web.services.team_workflow.challenge_cup_real_batch import (
+                ChallengeCupRealBatchError,
             )
+
+            from .run_creation import create_question_run
+            from .service import ResearchWorkflowError
+
+            try:
+                # Stage-one policy-covered runs freeze the durable catalog
+                # authorization into the run input (same precedent as
+                # _create_stage_one_question_run); uncovered questions pass
+                # no authorization.
+                result = create_question_run(
+                    CHALLENGE_CUP_WORKFLOW_ID,
+                    team_id=normalized_team_id,
+                    question_id=normalized_question_id,
+                    safety_limits=_formal_run_safety_limits(),
+                    idempotency_key=idempotency_key,
+                    formal_hypothesis_round_id=str(
+                        payload.get("hypothesisRoundId") or ""
+                    ),
+                    catalog_run_authorization=_stage_one_catalog_run_authorization(
+                        normalized_team_id, normalized_question_id
+                    ),
+                )
+            except (
+                ChallengeCupRealBatchError,
+                ResearchWorkflowError,
+            ) as exc:
+                # Structured rejection instead of a flattened 500: the route
+                # renders FormalCommandRejectedError with its stable code
+                # (catalog_run_authorization_required,
+                # catalog_run_authorization_replay_mismatch,
+                # idempotency_conflict, ...).
+                raise _formal_command_rejection(exc) from exc
             # A created run has no automatic start channel (graph-worker
             # reconciliation spares only hypothesis-first-era runs), so submit
             # the entry start_node immediately; readiness-blocked offers keep
@@ -9313,6 +9957,35 @@ def close_review_meeting(
     _auto_advance_converge_tick(
         normalized_team_id, str(closed_record.get("question") or "")
     )
+    # Budget-exhaustion auto-advance (in-place): when this closure produced a
+    # fan-in round at/after the hard limit, adjudicate it accepted and create
+    # the formal run without waiting for a human.  Strictly best-effort — the
+    # helpers never raise, and this wrapper swallows anything left so the
+    # closed fact and the closure result stand regardless.
+    auto_adjudication: dict[str, Any] | None = None
+    auto_formal_run: dict[str, Any] | None = None
+    try:
+        auto_adjudication = auto_adjudicate_exhausted_round(
+            normalized_team_id,
+            question_id=str(closed_record.get("question") or ""),
+        )
+        if str(auto_adjudication.get("status") or "") in {"created", "reused"}:
+            auto_formal_run = auto_create_formal_run_after_convergence(
+                normalized_team_id,
+                question_id=str(closed_record.get("question") or ""),
+            )
+    except Exception as exc:  # noqa: BLE001 - closure must never fail on auto-advance
+        _record_scene_event(
+            "hypothesis_first.auto_advance_failed",
+            outcome="failed",
+            level="warning",
+            fields={
+                "teamId": normalized_team_id,
+                "meetingRoundId": normalized_round_id,
+                "reason": type(exc).__name__,
+                "error": str(exc)[:400],
+            },
+        )
     # The sibling archive gate may have deferred this round's open-next; a
     # first-time archive of the newest logical round's last sibling retries it
     # here.  Replay closures ("reused") never re-trigger, and the gate inside
@@ -9349,6 +10022,8 @@ def close_review_meeting(
         "collection": collection,
         "hypothesisRound": hypothesis_round,
         "deferredNextReview": deferred_next_review,
+        "autoAdjudication": auto_adjudication,
+        "autoFormalRun": auto_formal_run,
         "resume": resume,
     }
 

@@ -1692,6 +1692,125 @@ def test_accepted_adjudication_with_all_requests_handed_off_converges() -> None:
     assert "create_formal_run" in commands
 
 
+def test_auto_advanced_accepted_adjudication_drives_projection_to_formal_run_offer() -> None:
+    """The budget-exhaustion auto-advance record (system actor, deterministic
+    auto idempotency key) is an ordinary convergence authority: after it lands
+    the projection flips to succeeded/terminal, the human_adjudication offer
+    disappears and create_formal_run appears (the in-place close hook and the
+    maintenance sweep then create the formal run through the same command)."""
+    auto_adjudication = {
+        **_convergence_adjudication_record(5, "accepted"),
+        "idempotencyKey": "hf2:auto-adjudication:round-5",
+        "decidedBy": "system:auto-advance:budget-exhausted",
+        "rationale": (
+            "auto-advance: review round budget exhausted (5/5); "
+            "auto-advanced per budget-exhaustion policy"
+        ),
+    }
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[
+                {
+                    "recordKind": "hypothesis_candidate",
+                    "candidateId": "candidate-1",
+                    "questionId": "SCI-001",
+                },
+                _convergence_link_record(5),
+                _convergence_request_record("request-1", 5, handed_off=True),
+                auto_adjudication,
+            ],
+            selection_records=[
+                {
+                    "selectionId": "selection-1",
+                    "questionId": "SCI-001",
+                    "selectedCandidateIds": ["candidate-1"],
+                }
+            ],
+            meeting_records=[
+                {
+                    "meetingRoundId": "review-5",
+                    "meetingType": "hypothesis_review",
+                    "question": "SCI-001",
+                    "status": "closed",
+                }
+            ],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[_convergence_round_record(5)],
+        )
+    )
+
+    commands = _convergence_commands(state)
+    assert state.convergence.accepted is True
+    assert state.convergence.lifecycle == "completed"
+    assert state.convergence.outcome == "succeeded"
+    assert state.convergence.actionability == "terminal"
+    assert "human_adjudication" not in commands
+    assert "create_formal_run" in commands
+
+
+def test_auto_rejected_gate_blocked_adjudication_projects_terminal_rejected() -> None:
+    """The auto-recorded rejected outcome (gate blocked) is the same terminal
+    authority as a human rejection: completed/rejected/terminal, no exhausted
+    waiting state, no adjudication re-offer, no formal-run offer."""
+    auto_rejected = {
+        **_convergence_adjudication_record(5, "rejected"),
+        "idempotencyKey": "hf2:auto-adjudication-rejected:round-5",
+        "decidedBy": "system:auto-advance:gate-blocked",
+        "rationale": (
+            "auto-advance: claim belief gate blocked (claim_data_missing); "
+            "review round budget exhausted (5/5); unconverged outcome recorded "
+            "per challenge-cup retention policy"
+        ),
+    }
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[
+                {
+                    "recordKind": "hypothesis_candidate",
+                    "candidateId": "candidate-1",
+                    "questionId": "SCI-001",
+                },
+                _convergence_link_record(5),
+                _convergence_request_record("request-1", 5, handed_off=True),
+                auto_rejected,
+            ],
+            selection_records=[
+                {
+                    "selectionId": "selection-1",
+                    "questionId": "SCI-001",
+                    "selectedCandidateIds": ["candidate-1"],
+                }
+            ],
+            meeting_records=[
+                {
+                    "meetingRoundId": "review-5",
+                    "meetingType": "hypothesis_review",
+                    "question": "SCI-001",
+                    "status": "closed",
+                }
+            ],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[_convergence_round_record(5)],
+        )
+    )
+
+    commands = _convergence_commands(state)
+    assert state.convergence.lifecycle == "completed"
+    assert state.convergence.outcome == "rejected"
+    assert state.convergence.actionability == "terminal"
+    assert state.convergence.accepted is False
+    assert "human_adjudication" not in commands
+    assert "create_formal_run" not in commands
+
+
 def test_accepted_adjudication_with_pending_request_stays_unconverged() -> None:
     """An accepted adjudication can never waive unfinished collection: one
     request that has not been handed off keeps the projection unconverged."""

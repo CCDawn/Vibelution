@@ -590,6 +590,52 @@ def test_convergence_not_exhausted_stays_silent() -> None:
     assert inbox.items == ()
 
 
+def test_auto_advanced_convergence_no_longer_yields_exhausted_gate_item() -> None:
+    """The budget-exhaustion auto-advance removes the human gate item: both
+    terminal outcomes it can record (accepted -> succeeded, gate blocked ->
+    rejected) project away from ``exhausted``/``waiting_user``, so the same
+    question's inbox is empty afterwards."""
+    exhausted_state = {
+        **_TEAM_QUESTION,
+        "computedAt": _GENERATED_AT,
+        "convergence": {
+            "lifecycle": "completed",
+            "outcome": "exhausted",
+            "actionability": "waiting_user",
+            "updatedAt": "2026-08-28T00:30:00Z",
+            "roundIndex": 5,
+            "roundBudget": 5,
+            "latestHypothesisRoundId": "round-5",
+        },
+    }
+    before = anomaly_inbox_service.build_anomaly_inbox(
+        exhausted_state, generated_at=_GENERATED_AT
+    )
+    assert [item.kind for item in before.items] == [ANOMALY_KIND_NEEDS_HUMAN_GATE]
+
+    def _post_advance_state(outcome: str) -> dict[str, Any]:
+        return {
+            **_TEAM_QUESTION,
+            "computedAt": _GENERATED_AT,
+            "convergence": {
+                "lifecycle": "completed",
+                "outcome": outcome,
+                "actionability": "terminal",
+                "updatedAt": "2026-08-28T00:35:00Z",
+                "roundIndex": 5,
+                "roundBudget": 5,
+                "latestHypothesisRoundId": "round-5",
+                "accepted": outcome == "succeeded",
+            },
+        }
+
+    for outcome in ("succeeded", "rejected"):
+        after = anomaly_inbox_service.build_anomaly_inbox(
+            _post_advance_state(outcome), generated_at=_GENERATED_AT
+        )
+        assert after.items == (), outcome
+
+
 def _mute_state(round_id: str = "meeting-1") -> dict[str, Any]:
     return {
         "meetingStatus": "awaiting_approval",

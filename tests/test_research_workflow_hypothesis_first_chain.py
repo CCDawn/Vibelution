@@ -7807,3 +7807,790 @@ def test_v2_stop_discussion_keeps_supersede_semantics_for_empty_attempts(
         meeting["summaryDraftError"]["code"] == "discussion_has_no_completed_messages"
     )
     assert not meeting.get("executionStatus")
+
+# ---------------------------------------------------------------------------
+# Budget-exhaustion auto-advance closure (adjudication -> formal run)
+# ---------------------------------------------------------------------------
+
+_AUTO_ROUND_ID = "hround-auto-5"
+_AUTO_MEETING_ID = "meeting-auto-5"
+_AUTO_CANDIDATE_ID = "hyp-auto-a"
+_AUTO_ADJUDICATION_KEY = f"hf2:auto-adjudication:{_AUTO_ROUND_ID}"
+_AUTO_RATIONALE = (
+    "auto-advance: review round budget exhausted (5/5); "
+    "auto-advanced per budget-exhaustion policy"
+)
+
+
+def _auto_advance_round_record(question_id: str) -> dict[str, Any]:
+    return {
+        "roundId": _AUTO_ROUND_ID,
+        "question": question_id,
+        "status": "closed",
+        "roundIndex": 5,
+        "metaReview": {
+            "metaReviewId": "mr-auto-5",
+            "recommendationCandidateId": _AUTO_CANDIDATE_ID,
+            "accepted": False,
+        },
+        "meetingRefs": [{"kind": "meeting_round", "id": _AUTO_MEETING_ID}],
+        "createdAt": "2026-09-01T00:00:00Z",
+    }
+
+
+def _auto_advance_env(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    question_id: str = _QUESTION_ID,
+    request_status: str = "handed_off",
+    existing_adjudication: dict[str, Any] | None = None,
+):
+    """Env for the auto-advance helpers: closed round 5/5 plus ledger records."""
+    team_id, _agents = _hf_env(tmp_path, monkeypatch)
+    round_record = _auto_advance_round_record(question_id)
+    monkeypatch.setattr(
+        hrounds,
+        "get_hypothesis_round",
+        lambda _team_id, _round_id: {"round": round_record},
+    )
+    monkeypatch.setattr(
+        chain,
+        "_question_hypothesis_rounds",
+        lambda _team_id, _round_question: [round_record]
+        if str(_round_question).upper() == question_id.upper()
+        else [],
+    )
+    ledger_path = tmp_path / "hypothesis_first_chain.jsonl"
+    monkeypatch.setattr(chain, "_storage_path", lambda _team_id: ledger_path)
+    if request_status:
+        chain._append_jsonl(
+            ledger_path,
+            {
+                "recordKind": "collection_request",
+                "requestId": "request-auto-1",
+                "questionId": question_id,
+                "meetingRoundId": _AUTO_MEETING_ID,
+                "status": request_status,
+                "createdAt": "2026-09-01T00:01:00Z",
+            },
+        )
+    if existing_adjudication is not None:
+        chain._append_jsonl(ledger_path, dict(existing_adjudication))
+    scene_events: list[tuple[str, dict[str, Any]]] = []
+    monkeypatch.setattr(
+        chain,
+        "_record_scene_event",
+        lambda event_code, **kwargs: scene_events.append((event_code, dict(kwargs))),
+    )
+    return team_id, ledger_path, scene_events
+
+
+def _auto_adjudication_records(ledger_path: Path) -> list[dict[str, Any]]:
+    return [
+        item
+        for item in chain._read_jsonl(ledger_path)
+        if str(item.get("recordKind") or "") == chain.HUMAN_ADJUDICATION_KIND
+    ]
+
+
+def test_auto_adjudicate_exhausted_round_records_accepted_authority(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    team_id, ledger_path, scene_events = _auto_advance_env(tmp_path, monkeypatch)
+    _allow_chain_claim_belief_gate(monkeypatch)
+
+    result = chain.auto_adjudicate_exhausted_round(
+        team_id, question_id=_QUESTION_ID
+    )
+
+    assert result["status"] == "created"
+    assert result["roundId"] == _AUTO_ROUND_ID
+    assert result["decision"] == "accepted"
+    adjudications = _auto_adjudication_records(ledger_path)
+    assert len(adjudications) == 1
+    adjudication = adjudications[0]
+    assert adjudication["decision"] == "accepted"
+    assert adjudication["decidedBy"] == "system:auto-advance:budget-exhausted"
+    assert adjudication["idempotencyKey"] == _AUTO_ADJUDICATION_KEY
+    assert adjudication["rationale"] == _AUTO_RATIONALE
+    events = [
+        fields
+        for event, fields in scene_events
+        if event == "hypothesis_first.auto_adjudication"
+    ]
+    assert len(events) == 1
+    assert events[0]["outcome"] == "created"
+    assert events[0]["fields"]["questionId"] == _QUESTION_ID
+    assert events[0]["fields"]["roundId"] == _AUTO_ROUND_ID
+
+
+def test_auto_adjudicate_exhausted_round_replays_as_reused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The deterministic auto key + rationale make every replay a reuse."""
+    team_id, ledger_path, _events = _auto_advance_env(tmp_path, monkeypatch)
+    _allow_chain_claim_belief_gate(monkeypatch)
+
+    first = chain.auto_adjudicate_exhausted_round(team_id, question_id=_QUESTION_ID)
+    second = chain.auto_adjudicate_exhausted_round(team_id, question_id=_QUESTION_ID)
+
+    assert (first["status"], second["status"]) == ("created", "reused")
+    assert second["roundId"] == _AUTO_ROUND_ID
+    assert len(_auto_adjudication_records(ledger_path)) == 1
+
+
+def test_auto_adjudicate_skips_while_collection_pending(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    team_id, ledger_path, scene_events = _auto_advance_env(
+        tmp_path, monkeypatch, request_status="collecting"
+    )
+
+    result = chain.auto_adjudicate_exhausted_round(
+        team_id, question_id=_QUESTION_ID
+    )
+
+    assert result["status"] == "skipped"
+    assert result["reason"] == "pending_collection"
+    assert _auto_adjudication_records(ledger_path) == []
+    assert not [
+        fields
+        for event, fields in scene_events
+        if event == "hypothesis_first.auto_adjudication"
+    ]
+
+
+def test_auto_adjudicate_skips_when_human_already_decided(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    human_record = {
+        "recordKind": chain.HUMAN_ADJUDICATION_KIND,
+        "adjudicationId": "hf-adjudication-human-1",
+        "idempotencyKey": "hf2:human-adjudication:manual-1",
+        "questionId": _QUESTION_ID,
+        "hypothesisRoundId": _AUTO_ROUND_ID,
+        "workflowRunId": "",
+        "meetingRoundIds": [_AUTO_MEETING_ID],
+        "decision": "rejected",
+        "rationale": "operator rejected after review",
+        "decidedBy": "operator",
+        "createdAt": "2026-09-01T00:02:00Z",
+        "updatedAt": "2026-09-01T00:02:00Z",
+    }
+    team_id, ledger_path, _events = _auto_advance_env(
+        tmp_path, monkeypatch, existing_adjudication=human_record
+    )
+
+    result = chain.auto_adjudicate_exhausted_round(
+        team_id, question_id=_QUESTION_ID
+    )
+
+    assert result["status"] == "skipped"
+    assert result["reason"] == "adjudication_exists"
+    assert result["decision"] == "rejected"
+    # The human authority is untouched and nothing new was appended.
+    assert _auto_adjudication_records(ledger_path) == [human_record]
+
+
+def test_auto_adjudicate_gate_blocked_records_rejected_outcome(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Gate blocked is a final verdict: the rejected outcome is recorded as
+    the formal failure result (challenge-cup retention policy), so the chain
+    lands in a queryable terminal state instead of a dangling human wait."""
+    team_id, ledger_path, scene_events = _auto_advance_env(tmp_path, monkeypatch)
+
+    def _blocked(_team_id, _question_id, candidate_ids):
+        return {
+            candidate_id: {
+                "status": "blocked",
+                "reason": "claim_data_missing",
+                "claims": [],
+                "blockedClaims": [],
+            }
+            for candidate_id in candidate_ids
+        }
+
+    monkeypatch.setattr(chain, "evaluate_claim_belief_gate", _blocked)
+
+    result = chain.auto_adjudicate_exhausted_round(
+        team_id, question_id=_QUESTION_ID
+    )
+
+    assert result["status"] == "rejected"
+    assert result["reason"] == "claim_belief_gate_blocked"
+    assert result["roundId"] == _AUTO_ROUND_ID
+    assert result["decision"] == "rejected"
+    adjudications = _auto_adjudication_records(ledger_path)
+    assert len(adjudications) == 1
+    adjudication = adjudications[0]
+    assert adjudication["decision"] == "rejected"
+    assert adjudication["decidedBy"] == "system:auto-advance:gate-blocked"
+    assert adjudication["idempotencyKey"] == (
+        f"hf2:auto-adjudication-rejected:{_AUTO_ROUND_ID}"
+    )
+    assert "(claim_data_missing)" in adjudication["rationale"]
+    assert "budget exhausted (5/5)" in adjudication["rationale"]
+    assert "challenge-cup retention policy" in adjudication["rationale"]
+    events = [
+        fields
+        for event, fields in scene_events
+        if event == "hypothesis_first.auto_adjudication"
+    ]
+    assert [fields["outcome"] for fields in events] == [
+        "blocked_by_claim_gate",
+        "created",
+    ]
+
+
+def test_auto_adjudicate_gate_blocked_rejection_replays_as_reused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Rerunning after the rejected outcome is idempotent: reused, and the
+    terminal verdict is never flipped to accepted."""
+    team_id, ledger_path, _events = _auto_advance_env(tmp_path, monkeypatch)
+
+    def _blocked(_team_id, _question_id, candidate_ids):
+        return {
+            candidate_id: {
+                "status": "blocked",
+                "reason": "claim_data_missing",
+                "claims": [],
+                "blockedClaims": [],
+            }
+            for candidate_id in candidate_ids
+        }
+
+    monkeypatch.setattr(chain, "evaluate_claim_belief_gate", _blocked)
+
+    first = chain.auto_adjudicate_exhausted_round(team_id, question_id=_QUESTION_ID)
+    second = chain.auto_adjudicate_exhausted_round(team_id, question_id=_QUESTION_ID)
+
+    assert (first["status"], second["status"]) == ("rejected", "reused")
+    assert second["decision"] == "rejected"
+    records = _auto_adjudication_records(ledger_path)
+    assert len(records) == 1
+    assert records[0]["decision"] == "rejected"
+
+
+def test_auto_adjudicate_transient_failure_stays_failed_without_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A storage-style transient error keeps the structured failed outcome
+    with NO adjudication record so the maintenance sweep can retry."""
+    team_id, ledger_path, scene_events = _auto_advance_env(tmp_path, monkeypatch)
+
+    def _storage_broken(*_args, **_kwargs):
+        raise RuntimeError("simulated ledger io failure")
+
+    monkeypatch.setattr(chain, "record_human_adjudication", _storage_broken)
+
+    result = chain.auto_adjudicate_exhausted_round(
+        team_id, question_id=_QUESTION_ID
+    )
+
+    assert result["status"] == "failed"
+    assert result["reason"] == "RuntimeError"
+    assert _auto_adjudication_records(ledger_path) == []
+    events = [
+        fields
+        for event, fields in scene_events
+        if event == "hypothesis_first.auto_adjudication"
+    ]
+    assert [fields["outcome"] for fields in events] == ["failed"]
+
+
+def _auto_create_env(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    question_id: str = _QUESTION_ID,
+):
+    """Env with an accepted (auto) adjudication already on the ledger."""
+    adjudication = {
+        "recordKind": chain.HUMAN_ADJUDICATION_KIND,
+        "adjudicationId": "hf-adjudication-auto-1",
+        "idempotencyKey": _AUTO_ADJUDICATION_KEY,
+        "questionId": question_id,
+        "hypothesisRoundId": _AUTO_ROUND_ID,
+        "workflowRunId": "",
+        "meetingRoundIds": [_AUTO_MEETING_ID],
+        "decision": "accepted",
+        "rationale": _AUTO_RATIONALE,
+        "decidedBy": "system:auto-advance:budget-exhausted",
+        "createdAt": "2026-09-01T00:02:00Z",
+        "updatedAt": "2026-09-01T00:02:00Z",
+    }
+    team_id, ledger_path, scene_events = _auto_advance_env(
+        tmp_path, monkeypatch, question_id=question_id,
+        existing_adjudication=adjudication,
+    )
+    _allow_chain_claim_belief_gate(monkeypatch)
+    monkeypatch.setattr(
+        chain, "_question_non_archived_formal_run_exists", lambda _t, _q: False
+    )
+    return team_id, ledger_path, scene_events
+
+
+def test_auto_create_formal_run_creates_and_auto_starts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from core.web.services.team_workflow.research_runtime import run_creation
+
+    team_id, _ledger_path, scene_events = _auto_create_env(
+        tmp_path, monkeypatch
+    )
+    create_calls: list[dict] = []
+    monkeypatch.setattr(
+        run_creation,
+        "create_question_run",
+        lambda *_args, **kwargs: (create_calls.append(kwargs) or {"runId": "run-auto-1"}),
+    )
+    start_calls: list[dict] = []
+    monkeypatch.setattr(
+        chain,
+        "_auto_start_created_formal_run",
+        lambda _team_id, *, run, idempotency_key: (
+            start_calls.append(
+                {"runId": str(run.get("runId") or ""), "idempotencyKey": idempotency_key}
+            )
+            or {"status": "accepted"}
+        ),
+    )
+
+    result = chain.auto_create_formal_run_after_convergence(
+        team_id, question_id=_QUESTION_ID
+    )
+
+    assert result["status"] == "created"
+    assert result["roundId"] == _AUTO_ROUND_ID
+    assert result["runId"] == "run-auto-1"
+    assert len(create_calls) == 1
+    call = create_calls[0]
+    assert call["team_id"] == team_id
+    assert call["question_id"] == _QUESTION_ID
+    assert call["idempotency_key"] == (
+        f"hf2:auto-formal-run:{_QUESTION_ID}:{_AUTO_ROUND_ID}"
+    )
+    assert call["formal_hypothesis_round_id"] == _AUTO_ROUND_ID
+    # Uncovered question: no catalog authorization required.
+    assert call["catalog_run_authorization"] is None
+    assert start_calls == [
+        {
+            "runId": "run-auto-1",
+            "idempotencyKey": f"hf2:auto-formal-run:{_QUESTION_ID}:{_AUTO_ROUND_ID}",
+        }
+    ]
+    events = [
+        fields
+        for event, fields in scene_events
+        if event == "hypothesis_first.auto_formal_run"
+    ]
+    assert len(events) == 1
+    assert events[0]["outcome"] == "created"
+    assert events[0]["fields"]["runId"] == "run-auto-1"
+
+
+def test_auto_create_skips_when_already_created_or_unconverged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from core.web.services.team_workflow.research_runtime import run_creation
+
+    team_id, _ledger_path, _events = _auto_create_env(tmp_path, monkeypatch)
+    create_calls: list[dict] = []
+    monkeypatch.setattr(
+        run_creation,
+        "create_question_run",
+        lambda *_args, **kwargs: (create_calls.append(kwargs) or {"runId": "run-auto-1"}),
+    )
+
+    # A live formal run already owns the next phase: skip before any create.
+    monkeypatch.setattr(
+        chain, "_question_non_archived_formal_run_exists", lambda _t, _q: True
+    )
+    skipped_run = chain.auto_create_formal_run_after_convergence(
+        team_id, question_id=_QUESTION_ID
+    )
+    assert skipped_run == {
+        "status": "skipped",
+        "reason": "formal_run_exists",
+        "roundId": _AUTO_ROUND_ID,
+    }
+
+    # Without an accepted adjudication the offer is not on the projection.
+    monkeypatch.setattr(
+        chain, "_question_non_archived_formal_run_exists", lambda _t, _q: False
+    )
+    monkeypatch.setattr(
+        chain,
+        "_latest_round_adjudication",
+        lambda *_args, **_kwargs: None,
+    )
+    skipped_no_adjudication = chain.auto_create_formal_run_after_convergence(
+        team_id, question_id=_QUESTION_ID
+    )
+    assert skipped_no_adjudication == {
+        "status": "skipped",
+        "reason": "no_accepted_adjudication",
+    }
+    assert create_calls == []
+
+
+def test_auto_create_stage_one_question_passes_catalog_authorization(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """SCI-091: the real create_question_run receives the durable catalog
+    authorization resolved by _current_catalog_run_authorization."""
+    from core.research.competition.stage_one_completion_policy import (
+        load_stage_one_completion_policy,
+    )
+    from core.web.services.team_workflow import challenge_cup_real_batch
+    from core.web.services.team_workflow.research_runtime import run_creation
+
+    team_id, _ledger_path, _events = _auto_create_env(
+        tmp_path, monkeypatch, question_id="SCI-091"
+    )
+    authorization_payload = {
+        "authorizationId": "auth-real-1",
+        "planId": "real-1",
+        "batchScope": {
+            "stageOneCompletionPolicy": load_stage_one_completion_policy().to_dict()
+        },
+    }
+    auth_plan_ids: list[str] = []
+    monkeypatch.setattr(
+        challenge_cup_real_batch,
+        "_current_catalog_run_authorization",
+        lambda _team_id, plan_id: (
+            auth_plan_ids.append(plan_id) or dict(authorization_payload)
+        ),
+    )
+    monkeypatch.setattr(
+        run_creation, "assert_writes_allowed", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(run_creation, "get_write_store", lambda: object())
+    monkeypatch.setattr(
+        run_creation,
+        "build_question_run_input",
+        lambda *_args, **_kwargs: {
+            "teamId": team_id,
+            "questionId": "SCI-091",
+            "researchScopeEnvelope": {},
+            "catalogScope": {},
+            "stageOneCompletionPolicy": load_stage_one_completion_policy().to_dict(),
+        },
+    )
+    monkeypatch.setattr(
+        run_creation,
+        "_formal_hypothesis_handoff",
+        lambda *_args, **_kwargs: {"hypothesisSelection": {"selectionId": "s-auto"}},
+    )
+    create_run_calls: list[dict] = []
+    monkeypatch.setattr(
+        run_creation,
+        "create_run",
+        lambda *_args, **kwargs: (
+            create_run_calls.append(kwargs) or {"runId": "run-auto-s1"}
+        ),
+    )
+    monkeypatch.setattr(
+        chain, "_auto_start_created_formal_run", lambda *_args, **_kwargs: None
+    )
+
+    result = chain.auto_create_formal_run_after_convergence(
+        team_id, question_id="SCI-091"
+    )
+
+    assert result["status"] == "created"
+    assert result["runId"] == "run-auto-s1"
+    assert auth_plan_ids == ["real-1"]
+    assert len(create_run_calls) == 1
+    # The authorization reached the real create_question_run unchanged...
+    assert create_run_calls[0]["catalog_run_authorization"] == authorization_payload
+    # ...and the frozen run input carries the stage-one policy it authorizes.
+    assert create_run_calls[0]["run_input"][
+        "stageOneCompletionPolicy"
+    ] == load_stage_one_completion_policy().to_dict()
+
+
+def test_auto_create_stage_one_without_authorization_fails_structured(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A missing durable authorization is a structured failure, never a raise."""
+    from core.web.services.team_workflow import challenge_cup_real_batch
+    from core.web.services.team_workflow.challenge_cup_real_batch import (
+        ChallengeCupRealBatchError,
+    )
+    from core.web.services.team_workflow.research_runtime import run_creation
+
+    team_id, _ledger_path, scene_events = _auto_create_env(
+        tmp_path, monkeypatch, question_id="SCI-091"
+    )
+
+    def _missing_authorization(_team_id, _plan_id):
+        raise ChallengeCupRealBatchError(
+            "A durable CatalogRunAuthorization record is required before a real "
+            "batch can start.",
+            code="catalog_run_authorization_required",
+        )
+
+    monkeypatch.setattr(
+        challenge_cup_real_batch,
+        "_current_catalog_run_authorization",
+        _missing_authorization,
+    )
+    create_calls: list[dict] = []
+    monkeypatch.setattr(
+        run_creation,
+        "create_question_run",
+        lambda *_args, **kwargs: (create_calls.append(kwargs) or {"runId": "run-x"}),
+    )
+
+    result = chain.auto_create_formal_run_after_convergence(
+        team_id, question_id="SCI-091"
+    )
+
+    assert result["status"] == "failed"
+    assert result["reason"] == "catalog_run_authorization_required"
+    assert create_calls == []
+    events = [
+        fields
+        for event, fields in scene_events
+        if event == "hypothesis_first.auto_formal_run"
+    ]
+    assert len(events) == 1
+    assert events[0]["outcome"] == "failed"
+    assert events[0]["fields"]["reason"] == "catalog_run_authorization_required"
+
+
+def test_auto_create_skips_rejected_round(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A gate-blocked rejected round is terminal: the formal-run creation
+    must skip it (no accepted convergence authority), never fork a run."""
+    from core.web.services.team_workflow.research_runtime import run_creation
+
+    rejected_adjudication = {
+        "recordKind": chain.HUMAN_ADJUDICATION_KIND,
+        "adjudicationId": "hf-adjudication-rejected-1",
+        "idempotencyKey": f"hf2:auto-adjudication-rejected:{_AUTO_ROUND_ID}",
+        "questionId": _QUESTION_ID,
+        "hypothesisRoundId": _AUTO_ROUND_ID,
+        "workflowRunId": "",
+        "meetingRoundIds": [_AUTO_MEETING_ID],
+        "decision": "rejected",
+        "rationale": (
+            "auto-advance: claim belief gate blocked (claim_data_missing); "
+            "review round budget exhausted (5/5); unconverged outcome recorded "
+            "per challenge-cup retention policy"
+        ),
+        "decidedBy": "system:auto-advance:gate-blocked",
+        "createdAt": "2026-09-01T00:02:00Z",
+        "updatedAt": "2026-09-01T00:02:00Z",
+    }
+    team_id, _ledger_path, _events = _auto_advance_env(
+        tmp_path, monkeypatch, existing_adjudication=rejected_adjudication
+    )
+    create_calls: list[dict] = []
+    monkeypatch.setattr(
+        run_creation,
+        "create_question_run",
+        lambda *_args, **kwargs: (create_calls.append(kwargs) or {"runId": "run-x"}),
+    )
+
+    result = chain.auto_create_formal_run_after_convergence(
+        team_id, question_id=_QUESTION_ID
+    )
+
+    assert result == {"status": "skipped", "reason": "no_accepted_adjudication"}
+    assert create_calls == []
+
+
+def _close_review_meeting_auto_advance_env(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    question_id: str = _QUESTION_ID,
+    round_index: int = 1,
+):
+    """close_review_meeting seam env: closure machinery faked at the edges."""
+    from core.web.services.team_workflow import meeting_rounds
+
+    team_id, _agents = _hf_env(tmp_path, monkeypatch)
+    closed_meeting = {
+        "meetingRoundId": _AUTO_MEETING_ID,
+        "meetingType": chain.HYPOTHESIS_REVIEW_MEETING_TYPE,
+        "question": question_id,
+        "status": "closed",
+    }
+    monkeypatch.setattr(
+        meeting_rounds,
+        "get_meeting_round",
+        lambda _team_id, _meeting_id: {"meetingRound": dict(closed_meeting)},
+    )
+    monkeypatch.setattr(
+        meeting_rounds,
+        "approve_meeting_closure",
+        lambda _team_id, _meeting_id, _request: {
+            "status": "created",
+            "meetingRound": dict(closed_meeting),
+            "decisions": [],
+        },
+    )
+    monkeypatch.setattr(
+        chain,
+        "_resolve_review_runners",
+        lambda *_args, **_kwargs: {
+            "reflection_runner": None,
+            "pairwise_runner": None,
+            "pareto_runner": None,
+            "metareview_runner": None,
+            "revision_runner": None,
+        },
+    )
+    monkeypatch.setattr(
+        chain,
+        "_process_collection_decisions",
+        lambda _team_id, _meeting, _result, _request: {
+            "requests": [],
+            "skipped": [],
+        },
+    )
+    round_record = _auto_advance_round_record(question_id)
+    round_record["roundIndex"] = round_index
+    monkeypatch.setattr(
+        chain,
+        "_generate_hypothesis_round",
+        lambda _team_id, _meeting, **_kwargs: {
+            "roundId": round_record["roundId"],
+            "status": round_record["status"],
+            "round": round_record,
+        },
+    )
+    monkeypatch.setattr(
+        hrounds,
+        "get_hypothesis_round",
+        lambda _team_id, _round_id: {"round": round_record},
+    )
+    monkeypatch.setattr(
+        chain,
+        "_question_hypothesis_rounds",
+        lambda _team_id, _round_question: [round_record]
+        if str(_round_question).upper() == question_id.upper()
+        else [],
+    )
+    monkeypatch.setattr(
+        chain, "_storage_path", lambda _team_id: tmp_path / "chain.jsonl"
+    )
+    monkeypatch.setattr(
+        chain, "_trigger_deferred_next_review", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(
+        chain, "_auto_advance_converge_tick", lambda *_args, **_kwargs: None
+    )
+    return team_id
+
+
+def test_close_review_meeting_reports_skipped_auto_advance_within_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    team_id = _close_review_meeting_auto_advance_env(
+        tmp_path, monkeypatch, round_index=1
+    )
+
+    result = chain.close_review_meeting(team_id, _AUTO_MEETING_ID, {"decisions": []})
+
+    # Budget not spent: the closure result stands and the auto-advance keys
+    # report the structural skip only.
+    assert result["status"] == "created"
+    assert result["autoAdjudication"]["status"] == "skipped"
+    assert result["autoAdjudication"]["reason"] == "round_not_exhausted"
+    assert result["autoFormalRun"] is None
+    assert result["deferredNextReview"] is None
+
+
+def test_close_review_meeting_auto_advances_exhausted_round(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from core.web.services.team_workflow.research_runtime import run_creation
+
+    team_id = _close_review_meeting_auto_advance_env(
+        tmp_path, monkeypatch, round_index=5
+    )
+    _allow_chain_claim_belief_gate(monkeypatch)
+    monkeypatch.setattr(
+        chain, "_question_non_archived_formal_run_exists", lambda _t, _q: False
+    )
+    create_calls: list[dict] = []
+    monkeypatch.setattr(
+        run_creation,
+        "create_question_run",
+        lambda *_args, **kwargs: (
+            create_calls.append(kwargs) or {"runId": "run-close-1"}
+        ),
+    )
+    monkeypatch.setattr(
+        chain, "_auto_start_created_formal_run", lambda *_args, **_kwargs: None
+    )
+
+    result = chain.close_review_meeting(team_id, _AUTO_MEETING_ID, {"decisions": []})
+
+    # Round 5/5 closed in place: adjudicated accepted and the formal run
+    # created without any human step, without touching the closure result.
+    assert result["status"] == "created"
+    assert result["autoAdjudication"]["status"] == "created"
+    assert result["autoFormalRun"]["status"] == "created"
+    assert result["autoFormalRun"]["runId"] == "run-close-1"
+    assert len(create_calls) == 1
+    assert create_calls[0]["idempotency_key"] == (
+        f"hf2:auto-formal-run:{_QUESTION_ID}:{_AUTO_ROUND_ID}"
+    )
+    adjudications = _auto_adjudication_records(tmp_path / "chain.jsonl")
+    assert [item["decidedBy"] for item in adjudications] == [
+        "system:auto-advance:budget-exhausted"
+    ]
+
+
+def test_close_review_meeting_records_rejected_outcome_when_gate_blocks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Closing the 5/5 round into a blocked claim gate records the rejected
+    outcome in place; no formal run is created for a rejected chain."""
+    team_id = _close_review_meeting_auto_advance_env(
+        tmp_path, monkeypatch, round_index=5
+    )
+
+    def _blocked(_team_id, _question_id, candidate_ids):
+        return {
+            candidate_id: {
+                "status": "blocked",
+                "reason": "claim_data_missing",
+                "claims": [],
+                "blockedClaims": [],
+            }
+            for candidate_id in candidate_ids
+        }
+
+    monkeypatch.setattr(chain, "evaluate_claim_belief_gate", _blocked)
+    from core.web.services.team_workflow.research_runtime import run_creation
+
+    create_calls: list[dict] = []
+    monkeypatch.setattr(
+        run_creation,
+        "create_question_run",
+        lambda *_args, **kwargs: (create_calls.append(kwargs) or {"runId": "run-x"}),
+    )
+
+    result = chain.close_review_meeting(team_id, _AUTO_MEETING_ID, {"decisions": []})
+
+    assert result["status"] == "created"
+    assert result["autoAdjudication"]["status"] == "rejected"
+    assert result["autoAdjudication"]["decision"] == "rejected"
+    # A rejected chain owns no formal-run transition.
+    assert result["autoFormalRun"] is None
+    assert create_calls == []
+    adjudications = _auto_adjudication_records(tmp_path / "chain.jsonl")
+    assert [item["decidedBy"] for item in adjudications] == [
+        "system:auto-advance:gate-blocked"
+    ]
