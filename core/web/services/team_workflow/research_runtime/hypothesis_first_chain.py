@@ -3168,17 +3168,21 @@ def _execute_v2_command_impl(
                 workflow_run_id=normalized_workflow_run_id,
             )
         elif command == "create_formal_run":
+            from .budget_contract import DEFAULT_STAGE_TOKENS, FORMAL_STAGE_IDS
             from .run_creation import create_question_run
 
+            # Stage token capacity must come from the shared budget contract
+            # (the 2M calibrated authority), never a copied literal: readiness
+            # compares run-cumulative settled usage against this frozen limit,
+            # and a stale smaller value false-rejects after 1-2 real nodes.
             result = create_question_run(
                 CHALLENGE_CUP_WORKFLOW_ID,
                 team_id=normalized_team_id,
                 question_id=normalized_question_id,
                 safety_limits={
                     "stageTokens": {
-                        "knowledge_collection": 250_000,
-                        "experiment_design": 250_000,
-                        "execution_iteration": 250_000,
+                        stage: DEFAULT_STAGE_TOKENS
+                        for stage in FORMAL_STAGE_IDS
                     },
                     "toolCalls": 300,
                     "wallClockSeconds": 21_600,

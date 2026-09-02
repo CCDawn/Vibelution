@@ -13,6 +13,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from core.research.workflow.contracts import PendingAction
 from core.research.workflow.models import ActorKind
 from core.web.services.team_workflow.research_runtime.budget_authority_adapter import (
@@ -1038,5 +1040,179 @@ def test_readiness_snapshot_dual_reads_retry_vocabulary(tmp_path: Path) -> None:
             },
         )
         assert _auto_retries() == 6
+    finally:
+        harness.close()
+
+
+# ------------------------------------------------- chain launch contract (T4)
+# The hypothesis-first chain's ``create_formal_run`` freezes an explicit
+# launch contract, and the budget authority treats an explicit contract as
+# authoritative (budget_authority_adapter._policy_limits reads the frozen
+# stageBudgets before any fallback).  That explicit contract must therefore
+# be sourced from the shared budget contract (the 2M calibrated authority),
+# never a copied literal: readiness compares run-cumulative settled usage
+# against this frozen limit, and the old 250K copy false-rejected
+# ``budget_safety_limit_reached`` after 1-2 real nodes (~294K each).
+
+
+_CREATE_FORMAL_RUN_REQUEST = {
+    "actionId": "create-formal-run-v2:round-accepted:1",
+    "idempotencyKey": "hf2:create-formal-run:round-accepted:1",
+    "expectedStateVersion": "hf2-action:converged-round",
+    "command": "create_formal_run",
+    "payload": {"hypothesisRoundId": "round-accepted"},
+}
+
+
+def _capture_formal_run_safety_limits(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> dict[str, object]:
+    """Drive the real chain ``create_formal_run`` branch and capture the
+    ``safety_limits`` the chain freezes into the run contract."""
+    from core.research.workflow.definition import (
+        build_challenge_cup_workflow_definition,
+    )
+    from core.research.workflow.definition_registry import definition_identity
+    from core.web.services import team_service
+    from core.web.services.team_workflow.research_runtime import (
+        formal_read_runtime,
+        hypothesis_first_chain,
+        hypothesis_first_state_v2,
+        run_creation,
+        runtime_factory,
+    )
+
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
+    monkeypatch.setattr(hypothesis_first_chain, "PROJECT_ROOT", tmp_path)
+    snapshot = {
+        "stateVersion": "hf2-action:converged-round",
+        "allowedActions": [
+            {
+                "kind": "command",
+                "actionId": "create-formal-run-v2:round-accepted:1",
+                "command": "create_formal_run",
+                "payload": {"hypothesisRoundId": "round-accepted"},
+                "enabled": True,
+                "idempotencyKey": "hf2:create-formal-run:round-accepted:1",
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        hypothesis_first_state_v2,
+        "project_hypothesis_first_state_v2",
+        lambda *_args, **_kwargs: snapshot,
+    )
+    identity = definition_identity(build_challenge_cup_workflow_definition())
+    captured: dict[str, object] = {}
+
+    def _capture_create(*_args, **kwargs):
+        captured.update(kwargs)
+        return {
+            "runId": "run-fresh",
+            "workflowId": identity.workflowId,
+            "workflowVersionId": identity.workflowVersionId,
+            "structureHash": identity.structureHash,
+            "teamId": "team-1",
+            "questionId": "SCI-001",
+            "status": "queued",
+            "runVersion": 1,
+        }
+
+    monkeypatch.setattr(run_creation, "create_question_run", _capture_create)
+
+    class Query:
+        def get_snapshot(self, *, team_id: str, run_id: str):
+            return {"commandOffers": []}
+
+    monkeypatch.setattr(formal_read_runtime, "get_query_service", lambda: Query())
+    monkeypatch.setattr(runtime_factory, "production_workflow_runtime", lambda: None)
+    monkeypatch.setattr(
+        hypothesis_first_chain,
+        "_record_scene_event",
+        lambda event_code, **kwargs: None,
+    )
+    return captured
+
+
+def test_create_formal_run_freezes_budget_contract_stage_capacity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The explicit create_formal_run stageBudgets must equal the shared
+    budget-contract capacity (2M authority), not a copied 250K literal."""
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_first_chain,
+    )
+    from core.web.services.team_workflow.research_runtime.budget_contract import (
+        DEFAULT_FORMAL_TOKEN_BUDGET,
+        FORMAL_STAGE_IDS,
+        default_safety_limits,
+    )
+
+    captured = _capture_formal_run_safety_limits(monkeypatch, tmp_path)
+    result = hypothesis_first_chain.execute_v2_command(
+        "team-1",
+        dict(_CREATE_FORMAL_RUN_REQUEST),
+        question_id="SCI-001",
+    )
+
+    assert result["result"]["runId"] == "run-fresh"
+    limits = captured["safety_limits"]
+    assert isinstance(limits, dict)
+    assert set(limits["stageTokens"]) == set(FORMAL_STAGE_IDS)
+    assert limits["stageTokens"] == default_safety_limits()["stageTokens"]
+    assert limits["stageTokens"]["knowledge_collection"] == DEFAULT_FORMAL_TOKEN_BUDGET
+    # Regression pin: the stale copied value must never come back.
+    assert 250_000 not in limits["stageTokens"].values()
+
+
+def test_readiness_chain_contract_admits_two_settled_real_nodes(
+    tmp_path: Path,
+) -> None:
+    """With the chain-frozen contract in the snapshot, a run-cumulative
+    ~588K settled sequence (two real nodes) must keep readiness available —
+    the old 250K contract false-rejected at exactly this point."""
+    from core.web.services.team_workflow.research_runtime.budget_contract import (
+        DEFAULT_STAGE_TOKENS,
+        FORMAL_STAGE_IDS,
+    )
+
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run()
+        _write_snapshot(
+            harness,
+            {
+                "stageBudgets": {
+                    stage: {"tokens": DEFAULT_STAGE_TOKENS}
+                    for stage in FORMAL_STAGE_IDS
+                }
+            },
+        )
+        _insert_budget_receipt(
+            harness,
+            receipt_id="br-chain-a",
+            node_id="source_finding",
+            node_run_id="nr-run-test-source_finding-a1",
+            estimate=250_000,
+            status="settled",
+            usage={"tokens": REAL_NODE_USAGE},
+        )
+        _insert_budget_receipt(
+            harness,
+            receipt_id="br-chain-b",
+            node_id="source_extraction",
+            node_run_id="nr-run-test-source_extraction-a1",
+            estimate=250_000,
+            status="settled",
+            usage={"tokens": REAL_NODE_USAGE},
+        )
+        consumed, budget = _readiness_budget(harness)
+        assert consumed["tokens"] == 2 * REAL_NODE_USAGE
+        # The sequence must exceed the old stale contract so this test
+        # actually bites if the chain literal ever regresses to 250K.
+        assert consumed["tokens"] > 250_000
+        assert budget.available() == (True, "")
     finally:
         harness.close()
