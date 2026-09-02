@@ -1162,8 +1162,8 @@ def test_maintenance_sweep_approves_stale_digests_before_adjudicating(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """sweep 每题顺序：先 approve（消化 awaiting_approval）再 adjudicate →
-    create(+start) → retry，approved 计数汇入 sweep summary。"""
+    """sweep 每题顺序：先 approve（消化 awaiting_approval）→ 缺 round 补生成 →
+    adjudicate → create(+start) → retry，approved 计数汇入 sweep summary。"""
     from core.web.services.team_workflow.research_runtime import run_creation
 
     ledger_path = _sweep_env(tmp_path, monkeypatch)
@@ -1179,12 +1179,25 @@ def test_maintenance_sweep_approves_stale_digests_before_adjudicating(
             "failed": 0,
         }
 
+    def _record_regen(team_id: str, *, question_id: str, now_ms=None):
+        order.append("regen")
+        return {
+            "status": "skipped",
+            "reason": "round_exists",
+            "created": 0,
+            "skipped": 1,
+            "failed": 0,
+        }
+
     def _record_retry(team_id: str, *, question_id: str):
         order.append(f"retry:{question_id}")
         return {"blockedRuns": 1, "retried": 1, "skipped": 0, "failed": 0}
 
     monkeypatch.setattr(
         chain, "auto_approve_awaiting_review_digests", _record_approve
+    )
+    monkeypatch.setattr(
+        chain, "auto_regenerate_missing_hypothesis_round", _record_regen
     )
     monkeypatch.setattr(chain, "auto_retry_blocked_formal_nodes", _record_retry)
     monkeypatch.setattr(
@@ -1202,11 +1215,411 @@ def test_maintenance_sweep_approves_stale_digests_before_adjudicating(
 
     summary = chain.sweep_auto_advance_closure()
 
-    assert order == ["approve", "create", "start", f"retry:{_QUESTION_ID}"]
+    assert order == [
+        "approve",
+        "regen",
+        "create",
+        "start",
+        f"retry:{_QUESTION_ID}",
+    ]
     assert summary["approved"] == 1
+    assert summary["roundsRegenerated"] == 0
     assert summary["adjudicated"] == 1
     assert summary["formalRuns"] == 1
     assert summary["retried"] == 1
     adjudications = _adjudications(ledger_path)
     assert len(adjudications) == 1
     assert adjudications[0]["decision"] == "accepted"
+
+
+# ---------------------------------------------------------------------------
+# step zero-five: auto-regeneration of a missing HypothesisRound (the closure
+# fan-in generation died mid-close: the meeting and its closure artifacts are
+# already persisted closed, but no round ever lands, so every downstream
+# auto-advance gate dead-waits forever)
+
+
+_REGEN_SELECTION_ID = "hsel-regen-1"
+_REGEN_R1_MEETING_ID = "hf-review-hsel-regen-1-round-1"
+_REGEN_R2_MEETING_A = "hf-review-hsel-regen-1-round-2-hyp-a"
+_REGEN_R2_MEETING_B = "hf-review-hsel-regen-1-round-2-hyp-b"
+_REGEN_CANDIDATE_A = "hyp-regen-a"
+_REGEN_CANDIDATE_B = "hyp-regen-b"
+
+
+def _regen_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> list[dict[str, Any]]:
+    """Tmp-isolated chain/meeting/round stores plus captured scene events."""
+    events = _approve_env(tmp_path, monkeypatch)
+    monkeypatch.setattr(hrounds, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chain, "PROJECT_ROOT", tmp_path)
+    # The inflight marker is process-global: a fresh env must not inherit one.
+    chain._ROUND_REGEN_INFLIGHT.clear()
+    monkeypatch.delenv("VIBELUTION_AUTO_REGEN_ROUND_GRACE_MS", raising=False)
+    return events
+
+
+def _seed_review_link(
+    meeting_id: str,
+    *,
+    round_index: int,
+    candidate_id: str = "",
+    selection_id: str = _REGEN_SELECTION_ID,
+    created_at: str = "",
+) -> None:
+    path = chain._storage_path(_TEAM_ID)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    chain._append_jsonl(
+        path,
+        {
+            "schemaVersion": 1,
+            "recordKind": chain.REVIEW_ROUND_LINK_KIND,
+            "linkId": f"hf-link-{meeting_id}",
+            "meetingRoundId": meeting_id,
+            "previousMeetingRoundId": "",
+            "selectionId": selection_id,
+            "collectionRequestId": "request-regen-1",
+            "questionId": _QUESTION_ID,
+            "roundIndex": round_index,
+            "roundBudget": chain.HARD_ROUND_LIMIT,
+            "candidateId": candidate_id,
+            "candidateOrder": None,
+            "createdAt": created_at or _offset_iso(0),
+        },
+    )
+
+
+def _seed_closed_review_meeting(
+    meeting_id: str,
+    *,
+    closed_at: str,
+    status: str = "closed",
+) -> None:
+    _seed_meeting(
+        {
+            "meetingRoundId": meeting_id,
+            "question": _QUESTION_ID,
+            "meetingType": "hypothesis_review",
+            "status": status,
+            "startedAt": _offset_iso(0),
+            "updatedAt": closed_at,
+            "closedAt": closed_at,
+            "participants": ["agent-a"],
+        }
+    )
+
+
+def _seed_stored_round(round_id: str, *, meeting_ids: list[str]) -> dict[str, Any]:
+    """Append a stored round record straight into the round ledger."""
+    record = {
+        "roundId": round_id,
+        "question": _QUESTION_ID,
+        "status": "closed",
+        "meetingRefs": [
+            {"kind": "meeting_round", "id": meeting_id} for meeting_id in meeting_ids
+        ],
+        "createdAt": _offset_iso(0),
+    }
+    hrounds._append_jsonl(hrounds._storage_path(_TEAM_ID), record)
+    return record
+
+
+def _seed_regen_chain(
+    *, second_round_status: str = "closed", closed_at: str = ""
+) -> None:
+    """Round-1 selection review plus a fully closed round-2 candidate pair."""
+    _seed_review_link(_REGEN_R1_MEETING_ID, round_index=1)
+    _seed_review_link(
+        _REGEN_R2_MEETING_A,
+        round_index=2,
+        candidate_id=_REGEN_CANDIDATE_A,
+        created_at=_offset_iso(10),
+    )
+    _seed_review_link(
+        _REGEN_R2_MEETING_B,
+        round_index=2,
+        candidate_id=_REGEN_CANDIDATE_B,
+        created_at=_offset_iso(10),
+    )
+    _seed_closed_review_meeting(_REGEN_R1_MEETING_ID, closed_at=_offset_iso(0))
+    _seed_closed_review_meeting(
+        _REGEN_R2_MEETING_A,
+        closed_at=closed_at or _offset_iso(100),
+        status=second_round_status,
+    )
+    _seed_closed_review_meeting(
+        _REGEN_R2_MEETING_B,
+        closed_at=closed_at or _offset_iso(300),
+        status=second_round_status,
+    )
+
+
+def test_auto_regenerate_creates_missing_round_after_grace(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """最新轮会议全部 closed 且过宽限期、无 round → 走 regenerate 命令路径补
+    生成；触发会议取该轮最后 closed 的一个，round 真实落盘并发事件。"""
+    events = _regen_env(tmp_path, monkeypatch)
+    _seed_regen_chain()
+    calls: list[str] = []
+
+    def _regenerate(team_id, meeting_round_id, **_kwargs):
+        calls.append(meeting_round_id)
+        record = _seed_stored_round(
+            "hround-regen-r2", meeting_ids=[meeting_round_id]
+        )
+        return {"status": "created", "round": record}
+
+    monkeypatch.setattr(chain, "regenerate_hypothesis_round", _regenerate)
+
+    summary = chain.auto_regenerate_missing_hypothesis_round(
+        _TEAM_ID,
+        question_id=_QUESTION_ID,
+        # Round-2 meetings closed 300s ago (beyond the 120s grace).
+        now_ms=_offset_ms(600),
+    )
+
+    assert summary["status"] == "created"
+    assert summary["reason"] == "round_generated"
+    assert summary["roundId"] == "hround-regen-r2"
+    # The last closed round-2 meeting triggers the regeneration.
+    assert calls == [_REGEN_R2_MEETING_B]
+    stored_rounds = hrounds.list_hypothesis_rounds(_TEAM_ID)["rounds"]
+    assert any(item["roundId"] == "hround-regen-r2" for item in stored_rounds)
+    created_events = [
+        item
+        for item in events
+        if item["code"] == "hypothesis_first.auto_regenerate_round"
+    ]
+    assert created_events and created_events[-1]["outcome"] == "created"
+    assert created_events[-1]["fields"]["meetingRoundId"] == _REGEN_R2_MEETING_B
+
+
+def test_auto_regenerate_waits_within_grace_period(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """closed 后未过宽限期（同步 fan-in 还在跑）→ skipped within_grace，
+    不触碰 regenerate。"""
+    events = _regen_env(tmp_path, monkeypatch)
+    _seed_regen_chain(closed_at=_offset_iso(100))
+    calls: list[str] = []
+
+    def _regenerate(team_id, meeting_round_id, **_kwargs):
+        calls.append(meeting_round_id)
+        return {"status": "created", "round": {}}
+
+    monkeypatch.setattr(chain, "regenerate_hypothesis_round", _regenerate)
+
+    summary = chain.auto_regenerate_missing_hypothesis_round(
+        _TEAM_ID,
+        question_id=_QUESTION_ID,
+        # Newest closure 100s ago: still inside the 120s grace.
+        now_ms=_offset_ms(200),
+    )
+
+    assert summary["status"] == "skipped"
+    assert summary["reason"] == "within_grace"
+    assert calls == []
+    skipped_events = [
+        item
+        for item in events
+        if item["code"] == "hypothesis_first.auto_regenerate_round"
+    ]
+    assert skipped_events and skipped_events[-1]["outcome"] == "skipped"
+    assert skipped_events[-1]["fields"]["reason"] == "within_grace"
+
+
+def test_auto_regenerate_skips_when_round_already_exists(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """该轮任一会议已被某个已存 round 的 meetingRefs 覆盖 → skipped
+    round_exists，不重复生成。"""
+    _regen_env(tmp_path, monkeypatch)
+    _seed_regen_chain()
+    _seed_stored_round("hround-existing-r2", meeting_ids=[_REGEN_R2_MEETING_A])
+    calls: list[str] = []
+
+    def _regenerate(team_id, meeting_round_id, **_kwargs):
+        calls.append(meeting_round_id)
+        return {"status": "created", "round": {}}
+
+    monkeypatch.setattr(chain, "regenerate_hypothesis_round", _regenerate)
+
+    summary = chain.auto_regenerate_missing_hypothesis_round(
+        _TEAM_ID, question_id=_QUESTION_ID, now_ms=_offset_ms(600)
+    )
+
+    assert summary["status"] == "skipped"
+    assert summary["reason"] == "round_exists"
+    assert calls == []
+
+
+def test_auto_regenerate_skips_when_review_meetings_still_open(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """最新轮还有会议未 closed → skipped review_not_closed（fan-in 兄弟
+    未齐也是同一语义，交给 regenerate 的域断言兜底）。"""
+    _regen_env(tmp_path, monkeypatch)
+    _seed_regen_chain(second_round_status="awaiting_approval")
+    calls: list[str] = []
+
+    def _regenerate(team_id, meeting_round_id, **_kwargs):
+        calls.append(meeting_round_id)
+        return {"status": "created", "round": {}}
+
+    monkeypatch.setattr(chain, "regenerate_hypothesis_round", _regenerate)
+
+    summary = chain.auto_regenerate_missing_hypothesis_round(
+        _TEAM_ID, question_id=_QUESTION_ID, now_ms=_offset_ms(600)
+    )
+
+    assert summary["status"] == "skipped"
+    assert summary["reason"] == "review_not_closed"
+    assert calls == []
+
+
+def test_auto_regenerate_reports_failed_generation_without_raising(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """生成失败（如评审 LLM 300s 超时）→ failed 不外抛、无新 round；
+    下一轮再试由幂等域保证成功。"""
+    events = _regen_env(tmp_path, monkeypatch)
+    _seed_regen_chain()
+    state = {"attempt": 0}
+
+    def _regenerate(team_id, meeting_round_id, **_kwargs):
+        state["attempt"] += 1
+        if state["attempt"] == 1:
+            raise RuntimeError("review LLM did not return within 300s")
+        record = _seed_stored_round(
+            "hround-regen-r2", meeting_ids=[meeting_round_id]
+        )
+        return {"status": "created", "round": record}
+
+    monkeypatch.setattr(chain, "regenerate_hypothesis_round", _regenerate)
+
+    failed = chain.auto_regenerate_missing_hypothesis_round(
+        _TEAM_ID, question_id=_QUESTION_ID, now_ms=_offset_ms(600)
+    )
+    assert failed["status"] == "failed"
+    assert failed["reason"] == "RuntimeError"
+    assert "300s" in failed["error"]
+    assert hrounds.list_hypothesis_rounds(_TEAM_ID)["roundCount"] == 0
+    failed_events = [
+        item
+        for item in events
+        if item["code"] == "hypothesis_first.auto_regenerate_round"
+    ]
+    assert failed_events and failed_events[-1]["outcome"] == "failed"
+    assert failed_events[-1]["level"] == "warning"
+
+    # The next sweep pass simply retries; the domain stays the idempotency
+    # authority (a stored round would replay as reuse instead).
+    retry = chain.auto_regenerate_missing_hypothesis_round(
+        _TEAM_ID, question_id=_QUESTION_ID, now_ms=_offset_ms(600)
+    )
+    assert retry["status"] == "created"
+    assert hrounds.list_hypothesis_rounds(_TEAM_ID)["roundCount"] == 1
+
+
+def test_auto_regenerate_maps_sibling_rejection_to_skipped(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """regenerate 域拒绝（waiting_for_sibling_reviews）→ skipped，不算失败。"""
+    _regen_env(tmp_path, monkeypatch)
+    _seed_regen_chain()
+
+    def _regenerate(team_id, meeting_round_id, **_kwargs):
+        return {
+            "status": "waiting_for_sibling_reviews",
+            "selectionId": _REGEN_SELECTION_ID,
+            "roundIndex": 2,
+        }
+
+    monkeypatch.setattr(chain, "regenerate_hypothesis_round", _regenerate)
+
+    summary = chain.auto_regenerate_missing_hypothesis_round(
+        _TEAM_ID, question_id=_QUESTION_ID, now_ms=_offset_ms(600)
+    )
+
+    assert summary["status"] == "skipped"
+    assert summary["reason"] == "waiting_for_sibling_reviews"
+
+
+def test_auto_regenerate_is_inflight_guarded_per_question(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """同一 (team, question) 重入（上一轮补生成还在跑）→ 内层直接 skipped
+    already_in_flight；外层结束后标记释放，下一轮可再次检测。"""
+    _regen_env(tmp_path, monkeypatch)
+    _seed_regen_chain()
+    reentrant: dict[str, Any] = {}
+
+    def _regenerate(team_id, meeting_round_id, **_kwargs):
+        # Re-enter the helper while the outer generation is still "running":
+        # the inflight marker must fence the nested call for the same question.
+        reentrant.update(
+            chain.auto_regenerate_missing_hypothesis_round(
+                team_id, question_id=_QUESTION_ID, now_ms=_offset_ms(600)
+            )
+        )
+        return {
+            "status": "waiting_for_sibling_reviews",
+            "selectionId": _REGEN_SELECTION_ID,
+        }
+
+    monkeypatch.setattr(chain, "regenerate_hypothesis_round", _regenerate)
+
+    summary = chain.auto_regenerate_missing_hypothesis_round(
+        _TEAM_ID, question_id=_QUESTION_ID, now_ms=_offset_ms(600)
+    )
+
+    assert reentrant["reason"] == "already_in_flight"
+    assert summary["status"] == "skipped"
+    assert summary["reason"] == "waiting_for_sibling_reviews"
+    # The marker is released after the outer call: a fresh pass detects again.
+    followup = chain.auto_regenerate_missing_hypothesis_round(
+        _TEAM_ID, question_id=_QUESTION_ID, now_ms=_offset_ms(600)
+    )
+    assert followup["status"] == "skipped"
+    assert followup["reason"] == "waiting_for_sibling_reviews"
+    assert all(
+        team_id != _TEAM_ID for team_id, _question in chain._ROUND_REGEN_INFLIGHT
+    )
+
+
+def test_maintenance_sweep_counts_regenerated_round_in_summary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """sweep 在 approve 之后、adjudicate 之前补缺 round；created 计数汇入
+    summary.roundsRegenerated，failed 计入 summary.failed。"""
+    ledger_path = _sweep_env(tmp_path, monkeypatch)
+
+    def _record_regen(team_id: str, *, question_id: str, now_ms=None):
+        return {"status": "created", "reason": "round_generated", "created": 1}
+
+    monkeypatch.setattr(
+        chain, "auto_regenerate_missing_hypothesis_round", _record_regen
+    )
+
+    def _record_adjudicate(team_id: str, *, question_id: str):
+        return {"status": "skipped", "reason": "round_not_exhausted"}
+
+    monkeypatch.setattr(
+        chain, "auto_adjudicate_exhausted_round", _record_adjudicate
+    )
+
+    summary = chain.sweep_auto_advance_closure()
+
+    assert summary["roundsRegenerated"] == 1
+    assert summary["failed"] == 0
+    assert _adjudications(ledger_path) == []

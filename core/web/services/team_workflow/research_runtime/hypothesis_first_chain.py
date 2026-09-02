@@ -106,6 +106,19 @@ DEFAULT_AUTO_APPROVE_DIGEST_TTL_MS = 600_000
 AUTO_APPROVE_DIGEST_TTL_MIN_MS = 60_000
 _AUTO_APPROVE_DIGEST_TTL_OVERRIDE_ENV = "VIBELUTION_AUTO_APPROVE_DIGEST_TTL_MS"
 
+# Missing-HypothesisRound auto-regeneration (auto-advance, after the digest
+# approval): how long the newest review round must have been fully closed
+# before the sweep accepts "no round landed" as a permanent miss instead of
+# racing the synchronous fan-in generation a still-settling close is running.
+# Deliberately an independent threshold from the digest TTL above.
+DEFAULT_AUTO_REGEN_ROUND_GRACE_MS = 120_000
+_AUTO_REGEN_ROUND_GRACE_OVERRIDE_ENV = "VIBELUTION_AUTO_REGEN_ROUND_GRACE_MS"
+# In-flight marker, one regeneration per (teamId, questionId) per process.
+# The maintenance tick is serial, but one regeneration can spend the whole
+# review-LLM budget (minutes) while the sweep interval is 30s, so any
+# re-entrant or concurrent host must not double-trigger the same question.
+_ROUND_REGEN_INFLIGHT: dict[tuple[str, str], object] = {}
+
 PROJECT_ROOT = Path(__file__).resolve().parents[5]
 _LOCK = threading.RLock()
 _RECOVERY_LOCKS: dict[str, threading.Lock] = {}
@@ -2904,6 +2917,20 @@ def _auto_approve_digest_ttl_ms() -> int:
     return DEFAULT_AUTO_APPROVE_DIGEST_TTL_MS
 
 
+def _auto_regen_round_grace_ms() -> int:
+    """Configured missing-round grace; the env override is clamped to >=0."""
+
+    raw = str(os.environ.get(_AUTO_REGEN_ROUND_GRACE_OVERRIDE_ENV) or "").strip()
+    if raw:
+        try:
+            normalized = int(raw)
+        except ValueError:
+            normalized = -1
+        if normalized >= 0:
+            return normalized
+    return DEFAULT_AUTO_REGEN_ROUND_GRACE_MS
+
+
 def _iso_timestamp_ms(value: Any) -> int | None:
     """Parse one record ISO timestamp into epoch ms (tolerant, fail-open)."""
 
@@ -3123,26 +3150,424 @@ def auto_approve_awaiting_review_digests(
     return summary
 
 
+def _round_refs_meeting_ids(round_record: Mapping[str, Any]) -> set[str]:
+    """Meeting ids a stored HypothesisRound was generated from.
+
+    ``meetingRefs`` is the only durable round-to-meeting association: round
+    records carry no selectionId/roundIndex of their own, but a generated
+    round references every bound meeting of its fan-in group here.
+    """
+
+    refs = round_record.get("meetingRefs")
+    if not isinstance(refs, Sequence) or isinstance(refs, (str, bytes)):
+        return set()
+    return {
+        str(item.get("id") or "").strip()
+        for item in refs
+        if isinstance(item, Mapping)
+        and str(item.get("kind") or "").strip() == "meeting_round"
+        and str(item.get("id") or "").strip()
+    }
+
+
+def _missing_round_plans_for_question(
+    team_id: str,
+    *,
+    question_id: str,
+    now_ms: int,
+    grace_ms: int,
+) -> list[dict[str, Any]]:
+    """Detect per selection chain: newest review round closed but roundless.
+
+    One plan per selection whose newest link round ``N`` satisfies all of:
+    every latest-attempt meeting at round ``N`` is closed, the newest closure
+    is older than ``grace_ms`` (a close still running its synchronous fan-in
+    generation must never be raced), and no stored HypothesisRound references
+    any round-``N`` meeting.  A plan that fails a guard returns its skip
+    reason instead; the caller reports only the decisive outcomes.
+    """
+
+    from core.web.services.team_workflow import meeting_rounds
+
+    links = [
+        dict(item)
+        for item in list_review_round_links(team_id, question_id=question_id).get(
+            "links"
+        )
+        or []
+        if isinstance(item, Mapping) and str(item.get("meetingRoundId") or "").strip()
+    ]
+    if not links:
+        return [{"status": "skipped", "reason": "no_review_links"}]
+
+    by_selection: dict[str, list[dict[str, Any]]] = {}
+    for link in links:
+        by_selection.setdefault(str(link.get("selectionId") or "").strip(), []).append(
+            link
+        )
+
+    stored_rounds = _question_hypothesis_rounds(team_id, question_id)
+    stored_meeting_ids: set[str] = set()
+    for round_record in stored_rounds:
+        if isinstance(round_record, Mapping):
+            stored_meeting_ids |= _round_refs_meeting_ids(round_record)
+
+    plans: list[dict[str, Any]] = []
+    for selection_id, selection_links in sorted(by_selection.items()):
+        for link in selection_links:
+            try:
+                link["roundIndex"] = int(link.get("roundIndex") or 1)
+            except (TypeError, ValueError):
+                link["roundIndex"] = 1
+        latest_round_index = max(item["roundIndex"] for item in selection_links)
+        round_links = [
+            item
+            for item in selection_links
+            if item["roundIndex"] == latest_round_index
+        ]
+        fields: dict[str, Any] = {
+            "teamId": team_id,
+            "questionId": question_id,
+            "selectionId": selection_id,
+            "roundIndex": latest_round_index,
+        }
+        round_n_meeting_ids = [
+            str(item.get("meetingRoundId") or "").strip() for item in round_links
+        ]
+        # The round id is content-addressed over the whole fan-in group, so a
+        # stored round covers every attempt meeting of the round; any overlap
+        # means the round landed and nothing is missing.
+        if stored_meeting_ids.intersection(round_n_meeting_ids):
+            plans.append({**fields, "status": "skipped", "reason": "round_exists"})
+            continue
+        # Retry attempts append one link per attempt while reusing the same
+        # (candidateId, roundIndex) binding; only the newest attempt counts.
+        latest_attempt: dict[str, dict[str, Any]] = {}
+        for item in round_links:
+            candidate = str(item.get("candidateId") or "").strip()
+            existing = latest_attempt.get(candidate)
+            if existing is None or str(item.get("createdAt") or "") >= str(
+                existing.get("createdAt") or ""
+            ):
+                latest_attempt[candidate] = item
+        attempt_links = list(latest_attempt.values())
+        if not attempt_links:
+            plans.append(
+                {**fields, "status": "skipped", "reason": "no_round_meetings"}
+            )
+            continue
+        attempt_meetings: list[dict[str, Any]] = []
+        skip_reason = ""
+        for item in attempt_links:
+            meeting_id = str(item.get("meetingRoundId") or "").strip()
+            try:
+                meeting = dict(
+                    meeting_rounds.get_meeting_round(team_id, meeting_id)[
+                        "meetingRound"
+                    ]
+                )
+            except Exception:  # noqa: BLE001 - unreadable state stays a skip
+                skip_reason = "meeting_unreadable"
+                break
+            if str(meeting.get("status") or "").strip().lower() != "closed":
+                skip_reason = "review_not_closed"
+                break
+            closed_at_ms = _iso_timestamp_ms(
+                meeting.get("closedAt") or meeting.get("updatedAt")
+            )
+            if closed_at_ms is None:
+                skip_reason = "unreadable_updated_at"
+                break
+            meeting["closedAtMs"] = closed_at_ms
+            attempt_meetings.append(meeting)
+        if skip_reason:
+            plans.append({**fields, "status": "skipped", "reason": skip_reason})
+            continue
+        newest_closed_ms = max(
+            int(meeting.get("closedAtMs") or 0) for meeting in attempt_meetings
+        )
+        closed_age_ms = max(now_ms - newest_closed_ms, 0)
+        if closed_age_ms < grace_ms:
+            plans.append(
+                {
+                    **fields,
+                    "status": "skipped",
+                    "reason": "within_grace",
+                    "closedAgeMs": closed_age_ms,
+                    "graceMs": grace_ms,
+                }
+            )
+            continue
+        attempt_meetings.sort(key=lambda item: int(item.get("closedAtMs") or 0))
+        plans.append(
+            {
+                **fields,
+                "status": "planned",
+                "triggerMeetingRoundId": str(
+                    attempt_meetings[-1].get("meetingRoundId") or ""
+                ).strip(),
+                "meetingRoundIds": [
+                    str(meeting.get("meetingRoundId") or "").strip()
+                    for meeting in attempt_meetings
+                ],
+            }
+        )
+    return plans
+
+
+def auto_regenerate_missing_hypothesis_round(
+    team_id: str,
+    *,
+    question_id: str,
+    now_ms: int | None = None,
+) -> dict[str, Any]:
+    """Regenerate a HypothesisRound the closure fan-in never landed.
+
+    Auto-advance step between digest approval and adjudication.  The live
+    break this closes: :func:`close_review_meeting` persists the meeting
+    ``closed`` and only then runs the selection-level round generation
+    synchronously through the review LLMs; when that call times out, the
+    closure artifacts stand but the round never lands — and with no round,
+    no adjudication or convergence gate can ever fire, so the chain
+    dead-waits forever.  Detection and action per selection chain: see
+    :func:`_missing_round_plans_for_question`; the action reuses the
+    existing :func:`regenerate_hypothesis_round` command path unchanged
+    (all of its domain assertions and runner resolution stay authoritative),
+    so a fan-in that judges siblings unready and an already-stored round are
+    domain rejections, not errors.
+
+    Result semantics: ``created`` (a round landed), ``skipped`` (guarded or
+    domain-rejected; ``reason`` says which), ``failed`` (generation failed —
+    the next sweep pass retries naturally).  Best-effort like every
+    auto-advance helper: nothing raises and every outcome lands as a
+    ``hypothesis_first.auto_regenerate_round`` scene event.  An in-process
+    inflight marker keyed by ``(teamId, questionId)`` keeps a slow
+    regeneration (the review-LLM budget is minutes against a 30s sweep
+    interval) from being double-triggered for the same question.
+    """
+    normalized_team_id = str(team_id or "").strip()
+    normalized_question_id = str(question_id or "").strip().upper()
+    summary: dict[str, Any] = {
+        "status": "skipped",
+        "reason": "",
+        "created": 0,
+        "skipped": 0,
+        "failed": 0,
+    }
+    if not normalized_team_id or not normalized_question_id:
+        summary["reason"] = "missing_identity"
+        return summary
+    inflight_key = (normalized_team_id, normalized_question_id)
+    inflight_token: object = object()
+    if _ROUND_REGEN_INFLIGHT.setdefault(inflight_key, inflight_token) is not (
+        inflight_token
+    ):
+        return {
+            "status": "skipped",
+            "reason": "already_in_flight",
+            "created": 0,
+            "skipped": 0,
+            "failed": 0,
+        }
+    try:
+        now_value = int(now_ms if now_ms is not None else time.time() * 1000)
+        grace_ms = _auto_regen_round_grace_ms()
+        try:
+            plans = _missing_round_plans_for_question(
+                normalized_team_id,
+                question_id=normalized_question_id,
+                now_ms=now_value,
+                grace_ms=grace_ms,
+            )
+        except Exception as exc:  # noqa: BLE001 - detection stays best-effort
+            summary["status"] = "failed"
+            summary["reason"] = "detection_failed"
+            summary["error"] = str(exc)[:400]
+            _record_scene_event(
+                "hypothesis_first.auto_regenerate_round",
+                outcome="failed",
+                level="warning",
+                fields={
+                    "teamId": normalized_team_id,
+                    "questionId": normalized_question_id,
+                    "reason": "detection_failed",
+                    "errorType": type(exc).__name__,
+                    "error": str(exc)[:400],
+                },
+            )
+            return summary
+        decisive: dict[str, Any] | None = None
+        for plan in plans:
+            fields = {
+                "teamId": normalized_team_id,
+                "questionId": normalized_question_id,
+                "selectionId": str(plan.get("selectionId") or ""),
+                "roundIndex": plan.get("roundIndex"),
+                "graceMs": grace_ms,
+            }
+            if str(plan.get("status") or "") != "planned":
+                summary["skipped"] += 1
+                if decisive is None or decisive.get("status") == "skipped":
+                    decisive = {
+                        "status": "skipped",
+                        "reason": str(plan.get("reason") or "unknown"),
+                    }
+                _record_scene_event(
+                    "hypothesis_first.auto_regenerate_round",
+                    outcome="skipped",
+                    fields={**fields, "reason": str(plan.get("reason") or "")},
+                )
+                continue
+            trigger_meeting_id = str(plan.get("triggerMeetingRoundId") or "").strip()
+            plan_fields = {
+                **fields,
+                "meetingRoundId": trigger_meeting_id,
+                "meetingRoundIds": list(plan.get("meetingRoundIds") or []),
+            }
+            try:
+                result = regenerate_hypothesis_round(
+                    normalized_team_id, trigger_meeting_id
+                )
+            except HypothesisFirstChainError as exc:
+                # Domain rejection (the meeting moved, the closure state
+                # disagrees): a structured wait, never an error.
+                summary["skipped"] += 1
+                if decisive is None:
+                    decisive = {"status": "skipped", "reason": str(exc)[:200]}
+                _record_scene_event(
+                    "hypothesis_first.auto_regenerate_round",
+                    outcome="skipped",
+                    fields={**plan_fields, "reason": str(exc)[:200]},
+                )
+                continue
+            except Exception as exc:  # noqa: BLE001 - one plan is isolated
+                summary["failed"] += 1
+                if decisive is None or decisive.get("status") != "created":
+                    decisive = {
+                        "status": "failed",
+                        "reason": type(exc).__name__,
+                        "error": str(exc)[:400],
+                    }
+                _record_scene_event(
+                    "hypothesis_first.auto_regenerate_round",
+                    outcome="failed",
+                    level="warning",
+                    fields={
+                        **plan_fields,
+                        "reason": type(exc).__name__,
+                        "error": str(exc)[:400],
+                    },
+                )
+                continue
+            result_status = str(result.get("status") or "")
+            if result_status == "created":
+                round_record = (
+                    result.get("round")
+                    if isinstance(result.get("round"), Mapping)
+                    else {}
+                )
+                summary["created"] += 1
+                decisive = {
+                    "status": "created",
+                    "reason": "round_generated",
+                    "roundId": str(round_record.get("roundId") or ""),
+                }
+                _record_scene_event(
+                    "hypothesis_first.auto_regenerate_round",
+                    outcome="created",
+                    fields={
+                        **plan_fields,
+                        "roundId": str(round_record.get("roundId") or ""),
+                    },
+                )
+            elif result_status == "reused":
+                # The stored round predated detection (or a concurrent winner
+                # landed it): the chain has its round either way.
+                summary["skipped"] += 1
+                decisive = {"status": "skipped", "reason": "round_reused"}
+                _record_scene_event(
+                    "hypothesis_first.auto_regenerate_round",
+                    outcome="skipped",
+                    fields={**plan_fields, "reason": "round_reused"},
+                )
+            elif result_status in {
+                "waiting_for_sibling_reviews",
+                "generation_in_progress",
+            }:
+                # Fan-in authority says siblings are not ready, or another
+                # trigger is generating the same round: wait for the next pass.
+                summary["skipped"] += 1
+                decisive = {"status": "skipped", "reason": result_status}
+                _record_scene_event(
+                    "hypothesis_first.auto_regenerate_round",
+                    outcome="skipped",
+                    fields={**plan_fields, "reason": result_status},
+                )
+            elif result_status == "failed":
+                # The generation failure trace is already durable (the
+                # hypothesis_round_failures ledger); the next sweep retries.
+                summary["failed"] += 1
+                decisive = {
+                    "status": "failed",
+                    "reason": "generation_failed",
+                    "error": str(result.get("error") or "")[:400],
+                }
+                _record_scene_event(
+                    "hypothesis_first.auto_regenerate_round",
+                    outcome="failed",
+                    level="warning",
+                    fields={
+                        **plan_fields,
+                        "reason": "generation_failed",
+                        "errorType": str(result.get("errorType") or ""),
+                        "error": str(result.get("error") or "")[:400],
+                    },
+                )
+            else:
+                summary["skipped"] += 1
+                decisive = {
+                    "status": "skipped",
+                    "reason": f"unexpected_status:{result_status}",
+                }
+                _record_scene_event(
+                    "hypothesis_first.auto_regenerate_round",
+                    outcome="skipped",
+                    fields={**plan_fields, "reason": "unexpected_status"},
+                )
+        if decisive is not None:
+            summary.update(decisive)
+        elif not plans:
+            summary["reason"] = "no_review_links"
+        return summary
+    finally:
+        if _ROUND_REGEN_INFLIGHT.get(inflight_key) is inflight_token:
+            _ROUND_REGEN_INFLIGHT.pop(inflight_key, None)
+
+
 def sweep_auto_advance_closure() -> dict[str, Any]:
     """Maintenance sweep: auto-advance every exhausted hypothesis chain.
 
     Restart-time recovery for chains stuck at an auto-advance gate (the
     closing tick may be long gone by the time this runs).  Enumerates the
     team ids that own a hypothesis-first chain ledger read-only, then walks
-    each question through approve -> adjudicate -> create -> retry: review
-    digests that waited beyond the TTL get approved and closed first (so the
-    fan-in / next-round advance can still progress within the same pass),
-    exhausted rounds get their accepted adjudication, converged chains get
-    the formal run created and started, and formal nodes blocked on the
-    transient ``auto_advance_not_ready`` gate get their offer-gated retry
-    resubmitted.  Nothing here raises: one broken team or question is
-    isolated and counted; questions whose latest round is not an
-    unadjudicated exhausted round cost one cheap guard read.
+    each question through approve -> regenerate -> adjudicate -> create ->
+    retry: review digests that waited beyond the TTL get approved and closed
+    first (so the fan-in / next-round advance can still progress within the
+    same pass), a newest review round whose fan-in round generation never
+    landed (the closure LLM died mid-close) gets its HypothesisRound
+    regenerated before anything downstream could block on it, exhausted
+    rounds get their accepted adjudication, converged chains get the formal
+    run created and started, and formal nodes blocked on the transient
+    ``auto_advance_not_ready`` gate get their offer-gated retry resubmitted.
+    Nothing here raises: one broken team or question is isolated and
+    counted; questions whose latest round is not an unadjudicated exhausted
+    round cost one cheap guard read.
     """
     summary: dict[str, Any] = {
         "teams": 0,
         "questions": 0,
         "approved": 0,
+        "roundsRegenerated": 0,
         "adjudicated": 0,
         "rejected": 0,
         "formalRuns": 0,
@@ -3177,6 +3602,18 @@ def sweep_auto_advance_closure() -> dict[str, Any]:
                     team_id, question_id=question_id
                 )
                 summary["approved"] += int(approval.get("approved") or 0)
+                # Step zero-five, after approval: a newest review round whose
+                # fan-in round generation never landed (the closure's
+                # synchronous review-LLM call died after the meeting was
+                # already closed) is regenerated here — without the round,
+                # every downstream gate below would wait forever.
+                regeneration = auto_regenerate_missing_hypothesis_round(
+                    team_id, question_id=question_id
+                )
+                if str(regeneration.get("status") or "") == "created":
+                    summary["roundsRegenerated"] += 1
+                elif str(regeneration.get("status") or "") == "failed":
+                    summary["failed"] += 1
                 adjudication = auto_adjudicate_exhausted_round(
                     team_id, question_id=question_id
                 )
@@ -3214,6 +3651,7 @@ def sweep_auto_advance_closure() -> dict[str, Any]:
             "teams": int(summary["teams"]),
             "questions": int(summary["questions"]),
             "approved": int(summary["approved"]),
+            "roundsRegenerated": int(summary["roundsRegenerated"]),
             "adjudicated": int(summary["adjudicated"]),
             "rejected": int(summary["rejected"]),
             "formalRuns": int(summary["formalRuns"]),
