@@ -30,7 +30,20 @@ def _reject_duplicate_json_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return payload
 
 
-def _is_exact_hypothesis_first_meeting_block(run: Any) -> bool:
+# ``auto_advance_not_ready`` readiness gates that the hypothesis chain's own
+# meetings resolve: the candidate-generation meeting opens the loop, and its
+# review rounds drive convergence.  Blocking meeting fan-out while the run
+# waits on either gate deadlocks the chain (the run waits for convergence that
+# only the fenced meeting can produce).
+_CHAIN_RESOLVABLE_HYPOTHESIS_BLOCK_DETAILS = frozenset(
+    {
+        "hypothesis_first_meeting_open",
+        "hypothesis_round_unconverged",
+    }
+)
+
+
+def _is_chain_resolvable_hypothesis_block(run: Any) -> bool:
     raw_problem = getattr(run, "blocked_problem_json", None)
     if not isinstance(raw_problem, str) or not raw_problem.strip():
         return False
@@ -43,7 +56,8 @@ def _is_exact_hypothesis_first_meeting_block(run: Any) -> bool:
         return False
     return isinstance(problem, Mapping) and (
         problem.get("code") == "auto_advance_not_ready"
-        and problem.get("detail") == "hypothesis_first_meeting_open"
+        and isinstance(problem.get("detail"), str)
+        and problem.get("detail") in _CHAIN_RESOLVABLE_HYPOTHESIS_BLOCK_DETAILS
     )
 
 
@@ -249,10 +263,12 @@ def workflow_run_stop_reason(authority: Mapping[str, Any] | None) -> str:
     if run is None:
         return "challenge_workflow_run_missing"
     status = str(getattr(run, "status", "") or "").strip().lower()
-    if status == "blocked" and _is_exact_hypothesis_first_meeting_block(run):
-        # ``hypothesis_first_meeting_open`` is the RESOLVE_HUMAN readiness
-        # gate that this formal candidate-generation meeting is meant to
-        # resolve.  Every other blocked shape remains fail-closed below.
+    if status == "blocked" and _is_chain_resolvable_hypothesis_block(run):
+        # These readiness gates are the exact conditions the chain's own
+        # meetings exist to resolve (open the hypothesis loop / converge the
+        # review rounds), so the fence must not strangle the meeting that
+        # would clear the block.  Every other blocked shape stays fail-closed
+        # below.
         return ""
     return (
         f"challenge_workflow_run_{status}"

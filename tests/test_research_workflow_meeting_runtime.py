@@ -1634,7 +1634,9 @@ def test_workflow_run_stop_reason_rechecks_blocked_then_allows_resumed_run(monke
     assert meeting_receipt_authority.workflow_run_stop_reason(authority) == ""
 
 
-def test_workflow_run_stop_reason_allows_only_exact_human_meeting_gate(monkeypatch):
+def test_workflow_run_stop_reason_allows_only_chain_resolvable_readiness_blocks(
+    monkeypatch,
+):
     problem_jsons = iter(
         [
             json.dumps(
@@ -1648,7 +1650,25 @@ def test_workflow_run_stop_reason_allows_only_exact_human_meeting_gate(monkeypat
             json.dumps(
                 {
                     "code": "auto_advance_not_ready",
+                    "detail": "hypothesis_round_unconverged",
+                }
+            ),
+            json.dumps(
+                {
+                    "code": "auto_advance_not_ready",
                     "detail": "source_candidates_missing",
+                }
+            ),
+            json.dumps(
+                {
+                    "code": "auto_advance_not_ready",
+                    "detail": "template_baseline_missing",
+                }
+            ),
+            json.dumps(
+                {
+                    "code": "knowledge_gap_pending",
+                    "detail": "hypothesis_round_unconverged",
                 }
             ),
             json.dumps(
@@ -1680,12 +1700,36 @@ def test_workflow_run_stop_reason_allows_only_exact_human_meeting_gate(monkeypat
     )
     authority = {"workflowRunId": "run-blocked-human-gate"}
 
+    # Chain-resolvable readiness gates: the chain's own meetings resolve them.
     assert meeting_receipt_authority.workflow_run_stop_reason(authority) == ""
-    for _ in range(5):
+    assert meeting_receipt_authority.workflow_run_stop_reason(authority) == ""
+    # Every other blocked shape stays fail-closed.
+    for _ in range(7):
         assert (
             meeting_receipt_authority.workflow_run_stop_reason(authority)
             == "challenge_workflow_run_blocked"
         )
+
+
+def test_workflow_run_stop_reason_keeps_terminal_statuses_fail_closed(monkeypatch):
+    statuses = iter(["cancelled", "failed"])
+
+    class FakeStore:
+        def get_run(self, _run_id):
+            return type("Run", (), {"status": next(statuses)})()
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.formal_write_runtime.get_write_store",
+        lambda: FakeStore(),
+    )
+    authority = {"workflowRunId": "run-terminal"}
+
+    assert meeting_receipt_authority.workflow_run_stop_reason(authority) == (
+        "challenge_workflow_run_cancelled"
+    )
+    assert meeting_receipt_authority.workflow_run_stop_reason(authority) == (
+        "challenge_workflow_run_failed"
+    )
 
 
 def test_formal_candidate_generation_runs_all_speakers_for_human_meeting_gate(
