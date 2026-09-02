@@ -23,6 +23,34 @@ vi.mock("../../../api/hypothesisFirst", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../../api/hypothesisFirst")>()),
   recordCollectionHandoff: vi.fn().mockResolvedValue({}),
   openHypothesisCandidateGeneration: vi.fn().mockResolvedValue({}),
+  openNextHypothesisReviewRound: vi.fn().mockResolvedValue({
+    schemaVersion: 1,
+    teamId: "team-1",
+    status: "ok",
+    selectionId: "sel-1",
+    previousMeetingRoundId: "r2",
+    collectionRequestId: "cr-1",
+    roundIndex: 3,
+    budget: 2,
+    meetingRound: {
+      program: "p",
+      theme: "t",
+      campaign: "c",
+      question: "Q-01",
+      branch: "b",
+      workflow: "w",
+      agentId: "a",
+      schemaVersion: 1,
+      meetingRoundId: "r3",
+      meetingType: "hypothesis_review",
+      mode: "review",
+      scopeHash: "sh",
+      participants: ["agent-1"],
+      status: "open",
+      startedAt: "2026-08-19T01:00:00Z",
+      roundIndex: 3,
+    },
+  }),
   executeHypothesisFirstCommand: vi.fn().mockResolvedValue({ result: {} }),
   isHypothesisFirstCommandStateConflict: vi.fn().mockReturnValue(false),
 }));
@@ -40,11 +68,13 @@ vi.mock("../challenge-cup/ChallengeQuestionReviewForm", () => ({
 
 import {
   executeHypothesisFirstCommand,
+  openNextHypothesisReviewRound,
   recordCollectionHandoff,
 } from "../../../api/hypothesisFirst";
 import { fetchChatRoomDetail } from "../../../api/chat";
 import { getChallengeQuestionRunDetail } from "../../../api/challengeQuestionRuns";
 const mockedRecordCollectionHandoff = vi.mocked(recordCollectionHandoff);
+const mockedOpenNextReviewRound = vi.mocked(openNextHypothesisReviewRound);
 const mockedExecuteCommand = vi.mocked(executeHypothesisFirstCommand);
 const mockedFetchChatRoomDetail = vi.mocked(fetchChatRoomDetail);
 const mockedGetChallengeQuestionRunDetail = vi.mocked(getChallengeQuestionRunDetail);
@@ -2075,7 +2105,7 @@ describe("HypothesisFirstNodeInspector", () => {
     });
   });
 
-  it("shows the snapshot-derived budget copy on the next-review-round fallback action", () => {
+  it("shows the snapshot-derived budget copy on the next-review-round fallback action", async () => {
     mockedChain.mockReturnValue(chainData({
       chainState: {
         schemaVersion: 1,
@@ -2125,6 +2155,82 @@ describe("HypothesisFirstNodeInspector", () => {
       expect(Array.from(wrapper.querySelectorAll("button")).some((button) =>
         button.textContent === "发起新一轮评审")).toBe(true);
     }
+    // Legacy (non-V2-canonical) snapshot: the fallback button still dispatches
+    // the legacy next-round endpoint — the V2 command route is unavailable.
+    const fallbackButton = Array.from(wrapper?.querySelectorAll("button") ?? [])
+      .find((button) => button.textContent === "发起新一轮评审");
+    await act(async () => {
+      fallbackButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await vi.waitFor(() => expect(mockedOpenNextReviewRound).toHaveBeenCalledTimes(1));
+    });
+    expect(mockedOpenNextReviewRound).toHaveBeenCalledWith("team-1", "r2");
+    expect(mockedExecuteCommand).not.toHaveBeenCalled();
+  });
+
+  it("dispatches open_next_review through the V2 command route, never the legacy endpoint", async () => {
+    const openNext = {
+      kind: "command",
+      actionId: "open-next-review:hr-2",
+      label: "发起下一轮候选评审",
+      enabled: true,
+      disabledReason: null,
+      targetPhase: "convergence",
+      targetNodeId: "hf_convergence",
+      command: "open_next_review",
+      payload: { previousMeetingRoundId: "r2", roundBudget: 5 },
+      inputSchemaRef: null,
+      idempotencyKey: "hf2:open-next-review:hr-2",
+      expectedStateVersion: "hf2-action:hr-2:1",
+      requiresConfirmation: false,
+      confirmationText: null,
+    } as const;
+    mockedChain.mockReturnValue(chainData({
+      stateV2: {
+        currentPhase: "convergence",
+        generation: { generationMeetingId: null },
+        review: { candidates: [], aggregate: { total: 0, completed: 0, pending: 0, failed: 0, blocked: 0 } },
+        collection: { requests: [] },
+        convergence: {
+          lifecycle: "waiting_human",
+          outcome: "none",
+          actionability: "waiting_user",
+          attempt: null,
+          updatedAt: null,
+          problems: [],
+          accepted: false,
+          latestHypothesisRoundId: "hr-2",
+          roundIndex: 2,
+          roundBudget: 5,
+        },
+        allowedActions: [openNext],
+        problems: [],
+      } as unknown as HypothesisFirstStateV2,
+    }));
+    render(
+      <HypothesisFirstNodeInspector
+        teamId="team-1"
+        questionId="Q-01"
+        nodeId="hf_convergence_gate"
+        runId="run-1"
+        onOpenQuestion={() => {}}
+      />,
+    );
+    const serverButton = [...container.querySelectorAll("button")]
+      .find((button) => button.textContent?.includes("发起下一轮候选评审"));
+    expect(serverButton).toBeTruthy();
+    await act(async () => {
+      serverButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await vi.waitFor(() => expect(mockedExecuteCommand).toHaveBeenCalledTimes(1));
+    });
+    expect(mockedExecuteCommand).toHaveBeenCalledWith(
+      "team-1",
+      "Q-01",
+      openNext,
+      undefined,
+      { runId: "run-1" },
+    );
+    // The legacy next-round endpoint must stay out of the V2-canonical path.
+    expect(mockedOpenNextReviewRound).not.toHaveBeenCalled();
   });
 
   // ---------------------------------------------------------------------------

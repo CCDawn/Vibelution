@@ -19,6 +19,7 @@ import {
   recordCollectionHandoff,
 } from "../../../api/hypothesisFirst";
 import { queryKeys } from "../../../api/queryKeys";
+import type { HypothesisFirstCommandExecutionResponse } from "../../../api/hypothesisFirst";
 import type {
   CommandAction,
   HypothesisFirstChainState,
@@ -26,6 +27,7 @@ import type {
   HypothesisFirstClaimGateEvidenceGap,
   HypothesisFirstStateV2,
   MeetingRoundRecord,
+  ReviewNextRoundResponse,
   WorkflowProblem,
 } from "../../../api/types/hypothesisFirst";
 import {
@@ -1116,6 +1118,10 @@ function InspectorBody(props: {
             questionId={questionId}
             runId={runId}
             meetingRoundId={liveMeetingRoundId}
+            canonicalAction={nextAction.canonicalAction?.command === "open_next_review"
+              ? nextAction.canonicalAction
+              : undefined}
+            allowLegacyMutation={nextAction.stateSource !== "v2_canonical"}
             nextRoundIndex={resolveHypothesisFirstNextReviewRoundIndex({
               stateV2: props.stateV2,
               chainState: props.chainState,
@@ -1689,21 +1695,49 @@ function NextReviewRoundButton(props: {
   /** Claim-gate guidance replaces the generic "not converged" detail when the
    * server gate blocked convergence; the button authority itself is untouched. */
   gateDetail?: string | null;
+  /** Signed V2 envelope for the same action; when present the dispatch goes
+   * through the CAS/re-auth command route instead of the legacy endpoint. */
+  canonicalAction?: Extract<CommandAction, { command: "open_next_review" }>;
+  /** The legacy endpoint has no CAS/re-auth, so it is only allowed while the
+   * snapshot itself is a legacy (non-V2-canonical) fallback. */
+  allowLegacyMutation: boolean;
   lang: Language;
 }) {
   const queryClient = useQueryClient();
   const [blockedReason, setBlockedReason] = useState<string | null>(null);
   const copy = reviewRoundActionCopy(props.nextRoundIndex, props.lang, props.roundBudget);
-  const mutation = useMutation({
-    mutationFn: () =>
-      openNextHypothesisReviewRound(props.teamId, props.meetingRoundId),
+  const mutation = useMutation<HypothesisFirstCommandExecutionResponse | ReviewNextRoundResponse, Error, void>({
+    mutationFn: () => {
+      if (props.canonicalAction) {
+        return executeHypothesisFirstCommand(
+          props.teamId,
+          props.questionId,
+          props.canonicalAction,
+          undefined,
+          { runId: props.runId },
+        );
+      }
+      if (props.allowLegacyMutation) {
+        return openNextHypothesisReviewRound(props.teamId, props.meetingRoundId);
+      }
+      return Promise.reject(new Error("canonical_action_unavailable"));
+    },
     onSuccess: (payload) => {
+      // V2 dispatch wraps the chain result in `.result`; the legacy endpoint
+      // returns it directly. Both carry the budget_exhausted status marker.
+      const outcome = (payload as { result?: { status?: string } } | null)?.result
+        ?? (payload as { status?: string } | null);
       setBlockedReason(
-        payload?.status === "budget_exhausted"
+        outcome?.status === "budget_exhausted"
           ? (props.lang === "zh" ? `已达到评审上限 ${props.roundBudget}，假说仍未收敛。` : `The review limit of ${props.roundBudget} was reached without convergence.`)
           : null,
       );
       invalidateHypothesisFirstQueries(queryClient, props.teamId, props.questionId, props.runId);
+    },
+    onError: (error) => {
+      if (isHypothesisFirstCommandStateConflict(error)) {
+        invalidateHypothesisFirstQueries(queryClient, props.teamId, props.questionId, props.runId);
+      }
     },
   });
   return (
@@ -1725,8 +1759,8 @@ function NextReviewRoundButton(props: {
         variant="primary"
         density="compact"
         isPending={mutation.isPending}
-        isDisabled={!props.meetingRoundId}
-        disabledReason={props.meetingRoundId ? undefined : (props.lang === "zh" ? "缺少上一轮评审标识" : "The previous review round ID is missing")}
+        isDisabled={!props.canonicalAction && !props.meetingRoundId}
+        disabledReason={props.canonicalAction || props.meetingRoundId ? undefined : (props.lang === "zh" ? "缺少上一轮评审标识" : "The previous review round ID is missing")}
         onPress={() => mutation.mutate()}
       >
         {copy.label}
