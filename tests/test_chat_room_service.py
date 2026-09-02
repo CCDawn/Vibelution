@@ -3592,6 +3592,38 @@ def test_speaker_prompt_cache_partition_requires_session_id():
     assert chat_room_service._speaker_prompt_cache_partition("  ", "room-1") == ""
 
 
+def test_chat_room_chat_agent_factory_disables_auto_delegation(monkeypatch):
+    """Chat-surface runtimes must carry the stable-session prompt-goal flag.
+
+    Without the flag, agent.py treats the raw speaker prompt as the effective
+    goal and re-injects the whole prompt into RUNTIME_GOAL and MEMORY on every
+    turn. The chat-room speaker path calls create_chat_agent directly, so the
+    factory itself must mirror _create_chat_agent_for_session's behavior.
+    """
+    runtime_agent = SimpleNamespace()
+    captured: dict = {}
+
+    def fake_create_agent_runtime(**kwargs):
+        captured.update(kwargs)
+        return runtime_agent
+
+    monkeypatch.setattr(session_service, "create_agent_runtime", fake_create_agent_runtime)
+
+    created = session_service.create_chat_agent(
+        workspace_path="workspace/speaker",
+        config={"model": "qwen-max"},
+    )
+
+    assert created is runtime_agent
+    assert captured == {
+        "mode": "chat",
+        "workspace_path": "workspace/speaker",
+        "config": {"model": "qwen-max"},
+        "runtime_agent_binding": None,
+    }
+    assert created._allow_session_subagent_auto_delegation is False
+
+
 def test_update_agent_chat_room_membership_only_changes_selected_agent(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)

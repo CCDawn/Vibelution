@@ -1,3 +1,4 @@
+from core.llm.payload_builder import current_prompt_cache_partition
 from core.orchestration.turn_runner import (
     AgentSingleTurnRequest,
     call_agent_factory_with_supported_kwargs,
@@ -590,6 +591,32 @@ def test_run_existing_agent_single_turn_wraps_runner_with_prompt_cache_partition
         ("run", "probe"),
         ("exit", "agent:a|session:s|slot:dialogue|model:m"),
     ]
+
+
+def test_run_existing_agent_single_turn_binds_real_partition_contextvar():
+    """The partition scope must be live for the runner body, not just wrapped.
+
+    Payload building reads current_prompt_cache_partition() inside
+    agent.run_single_turn, so the real contextvar (not a monkeypatched scope)
+    has to carry the partition through execution and be restored afterwards.
+    """
+    seen: list[str] = []
+    before = current_prompt_cache_partition()
+
+    class FakeAgent:
+        def run_single_turn(self, initial_prompt=None):
+            seen.append(current_prompt_cache_partition())
+            return {"status": "completed"}
+
+    result = run_existing_agent_single_turn(
+        FakeAgent(),
+        initial_prompt="probe",
+        prompt_cache_partition="chat-room:room-1:session-1",
+    )
+
+    assert result == {"status": "completed"}
+    assert seen == ["chat-room:room-1:session-1"]
+    assert current_prompt_cache_partition() == before
 
 
 def test_run_existing_agent_single_turn_omits_unsupported_optional_kwargs():

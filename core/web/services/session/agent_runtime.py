@@ -786,12 +786,21 @@ def create_chat_agent(
     runtime_agent_binding: dict[str, Any] | None = None,
 ) -> Any:
     s = _service()
-    return s.create_agent_runtime(
+    runtime_agent = s.create_agent_runtime(
         mode=str(mode or "chat").strip() or "chat",
         workspace_path=str(workspace_path) if workspace_path else None,
         config=config,
         runtime_agent_binding=runtime_agent_binding,
     )
+    # Chat-surface runtimes must not treat the raw user prompt as the effective
+    # goal: otherwise the whole prompt is re-injected into RUNTIME_GOAL and
+    # MEMORY on every turn. Mirrors _create_chat_agent_for_session below so
+    # direct factory callers (chat room speakers) get the stable constant goal.
+    try:
+        runtime_agent._allow_session_subagent_auto_delegation = False
+    except (AttributeError, TypeError):
+        pass
+    return runtime_agent
 
 
 def _attach_session_llm_runtime_diagnostics(result: Any, diagnostics: dict[str, Any] | None) -> Any:
