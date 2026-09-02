@@ -2660,6 +2660,7 @@ _member_role = _tk_permissions._member_role
 _normalize_acl = _tk_permissions._normalize_acl
 
 update_owner_source_governance = _tk_source_inbox.update_owner_source_governance
+ensure_owner_source_review_grant = _tk_source_inbox.ensure_owner_source_review_grant
 collect_source_to_inbox = _tk_source_inbox.collect_source_to_inbox
 list_owner_source_inbox = _tk_source_inbox.list_owner_source_inbox
 review_owner_inbox_source = _tk_source_inbox.review_owner_inbox_source

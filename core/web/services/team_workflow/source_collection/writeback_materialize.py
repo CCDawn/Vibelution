@@ -1781,6 +1781,10 @@ def _materialize_source_collection_stage_writeback_knowledge_ingestion(
                 knowledge_base_id = s._knowledge_base_raw_id(knowledge_base.get("knowledgeBaseId"))
                 scoped_knowledge_base_id = s._knowledge_base_scoped_id_for_team(team_id, knowledge_base_id, knowledge_base)
         s.team_knowledge_service.ensure_knowledge_base_review_grant(scoped_knowledge_base_id, steward_agent_id)
+        # 与 KB review grant 对称的 trusted-gate 授权确保：只把本次自动链实际执行
+        # owner source 审阅的 steward agent 加进该 team 的 localStewardAgentIds，
+        # 不扩 REVIEW_ROLES、不影响其他 agent。
+        s.team_knowledge_service.ensure_owner_source_review_grant("team", team_id, steward_agent_id)
         pack_record = s.record_local_research_model_output(
             team_id,
             {

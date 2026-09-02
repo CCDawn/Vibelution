@@ -60,6 +60,60 @@ def update_owner_source_governance(
     return payload
 
 
+def ensure_owner_source_review_grant(owner_type: str, owner_id: str, agent_id: str) -> dict[str, Any]:
+    """Idempotently grant one agent owner-source review permission for an owner.
+
+    Server-authoritative ensure used by the trusted knowledge-ingestion gate
+    (source collection writeback auto-ingestion): it deliberately skips the
+    ``_can_configure_owner_source_governance`` check, mirroring
+    ``ensure_knowledge_base_review_grant`` on the knowledge-base side. This only
+    adds the named agent to this owner's ``localStewardAgentIds`` (preserving
+    existing entries, deduplicated); it never widens REVIEW_ROLES or any other
+    owner's governance scope.
+    """
+    s = _service()
+    owner = s._require_owner_context(owner_type, owner_id)
+    normalized_agent_id = str(agent_id or "").strip()
+    if not normalized_agent_id:
+        raise s.TeamKnowledgePermissionError("Agent identity is required to grant owner source review.")
+    existing = s._source_governance_for_owner(owner)
+    steward_ids = list(existing.get("localStewardAgentIds") or [])
+    if normalized_agent_id in steward_ids:
+        return {
+            "schemaVersion": existing.get("schemaVersion") or s.SCHEMA_VERSION,
+            "ownerType": owner["ownerType"],
+            "ownerId": owner["ownerId"],
+            "teamId": owner["ownerId"] if owner["ownerType"] == "team" else "",
+            "agentId": owner["ownerId"] if owner["ownerType"] == "agent" else "",
+            "localStewardAgentIds": steward_ids,
+            "updatedByAgentId": "",
+            "updatedAt": str(existing.get("updatedAt") or ""),
+        }
+    steward_ids.append(normalized_agent_id)
+    now = s.utc_now_iso()
+    payload = {
+        "schemaVersion": s.SCHEMA_VERSION,
+        "ownerType": owner["ownerType"],
+        "ownerId": owner["ownerId"],
+        "teamId": owner["ownerId"] if owner["ownerType"] == "team" else "",
+        "agentId": owner["ownerId"] if owner["ownerType"] == "agent" else "",
+        "localStewardAgentIds": s._unique_strings(steward_ids),
+        "updatedByAgentId": normalized_agent_id,
+        "updatedAt": now,
+    }
+    with s._LOCK:
+        s._write_json(s._owner_source_governance_path(owner), payload)
+        s._append_audit(owner, "knowledge.source_governance.updated", payload, actor_agent_id=normalized_agent_id)
+    s._record_event(
+        "knowledge.source_governance.updated",
+        owner,
+        "",
+        actor_agent_id=normalized_agent_id,
+        fields={"localStewardCount": len(payload["localStewardAgentIds"])},
+    )
+    return payload
+
+
 def collect_source_to_inbox(
     owner_type: str,
     owner_id: str,

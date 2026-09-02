@@ -2145,3 +2145,66 @@ def test_escaping_locator_is_forbidden_and_freshness_task_appears_in_governance(
     freshness_tasks = [task for task in tasks["tasks"] if task["taskType"] == "catalog_freshness" and task["status"] == "open"]
     assert freshness_tasks
     assert tasks["summary"]["catalogFreshnessCount"] >= 2
+
+
+def test_ensure_owner_source_review_grant_is_idempotent_and_preserves_existing_stewards(knowledge_env):
+    team_id = knowledge_env["team"]["teamId"]
+    lead_id = knowledge_env["lead"]["agentId"]
+    member_id = knowledge_env["member"]["agentId"]
+    outsider_id = knowledge_env["outsider"]["agentId"]
+
+    seeded = team_knowledge_service.update_owner_source_governance(
+        "team",
+        team_id,
+        local_steward_agent_ids=[member_id],
+        actor_agent_id=lead_id,
+    )
+    assert seeded["localStewardAgentIds"] == [member_id]
+
+    first = team_knowledge_service.ensure_owner_source_review_grant("team", team_id, outsider_id)
+    assert first["localStewardAgentIds"] == [member_id, outsider_id]
+    assert first["teamId"] == team_id
+
+    second = team_knowledge_service.ensure_owner_source_review_grant("team", team_id, outsider_id)
+    assert second["localStewardAgentIds"] == [member_id, outsider_id]
+    assert second["updatedAt"] == first["updatedAt"]
+
+
+def test_owner_source_review_blocked_until_ensure_grant_allows_non_member_steward(knowledge_env):
+    team_id = knowledge_env["team"]["teamId"]
+    member_id = knowledge_env["member"]["agentId"]
+    steward_id = knowledge_env["outsider"]["agentId"]
+
+    inbox_source = team_knowledge_service.collect_source_to_inbox(
+        "team",
+        team_id,
+        source_type="manual_user_entry",
+        source_ref={"note": "auto ingestion source"},
+        original_content="Auto ingestion source content captured for knowledge expansion.",
+        original_filename="auto-source.txt",
+        title="Auto ingestion source",
+        summary="Captured by the automated knowledge-ingestion chain.",
+        actor_agent_id=member_id,
+    )
+
+    with pytest.raises(team_knowledge_service.TeamKnowledgePermissionError):
+        team_knowledge_service.review_owner_inbox_source(
+            "team",
+            team_id,
+            inbox_source["inboxSourceId"],
+            decision="accepted",
+            reviewed_by_agent_id=steward_id,
+        )
+
+    granted = team_knowledge_service.ensure_owner_source_review_grant("team", team_id, steward_id)
+    assert granted["localStewardAgentIds"] == [steward_id]
+
+    reviewed = team_knowledge_service.review_owner_inbox_source(
+        "team",
+        team_id,
+        inbox_source["inboxSourceId"],
+        decision="accepted",
+        reviewed_by_agent_id=steward_id,
+    )
+    assert reviewed["source"]["status"] == "accepted"
+    assert reviewed["centralSource"]["centralSourceId"]
