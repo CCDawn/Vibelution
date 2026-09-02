@@ -1822,6 +1822,23 @@ def _assert_closure_conditions(
             raise ContractValidationError(
                 "each decision record requires at least one evidence ref"
             )
+        if (
+            str(decision.get("decision") or "").strip().lower() == "request_new_evidence"
+            and not list(decision.get("candidateRefs") or [])
+        ):
+            # ``candidateRefs`` on a request_new_evidence decision name the
+            # hypothesis candidates the collection serves — the claim belief
+            # gate's aggregation dimension. A decision without them can only
+            # fail that gate closed at convergence, so the closure is rejected
+            # here before any artifact is persisted. Recovery stays on the
+            # existing idempotent closure flow: correct the decision payload
+            # (name the served candidates) and re-approve.
+            raise ContractValidationError(
+                "request_new_evidence decisions require at least one candidateRef: "
+                "the claim belief gate aggregates collection evidence on this "
+                "candidate dimension, so a decision without candidateRefs can "
+                "only fail that gate closed"
+            )
     for index, item in enumerate(list(digest.get("actionItems") or [])):
         if not isinstance(item, Mapping):
             raise ContractValidationError(f"actionItems[{index}] must be an object")
