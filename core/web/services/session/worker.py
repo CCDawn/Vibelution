@@ -492,6 +492,138 @@ def _challenge_invocation_budget_preflight(
     return decision
 
 
+def _challenge_expected_model_route(
+    context: dict[str, Any],
+    *,
+    session_id: str,
+    turn_id: str,
+) -> dict[str, str]:
+    """Read the run-frozen model route of a formal turn (empty when absent).
+
+    The route authority is the server-owned challenge task contract read back
+    through :func:`_model_invocation_receipt_context`; ordinary sessions have
+    no contract and therefore no frozen route.
+    """
+
+    receipt_context = _model_invocation_receipt_context(
+        context,
+        session_id=session_id,
+        turn_id=turn_id,
+    )
+    route = (
+        receipt_context.get("expectedModelRoute")
+        if isinstance(receipt_context, dict)
+        else None
+    )
+    if not isinstance(route, dict):
+        return {}
+    normalized = {
+        key: str(route.get(key) or "").strip()
+        for key in ("modelRef", "providerId", "modelId")
+    }
+    if not all(normalized.values()):
+        return {}
+    return normalized
+
+
+def _pin_resolved_agent_llm_to_challenge_route(
+    resolved_agent_llm: Any,
+    context: dict[str, Any],
+    *,
+    agent_instance: dict[str, Any] | None,
+    session_id: str,
+    turn_id: str,
+    llm_slot: str,
+    reasoning_effort: str | None = None,
+) -> Any:
+    """Pin a formal turn's LLM to the frozen workflow route.
+
+    A formal run freezes ``expectedModelRoute`` in its challenge task
+    contract, and the invocation receipt check rejects any other model.  The
+    turn model otherwise comes only from the Agent ``llmBindings`` slot
+    resolution, so a disagreement passes the provider call through and then
+    fails the node opaquely with ``challenge_model_invocation_receipt_missing``.
+    When the frozen route is resolvable it wins; ordinary sessions (no frozen
+    route) keep the Agent-binding resolution unchanged.  If the frozen model
+    cannot be resolved locally the turn keeps the existing resolution and the
+    mismatch surfaces through the receipt gate instead of a new failure path.
+    """
+
+    s = _service()
+    if resolved_agent_llm is None:
+        return resolved_agent_llm
+    expected_route = _challenge_expected_model_route(
+        context,
+        session_id=session_id,
+        turn_id=turn_id,
+    )
+    expected_ref = expected_route.get("modelRef") or ""
+    if not expected_ref:
+        return resolved_agent_llm
+    current_ref = str(getattr(resolved_agent_llm, "model_ref", "") or "").strip()
+    if current_ref.casefold() == expected_ref.casefold():
+        return resolved_agent_llm
+    normalized_slot = str(llm_slot or s.SESSION_LLM_SLOT_DIALOGUE).strip() or s.SESSION_LLM_SLOT_DIALOGUE
+    pinned_agent = dict(agent_instance or {})
+    bindings = (
+        dict(pinned_agent.get("llmBindings"))
+        if isinstance(pinned_agent.get("llmBindings"), dict)
+        else {}
+    )
+    bindings[normalized_slot] = {"modelId": expected_ref}
+    pinned_agent["llmBindings"] = bindings
+    try:
+        pinned = s._resolve_session_agent_llm(
+            pinned_agent,
+            normalized_slot,
+            reasoning_effort=reasoning_effort,
+        )
+    except s.SessionValidationError as exc:
+        s._record_session_turn_lifecycle_event(
+            session_id,
+            "challenge_model_route_pin_failed",
+            turn_id=turn_id,
+            level="warning",
+            outcome="failed",
+            fields={
+                "expectedModelRef": expected_ref,
+                "agentModelRef": current_ref,
+                "llmSlot": normalized_slot,
+                "error": trim_lines(str(exc), max_lines=2),
+            },
+        )
+        return resolved_agent_llm
+    source = str(getattr(pinned, "source", "") or "").strip()
+    if source:
+        try:
+            from dataclasses import replace as _dataclass_replace
+
+            pinned = _dataclass_replace(
+                pinned,
+                source="challenge_frozen_route",
+                warnings=[
+                    *list(getattr(pinned, "warnings", None) or []),
+                    f"pinned to frozen challenge route {expected_ref}",
+                ],
+            )
+        except (TypeError, ValueError):
+            pass
+    s._record_session_turn_lifecycle_event(
+        session_id,
+        "challenge_model_route_pinned",
+        turn_id=turn_id,
+        outcome="completed",
+        fields={
+            "expectedModelRef": expected_ref,
+            "expectedProviderId": expected_route.get("providerId") or "",
+            "expectedModelId": expected_route.get("modelId") or "",
+            "agentModelRef": current_ref,
+            "llmSlot": normalized_slot,
+        },
+    )
+    return pinned
+
+
 def _service():
     """Late-bound facade module (avoids import cycles at package import time)."""
 
@@ -1038,6 +1170,15 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
             resolved_agent_llm = s._resolve_session_agent_llm(
                 agent_instance,
                 llm_slot,
+                reasoning_effort=session_reasoning_effort,
+            )
+            resolved_agent_llm = _pin_resolved_agent_llm_to_challenge_route(
+                resolved_agent_llm,
+                context,
+                agent_instance=agent_instance,
+                session_id=session_id,
+                turn_id=turn_id,
+                llm_slot=llm_slot,
                 reasoning_effort=session_reasoning_effort,
             )
         except s.SessionValidationError as exc:

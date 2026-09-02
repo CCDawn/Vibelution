@@ -322,6 +322,15 @@ def _reconcile_source_collection_stage_session_task_turn_status(task: dict[str, 
     status = s._trim_text(task.get("status"), max_length=80).lower()
     if status not in s.SOURCE_COLLECTION_STAGE_SESSION_TASK_STATUSES:
         return task
+    # An explicit task-level failure (failed + failureCode) is a deliberate
+    # terminal marker: turn-terminal failure propagation and the
+    # missing-session recovery path both write it.  A writeback status
+    # recorded earlier in the same turn must not resurrect the task, because
+    # the formal replay reads exactly this failed+failureCode state to decide
+    # a fresh-session retry.  A formal retry resets the whole task record, so
+    # this guard never blocks a legitimate retry.
+    if status == "failed" and s._trim_text(task.get("failureCode"), max_length=120):
+        return task
     writeback = task.get("writeback") if isinstance(task.get("writeback"), dict) else {}
     writeback_status = s._trim_text(writeback.get("status"), max_length=80).lower() if writeback else ""
     if writeback_status and writeback_status not in s.SOURCE_COLLECTION_STAGE_SESSION_TASK_STATUSES:

@@ -1290,3 +1290,224 @@ def test_continuation_loop_reseeds_runtime_context_blocks_with_history(tmp_path,
 
     assert agent.static_seeds == ["## 静态运行上下文"]
     assert agent.volatile_seeds == ["## 本轮易变上下文"]
+
+
+def _pin_route_contract_task() -> dict:
+    """A research project task whose run froze an explicit model route."""
+
+    return {
+        "taskId": "task-pin",
+        "sessionId": "session-1",
+        "researchProjectId": "project-1",
+        "turn": {"turnId": "turn-1"},
+        "modelInvocationReceiptBinding": {
+            "questionStage": "generation",
+            "questionId": "SCI-096",
+            "questionRunId": "run-1",
+            "workflowRunId": "run-1",
+            "workflowId": "challenge-cup-research",
+            "workflowVersionId": "v2.1",
+            "formalNodeId": "hypothesis_design",
+            "formalNodeRunId": "node-run-1",
+            "formalNodeAttempt": 1,
+            "taskId": "task-pin",
+            "sessionId": "session-1",
+            "turnId": "turn-1",
+            "modelPolicySha256": "a" * 64,
+            "outcomeKinds": ["candidate"],
+        },
+        "challengeTaskContract": {
+            "questionId": "SCI-096",
+            "workflowRunId": "run-1",
+            "workflowId": "challenge-cup-research",
+            "workflowVersionId": "v2.1",
+            "workflowNodeId": "hypothesis_design",
+            "nodeRunId": "node-run-1",
+            "nodeAttempt": 1,
+            "modelPolicySha256": "a" * 64,
+            "effectiveRoute": {
+                "modelRef": "dashscope_main/qwen3.6-plus",
+                "providerId": "dashscope_main",
+                "modelId": "qwen3.6-plus",
+            },
+        },
+    }
+
+
+def _resolved_llm_stub(model_ref: str):
+    from core.llm.agent_runtime import ResolvedAgentLlm
+
+    provider_id, _, model = str(model_ref).partition("/")
+    return ResolvedAgentLlm(
+        agent_id="agent-1",
+        slot="dialogue",
+        requested_slot="dialogue",
+        model_id=str(model_ref),
+        requested_model_ref=str(model_ref),
+        model_ref=str(model_ref),
+        provider_id=provider_id,
+        model=model or str(model_ref),
+        source="agent_llm_bindings",
+    )
+
+
+_PIN_CONTEXT = {
+    "message_metadata": {
+        "teamId": "team-1",
+        "researchProjectId": "project-1",
+        "taskId": "task-pin",
+    }
+}
+
+
+def _patch_pin_collaborators(monkeypatch, *, resolve, task=None):
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_project_agent_tasks._read_research_project_agent_task_record",
+        lambda *_args, **_kwargs: task if task is not None else _pin_route_contract_task(),
+    )
+    lifecycle = []
+    monkeypatch.setattr(
+        session_service,
+        "_record_session_turn_lifecycle_event",
+        lambda _sid, phase, **kwargs: lifecycle.append((phase, kwargs)),
+    )
+    resolve_calls = []
+
+    def _resolve(agent_instance, llm_slot, *, reasoning_effort=None):
+        resolve_calls.append(
+            (dict(agent_instance or {}), str(llm_slot), reasoning_effort)
+        )
+        return resolve(agent_instance, llm_slot, reasoning_effort=reasoning_effort)
+
+    monkeypatch.setattr(session_service, "_resolve_session_agent_llm", _resolve)
+    return lifecycle, resolve_calls
+
+
+_PIN_AGENT = {
+    "agentId": "agent-1",
+    "llmBindings": {"dialogue": {"modelId": "autodl/GLM-5.3-flash"}},
+}
+
+
+def test_formal_turn_llm_pins_to_frozen_challenge_route(monkeypatch) -> None:
+    """A formal turn with a frozen expectedModelRoute resolves its LLM to the
+    route's modelRef instead of the Agent dialogue binding."""
+    lifecycle, resolve_calls = _patch_pin_collaborators(
+        monkeypatch,
+        resolve=lambda _agent, _slot, *, reasoning_effort=None: _resolved_llm_stub(
+            (_agent or {}).get("llmBindings", {}).get(_slot, {}).get("modelId", "")
+        ),
+    )
+
+    pinned = worker._pin_resolved_agent_llm_to_challenge_route(
+        _resolved_llm_stub("autodl/GLM-5.3-flash"),
+        _PIN_CONTEXT,
+        agent_instance=_PIN_AGENT,
+        session_id="session-1",
+        turn_id="turn-1",
+        llm_slot="dialogue",
+    )
+
+    assert pinned.model_ref == "dashscope_main/qwen3.6-plus"
+    assert pinned.model_id == "dashscope_main/qwen3.6-plus"
+    assert pinned.source == "challenge_frozen_route"
+    # Exactly one re-resolution happens, on a copy pinned to the frozen
+    # modelRef; the caller's agent dict is never mutated.
+    assert len(resolve_calls) == 1
+    assert resolve_calls[0][0]["llmBindings"]["dialogue"]["modelId"] == (
+        "dashscope_main/qwen3.6-plus"
+    )
+    assert _PIN_AGENT["llmBindings"]["dialogue"]["modelId"] == "autodl/GLM-5.3-flash"
+    assert any(phase == "challenge_model_route_pinned" for phase, _ in lifecycle)
+
+
+def test_formal_turn_pin_noop_when_route_already_matches(monkeypatch) -> None:
+    """When the Agent binding already resolves to the frozen route the original
+    resolution is returned untouched."""
+    route_task = _pin_route_contract_task()
+    route_task["challengeTaskContract"]["effectiveRoute"] = {
+        "modelRef": "autodl/GLM-5.3-flash",
+        "providerId": "autodl",
+        "modelId": "GLM-5.3-flash",
+    }
+    lifecycle, resolve_calls = _patch_pin_collaborators(
+        monkeypatch,
+        resolve=lambda _agent, _slot, *, reasoning_effort=None: _resolved_llm_stub(
+            (_agent or {}).get("llmBindings", {}).get(_slot, {}).get("modelId", "")
+        ),
+        task=route_task,
+    )
+
+    resolved = _resolved_llm_stub("autodl/GLM-5.3-flash")
+    result = worker._pin_resolved_agent_llm_to_challenge_route(
+        resolved,
+        _PIN_CONTEXT,
+        agent_instance=_PIN_AGENT,
+        session_id="session-1",
+        turn_id="turn-1",
+        llm_slot="dialogue",
+    )
+
+    assert result is resolved
+    assert resolve_calls == []
+    assert lifecycle == []
+
+
+def test_ordinary_session_llm_resolution_never_pinned(monkeypatch) -> None:
+    """No frozen route (ordinary chat) keeps the resolution and logs nothing."""
+    lifecycle, resolve_calls = _patch_pin_collaborators(
+        monkeypatch,
+        resolve=lambda _agent, _slot, *, reasoning_effort=None: _resolved_llm_stub(
+            "autodl/GLM-5.3-flash"
+        ),
+    )
+
+    resolved = _resolved_llm_stub("autodl/GLM-5.3-flash")
+    result = worker._pin_resolved_agent_llm_to_challenge_route(
+        resolved,
+        {},
+        agent_instance=_PIN_AGENT,
+        session_id="session-1",
+        turn_id="turn-1",
+        llm_slot="dialogue",
+    )
+
+    assert result is resolved
+    assert resolve_calls == []
+    assert lifecycle == []
+
+
+def test_formal_turn_pin_falls_back_when_frozen_model_unresolvable(
+    monkeypatch,
+) -> None:
+    """A frozen model missing from the local library keeps the existing
+    resolution (the receipt gate owns the mismatch) and records a warning."""
+
+    def _resolve(_agent, _slot, *, reasoning_effort=None):
+        binding = (_agent or {}).get("llmBindings", {}).get(_slot, {}).get("modelId", "")
+        if binding == "dashscope_main/qwen3.6-plus":
+            raise session_service.SessionValidationError(
+                "Agent dialogue model not found in model library: dashscope_main/qwen3.6-plus"
+            )
+        return _resolved_llm_stub("autodl/GLM-5.3-flash")
+
+    lifecycle, _resolve_calls = _patch_pin_collaborators(monkeypatch, resolve=_resolve)
+
+    resolved = _resolved_llm_stub("autodl/GLM-5.3-flash")
+    result = worker._pin_resolved_agent_llm_to_challenge_route(
+        resolved,
+        _PIN_CONTEXT,
+        agent_instance=_PIN_AGENT,
+        session_id="session-1",
+        turn_id="turn-1",
+        llm_slot="dialogue",
+    )
+
+    assert result is resolved
+    warnings = [
+        kwargs
+        for phase, kwargs in lifecycle
+        if phase == "challenge_model_route_pin_failed"
+    ]
+    assert len(warnings) == 1
+    assert warnings[0]["fields"]["expectedModelRef"] == "dashscope_main/qwen3.6-plus"

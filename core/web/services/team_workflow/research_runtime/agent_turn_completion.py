@@ -345,6 +345,116 @@ def _turn_terminal_failure_detail(exc: Exception) -> dict[str, Any] | None:
     return detail
 
 
+def _propagate_turn_terminal_failure_to_stage_task(
+    *,
+    team_id: str,
+    task_id: str,
+    failure_detail: dict[str, Any],
+) -> None:
+    """Mirror a terminal Agent turn failure onto its source-collection stage task.
+
+    The writeback tool can leave the stage task in a non-terminal state (for
+    example ``needs_review``) even though the turn itself ended in a failure
+    terminal status.  ``prepare_source_collection_stage_task_replay`` only
+    switches to a fresh session for ``status == "failed"`` tasks whose
+    recorded failure matches the poisoned-context loop, so without this mirror
+    the formal retry keeps reusing the failed session forever.  The turn's
+    structured reason wins as ``failureCode`` so the existing loop markers
+    keep matching.  Idempotent and best-effort: a settled ``completed`` task
+    is never overwritten, an identical failure is not rewritten, and any
+    store error is logged without breaking the dispatch failure path.
+    """
+
+    normalized_team = str(team_id or "").strip()
+    normalized_task = str(task_id or "").strip()
+    if not normalized_team or not normalized_task:
+        return
+    detail = failure_detail if isinstance(failure_detail, dict) else {}
+    terminal_status = str(detail.get("terminalStatus") or "").strip().lower()
+    reason_code = str(
+        detail.get("terminalProblemCode")
+        or detail.get("terminalReason")
+        or ""
+    ).strip()
+    failure_code = (reason_code or "agent_turn_terminal_failed")[:120]
+    failure_message = " ".join(
+        part
+        for part in (
+            (
+                f"Agent turn ended in terminal status '{terminal_status}'."
+                if terminal_status
+                else "Agent turn ended in a terminal failure."
+            ),
+            f"Reason: {reason_code}." if reason_code else "",
+            "Stage task marked failed so the formal replay can pick a recovery path.",
+        )
+        if part
+    )
+    try:
+        from core.web.services import team_workflow_orchestration_service
+
+        s = team_workflow_orchestration_service
+        task, run_id = s._find_source_collection_stage_session_task_by_id(
+            normalized_team,
+            normalized_task,
+        )
+        if task is None or not run_id:
+            _record_turn_continuation_scene_event(
+                "agent_turn.stage_task_failure_propagation_skipped",
+                level="warning",
+                outcome="skipped",
+                fields={
+                    "teamId": normalized_team,
+                    "taskId": normalized_task,
+                    "reason": "stage_session_task_not_found",
+                },
+            )
+            return
+        current_status = str(task.get("status") or "").strip().lower()
+        if current_status == "completed":
+            # Domain-verified finished work is never retroactively failed.
+            return
+        if (
+            current_status == "failed"
+            and str(task.get("failureCode") or "").strip() == failure_code
+            and str(task.get("failureMessage") or "").strip() == failure_message
+        ):
+            # Same failure already recorded: keep the original timestamps.
+            return
+        now = s.utc_now_iso()
+        failed = dict(task)
+        failed["status"] = "failed"
+        failed["failureCode"] = failure_code
+        failed["failureMessage"] = failure_message
+        failed["failedAt"] = now
+        failed["updatedAt"] = now
+        s._upsert_source_collection_stage_session_task(normalized_team, run_id, failed)
+        s._record_workflow_event(
+            "source_collection.stage_session_task_turn_terminal_failed",
+            normalized_team,
+            fields={
+                "runId": run_id,
+                "taskId": normalized_task,
+                "sessionId": str(detail.get("sessionId") or "").strip(),
+                "turnId": str(detail.get("turnId") or "").strip(),
+                "terminalStatus": terminal_status,
+                "failureCode": failure_code,
+            },
+        )
+    except Exception as exc:  # noqa: BLE001 - failure propagation is best-effort
+        _record_turn_continuation_scene_event(
+            "agent_turn.stage_task_failure_propagation_failed",
+            level="warning",
+            outcome="failed",
+            fields={
+                "teamId": normalized_team,
+                "taskId": normalized_task,
+                "errorType": type(exc).__name__,
+                "error": str(exc)[:200],
+            },
+        )
+
+
 def wait_for_agent_turn_terminal(
     session_id: str,
     turn_id: str,
@@ -901,6 +1011,16 @@ def _wait_with_bounded_turn_continuation(
                     "rescuedByStageTaskAuthority": True,
                 }
                 return failure_snapshot, original_turn_id, continuations
+            if source_collection_scope and str(handle.task_id or "").strip():
+                # The attempt is about to fail on this terminal turn failure:
+                # mirror the failure onto the stage task so the formal replay
+                # sees status=failed plus a structured reason instead of the
+                # writeback-time status (poisoned-session retry loop).
+                _propagate_turn_terminal_failure_to_stage_task(
+                    team_id=team_id,
+                    task_id=handle.task_id,
+                    failure_detail=failure_detail,
+                )
             raise
         status = str(
             snapshot.get("terminalStatus") or snapshot.get("lastTurnStatus") or ""

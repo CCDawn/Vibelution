@@ -871,3 +871,158 @@ def test_research_project_parked_turn_is_never_continued(monkeypatch):
     assert snapshot["terminalStatus"] == "needs_continue"
     assert used == []
     assert events == ["poll:turn-main"]
+
+
+def _stage_task_store(monkeypatch, tasks_by_id):
+    """Patch the orchestration-facade stage-task store used by failure propagation."""
+
+    import core.web.services.team_workflow_orchestration_service as facade
+
+    upserts: list[dict] = []
+    events: list[tuple] = []
+
+    def _find(team_id, task_id):
+        found = tasks_by_id.get(str(task_id))
+        return (dict(found), "run-test") if found is not None else (None, "")
+
+    def _upsert(team_id, run_id, task):
+        upserts.append(dict(task))
+        tasks_by_id[str(task.get("taskId"))] = dict(task)
+        return task
+
+    def _record(event_type, team_id, fields=None, **kwargs):
+        events.append((event_type, str(team_id), dict(fields or {})))
+
+    monkeypatch.setattr(
+        facade, "_find_source_collection_stage_session_task_by_id", _find
+    )
+    monkeypatch.setattr(
+        facade, "_upsert_source_collection_stage_session_task", _upsert
+    )
+    monkeypatch.setattr(facade, "_record_workflow_event", _record)
+    monkeypatch.setattr(facade, "utc_now_iso", lambda: "2026-09-02T00:00:00Z")
+    return upserts, events
+
+
+def test_main_turn_failure_marks_stage_task_failed(monkeypatch):
+    """A formal stage turn that ends ``failed_runtime`` must mirror the failure
+    onto its stage task (status=failed + structured failureCode/failureMessage)
+    so the replay can pick a recovery path instead of reusing the poisoned
+    session forever.  Existing task data (result/writeback) stays untouched."""
+    import core.web.services.team_workflow.research_runtime.agent_turn_completion as atc
+
+    tasks = {
+        "task-1": {
+            "taskId": "task-1",
+            "sessionId": "sess-1",
+            "status": "needs_review",
+            "writeback": {"status": "needs_review"},
+            "result": {"keep": "me"},
+            "turn": {"turnId": "turn-main", "status": "needs_review"},
+        }
+    }
+    upserts, events = _stage_task_store(monkeypatch, tasks)
+
+    def _wait(session_id, turn_id, *, timeout_ms, poll_ms, reconcilable_terminal_statuses):
+        raise _terminal_failure(
+            turn_id, "failed_runtime", problem_code="context_budget_exhausted"
+        )
+
+    monkeypatch.setattr(atc, "wait_for_agent_turn_terminal", _wait)
+    monkeypatch.setattr(atc, "_record_turn_continuation_scene_event", lambda *a, **k: None)
+    monkeypatch.setattr(
+        atc,
+        "_stage_task_work_already_complete",
+        lambda *, team_id, task_id: False,
+    )
+
+    with pytest.raises(RuntimeError) as excinfo:
+        _wait_with_bounded_turn_continuation(
+            _handle(),
+            action=_action(),
+            input_snapshot=_input_snapshot(),
+            adapter_spec=AgentTaskAdapterSpec(
+                node_id="source_finding",
+                family="source_collection",
+                task_key="finding",
+                role_key="source_finder",
+            ),
+            timeout_ms=1000,
+            poll_ms=10,
+        )
+
+    assert json.loads(str(excinfo.value))["code"] == "agent_turn_terminal_failed"
+    assert len(upserts) == 1
+    failed = upserts[0]
+    assert failed["status"] == "failed"
+    assert failed["failureCode"] == "context_budget_exhausted"
+    assert "failed_runtime" in failed["failureMessage"]
+    assert "context_budget_exhausted" in failed["failureMessage"]
+    assert failed["result"] == {"keep": "me"}
+    assert failed["writeback"] == {"status": "needs_review"}
+    assert failed["failedAt"] == "2026-09-02T00:00:00Z"
+    assert any(
+        event_type == "source_collection.stage_session_task_turn_terminal_failed"
+        for event_type, _team, _fields in events
+    )
+
+
+def test_stage_task_failure_propagation_idempotent_and_completed_guard(monkeypatch):
+    """Repeated callbacks must not rewrite an identical failure, and a settled
+    ``completed`` task must never be retroactively failed."""
+    from core.web.services.team_workflow.research_runtime.agent_turn_completion import (
+        _propagate_turn_terminal_failure_to_stage_task,
+    )
+
+    detail = {
+        "code": "agent_turn_terminal_failed",
+        "sessionId": "sess-1",
+        "turnId": "turn-main",
+        "terminalStatus": "failed_runtime",
+        "terminalProblemCode": "context_budget_exhausted",
+        "terminalReason": "context_budget_exhausted",
+    }
+
+    # Completed tasks are settled work: never overwritten.
+    completed = {"taskId": "task-done", "status": "completed", "result": {"ok": True}}
+    upserts, _events = _stage_task_store(monkeypatch, {"task-done": completed})
+    _propagate_turn_terminal_failure_to_stage_task(
+        team_id="team-1", task_id="task-done", failure_detail=detail
+    )
+    assert upserts == []
+
+    # Identical failure already recorded: no rewrite (original timestamps win).
+    failed_once = {
+        "taskId": "task-failed",
+        "status": "failed",
+        "failureCode": "context_budget_exhausted",
+        "failureMessage": (
+            "Agent turn ended in terminal status 'failed_runtime'. "
+            "Reason: context_budget_exhausted. Stage task marked failed so the "
+            "formal replay can pick a recovery path."
+        ),
+        "failedAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:00:00Z",
+    }
+    tasks = {"task-failed": failed_once}
+    upserts, _events = _stage_task_store(monkeypatch, tasks)
+    _propagate_turn_terminal_failure_to_stage_task(
+        team_id="team-1", task_id="task-failed", failure_detail=detail
+    )
+    assert upserts == []
+    assert tasks["task-failed"]["failedAt"] == "2026-01-01T00:00:00Z"
+
+    # A new failure reason on the same task does overwrite the failure record.
+    _propagate_turn_terminal_failure_to_stage_task(
+        team_id="team-1",
+        task_id="task-failed",
+        failure_detail={
+            **detail,
+            "terminalStatus": "failed_provider",
+            "terminalProblemCode": "provider_timeout",
+            "terminalReason": "provider_timeout",
+        },
+    )
+    assert len(upserts) == 1
+    assert upserts[0]["failureCode"] == "provider_timeout"
+    assert "failed_provider" in upserts[0]["failureMessage"]

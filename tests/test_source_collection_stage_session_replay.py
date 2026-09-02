@@ -22,6 +22,18 @@ class _FakeService:
     class TeamWorkflowOrchestrationError(RuntimeError):
         pass
 
+    SOURCE_COLLECTION_STAGE_SESSION_TASK_STATUSES = {
+        "queued",
+        "running",
+        "completed",
+        "needs_review",
+        "blocked",
+        "failed",
+        "cancelled",
+        "interrupted",
+    }
+    SOURCE_COLLECTION_STAGE_SESSION_TASK_ACTIVE_STATUSES = {"queued", "running"}
+
     @staticmethod
     def _trim_text(value, max_length=0):
         text = str(value or "").strip()
@@ -154,3 +166,67 @@ def test_marker_in_turn_summary_also_matches(monkeypatch):
 
 if __name__ == "__main__":
     pytest.main([__file__])
+
+
+def test_turn_terminal_failure_shape_retries_with_new_session(monkeypatch):
+    """turn 终态失败传播写入的失败形态（failed + 结构化 failureCode +
+    failureMessage 摘要）必须命中 formal_retry_same_task，毒会话不再被复用。"""
+    fake = _FakeService(session_detail={"sessionId": "session-1"})
+    propagated = _task(
+        failureCode="context_budget_exhausted",
+        failureMessage=(
+            "Agent turn ended in terminal status 'failed_runtime'. "
+            "Reason: context_budget_exhausted. Stage task marked failed so the "
+            "formal replay can pick a recovery path."
+        ),
+    )
+    result = _prepare(monkeypatch, fake, propagated)
+
+    assert result["action"] == "formal_retry_same_task"
+    assert result["recoveryReason"] == replay_module.CONTEXT_BUDGET_RETRY_NEW_SESSION
+
+
+def test_reconcile_keeps_explicit_failure_over_writeback_status(monkeypatch):
+    """writeback 早已写入 needs_review 的任务被显式标 failed+failureCode 后，
+    状态 reconcile 不得把它翻回 needs_review（否则 replay 永远看到非终态）。"""
+    import core.web.services.team_workflow.source_collection.stage_reconcile as reconcile_module
+
+    fake = _FakeService(session_detail={"sessionId": "session-1"})
+    monkeypatch.setattr(reconcile_module, "_service", lambda: fake)
+    task = _task(
+        writeback={"status": "needs_review"},
+        turn={"accepted": True, "turnId": "turn-1", "status": "needs_review"},
+    )
+
+    reconciled = (
+        reconcile_module._reconcile_source_collection_stage_session_task_turn_status(
+            task
+        )
+    )
+
+    assert reconciled is task
+    assert reconciled["status"] == "failed"
+    assert reconciled["failureCode"] == "context_budget_exhausted"
+
+
+def test_reconcile_legacy_flip_without_failure_code_unchanged(monkeypatch):
+    """无 failureCode 的历史 failed 任务保持既有 reconcile 翻转语义（回归）。"""
+    import core.web.services.team_workflow.source_collection.stage_reconcile as reconcile_module
+
+    fake = _FakeService(session_detail={"sessionId": "session-1"})
+    monkeypatch.setattr(reconcile_module, "_service", lambda: fake)
+    task = _task(
+        failureCode="",
+        writeback={"status": "needs_review"},
+        turn={"accepted": True, "turnId": "turn-1", "status": "failed"},
+    )
+
+    reconciled = (
+        reconcile_module._reconcile_source_collection_stage_session_task_turn_status(
+            task
+        )
+    )
+
+    assert reconciled is not task
+    assert reconciled["status"] == "needs_review"
+    assert reconciled["turn"]["status"] == "needs_review"
