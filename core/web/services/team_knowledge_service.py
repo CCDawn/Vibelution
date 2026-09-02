@@ -66,10 +66,21 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def list_knowledge_overview(*, agent_id: str = "", internal: bool = False) -> dict[str, Any]:
-    """Return formal knowledge bases visible to an optional Agent."""
+def list_knowledge_overview(
+    *,
+    agent_id: str = "",
+    internal: bool = False,
+    sync_roots: bool = True,
+) -> dict[str, Any]:
+    """Return formal knowledge bases visible to an optional Agent.
 
-    _sync_roots()
+    ``sync_roots=False`` 供只读投影（提示词渲染等）使用：跳过 ``_sync_roots``
+    对兄弟服务 ``PROJECT_ROOT`` 的全局改写，避免只读查询劫持调用方（群聊轮次、
+    会话 journal、Agent 目录）已解析的项目根目录。
+    """
+
+    if sync_roots:
+        _sync_roots()
     visible_bases: list[dict[str, Any]] = []
     pending_proposals = 0
     item_count = 0

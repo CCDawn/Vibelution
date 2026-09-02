@@ -84,7 +84,10 @@ def _resolve_agent_knowledge_base_ids_by_action(agent_id: str) -> dict[str, list
     try:
         from core.web.services import team_knowledge_service
 
-        overview = team_knowledge_service.list_knowledge_overview(agent_id=agent_id)
+        # 投影是只读渲染路径：必须以 sync_roots=False 跳过 _sync_roots，否则
+        # 它会把 chat_room/agent_directory/team 服务的全局 PROJECT_ROOT 改写成
+        # team_knowledge 的根，劫持调用方（群聊轮次、会话 journal）已解析的根。
+        overview = team_knowledge_service.list_knowledge_overview(agent_id=agent_id, sync_roots=False)
     except Exception:
         # 投影渲染必须失败开放：查询异常时退回指引文本，不阻塞提示词构建。
         return resolved
