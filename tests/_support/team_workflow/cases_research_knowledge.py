@@ -3246,3 +3246,241 @@ def test_local_research_model_invoke_rejects_unparseable_output_without_candidat
 
     workflow = team_workflow_orchestration_service.get_team_workflow_orchestration(team["teamId"])
     assert workflow["candidateStore"]["candidateCount"] == 0
+
+
+def test_steward_pack_writeback_lands_in_run_owner_project_store(tmp_path, monkeypatch):
+    """SCI-091 回归：活跃工程 A + authority run 属工程 B 时，writeback 自动链物化的
+    steward_pack_draft 候选必须落 B 的 owner 工程店；owner+active 读兼容合并仍工作。"""
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    ingestor = agent_directory_service.create_agent_instance(display_name="资料入库")
+    ingestor_session = session_service.ensure_agent_direct_session(
+        agent_id=ingestor["agentId"],
+        title="资料入库",
+    )
+    agent_directory_service.update_agent_instance(ingestor["agentId"], direct_session_id=ingestor_session["id"])
+    coordinator = agent_directory_service.create_agent_instance(display_name="科研协调")
+    session_service.ensure_agent_direct_session(agent_id=coordinator["agentId"], title="科研协调")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[
+            {"agentId": coordinator["agentId"], "role": "research_coordination", "agentName": "科研协调"},
+            {"agentId": ingestor["agentId"], "role": "source_ingestor", "agentName": "资料入库"},
+        ],
+    )
+    knowledge_base = team_knowledge_service.create_knowledge_base(
+        team["teamId"],
+        name="挑战杯科研知识库",
+        actor_agent_id=coordinator["agentId"],
+    )
+    # 活跃工程 A（sci-001 语境），run 经 workflowRunId 钉到工程 B（sci-091 语境）。
+    project_active = team_workflow_orchestration_service.create_research_project(
+        team["teamId"], {"name": "challenge-sci-001"}
+    )["project"]
+    team_workflow_orchestration_service.activate_research_project(team["teamId"], project_active["projectId"])
+    project_owner = team_workflow_orchestration_service.create_research_project(
+        team["teamId"], {"name": "challenge-sci-091"}
+    )["project"]
+    active_store_path = team_workflow_orchestration_service._candidate_store_path(team["teamId"])
+    from core.web.services.team_workflow.research_projects import resolve_research_project_workspace_root
+
+    owner_store_path = (
+        resolve_research_project_workspace_root(team["teamId"], project_owner["projectId"])
+        / "candidate_store"
+        / "index.json"
+    )
+    assert active_store_path != owner_store_path
+
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "神经预测编码",
+            "researchProjectId": project_owner["projectId"],
+            "scope": {"workflowRunId": "wr-owner-store-regression"},
+            "agentRoles": ["source_ingestor"],
+            "agentIds": {"source_ingestor": ingestor["agentId"]},
+            "querySeeds": ["predictive coding neural algorithm"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = run_response["run"]["runId"]
+    assert (
+        team_workflow_orchestration_service._source_collection_run_owner_research_project_id(team["teamId"], run_id)
+        == project_owner["projectId"]
+    )
+    source = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Predictive coding cortical hierarchy neural network paper",
+            "sourceUrl": "https://doi.org/10.0000/steward-owner-store",
+            "sourceKind": "paper",
+            "summary": "Neural predictive coding evidence for neural-network hierarchy and attention mechanisms.",
+            "tags": ["neuroscience", "algorithm"],
+            "allowedForAnalysis": True,
+            "metadata": {"sourceCollectionRunId": run_id, "doi": "10.0000/steward-owner-store"},
+            "createdByAgent": "content-extraction-agent",
+        },
+        run_id=run_id,
+    )["candidate"]
+    team_workflow_orchestration_service.assess_source_candidate_quality(
+        team["teamId"],
+        source["candidateId"],
+        {
+            "assessedByAgent": "source-quality-agent",
+            "decision": "approved",
+            "notes": "神经预测编码主题相关，元数据可追踪。",
+            "evidenceRefs": [{"type": "doi", "id": "10.0000/steward-owner-store"}],
+        },
+        run_id=run_id,
+    )
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda session_id, content, **kwargs: {"accepted": True, "sessionId": session_id, "turnId": "turn-owner-store", "status": "running"},
+    )
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {"stageId": "ingestion", "agentId": ingestor["agentId"], "agentRole": "source_ingestor"},
+    )
+    writeback_payload = {
+        "status": "completed",
+        "summary": "知识库管理员通过 1 条候选，直接入库。",
+        "result": {
+            "knowledgeBaseId": knowledge_base["knowledgeBaseId"],
+            "candidate_summary": {
+                "approved": {
+                    "count": 1,
+                    "candidates": [
+                        {
+                            "candidateId": source["candidateId"],
+                            "title": source["title"],
+                            "doi": "10.0000/steward-owner-store",
+                            "overall_score": 88,
+                            "relevance_score": 96,
+                            "assessment_notes": "可直接支撑神经预测编码算法假设。",
+                        }
+                    ],
+                }
+            },
+            "steward_assessment": {"decision": "approved", "targetDomain": "神经机制启发神经网络算法"},
+        },
+        "recordedByAgent": ingestor["agentId"],
+        "evidenceRefs": [{"type": "candidate", "id": source["candidateId"]}],
+        "nextActions": ["进入实验规划"],
+    }
+
+    _append_stage_task_tool_trace(tmp_path, task["task"])
+    response = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        team["teamId"],
+        task["taskId"],
+        writeback_payload,
+    )
+
+    materialized = response["writeback"]["materializedKnowledgeIngestion"]
+    assert materialized["status"] == "completed"
+    assert materialized["stewardPackCandidateId"]
+
+    # owner 店（工程 B）必须拿到 steward_pack_draft 候选；活跃工程 A 的店不得收留它。
+    owner_store = team_workflow_orchestration_service._read_json(owner_store_path)
+    owner_pack_candidates = [
+        item
+        for item in list(owner_store.get("candidates") or [])
+        if isinstance(item, dict) and str((item.get("metadata") or {}).get("taskType") or "") == "steward_pack_draft"
+    ]
+    assert [str(item.get("candidateId") or "") for item in owner_pack_candidates] == [
+        materialized["stewardPackCandidateId"]
+    ]
+    active_store = team_workflow_orchestration_service._read_json(active_store_path)
+    active_pack_candidates = [
+        item
+        for item in list(active_store.get("candidates") or [])
+        if isinstance(item, dict) and str((item.get("metadata") or {}).get("taskType") or "") == "steward_pack_draft"
+    ]
+    assert active_pack_candidates == []
+
+    # 读兼容合并仍工作：活跃店候选通过 owner-first merged read 仍可见。
+    stray = team_workflow_orchestration_service.record_local_research_model_output(
+        team["teamId"],
+        {
+            "taskType": "steward_pack_draft",
+            "title": "活跃店遗留候选",
+            "createdByAgent": ingestor["agentId"],
+            "output": {
+                "candidateType": "review_record",
+                "sourceRefs": [{"type": "paper", "id": "paper-legacy", "label": "Paper legacy"}],
+                "evidenceRefs": [{"type": "review", "id": "review-legacy", "label": "Review legacy"}],
+                "candidateIds": [source["candidateId"]],
+                "proposalPayload": {"title": "活跃店遗留候选", "summary": "遗留", "excerpt": "遗留摘要", "ratingSuggestion": {"rating": 4, "confidence": 0.9}, "claims": [], "uncertainty": [], "riskSummary": "", "nextAction": "提交审核"},
+            },
+        },
+    )["candidate"]
+    merged = team_workflow_orchestration_service._load_candidate_store(team["teamId"], run_id=run_id)
+    merged_ids = {str(item.get("candidateId") or "") for item in list(merged.get("candidates") or [])}
+    assert materialized["stewardPackCandidateId"] in merged_ids
+    assert stray["candidateId"] in merged_ids
+    # 无 run 的读取仍以活跃店为视角。
+    active_only = team_workflow_orchestration_service._load_candidate_store(team["teamId"])
+    active_only_ids = {str(item.get("candidateId") or "") for item in list(active_only.get("candidates") or [])}
+    assert stray["candidateId"] in active_only_ids
+    assert materialized["stewardPackCandidateId"] not in active_only_ids
+
+
+def test_run_scoped_steward_pack_write_records_reason_when_owner_unresolved(tmp_path, monkeypatch):
+    """带 authority run 但 owner 工程不可解析（legacy/已删 run）时：保持历史活跃店
+    目标（legacy 流程不破坏），但必须记录明确 reason 的 warning 事件并在返回里带
+    candidateStoreScope，不静默漂移。"""
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    active_store_path = team_workflow_orchestration_service._candidate_store_path(team["teamId"])
+
+    recorded_events: list[tuple[tuple, dict]] = []
+    real_record_event = team_workflow_orchestration_service.record_runtime_scene_event
+
+    def _spy_record_event(*args, **kwargs):
+        recorded_events.append((args, kwargs))
+        return real_record_event(*args, **kwargs)
+
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "record_runtime_scene_event",
+        _spy_record_event,
+    )
+
+    response = team_workflow_orchestration_service.record_local_research_model_output(
+        team["teamId"],
+        {
+            "taskType": "steward_pack_draft",
+            "title": "owner 不可解析的包",
+            "createdByAgent": "knowledge-steward",
+            "output": {
+                "candidateType": "review_record",
+                "sourceRefs": [{"type": "paper", "id": "paper-x", "label": "Paper X"}],
+                "evidenceRefs": [{"type": "review", "id": "review-x", "label": "Review X"}],
+                "candidateIds": ["candidate-x"],
+                "proposalPayload": {"title": "包", "summary": "摘要", "excerpt": "证据摘录", "ratingSuggestion": {"rating": 4, "confidence": 0.9}, "claims": [], "uncertainty": [], "riskSummary": "", "nextAction": "提交审核"},
+            },
+        },
+        run_id="dprun-owner-unresolvable",
+    )
+
+    # 返回里带明确 reason。
+    scope = response.get("candidateStoreScope")
+    assert scope["requestedRunId"] == "dprun-owner-unresolvable"
+    assert scope["resolvedRunId"] == ""
+    assert scope["resolution"] == "active_project_owner_unresolved"
+    # warning 事件带明确 reason，不静默。
+    warning_events = [
+        (args, kwargs)
+        for args, kwargs in recorded_events
+        if len(args) >= 3 and args[2] == "candidate.store_owner_project_unresolved"
+    ]
+    assert warning_events, "expected a store_owner_project_unresolved workflow event"
+    event_fields = warning_events[0][0][3] if len(warning_events[0][0]) > 3 else warning_events[0][1].get("fields") or {}
+    assert event_fields.get("runId") == "dprun-owner-unresolvable"
+    assert event_fields.get("reason") == "authority_run_has_no_resolvable_owner_research_project"
+    assert warning_events[0][1].get("level") == "warning"
+    # 历史行为保持：候选仍写入活跃店（legacy run 场景不破坏）。
+    store = team_workflow_orchestration_service._read_json(active_store_path)
+    store_ids = {str(item.get("candidateId") or "") for item in list(store.get("candidates") or [])}
+    assert response["candidate"]["candidateId"] in store_ids

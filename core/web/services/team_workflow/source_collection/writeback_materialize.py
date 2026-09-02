@@ -1200,7 +1200,7 @@ def _materialize_source_collection_stage_writeback_quality(
             ),
         }
         try:
-            response = s.assess_source_candidate_quality(team_id, candidate_id, assessment_payload)
+            response = s.assess_source_candidate_quality(team_id, candidate_id, assessment_payload, run_id=run_id)
         except (s.team_service.TeamServiceError, s.TeamWorkflowOrchestrationError) as exc:
             failed.append({"candidateId": candidate_id, "reason": "assessment_failed", "error": str(exc)})
             continue
@@ -1785,6 +1785,9 @@ def _materialize_source_collection_stage_writeback_knowledge_ingestion(
         # owner source 审阅的 steward agent 加进该 team 的 localStewardAgentIds，
         # 不扩 REVIEW_ROLES、不影响其他 agent。
         s.team_knowledge_service.ensure_owner_source_review_grant("team", team_id, steward_agent_id)
+        # 候选写入必须落在 authority run 的 owner 工程店里：pack/提交/审核整条
+        # 链都带 run_id 走 run-owner 解析；owner 解析失败时保留历史活跃店目标
+        # 并记录带 reason 的 warning 事件，不再静默漂移（SCI-091 事故根因）。
         pack_record = s.record_local_research_model_output(
             team_id,
             {
@@ -1793,11 +1796,13 @@ def _materialize_source_collection_stage_writeback_knowledge_ingestion(
                 "createdByAgent": steward_agent_id,
                 "output": pack_output,
             },
+            run_id=run_id,
         )["candidate"]
         source_pending = s.submit_steward_pack_to_knowledge_ingestion(
             team_id,
             pack_record["candidateId"],
             {"knowledgeBaseId": scoped_knowledge_base_id, "proposedByAgentId": steward_agent_id},
+            run_id=run_id,
         )
         ingestion = source_pending["candidate"].get("metadata", {}).get("knowledgeIngestion", {}) if isinstance(source_pending.get("candidate"), dict) else {}
         inbox_source_id = s._trim_text(ingestion.get("inboxSourceId"), max_length=160)
@@ -1817,6 +1822,7 @@ def _materialize_source_collection_stage_writeback_knowledge_ingestion(
                 "proposedByAgentId": steward_agent_id,
                 "centralSourceId": central_source_id,
             },
+            run_id=run_id,
         )
         knowledge_review = s.review_steward_pack_knowledge_ingestion(
             team_id,
@@ -1827,6 +1833,7 @@ def _materialize_source_collection_stage_writeback_knowledge_ingestion(
                 "decision": "approved",
                 "resolutionNote": s._trim_text(decision.get("reason") or writeback.get("summary"), max_length=2000),
             },
+            run_id=run_id,
         )
     except (s.TeamWorkflowOrchestrationError, s.team_knowledge_service.TeamKnowledgeError, s.team_knowledge_service.TeamKnowledgeNotFoundError) as exc:
         summary = s._source_collection_stage_writeback_knowledge_ingestion_summary(

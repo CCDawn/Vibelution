@@ -1103,11 +1103,14 @@ def _default_source_quality_required_fixes(
     return required_fixes[:12]
 
 
-def assess_source_candidate_quality(team_id: str, candidate_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+def assess_source_candidate_quality(team_id: str, candidate_id: str, payload: dict[str, Any] | None = None, *, run_id: str = "") -> dict[str, Any]:
     s = _service()
     normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
     normalized_candidate_id = s._normalize_required_id(candidate_id, "Candidate id is required.")
     s.team_service.get_team(normalized_team_id)
+    # Run-scoped auto chains resolve the store through the authority run's
+    # owner project; the assessment update must not drift to the active store.
+    normalized_run_id = s._resolve_candidate_store_write_run(normalized_team_id, run_id)
     payload = payload if isinstance(payload, dict) else {}
     assessed_by_agent = s._trim_text(payload.get("assessedByAgent"), max_length=160) or "资料提炼 Agent"
     requested_decision = s._trim_text(payload.get("decision"), max_length=80)
@@ -1120,7 +1123,11 @@ def assess_source_candidate_quality(team_id: str, candidate_id: str, payload: di
     now = s.utc_now_iso()
     with s._WORKFLOW_LOCK:
         workflow = s._load_or_create_workflow(normalized_team_id)
-        candidate_store = s._load_candidate_store(normalized_team_id)
+        candidate_store = (
+            s._load_candidate_store(normalized_team_id, run_id=normalized_run_id)
+            if normalized_run_id
+            else s._load_candidate_store(normalized_team_id)
+        )
         candidate = s._find_candidate(candidate_store, normalized_candidate_id)
         if candidate is None:
             raise s.TeamWorkflowOrchestrationError("Candidate not found.")
@@ -1182,7 +1189,7 @@ def assess_source_candidate_quality(team_id: str, candidate_id: str, payload: di
             candidate["qualityStatus"] = "source_quality_needs_revision"
         candidate["updatedAt"] = now
         candidate_store["updatedAt"] = now
-        s._write_json(s._candidate_store_path(normalized_team_id), candidate_store)
+        s._write_json(s._candidate_store_path(normalized_team_id, normalized_run_id), candidate_store)
         workflow["updatedAt"] = now
         workflow["activeWorkflowItems"] = s._upsert_active_item(
             workflow.get("activeWorkflowItems"),
@@ -1201,6 +1208,7 @@ def assess_source_candidate_quality(team_id: str, candidate_id: str, payload: di
             "decision": decision,
             "overallScore": scores["overall"],
             "assessedByAgent": assessed_by_agent,
+            "sourceCollectionRunId": normalized_run_id,
         },
     )
     return {
@@ -2438,10 +2446,15 @@ def build_local_research_model_task(team_id: str, payload: dict[str, Any]) -> di
     return {"task": task, "workflow": s._workflow_to_api(normalized_team_id, workflow, candidate_store)}
 
 
-def record_local_research_model_output(team_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+def record_local_research_model_output(team_id: str, payload: dict[str, Any], *, run_id: str = "") -> dict[str, Any]:
     s = _service()
     normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
     s.team_service.get_team(normalized_team_id)
+    # Run-scoped callers (stage writeback auto chains) resolve the store
+    # through the authority run's owner project; an unresolvable owner keeps
+    # the historical active-store target but records an explicit warning
+    # instead of drifting silently (SCI-091 incident).
+    normalized_run_id = s._resolve_candidate_store_write_run(normalized_team_id, run_id)
     task_type = s._normalize_local_research_task_type(payload.get("taskType"))
     output = payload.get("output")
     if not isinstance(output, dict):
@@ -2450,7 +2463,11 @@ def record_local_research_model_output(team_id: str, payload: dict[str, Any]) ->
     now = s.utc_now_iso()
     with s._WORKFLOW_LOCK:
         workflow = s._load_or_create_workflow(normalized_team_id)
-        candidate_store = s._load_candidate_store(normalized_team_id)
+        candidate_store = (
+            s._load_candidate_store(normalized_team_id, run_id=normalized_run_id)
+            if normalized_run_id
+            else s._load_candidate_store(normalized_team_id)
+        )
         record = {
             "schemaVersion": s.SCHEMA_VERSION,
             "candidateId": s._new_record_id("local-model-output"),
@@ -2477,7 +2494,7 @@ def record_local_research_model_output(team_id: str, payload: dict[str, Any]) ->
         }
         candidate_store.setdefault("candidates", []).append(record)
         candidate_store["updatedAt"] = now
-        s._write_json(s._candidate_store_path(normalized_team_id), candidate_store)
+        s._write_json(s._candidate_store_path(normalized_team_id, normalized_run_id), candidate_store)
         workflow["updatedAt"] = now
         workflow["activeWorkflowItems"] = s._upsert_active_item(
             workflow.get("activeWorkflowItems"),
@@ -2496,13 +2513,22 @@ def record_local_research_model_output(team_id: str, payload: dict[str, Any]) ->
             "taskType": task_type,
             "valid": validation["valid"],
             "issueCount": len(validation["issues"]),
+            "sourceCollectionRunId": normalized_run_id,
         },
     )
-    return {
+    response = {
         "candidate": record,
         "validation": validation,
         "workflow": s._workflow_to_api(normalized_team_id, workflow, candidate_store),
     }
+    if s._trim_text(run_id, max_length=160):
+        # 写入定位证据：owner 解析失败回退活跃店时，返回里带明确 reason。
+        response["candidateStoreScope"] = {
+            "requestedRunId": s._trim_text(run_id, max_length=160),
+            "resolvedRunId": normalized_run_id,
+            "resolution": "owner_project" if normalized_run_id else "active_project_owner_unresolved",
+        }
+    return response
 
 
 def invoke_local_research_model(team_id: str, payload: dict[str, Any], *, llm_client_factory: Any = None) -> dict[str, Any]:
@@ -2647,12 +2673,18 @@ def invoke_local_research_model(team_id: str, payload: dict[str, Any], *, llm_cl
     return record_response
 
 
-def _steward_pack_local_file_paths(team_id: str, output: dict[str, Any]) -> list[dict[str, Any]]:
+def _steward_pack_local_file_paths(team_id: str, output: dict[str, Any], *, run_id: str = "") -> list[dict[str, Any]]:
     """Collect candidate-local files that can be copied into the central source store."""
 
     s = _service()
     candidate_ids = s._normalize_text_list(output.get("candidateIds"), max_items=32, max_length=160)
-    candidate_store = s._load_candidate_store(team_id)
+    # Run-scoped submissions read through the owner-project store (merged with
+    # the active store as read-compat) so referenced sources stay discoverable.
+    candidate_store = (
+        s._load_candidate_store(team_id, run_id=run_id)
+        if run_id
+        else s._load_candidate_store(team_id)
+    )
     by_id = {
         str(item.get("candidateId") or ""): item
         for item in list(candidate_store.get("candidates") or [])
@@ -2681,11 +2713,16 @@ def _steward_pack_local_file_paths(team_id: str, output: dict[str, Any]) -> list
     return paths
 
 
-def submit_steward_pack_to_knowledge_ingestion(team_id: str, candidate_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+def submit_steward_pack_to_knowledge_ingestion(team_id: str, candidate_id: str, payload: dict[str, Any], *, run_id: str = "") -> dict[str, Any]:
     s = _service()
     normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
     normalized_candidate_id = s._normalize_required_id(candidate_id, "Candidate id is required.")
     s.team_service.get_team(normalized_team_id)
+    # Run-scoped auto chains resolve the pack store through the authority
+    # run's owner project (unresolvable owners keep the active-store target
+    # with an explicit warning); run-less manual submissions keep the
+    # historical active-store behavior.
+    normalized_run_id = s._resolve_candidate_store_write_run(normalized_team_id, run_id)
     knowledge_base_id = s._trim_text(payload.get("knowledgeBaseId"), max_length=256)
     if not knowledge_base_id:
         raise s.TeamWorkflowOrchestrationError("Knowledge base id is required.")
@@ -2694,7 +2731,11 @@ def submit_steward_pack_to_knowledge_ingestion(team_id: str, candidate_id: str, 
 
     with s._WORKFLOW_LOCK:
         workflow = s._load_or_create_workflow(normalized_team_id)
-        candidate_store = s._load_candidate_store(normalized_team_id)
+        candidate_store = (
+            s._load_candidate_store(normalized_team_id, run_id=normalized_run_id)
+            if normalized_run_id
+            else s._load_candidate_store(normalized_team_id)
+        )
         candidate = s._find_candidate(candidate_store, normalized_candidate_id)
         if candidate is None:
             raise s.TeamWorkflowOrchestrationError("Steward pack candidate not found.")
@@ -2716,7 +2757,7 @@ def submit_steward_pack_to_knowledge_ingestion(team_id: str, candidate_id: str, 
         output,
         proposed_by_agent_id=proposed_by_agent_id,
     )
-    local_file_paths = _steward_pack_local_file_paths(normalized_team_id, output)
+    local_file_paths = _steward_pack_local_file_paths(normalized_team_id, output, run_id=normalized_run_id)
 
     if not central_source_id:
         try:
@@ -2741,7 +2782,11 @@ def submit_steward_pack_to_knowledge_ingestion(team_id: str, candidate_id: str, 
         now = s.utc_now_iso()
         with s._WORKFLOW_LOCK:
             workflow = s._load_or_create_workflow(normalized_team_id)
-            candidate_store = s._load_candidate_store(normalized_team_id)
+            candidate_store = (
+                s._load_candidate_store(normalized_team_id, run_id=normalized_run_id)
+                if normalized_run_id
+                else s._load_candidate_store(normalized_team_id)
+            )
             candidate = s._find_candidate(candidate_store, normalized_candidate_id)
             if candidate is None:
                 raise s.TeamWorkflowOrchestrationError("Steward pack candidate not found after source inbox submission.")
@@ -2766,7 +2811,7 @@ def submit_steward_pack_to_knowledge_ingestion(team_id: str, candidate_id: str, 
             candidate["qualityStatus"] = "pending_source_review"
             candidate["updatedAt"] = now
             candidate_store["updatedAt"] = now
-            s._write_json(s._candidate_store_path(normalized_team_id), candidate_store)
+            s._write_json(s._candidate_store_path(normalized_team_id, normalized_run_id), candidate_store)
             workflow["updatedAt"] = now
             workflow["activeWorkflowItems"] = s._upsert_active_item(
                 workflow.get("activeWorkflowItems"),
@@ -2833,7 +2878,11 @@ def submit_steward_pack_to_knowledge_ingestion(team_id: str, candidate_id: str, 
     now = s.utc_now_iso()
     with s._WORKFLOW_LOCK:
         workflow = s._load_or_create_workflow(normalized_team_id)
-        candidate_store = s._load_candidate_store(normalized_team_id)
+        candidate_store = (
+            s._load_candidate_store(normalized_team_id, run_id=normalized_run_id)
+            if normalized_run_id
+            else s._load_candidate_store(normalized_team_id)
+        )
         candidate = s._find_candidate(candidate_store, normalized_candidate_id)
         if candidate is None:
             raise s.TeamWorkflowOrchestrationError("Steward pack candidate not found after ingestion submission.")
@@ -2858,7 +2907,7 @@ def submit_steward_pack_to_knowledge_ingestion(team_id: str, candidate_id: str, 
         candidate["qualityStatus"] = "pending_knowledge_review"
         candidate["updatedAt"] = now
         candidate_store["updatedAt"] = now
-        s._write_json(s._candidate_store_path(normalized_team_id), candidate_store)
+        s._write_json(s._candidate_store_path(normalized_team_id, normalized_run_id), candidate_store)
         workflow["updatedAt"] = now
         workflow["activeWorkflowItems"] = s._upsert_active_item(
             workflow.get("activeWorkflowItems"),
@@ -2898,11 +2947,14 @@ def submit_steward_pack_to_knowledge_ingestion(team_id: str, candidate_id: str, 
     }
 
 
-def review_steward_pack_knowledge_ingestion(team_id: str, candidate_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+def review_steward_pack_knowledge_ingestion(team_id: str, candidate_id: str, payload: dict[str, Any], *, run_id: str = "") -> dict[str, Any]:
     s = _service()
     normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
     normalized_candidate_id = s._normalize_required_id(candidate_id, "Candidate id is required.")
     s.team_service.get_team(normalized_team_id)
+    # Same run-owner resolution as submit: auto chains must keep pack state
+    # updates inside the authority run's owner-project store.
+    normalized_run_id = s._resolve_candidate_store_write_run(normalized_team_id, run_id)
     knowledge_base_id = s._trim_text(payload.get("knowledgeBaseId"), max_length=256)
     if not knowledge_base_id:
         raise s.TeamWorkflowOrchestrationError("Knowledge base id is required.")
@@ -2912,7 +2964,11 @@ def review_steward_pack_knowledge_ingestion(team_id: str, candidate_id: str, pay
 
     with s._WORKFLOW_LOCK:
         workflow = s._load_or_create_workflow(normalized_team_id)
-        candidate_store = s._load_candidate_store(normalized_team_id)
+        candidate_store = (
+            s._load_candidate_store(normalized_team_id, run_id=normalized_run_id)
+            if normalized_run_id
+            else s._load_candidate_store(normalized_team_id)
+        )
         candidate = s._find_candidate(candidate_store, normalized_candidate_id)
         if candidate is None:
             raise s.TeamWorkflowOrchestrationError("Steward pack candidate not found.")
@@ -3013,7 +3069,11 @@ def review_steward_pack_knowledge_ingestion(team_id: str, candidate_id: str, pay
 
     with s._WORKFLOW_LOCK:
         workflow = s._load_or_create_workflow(normalized_team_id)
-        candidate_store = s._load_candidate_store(normalized_team_id)
+        candidate_store = (
+            s._load_candidate_store(normalized_team_id, run_id=normalized_run_id)
+            if normalized_run_id
+            else s._load_candidate_store(normalized_team_id)
+        )
         candidate = s._find_candidate(candidate_store, normalized_candidate_id)
         if candidate is None:
             raise s.TeamWorkflowOrchestrationError("Steward pack candidate not found after approval gate review.")
@@ -3043,7 +3103,7 @@ def review_steward_pack_knowledge_ingestion(team_id: str, candidate_id: str, pay
         candidate["qualityStatus"] = quality_status
         candidate["updatedAt"] = now
         candidate_store["updatedAt"] = now
-        s._write_json(s._candidate_store_path(normalized_team_id), candidate_store)
+        s._write_json(s._candidate_store_path(normalized_team_id, normalized_run_id), candidate_store)
         workflow["updatedAt"] = now
         workflow["activeWorkflowItems"] = s._upsert_active_item(
             workflow.get("activeWorkflowItems"),

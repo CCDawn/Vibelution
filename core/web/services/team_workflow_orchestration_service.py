@@ -222,6 +222,7 @@ from core.web.services.team_workflow.source_collection.residual import (
     _record_source_collection_exclusion,
     _record_source_collection_summary_timing,
     _record_workflow_event,
+    _resolve_candidate_store_write_run,
     _resolve_source_collection_record_id,
     _scan_managed_root_for_import,
     _source_candidate_payload_from_data_record,

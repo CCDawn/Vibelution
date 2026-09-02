@@ -3667,6 +3667,41 @@ def _source_collection_run_owner_research_project_id(team_id: str, run_id: str) 
     )
 
 
+def _resolve_candidate_store_write_run(team_id: str, run_id: str) -> str:
+    """Resolve the candidate-store write scope for a caller-supplied authority run.
+
+    Workflow candidates created while processing a source-collection run must
+    land in the run owner project's store (SCI-091 steward-pack incident: the
+    pack materialized into whichever project happened to be active). Returns
+    the normalized run id once the owner project resolves so callers use the
+    owner-scoped store. Returns "" when no run context was supplied (the
+    historical active-store behavior) — and also when a supplied run cannot be
+    resolved to an owner project (legacy/deleted run record): the historical
+    active-store target is kept, but a warning event records the explicit
+    reason so the drift is never silent. No new fallback path is introduced.
+    """
+
+    s = _service()
+    normalized_run_id = s._trim_text(run_id, max_length=160)
+    if not normalized_run_id:
+        return ""
+    owner_project_id = s._source_collection_run_owner_research_project_id(team_id, normalized_run_id)
+    if not owner_project_id:
+        s._record_workflow_event(
+            "candidate.store_owner_project_unresolved",
+            team_id,
+            fields={
+                "runId": normalized_run_id,
+                "reason": "authority_run_has_no_resolvable_owner_research_project",
+                "storeTarget": "active_project",
+            },
+            level="warning",
+            outcome="degraded",
+        )
+        return ""
+    return normalized_run_id
+
+
 def _source_collection_run_workflow_root(team_id: str, run_id: str) -> Path:
     """Workflow root resolved by the run owner project (fallback: active project).
 
