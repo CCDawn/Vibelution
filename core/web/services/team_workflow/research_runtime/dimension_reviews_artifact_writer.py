@@ -503,6 +503,43 @@ def _artifact_descriptor(
     }
 
 
+def _novelty_contrasts_from_review(
+    review: Mapping[str, Any] | Sequence[Any] | None,
+) -> dict[str, dict[str, Any]]:
+    """Extract per-candidate structured novelty conclusions from a round.
+
+    Reads the candidate-level ``noveltyContrast`` objects written by the
+    reflection runner (via the executor).  Lenient by contract: anything
+    missing or malformed is skipped, and candidates without a meaningful
+    conclusion produce no entry.  The output is keyed by candidateId and
+    carries only the three audited fields.
+    """
+
+    if not isinstance(review, Mapping):
+        return {}
+    result: dict[str, dict[str, Any]] = {}
+    for candidate in list(review.get("candidates") or []):
+        if not isinstance(candidate, Mapping):
+            continue
+        candidate_id = _candidate_id(candidate)
+        raw = candidate.get("noveltyContrast")
+        if not candidate_id or not isinstance(raw, Mapping):
+            continue
+        overlap = _string_list(raw.get("overlapPapers") or raw.get("overlap_papers"))
+        delta = _text(raw.get("deltaStatement") or raw.get("delta_statement"))
+        basis = _text(raw.get("basis")).lower()
+        if basis not in {"retrieved", "degraded"}:
+            continue
+        if not overlap and not delta:
+            continue
+        result[candidate_id] = {
+            "overlapPapers": overlap,
+            "deltaStatement": delta,
+            "basis": basis,
+        }
+    return result
+
+
 def materialize_dimension_reviews_authority(
     *,
     team_id: Any,
@@ -589,6 +626,10 @@ def materialize_dimension_reviews_authority(
     )
     blockers.extend(receipt_blockers)
     blockers = list(dict.fromkeys(blockers))
+    # Candidate-level structured novelty conclusions ride beside the audit
+    # rows (never inside them).  Empty output keeps the payload — and its
+    # hashes — byte-identical to the pre-contrast authority.
+    novelty_contrasts = _novelty_contrasts_from_review(review)
     result: dict[str, Any] = {
         "status": "blocked",
         "reason": "NEEDS_CONTEXT",
@@ -613,6 +654,11 @@ def materialize_dimension_reviews_authority(
             "selection": deepcopy(selection),
             "pareto": deepcopy(pareto),
             "metaReview": deepcopy(meta_review),
+            **(
+                {"noveltyContrastByCandidate": deepcopy(novelty_contrasts)}
+                if novelty_contrasts
+                else {}
+            ),
         }
         record = put_workflow_artifact(
             team,
@@ -646,6 +692,11 @@ def materialize_dimension_reviews_authority(
             "pareto": pareto,
             "metaReview": meta_review,
             "artifact": result["artifact"],
+            **(
+                {"noveltyContrastByCandidate": novelty_contrasts}
+                if novelty_contrasts
+                else {}
+            ),
         }
     )
     return result

@@ -356,6 +356,26 @@ def isolate_team_workflow_review_llm(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def isolate_team_workflow_literature_contrast(monkeypatch):
+    """Hypothesis review must never hit real literature providers in tests.
+
+    The executor's pre-review literature contrast retrieval is a real HTTP
+    side effect (shared rate-limited arXiv/OpenAlex transport).  Tests pin it
+    to a ``None`` stub — the executor treats that as "no contrast available"
+    and keeps byte-identical candidate shapes.  Tests that exercise the
+    contrast path inject their own fake retriever via ``monkeypatch``.
+    """
+    try:
+        from core.web.services.team_workflow import literature_contrast
+    except Exception:
+        return
+
+    monkeypatch.setattr(
+        literature_contrast, "retrieve_literature_contrast", lambda *a, **k: None
+    )
+
+
+@pytest.fixture(autouse=True)
 def isolate_runtime_manager_evolution_store(tmp_path, monkeypatch, request):
     """Keep manager-owned evolution snapshots out of the real .runtime tree."""
     path_value = str(getattr(request.node, "path", "") or getattr(request.node, "fspath", "") or "")

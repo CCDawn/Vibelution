@@ -63,6 +63,7 @@ from core.research.workflow.contracts.model_invocation_receipt import (
     ModelInvocationReceipt,
     ModelInvocationStatus,
 )
+from core.web.services.team_workflow import literature_contrast
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -546,15 +547,37 @@ def _reflection_step(
     """Score every candidate independently on the five fixed dimensions."""
 
     context_id = str(context.get("contextId") or "")
+    # Evidence enhancement, not a review step: before each real reflection call
+    # the executor runs the fail-open literature contrast retrieval (pure HTTP,
+    # never a model call, so the review-call budget is untouched).  A retrieval
+    # failure degrades to an empty contrast and the review proceeds normally.
     # Phase 1 acquires the raw runner outputs (the only concurrent part);
     # phase 2 validates receipts and payloads sequentially in input order, so
     # the shared formal_receipts list is never touched from worker threads.
     produced_by_candidate: list[ReviewRunnerResult] = []
+    contrast_by_index: list[Mapping[str, Any] | None] = [None] * len(candidates)
+
+    def _reflection_thunk(index: int, candidate: dict[str, Any]) -> Callable[[], Any]:
+        def call() -> Any:
+            try:
+                contrast = literature_contrast.retrieve_literature_contrast(candidate)
+            except Exception:  # noqa: BLE001 - evidence must never block the review
+                contrast = None
+            contrast_by_index[index] = (
+                contrast if isinstance(contrast, Mapping) else None
+            )
+            context_with_contrast = dict(context)
+            if contrast_by_index[index] is not None:
+                context_with_contrast["literatureContrast"] = contrast_by_index[index]
+            return runner(dict(candidate), context_with_contrast)
+
+        return call
+
     if runner is not None:
         produced_by_candidate = _collect_runner_outputs(
             [
-                lambda candidate=candidate: runner(dict(candidate), dict(context))
-                for candidate in candidates
+                _reflection_thunk(index, candidate)
+                for index, candidate in enumerate(candidates)
             ],
             max_concurrent_calls=max_concurrent_calls,
         )
@@ -670,6 +693,17 @@ def _reflection_step(
                 receipt_ref=coherence_receipt_ref,
             )
             reviewed_item["coreHypothesisCoherence"] = coherence.to_dict()
+        if runner is not None:
+            # Candidate-level evidence envelope: the retrieved literature
+            # contrast (with queries/provider/timestamp) plus the reflection
+            # run's structured novelty conclusion.  Both live beside the
+            # candidate, never inside the audit dimension rows.
+            contrast = contrast_by_index[index]
+            if isinstance(contrast, Mapping) and contrast:
+                reviewed_item["literatureContrast"] = dict(contrast)
+            raw_novelty = merged.get("noveltyContrast")
+            if isinstance(raw_novelty, Mapping) and raw_novelty:
+                reviewed_item["noveltyContrast"] = dict(raw_novelty)
         reviewed.append(reviewed_item)
     return reviewed
 
@@ -999,6 +1033,35 @@ def _required_text_list(value: Any, *, field: str) -> list[str]:
             f"formal revision {field} must contain explicit evidence"
         )
     return list(dict.fromkeys(normalized))
+
+
+def _candidates_with_review_contrast(
+    candidates: list[dict[str, Any]],
+    reviewed_candidates: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Merge each reviewed candidate's contrast evidence onto its R1 input.
+
+    The revision runner receives the parent candidate verbatim, so attaching
+    the reflection run's ``literatureContrast`` / ``noveltyContrast`` here is
+    the minimal pass-through of the novelty evidence.  Revision lineage
+    snapshots pick fixed fields only, so these keys never perturb the R1/R2
+    content hashes.
+    """
+
+    reviewed_by_id = {
+        str(item.get("candidateId") or ""): item for item in reviewed_candidates
+    }
+    merged: list[dict[str, Any]] = []
+    for candidate in candidates:
+        item = dict(candidate)
+        reviewed = reviewed_by_id.get(str(item.get("candidateId") or ""))
+        if isinstance(reviewed, Mapping):
+            for key in ("literatureContrast", "noveltyContrast"):
+                value = reviewed.get(key)
+                if isinstance(value, Mapping) and value:
+                    item[key] = dict(value)
+        merged.append(item)
+    return merged
 
 
 def _revision_step(
@@ -1400,7 +1463,7 @@ def execute_hypothesis_review(
         assert formal_receipts is not None
         revision_envelope = _revision_step(
             context,
-            candidates,
+            _candidates_with_review_contrast(candidates, reviewed_candidates),
             meta_review,
             runner=revision_runner,
             round_id=round_id,

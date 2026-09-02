@@ -183,6 +183,87 @@ def test_complete_explicit_rows_write_deterministically(monkeypatch):
     assert payload["pareto"]["paretoFrontCandidateIds"] == ["H1"]
 
 
+def test_novelty_contrast_rides_beside_rows_and_keeps_rows_clean(monkeypatch):
+    writes = []
+
+    def fake_put(team_id, **kwargs):
+        writes.append((team_id, kwargs))
+        return {
+            "recordId": kwargs["artifact_identity"],
+            "workflowRunId": kwargs["workflow_run_id"],
+            "sourceCollectionRunId": kwargs["source_collection_run_id"],
+            "contentHash": writer.canonical_sha256(kwargs["payload"]),
+        }
+
+    monkeypatch.setattr(writer, "put_workflow_artifact", fake_put)
+    monkeypatch.setattr(writer, "read_domain_artifact", lambda ref: object())
+    review = _review_payload()
+    review["candidates"] = [
+        {
+            "candidateId": "H1",
+            "claim": "claim one",
+            "literatureContrast": {"papers": [{"title": "T"}], "degraded": False},
+            "noveltyContrast": {
+                "overlapPapers": ["T"],
+                "deltaStatement": "机制不同",
+                "basis": "retrieved",
+            },
+        },
+        {"candidateId": "H2", "claim": "claim two"},
+    ]
+
+    result = writer.materialize_dimension_reviews_authority(
+        **_BASE,
+        review=review,
+    )
+
+    assert result["status"] == "written"
+    payload = writes[0][1]["payload"]
+    # The structured conclusion rides beside the rows, keyed by candidate.
+    assert payload["noveltyContrastByCandidate"] == {
+        "H1": {
+            "overlapPapers": ["T"],
+            "deltaStatement": "机制不同",
+            "basis": "retrieved",
+        }
+    }
+    # The audit rows themselves never gain contrast fields.
+    assert all(
+        set(row) == {
+            "hypothesis_id",
+            "dimension",
+            "rating",
+            "rationale",
+            "reviewer",
+            "evidence_refs",
+        }
+        for row in payload["dimensionReviews"]
+    )
+
+
+def test_novelty_contrast_key_absent_without_contrast(monkeypatch):
+    writes = []
+
+    def fake_put(team_id, **kwargs):
+        writes.append((team_id, kwargs))
+        return {
+            "recordId": kwargs["artifact_identity"],
+            "workflowRunId": kwargs["workflow_run_id"],
+            "sourceCollectionRunId": kwargs["source_collection_run_id"],
+            "contentHash": writer.canonical_sha256(kwargs["payload"]),
+        }
+
+    monkeypatch.setattr(writer, "put_workflow_artifact", fake_put)
+    monkeypatch.setattr(writer, "read_domain_artifact", lambda ref: object())
+    result = writer.materialize_dimension_reviews_authority(
+        **_BASE,
+        review=_review_payload(),
+    )
+
+    assert result["status"] == "written"
+    assert "noveltyContrastByCandidate" not in writes[0][1]["payload"]
+
+
 def test_formal_rows_bind_each_candidate_to_reflection_receipt(monkeypatch):
     writes = []
 

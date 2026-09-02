@@ -473,6 +473,33 @@ def _hypotheses(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
     return result
 
 
+def _merge_novelty_contrasts(
+    hypotheses: list[dict[str, Any]],
+    dimension_payload: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Attach per-hypothesis novelty contrast conclusions to the package.
+
+    The canonical ``dimension_reviews`` authority may carry a
+    ``noveltyContrastByCandidate`` map (candidateId -> structured novelty
+    conclusion) produced by the reflection review.  Entries are merged onto
+    the matching ``hypotheses`` items as ``novelty_contrast``; hypotheses
+    without a conclusion stay untouched.
+    """
+
+    contrasts = dimension_payload.get("noveltyContrastByCandidate")
+    if not isinstance(contrasts, Mapping) or not contrasts:
+        return hypotheses
+    merged: list[dict[str, Any]] = []
+    for item in hypotheses:
+        hypothesis_id = _text(item.get("hypothesis_id"))
+        contrast = contrasts.get(hypothesis_id)
+        if hypothesis_id and isinstance(contrast, Mapping) and contrast:
+            merged.append({**item, "novelty_contrast": deepcopy(dict(contrast))})
+        else:
+            merged.append(item)
+    return merged
+
+
 def _same_run_hypothesis_feedback_iterations(
     artifacts: Sequence[Mapping[str, Any]],
     *,
@@ -765,7 +792,10 @@ def build_challenge_result_package_v2(
     )
     authority_sections = [dimension_payload, hypothesis_set, research_payload]
     evidence = _evidence(evidence_cards, candidates)
-    hypotheses = _hypotheses(hypothesis_set)
+    hypotheses = _merge_novelty_contrasts(
+        _hypotheses(hypothesis_set),
+        dimension_payload,
+    )
     reviews = _list_of_mappings(
         dimension_payload.get("dimensionReviews")
         or dimension_payload.get("dimension_reviews")

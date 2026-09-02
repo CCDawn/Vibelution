@@ -1269,13 +1269,16 @@ Rubric（分数 0.0-1.0，两位小数，按分档描述对号入座）：
 - claim 沿用候选自己的 claim 原文；rationale 用中文说明打分依据；differenceFromAlternatives 说明相对其他候选的差异。
 - lineageRefs 沿用候选携带的来源引用，没有就给空数组，不得编造。
 - dimensionReviews 是与 5+2 完全独立的结果包审计七维，每个维度恰好一行，维度只能为 {list(REQUIRED_REVIEW_DIMENSIONS)}。不得把 5+2 评分字段映射、改名或复制成审计七维。
-- 每行 {{"hypothesis_id","dimension","rating","rationale","reviewer","evidence_refs"}}；rating 只能取 {list(REVIEW_DIMENSION_RATINGS)}；rationale 必须针对该审计维度给出非空正文；evidence_refs 只能从输入 refsWhitelist 中选择，白名单为空则给空数组。
+- 每行 {{"hypothesis_id","dimension","rating","rationale","reviewer","evidence_refs"}}；rating 只能取 {list(REVIEW_DIMENSION_RATINGS)}；rationale 必须针对该审计维度给出非空正文；evidence_refs 只能从输入 refsWhitelist 中选择，白名单为空则给空数组。文献对照论文（literatureContrast.papers）没有 canonical ref，禁止写入 evidence_refs。
+- novelty 维度必须有文献对照支撑：输入 literatureContrast.papers 是评审前检索到的开放文献（title/year/venue/abstract）。novelty rationale 必须逐条对照检索文献：哪些论文已覆盖候选的哪些部分（引用具体 title），真正的增量（delta）是什么；若检索结果中未发现显著重叠，必须明确写「检索结果中未发现显著重叠工作」；禁止无文献证据的空泛「novelty 不足/充足」。语气从严：只有当增量足以构成新贡献时 novelty 才算充足。
+- 若 literatureContrast.degraded=true 或缺失，必须写明「未能获取文献对照，基于评审自身知识判断」，并说明结论存在「基于可检索文献（open-access 盲区）」的局限；此时 noveltyContrast.basis 必须为 "degraded"。
+- 输出可选顶层 noveltyContrast 对象 {{"overlapPapers": [str], "deltaStatement": str, "basis": "retrieved" | "degraded"}}：overlapPapers 列出确实覆盖候选内容的具体论文 title（无重叠则为空数组），deltaStatement 一句话说明相对已检索文献的真正增量，basis 按实际检索情况取值。确实无法给出时可省略该对象，省略不影响其余输出的有效性。
 - reviewedBy 固定为 "llm"，status 固定为 "reviewed"。
 - 若输入 requireCoreHypothesisCoherence=true，必须在同一次 Reflection 输出 coreHypothesisCoherence，不得新增模型调用。它必须恰好按顺序覆盖 {list(CORE_HYPOTHESIS_COHERENCE_CHECK_IDS)}；每项包含 checkId、passed、非空 rationale、claimRefs、evidenceRefs。evidenceRefs 只能来自 refsWhitelist；五项分别审查因果链、prediction 是否由 mechanism 推导、falsifier 是否命中机制、population/boundary 是否冲突、候选边界是否与替代方案可区分。
 - 严格输出单个 JSON 对象。
 
 输出 JSON 结构：
-{{"claim": str, "rationale": str, "differenceFromAlternatives": str, "lineageRefs": [str], "scores": {{{", ".join(f'"{d}": float' for d in HYPOTHESIS_SCORE_DIMENSIONS)}}}, "reviewedBy": "llm", "status": "reviewed", "dimensionReviews": [dict], "coreHypothesisCoherence": {{"candidateId": str, "reviewer": str, "checks": [{{"checkId": str, "passed": bool, "rationale": str, "claimRefs": [str], "evidenceRefs": [str]}}]}}}}
+{{"claim": str, "rationale": str, "differenceFromAlternatives": str, "lineageRefs": [str], "scores": {{{", ".join(f'"{d}": float' for d in HYPOTHESIS_SCORE_DIMENSIONS)}}}, "reviewedBy": "llm", "status": "reviewed", "dimensionReviews": [dict], "noveltyContrast": {{"overlapPapers": [str], "deltaStatement": str, "basis": "retrieved" | "degraded"}}, "coreHypothesisCoherence": {{"candidateId": str, "reviewer": str, "checks": [{{"checkId": str, "passed": bool, "rationale": str, "claimRefs": [str], "evidenceRefs": [str]}}]}}}}
 """
 
 _PAIRWISE_SYSTEM_PROMPT = """你是科研假说评审员（两两比较步骤）。对给出的左右两个候选做一次比较。
@@ -1407,6 +1410,64 @@ def _context_digest_refs(context: Mapping[str, Any]) -> list[str]:
     return refs
 
 
+def _literature_contrast_payload(context: Mapping[str, Any]) -> dict[str, Any]:
+    """Project the executor-injected literature contrast onto the payload shape.
+
+    Absent or malformed input degrades to an empty, ``degraded`` contrast so
+    the reflection payload contract stays stable and the reviewer always knows
+    whether retrieved literature is available.
+    """
+
+    raw = context.get("literatureContrast")
+    if isinstance(raw, Mapping) and raw:
+        papers = [
+            dict(item)
+            for item in list(raw.get("papers") or [])
+            if isinstance(item, Mapping)
+        ]
+        meta = raw.get("retrievalMeta")
+        return {
+            "papers": papers,
+            "degraded": bool(raw.get("degraded")) or not papers,
+            "retrievalMeta": dict(meta) if isinstance(meta, Mapping) else {},
+        }
+    return {"papers": [], "degraded": True, "retrievalMeta": {}}
+
+
+def _normalized_novelty_contrast(
+    raw: Any,
+    *,
+    literature: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """Leniently normalize the optional ``noveltyContrast`` reflection output.
+
+    Malformed or missing output returns ``None`` and never fails the review.
+    ``basis`` is forced to match retrieval reality: a claimed ``retrieved``
+    basis without papers cannot exist.
+    """
+
+    if not isinstance(raw, Mapping):
+        return None
+    overlap: list[str] = []
+    for item in list(raw.get("overlapPapers") or []):
+        text = str(item or "").strip()[:260]
+        if text:
+            overlap.append(text)
+        if len(overlap) >= 10:
+            break
+    delta = str(raw.get("deltaStatement") or "").strip()[:2000]
+    basis = str(raw.get("basis") or "").strip().lower()
+    if basis not in {"retrieved", "degraded"}:
+        basis = "retrieved"
+    if not list(literature.get("papers") or []):
+        basis = "degraded"
+    return {
+        "overlapPapers": overlap,
+        "deltaStatement": delta,
+        "basis": basis,
+    }
+
+
 def build_hypothesis_review_runners(
     llm: Mapping[str, Any] | None = None,
     *,
@@ -1482,6 +1543,7 @@ def build_hypothesis_review_runners(
                 "scoreDimensions": list(HYPOTHESIS_SCORE_DIMENSIONS),
                 "reviewDimensions": list(REQUIRED_REVIEW_DIMENSIONS),
                 "allowedRatings": list(REVIEW_DIMENSION_RATINGS),
+                "literatureContrast": _literature_contrast_payload(context),
             },
             session_id=_context_session(context),
             receipt_context=_receipt_context(
@@ -1498,6 +1560,14 @@ def build_hypothesis_review_runners(
             result = dict(produced.payload)
         else:
             result = dict(produced)
+        # Optional structured novelty conclusion: lenient normalization, and a
+        # malformed or missing object never fails the review.
+        novelty = _normalized_novelty_contrast(
+            result.pop("noveltyContrast", None),
+            literature=_literature_contrast_payload(context),
+        )
+        if novelty is not None:
+            result["noveltyContrast"] = novelty
         result["reviewedBy"] = f"llm:{resolved['modelId']}"
         result["dimensionReviews"] = _validated_dimension_review_rows(
             result.get("dimensionReviews"),
