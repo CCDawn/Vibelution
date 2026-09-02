@@ -1295,12 +1295,12 @@ def test_legacy_running_formal_run_does_not_hide_unstarted_hypothesis_generation
 
 
 @pytest.mark.parametrize(
-    ("round_index", "expected_command"),
-    [(3, "open_next_review"), (5, "human_adjudication")],
+    ("round_index", "expected_commands"),
+    [(3, {"open_next_review", "human_adjudication"}), (5, {"human_adjudication"})],
 )
 def test_unaccepted_closed_round_uses_budget_before_human_adjudication(
     round_index: int,
-    expected_command: str,
+    expected_commands: set[str],
 ) -> None:
     state = HypothesisFirstStateV2.model_validate(
         project_state_from_records(
@@ -1361,12 +1361,12 @@ def test_unaccepted_closed_round_uses_budget_before_human_adjudication(
         if action.kind == "command"
     }
     assert state.currentPhase == "convergence"
-    assert expected_command in commands
-    assert ({"open_next_review", "human_adjudication"} - {expected_command}).isdisjoint(
+    assert expected_commands <= set(commands)
+    assert ({"open_next_review", "human_adjudication"} - expected_commands).isdisjoint(
         commands
     )
-    if expected_command == "open_next_review":
-        action = commands[expected_command]
+    if "open_next_review" in expected_commands:
+        action = commands["open_next_review"]
         assert action.payload.previousMeetingRoundId == f"review-{round_index}"
         assert action.payload.roundBudget == 5
         assert state.convergence.lifecycle == "waiting_human"
@@ -1374,6 +1374,87 @@ def test_unaccepted_closed_round_uses_budget_before_human_adjudication(
     else:
         assert state.convergence.lifecycle == "completed"
         assert state.convergence.outcome == "exhausted"
+
+
+def test_early_human_adjudication_offer_matches_exhausted_path_offer() -> None:
+    """The in-budget adjudication offer reuses the exhausted path's contract.
+
+    Early adjudication must not grow a second action family: the same command,
+    action id, payload, schema ref and idempotency key as the budget-exhausted
+    offer, so operators can adjudicate a closed round before the hard limit
+    without the runtime learning a new shape.
+    """
+
+    def _adjudication_offer(round_index: int) -> Any:
+        state = HypothesisFirstStateV2.model_validate(
+            project_state_from_records(
+                team_id="team-1",
+                question_id="SCI-001",
+                reset_boundary=None,
+                chain_records=[
+                    {
+                        "recordKind": "hypothesis_candidate",
+                        "candidateId": "candidate-1",
+                        "questionId": "SCI-001",
+                    },
+                    {
+                        "recordKind": "review_round_link",
+                        "linkId": f"link-{round_index}",
+                        "selectionId": "selection-1",
+                        "candidateId": "candidate-1",
+                        "candidateOrder": 0,
+                        "roundIndex": round_index,
+                        "roundBudget": 3,
+                        "meetingRoundId": f"review-{round_index}",
+                        "questionId": "SCI-001",
+                    },
+                ],
+                selection_records=[
+                    {
+                        "selectionId": "selection-1",
+                        "questionId": "SCI-001",
+                        "selectedCandidateIds": ["candidate-1"],
+                    }
+                ],
+                meeting_records=[
+                    {
+                        "meetingRoundId": f"review-{round_index}",
+                        "meetingType": "hypothesis_review",
+                        "question": "SCI-001",
+                        "status": "closed",
+                    }
+                ],
+                digest_records=[],
+                decision_records=[],
+                hypothesis_round_records=[
+                    {
+                        "roundId": f"round-{round_index}",
+                        "question": "SCI-001",
+                        "roundIndex": round_index,
+                        "status": "closed",
+                        "metaReview": {"accepted": False},
+                        "createdAt": "2026-08-25T00:00:00Z",
+                    }
+                ],
+            )
+        )
+        return next(
+            action
+            for action in state.allowedActions
+            if action.kind == "command" and action.command == "human_adjudication"
+        )
+
+    early = _adjudication_offer(3)
+    exhausted = _adjudication_offer(5)
+    assert early.actionId == "human-adjudication:round-3"
+    assert early.label == exhausted.label
+    assert early.targetPhase == exhausted.targetPhase
+    assert early.targetNodeId == exhausted.targetNodeId
+    assert early.payload.hypothesisRoundId == "round-3"
+    assert early.inputSchemaRef == exhausted.inputSchemaRef
+    assert exhausted.inputSchemaRef == "hypothesis-first/human-adjudication/v1"
+    assert early.idempotencyKey.startswith("hf2:human-adjudication:round-3")
+    assert exhausted.idempotencyKey.startswith("hf2:human-adjudication:round-5")
 
 
 def test_rejected_human_adjudication_is_terminal_and_not_reoffered() -> None:
@@ -1908,7 +1989,9 @@ def test_unadjudicated_new_requests_budget_exhausted_offers_human_adjudication()
 
 def test_unadjudicated_new_requests_within_budget_offers_open_next_review() -> None:
     """Same unconverged shape but inside the round budget -> the projection
-    offers the next review round, not the adjudication exit."""
+    offers the next review round as the budget-bounded follow-up, with the
+    early adjudication exit available alongside it (same offer contract as
+    the exhausted path)."""
     state = HypothesisFirstStateV2.model_validate(
         project_state_from_records(
             team_id="team-1",
@@ -1949,7 +2032,8 @@ def test_unadjudicated_new_requests_within_budget_offers_open_next_review() -> N
     assert state.convergence.accepted is False
     assert state.convergence.lifecycle == "waiting_human"
     assert "open_next_review" in commands
-    assert "human_adjudication" not in commands
+    assert "human_adjudication" in commands
+    assert commands["human_adjudication"].payload.hypothesisRoundId == "round-3"
 
 
 def test_program_output_waits_for_exact_h1_h4_review() -> None:

@@ -7,9 +7,10 @@ durable records.  The audit suspected a double-read window where a round could
 be opened beyond ``roundBudget`` or a budget exhaustion could be misjudged.
 These tests lock down that the window stays closed:
 
-- the projection only offers ``open_next_review`` while ``round_index`` is
-  below the single hard limit and switches to ``human_adjudication`` at the
-  boundary;
+- the projection offers ``open_next_review`` while ``round_index`` is below
+  the single hard limit — alongside an early ``human_adjudication`` offer that
+  reuses the exhausted path's exact contract — and drops the budget-bounded
+  open at the boundary, leaving only ``human_adjudication``;
 - execution re-authorizes against a freshly re-projected snapshot inside the
   per-question scope lock, so a stale ``expectedStateVersion`` is rejected by
   CAS before any mutation runs;
@@ -127,8 +128,9 @@ def _budget_projection_records(
 
 
 def test_projection_offers_open_next_review_within_budget() -> None:
-    """A closed unaccepted round below budget must offer exactly the follow-up
-    review-open command with server-published budget payload."""
+    """A closed unaccepted round below budget must offer the follow-up
+    review-open command with server-published budget payload, plus the early
+    adjudication offer (same contract as the exhausted path)."""
     state = HypothesisFirstStateV2.model_validate(
         project_state_from_records(
             team_id=TEAM_ID,
@@ -148,7 +150,13 @@ def test_projection_offers_open_next_review_within_budget() -> None:
     assert commands["open_next_review"].actionId == "open-next-review:round-1"
     assert commands["open_next_review"].payload.previousMeetingRoundId == "review-1"
     assert commands["open_next_review"].payload.roundBudget == 5
-    assert "human_adjudication" not in commands
+    # Early adjudication stays available inside the budget: same action id
+    # scheme, payload shape and schema ref as the exhausted-path offer.
+    assert commands["human_adjudication"].actionId == "human-adjudication:round-1"
+    assert commands["human_adjudication"].payload.hypothesisRoundId == "round-1"
+    assert commands["human_adjudication"].inputSchemaRef == (
+        "hypothesis-first/human-adjudication/v1"
+    )
     assert state.convergence.lifecycle == "waiting_human"
     assert state.convergence.outcome == "none"
 
@@ -171,7 +179,7 @@ def test_legacy_round_three_continues_under_single_hard_limit() -> None:
     assert state.convergence.roundIndex == 3
     assert state.convergence.roundBudget == 5
     assert commands["open_next_review"].payload.roundBudget == 5
-    assert "human_adjudication" not in commands
+    assert commands["human_adjudication"].actionId == "human-adjudication:round-3"
     assert state.convergence.lifecycle == "waiting_human"
 
 

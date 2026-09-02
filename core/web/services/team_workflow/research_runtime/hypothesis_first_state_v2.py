@@ -3818,7 +3818,14 @@ def project_state_from_records(
                     },
                 )
             )
-        elif round_id:
+        # Early adjudication stays offerable inside the budget: an operator may
+        # accept/fork/reset the closed round without burning the remaining
+        # review rounds. The offer reuses the exhausted path's single
+        # construction — same action id, payload, schema and idempotency key,
+        # no second action family — and is appended after open_next_review so
+        # first-enabled-command consumers keep preferring the budget-bounded
+        # follow-up round.
+        if round_id:
             allowed_actions.append(
                 _command_action(
                     "human_adjudication",
