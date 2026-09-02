@@ -2700,15 +2700,198 @@ def auto_create_formal_run_after_convergence(
         }
 
 
+# Transient readiness verdict the auto-advance loop itself resolves: a formal
+# run node lands blocked with this problem code when the hypothesis review
+# meeting had not closed yet at start time.  The in-place auto-advance closes
+# the meeting; this constant gates which blocked runs the auto-retry may
+# touch — every other blocked code is a real readiness gap or a human problem
+# and stays manual (command_offers/retry_node.py reads the same verdict).
+AUTO_ADVANCE_NOT_READY_CODE = "auto_advance_not_ready"
+
+
+def _latest_auto_advance_blocked_attempt(
+    store: Any,
+    run_id: str,
+) -> tuple[str, dict[str, Any]] | None:
+    """Newest ``(nodeId, problem)`` blocked on ``auto_advance_not_ready``.
+
+    Reads node-attempt problem JSON straight from the workflow ledger — the
+    same truth the graph dispatch worker wrote when the run landed blocked.
+    Only a node whose *latest* attempt (same latest-per-node resolution the
+    retry offer builder uses) is blocked with exactly this transient code
+    qualifies: a newer attempt that re-blocked on a different problem means
+    the run moved on and must not be auto-retried.  ``None`` means no node
+    qualifies, so the caller must not touch the run.
+    """
+    latest_by_node: dict[str, tuple[int, int, Any]] = {}
+    for attempt in store.list_attempts(run_id):
+        node_id = str(getattr(attempt, "node_id", "") or "").strip()
+        if not node_id:
+            continue
+        key = (
+            int(getattr(attempt, "attempt", 0) or 0),
+            int(getattr(attempt, "updated_at_ms", 0) or 0),
+        )
+        current = latest_by_node.get(node_id)
+        # Per-node latest resolves by attempt number first, exactly like the
+        # retry offer builder's latest-per-node resolution.
+        if current is None or key > (current[0], current[1]):
+            latest_by_node[node_id] = (key[0], key[1], attempt)
+    best_key: tuple[int, int] | None = None
+    best: tuple[str, dict[str, Any]] | None = None
+    for node_id, (_attempt_no, updated_at_ms, attempt) in latest_by_node.items():
+        if str(getattr(attempt, "status", "") or "").strip() != "blocked":
+            continue
+        try:
+            problem = json.loads(
+                str(getattr(attempt, "problem_json", "") or "") or "{}"
+            )
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(problem, Mapping):
+            continue
+        if str(problem.get("code") or "").strip() != AUTO_ADVANCE_NOT_READY_CODE:
+            continue
+        # Across nodes the wall-clock recency of the block decides: the most
+        # recently blocked node is the deepest chain position to advance.
+        key = (updated_at_ms, _attempt_no)
+        if best_key is None or key > best_key:
+            best_key = key
+            best = (node_id, dict(problem))
+    return best
+
+
+def auto_retry_blocked_formal_nodes(
+    team_id: str,
+    *,
+    question_id: str,
+) -> dict[str, Any]:
+    """Auto-retry formal nodes blocked on the transient auto-advance gate.
+
+    Budget-exhaustion auto-advance, step three.  A formal run that auto-starts
+    one instant before the hypothesis review meeting closes lands blocked with
+    ``auto_advance_not_ready`` — a condition the auto-advance loop itself
+    resolves moments later, so the run must not wait for a human retry click.
+    This helper enumerates the question's blocked formal runs (same
+    ``list_runs`` read as ``_question_non_archived_formal_run_exists``), keeps
+    only runs whose latest blocked ledger attempt carries exactly this
+    transient code, and submits the retry through the identical offer-gated
+    channel as the manual ``retry_formal_node`` action
+    (``_submit_formal_v2_command``): the offer projection is re-read at submit
+    time and its own ``offer:{runId}:{nodeId}:retry_node:...`` idempotency key
+    is reused, so an offer that readiness still blocks (or a stale run
+    version) ends as a structured wait and the next maintenance tick retries —
+    readiness is never bypassed.  Best-effort: nothing raises; every outcome
+    is counted and recorded as a scene event.
+    """
+    normalized_question_id = str(question_id or "").strip().upper()
+    summary: dict[str, Any] = {
+        "blockedRuns": 0,
+        "retried": 0,
+        "skipped": 0,
+        "ineligible": 0,
+        "failed": 0,
+    }
+    try:
+        from .formal_read_runtime import get_query_service
+
+        payload = get_query_service().list_runs(
+            team_id=team_id, workflow_id=CHALLENGE_CUP_WORKFLOW_ID
+        )
+    except Exception:  # noqa: BLE001 - formal runtime absent (command line)
+        return summary
+    from .runtime_factory import production_workflow_runtime
+
+    runtime = production_workflow_runtime()
+    if runtime is None:
+        return summary
+    blocked_runs = [
+        run
+        for run in list((payload or {}).get("runs") or [])
+        if isinstance(run, Mapping)
+        and str(run.get("questionId") or "").strip().upper()
+        == normalized_question_id
+        and str(run.get("status") or "").strip().lower() == "blocked"
+    ]
+    for run in blocked_runs:
+        summary["blockedRuns"] += 1
+        run_id = str(run.get("runId") or "").strip()
+        if not run_id:
+            continue
+        try:
+            target = _latest_auto_advance_blocked_attempt(runtime.store, run_id)
+            if target is None:
+                # Blocked on a real readiness gap or a human problem: the
+                # auto-retry never touches this run.
+                summary["ineligible"] += 1
+                continue
+            node_id, _problem = target
+            _submit_formal_v2_command(
+                team_id,
+                run_id=run_id,
+                node_id=node_id,
+                command="retry_node",
+                # Retry offers carry their own idempotency key and
+                # _submit_formal_v2_command always submits with it; this
+                # deterministic value only satisfies the signature.
+                idempotency_key=f"hf2:auto-retry:{run_id}:{node_id}",
+            )
+        except HypothesisFirstChainError as exc:
+            # The offer gate kept the retry out: readiness still blocks the
+            # offer or the run version moved on.  Wait for the next tick.
+            summary["skipped"] += 1
+            _record_scene_event(
+                "hypothesis_first.auto_retry_formal_node",
+                outcome="waited_for_offer",
+                fields={
+                    "teamId": team_id,
+                    "questionId": normalized_question_id,
+                    "runId": run_id,
+                    "reason": str(exc)[:200],
+                },
+            )
+        except Exception as exc:  # noqa: BLE001 - one broken run is isolated
+            summary["failed"] += 1
+            _record_scene_event(
+                "hypothesis_first.auto_retry_formal_node",
+                outcome="failed",
+                level="warning",
+                fields={
+                    "teamId": team_id,
+                    "questionId": normalized_question_id,
+                    "runId": run_id,
+                    "reason": type(exc).__name__,
+                    "error": str(exc)[:400],
+                },
+            )
+        else:
+            summary["retried"] += 1
+            _record_scene_event(
+                "hypothesis_first.auto_retry_formal_node",
+                outcome="submitted",
+                fields={
+                    "teamId": team_id,
+                    "questionId": normalized_question_id,
+                    "runId": run_id,
+                    "nodeId": node_id,
+                },
+            )
+    return summary
+
+
 def sweep_auto_advance_closure() -> dict[str, Any]:
     """Maintenance sweep: auto-advance every exhausted hypothesis chain.
 
     Restart-time recovery for chains stuck at the adjudication gate (the
     closing tick may be long gone by the time this runs).  Enumerates the
     team ids that own a hypothesis-first chain ledger read-only, then walks
-    each question through adjudicate -> create.  Nothing here raises: one
-    broken team or question is isolated and counted; questions whose latest
-    round is not an unadjudicated exhausted round cost one cheap guard read.
+    each question through adjudicate -> create -> retry: exhausted rounds get
+    their accepted adjudication, converged chains get the formal run created
+    and started, and formal nodes blocked on the transient
+    ``auto_advance_not_ready`` gate get their offer-gated retry resubmitted.
+    Nothing here raises: one broken team or question is isolated and counted;
+    questions whose latest round is not an unadjudicated exhausted round cost
+    one cheap guard read.
     """
     summary: dict[str, Any] = {
         "teams": 0,
@@ -2716,6 +2899,7 @@ def sweep_auto_advance_closure() -> dict[str, Any]:
         "adjudicated": 0,
         "rejected": 0,
         "formalRuns": 0,
+        "retried": 0,
         "failed": 0,
         "skipped": 0,
     }
@@ -2759,6 +2943,14 @@ def sweep_auto_advance_closure() -> dict[str, Any]:
                         summary["formalRuns"] += 1
                     elif str(formal_run.get("status") or "") == "failed":
                         summary["failed"] += 1
+                # Step three, every question every pass: resubmit the
+                # offer-gated retry for formal nodes blocked on the transient
+                # auto_advance_not_ready verdict (read-only unless an eligible
+                # blocked run exists).
+                retry_summary = auto_retry_blocked_formal_nodes(
+                    team_id, question_id=question_id
+                )
+                summary["retried"] += int(retry_summary.get("retried") or 0)
             except Exception:  # noqa: BLE001 - one broken question is isolated
                 summary["failed"] += 1
     _record_scene_event(
@@ -2770,6 +2962,7 @@ def sweep_auto_advance_closure() -> dict[str, Any]:
             "adjudicated": int(summary["adjudicated"]),
             "rejected": int(summary["rejected"]),
             "formalRuns": int(summary["formalRuns"]),
+            "retried": int(summary["retried"]),
             "failed": int(summary["failed"]),
             "skipped": int(summary["skipped"]),
         },
