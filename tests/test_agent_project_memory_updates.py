@@ -75,6 +75,100 @@ def test_agent_patch_memory_policy_updates_private_policy_and_logs(tmp_path, mon
     assert "Knowledge bodies are tool-readable only" in context_block
 
 
+def test_agent_runtime_context_without_knowledge_policy_renders_guidance_not_placeholder_ids(tmp_path, monkeypatch):
+    from core.web.services import team_knowledge_service as team_knowledge_service_mod
+
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(team_knowledge_service_mod, "PROJECT_ROOT", tmp_path)
+    agent = agent_directory_service.create_agent_instance(display_name="无知识库策略 Agent")
+
+    context_block = agent_directory_service.build_agent_runtime_context_block(agent["agentId"])
+
+    assert "TeamKnowledgeAccess:" in context_block
+    # 历史 bug：空策略会渲染占位符字面量，agent 照抄进 knowledge 工具后按精确 ID 匹配必然失败。
+    assert "team-membership" not in context_block
+    assert "team-review-roles" not in context_block
+    propose_line = next(line for line in context_block.splitlines() if line.startswith("- ProposeKnowledgeBaseIds:"))
+    assert "未配置提案知识库" in propose_line
+    assert "不要猜测" in propose_line
+    read_line = next(line for line in context_block.splitlines() if line.startswith("- ReadKnowledgeBaseIds:"))
+    assert "未配置可读知识库" in read_line
+    review_line = next(line for line in context_block.splitlines() if line.startswith("- ReviewKnowledgeBaseIds:"))
+    assert "未配置审核知识库" in review_line
+    rate_line = next(line for line in context_block.splitlines() if line.startswith("- RateKnowledgeBaseIds:"))
+    assert "未配置评分知识库" in rate_line
+
+
+def test_agent_runtime_context_resolves_team_knowledge_base_ids_when_policy_empty(tmp_path, monkeypatch):
+    from core.web.services import team_knowledge_service as team_knowledge_service_mod
+
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(team_knowledge_service_mod, "PROJECT_ROOT", tmp_path)
+    agent = agent_directory_service.create_agent_instance(display_name="团队知识 Agent")
+    team = team_service.create_team(
+        name="知识扩充团队",
+        members=[{"agentId": agent["agentId"], "role": "member", "agentName": "团队知识 Agent"}],
+    )
+    knowledge_base = team_knowledge_service_mod.create_knowledge_base(
+        team["teamId"],
+        name="Knowledge Expansion Library",
+        actor_agent_id=agent["agentId"],
+    )
+    scoped_id = str(knowledge_base.get("scopedKnowledgeBaseId") or "").strip()
+    assert scoped_id.startswith("team:")
+
+    context_block = agent_directory_service.build_agent_runtime_context_block(agent["agentId"])
+
+    assert "team-membership" not in context_block
+    read_line = next(line for line in context_block.splitlines() if line.startswith("- ReadKnowledgeBaseIds:"))
+    assert scoped_id in read_line
+    propose_line = next(line for line in context_block.splitlines() if line.startswith("- ProposeKnowledgeBaseIds:"))
+    assert scoped_id in propose_line
+    assert "未配置提案知识库" not in propose_line
+
+
+def test_agent_runtime_context_keeps_explicit_knowledge_policy_ids_unchanged(tmp_path, monkeypatch):
+    from core.web.services import team_knowledge_service as team_knowledge_service_mod
+
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(team_knowledge_service_mod, "PROJECT_ROOT", tmp_path)
+    agent = agent_directory_service.create_agent_instance(display_name="显式策略 Agent")
+    team = team_service.create_team(
+        name="知识扩充团队",
+        members=[{"agentId": agent["agentId"], "role": "member", "agentName": "显式策略 Agent"}],
+    )
+    knowledge_base = team_knowledge_service_mod.create_knowledge_base(
+        team["teamId"],
+        name="Knowledge Expansion Library",
+        actor_agent_id=agent["agentId"],
+    )
+    scoped_id = str(knowledge_base.get("scopedKnowledgeBaseId") or "").strip()
+
+    response = client.patch(
+        f"/api/agents/{agent['agentId']}",
+        json={
+            "memoryPolicy": {
+                "readSharedGroups": ["project"],
+                "writeSharedGroups": [],
+                "readKnowledgeBaseIds": ["kb-research"],
+                "proposeKnowledgeBaseIds": ["kb-research"],
+                "reviewKnowledgeBaseIds": [],
+                "rateKnowledgeBaseIds": [],
+            }
+        },
+    )
+    assert response.status_code == 200, response.text
+
+    context_block = agent_directory_service.build_agent_runtime_context_block(agent["agentId"])
+
+    # 非空策略路径保持原样：显式 ID 原样渲染，不被解析结果覆盖。
+    assert "ReadKnowledgeBaseIds: kb-research" in context_block
+    propose_line = next(line for line in context_block.splitlines() if line.startswith("- ProposeKnowledgeBaseIds:"))
+    assert "kb-research" in propose_line
+    assert scoped_id not in propose_line
+    assert "team-membership" not in context_block
+
+
 def test_project_memory_update_proposals_are_agent_private_and_resolvable(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     recorded_events = []

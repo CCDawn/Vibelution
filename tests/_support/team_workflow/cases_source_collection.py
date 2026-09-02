@@ -2036,6 +2036,112 @@ def test_source_ingestor_writeback_auto_ingests_high_confidence_sources(tmp_path
     assert ingestion_events[-1]["child_log_payload"]["steps"][-1]["stageId"] == "official_sync"
     assert ingestion_events[-1]["child_log_payload"]["formalKnowledgeItemIds"] == response["writeback"]["materializedKnowledgeIngestion"]["formalKnowledgeItemIds"]
 
+def test_source_ingestor_writeback_reuses_existing_knowledge_expansion_library_when_request_id_missing(tmp_path, monkeypatch):
+    """缺省 knowledgeBaseId 的重试必须复用同名既有库，而不是每次新建。"""
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    result = team_service.ensure_knowledge_expansion_team_agents(purge_stale=True)
+    team = result["team"]
+    ingestor = next(member for member in team["members"] if member["role"] == "source_ingestor")
+    ingestor_agent_id = ingestor["agentId"]
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "workflowPurpose": "knowledge_expansion",
+            "collectionMode": "web_search",
+            "topic": "predictive coding",
+            "agentRoles": ["source_finder", "source_extractor", "source_ingestor"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = run_response["run"]["runId"]
+
+    def register_approved_source(title: str, doi_slug: str) -> str:
+        source = team_workflow_orchestration_service.register_candidate_source(
+            team["teamId"],
+            {
+                "candidateType": "source_manifest",
+                "title": title,
+                "sourceUrl": f"https://doi.org/10.0000/{doi_slug}",
+                "sourceKind": "paper",
+                "summary": "High-confidence source for predictive coding.",
+                "metadata": {"sourceCollectionRunId": run_id, "doi": f"10.0000/{doi_slug}"},
+                "createdByAgent": "knowledge-expansion-source-finder",
+            },
+        )["candidate"]
+        team_workflow_orchestration_service.assess_source_candidate_quality(
+            team["teamId"],
+            source["candidateId"],
+            {
+                "assessedByAgent": "knowledge-expansion-source-extractor",
+                "decision": "approved",
+                "notes": "Source is traceable and relevant.",
+            },
+        )
+        return source["candidateId"]
+
+    def materialize_without_knowledge_base_id(candidate_id: str, task_id: str) -> dict:
+        pack_output = _steward_pack_output(candidate_ids=[candidate_id], confidence=0.92)
+        pack_output.update(
+            {
+                "targetDomain": "team_knowledge_expansion",
+                "sourceTrace": {"sourceIds": [candidate_id], "sourceCollectionRunId": run_id},
+                "riskSummary": "Traceable source with high confidence; suitable for governed Team Knowledge.",
+                "proposalPayload": {
+                    "title": "Predictive coding cortical hierarchy",
+                    "summary": "Add predictive coding hierarchy as governed Team Knowledge.",
+                },
+                "ratingSuggestion": {
+                    "importanceLevel": "high",
+                    "confidence": 0.92,
+                    "stability": "evolving",
+                    "reviewPriority": "elevated",
+                },
+            }
+        )
+        task = {
+            "taskId": task_id,
+            "stageId": "ingestion",
+            "agentRole": "source_ingestor",
+            "agentId": ingestor_agent_id,
+        }
+        writeback = {
+            "status": "completed",
+            "summary": "资料入库 Agent 已审核并入库高置信资料。",
+            "result": {
+                # 故意缺省 knowledgeBaseId：命中自动复用/建库分支。
+                "stewardPackDraft": pack_output,
+                "autoIngestDecision": {
+                    "decision": "approved",
+                    "confidence": 0.92,
+                    "reason": "Source quality approved and steward confidence is high.",
+                },
+            },
+            "recordedByAgent": ingestor_agent_id,
+        }
+        return team_workflow_orchestration_service._materialize_source_collection_stage_writeback_knowledge_ingestion(
+            team["teamId"],
+            run_id,
+            task,
+            writeback,
+        )
+
+    first = materialize_without_knowledge_base_id(
+        register_approved_source("Predictive coding cortical hierarchy", "predictive-coding"),
+        "task-kb-dedupe-1",
+    )
+    second = materialize_without_knowledge_base_id(
+        register_approved_source("Predictive coding follow-up", "predictive-coding-follow-up"),
+        "task-kb-dedupe-2",
+    )
+
+    assert first["status"] == "completed"
+    assert second["status"] == "completed"
+    assert first["knowledgeBaseId"] == second["knowledgeBaseId"]
+    assert first["scopedKnowledgeBaseId"] == second["scopedKnowledgeBaseId"]
+    bases = team_knowledge_service.list_team_knowledge_bases(team["teamId"], internal=True)["knowledgeBases"]
+    assert [str(item.get("name") or "") for item in bases] == ["Knowledge Expansion Library"]
+
 def test_source_ingestor_writeback_auto_ingests_approved_candidate_summary(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)

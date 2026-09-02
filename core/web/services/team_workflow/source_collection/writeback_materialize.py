@@ -1759,13 +1759,27 @@ def _materialize_source_collection_stage_writeback_knowledge_ingestion(
     knowledge_base = None
     try:
         if not knowledge_base_id:
-            knowledge_base = s.team_knowledge_service.create_knowledge_base(
-                team_id,
-                name="Knowledge Expansion Library",
-                actor_agent_id=steward_agent_id,
-            )
-            knowledge_base_id = s._knowledge_base_raw_id(knowledge_base.get("knowledgeBaseId"))
-            scoped_knowledge_base_id = s._knowledge_base_scoped_id_for_team(team_id, knowledge_base_id, knowledge_base)
+            # 建库前先按 owner+名称查重：重试路径此前每次都新建同名库，造成重复堆积。
+            existing_bases = [
+                item
+                for item in list(
+                    s.team_knowledge_service.list_team_knowledge_bases(team_id, internal=True).get("knowledgeBases")
+                    or []
+                )
+                if isinstance(item, dict) and str(item.get("name") or "").strip() == "Knowledge Expansion Library"
+            ]
+            if existing_bases:
+                knowledge_base = existing_bases[0]
+                knowledge_base_id = s._knowledge_base_raw_id(knowledge_base.get("knowledgeBaseId"))
+                scoped_knowledge_base_id = s._knowledge_base_scoped_id_for_team(team_id, knowledge_base_id, knowledge_base)
+            else:
+                knowledge_base = s.team_knowledge_service.create_knowledge_base(
+                    team_id,
+                    name="Knowledge Expansion Library",
+                    actor_agent_id=steward_agent_id,
+                )
+                knowledge_base_id = s._knowledge_base_raw_id(knowledge_base.get("knowledgeBaseId"))
+                scoped_knowledge_base_id = s._knowledge_base_scoped_id_for_team(team_id, knowledge_base_id, knowledge_base)
         s.team_knowledge_service.ensure_knowledge_base_review_grant(scoped_knowledge_base_id, steward_agent_id)
         pack_record = s.record_local_research_model_output(
             team_id,

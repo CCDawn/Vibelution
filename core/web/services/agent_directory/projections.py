@@ -47,6 +47,82 @@ def _format_personal_episodes_context(episodes: list[dict[str, Any]]) -> list[st
     return lines
 
 
+_TEAM_KNOWLEDGE_ACCESS_MAX_IDS = 12
+
+# 提示词消费者会把这里的 knowledge_base_id 原样传给 knowledge 工具，而服务端按
+# 精确 ID 解析；空策略绝不渲染形如 ID 的占位串（历史占位 "team-membership" 会被
+# agent 照抄进 knowledge_ingestion_tool 并触发 TeamKnowledgeNotFoundError）。
+_TEAM_KNOWLEDGE_ACCESS_EMPTY_GUIDANCE = {
+    "read": "未配置可读知识库；不要猜测或编造 knowledge_base_id，先用 knowledge overview 或 knowledge_governance_tasks_tool 查询真实知识库 ID",
+    "propose": "未配置提案知识库；不要猜测或编造 knowledge_base_id，先用 knowledge overview 或 knowledge_governance_tasks_tool 查询真实知识库 ID，再调用 knowledge_ingestion_tool",
+    "review": "未配置审核知识库；审核资格由 Team 审核角色与知识库 ACL 决定，不要猜测 knowledge_base_id",
+    "rate": "未配置评分知识库；评分资格由 Team 审核角色与知识库 ACL 决定，不要猜测 knowledge_base_id",
+}
+_TEAM_KNOWLEDGE_ACCESS_LABELS = {
+    "read": "ReadKnowledgeBaseIds",
+    "propose": "ProposeKnowledgeBaseIds",
+    "review": "ReviewKnowledgeBaseIds",
+    "rate": "RateKnowledgeBaseIds",
+}
+
+
+def _format_knowledge_base_id_list(values: list[str]) -> str:
+    shown = [str(item or "").strip() for item in values[:_TEAM_KNOWLEDGE_ACCESS_MAX_IDS] if str(item or "").strip()]
+    text = ", ".join(shown)
+    overflow = len(values) - len(shown)
+    if overflow > 0:
+        text = f"{text}, …(+{overflow})"
+    return text
+
+
+def _resolve_agent_knowledge_base_ids_by_action(agent_id: str) -> dict[str, list[str]]:
+    """Resolve real knowledge base ids the agent can read/propose/review/rate."""
+
+    resolved: dict[str, list[str]] = {"read": [], "propose": [], "review": [], "rate": []}
+    if not agent_id:
+        return resolved
+    try:
+        from core.web.services import team_knowledge_service
+
+        overview = team_knowledge_service.list_knowledge_overview(agent_id=agent_id)
+    except Exception:
+        # 投影渲染必须失败开放：查询异常时退回指引文本，不阻塞提示词构建。
+        return resolved
+    for base in list(overview.get("knowledgeBases") or []):
+        if not isinstance(base, dict):
+            continue
+        scoped_id = str(base.get("scopedKnowledgeBaseId") or base.get("knowledgeBaseId") or "").strip()
+        if not scoped_id:
+            continue
+        permissions = base.get("permissions") if isinstance(base.get("permissions"), dict) else {}
+        for action in resolved:
+            if permissions.get(f"can{action.capitalize()}"):
+                resolved[action].append(scoped_id)
+    return resolved
+
+
+def _team_knowledge_access_lines(agent_id: str, memory_policy: dict[str, Any]) -> list[str]:
+    policy_ids = {
+        action: [
+            str(item or "").strip()
+            for item in list(memory_policy.get(f"{action}KnowledgeBaseIds") or [])
+            if str(item or "").strip()
+        ]
+        for action in ("read", "propose", "review", "rate")
+    }
+    resolved: dict[str, list[str]] = {}
+    if any(not items for items in policy_ids.values()):
+        resolved = _resolve_agent_knowledge_base_ids_by_action(agent_id)
+    lines = ["TeamKnowledgeAccess:"]
+    for action in ("read", "propose", "review", "rate"):
+        values = policy_ids[action] or resolved.get(action) or []
+        if values:
+            lines.append(f"- {_TEAM_KNOWLEDGE_ACCESS_LABELS[action]}: {_format_knowledge_base_id_list(values)}")
+        else:
+            lines.append(f"- {_TEAM_KNOWLEDGE_ACCESS_LABELS[action]}: {_TEAM_KNOWLEDGE_ACCESS_EMPTY_GUIDANCE[action]}")
+    return lines
+
+
 def build_agent_runtime_context_block(
     agent_id: str,
     *,
@@ -118,11 +194,7 @@ def build_agent_runtime_context_block(
         f"MemoryRoot: {memory_policy.get('privateMemoryRoot') or ''}",
         f"ProjectMemoryUpdatesPath: {memory_policy.get('projectMemoryUpdatesPath') or ''}",
         *budget_lines,
-        "TeamKnowledgeAccess:",
-        f"- ReadKnowledgeBaseIds: {', '.join(list(memory_policy.get('readKnowledgeBaseIds') or [])) or 'team-membership'}",
-        f"- ProposeKnowledgeBaseIds: {', '.join(list(memory_policy.get('proposeKnowledgeBaseIds') or [])) or 'team-membership'}",
-        f"- ReviewKnowledgeBaseIds: {', '.join(list(memory_policy.get('reviewKnowledgeBaseIds') or [])) or 'team-review-roles'}",
-        f"- RateKnowledgeBaseIds: {', '.join(list(memory_policy.get('rateKnowledgeBaseIds') or [])) or 'team-review-roles'}",
+        *_team_knowledge_access_lines(str(agent.get("agentId") or agent_id or "").strip(), memory_policy),
         "- Knowledge bodies are tool-readable only; do not treat team knowledge as prompt-injected memory.",
     ]
     persona_lines = s._format_persona_profile_context(agent.get("personaProfile"))
