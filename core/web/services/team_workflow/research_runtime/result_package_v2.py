@@ -298,6 +298,54 @@ def _platform_for_provider(provider: str) -> str:
     return "other_official_tool"
 
 
+
+# Canonical claim-evidence records (``ClaimEvidenceStore``) persist the
+# verbatim fact anchor as ``quote`` and encode support/verification as
+# ``supportLevel``/``reviewStatus``.  Projecting those exact fields is the
+# faithful inverse of the materializer's forward mapping
+# (``agent_claim_evidence_materializer``: relation supports -> supports,
+# challenges -> contradicts, everything else -> insufficient); no fact that
+# the authority does not carry is ever synthesized here.
+_SUPPORT_LEVEL_RELATIONS = {
+    "supports": "supports",
+    "contradicts": "challenges",
+    "insufficient": "context",
+    "unverified": "context",
+}
+
+# Only an explicit human acceptance decision counts as verified; every other
+# review state stays at the fail-closed floor so pending/rejected/stale
+# evidence can never pass a citation check.
+_REVIEW_STATUS_VERIFICATIONS = {
+    "accepted": "human_verified",
+    "pending": "unverified",
+    "rejected": "unverified",
+    "stale": "unverified",
+}
+
+# Candidate ``sourceKind`` values outside the curated set (e.g. ``url``) fall
+# back to the schema's explicit non-authoritative umbrella classification.
+_SOURCE_KIND_SOURCE_TYPES = {
+    "paper": "peer_reviewed_paper",
+    "preprint": "preprint",
+    "dataset": "dataset",
+    "standard": "standard",
+    "official": "official_document",
+    "book": "book",
+    "url": "other",
+}
+
+
+def _support_level_relation(card: Mapping[str, Any]) -> str:
+    support_level = _text(card.get("supportLevel")).strip().casefold()
+    return _SUPPORT_LEVEL_RELATIONS.get(support_level, "")
+
+
+def _review_status_verification(card: Mapping[str, Any]) -> str:
+    review_status = _text(card.get("reviewStatus")).strip().casefold()
+    return _REVIEW_STATUS_VERIFICATIONS.get(review_status, "")
+
+
 def _evidence_item(card: Mapping[str, Any], candidate: Mapping[str, Any]) -> dict[str, Any]:
     locator = _mapping(card.get("citationLocator"))
     source_type = _text(
@@ -305,14 +353,9 @@ def _evidence_item(card: Mapping[str, Any], candidate: Mapping[str, Any]) -> dic
         or _pick(candidate, "source_type", "sourceType")
     )
     if not source_type:
-        source_type = {
-            "paper": "peer_reviewed_paper",
-            "preprint": "preprint",
-            "dataset": "dataset",
-            "standard": "standard",
-            "official": "official_document",
-            "book": "book",
-        }.get(_text(candidate.get("sourceKind")).lower(), "")
+        source_type = _SOURCE_KIND_SOURCE_TYPES.get(
+            _text(candidate.get("sourceKind")).lower(), "other"
+        )
     result: dict[str, Any] = {
         "evidence_id": _require_text(
             _pick(card, "evidence_id", "evidenceId", "claimEvidenceId")
@@ -333,10 +376,19 @@ def _evidence_item(card: Mapping[str, Any], candidate: Mapping[str, Any]) -> dic
             or candidate.get("updatedAt"),
             "evidence.retrieved_at",
         ),
-        "fact": _require_text(card.get("fact") or card.get("claim"), "evidence.fact"),
-        "relation": _require_text(card.get("relation"), "evidence.relation"),
+        # ``quote`` is the claim-evidence authority's verbatim fact anchor;
+        # a card without it (and without fact/claim) still fails closed.
+        "fact": _require_text(
+            card.get("fact") or card.get("claim") or card.get("quote"),
+            "evidence.fact",
+        ),
+        "relation": _require_text(
+            card.get("relation") or _support_level_relation(card),
+            "evidence.relation",
+        ),
         "verification_status": _require_text(
-            _pick(card, "verification_status", "verificationStatus"),
+            _pick(card, "verification_status", "verificationStatus")
+            or _review_status_verification(card),
             "evidence.verification_status",
         ),
     }
@@ -371,13 +423,21 @@ def _evidence(
     }
     if not cards:
         raise ResultPackageV2Error("canonical evidence_card_batch contains no evidence")
-    return [
-        _evidence_item(
-            card,
-            by_id.get(_text(card.get("candidateId") or card.get("sourceId")), {}),
+    projected: list[dict[str, Any]] = []
+    for card in cards:
+        candidate_id = _text(card.get("candidateId") or card.get("recordId"))
+        if candidate_id and candidate_id not in by_id:
+            # Fail closed naming the orphaned candidate instead of projecting
+            # a card whose source identity cannot be resolved.
+            raise ResultPackageV2Error(
+                "canonical evidence card "
+                f"{_text(card.get('claimEvidenceId') or card.get('evidenceId') or card.get('evidence_id'))} "
+                f"references candidate {candidate_id} missing from source_candidate_batch"
+            )
+        projected.append(
+            _evidence_item(card, by_id.get(candidate_id or _text(card.get("sourceId")), {}))
         )
-        for card in cards
-    ]
+    return projected
 
 
 def _citation_checks(evidence: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:

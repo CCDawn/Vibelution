@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from typing import Any
 
 import pytest
 
@@ -141,6 +142,151 @@ def test_v2_producer_fails_closed_without_canonical_final_summary(monkeypatch) -
             workflow_run_id="run-sci-096",
             source_collection_run_id="source-sci-096",
         )
+
+
+# ---------------------------------------- canonical claim-evidence projection
+
+
+def _claim_evidence_card(**overrides: Any) -> dict[str, Any]:
+    """Shape of a canonical ``ClaimEvidenceStore`` record.
+
+    The fact anchor is persisted as ``quote``; support and verification live
+    in ``supportLevel``/``reviewStatus``.  No ``fact``/``claim``/``relation``/
+    ``verification_status`` keys exist on the stored record.
+    """
+    card = {
+        "schemaVersion": 1,
+        "claimEvidenceId": "ce-anchor",
+        "claimId": "claim-1",
+        "candidateId": "candidate-1",
+        "sourceId": "abstract-block-1",
+        "locator": {"kind": "citation", "url": "abstract-block-1"},
+        "quote": "The universe performs at most 10^120 operations on 10^90 bits.",
+        "evidenceKind": "primary_result",
+        "reasoningRole": "fact",
+        "supportLevel": "supports",
+        "reviewStatus": "pending",
+    }
+    card.update(overrides)
+    return card
+
+
+def _claim_evidence_artifacts(cards: list[dict]) -> tuple[dict, dict[str, dict]]:
+    expected, artifacts = _authority_sections()
+    artifacts["source_candidate_batch"] = {
+        "candidates": [
+            {
+                "candidateId": "candidate-1",
+                "title": "Computational Capacity of the Universe",
+                "sourceKind": "paper",
+                "sourceUrl": "https://doi.org/10.1103/PhysRevLett.88.237901",
+                "retrievedAt": "2026-09-02T17:14:45Z",
+            },
+            {
+                "candidateId": "candidate-2",
+                "title": "Dennard scaling",
+                "sourceKind": "url",
+                "sourceUrl": "https://en.wikipedia.org/wiki/Dennard_scaling",
+                "updatedAt": "2026-09-02T17:15:45Z",
+            },
+        ]
+    }
+    artifacts["evidence_card_batch"] = {
+        "teamId": "research-team",
+        "sourceCollectionRunId": "source-sci-096",
+        "evidenceCards": cards,
+        "cardCount": len(cards),
+    }
+    return expected, artifacts
+
+
+def _build_v2_with_artifacts(monkeypatch, artifacts: dict[str, dict]) -> dict:
+    expected = _authority_sections()[0]
+    monkeypatch.setattr(
+        result_package_v2,
+        "_artifact_payload",
+        lambda kind, **_kwargs: deepcopy(artifacts[kind]),
+    )
+    monkeypatch.setattr(
+        result_package_v2,
+        "_feedback_iterations",
+        lambda **_kwargs: deepcopy(expected["feedback_iterations"]),
+    )
+    monkeypatch.setattr(result_package_v2, "_model_run", lambda *_a, **_k: deepcopy(expected["run"]))
+    return result_package_v2.build_challenge_result_package_v2(
+        generic_package={"runId": "run-sci-096", "factChainHash": "f" * 64},
+        record=_record(),
+        team_id="research-team",
+        workflow_run_id="run-sci-096",
+        source_collection_run_id="source-sci-096",
+    )
+
+
+def test_v2_projects_claim_evidence_quote_as_fact(monkeypatch) -> None:
+    _, artifacts = _claim_evidence_artifacts(
+        [
+            _claim_evidence_card(claimEvidenceId="ce-supports", supportLevel="supports"),
+            _claim_evidence_card(
+                claimEvidenceId="ce-contradicts",
+                candidateId="candidate-1",
+                quote="Landauer's principle has been falsified.",
+                supportLevel="contradicts",
+                reviewStatus="accepted",
+            ),
+            _claim_evidence_card(
+                claimEvidenceId="ce-insufficient",
+                candidateId="candidate-2",
+                quote="The page mentions Dennard scaling without sources.",
+                supportLevel="insufficient",
+                reviewStatus="pending",
+            ),
+        ]
+    )
+
+    package = _build_v2_with_artifacts(monkeypatch, artifacts)
+    output = package["challengeQuestionOutput"]
+
+    assert challenge_question_runs._schema_issues(output) == []
+    evidence = {item["evidence_id"]: item for item in output["evidence"]}
+    # The verbatim quote is the fact anchor; nothing is synthesized.
+    assert evidence["ce-supports"]["fact"] == (
+        "The universe performs at most 10^120 operations on 10^90 bits."
+    )
+    assert evidence["ce-supports"]["relation"] == "supports"
+    assert evidence["ce-supports"]["verification_status"] == "unverified"
+    assert evidence["ce-supports"]["source_type"] == "peer_reviewed_paper"
+    assert evidence["ce-supports"]["retrieved_at"] == "2026-09-02T17:14:45Z"
+    assert evidence["ce-contradicts"]["relation"] == "challenges"
+    assert evidence["ce-contradicts"]["verification_status"] == "human_verified"
+    assert evidence["ce-insufficient"]["relation"] == "context"
+    assert evidence["ce-insufficient"]["source_type"] == "other"
+    assert evidence["ce-insufficient"]["retrieved_at"] == "2026-09-02T17:15:45Z"
+    # Fail-closed floor: pending review state can never pass a citation check.
+    checks = {item["evidenceId"]: item["status"] for item in package["citationChecks"]}
+    assert checks["ce-supports"] == "failed"
+    assert checks["ce-insufficient"] == "failed"
+    assert checks["ce-contradicts"] == "passed"
+
+
+def test_v2_claim_evidence_card_without_fact_anchor_fails_closed(monkeypatch) -> None:
+    _, artifacts = _claim_evidence_artifacts(
+        [_claim_evidence_card(quote=" ")]
+    )
+
+    with pytest.raises(result_package_v2.ResultPackageV2Error, match="evidence.fact"):
+        _build_v2_with_artifacts(monkeypatch, artifacts)
+
+
+def test_v2_evidence_card_with_unknown_candidate_fails_closed(monkeypatch) -> None:
+    _, artifacts = _claim_evidence_artifacts(
+        [_claim_evidence_card(candidateId="candidate-missing")]
+    )
+
+    with pytest.raises(
+        result_package_v2.ResultPackageV2Error,
+        match="candidate-missing missing from source_candidate_batch",
+    ):
+        _build_v2_with_artifacts(monkeypatch, artifacts)
 
 
 def test_shared_registry_reads_new_canonical_kinds(monkeypatch) -> None:
