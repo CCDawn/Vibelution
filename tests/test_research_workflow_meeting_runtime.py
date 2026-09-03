@@ -74,7 +74,7 @@ def test_meeting_discussion_executor_default_and_env_override(monkeypatch) -> No
     """
 
     monkeypatch.delenv("VIBELUTION_MEETING_DISCUSSION_MAX_WORKERS", raising=False)
-    assert meeting_runtime._MEETING_DISCUSSION_MAX_WORKERS_DEFAULT == 12
+    assert meeting_runtime._MEETING_DISCUSSION_MAX_WORKERS_DEFAULT == 24
     assert (
         meeting_runtime._meeting_discussion_max_workers()
         == meeting_runtime._MEETING_DISCUSSION_MAX_WORKERS_DEFAULT

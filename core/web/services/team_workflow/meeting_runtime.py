@@ -163,7 +163,7 @@ _ROLE_METADATA_FIELDS = (
     "challengeCupTeamRole",
 )
 _DISCUSSION_DRIVER = threading.local()
-_MEETING_DISCUSSION_MAX_WORKERS_DEFAULT = 12
+_MEETING_DISCUSSION_MAX_WORKERS_DEFAULT = 24
 
 
 def _meeting_discussion_max_workers() -> int:
@@ -175,7 +175,9 @@ def _meeting_discussion_max_workers() -> int:
     which used to surface as ~10-minute round dispatch delays under campaign
     concurrency.  Driver threads are IO-bound waiters on the speaker batch
     pool, so the default covers a full campaign wave without adding LLM-gate
-    pressure beyond the shared gate's own cap.
+    pressure beyond the shared gate's own cap.  24 covers a full
+    wave with two to three live rooms per question (generation + two
+    review rooms).
     """
 
     raw = str(
