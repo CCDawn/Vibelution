@@ -613,6 +613,9 @@ def test_node_agent_turn_materializes_chain_authority_before_completion_gate(
     from core.web.services.team_workflow.research_runtime.action_registry import (
         AdapterResult,
     )
+    from core.web.services.team_workflow.research_runtime.artifact_readback_registry import (
+        load_scoped_artifact_payload,
+    )
     from core.web.services.team_workflow.research_runtime.domain_ports import (
         AgentTaskHandle,
     )
@@ -624,6 +627,13 @@ def test_node_agent_turn_materializes_chain_authority_before_completion_gate(
         round_id="hround-stage-one-authority-1",
         accepted=True,
         revision_envelope=_revision_envelope(),
+    )
+    # The accepted-round human adjudication is the only real gate authority.
+    _append_human_adjudication(
+        team_id,
+        _accepted_round(team_id),
+        decision="accepted",
+        adjudication_id="hf-adjudication-authority-order",
     )
     monkeypatch.setattr(
         question_launch,
@@ -648,6 +658,26 @@ def test_node_agent_turn_materializes_chain_authority_before_completion_gate(
     required_kinds = ("hypothesis_set", *chain.STAGE_ONE_NODE_AUTHORITY_KINDS)
 
     def fake_complete(**kwargs):
+        # The live retry shape: the agent turn's own writeback appends a
+        # NEWER ungated hypothesis_set row before completion.  The hook must
+        # run AFTER that row lands (so the gate embeds onto the row the refs
+        # readback is about to read) and BEFORE the refs collection.
+        workflow_artifact_store.put_workflow_artifact(
+            kwargs["input_snapshot"]["teamId"],
+            kind="hypothesis_set",
+            workflow_run_id=kwargs["action"].run_id,
+            source_collection_run_id=(
+                kwargs["input_snapshot"].get("sourceCollectionRunId")
+                or kwargs["action"].run_id
+            ),
+            payload={
+                "hypotheses": [{"hypothesis_id": "cand-b"}],
+                "createdFromTurnId": "turn-attempt-2",
+            },
+        )
+        hook = kwargs.get("before_refs_collection")
+        assert callable(hook)
+        hook()
         refs = agent_turn_completion.collect_required_artifact_refs(
             required_kinds=kwargs["required_kinds"],
             team_id=kwargs["input_snapshot"]["teamId"],
@@ -687,6 +717,32 @@ def test_node_agent_turn_materializes_chain_authority_before_completion_gate(
     assert isinstance(result, agent_turn_completion.AgentTurnResult)
     ref_kinds = {item["kind"] for item in result.materialized_refs}
     assert ref_kinds == set(required_kinds)
+
+    rows = workflow_artifact_store.list_workflow_artifacts(
+        team_id, kind="hypothesis_set", workflow_run_id=_RUN_ID
+    )
+    # Seed row + the turn's newer ungated row + the gate appended onto THAT
+    # latest row (not onto the stale seed row the old order targeted).
+    assert len(rows) == 3
+    assert rows[1]["payload"]["createdFromTurnId"] == "turn-attempt-2"
+    assert "human_gate" not in rows[1]["payload"]
+    gate_row = rows[-1]
+    assert gate_row["recordId"].startswith(f"{rows[1]['recordId']}:human-gate")
+
+    # The refs/closeout readback resolves the gated payload: the exact
+    # hypothesis_set ref hash reads back into a payload carrying the gate.
+    hs_ref = next(
+        item for item in result.materialized_refs if item["kind"] == "hypothesis_set"
+    )
+    envelope = load_scoped_artifact_payload(
+        "hypothesis_set",
+        team_id=team_id,
+        authority_run_id=_SC_RUN_ID,
+        workflow_run_id=_RUN_ID,
+        content_hash=hs_ref["sha256"],
+    )
+    assert envelope is not None
+    assert envelope["payload"]["human_gate"]["decision"] == "approved"
 
     # The exact verify gate that blocked the live run now succeeds.
     adapter = AgentActionAdapter(ports)
@@ -763,6 +819,9 @@ def test_dev_mode_round_recovers_coherence_authority_from_round(
     required_kinds = ("hypothesis_set", *chain.STAGE_ONE_NODE_AUTHORITY_KINDS)
 
     def fake_complete(**kwargs):
+        hook = kwargs.get("before_refs_collection")
+        assert callable(hook)
+        hook()
         refs = agent_turn_completion.collect_required_artifact_refs(
             required_kinds=kwargs["required_kinds"],
             team_id=kwargs["input_snapshot"]["teamId"],
@@ -987,7 +1046,11 @@ def test_blocked_node_problem_carries_chain_authority_reason(
 
     def empty_completion(**kwargs):
         # No turn output materialized: without the chain authorities the gate
-        # must keep blocking exactly as before.
+        # must keep blocking exactly as before.  The hook still runs (same
+        # production ordering contract), it just cannot satisfy the gate.
+        hook = kwargs.get("before_refs_collection")
+        assert callable(hook)
+        hook()
         return agent_turn_completion.AgentTurnResult(
             materialized_refs=(),
             handle=kwargs["handle"],
@@ -3141,3 +3204,473 @@ def test_partial_real_receipts_embed_but_missing_stage_stays_fail_closed(
     message = str(excinfo.value)
     assert "revision" in message
     assert "generation, review, revision" not in message
+
+
+# ---------------------------------------------------------------------------
+# Gate/receipt embedding ORDER: materialization after the turn output lands.
+#
+# The live retry loop (run-882610596ddb / SCI-091): materialization ran BEFORE
+# the agent turn, the turn appended a newer ungated ``hypothesis_set`` row, and
+# the completion gate / closeout kept reading a latest row without the gate
+# (``stage_one_human_gate_missing``).  The hook now runs after the turn output
+# lands and before the refs readback; the readback additionally merges
+# ``:human-gate`` / ``:model-receipts`` sub-rows so the closeout payload always
+# carries the embedded authorities.
+# ---------------------------------------------------------------------------
+
+
+def _stage_one_turn_seed(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    adjudication_id: str | None,
+) -> str:
+    """Real-batch chain + accepted adjudication + receipt sources for the turn."""
+    from core.web.services.team_workflow.research_runtime.model_invocation_receipt_registry import (
+        register_question_model_invocation_receipts,
+    )
+
+    team_id = _seed_gate_materialization(tmp_path, monkeypatch)
+    round_record = _accepted_round(team_id)
+    if adjudication_id:
+        _append_human_adjudication(
+            team_id,
+            round_record,
+            decision="accepted",
+            adjudication_id=adjudication_id,
+        )
+    _bind_review_meeting_to_chat_room(team_id)
+    _seed_journal_receipt(stage="review")
+    monkeypatch.setattr(chain, "_read_chat_rooms_snapshot", _receipt_rooms_snapshot)
+    register_question_model_invocation_receipts(
+        team_id,
+        question_id=_QUESTION_ID,
+        workflow_run_id=_RUN_ID,
+        receipts=[
+            _registry_receipt("generation", receipt_id="receipt-registry-generation"),
+            _registry_receipt("revision", receipt_id="receipt-registry-revision"),
+        ],
+    )
+    return team_id
+
+
+def _drive_hypothesis_design_turn(
+    team_id: str,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    turn_row_turn_id: str,
+) -> tuple[Any, list[dict[str, str]]]:
+    """Drive the real ``execute_agent_turn`` path with a turn that appends a row.
+
+    The fake completion replays the production ordering: the turn writeback
+    lands a NEWER ungated ``hypothesis_set`` row, the materialization hook
+    runs, then the refs are collected — exactly the sequence that used to
+    deadlock the live closure node.
+    """
+    from core.web.services.team_workflow.research_runtime import (
+        agent_turn_completion,
+        real_domain_ports,
+    )
+    from core.web.services.team_workflow.research_runtime.domain_ports import (
+        AgentTaskHandle,
+    )
+
+    snapshot = {
+        "teamId": team_id,
+        "questionId": _QUESTION_ID,
+        "sourceCollectionRunId": _SC_RUN_ID,
+    }
+    action = _pending_action(f"action-{turn_row_turn_id}")
+    required_kinds = ("hypothesis_set", *chain.STAGE_ONE_NODE_AUTHORITY_KINDS)
+
+    def fake_complete(**kwargs):
+        workflow_artifact_store.put_workflow_artifact(
+            kwargs["input_snapshot"]["teamId"],
+            kind="hypothesis_set",
+            workflow_run_id=kwargs["action"].run_id,
+            source_collection_run_id=(
+                kwargs["input_snapshot"].get("sourceCollectionRunId")
+                or kwargs["action"].run_id
+            ),
+            payload={
+                **_portfolio_payload(),
+                "portfolioId": f"portfolio-{turn_row_turn_id}",
+                "createdFromTurnId": turn_row_turn_id,
+            },
+        )
+        hook = kwargs.get("before_refs_collection")
+        assert callable(hook)
+        hook()
+        refs = agent_turn_completion.collect_required_artifact_refs(
+            required_kinds=kwargs["required_kinds"],
+            team_id=kwargs["input_snapshot"]["teamId"],
+            workflow_run_id=kwargs["action"].run_id,
+            source_collection_run_id=(
+                kwargs["input_snapshot"].get("sourceCollectionRunId")
+                or kwargs["action"].run_id
+            ),
+        )
+        return agent_turn_completion.AgentTurnResult(
+            materialized_refs=tuple(refs),
+            handle=kwargs["handle"],
+            usage=None,
+        )
+
+    ports = real_domain_ports.RealDomainPorts(object())
+    monkeypatch.setattr(ports, "_run_input_snapshot", lambda _run_id: dict(snapshot))
+    monkeypatch.setattr(
+        ports, "required_artifact_kinds", lambda _action: required_kinds
+    )
+    monkeypatch.setattr(
+        agent_turn_completion, "complete_agent_turn_outputs", fake_complete
+    )
+    handle = AgentTaskHandle(
+        session_id="session-stage-one",
+        session_attempt=2,
+        task_id="task-stage-one",
+        turn_id="turn-stage-one",
+    )
+    result = ports.execute_agent_turn(action=action, handle=handle)
+    assert isinstance(result, agent_turn_completion.AgentTurnResult)
+    return ports, [dict(item) for item in result.materialized_refs]
+
+
+def test_agent_turn_materializes_gate_and_receipts_after_turn_row(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Full order: turn row lands → gate+receipts embed onto THAT row.
+
+    The refs and the closeout readback must resolve a payload that carries
+    both the human gate and the model receipts — the loop that killed the
+    live run is gone.
+    """
+    from core.web.services.team_workflow.research_runtime.artifact_readback_registry import (
+        load_scoped_artifact_payload,
+    )
+    from core.web.services.team_workflow.research_runtime.stage_one_closeout import (
+        evaluate_stage_one_closeout,
+    )
+    from tests.test_research_workflow_stage_one_closeout import _stage_one_record
+
+    team_id = _stage_one_turn_seed(
+        tmp_path, monkeypatch, adjudication_id="hf-adjudication-turn-order"
+    )
+    ports, refs = _drive_hypothesis_design_turn(
+        team_id, monkeypatch, turn_row_turn_id="turn-attempt-9"
+    )
+    _ = ports
+    ref_kinds = {item["kind"] for item in refs}
+    assert ref_kinds == {"hypothesis_set", *chain.STAGE_ONE_NODE_AUTHORITY_KINDS}
+
+    rows = workflow_artifact_store.list_workflow_artifacts(
+        team_id, kind="hypothesis_set", workflow_run_id=_RUN_ID
+    )
+    # Seed row + turn's newer row + gate row + receipts row (derived from the
+    # gate row, so the final authority carries gate AND receipts).
+    assert len(rows) == 4
+    turn_row = rows[1]
+    assert turn_row["payload"]["createdFromTurnId"] == "turn-attempt-9"
+    assert "human_gate" not in turn_row["payload"]
+    assert rows[2]["recordId"] == f"{turn_row['recordId']}:human-gate"
+    assert rows[3]["recordId"] == f"{rows[2]['recordId']}:model-receipts"
+    final_payload = rows[-1]["payload"]
+    assert final_payload["human_gate"]["adjudicationId"] == (
+        "hf-adjudication-turn-order"
+    )
+    assert final_payload["modelInvocationReceipts"]
+
+    # The exact refs the node returned read back into the gated + receipted
+    # payload (same single readback the closeout's payload loader uses).
+    hs_ref = next(item for item in refs if item["kind"] == "hypothesis_set")
+    envelope = load_scoped_artifact_payload(
+        "hypothesis_set",
+        team_id=team_id,
+        authority_run_id=_SC_RUN_ID,
+        workflow_run_id=_RUN_ID,
+        content_hash=hs_ref["sha256"],
+    )
+    assert envelope is not None
+    readback_payload = envelope["payload"]
+    assert readback_payload["human_gate"]["required"] is True
+    assert readback_payload["human_gate"]["decision"] == "approved"
+    assert {
+        item["receiptId"] for item in readback_payload["modelInvocationReceipts"]
+    } == {"receipt-review", "receipt-registry-generation", "receipt-registry-revision"}
+
+    # A closeout consuming this payload passes the gate and receipt demands.
+    record = _stage_one_record(_RUN_ID)
+    for payload in record["artifactPayloads"].values():
+        payload.pop("modelInvocationReceipts", None)
+    record["artifactPayloads"]["hypothesis_set:hypothesis_set-artifact"] = (
+        readback_payload
+    )
+    outcome = evaluate_stage_one_closeout(record, node_id="hypothesis_design")
+    assert outcome is not None
+    assert outcome.status == "program_review_required"
+
+
+def test_agent_turn_materialization_replay_is_idempotent(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Re-running the hook (retry) neither rewrites nor duplicates rows."""
+    from core.web.services.team_workflow.research_runtime import (
+        agent_turn_completion,
+    )
+    from core.web.services.team_workflow.research_runtime.artifact_readback_registry import (
+        load_scoped_artifact_payload,
+    )
+
+    team_id = _stage_one_turn_seed(
+        tmp_path, monkeypatch, adjudication_id="hf-adjudication-replay-order"
+    )
+    ports, refs = _drive_hypothesis_design_turn(
+        team_id, monkeypatch, turn_row_turn_id="turn-attempt-replay"
+    )
+    rows_before = workflow_artifact_store.list_workflow_artifacts(
+        team_id, kind="hypothesis_set", workflow_run_id=_RUN_ID
+    )
+    assert len(rows_before) == 4
+
+    # A retry re-runs the same hook with no new turn row: every probe sees the
+    # embedded authorities and reuses them — no new rows, no rewritten hashes.
+    snapshot = {
+        "teamId": team_id,
+        "questionId": _QUESTION_ID,
+        "sourceCollectionRunId": _SC_RUN_ID,
+    }
+    replay_action = _pending_action("action-replay")
+    report = ports._materialize_stage_one_chain_authority(
+        action=replay_action, snapshot=snapshot
+    )
+    assert report["status"] == "materialized"
+    assert report["hypothesisSetGate"]["status"] == "present"
+    assert report["hypothesisSetReceipts"]["status"] == "present"
+    rows_after = workflow_artifact_store.list_workflow_artifacts(
+        team_id, kind="hypothesis_set", workflow_run_id=_RUN_ID
+    )
+    assert rows_after == rows_before
+
+    # The replayed refs still read back to the identical gated payload.
+    refs_again = agent_turn_completion.collect_required_artifact_refs(
+        required_kinds=("hypothesis_set", *chain.STAGE_ONE_NODE_AUTHORITY_KINDS),
+        team_id=team_id,
+        workflow_run_id=_RUN_ID,
+        source_collection_run_id=_SC_RUN_ID,
+    )
+    hs_before = next(
+        item for item in refs if item["kind"] == "hypothesis_set"
+    )["sha256"]
+    hs_after = next(
+        item for item in refs_again if item["kind"] == "hypothesis_set"
+    )["sha256"]
+    assert hs_after == hs_before
+    envelope = load_scoped_artifact_payload(
+        "hypothesis_set",
+        team_id=team_id,
+        authority_run_id=_SC_RUN_ID,
+        workflow_run_id=_RUN_ID,
+        content_hash=hs_after,
+    )
+    assert envelope is not None
+    assert envelope["payload"]["human_gate"]["adjudicationId"] == (
+        "hf-adjudication-replay-order"
+    )
+
+
+def test_agent_turn_without_adjudication_keeps_closeout_blocked(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No real adjudication: the hook embeds nothing; closeout stays blocked."""
+    from core.web.services.team_workflow.research_runtime.artifact_readback_registry import (
+        load_scoped_artifact_payload,
+    )
+    from core.web.services.team_workflow.research_runtime.node_execution_support import (
+        NodeExecutionError,
+    )
+    from core.web.services.team_workflow.research_runtime.stage_one_closeout import (
+        evaluate_stage_one_closeout,
+    )
+    from tests.test_research_workflow_stage_one_closeout import (
+        _receipt,
+        _stage_one_record,
+    )
+
+    team_id = _stage_one_turn_seed(tmp_path, monkeypatch, adjudication_id=None)
+    ports, refs = _drive_hypothesis_design_turn(
+        team_id, monkeypatch, turn_row_turn_id="turn-attempt-no-gate"
+    )
+    report = ports.chain_authority_materialization_report(
+        _pending_action("action-turn-attempt-no-gate")
+    )
+    assert report is not None
+    assert report["hypothesisSetGate"]["status"] == "blocked"
+    assert report["hypothesisSetGate"]["blockerCodes"] == [
+        "stage_one_human_gate_missing"
+    ]
+
+    rows = workflow_artifact_store.list_workflow_artifacts(
+        team_id, kind="hypothesis_set", workflow_run_id=_RUN_ID
+    )
+    # Seed row + the turn's own row + the receipts row: the real receipts still
+    # embed (they exist), but NO gate row — nothing may fake the adjudication.
+    assert len(rows) == 3
+    assert rows[1]["payload"]["createdFromTurnId"] == "turn-attempt-no-gate"
+    assert all("human_gate" not in row["payload"] for row in rows)
+    assert rows[2]["recordId"] == f"{rows[1]['recordId']}:model-receipts"
+
+    hs_ref = next(item for item in refs if item["kind"] == "hypothesis_set")
+    envelope = load_scoped_artifact_payload(
+        "hypothesis_set",
+        team_id=team_id,
+        authority_run_id=_SC_RUN_ID,
+        workflow_run_id=_RUN_ID,
+        content_hash=hs_ref["sha256"],
+    )
+    assert envelope is not None
+    assert "human_gate" not in envelope["payload"]
+
+    record = _stage_one_record()
+    record["artifactPayloads"]["hypothesis_set:hypothesis_set-artifact"] = {
+        **envelope["payload"],
+        "modelInvocationReceipts": [_receipt("generation", record["runId"])],
+    }
+    with pytest.raises(NodeExecutionError) as excinfo:
+        evaluate_stage_one_closeout(record, node_id="hypothesis_design")
+    assert excinfo.value.code == "stage_one_human_gate_missing"
+
+
+def test_hypothesis_set_readback_merges_authority_subrows_by_scope(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Readback merges :human-gate/:model-receipts sub-rows — scope-guarded.
+
+    Sub-rows whose scope matches the base row merge into the read-back
+    payload (including pinned record reads); a sub-row whose workflowRunId
+    drifted from its base row never merges.
+    """
+    from core.web.services.team_workflow.research_runtime.workflow_artifact_store import (
+        load_workflow_artifact_payload,
+    )
+
+    team_id = _env(tmp_path, monkeypatch)
+    base_payload = {"portfolioId": "portfolio-readback", "candidates": []}
+    gate = {
+        "required": True,
+        "decision": "approved",
+        "rationale": "accepted",
+        "source": "chain_human_adjudication",
+    }
+    receipts = [{"receiptId": "receipt-readback", "status": "succeeded"}]
+    workflow_artifact_store.put_workflow_artifact(
+        team_id,
+        kind="hypothesis_set",
+        workflow_run_id=_RUN_ID,
+        source_collection_run_id=_SC_RUN_ID,
+        payload=base_payload,
+        artifact_identity="base-readback",
+    )
+    workflow_artifact_store.put_workflow_artifact(
+        team_id,
+        kind="hypothesis_set",
+        workflow_run_id=_RUN_ID,
+        source_collection_run_id=_SC_RUN_ID,
+        payload={**base_payload, "human_gate": gate},
+        artifact_identity="base-readback:human-gate",
+    )
+    workflow_artifact_store.put_workflow_artifact(
+        team_id,
+        kind="hypothesis_set",
+        workflow_run_id=_RUN_ID,
+        source_collection_run_id=_SC_RUN_ID,
+        payload={
+            **base_payload,
+            "human_gate": gate,
+            "modelInvocationReceipts": receipts,
+        },
+        artifact_identity="base-readback:human-gate:model-receipts",
+    )
+    # Drifted pair: the sub-row's workflowRunId differs from its base row, so
+    # the base row must never absorb this authority.
+    workflow_artifact_store.put_workflow_artifact(
+        team_id,
+        kind="hypothesis_set",
+        workflow_run_id="wf-drifted-run",
+        source_collection_run_id=_SC_RUN_ID,
+        payload=base_payload,
+        artifact_identity="base-drifted",
+    )
+    workflow_artifact_store.put_workflow_artifact(
+        team_id,
+        kind="hypothesis_set",
+        workflow_run_id="wf-other-drifted-run",
+        source_collection_run_id=_SC_RUN_ID,
+        payload={
+            **base_payload,
+            "human_gate": {**gate, "decision": "rejected"},
+        },
+        artifact_identity="base-drifted:human-gate",
+    )
+
+    rows = workflow_artifact_store.list_workflow_artifacts(
+        team_id, kind="hypothesis_set", workflow_run_id=_RUN_ID
+    )
+    assert [row["recordId"] for row in rows] == [
+        "base-readback",
+        "base-readback:human-gate",
+        "base-readback:human-gate:model-receipts",
+    ]
+
+    # Latest-row readback (workflow filtered): the latest in-scope row already
+    # carries both keys, so the merge is an idempotent no-op.
+    envelope = load_workflow_artifact_payload(
+        "hypothesis_set",
+        team_id=team_id,
+        authority_run_id=_SC_RUN_ID,
+        workflow_run_id=_RUN_ID,
+    )
+    assert envelope is not None
+    assert envelope["payload"]["human_gate"]["decision"] == "approved"
+    assert envelope["payload"]["modelInvocationReceipts"] == receipts
+
+    # Pinned base read (no workflow filter — the read_domain_artifact shape):
+    # the sub-rows merge into the ungated base payload by record identity.
+    pinned = load_workflow_artifact_payload(
+        "hypothesis_set",
+        team_id=team_id,
+        authority_run_id=_SC_RUN_ID,
+        workflow_run_id="",
+        record_id="base-readback",
+    )
+    assert pinned is not None
+    assert pinned["payload"]["human_gate"]["decision"] == "approved"
+    assert pinned["payload"]["modelInvocationReceipts"] == receipts
+    assert pinned["payload"]["portfolioId"] == "portfolio-readback"
+
+    # Scope drift guard: the drifted sub-row carries a different workflowRunId
+    # than its base row, so it never merges — fail closed, ungated.
+    drifted = load_workflow_artifact_payload(
+        "hypothesis_set",
+        team_id=team_id,
+        authority_run_id=_SC_RUN_ID,
+        workflow_run_id="",
+        record_id="base-drifted",
+    )
+    assert drifted is not None
+    assert "human_gate" not in drifted["payload"]
+    assert "modelInvocationReceipts" not in drifted["payload"]
+
+    # Writers see the raw rows: the append-only store is untouched by reads.
+    assert [
+        row["recordId"]
+        for row in workflow_artifact_store.list_workflow_artifacts(
+            team_id, kind="hypothesis_set", workflow_run_id=_RUN_ID
+        )
+    ] == [
+        "base-readback",
+        "base-readback:human-gate",
+        "base-readback:human-gate:model-receipts",
+    ]

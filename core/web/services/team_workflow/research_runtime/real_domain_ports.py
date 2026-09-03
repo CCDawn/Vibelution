@@ -1009,16 +1009,25 @@ class RealDomainPorts:
             return AgentTurnResult(materialized_refs=(), handle=handle)
 
         snapshot = self._run_input_snapshot(action.run_id)
-        if action.node_id == "hypothesis_design":
-            # Stage-one closure authorities live in the hypothesis-first chain,
-            # not in the Agent turn output.  When the question's review chain
-            # already converged (accepted closed round), bind its canonical
-            # artifacts to the live node run before the completion gate reads
-            # them; a skipped/blocked materialization keeps the existing
-            # fail-closed ``required_artifact_missing`` semantics untouched.
-            self._materialize_stage_one_chain_authority(
-                action=action, snapshot=snapshot
+        # Stage-one closure authorities live in the hypothesis-first chain, not
+        # in the Agent turn output.  They are materialized AFTER the turn's own
+        # artifacts land and BEFORE the refs readback (see the
+        # ``before_refs_collection`` hook below / the fan-out aggregation
+        # path): embedding the gate/receipts before the turn ran let the turn
+        # append a newer ungated ``hypothesis_set`` row, so the completion gate
+        # and closeout kept reading a latest row without the gate
+        # (``stage_one_human_gate_missing`` retry loop).  A skipped/blocked
+        # materialization keeps the existing fail-closed
+        # ``required_artifact_missing`` semantics untouched.
+        materialize_chain_authority = (
+            (
+                lambda: self._materialize_stage_one_chain_authority(
+                    action=action, snapshot=snapshot
+                )
             )
+            if action.node_id == "hypothesis_design"
+            else None
+        )
         bounded = _bounded_agent_node_can_complete(
             action.node_id,
             team_id=str(snapshot.get("teamId") or ""),
@@ -1048,6 +1057,7 @@ class RealDomainPorts:
                 action=action,
                 handle=handle,
                 snapshot=snapshot,
+                materialize_chain_authority=materialize_chain_authority,
             )
         return complete_agent_turn_outputs(
             action=action,
@@ -1055,6 +1065,7 @@ class RealDomainPorts:
             input_snapshot=snapshot,
             required_kinds=self.required_artifact_kinds(action),
             return_result=True,
+            before_refs_collection=materialize_chain_authority,
         )
 
     _CHAIN_AUTHORITY_REPORT_LIMIT = 32
@@ -1349,6 +1360,7 @@ class RealDomainPorts:
         action: PendingAction,
         handle: AgentTaskHandle,
         snapshot: dict[str, Any],
+        materialize_chain_authority: Any = None,
     ) -> AgentTurnResult:
         """Collect candidate fragments and deterministically fan in a set.
 
@@ -1357,6 +1369,9 @@ class RealDomainPorts:
         requeue signal while any candidate is still live — the pump thread is
         never held waiting for children.  ``[research] blocking_fanout_wait``
         restores the legacy in-thread wait-per-child semantics.
+        ``materialize_chain_authority`` (never raises) runs after the fan-in
+        aggregation row lands and before the refs readback, so the closeout
+        gate/receipts are embedded on the exact row the completion gate reads.
         """
 
         from .agent_turn_completion import (
@@ -1839,6 +1854,12 @@ class RealDomainPorts:
             },
             discriminator="aggregation-completed",
         )
+        if callable(materialize_chain_authority):
+            # Same ordering contract as the non-fan-out path: the aggregation
+            # just appended the latest ``hypothesis_set`` row, so the stage-one
+            # gate/receipt embedding must target THAT row before the refs
+            # readback and closeout read it.
+            materialize_chain_authority()
         refs = collect_required_artifact_refs(
             required_kinds=self.required_artifact_kinds(action),
             team_id=team_id,
