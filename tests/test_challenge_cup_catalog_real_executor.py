@@ -540,6 +540,52 @@ def test_poll_revalidates_readiness_immediately_before_refill(
     assert harness.start_log == []
 
 
+def test_poll_harvests_terminal_run_across_readiness_rotation(
+    harness: _Harness,
+) -> None:
+    _start(harness, "real-1")
+    harness.readiness_report = {
+        **harness.readiness_report,
+        "reportId": "real-batch-test-readiness-v2",
+    }
+    harness.authorize("real-1")
+    launch_log_after_rotation = list(harness.launch_log)
+    harness.set_run_status("SCI-091", "succeeded")
+    harness.approve("SCI-091", "real-1")
+
+    polled = _poll(harness, "real-1")
+
+    outcomes = {item["questionId"]: item["outcome"] for item in polled["harvested"]}
+    assert outcomes["SCI-091"] == "succeeded"
+    assert harness.launch_log == launch_log_after_rotation
+    state = svc._state_of(svc._load_envelope(TEAM_ID, "real-1"))
+    assert state.status("SCI-091") is QuestionStatus.SUCCEEDED
+    assert svc._gate_complete(TEAM_ID, "G5") is True
+
+
+def test_poll_fences_start_dispatch_across_readiness_rotation(
+    harness: _Harness,
+) -> None:
+    _start(harness, "real-1")
+    envelope = svc._load_envelope(TEAM_ID, "real-1")
+    envelope["runRefs"]["SCI-091"]["started"] = False
+    svc._save_envelope(TEAM_ID, envelope)
+    harness.readiness_report = {
+        **harness.readiness_report,
+        "reportId": "real-batch-test-readiness-v2",
+    }
+    harness.authorize("real-1")
+    start_log_after_rotation = list(harness.start_log)
+
+    with pytest.raises(
+        svc.ChallengeCupRealBatchError,
+        match="readiness authorization has changed",
+    ):
+        _poll(harness, "real-1")
+
+    assert harness.start_log == start_log_after_rotation
+
+
 def test_gate_progression_requires_previous_gate_complete(harness: _Harness) -> None:
     with pytest.raises(svc.ChallengeCupRealBatchError, match="real-1 batch"):
         _start(harness, "real-5")

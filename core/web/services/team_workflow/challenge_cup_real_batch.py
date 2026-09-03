@@ -1145,12 +1145,11 @@ def poll_real_batch(
             )
         state = _state_of(envelope)
         runs = reader(normalized_team)
-        current_authorization = _current_catalog_run_authorization(
-            normalized_team, normalized_plan
-        )
-        _require_envelope_catalog_run_authorization(
-            envelope, current_authorization
-        )
+        # Harvesting and approval promotion are pure accounting against the
+        # envelope's own durable authorization, so they survive readiness
+        # rotations; the current-authorization fence only guards execution
+        # (start dispatch and refill) and is computed lazily at those points.
+        current_authorization: dict[str, Any] | None = None
         try:
             durable_authorization = _durable_authorization_record(
                 envelope.get("catalogRunAuthorization"),
@@ -1212,6 +1211,13 @@ def poll_real_batch(
                     envelope["consecutiveFailures"] = int(envelope["consecutiveFailures"]) + 1
                     harvested.append({"questionId": question_id, "outcome": f"run_{status}"})
             elif not entry.get("started"):
+                if current_authorization is None:
+                    current_authorization = _current_catalog_run_authorization(
+                        normalized_team, normalized_plan
+                    )
+                    _require_envelope_catalog_run_authorization(
+                        envelope, current_authorization
+                    )
                 _dispatch_start(
                     normalized_team, envelope, state, question_id, entry, resolved_dispatcher
                 )
