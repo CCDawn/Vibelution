@@ -26,8 +26,35 @@ from core.web.services.team_workflow.research_runtime import meeting_receipt_aut
 from tests.helpers.chat_turn_harness import wait_for_matching_event
 
 
-def test_chat_room_executor_allows_four_concurrent_rounds() -> None:
-    assert chat_room_service._CHAT_ROOM_EXECUTOR_MAX_WORKERS == 4
+def test_chat_room_executor_allows_ten_concurrent_rounds() -> None:
+    assert chat_room_service._CHAT_ROOM_EXECUTOR_MAX_WORKERS_DEFAULT == 10
+    assert chat_room_service._CHAT_ROOM_EXECUTOR_MAX_WORKERS == 10
+
+
+def test_chat_room_executor_max_workers_env_override_and_clamping(monkeypatch):
+    """``VIBELUTION_CHAT_ROOM_MAX_WORKERS`` overrides the width, clamped 1..32.
+
+    Malformed values fall back to the default (10); out-of-range values clamp
+    instead of serializing rounds or exploding the pool.  Tests exercise the
+    resolver only — the module-level executor was already built from it once
+    at import, so no module state is mutated here.
+    """
+
+    env = "VIBELUTION_CHAT_ROOM_MAX_WORKERS"
+    monkeypatch.delenv(env, raising=False)
+    assert chat_room_service._chat_room_executor_max_workers() == 10
+
+    monkeypatch.setenv(env, "10")
+    assert chat_room_service._chat_room_executor_max_workers() == 10
+    monkeypatch.setenv(env, "32")
+    assert chat_room_service._chat_room_executor_max_workers() == 32
+    monkeypatch.setenv(env, "33")
+    assert chat_room_service._chat_room_executor_max_workers() == 32
+    monkeypatch.setenv(env, "0")
+    assert chat_room_service._chat_room_executor_max_workers() == 1
+
+    monkeypatch.setenv(env, "abc")
+    assert chat_room_service._chat_room_executor_max_workers() == 10
 
 
 def _append_session_ledger_message(root, session_id: str, message: dict, *, turn_id: str) -> None:
