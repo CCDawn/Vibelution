@@ -5294,3 +5294,52 @@ def test_reconcile_gate_reruns_after_store_change_or_inflight_release(tmp_path, 
     assert chat_room_service._acquire_chat_room_reconcile_run() is True
     chat_room_service._release_chat_room_reconcile_run()
     assert next(item for item in state["rooms"] if item["roomId"]) is not None
+
+
+def test_speaker_generation_token_cap_aligns_request_with_running_fence() -> None:
+    """A fenced speaker request carries a generation cap inside the fence.
+
+    Regression: a max-tier speaker generating ~40 tok/s could not finish a
+    full statement inside a 300s per-call fence, so the fence cut the call
+    off at exactly 300s with zero output.  The request must be clamped to the
+    fence-derived token budget instead.
+    """
+
+    context = {
+        chat_room_service._CHALLENGE_ROOM_PER_CALL_DEADLINE_CONTEXT_KEY: (
+            int(time.time() * 1000) + 300_000
+        )
+    }
+    cap = chat_room_service._speaker_generation_token_cap(context)
+    assert cap is not None
+    # 300s at the conservative 40 tok/s with 0.7 utilization, minus the few
+    # milliseconds elapsed while computing the remaining budget.
+    assert 8_300 <= cap <= 8_400
+
+
+def test_speaker_generation_token_cap_fails_safe(monkeypatch) -> None:
+    # No fence in the context: the request keeps the profile default.
+    assert chat_room_service._speaker_generation_token_cap({}) is None
+    # An already-expired fence has no meaningful clamp left.
+    expired = {
+        chat_room_service._CHALLENGE_ROOM_PER_CALL_DEADLINE_CONTEXT_KEY: (
+            int(time.time() * 1000) - 1_000
+        )
+    }
+    assert chat_room_service._speaker_generation_token_cap(expired) is None
+
+    # Any policy failure must never break the speaker call itself.
+    context = {
+        chat_room_service._CHALLENGE_ROOM_PER_CALL_DEADLINE_CONTEXT_KEY: (
+            int(time.time() * 1000) + 300_000
+        )
+    }
+
+    def _boom(*, remaining_budget_ms: int) -> int:
+        raise RuntimeError("policy unavailable")
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.challenge_deadline_policy.speaker_output_token_cap",
+        _boom,
+    )
+    assert chat_room_service._speaker_generation_token_cap(context) is None

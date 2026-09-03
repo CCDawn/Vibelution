@@ -585,3 +585,41 @@ def test_metadata_override_clamps_responses_transport_payload():
 
     assert clamped["max_output_tokens"] == 8192
     assert untouched["max_output_tokens"] == 32768
+
+
+def test_per_call_output_token_cap_scope_clamps_payload_and_yields_to_metadata():
+    # Chat-room speaker calls cannot thread metadata through the session
+    # agent runtime; the owning service binds the derived generation cap via
+    # the scope and the payload build falls back to it.
+    from core.llm.client import (
+        MAX_OUTPUT_TOKENS_OVERRIDE_METADATA_KEY,
+        per_call_output_token_cap_scope,
+    )
+
+    config = _relay_autodl_glm_config()
+    client = LLMClient(config=config, backend=lambda payload: payload)
+    messages = [{"role": "user", "content": "讲者输入"}]
+
+    with per_call_output_token_cap_scope(8400):
+        clamped = client._build_payload(messages)
+    assert clamped["max_tokens"] == 8400
+    # Outside the scope the profile default is authoritative again.
+    assert client._build_payload(messages)["max_tokens"] == 32768
+
+    with per_call_output_token_cap_scope(8400):
+        explicit = client._build_payload(
+            messages, metadata={MAX_OUTPUT_TOKENS_OVERRIDE_METADATA_KEY: 4096}
+        )
+        # Invalid metadata still falls back to the derived cap.
+        invalid_metadata = client._build_payload(
+            messages, metadata={MAX_OUTPUT_TOKENS_OVERRIDE_METADATA_KEY: 0}
+        )
+    assert explicit["max_tokens"] == 4096
+    assert invalid_metadata["max_tokens"] == 8400
+
+    with per_call_output_token_cap_scope(None):
+        assert client._build_payload(messages)["max_tokens"] == 32768
+
+    for bogus in (0, -5, True, "8400", 3.5):
+        with per_call_output_token_cap_scope(bogus):
+            assert client._build_payload(messages)["max_tokens"] == 32768

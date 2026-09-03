@@ -1798,6 +1798,15 @@ class ResearchConfig(BaseModel):
             return value
         return DEFAULT_RESEARCH_BLOCKING_FANOUT_WAIT
 
+    challenge_meeting_per_call_budget_ms: Optional[int] = Field(
+        default=None,
+        description=(
+            "挑战杯会议讲者单次调用的围栏（毫秒）。缺省 None：先回落环境变量"
+            " VIBELUTION_CHALLENGE_MEETING_PER_CALL_BUDGET_MS，再回落 receipt"
+            " p95 推导。合法域 [300000, 600000]，越界值在会议围栏派生时拒绝。"
+        ),
+    )
+
 
 class SupervisedEvolutionFeatureConfig(BaseModel):
     """可信操作员配置控制的监督进化功能族。"""

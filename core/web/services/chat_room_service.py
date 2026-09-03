@@ -2938,6 +2938,33 @@ def _speaker_prompt_cache_partition(session_id: str, room_id: str) -> str:
     )
 
 
+def _speaker_generation_token_cap(context: Mapping[str, Any]) -> int | None:
+    """Request-side generation budget for one fenced speaker call, or ``None``.
+
+    The per-call fence only stops a call after the fact; a slow model whose
+    physical token rate cannot finish inside the fence was being cut off with
+    zero output.  Aligning the request's max output tokens with the running
+    fence lets the speaker finish with usable content.  Any failure here is
+    fail-safe: without a cap the request keeps the profile default and the
+    fence stays the hard stop.
+    """
+
+    deadline_at_ms = _positive_int(
+        context.get(_CHALLENGE_ROOM_PER_CALL_DEADLINE_CONTEXT_KEY)
+    )
+    if deadline_at_ms is None:
+        return None
+    remaining_budget_ms = deadline_at_ms - int(time.time() * 1000)
+    try:
+        from core.web.services.team_workflow.challenge_deadline_policy import (
+            speaker_output_token_cap,
+        )
+
+        return speaker_output_token_cap(remaining_budget_ms=remaining_budget_ms)
+    except Exception:  # noqa: BLE001 - the cap must never break the speaker
+        return None
+
+
 def _run_participant_agent(participant: dict[str, Any], prompt: str, context: dict[str, Any]) -> dict[str, Any]:
     prepare_started_at = _perf_counter()
     timings: dict[str, Any] = {}
@@ -3077,7 +3104,11 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
             timings["agentSeedMs"] = _elapsed_ms(stage_started_at)
             timings["totalPrepareMs"] = _elapsed_ms(prepare_started_at)
             stage_started_at = _perf_counter()
-            from core.llm.client import llm_status_context, model_invocation_receipt_context_scope
+            from core.llm.client import (
+                llm_status_context,
+                model_invocation_receipt_context_scope,
+                per_call_output_token_cap_scope,
+            )
 
             meeting_outcomes: list[Any] = []
             llm_response_callback_id = ""
@@ -3119,6 +3150,8 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
                     session_id=session_id,
                     turn_id=turn_identity,
                     enabled=bool(context.get("_speakerDeltaCapture")),
+                ), per_call_output_token_cap_scope(
+                    _speaker_generation_token_cap(context)
                 ):
                     result = run_existing_agent_single_turn(
                         agent_runtime,

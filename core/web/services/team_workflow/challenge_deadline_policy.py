@@ -72,7 +72,37 @@ def _bounded_budget_from_p95(p95_ms: int) -> int:
     )
 
 
+def _operator_config_override_ms() -> int | None:
+    """Read the operator-configured per-call fence from ``[research]`` config.
+
+    The packaged default is ``None`` (unconfigured).  Missing/unreadable
+    config fails open to ``None`` so the derivation falls back to the env
+    override and then the receipt-derived budget; an out-of-range value is
+    rejected by ``_operator_override_ms`` with the same error contract as the
+    env override, because a silently ignored operator fence would produce a
+    meeting clock the operator does not expect.
+    """
+
+    try:
+        from config.settings import get_config
+
+        value = get_config().research.challenge_meeting_per_call_budget_ms
+    except Exception:  # noqa: BLE001 - config gating must never break the policy
+        return None
+    if isinstance(value, bool):
+        return None
+    return value if isinstance(value, int) and value > 0 else None
+
+
 def _operator_override_ms() -> int | None:
+    config_value = _operator_config_override_ms()
+    if config_value is not None:
+        if not PER_CALL_MIN_MS <= config_value <= PER_CALL_MAX_MS:
+            raise ChallengeMeetingDeadlinePolicyError(
+                "research.challenge_meeting_per_call_budget_ms must be between "
+                f"{PER_CALL_MIN_MS} and {PER_CALL_MAX_MS}"
+            )
+        return config_value
     raw = str(os.environ.get(_PER_CALL_OVERRIDE_ENV) or "").strip()
     if not raw:
         return None
@@ -109,12 +139,15 @@ def derive_per_call_budget(
 
     override = _operator_override_ms()
     if override is not None:
+        config_present = _operator_config_override_ms() is not None
         return {
             "perCallBudgetMs": override,
             "latencyP95Ms": 0,
             "sampleCount": 0,
-            "sampleSource": "operator_env",
-            "overrideEnv": _PER_CALL_OVERRIDE_ENV,
+            "sampleSource": (
+                "operator_config" if config_present else "operator_env"
+            ),
+            "overrideEnv": "" if config_present else _PER_CALL_OVERRIDE_ENV,
         }
 
     requested = {item for item in (_model_ref(value) for value in model_refs) if item[0]}
@@ -369,6 +402,42 @@ def effective_call_deadline_at_ms(
     return min(candidates)
 
 
+# Predictive generation alignment: the per-call fence stops a speaker call at
+# zero output when the model's physical token rate cannot finish inside the
+# budget.  40 tokens/s is the slowest sustained rate observed on the audited
+# max-tier dialogue model (receipt usage ledger, 2026-09); the 0.7 utilization
+# reserves the rest of the fence for prefill, queueing and prompt-build time.
+SPEAKER_CONSERVATIVE_OUTPUT_TOKENS_PER_SECOND = 40
+SPEAKER_TOKEN_BUDGET_UTILIZATION = 0.7
+# Below this a clamp would only guarantee a truncated, useless answer; leave
+# the request untouched and let the fence remain the hard stop.
+SPEAKER_MIN_CLAMPED_OUTPUT_TOKENS = 2048
+
+
+def speaker_output_token_cap(*, remaining_budget_ms: int) -> int | None:
+    """Return a request-side generation cap for one fenced speaker call.
+
+    The cap keeps the predicted generation time inside the running per-call
+    fence so slow models finish with usable output instead of being cut off at
+    zero output (``challenge_per_call_budget_exhausted``).  Returns ``None``
+    when there is no meaningful clamp: a non-positive/absent remaining budget
+    or a remaining fence too short for the minimum useful answer.
+    """
+
+    remaining_ms = _positive_int(remaining_budget_ms)
+    if remaining_ms is None:
+        return None
+    rate = max(1, int(SPEAKER_CONSERVATIVE_OUTPUT_TOKENS_PER_SECOND))
+    cap = int(
+        (remaining_ms / 1000.0)
+        * rate
+        * SPEAKER_TOKEN_BUDGET_UTILIZATION
+    )
+    if cap < SPEAKER_MIN_CLAMPED_OUTPUT_TOKENS:
+        return None
+    return cap
+
+
 __all__ = [
     "ChallengeMeetingDeadlinePolicyError",
     "DEADLINE_POLICY_VERSION",
@@ -376,8 +445,12 @@ __all__ = [
     "MIN_BUCKET_SAMPLE_COUNT",
     "PER_CALL_MAX_MS",
     "PER_CALL_MIN_MS",
+    "SPEAKER_CONSERVATIVE_OUTPUT_TOKENS_PER_SECOND",
+    "SPEAKER_MIN_CLAMPED_OUTPUT_TOKENS",
+    "SPEAKER_TOKEN_BUDGET_UTILIZATION",
     "derive_meeting_deadline_policy",
     "derive_per_call_budget",
     "effective_call_deadline_at_ms",
     "is_challenge_meeting",
+    "speaker_output_token_cap",
 ]
