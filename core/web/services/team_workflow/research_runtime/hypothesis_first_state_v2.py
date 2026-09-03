@@ -4364,8 +4364,7 @@ def _latest_requirement_matrix(
 
     ``competition_alignment`` payloads carry the matrix nested under
     ``officialRequirementMatrix`` (the same member the stage-one closeout
-    validator reads); a payload that already is the bare matrix keeps passing
-    through untouched.  Feeding the whole alignment payload into
+    validator reads).  Feeding the whole alignment payload into
     ``requirement_matrix_from_dict`` instead is what produced the
     ``unsupported fields`` StageOneRequirementMatrixError 500 on state-v2.
     """
@@ -4391,7 +4390,11 @@ def _latest_requirement_matrix(
     raw_matrix = payload.get("officialRequirementMatrix")
     if isinstance(raw_matrix, Mapping):
         return dict(raw_matrix)
-    return payload
+    # Alignment payloads carry top-level members beyond the matrix and
+    # requirement_matrix_from_dict fail-closes on unknown top-level fields,
+    # so any non-matrix shape must fall back to the tolerant
+    # requirement_matrix=None path instead of leaking the raw payload.
+    return None
 
 
 def _scope_records(

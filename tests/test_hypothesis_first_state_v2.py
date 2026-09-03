@@ -8072,3 +8072,65 @@ def test_v2_reselect_after_rejection_wire_envelope_without_command_binds_selecti
         workflow_run_id="",
     )
     assert outcomes[0]["selectionVersion"] == expected_version
+
+
+# ---------------------------------------------------------------------------
+# Matrix readback fallback: a competition_alignment payload whose nested
+# officialRequirementMatrix is not a Mapping must resolve to None (tolerant
+# path), never leak the whole alignment wrapper into the strict validator.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("broken_matrix", ["matrix-payload-string", None])
+def test_matrix_readback_non_mapping_nested_matrix_stays_tolerant(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    broken_matrix: object,
+) -> None:
+    """Malformed nested requirement matrices must not 500 the state projection.
+
+    The alignment wrapper carries top-level members beyond the matrix and
+    ``requirement_matrix_from_dict`` fail-closes on unknown top-level fields;
+    when the nested ``officialRequirementMatrix`` member is not a Mapping the
+    readback must resolve to ``None`` so the direction-1A section renders the
+    tolerant ``not_materialized`` state instead of raising.
+    """
+    from tests._support.team_workflow.helpers import _use_tmp_project_root
+    from core.web.services import team_service
+    from core.web.services.team_workflow.research_runtime import (
+        workflow_artifact_store,
+    )
+
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team_id = team_service.create_team(
+        name="matrix readback 兜底团队",
+        purpose="stage-one-matrix-readback-fallback",
+    )["teamId"]
+
+    run_id = "run-matrix-readback-fallback"
+    alignment_payload = {
+        "schemaVersion": 1,
+        "artifactKind": "competition_alignment",
+        "questionIdentity": {
+            "catalog_id": "science-125-questions-2021",
+            "question_id": "SCI-091",
+            "question_en": "Canonical question",
+        },
+        "officialRequirementMatrix": broken_matrix,
+    }
+    workflow_artifact_store.put_workflow_artifact(
+        team_id,
+        kind="competition_alignment",
+        workflow_run_id=run_id,
+        source_collection_run_id="sc-matrix-readback-fallback",
+        payload=alignment_payload,
+    )
+
+    resolved = hf_state_v2_module._latest_requirement_matrix(team_id, [run_id])
+
+    assert resolved is None
+    section = hf_state_v2_module._direction_1a_submission_section(resolved)
+    assert section["source"] == "not_materialized"
+    assert section["submissionReady"] is False
+    assert len(section["g1RequiredUnmet"]) == 3
+    assert len(section["notYetEvidenced"]) == 8
