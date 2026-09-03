@@ -1533,12 +1533,36 @@ def _digest_markdown_contract_fields(markdown: str) -> dict[str, Any]:
     }
 
 
+def _pin_digest_drafter_thinking_disabled(resolved: Mapping[str, Any]) -> None:
+    """Disable provider-side thinking for the digest drafter's model.
+
+    Digest synthesis is a bounded transcript-summarization task, not an open
+    research decision.  On deep-reasoning models (qwen3.8-max family) the
+    provider's default thinking pass alone outruns the governed 600s
+    per-call fence: the SCI-007 meeting drafter call never returned (no
+    usage event, no error, reproduced 1:1 out of process), the watchdog
+    fenced ``summary_draft_stuck``, and the meeting stayed ``summarizing``
+    forever — candidates, discussion items and the digest all stayed empty.
+    ``thinking_type="disabled"`` rides the qwen thinking-parameter channel:
+    qwen-shaped routes emit the top-level toggle, openai-compatible wires
+    pass it through litellm ``extra_body``; models without a declared
+    thinking contract simply keep their provider default with no parameter
+    emitted beyond this drafter's calls.
+    """
+
+    profile = getattr(resolved.get("client"), "profile", None)
+    if profile is None:
+        return
+    profile.thinking_type = "disabled"
+
+
 def build_meeting_digest_drafter(llm: Mapping[str, Any] | None = None):
     """Return the real-LLM Coordinator digest drafter, or ``None`` if unavailable."""
 
     resolved = dict(llm) if isinstance(llm, Mapping) and llm else resolve_review_llm()
     if not resolved:
         return None
+    _pin_digest_drafter_thinking_disabled(resolved)
     # Strict-JSON wire contract when the resolved provider capability allows
     # it: the persisted artifact stays open Markdown, but it travels as the
     # ``documentMarkdown`` field of one schema-constrained JSON object, so a

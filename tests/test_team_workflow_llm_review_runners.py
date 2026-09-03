@@ -781,6 +781,38 @@ def test_digest_prompt_requests_open_markdown_instead_of_protocol_fact_json():
     assert "evidenceRequests" not in prompt
 
 
+def _digest_effort_client(profile_attrs: dict):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(profile=SimpleNamespace(**profile_attrs))
+
+
+def test_digest_drafter_disables_provider_thinking_for_the_call():
+    """SCI-007 regression: qwen3.8-max's default provider-side thinking pass
+    alone outran the governed 600s per-call fence, so the digest drafter
+    call never returned and the meeting stayed ``summarizing`` with zero
+    digest/candidates.  The drafter pins ``thinking_type="disabled"`` so
+    the qwen thinking channel (``enable_thinking: false``) is emitted."""
+
+    profile_attrs = {"thinking_type": ""}
+    client = _digest_effort_client(profile_attrs)
+    drafter = llm_review_runners.build_meeting_digest_drafter(
+        {**_FAKE_LLM, "client": client}
+    )
+    assert callable(drafter)
+    assert client.profile.thinking_type == "disabled"
+
+
+def test_digest_drafter_client_without_profile_is_untouched():
+    """Injected bare clients (existing fake shape) keep working."""
+
+    client = object()
+    drafter = llm_review_runners.build_meeting_digest_drafter(
+        {**_FAKE_LLM, "client": client}
+    )
+    assert callable(drafter)
+
+
 def test_digest_drafter_fails_closed_without_completed_messages(monkeypatch):
     _install_fake_llm(monkeypatch, ["{}"])
     drafter = llm_review_runners.build_meeting_digest_drafter(dict(_FAKE_LLM))
