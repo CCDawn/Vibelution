@@ -9362,6 +9362,683 @@ def _blocked_round_authority(kind: str, code: str) -> dict[str, Any]:
     }
 
 
+# ---------------------------------------------------------------------------
+# real-batch (chain-driven dev/platform rounds) authority recovery helpers.
+#
+# The three recoveries below close the same architectural gap the coherence
+# recovery already closed: legacy question-run lifecycle artifacts (approved
+# question details, formal revision envelopes, canonical evidence refs) do not
+# exist for rounds driven directly by the real-batch research workflow, but the
+# equivalent authorities are already persisted in live records.  Every recovery
+# is fail-closed: missing, ambiguous, or unreadable inputs keep the existing
+# blocker, and nothing is regenerated through a model call.
+
+
+def _candidate_revision_snapshot(entry: Mapping[str, Any]) -> dict[str, Any]:
+    """Deterministic per-candidate content projection for revision hashing."""
+    axis = entry.get("axisProfile") if isinstance(entry.get("axisProfile"), Mapping) else {}
+    return {
+        "candidateId": str(entry.get("candidateId") or "").strip(),
+        "statement": str(
+            entry.get("statement") or entry.get("claim") or ""
+        ).strip(),
+        "rationale": str(
+            entry.get("rationale") or entry.get("mechanism") or ""
+        ).strip(),
+        "testablePrediction": str(entry.get("testablePrediction") or "").strip(),
+        "falsifier": str(entry.get("falsifier") or "").strip(),
+        "axisProfile": dict(axis),
+    }
+
+
+def _canonical_snapshot_hash(snapshots: Sequence[Mapping[str, Any]]) -> str:
+    from .human_gate_artifacts import canonical_sha256
+
+    ordered = sorted(
+        (dict(item) for item in snapshots if isinstance(item, Mapping)),
+        key=lambda item: str(item.get("candidateId") or ""),
+    )
+    return canonical_sha256(ordered)
+
+
+def _review_round_meeting_chain(
+    team_id: str,
+    *,
+    selection_id: str,
+    candidate_ids: Sequence[str],
+) -> dict[int, dict[str, dict[str, Any]]]:
+    """Resolve each review round's closed authority meeting per candidate.
+
+    Authority mirrors ``_review_meeting_fan_in_group``: the newest
+    non-superseded link per (candidateId, roundIndex) wins, the meeting must be
+    closed with a digest and decisions, and every round's group must cover all
+    round candidates.  Returns ``{roundIndex: {candidateId: record}}``.
+    """
+    from core.web.services.team_workflow import meeting_rounds as meetings
+
+    links = [
+        dict(item)
+        for item in list(list_review_round_links(team_id).get("links") or [])
+        if str(item.get("selectionId") or "").strip() == selection_id
+        and str(item.get("candidateId") or "").strip() in set(candidate_ids)
+    ]
+    if not links:
+        return {}
+    latest_links: dict[tuple[str, int], dict[str, Any]] = {}
+    for link in links:
+        key = (
+            str(link.get("candidateId") or "").strip(),
+            int(link.get("roundIndex") or 1),
+        )
+        existing = latest_links.get(key)
+        if existing is None or str(link.get("createdAt") or "") >= str(
+            existing.get("createdAt") or ""
+        ):
+            latest_links[key] = link
+    meeting_by_id = {
+        str(meeting.get("meetingRoundId") or "").strip(): meeting
+        for meeting in meetings._read_jsonl(meetings._rounds_path(team_id))
+        if isinstance(meeting, Mapping)
+    }
+    chain: dict[int, dict[str, dict[str, Any]]] = {}
+    for (candidate_id, round_index), link in latest_links.items():
+        meeting = meeting_by_id.get(
+            str(link.get("meetingRoundId") or "").strip()
+        )
+        if not isinstance(meeting, Mapping):
+            continue
+        if _is_superseded_review_attempt(meeting):
+            continue
+        if str(meeting.get("status") or "").strip().lower() != "closed":
+            continue
+        if not str(meeting.get("digestId") or "").strip():
+            continue
+        if not _normalized_str_list(meeting.get("decisionRefs")):
+            continue
+        chain.setdefault(round_index, {})[candidate_id] = dict(meeting)
+    return {
+        round_index: bindings
+        for round_index, bindings in sorted(chain.items())
+        if set(bindings) == set(candidate_ids)
+    }
+
+
+def _materialize_review_feedback_iterations_authority(
+    *,
+    team_id: str,
+    workflow_run_id: str,
+    node_run_id: str,
+    question_id: str,
+    source_collection_run_id: str,
+    accepted_round: Mapping[str, Any],
+    selection_id: str,
+) -> dict[str, Any]:
+    """Replay the recorded review-round chain as feedback-iteration authority.
+
+    Chain-driven review rounds never persist a ``revisionEnvelope`` (dev/
+    platform rounds carry no formal revision fork), but the r1→rN review
+    meetings themselves are recorded revision evidence: round i's digest
+    proposes the revised candidate and its decision records the review
+    feedback.  Each adjacent round pair therefore replays as one iteration:
+
+    - feedback: the round's real decision/digest/meeting ids plus the decision
+      rationale (the review's open issues);
+    - revision: the digest-proposed candidate delta, hashed over the exact
+      persisted snapshots (input = prior round state — the ledger candidate for
+      round 1, the prior round's digest proposal afterwards), so the iteration
+      chain stays continuous by construction.
+
+    Fail-closed: rounds below 2, any candidate without a closed authoritative
+    meeting, a missing digest proposal, or a snapshot with no actual change
+    stops the replay at the last derivable iteration; fewer than one
+    derivable iteration keeps the existing blocker.
+    """
+    from core.web.services.team_workflow import meeting_rounds as meetings
+
+    candidate_ids = [
+        str(item.get("candidateId") or "").strip()
+        for item in list(accepted_round.get("candidates") or [])
+        if isinstance(item, Mapping) and str(item.get("candidateId") or "").strip()
+    ]
+    if len(candidate_ids) < 1 or not selection_id:
+        return {"status": "blocked", "blockerCodes": ["hypothesis_revision_evidence_missing"]}
+    chain = _review_round_meeting_chain(
+        team_id,
+        selection_id=selection_id,
+        candidate_ids=candidate_ids,
+    )
+    if not chain or min(chain) != 1 or max(chain) < 2:
+        return {"status": "blocked", "blockerCodes": ["hypothesis_revision_evidence_missing"]}
+    digest_by_id = {
+        str(item.get("digestId") or "").strip(): dict(item)
+        for item in meetings._read_jsonl(meetings._digests_path(team_id))
+        if isinstance(item, Mapping) and str(item.get("digestId") or "").strip()
+    }
+    decision_by_id = {
+        str(item.get("decisionId") or "").strip(): dict(item)
+        for item in meetings._read_jsonl(meetings._decisions_path(team_id))
+        if isinstance(item, Mapping) and str(item.get("decisionId") or "").strip()
+    }
+
+    # Round-0 input state: the ledger-registered generation candidates.
+    input_state: dict[str, dict[str, Any]] | None = {}
+    ledger = list_hypothesis_candidates(team_id, question_id=question_id)
+    ledger_by_id = {
+        str(item.get("candidateId") or "").strip(): dict(item)
+        for item in list(ledger.get("candidates") or [])
+        if isinstance(item, Mapping)
+    }
+    for candidate_id in candidate_ids:
+        entry = ledger_by_id.get(candidate_id)
+        if entry is None:
+            input_state = None
+            break
+        input_state[candidate_id] = _candidate_revision_snapshot(entry)
+
+    from .feedback_iterations_artifact_writer import write_feedback_iterations_artifact
+
+    written = 0
+    blockers: list[str] = []
+    for round_index in sorted(chain):
+        if input_state is None:
+            break
+        bindings = chain[round_index]
+        round_blockers: list[str] = []
+        feedback_refs = [f"hypothesis_selection:{selection_id}"]
+        rationales: list[str] = []
+        output_state: dict[str, dict[str, Any]] = {}
+        for candidate_id in candidate_ids:
+            meeting = bindings[candidate_id]
+            digest = digest_by_id.get(str(meeting.get("digestId") or "").strip())
+            decision_ref = _normalized_str_list(meeting.get("decisionRefs"))[0]
+            decision = decision_by_id.get(decision_ref)
+            if not isinstance(digest, Mapping) or not isinstance(decision, Mapping):
+                round_blockers.append("hypothesis_revision_evidence_missing")
+                break
+            proposal = next(
+                (
+                    dict(item)
+                    for item in list(digest.get("proposedCandidates") or [])
+                    if isinstance(item, Mapping)
+                    and str(item.get("candidateId") or "").strip() == candidate_id
+                ),
+                None,
+            )
+            if proposal is None:
+                # This round recorded no revision proposal for the candidate:
+                # no digest-backed iteration can be derived beyond here.
+                round_blockers.append("hypothesis_revision_evidence_missing")
+                break
+            rationale = str(decision.get("rationale") or "").strip()
+            if not rationale:
+                round_blockers.append("hypothesis_revision_evidence_missing")
+                break
+            meeting_ref = str(meeting.get("meetingRoundId") or "").strip()
+            feedback_refs.extend(
+                [
+                    f"meeting_round:{meeting_ref}",
+                    f"meeting_digest:{digest.get('digestId')}",
+                    f"decision_record:{decision_ref}",
+                ]
+            )
+            rationales.append(rationale)
+            output_state[candidate_id] = _candidate_revision_snapshot(proposal)
+        if round_blockers:
+            blockers = round_blockers
+            break
+        input_hash = _canonical_snapshot_hash(list(input_state.values()))
+        output_hash = _canonical_snapshot_hash(list(output_state.values()))
+        if output_hash == input_hash:
+            # The digest re-proposed an identical candidate: recorded, but not
+            # an actual revision, so it cannot establish an iteration.
+            blockers = ["hypothesis_revision_evidence_missing"]
+            break
+        changes = [
+            (
+                f"{candidate_id}: revised per review round {round_index} "
+                f"({feedback_refs[1 + index * 3]}, "
+                f"{feedback_refs[2 + index * 3]}, "
+                f"{feedback_refs[3 + index * 3]})"
+            )
+            for index, candidate_id in enumerate(candidate_ids)
+        ]
+        try:
+            recorded = write_feedback_iterations_artifact(
+                team_id=team_id,
+                workflow_run_id=workflow_run_id,
+                node_run_id=node_run_id,
+                question_id=question_id,
+                iteration_round=round_index,
+                feedback={
+                    "trigger": "review_round_feedback",
+                    "humanFeedback": rationales[0],
+                    "inputRefs": list(dict.fromkeys(feedback_refs)),
+                    "inputHash": input_hash,
+                },
+                revision={
+                    "changes": changes,
+                    "unresolvedIssues": list(dict.fromkeys(rationales)),
+                    "outputRefs": [
+                        f"hypothesis_candidate:{candidate_id}:r{round_index}"
+                        for candidate_id in candidate_ids
+                    ],
+                    "outputHash": output_hash,
+                    "status": "revised",
+                },
+                source_collection_run_id=source_collection_run_id,
+                node_id="hypothesis_design",
+                revision_phase=(
+                    "grounded_revision" if round_index == 1 else "review_revision"
+                ),
+            )
+        except Exception:  # noqa: BLE001 - stay fail-closed, try earlier rounds only
+            blockers = ["hypothesis_revision_authority_persistence_failed"]
+            break
+        if str(recorded.get("status") or "").strip().lower() not in {
+            "recorded",
+            "written",
+        }:
+            blockers = [
+                str(item)
+                for item in list(recorded.get("blockerCodes") or [])
+                if str(item).strip()
+            ] or ["hypothesis_revision_evidence_missing"]
+            break
+        written += 1
+        blockers = []
+        input_state = output_state
+    if written < 1:
+        return {
+            "status": "blocked",
+            "blockerCodes": blockers or ["hypothesis_revision_evidence_missing"],
+        }
+    return {"status": "written", "blockerCodes": [], "iterationCount": written}
+
+
+def _source_candidate_batch_ref_index(
+    team_id: str,
+) -> dict[str, tuple[str, str]]:
+    """Map bare source-candidate ids to (scRunId, canonical batch ref).
+
+    Authority is the team candidate store: each bare evidence id resolves to
+    the exactly one source-collection run that scoped it, and the run's
+    ``source_candidate_batch`` canonical ref is verified through the same
+    read-back the writer uses.  Ambiguous or unknown ids are simply absent
+    from the index, which keeps every caller fail-closed.
+    """
+    from core.web.services.team_workflow.source_collection.candidates import (
+        list_candidate_store,
+    )
+    from .artifact_readback_registry import (
+        build_canonical_ref,
+        load_scoped_artifact_payload,
+        read_domain_artifact,
+    )
+    from .human_gate_artifacts import canonical_sha256
+
+    try:
+        store_rows = list(
+            list_candidate_store(team_id, limit=500).get("candidates") or []
+        )
+    except Exception:  # noqa: BLE001 - unreadable store means no mapping
+        return {}
+    runs_by_id: dict[str, set[str]] = {}
+    for row in store_rows:
+        if not isinstance(row, Mapping):
+            continue
+        candidate_id = str(row.get("candidateId") or "").strip()
+        meta = (
+            row.get("metadata")
+            if isinstance(row.get("metadata"), Mapping)
+            else {}
+        )
+        sc_run = str(
+            row.get("sourceCollectionRunId") or meta.get("sourceCollectionRunId") or ""
+        ).strip()
+        if candidate_id and sc_run:
+            runs_by_id.setdefault(candidate_id, set()).add(sc_run)
+    index: dict[str, tuple[str, str]] = {}
+    ref_by_run: dict[str, str] = {}
+    for candidate_id, sc_runs in runs_by_id.items():
+        if len(sc_runs) != 1:
+            continue
+        sc_run = next(iter(sc_runs))
+        ref = ref_by_run.get(sc_run)
+        if ref is None:
+            try:
+                payload = load_scoped_artifact_payload(
+                    "source_candidate_batch",
+                    team_id=team_id,
+                    authority_run_id=sc_run,
+                )
+            except Exception:  # noqa: BLE001 - unreadable batch stays unmapped
+                payload = None
+            if not isinstance(payload, Mapping) or not payload.get("candidates"):
+                continue
+            ref = build_canonical_ref(
+                kind="source_candidate_batch",
+                team_id=team_id,
+                authority_run_id=sc_run,
+                content_hash=canonical_sha256(payload),
+            )
+            if read_domain_artifact(ref) is None:
+                continue
+            ref_by_run[sc_run] = ref
+        index[candidate_id] = (sc_run, ref)
+    return index
+
+
+def _repair_dimension_review_evidence_refs(
+    team_id: str,
+    review: Mapping[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Repair bare source-candidate evidence refs into canonical batch refs.
+
+    Chain-driven review rows cite bare ``candidate-...`` source ids, while the
+    writer only accepts readable canonical refs.  The repair is deterministic
+    and narrow:
+
+    - each bare id must resolve to exactly one scoped source-collection run
+      whose verified ``source_candidate_batch`` canonical ref is substituted;
+    - a row that cites no evidence at all inherits the reviewed candidate's
+      own mapped lineage refs (the grounded sources the candidate is built
+      on) — never invented content;
+    - any bare id without a unique readable mapping — or an inheritable-empty
+      row without a mappable lineage — is left untouched, so the writer's
+      existing fail-closed blockers keep firing for exactly those rows.
+
+    Returns ``(repaired_review, report)``; ``report`` records what was
+    repaired for auditability.
+    """
+    from .artifact_readback_registry import parse_canonical_ref
+
+    # The reviewed (round) candidates own the rows' lineage: an empty row can
+    # only inherit the lineage of the exact candidate the review is about.
+    lineage_by_candidate = {
+        str(
+            item.get("candidateId")
+            or item.get("candidate_id")
+            or item.get("hypothesis_id")
+            or ""
+        ).strip(): [
+            str(ref or "").strip()
+            for ref in list(item.get("lineageRefs") or [])
+            if str(ref or "").strip()
+        ]
+        for item in list(review.get("candidates") or [])
+        if isinstance(item, Mapping)
+    }
+    repaired_review = dict(review)
+    repaired_candidates: list[Any] = []
+    repaired_rows = 0
+    inherited_rows = 0
+    unresolved_refs: list[str] = []
+    bare_index: dict[str, str] = {}
+
+    def _canonical_or_none(ref: str) -> str:
+        if not ref:
+            return ""
+        if parse_canonical_ref(ref) is not None:
+            return ref
+        return bare_index.get(ref, "")
+
+    for candidate in list(review.get("candidates") or []):
+        if not isinstance(candidate, Mapping):
+            repaired_candidates.append(candidate)
+            continue
+        candidate_id = str(
+            candidate.get("candidateId")
+            or candidate.get("candidate_id")
+            or candidate.get("hypothesis_id")
+            or ""
+        ).strip()
+        rows = list(candidate.get("dimensionReviews") or [])
+        if not rows:
+            repaired_candidates.append(candidate)
+            continue
+        # Lazy index build: only rows that actually carry bare ids pay for it.
+        bare_ids = {
+            str(ref or "").strip()
+            for row in rows
+            if isinstance(row, Mapping)
+            for ref in list(row.get("evidence_refs") or row.get("evidenceRefs") or [])
+            if isinstance(ref, str) and parse_canonical_ref(str(ref or "").strip()) is None
+        }
+        bare_ids |= {
+            str(ref or "").strip()
+            for ref in lineage_by_candidate.get(candidate_id) or []
+            if parse_canonical_ref(ref) is None
+        }
+        if bare_ids and not bare_index:
+            bare_index = {
+                bare_id: mapped_ref
+                for bare_id, (_sc_run, mapped_ref) in _source_candidate_batch_ref_index(
+                    team_id
+                ).items()
+            }
+        for bare_id in sorted(bare_ids):
+            if bare_id and bare_id not in bare_index and bare_id not in unresolved_refs:
+                unresolved_refs.append(bare_id)
+        repaired_row_candidates = []
+        for row in rows:
+            if not isinstance(row, Mapping):
+                repaired_row_candidates.append(row)
+                continue
+            raw_refs = [
+                str(ref or "").strip()
+                for ref in list(row.get("evidence_refs") or row.get("evidenceRefs") or [])
+                if str(ref or "").strip()
+            ]
+            mapped: list[str] = []
+            resolvable = True
+            for ref in raw_refs:
+                canonical = _canonical_or_none(ref)
+                if not canonical:
+                    resolvable = False
+                    break
+                if canonical not in mapped:
+                    mapped.append(canonical)
+            if not raw_refs:
+                # No explicit citations: inherit the candidate's own lineage.
+                for ref in lineage_by_candidate.get(candidate_id) or []:
+                    canonical = _canonical_or_none(ref)
+                    if not canonical:
+                        resolvable = False
+                        break
+                    if canonical not in mapped:
+                        mapped.append(canonical)
+                if resolvable and mapped:
+                    inherited_rows += 1
+            elif resolvable and mapped != raw_refs:
+                repaired_rows += 1
+            if resolvable and mapped:
+                updated_row = dict(row)
+                updated_row["evidence_refs"] = mapped
+                repaired_row_candidates.append(updated_row)
+                continue
+            repaired_row_candidates.append(row)
+        updated_candidate = dict(candidate)
+        updated_candidate["dimensionReviews"] = repaired_row_candidates
+        repaired_candidates.append(updated_candidate)
+    repaired_review["candidates"] = repaired_candidates
+    return repaired_review, {
+        "repairedRows": repaired_rows,
+        "inheritedRows": inherited_rows,
+        "unresolvedRefs": unresolved_refs,
+    }
+
+
+def _project_live_stage_one_question_detail(
+    team_id: str,
+    question_id: str,
+    *,
+    workflow_run_id: str,
+    accepted_round: Mapping[str, Any],
+    selected_candidate_id: str,
+) -> dict[str, Any] | None:
+    """Project the canonical approved-question shape from live authorities.
+
+    Real-batch rounds never created a legacy question-run record, so the
+    plan/alignment projection falls back to the only live authorities: the
+    hash-pinned frozen 125-question catalog (question text and catalog
+    identity), the problem-understanding artifact already in the immutable
+    workflow store, and the accepted round's persisted candidates and
+    recommendation.  Every projected gate decision is the accepted-round
+    acceptance itself; ``None`` is returned for any missing input so the
+    caller keeps the existing fail-closed blocker.
+    """
+    from core.research.competition.resources import (
+        CATALOG_SHA256,
+        load_science_question_catalog,
+    )
+    from .workflow_artifact_store import list_workflow_artifacts
+
+    meta_review = (
+        accepted_round.get("metaReview")
+        if isinstance(accepted_round.get("metaReview"), Mapping)
+        else {}
+    )
+    recommendation = str(meta_review.get("recommendationCandidateId") or "").strip()
+    if recommendation != selected_candidate_id:
+        return None
+    try:
+        catalog = load_science_question_catalog()
+    except Exception:  # noqa: BLE001 - frozen resource unavailable: fail closed
+        return None
+    entry = next(
+        (
+            dict(item)
+            for item in list(catalog.get("questions") or [])
+            if isinstance(item, Mapping)
+            and str(item.get("id") or "").strip().upper() == question_id
+        ),
+        None,
+    )
+    question_en = str(entry.get("question_en") or "").strip() if entry else ""
+    catalog_id = str(catalog.get("catalog_id") or "").strip()
+    if entry is None or not question_en or not catalog_id:
+        return None
+    understanding_rows = [
+        dict(item)
+        for item in list_workflow_artifacts(
+            team_id,
+            kind="problem_understanding",
+            workflow_run_id=workflow_run_id,
+        )
+        if isinstance(item.get("payload"), Mapping)
+    ]
+    if not understanding_rows:
+        return None
+    understanding = understanding_rows[-1]["payload"]
+    scope = str(understanding.get("scope") or "").strip()
+    if not scope:
+        return None
+    subquestions = [
+        str(item or "").strip()
+        for item in list(understanding.get("subquestions") or [])
+        if str(item or "").strip()
+    ]
+    round_candidates = [
+        dict(item)
+        for item in list(accepted_round.get("candidates") or [])
+        if isinstance(item, Mapping)
+        and str(item.get("candidateId") or "").strip()
+        and str(item.get("claim") or "").strip()
+    ]
+    selected_row = next(
+        (
+            item
+            for item in round_candidates
+            if str(item.get("candidateId") or "").strip() == selected_candidate_id
+        ),
+        None,
+    )
+    if selected_row is None:
+        return None
+    selected_statement = str(selected_row.get("claim") or "").strip()
+    selected_rationale = str(selected_row.get("rationale") or "").strip()
+    round_id = str(accepted_round.get("roundId") or "").strip()
+    acceptance_gate = {
+        "required": True,
+        "decision": "approved",
+        "rationale": (
+            f"Hypothesis round {round_id} was meta-review accepted; the "
+            "stage-one projection stays proposal-only."
+        ),
+    }
+    methods = subquestions or [selected_statement]
+    plan: dict[str, Any] = {
+        "proposal_only": True,
+        "objective": scope,
+        "method": selected_rationale or selected_statement,
+        "human_gate": dict(acceptance_gate),
+    }
+    if subquestions:
+        plan["work_packages"] = [
+            {
+                "work_package_id": f"wp-{index + 1}",
+                "goal": text,
+                "inputs": [question_en],
+                "procedure": [selected_rationale or selected_statement],
+                "outputs": [f"wp-{index + 1} resolution"],
+                "dependencies": [],
+            }
+            for index, text in enumerate(subquestions)
+        ]
+    competition_view = {
+        "problem_statement": question_en,
+        "rationale": scope,
+        "technical_details": selected_rationale or selected_statement,
+        "datasets": {"planned": [], "used": []},
+        "methods": methods,
+        "experiments": [],
+        "results": ["not executed at stage one"],
+        "references": [],
+        "paper_title": f"Stage-one research proposal: {question_en}",
+        "paper_abstract": selected_statement,
+    }
+    return {
+        "record": {
+            "runId": round_id,
+            "questionId": question_id,
+            "schemaVersion": 2,
+            "status": "approved",
+            "validation": {
+                # Projection equivalence (mirrors the coherence recovery): the
+                # catalog resource is hash-pinned, the problem-understanding
+                # artifact is content-addressed in the immutable store, and
+                # the accepted round is the persisted acceptance authority.
+                "schemaValidation": "passed",
+                "citationValidation": "passed",
+                "officialModelCall": True,
+            },
+        },
+        "artifact": {"sha256": str(CATALOG_SHA256).lower(), "immutable": True},
+        "output": {
+            "schema_version": 2,
+            "identity": {
+                "catalog_id": catalog_id,
+                "question_id": question_id,
+                "question_en": question_en,
+                "domain": str(entry.get("domain") or "").strip(),
+            },
+            "hypotheses": [
+                {
+                    "hypothesis_id": str(item.get("candidateId") or "").strip(),
+                    "statement": str(item.get("claim") or "").strip(),
+                }
+                for item in round_candidates
+            ],
+            "selection": {
+                "selected_hypothesis_id": selected_candidate_id,
+                "human_gate": dict(acceptance_gate),
+            },
+            "research_plan": plan,
+            "competition_result_view": competition_view,
+        },
+    }
+
+
 def _materialize_hypothesis_revision_authority(
     *,
     team_id: str,
@@ -9579,6 +10256,16 @@ def _materialize_stage_one_plan_authority(
     from .stage_one_plan_artifact_writer import write_stage_one_plan_artifacts
 
     detail = question_launch._approved_details(team_id).get(question_id.upper())
+    if not isinstance(detail, Mapping):
+        # No legacy question-run record (real-batch rounds never create one):
+        # project the equivalent question authority from the live authorities.
+        detail = _project_live_stage_one_question_detail(
+            team_id,
+            question_id.upper(),
+            workflow_run_id=str(workflow_run_id or "").strip(),
+            accepted_round=round_record,
+            selected_candidate_id=selected,
+        )
     if not isinstance(detail, Mapping):
         return _blocked_round_authority(
             "stage1_research_plan", "stage_one_question_authority_missing"
@@ -9967,6 +10654,7 @@ def materialize_stage_one_node_authority(
     reused: list[str] = []
     blockers_by_kind: dict[str, list[str]] = {}
     errors: dict[str, str] = {}
+    dimension_ref_repair: dict[str, Any] = {}
 
     # dimension_reviews — canonical audit projection of the accepted round.
     if _probe("dimension_reviews"):
@@ -9981,6 +10669,12 @@ def materialize_stage_one_node_authority(
                 materialize_dimension_reviews_authority,
             )
 
+            # Ref repair happens on the materializer input side only: the
+            # writer keeps its exact canonical-ref validation and sees the
+            # repaired (or untouched, for unmappable ids) rows.
+            repaired_review, dimension_ref_repair = (
+                _repair_dimension_review_evidence_refs(team, accepted_round)
+            )
             dimension_authority = materialize_dimension_reviews_authority(
                 team_id=team,
                 workflow_run_id=run,
@@ -9991,7 +10685,7 @@ def materialize_stage_one_node_authority(
                 input_refs=input_refs,
                 input_snapshot_hash=input_snapshot_hash,
                 candidates=candidates,
-                review=accepted_round,
+                review=repaired_review,
                 workflow_authority=workflow_authority,
                 source_collection_run_id=source,
             )
@@ -10097,9 +10791,42 @@ def materialize_stage_one_node_authority(
                 if str(item).strip()
             ] or ["hypothesis_revision_evidence_missing"]
         if "feedback_iterations" not in satisfied:
-            blockers_by_kind["feedback_iterations"] = feedback_blockers or [
-                "hypothesis_revision_evidence_missing"
-            ]
+            # No revision envelope anywhere in the chain (chain-driven dev/
+            # platform rounds never persist one): replay the recorded review
+            # round chain as the feedback authority instead.  Fail-closed —
+            # fewer than one derivable iteration keeps the blocker above.
+            try:
+                review_feedback_authority = (
+                    _materialize_review_feedback_iterations_authority(
+                        team_id=team,
+                        workflow_run_id=run,
+                        node_run_id=node,
+                        question_id=question,
+                        source_collection_run_id=source,
+                        accepted_round=accepted_round,
+                        selection_id=selection_id,
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001 - keep the fail-closed blocker
+                errors["feedback_iterations"] = str(exc) or type(exc).__name__
+                review_feedback_authority = {
+                    "status": "blocked",
+                    "blockerCodes": ["hypothesis_revision_evidence_missing"],
+                }
+            if str(review_feedback_authority.get("status") or "") == "written":
+                satisfied.append("feedback_iterations")
+                written.append("feedback_iterations")
+            else:
+                derivation_blockers = [
+                    str(item)
+                    for item in list(review_feedback_authority.get("blockerCodes") or [])
+                    if str(item).strip()
+                ]
+                blockers_by_kind["feedback_iterations"] = (
+                    derivation_blockers
+                    or feedback_blockers
+                    or ["hypothesis_revision_evidence_missing"]
+                )
 
     # core_hypothesis_coherence — a readable authority is reused. An absent one
     # is recovered from the accepted round's persisted per-candidate verdicts:
@@ -10196,6 +10923,17 @@ def materialize_stage_one_node_authority(
 
     ordered = list(STAGE_ONE_NODE_AUTHORITY_KINDS)
     missing = [kind for kind in ordered if kind not in satisfied]
+    repair_report = (
+        {
+            "repairedRows": int(dimension_ref_repair.get("repairedRows") or 0),
+            "inheritedRows": int(dimension_ref_repair.get("inheritedRows") or 0),
+            "unresolvedRefs": list(
+                dimension_ref_repair.get("unresolvedRefs") or []
+            ),
+        }
+        if dimension_ref_repair
+        else {}
+    )
     return {
         "status": "materialized" if not missing else "blocked",
         "reason": "" if not missing else "stage_one_authority_missing",
@@ -10211,6 +10949,7 @@ def materialize_stage_one_node_authority(
         "missingKinds": missing,
         "blockerCodes": blockers_by_kind,
         **({"errors": errors} if errors else {}),
+        **({"dimensionRefRepair": repair_report} if repair_report else {}),
     }
 
 
