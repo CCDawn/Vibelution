@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+from pathlib import Path
 
 import pytest
 
@@ -24,6 +25,7 @@ from core.web.services.team_workflow.research_runtime import (
     catalog_run_authorization,
     run_creation,
 )
+from tests._support.workflow_ledger_helpers import FIXED_NOW_MS, open_ledger_store
 
 WORKFLOW_DEFINITION_ID = "challenge-cup-research@2.1.0"
 
@@ -269,3 +271,81 @@ def test_policy_parser_rejects_unknown_fields() -> None:
 
 def test_real_one_is_the_policy_question() -> None:
     assert tuple(real_plan("real-1").question_ids) == ("SCI-091",)
+
+
+def _record_policy_covered_real_one_authorization(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(
+        challenge_cup_real_batch,
+        "resolve_catalog_model_policy",
+        lambda _team_id: canonical_model_policy(
+            {
+                "family": "qwen",
+                "providerIds": ["dashscope"],
+                "modelIds": ["qwen3-max"],
+                "requireOfficialProvider": True,
+            }
+        ),
+    )
+    scope = challenge_cup_real_batch._batch_scope("team-stage-one", "real-1")
+    assert scope["questionIds"] == ["SCI-091"]
+    assert scope["stageOneCompletionPolicy"] == load_stage_one_completion_policy().to_dict()
+
+    store = open_ledger_store(tmp_path / "ledger.sqlite3")
+    try:
+        monkeypatch.setattr(
+            catalog_run_authorization, "get_write_store", lambda: store
+        )
+        return catalog_run_authorization.record_catalog_run_authorization(
+            "team-stage-one",
+            plan_id="real-1",
+            batch_scope=scope,
+            approved_by="server-operator",
+            readiness_evidence={"status": "READY", "basis": "report-v1"},
+            approved_at_ms=FIXED_NOW_MS,
+            require_model_policy=True,
+            require_stage_one_policy=True,
+        )
+    finally:
+        store.close()
+
+
+def test_policy_question_outside_plan_questions_is_authorized(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record = _record_policy_covered_real_one_authorization(tmp_path, monkeypatch)
+
+    # SCI-003 is not a real-1 plan question but the approved stage-one policy
+    # scope covers it, so formal run creation for it must validate.
+    assert catalog_run_authorization.validate_catalog_run_authorization(
+        record,
+        team_id="team-stage-one",
+        plan_id="real-1",
+        question_id="SCI-003",
+        require_model_policy=True,
+        require_stage_one_policy=True,
+    )
+    assert catalog_run_authorization.validate_catalog_run_authorization(
+        record,
+        team_id="team-stage-one",
+        plan_id="real-1",
+        question_id="SCI-091",
+        require_model_policy=True,
+        require_stage_one_policy=True,
+    )
+
+
+def test_question_outside_plan_and_policy_scope_stays_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record = _record_policy_covered_real_one_authorization(tmp_path, monkeypatch)
+
+    assert not catalog_run_authorization.validate_catalog_run_authorization(
+        record,
+        team_id="team-stage-one",
+        plan_id="real-1",
+        question_id="SCI-042",
+        require_model_policy=True,
+        require_stage_one_policy=True,
+    )

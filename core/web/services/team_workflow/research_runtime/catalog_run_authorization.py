@@ -595,10 +595,18 @@ def validate_catalog_run_authorization(
         return False
     if batch_scope_sha256(canonical_scope) != expected_scope_hash:
         return False
-    if question_id is not None and str(question_id).strip() not in {
-        str(value).strip() for value in canonical_scope["questionIds"]
-    }:
-        return False
+    if question_id is not None:
+        authorized_question_ids = {
+            str(value).strip() for value in canonical_scope["questionIds"]
+        }
+        # The stage-one policy scope covers the plan, so every question the
+        # approved policy snapshot names is inside the authorized batch scope.
+        policy_scope = canonical_scope.get("stageOneCompletionPolicy") or {}
+        authorized_question_ids.update(
+            str(value).strip() for value in policy_scope.get("questionIds") or ()
+        )
+        if str(question_id).strip() not in authorized_question_ids:
+            return False
     if scope_hash is not None and expected_scope_hash != str(scope_hash):
         return False
     if readiness_sha256 is not None and report_hash != str(readiness_sha256):
