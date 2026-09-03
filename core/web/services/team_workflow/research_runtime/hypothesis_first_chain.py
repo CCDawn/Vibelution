@@ -7950,6 +7950,44 @@ def resolve_stage_one_generation_launch(
     }
 
 
+def _abandon_open_generation_meeting_without_rounds(
+    team_id: str, meeting_round_id: str
+) -> None:
+    """Close a just-created zero-round meeting after a failed opening.
+
+    The meeting runtime commits the open MeetingRound record before it starts
+    the opening chat-room round; a busy/failed launch must not leave that
+    zero-round record open and polluting the state surface.  The supersede is
+    the same append-only empty-discussion recovery used for dead discussions:
+    it refuses to touch meetings whose discussion round actually started, so
+    an open meeting with a bound round is left untouched here.
+    """
+
+    from core.web.services.team_workflow import meeting_rounds
+
+    try:
+        meeting = meeting_rounds.get_meeting_round(team_id, meeting_round_id)[
+            "meetingRound"
+        ]
+    except Exception:  # noqa: BLE001 - no record to abandon must mask the launch error
+        return
+    if (
+        str(meeting.get("meetingType") or "").strip().lower()
+        != CANDIDATE_GENERATION_MEETING_TYPE
+        or str(meeting.get("status") or "").strip().lower() != "open"
+        or _normalized_str_list(meeting.get("chatRoomRoundIds"))
+    ):
+        return
+    try:
+        meeting_rounds.supersede_empty_discussion_meeting(
+            team_id,
+            meeting_round_id,
+            actor="system:generation-open-failed",
+        )
+    except Exception:  # noqa: BLE001 - supersede race keeps the primary launch error
+        return
+
+
 def open_candidate_generation_meeting(
     team_id: str,
     question_id: str,
@@ -8346,6 +8384,9 @@ def open_candidate_generation_meeting(
             lifecycle="failed",
             supersedes_attempt_id=previous_attempt_id,
             error=f"{type(exc).__name__}: {exc}",
+        )
+        _abandon_open_generation_meeting_without_rounds(
+            normalized_team_id, meeting_round_id
         )
         raise
     _append_generation_attempt_state(

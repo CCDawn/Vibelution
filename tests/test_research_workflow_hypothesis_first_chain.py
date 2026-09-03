@@ -6139,6 +6139,160 @@ def test_closed_generation_without_candidates_allows_a_fresh_attempt(
         assert chain.needs_candidate_generation(team_id, _QUESTION_ID) is False
 
 
+def _generation_room_test_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    team_id, agents = _hf_env(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        question_launch,
+        "challenge_question_run_summary",
+        lambda _team_id: {"completedQuestionIds": [], "completedQuestionResults": []},
+    )
+    return team_id, agents
+
+
+def test_generation_meetings_host_in_isolated_per_question_rooms(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Sibling questions generate in their own rooms; the team room stays free.
+
+    Generation openings used to host their rounds in the team's linked room, so
+    one background generation made every sibling emission fail with
+    ``ChatRoomBusyError``.  Each question now owns a deterministic
+    ``room-hf-gen-`` room and a same-question replay reuses the same meeting
+    and room.
+    """
+    team_id, agents = _generation_room_test_env(tmp_path, monkeypatch)
+    team_room = team_service.get_team(team_id)["linkedChatRoomId"]
+
+    with server_operator_scope("u-1", roles=("operator",)):
+        first = chain.open_candidate_generation_meeting(
+            team_id, _QUESTION_ID, agent_runner=_candidate_generation_runner
+        )
+        sibling_question = "SCI-095"
+        second = chain.open_candidate_generation_meeting(
+            team_id, sibling_question, agent_runner=_candidate_generation_runner
+        )
+
+    first_room = first["roomId"]
+    second_room = second["roomId"]
+    assert first_room.startswith("room-hf-gen-")
+    assert second_room.startswith("room-hf-gen-")
+    assert first_room != second_room
+    assert first_room != team_room and second_room != team_room
+    assert first["meetingRound"]["linkedChatRoomId"] == first_room
+    assert second["meetingRound"]["linkedChatRoomId"] == second_room
+    # The team room hosted nothing: sibling emissions can never collide there.
+    assert chat_room_service.get_chat_room_detail(team_room)["rounds"] == []
+
+    with server_operator_scope("u-1", roles=("operator",)):
+        replay = chain.open_candidate_generation_meeting(
+            team_id, _QUESTION_ID, agent_runner=_candidate_generation_runner
+        )
+    assert replay["status"] == "reused"
+    assert replay["meetingRound"]["meetingRoundId"] == first["meetingRound"]["meetingRoundId"]
+    assert replay["roomId"] == first_room
+
+    # Digest source refs point into the hosting room, so every consumer that
+    # reads the meeting record follows the isolated room.
+    agent_ids = [agents[role] for role in _ROLES]
+    with server_operator_scope("u-1", roles=("operator",)):
+        _drive_to_awaiting_approval(team_id, first["meetingRound"]["meetingRoundId"], agent_ids[0])
+    meeting = meetings.get_meeting_round(team_id, first["meetingRound"]["meetingRoundId"])[
+        "meetingRound"
+    ]
+    draft = dict(meeting.get("digestDraft") or {})
+    source_refs = [str(item) for item in list(draft.get("sourceMessageRefs") or [])]
+    assert source_refs
+    assert all(ref.startswith(f"{first_room}/") for ref in source_refs)
+
+
+def test_generation_open_busy_failure_leaves_no_open_zero_round_meeting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A busy/failed launch must not leave an open zero-round meeting behind.
+
+    The meeting record is committed before the opening round starts; when the
+    round start is rejected the just-created record is superseded with the
+    same append-only empty-discussion recovery, and the next open rolls to a
+    fresh per-attempt id instead of adopting a dead open record.
+    """
+    team_id, _agents = _generation_room_test_env(tmp_path, monkeypatch)
+
+    def _busy_start(room_id, *args, **kwargs):
+        raise chat_room_service.ChatRoomBusyError(
+            "Chat room already has an active round."
+        )
+
+    original_start = chat_room_service.start_chat_room_round
+    monkeypatch.setattr(chat_room_service, "start_chat_room_round", _busy_start)
+    with server_operator_scope("u-1", roles=("operator",)):
+        with pytest.raises(chat_room_service.ChatRoomBusyError):
+            chain.open_candidate_generation_meeting(
+                team_id, _QUESTION_ID, agent_runner=_candidate_generation_runner
+            )
+    generation_meetings = [
+        meeting
+        for meeting in meetings.list_meeting_rounds(team_id)["meetings"]
+        if meeting.get("meetingType") == "hypothesis_candidate_generation"
+    ]
+    assert len(generation_meetings) == 1
+    failed_meeting = generation_meetings[0]
+    assert failed_meeting["status"] == "closed"
+    assert failed_meeting["recoveryReason"] == "discussion_has_no_completed_messages"
+    assert failed_meeting["closedBy"] == "system:generation-open-failed"
+    attempts = chain.list_generation_attempts(team_id, question_id=_QUESTION_ID)[
+        "attempts"
+    ]
+    assert attempts[-1]["lifecycle"] == "failed"
+
+    monkeypatch.setattr(chat_room_service, "start_chat_room_round", original_start)
+    with server_operator_scope("u-1", roles=("operator",)):
+        retried = chain.open_candidate_generation_meeting(
+            team_id, _QUESTION_ID, agent_runner=_candidate_generation_runner
+        )
+    assert retried["status"] == "opened"
+    assert retried["meetingRound"]["meetingRoundId"].endswith("-a2")
+    assert retried["roomId"] != team_service.get_team(team_id)["linkedChatRoomId"]
+
+
+def test_legacy_team_room_generation_record_replays_in_team_room(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Old records bound to the team room keep reopening there, no migration.
+
+    Only meetings created after the room isolation move to a ``room-hf-gen-``
+    room; replaying an existing record must reuse its stored
+    ``linkedChatRoomId`` verbatim.
+    """
+    team_id, _agents = _generation_room_test_env(tmp_path, monkeypatch)
+    team_room = team_service.get_team(team_id)["linkedChatRoomId"]
+
+    # Seed a record exactly like the pre-isolation runtime produced: the
+    # generation meeting linked to the team's room.
+    original_resolver = meeting_runtime._resolve_preformal_generation_room
+    monkeypatch.setattr(
+        meeting_runtime,
+        "_resolve_preformal_generation_room",
+        lambda *args, **kwargs: (team_room, None),
+    )
+    with server_operator_scope("u-1", roles=("operator",)):
+        legacy = chain.open_candidate_generation_meeting(
+            team_id, _QUESTION_ID, agent_runner=_candidate_generation_runner
+        )
+    monkeypatch.setattr(
+        meeting_runtime, "_resolve_preformal_generation_room", original_resolver
+    )
+    legacy_meeting_id = legacy["meetingRound"]["meetingRoundId"]
+    assert legacy["roomId"] == team_room
+
+    with server_operator_scope("u-1", roles=("operator",)):
+        replay = chain.open_candidate_generation_meeting(
+            team_id, _QUESTION_ID, agent_runner=_candidate_generation_runner
+        )
+    assert replay["status"] == "reused"
+    assert replay["meetingRound"]["meetingRoundId"] == legacy_meeting_id
+    assert replay["roomId"] == team_room
+
+
 def test_failed_review_round_can_be_reopened_with_next_budgeted_round(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -184,6 +184,7 @@ _SUMMARY_DRAFT_LOCKS_GUARD = threading.Lock()
 _SUMMARY_DRAFT_LOCKS: dict[tuple[str, str], tuple[Any, int]] = {}
 _SCOPED_DISCUSSION_SCOPE_AUTHORITY = "workflow_discussion_scope.v1"
 _PREFORMAL_CANDIDATE_ROOM_SOURCE = "hypothesis_first_candidate_review.v1"
+_PREFORMAL_GENERATION_ROOM_SOURCE = "hypothesis_first_candidate_generation.v1"
 _PREFORMAL_DISCUSSION_SCOPE_AUTHORITY = "preformal_candidate_review_scope.v1"
 
 
@@ -453,6 +454,13 @@ def _resolve_scoped_meeting_room(
     """Bind role-resolved Agents to hidden Child Sessions and one room."""
 
     if scope is None:
+        if meeting_type == CANDIDATE_GENERATION_MEETING_TYPE:
+            return _resolve_preformal_generation_room(
+                team_id,
+                request,
+                base_room_id=base_room_id,
+                participant_resolution=participant_resolution,
+            )
         return _resolve_preformal_candidate_review_room(
             team_id,
             request,
@@ -545,6 +553,137 @@ def _resolve_scoped_meeting_room(
     if not room_id:
         raise ResearchMeetingRuntimeError("formal discussion room resolver returned no roomId")
     return room_id, scope
+
+
+def _resolve_preformal_generation_room(
+    team_id: str,
+    request: Mapping[str, Any],
+    *,
+    base_room_id: str,
+    participant_resolution: Mapping[str, Any],
+) -> tuple[str, None]:
+    """Allocate one deterministic per-question room for an unscoped generation meeting.
+
+    Generation openings used to host their rounds in the team's linked room, so
+    one background generation kept every sibling question's emission from
+    opening (``ChatRoomBusyError``) and made batch generation strictly serial.
+    The room id derives from team+question only, so retries and per-attempt
+    regeneration reuse the same room while sibling questions generate in their
+    own rooms.  An existing meeting record keeps its stored room binding:
+    legacy records linked to the team room must keep reopening there without a
+    data migration.  Speakers still resolve from the team's linked room, so the
+    roster and their sessions are unchanged; only the hosting room moves.
+    """
+
+    from core.web.services import chat_room_service
+
+    question_id = str(request.get("questionId") or "").strip().upper()
+    meeting_round_id = str(request.get("meetingRoundId") or "").strip()
+    if not question_id or not meeting_round_id:
+        raise ResearchMeetingRuntimeError(
+            "preformal generation room requires question and meeting ids"
+        )
+
+    try:
+        existing_meeting = meeting_rounds.get_meeting_round(
+            team_id, meeting_round_id
+        )["meetingRound"]
+    except meeting_rounds.ResearchMeetingRoundNotFoundError:
+        existing_meeting = None
+    if isinstance(existing_meeting, Mapping):
+        stored_room_id = str(existing_meeting.get("linkedChatRoomId") or "").strip()
+        if stored_room_id:
+            return stored_room_id, None
+
+    normalized_team_id = str(team_id or "").strip()
+    room_id = (
+        "room-hf-gen-"
+        + sha256_hex({"teamId": normalized_team_id, "questionId": question_id})[:24]
+    )
+    expected_config = {
+        "source": _PREFORMAL_GENERATION_ROOM_SOURCE,
+        "teamId": normalized_team_id,
+        "questionId": question_id,
+    }
+    base_room = chat_room_service.get_chat_room_detail(base_room_id)
+    participant_agent_ids = _normalized_str_list(
+        participant_resolution.get("participants")
+    )
+    if not participant_agent_ids:
+        raise ResearchMeetingRuntimeError(
+            "preformal generation room requires a resolved participant roster"
+        )
+    base_bindings = _room_participant_bindings(base_room)
+    expected_by_agent_id: dict[str, str] = {}
+    for agent_id in participant_agent_ids:
+        session_id = base_bindings.get(agent_id, "")
+        if not session_id:
+            raise ResearchMeetingRuntimeError(
+                "team linked chat room is missing a generation speaker session"
+                f" for {agent_id}"
+            )
+        expected_by_agent_id[agent_id] = session_id
+    participant_contexts = _derived_room_participant_contexts(
+        base_room, participant_resolution, participant_agent_ids
+    )
+    participant_session_ids = [
+        expected_by_agent_id[agent_id] for agent_id in participant_agent_ids
+    ]
+
+    existing = chat_room_service.get_chat_room_detail(room_id)
+    if isinstance(existing, Mapping):
+        config = (
+            existing.get("config")
+            if isinstance(existing.get("config"), Mapping)
+            else {}
+        )
+        if any(
+            str(config.get(key) or "") != value
+            for key, value in expected_config.items()
+        ):
+            raise ResearchMeetingRuntimeError(
+                "preformal generation room is already bound to different content"
+            )
+        bound_by_agent_id = _room_participant_bindings(existing)
+        if bound_by_agent_id != expected_by_agent_id:
+            if set(bound_by_agent_id) != set(expected_by_agent_id):
+                raise ResearchMeetingRuntimeError(
+                    "preformal generation room roster does not match the"
+                    " resolved participants"
+                )
+            try:
+                rebound = chat_room_service.update_chat_room(
+                    room_id,
+                    participant_session_ids=participant_session_ids,
+                    participant_contexts_by_agent_id=participant_contexts,
+                    config={**dict(config), **expected_config},
+                )
+            except chat_room_service.ChatRoomBusyError as exc:
+                raise ResearchMeetingRuntimeError(
+                    "preformal generation room is busy and cannot be rebound"
+                    " to the team speaker sessions"
+                ) from exc
+            if _room_participant_bindings(rebound) != expected_by_agent_id:
+                raise ResearchMeetingRuntimeError(
+                    "preformal generation room participant sessions do not"
+                    " match the roster"
+                )
+        return room_id, None
+
+    created = chat_room_service.create_chat_room(
+        room_id=room_id,
+        title=f"{question_id} | 候选生成",
+        participant_session_ids=participant_session_ids,
+        participant_contexts_by_agent_id=participant_contexts,
+        mode="round_robin",
+        purpose="meeting",
+        config=expected_config,
+    )
+    if _room_participant_bindings(created) != expected_by_agent_id:
+        raise ResearchMeetingRuntimeError(
+            "preformal generation room participant sessions do not match the roster"
+        )
+    return room_id, None
 
 
 def _resolve_preformal_candidate_review_room(
