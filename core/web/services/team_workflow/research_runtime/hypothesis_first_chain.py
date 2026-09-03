@@ -26,6 +26,7 @@ collection requests.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import os
@@ -10609,6 +10610,125 @@ def _materialize_stage_one_plan_authority(
     )
 
 
+def _materialize_hypothesis_set_human_gate(
+    *,
+    team_id: str,
+    workflow_run_id: str,
+    question_id: str,
+    source_collection_run_id: str,
+    round_record: Mapping[str, Any],
+    meeting_ids: set[str],
+    errors: dict[str, str],
+) -> dict[str, Any]:
+    """Embed the closeout human gate into the node's ``hypothesis_set`` row.
+
+    The stage-one closeout demands a ``human_gate`` mapping inside the
+    ``hypothesis_set`` payload, and the only real authority for that gate is
+    the persisted chain human adjudication of the accepted round
+    (``HUMAN_ADJUDICATION_KIND`` with ``decision == "accepted"``).  So the
+    gate is embedded only from that record — never synthesized — and a
+    missing/rejected adjudication stays blocked: closeout keeps failing with
+    ``stage_one_human_gate_missing`` exactly as before.
+
+    The ungated row itself is immutable; the gated payload is appended as a
+    new row whose identity derives from the row it upgrades, so the scoped
+    readback (latest row wins) resolves the gated authority and replays are
+    idempotent.  Field shape mirrors the stage1_research_plan gate
+    (``required``/``decision``/``rationale``) plus the adjudication
+    provenance that makes the decision traceable.
+    """
+
+    from .stage_one_closeout import payload_human_gates
+    from .workflow_artifact_store import list_workflow_artifacts, put_workflow_artifact
+
+    rows = [
+        row
+        for row in list_workflow_artifacts(
+            team_id,
+            kind="hypothesis_set",
+            workflow_run_id=workflow_run_id,
+            source_collection_run_id=source_collection_run_id,
+        )
+        if isinstance(row.get("payload"), Mapping) and row.get("payload")
+    ]
+    if not rows:
+        # The artifact requirement gate owns the missing-artifact semantics;
+        # there is nothing to gate yet.
+        return {"status": "absent", "blockerCodes": []}
+    base_row = rows[-1]
+    base_payload = dict(base_row["payload"])
+    report = {
+        "status": "blocked",
+        "blockerCodes": [],
+        "baseRecordId": str(base_row.get("recordId") or ""),
+    }
+    if next(payload_human_gates(base_payload), None) is not None:
+        # The latest authority already carries a gate (replay, or the
+        # writeback already recorded one): reuse, never rewrite.
+        return {**report, "status": "present"}
+    adjudication = _latest_round_adjudication(
+        _read_jsonl(_storage_path(team_id)),
+        question_id=question_id,
+        round_id=str(round_record.get("roundId") or "").strip(),
+        meeting_ids=meeting_ids or None,
+    )
+    if adjudication is None or (
+        str(adjudication.get("decision") or "").strip().lower() != "accepted"
+    ):
+        return {
+            **report,
+            "blockerCodes": ["stage_one_human_gate_missing"],
+        }
+    adjudication_id = str(adjudication.get("adjudicationId") or "").strip()
+    round_id = str(round_record.get("roundId") or "").strip()
+    decided_by = str(adjudication.get("decidedBy") or "").strip()
+    decided_at = str(adjudication.get("createdAt") or "").strip()
+    rationale = str(adjudication.get("rationale") or "").strip() or (
+        f"Human adjudication {adjudication_id} accepted hypothesis round "
+        f"{round_id}."
+    )
+    gate = {
+        "required": True,
+        "decision": "approved",
+        "rationale": rationale,
+        "source": "chain_human_adjudication",
+        "adjudicationId": adjudication_id,
+        "hypothesisRoundId": round_id,
+        "decidedBy": decided_by,
+        "decidedAt": decided_at,
+    }
+    gated_payload = {**copy.deepcopy(base_payload), "human_gate": gate}
+    base_record_id = str(base_row.get("recordId") or "").strip()
+    try:
+        stored = put_workflow_artifact(
+            team_id,
+            kind="hypothesis_set",
+            workflow_run_id=workflow_run_id,
+            source_collection_run_id=str(
+                base_row.get("sourceCollectionRunId") or source_collection_run_id
+            ).strip(),
+            artifact_identity=(
+                f"{base_record_id}:human-gate" if base_record_id else ""
+            ),
+            payload=gated_payload,
+        )
+    except Exception as exc:  # noqa: BLE001 - fail closed, report the cause
+        errors["hypothesis_set"] = str(exc) or type(exc).__name__
+        return {
+            **report,
+            "blockerCodes": ["stage_one_human_gate_embedding_failed"],
+        }
+    return {
+        "status": "embedded",
+        "baseRecordId": base_record_id,
+        "recordId": str(stored.get("recordId") or ""),
+        "contentHash": str(stored.get("contentHash") or ""),
+        "adjudicationId": adjudication_id,
+        "hypothesisRoundId": round_id,
+        "decidedBy": decided_by,
+    }
+
+
 def _classify_round_failure(exc: BaseException) -> str:
     """Map one generation failure to a stable machine-readable failure code."""
     type_name = type(exc).__name__
@@ -11300,6 +11420,29 @@ def materialize_stage_one_node_authority(
             blockers_by_kind["stage1_research_plan"] = plan_blockers
             blockers_by_kind["competition_alignment"] = list(plan_blockers)
 
+    # hypothesis_set human gate — the node's own authority still needs its
+    # closeout human gate.  The gate is ONLY the persisted real chain human
+    # adjudication of the accepted round (decision ``accepted``): without such
+    # a record nothing is embedded and closeout keeps failing closed with
+    # ``stage_one_human_gate_missing``.  The gated payload is written as a new
+    # append-only row whose identity derives from the ungated row it upgrades,
+    # so replays are idempotent and no existing artifact is rewritten.
+    hypothesis_set_gate_report = _materialize_hypothesis_set_human_gate(
+        team_id=team,
+        workflow_run_id=run,
+        question_id=question,
+        source_collection_run_id=source,
+        round_record=accepted_round,
+        meeting_ids=meeting_ids,
+        errors=errors,
+    )
+    if hypothesis_set_gate_report.get("status") == "blocked":
+        blockers_by_kind["hypothesis_set"] = [
+            str(code)
+            for code in list(hypothesis_set_gate_report.get("blockerCodes") or [])
+            if str(code).strip()
+        ] or ["stage_one_human_gate_missing"]
+
     ordered = list(STAGE_ONE_NODE_AUTHORITY_KINDS)
     # Launch-shape conditional waivers: hypothesis-first chain launches cannot
     # demand authorities whose source (approved question artifact /
@@ -11355,6 +11498,11 @@ def materialize_stage_one_node_authority(
         "blockerCodes": blockers_by_kind,
         **({"errors": errors} if errors else {}),
         **({"dimensionRefRepair": repair_report} if repair_report else {}),
+        **(
+            {"hypothesisSetGate": dict(hypothesis_set_gate_report)}
+            if hypothesis_set_gate_report.get("status") != "absent"
+            else {}
+        ),
     }
 
 

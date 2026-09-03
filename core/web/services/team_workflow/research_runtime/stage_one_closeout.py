@@ -225,16 +225,22 @@ def _receipt_payloads(value: Any) -> Iterable[Mapping[str, Any]]:
             yield from _receipt_payloads(child)
 
 
-def _human_gates(value: Any) -> Iterable[Mapping[str, Any]]:
+def payload_human_gates(value: Any) -> Iterable[Mapping[str, Any]]:
+    """Every ``human_gate``/``humanGate`` mapping nested inside ``value``.
+
+    Public so the hypothesis_set materializer discovers gates with the exact
+    same walk the closeout validator consumes — the two sides cannot drift.
+    """
+
     if isinstance(value, Mapping):
         for key, child in value.items():
             if key in {"human_gate", "humanGate"} and isinstance(child, Mapping):
                 yield child
             else:
-                yield from _human_gates(child)
+                yield from payload_human_gates(child)
     elif isinstance(value, list):
         for child in value:
-            yield from _human_gates(child)
+            yield from payload_human_gates(child)
 
 
 def _validate_human_tasks(record: Mapping[str, Any]) -> None:
@@ -369,7 +375,7 @@ def evaluate_stage_one_closeout(
     for kind, kind_payloads in required_payloads.items():
         kind_gate_count = 0
         for payload in kind_payloads:
-            for gate in _human_gates(payload):
+            for gate in payload_human_gates(payload):
                 kind_gate_count += 1
                 human_gate_count += 1
                 if gate.get("required") is not True or str(gate.get("decision") or "").lower() != "approved":
@@ -988,6 +994,7 @@ __all__ = [
     "evaluate_ledger_stage_one_closeout",
     "evaluate_stage_one_closeout",
     "finalize_stage_one_closeout",
+    "payload_human_gates",
     "route_after_stage_one_closure",
     "stage_one_terminal_facts",
 ]

@@ -4159,7 +4159,15 @@ def _latest_requirement_matrix(
     team_id: str,
     run_ids: Sequence[str],
 ) -> dict[str, Any] | None:
-    """Return the newest competition-alignment payload across the scoped runs."""
+    """Newest §2.5 official requirement matrix across the scoped runs.
+
+    ``competition_alignment`` payloads carry the matrix nested under
+    ``officialRequirementMatrix`` (the same member the stage-one closeout
+    validator reads); a payload that already is the bare matrix keeps passing
+    through untouched.  Feeding the whole alignment payload into
+    ``requirement_matrix_from_dict`` instead is what produced the
+    ``unsupported fields`` StageOneRequirementMatrixError 500 on state-v2.
+    """
 
     from .workflow_artifact_store import list_workflow_artifacts
 
@@ -4176,7 +4184,13 @@ def _latest_requirement_matrix(
             updated = str(row.get("updatedAt") or "")
             if best is None or updated > best[0]:
                 best = (updated, dict(payload))
-    return best[1] if best else None
+    if best is None:
+        return None
+    payload = best[1]
+    raw_matrix = payload.get("officialRequirementMatrix")
+    if isinstance(raw_matrix, Mapping):
+        return dict(raw_matrix)
+    return payload
 
 
 def _scope_records(

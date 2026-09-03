@@ -2368,3 +2368,354 @@ def test_chain_iteration_recovery_stays_fail_closed(
     assert not workflow_artifact_store.list_workflow_artifacts(
         team_id, kind="feedback_iterations", workflow_run_id=_RUN_ID
     )
+
+
+# ---------------------------------------------------------------------------
+# Stage-one closeout human gates: state-v2 matrix readback + hypothesis_set
+# human-gate embedding from the real chain human adjudication.
+# ---------------------------------------------------------------------------
+
+
+def _new_shape_alignment_payload() -> dict[str, Any]:
+    """competition_alignment payload exactly as the live plan writer emits it."""
+    from core.research.competition.stage_one_completion_policy import (
+        load_stage_one_completion_policy,
+    )
+    from core.research.competition.stage_one_requirement_matrix import (
+        G1_REQUIRED_EVIDENCE_KINDS,
+        evaluate_stage_one_requirement_matrix,
+        matrix_to_dict,
+    )
+
+    return {
+        "schemaVersion": 1,
+        "artifactKind": "competition_alignment",
+        "questionIdentity": {
+            "catalog_id": "science-125-questions-2021",
+            "question_id": _QUESTION_ID,
+            "question_en": "Canonical question",
+        },
+        "selectedHypothesis": {
+            "hypothesisId": "cand-a",
+            "statement": "A bounded proxy improves reconstruction under noise.",
+        },
+        "competitionResultView": {
+            "problem_statement": "Canonical competition problem.",
+            "paper_title": "Planned paper",
+        },
+        "sourceQuestionRunId": _RUN_ID,
+        "sourceArtifactSha256": "f" * 64,
+        "officialRequirementMatrix": matrix_to_dict(
+            evaluate_stage_one_requirement_matrix(
+                {
+                    requirement_id: tuple(
+                        f"{kind}:ref" for kind in kinds
+                    )
+                    for requirement_id, kinds in G1_REQUIRED_EVIDENCE_KINDS.items()
+                }
+            ),
+            scope_id=load_stage_one_completion_policy().scopeId,
+        ),
+    }
+
+
+def test_state_v2_matrix_readback_parses_nested_alignment_payload(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The live alignment payload shape no longer 500s the state-v2 projection.
+
+    ``_latest_requirement_matrix`` must hand the §2.5 matrix member — not the
+    whole ``competition_alignment`` wrapper — to ``requirement_matrix_from_dict``;
+    feeding the wrapper is what raised ``requirement matrix contains unsupported
+    fields`` (a StageOneRequirementMatrixError 500 on state-v2).
+    """
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_first_state_v2 as state_v2,
+    )
+    from core.web.services.team_workflow.research_runtime.stage_one_closeout import (
+        _validate_requirement_matrices,
+    )
+
+    team_id = _env(tmp_path, monkeypatch)
+    alignment_payload = _new_shape_alignment_payload()
+    workflow_artifact_store.put_workflow_artifact(
+        team_id,
+        kind="competition_alignment",
+        workflow_run_id=_RUN_ID,
+        source_collection_run_id=_SC_RUN_ID,
+        payload=alignment_payload,
+    )
+
+    resolved = state_v2._latest_requirement_matrix(team_id, [_RUN_ID])
+
+    assert resolved == alignment_payload["officialRequirementMatrix"]
+    section = state_v2._direction_1a_submission_section(resolved)
+    assert section["source"] == "competition_alignment"
+    # Every G1_REQUIRED row is evidenced, but stage-one never implies
+    # direction-1A submission readiness (the other delivery classes stay
+    # not_yet_evidenced).
+    assert section["g1RequiredUnmet"] == []
+    assert section["submissionReady"] is False
+    assert "official_scale_out_125_questions" in section["notYetEvidenced"]
+    # The closeout matrix validator accepts the exact same nested payload.
+    _validate_requirement_matrices(
+        {"competition_alignment": [alignment_payload]}
+    )
+
+
+def _portfolio_payload() -> dict[str, Any]:
+    """Ungated node-own hypothesis_set artifact as the writeback records it."""
+    return {
+        "portfolioId": "portfolio-stage-one-gate",
+        "runId": _RUN_ID,
+        "maxCandidates": 4,
+        "maxEvolutionRounds": 3,
+        "candidates": [
+            {
+                "candidateId": "cand-a",
+                "claim": "A bounded proxy improves reconstruction under noise.",
+                "scores": {dimension: 0.8 for dimension in SCORE_DIMENSIONS},
+                "counterEvidenceRefs": ["artifact:counter-a"],
+                "derivedFromCandidateIds": [],
+                "status": "reviewed",
+                "reviewRef": "review-cand-a",
+            },
+            {
+                "candidateId": "cand-b",
+                "claim": "A higher-capacity decoder generalizes better.",
+                "scores": {dimension: 0.7 for dimension in SCORE_DIMENSIONS},
+                "counterEvidenceRefs": ["artifact:counter-b"],
+                "derivedFromCandidateIds": ["cand-a"],
+                "status": "reviewed",
+                "reviewRef": "review-cand-b",
+            },
+        ],
+        "hypothesis_count": 2,
+        "currentEvolutionRound": 1,
+        "createdFromTaskId": "task-stage-one-gate",
+        "createdFromSessionId": "sess-stage-one-gate",
+        "createdFromTurnId": "turn-stage-one-gate",
+    }
+
+
+def _seed_gate_materialization(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> str:
+    """Real-batch chain plus the ungated node hypothesis_set artifact."""
+    from core.web.services.team_workflow.research_runtime import question_launch
+
+    team_id = _env(tmp_path, monkeypatch)
+    _fake_candidate_store(
+        monkeypatch, sc_run_id=_SC_RUN_ID, candidate_ids=_BARE_SOURCE_IDS
+    )
+    _seed_real_batch_chain(team_id, rounds=3)
+    _seed_real_batch_round(team_id, round_id="hround-stage-one-real-batch-1")
+    _seed_problem_understanding(team_id)
+    monkeypatch.setattr(
+        question_launch, "_approved_details", lambda _team_id: {}
+    )
+    workflow_artifact_store.put_workflow_artifact(
+        team_id,
+        kind="hypothesis_set",
+        workflow_run_id=_RUN_ID,
+        source_collection_run_id=_SC_RUN_ID,
+        payload=_portfolio_payload(),
+    )
+    return team_id
+
+
+def _accepted_round(team_id: str) -> dict[str, Any]:
+    rounds = chain._question_hypothesis_rounds(team_id, _QUESTION_ID)
+    return rounds[-1]
+
+
+def _append_human_adjudication(
+    team_id: str,
+    round_record: dict[str, Any],
+    *,
+    decision: str,
+    adjudication_id: str,
+) -> None:
+    """Append one HUMAN_ADJUDICATION_KIND record in the canonical ledger shape."""
+    from collections.abc import Mapping
+
+    meeting_ids = [
+        str(ref.get("id") or "")
+        for ref in list(round_record.get("meetingRefs") or [])
+        if isinstance(ref, Mapping) and str(ref.get("kind") or "") == "meeting_round"
+    ]
+    chain._append_jsonl(
+        chain._storage_path(team_id),
+        {
+            "schemaVersion": 1,
+            "recordKind": chain.HUMAN_ADJUDICATION_KIND,
+            "adjudicationId": adjudication_id,
+            "idempotencyKey": f"key-{adjudication_id}",
+            "questionId": _QUESTION_ID,
+            "hypothesisRoundId": str(round_record.get("roundId") or ""),
+            "workflowRunId": _RUN_ID,
+            "meetingRoundIds": meeting_ids,
+            "decision": decision,
+            "rationale": "operator accepted the recommended hypothesis",
+            "decidedBy": "operator-console",
+            "createdAt": "2026-09-02T12:30:00Z",
+            "updatedAt": "2026-09-02T12:30:00Z",
+        },
+    )
+
+
+def test_accepted_human_adjudication_embeds_hypothesis_set_closeout_gate(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The real chain adjudication becomes the hypothesis_set human gate.
+
+    Positive path: the accepted-round adjudication is embedded into the node's
+    hypothesis_set payload, the closeout gate walk reads required+approved,
+    and a closeout that previously died on ``stage_one_human_gate_missing``
+    now proceeds past the human-gate demand.
+    """
+    from core.web.services.team_workflow.research_runtime.stage_one_closeout import (
+        evaluate_stage_one_closeout,
+        payload_human_gates,
+    )
+    from tests.test_research_workflow_stage_one_closeout import (
+        _receipt,
+        _stage_one_record,
+    )
+
+    team_id = _seed_gate_materialization(tmp_path, monkeypatch)
+    round_record = _accepted_round(team_id)
+    _append_human_adjudication(
+        team_id,
+        round_record,
+        decision="accepted",
+        adjudication_id="hf-adjudication-stage-one-gate",
+    )
+
+    report = chain.materialize_stage_one_node_authority(
+        team_id,
+        _QUESTION_ID,
+        workflow_run_id=_RUN_ID,
+        node_run_id=_NODE_RUN_ID,
+        input_snapshot_hash=_SNAPSHOT_HASH,
+        source_collection_run_id=_SC_RUN_ID,
+    )
+
+    assert report["hypothesisSetGate"]["status"] == "embedded"
+    assert report["hypothesisSetGate"]["adjudicationId"] == (
+        "hf-adjudication-stage-one-gate"
+    )
+    assert "hypothesis_set" not in report["blockerCodes"]
+    rows = workflow_artifact_store.list_workflow_artifacts(
+        team_id, kind="hypothesis_set", workflow_run_id=_RUN_ID
+    )
+    assert len(rows) == 2
+    # The ungated row stays untouched; the gated payload is a new append-only row.
+    assert rows[0]["payload"] == _portfolio_payload()
+    gate = rows[-1]["payload"]["human_gate"]
+    assert gate["required"] is True
+    assert gate["decision"] == "approved"
+    assert gate["source"] == "chain_human_adjudication"
+    assert gate["adjudicationId"] == "hf-adjudication-stage-one-gate"
+    assert gate["hypothesisRoundId"] == round_record["roundId"]
+    assert gate["decidedBy"] == "operator-console"
+
+    # The closeout gate walk discovers exactly this gate.
+    discovered = list(payload_human_gates(rows[-1]["payload"]))
+    assert len(discovered) == 1
+    assert discovered[0]["required"] is True
+    assert str(discovered[0]["decision"]).lower() == "approved"
+
+    # A closeout record carrying this payload passes the human-gate demand.
+    record = _stage_one_record()
+    record["artifactPayloads"]["hypothesis_set:hypothesis_set-artifact"] = {
+        **rows[-1]["payload"],
+        "modelInvocationReceipts": [_receipt("generation", record["runId"])],
+    }
+    outcome = evaluate_stage_one_closeout(record, node_id="hypothesis_design")
+    assert outcome is not None
+    assert outcome.status == "program_review_required"
+
+    # Replay is idempotent: the gated row already satisfies the gate probe.
+    replay = chain.materialize_stage_one_node_authority(
+        team_id,
+        _QUESTION_ID,
+        workflow_run_id=_RUN_ID,
+        node_run_id=_NODE_RUN_ID,
+        input_snapshot_hash=_SNAPSHOT_HASH,
+        source_collection_run_id=_SC_RUN_ID,
+    )
+    assert replay["hypothesisSetGate"]["status"] == "present"
+    assert len(
+        workflow_artifact_store.list_workflow_artifacts(
+            team_id, kind="hypothesis_set", workflow_run_id=_RUN_ID
+        )
+    ) == 2
+
+
+def test_without_accepted_adjudication_hypothesis_set_gate_stays_blocked(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No accepted adjudication means no gate — closeout keeps failing closed.
+
+    Both the missing-adjudication and the rejected-adjudication shapes leave
+    the node artifact untouched and the closeout blocked on
+    ``stage_one_human_gate_missing``.
+    """
+    from core.web.services.team_workflow.research_runtime.node_execution_support import (
+        NodeExecutionError,
+    )
+    from core.web.services.team_workflow.research_runtime.stage_one_closeout import (
+        evaluate_stage_one_closeout,
+    )
+    from tests.test_research_workflow_stage_one_closeout import (
+        _receipt,
+        _stage_one_record,
+    )
+
+    for decision in (None, "rejected"):
+        team_id = _seed_gate_materialization(tmp_path, monkeypatch)
+        round_record = _accepted_round(team_id)
+        if decision is not None:
+            _append_human_adjudication(
+                team_id,
+                round_record,
+                decision=decision,
+                adjudication_id=f"hf-adjudication-{decision}",
+            )
+
+        report = chain.materialize_stage_one_node_authority(
+            team_id,
+            _QUESTION_ID,
+            workflow_run_id=_RUN_ID,
+            node_run_id=_NODE_RUN_ID,
+            input_snapshot_hash=_SNAPSHOT_HASH,
+            source_collection_run_id=_SC_RUN_ID,
+        )
+
+        assert report["hypothesisSetGate"]["status"] == "blocked"
+        assert report["hypothesisSetGate"]["blockerCodes"] == [
+            "stage_one_human_gate_missing"
+        ]
+        assert report["blockerCodes"]["hypothesis_set"] == [
+            "stage_one_human_gate_missing"
+        ]
+        rows = workflow_artifact_store.list_workflow_artifacts(
+            team_id, kind="hypothesis_set", workflow_run_id=_RUN_ID
+        )
+        assert len(rows) == 1
+        assert rows[0]["payload"] == _portfolio_payload()
+        assert "human_gate" not in rows[0]["payload"]
+
+        record = _stage_one_record()
+        record["artifactPayloads"]["hypothesis_set:hypothesis_set-artifact"] = {
+            **rows[0]["payload"],
+            "modelInvocationReceipts": [_receipt("generation", record["runId"])],
+        }
+        with pytest.raises(NodeExecutionError) as excinfo:
+            evaluate_stage_one_closeout(record, node_id="hypothesis_design")
+        assert excinfo.value.code == "stage_one_human_gate_missing"
