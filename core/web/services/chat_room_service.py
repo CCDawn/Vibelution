@@ -248,6 +248,15 @@ _SPEAKER_BATCH_PARALLEL = "parallel"
 # same policy; ordinary rooms never retry.
 _SPEAKER_FENCE_RETRY_CONFIG_KEY = "speakerFenceRetry"
 _RETRIED_AFTER_FENCE_TIMING_KEY = "retriedAfterFence"
+# Idempotency guard at the speaker commit side: a byte-identical completed
+# speech from the same speaker in the same room (the observed retry-path
+# duplicate shape: one 4458-char speech published twice verbatim across
+# rounds) is dropped from the message stream with an explicit suppression
+# event instead of polluting the discussion context twice.  Only completed
+# speeches at or above this length are eligible; short control/ack messages
+# ("pass", brief agreements) legitimately repeat and stay untouched.
+_SPEAKER_DUPLICATE_SUPPRESSED_EVENT_CODE = "chat_room.speaker.duplicate_suppressed"
+_SPEAKER_DUPLICATE_GUARD_MIN_CONTENT_CHARS = 64
 # Worker ceiling for one round's speaker batch.  Reuses the process-wide LLM
 # concurrency budget as an operator ceiling; the batch width itself stays the
 # natural bound (meeting rosters are four speakers).
@@ -2184,9 +2193,9 @@ def _execute_chat_room_round(
                     _clear_chat_room_round_control(round_id)
                     return stopped
                 continue
-            messages.append(message)
             message_time = utc_now_iso()
             stop_pending = False
+            duplicate_of: tuple[dict[str, Any], str] | None = None
             with _CHAT_ROOM_LOCK:
                 state = _store().load()
                 live_room = _find_room(state, normalized_room_id)
@@ -2198,28 +2207,57 @@ def _execute_chat_room_round(
                 if _chat_room_round_is_terminal(live_room, target_round, round_id):
                     _clear_chat_room_round_control(round_id)
                     return _room_to_api(live_room)
-                if _chat_room_round_stop_reason(round_id):
-                    # A stop arrived between the outer check and this lock: persist
-                    # the latest messages without rewinding the round to running,
-                    # then let the shared stop finalizer close the round.  The
-                    # finalizer performs session sync (chat-state transaction), so
-                    # per the lock order contract it must run after releasing
-                    # _CHAT_ROOM_LOCK.
-                    target_round["messages"] = [dict(item) for item in messages]
-                    target_round["updatedAt"] = message_time
-                    _store().save(state)
-                    locked_room_snapshot = dict(live_room)
-                    stop_pending = True
-                else:
-                    target_round["messages"] = [dict(item) for item in messages]
-                    target_round["status"] = "running"
-                    target_round["updatedAt"] = message_time
-                    live_room["status"] = "running"
-                    live_room["activeRoundId"] = round_id
-                    live_room["updatedAt"] = message_time
-                    _store().save(state)
-                    room = dict(live_room)
-                    round_payload = dict(target_round)
+                # Speaker dedup guard: a byte-identical completed speech from
+                # the same speaker earlier in this room (the retry-path
+                # duplicate shape) is never committed into the message stream
+                # twice; it is dropped with an explicit suppression event.
+                duplicate_of = _find_committed_speaker_duplicate(
+                    live_room, round_id, messages, message
+                )
+                if duplicate_of is None:
+                    messages.append(message)
+                    if _chat_room_round_stop_reason(round_id):
+                        # A stop arrived between the outer check and this lock: persist
+                        # the latest messages without rewinding the round to running,
+                        # then let the shared stop finalizer close the round.  The
+                        # finalizer performs session sync (chat-state transaction), so
+                        # per the lock order contract it must run after releasing
+                        # _CHAT_ROOM_LOCK.
+                        target_round["messages"] = [dict(item) for item in messages]
+                        target_round["updatedAt"] = message_time
+                        _store().save(state)
+                        locked_room_snapshot = dict(live_room)
+                        stop_pending = True
+                    else:
+                        target_round["messages"] = [dict(item) for item in messages]
+                        target_round["status"] = "running"
+                        target_round["updatedAt"] = message_time
+                        live_room["status"] = "running"
+                        live_room["activeRoundId"] = round_id
+                        live_room["updatedAt"] = message_time
+                        _store().save(state)
+                        room = dict(live_room)
+                        round_payload = dict(target_round)
+            if duplicate_of is not None:
+                # Suppressed duplicates stay auditable, never silent.  A stop
+                # that engaged while this turn ran is honored exactly like the
+                # fence-skipped speaker path above.
+                _record_speaker_duplicate_suppressed_event(
+                    room,
+                    round_payload,
+                    participant,
+                    message,
+                    duplicate_of[0],
+                    duplicate_of[1],
+                    speaker_index=index,
+                    prompt_build_ms=prompt_build_ms,
+                    speaker_run_ms=speaker_run_ms,
+                )
+                stopped = _stopped_chat_room_round_detail(normalized_room_id, round_id)
+                if stopped is not None:
+                    _clear_chat_room_round_control(round_id)
+                    return stopped
+                continue
             if stop_pending:
                 stopped = _stopped_chat_room_round_detail(normalized_room_id, round_id)
                 if stopped is not None:
@@ -2852,6 +2890,98 @@ def _record_speaker_fence_retry_event(
         )
     except Exception:
         return
+
+
+def _find_committed_speaker_duplicate(
+    room: Mapping[str, Any],
+    current_round_id: str,
+    staged_messages: list[dict[str, Any]],
+    message: Mapping[str, Any],
+) -> tuple[dict[str, Any], str] | None:
+    """Return the earlier committed speech this turn duplicates, if any.
+
+    Guard granularity is room + participant: the room is the discussion
+    context unit (prior rounds feed later prompts), so a byte-identical
+    completed speech from the same speaker anywhere earlier in the same room
+    is a retry-path duplicate, not new content.  Only completed speeches with
+    non-trivial content are eligible — failed/stopped/blocked turns and short
+    control or acknowledgement messages keep their existing semantics.
+    """
+
+    participant_id = str(message.get("participantId") or "").strip()
+    content = str(message.get("content") or "")
+    if (
+        str(message.get("status") or "").strip().lower() != "completed"
+        or not participant_id
+        or len(content) < _SPEAKER_DUPLICATE_GUARD_MIN_CONTENT_CHARS
+    ):
+        return None
+    normalized_round_id = str(current_round_id or "").strip()
+    candidates: list[tuple[Mapping[str, Any], str]] = [
+        (item, normalized_round_id)
+        for item in staged_messages
+        if isinstance(item, Mapping)
+    ]
+    for round_payload in list(room.get("rounds") or []):
+        if not isinstance(round_payload, Mapping):
+            continue
+        round_id_of_payload = str(round_payload.get("roundId") or "").strip()
+        if round_id_of_payload == normalized_round_id:
+            # The live round's persisted prefix is already covered by
+            # ``staged_messages``.
+            continue
+        candidates.extend(
+            (item, round_id_of_payload)
+            for item in list(round_payload.get("messages") or [])
+            if isinstance(item, Mapping)
+        )
+    for prior, prior_round_id in candidates:
+        if str(prior.get("participantId") or "").strip() != participant_id:
+            continue
+        if str(prior.get("status") or "").strip().lower() != "completed":
+            continue
+        if str(prior.get("content") or "") == content:
+            return dict(prior), prior_round_id
+    return None
+
+
+def _record_speaker_duplicate_suppressed_event(
+    room: Mapping[str, Any],
+    round_payload: Mapping[str, Any],
+    participant: Mapping[str, Any],
+    message: Mapping[str, Any],
+    duplicate_of: Mapping[str, Any],
+    duplicate_round_id: str,
+    *,
+    speaker_index: int,
+    prompt_build_ms: float,
+    speaker_run_ms: float,
+) -> None:
+    """Record the explicit dedup marker; suppressed duplicates are never
+    silently dropped."""
+
+    timings = message.get("timings") if isinstance(message.get("timings"), Mapping) else {}
+    _record_room_event(
+        "speaker",
+        _SPEAKER_DUPLICATE_SUPPRESSED_EVENT_CODE,
+        dict(room),
+        dict(round_payload),
+        fields={
+            "participantId": str(participant.get("participantId") or "").strip(),
+            "sessionId": str(participant.get("sessionId") or "").strip(),
+            "speakerIndex": speaker_index,
+            "contentChars": len(str(message.get("content") or "")),
+            "duplicateOfMessageId": str(duplicate_of.get("messageId") or "").strip(),
+            "duplicateOfRoundId": str(duplicate_round_id or "").strip(),
+            "duplicateOfTimestamp": str(duplicate_of.get("timestamp") or "").strip(),
+            "retriedAfterFence": bool((timings or {}).get(_RETRIED_AFTER_FENCE_TIMING_KEY)),
+            "promptBuildMs": prompt_build_ms,
+            "speakerRunMs": speaker_run_ms,
+            **_participant_team_event_fields(dict(participant)),
+        },
+        outcome="deduplicated",
+        level="warning",
+    )
 
 
 def _finish_speaker_turn(

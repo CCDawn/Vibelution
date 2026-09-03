@@ -5664,3 +5664,165 @@ def test_ordinary_room_never_retries_zero_output_speaker(tmp_path, monkeypatch):
     assert attempts == {"session-alpha": 1, "session-beta": 1}
     assert latest["messages"][0]["content"] == ""
     assert latest["messages"][0]["timings"].get("retriedAfterFence") is None
+
+
+def test_chat_room_suppresses_byte_identical_repeat_speech_from_same_speaker(
+    tmp_path, monkeypatch
+):
+    """SCI-091 复读守卫：同一讲者逐字节相同的完成发言只进一次消息流。
+
+    重试路径可能把同一篇发言重复提交（同一讲者跨轮逐字节复读）。提交侧
+    幂等守卫保留首次发言；后续逐字节相同的发言不再注入房间消息流，改为
+    记录一条显式去重事件便于排查；内容有变化的发言零影响。
+    """
+
+    _isolate_chat_room_kernel(tmp_path, monkeypatch)
+    _seed_chat_sessions(tmp_path)
+    recorded_events = []
+    monkeypatch.setattr(
+        chat_room_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded_events.append((args, kwargs)) or {"accepted": True},
+    )
+    alpha_speech = (
+        "本轮我维持原有判断：先收敛 API 契约再评估前端改造成本，"
+        "依据是现有调用方尚未稳定，过早扩展会放大联调风险，"
+        "建议本轮只锁定接口边界，不做实现展开。"
+    )
+    assert len(alpha_speech) >= chat_room_service._SPEAKER_DUPLICATE_GUARD_MIN_CONTENT_CHARS
+    alpha_calls = {"count": 0}
+    beta_calls = {"count": 0}
+
+    def fake_runner(participant, _prompt, _context):
+        if participant["sessionId"] == "session-alpha":
+            alpha_calls["count"] += 1
+            if alpha_calls["count"] == 2:
+                # 第 2 轮逐字节重放第 1 轮发言：重试路径重复提交形态。
+                return {"status": "completed", "raw_output": alpha_speech, "summary": "ok"}
+            if alpha_calls["count"] == 3:
+                # 第 3 轮内容有变化：必须原样保留。
+                return {
+                    "status": "completed",
+                    "raw_output": alpha_speech + " 补充一条新论据。",
+                    "summary": "ok",
+                }
+            return {"status": "completed", "raw_output": alpha_speech, "summary": "ok"}
+        beta_calls["count"] += 1
+        return {
+            "status": "completed",
+            "raw_output": f"我同意先收敛接口边界，这是第 {beta_calls['count']} 轮意见。",
+            "summary": "ok",
+        }
+
+    room = chat_room_service.create_chat_room(
+        title="复读守卫群聊",
+        participant_session_ids=["session-alpha", "session-beta"],
+    )
+
+    detail_round1 = chat_room_service.start_chat_room_round(
+        room["roomId"], "讨论第一轮", agent_runner=fake_runner
+    )
+    detail_round2 = chat_room_service.start_chat_room_round(
+        room["roomId"], "讨论第二轮", agent_runner=fake_runner
+    )
+    detail_round3 = chat_room_service.start_chat_room_round(
+        room["roomId"], "讨论第三轮", agent_runner=fake_runner
+    )
+
+    round1 = detail_round1["rounds"][-1]
+    round2 = detail_round2["rounds"][-1]
+    round3 = detail_round3["rounds"][-1]
+    assert round1["status"] == "completed"
+    alpha_round1 = next(
+        message for message in round1["messages"] if message["sessionId"] == "session-alpha"
+    )
+    assert alpha_round1["content"] == alpha_speech
+
+    # 第 2 轮：重复发言不再进入消息流，只保留 Beta 的新发言。
+    assert round2["status"] == "completed"
+    assert [message["sessionId"] for message in round2["messages"]] == ["session-beta"]
+
+    # 去重标记事件可排查、不静默。
+    dedup_events = [
+        event
+        for event in recorded_events
+        if event[0][:3]
+        == ("chat_room", "speaker", "chat_room.speaker.duplicate_suppressed")
+    ]
+    assert len(dedup_events) == 1
+    dedup_fields = dedup_events[0][1]["fields"]
+    assert dedup_fields["participantId"] == alpha_round1["participantId"]
+    assert dedup_fields["duplicateOfMessageId"] == alpha_round1["messageId"]
+    assert dedup_fields["duplicateOfRoundId"] == round1["roundId"]
+    assert dedup_fields["contentChars"] == len(alpha_speech)
+    assert dedup_fields["retriedAfterFence"] is False
+    assert dedup_events[0][1]["outcome"] == "deduplicated"
+
+    # 第 3 轮内容有变化：照常入流；全房间该讲者原文只提交过一次。
+    assert round3["status"] == "completed"
+    alpha_round3 = next(
+        message for message in round3["messages"] if message["sessionId"] == "session-alpha"
+    )
+    assert alpha_round3["content"] == alpha_speech + " 补充一条新论据。"
+    final_detail = chat_room_service.get_chat_room_detail(room["roomId"])
+    committed_alpha_contents = [
+        message.get("content")
+        for round_payload in final_detail["rounds"]
+        for message in round_payload.get("messages") or []
+        if message.get("sessionId") == "session-alpha"
+    ]
+    assert committed_alpha_contents == [alpha_speech, alpha_speech + " 补充一条新论据。"]
+
+
+def test_chat_room_keeps_short_repeat_and_changed_speaker_messages(tmp_path, monkeypatch):
+    """守卫只拦长文逐字节复读：短消息/pass 类发言的既有重复语义不变。"""
+
+    _isolate_chat_room_kernel(tmp_path, monkeypatch)
+    _seed_chat_sessions(tmp_path)
+    recorded_events = []
+    monkeypatch.setattr(
+        chat_room_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded_events.append((args, kwargs)) or {"accepted": True},
+    )
+    short_speech = "pass，本轮我先观察，下一轮再给意见。"
+    assert len(short_speech) < chat_room_service._SPEAKER_DUPLICATE_GUARD_MIN_CONTENT_CHARS
+
+    def fake_runner(participant, _prompt, _context):
+        if participant["sessionId"] == "session-alpha":
+            # 同一短发言在两轮逐字节重复：守卫不拦截。
+            return {"status": "completed", "raw_output": short_speech, "summary": "ok"}
+        return {"status": "completed", "raw_output": "我补充一条数据来源。", "summary": "ok"}
+
+    room = chat_room_service.create_chat_room(
+        title="短消息重复群聊",
+        participant_session_ids=["session-alpha", "session-beta"],
+    )
+    detail_round1 = chat_room_service.start_chat_room_round(
+        room["roomId"], "讨论一轮", agent_runner=fake_runner
+    )
+    detail_round2 = chat_room_service.start_chat_room_round(
+        room["roomId"], "讨论二轮", agent_runner=fake_runner
+    )
+
+    round2 = detail_round2["rounds"][-1]
+    assert round2["status"] == "completed"
+    alpha_round2 = [
+        message for message in round2["messages"] if message["sessionId"] == "session-alpha"
+    ]
+    assert [message["content"] for message in alpha_round2] == [short_speech]
+    assert not [
+        event
+        for event in recorded_events
+        if event[0][:3]
+        == ("chat_room", "speaker", "chat_room.speaker.duplicate_suppressed")
+    ]
+    final_detail = chat_room_service.get_chat_room_detail(room["roomId"])
+    committed_alpha_contents = [
+        message.get("content")
+        for round_payload in final_detail["rounds"]
+        for message in round_payload.get("messages") or []
+        if message.get("sessionId") == "session-alpha"
+    ]
+    # 短消息两轮逐字节相同仍都保留，语义零改变。
+    assert committed_alpha_contents == [short_speech, short_speech]
