@@ -1110,8 +1110,16 @@ def complete_agent_turn_outputs(
     timeout_ms: int = DEFAULT_AGENT_TURN_TIMEOUT_MS,
     poll_ms: int = 200,
     return_result: bool = False,
+    before_refs_collection: Any = None,
 ) -> list[dict[str, str]] | AgentTurnResult:
-    """Wait for turn terminal, reconcile its task authority, collect store refs."""
+    """Wait for turn terminal, reconcile its task authority, collect store refs.
+
+    ``before_refs_collection`` (optional, never raises by contract) runs after
+    the turn's own artifacts are persisted and immediately before the refs
+    readback.  The stage-one closure node uses it to materialize the chain
+    authority onto the exact latest ``hypothesis_set`` row the refs collection
+    and closeout are about to read.
+    """
     from .task_adapter_registry import resolve_agent_task_adapter
 
     team_id = str(input_snapshot.get("teamId") or "").strip()
@@ -1222,6 +1230,12 @@ def complete_agent_turn_outputs(
                     }
                 ) from exc
 
+    if callable(before_refs_collection):
+        # Ordering contract: the hook lands AFTER the turn outputs are durable
+        # (receipt writeback / stage reconciliation above) and BEFORE the refs
+        # readback, so collect_required_artifact_refs and the stage-one
+        # closeout read the rows the hook just gated.
+        before_refs_collection()
     refs = collect_required_artifact_refs(
         required_kinds=required_kinds,
         team_id=team_id,

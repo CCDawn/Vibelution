@@ -355,16 +355,23 @@ def _hypothesis_set_payload(
         raise ValueError(
             "hypothesis_design requires one completed TaskBundle aggregation artifact"
         )
-    from .workflow_artifact_store import list_workflow_artifacts
+    from .workflow_artifact_store import (
+        list_workflow_artifacts,
+        merge_hypothesis_set_authority_payload,
+    )
 
+    scoped_rows = [
+        dict(item)
+        for item in list_workflow_artifacts(
+            str(record.get("teamId") or ""),
+            kind="hypothesis_set",
+            workflow_run_id=str(record.get("runId") or ""),
+        )
+    ]
     artifact = next(
         (
-            dict(item)
-            for item in list_workflow_artifacts(
-                str(record.get("teamId") or ""),
-                kind="hypothesis_set",
-                workflow_run_id=str(record.get("runId") or ""),
-            )
+            item
+            for item in scoped_rows
             if str(item.get("recordId") or "") == str(refs[0] or "")
         ),
         None,
@@ -382,7 +389,14 @@ def _hypothesis_set_payload(
         raise ValueError(
             "hypothesis_design aggregation artifact is missing or belongs to another NodeRun"
         )
-    return dict(payload)
+    # Same single readback merge as the registry: the closeout manifest payload
+    # for this NodeRun must carry the embedded closeout gate/receipts even when
+    # the embedding rows derive from the aggregation record id.
+    return merge_hypothesis_set_authority_payload(
+        payload,
+        scoped_rows,
+        artifact,
+    )
 
 
 def _protocol_design_artifact_payloads(

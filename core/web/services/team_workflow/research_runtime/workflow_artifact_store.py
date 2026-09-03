@@ -66,6 +66,84 @@ def _path(team_id: str, kind: str) -> Path:
     return resolve_project_workspace_home(_root()) / "teams" / team / "workflow_artifacts" / f"{kind_key}.jsonl"
 
 
+# The stage-one closure writers embed the human gate / model receipts as new
+# append-only rows whose identity derives from the base row they upgrade
+# (``<baseRecordId>:human-gate`` / ``<baseRecordId>:model-receipts``).  The
+# read-back below merges those authority rows into the base payload so every
+# consumer (refs collection, adapter verify, stage-one closeout) reads ONE
+# payload that carries the embedded authorities, even when another row was
+# appended after the embedding.  Writers deliberately read the raw rows via
+# ``list_workflow_artifacts`` and must never see this merge.
+_HYPOTHESIS_SET_AUTHORITY_KEYS: dict[str, str] = {
+    ":human-gate": "human_gate",
+    ":model-receipts": "modelInvocationReceipts",
+}
+
+
+def _hypothesis_set_row_scope(row: Mapping[str, Any]) -> tuple[str, str]:
+    return (
+        str(row.get("workflowRunId") or "").strip(),
+        str(row.get("sourceCollectionRunId") or "").strip(),
+    )
+
+
+def merge_hypothesis_set_authority_payload(
+    payload: Mapping[str, Any],
+    rows: Sequence[Mapping[str, Any]],
+    base_row: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Merge ``:human-gate`` / ``:model-receipts`` sub-rows into a base payload.
+
+    Only sub-rows whose identity derives from the traversed row's ``recordId``
+    AND whose scope (workflowRunId + sourceCollectionRunId) matches the base
+    row exactly are merged, and only into keys the payload does not already
+    carry (idempotent: base keys win, replay merges are no-ops).  The writers
+    chain identities (gate row → receipts row), so the merge follows the same
+    identity chain.  The input payload is never mutated; a plain dict copy is
+    returned.
+    """
+
+    merged = dict(payload)
+    base_id = str(base_row.get("recordId") or "").strip()
+    if not base_id:
+        return merged
+    base_scope = _hypothesis_set_row_scope(base_row)
+    index = {
+        str(row.get("recordId") or "").strip(): row
+        for row in rows
+        if str(row.get("recordId") or "").strip()
+    }
+    frontier = [base_id]
+    seen = {base_id}
+    while frontier:
+        next_frontier: list[str] = []
+        for current_id in frontier:
+            for suffix, key in _HYPOTHESIS_SET_AUTHORITY_KEYS.items():
+                if key in merged:
+                    continue
+                row = index.get(f"{current_id}{suffix}")
+                if row is None:
+                    continue
+                # Scope drift (e.g. a re-scoped replay) disqualifies the
+                # sub-row: its authority was bound to a different run identity.
+                if _hypothesis_set_row_scope(row) != base_scope:
+                    continue
+                row_payload = row.get("payload")
+                value = (
+                    row_payload.get(key) if isinstance(row_payload, Mapping) else None
+                )
+                if isinstance(value, Mapping) and value:
+                    merged[key] = dict(value)
+                elif isinstance(value, list) and value:
+                    merged[key] = list(value)
+                sub_id = str(row.get("recordId") or "").strip()
+                if sub_id not in seen:
+                    seen.add(sub_id)
+                    next_frontier.append(sub_id)
+        frontier = next_frontier
+    return merged
+
+
 class WorkflowArtifactConflictError(RuntimeError):
     """Raised when an immutable artifact identity is reused with new content."""
 
@@ -229,6 +307,9 @@ def load_workflow_artifact_payload(
         workflow_run_id=workflow,
         source_collection_run_id=authority,
     )
+    # Sub-row lookup stays over the full scope so a pinned base read still
+    # finds its ``:human-gate`` / ``:model-receipts`` authority rows.
+    scoped_rows = list(rows)
     if wanted_record:
         rows = [
             row
@@ -242,6 +323,10 @@ def load_workflow_artifact_payload(
         payload = latest.get("payload")
         if not isinstance(payload, dict) or not payload:
             continue
+        if kind_key == "hypothesis_set":
+            payload = merge_hypothesis_set_authority_payload(
+                payload, scoped_rows, latest
+            )
         envelope = {
             "teamId": team,
             "kind": kind_key,
