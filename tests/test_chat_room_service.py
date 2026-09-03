@@ -5294,3 +5294,373 @@ def test_reconcile_gate_reruns_after_store_change_or_inflight_release(tmp_path, 
     assert chat_room_service._acquire_chat_room_reconcile_run() is True
     chat_room_service._release_chat_room_reconcile_run()
     assert next(item for item in state["rooms"] if item["roomId"]) is not None
+
+
+# ---------------------------------------------------------------------------
+# Speaker batch parallelism + per-call fence in-turn retry (meeting path)
+# ---------------------------------------------------------------------------
+
+
+def _seed_four_chat_sessions(root):
+    sessions = ["session-s1", "session-s2", "session-s3", "session-s4"]
+    save_chat_state(
+        root,
+        {
+            "version": 1,
+            "active_conversation_id": sessions[0],
+            "conversations": [
+                {
+                    "conversation_id": session_id,
+                    "title": f"Speaker {index}",
+                    "updated_at": f"2026-05-26T10:0{index}:00",
+                }
+                for index, session_id in enumerate(sessions, start=1)
+            ],
+        },
+    )
+    for session_id in sessions:
+        _append_session_ledger_message(
+            root,
+            session_id,
+            {"role": "user", "content": "会议输入", "timestamp": "2026-05-26T10:00:00"},
+            turn_id=f"{session_id}-seed-1",
+        )
+    return sessions
+
+
+def test_speaker_execution_policy_defaults_and_overrides():
+    meeting_round = {"config": {"meetingType": "hypothesis_review"}}
+    generation_round = {"config": {"meetingType": "hypothesis_candidate_generation"}}
+    ordinary_round = {"config": {}}
+    assert chat_room_service._speaker_execution_policy(meeting_round) == {
+        "parallel": True,
+        "fenceRetry": True,
+    }
+    assert chat_room_service._speaker_execution_policy(generation_round) == {
+        "parallel": True,
+        "fenceRetry": True,
+    }
+    assert chat_room_service._speaker_execution_policy(ordinary_round) == {
+        "parallel": False,
+        "fenceRetry": False,
+    }
+    # Explicit round-config overrides win over the meeting-path default.
+    assert chat_room_service._speaker_execution_policy(
+        {"config": {"meetingType": "hypothesis_review", "speakerBatchMode": "serial"}}
+    )["parallel"] is False
+    assert chat_room_service._speaker_execution_policy(
+        {"config": {"speakerBatchMode": "parallel", "speakerFenceRetry": True}}
+    ) == {"parallel": True, "fenceRetry": True}
+    assert chat_room_service._speaker_execution_policy(
+        {"config": {"speakerBatchMode": "parallel", "speakerFenceRetry": "false"}}
+    ) == {"parallel": True, "fenceRetry": False}
+
+
+def test_speaker_round_batches_opening_all_parallel_interaction_two_batches():
+    speakers = [{"participantId": f"p{index}"} for index in range(4)]
+    parallel_policy = {"parallel": True, "fenceRetry": True}
+    serial_policy = {"parallel": False, "fenceRetry": False}
+    opening = {"config": {"discussionRoundIndex": 1}}
+    interaction = {"config": {"discussionRoundIndex": 2}}
+    assert chat_room_service._speaker_round_batches(speakers, opening, parallel_policy) == [
+        [0, 1, 2, 3]
+    ]
+    assert chat_room_service._speaker_round_batches(speakers, interaction, parallel_policy) == [
+        [0, 1],
+        [2, 3],
+    ]
+    three = [{"participantId": f"p{index}"} for index in range(3)]
+    assert chat_room_service._speaker_round_batches(three, interaction, parallel_policy) == [
+        [0, 1],
+        [2],
+    ]
+    # Serial policy keeps one speaker per batch: today's loop.
+    assert chat_room_service._speaker_round_batches(speakers, opening, serial_policy) == [
+        [0],
+        [1],
+        [2],
+        [3],
+    ]
+    # A missing round index defaults to the conservative interaction split.
+    assert chat_room_service._speaker_round_batches(speakers, {"config": {}}, parallel_policy) == [
+        [0, 1],
+        [2, 3],
+    ]
+
+
+def test_meeting_opening_round_runs_speakers_concurrently_and_commits_in_order(
+    tmp_path, monkeypatch
+):
+    _isolate_chat_room_kernel(tmp_path, monkeypatch)
+    sessions = _seed_four_chat_sessions(tmp_path)
+    monkeypatch.delenv("VIBELUTION_LLM_MAX_CONCURRENT", raising=False)
+    room = chat_room_service.create_chat_room(
+        title="开幕轮并行群聊",
+        participant_session_ids=sessions,
+    )
+    barrier = threading.Barrier(4, timeout=10)
+    started = []
+    start_lock = threading.Lock()
+
+    def runner(participant, _prompt, _context):
+        with start_lock:
+            started.append(participant["sessionId"])
+        # Only passes when all four speakers genuinely overlap.
+        barrier.wait(timeout=10)
+        return {
+            "status": "completed",
+            "raw_output": f"{participant['sessionId']} 独立评估",
+            "summary": "ok",
+        }
+
+    detail = chat_room_service.start_chat_room_round(
+        room["roomId"],
+        "假说评审第 1 轮：独立评估候选",
+        config={"meetingType": "hypothesis_review", "discussionRoundIndex": 1},
+        agent_runner=runner,
+    )
+
+    latest = detail["rounds"][-1]
+    assert latest["status"] == "completed"
+    assert sorted(started) == sorted(sessions)
+    # Messages commit in speaker order even though the batch ran concurrently.
+    participant_order = [
+        participant["sessionId"] for participant in detail["participants"]
+    ]
+    assert [message["sessionId"] for message in latest["messages"]] == participant_order
+    assert all(message["status"] == "completed" for message in latest["messages"])
+    # Per-speaker timings survive the batch fan-out.
+    assert all(
+        isinstance(message.get("timings"), dict) and "runnerMs" in message["timings"]
+        for message in latest["messages"]
+    )
+    assert [message["content"] for message in latest["messages"]] == [
+        f"{session_id} 独立评估" for session_id in participant_order
+    ]
+
+
+def test_meeting_interaction_round_second_batch_prompts_see_first_batch_messages(
+    tmp_path, monkeypatch
+):
+    _isolate_chat_room_kernel(tmp_path, monkeypatch)
+    sessions = _seed_four_chat_sessions(tmp_path)
+    room = chat_room_service.create_chat_room(
+        title="互动轮两批群聊",
+        participant_session_ids=sessions,
+    )
+    prompts = {}
+    prompts_lock = threading.Lock()
+    first_batch = set(sessions[:2])
+    first_batch_barrier = threading.Barrier(2, timeout=10)
+    first_batch_entered = []
+
+    def runner(participant, prompt, _context):
+        with prompts_lock:
+            prompts[participant["sessionId"]] = prompt
+        if participant["sessionId"] in first_batch:
+            # The first two speakers must overlap (one parallel batch).
+            with prompts_lock:
+                first_batch_entered.append(participant["sessionId"])
+            first_batch_barrier.wait(timeout=10)
+        return {
+            "status": "completed",
+            "raw_output": f"观点-{participant['sessionId']}",
+            "summary": "ok",
+        }
+
+    detail = chat_room_service.start_chat_room_round(
+        room["roomId"],
+        "假说评审第 2 轮（批评与修订）：逐条批评上一轮观点",
+        config={"meetingType": "hypothesis_review", "discussionRoundIndex": 2},
+        agent_runner=runner,
+    )
+
+    latest = detail["rounds"][-1]
+    assert latest["status"] == "completed"
+    assert sorted(first_batch_entered) == sorted(first_batch)
+    # Batch 1 prompts are built before anyone spoke.
+    for session_id in first_batch:
+        assert "观点-session-" not in prompts[session_id]
+    # Batch 2 prompts are built after batch 1 committed and carry its content.
+    for session_id in sessions[2:]:
+        assert "观点-session-s1" in prompts[session_id]
+        assert "观点-session-s2" in prompts[session_id]
+    # Messages still land in speaker order.
+    participant_order = [
+        participant["sessionId"] for participant in detail["participants"]
+    ]
+    assert [message["sessionId"] for message in latest["messages"]] == participant_order
+
+
+def test_parallel_batch_single_speaker_failure_does_not_block_batch_peers(
+    tmp_path, monkeypatch
+):
+    _isolate_chat_room_kernel(tmp_path, monkeypatch)
+    sessions = _seed_four_chat_sessions(tmp_path)
+    room = chat_room_service.create_chat_room(
+        title="批内失败隔离群聊",
+        participant_session_ids=sessions,
+    )
+
+    def runner(participant, _prompt, _context):
+        if participant["sessionId"] == "session-s2":
+            raise RuntimeError("provider exploded")
+        return {
+            "status": "completed",
+            "raw_output": f"{participant['sessionId']} 正常发言",
+            "summary": "ok",
+        }
+
+    detail = chat_room_service.start_chat_room_round(
+        room["roomId"],
+        "假说评审第 1 轮：独立评估候选",
+        config={"meetingType": "hypothesis_review", "discussionRoundIndex": 1},
+        agent_runner=runner,
+    )
+
+    latest = detail["rounds"][-1]
+    assert latest["status"] == "partial"
+    statuses = [message["status"] for message in latest["messages"]]
+    assert statuses == ["completed", "failed", "completed", "completed"]
+    failed_message = latest["messages"][1]
+    assert failed_message["sessionId"] == "session-s2"
+    assert failed_message["errorType"] == "RuntimeError"
+
+
+def _start_fence_retry_room(tmp_path, monkeypatch):
+    _isolate_chat_room_kernel(tmp_path, monkeypatch)
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(chat_room_service.time, "time", lambda: 1000.0)
+    return chat_room_service.create_chat_room(
+        title="围栏挂死重试群聊",
+        participant_session_ids=["session-alpha", "session-beta"],
+    )
+
+
+def test_fence_hung_zero_output_speaker_retries_once_and_recovers(tmp_path, monkeypatch):
+    room = _start_fence_retry_room(tmp_path, monkeypatch)
+    scene_events = []
+    monkeypatch.setattr(
+        chat_room_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: scene_events.append((args, kwargs)) or {"accepted": True},
+    )
+    attempts = {}
+
+    def runner(participant, _prompt, _context):
+        attempts[participant["sessionId"]] = attempts.get(participant["sessionId"], 0) + 1
+        if participant["sessionId"] == "session-alpha" and attempts["session-alpha"] == 1:
+            # First attempt hangs past the per-call watchdog (1s under the
+            # frozen clock); the watchdog abandons it with zero output.
+            time.sleep(3)
+        return {
+            "status": "completed",
+            "raw_output": f"重试后发言-{participant['sessionId']}",
+            "summary": "ok",
+        }
+
+    detail = chat_room_service.start_chat_room_round(
+        room["roomId"],
+        "假说评审第 1 轮",
+        config={
+            "meetingType": "hypothesis_review",
+            "speakerBatchMode": "serial",
+            "perCallBudgetMs": 500,
+        },
+        agent_runner=runner,
+    )
+
+    latest = detail["rounds"][-1]
+    assert latest["status"] == "completed"
+    # The hung speaker was retried exactly once inside its own turn.
+    assert attempts == {"session-alpha": 2, "session-beta": 1}
+    recovered = latest["messages"][0]
+    assert recovered["sessionId"] == "session-alpha"
+    assert recovered["status"] == "completed"
+    assert recovered["content"] == "重试后发言-session-alpha"
+    assert recovered["timings"]["retriedAfterFence"] is True
+    # The healthy speaker turn is untouched by the retry policy.
+    healthy = latest["messages"][1]
+    assert healthy["status"] == "completed"
+    assert healthy["timings"].get("retriedAfterFence") is None
+    retry_events = [
+        event
+        for event in scene_events
+        if event[0][2:3] == ("chat_room.speaker_call.fence_retry",)
+    ]
+    assert len(retry_events) == 1
+
+
+def test_fence_hung_speaker_second_zero_output_falls_back_to_empty_message(
+    tmp_path, monkeypatch
+):
+    room = _start_fence_retry_room(tmp_path, monkeypatch)
+    attempts = {}
+
+    def runner(participant, _prompt, _context):
+        attempts[participant["sessionId"]] = attempts.get(participant["sessionId"], 0) + 1
+        if participant["sessionId"] == "session-alpha":
+            # Both attempts hang; the retry must happen exactly once.
+            time.sleep(3)
+        return {
+            "status": "completed",
+            "raw_output": f"发言-{participant['sessionId']}",
+            "summary": "ok",
+        }
+
+    detail = chat_room_service.start_chat_room_round(
+        room["roomId"],
+        "假说评审第 1 轮",
+        config={
+            "meetingType": "hypothesis_review",
+            "speakerBatchMode": "serial",
+            "perCallBudgetMs": 500,
+        },
+        agent_runner=runner,
+    )
+
+    latest = detail["rounds"][-1]
+    assert latest["status"] == "partial"
+    # Exactly two attempts for the hung speaker, then the empty message stands.
+    assert attempts == {"session-alpha": 2, "session-beta": 1}
+    empty_message = latest["messages"][0]
+    assert empty_message["sessionId"] == "session-alpha"
+    assert empty_message["content"] == ""
+    assert empty_message["status"] in {"failed", "stopped"}
+    assert empty_message["timings"]["retriedAfterFence"] is True
+    assert latest["messages"][1]["status"] == "completed"
+
+
+def test_ordinary_room_never_retries_zero_output_speaker(tmp_path, monkeypatch):
+    _isolate_chat_room_kernel(tmp_path, monkeypatch)
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(chat_room_service.time, "time", lambda: 1000.0)
+    room = chat_room_service.create_chat_room(
+        title="普通群聊不重试",
+        participant_session_ids=["session-alpha", "session-beta"],
+    )
+    attempts = {}
+
+    def runner(participant, _prompt, _context):
+        attempts[participant["sessionId"]] = attempts.get(participant["sessionId"], 0) + 1
+        if participant["sessionId"] == "session-alpha":
+            time.sleep(3)
+        return {
+            "status": "completed",
+            "raw_output": f"发言-{participant['sessionId']}",
+            "summary": "ok",
+        }
+
+    detail = chat_room_service.start_chat_room_round(
+        room["roomId"],
+        "普通讨论",
+        config={"perCallBudgetMs": 500},
+        agent_runner=runner,
+    )
+
+    latest = detail["rounds"][-1]
+    assert latest["status"] == "partial"
+    # No meeting path: the watchdog failure stands without an in-turn retry.
+    assert attempts == {"session-alpha": 1, "session-beta": 1}
+    assert latest["messages"][0]["content"] == ""
+    assert latest["messages"][0]["timings"].get("retriedAfterFence") is None

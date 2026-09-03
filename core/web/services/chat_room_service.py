@@ -42,6 +42,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import os
 import queue
 import re
 import threading
@@ -234,6 +235,25 @@ _CHAT_ROOM_WORK_RUN_HEARTBEAT_FRESH_SECONDS = 90.0
 # the room round only; the meeting state machine and its digest stay intact.
 _MEETING_DIGEST_TTL_STOP_REASON = "meeting_digest_ttl_muted"
 _MEETING_DIGEST_TTL_POLL_INTERVAL_SECONDS = 15.0
+# Speaker batch parallelism: formal review/generation meeting rounds opt in
+# (config ``speakerBatchMode`` overrides); every other chat room keeps the
+# serial speaker loop byte-for-byte.  The opening meeting round runs all
+# speakers in one batch (independent assessments); interaction rounds split
+# the ordered speaker list in half so the second batch still sees the first
+# batch's committed messages and can criticize them.
+_SPEAKER_BATCH_MODE_CONFIG_KEY = "speakerBatchMode"
+_SPEAKER_BATCH_PARALLEL = "parallel"
+# A per-call-fence-hung speaker turn (zero usable output) is retried once in
+# the same turn with a fresh per-call budget.  Meeting rounds opt in via the
+# same policy; ordinary rooms never retry.
+_SPEAKER_FENCE_RETRY_CONFIG_KEY = "speakerFenceRetry"
+_RETRIED_AFTER_FENCE_TIMING_KEY = "retriedAfterFence"
+# Worker ceiling for one round's speaker batch.  Reuses the process-wide LLM
+# concurrency budget as an operator ceiling; the batch width itself stays the
+# natural bound (meeting rosters are four speakers).
+_CHAT_ROOM_SPEAKER_BATCH_EXECUTOR_LOCK = threading.Lock()
+_CHAT_ROOM_SPEAKER_BATCH_EXECUTOR: ThreadPoolExecutor | None = None
+_CHAT_ROOM_SPEAKER_BATCH_MAX_WORKERS_DEFAULT = 4
 _CHAT_ROOM_PARTICIPANT_INDEX_CACHE_LOCK = threading.Lock()
 _CHAT_ROOM_PARTICIPANT_INDEX_CACHE_CONDITION = threading.Condition(_CHAT_ROOM_PARTICIPANT_INDEX_CACHE_LOCK)
 _CHAT_ROOM_PARTICIPANT_INDEX_CACHE: dict[tuple[Any, ...], dict[str, dict[str, dict[str, Any]]]] = {}
@@ -1952,6 +1972,37 @@ def _meeting_digest_ttl_mute_for_context(
     return mute
 
 
+def _engage_meeting_digest_ttl_stop(
+    context: Mapping[str, Any],
+    meeting_ttl_probe: dict[str, Any],
+    *,
+    room_id: str,
+    round_id: str,
+) -> bool:
+    """Engage the digest-wait stop-loss at one speaker boundary.
+
+    Returns True when the mute engaged: the round stop is registered and the
+    TTL evidence event recorded, so this speaker must not start.
+    """
+
+    if _meeting_digest_ttl_mute_for_context(context, meeting_ttl_probe) is None:
+        return False
+    _request_chat_room_round_stop(round_id, _MEETING_DIGEST_TTL_STOP_REASON)
+    try:
+        from core.web.services.team_workflow import meeting_runtime
+
+        meeting_runtime.record_meeting_digest_ttl_mute_event(
+            str(context.get("teamId") or ""),
+            str(context.get("meetingRoundId") or ""),
+            surface="chat_room_round",
+            room_id=room_id,
+            room_round_id=round_id,
+        )
+    except Exception:  # noqa: BLE001 - evidence never blocks the fence
+        pass
+    return True
+
+
 def _execute_chat_room_round(
     normalized_room_id: str,
     round_id: str,
@@ -1971,214 +2022,247 @@ def _execute_chat_room_round(
     # rebuild so one round re-reads the meeting record at most once per
     # poll interval.
     meeting_ttl_probe: dict[str, Any] = {"readAtMonotonic": 0.0, "mute": None}
-    for index, participant in enumerate(speakers):
-        speaker_started_at = _perf_counter()
-        stopped_detail = _stopped_chat_room_round_detail(normalized_room_id, round_id)
-        if stopped_detail is not None:
-            _clear_chat_room_round_control(round_id)
-            return stopped_detail
-        round_config = (
-            round_payload.get("config")
-            if isinstance(round_payload.get("config"), dict)
-            else {}
-        )
-        context = {
-            "roomId": normalized_room_id,
-            "roundId": round_id,
-            "topic": normalized_topic,
-            "mode": round_mode,
-            "purpose": round_purpose,
-            "caseState": dict(round_payload.get("caseState") or {})
-            if isinstance(round_payload.get("caseState"), dict)
-            else {},
-            "speakerIndex": index,
-            "meetingRoundId": str(round_config.get("meetingRoundId") or "").strip(),
-            "meetingType": str(round_config.get("meetingType") or "").strip().lower(),
-            "teamId": str(round_config.get("teamId") or "").strip(),
-            "questionId": str(round_config.get("question") or "").strip().upper(),
-            "challengeDeadlineAtMs": _positive_int(
-                round_config.get(_CHALLENGE_ROOM_DEADLINE_CONFIG_KEY)
-            ),
-            "_structuredMeetingMessage": _uses_structured_meeting_message(
-                room, round_payload
-            ),
-            "_modelInvocationReceiptAuthority": receipt_authority,
-            "_speakerDeltaCapture": _speaker_delta_capture_enabled(
+    policy = _speaker_execution_policy(round_payload)
+    speaker_batches = _speaker_round_batches(speakers, round_payload, policy)
+    for batch in speaker_batches:
+        batch_turns: list[tuple[dict[str, Any], str, dict[str, Any]]] = []
+        batch_meta: list[tuple[int, dict[str, Any], float]] = []
+        batch_is_parallel = bool(policy["parallel"]) and len(batch) > 1
+        # Batch prep stays serial and in speaker order.  Serial rounds keep
+        # every boundary check here before the prompt build, exactly as before
+        # batching existed; parallel batches defer the fence/TTL checks to the
+        # turn launch so a fence engaging mid-batch preserves the speaker
+        # boundary semantics instead of discarding the whole batch.
+        for index in batch:
+            participant = speakers[index]
+            speaker_started_at = _perf_counter()
+            stopped_detail = _stopped_chat_room_round_detail(normalized_room_id, round_id)
+            if stopped_detail is not None:
+                _clear_chat_room_round_control(round_id)
+                return stopped_detail
+            round_config = (
+                round_payload.get("config")
+                if isinstance(round_payload.get("config"), dict)
+                else {}
+            )
+            context = {
+                "roomId": normalized_room_id,
+                "roundId": round_id,
+                "topic": normalized_topic,
+                "mode": round_mode,
+                "purpose": round_purpose,
+                "caseState": dict(round_payload.get("caseState") or {})
+                if isinstance(round_payload.get("caseState"), dict)
+                else {},
+                "speakerIndex": index,
+                "meetingRoundId": str(round_config.get("meetingRoundId") or "").strip(),
+                "meetingType": str(round_config.get("meetingType") or "").strip().lower(),
+                "teamId": str(round_config.get("teamId") or "").strip(),
+                "questionId": str(round_config.get("question") or "").strip().upper(),
+                "challengeDeadlineAtMs": _positive_int(
+                    round_config.get(_CHALLENGE_ROOM_DEADLINE_CONFIG_KEY)
+                ),
+                "_structuredMeetingMessage": _uses_structured_meeting_message(
+                    room, round_payload
+                ),
+                "_modelInvocationReceiptAuthority": receipt_authority,
+                "_speakerDeltaCapture": _speaker_delta_capture_enabled(
+                    room,
+                    round_payload,
+                    round_mode,
+                    round_config,
+                    receipt_authority,
+                ),
+            }
+            per_call_budget_ms = _positive_int(round_config.get("perCallBudgetMs"))
+            if per_call_budget_ms is None:
+                # Speaker watchdog: plain meeting/discussion rooms have no
+                # challenge meeting clock, but every speaker call still needs a
+                # bounded budget so a hung LLM call cannot occupy the round
+                # forever.  Challenge rooms keep their policy-derived budget.
+                per_call_budget_ms = _CHAT_ROOM_SPEAKER_DEFAULT_PER_CALL_BUDGET_MS
+            from core.web.services.team_workflow.challenge_deadline_policy import (
+                effective_call_deadline_at_ms,
+            )
+
+            # The meeting-level clock stays in ``challengeDeadlineAtMs``; the
+            # per-call fence lives in its own key so an exhausted speaker call
+            # can never be mistaken for an exhausted meeting.  Plain rooms have
+            # no outer deadline, so the per-call budget alone defines the fence.
+            context[_CHALLENGE_ROOM_PER_CALL_DEADLINE_CONTEXT_KEY] = effective_call_deadline_at_ms(
+                call_started_at_ms=int(time.time() * 1000),
+                per_call_budget_ms=per_call_budget_ms,
+                meeting_deadline_at_ms=_positive_int(
+                    round_config.get("meetingDeadlineAtMs")
+                )
+                or context["challengeDeadlineAtMs"],
+                outer_deadline_at_ms=context["challengeDeadlineAtMs"],
+            )
+            # Remember the fence inputs so a fence-hung zero-output turn can
+            # rebuild a fresh per-call budget for its single in-turn retry.
+            context["_perCallBudgetMs"] = per_call_budget_ms
+            context["_perCallMeetingDeadlineAtMs"] = (
+                _positive_int(round_config.get("meetingDeadlineAtMs"))
+                or context["challengeDeadlineAtMs"]
+            )
+            # A deadline is an absolute round fence.  Check it before constructing
+            # the next prompt so an expired formal round never starts another
+            # speaker, even when the previous runner returned a late result.
+            # Parallel batches re-run this check at the turn launch instead.
+            if (
+                not batch_is_parallel
+                and _request_challenge_room_execution_stop(round_id, context, force_run_read=True)
+            ):
+                stopped_detail = _stopped_chat_room_round_detail(normalized_room_id, round_id)
+                if stopped_detail is not None:
+                    _clear_chat_room_round_control(round_id)
+                    return stopped_detail
+            # Digest-wait TTL stop-loss: a meeting whose digest draft has been
+            # waiting past the TTL gets no further speaker calls.  Completed
+            # speakers stay persisted; the meeting record, its digest draft and
+            # operator approve/close are untouched (finalize guard in
+            # meeting_runtime keeps the TTL stop from terminating the meeting).
+            if (
+                not batch_is_parallel
+                and _engage_meeting_digest_ttl_stop(
+                    context,
+                    meeting_ttl_probe,
+                    room_id=normalized_room_id,
+                    round_id=round_id,
+                )
+            ):
+                stopped_detail = _stopped_chat_room_round_detail(normalized_room_id, round_id)
+                if stopped_detail is not None:
+                    _clear_chat_room_round_control(round_id)
+                    return stopped_detail
+            prompt = _build_participant_prompt(
+                room=room,
+                round_payload=round_payload,
+                participant=participant,
+                prior_messages=messages,
+            )
+            prompt_build_ms = _elapsed_ms(speaker_started_at)
+            context["speakerStartedAtMonotonic"] = speaker_started_at
+            context["promptBuildMs"] = prompt_build_ms
+            batch_turns.append((participant, prompt, context))
+            batch_meta.append((index, participant, prompt_build_ms))
+        if batch_is_parallel:
+            # Batch fan-out: turns run concurrently, each with its own
+            # watchdog, per-call fence and session slot; one failed speaker
+            # never blocks its batch peers.  Wall-clock shrinks from the sum
+            # of speaker calls to the slowest call in the batch.
+            batch_results = _run_speaker_batch_turns(
+                batch_turns,
+                runner,
+                fence_retry_enabled=policy["fenceRetry"],
+                run_turn_fences=True,
+                meeting_ttl_probe=meeting_ttl_probe,
+            )
+        else:
+            batch_results = [
+                _finish_speaker_turn(
+                    participant,
+                    prompt,
+                    context,
+                    runner,
+                    fence_retry_enabled=policy["fenceRetry"],
+                )
+                for participant, prompt, context in batch_turns
+            ]
+        # Messages commit in speaker order even when the batch ran
+        # concurrently: per-message persistence, snapshot publish and speaker
+        # events keep their serial sequence.
+        for (
+            (index, participant, prompt_build_ms),
+            (message, speaker_run_ms),
+        ) in zip(batch_meta, batch_results):
+            if message is None:
+                # A round-level fence engaged before this speaker launched;
+                # finalize the stopped round without a speaker message.
+                stopped = _stopped_chat_room_round_detail(normalized_room_id, round_id)
+                if stopped is not None:
+                    _clear_chat_room_round_control(round_id)
+                    return stopped
+                continue
+            messages.append(message)
+            message_time = utc_now_iso()
+            stop_pending = False
+            with _CHAT_ROOM_LOCK:
+                state = _store().load()
+                live_room = _find_room(state, normalized_room_id)
+                if live_room is None:
+                    raise ChatRoomNotFoundError(text_for(lang, zh="未找到群聊。", en="Chat room not found."))
+                target_round = _find_round(live_room, round_id)
+                if target_round is None:
+                    raise ChatRoomNotFoundError(text_for(lang, zh="未找到群聊轮次。", en="Chat room round not found."))
+                if _chat_room_round_is_terminal(live_room, target_round, round_id):
+                    _clear_chat_room_round_control(round_id)
+                    return _room_to_api(live_room)
+                if _chat_room_round_stop_reason(round_id):
+                    # A stop arrived between the outer check and this lock: persist
+                    # the latest messages without rewinding the round to running,
+                    # then let the shared stop finalizer close the round.  The
+                    # finalizer performs session sync (chat-state transaction), so
+                    # per the lock order contract it must run after releasing
+                    # _CHAT_ROOM_LOCK.
+                    target_round["messages"] = [dict(item) for item in messages]
+                    target_round["updatedAt"] = message_time
+                    _store().save(state)
+                    locked_room_snapshot = dict(live_room)
+                    stop_pending = True
+                else:
+                    target_round["messages"] = [dict(item) for item in messages]
+                    target_round["status"] = "running"
+                    target_round["updatedAt"] = message_time
+                    live_room["status"] = "running"
+                    live_room["activeRoundId"] = round_id
+                    live_room["updatedAt"] = message_time
+                    _store().save(state)
+                    room = dict(live_room)
+                    round_payload = dict(target_round)
+            if stop_pending:
+                stopped = _stopped_chat_room_round_detail(normalized_room_id, round_id)
+                if stopped is not None:
+                    _clear_chat_room_round_control(round_id)
+                    return stopped
+                return _room_to_api(locked_room_snapshot)
+            _persist_chat_room_work_run(
                 room,
                 round_payload,
-                round_mode,
-                round_config,
-                receipt_authority,
-            ),
-        }
-        per_call_budget_ms = _positive_int(round_config.get("perCallBudgetMs"))
-        if per_call_budget_ms is None:
-            # Speaker watchdog: plain meeting/discussion rooms have no
-            # challenge meeting clock, but every speaker call still needs a
-            # bounded budget so a hung LLM call cannot occupy the round
-            # forever.  Challenge rooms keep their policy-derived budget.
-            per_call_budget_ms = _CHAT_ROOM_SPEAKER_DEFAULT_PER_CALL_BUDGET_MS
-        from core.web.services.team_workflow.challenge_deadline_policy import (
-            effective_call_deadline_at_ms,
-        )
-
-        # The meeting-level clock stays in ``challengeDeadlineAtMs``; the
-        # per-call fence lives in its own key so an exhausted speaker call
-        # can never be mistaken for an exhausted meeting.  Plain rooms have
-        # no outer deadline, so the per-call budget alone defines the fence.
-        context[_CHALLENGE_ROOM_PER_CALL_DEADLINE_CONTEXT_KEY] = effective_call_deadline_at_ms(
-            call_started_at_ms=int(time.time() * 1000),
-            per_call_budget_ms=per_call_budget_ms,
-            meeting_deadline_at_ms=_positive_int(
-                round_config.get("meetingDeadlineAtMs")
+                status="running",
+                summary=text_for(
+                    lang,
+                    zh=f"群聊进行中：{len(messages)}/{len(speakers)} 位 Agent 已发言。",
+                    en=f"Group discussion running: {len(messages)}/{len(speakers)} agents responded.",
+                ),
             )
-            or context["challengeDeadlineAtMs"],
-            outer_deadline_at_ms=context["challengeDeadlineAtMs"],
-        )
-        # A deadline is an absolute round fence.  Check it before constructing
-        # the next prompt so an expired formal round never starts another
-        # speaker, even when the previous runner returned a late result.
-        if _request_challenge_room_execution_stop(round_id, context, force_run_read=True):
-            stopped_detail = _stopped_chat_room_round_detail(normalized_room_id, round_id)
-            if stopped_detail is not None:
-                _clear_chat_room_round_control(round_id)
-                return stopped_detail
-        # Digest-wait TTL stop-loss: a meeting whose digest draft has been
-        # waiting past the TTL gets no further speaker calls.  Completed
-        # speakers stay persisted; the meeting record, its digest draft and
-        # operator approve/close are untouched (finalize guard in
-        # meeting_runtime keeps the TTL stop from terminating the meeting).
-        meeting_ttl_mute = _meeting_digest_ttl_mute_for_context(context, meeting_ttl_probe)
-        if meeting_ttl_mute is not None:
-            _request_chat_room_round_stop(round_id, _MEETING_DIGEST_TTL_STOP_REASON)
-            try:
-                from core.web.services.team_workflow import meeting_runtime
-
-                meeting_runtime.record_meeting_digest_ttl_mute_event(
-                    str(context.get("teamId") or ""),
-                    str(context.get("meetingRoundId") or ""),
-                    surface="chat_room_round",
-                    room_id=normalized_room_id,
-                    room_round_id=round_id,
-                )
-            except Exception:  # noqa: BLE001 - evidence never blocks the fence
-                pass
-            stopped_detail = _stopped_chat_room_round_detail(normalized_room_id, round_id)
-            if stopped_detail is not None:
-                _clear_chat_room_round_control(round_id)
-                return stopped_detail
-        prompt = _build_participant_prompt(
-            room=room,
-            round_payload=round_payload,
-            participant=participant,
-            prior_messages=messages,
-        )
-        prompt_build_ms = _elapsed_ms(speaker_started_at)
-        context["speakerStartedAtMonotonic"] = speaker_started_at
-        context["promptBuildMs"] = prompt_build_ms
-        message = _run_one_speaker(participant, prompt, context, runner)
-        speaker_run_ms = _elapsed_ms(speaker_started_at)
-        # Tiered fence: only a meeting-level (or workflow-run) expiry returns a
-        # reason that has registered a round stop.  A per-call expiry aborts
-        # just this speaker call, so a late result is discarded and the round
-        # advances to the next speaker.
-        stop_reason = _challenge_room_speaker_abort_reason(
-            round_id,
-            context,
-            force_run_read=True,
-        )
-        if stop_reason and str(message.get("status") or "").strip().lower() == "completed":
-            # The provider/custom runner returned after the formal fence. Keep
-            # only auditable stop metadata; late content cannot become formal
-            # meeting evidence.
-            message = {
-                **message,
-                "status": "stopped",
-                "resultStatus": "stopped",
-                "content": "",
-                "summary": stop_reason,
-                "lateResultDiscarded": True,
-            }
-            message.pop("messagePayload", None)
-        messages.append(message)
-        message_time = utc_now_iso()
-        stop_pending = False
-        with _CHAT_ROOM_LOCK:
-            state = _store().load()
-            live_room = _find_room(state, normalized_room_id)
-            if live_room is None:
-                raise ChatRoomNotFoundError(text_for(lang, zh="未找到群聊。", en="Chat room not found."))
-            target_round = _find_round(live_room, round_id)
-            if target_round is None:
-                raise ChatRoomNotFoundError(text_for(lang, zh="未找到群聊轮次。", en="Chat room round not found."))
-            if _chat_room_round_is_terminal(live_room, target_round, round_id):
-                _clear_chat_room_round_control(round_id)
-                return _room_to_api(live_room)
-            if _chat_room_round_stop_reason(round_id):
-                # A stop arrived between the outer check and this lock: persist
-                # the latest messages without rewinding the round to running,
-                # then let the shared stop finalizer close the round.  The
-                # finalizer performs session sync (chat-state transaction), so
-                # per the lock order contract it must run after releasing
-                # _CHAT_ROOM_LOCK.
-                target_round["messages"] = [dict(item) for item in messages]
-                target_round["updatedAt"] = message_time
-                _store().save(state)
-                locked_room_snapshot = dict(live_room)
-                stop_pending = True
-            else:
-                target_round["messages"] = [dict(item) for item in messages]
-                target_round["status"] = "running"
-                target_round["updatedAt"] = message_time
-                live_room["status"] = "running"
-                live_room["activeRoundId"] = round_id
-                live_room["updatedAt"] = message_time
-                _store().save(state)
-                room = dict(live_room)
-                round_payload = dict(target_round)
-        if stop_pending:
-            stopped = _stopped_chat_room_round_detail(normalized_room_id, round_id)
-            if stopped is not None:
-                _clear_chat_room_round_control(round_id)
-                return stopped
-            return _room_to_api(locked_room_snapshot)
-        _persist_chat_room_work_run(
-            room,
-            round_payload,
-            status="running",
-            summary=text_for(
-                lang,
-                zh=f"群聊进行中：{len(messages)}/{len(speakers)} 位 Agent 已发言。",
-                en=f"Group discussion running: {len(messages)}/{len(speakers)} agents responded.",
-            ),
-        )
-        _publish_chat_room_detail_snapshot(normalized_room_id)
-        _record_room_event(
-            "speaker",
-            _speaker_event_code(message.get("status")),
-            room,
-            round_payload,
-            fields={
-                "participantId": participant["participantId"],
-                "sessionId": participant.get("sessionId") or "",
-                "speakerIndex": index,
-                "status": message["status"],
-                "purpose": round_purpose,
-                "caseIntent": (round_payload.get("caseState") or {}).get("intent") if isinstance(round_payload.get("caseState"), dict) else "",
-                "caseNextAction": (round_payload.get("caseState") or {}).get("nextAction") if isinstance(round_payload.get("caseState"), dict) else "",
-                "caseInformationSufficiency": (round_payload.get("caseState") or {}).get("informationSufficiency") if isinstance(round_payload.get("caseState"), dict) else "",
-                "caseUserFacingMode": (round_payload.get("caseState") or {}).get("userFacingMode") if isinstance(round_payload.get("caseState"), dict) else "",
-                "caseDiscussionVisibility": (round_payload.get("caseState") or {}).get("discussionVisibility") if isinstance(round_payload.get("caseState"), dict) else "",
-                "contentChars": len(message.get("content") or ""),
-                "errorType": message.get("errorType") or "",
-                "promptBuildMs": prompt_build_ms,
-                "speakerRunMs": speaker_run_ms,
-                **_participant_team_event_fields(participant),
-                **(message.get("timings") if isinstance(message.get("timings"), dict) else {}),
-            },
-            outcome=message["status"],
-            level="info" if message["status"] == "completed" else "warning",
-        )
+            _publish_chat_room_detail_snapshot(normalized_room_id)
+            _record_room_event(
+                "speaker",
+                _speaker_event_code(message.get("status")),
+                room,
+                round_payload,
+                fields={
+                    "participantId": participant["participantId"],
+                    "sessionId": participant.get("sessionId") or "",
+                    "speakerIndex": index,
+                    "status": message["status"],
+                    "purpose": round_purpose,
+                    "caseIntent": (round_payload.get("caseState") or {}).get("intent") if isinstance(round_payload.get("caseState"), dict) else "",
+                    "caseNextAction": (round_payload.get("caseState") or {}).get("nextAction") if isinstance(round_payload.get("caseState"), dict) else "",
+                    "caseInformationSufficiency": (round_payload.get("caseState") or {}).get("informationSufficiency") if isinstance(round_payload.get("caseState"), dict) else "",
+                    "caseUserFacingMode": (round_payload.get("caseState") or {}).get("userFacingMode") if isinstance(round_payload.get("caseState"), dict) else "",
+                    "caseDiscussionVisibility": (round_payload.get("caseState") or {}).get("discussionVisibility") if isinstance(round_payload.get("caseState"), dict) else "",
+                    "contentChars": len(message.get("content") or ""),
+                    "errorType": message.get("errorType") or "",
+                    "promptBuildMs": prompt_build_ms,
+                    "speakerRunMs": speaker_run_ms,
+                    **_participant_team_event_fields(participant),
+                    **(message.get("timings") if isinstance(message.get("timings"), dict) else {}),
+                },
+                outcome=message["status"],
+                level="info" if message["status"] == "completed" else "warning",
+            )
 
     completed_count = sum(1 for item in messages if item.get("status") == "completed")
     failed_count = sum(1 for item in messages if item.get("status") == "failed")
@@ -2600,6 +2684,283 @@ def _invoke_speaker_runner_with_watchdog(
     if error is not None:
         raise error
     return outcome.get("result")
+
+
+def _config_flag(value: Any) -> bool | None:
+    """Normalize a config tri-state flag; ``None`` when unset."""
+
+    if value is None or isinstance(value, str) and not value.strip():
+        return None
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on", "parallel", "enabled"}
+    return bool(value)
+
+
+def _speaker_execution_policy(round_payload: Mapping[str, Any]) -> dict[str, bool]:
+    """Resolve one round's speaker execution policy.
+
+    Formal review/generation meeting rounds opt into batch parallelism and
+    the per-call-fence in-turn retry; every other chat room keeps the serial
+    speaker loop.  Round config keys (``speakerBatchMode`` /
+    ``speakerFenceRetry``) override the meeting-path default so callers and
+    tests can pin either behavior explicitly.
+    """
+
+    config = (
+        round_payload.get("config")
+        if isinstance(round_payload.get("config"), Mapping)
+        else {}
+    )
+    meeting_path = _is_challenge_meeting_round(round_payload)
+    raw_batch_mode = str(config.get(_SPEAKER_BATCH_MODE_CONFIG_KEY) or "").strip().lower()
+    if raw_batch_mode:
+        parallel = raw_batch_mode in {_SPEAKER_BATCH_PARALLEL, "batch", "batches"}
+    else:
+        parallel = meeting_path
+    retry_flag = _config_flag(config.get(_SPEAKER_FENCE_RETRY_CONFIG_KEY))
+    return {
+        "parallel": parallel,
+        "fenceRetry": meeting_path if retry_flag is None else retry_flag,
+    }
+
+
+def _speaker_round_batches(
+    speakers: list[dict[str, Any]],
+    round_payload: Mapping[str, Any],
+    policy: Mapping[str, bool],
+) -> list[list[int]]:
+    """Partition speaker indexes into execution batches, in speaker order.
+
+    Opening meeting rounds (``discussionRoundIndex == 1``) run every speaker
+    in a single batch: the assessments are independent.  Interaction rounds
+    split the ordered roster into two halves so the second batch's prompts
+    are built after the first batch committed and the "criticize the prior
+    speaker" chain keeps its structure.  Serial rounds get one speaker per
+    batch, which is exactly today's loop.
+    """
+
+    if not policy.get("parallel") or len(speakers) <= 1:
+        return [[index] for index in range(len(speakers))]
+    config = (
+        round_payload.get("config")
+        if isinstance(round_payload.get("config"), Mapping)
+        else {}
+    )
+    discussion_round_index = _positive_int(config.get("discussionRoundIndex"))
+    if discussion_round_index == 1:
+        return [list(range(len(speakers)))]
+    split_at = (len(speakers) + 1) // 2
+    return [list(range(split_at)), list(range(split_at, len(speakers)))]
+
+
+def _speaker_batch_max_workers() -> int:
+    raw = str(os.environ.get("VIBELUTION_LLM_MAX_CONCURRENT") or "").strip()
+    if raw:
+        try:
+            ceiling = int(float(raw))
+        except ValueError:
+            ceiling = _CHAT_ROOM_SPEAKER_BATCH_MAX_WORKERS_DEFAULT
+        return max(1, min(_CHAT_ROOM_SPEAKER_BATCH_MAX_WORKERS_DEFAULT, ceiling))
+    return _CHAT_ROOM_SPEAKER_BATCH_MAX_WORKERS_DEFAULT
+
+
+def _speaker_batch_executor() -> ThreadPoolExecutor:
+    """Bounded worker pool for one round's speaker batch fan-out."""
+
+    global _CHAT_ROOM_SPEAKER_BATCH_EXECUTOR
+    executor = _CHAT_ROOM_SPEAKER_BATCH_EXECUTOR
+    if executor is not None:
+        return executor
+    with _CHAT_ROOM_SPEAKER_BATCH_EXECUTOR_LOCK:
+        if _CHAT_ROOM_SPEAKER_BATCH_EXECUTOR is None:
+            _CHAT_ROOM_SPEAKER_BATCH_EXECUTOR = ThreadPoolExecutor(
+                max_workers=_speaker_batch_max_workers(),
+                thread_name_prefix="web-chat-room-speaker",
+            )
+        return _CHAT_ROOM_SPEAKER_BATCH_EXECUTOR
+
+
+def _refresh_per_call_fence(context: dict[str, Any]) -> None:
+    """Give this speaker call a fresh per-call fence computed from now."""
+
+    from core.web.services.team_workflow.challenge_deadline_policy import (
+        effective_call_deadline_at_ms,
+    )
+
+    context[_CHALLENGE_ROOM_PER_CALL_DEADLINE_CONTEXT_KEY] = effective_call_deadline_at_ms(
+        call_started_at_ms=int(time.time() * 1000),
+        per_call_budget_ms=_positive_int(context.get("_perCallBudgetMs"))
+        or _CHAT_ROOM_SPEAKER_DEFAULT_PER_CALL_BUDGET_MS,
+        meeting_deadline_at_ms=context.get("_perCallMeetingDeadlineAtMs"),
+        outer_deadline_at_ms=context.get("challengeDeadlineAtMs"),
+    )
+
+
+def _speaker_turn_zero_output_after_per_call_fence(
+    message: Mapping[str, Any],
+    context: Mapping[str, Any],
+) -> bool:
+    """True when the turn produced no usable output because its fence ran out.
+
+    Covers the audited SCI-091 hang shape: the runner was abandoned by the
+    watchdog (no runner time recorded, empty content) or a late completed
+    result was discarded by the per-call fence.  Round-level stops (manual
+    stop, meeting deadline, workflow-run fence) never retry — the round is
+    ending regardless of this speaker.
+    """
+
+    status = str(message.get("status") or "").strip().lower()
+    content = str(message.get("content") or "").strip()
+    if status == "completed" and content:
+        return False
+    round_id = str(context.get("roundId") or "").strip()
+    if _chat_room_round_stop_reason(round_id):
+        return False
+    if message.get("lateResultDiscarded") and str(message.get("summary") or "") == (
+        _CHALLENGE_ROOM_PER_CALL_STOP_REASON
+    ):
+        return True
+    if message.get("errorType") == "SpeakerCallWatchdogTimeout":
+        return True
+    # Runner finished inside its call but still returned nothing while the
+    # per-call fence is spent.
+    return not content and bool(_challenge_room_per_call_stop_reason(context))
+
+
+def _record_speaker_fence_retry_event(
+    context: Mapping[str, Any],
+    participant: Mapping[str, Any],
+) -> None:
+    try:
+        record_runtime_scene_event(
+            "chat_room",
+            "speaker_call",
+            "chat_room.speaker_call.fence_retry",
+            message=(
+                "Speaker call produced no output after its per-call fence "
+                "expired; retrying the same turn once with a fresh budget."
+            ),
+            level="warning",
+            outcome="retry",
+            fields={
+                "roomId": str(context.get("roomId") or "").strip(),
+                "roundId": str(context.get("roundId") or "").strip(),
+                "speakerIndex": context.get("speakerIndex"),
+                "participantId": str(participant.get("participantId") or "").strip(),
+                **_participant_team_event_fields(dict(participant)),
+            },
+        )
+    except Exception:
+        return
+
+
+def _finish_speaker_turn(
+    participant: dict[str, Any],
+    prompt: str,
+    context: dict[str, Any],
+    runner: AgentRunner,
+    *,
+    fence_retry_enabled: bool,
+    run_turn_fences: bool = False,
+    meeting_ttl_probe: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any] | None, float]:
+    """Run, fence-check, and (policy permitting) retry one speaker turn.
+
+    Returns the committed message (``None`` when a round-level fence engaged
+    before the speaker launched) plus the wall-clock the speaker stage took
+    (measured at the same point as the serial loop always did).  The late
+    result discard keeps its serial position: measured, then evaluated.
+    """
+
+    round_id = str(context.get("roundId") or "").strip()
+    if run_turn_fences:
+        # Batch-parallel turns carry their own speaker-boundary fences: the
+        # check belongs to the turn launch, not the batch prep, so a fence
+        # engaging mid-batch lets already-launched batch peers finish while
+        # the remaining turns stop — the observable equivalent of the serial
+        # speaker boundary.
+        if _request_challenge_room_execution_stop(round_id, context, force_run_read=True):
+            return None, 0.0
+        if _engage_meeting_digest_ttl_stop(
+            context,
+            meeting_ttl_probe if meeting_ttl_probe is not None else {"readAtMonotonic": 0.0, "mute": None},
+            room_id=str(context.get("roomId") or "").strip(),
+            round_id=round_id,
+        ):
+            return None, 0.0
+    speaker_started_at = context.get("speakerStartedAtMonotonic") or _perf_counter()
+    message = _run_one_speaker(participant, prompt, context, runner)
+    speaker_run_ms = _elapsed_ms(speaker_started_at)
+    stop_reason = _challenge_room_speaker_abort_reason(round_id, context, force_run_read=True)
+    if stop_reason and str(message.get("status") or "").strip().lower() == "completed":
+        # The provider/custom runner returned after the formal fence. Keep
+        # only auditable stop metadata; late content cannot become formal
+        # meeting evidence.
+        message = {
+            **message,
+            "status": "stopped",
+            "resultStatus": "stopped",
+            "content": "",
+            "summary": stop_reason,
+            "lateResultDiscarded": True,
+        }
+        message.pop("messagePayload", None)
+    if fence_retry_enabled and _speaker_turn_zero_output_after_per_call_fence(message, context):
+        _record_speaker_fence_retry_event(context, participant)
+        retry_context = dict(context)
+        _refresh_per_call_fence(retry_context)
+        retry_message = _run_one_speaker(participant, prompt, retry_context, runner)
+        retry_stop_reason = _challenge_room_speaker_abort_reason(
+            round_id, retry_context, force_run_read=True
+        )
+        if retry_stop_reason and str(retry_message.get("status") or "").strip().lower() == "completed":
+            retry_message = {
+                **retry_message,
+                "status": "stopped",
+                "resultStatus": "stopped",
+                "content": "",
+                "summary": retry_stop_reason,
+                "lateResultDiscarded": True,
+            }
+            retry_message.pop("messagePayload", None)
+        retry_timings = dict(retry_message.get("timings") or {})
+        retry_timings[_RETRIED_AFTER_FENCE_TIMING_KEY] = True
+        retry_message["timings"] = retry_timings
+        message = retry_message
+        speaker_run_ms = _elapsed_ms(speaker_started_at)
+    return message, speaker_run_ms
+
+
+def _run_speaker_batch_turns(
+    batch_turns: list[tuple[dict[str, Any], str, dict[str, Any]]],
+    runner: AgentRunner,
+    *,
+    fence_retry_enabled: bool,
+    run_turn_fences: bool = False,
+    meeting_ttl_probe: dict[str, Any] | None = None,
+) -> list[tuple[dict[str, Any] | None, float]]:
+    """Run one batch's speaker turns concurrently, results in speaker order.
+
+    Each turn is independent (its own watchdog, fence, session slot and
+    supervision path), so one failed speaker never blocks its batch peers;
+    ordering is restored by collecting futures in submission order.
+    """
+
+    executor = _speaker_batch_executor()
+    futures = [
+        executor.submit(
+            _finish_speaker_turn,
+            participant,
+            prompt,
+            context,
+            runner,
+            fence_retry_enabled=fence_retry_enabled,
+            run_turn_fences=run_turn_fences,
+            meeting_ttl_probe=meeting_ttl_probe,
+        )
+        for participant, prompt, context in batch_turns
+    ]
+    return [future.result() for future in futures]
 
 
 def _run_one_speaker(
