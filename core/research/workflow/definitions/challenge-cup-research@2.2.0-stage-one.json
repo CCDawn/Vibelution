@@ -1,0 +1,210 @@
+{
+  "contentHash": "dc2772597d64f047ef36a0bbb2add78adf4134b8d8c5442cdfcdc5e1fbd75378",
+  "definition": {
+    "edges": [
+      {
+        "edgeId": "e_problem_find",
+        "fromNodeId": "problem_understanding",
+        "gateKind": "auto",
+        "label": "问题理解",
+        "requiredArtifactKinds": [
+          "problem_understanding"
+        ],
+        "requiresHumanAccept": false,
+        "toNodeId": "source_finding"
+      },
+      {
+        "edgeId": "e_find_extract",
+        "fromNodeId": "source_finding",
+        "gateKind": "auto",
+        "label": "候选资料",
+        "requiredArtifactKinds": [
+          "source_candidate_batch"
+        ],
+        "requiresHumanAccept": false,
+        "toNodeId": "source_extraction"
+      },
+      {
+        "edgeId": "e_extract_rel",
+        "fromNodeId": "source_extraction",
+        "gateKind": "auto",
+        "label": "证据卡",
+        "requiredArtifactKinds": [
+          "evidence_card_batch"
+        ],
+        "requiresHumanAccept": false,
+        "toNodeId": "evidence_relations"
+      },
+      {
+        "edgeId": "e_rel_ingest",
+        "fromNodeId": "evidence_relations",
+        "gateKind": "auto",
+        "label": "关系图",
+        "requiredArtifactKinds": [
+          "evidence_relation_graph"
+        ],
+        "requiresHumanAccept": false,
+        "toNodeId": "knowledge_ingestion"
+      },
+      {
+        "edgeId": "e_ingest_handoff",
+        "fromNodeId": "knowledge_ingestion",
+        "gateKind": "human",
+        "label": "入库草稿",
+        "requiredArtifactKinds": [
+          "knowledge_package_draft"
+        ],
+        "requiresHumanAccept": true,
+        "toNodeId": "knowledge_handoff"
+      },
+      {
+        "edgeId": "e_kc_hypothesis",
+        "fromNodeId": "knowledge_handoff",
+        "gateKind": "knowledge_package",
+        "label": "Knowledge Package",
+        "requiredArtifactKinds": [
+          "knowledge_package"
+        ],
+        "requiresHumanAccept": true,
+        "toNodeId": "hypothesis_design"
+      }
+    ],
+    "label": "挑战杯科研流程",
+    "nodes": [
+      {
+        "acceptsGateKinds": [],
+        "actorKind": "agent",
+        "collaboratorRoleKeys": [],
+        "description": "",
+        "label": "问题理解",
+        "nodeId": "problem_understanding",
+        "primaryRoleKey": "source_finder",
+        "producesArtifactKinds": [
+          "problem_understanding"
+        ],
+        "sessionScopePolicy": "node_shared",
+        "stageId": "knowledge_collection"
+      },
+      {
+        "acceptsGateKinds": [],
+        "actorKind": "agent",
+        "collaboratorRoleKeys": [],
+        "description": "",
+        "label": "资料寻找",
+        "nodeId": "source_finding",
+        "primaryRoleKey": "source_finder",
+        "producesArtifactKinds": [
+          "source_candidate_batch"
+        ],
+        "sessionScopePolicy": "node_shared",
+        "stageId": "knowledge_collection"
+      },
+      {
+        "acceptsGateKinds": [],
+        "actorKind": "agent",
+        "collaboratorRoleKeys": [],
+        "description": "",
+        "label": "资料提炼",
+        "nodeId": "source_extraction",
+        "primaryRoleKey": "source_extractor",
+        "producesArtifactKinds": [
+          "evidence_card_batch"
+        ],
+        "sessionScopePolicy": "node_shared",
+        "stageId": "knowledge_collection"
+      },
+      {
+        "acceptsGateKinds": [],
+        "actorKind": "agent",
+        "collaboratorRoleKeys": [],
+        "description": "",
+        "label": "证据关系",
+        "nodeId": "evidence_relations",
+        "primaryRoleKey": "source_relation_mapper",
+        "producesArtifactKinds": [
+          "evidence_relation_graph"
+        ],
+        "sessionScopePolicy": "node_shared",
+        "stageId": "knowledge_collection"
+      },
+      {
+        "acceptsGateKinds": [],
+        "actorKind": "agent",
+        "collaboratorRoleKeys": [],
+        "description": "",
+        "label": "知识入库",
+        "nodeId": "knowledge_ingestion",
+        "primaryRoleKey": "source_ingestor",
+        "producesArtifactKinds": [
+          "knowledge_package_draft"
+        ],
+        "sessionScopePolicy": "node_shared",
+        "stageId": "knowledge_collection"
+      },
+      {
+        "acceptsGateKinds": [
+          "knowledge_package",
+          "human"
+        ],
+        "actorKind": "human",
+        "collaboratorRoleKeys": [],
+        "description": "",
+        "label": "知识包交接",
+        "nodeId": "knowledge_handoff",
+        "primaryRoleKey": "research_owner",
+        "producesArtifactKinds": [
+          "knowledge_package"
+        ],
+        "sessionScopePolicy": "node_shared",
+        "stageId": "knowledge_collection"
+      },
+      {
+        "acceptsGateKinds": [
+          "knowledge_package"
+        ],
+        "actorKind": "agent",
+        "collaboratorRoleKeys": [],
+        "description": "",
+        "label": "假设设计",
+        "nodeId": "hypothesis_design",
+        "primaryRoleKey": "experiment_planner",
+        "producesArtifactKinds": [
+          "hypothesis_set"
+        ],
+        "sessionScopePolicy": "candidate_fan_out",
+        "stageId": "experiment_design"
+      }
+    ],
+    "schemaVersion": "2.2.0-stage-one",
+    "stages": [
+      {
+        "index": 1,
+        "label": "知识搜集",
+        "nodeIds": [
+          "problem_understanding",
+          "source_finding",
+          "source_extraction",
+          "evidence_relations",
+          "knowledge_ingestion",
+          "knowledge_handoff"
+        ],
+        "stageId": "knowledge_collection"
+      },
+      {
+        "index": 2,
+        "label": "实验设计",
+        "nodeIds": [
+          "hypothesis_design"
+        ],
+        "stageId": "experiment_design"
+      }
+    ],
+    "structureHash": "dc2772597d64f047ef36a0bbb2add78adf4134b8d8c5442cdfcdc5e1fbd75378",
+    "workflowId": "challenge-cup-research"
+  },
+  "schemaVersion": "2.2.0-stage-one",
+  "snapshotKind": "workflow_definition_snapshot",
+  "snapshotVersion": 1,
+  "workflowId": "challenge-cup-research",
+  "workflowVersionId": "wv-dc2772597d64"
+}

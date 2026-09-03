@@ -60,6 +60,38 @@ def test_binding_p95_derives_bounded_call_budget(monkeypatch):
     assert result["perCallBudgetMs"] == 600_000
 
 
+def test_low_p95_floors_at_governed_six_hundred_seconds(monkeypatch):
+    """Pin the raised per-call floor: a 118s p95 must no longer derive 300s.
+
+    Live meeting-speaker calls regularly ran 300-416s, so the former 300s
+    floor truncated valid calls mid-flight; the derivation band now collapses
+    onto the governed 600s cap.
+    """
+
+    samples = [
+        {
+            "provider": "relay_autodl",
+            "model": "GLM-5.3-flash",
+            "purpose": "meeting_speaker",
+            "latencyMs": 100_000 + index * 1_000,
+        }
+        for index in range(20)
+    ]
+    monkeypatch.delenv(policy._PER_CALL_OVERRIDE_ENV, raising=False)
+    monkeypatch.setattr(policy, "_receipt_latency_samples", lambda _team: samples)
+
+    result = policy.derive_per_call_budget(
+        "research-team",
+        model_refs=["relay_autodl/GLM-5.3-flash"],
+        purpose="meeting_speaker",
+    )
+
+    assert result["sampleSource"] == "provider_model_purpose_p95"
+    assert result["latencyP95Ms"] == 118_000
+    # 118s p95 x 1.25 = 147.5s; previously floored at 300s, now governed to 600s.
+    assert result["perCallBudgetMs"] == 600_000
+
+
 def test_sparse_samples_use_audited_default(monkeypatch):
     monkeypatch.delenv(policy._PER_CALL_OVERRIDE_ENV, raising=False)
     monkeypatch.setattr(
@@ -82,13 +114,16 @@ def test_sparse_samples_use_audited_default(monkeypatch):
 
 
 def test_operator_override_is_bounded(monkeypatch):
-    monkeypatch.setenv(policy._PER_CALL_OVERRIDE_ENV, "299999")
+    # The derivation band collapsed onto the 600s cap, so the override domain
+    # is now the single governed value; lower pins fail loudly instead of
+    # re-creating the observed 300s speaker-call truncation.
+    monkeypatch.setenv(policy._PER_CALL_OVERRIDE_ENV, "599999")
     with pytest.raises(policy.ChallengeMeetingDeadlinePolicyError):
         policy.derive_per_call_budget("research-team")
 
-    monkeypatch.setenv(policy._PER_CALL_OVERRIDE_ENV, "360000")
+    monkeypatch.setenv(policy._PER_CALL_OVERRIDE_ENV, "600000")
     assert policy.derive_per_call_budget("research-team") == {
-        "perCallBudgetMs": 360_000,
+        "perCallBudgetMs": 600_000,
         "latencyP95Ms": 0,
         "sampleCount": 0,
         "sampleSource": "operator_env",

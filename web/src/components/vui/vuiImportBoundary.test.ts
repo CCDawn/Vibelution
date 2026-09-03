@@ -45,6 +45,7 @@ const productSharedParentStyleConsumers = [
   // Challenge-question detail surface subcomponents share the owning panel's
   // style module (ChallengeQuestionDetailPanel.styles) instead of owning one.
   "routes/teams/challenge-cup/ChallengeQuestionRegisterDialog.tsx",
+  "routes/teams/challenge-cup/ChallengeQuestionStageZoneHeading.tsx",
   "routes/teams/challenge-cup/ChallengeQuestionRunResetDialog.tsx",
   "routes/teams/challenge-cup/ChallengeQuestionReviewForm.tsx",
   // Companions (virtual human life) surface: the route and its rail/portrait

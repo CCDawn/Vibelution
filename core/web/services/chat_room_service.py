@@ -257,12 +257,16 @@ _RETRIED_AFTER_FENCE_TIMING_KEY = "retriedAfterFence"
 # ("pass", brief agreements) legitimately repeat and stay untouched.
 _SPEAKER_DUPLICATE_SUPPRESSED_EVENT_CODE = "chat_room.speaker.duplicate_suppressed"
 _SPEAKER_DUPLICATE_GUARD_MIN_CONTENT_CHARS = 64
-# Worker ceiling for one round's speaker batch.  Reuses the process-wide LLM
-# concurrency budget as an operator ceiling; the batch width itself stays the
-# natural bound (meeting rosters are four speakers).
+# Worker ceiling for the process-wide speaker batch pool.  One meeting's
+# roster is still four speakers, but several meetings run concurrently in one
+# process and their opening-round batches all share this pool, so the default
+# is sized for four concurrent meetings (16 opening-round speaker tasks)
+# instead of a single roster.  ``VIBELUTION_LLM_MAX_CONCURRENT`` directly
+# overrides the width up or down (>=1); raising it trades provider
+# cost/rate-limit headroom for shorter speaker start-up skew.
 _CHAT_ROOM_SPEAKER_BATCH_EXECUTOR_LOCK = threading.Lock()
 _CHAT_ROOM_SPEAKER_BATCH_EXECUTOR: ThreadPoolExecutor | None = None
-_CHAT_ROOM_SPEAKER_BATCH_MAX_WORKERS_DEFAULT = 4
+_CHAT_ROOM_SPEAKER_BATCH_MAX_WORKERS_DEFAULT = 12
 _CHAT_ROOM_PARTICIPANT_INDEX_CACHE_LOCK = threading.Lock()
 _CHAT_ROOM_PARTICIPANT_INDEX_CACHE_CONDITION = threading.Condition(_CHAT_ROOM_PARTICIPANT_INDEX_CACHE_LOCK)
 _CHAT_ROOM_PARTICIPANT_INDEX_CACHE: dict[tuple[Any, ...], dict[str, dict[str, dict[str, Any]]]] = {}
@@ -2795,10 +2799,12 @@ def _speaker_batch_max_workers() -> int:
     raw = str(os.environ.get("VIBELUTION_LLM_MAX_CONCURRENT") or "").strip()
     if raw:
         try:
-            ceiling = int(float(raw))
+            override = int(float(raw))
         except ValueError:
-            ceiling = _CHAT_ROOM_SPEAKER_BATCH_MAX_WORKERS_DEFAULT
-        return max(1, min(_CHAT_ROOM_SPEAKER_BATCH_MAX_WORKERS_DEFAULT, ceiling))
+            return _CHAT_ROOM_SPEAKER_BATCH_MAX_WORKERS_DEFAULT
+        # Direct env override (up or down), floored at 1 so a bad env edit
+        # can neither explode the pool nor drop below a single worker.
+        return max(1, override)
     return _CHAT_ROOM_SPEAKER_BATCH_MAX_WORKERS_DEFAULT
 
 
