@@ -73,6 +73,20 @@ AUTO_ADVANCE_UI_PRESET_IDS: frozenset[str] = frozenset({"L1", "L2", "L3"})
 MAX_AUTO_REVISION_ROUNDS_DEFAULT = 2
 MAX_AUTO_REVISION_ROUNDS_ADJUSTABLE_TO = 1
 
+# autoSelectCandidates cost bound: the deterministic selection rule keeps at
+# least two candidates (the review comparable-pair floor) and caps the
+# auto-selected set so one generation digest cannot fan out an unbounded
+# fleet of review meetings. ``selectionRule`` names the deterministic
+# ordering the executor must apply and record; ``digest_proposal_order``
+# takes the first N ids exactly in the generation digest's
+# ``proposedCandidates`` order (no scoring signal exists at that surface).
+CANDIDATE_SELECTION_DEFAULT_MAX = 2
+CANDIDATE_SELECTION_MIN_MAX = 2
+CANDIDATE_SELECTION_RULE_DIGEST_ORDER = "digest_proposal_order"
+CANDIDATE_SELECTION_RULES: frozenset[str] = frozenset(
+    {CANDIDATE_SELECTION_RULE_DIGEST_ORDER}
+)
+
 # Decision #13: kappa >= 0.75 with zero false auto-approvals is calibration
 # evidence, never a permanent delegation of authority.
 CALIBRATION_GATE_REQUIRED_FIELDS = (
@@ -489,6 +503,65 @@ def _validated_calibration_gate(
     return gate
 
 
+def _validated_candidate_selection(
+    errors: list[dict[str, str]], payload: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Validate the optional bounded candidateSelection parameters.
+
+    Absent means the frozen default (``maxSelected`` = 2,
+    ``selectionRule`` = ``digest_proposal_order``) so existing documents
+    stay valid; present it must be an object with an integer
+    ``maxSelected`` >= the review comparable-pair floor and, when
+    declared, a known deterministic ``selectionRule``.
+    """
+
+    default = {
+        "maxSelected": CANDIDATE_SELECTION_DEFAULT_MAX,
+        "selectionRule": CANDIDATE_SELECTION_RULE_DIGEST_ORDER,
+    }
+    raw = payload.get("candidateSelection")
+    if raw is None:
+        return default
+    if not isinstance(raw, Mapping):
+        errors.append(
+            _error(
+                "missing_or_invalid",
+                "candidateSelection",
+                "must be an object when present",
+            )
+        )
+        return default
+    max_selected = raw.get("maxSelected")
+    if (
+        isinstance(max_selected, bool)
+        or not isinstance(max_selected, int)
+        or max_selected < CANDIDATE_SELECTION_MIN_MAX
+    ):
+        errors.append(
+            _error(
+                "unsupported_value",
+                "candidateSelection.maxSelected",
+                "must be an integer >= "
+                f"{CANDIDATE_SELECTION_MIN_MAX} (the review comparable-pair "
+                "floor)",
+            )
+        )
+        max_selected = CANDIDATE_SELECTION_DEFAULT_MAX
+    rule = str(
+        raw.get("selectionRule") or CANDIDATE_SELECTION_RULE_DIGEST_ORDER
+    ).strip()
+    if rule not in CANDIDATE_SELECTION_RULES:
+        errors.append(
+            _error(
+                "unsupported_value",
+                "candidateSelection.selectionRule",
+                "must be one of: " + ", ".join(sorted(CANDIDATE_SELECTION_RULES)),
+            )
+        )
+        rule = CANDIDATE_SELECTION_RULE_DIGEST_ORDER
+    return {"maxSelected": max_selected, "selectionRule": rule}
+
+
 def _validated_ui_presets(
     errors: list[dict[str, str]], payload: Mapping[str, Any]
 ) -> dict[str, Any]:
@@ -574,6 +647,15 @@ class AutoAdvancePolicyV2:
     activationRequires: str
     declaredContentHash: str
     contentHashRule: str = POLICY_CONTENT_HASH_RULE
+    # Optional bounded selection parameters; defaulted (never None) so the
+    # executor can always read a concrete cap.  Sits after the defaulted
+    # contentHashRule to keep direct keyword constructions compatible.
+    candidateSelection: dict[str, Any] = field(
+        default_factory=lambda: {
+            "maxSelected": CANDIDATE_SELECTION_DEFAULT_MAX,
+            "selectionRule": CANDIDATE_SELECTION_RULE_DIGEST_ORDER,
+        }
+    )
     previewStageOnly: Literal["preview"] = field(
         default="preview", init=False
     )
@@ -593,6 +675,7 @@ class AutoAdvancePolicyV2:
         declared_hash = verify_policy_content_hash(payload, errors)
         capabilities = _validated_capabilities(errors, payload)
         calibration_gate = _validated_calibration_gate(errors, payload)
+        candidate_selection = _validated_candidate_selection(errors, payload)
         ui_presets = _validated_ui_presets(errors, payload)
 
         activation_requires = str(payload.get("activationRequires") or "").strip()
@@ -701,6 +784,7 @@ class AutoAdvancePolicyV2:
             effectiveFromCheckpoint=checkpoint,
             drainMode=drain_mode,
             calibrationGate=calibration_gate,
+            candidateSelection=candidate_selection,
             uiPresets=ui_presets,
             supersedes=supersedes,
             activationRequires=activation_requires,
@@ -727,6 +811,7 @@ class AutoAdvancePolicyV2:
             "effectiveFromCheckpoint": self.effectiveFromCheckpoint,
             "drainMode": self.drainMode,
             "calibrationGate": copy.deepcopy(self.calibrationGate),
+            "candidateSelection": copy.deepcopy(self.candidateSelection),
             "uiPresets": copy.deepcopy(self.uiPresets),
             "supersedes": copy.deepcopy(self.supersedes),
             "activationRequires": self.activationRequires,
@@ -953,6 +1038,10 @@ __all__ = [
     "AUTO_ADVANCE_POLICY_STATUSES",
     "AUTO_ADVANCE_UI_PRESET_IDS",
     "CALIBRATION_GATE_REQUIRED_FIELDS",
+    "CANDIDATE_SELECTION_DEFAULT_MAX",
+    "CANDIDATE_SELECTION_MIN_MAX",
+    "CANDIDATE_SELECTION_RULES",
+    "CANDIDATE_SELECTION_RULE_DIGEST_ORDER",
     "FALSE_AUTO_APPROVE_BOUND_METHODS",
     "HUMAN_REVIEW_POLICY_SCHEMA_VERSION",
     "HUMAN_REVIEW_ROLLING_DRIFT_SENTINELS",

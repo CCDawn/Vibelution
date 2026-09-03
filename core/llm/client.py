@@ -127,31 +127,6 @@ def _max_output_tokens_override_from_metadata(
     return value if value > 0 else None
 
 
-# Derived per-call generation cap for call paths that cannot thread metadata
-# through the agent runtime (chat-room speaker turns run inside the session
-# runtime, so the owning service binds the cap as a context var next to the
-# receipt scope).  Explicit metadata overrides keep precedence; invalid or
-# non-positive values are ignored and the profile default stays authoritative.
-_PER_CALL_OUTPUT_TOKEN_CAP: ContextVar[int | None] = ContextVar(
-    "vibelution_llm_per_call_output_token_cap", default=None
-)
-
-
-@contextmanager
-def per_call_output_token_cap_scope(max_output_tokens: Any) -> Iterator[None]:
-    """Bind one derived per-call generation cap to nested payload builds."""
-
-    if isinstance(max_output_tokens, bool) or not isinstance(max_output_tokens, int):
-        normalized = None
-    else:
-        normalized = max_output_tokens if max_output_tokens > 0 else None
-    token = _PER_CALL_OUTPUT_TOKEN_CAP.set(normalized)
-    try:
-        yield
-    finally:
-        _PER_CALL_OUTPUT_TOKEN_CAP.reset(token)
-
-
 @contextmanager
 def model_invocation_receipt_context_scope(
     context: Mapping[str, Any] | None,
@@ -2734,10 +2709,6 @@ class LLMClient:
     ) -> Dict[str, Any]:
         wire_adapter = self._required_wire_adapter()
         max_output_tokens_override = _max_output_tokens_override_from_metadata(metadata)
-        if max_output_tokens_override is None:
-            # Derived speaker-call cap bound by the owning service next to the
-            # receipt scope; explicit metadata overrides keep precedence.
-            max_output_tokens_override = _PER_CALL_OUTPUT_TOKEN_CAP.get()
         if output_schema is not None and not self.capabilities.supports_strict_json_schema:
             raise LLMError(
                 "capability_error",

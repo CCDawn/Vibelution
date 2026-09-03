@@ -69,3 +69,4 @@
 | `[git]` | 08 |
 | `[ui]` | 08 |
 | `[user_profile]` | 08 |
+| `[research_workflow]` | [auto-advance-policy.active.json 模板](./auto-advance-policy.active.json)：activation 自动推进策略文档；`auto_advance_policy_path` 指向部署副本（缺省读 config 目录同名文件，env 次之） |

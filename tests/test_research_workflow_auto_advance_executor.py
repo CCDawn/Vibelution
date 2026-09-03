@@ -153,6 +153,9 @@ def active_policy_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         encoding="utf-8",
     )
     monkeypatch.setenv(ev.SHADOW_POLICY_ENV, str(path))
+    # Isolate the operator config home: a deployed default policy file or
+    # config.toml override must never shadow this fixture's document.
+    monkeypatch.setenv("VIBELUTION_CONFIG_HOME", str(tmp_path / "operator-config"))
     executor._DOCUMENT_CACHE.clear()
     ev._POLICY_CACHE.clear()
     return path
@@ -282,6 +285,12 @@ def hf_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_EXECUTOR", _InlineExecutor())
     monkeypatch.delenv(ev.SHADOW_POLICY_ENV, raising=False)
     monkeypatch.delenv(executor.AUTO_ADVANCE_DISABLED_ENV, raising=False)
+    # Isolate the operator config home so the activation policy resolver
+    # cannot pick up a deployed default/config document in tests.
+    monkeypatch.setenv("VIBELUTION_CONFIG_HOME", str(tmp_path / "operator-config"))
+    from config import paths as config_paths
+
+    config_paths._AUTO_ADVANCE_POLICY_PATH_CACHE.clear()
     executor._DOCUMENT_CACHE.clear()
     ev._POLICY_CACHE.clear()
     agents: dict[str, str] = {}
@@ -860,14 +869,15 @@ def test_auto_select_candidates_executes_record_selection_with_system_actor(
     assert record["detail"]["status"] == "created"
     selection = selections.list_hypothesis_selections(team_id)["selections"][0]
     assert selection["decidedBy"] == _SYSTEM_ACTOR
-    assert selection["selectedCandidateIds"] == ["hyp-a", "hyp-b"]
+    # Digest proposal order is the rule: submitted order is preserved.
+    assert selection["selectedCandidateIds"] == ["hyp-b", "hyp-a"]
 
-    # Replay reuses the same selection (idempotent), no duplicate record.
+    # Replay with the SAME digest order reuses the selection (idempotent).
     replay = executor.attempt_capability(
         decision_point="candidate_selection",
         team_id=team_id,
         question_id=_QUESTION_ID,
-        candidate_ids=["hyp-a", "hyp-b"],
+        candidate_ids=["hyp-b", "hyp-a"],
         selection_scope=chain._question_scope_envelope(team_id, _QUESTION_ID),
         policy=policy,
         payload=payload,

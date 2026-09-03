@@ -849,6 +849,40 @@ def _gate_complete(team_id: str, gate_id: str) -> bool:
     )
 
 
+def _concurrency_elevation_allowed(team_id: str, gate_id: str) -> bool:
+    """Frozen policy: concurrency above the default needs completed G12 evidence.
+
+    Two fail-closed evidence sources, no bypass: the real-12 batch fully
+    succeeded, or a completed G12 calibration pilot (decision-#13 judgement
+    records persisted through the G12 store) passed its statistical gate —
+    thresholds come from the loadable active policy document when one is
+    configured and bound to the recorded manifest, else the frozen
+    calibration defaults.  The plan-level restriction (only the real-125
+    plan may exceed the frozen default) is unchanged.
+    """
+    if gate_id != "G125":
+        return False
+    if _gate_complete(team_id, "G12"):
+        return True
+    from core.web.services.team_workflow.research_runtime import (
+        automation_policy_executor,
+    )
+    from core.web.services.team_workflow.research_runtime.g12_calibration_store import (
+        g12_calibration_gate_verdict_for_team,
+    )
+
+    try:
+        policy = automation_policy_executor.load_active_policy_from_environment()
+    except Exception:  # noqa: BLE001 - evidence read never breaks batch start
+        policy = None
+    return (
+        g12_calibration_gate_verdict_for_team(
+            team_id, policy=policy
+        ).get("passed")
+        is True
+    )
+
+
 def _require_gate_progression(team_id: str, gate_id: str) -> None:
     previous_gate = PREVIOUS_GATE.get(gate_id)
     if previous_gate is None:
@@ -1021,9 +1055,8 @@ def start_real_batch(
     authorization = _current_catalog_run_authorization(
         normalized_team, normalized_plan
     )
-    above_default_allowed = (
-        plan.gate_id == "G125"
-        and _gate_complete(normalized_team, "G12")
+    above_default_allowed = _concurrency_elevation_allowed(
+        normalized_team, plan.gate_id
     )
     resolved_concurrency = validate_real_concurrency(
         concurrency if concurrency is not None else frozen_execution_policy()[

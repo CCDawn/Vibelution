@@ -55,7 +55,7 @@ MEETING_ROUND_TYPES = {
     "risk_escalation",
     "generation",
 }
-DEFAULT_MEETING_ROUNDS = 3
+DEFAULT_MEETING_ROUNDS = 2
 MEETING_STATUS_TRANSITIONS = {
     "open": {"summarizing"},
     "summarizing": {"awaiting_approval"},
