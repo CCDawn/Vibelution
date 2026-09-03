@@ -2452,8 +2452,22 @@ def register_challenge_question_output(team_id: str, payload: dict[str, Any]) ->
                     raise ValueError(
                         "Existing challenge question result package artifact is missing."
                     )
+            # The human review is the one sanctioned post-registration
+            # mutation: it writes approved gate decisions into the stored
+            # artifact and re-hashes the record.  A replay that carries the
+            # same canonical output (identical once both copies are normalised
+            # back to pending gates) must still be recognised as the same run
+            # instead of being rejected as an illicit overwrite — the
+            # finalize-time fresh Program readback depends on it.
+            fresh_pending = deepcopy(output)
+            _set_pending_human_gates(fresh_pending)
+            existing_pending = deepcopy(existing_output)
+            _set_pending_human_gates(existing_pending)
+            same_canonical_output = (
+                _output_sha256(fresh_pending) == _output_sha256(existing_pending)
+            )
             if (
-                existing_record.get("outputSha256") == output_hash
+                (existing_record.get("outputSha256") == output_hash or same_canonical_output)
                 and existing_record.get("lineage") == record.get("lineage")
                 and (
                     package_metadata is None

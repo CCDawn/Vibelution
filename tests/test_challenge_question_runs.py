@@ -776,6 +776,82 @@ def test_revised_question_run_records_parent_lineage_and_is_immutable(tmp_path, 
         )
 
 
+def test_replay_after_human_review_recognizes_same_canonical_output(
+    tmp_path, monkeypatch
+):
+    """The finalize-time Program readback replays a reviewed run.
+
+    Human review is the one sanctioned post-registration mutation: it writes
+    approved gate decisions into the stored artifact and re-hashes the index
+    record.  Re-registering the same canonical output (identical once both
+    copies are normalised back to pending gates) must stay idempotent instead
+    of being rejected as an illicit overwrite, otherwise the stage-one
+    finalize's fresh handoff can never read the approved record back.
+    """
+
+    _isolate_store(tmp_path, monkeypatch)
+    output = _output()
+    question_id = output["identity"]["question_id"]
+    run_id = output["run"]["run_id"]
+    payload = {
+        "output": output,
+        "citationChecks": _citation_checks(output),
+    }
+    registered = challenge_question_runs.register_challenge_question_output(
+        "research-team", payload
+    )
+    assert registered["record"]["recordId"] == f"{question_id}:{run_id}"
+
+    artifact_path = challenge_question_runs._artifact_path(
+        "research-team", question_id, run_id
+    )
+    stored = challenge_question_runs._read_json(artifact_path)
+    gate = stored["problem_understanding"]["human_gate"]
+    gate.update(
+        {
+            "decision": "approved",
+            "rationale": "operator approved",
+            "reviewer": "operator:test",
+            "decided_at": "2026-09-04T00:00:00Z",
+        }
+    )
+    stored.setdefault("review", {})["human_review_status"] = "approved"
+    stored.setdefault("submission", {}).update(
+        {"eligible": True, "projection_version": "1.0-review.1", "blockers": []}
+    )
+    stored.setdefault("audit", {})["human_review_status"] = "approved"
+    challenge_question_runs._write_json(artifact_path, stored)
+
+    store = challenge_question_runs._load_store("research-team")
+    record = next(
+        item
+        for item in store["records"]
+        if item.get("recordId") == f"{question_id}:{run_id}"
+    )
+    record["outputSha256"] = challenge_question_runs._output_sha256(stored)
+    record["status"] = "approved"
+    challenge_question_runs._write_json(challenge_question_runs._store_path("research-team"), store)
+
+    replay = challenge_question_runs.register_challenge_question_output(
+        "research-team", payload
+    )
+    assert replay["idempotent"] is True
+    assert replay["record"]["recordId"] == f"{question_id}:{run_id}"
+    assert replay["record"]["status"] == "approved"
+
+    # A genuinely different canonical output stays an illicit overwrite.
+    changed_output = deepcopy(output)
+    changed_output["hypotheses"][0]["statement"] = "An illicit overwrite."
+    with pytest.raises(ValueError, match="immutable"):
+        challenge_question_runs.register_challenge_question_output(
+            "research-team",
+            {
+                "output": changed_output,
+                "citationChecks": _citation_checks(changed_output),
+            },
+        )
+
+
 def test_revised_question_run_requires_existing_parent(tmp_path, monkeypatch):
     _isolate_store(tmp_path, monkeypatch)
     revised_output = _output()
