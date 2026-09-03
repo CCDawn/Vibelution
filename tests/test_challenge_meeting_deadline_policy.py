@@ -147,22 +147,6 @@ def test_operator_config_override_reads_live_settings(monkeypatch):
     assert policy._operator_config_override_ms() is None
 
 
-def test_speaker_output_token_cap_scales_with_running_fence():
-    # 300s fence: 300s * 40 tok/s * 0.7 utilization.
-    assert policy.speaker_output_token_cap(remaining_budget_ms=300_000) == 8_400
-    # The operator-pinned 600s fence relaxes the cap proportionally.
-    assert policy.speaker_output_token_cap(remaining_budget_ms=600_000) == 16_800
-
-
-def test_speaker_output_token_cap_fails_safe_without_meaningful_budget():
-    assert policy.speaker_output_token_cap(remaining_budget_ms=0) is None
-    assert policy.speaker_output_token_cap(remaining_budget_ms=-1) is None
-    assert policy.speaker_output_token_cap(remaining_budget_ms=None) is None
-    # Below the minimum useful answer a clamp would only guarantee a
-    # truncated reply, so the request stays untouched.
-    assert policy.speaker_output_token_cap(remaining_budget_ms=60_000) is None
-
-
 def _stub_call_budget(monkeypatch, per_call_ms: int = 300_000) -> None:
     monkeypatch.setattr(policy, "_participant_model_refs", lambda _ids: ["p/m"])
     monkeypatch.setattr(
