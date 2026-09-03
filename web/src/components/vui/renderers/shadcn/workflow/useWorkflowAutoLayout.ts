@@ -325,8 +325,11 @@ export function layoutDiagnostic(
       return { reason: `node "${node.id}" has invalid geometry bounds` };
     }
   }
-  if (input && !layoutMatchesGraph(result, input)) {
+  if (input && !layoutMatchesBusinessNodes(result, input)) {
     return { reason: "layout result omitted or changed business nodes" };
+  }
+  if (input && !layoutMatchesBusinessEdges(result, input)) {
+    return { reason: "layout result omitted or changed business edges" };
   }
   for (const edge of result.edges) {
     for (const section of edge.sections) {
@@ -672,6 +675,13 @@ function fallbackEdgeSections(
 }
 
 function layoutMatchesGraph(
+  layout: { nodes: WorkflowLayoutNode[]; edges: WorkflowLayoutResult["edges"] },
+  input: WorkflowLayoutInput,
+): boolean {
+  return layoutMatchesBusinessNodes(layout, input) && layoutMatchesBusinessEdges(layout, input);
+}
+
+function layoutMatchesBusinessNodes(
   layout: { nodes: WorkflowLayoutNode[] },
   input: WorkflowLayoutInput,
 ): boolean {
@@ -684,6 +694,18 @@ function layoutMatchesGraph(
   const expectedStages = new Set(input.stages.map((stage) => stage.stageId));
   const actualStages = new Set(layout.nodes.filter((node) => node.kind === "stage").map((node) => node.stageId));
   return expectedStages.size === actualStages.size && [...expectedStages].every((stageId) => actualStages.has(stageId));
+}
+
+function layoutMatchesBusinessEdges(
+  layout: { edges: WorkflowLayoutResult["edges"] },
+  input: WorkflowLayoutInput,
+): boolean {
+  const expectedEdges = new Map(input.edges.map((edge) => [edge.edgeId, edge] as const));
+  if (expectedEdges.size !== layout.edges.length) return false;
+  return layout.edges.every((edge) => {
+    const expected = expectedEdges.get(edge.id);
+    return expected?.fromNodeId === edge.source && expected.toNodeId === edge.target;
+  });
 }
 
 function resolveWorkflowLayoutRecovery(
