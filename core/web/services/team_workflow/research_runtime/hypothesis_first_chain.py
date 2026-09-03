@@ -2213,6 +2213,229 @@ def _apply_human_acceptance_for_recommended_candidate(
     }
 
 
+def _adjudication_workflow_run_id(
+    team_id: str,
+    round_record: Mapping[str, Any],
+    *,
+    workflow_run_id: str,
+) -> str:
+    """Resolve the run scope for adjudication-time binding materialization.
+
+    The budget-exhaustion auto-advance reuses ``record_human_adjudication``
+    without a ``workflow_run_id`` (chain rounds pre-date run-scoped
+    adjudications), so fall back to the round's own meeting refs — the same
+    meetings the adjudication already validated.  Empty is a valid answer:
+    the materialization then keys run scope off the source evidence records
+    instead of a run identity, and a caller that cannot resolve one simply
+    skips the run-scoped tag.
+    """
+
+    normalized = str(workflow_run_id or "").strip()
+    if normalized:
+        return normalized
+    meeting_ids = {
+        str(ref.get("id") or "").strip()
+        for ref in list(round_record.get("meetingRefs") or [])
+        if isinstance(ref, Mapping)
+        and str(ref.get("kind") or "") == "meeting_round"
+        and str(ref.get("id") or "").strip()
+    }
+    if not meeting_ids:
+        return ""
+    from core.web.services.team_workflow import meeting_rounds
+
+    for meeting in meeting_rounds.list_meeting_rounds(team_id)["meetings"]:
+        if str(meeting.get("meetingRoundId") or "").strip() not in meeting_ids:
+            continue
+        resolved = _meeting_workflow_run_id(meeting)
+        if resolved:
+            return resolved
+    return ""
+
+
+def _materialize_recommended_candidate_claim_bindings(
+    team_id: str,
+    question_id: str,
+    candidate_id: str,
+    *,
+    workflow_run_id: str,
+) -> dict[str, Any]:
+    """Materialize the recommended candidate's strict claim bindings (probe-first).
+
+    Time-invariance fix for the chain-level acceptance authority: the strict
+    claim belief gate requires hypothesis-role claim binding records, but the
+    only writer (:func:`materialize_candidate_claim_bindings_from_existing_evidence`)
+    ran on the formal side — after the formal run exists — while chain-level
+    adjudication happens strictly before it.  An accepted adjudication could
+    therefore never satisfy the gate (``candidate_claim_binding_missing``),
+    deadlocking the convergence the human (or budget-exhaustion policy) had
+    just granted.  Before the gate runs, this binds the recommended
+    candidate's already-collected lineage evidence under ``reasoningRole =
+    hypothesis`` so the unchanged strict gate can finally read it:
+
+    - probe-first and idempotent: if any hypothesis-role record is already
+      bound to the candidate, nothing is written (replays and a human
+      adjudication after an auto-advanced one stay write-free);
+    - reuse first: when the candidate's core-claim ledger row already exists
+      (the chain collection bridge proposed it with its cited evidence refs),
+      re-proposing it ref-less would collide with the ledger's content
+      binding, so the existing row's claim id is kept and the hypothesis-role
+      records are registered against it directly;
+    - fresh rows go through the formal materializer unchanged;
+    - no evidence to bind (no candidate record, no lineage refs, no matching
+      source records) materializes nothing and the gate keeps its original
+      fail-closed verdict — bindings are never fabricated and the gate
+      semantics are never relaxed.
+    """
+
+    normalized_candidate = str(candidate_id or "").strip()
+    if not normalized_candidate:
+        return {"status": "skipped", "reason": "recommended_candidate_missing"}
+    evidence_records = _claim_evidence_records(team_id)
+    existing_strict_ids = {
+        str(record.get("claimEvidenceId") or "").strip()
+        for record in evidence_records
+        if str(record.get("candidateId") or "").strip() == normalized_candidate
+        and str(record.get("reasoningRole") or "").strip().lower() == "hypothesis"
+        and str(record.get("claimEvidenceId") or "").strip()
+    }
+    if existing_strict_ids:
+        return {
+            "status": "skipped",
+            "reason": "strict_binding_present",
+            "candidateId": normalized_candidate,
+            "strictBindingCount": len(existing_strict_ids),
+        }
+    candidate_record = next(
+        (
+            dict(record)
+            for record in reversed(_records(team_id))
+            if str(record.get("recordKind") or "") == CANDIDATE_KIND
+            and str(record.get("candidateId") or "").strip() == normalized_candidate
+            and str(record.get("questionId") or "").strip().upper()
+            == str(question_id or "").strip().upper()
+        ),
+        None,
+    )
+    statement = str((candidate_record or {}).get("statement") or "").strip()
+    lineage_refs = {
+        str(item or "").strip()
+        for item in list((candidate_record or {}).get("lineageRefs") or [])
+        if str(item or "").strip()
+    }
+    if not candidate_record or not statement or not lineage_refs:
+        return {
+            "status": "skipped",
+            "reason": "candidate_lineage_missing",
+            "candidateId": normalized_candidate,
+        }
+    matching_sources = [
+        dict(record)
+        for record in evidence_records
+        if str(record.get("reasoningRole") or "").strip().lower() != "hypothesis"
+        and str(record.get("reviewStatus") or "").strip().lower()
+        not in {"rejected", "stale"}
+        and (
+            str(record.get("sourceId") or "").strip() in lineage_refs
+            or str(record.get("claimEvidenceId") or "").strip() in lineage_refs
+        )
+    ]
+    if not matching_sources:
+        return {
+            "status": "skipped",
+            "reason": "no_matching_lineage_evidence",
+            "candidateId": normalized_candidate,
+        }
+    normalized_run = str(workflow_run_id or "").strip()
+    question_scope = _question_scope_envelope(team_id, question_id)
+
+    from core.research.evidence import ClaimEvidenceStore
+
+    from .agent_claim_evidence_materializer import (
+        _ledger_claim_id,
+        materialize_candidate_claim_bindings_from_existing_evidence,
+    )
+
+    expected_claim_id = _ledger_claim_id(
+        question_scope=question_scope,
+        claim_text=statement,
+        candidate_id=normalized_candidate,
+    )
+    ledger_row = next(
+        (
+            row
+            for row in _question_claim_rows_for_gate(team_id, question_id)
+            if str(row.get("claimId") or "").strip() == expected_claim_id
+        ),
+        None,
+    )
+    if ledger_row is None and any(
+        not str(source.get("sourceCollectionRunId") or "").strip()
+        or (not normalized_run and not str(source.get("workflowRunId") or "").strip())
+        for source in matching_sources
+    ):
+        # The formal materializer stamps every binding with direct reads of
+        # the source's ``sourceCollectionRunId`` plus the run scope of either
+        # the resolved run or the source record itself; with either missing it
+        # cannot tag provenance, so skip instead of crashing — the gate keeps
+        # its original fail-closed verdict.
+        return {
+            "status": "skipped",
+            "reason": "provenance_unresolvable",
+            "candidateId": normalized_candidate,
+        }
+    if ledger_row is None:
+        materialized = materialize_candidate_claim_bindings_from_existing_evidence(
+            project_root=_project_root(),
+            team_id=team_id,
+            workflow_run_id=normalized_run,
+            question_scope=question_scope,
+            candidates=[candidate_record],
+        )
+        return {
+            "status": "applied",
+            "reason": "formal_materializer",
+            "candidateId": normalized_candidate,
+            "claimId": expected_claim_id,
+            "materializedCount": len(materialized),
+        }
+    store = ClaimEvidenceStore(_project_root())
+    bound_claim_id = str(ledger_row.get("claimId") or "").strip()
+    before_ids = set(existing_strict_ids)
+    for source in matching_sources:
+        payload: dict[str, Any] = {
+            "claimId": bound_claim_id,
+            "candidateId": normalized_candidate,
+            "sourceId": str(source.get("sourceId") or ""),
+            "sourceRevision": str(source.get("sourceRevision") or ""),
+            "locator": dict(source.get("locator") or {}),
+            "quote": str(source.get("quote") or ""),
+            "evidenceKind": str(source.get("evidenceKind") or ""),
+            "reasoningRole": "hypothesis",
+            "supportLevel": str(source.get("supportLevel") or ""),
+            "extractionMethod": str(source.get("extractionMethod") or ""),
+            "extractorAgentId": str(source.get("extractorAgentId") or ""),
+            "modelRef": str(source.get("modelRef") or ""),
+            "sourceCollectionRunId": str(
+                source.get("sourceCollectionRunId") or ""
+            ),
+        }
+        run_tag = normalized_run or str(source.get("workflowRunId") or "")
+        if run_tag:
+            payload["workflowRunId"] = run_tag
+        bound = store.register(team_id, payload)
+        bound_id = str(bound.get("claimEvidenceId") or "").strip()
+        if bound_id and bound_id not in before_ids:
+            before_ids.add(bound_id)
+    return {
+        "status": "applied",
+        "reason": "chain_collection_row_reused",
+        "candidateId": normalized_candidate,
+        "claimId": bound_claim_id,
+        "materializedCount": len(before_ids - existing_strict_ids),
+    }
+
+
 def record_human_adjudication(
     team_id: str,
     *,
@@ -2322,8 +2545,15 @@ def record_human_adjudication(
             # re-gated; rejecting (elimination) is never gated.  The human
             # acceptance authority is exercised first: the recommended
             # candidate's pending supporting evidence gets audited accepted
-            # twins (the chain never runs an evidence review round), then the
-            # unchanged gate still blocks contradicted/disputed claims.
+            # twins (the chain never runs an evidence review round).  Then the
+            # candidate's strict hypothesis-role claim bindings are
+            # materialized from its already-collected lineage evidence
+            # (probe-first, idempotent) — the only writer ran on the formal
+            # side, which always happens after this adjudication, so without
+            # this the strict gate could never pass at chain level.  The
+            # unchanged gate still blocks contradicted/disputed claims, and a
+            # candidate with no bindable evidence keeps its original
+            # fail-closed verdict.
             meta_review = (
                 round_record.get("metaReview")
                 if isinstance(round_record.get("metaReview"), Mapping)
@@ -2370,6 +2600,51 @@ def record_human_adjudication(
                         ),
                         "sourceCount": int(acceptance.get("sourceCount") or 0),
                         "coreClaimIds": list(acceptance.get("coreClaimIds") or []),
+                    },
+                )
+            try:
+                binding_materialization = (
+                    _materialize_recommended_candidate_claim_bindings(
+                        team_id,
+                        normalized_question_id,
+                        recommended_candidate_id,
+                        workflow_run_id=_adjudication_workflow_run_id(
+                            team_id,
+                            round_record,
+                            workflow_run_id=normalized_workflow_run_id,
+                        ),
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001 - the gate stays fail-closed
+                _record_scene_event(
+                    "human_adjudication_binding_materialization_failed",
+                    outcome="failed",
+                    level="warning",
+                    fields={
+                        "questionId": normalized_question_id,
+                        "candidateId": recommended_candidate_id,
+                        "hypothesisRoundId": normalized_round_id,
+                        "error": str(exc)[:200],
+                    },
+                )
+            else:
+                _record_scene_event(
+                    "human_adjudication_binding_materialized",
+                    outcome=str(binding_materialization.get("status") or ""),
+                    fields={
+                        "questionId": normalized_question_id,
+                        "candidateId": recommended_candidate_id,
+                        "hypothesisRoundId": normalized_round_id,
+                        "materializationStatus": str(
+                            binding_materialization.get("status") or ""
+                        ),
+                        "materializationReason": str(
+                            binding_materialization.get("reason") or ""
+                        ),
+                        "claimId": str(binding_materialization.get("claimId") or ""),
+                        "materializedCount": int(
+                            binding_materialization.get("materializedCount") or 0
+                        ),
                     },
                 )
             _assert_claim_belief_gate_allows(
