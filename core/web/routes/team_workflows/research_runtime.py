@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
@@ -153,6 +153,20 @@ class CommandPayload(VersionedCommandPayload):
     payload: dict[str, Any] = Field(default_factory=dict)
 
 
+class StageOneCommandPayload(VersionedCommandPayload):
+    """Stage-one G1 closeout operator commands (Challenge Program flow).
+
+    The two system commands execute synchronously through
+    ``apply_node_command``; the closure node defaults to the run's
+    ``inputSnapshot.stageOneCompletionPolicy.closureNodeId`` so callers never
+    hard-code the workflow shape.
+    """
+
+    command: Literal["build_stage_one_package", "finalize_stage_one"]
+    nodeId: str = ""
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
 class KnowledgeSearchEnvelopePayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -230,6 +244,9 @@ def _map_error(exc: ResearchWorkflowError) -> HTTPException:
         "experiment_activation_not_allowed",
         "campaign_theme_mismatch",
         "dev_theme_not_activatable",
+        "stage_one_package_not_ready",
+        "stage_one_program_review_not_approved",
+        "stage_one_result_package_missing",
     }:
         status = 409
     elif code in {
@@ -850,3 +867,72 @@ def _submit_workflow_command(
             status_code=422,
             detail={"code": "unknown_command", "message": str(exc)},
         ) from exc
+
+
+def _stage_one_closure_node_id(record: dict[str, Any], requested_node_id: str) -> str:
+    """Resolve the closure node from the run's authoritative stage-one policy."""
+    node_id = str(requested_node_id or "").strip()
+    if node_id:
+        return node_id
+    snapshot = record.get("inputSnapshot")
+    snapshot = snapshot if isinstance(snapshot, dict) else {}
+    policy = snapshot.get("stageOneCompletionPolicy")
+    policy = policy if isinstance(policy, dict) else {}
+    return str(policy.get("closureNodeId") or "").strip() or "hypothesis_design"
+
+
+@router.post(
+    "/research/workflow-runs/{run_id}/stage-one/commands",
+)
+def research_workflow_stage_one_command(
+    run_id: str,
+    payload: StageOneCommandPayload,
+    request: Request,
+) -> dict:
+    """Stage-one G1 closeout facade over the runtime service (thin route).
+
+    ``build_stage_one_package`` registers the Challenge Program result
+    package; ``finalize_stage_one`` re-reads Program authority and promotes
+    the pending closeout. All semantics stay in the system adapters.
+    """
+    try:
+        with server_operator_scope_from_http(request):
+            operator = current_server_operator()
+            actor_id = (
+                str(operator.operator_id).strip() if operator is not None else ""
+            )
+            service = _svc()
+            record = service.get_run(run_id)
+            if str(record.get("teamId") or "") != payload.teamId:
+                raise HTTPException(
+                    status_code=404,
+                    detail={
+                        "code": "team_scope_mismatch",
+                        "message": "run does not belong to the requested team",
+                    },
+                )
+            if int(record.get("runVersion") or 0) != payload.expectedRunVersion:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "run_version_conflict",
+                        "message": "expectedRunVersion does not match the run",
+                    },
+                )
+            return service.apply_node_command(
+                run_id=run_id,
+                node_id=_stage_one_closure_node_id(record, payload.nodeId),
+                command=payload.command,
+                payload={
+                    **payload.payload,
+                    "idempotencyKey": payload.idempotencyKey,
+                    "requestedBy": actor_id or "operator",
+                },
+            )
+    except PermissionError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "command_forbidden", "message": str(exc) or "command_forbidden"},
+        ) from exc
+    except ResearchWorkflowError as exc:
+        raise _map_error(exc) from exc
