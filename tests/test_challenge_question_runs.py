@@ -815,7 +815,14 @@ def test_replay_after_human_review_recognizes_same_canonical_output(
             "decided_at": "2026-09-04T00:00:00Z",
         }
     )
-    stored.setdefault("review", {})["human_review_status"] = "approved"
+    stored.setdefault("review", {}).update(
+        {
+            "human_review_status": "approved",
+            "reviewer": "operator:test",
+            "rationale": "operator approved",
+            "decided_at": "2026-09-04T00:00:00Z",
+        }
+    )
     stored.setdefault("submission", {}).update(
         {"eligible": True, "projection_version": "1.0-review.1", "blockers": []}
     )

@@ -635,6 +635,29 @@ def _human_gate_summary(output: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _replay_canonical_output_sha256(output: dict[str, Any]) -> str:
+    """Hash the output modulo review decisions and registration projections.
+
+    Two copies of one canonical output can legitimately differ after
+    registration: the human review writes gate decisions and review
+    attribution, and register itself recomputes ``audit.output_sha256`` /
+    ``audit.citation_validation`` before hashing.  Those fields are excluded
+    from the replay identity; everything else must match exactly.
+    """
+
+    copy = deepcopy(output)
+    _set_pending_human_gates(copy)
+    review = copy.get("review")
+    if isinstance(review, dict):
+        for key in ("reviewer", "rationale", "decided_at"):
+            review.pop(key, None)
+    audit = copy.get("audit")
+    if isinstance(audit, dict):
+        audit.pop("output_sha256", None)
+        audit.pop("citation_validation", None)
+    return _output_sha256(copy)
+
+
 def _set_pending_human_gates(output: dict[str, Any]) -> None:
     for field in ("problem_understanding", "selection", "research_plan"):
         section = output.get(field) if isinstance(output.get(field), dict) else {}
@@ -2452,19 +2475,18 @@ def register_challenge_question_output(team_id: str, payload: dict[str, Any]) ->
                     raise ValueError(
                         "Existing challenge question result package artifact is missing."
                     )
-            # The human review is the one sanctioned post-registration
-            # mutation: it writes approved gate decisions into the stored
-            # artifact and re-hashes the record.  A replay that carries the
-            # same canonical output (identical once both copies are normalised
-            # back to pending gates) must still be recognised as the same run
-            # instead of being rejected as an illicit overwrite — the
-            # finalize-time fresh Program readback depends on it.
-            fresh_pending = deepcopy(output)
-            _set_pending_human_gates(fresh_pending)
-            existing_pending = deepcopy(existing_output)
-            _set_pending_human_gates(existing_pending)
+            # Replay identity: the output is "the same run" when it matches
+            # modulo the two kinds of post/pre-registration projection noise —
+            # (a) the human review (the one sanctioned post-registration
+            # mutation: approved gate decisions, review attribution, and the
+            # re-hashed record), and (b) registration-time audit projections
+            # (output_sha256 / citation_validation are recomputed by register
+            # and therefore cannot participate in the comparison).  Everything
+            # else must match exactly.  Without this the finalize-time fresh
+            # Program readback could never recognise the reviewed record.
             same_canonical_output = (
-                _output_sha256(fresh_pending) == _output_sha256(existing_pending)
+                _replay_canonical_output_sha256(output)
+                == _replay_canonical_output_sha256(existing_output)
             )
             if (
                 (existing_record.get("outputSha256") == output_hash or same_canonical_output)
