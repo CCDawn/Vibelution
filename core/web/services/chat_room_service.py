@@ -276,6 +276,15 @@ _SPEAKER_BATCH_PARALLEL = "parallel"
 # same policy; ordinary rooms never retry.
 _SPEAKER_FENCE_RETRY_CONFIG_KEY = "speakerFenceRetry"
 _RETRIED_AFTER_FENCE_TIMING_KEY = "retriedAfterFence"
+# Zero-output retries recover transient provider/runtime failures.  These
+# error types are configuration problems: the same turn cannot succeed on a
+# second attempt, so retrying would only burn another full budget.
+_ZERO_OUTPUT_RETRY_EXCLUDED_ERROR_TYPES = frozenset(
+    {
+        "ChatRoomValidationError",
+        "AgentLlmResolutionError",
+    }
+)
 # Idempotency guard at the speaker commit side: a byte-identical completed
 # speech from the same speaker in the same room (the observed retry-path
 # duplicate shape: one 4458-char speech published twice verbatim across
@@ -2065,9 +2074,15 @@ def _execute_chat_room_round(
     meeting_ttl_probe: dict[str, Any] = {"readAtMonotonic": 0.0, "mute": None}
     policy = _speaker_execution_policy(round_payload)
     speaker_batches = _speaker_round_batches(speakers, round_payload, policy)
+    # The built-in runner resolves each speaker's room-agent LLM inside the
+    # turn, so the round can preflight that same resolution at prep and fail
+    # configuration errors before the pool.  Injected runners own their model
+    # resolution and keep today's contract untouched.
+    prep_model_preflight = runner is _run_participant_agent
     for batch in speaker_batches:
         batch_turns: list[tuple[dict[str, Any], str, dict[str, Any]]] = []
         batch_meta: list[tuple[int, dict[str, Any], float]] = []
+        batch_pre_failed: dict[int, tuple[dict[str, Any], float]] = {}
         batch_is_parallel = bool(policy["parallel"]) and len(batch) > 1
         # Batch prep stays serial and in speaker order.  Serial rounds keep
         # every boundary check here before the prompt build, exactly as before
@@ -2122,23 +2137,11 @@ def _execute_chat_room_round(
                 # bounded budget so a hung LLM call cannot occupy the round
                 # forever.  Challenge rooms keep their policy-derived budget.
                 per_call_budget_ms = _CHAT_ROOM_SPEAKER_DEFAULT_PER_CALL_BUDGET_MS
-            from core.web.services.team_workflow.challenge_deadline_policy import (
-                effective_call_deadline_at_ms,
-            )
-
-            # The meeting-level clock stays in ``challengeDeadlineAtMs``; the
-            # per-call fence lives in its own key so an exhausted speaker call
-            # can never be mistaken for an exhausted meeting.  Plain rooms have
-            # no outer deadline, so the per-call budget alone defines the fence.
-            context[_CHALLENGE_ROOM_PER_CALL_DEADLINE_CONTEXT_KEY] = effective_call_deadline_at_ms(
-                call_started_at_ms=int(time.time() * 1000),
-                per_call_budget_ms=per_call_budget_ms,
-                meeting_deadline_at_ms=_positive_int(
-                    round_config.get("meetingDeadlineAtMs")
-                )
-                or context["challengeDeadlineAtMs"],
-                outer_deadline_at_ms=context["challengeDeadlineAtMs"],
-            )
+            # Only the fence inputs are captured at prep time.  The per-call
+            # fence itself is computed when the turn actually starts running
+            # (in _finish_speaker_turn): the shared batch pool serves several
+            # meetings at once, so a turn can queue long after prep, and that
+            # queue wait must not consume this call's budget.
             # Remember the fence inputs so a fence-hung zero-output turn can
             # rebuild a fresh per-call budget for its single in-turn retry.
             context["_perCallBudgetMs"] = per_call_budget_ms
@@ -2183,10 +2186,26 @@ def _execute_chat_room_round(
                 prior_messages=messages,
             )
             prompt_build_ms = _elapsed_ms(speaker_started_at)
-            context["speakerStartedAtMonotonic"] = speaker_started_at
+            # Prep timestamp only: ``speakerStartedAtMonotonic`` moves to the
+            # turn launch so totalSpeakerMs excludes the shared-pool queue
+            # wait; the excluded wait is auditable as ``queueWaitMs``.
+            context["speakerBatchPrepAtMonotonic"] = speaker_started_at
             context["promptBuildMs"] = prompt_build_ms
-            batch_turns.append((participant, prompt, context))
             batch_meta.append((index, participant, prompt_build_ms))
+            if prep_model_preflight:
+                # Prep-phase model preflight: a speaker whose runtime model
+                # cannot resolve fails here in milliseconds and never occupies
+                # a shared-pool slot (whose queue delay the other speakers
+                # would otherwise absorb).
+                pre_failure = _prep_speaker_model_failure(
+                    participant,
+                    context,
+                    prompt_build_ms=prompt_build_ms,
+                )
+                if pre_failure is not None:
+                    batch_pre_failed[index] = (pre_failure, 0.0)
+                    continue
+            batch_turns.append((participant, prompt, context))
         if batch_is_parallel:
             # Batch fan-out: turns run concurrently, each with its own
             # watchdog, per-call fence and session slot; one failed speaker
@@ -2209,6 +2228,17 @@ def _execute_chat_room_round(
                     fence_retry_enabled=policy["fenceRetry"],
                 )
                 for participant, prompt, context in batch_turns
+            ]
+        if batch_pre_failed:
+            # Preflight failures never entered the pool; stitch them back into
+            # speaker order so per-message persistence below keeps the exact
+            # serial sequence.
+            executed_iter = iter(batch_results)
+            batch_results = [
+                batch_pre_failed[index]
+                if index in batch_pre_failed
+                else next(executed_iter)
+                for index, _participant, _prompt_build_ms in batch_meta
             ]
         # Messages commit in speaker order even when the batch ran
         # concurrently: per-message persistence, snapshot publish and speaker
@@ -2868,35 +2898,157 @@ def _refresh_per_call_fence(context: dict[str, Any]) -> None:
     )
 
 
+def _queue_wait_ms_from_context(context: Mapping[str, Any], launched_at: float) -> int:
+    """Prep-to-launch wall-clock this turn spent waiting for a pool slot."""
+
+    return _elapsed_ms_between(context.get("speakerBatchPrepAtMonotonic"), ended_at=launched_at)
+
+
+def _context_queue_wait_ms(context: Mapping[str, Any]) -> int:
+    """Launch-time queue wait recorded for this turn; 0 when never queued."""
+
+    try:
+        return max(0, int(context.get("queueWaitMs") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _prep_speaker_failure_message(
+    participant: dict[str, Any],
+    context: Mapping[str, Any],
+    exc: Exception,
+    *,
+    prompt_build_ms: float,
+) -> dict[str, Any]:
+    """Failed speaker message for a prep-phase model preflight rejection.
+
+    Mirrors the runner-path failure shape (same status/summary/errorType
+    contract as ``_run_one_speaker``'s exception branch) so downstream
+    persistence and UI need no special casing.
+    """
+
+    try:
+        supervision_payload = _supervision_decision_to_message(
+            _evaluate_speaker_supervision_policy(participant)
+        )
+    except Exception:  # noqa: BLE001 - preflight evidence must not fail the round
+        supervision_payload = _supervision_decision_to_message(None)
+    return {
+        "messageId": _new_id("message", set()),
+        "participantId": participant["participantId"],
+        "agentId": participant.get("agentId") or "",
+        "speakerCode": participant.get("agentCode") or "",
+        "sessionId": participant.get("sessionId") or "",
+        "speakerTitle": _participant_speaker_label(participant),
+        "status": "failed",
+        "content": "",
+        "summary": f"{type(exc).__name__}: {exc}",
+        "errorType": type(exc).__name__,
+        "timestamp": utc_now_iso(),
+        **_case_message_metadata(dict(context)),
+        "supervision": supervision_payload,
+        "timings": {
+            "promptBuildMs": max(0, int(prompt_build_ms)),
+            "queueWaitMs": 0,
+            "totalSpeakerMs": _elapsed_ms_between(
+                context.get("speakerBatchPrepAtMonotonic")
+            ),
+        },
+    }
+
+
+def _prep_speaker_model_failure(
+    participant: dict[str, Any],
+    context: dict[str, Any],
+    *,
+    prompt_build_ms: float,
+) -> dict[str, Any] | None:
+    """Resolve this speaker's runtime model before the turn enters the pool.
+
+    Runs the exact resolution the built-in runner performs mid-turn
+    (agent lookup + ``_resolve_chat_room_agent_llm``), so a configuration
+    error — archived/missing agent, missing LLM binding, model absent from
+    the model library — fails this speaker in milliseconds at prep instead of
+    after it queued onto the shared batch pool and burned wall-clock there.
+    Returns the failed message, or ``None`` when the speaker may launch.
+    """
+
+    agent_id = str(participant.get("agentId") or "").strip()
+    _sync_agent_directory_project_root()
+    agent = (
+        agent_directory_service.get_agent(agent_id, include_archived=False)
+        if agent_id
+        else None
+    )
+    if agent_id and not agent:
+        historical_agent = agent_directory_service.get_agent(agent_id, include_archived=True)
+        status = str((historical_agent or {}).get("status") or "").strip().lower()
+        reason = "archived_agent" if status == "archived" else "missing_agent"
+        _record_participant_agent_unavailable_event(
+            participant,
+            dict(context),
+            reason=reason,
+            agent_status=status,
+        )
+        return _prep_speaker_failure_message(
+            participant,
+            context,
+            ChatRoomValidationError(
+                text_for(
+                    get_web_language(),
+                    zh="群聊成员引用的 Agent 已归档或不可用，不能继续作为发言者运行。",
+                    en="This room participant references an archived or unavailable Agent and cannot run as a speaker.",
+                )
+            ),
+            prompt_build_ms=prompt_build_ms,
+        )
+    try:
+        _resolve_chat_room_agent_llm(agent)
+    except ChatRoomValidationError as exc:
+        return _prep_speaker_failure_message(
+            participant,
+            context,
+            exc,
+            prompt_build_ms=prompt_build_ms,
+        )
+    return None
+
+
 def _speaker_turn_zero_output_after_per_call_fence(
     message: Mapping[str, Any],
     context: Mapping[str, Any],
 ) -> bool:
-    """True when the turn produced no usable output because its fence ran out.
+    """True when a stopped/failed turn produced no usable output at all.
 
-    Covers the audited SCI-091 hang shape: the runner was abandoned by the
-    watchdog (no runner time recorded, empty content) or a late completed
-    result was discarded by the per-call fence.  Round-level stops (manual
-    stop, meeting deadline, workflow-run fence) never retry — the round is
-    ending regardless of this speaker.
+    Any zero-output terminal (watchdog abandon, per-call fence discard, empty
+    provider failure or structured stop) gets exactly one same-turn retry with
+    a fresh budget: real provider tail latency regularly lands on the second
+    attempt.  Two shapes never retry — round-level stops (manual stop,
+    meeting deadline, workflow-run fence, digest TTL: the round is ending
+    regardless of this speaker) and configuration errors (a missing model
+    binding or library entry cannot heal inside the same turn).
     """
 
     status = str(message.get("status") or "").strip().lower()
     content = str(message.get("content") or "").strip()
     if status == "completed" and content:
         return False
+    if status not in {"stopped", "failed"} or content:
+        # Completed/blocked/partial turns and any turn with visible content
+        # keep their existing semantics; there is nothing to recover.
+        return False
     round_id = str(context.get("roundId") or "").strip()
     if _chat_room_round_stop_reason(round_id):
         return False
-    if message.get("lateResultDiscarded") and str(message.get("summary") or "") == (
+    if str(message.get("errorType") or "").strip() in _ZERO_OUTPUT_RETRY_EXCLUDED_ERROR_TYPES:
+        return False
+    if message.get("lateResultDiscarded") and str(message.get("summary") or "") != (
         _CHALLENGE_ROOM_PER_CALL_STOP_REASON
     ):
-        return True
-    if message.get("errorType") == "SpeakerCallWatchdogTimeout":
-        return True
-    # Runner finished inside its call but still returned nothing while the
-    # per-call fence is spent.
-    return not content and bool(_challenge_room_per_call_stop_reason(context))
+        # A round-level fence discarded this late result; retrying would fire
+        # a fresh speaker call after the round has already begun closing.
+        return False
+    return True
 
 
 def _record_speaker_fence_retry_event(
@@ -3053,6 +3205,13 @@ def _finish_speaker_turn(
         ):
             return None, 0.0
     speaker_started_at = context.get("speakerStartedAtMonotonic") or _perf_counter()
+    context["speakerStartedAtMonotonic"] = speaker_started_at
+    # Queue wait is the prep-to-launch gap: the shared batch pool serves
+    # several meetings at once, so a turn can sit queued long after its batch
+    # was prepared.  That wait is auditable here but consumes neither the
+    # per-call budget nor totalSpeakerMs, both of which start now.
+    context["queueWaitMs"] = _queue_wait_ms_from_context(context, speaker_started_at)
+    _refresh_per_call_fence(context)
     message = _run_one_speaker(participant, prompt, context, runner)
     speaker_run_ms = _elapsed_ms(speaker_started_at)
     stop_reason = _challenge_room_speaker_abort_reason(round_id, context, force_run_read=True)
@@ -3156,6 +3315,7 @@ def _run_one_speaker(
             "supervision": supervision_payload,
             "timings": {
                 "supervisionPolicyMs": supervision_policy_ms,
+                "queueWaitMs": _context_queue_wait_ms(context),
                 "totalSpeakerMs": _elapsed_ms_between(speaker_started_at),
             },
         }
@@ -3193,7 +3353,11 @@ def _run_one_speaker(
         _close_chat_room_speaker_delta(
             context, participant, _speaker_delta_terminal_status(message_status)
         )
-        error_type = _structured_speaker_result_error_type(result) if message_status == "failed" else ""
+        error_type = (
+            _structured_speaker_result_error_type(result)
+            if message_status in {"failed", "stopped"}
+            else ""
+        )
         timestamp = utc_now_iso()
         return {
             "messageId": _new_id("message", set()),
@@ -3213,6 +3377,7 @@ def _run_one_speaker(
             "supervision": supervision_payload,
             "timings": {
                 "supervisionPolicyMs": supervision_policy_ms,
+                "queueWaitMs": _context_queue_wait_ms(context),
                 "runnerMs": runner_ms,
                 "totalSpeakerMs": _elapsed_ms_between(speaker_started_at),
                 **result_timings,
@@ -3253,6 +3418,7 @@ def _run_one_speaker(
                 **_case_message_metadata(context),
                 "timings": {
                     "supervisionPolicyMs": supervision_policy_ms,
+                    "queueWaitMs": _context_queue_wait_ms(context),
                     "totalSpeakerMs": total_speaker_ms,
                 },
             }
@@ -3273,6 +3439,7 @@ def _run_one_speaker(
             "supervision": supervision_payload,
             "timings": {
                 "supervisionPolicyMs": supervision_policy_ms,
+                "queueWaitMs": _context_queue_wait_ms(context),
                 "totalSpeakerMs": total_speaker_ms,
             },
         }
@@ -4051,12 +4218,19 @@ def _structured_speaker_result_error_type(result: Any) -> str:
     llm_failure = result.get("llm_failure") if isinstance(result.get("llm_failure"), dict) else {}
     result_status = str(result.get("status") or "").strip().lower()
     known_failure_statuses = {"failed", "failed_provider", "failed_runtime", "error"}
+    known_stop_statuses = {"stopped", "stopped_by_user", "cancelled"}
     return trim_lines(
         str(
             result.get("errorType")
             or result.get("error_type")
             or llm_failure.get("category")
-            or ("AgentTurnFailed" if result_status in known_failure_statuses else "UnexpectedResultStatus")
+            or (
+                "AgentTurnFailed"
+                if result_status in known_failure_statuses
+                else "AgentTurnStopped"
+                if result_status in known_stop_statuses
+                else "UnexpectedResultStatus"
+            )
         ),
         max_lines=1,
     ).strip()

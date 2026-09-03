@@ -1826,7 +1826,7 @@ def test_start_chat_room_round_preserves_all_partial_results(tmp_path, monkeypat
         (None, "completed", "", ""),
         ("succeeded", "completed", "succeeded", ""),
         ("blocked", "blocked", "blocked", ""),
-        ("stopped_by_user", "stopped", "stopped_by_user", ""),
+        ("stopped_by_user", "stopped", "stopped_by_user", "AgentTurnStopped"),
         ("degraded", "partial", "degraded", ""),
         ("needs_continue", "partial", "needs_continue", ""),
         ("unexpected_status", "failed", "unexpected_status", "UnexpectedResultStatus"),
@@ -5722,6 +5722,370 @@ def test_ordinary_room_never_retries_zero_output_speaker(tmp_path, monkeypatch):
     assert attempts == {"session-alpha": 1, "session-beta": 1}
     assert latest["messages"][0]["content"] == ""
     assert latest["messages"][0]["timings"].get("retriedAfterFence") is None
+
+
+def test_parallel_batch_queue_wait_excluded_from_budget_and_total_speaker_ms(
+    tmp_path, monkeypatch
+):
+    """A：per-call fence 与讲者计时起点在开跑时刻，而不是批次 prep 时刻。
+
+    跨房间共享池（12 宽）下，讲者 turn 可能在 prep 之后排队数百秒；这段
+    排队不得吃掉该讲者的 per-call 预算，也不得计入 totalSpeakerMs，只以
+    ``timings.queueWaitMs`` 留审计。
+    """
+
+    _isolate_chat_room_kernel(tmp_path, monkeypatch)
+    _seed_chat_sessions(tmp_path)
+    room = chat_room_service.create_chat_room(
+        title="排队预算群聊",
+        participant_session_ids=["session-alpha", "session-beta"],
+    )
+    pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pytest-queue-wait")
+    monkeypatch.setattr(chat_room_service, "_speaker_batch_executor", lambda: pool)
+    contexts: dict[str, dict] = {}
+    observed_now_ms: dict[str, int] = {}
+
+    def runner(participant, _prompt, context):
+        session_id = participant["sessionId"]
+        contexts[session_id] = dict(context)
+        observed_now_ms[session_id] = int(time.time() * 1000)
+        if session_id == "session-alpha":
+            # Alpha holds the single pool worker; beta waits in the queue.
+            time.sleep(1.5)
+        return {
+            "status": "completed",
+            "raw_output": f"发言-{session_id}",
+            "summary": "ok",
+        }
+
+    try:
+        detail = chat_room_service.start_chat_room_round(
+            room["roomId"],
+            "假说评审第 1 轮",
+            config={
+                "meetingType": "hypothesis_review",
+                "speakerBatchMode": "parallel",
+                "discussionRoundIndex": 1,
+                "perCallBudgetMs": 60_000,
+            },
+            agent_runner=runner,
+        )
+    finally:
+        pool.shutdown(wait=True)
+
+    latest = detail["rounds"][-1]
+    assert latest["status"] == "completed"
+    messages = {m["sessionId"]: m for m in latest["messages"]}
+    alpha_timings = messages["session-alpha"]["timings"]
+    beta_timings = messages["session-beta"]["timings"]
+    # Alpha launched immediately after submission: negligible queue wait.
+    assert alpha_timings["queueWaitMs"] < 500
+    # Beta queued behind alpha's full 1.5s call; the wait is auditable.
+    assert beta_timings["queueWaitMs"] >= 1_000
+    # totalSpeakerMs starts at the turn launch: it excludes beta's queue wait.
+    assert beta_timings["totalSpeakerMs"] < beta_timings["queueWaitMs"]
+    # The fence is computed at beta's own launch: one full budget above the
+    # runner-observed now, not above the batch prep moment.
+    fence_gap_ms = (
+        contexts["session-beta"]["challengePerCallDeadlineAtMs"]
+        - observed_now_ms["session-beta"]
+    )
+    assert 59_000 <= fence_gap_ms <= 60_000
+    # Beta's fence anchor sits one queue-wait later than alpha's.
+    fence_delta_ms = (
+        contexts["session-beta"]["challengePerCallDeadlineAtMs"]
+        - contexts["session-alpha"]["challengePerCallDeadlineAtMs"]
+    )
+    assert fence_delta_ms >= 1_000
+
+
+def test_zero_output_failed_turn_retries_once_even_without_fence_spend(
+    tmp_path, monkeypatch
+):
+    """B：零输出 failed 终态一律同轮重试一次，不再要求 per-call fence 花完。
+
+    快速 provider 失败（未触发 fence）过去直接烧掉该讲者；现在同轮拿到
+    一次全新预算的重试机会。
+    """
+
+    room = _start_fence_retry_room(tmp_path, monkeypatch)
+    attempts = {}
+
+    def runner(participant, _prompt, _context):
+        session_id = participant["sessionId"]
+        attempts[session_id] = attempts.get(session_id, 0) + 1
+        if session_id == "session-alpha" and attempts[session_id] == 1:
+            raise RuntimeError("provider exploded")
+        return {
+            "status": "completed",
+            "raw_output": f"重试后发言-{session_id}",
+            "summary": "ok",
+        }
+
+    detail = chat_room_service.start_chat_room_round(
+        room["roomId"],
+        "假说评审第 1 轮",
+        config={"meetingType": "hypothesis_review", "speakerBatchMode": "serial"},
+        agent_runner=runner,
+    )
+
+    latest = detail["rounds"][-1]
+    assert latest["status"] == "completed"
+    assert attempts == {"session-alpha": 2, "session-beta": 1}
+    recovered = latest["messages"][0]
+    assert recovered["sessionId"] == "session-alpha"
+    assert recovered["status"] == "completed"
+    assert recovered["content"] == "重试后发言-session-alpha"
+    assert recovered["timings"]["retriedAfterFence"] is True
+
+
+def test_config_error_zero_output_never_retries_and_keeps_readable_summary(
+    tmp_path, monkeypatch
+):
+    """B：配置/校验类错误（ChatRoomValidationError）不重试，summary 保留原因。"""
+
+    room = _start_fence_retry_room(tmp_path, monkeypatch)
+    attempts = {}
+
+    def runner(participant, _prompt, _context):
+        session_id = participant["sessionId"]
+        attempts[session_id] = attempts.get(session_id, 0) + 1
+        if session_id == "session-alpha":
+            raise chat_room_service.ChatRoomValidationError(
+                "模型库缺少模型：missing-model"
+            )
+        return {
+            "status": "completed",
+            "raw_output": f"发言-{session_id}",
+            "summary": "ok",
+        }
+
+    detail = chat_room_service.start_chat_room_round(
+        room["roomId"],
+        "假说评审第 1 轮",
+        config={"meetingType": "hypothesis_review", "speakerBatchMode": "serial"},
+        agent_runner=runner,
+    )
+
+    latest = detail["rounds"][-1]
+    assert latest["status"] == "partial"
+    # The configuration failure stands: retrying cannot heal a missing model.
+    assert attempts == {"session-alpha": 1, "session-beta": 1}
+    failed = latest["messages"][0]
+    assert failed["sessionId"] == "session-alpha"
+    assert failed["status"] == "failed"
+    assert failed["errorType"] == "ChatRoomValidationError"
+    assert "模型库缺少模型：missing-model" in failed["summary"]
+    assert failed["timings"].get("retriedAfterFence") is None
+
+
+def test_zero_output_retry_predicate_matrix(monkeypatch):
+    """B：重试判定矩阵——零输出 stopped/failed 重试；轮级 stop 与配置错误排除。"""
+
+    monkeypatch.setattr(chat_room_service, "_chat_room_round_stop_reason", lambda _round_id: "")
+    context = {"roundId": "round-matrix"}
+
+    def message(**overrides):
+        base = {
+            "status": "failed",
+            "content": "",
+            "summary": "boom",
+            "errorType": "RuntimeError",
+        }
+        base.update(overrides)
+        return base
+
+    retry = chat_room_service._speaker_turn_zero_output_after_per_call_fence
+    # Zero-output failed/stopped terminals retry exactly once.
+    assert retry(message(), context) is True
+    assert (
+        retry(message(status="stopped", errorType="SpeakerCallWatchdogTimeout"), context)
+        is True
+    )
+    assert retry(message(status="stopped", errorType="AgentTurnStopped"), context) is True
+    assert (
+        retry(
+            message(
+                lateResultDiscarded=True,
+                summary="challenge_per_call_budget_exhausted",
+                errorType="",
+            ),
+            context,
+        )
+        is True
+    )
+    # Configuration errors cannot heal inside the same turn.
+    for excluded in ("ChatRoomValidationError", "AgentLlmResolutionError"):
+        assert retry(message(errorType=excluded), context) is False
+    # A round-level fence discarded this late result: the round is closing.
+    assert (
+        retry(
+            message(
+                lateResultDiscarded=True,
+                summary="challenge_logical_task_deadline_exhausted",
+                errorType="",
+            ),
+            context,
+        )
+        is False
+    )
+    # Turns with visible output and non stopped/failed terminals keep semantics.
+    assert retry(message(content="有实际内容"), context) is False
+    assert retry(message(status="completed", content="正常发言", errorType=""), context) is False
+    assert retry(message(status="blocked", errorType=""), context) is False
+    assert retry(message(status="partial", content="", errorType=""), context) is False
+    # A round-level stop always wins over any zero-output shape.
+    monkeypatch.setattr(
+        chat_room_service, "_chat_room_round_stop_reason", lambda _round_id: "manual"
+    )
+    assert retry(message(), context) is False
+    assert (
+        retry(message(status="stopped", errorType="SpeakerCallWatchdogTimeout"), context)
+        is False
+    )
+
+
+def test_structured_stopped_result_carries_error_type(monkeypatch):
+    """B：structured stopped 路径也写 errorType，零输出判定与审计拿得到类别。"""
+
+    monkeypatch.setattr(
+        chat_room_service,
+        "_evaluate_speaker_supervision_policy",
+        lambda participant: SimpleNamespace(
+            allowed=True,
+            reason="",
+            supervision_enabled=False,
+            requires_review=False,
+            review_mode="",
+            evidence_level="",
+        ),
+    )
+    monkeypatch.setattr(
+        agent_directory_service, "record_supervision_policy_decision", lambda decision: None
+    )
+    participant = {
+        "participantId": "participant-stopped",
+        "agentId": "agent-stopped",
+        "agentCode": "A-st",
+        "sessionId": "session-stopped",
+        "title": "停止 Agent",
+    }
+
+    def run(result):
+        return chat_room_service._run_one_speaker(
+            participant,
+            "提示词",
+            {},
+            lambda _participant, _prompt, _context: result,
+        )
+
+    explicit = run(
+        {"status": "stopped", "errorType": "ProviderStreamCancelled", "raw_output": "", "summary": ""}
+    )
+    assert explicit["status"] == "stopped"
+    assert explicit["errorType"] == "ProviderStreamCancelled"
+    fallback = run({"status": "stopped", "raw_output": "", "summary": ""})
+    assert fallback["status"] == "stopped"
+    assert fallback["errorType"] == "AgentTurnStopped"
+
+
+class _CountingSpeakerPool(ThreadPoolExecutor):
+    """Thread pool that records every submitted speaker turn."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._lock = threading.Lock()
+        self.submitted: list = []
+
+    def submit(self, fn, *args, **kwargs):
+        with self._lock:
+            self.submitted.append(fn)
+        return super().submit(fn, *args, **kwargs)
+
+
+def test_prep_preflight_fails_bad_model_reference_before_pool(tmp_path, monkeypatch):
+    """C：模型解析失败的讲者在 prep 阶段毫秒级标 failed，不进共享池排队。"""
+
+    _isolate_chat_room_kernel(tmp_path, monkeypatch)
+    monkeypatch.setattr(session_service, "build_agent_context", _lightweight_agent_context)
+    monkeypatch.setattr(chat_room_service, "build_agent_context", _lightweight_agent_context)
+    llm_bindings = _install_chat_room_test_llm_config(monkeypatch)
+    alpha = session_service.create_chat_session(title="Alpha Agent", llm_bindings=llm_bindings)
+    beta = session_service.create_chat_session(title="Beta Agent", llm_bindings=llm_bindings)
+    beta_agent_id = str(beta["agentId"] or "").strip()
+    agent_directory_service.update_agent_instance(
+        beta_agent_id,
+        llm_bindings={"dialogue": {"modelId": "missing-from-library"}},
+    )
+
+    class FakeChatAgent:
+        def __init__(self, workspace_path=None, config=None):
+            pass
+
+        def set_turn_identity(self, turn_identity):
+            pass
+
+        def seed_chat_history(self, messages):
+            pass
+
+        def seed_static_runtime_context(self, content):
+            pass
+
+        def seed_runtime_context(self, content):
+            pass
+
+        def mark_runtime_context_seeded_by_host(self):
+            pass
+
+        def set_turn_interrupt_checker(self, checker):
+            pass
+
+        def run_single_turn(self, initial_prompt=None, disable_tools=False):
+            return {
+                "status": "completed",
+                "raw_output": "alpha 正常发言",
+                "summary": "ok",
+                "tool_call_count": 0,
+            }
+
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda **kwargs: FakeChatAgent())
+    pool = _CountingSpeakerPool(max_workers=2, thread_name_prefix="pytest-preflight")
+    monkeypatch.setattr(chat_room_service, "_speaker_batch_executor", lambda: pool)
+    room = chat_room_service.create_chat_room(
+        title="预解析群聊",
+        participant_agent_ids=[alpha["agentId"], beta["agentId"]],
+    )
+
+    try:
+        detail = chat_room_service.start_chat_room_round(
+            room["roomId"],
+            "假说评审第 1 轮",
+            config={
+                "meetingType": "hypothesis_review",
+                "speakerBatchMode": "parallel",
+                "discussionRoundIndex": 1,
+            },
+        )
+    finally:
+        pool.shutdown(wait=True)
+
+    latest = detail["rounds"][-1]
+    assert latest["status"] == "partial"
+    messages = {m["sessionId"]: m for m in latest["messages"]}
+    beta_message = messages[beta["id"]]
+    # The misconfigured speaker failed at prep with the runner-path failure
+    # shape and a readable model-library reason.
+    assert beta_message["status"] == "failed"
+    assert beta_message["errorType"] == "ChatRoomValidationError"
+    assert "missing-from-library" in beta_message["summary"]
+    assert "model library" in beta_message["summary"]
+    assert beta_message["timings"]["queueWaitMs"] == 0
+    assert "runnerMs" not in beta_message["timings"]
+    # Only the healthy speaker ever occupied a pool slot.
+    assert len(pool.submitted) == 1
+    alpha_message = messages[alpha["id"]]
+    assert alpha_message["status"] == "completed"
+    assert alpha_message["content"] == "alpha 正常发言"
 
 
 def test_chat_room_suppresses_byte_identical_repeat_speech_from_same_speaker(
