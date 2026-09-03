@@ -57,15 +57,15 @@ def test_binding_p95_derives_bounded_call_budget(monkeypatch):
     assert result["sampleSource"] == "provider_model_purpose_p95"
     assert result["sampleCount"] == 20
     assert result["latencyP95Ms"] == 488_000
-    assert result["perCallBudgetMs"] == 600_000
+    assert result["perCallBudgetMs"] == 800_000
 
 
-def test_low_p95_floors_at_governed_six_hundred_seconds(monkeypatch):
+def test_low_p95_floors_at_governed_cap(monkeypatch):
     """Pin the raised per-call floor: a 118s p95 must no longer derive 300s.
 
-    Live meeting-speaker calls regularly ran 300-416s, so the former 300s
-    floor truncated valid calls mid-flight; the derivation band now collapses
-    onto the governed 600s cap.
+    Live meeting-speaker calls regularly ran 300-416s with a heavy tail past
+    600s, so the former 300s floor truncated valid calls mid-flight; the
+    derivation band now collapses onto the governed 800s cap.
     """
 
     samples = [
@@ -88,8 +88,8 @@ def test_low_p95_floors_at_governed_six_hundred_seconds(monkeypatch):
 
     assert result["sampleSource"] == "provider_model_purpose_p95"
     assert result["latencyP95Ms"] == 118_000
-    # 118s p95 x 1.25 = 147.5s; previously floored at 300s, now governed to 600s.
-    assert result["perCallBudgetMs"] == 600_000
+    # 118s p95 x 1.25 = 147.5s; previously floored at 300s, now governed to 800s.
+    assert result["perCallBudgetMs"] == 800_000
 
 
 def test_sparse_samples_use_audited_default(monkeypatch):
@@ -110,20 +110,20 @@ def test_sparse_samples_use_audited_default(monkeypatch):
     assert speaker_result["sampleSource"] == "audited_default"
     assert speaker_result["perCallBudgetMs"] == 450_000
     assert review_result["sampleSource"] == "audited_default"
-    assert review_result["perCallBudgetMs"] == 600_000
+    assert review_result["perCallBudgetMs"] == 800_000
 
 
 def test_operator_override_is_bounded(monkeypatch):
-    # The derivation band collapsed onto the 600s cap, so the override domain
+    # The derivation band collapsed onto the 800s cap, so the override domain
     # is now the single governed value; lower pins fail loudly instead of
     # re-creating the observed 300s speaker-call truncation.
-    monkeypatch.setenv(policy._PER_CALL_OVERRIDE_ENV, "599999")
+    monkeypatch.setenv(policy._PER_CALL_OVERRIDE_ENV, "799999")
     with pytest.raises(policy.ChallengeMeetingDeadlinePolicyError):
         policy.derive_per_call_budget("research-team")
 
-    monkeypatch.setenv(policy._PER_CALL_OVERRIDE_ENV, "600000")
+    monkeypatch.setenv(policy._PER_CALL_OVERRIDE_ENV, "800000")
     assert policy.derive_per_call_budget("research-team") == {
-        "perCallBudgetMs": 600_000,
+        "perCallBudgetMs": 800_000,
         "latencyP95Ms": 0,
         "sampleCount": 0,
         "sampleSource": "operator_env",
@@ -133,10 +133,10 @@ def test_operator_override_is_bounded(monkeypatch):
 
 def test_operator_config_pins_fence_and_precedes_env(monkeypatch):
     monkeypatch.delenv(policy._PER_CALL_OVERRIDE_ENV, raising=False)
-    monkeypatch.setattr(policy, "_operator_config_override_ms", lambda: 600_000)
+    monkeypatch.setattr(policy, "_operator_config_override_ms", lambda: 800_000)
 
     assert policy.derive_per_call_budget("research-team") == {
-        "perCallBudgetMs": 600_000,
+        "perCallBudgetMs": 800_000,
         "latencyP95Ms": 0,
         "sampleCount": 0,
         "sampleSource": "operator_config",
@@ -145,7 +145,7 @@ def test_operator_config_pins_fence_and_precedes_env(monkeypatch):
 
     monkeypatch.setenv(policy._PER_CALL_OVERRIDE_ENV, "360000")
     assert (
-        policy.derive_per_call_budget("research-team")["perCallBudgetMs"] == 600_000
+        policy.derive_per_call_budget("research-team")["perCallBudgetMs"] == 800_000
     )
 
 
@@ -165,8 +165,8 @@ def test_operator_config_override_reads_live_settings(monkeypatch):
             research=SimpleNamespace(challenge_meeting_per_call_budget_ms=value)
         )
 
-    monkeypatch.setattr("config.settings.get_config", lambda: _settings(600_000))
-    assert policy._operator_config_override_ms() == 600_000
+    monkeypatch.setattr("config.settings.get_config", lambda: _settings(800_000))
+    assert policy._operator_config_override_ms() == 800_000
 
     monkeypatch.setattr("config.settings.get_config", lambda: _settings(None))
     assert policy._operator_config_override_ms() is None

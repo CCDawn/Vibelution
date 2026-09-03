@@ -47,12 +47,13 @@ CHALLENGE_LOGICAL_TASK_TIMEOUT_MS = _env_positive_int_ms(
     "VIBELUTION_CHALLENGE_LOGICAL_TASK_TIMEOUT_MS",
     1_800_000,
 )
-# No-progress window: must outlast one in-flight long model call (>= 10 min).
+# No-progress window: must outlast one in-flight long model call, i.e. the
+# governed per-call fence (800s since 2026-09-03) plus margin.
 # An actively executing turn refreshes progress via the session-side activity
 # signal (turnCurrent), so this window only fires on a truly silent turn.
 CHALLENGE_NO_PROGRESS_TIMEOUT_MS = _env_positive_int_ms(
     "VIBELUTION_CHALLENGE_NO_PROGRESS_TIMEOUT_MS",
-    600_000,
+    900_000,
 )
 # Per-wait poll window before the durable requeue re-evaluates progress.
 CHALLENGE_TURN_WAIT_WINDOW_MS = 120_000
