@@ -487,3 +487,212 @@ def test_execute_chat_room_round_closes_round_when_speaker_watchdog_times_out(tm
     assert message["status"] == "stopped"
     assert message["errorType"] == "SpeakerCallWatchdogTimeout"
     assert not chat_room_service._chat_room_round_has_process_control(round_id)
+
+
+# ---------------------------------------------------------------------------
+# E. work-run snapshot desync self-heal
+# ---------------------------------------------------------------------------
+
+
+def _seed_room_with_rounds(tmp_path, monkeypatch, *, title, room_status, active_round_id, rounds):
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(work_run_store, "WORK_RUNS_DIR", tmp_path / "work_runs")
+    room = chat_room_service.create_chat_room(title=title, participant_session_ids=["session-alpha"])
+    state = chat_room_service._store().load()
+    stored_room = next(item for item in state["rooms"] if item["roomId"] == room["roomId"])
+    stored_room["status"] = room_status
+    stored_room["activeRoundId"] = active_round_id
+    stored_room["rounds"] = [dict(round_payload, roomId=stored_room["roomId"]) for round_payload in rounds]
+    chat_room_service._store().save(state)
+    return stored_room
+
+
+def _round_payload(round_id, *, title, status, updated_at, finished_at, summary=""):
+    return {
+        "roundId": round_id,
+        "topic": title,
+        "mode": "round_robin",
+        "purpose": "discussion",
+        "config": {},
+        "status": status,
+        "speakerOrder": ["session-session-alpha"],
+        "messages": [],
+        "summary": summary,
+        "startedAt": "2026-09-01T00:00:00+00:00",
+        "updatedAt": updated_at,
+        "finishedAt": finished_at,
+    }
+
+
+def _counting_work_run_store(monkeypatch):
+    real_store = chat_room_service._work_run_store()
+    calls = {"persist": 0}
+
+    class CountingStore:
+        def __getattr__(self, name):
+            return getattr(real_store, name)
+
+        def persist_snapshot(self, *args, **kwargs):
+            calls["persist"] += 1
+            return real_store.persist_snapshot(*args, **kwargs)
+
+    monkeypatch.setattr(chat_room_service, "_work_run_store", lambda: CountingStore())
+    return calls
+
+
+def test_reconcile_repairs_terminal_round_with_running_work_run_snapshot(tmp_path, monkeypatch):
+    finished_at = "2026-09-03T09:17:07+00:00"
+    stored_room = _seed_room_with_rounds(
+        tmp_path,
+        monkeypatch,
+        title="快照脱同步自愈",
+        room_status="ready",
+        active_round_id="",
+        rounds=[
+            _round_payload(
+                "round-desync-ghost",
+                title="快照脱同步自愈",
+                status="stopped",
+                updated_at=finished_at,
+                finished_at=finished_at,
+                summary="群聊轮次已停止：0/1 位 Agent 已发言。",
+            )
+        ],
+    )
+    room_id = stored_room["roomId"]
+    # The stop happened in another process/path: chat store is terminal while
+    # the WorkRun snapshot stayed "running" and still owns the index pointer.
+    _persist_running_work_run(stored_room, "round-desync-ghost", updated_at="2026-09-01T00:00:00+00:00")
+    store = chat_room_service._work_run_store()
+    assert store.load_run_index(chat_room_service.RUN_KIND)["activeRunId"] == "round-desync-ghost"
+    monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_RECONCILE_MIN_INTERVAL_SECONDS", 0.0)
+    monkeypatch.setattr(chat_room_service, "_record_room_event", lambda *args, **kwargs: None)
+    recorded = _capture_scene_events(monkeypatch)
+
+    chat_room_service.list_chat_rooms_compact()
+
+    repaired = store.load_snapshot(chat_room_service.RUN_KIND, "round-desync-ghost")
+    assert repaired["status"] == "stopped"
+    assert repaired["finishedAt"] == finished_at
+    assert repaired["summary"] == "群聊轮次已停止：0/1 位 Agent 已发言。"
+    assert repaired["runtimeStatus"] == "orphan_reconciled"
+    assert repaired["reconciliationSource"] == "work_run_snapshot_desync"
+    index = store.load_run_index(chat_room_service.RUN_KIND)
+    assert index["activeRunId"] == ""
+    assert "round-desync-ghost" not in index["activeRunIds"]
+    assert any(
+        item[0][:3] == ("chat_room", "reconcile", "chat_room.round.work_run_snapshot_resynced")
+        for item in recorded
+    )
+    # The room store side is already terminal and must stay untouched.
+    reloaded_room = _reloaded_room(room_id)
+    assert reloaded_room["rounds"][0]["status"] == "stopped"
+    assert reloaded_room["rounds"][0]["finishedAt"] == finished_at
+    assert reloaded_room["activeRoundId"] == ""
+
+    # Idempotent: a second pass must not rewrite the repaired snapshot.
+    persisted_before = dict(repaired)
+    persist_calls = _counting_work_run_store(monkeypatch)
+    chat_room_service._reconcile_chat_room_round_state()
+    assert persist_calls["persist"] == 0
+    assert store.load_snapshot(chat_room_service.RUN_KIND, "round-desync-ghost") == persisted_before
+
+
+def test_reconcile_desync_repair_keeps_newer_active_run_pointer(tmp_path, monkeypatch):
+    finished_at = "2026-09-03T09:17:07+00:00"
+    live_updated_at = chat_room_service.utc_now_iso()
+    stored_room = _seed_room_with_rounds(
+        tmp_path,
+        monkeypatch,
+        title="新轮指针不被回拨",
+        room_status="running",
+        active_round_id="round-live-newer",
+        rounds=[
+            _round_payload(
+                "round-desync-old",
+                title="新轮指针不被回拨",
+                status="stopped",
+                updated_at=finished_at,
+                finished_at=finished_at,
+                summary="群聊轮次已停止：1/2 位 Agent 已发言。",
+            ),
+            _round_payload(
+                "round-live-newer",
+                title="新轮指针不被回拨",
+                status="running",
+                updated_at=live_updated_at,
+                finished_at="",
+            ),
+        ],
+    )
+    room_id = stored_room["roomId"]
+    _persist_running_work_run(stored_room, "round-desync-old", updated_at="2026-09-01T00:00:00+00:00")
+    _persist_running_work_run(stored_room, "round-live-newer", updated_at=chat_room_service.utc_now_iso())
+    store = chat_room_service._work_run_store()
+    index = store.load_run_index(chat_room_service.RUN_KIND)
+    assert index["activeRunId"] == "round-live-newer"
+    assert set(index["activeRunIds"]) == {"round-desync-old", "round-live-newer"}
+    monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_RECONCILE_MIN_INTERVAL_SECONDS", 0.0)
+    monkeypatch.setattr(chat_room_service, "_record_room_event", lambda *args, **kwargs: None)
+    _capture_scene_events(monkeypatch)
+
+    chat_room_service.list_chat_rooms_compact()
+
+    repaired = store.load_snapshot(chat_room_service.RUN_KIND, "round-desync-old")
+    assert repaired["status"] == "stopped"
+    assert repaired["finishedAt"] == finished_at
+    assert repaired["reconciliationSource"] == "work_run_snapshot_desync"
+    # The live newer round keeps the index pointer and its running snapshot.
+    live = store.load_snapshot(chat_room_service.RUN_KIND, "round-live-newer")
+    assert live["status"] == "running"
+    assert live["finishedAt"] == ""
+    assert "runtimeStatus" not in live
+    index = store.load_run_index(chat_room_service.RUN_KIND)
+    assert index["activeRunId"] == "round-live-newer"
+    assert index["activeRunIds"] == ["round-live-newer"]
+    reloaded_room = _reloaded_room(room_id)
+    assert reloaded_room["status"] == "running"
+    assert reloaded_room["activeRoundId"] == "round-live-newer"
+
+
+def test_reconcile_leaves_normal_running_round_snapshot_untouched(tmp_path, monkeypatch):
+    live_updated_at = chat_room_service.utc_now_iso()
+    stored_room = _seed_room_with_rounds(
+        tmp_path,
+        monkeypatch,
+        title="正常轮不被误修",
+        room_status="running",
+        active_round_id="round-live-normal",
+        rounds=[
+            _round_payload(
+                "round-live-normal",
+                title="正常轮不被误修",
+                status="running",
+                updated_at=live_updated_at,
+                finished_at="",
+            )
+        ],
+    )
+    _persist_running_work_run(stored_room, "round-live-normal", updated_at=chat_room_service.utc_now_iso())
+    store = chat_room_service._work_run_store()
+    snapshot_before = store.load_snapshot(chat_room_service.RUN_KIND, "round-live-normal")
+    monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_RECONCILE_MIN_INTERVAL_SECONDS", 0.0)
+    monkeypatch.setattr(chat_room_service, "_record_room_event", lambda *args, **kwargs: None)
+    persist_calls = _counting_work_run_store(monkeypatch)
+
+    reconciled = chat_room_service._reconcile_chat_room_round_state()
+
+    # A live running round is spared by the heartbeat exemption and the desync
+    # repair must not write anything at all.
+    assert reconciled == []
+    assert persist_calls["persist"] == 0
+    snapshot_after = store.load_snapshot(chat_room_service.RUN_KIND, "round-live-normal")
+    assert snapshot_after == snapshot_before
+    assert snapshot_after["finishedAt"] == ""
+    assert "reconciliationSource" not in snapshot_after
+    reloaded_room = _reloaded_room(stored_room["roomId"])
+    assert reloaded_room["status"] == "running"
+    assert reloaded_room["activeRoundId"] == "round-live-normal"
+    assert reloaded_room["rounds"][0]["status"] == "running"

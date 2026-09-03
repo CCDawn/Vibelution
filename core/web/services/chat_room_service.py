@@ -6404,32 +6404,174 @@ def _record_store_read_failed_event(exc: ChatRoomStoreReadError) -> None:
         return
 
 
+def _desync_repair_candidate_run_ids(store: Any) -> set[str]:
+    """Return WorkRun ids this store still tracks, bounded to the index window.
+
+    The snapshot-desync repair only needs to look at rounds whose WorkRun
+    snapshots can still be observed (active slots, latest, and the bounded
+    recent window).  Snapshots outside that window are invisible to the
+    lifecycle guard and work-run listings, so scanning every historical round
+    would only add I/O without healing anything observable.
+    """
+
+    try:
+        index = store.load_run_index(RUN_KIND)
+    except Exception:
+        return set()
+    if not isinstance(index, dict):
+        return set()
+    raw_values: list[Any] = [
+        index.get("activeRunId"),
+        index.get("latestRunId"),
+        *(value for value in (index.get("activeRunIds") or []) if isinstance(value, str)),
+        *(value for value in (index.get("recentRunIds") or []) if isinstance(value, str)),
+    ]
+    return {str(value or "").strip() for value in raw_values if str(value or "").strip()}
+
+
+def _record_work_run_snapshot_desync_repair_event(
+    room_id: str,
+    round_id: str,
+    *,
+    snapshot_status: str,
+    snapshot_runtime_status: str,
+) -> None:
+    try:
+        record_runtime_scene_event(
+            "chat_room",
+            "reconcile",
+            "chat_room.round.work_run_snapshot_resynced",
+            message=(
+                "Chat room round was already terminal in the room store while its "
+                "WorkRun snapshot was still running; the stale snapshot was "
+                "re-projected with the room-store terminal state."
+            ),
+            level="warning",
+            outcome="repaired",
+            fields={
+                "roomId": str(room_id or "").strip(),
+                "roundId": str(round_id or "").strip(),
+                "snapshotStatus": str(snapshot_status or "").strip(),
+                "snapshotRuntimeStatus": str(snapshot_runtime_status or "").strip(),
+                "reconciliationSource": "work_run_snapshot_desync",
+            },
+        )
+    except Exception:
+        return
+
+
+def _resync_desynced_chat_room_work_run_snapshots(
+    store: Any,
+    candidates: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Re-project WorkRun snapshots left running behind terminal room rounds.
+
+    A round can reach its terminal state in the chat room store (for example a
+    stop issued across a process boundary, or a terminal persistence that
+    happened while the WorkRun write failed) without the WorkRun snapshot being
+    terminal too.  The main reconciliation only inspects rounds whose
+    chat-store status is still running, so such a stale "running" snapshot is
+    never revisited and keeps blocking lifecycle commands as phantom active
+    work.  This repair mirrors the existing orphan re-projection semantics:
+    the snapshot is rebuilt from the terminal room round with
+    ``runtimeStatus="orphan_reconciled"`` and persisted without an active index
+    claim, so the index pointer of a different (newer) run is never repointed.
+    It is idempotent by construction: snapshots that already carry a terminal
+    status or a ``finishedAt`` are never rewritten.
+    """
+
+    repaired: list[dict[str, Any]] = []
+    for candidate in candidates:
+        room = candidate.get("room")
+        round_payload = candidate.get("round")
+        if not isinstance(room, dict) or not isinstance(round_payload, dict):
+            continue
+        round_id = str(round_payload.get("roundId") or "").strip()
+        if not round_id:
+            continue
+        snapshot = store.load_snapshot(RUN_KIND, round_id)
+        if not isinstance(snapshot, dict) or not snapshot:
+            continue
+        if str(snapshot.get("finishedAt") or "").strip():
+            continue
+        if _terminal_chat_room_status_from_work_run(snapshot):
+            # Already terminal by status or runtimeStatus: rewriting it would
+            # only churn updatedAt on every reconcile pass.
+            continue
+        final_status = str(candidate.get("finalStatus") or "").strip().lower()
+        work_run_payload = _chat_room_work_run_snapshot(room, round_payload, status=final_status)
+        work_run_payload.update(
+            {
+                "summary": str(round_payload.get("summary") or "").strip(),
+                "finishedAt": str(round_payload.get("finishedAt") or "").strip(),
+                "runtimeStatus": "orphan_reconciled",
+                "reconciliationSource": "work_run_snapshot_desync",
+            }
+        )
+        store.persist_snapshot(RUN_KIND, work_run_payload, active_run_id="")
+        repaired.append(
+            {
+                "roomId": str(room.get("roomId") or "").strip(),
+                "roundId": round_id,
+                "finalStatus": final_status,
+                "snapshotStatus": str(snapshot.get("status") or "").strip(),
+                "snapshotRuntimeStatus": str(snapshot.get("runtimeStatus") or "").strip(),
+            }
+        )
+        _record_work_run_snapshot_desync_repair_event(
+            str(room.get("roomId") or ""),
+            round_id,
+            snapshot_status=str(snapshot.get("status") or ""),
+            snapshot_runtime_status=str(snapshot.get("runtimeStatus") or ""),
+        )
+    return repaired
+
+
 def _reconcile_chat_room_round_state_locked_gate() -> list[dict[str, Any]]:
     if _chat_room_lock_owned_by_current_thread():
         return []
     store = _work_run_store()
     reconciled_at = utc_now_iso()
+    desync_candidate_run_ids = _desync_repair_candidate_run_ids(store)
 
     # WorkRun reads can touch a separate persistent store.  Take a small room
     # snapshot first, then resolve the WorkRun state without holding the room
     # mutex.  Holding this mutex across that I/O blocks detail, stop, and room
     # recovery requests behind one slow reconciliation read.
     active_rounds: list[tuple[str, str]] = []
+    desync_candidates: list[dict[str, Any]] = []
     with _CHAT_ROOM_LOCK:
         state = _store().load()
         for room in list(state.get("rooms") or []):
             if not isinstance(room, dict):
                 continue
             round_id = str(room.get("activeRoundId") or "").strip()
-            if not round_id:
+            if round_id:
+                round_payload = _find_round(room, round_id)
+                if isinstance(round_payload, dict):
+                    previous_status = str(round_payload.get("status") or "").strip().lower()
+                    if previous_status in RUNNING_ROUND_STATUSES:
+                        active_rounds.append((str(room.get("roomId") or "").strip(), round_id))
+            if not desync_candidate_run_ids:
                 continue
-            round_payload = _find_round(room, round_id)
-            if not isinstance(round_payload, dict):
-                continue
-            previous_status = str(round_payload.get("status") or "").strip().lower()
-            if previous_status not in RUNNING_ROUND_STATUSES:
-                continue
-            active_rounds.append((str(room.get("roomId") or "").strip(), round_id))
+            for round_payload in list(room.get("rounds") or []):
+                if not isinstance(round_payload, dict):
+                    continue
+                candidate_round_id = str(round_payload.get("roundId") or "").strip()
+                if not candidate_round_id or candidate_round_id not in desync_candidate_run_ids:
+                    continue
+                candidate_status = str(round_payload.get("status") or "").strip().lower()
+                if not candidate_status or candidate_status in RUNNING_ROUND_STATUSES:
+                    continue
+                if not str(round_payload.get("finishedAt") or "").strip():
+                    continue
+                desync_candidates.append(
+                    {
+                        "room": dict(room),
+                        "round": dict(round_payload),
+                        "finalStatus": candidate_status,
+                    }
+                )
 
     candidates: list[dict[str, Any]] = []
     for room_id, round_id in active_rounds:
@@ -6590,6 +6732,12 @@ def _reconcile_chat_room_round_state_locked_gate() -> list[dict[str, Any]]:
             ),
             lifecycle=True,
         )
+    # Snapshot-desync self-heal: terminal room rounds whose WorkRun snapshots
+    # stayed "running" (stop across a process boundary, failed snapshot write).
+    # These repairs never touch the room store, so they stay out of the
+    # reconciled-round return contract; they are observable through the
+    # re-projected snapshot and the work_run_snapshot_resynced scene event.
+    _resync_desynced_chat_room_work_run_snapshots(store, desync_candidates)
     return reconciled
 
 
