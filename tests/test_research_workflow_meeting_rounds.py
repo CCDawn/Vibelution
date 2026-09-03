@@ -515,6 +515,109 @@ def test_stop_discussion_meeting_refuses_still_running_rounds(tmp_path, monkeypa
     assert live["status"] == "open"
 
 
+def _multi_round_room_detail(round_messages: dict[str, list[dict]]) -> dict:
+    return {
+        "roomId": "room-stop-1",
+        "rounds": [
+            {"roundId": round_id, "status": status, "messages": messages}
+            for round_id, (status, messages) in round_messages.items()
+        ],
+    }
+
+
+def _bind_multi_round_room(
+    monkeypatch, round_messages: dict[str, tuple[str, list[dict]]]
+) -> None:
+    from core.web.services import chat_room_service
+
+    detail = _multi_round_room_detail(round_messages)
+    monkeypatch.setattr(
+        chat_room_service,
+        "get_chat_room_detail",
+        lambda room_id: detail if room_id == "room-stop-1" else None,
+    )
+
+
+def _bind_two_round_meeting(team_id: str, meeting_round_id: str) -> None:
+    meetings.bind_meeting_chat_room_round(
+        team_id, meeting_round_id, "room-stop-1", "round-r1"
+    )
+    meetings.bind_meeting_chat_room_round(
+        team_id, meeting_round_id, "room-stop-1", "round-r2"
+    )
+
+
+def test_supersede_recovery_judges_only_the_latest_bound_round(tmp_path, monkeypatch):
+    """Restart-orphan shape: an earlier round's completed history must not
+    block superseding a newer bound round that died with zero citable speech
+    (chatRoomRoundIds is append-only; the last id is the execution authority).
+    """
+    team_id = _team(tmp_path, monkeypatch)
+    meetings.create_meeting_round(team_id, _meeting(meetingRoundId="meeting-orphan-r2"))
+    _bind_two_round_meeting(team_id, "meeting-orphan-r2")
+    _bind_multi_round_room(
+        monkeypatch,
+        {
+            "round-r1": (
+                "completed",
+                [
+                    {
+                        "status": "completed",
+                        "speakerTitle": "研究员",
+                        "content": "DISAGREE: hyp-b 的泛化证据不足",
+                    }
+                ],
+            ),
+            "round-r2": ("stopped", []),
+        },
+    )
+    record = meetings.get_meeting_round(team_id, "meeting-orphan-r2")["meetingRound"]
+    # The contrast is the point: all-round view sees history, last-round view
+    # sees a silent live attempt.
+    assert len(meetings.completed_meeting_source_messages(record)) == 1
+    assert meetings.completed_latest_bound_round_source_messages(record) == []
+
+    superseded = meetings.supersede_empty_discussion_meeting(
+        team_id, "meeting-orphan-r2"
+    )
+
+    assert superseded["status"] == "superseded"
+    closed = superseded["meetingRound"]
+    assert closed["status"] == "closed"
+    assert closed["recoveryReason"] == "discussion_has_no_completed_messages"
+
+
+def test_supersede_recovery_still_refuses_latest_round_with_speech(
+    tmp_path, monkeypatch
+):
+    """A latest bound round with citable completed messages stays protected."""
+    team_id = _team(tmp_path, monkeypatch)
+    meetings.create_meeting_round(team_id, _meeting(meetingRoundId="meeting-spoke-r2"))
+    _bind_two_round_meeting(team_id, "meeting-spoke-r2")
+    _bind_multi_round_room(
+        monkeypatch,
+        {
+            "round-r1": ("completed", []),
+            "round-r2": (
+                "completed",
+                [
+                    {
+                        "status": "completed",
+                        "speakerTitle": "研究员",
+                        "content": "DISAGREE: hyp-b 的泛化证据不足",
+                    }
+                ],
+            ),
+        },
+    )
+
+    with pytest.raises(
+        meetings.ResearchMeetingRoundError,
+        match="produced completed messages and cannot be superseded",
+    ):
+        meetings.supersede_empty_discussion_meeting(team_id, "meeting-spoke-r2")
+
+
 def test_module_lock_timeouts_are_bounded_and_structured(tmp_path, monkeypatch):
     """The module lock is bounded: a blocked waiter fails with the structured
     timeout instead of hanging forever (2026-09 ghost-lock incident)."""

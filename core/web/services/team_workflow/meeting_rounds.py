@@ -820,6 +820,31 @@ def completed_meeting_source_messages(
     ]
 
 
+def completed_latest_bound_round_source_messages(
+    meeting_round: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Return citable messages from only the last bound chat round.
+
+    ``chatRoomRoundIds`` is append-only, so the last bound id is the meeting's
+    current execution authority.  Recovery gates (supersede/reopen/retry) must
+    judge the live attempt by that round alone: earlier completed rounds are
+    history from a previous attempt and must not block redriving a newer round
+    that a backend restart killed before its first completed speech.
+    """
+
+    round_ids = _normalized_str_list(meeting_round.get("chatRoomRoundIds"))
+    if not round_ids:
+        return []
+    latest_round_id = round_ids[-1]
+    return [
+        message
+        for message in meeting_source_messages(meeting_round)
+        if str(message.get("roundId") or "").strip() == latest_round_id
+        and str(message.get("status") or "").strip().lower() == "completed"
+        and not is_pass_message(message)
+    ]
+
+
 _EMPTY_DISCUSSION_RECOVERY_TYPES = {
     "hypothesis_candidate_generation",
     "hypothesis_review",
@@ -834,11 +859,14 @@ def supersede_empty_discussion_meeting(
 ) -> dict[str, Any]:
     """Close one terminal discussion attempt that produced no citable message.
 
-    Applies to candidate-generation and hypothesis-review rounds alike.  This
-    recovery record deliberately carries no digest or decisions: it is an
-    abandoned attempt, not an approved research conclusion.  A follow-up
-    meeting (fresh generation attempt or next review round) can then open
-    without rewriting the append-only history of the failed attempt.
+    Citability is judged on the last bound chat round only: an older round's
+    completed messages are a previous attempt's history and must not block
+    superseding a newer round that never spoke.  Applies to candidate-generation
+    and hypothesis-review rounds alike.  This recovery record deliberately
+    carries no digest or decisions: it is an abandoned attempt, not an approved
+    research conclusion.  A follow-up meeting (fresh generation attempt or next
+    review round) can then open without rewriting the append-only history of
+    the failed attempt.
     """
 
     from core.web.services.team_service import assert_team_exists
@@ -875,7 +903,7 @@ def supersede_empty_discussion_meeting(
         raise ResearchMeetingRoundError(
             "discussion round is still running and cannot be superseded"
         )
-    if completed_meeting_source_messages(meeting_round):
+    if completed_latest_bound_round_source_messages(meeting_round):
         raise ResearchMeetingRoundError(
             "discussion produced completed messages and cannot be superseded"
         )

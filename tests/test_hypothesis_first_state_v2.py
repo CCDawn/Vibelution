@@ -2666,13 +2666,16 @@ def _failed_review_meeting_fixture(
     *,
     messages: list[dict[str, object]] | None = None,
     room_state: dict[str, object] | None = "completed_speech",
+    chat_room_round_ids: list[str] | None = None,
 ) -> dict[str, object]:
     """A round-3 review meeting whose bound chat round died mid-discussion.
 
     ``room_state`` controls the read-only chat-room probe: the default
     ``"completed_speech"`` sentinel plants one citable completed message,
     ``None`` models an unreadable store, and an explicit mapping is used
-    verbatim (e.g. a pass-only transcript).
+    verbatim (e.g. a pass-only transcript).  ``chat_room_round_ids`` overrides
+    the meeting's append-only bound round ids (multi-round restart-orphan
+    shapes).
     """
 
     if room_state is None:
@@ -2736,7 +2739,7 @@ def _failed_review_meeting_fixture(
                     "selectionId": "selection-1",
                     "status": "open",
                     "linkedChatRoomId": "room-review",
-                    "chatRoomRoundIds": ["room-round-3"],
+                    "chatRoomRoundIds": chat_room_round_ids or ["room-round-3"],
                 }
             ],
             digest_records=[],
@@ -2860,6 +2863,169 @@ def test_unreadable_room_state_falls_back_to_reopen_review(
         if action.kind == "command"
     }
     assert "reopen_review" in commands
+    assert "retry-review-dispatch:candidate-1" not in {
+        action.actionId
+        for action in state.allowedActions
+        if action.kind == "command"
+    }
+
+
+def test_restart_orphan_review_with_history_speech_offers_reopen(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Restart-orphan shape (SCI-007): history round completed, newest silent.
+
+    Recovery offers must judge the last bound round only.  A meeting whose
+    earlier round carries completed messages but whose newest round died with
+    zero citable speech is a dead attempt: resume/retry offers there are
+    silent no-ops, so the projection keeps the executable reopen recovery.
+    """
+    state = _failed_review_meeting_fixture(
+        monkeypatch,
+        room_state={
+            "rooms": [
+                {
+                    "roomId": "room-review",
+                    "rounds": [
+                        {
+                            "roundId": "room-round-2",
+                            "status": "completed",
+                            "messages": [
+                                {
+                                    "status": "completed",
+                                    "speakerTitle": "研究员",
+                                    "content": "DISAGREE: candidate-1 的泛化证据不足",
+                                }
+                            ],
+                        },
+                        {
+                            "roundId": "room-round-3",
+                            "status": "stopped",
+                            "messages": [],
+                        },
+                    ],
+                }
+            ]
+        },
+        chat_room_round_ids=["room-round-2", "room-round-3"],
+    )
+
+    assert state.currentPhase == "review"
+    assert any(
+        problem.code == "discussion_round_orphaned" for problem in state.problems
+    )
+    commands = {
+        action.command
+        for action in state.allowedActions
+        if action.kind == "command"
+    }
+    assert "reopen_review" in commands
+    assert "resume_discussion" not in commands
+    assert "retry-review-dispatch:candidate-1" not in {
+        action.actionId
+        for action in state.allowedActions
+        if action.kind == "command"
+    }
+
+
+def test_heartbeat_stale_orphan_review_with_history_speech_keeps_reopen(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Heartbeat-stale twin: history speech must not fake a resume offer.
+
+    Without a terminal snapshot for the newest round the stale meeting still
+    gets the guarded reopen; the last-bound-round speech probe keeps the
+    resume/retry redirect off because the newest round never spoke.
+    """
+    monkeypatch.setattr(
+        hf_state_v2_module,
+        "_chat_room_state_snapshot",
+        lambda: {
+            "rooms": [
+                {
+                    "roomId": "room-review",
+                    "rounds": [
+                        {
+                            "roundId": "room-round-history",
+                            "status": "completed",
+                            "messages": [
+                                {
+                                    "status": "completed",
+                                    "speakerTitle": "研究员",
+                                    "content": "DISAGREE: candidate-1 的泛化证据不足",
+                                }
+                            ],
+                        },
+                        {
+                            "roundId": "room-round-review",
+                            "status": "running",
+                            "messages": [],
+                        },
+                    ],
+                }
+            ]
+        },
+    )
+    updated_at = _iso_minute_offset(30 * 60)
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[
+                {
+                    "recordKind": "hypothesis_candidate",
+                    "candidateId": "candidate-1",
+                    "questionId": "SCI-001",
+                },
+                {
+                    "recordKind": "review_round_link",
+                    "linkId": "link-1",
+                    "selectionId": "selection-1",
+                    "candidateId": "candidate-1",
+                    "candidateOrder": 0,
+                    "roundIndex": 1,
+                    "meetingRoundId": "review-1",
+                    "questionId": "SCI-001",
+                },
+            ],
+            selection_records=[
+                {
+                    "selectionId": "selection-1",
+                    "questionId": "SCI-001",
+                    "selectedCandidateIds": ["candidate-1"],
+                }
+            ],
+            meeting_records=[
+                {
+                    "meetingRoundId": "review-1",
+                    "meetingType": "hypothesis_review",
+                    "question": "SCI-001",
+                    "selectionId": "selection-1",
+                    "status": "open",
+                    "linkedChatRoomId": "room-review",
+                    "chatRoomRoundIds": ["room-round-history", "room-round-review"],
+                    "createdAt": _iso_minute_offset(30 * 60 + 5),
+                    "updatedAt": updated_at,
+                }
+            ],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[],
+            chat_room_round_snapshots={},
+        )
+    )
+
+    assert any(
+        problem.code == "review_heartbeat_stale" for problem in state.problems
+    )
+    commands = {
+        action.command
+        for action in state.allowedActions
+        if action.kind == "command"
+    }
+    assert "reopen_review" in commands
+    assert "resume_discussion" not in commands
     assert "retry-review-dispatch:candidate-1" not in {
         action.actionId
         for action in state.allowedActions

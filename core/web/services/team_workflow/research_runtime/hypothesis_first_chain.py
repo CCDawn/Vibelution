@@ -6035,8 +6035,9 @@ def _append_review_dispatch_attempt_state(
     replays never stack duplicate attempts, while a latest failed attempt bumps
     the attempt number so retries supersede it in projection instead of
     rewriting history. A latest attempt whose bound meeting already terminated
-    (closed) is superseded the same way, so a retry after a terminated review
-    opens a fresh attempt instead of reusing the dead meeting. Terminal
+    (closed, or open with a terminally dead zero-speech latest bound round) is
+    superseded the same way, so a retry after a terminated review opens a fresh
+    attempt instead of reusing the dead meeting. Terminal
     transitions update the same attempt id.
     """
     now = _utc_now()
@@ -6115,6 +6116,46 @@ def _meeting_round_is_terminal(meeting_round: Any) -> bool:
     return str(meeting_round.get("status") or "").strip().lower() == "closed"
 
 
+def _meeting_latest_bound_round_is_dead_silent(meeting_round: Any) -> bool:
+    """True when the last bound room round terminally died without speech.
+
+    A backend restart can kill an in-flight discussion round while the
+    append-only meeting record stays ``open``: the newest bound round
+    persists a terminal status (``stopped``/``failed``/...) with zero
+    completed, non-pass messages.  Such a meeting is a dead attempt even
+    though ``meeting.status != "closed"`` — the discussion scheduler keeps
+    answering ``waiting_for_completed_speech`` for speech that will never
+    arrive, and the meeting-level terminal check cannot see it.  Scoped to
+    the statuses the supersede gate legally accepts (``open``/
+    ``summarizing``), so retry only bypasses an attempt the owning service
+    could actually supersede; conservative by design: an unreadable room, a
+    missing round or a still-running round is never declared dead.
+    """
+
+    from core.web.services.team_workflow import meeting_rounds
+
+    if not isinstance(meeting_round, Mapping):
+        return False
+    if (
+        str(meeting_round.get("status") or "").strip().lower()
+        not in {"open", "summarizing"}
+    ):
+        return False
+    round_ids = _normalized_str_list(meeting_round.get("chatRoomRoundIds"))
+    if not round_ids:
+        return False
+    try:
+        running_ids = meeting_rounds.running_bound_round_ids(meeting_round)
+        completed_latest = meeting_rounds.completed_latest_bound_round_source_messages(
+            meeting_round
+        )
+    except meeting_rounds.ResearchMeetingRoundError:
+        return False
+    if round_ids[-1] in running_ids:
+        return False
+    return not completed_latest
+
+
 def _attempt_bound_meeting_is_terminal(
     team_id: str, attempt: Mapping[str, Any]
 ) -> bool:
@@ -6122,6 +6163,9 @@ def _attempt_bound_meeting_is_terminal(
 
     A terminated review meeting can never serve a fresh dispatch again, so the
     attempt ledger must supersede such attempts instead of replaying them.
+    Termination includes the restart-orphan shape: the meeting record is still
+    ``open`` but its last bound room round is terminal with zero completed
+    speech, so a replayed attempt would silently no-op.
     """
 
     from core.web.services.team_workflow import meeting_rounds
@@ -6135,7 +6179,9 @@ def _attempt_bound_meeting_is_terminal(
         ]
     except meeting_rounds.ResearchMeetingRoundNotFoundError:
         return False
-    return _meeting_round_is_terminal(meeting_round)
+    if _meeting_round_is_terminal(meeting_round):
+        return True
+    return _meeting_latest_bound_round_is_dead_silent(meeting_round)
 
 
 def list_review_dispatch_attempts(
@@ -6948,15 +6994,22 @@ def open_review_meeting_for_selection(
         and str(existing_round.get("meetingType") or "").strip().lower()
         == HYPOTHESIS_REVIEW_MEETING_TYPE
         and _normalized_str_list(existing_round.get("chatRoomRoundIds"))
-        and _meeting_round_is_terminal(existing_round)
+        and (
+            _meeting_round_is_terminal(existing_round)
+            or _meeting_latest_bound_round_is_dead_silent(existing_round)
+        )
     ):
-        # A closed meeting is a terminated dispatch, never a fresh reuse.
-        # Reconcile the attempt this meeting belonged to, then derive the next
-        # attempt id so the dispatch opens a new meeting instead of reporting
-        # success on the dead one. Reached only when the durable attempt ledger
-        # could not see the termination (for example a dispatch that stayed
-        # ``queued`` across a crash); the regular retry path supersedes
-        # terminal attempts before this id is ever cast.
+        # A closed meeting is a terminated dispatch, never a fresh reuse.  The
+        # same holds for the restart-orphan shape: the meeting record is still
+        # ``open`` but its last bound room round is terminal with zero
+        # completed speech, so a plain reuse would return the dead meeting and
+        # the scheduler would no-op forever.  Reconcile the attempt this
+        # meeting belonged to, then derive the next attempt id so the dispatch
+        # opens a new meeting instead of reporting success on the dead one.
+        # Reached only when the durable attempt ledger could not see the
+        # termination (for example a dispatch that stayed ``queued`` across a
+        # crash); the regular retry path supersedes terminal attempts before
+        # this id is ever cast.
         _append_review_dispatch_attempt_state(
             normalized_team_id,
             question_id=question_id,
@@ -6967,7 +7020,7 @@ def open_review_meeting_for_selection(
             lifecycle="failed",
             outcome="superseded",
             meeting_round_id=normalized_meeting_round_id,
-            error="bound review meeting already closed",
+            error="bound review meeting already terminated without citable speech",
             error_type="ReviewMeetingClosed",
         )
         attempt_record = _append_review_dispatch_attempt_state(

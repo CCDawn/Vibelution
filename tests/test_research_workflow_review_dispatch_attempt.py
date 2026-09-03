@@ -305,6 +305,65 @@ def test_replay_does_not_stack_attempts(tmp_path, monkeypatch) -> None:
     assert all(item["lifecycle"] == "completed" for item in attempts)
 
 
+def test_retry_bumps_attempt_for_open_meeting_with_dead_silent_latest_round(
+    tmp_path, monkeypatch
+) -> None:
+    """Restart-orphan depth defense (SCI-007): a dispatch whose bound meeting
+    is still ``open`` but whose latest bound round terminally died with zero
+    completed speech is a dead attempt — retry must bump the attempt number
+    and open a fresh meeting instead of replaying the silent one.
+    """
+    from core.web.services import chat_room_service
+
+    team_id = _fanout_env(tmp_path, monkeypatch)
+    selection = _persist_selection(team_id)
+
+    chain.open_review_meeting_for_selection(team_id, selection, background=False)
+    attempts = {item["candidateId"]: item for item in _attempts(team_id)}
+    orphan_meeting_id = attempts["hyp-b"]["meetingRoundId"]
+    assert attempts["hyp-b"]["attemptNumber"] == 1
+
+    # Model the backend restart: the meeting record stays ``open`` (the
+    # append-only ledger never saw the kill) while the newest bound room round
+    # is terminal with zero completed speech.
+    def staged_get_meeting_round(_team_id, meeting_round_id, **_kwargs):
+        if meeting_round_id == orphan_meeting_id:
+            return {
+                "meetingRound": {
+                    "meetingRoundId": orphan_meeting_id,
+                    "meetingType": "hypothesis_review",
+                    "status": "open",
+                    "linkedChatRoomId": "team-room",
+                    "chatRoomRoundIds": ["round-hyp-b"],
+                }
+            }
+        raise meetings.ResearchMeetingRoundNotFoundError("missing")
+
+    monkeypatch.setattr(meetings, "get_meeting_round", staged_get_meeting_round)
+    monkeypatch.setattr(
+        chat_room_service,
+        "get_chat_room_detail",
+        lambda room_id: {
+            "roomId": "team-room",
+            "rounds": [
+                {"roundId": "round-hyp-b", "status": "stopped", "messages": []}
+            ],
+        }
+        if room_id == "team-room"
+        else None,
+    )
+
+    chain.retry_review_dispatch(team_id, "selection-dispatch-1", ["hyp-b"])
+
+    attempts = {item["candidateId"]: item for item in _attempts(team_id)}
+    assert attempts["hyp-b"]["attemptNumber"] == 2
+    assert attempts["hyp-b"]["lifecycle"] == "completed"
+    assert attempts["hyp-b"]["outcome"] == "succeeded"
+    fresh_meeting_id = attempts["hyp-b"]["meetingRoundId"]
+    assert fresh_meeting_id != orphan_meeting_id
+    assert fresh_meeting_id.endswith("-a2")
+
+
 def test_queued_attempt_projects_waiting_system_not_blocked() -> None:
     state = project_state_from_records(
         team_id="team-1",

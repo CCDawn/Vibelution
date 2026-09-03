@@ -1041,6 +1041,61 @@ def _meeting_has_completed_source_messages(meeting: Mapping[str, Any]) -> bool:
     return False
 
 
+def _latest_bound_round_has_completed_source_messages(
+    meeting: Mapping[str, Any],
+) -> bool:
+    """Last-bound-round variant of ``_meeting_has_completed_source_messages``.
+
+    ``chatRoomRoundIds`` is append-only, so recovery offers must judge the
+    live attempt by the last bound id alone.  A meeting whose earlier rounds
+    completed but whose newest round died with zero completed speech is a
+    restart-orphaned attempt: it must redrive through reopen/retry instead of
+    being offered resume actions the executor will silently no-op.
+    """
+
+    room_id = str(meeting.get("linkedChatRoomId") or "").strip()
+    round_ids = [
+        str(round_id or "").strip()
+        for round_id in list(meeting.get("chatRoomRoundIds") or [])
+        if str(round_id or "").strip()
+    ]
+    if not room_id or not round_ids:
+        return False
+    state = _chat_room_state_snapshot()
+    if state is None:
+        return False
+    room = next(
+        (
+            item
+            for item in list(state.get("rooms") or [])
+            if isinstance(item, Mapping)
+            and str(item.get("roomId") or "").strip() == room_id
+        ),
+        None,
+    )
+    if not isinstance(room, Mapping):
+        return False
+    from core.web.services.team_workflow.meeting_rounds import is_pass_message
+
+    rounds_by_id = {
+        str(item.get("roundId") or "").strip(): item
+        for item in list(room.get("rounds") or [])
+        if isinstance(item, Mapping)
+    }
+    latest_round = rounds_by_id.get(round_ids[-1])
+    if not isinstance(latest_round, Mapping):
+        return False
+    for message in list(latest_round.get("messages") or []):
+        if not isinstance(message, Mapping):
+            continue
+        if (
+            str(message.get("status") or "").strip().lower() == "completed"
+            and not is_pass_message(message)
+        ):
+            return True
+    return False
+
+
 def _bound_chat_rounds_are_terminal(
     meeting: Mapping[str, Any],
     chat_room_round_snapshots: Mapping[str, Mapping[str, Any]] | None,
@@ -1491,21 +1546,25 @@ def _meeting_recovery_actions(
     if status in {"open", "summarizing"} and linked_round_problem:
         # The linked WorkRun is terminal, so there is no live executor to
         # resume or stop.  A zero-speech review attempt can safely supersede
-        # the failed attempt and open the next budgeted round; an attempt with
-        # citable completed messages cannot be superseded (the owning service
-        # rechecks terminality and completed messages under its lock), so
-        # reopen_review there is a guaranteed-422 fake offer.  The executable
-        # exits for that shape are: resume_discussion — the discussion
-        # scheduler is built to continue an open meeting whose latest bound
-        # round is terminal with completed speech — and retry_review_dispatch,
-        # which re-dispatches the same round index as a fresh attempt meeting
-        # without burning the round budget (effective once the dead meeting is
-        # closed, e.g. through stop_discussion).
+        # the failed attempt and open the next budgeted round; an attempt whose
+        # latest bound round produced citable completed messages cannot be
+        # superseded (the owning service rechecks terminality and latest-round
+        # completed messages under its lock), so reopen_review there is a
+        # guaranteed-422 fake offer.  Citability is judged on the last bound
+        # round only: earlier completed rounds are history from a previous
+        # attempt, and offering resume/retry for a meeting whose newest round
+        # died silent would advertise actions the executor no-ops.  The
+        # executable exits for that shape are: resume_discussion — the
+        # discussion scheduler is built to continue an open meeting whose
+        # latest bound round is terminal with completed speech — and
+        # retry_review_dispatch, which re-dispatches the same round index as a
+        # fresh attempt meeting without burning the round budget (effective
+        # once the dead meeting is closed, e.g. through stop_discussion).
         if str(meeting.get("meetingType") or "").strip().lower() == _REVIEW_MEETING_TYPE:
             if (
                 selection_id
                 and candidate_id
-                and _meeting_has_completed_source_messages(meeting)
+                and _latest_bound_round_has_completed_source_messages(meeting)
             ):
                 actions.append(
                     _command_action(
@@ -1608,14 +1667,18 @@ def _meeting_recovery_actions(
         str(meeting.get("meetingType") or "").strip().lower()
         == _REVIEW_MEETING_TYPE
     ):
-        # A heartbeat-stale meeting with citable completed messages can never
-        # be reopened: the executor refuses a still-running round and refuses
-        # superseding a transcript.  Route the same meeting to the executable
-        # recoveries instead of advertising a guaranteed-failed one.
+        # A heartbeat-stale meeting whose latest bound round produced citable
+        # completed messages can never be reopened: the executor refuses a
+        # still-running round and refuses superseding a latest-round
+        # transcript.  Route the same meeting to the executable recoveries
+        # instead of advertising a guaranteed-failed one.  Like the
+        # linked-round branch above, citability is judged on the last bound
+        # round only so a restart-killed newest round redrives instead of
+        # no-oping.
         if (
             selection_id
             and candidate_id
-            and _meeting_has_completed_source_messages(meeting)
+            and _latest_bound_round_has_completed_source_messages(meeting)
         ):
             actions.append(
                 _command_action(

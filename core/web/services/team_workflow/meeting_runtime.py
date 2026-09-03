@@ -2573,6 +2573,12 @@ def schedule_meeting_discussion(team_id: str, meeting_round_id: str) -> dict[str
         str(message.get("status") or "").strip().lower() == "completed"
         for message in latest_messages
     ):
+        # Resume deliberately continues a meeting whose latest bound round
+        # still produced completed speech.  A terminal (stopped/failed) latest
+        # round with zero completed speech is a restart-orphaned attempt: it
+        # must redrive through the reopen/retry recovery paths
+        # (reopen_review / retry_review_dispatch / supersede recovery), which
+        # judge the attempt by this same last-bound-round view, not here.
         return {
             "status": "waiting_for_completed_speech",
             "teamId": normalized_team_id,

@@ -2072,6 +2072,60 @@ def test_failed_discussion_does_not_advance_to_summary(tmp_path, monkeypatch):
     assert "summaryDraftError" not in persisted
 
 
+def test_schedule_discussion_waits_on_terminal_silent_latest_round(tmp_path, monkeypatch):
+    """Resume pins the documented contract for the restart-orphan shape.
+
+    An open meeting whose latest bound round terminally died with zero
+    completed speech answers ``waiting_for_completed_speech`` — the resume
+    scheduler only continues meetings whose latest round spoke.  That orphan
+    must redrive through the reopen/retry recovery paths, which judge the
+    same last-bound-round view (SCI-007).
+    """
+    # Model the backend restart: no automatic summary drafting ever lands
+    # (the process died before the post-round hook and the driver's graceful
+    # stop), so the meeting record stays ``open`` across both rounds.
+    monkeypatch.setattr(
+        meeting_runtime,
+        "maybe_auto_draft_meeting",
+        lambda *_args, **_kwargs: None,
+    )
+    team_id, _agents, opened = _open_meeting(
+        tmp_path, monkeypatch, runner=_content_runner
+    )
+    meeting_round_id = opened["meetingRound"]["meetingRoundId"]
+
+    monkeypatch.setattr(
+        meeting_runtime,
+        "prepare_meeting_summary_draft",
+        lambda *_args, **_kwargs: {
+            "status": "open",
+            "meetingRound": meetings.get_meeting_round(
+                team_id, meeting_round_id
+            )["meetingRound"],
+        },
+    )
+
+    # Round 2 dies before its first completed message: terminal, silent.
+    driven = meeting_runtime.run_meeting_discussion(
+        team_id, meeting_round_id, agent_runner=_failed_runner
+    )
+    # The planned-round budget ends the driver either way; what matters is
+    # that round 2 ran and produced zero completed speech.
+    assert driven["roundsRun"] == 2
+    assert driven["stopReason"] in {"no_progress", "budget_exhausted"}
+    orphan = meetings.get_meeting_round(team_id, meeting_round_id)["meetingRound"]
+    assert orphan["status"] == "open"
+    assert len(orphan["chatRoomRoundIds"]) == 2
+    assert meetings.completed_meeting_source_messages(orphan)
+    assert not meetings.completed_latest_bound_round_source_messages(orphan)
+
+    scheduled = meeting_runtime.schedule_meeting_discussion(
+        team_id, meeting_round_id
+    )
+
+    assert scheduled["status"] == "waiting_for_completed_speech"
+
+
 def test_run_meeting_discussion_requires_open_bound_meeting(tmp_path, monkeypatch):
     team_id, agents = _team_with_room(tmp_path, monkeypatch)
     agent_ids = list(agents.values())

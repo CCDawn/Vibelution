@@ -6335,6 +6335,77 @@ def test_failed_review_round_can_be_reopened_with_next_budgeted_round(
     assert first["status"] == "closed"
 
 
+def test_reopen_recovery_redrives_restart_orphan_review_with_history_speech(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End-to-end restart orphan (SCI-007 shape): round 1 completed with
+    citable speech, round 2 died before its first completed message, meeting
+    still ``open``.  The supersede gate must judge the last bound round only,
+    so ``reopen_failed_review_meeting`` supersedes the orphaned attempt and
+    opens the next budgeted round instead of raising on the history speech.
+    """
+    team_id, agents = _hf_env(tmp_path, monkeypatch)
+    _patch_approved_question(monkeypatch)
+    agent_ids = [agents[role] for role in _ROLES]
+
+    # Model the backend restart: no automatic summary drafting ever lands
+    # (the process died before the post-round hook and the driver's graceful
+    # stop), so the meeting record stays ``open`` across both rounds.
+    monkeypatch.setattr(
+        meeting_runtime,
+        "maybe_auto_draft_meeting",
+        lambda *_args, **_kwargs: None,
+    )
+
+    with server_operator_scope("u-1", roles=("operator",)):
+        recorded = _open_first_meeting(team_id, agent_ids)
+        meeting = _review_meetings(recorded)[0]
+        meeting_id = str(meeting["meetingRoundId"])
+
+        # Round 2 dies mid-flight: every speaker fails before producing a
+        # citable message, and the driver never reaches the graceful summary
+        # step, so the meeting stays ``open``.
+        monkeypatch.setattr(
+            meeting_runtime,
+            "prepare_meeting_summary_draft",
+            lambda *_args, **_kwargs: {
+                "status": "open",
+                "meetingRound": meetings.get_meeting_round(
+                    team_id, meeting_id
+                )["meetingRound"],
+            },
+        )
+        driven = meeting_runtime.run_meeting_discussion(
+            team_id, meeting_id, agent_runner=_failed_generation_runner
+        )
+        # The planned-round budget ends the driver either way; what matters
+        # is that round 2 ran and produced zero completed speech.
+        assert driven["roundsRun"] == 2
+        assert driven["stopReason"] in {"no_progress", "budget_exhausted"}
+
+        orphan = meetings.get_meeting_round(team_id, meeting_id)["meetingRound"]
+        assert orphan["status"] == "open"
+        assert len(orphan["chatRoomRoundIds"]) == 2
+        # The contrast that used to deadlock recovery: history has speech,
+        # the live attempt has none.
+        assert meetings.completed_meeting_source_messages(orphan)
+        assert not meetings.completed_latest_bound_round_source_messages(orphan)
+
+        reopened = chain.reopen_failed_review_meeting(
+            team_id,
+            meeting_id,
+            agent_runner=_marker_runner,
+        )
+
+    assert reopened["status"] == "reopened"
+    superseded = reopened["supersededMeetingRound"]
+    assert superseded["status"] == "closed"
+    assert superseded["recoveryReason"] == "discussion_has_no_completed_messages"
+    next_round = reopened["meetingRound"]
+    assert next_round["meetingRoundId"] != meeting_id
+    assert next_round["status"] in {"open", "summarizing"}
+
+
 def _hyp_a_failed_review_runner(participant, prompt, context):
     """hyp-a's discussion all fails (zero completed messages); hyp-b speaks."""
     if "candidate hyp-b" in str(prompt):
