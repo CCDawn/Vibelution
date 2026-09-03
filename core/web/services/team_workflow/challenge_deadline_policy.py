@@ -85,9 +85,11 @@ def _operator_config_override_ms() -> int | None:
     The packaged default is ``None`` (unconfigured).  Missing/unreadable
     config fails open to ``None`` so the derivation falls back to the env
     override and then the receipt-derived budget; an out-of-range value is
-    rejected by ``_operator_override_ms`` with the same error contract as the
-    env override, because a silently ignored operator fence would produce a
-    meeting clock the operator does not expect.
+    rejected by ``validate_operator_per_call_config`` with the same error
+    contract as the env override, because a silently ignored operator fence
+    would produce a meeting clock the operator does not expect.  The same
+    validation runs once at backend startup (``web_workbench_lifespan``) so
+    a stale pin is surfaced before any meeting can derive a clock.
     """
 
     try:
@@ -101,23 +103,63 @@ def _operator_config_override_ms() -> int | None:
     return value if isinstance(value, int) and value > 0 else None
 
 
+def validate_operator_per_call_config(value: Any) -> int | None:
+    """Validate one operator fence value against the governed cap domain.
+
+    ``config.models`` cannot import this service module (layering: config
+    must stay below the service layer), so the fence domain contract lives
+    here and both the startup self-check and the request-time derivation
+    funnel through this single function.  ``None``/bool/non-int/non-positive
+    values stay fail-open (unconfigured), matching
+    ``_operator_config_override_ms``; a positive int outside
+    ``[PER_CALL_MIN_MS, PER_CALL_MAX_MS]`` raises loudly with the actual and
+    expected values.
+    """
+
+    if isinstance(value, bool):
+        return None
+    if not isinstance(value, int) or value <= 0:
+        return None
+    if not PER_CALL_MIN_MS <= value <= PER_CALL_MAX_MS:
+        raise ChallengeMeetingDeadlinePolicyError(
+            "research.challenge_meeting_per_call_budget_ms must equal the "
+            f"governed per-call cap ({PER_CALL_MAX_MS}); got {value} "
+            f"(allowed domain: [{PER_CALL_MIN_MS}, {PER_CALL_MAX_MS}])"
+        )
+    return value
+
+
+def validate_live_operator_per_call_config() -> int | None:
+    """Startup self-check: validate the live ``[research]`` fence value.
+
+    Called once from ``web_workbench_lifespan`` so an operator pin left at a
+    stale cap fails loud at boot instead of poisoning the first in-flight
+    meeting at derivation time.  An unreadable config stays fail-open; the
+    request-time contract still rejects bad values per derivation.
+    """
+
+    try:
+        from config.settings import get_config
+
+        value = get_config().research.challenge_meeting_per_call_budget_ms
+    except Exception:  # noqa: BLE001 - startup self-check must not break boot
+        return None
+    return validate_operator_per_call_config(value)
+
+
 def _operator_override_ms() -> int | None:
     config_value = _operator_config_override_ms()
     if config_value is not None:
-        if not PER_CALL_MIN_MS <= config_value <= PER_CALL_MAX_MS:
-            raise ChallengeMeetingDeadlinePolicyError(
-                "research.challenge_meeting_per_call_budget_ms must be between "
-                f"{PER_CALL_MIN_MS} and {PER_CALL_MAX_MS}"
-            )
-        return config_value
+        return validate_operator_per_call_config(config_value)
     raw = str(os.environ.get(_PER_CALL_OVERRIDE_ENV) or "").strip()
     if not raw:
         return None
     value = _positive_int(raw)
     if value is None or not PER_CALL_MIN_MS <= value <= PER_CALL_MAX_MS:
         raise ChallengeMeetingDeadlinePolicyError(
-            f"{_PER_CALL_OVERRIDE_ENV} must be between "
-            f"{PER_CALL_MIN_MS} and {PER_CALL_MAX_MS}"
+            f"{_PER_CALL_OVERRIDE_ENV} must equal the governed per-call cap "
+            f"({PER_CALL_MAX_MS}); got {raw!r} "
+            f"(allowed domain: [{PER_CALL_MIN_MS}, {PER_CALL_MAX_MS}])"
         )
     return value
 
@@ -420,4 +462,6 @@ __all__ = [
     "derive_per_call_budget",
     "effective_call_deadline_at_ms",
     "is_challenge_meeting",
+    "validate_live_operator_per_call_config",
+    "validate_operator_per_call_config",
 ]

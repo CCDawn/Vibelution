@@ -96,6 +96,23 @@ def _recover_challenge_meeting_drivers_on_startup() -> object:
     return recover_challenge_meeting_drivers()
 
 
+def _validate_challenge_fence_config_on_startup() -> int | None:
+    """Validate the operator per-call fence pin once at backend boot.
+
+    The request-time derivation rejects an out-of-domain
+    ``[research] challenge_meeting_per_call_budget_ms`` too, but only when a
+    meeting is already being scheduled (2026-09-03 incident); this self-check
+    surfaces the misconfiguration — with the actual and expected values —
+    before any meeting can derive a clock.
+    """
+
+    from .services.team_workflow.challenge_deadline_policy import (
+        validate_live_operator_per_call_config,
+    )
+
+    return validate_live_operator_per_call_config()
+
+
 def shutdown_session_catalog_on_shutdown() -> None:
     """Cancel opt-in catalog-only work before web shutdown completes."""
 
@@ -202,6 +219,9 @@ async def web_workbench_lifespan(app: FastAPI | None):
     startup_meeting_driver_recovery_task = asyncio.create_task(
         asyncio.to_thread(_recover_challenge_meeting_drivers_on_startup)
     )
+    startup_challenge_fence_validation_task = asyncio.create_task(
+        asyncio.to_thread(_validate_challenge_fence_config_on_startup)
+    )
     startup_external_agent_reconcile_task = asyncio.create_task(
         reconcile_external_agent_tasks_forever()
     )
@@ -255,6 +275,16 @@ async def web_workbench_lifespan(app: FastAPI | None):
             task, message="Challenge meeting driver recovery failed during startup."
         )
     )
+    startup_challenge_fence_validation_task.add_done_callback(
+        lambda task: consume_startup_task_result(
+            task,
+            message=(
+                "research.challenge_meeting_per_call_budget_ms is out of the "
+                "governed domain; fix the operator config before scheduling "
+                "Challenge meetings."
+            ),
+        )
+    )
     startup_external_agent_reconcile_task.add_done_callback(
         lambda task: consume_startup_task_result(
             task, message="External Agent task reconciliation stopped unexpectedly."
@@ -295,6 +325,7 @@ async def web_workbench_lifespan(app: FastAPI | None):
                         "session_catalog",
                         "agent_inbox_recovery",
                         "meeting_driver_recovery",
+                        "challenge_fence_config_validation",
                         "external_agent_task_reconcile",
                         "virtual_human_life",
                     ],
@@ -316,6 +347,7 @@ async def web_workbench_lifespan(app: FastAPI | None):
             startup_catalog_task,
             startup_agent_inbox_recovery_task,
             startup_meeting_driver_recovery_task,
+            startup_challenge_fence_validation_task,
             startup_external_agent_reconcile_task,
             startup_code_fingerprint_task,
             startup_workflow_runtime_task,

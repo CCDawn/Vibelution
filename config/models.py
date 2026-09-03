@@ -1801,9 +1801,10 @@ class ResearchConfig(BaseModel):
     challenge_meeting_per_call_budget_ms: Optional[int] = Field(
         default=None,
         description=(
-            "挑战杯会议讲者单次调用的围栏（毫秒）。缺省 None：先回落环境变量"
+            "挑战杯会议讲者单次调用的围栏（毫秒）。留空（None）：先回落环境变量"
             " VIBELUTION_CHALLENGE_MEETING_PER_CALL_BUDGET_MS，再回落 receipt"
-            " p95 推导。合法域 [300000, 600000]，越界值在会议围栏派生时拒绝。"
+            " 推导。配置时必须等于治理上限（PER_CALL_MAX_MS，当前 800000）；"
+            "越域值在启动自检与会议围栏派生时 fail-loud 拒绝。"
         ),
     )
 

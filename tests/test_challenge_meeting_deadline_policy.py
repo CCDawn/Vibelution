@@ -153,8 +153,57 @@ def test_operator_config_out_of_domain_is_rejected(monkeypatch):
     monkeypatch.delenv(policy._PER_CALL_OVERRIDE_ENV, raising=False)
     monkeypatch.setattr(policy, "_operator_config_override_ms", lambda: 700_000)
 
-    with pytest.raises(policy.ChallengeMeetingDeadlinePolicyError):
+    with pytest.raises(policy.ChallengeMeetingDeadlinePolicyError) as excinfo:
         policy.derive_per_call_budget("research-team")
+    # The message must carry the actual offending value for operator triage.
+    assert "700000" in str(excinfo.value)
+
+
+def test_validate_operator_per_call_config_rejects_stale_lower_pin():
+    """A pin left at the retired 600s cap must fail loud with both values.
+
+    The 2026-09-03 incident: a config written against the old [300000, 600000]
+    domain only failed at request-time derivation and poisoned in-flight
+    meeting minutes.  The startup validator must name the stale value and the
+    governed cap in one message.
+    """
+
+    with pytest.raises(policy.ChallengeMeetingDeadlinePolicyError) as excinfo:
+        policy.validate_operator_per_call_config(600_000)
+    message = str(excinfo.value)
+    assert "600000" in message
+    assert "800000" in message
+
+
+def test_validate_operator_per_call_config_allows_unconfigured_and_cap():
+    assert policy.validate_operator_per_call_config(None) is None
+    assert policy.validate_operator_per_call_config(800_000) == 800_000
+    # Fail-open non-configs match _operator_config_override_ms semantics.
+    for unconfigured in (True, 0, -1, "600000", 600_000.0):
+        assert policy.validate_operator_per_call_config(unconfigured) is None
+
+
+def test_validate_live_operator_per_call_config_reads_live_settings(monkeypatch):
+    from types import SimpleNamespace
+
+    def _settings(value):
+        return SimpleNamespace(
+            research=SimpleNamespace(challenge_meeting_per_call_budget_ms=value)
+        )
+
+    monkeypatch.setattr("config.settings.get_config", lambda: _settings(600_000))
+    with pytest.raises(policy.ChallengeMeetingDeadlinePolicyError) as excinfo:
+        policy.validate_live_operator_per_call_config()
+    assert "600000" in str(excinfo.value)
+
+    monkeypatch.setattr("config.settings.get_config", lambda: _settings(None))
+    assert policy.validate_live_operator_per_call_config() is None
+
+    def _boom():
+        raise RuntimeError("config unavailable")
+
+    monkeypatch.setattr("config.settings.get_config", _boom)
+    assert policy.validate_live_operator_per_call_config() is None
 
 
 def test_operator_config_override_reads_live_settings(monkeypatch):
