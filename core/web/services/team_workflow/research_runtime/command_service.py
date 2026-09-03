@@ -1935,7 +1935,7 @@ class WorkflowCommandService:
         from .result_package_v2 import ResultPackageV2Error
         from .stage_one_closeout import evaluate_stage_one_closeout
 
-        existing = self._existing_stage_one_package_result(request.run_id)
+        existing = self._existing_stage_one_package_result(request.run_id, record)
         if existing is not None:
             return {"kind": "build", "replayed": existing}
 
@@ -2188,14 +2188,53 @@ class WorkflowCommandService:
             )
         return handoff
 
-    def _existing_stage_one_package_result(self, run_id: str) -> dict[str, Any] | None:
+    def _existing_stage_one_package_result(
+        self, run_id: str, record: dict[str, Any]
+    ) -> dict[str, Any] | None:
         """Reuse gate: facts from an already-registered canonical package.
 
         A persisted ``research_result_package`` receipt is the durable marker;
         the registered facts ride the ``stage_one_package_registered`` event.
         Replaying is zero side effect: no CAS, no command row, no event, no
-        artifact write, no second Program registration.
+        artifact write, no second Program registration — but only while the
+        Program registration itself still exists.  A build command's effects
+        are the package AND its Challenge Program registration; when the
+        registered record or its output artifact is gone, the replayed facts
+        would advertise a review target that no longer exists, so the gate
+        falls through to a full rebuild that re-registers.
         """
+        result = self._stage_one_package_registered_facts(run_id)
+        if result is None:
+            return None
+        program_record_id = str(result.get("programRecordId") or "")
+        if not program_record_id:
+            return None
+        from core.web.services.team_workflow import challenge_question_runs
+
+        team_id = str(record.get("teamId") or "")
+        question_id, _, registered_run_id = program_record_id.partition(":")
+        try:
+            registered = any(
+                str(item.get("recordId") or "") == program_record_id
+                for item in (
+                    challenge_question_runs._load_store(team_id).get("records") or []
+                )
+                if isinstance(item, dict)
+            ) and challenge_question_runs._artifact_path(
+                team_id, question_id, registered_run_id
+            ).is_file()
+        except Exception:
+            # An unreadable Program store must not turn the reuse gate into a
+            # bypass: fall through to the normal build path, which fails with
+            # its own explicit errors if the environment is truly broken.
+            registered = False
+        if not registered:
+            return None
+        return result
+
+    def _stage_one_package_registered_facts(
+        self, run_id: str
+    ) -> dict[str, Any] | None:
         receipts, events = self._store.read(
             lambda repo: (
                 repo.list_artifact_receipts_for_run(run_id),

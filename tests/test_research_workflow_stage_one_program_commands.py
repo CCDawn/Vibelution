@@ -328,6 +328,38 @@ def test_build_registers_receipt_event_and_program_record(tmp_path, monkeypatch)
         harness.close()
 
 
+def _persist_program_registration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Path:
+    """Materialize the Challenge Program registration the mocked handoff claims.
+
+    The real handoff writes the question-run record and its output artifact
+    under the team program root; tests mock the handoff, so a replaying reuse
+    gate needs those files present to observe a durable registration.
+    """
+
+    program_root = tmp_path / "team-program-root"
+    monkeypatch.setattr(
+        challenge_question_runs,
+        "resolve_team_program_root",
+        lambda _team_id: program_root,
+    )
+    store = {
+        "schemaVersion": challenge_question_runs.STORE_SCHEMA_VERSION,
+        "storeKind": challenge_question_runs.STORE_KIND,
+        "teamId": TEAM_ID,
+        "records": [{"recordId": f"SCI-091:{RUN_ID}"}],
+        "updatedAt": "",
+    }
+    challenge_question_runs._write_json(
+        challenge_question_runs._store_path(TEAM_ID), store
+    )
+    artifact = challenge_question_runs._artifact_path(TEAM_ID, "SCI-091", RUN_ID)
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.write_text("{}", encoding="utf-8")
+    return program_root
+
+
 def test_build_replay_is_zero_side_effect(tmp_path, monkeypatch) -> None:
     harness = CommandHarness(tmp_path / "ledger.sqlite3")
     try:
@@ -335,6 +367,10 @@ def test_build_replay_is_zero_side_effect(tmp_path, monkeypatch) -> None:
         _patch_domain(monkeypatch, receipt_root=tmp_path)
         first = _submit(harness, _request(harness, command=WorkflowCommandKind.BUILD_STAGE_ONE_PACKAGE, key="stage-one-build"))
         assert first.result["idempotent"] is False
+
+        # Replay is only truthful while the Program registration exists; the
+        # mocked handoff wrote nothing, so materialize it before replaying.
+        _persist_program_registration(tmp_path, monkeypatch)
 
         events_before = len(harness.store.list_events(RUN_ID))
         rows_before = len(
@@ -373,6 +409,73 @@ def test_build_replay_is_zero_side_effect(tmp_path, monkeypatch) -> None:
         )
         assert same_key.status == "accepted"
         assert same_key.result["packageId"] == "rrp-v2:stage-one"
+    finally:
+        harness.close()
+
+
+def test_build_replay_falls_through_when_program_registration_missing(
+    tmp_path, monkeypatch
+) -> None:
+    """A lost registration must not be replayed as if it still existed.
+
+    The build command's effects are the package AND its Challenge Program
+    registration.  When the registered record or its output artifact is gone,
+    the reuse gate falls through to a full rebuild that re-registers instead
+    of returning facts about a review target that no longer exists.
+    """
+
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        _seed(harness)
+        handoff_calls, _puts = _patch_domain(monkeypatch, receipt_root=tmp_path)
+        first = _submit(
+            harness,
+            _request(
+                harness,
+                command=WorkflowCommandKind.BUILD_STAGE_ONE_PACKAGE,
+                key="stage-one-build",
+            ),
+        )
+        assert first.status == "accepted"
+        assert first.result["idempotent"] is False
+        assert len(handoff_calls) == 1
+
+        # The mocked handoff wrote nothing: the Program store under the patched
+        # root stays empty, so the registration is durably absent.  The rebuild
+        # also projects fresh package content (a real code/data change), which
+        # keeps the second artifact receipt distinct from the first.
+        monkeypatch.setattr(
+            challenge_question_runs,
+            "resolve_team_program_root",
+            lambda _team_id: tmp_path / "empty-program-root",
+        )
+        monkeypatch.setattr(
+            result_package_system_adapter,
+            "build_challenge_result_package_v2",
+            lambda **_kwargs: {
+                "packageId": "rrp-v2:stage-one-r2",
+                "factChainHash": "e" * 64,
+                "contentHash": "b" * 64,
+            },
+        )
+
+        events_before = len(harness.store.list_events(RUN_ID))
+        replay = _submit(
+            harness,
+            _request(
+                harness,
+                command=WorkflowCommandKind.BUILD_STAGE_ONE_PACKAGE,
+                key="stage-one-build-2",
+                expected_version=2,
+            ),
+        )
+
+        assert replay.status == "accepted"
+        assert replay.result.get("replayed") is not True
+        assert replay.result["idempotent"] is False
+        assert replay.result["programRecordId"] == f"SCI-091:{RUN_ID}"
+        assert len(handoff_calls) == 2
+        assert len(harness.store.list_events(RUN_ID)) > events_before
     finally:
         harness.close()
 
