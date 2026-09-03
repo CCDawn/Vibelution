@@ -11,6 +11,9 @@ from langgraph.graph import END
 from core.research.competition.stage_one_completion_policy import (
     load_stage_one_completion_policy,
 )
+from core.research.competition.question_result_package import (
+    REQUIRED_REVIEW_DIMENSIONS,
+)
 from core.research.competition.stage_one_requirement_matrix import (
     G1_REQUIRED_EVIDENCE_KINDS,
     evaluate_stage_one_requirement_matrix,
@@ -740,3 +743,256 @@ def test_closeout_without_hypothesis_first_marker_stays_fail_closed(
         evaluate_stage_one_closeout(record, node_id="hypothesis_design")
 
     assert exc.value.code == "stage_one_artifact_missing"
+
+
+# ---------------------------------------------------------------------------
+# Stage receipts on chain launches: the policy's requiredReceiptStages are
+# run-bound ``ModelInvocationReceipt`` assertions.  A hypothesis-first chain
+# launch runs its meeting calls before the formal run exists, so no stage
+# receipt bound to THIS run can ever be registered.  The closeout waives the
+# demand ONLY when the accepted round's persisted chain evidence is complete
+# (hash-anchored approved meeting digests + the complete review audit rows);
+# every exemption is reported per stage, and any evidence gap keeps the
+# fail-closed ``stage_one_receipt_missing`` demand.  Question-driven runs are
+# never waived.
+# ---------------------------------------------------------------------------
+
+
+def _chain_record_without_stage_receipts() -> dict:
+    record = _chain_shape_closeout_record()
+    for payload in record["artifactPayloads"].values():
+        payload.pop("modelInvocationReceipts", None)
+    return record
+
+
+def _patch_chain_receipt_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    digest_evidence: bool = True,
+) -> None:
+    """Keep the kinds waiver armed and control only the digest-side receipt
+    evidence.  ``_accepted_round_rows_complete`` backs BOTH the
+    ``dimension_reviews`` kinds waiver and the receipt waiver, so an
+    incomplete audit must be exercised through the real storage test below
+    (where the artifact gate correctly fires before the receipt gate)."""
+    from core.web.services.team_workflow.research_runtime import stage_one_shape_gate
+
+    monkeypatch.setattr(
+        stage_one_shape_gate,
+        "_accepted_round_meeting_digest_evidence",
+        lambda *_a, **_k: digest_evidence,
+    )
+
+
+def test_hypothesis_first_chain_launch_waives_missing_stage_receipts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Complete chain evidence waives exactly the missing stage receipts."""
+    from core.web.services.team_workflow.research_runtime import stage_one_shape_gate
+
+    record = _chain_record_without_stage_receipts()
+    _patch_chain_shape_lookup(monkeypatch)
+    _patch_chain_receipt_evidence(monkeypatch)
+
+    outcome = evaluate_stage_one_closeout(record, node_id="hypothesis_design")
+
+    assert outcome is not None
+    assert outcome.status == "program_review_required"
+    reason = stage_one_shape_gate.REASON_MEETING_MODEL_EVIDENCE_PERSISTED
+    assert set(outcome.receipt_exempt_stages) == {
+        ("generation", reason),
+        ("review", reason),
+        ("revision", reason),
+    }
+    report = outcome.to_dict()
+    assert report["receiptExemptStages"] == {
+        "generation": reason,
+        "review": reason,
+        "revision": reason,
+    }
+    assert report["receiptRefs"] == []
+
+
+def test_chain_launch_receipt_demand_survives_incomplete_digest_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Hash-anchored meeting digest evidence missing keeps the demand armed."""
+    record = _chain_record_without_stage_receipts()
+    _patch_chain_shape_lookup(monkeypatch)
+    _patch_chain_receipt_evidence(monkeypatch, digest_evidence=False)
+
+    with pytest.raises(NodeExecutionError) as exc:
+        evaluate_stage_one_closeout(record, node_id="hypothesis_design")
+
+    assert exc.value.code == "stage_one_receipt_missing"
+
+
+def test_receipt_waiver_never_applies_to_question_driven_runs() -> None:
+    """The waiver is keyed on the launch marker before any storage is read."""
+    from core.web.services.team_workflow.research_runtime import stage_one_shape_gate
+
+    assert (
+        stage_one_shape_gate.downgraded_stage_one_receipt_stages(
+            ["generation", "review", "revision"],
+            team_id="any-team",
+            question_id="SCI-091",
+            input_snapshot={"researchObjectiveContract": {"hypothesisFirst": False}},
+        )
+        == {}
+    )
+    assert (
+        stage_one_shape_gate.downgraded_stage_one_receipt_stages(
+            ["generation"],
+            team_id="any-team",
+            question_id="SCI-091",
+            input_snapshot={},
+        )
+        == {}
+    )
+
+
+def test_chain_receipt_evidence_discrimination_on_real_chain_storage(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The evidence discriminators read the real persisted chain stores."""
+    from core.web.services import team_service
+    from core.web.services.team_workflow import hypothesis_rounds, meeting_rounds
+    from core.web.services.team_workflow.research_runtime import stage_one_shape_gate
+    from tests._support.team_workflow.helpers import _use_tmp_project_root
+
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(meeting_rounds, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(hypothesis_rounds, "PROJECT_ROOT", tmp_path)
+    team_id = team_service.create_team(name="chain receipt evidence")["teamId"]
+
+    def _complete_rows(candidate_id: str) -> dict:
+        return {
+            "candidateId": candidate_id,
+            "dimensionReviews": [
+                {
+                    "dimension": dimension,
+                    "rating": "adequate",
+                    "rationale": f"{dimension} covered by persisted audit",
+                    "reviewer": "agent-reviewer",
+                }
+                for dimension in REQUIRED_REVIEW_DIMENSIONS
+            ],
+        }
+
+    round_record = {
+        "roundId": "hround-receipt-1",
+        "question": "SCI-091",
+        "createdAt": "2026-09-03T10:00:00Z",
+        "status": "closed",
+        "metaReview": {"accepted": True},
+        "candidates": [
+            _complete_rows("cand-a"),
+            _complete_rows("cand-b"),
+        ],
+        "meetingRefs": [{"kind": "meeting_round", "id": "meeting-receipt-1"}],
+    }
+    hypothesis_rounds._append_jsonl(
+        hypothesis_rounds._storage_path(team_id), round_record
+    )
+    meeting_rounds._append_jsonl(
+        meeting_rounds._rounds_path(team_id),
+        {
+            "meetingRoundId": "meeting-receipt-1",
+            "status": "closed",
+            "digestId": "digest-receipt-1",
+        },
+    )
+    meeting_rounds._append_jsonl(
+        meeting_rounds._digests_path(team_id),
+        {
+            "digestId": "digest-receipt-1",
+            "contentHash": "a" * 64,
+            "sourceMessageRefs": ["msg:A001"],
+        },
+    )
+
+    assert (
+        stage_one_shape_gate._accepted_round_rows_complete(team_id, "SCI-091") is True
+    )
+    assert (
+        stage_one_shape_gate._accepted_round_meeting_digest_evidence(
+            team_id, "SCI-091"
+        )
+        is True
+    )
+    assert stage_one_shape_gate.downgraded_stage_one_receipt_stages(
+        ["generation", "review", "revision"],
+        team_id=team_id,
+        question_id="SCI-091",
+        input_snapshot={"researchObjectiveContract": {"hypothesisFirst": True}},
+    ) == {
+        "generation": stage_one_shape_gate.REASON_MEETING_MODEL_EVIDENCE_PERSISTED,
+        "review": stage_one_shape_gate.REASON_MEETING_MODEL_EVIDENCE_PERSISTED,
+        "revision": stage_one_shape_gate.REASON_MEETING_MODEL_EVIDENCE_PERSISTED,
+    }
+
+    # Unanchored digest (hash not 64-hex) -> fail closed.
+    meeting_rounds._append_jsonl(
+        meeting_rounds._digests_path(team_id),
+        {
+            "digestId": "digest-receipt-1",
+            "contentHash": "deadbeef",
+            "sourceMessageRefs": ["msg:A001"],
+        },
+    )
+    assert (
+        stage_one_shape_gate._accepted_round_meeting_digest_evidence(
+            team_id, "SCI-091"
+        )
+        is False
+    )
+
+    # Digest citing no source messages -> fail closed.
+    meeting_rounds._append_jsonl(
+        meeting_rounds._digests_path(team_id),
+        {"digestId": "digest-receipt-1", "contentHash": "a" * 64},
+    )
+    assert (
+        stage_one_shape_gate._accepted_round_meeting_digest_evidence(
+            team_id, "SCI-091"
+        )
+        is False
+    )
+
+    # Meeting not closed -> fail closed.
+    meeting_rounds._append_jsonl(
+        meeting_rounds._rounds_path(team_id),
+        {
+            "meetingRoundId": "meeting-receipt-1",
+            "status": "summarizing",
+            "digestId": "digest-receipt-1",
+        },
+    )
+    assert (
+        stage_one_shape_gate._accepted_round_meeting_digest_evidence(
+            team_id, "SCI-091"
+        )
+        is False
+    )
+
+    # A candidate missing one review dimension -> the review audit is
+    # incomplete, so even intact digest evidence cannot waive.
+    incomplete_round = {
+        **round_record,
+        "roundId": "hround-receipt-2",
+        "createdAt": "2026-09-03T10:05:00Z",
+        "candidates": [
+            {
+                "candidateId": "cand-a",
+                "dimensionReviews": _complete_rows("cand-a")["dimensionReviews"][:-1],
+            },
+            _complete_rows("cand-b"),
+        ],
+    }
+    hypothesis_rounds._append_jsonl(
+        hypothesis_rounds._storage_path(team_id), incomplete_round
+    )
+    assert (
+        stage_one_shape_gate._accepted_round_rows_complete(team_id, "SCI-091") is False
+    )

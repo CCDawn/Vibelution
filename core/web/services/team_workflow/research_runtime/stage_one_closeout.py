@@ -52,6 +52,7 @@ class StageOneCloseoutOutcome:
     program_record_id: str = ""
     program_output_sha256: str = ""
     canonical_package_sha256: str = ""
+    receipt_exempt_stages: tuple[tuple[str, str], ...] = ()
 
     @property
     def accepted(self) -> bool:
@@ -64,6 +65,9 @@ class StageOneCloseoutOutcome:
             "artifactRefs": list(self.artifact_refs),
             "receiptStages": list(self.receipt_stages),
             "receiptRefs": list(self.receipt_refs),
+            "receiptExemptStages": {
+                stage: reason for stage, reason in self.receipt_exempt_stages
+            },
             "humanGateCount": self.human_gate_count,
             "status": self.status,
             "accepted": self.accepted,
@@ -418,11 +422,42 @@ def evaluate_stage_one_closeout(
                         code="stage_one_receipt_invalid",
                     )
                 receipt_stages[stage] = receipt.receipt_id
-    missing_stages = [stage for stage in policy.requiredReceiptStages if stage not in receipt_stages]
+    missing_stages = [
+        stage for stage in policy.requiredReceiptStages if stage not in receipt_stages
+    ]
+    # Launch-shape conditional waiver: hypothesis-first chain launches run
+    # their meeting calls before the formal run exists, so no stage receipt
+    # bound to THIS run can ever be registered.  Only persisted chain evidence
+    # (hash-anchored meeting digests + the complete review audit) waives the
+    # demand, every exemption names its reason here, and any doubt keeps the
+    # fail-closed ``stage_one_receipt_missing`` demand.
+    receipt_exempt_stages: tuple[tuple[str, str], ...] = ()
     if missing_stages:
-        _fail(
-            "stage-one receipt stages are missing: " + ", ".join(missing_stages),
-            code="stage_one_receipt_missing",
+        try:
+            from .stage_one_shape_gate import (
+                downgraded_stage_one_receipt_stages,
+                drop_downgraded_kinds,
+            )
+
+            snapshot = record.get("inputSnapshot")
+            exemptions = downgraded_stage_one_receipt_stages(
+                missing_stages,
+                team_id=str(record.get("teamId") or ""),
+                question_id=question_id,
+                input_snapshot=snapshot if isinstance(snapshot, Mapping) else {},
+            )
+        except Exception:  # noqa: BLE001 - uncertain shape keeps the demand
+            exemptions = {}
+        still_missing = drop_downgraded_kinds(missing_stages, exemptions)
+        if still_missing:
+            _fail(
+                "stage-one receipt stages are missing: "
+                + ", ".join(still_missing),
+                code="stage_one_receipt_missing",
+            )
+        receipt_exempt_stages = tuple(
+            (stage, exemptions[stage]) for stage in policy.requiredReceiptStages
+            if stage in exemptions
         )
     verified_manifest: Mapping[str, Any] | None = None
     if program_handoff is not None:
@@ -456,13 +491,18 @@ def evaluate_stage_one_closeout(
         policy_sha256=policy.policySha256,
         artifact_refs=tuple(dict.fromkeys(artifact_refs)),
         receipt_stages=tuple(policy.requiredReceiptStages),
-        receipt_refs=tuple(receipt_stages[stage] for stage in policy.requiredReceiptStages),
+        receipt_refs=tuple(
+            receipt_stages[stage]
+            for stage in policy.requiredReceiptStages
+            if stage in receipt_stages
+        ),
         human_gate_count=human_gate_count,
         status="accepted" if accepted else "program_review_required",
         completion_manifest_sha256=completion_manifest_sha256,
         program_record_id=program_record_id,
         program_output_sha256=program_output_sha256,
         canonical_package_sha256=canonical_package_sha256,
+        receipt_exempt_stages=receipt_exempt_stages,
     )
 
 

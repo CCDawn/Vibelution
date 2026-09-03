@@ -25,6 +25,12 @@ whenever its authority is actually readable or its source authority exists,
 and a question-driven run is never downgraded.  Everything else keeps its
 fail-closed demand; no blocker is waived without persisted evidence, and no
 payload is ever faked.
+
+The same doctrine covers the policy's ``requiredReceiptStages``: chain meeting
+calls are structurally unable to register run-bound receipts (they run before
+the formal run exists), so :func:`downgraded_stage_one_receipt_stages` waives
+exactly that demand — only with hash-anchored meeting digests and the complete
+persisted review audit on the accepted round.
 """
 
 from __future__ import annotations
@@ -47,6 +53,7 @@ ROUND_ROW_BACKED_KINDS: tuple[str, ...] = ("dimension_reviews",)
 # Downgrade reason codes surfaced in materialization reports and gate logs.
 REASON_QUESTION_AUTHORITY_SOURCE_ABSENT = "stage_one_question_authority_source_absent"
 REASON_ROUND_ROWS_PERSISTED_ON_CHAIN_ROUND = "dimension_reviews_rows_persisted_on_chain_round"
+REASON_MEETING_MODEL_EVIDENCE_PERSISTED = "hypothesis_first_meeting_model_evidence_persisted"
 
 
 def is_hypothesis_first_launch(input_snapshot: Mapping[str, Any] | None) -> bool:
@@ -167,6 +174,118 @@ def _accepted_round_rows_complete(team_id: str, question_id: str) -> bool:
     return True
 
 
+def _accepted_round_meeting_digest_evidence(team_id: str, question_id: str) -> bool:
+    """True when the accepted round's closed meetings carry approved digests.
+
+    Chain meetings never register run-bound ``ModelInvocationReceipts`` — the
+    speaker calls run in dev/platform meeting scope, bound to the meeting and
+    its chat room, not to the formal run that starts afterwards.  What does
+    persist is the model product itself: a closed meeting's approved digest is
+    hash-anchored (``contentHash``) and cites the real discussion messages
+    (``sourceMessageRefs``).  Every closed meeting bound to the accepted round
+    must resolve to such a digest; anything unreadable or unanchored keeps the
+    receipt demand — fail-closed.
+    """
+    from core.web.services.team_workflow import meeting_rounds as meeting_rounds_service
+
+    from .hypothesis_first_chain import _question_hypothesis_rounds
+
+    try:
+        rounds = _question_hypothesis_rounds(team_id, question_id)
+    except Exception:  # noqa: BLE001 - unreadable chain keeps the demand
+        return False
+    accepted = [
+        round_record
+        for round_record in rounds
+        if str(round_record.get("status") or "") == "closed"
+        and isinstance(round_record.get("metaReview"), Mapping)
+        and round_record["metaReview"].get("accepted") is True
+    ]
+    if not accepted:
+        return False
+    meeting_ids = {
+        str(ref.get("id") or "").strip()
+        for ref in list(accepted[-1].get("meetingRefs") or [])
+        if isinstance(ref, Mapping)
+        and str(ref.get("kind") or "") == "meeting_round"
+        and str(ref.get("id") or "").strip()
+    }
+    if not meeting_ids:
+        return False
+    try:
+        bound_meetings = [
+            meeting
+            for meeting in meeting_rounds_service.list_meeting_rounds(team_id)["meetings"]
+            if isinstance(meeting, Mapping)
+            and str(meeting.get("meetingRoundId") or "") in meeting_ids
+            and str(meeting.get("status") or "") == "closed"
+        ]
+        digest_rows = meeting_rounds_service._read_jsonl(
+            meeting_rounds_service._digests_path(team_id)
+        )
+    except Exception:  # noqa: BLE001 - unreadable evidence keeps the demand
+        return False
+    if not bound_meetings:
+        return False
+    digests = {
+        str(row.get("digestId") or ""): row
+        for row in digest_rows
+        if isinstance(row, Mapping) and str(row.get("digestId") or "")
+    }
+    for meeting in bound_meetings:
+        digest = digests.get(str(meeting.get("digestId") or ""))
+        if not isinstance(digest, Mapping):
+            return False
+        content_hash = str(digest.get("contentHash") or "").strip().lower()
+        if len(content_hash) != 64 or any(
+            char not in "0123456789abcdef" for char in content_hash
+        ):
+            return False
+        if not meeting_rounds_service._normalized_str_list(
+            digest.get("sourceMessageRefs")
+        ):
+            return False
+    return True
+
+
+def downgraded_stage_one_receipt_stages(
+    required_stages: Sequence[str],
+    *,
+    team_id: str,
+    question_id: str,
+    input_snapshot: Mapping[str, Any] | None,
+) -> dict[str, str]:
+    """Return ``{stage: reason}`` for run-bound receipt demands a chain launch
+    structurally cannot meet.
+
+    The stage-one policy demands one run-bound ``ModelInvocationReceipt`` per
+    required stage, scope-pinned to the closing run.  Hypothesis-first chain
+    launches run their meeting calls before the formal run exists, so no such
+    receipt can ever be registered.  For exactly those launches — never a
+    question-driven run — the demand is downgraded to conditionally required:
+    it stays demanded whenever the accepted round's persisted evidence is
+    incomplete, and it is only waived when BOTH the complete review audit rows
+    and every bound meeting's hash-anchored approved digest exist.  Any doubt
+    keeps the receipt demand — fail-closed.
+    """
+    team = str(team_id or "").strip()
+    question = str(question_id or "").strip().upper()
+    stages = [
+        str(stage or "").strip().lower()
+        for stage in required_stages
+        if str(stage or "").strip()
+    ]
+    if not team or not question or not stages:
+        return {}
+    if not is_hypothesis_first_launch(input_snapshot):
+        return {}
+    if not _accepted_round_rows_complete(team, question):
+        return {}
+    if not _accepted_round_meeting_digest_evidence(team, question):
+        return {}
+    return {stage: REASON_MEETING_MODEL_EVIDENCE_PERSISTED for stage in stages}
+
+
 def downgraded_stage_one_kinds(
     required_kinds: Sequence[str],
     *,
@@ -228,10 +347,12 @@ def drop_downgraded_kinds(
 
 __all__ = [
     "QUESTION_AUTHORITY_PROJECTED_KINDS",
+    "REASON_MEETING_MODEL_EVIDENCE_PERSISTED",
     "REASON_QUESTION_AUTHORITY_SOURCE_ABSENT",
     "REASON_ROUND_ROWS_PERSISTED_ON_CHAIN_ROUND",
     "ROUND_ROW_BACKED_KINDS",
     "downgraded_stage_one_kinds",
+    "downgraded_stage_one_receipt_stages",
     "drop_downgraded_kinds",
     "is_hypothesis_first_launch",
 ]
