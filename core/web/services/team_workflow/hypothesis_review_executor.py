@@ -77,7 +77,7 @@ SCHEMA_VERSION = 1
 # Reflection and pairwise fans out to one LLM call per candidate / pair; the
 # executor only parallelizes that IO wait (never the validation below), so the
 # review latency stays bounded instead of O(candidates + pairs) serial calls.
-MAX_CONCURRENT_REVIEW_CALLS = 4
+MAX_CONCURRENT_REVIEW_CALLS = 8
 
 # Per-run fan-out override.  This bound is per review execution (every
 # ``execute_hypothesis_review`` call opens its own bounded pool), not
@@ -88,7 +88,7 @@ _MAX_CONCURRENT_REVIEW_CALLS_LIMIT = 64
 
 
 def resolve_max_concurrent_review_calls() -> int:
-    """Resolve the per-run review fan-out; env-tunable, default 4.
+    """Resolve the per-run review fan-out; env-tunable, default 8.
 
     Malformed or out-of-range overrides fall back to the audited default, so
     a bad env edit can neither serialize a review wave nor open an unbounded

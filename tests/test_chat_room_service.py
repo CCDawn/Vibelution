@@ -5388,6 +5388,37 @@ def test_speaker_round_batches_opening_all_parallel_interaction_two_batches():
     ]
 
 
+def test_speaker_batch_max_workers_default_and_env_override(monkeypatch):
+    """The speaker pool width defaults to 12 and the env overrides it directly.
+
+    ``VIBELUTION_LLM_MAX_CONCURRENT`` may raise the width above the default
+    (several concurrent meetings share the process-wide pool) or lower it,
+    with a floor of 1; malformed values fall back to the default.
+    """
+
+    monkeypatch.delenv("VIBELUTION_LLM_MAX_CONCURRENT", raising=False)
+    assert chat_room_service._CHAT_ROOM_SPEAKER_BATCH_MAX_WORKERS_DEFAULT == 12
+    assert (
+        chat_room_service._speaker_batch_max_workers()
+        == chat_room_service._CHAT_ROOM_SPEAKER_BATCH_MAX_WORKERS_DEFAULT
+    )
+
+    monkeypatch.setenv("VIBELUTION_LLM_MAX_CONCURRENT", "16")
+    assert chat_room_service._speaker_batch_max_workers() == 16
+    monkeypatch.setenv("VIBELUTION_LLM_MAX_CONCURRENT", "2")
+    assert chat_room_service._speaker_batch_max_workers() == 2
+    monkeypatch.setenv("VIBELUTION_LLM_MAX_CONCURRENT", "0")
+    assert chat_room_service._speaker_batch_max_workers() == 1
+    monkeypatch.setenv("VIBELUTION_LLM_MAX_CONCURRENT", "-5")
+    assert chat_room_service._speaker_batch_max_workers() == 1
+
+    monkeypatch.setenv("VIBELUTION_LLM_MAX_CONCURRENT", "not-a-number")
+    assert (
+        chat_room_service._speaker_batch_max_workers()
+        == chat_room_service._CHAT_ROOM_SPEAKER_BATCH_MAX_WORKERS_DEFAULT
+    )
+
+
 def test_meeting_opening_round_runs_speakers_concurrently_and_commits_in_order(
     tmp_path, monkeypatch
 ):

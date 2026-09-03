@@ -1980,7 +1980,7 @@ def test_shared_wave_output_is_identical_to_serial_output():
 
 
 # ---------------------------------------------------------------------------
-# Per-run concurrency ceiling: env-tunable, default stays the audited 4
+# Per-run concurrency ceiling: env-tunable, default stays the audited 8
 # ---------------------------------------------------------------------------
 
 
@@ -1989,15 +1989,19 @@ def test_max_concurrent_review_calls_env_override(monkeypatch):
 
     env = executor._MAX_CONCURRENT_REVIEW_CALLS_ENV
     monkeypatch.delenv(env, raising=False)
-    assert executor.resolve_max_concurrent_review_calls() == 4
-    assert executor.MAX_CONCURRENT_REVIEW_CALLS == 4
+    assert executor.resolve_max_concurrent_review_calls() == 8
+    assert executor.MAX_CONCURRENT_REVIEW_CALLS == 8
 
     monkeypatch.setenv(env, "2")
     assert executor.resolve_max_concurrent_review_calls() == 2
 
     for junk in ("not-a-number", ""):
         monkeypatch.setenv(env, junk)
-        assert executor.resolve_max_concurrent_review_calls() == 4
+        assert executor.resolve_max_concurrent_review_calls() == 8
+
+    # The override works upward too (direct env override, not a down-only cap).
+    monkeypatch.setenv(env, "16")
+    assert executor.resolve_max_concurrent_review_calls() == 16
 
     # Out-of-range values clamp instead of serializing or exploding fan-out.
     monkeypatch.setenv(env, "0")
