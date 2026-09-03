@@ -122,14 +122,22 @@ _REVIEW_LLM_CALL_TIMEOUT_ENV = "VIBELUTION_REVIEW_LLM_CALL_TIMEOUT_SECONDS"
 #
 # - ``VIBELUTION_REVIEW_JSON_MAX_OUTPUT_TOKENS``: reflection / pairwise /
 #   pareto / metareview JSON review calls (default 8192).
-# - The meeting digest call and the revision runner (long revised candidate
-#   prose) are deliberately NOT clamped and keep the profile default: the
-#   digest is the meeting's authoritative long-form document and its
-#   generation budget must never be compressed (2026-09-02 task red line).
+# - ``VIBELUTION_REVISION_MAX_OUTPUT_TOKENS``: the hypothesis revision runner
+#   (long revised candidate prose; default 12288, clamped to [2048, 32768]).
+#   It caps the same runaway-generation failure mode at well under the profile
+#   default while leaving ample headroom for a full revised candidate.
+# - The meeting digest call is deliberately NOT clamped and keeps the profile
+#   default: the digest is the meeting's authoritative long-form document and
+#   its generation budget must never be compressed (2026-09-02 task red line).
 _REVIEW_JSON_MAX_OUTPUT_TOKENS_ENV = "VIBELUTION_REVIEW_JSON_MAX_OUTPUT_TOKENS"
 _REVIEW_MAX_OUTPUT_TOKENS_DEFAULT = 8192
 _REVIEW_MAX_OUTPUT_TOKENS_MIN = 512
 _REVIEW_MAX_OUTPUT_TOKENS_MAX = 65536
+
+_REVISION_MAX_OUTPUT_TOKENS_ENV = "VIBELUTION_REVISION_MAX_OUTPUT_TOKENS"
+_REVISION_MAX_OUTPUT_TOKENS_DEFAULT = 12288
+_REVISION_MAX_OUTPUT_TOKENS_MIN = 2048
+_REVISION_MAX_OUTPUT_TOKENS_MAX = 32768
 
 
 def _env_int(name: str, default: int, *, minimum: int, maximum: int) -> int:
@@ -154,6 +162,17 @@ def review_json_max_output_tokens() -> int:
     )
 
 
+def revision_max_output_tokens() -> int:
+    """Per-call ``max_tokens`` clamp for the hypothesis revision runner."""
+
+    return _env_int(
+        _REVISION_MAX_OUTPUT_TOKENS_ENV,
+        _REVISION_MAX_OUTPUT_TOKENS_DEFAULT,
+        minimum=_REVISION_MAX_OUTPUT_TOKENS_MIN,
+        maximum=_REVISION_MAX_OUTPUT_TOKENS_MAX,
+    )
+
+
 def _purpose_max_output_tokens(purpose: str) -> int | None:
     """Return the per-call output clamp for ``purpose`` (``None`` = profile)."""
 
@@ -165,7 +184,10 @@ def _purpose_max_output_tokens(purpose: str) -> int | None:
         "hypothesis_metareview",
     }:
         return review_json_max_output_tokens()
-    # ``meeting_digest`` and ``hypothesis_revision`` keep the profile default.
+    if normalized == "hypothesis_revision":
+        return revision_max_output_tokens()
+    # ``meeting_digest`` keeps the profile default: the digest must never be
+    # compressed (2026-09-02 task red line).
     return None
 
 

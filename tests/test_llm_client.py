@@ -6516,3 +6516,110 @@ def test_chat_truncated_tool_arguments_with_partial_output_does_not_retry(monkey
     outcome = events[-1].provider_payload["turn_outcome"]
     assert outcome.kind == "incomplete"
     assert outcome.error == "chat.finish.tool_arguments_unparsable"
+
+
+def _length_truncation_config() -> dict:
+    return {
+        "llm.providers.default.kind": "relay",
+        "llm.providers.default.api_key": "test-key",
+        "llm.providers.default.base_url": "https://pixel.try-chatapi.com/v1",
+        "llm.providers.default.compat_mode": "openai",
+        "llm.profiles.primary.provider_id": "default",
+        "llm.profiles.primary.model": "glm-4.6",
+        "llm.profiles.primary.transport": "chat_completions",
+        "llm.profiles.primary.streaming": True,
+        "llm.profiles.primary.retry_policy.max_attempts": 2,
+    }
+
+
+def test_output_length_truncation_marker_raises_llm_output_truncated_error() -> None:
+    from core.llm.client import _raise_if_output_truncated
+    from core.llm.types import LLMOutputTruncatedError
+    from core.llm.wire.chat_completions import OUTPUT_LENGTH_TRUNCATED
+
+    identity = CanonicalItemIdentity(
+        session_id="session-trunc",
+        turn_id="turn-trunc",
+        invocation_id="invocation-trunc",
+        iteration=0,
+        item_id="item-1",
+    )
+    truncated = TurnOutcome(
+        kind="incomplete",
+        identity=identity,
+        error=OUTPUT_LENGTH_TRUNCATED,
+        terminal_event_seen=True,
+    )
+
+    with pytest.raises(LLMOutputTruncatedError) as excinfo:
+        _raise_if_output_truncated(
+            truncated, provider="relay_autodl", model="glm-4.6", phase="invoke"
+        )
+
+    # chat_room errorType = type(exc).__name__; the class name is the surface.
+    assert type(excinfo.value).__name__ == "LLMOutputTruncatedError"
+    assert excinfo.value.retryable is False
+    assert excinfo.value.category == "output_truncated"
+    assert excinfo.value.details["terminal_reason"] == OUTPUT_LENGTH_TRUNCATED
+    # classify_exception passes LLMError subclasses through unchanged, so the
+    # distinct errorType survives normalization on the way to chat_room.
+    assert classify_exception(excinfo.value) is excinfo.value
+
+    # A complete final answer never raises.
+    _raise_if_output_truncated(
+        TurnOutcome.final_answer(identity=identity, text="done"),
+        provider="relay_autodl",
+        model="glm-4.6",
+        phase="invoke",
+    )
+
+
+def test_invoke_outcome_finish_reason_length_raises_output_truncated_error() -> None:
+    from core.llm.types import LLMOutputTruncatedError
+
+    def chat_backend(_payload):
+        return {
+            "id": "chatcmpl-trunc",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": "partial answer"},
+                    "finish_reason": "length",
+                }
+            ],
+            "usage": {"input_tokens": 5, "output_tokens": 6, "total_tokens": 11},
+        }
+
+    client = LLMClient(config=make_config(**_length_truncation_config()), backend=chat_backend)
+
+    with pytest.raises(LLMOutputTruncatedError) as excinfo:
+        client.invoke_outcome([{"role": "user", "content": "讲一段完整的话"}])
+
+    assert excinfo.value.retryable is False
+    assert excinfo.value.details["terminal_reason"] == "chat.finish.output_length_truncated"
+
+
+def test_stream_finish_reason_length_raises_output_truncated_error_without_retry(monkeypatch) -> None:
+    from core.llm.types import LLMOutputTruncatedError
+
+    attempts = {"count": 0}
+
+    def chat_backend(_payload):
+        attempts["count"] += 1
+        return iter(
+            [
+                {"choices": [{"index": 0, "delta": {"content": "部分输出"}, "finish_reason": None}]},
+                {"choices": [{"index": 0, "delta": {}, "finish_reason": "length"}]},
+            ]
+        )
+
+    monkeypatch.setattr("core.llm.client._sleep_with_llm_cancel_check", lambda _seconds: None)
+    client = LLMClient(
+        config=make_config(**_length_truncation_config()), backend=chat_backend
+    )
+
+    with pytest.raises(LLMOutputTruncatedError):
+        list(client.stream_events([{"role": "user", "content": "ping"}]))
+
+    # retryable=False: resending reproduces the same ceiling, so exactly one attempt.
+    assert attempts["count"] == 1

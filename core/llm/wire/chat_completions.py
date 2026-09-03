@@ -46,6 +46,16 @@ STREAM_EXHAUSTED_WITHOUT_FINISH_REASON = "stream_exhausted_without_finish_reason
 # empty-arguments (``{}``) tool call to the approval/execution layers.
 TOOL_ARGUMENTS_UNPARSABLE = "chat.finish.tool_arguments_unparsable"
 
+# Terminal marker for a provider turn that stopped with
+# finish_reason == "length" (Anthropic ``stop_reason == "max_tokens"`` is
+# normalized to "length" by the native adapter, so both wires land here). The
+# model hit the output-token ceiling mid-generation: the visible text / JSON
+# payload is truncated by construction and must never be consumed as a
+# complete answer. The client converts the ``incomplete`` canonical outcome
+# carrying this error into ``LLMOutputTruncatedError`` at outcome assembly,
+# before structured-output contract validation or persistence can see it.
+OUTPUT_LENGTH_TRUNCATED = "chat.finish.output_length_truncated"
+
 
 def _as_dict(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
@@ -586,11 +596,16 @@ class _ChatTurnAssembler:
                 )
             emitted.extend(self._terminal("final_answer", provider_event_type="chat.finish.stop"))
         else:
+            # finish_reason == "length" is an output-ceiling truncation, not a
+            # benign terminal: surface it under the explicit marker so the
+            # client can raise LLMOutputTruncatedError before any consumer
+            # treats the partial text as a complete answer.
+            error = OUTPUT_LENGTH_TRUNCATED if finish_reason == "length" else finish_reason
             emitted.extend(
                 self._terminal(
                     "incomplete",
                     provider_event_type=f"chat.finish.{finish_reason}",
-                    error=finish_reason,
+                    error=error,
                 )
             )
         return emitted

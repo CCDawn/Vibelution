@@ -5,7 +5,9 @@ from __future__ import annotations
 
 from typing import Tuple
 
-from .types import LLMError
+from .types import LLMError, LLMOutputTruncatedError
+
+__all__ = ["LLMError", "LLMOutputTruncatedError", "classify_exception"]
 
 
 def classify_exception(exc: Exception) -> LLMError:

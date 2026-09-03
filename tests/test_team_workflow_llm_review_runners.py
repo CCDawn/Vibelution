@@ -2060,7 +2060,7 @@ def test_capability_true_but_explicit_false_resolves_through_client_capability(m
     assert captured[0]["output_schema"] is None
 
 
-def test_revision_runner_keeps_profile_max_tokens_and_skips_schema(monkeypatch):
+def test_revision_runner_sends_default_revision_cap_and_skips_schema(monkeypatch):
     llm = _fake_llm_with_strict_json_capability(supported=True)
     revision_payload = json.dumps(
         {
@@ -2085,7 +2085,9 @@ def test_revision_runner_keeps_profile_max_tokens_and_skips_schema(monkeypatch):
     assert queue == []
     assert produced["revisedCandidate"]["claim"].startswith("假说 A")
     assert captured[0]["output_schema"] is None
-    assert captured[0]["metadata"] is None
+    assert captured[0]["metadata"] == {
+        llm_review_runners.MAX_OUTPUT_TOKENS_OVERRIDE_METADATA_KEY: llm_review_runners.revision_max_output_tokens()
+    }
 
 
 def test_digest_drafter_sends_strict_json_schema_and_keeps_profile_tokens(
@@ -2237,9 +2239,10 @@ def test_review_max_output_tokens_env_overrides_and_defaults(monkeypatch):
     assert (
         llm_review_runners._purpose_max_output_tokens("hypothesis_metareview") == 8192
     )
-    # Red line: digest and revision never clamp; they keep the profile default.
+    # Red line: digest never clamps; it keeps the profile default. Revision
+    # carries its own cap (see the dedicated revision cap test below).
     assert llm_review_runners._purpose_max_output_tokens("meeting_digest") is None
-    assert llm_review_runners._purpose_max_output_tokens("hypothesis_revision") is None
+    assert llm_review_runners._purpose_max_output_tokens("hypothesis_revision") == 12288
 
     monkeypatch.setenv("VIBELUTION_REVIEW_JSON_MAX_OUTPUT_TOKENS", "4096")
     assert llm_review_runners.review_json_max_output_tokens() == 4096
@@ -2257,6 +2260,38 @@ def test_review_max_output_tokens_env_overrides_and_defaults(monkeypatch):
 
     monkeypatch.setenv("VIBELUTION_REVIEW_JSON_MAX_OUTPUT_TOKENS", "999999")
     assert llm_review_runners.review_json_max_output_tokens() == 65536
+
+
+def test_revision_max_output_tokens_env_overrides_and_defaults(monkeypatch):
+    monkeypatch.delenv("VIBELUTION_REVISION_MAX_OUTPUT_TOKENS", raising=False)
+
+    assert llm_review_runners.revision_max_output_tokens() == 12288
+    assert (
+        llm_review_runners._purpose_max_output_tokens("hypothesis_revision") == 12288
+    )
+    # Red line: the digest generation budget is never clamped.
+    assert llm_review_runners._purpose_max_output_tokens("meeting_digest") is None
+    # The four JSON review purposes keep their own clamp, untouched by the
+    # revision env override.
+    assert llm_review_runners._purpose_max_output_tokens("hypothesis_reflection") == 8192
+
+    monkeypatch.setenv("VIBELUTION_REVISION_MAX_OUTPUT_TOKENS", "4096")
+    assert llm_review_runners.revision_max_output_tokens() == 4096
+    assert llm_review_runners._purpose_max_output_tokens("hypothesis_revision") == 4096
+
+    monkeypatch.setenv("VIBELUTION_REVISION_MAX_OUTPUT_TOKENS", "not-a-number")
+    assert llm_review_runners.revision_max_output_tokens() == 12288
+
+    # Boundary: below minimum clamps up to 2048.
+    monkeypatch.setenv("VIBELUTION_REVISION_MAX_OUTPUT_TOKENS", "1")
+    assert llm_review_runners.revision_max_output_tokens() == 2048
+
+    monkeypatch.setenv("VIBELUTION_REVISION_MAX_OUTPUT_TOKENS", "2047")
+    assert llm_review_runners.revision_max_output_tokens() == 2048
+
+    # Boundary: above maximum clamps down to 32768.
+    monkeypatch.setenv("VIBELUTION_REVISION_MAX_OUTPUT_TOKENS", "999999")
+    assert llm_review_runners.revision_max_output_tokens() == 32768
 
 
 def test_receipt_bound_structured_call_passes_schema_and_clamp(monkeypatch):

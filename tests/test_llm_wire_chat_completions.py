@@ -19,7 +19,10 @@ from core.llm.semantic_messages import (
     ToolResultPart,
 )
 from core.llm.types import CanonicalItemIdentity, CanonicalToolCall, CanonicalToolResult
-from core.llm.wire.chat_completions import ChatCompletionsWireAdapter
+from core.llm.wire.chat_completions import (
+    OUTPUT_LENGTH_TRUNCATED,
+    ChatCompletionsWireAdapter,
+)
 
 
 def route():
@@ -296,6 +299,49 @@ def test_chat_finish_length_with_truncated_call_stays_incomplete():
     assert decoded.outcome.kind == "incomplete"
     assert decoded.outcome.error == "chat.finish.tool_arguments_unparsable"
     assert decoded.outcome.tool_calls == ()
+
+
+def test_chat_finish_length_truncation_is_marked_output_length_truncated():
+    decoded = ChatCompletionsWireAdapter().decode_stream(
+        [
+            {
+                "choices": [
+                    {"index": 0, "delta": {"content": "partial ans"}, "finish_reason": None}
+                ]
+            },
+            {"choices": [{"index": 0, "delta": {}, "finish_reason": "length"}]},
+        ],
+        route=route(),
+        scope=scope(),
+    )
+
+    tuple(decoded)
+
+    assert decoded.outcome.kind == "incomplete"
+    assert decoded.outcome.error == OUTPUT_LENGTH_TRUNCATED
+    terminal_events = [event for event in decoded.outcome.events if event.terminal]
+    assert terminal_events[-1].provider_event_type == "chat.finish.length"
+
+
+def test_chat_decode_response_finish_length_marks_output_length_truncated():
+    outcome = ChatCompletionsWireAdapter().decode_response(
+        {
+            "id": "chatcmpl-1",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": "partial"},
+                    "finish_reason": "length",
+                }
+            ],
+            "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+        },
+        route=route(),
+        scope=scope(),
+    )
+
+    assert outcome.kind == "incomplete"
+    assert outcome.error == OUTPUT_LENGTH_TRUNCATED
 
 
 def test_chat_late_argument_chunk_after_finish_does_not_escape_interception():

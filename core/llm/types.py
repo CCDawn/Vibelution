@@ -325,3 +325,30 @@ class LLMError(RuntimeError):
         self.provider = provider
         self.model = model
         self.details = details or {}
+
+
+class LLMOutputTruncatedError(LLMError):
+    """Provider 在达到 max output token 上限时截断了本轮输出。
+
+    对应 wire 层 ``finish_reason == "length"``（Anthropic ``stop_reason ==
+    "max_tokens"`` 归一到同一标记）。独立于通用 ``provider_protocol_error``：
+    chat_room 等消费方用 ``type(exc).__name__`` 作为 errorType，类名本身就是
+    新的观测类型。retryable=False——同样的请求会撞同样的上限，重试无意义。
+    """
+
+    def __init__(
+        self,
+        message: str = "模型输出达到 max output token 上限，被 provider 截断",
+        *,
+        provider: str = "",
+        model: str = "",
+        details: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        super().__init__(
+            "output_truncated",
+            message,
+            retryable=False,
+            provider=provider,
+            model=model,
+            details=details,
+        )

@@ -21,6 +21,7 @@ from core.llm.semantic_messages import (
     TextPart,
 )
 from core.llm.wire.anthropic_messages import AnthropicMessagesNativeWireAdapter
+from core.llm.wire.chat_completions import OUTPUT_LENGTH_TRUNCATED
 from core.llm.wire.compat_native import AnthropicMessagesLiteLLMCompatWireAdapter
 
 
@@ -101,6 +102,50 @@ def test_native_adapter_decodes_text_tool_and_cache_usage() -> None:
     assert usage_events
     assert usage_events[-1].diagnostic_summary["cachedInputTokens"] == 3
     assert usage_events[-1].diagnostic_summary["cacheCreationInputTokens"] == 2
+
+
+def test_native_max_tokens_stop_reason_marks_output_length_truncated() -> None:
+    outcome = AnthropicMessagesNativeWireAdapter().decode_response(
+        {
+            "id": "msg-1",
+            "content": [{"type": "text", "text": "partial answer"}],
+            "stop_reason": "max_tokens",
+            "usage": {"input_tokens": 10, "output_tokens": 8},
+        },
+        route=_route(),
+        scope=_scope(),
+    )
+
+    # stop_reason "max_tokens" maps to finish_reason "length" and then to the
+    # shared explicit truncation marker the client converts into
+    # LLMOutputTruncatedError.
+    assert outcome.kind == "incomplete"
+    assert outcome.error == OUTPUT_LENGTH_TRUNCATED
+
+
+def test_native_stream_max_tokens_stop_reason_marks_output_length_truncated() -> None:
+    streamed = AnthropicMessagesNativeWireAdapter().decode_stream(
+        [
+            {"type": "message_start", "message": {"id": "msg-3", "usage": {"input_tokens": 2}}},
+            {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "text_delta", "text": "partial"},
+            },
+            {
+                "type": "message_delta",
+                "delta": {"stop_reason": "max_tokens"},
+                "usage": {"output_tokens": 9},
+            },
+            {"type": "message_stop"},
+        ],
+        route=_route(),
+        scope=_scope(),
+    )
+    tuple(streamed)
+
+    assert streamed.outcome.kind == "incomplete"
+    assert streamed.outcome.error == OUTPUT_LENGTH_TRUNCATED
 
 
 def test_native_sse_and_nonstream_produce_equivalent_final_text() -> None:

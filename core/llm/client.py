@@ -47,12 +47,12 @@ from .stream_http_timing import (
 from .streaming import ResponsesStreamNormalizer, extract_message_tool_calls, extract_text_content
 from .semantic_messages import SemanticGenerationSettings, SemanticOutputSchema
 from .semantic_projector import SemanticProjectionError, SemanticProjectionInput, project_semantic_request
-from .types import LLMCapabilities, LLMError, LLMProtocolEvent, StreamChunk, ToolCall, TurnOutcome, UsageStats
+from .types import LLMCapabilities, LLMError, LLMOutputTruncatedError, LLMProtocolEvent, StreamChunk, ToolCall, TurnOutcome, UsageStats
 from .usage import read_usage_int as _read_provider_usage_int
 from .usage import cache_usage_observation_from_payload, usage_stats_from_payload, usage_to_dict
 from .wire.registry import build_default_wire_adapter_registry
 from .wire.chat_completions import STREAM_EXHAUSTED_WITHOUT_FINISH_REASON
-from .wire.chat_completions import TOOL_ARGUMENTS_UNPARSABLE
+from .wire.chat_completions import OUTPUT_LENGTH_TRUNCATED, TOOL_ARGUMENTS_UNPARSABLE
 from .wire.responses import STREAM_EXHAUSTED_WITHOUT_TERMINAL
 
 
@@ -229,6 +229,32 @@ def _is_retryable_stream_exhaustion(outcome: TurnOutcome, *, allow_chat: bool = 
     if outcome.error == TOOL_ARGUMENTS_UNPARSABLE:
         return True
     return allow_chat and outcome.error == STREAM_EXHAUSTED_WITHOUT_FINISH_REASON
+
+
+def _raise_if_output_truncated(outcome: TurnOutcome, *, provider: str, model: str, phase: str) -> None:
+    """Convert a provider length-truncation terminal into an explicit error.
+
+    ``finish_reason == "length"`` (marker ``OUTPUT_LENGTH_TRUNCATED``) means
+    the model hit the output-token ceiling mid-generation. Raising at the
+    outcome-assembly point — before any downstream consumer sees the outcome —
+    keeps truncated prose from being persisted as a complete answer and stops a
+    truncated structured (json_schema) payload from paying a full-price
+    ContractValidationError re-burn downstream; it surfaces instead as
+    ``LLMOutputTruncatedError`` (chat_room errorType = class name).
+    Not retryable: resending the same request reproduces the same ceiling.
+
+    TODO(retry-hook): a one-shot *downgraded retry* for truncated structured
+    purposes (lower thinking effort / smaller ceiling, see
+    ``_purpose_max_output_tokens`` in team_workflow llm_review_runners) would
+    attach at this call site. Deliberately not implemented here.
+    """
+
+    if outcome.kind == "incomplete" and str(outcome.error or "") == OUTPUT_LENGTH_TRUNCATED:
+        raise LLMOutputTruncatedError(
+            provider=provider,
+            model=model,
+            details={"phase": phase, "terminal_reason": outcome.error},
+        )
 
 
 def _safe_semantic_projection_snapshot(messages: List[Any]) -> Dict[str, Any]:
@@ -3761,6 +3787,12 @@ class LLMClient:
             },
         )
         self._record_canonical_outcome(turn_outcome, phase="invoke")
+        _raise_if_output_truncated(
+            turn_outcome,
+            provider=self.provider.kind,
+            model=self.profile.model,
+            phase="invoke",
+        )
         return turn_outcome
 
     def project_outcome_message(
@@ -4663,6 +4695,12 @@ class LLMClient:
                         model=self.profile.model,
                     )
                 self._record_canonical_outcome(canonical_outcome, phase="stream")
+                _raise_if_output_truncated(
+                    canonical_outcome,
+                    provider=self.provider.kind,
+                    model=self.profile.model,
+                    phase="stream",
+                )
                 chat_partial_output = bool(emitted) and canonical_outcome.error in {
                     STREAM_EXHAUSTED_WITHOUT_FINISH_REASON,
                     TOOL_ARGUMENTS_UNPARSABLE,
