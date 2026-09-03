@@ -26,6 +26,12 @@ class WorkflowCommandKind(str, Enum):
     # NOT operator-only — the privileged-command set is unchanged.
     ENSURE_KNOWLEDGE_COLLECTION = "ensure_knowledge_collection"
     INSPECT_KNOWLEDGE_COLLECTION = "inspect_knowledge_collection"
+    # Stage-one G1 closeout operator commands (Challenge Program flow).  Both
+    # are ledger-authoritative first-class commands: the build registers the
+    # canonical result package, the finalize promotes the pending closeout
+    # after a fresh approved Program readback.
+    BUILD_STAGE_ONE_PACKAGE = "build_stage_one_package"
+    FINALIZE_STAGE_ONE = "finalize_stage_one"
 
 
 @dataclass(frozen=True, slots=True)

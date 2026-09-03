@@ -823,6 +823,9 @@ def _ledger_run_mapping(run: Any) -> dict[str, Any]:
         snapshot = json.loads(str(getattr(run, "input_snapshot_json", "") or "{}"))
     except (TypeError, ValueError, json.JSONDecodeError):
         snapshot = {}
+    created_ms = int(getattr(run, "created_at_ms", 0) or 0)
+    updated_ms = int(getattr(run, "updated_at_ms", 0) or 0)
+    completed_ms = int(getattr(run, "completed_at_ms", 0) or 0)
     return {
         "runId": str(getattr(run, "run_id", "") or ""),
         "teamId": str(getattr(run, "team_id", "") or ""),
@@ -832,7 +835,25 @@ def _ledger_run_mapping(run: Any) -> dict[str, Any]:
         "structureHash": str(getattr(run, "structure_hash", "") or ""),
         "questionId": str(getattr(run, "question_id", "") or "").upper(),
         "inputSnapshot": snapshot if isinstance(snapshot, Mapping) else {},
+        # Package builders need non-empty lineage timestamps; empty fallbacks
+        # keep pre-registry runs buildable without inventing facts.
+        "createdAt": _ledger_ms_to_iso(created_ms),
+        "updatedAt": _ledger_ms_to_iso(updated_ms or created_ms),
+        "completedAt": _ledger_ms_to_iso(completed_ms or updated_ms or created_ms),
     }
+
+
+def _ledger_ms_to_iso(value_ms: int) -> str:
+    if not value_ms:
+        return ""
+    from datetime import UTC, datetime
+
+    return (
+        datetime.fromtimestamp(int(value_ms) / 1000, tz=UTC)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
 
 
 def _ledger_receipt_payload(row: Any) -> dict[str, Any]:
@@ -899,27 +920,34 @@ def _load_ledger_artifact_payload(receipt: Mapping[str, Any]) -> dict[str, Any] 
     return dict(envelope)
 
 
-def evaluate_ledger_stage_one_closeout(
+def project_ledger_stage_one_closeout_record(
     store: Any,
     *,
-    action: Any,
-    current_artifact_receipts: Iterable[Mapping[str, Any]],
-) -> StageOneCloseoutOutcome | None:
-    """Project the formal Ledger snapshot into the shared closeout validator."""
+    run_id: str,
+    current_artifact_receipts: Iterable[Mapping[str, Any]] = (),
+) -> tuple[dict[str, Any], StageOneCompletionPolicy] | None:
+    """Project the durable Ledger run into the shared closeout candidate record.
+
+    Returns ``(record, policy)`` for the stage-one run, or ``None`` when the
+    run carries no stage-one completion policy.  Raises the fail-closed
+    validator errors for a missing run or a malformed policy.  Shared by the
+    worker-side evaluator and the ledger closeout commands so both sides can
+    never drift in what evidence they project.
+    """
 
     run, attempts, prior_receipts, pending_human_tasks = store.read(
         lambda repo: (
-            repo.get_run(str(action.run_id)),
-            repo.list_attempts(str(action.run_id)),
-            repo.list_artifact_receipts_for_run(str(action.run_id)),
-            repo.list_pending_human_tasks(str(action.run_id)),
+            repo.get_run(str(run_id)),
+            repo.list_attempts(str(run_id)),
+            repo.list_artifact_receipts_for_run(str(run_id)),
+            repo.list_pending_human_tasks(str(run_id)),
         )
     )
     if run is None:
         _fail("stage-one Ledger run is missing", code="stage_one_run_missing")
     record = _ledger_run_mapping(run)
     policy = _stage_one_policy(record)
-    if policy is None or str(action.node_id) != policy.closureNodeId:
+    if policy is None:
         return None
 
     selected_by_kind: dict[str, dict[str, Any]] = {}
@@ -964,6 +992,28 @@ def evaluate_ledger_stage_one_closeout(
             ],
         }
     )
+    return record, policy
+
+
+def evaluate_ledger_stage_one_closeout(
+    store: Any,
+    *,
+    action: Any,
+    current_artifact_receipts: Iterable[Mapping[str, Any]],
+) -> StageOneCloseoutOutcome | None:
+    """Project the formal Ledger snapshot into the shared closeout validator."""
+
+    projected = project_ledger_stage_one_closeout_record(
+        store,
+        run_id=str(action.run_id),
+        current_artifact_receipts=current_artifact_receipts,
+    )
+    if projected is None:
+        return None
+    record, policy = projected
+    if str(action.node_id) != policy.closureNodeId:
+        return None
+
     evidence_outcome = evaluate_stage_one_closeout(
         record,
         node_id=str(action.node_id),
@@ -1035,6 +1085,7 @@ __all__ = [
     "evaluate_stage_one_closeout",
     "finalize_stage_one_closeout",
     "payload_human_gates",
+    "project_ledger_stage_one_closeout_record",
     "route_after_stage_one_closure",
     "stage_one_terminal_facts",
 ]

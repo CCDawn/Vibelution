@@ -133,6 +133,16 @@ class KnowledgeCommandError(WorkflowCommandError):
         self.detail = detail
 
 
+class StageOneCommandError(WorkflowCommandError):
+    """Typed stage-one closeout command failure; ``code`` is stable for HTTP
+    mapping (mirrors the fail-closed stage-one validator codes)."""
+
+    def __init__(self, detail: str, *, code: str = "stage_one_command_failed") -> None:
+        super().__init__(detail)
+        self.code = code
+        self.detail = detail
+
+
 class DefinitionResolutionDegradedError(WorkflowCommandError):
     """A mutation was attempted on a run whose pinned definition could not be
     honored (plan §6.3): the stale-mutation path is fail-closed instead of
@@ -267,6 +277,20 @@ _OPERATOR_ONLY_COMMANDS = frozenset(
         WorkflowCommandKind.FORK_REVISION,
         WorkflowCommandKind.ARCHIVE_RUN,
         WorkflowCommandKind.RECONCILE_RUN,
+        WorkflowCommandKind.BUILD_STAGE_ONE_PACKAGE,
+        WorkflowCommandKind.FINALIZE_STAGE_ONE,
+    }
+)
+
+# Stage-one G1 closeout operator commands.  Domain preparation (package
+# build, Challenge Program registration/readback, artifact-store writes) is
+# idempotent file-store IO and runs OUTSIDE the single-writer ledger
+# transaction; only durable facts persist inside it (resolve_human_task
+# precedent).
+_STAGE_ONE_COMMANDS = frozenset(
+    {
+        WorkflowCommandKind.BUILD_STAGE_ONE_PACKAGE,
+        WorkflowCommandKind.FINALIZE_STAGE_ONE,
     }
 )
 
@@ -299,6 +323,8 @@ class WorkflowCommandService:
             WorkflowCommandKind.ARCHIVE_RUN: self._handle_archive_run,
             WorkflowCommandKind.REBIND_NODE: self._handle_rebind_node,
             WorkflowCommandKind.FORK_REVISION: self._handle_fork_revision,
+            WorkflowCommandKind.BUILD_STAGE_ONE_PACKAGE: self._handle_build_stage_one_package,
+            WorkflowCommandKind.FINALIZE_STAGE_ONE: self._handle_finalize_stage_one,
         }
 
     # ------------------------------------------------------------ public
@@ -361,6 +387,14 @@ class WorkflowCommandService:
         except KnowledgeAcceptanceArtifactError as exc:
             raise WorkflowCommandError(str(exc)) from exc
 
+        prepared_stage_one = None
+        if request.command in _STAGE_ONE_COMMANDS:
+            # Domain preparation OUTSIDE the ledger transaction: package
+            # build, Challenge Program registration/readback and artifact-store
+            # writes are idempotent IO and must never run inside the
+            # single-writer transaction.
+            prepared_stage_one = self._prepare_stage_one_command(run, request)
+
         if request.command in _ATTEMPT_CREATING_COMMANDS:
             if not request.node_id:
                 raise WorkflowCommandError(f"{request.command.value} 需要 nodeId")
@@ -404,10 +438,16 @@ class WorkflowCommandService:
                 force_flush=True,
             )
         else:
-            future = self._store.submit(
-                lambda uow: handler(uow, request, request_hash),
-                force_flush=True,
-            )
+            if prepared_stage_one is not None:
+                future = self._store.submit(
+                    lambda uow: handler(uow, request, request_hash, prepared_stage_one),
+                    force_flush=True,
+                )
+            else:
+                future = self._store.submit(
+                    lambda uow: handler(uow, request, request_hash),
+                    force_flush=True,
+                )
         receipt = future.result(timeout=30)
         if request.command is WorkflowCommandKind.CANCEL_RUN and receipt.status == "accepted":
             # Post-commit, best-effort fast path: the durable cleanup intent
@@ -417,6 +457,23 @@ class WorkflowCommandService:
             # Replay returns earlier via the idempotency lookup, so a replayed
             # cancel_run cannot re-run this side effect.
             self._close_cancel_run_inflight_turns(request.run_id)
+        if (
+            request.command is WorkflowCommandKind.FINALIZE_STAGE_ONE
+            and prepared_stage_one is not None
+            and receipt.status == "accepted"
+            and not dict(receipt.result or {}).get("replayed")
+        ):
+            # Post-commit checkpoint sync (ledger transaction already durably
+            # terminal): either resume the interrupted closure node through the
+            # outbox worker, or write the accepted marker straight into the
+            # thread's checkpoint when no interrupt is left. A same-key replay
+            # returns at the idempotency lookup above with the same result, so
+            # this stays idempotent end to end.
+            self._sync_stage_one_checkpoint(
+                run=run,
+                prepared=prepared_stage_one,
+                idempotency_key=request.idempotency_key,
+            )
         return receipt
 
     def _authorize_operator(self, request: CommandRequest) -> None:
@@ -823,6 +880,7 @@ class WorkflowCommandService:
             raise IdempotencyConflictError()
         if existing.result_json:
             payload = json.loads(existing.result_json)
+            result = payload.get("result")
             return CommandReceipt(
                 command_id=str(payload.get("commandId") or ""),
                 run_id=str(payload.get("runId") or ""),
@@ -830,6 +888,7 @@ class WorkflowCommandService:
                 accepted_run_version=payload.get("acceptedRunVersion"),
                 idempotency_key=str(payload.get("idempotencyKey") or ""),
                 latest_event_sequence=int(payload.get("latestEventSequence") or 0),
+                result=dict(result) if isinstance(result, Mapping) else None,
             )
         return CommandReceipt(
             command_id=existing.command_id,
@@ -1821,6 +1880,564 @@ class WorkflowCommandService:
         )
         return child_run_id
 
+    # ------------------------------------------------- stage-one closeout
+
+    def _prepare_stage_one_command(self, run: Any, request: CommandRequest) -> dict[str, Any]:
+        """Domain preparation for the stage-one closeout commands.
+
+        Runs OUTSIDE the ledger transaction.  Returns a prepared-facts dict
+        consumed by the transaction-side handler; raises StageOneCommandError
+        with a stable HTTP-mappable code on every fail-closed gate.
+        """
+        from .node_execution_support import NodeExecutionError
+        from .stage_one_closeout import project_ledger_stage_one_closeout_record
+
+        try:
+            projected = project_ledger_stage_one_closeout_record(
+                self._store, run_id=request.run_id
+            )
+        except NodeExecutionError as exc:
+            raise StageOneCommandError(
+                str(exc), code=str(getattr(exc, "code", "") or "stage_one_policy_invalid")
+            ) from exc
+        if projected is None:
+            raise StageOneCommandError(
+                "stage-one completion policy is missing for this run",
+                code="stage_one_policy_invalid",
+            )
+        record, policy = projected
+        node_id = str(request.node_id or "").strip() or policy.closureNodeId
+        if request.command is WorkflowCommandKind.BUILD_STAGE_ONE_PACKAGE:
+            return self._prepare_stage_one_build(request, record, policy, node_id)
+        return self._prepare_stage_one_finalize(request, record, policy, node_id)
+
+    def _stage_one_attempt_or_raise(self, run_id: str, node_id: str) -> Any:
+        attempt = self._store.latest_attempt(run_id, node_id)
+        if attempt is None:
+            raise StageOneCommandError(
+                f"stage-one closure attempt is missing for {node_id}",
+                code="stage_one_closure_attempt_missing",
+            )
+        return attempt
+
+    def _prepare_stage_one_build(
+        self,
+        request: CommandRequest,
+        record: dict[str, Any],
+        policy: Any,
+        node_id: str,
+    ) -> dict[str, Any]:
+        from .artifact_readback_registry import build_canonical_ref
+        from .human_gate_artifacts import canonical_sha256
+        from .node_execution_support import NodeExecutionError
+        from .result_package_system_adapter import build_stage_one_proposal_package
+        from .result_package import ResultPackageError
+        from .result_package_v2 import ResultPackageV2Error
+        from .stage_one_closeout import evaluate_stage_one_closeout
+
+        existing = self._existing_stage_one_package_result(request.run_id)
+        if existing is not None:
+            return {"kind": "build", "replayed": existing}
+
+        attempt = self._stage_one_attempt_or_raise(request.run_id, node_id)
+        try:
+            outcome = evaluate_stage_one_closeout(record, node_id=node_id)
+        except NodeExecutionError as exc:
+            raise StageOneCommandError(str(exc), code=str(exc.code)) from exc
+        if outcome is None or outcome.accepted or outcome.status != "program_review_required":
+            raise StageOneCommandError(
+                "stage-one evidence is not ready for packaging",
+                code="stage_one_package_not_ready",
+            )
+
+        snapshot = record.get("inputSnapshot")
+        snapshot = snapshot if isinstance(snapshot, dict) else {}
+        team_id = str(record.get("teamId") or "")
+        workflow_run_id = str(record.get("runId") or "")
+        authority_run_id = str(snapshot.get("sourceCollectionRunId") or workflow_run_id)
+        try:
+            package, _plan_alias_written = build_stage_one_proposal_package(
+                record,
+                team_id=team_id,
+                workflow_run_id=workflow_run_id,
+                source_collection_run_id=authority_run_id,
+                idempotency_key=request.idempotency_key,
+            )
+        except (ResultPackageError, ResultPackageV2Error) as exc:
+            raise StageOneCommandError(
+                str(exc),
+                code=str(getattr(exc, "code", "") or "challenge_v2_package_failed"),
+            ) from exc
+
+        from .workflow_artifact_store import put_workflow_artifact
+
+        artifact_payload = {
+            "teamId": team_id,
+            "workflowRunId": workflow_run_id,
+            "sourceCollectionRunId": authority_run_id,
+            "package": package,
+        }
+        content_hash = canonical_sha256(artifact_payload)
+        put_workflow_artifact(
+            team_id,
+            kind="research_result_package",
+            workflow_run_id=workflow_run_id,
+            source_collection_run_id=authority_run_id,
+            payload=artifact_payload,
+            artifact_identity=request.idempotency_key,
+        )
+        handoff = self._handoff_to_challenge_program(
+            team_id=team_id,
+            workflow_run_id=workflow_run_id,
+            authority_run_id=authority_run_id,
+            registered_by="stage_one_command_service",
+        )
+        canonical_ref = build_canonical_ref(
+            kind="research_result_package",
+            team_id=team_id,
+            authority_run_id=authority_run_id,
+            content_hash=content_hash,
+        )
+        return {
+            "kind": "build",
+            "package": package,
+            "content_hash": content_hash,
+            "canonical_ref": canonical_ref,
+            "authority_run_id": authority_run_id,
+            "node_run_id": str(attempt.node_run_id),
+            "handoff": handoff,
+        }
+
+    def _prepare_stage_one_finalize(
+        self,
+        request: CommandRequest,
+        record: dict[str, Any],
+        policy: Any,
+        node_id: str,
+    ) -> dict[str, Any]:
+        from .artifact_readback_registry import build_canonical_ref
+        from .human_gate_artifacts import canonical_sha256
+        from .node_execution_support import NodeExecutionError
+        from .program_candidate_handoff import (
+            ProgramCandidateHandoffContractError,
+            stage_one_completion_manifest_from_handoff,
+        )
+        from .stage_one_closeout import evaluate_stage_one_closeout
+
+        attempt = self._stage_one_attempt_or_raise(request.run_id, node_id)
+        if str(attempt.status) != "succeeded":
+            raise StageOneCommandError(
+                "stage-one closure attempt is not durably succeeded",
+                code="stage_one_closure_attempt_missing",
+            )
+        snapshot = record.get("inputSnapshot")
+        snapshot = snapshot if isinstance(snapshot, dict) else {}
+        team_id = str(record.get("teamId") or "")
+        workflow_run_id = str(record.get("runId") or "")
+        authority_run_id = str(snapshot.get("sourceCollectionRunId") or workflow_run_id)
+        handoff = self._handoff_to_challenge_program(
+            team_id=team_id,
+            workflow_run_id=workflow_run_id,
+            authority_run_id=authority_run_id,
+            registered_by="stage_one_closeout_finalizer",
+        )
+        try:
+            manifest = stage_one_completion_manifest_from_handoff(
+                handoff,
+                policy_sha256=policy.policySha256,
+            )
+        except ProgramCandidateHandoffContractError as exc:
+            raise StageOneCommandError(
+                str(exc), code="stage_one_program_review_not_approved"
+            ) from exc
+        try:
+            outcome = evaluate_stage_one_closeout(
+                record,
+                node_id=node_id,
+                program_handoff=handoff,
+            )
+        except NodeExecutionError as exc:
+            raise StageOneCommandError(str(exc), code=str(exc.code)) from exc
+        if outcome is None or not outcome.accepted:
+            raise StageOneCommandError(
+                "stage-one completion manifest did not authorize acceptance",
+                code="stage_one_completion_manifest_invalid",
+            )
+
+        from .workflow_artifact_store import put_workflow_artifact
+
+        content_hash = canonical_sha256(manifest)
+        put_workflow_artifact(
+            team_id,
+            kind="stage_one_completion_manifest",
+            workflow_run_id=workflow_run_id,
+            source_collection_run_id=authority_run_id,
+            payload=manifest,
+            artifact_identity=request.idempotency_key,
+        )
+        canonical_ref = build_canonical_ref(
+            kind="stage_one_completion_manifest",
+            team_id=team_id,
+            authority_run_id=authority_run_id,
+            content_hash=content_hash,
+        )
+        return {
+            "kind": "finalize",
+            "manifest": manifest,
+            "outcome": outcome,
+            "content_hash": content_hash,
+            "canonical_ref": canonical_ref,
+            "authority_run_id": authority_run_id,
+            "node_run_id": str(attempt.node_run_id),
+            "completion_state": policy.completionState,
+        }
+
+    def _handoff_to_challenge_program(
+        self,
+        *,
+        team_id: str,
+        workflow_run_id: str,
+        authority_run_id: str,
+        registered_by: str,
+    ) -> dict[str, Any]:
+        from .program_candidate_handoff import (
+            HANDOFF_STATUS_NEEDS_CONTEXT,
+            handoff_result_package_to_challenge_program,
+        )
+
+        handoff = handoff_result_package_to_challenge_program(
+            team_id=team_id,
+            workflow_run_id=workflow_run_id,
+            source_collection_run_id=authority_run_id,
+            registered_by=registered_by,
+        )
+        if str(handoff.get("status") or "") == HANDOFF_STATUS_NEEDS_CONTEXT:
+            raise StageOneCommandError(
+                str(handoff.get("reason") or "stage-one package handoff needs context"),
+                code="stage_one_result_package_missing",
+            )
+        return handoff
+
+    def _existing_stage_one_package_result(self, run_id: str) -> dict[str, Any] | None:
+        """Reuse gate: facts from an already-registered canonical package.
+
+        A persisted ``research_result_package`` receipt is the durable marker;
+        the registered facts ride the ``stage_one_package_registered`` event.
+        Replaying is zero side effect: no CAS, no command row, no event, no
+        artifact write, no second Program registration.
+        """
+        receipts, events = self._store.read(
+            lambda repo: (
+                repo.list_artifact_receipts_for_run(run_id),
+                repo.list_events(run_id, after_sequence=0, limit=100000),
+            )
+        )
+        if not any(str(row[4] or "") == "research_result_package" for row in receipts):
+            return None
+        for event in reversed(events):
+            if str(event.event_type or "") != "stage_one_package_registered":
+                continue
+            try:
+                payload = json.loads(str(event.payload_json or "{}"))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+            result = payload.get("result")
+            if isinstance(result, dict):
+                return dict(result)
+        # Receipt without its registration event (crash between writes):
+        # replay the package facts from the artifact authority itself.
+        from .artifact_readback_registry import load_scoped_artifact_payload
+
+        row = next(
+            item for item in receipts if str(item[4] or "") == "research_result_package"
+        )
+        try:
+            ref = json.loads(str(row[5] or "{}")).get("canonicalRef") or ""
+        except (TypeError, ValueError, json.JSONDecodeError):
+            ref = ""
+        from .artifact_readback_registry import parse_canonical_ref
+
+        parsed = parse_canonical_ref(str(ref))
+        envelope = (
+            load_scoped_artifact_payload(
+                "research_result_package",
+                team_id=str(row[3] or ""),
+                authority_run_id=str((parsed or {}).get("authorityRunId") or ""),
+                workflow_run_id=run_id,
+            )
+            if parsed
+            else None
+        )
+        payload = (envelope or {}).get("payload") if isinstance(envelope, dict) else None
+        package = (payload or {}).get("package") if isinstance(payload, dict) else None
+        return {
+            "command": "build_stage_one_package",
+            "idempotent": False,
+            "packageId": str((package or {}).get("packageId") or ""),
+            "contentHash": str(row[7] or ""),
+            "programRecordId": "",
+            "programReviewStatus": "",
+            "sourceCollectionRunId": str((parsed or {}).get("authorityRunId") or ""),
+            "artifactRef": str(ref),
+        }
+
+    def _sync_stage_one_checkpoint(
+        self,
+        *,
+        run: Any,
+        prepared: dict[str, Any],
+        idempotency_key: str,
+    ) -> str:
+        """Post-commit checkpoint sync for an accepted stage-one finalize.
+
+        Two branches, decided by the live thread state:
+
+        - interrupt present -> enqueue the authoritative ``resume_action``
+          dispatch (``enqueue_ledger_stage_one_closeout``); the graph worker
+          resumes the closure node and ``stage_one_terminal_facts`` closes the
+          checkpoint, so the Ledger and the thread stay consistent;
+        - thread already END / no interrupt -> write the accepted marker and
+          closeout outcome straight into the thread's checkpoint through the
+          coordinator's direct ``update_state`` (never ``as_node``).
+
+        Raises after the fact when sync is impossible: the run is already
+        durably terminal and a same-key replay re-runs this sync.
+        """
+        from core.research.workflow.stage_one_completion import (
+            STAGE_ONE_CHECKPOINT_FIELD,
+        )
+
+        from .stage_one_closeout import enqueue_ledger_stage_one_closeout
+
+        coordinator = (
+            self._coordinator_factory() if self._coordinator_factory is not None else None
+        )
+        if coordinator is None:
+            raise StageOneCommandError(
+                "stage-one checkpoint coordinator is unavailable",
+                code="stage_one_checkpoint_sync_failed",
+            )
+        outcome = prepared["outcome"]
+        update = {
+            STAGE_ONE_CHECKPOINT_FIELD: outcome.completion_state,
+            "stage_one_closeout": outcome.to_dict(),
+        }
+        try:
+            snapshot = coordinator.snapshot(run.run_id, run.workflow_version_id)
+        except Exception as exc:  # noqa: BLE001 - surfaced as a typed failure
+            raise StageOneCommandError(
+                f"stage-one checkpoint state could not be read: {exc}",
+                code="stage_one_checkpoint_sync_failed",
+            ) from exc
+        pending = snapshot.get("pendingAction") if isinstance(snapshot, dict) else None
+        if pending:
+            enqueued = enqueue_ledger_stage_one_closeout(
+                self._store,
+                workflow_run_id=run.run_id,
+                outcome=outcome,
+                idempotency_key=idempotency_key,
+                completed_at_ms=self._clock(),
+            )
+            if not enqueued:
+                raise StageOneCommandError(
+                    "stage-one formal closeout could not be enqueued",
+                    code="stage_one_formal_closeout_enqueue_failed",
+                )
+            self._wake_worker()
+            return "resume_dispatch"
+        try:
+            coordinator.apply_state_update(
+                run.run_id, run.workflow_version_id, update
+            )
+        except Exception as exc:  # noqa: BLE001 - surfaced as a typed failure
+            raise StageOneCommandError(
+                f"stage-one checkpoint state could not be written: {exc}",
+                code="stage_one_checkpoint_sync_failed",
+            ) from exc
+        return "checkpoint_state_write"
+
+    def _handle_build_stage_one_package(
+        self,
+        uow,
+        request: CommandRequest,
+        request_hash: str,
+        prepared: dict[str, Any] | None = None,
+    ) -> CommandReceipt:
+        prepared = prepared or {}
+        replayed = prepared.get("replayed")
+        if isinstance(replayed, dict):
+            fresh = uow.repository.get_run(request.run_id)
+            result = dict(replayed)
+            result["idempotent"] = True
+            result["replayed"] = True
+            return CommandReceipt(
+                command_id=new_id("cmd"),
+                run_id=request.run_id,
+                status="accepted",
+                accepted_run_version=int(fresh.run_version) if fresh else None,
+                idempotency_key=request.idempotency_key,
+                latest_event_sequence=int(fresh.last_event_sequence) if fresh else 0,
+                result=result,
+            )
+        now_ms = self._clock()
+        command_id = new_id("cmd")
+        handoff = dict(prepared.get("handoff") or {})
+        result = {
+            "command": "build_stage_one_package",
+            "idempotent": False,
+            "packageId": str((prepared.get("package") or {}).get("packageId") or ""),
+            "contentHash": str(prepared.get("content_hash") or ""),
+            "programRecordId": str(handoff.get("recordId") or ""),
+            "programReviewStatus": str(handoff.get("reviewStatus") or ""),
+            "sourceCollectionRunId": str(prepared.get("authority_run_id") or ""),
+            "artifactRef": str(prepared.get("canonical_ref") or ""),
+        }
+        accepted_version, sequence = _bump(uow, request, event_count=1, now_ms=now_ms)
+        uow.repository.insert_command(
+            _command_record(
+                command_id=command_id,
+                request=request,
+                request_hash=request_hash,
+                accepted_run_version=accepted_version,
+                now_ms=now_ms,
+            )
+        )
+        uow.repository.insert_artifact_receipt(
+            receipt_id=f"ar-stage1-pkg-{str(prepared.get('content_hash') or '')[:24]}",
+            run_id=request.run_id,
+            node_run_id=str(prepared.get("node_run_id") or ""),
+            team_id=request.team_id,
+            artifact_kind="research_result_package",
+            canonical_ref_json=_json_dumps({"canonicalRef": prepared.get("canonical_ref")}),
+            artifact_version="1.0.0",
+            sha256=str(prepared.get("content_hash") or ""),
+            domain_revision=_stage_one_domain_revision(
+                kind="research_result_package",
+                team_id=request.team_id,
+                authority_run_id=str(prepared.get("authority_run_id") or ""),
+                content_hash=str(prepared.get("content_hash") or ""),
+            ),
+            materialized=1,
+            verified_at_ms=now_ms,
+        )
+        uow.repository.insert_event(
+            _event_record(
+                run_id=request.run_id,
+                sequence=sequence,
+                event_id=new_id("evt"),
+                run_version=accepted_version,
+                event_type="stage_one_package_registered",
+                correlation_id=request.idempotency_key,
+                payload={"commandId": command_id, "result": result},
+                now_ms=now_ms,
+            )
+        )
+        return _receipt(
+            uow, request, command_id, accepted_version, sequence, now_ms, result=result
+        )
+
+    def _handle_finalize_stage_one(
+        self,
+        uow,
+        request: CommandRequest,
+        request_hash: str,
+        prepared: dict[str, Any] | None = None,
+    ) -> CommandReceipt:
+        prepared = prepared or {}
+        run = uow.repository.get_run(request.run_id)
+        if run is None:
+            raise RunNotFoundError(request.run_id)
+        completion_state = str(prepared.get("completion_state") or "")
+        manifest = dict(prepared.get("manifest") or {})
+        outcome = prepared.get("outcome")
+        if str(run.completion_kind or "") == "stage_one_g1_accepted":
+            # Idempotency gate: already terminal through this command — no-op.
+            return CommandReceipt(
+                command_id=new_id("cmd"),
+                run_id=request.run_id,
+                status="accepted",
+                accepted_run_version=int(run.run_version),
+                idempotency_key=request.idempotency_key,
+                latest_event_sequence=int(run.last_event_sequence),
+                result={
+                    "command": "finalize_stage_one",
+                    "idempotent": True,
+                    "replayed": True,
+                    "completionState": completion_state,
+                },
+            )
+        now_ms = self._clock()
+        command_id = new_id("cmd")
+        result = {
+            "command": "finalize_stage_one",
+            "idempotent": False,
+            "completionState": completion_state,
+            "manifestSha256": str(manifest.get("manifestSha256") or ""),
+            "programRecordId": str(manifest.get("programRecordId") or ""),
+            "programOutputSha256": str(manifest.get("programOutputSha256") or ""),
+            "canonicalPackageSha256": str(manifest.get("canonicalPackageHash") or ""),
+        }
+        accepted_version, sequence = _bump(uow, request, event_count=1, now_ms=now_ms)
+        uow.repository.insert_command(
+            _command_record(
+                command_id=command_id,
+                request=request,
+                request_hash=request_hash,
+                accepted_run_version=accepted_version,
+                now_ms=now_ms,
+            )
+        )
+        uow.repository.insert_artifact_receipt(
+            receipt_id=f"ar-stage1-man-{str(prepared.get('content_hash') or '')[:24]}",
+            run_id=request.run_id,
+            node_run_id=str(prepared.get("node_run_id") or ""),
+            team_id=request.team_id,
+            artifact_kind="stage_one_completion_manifest",
+            canonical_ref_json=_json_dumps({"canonicalRef": prepared.get("canonical_ref")}),
+            artifact_version="1.0.0",
+            sha256=str(prepared.get("content_hash") or ""),
+            domain_revision=_stage_one_domain_revision(
+                kind="stage_one_completion_manifest",
+                team_id=request.team_id,
+                authority_run_id=str(prepared.get("authority_run_id") or ""),
+                content_hash=str(prepared.get("content_hash") or ""),
+            ),
+            materialized=1,
+            verified_at_ms=now_ms,
+        )
+        if not uow.repository.update_run_status(
+            request.run_id,
+            request.team_id,
+            RunStatus.SUCCEEDED.value,
+            now_ms,
+            active_node_id="",
+            completion_kind="stage_one_g1_accepted",
+            terminal_reason=completion_state or None,
+            blocked_problem_json=None,
+        ):
+            raise WorkflowCommandError("finalize_stage_one 未能更新目标 run")
+        uow.repository.insert_event(
+            _event_record(
+                run_id=request.run_id,
+                sequence=sequence,
+                event_id=new_id("evt"),
+                run_version=accepted_version,
+                event_type="stage_one_closeout_completed",
+                correlation_id=request.idempotency_key,
+                payload={
+                    "commandId": command_id,
+                    "result": result,
+                    "artifactRefs": list(getattr(outcome, "artifact_refs", ()) or ()),
+                    "receiptStages": list(getattr(outcome, "receipt_stages", ()) or ()),
+                    "humanGateCount": int(getattr(outcome, "human_gate_count", 0) or 0),
+                },
+                now_ms=now_ms,
+            )
+        )
+        return _receipt(
+            uow, request, command_id, accepted_version, sequence, now_ms, result=result
+        )
+
 
 def _checkpoint_fork_record(
     *,
@@ -1874,6 +2491,27 @@ def _bump(uow, request: CommandRequest, *, event_count: int, now_ms: int) -> tup
     if bumped is None:
         raise RunVersionConflictError()
     return bumped
+
+
+def _json_dumps(payload: Any) -> str:
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True)
+
+
+def _stage_one_domain_revision(
+    *, kind: str, team_id: str, authority_run_id: str, content_hash: str
+) -> str:
+    """Stable receipt identity (human_acceptance_artifact precedent)."""
+    from .human_gate_artifacts import canonical_sha256
+
+    return canonical_sha256(
+        {
+            "kind": kind,
+            "teamId": team_id,
+            "authorityRunId": authority_run_id,
+            "contentHash": content_hash,
+            "schemaVersion": "1.0.0",
+        }
+    )[:32]
 
 
 def _command_record(
@@ -2075,6 +2713,7 @@ def _receipt(
     accepted_version: int,
     sequence: int,
     now_ms: int,
+    result: Mapping[str, Any] | None = None,
 ) -> CommandReceipt:
     receipt = CommandReceipt(
         command_id=command_id,
@@ -2083,6 +2722,7 @@ def _receipt(
         accepted_run_version=accepted_version,
         idempotency_key=request.idempotency_key,
         latest_event_sequence=sequence,
+        result=result,
     )
     uow.repository.complete_command(
         command_id, "accepted", now_ms, result_json=json.dumps(receipt.to_dict())

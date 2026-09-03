@@ -103,6 +103,11 @@ class ChallengeCupGraphState(TypedDict, total=False):
     scope_binding_status: str
     scope_binding_problem: dict[str, Any]
     stage_one_completion_state: str
+    # Terminal closeout outcome for a server-authorized stage-one acceptance.
+    # Last-value channel, declared so checkpoint writes (the enqueued resume
+    # and the direct marker write) persist the outcome instead of silently
+    # dropping it as undeclared input.
+    stage_one_closeout: dict[str, Any]
     # Declared last-value channels.  Fork/state patches write these keys and
     # they must survive into the persisted checkpoint instead of being dropped
     # as undeclared input.
@@ -1046,6 +1051,33 @@ class ChallengeCupGraphCoordinator:
                 # the task queue alone.
                 "pendingAction": pending.to_dict() if pending is not None else None,
             }
+        finally:
+            stack.close()
+
+    def apply_state_update(
+        self,
+        run_id: str,
+        workflow_version_id: str = "",
+        update: Mapping[str, Any] | None = None,
+    ) -> str:
+        """Write state values into the thread's current checkpoint (no invoke).
+
+        Direct ``update_state`` WITHOUT ``as_node`` (restart_attempt's
+        precedent): it appends values to the current checkpoint without
+        scheduling a task or resuming an interrupt.  Used for server-authorized
+        terminal markers when the thread has no live interrupt left to resume,
+        so the Ledger and the LangGraph checkpoint cannot drift.
+        Returns the new checkpoint id ("" when the backend does not expose one).
+        """
+        graph, stack = self._compile(workflow_version_id)
+        try:
+            state = self._read_state(graph, self._config(run_id), heal=True)
+            _validate_state_scope_binding(dict(state.values or {}))
+            saved = graph.update_state(state.config, dict(update or {}))
+            configurable = (
+                saved.get("configurable") if isinstance(saved, Mapping) else None
+            ) or {}
+            return str(configurable.get("checkpoint_id") or "")
         finally:
             stack.close()
 

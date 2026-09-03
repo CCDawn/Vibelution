@@ -28,6 +28,8 @@ HIGH_IMPACT_COMMANDS: frozenset[str] = frozenset(
         "fork_revision",
         "record_g12_calibration",
         "read_g12_calibration",
+        "build_stage_one_package",
+        "finalize_stage_one",
     }
 )
 

@@ -30,6 +30,68 @@ from .system_action_records import (
 from .system_artifact_builder import build_system_artifact
 
 
+def build_stage_one_proposal_package(
+    record: Any,
+    *,
+    team_id: str,
+    workflow_run_id: str,
+    source_collection_run_id: str,
+    idempotency_key: str,
+) -> tuple[dict[str, Any], bool]:
+    """Build the stage-one proposal result package (single shared build path).
+
+    Pure domain build used by BOTH the legacy file-store adapter and the
+    ledger ``build_stage_one_package`` command: builds the generic proposal
+    envelope, mirrors the scoped ``stage1_research_plan`` authority onto the
+    shared ``research_plan`` alias once, and assembles the canonical v2
+    output.  The alias write is idempotent by content identity; no run/store
+    mutation happens here.
+
+    Returns ``(package, plan_alias_written)``.  Raises the builders' own
+    typed failures (``ResultPackageError`` / ``ResultPackageV2Error``).
+    """
+
+    candidate = {
+        **record,
+        "terminalReason": "STAGE1_PROGRAM_REVIEW_REQUIRED",
+        "completedAt": str(record.get("updatedAt") or record.get("createdAt") or ""),
+    }
+    generic = build_proposal_result_package_base(candidate)
+    # Stage one owns ``stage1_research_plan`` while the canonical v2 builder
+    # reads the shared ``research_plan`` authority. Project that exact
+    # payload once; do not synthesize missing plan fields.
+    from .artifact_readback_registry import load_scoped_artifact_payload
+    from .workflow_artifact_store import put_workflow_artifact
+
+    plan_alias_written = False
+    plan_envelope = load_scoped_artifact_payload(
+        "stage1_research_plan",
+        team_id=team_id,
+        workflow_run_id=workflow_run_id,
+        authority_run_id=source_collection_run_id,
+    )
+    if isinstance(plan_envelope, dict):
+        plan_payload = plan_envelope.get("payload")
+        plan_payload = plan_payload if isinstance(plan_payload, dict) else plan_envelope
+        put_workflow_artifact(
+            team_id,
+            kind="research_plan",
+            workflow_run_id=workflow_run_id,
+            source_collection_run_id=source_collection_run_id,
+            payload=deepcopy(plan_payload),
+            artifact_identity=f"{idempotency_key}:research-plan-alias",
+        )
+        plan_alias_written = True
+    package = build_challenge_result_package_v2(
+        generic_package=generic,
+        record=candidate,
+        team_id=team_id,
+        workflow_run_id=workflow_run_id,
+        source_collection_run_id=source_collection_run_id,
+    )
+    return package, plan_alias_written
+
+
 def execute_stage_one_package_action(
     store: WorkflowRunStore,
     *,
@@ -64,42 +126,13 @@ def execute_stage_one_package_action(
     snapshot = record.get("inputSnapshot")
     snapshot = snapshot if isinstance(snapshot, dict) else {}
     authority_run_id = str(snapshot.get("sourceCollectionRunId") or workflow_run_id)
-    candidate = {
-        **record,
-        "terminalReason": "STAGE1_PROGRAM_REVIEW_REQUIRED",
-        "completedAt": str(record.get("updatedAt") or record.get("createdAt") or ""),
-    }
     try:
-        generic = build_proposal_result_package_base(candidate)
-        # Stage one owns ``stage1_research_plan`` while the canonical v2 builder
-        # reads the shared ``research_plan`` authority. Project that exact
-        # payload once; do not synthesize missing plan fields.
-        from .artifact_readback_registry import load_scoped_artifact_payload
-        from .workflow_artifact_store import put_workflow_artifact
-
-        plan_envelope = load_scoped_artifact_payload(
-            "stage1_research_plan",
-            team_id=team_id,
-            workflow_run_id=workflow_run_id,
-            authority_run_id=authority_run_id,
-        )
-        if isinstance(plan_envelope, dict):
-            plan_payload = plan_envelope.get("payload")
-            plan_payload = plan_payload if isinstance(plan_payload, dict) else plan_envelope
-            put_workflow_artifact(
-                team_id,
-                kind="research_plan",
-                workflow_run_id=workflow_run_id,
-                source_collection_run_id=authority_run_id,
-                payload=deepcopy(plan_payload),
-                artifact_identity=f"{idempotency_key}:research-plan-alias",
-            )
-        package = build_challenge_result_package_v2(
-            generic_package=generic,
-            record=candidate,
+        package, _plan_alias_written = build_stage_one_proposal_package(
+            record,
             team_id=team_id,
             workflow_run_id=workflow_run_id,
             source_collection_run_id=authority_run_id,
+            idempotency_key=idempotency_key,
         )
     except (ResultPackageError, ResultPackageV2Error) as exc:
         raise SystemActionError(
