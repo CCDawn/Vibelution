@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -29,8 +30,11 @@ from core.research.workflow.challenge_cup_runtime import ChallengeCupGraphCoordi
 from core.research.workflow.contracts import WorkflowCommandKind
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.routes.team_workflows import research_runtime as research_runtime_module
+from core.web.services import team_workflow_orchestration_service
+from core.web.services.team_workflow import knowledge as knowledge_module
 from core.web.services.team_workflow.research_runtime import (
     artifact_readback_registry,
+    model_invocation_receipt_registry,
     operator_authorization,
     program_candidate_handoff,
     result_package_system_adapter,
@@ -116,11 +120,19 @@ def _seed(harness: CommandHarness) -> None:
     harness.store.submit(mutate, force_flush=True).result(timeout=10)
 
 
-def _patch_domain(monkeypatch: pytest.MonkeyPatch, *, handoff: Any = None):
+def _patch_domain(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    handoff: Any = None,
+    receipt_root: Path | None = None,
+):
     """Patch the idempotent domain IO behind the command service.
 
     Returns ``(handoff_calls, artifact_puts)`` recorders.  ``handoff`` may be
-    a dict (returned verbatim) or a zero-arg callable.
+    a dict (returned verbatim) or a zero-arg callable.  ``receipt_root``
+    isolates the model invocation receipt registry (whose resolution asserts
+    the team exists); build submissions need it so the official-evidence
+    mirror sees an empty receipt store instead of a missing team.
     """
     payloads = _payloads(RUN_ID)
     monkeypatch.setattr(
@@ -189,6 +201,12 @@ def _patch_domain(monkeypatch: pytest.MonkeyPatch, *, handoff: Any = None):
         "handoff_result_package_to_challenge_program",
         _handoff,
     )
+    if receipt_root is not None:
+        monkeypatch.setattr(
+            model_invocation_receipt_registry,
+            "resolve_team_program_root",
+            lambda _team_id: receipt_root,
+        )
     return handoff_calls, puts
 
 
@@ -272,7 +290,7 @@ def test_build_registers_receipt_event_and_program_record(tmp_path, monkeypatch)
     harness = CommandHarness(tmp_path / "ledger.sqlite3")
     try:
         _seed(harness)
-        handoff_calls, puts = _patch_domain(monkeypatch)
+        handoff_calls, puts = _patch_domain(monkeypatch, receipt_root=tmp_path)
 
         receipt = _submit(harness, _request(harness, command=WorkflowCommandKind.BUILD_STAGE_ONE_PACKAGE, key="stage-one-build"))
 
@@ -315,7 +333,7 @@ def test_build_replay_is_zero_side_effect(tmp_path, monkeypatch) -> None:
     harness = CommandHarness(tmp_path / "ledger.sqlite3")
     try:
         _seed(harness)
-        _patch_domain(monkeypatch)
+        _patch_domain(monkeypatch, receipt_root=tmp_path)
         first = _submit(harness, _request(harness, command=WorkflowCommandKind.BUILD_STAGE_ONE_PACKAGE, key="stage-one-build"))
         assert first.result["idempotent"] is False
 
@@ -356,6 +374,196 @@ def test_build_replay_is_zero_side_effect(tmp_path, monkeypatch) -> None:
         )
         assert same_key.status == "accepted"
         assert same_key.result["packageId"] == "rrp-v2:stage-one"
+    finally:
+        harness.close()
+
+
+def _receipt_rows() -> list[dict[str, Any]]:
+    """Shape of ``question_model_invocation_receipts`` rows (real fields)."""
+    return [
+        {
+            "receiptId": f"receipt-{index}",
+            "runId": RUN_ID,
+            "nodeRunId": f"nr-{index}",
+            "scope": {
+                "questionId": "SCI-091",
+                "workflowRunId": RUN_ID,
+                "sessionId": f"session-{index}",
+                "taskId": f"task-{index}",
+                "turnId": f"turn-{index}",
+                "formalNodeId": f"node-{index}",
+                "formalNodeRunId": f"nr-{index}",
+                "stageId": "stage_one",
+            },
+            "provider": "dashscope_main",
+            "model": "qwen3.6-plus",
+            "requestedModel": "qwen3.6-plus",
+            "status": "succeeded",
+            "attempt": 1,
+        }
+        for index in range(2)
+    ]
+
+
+def test_build_mirrors_invocation_receipts_before_program_handoff(
+    tmp_path, monkeypatch
+) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        _seed(harness)
+        handoff_calls, _puts = _patch_domain(monkeypatch, receipt_root=tmp_path)
+        rows = _receipt_rows()
+        monkeypatch.setattr(
+            model_invocation_receipt_registry,
+            "question_model_invocation_receipts",
+            lambda *_args, **_kwargs: deepcopy(rows),
+        )
+        ensure_calls: list[dict[str, Any]] = []
+
+        def _ensure(team_id, *, question_id, workflow_run_id, receipts):
+            ensure_calls.append(
+                {
+                    "teamId": team_id,
+                    "questionId": question_id,
+                    "workflowRunId": workflow_run_id,
+                    "receipts": deepcopy(receipts),
+                    "handoffAlreadyRegistered": bool(handoff_calls),
+                }
+            )
+            return {"registered": len(receipts), "skipped": 0}
+
+        monkeypatch.setattr(
+            knowledge_module,
+            "ensure_official_model_evidence_for_receipt_refs",
+            _ensure,
+        )
+
+        receipt = _submit(
+            harness,
+            _request(
+                harness,
+                command=WorkflowCommandKind.BUILD_STAGE_ONE_PACKAGE,
+                key="stage-one-build",
+            ),
+        )
+
+        assert receipt.status == "accepted"
+        # The mirror happens with the run's validated receipts, before the
+        # challenge program handoff registers the output.
+        assert ensure_calls == [
+            {
+                "teamId": TEAM_ID,
+                "questionId": "SCI-091",
+                "workflowRunId": RUN_ID,
+                "receipts": rows,
+                "handoffAlreadyRegistered": False,
+            }
+        ]
+        assert handoff_calls[0]["registered_by"] == "stage_one_command_service"
+    finally:
+        harness.close()
+
+
+def test_build_fails_closed_when_official_evidence_registration_fails(
+    tmp_path, monkeypatch
+) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        _seed(harness)
+        handoff_calls, _puts = _patch_domain(monkeypatch, receipt_root=tmp_path)
+        monkeypatch.setattr(
+            model_invocation_receipt_registry,
+            "question_model_invocation_receipts",
+            lambda *_args, **_kwargs: _receipt_rows(),
+        )
+
+        def _boom(*_args, **_kwargs):
+            raise RuntimeError("evidence store unwritable")
+
+        monkeypatch.setattr(
+            knowledge_module,
+            "ensure_official_model_evidence_for_receipt_refs",
+            _boom,
+        )
+
+        with pytest.raises(StageOneCommandError) as exc:
+            _submit(
+                harness,
+                _request(
+                    harness,
+                    command=WorkflowCommandKind.BUILD_STAGE_ONE_PACKAGE,
+                    key="stage-one-build",
+                ),
+            )
+
+        assert exc.value.code == "stage_one_official_evidence_registration_failed"
+        assert handoff_calls == []
+        events = harness.store.list_events(RUN_ID)
+        assert not [
+            item for item in events if item.event_type == "stage_one_package_registered"
+        ]
+    finally:
+        harness.close()
+
+
+def test_build_registers_receipt_evidence_rows_idempotently(tmp_path, monkeypatch) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        _seed(harness)
+        _patch_domain(monkeypatch, receipt_root=tmp_path)
+        rows = _receipt_rows()
+        monkeypatch.setattr(
+            model_invocation_receipt_registry,
+            "question_model_invocation_receipts",
+            lambda *_args, **_kwargs: deepcopy(rows),
+        )
+        monkeypatch.setattr(
+            team_workflow_orchestration_service.team_service,
+            "get_team",
+            lambda team_id: {"teamId": team_id},
+        )
+        monkeypatch.setattr(
+            team_workflow_orchestration_service,
+            "_team_workflow_root",
+            lambda _team_id: tmp_path,
+        )
+        monkeypatch.setattr(
+            team_workflow_orchestration_service,
+            "record_runtime_scene_event",
+            lambda *args, **kwargs: None,
+        )
+
+        receipt = _submit(
+            harness,
+            _request(
+                harness,
+                command=WorkflowCommandKind.BUILD_STAGE_ONE_PACKAGE,
+                key="stage-one-build",
+            ),
+        )
+
+        assert receipt.status == "accepted"
+        store_path = tmp_path / "official_model_evidence" / "index.json"
+        store = json.loads(store_path.read_text(encoding="utf-8"))
+        evidence_ids = [item["evidenceId"] for item in store["evidence"]]
+        assert evidence_ids == [
+            "model-invocation-receipt:receipt-0",
+            "model-invocation-receipt:receipt-1",
+        ]
+        assert store["evidence"][0]["modelProvider"] == "dashscope_main"
+        assert store["evidence"][0]["status"] == "registered"
+
+        # Idempotent re-registration: the same receipts never duplicate rows.
+        outcome = knowledge_module.ensure_official_model_evidence_for_receipt_refs(
+            TEAM_ID,
+            question_id="SCI-091",
+            workflow_run_id=RUN_ID,
+            receipts=deepcopy(rows),
+        )
+        assert outcome["registered"] == 0
+        assert outcome["skipped"] == 2
+        store_after = json.loads(store_path.read_text(encoding="utf-8"))
+        assert [item["evidenceId"] for item in store_after["evidence"]] == evidence_ids
     finally:
         harness.close()
 
@@ -407,7 +615,7 @@ def test_finalize_requires_approved_program_review(tmp_path, monkeypatch) -> Non
     harness = CommandHarness(tmp_path / "ledger.sqlite3")
     try:
         _seed(harness)
-        _patch_domain(monkeypatch)  # review_required registration
+        _patch_domain(monkeypatch, receipt_root=tmp_path)  # review_required registration
         with pytest.raises(StageOneCommandError) as exc:
             _submit(harness, _request(harness, command=WorkflowCommandKind.FINALIZE_STAGE_ONE, key="stage-one-finalize"))
         assert exc.value.code == "stage_one_program_review_not_approved"
@@ -423,7 +631,7 @@ def test_finalize_with_live_interrupt_enqueues_resume_dispatch(tmp_path, monkeyp
     harness = CommandHarness(tmp_path / "ledger.sqlite3")
     try:
         _seed(harness)
-        _patch_domain(monkeypatch, handoff=_approved_handoff())
+        _patch_domain(monkeypatch, handoff=_approved_handoff(), receipt_root=tmp_path)
         coordinator = _RecordingCoordinator(pending=True)
         _bind_coordinator(harness, coordinator)
 
@@ -464,7 +672,7 @@ def test_finalize_without_interrupt_writes_checkpoint_state_directly(tmp_path, m
     harness = CommandHarness(tmp_path / "ledger.sqlite3")
     try:
         _seed(harness)
-        _patch_domain(monkeypatch, handoff=_approved_handoff())
+        _patch_domain(monkeypatch, handoff=_approved_handoff(), receipt_root=tmp_path)
         coordinator = _RecordingCoordinator(pending=False)
         _bind_coordinator(harness, coordinator)
 
@@ -495,7 +703,7 @@ def test_finalize_is_noop_after_acceptance(tmp_path, monkeypatch) -> None:
     harness = CommandHarness(tmp_path / "ledger.sqlite3")
     try:
         _seed(harness)
-        _patch_domain(monkeypatch, handoff=_approved_handoff())
+        _patch_domain(monkeypatch, handoff=_approved_handoff(), receipt_root=tmp_path)
         _bind_coordinator(harness, _RecordingCoordinator(pending=False))
         first = _submit(harness, _request(harness, command=WorkflowCommandKind.FINALIZE_STAGE_ONE, key="stage-one-finalize"))
         assert first.result.get("replayed") is None
@@ -524,7 +732,7 @@ def test_stage_one_commands_require_privileged_operator(tmp_path, monkeypatch) -
     harness = CommandHarness(tmp_path / "ledger.sqlite3")
     try:
         _seed(harness)
-        _patch_domain(monkeypatch)
+        _patch_domain(monkeypatch, receipt_root=tmp_path)
         for command in (
             WorkflowCommandKind.BUILD_STAGE_ONE_PACKAGE,
             WorkflowCommandKind.FINALIZE_STAGE_ONE,
@@ -591,7 +799,7 @@ def _post(client: TestClient, body: dict[str, Any]):
 def test_stage_one_facade_route_submits_ledger_commands(tmp_path, monkeypatch) -> None:
     harness = _route_client(tmp_path)
     try:
-        handoff_calls, _puts = _patch_domain(monkeypatch)
+        handoff_calls, _puts = _patch_domain(monkeypatch, receipt_root=tmp_path)
         app = FastAPI()
         app.include_router(research_runtime_module.router, prefix="/api")
         client = TestClient(app)
@@ -661,7 +869,7 @@ def test_stage_one_facade_route_requires_privileged_operator(
 ) -> None:
     harness = _route_client(tmp_path)
     try:
-        _patch_domain(monkeypatch)
+        _patch_domain(monkeypatch, receipt_root=tmp_path)
         monkeypatch.setattr(
             operator_authorization,
             "local_control_operator",

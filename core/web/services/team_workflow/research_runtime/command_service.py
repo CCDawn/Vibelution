@@ -1986,6 +1986,12 @@ class WorkflowCommandService:
             payload=artifact_payload,
             artifact_identity=request.idempotency_key,
         )
+        # The package is durable; before handing it to the challenge program,
+        # mirror the run's validated invocation receipts into the team
+        # official-model evidence store so the program's official-call gate
+        # can match them.  Failing closed here keeps an unregistrable package
+        # from entering a program review it could never pass.
+        self._ensure_stage_one_official_evidence(record)
         handoff = self._handoff_to_challenge_program(
             team_id=team_id,
             workflow_run_id=workflow_run_id,
@@ -2007,6 +2013,65 @@ class WorkflowCommandService:
             "node_run_id": str(attempt.node_run_id),
             "handoff": handoff,
         }
+
+    def _ensure_stage_one_official_evidence(self, record: dict[str, Any]) -> dict[str, Any]:
+        """Register official-model evidence rows for the run's receipts.
+
+        The challenge program's official-call gate intersects the v2 output's
+        ``invocation_evidence_refs`` with the team official-model evidence
+        store; when that store has no rows for the run the intersection is
+        empty and program review is unreachable even though every receipt is
+        validated.  Registration is idempotent by receipt; any registration
+        failure fails closed with a stable stage-one command error code.
+        """
+        from ..knowledge import ensure_official_model_evidence_for_receipt_refs
+        from .model_invocation_receipt_registry import (
+            question_model_invocation_receipts,
+        )
+
+        snapshot = record.get("inputSnapshot")
+        snapshot = snapshot if isinstance(snapshot, dict) else {}
+        team_id = str(record.get("teamId") or "")
+        workflow_run_id = str(record.get("runId") or "")
+        question_id = str(
+            snapshot.get("questionId") or record.get("questionId") or ""
+        ).strip().upper()
+        if not team_id or not workflow_run_id or not question_id:
+            raise StageOneCommandError(
+                "stage-one run lacks the team/question/run identity required for "
+                "official model evidence registration",
+                code="stage_one_official_evidence_registration_failed",
+            )
+        try:
+            receipts = question_model_invocation_receipts(
+                team_id,
+                question_id=question_id,
+                workflow_run_id=workflow_run_id,
+            )
+        except Exception as exc:  # noqa: BLE001 - fail closed naming the stage
+            raise StageOneCommandError(
+                f"official model evidence registration failed for "
+                f"{question_id}/{workflow_run_id}: {exc}",
+                code="stage_one_official_evidence_registration_failed",
+            ) from exc
+        if not receipts:
+            # No receipts registered for this run means nothing to mirror;
+            # the package builder above already fails closed on the missing
+            # receipt authority for real stage-one runs.
+            return {"registered": 0, "skipped": 0}
+        try:
+            return ensure_official_model_evidence_for_receipt_refs(
+                team_id,
+                question_id=question_id,
+                workflow_run_id=workflow_run_id,
+                receipts=receipts,
+            )
+        except Exception as exc:  # noqa: BLE001 - fail closed naming the stage
+            raise StageOneCommandError(
+                f"official model evidence registration failed for "
+                f"{question_id}/{workflow_run_id}: {exc}",
+                code="stage_one_official_evidence_registration_failed",
+            ) from exc
 
     def _prepare_stage_one_finalize(
         self,

@@ -268,6 +268,11 @@ def _model_run(
         model_id = _require_text(
             route.get("modelRef") or route.get("modelId"), "run.model_id"
         )
+    # The route/receipt authority names concrete deployment ids; the schema
+    # run block projects the official-model family token (see
+    # _official_provider_family).  Unknown families stay verbatim and keep
+    # failing the exact-match official-provider gate downstream.
+    provider = _official_provider_family(provider)
     started_at = _require_text(
         record.get("createdAt") or record.get("startedAt"), "run.started_at"
     )
@@ -302,6 +307,27 @@ def _platform_for_provider(provider: str) -> str:
     if "meoo" in normalized:
         return "meoo"
     return "other_official_tool"
+
+
+def _official_provider_family(provider: str) -> str:
+    """Collapse a concrete provider id onto its official-model family token.
+
+    ``challenge_question_runs.OFFICIAL_PROVIDERS`` matches exactly against
+    {"dashscope", "bailian", "aliyun"}, while frozen routes and receipts carry
+    concrete deployment ids (e.g. ``dashscope_main``).  This mirrors the
+    substring markers used by ``_platform_for_provider`` and only collapses
+    the known official families; any other provider id stays verbatim so the
+    exact-match official-provider gate keeps failing closed for it.  The full
+    provider id remains queryable from the registered receipt refs.
+    """
+    normalized = str(provider or "").strip().casefold()
+    if "dashscope" in normalized:
+        return "dashscope"
+    if "aliyun" in normalized:
+        return "aliyun"
+    if "bailian" in normalized:
+        return "bailian"
+    return str(provider or "").strip()
 
 
 def _stage_one_model_route(
@@ -371,15 +397,24 @@ _SUPPORT_LEVEL_RELATIONS = {
     "unverified": "context",
 }
 
-# Only an explicit human acceptance decision counts as verified; every other
-# review state stays at the fail-closed floor so pending/rejected/stale
-# evidence can never pass a citation check.
+# Authority chain for ``verification_status``: card-level human review >
+# source candidate collection-stage screening > fail-closed floor.  A
+# card-level human acceptance is the only ``human_verified`` authority, and a
+# rejected/stale verdict keeps the fail-closed floor — it is never overridden
+# by the weaker source-level authority.  ``pending`` (and any unknown status)
+# deliberately falls through to that source-level check.
 _REVIEW_STATUS_VERIFICATIONS = {
     "accepted": "human_verified",
-    "pending": "unverified",
     "rejected": "unverified",
     "stale": "unverified",
 }
+
+# A source candidate the collection stage already screened with metadata-level
+# verification (``qualityStatus == "source_quality_approved"`` and
+# ``currentState == "source_screened"`` — the stage that persisted the
+# abstract) is the schema's ``metadata_checked`` made concrete.  This reads
+# the existing source_candidate_batch authority; it verifies nothing new.
+_SOURCE_SCREENED_VERIFICATION = "metadata_checked"
 
 # Candidate ``sourceKind`` values outside the curated set (e.g. ``url``) fall
 # back to the schema's explicit non-authoritative umbrella classification.
@@ -399,9 +434,21 @@ def _support_level_relation(card: Mapping[str, Any]) -> str:
     return _SUPPORT_LEVEL_RELATIONS.get(support_level, "")
 
 
-def _review_status_verification(card: Mapping[str, Any]) -> str:
+def _review_status_verification(
+    card: Mapping[str, Any], candidate: Mapping[str, Any]
+) -> str:
     review_status = _text(card.get("reviewStatus")).strip().casefold()
-    return _REVIEW_STATUS_VERIFICATIONS.get(review_status, "")
+    card_decision = _REVIEW_STATUS_VERIFICATIONS.get(review_status, "")
+    if card_decision:
+        return card_decision
+    if (
+        _text(candidate.get("qualityStatus")).strip().casefold()
+        == "source_quality_approved"
+        and _text(candidate.get("currentState")).strip().casefold()
+        == "source_screened"
+    ):
+        return _SOURCE_SCREENED_VERIFICATION
+    return "unverified"
 
 
 def _evidence_item(card: Mapping[str, Any], candidate: Mapping[str, Any]) -> dict[str, Any]:
@@ -446,7 +493,7 @@ def _evidence_item(card: Mapping[str, Any], candidate: Mapping[str, Any]) -> dic
         ),
         "verification_status": _require_text(
             _pick(card, "verification_status", "verificationStatus")
-            or _review_status_verification(card),
+            or _review_status_verification(card, candidate),
             "evidence.verification_status",
         ),
     }

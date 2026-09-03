@@ -269,6 +269,45 @@ def test_v2_projects_claim_evidence_quote_as_fact(monkeypatch) -> None:
     assert checks["ce-contradicts"] == "passed"
 
 
+def test_v2_source_screened_candidate_projects_metadata_checked_and_human_veto_wins(
+    monkeypatch,
+) -> None:
+    _, artifacts = _claim_evidence_artifacts(
+        [
+            _claim_evidence_card(claimEvidenceId="ce-screened", supportLevel="supports"),
+            _claim_evidence_card(
+                claimEvidenceId="ce-rejected",
+                candidateId="candidate-2",
+                quote="The page mentions Dennard scaling without sources.",
+                supportLevel="contradicts",
+                reviewStatus="rejected",
+            ),
+        ]
+    )
+    # The collection stage screened both sources at the metadata level and
+    # persisted the abstract; the source_candidate_batch rows carry that
+    # authority verbatim.
+    for candidate in artifacts["source_candidate_batch"]["candidates"]:
+        candidate["qualityStatus"] = "source_quality_approved"
+        candidate["currentState"] = "source_screened"
+
+    package = _build_v2_with_artifacts(monkeypatch, artifacts)
+    output = package["challengeQuestionOutput"]
+
+    assert challenge_question_runs._schema_issues(output) == []
+    evidence = {item["evidence_id"]: item for item in output["evidence"]}
+    # Pending card review + collection-stage-screened source -> the schema's
+    # metadata_checked, faithful to the source candidate authority.
+    assert evidence["ce-screened"]["verification_status"] == "metadata_checked"
+    # A card-level human rejection is never overridden by the source-level
+    # authority: the fail-closed floor holds.
+    assert evidence["ce-rejected"]["verification_status"] == "unverified"
+
+    checks = {item["evidenceId"]: item["status"] for item in package["citationChecks"]}
+    assert checks["ce-screened"] == "passed"
+    assert checks["ce-rejected"] == "failed"
+
+
 def test_v2_claim_evidence_card_without_fact_anchor_fails_closed(monkeypatch) -> None:
     _, artifacts = _claim_evidence_artifacts(
         [_claim_evidence_card(quote=" ")]
@@ -597,6 +636,9 @@ def test_model_run_uses_real_receipt_ids_and_final_route(monkeypatch) -> None:
     assert run["invocation_evidence_refs"] == [
         "model-invocation-receipt:receipt-final"
     ]
+    # Official-family deployment ids collapse onto the OFFICIAL_PROVIDERS
+    # family token; unknown families stay verbatim (fail-closed downstream).
+    assert run["model_provider"] == "dashscope"
 
     record["modelRoutingDecisions"][0].update(
         {
@@ -616,6 +658,26 @@ def test_model_run_uses_real_receipt_ids_and_final_route(monkeypatch) -> None:
     assert flash_run["model_provider"] == "opencode_go"
     assert flash_run["model_id"] == "opencode_go/deepseek-v4-flash"
     assert flash_run["platform"] == "other_official_tool"
+
+    record["modelRoutingDecisions"][0].update(
+        {
+            "providerId": "meoo_x",
+            "modelId": "meoo-v2",
+            "modelRef": "meoo_x/meoo-v2",
+        }
+    )
+    meoo_run = result_package_v2._model_run(
+        record,
+        team_id="research-team",
+        question_id="SCI-096",
+        workflow_run_id="run-sci-096",
+        authority_run_id="source-sci-096",
+    )
+
+    # A platform marker is not an official-model family: meoo_x keeps its
+    # verbatim provider id and only maps its platform.
+    assert meoo_run["model_provider"] == "meoo_x"
+    assert meoo_run["platform"] == "meoo"
 
 
 # ------------------------------- stage-one accepted-round hypothesis authority
@@ -955,7 +1017,7 @@ def test_stage_one_model_route_projects_receipt_authority(monkeypatch) -> None:
         authority_run_id="source-sci-091",
     )
 
-    assert run["model_provider"] == "dashscope_main"
+    assert run["model_provider"] == "dashscope"
     assert run["model_id"] == "qwen3.7-plus+qwen3.8-flash"
     assert run["platform"] == "aliyun_bailian"
 
