@@ -9552,6 +9552,334 @@ def _materialize_hypothesis_revision_authority(
     )
 
 
+def _latest_chain_records_by_id(
+    records: list[Mapping[str, Any]], id_field: str
+) -> dict[str, dict[str, Any]]:
+    """Fold the append-only chain ledger down to its newest record per id."""
+    latest: dict[str, dict[str, Any]] = {}
+    for record in records:
+        if not isinstance(record, Mapping):
+            continue
+        key = str(record.get(id_field) or "").strip()
+        if key:
+            latest[key] = dict(record)
+    return latest
+
+
+def _is_sha256_hex(value: Any) -> bool:
+    text = str(value or "").strip().lower()
+    return len(text) == 64 and all(char in "0123456789abcdef" for char in text)
+
+
+def _chain_iteration_links(
+    team_id: str, question_id: str
+) -> dict[int, dict[str, dict[str, Any]]]:
+    """Latest review-round link per candidate for every round index.
+
+    The chain ledger appends one link per dispatch attempt; retries reuse the
+    same (candidateId, roundIndex), so the newest link is the candidate's
+    authoritative binding for that round — the same fold the fan-in resolver
+    applies before binding meetings.
+    """
+    links: dict[int, dict[str, dict[str, Any]]] = {}
+    for record in _records(team_id):
+        if not isinstance(record, Mapping):
+            continue
+        if str(record.get("recordKind") or "") != "review_round_link":
+            continue
+        if str(record.get("questionId") or "").upper() != str(question_id or "").upper():
+            continue
+        candidate_id = str(record.get("candidateId") or "").strip()
+        round_index = record.get("roundIndex")
+        if (
+            not candidate_id
+            or isinstance(round_index, bool)
+            or not isinstance(round_index, int)
+            or round_index < 1
+        ):
+            continue
+        links.setdefault(round_index, {})[candidate_id] = dict(record)
+    return links
+
+
+def _chain_iteration_evidence(
+    *,
+    team_id: str,
+    question_id: str,
+    selected_candidate_ids: list[str],
+    links_by_round: dict[int, dict[str, dict[str, Any]]],
+    meetings: list[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Resolve the chain's review-round iteration evidence, fail-closed.
+
+    A chain-driven review set carries its iteration history in the
+    ``review_round_link`` / ``collection_request`` / ``decision_record``
+    ledgers instead of a HypothesisRound ``revisionEnvelope`` (the convergence
+    fan-in is the only round record the chain appends).  For every consecutive
+    round pair this demands, and binds verbatim:
+
+    - links for EVERY selected candidate at round k and k+1;
+    - the round-(k+1) links' single shared collection request: completed,
+      handed off to a source-collection run, hash-identified, decision-bound;
+    - the adopted ``request_new_evidence`` decision with its persisted
+      rationale (the review findings that opened the request);
+    - closed round-(k+1) meetings with hash-pinned digests (the re-review
+      output), and the round-k digest risks as the still-unresolved issues.
+
+    Raises ``LookupError`` naming the first missing piece; nothing is ever
+    substituted or fabricated.
+    """
+    from core.web.services.team_workflow import meeting_rounds as meeting_rounds_service
+
+    candidate_ids = {str(item or "").strip() for item in selected_candidate_ids} - {""}
+    if len(candidate_ids) < 2:
+        raise LookupError("chain_iteration_candidates_missing")
+    round_indexes = sorted(links_by_round)
+    if len(round_indexes) < 2:
+        raise LookupError("chain_iteration_rounds_missing")
+    if round_indexes != list(range(1, round_indexes[-1] + 1)):
+        raise LookupError("chain_iteration_rounds_not_consecutive")
+
+    meeting_by_id = {
+        str(meeting.get("meetingRoundId") or "").strip(): meeting
+        for meeting in meetings
+        if isinstance(meeting, Mapping)
+    }
+    digest_by_id = _latest_chain_records_by_id(
+        meeting_rounds_service._read_jsonl(
+            meeting_rounds_service._digests_path(team_id)
+        ),
+        "digestId",
+    )
+
+    def _round_digest(round_index: int) -> list[dict[str, Any]]:
+        digests: list[dict[str, Any]] = []
+        for link in links_by_round[round_index].values():
+            meeting_id = str(link.get("meetingRoundId") or "").strip()
+            meeting = meeting_by_id.get(meeting_id)
+            if meeting is None:
+                raise LookupError("chain_iteration_meeting_unbound")
+            if str(meeting.get("status") or "") != "closed":
+                raise LookupError("chain_iteration_meeting_not_closed")
+            digest_id = str(meeting.get("digestId") or "").strip()
+            if not digest_id:
+                raise LookupError("chain_iteration_digest_missing")
+            digest = digest_by_id.get(digest_id)
+            if not isinstance(digest, Mapping) or not _is_sha256_hex(
+                digest.get("contentHash")
+            ):
+                raise LookupError("chain_iteration_digest_hash_missing")
+            risks: list[str] = []
+            for item in list(digest.get("risks") or []):
+                if isinstance(item, str):
+                    text = item.strip()
+                elif isinstance(item, Mapping):
+                    text = str(
+                        item.get("text") or item.get("description") or ""
+                    ).strip()
+                else:
+                    text = ""
+                if text:
+                    risks.append(text)
+            digests.append(
+                {
+                    "meetingRoundId": meeting_id,
+                    "digestId": digest_id,
+                    "contentHash": str(digest.get("contentHash")).strip().lower(),
+                    "risks": risks,
+                }
+            )
+        digests.sort(key=lambda item: item["meetingRoundId"])
+        return digests
+
+    from .human_gate_artifacts import canonical_sha256
+
+    iterations: list[dict[str, Any]] = []
+    for round_index in round_indexes[:-1]:
+        next_index = round_index + 1
+        current_digests = _round_digest(round_index)
+        next_digests = _round_digest(next_index)
+        request_ids = {
+            str(link.get("collectionRequestId") or "").strip()
+            for link in links_by_round[next_index].values()
+        } - {""}
+        if len(request_ids) != 1:
+            raise LookupError("chain_iteration_request_missing")
+        request_id = next(iter(request_ids))
+        request = _latest_chain_records_by_id(
+            [
+                record
+                for record in _records(team_id)
+                if isinstance(record, Mapping)
+                and str(record.get("recordKind") or "") == "collection_request"
+            ],
+            "requestId",
+        ).get(request_id)
+        if not isinstance(request, Mapping):
+            raise LookupError("chain_iteration_request_missing")
+        if (
+            str(request.get("collectionRunStatus") or "") != "completed"
+            or not str(request.get("handoffRef") or "").strip()
+            or not _is_sha256_hex(request.get("requestHash"))
+        ):
+            raise LookupError("chain_iteration_request_incomplete")
+        decision_id = str(request.get("decisionId") or "").strip()
+        decision = _latest_chain_records_by_id(
+            meeting_rounds_service._read_jsonl(
+                meeting_rounds_service._decisions_path(team_id)
+            ),
+            "decisionId",
+        ).get(decision_id)
+        if (
+            not isinstance(decision, Mapping)
+            or str(decision.get("decision") or "") != "request_new_evidence"
+            or str(decision.get("status") or "adopted") != "adopted"
+            or not str(decision.get("rationale") or "").strip()
+        ):
+            raise LookupError("chain_iteration_decision_missing")
+        keywords = _normalized_str_list(
+            (request.get("searchEnvelope") or {}).get("keywords")
+            if isinstance(request.get("searchEnvelope"), Mapping)
+            else []
+        )
+        if not keywords:
+            raise LookupError("chain_iteration_revision_scope_missing")
+        unresolved = [
+            risk
+            for digest in current_digests
+            for risk in digest["risks"]
+            if risk
+        ]
+        if not unresolved:
+            raise LookupError("chain_iteration_unresolved_missing")
+        iterations.append(
+            {
+                "iterationRound": round_index,
+                "revisionPhase": (
+                    "grounded_revision" if round_index == 1 else "review_revision"
+                ),
+                "feedback": {
+                    "trigger": "request_new_evidence",
+                    "humanFeedback": str(decision.get("rationale") or "").strip(),
+                    "inputRefs": [
+                        f"collection_request:{request_id}",
+                        f"decision:{decision_id}",
+                        *[
+                            f"meeting_round:{digest['meetingRoundId']}"
+                            for digest in current_digests
+                        ],
+                    ],
+                    "inputHash": str(request.get("requestHash")).strip().lower(),
+                },
+                "revision": {
+                    "changes": keywords,
+                    "unresolvedIssues": unresolved,
+                    "outputRefs": [
+                        *[
+                            f"meeting_round:{digest['meetingRoundId']}"
+                            for digest in next_digests
+                        ],
+                        *[f"meeting_digest:{digest['digestId']}" for digest in next_digests],
+                    ],
+                    # Content address over the persisted round-(k+1) digest
+                    # hashes: derived deterministically, never invented.
+                    "outputHash": canonical_sha256(
+                        [digest["contentHash"] for digest in next_digests]
+                    ),
+                    "status": "revised",
+                },
+            }
+        )
+    return iterations
+
+
+def _recover_chain_feedback_iterations_authority(
+    *,
+    team_id: str,
+    question_id: str,
+    workflow_run_id: str,
+    node_run_id: str,
+    source_collection_run_id: str,
+    selected_candidate_ids: list[str],
+    meetings: list[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Replay the chain's review-round iterations as feedback_iterations rows.
+
+    Recovery source is the chain's own persisted iteration evidence (see
+    :func:`_chain_iteration_evidence`); the canonical fail-closed writer stays
+    the only persistence path.  A question without any chain review-round link
+    is ``not_applicable`` — the caller keeps its original blocker, so
+    non-chain shapes behave exactly as before.
+    """
+    links_by_round = _chain_iteration_links(team_id, question_id)
+    if not links_by_round:
+        return {"status": "not_applicable", "blockerCodes": [], "rounds": []}
+    try:
+        iterations = _chain_iteration_evidence(
+            team_id=team_id,
+            question_id=question_id,
+            selected_candidate_ids=selected_candidate_ids,
+            links_by_round=links_by_round,
+            meetings=meetings,
+        )
+    except LookupError as exc:
+        return {
+            "status": "blocked",
+            "blockerCodes": ["hypothesis_revision_evidence_missing"],
+            "reason": str(exc),
+            "rounds": [],
+        }
+    except Exception as exc:  # noqa: BLE001 - recovery failure stays visible
+        return {
+            "status": "blocked",
+            "blockerCodes": ["feedback_iteration_recovery_failed"],
+            "error": str(exc) or type(exc).__name__,
+            "rounds": [],
+        }
+    from .feedback_iterations_artifact_writer import (
+        write_feedback_iterations_artifact,
+    )
+
+    written_rounds: list[int] = []
+    for iteration in iterations:
+        try:
+            recorded = write_feedback_iterations_artifact(
+                team_id=team_id,
+                workflow_run_id=workflow_run_id,
+                node_run_id=node_run_id,
+                question_id=question_id,
+                iteration_round=iteration["iterationRound"],
+                feedback=iteration["feedback"],
+                revision=iteration["revision"],
+                source_collection_run_id=source_collection_run_id,
+                node_id="hypothesis_design",
+                revision_phase=iteration["revisionPhase"],
+            )
+        except Exception as exc:  # noqa: BLE001 - fail-closed blocker
+            return {
+                "status": "blocked",
+                "blockerCodes": ["hypothesis_revision_authority_persistence_failed"],
+                "error": str(exc) or type(exc).__name__,
+                "rounds": written_rounds,
+            }
+        if str(recorded.get("status") or "").strip().lower() not in {
+            "recorded",
+            "written",
+        }:
+            return {
+                "status": "blocked",
+                "blockerCodes": [
+                    str(code)
+                    for code in list(recorded.get("blockerCodes") or [])
+                    if str(code).strip()
+                ]
+                or ["hypothesis_revision_evidence_missing"],
+                "rounds": written_rounds,
+            }
+        written_rounds.append(int(iteration["iterationRound"]))
+    return {"status": "written", "blockerCodes": [], "rounds": written_rounds}
+
+
 def _materialize_stage_one_plan_authority(
     *,
     team_id: str,
@@ -9761,6 +10089,7 @@ def materialize_stage_one_node_authority(
     node_run_id: str,
     input_snapshot_hash: str = "",
     source_collection_run_id: str = "",
+    input_snapshot: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Bind an already-accepted chain round's stage-one authorities to a live node.
 
@@ -9784,6 +10113,14 @@ def materialize_stage_one_node_authority(
     skip the artifact write at generation time, so the recovery replays it
     with ``require_receipts=False``); verdict data that is absent, incomplete,
     or not fully passed is reported as missing instead of being regenerated.
+
+    When the closed rounds carry no ``revisionEnvelope`` — the chain-driven
+    review shape, whose iteration history lives in the review-round link /
+    collection-request / decision ledgers instead — the authority is recovered
+    from that persisted evidence and replayed through the same canonical
+    writer.  Kinds the run's launch shape structurally cannot demand (see
+    ``stage_one_shape_gate``) are waived with persisted evidence and reported
+    under ``downgradedKinds``; they never count as satisfied.
     """
     from core.web.services.team_service import assert_team_exists
 
@@ -10097,6 +10434,41 @@ def materialize_stage_one_node_authority(
                 if str(item).strip()
             ] or ["hypothesis_revision_evidence_missing"]
         if "feedback_iterations" not in satisfied:
+            # Chain-driven review sets persist their iteration history in the
+            # review-round link / collection-request / decision ledgers, not in
+            # a round ``revisionEnvelope``.  Recover it and replay the same
+            # canonical writer; a question without chain links is not
+            # applicable here and keeps the original blocker untouched.
+            recovery = _recover_chain_feedback_iterations_authority(
+                team_id=team,
+                question_id=question,
+                workflow_run_id=run,
+                node_run_id=node,
+                source_collection_run_id=source,
+                selected_candidate_ids=selected_candidate_ids,
+                meetings=meetings,
+            )
+            if str(recovery.get("status") or "") == "written":
+                satisfied.append("feedback_iterations")
+                written.append("feedback_iterations")
+                errors.pop("feedback_iterations", None)
+            elif str(recovery.get("status") or "") == "blocked":
+                recovery_blockers = [
+                    str(item)
+                    for item in list(recovery.get("blockerCodes") or [])
+                    if str(item).strip()
+                ]
+                blockers_by_kind["feedback_iterations"] = (
+                    recovery_blockers
+                    or feedback_blockers
+                    or ["hypothesis_revision_evidence_missing"]
+                )
+                recovery_reason = str(recovery.get("reason") or "").strip()
+                if recovery_reason:
+                    errors["feedback_iterations"] = recovery_reason
+        if "feedback_iterations" not in satisfied and (
+            "feedback_iterations" not in blockers_by_kind
+        ):
             blockers_by_kind["feedback_iterations"] = feedback_blockers or [
                 "hypothesis_revision_evidence_missing"
             ]
@@ -10195,10 +10567,35 @@ def materialize_stage_one_node_authority(
             blockers_by_kind["competition_alignment"] = list(plan_blockers)
 
     ordered = list(STAGE_ONE_NODE_AUTHORITY_KINDS)
+    # Launch-shape conditional waivers: hypothesis-first chain launches cannot
+    # demand authorities whose source (approved question artifact /
+    # canonically addressable review rows) the shape never produces.  The
+    # waiver needs persisted evidence, is never applied to a readable
+    # authority, and a downgraded kind stays in ``blockerCodes`` (the real
+    # underlying evidence) while being excluded from ``missingKinds``.
+    try:
+        from .stage_one_shape_gate import (
+            downgraded_stage_one_kinds,
+            drop_downgraded_kinds,
+        )
+
+        downgrades = downgraded_stage_one_kinds(
+            ordered,
+            team_id=team,
+            question_id=question,
+            input_snapshot=input_snapshot,
+            source_collection_run_id=source,
+            workflow_run_id=run,
+        )
+    except Exception:  # noqa: BLE001 - no waiver on doubt, stay fail-closed
+        downgrades = {}
     missing = [kind for kind in ordered if kind not in satisfied]
+    effective_missing = [
+        kind for kind in drop_downgraded_kinds(missing, downgrades)
+    ]
     return {
-        "status": "materialized" if not missing else "blocked",
-        "reason": "" if not missing else "stage_one_authority_missing",
+        "status": "materialized" if not effective_missing else "blocked",
+        "reason": "" if not effective_missing else "stage_one_authority_missing",
         "teamId": team,
         "questionId": question,
         "workflowRunId": run,
@@ -10208,7 +10605,8 @@ def materialize_stage_one_node_authority(
         "satisfiedKinds": [kind for kind in ordered if kind in satisfied],
         "writtenKinds": written,
         "reusedKinds": reused,
-        "missingKinds": missing,
+        "missingKinds": effective_missing,
+        **({"downgradedKinds": dict(downgrades)} if downgrades else {}),
         "blockerCodes": blockers_by_kind,
         **({"errors": errors} if errors else {}),
     }

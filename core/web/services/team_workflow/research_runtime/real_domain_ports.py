@@ -346,7 +346,34 @@ class RealDomainPorts:
         )
         if len(stage_one_required) != len(raw_required):
             raise RuntimeError("stage-one completion policy artifact kinds are invalid")
-        return tuple(dict.fromkeys((*produced, *stage_one_required)))
+        # Hypothesis-first chain launches cannot demand the authorities whose
+        # source (approved question artifact / canonically addressable review
+        # rows) the launch shape never produces; the shape gate waives exactly
+        # those, with persisted evidence, and leaves every other demand and
+        # every question-driven run untouched.
+        try:
+            from .stage_one_shape_gate import (
+                downgraded_stage_one_kinds,
+                drop_downgraded_kinds,
+            )
+
+            downgrades = downgraded_stage_one_kinds(
+                stage_one_required,
+                team_id=str(snapshot.get("teamId") or ""),
+                question_id=str(snapshot.get("questionId") or ""),
+                input_snapshot=snapshot,
+                source_collection_run_id=str(
+                    snapshot.get("sourceCollectionRunId") or ""
+                ),
+                workflow_run_id=str(action.run_id or ""),
+            )
+        except Exception:  # noqa: BLE001 - gate demand stays complete on doubt
+            downgrades = {}
+        return tuple(
+            dict.fromkeys(
+                (*produced, *drop_downgraded_kinds(stage_one_required, downgrades))
+            )
+        )
 
     def _run_input_snapshot(self, run_id: str) -> dict[str, Any]:
         run = self._store.get_run(run_id)
@@ -1080,6 +1107,7 @@ class RealDomainPorts:
                 source_collection_run_id=str(
                     snapshot.get("sourceCollectionRunId") or ""
                 ).strip(),
+                input_snapshot=snapshot,
             )
         except Exception as exc:  # noqa: BLE001 - diagnostic only, gate still authoritative
             report = {
