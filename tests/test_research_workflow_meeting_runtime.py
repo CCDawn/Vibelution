@@ -574,7 +574,7 @@ def test_open_hypothesis_review_meeting_binds_room_round_both_ways(tmp_path, mon
     assert meeting_round["meetingType"] == "hypothesis_review"
     assert meeting_round["stage"] == "hypothesis"
     assert meeting_round["roundType"] == "decision_gate"
-    assert meeting_round["rounds"] == 3
+    assert meeting_round["rounds"] == 2
     assert meeting_round["status"] == "open"
     assert meeting_round["participants"] == list(agents.values())
     assert meeting_round["participantRoleIds"] == list(_ROLES)
@@ -1160,7 +1160,7 @@ def test_discussion_driver_stops_on_convergence_signal(tmp_path, monkeypatch):
 
     assert result["stopReason"] == "converged"
     assert result["roundsRun"] == 2
-    assert result["roundBudget"] == 3
+    assert result["roundBudget"] == 2
     assert result["meetingRound"]["status"] == "awaiting_approval"
     assert len(result["chatRoomRoundIds"]) == 2
     assert [event["eventCode"] for event in events] == [
@@ -1970,7 +1970,7 @@ def test_discussion_driver_stops_at_round_budget(tmp_path, monkeypatch):
     )
 
     assert result["stopReason"] == "budget_exhausted"
-    assert result["roundsRun"] == 3
+    assert result["roundsRun"] == 2
     assert result["completedMessageCount"] >= 3
     assert next(
         event["fields"]["stopReason"]
@@ -2163,7 +2163,7 @@ def test_legacy_v1_records_stay_readable_with_defaults():
         "closedBy": "",
     }
     parsed_round = MeetingRound.from_dict(legacy_round)
-    assert parsed_round.rounds == 3
+    assert parsed_round.rounds == 2
     assert parsed_round.stage == ""
     assert parsed_round.roundType == ""
     assert parsed_round.agenda == ()

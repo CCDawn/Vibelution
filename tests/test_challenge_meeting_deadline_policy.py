@@ -17,6 +17,24 @@ from core.web.services.team_workflow.research_runtime import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _isolate_operator_config_from_budget(monkeypatch):
+    """Default every test to an unconfigured operator fence.
+
+    The live operator config may pin ``[research]``
+    ``challenge_meeting_per_call_budget_ms``; policy tests assert specific
+    derivation outcomes, so the config gate is neutralized unless a test
+    explicitly overrides ``config.settings.get_config`` itself.
+    """
+
+    from types import SimpleNamespace
+
+    unconfigured = SimpleNamespace(
+        research=SimpleNamespace(challenge_meeting_per_call_budget_ms=None)
+    )
+    monkeypatch.setattr("config.settings.get_config", lambda: unconfigured)
+
+
 def test_binding_p95_derives_bounded_call_budget(monkeypatch):
     samples = [
         {
@@ -76,6 +94,57 @@ def test_operator_override_is_bounded(monkeypatch):
         "sampleSource": "operator_env",
         "overrideEnv": policy._PER_CALL_OVERRIDE_ENV,
     }
+
+
+def test_operator_config_pins_fence_and_precedes_env(monkeypatch):
+    monkeypatch.delenv(policy._PER_CALL_OVERRIDE_ENV, raising=False)
+    monkeypatch.setattr(policy, "_operator_config_override_ms", lambda: 600_000)
+
+    assert policy.derive_per_call_budget("research-team") == {
+        "perCallBudgetMs": 600_000,
+        "latencyP95Ms": 0,
+        "sampleCount": 0,
+        "sampleSource": "operator_config",
+        "overrideEnv": "",
+    }
+
+    monkeypatch.setenv(policy._PER_CALL_OVERRIDE_ENV, "360000")
+    assert (
+        policy.derive_per_call_budget("research-team")["perCallBudgetMs"] == 600_000
+    )
+
+
+def test_operator_config_out_of_domain_is_rejected(monkeypatch):
+    monkeypatch.delenv(policy._PER_CALL_OVERRIDE_ENV, raising=False)
+    monkeypatch.setattr(policy, "_operator_config_override_ms", lambda: 700_000)
+
+    with pytest.raises(policy.ChallengeMeetingDeadlinePolicyError):
+        policy.derive_per_call_budget("research-team")
+
+
+def test_operator_config_override_reads_live_settings(monkeypatch):
+    from types import SimpleNamespace
+
+    def _settings(value):
+        return SimpleNamespace(
+            research=SimpleNamespace(challenge_meeting_per_call_budget_ms=value)
+        )
+
+    monkeypatch.setattr("config.settings.get_config", lambda: _settings(600_000))
+    assert policy._operator_config_override_ms() == 600_000
+
+    monkeypatch.setattr("config.settings.get_config", lambda: _settings(None))
+    assert policy._operator_config_override_ms() is None
+
+    for bogus in (True, 0, -300_000, "600000", 600.0):
+        monkeypatch.setattr("config.settings.get_config", lambda bogus=bogus: _settings(bogus))
+        assert policy._operator_config_override_ms() is None
+
+    def _boom():
+        raise RuntimeError("config unavailable")
+
+    monkeypatch.setattr("config.settings.get_config", _boom)
+    assert policy._operator_config_override_ms() is None
 
 
 def _stub_call_budget(monkeypatch, per_call_ms: int = 300_000) -> None:

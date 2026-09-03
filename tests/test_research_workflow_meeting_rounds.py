@@ -71,6 +71,15 @@ def _closure(**overrides):
     return payload
 
 
+def test_create_meeting_round_defaults_chat_rounds_to_two(tmp_path, monkeypatch):
+    """创建会议不显式传 rounds 时，默认聊天轮数为 2（评审/生成会议时长口径）。"""
+    team_id = _team(tmp_path, monkeypatch)
+    created = meetings.create_meeting_round(team_id, _meeting())
+
+    assert created["status"] == "created"
+    assert created["meetingRound"]["rounds"] == 2
+
+
 def test_close_meeting_emits_digest_decision_and_private_memory_refs(tmp_path, monkeypatch):
     team_id = _team(tmp_path, monkeypatch)
     created = meetings.create_meeting_round(team_id, _meeting())
