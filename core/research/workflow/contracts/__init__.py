@@ -200,7 +200,12 @@ from .hypothesis_round import (
 )
 from .hypothesis_selection import MAX_SELECTED_CANDIDATES, HypothesisSelectionRecord
 from .meeting_digest import MeetingDigest
-from .meeting_round import MEETING_STATUSES, MEETING_TYPES, MeetingRound
+from .meeting_round import (
+    DEFAULT_MEETING_ROUNDS,
+    MEETING_STATUSES,
+    MEETING_TYPES,
+    MeetingRound,
+)
 from .node_readiness import (
     ActorReadiness,
     BudgetReadiness,
@@ -463,6 +468,7 @@ __all__ = [
     "DEFAULT_APPROXIMATE_MATCH_AXES",
     "DEFAULT_DRAFT_POOL_SIZE",
     "DEFAULT_FINALIST_LIMIT",
+    "DEFAULT_MEETING_ROUNDS",
     "DEFAULT_PROGRAM_ID",
     "DEFAULT_REQUIRED_THRESHOLD_IDS",
     "DEFAULT_RETRY_TAXONOMY",

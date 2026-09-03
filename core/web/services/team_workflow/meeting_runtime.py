@@ -39,6 +39,7 @@ from core.research.competition.resources import (
 from core.research.workflow.contracts import (
     CURRENT_RESEARCH_TEAM_ROLE_CONTRACT,
     ContractValidationError,
+    DEFAULT_MEETING_ROUNDS,
     sha256_hex,
 )
 from core.research.workflow.contracts.discussion_scope import (
@@ -2144,7 +2145,7 @@ def meeting_digest_ttl_mute_state(
     if overdue_ms <= 0:
         return None
     bound_round_count = len(_normalized_str_list(meeting_round.get("chatRoomRoundIds")))
-    round_budget = int(meeting_round.get("rounds") or 3)
+    round_budget = int(meeting_round.get("rounds") or DEFAULT_MEETING_ROUNDS)
     return {
         "meetingStatus": status,
         "digestAtMs": digest_at_ms,
@@ -2643,7 +2644,7 @@ def _run_meeting_discussion_impl(
                 "challengeDeadlineAtMs": challenge_deadline_at_ms,
                 **recovered_policy,
             }
-    budget = int(meeting_round.get("rounds") or 3)
+    budget = int(meeting_round.get("rounds") or DEFAULT_MEETING_ROUNDS)
     run_started_at = time.monotonic()
     challenge_deadline_at_ms = meeting_round.get("challengeDeadlineAtMs")
     deadline_present = bool(
@@ -2851,7 +2852,21 @@ def _run_meeting_discussion_impl(
             },
         )
     else:
-        stop_reason = "budget_exhausted"
+        # The loop-top convergence check only runs while another round is
+        # still affordable.  With the default two-round budget (opening round
+        # plus one follow-up) the final round is never re-examined, so a
+        # unanimous pass would be misreported as budget_exhausted.
+        latest_completed = [
+            message
+            for message in _latest_bound_round_messages(meeting_round)
+            if str(message.get("status") or "").strip().lower() == "completed"
+        ]
+        if latest_completed and all(
+            meeting_rounds.is_pass_message(message) for message in latest_completed
+        ):
+            stop_reason = "converged"
+        else:
+            stop_reason = "budget_exhausted"
 
     all_messages = meeting_rounds.meeting_source_messages(meeting_round)
     completed_count = sum(
