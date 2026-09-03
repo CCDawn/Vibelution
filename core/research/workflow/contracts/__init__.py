@@ -50,6 +50,10 @@ from .automation_policy import (
     AUTO_ADVANCE_EXECUTION_MODES,
     AUTO_ADVANCE_POLICY_STATUSES,
     AUTO_ADVANCE_UI_PRESET_IDS,
+    CANDIDATE_SELECTION_DEFAULT_MAX,
+    CANDIDATE_SELECTION_MIN_MAX,
+    CANDIDATE_SELECTION_RULES,
+    CANDIDATE_SELECTION_RULE_DIGEST_ORDER,
     MAX_AUTO_REVISION_ROUNDS_ADJUSTABLE_TO,
     MAX_AUTO_REVISION_ROUNDS_DEFAULT,
     AutoAdvancePolicyV2,
@@ -200,7 +204,12 @@ from .hypothesis_round import (
 )
 from .hypothesis_selection import MAX_SELECTED_CANDIDATES, HypothesisSelectionRecord
 from .meeting_digest import MeetingDigest
-from .meeting_round import MEETING_STATUSES, MEETING_TYPES, MeetingRound
+from .meeting_round import (
+    DEFAULT_MEETING_ROUNDS,
+    MEETING_STATUSES,
+    MEETING_TYPES,
+    MeetingRound,
+)
 from .node_readiness import (
     ActorReadiness,
     BudgetReadiness,
@@ -463,6 +472,7 @@ __all__ = [
     "DEFAULT_APPROXIMATE_MATCH_AXES",
     "DEFAULT_DRAFT_POOL_SIZE",
     "DEFAULT_FINALIST_LIMIT",
+    "DEFAULT_MEETING_ROUNDS",
     "DEFAULT_PROGRAM_ID",
     "DEFAULT_REQUIRED_THRESHOLD_IDS",
     "DEFAULT_RETRY_TAXONOMY",
@@ -525,6 +535,10 @@ __all__ = [
     "HypothesisRound",
     "HypothesisRoundCandidate",
     "HypothesisSelectionRecord",
+    "CANDIDATE_SELECTION_DEFAULT_MAX",
+    "CANDIDATE_SELECTION_MIN_MAX",
+    "CANDIDATE_SELECTION_RULES",
+    "CANDIDATE_SELECTION_RULE_DIGEST_ORDER",
     "LEGACY_READ_MODE",
     "LINEAGE_KINDS",
     "MAX_AUTO_REVISION_ROUNDS_ADJUSTABLE_TO",

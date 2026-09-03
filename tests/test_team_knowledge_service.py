@@ -1,3 +1,6 @@
+import json
+import threading
+
 import pytest
 
 from core.infrastructure import developer_sandbox
@@ -2208,3 +2211,142 @@ def test_owner_source_review_blocked_until_ensure_grant_allows_non_member_stewar
     )
     assert reviewed["source"]["status"] == "accepted"
     assert reviewed["centralSource"]["centralSourceId"]
+
+
+def test_get_or_create_team_knowledge_base_is_race_safe(knowledge_env):
+    team = knowledge_env["team"]
+    member_id = knowledge_env["member"]["agentId"]
+    barrier = threading.Barrier(8)
+    results: list[dict] = []
+    errors: list[BaseException] = []
+
+    def _run() -> None:
+        try:
+            barrier.wait()
+            results.append(
+                team_knowledge_service.get_or_create_team_knowledge_base(
+                    team["teamId"],
+                    name="Race Safe Library",
+                    actor_agent_id=member_id,
+                )
+            )
+        except BaseException as exc:  # pragma: no cover - surfaced via assertion
+            errors.append(exc)
+
+    threads = [threading.Thread(target=_run) for _ in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert not errors
+    assert [item["created"] for item in results].count(True) == 1
+    assert len({item["knowledgeBase"]["knowledgeBaseId"] for item in results}) == 1
+    same_name_bases = [
+        item
+        for item in team_knowledge_service.list_team_knowledge_bases(team["teamId"], internal=True)["knowledgeBases"]
+        if item["name"] == "Race Safe Library"
+    ]
+    assert len(same_name_bases) == 1
+
+
+def test_get_or_create_team_knowledge_base_reuse_and_lookup_only_semantics(knowledge_env):
+    lead = agent_directory_service.create_agent_instance(display_name="Get Or Create Lead")
+    team = team_service.create_team(
+        name="Get Or Create Semantics Team",
+        members=[{"agentId": lead["agentId"], "role": "lead"}],
+    )
+    lead_id = lead["agentId"]
+    existing = team_knowledge_service.create_knowledge_base(
+        team["teamId"],
+        name="Existing Library",
+        actor_agent_id=lead_id,
+    )
+
+    reused = team_knowledge_service.get_or_create_team_knowledge_base(
+        team["teamId"],
+        name="Existing Library",
+        actor_agent_id=lead_id,
+    )
+    assert reused["created"] is False
+    assert reused["knowledgeBase"]["knowledgeBaseId"] == existing["knowledgeBaseId"]
+    assert reused["knowledgeBase"]["name"] == "Existing Library"
+
+    reused_any = team_knowledge_service.get_or_create_team_knowledge_base(
+        team["teamId"],
+        name="Different Name",
+        actor_agent_id=lead_id,
+        reuse_any_existing=True,
+    )
+    assert reused_any["created"] is False
+    assert reused_any["knowledgeBase"]["knowledgeBaseId"] == existing["knowledgeBaseId"]
+
+    lookup_only = team_knowledge_service.get_or_create_team_knowledge_base(
+        team["teamId"],
+        name="Different Name",
+        actor_agent_id=lead_id,
+        create_if_missing=False,
+    )
+    assert lookup_only == {"knowledgeBase": None, "created": False}
+
+    created = team_knowledge_service.get_or_create_team_knowledge_base(
+        team["teamId"],
+        name="Brand New Library",
+        description="Freshly created",
+        actor_agent_id=lead_id,
+    )
+    assert created["created"] is True
+    assert created["knowledgeBase"]["name"] == "Brand New Library"
+    assert created["knowledgeBase"]["description"] == "Freshly created"
+
+    names = [
+        item["name"]
+        for item in team_knowledge_service.list_team_knowledge_bases(team["teamId"], internal=True)["knowledgeBases"]
+    ]
+    assert names.count("Different Name") == 0
+    assert names.count("Brand New Library") == 1
+
+
+def test_get_or_create_team_knowledge_base_requires_member_actor(knowledge_env):
+    with pytest.raises(team_knowledge_service.TeamKnowledgePermissionError):
+        team_knowledge_service.get_or_create_team_knowledge_base(
+            knowledge_env["team"]["teamId"],
+            name="Anonymous Library",
+        )
+    with pytest.raises(team_knowledge_service.TeamKnowledgePermissionError):
+        team_knowledge_service.get_or_create_team_knowledge_base(
+            knowledge_env["team"]["teamId"],
+            name="Outsider Library",
+            actor_agent_id=knowledge_env["outsider"]["agentId"],
+        )
+    with pytest.raises(team_knowledge_service.TeamKnowledgeError):
+        team_knowledge_service.get_or_create_team_knowledge_base(
+            knowledge_env["team"]["teamId"],
+            name="   ",
+            actor_agent_id=knowledge_env["lead"]["agentId"],
+        )
+
+
+def test_get_or_create_team_knowledge_base_treats_legacy_missing_status_as_active(knowledge_env, tmp_path):
+    team = knowledge_env["team"]
+    lead_id = knowledge_env["lead"]["agentId"]
+    existing = team_knowledge_service.create_knowledge_base(
+        team["teamId"],
+        name="Legacy Library",
+        actor_agent_id=lead_id,
+    )
+    state_path = tmp_path / "workspace" / "teams" / team["teamId"] / "knowledge" / "knowledge_bases.json"
+    payload = json.loads(state_path.read_text(encoding="utf-8"))
+    for item in payload.get("knowledgeBases") or []:
+        if item.get("name") == "Legacy Library":
+            item.pop("status", None)
+    state_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    reused = team_knowledge_service.get_or_create_team_knowledge_base(
+        team["teamId"],
+        name="Legacy Library",
+        actor_agent_id=lead_id,
+    )
+
+    assert reused["created"] is False
+    assert reused["knowledgeBase"]["knowledgeBaseId"] == existing["knowledgeBaseId"]

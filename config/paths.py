@@ -20,6 +20,15 @@ CONFIG_META_FILENAME = "config.meta.json"
 CONFIG_META_SCHEMA_VERSION = 3
 _CONFIGURED_DATA_HOME_CACHE: dict[str, tuple[int, int, Path | None]] = {}
 
+# Auto-advance (activation) policy document resolution: operator config.toml
+# first, the historical env var second, then a default file in the operator
+# config home.  Keyed by ``[research_workflow].auto_advance_policy_path``.
+AUTO_ADVANCE_POLICY_PATH_ENV = "VIBELUTION_AUTO_ADVANCE_POLICY_PATH"
+AUTO_ADVANCE_POLICY_FILENAME = "auto-advance-policy.active.json"
+AUTO_ADVANCE_POLICY_CONFIG_SECTION = "research_workflow"
+AUTO_ADVANCE_POLICY_CONFIG_KEY = "auto_advance_policy_path"
+_AUTO_ADVANCE_POLICY_PATH_CACHE: dict[str, tuple[int, int, Path | None]] = {}
+
 if TYPE_CHECKING:
     # Runtime access stays lazy through __getattr__ to avoid the
     # paths -> operator_bootstrap -> public_config import cycle.
@@ -328,11 +337,79 @@ def _resolve_operator_path(value: str | os.PathLike[str], *, base_dir: Path | No
     return path.resolve()
 
 
+def configured_auto_advance_policy_path(
+    *, config_path: str | os.PathLike[str] | None = None
+) -> Path | None:
+    """Return only an explicit ``[research_workflow]`` policy path override."""
+
+    path = resolve_config_path(config_path)
+    try:
+        stat = path.stat()
+    except OSError:
+        _AUTO_ADVANCE_POLICY_PATH_CACHE.pop(str(path), None)
+        return None
+    cache_key = str(path)
+    cached = _AUTO_ADVANCE_POLICY_PATH_CACHE.get(cache_key)
+    if cached and cached[0] == stat.st_mtime_ns and cached[1] == stat.st_size:
+        return cached[2]
+    resolved: Path | None = None
+    try:
+        import tomllib
+
+        payload = tomllib.loads(path.read_text(encoding="utf-8"))
+        section = (
+            payload.get(AUTO_ADVANCE_POLICY_CONFIG_SECTION)
+            if isinstance(payload, dict)
+            else None
+        )
+        raw = (
+            str(section.get(AUTO_ADVANCE_POLICY_CONFIG_KEY) or "").strip()
+            if isinstance(section, dict)
+            else ""
+        )
+        if raw:
+            resolved = _resolve_operator_path(raw, base_dir=path.parent)
+    except (OSError, ValueError):
+        resolved = None
+    _AUTO_ADVANCE_POLICY_PATH_CACHE[cache_key] = (
+        stat.st_mtime_ns,
+        stat.st_size,
+        resolved,
+    )
+    return resolved
+
+
+def resolve_auto_advance_policy_path(
+    *, config_path: str | os.PathLike[str] | None = None
+) -> Path:
+    """Activation policy document precedence: config.toml -> env -> default.
+
+    ``[research_workflow].auto_advance_policy_path`` in the operator config
+    wins (env propagation into backend processes is unreliable), then
+    ``VIBELUTION_AUTO_ADVANCE_POLICY_PATH``, then
+    ``<config-home>/auto-advance-policy.active.json``.  The caller decides
+    whether the resolved file must exist (a missing default behaves like no
+    policy configured).
+    """
+
+    configured = configured_auto_advance_policy_path(config_path=config_path)
+    if configured is not None:
+        return configured
+    raw = str(os.environ.get(AUTO_ADVANCE_POLICY_PATH_ENV) or "").strip()
+    if raw:
+        return _resolve_operator_path(raw)
+    return (resolve_config_home() / AUTO_ADVANCE_POLICY_FILENAME).resolve()
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
 __all__ = [
+    "AUTO_ADVANCE_POLICY_CONFIG_KEY",
+    "AUTO_ADVANCE_POLICY_CONFIG_SECTION",
+    "AUTO_ADVANCE_POLICY_FILENAME",
+    "AUTO_ADVANCE_POLICY_PATH_ENV",
     "CONFIG_FILENAME",
     "CONFIG_STARTER_TEXT",
     "DATA_HOME_ENV",
@@ -344,9 +421,11 @@ __all__ = [
     "EXAMPLE_CONFIG_STARTER_TEXT",
     "MODEL_CATALOG_STATE_FILENAME",
     "PROJECT_ROOT",
+    "configured_auto_advance_policy_path",
     "default_config_home",
     "default_data_home",
     "ensure_global_config_initialized",
+    "resolve_auto_advance_policy_path",
     "resolve_config_backup_dir",
     "resolve_config_home",
     "resolve_config_lock_path",

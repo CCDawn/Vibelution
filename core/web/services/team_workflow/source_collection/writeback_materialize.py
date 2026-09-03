@@ -1759,27 +1759,15 @@ def _materialize_source_collection_stage_writeback_knowledge_ingestion(
     knowledge_base = None
     try:
         if not knowledge_base_id:
-            # 建库前先按 owner+名称查重：重试路径此前每次都新建同名库，造成重复堆积。
-            existing_bases = [
-                item
-                for item in list(
-                    s.team_knowledge_service.list_team_knowledge_bases(team_id, internal=True).get("knowledgeBases")
-                    or []
-                )
-                if isinstance(item, dict) and str(item.get("name") or "").strip() == "Knowledge Expansion Library"
-            ]
-            if existing_bases:
-                knowledge_base = existing_bases[0]
-                knowledge_base_id = s._knowledge_base_raw_id(knowledge_base.get("knowledgeBaseId"))
-                scoped_knowledge_base_id = s._knowledge_base_scoped_id_for_team(team_id, knowledge_base_id, knowledge_base)
-            else:
-                knowledge_base = s.team_knowledge_service.create_knowledge_base(
-                    team_id,
-                    name="Knowledge Expansion Library",
-                    actor_agent_id=steward_agent_id,
-                )
-                knowledge_base_id = s._knowledge_base_raw_id(knowledge_base.get("knowledgeBaseId"))
-                scoped_knowledge_base_id = s._knowledge_base_scoped_id_for_team(team_id, knowledge_base_id, knowledge_base)
+            # 单临界区 get-or-create：查重与建库共享 _LOCK，关闭两段锁之间的竞态。
+            resolved = s.team_knowledge_service.get_or_create_team_knowledge_base(
+                team_id,
+                name="Knowledge Expansion Library",
+                actor_agent_id=steward_agent_id,
+            )
+            knowledge_base = resolved["knowledgeBase"]
+            knowledge_base_id = s._knowledge_base_raw_id(knowledge_base.get("knowledgeBaseId"))
+            scoped_knowledge_base_id = s._knowledge_base_scoped_id_for_team(team_id, knowledge_base_id, knowledge_base)
         s.team_knowledge_service.ensure_knowledge_base_review_grant(scoped_knowledge_base_id, steward_agent_id)
         # 与 KB review grant 对称的 trusted-gate 授权确保：只把本次自动链实际执行
         # owner source 审阅的 steward agent 加进该 team 的 localStewardAgentIds，

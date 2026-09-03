@@ -213,7 +213,8 @@ def test_schedule_meeting_discussion_stops_after_digest_ttl(tmp_path, monkeypatc
     assert fields["surface"] == "schedule_meeting_discussion"
     assert fields["ttlMs"] == 1
     assert fields["digestAtMs"] > 0
-    assert fields["pausedRoundRange"] == [2, 3]
+    # 默认聊天轮数 2：已绑开场轮之后，TTL 静默暂停的剩余轮区间是 [2, 2]。
+    assert fields["pausedRoundRange"] == [2, 2]
     # The pause never touches the meeting state machine or the draft.
     record = meetings.get_meeting_round(team_id, meeting_round_id)["meetingRound"]
     assert record["status"] == "awaiting_approval"

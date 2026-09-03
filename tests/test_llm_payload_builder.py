@@ -585,3 +585,43 @@ def test_metadata_override_clamps_responses_transport_payload():
 
     assert clamped["max_output_tokens"] == 8192
     assert untouched["max_output_tokens"] == 32768
+
+
+def test_speaker_payload_keeps_profile_default_without_cap_injection():
+    """Regression: the fenced speaker request must not lose output budget.
+
+    The removed per-call token-cap channel (fence-derived ContextVar) used to
+    clamp the speaker's ``max_tokens`` below the profile default.  Speakers
+    must generate exactly as before: without an explicit
+    ``llmMaxOutputTokensOverride`` metadata entry, the payload keeps the
+    profile default even inside the scopes a fenced speaker turn binds.
+    """
+
+    from core.llm import client as llm_client_module
+    from core.llm.client import (
+        MAX_OUTPUT_TOKENS_OVERRIDE_METADATA_KEY,
+        llm_status_context,
+        model_invocation_receipt_context_scope,
+    )
+
+    # The derived cap channel itself is gone; only the pre-existing explicit
+    # metadata override remains.
+    assert not hasattr(llm_client_module, "per_call_output_token_cap_scope")
+    assert not hasattr(llm_client_module, "_PER_CALL_OUTPUT_TOKEN_CAP")
+
+    config = _relay_autodl_glm_config()
+    client = LLMClient(config=config, backend=lambda payload: payload)
+    messages = [{"role": "user", "content": "讲者输入"}]
+
+    with model_invocation_receipt_context_scope(None), llm_status_context(
+        session_id="session-speaker",
+        turn_id="chat-room:round-1:speaker-1",
+    ):
+        payload = client._build_payload(messages)
+        assert payload["max_tokens"] == 32768
+
+        # The pre-existing explicit metadata clamp keeps working.
+        clamped = client._build_payload(
+            messages, metadata={MAX_OUTPUT_TOKENS_OVERRIDE_METADATA_KEY: 4096}
+        )
+    assert clamped["max_tokens"] == 4096

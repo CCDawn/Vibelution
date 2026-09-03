@@ -661,3 +661,82 @@ def test_node_completion_waits_for_program_review_without_phase_two_attempt(
     )
     assert replay["runVersion"] == completed_run["runVersion"]
     assert len(replay["systemActions"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# Hypothesis-first chain launches: the closure demand must match the launch
+# shape.  A chain launch structurally cannot produce stage1_research_plan /
+# competition_alignment (no approved question authority exists to project) or
+# dimension_reviews (rows cite claim-evidence ledger ids, not canonical
+# artifact refs).  The shape gate waives exactly those kinds -- with persisted
+# evidence -- so closeout cannot block them forever; a question-driven run is
+# never waived.
+# ---------------------------------------------------------------------------
+
+
+_CHAIN_CLOSEOUT_TEAM = "team-closeout-shape"
+_CHAIN_WAIVED_KINDS = (
+    "stage1_research_plan",
+    "competition_alignment",
+    "dimension_reviews",
+)
+
+
+def _chain_shape_closeout_record() -> dict:
+    """Stage-one closeout record in the chain-driven hypothesis-first shape."""
+    record = _stage_one_record()
+    record["artifactManifests"] = [
+        item
+        for item in record["artifactManifests"]
+        if str(item.get("artifactId") or "").split(":", 1)[0] not in _CHAIN_WAIVED_KINDS
+    ]
+    for kind in _CHAIN_WAIVED_KINDS:
+        record["artifactPayloads"].pop(f"{kind}:{kind}-artifact", None)
+    # The chain shape attaches the review-stage receipt to the
+    # feedback-iterations authority (dev rounds carry no per-stage receipts).
+    record["artifactPayloads"]["feedback_iterations:feedback_iterations-artifact"][
+        "modelInvocationReceipts"
+    ].append(_receipt("review", record["runId"]))
+    record["teamId"] = _CHAIN_CLOSEOUT_TEAM
+    record["inputSnapshot"]["researchObjectiveContract"] = {"hypothesisFirst": True}
+    return record
+
+
+def _patch_chain_shape_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
+    from core.web.services.team_workflow.research_runtime import question_launch
+    from core.web.services.team_workflow.research_runtime import stage_one_shape_gate
+
+    monkeypatch.setattr(question_launch, "_approved_details", lambda _team_id: {})
+    monkeypatch.setattr(
+        stage_one_shape_gate, "_accepted_round_rows_complete", lambda *_a, **_k: True
+    )
+
+
+def test_hypothesis_first_closeout_waives_unproducible_kinds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Closeout demands exactly what a chain launch can produce, no more."""
+    record = _chain_shape_closeout_record()
+    _patch_chain_shape_lookup(monkeypatch)
+
+    outcome = evaluate_stage_one_closeout(record, node_id="hypothesis_design")
+
+    assert outcome is not None
+    assert outcome.status == "program_review_required"
+    waived_refs = {f"{kind}:{kind}-artifact" for kind in _CHAIN_WAIVED_KINDS}
+    assert waived_refs.isdisjoint(set(outcome.artifact_refs))
+    assert set(outcome.receipt_stages) == {"generation", "review", "revision"}
+
+
+def test_closeout_without_hypothesis_first_marker_stays_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without the launch marker the full policy demand stays untouched."""
+    record = _chain_shape_closeout_record()
+    record["inputSnapshot"]["researchObjectiveContract"] = {"hypothesisFirst": False}
+    _patch_chain_shape_lookup(monkeypatch)
+
+    with pytest.raises(NodeExecutionError) as exc:
+        evaluate_stage_one_closeout(record, node_id="hypothesis_design")
+
+    assert exc.value.code == "stage_one_artifact_missing"

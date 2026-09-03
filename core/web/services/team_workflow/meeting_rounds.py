@@ -46,6 +46,7 @@ from typing import Any
 from core.infrastructure import developer_sandbox
 from core.research.workflow.contracts import (
     ContractValidationError,
+    DEFAULT_MEETING_ROUNDS,
     DecisionRecord,
     MeetingDigest,
     MeetingRound,
@@ -400,7 +401,9 @@ def create_meeting_round(team_id: str, payload: Mapping[str, Any] | None = None)
         "agenda": _normalized_str_list(request.get("agenda")),
         "agendaQuestions": _normalized_str_list(request.get("agendaQuestions")),
         "agendaRules": _normalized_str_list(request.get("agendaRules")),
-        "rounds": request.get("rounds") if request.get("rounds") is not None else 3,
+        "rounds": request.get("rounds")
+        if request.get("rounds") is not None
+        else DEFAULT_MEETING_ROUNDS,
         "participantRoleIds": participant_role_ids,
         "teamRoleContractVersion": request.get("teamRoleContractVersion")
         if request.get("teamRoleContractVersion") is not None

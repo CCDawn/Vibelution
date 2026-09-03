@@ -4,6 +4,7 @@ from __future__ import annotations
 from . import challenge_cup_dev_controls as _challenge_cup_dev_controls  # noqa: F401
 from . import challenge_cup_real_batch as _challenge_cup_real_batch  # noqa: F401
 from . import experiment as _experiment  # noqa: F401
+from . import g12_calibration as _g12_calibration  # noqa: F401
 from . import hypothesis_first as _hypothesis_first  # noqa: F401
 from . import knowledge as _knowledge  # noqa: F401
 from . import orchestration as _orchestration  # noqa: F401
