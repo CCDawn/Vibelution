@@ -163,9 +163,37 @@ _ROLE_METADATA_FIELDS = (
     "challengeCupTeamRole",
 )
 _DISCUSSION_DRIVER = threading.local()
-_MEETING_DISCUSSION_EXECUTOR_MAX_WORKERS = 4
+_MEETING_DISCUSSION_MAX_WORKERS_DEFAULT = 12
+
+
+def _meeting_discussion_max_workers() -> int:
+    """Width of the process-wide meeting discussion driver pool.
+
+    One executor thread drives one active meeting round end-to-end (speaker
+    batch, digest, close), so this pool is the ceiling on simultaneously
+    driving rounds; further rounds queue here before their first LLM call,
+    which used to surface as ~10-minute round dispatch delays under campaign
+    concurrency.  Driver threads are IO-bound waiters on the speaker batch
+    pool, so the default covers a full campaign wave without adding LLM-gate
+    pressure beyond the shared gate's own cap.
+    """
+
+    raw = str(
+        os.environ.get("VIBELUTION_MEETING_DISCUSSION_MAX_WORKERS") or ""
+    ).strip()
+    if raw:
+        try:
+            override = int(float(raw))
+        except ValueError:
+            return _MEETING_DISCUSSION_MAX_WORKERS_DEFAULT
+        # Direct env override (up or down), floored at 1 so a bad env edit
+        # can neither explode the pool nor drop below a single driver.
+        return max(1, override)
+    return _MEETING_DISCUSSION_MAX_WORKERS_DEFAULT
+
+
 _MEETING_DISCUSSION_EXECUTOR = ThreadPoolExecutor(
-    max_workers=_MEETING_DISCUSSION_EXECUTOR_MAX_WORKERS,
+    max_workers=_meeting_discussion_max_workers(),
     thread_name_prefix="hypothesis-meeting",
 )
 _MEETING_DISCUSSION_JOBS_LOCK = threading.Lock()

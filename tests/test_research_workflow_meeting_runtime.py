@@ -64,8 +64,38 @@ _ROLES = (
 )
 
 
-def test_meeting_discussion_executor_allows_four_concurrent_meetings() -> None:
-    assert meeting_runtime._MEETING_DISCUSSION_EXECUTOR_MAX_WORKERS == 4
+def test_meeting_discussion_executor_default_and_env_override(monkeypatch) -> None:
+    """The driver pool defaults to 12; the env overrides it with a floor of 1.
+
+    One executor thread drives one active meeting round end-to-end, so a
+    four-thread pool queued later rounds for ~10 minutes under campaign
+    concurrency before their first LLM call.  The module-level executor is
+    built from the same helper the env override feeds.
+    """
+
+    monkeypatch.delenv("VIBELUTION_MEETING_DISCUSSION_MAX_WORKERS", raising=False)
+    assert meeting_runtime._MEETING_DISCUSSION_MAX_WORKERS_DEFAULT == 12
+    assert (
+        meeting_runtime._meeting_discussion_max_workers()
+        == meeting_runtime._MEETING_DISCUSSION_MAX_WORKERS_DEFAULT
+    )
+    assert meeting_runtime._MEETING_DISCUSSION_EXECUTOR._max_workers == (
+        meeting_runtime._meeting_discussion_max_workers()
+    )
+
+    monkeypatch.setenv("VIBELUTION_MEETING_DISCUSSION_MAX_WORKERS", "16")
+    assert meeting_runtime._meeting_discussion_max_workers() == 16
+    monkeypatch.setenv("VIBELUTION_MEETING_DISCUSSION_MAX_WORKERS", "2")
+    assert meeting_runtime._meeting_discussion_max_workers() == 2
+    monkeypatch.setenv("VIBELUTION_MEETING_DISCUSSION_MAX_WORKERS", "0")
+    assert meeting_runtime._meeting_discussion_max_workers() == 1
+    monkeypatch.setenv("VIBELUTION_MEETING_DISCUSSION_MAX_WORKERS", "-5")
+    assert meeting_runtime._meeting_discussion_max_workers() == 1
+    monkeypatch.setenv("VIBELUTION_MEETING_DISCUSSION_MAX_WORKERS", "not-a-number")
+    assert (
+        meeting_runtime._meeting_discussion_max_workers()
+        == meeting_runtime._MEETING_DISCUSSION_MAX_WORKERS_DEFAULT
+    )
 
 
 def _capture_discussion_events(monkeypatch) -> list[dict[str, object]]:
