@@ -17,8 +17,14 @@ from typing import Any
 
 
 DEADLINE_POLICY_VERSION = "challenge_meeting_deadline.v1"
-PER_CALL_MIN_MS = 300_000
 PER_CALL_MAX_MS = 600_000
+# The derivation band is collapsed onto the governed cap: live meeting-speaker
+# calls regularly ran 300-416s, so the former 300s derived floor truncated
+# valid calls mid-flight.  Receipt-derived budgets are now always the 600s
+# governed fence; as a consequence the operator config/env override only
+# accepts that same cap, and lower pins are rejected by the existing
+# fail-loud override contract.
+PER_CALL_MIN_MS = PER_CALL_MAX_MS
 DEFAULT_PER_CALL_BUDGET_MS = 450_000
 # Review calls process the full bounded transcript and have observed valid
 # GLM latencies up to seven minutes; use the governed cap when receipts are
