@@ -81,9 +81,10 @@ The session currently closing work into `main` should:
 - keep the main workspace clean before each merge;
 - expect task-owning Agents to self-review and self-merge routine clean branches before asking for integration help;
 - accept covering development claims in `active` or `ready`; queue-only `ready_for_merge` semantics remain for explicit handoff/integration lanes;
+- let the pre-commit guard reuse the registered worktree owner or automatically create one narrow claim for the staged paths; a real parent/child path overlap fails closed, while unrelated paths continue in parallel;
 - abort and restore `main` immediately if a blocked branch is accidentally merged and produces conflicts;
 - merge one task branch at a time;
-- hold `integration/main` only for final manifest verification and fast-forward merge. Bounded contention returns the existing manifest; the only validation-under-reservation exception is a one-use token issued after `stale_main`;
+- hold `integration/main` only for final manifest verification and fast-forward merge. Managed closeout binds a 60-second, exact old/new SHA permit to that lease; the `reference-transaction` hook rejects every other `main` ref update. Bounded contention returns the existing manifest; the only validation-under-reservation exception is a one-use token issued after `stale_main`;
 - confirm each fast-forward merge succeeded and the target contains the merged task tip, then immediately clean that task's local resources;
 - handle semantic conflicts instead of letting Agents resolve them blindly;
 - keep successful merges on local `main`; do not push `main` after merge-result inspection unless the user explicitly asks to sync GitHub or publish;

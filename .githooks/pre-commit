@@ -30,6 +30,8 @@ if [ -z "$project_python" ]; then
   exit 1
 fi
 
+"$project_python" "$repo_root/scripts/git_claim_guard.py" ensure-claim --repo "$repo_root"
+
 if ! git diff --cached --quiet -- web/package.json web/package-lock.json; then
   if ! command -v npm >/dev/null 2>&1; then
     echo "[pre-commit] missing npm; cannot verify staged web dependency metadata" >&2

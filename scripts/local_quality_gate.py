@@ -101,7 +101,7 @@ FAILURE_SUMMARY_REDACTIONS = (
 GATE_SELF_TEST_COMMANDS = (
     (
         ".\\.venv\\Scripts\\python.exe -m pytest "
-        "tests/test_local_quality_gate.py tests/test_task_closeout.py tests/test_ci_workflow_contract.py "
+        "tests/test_git_claim_guard.py tests/test_local_quality_gate.py tests/test_task_closeout.py tests/test_ci_workflow_contract.py "
         "tests/test_select_tests.py tests/test_reuse_research_contract.py tests/test_validation_toolchain.py "
         "tests/test_github_project_library_service.py -n 4 --dist load -m \"not serial\" -q --maxfail=0"
     ),
@@ -109,9 +109,11 @@ GATE_SELF_TEST_COMMANDS = (
 GATE_DEFINITION_FILES = frozenset(
     {
         ".githooks/pre-commit",
+        ".githooks/reference-transaction",
         ".github/workflows/ci.yml",
         "scripts/doctor.ps1",
         "scripts/local_quality_gate.py",
+        "scripts/git_claim_guard.py",
         "scripts/reuse_research_contract.py",
         "scripts/reuse_research_evidence.py",
         "scripts/task_closeout.py",
@@ -119,6 +121,7 @@ GATE_DEFINITION_FILES = frozenset(
         "tests/select_tests.py",
         "tests/test_matrix.yaml",
         "tests/test_task_closeout.py",
+        "tests/test_git_claim_guard.py",
         "tests/test_validation_toolchain.py",
     }
 )

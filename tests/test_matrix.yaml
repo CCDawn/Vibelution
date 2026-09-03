@@ -37,14 +37,17 @@ rules:
       - "Remote distributed testing is a speed path for Python not-serial coverage; it is not a complete gate."
 
   - id: pre-commit-hook
-    description: "Local pre-commit hook adapter and its shared-worktree Python fallback."
+    description: "Local claim/ref hook adapters and their shared-worktree Python fallback."
     executionLayers:
       - "focused"
       - "local-serial"
     paths:
       - ".githooks/pre-commit"
+      - ".githooks/reference-transaction"
+      - "scripts/git_claim_guard.py"
+      - "tests/test_git_claim_guard.py"
     commands:
-      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_local_quality_gate.py -k pre_commit -q"
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_git_claim_guard.py tests/test_local_quality_gate.py -k \"claim_guard or pre_commit or reference_transaction or main_permit or real_hook\" -q"
     notes:
       - "Hook-only changes run the hook contract tests; closeout keeps its full gate-definition self-test."
 
@@ -56,15 +59,17 @@ rules:
     paths:
       - ".github/workflows/ci.yml"
       - "scripts/local_quality_gate.py"
+      - "scripts/git_claim_guard.py"
       - "scripts/task_closeout.py"
       - "tests/select_tests.py"
       - "tests/test_matrix.yaml"
       - "tests/test_local_quality_gate.py"
+      - "tests/test_git_claim_guard.py"
       - "tests/test_task_closeout.py"
       - "tests/test_ci_workflow_contract.py"
       - "tests/test_select_tests.py"
     commands:
-      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_local_quality_gate.py tests/test_task_closeout.py tests/test_ci_workflow_contract.py tests/test_select_tests.py tests/test_reuse_research_contract.py tests/test_validation_toolchain.py tests/test_github_project_library_service.py -n 4 --dist load -m \"not serial\" -q --maxfail=0"
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_git_claim_guard.py tests/test_local_quality_gate.py tests/test_task_closeout.py tests/test_ci_workflow_contract.py tests/test_select_tests.py tests/test_reuse_research_contract.py tests/test_validation_toolchain.py tests/test_github_project_library_service.py -n 4 --dist load -m \"not serial\" -q --maxfail=0"
     notes:
       - "Gate-definition changes must validate the gate itself even when the matrix changes in the same branch."
 
