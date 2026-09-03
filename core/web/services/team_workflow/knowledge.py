@@ -3547,32 +3547,36 @@ def run_knowledge_collection_ingestion(team_id: str, payload: dict[str, Any] | N
     scoped_knowledge_base_id = s._knowledge_base_scoped_id_for_team(normalized_team_id, requested_knowledge_base_id)
     knowledge_base: dict[str, Any] | None = None
     if not scoped_knowledge_base_id:
-        status_before_submit = s.get_knowledge_ingestion_status(normalized_team_id)
-        existing_bases = [item for item in list(status_before_submit.get("knowledgeBases") or []) if isinstance(item, dict)]
-        if existing_bases:
-            knowledge_base = existing_bases[0]
+        # 单临界区 get-or-create：先只查不建，维持“有任何 active 库就复用、
+        # 无库且允许自动建库才创建”的原语义，同时消除查重与建库之间的锁间隙竞态。
+        get_or_create_kwargs = {
+            "name": "挑战杯科研知识库",
+            "description": "由 ai科学研究团队第一阶段一键入库流程创建。",
+            "actor_agent_id": steward_agent_id,
+            "reuse_any_existing": True,
+        }
+        resolved = s.team_knowledge_service.get_or_create_team_knowledge_base(
+            normalized_team_id,
+            create_if_missing=False,
+            **get_or_create_kwargs,
+        )
+        knowledge_base = resolved["knowledgeBase"]
+        if knowledge_base is None and auto_create_knowledge_base:
+            try:
+                resolved = s.team_knowledge_service.get_or_create_team_knowledge_base(
+                    normalized_team_id,
+                    **get_or_create_kwargs,
+                )
+                knowledge_base = resolved["knowledgeBase"]
+            except (s.team_knowledge_service.TeamKnowledgeError, s.team_knowledge_service.TeamKnowledgeNotFoundError) as exc:
+                raise s.TeamWorkflowOrchestrationError(f"Knowledge base auto-create failed: {exc}") from exc
+        if knowledge_base is not None:
             knowledge_base_id = s._knowledge_base_raw_id(knowledge_base.get("knowledgeBaseId"))
             scoped_knowledge_base_id = s._knowledge_base_scoped_id_for_team(
                 normalized_team_id,
                 knowledge_base_id,
                 knowledge_base,
             )
-        elif auto_create_knowledge_base:
-            try:
-                knowledge_base = s.team_knowledge_service.create_knowledge_base(
-                    normalized_team_id,
-                    name="挑战杯科研知识库",
-                    description="由 ai科学研究团队第一阶段一键入库流程创建。",
-                    actor_agent_id=steward_agent_id,
-                )
-                knowledge_base_id = s._knowledge_base_raw_id(knowledge_base.get("knowledgeBaseId"))
-                scoped_knowledge_base_id = s._knowledge_base_scoped_id_for_team(
-                    normalized_team_id,
-                    knowledge_base_id,
-                    knowledge_base,
-                )
-            except (s.team_knowledge_service.TeamKnowledgeError, s.team_knowledge_service.TeamKnowledgeNotFoundError) as exc:
-                raise s.TeamWorkflowOrchestrationError(f"Knowledge base auto-create failed: {exc}") from exc
     if not scoped_knowledge_base_id:
         raise s.TeamWorkflowOrchestrationError("Knowledge base id is required before knowledge collection ingestion.")
 

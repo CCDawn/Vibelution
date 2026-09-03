@@ -312,6 +312,68 @@ def create_knowledge_base(
     return _create_knowledge_base_for_owner(owner, name=name, description=description, actor_agent_id=normalized_actor, acl=acl)
 
 
+def get_or_create_team_knowledge_base(
+    team_id: str,
+    *,
+    name: str,
+    description: str = "",
+    actor_agent_id: str = "",
+    reuse_any_existing: bool = False,
+    create_if_missing: bool = True,
+) -> dict[str, Any]:
+    """Resolve a Team knowledge base by name (or any active base) and create it only if missing.
+
+    查重与建库共享同一个 ``_LOCK`` 临界区，关闭 "list 查重 → create" 两段各自拿锁
+    之间的 check-then-act 竞态（历史并行 run 曾同时判无同名库，产生
+    ``kb-knowledge-expansion-library-2..8`` 八个重复库）。``reuse_any_existing``
+    对应旧调用方 "有任何 active 库就复用" 的语义；``create_if_missing=False``
+    提供只查不建模式，未命中返回 ``{"knowledgeBase": None, "created": False}``。
+    """
+
+    team = _require_team(team_id)
+    owner = _owner_context("team", team["teamId"], team=team)
+    normalized_actor = str(actor_agent_id or "").strip()
+    if not normalized_actor:
+        raise TeamKnowledgePermissionError("Agent identity is required to create a team knowledge base.")
+    if not _member_role(team, normalized_actor):
+        raise TeamKnowledgePermissionError("Only Team members can create a team knowledge base.")
+    normalized_name = trim_lines(name or "", max_lines=1).strip()
+    if not normalized_name:
+        raise TeamKnowledgeError("Knowledge base name is required.")
+    with _LOCK:
+        state = _load_bases_state_for_owner(owner)
+        bases = [item for item in state.get("knowledgeBases") or [] if isinstance(item, dict)]
+        target = None
+        for item in bases:
+            if str(item.get("status") or "active") != "active":
+                continue
+            if reuse_any_existing or str(item.get("name") or "").strip() == normalized_name:
+                target = item
+                break
+        if target is not None:
+            target_id = str(target.get("knowledgeBaseId") or "")
+            repaired = _repair_base_for_owner(owner, target)
+            return {
+                "knowledgeBase": {
+                    **_knowledge_base_to_api(repaired, owner),
+                    "stats": _knowledge_base_stats_for_owner(owner, target_id),
+                    "permissions": _permissions_for_actor(owner, repaired, normalized_actor),
+                },
+                "created": False,
+            }
+        if not create_if_missing:
+            return {"knowledgeBase": None, "created": False}
+        return {
+            "knowledgeBase": _create_knowledge_base_for_owner(
+                owner,
+                name=normalized_name,
+                description=description,
+                actor_agent_id=normalized_actor,
+            ),
+            "created": True,
+        }
+
+
 def ensure_knowledge_base_review_grant(knowledge_base_id: str, agent_id: str) -> dict[str, Any]:
     """Idempotently grant one agent review permission on a knowledge base.
 
