@@ -594,7 +594,18 @@ def _payload_thinking_parameters(
 ) -> Dict[str, Any]:
     thinking_type = str(getattr(profile, "thinking_type", "") or "").strip().lower()
     if route.policy.thinking_param_shape != "qwen":
-        return {}
+        if not thinking_type:
+            return {}
+        # OpenAI-compatible wires (e.g. DashScope's chat_completions endpoint)
+        # have no native thinking-parameter shape, so the profile's declared
+        # thinking contract used to be silently dropped there.  LiteLLM merges
+        # ``extra_body`` keys into the outbound request body, which is exactly
+        # how those endpoints accept the qwen thinking toggle.  Nothing is
+        # emitted unless the profile explicitly declares a thinking contract,
+        # so undeclared models keep today's payload byte-for-byte.
+        enabled = thinking_type != "disabled"
+        actions.qwen_thinking_parameter = "enabled" if enabled else "disabled"
+        return {"extra_body": {"enable_thinking": enabled}}
     if thinking_type == "disabled":
         actions.qwen_thinking_parameter = "disabled"
         enabled = False

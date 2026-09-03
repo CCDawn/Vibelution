@@ -140,6 +140,72 @@ def test_llamacpp_qwen_thinking_shapes_system_messages_and_thinking_flag():
     assert client._last_payload_protocol_summary["payloadPolicyQwenThinkingParameter"] == "enabled"
 
 
+def make_dashscope_openai_compat_config(**kwargs):
+    values = {
+        "llm.providers.default.kind": "official_api",
+        "llm.providers.default.requires_api_key": False,
+        "llm.providers.default.base_url": "https://dashscope.example/compatible-mode/v1",
+        "llm.providers.default.api": "openai-completions",
+        "llm.profiles.primary.provider_id": "default",
+        "llm.profiles.primary.model": "qwen3.8-max-0902",
+    }
+    values.update(kwargs)
+    return make_config(**values)
+
+
+def test_openai_compat_wire_passes_declared_thinking_via_extra_body():
+    """SCI-007 regression: on chat_completions (thinking_param_shape !=
+    "qwen") a declared thinking contract used to be silently dropped, so
+    the digest drafter ran on the provider default thinking pass and its
+    deep-reasoning call outran the 600s per-call fence.  The declared
+    toggle now travels via litellm extra_body instead."""
+
+    client = LLMClient(
+        config=make_dashscope_openai_compat_config(
+            **{"llm.profiles.primary.thinking_type": "disabled"}
+        ),
+        backend=lambda payload: payload,
+    )
+
+    payload = client._build_payload([{"role": "user", "content": "ping"}])
+
+    assert payload["extra_body"]["enable_thinking"] is False
+    assert "enable_thinking" not in payload
+    assert client._last_payload_protocol_summary["payloadPolicyQwenThinkingParameter"] == "disabled"
+
+
+def test_openai_compat_wire_undeclared_thinking_stays_byte_identical():
+    """No declared thinking contract: no thinking parameters at all."""
+
+    client = LLMClient(
+        config=make_dashscope_openai_compat_config(
+            **{"llm.profiles.primary.thinking_type": ""}
+        ),
+        backend=lambda payload: payload,
+    )
+
+    payload = client._build_payload([{"role": "user", "content": "ping"}])
+
+    assert "extra_body" not in payload
+    assert "enable_thinking" not in payload
+
+
+def test_openai_compat_enabled_thinking_switches_to_qwen_shape_protocol():
+    """A declared non-disabled contract makes the resolver pick the qwen
+    thinking protocol, which keeps the historical top-level parameter."""
+
+    client = LLMClient(
+        config=make_dashscope_openai_compat_config(
+            **{"llm.profiles.primary.thinking_type": "adaptive"}
+        ),
+        backend=lambda payload: payload,
+    )
+
+    payload = client._build_payload([{"role": "user", "content": "ping"}])
+
+    assert payload["enable_thinking"] is True
+    assert "extra_body" not in payload
+
 def test_vllm_qwen_thinking_adds_chat_template_kwargs_for_reasoning_parser():
     client = LLMClient(config=make_vllm_qwen_config(), backend=lambda payload: payload)
 
