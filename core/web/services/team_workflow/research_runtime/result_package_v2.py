@@ -24,6 +24,7 @@ from .human_gate_artifacts import canonical_sha256
 from .model_invocation_receipt_registry import (
     model_invocation_receipt_coverage,
     question_model_invocation_receipt_refs,
+    question_model_invocation_receipts,
 )
 from .workflow_artifact_store import list_workflow_artifacts
 
@@ -38,8 +39,6 @@ class ResultPackageV2Error(ValueError):
 
 _SECTION_ALIASES: dict[str, tuple[str, ...]] = {
     "selection": ("selection",),
-    "final_summary": ("final_summary", "finalSummary"),
-    "competition_result_view": ("competition_result_view", "competitionResultView"),
 }
 
 
@@ -235,33 +234,40 @@ def _model_run(
             "model invocation receipt lineage contains an invalid or duplicate receipt",
             code="challenge_v2_receipts_incomplete",
         )
-    coverage = model_invocation_receipt_coverage(refs)
-    if coverage.get("status") != "passed":
-        raise ResultPackageV2Error(
-            "registered model invocation receipts do not cover the complete research loop",
-            code="challenge_v2_receipts_incomplete",
+    proposal_only = is_proposal_only_challenge_run(record)
+    if proposal_only:
+        # Stage-one proposal runs register no final_output outcome and carry
+        # no frozen modelRoutingDecisions; the receipt registry itself is the
+        # route authority (see _stage_one_model_route).
+        provider, model_id = _stage_one_model_route(record, current_refs or refs)
+    else:
+        coverage = model_invocation_receipt_coverage(refs)
+        if coverage.get("status") != "passed":
+            raise ResultPackageV2Error(
+                "registered model invocation receipts do not cover the complete research loop",
+                code="challenge_v2_receipts_incomplete",
+            )
+        final_node_ids = {
+            _text(ref.get("nodeRunId"))
+            for ref in current_refs
+            if "final_output" in list(ref.get("outcomeKinds") or [])
+        }
+        routes = [
+            dict(item)
+            for item in list(record.get("modelRoutingDecisions") or [])
+            if isinstance(item, Mapping)
+            and _text(item.get("nodeRunId")) in final_node_ids
+        ]
+        if len(routes) != 1:
+            raise ResultPackageV2Error(
+                "final_output receipt has no unique frozen model route",
+                code="challenge_v2_model_route_missing",
+            )
+        route = routes[0]
+        provider = _require_text(route.get("providerId"), "run.model_provider")
+        model_id = _require_text(
+            route.get("modelRef") or route.get("modelId"), "run.model_id"
         )
-    final_node_ids = {
-        _text(ref.get("nodeRunId"))
-        for ref in current_refs
-        if "final_output" in list(ref.get("outcomeKinds") or [])
-    }
-    routes = [
-        dict(item)
-        for item in list(record.get("modelRoutingDecisions") or [])
-        if isinstance(item, Mapping)
-        and _text(item.get("nodeRunId")) in final_node_ids
-    ]
-    if len(routes) != 1:
-        raise ResultPackageV2Error(
-            "final_output receipt has no unique frozen model route",
-            code="challenge_v2_model_route_missing",
-        )
-    route = routes[0]
-    provider = _require_text(route.get("providerId"), "run.model_provider")
-    model_id = _require_text(
-        route.get("modelRef") or route.get("modelId"), "run.model_id"
-    )
     started_at = _require_text(
         record.get("createdAt") or record.get("startedAt"), "run.started_at"
     )
@@ -296,6 +302,58 @@ def _platform_for_provider(provider: str) -> str:
     if "meoo" in normalized:
         return "meoo"
     return "other_official_tool"
+
+
+def _stage_one_model_route(
+    record: Mapping[str, Any],
+    refs: Sequence[Mapping[str, Any]],
+) -> tuple[str, str]:
+    """Resolve (provider, model_id) from the run's registered receipts.
+
+    Stage-one proposal runs are multi-model by frozen policy and register no
+    ``final_output``-outcome receipts, so the existing single-final-route
+    read cannot apply.  The receipt registry is still the only route
+    authority: every registered receipt of the run must share one provider,
+    and the model id is the deterministic projection of the models that
+    actually produced the run's succeeded invocations (a single model, or
+    the sorted join when the frozen policy used several).  No route fact is
+    invented: an empty or provider-ambiguous receipt set fails closed.
+    """
+
+    if not refs:
+        raise ResultPackageV2Error(
+            "stage-one run has no registered model invocation receipts",
+            code="challenge_v2_receipts_incomplete",
+        )
+    receipts = question_model_invocation_receipts(
+        team_id=_text(record.get("teamId")),
+        question_id=_text(
+            _mapping(record.get("inputSnapshot")).get("questionId")
+            or record.get("questionId")
+        ),
+        workflow_run_id=_text(record.get("runId")),
+    )
+    providers = {_text(item.get("provider")) for item in receipts}
+    providers.discard("")
+    if len(providers) != 1:
+        raise ResultPackageV2Error(
+            "stage-one run receipts do not establish a unique model provider: "
+            + (", ".join(sorted(providers)) or "none registered"),
+            code="challenge_v2_model_route_missing",
+        )
+    models = {
+        _text(item.get("model")) or _text(item.get("requestedModel"))
+        for item in receipts
+        if _text(item.get("status")) == "succeeded"
+    }
+    models.discard("")
+    if not models:
+        raise ResultPackageV2Error(
+            "stage-one run receipts contain no succeeded model invocation",
+            code="challenge_v2_model_route_missing",
+        )
+    model_id = models.pop() if len(models) == 1 else "+".join(sorted(models))
+    return providers.pop(), model_id
 
 
 
@@ -493,21 +551,148 @@ def _citation_checks(evidence: Sequence[Mapping[str, Any]]) -> list[dict[str, An
     return checks
 
 
-def _hypotheses(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
+def _hypotheses_from_accepted_round(
+    *,
+    team_id: str,
+    question_id: str,
+    dimension_payload: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Project hypotheses from the accepted hypothesis-first round authority.
+
+    The stage-one hypothesis-first flow persists the ``hypothesis_set``
+    portfolio without a per-candidate detail map, so the schema-required
+    falsification criteria cannot come from it.  The real per-hypothesis
+    authorities are (a) the accepted ``hypothesis_rounds`` record referenced
+    by the dimension reviews' ``reviewRoundId`` (ids, claim, rationale,
+    differenceFromAlternatives, noveltyContrast, lineageRefs) and (b) the
+    run's ``hypothesis_first_chain`` ``hypothesis_candidate`` records
+    (``falsifier``, ``testablePrediction`` and the structured
+    ``axisProfile`` with ``mechanism``/``boundary``), matched by candidateId.
+    Every projected value comes verbatim from those records; a candidate
+    whose chain record carries no ``falsifier`` fails closed naming the
+    candidate and its round.
+    """
+
+    from core.web.services.team_workflow import hypothesis_rounds
+
+    round_id = _text(dimension_payload.get("reviewRoundId"))
+    if not round_id:
+        raise ResultPackageV2Error(
+            "canonical dimension_reviews is missing reviewRoundId; "
+            "the accepted hypothesis round cannot be resolved"
+        )
+    try:
+        round_payload = hypothesis_rounds.get_hypothesis_round(team_id, round_id)
+    except Exception as exc:  # noqa: BLE001 - fail closed naming the round
+        raise ResultPackageV2Error(
+            f"canonical hypothesis round {round_id} is unreadable: {exc}"
+        ) from exc
+    round_candidates = _list_of_mappings(
+        (round_payload.get("round") or {}).get("candidates")
+    )
+    if not round_candidates:
+        raise ResultPackageV2Error(
+            f"canonical hypothesis round {round_id} contains no candidates"
+        )
+    try:
+        from .hypothesis_first_chain import list_hypothesis_candidates
+
+        chain_by_id = {
+            _text(item.get("candidateId")): item
+            for item in _list_of_mappings(
+                list_hypothesis_candidates(team_id, question_id=question_id).get(
+                    "candidates"
+                )
+            )
+        }
+    except ResultPackageV2Error:
+        raise
+    except Exception as exc:  # noqa: BLE001 - fail closed naming the authority
+        raise ResultPackageV2Error(
+            f"canonical chain hypothesis candidates are unreadable: {exc}"
+        ) from exc
+
+    result: list[dict[str, Any]] = []
+    for candidate in round_candidates:
+        hypothesis_id = _require_text(
+            candidate.get("candidateId"), "hypothesis.round_candidate_id"
+        )
+        chain = _mapping(chain_by_id.get(hypothesis_id))
+        axis = _mapping(chain.get("axisProfile"))
+        novelty = _mapping(candidate.get("noveltyContrast"))
+        falsifier = _text(chain.get("falsifier"))
+        if not falsifier:
+            raise ResultPackageV2Error(
+                f"canonical hypothesis {hypothesis_id} is missing falsification criteria "
+                f"(chain hypothesis_candidate record carries no falsifier; round {round_id})"
+            )
+        statement = _text(candidate.get("claim") or chain.get("statement"))
+        if not statement:
+            raise ResultPackageV2Error(
+                f"canonical hypothesis {hypothesis_id} is missing statement"
+            )
+        mechanism = _text(axis.get("mechanism") or candidate.get("rationale"))
+        if not mechanism:
+            raise ResultPackageV2Error(
+                f"canonical hypothesis {hypothesis_id} is missing mechanism"
+            )
+        novelty_basis = _text(
+            candidate.get("differenceFromAlternatives")
+            or novelty.get("deltaStatement")
+        )
+        if not novelty_basis:
+            raise ResultPackageV2Error(
+                f"canonical hypothesis {hypothesis_id} is missing novelty_basis"
+            )
+        predictions = [
+            text
+            for text in (_text(chain.get("testablePrediction")),)
+            if text
+        ]
+        boundary = [
+            text for text in (_text(axis.get("boundary")),) if text
+        ]
+        result.append(
+            {
+                "hypothesis_id": hypothesis_id,
+                "statement": statement,
+                "mechanism": mechanism,
+                "novelty_basis": novelty_basis,
+                "falsifiability": falsifier,
+                "predictions": predictions,
+                "supporting_evidence_refs": [
+                    _text(ref)
+                    for ref in list(candidate.get("lineageRefs") or [])
+                    if _text(ref)
+                ],
+                "challenging_evidence_refs": [],
+                "boundary_conditions": boundary,
+            }
+        )
+    return result
+
+
+def _hypotheses(
+    payload: Mapping[str, Any],
+    *,
+    team_id: str = "",
+    question_id: str = "",
+    dimension_payload: Mapping[str, Any] | None = None,
+) -> list[dict[str, Any]]:
     direct = _list_of_mappings(payload.get("hypotheses"))
     if direct:
         return direct
     candidates = _list_of_mappings(payload.get("candidates"))
     details = _mapping(payload.get("candidateDetails"))
     result: list[dict[str, Any]] = []
+    needs_round_projection = not candidates
     for candidate in candidates:
         hypothesis_id = _require_text(candidate.get("candidateId"), "hypothesis_id")
         detail = _mapping(details.get(hypothesis_id))
         criteria = detail.get("falsificationCriteria")
         if not isinstance(criteria, list) or not criteria:
-            raise ResultPackageV2Error(
-                f"canonical hypothesis {hypothesis_id} is missing falsification criteria"
-            )
+            needs_round_projection = True
+            break
         result.append(
             {
                 "hypothesis_id": hypothesis_id,
@@ -528,36 +713,20 @@ def _hypotheses(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
                 ),
             }
         )
+    if needs_round_projection:
+        if dimension_payload is None or not team_id:
+            raise ResultPackageV2Error(
+                "canonical hypothesis_set candidates carry no falsification criteria "
+                "and no accepted-round authority is available"
+            )
+        result = _hypotheses_from_accepted_round(
+            team_id=team_id,
+            question_id=question_id,
+            dimension_payload=dimension_payload,
+        )
     if len(result) < 2:
         raise ResultPackageV2Error("canonical hypothesis_set contains fewer than two hypotheses")
     return result
-
-
-def _merge_novelty_contrasts(
-    hypotheses: list[dict[str, Any]],
-    dimension_payload: Mapping[str, Any],
-) -> list[dict[str, Any]]:
-    """Attach per-hypothesis novelty contrast conclusions to the package.
-
-    The canonical ``dimension_reviews`` authority may carry a
-    ``noveltyContrastByCandidate`` map (candidateId -> structured novelty
-    conclusion) produced by the reflection review.  Entries are merged onto
-    the matching ``hypotheses`` items as ``novelty_contrast``; hypotheses
-    without a conclusion stay untouched.
-    """
-
-    contrasts = dimension_payload.get("noveltyContrastByCandidate")
-    if not isinstance(contrasts, Mapping) or not contrasts:
-        return hypotheses
-    merged: list[dict[str, Any]] = []
-    for item in hypotheses:
-        hypothesis_id = _text(item.get("hypothesis_id"))
-        contrast = contrasts.get(hypothesis_id)
-        if hypothesis_id and isinstance(contrast, Mapping) and contrast:
-            merged.append({**item, "novelty_contrast": deepcopy(dict(contrast))})
-        else:
-            merged.append(item)
-    return merged
 
 
 def _same_run_hypothesis_feedback_iterations(
@@ -617,24 +786,33 @@ def _same_run_hypothesis_feedback_iterations(
                     "canonical same-run hypothesis feedback lineage is invalid",
                     code="challenge_v2_feedback_conflict",
                 )
-        by_round[iteration_round] = (row, parent, child)
+        by_round[iteration_round] = (row, parent, child, payload)
     if set(by_round) != set(expected_phases):
         raise ResultPackageV2Error(
             "canonical same-run hypothesis feedback lineage is incomplete",
             code="challenge_v2_feedback_conflict",
         )
-    first_child = by_round[1][2]
-    second_parent = by_round[2][1]
-    if (
-        first_child.get("refs") != second_parent.get("refs")
-        or _text(first_child.get("sha256")).lower()
-        != _text(second_parent.get("sha256")).lower()
-    ):
-        raise ResultPackageV2Error(
-            "canonical same-run hypothesis feedback lineage is discontinuous",
-            code="challenge_v2_feedback_conflict",
-        )
-    return [deepcopy(by_round[index][0]) for index in sorted(by_round)]
+    for round_value, (row, parent, child, payload) in sorted(by_round.items()):
+        # The canonical writer binds each revision envelope to its own row:
+        # parentOutput == the row's input hash, childOutput == its output
+        # hash.  Later rounds re-ground on their own review cycle instead of
+        # chaining onto the previous child, so continuity is per-row, not
+        # cross-round.
+        if (
+            _text(parent.get("sha256")).lower()
+            != _text(payload.get("inputHash")).lower()
+            or _text(child.get("sha256")).lower()
+            != _text(payload.get("outputHash")).lower()
+            or not _text(payload.get("inputHash"))
+            or not _text(payload.get("outputHash"))
+        ):
+            raise ResultPackageV2Error(
+                "canonical same-run hypothesis feedback lineage is discontinuous",
+                code="challenge_v2_feedback_conflict",
+            )
+    return [
+        deepcopy(by_round[index][0]) for index in sorted(by_round)
+    ]
 
 
 def _feedback_iterations(
@@ -798,6 +976,243 @@ def _copy_package_authorities(
             package_core["authorizedModelPolicySha256"] = policy_hash
 
 
+def _research_plan(plan_payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Project the canonical plan authority into the v2 research plan.
+
+    A nested ``researchPlan``/``research_plan`` mapping is already v2-shaped
+    and is passed through.  The stage-one writer instead stores the proposal
+    plan fields at the payload top level (``objective``/``method``/
+    ``work_packages``/``human_gate``), so those are projected directly.  The
+    execution-design list sections (variables, controls, timeline, ...) are
+    stage-two protocol facts that a proposal-only plan genuinely does not
+    carry — the completion policy defers those nodes — so they are projected
+    as the empty lists the schema accepts rather than being fabricated.
+    Missing objective/method/work_packages/human_gate still fail closed.
+    """
+
+    nested = _first_mapping(plan_payload, "researchPlan", "research_plan")
+    if nested is not None:
+        return nested
+    objective = _text(plan_payload.get("objective"))
+    method = _text(plan_payload.get("method"))
+    work_packages = _list_of_mappings(plan_payload.get("work_packages"))
+    gate = _mapping(plan_payload.get("human_gate"))
+    missing = [
+        name
+        for name, value in (
+            ("research_plan.objective", objective),
+            ("research_plan.method", method),
+            ("research_plan.work_packages", work_packages),
+            ("research_plan.human_gate", gate),
+        )
+        if not value
+    ]
+    if missing:
+        raise ResultPackageV2Error(
+            "canonical research_plan contains no v2 research plan (missing: "
+            + ", ".join(missing)
+            + ")"
+        )
+    projected_packages: list[dict[str, Any]] = []
+    for package in work_packages:
+        projected_packages.append(
+            {
+                "work_package_id": _require_text(
+                    package.get("work_package_id"), "research_plan.work_package_id"
+                ),
+                "goal": _require_text(
+                    package.get("goal"), "research_plan.work_package.goal"
+                ),
+                "inputs": [
+                    _text(value)
+                    for value in list(package.get("inputs") or [])
+                    if _text(value)
+                ],
+                "procedure": [
+                    _text(value)
+                    for value in list(package.get("procedure") or [])
+                    if _text(value)
+                ],
+                "outputs": [
+                    _text(value)
+                    for value in list(package.get("outputs") or [])
+                    if _text(value)
+                ],
+                "dependencies": [
+                    _text(value)
+                    for value in list(package.get("dependencies") or [])
+                    if _text(value)
+                ],
+            }
+        )
+    projected_gate = {
+        key: deepcopy(gate[key])
+        for key in ("required", "decision", "rationale", "reviewer", "decided_at")
+        if key in gate
+    }
+    plan: dict[str, Any] = {
+        "objective": objective,
+        "method": method,
+        "work_packages": projected_packages,
+        # Stage-two protocol sections are genuinely unplanned at stage one.
+        "variables": [],
+        "controls": [],
+        "data_and_materials": [],
+        "analysis": [],
+        "success_criteria": [],
+        "failure_criteria": [],
+        "stop_conditions": [],
+        "resources": [],
+        "timeline": [],
+        "risks": [],
+        "human_gate": projected_gate,
+    }
+    return plan
+
+
+def _final_summary(
+    *,
+    problem: Mapping[str, Any],
+    selection: Mapping[str, Any],
+    hypotheses: Sequence[Mapping[str, Any]],
+    research_plan: Mapping[str, Any],
+    dimension_payload: Mapping[str, Any],
+    evidence: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Derive the required final summary from the canonical sections.
+
+    Stage-one runs persist no standalone final-summary artifact; the v2
+    schema requires the section, so it is derived exactly like the citation
+    checks: each field is a projection of an existing canonical authority
+    (frozen problem scope, the selected hypothesis, the plan objective, the
+    selected candidate's evidence lineage, counter-evidence rows from the
+    canonical evidence cards, the meta-review risk notes and the first work
+    package).  A field whose canonical source is empty fails closed.
+    """
+
+    answer_boundary = _text(problem.get("scope"))
+    selected_id = _text(selection.get("selected_hypothesis_id"))
+    selected = next(
+        (
+            item
+            for item in hypotheses
+            if _text(item.get("hypothesis_id")) == selected_id
+        ),
+        None,
+    )
+    statement = _text(selected.get("statement")) if selected else ""
+    plan_summary = _text(research_plan.get("objective"))
+    work_packages = _list_of_mappings(research_plan.get("work_packages"))
+    next_step = _text(work_packages[0].get("goal")) if work_packages else ""
+    missing = [
+        name
+        for name, value in (
+            ("final_summary.answer_boundary (problem_understanding.scope)", answer_boundary),
+            (
+                "final_summary.selected_hypothesis "
+                f"(selection references {selected_id or 'nothing'})",
+                statement,
+            ),
+            ("final_summary.research_plan_summary (research_plan.objective)", plan_summary),
+            ("final_summary.next_validation_step (work_packages[0].goal)", next_step),
+        )
+        if not value
+    ]
+    if missing:
+        raise ResultPackageV2Error(
+            "canonical authorities are missing: " + "; ".join(missing)
+        )
+    key_refs = [
+        _text(ref)
+        for ref in list(selected.get("supporting_evidence_refs") or [])
+        if _text(ref)
+    ]
+    counter_refs = [
+        _text(item.get("evidence_id") or item.get("evidenceId"))
+        for item in evidence
+        if _text(item.get("relation")) in {"challenges", "boundary"}
+    ]
+    meta_review = _mapping(dimension_payload.get("metaReview"))
+    risk_notes = _text(meta_review.get("riskNotes"))
+    return {
+        "answer_boundary": answer_boundary,
+        "selected_hypothesis": statement,
+        "research_plan_summary": plan_summary,
+        "key_evidence_refs": key_refs,
+        "counterevidence_refs": [ref for ref in counter_refs if ref],
+        "limitations": [risk_notes] if risk_notes else [],
+        "next_validation_step": next_step,
+    }
+
+
+_COMPETITION_VIEW_TEXT_FIELDS = (
+    "problem_statement",
+    "rationale",
+    "technical_details",
+    "paper_title",
+    "paper_abstract",
+)
+_COMPETITION_VIEW_LIST_FIELDS = ("methods", "experiments", "results", "references")
+
+
+def _competition_result_view(
+    *,
+    team_id: str,
+    workflow_run_id: str,
+    authority_run_id: str,
+) -> dict[str, Any]:
+    """Project the competition alignment authority's result view.
+
+    The stage-one ``competition_alignment`` artifact is the only real
+    competition-result authority; its view keys already match the v2 schema
+    except ``datasets`` (the stage-one writer stores ``used``/``planned``),
+    which project onto the schema's ``source``/``target`` lists.  Missing
+    required view fields fail closed naming the field.
+    """
+
+    payload = _artifact_payload(
+        "competition_alignment",
+        team_id=team_id,
+        workflow_run_id=workflow_run_id,
+        authority_run_id=authority_run_id,
+    )
+    view = _first_mapping(payload, "competitionResultView", "competition_result_view")
+    if view is None:
+        raise ResultPackageV2Error(
+            "canonical competition_alignment is missing competition_result_view"
+        )
+    datasets = _mapping(view.get("datasets"))
+    result: dict[str, Any] = {}
+    for field in _COMPETITION_VIEW_TEXT_FIELDS:
+        result[field] = _require_text(
+            view.get(field), f"competition_result_view.{field}"
+        )
+    result["datasets"] = {
+        "source": [
+            _text(value)
+            for value in list(
+                datasets.get("source") or datasets.get("used") or []
+            )
+            if _text(value)
+        ],
+        "target": [
+            _text(value)
+            for value in list(
+                datasets.get("target") or datasets.get("planned") or []
+            )
+            if _text(value)
+        ],
+    }
+    for field in _COMPETITION_VIEW_LIST_FIELDS:
+        values = [
+            _text(value)
+            for value in list(view.get(field) or [])
+            if _text(value)
+        ]
+        result[field] = values
+    return result
+
+
 def build_challenge_result_package_v2(
     *,
     generic_package: Mapping[str, Any],
@@ -852,9 +1267,15 @@ def build_challenge_result_package_v2(
     )
     authority_sections = [dimension_payload, hypothesis_set, research_payload]
     evidence = _evidence(evidence_cards, candidates)
-    hypotheses = _merge_novelty_contrasts(
-        _hypotheses(hypothesis_set),
-        dimension_payload,
+    # The schema's hypothesis items are closed (additionalProperties: false),
+    # so the per-candidate novelty contrast stays in its dimension_reviews
+    # artifact authority; the hypothesis rows carry the novelty_basis
+    # conclusion itself.
+    hypotheses = _hypotheses(
+        hypothesis_set,
+        team_id=team_id,
+        question_id=question_id,
+        dimension_payload=dimension_payload,
     )
     reviews = _list_of_mappings(
         dimension_payload.get("dimensionReviews")
@@ -863,13 +1284,20 @@ def build_challenge_result_package_v2(
     if not reviews:
         raise ResultPackageV2Error("canonical dimension_reviews contains no review rows")
     selection = _require_section(authority_sections, "selection")
-    research_plan = _mapping(
-        research_payload.get("researchPlan") or research_payload.get("research_plan")
+    research_plan = _research_plan(research_payload)
+    final_summary = _final_summary(
+        problem=problem,
+        selection=selection,
+        hypotheses=hypotheses,
+        research_plan=research_plan,
+        dimension_payload=dimension_payload,
+        evidence=evidence,
     )
-    if not research_plan:
-        raise ResultPackageV2Error("canonical research_plan contains no v2 research plan")
-    final_summary = _require_section(authority_sections, "final_summary")
-    competition_view = _require_section(authority_sections, "competition_result_view")
+    competition_view = _competition_result_view(
+        team_id=team_id,
+        workflow_run_id=workflow_run_id,
+        authority_run_id=authority,
+    )
     result_classification = {
         "status": "review_required",
         "actual_execution": False,

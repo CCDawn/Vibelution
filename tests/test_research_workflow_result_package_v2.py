@@ -19,13 +19,14 @@ def _authority_sections() -> tuple[dict, dict[str, dict]]:
         "hypothesis_set": {
             "hypotheses": deepcopy(output["hypotheses"]),
             "selection": deepcopy(output["selection"]),
-            "finalSummary": deepcopy(output["result_classification"]["final_summary"]),
-            "competitionResultView": deepcopy(output["competition_result_view"]),
         },
         "dimension_reviews": {
             "dimensionReviews": deepcopy(output["dimension_reviews"]),
         },
         "research_plan": {"researchPlan": deepcopy(output["research_plan"])},
+        "competition_alignment": {
+            "competitionResultView": deepcopy(output["competition_result_view"]),
+        },
     }
     return output, artifacts
 
@@ -119,9 +120,9 @@ def test_citation_checks_preserve_unverified_evidence_as_failed() -> None:
     assert all(item["status"] == "passed" for item in checks[1:])
 
 
-def test_v2_producer_fails_closed_without_canonical_final_summary(monkeypatch) -> None:
+def test_v2_producer_fails_closed_without_problem_scope(monkeypatch) -> None:
     expected, artifacts = _authority_sections()
-    artifacts["hypothesis_set"].pop("finalSummary")
+    artifacts["problem_understanding"]["scope"] = ""
     monkeypatch.setattr(
         result_package_v2,
         "_artifact_payload",
@@ -134,7 +135,7 @@ def test_v2_producer_fails_closed_without_canonical_final_summary(monkeypatch) -
     )
     monkeypatch.setattr(result_package_v2, "_model_run", lambda *_a, **_k: deepcopy(expected["run"]))
 
-    with pytest.raises(result_package_v2.ResultPackageV2Error, match="final_summary"):
+    with pytest.raises(result_package_v2.ResultPackageV2Error, match="answer_boundary"):
         result_package_v2.build_challenge_result_package_v2(
             generic_package={"runId": "run-sci-096"},
             record=_record(),
@@ -389,6 +390,12 @@ def test_feedback_iterations_follow_revision_parent_lineage(monkeypatch) -> None
 
 
 def test_feedback_iterations_accept_two_phase_same_run_lineage(monkeypatch) -> None:
+    """Real stage-one shape: each revision re-grounds on its own review cycle.
+
+    The canonical writer binds ``parentOutput`` to the row's ``inputHash``
+    and ``childOutput`` to its ``outputHash``; later rounds are NOT chained
+    onto the previous child output.
+    """
     monkeypatch.setattr(
         result_package_v2,
         "list_workflow_artifacts",
@@ -410,10 +417,15 @@ def test_feedback_iterations_accept_two_phase_same_run_lineage(monkeypatch) -> N
                     "nodeId": "hypothesis_design",
                     "iterationRound": 2,
                     "revisionPhase": "review_revision",
+                    "inputHash": "c" * 64,
+                    "outputHash": "d" * 64,
                     "revisionEnvelope": {
                         "phase": "review_revision",
-                        "parentOutput": {"refs": ["hypothesis:r1"], "sha256": "b" * 64},
-                        "childOutput": {"refs": ["hypothesis:r2"], "sha256": "c" * 64},
+                        "parentOutput": {
+                            "refs": ["collection_request:r2", "meeting_round:r2"],
+                            "sha256": "c" * 64,
+                        },
+                        "childOutput": {"refs": ["hypothesis:r2"], "sha256": "d" * 64},
                     },
                     "feedbackIteration": {"round": 2, "changes": ["reviewed"]},
                 },
@@ -426,9 +438,14 @@ def test_feedback_iterations_accept_two_phase_same_run_lineage(monkeypatch) -> N
                     "nodeId": "hypothesis_design",
                     "iterationRound": 1,
                     "revisionPhase": "grounded_revision",
+                    "inputHash": "a" * 64,
+                    "outputHash": "b" * 64,
                     "revisionEnvelope": {
                         "phase": "grounded_revision",
-                        "parentOutput": {"refs": ["hypothesis:r0"], "sha256": "a" * 64},
+                        "parentOutput": {
+                            "refs": ["collection_request:r1", "meeting_round:r1"],
+                            "sha256": "a" * 64,
+                        },
                         "childOutput": {"refs": ["hypothesis:r1"], "sha256": "b" * 64},
                     },
                     "feedbackIteration": {"round": 1, "changes": ["grounded"]},
@@ -448,7 +465,15 @@ def test_feedback_iterations_accept_two_phase_same_run_lineage(monkeypatch) -> N
 
 
 def test_feedback_iterations_reject_discontinuous_same_run_lineage(monkeypatch) -> None:
-    def artifact(round_value: int, phase: str, parent_hash: str, child_hash: str) -> dict:
+    def artifact(
+        round_value: int,
+        phase: str,
+        input_hash: str,
+        output_hash: str,
+        *,
+        envelope_parent_hash: str | None = None,
+        envelope_child_hash: str | None = None,
+    ) -> dict:
         return {
             "workflowRunId": "run-stage-one",
             "sourceCollectionRunId": "source-sci-096",
@@ -457,15 +482,17 @@ def test_feedback_iterations_reject_discontinuous_same_run_lineage(monkeypatch) 
                 "nodeId": "hypothesis_design",
                 "iterationRound": round_value,
                 "revisionPhase": phase,
+                "inputHash": input_hash * 64,
+                "outputHash": output_hash * 64,
                 "revisionEnvelope": {
                     "phase": phase,
                     "parentOutput": {
-                        "refs": [f"hypothesis:{parent_hash}"],
-                        "sha256": parent_hash * 64,
+                        "refs": [f"hypothesis:{envelope_parent_hash or input_hash}"],
+                        "sha256": (envelope_parent_hash or input_hash) * 64,
                     },
                     "childOutput": {
-                        "refs": [f"hypothesis:{child_hash}"],
-                        "sha256": child_hash * 64,
+                        "refs": [f"hypothesis:{envelope_child_hash or output_hash}"],
+                        "sha256": (envelope_child_hash or output_hash) * 64,
                     },
                 },
                 "feedbackIteration": {"round": round_value},
@@ -477,7 +504,9 @@ def test_feedback_iterations_reject_discontinuous_same_run_lineage(monkeypatch) 
         "list_workflow_artifacts",
         lambda *_args, **_kwargs: [
             artifact(1, "grounded_revision", "a", "b"),
-            artifact(2, "review_revision", "c", "d"),
+            # Round 2's envelope claims a parent hash that is not the row's
+            # persisted input hash: the row contradicts its own lineage.
+            artifact(2, "review_revision", "c", "d", envelope_parent_hash="e"),
         ],
     )
 
@@ -587,3 +616,543 @@ def test_model_run_uses_real_receipt_ids_and_final_route(monkeypatch) -> None:
     assert flash_run["model_provider"] == "opencode_go"
     assert flash_run["model_id"] == "opencode_go/deepseek-v4-flash"
     assert flash_run["platform"] == "other_official_tool"
+
+
+# ------------------------------- stage-one accepted-round hypothesis authority
+
+
+def _round_candidate(**overrides: Any) -> dict[str, Any]:
+    """Shape of one accepted ``hypothesis_rounds`` candidate (real fields)."""
+    candidate = {
+        "candidateId": "sci-091-cbdbec3a3",
+        "claim": "Erase-cost and cooling jointly bound sustained processing rate.",
+        "rationale": "Separates the bound into erasure energy and heat removal.",
+        "differenceFromAlternatives": "Unlike constant-bound alternatives, the mechanism is separable and measurable.",
+        "lineageRefs": ["candidate-2026-e1", "candidate-2026-e2"],
+        "noveltyContrast": {"basis": "retrieved", "deltaStatement": "No overlapping prior work found."},
+        "scores": {"falsifiability": 0.82},
+        "status": "reviewed",
+    }
+    candidate.update(overrides)
+    return candidate
+
+
+def _chain_candidate(**overrides: Any) -> dict[str, Any]:
+    """Shape of one ``hypothesis_first_chain`` hypothesis_candidate record."""
+    record = {
+        "recordKind": "hypothesis_candidate",
+        "candidateId": "sci-091-cbdbec3a3",
+        "candidateAuthority": "formal_grounded_candidate",
+        "statement": "Erase-cost and cooling jointly bound sustained processing rate.",
+        "falsifier": "A peer-reviewed result showing sustained ops/s rising without better cooling.",
+        "testablePrediction": "ops/s <= P_cool / (N_e * E_e + overhead).",
+        "axisProfile": {
+            "mechanism": "Irreversible erasure dissipates energy; cooling bounds sustained power.",
+            "boundary": "Applies only to fixed cooling and reliability budgets.",
+        },
+        "lineageRefs": ["candidate-2026-e1"],
+    }
+    record.update(overrides)
+    return record
+
+
+def _patch_hypothesis_authorities(monkeypatch, round_candidates, chain_candidates) -> None:
+    from core.web.services.team_workflow import hypothesis_rounds
+    from core.web.services.team_workflow.research_runtime import hypothesis_first_chain
+
+    monkeypatch.setattr(
+        hypothesis_rounds,
+        "get_hypothesis_round",
+        lambda team_id, round_id: {"teamId": team_id, "round": {"roundId": round_id, "candidates": round_candidates}},
+    )
+    monkeypatch.setattr(
+        hypothesis_first_chain,
+        "list_hypothesis_candidates",
+        lambda team_id, **_kwargs: {"candidates": chain_candidates},
+    )
+
+
+def test_hypotheses_project_accepted_round_and_chain_authorities(monkeypatch) -> None:
+    _patch_hypothesis_authorities(
+        monkeypatch,
+        [_round_candidate(), _round_candidate(candidateId="sci-091-cf0889b0d")],
+        [
+            _chain_candidate(),
+            _chain_candidate(
+                candidateId="sci-091-cf0889b0d",
+                falsifier="Sustained throughput approaching Lloyd/cGh bounds would falsify this.",
+                axisProfile={"mechanism": "CMOS power density and thermal budgets bind frequency."},
+            ),
+        ],
+    )
+    hypotheses = result_package_v2._hypotheses(
+        {"candidates": [{"candidateId": "hyp-portfolio-1", "claim": "portfolio"}]},
+        team_id="research-team",
+        question_id="SCI-091",
+        dimension_payload={"reviewRoundId": "hround-1"},
+    )
+
+    assert [item["hypothesis_id"] for item in hypotheses] == [
+        "sci-091-cbdbec3a3",
+        "sci-091-cf0889b0d",
+    ]
+    first = hypotheses[0]
+    assert first["statement"] == "Erase-cost and cooling jointly bound sustained processing rate."
+    assert first["falsifiability"] == (
+        "A peer-reviewed result showing sustained ops/s rising without better cooling."
+    )
+    assert first["mechanism"] == (
+        "Irreversible erasure dissipates energy; cooling bounds sustained power."
+    )
+    assert first["novelty_basis"] == (
+        "Unlike constant-bound alternatives, the mechanism is separable and measurable."
+    )
+    assert first["predictions"] == ["ops/s <= P_cool / (N_e * E_e + overhead)."]
+    assert first["boundary_conditions"] == [
+        "Applies only to fixed cooling and reliability budgets."
+    ]
+    assert first["supporting_evidence_refs"] == ["candidate-2026-e1", "candidate-2026-e2"]
+    assert first["challenging_evidence_refs"] == []
+
+
+def test_hypothesis_without_chain_falsifier_fails_closed(monkeypatch) -> None:
+    _patch_hypothesis_authorities(
+        monkeypatch,
+        [_round_candidate(), _round_candidate(candidateId="sci-091-cf0889b0d")],
+        [
+            _chain_candidate(falsifier=" "),
+            _chain_candidate(candidateId="sci-091-cf0889b0d"),
+        ],
+    )
+
+    with pytest.raises(
+        result_package_v2.ResultPackageV2Error,
+        match="sci-091-cbdbec3a3 is missing falsification criteria",
+    ) as exc_info:
+        result_package_v2._hypotheses(
+            {"candidates": [{"candidateId": "hyp-portfolio-1"}]},
+            team_id="research-team",
+            question_id="SCI-091",
+            dimension_payload={"reviewRoundId": "hround-1"},
+        )
+
+    assert exc_info.value.code == "challenge_v2_authority_missing"
+
+
+def test_hypotheses_fail_closed_without_review_round_reference(monkeypatch) -> None:
+    with pytest.raises(
+        result_package_v2.ResultPackageV2Error,
+        match="reviewRoundId",
+    ):
+        result_package_v2._hypotheses(
+            {"candidates": [{"candidateId": "hyp-portfolio-1"}]},
+            team_id="research-team",
+            question_id="SCI-091",
+            dimension_payload={},
+        )
+
+
+# ------------------------------------------------- stage-one research plan
+
+
+def test_research_plan_projects_stage_one_proposal_plan() -> None:
+    plan = result_package_v2._research_plan(
+        {
+            "objective": "Bound the question to measurable ops/s calibers.",
+            "method": "Separate erasure cost from heat removal.",
+            "work_packages": [
+                {
+                    "work_package_id": "wp-1",
+                    "goal": "Settle the theoretical caliber split.",
+                    "inputs": ["Is there an upper limit?"],
+                    "procedure": ["Compare bound families."],
+                    "outputs": ["wp-1 resolution"],
+                    "dependencies": [],
+                }
+            ],
+            "human_gate": {
+                "required": True,
+                "decision": "approved",
+                "rationale": "Meta-review accepted; projection stays proposal-only.",
+            },
+            "proposal_only": True,
+        }
+    )
+
+    assert plan["objective"] == "Bound the question to measurable ops/s calibers."
+    assert plan["work_packages"][0]["work_package_id"] == "wp-1"
+    assert plan["human_gate"]["decision"] == "approved"
+    # Stage-two protocol sections are genuinely unplanned at stage one.
+    for section in (
+        "variables",
+        "controls",
+        "data_and_materials",
+        "analysis",
+        "success_criteria",
+        "failure_criteria",
+        "stop_conditions",
+        "resources",
+        "timeline",
+        "risks",
+    ):
+        assert plan[section] == []
+
+
+def test_research_plan_fails_closed_without_stage_one_plan_fields() -> None:
+    with pytest.raises(
+        result_package_v2.ResultPackageV2Error,
+        match="research_plan.objective",
+    ):
+        result_package_v2._research_plan({"method": "Only method carried."})
+
+
+# --------------------------------------------------------------- final summary
+
+
+def test_final_summary_projects_canonical_sections() -> None:
+    problem = {"scope": "Bounded to known physics and fixed energy budgets."}
+    selection = {"selected_hypothesis_id": "sci-091-cbdbec3a3"}
+    hypotheses = [
+        {
+            "hypothesis_id": "sci-091-cbdbec3a3",
+            "statement": "Erase-cost and cooling jointly bound sustained processing rate.",
+            "supporting_evidence_refs": ["candidate-2026-e1", "candidate-2026-e2"],
+        }
+    ]
+    research_plan = {
+        "objective": "Bound the question to measurable ops/s calibers.",
+        "work_packages": [{"work_package_id": "wp-1", "goal": "Settle the caliber split."}],
+    }
+    dimension_payload = {"metaReview": {"riskNotes": "1) overhead quantification missing."}}
+    evidence = [
+        {"evidence_id": "ce-supports", "relation": "supports"},
+        {"evidence_id": "ce-challenges", "relation": "challenges"},
+    ]
+
+    summary = result_package_v2._final_summary(
+        problem=problem,
+        selection=selection,
+        hypotheses=hypotheses,
+        research_plan=research_plan,
+        dimension_payload=dimension_payload,
+        evidence=evidence,
+    )
+
+    assert summary == {
+        "answer_boundary": "Bounded to known physics and fixed energy budgets.",
+        "selected_hypothesis": "Erase-cost and cooling jointly bound sustained processing rate.",
+        "research_plan_summary": "Bound the question to measurable ops/s calibers.",
+        "key_evidence_refs": ["candidate-2026-e1", "candidate-2026-e2"],
+        "counterevidence_refs": ["ce-challenges"],
+        "limitations": ["1) overhead quantification missing."],
+        "next_validation_step": "Settle the caliber split.",
+    }
+
+
+def test_final_summary_fails_closed_without_selected_hypothesis() -> None:
+    with pytest.raises(
+        result_package_v2.ResultPackageV2Error,
+        match="selection references sci-091-missing",
+    ):
+        result_package_v2._final_summary(
+            problem={"scope": "Bounded."},
+            selection={"selected_hypothesis_id": "sci-091-missing"},
+            hypotheses=[{"hypothesis_id": "sci-091-cbdbec3a3", "statement": "s"}],
+            research_plan={"objective": "o", "work_packages": [{"goal": "g"}]},
+            dimension_payload={},
+            evidence=[],
+        )
+
+
+# ------------------------------------------------------- competition result view
+
+
+def test_competition_result_view_projects_stage_one_alignment(monkeypatch) -> None:
+    artifacts = {
+        "competition_alignment": {
+            "competitionResultView": {
+                "problem_statement": "Is there an upper limit to computer processing speed?",
+                "rationale": "Scoped to measurable calibers.",
+                "technical_details": "ops/s <= P_cool / (N_e * E_e + overhead).",
+                "datasets": {"planned": [], "used": ["arxiv:1412.2166"]},
+                "methods": ["Q1 caliber split"],
+                "experiments": [],
+                "results": ["not executed at stage one"],
+                "references": [],
+                "paper_title": "Stage-one research proposal",
+                "paper_abstract": "The joint erase-cooling bound.",
+            }
+        }
+    }
+    monkeypatch.setattr(
+        result_package_v2,
+        "_artifact_payload",
+        lambda kind, **_kwargs: deepcopy(artifacts[kind]),
+    )
+
+    view = result_package_v2._competition_result_view(
+        team_id="research-team",
+        workflow_run_id="run-sci-091",
+        authority_run_id="source-sci-091",
+    )
+
+    assert view["datasets"] == {"source": ["arxiv:1412.2166"], "target": []}
+    assert view["results"] == ["not executed at stage one"]
+    assert view["paper_title"] == "Stage-one research proposal"
+
+
+def test_competition_result_view_fails_closed_without_alignment(monkeypatch) -> None:
+    monkeypatch.setattr(
+        result_package_v2,
+        "_artifact_payload",
+        lambda kind, **_kwargs: {"artifactKind": kind},
+    )
+
+    with pytest.raises(
+        result_package_v2.ResultPackageV2Error,
+        match="competition_alignment is missing competition_result_view",
+    ):
+        result_package_v2._competition_result_view(
+            team_id="research-team",
+            workflow_run_id="run-sci-091",
+            authority_run_id="source-sci-091",
+        )
+
+
+# ------------------------------------------------------ stage-one model route
+
+
+def _proposal_only_record() -> dict:
+    record = _record()
+    record["inputSnapshot"]["constraintSnapshot"] = {"formalWrites": False}
+    return record
+
+
+def test_stage_one_model_route_projects_receipt_authority(monkeypatch) -> None:
+    receipts = [
+        {"provider": "dashscope_main", "model": "qwen3.8-flash", "status": "succeeded"},
+        {"provider": "dashscope_main", "model": "qwen3.7-plus", "status": "succeeded"},
+    ]
+    monkeypatch.setattr(result_package_v2, "list_workflow_artifacts", lambda *_a, **_k: [])
+    monkeypatch.setattr(
+        result_package_v2,
+        "question_model_invocation_receipt_refs",
+        lambda *_a, **_k: [
+            {"receiptId": "receipt-1", "outcomeKinds": ["candidate"], "nodeRunId": "n1"}
+        ],
+    )
+    monkeypatch.setattr(
+        result_package_v2,
+        "question_model_invocation_receipts",
+        lambda *_a, **_k: deepcopy(receipts),
+    )
+
+    run = result_package_v2._model_run(
+        _proposal_only_record(),
+        team_id="research-team",
+        question_id="SCI-091",
+        workflow_run_id="run-sci-091",
+        authority_run_id="source-sci-091",
+    )
+
+    assert run["model_provider"] == "dashscope_main"
+    assert run["model_id"] == "qwen3.7-plus+qwen3.8-flash"
+    assert run["platform"] == "aliyun_bailian"
+
+
+def test_stage_one_model_route_fails_closed_on_ambiguous_provider(monkeypatch) -> None:
+    receipts = [
+        {"provider": "dashscope_main", "model": "qwen3.8-flash", "status": "succeeded"},
+        {"provider": "opencode_go", "model": "deepseek-v4", "status": "succeeded"},
+    ]
+    monkeypatch.setattr(result_package_v2, "list_workflow_artifacts", lambda *_a, **_k: [])
+    monkeypatch.setattr(
+        result_package_v2,
+        "question_model_invocation_receipt_refs",
+        lambda *_a, **_k: [
+            {"receiptId": "receipt-1", "outcomeKinds": ["candidate"], "nodeRunId": "n1"}
+        ],
+    )
+    monkeypatch.setattr(
+        result_package_v2,
+        "question_model_invocation_receipts",
+        lambda *_a, **_k: deepcopy(receipts),
+    )
+
+    with pytest.raises(
+        result_package_v2.ResultPackageV2Error,
+        match="unique model provider",
+    ) as exc_info:
+        result_package_v2._model_run(
+            _proposal_only_record(),
+            team_id="research-team",
+            question_id="SCI-091",
+            workflow_run_id="run-sci-091",
+            authority_run_id="source-sci-091",
+        )
+
+    assert exc_info.value.code == "challenge_v2_model_route_missing"
+
+
+def test_stage_one_model_route_fails_closed_without_receipts(monkeypatch) -> None:
+    monkeypatch.setattr(result_package_v2, "list_workflow_artifacts", lambda *_a, **_k: [])
+    monkeypatch.setattr(
+        result_package_v2,
+        "question_model_invocation_receipt_refs",
+        lambda *_a, **_k: [],
+    )
+
+    with pytest.raises(
+        result_package_v2.ResultPackageV2Error,
+        match="no registered model invocation receipts",
+    ):
+        result_package_v2._model_run(
+            _proposal_only_record(),
+            team_id="research-team",
+            question_id="SCI-091",
+            workflow_run_id="run-sci-091",
+            authority_run_id="source-sci-091",
+        )
+
+
+# ----------------------------- end-to-end stage-one accepted-round build
+
+
+def test_v2_build_projects_full_stage_one_authority_end_to_end(monkeypatch) -> None:
+    expected = _authority_sections()[0]
+    artifacts = {
+        "problem_understanding": {
+            "scope": "Bounded to known physics with measurable ops/s calibers.",
+            "subquestions": ["Q1 caliber split"],
+            "assumptions": ["Computation is physical."],
+            "known_unknowns": ["Quantified baselines are unverified."],
+            "human_gate": {
+                "required": True,
+                "decision": "pending",
+                "rationale": "Awaiting scope confirmation.",
+            },
+        },
+        "source_candidate_batch": {"candidates": []},
+        "evidence_card_batch": {"evidence": deepcopy(expected["evidence"])},
+        "hypothesis_set": {
+            "candidates": [
+                {"candidateId": "hyp-portfolio-1", "claim": "portfolio", "status": "draft"}
+            ],
+        },
+        "dimension_reviews": {
+            "reviewRoundId": "hround-1",
+            # Round candidates replace the portfolio HYP-1/HYP-2 ids, so the
+            # canonical seven-dimension coverage must follow the accepted
+            # round candidate ids.
+            "dimensionReviews": [
+                {
+                    **deepcopy(item),
+                    "hypothesis_id": (
+                        "sci-091-cbdbec3a3"
+                        if item["hypothesis_id"] == "HYP-1"
+                        else "sci-091-cf0889b0d"
+                    ),
+                }
+                for item in expected["dimension_reviews"]
+            ],
+            "selection": {
+                "selected_hypothesis_id": "sci-091-cbdbec3a3",
+                "comparison_method": "multi_dimension_pareto_plus_human_decision",
+                "tradeoffs": ["MetaReview rationale."],
+                "rejected_hypotheses": [],
+                "human_gate": {
+                    "required": True,
+                    "decision": "pending",
+                    "rationale": "Awaiting confirmation.",
+                },
+            },
+            "metaReview": {
+                "accepted": True,
+                "recommendationCandidateId": "sci-091-cbdbec3a3",
+                "riskNotes": "Overhead quantification is missing.",
+            },
+        },
+        "research_plan": {
+            "objective": "Bound the question to measurable ops/s calibers.",
+            "method": "Separate erasure cost from heat removal.",
+            "work_packages": [
+                {
+                    "work_package_id": "wp-1",
+                    "goal": "Settle the theoretical caliber split.",
+                    "inputs": ["Is there an upper limit?"],
+                    "procedure": ["Compare bound families."],
+                    "outputs": ["wp-1 resolution"],
+                    "dependencies": [],
+                }
+            ],
+            "human_gate": {
+                "required": True,
+                "decision": "approved",
+                "rationale": "Meta-review accepted.",
+            },
+        },
+        "competition_alignment": {
+            "competitionResultView": {
+                "problem_statement": "Is there an upper limit to computer processing speed?",
+                "rationale": "Scoped to measurable calibers.",
+                "technical_details": "ops/s <= P_cool / (N_e * E_e + overhead).",
+                "datasets": {"planned": [], "used": []},
+                "methods": ["Q1 caliber split"],
+                "experiments": [],
+                "results": ["not executed at stage one"],
+                "references": [],
+                "paper_title": "Stage-one research proposal",
+                "paper_abstract": "The joint erase-cooling bound.",
+            }
+        },
+    }
+    monkeypatch.setattr(
+        result_package_v2,
+        "_artifact_payload",
+        lambda kind, **_kwargs: deepcopy(artifacts[kind]),
+    )
+    monkeypatch.setattr(
+        result_package_v2,
+        "_feedback_iterations",
+        lambda **_kwargs: deepcopy(expected["feedback_iterations"]),
+    )
+    monkeypatch.setattr(
+        result_package_v2,
+        "_model_run",
+        lambda *_a, **_k: {
+            **deepcopy(expected["run"]),
+            "run_id": "run-sci-096",
+        },
+    )
+    _patch_hypothesis_authorities(
+        monkeypatch,
+        [_round_candidate(), _round_candidate(candidateId="sci-091-cf0889b0d")],
+        [
+            _chain_candidate(),
+            _chain_candidate(candidateId="sci-091-cf0889b0d"),
+        ],
+    )
+
+    package = result_package_v2.build_challenge_result_package_v2(
+        generic_package={"runId": "run-sci-096", "factChainHash": "f" * 64},
+        record=_record(),
+        team_id="research-team",
+        workflow_run_id="run-sci-096",
+        source_collection_run_id="source-sci-096",
+    )
+    output = package["challengeQuestionOutput"]
+
+    assert challenge_question_runs._schema_issues(output) == []
+    assert challenge_question_runs._semantic_validation(output)["status"] == "passed"
+    assert [item["hypothesis_id"] for item in output["hypotheses"]] == [
+        "sci-091-cbdbec3a3",
+        "sci-091-cf0889b0d",
+    ]
+    assert output["hypotheses"][0]["falsifiability"].startswith("A peer-reviewed result")
+    final_summary = output["result_classification"]["final_summary"]
+    assert final_summary["selected_hypothesis"] == (
+        "Erase-cost and cooling jointly bound sustained processing rate."
+    )
+    assert final_summary["limitations"] == ["Overhead quantification is missing."]
+    assert output["competition_result_view"]["datasets"] == {"source": [], "target": []}
+    assert output["research_plan"]["work_packages"][0]["work_package_id"] == "wp-1"

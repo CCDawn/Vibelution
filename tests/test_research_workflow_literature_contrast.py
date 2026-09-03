@@ -39,9 +39,6 @@ from core.web.services.team_workflow import (
 from core.web.services.team_workflow.research_runtime.dimension_reviews_artifact_writer import (
     _novelty_contrasts_from_review,
 )
-from core.web.services.team_workflow.research_runtime.result_package_v2 import (
-    _merge_novelty_contrasts,
-)
 from tests.test_team_workflow_llm_review_runners import (
     _candidate,
     _dimension_review_rows,
@@ -592,21 +589,10 @@ def test_novelty_contrasts_extraction_is_lenient():
     assert _novelty_contrasts_from_review([{"dimension": "novelty"}]) == {}
 
 
-def test_merge_novelty_contrasts_into_hypotheses():
-    hypotheses = [
-        {"hypothesis_id": "cand-a", "statement": "A"},
-        {"hypothesis_id": "cand-b", "statement": "B"},
-    ]
-    dimension_payload = {
-        "noveltyContrastByCandidate": {
-            "cand-a": {"overlapPapers": ["T"], "deltaStatement": "d", "basis": "retrieved"}
-        }
-    }
-    merged = _merge_novelty_contrasts(hypotheses, dimension_payload)
-    assert merged[0]["novelty_contrast"]["basis"] == "retrieved"
-    assert "novelty_contrast" not in merged[1]
-    # Absent map keeps hypotheses untouched.
-    assert _merge_novelty_contrasts(hypotheses, {}) is hypotheses
+# The former test_merge_novelty_contrasts_into_hypotheses was removed together
+# with _merge_novelty_contrasts: the canonical v2 schema closes hypothesis
+# items (additionalProperties=false), so novelty contrast conclusions stay in
+# the dimension_reviews authority instead of being merged onto hypotheses.
 
 
 # ---------------------------------------------------------------------------
