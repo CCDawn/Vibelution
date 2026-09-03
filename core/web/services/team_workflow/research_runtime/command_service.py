@@ -2021,10 +2021,15 @@ class WorkflowCommandService:
         ``invocation_evidence_refs`` with the team official-model evidence
         store; when that store has no rows for the run the intersection is
         empty and program review is unreachable even though every receipt is
-        validated.  Registration is idempotent by receipt; any registration
-        failure fails closed with a stable stage-one command error code.
+        validated.  The mirror lives on the gate's owner module
+        (``challenge_question_runs``) so the write and the gate read resolve
+        the same store path.  Registration is idempotent by receipt; any
+        registration failure fails closed with a stable stage-one command
+        error code.
         """
-        from ..knowledge import ensure_official_model_evidence_for_receipt_refs
+        from ..challenge_question_runs import (
+            ensure_official_model_evidence_for_receipt_refs,
+        )
         from .model_invocation_receipt_registry import (
             question_model_invocation_receipts,
         )

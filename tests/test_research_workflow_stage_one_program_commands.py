@@ -30,8 +30,7 @@ from core.research.workflow.challenge_cup_runtime import ChallengeCupGraphCoordi
 from core.research.workflow.contracts import WorkflowCommandKind
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.routes.team_workflows import research_runtime as research_runtime_module
-from core.web.services import team_workflow_orchestration_service
-from core.web.services.team_workflow import knowledge as knowledge_module
+from core.web.services.team_workflow import challenge_question_runs
 from core.web.services.team_workflow.research_runtime import (
     artifact_readback_registry,
     model_invocation_receipt_registry,
@@ -433,7 +432,7 @@ def test_build_mirrors_invocation_receipts_before_program_handoff(
             return {"registered": len(receipts), "skipped": 0}
 
         monkeypatch.setattr(
-            knowledge_module,
+            challenge_question_runs,
             "ensure_official_model_evidence_for_receipt_refs",
             _ensure,
         )
@@ -481,7 +480,7 @@ def test_build_fails_closed_when_official_evidence_registration_fails(
             raise RuntimeError("evidence store unwritable")
 
         monkeypatch.setattr(
-            knowledge_module,
+            challenge_question_runs,
             "ensure_official_model_evidence_for_receipt_refs",
             _boom,
         )
@@ -517,18 +516,16 @@ def test_build_registers_receipt_evidence_rows_idempotently(tmp_path, monkeypatc
             "question_model_invocation_receipts",
             lambda *_args, **_kwargs: deepcopy(rows),
         )
+        # The real ensure runs on the gate's owner module: resolve the team
+        # program root to tmp_path so the write path and the gate read path
+        # (_official_model_evidence_ids) resolve the same store.
         monkeypatch.setattr(
-            team_workflow_orchestration_service.team_service,
-            "get_team",
-            lambda team_id: {"teamId": team_id},
-        )
-        monkeypatch.setattr(
-            team_workflow_orchestration_service,
-            "_team_workflow_root",
+            challenge_question_runs,
+            "resolve_team_program_root",
             lambda _team_id: tmp_path,
         )
         monkeypatch.setattr(
-            team_workflow_orchestration_service,
+            challenge_question_runs,
             "record_runtime_scene_event",
             lambda *args, **kwargs: None,
         )
@@ -553,8 +550,15 @@ def test_build_registers_receipt_evidence_rows_idempotently(tmp_path, monkeypatc
         assert store["evidence"][0]["modelProvider"] == "dashscope_main"
         assert store["evidence"][0]["status"] == "registered"
 
+        # Gate read-path identity: the official-call gate reads the exact
+        # rows the mirror wrote (team program root store).
+        assert challenge_question_runs._official_model_evidence_ids(TEAM_ID) == {
+            "model-invocation-receipt:receipt-0",
+            "model-invocation-receipt:receipt-1",
+        }
+
         # Idempotent re-registration: the same receipts never duplicate rows.
-        outcome = knowledge_module.ensure_official_model_evidence_for_receipt_refs(
+        outcome = challenge_question_runs.ensure_official_model_evidence_for_receipt_refs(
             TEAM_ID,
             question_id="SCI-091",
             workflow_run_id=RUN_ID,

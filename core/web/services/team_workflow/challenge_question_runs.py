@@ -698,6 +698,134 @@ def _official_model_evidence_store(team_id: str) -> dict[str, Any]:
     }
 
 
+def _bounded_text(value: Any, limit: int) -> str:
+    return str(value or "").strip()[:limit]
+
+
+def ensure_official_model_evidence_for_receipt_refs(
+    team_id: str,
+    *,
+    question_id: str,
+    workflow_run_id: str,
+    receipts: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Mirror validated invocation receipts into the official evidence store.
+
+    Writes the exact store this module's official-call gate reads
+    (``_official_model_evidence_ids`` over ``_workflow_root(team_id) /
+    official_model_evidence / index.json``), so a registered run's
+    ``invocation_evidence_refs`` can intersect registered evidence instead of
+    intersecting an empty store.  Every ``question_model_invocation_receipts``
+    row already proves a real succeeded model call; rows are appended
+    idempotently under the stable ``model-invocation-receipt:{receiptId}``
+    evidence id, rows without receiptId/provider are skipped and counted (a
+    single bad receipt never fails the batch), and nothing here promotes
+    formal knowledge.  modelProvider keeps the receipt's concrete provider id
+    (e.g. ``dashscope_main``); the gate matches it by contains-marker.
+    """
+    normalized_team_id = str(team_id or "").strip()
+    normalized_question = str(question_id or "").strip().upper()
+    normalized_run = str(workflow_run_id or "").strip()
+    rows = [item for item in list(receipts or []) if isinstance(item, dict)]
+    evidence_path = _evidence_store_path(_workflow_root(normalized_team_id))
+    registered = 0
+    skipped = 0
+    now = _utc_now()
+    with _STORE_LOCK:
+        store = _load_evidence_store(evidence_path, normalized_team_id)
+        evidence = [item for item in store.get("evidence", []) if isinstance(item, dict)]
+        existing = {str(item.get("evidenceId") or "") for item in evidence}
+        for receipt in rows:
+            receipt_id = _bounded_text(receipt.get("receiptId"), 160)
+            provider = _bounded_text(receipt.get("provider"), 120)
+            if not receipt_id or not provider:
+                skipped += 1
+                continue
+            evidence_id = f"model-invocation-receipt:{receipt_id}"
+            if evidence_id in existing:
+                skipped += 1
+                continue
+            scope = receipt.get("scope") if isinstance(receipt.get("scope"), dict) else {}
+            stage_id = _bounded_text(scope.get("stageId"), 128)
+            evidence.append(
+                {
+                    "schemaVersion": store.get("schemaVersion", 1),
+                    "evidenceId": evidence_id,
+                    "teamId": normalized_team_id,
+                    "workflowId": "",
+                    "workflowKind": "",
+                    "taskType": "",
+                    "workflowNode": "",
+                    "candidateId": "",
+                    "stageRoundId": stage_id,
+                    "sourceRunId": normalized_run,
+                    "taskId": _bounded_text(scope.get("taskId"), 128),
+                    "modelProvider": provider,
+                    "modelId": _bounded_text(receipt.get("requestedModel"), 160),
+                    "modelName": _bounded_text(receipt.get("model"), 240),
+                    "modelProfileId": "",
+                    "evidenceKind": "invocation_log",
+                    "artifactPath": "",
+                    "screenshotPath": "",
+                    "logRef": "",
+                    "promptSummary": "",
+                    "outputSummary": "",
+                    "sourceRefs": [normalized_run] if normalized_run else [],
+                    "evidenceRefs": [],
+                    "status": "registered",
+                    "recordedByAgent": "stage_one_command_service",
+                    "metadata": {
+                        "questionId": normalized_question,
+                        "workflowRunId": normalized_run,
+                        "stageId": stage_id,
+                        "nodeRunId": _bounded_text(receipt.get("nodeRunId"), 160),
+                        "formalNodeId": _bounded_text(scope.get("formalNodeId"), 160),
+                        "attempt": receipt.get("attempt"),
+                    },
+                    "officialBoundary": {
+                        "candidateOnly": True,
+                        "writesFormalKnowledge": False,
+                        "writesRag": False,
+                        "writesOfficialGraph": False,
+                        "requiresStewardApproval": True,
+                        "boundary": "model_evidence_only_not_formal_knowledge",
+                    },
+                    "createdAt": now,
+                    "updatedAt": now,
+                }
+            )
+            existing.add(evidence_id)
+            registered += 1
+        if registered:
+            store["evidence"] = evidence
+            store["updatedAt"] = now
+            _write_json(evidence_path, store)
+    if registered:
+        try:
+            record_runtime_scene_event(
+                "team_workflow_orchestration",
+                "challenge_question_run",
+                "official_model_evidence.receipt_refs_ensured",
+                message="Stage-one invocation receipts were mirrored into the official model evidence store.",
+                outcome="passed",
+                fields={
+                    "teamId": normalized_team_id,
+                    "questionId": normalized_question,
+                    "workflowRunId": normalized_run,
+                    "registeredCount": registered,
+                    "skippedCount": skipped,
+                    "receiptCount": len(rows),
+                },
+            )
+        except Exception:  # noqa: BLE001 - observability must never gate the mirror
+            pass
+    return {
+        "registered": registered,
+        "skipped": skipped,
+        "evidenceStorePath": str(evidence_path),
+    }
+
+
 def _evidence_store_path(root: Path) -> Path:
     return root / "official_model_evidence" / "index.json"
 
