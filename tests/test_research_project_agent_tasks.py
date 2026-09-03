@@ -1704,3 +1704,249 @@ def test_hypothesis_design_task_binds_canonical_role_member(tmp_path, monkeypatc
         },
     )
     assert started["task"]["status"] == "running"
+
+
+def _append_turn_journal(session_id: str, entries: list[dict]) -> None:
+    """Write real turn-journal events for a task session under the tmp root."""
+
+    from core.chat.turn_journal import append_turn_event
+
+    for entry in entries:
+        append_turn_event(
+            session_service.PROJECT_ROOT,
+            session_id,
+            entry["turnId"],
+            entry["eventType"],
+            status=entry.get("status", ""),
+            payload=entry.get("payload", {}),
+            source=entry.get("source", "test_journal"),
+        )
+
+
+def _final_answer_item_entry(turn_id: str, text: str) -> dict:
+    return {
+        "turnId": turn_id,
+        "eventType": "assistant_item_committed",
+        "payload": {
+            "kind": "assistant_message",
+            "channel": "answer",
+            "phase": "final_answer",
+            "status": "completed",
+            "terminal": True,
+            "text": text,
+        },
+    }
+
+
+def _turn_completed_entry(turn_id: str, summary: str = "") -> dict:
+    return {
+        "turnId": turn_id,
+        "eventType": "turn_completed",
+        "status": "completed",
+        "payload": {"resultStatus": "completed", "summary": summary},
+    }
+
+
+def _ready_session_detail(_session_id: str, **_kwargs):
+    return {
+        "status": "ready",
+        "currentPhase": "ready",
+        "activeTask": None,
+    }
+
+
+def _start_design_task(team, project, key: str):
+    return start_research_project_agent_task(
+        team["teamId"],
+        project["projectId"],
+        {
+            "taskKind": "experiment_design",
+            "idempotencyKey": key,
+        },
+    )
+
+
+def test_reconcile_completes_task_from_session_final_turn_when_refs_missing(
+    tmp_path, monkeypatch
+):
+    """SCI-091 回归：围栏写回拒绝盖章但 turn 已完成且有最终正文时，
+    任务按会话终 turn 证据判 completed，而不是永远 incomplete。"""
+    team, project, _agents = _team_project_and_agents(tmp_path, monkeypatch)
+    _accepted_submitter(monkeypatch)
+    started = _start_design_task(team, project, "design-session-final-1")
+    session_id = started["task"]["sessionId"]
+    _append_turn_journal(
+        session_id,
+        [
+            _final_answer_item_entry("turn-1", "假设集边界说明与最终结论正文。"),
+            _turn_completed_entry("turn-1", "假设集边界说明与最终结论正文。"),
+        ],
+    )
+    monkeypatch.setattr(
+        session_service,
+        "get_session_detail",
+        _ready_session_detail,
+    )
+
+    summary = reconcile_research_project_agent_task_statuses(
+        team["teamId"],
+        project["projectId"],
+    )
+
+    assert summary["reconciled"] == 1
+    assert summary["outcomes"][0]["status"] == "completed"
+    assert summary["outcomes"][0]["resultSource"] == "session_final_turn"
+    status = get_research_project_agent_task_status(
+        team["teamId"],
+        project["projectId"],
+    )
+    assert status["activeTasks"] == []
+    assert status["tasks"][0]["status"] == "completed"
+    assert status["tasks"][0]["failureCode"] == ""
+    assert status["tasks"][0]["resultRefs"] == [
+        f"session-final-turn:{session_id}:turn-1"
+    ]
+    assert status["tasks"][0]["resultSource"] == "session_final_turn"
+    # 已按会话终 turn 终结的任务不再反复进入 reconcile 目标集。
+    repeat = reconcile_research_project_agent_task_statuses(
+        team["teamId"],
+        project["projectId"],
+    )
+    assert repeat["checked"] == 0
+
+
+def test_reconcile_keeps_incomplete_when_final_turn_has_no_answer_text(
+    tmp_path, monkeypatch
+):
+    """turn completed 但没有非空最终 assistant 正文时，防呆不放松。"""
+    team, project, _agents = _team_project_and_agents(tmp_path, monkeypatch)
+    _accepted_submitter(monkeypatch)
+    started = _start_design_task(team, project, "design-session-empty-text-1")
+    _append_turn_journal(
+        started["task"]["sessionId"],
+        [
+            _final_answer_item_entry("turn-1", ""),
+            _turn_completed_entry("turn-1", ""),
+        ],
+    )
+    monkeypatch.setattr(
+        session_service,
+        "get_session_detail",
+        _ready_session_detail,
+    )
+
+    reconcile_research_project_agent_task_statuses(
+        team["teamId"],
+        project["projectId"],
+    )
+
+    status = get_research_project_agent_task_status(
+        team["teamId"],
+        project["projectId"],
+    )
+    assert status["tasks"][0]["status"] == "incomplete"
+    assert status["tasks"][0]["failureCode"] == "task_result_not_recorded"
+    assert status["tasks"][0]["resultRefs"] == []
+    assert status["tasks"][0]["resultSource"] == ""
+
+
+def test_reconcile_keeps_incomplete_when_latest_terminal_turn_failed(
+    tmp_path, monkeypatch
+):
+    """最新终态 turn 是 failed 时，回退不得把失败会话洗成 completed。"""
+    team, project, _agents = _team_project_and_agents(tmp_path, monkeypatch)
+    _accepted_submitter(monkeypatch)
+    started = _start_design_task(team, project, "design-session-failed-turn-1")
+    _append_turn_journal(
+        started["task"]["sessionId"],
+        [
+            _final_answer_item_entry("turn-1", "中间轮有正文但不终态。"),
+            _turn_completed_entry("turn-1", "中间轮有正文但不终态。"),
+            {
+                "turnId": "turn-2",
+                "eventType": "turn_failed",
+                "status": "failed_runtime",
+                "payload": {"errorType": "runtime_error", "summary": ""},
+            },
+        ],
+    )
+    monkeypatch.setattr(
+        session_service,
+        "get_session_detail",
+        _ready_session_detail,
+    )
+
+    reconcile_research_project_agent_task_statuses(
+        team["teamId"],
+        project["projectId"],
+    )
+
+    status = get_research_project_agent_task_status(
+        team["teamId"],
+        project["projectId"],
+    )
+    assert status["tasks"][0]["status"] == "incomplete"
+    assert status["tasks"][0]["failureCode"] == "task_result_not_recorded"
+    assert status["tasks"][0]["resultRefs"] == []
+    assert status["tasks"][0]["resultSource"] == ""
+
+
+def test_reconcile_stamped_result_refs_take_precedence_over_session_final_turn(
+    tmp_path, monkeypatch
+):
+    """writeback 盖章路径优先：refs 有值时保持原路径且不留回退审计位。"""
+    team, project, agents = _team_project_and_agents(tmp_path, monkeypatch)
+    _accepted_submitter(monkeypatch)
+    started = _start_design_task(team, project, "design-stamped-refs-1")
+    task_id = started["task"]["taskId"]
+    _append_turn_journal(
+        started["task"]["sessionId"],
+        [
+            _final_answer_item_entry("turn-1", "已写回计划后的最终正文。"),
+            _turn_completed_entry("turn-1", "已写回计划后的最终正文。"),
+        ],
+    )
+    root = team_workflow_orchestration_service.resolve_research_project_workspace_root(
+        team["teamId"],
+        project["projectId"],
+    )
+    team_workflow_orchestration_service._write_json(
+        root / "experiment_plans" / "index.json",
+        {
+            "schemaVersion": 1,
+            "storeKind": team_workflow_orchestration_service.EXPERIMENT_PLAN_STORE_KIND,
+            "teamId": team["teamId"],
+            "activePlanId": "plan-stamped",
+            "plans": [
+                {
+                    "planId": "plan-stamped",
+                    "researchProjectId": project["projectId"],
+                    "createdByAgent": agents["experiment_planner"]["agentId"],
+                    "createdFromTaskId": task_id,
+                    "createdAt": "9999-07-29T00:01:00+00:00",
+                    "updatedAt": "9999-07-29T00:01:00+00:00",
+                    "status": "draft",
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        session_service,
+        "get_session_detail",
+        _ready_session_detail,
+    )
+
+    summary = reconcile_research_project_agent_task_statuses(
+        team["teamId"],
+        project["projectId"],
+    )
+
+    assert summary["reconciled"] == 1
+    assert "resultSource" not in summary["outcomes"][0]
+    status = get_research_project_agent_task_status(
+        team["teamId"],
+        project["projectId"],
+    )
+    assert status["tasks"][0]["status"] == "completed"
+    assert status["tasks"][0]["resultRefs"] == ["plan-stamped"]
+    assert status["tasks"][0]["resultSource"] == ""

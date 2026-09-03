@@ -27,6 +27,9 @@ CANDIDATE_CONTEXT_MECHANISM_MAX_CHARS = 2_000
 CANDIDATE_CONTEXT_MAX_PREDICTIONS = 8
 CANDIDATE_CONTEXT_PREDICTION_MAX_CHARS = 1_000
 ACTIVE_STATUSES = {"queued", "running"}
+# Audit bit marking resultRefs that were derived from the execution session's
+# latest completed turn instead of a server-stamped writeback artifact.
+SESSION_FINAL_TURN_RESULT_SOURCE = "session_final_turn"
 TERMINAL_STATUSES = {
     "blocked",
     "canceled",
@@ -336,6 +339,7 @@ def _normalize_task(value: Any) -> dict[str, Any]:
         )
         if item and _SAFE_REF.fullmatch(item)
     ][:24]
+    result_source = _text(payload.get("resultSource"), limit=80)
     return {
         "schemaVersion": SCHEMA_VERSION,
         "taskId": _text(payload.get("taskId")),
@@ -416,6 +420,9 @@ def _normalize_task(value: Any) -> dict[str, Any]:
         "status": status,
         "turn": turn,
         "resultRefs": result_refs,
+        "resultSource": (
+            result_source if result_source == SESSION_FINAL_TURN_RESULT_SOURCE else ""
+        ),
         "failureCode": _text(payload.get("failureCode"), limit=120),
         "sessionReconcileFailures": session_reconcile_failures,
         "returnTo": _text(payload.get("returnTo"), limit=1000),
@@ -1836,6 +1843,10 @@ def reconcile_research_project_agent_task_statuses(
                     task["status"] = verdict["status"]
                     task["resultRefs"] = verdict["resultRefs"]
                     task["failureCode"] = verdict["failureCode"]
+                    task["resultSource"] = _text(
+                        verdict.get("resultSource"),
+                        limit=80,
+                    )
                     task["sessionReconcileFailures"] = 0
                     turn = (
                         task.get("turn") if isinstance(task.get("turn"), dict) else {}
@@ -1845,14 +1856,16 @@ def reconcile_research_project_agent_task_statuses(
                         task["turn"] = turn
                     task["updatedAt"] = s.utc_now_iso()
                     changed = True
-                    outcomes.append(
-                        {
-                            "taskId": target_id,
-                            "action": "reconciled",
-                            "status": verdict["status"],
-                            "failureCode": verdict["failureCode"],
-                        }
-                    )
+                    outcome = {
+                        "taskId": target_id,
+                        "action": "reconciled",
+                        "status": verdict["status"],
+                        "failureCode": verdict["failureCode"],
+                    }
+                    result_source = _text(verdict.get("resultSource"), limit=80)
+                    if result_source:
+                        outcome["resultSource"] = result_source
+                    outcomes.append(outcome)
                 elif verdict["kind"] == "unreadable":
                     failures = (
                         int(task.get("sessionReconcileFailures") or 0) + 1
@@ -1933,7 +1946,10 @@ def _reconcile_project_agent_task_from_session(
       {"kind": "unreadable"} — the session detail could not be read; the
         caller counts consecutive failures and fails the task loudly;
       {"kind": "terminal", "status", "resultRefs", "failureCode"} — the
-        session reached a state the task store must reflect.
+        session reached a state the task store must reflect. A
+        ``resultSource`` key ("session_final_turn") marks verdicts whose
+        completion evidence comes from the session's latest finished turn
+        instead of a server-stamped writeback artifact.
     """
     s = _service()
     session_id = _text(task.get("sessionId"))
@@ -2009,6 +2025,22 @@ def _reconcile_project_agent_task_from_session(
             # Plans exist for this window but none is linked to this task:
             # report the missing linkage instead of guessing ownership.
             failure_code = "plan_task_link_missing"
+        if failure_code == "task_result_not_recorded":
+            # SCI-091: capability-fenced writeback tools may refuse server
+            # stamping by design (boundary: manual_ledger_only) while the
+            # execution turn still finished with a real final answer. When the
+            # latest session turn settled completed with non-empty final
+            # assistant text, that turn is the completion evidence; every
+            # other shape keeps the conservative incomplete verdict.
+            fallback = _session_final_turn_completion_fallback(session_id)
+            if fallback is not None:
+                return {
+                    "kind": "terminal",
+                    "status": "completed",
+                    "resultRefs": [fallback["resultRef"]],
+                    "failureCode": "",
+                    "resultSource": SESSION_FINAL_TURN_RESULT_SOURCE,
+                }
         return {
             "kind": "terminal",
             "status": "incomplete",
@@ -2016,6 +2048,104 @@ def _reconcile_project_agent_task_from_session(
             "failureCode": failure_code,
         }
     return {"kind": "unchanged"}
+
+
+_SESSION_FINAL_TURN_REF_PREFIX = "session-final-turn"
+
+
+def _session_final_turn_completion_fallback(
+    session_id: str,
+) -> dict[str, str] | None:
+    """Resolve the session's latest finished turn as completion evidence.
+
+    Fail-closed helper for the ``task_result_not_recorded`` path: it returns
+    evidence only when the latest terminal journal event is a
+    ``turn_completed completed`` settlement AND the turn carries a non-empty
+    final assistant text (canonical final-answer item, committed assistant
+    message, or the terminal summary). Failed, interrupted, or empty turns
+    return ``None`` so the caller keeps the previous incomplete verdict
+    instead of celebrating a turn that produced nothing.
+    """
+
+    normalized_session_id = _text(session_id, limit=200)
+    if not normalized_session_id:
+        return None
+    s = _service()
+    try:
+        from core.chat.turn_journal import (
+            EVENT_ASSISTANT_ITEM_COMMITTED,
+            EVENT_ASSISTANT_MESSAGE,
+            EVENT_TURN_COMPLETED,
+            EVENT_TURN_FAILED,
+            EVENT_TURN_INTERRUPTED,
+            load_turn_events,
+        )
+
+        events = load_turn_events(
+            Path(s.session_service.PROJECT_ROOT),
+            normalized_session_id,
+        )
+    except Exception:
+        # Unreadable journal must never upgrade a task to completed.
+        return None
+    terminal_event_types = {
+        EVENT_TURN_COMPLETED,
+        EVENT_TURN_FAILED,
+        EVENT_TURN_INTERRUPTED,
+    }
+    terminal = next(
+        (
+            event
+            for event in reversed(events)
+            if str(getattr(event, "event_type", "") or "") in terminal_event_types
+        ),
+        None,
+    )
+    if terminal is None:
+        return None
+    turn_id = _text(getattr(terminal, "turn_id", ""), limit=200)
+    if (
+        terminal.event_type != EVENT_TURN_COMPLETED
+        or _text(getattr(terminal, "status", ""), limit=80).lower() != "completed"
+        or not turn_id
+    ):
+        return None
+    canonical_text = ""
+    message_text = ""
+    for event in events:
+        if _text(getattr(event, "turn_id", ""), limit=200) != turn_id:
+            continue
+        payload = getattr(event, "payload", None)
+        if not isinstance(payload, dict):
+            continue
+        if event.event_type == EVENT_ASSISTANT_ITEM_COMMITTED:
+            if (
+                _text(payload.get("kind"), limit=80) == "assistant_message"
+                and _text(payload.get("channel"), limit=80).lower() == "answer"
+                and _text(payload.get("phase"), limit=80) == "final_answer"
+            ):
+                text = str(payload.get("text") or "").strip()
+                if text:
+                    canonical_text = text
+        elif event.event_type == EVENT_ASSISTANT_MESSAGE:
+            text = str(payload.get("content") or "").strip()
+            if text:
+                message_text = text
+    terminal_payload = getattr(terminal, "payload", None)
+    summary_text = (
+        str(terminal_payload.get("summary") or "").strip()
+        if isinstance(terminal_payload, dict)
+        else ""
+    )
+    final_text = canonical_text or message_text or summary_text
+    if not final_text:
+        return None
+    result_ref = f"{_SESSION_FINAL_TURN_REF_PREFIX}:{normalized_session_id}:{turn_id}"
+    if not _SAFE_REF.fullmatch(result_ref):
+        result_ref = f"{_SESSION_FINAL_TURN_REF_PREFIX}:{turn_id}"
+    if not _SAFE_REF.fullmatch(result_ref):
+        return None
+    return {"turnId": turn_id, "resultRef": result_ref}
 
 
 def _project_agent_task_result_refs(
