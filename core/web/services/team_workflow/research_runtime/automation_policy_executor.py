@@ -14,8 +14,11 @@ Safety ladder (evaluated per attempt; ANY failed rung => record-only):
 
 0. ``VIBELUTION_AUTO_ADVANCE_DISABLED`` truthy -> nothing executes
    (kill switch, highest priority, audited);
-1. policy load: ``VIBELUTION_AUTO_ADVANCE_POLICY_PATH`` must load + hash-
-   verify through the frozen loader at ``stage="activation"``;
+1. policy load: the resolved policy document (operator config.toml
+   ``[research_workflow].auto_advance_policy_path`` first, then
+   ``VIBELUTION_AUTO_ADVANCE_POLICY_PATH``, then the default
+   ``auto-advance-policy.active.json`` in the operator config home) must
+   load + hash-verify through the frozen loader at ``stage="activation"``;
 2. activation credential: ``executionMode == "active"`` AND
    ``status == "approved"`` AND a non-empty ``approval.approvedBy`` —
    enforced twice (fail-closed at contract validation, re-checked here);
@@ -39,9 +42,10 @@ directory conventions as the shadow store) carrying the policy identity,
 the per-rung verdicts, the actor and the outcome.  Shadow recording is
 completely unchanged; the two stores are separate files.
 
-Behavior guard: with ``VIBELUTION_AUTO_ADVANCE_POLICY_PATH`` unset every
-hook is a no-op before any I/O — the executing chain stays byte-identical
-to the non-policy flow.  All hooks swallow their own failures into
+Behavior guard: with no policy document configured (config.toml key unset,
+env unset, and no default file in the operator config home) every hook is
+a no-op before any I/O — the executing chain stays byte-identical to the
+non-policy flow.  All hooks swallow their own failures into
 diagnostics (quiet scene events); they never break a host flow.
 """
 
@@ -170,21 +174,24 @@ def _load_document_cached() -> tuple[AutoAdvancePolicyV2 | None, dict[str, Any] 
 
     Fail-closed about the document (hash verify + activation-stage
     validation: an active document must carry status=approved AND a
-    non-empty approval.approvedBy), fail-silent for the chain.  Results are
+    non-empty approval.approvedBy), fail-silent for the chain.  The document
+    path resolves config-first (``[research_workflow]
+    .auto_advance_policy_path`` in the operator config.toml — env
+    propagation into backend processes is unreliable), then
+    ``VIBELUTION_AUTO_ADVANCE_POLICY_PATH``, then the default
+    ``auto-advance-policy.active.json`` in the operator config home; a
+    missing file behaves exactly like "no policy configured".  Results are
     cached per (path, mtime, size) exactly like the shadow loader.
     """
+
+    from config.paths import resolve_auto_advance_policy_path
 
     from core.web.services.team_workflow.research_runtime.automation_policy_service import (
         load_auto_advance_policy_v2_document,
     )
 
-    raw_path = os.environ.get(
-        _shadow_policy_env(), ""
-    ).strip()
-    if not raw_path:
-        return None, None
     try:
-        resolved = Path(raw_path)
+        resolved = resolve_auto_advance_policy_path()
         stat = resolved.stat()
     except OSError:
         return None, None
@@ -204,7 +211,7 @@ def _load_document_cached() -> tuple[AutoAdvancePolicyV2 | None, dict[str, Any] 
         _record_scene_event(
             "auto_advance_policy_source_invalid",
             outcome="policy_load_failed",
-            fields={"env": _shadow_policy_env()},
+            fields={"path": str(resolved), "env": _shadow_policy_env()},
             level="warning",
         )
     with _LOCK:
@@ -227,22 +234,34 @@ def load_active_policy_from_environment() -> AutoAdvancePolicyV2 | None:
     return policy
 
 
-def default_calibration_gate_verdict(policy: AutoAdvancePolicyV2) -> dict[str, Any]:
+def default_calibration_gate_verdict(
+    policy: AutoAdvancePolicyV2, *, team_id: str = ""
+) -> dict[str, Any]:
     """The ladder's default calibration evidence read (read-only).
 
-    Delegates to :func:`g12_calibration_service.calibration_gate_verdict`
-    without a bundle: no G12 judgement-record store is persisted yet, so the
-    default answer is fail-closed ("calibration evidence unavailable") and
-    the executor only records.  Callers with real decision-#13 evidence
-    (tests now, a future G12 pilot store later) inject their verdict
-    explicitly.
+    Delegates to :func:`g12_calibration_service.calibration_gate_verdict`.
+    When operator-entered G12 evidence exists for this team
+    (``g12_calibration_store`` manifests + judgement records bound to this
+    policy identity) the persisted bundle is judged by the unchanged gate
+    logic; with nothing recorded the answer stays fail-closed
+    ("calibration evidence unavailable") and the executor only records.
+    Callers with real decision-#13 evidence may still inject their verdict
+    explicitly.  There is deliberately no bypass switch.
     """
 
     from core.web.services.team_workflow.research_runtime.g12_calibration_service import (
         calibration_gate_verdict,
     )
+    from core.web.services.team_workflow.research_runtime.g12_calibration_store import (
+        load_g12_calibration_bundle,
+    )
 
-    return calibration_gate_verdict(policy)
+    bundle = (
+        load_g12_calibration_bundle(str(team_id or "").strip(), policy=policy)
+        if str(team_id or "").strip()
+        else None
+    )
+    return calibration_gate_verdict(policy, bundle)
 
 
 # ---------------------------------------------------------------------------
@@ -560,19 +579,47 @@ def _execute_candidate_selection(
     workflow_run_id: str,
     policy: AutoAdvancePolicyV2,
 ) -> dict[str, Any]:
-    """Auto-record one selection through the existing record_selection path."""
+    """Auto-record one bounded selection through the existing record path.
 
+    Deterministic, auditable cost bound (autoSelectCandidates): the ids
+    arrive in the generation digest's ``proposedCandidates`` order (the
+    chain hook preserves it), so the rule is dedupe-keep-order then cap at
+    the policy's ``candidateSelection.maxSelected`` (floor 2 keeps the
+    review comparable-pair gate meaningful).  There is no scoring signal at
+    this surface, so proposal order IS the rule; the rule, its source, the
+    cap and whether truncation happened are all written into the audit
+    detail below.
+    """
+
+    from core.research.workflow.contracts.automation_policy import (
+        CANDIDATE_SELECTION_DEFAULT_MAX,
+        CANDIDATE_SELECTION_MIN_MAX,
+        CANDIDATE_SELECTION_RULE_DIGEST_ORDER,
+    )
     from core.web.services.team_workflow import hypothesis_selection
 
     normalized_question = str(question_id or "").strip().upper()
-    ids = sorted({str(item or "").strip() for item in candidate_ids if str(item or "").strip()})
+    ordered: list[str] = []
+    for item in candidate_ids:
+        candidate_id = str(item or "").strip()
+        if candidate_id and candidate_id not in ordered:
+            ordered.append(candidate_id)
     if not normalized_question:
         raise _PointSkip("question_id_missing")
-    if len(ids) < 2:
+    raw_max = (policy.candidateSelection or {}).get("maxSelected")
+    max_selected = (
+        raw_max
+        if isinstance(raw_max, int)
+        and not isinstance(raw_max, bool)
+        and raw_max >= CANDIDATE_SELECTION_MIN_MAX
+        else CANDIDATE_SELECTION_DEFAULT_MAX
+    )
+    selected = ordered[:max_selected]
+    if len(selected) < 2:
         raise _PointSkip(
             "candidate_set_too_small",
             {
-                "candidateIds": ids,
+                "candidateIds": ordered,
                 "reason": (
                     "record_selection requires at least two candidates "
                     "(review needs a comparable pair)"
@@ -583,7 +630,7 @@ def _execute_candidate_selection(
         **dict(selection_scope or {}),
         "questionId": normalized_question,
         "workflowRunId": str(workflow_run_id or "").strip(),
-        "selectedCandidateIds": ids,
+        "selectedCandidateIds": selected,
         "decidedBy": system_actor_for(policy),
     }
     result = hypothesis_selection.record_hypothesis_selection(
@@ -595,7 +642,15 @@ def _execute_candidate_selection(
     return {
         "status": str(result.get("status") or ""),
         "selectionId": str(selection.get("selectionId") or ""),
-        "candidateIds": ids,
+        "candidateIds": selected,
+        "selectionRule": CANDIDATE_SELECTION_RULE_DIGEST_ORDER,
+        "selectionSource": (
+            "generation digest proposedCandidates order as passed by the "
+            "chain selection tick"
+        ),
+        "maxSelected": max_selected,
+        "totalCandidates": len(ordered),
+        "truncated": len(ordered) > max_selected,
     }
 
 
@@ -745,7 +800,9 @@ def attempt_capability(
 
     verdict = calibration_verdict
     if verdict is None:
-        verdict = default_calibration_gate_verdict(active_policy)
+        verdict = default_calibration_gate_verdict(
+            active_policy, team_id=normalized_team_id
+        )
     ladder = evaluate_activation_ladder(
         active_policy, active_payload, calibration_verdict=verdict
     )

@@ -1,0 +1,106 @@
+{
+  "schemaVersion": "1.0.0",
+  "policyId": "cc-auto-advance-policy-002",
+  "version": "2.0.0-approved.1",
+  "status": "approved",
+  "executionMode": "active",
+  "createdAt": "2026-09-02T00:00:00+08:00",
+  "capabilities": {
+    "autoAdvanceBatchGate": false,
+    "autoCloseMeetingRound": true,
+    "autoConvergeQuestion": false,
+    "autoSelectCandidates": true,
+    "autoStartEvidenceRepair": true
+  },
+  "candidateSelection": {
+    "maxSelected": 2,
+    "selectionRule": "digest_proposal_order"
+  },
+  "maxRevisionRounds": 2,
+  "maxRevisionRoundsAdjustableTo": 1,
+  "allowedRiskClasses": [
+    "low_risk_standard"
+  ],
+  "effectiveFromCheckpoint": null,
+  "drainMode": "none",
+  "uiPresets": {
+    "L3": {
+      "displayOnly": true,
+      "label": "per_round_confirmation",
+      "description": "identical to the pre-transform manual flow",
+      "displayCapabilities": []
+    },
+    "L2": {
+      "displayOnly": true,
+      "label": "stage_gates_only",
+      "description": "in-question auto advance when hard gates pass",
+      "displayCapabilities": [
+        "autoCloseMeetingRound",
+        "autoSelectCandidates",
+        "autoStartEvidenceRepair",
+        "autoConvergeQuestion"
+      ]
+    },
+    "L1": {
+      "displayOnly": true,
+      "label": "full_auto",
+      "description": "in-question and between-batch auto advance",
+      "displayCapabilities": [
+        "autoAdvanceBatchGate",
+        "autoCloseMeetingRound",
+        "autoConvergeQuestion",
+        "autoSelectCandidates",
+        "autoStartEvidenceRepair"
+      ]
+    }
+  },
+  "calibrationGate": {
+    "confusionMatrix": {
+      "axes": [
+        "autoAdvanceDecision",
+        "humanReviewDecision"
+      ]
+    },
+    "kappaWithCI": {
+      "measure": "cohens_kappa",
+      "minimumKappa": 0.75,
+      "confidenceInterval": "95_percent"
+    },
+    "stratifiedBy": [
+      "risk_class",
+      "catalog_domain"
+    ],
+    "falseAutoApproveUpperBound": {
+      "method": "wilson",
+      "side": "one_sided_upper"
+    },
+    "sequentialSamplingDeclaration": {
+      "mode": "fixed_n_then_sequential_extension",
+      "declaredBeforeUnblinding": true
+    },
+    "notAPermanentDelegation": true,
+    "maxFalseAutoApproveUpperBound": 0.35
+  },
+  "supersedes": {
+    "policyId": "cc-auto-advance-policy-002",
+    "supersededVersion": "2.0.0-candidate.1",
+    "supersededFields": [
+      "status",
+      "executionMode",
+      "approval",
+      "candidateSelection"
+    ]
+  },
+  "activationRequires": "explicit approval recorded against policyId + version + contentHash; a hash change starts a new checkpoint generation; the G12 calibration gate requires persisted decision-#13 judgement records (g12-calibration REST entry) and stays fail-closed without them",
+  "approval": {
+    "requiredApprovers": [
+      "competition_owner"
+    ],
+    "approvedBy": [
+      "operator"
+    ],
+    "frozenAt": "2026-09-02T00:00:00+08:00",
+    "contentHash": "74F721E361D0E1F8AC40F6F23CC5C1854F6D41BD1126A377552412FA45B8DC8A",
+    "contentHashRule": "sha256 over canonical JSON (sort_keys=True, separators=(',', ':'), ensure_ascii=False) with contentHash set to null; uppercase hex"
+  }
+}
