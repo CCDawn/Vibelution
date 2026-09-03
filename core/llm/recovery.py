@@ -35,7 +35,10 @@ def plan_recovery(
     wait_seconds = _retry_wait_seconds(error, attempt, max_attempts)
     return LLMRecoveryDecision(
         category=error.category,
-        retryable=error.retryable,
+        # protocol_error is deterministic on the same adapter path, so same-path
+        # transport retries stay off; mark the decision retryable so the turn
+        # survives one route switch (retry_without_streaming) instead of dying.
+        retryable=error.retryable or error.category == "protocol_error",
         action=action,
         user_message=str(error),
         wait_seconds=wait_seconds,
@@ -55,6 +58,7 @@ def _action_for_category(category: str) -> str:
         "context_length_error": "compress_context",
         "tool_protocol_error": "disable_tools_and_retry_without_streaming",
         "empty_content_error": "retry_without_streaming",
+        "protocol_error": "retry_without_streaming",
         "capability_error": "fail_fast",
         "quota_error": "fail_fast",
         "auth_error": "fail_fast",
@@ -79,7 +83,7 @@ def _should_stop_current_turn(error: LLMError, attempt: int, max_attempts: int) 
         return True
     if error.category == "capability_error":
         return True
-    if error.category in {"context_length_error", "tool_protocol_error", "empty_content_error"}:
+    if error.category in {"context_length_error", "tool_protocol_error", "empty_content_error", "protocol_error"}:
         return False
     if not error.retryable:
         return True
