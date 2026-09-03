@@ -19,7 +19,19 @@ const styles: Record<string, string> = {
   headerActions: "flex shrink-0 items-center gap-2",
   eyebrow: "[font-size:var(--vui-font-2xs)] font-[650] tracking-[0.02em] text-[var(--fg-secondary)]",
   anchorNav:
-    "grid grid-cols-2 gap-1.5 @min-[430px]:grid-cols-4 [&_a]:flex [&_a]:min-w-0 [&_a]:items-center [&_a]:gap-[7px] [&_a]:rounded-[var(--vui-radius-control)] [&_a]:border [&_a]:border-[var(--vui-border-subtle)] [&_a]:bg-[var(--vui-surface-panel)] [&_a]:px-2.5 [&_a]:py-[9px] [&_a]:[font-size:var(--vui-font-2xs)] [&_a]:text-inherit [&_a]:no-underline [&_span]:grid [&_span]:h-5 [&_span]:w-5 [&_span]:shrink-0 [&_span]:place-items-center [&_span]:rounded-full [&_span]:bg-[var(--vui-surface-inset)] [&_span]:text-[var(--fg-secondary)]",
+    "grid gap-3 [&_a]:flex [&_a]:min-w-0 [&_a]:items-center [&_a]:gap-[7px] [&_a]:rounded-[var(--vui-radius-control)] [&_a]:border [&_a]:border-[var(--vui-border-subtle)] [&_a]:bg-[var(--vui-surface-panel)] [&_a]:px-2.5 [&_a]:py-[9px] [&_a]:[font-size:var(--vui-font-2xs)] [&_a]:text-inherit [&_a]:no-underline",
+  // Two-stage anchor directory: zone title row + its anchor links. The archive
+  // mode still renders bare links, so link styles stay on the anchorNav
+  // descendant selector and cover both layouts.
+  anchorGroup: "grid gap-1.5",
+  anchorGroupTitle:
+    "flex items-center gap-1.5 [font-size:var(--vui-font-2xs)] font-[650] tracking-[0.02em] text-[var(--fg-secondary)]",
+  anchorGroupLinks: "grid grid-cols-2 gap-1.5 @min-[430px]:grid-cols-4",
+  stageZone:
+    "grid scroll-mt-5 gap-1.5 border-b border-[var(--vui-border-subtle)] pb-2",
+  stageZoneTopline: "flex flex-wrap items-center justify-between gap-2",
+  stageZoneTitle: "m-0 [font-size:var(--vui-font-md)] leading-[1.35]",
+  stageZoneHint: "m-0 [font-size:var(--vui-font-2xs)] leading-5 text-[var(--fg-secondary)]",
   archiveHint: "m-0 [font-size:var(--vui-font-xs)] leading-5 text-[var(--fg-secondary)]",
   section:
     "grid scroll-mt-5 gap-3 rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-4 [&_h3]:m-0 [&_h4]:m-0 [&_p]:m-0",
@@ -58,6 +70,9 @@ const styles: Record<string, string> = {
   selection:
     "grid grid-cols-1 gap-2.5 [&>div]:grid [&>div]:content-start [&>div]:gap-1.25 [&>div]:rounded-[var(--vui-radius-control)] [&>div]:bg-[var(--vui-surface-inset)] [&>div]:p-2.5 [&>div>span]:[font-size:var(--vui-font-2xs)] [&>div>span]:font-[650] [&>div>span]:tracking-[0.02em] [&>div>span]:text-[var(--fg-secondary)]",
   plan: "grid gap-2.5",
+  sectionHeadingRow: "flex flex-wrap items-center justify-between gap-2",
+  planProposalTag:
+    "grid gap-1 rounded-[var(--vui-radius-control)] bg-[var(--vui-surface-inset)] p-2.5 [&>span]:[font-size:var(--vui-font-2xs)] [&>span]:leading-5 [&>span]:text-[var(--fg-secondary)]",
   planGrid:
     "grid grid-cols-1 gap-2 @min-[430px]:grid-cols-2 [&>div]:grid [&>div]:content-start [&>div]:gap-1.25 [&>div]:rounded-[var(--vui-radius-control)] [&>div]:bg-[var(--vui-surface-inset)] [&>div]:p-2.5",
   workPackage:

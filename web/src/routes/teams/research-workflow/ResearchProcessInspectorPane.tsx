@@ -51,6 +51,12 @@ import { ResearchCenteredEmptyState } from "./ResearchCenteredEmptyState";
 import type { ResearchProcessPanel } from "./researchProcessPanelSelection";
 import { handoffsForNode } from "./researchNodeHandoffModel";
 import type { ScopedDiscussionModel } from "./scopedDiscussionModel";
+import {
+  definitionNeedsStageTwoInactiveRegion,
+  isStageTwoInactiveCanvasNode,
+  stageTwoInactiveNodeLabel,
+} from "./stageTwoCanvasRegion";
+import { StageTwoInactiveNodePanel } from "./StageTwoInactiveNodePanel";
 import type { NodeDetailState } from "./useNodeDetailState";
 import type { ResearchWorkflowInsights } from "./useResearchWorkflowInsights";
 import styles from "./ResearchProcessInspectorPane.styles";
@@ -191,6 +197,19 @@ export function ResearchProcessInspectorPane(props: {
         state.projection.definition as { nodes: Array<{ nodeId: string }> },
       )
     : false;
+  // Stage-two truncated runs render protocol/experiment selections as an
+  // inactive explanation, never as runtime detail. Labels come from the
+  // static region mirror: a truncated definition never carries these nodes.
+  const stageTwoInactive = definitionNeedsStageTwoInactiveRegion(
+    state.projection
+      ? (state.projection.definition as { nodes: Array<{ nodeId: string }> })
+      : null,
+  );
+  const stageTwoSelectedLabel = stageTwoInactive
+    && scope.selectedNodeId
+    && isStageTwoInactiveCanvasNode(scope.selectedNodeId)
+    ? stageTwoInactiveNodeLabel(scope.selectedNodeId)
+    : undefined;
 
   if (scope.panel === "progress") {
     // R4.3: the anomaly inbox sits directly below the batch console so the
@@ -317,6 +336,17 @@ export function ResearchProcessInspectorPane(props: {
         meetingRoundId={nextAction?.meetingRoundId || ""}
         questionId={scope.questionId || state.run?.questionId || ""}
         discussionModel={discussionModel}
+      />
+    );
+  }
+  // Grayed stage-two nodes own the inspector before any runtime panel: the
+  // explanation is the only thing a selection of them should ever surface.
+  if (stageTwoInactive && scope.selectedNodeId && isStageTwoInactiveCanvasNode(scope.selectedNodeId)) {
+    return (
+      <StageTwoInactiveNodePanel
+        nodeId={scope.selectedNodeId}
+        nodeLabel={stageTwoSelectedLabel}
+        lang={lang}
       />
     );
   }

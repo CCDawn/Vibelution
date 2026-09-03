@@ -657,3 +657,84 @@ describe("ResearchProcessInspectorPane collection recovery wiring", () => {
     container.remove();
   });
 });
+
+describe("ResearchProcessInspectorPane stage-two inactive selection", () => {
+  afterEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  const STAGE_ONE_DEFINITION_NODE_IDS = [
+    "problem_understanding",
+    "source_finding",
+    "source_extraction",
+    "evidence_relations",
+    "knowledge_ingestion",
+    "knowledge_handoff",
+    "hypothesis_design",
+  ];
+
+  function projectionWith(nodeIds: string[]) {
+    return {
+      definition: {
+        nodes: nodeIds.map((nodeId) => ({
+          nodeId,
+          label: nodeId === "protocol_design" ? "协议设计" : nodeId,
+        })),
+        edges: [],
+        stages: [],
+      },
+      run: { runId: "run-1", status: "running", runtimeCurrentNodeIds: [], nodeRuns: {} },
+    } as InspectorProps["state"]["projection"];
+  }
+
+  async function renderWithProjection(selectedNodeId: string, nodeIds: string[]) {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    queryClient.setQueryData(queryKeys.configPublic(), { language: "zh" });
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter>
+            <ResearchProcessInspectorPane
+              scope={makeInspectorScope("node", { selectedNodeId })}
+              state={{
+                ...makeInspectorState(),
+                projection: projectionWith(nodeIds),
+              }}
+              actions={makeInspectorActions()}
+            />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+    });
+    return { container, root };
+  }
+
+  it("explains the inactive semantics instead of runtime detail on truncated runs", async () => {
+    const { container, root } = await renderWithProjection("protocol_design", STAGE_ONE_DEFINITION_NODE_IDS);
+
+    expect(container.querySelector('[data-testid="stage-two-inactive-node-panel"]')).not.toBeNull();
+    expect(container.textContent).toContain("协议设计");
+    expect(container.textContent).toContain("未激活");
+    expect(container.textContent).toContain("需按题显式开启");
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it("keeps the normal detail path for stage-two nodes on legacy 17-node runs", async () => {
+    const { container, root } = await renderWithProjection("protocol_design", [
+      ...STAGE_ONE_DEFINITION_NODE_IDS,
+      "protocol_design",
+      "result_package",
+    ]);
+
+    expect(container.querySelector('[data-testid="stage-two-inactive-node-panel"]')).toBeNull();
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+});

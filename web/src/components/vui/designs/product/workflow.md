@@ -235,3 +235,32 @@ const graph = composeKnowledgeSideflowGraph(withHypothesisFirst, region); // reg
 ```
 
 数据由快照 `invocationBadges` 提供（后端 knowledge_invocations 域投影）；SSE 快照刷新即失效重取，无独立轮询。
+
+## 阶段未激活区域
+
+### 功能
+
+科研流程画布的**显示层第三类区域**：截断定义（`challenge-cup-research@2.2.0-stage-one`，七节点、`hypothesis_design` 唯一终端）的运行画布上，把「研究计划与实验」阶段的十节点（`protocol_design` → `result_package`）以灰置「未激活」组追加在主图之后，让「第一阶段（假说生成）/第二阶段（研究计划与实验）」的分区在画布上持续可见。数据源是前端契约副本 `CHALLENGE_CUP_NODE_IDS` + 静态镜像 `core/research/workflow/definition.py` 的标签/actor，**不含任何运行时状态**：所有节点 `pending`、阶段 `stageTone: idle`、描述统一为「第二阶段未激活，需按题显式开启」。区域由路由层纯函数 `buildStageTwoInactiveCanvasRegion`（`routes/teams/research-workflow/stageTwoCanvasRegion.ts`）产出 `{ stage, nodes, edges }`，经 `composeStageTwoInactiveGraph` 拼进主图；边界边（`hypothesis_design` → `protocol_design`，常显「需按题显式开启」）只是显示层语义，不触发任何动作。
+
+### 适用范围
+
+- 仅「definition 不含 `protocol_design` 节点」的截断运行/定义视图（`definitionNeedsStageTwoInactiveRegion` 判定）；2.1.0 十七节点历史运行的二阶段节点在图内有真实状态，不合成区域。
+- 点击灰置节点：`useNodeDetailState` 跳过 fetch（workspace 对未激活节点传 null），Inspector 渲染 `StageTwoInactiveNodePanel` 只读说明（节点名 + 「未激活」状态章 + 按题显式开启语义），位于所有 runtime Inspector 分支之前。
+- **禁止**在本区域渲染任何可触发二阶段的动作；二阶段激活是按题显式的产品决策，永远不出现在画布。
+
+### 使用方式
+
+```tsx
+import {
+  buildStageTwoInactiveCanvasRegion,
+  composeStageTwoInactiveGraph,
+  definitionNeedsStageTwoInactiveRegion,
+} from "./stageTwoCanvasRegion";
+
+const stageTwoInactiveRegion = definitionNeedsStageTwoInactiveRegion(projection.definition)
+  ? buildStageTwoInactiveCanvasRegion()
+  : null;
+const graph = composeStageTwoInactiveGraph(withSideflow, stageTwoInactiveRegion); // region 为 null 时原样返回 base
+```
+
+纯静态片段，无数据依赖、无 SSE 订阅；定义视图与运行视图同样合成，Legacy 十七节点运行自动退出。

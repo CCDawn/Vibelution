@@ -43,6 +43,12 @@ import {
   projectionToCanvasGraph,
 } from "./researchProcessGraphModel";
 import {
+  buildStageTwoInactiveCanvasRegion,
+  composeStageTwoInactiveGraph,
+  definitionNeedsStageTwoInactiveRegion,
+  isStageTwoInactiveCanvasNode,
+} from "./stageTwoCanvasRegion";
+import {
   RESEARCH_PROCESS_INSPECTOR_CLOSED,
   shouldShowResearchProcessInspector,
 } from "./researchProcessPanelSelection";
@@ -183,10 +189,25 @@ export function ResearchProcessWorkspace({
     if (!deepLink.startsWith("/chat?")) return;
     navigate(deepLink);
   }, [navigate]);
+  // Stage-two truncated runs: protocol/experiment nodes are a grayed display
+  // region, not runtime nodes, so node detail never fetches for them. Legacy
+  // 17-node runs keep real stage-two nodes and their normal detail path.
+  const stageTwoInactiveRegion = useMemo(
+    () => definitionNeedsStageTwoInactiveRegion(
+      runState.projection?.definition as { nodes: Array<{ nodeId: string }> } | undefined,
+    )
+      ? buildStageTwoInactiveCanvasRegion()
+      : null,
+    [runState.projection],
+  );
+  const nodeDetailTargetNodeId = stageTwoInactiveRegion
+      && isStageTwoInactiveCanvasNode(location.selectedNodeId)
+    ? null
+    : location.selectedNodeId;
   const nodeDetail = useNodeDetailState(
     teamId,
     location.runId,
-    location.selectedNodeId,
+    nodeDetailTargetNodeId,
     runState.run?.runVersion ?? null,
   );
   // Scalar selection input for the sideflow relation edge: identity-stable
@@ -259,7 +280,12 @@ export function ResearchProcessWorkspace({
     const relationEdge = sideflowRegion
       ? knowledgeSideflowRelationEdge(invocationBadges ?? null, selectedKsfNodeId)
       : null;
-    return composeKnowledgeSideflowGraph(withHypothesisFirst, sideflowRegion, relationEdge);
+    // Truncated stage-one runs append the grayed "研究计划与实验 · 未激活"
+    // group so the two-stage split stays visible without offering actions.
+    return composeStageTwoInactiveGraph(
+      composeKnowledgeSideflowGraph(withHypothesisFirst, sideflowRegion, relationEdge),
+      stageTwoInactiveRegion,
+    );
   }, [
     catalog.effectiveBindings,
     location.runId,
@@ -273,6 +299,7 @@ export function ResearchProcessWorkspace({
     hypothesisFirstChain.selection,
     hypothesisFirstChain.stateV2,
     chainQuestionId,
+    stageTwoInactiveRegion,
   ]);
 
   const experimentChainSummary = hypothesisFirstChain.chainState

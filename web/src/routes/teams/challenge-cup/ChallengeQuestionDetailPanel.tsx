@@ -27,6 +27,12 @@ import { ChallengeQuestionEvidenceSection } from "./ChallengeQuestionEvidenceSec
 import { ChallengeQuestionPlanSection } from "./ChallengeQuestionPlanSection";
 import { ChallengeQuestionRegisterDialog } from "./ChallengeQuestionRegisterDialog";
 import { ChallengeQuestionRunResetDialog } from "./ChallengeQuestionRunResetDialog";
+import { ChallengeQuestionStageZoneHeading } from "./ChallengeQuestionStageZoneHeading";
+import {
+  deriveChallengeQuestionStageProjection,
+  stageTwoStatusCopy,
+  stageZoneTitle,
+} from "./challengeQuestionStageModel";
 import { HypothesisSelectionPanel } from "./HypothesisSelectionPanel";
 import { ChallengeQuestionTokenUsage } from "./ChallengeTokenUsageStrip";
 import { isTokenUsageOverview, questionTokenUsage } from "./challengeTokenUsageModel";
@@ -67,34 +73,60 @@ export type ChallengeQuestionDetailPanelProps = {
   };
 };
 
-const DETAIL_ANCHORS_ZH = [
-  ["question-agent", "题目与接单"],
-  ["sources", "来源与证据"],
-  ["lineage", "全链谱系"],
-  ["hypotheses", "候选假设"],
-  ["reviews", "七维评价"],
-  ["selection", "选择"],
-  ["hypothesis-first-selection", "假说选择"],
-  ["hypothesis-first-meeting", "评审讨论"],
-  ["hypothesis-first-rounds", "评审轮次"],
-  ["plan", "研究计划"],
-  ["feedback", "人工审核"],
-  ["artifact", "最终工件"],
+/**
+ * Two-stage anchor directory (descriptive names, never ordinals). Zone one
+ * holds the hypothesis-generation and knowledge-chain artifacts; zone two
+ * holds the research-plan/experiment artifacts, which stay visible but carry
+ * the stage-two inactive semantics.
+ */
+const DETAIL_ANCHOR_GROUPS_ZH = [
+  {
+    zone: "hypothesis" as const,
+    anchors: [
+      ["question-agent", "题目与接单"],
+      ["sources", "来源与证据"],
+      ["lineage", "全链谱系"],
+      ["hypotheses", "候选假设"],
+      ["reviews", "七维评价"],
+      ["selection", "选择"],
+      ["hypothesis-first-selection", "假说选择"],
+      ["hypothesis-first-meeting", "评审讨论"],
+      ["hypothesis-first-rounds", "评审轮次"],
+    ],
+  },
+  {
+    zone: "plan" as const,
+    anchors: [
+      ["plan", "研究计划"],
+      ["feedback", "人工审核"],
+      ["artifact", "最终工件"],
+    ],
+  },
 ] as const;
 
-const DETAIL_ANCHORS_EN = [
-  ["question-agent", "Question & agent"],
-  ["sources", "Sources & evidence"],
-  ["lineage", "Question lineage"],
-  ["hypotheses", "Candidate hypotheses"],
-  ["reviews", "Seven-dim review"],
-  ["selection", "Selection"],
-  ["hypothesis-first-selection", "Hypothesis selection"],
-  ["hypothesis-first-meeting", "Review discussion"],
-  ["hypothesis-first-rounds", "Review rounds"],
-  ["plan", "Research plan"],
-  ["feedback", "Human review"],
-  ["artifact", "Final artifact"],
+const DETAIL_ANCHOR_GROUPS_EN = [
+  {
+    zone: "hypothesis" as const,
+    anchors: [
+      ["question-agent", "Question & agent"],
+      ["sources", "Sources & evidence"],
+      ["lineage", "Question lineage"],
+      ["hypotheses", "Candidate hypotheses"],
+      ["reviews", "Seven-dim review"],
+      ["selection", "Selection"],
+      ["hypothesis-first-selection", "Hypothesis selection"],
+      ["hypothesis-first-meeting", "Review discussion"],
+      ["hypothesis-first-rounds", "Review rounds"],
+    ],
+  },
+  {
+    zone: "plan" as const,
+    anchors: [
+      ["plan", "Research plan"],
+      ["feedback", "Human review"],
+      ["artifact", "Final artifact"],
+    ],
+  },
 ] as const;
 
 export function ChallengeQuestionDetailPanel({
@@ -116,7 +148,8 @@ export function ChallengeQuestionDetailPanel({
   const [archiveExportError, setArchiveExportError] = useState("");
   const { lang } = useShellI18n();
   const isZh = lang === "zh";
-  const detailAnchors = isZh ? DETAIL_ANCHORS_ZH : DETAIL_ANCHORS_EN;
+  const detailAnchorGroups = isZh ? DETAIL_ANCHOR_GROUPS_ZH : DETAIL_ANCHOR_GROUPS_EN;
+  const stageProjection = deriveChallengeQuestionStageProjection(detail);
   const tokenUsageQuery = useQuery({
     queryKey: queryKeys.challengeCupTokenUsage(teamId),
     queryFn: () => fetchChallengeCupTokenUsage(teamId),
@@ -365,15 +398,28 @@ export function ChallengeQuestionDetailPanel({
       ) : null}
 
       <nav className={css.anchorNav} aria-label={isZh ? (readOnlyArchive ? "题目档案章节" : "单题验收章节") : (readOnlyArchive ? "Question archive sections" : "Acceptance sections")}>
-        {(readOnlyArchive
+        {readOnlyArchive
           ? ([
               ["hypotheses", isZh ? "假说摘要" : "Hypothesis summary"],
               ["lineage", isZh ? "全链谱系" : "Question lineage"],
               ["hypothesis-first-rounds", isZh ? "评审历程" : "Review history"],
-            ] as const)
-          : detailAnchors).map(([id, label]) => (
-          <a href={`#${id}`} key={id}>{label}</a>
-        ))}
+            ] as const).map(([id, label]) => (
+              <a href={`#${id}`} key={id}>{label}</a>
+            ))
+          : detailAnchorGroups.map((group) => (
+            <div className={css.anchorGroup} key={group.zone} data-stage-zone={group.zone}>
+              <span className={css.anchorGroupTitle}>
+                {group.zone === "plan"
+                  ? `${stageZoneTitle(group.zone, lang)} · ${stageTwoStatusCopy(lang)}`
+                  : stageZoneTitle(group.zone, lang)}
+              </span>
+              <span className={css.anchorGroupLinks}>
+                {group.anchors.map(([id, label]) => (
+                  <a href={`#${id}`} key={id}>{label}</a>
+                ))}
+              </span>
+            </div>
+          ))}
       </nav>
 
       {readOnlyArchive ? (
@@ -406,6 +452,11 @@ export function ChallengeQuestionDetailPanel({
       ) : (
         <>
           {teamId ? <ChallengeQuestionTokenUsage lang={lang} usage={questionUsage} state={tokenUsageState} /> : null}
+          <ChallengeQuestionStageZoneHeading
+            zone="hypothesis"
+            stageOneStatus={stageProjection.stageOne}
+            lang={lang}
+          />
           <ChallengeQuestionEvidenceSection detail={detail} lang={lang} />
           <section className={css.section} id="lineage" data-testid="question-lineage-section">
             <ChallengeQuestionSectionHeading
@@ -423,6 +474,10 @@ export function ChallengeQuestionDetailPanel({
           />
           <TeamMeetingRoundPanel teamId={detail.teamId} questionId={detail.questionId} />
           <TeamHypothesisRoundTimeline teamId={detail.teamId} questionId={detail.questionId} />
+          <ChallengeQuestionStageZoneHeading
+            zone="plan"
+            lang={lang}
+          />
           <ChallengeQuestionPlanSection detail={detail} lang={lang} />
         </>
       )}
