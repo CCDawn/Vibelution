@@ -7650,9 +7650,12 @@ def test_execute_source_collection_search_publishes_runtime_work_run(tmp_path, m
     assert search_event["child_log_path"].startswith("artifacts/source-collection-")
     assert search_event["child_log_payload"]["summary"]["attemptedQueryCount"] == 1
     assert search_event["child_log_payload"]["summary"]["executedQueryCount"] == 1
-    assert search_event["child_log_payload"]["queryEvents"]
-    assert search_event["child_log_payload"]["queryEvents"][0]["assignmentId"]
-    assert search_event["child_log_payload"]["queryEvents"][0]["queryId"]
+    # The run-level qwen deep-search event (no assignment) legitimately leads
+    # the timeline; per-query events must still carry assignment bindings.
+    query_events = search_event["child_log_payload"]["queryEvents"]
+    assert query_events
+    first_assigned = next(item for item in query_events if item["assignmentId"])
+    assert first_assigned["queryId"]
 
 def test_execute_source_collection_search_does_not_mark_downstream_assignments_as_running_search(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
@@ -7771,12 +7774,16 @@ def test_execute_source_collection_search_limits_failed_provider_attempt_to_max_
     assert execution["status"] == "partial"
     assert calls == [first_query_id] * 3
     assert second_query_id in execution["nextRunnableQueryIds"]
-    assert [event["eventType"] for event in execution["executionEvents"]] == [
+    assert [event["eventType"] for event in execution["executionEvents"] if event["provider"] != "qwen_web_search"] == [
         "search.failed",
         "search.failed",
         "search.failed",
     ]
-    assert {event["provider"] for event in execution["executionEvents"]} == {
+    assert {
+        event["provider"]
+        for event in execution["executionEvents"]
+        if event["provider"] != "qwen_web_search"
+    } == {
         "crossref_rest_api",
         "arxiv_api",
         "openalex_api",

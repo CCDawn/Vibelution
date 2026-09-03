@@ -761,7 +761,9 @@ def test_search_envelope_fingerprint_changes_with_keywords_and_requirements():
     other_policy = facade.search_envelope_fingerprint(
         facade._normalize_search_envelope({"keywords": ["alpha"]}),
         {},
-        source_policy_version="4",
+        # v4 became the default when the qwen deep-search supplement landed;
+        # the fingerprint must still react to any other explicit version.
+        source_policy_version="5",
     )
     assert base != other_keywords
     assert base != other_requirements
