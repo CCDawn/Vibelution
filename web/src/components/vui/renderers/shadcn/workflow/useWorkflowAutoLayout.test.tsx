@@ -931,6 +931,15 @@ describe("useWorkflowAutoLayout behavior", () => {
     expect(diagnostic?.reason).toContain('edge "e2" section chain is not well-formed');
   });
 
+  it("rejects a layout that keeps every node but drops the business edges", () => {
+    const graph = makeGraph(["knowledge_collection", "experiment_design"]);
+    const complete = createDeterministicWorkflowLayout(graph, "serpentine");
+
+    const diagnostic = layoutDiagnostic({ ...complete, edges: [] }, graph);
+
+    expect(diagnostic?.reason).toContain("business edges");
+  });
+
   it("stays clean when every label has bounds and chains are well-formed (P1-5)", () => {
     const result = {
       nodes: [],
