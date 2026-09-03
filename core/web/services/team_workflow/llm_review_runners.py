@@ -10,6 +10,19 @@ service-layer defaults:
 * ``build_hypothesis_review_runners`` returns the reflection / pairwise /
   Pareto / MetaReview runners consumed by ``execute_hypothesis_review``.
 
+Every review-profile call declares its structured-output contract to the
+provider when the resolved client capability ``supports_strict_json_schema``
+is true: the four JSON review steps carry their per-purpose schemas, and the
+meeting digest — whose persisted artifact stays open Markdown — wraps the
+document as ``{"documentMarkdown": ...}`` so strict-JSON providers can never
+return prose around a broken payload.  Providers without the capability keep
+the historical open-Markdown text path unchanged.  Every call also carries
+team-scoped invocation metadata, so the client-side usage ledger classifies
+these direct calls under the team workflow scope (latency and token usage
+become visible in the ledger), and emits bounded scene telemetry
+(``meeting_digest.llm.*`` for the digest, ``review_llm.call.*`` for the
+other purposes) with latency, token usage, and failure categories.
+
 Resolution is lazy and fail-open at *availability* level only: when no model
 is configured the callers keep the DEV fixture behaviour, so DEV/CI stays
 deterministic.  Every fallback branch announces itself (warning log plus a
@@ -109,12 +122,11 @@ _REVIEW_LLM_CALL_TIMEOUT_ENV = "VIBELUTION_REVIEW_LLM_CALL_TIMEOUT_SECONDS"
 #
 # - ``VIBELUTION_REVIEW_JSON_MAX_OUTPUT_TOKENS``: reflection / pairwise /
 #   pareto / metareview JSON review calls (default 8192).
-# - ``VIBELUTION_DIGEST_MAX_OUTPUT_TOKENS``: the meeting digest Markdown call
-#   (default 8192; medium-length output).
-# - The revision runner (long revised candidate prose) and every speaker /
-#   chat path are deliberately NOT clamped and keep the profile default.
+# - The meeting digest call and the revision runner (long revised candidate
+#   prose) are deliberately NOT clamped and keep the profile default: the
+#   digest is the meeting's authoritative long-form document and its
+#   generation budget must never be compressed (2026-09-02 task red line).
 _REVIEW_JSON_MAX_OUTPUT_TOKENS_ENV = "VIBELUTION_REVIEW_JSON_MAX_OUTPUT_TOKENS"
-_DIGEST_MAX_OUTPUT_TOKENS_ENV = "VIBELUTION_DIGEST_MAX_OUTPUT_TOKENS"
 _REVIEW_MAX_OUTPUT_TOKENS_DEFAULT = 8192
 _REVIEW_MAX_OUTPUT_TOKENS_MIN = 512
 _REVIEW_MAX_OUTPUT_TOKENS_MAX = 65536
@@ -142,23 +154,10 @@ def review_json_max_output_tokens() -> int:
     )
 
 
-def digest_max_output_tokens() -> int:
-    """Per-call ``max_tokens`` clamp for the meeting digest draft call."""
-
-    return _env_int(
-        _DIGEST_MAX_OUTPUT_TOKENS_ENV,
-        _REVIEW_MAX_OUTPUT_TOKENS_DEFAULT,
-        minimum=_REVIEW_MAX_OUTPUT_TOKENS_MIN,
-        maximum=_REVIEW_MAX_OUTPUT_TOKENS_MAX,
-    )
-
-
 def _purpose_max_output_tokens(purpose: str) -> int | None:
     """Return the per-call output clamp for ``purpose`` (``None`` = profile)."""
 
     normalized = str(purpose or "").strip()
-    if normalized == "meeting_digest":
-        return digest_max_output_tokens()
     if normalized in {
         "hypothesis_reflection",
         "hypothesis_pairwise",
@@ -166,6 +165,7 @@ def _purpose_max_output_tokens(purpose: str) -> int | None:
         "hypothesis_metareview",
     }:
         return review_json_max_output_tokens()
+    # ``meeting_digest`` and ``hypothesis_revision`` keep the profile default.
     return None
 
 
@@ -177,8 +177,19 @@ def _purpose_max_output_tokens(purpose: str) -> int | None:
 # either way, so capability=false or an unexpected provider answer keeps the
 # previous behavior.  Optional top-level fields (noveltyContrast,
 # coreHypothesisCoherence) are intentionally left out of ``required`` because
-# the prompts allow omitting them.
+# the prompts allow omitting them.  ``meeting_digest`` wraps the persisted
+# open-Markdown document as a single ``documentMarkdown`` string so strict
+# providers cannot return prose around a broken payload; providers without
+# the capability keep the historical text path (see the drafter).
 _REVIEW_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
+    "meeting_digest": {
+        "type": "object",
+        "properties": {
+            "documentMarkdown": {"type": "string"},
+        },
+        "required": ["documentMarkdown"],
+        "additionalProperties": False,
+    },
     "hypothesis_reflection": {
         "type": "object",
         "properties": {
@@ -330,8 +341,9 @@ def _purpose_output_schema(purpose: str, llm: Mapping[str, Any]) -> SemanticOutp
     """Structured-output schema for ``purpose`` when the provider supports it.
 
     Returns ``None`` — keeping the prompt + brace-tolerant parsing path — for
-    text-mode purposes, unstructured purposes (revision), and providers whose
-    resolved capability ``supports_strict_json_schema`` is false or missing.
+    unstructured purposes (revision), for the digest's open-Markdown text
+    fallback, and for providers whose resolved capability
+    ``supports_strict_json_schema`` is false or missing.
     """
 
     schema_body = _REVIEW_JSON_SCHEMAS.get(str(purpose or "").strip())
@@ -343,6 +355,37 @@ def _purpose_output_schema(purpose: str, llm: Mapping[str, Any]) -> SemanticOutp
     return SemanticOutputSchema(name=f"{purpose}_v1", schema=schema_body)
 
 
+def _record_review_chain_scene_event(
+    phase: str,
+    event_code: str,
+    *,
+    outcome: str,
+    fields: Mapping[str, Any],
+    level: str = "info",
+    message: str = "Review-chain LLM stage observed.",
+) -> None:
+    """Emit bounded review-chain diagnostics without affecting model execution."""
+
+    try:
+        from core.web.services.runtime_scene_service import (
+            record_runtime_scene_event_quietly,
+        )
+
+        record_runtime_scene_event_quietly(
+            "team_workflow",
+            phase,
+            event_code,
+            message=message,
+            level=level,
+            outcome=outcome,
+            fields=dict(fields),
+            lifecycle=False,
+        )
+    except Exception:  # noqa: BLE001 - diagnostics must never fail the LLM call
+        # Diagnostics are never allowed to change the review contract.
+        return
+
+
 def _record_meeting_digest_scene_event(
     event_code: str,
     *,
@@ -352,24 +395,14 @@ def _record_meeting_digest_scene_event(
 ) -> None:
     """Emit bounded digest diagnostics without affecting model execution."""
 
-    try:
-        from core.web.services.runtime_scene_service import (
-            record_runtime_scene_event_quietly,
-        )
-
-        record_runtime_scene_event_quietly(
-            "team_workflow",
-            "meeting_digest",
-            event_code,
-            message="Meeting digest LLM stage observed.",
-            level=level,
-            outcome=outcome,
-            fields=dict(fields),
-            lifecycle=False,
-        )
-    except Exception:  # noqa: BLE001 - diagnostics must never fail the LLM call
-        # Diagnostics are never allowed to change the digest contract.
-        return
+    _record_review_chain_scene_event(
+        "meeting_digest",
+        event_code,
+        outcome=outcome,
+        fields=fields,
+        level=level,
+        message="Meeting digest LLM stage observed.",
+    )
 
 
 def _review_llm_error_category(error: Exception) -> str:
@@ -1146,6 +1179,11 @@ def _invoke_review_llm(
         metadata={
             "purpose": purpose,
             "reviewProfileId": llm["profileId"],
+            # Team scope for the client-side usage-ledger event: without it
+            # ``_usage_scope_kind`` classifies these direct review calls as
+            # generic chat sessions and team-filtered ledger views show zero
+            # digest/review traffic even though tokens were burned.
+            "teamId": session_id,
             **(
                 {"turnId": turn_id, "invocationId": invocation_id}
                 if require_provider_receipt
@@ -1186,12 +1224,36 @@ def _invoke_review_llm(
             if deadline_at_ms
             else 0,
         }
-        if digest_observation:
-            _record_meeting_digest_scene_event(
-                "meeting_digest.llm.started",
-                outcome="started",
-                fields=base_fields,
+        # Every review-profile purpose emits bounded call telemetry: the
+        # digest keeps its historical meeting_digest.llm.* codes, the other
+        # purposes share the review_llm.call.* codes.  Diagnostics only.
+        call_phase = "meeting_digest" if digest_observation else "review_llm"
+        stage_message = (
+            "Meeting digest LLM stage observed."
+            if digest_observation
+            else "Review LLM stage observed."
+        )
+
+        def record_call_event(
+            event_code: str,
+            *,
+            outcome: str,
+            level: str = "info",
+            extra_fields: Mapping[str, Any] | None = None,
+        ) -> None:
+            _record_review_chain_scene_event(
+                call_phase,
+                event_code,
+                outcome=outcome,
+                level=level,
+                message=stage_message,
+                fields={**base_fields, **(extra_fields or {})},
             )
+
+        if digest_observation:
+            record_call_event("meeting_digest.llm.started", outcome="started")
+        else:
+            record_call_event("review_llm.call.started", outcome="started")
         response: Any = None
         content = ""
         try:
@@ -1230,24 +1292,31 @@ def _invoke_review_llm(
             # A real provider 429 opens the model-level cooldown window so
             # later calls fast-fail instead of piling onto the same throttle.
             _maybe_record_provider_rate_limit(exc, model_ref=model_gate_ref)
+            failure_fields = {
+                **_response_usage_fields(response),
+                "latencyMs": max(
+                    0, int((time.monotonic() - started_at) * 1000)
+                ),
+                "outputChars": len(content),
+                "errorCategory": _review_llm_error_category(exc),
+                "errorType": type(exc).__name__,
+                "llmErrorCategory": (
+                    str(exc.category) if isinstance(exc, LLMError) else ""
+                ),
+            }
             if digest_observation:
-                _record_meeting_digest_scene_event(
+                record_call_event(
                     "meeting_digest.llm.failed",
                     outcome="failed",
                     level="error",
-                    fields={
-                        **base_fields,
-                        **_response_usage_fields(response),
-                        "latencyMs": max(
-                            0, int((time.monotonic() - started_at) * 1000)
-                        ),
-                        "outputChars": len(content),
-                        "errorCategory": _review_llm_error_category(exc),
-                        "errorType": type(exc).__name__,
-                        "llmErrorCategory": (
-                            str(exc.category) if isinstance(exc, LLMError) else ""
-                        ),
-                    },
+                    extra_fields=failure_fields,
+                )
+            else:
+                record_call_event(
+                    "review_llm.call.failed",
+                    outcome="failed",
+                    level="error",
+                    extra_fields=failure_fields,
                 )
             # Offline attribution evidence: the raw (possibly malformed)
             # response survives on disk even though the call itself fails
@@ -1264,11 +1333,20 @@ def _invoke_review_llm(
             )
             raise
         if digest_observation:
-            _record_meeting_digest_scene_event(
+            record_call_event(
                 "meeting_digest.llm.completed",
                 outcome="succeeded",
-                fields={
-                    **base_fields,
+                extra_fields={
+                    **_response_usage_fields(response),
+                    "latencyMs": max(0, int((time.monotonic() - started_at) * 1000)),
+                    "outputChars": len(content),
+                },
+            )
+        else:
+            record_call_event(
+                "review_llm.call.completed",
+                outcome="succeeded",
+                extra_fields={
                     **_response_usage_fields(response),
                     "latencyMs": max(0, int((time.monotonic() - started_at) * 1000)),
                     "outputChars": len(content),
@@ -1392,6 +1470,24 @@ _DIGEST_SYSTEM_PROMPT = """你是科研团队的 Coordinator，负责把团队�
 - 输出只包含最终 Markdown 文档，不要输出 JSON、代码围栏、前言或解释。
 """
 
+# Strict-JSON variant for providers whose resolved capability declares
+# ``supports_strict_json_schema``.  The document requirements are identical;
+# only the wire envelope changes: the full Markdown document travels inside
+# the ``documentMarkdown`` string of one JSON object, so a provider in strict
+# JSON mode can never return prose around a truncated payload (the historical
+# multi-minute "invalid JSON" digest failure class).
+_DIGEST_JSON_SYSTEM_PROMPT = """你是科研团队的 Coordinator，负责把团队会议发言整理为人类可审阅的会议纪要文档。
+
+要求：
+- 只依据给出的会议发言，不得编造发言人或结论。
+- 会议纪要文档是 Markdown：第一行必须是 `# ` 开头的会议标题。
+- 必须包含 `## 会议结论`，用一到三段中文概括本次会议形成的判断。
+- 其余二级章节由你根据实际会议内容自行选择；不要为了填固定栏目重复同一信息。
+- 重要结论、取舍和未解决问题应保留发言中的限定条件，不把提议写成已经达成的决定。
+- `DISAGREE:`、`RISK:`、`ACTION:`、`CANDIDATE:` 和 `EVIDENCE_REQUEST:` 属于系统独立保存的协议事实；你可以在自然语言中解释其意义，但不要承担协议字段复制或重组职责。
+- 输出是一个 JSON 对象，只含字段 `documentMarkdown`：其字符串值是完整的会议纪要 Markdown 文档，文档内部不要再包裹代码围栏，不要输出 JSON 之外的任何解释。
+"""
+
 
 def _summary_from_digest_markdown(markdown: str) -> str:
     """Project the first conclusion paragraph into the legacy summary field."""
@@ -1443,6 +1539,12 @@ def build_meeting_digest_drafter(llm: Mapping[str, Any] | None = None):
     resolved = dict(llm) if isinstance(llm, Mapping) and llm else resolve_review_llm()
     if not resolved:
         return None
+    # Strict-JSON wire contract when the resolved provider capability allows
+    # it: the persisted artifact stays open Markdown, but it travels as the
+    # ``documentMarkdown`` field of one schema-constrained JSON object, so a
+    # strict provider can never wrap a broken payload in prose.  Providers
+    # without the capability keep the historical text path unchanged.
+    digest_structured = _purpose_output_schema("meeting_digest", resolved) is not None
 
     def drafter(
         meeting_round: dict[str, Any], source_messages: list[dict[str, Any]]
@@ -1455,28 +1557,69 @@ def build_meeting_digest_drafter(llm: Mapping[str, Any] | None = None):
             raise ContractValidationError(
                 "digest drafter requires completed source messages"
             )
+        session_id = str(meeting_round.get("teamId") or "") or "team"
+        meeting_round_id = str(meeting_round.get("meetingRoundId") or "")
+
+        def dump_digest_contract_failure(error: Exception, raw_response: str) -> None:
+            # Contract failures after a successful provider call lose their
+            # raw response otherwise; keep offline attribution on par with
+            # the in-call failure path.  Diagnostics only, never re-raised.
+            _dump_failed_review_response(
+                purpose="meeting_digest",
+                failure_category="contract_validation",
+                error=error,
+                raw_response=raw_response,
+                session_id=session_id,
+                meeting_round_id=meeting_round_id,
+                model_ref=str(resolved.get("modelRef") or ""),
+            )
+
         produced = _invoke_review_llm(
             resolved,
             agent_id=str(resolved.get("agentId") or "challenge_cup_evaluator"),
             purpose="meeting_digest",
-            system_prompt=_DIGEST_SYSTEM_PROMPT,
+            system_prompt=(
+                _DIGEST_JSON_SYSTEM_PROMPT
+                if digest_structured
+                else _DIGEST_SYSTEM_PROMPT
+            ),
             user_payload={
                 "meetingType": meeting_type,
-                "meetingRoundId": str(meeting_round.get("meetingRoundId") or ""),
+                "meetingRoundId": meeting_round_id,
                 "agenda": list(meeting_round.get("agenda") or []),
                 "participants": list(meeting_round.get("participants") or []),
                 "messages": transcript,
             },
-            session_id=str(meeting_round.get("teamId") or "") or "team",
+            session_id=session_id,
             deadline_at_ms=int(meeting_round.get("challengeDeadlineAtMs") or 0)
             or None,
-            response_mode="text",
+            response_mode="json_object" if digest_structured else "text",
         )
+        if digest_structured:
+            raw_document = (
+                produced.get("documentMarkdown")
+                if isinstance(produced, Mapping)
+                else None
+            )
+            document_markdown = str(raw_document or "").strip()
+            if not document_markdown:
+                error = ContractValidationError(
+                    "meeting digest structured output requires a non-empty "
+                    "documentMarkdown string"
+                )
+                dump_digest_contract_failure(
+                    error,
+                    json.dumps(produced, ensure_ascii=False)
+                    if isinstance(produced, Mapping)
+                    else "",
+                )
+                raise error
+            produced = document_markdown
         if not isinstance(produced, str):
             raise ContractValidationError("digest drafter requires Markdown text")
         contract_fields = {
             "teamId": str(meeting_round.get("teamId") or ""),
-            "meetingRoundId": str(meeting_round.get("meetingRoundId") or ""),
+            "meetingRoundId": meeting_round_id,
             **_digest_markdown_contract_fields(produced),
         }
         try:
@@ -1492,6 +1635,7 @@ def build_meeting_digest_drafter(llm: Mapping[str, Any] | None = None):
                     "errorType": type(exc).__name__,
                 },
             )
+            dump_digest_contract_failure(exc, produced)
             raise
         _record_meeting_digest_scene_event(
             "meeting_digest.contract.validated",

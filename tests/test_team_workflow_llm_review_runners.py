@@ -28,6 +28,7 @@ import logging
 import os
 import threading
 import time
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -1403,6 +1404,29 @@ def test_runners_compose_with_execute_hypothesis_review(monkeypatch):
         )
     )
     queue = _install_fake_llm(monkeypatch, payloads)
+    # The reflection wave issues its two calls concurrently, so a shared FIFO
+    # queue can hand cand-a's payload to cand-b's call (and vice versa) —
+    # a test-fake race, not product behavior.  Bind reflection payloads to
+    # the candidate id carried by the request instead of pop order.
+    reflection_by_candidate = {
+        "cand-a": payloads[0],
+        "cand-b": payloads[1],
+    }
+
+    def ordered_fake_invoke_llm(client, messages, tools=None, context=None, **kwargs):
+        assert context is not None, "review calls must carry an invocation context"
+        request = json.loads(str(messages[-1].get("content") or "{}"))
+        candidate_id = str(
+            (request.get("candidate") or {}).get("candidateId") or ""
+        )
+        if candidate_id in reflection_by_candidate:
+            queue.pop(0)  # keep the ordered queue accounting in sync
+            return _FakeResponse(reflection_by_candidate.pop(candidate_id))
+        return _FakeResponse(queue.pop(0))
+
+    monkeypatch.setattr(
+        llm_review_runners, "invoke_llm", ordered_fake_invoke_llm
+    )
 
     result = execute_hypothesis_review(
         _review_context(),
@@ -2032,46 +2056,166 @@ def test_revision_runner_keeps_profile_max_tokens_and_skips_schema(monkeypatch):
     assert captured[0]["metadata"] is None
 
 
-def test_digest_drafter_clamps_output_tokens_and_never_sends_schema(monkeypatch):
-    monkeypatch.setenv("VIBELUTION_DIGEST_MAX_OUTPUT_TOKENS", "4096")
-    payload = """# 候选 A/B 评审纪要
+def test_digest_drafter_sends_strict_json_schema_and_keeps_profile_tokens(
+    monkeypatch,
+):
+    """Strict-capable providers get the digest contract at the wire level.
+
+    The persisted artifact stays open Markdown; it travels as the
+    ``documentMarkdown`` field of one schema-constrained JSON object, and the
+    digest call is never clamped (profile max_tokens default).
+    """
+
+    markdown = """# 候选 A/B 评审纪要
 
 ## 会议结论
 
 评审完成，倾向候选 A。
 """
     llm = _fake_llm_with_strict_json_capability(supported=True)
-    queue, captured = _install_capturing_fake_llm(monkeypatch, [payload])
+    queue, captured = _install_capturing_fake_llm(
+        monkeypatch,
+        [json.dumps({"documentMarkdown": markdown}, ensure_ascii=False)],
+    )
     drafter = llm_review_runners.build_meeting_digest_drafter(dict(llm))
 
     digest = drafter(_meeting_round(), _source_messages())
 
     assert queue == []
     assert digest["summary"].startswith("评审完成")
-    assert captured[0]["metadata"] == {"llmMaxOutputTokensOverride": 4096}
+    assert digest["documentMarkdown"] == markdown.strip()
+    assert digest["documentTemplateId"] == "open_sections_v1"
+    schema = captured[0]["output_schema"]
+    assert schema is not None
+    assert schema.name == "meeting_digest_v1"
+    assert schema.schema["type"] == "object"
+    assert list(schema.schema["required"]) == ["documentMarkdown"]
+    assert schema.schema["additionalProperties"] is False
+    # Red line: the digest generation budget is never clamped.
+    assert captured[0]["metadata"] is None
+
+
+def _system_prompt_text(messages: list[Any]) -> str:
+    first = messages[0]
+    if isinstance(first, Mapping):
+        content = first.get("content")
+        if isinstance(content, list):
+            return "".join(
+                str(block.get("text") or "") for block in content if isinstance(block, Mapping)
+            )
+        return str(content or "")
+    return str(getattr(first, "content", "") or "")
+
+
+def test_digest_strict_mode_uses_json_prompt_and_serves_document_markdown(
+    monkeypatch,
+):
+    markdown = "# 评审纪要\n\n## 会议结论\n\n纪要正常生成。\n"
+    llm = _fake_llm_with_strict_json_capability(supported=True)
+    captured_messages: list[Any] = []
+
+    def fake_invoke_llm(client, messages, tools=None, context=None, **kwargs):
+        captured_messages.append(list(messages))
+        return _FakeResponse(json.dumps({"documentMarkdown": markdown}, ensure_ascii=False))
+
+    monkeypatch.setattr(llm_review_runners, "invoke_llm", fake_invoke_llm)
+    drafter = llm_review_runners.build_meeting_digest_drafter(dict(llm))
+
+    digest = drafter(_meeting_round(), _source_messages())
+
+    assert digest["documentMarkdown"] == markdown.strip()
+    system_prompt = _system_prompt_text(captured_messages[0])
+    assert "documentMarkdown" in system_prompt
+    assert "会议结论" in system_prompt
+    assert "不得编造发言人" in system_prompt
+    assert "proposedCandidates" not in system_prompt
+    assert "evidenceRequests" not in system_prompt
+
+
+def test_digest_without_capability_keeps_open_markdown_text_path(monkeypatch):
+    """No strict capability → the historical text contract is unchanged."""
+
+    markdown = "# 评审纪要\n\n## 会议结论\n\n纪要仍应正常生成。\n"
+    llm = _fake_llm_with_strict_json_capability(supported=False)
+    queue = [markdown]
+    captured: list[dict[str, Any]] = []
+    captured_messages: list[Any] = []
+
+    def fake_invoke_llm(client, messages, tools=None, context=None, **kwargs):
+        captured.append(dict(kwargs))
+        captured_messages.append(list(messages))
+        return _FakeResponse(queue.pop(0))
+
+    monkeypatch.setattr(llm_review_runners, "invoke_llm", fake_invoke_llm)
+    drafter = llm_review_runners.build_meeting_digest_drafter(dict(llm))
+
+    digest = drafter(_meeting_round(), _source_messages())
+
+    assert queue == []
+    assert digest["summary"].startswith("纪要仍应正常生成。")
     assert captured[0]["output_schema"] is None
+    assert captured[0]["metadata"] is None
+    system_prompt = _system_prompt_text(captured_messages[0])
+    assert "不要输出 JSON" in system_prompt
+    assert "documentMarkdown" not in system_prompt
+
+
+def test_digest_strict_mode_invalid_json_fails_closed_and_dumps_raw_response(
+    monkeypatch, _redirect_failure_dumps_to_tmp
+):
+    broken = '{broken json from "provider"'
+    llm = _fake_llm_with_strict_json_capability(supported=True)
+    _install_fake_llm(monkeypatch, [broken])
+    drafter = llm_review_runners.build_meeting_digest_drafter(dict(llm))
+
+    with pytest.raises(ContractValidationError, match="did not return valid JSON"):
+        drafter(_meeting_round(), _source_messages())
+
+    dumps = _failure_dump_dir(_redirect_failure_dumps_to_tmp)
+    assert len(dumps) == 1
+    record = json.loads(dumps[0].read_text(encoding="utf-8"))
+    assert record["purpose"] == "meeting_digest"
+    assert record["failureCategory"] == "contract_validation"
+    assert record["rawResponse"] == broken
+
+
+def test_digest_strict_mode_missing_document_markdown_fails_closed(
+    monkeypatch, _redirect_failure_dumps_to_tmp
+):
+    llm = _fake_llm_with_strict_json_capability(supported=True)
+    _install_fake_llm(monkeypatch, [json.dumps({"unrelated": True})])
+    drafter = llm_review_runners.build_meeting_digest_drafter(dict(llm))
+
+    with pytest.raises(
+        ContractValidationError, match="documentMarkdown"
+    ):
+        drafter(_meeting_round(), _source_messages())
+
+    dumps = _failure_dump_dir(_redirect_failure_dumps_to_tmp)
+    assert len(dumps) == 1
+    record = json.loads(dumps[0].read_text(encoding="utf-8"))
+    assert record["failureCategory"] == "contract_validation"
+    assert "unrelated" in record["rawResponse"]
 
 
 def test_review_max_output_tokens_env_overrides_and_defaults(monkeypatch):
     monkeypatch.delenv("VIBELUTION_REVIEW_JSON_MAX_OUTPUT_TOKENS", raising=False)
-    monkeypatch.delenv("VIBELUTION_DIGEST_MAX_OUTPUT_TOKENS", raising=False)
 
     assert llm_review_runners.review_json_max_output_tokens() == 8192
-    assert llm_review_runners.digest_max_output_tokens() == 8192
     assert (
         llm_review_runners._purpose_max_output_tokens("hypothesis_metareview") == 8192
     )
-    assert llm_review_runners._purpose_max_output_tokens("meeting_digest") == 8192
+    # Red line: digest and revision never clamp; they keep the profile default.
+    assert llm_review_runners._purpose_max_output_tokens("meeting_digest") is None
     assert llm_review_runners._purpose_max_output_tokens("hypothesis_revision") is None
 
     monkeypatch.setenv("VIBELUTION_REVIEW_JSON_MAX_OUTPUT_TOKENS", "4096")
-    monkeypatch.setenv("VIBELUTION_DIGEST_MAX_OUTPUT_TOKENS", "6144")
     assert llm_review_runners.review_json_max_output_tokens() == 4096
-    assert llm_review_runners.digest_max_output_tokens() == 6144
     assert (
         llm_review_runners._purpose_max_output_tokens("hypothesis_pairwise") == 4096
     )
     assert llm_review_runners._purpose_max_output_tokens("hypothesis_pareto") == 4096
+    assert llm_review_runners._purpose_max_output_tokens("meeting_digest") is None
 
     monkeypatch.setenv("VIBELUTION_REVIEW_JSON_MAX_OUTPUT_TOKENS", "not-a-number")
     assert llm_review_runners.review_json_max_output_tokens() == 8192
@@ -2112,4 +2256,148 @@ def test_receipt_bound_structured_call_passes_schema_and_clamp(monkeypatch):
     assert result.payload["outcome"] == "left_wins"
     assert captured[0]["output_schema"] is not None
     assert captured[0]["output_schema"].name == "hypothesis_pairwise_v1"
+    # Receipt-bound structured calls keep the review clamp (digest-only
+    # unclamping does not touch the hypothesis review purposes).
     assert captured[0]["metadata"] == {"llmMaxOutputTokensOverride": 8192}
+
+
+# ---------------------------------------------------------------------------
+# Direct-call telemetry: scene events per review purpose and team-scoped
+# usage-ledger metadata (latency / model / tokens / failure category)
+# ---------------------------------------------------------------------------
+
+
+def _capture_scene_events(monkeypatch) -> list[dict]:
+    from core.web.services import runtime_scene_service
+
+    events: list[dict] = []
+    monkeypatch.setattr(
+        runtime_scene_service,
+        "record_runtime_scene_event_quietly",
+        lambda component, phase, event_code, **kwargs: events.append(
+            {
+                "component": component,
+                "phase": phase,
+                "eventCode": event_code,
+                **kwargs,
+            }
+        ),
+    )
+    return events
+
+
+def test_review_call_telemetry_records_scene_events_for_review_purposes(
+    monkeypatch,
+):
+    events = _capture_scene_events(monkeypatch)
+
+    def fake_invoke_llm(client, messages, tools=None, context=None, **kwargs):
+        return _FakeResponse(
+            json.dumps({"outcome": "left_wins", "justification": "A 更优。"}),
+            response_metadata={
+                "finish_reason": "stop",
+                "usage_observation": {
+                    "input_tokens": 90,
+                    "output_tokens": 30,
+                    "total_tokens": 120,
+                },
+            },
+        )
+
+    monkeypatch.setattr(llm_review_runners, "invoke_llm", fake_invoke_llm)
+    runners = llm_review_runners.build_hypothesis_review_runners(dict(_FAKE_LLM))
+
+    produced = runners["pairwise_runner"](
+        _candidate("cand-a", "假说 A"),
+        _candidate("cand-b", "假说 B"),
+        _review_context(),
+    )
+
+    assert produced["outcome"] == "left_wins"
+    codes = [event["eventCode"] for event in events]
+    assert "review_llm.call.started" in codes
+    completed = next(
+        event for event in events if event["eventCode"] == "review_llm.call.completed"
+    )
+    assert completed["component"] == "team_workflow"
+    assert completed["phase"] == "review_llm"
+    fields = completed["fields"]
+    assert fields["purpose"] == "hypothesis_pairwise"
+    assert fields["modelId"] == "fake-review-model"
+    assert fields["inputTokens"] == 90
+    assert fields["outputTokens"] == 30
+    assert fields["totalTokens"] == 120
+    assert fields["finishReason"] == "stop"
+    assert fields["latencyMs"] >= 0
+
+
+def test_review_call_telemetry_records_failure_category(monkeypatch):
+    events = _capture_scene_events(monkeypatch)
+    _install_fake_llm(monkeypatch, ["{broken json"])
+    runners = llm_review_runners.build_hypothesis_review_runners(dict(_FAKE_LLM))
+
+    with pytest.raises(ContractValidationError, match="did not return valid JSON"):
+        runners["pairwise_runner"](
+            _candidate("cand-a", "假说 A"),
+            _candidate("cand-b", "假说 B"),
+            _review_context(),
+        )
+
+    failed = next(
+        event for event in events if event["eventCode"] == "review_llm.call.failed"
+    )
+    assert failed["level"] == "error"
+    assert failed["fields"]["purpose"] == "hypothesis_pairwise"
+    assert failed["fields"]["errorCategory"] == "contract_validation"
+    assert failed["fields"]["errorType"] == "ContractValidationError"
+
+
+def test_review_invocation_metadata_carries_team_scope_for_usage_ledger(
+    monkeypatch,
+):
+    """teamId in the invocation metadata routes the client-side usage-ledger
+    write into the team_workflow scope, so digest/review traffic is visible
+    in team-filtered ledger views (latency and token distribution)."""
+
+    captured_contexts: list[Any] = []
+
+    def fake_invoke_llm(client, messages, tools=None, context=None, **kwargs):
+        captured_contexts.append(context)
+        purpose = str(context.metadata.get("purpose") or "")
+        if purpose == "meeting_digest":
+            return _FakeResponse(
+                "# 评审纪要\n\n## 会议结论\n\n纪要正常生成。\n"
+            )
+        return _FakeResponse(json.dumps({"outcome": "tie", "justification": "x"}))
+
+    monkeypatch.setattr(llm_review_runners, "invoke_llm", fake_invoke_llm)
+    runners = llm_review_runners.build_hypothesis_review_runners(dict(_FAKE_LLM))
+    runners["pairwise_runner"](
+        _candidate("cand-a", "假说 A"),
+        _candidate("cand-b", "假说 B"),
+        _review_context(),
+    )
+    drafter = llm_review_runners.build_meeting_digest_drafter(dict(_FAKE_LLM))
+    drafter(_meeting_round(), _source_messages())
+
+    assert len(captured_contexts) == 2
+    for context in captured_contexts:
+        assert context.metadata["teamId"] == "team-1"
+        assert context.metadata["purpose"] in {
+            "hypothesis_pairwise",
+            "meeting_digest",
+        }
+
+
+def test_digest_strict_mode_timeout_keeps_existing_failure_semantics(monkeypatch):
+    def timeout(*_args, **_kwargs):
+        raise llm_review_runners.ReviewLLMTimeoutError(
+            purpose="meeting_digest", timeout_seconds=450
+        )
+
+    monkeypatch.setattr(llm_review_runners, "_invoke_llm_with_timeout", timeout)
+    llm = _fake_llm_with_strict_json_capability(supported=True)
+    drafter = llm_review_runners.build_meeting_digest_drafter(dict(llm))
+
+    with pytest.raises(llm_review_runners.ReviewLLMTimeoutError):
+        drafter(_meeting_round(), _source_messages())
