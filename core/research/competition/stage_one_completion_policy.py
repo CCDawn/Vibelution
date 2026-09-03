@@ -246,6 +246,90 @@ def require_current_stage_one_policy_snapshot(
     return parsed.to_dict()
 
 
+def _policy_dict_with_definition_id(
+    policy: StageOneCompletionPolicy,
+    workflow_definition_id: str,
+) -> dict[str, Any]:
+    payload = policy.to_dict()
+    payload["workflowDefinitionId"] = str(workflow_definition_id)
+    canonical = {field: payload[field] for field in _RESOURCE_FIELDS}
+    payload["policySha256"] = _canonical_sha256(canonical)
+    return payload
+
+
+def _equivalent_modulo_definition_id(
+    policy: StageOneCompletionPolicy,
+    tracked: StageOneCompletionPolicy,
+) -> bool:
+    def _without_identity(item: StageOneCompletionPolicy) -> dict[str, Any]:
+        payload = item.to_dict()
+        payload.pop("workflowDefinitionId")
+        payload.pop("policySha256")
+        return payload
+
+    return _without_identity(policy) == _without_identity(tracked)
+
+
+def stage_one_policy_snapshot_for_definition(
+    payload: Mapping[str, Any],
+    *,
+    workflow_definition_id: str,
+) -> dict[str, Any]:
+    """The tracked current stage-one policy re-targeted at one definition id.
+
+    The tracked resource stays pinned to
+    ``STAGE_ONE_POLICY_WORKFLOW_DEFINITION_ID`` (authorization scopes and
+    historical runs keep that identity).  Runs created against the truncated
+    stage-one definition (``challenge-cup-research@2.2.0-stage-one``) embed a
+    re-targeted copy whose ``workflowDefinitionId`` names the definition that
+    actually drives the run, so the run-input contract and the stage-one
+    closeout identity check both keep matching exactly.
+
+    Fail-closed: ``payload`` must be the tracked current policy — either
+    verbatim or already re-targeted at ``workflow_definition_id`` (identical
+    policy fields, only the definition identity differs).  The returned
+    snapshot is self-consistent (``policySha256`` recomputed).
+    """
+    parsed = StageOneCompletionPolicy.from_dict(payload)
+    current = load_stage_one_completion_policy()
+    if parsed != current and not (
+        parsed.workflowDefinitionId == workflow_definition_id
+        and _equivalent_modulo_definition_id(parsed, current)
+    ):
+        raise StageOneCompletionPolicyError(
+            "stage-one completion policy does not match the tracked current policy"
+        )
+    if parsed.workflowDefinitionId == workflow_definition_id:
+        return parsed.to_dict()
+    return _policy_dict_with_definition_id(parsed, workflow_definition_id)
+
+
+def matches_current_stage_one_policy(
+    payload: Mapping[str, Any],
+    *,
+    workflow_definition_id: str = "",
+) -> bool:
+    """Whether payload is the tracked current policy, optionally re-targeted.
+
+    Read-path companion of :func:`stage_one_policy_snapshot_for_definition`:
+    a run input snapshot embedding the re-targeted truncated-definition copy
+    stays a valid stage-one policy authorization, while any other drift
+    fails closed.
+    """
+    try:
+        parsed = StageOneCompletionPolicy.from_dict(payload)
+        current = load_stage_one_completion_policy()
+    except (StageOneCompletionPolicyError, KeyError, TypeError, ValueError):
+        return False
+    if parsed == current:
+        return True
+    return bool(
+        workflow_definition_id
+        and parsed.workflowDefinitionId == workflow_definition_id
+        and _equivalent_modulo_definition_id(parsed, current)
+    )
+
+
 __all__ = [
     "STAGE_ONE_POLICY_KIND",
     "STAGE_ONE_POLICY_QUESTION_IDS",
@@ -256,6 +340,8 @@ __all__ = [
     "StageOneCompletionPolicy",
     "StageOneCompletionPolicyError",
     "load_stage_one_completion_policy",
+    "matches_current_stage_one_policy",
     "require_current_stage_one_policy_snapshot",
     "stage_one_policy_snapshot_for",
+    "stage_one_policy_snapshot_for_definition",
 ]

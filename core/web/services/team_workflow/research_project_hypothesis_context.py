@@ -401,13 +401,28 @@ def build_stage_one_grounded_generation_context(
             "allowedEvidenceRefs": [],
         }
     from core.research.competition.stage_one_completion_policy import (
-        StageOneCompletionPolicyError,
-        require_current_stage_one_policy_snapshot,
+        matches_current_stage_one_policy,
     )
 
-    try:
-        require_current_stage_one_policy_snapshot(raw_policy)
-    except StageOneCompletionPolicyError:
+    # The run's embedded policy may be the tracked current policy verbatim
+    # (2.1.0 runs) or the copy re-targeted at the truncated stage-one
+    # definition the run is pinned to; anything else fails closed.
+    run_definition_id = ""
+    version_id = _text(getattr(run, "workflow_version_id", ""))
+    if version_id:
+        try:
+            from core.research.workflow.definition_registry import (
+                resolve_definition_by_version_id,
+            )
+
+            pinned = resolve_definition_by_version_id(version_id)
+            run_definition_id = f"{pinned.workflowId}@{pinned.schemaVersion}"
+        except Exception:  # noqa: BLE001 - unpinnable version keeps strict tracked matching
+            run_definition_id = ""
+    if not matches_current_stage_one_policy(
+        raw_policy,
+        workflow_definition_id=run_definition_id,
+    ):
         return {
             "status": "blocked",
             "code": "stage_one_policy_invalid",

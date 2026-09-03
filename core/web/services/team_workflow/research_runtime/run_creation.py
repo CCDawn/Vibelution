@@ -11,6 +11,7 @@ from typing import Any
 from core.research.competition.stage_one_completion_policy import (
     StageOneCompletionPolicyError,
     require_current_stage_one_policy_snapshot,
+    stage_one_policy_snapshot_for_definition,
 )
 from core.research.workflow.bindings import (
     AgentBindingLayers,
@@ -18,8 +19,9 @@ from core.research.workflow.bindings import (
 )
 from core.research.workflow.contracts import ContractValidationError
 from core.research.workflow.definition import CHALLENGE_CUP_WORKFLOW_ID
+from core.research.workflow.definition_registry import register_or_resolve
 from core.research.workflow.ledger import EventRecord, RunRecord
-from core.research.workflow.models import ActorKind
+from core.research.workflow.models import ActorKind, WorkflowDefinition
 
 from .binding_config import WorkflowBindingConfigStore
 from .checkpoint_lifecycle import prepare_initial_checkpoint
@@ -45,6 +47,8 @@ def _utc_now() -> str:
 def _require_stage_one_authorization_binding(
     run_input: Mapping[str, Any],
     catalog_run_authorization: Mapping[str, Any] | None,
+    *,
+    workflow_definition_id: str = "",
 ) -> None:
     raw_policy = run_input.get("stageOneCompletionPolicy")
     if raw_policy is None:
@@ -55,7 +59,19 @@ def _require_stage_one_authorization_binding(
             code="invalid_run_input",
         )
     try:
-        expected_policy = require_current_stage_one_policy_snapshot(raw_policy)
+        normalized_definition_id = str(workflow_definition_id or "").strip()
+        if normalized_definition_id:
+            # The tracked policy stays pinned to its 2.1.0 identity; a run
+            # driven by another registered stage-one definition (the
+            # truncated 2.2.0-stage-one chain) embeds the re-targeted copy so
+            # run-input and closeout identity checks keep matching the
+            # resolved definition.
+            expected_policy = stage_one_policy_snapshot_for_definition(
+                raw_policy,
+                workflow_definition_id=normalized_definition_id,
+            )
+        else:
+            expected_policy = require_current_stage_one_policy_snapshot(raw_policy)
     except StageOneCompletionPolicyError as exc:
         raise ResearchWorkflowError(
             "stage-one completion policy is invalid",
@@ -78,8 +94,9 @@ def _require_stage_one_authorization_binding(
             code="catalog_run_authorization_required",
         )
     try:
-        normalized_authorized_policy = require_current_stage_one_policy_snapshot(
-            authorized_policy
+        normalized_authorized_policy = stage_one_policy_snapshot_for_definition(
+            authorized_policy,
+            workflow_definition_id=str(expected_policy.get("workflowDefinitionId") or ""),
         )
     except StageOneCompletionPolicyError as exc:
         raise ResearchWorkflowError(
@@ -91,6 +108,44 @@ def _require_stage_one_authorization_binding(
             "stage-one completion policy authorization does not match the run input",
             code="catalog_run_authorization_invalid",
         )
+
+
+def _retarget_stage_one_policy_binding(
+    run_input: Mapping[str, Any],
+    definition: WorkflowDefinition,
+) -> Mapping[str, Any]:
+    """Re-target the embedded stage-one policy at the resolved run definition.
+
+    The tracked stage-one completion policy stays pinned to its 2.1.0
+    identity (authorization scopes and historical runs keep it); a run driven
+    by another registered stage-one definition (the truncated
+    ``2.2.0-stage-one`` chain) embeds a re-targeted copy so the run-input
+    contract and the stage-one closeout identity check keep matching the
+    definition that actually drives the run.  Fail-closed: the policy must be
+    the tracked current policy modulo the definition identity, and its
+    closure node must exist in the resolved definition.
+    """
+    raw_policy = run_input.get("stageOneCompletionPolicy")
+    if raw_policy is None:
+        return run_input
+    definition_id = f"{definition.workflowId}@{definition.schemaVersion}"
+    try:
+        policy = stage_one_policy_snapshot_for_definition(
+            raw_policy,
+            workflow_definition_id=definition_id,
+        )
+    except StageOneCompletionPolicyError as exc:
+        raise ResearchWorkflowError(
+            "stage-one completion policy is invalid",
+            code="invalid_run_input",
+        ) from exc
+    closure_node = str(policy.get("closureNodeId") or "").strip()
+    if closure_node and closure_node not in {node.nodeId for node in definition.nodes}:
+        raise ResearchWorkflowError(
+            "stage-one completion policy closure node is missing from the run definition",
+            code="stage_one_policy_mismatch",
+        )
+    return {**run_input, "stageOneCompletionPolicy": policy}
 
 
 def _auto_open_candidate_generation(
@@ -413,11 +468,29 @@ def create_question_run(
         run_input=run_input,
         idempotency_key=idempotency_key,
         catalog_run_authorization=catalog_run_authorization,
+        workflow_definition=_question_run_creation_definition(),
     )
     generation = _auto_open_candidate_generation(run_input, created_run=created)
     if generation is not None:
         created = {**created, "candidateGeneration": generation}
     return created
+
+
+def _question_run_creation_definition() -> WorkflowDefinition:
+    """The pinned definition for NEW question runs.
+
+    Product decision (挑战杯假说链第一阶段): the hypothesis chain stops at
+    ``hypothesis_design``, so question runs are created against the
+    registered stage-one truncated definition
+    (``challenge-cup-research@2.2.0-stage-one``) instead of the full
+    2.1.0/3.0.0 chains.  Historical runs keep their own pinned registry
+    identity.
+    """
+    from core.research.workflow.stage_one_definition import (
+        build_stage_one_workflow_definition,
+    )
+
+    return build_stage_one_workflow_definition()
 
 
 def _create_request_fingerprints(run_input: Mapping[str, Any]) -> tuple[str, ...]:
@@ -625,26 +698,36 @@ def create_run(
     idempotency_key: str,
     binding_layers: AgentBindingLayers | None = None,
     catalog_run_authorization: Mapping[str, Any] | None = None,
+    workflow_definition: WorkflowDefinition | None = None,
 ) -> dict[str, Any]:
     store = get_write_store()
     # Register-or-resolve: the definition driving this run is pinned by its
     # (workflowId, workflowVersionId, structureHash) identity in the registry
-    # before any checkpoint or ledger write happens.  The rollout mode decides
-    # WHICH pinned definition new runs get: off/shadow keep the frozen 2.1.0
-    # default, on moves new runs to the registered main-flow 3.0.0 definition
-    # (knowledge collection has left the in-graph chain).  Historical runs are
-    # always read through their own pinned version identity, so this choice
-    # never re-shapes an in-flight run.
-    from .knowledge_rollout import creation_workflow_definition
+    # before any checkpoint or ledger write happens.  Question-run callers
+    # pass the stage-one truncated definition explicitly; the default keeps
+    # the rollout-mode behavior (off/shadow → frozen 2.1.0, on → main-flow
+    # 3.0.0).  Historical runs are always read through their own pinned
+    # version identity, so this choice never re-shapes an in-flight run.
+    if workflow_definition is not None:
+        definition = workflow_definition
+        identity = register_or_resolve(definition)
+    else:
+        from .knowledge_rollout import creation_workflow_definition
 
-    definition, identity = creation_workflow_definition()
+        definition, identity = creation_workflow_definition()
     workflow_version_id = identity.workflowVersionId
+    definition_id = f"{definition.workflowId}@{definition.schemaVersion}"
+    # Fingerprint the request AS RECEIVED (tracked policy identity) so an
+    # idempotent replay of a pre-truncation creation stays compatible; the
+    # re-targeted copy only shapes the frozen snapshot below.
+    fingerprints = _create_request_fingerprints(run_input)
+    fingerprint = fingerprints[0]
+    run_input = _retarget_stage_one_policy_binding(run_input, definition)
     _require_stage_one_authorization_binding(
         run_input,
         catalog_run_authorization,
+        workflow_definition_id=definition_id,
     )
-    fingerprints = _create_request_fingerprints(run_input)
-    fingerprint = fingerprints[0]
     run_id = run_id_for_create(workflow_id, idempotency_key)
     existing = store.get_run(run_id)
     if existing is not None:
