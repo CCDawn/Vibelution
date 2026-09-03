@@ -2520,7 +2520,459 @@ def test_stopped_linked_chat_round_projects_guarded_review_reopen() -> None:
     }
     assert "reopen_review" in commands
     assert "resume_discussion" not in commands
-    assert "retry_review_dispatch" not in commands
+    # The bound round is terminal, so no live executor can be doubled: the
+    # round-level re-dispatch is an executable same-round exit beside reopen.
+    assert "retry_review_dispatch" in commands
+
+
+def _single_candidate_completed_attempt_fixture() -> dict[str, object]:
+    return HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[
+                {
+                    "recordKind": "generation_attempt",
+                    "attemptId": "attempt-1",
+                    "attemptNumber": 1,
+                    "questionId": "SCI-001",
+                    "meetingRoundId": "meeting-single",
+                    "lifecycle": "completed",
+                    "outcome": "succeeded",
+                    "queuedAt": "2026-08-25T00:00:00Z",
+                    "updatedAt": "2026-08-25T00:05:00Z",
+                },
+                {
+                    "recordKind": "hypothesis_candidate",
+                    "candidateId": "candidate-1",
+                    "questionId": "SCI-001",
+                },
+            ],
+            selection_records=[],
+            meeting_records=[],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[],
+        )
+    )
+
+
+def test_single_candidate_completed_attempt_offers_retry_not_selection() -> None:
+    """A "successful" attempt with exactly one candidate is not a dead end.
+
+    record_selection demands a comparable pair, so a single candidate can
+    never open the selector: the selector stays closed, the authoritative
+    phase stays on generation, and retry_generation owns the exit.
+    """
+    state = _single_candidate_completed_attempt_fixture()
+
+    commands = {
+        action.command
+        for action in state.allowedActions
+        if action.kind == "command"
+    }
+    assert "retry_generation" in commands
+    assert "record_selection" not in commands
+    assert state.currentPhase == "generation"
+    assert state.selection.lifecycle != "waiting_human"
+    retry = next(
+        action
+        for action in state.allowedActions
+        if action.kind == "command" and action.command == "retry_generation"
+    )
+    assert retry.payload.previousAttemptId == "attempt-1"
+
+
+def test_single_candidate_orphaned_generation_reports_dead_end_problem(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With retry withheld, the single-candidate dead end is named loudly."""
+
+    monkeypatch.setattr(
+        hf_state_v2_module,
+        "_chat_room_state_snapshot",
+        lambda: {"rooms": []},
+    )
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[
+                {
+                    "recordKind": "generation_attempt",
+                    "attemptId": "attempt-1",
+                    "attemptNumber": 1,
+                    "questionId": "SCI-001",
+                    "meetingRoundId": "candgen-1",
+                    "lifecycle": "running",
+                    "outcome": "none",
+                    "updatedAt": "2026-08-25T00:05:00Z",
+                },
+                {
+                    "recordKind": "hypothesis_candidate",
+                    "candidateId": "candidate-1",
+                    "questionId": "SCI-001",
+                },
+            ],
+            selection_records=[],
+            meeting_records=[
+                {
+                    "meetingRoundId": "candgen-1",
+                    "meetingType": "hypothesis_candidate_generation",
+                    "question": "SCI-001",
+                    "status": "open",
+                    "linkedChatRoomId": "room-generation",
+                    "chatRoomRoundIds": ["room-round-1"],
+                }
+            ],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[],
+            chat_room_round_snapshots={
+                "room-round-1": {
+                    "runId": "room-round-1",
+                    "runKind": "chat_room_round",
+                    "status": "stopped",
+                    "currentPhase": "stopped",
+                    "runtimeStatus": "orphan_reconciled",
+                    "reconciliationSource": "missing_process_controller",
+                    "updatedAt": "2026-08-26T02:17:41Z",
+                    "finishedAt": "2026-08-26T02:17:41Z",
+                }
+            },
+        )
+    )
+
+    commands = {
+        action.command
+        for action in state.allowedActions
+        if action.kind == "command"
+    }
+    # The orphaned meeting pins the generation problems, so retry_generation
+    # stays withheld; the dead end must still be reported as such.
+    assert "retry_generation" not in commands
+    assert "record_selection" not in commands
+    assert state.currentPhase == "generation"
+    assert any(
+        problem.code == "generation_single_candidate"
+        for problem in state.problems
+    )
+
+
+def _failed_review_meeting_fixture(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    messages: list[dict[str, object]] | None = None,
+    room_state: dict[str, object] | None = "completed_speech",
+) -> dict[str, object]:
+    """A round-3 review meeting whose bound chat round died mid-discussion.
+
+    ``room_state`` controls the read-only chat-room probe: the default
+    ``"completed_speech"`` sentinel plants one citable completed message,
+    ``None`` models an unreadable store, and an explicit mapping is used
+    verbatim (e.g. a pass-only transcript).
+    """
+
+    if room_state is None:
+        canned_state: dict[str, object] | None = None
+    elif room_state == "completed_speech":
+        canned_state = {
+            "rooms": [
+                {
+                    "roomId": "room-review",
+                    "rounds": [
+                        {
+                            "roundId": "room-round-3",
+                            "status": "stopped",
+                            "messages": messages or [],
+                        }
+                    ],
+                }
+            ]
+        }
+    else:
+        canned_state = room_state
+    monkeypatch.setattr(
+        hf_state_v2_module,
+        "_chat_room_state_snapshot",
+        lambda: canned_state,
+    )
+    return HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[
+                {
+                    "recordKind": "hypothesis_candidate",
+                    "candidateId": "candidate-1",
+                    "questionId": "SCI-001",
+                },
+                {
+                    "recordKind": "review_round_link",
+                    "linkId": "link-3",
+                    "selectionId": "selection-1",
+                    "candidateId": "candidate-1",
+                    "candidateOrder": 0,
+                    "roundIndex": 3,
+                    "meetingRoundId": "review-3",
+                    "questionId": "SCI-001",
+                },
+            ],
+            selection_records=[
+                {
+                    "selectionId": "selection-1",
+                    "questionId": "SCI-001",
+                    "selectedCandidateIds": ["candidate-1"],
+                }
+            ],
+            meeting_records=[
+                {
+                    "meetingRoundId": "review-3",
+                    "meetingType": "hypothesis_review",
+                    "question": "SCI-001",
+                    "selectionId": "selection-1",
+                    "status": "open",
+                    "linkedChatRoomId": "room-review",
+                    "chatRoomRoundIds": ["room-round-3"],
+                }
+            ],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[],
+            chat_room_round_snapshots={
+                "room-round-3": {
+                    "runId": "room-round-3",
+                    "runKind": "chat_room_round",
+                    "status": "stopped",
+                    "currentPhase": "stopped",
+                    "runtimeStatus": "orphan_reconciled",
+                    "reconciliationSource": "missing_process_controller",
+                    "updatedAt": "2026-08-26T02:17:41Z",
+                    "finishedAt": "2026-08-26T02:17:41Z",
+                }
+            },
+        )
+    )
+
+
+def test_completed_speech_failed_review_offers_retry_not_reopen(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A terminal failed review with citable messages must not fake a reopen.
+
+    The guarded reopen executor refuses superseding a transcript, so the
+    projection routes the dead meeting to the executable same-round
+    retry_review_dispatch (fresh attempt, no round budget burned) instead.
+    """
+    state = _failed_review_meeting_fixture(
+        monkeypatch,
+        messages=[
+            {
+                "status": "completed",
+                "speakerTitle": "研究员",
+                "content": "DISAGREE: candidate-1 的泛化证据不足",
+            }
+        ],
+    )
+
+    assert state.currentPhase == "review"
+    commands = {
+        action.command
+        for action in state.allowedActions
+        if action.kind == "command"
+    }
+    assert "retry_review_dispatch" in commands
+    assert "resume_discussion" in commands
+    assert "reopen_review" not in commands
+    retry_actions = [
+        action
+        for action in state.allowedActions
+        if action.kind == "command" and action.command == "retry_review_dispatch"
+    ]
+    assert "retry-review-dispatch:candidate-1" in {
+        action.actionId for action in retry_actions
+    }
+    scoped = next(
+        action
+        for action in retry_actions
+        if action.actionId == "retry-review-dispatch:candidate-1"
+    )
+    assert scoped.payload.selectionId == "selection-1"
+    assert list(scoped.payload.candidateIds) == ["candidate-1"]
+
+
+def test_zero_speech_failed_review_keeps_reopen_review(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A zero-speech failed review keeps the sanctioned reopen recovery."""
+
+    state = _failed_review_meeting_fixture(
+        monkeypatch,
+        room_state={
+            # A pass token is not citable: the executor would accept supersede.
+            "rooms": [
+                {
+                    "roomId": "room-review",
+                    "rounds": [
+                        {
+                            "roundId": "room-round-3",
+                            "status": "stopped",
+                            "messages": [
+                                {
+                                    "status": "completed",
+                                    "speakerTitle": "研究员",
+                                    "content": "pass",
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+
+    commands = {
+        action.command
+        for action in state.allowedActions
+        if action.kind == "command"
+    }
+    assert "reopen_review" in commands
+    assert "retry-review-dispatch:candidate-1" not in {
+        action.actionId
+        for action in state.allowedActions
+        if action.kind == "command"
+    }
+
+
+def test_unreadable_room_state_falls_back_to_reopen_review(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing room transcript never invents the retry redirect."""
+
+    state = _failed_review_meeting_fixture(monkeypatch, room_state=None)
+
+    commands = {
+        action.command
+        for action in state.allowedActions
+        if action.kind == "command"
+    }
+    assert "reopen_review" in commands
+    assert "retry-review-dispatch:candidate-1" not in {
+        action.actionId
+        for action in state.allowedActions
+        if action.kind == "command"
+    }
+
+
+def test_heartbeat_stale_review_with_completed_messages_redirects_to_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A zombie review with a transcript gets the executable retry instead."""
+
+    updated_at = _iso_minute_offset(30 * 60)
+    monkeypatch.setattr(
+        hf_state_v2_module,
+        "_chat_room_state_snapshot",
+        lambda: {
+            "rooms": [
+                {
+                    "roomId": "room-review",
+                    "rounds": [
+                        {
+                            "roundId": "room-round-review",
+                            "status": "running",
+                            "messages": [
+                                {
+                                    "status": "completed",
+                                    "speakerTitle": "研究员",
+                                    "content": "AGREE: 收敛到 candidate-1",
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=[
+                {
+                    "recordKind": "hypothesis_candidate",
+                    "candidateId": "candidate-1",
+                    "questionId": "SCI-001",
+                },
+                {
+                    "recordKind": "review_round_link",
+                    "linkId": "link-1",
+                    "selectionId": "selection-1",
+                    "candidateId": "candidate-1",
+                    "candidateOrder": 0,
+                    "roundIndex": 1,
+                    "meetingRoundId": "review-1",
+                    "questionId": "SCI-001",
+                },
+            ],
+            selection_records=[
+                {
+                    "selectionId": "selection-1",
+                    "questionId": "SCI-001",
+                    "selectedCandidateIds": ["candidate-1"],
+                }
+            ],
+            meeting_records=[
+                {
+                    "meetingRoundId": "review-1",
+                    "meetingType": "hypothesis_review",
+                    "question": "SCI-001",
+                    "selectionId": "selection-1",
+                    "status": "open",
+                    "linkedChatRoomId": "room-review",
+                    "chatRoomRoundIds": ["room-round-review"],
+                    "createdAt": _iso_minute_offset(30 * 60 + 5),
+                    "updatedAt": updated_at,
+                }
+            ],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[],
+            chat_room_round_snapshots={
+                "room-round-review": {
+                    "runId": "room-round-review",
+                    "runKind": "chat_room_round",
+                    "status": "running",
+                    "updatedAt": updated_at,
+                }
+            },
+        )
+    )
+
+    assert any(
+        problem.code == "review_heartbeat_stale" for problem in state.problems
+    )
+    commands = {
+        action.command
+        for action in state.allowedActions
+        if action.kind == "command"
+    }
+    # The meeting-level recovery redirects to the executable recoveries, and
+    # the round-level re-dispatch stays suppressed beside the possibly-live
+    # round.
+    assert "retry_review_dispatch" in commands
+    assert "resume_discussion" in commands
+    assert "reopen_review" not in commands
+    retry_action_ids = {
+        action.actionId
+        for action in state.allowedActions
+        if action.kind == "command" and action.command == "retry_review_dispatch"
+    }
+    assert retry_action_ids == {"retry-review-dispatch:candidate-1"}
 
 
 def test_summarizing_generation_with_all_terminal_bound_rounds_exposes_summary_retry() -> None:

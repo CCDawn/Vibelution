@@ -7039,6 +7039,131 @@ def test_retry_review_dispatch_rebinds_review_link_to_fresh_meeting(
     assert links[0]["meetingRoundId"] == base_meeting_id
 
 
+def test_retry_review_dispatch_exits_completed_speech_failed_round3(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A terminal round-3 review with citable messages exits via retry only.
+
+    Failed attempts burn the round budget, so a stuck round 3 can no longer
+    open a budgeted round 4.  The guarded reopen (supersede + next round) is
+    a guaranteed-422 fake offer once the discussion produced citable
+    messages, while ``retry_review_dispatch`` stays executable against the
+    same round index: idempotent while the dead meeting is still open, and a
+    fresh same-round attempt meeting once it is closed — never burning the
+    round budget.
+    """
+
+    selection_id = "selection-retry-r3-speech"
+    team_id, selection, meetings_store, opened_ids, _driver_calls = (
+        _retry_dispatch_env(tmp_path, monkeypatch, selection_id)
+    )
+    # Serve the durable selection identity on retry so the replaying link
+    # carries the same selectionVersion the initial dispatch wrote.
+    selection_version = chain.selection_version_for(
+        question_id=_QUESTION_ID,
+        selected_candidate_ids=list(selection["selectedCandidateIds"]),
+        previous_selection_id="",
+        reset_id=chain._current_reset_id(team_id, _QUESTION_ID),
+        scope_hash="",
+        workflow_run_id="",
+    )
+    monkeypatch.setattr(
+        selections,
+        "get_hypothesis_selection",
+        lambda _team_id, _selection_id: {
+            "selection": {**selection, "selectionVersion": selection_version}
+        },
+    )
+
+    third = chain.open_review_meeting_for_selection(
+        team_id, selection, background=True, round_index=3
+    )
+    assert third["candidateCount"] == 2
+    base_meeting_id = chain._candidate_review_meeting_id(selection_id, "hyp-a", 3)
+    meeting = meetings_store[base_meeting_id]
+    room_id = str(meeting["linkedChatRoomId"])
+    round_id = str(meeting["chatRoomRoundIds"][-1])
+
+    # The bound discussion is terminal (no live executor) and produced one
+    # citable completed message: exactly the executor state that refuses a
+    # supersede.  Serve it through the room-detail authority the executor
+    # reads under its lock; the team's own linked room stays on the real
+    # reader so the fresh-attempt participant resolution keeps working.
+    real_room_detail = chat_room_service.get_chat_room_detail
+
+    def fake_room_detail(detail_room_id: str):
+        if detail_room_id == room_id:
+            return {
+                "roomId": detail_room_id,
+                "rounds": [
+                    {
+                        "roundId": round_id,
+                        "status": "completed",
+                        "messages": [
+                            {
+                                "status": "completed",
+                                "speakerTitle": "研究员",
+                                "content": "DISAGREE: hyp-b 的泛化证据不足",
+                            }
+                        ],
+                    }
+                ],
+            }
+        return real_room_detail(detail_room_id)
+
+    monkeypatch.setattr(chat_room_service, "get_chat_room_detail", fake_room_detail)
+    # ``supersede_empty_discussion_meeting`` loads the meeting through the
+    # internal reader; serve the same in-memory record so the reopen really
+    # reaches its completed-messages guard instead of failing on "not found".
+    def fake_load_meeting_round(_team_id: str, meeting_round_id: str):
+        record = meetings_store.get(str(meeting_round_id))
+        if record is None:
+            raise meetings.ResearchMeetingRoundNotFoundError(
+                "Meeting round not found."
+            )
+        return dict(record)
+
+    monkeypatch.setattr(meetings, "_load_meeting_round", fake_load_meeting_round)
+    # The guarded reopen is the fake offer here: supersede refuses a
+    # discussion that produced completed messages.
+    with pytest.raises(
+        meetings.ResearchMeetingRoundError, match="completed messages"
+    ):
+        chain.reopen_failed_review_meeting(team_id, base_meeting_id)
+
+    # retry_review_dispatch stays executable against the open dead meeting:
+    # the attempt ledger replays idempotently instead of erroring.
+    retried = chain.retry_review_dispatch(team_id, selection_id, ["hyp-a"])
+    assert retried["status"] == "reused"
+
+    # Once the dead meeting is closed (e.g. via the operator stop recovery),
+    # the same command opens the fresh same-round attempt: the real exit that
+    # never consumes a budgeted round 4.
+    meetings_store[base_meeting_id]["status"] = "closed"
+    meetings_store[base_meeting_id]["executionStatus"] = "stopped"
+    retried_after_close = chain.retry_review_dispatch(
+        team_id, selection_id, ["hyp-a"]
+    )
+    assert retried_after_close["status"] == "created"
+    fresh_meeting_id = f"{base_meeting_id}-a2"
+    assert retried_after_close["meetingRound"]["meetingRoundId"] == fresh_meeting_id
+    assert opened_ids[-1] == fresh_meeting_id
+
+    attempts = chain.list_review_dispatch_attempts(
+        team_id, selection_id=selection_id
+    )["attempts"]
+    hyp_a_attempts = _attempts_for(attempts, "hyp-a")
+    assert [int(item.get("attemptNumber") or 0) for item in hyp_a_attempts] == [1, 2]
+    # The retry kept the round index (no budget burn) and rebound the link.
+    links = [
+        item
+        for item in chain._review_round_links(chain._records(team_id))
+        if str(item.get("selectionId") or "") == selection_id
+        and str(item.get("candidateId") or "") == "hyp-a"
+    ]
+    assert [int(item.get("roundIndex") or 0) for item in links] == [3, 3]
+
+
 def _hold_open_window_env(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -960,6 +960,87 @@ def _chat_room_round_snapshot_is_terminal(snapshot: Mapping[str, Any]) -> bool:
     }
 
 
+def _chat_room_state_snapshot() -> Mapping[str, Any] | None:
+    """Read-only chat-room state access for transcript-shaped recovery gates.
+
+    The guarded reopen executor refuses a meeting whose bound discussion
+    already produced citable messages, so the projector must know that fact
+    before offering the recovery.  Meeting records carry no message facts and
+    WorkRun snapshots carry no transcript; the chat-room state store is the
+    remaining read-only authority.  Any failure resolves to ``None`` so the
+    caller falls back to the legacy zero-speech offer derivation instead of
+    guessing that a transcript exists.
+    """
+
+    try:
+        from core.chatroom.store import ChatRoomStore
+        from core.infrastructure import developer_sandbox
+        from core.web.services import chat_room_service
+
+        workspace_root = developer_sandbox.formal_workspace_path(
+            chat_room_service.PROJECT_ROOT
+        )
+        state = ChatRoomStore(root=workspace_root.parent).load()
+    except Exception:
+        # A read-only probe must never break the canonical projection: an
+        # unreadable store keeps the legacy offer contract (zero-speech).
+        return None
+    return state if isinstance(state, Mapping) else None
+
+
+def _meeting_has_completed_source_messages(meeting: Mapping[str, Any]) -> bool:
+    """Mirror ``meeting_rounds.completed_meeting_source_messages`` best-effort.
+
+    A message is citable when its status is ``completed`` and its content is
+    not a pass token — exactly the executor's supersede gate.  Every bound
+    chat round of the meeting is inspected; when the room or a bound round
+    cannot be resolved the answer is ``False`` (no evidence of a transcript).
+    """
+
+    room_id = str(meeting.get("linkedChatRoomId") or "").strip()
+    round_ids = [
+        str(round_id or "").strip()
+        for round_id in list(meeting.get("chatRoomRoundIds") or [])
+        if str(round_id or "").strip()
+    ]
+    if not room_id or not round_ids:
+        return False
+    state = _chat_room_state_snapshot()
+    if state is None:
+        return False
+    room = next(
+        (
+            item
+            for item in list(state.get("rooms") or [])
+            if isinstance(item, Mapping)
+            and str(item.get("roomId") or "").strip() == room_id
+        ),
+        None,
+    )
+    if not isinstance(room, Mapping):
+        return False
+    from core.web.services.team_workflow.meeting_rounds import is_pass_message
+
+    rounds_by_id = {
+        str(item.get("roundId") or "").strip(): item
+        for item in list(room.get("rounds") or [])
+        if isinstance(item, Mapping)
+    }
+    for round_id in round_ids:
+        room_round = rounds_by_id.get(round_id)
+        if not isinstance(room_round, Mapping):
+            continue
+        for message in list(room_round.get("messages") or []):
+            if not isinstance(message, Mapping):
+                continue
+            if (
+                str(message.get("status") or "").strip().lower() == "completed"
+                and not is_pass_message(message)
+            ):
+                return True
+    return False
+
+
 def _bound_chat_rounds_are_terminal(
     meeting: Mapping[str, Any],
     chat_room_round_snapshots: Mapping[str, Mapping[str, Any]] | None,
@@ -1409,20 +1490,57 @@ def _meeting_recovery_actions(
     )
     if status in {"open", "summarizing"} and linked_round_problem:
         # The linked WorkRun is terminal, so there is no live executor to
-        # resume or stop.  Review meetings can safely supersede a zero-speech
-        # failed attempt and open the next budgeted round; the owning service
-        # rechecks terminality and completed messages under its lock.
-        if str(meeting.get("meetingType") or "").strip().lower() == "hypothesis_review":
-            actions.append(
-                _command_action(
-                    "reopen_review",
-                    action_id=f"reopen-review:{meeting_id}",
-                    label="重新发起评审讨论",
-                    target_phase=target_phase,
-                    target_node_id=target_node_id,
-                    payload={"meetingRoundId": meeting_id},
+        # resume or stop.  A zero-speech review attempt can safely supersede
+        # the failed attempt and open the next budgeted round; an attempt with
+        # citable completed messages cannot be superseded (the owning service
+        # rechecks terminality and completed messages under its lock), so
+        # reopen_review there is a guaranteed-422 fake offer.  The executable
+        # exits for that shape are: resume_discussion — the discussion
+        # scheduler is built to continue an open meeting whose latest bound
+        # round is terminal with completed speech — and retry_review_dispatch,
+        # which re-dispatches the same round index as a fresh attempt meeting
+        # without burning the round budget (effective once the dead meeting is
+        # closed, e.g. through stop_discussion).
+        if str(meeting.get("meetingType") or "").strip().lower() == _REVIEW_MEETING_TYPE:
+            if (
+                selection_id
+                and candidate_id
+                and _meeting_has_completed_source_messages(meeting)
+            ):
+                actions.append(
+                    _command_action(
+                        "resume_discussion",
+                        action_id=f"resume-discussion:{meeting_id}",
+                        label="恢复讨论",
+                        target_phase=target_phase,
+                        target_node_id=target_node_id,
+                        payload={"meetingRoundId": meeting_id},
+                    )
                 )
-            )
+                actions.append(
+                    _command_action(
+                        "retry_review_dispatch",
+                        action_id=f"retry-review-dispatch:{candidate_id}",
+                        label="重试候选评审分发",
+                        target_phase=target_phase,
+                        target_node_id=target_node_id,
+                        payload={
+                            "selectionId": selection_id,
+                            "candidateIds": [candidate_id],
+                        },
+                    )
+                )
+            else:
+                actions.append(
+                    _command_action(
+                        "reopen_review",
+                        action_id=f"reopen-review:{meeting_id}",
+                        label="重新发起评审讨论",
+                        target_phase=target_phase,
+                        target_node_id=target_node_id,
+                        payload={"meetingRoundId": meeting_id},
+                    )
+                )
         return actions, anchor
     stalled = _meeting_is_stalled(meeting)
     # A heartbeat-stale open meeting has no explicit stall marker and no
@@ -1490,16 +1608,49 @@ def _meeting_recovery_actions(
         str(meeting.get("meetingType") or "").strip().lower()
         == _REVIEW_MEETING_TYPE
     ):
-        actions.append(
-            _command_action(
-                "reopen_review",
-                action_id=f"reopen-review:{meeting_id}",
-                label="重新发起评审讨论",
-                target_phase=target_phase,
-                target_node_id=target_node_id,
-                payload={"meetingRoundId": meeting_id},
+        # A heartbeat-stale meeting with citable completed messages can never
+        # be reopened: the executor refuses a still-running round and refuses
+        # superseding a transcript.  Route the same meeting to the executable
+        # recoveries instead of advertising a guaranteed-failed one.
+        if (
+            selection_id
+            and candidate_id
+            and _meeting_has_completed_source_messages(meeting)
+        ):
+            actions.append(
+                _command_action(
+                    "resume_discussion",
+                    action_id=f"resume-discussion:{meeting_id}",
+                    label="恢复讨论",
+                    target_phase=target_phase,
+                    target_node_id=target_node_id,
+                    payload={"meetingRoundId": meeting_id},
+                )
             )
-        )
+            actions.append(
+                _command_action(
+                    "retry_review_dispatch",
+                    action_id=f"retry-review-dispatch:{candidate_id}",
+                    label="重试候选评审分发",
+                    target_phase=target_phase,
+                    target_node_id=target_node_id,
+                    payload={
+                        "selectionId": selection_id,
+                        "candidateIds": [candidate_id],
+                    },
+                )
+            )
+        else:
+            actions.append(
+                _command_action(
+                    "reopen_review",
+                    action_id=f"reopen-review:{meeting_id}",
+                    label="重新发起评审讨论",
+                    target_phase=target_phase,
+                    target_node_id=target_node_id,
+                    payload={"meetingRoundId": meeting_id},
+                )
+            )
     elif status == "summarizing" and meeting.get("summaryDraftError"):
         actions.append(
             _command_action(
@@ -3043,7 +3194,10 @@ def project_state_from_records(
             "selectionId": selection_id,
             "selectedCandidateIds": selected_candidate_ids,
         }
-    elif candidate_ids:
+    elif len(candidate_ids) >= 2:
+        # record_selection demands a comparable pair (>= 2 candidates); a
+        # smaller set can never pass the owning selection service, so only a
+        # selectable generation puts the selector into waiting_human.
         selection = {
             **_phase("waiting_human", "none", "waiting_user", updated_at=_timestamp(candidates[-1])),
             "selectionId": None,
@@ -3485,6 +3639,11 @@ def project_state_from_records(
         (
             generation["outcome"] == "empty"
             or generation["lifecycle"] == "failed"
+            # A "successful" attempt that produced exactly one candidate is a
+            # silent dead end: record_selection requires a comparable pair, so
+            # the selector can never open.  A fresh generation attempt is the
+            # only executable exit and must be offered like an empty attempt.
+            or 0 < len(candidate_ids) < 2
             or any(
                 problem.get("code") == "generation_heartbeat_stale"
                 for problem in list(generation.get("problems") or [])
@@ -3628,16 +3787,16 @@ def project_state_from_records(
             and not hypothesis_stage_superseded
             and selection_id
             and not selection_integrity_problems
+            # Only a meeting that may still own a live executor suppresses the
+            # round-level re-dispatch.  ``discussion_round_orphaned`` /
+            # ``discussion_round_stopped`` are projected precisely when the
+            # last bound chat round is terminal, so no executor is alive and a
+            # retry opens a fresh attempt meeting instead of doubling a live
+            # one.  A heartbeat-stale round has no terminal fact yet: the
+            # meeting-level recovery owns it (reopen_review, or the completed
+            # -speech redirect below), so the re-dispatch stays suppressed.
             and not any(
-                problem.get("code")
-                in {
-                    "discussion_round_orphaned",
-                    "discussion_round_stopped",
-                    # A heartbeat-stale open meeting owns its precise recovery
-                    # through reopen_review; a re-dispatch could fan out a
-                    # second meeting beside the stuck one.
-                    "review_heartbeat_stale",
-                }
+                problem.get("code") == "review_heartbeat_stale"
                 for candidate in review_candidates
                 for problem in list(candidate.get("problems") or [])
             )
@@ -3999,7 +4158,10 @@ def project_state_from_records(
         current_phase = "convergence"
     elif selection_id:
         current_phase = "review"
-    elif candidate_ids:
+    elif len(candidate_ids) >= 2:
+        # A single candidate cannot open the selector (no comparable pair), so
+        # the authoritative phase stays on generation where the retry offer
+        # lives; advertising "selection" would fence every recovery action.
         current_phase = "selection"
     else:
         current_phase = "generation"
@@ -4080,6 +4242,45 @@ def project_state_from_records(
             "problems": [
                 *(list(generation.get("problems") or [])),
                 sentinel_problem,
+            ],
+        }
+        phase_lookup = {
+            **phase_lookup,
+            "generation": generation,
+        }
+        current_state = phase_lookup[current_phase]
+    elif (
+        formal_phase is None
+        and not formal_runs
+        and len(candidate_ids) == 1
+        and not any(
+            action.get("kind") == "command" for action in allowed_actions
+        )
+        and generation["lifecycle"] in {"completed", "failed"}
+    ):
+        # Same dead end with exactly one candidate: a "successful" attempt
+        # whose single candidate can never open the selector.  Normally the
+        # retry_generation offer above owns the exit; when it is withheld
+        # (e.g. an orphaned generation meeting pins the problems), the
+        # question must still report why it cannot move forward.
+        single_candidate_problem = _problem(
+            "generation_single_candidate",
+            (
+                "候选生成只产出 1 个候选，无法满足双候选评审选择，"
+                "且当前没有可用的过渡动作。请重新发起候选生成，或重置本题后重试"
+            ),
+            category="integrity",
+            severity="error",
+            recoverable=True,
+            source_kind="generation",
+            source_id=str(generation.get("generationMeetingId") or "") or None,
+            detected_at=_timestamp(generation) or _EPOCH,
+        )
+        generation = {
+            **generation,
+            "problems": [
+                *(list(generation.get("problems") or [])),
+                single_candidate_problem,
             ],
         }
         phase_lookup = {
