@@ -15,6 +15,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from scripts import git_claim_guard as claim_guard
 from scripts import local_quality_gate as gate
 
 INTEGRATION_WAIT_SECONDS = 15.0
@@ -329,20 +330,49 @@ def prune_coordination(context: CloseoutContext) -> None:
     _coordination_call(context, "prune")
 
 
-def merge_ff_only(context: CloseoutContext) -> str:
+def merge_ff_only(context: CloseoutContext, *, integration_claim_id: str) -> str:
     if gate.git_lines(context.main_root, "status", "--porcelain"):
         raise ManagedCloseoutError("dirty_main")
     target_sha = gate.rev_parse(context.task_root, "HEAD")
-    completed = gate.run_process(
-        ["git", "merge", "--ff-only", context.branch],
+    old_sha = gate.rev_parse(context.main_root, "HEAD")
+    claim_guard.issue_main_permit(
         context.main_root,
+        old_sha=old_sha,
+        new_sha=target_sha,
+        integration_claim_id=integration_claim_id,
     )
+    try:
+        completed = gate.run_process(
+            ["git", "merge", "--ff-only", context.branch],
+            context.main_root,
+        )
+    finally:
+        claim_guard.clear_main_permit(context.main_root)
     if completed.returncode != 0:
         raise ManagedCloseoutError(
             "ff_only_merge_failed",
             _bounded_error(completed.stderr or completed.stdout),
         )
     return target_sha
+
+
+def resolve_claim_identity(
+    context: CloseoutContext,
+    *,
+    claim_id: str,
+    agent_id: str,
+) -> tuple[str, str]:
+    if claim_id and agent_id:
+        return claim_id, agent_id
+    binding = claim_guard.read_claim_binding(context.task_root)
+    if (
+        binding is None
+        or binding.branch != context.branch
+        or os.path.normcase(str(Path(binding.worktree).resolve()))
+        != os.path.normcase(str(context.task_root.resolve()))
+    ):
+        raise ManagedCloseoutError("claim_identity_required")
+    return claim_id or binding.claim_id, agent_id or binding.agent_id
 
 
 def _is_link_or_junction(path: Path) -> bool:
@@ -526,8 +556,8 @@ def run_cleanup_only(
 def run_managed_closeout(
     task_worktree: Path | str,
     *,
-    claim_id: str,
-    agent_id: str,
+    claim_id: str = "",
+    agent_id: str = "",
     base: str = "main",
     manifest_path: Path | str | None = None,
     reserve_integration: bool = False,
@@ -536,6 +566,11 @@ def run_managed_closeout(
 ) -> ManagedCloseoutResult:
     try:
         context = resolve_context(task_worktree, base=base)
+        claim_id, agent_id = resolve_claim_identity(
+            context,
+            claim_id=claim_id,
+            agent_id=agent_id,
+        )
         validate_development_claim(context, claim_id=claim_id, agent_id=agent_id)
     except (OSError, RuntimeError, ValueError) as error:
         return ManagedCloseoutResult(
@@ -719,7 +754,10 @@ def run_managed_closeout(
                 errors=[str(verified.outcome)],
             )
         else:
-            merge_sha = merge_ff_only(context)
+            merge_sha = merge_ff_only(
+                context,
+                integration_claim_id=integration_claim_id,
+            )
             release_claim(
                 context,
                 claim_id,
@@ -795,7 +833,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--task-worktree", type=Path, required=True)
     parser.add_argument("--claim-id", default="")
-    parser.add_argument("--agent-id", required=True)
+    parser.add_argument("--agent-id", default="")
     parser.add_argument("--base", default="main")
     parser.add_argument("--branch", default="")
     parser.add_argument(
@@ -838,7 +876,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             errors=["task_worktree_cannot_be_invocation_cwd"],
         )
     elif args.cleanup_only:
-        if not args.branch:
+        if not args.agent_id:
+            result = ManagedCloseoutResult(
+                status="failed",
+                exit_code=1,
+                errors=["agent_id_required_for_cleanup_only"],
+            )
+        elif not args.branch:
             result = ManagedCloseoutResult(
                 status="failed",
                 exit_code=1,
@@ -851,12 +895,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                 agent_id=args.agent_id,
                 base=args.base,
             )
-    elif not args.claim_id:
-        result = ManagedCloseoutResult(
-            status="failed",
-            exit_code=1,
-            errors=["claim_id_required"],
-        )
     else:
         result = run_managed_closeout(
             args.task_worktree,

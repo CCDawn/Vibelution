@@ -301,14 +301,16 @@ def test_selector_scopes_pre_commit_hook_to_hook_contract_tests():
     assert result["matchedRules"] == [
         {
             "id": "pre-commit-hook",
-            "description": "Local pre-commit hook adapter and its shared-worktree Python fallback.",
+            "description": "Local claim/ref hook adapters and their shared-worktree Python fallback.",
             "matchedFiles": [".githooks/pre-commit"],
         }
     ]
     assert result["commands"] == [
         "git diff --check",
         ".\\.venv\\Scripts\\python.exe -m pytest "
-        "tests/test_local_quality_gate.py -k pre_commit -q --maxfail=0",
+        "tests/test_git_claim_guard.py tests/test_local_quality_gate.py "
+        "-k \"claim_guard or pre_commit or reference_transaction or main_permit or real_hook\" "
+        "-q --maxfail=0",
     ]
     assert result["validationLayers"] == ["hygiene", "focused", "local-serial"]
 

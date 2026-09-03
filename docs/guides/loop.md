@@ -20,7 +20,7 @@
 1 CLASSIFY  tier + route.md 行
 2 LOCATE    ownership.md → 模块 README → 现有 test
 3 RESEARCH  §2.2：始终评估本地；架构/依赖/复杂能力/真实复用分歧才做仓外对照与排序；已定位小修不付固定扫描成本
-4 ISOLATE   worktree if STANDARD+|ISOLATION_REQUIRED；claim if multi-agent
+4 ISOLATE   worktree if STANDARD+|ISOLATION_REQUIRED；pre-commit 按 staged paths 自动取得或复核窄 claim，真实重叠才阻止
 5 IMPLEMENT 只改 owner；SSOT 表 if 状态/API
 6 VERIFY    稳定修改批次按影响面跑最窄反馈测试；同一 HEAD/命令/输入未变不重复跑；完整 selector 计划留给最终 closeout 一次执行
 7 EVIDENCE  实现文件变更：已定位小修记 `LOCAL_ONLY`，需仓外对照记 `EXTERNAL`；logging/runtime 证据按影响面；验收在 merge 前闭合
@@ -43,14 +43,14 @@
 # 实现文件变更：已定位小修用 LOCAL_ONLY；复杂/开放复用决策用默认 EXTERNAL
 .\.venv\Scripts\python.exe scripts\reuse_research_evidence.py record --help
 
-# 最终收口必须从根 main cwd 调用；未生成 manifest 时只执行一次 selector 计划
+# 最终收口必须从根 main cwd 调用；pre-commit 已记录 claim binding 时可省略 claim-id/agent-id；未生成 manifest 时只执行一次 selector 计划
 Set-Location "<ROOT_MAIN>"
-.\.venv\Scripts\python.exe scripts\task_closeout.py --task-worktree "<TASK_WORKTREE>" --claim-id "<CLAIM_ID>" --agent-id "<AGENT_ID>"
+.\.venv\Scripts\python.exe scripts\task_closeout.py --task-worktree "<TASK_WORKTREE>"
 # selector 中的 .venv 是逻辑命令；同 requirements 指纹时由 gate 只读解析到根 main .venv，禁止在任务树创建 junction
 # 已有 manifest 或 integration 冲突返回 manifest：原样复用，禁止再跑测试
-.\.venv\Scripts\python.exe scripts\task_closeout.py --task-worktree "<TASK_WORKTREE>" --claim-id "<CLAIM_ID>" --agent-id "<AGENT_ID>" --manifest "<MANIFEST_PATH>"
+.\.venv\Scripts\python.exe scripts\task_closeout.py --task-worktree "<TASK_WORKTREE>" --manifest "<MANIFEST_PATH>"
 # 仅 stale_main：同步/提交最新 main 后，携带返回的一次性 token 做一次 reserve retry
-.\.venv\Scripts\python.exe scripts\task_closeout.py --task-worktree "<TASK_WORKTREE>" --claim-id "<CLAIM_ID>" --agent-id "<AGENT_ID>" --reserve-integration --stale-retry-token "<TOKEN_PATH>"
+.\.venv\Scripts\python.exe scripts\task_closeout.py --task-worktree "<TASK_WORKTREE>" --reserve-integration --stale-retry-token "<TOKEN_PATH>"
 # merged_cleanup_pending 表示已合入，只补清理，不验证/不 merge
 .\.venv\Scripts\python.exe scripts\task_closeout.py --task-worktree "<TASK_WORKTREE>" --branch "codex/<TASK>" --agent-id "<AGENT_ID>" --cleanup-only
 

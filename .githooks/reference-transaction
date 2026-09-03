@@ -1,0 +1,24 @@
+#!/bin/sh
+set -eu
+
+repo_root=$(git rev-parse --show-toplevel)
+dependency_root=$repo_root
+if [ ! -x "$dependency_root/.venv/Scripts/python.exe" ] && [ ! -x "$dependency_root/.venv/bin/python" ]; then
+  git_common_dir=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)
+  case "$git_common_dir" in
+    */.git) dependency_root=${git_common_dir%/.git} ;;
+  esac
+fi
+
+if [ -n "${VIBELUTION_HOOK_PYTHON:-}" ]; then
+  project_python=$VIBELUTION_HOOK_PYTHON
+elif [ -x "$dependency_root/.venv/Scripts/python.exe" ]; then
+  project_python="$dependency_root/.venv/Scripts/python.exe"
+elif [ -x "$dependency_root/.venv/bin/python" ]; then
+  project_python="$dependency_root/.venv/bin/python"
+else
+  echo "[claim-guard] missing project Python; refusing ref update" >&2
+  exit 1
+fi
+
+exec "$project_python" "$repo_root/scripts/git_claim_guard.py" reference-transaction --repo "$repo_root" --phase "$1"

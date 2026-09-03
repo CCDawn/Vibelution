@@ -49,7 +49,7 @@ def test_launcher_precommit_hook_supports_posix_venv_and_verifies_web_lock():
 
 @pytest.mark.serial
 def test_launcher_posix_git_hooks_are_executable() -> None:
-    for hook_name in ("pre-commit", "post-merge"):
+    for hook_name in ("pre-commit", "post-merge", "reference-transaction"):
         mode = subprocess.run(
             ["git", "ls-files", "--stage", "--", f".githooks/{hook_name}"],
             cwd=PROJECT_ROOT,
