@@ -11004,6 +11004,420 @@ def _materialize_hypothesis_set_human_gate(
     }
 
 
+# Stage-one closeout demands one real model-invocation receipt per policy
+# ``requiredReceiptStages`` stage inside the required artifact payloads
+# (``stage_one_receipt_missing`` otherwise).  Like the human gate above, the
+# only real authorities for those receipts are the persisted chain records —
+# never a synthesized payload.
+_STAGE_ONE_RECEIPT_KEY = "modelInvocationReceipts"
+_MAX_EMBEDDED_RECEIPTS_PER_STAGE = 4
+
+
+def _read_chat_rooms_snapshot() -> list[dict[str, Any]]:
+    """Durable chat-room authority without reconciliation or repair.
+
+    Kept as an indirection so workflow materialization stays zero-write and
+    tests can seed the persisted room shape directly.
+    """
+
+    from core.web.services import chat_room_service
+
+    rooms = chat_room_service.read_chat_rooms_snapshot()
+    return [dict(room) for room in rooms if isinstance(room, dict)]
+
+
+def _question_generation_meetings_for_run(
+    team_id: str,
+    question_id: str,
+    workflow_run_id: str,
+) -> list[dict[str, Any]]:
+    """Candidate-generation meetings bound to this run's question chain."""
+
+    from core.web.services.team_workflow import meeting_rounds
+
+    normalized_run = str(workflow_run_id or "").strip()
+    return [
+        meeting
+        for meeting in meeting_rounds.list_meeting_rounds(team_id)["meetings"]
+        if str(meeting.get("meetingType") or "") == CANDIDATE_GENERATION_MEETING_TYPE
+        and str(meeting.get("question") or "").upper() == question_id.upper()
+        and (
+            not normalized_run
+            or _meeting_workflow_run_id(meeting) == normalized_run
+        )
+    ]
+
+
+def _meeting_chat_room_journal_receipts(
+    meetings: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Read receipts from the bound meetings' speaker turn journals.
+
+    Mirrors the exact read path ``meeting_receipt_authority`` uses for formal
+    meeting turns: the speaker turn identity is ``chat-room:<round id>:<participant>``
+    inside the participant session's turn journal, and receipts are read with
+    ``read_model_invocation_receipts_from_events`` (source
+    ``canonical_turn_outcome``).  Room/round/session resolution comes from the
+    durable room snapshot plus each meeting's persisted chat-room bindings;
+    anything unreadable simply contributes no receipts — the closeout stays
+    the fail-closed gate.
+    """
+
+    from core.chat.conversation_ledger import load_conversation_events
+    from core.chat.turn_journal import read_model_invocation_receipts_from_events
+
+    deduped_meetings: dict[str, Mapping[str, Any]] = {}
+    for meeting in meetings:
+        meeting_id = str(meeting.get("meetingRoundId") or "").strip()
+        if meeting_id:
+            deduped_meetings[meeting_id] = meeting
+    if not deduped_meetings:
+        return []
+    try:
+        rooms = _read_chat_rooms_snapshot()
+    except Exception:  # noqa: BLE001 - journal source stays best-effort
+        return []
+    rooms_by_id = {
+        str(room.get("roomId") or "").strip(): room
+        for room in rooms
+        if str(room.get("roomId") or "").strip()
+    }
+    receipts: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for meeting in deduped_meetings.values():
+        room = rooms_by_id.get(str(meeting.get("linkedChatRoomId") or "").strip())
+        if room is None:
+            continue
+        wanted_round_ids = {
+            str(item or "").strip()
+            for item in list(meeting.get("chatRoomRoundIds") or [])
+            if str(item or "").strip()
+        }
+        for chat_round in room.get("rounds") or []:
+            if not isinstance(chat_round, Mapping):
+                continue
+            round_id = str(chat_round.get("roundId") or "").strip()
+            if not round_id or (
+                wanted_round_ids and round_id not in wanted_round_ids
+            ):
+                continue
+            for message in chat_round.get("messages") or []:
+                if not isinstance(message, Mapping):
+                    continue
+                session_id = str(message.get("sessionId") or "").strip()
+                participant_id = (
+                    str(message.get("participantId") or "").strip() or session_id
+                )
+                if not session_id or not participant_id:
+                    continue
+                turn_identity = f"chat-room:{round_id}:{participant_id}"
+                try:
+                    events = load_conversation_events(PROJECT_ROOT, session_id)
+                    found = read_model_invocation_receipts_from_events(
+                        events,
+                        turn_id=turn_identity,
+                    )
+                except Exception:  # noqa: BLE001 - unreadable journal, skip
+                    continue
+                for raw_receipt in found:
+                    receipt_id = str(raw_receipt.get("receiptId") or "").strip()
+                    if receipt_id:
+                        if receipt_id in seen:
+                            continue
+                        seen.add(receipt_id)
+                    receipts.append(dict(raw_receipt))
+    return receipts
+
+
+def _question_registered_receipts(
+    team_id: str,
+    question_id: str,
+    workflow_run_id: str,
+) -> list[dict[str, Any]]:
+    """Registered node agent-turn receipts (the Challenge Cup audit store)."""
+
+    from .model_invocation_receipt_registry import (
+        question_model_invocation_receipts,
+    )
+
+    try:
+        return question_model_invocation_receipts(
+            team_id,
+            question_id=question_id,
+            workflow_run_id=workflow_run_id,
+        )
+    except Exception:  # noqa: BLE001 - corrupt store fails closed as empty
+        return []
+
+
+def _stage_one_policy_receipt_stages(
+    input_snapshot: Mapping[str, Any] | None,
+) -> tuple[str, ...]:
+    """The receipt stages this run's closeout policy demands (canonical 3)."""
+
+    from core.research.workflow.contracts.question_stage_binding import (
+        QUESTION_PACKAGE_STAGES,
+    )
+
+    snapshot = input_snapshot if isinstance(input_snapshot, Mapping) else {}
+    raw_policy = snapshot.get("stageOneCompletionPolicy")
+    stages = tuple(
+        str(item or "").strip().lower()
+        for item in (
+            raw_policy.get("requiredReceiptStages") if isinstance(raw_policy, Mapping) else ()
+        )
+        if str(item or "").strip()
+    )
+    canonical = tuple(sorted(QUESTION_PACKAGE_STAGES))
+    if not stages:
+        return canonical
+    known = set(canonical)
+    return tuple(item for item in stages if item in known) or canonical
+
+
+def _collect_stage_one_receipt_candidates(
+    *,
+    team_id: str,
+    question_id: str,
+    workflow_run_id: str,
+    accepted_round: Mapping[str, Any],
+    bound_meetings: Sequence[Mapping[str, Any]],
+    generation_meetings: Sequence[Mapping[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """Gather candidate receipts, round first, then journal, then registry."""
+
+    candidates: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    source_counts = {"round": 0, "meeting_journal": 0, "registered": 0}
+
+    def _extend(source: str, found: Sequence[Any]) -> None:
+        for raw in found:
+            if not isinstance(raw, Mapping):
+                continue
+            receipt_id = str(raw.get("receiptId") or "").strip()
+            if receipt_id:
+                if receipt_id in seen:
+                    continue
+                seen.add(receipt_id)
+            candidates.append(dict(raw))
+            source_counts[source] += 1
+
+    _extend(
+        "round",
+        [
+            item
+            for item in list(accepted_round.get("modelInvocationReceipts") or [])
+            if isinstance(item, Mapping)
+        ],
+    )
+    _extend(
+        "meeting_journal",
+        _meeting_chat_room_journal_receipts([*bound_meetings, *generation_meetings]),
+    )
+    _extend(
+        "registered",
+        _question_registered_receipts(team_id, question_id, workflow_run_id),
+    )
+    return candidates, source_counts
+
+
+def _stage_one_bound_receipts_by_stage(
+    candidates: Sequence[Mapping[str, Any]],
+    *,
+    question_id: str,
+    workflow_run_id: str,
+    required_stages: Sequence[str],
+    bound_meeting_ids: Sequence[str],
+) -> tuple[dict[str, list[dict[str, Any]]], int]:
+    """Validate and classify receipts exactly like the closeout walk.
+
+    Faithful classification rule: the closeout reads each receipt's OWN
+    ``scope.stageId`` — the server-owned ``QuestionStageBinding.questionStage``
+    the producer minted ("generation" meeting speakers and hypothesis-design /
+    earlier agent tasks, "review" meeting speakers and the review-step
+    executor, "revision" protocol/iteration agent tasks).  A receipt is only
+    embedded when it parses, its status is succeeded/retried, its scope is
+    bound to THIS question and run, and its real stage is one the policy
+    demands — scope is never synthesized, rewritten, or re-mapped.  A stage
+    whose real receipt does not exist stays missing and closeout keeps failing
+    closed with ``stage_one_receipt_missing`` (the live G1 smoke shape: real
+    generation/review receipts exist, while every revision-stage producer is a
+    policy-deferred node, so no revision receipt can exist yet).
+    """
+
+    from core.research.workflow.contracts.model_invocation_receipt import (
+        ModelInvocationReceipt,
+        ModelInvocationStatus,
+    )
+
+    meeting_prefixes = tuple(
+        f"meeting:{str(item or '').strip()}:"
+        for item in bound_meeting_ids
+        if str(item or "").strip()
+    )
+    by_stage: dict[str, list[dict[str, Any]]] = {stage: [] for stage in required_stages}
+    rejected = 0
+    indexed = list(enumerate(candidates))
+    ordered = sorted(
+        indexed,
+        key=lambda item: (
+            0
+            if str(item[1].get("nodeRunId") or "").startswith(meeting_prefixes)
+            else 1,
+            item[0],
+        ),
+    )
+    for _, raw in ordered:
+        try:
+            receipt = ModelInvocationReceipt.from_dict(raw)
+        except (KeyError, TypeError, ValueError, ContractValidationError):
+            rejected += 1
+            continue
+        if receipt.status not in {
+            ModelInvocationStatus.SUCCEEDED,
+            ModelInvocationStatus.RETRIED,
+        }:
+            rejected += 1
+            continue
+        scope = dict(receipt.scope or {})
+        stage = str(scope.get("stageId") or scope.get("stage_id") or "").lower()
+        if (
+            stage not in by_stage
+            or str(scope.get("questionId") or "").upper() != question_id.upper()
+            or str(scope.get("runId") or "") != workflow_run_id
+        ):
+            rejected += 1
+            continue
+        by_stage[stage].append(receipt.to_dict())
+    return by_stage, rejected
+
+
+def _materialize_stage_one_receipt_evidence(
+    *,
+    team_id: str,
+    workflow_run_id: str,
+    question_id: str,
+    source_collection_run_id: str,
+    accepted_round: Mapping[str, Any],
+    bound_meetings: Sequence[Mapping[str, Any]],
+    generation_meetings: Sequence[Mapping[str, Any]],
+    required_stages: Sequence[str],
+    errors: dict[str, str],
+) -> dict[str, Any]:
+    """Embed the accepted chain's real receipts into the ``hypothesis_set`` row.
+
+    Same append-only pattern as the closeout human gate: the base row is
+    immutable, the receipt-carrying payload is appended as a new row whose
+    identity derives from the row it upgrades (``<recordId>:model-receipts``),
+    so the scoped readback (latest row wins) resolves the receipt authority
+    and replays are idempotent.  No receipts means no row: closeout keeps
+    failing with ``stage_one_receipt_missing`` exactly as before.
+    """
+
+    from .workflow_artifact_store import list_workflow_artifacts, put_workflow_artifact
+
+    report: dict[str, Any] = {
+        "status": "absent",
+        "blockerCodes": [],
+        "stageCoverage": {},
+        "embeddedCount": 0,
+        "candidateCount": 0,
+        "rejectedCount": 0,
+        "sourceCounts": {},
+    }
+    rows = [
+        row
+        for row in list_workflow_artifacts(
+            team_id,
+            kind="hypothesis_set",
+            workflow_run_id=workflow_run_id,
+            source_collection_run_id=source_collection_run_id,
+        )
+        if isinstance(row.get("payload"), Mapping) and row.get("payload")
+    ]
+    if not rows:
+        # The artifact requirement gate owns the missing-artifact semantics.
+        return report
+    base_row = rows[-1]
+    base_payload = dict(base_row["payload"])
+    report["baseRecordId"] = str(base_row.get("recordId") or "")
+    if (
+        _STAGE_ONE_RECEIPT_KEY in base_payload
+        or "model_invocation_receipts" in base_payload
+        or "receipts" in base_payload
+    ):
+        # The latest authority already carries receipts (replay): reuse,
+        # never rewrite.
+        report["status"] = "present"
+        return report
+    candidates, source_counts = _collect_stage_one_receipt_candidates(
+        team_id=team_id,
+        question_id=question_id,
+        workflow_run_id=workflow_run_id,
+        accepted_round=accepted_round,
+        bound_meetings=bound_meetings,
+        generation_meetings=generation_meetings,
+    )
+    report["candidateCount"] = len(candidates)
+    report["sourceCounts"] = source_counts
+    by_stage, rejected = _stage_one_bound_receipts_by_stage(
+        candidates,
+        question_id=question_id,
+        workflow_run_id=workflow_run_id,
+        required_stages=required_stages,
+        bound_meeting_ids=[
+            str(meeting.get("meetingRoundId") or "").strip()
+            for meeting in [*bound_meetings, *generation_meetings]
+        ],
+    )
+    report["rejectedCount"] = rejected
+    embedded: list[dict[str, Any]] = []
+    stage_coverage: dict[str, list[str]] = {}
+    for stage in required_stages:
+        stage_receipts = by_stage.get(stage) or []
+        stage_coverage[stage] = [
+            str(receipt.get("receiptId") or "")
+            for receipt in stage_receipts[:_MAX_EMBEDDED_RECEIPTS_PER_STAGE]
+        ]
+        embedded.extend(stage_receipts[:_MAX_EMBEDDED_RECEIPTS_PER_STAGE])
+    report["stageCoverage"] = stage_coverage
+    if not embedded:
+        # Nothing real to embed: keep the fail-closed closeout blocker
+        # (``stage_one_receipt_missing``) untouched — never fake coverage.
+        return report
+    receipt_payload = {
+        **copy.deepcopy(base_payload),
+        _STAGE_ONE_RECEIPT_KEY: embedded,
+    }
+    base_record_id = str(base_row.get("recordId") or "").strip()
+    try:
+        stored = put_workflow_artifact(
+            team_id,
+            kind="hypothesis_set",
+            workflow_run_id=workflow_run_id,
+            source_collection_run_id=str(
+                base_row.get("sourceCollectionRunId") or source_collection_run_id
+            ).strip(),
+            artifact_identity=(
+                f"{base_record_id}:model-receipts" if base_record_id else ""
+            ),
+            payload=receipt_payload,
+        )
+    except Exception as exc:  # noqa: BLE001 - fail closed, report the cause
+        errors["hypothesis_set"] = str(exc) or type(exc).__name__
+        return {
+            **report,
+            "status": "blocked",
+            "blockerCodes": ["stage_one_receipt_embedding_failed"],
+        }
+    return {
+        **report,
+        "status": "embedded",
+        "recordId": str(stored.get("recordId") or ""),
+        "embeddedCount": len(embedded),
+    }
+
+
 def _classify_round_failure(exc: BaseException) -> str:
     """Map one generation failure to a stable machine-readable failure code."""
     type_name = type(exc).__name__
@@ -11718,6 +12132,27 @@ def materialize_stage_one_node_authority(
             if str(code).strip()
         ] or ["stage_one_human_gate_missing"]
 
+    # hypothesis_set receipt evidence — the closeout demands one real model
+    # invocation receipt per policy ``requiredReceiptStages`` stage inside the
+    # required payloads (``stage_one_receipt_missing`` otherwise).  Only real
+    # receipts are embedded (accepted round → meeting speaker journals → the
+    # registered agent-turn audit store), classified by their own scope stage
+    # and validated against this run; a stage without a real receipt stays
+    # missing and closeout keeps failing closed.
+    hypothesis_set_receipt_report = _materialize_stage_one_receipt_evidence(
+        team_id=team,
+        workflow_run_id=run,
+        question_id=question,
+        source_collection_run_id=source,
+        accepted_round=accepted_round,
+        bound_meetings=bound_meetings,
+        generation_meetings=_question_generation_meetings_for_run(
+            team, question, run
+        ),
+        required_stages=_stage_one_policy_receipt_stages(input_snapshot),
+        errors=errors,
+    )
+
     ordered = list(STAGE_ONE_NODE_AUTHORITY_KINDS)
     # Launch-shape conditional waivers: hypothesis-first chain launches cannot
     # demand authorities whose source (approved question artifact /
@@ -11778,6 +12213,10 @@ def materialize_stage_one_node_authority(
             if hypothesis_set_gate_report.get("status") != "absent"
             else {}
         ),
+        # Always reported: the receipt stage coverage (or its deliberate
+        # absence) is the operator-visible explanation for a lingering
+        # ``stage_one_receipt_missing`` closeout blocker.
+        "hypothesisSetReceipts": dict(hypothesis_set_receipt_report),
     }
 
 

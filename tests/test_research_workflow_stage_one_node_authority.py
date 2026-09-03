@@ -2719,3 +2719,425 @@ def test_without_accepted_adjudication_hypothesis_set_gate_stays_blocked(
         with pytest.raises(NodeExecutionError) as excinfo:
             evaluate_stage_one_closeout(record, node_id="hypothesis_design")
         assert excinfo.value.code == "stage_one_human_gate_missing"
+
+
+# ---------------------------------------------------------------------------
+# Stage-one closeout receipt embedding (requiredReceiptStages coverage)
+# ---------------------------------------------------------------------------
+
+_RECEIPT_ROOM_ID = "room-stage-one-receipts"
+_RECEIPT_CHAT_ROUND_ID = "round-stage-one-receipts"
+_RECEIPT_JOURNAL_SESSION = "session-stage-one-receipts"
+_REVIEW_RECEIPT_MEETING = f"{_REVIEW_PREFIX}-a-r3"
+
+
+def _registry_receipt(
+    stage: str,
+    *,
+    receipt_id: str,
+) -> dict[str, Any]:
+    """Receipt in the exact registered agent-turn shape (full locator)."""
+    from core.research.workflow.contracts.model_invocation_receipt import (
+        ModelInvocationReceipt,
+        ModelInvocationStatus,
+    )
+
+    node_run_id = f"nr-{_RUN_ID}-{stage}-task"
+    session_id = f"session-registry-{stage}"
+    task_id = f"task-registry-{stage}"
+    turn_id = f"turn-registry-{stage}"
+    policy_sha256 = "2" * 64
+    outcome_kind = {"generation": "candidate"}.get(stage, stage)
+    return ModelInvocationReceipt.from_invocation(
+        receipt_id=receipt_id,
+        run_id=_RUN_ID,
+        node_run_id=node_run_id,
+        scope={
+            "questionId": _QUESTION_ID,
+            "runId": _RUN_ID,
+            "taskId": task_id,
+            "turnId": turn_id,
+            "stageId": stage,
+            "questionStage": stage,
+            "modelPolicySha256": policy_sha256,
+            "workflowRunId": _RUN_ID,
+            "formalNodeId": "hypothesis_design",
+            "formalNodeRunId": node_run_id,
+            "formalNodeAttempt": "1",
+            "sessionId": session_id,
+            "attempt": "1",
+        },
+        provider="dashscope",
+        model="qwen3.6-plus",
+        model_version="2026-08",
+        requested_model="qwen3.6-plus",
+        status=ModelInvocationStatus.SUCCEEDED,
+        request_content={"stage": stage},
+        response_content={"stage": stage, "status": "ok"},
+        started_at_ms=100,
+        finished_at_ms=110,
+        token_usage={"inputTokens": 10, "outputTokens": 10, "totalTokens": 20},
+        metadata={"outcomeKinds": [outcome_kind]},
+        evidence_locator={
+            "kind": "challenge_model_invocation_receipt_registry",
+            "outputRef": (
+                f"challenge-receipt://{_QUESTION_ID}/{_RUN_ID}/{task_id}/{turn_id}"
+            ),
+            "outputSha256": "d" * 64,
+            "sessionId": session_id,
+            "taskId": task_id,
+            "turnId": turn_id,
+            "formalNodeId": "hypothesis_design",
+            "formalNodeRunId": node_run_id,
+            "modelPolicySha256": policy_sha256,
+            "invocationId": f"inv-{receipt_id}",
+            "iteration": 0,
+            "attempt": 1,
+        },
+    ).to_dict()
+
+
+def _seed_journal_receipt(
+    *,
+    stage: str,
+) -> None:
+    """Journal one canonical meeting speaker receipt (legacy journal shape)."""
+    from core.chat.turn_journal import (
+        EVENT_ASSISTANT_ITEM_COMMITTED,
+        append_turn_event,
+    )
+    from tests.test_research_workflow_stage_one_closeout import _receipt
+
+    append_turn_event(
+        chain.PROJECT_ROOT,
+        _RECEIPT_JOURNAL_SESSION,
+        f"chat-room:{_RECEIPT_CHAT_ROUND_ID}:{_RECEIPT_JOURNAL_SESSION}",
+        EVENT_ASSISTANT_ITEM_COMMITTED,
+        status="completed",
+        source="canonical_turn_outcome",
+        payload={"modelInvocationReceipt": _receipt(stage, _RUN_ID)},
+    )
+
+
+def _bind_review_meeting_to_chat_room(team_id: str) -> None:
+    """Re-append the r3 review meeting with its durable chat-room bindings."""
+    path = meetings._rounds_path(team_id)
+    rows = [
+        row
+        for row in meetings._read_jsonl(path)
+        if str(row.get("meetingRoundId") or "") == _REVIEW_RECEIPT_MEETING
+    ]
+    assert rows, _REVIEW_RECEIPT_MEETING
+    meetings._append_jsonl(
+        path,
+        {
+            **rows[-1],
+            "linkedChatRoomId": _RECEIPT_ROOM_ID,
+            "chatRoomRoundIds": [_RECEIPT_CHAT_ROUND_ID],
+        },
+    )
+
+
+def _receipt_rooms_snapshot() -> list[dict[str, Any]]:
+    return [
+        {
+            "roomId": _RECEIPT_ROOM_ID,
+            "rounds": [
+                {
+                    "roundId": _RECEIPT_CHAT_ROUND_ID,
+                    "config": {"workflowRunId": _RUN_ID},
+                    "messages": [
+                        {
+                            "participantId": _RECEIPT_JOURNAL_SESSION,
+                            "sessionId": _RECEIPT_JOURNAL_SESSION,
+                        }
+                    ],
+                }
+            ],
+        }
+    ]
+
+
+def test_real_chain_receipts_embed_and_satisfy_closeout_receipt_stages(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Journal + registry receipts embed; the closeout receipt walk passes.
+
+    The meeting journal authority carries the r3 review speaker receipt
+    (scope.stageId=review), the registered agent-turn store carries the
+    generation and revision receipts; the materializer embeds them into the
+    node's hypothesis_set authority and a closeout stripped of every other
+    receipt then passes the ``requiredReceiptStages`` demand.
+    """
+    from core.web.services.team_workflow.research_runtime.model_invocation_receipt_registry import (
+        register_question_model_invocation_receipts,
+    )
+    from core.web.services.team_workflow.research_runtime.stage_one_closeout import (
+        evaluate_stage_one_closeout,
+        payload_human_gates,
+    )
+    from tests.test_research_workflow_stage_one_closeout import (
+        _stage_one_record,
+    )
+
+    team_id = _seed_gate_materialization(tmp_path, monkeypatch)
+    round_record = _accepted_round(team_id)
+    _append_human_adjudication(
+        team_id,
+        round_record,
+        decision="accepted",
+        adjudication_id="hf-adjudication-receipt-embed",
+    )
+    _bind_review_meeting_to_chat_room(team_id)
+    _seed_journal_receipt(stage="review")
+    monkeypatch.setattr(
+        chain, "_read_chat_rooms_snapshot", _receipt_rooms_snapshot
+    )
+    register_question_model_invocation_receipts(
+        team_id,
+        question_id=_QUESTION_ID,
+        workflow_run_id=_RUN_ID,
+        receipts=[
+            _registry_receipt(
+                "generation", receipt_id="receipt-registry-generation"
+            ),
+            _registry_receipt("revision", receipt_id="receipt-registry-revision"),
+        ],
+    )
+
+    report = chain.materialize_stage_one_node_authority(
+        team_id,
+        _QUESTION_ID,
+        workflow_run_id=_RUN_ID,
+        node_run_id=_NODE_RUN_ID,
+        input_snapshot_hash=_SNAPSHOT_HASH,
+        source_collection_run_id=_SC_RUN_ID,
+    )
+
+    receipts_report = report["hypothesisSetReceipts"]
+    assert receipts_report["status"] == "embedded"
+    assert receipts_report["embeddedCount"] == 3
+    assert set(receipts_report["stageCoverage"]) == {
+        "generation",
+        "review",
+        "revision",
+    }
+    assert receipts_report["stageCoverage"]["review"] == ["receipt-review"]
+    assert receipts_report["stageCoverage"]["generation"] == [
+        "receipt-registry-generation"
+    ]
+    assert receipts_report["stageCoverage"]["revision"] == [
+        "receipt-registry-revision"
+    ]
+    assert receipts_report["sourceCounts"]["meeting_journal"] == 1
+    assert receipts_report["sourceCounts"]["registered"] == 2
+
+    rows = workflow_artifact_store.list_workflow_artifacts(
+        team_id, kind="hypothesis_set", workflow_run_id=_RUN_ID
+    )
+    assert len(rows) == 3
+    # The gated row stays untouched; the receipt payload is a new append-only
+    # row derived from the gated row (gate inherited, receipts added).
+    assert rows[1]["payload"]["human_gate"]["adjudicationId"] == (
+        "hf-adjudication-receipt-embed"
+    )
+    embedded = rows[-1]["payload"]["modelInvocationReceipts"]
+    assert {item["receiptId"] for item in embedded} == {
+        "receipt-review",
+        "receipt-registry-generation",
+        "receipt-registry-revision",
+    }
+    # Every embedded receipt keeps its own real scope stage; nothing was
+    # rewritten or re-scoped.
+    assert {item["scope"]["stageId"] for item in embedded} == {
+        "generation",
+        "review",
+        "revision",
+    }
+    # The closeout gate walk still discovers the inherited gate.
+    assert list(payload_human_gates(rows[-1]["payload"]))
+
+    # A closeout whose only receipts are the embedded ones now passes the
+    # stage demand (it stops later on the program handoff, as designed).
+    record = _stage_one_record(_RUN_ID)
+    for payload in record["artifactPayloads"].values():
+        payload.pop("modelInvocationReceipts", None)
+    record["artifactPayloads"]["hypothesis_set:hypothesis_set-artifact"] = rows[
+        -1
+    ]["payload"]
+    outcome = evaluate_stage_one_closeout(record, node_id="hypothesis_design")
+    assert outcome is not None
+    assert outcome.status == "program_review_required"
+    assert set(outcome.receipt_stages) == {"generation", "review", "revision"}
+
+    # Replay is idempotent: the receipt row already satisfies the probe.
+    replay = chain.materialize_stage_one_node_authority(
+        team_id,
+        _QUESTION_ID,
+        workflow_run_id=_RUN_ID,
+        node_run_id=_NODE_RUN_ID,
+        input_snapshot_hash=_SNAPSHOT_HASH,
+        source_collection_run_id=_SC_RUN_ID,
+    )
+    assert replay["hypothesisSetReceipts"]["status"] == "present"
+    assert len(
+        workflow_artifact_store.list_workflow_artifacts(
+            team_id, kind="hypothesis_set", workflow_run_id=_RUN_ID
+        )
+    ) == 3
+
+
+def test_without_any_real_receipt_closeout_stays_blocked_on_missing_stages(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No journal/registry/round receipts means no embed — fail-closed.
+
+    The node artifact stays untouched and the closeout keeps raising
+    ``stage_one_receipt_missing`` naming all three stages, exactly as before
+    the materializer grew the receipt embedding step.
+    """
+    from core.web.services.team_workflow.research_runtime.node_execution_support import (
+        NodeExecutionError,
+    )
+    from core.web.services.team_workflow.research_runtime.stage_one_closeout import (
+        evaluate_stage_one_closeout,
+    )
+    from tests.test_research_workflow_stage_one_closeout import (
+        _stage_one_record,
+    )
+
+    team_id = _seed_gate_materialization(tmp_path, monkeypatch)
+    round_record = _accepted_round(team_id)
+    _append_human_adjudication(
+        team_id,
+        round_record,
+        decision="accepted",
+        adjudication_id="hf-adjudication-receipt-absent",
+    )
+    monkeypatch.setattr(chain, "_read_chat_rooms_snapshot", lambda: [])
+
+    report = chain.materialize_stage_one_node_authority(
+        team_id,
+        _QUESTION_ID,
+        workflow_run_id=_RUN_ID,
+        node_run_id=_NODE_RUN_ID,
+        input_snapshot_hash=_SNAPSHOT_HASH,
+        source_collection_run_id=_SC_RUN_ID,
+    )
+
+    receipts_report = report["hypothesisSetReceipts"]
+    assert receipts_report["status"] == "absent"
+    assert receipts_report["embeddedCount"] == 0
+    assert set(receipts_report["stageCoverage"]) == {
+        "generation",
+        "review",
+        "revision",
+    }
+    assert all(not refs for refs in receipts_report["stageCoverage"].values())
+    rows = workflow_artifact_store.list_workflow_artifacts(
+        team_id, kind="hypothesis_set", workflow_run_id=_RUN_ID
+    )
+    # Only the human-gate row was appended; no receipt row exists.
+    assert len(rows) == 2
+    assert "modelInvocationReceipts" not in rows[-1]["payload"]
+
+    record = _stage_one_record(_RUN_ID)
+    for payload in record["artifactPayloads"].values():
+        payload.pop("modelInvocationReceipts", None)
+    record["artifactPayloads"]["hypothesis_set:hypothesis_set-artifact"] = rows[
+        -1
+    ]["payload"]
+    with pytest.raises(NodeExecutionError) as excinfo:
+        evaluate_stage_one_closeout(record, node_id="hypothesis_design")
+    assert excinfo.value.code == "stage_one_receipt_missing"
+    assert "generation, review, revision" in str(excinfo.value)
+
+
+def test_partial_real_receipts_embed_but_missing_stage_stays_fail_closed(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only real generation/review receipts exist: they embed, revision fails.
+
+    Mirrors the live G1 smoke: a real generation receipt on the accepted
+    round and a real review receipt in the meeting journal, while no
+    revision-stage model call ever ran (its producers are policy-deferred
+    nodes).  The real receipts embed under their own scope stages and the
+    closeout keeps failing on exactly the uncovered stage — never faked.
+    """
+    from core.web.services.team_workflow.research_runtime.node_execution_support import (
+        NodeExecutionError,
+    )
+    from core.web.services.team_workflow.research_runtime.stage_one_closeout import (
+        evaluate_stage_one_closeout,
+    )
+    from tests.test_research_workflow_stage_one_closeout import (
+        _receipt,
+        _stage_one_record,
+    )
+
+    team_id = _seed_gate_materialization(tmp_path, monkeypatch)
+    round_record = _accepted_round(team_id)
+    _append_human_adjudication(
+        team_id,
+        round_record,
+        decision="accepted",
+        adjudication_id="hf-adjudication-receipt-partial",
+    )
+    # Source 1: the accepted round itself carries one generation receipt.
+    rounds_path = hrounds._storage_path(team_id)
+    rounds = hrounds._read_jsonl(rounds_path)
+    assert rounds, "accepted round row must exist"
+    hrounds._append_jsonl(
+        rounds_path,
+        {
+            **rounds[-1],
+            "modelInvocationReceipts": [_receipt("generation", _RUN_ID)],
+        },
+    )
+    _bind_review_meeting_to_chat_room(team_id)
+    _seed_journal_receipt(stage="review")
+    monkeypatch.setattr(
+        chain, "_read_chat_rooms_snapshot", _receipt_rooms_snapshot
+    )
+
+    report = chain.materialize_stage_one_node_authority(
+        team_id,
+        _QUESTION_ID,
+        workflow_run_id=_RUN_ID,
+        node_run_id=_NODE_RUN_ID,
+        input_snapshot_hash=_SNAPSHOT_HASH,
+        source_collection_run_id=_SC_RUN_ID,
+    )
+
+    receipts_report = report["hypothesisSetReceipts"]
+    assert receipts_report["status"] == "embedded"
+    assert receipts_report["sourceCounts"]["round"] == 1
+    assert receipts_report["sourceCounts"]["meeting_journal"] == 1
+    assert receipts_report["stageCoverage"]["generation"] == ["receipt-generation"]
+    assert receipts_report["stageCoverage"]["review"] == ["receipt-review"]
+    assert receipts_report["stageCoverage"]["revision"] == []
+
+    rows = workflow_artifact_store.list_workflow_artifacts(
+        team_id, kind="hypothesis_set", workflow_run_id=_RUN_ID
+    )
+    embedded = rows[-1]["payload"]["modelInvocationReceipts"]
+    assert {item["receiptId"] for item in embedded} == {
+        "receipt-generation",
+        "receipt-review",
+    }
+
+    record = _stage_one_record(_RUN_ID)
+    for payload in record["artifactPayloads"].values():
+        payload.pop("modelInvocationReceipts", None)
+    record["artifactPayloads"]["hypothesis_set:hypothesis_set-artifact"] = rows[
+        -1
+    ]["payload"]
+    with pytest.raises(NodeExecutionError) as excinfo:
+        evaluate_stage_one_closeout(record, node_id="hypothesis_design")
+    assert excinfo.value.code == "stage_one_receipt_missing"
+    message = str(excinfo.value)
+    assert "revision" in message
+    assert "generation, review, revision" not in message
