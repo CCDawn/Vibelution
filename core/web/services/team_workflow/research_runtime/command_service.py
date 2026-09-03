@@ -1930,8 +1930,8 @@ class WorkflowCommandService:
         from .artifact_readback_registry import build_canonical_ref
         from .human_gate_artifacts import canonical_sha256
         from .node_execution_support import NodeExecutionError
-        from .result_package_system_adapter import build_stage_one_proposal_package
         from .result_package import ResultPackageError
+        from .result_package_system_adapter import build_stage_one_proposal_package
         from .result_package_v2 import ResultPackageV2Error
         from .stage_one_closeout import evaluate_stage_one_closeout
 

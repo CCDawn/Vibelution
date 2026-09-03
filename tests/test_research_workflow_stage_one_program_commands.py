@@ -25,8 +25,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from core.research.workflow.contracts import WorkflowCommandKind
 from core.research.workflow.challenge_cup_runtime import ChallengeCupGraphCoordinator
+from core.research.workflow.contracts import WorkflowCommandKind
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.routes.team_workflows import research_runtime as research_runtime_module
 from core.web.services.team_workflow.research_runtime import (
@@ -34,8 +34,10 @@ from core.web.services.team_workflow.research_runtime import (
     operator_authorization,
     program_candidate_handoff,
     result_package_system_adapter,
-    stage_one_closeout as stage_one_closeout_module,
     workflow_artifact_store,
+)
+from core.web.services.team_workflow.research_runtime import (
+    stage_one_closeout as stage_one_closeout_module,
 )
 from core.web.services.team_workflow.research_runtime.command_service import (
     CommandForbiddenError,
@@ -527,11 +529,13 @@ def test_stage_one_commands_require_privileged_operator(tmp_path, monkeypatch) -
             WorkflowCommandKind.BUILD_STAGE_ONE_PACKAGE,
             WorkflowCommandKind.FINALIZE_STAGE_ONE,
         ):
-            with server_operator_scope("op-viewer", roles=("viewer",)):
-                with pytest.raises(CommandForbiddenError):
-                    harness.command_service.submit(
-                        _request(harness, command=command, key=f"gate-{command.value}")
-                    )
+            with (
+                server_operator_scope("op-viewer", roles=("viewer",)),
+                pytest.raises(CommandForbiddenError),
+            ):
+                harness.command_service.submit(
+                    _request(harness, command=command, key=f"gate-{command.value}")
+                )
             with pytest.raises(CommandForbiddenError):
                 # No server operator bound at all: never self-declared.
                 harness.command_service.submit(
