@@ -285,6 +285,35 @@ def _validate_requirement_matrices(required_payloads: dict[str, list[Mapping[str
             )
 
 
+def _effective_required_kinds(
+    policy: StageOneCompletionPolicy,
+    record: Mapping[str, Any],
+) -> tuple[str, ...]:
+    """Policy kinds minus the launch-shape conditional waivers.
+
+    Hypothesis-first chain launches persist no approved question authority and
+    no canonically addressable review rows, so the shape gate waives exactly
+    those policy kinds (each backed by persisted evidence).  Any doubt keeps
+    the full policy demand — fail-closed.
+    """
+    try:
+        from .stage_one_shape_gate import (
+            downgraded_stage_one_kinds,
+            drop_downgraded_kinds,
+        )
+
+        snapshot = record.get("inputSnapshot")
+        downgrades = downgraded_stage_one_kinds(
+            policy.requiredArtifactKinds,
+            team_id=str(record.get("teamId") or ""),
+            question_id=str(record.get("questionId") or ""),
+            input_snapshot=snapshot if isinstance(snapshot, Mapping) else {},
+        )
+    except Exception:  # noqa: BLE001 - uncertain shape keeps the full demand
+        return tuple(policy.requiredArtifactKinds)
+    return drop_downgraded_kinds(policy.requiredArtifactKinds, downgrades)
+
+
 def evaluate_stage_one_closeout(
     record: Mapping[str, Any],
     *,
@@ -296,6 +325,7 @@ def evaluate_stage_one_closeout(
     policy = _stage_one_policy(record)
     if policy is None or node_id != policy.closureNodeId:
         return None
+    required_kinds = _effective_required_kinds(policy, record)
     deferred = set(policy.deferredNodeIds)
     if any(
         isinstance(item, Mapping) and str(item.get("nodeId") or "") in deferred
@@ -314,7 +344,7 @@ def evaluate_stage_one_closeout(
     manifests_by_kind: dict[str, list[Mapping[str, Any]]] = {}
     for manifest in manifests:
         manifests_by_kind.setdefault(_artifact_kind(manifest), []).append(manifest)
-    missing = [kind for kind in policy.requiredArtifactKinds if not manifests_by_kind.get(kind)]
+    missing = [kind for kind in required_kinds if not manifests_by_kind.get(kind)]
     if missing:
         _fail(
             "stage-one required artifacts are missing: " + ", ".join(missing),
@@ -323,7 +353,7 @@ def evaluate_stage_one_closeout(
 
     required_payloads: dict[str, list[Mapping[str, Any]]] = {}
     artifact_refs: list[str] = []
-    for kind in policy.requiredArtifactKinds:
+    for kind in required_kinds:
         for manifest in manifests_by_kind[kind]:
             artifact_id = str(manifest.get("artifactId") or "").strip()
             payload = payloads.get(artifact_id)

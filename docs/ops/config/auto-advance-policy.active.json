@@ -8,7 +8,7 @@
   "capabilities": {
     "autoAdvanceBatchGate": false,
     "autoCloseMeetingRound": true,
-    "autoConvergeQuestion": false,
+    "autoConvergeQuestion": true,
     "autoSelectCandidates": true,
     "autoStartEvidenceRepair": true
   },
@@ -100,7 +100,7 @@
       "operator"
     ],
     "frozenAt": "2026-09-02T00:00:00+08:00",
-    "contentHash": "74F721E361D0E1F8AC40F6F23CC5C1854F6D41BD1126A377552412FA45B8DC8A",
+    "contentHash": "70B57F5E47BEC8C4494620C6990FEF5973E0214BAF8F1ADC471BB98BDA952B05",
     "contentHashRule": "sha256 over canonical JSON (sort_keys=True, separators=(',', ':'), ensure_ascii=False) with contentHash set to null; uppercase hex"
   }
 }
