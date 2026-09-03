@@ -207,6 +207,143 @@ def _openalex_search_url(query_text: str, *, per_page: int) -> str:
     return f"https://api.openalex.org/works?{params}"
 
 
+# ---------------------------------------------------------------------------
+# Qwen deep search (DashScope compatible-mode Responses API) — run-level
+# source-collection supplement.
+#
+# Endpoint and shape verified live (2026-09-03, qwen3.8-flash + operator
+# DASHSCOPE_API_KEY): the compatible-mode Responses endpoint
+# (``POST /compatible-mode/v1/responses`` with ``tools=[{"type": "web_search"}]``)
+# is the only usable web-search surface — the native multimodal-generation
+# endpoint rejects the model (HTTP 400) and chat-completions ``enable_search``
+# takes minutes without structured sources.  A non-streaming response carries
+# an ``output`` array where every ``web_search_call`` item exposes
+# ``action.sources`` (structured ``{type, url}`` lists, e.g. precise arXiv
+# hits) and ``action.queries`` (the model's actual search phrases), and a
+# ``message`` item holds the synthesis text; ``usage.x_tools.web_search.count``
+# carries billing observability.  The bare ``qwen3.8`` id is rejected here
+# ("Unsupported model"), ``qwen3.8-flash`` works.  Requests stay plain bounded
+# urllib POSTs (no console, no subprocess, no streaming aggregation).
+# ---------------------------------------------------------------------------
+
+_DASHSCOPE_SEARCH_API_KEY_ENV = "DASHSCOPE_API_KEY"
+_DASHSCOPE_SEARCH_MODEL_ENV = "VIBELUTION_SOURCE_COLLECTION_QWEN_SEARCH_MODEL"
+_DASHSCOPE_SEARCH_MODEL_DEFAULT = "qwen3.8-flash"
+_DASHSCOPE_RESPONSES_ENDPOINT = "https://dashscope.aliyuncs.com/compatible-mode/v1/responses"
+_QWEN_DEEP_SEARCH_MAX_OUTPUT_TOKENS_DEFAULT = 4096
+_QWEN_DEEP_SEARCH_MAX_OUTPUT_TOKENS_ENV = "VIBELUTION_SOURCE_COLLECTION_QWEN_DEEP_SEARCH_MAX_OUTPUT_TOKENS"
+_QWEN_DEEP_SEARCH_TASK_MAX_CHARS = 4000
+_QWEN_DEEP_SEARCH_TASK_DIRECTION_LIMIT = 12
+
+
+def _dashscope_search_api_key() -> str:
+    """Read the DashScope API key from the environment ("" = not configured)."""
+    return str(os.environ.get(_DASHSCOPE_SEARCH_API_KEY_ENV) or "").strip()
+
+
+def _dashscope_search_model() -> str:
+    """Deep-search model id (env-overridable; ``qwen3.8`` bare id is rejected)."""
+    raw = str(os.environ.get(_DASHSCOPE_SEARCH_MODEL_ENV) or "").strip()
+    return raw or _DASHSCOPE_SEARCH_MODEL_DEFAULT
+
+
+def _qwen_deep_search_max_output_tokens() -> int:
+    """Output-token ceiling for the deep-search call (cost/latency bound)."""
+    s = _service()
+    raw = str(os.environ.get(_QWEN_DEEP_SEARCH_MAX_OUTPUT_TOKENS_ENV) or "").strip()
+    return s._normalize_int(raw, default=_QWEN_DEEP_SEARCH_MAX_OUTPUT_TOKENS_DEFAULT, minimum=512, maximum=16384)
+
+
+def _qwen_deep_search_question_en(run: dict[str, Any]) -> str:
+    """Resolve the challenge question's English text from the run scope.
+
+    Deep-search tasks are phrased in English because the primary literature is
+    English; the run scope pins only ``questionId``, so the official catalog is
+    the authority for the question text.  Any resolution failure degrades to
+    the goal/topic task lines (fail-open — never blocks collection).
+    """
+    s = _service()
+    scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
+    question_id = s._trim_text(scope.get("questionId"), max_length=64)
+    if not question_id:
+        return ""
+    try:
+        from core.research.competition.resources import load_science_question_catalog
+
+        catalog = load_science_question_catalog()
+    except Exception:  # noqa: BLE001 - catalog problems must not block search
+        return ""
+    for item in catalog.get("questions") if isinstance(catalog.get("questions"), list) else []:
+        if isinstance(item, dict) and s._trim_text(item.get("id"), max_length=64) == question_id:
+            return s._trim_text(item.get("question_en"), max_length=600)
+    return ""
+
+
+def _qwen_deep_search_task(run: dict[str, Any], assignments: list[dict[str, Any]]) -> str:
+    """Compose the one natural-language task for the run-level deep search.
+
+    The task merges the question's English text (catalog-resolved), the
+    collection goal/topic, envelope keywords, and the currently assigned
+    search directions into a single paragraph so the model searches the same
+    research question the per-query providers are sweeping with keywords.
+    """
+    s = _service()
+    scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
+    question_en = _qwen_deep_search_question_en(run)
+    goal = s._trim_text(scope.get("goal"), max_length=600)
+    topic = s._trim_text(scope.get("topic"), max_length=300)
+    envelope = scope.get("searchEnvelope") if isinstance(scope.get("searchEnvelope"), dict) else {}
+    keywords = [item for item in list(envelope.get("keywords") or [])[:8] if s._trim_text(item, max_length=200)]
+    directions: list[str] = []
+    for assignment in assignments if isinstance(assignments, list) else []:
+        if not isinstance(assignment, dict):
+            continue
+        assignment_scope = assignment.get("scope") if isinstance(assignment.get("scope"), dict) else {}
+        for query in list(assignment_scope.get("assignedQueries") or []):
+            if not isinstance(query, dict):
+                continue
+            text = s._trim_text(query.get("query"), max_length=200)
+            if text and text not in directions:
+                directions.append(text)
+            if len(directions) >= _QWEN_DEEP_SEARCH_TASK_DIRECTION_LIMIT:
+                break
+        if len(directions) >= _QWEN_DEEP_SEARCH_TASK_DIRECTION_LIMIT:
+            break
+    if not (question_en or goal or topic or keywords or directions):
+        # Nothing to search for: the caller records an empty-task skip instead
+        # of sending an instruction-only prompt to the model.
+        return ""
+    lines = ["Literature search task for a research evidence collection run."]
+    if question_en:
+        lines.append(f"Research question: {question_en}")
+    if goal:
+        lines.append(f"Collection goal: {goal}")
+    if topic:
+        lines.append(f"Topic: {topic}")
+    if keywords:
+        lines.append(f"Keywords: {', '.join(keywords)}")
+    if directions:
+        lines.append("Current search directions:")
+        lines.extend(f"- {text}" for text in directions)
+    lines.append(
+        "Search the open web for the most authoritative primary sources that answer this "
+        "research question: peer-reviewed journal articles, official publisher pages, and "
+        "preprint servers such as arXiv. Prefer primary literature over blogs, news, or "
+        "course materials, and include the canonical abstract URL for every source you rely on."
+    )
+    return s._trim_text("\n".join(lines), max_length=_QWEN_DEEP_SEARCH_TASK_MAX_CHARS)
+
+
+def _qwen_deep_search_request_payload(task_text: str) -> dict[str, Any]:
+    """Build one non-streaming Responses API web_search request body."""
+    return {
+        "model": _dashscope_search_model(),
+        "input": task_text,
+        "tools": [{"type": "web_search"}],
+        "max_output_tokens": _qwen_deep_search_max_output_tokens(),
+    }
+
+
 def _current_research_stage(phases: list[dict[str, Any]], workflow: dict[str, Any]) -> str:
     s = _service()
     for phase in phases:

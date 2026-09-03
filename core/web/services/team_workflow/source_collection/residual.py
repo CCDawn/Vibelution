@@ -3280,6 +3280,162 @@ def _source_collection_result_from_openalex_work(work: dict[str, Any], *, fallba
     }
 
 
+def _source_collection_qwen_url_doi(url: str) -> str:
+    """Extract a DOI from a deep-search source URL (best-effort, conservative).
+
+    Only DOI-bearing hosts (``doi.org`` / ``dx.doi.org``) and explicit ``doi=``
+    query parameters count: arbitrary ``10.x/...`` substrings inside publisher
+    URLs are too noisy to key dedupe on.
+    """
+    s = _service()
+    url = s._trim_text(url, max_length=1000)
+    if not url:
+        return ""
+    try:
+        parts = urllib.parse.urlsplit(url)
+    except ValueError:
+        return ""
+    host = (parts.netloc or "").lower()
+    host = host[4:] if host.startswith("www.") else host
+    if host in {"doi.org", "dx.doi.org", "hdl.handle.net"}:
+        path = urllib.parse.unquote(parts.path or "").strip("/")
+        return s._source_collection_normalized_doi(path)
+    for key, value in urllib.parse.parse_qsl(parts.query, keep_blank_values=True):
+        if key.lower() in {"doi", "doi_number"} and value:
+            return s._source_collection_normalized_doi(urllib.parse.unquote(value))
+    return ""
+
+
+def _source_collection_qwen_url_arxiv_id(url: str) -> str:
+    """Extract an arXiv id (``2210.15752`` / ``quant-ph/9908043``) from a URL.
+
+    New-style ids live in one path segment, old-style ids in two
+    (``abs/quant-ph/9908043``); both are normalized to their canonical form.
+    """
+    s = _service()
+    url = s._trim_text(url, max_length=1000)
+    if "arxiv.org" not in url.lower():
+        return ""
+    match = re.search(r"arxiv\.org/(?:abs|pdf|format)/([A-Za-z-]+/\d{7}(?:v\d+)?|\d{4}\.\d{4,5}(?:v\d+)?)(?:[/?#]|$)", url, re.IGNORECASE)
+    if not match:
+        return ""
+    arxiv_id = urllib.parse.unquote(match.group(1)).rstrip(".")
+    if arxiv_id.endswith(".pdf"):
+        arxiv_id = arxiv_id[: -len(".pdf")]
+    arxiv_id = re.sub(r"^arXiv:", "", arxiv_id, flags=re.IGNORECASE)
+    if re.match(r"^\d{4}\.\d{4,5}(v\d+)?$", arxiv_id) or re.match(r"^[a-z-]+/\d{7}(v\d+)?$", arxiv_id, re.IGNORECASE):
+        return s._trim_text(arxiv_id, max_length=120)
+    return ""
+
+
+def _source_collection_qwen_url_display_title(url: str) -> str:
+    """Derive a human-readable title from a URL path segment (best-effort).
+
+    Responses-API sources carry no title field, so the record title comes from
+    the URL itself: the last non-trivial path segment, slug-split into words.
+    arXiv-style ids ("quant-ph/9908043") and bare hosts fall through cleanly.
+    """
+    s = _service()
+    url = s._trim_text(url, max_length=1000)
+    if not url:
+        return ""
+    try:
+        parts = urllib.parse.urlsplit(url)
+    except ValueError:
+        return url
+    segments = [segment for segment in (parts.path or "").split("/") if segment]
+    tail = urllib.parse.unquote(segments[-1]) if segments else ""
+    tail = re.sub(r"\.(pdf|html?|xml|txt)$", "", tail, flags=re.IGNORECASE)
+    tail = tail.strip("-_ ")
+    if len(tail) < 4 or tail.isdigit():
+        if tail.isdigit() and len(segments) >= 2:
+            # arXiv-style ".../quant-ph/9908043": the bare numeric id alone is
+            # not a readable title; keep the category segment with it.
+            tail = f"{urllib.parse.unquote(segments[-2])} {tail}"
+        else:
+            tail = (parts.netloc or "").lower()
+            tail = tail[4:] if tail.startswith("www.") else tail
+            return s._trim_text(tail, max_length=260) or url
+    words = re.split(r"[-_+]+", tail)
+    title = " ".join(word for word in words if word)
+    if title and title.isascii():
+        title = title[:1].upper() + title[1:]
+    return s._trim_text(title, max_length=260) or url
+
+
+def _source_collection_qwen_answer_context(answer_text: str, url: str) -> str:
+    """Cut the answer-text context window around one source URL (or "").
+
+    The deep-search synthesis mentions its sources by URL; a bounded window
+    around the match becomes the record summary so downstream extraction keeps
+    a verbatim snippet tied to the source.  The snippet is model prose, not an
+    abstract — ``hasAbstract`` stays false (the caller owns that signal).
+    """
+    s = _service()
+    url = s._trim_text(url, max_length=1000)
+    answer = s._trim_text(answer_text, max_length=12000)
+    if not url or not answer:
+        return ""
+    needle = url[:160].lower()
+    position = answer.lower().find(needle)
+    if position < 0:
+        return ""
+    start = max(0, position - 240)
+    end = min(len(answer), position + len(needle) + 360)
+    window = re.sub(r"\s+", " ", answer[start:end]).strip()
+    return s._trim_text(window, max_length=1200)
+
+
+def _source_collection_result_from_qwen_source_url(
+    url: str,
+    *,
+    answer_text: str = "",
+    fallback_source_type: str = "",
+) -> dict[str, Any]:
+    """Map one Responses-API ``web_search_call`` source URL into the shared shape.
+
+    Sources are URL-only ({type, url}), so the title is derived from the URL,
+    ``summary`` is the answer-text context window around the URL (empty when
+    the synthesis does not cite it verbatim), and ``hasAbstract`` stays false —
+    the model's prose must never masquerade as a paper abstract.  DOI/arXiv
+    extraction keeps identity-key dedupe working against the academic
+    providers, so a deep-search hit for a paper Crossref also found merges
+    into one source instead of duplicating.
+    """
+    s = _service()
+    url = s._trim_text(url, max_length=1000)
+    if not url:
+        return {}
+    doi = s._source_collection_qwen_url_doi(url)
+    arxiv_id = s._source_collection_qwen_url_arxiv_id(url)
+    try:
+        host = (urllib.parse.urlsplit(url).netloc or "").lower()
+    except ValueError:
+        host = ""
+    host = host[4:] if host.startswith("www.") else host
+    source_type = s._source_collection_data_processing_source_type(
+        fallback_source_type or ("preprint" if arxiv_id else ("paper" if doi else ""))
+    )
+    return {
+        "title": s._source_collection_qwen_url_display_title(url),
+        "sourceRef": url,
+        "rawLocation": url,
+        "summary": s._source_collection_qwen_answer_context(answer_text, url),
+        "sourceType": source_type,
+        "providerType": "qwen_web_search",
+        "metadata": {
+            "siteName": host,
+            "url": url,
+            "doi": doi,
+            "arxivId": arxiv_id,
+        },
+        "qualitySignals": {
+            "hasDoi": bool(doi),
+            "hasAbstract": False,
+        },
+    }
+
+
 def _source_collection_result_identity_key(result: dict[str, Any]) -> str:
     s = _service()
     metadata = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}

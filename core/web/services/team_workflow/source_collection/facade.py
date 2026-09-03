@@ -39,7 +39,12 @@ SEARCH_ENVELOPE_SCHEMA_VERSION = 1
 # preprint coverage that stays reachable when export.arxiv.org is blocked).
 # Runs fingerprinted under v2 lack OpenAlex coverage, so ensure must create
 # fresh runs instead of reusing them.
-KNOWLEDGE_COLLECTION_SOURCE_POLICY_VERSION = "3"
+# v4: added the run-level qwen_web_search deep-search supplement (one DashScope
+# compatible-mode Responses API web_search call per run) on top of the
+# unchanged per-query academic provider set.  Runs fingerprinted under v3 were
+# collected without qwen web coverage, so ensure must create fresh runs
+# instead of reusing them.
+KNOWLEDGE_COLLECTION_SOURCE_POLICY_VERSION = "4"
 
 # Metadata key on the processing run that stores the ensure idempotency
 # fingerprint (see ``search_envelope_fingerprint``).

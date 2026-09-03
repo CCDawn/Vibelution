@@ -120,6 +120,7 @@ from core.web.services.team_workflow.source_collection.search_execution import (
     _sync_source_collection_stage_round_after_search,
     _source_collection_stage_round_status_after_search,
     _execute_source_collection_query,
+    _execute_qwen_deep_search_for_run,
     _execute_arxiv_source_collection_query,
     _execute_openalex_source_collection_query,
     _source_collection_search_quality_terms,
@@ -296,6 +297,11 @@ from core.web.services.team_workflow.source_collection.residual import (
     _source_collection_openalex_abstract,
     _source_collection_result_from_openalex_work,
     _source_collection_result_from_crossref_item,
+    _source_collection_qwen_url_doi,
+    _source_collection_qwen_url_arxiv_id,
+    _source_collection_qwen_url_display_title,
+    _source_collection_qwen_answer_context,
+    _source_collection_result_from_qwen_source_url,
     _source_collection_result_identity_key,
     _source_collection_role_assignment_inputs,
     _source_collection_run_belongs_to_research_project,
@@ -370,6 +376,12 @@ from core.web.services.team_workflow.facade_helpers import (
     _arxiv_search_query,
     _arxiv_search_url,
     _openalex_search_url,
+    _dashscope_search_api_key,
+    _dashscope_search_model,
+    _qwen_deep_search_request_payload,
+    _qwen_deep_search_task,
+    _qwen_deep_search_max_output_tokens,
+    _DASHSCOPE_RESPONSES_ENDPOINT,
     _best_research_loop_evidence_id,
     _bounded_log_items,
     _bounded_text_items,
@@ -904,6 +916,19 @@ SOURCE_COLLECTION_SEARCH_PROVIDER_OPENALEX = "openalex_api"
 # covers arXiv preprints (with rebuilt abstracts) and stays reachable when the
 # export.arxiv.org channel is blocked; arXiv stays in the set so it resumes
 # contributing automatically once connectivity returns.
+SOURCE_COLLECTION_SEARCH_PROVIDER_QWEN_WEB_SEARCH = "qwen_web_search"
+# Default provider set executed for every source-collection query: each query
+# runs once per provider and results merge through the existing
+# sourceIdentityKey dedup semantics (first provider to return wins).  OpenAlex
+# covers arXiv preprints (with rebuilt abstracts) and stays reachable when the
+# export.arxiv.org channel is blocked; arXiv stays in the set so it resumes
+# contributing automatically once connectivity returns.
+#
+# qwen_web_search is deliberately NOT a per-query provider.  It is the layered
+# run-level deep-search supplement (exactly one DashScope compatible-mode
+# Responses API web_search call per run, executed from
+# search_execution._execute_qwen_deep_search_for_run before the query loop);
+# its records merge into the same pipeline through identity-key dedupe.
 SOURCE_COLLECTION_SEARCH_PROVIDERS = (
     SOURCE_COLLECTION_SEARCH_PROVIDER_CROSSREF,
     SOURCE_COLLECTION_SEARCH_PROVIDER_ARXIV,

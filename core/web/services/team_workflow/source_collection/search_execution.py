@@ -55,10 +55,15 @@ _SOURCE_COLLECTION_CONTACT_MAILTO = "challenge-cup-research@localhost"
 #   a mailto contact is supplied (injected per request below).
 # - openalex_api: the OpenAlex polite pool is documented at 10 req/s with a
 #   mailto contact; run at half of that to leave headroom for retry bursts.
+# - qwen_web_search: the run-level deep-search supplement bills per executed
+#   search and has no published per-key RPS contract; serialize at 1 req/s so
+#   overlapping executions cannot burst the account (one call per run by
+#   design, but the limiter still guards concurrent runs).
 _SOURCE_COLLECTION_PROVIDER_RATE_LIMITS: dict[str, Rate] = {
     "arxiv_api": Rate(1, Duration.SECOND * 3),
     "crossref_rest_api": Rate(3, Duration.SECOND),
     "openalex_api": Rate(5, Duration.SECOND),
+    "qwen_web_search": Rate(1, Duration.SECOND),
 }
 _SOURCE_COLLECTION_RATE_LIMITER_LOCK = threading.Lock()
 _SOURCE_COLLECTION_RATE_LIMITERS: dict[str, Limiter] = {}
@@ -69,6 +74,24 @@ _SOURCE_COLLECTION_RATE_LIMITERS: dict[str, Limiter] = {}
 _SOURCE_COLLECTION_SEARCH_HTTP_MAX_ATTEMPTS = 4
 _SOURCE_COLLECTION_SEARCH_HTTP_TIMEOUT_SECONDS = 15
 _SOURCE_COLLECTION_SEARCH_RATE_LIMIT_DEFAULT_BACKOFF_SECONDS = 5.0
+
+# The Qwen deep-search call runs a live multi-round web search under the hood,
+# so it legitimately takes far longer than the academic metadata APIs (live
+# smoke 2026-09-03: 13.7s for a precise lookup, 237s for an open-ended
+# survey).  The default 300s covers the survey shape; the timeout is
+# env-tunable because it is the one knob that trades worker-thread pin time
+# against premature deep-search skips (fail-open either way).
+_SOURCE_COLLECTION_QWEN_SEARCH_HTTP_TIMEOUT_DEFAULT_SECONDS = 300.0
+_SOURCE_COLLECTION_QWEN_SEARCH_HTTP_TIMEOUT_SECONDS_ENV = (
+    "VIBELUTION_SOURCE_COLLECTION_QWEN_SEARCH_TIMEOUT_SECONDS"
+)
+
+# The deep-search supplement emits exactly one run-level execution event whose
+# ``answerText`` keeps the model synthesis for the downstream extractor.  The
+# synthesis is bounded so the events JSONL stays a bounded artifact.
+_SOURCE_COLLECTION_QWEN_DEEP_SEARCH_ANSWER_MAX_CHARS = 8000
+_SOURCE_COLLECTION_QWEN_DEEP_SEARCH_EXECUTED_EVENT = "search.qwen_deep_search.executed"
+_SOURCE_COLLECTION_QWEN_DEEP_SEARCH_SKIPPED_EVENT = "search.qwen_deep_search.skipped"
 
 # A server-supplied ``Retry-After`` is honored, but only up to this cap: a
 # throttling provider reporting hours must never pin a background worker
@@ -368,6 +391,68 @@ def _source_collection_rate_limited_http_get(
     raise last_error
 
 
+def _source_collection_rate_limited_http_post_json(
+    url: str,
+    *,
+    payload: dict[str, Any],
+    headers: dict[str, str],
+    provider: str,
+    timeout: float,
+) -> bytes:
+    """Perform one rate-limited JSON POST with bounded exponential backoff.
+
+    Mirror of ``_source_collection_rate_limited_http_get`` for the one search
+    contract whose transport is a POST (the qwen_web_search run-level
+    deep-search call to the DashScope compatible-mode Responses endpoint).
+    Same ladder: transient failures (``URLError``, socket timeouts, HTTP 5xx)
+    retry up to three times waiting 1s/2s/4s, a 429 honors ``Retry-After``
+    (clamped, cooldown on over-cap waits), other 4xx responses raise
+    immediately (a rejected request will never succeed on retry), and all
+    waits are charged against the active execution's backoff budget.  The
+    request body is deterministic JSON so retries re-send the same call.
+    """
+    limiter = _source_collection_rate_limiter(provider)
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    last_error: Exception | None = None
+    next_delay = 1.0
+    cooled_this_call = False
+    for attempt in range(_SOURCE_COLLECTION_SEARCH_HTTP_MAX_ATTEMPTS):
+        if attempt:
+            _source_collection_backoff_sleep(next_delay)
+        if limiter is not None:
+            limiter.try_acquire(provider)
+        request = urllib.request.Request(
+            url,
+            data=body,
+            headers=headers,
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                payload_bytes = response.read()
+            if not cooled_this_call:
+                _source_collection_clear_provider_cooldown(provider)
+            return payload_bytes
+        except urllib.error.HTTPError as exc:
+            if exc.code == 429:
+                next_delay = _source_collection_retry_after_seconds(exc.headers)
+                if _source_collection_retry_after_requests_cooldown(exc.headers):
+                    _source_collection_enter_provider_cooldown(provider)
+                    cooled_this_call = True
+            elif exc.code >= 500:
+                next_delay = 2.0**attempt
+            else:
+                raise
+            last_error = exc
+        except (OSError, urllib.error.URLError) as exc:
+            next_delay = 2.0**attempt
+            last_error = exc
+    assert last_error is not None
+    if isinstance(last_error, urllib.error.HTTPError) and last_error.code == 429:
+        _source_collection_enter_provider_cooldown(provider)
+    raise last_error
+
+
 def _source_collection_search_background_response(
     *,
     team_id: str,
@@ -517,6 +602,7 @@ def _execute_source_collection_search_body(team_id: str, run_id: str, payload: d
     run_team_id = s._trim_text(run_scope.get("teamId"), max_length=128)
     if run_team_id and run_team_id != normalized_team_id:
         raise s.TeamWorkflowOrchestrationError("Data processing run does not belong to this team.")
+    circuit_provider_order: list[str] = []
     if not requested_provider:
         circuit_provider_order = _source_collection_circuit_provider_order(run)
         if circuit_provider_order:
@@ -546,6 +632,35 @@ def _execute_source_collection_search_body(team_id: str, run_id: str, payload: d
     duplicate_source_keys: list[str] = []
     excluded_source_keys: list[str] = []
     cancelled = str(run.get("status") or "").strip().lower() == "cancelled"
+
+    # Run-level Qwen deep-search supplement (layered scheme): exactly one
+    # Responses API web-search call per run, before the untouched per-query
+    # academic scans.  It only fires on default full executions (not targeted
+    # single-provider or circuit-rewrite invocations), only when runnable
+    # queries exist, and only once per run — the persisted event is the
+    # idempotency marker.  Fail-open: its events land in the same timeline,
+    # its records go through the same identity-key dedupe/candidate pipeline.
+    qwen_deep_search: dict[str, Any] = {"status": "not_attempted"}
+    deep_search_runnable_query_ids = (
+        s._source_collection_next_runnable_query_ids(
+            assignments,
+            existing_query_ids,
+            force=force,
+            target_assignment_ids=target_assignment_ids,
+            target_agent_role=target_agent_role,
+        )
+        if not requested_provider and not circuit_provider_order and not cancelled
+        else []
+    )
+    if deep_search_runnable_query_ids and not _qwen_deep_search_attempted(normalized_team_id, normalized_run_id):
+        qwen_deep_search = s._execute_qwen_deep_search_for_run(
+            normalized_team_id,
+            run,
+            assignments,
+            existing_identity_records,
+            storage_artifacts,
+        )
+        execution_events.extend(qwen_deep_search.pop("events", []))
 
     for assignment in assignments:
         if cancelled or attempted_query_count >= max_queries:
@@ -963,6 +1078,10 @@ def _execute_source_collection_search_body(team_id: str, run_id: str, payload: d
             "excludedSourceKeys": excluded_source_keys[:20],
             "remainingQueryCount": remaining_query_count,
             "hasMore": remaining_query_count > 0,
+            "qwenDeepSearchStatus": s._trim_text(qwen_deep_search.get("status"), max_length=40),
+            "qwenDeepSearchUrlCount": qwen_deep_search.get("urlCount") if isinstance(qwen_deep_search.get("urlCount"), int) else 0,
+            "qwenDeepSearchRecordCount": qwen_deep_search.get("recordCount") if isinstance(qwen_deep_search.get("recordCount"), int) else 0,
+            "qwenDeepSearchImportedCount": qwen_deep_search.get("importedCount") if isinstance(qwen_deep_search.get("importedCount"), int) else 0,
             "sourceCollectionRunDirectory": storage_artifacts["runDirectory"],
         },
         child_log_path=f"artifacts/source-collection-{s._safe_token(normalized_run_id, default='run', max_length=96)}-query-summary.jsonl",
@@ -1011,6 +1130,7 @@ def _execute_source_collection_search_body(team_id: str, run_id: str, payload: d
         "remainingQueryCount": remaining_query_count,
         "nextRunnableQueryIds": next_runnable_query_ids[:12],
         "hasMore": remaining_query_count > 0,
+        "qwenDeepSearch": qwen_deep_search,
         "run": final_run,
         "runStatus": final_status,
         "sourceCollectionSummary": source_collection_summary,
@@ -1021,7 +1141,7 @@ def _execute_source_collection_search_body(team_id: str, run_id: str, payload: d
         "imported": imported,
         "executionEvents": execution_events,
         "boundaries": {
-            "externalSearchTriggered": attempted_query_count > 0,
+            "externalSearchTriggered": attempted_query_count > 0 or qwen_deep_search.get("status") == "executed",
             "metadataOnlyDownload": True,
             "writesFormalKnowledge": False,
             "writesRag": False,
@@ -1294,6 +1414,427 @@ def _execute_openalex_source_collection_query(
     return {"provider": provider, "searchUrl": search_url, "results": [item for item in results if item.get("title") or item.get("sourceRef") or item.get("rawLocation")]}
 
 
+def _source_collection_qwen_search_http_timeout() -> float:
+    return _source_collection_env_seconds(
+        _SOURCE_COLLECTION_QWEN_SEARCH_HTTP_TIMEOUT_SECONDS_ENV,
+        _SOURCE_COLLECTION_QWEN_SEARCH_HTTP_TIMEOUT_DEFAULT_SECONDS,
+    )
+
+
+def _qwen_deep_search_attempted(team_id: str, run_id: str) -> bool:
+    """Check the events JSONL for a prior run-level deep-search attempt.
+
+    The supplement runs at most once per source-collection run regardless of
+    outcome (executed, skipped without a key, or transport failure): the
+    persisted event is the idempotency marker, so re-invocations of the search
+    execution for the same run never re-bill the model call.
+    """
+    s = _service()
+    try:
+        events_path = s._source_collection_storage_artifact_paths(team_id, run_id)["searchEventsPath"]
+    except Exception:  # noqa: BLE001 - unreadable artifact layout must not block
+        return False
+    if not events_path.exists():
+        return False
+    try:
+        with open(events_path, encoding="utf-8") as handle:
+            for line in handle:
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                try:
+                    event = json.loads(stripped)
+                except json.JSONDecodeError:
+                    continue
+                if (
+                    isinstance(event, dict)
+                    and event.get("eventType")
+                    in {_SOURCE_COLLECTION_QWEN_DEEP_SEARCH_EXECUTED_EVENT, _SOURCE_COLLECTION_QWEN_DEEP_SEARCH_SKIPPED_EVENT}
+                ):
+                    return True
+    except OSError:
+        return False
+    return False
+
+
+def _qwen_deep_search_parse_response(payload: dict[str, Any]) -> dict[str, Any]:
+    """Parse one non-streaming Responses API payload into deep-search artifacts.
+
+    Shape verified live (2026-09-03): ``output`` is a list mixing ``reasoning``,
+    ``web_search_call`` (``action.sources`` as ``{type, url}`` dicts plus
+    ``action.queries``) and ``message`` (``content[].output_text``) items, and
+    ``usage.x_tools.web_search.count`` carries billing observability.  Source
+    URLs are deduped preserving first-seen order; parsing is defensive because
+    the protocol may add item types.
+    """
+    s = _service()
+    output = payload.get("output") if isinstance(payload.get("output"), list) else []
+    source_urls: list[str] = []
+    seen_urls: set[str] = set()
+    search_queries: list[str] = []
+    answer_parts: list[str] = []
+    search_call_count = 0
+    for item in output:
+        if not isinstance(item, dict):
+            continue
+        item_type = str(item.get("type") or "")
+        if item_type == "web_search_call":
+            search_call_count += 1
+            action = item.get("action") if isinstance(item.get("action"), dict) else {}
+            for query in list(action.get("queries") or [])[:8]:
+                text = s._trim_text(query, max_length=200)
+                if text and text not in search_queries:
+                    search_queries.append(text)
+            for source in list(action.get("sources") or []):
+                url = ""
+                if isinstance(source, str):
+                    url = s._trim_text(source, max_length=1000)
+                elif isinstance(source, dict):
+                    url = s._trim_text(source.get("url"), max_length=1000)
+                if not url or not url.lower().startswith(("http://", "https://")):
+                    continue
+                if url in seen_urls:
+                    continue
+                seen_urls.add(url)
+                source_urls.append(url)
+        elif item_type == "message":
+            for part in list(item.get("content") or []):
+                if isinstance(part, dict) and isinstance(part.get("text"), str) and part["text"].strip():
+                    answer_parts.append(part["text"])
+    usage = payload.get("usage") if isinstance(payload, dict) and isinstance(payload.get("usage"), dict) else {}
+    x_tools = usage.get("x_tools") if isinstance(usage.get("x_tools"), dict) else {}
+    web_search_usage = x_tools.get("web_search") if isinstance(x_tools.get("web_search"), dict) else {}
+
+    def _usage_int(value: Any) -> Any:
+        return value if isinstance(value, int) and not isinstance(value, bool) else ""
+
+    return {
+        "sourceUrls": source_urls,
+        "searchQueries": search_queries[:40],
+        "searchCallCount": search_call_count,
+        "answerText": s._trim_text("\n\n".join(answer_parts), max_length=_SOURCE_COLLECTION_QWEN_DEEP_SEARCH_ANSWER_MAX_CHARS),
+        "usage": {
+            "inputTokens": _usage_int(usage.get("input_tokens")),
+            "outputTokens": _usage_int(usage.get("output_tokens")),
+            "totalTokens": _usage_int(usage.get("total_tokens")),
+            "webSearchCount": _usage_int(web_search_usage.get("count")),
+        },
+        "responseStatus": s._trim_text(payload.get("status"), max_length=40),
+    }
+
+
+def _execute_qwen_deep_search_for_run(
+    team_id: str,
+    run: dict[str, Any],
+    assignments: list[dict[str, Any]],
+    existing_identity_records: dict[str, dict[str, Any]],
+    storage_artifacts: dict[str, str],
+) -> dict[str, Any]:
+    """Run the once-per-run Qwen deep-search supplement (fail-open).
+
+    Layered on top of the untouched per-query Crossref/arXiv/OpenAlex scans:
+    exactly one Responses API call per run turns the question text plus the
+    current search directions into web-wide recall.  Every
+    ``web_search_call`` source URL becomes a regular DataRecord through the
+    same mappers, identity-key dedupe, exclusion ledger, and candidate import
+    the three academic providers use, so deep-search hits and provider hits
+    for the same paper merge into one source.  The model synthesis is stored
+    verbatim (bounded) on the run-level execution event for the downstream
+    extractor.  Any failure — missing key, timeout, throttle, malformed
+    payload — records a skip event and never blocks the pipeline.
+
+    (Recorded alternative: an earlier probe claimed the native
+    multimodal-generation endpoint also answered non-streaming with
+    ``output.search_info.search_results`` (index/title/url/site_name/icon,
+    ``usage.plugins.search = {count, strategy}``) under a different parameter
+    shape; two independent live checks got HTTP 400 instead ("task can not be
+    null").  The Responses API is the verified authority; revisit only if that
+    shape ever resurfaces.)
+    """
+    s = _service()
+    run_id = s._trim_text(run.get("runId"), max_length=128)
+    summary: dict[str, Any] = {
+        "status": "skipped",
+        "reason": "",
+        "urlCount": 0,
+        "recordCount": 0,
+        "importedCount": 0,
+        "duplicateCount": 0,
+        "filteredCount": 0,
+    }
+    events: list[dict[str, Any]] = []
+    api_key = s._dashscope_search_api_key()
+    task_text = s._qwen_deep_search_task(run, assignments)
+    if not api_key:
+        summary["reason"] = "missing_api_key"
+        events.append(
+            s._source_collection_execution_event(
+                _SOURCE_COLLECTION_QWEN_DEEP_SEARCH_SKIPPED_EVENT,
+                assignment={},
+                status="blocked",
+                title="Qwen deep search skipped: DASHSCOPE_API_KEY not configured",
+                summary="The run-level web-search supplement is disabled without an API key; per-query academic providers are unaffected.",
+                provider=s.SOURCE_COLLECTION_SEARCH_PROVIDER_QWEN_WEB_SEARCH,
+                reason="missing_api_key",
+            )
+        )
+        summary["events"] = events
+        return summary
+    if not task_text:
+        summary["reason"] = "empty_task"
+        events.append(
+            s._source_collection_execution_event(
+                _SOURCE_COLLECTION_QWEN_DEEP_SEARCH_SKIPPED_EVENT,
+                assignment={},
+                status="blocked",
+                title="Qwen deep search skipped: no task text",
+                summary="The run scope carries no question, goal, topic, keywords, or search directions to search for.",
+                provider=s.SOURCE_COLLECTION_SEARCH_PROVIDER_QWEN_WEB_SEARCH,
+                reason="empty_task",
+            )
+        )
+        summary["events"] = events
+        return summary
+    endpoint = s._DASHSCOPE_RESPONSES_ENDPOINT
+    deep_query_id = f"{s._safe_token(run_id, default='run', max_length=96)}-qwendeep"
+    deep_query = {
+        "queryId": deep_query_id,
+        "query": s._trim_text(task_text, max_length=240),
+    }
+    try:
+        payload_bytes = _source_collection_rate_limited_http_post_json(
+            endpoint,
+            payload=s._qwen_deep_search_request_payload(task_text),
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "User-Agent": "Vibelution-ChallengeCup/1.0 (metadata-only research source collection)",
+            },
+            provider=s.SOURCE_COLLECTION_SEARCH_PROVIDER_QWEN_WEB_SEARCH,
+            timeout=_source_collection_qwen_search_http_timeout(),
+        )
+        payload = json.loads(payload_bytes.decode("utf-8", errors="replace"))
+    except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
+        summary["reason"] = "transport_failed"
+        events.append(
+            s._source_collection_execution_event(
+                _SOURCE_COLLECTION_QWEN_DEEP_SEARCH_SKIPPED_EVENT,
+                assignment={},
+                query=deep_query,
+                status="blocked",
+                title="Qwen deep search failed; continuing with academic providers",
+                summary=str(exc),
+                refs=[endpoint[:240]],
+                raw_location=endpoint,
+                provider=s.SOURCE_COLLECTION_SEARCH_PROVIDER_QWEN_WEB_SEARCH,
+                reason="transport_failed",
+            )
+        )
+        summary["events"] = events
+        return summary
+    parsed = _qwen_deep_search_parse_response(payload if isinstance(payload, dict) else {})
+    answer_text = parsed["answerText"]
+    metrics = {
+        "model": s._trim_text(s._dashscope_search_model(), max_length=80),
+        "maxOutputTokens": s._qwen_deep_search_max_output_tokens(),
+        "responseStatus": parsed["responseStatus"],
+        "searchCallCount": parsed["searchCallCount"],
+        "searchQueryCount": len(parsed["searchQueries"]),
+        "sourceUrlCount": len(parsed["sourceUrls"]),
+        "usage": parsed["usage"],
+    }
+    events.append(
+        s._source_collection_execution_event(
+            _SOURCE_COLLECTION_QWEN_DEEP_SEARCH_EXECUTED_EVENT,
+            assignment={},
+            query=deep_query,
+            status="completed",
+            title="Qwen deep search completed for this run",
+            summary=(
+                f"{len(parsed['sourceUrls'])} unique source URL(s) across {parsed['searchCallCount']} web search call(s); "
+                "sources enter the shared record pipeline."
+            ),
+            refs=[endpoint[:240], *parsed["searchQueries"][:4]],
+            raw_location=endpoint,
+            provider=s.SOURCE_COLLECTION_SEARCH_PROVIDER_QWEN_WEB_SEARCH,
+            metrics=metrics,
+            answer_text=answer_text,
+        )
+    )
+    summary["status"] = "executed"
+    summary["urlCount"] = len(parsed["sourceUrls"])
+    for url in parsed["sourceUrls"]:
+        result = s._source_collection_result_from_qwen_source_url(url, answer_text=answer_text)
+        if not result:
+            continue
+        identity_key = s._source_collection_result_identity_key(result)
+        if identity_key and identity_key in existing_identity_records:
+            summary["duplicateCount"] += 1
+            events.append(
+                s._source_collection_execution_event(
+                    "search.duplicate_skipped",
+                    assignment={},
+                    query=deep_query,
+                    status="completed",
+                    title=f"Skipped duplicate source: {result.get('title') or result.get('sourceRef')}",
+                    summary="The deep-search source matched an existing DataRecord source identity and was not written again.",
+                    refs=[identity_key],
+                    raw_location=url,
+                    provider=s.SOURCE_COLLECTION_SEARCH_PROVIDER_QWEN_WEB_SEARCH,
+                )
+            )
+            continue
+        excluded_entry = s._source_collection_exclusion_match(team_id, run, identity_key)
+        if excluded_entry is not None:
+            summary["filteredCount"] += 1
+            events.append(
+                s._source_collection_execution_event(
+                    "search.excluded_source_filtered",
+                    assignment={},
+                    query=deep_query,
+                    status="completed",
+                    title=f"Filtered excluded source: {result.get('title') or result.get('sourceRef')}",
+                    summary="This deep-search source matched the source exclusion ledger for the current topic and was not written.",
+                    refs=[identity_key, s._trim_text(excluded_entry.get("reason"), max_length=120)],
+                    raw_location=url,
+                    provider=s.SOURCE_COLLECTION_SEARCH_PROVIDER_QWEN_WEB_SEARCH,
+                )
+            )
+            continue
+        haystack = " ".join(
+            s._trim_text(value, max_length=2000)
+            for value in (result.get("title"), result.get("summary"), result.get("sourceRef"), result.get("rawLocation"))
+            if value
+        ).lower()
+        blocking_terms = sorted(term for term in s._SOURCE_COLLECTION_LOW_QUALITY_TERMS if term.lower() in haystack)
+        if blocking_terms:
+            summary["filteredCount"] += 1
+            events.append(
+                s._source_collection_execution_event(
+                    "search.low_quality_rejected",
+                    assignment={},
+                    query=deep_query,
+                    status="blocked",
+                    title=f"Rejected low-quality source: {result.get('title') or result.get('sourceRef')}",
+                    summary="The deep-search source matched low-quality context terms: " + ", ".join(blocking_terms[:4]),
+                    refs=[url[:240], *[f"blocked:{term}" for term in blocking_terms[:4]]],
+                    raw_location=url,
+                    provider=s.SOURCE_COLLECTION_SEARCH_PROVIDER_QWEN_WEB_SEARCH,
+                )
+            )
+            continue
+        if identity_key:
+            existing_identity_records[identity_key] = result
+        record = s._source_collection_record_from_search_result(
+            team_id,
+            run,
+            {},
+            deep_query,
+            result,
+            provider=s.SOURCE_COLLECTION_SEARCH_PROVIDER_QWEN_WEB_SEARCH,
+            search_url=endpoint,
+        )
+        try:
+            record_response = s.data_processing_service.add_record(run_id, record)
+        except s.data_processing_service.DataProcessingError as exc:
+            events.append(
+                s._source_collection_execution_event(
+                    "storage.data_record_write_failed",
+                    assignment={},
+                    query=deep_query,
+                    status="blocked",
+                    title=f"Failed to store deep-search record: {result.get('title') or url}",
+                    summary=str(exc),
+                    refs=[url[:240]],
+                    raw_location=url,
+                    provider=s.SOURCE_COLLECTION_SEARCH_PROVIDER_QWEN_WEB_SEARCH,
+                )
+            )
+            continue
+        summary["recordCount"] += 1
+        events.append(
+            s._source_collection_execution_event(
+                "storage.data_record_written",
+                assignment={},
+                query=deep_query,
+                status="completed",
+                title=f"Stored DataRecord: {record_response.get('title') or record_response.get('recordId')}",
+                summary="The deep-search source was stored in the generic data processing run before candidate import.",
+                refs=[record_response.get("recordId", ""), record_response.get("sourceRef", "") or record_response.get("rawLocation", "")],
+                storage_refs=[*s._source_collection_storage_refs(run), storage_artifacts["recordsPath"]],
+                provider=s.SOURCE_COLLECTION_SEARCH_PROVIDER_QWEN_WEB_SEARCH,
+            )
+        )
+        try:
+            import_response = s.import_data_record_as_source_candidate(
+                team_id,
+                run_id,
+                str(record_response.get("recordId") or ""),
+                {
+                    "createdByAgent": "source_collection_search_executor",
+                    "tags": ["source_collection", "search_execution", "qwen_deep_search"],
+                    "metadata": {
+                        "sourceCollectionSearchExecution": True,
+                        "searchProvider": s.SOURCE_COLLECTION_SEARCH_PROVIDER_QWEN_WEB_SEARCH,
+                        "metadataOnlyDownload": True,
+                        "queryId": deep_query_id,
+                        "query": s._trim_text(task_text, max_length=1000),
+                        "agentRole": "qwen_deep_search",
+                    },
+                },
+            )
+        except s.TeamWorkflowOrchestrationError as exc:
+            events.append(
+                s._source_collection_execution_event(
+                    "storage.source_manifest_import_failed",
+                    assignment={},
+                    query=deep_query,
+                    status="blocked",
+                    title=f"Failed to import deep-search candidate: {record_response.get('title') or url}",
+                    summary=str(exc),
+                    refs=[str(record_response.get("recordId") or "")],
+                    storage_refs=[storage_artifacts["candidatesPath"], storage_artifacts["candidateStorePath"]],
+                    provider=s.SOURCE_COLLECTION_SEARCH_PROVIDER_QWEN_WEB_SEARCH,
+                )
+            )
+            continue
+        if import_response.get("duplicate"):
+            summary["duplicateCount"] += 1
+            candidate = import_response.get("candidate") if isinstance(import_response.get("candidate"), dict) else {}
+            events.append(
+                s._source_collection_execution_event(
+                    "storage.source_manifest_duplicate_skipped",
+                    assignment={},
+                    query=deep_query,
+                    status="completed",
+                    title=f"Skipped duplicate source_manifest: {candidate.get('title') or candidate.get('candidateId')}",
+                    summary="The deep-search DataRecord matched an existing source_manifest identity and was not imported again.",
+                    refs=[candidate.get("candidateId", ""), str(record_response.get("recordId") or "")],
+                    storage_refs=[storage_artifacts["candidatesPath"], storage_artifacts["candidateStorePath"]],
+                    provider=s.SOURCE_COLLECTION_SEARCH_PROVIDER_QWEN_WEB_SEARCH,
+                )
+            )
+        else:
+            summary["importedCount"] += 1
+            candidate = import_response.get("candidate") if isinstance(import_response.get("candidate"), dict) else {}
+            events.append(
+                s._source_collection_execution_event(
+                    "storage.source_manifest_imported",
+                    assignment={},
+                    query=deep_query,
+                    status="completed",
+                    title=f"Imported source_manifest: {candidate.get('title') or candidate.get('candidateId')}",
+                    summary="The deep-search DataRecord was imported as a source_manifest candidate, still outside formal Team Knowledge/RAG/official graph.",
+                    refs=[candidate.get("candidateId", ""), str(record_response.get("recordId") or "")],
+                    storage_refs=[storage_artifacts["candidatesPath"], storage_artifacts["candidateStorePath"]],
+                    provider=s.SOURCE_COLLECTION_SEARCH_PROVIDER_QWEN_WEB_SEARCH,
+                )
+            )
+    summary["events"] = events
+    return summary
+
+
 def _source_collection_search_quality_terms(query_text: str) -> set[str]:
     s = _service()
     text = s._trim_text(query_text, max_length=1000)
@@ -1559,11 +2100,13 @@ def _source_collection_execution_event(
     storage_refs: list[str] | None = None,
     provider: str = "",
     reason: str = "",
+    metrics: dict[str, Any] | None = None,
+    answer_text: str = "",
 ) -> dict[str, Any]:
     s = _service()
     now = s.utc_now_iso()
     normalized_query = query if isinstance(query, dict) else {}
-    return {
+    event = {
         "eventId": s._new_record_id("srcevt"),
         "eventType": event_type,
         "status": s._trim_text(status, max_length=80) or "completed",
@@ -1587,6 +2130,18 @@ def _source_collection_execution_event(
         "storageRefs": s._normalize_text_list(storage_refs or [], max_items=8, max_length=240),
         "createdAt": now,
     }
+    normalized_metrics = s._normalize_metadata(metrics) if metrics else {}
+    if normalized_metrics:
+        # Provider-supplied observability (e.g. the qwen deep-search model,
+        # search-call count, DashScope usage tokens).  Absent on every other
+        # event, so the JSONL shape of existing event types is unchanged.
+        event["metrics"] = normalized_metrics
+    normalized_answer = s._trim_text(answer_text, max_length=_SOURCE_COLLECTION_QWEN_DEEP_SEARCH_ANSWER_MAX_CHARS)
+    if normalized_answer:
+        # Run-level model synthesis for the qwen deep-search event only; the
+        # downstream extractor reads it as run-level context, not per-record.
+        event["answerText"] = normalized_answer
+    return event
 
 
 def _append_source_collection_execution_artifacts(

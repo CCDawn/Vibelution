@@ -376,6 +376,20 @@ def isolate_team_workflow_literature_contrast(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def isolate_source_collection_dashscope_key(monkeypatch):
+    """Source collection must never reach DashScope with operator credentials.
+
+    The run-level qwen_web_search deep-search supplement activates whenever
+    ``DASHSCOPE_API_KEY`` is present, so a developer/CI machine carrying the
+    real key would otherwise fire a live billed Responses API call from any
+    test that executes a source-collection search.  The key is removed for
+    every test (fail-open skip path); tests that exercise the deep search
+    inject their own fake key and stubbed transport via ``monkeypatch``.
+    """
+    monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def isolate_runtime_manager_evolution_store(tmp_path, monkeypatch, request):
     """Keep manager-owned evolution snapshots out of the real .runtime tree."""
     path_value = str(getattr(request.node, "path", "") or getattr(request.node, "fspath", "") or "")
