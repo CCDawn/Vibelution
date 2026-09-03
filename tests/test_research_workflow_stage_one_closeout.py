@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from copy import deepcopy
 from pathlib import Path
+from typing import Any
 
 import pytest
 from langgraph.graph import END
@@ -51,6 +54,7 @@ from core.web.services.team_workflow.research_runtime.service import (
 from core.web.services.team_workflow.research_runtime.stage_one_closeout import (
     STAGE_ONE_CLOSEOUT_COMMAND,
     _completion_manifest_sha256,
+    _validated_completion_manifest,
     evaluate_stage_one_closeout,
     finalize_stage_one_closeout,
     route_after_stage_one_closure,
@@ -289,6 +293,150 @@ def test_fresh_program_handoff_is_required_for_terminal_acceptance() -> None:
     assert outcome.accepted is True
     assert outcome.completion_state == "STAGE1_G1_ACCEPTED"
     assert outcome.program_record_id == handoff["recordId"]
+
+
+# ---------------------------------------------------------------------------
+# Dual receipt authority: the stage-one v2 flow structurally cannot produce
+# the legacy three-stage canonical package receipts, so a handoff whose
+# receipt-registry trace is fresh-verified carries the manifest's
+# "trace_verified" authority instead.  The manifest hash seals the trace
+# digest, and the closeout validator demands the authority field, a positive
+# trace count, and a lowercase 64-hex digest — anything else fails closed.
+# ---------------------------------------------------------------------------
+
+
+def _trace_verified_handoff(record: dict) -> dict:
+    return {
+        "workflowRunId": record["runId"],
+        "questionId": record["questionId"],
+        "recordId": f"{record['questionId']}:{record['runId']}",
+        "reviewStatus": "approved",
+        "outputSha256": "e" * 64,
+        "sourceResultPackageHash": "a" * 64,
+        "resultPackage": None,
+        "officialModelCall": True,
+        "receiptStatus": "pending",
+        "receiptTraceVerified": True,
+        "receiptTraceCount": 2,
+        "receiptTraceDigest": hashlib.sha256(
+            json.dumps(
+                sorted(["1" * 64, "2" * 64]),
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest(),
+        "humanGates": {"allApproved": True, "approvedCount": 4},
+    }
+
+
+def _trace_verified_completion_manifest(
+    record: dict,
+    *,
+    overrides: dict[str, Any] | None = None,
+    remove: tuple[str, ...] = (),
+) -> dict:
+    policy = load_stage_one_completion_policy()
+    manifest: dict[str, Any] = {
+        "schemaVersion": 1,
+        "manifestKind": "stage_one_completion",
+        "workflowRunId": record["runId"],
+        "questionId": record["questionId"],
+        "policySha256": policy.policySha256,
+        "programRecordId": f"{record['questionId']}:{record['runId']}",
+        "programReviewStatus": "approved",
+        "sourceResultPackageHash": "a" * 64,
+        "canonicalPackageHash": "a" * 64,
+        "programOutputSha256": "e" * 64,
+        "officialModelCall": True,
+        "receiptStatus": "trace_verified",
+        "receiptAuthority": "model_invocation_trace",
+        "receiptTraceCount": 2,
+        "receiptTraceDigest": "c" * 64,
+        "humanGates": {"allApproved": True, "approvedCount": 4},
+    }
+    manifest.update(overrides or {})
+    for key in remove:
+        manifest.pop(key, None)
+    manifest["manifestSha256"] = _completion_manifest_sha256(manifest)
+    return manifest
+
+
+def test_trace_verified_program_handoff_is_accepted_for_terminal_closeout() -> None:
+    record = _stage_one_record()
+    handoff = _trace_verified_handoff(record)
+
+    outcome = evaluate_stage_one_closeout(
+        record,
+        node_id="hypothesis_design",
+        program_handoff=handoff,
+    )
+
+    assert outcome is not None
+    assert outcome.accepted is True
+    assert outcome.completion_state == "STAGE1_G1_ACCEPTED"
+    assert outcome.program_record_id == handoff["recordId"]
+    assert outcome.canonical_package_sha256 == handoff["sourceResultPackageHash"]
+
+
+def test_validator_accepts_well_formed_trace_verified_manifest() -> None:
+    record = _stage_one_record()
+    manifest = _trace_verified_completion_manifest(record)
+
+    (
+        manifest_sha256,
+        program_record_id,
+        output_hash,
+        canonical_hash,
+    ) = _validated_completion_manifest(
+        record,
+        policy=load_stage_one_completion_policy(),
+        verified_manifest=manifest,
+    )
+
+    assert manifest_sha256 == manifest["manifestSha256"]
+    assert program_record_id == manifest["programRecordId"]
+    assert output_hash == manifest["programOutputSha256"]
+    assert canonical_hash == manifest["canonicalPackageHash"]
+
+
+@pytest.mark.parametrize(
+    ("remove", "overrides"),
+    [
+        pytest.param(("receiptAuthority",), {}, id="authority-missing"),
+        pytest.param(
+            (),
+            {"receiptAuthority": "canonical_result_package"},
+            id="authority-wrong-channel",
+        ),
+        pytest.param((), {"receiptTraceCount": 0}, id="trace-count-zero"),
+        pytest.param(
+            ("receiptTraceCount",),
+            {"receiptStatus": "trace_verified"},
+            id="trace-count-missing",
+        ),
+        pytest.param((), {"receiptTraceDigest": "C" * 64}, id="digest-uppercase"),
+        pytest.param((), {"receiptTraceDigest": "c" * 63}, id="digest-short"),
+        pytest.param((), {"receiptTraceDigest": "g" * 64}, id="digest-not-hex"),
+    ],
+)
+def test_trace_verified_manifest_fails_closed(
+    remove: tuple[str, ...],
+    overrides: dict[str, Any],
+) -> None:
+    record = _stage_one_record()
+    manifest = _trace_verified_completion_manifest(
+        record,
+        overrides=overrides,
+        remove=remove,
+    )
+
+    with pytest.raises(NodeExecutionError) as exc:
+        _validated_completion_manifest(
+            record,
+            policy=load_stage_one_completion_policy(),
+            verified_manifest=manifest,
+        )
+
+    assert exc.value.code == "stage_one_program_review_not_approved"
 
 
 def test_finalize_rechecks_program_authority_before_terminal_write(

@@ -132,11 +132,32 @@ def _validated_completion_manifest(
     package_hash = str(raw.get("sourceResultPackageHash") or "").lower()
     output_hash = str(raw.get("programOutputSha256") or "").lower()
     canonical_hash = str(raw.get("canonicalPackageHash") or "").lower()
+    # Dual receipt authority, both fail-closed:
+    # * "passed" — the legacy canonical three-stage ``QuestionResultPackage``
+    #   receipts (generation/review/revision); existing checks unchanged.
+    # * "trace_verified" — the stage-one v2 receipt-registry per-invocation
+    #   trace (hash-verified refs); the manifest hash seals its integrity, so
+    #   the authority field, a positive trace count, and a lowercase 64-hex
+    #   trace digest are all demanded here.
+    receipt_status = str(raw.get("receiptStatus") or "")
+    trace_digest = ""
+    if receipt_status == "trace_verified":
+        trace_digest = str(raw.get("receiptTraceDigest") or "")
+        receipt_status_ok = (
+            str(raw.get("receiptAuthority") or "") == "model_invocation_trace"
+            and int(raw.get("receiptTraceCount") or 0) >= 1
+            and len(trace_digest) == 64
+            and all(char in "0123456789abcdef" for char in trace_digest)
+        )
+    elif receipt_status == "passed":
+        receipt_status_ok = True
+    else:
+        receipt_status_ok = False
     if (
         str(raw.get("programRecordId") or "").strip() == ""
         or str(raw.get("programReviewStatus") or "") != "approved"
         or raw.get("officialModelCall") is not True
-        or str(raw.get("receiptStatus") or "") != "passed"
+        or not receipt_status_ok
         or human_gates.get("allApproved") is not True
         or int(human_gates.get("approvedCount") or 0) != 4
         or len(package_hash) != 64

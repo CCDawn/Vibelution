@@ -18,6 +18,8 @@ package fields.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from copy import deepcopy
 from typing import Any
@@ -254,6 +256,45 @@ def _read_canonical_package(
     }, None
 
 
+def _receipt_trace_digest(refs: list[dict[str, Any]]) -> str:
+    """Seal the fresh trace refs into one lowercase 64-hex digest."""
+
+    if not refs:
+        return ""
+    encoded = json.dumps(
+        sorted(str(item.get("receiptSha256") or "") for item in refs),
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _fresh_receipt_trace_facts(
+    team: str, record: dict[str, Any]
+) -> tuple[bool, int, str]:
+    """Re-verify the stored trace projection against the live receipt registry.
+
+    The stage-one v2 flow structurally cannot produce the legacy three-stage
+    canonical package receipts, so the only honest receipt authority is the
+    registry-backed per-invocation trace.  It is re-verified fresh here (never
+    trusted from the stored record): any registry/stored mismatch is reported
+    by the projection as ``integrityIssue`` and fails closed without raising.
+    """
+
+    refs, coverage = challenge_question_runs._question_model_invocation_trace_projection(
+        team, record
+    )
+    stored_refs = record.get("modelInvocationReceiptTraceRefs")
+    verified = (
+        bool(refs)
+        and "integrityIssue" not in coverage
+        and (
+            "modelInvocationReceiptTraceRefs" not in record
+            or stored_refs == refs
+        )
+    )
+    return verified, len(refs), _receipt_trace_digest(refs)
+
+
 def handoff_result_package_to_challenge_program(
     store: Any = None,
     *,
@@ -483,6 +524,11 @@ def handoff_result_package_to_challenge_program(
         else {}
     )
     receipt_status = str(validation.get("modelInvocationReceipts") or "")
+    (
+        receipt_trace_verified,
+        receipt_trace_count,
+        receipt_trace_digest,
+    ) = _fresh_receipt_trace_facts(team, record)
     result_package = (
         deepcopy(record.get("resultPackage"))
         if isinstance(record, dict) and isinstance(record.get("resultPackage"), dict)
@@ -506,6 +552,9 @@ def handoff_result_package_to_challenge_program(
         "officialModelCall": validation.get("officialModelCall") is True,
         "receipts": receipt_refs,
         "receiptStatus": receipt_status,
+        "receiptTraceVerified": receipt_trace_verified,
+        "receiptTraceCount": receipt_trace_count,
+        "receiptTraceDigest": receipt_trace_digest,
     }
     return response
 
@@ -528,15 +577,51 @@ def stage_one_completion_manifest_from_handoff(
         or result_package.get("canonical_sha256")
         or ""
     ).lower()
+    try:
+        trace_count = int(handoff.get("receiptTraceCount") or 0)
+    except (TypeError, ValueError):
+        trace_count = 0
+    trace_digest = str(handoff.get("receiptTraceDigest") or "").lower()
+    # Dual receipt authority, both fail-closed:
+    # * canonical — the legacy three-stage ``QuestionResultPackage`` receipts
+    #   (generation/review/revision) reported as ``receiptStatus == "passed"``;
+    # * trace — the stage-one v2 receipt-registry per-invocation refs, already
+    #   hash-verified against the registry at registration and re-verified by
+    #   the handoff; the manifest digest seals their integrity.
+    if str(handoff.get("receiptStatus") or "") == "passed":
+        manifest_receipt_status = "passed"
+        receipt_authority = "canonical_result_package"
+        trace_fields: dict[str, Any] = {}
+        manifest_canonical_hash = canonical_hash
+        receipt_gate_ok = _SHA256_RE.fullmatch(canonical_hash) is not None
+    elif handoff.get("receiptTraceVerified") is True and trace_count >= 1:
+        manifest_receipt_status = "trace_verified"
+        receipt_authority = "model_invocation_trace"
+        trace_fields = {
+            "receiptTraceCount": trace_count,
+            "receiptTraceDigest": trace_digest,
+        }
+        # In the stage-one v2 flow the rrp-v2 result-package content hash is
+        # itself the canonical binding, so the manifest binds
+        # ``canonicalPackageHash`` to the already hash-checked
+        # ``sourceResultPackageHash``.
+        manifest_canonical_hash = source_hash
+        receipt_gate_ok = _SHA256_RE.fullmatch(trace_digest) is not None
+    else:
+        manifest_receipt_status = ""
+        receipt_authority = ""
+        trace_fields = {}
+        manifest_canonical_hash = canonical_hash
+        receipt_gate_ok = False
     if (
         str(handoff.get("reviewStatus") or "") != "approved"
         or handoff.get("officialModelCall") is not True
-        or str(handoff.get("receiptStatus") or "") != "passed"
+        or not receipt_gate_ok
         or human_gates.get("allApproved") is not True
         or int(human_gates.get("approvedCount") or 0) != 4
         or not _SHA256_RE.fullmatch(source_hash)
         or not _SHA256_RE.fullmatch(output_hash)
-        or not _SHA256_RE.fullmatch(canonical_hash)
+        or not _SHA256_RE.fullmatch(manifest_canonical_hash)
         or not _SHA256_RE.fullmatch(str(policy_sha256 or ""))
     ):
         raise ProgramCandidateHandoffContractError(
@@ -552,9 +637,11 @@ def stage_one_completion_manifest_from_handoff(
         "programOutputSha256": output_hash,
         "programReviewStatus": "approved",
         "sourceResultPackageHash": source_hash,
-        "canonicalPackageHash": canonical_hash,
+        "canonicalPackageHash": manifest_canonical_hash,
         "officialModelCall": True,
-        "receiptStatus": "passed",
+        "receiptStatus": manifest_receipt_status,
+        "receiptAuthority": receipt_authority,
+        **trace_fields,
         "humanGates": deepcopy(human_gates),
     }
     if not manifest["workflowRunId"] or not manifest["questionId"] or not manifest["programRecordId"]:
