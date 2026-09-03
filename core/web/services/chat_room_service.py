@@ -170,7 +170,35 @@ _CHAT_ROOM_API_HISTORY_MESSAGE_LIMIT = 50
 # persistence, or scene-event writes.  Never nest with _CHAT_STATE_LOCK.
 _CHAT_ROOM_LOCK = threading.RLock()
 _CHAT_ROOM_PARTICIPANT_REFRESH_MAX_ATTEMPTS = 3
-_CHAT_ROOM_EXECUTOR_MAX_WORKERS = 4
+
+
+def _chat_room_executor_max_workers() -> int:
+    """Resolve the process-wide round-executor width; env-tunable, default 10.
+
+    ``VIBELUTION_CHAT_ROOM_MAX_WORKERS`` overrides the width (clamped to
+    1..32) so an operator can trade provider cost/rate-limit headroom for
+    shorter round start-up skew; malformed values fall back to the default so
+    a bad env edit can neither serialize rounds below one worker nor explode
+    the pool.  Read once at module load: the executor below is process-wide.
+    """
+
+    raw = str(os.environ.get("VIBELUTION_CHAT_ROOM_MAX_WORKERS") or "").strip()
+    if raw:
+        try:
+            value = int(float(raw))
+        except (ValueError, OverflowError):
+            return _CHAT_ROOM_EXECUTOR_MAX_WORKERS_DEFAULT
+        return max(1, min(_CHAT_ROOM_EXECUTOR_MAX_WORKERS_LIMIT, value))
+    return _CHAT_ROOM_EXECUTOR_MAX_WORKERS_DEFAULT
+
+
+# Process-wide executor that runs whole chat-room rounds (one slot = one
+# round).  Ten concurrent question-review rounds must be able to execute at
+# once, so the default is 10 instead of the old 4-slot pool; the in-flight
+# cap below still bounds how many rounds may be submitted at once.
+_CHAT_ROOM_EXECUTOR_MAX_WORKERS_DEFAULT = 10
+_CHAT_ROOM_EXECUTOR_MAX_WORKERS_LIMIT = 32
+_CHAT_ROOM_EXECUTOR_MAX_WORKERS = _chat_room_executor_max_workers()
 _CHAT_ROOM_EXECUTOR = ThreadPoolExecutor(
     max_workers=_CHAT_ROOM_EXECUTOR_MAX_WORKERS,
     thread_name_prefix="web-chat-room",
