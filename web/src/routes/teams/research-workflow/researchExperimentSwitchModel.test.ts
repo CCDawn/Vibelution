@@ -33,7 +33,7 @@ function question(overrides: Partial<ResearchWorkflowLaunchOption> = {}): Resear
 }
 
 describe("researchExperimentSwitchModel", () => {
-  it("keeps all 125 catalog questions in the unified selector", () => {
+  it("keeps only checkpoint-backed experiments in the toolbar selector", () => {
     const questions = Array.from({ length: 125 }, (_, index) => {
       const questionId = `SCI-${String(index + 1).padStart(3, "0")}`;
       return question({
@@ -53,15 +53,13 @@ describe("researchExperimentSwitchModel", () => {
 
     const options = buildExperimentSwitchOptions({ questions });
 
-    expect(options).toHaveLength(125);
-    expect(options[0].questionId).toBe("SCI-001");
-    expect(options[0].description).toContain("无 checkpoint");
-    expect(options[1].questionId).toBe("SCI-002");
-    expect(options[1].description).toContain("运行中");
-    expect(options[124].questionId).toBe("SCI-125");
+    expect(options).toHaveLength(62);
+    expect(options[0].questionId).toBe("SCI-002");
+    expect(options[0].description).toContain("运行中");
+    expect(options[61].questionId).toBe("SCI-124");
   });
 
-  it("lists every supplied catalog question including checkpoint-less entries", () => {
+  it("keeps new questions in the searchable launch panel instead of the toolbar", () => {
     const options = buildExperimentSwitchOptions({
       questions: [
         question({ questionId: "SCI-001", title: "Idle question", checkpoint: null }),
@@ -82,12 +80,12 @@ describe("researchExperimentSwitchModel", () => {
       ],
     });
 
-    expect(options.map((item) => item.questionId)).toEqual(["SCI-001", "SCI-096", "SCI-003"]);
-    expect(options[1].label).toBe("SCI-096 · 假说待生成");
-    expect(options[1].label).not.toContain("知识包交接");
-    expect(options[1].label).not.toContain("4/16");
-    expect(options[1].label).not.toContain("等待确认");
-    expect(options[1].label).not.toContain("run-96");
+    expect(options.map((item) => item.questionId)).toEqual(["SCI-096", "SCI-003"]);
+    expect(options[0].label).toBe("SCI-096 · 假说状态未读取");
+    expect(options[0].label).not.toContain("知识包交接");
+    expect(options[0].label).not.toContain("4/16");
+    expect(options[0].label).not.toContain("等待确认");
+    expect(options[0].label).not.toContain("run-96");
   });
 
   it("describes checkpoint availability, status and progress for every option", () => {
@@ -111,11 +109,7 @@ describe("researchExperimentSwitchModel", () => {
       ],
     });
 
-    const checkpointless = options.find((item) => item.questionId === "SCI-001");
-    expect(checkpointless?.description).toContain("Idle question");
-    expect(checkpointless?.description).toContain("无 checkpoint");
-    expect(checkpointless?.runId).toBeUndefined();
-    expect(checkpointless?.currentNodeId).toBeUndefined();
+    expect(options.find((item) => item.questionId === "SCI-001")).toBeUndefined();
 
     const checkpointed = options.find((item) => item.questionId === "SCI-096");
     expect(checkpointed?.description).toContain("coding principles");
@@ -180,7 +174,7 @@ describe("researchExperimentSwitchModel", () => {
     });
   });
 
-  it("resolves a checkpoint-less question to a no-run launch patch", () => {
+  it("does not resolve a new catalog question through the experiment switcher", () => {
     const options = buildExperimentSwitchOptions({
       questions: [
         question(),
@@ -188,12 +182,7 @@ describe("researchExperimentSwitchModel", () => {
       ],
     });
 
-    expect(resolveExperimentSwitch(options, "sci-005")).toEqual({
-      questionId: "SCI-005",
-      runId: "",
-      node: null,
-      panel: "launch",
-    });
+    expect(resolveExperimentSwitch(options, "sci-005")).toBeNull();
   });
 
   it("returns null for unknown question ids", () => {
@@ -217,7 +206,7 @@ describe("researchExperimentSwitchModel", () => {
       },
     });
 
-    expect(options.map((item) => item.questionId)).toEqual(["SCI-003", "SCI-001", "SCI-096", "SCI-002"]);
+    expect(options.map((item) => item.questionId)).toEqual(["SCI-003", "SCI-096"]);
     expect(options[0].label).toBe("SCI-003 · 1 条假说待评审");
   });
 
@@ -283,7 +272,7 @@ describe("researchExperimentSwitchModel", () => {
       },
     });
 
-    expect(options).toHaveLength(2);
+    expect(options).toHaveLength(1);
     expect(options[0]).toMatchObject({
       questionId: "SCI-091",
       runId: "run-current",

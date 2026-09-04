@@ -7,6 +7,6 @@ export default {
   progress: "px-4 pt-2 [font-size:var(--vui-font-xs)] text-[var(--fg-tertiary)]",
   body: "min-h-0 overflow-auto",
   empty: "flex h-full min-h-40 items-center justify-center px-5 text-center [font-size:var(--vui-font-sm)] text-[var(--fg-tertiary)]",
-  footer: "border-t border-[var(--border-subtle)] bg-[var(--surface-panel)] px-4 py-3 shadow-[0_-8px_18px_-16px_rgba(15,23,42,0.45)]",
+  footer: "empty:hidden border-t border-[var(--border-subtle)] bg-[var(--surface-panel)] px-4 py-3 shadow-[0_-8px_18px_-16px_rgba(15,23,42,0.45)]",
   primaryAction: "w-full",
 } as const;

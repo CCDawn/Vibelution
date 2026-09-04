@@ -58,6 +58,26 @@ describe("buildResearchWorkflowStageNavigatorModel", () => {
     expect(model.stages[3].targetNodeId).toBeNull();
   });
 
+  it("presents an attention stage with a waiting-human node as current, not blocked", () => {
+    const waitingGraph: WorkflowLayoutInput = {
+      stages: [{ stageId: "review", label: "人工评审", nodeIds: ["review_gate"], stageTone: "attention" }],
+      nodes: [{
+        nodeId: "review_gate",
+        stageId: "review",
+        label: "确认候选",
+        actorKind: "human",
+        visualKind: "human_gate",
+        status: "waiting_human",
+      }],
+      edges: [],
+    };
+
+    const model = buildResearchWorkflowStageNavigatorModel({ graph: waitingGraph, progress: null });
+
+    expect(model.stages[0]).toMatchObject({ status: "current", blocked: 0 });
+    expect(model.summary.blockedNodes).toBe(0);
+  });
+
   it("gives matching formal progress precedence without rewriting hypothesis progress", () => {
     const model = buildResearchWorkflowStageNavigatorModel({
       graph,

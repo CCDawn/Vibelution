@@ -9,6 +9,8 @@ import {
   ResearchRunLaunchPanel,
   isLaunchBlockedByExperiment,
 } from "./ResearchRunLaunchPanel";
+import currentTaskStyles from "./ResearchCurrentTaskInspector.styles";
+import launchStyles from "./ResearchRunLaunchPanel.styles";
 
 function installPointerCaptureShims() {
   const proto = Element.prototype as unknown as Record<string, unknown>;
@@ -201,6 +203,11 @@ async function openExperimentSelect(trigger: HTMLElement): Promise<NodeListOf<El
 }
 
 describe("ResearchRunLaunchPanel", () => {
+  it("uses the current-task body as the sole scroll owner and collapses an empty outer footer", () => {
+    expect(launchStyles.root).not.toContain("overflow-auto");
+    expect(launchStyles.root.split(/\s+/)).not.toContain("h-full");
+    expect(currentTaskStyles.footer).toContain("empty:hidden");
+  });
   beforeEach(() => {
     Object.assign(queryState.current, {
       isPending: false,
