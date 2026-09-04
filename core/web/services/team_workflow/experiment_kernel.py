@@ -1153,6 +1153,17 @@ def _research_stage_memory_context(
         team_id,
         research_question=research_question,
         actor_agent_id=actor_agent_id,
+        research_project_id=str((control_plan or {}).get("researchProjectId") or ""),
+        question_id=str(
+            ((control_plan or {}).get("experimentContract") or {}).get("questionId")
+            if isinstance((control_plan or {}).get("experimentContract"), dict)
+            else (control_plan or {}).get("questionId") or ""
+        ),
+        require_scope=bool(
+            (control_plan or {}).get("researchProjectId")
+            or (control_plan or {}).get("challengeTaskContract")
+            or (control_plan or {}).get("challengeQuestionId")
+        ),
     )
     normalized_stage_type = (
         "experiment_execution_iteration"

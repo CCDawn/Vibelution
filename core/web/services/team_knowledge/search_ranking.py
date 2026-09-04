@@ -40,19 +40,24 @@ def _search_text_for_payload(payload: Any) -> str:
 
 
 def _tokenize_search_text(text: str) -> set[str]:
-    return {
-        match.group(0).lower()
-        for match in _SEARCH_TOKEN_PATTERN.finditer(str(text or "").lower())
-        if match.group(0).strip()
-    }
+    return set(_tokenize_bm25_text(text))
 
 
 def _tokenize_bm25_text(text: str) -> list[str]:
-    return [
-        match.group(0).lower()
-        for match in _SEARCH_TOKEN_PATTERN.finditer(str(text or "").lower())
-        if match.group(0).strip()
-    ]
+    tokens: list[str] = []
+    for match in _SEARCH_TOKEN_PATTERN.finditer(str(text or "").lower()):
+        token = match.group(0).strip().lower()
+        if not token:
+            continue
+        if not all("\u4e00" <= char <= "\u9fff" for char in token):
+            tokens.append(token)
+            continue
+        if len(token) == 1:
+            tokens.append(token)
+            continue
+        for width in range(2, min(4, len(token)) + 1):
+            tokens.extend(token[index : index + width] for index in range(0, len(token) - width + 1))
+    return tokens
 
 
 def _rank_bm25_search_results(results: list[dict[str, Any]], query: str) -> list[dict[str, Any]]:
@@ -100,6 +105,8 @@ def _rank_bm25_search_results(results: list[dict[str, Any]], query: str) -> list
             if denominator <= 0:
                 continue
             score += idf * ((term_frequency * (BM25_K1 + 1.0)) / denominator)
+        if normalized_query in _bm25_text_for_result(result).lower():
+            score += 2.0
         item = dict(result)
         rounded_score = round(score, 6)
         item["semanticScore"] = rounded_score
@@ -178,7 +185,16 @@ def _item_matches_filters(
     created_to: str,
     artifacts_by_id: dict[str, dict[str, Any]],
     search_mode: str = "exact",
+    research_project_id: str = "",
+    question_id: str = "",
+    source_collection_run_id: str = "",
 ) -> bool:
+    if research_project_id and str(item.get("researchProjectId") or "") != research_project_id:
+        return False
+    if question_id and str(item.get("questionId") or "") != question_id:
+        return False
+    if source_collection_run_id and str(item.get("sourceCollectionRunId") or "") != source_collection_run_id:
+        return False
     if query:
         normalized_search_mode = str(search_mode or "exact").strip().lower()
         haystack = _search_text_for_payload([item, list(artifacts_by_id.values())])

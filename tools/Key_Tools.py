@@ -2577,6 +2577,9 @@ def _build_key_tools() -> List[BaseTool]:
         knowledge_base_id: str = "",
         owner_type: str = "",
         owner_id: str = "",
+        research_project_id: str = "",
+        question_id: str = "",
+        source_collection_run_id: str = "",
         tags: str = "",
         limit: int = 8,
         max_context_chars: int = 1200,
@@ -2596,6 +2599,9 @@ def _build_key_tools() -> List[BaseTool]:
             knowledge_base_id: 可选知识库 ID；为空时检索当前 Agent 可访问的知识库
             owner_type: 可选 owner 类型，支持 team / agent
             owner_id: 可选 owner id，teamId 或 agentId
+            research_project_id: 可选研究项目过滤；挑战杯自动链必须使用权威运行绑定
+            question_id: 可选题目过滤；挑战杯自动链必须使用权威运行绑定
+            source_collection_run_id: 可选来源搜集 run 过滤
             tags: 逗号分隔标签过滤
             limit: 最多返回结果数，范围 1-25
             max_context_chars: rag 模式单条上下文最大字符数
@@ -2611,6 +2617,9 @@ def _build_key_tools() -> List[BaseTool]:
             knowledge_base_id=knowledge_base_id,
             owner_type=owner_type,
             owner_id=owner_id,
+            research_project_id=research_project_id,
+            question_id=question_id,
+            source_collection_run_id=source_collection_run_id,
             tags=tags,
             limit=limit,
             max_context_chars=max_context_chars,
