@@ -105,6 +105,20 @@ _LLM_STREAM_TOTAL_DEADLINE_MIN_SECONDS = 60.0
 _LLM_STREAM_TOTAL_DEADLINE_MAX_SECONDS = 3600.0
 _LLM_STREAM_TOTAL_DEADLINE_LIMIT: float | None = None
 
+# DashScope explicit cache entries expire after roughly five minutes.  A long
+# streaming generation can therefore outlive the entry that its next tool
+# iteration needs.  Refresh the exact marked request prefix shortly before the
+# TTL, but only while the original stream is still active.  The in-process
+# override keeps the timing deterministic in tests; ``0`` disables the probe.
+_QWEN_INFLIGHT_CACHE_KEEPALIVE_INTERVAL_ENV = (
+    "VIBELUTION_QWEN_INFLIGHT_CACHE_KEEPALIVE_INTERVAL_SECONDS"
+)
+_QWEN_INFLIGHT_CACHE_KEEPALIVE_INTERVAL_DEFAULT_SECONDS = 240.0
+_QWEN_INFLIGHT_CACHE_KEEPALIVE_INTERVAL_MIN_SECONDS = 30.0
+_QWEN_INFLIGHT_CACHE_KEEPALIVE_INTERVAL_MAX_SECONDS = 280.0
+_QWEN_INFLIGHT_CACHE_KEEPALIVE_INTERVAL_LIMIT: float | None = None
+_QWEN_INFLIGHT_CACHE_KEEPALIVE_MAX_OUTPUT_TOKENS = 16
+
 # 看 watchdog「真断连」用的 turn-scoped 取消态与在途流 closer 登记。key 是
 # 规范化的 turn 身份（chat_room 讲者调用是 "chat-room:{round}:{participant}"）。
 _LLM_TURN_CANCEL_STATES: Dict[str, tuple[str, float]] = {}
@@ -155,6 +169,28 @@ def _llm_stream_total_deadline_seconds() -> float:
         default=_LLM_STREAM_TOTAL_DEADLINE_DEFAULT_SECONDS,
         minimum=_LLM_STREAM_TOTAL_DEADLINE_MIN_SECONDS,
         maximum=_LLM_STREAM_TOTAL_DEADLINE_MAX_SECONDS,
+    )
+
+
+def _qwen_inflight_cache_keepalive_interval_seconds() -> float:
+    override = _QWEN_INFLIGHT_CACHE_KEEPALIVE_INTERVAL_LIMIT
+    if (
+        isinstance(override, (int, float))
+        and not isinstance(override, bool)
+        and override >= 0
+    ):
+        return float(override)
+    raw = os.environ.get(_QWEN_INFLIGHT_CACHE_KEEPALIVE_INTERVAL_ENV)
+    try:
+        if raw is not None and float(raw) == 0:
+            return 0.0
+    except (TypeError, ValueError):
+        pass
+    return _clamp_env_seconds(
+        raw,
+        default=_QWEN_INFLIGHT_CACHE_KEEPALIVE_INTERVAL_DEFAULT_SECONDS,
+        minimum=_QWEN_INFLIGHT_CACHE_KEEPALIVE_INTERVAL_MIN_SECONDS,
+        maximum=_QWEN_INFLIGHT_CACHE_KEEPALIVE_INTERVAL_MAX_SECONDS,
     )
 
 
@@ -1492,6 +1528,38 @@ def _safe_prompt_cache_payload_summary(payload: Dict[str, Any]) -> Dict[str, Any
             "cacheControlBlockCount": cache_control_blocks,
         }
     }
+
+
+def _qwen_inflight_cache_keepalive_enabled(
+    *,
+    protocol_summary: Mapping[str, Any],
+    payload_summary: Mapping[str, Any],
+    route_concurrency: int,
+) -> bool:
+    cache_payload = payload_summary.get("promptCachePayload")
+    marker_count = (
+        int(cache_payload.get("cacheControlBlockCount") or 0)
+        if isinstance(cache_payload, Mapping)
+        else 0
+    )
+    return bool(
+        route_concurrency >= 2
+        and _qwen_inflight_cache_keepalive_interval_seconds() > 0
+        and str(protocol_summary.get("promptCacheProviderStrategy") or "")
+        .strip()
+        .lower()
+        == "qwen_explicit_cache_control"
+        and marker_count > 0
+    )
+
+
+def _qwen_inflight_cache_probe_payload(payload: Mapping[str, Any]) -> Dict[str, Any]:
+    probe = dict(payload)
+    probe["stream"] = False
+    probe.pop("stream_options", None)
+    output_field = "max_output_tokens" if "max_output_tokens" in probe else "max_tokens"
+    probe[output_field] = _QWEN_INFLIGHT_CACHE_KEEPALIVE_MAX_OUTPUT_TOKENS
+    return probe
 
 
 def _usage_cache_observation_fields(usage: UsageStats) -> Dict[str, Any]:
@@ -4345,6 +4413,137 @@ class LLMClient:
             raise _llm_cancelled_error(cancel_exc.reason) from cancel_exc
         return True
 
+    def _start_qwen_inflight_cache_keepalive(
+        self,
+        payload: Dict[str, Any],
+        *,
+        metadata: Optional[Dict[str, Any]],
+        protocol_summary: Mapping[str, Any],
+        payload_summary: Mapping[str, Any],
+        message_count: int,
+        tool_count: int,
+    ) -> Callable[[], None]:
+        """Refresh one active Qwen request prefix until its stream finishes."""
+
+        route_concurrency = _resolve_llm_route_concurrency_limit(self.config)
+        if not _qwen_inflight_cache_keepalive_enabled(
+            protocol_summary=protocol_summary,
+            payload_summary=payload_summary,
+            route_concurrency=route_concurrency,
+        ):
+            return lambda: None
+        interval = _qwen_inflight_cache_keepalive_interval_seconds()
+        stopped = threading.Event()
+        route_key = _llm_route_concurrency_key(
+            self.provider,
+            self.profile,
+            profile_id=self.profile_id,
+        )
+        probe_payload = _qwen_inflight_cache_probe_payload(payload)
+        probe_metadata = {
+            **dict(metadata or {}),
+            "conversationBound": False,
+            "promptPurpose": "qwen_inflight_cache_keepalive",
+        }
+        invocation_id = str(probe_metadata.get("invocationId") or "").strip()
+
+        def run() -> None:
+            probe_index = 0
+            while not stopped.wait(interval):
+                probe_index += 1
+                started_at = time.monotonic()
+                try:
+                    gate = _llm_route_concurrency_gate(
+                        route_key,
+                        limit=route_concurrency,
+                    )
+                    if not gate.acquire(blocking=False):
+                        continue
+                    try:
+                        if stopped.is_set():
+                            return
+                        with _llm_provider_proxy_env(
+                            self.config,
+                            probe_payload.get("base_url"),
+                        ):
+                            response = self._backend_for_payload(probe_payload)(
+                                probe_payload
+                            )
+                    finally:
+                        gate.release()
+                    usage = self._usage_from_response(
+                        response,
+                        latency_ms=max(0, int((time.monotonic() - started_at) * 1000)),
+                    )
+                    _record_usage_ledger_event(
+                        usage=usage,
+                        metadata={
+                            **probe_metadata,
+                            "invocationId": (
+                                f"{invocation_id}:cache-keepalive:{probe_index}"
+                            ).strip(":"),
+                        },
+                        provider=self.provider.kind,
+                        model=self.profile.model,
+                        profile_id=self.profile_id,
+                        transport=str(
+                            getattr(
+                                getattr(self.protocol_route, "wire_protocol", None),
+                                "value",
+                                "",
+                            )
+                            or ""
+                        ),
+                        context_window=max(
+                            0,
+                            int(getattr(self._resolved_spec, "context_window", 0) or 0),
+                        ),
+                    )
+                    _record_llm_scene_event(
+                        "cache",
+                        "llm.qwen_inflight_cache_keepalive.succeeded",
+                        message="Active Qwen explicit-cache prefix was refreshed.",
+                        outcome="succeeded",
+                        fields={
+                            "profileId": self.profile_id,
+                            "provider": self.provider.kind,
+                            "model": self.profile.model,
+                            "sessionId": str(probe_metadata.get("sessionId") or ""),
+                            "turnId": str(probe_metadata.get("turnId") or ""),
+                            "probeIndex": probe_index,
+                            "latencyMs": usage.latency_ms,
+                            **_usage_cache_observation_fields(usage),
+                        },
+                        lifecycle=False,
+                    )
+                except Exception as exc:  # noqa: BLE001 - an optimization cannot fail the main stream
+                    _record_llm_scene_event(
+                        "cache",
+                        "llm.qwen_inflight_cache_keepalive.failed",
+                        message="Active Qwen explicit-cache prefix refresh failed.",
+                        level="warning",
+                        outcome="failed",
+                        fields={
+                            "profileId": self.profile_id,
+                            "provider": self.provider.kind,
+                            "model": self.profile.model,
+                            "sessionId": str(probe_metadata.get("sessionId") or ""),
+                            "turnId": str(probe_metadata.get("turnId") or ""),
+                            "probeIndex": probe_index,
+                            "errorType": type(exc).__name__,
+                            "latencyMs": max(0, int((time.monotonic() - started_at) * 1000)),
+                        },
+                        lifecycle=False,
+                    )
+
+        worker = threading.Thread(
+            target=run,
+            name="qwen-inflight-cache-keepalive",
+            daemon=True,
+        )
+        worker.start()
+        return stopped.set
+
     def _stream_attempt(
         self,
         payload: Dict[str, Any],
@@ -4767,105 +4966,76 @@ class LLMClient:
                     tool_count=tool_count,
                 ):
                     _raise_if_llm_cancelled()
-                    events, emitted_fn, outcome_fn = self._stream_attempt(
+                    stop_cache_keepalive = self._start_qwen_inflight_cache_keepalive(
                         payload,
+                        metadata=event_metadata,
+                        protocol_summary=protocol_summary,
+                        payload_summary=prompt_cache_payload_summary,
                         message_count=message_count,
                         tool_count=tool_count,
-                        metadata=metadata,
-                        invocation_scope=invocation_scope,
-                        protocol_event_sink=protocol_event_sink,
-                        stream_deadline_at=stream_deadline_at,
-                        scene_identity={
-                            "role": self.role,
-                            "profileId": self.profile_id,
-                            "provider": self.provider.kind,
-                            "model": self.profile.model,
-                            "sessionId": event_metadata.get("sessionId", ""),
-                            "turnId": event_metadata.get("turnId", ""),
-                            "invocationId": event_metadata.get("invocationId", ""),
-                            "attempt": attempt,
-                        },
-                        request_messages=list(messages or []),
-                        receipt_builder=lambda outcome, usage: self._attach_model_invocation_receipt(
-                            outcome,
+                    )
+                    try:
+                        events, emitted_fn, outcome_fn = self._stream_attempt(
+                            payload,
+                            message_count=message_count,
+                            tool_count=tool_count,
                             metadata=metadata,
                             invocation_scope=invocation_scope,
-                            request_content=_canonical_receipt_request_summary(payload),
-                            response_content=_canonical_receipt_response_summary(outcome),
-                            started_at_ms=int(start * 1000),
-                            finished_at_ms=int(time.time() * 1000),
-                            attempt=attempt,
-                            retry_count=max(0, attempt - 1),
-                            token_usage={
-                                "inputTokens": int(getattr(usage, "input_tokens", 0) or 0),
-                                "outputTokens": int(getattr(usage, "output_tokens", 0) or 0),
-                                "totalTokens": int(getattr(usage, "total_tokens", 0) or 0),
-                                "cachedInputTokens": int(
-                                    getattr(usage, "cached_input_tokens", 0) or 0
-                                ),
-                                "reasoningTokens": int(
-                                    getattr(usage, "reasoning_output_tokens", 0) or 0
-                                ),
+                            protocol_event_sink=protocol_event_sink,
+                            stream_deadline_at=stream_deadline_at,
+                            scene_identity={
+                                "role": self.role,
+                                "profileId": self.profile_id,
+                                "provider": self.provider.kind,
+                                "model": self.profile.model,
+                                "sessionId": event_metadata.get("sessionId", ""),
+                                "turnId": event_metadata.get("turnId", ""),
+                                "invocationId": event_metadata.get("invocationId", ""),
+                                "attempt": attempt,
                             },
-                        ),
-                    )
-                    for event in events:
-                        _raise_if_llm_cancelled()
-                        if time.monotonic() >= stream_deadline_at:
-                            raise LLMStreamTotalDeadlineError(
-                                deadline_seconds=stream_total_deadline_seconds,
-                                provider=self.provider.kind,
-                                model=self.profile.model,
-                            )
-                        now = time.time()
-                        elapsed_ms = int((now - start) * 1000)
-                        if first_chunk_ms is None:
-                            first_chunk_ms = elapsed_ms
-                            http_timings = current_stream_http_timings()
-                            if http_timings is not None:
-                                http_timings.mark_first_projected_chunk()
-                            _record_llm_scene_event(
-                                "stream",
-                                "llm.stream.first_chunk",
-                                message="LLM stream produced its first protocol chunk.",
-                                outcome="observed",
-                                fields={
-                                    "role": self.role,
-                                    "profileId": self.profile_id,
-                                    "provider": self.provider.kind,
-                                    "model": self.profile.model,
-                                    "sessionId": event_metadata.get("sessionId", ""),
-                                    "turnId": event_metadata.get("turnId", ""),
-                                    "invocationId": event_metadata.get("invocationId", ""),
-                                    "routeAttempt": event_metadata.get("routeAttempt", 0),
-                                    "elapsedMs": elapsed_ms,
-                                    "chunkType": event.type,
-                                    "attempt": attempt,
-                                    **(
-                                        http_timings.first_chunk_scene_fields()
-                                        if http_timings is not None
-                                        else {}
+                            request_messages=list(messages or []),
+                            receipt_builder=lambda outcome, usage: self._attach_model_invocation_receipt(
+                                outcome,
+                                metadata=metadata,
+                                invocation_scope=invocation_scope,
+                                request_content=_canonical_receipt_request_summary(payload),
+                                response_content=_canonical_receipt_response_summary(outcome),
+                                started_at_ms=int(start * 1000),
+                                finished_at_ms=int(time.time() * 1000),
+                                attempt=attempt,
+                                retry_count=max(0, attempt - 1),
+                                token_usage={
+                                    "inputTokens": int(getattr(usage, "input_tokens", 0) or 0),
+                                    "outputTokens": int(getattr(usage, "output_tokens", 0) or 0),
+                                    "totalTokens": int(getattr(usage, "total_tokens", 0) or 0),
+                                    "cachedInputTokens": int(
+                                        getattr(usage, "cached_input_tokens", 0) or 0
+                                    ),
+                                    "reasoningTokens": int(
+                                        getattr(usage, "reasoning_output_tokens", 0) or 0
                                     ),
                                 },
-                                lifecycle=False,
-                            )
-                        if previous_chunk_at is not None:
-                            inter_chunk_ms = int((now - previous_chunk_at) * 1000)
-                            max_inter_chunk_ms = max(max_inter_chunk_ms, inter_chunk_ms)
-                            total_inter_chunk_ms += inter_chunk_ms
-                            inter_chunk_count += 1
-                        previous_chunk_at = now
-                        emitted = emitted_fn()
-                        chunk_count += 1
-                        if event.type == "text_delta":
-                            text_delta_count += 1
-                            generated_text_parts.append(event.text or "")
-                            if first_text_delta_ms is None and (event.text or ""):
-                                first_text_delta_ms = elapsed_ms
+                            ),
+                        )
+                        for event in events:
+                            _raise_if_llm_cancelled()
+                            if time.monotonic() >= stream_deadline_at:
+                                raise LLMStreamTotalDeadlineError(
+                                    deadline_seconds=stream_total_deadline_seconds,
+                                    provider=self.provider.kind,
+                                    model=self.profile.model,
+                                )
+                            now = time.time()
+                            elapsed_ms = int((now - start) * 1000)
+                            if first_chunk_ms is None:
+                                first_chunk_ms = elapsed_ms
+                                http_timings = current_stream_http_timings()
+                                if http_timings is not None:
+                                    http_timings.mark_first_projected_chunk()
                                 _record_llm_scene_event(
                                     "stream",
-                                    "llm.stream.first_content_delta",
-                                    message="LLM stream produced its first visible content delta.",
+                                    "llm.stream.first_chunk",
+                                    message="LLM stream produced its first protocol chunk.",
                                     outcome="observed",
                                     fields={
                                         "role": self.role,
@@ -4877,46 +5047,86 @@ class LLMClient:
                                         "invocationId": event_metadata.get("invocationId", ""),
                                         "routeAttempt": event_metadata.get("routeAttempt", 0),
                                         "elapsedMs": elapsed_ms,
-                                        "contentChars": len(event.text or ""),
+                                        "chunkType": event.type,
                                         "attempt": attempt,
+                                        **(
+                                            http_timings.first_chunk_scene_fields()
+                                            if http_timings is not None
+                                            else {}
+                                        ),
                                     },
                                     lifecycle=False,
                                 )
-                        elif event.type == "reasoning_delta":
-                            reasoning_delta_count += 1
-                            if first_reasoning_delta_ms is None and (event.text or ""):
-                                first_reasoning_delta_ms = elapsed_ms
-                                _record_llm_scene_event(
-                                    "stream",
-                                    "llm.stream.first_reasoning_delta",
-                                    message="LLM stream produced its first reasoning delta.",
-                                    outcome="observed",
-                                    fields={
-                                        "role": self.role,
-                                        "profileId": self.profile_id,
-                                        "provider": self.provider.kind,
-                                        "model": self.profile.model,
-                                        "sessionId": event_metadata.get("sessionId", ""),
-                                        "turnId": event_metadata.get("turnId", ""),
-                                        "invocationId": event_metadata.get("invocationId", ""),
-                                        "routeAttempt": event_metadata.get("routeAttempt", 0),
-                                        "elapsedMs": elapsed_ms,
-                                        "reasoningChars": len(event.text or ""),
-                                        "attempt": attempt,
-                                    },
-                                    lifecycle=False,
-                                )
-                            reasoning_chars += len(event.text or "")
-                            if isinstance(event.provider_payload, dict):
-                                source = str(event.provider_payload.get("reasoning_source") or "").strip()
-                                if source:
-                                    reasoning_sources.add(source)
-                        elif event.type == "tool_call_final":
-                            tool_call_count += len(event.tool_calls or [])
-                        elif event.type == "done" and event.usage is not None:
-                            usage_observation = event.usage
-                        yield event
-                        _raise_if_llm_cancelled()
+                            if previous_chunk_at is not None:
+                                inter_chunk_ms = int((now - previous_chunk_at) * 1000)
+                                max_inter_chunk_ms = max(max_inter_chunk_ms, inter_chunk_ms)
+                                total_inter_chunk_ms += inter_chunk_ms
+                                inter_chunk_count += 1
+                            previous_chunk_at = now
+                            emitted = emitted_fn()
+                            chunk_count += 1
+                            if event.type == "text_delta":
+                                text_delta_count += 1
+                                generated_text_parts.append(event.text or "")
+                                if first_text_delta_ms is None and (event.text or ""):
+                                    first_text_delta_ms = elapsed_ms
+                                    _record_llm_scene_event(
+                                        "stream",
+                                        "llm.stream.first_content_delta",
+                                        message="LLM stream produced its first visible content delta.",
+                                        outcome="observed",
+                                        fields={
+                                            "role": self.role,
+                                            "profileId": self.profile_id,
+                                            "provider": self.provider.kind,
+                                            "model": self.profile.model,
+                                            "sessionId": event_metadata.get("sessionId", ""),
+                                            "turnId": event_metadata.get("turnId", ""),
+                                            "invocationId": event_metadata.get("invocationId", ""),
+                                            "routeAttempt": event_metadata.get("routeAttempt", 0),
+                                            "elapsedMs": elapsed_ms,
+                                            "contentChars": len(event.text or ""),
+                                            "attempt": attempt,
+                                        },
+                                        lifecycle=False,
+                                    )
+                            elif event.type == "reasoning_delta":
+                                reasoning_delta_count += 1
+                                if first_reasoning_delta_ms is None and (event.text or ""):
+                                    first_reasoning_delta_ms = elapsed_ms
+                                    _record_llm_scene_event(
+                                        "stream",
+                                        "llm.stream.first_reasoning_delta",
+                                        message="LLM stream produced its first reasoning delta.",
+                                        outcome="observed",
+                                        fields={
+                                            "role": self.role,
+                                            "profileId": self.profile_id,
+                                            "provider": self.provider.kind,
+                                            "model": self.profile.model,
+                                            "sessionId": event_metadata.get("sessionId", ""),
+                                            "turnId": event_metadata.get("turnId", ""),
+                                            "invocationId": event_metadata.get("invocationId", ""),
+                                            "routeAttempt": event_metadata.get("routeAttempt", 0),
+                                            "elapsedMs": elapsed_ms,
+                                            "reasoningChars": len(event.text or ""),
+                                            "attempt": attempt,
+                                        },
+                                        lifecycle=False,
+                                    )
+                                reasoning_chars += len(event.text or "")
+                                if isinstance(event.provider_payload, dict):
+                                    source = str(event.provider_payload.get("reasoning_source") or "").strip()
+                                    if source:
+                                        reasoning_sources.add(source)
+                            elif event.type == "tool_call_final":
+                                tool_call_count += len(event.tool_calls or [])
+                            elif event.type == "done" and event.usage is not None:
+                                usage_observation = event.usage
+                            yield event
+                            _raise_if_llm_cancelled()
+                    finally:
+                        stop_cache_keepalive()
                 usage_observation.latency_ms = int((time.time() - start) * 1000)
                 estimated_input_tokens = 0
                 estimated_output_tokens = 0
