@@ -936,34 +936,69 @@ def supersede_empty_discussion_meeting(
     }
 
 
-def terminate_meeting_execution(
+_EXECUTION_STOP_ELIGIBLE_STATUSES = {
+    "open",
+    "summarizing",
+    "awaiting_approval",
+}
+
+
+def terminate_meeting_executions(
     team_id: str,
-    meeting_round_id: str,
+    meeting_round_ids: Sequence[str],
     *,
     reason: str,
     actor: str = "system:challenge-execution-fence",
 ) -> dict[str, Any]:
-    """Close a fenced formal meeting without promoting a partial digest."""
+    """Close one execution-owned set of meetings as a single domain action."""
 
     from core.web.services.team_service import assert_team_exists
 
     normalized_team_id = assert_team_exists(team_id)
-    normalized_round_id = str(meeting_round_id or "").strip()
+    normalized_round_ids = list(
+        dict.fromkeys(
+            str(meeting_round_id or "").strip()
+            for meeting_round_id in meeting_round_ids
+            if str(meeting_round_id or "").strip()
+        )
+    )
     normalized_reason = str(reason or "").strip()
-    if not normalized_round_id or not normalized_reason:
-        raise ResearchMeetingRoundError("meeting id and terminal reason are required")
-    with _write_lock("terminate_meeting_execution"):
-        meeting_round = _load_meeting_round(normalized_team_id, normalized_round_id)
-        status = str(meeting_round.get("status") or "").strip().lower()
-        if status == "closed" and str(meeting_round.get("executionStatus") or "") == "stopped":
-            updated = meeting_round
-            result_status = "reused"
-        else:
-            if status not in {"open", "summarizing"}:
+    if not normalized_round_ids or not normalized_reason:
+        raise ResearchMeetingRoundError("meeting ids and terminal reason are required")
+    with _write_lock("terminate_meeting_executions"):
+        records = _read_jsonl(_rounds_path(normalized_team_id))
+        current = {
+            meeting_round_id: _latest_by_id(
+                records, "meetingRoundId", meeting_round_id
+            )
+            for meeting_round_id in normalized_round_ids
+        }
+        missing = [
+            meeting_round_id
+            for meeting_round_id, meeting_round in current.items()
+            if meeting_round is None
+        ]
+        if missing:
+            raise ResearchMeetingRoundNotFoundError("Meeting round not found.")
+
+        updates: list[dict[str, Any]] = []
+        stopped_ids: list[str] = []
+        now = _utc_now()
+        for meeting_round_id in normalized_round_ids:
+            meeting_round = current[meeting_round_id]
+            assert meeting_round is not None
+            status = str(meeting_round.get("status") or "").strip().lower()
+            if (
+                status == "closed"
+                and str(meeting_round.get("executionStatus") or "").strip().lower()
+                == "stopped"
+            ):
+                updates.append(meeting_round)
+                continue
+            if status not in _EXECUTION_STOP_ELIGIBLE_STATUSES:
                 raise ResearchMeetingRoundError(
                     f"meeting status {status or '<unknown>'} cannot be execution-stopped"
                 )
-            now = _utc_now()
             updated = {
                 **meeting_round,
                 "status": "closed",
@@ -980,14 +1015,47 @@ def terminate_meeting_execution(
                 },
                 "updatedAt": now,
             }
-            _append_round_record(normalized_team_id, updated)
-            result_status = "stopped"
+            MeetingRound.from_dict(updated)
+            updates.append(updated)
+            stopped_ids.append(meeting_round_id)
+
+        # All records are validated before the first append. Holding the shared
+        # writer lock makes the selection-level stop one ordered state change
+        # for every in-process reader instead of a series of independent stops.
+        for updated in updates:
+            if str(updated.get("meetingRoundId") or "") in stopped_ids:
+                _append_jsonl(_rounds_path(normalized_team_id), updated)
     return {
         "schemaVersion": SCHEMA_VERSION,
         "teamId": normalized_team_id,
-        "status": result_status,
-        "meetingRound": updated,
+        "status": "stopped" if stopped_ids else "reused",
+        "meetingRounds": updates,
+        "stoppedMeetingRoundIds": stopped_ids,
         "storagePath": str(_rounds_path(normalized_team_id)),
+    }
+
+
+def terminate_meeting_execution(
+    team_id: str,
+    meeting_round_id: str,
+    *,
+    reason: str,
+    actor: str = "system:challenge-execution-fence",
+) -> dict[str, Any]:
+    """Close a fenced formal meeting without promoting a partial digest."""
+    result = terminate_meeting_executions(
+        team_id,
+        [meeting_round_id],
+        reason=reason,
+        actor=actor,
+    )
+    updated = result["meetingRounds"][0]
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": result["teamId"],
+        "status": result["status"],
+        "meetingRound": updated,
+        "storagePath": result["storagePath"],
     }
 
 

@@ -6969,6 +6969,92 @@ def closeout_fenced_meeting_attempts(
     return summary
 
 
+def terminate_review_selection_execution(
+    team_id: str,
+    meeting_round_id: str,
+    *,
+    reason: str,
+    actor: str = "system:challenge-execution-fence",
+) -> dict[str, Any] | None:
+    """Stop every unfinished review meeting owned by the current selection."""
+
+    from core.web.services.team_workflow import meeting_rounds
+
+    normalized_meeting_round_id = str(meeting_round_id or "").strip()
+    links = list_review_round_links(team_id).get("links") or []
+    current_link = next(
+        (
+            item
+            for item in reversed(links)
+            if str(item.get("meetingRoundId") or "").strip()
+            == normalized_meeting_round_id
+        ),
+        None,
+    )
+    selection_id = str((current_link or {}).get("selectionId") or "").strip()
+    if not selection_id:
+        return None
+
+    selection_meeting_ids = {
+        str(item.get("meetingRoundId") or "").strip()
+        for item in links
+        if str(item.get("selectionId") or "").strip() == selection_id
+        and str(item.get("meetingRoundId") or "").strip()
+    }
+    meetings = meeting_rounds.list_meeting_rounds(team_id)["meetings"]
+    active_statuses = {"open", "summarizing", "awaiting_approval"}
+    target_ids = [
+        str(meeting.get("meetingRoundId") or "").strip()
+        for meeting in meetings
+        if str(meeting.get("meetingRoundId") or "").strip()
+        in selection_meeting_ids
+        and (
+            str(meeting.get("status") or "").strip().lower() in active_statuses
+            or (
+                str(meeting.get("meetingRoundId") or "").strip()
+                == normalized_meeting_round_id
+                and _is_execution_stopped_meeting(meeting)
+            )
+        )
+    ]
+    if not target_ids:
+        return None
+
+    terminal = meeting_rounds.terminate_meeting_executions(
+        team_id,
+        target_ids,
+        reason=reason,
+        actor=actor,
+    )
+    for stopped_meeting_id in terminal["stoppedMeetingRoundIds"]:
+        closeout_fenced_meeting_attempts(
+            team_id,
+            stopped_meeting_id,
+            reason=reason,
+        )
+    current = next(
+        (
+            meeting
+            for meeting in terminal["meetingRounds"]
+            if str(meeting.get("meetingRoundId") or "").strip()
+            == normalized_meeting_round_id
+        ),
+        None,
+    )
+    if current is None:
+        current = meeting_rounds.get_meeting_round(
+            team_id, normalized_meeting_round_id
+        )["meetingRound"]
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": terminal["teamId"],
+        "status": terminal["status"],
+        "selectionId": selection_id,
+        "meetingRound": current,
+        "stoppedMeetingRoundIds": terminal["stoppedMeetingRoundIds"],
+    }
+
+
 def list_collection_requests(
     team_id: str,
     *,

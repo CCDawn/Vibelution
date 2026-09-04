@@ -155,6 +155,91 @@ def test_generation_attempt_finishes_when_bound_meeting_is_fenced(monkeypatch):
     assert appended[0][1]["supersedes_attempt_id"] == "attempt-1"
 
 
+def test_user_stop_closes_every_active_review_for_the_same_selection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One stopped candidate room ends its whole selection, not one candidate."""
+
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
+    monkeypatch.setattr(meetings, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chain, "PROJECT_ROOT", tmp_path)
+    team_id = "team-selection-stop"
+
+    def create_meeting(meeting_id: str, *, status: str = "open") -> None:
+        record = meetings.create_meeting_round(
+            team_id,
+            {
+                "program": "XH-202619",
+                "theme": "cc-selection-stop",
+                "campaign": "cc-selection-stop",
+                "question": "SCI-056",
+                "branch": "main",
+                "workflow": "hypothesis_first",
+                "agentId": "agent-coordinator",
+                "mode": "formal",
+                "meetingRoundId": meeting_id,
+                "meetingType": "hypothesis_review",
+                "participants": ["agent-reviewer"],
+                "discussionItemRefs": ["hypothesis_candidate:candidate-a"],
+            },
+        )["meetingRound"]
+        if status != "open":
+            meetings._append_round_record(team_id, {**record, "status": status})
+
+    current_id = "meeting-selection-a"
+    sibling_id = "meeting-selection-b"
+    other_id = "meeting-other-selection"
+    create_meeting(current_id)
+    create_meeting(sibling_id, status="awaiting_approval")
+    create_meeting(other_id)
+    for meeting_id, selection_id, candidate_id in (
+        (current_id, "selection-56", "candidate-a"),
+        (sibling_id, "selection-56", "candidate-b"),
+        (other_id, "selection-other", "candidate-c"),
+    ):
+        chain._append_jsonl(
+            chain._storage_path(team_id),
+            {
+                "schemaVersion": chain.SCHEMA_VERSION,
+                "recordKind": chain.REVIEW_ROUND_LINK_KIND,
+                "linkId": f"link-{meeting_id}",
+                "questionId": (
+                    "SCI-056" if selection_id == "selection-56" else "SCI-057"
+                ),
+                "selectionId": selection_id,
+                "candidateId": candidate_id,
+                "roundIndex": 1,
+                "meetingRoundId": meeting_id,
+                "createdAt": "2026-09-04T00:00:00Z",
+            },
+        )
+
+    result = meeting_runtime.finalize_stopped_meeting_after_chat_round(
+        {"roomId": "room-selection-a"},
+        {
+            "roundId": "room-round-selection-a",
+            "status": "stopped",
+            "terminalReason": "用户请求停止当前群聊轮次。",
+            "config": {
+                "teamId": team_id,
+                "meetingRoundId": current_id,
+                "meetingType": "hypothesis_review",
+            },
+        },
+    )
+
+    assert result is not None
+    assert result["selectionId"] == "selection-56"
+    assert set(result["stoppedMeetingRoundIds"]) == {current_id, sibling_id}
+    for meeting_id in (current_id, sibling_id):
+        meeting = meetings.get_meeting_round(team_id, meeting_id)["meetingRound"]
+        assert meeting["status"] == "closed"
+        assert meeting["executionStatus"] == "stopped"
+        assert meeting["terminalReason"] == "用户请求停止当前群聊轮次。"
+    other_meeting = meetings.get_meeting_round(team_id, other_id)["meetingRound"]
+    assert other_meeting["status"] == "open"
+
+
 def _hf_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)

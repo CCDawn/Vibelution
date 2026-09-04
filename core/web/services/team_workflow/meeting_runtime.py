@@ -4408,13 +4408,6 @@ def finalize_stopped_meeting_after_chat_round(
         team_id, meeting_round_id
     )["meetingRound"]
     meeting_status = str(meeting_round.get("status") or "").strip().lower()
-    if meeting_status not in {"open", "summarizing"}:
-        return {
-            "schemaVersion": meeting_rounds.SCHEMA_VERSION,
-            "teamId": team_id,
-            "status": "already_terminal",
-            "meetingRound": meeting_round,
-        }
     if terminal_reason == MEETING_DIGEST_TTL_STOP_REASON:
         # The TTL pause is a burn stop, never a closure: a digest-wait mute
         # that cuts a still-running room round must not execution-terminate
@@ -4423,6 +4416,27 @@ def finalize_stopped_meeting_after_chat_round(
             "schemaVersion": meeting_rounds.SCHEMA_VERSION,
             "teamId": team_id,
             "status": "ttl_mute_paused",
+            "meetingRound": meeting_round,
+        }
+    if str(meeting_round.get("meetingType") or "").strip().lower() == "hypothesis_review":
+        from core.web.services.team_workflow.research_runtime import (
+            hypothesis_first_chain,
+        )
+
+        selection_terminal = (
+            hypothesis_first_chain.terminate_review_selection_execution(
+                team_id,
+                meeting_round_id,
+                reason=terminal_reason,
+            )
+        )
+        if selection_terminal is not None:
+            return selection_terminal
+    if meeting_status not in {"open", "summarizing"}:
+        return {
+            "schemaVersion": meeting_rounds.SCHEMA_VERSION,
+            "teamId": team_id,
+            "status": "already_terminal",
             "meetingRound": meeting_round,
         }
     terminal = meeting_rounds.terminate_meeting_execution(
