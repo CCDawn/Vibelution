@@ -553,7 +553,11 @@ def writeback_source_collection_stage_session_task(
         materialized_knowledge_ingestion=materialized_knowledge_ingestion,
     )
     if status == "completed" and not bool(closure_summary.get("artifactComplete")):
-        status = "needs_review"
+        status = (
+            "incomplete"
+            if s._trim_text(closure_summary.get("artifactStatus"), max_length=120) == "evidence_gap"
+            else "needs_review"
+        )
         writeback["status"] = status
         closure_summary = s._source_collection_stage_writeback_closure_summary(
             task,
@@ -1059,9 +1063,8 @@ def _materialize_extraction_claim_evidence_after_reconcile(
     extraction tasks without claim-ledger rows.  The materializer is
     idempotent (content-hash claim ids), so both paths may call it for the
     same task.  A failure is recorded as a workflow event and returned for
-    diagnosis but never flips the completed task status here or blocks the
-    reconcile result; the zero-claim fail-loud parking lives in
-    ``_apply_extraction_claim_materialization_visibility_and_gate``.
+    diagnosis.  The visibility gate below parks the canonical task so a
+    failed ledger write cannot remain user-visible as completed.
     """
     s = _service()
     normalized_task_id = s._trim_text(reconciled_task.get("taskId"), max_length=160)
@@ -1142,7 +1145,7 @@ def _apply_extraction_claim_materialization_visibility_and_gate(
     task: dict[str, Any],
     claim_materialization: dict[str, Any],
 ) -> dict[str, Any]:
-    """Persist the materialization outcome on the canonical task; park zero-claim completions.
+    """Persist materialization outcome; park failed or zero-claim completions.
 
     Production incident (stagetask-20260831142807-d31d5a7d): a completed
     extraction writeback without verbatim quote anchors materialized zero
@@ -1153,20 +1156,32 @@ def _apply_extraction_claim_materialization_visibility_and_gate(
     loud: a completed extraction task that materialized zero claims while the
     run holds summary-bearing candidates is parked at ``needs_review`` — the
     stage-task status equivalent of a never-auto-reconciled needs_continue
-    stop — with explicit remediation.  Materialization failures keep their
-    diagnostic-only contract (workflow event, no status flip); only a
-    successful materialization with zero claims trips the gate.
+    stop — with explicit remediation.  Materialization failures trip the same
+    fail-loud boundary: a diagnostic event and a completed task cannot remain
+    contradictory authorities for the same stage.
     """
     s = _service()
     materialization_status = s._trim_text(claim_materialization.get("status"), max_length=80)
     if materialization_status not in {"materialized", "failed"}:
         return task
-    would_gate = (
+    task_completed = s._trim_text(task.get("status"), max_length=80) == "completed"
+    formal_extraction_scope = bool(
+        s._trim_text(claim_materialization.get("workflowRunId"), max_length=160)
+        or isinstance(task.get("challengeTaskContract"), dict)
+        and task.get("challengeTaskContract")
+    )
+    failed_materialization = (
+        materialization_status == "failed"
+        and task_completed
+        and formal_extraction_scope
+    )
+    zero_claim_materialization = (
         materialization_status == "materialized"
         and not s._source_collection_count(claim_materialization.get("claimEvidenceCount"))
-        and s._trim_text(task.get("status"), max_length=80) == "completed"
+        and task_completed
         and _run_has_summary_bearing_source_collection_candidate(team_id, run_id)
     )
+    would_gate = failed_materialization or zero_claim_materialization
     existing = task.get("claimMaterialization") if isinstance(task.get("claimMaterialization"), dict) else {}
     if (
         existing.get("status") == materialization_status
@@ -1183,28 +1198,67 @@ def _apply_extraction_claim_materialization_visibility_and_gate(
     next_result["claimMaterialization"] = recorded
     next_task["result"] = next_result
     next_task["claimMaterialization"] = recorded
-    if materialization_status == "materialized" and not s._source_collection_count(
-        recorded.get("claimEvidenceCount")
-    ) and _run_has_summary_bearing_source_collection_candidate(team_id, run_id):
-        remediation = (
-            "提炼回写缺少逐字 quote 锚：候选存储摘要非空但物化出 0 条 claim 证据。"
-            "请重新回写 completed：每条非 exclude 条目至少带一个 quote 锚"
-            "（嵌套 claims[]/keyFindings[] 项含 quote，或 evidenceRefs[] 项含 {id, quote}），"
-            "quote 必须从 candidates[].summary 逐字复制，并写 evidenceStatus=verified_abstract。"
-        )
-        recorded["gate"] = "needs_quote_anchor_retry"
+    if would_gate:
+        if failed_materialization:
+            remediation = (
+                "ClaimEvidence 物化失败，资料提炼结果尚未进入 canonical evidence store。"
+                "请修复物化错误后重试当前提炼节点；在物化成功前不得推进后续证据关系节点。"
+            )
+            gate_code = "needs_claim_materialization_retry"
+            artifact_status = "claim_evidence_materialization_failed"
+            message = "资料提炼内容已回写，但 ClaimEvidence 物化失败，当前阶段需要重试。"
+        else:
+            remediation = (
+                "提炼回写缺少逐字 quote 锚：候选存储摘要非空但物化出 0 条 claim 证据。"
+                "请重新回写 completed：每条非 exclude 条目至少带一个 quote 锚"
+                "（嵌套 claims[]/keyFindings[] 项含 quote，或 evidenceRefs[] 项含 {id, quote}），"
+                "quote 必须从 candidates[].summary 逐字复制，并写 evidenceStatus=verified_abstract。"
+            )
+            gate_code = "needs_quote_anchor_retry"
+            artifact_status = "claim_evidence_missing"
+            message = "资料提炼内容已回写，但没有物化出 ClaimEvidence，当前阶段需要补证。"
+        recorded["gate"] = gate_code
         recorded["remediation"] = remediation
         next_result["claimMaterializationRemediation"] = remediation
         previous_status = s._trim_text(next_task.get("status"), max_length=80)
-        next_task["status"] = "needs_review"
+        parked_status = "incomplete" if failed_materialization else "needs_review"
+        next_task["status"] = parked_status
         next_writeback = dict(task.get("writeback")) if isinstance(task.get("writeback"), dict) else {}
-        next_writeback["status"] = "needs_review"
-        next_writeback["agentRequestedStatus"] = "needs_review"
+        next_writeback["status"] = parked_status
+        if not failed_materialization:
+            next_writeback["agentRequestedStatus"] = parked_status
+        completion_gate = (
+            dict(task.get("completionGate"))
+            if isinstance(task.get("completionGate"), dict)
+            else {}
+        )
+        completion_gate["artifactComplete"] = False
+        completion_gate["passed"] = False
+        next_task["completionGate"] = completion_gate
+        closure_summary = (
+            dict(next_result.get("closureSummary"))
+            if isinstance(next_result.get("closureSummary"), dict)
+            else {}
+        )
+        closure_summary.update(
+            {
+                "artifactStatus": artifact_status,
+                "userStatus": "partial",
+                "message": message,
+                "artifactComplete": False,
+                "completionGatePassed": False,
+                "completionGate": completion_gate,
+                "advanceOutcome": "blocked",
+                "nextAction": remediation,
+            }
+        )
+        next_result["closureSummary"] = closure_summary
+        next_writeback["closureSummary"] = closure_summary
         next_task["writeback"] = next_writeback
         next_turn = next_task.get("turn") if isinstance(next_task.get("turn"), dict) else {}
         if next_turn:
             updated_turn = dict(next_turn)
-            updated_turn["status"] = "needs_review"
+            updated_turn["status"] = parked_status
             next_task["turn"] = updated_turn
         next_task["updatedAt"] = recorded["recordedAt"]
         s._record_workflow_event(
@@ -1215,12 +1269,13 @@ def _apply_extraction_claim_materialization_visibility_and_gate(
                 "taskId": s._trim_text(next_task.get("taskId"), max_length=160),
                 "stageId": s._trim_text(next_task.get("stageId"), max_length=80),
                 "previousStatus": previous_status,
-                "status": "needs_review",
-                "claimEvidenceCount": 0,
+                "status": parked_status,
+                "claimMaterializationStatus": materialization_status,
+                "claimEvidenceCount": s._source_collection_count(recorded.get("claimEvidenceCount")),
                 "workflowRunId": s._trim_text(recorded.get("workflowRunId"), max_length=160),
             },
             level="warning",
-            outcome="needs_review",
+            outcome=parked_status,
         )
     s._upsert_source_collection_stage_session_task(team_id, run_id, next_task)
     if next_task.get("status") != task.get("status"):
@@ -1345,6 +1400,8 @@ def reconcile_source_collection_stage_session_task_after_turn(
         reconciled,
         claim_materialization,
     )
+    after_gate = reconciled.get("completionGate") if isinstance(reconciled.get("completionGate"), dict) else {}
+    task_tool_progress = reconciled.get("taskToolProgress") if isinstance(reconciled.get("taskToolProgress"), dict) else {}
     return {
         "schemaVersion": s.SCHEMA_VERSION,
         "teamId": normalized_team_id,
