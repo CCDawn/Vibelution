@@ -164,6 +164,7 @@ class WorkflowRuntime:
         self._sweep_meetings_missing_digest_best_effort()
         self._refresh_queued_meeting_activity_best_effort()
         self._sweep_auto_advance_closure_best_effort()
+        self._recover_challenge_meeting_drivers_best_effort()
         return handled
 
     def _reconcile_expired_task_bundles_best_effort(self) -> None:
@@ -273,6 +274,25 @@ class WorkflowRuntime:
                 )
         except Exception:  # noqa: BLE001 - sweep must never break maintenance
             logger.exception("auto-advance closure sweep failed")
+
+    def _recover_challenge_meeting_drivers_best_effort(self) -> None:
+        """Re-drive dead challenge meeting drivers from this tick.
+
+        The startup sweep (``recover_challenge_meeting_drivers``) runs exactly
+        once per boot, so a meeting whose driver thread died or wedged after
+        boot used to hang until the next restart (observed live as a 7.5-hour
+        orphan).  The periodic entry reuses the same idempotent, never-raising
+        recovery scan, self-throttled inside ``meeting_driver_work`` (same
+        peek + self-throttle discipline as the digest watchdog): peeked (not
+        created), no second scheduler, and any failure is swallowed after
+        logging.
+        """
+        try:
+            from core.web.services.team_workflow import meeting_driver_work
+
+            meeting_driver_work.sweep_challenge_meeting_drivers()
+        except Exception:  # noqa: BLE001 - recovery must never break maintenance
+            logger.exception("challenge meeting driver recovery sweep failed")
 
     def close(self) -> None:
         from .budget_window_resolver import (

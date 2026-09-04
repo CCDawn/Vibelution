@@ -78,6 +78,7 @@ def _isolate(tmp_path, monkeypatch):
     )
     meeting_driver_work.reset_for_tests()
     meeting_driver_work.reset_digest_stuck_sweep_throttle_for_tests()
+    meeting_driver_work.reset_driver_recovery_sweep_throttle_for_tests()
     with meeting_runtime._MEETING_DISCUSSION_JOBS_LOCK:
         meeting_runtime._MEETING_DISCUSSION_JOBS.clear()
     with meeting_runtime._MEETING_DIGEST_JOBS_LOCK:
@@ -1574,3 +1575,291 @@ def test_stuck_digest_watchdog_throttles_between_ticks(tmp_path, monkeypatch):
     meeting_driver_work.reset_digest_stuck_sweep_throttle_for_tests()
     after_reset = meeting_driver_work.sweep_stuck_digest_works(now_ms=base_ms)
     assert after_reset.get("throttled") is None
+
+
+# --- Periodic recovery sweep on the resident maintenance tick ----------------
+
+
+@pytest.fixture
+def restore_runtime_service_singleton():
+    """Keep the research-runtime service singleton test-local."""
+
+    from core.web.services.team_workflow.research_runtime import (
+        service as research_runtime_service_module,
+    )
+
+    original = research_runtime_service_module._SERVICE
+    try:
+        yield
+    finally:
+        research_runtime_service_module._SERVICE = original
+
+
+def test_periodic_driver_recovery_sweep_throttles_between_ticks(
+    tmp_path, monkeypatch
+):
+    """The periodic recovery sweep is hosted by a fast tick, so it self-
+    throttles; tests can bypass with force=True, reset the stamp, or override
+    the interval through the env knob."""
+    _isolate(tmp_path, monkeypatch)
+    monkeypatch.delenv(
+        meeting_driver_work.DRIVER_RECOVERY_SWEEP_INTERVAL_ENV, raising=False
+    )
+    base_ms = 1_000_000_000
+
+    first = meeting_driver_work.sweep_challenge_meeting_drivers(now_ms=base_ms)
+    assert first.get("throttled") is None
+    throttled = meeting_driver_work.sweep_challenge_meeting_drivers(
+        now_ms=base_ms + 1_000
+    )
+    assert throttled.get("throttled") is True
+    assert throttled["meetingsScanned"] == 0
+    assert throttled["fenced"] == 0
+    after_interval = meeting_driver_work.sweep_challenge_meeting_drivers(
+        now_ms=base_ms + meeting_driver_work.DRIVER_RECOVERY_SWEEP_INTERVAL_MS + 1
+    )
+    assert after_interval.get("throttled") is None
+    forced = meeting_driver_work.sweep_challenge_meeting_drivers(
+        now_ms=base_ms + meeting_driver_work.DRIVER_RECOVERY_SWEEP_INTERVAL_MS + 2,
+        force=True,
+    )
+    assert forced.get("throttled") is None
+    meeting_driver_work.reset_driver_recovery_sweep_throttle_for_tests()
+    after_reset = meeting_driver_work.sweep_challenge_meeting_drivers(now_ms=base_ms)
+    assert after_reset.get("throttled") is None
+
+
+def test_driver_recovery_sweep_interval_env_override_is_clamped(
+    tmp_path, monkeypatch
+):
+    """A positive env override wins; sub-second values clamp to the same 1s
+    floor as the other maintenance-tick sweeps."""
+    _isolate(tmp_path, monkeypatch)
+    base_ms = 1_000_000_000
+
+    monkeypatch.setenv(
+        meeting_driver_work.DRIVER_RECOVERY_SWEEP_INTERVAL_ENV, "5000"
+    )
+    assert (
+        meeting_driver_work.sweep_challenge_meeting_drivers(now_ms=base_ms).get(
+            "throttled"
+        )
+        is None
+    )
+    assert (
+        meeting_driver_work.sweep_challenge_meeting_drivers(
+            now_ms=base_ms + 4_999
+        ).get("throttled")
+        is True
+    )
+    assert (
+        meeting_driver_work.sweep_challenge_meeting_drivers(
+            now_ms=base_ms + 5_000
+        ).get("throttled")
+        is None
+    )
+    meeting_driver_work.reset_driver_recovery_sweep_throttle_for_tests()
+
+    monkeypatch.setenv(
+        meeting_driver_work.DRIVER_RECOVERY_SWEEP_INTERVAL_ENV, "500"
+    )
+    assert (
+        meeting_driver_work.sweep_challenge_meeting_drivers(now_ms=base_ms).get(
+            "throttled"
+        )
+        is None
+    )
+    assert (
+        meeting_driver_work.sweep_challenge_meeting_drivers(
+            now_ms=base_ms + 999
+        ).get("throttled")
+        is True
+    )
+    assert (
+        meeting_driver_work.sweep_challenge_meeting_drivers(
+            now_ms=base_ms + 1_000
+        ).get("throttled")
+        is None
+    )
+
+
+def test_periodic_sweep_recovers_expired_lease_like_startup(
+    tmp_path, monkeypatch
+):
+    """The periodic entry reaches the same recovery outcome as the startup
+    sweep for a same-boot wedged driver: an expired-lease running intent gets
+    its dedup holder evicted and is re-driven to completion."""
+    _isolate(tmp_path, monkeypatch)
+    team_id, agent_ids = _team(tmp_path, monkeypatch)
+    wedged = _create_open_meeting(team_id, agent_ids, "meeting-periodic-lease")
+    _append_intent(
+        team_id,
+        wedged["meetingRoundId"],
+        leaseExpiresAtMs=int(time.time() * 1000) - 1000,
+    )
+    _ready_to_drive(
+        monkeypatch,
+        {
+            **wedged,
+            "linkedChatRoomId": "room-periodic-lease",
+            "chatRoomRoundIds": ["round-periodic-lease"],
+        },
+    )
+    executor = _InlineExecutor()
+    monkeypatch.setattr(meeting_runtime, "_MEETING_DISCUSSION_EXECUTOR", executor)
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(meeting_runtime, "run_meeting_discussion", _recorder(calls))
+
+    summary = meeting_driver_work.sweep_challenge_meeting_drivers(force=True)
+
+    assert summary == {
+        "teams": 1,
+        "meetingsScanned": 1,
+        "fenced": 0,
+        "backfilled": 0,
+        "rescheduled": 1,
+        "skipped": 0,
+    }
+    assert calls == [(team_id, wedged["meetingRoundId"])]
+    redriven = meeting_driver_work.latest_intent(team_id, wedged["meetingRoundId"])
+    assert redriven["status"] == "completed"
+    # Idempotent across the next tick, exactly like the startup entry: the
+    # completed intent is no longer re-driven, so the follow-up scan is a skip.
+    followup = meeting_driver_work.sweep_challenge_meeting_drivers(force=True)
+    assert followup["meetingsScanned"] == 1
+    assert followup["rescheduled"] == 0
+    assert followup["skipped"] == 1
+    assert calls == [(team_id, wedged["meetingRoundId"])]
+
+
+def test_periodic_sweep_skips_queued_same_boot_intent(tmp_path, monkeypatch):
+    """A meeting whose pending intent belongs to this boot and whose dedup job
+    is still queued (executor has not started it) must not be re-driven: the
+    scheduler answers ``already_scheduled`` and the sweep records a skip —
+    for the periodic entry and the startup entry alike."""
+    _isolate(tmp_path, monkeypatch)
+    team_id, agent_ids = _team(tmp_path, monkeypatch)
+    queued = _create_open_meeting(team_id, agent_ids, "meeting-periodic-queued")
+    meeting_driver_work.record_intent(
+        team_id, queued["meetingRoundId"], status="pending"
+    )
+    _ready_to_drive(
+        monkeypatch,
+        {
+            **queued,
+            "linkedChatRoomId": "room-periodic-queued",
+            "chatRoomRoundIds": ["round-periodic-queued"],
+        },
+    )
+    executor = _DeferredExecutor()
+    monkeypatch.setattr(meeting_runtime, "_MEETING_DISCUSSION_EXECUTOR", executor)
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(meeting_runtime, "run_meeting_discussion", _recorder(calls))
+
+    # The driver is registered in the dedup registry but has not started:
+    # exactly the queued state a fan-out leaves behind.
+    queued_key = (team_id, queued["meetingRoundId"])
+    with meeting_runtime._MEETING_DISCUSSION_JOBS_LOCK:
+        meeting_runtime._MEETING_DISCUSSION_JOBS[queued_key] = "queued-token"
+        meeting_runtime._MEETING_DISCUSSION_SESSIONS[queued_key] = "queued-token"
+
+    periodic = meeting_driver_work.sweep_challenge_meeting_drivers(force=True)
+    assert periodic["rescheduled"] == 0
+    assert periodic["skipped"] == 1
+    startup = meeting_driver_work.recover_challenge_meeting_drivers()
+    assert startup["rescheduled"] == 0
+    assert startup["skipped"] == 1
+    # No second driver was layered onto the queued one and the registration
+    # (and its pending intent) stayed untouched.
+    assert executor.submissions == []
+    assert calls == []
+    with meeting_runtime._MEETING_DISCUSSION_JOBS_LOCK:
+        assert (
+            meeting_runtime._MEETING_DISCUSSION_JOBS.get(queued_key)
+            == "queued-token"
+        )
+    still = meeting_driver_work.latest_intent(team_id, queued["meetingRoundId"])
+    assert still["status"] == "pending"
+
+
+def test_periodic_sweep_records_only_actionable_scene_events(
+    tmp_path, monkeypatch
+):
+    """A no-op periodic scan writes no scene event (the 30s cadence must not
+    grow the event store without bound); an actionable run records exactly
+    one; the startup entry keeps recording unconditionally."""
+    _isolate(tmp_path, monkeypatch)
+    team_id, agent_ids = _team(tmp_path, monkeypatch)
+    quiet = _create_open_meeting(team_id, agent_ids, "meeting-periodic-quiet")
+    # A future deadline with no durable work legitimately awaits an explicit
+    # schedule command: the scan skips it, so the run is a no-op.
+    quiet = _amend_meeting(
+        team_id,
+        quiet,
+        challengeDeadlineAtMs=int(time.time() * 1000) + 3_600_000,
+    )
+    events: list[dict] = []
+    monkeypatch.setattr(
+        meeting_driver_work,
+        "_record_recovery_scene_event",
+        lambda summary: events.append(dict(summary)),
+    )
+
+    first = meeting_driver_work.sweep_challenge_meeting_drivers(force=True)
+    assert first["meetingsScanned"] == 1
+    assert first["skipped"] == 1
+    second = meeting_driver_work.sweep_challenge_meeting_drivers(force=True)
+    assert second["skipped"] == 1
+    assert events == []
+
+    # Flipping the deadline past its fence makes the next tick actionable.
+    _expire_deadline(team_id, quiet, int(time.time() * 1000) - 60_000)
+    actionable = meeting_driver_work.sweep_challenge_meeting_drivers(force=True)
+    assert actionable["fenced"] == 1
+    assert len(events) == 1
+    assert events[0]["fenced"] == 1
+
+    # The fenced meeting is closed, so the next periodic tick is a no-op
+    # again and stays silent — while the startup entry records regardless.
+    noop = meeting_driver_work.sweep_challenge_meeting_drivers(force=True)
+    assert noop["meetingsScanned"] == 0
+    assert len(events) == 1
+    startup = meeting_driver_work.recover_challenge_meeting_drivers()
+    assert startup["meetingsScanned"] == 0
+    assert len(events) == 2
+
+
+def test_maintenance_tick_hosts_challenge_driver_recovery(
+    tmp_path, monkeypatch, restore_runtime_service_singleton
+):
+    """run_maintenance_once is the challenge driver recovery sweep host.
+
+    Same minimal-intrusion host pattern as the digest watchdog and the queue
+    sweep: the tick peeks the self-throttled periodic entry (never creates a
+    second scheduler), and the recovery semantics stay owned by the startup
+    sweep tests in this file.
+    """
+    from core.web.services.team_workflow.research_runtime.runtime_factory import (
+        build_workflow_runtime,
+    )
+
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    runtime = build_workflow_runtime(
+        tmp_path / "ledger.sqlite3",
+        checkpoint_path=tmp_path / "ledger-checkpoints.sqlite",
+    )
+    calls: list[dict] = []
+
+    def _sweep(*args, **kwargs):
+        calls.append(kwargs)
+        return {"fenced": 0, "backfilled": 0, "rescheduled": 0, "skipped": 0}
+
+    monkeypatch.setattr(
+        meeting_driver_work, "sweep_challenge_meeting_drivers", _sweep
+    )
+    try:
+        handled = runtime.run_maintenance_once(limit=2)
+    finally:
+        runtime.close()
+    assert calls == [{}]
+    assert handled >= 0

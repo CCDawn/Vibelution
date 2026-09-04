@@ -620,6 +620,23 @@ def recover_challenge_meeting_drivers() -> dict[str, Any]:
     intent with an expired lease proves its in-process holder is wedged, so
     the stale holder is evicted and the re-drive proceeds.  Never raises;
     every team/meeting failure is isolated into ``skipped``.
+
+    Unthrottled and always recording: this is the once-per-boot startup
+    entry; the resident maintenance tick drives the self-throttled
+    :func:`sweep_challenge_meeting_drivers` instead.
+    """
+
+    summary = _run_challenge_meeting_driver_recovery()
+    _record_recovery_scene_event(summary)
+    return summary
+
+
+def _run_challenge_meeting_driver_recovery() -> dict[str, Any]:
+    """One full recovery scan; shared by the startup and periodic entries.
+
+    Pure scan + closeout with no event recording, so each entry decides its
+    own evidence policy (startup records unconditionally, the periodic sweep
+    records only actionable runs — see ``sweep_challenge_meeting_drivers``).
     """
 
     summary: dict[str, Any] = {
@@ -633,7 +650,6 @@ def recover_challenge_meeting_drivers() -> dict[str, Any]:
     try:
         team_ids = _team_ids_with_meeting_rounds()
     except Exception:  # noqa: BLE001 - startup sweep must never block boot
-        _record_recovery_scene_event(summary)
         return summary
     for team_id in team_ids:
         summary["teams"] += 1
@@ -641,7 +657,96 @@ def recover_challenge_meeting_drivers() -> dict[str, Any]:
             _recover_team_drivers(team_id, summary)
         except Exception:  # noqa: BLE001 - one broken team cannot stop the sweep
             summary["skipped"] += 1
-    _record_recovery_scene_event(summary)
+    return summary
+
+
+# Periodic re-drive sweep on the resident maintenance tick -------------------
+#
+# The startup sweep runs exactly once per process boot, so a meeting whose
+# driver thread died or wedged after boot stayed orphaned until the next
+# restart (observed live as a 7.5-hour hang).  The maintenance tick already
+# hosts the digest watchdog and the queue-activity renewal with the same
+# minimal-intrusion peek pattern, so the recovery scan reuses that host with
+# its own self-throttle instead of a second scheduler.  The scan is idempotent
+# and never raises, but unlike the digest watchdog its evidence is written
+# only for actionable runs: a no-op scan every interval would otherwise grow
+# the scene-event store without bound.  The startup entry keeps its
+# unthrottled, always-recording contract.
+DRIVER_RECOVERY_SWEEP_INTERVAL_MS = 30_000
+DRIVER_RECOVERY_SWEEP_INTERVAL_ENV = "VIBELUTION_DRIVER_RECOVERY_SWEEP_INTERVAL_MS"
+# Throttle stamp for the periodic sweep; touched only under _LOCK.
+_LAST_DRIVER_RECOVERY_SWEEP_MS: int | None = None
+
+
+def _driver_recovery_sweep_interval_ms() -> int:
+    raw = str(os.environ.get(DRIVER_RECOVERY_SWEEP_INTERVAL_ENV) or "").strip()
+    if raw:
+        try:
+            value = int(raw)
+        except ValueError:
+            return DRIVER_RECOVERY_SWEEP_INTERVAL_MS
+        if value > 0:
+            return max(value, 1000)
+    return DRIVER_RECOVERY_SWEEP_INTERVAL_MS
+
+
+def _driver_recovery_sweep_due(now_ms: int) -> bool:
+    global _LAST_DRIVER_RECOVERY_SWEEP_MS
+    interval = _driver_recovery_sweep_interval_ms()
+    with _LOCK:
+        last = _LAST_DRIVER_RECOVERY_SWEEP_MS
+        if last is not None and now_ms - last < interval:
+            return False
+        _LAST_DRIVER_RECOVERY_SWEEP_MS = now_ms
+        return True
+
+
+def reset_driver_recovery_sweep_throttle_for_tests() -> None:
+    """Test seam: forget the last recovery sweep run so the next sweep executes."""
+
+    global _LAST_DRIVER_RECOVERY_SWEEP_MS
+    with _LOCK:
+        _LAST_DRIVER_RECOVERY_SWEEP_MS = None
+
+
+def sweep_challenge_meeting_drivers(
+    *,
+    now_ms: int | None = None,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Periodic driver-recovery sweep hosted by the maintenance tick.
+
+    Exactly the same scan and closeout semantics as
+    :func:`recover_challenge_meeting_drivers` (deadline fences, interrupted-run
+    re-drives, deadline backfills, legacy orphan closeouts — idempotent,
+    never raising), so a meeting whose driver thread died or wedged after
+    boot is recovered within one sweep interval instead of hanging until the
+    next restart.  Self-throttled like the digest watchdog; pass
+    ``force=True`` (tests) to bypass the throttle.  Unlike the startup entry
+    it writes its scene event only when the run had an actionable outcome
+    (fenced, rescheduled, or backfilled) — a healthy no-op scan records
+    nothing, so the 30s cadence cannot grow the event store without bound.
+    """
+
+    current_ms = int(time.time() * 1000) if now_ms is None else int(now_ms)
+    summary: dict[str, Any] = {
+        "teams": 0,
+        "meetingsScanned": 0,
+        "fenced": 0,
+        "backfilled": 0,
+        "rescheduled": 0,
+        "skipped": 0,
+    }
+    if not force and not _driver_recovery_sweep_due(current_ms):
+        summary["throttled"] = True
+        return summary
+    summary = _run_challenge_meeting_driver_recovery()
+    if (
+        int(summary.get("fenced") or 0)
+        or int(summary.get("rescheduled") or 0)
+        or int(summary.get("backfilled") or 0)
+    ):
+        _record_recovery_scene_event(summary)
     return summary
 
 
