@@ -169,6 +169,7 @@ export type TeamWorkspaceRouteLocation = {
   nodeId?: string;
   panel?: string;
   questionId?: string;
+  inspector?: "closed";
 };
 
 function setOptionalRouteParam(params: URLSearchParams, key: string, value: string | undefined) {
@@ -196,6 +197,7 @@ export function teamWorkspaceRoute(
   setOptionalRouteParam(params, "runId", location.runId);
   setOptionalRouteParam(params, "node", location.nodeId);
   setOptionalRouteParam(params, "panel", location.panel);
+  setOptionalRouteParam(params, "inspector", location.inspector);
   return `/teams?${params.toString()}`;
 }
 
@@ -213,6 +215,7 @@ export function canonicalChallengeCupWorkspaceRoute(
     runId: current.get("runId") || current.get("challengeRun") || undefined,
     nodeId: current.get("node") || current.get("nodeId") || undefined,
     panel: current.get("panel") || undefined,
+    inspector: current.get("inspector") === "closed" ? "closed" : undefined,
   });
 }
 
