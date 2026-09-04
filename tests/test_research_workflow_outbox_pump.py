@@ -1,10 +1,10 @@
 """Production outbox pump (B3): parallel claim-and-run dispatch pool.
 
-Covers the Challenge Cup 10-concurrency pump contract:
+Covers the Challenge Cup four-concurrency pump contract:
 - wake/idle drives workers to drain the outbox until idle (no lost wakeups);
 - N workers consume multiple actions concurrently with each action executed
   exactly once (lease CAS sharding, no prefetch);
-- worker count is configurable (default 10, ``VIBELUTION_WORKFLOW_WORKERS``);
+- worker count is configurable (default 4, ``VIBELUTION_WORKFLOW_WORKERS``);
 - stop broadcasts and joins the pool with a bounded wait;
 - two runs' graph actions advance concurrently without cross-run receipt
   leakage (receipt/attempt ownership stays per-run).
@@ -115,7 +115,7 @@ def test_parallel_workers_consume_actions_exactly_once() -> None:
         assert time.monotonic() - started < 10
 
 
-def test_worker_count_defaults_to_ten_and_env_overrides(
+def test_worker_count_defaults_to_four_and_env_overrides(
     monkeypatch: Any,
 ) -> None:
     from core.web.services.team_workflow.research_runtime.runtime_factory import (
@@ -125,20 +125,50 @@ def test_worker_count_defaults_to_ten_and_env_overrides(
     )
 
     monkeypatch.delenv(WORKFLOW_WORKERS_ENV, raising=False)
-    assert DEFAULT_WORKFLOW_WORKERS == 10
-    assert workflow_worker_count() == 10
+    assert DEFAULT_WORKFLOW_WORKERS == 4
+    assert workflow_worker_count() == 4
 
     monkeypatch.setenv(WORKFLOW_WORKERS_ENV, "3")
     assert workflow_worker_count() == 3
 
     monkeypatch.setenv(WORKFLOW_WORKERS_ENV, "not-a-number")
-    assert workflow_worker_count() == 10
+    assert workflow_worker_count() == 4
 
     monkeypatch.setenv(WORKFLOW_WORKERS_ENV, "0")
     assert workflow_worker_count() == 1
 
     monkeypatch.setenv(WORKFLOW_WORKERS_ENV, "-4")
     assert workflow_worker_count() == 1
+
+
+def test_hypothesis_execution_defaults_share_one_four_slot_contract() -> None:
+    """Every admission layer must agree; a wider inner pool recreates queuing."""
+
+    from core.web.services import chat_room_service
+    from core.web.services.team_workflow import (
+        hypothesis_review_executor,
+        llm_review_runners,
+        meeting_runtime,
+    )
+    from core.web.services.team_workflow.research_runtime.outbox_pump import (
+        DEFAULT_WORKERS,
+    )
+    from core.web.services.team_workflow.research_runtime.runtime_factory import (
+        DEFAULT_WORKFLOW_WORKERS,
+    )
+
+    assert {
+        DEFAULT_WORKERS,
+        DEFAULT_WORKFLOW_WORKERS,
+        chat_room_service._CHAT_ROOM_EXECUTOR_MAX_WORKERS_DEFAULT,
+        chat_room_service._CHAT_ROOM_SPEAKER_BATCH_MAX_WORKERS_DEFAULT,
+        meeting_runtime._MEETING_DISCUSSION_MAX_WORKERS_DEFAULT,
+        hypothesis_review_executor.MAX_CONCURRENT_REVIEW_CALLS,
+        llm_review_runners._LLM_GATE_MAX_CONCURRENT_DEFAULT,
+    } == {4}
+    assert chat_room_service._speaker_execution_policy(
+        {"config": {"meetingType": "hypothesis_review"}}
+    )["parallel"] is False
 
 
 def test_pump_spawns_configured_threads_and_stops_bounded() -> None:

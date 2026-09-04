@@ -1,4 +1,4 @@
-"""Global LLM concurrency gate (Challenge 10-way parallel review guard).
+"""Global LLM concurrency gate (four-hypothesis review guard).
 
 Covers the process-level ceiling added around the review LLM funnel:
 
@@ -142,9 +142,8 @@ def test_gate_primitive_caps_concurrent_slots_and_completes_all_callers(monkeypa
 
 
 def test_review_llm_invocations_respect_the_global_gate(monkeypatch):
-    """12 concurrent real-wiring calls against a 4-slot gate: peak <= 4."""
+    """The default gate holds 12 callers to four real provider calls."""
 
-    monkeypatch.setenv(_GATE_MAX_ENV, "4")
     llm_review_runners.reset_llm_gate_for_tests()
     state = _install_slow_pairwise_llm(monkeypatch)
 
@@ -158,14 +157,14 @@ def test_review_llm_invocations_respect_the_global_gate(monkeypatch):
     assert all(result["outcome"] == "left_wins" for result in results)
 
 
-def test_gate_env_override_is_clamped_and_defaults_to_ten(monkeypatch):
+def test_gate_env_override_is_clamped_and_defaults_to_four(monkeypatch):
     monkeypatch.delenv(_GATE_MAX_ENV, raising=False)
-    assert llm_review_runners.llm_gate_max_concurrent() == 10
+    assert llm_review_runners.llm_gate_max_concurrent() == 4
     monkeypatch.setenv(_GATE_MAX_ENV, "3")
     assert llm_review_runners.llm_gate_max_concurrent() == 3
     # A malformed override falls back to the audited default ...
     monkeypatch.setenv(_GATE_MAX_ENV, "not-a-number")
-    assert llm_review_runners.llm_gate_max_concurrent() == 10
+    assert llm_review_runners.llm_gate_max_concurrent() == 4
     # ... while numeric out-of-range values clamp into the governed band.
     for too_small in ("0", "-4"):
         monkeypatch.setenv(_GATE_MAX_ENV, too_small)
