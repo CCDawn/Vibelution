@@ -161,6 +161,7 @@ class WorkflowRuntime:
         handled += self.adapter_worker.run_repairs_once(limit=limit)
         self._reconcile_expired_task_bundles_best_effort()
         self._sweep_stuck_digest_works_best_effort()
+        self._sweep_meetings_missing_digest_best_effort()
         self._refresh_queued_meeting_activity_best_effort()
         self._sweep_auto_advance_closure_best_effort()
         return handled
@@ -203,6 +204,25 @@ class WorkflowRuntime:
             meeting_driver_work.sweep_stuck_digest_works()
         except Exception:  # noqa: BLE001 - watchdog must never break maintenance
             logger.exception("stuck digest work sweep failed")
+
+    def _sweep_meetings_missing_digest_best_effort(self) -> None:
+        """Schedule digests for discussions that finished without one.
+
+        ``run_meeting_discussion`` drafts its digest synchronously, so a
+        process death in that window (or a draft that failed with no redrive)
+        leaves a complete discussion hanging without ``run_digest`` — the
+        meeting then waits for the next fence instead of producing its
+        summary.  The missing-digest sweep is peeked (not created),
+        self-throttled, and only ever enters through the existing idempotent
+        ``schedule_meeting_digest_redrive`` entry; any failure is swallowed
+        after logging (same discipline as the stuck-digest watchdog).
+        """
+        try:
+            from core.web.services.team_workflow import meeting_runtime
+
+            meeting_runtime.sweep_meetings_missing_digest()
+        except Exception:  # noqa: BLE001 - sweep must never break maintenance
+            logger.exception("missing digest scheduling sweep failed")
 
     def _refresh_queued_meeting_activity_best_effort(self) -> None:
         """Renew queued discussion drivers' meeting activity from this tick.

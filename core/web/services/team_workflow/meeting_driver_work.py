@@ -694,6 +694,7 @@ def _recover_one_meeting(
             meeting_round_id,
             reason=_FENCE_REASON_DEADLINE,
         )
+        _closeout_fenced_meeting_attempts(team_id, meeting_round_id, _FENCE_REASON_DEADLINE)
         return "fenced"
     if str(meeting.get("status") or "").strip().lower() == "summarizing":
         digest_work = latest_intent(
@@ -1274,7 +1275,32 @@ def _close_or_backfill_identity_gap(
         meeting_round_id,
         reason=_FENCE_REASON_LEGACY_ORPHAN,
     )
+    _closeout_fenced_meeting_attempts(team_id, meeting_round_id, _FENCE_REASON_LEGACY_ORPHAN)
     return "fenced"
+
+
+def _closeout_fenced_meeting_attempts(
+    team_id: str,
+    meeting_round_id: str,
+    reason: str,
+) -> None:
+    """Bridge a sweep fence into the shared fenced-meeting closeout.
+
+    The startup sweep fences through the raw terminal primitive (it runs
+    before the runtime is warm), so the attempt/digest closeout is pulled in
+    through the same :func:`meeting_runtime.closeout_fenced_meeting` bridge
+    the in-driver fences use.  Best-effort: a closeout failure must never
+    undo the fence itself.
+    """
+
+    try:
+        from core.web.services.team_workflow import meeting_runtime
+
+        meeting_runtime.closeout_fenced_meeting(
+            team_id, meeting_round_id, reason=reason
+        )
+    except Exception:  # noqa: BLE001 - the fence stays authoritative
+        return
 
 
 def _record_recovery_scene_event(summary: Mapping[str, Any]) -> None:

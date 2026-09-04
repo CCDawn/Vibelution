@@ -2698,12 +2698,14 @@ def _run_scheduled_meeting_digest_redrive(team_id: str, meeting_round_id: str) -
 
 
 def schedule_meeting_digest_redrive(team_id: str, meeting_round_id: str) -> dict[str, Any]:
-    """Submit exactly one durable digest re-drive for a summarizing meeting.
+    """Submit exactly one durable digest re-drive for an under-drafted meeting.
 
-    Recovery-only entry used by the startup sweep: the in-process digest job
-    set dedups so consecutive sweeps never stack work on one meeting, and
-    the draft re-enters the same bounded, idempotent summary-draft state
-    machine a UI retry uses (sourceHash reuse check included).
+    Recovery-only entry used by the startup sweep and the periodic
+    missing-digest sweep: an ``open`` meeting whose discussion finished
+    without a digest or a ``summarizing`` meeting with a dead draft both
+    re-enter the same bounded, idempotent summary-draft state machine a UI
+    retry uses (sourceHash reuse check included).  The in-process digest job
+    set dedups so consecutive sweeps never stack work on one meeting.
     """
 
     from core.web.services import team_service
@@ -2748,6 +2750,203 @@ def schedule_meeting_digest_redrive(team_id: str, meeting_round_id: str) -> dict
         "teamId": normalized_team_id,
         "meetingRoundId": normalized_round_id,
     }
+
+
+# Auto-scheduled digest re-drives are bounded harder than the startup sweep's
+# discussion cap: an initial failed draft (``attemptCount`` 1) is re-driven
+# once; the second failure reaches the cap and stays auditable for the
+# operator retry instead of looping LLM calls forever.
+MAX_DIGEST_AUTO_REDRIVE_ATTEMPTS = 2
+DIGEST_MISSING_SWEEP_INTERVAL_MS = 30_000
+DIGEST_MISSING_SWEEP_INTERVAL_ENV = "VIBELUTION_DIGEST_MISSING_SWEEP_INTERVAL_MS"
+# Throttle stamp for the missing-digest sweep; touched only under its lock.
+_LAST_DIGEST_MISSING_SWEEP_MS: int | None = None
+_DIGEST_MISSING_SWEEP_LOCK = threading.Lock()
+
+
+def reset_digest_missing_sweep_throttle_for_tests() -> None:
+    """Test seam: forget the last sweep run so the next sweep executes."""
+
+    global _LAST_DIGEST_MISSING_SWEEP_MS
+    with _DIGEST_MISSING_SWEEP_LOCK:
+        _LAST_DIGEST_MISSING_SWEEP_MS = None
+
+
+def _digest_missing_sweep_due(now_ms: int) -> bool:
+    global _LAST_DIGEST_MISSING_SWEEP_MS
+    with _DIGEST_MISSING_SWEEP_LOCK:
+        last = _LAST_DIGEST_MISSING_SWEEP_MS
+        interval = DIGEST_MISSING_SWEEP_INTERVAL_MS
+        raw = str(os.environ.get(DIGEST_MISSING_SWEEP_INTERVAL_ENV) or "").strip()
+        if raw:
+            try:
+                normalized = int(raw)
+            except ValueError:
+                normalized = 0
+            if normalized > 0:
+                interval = normalized
+        if last is not None and now_ms - last < interval:
+            return False
+        _LAST_DIGEST_MISSING_SWEEP_MS = now_ms
+        return True
+
+
+def _meeting_has_digest_product(meeting_round: Mapping[str, Any]) -> bool:
+    """True when a digest artifact already exists (draft or approved)."""
+
+    for key in ("digestDraft", "digest"):
+        value = meeting_round.get(key)
+        if isinstance(value, Mapping) and value:
+            return True
+    return False
+
+
+def sweep_meetings_missing_digest(
+    *,
+    now_ms: int | None = None,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Periodic digest scheduling for discussions that finished silently.
+
+    The discussion driver drafts its digest synchronously when it stops, but
+    a process death between the last completed speech and the draft (or a
+    digest draft that failed before any redrive) leaves a meeting whose
+    discussion is really complete with ``run_digest`` never scheduled — the
+    meeting hangs in ``open``/``summarizing`` until the next fence.  This
+    sweep, hosted by the resident maintenance tick with the same peek +
+    self-throttle discipline as the stuck-digest watchdog, schedules the
+    digest for exactly two shapes:
+
+    - an ``open`` meeting whose last bound round is terminal with completed,
+      non-pass speech (the 068c92ba5 last-bound-round view) and no digest
+      product — ``run_digest`` was never scheduled;
+    - a ``summarizing`` meeting whose digest work is not live and either
+      failed under :data:`MAX_DIGEST_AUTO_REDRIVE_ATTEMPTS` or carries no
+      intent at all — the draft died mid-run.
+
+    Meetings with any live (pending/running) digest intent, an in-flight
+    redrive, or a digest product are never touched.  Idempotency reuses the
+    existing keys: the in-process ``_MEETING_DIGEST_JOBS`` dedup and the
+    durable digest intent bound to the source hash.  Never raises; one
+    broken team or meeting is isolated into ``skipped``.
+    """
+
+    summary: dict[str, Any] = {
+        "teams": 0,
+        "scanned": 0,
+        "scheduled": 0,
+        "skipped": 0,
+    }
+    current_ms = int(time.time() * 1000) if now_ms is None else int(now_ms)
+    if not force and not _digest_missing_sweep_due(current_ms):
+        summary["throttled"] = True
+        return summary
+    try:
+        team_ids = meeting_driver_work._team_ids_with_meeting_rounds()
+    except Exception:  # noqa: BLE001 - the sweep must never break its host
+        _record_digest_missing_sweep_event(summary)
+        return summary
+    for team_id in team_ids:
+        summary["teams"] += 1
+        try:
+            _sweep_team_meetings_missing_digest(team_id, summary)
+        except Exception:  # noqa: BLE001 - one broken team cannot stop the sweep
+            summary["skipped"] += 1
+    _record_digest_missing_sweep_event(summary)
+    return summary
+
+
+def _sweep_team_meetings_missing_digest(team_id: str, summary: dict[str, Any]) -> None:
+    meetings = meeting_rounds.list_meeting_rounds(
+        team_id, status=("open", "summarizing")
+    )["meetings"]
+    for meeting in meetings:
+        summary["scanned"] += 1
+        meeting_round_id = str(meeting.get("meetingRoundId") or "").strip()
+        if not meeting_round_id:
+            summary["skipped"] += 1
+            continue
+        try:
+            if _meeting_missing_digest(team_id, meeting_round_id, meeting):
+                result = schedule_meeting_digest_redrive(team_id, meeting_round_id)
+                if str(result.get("status") or "") == "scheduled":
+                    summary["scheduled"] += 1
+                else:
+                    summary["skipped"] += 1
+            else:
+                summary["skipped"] += 1
+        except Exception:  # noqa: BLE001 - one broken meeting cannot stop the sweep
+            summary["skipped"] += 1
+
+
+def _meeting_missing_digest(
+    team_id: str,
+    meeting_round_id: str,
+    meeting: Mapping[str, Any],
+) -> bool:
+    """True when the digest must be (re-)scheduled for one meeting."""
+
+    if _meeting_has_digest_product(meeting):
+        return False
+    key = (team_id, meeting_round_id)
+    with _MEETING_DIGEST_JOBS_LOCK:
+        if key in _MEETING_DIGEST_JOBS:
+            return False
+    try:
+        latest = meeting_driver_work.latest_intent(
+            team_id, meeting_round_id, action_kind=meeting_driver_work.ACTION_RUN_DIGEST
+        )
+    except Exception:  # noqa: BLE001 - an unreadable intent is treated as live
+        return False
+    status = str((latest or {}).get("status") or "").strip().lower()
+    if status in {meeting_driver_work.STATUS_PENDING, meeting_driver_work.STATUS_RUNNING}:
+        return False
+    if status == meeting_driver_work.STATUS_FAILED:
+        if meeting_driver_work._attempt_count(latest) >= MAX_DIGEST_AUTO_REDRIVE_ATTEMPTS:
+            return False
+    meeting_status = str(meeting.get("status") or "").strip().lower()
+    if meeting_status == "open":
+        # The discussion must really be done: no running bound round and the
+        # last bound round produced citable speech (068c92ba5 view — history
+        # from earlier rounds does not qualify a dead latest round).
+        if meeting_rounds.running_bound_round_ids(meeting):
+            return False
+        return bool(
+            meeting_rounds.completed_latest_bound_round_source_messages(meeting)
+        )
+    if meeting_status == "summarizing":
+        # Same gate the summary draft enforces: without citable messages the
+        # draft would only block again.
+        return bool(meeting_rounds.completed_meeting_source_messages(meeting))
+    return False
+
+
+def _record_digest_missing_sweep_event(summary: Mapping[str, Any]) -> None:
+    """Bounded sweep evidence, following the stuck-digest watchdog pattern."""
+
+    try:
+        from core.web.services.runtime_scene_service import (
+            record_runtime_scene_event_quietly,
+        )
+
+        record_runtime_scene_event_quietly(
+            "team_workflow",
+            "meeting_digest_missing",
+            "meeting_digest.missing_sweep_completed",
+            message="Missing digest scheduling sweep finished.",
+            level="info",
+            outcome="completed",
+            fields={
+                "teams": int(summary.get("teams") or 0),
+                "scanned": int(summary.get("scanned") or 0),
+                "scheduled": int(summary.get("scheduled") or 0),
+                "skipped": int(summary.get("skipped") or 0),
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        # A diagnostic outage must not alter the sweep outcome.
+        return
 
 
 def _run_meeting_discussion_impl(
@@ -3095,6 +3294,9 @@ def _run_meeting_discussion_impl(
             normalized_team_id,
             normalized_round_id,
             reason=stop_reason,
+        )
+        closeout_fenced_meeting(
+            normalized_team_id, normalized_round_id, reason=stop_reason
         )
         meeting_round = terminal["meetingRound"]
         return {
@@ -4215,17 +4417,63 @@ def finalize_stopped_meeting_after_chat_round(
         reason=terminal_reason,
     )
     meeting_round = terminal.get("meetingRound") or {}
-    if (
-        str(meeting_round.get("meetingType") or "").strip().lower()
-        == CANDIDATE_GENERATION_MEETING_TYPE
-    ):
+    closeout_fenced_meeting(team_id, meeting_round_id, reason=terminal_reason)
+    return terminal
+
+
+def closeout_fenced_meeting(team_id: str, meeting_round_id: str, *, reason: str) -> None:
+    """Finish the execution-bound work a Challenge fence just terminated.
+
+    ``terminate_meeting_execution`` closes the MeetingRound record, but three
+    durable surfaces only learn about the closure through this bridge:
+
+    - a live ``run_digest`` driver intent is superseded, so the recovery
+      sweeps never re-drive digest work for a meeting that can no longer
+      promote a digest;
+    - the owning candidate-generation attempt gets its failure terminal state
+      through the chain's existing ``fail_generation_attempt_for_meeting``
+      primitive;
+    - the owning review-dispatch attempts get the same superseded terminal
+      write the dispatch path itself uses for terminated meetings.
+
+    Every step is idempotent (terminal records are returned untouched, so a
+    repeated fence sweep never writes twice) and best-effort: a broken step
+    is isolated and the fence closure itself is never undone.
+    """
+
+    normalized_team_id = str(team_id or "").strip()
+    normalized_round_id = str(meeting_round_id or "").strip()
+    normalized_reason = str(reason or "").strip()
+    if not normalized_team_id or not normalized_round_id or not normalized_reason:
+        return
+    try:
+        latest_digest = meeting_driver_work.latest_intent(
+            normalized_team_id,
+            normalized_round_id,
+            action_kind=meeting_driver_work.ACTION_RUN_DIGEST,
+        )
+        if str((latest_digest or {}).get("status") or "").strip().lower() in {
+            meeting_driver_work.STATUS_PENDING,
+            meeting_driver_work.STATUS_RUNNING,
+        }:
+            meeting_driver_work.record_intent(
+                normalized_team_id,
+                normalized_round_id,
+                status=meeting_driver_work.STATUS_SUPERSEDED,
+                action_kind=meeting_driver_work.ACTION_RUN_DIGEST,
+                last_problem=f"fenced:{normalized_reason}",
+            )
+    except Exception:  # noqa: BLE001 - the digest intent is recovery-only sugar
+        pass
+    try:
         from core.web.services.team_workflow.research_runtime import (
             hypothesis_first_chain,
         )
 
-        hypothesis_first_chain.fail_generation_attempt_for_meeting(
-            team_id,
-            meeting_round_id,
-            reason=terminal_reason,
+        hypothesis_first_chain.closeout_fenced_meeting_attempts(
+            normalized_team_id,
+            normalized_round_id,
+            reason=normalized_reason,
         )
-    return terminal
+    except Exception:  # noqa: BLE001 - attempt closeout never undoes the fence
+        pass

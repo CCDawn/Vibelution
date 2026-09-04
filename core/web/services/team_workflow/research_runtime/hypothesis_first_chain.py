@@ -3478,6 +3478,396 @@ def auto_retry_blocked_formal_nodes(
     return summary
 
 
+# Auto-executor inflight markers (same pattern as _ROUND_REGEN_INFLIGHT): a
+# slow redrive must not be double-triggered for the same meeting/question
+# while the maintenance sweep is still serial.
+_FENCED_REVIEW_REDRIVE_INFLIGHT: dict[tuple[str, str], object] = {}
+_CLOSED_GENERATION_RETRY_INFLIGHT: dict[tuple[str, str], object] = {}
+
+
+def _fenced_review_redrive_plan(
+    team_id: str,
+    meeting: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """Resolve the redrive plan for one fenced, discussion-complete review meeting.
+
+    ``None`` means the meeting must not be touched: the plan needs the
+    dispatch identity (selection + candidates + round index) and proof that
+    this meeting still owns the newest attempt for every candidate — a newer
+    attempt means the fence was already redriven and a second hop would
+    duplicate the round.  The attempt cap reuses ``HARD_ROUND_LIMIT`` so a
+    dispatch identity cannot loop forever.
+    """
+
+    from core.web.services.team_workflow import meeting_rounds
+
+    meeting_round_id = str(meeting.get("meetingRoundId") or "").strip()
+    if not meeting_round_id:
+        return None
+    if (
+        str(meeting.get("status") or "").strip().lower() != "closed"
+        or not _is_execution_stopped_meeting(meeting)
+    ):
+        return None
+    # "Discussion really completed": the 068c92ba5 last-bound-round view —
+    # the newest bound round produced citable completed speech.  History from
+    # earlier rounds alone never qualifies.
+    try:
+        if not meeting_rounds.completed_latest_bound_round_source_messages(meeting):
+            return None
+    except meeting_rounds.ResearchMeetingRoundError:
+        return None
+    link = next(
+        (
+            dict(item)
+            for item in list_review_round_links(team_id).get("links") or []
+            if str(item.get("meetingRoundId") or "").strip() == meeting_round_id
+        ),
+        {},
+    )
+    selection_id = str(
+        link.get("selectionId") or _selection_id_from_meeting(meeting)
+    ).strip()
+    if not selection_id:
+        return None
+    candidate_ids: list[str] = []
+    link_candidate = str(link.get("candidateId") or "").strip()
+    if link_candidate:
+        candidate_ids.append(link_candidate)
+    else:
+        candidate_ids = [
+            ref.split(":", 1)[1].strip()
+            for ref in _normalized_str_list(meeting.get("discussionItemRefs"))
+            if ref.startswith("hypothesis_candidate:")
+            and ref.split(":", 1)[1].strip()
+        ]
+    if not candidate_ids:
+        return None
+    round_index = int(link.get("roundIndex") or 0)
+    records = _records(team_id)
+    eligible: list[str] = []
+    attempt_number = 0
+    for candidate_id in candidate_ids:
+        latest = _latest_review_dispatch_attempt(
+            records,
+            selection_id=selection_id,
+            candidate_id=candidate_id,
+            round_index=round_index,
+        )
+        if latest is None:
+            continue
+        if str(latest.get("meetingRoundId") or "").strip() != meeting_round_id:
+            # A newer attempt owns this dispatch identity already: the fence
+            # was redriven (or superseded) elsewhere.
+            continue
+        attempt_number = max(attempt_number, int(latest.get("attemptNumber") or 1))
+        eligible.append(candidate_id)
+    if not eligible:
+        return None
+    if attempt_number >= HARD_ROUND_LIMIT:
+        return None
+    return {
+        "selectionId": selection_id,
+        "candidateIds": eligible,
+        "roundIndex": round_index,
+    }
+
+
+def auto_redrive_fenced_review_meeting(
+    team_id: str,
+    *,
+    question_id: str,
+) -> dict[str, Any]:
+    """Auto-execute the retry-review-dispatch recovery for one fenced review.
+
+    Auto-advance step four.  A Challenge fence closes a review meeting whose
+    discussion really produced citable speech (deadline cut, restart orphan);
+    the V2 projection correctly offers ``retry_review_dispatch`` for that
+    shape, but nothing executed the offer automatically, so the candidate
+    waited for a human sweep.  This helper finds the question's fenced review
+    meetings whose last bound round is still speech-bearing, resolves the
+    dispatch identity, and re-dispatches through the exact same
+    :func:`retry_review_dispatch` entry the manual command branch reaches —
+    the attempt ledger supersedes the fenced attempt and a fresh meeting
+    opens without burning the round budget.  Idempotent: a fenced meeting
+    whose dispatch identity already has a newer attempt is never re-driven,
+    and the queued attempt append is the single attempt authority.  Bounded:
+    at most one meeting per call (one hop per sweep per question), capped by
+    ``HARD_ROUND_LIMIT`` attempts per identity.  Best-effort: nothing raises;
+    every outcome lands as a ``hypothesis_first.auto_redrive_fenced_review``
+    scene event.
+    """
+
+    normalized_team_id = str(team_id or "").strip()
+    normalized_question_id = str(question_id or "").strip().upper()
+    summary: dict[str, Any] = {
+        "fenced": 0,
+        "redriven": 0,
+        "skipped": 0,
+        "failed": 0,
+        "status": "skipped",
+        "reason": "",
+    }
+    if not normalized_team_id or not normalized_question_id:
+        summary["reason"] = "missing_identity"
+        return summary
+    meetings = [
+        meeting
+        for meeting in _question_meetings(normalized_team_id, normalized_question_id)
+        if str(meeting.get("status") or "").strip().lower() == "closed"
+        and _is_execution_stopped_meeting(meeting)
+    ]
+    for meeting in meetings:
+        summary["fenced"] += 1
+        meeting_round_id = str(meeting.get("meetingRoundId") or "").strip()
+        inflight_key = (normalized_team_id, meeting_round_id)
+        inflight_token: object = object()
+        if _FENCED_REVIEW_REDRIVE_INFLIGHT.setdefault(
+            inflight_key, inflight_token
+        ) is not inflight_token:
+            summary["skipped"] += 1
+            continue
+        try:
+            plan = _fenced_review_redrive_plan(normalized_team_id, meeting)
+            if plan is None:
+                summary["skipped"] += 1
+                continue
+            retry_review_dispatch(
+                normalized_team_id,
+                str(plan["selectionId"]),
+                [str(item) for item in plan["candidateIds"]],
+            )
+        except HypothesisFirstChainError as exc:
+            # Domain rejection (the meeting/selection moved between the read
+            # and the dispatch): a structured wait, never an error.
+            summary["skipped"] += 1
+            summary["status"] = "skipped"
+            summary["reason"] = str(exc)[:200]
+            _record_scene_event(
+                "hypothesis_first.auto_redrive_fenced_review",
+                outcome="skipped",
+                fields={
+                    "teamId": normalized_team_id,
+                    "questionId": normalized_question_id,
+                    "meetingRoundId": meeting_round_id,
+                    "reason": str(exc)[:200],
+                },
+            )
+            continue
+        except Exception as exc:  # noqa: BLE001 - one broken meeting is isolated
+            summary["failed"] += 1
+            summary["status"] = "failed"
+            _record_scene_event(
+                "hypothesis_first.auto_redrive_fenced_review",
+                outcome="failed",
+                level="warning",
+                fields={
+                    "teamId": normalized_team_id,
+                    "questionId": normalized_question_id,
+                    "meetingRoundId": meeting_round_id,
+                    "reason": type(exc).__name__,
+                    "error": str(exc)[:400],
+                },
+            )
+            continue
+        else:
+            summary["redriven"] += 1
+            summary["status"] = "redriven"
+            _record_scene_event(
+                "hypothesis_first.auto_redrive_fenced_review",
+                outcome="submitted",
+                fields={
+                    "teamId": normalized_team_id,
+                    "questionId": normalized_question_id,
+                    "meetingRoundId": meeting_round_id,
+                    "selectionId": str(plan["selectionId"]),
+                    "candidateIds": [str(item) for item in plan["candidateIds"]],
+                    "roundIndex": int(plan["roundIndex"]),
+                },
+            )
+            # One hop per sweep per question: the remaining fenced meetings
+            # (if any) wait for the next tick.
+            return summary
+        finally:
+            _FENCED_REVIEW_REDRIVE_INFLIGHT.pop(inflight_key, None)
+    return summary
+
+
+def _fenced_generation_retry_plan(
+    team_id: str,
+    meeting: Mapping[str, Any],
+    *,
+    question_id: str,
+) -> bool:
+    """True when a closed, digest-less generation meeting may be re-driven.
+
+    The meeting must be fenced (execution-stopped closure) with no digest
+    product, and its owning generation attempt must still be the question's
+    newest attempt — a newer attempt means the retry already happened.  The
+    attempt count cap reuses ``HARD_ROUND_LIMIT``.
+    """
+
+    meeting_round_id = str(meeting.get("meetingRoundId") or "").strip()
+    if not meeting_round_id:
+        return False
+    if _meeting_has_digest_artifact(meeting):
+        return False
+    question_attempts = _generation_attempts(
+        _read_jsonl(_storage_path(team_id)), str(question_id or "").strip().upper()
+    )
+    if not question_attempts:
+        return False
+    newest = question_attempts[-1]
+    owner = next(
+        (
+            item
+            for item in reversed(question_attempts)
+            if str(item.get("meetingRoundId") or "").strip() == meeting_round_id
+        ),
+        None,
+    )
+    if owner is None or str(owner.get("attemptId") or "") != str(
+        newest.get("attemptId") or ""
+    ):
+        return False
+    return len(question_attempts) < HARD_ROUND_LIMIT
+
+
+def _meeting_has_digest_artifact(meeting_round: Mapping[str, Any]) -> bool:
+    """True when the meeting already carries a digest draft or approved digest."""
+
+    for key in ("digestDraft", "digest"):
+        value = meeting_round.get(key)
+        if isinstance(value, Mapping) and value:
+            return True
+    return False
+
+
+def auto_retry_fenced_generation_attempt(
+    team_id: str,
+    *,
+    question_id: str,
+) -> dict[str, Any]:
+    """Auto-supersede and retry a fenced, digest-less generation attempt.
+
+    Auto-advance step five.  A fenced candidate-generation meeting that
+    produced no digest leaves the R1 chain with no candidates and no live
+    attempt; the ``retry_generation`` offer exists but had no automatic
+    executor.  This helper finds the question's fenced generation meetings
+    with no digest artifact, then walks the exact internal path the
+    ``retry_generation`` command branch reaches —
+    :func:`resolve_stage_one_generation_launch` +
+    :func:`open_candidate_generation_meeting` — so the owning service
+    supersedes the terminal attempt and opens the fresh per-attempt meeting
+    unchanged.  Idempotent: only the question's newest attempt is eligible,
+    the attempt count is capped at ``HARD_ROUND_LIMIT``, and a meeting that
+    already produced a digest is never touched.  At most one retry per call.
+    Best-effort: nothing raises; every outcome lands as a
+    ``hypothesis_first.auto_retry_closed_generation`` scene event.
+    """
+
+    normalized_team_id = str(team_id or "").strip()
+    normalized_question_id = str(question_id or "").strip().upper()
+    summary: dict[str, Any] = {
+        "fenced": 0,
+        "retried": 0,
+        "skipped": 0,
+        "failed": 0,
+        "status": "skipped",
+        "reason": "",
+    }
+    if not normalized_team_id or not normalized_question_id:
+        summary["reason"] = "missing_identity"
+        return summary
+    meetings = [
+        meeting
+        for meeting in _question_generation_meetings(
+            normalized_team_id, normalized_question_id
+        )
+        if str(meeting.get("status") or "").strip().lower() == "closed"
+        and _is_execution_stopped_meeting(meeting)
+    ]
+    for meeting in meetings:
+        summary["fenced"] += 1
+        meeting_round_id = str(meeting.get("meetingRoundId") or "").strip()
+        inflight_key = (normalized_team_id, meeting_round_id)
+        inflight_token: object = object()
+        if _CLOSED_GENERATION_RETRY_INFLIGHT.setdefault(
+            inflight_key, inflight_token
+        ) is not inflight_token:
+            summary["skipped"] += 1
+            continue
+        try:
+            if not _fenced_generation_retry_plan(
+                normalized_team_id, meeting, question_id=normalized_question_id
+            ):
+                summary["skipped"] += 1
+                continue
+            launch = resolve_stage_one_generation_launch(
+                normalized_team_id,
+                normalized_question_id,
+                _meeting_workflow_run_id(meeting),
+            )
+            open_candidate_generation_meeting(
+                normalized_team_id,
+                normalized_question_id,
+                _model_invocation_receipt_authority=launch.get("receipt_authority"),
+                _discussion_scope=launch.get("discussion_scope"),
+                _candidate_authority=str(launch.get("candidate_authority") or ""),
+                _generation_context=launch.get("generation_context"),
+            )
+        except HypothesisFirstChainError as exc:
+            # Domain rejection (context blocked, scope moved): a structured
+            # wait for the next tick, never an error.
+            summary["skipped"] += 1
+            summary["status"] = "skipped"
+            summary["reason"] = str(exc)[:200]
+            _record_scene_event(
+                "hypothesis_first.auto_retry_closed_generation",
+                outcome="skipped",
+                fields={
+                    "teamId": normalized_team_id,
+                    "questionId": normalized_question_id,
+                    "meetingRoundId": meeting_round_id,
+                    "reason": str(exc)[:200],
+                },
+            )
+            continue
+        except Exception as exc:  # noqa: BLE001 - one broken meeting is isolated
+            summary["failed"] += 1
+            summary["status"] = "failed"
+            _record_scene_event(
+                "hypothesis_first.auto_retry_closed_generation",
+                outcome="failed",
+                level="warning",
+                fields={
+                    "teamId": normalized_team_id,
+                    "questionId": normalized_question_id,
+                    "meetingRoundId": meeting_round_id,
+                    "reason": type(exc).__name__,
+                    "error": str(exc)[:400],
+                },
+            )
+            continue
+        else:
+            summary["retried"] += 1
+            summary["status"] = "retried"
+            _record_scene_event(
+                "hypothesis_first.auto_retry_closed_generation",
+                outcome="submitted",
+                fields={
+                    "teamId": normalized_team_id,
+                    "questionId": normalized_question_id,
+                    "meetingRoundId": meeting_round_id,
+                },
+            )
+            # One retry per sweep per question.
+            return summary
+        finally:
+            _CLOSED_GENERATION_RETRY_INFLIGHT.pop(inflight_key, None)
+    return summary
+
+
 def _auto_approve_digest_ttl_ms() -> int:
     """Configured digest auto-approve wait in ms.
 
@@ -3576,8 +3966,13 @@ def auto_approve_awaiting_review_digests(
     belongs to the stuck-digest recovery, never to an approval), and an
     ``updatedAt`` at least as old as the configured TTL — which is 0 by
     default (no human window: the landed digest is approved on this very
-    sweep pass).  No offer/idempotency layer is re-invented: the closure is
-    idempotent on its closure hash and a meeting that closed in the
+    sweep pass).  A candidate-generation digest additionally must pass a
+    quality gate before the automatic approval: zero ``validationErrors``
+    and at least one proposed candidate.  A generation draft that fails
+    the gate keeps its human gate and emits a reminder scene event
+    instead of being silently skipped.  No offer/idempotency layer is
+    re-invented: the closure is idempotent on its closure hash and a
+    meeting that closed in the
     meantime is rejected by the domain status assertion, so a replay can
     never approve twice.
 
@@ -3657,6 +4052,43 @@ def auto_approve_awaiting_review_digests(
                 fields={**fields, "reason": "digest_missing"},
             )
             continue
+        if meeting_type == CANDIDATE_GENERATION_MEETING_TYPE:
+            # Quality gate for the automatic candidate-generation approval:
+            # a draft with validation errors or without a single proposed
+            # candidate is not safe to close automatically, so the human gate
+            # stays and a reminder event keeps the wait auditable.
+            validation_errors = [
+                item
+                for item in list(draft.get("validationErrors") or [])
+                if isinstance(item, Mapping)
+            ]
+            proposals = [
+                item
+                for item in list(draft.get("proposedCandidates") or [])
+                if isinstance(item, Mapping)
+            ]
+            if validation_errors or not proposals:
+                summary["skipped"] += 1
+                _record_scene_event(
+                    "hypothesis_first.auto_approve_review_digest",
+                    outcome="skipped",
+                    level="warning",
+                    fields={
+                        **fields,
+                        "reason": (
+                            "candgen_digest_validation_errors"
+                            if validation_errors
+                            else "candgen_digest_no_proposals"
+                        ),
+                        "validationErrorCount": len(validation_errors),
+                        "proposedCandidateCount": len(proposals),
+                        "reminder": (
+                            "candgen digest awaits manual approval: the "
+                            "auto-approve quality gate did not pass"
+                        ),
+                    },
+                )
+                continue
         updated_at_ms = _iso_timestamp_ms(meeting.get("updatedAt"))
         if updated_at_ms is None:
             summary["skipped"] += 1
@@ -3737,6 +4169,7 @@ def auto_approve_awaiting_review_digests(
                         **fields,
                         "digestAgeMs": digest_age_ms,
                         "closedBy": closed_by,
+                        "meetingType": meeting_type,
                         # Deterministic identity of the automatic approval
                         # (no timestamps): meetingRoundId + TTL semantics.
                         "rationale": (
@@ -4728,6 +5161,8 @@ def sweep_auto_advance_closure() -> dict[str, Any]:
         "formalRuns": 0,
         "knowledgeHandoffsAccepted": 0,
         "retried": 0,
+        "fencedReviewsRedriven": 0,
+        "closedGenerationsRetried": 0,
         "failed": 0,
         "skipped": 0,
     }
@@ -4822,6 +5257,25 @@ def sweep_auto_advance_closure() -> dict[str, Any]:
                     team_id, question_id=question_id
                 )
                 summary["retried"] += int(retry_summary.get("retried") or 0)
+                # Step four, every question every pass: execute the
+                # retry-review-dispatch recovery for a fenced review meeting
+                # whose discussion really completed (the offer 068c92ba5 made
+                # executable, now driven automatically, one hop per pass).
+                fenced_review = auto_redrive_fenced_review_meeting(
+                    team_id, question_id=question_id
+                )
+                summary["fencedReviewsRedriven"] += int(
+                    fenced_review.get("redriven") or 0
+                )
+                # Step five, every question every pass: supersede + retry a
+                # fenced, digest-less generation attempt through the
+                # retry_generation internal path (one retry per pass).
+                fenced_generation = auto_retry_fenced_generation_attempt(
+                    team_id, question_id=question_id
+                )
+                summary["closedGenerationsRetried"] += int(
+                    fenced_generation.get("retried") or 0
+                )
             except Exception:  # noqa: BLE001 - one broken question is isolated
                 summary["failed"] += 1
     _record_scene_event(
@@ -4838,6 +5292,8 @@ def sweep_auto_advance_closure() -> dict[str, Any]:
             "formalRuns": int(summary["formalRuns"]),
             "knowledgeHandoffsAccepted": int(summary["knowledgeHandoffsAccepted"]),
             "retried": int(summary["retried"]),
+            "fencedReviewsRedriven": int(summary["fencedReviewsRedriven"]),
+            "closedGenerationsRetried": int(summary["closedGenerationsRetried"]),
             "failed": int(summary["failed"]),
             "skipped": int(summary["skipped"]),
         },
@@ -6409,6 +6865,108 @@ def fail_generation_attempt_for_meeting(
         supersedes_attempt_id=str(current.get("supersedesAttemptId") or ""),
         error=normalized_reason,
     )
+
+
+def fail_review_dispatch_attempts_for_meeting(
+    team_id: str,
+    meeting_round_id: str,
+    *,
+    reason: str,
+) -> list[dict[str, Any]]:
+    """Finish every active review-dispatch attempt bound to one meeting.
+
+    The MeetingRound is the execution authority for a review dispatch.  When a
+    Challenge fence closes the meeting (deadline, restart, legacy orphan), the
+    attempt ledger must not keep reporting the dispatch as live.  This is the
+    same terminal write the dispatch path itself performs when it finds its
+    bound meeting already terminated (``lifecycle="failed"``,
+    ``outcome="superseded"``, ``errorType="ReviewMeetingClosed"``), so the
+    projection resolves the attempt exactly like a superseded retry.  A
+    terminal attempt is returned untouched, so a repeated fence sweep never
+    writes twice.
+    """
+
+    normalized_meeting_round_id = str(meeting_round_id or "").strip()
+    normalized_reason = str(reason or "").strip()
+    if not normalized_meeting_round_id:
+        raise HypothesisFirstChainError("meeting round id is required")
+    if not normalized_reason:
+        raise HypothesisFirstChainError("review terminal reason is required")
+    records = _read_jsonl(_storage_path(team_id))
+    bound = [
+        item
+        for item in _review_dispatch_attempts(records)
+        if str(item.get("meetingRoundId") or "").strip()
+        == normalized_meeting_round_id
+    ]
+    written: list[dict[str, Any]] = []
+    for attempt in bound:
+        # "completed" only means the meeting opened — the attempt stays live
+        # while its meeting runs, so a fence must fail it.  Only an already
+        # failed/cancelled/superseded attempt is left untouched so a repeated
+        # fence sweep never writes twice.
+        if str(attempt.get("lifecycle") or "").strip().lower() in {
+            "failed",
+            "cancelled",
+            "superseded",
+        }:
+            written.append(attempt)
+            continue
+        written.append(
+            _append_review_dispatch_attempt_state(
+                team_id,
+                question_id=str(attempt.get("questionId") or ""),
+                selection_id=str(attempt.get("selectionId") or ""),
+                selection_version=str(attempt.get("selectionVersion") or ""),
+                candidate_id=str(attempt.get("candidateId") or ""),
+                round_index=int(attempt.get("roundIndex") or 1),
+                lifecycle="failed",
+                outcome="superseded",
+                meeting_round_id=normalized_meeting_round_id,
+                error=normalized_reason,
+                error_type="ReviewMeetingClosed",
+            )
+        )
+    return written
+
+
+def closeout_fenced_meeting_attempts(
+    team_id: str,
+    meeting_round_id: str,
+    *,
+    reason: str,
+) -> dict[str, Any]:
+    """Write failure terminal state for every attempt owned by a fenced meeting.
+
+    Challenge fences close the MeetingRound, but the durable attempt ledgers
+    are keyed by meeting id and only learn about the closure through this
+    bridge.  Both attempt families (generation and review dispatch) are
+    closed with their own existing terminal primitives, so a fence never
+    leaves a ``running``-looking attempt behind.  Best-effort: nothing
+    raises; every family outcome is counted so the caller can audit it.
+    """
+
+    summary: dict[str, Any] = {
+        "generation": "none",
+        "reviewAttempts": 0,
+        "failed": 0,
+    }
+    try:
+        result = fail_generation_attempt_for_meeting(
+            team_id, meeting_round_id, reason=reason
+        )
+        summary["generation"] = "failed" if result is not None else "none"
+    except Exception:  # noqa: BLE001 - one broken family cannot block the other
+        summary["generation"] = "error"
+        summary["failed"] += 1
+    try:
+        review = fail_review_dispatch_attempts_for_meeting(
+            team_id, meeting_round_id, reason=reason
+        )
+        summary["reviewAttempts"] = len(review)
+    except Exception:  # noqa: BLE001 - one broken family cannot block the other
+        summary["failed"] += 1
+    return summary
 
 
 def list_collection_requests(
