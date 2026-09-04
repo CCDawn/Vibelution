@@ -9,6 +9,8 @@ import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urlparse
 
+from core.web.services import agent_directory_service
+from core.web.services.team_workflow.source_collection import search_execution
 from tools import research_search_backends
 from tools.web_search_tool import public_web_search
 
@@ -259,12 +261,9 @@ def batch_web_search(
 ) -> str:
     """Run several public web searches concurrently and keep failures isolated."""
     parsed_queries = _parse_items(queries)
-    from core.web.services.agent_directory_service import current_agent_runtime
-    from core.web.services.team_workflow.source_collection.search_execution import (
-        resolve_bound_source_search_context,
+    receipt_context = search_execution.resolve_bound_source_search_context(
+        agent_directory_service.current_agent_runtime()
     )
-
-    receipt_context = resolve_bound_source_search_context(current_agent_runtime())
     tool_call_id = ""
     if receipt_context is not None:
         tool_call_id = "search-call-" + hashlib.sha256(

@@ -46,8 +46,12 @@ def resolve_bound_source_search_context(runtime: dict[str, Any] | None) -> dict[
     behaviour.
     """
 
-    s = _service()
     current = runtime if isinstance(runtime, dict) else {}
+    if not str(current.get("sessionId") or "").strip() or not str(
+        current.get("turnId") or ""
+    ).strip():
+        return None
+    s = _service()
     session_id = s._trim_text(current.get("sessionId"), max_length=160)
     turn_id = s._trim_text(current.get("turnId"), max_length=160)
     agent_id = s._trim_text(current.get("agentId"), max_length=160)
