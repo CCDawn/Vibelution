@@ -4520,6 +4520,13 @@ def _scope_records(
         for record in chain_records
         if str(record.get("selectionId") or "").strip()
     }
+    referenced_selection_meeting_ids = {
+        str(record.get("meetingRoundId") or "").strip()
+        for record in all_chain_records
+        if str(record.get("selectionId") or "").strip()
+        in referenced_selection_ids
+        and str(record.get("meetingRoundId") or "").strip()
+    }
     chat_room_round_snapshots: dict[str, dict[str, Any]] = {}
     try:
         # WorkRun snapshots are the read-only runtime authority.  Do not call
@@ -4674,7 +4681,8 @@ def _scope_records(
                 or any(
                     isinstance(ref, Mapping)
                     and str(ref.get("kind") or "") == "meeting_round"
-                    and str(ref.get("id") or "") in meeting_ids
+                    and str(ref.get("id") or "")
+                    in (meeting_ids | referenced_selection_meeting_ids)
                     for ref in list(record.get("meetingRefs") or [])
                 )
             )
