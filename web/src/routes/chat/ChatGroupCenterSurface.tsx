@@ -305,15 +305,13 @@ function GroupRoundsTimeline({
                   : (lang === "zh"
                     ? "该发言已等待较久，仍在等待后端响应…"
                     : "This speaker has been waiting a while; still waiting for the backend…");
-                const settledLabel = progress.status === "failed"
-                  ? (lang === "zh" ? "发言失败，等待前序发言" : "failed; waiting for earlier speaker")
-                  : progress.status === "blocked"
-                    ? (lang === "zh" ? "已阻止，等待前序发言" : "blocked; waiting for earlier speaker")
-                    : progress.status === "stopped"
-                      ? (lang === "zh" ? "已停止，等待前序发言" : "stopped; waiting for earlier speaker")
-                      : progress.status === "partial"
-                        ? (lang === "zh" ? "部分完成，等待前序发言" : "partially complete; waiting for earlier speaker")
-                        : (lang === "zh" ? "已完成，等待前序发言" : "complete; waiting for earlier speaker");
+                const waitingForPrefix = index > 0;
+                const settledBase = lang === "zh"
+                  ? (({ failed: "发言失败", blocked: "已阻止", stopped: "已停止", partial: "部分完成" } as Record<string, string>)[progress.status] ?? "已完成")
+                  : (({ failed: "failed", blocked: "blocked", stopped: "stopped", partial: "partially complete" } as Record<string, string>)[progress.status] ?? "complete");
+                const settledLabel = `${settledBase}${waitingForPrefix
+                  ? (lang === "zh" ? "，等待前序发言" : "; waiting for earlier speaker")
+                  : ""}`;
                 const trailingLabel = progress.state === "settled"
                   ? settledLabel
                   : progress.state === "queued"

@@ -48,8 +48,8 @@ import re
 import threading
 import time
 import uuid
-from collections.abc import Mapping
-from concurrent.futures import ThreadPoolExecutor
+from collections.abc import Iterator, Mapping
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -1522,6 +1522,16 @@ def start_chat_room_round(
                 "caseState": case_state,
                 "status": "running",
                 "speakerOrder": [item["participantId"] for item in speakers],
+                "speakerProgress": [
+                    {
+                        "participantId": item["participantId"],
+                        "sessionId": str(item.get("sessionId") or ""),
+                        "state": "queued",
+                        "status": "",
+                        "updatedAt": now,
+                    }
+                    for item in speakers
+                ],
                 "messages": [],
                 "autoContinueDeadLetters": [],
                 "summary": "",
@@ -2130,6 +2140,7 @@ def _execute_chat_room_round(
         batch_turns: list[tuple[dict[str, Any], str, dict[str, Any]]] = []
         batch_meta: list[tuple[int, dict[str, Any], float]] = []
         batch_pre_failed: dict[int, tuple[dict[str, Any], float]] = {}
+        batch_contexts: dict[int, dict[str, Any]] = {}
         batch_is_parallel = bool(policy["parallel"]) and len(batch) > 1
         # Batch prep stays serial and in speaker order.  Serial rounds keep
         # every boundary check here before the prompt build, exactly as before
@@ -2239,6 +2250,7 @@ def _execute_chat_room_round(
             context["speakerBatchPrepAtMonotonic"] = speaker_started_at
             context["promptBuildMs"] = prompt_build_ms
             batch_meta.append((index, participant, prompt_build_ms))
+            batch_contexts[index] = context
             if prep_model_preflight:
                 # Prep-phase model preflight: a speaker whose runtime model
                 # cannot resolve fails here in milliseconds and never occupies
@@ -2256,9 +2268,9 @@ def _execute_chat_room_round(
         if batch_is_parallel:
             # Batch fan-out: turns run concurrently, each with its own
             # watchdog, per-call fence and session slot; one failed speaker
-            # never blocks its batch peers.  Wall-clock shrinks from the sum
-            # of speaker calls to the slowest call in the batch.
-            batch_results = _run_speaker_batch_turns(
+            # never blocks its batch peers. Results arrive in completion order
+            # and are drained below only when the formal prefix is contiguous.
+            completion_results = _run_speaker_batch_turns(
                 batch_turns,
                 runner,
                 fence_retry_enabled=policy["fenceRetry"],
@@ -2266,34 +2278,23 @@ def _execute_chat_room_round(
                 meeting_ttl_probe=meeting_ttl_probe,
             )
         else:
-            batch_results = [
-                _finish_speaker_turn(
-                    participant,
-                    prompt,
-                    context,
-                    runner,
-                    fence_retry_enabled=policy["fenceRetry"],
-                )
-                for participant, prompt, context in batch_turns
-            ]
-        if batch_pre_failed:
-            # Preflight failures never entered the pool; stitch them back into
-            # speaker order so per-message persistence below keeps the exact
-            # serial sequence.
-            executed_iter = iter(batch_results)
-            batch_results = [
-                batch_pre_failed[index]
-                if index in batch_pre_failed
-                else next(executed_iter)
-                for index, _participant, _prompt_build_ms in batch_meta
-            ]
-        # Messages commit in speaker order even when the batch ran
-        # concurrently: per-message persistence, snapshot publish and speaker
-        # events keep their serial sequence.
+            completion_results = _run_serial_speaker_turns(
+                batch_turns,
+                runner,
+                fence_retry_enabled=policy["fenceRetry"],
+            )
+        ordered_batch_results = _ordered_speaker_batch_results(
+            batch_meta,
+            batch_contexts,
+            batch_pre_failed,
+            completion_results,
+        )
+        # Each settled contiguous prefix commits immediately in speaker order;
+        # a later speaker may settle visibly while its body waits in memory.
         for (
             (index, participant, prompt_build_ms),
             (turn_messages, speaker_run_ms),
-        ) in zip(batch_meta, batch_results):
+        ) in ordered_batch_results:
             if isinstance(turn_messages, Mapping):
                 # Prep-phase preflight failures stitch back a single message
                 # dict (never a list): normalize it so the per-message loop
@@ -3812,20 +3813,65 @@ def _run_speaker_batch_turns(
     fence_retry_enabled: bool,
     run_turn_fences: bool = False,
     meeting_ttl_probe: dict[str, Any] | None = None,
-) -> list[tuple[list[dict[str, Any]], float]]:
-    """Run one batch's speaker turns concurrently, results in speaker order.
+) -> Iterator[tuple[int, tuple[list[dict[str, Any]], float]]]:
+    """Run a batch concurrently and yield each result when it settles.
 
     Each turn is independent (its own watchdog, fence, session slot and
-    supervision path), so one failed speaker never blocks its batch peers;
-    ordering is restored by collecting futures in submission order.  Every
-    result carries the turn's committed messages (first message plus any
-    needs_continue auto-continuations) and the speaker wall-clock.
+    supervision path). The caller restores transcript order with a contiguous
+    prefix buffer instead of waiting for the slowest future.
     """
 
     executor = _speaker_batch_executor()
-    futures = [
+    futures = {
         executor.submit(
-            _finish_speaker_turn,
+            _finish_speaker_turn_with_progress,
+            participant,
+            prompt,
+            context,
+            runner,
+            fence_retry_enabled=fence_retry_enabled,
+            run_turn_fences=run_turn_fences,
+            meeting_ttl_probe=meeting_ttl_probe,
+        ): int(context.get("speakerIndex") or 0)
+        for participant, prompt, context in batch_turns
+    }
+
+    def iter_completed() -> Iterator[tuple[int, tuple[list[dict[str, Any]], float]]]:
+        for future in as_completed(futures):
+            yield futures[future], future.result()
+
+    return iter_completed()
+
+
+def _run_serial_speaker_turns(
+    batch_turns: list[tuple[dict[str, Any], str, dict[str, Any]]],
+    runner: AgentRunner,
+    *,
+    fence_retry_enabled: bool,
+) -> Iterator[tuple[int, tuple[list[dict[str, Any]], float]]]:
+    for participant, prompt, context in batch_turns:
+        yield int(context.get("speakerIndex") or 0), _finish_speaker_turn_with_progress(
+            participant,
+            prompt,
+            context,
+            runner,
+            fence_retry_enabled=fence_retry_enabled,
+        )
+
+
+def _finish_speaker_turn_with_progress(
+    participant: dict[str, Any],
+    prompt: str,
+    context: dict[str, Any],
+    runner: AgentRunner,
+    *,
+    fence_retry_enabled: bool,
+    run_turn_fences: bool = False,
+    meeting_ttl_probe: dict[str, Any] | None = None,
+) -> tuple[list[dict[str, Any]], float]:
+    _set_chat_room_speaker_progress(participant, context, state="running", status="")
+    try:
+        result = _finish_speaker_turn(
             participant,
             prompt,
             context,
@@ -3834,9 +3880,57 @@ def _run_speaker_batch_turns(
             run_turn_fences=run_turn_fences,
             meeting_ttl_probe=meeting_ttl_probe,
         )
-        for participant, prompt, context in batch_turns
-    ]
-    return [future.result() for future in futures]
+    except Exception:
+        _set_chat_room_speaker_progress(participant, context, state="settled", status="failed")
+        raise
+    _set_chat_room_speaker_progress(
+        participant,
+        context,
+        state="settled",
+        status=_speaker_progress_result_status(result[0]),
+    )
+    return result
+
+
+def _speaker_progress_result_status(turn_messages: Any) -> str:
+    if isinstance(turn_messages, Mapping):
+        candidates = [turn_messages]
+    else:
+        candidates = [item for item in list(turn_messages or []) if isinstance(item, Mapping)]
+    status = str(candidates[-1].get("status") or "").strip().lower() if candidates else "stopped"
+    return status if status in {"completed", "partial", "failed", "blocked", "stopped"} else "failed"
+
+
+def _ordered_speaker_batch_results(
+    batch_meta: list[tuple[int, dict[str, Any], float]],
+    batch_contexts: dict[int, dict[str, Any]],
+    batch_pre_failed: dict[int, tuple[dict[str, Any], float]],
+    completion_results: Iterator[tuple[int, tuple[list[dict[str, Any]], float]]],
+) -> Iterator[tuple[tuple[int, dict[str, Any], float], tuple[Any, float]]]:
+    """Yield only the settled contiguous speaker prefix in formal order."""
+
+    pending: dict[int, tuple[Any, float]] = dict(batch_pre_failed)
+    meta_by_index = {item[0]: item for item in batch_meta}
+    ordered_indexes = [item[0] for item in batch_meta]
+    next_position = 0
+    for index, result in batch_pre_failed.items():
+        meta = meta_by_index[index]
+        _set_chat_room_speaker_progress(
+            meta[1],
+            batch_contexts.get(index) or {},
+            state="settled",
+            status=_speaker_progress_result_status(result[0]),
+        )
+    while next_position < len(ordered_indexes) and ordered_indexes[next_position] in pending:
+        index = ordered_indexes[next_position]
+        yield meta_by_index[index], pending.pop(index)
+        next_position += 1
+    for index, result in completion_results:
+        pending[index] = result
+        while next_position < len(ordered_indexes) and ordered_indexes[next_position] in pending:
+            ready_index = ordered_indexes[next_position]
+            yield meta_by_index[ready_index], pending.pop(ready_index)
+            next_position += 1
 
 
 def _run_one_speaker(
@@ -7717,6 +7811,87 @@ def _publish_chat_room_speaker_delta(event: dict[str, Any]) -> None:
             subscriber.put_nowait(event)
         except queue.Full:
             continue
+
+
+def _publish_chat_room_speaker_state(event: dict[str, Any]) -> None:
+    """Fan a durable per-speaker lifecycle transition over the room SSE."""
+
+    if not isinstance(event, dict) or str(event.get("type") or "") != "chat_room_speaker_state":
+        return
+    normalized_room_id = str(event.get("roomId") or "").strip()
+    if not normalized_room_id:
+        return
+    with _CHAT_ROOM_STREAM_SUBSCRIBERS_LOCK:
+        subscribers = list(_CHAT_ROOM_STREAM_SUBSCRIBERS.get(normalized_room_id) or [])
+    for subscriber in subscribers:
+        try:
+            subscriber.put_nowait(event)
+        except queue.Full:
+            # The persisted speakerProgress snapshot remains authoritative;
+            # never evict a full room snapshot to make space for this hint.
+            continue
+
+
+def _set_chat_room_speaker_progress(
+    participant: Mapping[str, Any],
+    context: Mapping[str, Any],
+    *,
+    state: str,
+    status: str,
+) -> None:
+    room_id = str(context.get("roomId") or "").strip()
+    round_id = str(context.get("roundId") or "").strip()
+    participant_id = str(participant.get("participantId") or "").strip()
+    if not room_id or not round_id or not participant_id:
+        return
+    normalized_state = str(state or "").strip().lower()
+    normalized_status = str(status or "").strip().lower()
+    if normalized_state not in {"queued", "running", "settled"}:
+        return
+    if normalized_state != "settled":
+        normalized_status = ""
+    elif normalized_status not in {"completed", "partial", "failed", "blocked", "stopped"}:
+        normalized_status = "failed"
+    updated_at = utc_now_iso()
+    progress = {
+        "participantId": participant_id,
+        "sessionId": str(participant.get("sessionId") or ""),
+        "state": normalized_state,
+        "status": normalized_status,
+        "updatedAt": updated_at,
+    }
+    with _CHAT_ROOM_LOCK:
+        store = _store()
+        room_state = store.load()
+        room = _find_room(room_state, room_id)
+        target_round = _find_round(room, round_id) if room is not None else None
+        if room is None or target_round is None or _chat_room_round_is_terminal(room, target_round, round_id):
+            return
+        current = [
+            dict(item)
+            for item in list(target_round.get("speakerProgress") or [])
+            if isinstance(item, Mapping)
+        ]
+        replaced = False
+        for index, item in enumerate(current):
+            if str(item.get("participantId") or "").strip() == participant_id:
+                current[index] = progress
+                replaced = True
+                break
+        if not replaced:
+            current.append(progress)
+        target_round["speakerProgress"] = current
+        target_round["updatedAt"] = updated_at
+        room["updatedAt"] = updated_at
+        store.save(room_state)
+    _publish_chat_room_speaker_state(
+        {
+            "type": "chat_room_speaker_state",
+            "roomId": room_id,
+            "roundId": round_id,
+            **progress,
+        }
+    )
 
 
 # Wire the capture module to this module's fan-out so speaker turns emit

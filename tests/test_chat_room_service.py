@@ -233,6 +233,37 @@ def test_chat_room_store_retries_transient_permission_error(tmp_path, monkeypatc
     assert store.load()["rooms"][0]["roomId"] == "room-a"
 
 
+def test_chat_room_stream_carries_speaker_state_on_existing_sse(tmp_path, monkeypatch):
+    _isolate_chat_room_kernel(tmp_path, monkeypatch)
+    _seed_chat_sessions(tmp_path)
+    room = chat_room_service.create_chat_room(
+        title="同流成员状态",
+        participant_session_ids=["session-alpha"],
+    )
+    stream = chat_room_service.stream_chat_room_events(room["roomId"])
+    try:
+        initial = next(stream)
+        assert "event: chat_room_detail" in initial
+        chat_room_service._publish_chat_room_speaker_state(
+            {
+                "type": "chat_room_speaker_state",
+                "roomId": room["roomId"],
+                "roundId": "round-probe",
+                "participantId": "session-session-alpha",
+                "sessionId": "session-alpha",
+                "state": "settled",
+                "status": "completed",
+                "updatedAt": "2026-09-04T09:00:00Z",
+            }
+        )
+        frame = next(stream)
+        assert "event: chat_room_speaker_state" in frame
+        assert '"state": "settled"' in frame
+        assert '"status": "completed"' in frame
+    finally:
+        stream.close()
+
+
 def test_group_speaker_message_uses_completion_time_and_strips_self_prefix(monkeypatch):
     timestamps = iter(["2026-05-29T12:00:30+00:00"])
     monkeypatch.setattr(chat_room_service, "utc_now_iso", lambda: next(timestamps))
@@ -5494,6 +5525,137 @@ def test_meeting_opening_round_runs_speakers_concurrently_and_commits_in_order(
     )
     assert [message["content"] for message in latest["messages"]] == [
         f"{session_id} 独立评估" for session_id in participant_order
+    ]
+
+
+def test_parallel_batch_commits_ready_prefix_before_slowest_speaker_finishes(
+    tmp_path, monkeypatch
+):
+    _isolate_chat_room_kernel(tmp_path, monkeypatch)
+    _seed_chat_sessions(tmp_path)
+    room = chat_room_service.create_chat_room(
+        title="连续前缀即时落位",
+        participant_session_ids=["session-alpha", "session-beta"],
+    )
+    both_started = threading.Barrier(2, timeout=10)
+    alpha_finished = threading.Event()
+    release_beta = threading.Event()
+    round_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pytest-prefix-round")
+    speaker_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="pytest-prefix-speaker")
+    monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_EXECUTOR", round_executor)
+    monkeypatch.setattr(chat_room_service, "_speaker_batch_executor", lambda: speaker_executor)
+
+    def runner(participant, _prompt, _context):
+        both_started.wait()
+        if participant["sessionId"] == "session-beta":
+            assert release_beta.wait(10.0)
+        result = {
+            "status": "completed",
+            "raw_output": f"即时结果-{participant['sessionId']}",
+            "summary": "ok",
+        }
+        if participant["sessionId"] == "session-alpha":
+            alpha_finished.set()
+        return result
+
+    try:
+        started = chat_room_service.start_chat_room_round(
+            room["roomId"],
+            "假说评审第 1 轮",
+            config={"meetingType": "hypothesis_review", "discussionRoundIndex": 1},
+            agent_runner=runner,
+            background=True,
+        )
+        assert alpha_finished.wait(5.0)
+        deadline = time.monotonic() + 2.0
+        latest = None
+        while time.monotonic() < deadline:
+            latest = chat_room_service.get_chat_room_detail(room["roomId"])["rounds"][-1]
+            if len(latest["messages"]) == 1:
+                break
+            time.sleep(0.02)
+
+        assert latest is not None
+        assert [message["sessionId"] for message in latest["messages"]] == ["session-alpha"]
+        progress = {item["sessionId"]: item for item in latest["speakerProgress"]}
+        assert progress["session-alpha"]["state"] == "settled"
+        assert progress["session-beta"]["state"] == "running"
+        assert latest["roundId"] == started["activeRoundId"]
+    finally:
+        release_beta.set()
+        round_executor.shutdown(wait=True, cancel_futures=True)
+        speaker_executor.shutdown(wait=True, cancel_futures=True)
+
+    final_round = chat_room_service.get_chat_room_detail(room["roomId"])["rounds"][-1]
+    assert [message["sessionId"] for message in final_round["messages"]] == [
+        "session-alpha",
+        "session-beta",
+    ]
+
+
+def test_parallel_batch_marks_later_result_settled_without_committing_out_of_order(
+    tmp_path, monkeypatch
+):
+    _isolate_chat_room_kernel(tmp_path, monkeypatch)
+    _seed_chat_sessions(tmp_path)
+    room = chat_room_service.create_chat_room(
+        title="后位完成等待前序",
+        participant_session_ids=["session-alpha", "session-beta"],
+    )
+    both_started = threading.Barrier(2, timeout=10)
+    beta_finished = threading.Event()
+    release_alpha = threading.Event()
+    round_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pytest-ordered-round")
+    speaker_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="pytest-ordered-speaker")
+    monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_EXECUTOR", round_executor)
+    monkeypatch.setattr(chat_room_service, "_speaker_batch_executor", lambda: speaker_executor)
+
+    def runner(participant, _prompt, _context):
+        both_started.wait()
+        if participant["sessionId"] == "session-alpha":
+            assert release_alpha.wait(10.0)
+        result = {
+            "status": "completed",
+            "raw_output": f"乱序完成-{participant['sessionId']}",
+            "summary": "ok",
+        }
+        if participant["sessionId"] == "session-beta":
+            beta_finished.set()
+        return result
+
+    try:
+        chat_room_service.start_chat_room_round(
+            room["roomId"],
+            "假说评审第 1 轮",
+            config={"meetingType": "hypothesis_review", "discussionRoundIndex": 1},
+            agent_runner=runner,
+            background=True,
+        )
+        assert beta_finished.wait(5.0)
+        deadline = time.monotonic() + 2.0
+        latest = None
+        while time.monotonic() < deadline:
+            latest = chat_room_service.get_chat_room_detail(room["roomId"])["rounds"][-1]
+            progress = {item["sessionId"]: item for item in latest.get("speakerProgress") or []}
+            if progress.get("session-beta", {}).get("state") == "settled":
+                break
+            time.sleep(0.02)
+
+        assert latest is not None
+        assert latest["messages"] == []
+        progress = {item["sessionId"]: item for item in latest["speakerProgress"]}
+        assert progress["session-alpha"]["state"] == "running"
+        assert progress["session-beta"]["state"] == "settled"
+        assert progress["session-beta"]["status"] == "completed"
+    finally:
+        release_alpha.set()
+        round_executor.shutdown(wait=True, cancel_futures=True)
+        speaker_executor.shutdown(wait=True, cancel_futures=True)
+
+    final_round = chat_room_service.get_chat_room_detail(room["roomId"])["rounds"][-1]
+    assert [message["sessionId"] for message in final_round["messages"]] == [
+        "session-alpha",
+        "session-beta",
     ]
 
 
