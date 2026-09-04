@@ -11,7 +11,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from core.web.services.team_workflow.research_runtime.domain_ports import ArtifactReadBack
+from core.web.services.team_workflow.research_runtime.domain_ports import (
+    ArtifactReadBack,
+)
 from core.web.services.team_workflow.research_runtime.human_gate_artifacts import (
     canonical_sha256,
 )
@@ -544,6 +546,109 @@ def load_scoped_artifact_payload(
     # Never invent empty records / hashes for unwired kinds — that would make
     # forged or missing team/run refs look like successful read-back.
     return None
+
+
+def load_source_finding_receipt_payload(
+    *,
+    team_id: str,
+    authority_run_id: str,
+    workflow_run_id: str = "",
+    candidate_content_hash: str = "",
+) -> dict[str, Any] | None:
+    """Read and validate the live source-finding receipt/candidate authority."""
+
+    candidate_envelope = load_scoped_artifact_payload(
+        "source_candidate_batch",
+        team_id=str(team_id or "").strip(),
+        authority_run_id=str(authority_run_id or "").strip(),
+        workflow_run_id=str(workflow_run_id or "").strip(),
+    )
+    if not isinstance(candidate_envelope, dict):
+        return None
+    expected_hash = str(candidate_content_hash or "").strip()
+    if expected_hash and canonical_sha256(candidate_envelope) != expected_hash:
+        return None
+    candidates = [
+        item
+        for item in list(candidate_envelope.get("candidates") or [])
+        if isinstance(item, dict)
+    ]
+    if not candidates:
+        return None
+    from ..source_collection.search_execution import (
+        project_source_collection_search_trace,
+        validate_source_finding_receipt_payload,
+    )
+
+    trace = project_source_collection_search_trace(
+        str(team_id or "").strip(),
+        str(authority_run_id or "").strip(),
+    )
+    candidate_sources: list[dict[str, Any]] = []
+    for candidate in candidates:
+        metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+        source_trace = (
+            metadata.get("sourceCollectionTrace")
+            if isinstance(metadata.get("sourceCollectionTrace"), dict)
+            else {}
+        )
+        candidate_sources.append(
+            {
+                **candidate,
+                "sourceId": str(candidate.get("candidateId") or "").strip(),
+                "sourceRef": str(
+                    candidate.get("sourceRef")
+                    or candidate.get("sourceUrl")
+                    or metadata.get("sourceRef")
+                    or metadata.get("sourceUrl")
+                    or ""
+                ).strip(),
+                "perspective": str(
+                    candidate.get("perspective")
+                    or metadata.get("perspective")
+                    or source_trace.get("perspective")
+                    or ""
+                ).strip(),
+            }
+        )
+    perspectives = list(
+        dict.fromkeys(
+            str(item.get("perspective") or "").strip()
+            for item in trace
+            if str(item.get("perspective") or "").strip()
+        )
+    )
+    queries = list(
+        dict.fromkeys(
+            str(item.get("query") or "").strip()
+            for item in trace
+            if str(item.get("query") or "").strip()
+        )
+    )
+    counter_perspectives = {"limitation_or_null", "falsification"}
+    payload = {
+        "teamId": str(team_id or "").strip(),
+        "sourceCollectionRunId": str(authority_run_id or "").strip(),
+        "workflowRunId": str(workflow_run_id or "").strip(),
+        "perspectives": perspectives,
+        "queries": queries,
+        "candidateSources": candidate_sources,
+        "counterEvidenceCandidateSources": [
+            item
+            for item in candidate_sources
+            if str(item.get("perspective") or "").strip().lower()
+            in counter_perspectives
+        ],
+        "searchTrace": trace,
+    }
+    try:
+        payload["quality"] = validate_source_finding_receipt_payload(
+            payload,
+            require_candidate_receipt_binding=True,
+        )
+    except ValueError:
+        return None
+    return payload
 
 
 def read_domain_artifact(
