@@ -4515,6 +4515,11 @@ def _scope_records(
                 chain_records.append(record)
     else:
         chain_records = all_chain_records
+    referenced_selection_ids = {
+        str(record.get("selectionId") or "").strip()
+        for record in chain_records
+        if str(record.get("selectionId") or "").strip()
+    }
     chat_room_round_snapshots: dict[str, dict[str, Any]] = {}
     try:
         # WorkRun snapshots are the read-only runtime authority.  Do not call
@@ -4640,6 +4645,11 @@ def _scope_records(
                 not normalized_workflow_run_id
                 or str(record.get("workflowRunId") or "").strip()
                 == normalized_workflow_run_id
+                or (
+                    not str(record.get("workflowRunId") or "").strip()
+                    and str(record.get("selectionId") or "").strip()
+                    in referenced_selection_ids
+                )
             )
         ],
         "meeting_records": [

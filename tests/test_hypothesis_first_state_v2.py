@@ -6545,6 +6545,97 @@ def test_scope_records_keeps_question_boundary_without_run_filter(
     state_module.clear_hypothesis_first_state_v2_cache()
 
 
+def test_scope_records_keeps_preformal_selection_referenced_by_formal_review(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A promoted formal run still owns the selection that opened its review."""
+
+    state_module = hypothesis_first_routes.hypothesis_first_state_v2
+    state_module.clear_hypothesis_first_state_v2_cache()
+    monkeypatch.setattr(
+        state_module.hypothesis_first_chain,
+        "_question_reset_snapshot",
+        lambda *_args: {
+            "targetMeetingIds": {"review-formal"},
+            "targetRoundIds": set(),
+            "chainRecords": [
+                {
+                    "recordKind": "review_round_link",
+                    "linkId": "link-formal",
+                    "questionId": "SCI-001",
+                    "selectionId": "selection-preformal",
+                    "candidateId": "candidate-1",
+                    "meetingRoundId": "review-formal",
+                    "roundIndex": 1,
+                }
+            ],
+            "selectionRecords": [
+                {
+                    "questionId": "SCI-001",
+                    "selectionId": "selection-preformal",
+                    "workflowRunId": "",
+                    "selectedCandidateIds": ["candidate-1"],
+                },
+                {
+                    "questionId": "SCI-001",
+                    "selectionId": "selection-unrelated",
+                    "workflowRunId": "",
+                    "selectedCandidateIds": ["candidate-other"],
+                },
+            ],
+            "meetingRecords": [
+                {
+                    "meetingRoundId": "review-formal",
+                    "question": "SCI-001",
+                    "modelInvocationReceiptAuthority": {
+                        "workflowRunId": "run-formal",
+                    },
+                    "status": "closed",
+                }
+            ],
+            "digestRecords": [],
+            "decisionRecords": [],
+            "hypothesisRoundRecords": [],
+        },
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.formal_read_runtime.get_query_service",
+        lambda: type(
+            "QueryService",
+            (),
+            {
+                "list_runs": lambda self, **_kwargs: {
+                    "runs": [
+                        {
+                            "runId": "run-formal",
+                            "workflowId": "challenge-cup-research",
+                            "questionId": "SCI-001",
+                        }
+                    ]
+                },
+                "get_snapshot": lambda self, **_kwargs: {},
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.challenge_question_runs.get_challenge_question_run_detail",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            ValueError("challenge_question_run_not_found")
+        ),
+    )
+
+    sources = state_module._scope_records(
+        "team-formal-scope",
+        "SCI-001",
+        workflow_run_id="run-formal",
+    )
+
+    assert [item["selectionId"] for item in sources["selection_records"]] == [
+        "selection-preformal"
+    ]
+    state_module.clear_hypothesis_first_state_v2_cache()
+
+
 def test_production_projector_reads_bound_chat_round_work_run_without_room_reconcile(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
