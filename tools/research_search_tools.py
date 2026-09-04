@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -10,7 +11,6 @@ from urllib.parse import urlparse
 
 from tools import research_search_backends
 from tools.web_search_tool import public_web_search
-
 
 _MAX_BATCH_QUERIES = 8
 _MAX_WORKERS = 4
@@ -161,7 +161,8 @@ def _provider_or_legacy_web_search(
     max_results: int,
     allowed_domains: str = "",
     blocked_domains: str = "",
-) -> str:
+    formal_receipt_required: bool = False,
+) -> tuple[str, dict | None]:
     payload = research_search_backends.collect_provider_results(
         query,
         [
@@ -173,13 +174,15 @@ def _provider_or_legacy_web_search(
         blocked_domains=blocked_domains,
     )
     if payload.get("results"):
-        return _render_provider_payload("批量公开搜索", payload)
+        return _render_provider_payload("批量公开搜索", payload), payload
+    if formal_receipt_required:
+        return _render_provider_payload("批量公开搜索", payload), payload
     return public_web_search(
         query=query,
         max_results=max_results,
         allowed_domains=allowed_domains,
         blocked_domains=blocked_domains,
-    )
+    ), None
 
 
 def _run_searches(
@@ -189,6 +192,8 @@ def _run_searches(
     allowed_domains: str = "",
     blocked_domains: str = "",
     max_workers: int = _MAX_WORKERS,
+    receipt_context: dict | None = None,
+    tool_call_id: str = "",
 ) -> list[tuple[str, str]]:
     limit = _clamp_int(max_results_per_query, default=5, minimum=1, maximum=_MAX_RESULTS_PER_QUERY)
     workers = _clamp_int(max_workers, default=_MAX_WORKERS, minimum=1, maximum=_MAX_WORKERS)
@@ -197,12 +202,34 @@ def _run_searches(
     rows: list[tuple[str, str] | None] = [None] * len(queries)
 
     def _search_one(query: str) -> str:
-        return _provider_or_legacy_web_search(
+        binding = None
+        if receipt_context is not None:
+            from core.web.services.team_workflow.source_collection.search_execution import (
+                bind_formal_search_query,
+            )
+
+            binding = bind_formal_search_query(receipt_context, query)
+        rendered, provider_payload = _provider_or_legacy_web_search(
             query=query,
             max_results=limit,
             allowed_domains=allowed_domains,
             blocked_domains=blocked_domains,
+            formal_receipt_required=receipt_context is not None,
         )
+        if receipt_context is not None:
+            if not isinstance(provider_payload, dict) or binding is None:
+                raise RuntimeError("formal source search did not return a structured provider payload")
+            from core.web.services.team_workflow.source_collection.search_execution import (
+                append_bound_tool_search_receipts,
+            )
+
+            append_bound_tool_search_receipts(
+                receipt_context,
+                binding=binding,
+                provider_payload=provider_payload,
+                tool_call_id=tool_call_id,
+            )
+        return rendered
 
     with ThreadPoolExecutor(max_workers=min(workers, len(queries)), thread_name_prefix="research-search") as pool:
         futures = {pool.submit(_search_one, query): index for index, query in enumerate(queries)}
@@ -212,6 +239,13 @@ def _run_searches(
             try:
                 rows[index] = (query, future.result())
             except Exception as exc:
+                if receipt_context is not None:
+                    for pending in futures:
+                        if pending is not future:
+                            pending.cancel()
+                    raise RuntimeError(
+                        f"formal source search receipt failed for query: {query}"
+                    ) from exc
                 rows[index] = (query, f"[错误] 查询失败但批量任务继续: {type(exc).__name__}: {exc}")
     return [row for row in rows if row is not None]
 
@@ -225,12 +259,31 @@ def batch_web_search(
 ) -> str:
     """Run several public web searches concurrently and keep failures isolated."""
     parsed_queries = _parse_items(queries)
+    from core.web.services.agent_directory_service import current_agent_runtime
+    from core.web.services.team_workflow.source_collection.search_execution import (
+        resolve_bound_source_search_context,
+    )
+
+    receipt_context = resolve_bound_source_search_context(current_agent_runtime())
+    tool_call_id = ""
+    if receipt_context is not None:
+        tool_call_id = "search-call-" + hashlib.sha256(
+            "|".join(
+                [
+                    str(receipt_context.get("sessionId") or ""),
+                    str(receipt_context.get("turnId") or ""),
+                    json.dumps(parsed_queries, ensure_ascii=False, separators=(",", ":")),
+                ]
+            ).encode("utf-8", errors="replace")
+        ).hexdigest()[:24]
     rows = _run_searches(
         parsed_queries,
         max_results_per_query=max_results_per_query,
         allowed_domains=allowed_domains,
         blocked_domains=blocked_domains,
         max_workers=max_workers,
+        receipt_context=receipt_context,
+        tool_call_id=tool_call_id,
     )
     return _render_batch_result("批量公开搜索", rows)
 

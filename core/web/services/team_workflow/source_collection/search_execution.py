@@ -12,6 +12,7 @@ Late-bound facade keeps route imports and monkeypatches on
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -31,6 +32,315 @@ def _service():
     from core.web.services import team_workflow_orchestration_service
 
     return team_workflow_orchestration_service
+
+
+_FORMAL_SEARCH_EVENT_TYPE = "search.tool_result_returned"
+
+
+def resolve_bound_source_search_context(runtime: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Resolve a formal finding turn from server-owned Task/assignment records.
+
+    The persisted message metadata is only a locator.  All receipt authority is
+    re-read from the canonical stage task and data-processing assignment stores.
+    Ordinary sessions intentionally return ``None`` and retain the generic tool
+    behaviour.
+    """
+
+    s = _service()
+    current = runtime if isinstance(runtime, dict) else {}
+    session_id = s._trim_text(current.get("sessionId"), max_length=160)
+    turn_id = s._trim_text(current.get("turnId"), max_length=160)
+    agent_id = s._trim_text(current.get("agentId"), max_length=160)
+    if not session_id or not turn_id:
+        return None
+    detail = s.session_service.get_session_detail(
+        session_id,
+        message_limit=40,
+        include_secondary=False,
+    )
+    if not isinstance(detail, dict):
+        return None
+    locator: dict[str, Any] = {}
+    for message in reversed(list(detail.get("messages") or [])):
+        if not isinstance(message, dict):
+            continue
+        metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+        if s._trim_text(metadata.get("turnId"), max_length=160) != turn_id:
+            continue
+        if s._trim_text(metadata.get("kind"), max_length=120) != s.SOURCE_COLLECTION_STAGE_SESSION_TASK_KIND:
+            continue
+        locator = metadata
+        break
+    if not locator:
+        return None
+    team_id = s._trim_text(locator.get("teamId"), max_length=128)
+    task_id = s._trim_text(
+        locator.get("sourceCollectionStageTaskId") or locator.get("taskId"),
+        max_length=160,
+    )
+    if not team_id or not task_id:
+        raise RuntimeError("formal source search message has no canonical task locator")
+    from .stage_session import _read_source_collection_stage_session_task_record
+
+    task = _read_source_collection_stage_session_task_record(team_id, task_id)
+    if not isinstance(task, dict):
+        raise RuntimeError("formal source search canonical task is unavailable")
+    task_turn = task.get("turn") if isinstance(task.get("turn"), dict) else {}
+    if (
+        s._trim_text(task.get("sessionId"), max_length=160) != session_id
+        or s._trim_text(task_turn.get("turnId"), max_length=160) != turn_id
+        or (agent_id and s._trim_text(task.get("agentId"), max_length=160) != agent_id)
+    ):
+        raise RuntimeError("formal source search canonical task identity mismatch")
+    if s._trim_text(task.get("stageId"), max_length=80) != "finding":
+        return None
+    run_id = s._trim_text(task.get("runId"), max_length=160)
+    if not run_id:
+        return None
+    assignments_payload = s.data_processing_service.list_collection_assignments(run_id)
+    allowed_assignment_ids = {
+        s._trim_text(item, max_length=128)
+        for item in list(task.get("assignmentIds") or [])
+        if s._trim_text(item, max_length=128)
+    }
+    if not allowed_assignment_ids:
+        raise RuntimeError("formal source search task has no canonical assignment binding")
+    assignments: list[dict[str, Any]] = []
+    for assignment in list(assignments_payload.get("assignments") or []):
+        if not isinstance(assignment, dict):
+            continue
+        assignment_id = s._trim_text(assignment.get("assignmentId"), max_length=128)
+        if allowed_assignment_ids and assignment_id not in allowed_assignment_ids:
+            continue
+        if agent_id and s._trim_text(assignment.get("agentId"), max_length=160) not in {"", agent_id}:
+            continue
+        assignments.append(dict(assignment))
+    if not assignments:
+        raise RuntimeError("formal source search task assignments are unavailable")
+    return {
+        "teamId": team_id,
+        "sourceCollectionRunId": run_id,
+        "workflowRunId": s._trim_text(task.get("workflowRunId"), max_length=160),
+        "taskId": task_id,
+        "sessionId": session_id,
+        "turnId": turn_id,
+        "agentId": agent_id,
+        "assignments": assignments,
+    }
+
+
+def bind_formal_search_query(context: dict[str, Any], query_text: str) -> dict[str, Any]:
+    """Bind an Agent-supplied query string to one canonical assigned query."""
+
+    s = _service()
+    normalized = " ".join(str(query_text or "").split()).casefold()
+    matches: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    for assignment in list(context.get("assignments") or []):
+        if not isinstance(assignment, dict):
+            continue
+        for query in _source_collection_assigned_queries(assignment):
+            candidate = " ".join(str(query.get("query") or "").split()).casefold()
+            if candidate and candidate == normalized:
+                matches.append((assignment, query))
+    if len(matches) != 1:
+        raise RuntimeError(
+            "formal source search query must match exactly one server-assigned query"
+        )
+    assignment, query = matches[0]
+    if not s._trim_text(query.get("queryId"), max_length=160) or not s._trim_text(
+        query.get("perspective") or query.get("perspectiveId"), max_length=80
+    ):
+        raise RuntimeError("formal source search assignment is missing queryId/perspective")
+    return {"assignment": dict(assignment), "query": dict(query)}
+
+
+def append_bound_tool_search_receipts(
+    context: dict[str, Any],
+    *,
+    binding: dict[str, Any],
+    provider_payload: dict[str, Any],
+    tool_call_id: str,
+) -> list[str]:
+    """Persist idempotent provider-bound events before results reach the Agent."""
+
+    s = _service()
+    assignment = dict(binding["assignment"])
+    query = dict(binding["query"])
+    results = [item for item in list(provider_payload.get("results") or []) if isinstance(item, dict)]
+    provider_rows = [item for item in list(provider_payload.get("providers") or []) if isinstance(item, dict)]
+    if not provider_rows:
+        provider_rows = [{"provider": "unknown", "status": provider_payload.get("status") or "unknown"}]
+    events: list[dict[str, Any]] = []
+    for provider_row in provider_rows:
+        provider = s._trim_text(provider_row.get("provider"), max_length=80) or "unknown"
+        provider_results = [
+            item for item in results
+            if (s._trim_text(item.get("provider"), max_length=80) or provider) == provider
+        ]
+        refs: list[str] = []
+        for result in provider_results:
+            url = s._trim_text(result.get("url"), max_length=1000)
+            identity = s._source_collection_identity_key(
+                source_ref=url,
+                raw_location=url,
+                doi=result.get("doi"),
+                url=url,
+                title=result.get("title"),
+                container=result.get("source") or result.get("container"),
+                published=result.get("published"),
+            )
+            if url:
+                refs.append(url)
+            if identity:
+                refs.append(f"identity:{identity}")
+        status = s._trim_text(provider_row.get("status"), max_length=80).lower()
+        event_type = (
+            "search.failed"
+            if status in {"failed", "error"}
+            else _FORMAL_SEARCH_EVENT_TYPE
+            if refs
+            else "search.executed"
+        )
+        receipt_key = hashlib.sha256(
+            "|".join(
+                [
+                    str(context.get("sourceCollectionRunId") or ""),
+                    str(assignment.get("assignmentId") or ""),
+                    str(query.get("queryId") or ""),
+                    provider,
+                    str(tool_call_id or ""),
+                ]
+            ).encode("utf-8", errors="replace")
+        ).hexdigest()
+        event = _source_collection_execution_event(
+            event_type,
+            assignment=assignment,
+            query=query,
+            status="blocked" if event_type == "search.failed" else ("completed" if refs else "returned"),
+            title=f"Tool search {provider}: {query.get('query') or ''}",
+            summary=(
+                f"Provider returned {len(provider_results)} accepted structured result(s) "
+                "through batch_web_search_tool."
+            ),
+            refs=refs,
+            raw_location=refs[0] if refs else "",
+            provider=provider,
+            reason=s._trim_text(provider_row.get("error"), max_length=80),
+        )
+        event.update(
+            {
+                "receiptKey": receipt_key,
+                "toolName": "batch_web_search_tool",
+                "toolCallId": s._trim_text(tool_call_id, max_length=160),
+                "sessionId": s._trim_text(context.get("sessionId"), max_length=160),
+                "turnId": s._trim_text(context.get("turnId"), max_length=160),
+                "taskId": s._trim_text(context.get("taskId"), max_length=160),
+            }
+        )
+        events.append(event)
+    paths = s._source_collection_storage_artifact_paths(
+        str(context.get("teamId") or ""),
+        str(context.get("sourceCollectionRunId") or ""),
+    )
+    with s._WORKFLOW_LOCK:
+        existing_by_key = {
+            s._trim_text(item.get("receiptKey"), max_length=64): s._trim_text(
+                item.get("eventId"), max_length=160
+            )
+            for item in s._read_jsonl(paths["searchEventsPath"])
+            if isinstance(item, dict) and s._trim_text(item.get("receiptKey"), max_length=64)
+        }
+        pending = [event for event in events if event["receiptKey"] not in existing_by_key]
+        if pending:
+            paths["runDirectory"].mkdir(parents=True, exist_ok=True)
+            paths["artifactsDirectory"].mkdir(parents=True, exist_ok=True)
+            s._append_jsonl(paths["searchEventsPath"], pending)
+    return [
+        existing_by_key.get(str(event["receiptKey"])) or str(event["eventId"])
+        for event in events
+    ]
+
+
+def validate_source_finding_receipt_payload(
+    payload: dict[str, Any],
+    *,
+    require_candidate_receipt_binding: bool = False,
+) -> dict[str, Any]:
+    """Single semantic gate for both legacy completion and Ledger read-back."""
+
+    required = {"mechanism", "independent_baseline", "limitation_or_null", "falsification"}
+    perspectives = {str(item or "").strip().lower() for item in list(payload.get("perspectives") or [])}
+    queries = [str(item or "").strip() for item in list(payload.get("queries") or []) if str(item or "").strip()]
+    candidates = [item for item in list(payload.get("candidateSources") or []) if isinstance(item, dict)]
+    counter = [item for item in list(payload.get("counterEvidenceCandidateSources") or []) if isinstance(item, dict)]
+    trace = [item for item in list(payload.get("searchTrace") or []) if isinstance(item, dict)]
+    terminal = {
+        str(item.get("perspective") or "").strip().lower()
+        for item in trace
+        if str(item.get("status") or "").strip().lower()
+        in {"found", "duplicate", "excluded", "failed", "no_credible_source"}
+        and list(item.get("eventIds") or [])
+    }
+    candidate_perspectives = {
+        str(item.get("perspective") or item.get("perspectiveId") or "").strip().lower()
+        for item in candidates
+    }
+    receipt_refs = {
+        str(ref or "").strip()
+        for item in trace
+        for ref in list(item.get("resultRefs") or [])
+        if str(ref or "").strip()
+    }
+    unbound_candidates: list[str] = []
+    for candidate in candidates:
+        metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+        identity = str(metadata.get("sourceIdentityKey") or "").strip()
+        locators = {
+            str(value or "").strip()
+            for value in (
+                candidate.get("sourceRef"),
+                candidate.get("sourceUrl"),
+                candidate.get("locator"),
+                metadata.get("sourceRef"),
+                metadata.get("sourceUrl"),
+            )
+            if str(value or "").strip()
+        }
+        if identity:
+            locators.add(f"identity:{identity}")
+        if require_candidate_receipt_binding and not locators.intersection(receipt_refs):
+            unbound_candidates.append(str(candidate.get("candidateId") or candidate.get("sourceId") or "unknown"))
+    missing_perspectives = sorted(required - perspectives)
+    missing_terminal = sorted(required - terminal)
+    missing_primary = sorted({"mechanism", "independent_baseline"} - candidate_perspectives)
+    if missing_perspectives or missing_terminal or missing_primary or not queries or not candidates or unbound_candidates:
+        raise ValueError(
+            "source finding requires receipt-bound terminal searches and candidates; "
+            f"missingPerspectives={missing_perspectives} missingTerminalTraces={missing_terminal} "
+            f"missingPrimarySources={missing_primary} unboundCandidates={unbound_candidates}"
+        )
+    if not counter:
+        no_source = {
+            str(item.get("perspective") or "").strip().lower()
+            for item in trace
+            if str(item.get("status") or "").strip().lower() == "no_credible_source"
+            and list(item.get("eventIds") or [])
+            and str(item.get("failureReason") or "").strip()
+        }
+        if {"limitation_or_null", "falsification"}.issubset(no_source):
+            raise ValueError("source finding needs review: both negative perspectives ended without a credible source")
+        raise ValueError("source finding requires a real limitation, null-result or falsification candidate")
+    return {
+        "perspectiveCount": len(perspectives),
+        "queryCount": len(queries),
+        "candidateCount": len(candidates),
+        "counterEvidenceCandidateCount": len(counter),
+        "requiredPerspectives": sorted(required),
+        "missingPerspectives": missing_perspectives,
+        "missingTerminalTraces": missing_terminal,
+        "missingPrimarySources": missing_primary,
+        "unboundCandidateIds": unbound_candidates,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1342,7 +1652,9 @@ def _sync_source_collection_stage_round_after_search(
             },
         )
     try:
-        from core.web.services.team_workflow.research_runtime import hypothesis_first_chain
+        from core.web.services.team_workflow.research_runtime import (
+            hypothesis_first_chain,
+        )
 
         hypothesis_first_chain.notify_collection_run_terminal(
             normalized_team_id,
@@ -2344,6 +2656,7 @@ def project_source_collection_search_trace(
         grouped[key].append(event)
 
     status_by_event_type = {
+        _FORMAL_SEARCH_EVENT_TYPE: "found",
         "storage.source_manifest_imported": "found",
         "storage.data_record_written": "found",
         "search.duplicate_skipped": "duplicate",
