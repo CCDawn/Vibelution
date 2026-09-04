@@ -15,6 +15,7 @@ import type {
   ChallengeCupRealBatchStartResponse,
   ChallengeCupTokenUsage,
   ChallengeCatalogReadiness,
+  ChallengePhaseBoundaryStatus,
 } from "./types/challengeCup";
 
 export type TeamExperimentSmokeRunRequest = {
@@ -392,6 +393,27 @@ export function fetchChallengeCupTokenUsage(
   return fetchJson<ChallengeCupTokenUsage>(
     `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/challenge-program/token-usage`,
     { signal: options?.signal },
+  );
+}
+
+export function fetchChallengePhaseBoundaryStatus(
+  teamId: string,
+  options?: { signal?: AbortSignal },
+): Promise<ChallengePhaseBoundaryStatus> {
+  return fetchJson<ChallengePhaseBoundaryStatus>(
+    `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/challenge-program/phase-boundary`,
+    { signal: options?.signal },
+  );
+}
+
+export function approveChallengePhaseOne(
+  teamId: string,
+  note = "",
+): Promise<ChallengePhaseBoundaryStatus> {
+  return writeJson<ChallengePhaseBoundaryStatus>(
+    `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/challenge-program/phase-one/approve`,
+    "POST",
+    { note },
   );
 }
 

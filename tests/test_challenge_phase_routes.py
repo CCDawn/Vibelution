@@ -42,7 +42,7 @@ def test_phase_one_approval_route_uses_server_operator_not_client_identity(monke
     )
     monkeypatch.setattr(
         routes,
-        "approve_current_phase_one_manifest",
+        "approve_and_publish_current_phase_one_manifest",
         lambda team_id, **kwargs: captured.update(teamId=team_id, **kwargs)
         or {"teamId": team_id, "phase1Approved": True},
     )

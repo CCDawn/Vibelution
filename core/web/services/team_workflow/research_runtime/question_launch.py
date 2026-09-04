@@ -229,9 +229,9 @@ def _question_scope(output: Mapping[str, Any]) -> str:
 def _frozen_deep_experiment_records() -> list[dict[str, Any]]:
     """Read required independent experiments from the frozen Program core.
 
-    Program 2.3.0 is phased (``a_then_b``): the two experiments stay declared
-    with ``executionPhase=2`` and activate only behind the full catalog
-    result-set gate; the 125-question phase-1 flow never depends on them.
+    Program 2.4.0 is phased (``a_then_b``): the two experiments stay declared
+    with ``executionPhase=2`` and activate only after operator approval and a
+    Team Knowledge applied receipt; the phase-one flow never depends on them.
     """
     try:
         program = load_competition_program_core()

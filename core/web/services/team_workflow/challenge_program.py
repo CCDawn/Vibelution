@@ -5,11 +5,11 @@ projection over the append-only experiment lifecycle.  It must never be
 promoted to completion of the whole 125-question competition program.
 
 ``build_competition_program_projection`` is the active typed v2 projection
-driven by the tracked Program 2.3.0 and FullCatalogPolicy 1.2.0 resources.
-Program 2.3.0 is phased (``a_then_b``): phase 1 — the current goal — is the
-125-question direction-A hypothesis/plan loop and completes on
-``full_catalog_result_set_approved``; phase 2 stacks the two deep
-experiments behind that gate and the final program rule still requires both.
+driven by the tracked Program 2.4.0 and FullCatalogPolicy 1.2.0 resources.
+Program 2.4.0 is phased (``a_then_b``): phase 1 — the current goal — is the
+125-question direction-A hypothesis/plan loop, followed by one operator
+whole-package approval and a hash-matched Team Knowledge applied receipt;
+phase 2 stacks the two deep experiments behind that gate.
 Only schemaVersion=2 approved and submission-eligible question results count
 toward the formal 125-question completion contract.
 """
@@ -28,6 +28,7 @@ from core.research.competition.resources import (
     CompetitionResourceError,
     DEEP_EXPERIMENT_ACTIVATION_GATE,
     DEEP_EXPERIMENT_EXECUTION_PHASE,
+    PHASE1_COMPLETION_RULE,
     PROGRAM_DIRECTION_EXECUTION_MODE,
     load_competition_program_core,
     load_full_catalog_execution_core,
@@ -585,7 +586,7 @@ def build_competition_program_projection(
                 "campaignId": _text(experiment.get("campaignId")),
                 "required": experiment.get("required") is True,
                 "executionPhase": execution_phase,
-                "activationGate": _text(experiment.get("activationGate")) or DEEP_EXPERIMENT_ACTIVATION_GATE,
+                "activationGate": DEEP_EXPERIMENT_ACTIVATION_GATE,
                 "phaseActive": execution_phase == 1 or phase2_activated,
                 "questionResultApproved": question_id in approved_question_set,
                 "approved": (
@@ -652,7 +653,7 @@ def build_competition_program_projection(
                 if phase2_activated
                 else "方向A：完成 125 题结果整包审批并发布到团队知识库"
             ),
-            "phase1CompletionRule": "whole_package_operator_approved",
+            "phase1CompletionRule": PHASE1_COMPLETION_RULE,
             "phase1ContentReady": phase1_content_ready,
             "phase1Approved": phase1_approved,
             "phase1KnowledgePublished": phase1_knowledge_published,
@@ -660,7 +661,7 @@ def build_competition_program_projection(
             "phase1ManifestSha256": _text(
                 _mapping(boundary.get("manifest")).get("manifestSha256")
             ),
-            "phase2ActivationGate": "phase_one_approved_and_team_knowledge_applied",
+            "phase2ActivationGate": DEEP_EXPERIMENT_ACTIVATION_GATE,
             "phase2Activated": phase2_activated,
             "finalCompletionRequiresDeepExperiments": True,
         },
@@ -815,11 +816,10 @@ def build_challenge_submission_readiness(
         {
             "key": "deep_experiment_suite",
             "label": "两个深实验包",
-            # Program 2.3.0 phased (a_then_b): the deep-experiment package is
-            # a declared phase-2 deliverable.  Until the full catalog result
-            # set activates phase 2 it neither blocks nor counts toward the
-            # current phase-1 submission readiness; afterwards it flips to a
-            # required artifact under the final program rule.
+            # Program 2.4.0 phased (a_then_b): the deep-experiment package is
+            # a declared phase-2 deliverable. Until the whole-package approval
+            # is applied to Team Knowledge it neither blocks nor counts toward
+            # current phase-1 readiness.
             "required": phase2_activated and bool(required_deep_count),
             "finalRequired": bool(required_deep_count),
             "phase": 2,
@@ -830,7 +830,7 @@ def build_challenge_submission_readiness(
             "detail": (
                 f"{approved_deep_count}/{required_deep_count} 个独立深实验已通过提交门。"
                 if phase2_activated and required_deep_count
-                else f"{approved_deep_count}/{required_deep_count} 个独立深实验为第二阶段交付，125 题假说结果包完成后激活。"
+                else f"{approved_deep_count}/{required_deep_count} 个独立深实验为第二阶段交付，整包批准并写入团队知识库后激活。"
             ),
             "blocker": "deep_experiment_suite_incomplete"
             if (phase2_activated and required_deep_count and not deep_ready)

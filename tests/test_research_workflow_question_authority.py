@@ -627,7 +627,7 @@ def test_launch_options_and_frozen_input_derive_from_one_approved_question(
     assert run_input["modelRoutingPolicy"]["routes"]["review"]["byProductRole"][
         "challenge_cup_evaluator"
     ]["modelRef"] == "dashscope_main/qwen3.6-plus"
-    assert run_input["competitionProgramSnapshot"]["programContractVersion"] == "2.3.0"
+    assert run_input["competitionProgramSnapshot"]["programContractVersion"] == "2.4.0"
     assert run_input["competitionProgramSnapshot"]["fullCatalogPolicyVersion"] == "1.2.0"
     assert run_input["competitionProgramSnapshot"]["catalogQuestionCount"] == 125
     assert run_input["competitionProgramSnapshot"]["questionSchemaVersion"] == 2

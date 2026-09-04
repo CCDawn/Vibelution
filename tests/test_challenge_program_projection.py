@@ -52,6 +52,7 @@ def _activated_phase_boundary(summary: dict) -> dict:
             "questionId": question_id,
             "runId": f"run-{question_id}",
             "outputSha256": f"sha-{question_id}",
+            "artifactPath": f"artifacts/{question_id}.json",
         }
         for question_id in summary.get("completedQuestionIds") or []
     ]
@@ -509,8 +510,8 @@ def test_active_competition_projection_is_phased_a_then_b():
 
     assert empty["schemaVersion"] == 2
     assert empty["programContract"] == {
-        "version": "2.3.0",
-        "coreBehaviorHash": "0F9545A9F5286A6B35C0414B45303786AABBFF5E5A08A3E1AC9FE95F38812D81",
+        "version": "2.4.0",
+        "coreBehaviorHash": "EA89024E0C7F0A93F457A82ACD1E5A9ACB90F758049562401C26105A1580D1E6",
     }
     assert empty["fullCatalogPolicy"]["version"] == "1.2.0"
     assert empty["questionSchema"] == {
@@ -526,7 +527,7 @@ def test_active_competition_projection_is_phased_a_then_b():
         "mode": "a_then_b",
         "currentPhase": 1,
         "currentPhaseGoal": empty["executionPhase"]["currentPhaseGoal"],
-        "phase1CompletionRule": "whole_package_operator_approved",
+        "phase1CompletionRule": "phase_one_package_operator_approved",
         "phase1ContentReady": False,
         "phase1Approved": False,
         "phase1KnowledgePublished": False,

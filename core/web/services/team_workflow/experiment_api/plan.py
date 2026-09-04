@@ -70,6 +70,8 @@ def create_experiment_plan(team_id: str, payload: dict[str, Any] | None = None) 
         store = s._load_stage_round_store(normalized_team_id)
         rounds = s._stage_rounds(store)
         stage_round = s._select_experiment_stage_round(request_payload, rounds)
+        if request_targets_challenge_phase_two(stage_round):
+            require_phase_two_activation(normalized_team_id)
         research_project = s.resolve_research_project_identity(
             normalized_team_id,
             s._trim_text(

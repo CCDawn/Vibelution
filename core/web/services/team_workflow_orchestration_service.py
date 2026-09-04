@@ -592,6 +592,10 @@ from core.web.services.team_workflow.challenge_phase_boundary import (
     record_phase_one_knowledge_applied_receipt,
     require_phase_two_activation,
 )
+from core.web.services.team_workflow.challenge_phase_knowledge_publisher import (
+    approve_and_publish_current_phase_one_manifest,
+    publish_approved_phase_one_to_team_knowledge,
+)
 from core.web.services.team_workflow.challenge_cup_dev_controls import (
     ChallengeCupDevControlsError,
     DevControlsStorageError,

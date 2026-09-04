@@ -52,7 +52,7 @@ def team_workflow_challenge_phase_one_approve(
     try:
         with server_operator_scope_from_http(request):
             operator = require_privileged_server_operator(command="finalize_stage_one")
-            return approve_current_phase_one_manifest(
+            return approve_and_publish_current_phase_one_manifest(
                 team_id,
                 operator_id=operator.operator_id,
                 operator_display_name=operator.display_name,

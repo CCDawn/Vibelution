@@ -74,15 +74,29 @@ def build_phase_one_manifest(question_run_summary: dict[str, Any] | None) -> dic
             "questionId": question_id,
             "runId": _text(raw.get("runId")),
             "outputSha256": _text(raw.get("outputSha256")),
+            "artifactPath": _text(raw.get("artifactPath")),
         }
     package_items = [
         result_by_question.get(
             question_id,
-            {"questionId": question_id, "runId": "", "outputSha256": ""},
+            {
+                "questionId": question_id,
+                "runId": "",
+                "outputSha256": "",
+                "artifactPath": "",
+            },
         )
         for question_id in completed_ids
     ]
-    content_sha256 = _canonical_sha256(package_items)
+    content_sha256 = _canonical_sha256(
+        [
+            {
+                "questionId": item["questionId"],
+                "outputSha256": item["outputSha256"],
+            }
+            for item in package_items
+        ]
+    )
     catalog = load_science_question_catalog()
     expected_ids = {
         _text(item.get("id"))
@@ -93,7 +107,12 @@ def build_phase_one_manifest(question_run_summary: dict[str, Any] | None) -> dic
         len(expected_ids) == PHASE_ONE_REQUIRED_QUESTION_COUNT
         and set(completed_ids) == expected_ids
         and len(result_by_question) == PHASE_ONE_REQUIRED_QUESTION_COUNT
-        and all(_text(item.get("outputSha256")) for item in package_items)
+        and all(
+            _text(item.get("runId"))
+            and _text(item.get("outputSha256"))
+            and _text(item.get("artifactPath"))
+            for item in package_items
+        )
     )
     manifest_body = {
         "schemaVersion": PHASE_BOUNDARY_SCHEMA_VERSION,
@@ -334,12 +353,25 @@ def record_phase_one_knowledge_applied_receipt(
     normalized = {
         "receiptId": _text(receipt.get("receiptId")),
         "proposalId": _text(receipt.get("proposalId")),
+        "knowledgeBaseId": _text(receipt.get("knowledgeBaseId")),
+        "knowledgeItemIds": [
+            _text(item)
+            for item in receipt.get("knowledgeItemIds") or []
+            if _text(item)
+        ],
+        "batchId": _text(receipt.get("batchId")),
         "status": _text(receipt.get("status")),
         "manifestSha256": _text(receipt.get("manifestSha256")),
         "contentSha256": _text(receipt.get("contentSha256")),
         "appliedAt": _text(receipt.get("appliedAt")) or _utc_now_iso(),
     }
-    if normalized["status"] != "applied" or not normalized["receiptId"]:
+    if (
+        normalized["status"] != "applied"
+        or not normalized["receiptId"]
+        or not normalized["knowledgeBaseId"]
+        or not normalized["knowledgeItemIds"]
+        or not normalized["batchId"]
+    ):
         raise ChallengePhaseBoundaryError("knowledge_applied_receipt_required")
     if (
         normalized["manifestSha256"] != manifest["manifestSha256"]

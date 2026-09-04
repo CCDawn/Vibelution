@@ -1,10 +1,10 @@
 {
-  "schemaVersion": "2.3.0",
+  "schemaVersion": "2.4.0",
   "contractId": "cc-xh-202619-program-v2",
-  "contractVersion": "2.3.0",
+  "contractVersion": "2.4.0",
   "status": "core_frozen",
   "createdAt": "2026-08-17T14:52:27+08:00",
-  "lastReviewedAt": "2026-08-31T10:00:00+08:00",
+  "lastReviewedAt": "2026-09-05T00:00:00+08:00",
   "authoritySnapshot": {
     "asOf": "2026-08-17",
     "officialPublicPage": "https://university.aliyun.com/action/tzbjbgs2026",
@@ -50,7 +50,7 @@
       "approvedBy": [
         "project_owner"
       ],
-      "coreBehaviorHash": "0F9545A9F5286A6B35C0414B45303786AABBFF5E5A08A3E1AC9FE95F38812D81"
+      "coreBehaviorHash": "EA89024E0C7F0A93F457A82ACD1E5A9ACB90F758049562401C26105A1580D1E6"
     },
     "submissionProjection": {
       "status": "provisional_v1_pending_direction_popup",
@@ -193,7 +193,7 @@
       "status": "planned_not_started",
       "approvalStatus": "not_approved",
       "executionPhase": 2,
-      "activationGate": "full_catalog_result_set_approved",
+      "activationGate": "phase_one_approved_and_team_knowledge_applied",
       "phaseStatus": "gated_until_phase1_complete"
     },
     {
@@ -206,18 +206,20 @@
       "status": "planned_not_started",
       "approvalStatus": "not_approved",
       "executionPhase": 2,
-      "activationGate": "full_catalog_result_set_approved",
+      "activationGate": "phase_one_approved_and_team_knowledge_applied",
       "phaseStatus": "gated_until_phase1_complete"
     }
   ],
   "completionContract": {
     "representativeExperimentSuiteRule": "all_required_experiments_approved",
-    "programRule": "full_catalog_result_set_approved AND all_required_deep_experiments_approved",
+    "programRule": "phase_one_approved_and_team_knowledge_applied AND all_required_deep_experiments_approved",
     "projectCompletedDerivedOnly": true,
     "requiredGates": [
       "platform_flow_readiness_passed",
       "full_catalog_result_set_125_of_125_approved",
       "competition_result_view_125_of_125_complete",
+      "phase_one_package_operator_approved",
+      "phase_one_team_knowledge_applied",
       "catalog_capacity_authorization_was_approved_before_g125",
       "human_capacity_plan_execution_evidence_complete",
       "all_required_deep_experiments_approved",
@@ -233,9 +235,9 @@
     "legacyQuestionCountsAffectCompletion": false,
     "legacyRepresentativeCaseCountsAffectCompletion": false,
     "phaseCompletionRules": {
-      "phase1": "full_catalog_result_set_approved",
+      "phase1": "phase_one_package_operator_approved",
       "phase2": "all_required_deep_experiments_approved",
-      "phase2ActivationGate": "full_catalog_result_set_approved"
+      "phase2ActivationGate": "phase_one_approved_and_team_knowledge_applied"
     }
   },
   "isolationPolicy": {
@@ -364,15 +366,15 @@
         "directionId": "A",
         "name": "A. 科学假设生成与研究计划设计",
         "goal": "完成 125 题科学假设与研究计划的六环节闭环：问题理解、知识整合、候选假说生成、证据梳理、研究计划输出、反馈修正。",
-        "completionRule": "full_catalog_result_set_approved",
+        "completionRule": "phase_one_package_operator_approved",
         "status": "active"
       },
       {
         "phase": 2,
         "directionId": "B",
         "name": "B. 科学实验任务规划与反馈迭代",
-        "goal": "在 125 题假说结果集全部通过后，完成 SCI-091 与 SCI-096 两个独立深实验的规划与反馈迭代。",
-        "activationGate": "full_catalog_result_set_approved",
+        "goal": "在 125 题结果整包经操作者批准并成功写入团队知识库后，完成 SCI-091 与 SCI-096 两个独立深实验的规划与反馈迭代。",
+        "activationGate": "phase_one_approved_and_team_knowledge_applied",
         "completionRule": "all_required_deep_experiments_approved",
         "status": "gated_until_phase1_complete"
       }
