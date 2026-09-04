@@ -2497,6 +2497,10 @@ def test_chat_room_participant_runner_reuses_session_workspace_and_agent_llm_bin
     assert captured["history"]
     assert captured["turn_identity"].startswith("chat-room:")
     assert captured["active_runtime"]["turnId"] == captured["turn_identity"]
+    assert captured["active_runtime"]["runtimeToolSource"] == "chat_room_context"
+    assert "read_chat_room_context_refs" in captured["active_runtime"]["toolPolicy"][
+        "allowedTools"
+    ]
     assert captured_receipt_routes == [
         {
             "modelRef": "agent-explorer-model",

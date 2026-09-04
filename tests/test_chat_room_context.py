@@ -31,6 +31,8 @@ from core.chatroom.context_runtime import (
     last_chat_room_message_ref,
 )
 from core.chatroom.store import ChatRoomStore
+from core.llm.client import LLMClient
+from tests.helpers.isolated_config import isolated_settings_config
 from tools import chat_room_context_tools
 from tools.token_manager import estimate_messages_tokens
 
@@ -183,6 +185,7 @@ def test_failed_or_stopped_messages_never_enter_structured_or_legacy_state() -> 
 
     assert checkpoint["state"]["agreements"] == []
     assert checkpoint["legacyRecap"] == []
+    assert checkpoint["sourceMessageRefs"] == []
 
 
 def test_checkpoint_is_deterministic_and_requires_full_round_for_confirmed_agreement() -> None:
@@ -846,6 +849,138 @@ def test_fixed_eight_round_three_speaker_fixture_meets_token_reduction_targets()
     assert (current_uncached - structured_uncached) / current_uncached >= 0.20
 
 
+def test_qwen_room_payload_keeps_checkpoint_and_never_exceeds_four_markers() -> None:
+    room = _room(
+        [
+            _round(1, [], status="completed"),
+            _round(2, [], status="completed"),
+            _round(3, [], status="completed"),
+        ]
+    )
+    checkpoint = build_chat_room_context_checkpoint(
+        room,
+        covered_round_ids=["round-1"],
+        revision=1,
+        created_at="fixed",
+    )
+    snapshot = build_chat_room_context_snapshot(room, checkpoint=checkpoint)
+    messages = [
+        {
+            "role": "system",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "stable room system",
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
+        },
+        snapshot["checkpointMessage"],
+        {"role": "user", "content": "查证 checkpoint 引用"},
+        {
+            "role": "assistant",
+            "content": "读取两条精确消息",
+            "tool_calls": [
+                {
+                    "id": "call-a",
+                    "type": "function",
+                    "function": {
+                        "name": "read_chat_room_context_refs",
+                        "arguments": "{}",
+                    },
+                },
+                {
+                    "id": "call-b",
+                    "type": "function",
+                    "function": {
+                        "name": "read_chat_room_context_refs",
+                        "arguments": "{}",
+                    },
+                },
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call-a", "content": "A"},
+        {"role": "tool", "tool_call_id": "call-b", "content": "B"},
+    ]
+    config = isolated_settings_config(
+        **{
+            "llm.providers.default.kind": "aliyun",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "qwen3.6-plus",
+            "llm.profiles.primary.prompt_cache.mode": "explicit_cache_control",
+        }
+    )
+
+    payload = LLMClient(config=config, backend=lambda value: value)._build_payload(messages)
+
+    marker_count = sum(
+        1
+        for message in payload["messages"]
+        for block in (
+            message.get("content")
+            if isinstance(message.get("content"), list)
+            else []
+        )
+        if isinstance(block, dict) and block.get("cache_control")
+    )
+    checkpoint_messages = [
+        message
+        for message in payload["messages"]
+        if "ChatRoomContextCheckpoint.v1" in json.dumps(message, ensure_ascii=False)
+    ]
+    tool_messages = [
+        message for message in payload["messages"] if message.get("role") == "tool"
+    ]
+    assert marker_count == 4
+    assert len(checkpoint_messages) == 1
+    assert len(tool_messages) == 1
+    assert tool_messages[0]["content"][-1]["cache_control"] == {
+        "type": "ephemeral"
+    }
+
+
+def test_non_cache_profile_strips_room_checkpoint_marker() -> None:
+    room = _room([_round(1, [], status="completed")])
+    checkpoint = build_chat_room_context_checkpoint(
+        room,
+        covered_round_ids=["round-1"],
+        revision=1,
+        created_at="fixed",
+    )
+    snapshot = build_chat_room_context_snapshot(room, checkpoint=checkpoint)
+    config = isolated_settings_config(
+        **{
+            "llm.providers.default.kind": "local",
+            "llm.providers.default.requires_api_key": False,
+            "llm.providers.default.base_url": "http://127.0.0.1:8081/v1",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "non-caching-local-model",
+            "llm.profiles.primary.prompt_cache.mode": "disabled",
+        }
+    )
+    messages = [
+        {"role": "system", "content": "stable"},
+        snapshot["checkpointMessage"],
+        {"role": "user", "content": "current"},
+    ]
+
+    payload = LLMClient(config=config, backend=lambda value: value)._build_payload(messages)
+
+    assert not any(
+        isinstance(block, dict) and block.get("cache_control")
+        for message in payload["messages"]
+        for block in (
+            message.get("content")
+            if isinstance(message.get("content"), list)
+            else []
+        )
+    )
+
+
 def test_agent_exact_ref_tool_uses_bound_room_and_returns_structured_error(monkeypatch) -> None:
     message = _context_message(
         round_id="round-1",
@@ -943,6 +1078,35 @@ def test_formal_digest_overrides_same_source_range_and_forces_checkpoint_refresh
     public = chat_room_service._room_to_api(stored)
     assert "contextCheckpoint" not in public
     assert "contextFormalProjections" not in public
+
+
+def test_formal_projection_rejects_unknown_room_message_refs_before_persisting(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from core.web.services import chat_room_service
+
+    room = _room([_round(1, [], status="completed")])
+    store = ChatRoomStore(root=tmp_path)
+    store.save({"rooms": [room]})
+    monkeypatch.setattr(chat_room_service, "_store", lambda: store)
+
+    result = chat_room_service.promote_chat_room_formal_context(
+        ROOM_ID,
+        digest={
+            "digestId": "digest-invalid-ref",
+            "sourceMessageRefs": [f"{ROOM_ID}/round-1/missing-message"],
+        },
+        decisions=[],
+    )
+
+    stored = store.load()["rooms"][0]
+    assert result == {
+        "promoted": False,
+        "reason": "source_message_ref_invalid",
+        "invalidSourceMessageRefs": [f"{ROOM_ID}/round-1/missing-message"],
+    }
+    assert "contextFormalProjections" not in stored
 
 
 def test_closed_meeting_hook_promotes_only_the_linked_room(monkeypatch) -> None:

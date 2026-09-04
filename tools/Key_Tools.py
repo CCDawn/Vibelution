@@ -124,6 +124,9 @@ from tools.conversation_history_tools import (
     history_search_tool as _history_search_impl,
     history_timeline_tool as _history_timeline_impl,
 )
+from tools.chat_room_context_tools import (
+    read_chat_room_context_refs as _read_chat_room_context_refs_impl,
+)
 from tools.session_reference_tools import session_reference_query_tool as _session_reference_query_impl
 from tools.session_child_tools import (
     create_child_session_tool as _create_child_session_impl,
@@ -1254,6 +1257,23 @@ def _build_key_tools() -> List[BaseTool]:
             JSON 格式的检查点事件；没有检查点时返回空结果说明。
         """
         return _history_checkpoint_impl(session_id=session_id)
+
+    @tool
+    def read_chat_room_context_refs(refs: list[str]) -> str:
+        """
+        【群聊精确引用读取】读取当前群聊 checkpoint/delta 引用的原始消息。
+
+        仅在当前 Agent 正在群聊中发言时可用；引用必须是服务端给出的
+        roomId/roundId/messageId，且必须属于当前 room。每次最多 5 条，
+        总返回超过 32 KiB 时会要求缩小集合，不会静默截断。
+
+        Args:
+            refs: 要读取的规范化群聊消息引用，最多 5 条
+
+        Returns:
+            JSON 格式的精确消息列表或结构化错误。
+        """
+        return _read_chat_room_context_refs_impl(refs=refs)
 
     # ── 文件操作工具 ────────────────────────────────────────────────────────
 
@@ -3061,6 +3081,7 @@ def _build_key_tools() -> List[BaseTool]:
         history_fetch_tool,
         history_timeline_tool,
         history_checkpoint_tool,
+        read_chat_room_context_refs,
         # 文件操作
         cli_tool,
         exec_command,

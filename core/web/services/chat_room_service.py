@@ -70,6 +70,7 @@ from core.chatroom.context_checkpoint import (
     maybe_rotate_chat_room_context_checkpoint,
 )
 from core.chatroom.context_payload import (
+    PARSE_STATUS_STRUCTURED,
     chat_room_context_output_contract,
     ingest_chat_room_context_output,
 )
@@ -4499,6 +4500,36 @@ def promote_chat_room_formal_context(
         room = _find_room(state, normalized_room_id)
         if room is None:
             return {"promoted": False, "reason": "room_missing"}
+        available_source_refs = {
+            "/".join(
+                [
+                    normalized_room_id,
+                    str(round_payload.get("roundId") or round_payload.get("id") or "").strip(),
+                    str(message.get("messageId") or message.get("id") or "").strip(),
+                ]
+            )
+            for round_payload in list(room.get("rounds") or [])
+            if isinstance(round_payload, Mapping)
+            for message in list(round_payload.get("messages") or [])
+            if isinstance(message, Mapping)
+            and str(round_payload.get("roundId") or round_payload.get("id") or "").strip()
+            and str(message.get("messageId") or message.get("id") or "").strip()
+        }
+        invalid_source_refs = sorted(
+            ref
+            for ref in list(projection.get("sourceMessageRefs") or [])
+            if ref not in available_source_refs
+        )
+        if not projection["sourceMessageRefs"] or invalid_source_refs:
+            return {
+                "promoted": False,
+                "reason": "source_message_ref_invalid",
+                "invalidSourceMessageRefs": (
+                    invalid_source_refs
+                    if invalid_source_refs
+                    else ["sourceMessageRefs_required"]
+                ),
+            }
         rows = [
             dict(item)
             for item in list(room.get("contextFormalProjections") or [])
@@ -4683,6 +4714,16 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
             turn_id=turn_identity,
             room_id=str(context.get("roomId") or "").strip(),
             round_id=round_id,
+            runtime_tool_grants=(
+                ["read_chat_room_context_refs"]
+                if context.get("_structuredChatRoomContext")
+                else None
+            ),
+            runtime_tool_source=(
+                "chat_room_context"
+                if context.get("_structuredChatRoomContext")
+                else ""
+            ),
         ), session_service._session_tool_workspace_override(workspace):
             stage_started_at = _perf_counter()
             agent_runtime = session_service.create_chat_agent(workspace_path=workspace, config=agent_config)
@@ -4764,6 +4805,7 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
                     session_id=session_id,
                     turn_id=turn_identity,
                     enabled=bool(context.get("_speakerDeltaCapture")),
+                    structured_context=bool(context.get("_structuredChatRoomContext")),
                 ):
                     result = run_existing_agent_single_turn(
                         agent_runtime,
@@ -8082,11 +8124,33 @@ def _publish_chat_room_speaker_delta(event: dict[str, Any]) -> None:
     normalized_room_id = str(event.get("roomId") or "").strip()
     if not normalized_room_id:
         return
+    public_event = dict(event)
+    structured_context = bool(public_event.pop("_structuredContext", False))
+    if structured_context and chat_room_structured_context_enabled():
+        ingested = ingest_chat_room_context_output(public_event.get("content"))
+        context_payload = ingested.get("contextPayload")
+        audit = (
+            context_payload.get("audit")
+            if isinstance(context_payload, Mapping)
+            and isinstance(context_payload.get("audit"), Mapping)
+            else {}
+        )
+        if str(audit.get("parseStatus") or "") == PARSE_STATUS_STRUCTURED:
+            public_event["content"] = str(ingested.get("content") or "")
+        elif not (
+            bool(public_event.get("done"))
+            and str(public_event.get("status") or "").strip().lower()
+            in {"completed", "failed", "stopped", "aborted"}
+        ):
+            # A partial JSON object is not user-readable.  Keep it behind the
+            # room service boundary until it becomes a valid display payload
+            # or the turn closes with legacy free text.
+            return
     with _CHAT_ROOM_STREAM_SUBSCRIBERS_LOCK:
         subscribers = list(_CHAT_ROOM_STREAM_SUBSCRIBERS.get(normalized_room_id) or [])
     for subscriber in subscribers:
         try:
-            subscriber.put_nowait(event)
+            subscriber.put_nowait(public_event)
         except queue.Full:
             continue
 

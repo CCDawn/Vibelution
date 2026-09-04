@@ -197,7 +197,6 @@ def _reduce_state(
             if not message_id:
                 continue
             source_ref = _message_ref(room_id, round_id, message)
-            source_refs.append(source_ref)
             speaker = _speaker_id(message)
             speaker_role_id = _speaker_role_id(room, message)
             protocol = None
@@ -206,6 +205,7 @@ def _reduce_state(
             if protocol is None:
                 if str(message.get("status") or "").strip().lower() != _TERMINAL_MESSAGE_STATUS:
                     continue
+                source_refs.append(source_ref)
                 content = str(message.get("content") or "")
                 first_line = next(
                     (_clean_text(line) for line in content.splitlines() if _clean_text(line)),
@@ -220,6 +220,8 @@ def _reduce_state(
                         }
                     )
                 continue
+
+            source_refs.append(source_ref)
 
             for statement in list(protocol.get("agreements") or []):
                 text = _clean_text(statement)
