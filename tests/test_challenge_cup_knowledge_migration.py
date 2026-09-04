@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from scripts import migrate_challenge_cup_knowledge_items as migration
+from scripts import purge_challenge_cup_legacy_knowledge as purge
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:
@@ -171,6 +172,16 @@ def _plan(tmp_path: Path, *, migration_id: str = "migration-001") -> dict:
     )
 
 
+def _purge_plan(tmp_path: Path, *, purge_id: str = "purge-001") -> dict:
+    return purge.build_purge_plan(
+        team_id="team-challenge",
+        knowledge_base_id="team:team-challenge:kb-challenge",
+        purge_id=purge_id,
+        operator_agent_id="operator-agent",
+        backup_root=tmp_path / f"backup-{purge_id}",
+    )
+
+
 def test_dry_run_requires_exact_five_legacy_packs_and_33_unique_sources(monkeypatch, tmp_path):
     _seed(monkeypatch, tmp_path, source_count=32)
     with pytest.raises(migration.ChallengeCupKnowledgeMigrationError, match="33 unique legacy sources"):
@@ -291,3 +302,91 @@ def test_dry_run_reports_every_missing_authoritative_candidate(monkeypatch, tmp_
         match=r"missing \(2\): source-00, source-01",
     ):
         _plan(tmp_path)
+
+
+def test_legacy_purge_removes_only_searchable_records_and_is_idempotent(monkeypatch, tmp_path):
+    paths = _seed(monkeypatch, tmp_path)
+    proposals = migration._read_jsonl(paths["proposals"])
+    batches = migration._read_jsonl(paths["batches"])
+    items = migration._read_jsonl(paths["items"])
+    proposals.append({"proposalId": "keep-proposal", "title": "保留"})
+    batches.append({"batchId": "keep-batch", "proposalIds": ["keep-proposal"]})
+    items.append(
+        {
+            "knowledgeItemId": "keep-item",
+            "knowledgeBaseId": "kb-challenge",
+            "sourceCandidateId": "keep-source",
+            "lifecycleStatus": "applied",
+            "batchId": "keep-batch",
+        }
+    )
+    _write_jsonl(paths["proposals"], proposals)
+    _write_jsonl(paths["batches"], batches)
+    _write_jsonl(paths["items"], items)
+    source_artifacts_before = paths["source_artifacts"].read_bytes()
+
+    plan = _purge_plan(tmp_path)
+    assert plan["legacyKnowledgeItemIds"] == [f"old-item-{index}" for index in range(5)]
+    assert plan["legacyBatchIds"] == [f"old-batch-{index}" for index in range(5)]
+    assert plan["legacyProposalIds"] == ["old-proposal-0", "old-proposal-4"]
+    assert plan["directIngestedBatchIds"] == ["old-batch-1", "old-batch-2", "old-batch-3"]
+    assert len(plan["sourceCandidateIds"]) == 33
+
+    result = purge.apply_purge(
+        plan,
+        maintenance_window_confirmed=True,
+        expected_manifest_hash=plan["manifestHash"],
+    )
+    assert result["status"] == "applied"
+    assert [row["knowledgeItemId"] for row in migration._read_jsonl(paths["items"])] == ["keep-item"]
+    assert [row["batchId"] for row in migration._read_jsonl(paths["batches"])] == ["keep-batch"]
+    assert [row["proposalId"] for row in migration._read_jsonl(paths["proposals"])] == ["keep-proposal"]
+    assert paths["source_artifacts"].read_bytes() == source_artifacts_before
+    audits = migration._read_jsonl(paths["audit"])
+    assert len([row for row in audits if row["action"] == purge.PURGE_ACTION]) == 1
+    assert len([row for row in audits if row["action"] == purge.TERMINAL_ACTION]) == 1
+    assert Path(plan["backupPath"], "manifest.json").exists()
+    assert not any((tmp_path / "vector" / "items").glob("old-item-*.json"))
+
+    second = _purge_plan(tmp_path)
+    assert second["status"] == "already_applied"
+
+
+def test_legacy_purge_restores_files_and_vector_index_on_interruption(monkeypatch, tmp_path):
+    paths = _seed(monkeypatch, tmp_path)
+    before = {name: path.read_bytes() for name, path in paths.items()}
+    vector_before = {
+        path.name: path.read_bytes()
+        for path in (tmp_path / "vector" / "items").glob("*.json")
+    }
+    plan = _purge_plan(tmp_path, purge_id="purge-failure")
+    real_write = purge.team_knowledge_service._write_jsonl
+    calls = 0
+
+    def interrupted(path, rows):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise OSError("simulated purge interruption")
+        return real_write(path, rows)
+
+    monkeypatch.setattr(purge.team_knowledge_service, "_write_jsonl", interrupted)
+    with pytest.raises(OSError, match="simulated purge interruption"):
+        purge.apply_purge(
+            plan,
+            maintenance_window_confirmed=True,
+            expected_manifest_hash=plan["manifestHash"],
+        )
+    assert {name: path.read_bytes() for name, path in paths.items()} == before
+    assert {
+        path.name: path.read_bytes()
+        for path in (tmp_path / "vector" / "items").glob("*.json")
+    } == vector_before
+
+
+def test_legacy_purge_rejects_target_count_drift(monkeypatch, tmp_path):
+    paths = _seed(monkeypatch, tmp_path)
+    _write_jsonl(paths["items"], migration._read_jsonl(paths["items"])[:-1])
+
+    with pytest.raises(purge.ChallengeCupKnowledgePurgeError, match="exactly 5 legacy items"):
+        _purge_plan(tmp_path)
