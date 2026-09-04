@@ -66,6 +66,7 @@ def test_challenge_automatic_memory_lookup_stops_when_authoritative_scope_is_mis
         actor_agent_id="agent-source",
         research_project_id="",
         question_id="",
+        require_scope=True,
     )
     assert results == []
     assert status == "scope_incomplete"

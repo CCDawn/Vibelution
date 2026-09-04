@@ -261,6 +261,11 @@ def _legacy_research_lifecycle_memory_contexts(
             or (latest_iteration or {}).get("questionId"),
             max_length=200,
         ),
+        require_scope=any(
+            bool((item or {}).get("researchProjectId") or (item or {}).get("challengeTaskContract") or (item or {}).get("challengeQuestionId"))
+            for item in (design_plan, best_plan, latest_experiment, latest_iteration)
+            if isinstance(item, dict)
+        ),
     )
     loop_store = s._read_json(s._team_workflow_root(team_id) / "research_loops" / "index.json")
     common = {

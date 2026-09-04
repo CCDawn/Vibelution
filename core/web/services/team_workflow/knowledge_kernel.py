@@ -3690,6 +3690,7 @@ def _research_memory_knowledge_results(
     actor_agent_id: str,
     research_project_id: str = "",
     question_id: str = "",
+    require_scope: bool = False,
 ) -> tuple[list[dict[str, Any]], str]:
     s = _service()
     normalized_actor_id = s._trim_text(actor_agent_id, max_length=160)
@@ -3702,7 +3703,9 @@ def _research_memory_knowledge_results(
     knowledge_results: list[dict[str, Any]] = []
     normalized_project_id = s._trim_text(research_project_id, max_length=160)
     normalized_question_id = s._trim_text(question_id, max_length=200)
-    if not normalized_project_id or not normalized_question_id:
+    if (require_scope or normalized_project_id or normalized_question_id) and (
+        not normalized_project_id or not normalized_question_id
+    ):
         return [], "scope_incomplete"
     try:
         knowledge_payload = s.team_knowledge_service.search_knowledge_items(
