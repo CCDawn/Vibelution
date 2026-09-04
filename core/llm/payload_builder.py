@@ -33,6 +33,8 @@ class PayloadPolicyActions:
     minimal_tool_schema: bool = False
     prompt_cache_provider_strategy: str = "disabled"
     qwen_prompt_cache_markers_added: int = 0
+    qwen_tool_message_runs_merged: int = 0
+    qwen_tool_tail_cache_markers_added: int = 0
     anthropic_prompt_cache_markers_added: int = 0
     anthropic_top_level_cache_control: bool = False
     provider_tool_chain_repaired: int = 0
@@ -47,6 +49,8 @@ class PayloadPolicyActions:
             "payloadPolicyMinimalToolSchema": self.minimal_tool_schema,
             "promptCacheProviderStrategy": self.prompt_cache_provider_strategy,
             "payloadPolicyQwenPromptCacheMarkersAdded": self.qwen_prompt_cache_markers_added,
+            "payloadPolicyQwenToolMessageRunsMerged": self.qwen_tool_message_runs_merged,
+            "payloadPolicyQwenToolTailCacheMarkersAdded": self.qwen_tool_tail_cache_markers_added,
             "payloadPolicyAnthropicPromptCacheMarkersAdded": self.anthropic_prompt_cache_markers_added,
             "payloadPolicyAnthropicTopLevelCacheControl": self.anthropic_top_level_cache_control,
             "payloadPolicyProviderToolChainRepaired": self.provider_tool_chain_repaired,
@@ -275,6 +279,23 @@ def _tool_pairing_snapshot(messages: List[Dict[str, Any]]) -> Dict[str, int]:
                     assistant_tool_calls += 1
             continue
         if role == "tool":
+            content = message.get("content")
+            if isinstance(content, list):
+                # DashScope merged tool-result message: each content block
+                # carries its own tool_call_id.
+                block_ids = [
+                    str(block.get("tool_call_id") or "").strip()
+                    for block in content
+                    if isinstance(block, dict)
+                ]
+                for block_call_id in block_ids:
+                    tool_results += 1
+                    if block_call_id and block_call_id in pending:
+                        pending.remove(block_call_id)
+                        paired += 1
+                    else:
+                        orphan += 1
+                continue
             tool_results += 1
             tool_call_id = str(message.get("tool_call_id") or "").strip()
             if tool_call_id and tool_call_id in pending:
@@ -753,6 +774,81 @@ def _select_qwen_prompt_cache_marker_index(messages: List[Dict[str, Any]]) -> in
     return -1
 
 
+def _merged_tool_result_blocks(message: dict[str, Any]) -> list[dict[str, Any]]:
+    """Render one classic tool message as an official DashScope result block."""
+
+    text = extract_text_content(message.get("content"))
+    block: dict[str, Any] = {"type": "text", "text": text}
+    tool_call_id = str(message.get("tool_call_id") or "").strip()
+    if tool_call_id:
+        block["tool_call_id"] = tool_call_id
+    return [block]
+
+
+def _merge_qwen_consecutive_tool_messages(
+    messages: list[dict[str, Any]],
+    actions: PayloadPolicyActions,
+    *,
+    apply_merge: bool = True,
+) -> list[dict[str, Any]]:
+    """Merge consecutive tool messages for the DashScope explicit-cache window.
+
+    DashScope's explicit cache matches backward from a ``cache_control`` marker
+    across at most 20 content blocks. Parallel tool calls otherwise emit one
+    tool message per call and each message occupies a block position, pushing
+    markers out of the lookback window (guaranteed cache miss on long tool
+    loops). Official guidance: merge consecutive tool messages into one
+    message with multiple content blocks and mark the last block of the last
+    tool message. Runs are merged everywhere so a run's serialization stays
+    byte-stable across turn iterations; singleton tool messages keep today's
+    classic shape (top-level ``tool_call_id`` + string content).
+    """
+
+    if actions.prompt_cache_provider_strategy != "qwen_explicit_cache_control" or not apply_merge:
+        return [dict(item) for item in messages]
+    normalized: list[dict[str, Any]] = []
+    run: list[dict[str, Any]] = []
+
+    def flush_run() -> None:
+        nonlocal run
+        if len(run) < 2:
+            normalized.extend(dict(item) for item in run)
+            run = []
+            return
+        blocks: list[dict[str, Any]] = []
+        for item in run:
+            blocks.extend(_merged_tool_result_blocks(item))
+        normalized.append({"role": "tool", "content": blocks})
+        actions.qwen_tool_message_runs_merged += 1
+        run = []
+
+    for item in messages:
+        if isinstance(item, dict) and str(item.get("role") or "").strip().lower() == "tool":
+            run.append(item)
+            continue
+        flush_run()
+        normalized.append(dict(item))
+    flush_run()
+
+    if normalized and actions.qwen_tool_message_runs_merged:
+        last = normalized[-1]
+        content = last.get("content") if isinstance(last, dict) else None
+        # The tail marker only lands on a merged run: singleton runs keep their
+        # classic string content so their payload bytes never depend on what
+        # appends after them in later iterations.
+        if (
+            isinstance(last, dict)
+            and str(last.get("role") or "").strip().lower() == "tool"
+            and isinstance(content, list)
+            and content
+        ):
+            tail_block = content[-1]
+            if isinstance(tail_block, dict) and not tail_block.get("cache_control"):
+                tail_block["cache_control"] = {"type": "ephemeral"}
+                actions.qwen_tool_tail_cache_markers_added += 1
+    return normalized
+
+
 def _apply_qwen_explicit_prompt_cache_markers(
     messages: List[Dict[str, Any]],
     actions: PayloadPolicyActions,
@@ -846,10 +942,16 @@ def _apply_explicit_prompt_cache_markers(
     actions: PayloadPolicyActions,
     *,
     marker_limit: int = 4,
+    merge_tool_messages: bool = True,
 ) -> List[Dict[str, Any]]:
     strategy = str(actions.prompt_cache_provider_strategy or "").strip().lower()
     if strategy == "qwen_explicit_cache_control":
-        return _apply_qwen_explicit_prompt_cache_markers(messages, actions, marker_limit=marker_limit)
+        merged = _merge_qwen_consecutive_tool_messages(
+            messages,
+            actions,
+            apply_merge=merge_tool_messages,
+        )
+        return _apply_qwen_explicit_prompt_cache_markers(merged, actions, marker_limit=marker_limit)
     if strategy == "anthropic_explicit_cache_control":
         return _apply_anthropic_explicit_prompt_cache_markers(messages, actions, marker_limit=marker_limit)
     return [dict(item) for item in messages]
@@ -966,6 +1068,10 @@ def build_llm_payload(
         normalized_messages = _apply_explicit_prompt_cache_markers(
             normalized_messages,
             policy_actions,
+            # DashScope official merged-tool-message form is chat-completions
+            # only; the Responses input projection still requires per-item
+            # call_id at top level, so never merge on that transport.
+            merge_tool_messages=transport != "responses",
         )
 
     if transport == "responses":

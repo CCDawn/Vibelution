@@ -86,3 +86,81 @@ def test_payload_protocol_validation_blocks_duplicate_tool_call_id():
 
     assert result.ok is False
     assert result.error_type == "duplicate_tool_call_id"
+
+
+def _merged_tool_result_payload() -> dict:
+    return {
+        "model": "openai/qwen3.6-plus",
+        "messages": [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"id": "call_1", "type": "function", "function": {"name": "search_tool", "arguments": "{}"}},
+                    {"id": "call_2", "type": "function", "function": {"name": "search_tool", "arguments": "{}"}},
+                    {"id": "call_3", "type": "function", "function": {"name": "search_tool", "arguments": "{}"}},
+                ],
+            },
+            {
+                "role": "tool",
+                "content": [
+                    {"type": "text", "text": "result-1", "tool_call_id": "call_1"},
+                    {"type": "text", "text": "result-2", "tool_call_id": "call_2"},
+                    {
+                        "type": "text",
+                        "text": "result-3",
+                        "tool_call_id": "call_3",
+                        "cache_control": {"type": "ephemeral"},
+                    },
+                ],
+            },
+            {"role": "user", "content": "继续"},
+        ],
+    }
+
+
+def test_tool_result_pairing_accepts_merged_tool_result_blocks():
+    result = validate_payload_against_protocol(_merged_tool_result_payload(), _route())
+
+    assert result.ok is True
+
+
+def test_tool_result_pairing_blocks_merged_block_missing_tool_call_id():
+    payload = _merged_tool_result_payload()
+    payload["messages"][1]["content"][1] = {"type": "text", "text": "result-2"}
+
+    result = validate_payload_against_protocol(payload, _route())
+
+    assert result.ok is False
+    assert result.error_type == "tool_result_missing_id"
+
+
+def test_tool_result_pairing_blocks_merged_orphan_tool_result_block():
+    payload = _merged_tool_result_payload()
+    payload["messages"][1]["content"][2]["tool_call_id"] = "unknown_call"
+
+    result = validate_payload_against_protocol(payload, _route())
+
+    assert result.ok is False
+    assert result.error_type == "orphan_tool_result"
+
+
+def test_tool_result_pairing_blocks_merged_duplicate_tool_result_block():
+    payload = _merged_tool_result_payload()
+    payload["messages"][1]["content"][2]["tool_call_id"] = "call_1"
+
+    result = validate_payload_against_protocol(payload, _route())
+
+    assert result.ok is False
+    assert result.error_type == "duplicate_tool_result"
+
+
+def test_tool_result_pairing_blocks_partial_merged_tool_result():
+    payload = _merged_tool_result_payload()
+    payload["messages"][1]["content"] = payload["messages"][1]["content"][:2]
+
+    result = validate_payload_against_protocol(payload, _route())
+
+    assert result.ok is False
+    assert result.error_type == "missing_tool_result"
+    assert result.details["pendingToolCallIds"] == ["call_3"]

@@ -115,6 +115,48 @@ def validate_tool_result_pairing(messages: List[Dict[str, Any]]) -> PayloadValid
                 pending.append(tool_call_id)
             continue
         if role == "tool":
+            content = message.get("content")
+            if isinstance(content, list):
+                # DashScope official merged tool-result message: one tool
+                # message whose content blocks each carry a tool_call_id
+                # (parallel tool calls merged for the 20-block cache window).
+                block_ids: list[str] = []
+                for block_index, block in enumerate(content):
+                    block_call_id = (
+                        str(block.get("tool_call_id") or "").strip()
+                        if isinstance(block, dict)
+                        else ""
+                    )
+                    if not block_call_id:
+                        return PayloadValidationResult(
+                            ok=False,
+                            error_type="tool_result_missing_id",
+                            message="Merged tool result content block is missing tool_call_id.",
+                            details={"messageIndex": index, "blockIndex": block_index},
+                        )
+                    block_ids.append(block_call_id)
+                for block_call_id in block_ids:
+                    if block_call_id in seen_tool_result_ids:
+                        return PayloadValidationResult(
+                            ok=False,
+                            error_type="duplicate_tool_result",
+                            message="Duplicate tool result detected before provider send.",
+                            details={"messageIndex": index, "toolCallId": block_call_id},
+                        )
+                    if block_call_id not in pending:
+                        return PayloadValidationResult(
+                            ok=False,
+                            error_type="orphan_tool_result",
+                            message="Tool result has no pending assistant tool call.",
+                            details={
+                                "messageIndex": index,
+                                "toolCallId": block_call_id,
+                                "pendingToolCallIds": list(pending),
+                            },
+                        )
+                    seen_tool_result_ids.add(block_call_id)
+                    pending.remove(block_call_id)
+                continue
             tool_call_id = str(message.get("tool_call_id") or "").strip()
             if not tool_call_id:
                 return PayloadValidationResult(
