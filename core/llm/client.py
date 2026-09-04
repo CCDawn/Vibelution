@@ -21,7 +21,11 @@ from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, Syst
 
 from config import AppConfig, get_config
 from config.llm_security import is_llm_local_network_base_url
-from config.models import DEFAULT_LLM_ROUTE_CONCURRENCY
+from config.models import (
+    DEFAULT_LLM_ROUTE_CONCURRENCY,
+    DEFAULT_LLM_ROUTE_GATE_WAIT_SECONDS,
+    DEFAULT_LLM_STREAM_TOTAL_DEADLINE_SECONDS,
+)
 from core.context.volatility import is_volatile_context_text
 
 from .adapters import get_provider_adapter
@@ -47,7 +51,7 @@ from .stream_http_timing import (
 from .streaming import ResponsesStreamNormalizer, extract_message_tool_calls, extract_text_content
 from .semantic_messages import SemanticGenerationSettings, SemanticOutputSchema
 from .semantic_projector import SemanticProjectionError, SemanticProjectionInput, project_semantic_request
-from .types import LLMCapabilities, LLMError, LLMOutputTruncatedError, LLMProtocolEvent, StreamChunk, ToolCall, TurnOutcome, UsageStats
+from .types import LLMCapabilities, LLMError, LLMOutputTruncatedError, LLMProtocolEvent, LLMRouteGateTimeoutError, LLMStreamTotalDeadlineError, StreamChunk, ToolCall, TurnOutcome, UsageStats
 from .usage import read_usage_int as _read_provider_usage_int
 from .usage import cache_usage_observation_from_payload, usage_stats_from_payload, usage_to_dict
 from .wire.registry import build_default_wire_adapter_registry
@@ -82,6 +86,198 @@ _LLM_CHAT_PROVIDER_ABORT_CONTEXT: ContextVar[bool] = ContextVar(
 _LLM_ROUTE_CONCURRENCY_LIMIT: int | None = None
 _LLM_ROUTE_CONCURRENCY_LOCK = threading.Lock()
 _LLM_ROUTE_CONCURRENCY_GATES: Dict[str, threading.BoundedSemaphore] = {}
+
+# --- LLM 流式调用活性治理（route gate 有界等待 + 流总时长硬上限）---
+# 两者都是惰性逐请求解析：in-process override（测试/嵌入方）优先，其次 env
+# （钳制到安全范围），最后是打包默认值。导入时不读 env，与
+# `_resolve_llm_route_concurrency_limit` 的懒解析惯例一致。
+# 默认值（含「不小于挑战 per-call fence 800s」的约束说明）统一登记在
+# config/models.py；这里只保留 env 名与安全钳制范围。
+_LLM_ROUTE_GATE_WAIT_ENV = "VIBELUTION_LLM_ROUTE_GATE_WAIT_SECONDS"
+_LLM_ROUTE_GATE_WAIT_DEFAULT_SECONDS = DEFAULT_LLM_ROUTE_GATE_WAIT_SECONDS
+_LLM_ROUTE_GATE_WAIT_MIN_SECONDS = 1.0
+_LLM_ROUTE_GATE_WAIT_MAX_SECONDS = 600.0
+_LLM_ROUTE_GATE_WAIT_LIMIT: float | None = None
+
+_LLM_STREAM_TOTAL_DEADLINE_ENV = "VIBELUTION_LLM_STREAM_TOTAL_DEADLINE_SECONDS"
+_LLM_STREAM_TOTAL_DEADLINE_DEFAULT_SECONDS = DEFAULT_LLM_STREAM_TOTAL_DEADLINE_SECONDS
+_LLM_STREAM_TOTAL_DEADLINE_MIN_SECONDS = 60.0
+_LLM_STREAM_TOTAL_DEADLINE_MAX_SECONDS = 3600.0
+_LLM_STREAM_TOTAL_DEADLINE_LIMIT: float | None = None
+
+# 看 watchdog「真断连」用的 turn-scoped 取消态与在途流 closer 登记。key 是
+# 规范化的 turn 身份（chat_room 讲者调用是 "chat-room:{round}:{participant}"）。
+_LLM_TURN_CANCEL_STATES: Dict[str, tuple[str, float]] = {}
+_LLM_TURN_CANCEL_STATES_LOCK = threading.Lock()
+_LLM_TURN_CANCEL_STATE_TTL_SECONDS = 3600.0
+_LLM_ACTIVE_STREAM_CLOSE_HOOKS: Dict[str, set] = {}
+_LLM_ACTIVE_STREAM_CLOSE_HOOKS_LOCK = threading.Lock()
+
+
+def _clamp_env_seconds(
+    raw: Any,
+    *,
+    default: float,
+    minimum: float,
+    maximum: float,
+) -> float:
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return default
+    if value != value or value in (float("inf"), float("-inf")):
+        return default
+    return max(minimum, min(maximum, value))
+
+
+def _llm_route_gate_wait_seconds() -> float:
+    """Bounded wait budget for the per-route concurrency gate."""
+
+    override = _LLM_ROUTE_GATE_WAIT_LIMIT
+    if isinstance(override, (int, float)) and not isinstance(override, bool) and override > 0:
+        return float(override)
+    return _clamp_env_seconds(
+        os.environ.get(_LLM_ROUTE_GATE_WAIT_ENV),
+        default=_LLM_ROUTE_GATE_WAIT_DEFAULT_SECONDS,
+        minimum=_LLM_ROUTE_GATE_WAIT_MIN_SECONDS,
+        maximum=_LLM_ROUTE_GATE_WAIT_MAX_SECONDS,
+    )
+
+
+def _llm_stream_total_deadline_seconds() -> float:
+    """Hard wall-clock ceiling for one streaming attempt."""
+
+    override = _LLM_STREAM_TOTAL_DEADLINE_LIMIT
+    if isinstance(override, (int, float)) and not isinstance(override, bool) and override > 0:
+        return float(override)
+    return _clamp_env_seconds(
+        os.environ.get(_LLM_STREAM_TOTAL_DEADLINE_ENV),
+        default=_LLM_STREAM_TOTAL_DEADLINE_DEFAULT_SECONDS,
+        minimum=_LLM_STREAM_TOTAL_DEADLINE_MIN_SECONDS,
+        maximum=_LLM_STREAM_TOTAL_DEADLINE_MAX_SECONDS,
+    )
+
+
+def _stream_force_close_targets(stream: Any) -> list:
+    """Collect the objects whose ``close`` can unwind a blocked stream read.
+
+    Covers plain iterators (``close``), OpenAI SDK ``Stream`` (``response``
+    httpx response, ``response_cm``) and litellm wrappers (``_response``).
+    Every close is best-effort: a blocked socket read raises and unwinds,
+    which is exactly the goal.
+    """
+
+    targets = []
+    seen_ids = set()
+
+    def _push(candidate: Any) -> Any:
+        if candidate is None or id(candidate) in seen_ids:
+            return None
+        seen_ids.add(id(candidate))
+        targets.append(candidate)
+        return candidate
+
+    cursor = _push(stream)
+    for _ in range(3):
+        if cursor is None:
+            break
+        cursor = _push(getattr(cursor, "response", None) or getattr(cursor, "_response", None))
+    _push(getattr(stream, "response_cm", None))
+    return targets
+
+
+def force_close_llm_stream(stream: Any) -> None:
+    """Best-effort force close of an in-flight provider stream."""
+
+    for target in _stream_force_close_targets(stream):
+        close = getattr(target, "close", None)
+        if not callable(close):
+            continue
+        try:
+            close()
+        except Exception:
+            continue
+
+
+def _register_llm_stream_close_hook(turn_key: str, hook: Callable[[], None]) -> None:
+    normalized = str(turn_key or "").strip()
+    if not normalized:
+        return
+    with _LLM_ACTIVE_STREAM_CLOSE_HOOKS_LOCK:
+        _LLM_ACTIVE_STREAM_CLOSE_HOOKS.setdefault(normalized, set()).add(hook)
+
+
+def _unregister_llm_stream_close_hook(turn_key: str, hook: Callable[[], None]) -> None:
+    normalized = str(turn_key or "").strip()
+    if not normalized:
+        return
+    with _LLM_ACTIVE_STREAM_CLOSE_HOOKS_LOCK:
+        hooks = _LLM_ACTIVE_STREAM_CLOSE_HOOKS.get(normalized)
+        if hooks is not None:
+            hooks.discard(hook)
+            if not hooks:
+                _LLM_ACTIVE_STREAM_CLOSE_HOOKS.pop(normalized, None)
+
+
+def request_llm_stream_close_for_turn(turn_key: str) -> int:
+    """Force-close every in-flight provider stream registered for a turn.
+
+    Returns the number of close attempts. Best-effort by design: hooks are
+    idempotent and swallow close failures so a watchdog caller can never be
+    blocked by a dying connection.
+    """
+
+    normalized = str(turn_key or "").strip()
+    if not normalized:
+        return 0
+    with _LLM_ACTIVE_STREAM_CLOSE_HOOKS_LOCK:
+        hooks = set(_LLM_ACTIVE_STREAM_CLOSE_HOOKS.get(normalized) or ())
+    attempts = 0
+    for hook in hooks:
+        attempts += 1
+        try:
+            hook()
+        except Exception:
+            continue
+    return attempts
+
+
+def cancel_llm_turn_scope(turn_key: str, reason: str) -> int:
+    """Mark a turn scope cancelled and force-close its in-flight streams.
+
+    This is the chat-room speaker watchdog path: the abandoned runner thread
+    observes the reason through ``_raise_if_llm_cancelled`` (so its retry loop
+    stops), and its blocked provider stream is force-closed so the route
+    concurrency slot is returned promptly. Ordinary turns never set this
+    state, so their cancellation semantics are unchanged.
+    """
+
+    normalized = str(turn_key or "").strip()
+    normalized_reason = str(reason or "").strip() or "turn scope cancelled by watchdog"
+    if not normalized:
+        return 0
+    now = time.time()
+    with _LLM_TURN_CANCEL_STATES_LOCK:
+        stale = [
+            key
+            for key, (_, marked_at) in _LLM_TURN_CANCEL_STATES.items()
+            if now - marked_at > _LLM_TURN_CANCEL_STATE_TTL_SECONDS
+        ]
+        for key in stale:
+            _LLM_TURN_CANCEL_STATES.pop(key, None)
+        _LLM_TURN_CANCEL_STATES[normalized] = (normalized_reason, now)
+    return request_llm_stream_close_for_turn(normalized)
+
+
+def clear_llm_turn_scope_cancel(turn_key: str) -> None:
+    """Clear a turn-scoped cancellation so a fresh turn with the same identity
+    (chat-room fence retry) is not insta-cancelled by a stale watchdog flag."""
+
+    normalized = str(turn_key or "").strip()
+    if not normalized:
+        return
+    with _LLM_TURN_CANCEL_STATES_LOCK:
+        _LLM_TURN_CANCEL_STATES.pop(normalized, None)
 _LLM_BACKEND_ATTEMPT_CONTEXT: ContextVar[tuple[int, int]] = ContextVar(
     "vibelution_llm_backend_attempt",
     default=(1, 0),
@@ -414,12 +610,28 @@ def _dedupe_outcome_tool_calls_against_chain(
 
 def _current_llm_cancel_reason() -> str:
     checker = _LLM_CANCEL_CHECKER_CONTEXT.get(None)
-    if not callable(checker):
-        return ""
-    try:
-        return str(checker() or "").strip()
-    except Exception:
-        return ""
+    if callable(checker):
+        try:
+            reason = str(checker() or "").strip()
+        except Exception:
+            reason = ""
+        if reason:
+            return reason
+    # Turn-scoped cancellation (speaker watchdog abandon): only visible when
+    # a watchdog actually marked this turn identity, so ordinary turns keep
+    # their exact prior semantics.
+    status_context = _LLM_STATUS_CONTEXT.get({}) or {}
+    turn_key = str(
+        status_context.get("turnId")
+        or status_context.get("turn_id")
+        or ""
+    ).strip()
+    if turn_key and _LLM_TURN_CANCEL_STATES:
+        with _LLM_TURN_CANCEL_STATES_LOCK:
+            entry = _LLM_TURN_CANCEL_STATES.get(turn_key)
+        if entry is not None:
+            return str(entry[0] or "").strip()
+    return ""
 
 
 def _raise_if_llm_cancelled() -> None:
@@ -488,6 +700,8 @@ def _reserve_llm_route_slot(
 ):
     gate = _llm_route_concurrency_gate(route_key, limit=limit)
     wait_started = time.time()
+    gate_wait_budget = _llm_route_gate_wait_seconds()
+    gate_wait_started_monotonic = time.monotonic()
     acquired_immediately = gate.acquire(blocking=False)
     if not acquired_immediately:
         _record_llm_scene_event(
@@ -508,8 +722,20 @@ def _reserve_llm_route_slot(
             },
             lifecycle=False,
         )
-        while not gate.acquire(timeout=0.1):
+        while True:
+            acquired = gate.acquire(timeout=0.1)
+            if acquired:
+                break
             _raise_if_llm_cancelled()
+            # 有界等待：上限由 VIBELUTION_LLM_ROUTE_GATE_WAIT_SECONDS 控制
+            #（默认 120s，钳制 1-600s）。之前这里是无上限自旋，被遗弃的
+            # 讲者线程只要还持有槽位就能让同路由后续调用全部永久排队。
+            remaining = gate_wait_budget - (time.monotonic() - gate_wait_started_monotonic)
+            if remaining <= 0:
+                raise LLMRouteGateTimeoutError(
+                    wait_seconds=gate_wait_budget,
+                    route_key_hash=_short_hash(route_key),
+                )
     wait_ms = int((time.time() - wait_started) * 1000)
     _publish_llm_status_event(
         "concurrency_acquired",
@@ -4121,6 +4347,7 @@ class LLMClient:
         protocol_event_sink: Optional[Callable[[LLMProtocolEvent], None]] = None,
         scene_identity: Optional[Dict[str, Any]] = None,
         request_messages: Optional[List[Any]] = None,
+        stream_deadline_at: float | None = None,
         receipt_builder: Optional[
             Callable[[TurnOutcome, UsageStats | None], TurnOutcome]
         ] = None,
@@ -4128,6 +4355,49 @@ class LLMClient:
         _raise_if_llm_cancelled()
         emitted = False
         turn_outcome: TurnOutcome | None = None
+
+        # 独立的 total-deadline watcher：永远挂载，不受
+        # enable_chat_provider_abort 门控。现有的 opt-in 取消 closer
+        #（_prepare_cancellable_chat_stream）语义保持不变，两者叠加。
+        # Timer 到点强制 close 底层 stream/response，让阻塞在 socket read
+        # 上的线程以异常解卷并在 finally 归还路由槽位。
+        deadline_fired = threading.Event()
+        deadline_timer_holder: list[threading.Timer] = []
+        stream_iterator_holder: list[Any] = []
+        turn_key = str(dict(scene_identity or {}).get("turnId") or "").strip()
+
+        def _force_close_stream_on_deadline() -> None:
+            deadline_fired.set()
+            force_close_llm_stream(stream_iterator_holder[0] if stream_iterator_holder else None)
+
+        def _arm_stream_deadline_guard() -> None:
+            if stream_deadline_at is None or deadline_timer_holder:
+                return
+            remaining = max(0.0, stream_deadline_at - time.monotonic())
+            timer = threading.Timer(remaining, _force_close_stream_on_deadline)
+            timer.daemon = True
+            try:
+                timer.start()
+            except Exception:
+                return
+            deadline_timer_holder.append(timer)
+
+        def _teardown_stream_deadline_guard() -> None:
+            while deadline_timer_holder:
+                timer = deadline_timer_holder.pop()
+                timer.cancel()
+            if turn_key:
+                _unregister_llm_stream_close_hook(turn_key, _force_close_stream_on_deadline)
+
+        def _raise_if_stream_deadline_exceeded() -> None:
+            if stream_deadline_at is None:
+                return
+            if time.monotonic() >= stream_deadline_at:
+                raise LLMStreamTotalDeadlineError(
+                    deadline_seconds=_llm_stream_total_deadline_seconds(),
+                    provider=self.provider.kind,
+                    model=self.profile.model,
+                )
 
         def events() -> Iterator[StreamChunk]:
             nonlocal emitted, turn_outcome
@@ -4145,6 +4415,11 @@ class LLMClient:
 
             with _llm_provider_proxy_env(self.config, payload.get("base_url")):
                 iterator = self._open_provider_stream(payload)
+                stream_iterator_holder.append(iterator)
+                _arm_stream_deadline_guard()
+                _raise_if_stream_deadline_exceeded()
+                if turn_key:
+                    _register_llm_stream_close_hook(turn_key, _force_close_stream_on_deadline)
                 wire_adapter = self._required_wire_adapter()
                 if wire_adapter is None:
                     raise AssertionError("required wire adapter returned None")
@@ -4195,6 +4470,7 @@ class LLMClient:
                         canonical_usage: UsageStats | None = None
                         for event in normalized_iterator:
                             _raise_if_llm_cancelled()
+                            _raise_if_stream_deadline_exceeded()
                             if protocol_event_sink is not None:
                                 protocol_event_sink(event)
                             projected: StreamChunk | None = None
@@ -4298,7 +4574,22 @@ class LLMClient:
             ) as timings:
                 try:
                     yield from events()
+                except Exception as exc:
+                    # total-deadline timer 强制关闭底层连接后，阻塞的读会以
+                    # 任意连接类异常解卷；把它归一为 timeout/retryable，
+                    # 走现有的可重试错误路径。真正的取消/LLMError 保持原样。
+                    if (
+                        deadline_fired.is_set()
+                        and not isinstance(exc, (LLMError, LLMCancelledError))
+                    ):
+                        raise LLMStreamTotalDeadlineError(
+                            deadline_seconds=_llm_stream_total_deadline_seconds(),
+                            provider=self.provider.kind,
+                            model=self.profile.model,
+                        ) from exc
+                    raise
                 finally:
+                    _teardown_stream_deadline_guard()
                     _record_stream_http_timing_summary(timings, identity=identity)
 
         return timed_events(), lambda: emitted, lambda: turn_outcome
@@ -4411,6 +4702,10 @@ class LLMClient:
             except LLMCancelledError as exc:
                 raise _llm_cancelled_error(exc.reason) from exc
             start = time.time()
+            # 流式总时长硬上限按单次 attempt 计：litellm 重试循环的每次重试
+            # 都在这里重新起算，不跨 attempt 泄漏。
+            stream_total_deadline_seconds = _llm_stream_total_deadline_seconds()
+            stream_deadline_at = time.monotonic() + stream_total_deadline_seconds
             emitted = False
             chunk_count = 0
             text_delta_count = 0
@@ -4470,6 +4765,7 @@ class LLMClient:
                         metadata=metadata,
                         invocation_scope=invocation_scope,
                         protocol_event_sink=protocol_event_sink,
+                        stream_deadline_at=stream_deadline_at,
                         scene_identity={
                             "role": self.role,
                             "profileId": self.profile_id,
@@ -4506,6 +4802,12 @@ class LLMClient:
                     )
                     for event in events:
                         _raise_if_llm_cancelled()
+                        if time.monotonic() >= stream_deadline_at:
+                            raise LLMStreamTotalDeadlineError(
+                                deadline_seconds=stream_total_deadline_seconds,
+                                provider=self.provider.kind,
+                                model=self.profile.model,
+                            )
                         now = time.time()
                         elapsed_ms = int((now - start) * 1000)
                         if first_chunk_ms is None:

@@ -352,3 +352,59 @@ class LLMOutputTruncatedError(LLMError):
             model=model,
             details=details,
         )
+
+
+class LLMRouteGateTimeoutError(LLMError):
+    """路由并发闸门在等待预算内没有释放出空闲槽位。
+
+    命名与语义参照 team_workflow 的 ``ReviewLLMGateTimeoutError``：调用从未
+    到达 provider，按可恢复的闸门拒绝处理（``retryable=True``），交给现有
+    可重试错误恢复路径。消息携带等待秒数与 route key hash 便于归因。
+    """
+
+    def __init__(
+        self,
+        *,
+        wait_seconds: float,
+        route_key_hash: str = "",
+    ) -> None:
+        super().__init__(
+            "gate_timeout",
+            (
+                f"LLM route concurrency gate waited {float(wait_seconds):g}s for a free "
+                "slot and was rejected before reaching the provider "
+                f"(routeKeyHash={str(route_key_hash or '')})"
+            ),
+            retryable=True,
+        )
+        self.wait_seconds = float(wait_seconds)
+        self.route_key_hash = str(route_key_hash or "")
+
+
+class LLMStreamTotalDeadlineError(LLMError):
+    """流式调用超过单次 attempt 的 wall-clock 总时长硬上限。
+
+    httpx read timeout 是「chunk 间隔」型，静默保活字节会无限重置它；本错误
+    表示即使流仍在产出（或被保活字节喂养），整个 attempt 也必须强制收卷。
+    分类为 ``timeout`` 且 ``retryable=True``：超时后连接已被强制关闭，重试
+    是安全且可能有意义的。
+    """
+
+    def __init__(
+        self,
+        *,
+        deadline_seconds: float,
+        provider: str = "",
+        model: str = "",
+    ) -> None:
+        super().__init__(
+            "timeout",
+            (
+                f"LLM stream exceeded its total wall-clock deadline of "
+                f"{float(deadline_seconds):g}s and was force-closed"
+            ),
+            retryable=True,
+            provider=provider,
+            model=model,
+        )
+        self.deadline_seconds = float(deadline_seconds)

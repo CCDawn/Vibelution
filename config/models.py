@@ -562,6 +562,18 @@ DEFAULT_ROLE_PROFILE_IDS = (
 
 DEFAULT_LLM_ROUTE_CONCURRENCY = 4
 
+# LLM 流式调用活性治理的运行时旋钮（env 惰性逐请求解析，见 core/llm/client.py；
+# 这里只登记默认值与安全范围，不进 operator config 文件）：
+# - VIBELUTION_LLM_ROUTE_GATE_WAIT_SECONDS：路由并发闸门的有界等待上限。
+#   默认 120.0s，钳制 1-600s；超时抛可重试 gate_timeout（LLMRouteGateTimeoutError）。
+# - VIBELUTION_LLM_STREAM_TOTAL_DEADLINE_SECONDS：流式单次 attempt 的
+#   wall-clock 总时长硬上限（httpx read timeout 是 chunk 间隔型，保活字节
+#   会无限重置它，所以必须有总时长）。默认 900.0s，钳制 60-3600s；必须保持
+#   不小于挑战 per-call fence（team_workflow.challenge_deadline_policy.
+#   PER_CALL_MAX_MS = 800s），否则会截断本应完成的合法长调用。
+DEFAULT_LLM_ROUTE_GATE_WAIT_SECONDS = 120.0
+DEFAULT_LLM_STREAM_TOTAL_DEADLINE_SECONDS = 900.0
+
 
 class LLMConfig(BaseModel):
     """新的 LLM 根配置：providers / profiles / discovery。"""

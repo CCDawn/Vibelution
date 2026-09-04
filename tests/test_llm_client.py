@@ -3,6 +3,7 @@ import inspect
 import json
 import os
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
@@ -18,6 +19,8 @@ from core.llm.client import (
     _default_responses_backend,
     _llm_provider_proxy_env,
     _ensure_no_proxy_for_local_base_url,
+    _llm_route_concurrency_gate,
+    _llm_route_concurrency_key,
     _new_cancellable_completion_http_handler,
     _new_cancellable_responses_http_handler,
     _resolve_llm_route_concurrency_limit,
@@ -31,7 +34,7 @@ from core.llm.client import (
 from core.llm.errors import classify_exception
 from core.llm.provider_replay_state import OpaqueReplayItem, ProviderReplayState, endpoint_fingerprint
 from core.llm.semantic_messages import InvocationScope, SemanticOutputSchema
-from core.llm.types import CanonicalItemIdentity, CanonicalToolCall, LLMError, TurnOutcome
+from core.llm.types import CanonicalItemIdentity, CanonicalToolCall, LLMError, LLMRouteGateTimeoutError, LLMStreamTotalDeadlineError, TurnOutcome
 from core.llm.wire.responses import ResponsesWireAdapter
 from core.llm.recovery import plan_recovery
 from core.llm.routing import attach_recovery_fallback, select_recovery_profile
@@ -6623,3 +6626,237 @@ def test_stream_finish_reason_length_raises_output_truncated_error_without_retry
 
     # retryable=False: resending reproduces the same ceiling, so exactly one attempt.
     assert attempts["count"] == 1
+
+
+# ---------------------------------------------------------------------------
+# LLM 流式调用活性治理：路由闸门有界等待 + 流总时长硬上限
+# ---------------------------------------------------------------------------
+
+
+def _liveness_stream_client(backend):
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "local",
+            "llm.providers.default.requires_api_key": False,
+            "llm.providers.default.base_url": "http://localhost:8000/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "qwen-32b-awq",
+        }
+    )
+    return LLMClient(config=config, backend=backend)
+
+
+def test_route_gate_wait_is_bounded_and_raises_retryable_gate_timeout(monkeypatch):
+    """路由闸门被占满时，等待必须有界并以可重试的 gate_timeout 收场。"""
+
+    # 进程内 override 把该路由的并发上限压到 1，便于单测试占满闸门。
+    monkeypatch.setattr("core.llm.client._LLM_ROUTE_CONCURRENCY_LIMIT", 1)
+    monkeypatch.setattr("core.llm.client._LLM_ROUTE_CONCURRENCY_GATES", {})
+    monkeypatch.setattr("core.llm.client._LLM_ROUTE_GATE_WAIT_LIMIT", 1.0)
+    monkeypatch.setattr(
+        "core.llm.client._retry_policy_max_attempts", lambda profile, role="": 1
+    )
+    hold = threading.Event()
+    holder_entered = threading.Event()
+
+    def backend(_payload):
+        holder_entered.set()
+
+        def chunks():
+            assert hold.wait(10.0)
+            yield {"choices": [{"delta": {"content": "ok"}}]}
+
+        return chunks()
+
+    client = _liveness_stream_client(backend)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        holder = executor.submit(
+            lambda: [
+                event.type
+                for event in client.stream_events([{"role": "user", "content": "hold"}])
+            ]
+        )
+        assert holder_entered.wait(5.0)
+        started = time.monotonic()
+        with pytest.raises(LLMRouteGateTimeoutError) as raised:
+            list(client.stream_events([{"role": "user", "content": "queued"}]))
+        elapsed = time.monotonic() - started
+        hold.set()
+        assert holder.result(timeout=5.0) == ["text_delta", "done"]
+
+    assert raised.value.category == "gate_timeout"
+    assert raised.value.retryable is True
+    assert raised.value.wait_seconds == 1.0
+    assert raised.value.route_key_hash
+    assert "1s" in str(raised.value)
+    assert "routeKeyHash=" in str(raised.value)
+    # 等待预算 1s：必须在预算附近而不是无限自旋。
+    assert 0.9 <= elapsed < 8.0
+
+
+@pytest.mark.slow
+def test_silent_stream_total_deadline_force_closes_and_retry_recovers(monkeypatch):
+    """静默挂死流：deadline closer 强制关闭底层流，重试 attempt 重新起算并成功。"""
+
+    monkeypatch.setattr("core.llm.client._LLM_ROUTE_CONCURRENCY_LIMIT", None)
+    monkeypatch.setattr("core.llm.client._LLM_ROUTE_CONCURRENCY_GATES", {})
+    monkeypatch.setattr("core.llm.client._LLM_STREAM_TOTAL_DEADLINE_LIMIT", 1.0)
+    monkeypatch.setattr(
+        "core.llm.client._retry_policy_backoff_seconds", lambda profile, attempt, category="": 0.05
+    )
+    attempts = {"count": 0}
+    force_closed = threading.Event()
+    unblock = threading.Event()
+
+    class SilentHungStream:
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            if not unblock.wait(10.0):
+                raise AssertionError("total-deadline closer never fired")
+            raise RuntimeError("connection aborted by force close")
+
+        def close(self):
+            force_closed.set()
+            unblock.set()
+
+    def backend(_payload):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            return SilentHungStream()
+
+        def chunks():
+            yield {"choices": [{"delta": {"content": "recovered"}}]}
+
+        return chunks()
+
+    client = _liveness_stream_client(backend)
+    started = time.monotonic()
+    events = [
+        event.type
+        for event in client.stream_events([{"role": "user", "content": "ping"}])
+    ]
+    elapsed = time.monotonic() - started
+
+    assert events == ["text_delta", "done"]
+    # 第一次 attempt 被 deadline closer 解卷，第二次 attempt 重新起算并成功。
+    assert attempts["count"] == 2
+    assert force_closed.wait(1.0)
+    assert elapsed < 8.0
+
+    # 路由槽已归还：拿满默认 4 个槽（若有泄漏，4 次内必然失败）。
+    route_key = _llm_route_concurrency_key(
+        client.provider, client.profile, profile_id=client.profile_id
+    )
+    gate = _llm_route_concurrency_gate(route_key, limit=4)
+    acquired = [gate.acquire(blocking=False) for _ in range(4)]
+    assert all(acquired)
+    for _ in range(4):
+        gate.release()
+
+
+@pytest.mark.slow
+def test_emitted_stream_total_deadline_force_closes_and_surfaces_timeout(monkeypatch):
+    """产出过一个 chunk 后挂死：deadline+裕量内抛 timeout/retryable，槽位归还。"""
+
+    monkeypatch.setattr("core.llm.client._LLM_ROUTE_CONCURRENCY_LIMIT", None)
+    monkeypatch.setattr("core.llm.client._LLM_ROUTE_CONCURRENCY_GATES", {})
+    monkeypatch.setattr("core.llm.client._LLM_STREAM_TOTAL_DEADLINE_LIMIT", 1.0)
+    monkeypatch.setattr(
+        "core.llm.client._retry_policy_max_attempts", lambda profile, role="": 1
+    )
+    force_closed = threading.Event()
+    unblock = threading.Event()
+
+    class OneChunkThenHungStream:
+        def __init__(self):
+            self._first = True
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            if self._first:
+                self._first = False
+                return {"choices": [{"delta": {"content": "partial"}}]}
+            if not unblock.wait(10.0):
+                raise AssertionError("total-deadline closer never fired")
+            raise RuntimeError("connection reset by force close")
+
+        def close(self):
+            force_closed.set()
+            unblock.set()
+
+    client = _liveness_stream_client(lambda _payload: OneChunkThenHungStream())
+    started = time.monotonic()
+    with pytest.raises(LLMStreamTotalDeadlineError) as raised:
+        list(client.stream_events([{"role": "user", "content": "ping"}]))
+    elapsed = time.monotonic() - started
+
+    assert raised.value.category == "timeout"
+    assert raised.value.retryable is True
+    assert raised.value.deadline_seconds == 1.0
+    assert force_closed.wait(1.0)
+    assert 0.9 <= elapsed < 8.0
+
+    route_key = _llm_route_concurrency_key(
+        client.provider, client.profile, profile_id=client.profile_id
+    )
+    gate = _llm_route_concurrency_gate(route_key, limit=4)
+    acquired = [gate.acquire(blocking=False) for _ in range(4)]
+    assert all(acquired)
+    for _ in range(4):
+        gate.release()
+
+
+def test_stream_total_deadline_env_values_are_clamped(monkeypatch):
+    from core.llm import client as client_module
+
+    monkeypatch.delenv("VIBELUTION_LLM_STREAM_TOTAL_DEADLINE_SECONDS", raising=False)
+    monkeypatch.delenv("VIBELUTION_LLM_ROUTE_GATE_WAIT_SECONDS", raising=False)
+    assert client_module._llm_stream_total_deadline_seconds() == 900.0
+    assert client_module._llm_route_gate_wait_seconds() == 120.0
+
+    monkeypatch.setenv("VIBELUTION_LLM_STREAM_TOTAL_DEADLINE_SECONDS", "10")
+    monkeypatch.setenv("VIBELUTION_LLM_ROUTE_GATE_WAIT_SECONDS", "0.5")
+    assert client_module._llm_stream_total_deadline_seconds() == 60.0
+    assert client_module._llm_route_gate_wait_seconds() == 1.0
+
+    monkeypatch.setenv("VIBELUTION_LLM_STREAM_TOTAL_DEADLINE_SECONDS", "99999")
+    monkeypatch.setenv("VIBELUTION_LLM_ROUTE_GATE_WAIT_SECONDS", "7200")
+    assert client_module._llm_stream_total_deadline_seconds() == 3600.0
+    assert client_module._llm_route_gate_wait_seconds() == 600.0
+
+    monkeypatch.setenv("VIBELUTION_LLM_STREAM_TOTAL_DEADLINE_SECONDS", "abc")
+    monkeypatch.setenv("VIBELUTION_LLM_ROUTE_GATE_WAIT_SECONDS", "")
+    assert client_module._llm_stream_total_deadline_seconds() == 900.0
+    assert client_module._llm_route_gate_wait_seconds() == 120.0
+
+
+def test_cancel_llm_turn_scope_marks_cancel_reason_and_closes_registered_streams():
+    """watchdog 置 turn 取消态后：同 turn 上下文观察到取消原因，登记的在途流被 close。"""
+
+    from core.llm import client as client_module
+
+    turn_key = "chat-room:test-round:test-participant"
+    closed = threading.Event()
+
+    def close_hook():
+        closed.set()
+
+    client_module._register_llm_stream_close_hook(turn_key, close_hook)
+    try:
+        with client_module.llm_status_context(turn_id=turn_key):
+            # 未登记取消态时，普通上下文不产生取消原因。
+            assert client_module._current_llm_cancel_reason() == ""
+            closed_count = client_module.cancel_llm_turn_scope(turn_key, "watchdog_test")
+            assert closed_count == 1
+            assert client_module._current_llm_cancel_reason() == "watchdog_test"
+            assert closed.wait(1.0)
+        # turn 作用域之外不受影响。
+        assert client_module._current_llm_cancel_reason() == ""
+    finally:
+        client_module.clear_llm_turn_scope_cancel(turn_key)
+        client_module._unregister_llm_stream_close_hook(turn_key, close_hook)
+    assert client_module._LLM_TURN_CANCEL_STATES.get(turn_key) is None
