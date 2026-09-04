@@ -700,6 +700,7 @@ from core.web.services.session.signals_format import (
     _session_prompt_cache_scope,
     _should_omit_message_from_agent_history,
     _should_prefer_history_goal_over_active_task,
+    _source_collection_stage_task_allowed_tool_names,
     _source_collection_stage_task_required_tool_names,
     _task_status_from_result_contract,
     _unwrap_continuation_goal,

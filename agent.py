@@ -1053,7 +1053,10 @@ class SelfEvolvingAgent:
 
     def _is_tool_visible_to_current_agent(self, tool_name: str) -> bool:
         # Removal: keep while tests patch this method on the agent instance.
-        return is_tool_visible_to_agent(tool_name, getattr(self, "key_tool_maps", set()))
+        if not is_tool_visible_to_agent(tool_name, getattr(self, "key_tool_maps", set())):
+            return False
+        turn_allowed = getattr(self, "_turn_allowed_tool_names", None)
+        return turn_allowed is None or str(tool_name or "").strip() in turn_allowed
 
     def _hidden_tool_call_message(self, tool_name: str) -> str:
         # Removal: keep while tests patch this method on the agent instance.
@@ -1074,6 +1077,24 @@ class SelfEvolvingAgent:
             base_llm = get_llm_client(profile_id=profile_id, config=self.config)
         if disable_tools or not client_supports_tool_calling(base_llm):
             return base_llm
+        turn_allowed = getattr(self, "_turn_allowed_tool_names", None)
+        if turn_allowed is not None:
+            allowed_tools = [
+                self._key_tool_map[name]
+                for name in sorted(turn_allowed)
+                if name in self._key_tool_map
+            ]
+            if not allowed_tools:
+                return base_llm
+            cache_key = "turn_allowed:" + ",".join(sorted(turn_allowed))
+            if base_llm is getattr(self, "_base_llm", None):
+                cached = self._bound_llm_cache.get(cache_key)
+                if cached is not None:
+                    return cached
+                rebound = base_llm.bind_tools(allowed_tools)
+                self._bound_llm_cache[cache_key] = rebound
+                return rebound
+            return base_llm.bind_tools(allowed_tools)
         if not self._is_restart_focus_mode():
             if not hasattr(self, "_base_llm"):
                 return self.llm_with_tools
@@ -3463,6 +3484,7 @@ class SelfEvolvingAgent:
         goal_override: str = None,
         case_id: str = None,
         disable_tools: bool = False,
+        allowed_tool_names: Optional[List[str]] = None,
         attachments: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """执行单轮思考并返回结构化摘要。"""
@@ -3505,9 +3527,19 @@ class SelfEvolvingAgent:
         turn_runtime_metadata = _safe_turn_runtime_metadata(turn_runtime)
         ok = False
         previous_force_disable_tools = bool(getattr(self, "_force_disable_tools_for_turn", False))
+        previous_turn_allowed_tool_names = getattr(self, "_turn_allowed_tool_names", None)
         try:
             self._single_turn_mode_active = True
             self._force_disable_tools_for_turn = bool(disable_tools)
+            self._turn_allowed_tool_names = (
+                {
+                    str(item or "").strip()
+                    for item in list(allowed_tool_names or [])
+                    if str(item or "").strip()
+                }
+                if allowed_tool_names is not None
+                else None
+            )
             self._pending_supervised_case_id = case_id
             cache_partition = str(turn_runtime.get("promptCachePartition") or "").strip()
             cache_scope = prompt_cache_partition_scope(cache_partition) if cache_partition else nullcontext()
@@ -3647,6 +3679,7 @@ class SelfEvolvingAgent:
         finally:
             self._single_turn_mode_active = False
             self._force_disable_tools_for_turn = previous_force_disable_tools
+            self._turn_allowed_tool_names = previous_turn_allowed_tool_names
             self._pending_supervised_case_id = None
             self._turn_interrupt_checker = None
             set_cancel_checker = getattr(getattr(self, "tool_executor", None), "set_cancel_checker", None)

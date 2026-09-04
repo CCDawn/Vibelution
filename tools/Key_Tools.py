@@ -794,15 +794,16 @@ def _build_key_tools() -> List[BaseTool]:
         """
         【知识搜集阶段回写】把当前私聊阶段任务的结构化结果写回团队工作流。
 
-        该工具只更新 source_collection_stage_session_task 结果，不写正式 Team Knowledge、
-        RAG 或官方图谱。完成、阻塞、失败都应通过此工具收口，避免团队页任务长期停在 running。
+        该工具写回 source_collection_stage_session_task；是否经服务端门禁物化正式 Team Knowledge
+        或官方图谱由当前阶段任务契约决定，Agent 不应再调用其他治理工具。完成、阻塞、失败都应
+        通过此工具收口，避免团队页任务长期停在 running。
 
         Args:
             team_id: 团队 ID
             task_id: 阶段任务 ID
             status: completed / needs_review / blocked / failed / cancelled
             summary: 给团队页展示的简短结论
-            result_json: JSON 对象字符串，放结构化结果
+            result_json: JSON 对象字符串，放结构化结果；不要把对象字段展开成工具顶层参数
             evidence_refs_json: JSON 数组字符串，放证据引用
             next_actions_json: JSON 数组字符串，放下一步建议
             recorded_by_agent: 记录结果的 Agent ID 或名称

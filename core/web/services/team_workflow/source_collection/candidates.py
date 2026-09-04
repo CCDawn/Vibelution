@@ -629,6 +629,48 @@ def list_candidate_store(
         response["store"] = s._workflow_to_api(normalized_team_id, workflow, candidate_store)["candidateStore"]
     return response
 
+
+def list_candidate_store_authority_records(
+    team_id: str,
+    *,
+    run_id: str,
+    metadata_task_type: str = "",
+) -> list[dict[str, Any]]:
+    """Return all run-scoped records needed by canonical artifact read-back.
+
+    Presentation listing is capped at 500 records. Immutable artifact refs
+    cannot use that page boundary because the referenced record may be older
+    or appended after it. Filter inside the CandidateStore owner and return
+    only the narrow task family needed by the authority reader.
+    """
+
+    s = _service()
+    normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
+    s.team_service.assert_team_exists(normalized_team_id)
+    normalized_task_type = s._trim_text(metadata_task_type, max_length=120)
+    with s._WORKFLOW_LOCK:
+        candidate_store = s._load_candidate_store(normalized_team_id, run_id=run_id)
+        records = [
+            item
+            for item in list(candidate_store.get("candidates") or [])
+            if isinstance(item, dict)
+        ]
+        if normalized_task_type:
+            records = [
+                item
+                for item in records
+                if str(
+                    (
+                        item.get("metadata")
+                        if isinstance(item.get("metadata"), dict)
+                        else {}
+                    ).get("taskType")
+                    or ""
+                )
+                == normalized_task_type
+            ]
+        return records
+
 def validate_candidate_store(team_id: str) -> dict[str, Any]:
     s = _service()
     normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")

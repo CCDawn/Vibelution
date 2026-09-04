@@ -1425,6 +1425,26 @@ def _source_collection_stage_task_required_tool_names(context: dict[str, Any]) -
     return names
 
 
+def _source_collection_stage_task_allowed_tool_names(context: dict[str, Any]) -> list[str]:
+    """Return a task-scoped provider surface without disabling needed research tools."""
+
+    metadata = (
+        context.get("message_metadata")
+        if isinstance(context.get("message_metadata"), dict)
+        else {}
+    )
+    stage_id = str(metadata.get("stageId") or "").strip().lower()
+    required = _source_collection_stage_task_required_tool_names(context)
+    if stage_id in {"relations", "ingestion"}:
+        return required
+    if stage_id == "extraction":
+        return [*required, "web_fetch_tool"]
+    # Finding legitimately needs the role's search/fetch providers. Unknown or
+    # legacy metadata keeps the frozen Agent policy rather than silently losing
+    # capabilities.
+    return []
+
+
 def _task_status_from_result_contract(
     outcome: str,
     *,

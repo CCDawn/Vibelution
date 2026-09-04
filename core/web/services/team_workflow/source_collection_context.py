@@ -139,8 +139,89 @@ def compact_source_collection_stage_task_context(context: dict[str, Any]) -> dic
         compact["recordPage"] = normalize_metadata(record_page)
         compact["recordIds"] = compact_record_ids
     if isinstance(context.get("stewardActionPacket"), dict):
-        compact["stewardActionPacket"] = context["stewardActionPacket"]
+        compact["stewardActionPacket"] = compact_source_collection_steward_action_packet(
+            context["stewardActionPacket"]
+        )
     return compact
+
+
+def compact_source_collection_steward_action_packet(packet: dict[str, Any]) -> dict[str, Any]:
+    """Keep ingestion IDs and writeback shape without duplicating candidate bodies."""
+
+    approved_ids = normalize_text_list(
+        packet.get("approvedCandidateIds"),
+        max_items=80,
+        max_length=160,
+    )
+    raw_skeleton = (
+        packet.get("writebackResultSkeleton")
+        if isinstance(packet.get("writebackResultSkeleton"), dict)
+        else {}
+    )
+    raw_summary = (
+        raw_skeleton.get("candidate_summary")
+        if isinstance(raw_skeleton.get("candidate_summary"), dict)
+        else {}
+    )
+    raw_approved = (
+        raw_summary.get("approved")
+        if isinstance(raw_summary.get("approved"), dict)
+        else {}
+    )
+    raw_assessment = (
+        raw_skeleton.get("steward_assessment")
+        if isinstance(raw_skeleton.get("steward_assessment"), dict)
+        else {}
+    )
+    skeleton = {
+        "approvedCandidateIds": normalize_text_list(
+            raw_skeleton.get("approvedCandidateIds") or approved_ids,
+            max_items=80,
+            max_length=160,
+        ),
+        "candidate_summary": {
+            "approved": {
+                "count": source_collection_count(raw_approved.get("count")),
+                "candidateIds": normalize_text_list(
+                    raw_approved.get("candidateIds") or approved_ids,
+                    max_items=80,
+                    max_length=160,
+                ),
+            },
+            "deferredCounts": normalize_metadata(raw_summary.get("deferredCounts")),
+        },
+        "steward_assessment": {
+            "decision": trim_text(raw_assessment.get("decision"), max_length=80),
+            "reason": trim_text(raw_assessment.get("reason"), max_length=500),
+        },
+    }
+    compact = {
+        key: packet.get(key)
+        for key in (
+            "schemaVersion",
+            "packetKind",
+            "action",
+            "recommendedStatus",
+            "approvedCandidateCount",
+            "visibleApprovedCandidateCount",
+            "candidateInventoryCounts",
+            "deferredCandidateCounts",
+            "doNotInferHiddenOrTruncatedCandidates",
+            "doNotReviewPendingCandidates",
+            "writebackTool",
+            "writebackContractTaskId",
+        )
+        if key in packet
+    }
+    compact["summary"] = trim_text(packet.get("summary"), max_length=500)
+    compact["approvedCandidateIds"] = approved_ids
+    compact["writebackResultSkeleton"] = skeleton
+    compact["instructions"] = normalize_text_list(
+        packet.get("instructions"),
+        max_items=8,
+        max_length=500,
+    )
+    return {key: value for key, value in compact.items() if value not in ("", [], {})}
 
 
 def compact_source_collection_excluded_summary(summary: dict[str, Any]) -> dict[str, Any]:

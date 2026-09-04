@@ -1292,6 +1292,7 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
     )
     source_collection_stage_task_auto_continue = s._source_collection_stage_task_context_metadata(context)
     source_collection_stage_task_required_tools = s._source_collection_stage_task_required_tool_names(context)
+    source_collection_stage_task_allowed_tools = s._source_collection_stage_task_allowed_tool_names(context)
     task_workspace = s._session_task_workspace_for_turn(
         context,
         session_workspace=session_workspace,
@@ -1966,6 +1967,7 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
                             max_internal_auto_continue_turns=internal_auto_continue_max_turns,
                             require_tool_progress=bool(source_collection_stage_task_auto_continue),
                             required_tool_names=source_collection_stage_task_required_tools,
+                            allowed_tool_names=source_collection_stage_task_allowed_tools,
                             static_runtime_context_block=(
                                 static_runtime_context_block if host_seeded_agent_context else ""
                             ),
@@ -2189,6 +2191,7 @@ def _run_session_continuation_loop(
     max_internal_auto_continue_turns: int = 3,
     require_tool_progress: bool = False,
     required_tool_names: list[str] | None = None,
+    allowed_tool_names: list[str] | None = None,
     static_runtime_context_block: str = "",
     volatile_runtime_context_block: str = "",
 ) -> Any:
@@ -2379,6 +2382,7 @@ def _run_session_continuation_loop(
                 initial_prompt=prompt,
                 attachments=turn_attachments,
                 disable_tools=disable_tools,
+                allowed_tool_names=allowed_tool_names or None,
                 prompt_cache_partition=prompt_cache_partition,
                 turn_identity=canonical_turn_id,
                 chat_history=iteration_chat_history,

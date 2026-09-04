@@ -184,7 +184,11 @@ def source_collection_stage_writeback_tool(
     recorded_by_agent: str = "",
     metadata_json: str = "",
 ) -> str:
-    """Write structured stage task results back to the team workflow."""
+    """Write structured stage results; server gates own any formal materialization.
+
+    ``result_json`` contains the stage result object. Its fields must not be
+    expanded into top-level tool arguments.
+    """
 
     # All parameters are optional in the signature, so executor-side signature
     # binding cannot reject an empty-arguments call (e.g. streaming arguments

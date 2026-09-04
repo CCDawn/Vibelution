@@ -1122,15 +1122,44 @@ def test_formal_run_stage_sessions_do_not_inherit_other_runs(tmp_path, monkeypat
 
     binding_a = session_service.get_session_detail(task_a1["sessionId"])["experimentBinding"]
     assert binding_a["workflowRunId"] == workflow_run_a
-    assert binding_a["workflowNodeId"] == "source_collection"
+    assert binding_a["workflowNodeId"] == "source_finding"
     binding_b = session_service.get_session_detail(task_b["sessionId"])["experimentBinding"]
     assert binding_b["workflowRunId"] == workflow_run_b
-    assert binding_b["workflowNodeId"] == "source_collection"
+    assert binding_b["workflowNodeId"] == "source_finding"
 
     # 派发的任务消息只进入自己 run 的 session。
     assert submitted[0]["sessionId"] == task_a1["sessionId"]
     assert submitted[1]["sessionId"] == task_a2["sessionId"]
     assert submitted[2]["sessionId"] == task_b["sessionId"]
+
+
+def test_formal_run_stage_session_scope_uses_the_real_workflow_node():
+    from core.web.services.team_workflow.source_collection.stage_session import (
+        _source_collection_stage_session_workflow_scope,
+    )
+
+    run = {"scope": {"workflowRunId": "run-stage-scope"}}
+    expected = {
+        "finding": "source_finding",
+        "extraction": "source_extraction",
+        "relations": "evidence_relations",
+        "ingestion": "knowledge_ingestion",
+    }
+
+    scopes = {
+        stage_id: _source_collection_stage_session_workflow_scope(
+            run,
+            {},
+            stage_id=stage_id,
+        )
+        for stage_id in expected
+    }
+
+    assert scopes == {
+        stage_id: ("run-stage-scope", workflow_node_id)
+        for stage_id, workflow_node_id in expected.items()
+    }
+    assert len(set(scopes.values())) == len(expected)
 
 
 def test_start_source_collection_ingestion_stage_routes_to_bound_source_ingestor(tmp_path, monkeypatch):
@@ -1219,6 +1248,9 @@ def test_start_source_collection_ingestion_stage_routes_to_bound_source_ingestor
     assert "不要推断截断或隐藏候选" in submitted[0]["content"]
     assert "stewardActionPacket.approvedCandidateIds" in submitted[0]["content"]
     assert "writebackResultSkeleton" in submitted[0]["content"]
+    assert "JSON 序列化到参数 `result_json`" in submitted[0]["content"]
+    assert "没有 `stage_id`" in submitted[0]["content"]
+    assert "不要调用 knowledge_governance_tasks_tool" in submitted[0]["content"]
     assert "不要因为 `recordPage.hasMore=true` 或 `candidatePage.hasMore=true` 自动翻完整批次" in submitted[0]["content"]
     assert "如果返回的 `recordPage.hasMore=true`，必须继续按 `record_offset=recordPage.nextOffset` 分页读取" not in submitted[0]["content"]
     assert "如果返回的 `candidatePage.hasMore=true`，必须继续按 `candidate_offset=candidatePage.nextOffset` 分页读取" not in submitted[0]["content"]
