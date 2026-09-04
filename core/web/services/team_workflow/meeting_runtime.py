@@ -163,7 +163,7 @@ _ROLE_METADATA_FIELDS = (
     "challengeCupTeamRole",
 )
 _DISCUSSION_DRIVER = threading.local()
-_MEETING_DISCUSSION_MAX_WORKERS_DEFAULT = 24
+_MEETING_DISCUSSION_MAX_WORKERS_DEFAULT = 4
 
 
 def _meeting_discussion_max_workers() -> int:

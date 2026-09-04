@@ -173,7 +173,7 @@ _CHAT_ROOM_PARTICIPANT_REFRESH_MAX_ATTEMPTS = 3
 
 
 def _chat_room_executor_max_workers() -> int:
-    """Resolve the process-wide round-executor width; env-tunable, default 10.
+    """Resolve the process-wide round-executor width; env-tunable, default 4.
 
     ``VIBELUTION_CHAT_ROOM_MAX_WORKERS`` overrides the width (clamped to
     1..32) so an operator can trade provider cost/rate-limit headroom for
@@ -193,10 +193,9 @@ def _chat_room_executor_max_workers() -> int:
 
 
 # Process-wide executor that runs whole chat-room rounds (one slot = one
-# round).  Ten concurrent question-review rounds must be able to execute at
-# once, so the default is 10 instead of the old 4-slot pool; the in-flight
-# cap below still bounds how many rounds may be submitted at once.
-_CHAT_ROOM_EXECUTOR_MAX_WORKERS_DEFAULT = 10
+# round). Four slots match the governed hypothesis capacity; the in-flight cap
+# below still bounds how many rounds may be submitted at once.
+_CHAT_ROOM_EXECUTOR_MAX_WORKERS_DEFAULT = 4
 _CHAT_ROOM_EXECUTOR_MAX_WORKERS_LIMIT = 32
 _CHAT_ROOM_EXECUTOR_MAX_WORKERS = _chat_room_executor_max_workers()
 _CHAT_ROOM_EXECUTOR = ThreadPoolExecutor(
@@ -263,12 +262,11 @@ _CHAT_ROOM_WORK_RUN_HEARTBEAT_FRESH_SECONDS = 90.0
 # the room round only; the meeting state machine and its digest stay intact.
 _MEETING_DIGEST_TTL_STOP_REASON = "meeting_digest_ttl_muted"
 _MEETING_DIGEST_TTL_POLL_INTERVAL_SECONDS = 15.0
-# Speaker batch parallelism: formal review/generation meeting rounds opt in
-# (config ``speakerBatchMode`` overrides); every other chat room keeps the
-# serial speaker loop byte-for-byte.  The opening meeting round runs all
-# speakers in one batch (independent assessments); interaction rounds split
-# the ordered speaker list in half so the second batch still sees the first
-# batch's committed messages and can criticize them.
+# Speaker batch parallelism is explicit. Challenge review/generation meetings
+# default to one in-flight speaker per hypothesis so four concurrent meetings
+# cannot each flood the shared LLM queue with a full roster. Callers may still
+# opt into the legacy within-round fan-out with ``speakerBatchMode=parallel``;
+# every ordinary chat room keeps the serial loop byte-for-byte.
 _SPEAKER_BATCH_MODE_CONFIG_KEY = "speakerBatchMode"
 _SPEAKER_BATCH_PARALLEL = "parallel"
 # A per-call-fence-hung speaker turn (zero usable output) is retried once in
@@ -340,16 +338,13 @@ _ZERO_OUTPUT_RETRY_EXCLUDED_ERROR_TYPES = frozenset(
 # ("pass", brief agreements) legitimately repeat and stay untouched.
 _SPEAKER_DUPLICATE_SUPPRESSED_EVENT_CODE = "chat_room.speaker.duplicate_suppressed"
 _SPEAKER_DUPLICATE_GUARD_MIN_CONTENT_CHARS = 64
-# Worker ceiling for the process-wide speaker batch pool.  One meeting's
-# roster is still four speakers, but several meetings run concurrently in one
-# process and their opening-round batches all share this pool, so the default
-# is sized for four concurrent meetings (16 opening-round speaker tasks)
-# instead of a single roster.  ``VIBELUTION_LLM_MAX_CONCURRENT`` directly
-# overrides the width up or down (>=1); raising it trades provider
-# cost/rate-limit headroom for shorter speaker start-up skew.
+# Worker ceiling for explicit speaker batches. It is aligned with the global
+# four-call LLM budget so an opt-in batch cannot recreate the oversized hidden
+# queue. ``VIBELUTION_LLM_MAX_CONCURRENT`` still overrides the width up or
+# down (>=1).
 _CHAT_ROOM_SPEAKER_BATCH_EXECUTOR_LOCK = threading.Lock()
 _CHAT_ROOM_SPEAKER_BATCH_EXECUTOR: ThreadPoolExecutor | None = None
-_CHAT_ROOM_SPEAKER_BATCH_MAX_WORKERS_DEFAULT = 12
+_CHAT_ROOM_SPEAKER_BATCH_MAX_WORKERS_DEFAULT = 4
 _CHAT_ROOM_PARTICIPANT_INDEX_CACHE_LOCK = threading.Lock()
 _CHAT_ROOM_PARTICIPANT_INDEX_CACHE_CONDITION = threading.Condition(_CHAT_ROOM_PARTICIPANT_INDEX_CACHE_LOCK)
 _CHAT_ROOM_PARTICIPANT_INDEX_CACHE: dict[tuple[Any, ...], dict[str, dict[str, dict[str, Any]]]] = {}
@@ -2938,11 +2933,11 @@ def _config_flag(value: Any) -> bool | None:
 def _speaker_execution_policy(round_payload: Mapping[str, Any]) -> dict[str, bool]:
     """Resolve one round's speaker execution policy.
 
-    Formal review/generation meeting rounds opt into batch parallelism and
-    the per-call-fence in-turn retry; every other chat room keeps the serial
-    speaker loop.  Round config keys (``speakerBatchMode`` /
-    ``speakerFenceRetry``) override the meeting-path default so callers and
-    tests can pin either behavior explicitly.
+    Formal review/generation meeting rounds keep the per-call-fence in-turn
+    retry but default to one speaker at a time. This preserves one active LLM
+    call per hypothesis and lets the existing global four-call gate advance
+    four hypotheses fairly. Round config keys (``speakerBatchMode`` /
+    ``speakerFenceRetry``) may still opt into either behavior explicitly.
     """
 
     config = (
@@ -2955,7 +2950,7 @@ def _speaker_execution_policy(round_payload: Mapping[str, Any]) -> dict[str, boo
     if raw_batch_mode:
         parallel = raw_batch_mode in {_SPEAKER_BATCH_PARALLEL, "batch", "batches"}
     else:
-        parallel = meeting_path
+        parallel = False
     retry_flag = _config_flag(config.get(_SPEAKER_FENCE_RETRY_CONFIG_KEY))
     return {
         "parallel": parallel,
