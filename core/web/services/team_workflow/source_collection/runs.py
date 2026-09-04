@@ -1076,6 +1076,26 @@ def execute_source_collection_search(team_id: str, run_id: str, payload: dict[st
         terminal_status=terminal_status,
         terminal_summary=terminal_summary,
     )
+    # Write the batch outcome back onto the data-processing run itself: the
+    # work-run snapshot above is worker bookkeeping only, and without this
+    # writeback run.json stays "collecting" forever even after the last batch
+    # finishes.  Best-effort — the search result is already durable, so a
+    # failed status writeback must not fail the batch.
+    try:
+        if terminal_status == "failed":
+            s.data_processing_service.fail_processing_run(
+                normalized_run_id,
+                reason="source_collection_batch_failed: every query failed",
+            )
+        elif terminal_status != "cancelled":
+            # Cancelled runs were already driven terminal by
+            # cancel_processing_run inside stop_source_collection_search.
+            s.data_processing_service.complete_collection_batch(
+                normalized_run_id,
+                terminal_status=terminal_status,
+            )
+    except Exception:  # noqa: BLE001, S110 - run.json writeback must not fail the batch
+        pass
     return result
 
 def start_source_collection_search_background(team_id: str, run_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -1109,6 +1129,31 @@ def start_source_collection_search_background(team_id: str, run_id: str, payload
             team_id=normalized_team_id,
             run_id=normalized_run_id,
         )
+        stale_snapshot_reclaimed = (
+            isinstance(existing_active_snapshot, dict)
+            and s._trim_text(existing_active_snapshot.get("runId"), max_length=160) == normalized_run_id
+            and s._trim_text(existing_active_snapshot.get("teamId"), max_length=160) == normalized_team_id
+            and s._source_collection_snapshot_is_age_stale(existing_active_snapshot)
+        )
+        if stale_snapshot_reclaimed:
+            # The previous worker is gone (its active snapshot outlived the
+            # stale-age window without progress).  Persisting the new queued
+            # snapshot below replaces the dead active marker, and the worker
+            # starts for real instead of short-circuiting forever.
+            s._record_workflow_event(
+                "source_collection.search_background_stale_snapshot_reclaimed",
+                normalized_team_id,
+                level="warning",
+                outcome="degraded",
+                fields={
+                    "runId": normalized_run_id,
+                    "provider": provider,
+                    "activeStatus": str(existing_active_snapshot.get("status") or ""),
+                    "activePhase": str(existing_active_snapshot.get("currentPhase") or ""),
+                    "activeUpdatedAt": str(existing_active_snapshot.get("updatedAt") or ""),
+                    "staleSnapshotMs": s._source_collection_snapshot_stale_ms(),
+                },
+            )
         if s._source_collection_background_snapshot_is_active(existing_active_snapshot, normalized_team_id, normalized_run_id):
             s._record_workflow_event(
                 "source_collection.search_background_already_running",

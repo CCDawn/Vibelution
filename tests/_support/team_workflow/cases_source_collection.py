@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import re
+import time
 
 from core.research.competition.question_result_package import canonical_model_policy
 from core.web.services.team_workflow.research_runtime import workflow_artifact_store
@@ -10237,3 +10238,218 @@ def test_finding_writeback_candidates_carry_scope_markers(tmp_path, monkeypatch)
     assert metadata.get("sourceCollectionRunId") == run_id
     assert metadata.get("researchProjectId") == str(run_scope.get("researchProjectId") or "")
     assert metadata.get("workflowRunId") == str(run_scope.get("workflowRunId") or "")
+
+
+def _create_source_collection_run_for_background_tests(team, *, topic):
+    return team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "title": f"{topic} source batch",
+            "topic": topic,
+            "agentRoles": ["source_finder"],
+            "querySeeds": [topic],
+            "searchLanguages": ["en"],
+            "sourceTypes": ["paper"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+
+
+class _InstantSourceCollectionThread:
+    """Run the background worker target synchronously inside the test."""
+
+    def __init__(self, target, args=(), name="", daemon=None):
+        self._target = target
+        self._args = args
+        self.name = name
+
+    def start(self):
+        self._target(*self._args)
+
+
+def test_source_collection_search_background_worker_exception_marks_run_and_snapshot_failed(tmp_path, monkeypatch, capsys):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    run_response = _create_source_collection_run_for_background_tests(team, topic="predictive coding")
+    run_id = run_response["run"]["runId"]
+    events = _capture_workflow_events(monkeypatch)
+
+    def failing_execute(team_id, requested_run_id, payload=None):
+        raise RuntimeError("provider socket exploded")
+
+    monkeypatch.setattr(team_workflow_orchestration_service, "execute_source_collection_search", failing_execute)
+
+    team_workflow_orchestration_service._run_source_collection_search_background(team["teamId"], run_id, {})
+
+    # The data-processing run itself must read terminal, not stuck collecting.
+    run_after = data_processing_service.get_processing_run(run_id)
+    assert run_after["status"] == "failed"
+
+    # The work-run snapshot must have flipped to a terminal failure shape:
+    # no active marker left behind, latest snapshot failed and inactive.
+    store = team_workflow_orchestration_service._source_collection_work_run_store()
+    kind = team_workflow_orchestration_service.SOURCE_COLLECTION_WORK_RUN_KIND
+    assert store.load_active_snapshot(kind) is None
+    latest = store.load_latest_snapshot(kind)
+    assert latest["runId"] == run_id
+    assert latest["status"] == "failed"
+    assert latest["currentPhase"] == "failed"
+    assert latest.get("errorType") == "RuntimeError"
+
+    # Evidence: scene event plus one stderr breadcrumb carrying the runId.
+    failed_events = _workflow_scene_events_by_code(events, "source_collection.search_background_failed")
+    assert len(failed_events) == 1
+    assert failed_events[0]["fields"]["runId"] == run_id
+    captured = capsys.readouterr()
+    assert "source-collection" in captured.err
+    assert run_id in captured.err
+    assert "provider socket exploded" in captured.err
+
+
+def test_source_collection_search_background_reclaims_stale_active_snapshot(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    run_response = _create_source_collection_run_for_background_tests(team, topic="stale snapshot reclaim")
+    run_id = run_response["run"]["runId"]
+    store = team_workflow_orchestration_service._source_collection_work_run_store()
+    kind = team_workflow_orchestration_service.SOURCE_COLLECTION_WORK_RUN_KIND
+
+    # Leftover from a dead worker: an active-shaped snapshot stuck on running.
+    team_workflow_orchestration_service._persist_source_collection_work_run(
+        team["teamId"],
+        run_id,
+        status="running",
+        current_phase="searching",
+        run=run_response["run"],
+        team=team,
+        assignments=[],
+        records=[],
+        summary="僵尸快照",
+        active=True,
+    )
+    assert store.load_active_snapshot(kind)["runId"] == run_id
+
+    worker_calls = []
+
+    def recording_worker(team_id, requested_run_id, payload=None):
+        worker_calls.append({"teamId": team_id, "runId": requested_run_id})
+
+    monkeypatch.setattr(team_workflow_orchestration_service, "_run_source_collection_search_background", recording_worker)
+    monkeypatch.setattr(team_workflow_orchestration_service.threading, "Thread", _InstantSourceCollectionThread)
+    events = _capture_workflow_events(monkeypatch)
+    monkeypatch.setenv("VIBELUTION_SOURCE_COLLECTION_SNAPSHOT_STALE_MS", "1")
+    time.sleep(0.05)
+
+    response = team_workflow_orchestration_service.start_source_collection_search_background(
+        team["teamId"],
+        run_id,
+        {},
+    )
+
+    # The stale snapshot must not short-circuit: a new worker really started.
+    assert response["alreadyRunning"] is False
+    assert worker_calls == [{"teamId": team["teamId"], "runId": run_id}]
+    reclaim_events = _workflow_scene_events_by_code(
+        events,
+        "source_collection.search_background_stale_snapshot_reclaimed",
+    )
+    assert len(reclaim_events) == 1
+    assert reclaim_events[0]["fields"]["runId"] == run_id
+    # The dead marker is replaced by this start's own queued snapshot.
+    active_after = store.load_active_snapshot(kind)
+    assert active_after["runId"] == run_id
+    assert active_after["currentPhase"] == "queued"
+
+
+def test_source_collection_search_background_still_short_circuits_on_fresh_active_snapshot(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    run_response = _create_source_collection_run_for_background_tests(team, topic="fresh snapshot guard")
+    run_id = run_response["run"]["runId"]
+    store = team_workflow_orchestration_service._source_collection_work_run_store()
+    kind = team_workflow_orchestration_service.SOURCE_COLLECTION_WORK_RUN_KIND
+
+    team_workflow_orchestration_service._persist_source_collection_work_run(
+        team["teamId"],
+        run_id,
+        status="running",
+        current_phase="searching",
+        run=run_response["run"],
+        team=team,
+        assignments=[],
+        records=[],
+        summary="活跃批次",
+        active=True,
+    )
+
+    worker_calls = []
+
+    def recording_worker(team_id, requested_run_id, payload=None):
+        worker_calls.append({"teamId": team_id, "runId": requested_run_id})
+
+    monkeypatch.setattr(team_workflow_orchestration_service, "_run_source_collection_search_background", recording_worker)
+    monkeypatch.setattr(team_workflow_orchestration_service.threading, "Thread", _InstantSourceCollectionThread)
+    events = _capture_workflow_events(monkeypatch)
+
+    response = team_workflow_orchestration_service.start_source_collection_search_background(
+        team["teamId"],
+        run_id,
+        {},
+    )
+
+    # A genuinely live snapshot still short-circuits with already_running.
+    assert response["alreadyRunning"] is True
+    assert worker_calls == []
+    assert _workflow_scene_events_by_code(events, "source_collection.search_background_already_running")
+    assert not _workflow_scene_events_by_code(
+        events,
+        "source_collection.search_background_stale_snapshot_reclaimed",
+    )
+    assert store.load_active_snapshot(kind)["runId"] == run_id
+
+
+def test_source_collection_batch_terminal_writes_collection_batch_completed_event(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    monkeypatch.setattr(team_workflow_orchestration_service, "_execute_source_collection_query", _fake_arxiv_search_response)
+    team = team_service.create_team(name="ai科学研究团队")
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "title": "Arxiv source batch",
+            "topic": "predictive coding cortical hierarchy",
+            "querySeeds": ["predictive coding cortical hierarchy"],
+            "searchLanguages": ["en"],
+            "sourceTypes": ["paper"],
+            "agentRoles": ["source_finder"],
+            "agentIds": {"source_finder": "Source Finder Agent"},
+        },
+    )
+    run_id = run_response["run"]["runId"]
+
+    execution = team_workflow_orchestration_service.execute_source_collection_search(
+        team["teamId"],
+        run_id,
+        {"provider": "arxiv_api", "maxQueries": 1, "maxResultsPerQuery": 2},
+    )
+    assert execution["executedQueryCount"] >= 1
+
+    run_after = data_processing_service.get_processing_run(run_id)
+    assert run_after["status"] in data_processing_service.RUN_STATUSES
+
+    events_path = tmp_path / "workspace" / "data_processing" / "runs" / run_id / "events.jsonl"
+    events = [json.loads(line) for line in events_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    batch_events = [event for event in events if event["eventCode"] == "data_processing.run.collection_batch_completed"]
+    assert len(batch_events) == 1
+    fields = batch_events[0]["fields"]
+    # The query budget is exhausted with records on hand and every assignment
+    # closed: the batch outcome is completed and the run advances to
+    # reviewing (records waiting on review), never stuck on collecting.
+    assert fields["terminalStatus"] == "completed"
+    assert fields["runStatus"] == "reviewing"
+    assert fields["recordCount"] >= 1
+    assert fields["openAssignmentCount"] == 0
+    assert data_processing_service.get_processing_run(run_id)["status"] == "reviewing"

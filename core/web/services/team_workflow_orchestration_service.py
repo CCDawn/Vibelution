@@ -314,6 +314,8 @@ from core.web.services.team_workflow.source_collection.residual import (
     _source_collection_search_languages,
     _source_collection_search_plan_ref,
     _source_collection_seed_from_input_ref,
+    _source_collection_snapshot_is_age_stale,  # noqa: F401 - facade re-export
+    _source_collection_snapshot_stale_ms,  # noqa: F401 - facade re-export
     _source_collection_source_category,
     _source_collection_source_types,
     _source_collection_stable_prefix_contract,

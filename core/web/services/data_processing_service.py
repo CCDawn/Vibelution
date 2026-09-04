@@ -271,6 +271,78 @@ def fail_processing_run(run_id: str, *, reason: str = "execution_failed") -> dic
     return failed
 
 
+def complete_collection_batch(
+    run_id: str,
+    *,
+    terminal_status: str = "completed",
+    reason: str = "source_collection_batch_finished",
+) -> dict[str, Any]:
+    """Write one finished collection batch's outcome back onto the run.
+
+    Called by the source-collection search tail when a batch ends — either
+    with more batches pending (``needs_continue``) or with the query budget
+    exhausted (``completed``).  Two things land durably:
+
+    - a ``data_processing.run.collection_batch_completed`` event in the
+      run's event history, carrying the batch terminal status;
+    - an advanced run.json status following the existing collection-output
+      semantics (``_advance_run_status_after_collection_output``): open
+      assignments keep ``collecting``, closed assignments with records move
+      to ``reviewing`` (records waiting on review), and a drained run
+      without records ``completed``.
+
+    Terminal statuses (``completed``/``cancelled``/``failed``) are
+    preserved; the caller reports hard failures through
+    :func:`fail_processing_run` instead.
+    """
+
+    normalized_run_id = _safe_token(run_id, default="", max_length=96)
+    if not normalized_run_id:
+        raise DataProcessingNotFoundError("Data processing run id is required.")
+    normalized_terminal_status = _trim_text(terminal_status, max_length=80) or "completed"
+    normalized_reason = _trim_text(reason, max_length=300) or "source_collection_batch_finished"
+    with _LOCK:
+        run = _load_run(normalized_run_id)
+        assignments = _read_jsonl(_assignments_path(normalized_run_id))
+        record_count = len(_read_jsonl(_records_path(normalized_run_id)))
+        next_status = _advance_run_status_after_collection_output(
+            run,
+            assignments=assignments,
+            record_count=record_count,
+            preferred="collecting",
+        )
+        if str(run.get("status") or "") != next_status:
+            _touch_run(normalized_run_id, status=next_status)
+        advanced = _load_run(normalized_run_id)
+        open_assignments = [
+            item for item in assignments if item.get("status") in {"open", "in_progress", "returned"}
+        ]
+        _append_jsonl(
+            _events_path(normalized_run_id),
+            _run_event(
+                "data_processing.run.collection_batch_completed",
+                normalized_run_id,
+                {
+                    "terminalStatus": normalized_terminal_status,
+                    "runStatus": next_status,
+                    "openAssignmentCount": len(open_assignments),
+                    "recordCount": record_count,
+                    "reason": normalized_reason,
+                },
+            ),
+        )
+    _record_data_processing_event(
+        "data_processing.run.collection_batch_completed",
+        run_id=normalized_run_id,
+        fields={
+            "terminalStatus": normalized_terminal_status,
+            "runStatus": next_status,
+            "reason": normalized_reason,
+        },
+    )
+    return advanced
+
+
 def list_records(run_id: str) -> dict[str, Any]:
     run = _load_run(run_id)
     records = _read_jsonl(_records_path(run["runId"]))

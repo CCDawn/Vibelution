@@ -13,7 +13,9 @@ import copy
 import hashlib
 import html
 import json
+import os
 import re
+import sys
 import time
 import urllib.parse
 import uuid
@@ -1488,7 +1490,19 @@ def _record_workflow_event(
             child_log_payload=child_log_payload,
             lifecycle=lifecycle,
         )
-    except Exception:
+    except Exception as exc:
+        # The scene event is a breadcrumb, not a correctness gate, so the
+        # original failure stays swallowed — but it must not vanish without
+        # any trace: leave one stderr line behind for runtime diagnosis.
+        try:
+            print(
+                f"[team-workflow] workflow event dropped event={event_code} "
+                f"teamId={team_id} errorType={type(exc).__name__} error={str(exc)[:200]}",
+                file=sys.stderr,
+                flush=True,
+            )
+        except Exception:  # noqa: BLE001, S110 - breadcrumb must never raise
+            pass
         return
 
 
@@ -1926,6 +1940,8 @@ def _source_collection_background_snapshot_is_active(snapshot: dict[str, Any] | 
     if not isinstance(snapshot, dict):
         return False
     if s._source_collection_work_run_snapshot_is_stale(snapshot):
+        return False
+    if s._source_collection_snapshot_is_age_stale(snapshot):
         return False
     if s._trim_text(snapshot.get("runId"), max_length=160) != run_id:
         return False
@@ -4021,6 +4037,53 @@ def _source_collection_work_run_snapshot_is_stale(snapshot: dict[str, Any] | Non
     if snapshot.get("dataRunExists") is False:
         return True
     return bool([item for item in list(snapshot.get("staleReasons") or []) if s._trim_text(item, max_length=160)])
+
+
+# An active-shaped work-run snapshot older than this window can no longer
+# block a new background start: the worker is a bare daemon thread, so a
+# snapshot without progress for this long means the worker is gone and the
+# already-running guard would otherwise deadlock the run forever.  Same
+# order of magnitude as the bounded search budgets (backoff budget, provider
+# cooldowns); one collection batch with its retry ladders stays well inside
+# the default 30 minutes.
+_SOURCE_COLLECTION_SNAPSHOT_STALE_MS_DEFAULT = 30 * 60 * 1000
+_SOURCE_COLLECTION_SNAPSHOT_STALE_MS_ENV = "VIBELUTION_SOURCE_COLLECTION_SNAPSHOT_STALE_MS"
+
+
+def _source_collection_snapshot_stale_ms() -> int:
+    """Snapshot age (ms) beyond which an active snapshot is treated as dead."""
+    raw = str(os.environ.get(_SOURCE_COLLECTION_SNAPSHOT_STALE_MS_ENV) or "").strip()
+    if not raw:
+        return _SOURCE_COLLECTION_SNAPSHOT_STALE_MS_DEFAULT
+    try:
+        value = int(float(raw))
+    except ValueError:
+        return _SOURCE_COLLECTION_SNAPSHOT_STALE_MS_DEFAULT
+    return value if value > 0 else _SOURCE_COLLECTION_SNAPSHOT_STALE_MS_DEFAULT
+
+
+def _source_collection_snapshot_is_age_stale(snapshot: dict[str, Any] | None) -> bool:
+    """True when a snapshot has had no progress update for too long.
+
+    Adds the missing time dimension to the active-snapshot gate: status and
+    phase alone cannot distinguish a live worker from a dead one, so an
+    active snapshot whose ``updatedAt`` (or ``startedAt``) is older than
+    ``_source_collection_snapshot_stale_ms`` must read as not active.
+    """
+    s = _service()
+    if not isinstance(snapshot, dict):
+        return False
+    text = s._trim_text(snapshot.get("updatedAt") or snapshot.get("startedAt"), max_length=80)
+    if not text:
+        return False
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    age_ms = (datetime.now(timezone.utc) - parsed.astimezone(timezone.utc)).total_seconds() * 1000.0
+    return age_ms > s._source_collection_snapshot_stale_ms()
 
 
 def _source_collection_work_run_store() -> Any:

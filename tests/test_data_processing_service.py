@@ -241,3 +241,99 @@ def test_collection_assignment_rejects_unknown_agent_role(tmp_path, monkeypatch)
         assert "Unsupported collection agent role" in str(exc)
     else:
         raise AssertionError("Expected DataProcessingError")
+
+
+def _events_for(tmp_path, run_id):
+    events_path = tmp_path / "workspace" / "data_processing" / "runs" / run_id / "events.jsonl"
+    return _read_jsonl(events_path)
+
+
+def test_complete_collection_batch_advances_drained_run_with_records_to_reviewing(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    run = data_processing_service.create_processing_run()
+    assignment = data_processing_service.create_collection_assignment(run["runId"], {"agentRole": "source_finder"})
+    data_processing_service.record_collection_output(
+        run["runId"],
+        assignment["assignmentId"],
+        {
+            "status": "completed",
+            "records": [{"sourceType": "paper", "sourceRef": "https://doi.org/10.1/batch", "title": "Batch paper"}],
+        },
+    )
+
+    advanced = data_processing_service.complete_collection_batch(
+        run["runId"],
+        terminal_status="completed",
+    )
+
+    assert advanced["status"] == "reviewing"
+    assert data_processing_service.get_processing_run(run["runId"])["status"] == "reviewing"
+    batch_events = [
+        event for event in _events_for(tmp_path, run["runId"])
+        if event["eventCode"] == "data_processing.run.collection_batch_completed"
+    ]
+    assert len(batch_events) == 1
+    assert batch_events[0]["fields"]["terminalStatus"] == "completed"
+    assert batch_events[0]["fields"]["runStatus"] == "reviewing"
+    assert batch_events[0]["fields"]["recordCount"] == 1
+    assert batch_events[0]["fields"]["openAssignmentCount"] == 0
+
+
+def test_complete_collection_batch_keeps_collecting_while_assignments_open(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    run = data_processing_service.create_processing_run()
+    data_processing_service.create_collection_assignment(run["runId"], {"agentRole": "source_finder"})
+    data_processing_service.add_record(
+        run["runId"],
+        {"sourceType": "paper", "sourceRef": "https://doi.org/10.2/open", "title": "Open batch paper"},
+    )
+
+    advanced = data_processing_service.complete_collection_batch(
+        run["runId"],
+        terminal_status="needs_continue",
+    )
+
+    assert advanced["status"] == "collecting"
+    batch_events = [
+        event for event in _events_for(tmp_path, run["runId"])
+        if event["eventCode"] == "data_processing.run.collection_batch_completed"
+    ]
+    assert len(batch_events) == 1
+    assert batch_events[0]["fields"]["terminalStatus"] == "needs_continue"
+    assert batch_events[0]["fields"]["runStatus"] == "collecting"
+    assert batch_events[0]["fields"]["openAssignmentCount"] == 1
+
+
+def test_complete_collection_batch_completes_drained_run_without_records(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    run = data_processing_service.create_processing_run()
+    assignment = data_processing_service.create_collection_assignment(run["runId"], {"agentRole": "source_finder"})
+    data_processing_service.record_collection_output(
+        run["runId"],
+        assignment["assignmentId"],
+        {"status": "completed", "records": []},
+    )
+
+    advanced = data_processing_service.complete_collection_batch(run["runId"])
+
+    assert advanced["status"] == "completed"
+
+
+def test_complete_collection_batch_preserves_terminal_statuses(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    failed_run = data_processing_service.create_processing_run()
+    data_processing_service.fail_processing_run(failed_run["runId"], reason="earlier_failure")
+    cancelled_run = data_processing_service.create_processing_run()
+    data_processing_service.cancel_processing_run(cancelled_run["runId"])
+
+    failed_advanced = data_processing_service.complete_collection_batch(
+        failed_run["runId"],
+        terminal_status="needs_continue",
+    )
+    cancelled_advanced = data_processing_service.complete_collection_batch(
+        cancelled_run["runId"],
+        terminal_status="completed",
+    )
+
+    assert failed_advanced["status"] == "failed"
+    assert cancelled_advanced["status"] == "cancelled"

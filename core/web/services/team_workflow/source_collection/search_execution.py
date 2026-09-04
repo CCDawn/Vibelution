@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 import threading
 import time
 import urllib.error
@@ -521,6 +522,60 @@ def _source_collection_circuit_provider_order(run: dict[str, Any]) -> list[str]:
     return list(dict.fromkeys(supported))
 
 
+def _remediate_failed_source_collection_background_worker(team_id: str, run_id: str, exc: Exception) -> None:
+    """Best-effort liveness cleanup after an escaped background-worker error.
+
+    The search worker is a bare daemon thread: without this cleanup an
+    uncaught exception would evaporate silently — the data-processing run
+    stays "collecting", the work-run snapshot stays active, and every later
+    start short-circuits on the already-running guard forever.  Each step is
+    individually fail-safe; the original exception must never be masked.
+    """
+    s = _service()
+    error_summary = f"{type(exc).__name__}: {s._trim_text(exc, max_length=300)}"
+    try:
+        print(
+            f"[source-collection] background worker failed teamId={team_id} runId={run_id} error={error_summary}",
+            file=sys.stderr,
+            flush=True,
+        )
+    except Exception:  # noqa: BLE001, S110 - stderr breadcrumb must never mask remediation
+        pass
+    # Terminal work-run snapshot (same failure shape as the sync path) so the
+    # active index no longer pins a dead worker.
+    try:
+        run = s.data_processing_service.get_processing_run(run_id)
+        team = s.team_service.get_team(team_id)
+        assignments_payload = s.data_processing_service.list_collection_assignments(run_id)
+        records_payload = s.data_processing_service.list_records(run_id)
+        s._persist_source_collection_work_run(
+            team_id,
+            run_id,
+            status="failed",
+            current_phase="failed",
+            run=run,
+            team=team,
+            assignments=[item for item in list(assignments_payload.get("assignments") or []) if isinstance(item, dict)],
+            records=[item for item in list(records_payload.get("records") or []) if isinstance(item, dict)],
+            summary="资料搜索后台执行失败。",
+            active=False,
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
+    except Exception:  # noqa: BLE001, S110 - snapshot remediation is best-effort
+        pass
+    # Terminal data-processing run so liveness gates stop treating it as in
+    # flight (idempotent and terminal-preserving; a missing run raises and is
+    # swallowed here).
+    try:
+        s.data_processing_service.fail_processing_run(
+            run_id,
+            reason=f"source_collection_background_failed: {type(exc).__name__}",
+        )
+    except Exception:  # noqa: BLE001, S110 - liveness marking is best-effort
+        pass
+
+
 def _run_source_collection_search_background(team_id: str, run_id: str, payload: dict[str, Any]) -> None:
     s = _service()
     try:
@@ -529,12 +584,15 @@ def _run_source_collection_search_background(team_id: str, run_id: str, payload:
         s._record_workflow_event(
             "source_collection.search_background_failed",
             team_id,
+            level="error",
+            outcome="error",
             fields={
                 "runId": run_id,
                 "errorType": type(exc).__name__,
                 "error": s._trim_text(exc, max_length=500),
             },
         )
+        _remediate_failed_source_collection_background_worker(team_id, run_id, exc)
         return
     s._record_workflow_event(
         "source_collection.search_background_completed",
