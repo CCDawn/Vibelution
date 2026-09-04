@@ -160,8 +160,94 @@ def test_http_408_rule_never_touches_llm_error_passthrough():
     assert classification.disposition == PERMANENT
 
 
+# ---------------------------------------------------------------------------
+# HTTP 429 显式规则（408 先例）：数字边界收紧 + litellm 类型证据补漏
+# ---------------------------------------------------------------------------
+
+
+def test_http_429_digit_substring_is_demoted_fail_closed():
+    # 关键词表用子串判定，"1429" 会被误报成 rate_limit；显式规则要求 429
+    # 是独立 token，纯子串命中降级回 provider_protocol_error fail-closed。
+    bare = classify_exception(Exception("HTTP 1429 trace-id=1"))
+    assert bare.category == "rate_limit"
+    assert bare.retryable is True
+
+    classification = classify_error(Exception("HTTP 1429 trace-id=1"))
+    assert classification.category == "provider_protocol_error"
+    assert classification.disposition == PERMANENT
+    assert classification.retryable is False
+
+
+def test_http_429_independent_token_and_phrase_stay_rate_limit():
+    # 独立 token 与 "rate limit" 短语是合法证据，不受收紧影响。
+    for message in (
+        "HTTP 429 too many requests",
+        "rate limit exceeded, retry later",
+        "litellm.RateLimitError: Rate limit error: 429 Too Many Requests",
+    ):
+        classification = classify_error(Exception(message))
+        assert classification.category == "rate_limit", message
+        assert classification.disposition == TRANSIENT_RETRYABLE, message
+
+
+def test_litellm_rate_limit_error_type_is_promoted_to_rate_limit():
+    # litellm.RateLimitError 消息缺 "429"/"rate limit" 关键词时，关键词表会
+    # 误归不可重试的 provider_protocol_error；类型证据补漏提升为
+    # rate_limit 同族可重试（生产通道走 litellm）。
+    pytest.importorskip("litellm")
+    from litellm import RateLimitError as LiteLLMRateLimitError
+
+    bare = classify_exception(
+        LiteLLMRateLimitError(
+            message="Too many requests, please retry later",
+            model="review-model",
+            llm_provider="openai",
+        )
+    )
+    assert bare.category == "provider_protocol_error"
+    assert bare.retryable is False
+
+    classification = classify_error(
+        LiteLLMRateLimitError(
+            message="Too many requests, please retry later",
+            model="review-model",
+            llm_provider="openai",
+        )
+    )
+    assert classification.category == "rate_limit"
+    assert classification.disposition == TRANSIENT_RETRYABLE
+    assert classification.retryable is True
+    assert classification.error.details.get("httpStatus") == 429
+
+    # 带关键词消息的 litellm 429 走关键词路径，同样落在 rate_limit。
+    keyworded = classify_error(
+        LiteLLMRateLimitError(
+            message="Rate limit error: 429 Too Many Requests",
+            model="review-model",
+            llm_provider="openai",
+        )
+    )
+    assert keyworded.category == "rate_limit"
+    assert keyworded.disposition == TRANSIENT_RETRYABLE
+
+
+def test_http_429_rules_never_touch_llm_error_passthrough():
+    # provider 后端透传的 LLMError 保持 retryable/category 平价：429 收紧与
+    # 类型提升都只作用于裸异常路径。
+    passthrough = LLMError("rate_limit", "HTTP 1429 from gateway", retryable=True)
+    classification = classify_error(passthrough)
+    assert classification.category == "rate_limit"
+    assert classification.error is passthrough
+
+    cooldown = LLMError("rate_limit_cooldown", "gate cooldown rejection", retryable=True)
+    classification = classify_error(cooldown)
+    assert classification.category == "rate_limit_cooldown"
+    assert classification.error is cooldown
+
+
 def test_disposition_stays_parity_with_legacy_retryable_flag():
-    # 平价不变式（408 显式规则除外）：transient_retryable ⟺ 旧 retryable。
+    # 平价不变式（408 显式规则与 429 显式规则除外）：transient_retryable ⟺
+    # 旧 retryable。
     samples = [Exception(case[0]) for case in _CLASSIFICATION_TABLE]
     samples.extend(
         [
@@ -246,9 +332,10 @@ def test_is_recoverable_review_llm_gate_error_parity(review_runners_module):
 
 
 def test_maybe_record_provider_rate_limit_parity(review_runners_module, monkeypatch):
-    # 平价锁定：只有 provider 原生 ``rate_limit_error``（HTTP 状态映射透传）
-    # 打开模型 cooldown；``rate_limit``（关键词路径）与 gate 快速失败异常不
-    # 触发记录，风暴不延长窗口。
+    # 判定范围锁定：provider 429 传输族（Anthropic native 透传的
+    # ``rate_limit_error`` 与 litellm/关键词路径归一的 ``rate_limit``）打开
+    # 模型 cooldown；gate 快速失败异常与其它传输错误绝不触发记录，风暴不
+    # 延长窗口；纯子串 "1429" 不是 429，同样不触发。
     recorded: list[str] = []
     monkeypatch.setattr(
         review_runners_module, "_record_model_rate_limit", lambda ref: recorded.append(ref)
@@ -256,15 +343,22 @@ def test_maybe_record_provider_rate_limit_parity(review_runners_module, monkeypa
 
     cases = [
         (LLMError("rate_limit_error", "Anthropic HTTP 429", retryable=True), True),
-        (LLMError("rate_limit", "429 too many requests", retryable=True), False),
+        (LLMError("rate_limit", "429 too many requests", retryable=True), True),
+        (RuntimeError("HTTP 429 too many requests"), True),
         (
             review_runners_module.ReviewLLMRateLimitCooldownError(
                 purpose="p", model_ref="m", cooldown_remaining_seconds=1.0
             ),
             False,
         ),
+        (
+            review_runners_module.ReviewLLMGateTimeoutError(
+                purpose="p", model_ref="m", wait_seconds=1.0
+            ),
+            False,
+        ),
         (LLMError("server_error", "502", retryable=True), False),
-        (RuntimeError("429"), False),
+        (RuntimeError("HTTP 1429 trace-id=1"), False),
     ]
     for exc, should_record in cases:
         recorded.clear()

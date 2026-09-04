@@ -727,6 +727,11 @@ _LLM_GATE_ACQUIRE_TIMEOUT_DEFAULT = 120.0
 _LLM_RATE_LIMIT_COOLDOWN_ENV = "VIBELUTION_LLM_RATE_LIMIT_COOLDOWN_SECONDS"
 _LLM_RATE_LIMIT_COOLDOWN_DEFAULT = 60.0
 
+# provider 429 传输族：Anthropic native 透传的 ``rate_limit_error`` 与
+# litellm/关键词路径归一的 ``rate_limit``。gate 快速失败类别
+# （``gate_timeout`` / ``rate_limit_cooldown``）刻意不在此列。
+_PROVIDER_RATE_LIMIT_CATEGORIES = frozenset({"rate_limit_error", "rate_limit"})
+
 _gate_state_lock = threading.Lock()
 _gate_semaphore: threading.BoundedSemaphore | None = None
 _gate_semaphore_size = 0
@@ -890,16 +895,18 @@ def _record_model_rate_limit(model_ref: str, *, now_s: float | None = None) -> N
 
 
 def _maybe_record_provider_rate_limit(error: Exception, *, model_ref: str) -> None:
-    """Track a real provider 429 (transport category ``rate_limit_error``).
+    """Track a real provider 429 (transport family ``rate_limit_error``/``rate_limit``).
 
-    429 家族判定委托集中分类器 ``classify_error``，不再本地比较字符串；
-    ``rate_limit_error`` 由 provider 原生 HTTP 状态映射直接产生（透传），
-    gate 自身的快速失败异常（``gate_timeout`` / ``rate_limit_cooldown`` /
-    ``timeout``）虽然也是 LLMError，但 category 不在此列，风暴再大也永远
-    不会延长 cooldown 窗口。判定范围由 parity 测试锁定。
+    429 家族判定委托集中分类器 ``classify_error``，不再本地比较字符串。
+    ``rate_limit_error`` 由 provider 原生 HTTP 状态映射直接产生（Anthropic
+    native 透传）；``rate_limit`` 是 litellm/关键词路径的 429 归一类别——
+    生产通道走 litellm，限流风暴必须同样打开模型冷却。gate 自身的快速失败
+    异常（``gate_timeout`` / ``rate_limit_cooldown`` / ``timeout``）虽然也
+    是 LLMError，但 category 不在此列，风暴再大也永远不会延长 cooldown 窗
+    口。判定范围由 parity 测试锁定。
     """
 
-    if classify_error(error).category == "rate_limit_error":
+    if classify_error(error).category in _PROVIDER_RATE_LIMIT_CATEGORIES:
         _record_model_rate_limit(model_ref)
 
 

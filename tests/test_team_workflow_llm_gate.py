@@ -388,6 +388,90 @@ def test_gate_rejections_never_extend_the_cooldown_window(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# (d) litellm 路径 429（关键词类别 ``rate_limit``）同样打开模型冷却
+# ---------------------------------------------------------------------------
+
+
+def test_litellm_429_opens_cooldown_but_gate_errors_do_not():
+    """生产通道走 litellm：litellm 429 样本必须进入模型冷却，gate 快速失败
+    异常绝不打开/延长冷却（防拒绝风暴自我续命）。"""
+
+    pytest.importorskip("litellm")
+    from litellm import RateLimitError as LiteLLMRateLimitError
+
+    model_ref = "fake-provider/fake-litellm-model"
+    litellm_429 = LiteLLMRateLimitError(
+        message="Rate limit error: 429 Too Many Requests",
+        model="fake-litellm-model",
+        llm_provider="openai",
+    )
+
+    llm_review_runners._maybe_record_provider_rate_limit(
+        litellm_429, model_ref=model_ref
+    )
+    with llm_review_runners._gate_state_lock:
+        assert model_ref.lower() in llm_review_runners._rate_limit_cooldown_until
+
+    # 冷却生效：同模型下一次调用在到达 provider 前被快速失败。
+    with pytest.raises(llm_review_runners.ReviewLLMRateLimitCooldownError) as cooldown:
+        llm_review_runners._raise_if_model_cooling_down(
+            purpose="pairwise", model_ref=model_ref
+        )
+    assert cooldown.value.category == "rate_limit_cooldown"
+    assert cooldown.value.retryable is True
+
+    # 不变式：gate 自身快速失败异常不是 provider 429，不打开也不延长冷却。
+    llm_review_runners.reset_llm_gate_for_tests()
+    with llm_review_runners._gate_state_lock:
+        assert llm_review_runners._rate_limit_cooldown_until == {}
+    for gate_error in (
+        llm_review_runners.ReviewLLMGateTimeoutError(
+            purpose="p", model_ref=model_ref, wait_seconds=1.0
+        ),
+        llm_review_runners.ReviewLLMRateLimitCooldownError(
+            purpose="p", model_ref=model_ref, cooldown_remaining_seconds=1.0
+        ),
+    ):
+        llm_review_runners._maybe_record_provider_rate_limit(
+            gate_error, model_ref=model_ref
+        )
+        with llm_review_runners._gate_state_lock:
+            assert llm_review_runners._rate_limit_cooldown_until == {}, gate_error
+
+
+def test_litellm_429_without_keywords_still_opens_cooldown():
+    """litellm.RateLimitError 消息缺 "429"/"rate limit" 关键词时靠类型证据
+    补漏（classify_error 显式规则），冷却照常打开；裸 "HTTP 1429" 不是 429，
+    绝不触发。"""
+
+    pytest.importorskip("litellm")
+    from litellm import RateLimitError as LiteLLMRateLimitError
+
+    model_ref = "fake-provider/fake-litellm-quiet-model"
+    llm_review_runners._maybe_record_provider_rate_limit(
+        LiteLLMRateLimitError(
+            message="Too many requests, please retry later",
+            model="fake-litellm-quiet-model",
+            llm_provider="openai",
+        ),
+        model_ref=model_ref,
+    )
+    with llm_review_runners._gate_state_lock:
+        deadline_before = llm_review_runners._rate_limit_cooldown_until[
+            model_ref.lower()
+        ]
+
+    llm_review_runners._maybe_record_provider_rate_limit(
+        RuntimeError("HTTP 1429 trace-id=1"), model_ref=model_ref
+    )
+    with llm_review_runners._gate_state_lock:
+        assert (
+            llm_review_runners._rate_limit_cooldown_until[model_ref.lower()]
+            == deadline_before
+        ), "纯子串 1429 不得打开或延长冷却窗口"
+
+
+# ---------------------------------------------------------------------------
 # (d) exception paths always release the slot
 # ---------------------------------------------------------------------------
 
