@@ -27,13 +27,13 @@ def test_start_node_commits_command_attempt_outbox_events(tmp_path: Path) -> Non
         assert run is not None
         assert run.run_version == 2
         assert run.status == "running"
-        assert run.active_node_id == "source_finding"
+        assert run.active_node_id == "problem_understanding"
 
         attempts = harness.store.list_attempts("run-test")
         assert len(attempts) == 1
         attempt = attempts[0]
         assert attempt.status == "starting"
-        assert attempt.node_id == "source_finding"
+        assert attempt.node_id == "problem_understanding"
         assert attempt.actor_kind == "agent"
         assert attempt.attempt == 1
         assert attempt.command_id == receipt.command_id
@@ -60,9 +60,9 @@ def test_start_node_records_definition_actor_kind(tmp_path: Path) -> None:
     try:
         harness.seed_run()
         harness.service.submit(
-            harness.request(node_id="source_finding", idempotency_key="ui:agent")
+            harness.request(node_id="problem_understanding", idempotency_key="ui:agent")
         )
-        agent = harness.store.latest_attempt("run-test", "source_finding")
+        agent = harness.store.latest_attempt("run-test", "problem_understanding")
         assert agent is not None and agent.actor_kind == "agent"
 
         harness.service.submit(
@@ -120,7 +120,7 @@ def test_command_transaction_crash_injection_rolls_back_everything(tmp_path: Pat
                 _attempt_record(
                     node_run_id="nr-crash",
                     run_id=req.run_id,
-                    node_id="source_finding",
+                    node_id="problem_understanding",
                     attempt=1,
                     status="starting",
                     command_id=command_id,

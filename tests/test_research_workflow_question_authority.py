@@ -838,9 +838,9 @@ def test_attach_question_run_checkpoints_uses_latest_run() -> None:
     assert attached[0]["checkpoint"]["runId"] == "run-new"
     assert attached[0]["checkpoint"]["currentNodeId"] == "protocol_design"
     assert attached[0]["checkpoint"]["currentNodeLabel"] == "协议设计"
-    assert attached[0]["checkpoint"]["completedCount"] == 7
+    assert attached[0]["checkpoint"]["completedCount"] == 2
     assert attached[0]["checkpoint"]["resumable"] is True
-    assert attached[0]["checkpoint"]["totalSteps"] == 17
+    assert attached[0]["checkpoint"]["totalSteps"] == 12
     assert attached[1]["checkpoint"] is None
 
     finished = question_launch.attach_question_run_checkpoints(
@@ -857,7 +857,7 @@ def test_attach_question_run_checkpoints_uses_latest_run() -> None:
     )
     assert finished[0]["checkpoint"]["runId"] == "run-iso"
     assert finished[0]["checkpoint"]["resumable"] is False
-    assert finished[0]["checkpoint"]["completedCount"] == 17
+    assert finished[0]["checkpoint"]["completedCount"] == 12
 
 
 def test_attach_question_run_checkpoints_keeps_prior_success() -> None:
@@ -876,7 +876,7 @@ def test_attach_question_run_checkpoints_keeps_prior_success() -> None:
                 "runId": "run-retry",
                 "questionId": "SCI-003",
                 "status": "failed",
-                "runtimeCurrentNodeIds": ["source_finding"],
+                "runtimeCurrentNodeIds": ["problem_understanding"],
                 "updatedAtMs": 9,
             },
         ],
@@ -884,7 +884,7 @@ def test_attach_question_run_checkpoints_keeps_prior_success() -> None:
     checkpoint = attached[0]["checkpoint"]
     assert checkpoint["runId"] == "run-won"
     assert checkpoint["status"] == "succeeded"
-    assert checkpoint["completedCount"] == 17
+    assert checkpoint["completedCount"] == 12
     assert checkpoint["resumable"] is False
 
     # An in-flight retry still surfaces as running/resumable.
@@ -928,7 +928,7 @@ def test_attach_question_run_checkpoints_keeps_prior_success() -> None:
                 "runId": "run-shallow",
                 "questionId": "SCI-003",
                 "status": "failed",
-                "runtimeCurrentNodeIds": ["source_finding"],
+                "runtimeCurrentNodeIds": ["problem_understanding"],
                 "updatedAtMs": 9,
             },
         ],
@@ -975,7 +975,7 @@ def test_launch_options_overlay_live_checkpoints(
                         "runId": "run-live",
                         "questionId": "SCI-001",
                         "status": "running",
-                        "runtimeCurrentNodeIds": ["source_finding"],
+                        "runtimeCurrentNodeIds": ["problem_understanding"],
                         "updatedAtMs": 42,
                     }
                 ]
@@ -993,7 +993,7 @@ def test_launch_options_overlay_live_checkpoints(
     assert detail_calls == []
     assert by_id["SCI-096"]["source"] == "catalog"
     assert by_id["SCI-001"]["checkpoint"]["runId"] == "run-live"
-    assert by_id["SCI-001"]["checkpoint"]["currentNodeLabel"] == "资料寻找"
+    assert by_id["SCI-001"]["checkpoint"]["currentNodeLabel"] == "问题理解"
     assert by_id["SCI-001"]["checkpoint"]["resumable"] is True
     assert by_id["SCI-002"]["checkpoint"] is None
 

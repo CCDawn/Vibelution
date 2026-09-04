@@ -782,15 +782,12 @@ def test_question_run_scopes_candidate_generation_before_receipt_resolution(
         "workflowNodeId": chain.HYPOTHESIS_DESIGN_NODE_ID,
         "questionId": _QUESTION_ID,
     }
-    assert captured["_candidate_authority"] == ""
+    assert captured["_candidate_authority"] == "exploratory_draft"
 
 
 def test_stage_one_question_run_auto_opens_exploratory_generation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from core.research.competition.stage_one_completion_policy import (
-        load_stage_one_completion_policy,
-    )
     from core.web.services.team_workflow.research_runtime import run_creation
 
     captured: dict[str, object] = {}
@@ -808,7 +805,6 @@ def test_stage_one_question_run_auto_opens_exploratory_generation(
             "projectId": "project-stage-one",
             "researchObjectiveContract": {"hypothesisFirst": True},
             "modelRoutingPolicy": {"modelPolicySha256": "a" * 64},
-            "stageOneCompletionPolicy": load_stage_one_completion_policy().to_dict(),
         },
         created_run={
             "teamId": "team-stage-one",
@@ -1770,15 +1766,11 @@ def test_stage_one_plan_writer_projects_only_canonical_question_sections(
     assert result["status"] == "written"
     assert "stage1_research_plan" in workflow_artifact_store._SUPPORTED_KINDS
     assert "competition_alignment" in workflow_artifact_store._SUPPORTED_KINDS
-    assert "stage_one_completion_manifest" in workflow_artifact_store._SUPPORTED_KINDS
     assert artifact_readback_registry.resolve_artifact_authority(
         "stage1_research_plan"
     ) is not None
     assert artifact_readback_registry.resolve_artifact_authority(
         "competition_alignment"
-    ) is not None
-    assert artifact_readback_registry.resolve_artifact_authority(
-        "stage_one_completion_manifest"
     ) is not None
     assert [row["kind"] for row in rows] == [
         "stage1_research_plan",
@@ -3659,7 +3651,7 @@ def _seed_parent_run(runtime, team_id: str, planner_agent_id: str) -> None:
         "teamId": team_id,
         "projectId": "challenge-sci-096",
         "questionId": _QUESTION_ID,
-        "workflowVersionId": "challenge-cup-research-v2.1.0",
+        "workflowVersionId": "wv-268aa6e8dea8",
         "researchBriefHash": "b" * 64,
         "datasetRefs": [],
         "metricContract": {},
@@ -4064,286 +4056,6 @@ def _close_first_meeting_with_envelope(
         _closure_payload(agent_ids, [_envelope_decision(agent_ids[0])]),
         runtime=runtime,
     )
-
-
-def test_hypothesis_first_chain_end_to_end(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    team_id, agents = _hf_env(tmp_path, monkeypatch)
-    _patch_approved_question(monkeypatch)
-    collection_calls = _fake_collection_runs(monkeypatch)
-    runtime = _build_runtime(tmp_path)
-    try:
-        _seed_parent_run(runtime, team_id, agents["experiment_planner"])
-        agent_ids = [agents[role] for role in _ROLES]
-
-        with server_operator_scope("u-1", roles=("operator",)):
-            # 0. Before any selection: both chain gates block.
-            finding = _evaluate(runtime, team_id, "source_finding")
-            assert not finding.ready
-            assert "hypothesis_first_meeting_open" in _blocker_codes(finding)
-            design = _evaluate(runtime, team_id, "hypothesis_design")
-            design_codes = _blocker_codes(design)
-            assert "hypothesis_round_unconverged" in design_codes
-            assert "template_baseline_missing" in design_codes
-
-            # 1. Selection persists -> first review meeting auto-opens in
-            #    background mode with the room round <-> meetingRoundId binding.
-            recorded = _open_first_meeting(team_id, agent_ids)
-            # R2.2 claim belief gate: seed review-supported core claims for the
-            # selected candidates so the final convergence can pass the gate.
-            _seed_claim_belief_gate_fixture(
-                monkeypatch, team_id, _QUESTION_ID, ["hyp-a", "hyp-b"]
-            )
-            review = recorded["reviewMeeting"]
-            assert review["discussion"]["background"] is True
-            first_round_meetings = _review_meetings(recorded)
-            assert len(first_round_meetings) == 2
-            meeting = first_round_meetings[0]
-            first_meeting_id = meeting["meetingRoundId"]
-            sibling_meeting_id = first_round_meetings[1]["meetingRoundId"]
-            assert meeting["meetingType"] == "hypothesis_review"
-            assert meeting["linkedChatRoomId"] == review["roomId"]
-            assert meeting["chatRoomRoundIds"] == [review["roundId"]]
-            room_detail = chat_room_service.get_chat_room_detail(review["roomId"])
-            bound_round = next(
-                item for item in room_detail["rounds"] if item["roundId"] == review["roundId"]
-            )
-            assert bound_round["config"]["meetingRoundId"] == first_meeting_id
-            assert bound_round["status"] == "completed"
-
-            # 2. The open first discussion still blocks source_finding.
-            finding = _evaluate(runtime, team_id, "source_finding")
-            assert "hypothesis_first_meeting_open" in _blocker_codes(finding)
-
-            # 3. Closing with a searchEnvelope decision triggers stage-1
-            #    collection through the facade exactly once.
-            closed_first = _close_first_meeting_with_envelope(
-                team_id, agent_ids, first_meeting_id, runtime
-            )
-            assert closed_first["meetingRound"]["status"] == "closed"
-            assert (
-                closed_first["hypothesisRound"]["status"]
-                == "waiting_for_sibling_reviews"
-            )
-            requests = closed_first["collection"]["requests"]
-            assert len(requests) == 1
-            request = requests[0]
-            assert request["status"] == "pending"
-            assert request["collectionRunId"] == "dprun-hf4-1"
-            assert request["meetingRoundId"] == first_meeting_id
-            assert len(collection_calls) == 1
-            ensure_scope = collection_calls[0]["payload"]["scope"]
-            assert ensure_scope["researchScopeHash"] == meeting["scopeHash"]
-            assert ensure_scope["searchEnvelope"]["keywords"] == [
-                "predictive coding",
-                "spike train coding",
-            ]
-
-            # One closed candidate must not make the logical round ready while
-            # its sibling is still active.
-            finding = _evaluate(runtime, team_id, "source_finding")
-            assert "hypothesis_first_meeting_open" in _blocker_codes(finding)
-
-            # The logical round fans out to both selected candidates. Fan-in
-            # happens only after the second sibling is confirmed.
-            _drive_to_awaiting_approval(team_id, sibling_meeting_id, agent_ids[0])
-            closed = chain.close_review_meeting(
-                team_id,
-                sibling_meeting_id,
-                _closure_payload(agent_ids, [_select_decision(agent_ids[0])]),
-                runtime=runtime,
-            )
-            assert closed["meetingRound"]["status"] == "closed"
-            assert closed["collection"]["requests"] == []
-            assert len(collection_calls) == 1
-
-            # 3b. The closure auto-generates a closed HypothesisRound through
-            #     the HF-3 executor: meetingRefs point back to this meeting and
-            #     the first round's lineage terminates at the question candidates.
-            generated = closed["hypothesisRound"]
-            assert generated["status"] == "created"
-            first_round = generated["round"]
-            assert first_round["status"] == "closed"
-            assert first_round["metaReview"]["accepted"] is True
-            assert {
-                item["id"]
-                for item in first_round["meetingRefs"]
-                if item["kind"] == "meeting_round"
-            } == {first_meeting_id, sibling_meeting_id}
-            assert {
-                item["id"] for item in first_round["lineage"] if item["kind"] == "candidate"
-            } == {"hyp-a", "hyp-b"}
-            assert not [
-                item for item in first_round["lineage"] if item["kind"] == "round"
-            ]
-
-            # 4. The collection decision unblocks source_finding; the pending
-            #    collection request blocks hypothesis_design as a knowledge gap.
-            finding = _evaluate(runtime, team_id, "source_finding")
-            assert "hypothesis_first_meeting_open" not in _blocker_codes(finding)
-            design = _evaluate(runtime, team_id, "hypothesis_design")
-            design_codes = _blocker_codes(design)
-            assert "knowledge_gap_pending" in design_codes
-            assert "hypothesis_round_unconverged" in design_codes
-
-            # The command gate enforces the same blockers (not just the probe).
-            with pytest.raises(NodeNotReadyError):
-                runtime.command_service.submit(
-                    CommandRequest(
-                        command_id="cmd-hf4-early-design",
-                        run_id=_RUN_ID,
-                        team_id=team_id,
-                        command=WorkflowCommandKind.START_NODE,
-                        node_id="hypothesis_design",
-                        expected_run_version=1,
-                        idempotency_key="hf4:test-early-design",
-                        payload={},
-                        requested_by=ActorRef("user", "u-1"),
-                        requested_at_ms=_FIXED_NOW_MS,
-                    )
-                )
-
-            # 5. Child collection handoff: gap clears, the parent re-checks
-            #    (still unconverged) and the next review meeting auto-opens.
-            handoff = chain.record_collection_handoff(
-                team_id,
-                request["requestId"],
-                handoff_ref="knowledge_package:pkg-1",
-                runtime=runtime,
-                agent_runner=_marker_runner,
-            )
-            assert handoff["request"]["status"] == "handed_off"
-            assert handoff["request"]["handoffRef"] == "knowledge_package:pkg-1"
-            next_meeting = handoff["nextMeeting"]
-            assert next_meeting["status"] in {"opened", "created", "reused"}
-            second_round_meetings = _opened_review_meetings(next_meeting)
-            assert second_round_meetings
-            assert {item["meetingRoundId"] for item in second_round_meetings}.isdisjoint(
-                {first_meeting_id, sibling_meeting_id}
-            )
-            assert next_meeting["roundIndex"] == 2
-
-            links = chain.list_review_round_links(team_id, question_id=_QUESTION_ID)["links"]
-            assert [link["roundIndex"] for link in links] == [1, 1] + [
-                2
-            ] * len(second_round_meetings)
-            assert links[0]["meetingRoundId"] == first_meeting_id
-            assert links[2]["previousMeetingRoundId"] == first_meeting_id
-            assert links[2]["collectionRequestId"] == request["requestId"]
-
-            design = _evaluate(runtime, team_id, "hypothesis_design")
-            design_codes = _blocker_codes(design)
-            assert "knowledge_gap_pending" not in design_codes
-            assert "hypothesis_round_unconverged" in design_codes
-            resume = handoff["resume"]
-            assert resume["runs"][0]["runId"] == _RUN_ID
-            assert resume["runs"][0]["action"] == "not_ready"
-            assert "hypothesis_round_unconverged" in resume["runs"][0]["blockers"]
-            assert runtime.store.latest_attempt(_RUN_ID, "hypothesis_design") is None
-
-            # 6. Second discussion closes without new evidence requests; the
-            #    closure auto-generates the next HypothesisRound whose lineage
-            #    links back to the first round; a frozen baseline appears.
-            closed_second = None
-            for second_round_meeting in second_round_meetings:
-                meeting_id = second_round_meeting["meetingRoundId"]
-                _drive_to_awaiting_approval(team_id, meeting_id, agent_ids[0])
-                closed_second = chain.close_review_meeting(
-                    team_id,
-                    meeting_id,
-                    _closure_payload(agent_ids, [_select_decision(agent_ids[0])]),
-                    runtime=runtime,
-                )
-            assert closed_second is not None
-            assert closed_second["collection"]["requests"] == []
-            assert len(collection_calls) == 1
-            generated_second = closed_second["hypothesisRound"]
-            assert generated_second["status"] == "created"
-            second_round = generated_second["round"]
-            assert second_round["status"] == "closed"
-            assert second_round["metaReview"]["accepted"] is True
-            assert {
-                item["id"]
-                for item in second_round["meetingRefs"]
-                if item["kind"] == "meeting_round"
-            } == {item["meetingRoundId"] for item in second_round_meetings}
-            assert [
-                item["id"] for item in second_round["lineage"] if item["kind"] == "round"
-            ] == [first_round["roundId"]]
-            _freeze_template_baseline(team_id, agent_ids[0])
-
-            # 7. Converged: the readiness re-check passes and the parent run
-            #    dispatches hypothesis_design (writer-transaction-external).
-            design = _evaluate(runtime, team_id, "hypothesis_design")
-            assert design.ready, [b.code for b in design.blockers]
-            resumed = chain.resume_parent_runs(
-                team_id,
-                question_id=_QUESTION_ID,
-                runtime=runtime,
-                trigger="test:converged",
-            )
-            assert resumed["runs"][0]["action"] == "started"
-            attempt = runtime.store.latest_attempt(_RUN_ID, "hypothesis_design")
-            assert attempt is not None
-            assert attempt.status in {"starting", "dispatching", "running"}
-
-            # Idempotent replay: the same trigger replays the command instead
-            # of creating a second attempt.
-            replayed = chain.resume_parent_runs(
-                team_id,
-                question_id=_QUESTION_ID,
-                runtime=runtime,
-                trigger="test:converged",
-            )
-            assert replayed["runs"][0]["action"] == "replayed"
-            assert (
-                runtime.store.latest_attempt(_RUN_ID, "hypothesis_design").node_run_id
-                == attempt.node_run_id
-            )
-    finally:
-        runtime.close()
-
-
-def test_missing_search_envelope_never_triggers_collection(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    team_id, agents = _hf_env(tmp_path, monkeypatch)
-    _patch_approved_question(monkeypatch)
-    collection_calls = _fake_collection_runs(monkeypatch)
-    runtime = _build_runtime(tmp_path)
-    try:
-        _seed_parent_run(runtime, team_id, agents["experiment_planner"])
-        agent_ids = [agents[role] for role in _ROLES]
-
-        with server_operator_scope("u-1", roles=("operator",)):
-            recorded = _open_first_meeting(team_id, agent_ids)
-            first_meeting_id = recorded["reviewMeeting"]["meetingRound"]["meetingRoundId"]
-            _drive_to_awaiting_approval(team_id, first_meeting_id, agent_ids[0])
-            closed = chain.close_review_meeting(
-                team_id,
-                first_meeting_id,
-                _closure_payload(
-                    agent_ids,
-                    [
-                        _envelope_decision(
-                            agent_ids[0], searchEnvelope={"sourceTypes": ["paper"]}
-                        )
-                    ],
-                ),
-                runtime=runtime,
-            )
-            assert closed["meetingRound"]["status"] == "closed"
-            assert closed["collection"]["requests"] == []
-            skipped = closed["collection"]["skipped"]
-            assert len(skipped) == 1
-            assert skipped[0]["reason"] == "search_envelope_missing"
-            assert collection_calls == []
-
-            # source_finding stays blocked: the first collection scope must
-            # come from a discussion decision carrying a valid envelope.
-            finding = _evaluate(runtime, team_id, "source_finding")
-            assert "hypothesis_first_meeting_open" in _blocker_codes(finding)
-    finally:
-        runtime.close()
 
 
 def test_unconverged_round_blocks_hypothesis_design(
@@ -8717,7 +8429,7 @@ def test_auto_create_formal_run_creates_and_auto_starts(
     )
     assert call["formal_hypothesis_round_id"] == _AUTO_ROUND_ID
     # Uncovered question: no catalog authorization required.
-    assert call["catalog_run_authorization"] is None
+    assert "catalog_run_authorization" not in call
     assert start_calls == [
         {
             "runId": "run-auto-1",
@@ -8777,133 +8489,6 @@ def test_auto_create_skips_when_already_created_or_unconverged(
         "reason": "no_accepted_adjudication",
     }
     assert create_calls == []
-
-
-def test_auto_create_stage_one_question_passes_catalog_authorization(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """SCI-091: the real create_question_run receives the durable catalog
-    authorization resolved by _current_catalog_run_authorization."""
-    from core.research.competition.stage_one_completion_policy import (
-        load_stage_one_completion_policy,
-    )
-    from core.web.services.team_workflow import challenge_cup_real_batch
-    from core.web.services.team_workflow.research_runtime import run_creation
-
-    team_id, _ledger_path, _events = _auto_create_env(
-        tmp_path, monkeypatch, question_id="SCI-091"
-    )
-    authorization_payload = {
-        "authorizationId": "auth-real-1",
-        "planId": "real-1",
-        "batchScope": {
-            "stageOneCompletionPolicy": load_stage_one_completion_policy().to_dict()
-        },
-    }
-    auth_plan_ids: list[str] = []
-    monkeypatch.setattr(
-        challenge_cup_real_batch,
-        "_current_catalog_run_authorization",
-        lambda _team_id, plan_id: (
-            auth_plan_ids.append(plan_id) or dict(authorization_payload)
-        ),
-    )
-    monkeypatch.setattr(
-        run_creation, "assert_writes_allowed", lambda *_args, **_kwargs: None
-    )
-    monkeypatch.setattr(run_creation, "get_write_store", lambda: object())
-    monkeypatch.setattr(
-        run_creation,
-        "build_question_run_input",
-        lambda *_args, **_kwargs: {
-            "teamId": team_id,
-            "questionId": "SCI-091",
-            "researchScopeEnvelope": {},
-            "catalogScope": {},
-            "stageOneCompletionPolicy": load_stage_one_completion_policy().to_dict(),
-        },
-    )
-    monkeypatch.setattr(
-        run_creation,
-        "_formal_hypothesis_handoff",
-        lambda *_args, **_kwargs: {"hypothesisSelection": {"selectionId": "s-auto"}},
-    )
-    create_run_calls: list[dict] = []
-    monkeypatch.setattr(
-        run_creation,
-        "create_run",
-        lambda *_args, **kwargs: (
-            create_run_calls.append(kwargs) or {"runId": "run-auto-s1"}
-        ),
-    )
-    monkeypatch.setattr(
-        chain, "_auto_start_created_formal_run", lambda *_args, **_kwargs: None
-    )
-
-    result = chain.auto_create_formal_run_after_convergence(
-        team_id, question_id="SCI-091"
-    )
-
-    assert result["status"] == "created"
-    assert result["runId"] == "run-auto-s1"
-    assert auth_plan_ids == ["real-1"]
-    assert len(create_run_calls) == 1
-    # The authorization reached the real create_question_run unchanged...
-    assert create_run_calls[0]["catalog_run_authorization"] == authorization_payload
-    # ...and the frozen run input carries the stage-one policy it authorizes.
-    assert create_run_calls[0]["run_input"][
-        "stageOneCompletionPolicy"
-    ] == load_stage_one_completion_policy().to_dict()
-
-
-def test_auto_create_stage_one_without_authorization_fails_structured(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A missing durable authorization is a structured failure, never a raise."""
-    from core.web.services.team_workflow import challenge_cup_real_batch
-    from core.web.services.team_workflow.challenge_cup_real_batch import (
-        ChallengeCupRealBatchError,
-    )
-    from core.web.services.team_workflow.research_runtime import run_creation
-
-    team_id, _ledger_path, scene_events = _auto_create_env(
-        tmp_path, monkeypatch, question_id="SCI-091"
-    )
-
-    def _missing_authorization(_team_id, _plan_id):
-        raise ChallengeCupRealBatchError(
-            "A durable CatalogRunAuthorization record is required before a real "
-            "batch can start.",
-            code="catalog_run_authorization_required",
-        )
-
-    monkeypatch.setattr(
-        challenge_cup_real_batch,
-        "_current_catalog_run_authorization",
-        _missing_authorization,
-    )
-    create_calls: list[dict] = []
-    monkeypatch.setattr(
-        run_creation,
-        "create_question_run",
-        lambda *_args, **kwargs: (create_calls.append(kwargs) or {"runId": "run-x"}),
-    )
-
-    result = chain.auto_create_formal_run_after_convergence(
-        team_id, question_id="SCI-091"
-    )
-
-    assert result["status"] == "failed"
-    assert result["reason"] == "catalog_run_authorization_required"
-    assert create_calls == []
-    events = [
-        fields
-        for event, fields in scene_events
-        if event == "hypothesis_first.auto_formal_run"
-    ]
-    assert len(events) == 1
-    assert events[0]["outcome"] == "failed"
-    assert events[0]["fields"]["reason"] == "catalog_run_authorization_required"
 
 
 def test_auto_create_skips_rejected_round(

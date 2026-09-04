@@ -412,8 +412,8 @@ def test_knowledge_draft_readback_uses_scoped_authority_and_preserves_old_refs(
         )
     ]
     monkeypatch.setattr(
-        "core.web.services.team_workflow.source_collection.candidates.list_candidate_store",
-        lambda team_id, **_: {"teamId": team_id, "candidates": list(candidates)},
+        "core.web.services.team_workflow.source_collection.candidates.list_candidate_store_authority_records",
+        lambda team_id, **_: list(candidates),
     )
 
     payload = load_scoped_artifact_payload(
@@ -427,22 +427,6 @@ def test_knowledge_draft_readback_uses_scoped_authority_and_preserves_old_refs(
     assert payload["draft"]["sourceTrace"]["sourceCollectionRunId"] == "sc-run-1"
     assert payload["reviewable"] is True
     assert "knowledgeIngestion" not in payload
-
-    from core.web.services.team_workflow.research_runtime.readiness import (
-        NodeReadinessService,
-    )
-    from tests._support.readiness_fakes import FakeDomainContext, make_run
-
-    readiness_context = FakeDomainContext()
-    readiness_context._knowledge_draft = payload
-    readiness = NodeReadinessService(run_source={"wf-run-1": make_run()}.get).evaluate(
-        team_id="research-team",
-        run_id="wf-run-1",
-        node_id="knowledge_handoff",
-        context=readiness_context,
-        use_cache=False,
-    )
-    assert readiness.ready is True
 
     refs = collect_required_artifact_refs(
         required_kinds=("knowledge_package_draft",),
@@ -529,8 +513,8 @@ def test_agent_verify_blocks_when_required_outputs_missing() -> None:
     action = PendingAction(
         action_id="act-empty",
         run_id="run-test",
-        node_run_id="nr-run-test-source_finding-a1",
-        node_id="source_finding",
+        node_run_id="nr-run-test-hypothesis_design-a1",
+        node_id="hypothesis_design",
         attempt=1,
         actor_kind=ActorKind.AGENT,
         action_kind="start_agent_task",
@@ -645,10 +629,8 @@ def test_real_ports_required_kinds_follow_pinned_definition() -> None:
         WorkflowDefinitionNodeMismatch,
         register_or_resolve,
     )
-    from core.web.services.team_workflow.research_runtime.knowledge_rollout import (
-        build_challenge_cup_workflow_definition_v3,
-    )
-    from core.web.services.team_workflow.research_runtime.knowledge_sideflow_service import (
+    from core.research.workflow.definition import build_challenge_cup_workflow_definition
+    from core.research.workflow.knowledge_sideflow_definition import (
         build_knowledge_sideflow_workflow_definition,
     )
 
@@ -681,24 +663,10 @@ def test_real_ports_required_kinds_follow_pinned_definition() -> None:
             budget_policy_hash="p-1",
         )
 
-    v3_ports = RealDomainPorts(Store(build_challenge_cup_workflow_definition_v3()))
+    v3_ports = RealDomainPorts(Store(build_challenge_cup_workflow_definition()))
     assert v3_ports.required_artifact_kinds(action("hypothesis_design")) == (
         "hypothesis_set",
     )
-    from core.research.competition.stage_one_completion_policy import (
-        load_stage_one_completion_policy,
-    )
-
-    policy = load_stage_one_completion_policy().to_dict()
-    stage_one_ports = RealDomainPorts(
-        Store(
-            build_challenge_cup_workflow_definition_v3(),
-            snapshot={"stageOneCompletionPolicy": policy},
-        )
-    )
-    assert stage_one_ports.required_artifact_kinds(
-        action("hypothesis_design")
-    ) == tuple(policy["requiredArtifactKinds"])
     with pytest.raises(WorkflowDefinitionNodeMismatch):
         v3_ports.required_artifact_kinds(action("source_finding"))
 
@@ -720,40 +688,3 @@ def test_every_produced_kind_has_authority_mapping() -> None:
     }
     missing = [kind for kind in sorted(kinds) if resolve_artifact_authority(kind) is None]
     assert missing == [], f"Artifact kinds missing authority mapping: {missing}"
-
-
-def test_legacy_agent_artifact_builder_reads_stage_one_extras_from_canonical_store(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from core.research.competition.stage_one_completion_policy import (
-        load_stage_one_completion_policy,
-    )
-    from core.web.services.team_workflow.research_runtime import (
-        agent_task_artifact_builder as builder,
-    )
-
-    policy = load_stage_one_completion_policy().to_dict()
-    calls: list[str] = []
-
-    def fake_load(kind: str, **kwargs):
-        calls.append(kind)
-        return {"payload": {"kind": kind, "canonical": True}}
-
-    monkeypatch.setattr(builder, "load_scoped_artifact_payload", fake_load)
-    payloads = builder._stage_one_completion_payloads(
-        {
-            "runId": "run-stage-one",
-            "teamId": "team-stage-one",
-            "inputSnapshot": {
-                "sourceCollectionRunId": "source-stage-one",
-                "stageOneCompletionPolicy": policy,
-            },
-        },
-        node_id="hypothesis_design",
-        produced_kinds=("hypothesis_set",),
-    )
-
-    expected_extra_kinds = policy["requiredArtifactKinds"][1:]
-    assert calls == expected_extra_kinds
-    assert list(payloads) == expected_extra_kinds
-    assert all(payload["canonical"] is True for payload in payloads.values())

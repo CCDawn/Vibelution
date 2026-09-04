@@ -1260,7 +1260,7 @@ def test_converged_chain_does_not_offer_duplicate_formal_run() -> None:
     )
 
 
-def test_legacy_running_formal_run_does_not_hide_unstarted_hypothesis_generation() -> None:
+def test_active_workflow_run_owns_unstarted_hypothesis_generation() -> None:
     state = HypothesisFirstStateV2.model_validate(
         project_state_from_records(
             team_id="team-1",
@@ -1274,7 +1274,7 @@ def test_legacy_running_formal_run_does_not_hide_unstarted_hypothesis_generation
             hypothesis_round_records=[],
             formal_runs=[
                 {
-                    "runId": "legacy-container-run",
+                    "runId": "workflow-run",
                     "teamId": "team-1",
                     "questionId": "SCI-001",
                     "status": "running",
@@ -1287,8 +1287,8 @@ def test_legacy_running_formal_run_does_not_hide_unstarted_hypothesis_generation
     )
 
     assert state.currentPhase == "generation"
-    assert state.formalRuntime.runId == "legacy-container-run"
-    assert any(
+    assert state.formalRuntime.runId == "workflow-run"
+    assert not any(
         action.kind == "command" and action.command == "open_generation"
         for action in state.allowedActions
     )
@@ -7741,7 +7741,7 @@ def test_stage_one_origin_entry_redirects_to_run_creation() -> None:
     assert offer["expectedStateVersion"] == state["stateVersion"]
 
 
-def test_off_policy_question_keeps_plain_open_generation_entry() -> None:
+def test_every_question_uses_canonical_run_creation_entry() -> None:
     state = project_state_from_records(
         team_id="team-1",
         question_id="SCI-001",
@@ -7759,8 +7759,8 @@ def test_off_policy_question_keeps_plain_open_generation_entry() -> None:
         for action in state["allowedActions"]
         if action.get("kind") == "command"
     ]
-    assert [action["command"] for action in commands] == ["open_generation"]
-    assert commands[0]["actionId"] == "open-generation"
+    assert [action["command"] for action in commands] == ["create_stage_one_run"]
+    assert commands[0]["actionId"] == "create-stage-one-run"
 
 
 def test_stage_one_run_r0_completion_offers_grounded_stage_one_generation() -> None:
@@ -7951,7 +7951,7 @@ def test_dead_state_sentinel_stays_quiet_on_healthy_states() -> None:
     }
 
 
-def test_v2_create_stage_one_run_command_creates_stage_one_run(
+def test_v2_create_stage_one_run_command_creates_canonical_run(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -7982,24 +7982,12 @@ def test_v2_create_stage_one_run_command_creates_stage_one_run(
         "project_hypothesis_first_state_v2",
         lambda *_args, **_kwargs: snapshot,
     )
-    from core.web.services.team_workflow import challenge_cup_real_batch
-
-    authorization = {"authorizationId": "auth-1"}
     captured: dict[str, object] = {}
-
-    def fake_authorization(team_id: str, plan_id: str) -> dict[str, object]:
-        captured["authorization_call"] = (team_id, plan_id)
-        return authorization
 
     def fake_create_question_run(workflow_id, **kwargs):
         captured["create_kwargs"] = kwargs
         return {"runId": "run-stage-one-1", "status": "queued"}
 
-    monkeypatch.setattr(
-        challenge_cup_real_batch,
-        "_current_catalog_run_authorization",
-        fake_authorization,
-    )
     monkeypatch.setattr(
         run_creation,
         "create_question_run",
@@ -8026,11 +8014,10 @@ def test_v2_create_stage_one_run_command_creates_stage_one_run(
     )
 
     assert result["result"]["runId"] == "run-stage-one-1"
-    assert captured["authorization_call"] == ("team-1", "real-1")
     create_kwargs = captured["create_kwargs"]
     assert create_kwargs["team_id"] == "team-1"
     assert create_kwargs["question_id"] == "SCI-091"
-    assert create_kwargs["catalog_run_authorization"] == authorization
+    assert "catalog_run_authorization" not in create_kwargs
     assert create_kwargs["idempotency_key"] == "hf2:create-stage-one-run"
     assert "safety_limits" in create_kwargs
     assert captured["auto_start"] == (

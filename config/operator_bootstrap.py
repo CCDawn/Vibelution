@@ -416,11 +416,6 @@ def build_default_operator_config(
         "workflow_session_scope_v3": {
             "hypothesis_design": "shadow",
         },
-        "research": {
-            "knowledge_sideflow": {
-                "mode": "off",
-            },
-        },
     }
 
 

@@ -387,7 +387,7 @@ def test_runtime_node_detail_exposes_the_scoped_projection(tmp_path, monkeypatch
     record = {
         **_record(),
         "workflowId": "challenge-cup-research",
-        "workflowVersionId": "2.1.0",
+        "workflowVersionId": "wv-268aa6e8dea8",
         "runVersion": 1,
         "threadId": "thread-1",
         "bindingSnapshots": [

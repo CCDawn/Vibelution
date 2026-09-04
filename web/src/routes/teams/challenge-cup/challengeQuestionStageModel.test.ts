@@ -4,7 +4,7 @@ import type { ChallengeQuestionRunDetailPayload } from "../../../api/types";
 import {
   deriveChallengeQuestionStageProjection,
   stageOneStatusCopy,
-  stageTwoInactiveHint,
+  stageTwoProgressHint,
   stageTwoStatusCopy,
   stageZoneTitle,
 } from "./challengeQuestionStageModel";
@@ -58,11 +58,19 @@ describe("challengeQuestionStageModel", () => {
     expect(stageOneStatusCopy(projection.stageOne, "en")).toBe("Generating");
   });
 
-  it("never activates stage two and labels it inactive", () => {
-    const projection = deriveChallengeQuestionStageProjection(detailWith({}));
-    expect(projection.stageTwoActive).toBe(false);
-    expect(stageTwoStatusCopy("zh")).toBe("未激活");
-    expect(stageTwoInactiveHint("zh")).toContain("需按题显式开启");
+  it("advances stage two when the hypothesis is settled", () => {
+    const waiting = deriveChallengeQuestionStageProjection(
+      detailWith({ recordStatus: "pending_review", gateDecision: "pending" }),
+    );
+    expect(waiting.stageTwoActive).toBe(false);
+    expect(stageTwoStatusCopy(false, "zh")).toBe("等待假说确定");
+    expect(stageTwoProgressHint(false, "zh")).toContain("自动进入");
+
+    const active = deriveChallengeQuestionStageProjection(
+      detailWith({ recordStatus: "approved" }),
+    );
+    expect(active.stageTwoActive).toBe(true);
+    expect(stageTwoStatusCopy(true, "zh")).toBe("进行中");
   });
 
   it("treats a blank research plan as no proposal and a filled one as proposal-only", () => {

@@ -473,7 +473,7 @@ def test_catalog_authorization_hash_is_recorded_on_run_event(
             approved_at_ms=FIXED_NOW_MS,
         )
         fixture = json.loads(
-            (Path(__file__).parent / "fixtures" / "research_workflow_v21_baseline_case.json")
+            (Path(__file__).parent / "fixtures" / "research_workflow_v3_baseline_case.json")
             .read_text(encoding="utf-8")
         )
         run_input = {
@@ -568,7 +568,7 @@ def test_concurrent_replay_cannot_reuse_another_authorization(
             approved_at_ms=FIXED_NOW_MS,
         )
         fixture = json.loads(
-            (Path(__file__).parent / "fixtures" / "research_workflow_v21_baseline_case.json")
+            (Path(__file__).parent / "fixtures" / "research_workflow_v3_baseline_case.json")
             .read_text(encoding="utf-8")
         )
         run_input = {**fixture["runInput"], "questionId": str(plan.question_ids[0])}
@@ -638,7 +638,7 @@ def test_legacy_run_cannot_be_signed_after_creation(
             lambda: tmp_path / "runtime-data",
         )
         fixture = json.loads(
-            (Path(__file__).parent / "fixtures" / "research_workflow_v21_baseline_case.json")
+            (Path(__file__).parent / "fixtures" / "research_workflow_v3_baseline_case.json")
             .read_text(encoding="utf-8")
         )
         run_input = {**fixture["runInput"], "questionId": "SCI-091"}

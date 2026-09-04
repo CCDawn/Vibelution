@@ -276,84 +276,6 @@ def test_handoff_forwards_canonical_package_and_receipt_authority(
     assert result["receiptStatus"] == "passed"
 
 
-def test_completion_manifest_requires_fresh_approved_program_readback():
-    approved = {
-        "workflowRunId": "workflow-sci-096",
-        "questionId": "SCI-096",
-        "recordId": "SCI-096:workflow-sci-096",
-        "reviewStatus": "approved",
-        "outputSha256": "e" * 64,
-        "sourceResultPackageHash": "a" * 64,
-        "resultPackage": {"canonicalHash": "c" * 64},
-        "officialModelCall": True,
-        "receiptStatus": "passed",
-        "humanGates": {"allApproved": True, "approvedCount": 4},
-    }
-
-    manifest = program_candidate_handoff.stage_one_completion_manifest_from_handoff(
-        approved,
-        policy_sha256="d" * 64,
-    )
-
-    assert manifest["programRecordId"] == approved["recordId"]
-    assert manifest["programReviewStatus"] == "approved"
-    assert manifest["receiptStatus"] == "passed"
-    assert manifest["receiptAuthority"] == "canonical_result_package"
-    assert "receiptTraceCount" not in manifest
-    assert "receiptTraceDigest" not in manifest
-    assert len(manifest["manifestSha256"]) == 64
-
-    pending = deepcopy(approved)
-    pending["reviewStatus"] = "review_required"
-    pending["humanGates"] = {"allApproved": False, "approvedCount": 0}
-    with pytest.raises(
-        program_candidate_handoff.ProgramCandidateHandoffContractError,
-        match="not approved",
-    ):
-        program_candidate_handoff.stage_one_completion_manifest_from_handoff(
-            pending,
-            policy_sha256="d" * 64,
-        )
-
-
-def test_v2_handoff_without_result_package_builds_trace_verified_manifest(
-    monkeypatch,
-):
-    """A v2 run with no canonical package still carries honest receipt proof."""
-
-    _isolate_v2_trace_handoff(monkeypatch)
-    monkeypatch.setattr(
-        challenge_question_runs,
-        "_question_model_invocation_trace_projection",
-        lambda _team_id, _record: (
-            deepcopy(_TRACE_REFS),
-            deepcopy(_TRACE_COVERAGE),
-        ),
-    )
-
-    result = program_candidate_handoff.handoff_result_package_to_challenge_program(
-        team_id="research-team",
-        workflow_run_id="workflow-sci-096",
-    )
-
-    assert result["receiptStatus"] != "passed"
-    assert result["receiptTraceVerified"] is True
-    assert result["receiptTraceCount"] == 2
-    assert result["receiptTraceDigest"] == _trace_digest(_TRACE_REFS)
-
-    manifest = program_candidate_handoff.stage_one_completion_manifest_from_handoff(
-        result,
-        policy_sha256="d" * 64,
-    )
-
-    assert manifest["receiptStatus"] == "trace_verified"
-    assert manifest["receiptAuthority"] == "model_invocation_trace"
-    assert manifest["receiptTraceCount"] == 2
-    assert manifest["receiptTraceDigest"] == _trace_digest(_TRACE_REFS)
-    assert manifest["canonicalPackageHash"] == result["sourceResultPackageHash"]
-    assert len(manifest["manifestSha256"]) == 64
-
-
 def test_v2_handoff_trace_projection_mismatch_fails_closed(monkeypatch):
     """A registry/stored trace mismatch fails closed without raising."""
 
@@ -381,11 +303,3 @@ def test_v2_handoff_trace_projection_mismatch_fails_closed(monkeypatch):
     assert result["receiptTraceVerified"] is False
     assert result["receiptTraceCount"] == 0
     assert result["receiptTraceDigest"] == ""
-    with pytest.raises(
-        program_candidate_handoff.ProgramCandidateHandoffContractError,
-        match="not approved",
-    ):
-        program_candidate_handoff.stage_one_completion_manifest_from_handoff(
-            result,
-            policy_sha256="d" * 64,
-        )

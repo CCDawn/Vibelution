@@ -32,7 +32,7 @@ from tests._support.workflow_ledger_helpers import (
     build_attempt_record,
 )
 
-STAGE = "knowledge_collection"
+STAGE = "experiment_design"
 
 
 def _worker(harness: GraphHarness) -> GraphDispatchWorker:
@@ -58,7 +58,7 @@ def _seed_history(
     harness: GraphHarness,
     *,
     run_id: str = "run-history",
-    node_id: str = "source_finding",
+    node_id: str = "protocol_design",
     tokens: int,
 ) -> None:
     """A settled, usage-observed budget receipt in a sibling run (same question)."""
@@ -156,18 +156,20 @@ def _seed_underfunded_stage(harness: GraphHarness) -> None:
     """400K stage budget, 300K already consumed, 300K historical typical node."""
 
     harness.seed()
-    harness.start_thread_to("source_finding")
+    harness.start_thread_to("hypothesis_design")
     _update_input_snapshot(
         harness,
         "run-test",
         {"budgetPolicy": {"stageBudgets": {STAGE: {"tokens": 400_000}}}},
     )
-    _seed_history(harness, tokens=300_000)
+    # Use another node in the same stage so this scenario exercises the
+    # stage-median fallback instead of the exact-node median.
+    _seed_history(harness, node_id="protocol_review", tokens=300_000)
     _consume_run_budget(
         harness,
         run_id="run-test",
-        node_run_id="nr-run-test-problem_understanding-a1",
-        node_id="problem_understanding",
+        node_run_id="nr-run-test-hypothesis_design-a1",
+        node_id="hypothesis_design",
         tokens=300_000,
     )
 
@@ -182,7 +184,7 @@ def test_insufficient_stage_blocks_successor_with_structured_event(tmp_path: Pat
         harness.consume_adapter(pending.action_id)
         harness.resume(
             run_id="run-test",
-            node_id="source_finding",
+            node_id="hypothesis_design",
             attempt=1,
             action_id=json.loads(pending.payload_json)["actionId"],
         )
@@ -191,7 +193,7 @@ def test_insufficient_stage_blocks_successor_with_structured_event(tmp_path: Pat
 
         attempts = harness.commands.store.list_attempts("run-test")
         extraction = next(
-            (a for a in attempts if a.node_id == "source_extraction"), None
+            (a for a in attempts if a.node_id == "protocol_design"), None
         )
         assert extraction is not None
         assert extraction.status == "blocked"
@@ -212,7 +214,7 @@ def test_insufficient_stage_blocks_successor_with_structured_event(tmp_path: Pat
         assert len(blocked_events) == 1
         payload = json.loads(blocked_events[0].payload_json)
         assert payload["code"] == BUDGET_PRECHECK_INSUFFICIENT_CODE
-        assert payload["nodeId"] == "source_extraction"
+        assert payload["nodeId"] == "protocol_design"
         assert payload["stageId"] == STAGE
         assert payload["remainingTokens"] == 100_000
         assert payload["referenceTokens"] == 300_000
@@ -226,7 +228,7 @@ def test_insufficient_stage_blocks_successor_with_structured_event(tmp_path: Pat
             BUDGET_PRECHECK_INSUFFICIENT_CODE
         )
         # 后继不建 adapter outbox：被拦的 stage 不启动。
-        assert "source_extraction" not in _adapter_pending_node_ids(harness)
+        assert "protocol_design" not in _adapter_pending_node_ids(harness)
     finally:
         harness.close()
 
@@ -241,7 +243,7 @@ def test_extend_budget_then_retry_recovers_without_data_repair(tmp_path: Path) -
         harness.consume_adapter(pending.action_id)
         harness.resume(
             run_id="run-test",
-            node_id="source_finding",
+            node_id="hypothesis_design",
             attempt=1,
             action_id=json.loads(pending.payload_json)["actionId"],
         )
@@ -266,7 +268,7 @@ def test_extend_budget_then_retry_recovers_without_data_repair(tmp_path: Path) -
         decision = evaluate_stage_budget_admission(
             harness.commands.store,
             run_id="run-test",
-            node_id="source_extraction",
+            node_id="protocol_design",
             actor_kind="agent",
         )
         assert decision.admitted is True
@@ -276,7 +278,7 @@ def test_extend_budget_then_retry_recovers_without_data_repair(tmp_path: Path) -
         retry_receipt = harness.commands.service.submit(
             harness.commands.request(
                 command=WorkflowCommandKind.RETRY_NODE,
-                node_id="source_extraction",
+                node_id="protocol_design",
                 payload={},
                 expected_run_version=_run_id(harness),
                 idempotency_key="ui:retry-1",
@@ -285,7 +287,7 @@ def test_extend_budget_then_retry_recovers_without_data_repair(tmp_path: Path) -
         assert retry_receipt.status == "accepted"
         attempts = harness.commands.store.list_attempts("run-test")
         extraction_attempts = sorted(
-            (a for a in attempts if a.node_id == "source_extraction"),
+            (a for a in attempts if a.node_id == "protocol_design"),
             key=lambda a: a.attempt,
         )
         assert [a.attempt for a in extraction_attempts] == [1, 2]
@@ -305,13 +307,13 @@ def test_sufficient_budget_keeps_advancement_unchanged(tmp_path: Path) -> None:
         # 默认契约（2M stage 上限、无历史、无消耗）：一切与现在完全一致。
         harness.seed()
         harness.worker = _worker(harness)
-        harness.start_thread_to("source_finding")
+        harness.start_thread_to("hypothesis_design")
         pending = harness.latest_adapter_pending()
         assert pending is not None
         harness.consume_adapter(pending.action_id)
         harness.resume(
             run_id="run-test",
-            node_id="source_finding",
+            node_id="hypothesis_design",
             attempt=1,
             action_id=json.loads(pending.payload_json)["actionId"],
         )
@@ -319,12 +321,12 @@ def test_sufficient_budget_keeps_advancement_unchanged(tmp_path: Path) -> None:
 
         attempts = harness.commands.store.list_attempts("run-test")
         extraction = next(
-            (a for a in attempts if a.node_id == "source_extraction"), None
+            (a for a in attempts if a.node_id == "protocol_design"), None
         )
         assert extraction is not None
         assert extraction.status == "dispatching"
         assert extraction.problem_json in (None, "")
-        assert "source_extraction" in _adapter_pending_node_ids(harness)
+        assert "protocol_design" in _adapter_pending_node_ids(harness)
         events = harness.commands.store.list_events("run-test")
         assert not any(
             e.event_type == "budget_precheck_blocked" for e in events
@@ -340,12 +342,12 @@ def test_no_history_conservative_default_passes_normal_run(tmp_path: Path) -> No
     harness = GraphHarness(tmp_path)
     try:
         harness.seed()
-        harness.start_thread_to("source_finding")
+        harness.start_thread_to("hypothesis_design")
         # 无任何历史样本：保守小额定值，远低于真实节点消耗，不误杀。
         decision = evaluate_stage_budget_admission(
             harness.commands.store,
             run_id="run-test",
-            node_id="source_extraction",
+            node_id="protocol_design",
             actor_kind="agent",
         )
         assert decision.admitted is True
@@ -359,14 +361,14 @@ def test_no_history_conservative_default_passes_normal_run(tmp_path: Path) -> No
         harness.consume_adapter(pending.action_id)
         harness.resume(
             run_id="run-test",
-            node_id="source_finding",
+            node_id="hypothesis_design",
             attempt=1,
             action_id=json.loads(pending.payload_json)["actionId"],
         )
         harness.worker.run_once()
         attempts = harness.commands.store.list_attempts("run-test")
         extraction = next(
-            (a for a in attempts if a.node_id == "source_extraction"), None
+            (a for a in attempts if a.node_id == "protocol_design"), None
         )
         assert extraction is not None
         assert extraction.status == "dispatching"
@@ -378,15 +380,15 @@ def test_node_level_history_wins_over_stage_level(tmp_path: Path) -> None:
     harness = GraphHarness(tmp_path)
     try:
         harness.seed()
-        # 同 question 两个历史节点：source_extraction 400K、problem_understanding 1M。
-        _seed_history(harness, node_id="source_extraction", tokens=400_000)
+        # 同 question 两个历史节点：protocol_design 400K、hypothesis_design 1M。
+        _seed_history(harness, node_id="protocol_design", tokens=400_000)
         _seed_history(
-            harness, run_id="run-history-2", node_id="problem_understanding", tokens=1_000_000
+            harness, run_id="run-history-2", node_id="hypothesis_design", tokens=1_000_000
         )
         decision = evaluate_stage_budget_admission(
             harness.commands.store,
             run_id="run-test",
-            node_id="source_extraction",
+            node_id="protocol_design",
             actor_kind="agent",
         )
         assert decision.reference_basis == "historical_median_node"
@@ -421,7 +423,7 @@ def test_evaluation_failure_fails_open(tmp_path: Path) -> None:
     decision = evaluate_stage_budget_admission(
         ExplodingStore(),
         run_id="run-x",
-        node_id="source_extraction",
+        node_id="protocol_design",
         actor_kind="agent",
     )
     assert decision.admitted is True

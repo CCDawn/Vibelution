@@ -1090,6 +1090,8 @@ _FIRST_SELECT_CLOSURE_SHAPE = {
             # Sibling archive gate report appended by a88e6f9d6; present on
             # every close_review_meeting result regardless of shadow policy.
             "deferredNextReview",
+            "autoAdjudication",
+            "autoFormalRun",
         }
     ),
     "meetingStatus": "closed",

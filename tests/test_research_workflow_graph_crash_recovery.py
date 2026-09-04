@@ -14,14 +14,14 @@ def test_crash_after_interrupt_redispatch_reuses_same_action_id(tmp_path: Path) 
     harness = GraphHarness(tmp_path)
     try:
         harness.seed()
-        harness.start_thread_to("source_finding")
+        harness.start_thread_to("hypothesis_design")
         first_pending = harness.latest_adapter_pending()
         assert first_pending is not None
         first_action_id = json.loads(first_pending.payload_json)["actionId"]
 
         # 模拟崩溃：adapter outbox 尚未消费，graph_dispatch 重新领取。
         harness.enqueue_graph_dispatch(
-            "run-test", "source_finding", 1, idempotency_key="graph-redispatch"
+            "run-test", "hypothesis_design", 1, idempotency_key="graph-redispatch"
         )
         handled = harness.worker.run_once()
         assert handled == 1
@@ -33,7 +33,7 @@ def test_crash_after_interrupt_redispatch_reuses_same_action_id(tmp_path: Path) 
         attempts = [
             a
             for a in harness.commands.store.list_attempts("run-test")
-            if a.node_id == "source_finding"
+            if a.node_id == "hypothesis_design"
         ]
         assert len(attempts) == 1
     finally:
@@ -44,14 +44,14 @@ def test_retry_creates_new_action_id_and_new_attempt(tmp_path: Path) -> None:
     harness = GraphHarness(tmp_path)
     try:
         harness.seed()
-        harness.start_thread_to("source_finding")
+        harness.start_thread_to("hypothesis_design")
         first_pending = harness.latest_adapter_pending()
         first_action_id = json.loads(first_pending.payload_json)["actionId"]
 
         # 第一次尝试失败（failed receipt）。
         harness.resume(
             run_id="run-test",
-            node_id="source_finding",
+            node_id="hypothesis_design",
             attempt=1,
             action_id=first_action_id,
             outcome="failed",
@@ -60,12 +60,12 @@ def test_retry_creates_new_action_id_and_new_attempt(tmp_path: Path) -> None:
         attempts = [
             a
             for a in harness.commands.store.list_attempts("run-test")
-            if a.node_id == "source_finding"
+            if a.node_id == "hypothesis_design"
         ]
         assert attempts[0].status == "failed"
 
         # retry: attempt 2 的 start dispatch 重入节点并产生新 actionId。
-        harness.enqueue_graph_dispatch("run-test", "source_finding", 2)
+        harness.enqueue_graph_dispatch("run-test", "hypothesis_design", 2)
         harness.worker.run_once()
         pending = harness.latest_adapter_pending()
         assert pending is not None
@@ -75,7 +75,7 @@ def test_retry_creates_new_action_id_and_new_attempt(tmp_path: Path) -> None:
         attempts = [
             a
             for a in harness.commands.store.list_attempts("run-test")
-            if a.node_id == "source_finding"
+            if a.node_id == "hypothesis_design"
         ]
         assert {attempt.attempt for attempt in attempts} == {1, 2}
         retry = next(attempt for attempt in attempts if attempt.attempt == 2)
@@ -88,7 +88,7 @@ def test_restart_after_worker_crash_resumes_same_thread(tmp_path: Path) -> None:
     harness = GraphHarness(tmp_path)
     try:
         harness.seed()
-        harness.start_thread_to("source_finding")
+        harness.start_thread_to("hypothesis_design")
         first_pending = harness.latest_adapter_pending()
         first_action_id = json.loads(first_pending.payload_json)["actionId"]
 
@@ -105,7 +105,7 @@ def test_restart_after_worker_crash_resumes_same_thread(tmp_path: Path) -> None:
         )
         harness.resume(
             run_id="run-test",
-            node_id="source_finding",
+            node_id="hypothesis_design",
             attempt=1,
             action_id=first_action_id,
         )
@@ -115,7 +115,7 @@ def test_restart_after_worker_crash_resumes_same_thread(tmp_path: Path) -> None:
         pending = harness.latest_adapter_pending()
         assert pending is not None
         payload = json.loads(pending.payload_json)
-        assert payload["nodeId"] == "source_extraction"
+        assert payload["nodeId"] == "protocol_design"
     finally:
         harness.close()
 

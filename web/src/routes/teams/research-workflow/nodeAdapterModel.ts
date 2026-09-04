@@ -3,8 +3,15 @@
  * Adapters describe what to mount; they do not copy stage page business logic.
  */
 
-import type { ActorKind, ChallengeCupNodeId } from "../../../api/types/researchWorkflow";
-import { CHALLENGE_CUP_NODE_IDS } from "../../../api/types/researchWorkflow";
+import type {
+  ActorKind,
+  ChallengeCupNodeId,
+  KnowledgeSideflowNodeId,
+} from "../../../api/types/researchWorkflow";
+import {
+  CHALLENGE_CUP_NODE_IDS,
+  KNOWLEDGE_SIDEFLOW_NODE_IDS,
+} from "../../../api/types/researchWorkflow";
 import { HYPOTHESIS_DESIGN_NODE_TERM } from "./researchTerminology";
 
 export type NodeAdapterSlot =
@@ -17,8 +24,8 @@ export type NodeAdapterSlot =
   | "bindings";
 
 export type NodeAdapterSpec = {
-  nodeId: ChallengeCupNodeId;
-  stageId: "knowledge_collection" | "experiment_design" | "execution_iteration";
+  nodeId: ChallengeCupNodeId | KnowledgeSideflowNodeId;
+  stageId: "problem_understanding" | "knowledge_collection" | "experiment_design" | "execution_iteration";
   label: string;
   labelEn: string;
   actorKind: ActorKind;
@@ -42,7 +49,7 @@ export const WIRED_COMMANDS = ["accept_handoff", "reject_handoff", "revise"] as 
 const ADAPTERS: NodeAdapterSpec[] = [
   {
     nodeId: "problem_understanding",
-    stageId: "knowledge_collection",
+    stageId: "problem_understanding",
     label: "问题理解",
     labelEn: "Problem understanding",
     actorKind: "agent",
@@ -213,9 +220,14 @@ const ADAPTERS: NodeAdapterSpec[] = [
 ];
 
 const BY_ID = Object.fromEntries(ADAPTERS.map((a) => [a.nodeId, a])) as Record<
-  ChallengeCupNodeId,
+  ChallengeCupNodeId | KnowledgeSideflowNodeId,
   NodeAdapterSpec
 >;
+
+const ALL_NODE_IDS: readonly string[] = [
+  ...CHALLENGE_CUP_NODE_IDS,
+  ...KNOWLEDGE_SIDEFLOW_NODE_IDS,
+];
 
 export function listNodeAdapters(): NodeAdapterSpec[] {
   return ADAPTERS.slice();
@@ -223,8 +235,8 @@ export function listNodeAdapters(): NodeAdapterSpec[] {
 
 export function getNodeAdapter(nodeId: string | null | undefined): NodeAdapterSpec | null {
   if (!nodeId) return null;
-  if (!(CHALLENGE_CUP_NODE_IDS as readonly string[]).includes(nodeId)) return null;
-  return BY_ID[nodeId as ChallengeCupNodeId] ?? null;
+  if (!ALL_NODE_IDS.includes(nodeId)) return null;
+  return BY_ID[nodeId as ChallengeCupNodeId | KnowledgeSideflowNodeId] ?? null;
 }
 
 export function adaptersForStage(

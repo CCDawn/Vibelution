@@ -1,9 +1,8 @@
 """Evidence graph command coverage plus Result Package availability projection.
 
 Strict terminal Result Package construction and its system-adapter lifecycle
-live in the canonical v2.1 stream/iteration suites. This file deliberately
-covers the remaining read-model and command surfaces without reintroducing the
-obsolete pre-v2.1 auto-advance contract.
+live in the canonical workflow suites. This file covers the remaining
+read-model and command surfaces for the latest definitions.
 """
 
 from __future__ import annotations
@@ -13,9 +12,14 @@ from pathlib import Path
 
 import pytest
 
-from core.research.workflow.definition import CHALLENGE_CUP_WORKFLOW_ID
-from core.web.services.team_workflow.research_runtime.durable_index import (
-    DurableWorkflowIndex,
+from core.research.workflow.definition import (
+    CHALLENGE_CUP_WORKFLOW_ID,
+    build_challenge_cup_workflow_definition,
+)
+from core.research.workflow.definition_registry import definition_identity
+from core.research.workflow.knowledge_sideflow_definition import (
+    KNOWLEDGE_SIDEFLOW_WORKFLOW_ID,
+    build_knowledge_sideflow_workflow_definition,
 )
 from core.web.services.team_workflow.research_runtime.evidence_graph_projection import (
     _project_from_loop_records,
@@ -24,40 +28,27 @@ from core.web.services.team_workflow.research_runtime.evidence_graph_projection 
 )
 from core.web.services.team_workflow.research_runtime.node_command_adapter import (
     NodeCommandUnavailable,
+    apply_node_command,
     node_command_capabilities,
 )
 from core.web.services.team_workflow.research_runtime.result_package import (
     result_package_availability,
 )
-from core.web.services.team_workflow.research_runtime.service import (
-    ResearchWorkflowRuntimeService,
-    reset_research_workflow_runtime_service_for_tests,
-)
 from core.web.services.team_workflow.research_runtime.store import WorkflowRunStore
 
 
-_FIXTURE_PATH = Path(__file__).parent / "fixtures" / "research_workflow_v21_baseline_case.json"
-
-
-def _svc(tmp_path: Path) -> ResearchWorkflowRuntimeService:
-    store = WorkflowRunStore(tmp_path / "runs")
-    index = DurableWorkflowIndex(tmp_path / "runs" / "_index")
-    ckpt = str(tmp_path / "ckpt.sqlite")
-    return reset_research_workflow_runtime_service_for_tests(
-        run_store=store,
-        checkpoint_path=ckpt,
-        durable_index=index,
-    )
-
-
-def _run_input() -> dict:
-    return json.loads(_FIXTURE_PATH.read_text(encoding="utf-8"))["runInput"]
+_MAIN_DEFINITION = build_challenge_cup_workflow_definition()
+_MAIN_IDENTITY = definition_identity(_MAIN_DEFINITION)
+_KNOWLEDGE_DEFINITION = build_knowledge_sideflow_workflow_definition()
+_KNOWLEDGE_IDENTITY = definition_identity(_KNOWLEDGE_DEFINITION)
 
 
 def _run_record(**extra) -> dict:
     record = {
         "runId": "run-1",
         "workflowId": CHALLENGE_CUP_WORKFLOW_ID,
+        "workflowVersionId": _MAIN_IDENTITY.workflowVersionId,
+        "structureHash": _MAIN_IDENTITY.structureHash,
         "teamId": "team-1",
         "projectId": "project-1",
         "status": "running",
@@ -70,6 +61,16 @@ def _run_record(**extra) -> dict:
     }
     record.update(extra)
     return record
+
+
+def _knowledge_run_record(**extra) -> dict:
+    return _run_record(
+        workflowId=KNOWLEDGE_SIDEFLOW_WORKFLOW_ID,
+        workflowVersionId=_KNOWLEDGE_IDENTITY.workflowVersionId,
+        structureHash=_KNOWLEDGE_IDENTITY.structureHash,
+        runtimeCurrentNodeIds=["evidence_relations"],
+        **extra,
+    )
 
 
 def test_result_package_availability_reports_terminal_gate_first() -> None:
@@ -157,17 +158,12 @@ def test_open_evidence_graph_command_returns_projection(monkeypatch, tmp_path: P
         "_loop_evidence_for_project",
         lambda record: [{"evidenceId": "ev-9", "claim": "c", "source": "s"}],
     )
-    service = _svc(tmp_path)
-    run = service.create_run(
-        CHALLENGE_CUP_WORKFLOW_ID,
-        run_input=_run_input(),
-        idempotency_key="evidence-graph-command",
-    )
-
-    result = service.apply_node_command(
-        run["runId"],
-        "evidence_relations",
-        "open_evidence_graph",
+    result = apply_node_command(
+        store=WorkflowRunStore(tmp_path / "runs"),
+        checkpoint_path=str(tmp_path / "ckpt.sqlite"),
+        record=_knowledge_run_record(),
+        node_id="evidence_relations",
+        command="open_evidence_graph",
     )
 
     assert result["command"] == "open_evidence_graph"

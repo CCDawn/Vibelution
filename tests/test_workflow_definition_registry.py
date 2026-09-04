@@ -42,17 +42,6 @@ from core.research.workflow.models import (
     WorkflowNodeSpec,
     WorkflowStageId,
 )
-from core.web.services.team_workflow.research_runtime.checkpoint_lifecycle import (
-    advance_checkpoint,
-    fork_checkpoint_at_node,
-    prepare_initial_checkpoint,
-)
-from core.web.services.team_workflow.research_runtime.run_fork import (
-    build_child_run_skeleton,
-)
-from core.research.workflow.knowledge_sideflow_definition import (
-    build_challenge_cup_workflow_definition_v3,
-)
 from core.web.services.team_workflow.research_runtime.agent_task_artifact_builder import (
     _source_artifact_ids,
 )
@@ -69,24 +58,24 @@ def _isolated_registry():
 
 
 def build_variant_definition() -> WorkflowDefinition:
-    """A test-only older version with observable topology differences.
+    """A test-only custom definition with observable topology differences.
 
-    Differences from 2.1.0: an extra node ``legacy_smoke_echo`` in the last
+    It adds ``snapshot_smoke_echo`` in the last
     stage and ``source_finding`` routing to ``evidence_relations`` instead of
-    ``source_extraction``.  Used to prove a run pinned to this version keeps
-    being driven by the old graph.
+    ``source_extraction``. Used to prove registry pinning without adding a
+    second built-in Challenge Cup version.
     """
     base = build_challenge_cup_workflow_definition()
     extra_node = WorkflowNodeSpec(
-        nodeId="legacy_smoke_echo",
+        nodeId="snapshot_smoke_echo",
         stageId=WorkflowStageId.EXECUTION_ITERATION,
-        label="旧版试跑回声",
+        label="快照试跑回声",
         actorKind=ActorKind.SYSTEM,
         primaryRoleKey="formal_runner",
     )
     nodes = (*base.nodes, extra_node)
     stages = tuple(
-        dataclasses.replace(stage, nodeIds=(*stage.nodeIds, "legacy_smoke_echo"))
+        dataclasses.replace(stage, nodeIds=(*stage.nodeIds, "snapshot_smoke_echo"))
         if stage.stageId is WorkflowStageId.EXECUTION_ITERATION
         else stage
         for stage in base.stages
@@ -109,8 +98,8 @@ def build_variant_definition() -> WorkflowDefinition:
     ]
     edges.append(
         WorkflowEdgeSpec(
-            "e_legacy_echo",
-            "legacy_smoke_echo",
+            "e_snapshot_echo",
+            "snapshot_smoke_echo",
             "result_package",
             "回声",
             GateKind.AUTO,
@@ -119,8 +108,8 @@ def build_variant_definition() -> WorkflowDefinition:
     )
     draft = WorkflowDefinition(
         workflowId=base.workflowId,
-        schemaVersion="2.0.9-test",
-        label="挑战杯科研流程（测试旧版）",
+        schemaVersion="3.0.0-test",
+        label="挑战杯科研流程（测试快照）",
         stages=stages,
         nodes=nodes,
         edges=tuple(edges),
@@ -140,8 +129,8 @@ def pinned_run_record(definition: WorkflowDefinition, run_id: str = "run-pinned"
     }
 
 
-def test_v3_downstream_artifact_and_handoff_use_pinned_definition() -> None:
-    definition = build_challenge_cup_workflow_definition_v3()
+def test_current_downstream_artifact_and_handoff_use_pinned_definition() -> None:
+    definition = build_challenge_cup_workflow_definition()
     record = pinned_run_record(definition, run_id="run-v3-downstream")
     record["artifactManifests"] = [
         {"artifactId": "problem_understanding:current"},
@@ -172,7 +161,7 @@ def test_builtin_snapshot_matches_current_definition_build() -> None:
     identities = bootstrap_builtin_definitions()
     current = build_challenge_cup_workflow_definition()
     payload = json.loads(
-        (snapshot_dir() / "challenge-cup-research@2.1.0.json").read_text(encoding="utf-8")
+        (snapshot_dir() / "challenge-cup-research@3.0.0.json").read_text(encoding="utf-8")
     )
     assert payload["contentHash"] == definition_structure_hash(current)
     assert payload["snapshotKind"] == "workflow_definition_snapshot"
@@ -183,8 +172,19 @@ def test_builtin_snapshot_matches_current_definition_build() -> None:
         workflowVersionId=workflow_version_id_for(current.structureHash),
         structureHash=current.structureHash,
     ) in identities
+    assert [
+        item
+        for item in identities
+        if item.workflowId == "challenge-cup-research"
+    ] == [
+        DefinitionIdentity(
+            workflowId=current.workflowId,
+            workflowVersionId=workflow_version_id_for(current.structureHash),
+            structureHash=current.structureHash,
+        )
+    ]
     # snapshot is pure structure: no secrets, paths, or runtime data
-    raw = (snapshot_dir() / "challenge-cup-research@2.1.0.json").read_text(encoding="utf-8")
+    raw = (snapshot_dir() / "challenge-cup-research@3.0.0.json").read_text(encoding="utf-8")
     assert "\\" not in raw
     assert "http://" not in raw and "https://" not in raw
 
@@ -227,7 +227,7 @@ def test_snapshot_without_content_hash_is_blocked() -> None:
 
 
 def test_corrupt_snapshot_file_blocks_bootstrap(tmp_path: Path) -> None:
-    (tmp_path / "challenge-cup-research@2.1.0.json").write_text(
+    (tmp_path / "challenge-cup-research@3.0.0.json").write_text(
         "{not json at all", encoding="utf-8"
     )
     with pytest.raises(WorkflowDefinitionSnapshotInvalid):
@@ -245,31 +245,7 @@ def test_snapshot_filename_without_version_blocks_bootstrap(tmp_path: Path) -> N
 # --------------------------------------------------------------------------
 
 
-def test_run_pinned_to_old_version_advances_with_old_graph(tmp_path: Path) -> None:
-    old_definition = build_variant_definition()
-    record = pinned_run_record(old_definition, run_id="run-old")
-    db = tmp_path / "checkpoints.sqlite"
-    checkpoint_id = prepare_initial_checkpoint(
-        str(db), "thread-old", definition=old_definition
-    )
-    pinned = resolve_definition_for_run_record(record)
-    assert pinned == old_definition
-    _, scheduled = advance_checkpoint(
-        str(db),
-        thread_id="thread-old",
-        checkpoint_id=checkpoint_id,
-        completed_node_id="source_finding",
-        state_patch={
-            "current_node_id": "source_finding",
-            "completed_node_ids": ["source_finding"],
-        },
-        definition=pinned,
-    )
-    # old topology: source_finding -> evidence_relations (not source_extraction)
-    assert scheduled == ["evidence_relations"]
-
-
-def test_run_pinned_to_2_1_0_keeps_snapshot_graph_while_variant_registered() -> None:
+def test_run_pinned_to_current_keeps_snapshot_graph_while_variant_registered() -> None:
     variant = build_variant_definition()
     register_or_resolve(variant)
     current = build_challenge_cup_workflow_definition()
@@ -277,51 +253,6 @@ def test_run_pinned_to_2_1_0_keeps_snapshot_graph_while_variant_registered() -> 
     assert record["structureHash"] != variant.structureHash
     resolved = resolve_definition_for_run_record(record)
     assert resolved == current
-
-
-def test_fork_uses_parent_pinned_graph_and_inherits_version(tmp_path: Path) -> None:
-    old_definition = build_variant_definition()
-    parent_record = pinned_run_record(old_definition, run_id="run-old")
-    parent_record["threadId"] = "thread-old"
-    db = tmp_path / "checkpoints.sqlite"
-    checkpoint_id = prepare_initial_checkpoint(
-        str(db), "thread-old", definition=old_definition
-    )
-    # give the parent thread real state so the checkpoint is forkable
-    checkpoint_id, _ = advance_checkpoint(
-        str(db),
-        thread_id="thread-old",
-        checkpoint_id=checkpoint_id,
-        completed_node_id="source_finding",
-        state_patch={
-            "current_node_id": "source_finding",
-            "completed_node_ids": ["source_finding"],
-        },
-        definition=old_definition,
-    )
-    child_record = build_child_run_skeleton(
-        parent=parent_record,
-        decision={"decisionId": "dec-1"},
-        fork_checkpoint_id=checkpoint_id,
-        utc_now=lambda: "2026-01-01T00:00:00Z",
-        child_run_id="run-child",
-    )
-    # fork copied the parent's version identity
-    assert child_record["workflowVersionId"] == parent_record["workflowVersionId"]
-    assert child_record["structureHash"] == old_definition.structureHash
-    assert resolve_definition_for_run_record(child_record) == old_definition
-    # fork compiles the parent's pinned graph: only valid on the old topology
-    child_checkpoint_id = fork_checkpoint_at_node(
-        str(db),
-        source_thread_id="thread-old",
-        source_checkpoint_id=checkpoint_id,
-        child_thread_id="thread-child",
-        predecessor_node_id="source_finding",
-        resume_node_id="evidence_relations",
-        state_patch={"current_node_id": "source_finding"},
-        definition=resolve_definition_for_run_record(parent_record),
-    )
-    assert child_checkpoint_id
 
 
 # --------------------------------------------------------------------------
@@ -373,29 +304,28 @@ def test_node_set_mismatch_fails_closed() -> None:
         "workflowId": current.workflowId,
         "workflowVersionId": workflow_version_id_for(current.structureHash),
         "structureHash": current.structureHash,
-        "completedNodeIds": ["legacy_smoke_echo"],
+        "completedNodeIds": ["snapshot_smoke_echo"],
         "runtimeCurrentNodeIds": [],
     }
     with pytest.raises(WorkflowDefinitionNodeMismatch) as excinfo:
         resolve_definition_for_run_record(record)
-    assert "legacy_smoke_echo" in str(excinfo.value)
+    assert "snapshot_smoke_echo" in str(excinfo.value)
 
 
-def test_register_operations_entry_point_restores_old_version() -> None:
-    # Simulate ops rebuilding an old version from its snapshot payload.
-    old_definition = build_variant_definition()
-    payload = definition_snapshot_payload(old_definition)
+def test_register_operations_entry_point_loads_explicit_snapshot() -> None:
+    custom_definition = build_variant_definition()
+    payload = definition_snapshot_payload(custom_definition)
     identity = register_definition_snapshot(payload)
     assert identity == DefinitionIdentity(
-        workflowId=old_definition.workflowId,
-        workflowVersionId=workflow_version_id_for(old_definition.structureHash),
-        structureHash=old_definition.structureHash,
+        workflowId=custom_definition.workflowId,
+        workflowVersionId=workflow_version_id_for(custom_definition.structureHash),
+        structureHash=custom_definition.structureHash,
     )
     assert resolve_definition(
-        workflow_id=old_definition.workflowId,
+        workflow_id=custom_definition.workflowId,
         workflow_version_id=identity.workflowVersionId,
-        structure_hash=old_definition.structureHash,
-    ) == old_definition
+        structure_hash=custom_definition.structureHash,
+    ) == custom_definition
 
 
 def test_register_definition_without_hash_is_blocked() -> None:

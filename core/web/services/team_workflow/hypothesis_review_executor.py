@@ -1363,21 +1363,13 @@ def execute_hypothesis_review(
             ).strip() or _source_collection_run_id_for_formal_workflow(
                 workflow_run_id
             )
-            from core.research.competition.stage_one_completion_policy import (
-                STAGE_ONE_POLICY_QUESTION_IDS,
-            )
-
-            question_id = str(context.get("questionId") or "").strip().upper()
             if not team_id or not workflow_run_id:
                 raise ContractValidationError(
                     "coherence_failure: formal coherence artifact scope is unavailable"
                 )
-            if (
-                question_id in STAGE_ONE_POLICY_QUESTION_IDS
-                and not source_collection_run_id
-            ):
+            if not source_collection_run_id:
                 raise ContractValidationError(
-                    "coherence_failure: stage-one source collection authority is unavailable"
+                    "coherence_failure: source collection authority is unavailable"
                 )
             from core.web.services.team_workflow.research_runtime.core_hypothesis_coherence_artifact_writer import (
                 record_core_hypothesis_coherence_artifact,

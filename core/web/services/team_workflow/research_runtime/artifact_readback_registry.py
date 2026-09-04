@@ -62,9 +62,6 @@ ARTIFACT_AUTHORITY: dict[str, ArtifactAuthoritySpec] = {
     "competition_alignment": ArtifactAuthoritySpec(
         "competition_alignment", "workflow_system"
     ),
-    "stage_one_completion_manifest": ArtifactAuthoritySpec(
-        "stage_one_completion_manifest", "workflow_system"
-    ),
     "protocol_draft": ArtifactAuthoritySpec("protocol_draft", "experiment"),
     "protocol_review_report": ArtifactAuthoritySpec("protocol_review_report", "experiment"),
     "frozen_protocol": ArtifactAuthoritySpec("frozen_protocol", "experiment"),
@@ -517,7 +514,6 @@ def load_scoped_artifact_payload(
         "research_plan",
         "stage1_research_plan",
         "competition_alignment",
-        "stage_one_completion_manifest",
         "protocol_draft",
         "protocol_review_report",
         "iteration_decision",

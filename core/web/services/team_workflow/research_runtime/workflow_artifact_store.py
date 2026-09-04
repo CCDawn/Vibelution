@@ -36,7 +36,6 @@ _SUPPORTED_KINDS = frozenset(
         "research_plan",
         "stage1_research_plan",
         "competition_alignment",
-        "stage_one_completion_manifest",
         "protocol_draft",
         "protocol_review_report",
         "iteration_decision",

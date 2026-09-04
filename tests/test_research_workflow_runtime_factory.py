@@ -30,7 +30,7 @@ def _seed_with_snapshot(store, *, run_id: str = "run-test") -> None:
         "teamId": "research-team",
         "projectId": "challenge-sci-096",
         "questionId": "SCI-096",
-        "workflowVersionId": "challenge-cup-research-v2.1.0",
+        "workflowVersionId": "wv-268aa6e8dea8",
         "researchBriefHash": "b" * 64,
         "datasetRefs": [],
         "metricContract": {},
@@ -51,8 +51,8 @@ def _seed_with_snapshot(store, *, run_id: str = "run-test") -> None:
         "evaluationContract": {},
         "agentBindingSnapshot": [
             {
-                "snapshotId": f"snap:{run_id}:source_finding",
-                "nodeId": "source_finding",
+                "snapshotId": f"snap:{run_id}:problem_understanding",
+                "nodeId": "problem_understanding",
                 "agentId": "agent-real-1",
                 "roleKey": "source_finder",
             }
@@ -164,14 +164,14 @@ def test_real_context_reads_frozen_snapshot_data(tmp_path: Path) -> None:
         assert budget.stage_tokens_limit == 1000
         assert budget.max_tool_calls == 5
 
-        binding = context.binding_snapshot("run-test", "source_finding")
+        binding = context.binding_snapshot("run-test", "problem_understanding")
         assert binding is not None
         assert binding["agentId"] == "agent-real-1"
         assert binding["roleKey"] == "source_finder"
 
         # Agent Directory is authoritative: unknown ids are not resolvable.
         assert context.agent_resolvable("agent-real-1") is False
-        assert context.adapter_registered("source_finding") is True
+        assert context.adapter_registered("problem_understanding") is True
         assert context.adapter_registered("controlled_run") is True
         assert context.adapter_registered("knowledge_handoff") is True
     finally:
@@ -212,7 +212,7 @@ def test_composition_root_command_flow_works(
             run_id="run-test",
             team_id="research-team",
             command=WorkflowCommandKind.START_NODE,
-            node_id="source_finding",
+            node_id="problem_understanding",
             expected_run_version=1,
             idempotency_key="ui:compose-1",
             payload={},
@@ -275,6 +275,7 @@ def test_production_runtime_drains_graph_dispatch_without_manual_run_once(
         def fake_start(dispatch):
             state = {
                 "run_id": dispatch.run_id,
+                "workflow_version_id": dispatch.workflow_version_id,
                 "active_node_id": dispatch.node_id,
                 "active_attempt": dispatch.attempt,
                 "node_attempts": {dispatch.node_id: dispatch.attempt},
@@ -301,7 +302,7 @@ def test_production_runtime_drains_graph_dispatch_without_manual_run_once(
             run_id="run-test",
             team_id="research-team",
             command=WorkflowCommandKind.START_NODE,
-            node_id="source_finding",
+            node_id="problem_understanding",
             expected_run_version=1,
             idempotency_key="ui:prod-pump-1",
             payload={},
@@ -314,7 +315,7 @@ def test_production_runtime_drains_graph_dispatch_without_manual_run_once(
 
         deadline = time.time() + 5
         pending = _pending_graph_dispatch(runtime.store, "run-test")
-        attempt = runtime.store.latest_attempt("run-test", "source_finding")
+        attempt = runtime.store.latest_attempt("run-test", "problem_understanding")
         while time.time() < deadline and (
             pending
             or attempt is None
@@ -322,7 +323,7 @@ def test_production_runtime_drains_graph_dispatch_without_manual_run_once(
         ):
             time.sleep(0.05)
             pending = _pending_graph_dispatch(runtime.store, "run-test")
-            attempt = runtime.store.latest_attempt("run-test", "source_finding")
+            attempt = runtime.store.latest_attempt("run-test", "problem_understanding")
         assert pending == []
         assert attempt is not None
         assert attempt.status != "starting"

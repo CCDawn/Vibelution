@@ -62,15 +62,6 @@ export function knowledgeSideflowSemanticNodeId(nodeId: string | null | undefine
   return normalized.slice(KNOWLEDGE_SIDEFLOW_NODE_PREFIX.length) || null;
 }
 
-/** True when the pinned definition carries no in-graph knowledge chain. */
-export function definitionNeedsSideflowRegion(definition: {
-  nodes: Array<{ nodeId: string }>;
-  schemaVersion?: string;
-} | null | undefined): boolean {
-  if (!definition) return false;
-  return !definition.nodes.some((node) => node.nodeId === "knowledge_handoff");
-}
-
 export type KnowledgeSideflowCanvasRegion = {
   stage: WorkflowCanvasStageInput;
   nodes: WorkflowCanvasNodeInput[];
@@ -95,8 +86,8 @@ function sideflowStatusFor(
   current: KnowledgeInvocationRecentSummary | null,
 ): WorkflowNodeRunStatus {
   const nodeId = KNOWLEDGE_SIDEFLOW_NODE_IDS[position];
-  // Real per-node fact from the child run's latest attempt wins; the
-  // invocation-level derivation is only the legacy fallback.
+  // Real per-node fact from the child run's latest attempt wins. Before the
+  // child exposes attempts, derive the visible position from invocation state.
   const fromChild = sideflowStatusFromChildNodeState(current?.childNodeStates?.[nodeId]);
   if (fromChild !== null) {
     if (

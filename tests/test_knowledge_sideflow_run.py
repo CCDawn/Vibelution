@@ -27,7 +27,10 @@ from core.research.workflow.contracts.knowledge_sideflow import (
     KnowledgeResultAvailablePayload,
     knowledge_result_dedup_key,
 )
-from core.research.workflow.definition import build_challenge_cup_workflow_definition
+from core.research.workflow.definition import (
+    SCHEMA_VERSION as CHALLENGE_CUP_RESEARCH_SCHEMA_VERSION,
+    build_challenge_cup_workflow_definition,
+)
 from core.research.workflow.definition_registry import (
     definition_snapshot_payload,
     parse_snapshot_payload,
@@ -38,11 +41,9 @@ from core.research.workflow.definition_registry import (
     snapshot_dir,
 )
 from core.research.workflow.knowledge_sideflow_definition import (
-    CHALLENGE_CUP_RESEARCH_SCHEMA_VERSION_V3,
     KNOWLEDGE_SIDEFLOW_NODE_IDS,
     KNOWLEDGE_SIDEFLOW_SCHEMA_VERSION,
     KNOWLEDGE_SIDEFLOW_WORKFLOW_ID,
-    build_challenge_cup_workflow_definition_v3,
     build_knowledge_sideflow_workflow_definition,
 )
 from core.research.workflow.models import WorkflowStageId
@@ -162,9 +163,9 @@ def test_sideflow_and_v3_definitions_bootstrap_and_pin(tmp_path: Path) -> None:
         ("knowledge_ingestion", "knowledge_handoff"),
     ]
 
-    v3 = build_challenge_cup_workflow_definition_v3()
+    v3 = build_challenge_cup_workflow_definition()
     assert v3.workflowId == "challenge-cup-research"
-    assert v3.schemaVersion == CHALLENGE_CUP_RESEARCH_SCHEMA_VERSION_V3
+    assert v3.schemaVersion == CHALLENGE_CUP_RESEARCH_SCHEMA_VERSION
     assert len(v3.nodes) == 12
     v3_ids = {node.nodeId for node in v3.nodes}
     assert "problem_understanding" in v3_ids
@@ -182,10 +183,10 @@ def test_sideflow_and_v3_definitions_bootstrap_and_pin(tmp_path: Path) -> None:
     assert entry_node.stageId == WorkflowStageId.PROBLEM_UNDERSTANDING
 
 
-def test_default_definition_stays_2_1_0() -> None:
+def test_default_definition_is_canonical_3_0_0() -> None:
     default = build_challenge_cup_workflow_definition()
-    assert default.schemaVersion == "2.1.0"
-    assert len(default.nodes) == 17
+    assert default.schemaVersion == "3.0.0"
+    assert len(default.nodes) == 12
 
 
 def test_snapshots_on_disk_parse_and_match_builders(tmp_path: Path) -> None:
@@ -195,14 +196,14 @@ def test_snapshots_on_disk_parse_and_match_builders(tmp_path: Path) -> None:
         )
     )
     v3_payload = json.loads(
-        (snapshot_dir() / f"challenge-cup-research@{CHALLENGE_CUP_RESEARCH_SCHEMA_VERSION_V3}.json").read_text(
+        (snapshot_dir() / f"challenge-cup-research@{CHALLENGE_CUP_RESEARCH_SCHEMA_VERSION}.json").read_text(
             encoding="utf-8"
         )
     )
     parsed_sideflow = parse_snapshot_payload(sideflow_payload)
     parsed_v3 = parse_snapshot_payload(v3_payload)
     assert parsed_sideflow == build_knowledge_sideflow_workflow_definition()
-    assert parsed_v3 == build_challenge_cup_workflow_definition_v3()
+    assert parsed_v3 == build_challenge_cup_workflow_definition()
     assert sideflow_payload == definition_snapshot_payload(parsed_sideflow)
 
 
@@ -248,7 +249,7 @@ def test_sideflow_and_v3_graphs_compile_with_pinned_entry(tmp_path: Path) -> Non
     snap = coordinator.snapshot("thread-sf", sideflow_identity.workflowVersionId)
     assert snap["nextNodeIds"] == ["source_finding"]
 
-    v3 = build_challenge_cup_workflow_definition_v3()
+    v3 = build_challenge_cup_workflow_definition()
     v3_identity = register_or_resolve(v3)
     prepare_initial_checkpoint(str(checkpoint_path), "thread-v3", definition=v3)
     snap_v3 = coordinator.snapshot("thread-v3", v3_identity.workflowVersionId)
@@ -501,7 +502,7 @@ def test_problem_understanding_success_auto_ensures_sideflow_once(
     )
     harness = GraphHarness(tmp_path)
     try:
-        v3 = build_challenge_cup_workflow_definition_v3()
+        v3 = build_challenge_cup_workflow_definition()
         identity = register_or_resolve(v3)
         harness.commands.seed_run(
             "run-parent",

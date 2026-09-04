@@ -105,32 +105,6 @@ class AgentActionAdapter:
             reserved=dict(reservation),
         )
 
-    def _chain_authority_problem(
-        self, action: PendingAction, problem: dict[str, Any]
-    ) -> dict[str, Any]:
-        """Attach the stage-one chain materialization report to a blocked problem.
-
-        The report explains WHY the closure authorities are missing (per-kind
-        blocker codes from the chain writers); it never changes the outcome.
-        """
-        probe = getattr(self._ports, "chain_authority_materialization_report", None)
-        if not callable(probe):
-            return problem
-        try:
-            report = probe(action)
-        except Exception:  # noqa: BLE001 - diagnostics must not mask the block
-            return problem
-        if not isinstance(report, Mapping) or not report:
-            return problem
-        summary = {
-            key: report[key]
-            for key in ("status", "reason", "roundId", "missingKinds", "blockerCodes")
-            if key in report
-        }
-        if summary:
-            problem["chainAuthorityMaterialization"] = summary
-        return problem
-
     def verify(self, action: PendingAction, result: AdapterResult) -> VerifiedDomainResult:
         if result.observation_only:
             return VerifiedDomainResult(
@@ -148,13 +122,10 @@ class AgentActionAdapter:
                 artifact_receipts=(),
                 anchor=result.anchor,
                 budget_receipt=None,
-                problem=self._chain_authority_problem(
-                    action,
-                    {
-                        "code": "required_artifact_missing",
-                        "detail": f"{action.node_id} requires {list(required)}",
-                    },
-                ),
+                problem={
+                    "code": "required_artifact_missing",
+                    "detail": f"{action.node_id} requires {list(required)}",
+                },
             )
         receipts: list[dict[str, Any]] = []
         for ref in result.materialized_refs:
@@ -231,13 +202,10 @@ class AgentActionAdapter:
                 artifact_receipts=(),
                 anchor=result.anchor,
                 budget_receipt=None,
-                problem=self._chain_authority_problem(
-                    action,
-                    {
-                        "code": "required_artifact_missing",
-                        "detail": f"missing kinds: {missing}",
-                    },
-                ),
+                problem={
+                    "code": "required_artifact_missing",
+                    "detail": f"missing kinds: {missing}",
+                },
             )
         if action.node_id == "source_finding":
             from ..artifact_readback_registry import (
@@ -453,7 +421,7 @@ class SystemActionAdapter:
 
 
 _STAGE_BY_NODE: dict[str, str] = {
-    "problem_understanding": "knowledge_collection",
+    "problem_understanding": "problem_understanding",
     "source_finding": "knowledge_collection",
     "source_extraction": "knowledge_collection",
     "evidence_relations": "knowledge_collection",
@@ -482,15 +450,23 @@ def register_default_adapters(registry: Any, ports: DomainPorts) -> Any:
         build_challenge_cup_workflow_definition,
     )
     from core.research.workflow.models import ActorKind
+    from core.research.workflow.knowledge_sideflow_definition import (
+        build_knowledge_sideflow_workflow_definition,
+    )
 
     from ..action_registry import ActionRegistry
 
     if not isinstance(registry, ActionRegistry):
         registry = ActionRegistry()
     registry.register(AgentActionAdapter(ports))
-    for node in build_challenge_cup_workflow_definition().nodes:
-        if node.actorKind == ActorKind.HUMAN:
-            registry.register(HumanActionAdapter(ports, node_id=node.nodeId))
-        elif node.actorKind == ActorKind.SYSTEM:
-            registry.register(SystemActionAdapter(ports, node_id=node.nodeId))
+    definitions = (
+        build_challenge_cup_workflow_definition(),
+        build_knowledge_sideflow_workflow_definition(),
+    )
+    for definition in definitions:
+        for node in definition.nodes:
+            if node.actorKind == ActorKind.HUMAN:
+                registry.register(HumanActionAdapter(ports, node_id=node.nodeId))
+            elif node.actorKind == ActorKind.SYSTEM:
+                registry.register(SystemActionAdapter(ports, node_id=node.nodeId))
     return registry

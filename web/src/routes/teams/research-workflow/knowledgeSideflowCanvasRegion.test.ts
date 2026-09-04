@@ -4,7 +4,6 @@ import type { KnowledgeInvocationBadge } from "../../../api/types/research-workf
 import {
   buildKnowledgeSideflowCanvasRegion,
   composeKnowledgeSideflowGraph,
-  definitionNeedsSideflowRegion,
   isKnowledgeSideflowCanvasNode,
   knowledgeSideflowCanvasNodeId,
   knowledgeSideflowRelationEdge,
@@ -66,24 +65,6 @@ describe("knowledgeSideflowCanvasRegion ids", () => {
     expect(isKnowledgeSideflowCanvasNode("source_finding")).toBe(false);
     expect(knowledgeSideflowSemanticNodeId(canvasId)).toBe("source_finding");
     expect(knowledgeSideflowSemanticNodeId("hf_generation")).toBeNull();
-  });
-});
-
-describe("definitionNeedsSideflowRegion", () => {
-  it("is true for definitions without an in-graph knowledge chain (main 3.0.0)", () => {
-    expect(
-      definitionNeedsSideflowRegion({ nodes: [{ nodeId: "problem_understanding" }, { nodeId: "hypothesis_design" }] }),
-    ).toBe(true);
-  });
-
-  it("is false for the legacy 17-node definition (knowledge nodes are in-graph)", () => {
-    expect(
-      definitionNeedsSideflowRegion({ nodes: [{ nodeId: "knowledge_handoff" }] }),
-    ).toBe(false);
-  });
-
-  it("is false without a definition", () => {
-    expect(definitionNeedsSideflowRegion(null)).toBe(false);
   });
 });
 

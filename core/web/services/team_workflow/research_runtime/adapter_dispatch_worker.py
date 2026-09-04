@@ -25,6 +25,7 @@ from core.research.workflow.contracts import (
     ExecutionReceipt,
     PendingAction,
 )
+from core.research.workflow.challenge_cup_runtime import successor_map
 from core.research.workflow.ledger import WorkflowLedgerStore
 from core.research.workflow.ledger import outbox as outbox_api
 from core.research.workflow.knowledge_sideflow_definition import (
@@ -50,11 +51,6 @@ from .domain_ports import DomainPorts
 from .failure_projection import apply_node_run_failure
 from .ids import new_id
 from .iteration_route import branch_decision_from_run, routed_successors
-from .node_execution_support import NodeExecutionError
-from .stage_one_closeout import (
-    StageOneCloseoutOutcome,
-    evaluate_ledger_stage_one_closeout,
-)
 
 # Adapter execution may synchronously wait for a canonical Agent turn.  The
 # lease must outlive that bounded wait so another Workbench process cannot
@@ -267,7 +263,7 @@ class AdapterDispatchWorker:
         self._owner = owner_id
         self._lease_ms = lease_ms
         self._now = now_provider or (lambda: int(time.time() * 1000))
-        self._successor_fn = successor_fn or (lambda node_id: ())
+        self._successor_fn = successor_fn
         self._commit_hook = commit_hook
         self._after_commit_hook = after_commit_hook
         self.last_problem: dict[str, Any] | None = None
@@ -591,46 +587,6 @@ class AdapterDispatchWorker:
             return
 
         try:
-            stage_one_closeout = evaluate_ledger_stage_one_closeout(
-                self._store,
-                action=action,
-                current_artifact_receipts=verified.artifact_receipts,
-            )
-        except NodeExecutionError as exc:
-            if str(exc.code or "").startswith("stage_one_"):
-                _record_scene_event(
-                    "stage_one_closeout.started",
-                    outcome="started",
-                    fields={**_action_identity(action)},
-                )
-                _record_scene_event(
-                    "stage_one_closeout.blocked",
-                    outcome="blocked",
-                    fields={
-                        **_action_identity(action),
-                        "missingCategory": str(exc.code or "stage_one_invalid"),
-                    },
-                )
-            self._void_unused_reservation(
-                action, reason="stage_one_closeout_blocked_compensation"
-            )
-            self._block_attempt(outbox, action, exc.code, str(exc))
-            return
-
-        if stage_one_closeout is not None:
-            _record_scene_event(
-                "stage_one_closeout.started",
-                outcome="started",
-                fields={
-                    **_action_identity(action),
-                    "policySha256": stage_one_closeout.policy_sha256,
-                    "artifactCount": len(stage_one_closeout.artifact_refs),
-                    "receiptCount": len(stage_one_closeout.receipt_refs),
-                    "humanGateCount": stage_one_closeout.human_gate_count,
-                },
-            )
-
-        try:
             committed = False
             if action.actor_kind == ActorKind.HUMAN:
                 committed = self._commit_human(outbox, action, verified)
@@ -640,7 +596,6 @@ class AdapterDispatchWorker:
                     action,
                     verified,
                     usage=result.usage,
-                    stage_one_closeout=stage_one_closeout,
                 )
             if committed and verified.budget_receipt:
                 # ledger 提交后结算领域预算权威；settle 失败不回滚已提交 receipt，
@@ -663,33 +618,6 @@ class AdapterDispatchWorker:
                         ),
                     },
                 )
-                if stage_one_closeout is not None:
-                    completed = stage_one_closeout.accepted
-                    _record_scene_event(
-                        (
-                            "stage_one_closeout.completed"
-                            if completed
-                            else "stage_one_closeout.blocked"
-                        ),
-                        outcome="completed" if completed else "blocked",
-                        fields={
-                            **_action_identity(action),
-                            "policySha256": stage_one_closeout.policy_sha256,
-                            "artifactCount": len(stage_one_closeout.artifact_refs),
-                            "receiptCount": len(stage_one_closeout.receipt_refs),
-                            "humanGateCount": stage_one_closeout.human_gate_count,
-                            "missingCategory": (
-                                "" if completed else "program_review_required"
-                            ),
-                            "packageSha256": (
-                                stage_one_closeout.canonical_package_sha256
-                            ),
-                            "programOutputId": stage_one_closeout.program_record_id,
-                            "programOutputSha256": (
-                                stage_one_closeout.program_output_sha256
-                            ),
-                        },
-                    )
         except Exception as exc:
             # commit 前 crash：outbox 保留 pending（可重领取），领域侧幂等。
             self._requeue_or_fail(outbox, action, str(exc))
@@ -762,14 +690,13 @@ class AdapterDispatchWorker:
         verified: VerifiedDomainResult,
         *,
         usage: dict[str, Any],
-        stage_one_closeout: StageOneCloseoutOutcome | None = None,
     ) -> bool:
         now_ms = self._now()
         anchor_payload = _canonical_anchor_payload(action, verified.anchor)
         anchor_id = new_id("anchor") if anchor_payload else None
         budget_receipt_id = new_id("br") if verified.budget_receipt else None
         handoff_id = new_id("ho")
-        event_count = 4 if stage_one_closeout is not None else 3
+        event_count = 3
 
         receipt_id_by_index: list[str] = []
         for index in range(len(verified.artifact_receipts)):
@@ -895,30 +822,18 @@ class AdapterDispatchWorker:
                 finished_at_ms=now_ms,
             )
 
-            successors = self._successor_fn(action.node_id)
-            if stage_one_closeout is not None:
-                if uow.repository.list_pending_human_tasks(action.run_id):
-                    raise RuntimeError(
-                        "stage-one closeout raced with a pending human task"
-                    )
-                deferred = set(
-                    json.loads(run.input_snapshot_json)
-                    .get("stageOneCompletionPolicy", {})
-                    .get("deferredNodeIds", [])
+            successors = (
+                self._successor_fn(action.node_id)
+                if self._successor_fn is not None
+                else successor_map(str(getattr(run, "workflow_version_id", "") or "")).get(
+                    action.node_id, ()
                 )
-                if any(
-                    attempt.node_id in deferred
-                    for attempt in uow.repository.list_attempts(action.run_id)
-                ):
-                    raise RuntimeError(
-                        "stage-one closeout raced with a phase-two attempt"
-                    )
-                successors = ()
+            )
             branch = branch_decision_from_run(run)
-            routed = (
-                ()
-                if stage_one_closeout is not None
-                else routed_successors(action.node_id, branch)
+            routed = routed_successors(
+                action.node_id,
+                branch,
+                str(getattr(run, "workflow_version_id", "") or ""),
             )
             if routed:
                 successors = routed
@@ -970,21 +885,8 @@ class AdapterDispatchWorker:
             attempt = uow.repository.get_attempt(action.node_run_id)
             if attempt is None:
                 return False
-            if (
-                successors
-                or action.node_id == "result_package"
-                or (
-                    stage_one_closeout is not None
-                    and stage_one_closeout.accepted
-                )
-            ):
+            if successors or action.node_id == "result_package":
                 state_update = {"branch_decision": branch} if branch else {}
-                if stage_one_closeout is not None:
-                    if stage_one_closeout.accepted:
-                        state_update["stage_one_completion_state"] = (
-                            stage_one_closeout.completion_state
-                        )
-                    state_update["stage_one_closeout"] = stage_one_closeout.to_dict()
                 uow.repository.insert_outbox(
                     _resume_dispatch_record(
                         run=run,
@@ -1052,26 +954,6 @@ class AdapterDispatchWorker:
                     now_ms=now_ms,
                 )
             )
-            if stage_one_closeout is not None:
-                uow.repository.insert_event(
-                    _event(
-                        run_id=action.run_id,
-                        sequence=base_sequence + 4,
-                        run_version=run.run_version,
-                        event_id=new_id("evt"),
-                        event_type=(
-                            "stage_one_closeout_completed"
-                            if stage_one_closeout.accepted
-                            else "stage_one_program_review_required"
-                        ),
-                        correlation_id=action.action_id,
-                        payload={
-                            "nodeRunId": action.node_run_id,
-                            **stage_one_closeout.to_dict(),
-                        },
-                        now_ms=now_ms,
-                    )
-                )
             return True
 
         return bool(self._store.submit(mutate, force_flush=True).result(timeout=30))
@@ -1106,7 +988,13 @@ class AdapterDispatchWorker:
                 created_at_ms=now_ms,
                 human_task_id=task_id,
             )
-            successors = self._successor_fn(action.node_id)
+            successors = (
+                self._successor_fn(action.node_id)
+                if self._successor_fn is not None
+                else successor_map(str(getattr(run, "workflow_version_id", "") or "")).get(
+                    action.node_id, ()
+                )
+            )
             if successors:
                 uow.repository.insert_handoff(
                     handoff_id=handoff_id,

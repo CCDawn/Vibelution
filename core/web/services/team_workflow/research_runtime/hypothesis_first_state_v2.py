@@ -36,7 +36,7 @@ _EPOCH = "1970-01-01T00:00:00Z"
 _FORMAL_RUN_TERMINAL_STATUSES = frozenset(
     {"succeeded", "failed", "cancelled", "archived"}
 )
-# Challenge-cup topology (challenge-cup-research@2.1.0+): the formal run's
+# Canonical Challenge Cup topology: the formal run's
 # hypothesis stage is the single ``hypothesis_design`` node.  Once that node
 # has succeeded, the hf review phase it fed can no longer be recovered by
 # re-dispatching review meetings — that would re-run an already-successful
@@ -2684,7 +2684,7 @@ def _direction_1a_submission_section(
 ) -> dict[str, Any]:
     """Project the §2.5 official requirement matrix into the V2 state.
 
-    ``STAGE1_G1_ACCEPTED`` never implies direction-1A submission readiness:
+    Completing hypothesis design never implies direction-1A submission readiness:
     the aggregate is true only when every row across all four delivery
     classes holds real evidence (contract §8.2 counterexample 21).
     """
@@ -2710,31 +2710,6 @@ def _direction_1a_submission_section(
         "notYetEvidenced": list(not_yet_evidenced_ids(items)),
         "items": [item.to_dict() for item in items],
     }
-
-
-def _stage_one_policy_covers(question_id: str) -> bool:
-    """Whether the frozen stage-one completion policy covers this question.
-
-    Only policy-covered questions are routed to the run creation service by
-    the origin-level entry redirect; every other question keeps the plain
-    exploratory generation entry.
-    """
-
-    from core.research.competition.stage_one_completion_policy import (
-        STAGE_ONE_POLICY_WORKFLOW_DEFINITION_ID,
-        stage_one_policy_snapshot_for,
-    )
-
-    try:
-        return (
-            stage_one_policy_snapshot_for(
-                str(question_id or "").strip().upper(),
-                STAGE_ONE_POLICY_WORKFLOW_DEFINITION_ID,
-            )
-            is not None
-        )
-    except Exception:  # noqa: BLE001 - a drifted policy must not kill the projection
-        return False
 
 
 def _question_exploratory_drafts(
@@ -3647,19 +3622,17 @@ def project_state_from_records(
     }
 
     allowed_actions: list[dict[str, Any]] = []
-    # Stage-one bridge (R0 -> R1): the origin-level "open generation" entry on
-    # a policy-covered question is redirected to the run creation service.
+    # Canonical bridge (R0 -> R1): the origin-level generation entry creates
+    # the workflow run that owns all subsequent work.
     # Opening an R0 round without a run can only produce exploratory drafts
     # that no R1 consumes (the chain's formal-run offer is gated behind
     # convergence), so the run — which auto-opens R0 and pins the grounded
     # R1 context — is the real entry point.
-    stage_one_covered = _stage_one_policy_covers(normalized_question_id)
-    active_stage_one_run = _active_stage_one_run(formal_runs)
+    active_workflow_run = _active_stage_one_run(formal_runs)
     exploratory_drafts = _question_exploratory_drafts(chain, normalized_question_id)
     formal_candidate_count = len(candidate_ids)
     needs_stage_one_run = (
-        stage_one_covered
-        and active_stage_one_run is None
+        active_workflow_run is None
         and formal_candidate_count < 2
         and (
             generation["lifecycle"] == "not_started"
@@ -3676,23 +3649,6 @@ def project_state_from_records(
                 "create_stage_one_run",
                 action_id="create-stage-one-run",
                 label="创建第一阶段运行",
-                target_phase="generation",
-                target_node_id="hf_generation",
-                payload={"questionId": normalized_question_id},
-            )
-        )
-    elif (
-        generation["lifecycle"] == "not_started"
-        and not stage_one_covered
-    ):
-        # A policy-covered question that already owns a run never gets a bare
-        # origin-level open_generation offer: without the run binding it can
-        # only open an orphan R0 whose drafts nobody consume.  Non-covered
-        # questions have no run-side R0 auto-open, so the plain entry stays.
-        allowed_actions.append(
-            _command_action(
-                "open_generation",
-                label="开始生成候选",
                 target_phase="generation",
                 target_node_id="hf_generation",
                 payload={"questionId": normalized_question_id},
@@ -3737,8 +3693,7 @@ def project_state_from_records(
             )
         )
     if (
-        stage_one_covered
-        and active_stage_one_run is not None
+        active_workflow_run is not None
         and formal_candidate_count < 2
         and exploratory_drafts
         and not any(
@@ -3763,7 +3718,7 @@ def project_state_from_records(
                 target_node_id="hf_generation",
                 payload={
                     "questionId": normalized_question_id,
-                    "runId": str(active_stage_one_run.get("runId") or ""),
+                    "runId": str(active_workflow_run.get("runId") or ""),
                 },
             )
         )
@@ -4284,7 +4239,7 @@ def project_state_from_records(
     ):
         exit_hint = (
             "请通过「创建第一阶段运行」建立第一阶段运行后继续"
-            if stage_one_covered
+            if active_workflow_run is None
             else "请重新发起候选生成，或重置本题后重试"
         )
         sentinel_problem = _problem(

@@ -65,6 +65,7 @@ class CheckpointForkWorker:
     def _handle(self, action: Any) -> None:
         payload = json.loads(action.payload_json)
         parent_run_id = str(payload.get("parentRunId") or "").strip()
+        workflow_version_id = str(payload.get("workflowVersionId") or "").strip()
         checkpoint_id = str(payload.get("checkpointId") or "").strip()
         child_run_id = str(payload.get("childRunId") or action.run_id).strip()
         resume_node_id = str(payload.get("resumeNodeId") or "").strip()
@@ -77,6 +78,7 @@ class CheckpointForkWorker:
             execute_checkpoint_fork(
                 self._coordinator,
                 parent_run_id=parent_run_id,
+                workflow_version_id=workflow_version_id,
                 checkpoint_id=checkpoint_id,
                 child_run_id=child_run_id,
                 resume_node_id=resume_node_id,

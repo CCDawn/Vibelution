@@ -34,7 +34,6 @@ import {
   isHypothesisFirstCanvasNode,
 } from "./hypothesisFirstCanvasRegion";
 import {
-  definitionNeedsSideflowRegion,
   isKnowledgeSideflowCanvasNode,
   knowledgeSideflowSemanticNodeId,
   sideflowNodeStatesFromBadges,
@@ -51,12 +50,6 @@ import { ResearchCenteredEmptyState } from "./ResearchCenteredEmptyState";
 import type { ResearchProcessPanel } from "./researchProcessPanelSelection";
 import { handoffsForNode } from "./researchNodeHandoffModel";
 import type { ScopedDiscussionModel } from "./scopedDiscussionModel";
-import {
-  definitionNeedsStageTwoInactiveRegion,
-  isStageTwoInactiveCanvasNode,
-  stageTwoInactiveNodeLabel,
-} from "./stageTwoCanvasRegion";
-import { StageTwoInactiveNodePanel } from "./StageTwoInactiveNodePanel";
 import type { NodeDetailState } from "./useNodeDetailState";
 import type { ResearchWorkflowInsights } from "./useResearchWorkflowInsights";
 import styles from "./ResearchProcessInspectorPane.styles";
@@ -103,8 +96,6 @@ export function ResearchProcessInspectorPane(props: {
     /** Snapshot-level command offers (knowledge commands live here, not in
      * per-node detail offers). */
     snapshotOffers?: CommandOffer[];
-    /** Pinned-definition resolution diagnostic from the snapshot. */
-    definitionResolution?: string;
   };
   actions: {
     replaceParams: ReplaceParams;
@@ -190,26 +181,7 @@ export function ResearchProcessInspectorPane(props: {
       )
     ),
   );
-  // Only definitions without an in-graph knowledge chain (main 3.0.0) expose
-  // the sideflow section; legacy 17-node runs keep their knowledge_handoff node.
-  const sideflowRegionEnabled = state.projection
-    ? definitionNeedsSideflowRegion(
-        state.projection.definition as { nodes: Array<{ nodeId: string }> },
-      )
-    : false;
-  // Stage-two truncated runs render protocol/experiment selections as an
-  // inactive explanation, never as runtime detail. Labels come from the
-  // static region mirror: a truncated definition never carries these nodes.
-  const stageTwoInactive = definitionNeedsStageTwoInactiveRegion(
-    state.projection
-      ? (state.projection.definition as { nodes: Array<{ nodeId: string }> })
-      : null,
-  );
-  const stageTwoSelectedLabel = stageTwoInactive
-    && scope.selectedNodeId
-    && isStageTwoInactiveCanvasNode(scope.selectedNodeId)
-    ? stageTwoInactiveNodeLabel(scope.selectedNodeId)
-    : undefined;
+  const sideflowRegionEnabled = Boolean(state.projection);
 
   if (scope.panel === "progress") {
     // R4.3: the anomaly inbox sits directly below the batch console so the
@@ -339,17 +311,6 @@ export function ResearchProcessInspectorPane(props: {
       />
     );
   }
-  // Grayed stage-two nodes own the inspector before any runtime panel: the
-  // explanation is the only thing a selection of them should ever surface.
-  if (stageTwoInactive && scope.selectedNodeId && isStageTwoInactiveCanvasNode(scope.selectedNodeId)) {
-    return (
-      <StageTwoInactiveNodePanel
-        nodeId={scope.selectedNodeId}
-        nodeLabel={stageTwoSelectedLabel}
-        lang={lang}
-      />
-    );
-  }
   if (formalRuntimeOwnsInspector && scope.selectedNodeId) {
     return (
       <HypothesisFirstNodeInspector
@@ -461,15 +422,9 @@ export function ResearchProcessInspectorPane(props: {
       primaryActionOwnedByWorkspace={props.primaryActionOwnedByWorkspace}
       onOffer={actions.submitOffer}
       hideStartOffer={Boolean(nextAction && shouldHideSourceFindingStart(nextAction.stage) && scope.selectedNodeId === "source_finding")}
-      statusBanner={
-        state.definitionResolution === "degraded"
-          ? (isZh
-              ? "未能按本运行的钉住定义解析流程拓扑，当前展示为降级视图。"
-              : "This run's pinned definition could not be resolved; showing a degraded view.")
-          : (nextAction && shouldHideSourceFindingStart(nextAction.stage) && scope.selectedNodeId === "source_finding"
-              ? (nextAction.statusMessage || nextAction.recovery?.reason || (nextAction.stage === "collecting" ? (isZh ? "资料搜集中" : "Collecting sources") : ""))
-              : null)
-      }
+      statusBanner={nextAction && shouldHideSourceFindingStart(nextAction.stage) && scope.selectedNodeId === "source_finding"
+        ? (nextAction.statusMessage || nextAction.recovery?.reason || (nextAction.stage === "collecting" ? (isZh ? "资料搜集中" : "Collecting sources") : ""))
+        : null}
       hypothesisNavLabel={
         nextAction && nextAction.stage !== "collecting" && nextAction.targetNodeId?.startsWith("hf_")
           ? nextAction.navigationLabel

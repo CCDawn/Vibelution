@@ -41,6 +41,9 @@ from core.web.services.team_workflow.research_runtime.hypothesis_scope_events im
 from core.web.services.team_workflow.research_runtime.real_domain_ports import (
     RealDomainPorts,
 )
+from core.web.services.team_workflow.research_runtime.readiness.common import (
+    HandoffSnapshot,
+)
 from tests._support.adapter_fakes import FakeDomainPorts
 from tests._support.command_helpers import CommandHarness
 from tests._support.workflow_ledger_helpers import (
@@ -96,6 +99,34 @@ def _ready_hypothesis_input(
         },
         "consumedKnowledgeSnapshotHash": snapshot_hash,
     }
+
+
+def _start_hypothesis_attempt(
+    harness: CommandHarness, idempotency_key: str
+):
+    harness.context._knowledge_package = {
+        "accepted": True,
+        "knowledgeItems": [
+            {"knowledgeItemId": "ki-1", "contentHash": "d" * 64}
+        ],
+    }
+    harness.context.handoffs["hypothesis_design"] = [
+        HandoffSnapshot(
+            handoff_id="ho-knowledge-hypothesis",
+            from_node_run_id="nr-knowledge-handoff-a1",
+            status="accepted",
+        )
+    ]
+    harness.service.submit(
+        harness.request(
+            run_id="run-1",
+            node_id="hypothesis_design",
+            idempotency_key=idempotency_key,
+        )
+    )
+    latest = harness.store.latest_attempt("run-1", "hypothesis_design")
+    assert latest is not None
+    return latest
 
 
 def test_pending_action_rejects_candidate_identity_outside_its_scope() -> None:
@@ -418,11 +449,7 @@ def test_formal_shadow_validates_scope_and_keeps_legacy_task_execution(
     harness = CommandHarness(tmp_path / "ledger.sqlite3")
     try:
         harness.seed_run(run_id="run-1")
-        harness.service.submit(
-            harness.request(run_id="run-1", idempotency_key="start-shadow")
-        )
-        latest = harness.store.latest_attempt("run-1", "source_finding")
-        assert latest is not None
+        latest = _start_hypothesis_attempt(harness, "start-shadow")
         action = _action(node_run_id=latest.node_run_id)
         fallback = AgentTaskHandle(
             session_id="legacy-session",
@@ -496,11 +523,7 @@ def test_formal_non_hypothesis_first_without_selection_uses_bounded_compatibilit
     harness = CommandHarness(tmp_path / "ledger.sqlite3")
     try:
         harness.seed_run(run_id="run-1")
-        harness.service.submit(
-            harness.request(run_id="run-1", idempotency_key="start-compatibility")
-        )
-        latest = harness.store.latest_attempt("run-1", "source_finding")
-        assert latest is not None
+        latest = _start_hypothesis_attempt(harness, "start-compatibility")
         action = _action(node_run_id=latest.node_run_id)
         fallback = AgentTaskHandle(
             session_id="legacy-session",
@@ -517,7 +540,7 @@ def test_formal_non_hypothesis_first_without_selection_uses_bounded_compatibilit
             "projectId": "project-1",
             "questionId": "SCI-096",
             "workflowId": "challenge-cup-research",
-            "workflowVersionId": "v2.1",
+            "workflowVersionId": "v3.0",
             "workflowSessionScopeV3": {"hypothesis_design": "on"},
             "researchObjectiveContract": {"hypothesisFirst": False},
         }
@@ -573,11 +596,7 @@ def test_formal_hypothesis_first_without_selection_fails_closed(
     harness = CommandHarness(tmp_path / "ledger.sqlite3")
     try:
         harness.seed_run(run_id="run-1")
-        harness.service.submit(
-            harness.request(run_id="run-1", idempotency_key="start-hypothesis-missing")
-        )
-        latest = harness.store.latest_attempt("run-1", "source_finding")
-        assert latest is not None
+        latest = _start_hypothesis_attempt(harness, "start-hypothesis-missing")
         action = _action(node_run_id=latest.node_run_id)
         ports = RealDomainPorts(harness.store)
         snapshot = {
@@ -585,7 +604,7 @@ def test_formal_hypothesis_first_without_selection_fails_closed(
             "projectId": "project-1",
             "questionId": "SCI-096",
             "workflowId": "challenge-cup-research",
-            "workflowVersionId": "v2.1",
+            "workflowVersionId": "v3.0",
             "workflowSessionScopeV3": {"hypothesis_design": "on"},
             "researchObjectiveContract": {"hypothesisFirst": True},
         }
@@ -629,11 +648,7 @@ def test_formal_live_selection_enables_fan_out_when_snapshot_is_missing_selectio
     harness = CommandHarness(tmp_path / "ledger.sqlite3")
     try:
         harness.seed_run(run_id="run-1")
-        harness.service.submit(
-            harness.request(run_id="run-1", idempotency_key="start-live-selection")
-        )
-        latest = harness.store.latest_attempt("run-1", "source_finding")
-        assert latest is not None
+        latest = _start_hypothesis_attempt(harness, "start-live-selection")
         action = _action(node_run_id=latest.node_run_id)
         ports = RealDomainPorts(harness.store)
         required_model_policy = _formal_required_model_policy()
@@ -641,7 +656,7 @@ def test_formal_live_selection_enables_fan_out_when_snapshot_is_missing_selectio
             "teamId": "team-1",
             "projectId": "project-1",
             "questionId": "SCI-096",
-            "workflowVersionId": "v2.1",
+            "workflowVersionId": "v3.0",
             "workflowSessionScopeV3": {"hypothesis_design": "on"},
             "researchObjectiveContract": {"hypothesisFirst": False},
             "modelRoutingPolicy": {
@@ -821,7 +836,7 @@ def test_resolve_candidate_reuses_success_and_retries_only_failed(
         "challenge_task_contract": {
             "questionId": "SCI-096",
             "workflowId": "challenge-cup-research",
-            "workflowVersionId": "v2.1",
+            "workflowVersionId": "v3.0",
             "workflowRunId": "run-1",
             "workflowNodeId": "hypothesis_design",
             "nodeRunId": "node-2",
@@ -835,7 +850,7 @@ def test_resolve_candidate_reuses_success_and_retries_only_failed(
             "questionRunId": "run-1",
             "workflowRunId": "run-1",
             "workflowId": "challenge-cup-research",
-            "workflowVersionId": "v2.1",
+            "workflowVersionId": "v3.0",
             "formalNodeId": "hypothesis_design",
             "formalNodeRunId": "node-2",
             "formalNodeAttempt": 2,
@@ -1039,11 +1054,7 @@ def test_formal_live_anchor_is_incremental_and_keeps_failed_placeholder(
     harness = CommandHarness(tmp_path / "ledger.sqlite3")
     try:
         harness.seed_run(run_id="run-1")
-        harness.service.submit(
-            harness.request(run_id="run-1", idempotency_key="start-live-anchor")
-        )
-        latest = harness.store.latest_attempt("run-1", "source_finding")
-        assert latest is not None
+        latest = _start_hypothesis_attempt(harness, "start-live-anchor")
         action = _action(node_run_id=latest.node_run_id)
         ports = RealDomainPorts(harness.store)
         binding = BindingResolution(agent_id="agent-1", role_key="hypothesis_designer")
@@ -1088,11 +1099,7 @@ def test_hypothesis_scope_events_are_bounded_and_idempotent(tmp_path) -> None:
     harness = CommandHarness(tmp_path / "ledger.sqlite3")
     try:
         harness.seed_run(run_id="run-1")
-        harness.service.submit(
-            harness.request(run_id="run-1", idempotency_key="start-events")
-        )
-        latest = harness.store.latest_attempt("run-1", "source_finding")
-        assert latest is not None
+        latest = _start_hypothesis_attempt(harness, "start-events")
         action = _action(node_run_id=latest.node_run_id)
         fields = {
             "mode": "on",
@@ -1137,11 +1144,7 @@ def test_hypothesis_scope_event_id_conflict_is_fail_closed_without_sequence_gap(
     harness = CommandHarness(tmp_path / "ledger.sqlite3")
     try:
         harness.seed_run(run_id="run-1")
-        harness.service.submit(
-            harness.request(run_id="run-1", idempotency_key="start-event-conflict")
-        )
-        latest = harness.store.latest_attempt("run-1", "source_finding")
-        assert latest is not None
+        latest = _start_hypothesis_attempt(harness, "start-event-conflict")
         action = _action(node_run_id=latest.node_run_id)
         first = record_hypothesis_scope_event(
             harness.store,
@@ -1178,11 +1181,7 @@ def test_hypothesis_scope_event_replay_compares_correlation_identity(
     harness = CommandHarness(tmp_path / "ledger.sqlite3")
     try:
         harness.seed_run(run_id="run-1")
-        harness.service.submit(
-            harness.request(run_id="run-1", idempotency_key="start-event-correlation")
-        )
-        latest = harness.store.latest_attempt("run-1", "source_finding")
-        assert latest is not None
+        latest = _start_hypothesis_attempt(harness, "start-event-correlation")
         action = _action(node_run_id=latest.node_run_id)
         first = record_hypothesis_scope_event(
             harness.store,
@@ -1214,11 +1213,7 @@ def test_formal_child_turn_failure_closes_live_anchor_and_emits_blocked_event(
     harness = CommandHarness(tmp_path / "ledger.sqlite3")
     try:
         harness.seed_run(run_id="run-1")
-        harness.service.submit(
-            harness.request(run_id="run-1", idempotency_key="start-turn-failure")
-        )
-        latest = harness.store.latest_attempt("run-1", "source_finding")
-        assert latest is not None
+        latest = _start_hypothesis_attempt(harness, "start-turn-failure")
         action = _action(node_run_id=latest.node_run_id)
         child = ScopedAgentTaskHandle(
             selection_id="selection-1",
@@ -1307,11 +1302,7 @@ def test_formal_execute_rejects_candidate_list_drift_after_anchor_freeze(
     harness = CommandHarness(tmp_path / "ledger.sqlite3")
     try:
         harness.seed_run(run_id="run-1")
-        harness.service.submit(
-            harness.request(run_id="run-1", idempotency_key="start-selection-drift")
-        )
-        latest = harness.store.latest_attempt("run-1", "source_finding")
-        assert latest is not None
+        latest = _start_hypothesis_attempt(harness, "start-selection-drift")
         action = _action(node_run_id=latest.node_run_id)
         binding = BindingResolution(
             agent_id="agent-1", role_key="hypothesis_designer"
@@ -1380,11 +1371,7 @@ def test_formal_create_continues_after_one_candidate_start_failure(
     harness = CommandHarness(tmp_path / "ledger.sqlite3")
     try:
         harness.seed_run(run_id="run-1")
-        harness.service.submit(
-            harness.request(run_id="run-1", idempotency_key="start-partial")
-        )
-        latest = harness.store.latest_attempt("run-1", "source_finding")
-        assert latest is not None
+        latest = _start_hypothesis_attempt(harness, "start-partial")
         action = _action(node_run_id=latest.node_run_id)
         started_candidates: list[str] = []
         binding_hashes: list[str] = []
@@ -1461,7 +1448,7 @@ def test_formal_create_continues_after_one_candidate_start_failure(
             challenge_task_contract={
                 "questionId": "SCI-096",
                 "workflowId": "challenge-cup-research",
-                "workflowVersionId": "v2.1",
+                "workflowVersionId": "v3.0",
                 "workflowRunId": action.run_id,
                 "workflowNodeId": action.node_id,
                 "nodeRunId": action.node_run_id,
@@ -1475,7 +1462,7 @@ def test_formal_create_continues_after_one_candidate_start_failure(
                 "questionRunId": action.run_id,
                 "workflowRunId": action.run_id,
                 "workflowId": "challenge-cup-research",
-                "workflowVersionId": "v2.1",
+                "workflowVersionId": "v3.0",
                 "formalNodeId": action.node_id,
                 "formalNodeRunId": action.node_run_id,
                 "formalNodeAttempt": action.attempt,
@@ -1751,7 +1738,7 @@ def test_formal_retry_reuses_successful_children_and_rebinds_replayed_fragments(
             challenge_task_contract={
                 "questionId": "SCI-096",
                 "workflowId": "challenge-cup-research",
-                "workflowVersionId": "v2.1",
+                "workflowVersionId": "v3.0",
                 "workflowRunId": "run-1",
                 "workflowNodeId": "hypothesis_design",
                 "nodeRunId": "node-2",
@@ -1765,7 +1752,7 @@ def test_formal_retry_reuses_successful_children_and_rebinds_replayed_fragments(
                 "questionRunId": "run-1",
                 "workflowRunId": "run-1",
                 "workflowId": "challenge-cup-research",
-                "workflowVersionId": "v2.1",
+                "workflowVersionId": "v3.0",
                 "formalNodeId": "hypothesis_design",
                 "formalNodeRunId": "node-2",
                 "formalNodeAttempt": 2,
@@ -1944,11 +1931,7 @@ def _seed_nonblocking_fan_out(
         lambda: False,
     )
     harness.seed_run(run_id="run-1")
-    harness.service.submit(
-        harness.request(run_id="run-1", idempotency_key=idempotency_key)
-    )
-    latest = harness.store.latest_attempt("run-1", "source_finding")
-    assert latest is not None
+    latest = _start_hypothesis_attempt(harness, idempotency_key)
     action = _action(node_run_id=latest.node_run_id)
     children = [_nonblocking_child(item) for item in candidate_ids]
     handle = AgentTaskHandle(
@@ -2234,11 +2217,7 @@ def test_blocking_flag_restores_in_thread_child_wait(
     harness = CommandHarness(tmp_path / "ledger-blocking-flag.sqlite3")
     try:
         harness.seed_run(run_id="run-1")
-        harness.service.submit(
-            harness.request(run_id="run-1", idempotency_key="blocking-flag")
-        )
-        latest = harness.store.latest_attempt("run-1", "source_finding")
-        assert latest is not None
+        latest = _start_hypothesis_attempt(harness, "blocking-flag")
         action = _action(node_run_id=latest.node_run_id)
         children = [_nonblocking_child(item) for item in ("H1", "H2")]
         handle = AgentTaskHandle(

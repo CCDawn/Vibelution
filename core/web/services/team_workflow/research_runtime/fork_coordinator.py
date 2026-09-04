@@ -22,6 +22,7 @@ def validate_parent_checkpoint(
     coordinator: ChallengeCupGraphCoordinator,
     *,
     parent_run_id: str,
+    workflow_version_id: str,
     checkpoint_id: str,
 ) -> dict[str, Any]:
     checkpoint_id = str(checkpoint_id or "").strip()
@@ -29,7 +30,7 @@ def validate_parent_checkpoint(
         raise ForkCoordinatorError(
             "checkpointId is required for fork", code="checkpoint_required"
         )
-    snapshot = coordinator.snapshot(parent_run_id)
+    snapshot = coordinator.snapshot(parent_run_id, workflow_version_id)
     values = dict(snapshot.get("values") or {})
     if not values:
         raise ForkCoordinatorError(
@@ -41,7 +42,9 @@ def validate_parent_checkpoint(
 
     # Historical checkpoint must belong to the parent thread.
     try:
-        graph, stack = coordinator._compile()  # noqa: SLF001 - intentional
+        graph, stack = coordinator._compile(  # noqa: SLF001 - intentional
+            workflow_version_id
+        )
         try:
             state = graph.get_state(
                 {
@@ -74,6 +77,7 @@ def execute_checkpoint_fork(
     coordinator: ChallengeCupGraphCoordinator,
     *,
     parent_run_id: str,
+    workflow_version_id: str,
     checkpoint_id: str,
     child_run_id: str,
     resume_node_id: str,
@@ -88,10 +92,12 @@ def execute_checkpoint_fork(
     validate_parent_checkpoint(
         coordinator,
         parent_run_id=parent_run_id,
+        workflow_version_id=workflow_version_id,
         checkpoint_id=checkpoint_id,
     )
     try:
         return coordinator.fork_from_checkpoint(
+            workflow_version_id=workflow_version_id,
             source_thread_id=parent_run_id,
             source_checkpoint_id=checkpoint_id,
             child_thread_id=child_run_id,
@@ -109,6 +115,7 @@ def schedule_post_commit_fork(
     *,
     coordinator_factory: Callable[[], ChallengeCupGraphCoordinator],
     parent_run_id: str,
+    workflow_version_id: str,
     checkpoint_id: str,
     child_run_id: str,
     resume_node_id: str,
@@ -122,6 +129,7 @@ def schedule_post_commit_fork(
             execute_checkpoint_fork(
                 coordinator,
                 parent_run_id=parent_run_id,
+                workflow_version_id=workflow_version_id,
                 checkpoint_id=checkpoint_id,
                 child_run_id=child_run_id,
                 resume_node_id=resume_node_id,

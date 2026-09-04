@@ -559,114 +559,11 @@ def handoff_result_package_to_challenge_program(
     return response
 
 
-def stage_one_completion_manifest_from_handoff(
-    handoff: dict[str, Any],
-    *,
-    policy_sha256: str,
-) -> dict[str, Any]:
-    """Create a terminal manifest only from a fresh approved Program readback."""
-
-    human_gates = handoff.get("humanGates")
-    human_gates = human_gates if isinstance(human_gates, dict) else {}
-    result_package = handoff.get("resultPackage")
-    result_package = result_package if isinstance(result_package, dict) else {}
-    source_hash = str(handoff.get("sourceResultPackageHash") or "").lower()
-    output_hash = str(handoff.get("outputSha256") or "").lower()
-    canonical_hash = str(
-        result_package.get("canonicalHash")
-        or result_package.get("canonical_sha256")
-        or ""
-    ).lower()
-    try:
-        trace_count = int(handoff.get("receiptTraceCount") or 0)
-    except (TypeError, ValueError):
-        trace_count = 0
-    trace_digest = str(handoff.get("receiptTraceDigest") or "").lower()
-    # Dual receipt authority, both fail-closed:
-    # * canonical — the legacy three-stage ``QuestionResultPackage`` receipts
-    #   (generation/review/revision) reported as ``receiptStatus == "passed"``;
-    # * trace — the stage-one v2 receipt-registry per-invocation refs, already
-    #   hash-verified against the registry at registration and re-verified by
-    #   the handoff; the manifest digest seals their integrity.
-    if str(handoff.get("receiptStatus") or "") == "passed":
-        manifest_receipt_status = "passed"
-        receipt_authority = "canonical_result_package"
-        trace_fields: dict[str, Any] = {}
-        manifest_canonical_hash = canonical_hash
-        receipt_gate_ok = _SHA256_RE.fullmatch(canonical_hash) is not None
-    elif handoff.get("receiptTraceVerified") is True and trace_count >= 1:
-        manifest_receipt_status = "trace_verified"
-        receipt_authority = "model_invocation_trace"
-        trace_fields = {
-            "receiptTraceCount": trace_count,
-            "receiptTraceDigest": trace_digest,
-        }
-        # In the stage-one v2 flow the rrp-v2 result-package content hash is
-        # itself the canonical binding, so the manifest binds
-        # ``canonicalPackageHash`` to the already hash-checked
-        # ``sourceResultPackageHash``.
-        manifest_canonical_hash = source_hash
-        receipt_gate_ok = _SHA256_RE.fullmatch(trace_digest) is not None
-    else:
-        manifest_receipt_status = ""
-        receipt_authority = ""
-        trace_fields = {}
-        manifest_canonical_hash = canonical_hash
-        receipt_gate_ok = False
-    if (
-        str(handoff.get("reviewStatus") or "") != "approved"
-        or handoff.get("officialModelCall") is not True
-        or not receipt_gate_ok
-        or human_gates.get("allApproved") is not True
-        or int(human_gates.get("approvedCount") or 0) != 4
-        or not _SHA256_RE.fullmatch(source_hash)
-        or not _SHA256_RE.fullmatch(output_hash)
-        or not _SHA256_RE.fullmatch(manifest_canonical_hash)
-        or not _SHA256_RE.fullmatch(str(policy_sha256 or ""))
-    ):
-        raise ProgramCandidateHandoffContractError(
-            "Challenge Program record is not approved for stage-one completion"
-        )
-    manifest = {
-        "schemaVersion": 1,
-        "manifestKind": "stage_one_completion",
-        "workflowRunId": str(handoff.get("workflowRunId") or ""),
-        "questionId": str(handoff.get("questionId") or "").upper(),
-        "policySha256": str(policy_sha256).lower(),
-        "programRecordId": str(handoff.get("recordId") or ""),
-        "programOutputSha256": output_hash,
-        "programReviewStatus": "approved",
-        "sourceResultPackageHash": source_hash,
-        "canonicalPackageHash": manifest_canonical_hash,
-        "officialModelCall": True,
-        "receiptStatus": manifest_receipt_status,
-        "receiptAuthority": receipt_authority,
-        **trace_fields,
-        "humanGates": deepcopy(human_gates),
-    }
-    if not manifest["workflowRunId"] or not manifest["questionId"] or not manifest["programRecordId"]:
-        raise ProgramCandidateHandoffContractError(
-            "Challenge Program approval is missing immutable run identity"
-        )
-    from .stage_one_closeout import _completion_manifest_sha256
-
-    manifest["manifestSha256"] = _completion_manifest_sha256(manifest)
-    return manifest
-
-
-# Short compatibility aliases for callers that use the bridge as a command.
-bridge_result_package_to_challenge_question = handoff_result_package_to_challenge_program
-register_result_package_candidate = handoff_result_package_to_challenge_program
-
-
 __all__ = [
     "HANDOFF_STATUS_IDEMPOTENT",
     "HANDOFF_STATUS_NEEDS_CONTEXT",
     "HANDOFF_STATUS_REGISTERED",
     "NEEDS_CONTEXT",
     "ProgramCandidateHandoffContractError",
-    "bridge_result_package_to_challenge_question",
     "handoff_result_package_to_challenge_program",
-    "register_result_package_candidate",
-    "stage_one_completion_manifest_from_handoff",
 ]

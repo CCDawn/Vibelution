@@ -1,4 +1,4 @@
-"""Challenge Cup v2.1 control graph without business side effects.
+"""Challenge Cup 3.0.0 control graph without business side effects.
 
 Node work is performed by durable Agent/System/Human adapters. Graph node
 functions only expose an interrupt if somebody invokes the graph directly;
@@ -25,7 +25,6 @@ from .iteration_decisions import (
     route_target_for_decision,
 )
 from .models import WorkflowDefinition
-from .stage_one_completion import route_after_stage_one_closure
 
 
 class ChallengeCupState(TypedDict, total=False):
@@ -43,7 +42,6 @@ class ChallengeCupState(TypedDict, total=False):
     controlled_run_attempt: int
     blocked_reason: str
     pending_fork: bool
-    stage_one_completion_state: str
     # Declared last-value channels for fork/state patches.  Declaring them on
     # both graph schemas is intentional (extra channels are harmless): before
     # they were declared, langgraph silently dropped these keys from
@@ -117,12 +115,12 @@ def build_challenge_cup_graph(
 ) -> StateGraph:
     """Build the control graph for one pinned workflow definition.
 
-    ``definition=None`` keeps the historical behavior of compiling the current
+    ``definition=None`` compiles the one current
     ``build_challenge_cup_workflow_definition()`` output; run-driven callers
     must pass the definition resolved from the run's version identity instead.
     Decision-node conditional edges and terminal END edges are installed only
     when the pinned definition actually contains those nodes, so reduced
-    definitions (knowledge sideflow, main-flow 3.0.0) compile without the
+    definitions (knowledge sideflow and main flow) compile without irrelevant
     iteration/governance machinery.
     """
     resolved = definition or build_challenge_cup_workflow_definition()
@@ -132,13 +130,6 @@ def build_challenge_cup_graph(
         builder.add_node(node_id, _make_node_fn(node_id, resolved))
     builder.add_edge(START, order[0])
     for source, target in graph_static_edge_pairs(resolved):
-        if source == "hypothesis_design":
-            builder.add_conditional_edges(
-                source,
-                route_after_stage_one_closure(target),
-                {target: target, END: END},
-            )
-            continue
         builder.add_edge(source, target)
     if "iteration_decision" in order:
         iteration_targets = graph_conditional_targets("iteration_decision", resolved)

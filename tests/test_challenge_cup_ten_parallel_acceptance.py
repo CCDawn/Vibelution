@@ -39,7 +39,7 @@ from core.web.services.team_workflow.research_runtime.outbox_pump import (
 )
 
 RUN_COUNT = 10
-ENTRY_NODE_ID = "source_finding"
+ENTRY_NODE_ID = "problem_understanding"
 
 _DEFINITION_LOCK = threading.Lock()
 _DEFINITION_IDENTITY: Any = None
@@ -258,6 +258,7 @@ def test_ten_parallel_runs_advance_concurrently_without_crosstalk(
             time.sleep(0.05 + (index % 4) * 0.05)
             state = {
                 "run_id": run_id,
+                "workflow_version_id": dispatch.workflow_version_id,
                 "active_node_id": dispatch.node_id,
                 "active_attempt": dispatch.attempt,
                 "node_attempts": {dispatch.node_id: dispatch.attempt},
@@ -529,6 +530,7 @@ def test_ten_run_handshake_peaks_at_full_worker_width(
             time.sleep(0.03)
             state = {
                 "run_id": dispatch.run_id,
+                "workflow_version_id": dispatch.workflow_version_id,
                 "active_node_id": dispatch.node_id,
                 "active_attempt": dispatch.attempt,
                 "node_attempts": {dispatch.node_id: dispatch.attempt},

@@ -3,13 +3,13 @@
  *
  * Splits the anchor sections into the descriptive zones 假说生成 / 研究计划与
  * 实验 and carries the question-level stage state: zone one shows the derived
- * stage-one status (假说生成中 / 假说已定), zone two always shows 未激活 —
- * stage two never auto-activates. Display only; no activation action exists.
+ * stage-one status (假说生成中 / 假说已定), while zone two follows the
+ * canonical workflow progression.
  */
 import { VStatusChip, type VStatusTone } from "../../../components/vui";
 import {
   stageOneStatusCopy,
-  stageTwoInactiveHint,
+  stageTwoProgressHint,
   stageTwoStatusCopy,
   stageZoneTitle,
   type ChallengeQuestionStageOneStatus,
@@ -19,21 +19,23 @@ import css from "./ChallengeQuestionDetailPanel.styles";
 export function ChallengeQuestionStageZoneHeading({
   zone,
   stageOneStatus,
+  stageTwoActive = false,
   lang = "zh",
 }: {
   zone: "hypothesis" | "plan";
-  /** Only read for zone="hypothesis"; zone two is permanently inactive. */
+  /** Only read for zone="hypothesis". */
   stageOneStatus?: ChallengeQuestionStageOneStatus;
+  stageTwoActive?: boolean;
   lang?: "zh" | "en";
 }) {
   const isZh = lang === "zh";
   const chipTone: VStatusTone = zone === "plan"
-    ? "neutral"
+    ? stageTwoActive ? "accent" : "neutral"
     : stageOneStatus === "hypothesis_settled"
       ? "success"
       : "accent";
   const chipLabel = zone === "plan"
-    ? stageTwoStatusCopy(isZh ? "zh" : "en")
+    ? stageTwoStatusCopy(stageTwoActive, isZh ? "zh" : "en")
     : stageOneStatusCopy(stageOneStatus ?? "hypothesis_generating", isZh ? "zh" : "en");
   return (
     <section
@@ -47,7 +49,7 @@ export function ChallengeQuestionStageZoneHeading({
         <VStatusChip tone={chipTone}>{chipLabel}</VStatusChip>
       </div>
       {zone === "plan" ? (
-        <p className={css.stageZoneHint}>{stageTwoInactiveHint(isZh ? "zh" : "en")}</p>
+        <p className={css.stageZoneHint}>{stageTwoProgressHint(stageTwoActive, isZh ? "zh" : "en")}</p>
       ) : null}
     </section>
   );

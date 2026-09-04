@@ -244,7 +244,7 @@ def _run_record(record: Mapping[str, Any]) -> RunRecord:
         team_id=str(record.get("teamId") or ""),
         workflow_id=str(record.get("workflowId") or ""),
         workflow_version_id=str(record.get("workflowVersionId") or ""),
-        thread_id=str(record.get("threadId") or f"thread-{record.get('runId')}"),
+        thread_id=str(record.get("threadId") or record.get("runId") or ""),
         project_id=str(record.get("projectId") or ""),
         question_id=str(record.get("questionId") or ""),
         status=status,

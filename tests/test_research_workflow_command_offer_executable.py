@@ -10,6 +10,9 @@ import pytest
 from core.research.workflow.contracts import WorkflowCommandKind
 from core.research.workflow.definition import build_challenge_cup_workflow_definition
 from core.research.workflow.definition_registry import register_or_resolve
+from core.research.workflow.knowledge_sideflow_definition import (
+    build_knowledge_sideflow_workflow_definition,
+)
 from core.research.workflow.transitions import RunStatus
 from core.web.services.team_workflow.research_runtime.command_offers import (
     build_command_offers,
@@ -70,7 +73,7 @@ def _seed_waiting_human_run(harness: CommandHarness, run_id: str = "run-revise")
             build_command_record(
                 command_id=f"cmd-{run_id}",
                 run_id=run_id,
-                node_id="knowledge_handoff",
+                node_id="protocol_freeze",
                 command_kind="start_node",
                 idempotency_key=f"seed-{run_id}",
             )
@@ -79,7 +82,7 @@ def _seed_waiting_human_run(harness: CommandHarness, run_id: str = "run-revise")
             build_attempt_record(
                 node_run_id=f"nr-{run_id}-1",
                 run_id=run_id,
-                node_id="knowledge_handoff",
+                node_id="protocol_freeze",
                 actor_kind="human",
                 status="waiting_human",
                 command_id=f"cmd-{run_id}",
@@ -169,7 +172,7 @@ def test_human_resolve_offers_are_decision_complete(tmp_path: Path) -> None:
                 build_command_record(
                     command_id="cmd-human",
                     run_id="run-human",
-                    node_id="knowledge_handoff",
+                    node_id="protocol_freeze",
                     command_kind="start_node",
                     idempotency_key="seed-human",
                 )
@@ -178,7 +181,7 @@ def test_human_resolve_offers_are_decision_complete(tmp_path: Path) -> None:
                 build_attempt_record(
                     node_run_id="nr-human-1",
                     run_id="run-human",
-                    node_id="knowledge_handoff",
+                    node_id="protocol_freeze",
                     actor_kind="human",
                     status="waiting_human",
                     command_id="cmd-human",
@@ -201,7 +204,7 @@ def test_human_resolve_offers_are_decision_complete(tmp_path: Path) -> None:
             offer
             for offer in snap.command_offers
             if offer.command == WorkflowCommandKind.RESOLVE_HUMAN_TASK
-            and offer.node_id == "knowledge_handoff"
+            and offer.node_id == "protocol_freeze"
         ]
         decisions = {
             str(offer.payload.get("decision"))
@@ -248,7 +251,7 @@ def test_blocked_human_gate_exposes_executable_retry_offer(tmp_path: Path) -> No
                 build_command_record(
                     command_id="cmd-human-blocked",
                     run_id="run-human-blocked",
-                    node_id="knowledge_handoff",
+                    node_id="protocol_freeze",
                     command_kind="start_node",
                     idempotency_key="seed-human-blocked",
                 )
@@ -257,7 +260,7 @@ def test_blocked_human_gate_exposes_executable_retry_offer(tmp_path: Path) -> No
                 build_attempt_record(
                     node_run_id="nr-human-blocked-a1",
                     run_id="run-human-blocked",
-                    node_id="knowledge_handoff",
+                    node_id="protocol_freeze",
                     actor_kind="human",
                     status="blocked",
                     command_id="cmd-human-blocked",
@@ -274,7 +277,7 @@ def test_blocked_human_gate_exposes_executable_retry_offer(tmp_path: Path) -> No
             offer
             for offer in snap.command_offers
             if offer.command == WorkflowCommandKind.RETRY_NODE
-            and offer.node_id == "knowledge_handoff"
+            and offer.node_id == "protocol_freeze"
         )
         assert retry.available is True
         assert retry.reason_code == "retry_available"
@@ -290,7 +293,7 @@ def test_blocked_human_gate_exposes_executable_retry_offer(tmp_path: Path) -> No
             )
         )
         assert receipt.status == "accepted"
-        latest = harness.store.latest_attempt("run-human-blocked", "knowledge_handoff")
+        latest = harness.store.latest_attempt("run-human-blocked", "protocol_freeze")
         assert latest is not None
         assert latest.attempt == 2
         assert latest.status == "starting"
@@ -507,7 +510,7 @@ def test_start_offer_payload_carries_blocker_wording(tmp_path: Path) -> None:
             offer
             for offer in offers
             if offer.command == WorkflowCommandKind.START_NODE
-            and offer.node_id == "source_finding"
+            and offer.node_id == "problem_understanding"
         )
         assert blocked.available is False
         assert blocked.payload.get("remediation_label") == (
@@ -539,10 +542,12 @@ def _seed_finding_rerun_run(
         build_run_record,
     )
 
-    identity = register_or_resolve(build_challenge_cup_workflow_definition())
+    definition = build_knowledge_sideflow_workflow_definition()
+    identity = register_or_resolve(definition)
     run = replace(
         build_run_record(
             run_id=run_id,
+            workflow_id=definition.workflowId,
             status=run_status,
             run_version=2,
             last_event_sequence=1,

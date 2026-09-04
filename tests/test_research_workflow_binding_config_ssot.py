@@ -22,8 +22,8 @@ def test_team_scoped_binding_store_never_persists_workflow_defaults(tmp_path) ->
     store = WorkflowBindingConfigStore(tmp_path)
     layers = AgentBindingLayers(
         workflowDefaults={"source_finder": "stale-config-agent"},
-        stageOverrides={"knowledge_collection": {"source_finder": "stage-agent"}},
-        nodeOverrides={"source_finding": "node-agent"},
+        stageOverrides={"problem_understanding": {"source_finder": "stage-agent"}},
+        nodeOverrides={"problem_understanding": "node-agent"},
     )
 
     saved = store.save("challenge-cup", "research-team", layers)
@@ -64,14 +64,14 @@ def test_unscoped_binding_store_retains_legacy_workflow_defaults(tmp_path) -> No
         (
             AgentBindingLayers(
                 stageOverrides={
-                    "knowledge_collection": {"source_finder": ["agent-1"]}
+                    "problem_understanding": {"source_finder": ["agent-1"]}
                 }
             ),
             "research-team",
         ),
         (
             AgentBindingLayers(
-                nodeOverrides={"source_finding": {"agentId": "agent-1"}}
+                nodeOverrides={"problem_understanding": {"agentId": "agent-1"}}
             ),
             "research-team",
         ),
@@ -108,7 +108,7 @@ def test_binding_store_fails_closed_when_raw_config_contains_agent_object(tmp_pa
                 "workflowDefaults": {},
                 "stageOverrides": {},
                 "nodeOverrides": {
-                    "source_finding": {
+                    "problem_understanding": {
                         "agentId": "agent-1",
                         "promptTemplateId": "forbidden-copy",
                     }
@@ -131,10 +131,10 @@ def test_binding_store_fails_closed_when_raw_config_contains_agent_object(tmp_pa
         },
         {
             "stageOverrides": {
-                "knowledge_collection": {"source_finder": ["agent-1"]}
+                "problem_understanding": {"source_finder": ["agent-1"]}
             }
         },
-        {"nodeOverrides": {"source_finding": {"agentId": "agent-1"}}},
+        {"nodeOverrides": {"problem_understanding": {"agentId": "agent-1"}}},
     ],
 )
 def test_runtime_binding_api_rejects_non_string_agent_ids(tmp_path, payload) -> None:

@@ -79,7 +79,7 @@ def create_human_gate_child_run(
     correction_spec = next(
         item for item in definition.nodes if item.nodeId == correction_node_id
     )
-    child_thread_id = f"thread-{child_run_id}"
+    child_thread_id = child_run_id
     source_checkpoint_id = str(task.get("checkpointId") or "")
     child_checkpoint_id = fork_checkpoint_at_node(
         checkpoint_path,

@@ -9,6 +9,8 @@ from pathlib import Path
 import pytest
 
 from core.research.workflow.contracts import WorkflowCommandKind
+from core.research.workflow.definition import build_challenge_cup_workflow_definition
+from core.research.workflow.definition_registry import register_or_resolve
 from core.web.services.team_workflow.research_runtime.command_service import (
     WorkflowCommandError,
 )
@@ -21,6 +23,7 @@ from tests._support.workflow_ledger_helpers import (
     build_attempt_record,
     build_command_record,
     build_event_record,
+    build_outbox_record,
     build_run_record,
 )
 
@@ -30,11 +33,15 @@ def _seed_protocol_freeze_gate(
     *,
     historical_accept: bool = False,
 ) -> None:
+    definition = build_challenge_cup_workflow_definition()
+    identity = register_or_resolve(definition)
     run = replace(
         build_run_record(
             last_event_sequence=1,
             status="blocked" if historical_accept else "running",
+            workflow_version_id=identity.workflowVersionId,
         ),
+        structure_hash=identity.structureHash,
         active_node_id="smoke_gate" if historical_accept else "protocol_freeze",
         input_snapshot_json=json.dumps(
             {
@@ -127,6 +134,16 @@ def _seed_protocol_freeze_gate(
                     status="blocked",
                     command_id="cmd-smoke-a1",
                     problem_json=json.dumps({"code": "frozen_protocol_missing"}),
+                )
+            )
+            uow.repository.insert_outbox(
+                replace(
+                    build_outbox_record(
+                        action_id="act-smoke-a1",
+                        command_id="cmd-smoke-a1",
+                        status="failed",
+                    ),
+                    node_run_id="nr-run-test-smoke_gate-a1",
                 )
             )
 

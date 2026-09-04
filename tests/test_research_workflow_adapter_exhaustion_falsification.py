@@ -55,8 +55,8 @@ def _seed_pending_adapter_dispatch(harness: CommandHarness) -> str:
     action = PendingAction(
         action_id="act-time-exhaust",
         run_id="run-test",
-        node_run_id="nr-run-test-source_finding-a1",
-        node_id="source_finding",
+        node_run_id="nr-run-test-problem_understanding-a1",
+        node_id="problem_understanding",
         attempt=1,
         actor_kind=ActorKind.AGENT,
         action_kind="start_agent_task",
@@ -158,7 +158,7 @@ def test_time_advance_lease_exhaustion_converges_without_revival(
             now_provider=lambda: now["ms"],
         )
         assert worker.run_once() == 1
-        attempt = harness.store.latest_attempt("run-test", "source_finding")
+        attempt = harness.store.latest_attempt("run-test", "problem_understanding")
         assert attempt is not None and attempt.status == "failed"
         run = harness.store.get_run("run-test")
         assert run.status == "blocked"
@@ -183,7 +183,7 @@ def test_time_advance_lease_exhaustion_converges_without_revival(
             == "lease_attempt_exhausted"
         )
         assert harness.store.latest_attempt(
-            "run-test", "source_finding"
+            "run-test", "problem_understanding"
         ).status == "failed"
         final_row = harness.store.read(lambda repo: repo.get_outbox(_OUTBOX_ID))
         assert final_row.status == "failed"
@@ -260,7 +260,7 @@ def test_reconcile_keeps_exhausted_run_blocked_without_revival(
         assert worker.run_once() == 0
         assert harness.store.get_run("run-test").status == "blocked"
         assert (
-            harness.store.latest_attempt("run-test", "source_finding").status
+            harness.store.latest_attempt("run-test", "problem_understanding").status
             == "failed"
         )
     finally:

@@ -25,6 +25,7 @@ export type ResearchWorkflowLoadState =
 
 export type ResearchWorkflowStageId =
   | "hypothesis_first"
+  | "problem_understanding"
   | "knowledge_collection"
   | "experiment_design"
   | "execution_iteration";
@@ -152,6 +153,7 @@ export type BuildResearchWorkflowContextInput = {
 
 const STAGES: Array<Pick<ResearchWorkflowStageSummary, "id" | "label" | "detail">> = [
   { id: "hypothesis_first", label: "假说先行", detail: "形成、选择并评审假说" },
+  { id: "problem_understanding", label: RESEARCH_STAGE_TERMS.problem_understanding.zh, detail: "冻结研究问题与边界" },
   { id: "knowledge_collection", label: RESEARCH_STAGE_TERMS.knowledge_collection.zh, detail: "围绕收敛假说补充证据" },
   { id: "experiment_design", label: "实验设计", detail: "形成并冻结可执行协议" },
   { id: "execution_iteration", label: "执行迭代", detail: "运行、评价并归档成果" },
@@ -497,7 +499,7 @@ function stageSummaries(currentTask: ResearchWorkflowCurrentTask | null): Resear
 }
 
 function stageIdForContext(stageId: string | null | undefined): ResearchWorkflowStageId {
-  if (stageId === "knowledge_collection" || stageId === "experiment_design" || stageId === "execution_iteration") {
+  if (stageId === "problem_understanding" || stageId === "knowledge_collection" || stageId === "experiment_design" || stageId === "execution_iteration") {
     return stageId;
   }
   return "hypothesis_first";

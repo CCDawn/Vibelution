@@ -6,7 +6,7 @@
 >
 > 权威路径：根 `main` 的 `docs/plans/2026-09-02-challenge-cup-10-parallel-concurrency-plan.md`
 >
-> 适用范围：挑战杯科研工作流（`challenge-cup-research@2.1.0/3.0.0`、knowledge sideflow、评审假说链、来源收集链、formal run）在 **10 条链路并发** 目标下的并发正确性改造与存量竞态修复
+> 适用范围：挑战杯科研工作流（`challenge-cup-research@3.0.0`、knowledge sideflow、评审假说链、来源收集链、formal run）在 **10 条链路并发** 目标下的并发正确性改造与存量竞态修复
 >
 > 输入依据：2026-09-02 五路只读并发审查（账本/运行时、runner 批处理、评审假说、证据来源收集、跨链路共享资源），关键结论已由主 agent 亲验源码确认；同日四路仓外成熟方案调研（编排框架/科研多 agent/限流与基础设施工件/lease-fencing 工业实践）裁决结论见 §6，正文各任务方案要点已标注对标小节
 >
@@ -142,7 +142,7 @@
 | --- | --- | --- | --- |
 | V1 | reset 全链路是否所有入口都在 maintenance fence 内先停 pump（`challenge_cup_reset_service.py` 调用链） | B3（purge 后复活行） | 未核实 |
 | V2 | Launcher restart 新旧进程是否严格串行（旧退再拉新） | C7、shadow 跨进程面 | 未核实 |
-| V3 | shadow JSONL（`knowledge_rollout.py:196-246`）迁移到 `storage_durability.append_jsonl_locked` | D1 | 基础设施在，未接入 |
+| V3 | 旧 knowledge rollout/shadow JSONL 已随 latest-only 收口删除 | D1 | 不再适用 |
 | V4 | `routes` 层 close/approve 是否有请求级 idempotency key 挡双击 | A2 兜底深度 | 未核实 |
 
 ## 4. 明确不做

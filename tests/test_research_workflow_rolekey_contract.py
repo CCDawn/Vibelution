@@ -29,10 +29,6 @@ from core.web.services.team_workflow.research_runtime.team_role_source import (
 
 EXPECTED_AGENT_NODE_ROLE_KEYS = {
     "problem_understanding": "source_finder",
-    "source_finding": "source_finder",
-    "source_extraction": "source_extractor",
-    "evidence_relations": "source_relation_mapper",
-    "knowledge_ingestion": "source_ingestor",
     "hypothesis_design": "experiment_planner",
     "protocol_design": "experiment_planner",
     "protocol_review": "experiment_ledger",
@@ -116,7 +112,7 @@ def test_every_product_owned_definition_role_resolves_through_team_binding_path(
 
     snapshots = build_run_binding_snapshots(
         run_id="role-contract-run",
-        workflow_version_id="2.1.0",
+        workflow_version_id="wv-268aa6e8dea8",
         layers=AgentBindingLayers(workflowDefaults=resolved),
         captured_at="2026-08-23T00:00:00Z",
     )
@@ -139,7 +135,7 @@ def test_role_key_contract_rejects_a_legal_cross_node_rename() -> None:
         definition,
         nodes=tuple(
             replace(node, primaryRoleKey="source_extractor")
-            if node.nodeId == "source_finding"
+            if node.nodeId == "problem_understanding"
             else node
             for node in definition.nodes
         ),

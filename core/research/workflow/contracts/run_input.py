@@ -8,10 +8,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from core.research.competition.result_set import CatalogScope, ResultSetContractError
-from core.research.competition.stage_one_completion_policy import (
-    StageOneCompletionPolicy,
-    StageOneCompletionPolicyError,
-)
 
 from ._validation import (
     ContractValidationError,
@@ -46,23 +42,6 @@ _REQUIRED_FIELDS = (
     "createdBy",
     "createdAt",
 )
-
-
-def _definition_id_for_registry_version(workflow_version_id: str) -> str:
-    """Resolve ``workflowId@schemaVersion`` from the immutable registry id."""
-
-    try:
-        from core.research.workflow.definition_registry import (
-            WorkflowDefinitionRegistryError,
-            resolve_definition_by_version_id,
-        )
-
-        definition = resolve_definition_by_version_id(workflow_version_id)
-    except WorkflowDefinitionRegistryError as exc:
-        raise ContractValidationError(
-            "workflowVersionId cannot resolve the stage-one workflow definition"
-        ) from exc
-    return f"{definition.workflowId}@{definition.schemaVersion}"
 
 
 def _normalize_research_scope(
@@ -159,7 +138,6 @@ class WorkflowRunInputSnapshot:
     catalogScope: dict[str, Any]
     hypothesisSelection: dict[str, Any]
     hypothesisConvergenceHandoff: dict[str, Any]
-    stageOneCompletionPolicy: dict[str, Any]
     snapshotHash: str
 
     @classmethod
@@ -227,32 +205,6 @@ class WorkflowRunInputSnapshot:
                 payload,
                 "hypothesisConvergenceHandoff",
             )
-        if "stageOneCompletionPolicy" in payload:
-            raw_stage_one_policy = require_mapping(
-                payload,
-                "stageOneCompletionPolicy",
-            )
-            try:
-                stage_one_policy = StageOneCompletionPolicy.from_dict(
-                    raw_stage_one_policy
-                )
-            except StageOneCompletionPolicyError as exc:
-                raise ContractValidationError(
-                    f"stageOneCompletionPolicy is malformed: {exc}"
-                ) from exc
-            resolved_definition_id = _definition_id_for_registry_version(
-                canonical["workflowVersionId"]
-            )
-            if stage_one_policy.workflowDefinitionId != resolved_definition_id:
-                raise ContractValidationError(
-                    "stageOneCompletionPolicy.workflowDefinitionId must match the "
-                    "definition resolved by workflowVersionId"
-                )
-            if canonical["questionId"] not in stage_one_policy.questionIds:
-                raise ContractValidationError(
-                    "stageOneCompletionPolicy.questionIds must contain questionId"
-                )
-            canonical["stageOneCompletionPolicy"] = stage_one_policy.to_dict()
         raw_scope_mode = payload.get("workflowSessionScopeV3")
         if raw_scope_mode is None:
             canonical["workflowSessionScopeV3"] = {"hypothesis_design": "off"}
@@ -315,9 +267,6 @@ class WorkflowRunInputSnapshot:
             hypothesisConvergenceHandoff=copy.deepcopy(
                 canonical.get("hypothesisConvergenceHandoff") or {}
             ),
-            stageOneCompletionPolicy=copy.deepcopy(
-                canonical.get("stageOneCompletionPolicy") or {}
-            ),
             snapshotHash=snapshot_hash,
         )
 
@@ -363,9 +312,5 @@ class WorkflowRunInputSnapshot:
         if self.evidenceRemediationContract:
             payload["evidenceRemediationContract"] = copy.deepcopy(
                 self.evidenceRemediationContract
-            )
-        if self.stageOneCompletionPolicy:
-            payload["stageOneCompletionPolicy"] = copy.deepcopy(
-                self.stageOneCompletionPolicy
             )
         return payload

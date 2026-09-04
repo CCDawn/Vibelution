@@ -93,16 +93,16 @@ def _seed_bindings(harness: GraphHarness) -> None:
         snapshot = json.loads(run.input_snapshot_json or "{}")
         snapshot["agentBindingSnapshot"] = [
             {
-                "snapshotId": "snap:run-test:source_finding",
-                "nodeId": "source_finding",
-                "agentId": "agent-finding",
-                "roleKey": "source_finder",
+                "snapshotId": "snap:run-test:hypothesis_design",
+                "nodeId": "hypothesis_design",
+                "agentId": "agent-hypothesis",
+                "roleKey": "hypothesis_architect",
             },
             {
-                "snapshotId": "snap:run-test:source_extraction",
-                "nodeId": "source_extraction",
-                "agentId": "agent-extraction",
-                "roleKey": "source_extractor",
+                "snapshotId": "snap:run-test:protocol_design",
+                "nodeId": "protocol_design",
+                "agentId": "agent-protocol",
+                "roleKey": "experiment_designer",
             },
         ]
         uow.repository.execute(
@@ -118,19 +118,19 @@ def test_handoff_accepted_before_successor_readiness(tmp_path: Path) -> None:
     try:
         harness.seed()
         _seed_bindings(harness)
-        harness.start_thread_to("source_finding")
+        harness.start_thread_to("hypothesis_design")
         first_pending = harness.latest_adapter_pending()
         assert first_pending is not None
         first_action_id = json.loads(first_pending.payload_json)["actionId"]
         _consume_adapter(harness, first_pending.action_id)
 
-        # Ensure a handoff row exists from source_finding (ready, not accepted).
-        finding = harness.commands.store.latest_attempt("run-test", "source_finding")
-        assert finding is not None
+        # Ensure a handoff row exists from hypothesis_design (ready, not accepted).
+        hypothesis = harness.commands.store.latest_attempt("run-test", "hypothesis_design")
+        assert hypothesis is not None
 
         def ensure_handoff(uow):
             existing = uow.repository.get_handoff_by_from_node(
-                "run-test", finding.node_run_id
+                "run-test", hypothesis.node_run_id
             )
             if existing is not None:
                 if str(existing[8]) == "pending":
@@ -139,25 +139,25 @@ def test_handoff_accepted_before_successor_readiness(tmp_path: Path) -> None:
                     )
                 return
             uow.repository.insert_handoff(
-                handoff_id="ho-finding-extract",
+                handoff_id="ho-hypothesis-protocol",
                 run_id="run-test",
-                edge_id="e_find_extract",
-                from_node_run_id=finding.node_run_id,
-                to_node_id="source_extraction",
+                edge_id="e_hyp_proto",
+                from_node_run_id=hypothesis.node_run_id,
+                to_node_id="protocol_design",
                 to_node_run_id=None,
                 gate_kind="auto",
                 input_snapshot_hash="a" * 64,
                 offered_at_ms=FIXED_NOW_MS,
             )
             uow.repository.update_handoff_status(
-                "ho-finding-extract", "ready", FIXED_NOW_MS
+                "ho-hypothesis-protocol", "ready", FIXED_NOW_MS
             )
 
         harness.commands.store.submit(ensure_handoff, force_flush=True).result(timeout=10)
 
         harness.resume(
             run_id="run-test",
-            node_id="source_finding",
+            node_id="hypothesis_design",
             attempt=1,
             action_id=first_action_id,
             outcome="succeeded",
@@ -173,19 +173,19 @@ def test_handoff_accepted_before_successor_readiness(tmp_path: Path) -> None:
         )
         handled = worker.run_once()
         assert handled == 1
-        assert "source_extraction" in readiness.evaluated_nodes
+        assert "protocol_design" in readiness.evaluated_nodes
         assert readiness.observed_handoff_statuses, "readiness must observe handoffs"
         assert all(
             status == "accepted" for status in readiness.observed_handoff_statuses
         ), f"handoff must be accepted before readiness, saw {readiness.observed_handoff_statuses}"
 
-        extraction = harness.commands.store.latest_attempt(
-            "run-test", "source_extraction"
+        protocol = harness.commands.store.latest_attempt(
+            "run-test", "protocol_design"
         )
-        assert extraction is not None
-        assert extraction.status == "dispatching"
-        assert extraction.binding_snapshot_id == "snap:run-test:source_extraction"
-        assert extraction.binding_snapshot_id != "snap:run-test:source_finding"
+        assert protocol is not None
+        assert protocol.status == "dispatching"
+        assert protocol.binding_snapshot_id == "snap:run-test:protocol_design"
+        assert protocol.binding_snapshot_id != "snap:run-test:hypothesis_design"
     finally:
         harness.close()
 
@@ -197,16 +197,16 @@ def test_crash_between_handoff_accept_and_successor_is_recoverable(tmp_path: Pat
     try:
         harness.seed()
         _seed_bindings(harness)
-        harness.start_thread_to("source_finding")
+        harness.start_thread_to("hypothesis_design")
         first_pending = harness.latest_adapter_pending()
         first_action_id = json.loads(first_pending.payload_json)["actionId"]
         _consume_adapter(harness, first_pending.action_id)
 
-        finding = harness.commands.store.latest_attempt("run-test", "source_finding")
+        hypothesis = harness.commands.store.latest_attempt("run-test", "hypothesis_design")
 
         def ensure_handoff(uow):
             existing = uow.repository.get_handoff_by_from_node(
-                "run-test", finding.node_run_id
+                "run-test", hypothesis.node_run_id
             )
             if existing is not None:
                 if str(existing[8]) == "pending":
@@ -217,9 +217,9 @@ def test_crash_between_handoff_accept_and_successor_is_recoverable(tmp_path: Pat
             uow.repository.insert_handoff(
                 handoff_id="ho-crash",
                 run_id="run-test",
-                edge_id="e_find_extract",
-                from_node_run_id=finding.node_run_id,
-                to_node_id="source_extraction",
+                edge_id="e_hyp_proto",
+                from_node_run_id=hypothesis.node_run_id,
+                to_node_id="protocol_design",
                 to_node_run_id=None,
                 gate_kind="auto",
                 input_snapshot_hash="a" * 64,
@@ -230,7 +230,7 @@ def test_crash_between_handoff_accept_and_successor_is_recoverable(tmp_path: Pat
         harness.commands.store.submit(ensure_handoff, force_flush=True).result(timeout=10)
         harness.resume(
             run_id="run-test",
-            node_id="source_finding",
+            node_id="hypothesis_design",
             attempt=1,
             action_id=first_action_id,
             outcome="succeeded",
@@ -256,7 +256,7 @@ def test_crash_between_handoff_accept_and_successor_is_recoverable(tmp_path: Pat
         # Handoff should already be accepted; outbox not permanently leased.
         handoff = harness.commands.store.submit(
             lambda uow: uow.repository.get_handoff_by_from_node(
-                "run-test", finding.node_run_id
+                "run-test", hypothesis.node_run_id
             ),
             force_flush=True,
         ).result(timeout=10)
@@ -283,11 +283,11 @@ def test_crash_between_handoff_accept_and_successor_is_recoverable(tmp_path: Pat
             readiness_context=lambda: None,
         )
         healthy.run_once()
-        extraction = harness.commands.store.latest_attempt(
-            "run-test", "source_extraction"
+        protocol = harness.commands.store.latest_attempt(
+            "run-test", "protocol_design"
         )
-        assert extraction is not None
-        assert extraction.status == "dispatching"
-        assert extraction.binding_snapshot_id == "snap:run-test:source_extraction"
+        assert protocol is not None
+        assert protocol.status == "dispatching"
+        assert protocol.binding_snapshot_id == "snap:run-test:protocol_design"
     finally:
         harness.close()

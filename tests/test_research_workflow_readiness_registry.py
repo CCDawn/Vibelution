@@ -71,6 +71,8 @@ def test_unknown_node_returns_blocker() -> None:
 
 
 class _DefinitionWithExtraNode:
+    workflowId = DEFINITION.workflowId
+    structureHash = DEFINITION.structureHash
     nodes = list(DEFINITION.nodes) + [
         type(
             "Node",

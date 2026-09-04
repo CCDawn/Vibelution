@@ -169,9 +169,8 @@ def test_stage_one_grounded_context_uses_the_run_pinned_source_scope(
 ) -> None:
     from types import SimpleNamespace
 
-    from core.research.competition.stage_one_completion_policy import (
-        load_stage_one_completion_policy,
-    )
+    from core.research.workflow.definition import build_challenge_cup_workflow_definition
+    from core.research.workflow.definition_registry import register_or_resolve
     from core.web.services.team_workflow import research_project_hypothesis_context
 
     captured: dict[str, object] = {}
@@ -185,12 +184,14 @@ def test_stage_one_grounded_context_uses_the_run_pinned_source_scope(
         "build_hypothesis_input_context",
         fake_build,
     )
+    definition = build_challenge_cup_workflow_definition()
+    identity = register_or_resolve(definition)
     run = SimpleNamespace(
         team_id="research-team",
         question_id="SCI-091",
+        workflow_version_id=identity.workflowVersionId,
         input_snapshot_json=json.dumps(
             {
-                "stageOneCompletionPolicy": load_stage_one_completion_policy().to_dict(),
                 "sourceCollectionRunId": "source-stage-one",
             }
         ),

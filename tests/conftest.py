@@ -409,10 +409,19 @@ def isolate_runtime_manager_evolution_store(tmp_path, monkeypatch, request):
     from core.web.services import supervised_agent_service
     from core.web.services import team_service
     from core.web.services import chat_room_service
+    from core.web.services.team_workflow.research_runtime.formal_read_runtime import (
+        reset_formal_read_runtime_for_tests,
+    )
+    from core.web.services.team_workflow.research_runtime.formal_write_runtime import (
+        reset_formal_write_runtime_for_tests,
+    )
     try:
         from core.web.services import session_service
     except Exception:
         session_service = None
+
+    reset_formal_read_runtime_for_tests()
+    reset_formal_write_runtime_for_tests()
 
     runtime_manager_dir = tmp_path / ".runtime" / "runtime-manager"
     evolution_dir = runtime_manager_dir / "evolution"
@@ -500,6 +509,8 @@ def isolate_runtime_manager_evolution_store(tmp_path, monkeypatch, request):
                 session_service._SESSION_AGENT_QUEUES.clear()
         with session_service._SESSION_TURN_CONTROLS_LOCK:
             session_service._SESSION_TURN_CONTROLS.clear()
+        reset_formal_read_runtime_for_tests()
+        reset_formal_write_runtime_for_tests()
         _reset_agent_directory_caches(agent_directory_service)
     else:
         try:
@@ -509,6 +520,8 @@ def isolate_runtime_manager_evolution_store(tmp_path, monkeypatch, request):
                 chat_room_service._CHAT_ROOM_ROUND_CONTROLS.clear()
             with chat_room_service._CHAT_ROOM_STREAM_SUBSCRIBERS_LOCK:
                 chat_room_service._CHAT_ROOM_STREAM_SUBSCRIBERS.clear()
+            reset_formal_read_runtime_for_tests()
+            reset_formal_write_runtime_for_tests()
             isolated_chat_room_executor.shutdown(wait=True, cancel_futures=True)
             monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_EXECUTOR", previous_chat_room_executor)
             _reset_agent_directory_caches(agent_directory_service)

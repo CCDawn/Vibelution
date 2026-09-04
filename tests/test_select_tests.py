@@ -944,6 +944,21 @@ def test_selector_runs_unmapped_changed_python_test_file_itself(tmp_path: Path):
     assert result["coverageGaps"] == []
 
 
+def test_selector_ignores_deleted_changed_python_test_file(tmp_path: Path):
+    (tmp_path / "tests").mkdir()
+
+    result = select_tests.select_tests(
+        ["tests/test_deleted.py"],
+        {"rules": []},
+        include_always=False,
+        project_root=tmp_path,
+    )
+
+    assert result["matchedRules"] == []
+    assert result["commands"] == []
+    assert result["coverageGaps"] == []
+
+
 def test_selector_parallelizes_multiple_unmapped_changed_python_tests(tmp_path: Path):
     (tmp_path / "tests").mkdir()
     for name in ("test_alpha.py", "test_beta.py", "test_gamma.py"):

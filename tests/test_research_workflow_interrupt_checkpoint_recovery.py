@@ -21,18 +21,18 @@ from core.web.services.team_workflow.research_runtime.adapter_dispatch_worker im
 from core.web.services.team_workflow.research_runtime.agent_turn_completion import (
     DEFAULT_AGENT_TURN_TIMEOUT_MS,
 )
-from tests._support.graph_helpers import GraphHarness
+from tests._support.graph_helpers import GraphHarness, workflow_version_id_for_run
 from tests._support.workflow_ledger_helpers import FIXED_NOW_MS
 
 
 def test_node_attempt_reducer_keeps_each_nodes_highest_durable_attempt() -> None:
     assert merge_node_attempts(
-        {"source_finding": 1, "source_extraction": 4},
-        {"source_extraction": 1, "evidence_relations": 2},
+        {"problem_understanding": 1, "hypothesis_design": 4},
+        {"hypothesis_design": 1, "protocol_design": 2},
     ) == {
-        "source_finding": 1,
-        "source_extraction": 4,
-        "evidence_relations": 2,
+        "problem_understanding": 1,
+        "hypothesis_design": 4,
+        "protocol_design": 2,
     }
 
 
@@ -53,7 +53,7 @@ def test_restart_persisted_interrupt_with_new_attempt_is_single_graph_update(
             attempt=1,
             dispatch_kind="start",
             input_snapshot_hash="a" * 64,
-            workflow_version_id="challenge-cup-research-v2.1.0",
+            workflow_version_id="wv-268aa6e8dea8",
             team_id="research-team",
         )
         entered = harness.coordinator.start_attempt(start)
@@ -61,7 +61,7 @@ def test_restart_persisted_interrupt_with_new_attempt_is_single_graph_update(
         assert entered.pending_action.node_id == "problem_understanding"
 
         # 图入口是 problem_understanding：先走通入口节点，线程才中断在
-        # source_finding，与生产首发 dispatch 路径一致。
+        # problem_understanding，与当前主图首发 dispatch 路径一致。
         entry_receipt = ExecutionReceipt(
             action_id=action_id_for("run-restart", "problem_understanding", 1),
             node_run_id="nr-run-restart-problem_understanding-a1",
@@ -72,7 +72,7 @@ def test_restart_persisted_interrupt_with_new_attempt_is_single_graph_update(
             problem=None,
             completed_at_ms=FIXED_NOW_MS,
         )
-        finding = harness.coordinator.resume_action(
+        hypothesis = harness.coordinator.resume_action(
             GraphDispatch(
                 action_id=entry_receipt.action_id,
                 run_id="run-restart",
@@ -80,43 +80,20 @@ def test_restart_persisted_interrupt_with_new_attempt_is_single_graph_update(
                 node_id="problem_understanding",
                 attempt=1,
                 dispatch_kind="resume_action",
+                workflow_version_id="wv-268aa6e8dea8",
                 receipt=entry_receipt,
             )
         )
-        assert finding.pending_action is not None
-        assert finding.pending_action.node_id == "source_finding"
-
-        finding_receipt = ExecutionReceipt(
-            action_id=action_id_for("run-restart", "source_finding", 1),
-            node_run_id="nr-run-restart-source_finding-a1",
-            outcome="succeeded",
-            artifact_receipt_ids=(),
-            execution_anchor_id=None,
-            budget_receipt_id=None,
-            problem=None,
-            completed_at_ms=FIXED_NOW_MS,
-        )
-        extraction = harness.coordinator.resume_action(
-            GraphDispatch(
-                action_id=finding_receipt.action_id,
-                run_id="run-restart",
-                node_run_id=finding_receipt.node_run_id,
-                node_id="source_finding",
-                attempt=1,
-                dispatch_kind="resume_action",
-                receipt=finding_receipt,
-            )
-        )
-        assert extraction.pending_action is not None
-        assert extraction.pending_action.node_id == "source_extraction"
-        assert extraction.pending_action.attempt == 1
+        assert hypothesis.pending_action is not None
+        assert hypothesis.pending_action.node_id == "hypothesis_design"
+        assert hypothesis.pending_action.attempt == 1
 
         # Reproduce the stale task-specific resume left by a failed replay.
         # The durable checkpoint must remain recoverable even though the bad
         # receipt was persisted as a pending write before the task failed.
         stale_receipt = ExecutionReceipt(
-            action_id=finding_receipt.action_id,
-            node_run_id=finding_receipt.node_run_id,
+            action_id=entry_receipt.action_id,
+            node_run_id=entry_receipt.node_run_id,
             outcome="succeeded",
             artifact_receipt_ids=(),
             execution_anchor_id=None,
@@ -130,10 +107,11 @@ def test_restart_persisted_interrupt_with_new_attempt_is_single_graph_update(
                     action_id=stale_receipt.action_id,
                     run_id="run-restart",
                     node_run_id=stale_receipt.node_run_id,
-                    node_id="source_extraction",
+                    node_id="hypothesis_design",
                     attempt=1,
                     dispatch_kind="resume_action",
                     team_id="research-team",
+                    workflow_version_id="wv-268aa6e8dea8",
                     receipt=stale_receipt,
                 )
             )
@@ -142,19 +120,20 @@ def test_restart_persisted_interrupt_with_new_attempt_is_single_graph_update(
             GraphDispatch(
                 action_id="act-driver-retry",
                 run_id="run-restart",
-                node_run_id="nr-run-restart-source_extraction-a4",
-                node_id="source_extraction",
+                node_run_id="nr-run-restart-hypothesis_design-a4",
+                node_id="hypothesis_design",
                 attempt=4,
                 dispatch_kind="start",
                 team_id="research-team",
+                workflow_version_id="wv-268aa6e8dea8",
             )
         )
 
         assert restarted.pending_action is not None
-        assert restarted.pending_action.node_id == "source_extraction"
+        assert restarted.pending_action.node_id == "hypothesis_design"
         assert restarted.pending_action.attempt == 4
         assert restarted.pending_action.action_id == action_id_for(
-            "run-restart", "source_extraction", 4
+            "run-restart", "hypothesis_design", 4
         )
 
         # A worker crash/requeue can persist another mismatched resume against
@@ -166,10 +145,11 @@ def test_restart_persisted_interrupt_with_new_attempt_is_single_graph_update(
                     action_id=stale_receipt.action_id,
                     run_id="run-restart",
                     node_run_id=stale_receipt.node_run_id,
-                    node_id="source_extraction",
+                    node_id="hypothesis_design",
                     attempt=4,
                     dispatch_kind="resume_action",
                     team_id="research-team",
+                    workflow_version_id="wv-268aa6e8dea8",
                     receipt=stale_receipt,
                 )
             )
@@ -178,17 +158,18 @@ def test_restart_persisted_interrupt_with_new_attempt_is_single_graph_update(
             GraphDispatch(
                 action_id="act-driver-retry-again",
                 run_id="run-restart",
-                node_run_id="nr-run-restart-source_extraction-a5",
-                node_id="source_extraction",
+                node_run_id="nr-run-restart-hypothesis_design-a5",
+                node_id="hypothesis_design",
                 attempt=5,
                 dispatch_kind="start",
                 team_id="research-team",
+                workflow_version_id="wv-268aa6e8dea8",
             )
         )
         assert restarted_again.pending_action is not None
         assert restarted_again.pending_action.attempt == 5
         assert restarted_again.pending_action.action_id == action_id_for(
-            "run-restart", "source_extraction", 5
+            "run-restart", "hypothesis_design", 5
         )
     finally:
         harness.close()
@@ -201,12 +182,12 @@ def test_retry_uses_persisted_interrupt_when_checkpoint_next_is_empty(
     harness = GraphHarness(tmp_path)
     try:
         harness.seed()
-        harness.start_thread_to("source_finding")
+        harness.start_thread_to("problem_understanding")
         first_pending = harness.latest_adapter_pending()
         assert first_pending is not None
         harness.consume_adapter(first_pending.action_id)
 
-        finding = harness.commands.store.latest_attempt("run-test", "source_finding")
+        finding = harness.commands.store.latest_attempt("run-test", "problem_understanding")
         assert finding is not None
 
         def seed_completed_finding(uow):
@@ -219,9 +200,9 @@ def test_retry_uses_persisted_interrupt_when_checkpoint_next_is_empty(
             uow.repository.insert_handoff(
                 handoff_id="ho-interrupt-recovery",
                 run_id="run-test",
-                edge_id="source_finding->source_extraction",
+                edge_id="problem_understanding->hypothesis_design",
                 from_node_run_id=finding.node_run_id,
-                to_node_id="source_extraction",
+                to_node_id="hypothesis_design",
                 to_node_run_id=None,
                 gate_kind="auto",
                 input_snapshot_hash="a" * 64,
@@ -266,7 +247,7 @@ def test_retry_uses_persisted_interrupt_when_checkpoint_next_is_empty(
             snapshot = dict(original_snapshot(run_id, workflow_version_id))
             values = dict(snapshot.get("values") or {})
             attempts = dict(values.get("node_attempts") or {})
-            if attempts.get("source_extraction"):
+            if attempts.get("hypothesis_design"):
                 # Real persisted SQLite checkpoints can expose the interrupt
                 # while ``state.next`` is empty after recompilation.
                 snapshot["nextNodeIds"] = []
@@ -276,11 +257,11 @@ def test_retry_uses_persisted_interrupt_when_checkpoint_next_is_empty(
             harness.coordinator, "snapshot", persisted_interrupt_snapshot
         )
 
-        harness.enqueue_graph_dispatch("run-test", "source_extraction", 2)
+        harness.enqueue_graph_dispatch("run-test", "hypothesis_design", 2)
         harness.worker.run_once()
 
         extraction = harness.commands.store.latest_attempt(
-            "run-test", "source_extraction"
+            "run-test", "hypothesis_design"
         )
         assert extraction is not None
         assert extraction.attempt == 2
@@ -289,7 +270,7 @@ def test_retry_uses_persisted_interrupt_when_checkpoint_next_is_empty(
         pending = harness.latest_adapter_pending()
         assert pending is not None
         payload = json.loads(pending.payload_json)
-        assert payload["nodeId"] == "source_extraction"
+        assert payload["nodeId"] == "hypothesis_design"
         assert int(payload["attempt"]) == 2
     finally:
         harness.close()
@@ -316,7 +297,7 @@ def test_start_attempt_persists_binding_and_budget_authorities(
                 attempt=1,
                 dispatch_kind="start",
                 input_snapshot_hash="a" * 64,
-                workflow_version_id="challenge-cup-research-v2.1.0",
+                workflow_version_id="wv-268aa6e8dea8",
                 team_id="research-team",
                 binding_snapshot_id="binding-snapshot-1",
                 budget_policy_hash="d" * 64,
@@ -328,7 +309,7 @@ def test_start_attempt_persists_binding_and_budget_authorities(
         assert entered.pending_action.binding_snapshot_id == "binding-snapshot-1"
         assert entered.pending_action.budget_policy_hash == "d" * 64
 
-        snapshot = harness.coordinator.snapshot("run-binding")
+        snapshot = harness.coordinator.snapshot("run-binding", "wv-268aa6e8dea8")
         values = dict(snapshot.get("values") or {})
         assert values["binding_snapshot_id"] == "binding-snapshot-1"
         assert values["budget_policy_hash"] == "d" * 64
@@ -341,7 +322,7 @@ def test_start_attempt_persists_binding_and_budget_authorities(
         reopened = GraphHarness(tmp_path)
         try:
             reopened_values = dict(
-                reopened.coordinator.snapshot("run-binding").get("values") or {}
+                reopened.coordinator.snapshot("run-binding", "wv-268aa6e8dea8").get("values") or {}
             )
             assert reopened_values["binding_snapshot_id"] == "binding-snapshot-1"
             rebuilt = build_pending_action(reopened_values, "problem_understanding")
@@ -371,7 +352,9 @@ def test_old_version_checkpoint_is_discarded_and_rebuilt_from_ledger(
         harness.seed()
         harness.enqueue_graph_dispatch("run-test", "problem_understanding", 1)
         harness.worker.run_once()
-        stale = harness.coordinator.snapshot("run-test")
+        stale = harness.coordinator.snapshot(
+            "run-test", workflow_version_id_for_run(harness, "run-test")
+        )
         stale_values = dict(stale.get("values") or {})
         assert stale_values.get("checkpoint_version") == 1
         stale_checkpoint_id = stale.get("checkpointId")
@@ -381,7 +364,9 @@ def test_old_version_checkpoint_is_discarded_and_rebuilt_from_ledger(
         monkeypatch.undo()
 
         # Decision callers no longer see the stale thread.
-        discarded = harness.coordinator.snapshot("run-test")
+        discarded = harness.coordinator.snapshot(
+            "run-test", workflow_version_id_for_run(harness, "run-test")
+        )
         assert discarded.get("values") == {}
         assert discarded.get("nextNodeIds") == []
         assert discarded.get("pendingAction") is None
@@ -399,7 +384,9 @@ def test_old_version_checkpoint_is_discarded_and_rebuilt_from_ledger(
         )
         harness.worker.run_once()
 
-        rebuilt = harness.coordinator.snapshot("run-test")
+        rebuilt = harness.coordinator.snapshot(
+            "run-test", workflow_version_id_for_run(harness, "run-test")
+        )
         rebuilt_values = dict(rebuilt.get("values") or {})
         assert (
             rebuilt_values.get("checkpoint_version")
@@ -417,20 +404,20 @@ def test_old_version_checkpoint_is_discarded_and_rebuilt_from_ledger(
         harness.close()
 
 
-def test_checkpoint_version_bump_discards_v2_checkpoints() -> None:
-    """v3 renamed ``artifact_refs`` to ``latest_node_artifact_refs``.
+def test_checkpoint_version_bump_discards_v3_checkpoints() -> None:
+    """v4 pins the single run/thread checkpoint identity.
 
-    Checkpoints written by schema version 2 carry the retired channel set and
+    Checkpoints written by schema version 3 carry the retired identity shape and
     must be discarded (rebuilt from Ledger authority), never resumed.
     """
 
-    assert challenge_cup_runtime.CHALLENGE_CUP_CHECKPOINT_VERSION == 3
+    assert challenge_cup_runtime.CHALLENGE_CUP_CHECKPOINT_VERSION == 4
     assert (
-        challenge_cup_runtime.checkpoint_values_discarded({"checkpoint_version": 2})
+        challenge_cup_runtime.checkpoint_values_discarded({"checkpoint_version": 3})
         is True
     )
     assert (
-        challenge_cup_runtime.checkpoint_values_discarded({"checkpoint_version": 3})
+        challenge_cup_runtime.checkpoint_values_discarded({"checkpoint_version": 4})
         is False
     )
 

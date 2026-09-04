@@ -148,11 +148,7 @@ def _manifest(
 
 
 _PRE_ITERATION_NODES = [
-    "source_finding",
-    "source_extraction",
-    "evidence_relations",
-    "knowledge_ingestion",
-    "knowledge_handoff",
+    "problem_understanding",
     "hypothesis_design",
     "protocol_design",
     "protocol_review",
@@ -588,8 +584,8 @@ def _insert_remediation_continuation(
             "parentRunId": parent_run_id,
             "supersedesRunId": parent_run_id,
             "forkedFromRunId": parent_run_id,
-            "forkedFromNodeId": "source_extraction",
-            "sourceNodeId": "source_extraction",
+            "forkedFromNodeId": "protocol_design",
+            "sourceNodeId": "protocol_design",
             "resolutionKind": "add_budget",
         },
     )

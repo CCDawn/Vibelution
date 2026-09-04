@@ -368,7 +368,7 @@ def build_stage_one_grounded_generation_context(
     question_id: str,
     store: Any | None = None,
 ) -> dict[str, Any] | None:
-    """Build R1 input only for a run pinned to the current stage-one policy."""
+    """Build grounded R1 input for a canonical Challenge Cup workflow run."""
     resolved = store
     if resolved is None:
         from core.web.services.team_workflow.research_runtime.formal_write_runtime import (
@@ -391,41 +391,29 @@ def build_stage_one_grounded_generation_context(
             "code": "workflow_snapshot_invalid",
             "allowedEvidenceRefs": [],
         }
-    raw_policy = snapshot.get("stageOneCompletionPolicy")
-    if raw_policy is None:
-        return None
-    if not isinstance(raw_policy, Mapping):
+    try:
+        from core.research.workflow.definition import (
+            CHALLENGE_CUP_WORKFLOW_ID,
+            SCHEMA_VERSION,
+        )
+        from core.research.workflow.definition_registry import resolve_definition_by_version_id
+
+        pinned = resolve_definition_by_version_id(
+            _text(getattr(run, "workflow_version_id", ""))
+        )
+    except Exception:
         return {
             "status": "blocked",
-            "code": "stage_one_policy_invalid",
+            "code": "workflow_definition_unavailable",
             "allowedEvidenceRefs": [],
         }
-    from core.research.competition.stage_one_completion_policy import (
-        matches_current_stage_one_policy,
-    )
-
-    # The run's embedded policy may be the tracked current policy verbatim
-    # (2.1.0 runs) or the copy re-targeted at the truncated stage-one
-    # definition the run is pinned to; anything else fails closed.
-    run_definition_id = ""
-    version_id = _text(getattr(run, "workflow_version_id", ""))
-    if version_id:
-        try:
-            from core.research.workflow.definition_registry import (
-                resolve_definition_by_version_id,
-            )
-
-            pinned = resolve_definition_by_version_id(version_id)
-            run_definition_id = f"{pinned.workflowId}@{pinned.schemaVersion}"
-        except Exception:  # noqa: BLE001 - unpinnable version keeps strict tracked matching
-            run_definition_id = ""
-    if not matches_current_stage_one_policy(
-        raw_policy,
-        workflow_definition_id=run_definition_id,
+    if (
+        pinned.workflowId != CHALLENGE_CUP_WORKFLOW_ID
+        or pinned.schemaVersion != SCHEMA_VERSION
     ):
         return {
             "status": "blocked",
-            "code": "stage_one_policy_invalid",
+            "code": "workflow_definition_unavailable",
             "allowedEvidenceRefs": [],
         }
     normalized_team_id = _text(team_id)

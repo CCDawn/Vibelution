@@ -76,9 +76,10 @@ def test_graph_dispatch_round_trips_scoped_binding_metadata() -> None:
         action_id="act-1",
         run_id="run-1",
         node_run_id="node-run-1",
-        node_id="hypothesis_review",
+        node_id="hypothesis_design",
         attempt=1,
         dispatch_kind="start",
+        workflow_version_id="wv-268aa6e8dea8",
         discussion_scope=_scope(),
         scope_binding_required=True,
     )

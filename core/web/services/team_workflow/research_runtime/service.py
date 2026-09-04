@@ -32,6 +32,7 @@ from core.research.workflow.definition import (
     CHALLENGE_CUP_WORKFLOW_ID,
     build_challenge_cup_workflow_definition,
 )
+from core.research.workflow.definition_registry import register_or_resolve
 from core.research.workflow.models import ActorKind
 from core.research.workflow.projection import build_canvas_projection
 
@@ -467,21 +468,12 @@ def _definition_meta_from(
     definition: Any = None,
     identity: Any = None,
 ) -> tuple[Any, Any]:
-    """Validate the workflowId and return (definition, identity) for creation.
-
-    Callers that must keep ONE rollout-mode reading across a whole creation
-    transaction (e.g. ``create_run``) pass the already-resolved
-    ``definition``/``identity`` through; every independent call resolves the
-    current rollout mode exactly once here.
-    """
+    """Validate the workflowId and return its canonical creation identity."""
     if workflow_id != CHALLENGE_CUP_WORKFLOW_ID:
         raise ResearchWorkflowError(f"Unknown workflowId: {workflow_id}", code="unknown_workflow")
     if definition is None or identity is None:
-        # Rollout-mode aware: off/shadow pin the 2.1.0 default, on pins the
-        # registered main-flow 3.0.0 definition (see knowledge_rollout).
-        from .knowledge_rollout import creation_workflow_definition
-
-        definition, identity = creation_workflow_definition()
+        definition = build_challenge_cup_workflow_definition()
+        identity = register_or_resolve(definition)
     return definition, identity
 
 
@@ -787,11 +779,8 @@ class ResearchWorkflowRuntimeService:
     ) -> dict[str, Any]:
         with self._lock:
             # ONE rollout-mode reading per creation: the (definition, identity)
-            # pair resolved here is threaded through every downstream use
-            # (binding snapshots, frozen input snapshot, initial checkpoint,
-            # run record).  A mode flip between two independent reads could
-            # otherwise produce a workflowVersionId that disagrees with the
-            # checkpoint/structureHash inside the same run.
+            # The canonical definition identity is threaded through every
+            # downstream use in this transaction.
             creation_definition, creation_identity = _definition_meta_from(workflow_id)
             create_input_fingerprints = _create_request_fingerprints(run_input)
             create_input_fingerprint = create_input_fingerprints[0]
@@ -817,7 +806,7 @@ class ResearchWorkflowRuntimeService:
                         code="idempotency_conflict",
                     )
                 return existing
-            thread_id = f"thread-{run_id}"
+            thread_id = run_id
             team_id = str(run_input.get("teamId") or "").strip()
             # Team members always provide workflow defaults. Explicit and
             # service-level layers may add stage/node overrides only.
@@ -852,8 +841,7 @@ class ResearchWorkflowRuntimeService:
                 raise ResearchWorkflowError(str(exc), code="invalid_run_input") from exc
 
             # The pinned definition must be the same object identity used for
-            # the initial checkpoint and the frozen run record — the exact
-            # pair resolved at the top of this method (single mode reading).
+            # the initial checkpoint and the frozen run record.
             definition = creation_definition
             checkpoint_id = prepare_initial_checkpoint(
                 self._checkpoint_path,

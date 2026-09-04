@@ -122,6 +122,7 @@ def test_protocol_review_task_context_exposes_formal_input(monkeypatch) -> None:
     task = _review_task()
     service = SimpleNamespace(
         _WORKFLOW_LOCK=threading.RLock(),
+        _normalize_required_id=lambda value, _message: str(value).strip(),
         get_research_project=lambda *_args: {"name": "Project 1"},
         _load_experiment_plan_store=lambda _team_id: {"plans": []},
     )
@@ -129,6 +130,11 @@ def test_protocol_review_task_context_exposes_formal_input(monkeypatch) -> None:
     monkeypatch.setattr(
         research_project_agent_tasks,
         "require_research_project_agent_task",
+        lambda *_args, **_kwargs: task,
+    )
+    monkeypatch.setattr(
+        research_project_agent_tasks,
+        "_read_research_project_agent_task_record",
         lambda *_args, **_kwargs: task,
     )
     monkeypatch.setattr(

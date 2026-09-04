@@ -3,9 +3,8 @@
  *
  * Derives the two-stage presentation state (假说生成 / 研究计划与实验) from
  * data the question detail payload already carries — the same authorities the
- * panel already renders (record status + selection human gate). Stage two is
- * never auto-activated server-side (allowPhaseTwoAdvance=false), so the stage
- * projection treats "未激活" as the constant default, not a fetched state.
+ * panel already renders (record status + selection human gate). The canonical
+ * workflow proceeds into research planning once the hypothesis is settled.
  */
 import type { ChallengeQuestionRunDetailPayload } from "../../../api/types";
 
@@ -15,9 +14,9 @@ export type ChallengeQuestionStageOneStatus = "hypothesis_generating" | "hypothe
 export type ChallengeQuestionStageProjection = {
   /** 假说生成：run 活跃/候选评审中 → generating；stage-one 收门通过 → settled。 */
   stageOne: ChallengeQuestionStageOneStatus;
-  /** 研究计划与实验：恒为未激活（二阶段只能按题显式开启，永不自动激活）。 */
-  stageTwoActive: false;
-  /** 历史/预投影研究计划产物是否存在于本 run 输出（SCI-091 类历史题）。 */
+  /** 研究计划与实验是否已进入可执行阶段。 */
+  stageTwoActive: boolean;
+  /** 研究计划产物是否存在于本 run 输出。 */
   hasResearchPlanProposal: boolean;
 };
 
@@ -49,7 +48,7 @@ export function deriveChallengeQuestionStageProjection(
   );
   return {
     stageOne: settled ? "hypothesis_settled" : "hypothesis_generating",
-    stageTwoActive: false,
+    stageTwoActive: settled,
     hasResearchPlanProposal,
   };
 }
@@ -65,9 +64,10 @@ export function stageOneStatusCopy(
   return lang === "zh" ? "假说生成中" : "Generating";
 }
 
-/** Chinese/English copy for the constant stage-two state chip. */
-export function stageTwoStatusCopy(lang: "zh" | "en"): string {
-  return lang === "zh" ? "未激活" : "Inactive";
+/** Chinese/English copy for the stage-two state chip. */
+export function stageTwoStatusCopy(active: boolean, lang: "zh" | "en"): string {
+  if (active) return lang === "zh" ? "进行中" : "In progress";
+  return lang === "zh" ? "等待假说确定" : "Awaiting hypothesis";
 }
 
 /** Zone titles — descriptive names, never ordinals. */
@@ -81,9 +81,14 @@ export function stageZoneTitle(
   return lang === "zh" ? "研究计划与实验" : "Research plan & experiment";
 }
 
-/** One-line stage-two activation semantics shown with the inactive zone. */
-export function stageTwoInactiveHint(lang: "zh" | "en"): string {
+/** One-line progression semantics for the plan and experiment zone. */
+export function stageTwoProgressHint(active: boolean, lang: "zh" | "en"): string {
+  if (active) {
+    return lang === "zh"
+      ? "假说已确定，主流程将继续推进研究计划、协议与实验。"
+      : "The hypothesis is settled; the main workflow continues through planning, protocol, and experiments.";
+  }
   return lang === "zh"
-    ? "第二阶段未激活，需按题显式开启；以下内容为历史/预投影（proposal only）产物，仅供参考。"
-    : "Stage two is inactive and must be enabled explicitly per question; content below is historical / proposal-only.";
+    ? "完成假说确定后，主流程会自动进入研究计划与实验。"
+    : "The main workflow enters research planning and experiments after the hypothesis is settled.";
 }

@@ -252,7 +252,7 @@ def test_event_envelope_roundtrip() -> None:
         sequence=5,
         team_id="research-team",
         workflow_id="challenge-cup-research",
-        workflow_version_id="v2.1.0",
+        workflow_version_id="wv-268aa6e8dea8",
         run_id="run-1",
         run_version=17,
         event_type=WorkflowEventType.NODE_STARTING,

@@ -18,7 +18,6 @@ from typing import Any
 
 from core.research.workflow.challenge_cup_runtime import (
     ChallengeCupGraphCoordinator,
-    successor_map,
 )
 from core.research.workflow.ledger import WorkflowLedgerStore
 
@@ -446,7 +445,6 @@ def build_workflow_runtime(
         registry=registry,
         ports=ports,
         owner_id="adapter-worker",
-        successor_fn=lambda node_id: successor_map().get(node_id, ()),
         after_commit_hook=combined_wake,
     )
     fork_worker = CheckpointForkWorker(

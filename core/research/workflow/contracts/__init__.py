@@ -1,4 +1,4 @@
-"""Public v2.1 workflow contract surface.
+"""Public Challenge Cup workflow contract surface.
 
 Each independently changing contract stays in its owning module; callers import
 from this package boundary instead of growing ``models.py``.

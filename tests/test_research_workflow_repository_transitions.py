@@ -21,7 +21,7 @@ def test_illegal_attempt_transition_raises(tmp_path: Path) -> None:
     try:
         harness.seed_run()
         harness.service.submit(harness.request(idempotency_key="ui:key-1"))
-        attempt = harness.store.latest_attempt("run-test", "source_finding")
+        attempt = harness.store.latest_attempt("run-test", "problem_understanding")
         assert attempt is not None and attempt.status == "starting"
 
         # 先推进到 succeeded（starting->dispatching->succeeded 合法链）。
@@ -38,7 +38,7 @@ def test_illegal_attempt_transition_raises(tmp_path: Path) -> None:
             )
 
         harness.store.submit(to_succeeded, force_flush=True).result(timeout=10)
-        attempt = harness.store.latest_attempt("run-test", "source_finding")
+        attempt = harness.store.latest_attempt("run-test", "problem_understanding")
         assert attempt.status == "succeeded"
 
         with pytest.raises(ValueError, match="illegal node attempt transition"):
@@ -49,7 +49,7 @@ def test_illegal_attempt_transition_raises(tmp_path: Path) -> None:
 
             harness.store.submit(bad, force_flush=True).result(timeout=10)
         # 状态未被改动。
-        attempt = harness.store.latest_attempt("run-test", "source_finding")
+        attempt = harness.store.latest_attempt("run-test", "problem_understanding")
         assert attempt.status == "succeeded"
     finally:
         harness.close()
@@ -78,7 +78,7 @@ def test_legal_transitions_still_pass(tmp_path: Path) -> None:
     try:
         harness.seed_run()
         harness.service.submit(harness.request(idempotency_key="ui:key-1"))
-        attempt = harness.store.latest_attempt("run-test", "source_finding")
+        attempt = harness.store.latest_attempt("run-test", "problem_understanding")
 
         # starting -> dispatching -> running -> succeeded 合法链。
         def advance(status: str):
@@ -92,7 +92,7 @@ def test_legal_transitions_still_pass(tmp_path: Path) -> None:
         advance("dispatching")
         advance("running")
         advance("succeeded")
-        attempt = harness.store.latest_attempt("run-test", "source_finding")
+        attempt = harness.store.latest_attempt("run-test", "problem_understanding")
         assert attempt.status == "succeeded"
 
         # 终态 -> stale（retry 谱系）合法。
@@ -102,7 +102,7 @@ def test_legal_transitions_still_pass(tmp_path: Path) -> None:
             )
 
         harness.store.submit(stale, force_flush=True).result(timeout=10)
-        attempt = harness.store.latest_attempt("run-test", "source_finding")
+        attempt = harness.store.latest_attempt("run-test", "problem_understanding")
         assert attempt.status == "stale"
     finally:
         harness.close()
@@ -113,7 +113,7 @@ def test_illegal_handoff_transition_raises(tmp_path: Path) -> None:
     try:
         harness.seed_run()
         harness.service.submit(harness.request(idempotency_key="ui:key-1"))
-        attempt = harness.store.latest_attempt("run-test", "source_finding")
+        attempt = harness.store.latest_attempt("run-test", "problem_understanding")
 
         def seed_handoff(uow):
             from tests._support.workflow_ledger_helpers import FIXED_NOW_MS as NOW
@@ -121,9 +121,9 @@ def test_illegal_handoff_transition_raises(tmp_path: Path) -> None:
             uow.repository.insert_handoff(
                 handoff_id="ho-1",
                 run_id="run-test",
-                edge_id="source_finding->source_extraction",
+                edge_id="problem_understanding->hypothesis_design",
                 from_node_run_id=attempt.node_run_id,
-                to_node_id="source_extraction",
+                to_node_id="hypothesis_design",
                 to_node_run_id=None,
                 gate_kind="auto",
                 input_snapshot_hash="a" * 64,

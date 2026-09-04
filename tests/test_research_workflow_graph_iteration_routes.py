@@ -6,10 +6,17 @@ from pathlib import Path
 
 import pytest
 
+from core.research.workflow.definition import build_challenge_cup_workflow_definition
+from core.research.workflow.definition_registry import definition_identity
 from core.web.services.team_workflow.research_runtime.graph_dispatch_worker import (
     GraphDecisionError,
 )
 from tests._support.graph_helpers import GraphHarness, NODE_ORDER
+
+
+CURRENT_VERSION_ID = definition_identity(
+    build_challenge_cup_workflow_definition()
+).workflowVersionId
 
 
 def _walk_to(node_id: str, harness: GraphHarness) -> dict:
@@ -174,7 +181,7 @@ def test_revise_protocol_ends_graph_for_fork(tmp_path: Path) -> None:
         harness.worker.run_once()
         # revise_protocol 结束图：不再有新的 adapter pending。
         assert harness.latest_adapter_pending() is None
-        snapshot = harness.coordinator.snapshot("run-test")
+        snapshot = harness.coordinator.snapshot("run-test", CURRENT_VERSION_ID)
         assert snapshot["nextNodeIds"] == []
     finally:
         harness.close()
@@ -210,13 +217,13 @@ def test_routed_successors_stop_goes_to_version_governance() -> None:
         routed_successors,
     )
 
-    assert routed_successors("iteration_decision", "stop") == ("version_governance",)
-    assert routed_successors("iteration_decision", "rerun_same_protocol") == (
+    assert routed_successors("iteration_decision", "stop", CURRENT_VERSION_ID) == ("version_governance",)
+    assert routed_successors("iteration_decision", "rerun_same_protocol", CURRENT_VERSION_ID) == (
         "controlled_run",
     )
-    assert routed_successors("iteration_decision", "") == ()
-    assert routed_successors("version_governance", "stop") == ("result_package",)
-    assert routed_successors("version_governance", "promote_candidate") == (
+    assert routed_successors("iteration_decision", "", CURRENT_VERSION_ID) == ()
+    assert routed_successors("version_governance", "stop", CURRENT_VERSION_ID) == ("result_package",)
+    assert routed_successors("version_governance", "promote_candidate", CURRENT_VERSION_ID) == (
         "candidate_promotion",
     )
 
@@ -254,7 +261,7 @@ def test_graph_and_worker_routes_share_iteration_decision_tables() -> None:
         definition = definition_route_after_iteration(
             {"iteration_decision": {"decisionKind": kind.value}}
         )
-        worker = routed_successors("iteration_decision", kind.value)
+        worker = routed_successors("iteration_decision", kind.value, CURRENT_VERSION_ID)
         if target is None:
             assert runtime == END
             assert definition == END
@@ -273,9 +280,9 @@ def test_graph_and_worker_routes_share_iteration_decision_tables() -> None:
                 )
                 == governed
             )
-            assert routed_successors("version_governance", kind.value) == (governed,)
+            assert routed_successors("version_governance", kind.value, CURRENT_VERSION_ID) == (governed,)
         else:
-            assert routed_successors("version_governance", kind.value) == ()
+            assert routed_successors("version_governance", kind.value, CURRENT_VERSION_ID) == ()
 
 
 def test_branch_decision_from_run_heals_compact_authority_drift(
@@ -656,6 +663,7 @@ def _strand_iteration_at_end(harness: GraphHarness, decision: dict) -> None:
                 node_id="iteration_decision",
                 attempt=int(decision["attempt"]),
                 dispatch_kind="resume_action",
+                workflow_version_id=CURRENT_VERSION_ID,
                 team_id="research-team",
                 input_snapshot_hash="a" * 64,
                 receipt=receipt,
@@ -676,7 +684,7 @@ def test_enter_node_after_empty_decision_lands_on_version_governance(
         harness.enqueue_graph_dispatch("run-test", "problem_understanding", 1)
         decision = _walk_to("iteration_decision", harness)
         _strand_iteration_at_end(harness, decision)
-        snap = harness.coordinator.snapshot("run-test")
+        snap = harness.coordinator.snapshot("run-test", CURRENT_VERSION_ID)
         assert not snap.get("nextNodeIds")
         result = harness.coordinator.enter_node(
             GraphDispatch(
@@ -686,6 +694,7 @@ def test_enter_node_after_empty_decision_lands_on_version_governance(
                 node_id="version_governance",
                 attempt=1,
                 dispatch_kind="start",
+                workflow_version_id=CURRENT_VERSION_ID,
                 team_id="research-team",
                 input_snapshot_hash="a" * 64,
                 state_update={"branch_decision": "stop"},
@@ -693,7 +702,7 @@ def test_enter_node_after_empty_decision_lands_on_version_governance(
         )
         assert result.pending_action is not None
         assert result.pending_action.node_id == "version_governance"
-        snap2 = harness.coordinator.snapshot("run-test")
+        snap2 = harness.coordinator.snapshot("run-test", CURRENT_VERSION_ID)
         assert (snap2.get("pendingAction") or {}).get("nodeId") == "version_governance"
     finally:
         harness.close()
@@ -709,7 +718,7 @@ def test_snapshot_heals_duplicate_run_id_pending_writes(tmp_path: Path) -> None:
         harness.enqueue_graph_dispatch("run-test", "problem_understanding", 1)
         decision = _walk_to("iteration_decision", harness)
         _strand_iteration_at_end(harness, decision)
-        graph, stack = harness.coordinator._compile()
+        graph, stack = harness.coordinator._compile(CURRENT_VERSION_ID)
         try:
             graph.invoke(
                 Command(
@@ -726,7 +735,7 @@ def test_snapshot_heals_duplicate_run_id_pending_writes(tmp_path: Path) -> None:
             pass
         finally:
             stack.close()
-        snap = harness.coordinator.snapshot("run-test")
+        snap = harness.coordinator.snapshot("run-test", CURRENT_VERSION_ID)
         assert snap.get("checkpointId")
         result = harness.coordinator.enter_node(
             GraphDispatch(
@@ -736,6 +745,7 @@ def test_snapshot_heals_duplicate_run_id_pending_writes(tmp_path: Path) -> None:
                 node_id="version_governance",
                 attempt=1,
                 dispatch_kind="start",
+                workflow_version_id=CURRENT_VERSION_ID,
                 team_id="research-team",
                 input_snapshot_hash="a" * 64,
                 state_update={"branch_decision": "stop"},
@@ -743,6 +753,6 @@ def test_snapshot_heals_duplicate_run_id_pending_writes(tmp_path: Path) -> None:
         )
         assert result.pending_action is not None
         assert result.pending_action.node_id == "version_governance"
-        assert harness.coordinator.snapshot("run-test").get("pendingAction")
+        assert harness.coordinator.snapshot("run-test", CURRENT_VERSION_ID).get("pendingAction")
     finally:
         harness.close()

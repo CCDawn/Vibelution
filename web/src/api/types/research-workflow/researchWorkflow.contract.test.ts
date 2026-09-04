@@ -74,7 +74,7 @@ describe("researchWorkflow formal contracts (T6)", () => {
         runId: "run-1",
         teamId: "research-team",
         workflowId: "challenge-cup-research",
-        workflowVersionId: "challenge-cup-research-v2.1.0",
+        workflowVersionId: "challenge-cup-research@3.0.0",
         threadId: "thread-1",
         projectId: "challenge-sci-096",
         questionId: "SCI-096",

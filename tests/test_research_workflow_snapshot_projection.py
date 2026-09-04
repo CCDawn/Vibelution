@@ -11,7 +11,7 @@ import pytest
 from core.research.workflow.contracts import CommandOffer, WorkflowCommandKind
 from core.research.workflow.contracts.discussion_scope import WorkflowDiscussionScopeV1
 from core.research.workflow.definition import build_challenge_cup_workflow_definition
-from core.web.services.team_workflow.research_runtime.command_offer_builder import (
+from core.web.services.team_workflow.research_runtime.command_offers import (
     build_command_offers,
 )
 from core.web.services.team_workflow.research_runtime.projection_builder import (
@@ -708,12 +708,12 @@ def test_snapshot_live_attempt_owns_auto_running_state_over_start_offer() -> Non
     run = replace(
         build_run_record(run_id="run-v2-live-with-start-offer"),
         status="running",
-        active_node_id="source_finding",
+        active_node_id="problem_understanding",
     )
     attempt = build_attempt_record(
         node_run_id="nr-v2-live-with-start-offer",
         run_id=run.run_id,
-        node_id="source_finding",
+        node_id="problem_understanding",
         status="running",
         actor_kind="agent",
     )
@@ -998,25 +998,6 @@ def test_snapshot_projects_artifacts_delivery_and_launch_context() -> None:
         )
     ).to_dict()
     assert snapshot["deliveryStatus"] == "succeeded"
-    assert snapshot["stageOne"] == {
-        "authority": "challenge_program",
-        "completionState": "pending",
-        "formalTopology": {
-            "workflowId": run.workflow_id,
-            "workflowVersionId": run.workflow_version_id,
-            "definitionResolution": "pinned",
-            "role": "execution_authority",
-        },
-        "hypothesisView": {
-            "nodePrefix": "hf_",
-            "role": "operator_projection",
-        },
-        "knowledgeFlow": {
-            "topology": "child_workflow",
-            "rolloutMode": snapshot["knowledgeSideflowMode"],
-            "role": "optional_child_workflow",
-        },
-    }
     assert snapshot["artifactSummary"] == {
         "count": 1,
         "materializedCount": 1,
@@ -1051,17 +1032,17 @@ def test_snapshot_projects_artifacts_delivery_and_launch_context() -> None:
     }
 
 
-def test_snapshot_v2_current_task_and_stage_progress_are_explicit() -> None:
+def test_snapshot_v3_current_task_and_stage_progress_are_explicit() -> None:
     definition = build_challenge_cup_workflow_definition()
     run = replace(
-        build_run_record(run_id="run-v2-explicit-task"),
+        build_run_record(run_id="run-v3-explicit-task"),
         status="created",
-        active_node_id="source_finding",
+        active_node_id="problem_understanding",
         safety_limits_json=json.dumps({"maxAttempts": 4}),
     )
     offer = CommandOffer(
         command=WorkflowCommandKind.START_NODE,
-        node_id="source_finding",
+        node_id="problem_understanding",
         available=True,
         label="启动 资料寻找",
         reason_code="ready",
@@ -1088,7 +1069,7 @@ def test_snapshot_v2_current_task_and_stage_progress_are_explicit() -> None:
     task = payload["currentTask"]
     assert task is not None
     assert task["key"] == "offer:explicit-start"
-    assert task["stageId"] == "knowledge_collection"
+    assert task["stageId"] == "problem_understanding"
     assert task["state"] == "waiting_user"
     assert task["responsibility"] == "user"
     assert task["maxAttempts"] == 4
@@ -1108,7 +1089,7 @@ def test_snapshot_v2_current_task_and_stage_progress_are_explicit() -> None:
 
     progress = payload["progress"]
     assert progress["status"] == "waiting_user"
-    assert progress["currentStageId"] == "knowledge_collection"
+    assert progress["currentStageId"] == "problem_understanding"
     assert progress["completedNodes"] == 0
     assert progress["totalNodes"] == len(definition.nodes)
     assert progress["blockedNodes"] == 0
@@ -1116,9 +1097,9 @@ def test_snapshot_v2_current_task_and_stage_progress_are_explicit() -> None:
     assert progress["blockedNodeIds"] == []
     assert progress["stages"] == [
         {
-            "id": "knowledge_collection",
+            "id": "problem_understanding",
             "completed": 0,
-            "total": 6,
+            "total": 1,
             "blocked": 0,
             "state": "current",
         },
@@ -1175,12 +1156,12 @@ def test_snapshot_v2_waiting_user_stale_blocked_completed_and_terminal_states() 
     stale_blocked_run = replace(
         build_run_record(run_id="run-v2-stale-blocked"),
         status="running",
-        active_node_id="source_extraction",
+        active_node_id="protocol_design",
     )
     stale_blocked_attempt = build_attempt_record(
         node_run_id="nr-v2-stale-blocked",
         run_id=stale_blocked_run.run_id,
-        node_id="source_extraction",
+        node_id="protocol_design",
         status="blocked",
         problem_json=json.dumps(
             {"code": "provider_timeout", "detail": "timed out", "retryable": True}
@@ -1188,7 +1169,7 @@ def test_snapshot_v2_waiting_user_stale_blocked_completed_and_terminal_states() 
     )
     retry_offer = CommandOffer(
         command=WorkflowCommandKind.RETRY_NODE,
-        node_id="source_extraction",
+        node_id="protocol_design",
         available=True,
         label="重试 资料提炼",
         reason_code="retry_available",
@@ -1214,8 +1195,12 @@ def test_snapshot_v2_waiting_user_stale_blocked_completed_and_terminal_states() 
     assert stale_payload["currentTask"]["state"] == "blocked_retryable"
     assert stale_payload["progress"]["status"] == "blocked_retryable"
     assert stale_payload["progress"]["blockedNodes"] == 1
-    assert stale_payload["progress"]["blockedNodeIds"] == ["source_extraction"]
-    assert stale_payload["progress"]["stages"][0]["blocked"] == 1
+    assert stale_payload["progress"]["blockedNodeIds"] == ["protocol_design"]
+    assert next(
+        stage
+        for stage in stale_payload["progress"]["stages"]
+        if stage["id"] == "experiment_design"
+    )["blocked"] == 1
 
     completed_run = replace(
         build_run_record(run_id="run-v2-completed"),

@@ -424,7 +424,7 @@ describe("ChallengeQuestionDetailPanel stage zones", () => {
     const nav = markup.match(/<nav[^>]*aria-label="单题验收章节"[\s\S]*?<\/nav>/)?.[0] || "";
 
     expect(nav).toContain("假说生成");
-    expect(nav).toContain("研究计划与实验 · 未激活");
+    expect(nav).toContain("研究计划与实验 · 进行中");
     // Descriptive zone names, never stage ordinals.
     expect(nav).not.toContain("第一阶段");
     expect(nav).not.toContain("第二阶段");
@@ -452,27 +452,26 @@ describe("ChallengeQuestionDetailPanel stage zones", () => {
     expect(markup).not.toContain("假说已定");
   });
 
-  it("keeps the plan zone permanently inactive with the activation hint", () => {
+  it("marks the plan zone active after the hypothesis is settled", () => {
     const markup = renderAcceptance();
     expect(markup).toContain('data-testid="question-stage-zone-plan"');
-    expect(markup).toContain("未激活");
-    expect(markup).toContain("需按题显式开启");
-    // No stage-two activation entry point anywhere on the page.
+    expect(markup).toContain("进行中");
+    expect(markup).toContain("主流程将继续推进研究计划、协议与实验");
     expect(markup).not.toContain("激活第二阶段");
     expect(markup).not.toContain("开启第二阶段");
   });
 
-  it("flags an existing plan artifact as proposal-only pre-projection", () => {
+  it("renders an existing plan artifact as current workflow output", () => {
     const markup = renderAcceptance();
-    expect(markup).toContain('data-testid="question-plan-proposal-tag"');
-    expect(markup).toContain("预投影（proposal only）");
-    expect(markup).not.toContain('data-testid="question-plan-inactive-empty"');
+    expect(markup).toContain("区分两个假设");
+    expect(markup).not.toContain("proposal only");
+    expect(markup).not.toContain('data-testid="question-plan-pending-empty"');
   });
 
-  it("shows the inactive empty note when the run output carries no plan", () => {
+  it("shows the pending empty note when the run output carries no plan", () => {
     const markup = renderAcceptance({ withoutPlan: true });
-    expect(markup).toContain('data-testid="question-plan-inactive-empty"');
-    expect(markup).not.toContain('data-testid="question-plan-proposal-tag"');
+    expect(markup).toContain('data-testid="question-plan-pending-empty"');
+    expect(markup).toContain("主流程正在继续推进");
   });
 
   it("keeps the read-only archive free of stage zone chrome", () => {

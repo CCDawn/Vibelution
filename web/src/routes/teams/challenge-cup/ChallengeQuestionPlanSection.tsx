@@ -20,18 +20,9 @@ type ChallengeQuestionPlanSectionProps = {
 export function ChallengeQuestionPlanSection({ detail, lang = "zh" }: ChallengeQuestionPlanSectionProps) {
   const isZh = lang === "zh";
   const { artifact, output } = detail;
-  // Stage two never auto-activates; the plan section renders the inactive
-  // semantics plus the proposal-only annotation for historical plan artifacts
-  // (e.g. questions whose stage-one era output already carries a research plan).
   const stageProjection = deriveChallengeQuestionStageProjection(detail);
   const planCard = stageProjection.hasResearchPlanProposal ? (
     <VSurface className={css.plan} tone="card">
-      <div className={css.planProposalTag} data-testid="question-plan-proposal-tag">
-        <VStatusChip tone="neutral">{isZh ? "预投影（proposal only）" : "Proposal only"}</VStatusChip>
-        <span>{isZh
-          ? "此计划为阶段一期间的预投影产物，仅供参考；第二阶段按题显式开启后会重新生成协议与实验计划。"
-          : "This plan is a stage-one pre-projection for reference only; the protocol and experiment plan are regenerated once stage two is enabled per question."}</span>
-      </div>
       <h4>{output.research_plan.objective}</h4>
       <p>{output.research_plan.method}</p>
       <div className={css.planGrid}>
@@ -49,11 +40,15 @@ export function ChallengeQuestionPlanSection({ detail, lang = "zh" }: ChallengeQ
       ))}
     </VSurface>
   ) : (
-    <VSurface className={css.plan} tone="card" data-testid="question-plan-inactive-empty">
+    <VSurface className={css.plan} tone="card" data-testid="question-plan-pending-empty">
       <p className={css.archiveHint}>
         {isZh
-          ? "本题尚无研究计划产物。第二阶段未激活，需按题显式开启；开启后才会生成真正的协议与实验计划。"
-          : "No research-plan artifact for this question. Stage two is inactive and must be enabled explicitly per question; the real protocol and experiment plan only exist after activation."}
+          ? stageProjection.stageTwoActive
+            ? "本题尚无研究计划产物，主流程正在继续推进。"
+            : "本题尚未确定假说；确定后主流程会进入研究计划与实验。"
+          : stageProjection.stageTwoActive
+            ? "No research-plan artifact yet; the main workflow is progressing."
+            : "The hypothesis is not settled yet; planning and experiments follow automatically."}
       </p>
     </VSurface>
   );
@@ -62,7 +57,11 @@ export function ChallengeQuestionPlanSection({ detail, lang = "zh" }: ChallengeQ
       <section className={css.section} id="plan">
         <div className={css.sectionHeadingRow}>
           <ChallengeQuestionSectionHeading index="06" title={isZh ? "研究计划" : "Research plan"} />
-          <VStatusChip tone="neutral">{isZh ? "未激活" : "Inactive"}</VStatusChip>
+          <VStatusChip tone={stageProjection.stageTwoActive ? "accent" : "neutral"}>
+            {stageProjection.stageTwoActive
+              ? (isZh ? "进行中" : "In progress")
+              : (isZh ? "等待假说确定" : "Awaiting hypothesis")}
+          </VStatusChip>
         </div>
         {planCard}
       </section>

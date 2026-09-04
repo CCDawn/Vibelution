@@ -1,4 +1,4 @@
-"""SCI-096: heal empty adapter runId and synthesize pending when lag-walk fails."""
+"""Heal empty adapter runId and synthesize pending when lag-walk fails."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from core.research.workflow.models import ActorKind
 from core.web.services.team_workflow.research_runtime.adapter_dispatch_worker import (
     _heal_pending_action_identity,
 )
-from tests._support.graph_helpers import GraphHarness
+from tests._support.graph_helpers import GraphHarness, workflow_version_id_for_run
 
 
 def _pending(
@@ -65,14 +65,14 @@ def test_downstream_retry_synthesizes_pending_when_lag_walk_fails(
     harness = GraphHarness(tmp_path)
     try:
         harness.seed()
-        harness.start_thread_to("source_finding")
+        harness.start_thread_to("hypothesis_design")
         first_pending = harness.latest_adapter_pending()
         assert first_pending is not None
         harness.consume_adapter(first_pending.action_id)
 
-        before = harness.coordinator.snapshot("run-test")
+        before = harness.coordinator.snapshot("run-test", workflow_version_id_for_run(harness, "run-test"))
         pending_before = before.get("pendingAction") or {}
-        assert pending_before.get("nodeId") == "source_finding"
+        assert pending_before.get("nodeId") == "hypothesis_design"
         assert before.get("nextNodeIds")
 
         monkeypatch.setattr(

@@ -34,9 +34,9 @@ function readSnapshot(fileName: string): DefinitionSnapshot {
 }
 
 describe("frontend node id lists mirror the server definition snapshots", () => {
-  it("CHALLENGE_CUP_NODE_IDS equals the pinned 2.1.0 main definition", () => {
-    const snapshot = readSnapshot("challenge-cup-research@2.1.0.json");
-    expect(snapshot.schemaVersion).toBe("2.1.0");
+  it("CHALLENGE_CUP_NODE_IDS equals the pinned 3.0.0 main definition", () => {
+    const snapshot = readSnapshot("challenge-cup-research@3.0.0.json");
+    expect(snapshot.schemaVersion).toBe("3.0.0");
     const serverNodeIds = snapshot.definition.nodes.map((node) => node.nodeId);
     expect([...CHALLENGE_CUP_NODE_IDS]).toEqual(serverNodeIds);
     // Stage membership must not reference nodes outside the canonical list.

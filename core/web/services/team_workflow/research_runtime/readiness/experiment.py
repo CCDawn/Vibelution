@@ -28,9 +28,7 @@ def evaluate_hypothesis_design(
 ) -> DomainVerdict:
     blockers: list[Any] = []
     # Knowledge gate: the node contract requires an ACCEPTED knowledge
-    # package.  It is satisfied by an accepted in-graph handoff (2.1.0
-    # chain) OR by a knowledge sideflow invocation absorbed into this run
-    # (main flow 3.0.0 / hypothesis-first collection).  Without either, the
+    # package from the canonical knowledge sideflow. Without it, the
     # node stays blocked — no adapter dispatch is ever created against a
     # missing or rejected package.
     package_via_sideflow = run_has_accepted_knowledge_package(context, run)

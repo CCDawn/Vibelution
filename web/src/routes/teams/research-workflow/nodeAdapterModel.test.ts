@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { CHALLENGE_CUP_NODE_IDS } from "../../../api/types/researchWorkflow";
+import {
+  CHALLENGE_CUP_NODE_IDS,
+  KNOWLEDGE_SIDEFLOW_NODE_IDS,
+} from "../../../api/types/researchWorkflow";
 import {
   adaptersForStage,
   commandLabel,
@@ -10,10 +13,12 @@ import {
 } from "./nodeAdapterModel";
 
 describe("nodeAdapterModel", () => {
-  it("covers all seventeen fixed nodes exactly once", () => {
+  it("covers the main and knowledge-sideflow nodes exactly once", () => {
     const adapters = listNodeAdapters();
     expect(adapters).toHaveLength(17);
-    expect(adapters.map((a) => a.nodeId).sort()).toEqual([...CHALLENGE_CUP_NODE_IDS].sort());
+    expect(adapters.map((a) => a.nodeId).sort()).toEqual(
+      [...CHALLENGE_CUP_NODE_IDS, ...KNOWLEDGE_SIDEFLOW_NODE_IDS].sort(),
+    );
   });
 
   it("wires exactly the commands with a live handler (human-gate actions)", () => {
@@ -74,8 +79,9 @@ describe("nodeAdapterModel", () => {
     expect(commandLabel("run_smoke", "en")).toBe("Start trial run");
   });
 
-  it("groups three stages", () => {
-    expect(adaptersForStage("knowledge_collection")).toHaveLength(6);
+  it("groups the main and sideflow stages", () => {
+    expect(adaptersForStage("problem_understanding")).toHaveLength(1);
+    expect(adaptersForStage("knowledge_collection")).toHaveLength(5);
     expect(adaptersForStage("experiment_design")).toHaveLength(5);
     expect(adaptersForStage("execution_iteration")).toHaveLength(6);
   });

@@ -410,7 +410,7 @@ export function ChallengeQuestionDetailPanel({
             <div className={css.anchorGroup} key={group.zone} data-stage-zone={group.zone}>
               <span className={css.anchorGroupTitle}>
                 {group.zone === "plan"
-                  ? `${stageZoneTitle(group.zone, lang)} · ${stageTwoStatusCopy(lang)}`
+                  ? `${stageZoneTitle(group.zone, lang)} · ${stageTwoStatusCopy(stageProjection.stageTwoActive, lang)}`
                   : stageZoneTitle(group.zone, lang)}
               </span>
               <span className={css.anchorGroupLinks}>
@@ -476,6 +476,7 @@ export function ChallengeQuestionDetailPanel({
           <TeamHypothesisRoundTimeline teamId={detail.teamId} questionId={detail.questionId} />
           <ChallengeQuestionStageZoneHeading
             zone="plan"
+            stageTwoActive={stageProjection.stageTwoActive}
             lang={lang}
           />
           <ChallengeQuestionPlanSection detail={detail} lang={lang} />

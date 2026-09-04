@@ -10,6 +10,11 @@ from core.research.workflow.contracts.node_readiness import (
     BudgetReadiness,
 )
 from core.research.workflow.definition import build_challenge_cup_workflow_definition
+from core.research.workflow.definition_registry import definition_identity
+from core.research.workflow.knowledge_sideflow_definition import (
+    KNOWLEDGE_SIDEFLOW_WORKFLOW_ID,
+    build_knowledge_sideflow_workflow_definition,
+)
 from core.research.workflow.models import ActorKind
 
 from core.web.services.team_workflow.research_runtime.readiness.common import (
@@ -20,7 +25,16 @@ from core.web.services.team_workflow.research_runtime.readiness.common import (
 )
 
 DEFINITION = build_challenge_cup_workflow_definition()
-DEFINITION_NODE_IDS = {node.nodeId for node in DEFINITION.nodes}
+KNOWLEDGE_SIDEFLOW_DEFINITION = build_knowledge_sideflow_workflow_definition()
+MAIN_WORKFLOW_VERSION_ID = definition_identity(DEFINITION).workflowVersionId
+KNOWLEDGE_SIDEFLOW_VERSION_ID = definition_identity(
+    KNOWLEDGE_SIDEFLOW_DEFINITION
+).workflowVersionId
+DEFINITION_NODE_IDS = {
+    node.nodeId
+    for definition in (DEFINITION, KNOWLEDGE_SIDEFLOW_DEFINITION)
+    for node in definition.nodes
+}
 
 
 def make_run(
@@ -30,18 +44,36 @@ def make_run(
     status: str = "running",
     run_version: int = 1,
     question_id: str = "SCI-096",
-    workflow_version_id: str = "challenge-cup-research-v2.1.0",
+    workflow_id: str = DEFINITION.workflowId,
+    workflow_version_id: str | None = None,
 ) -> RunSnapshot:
+    resolved_version_id = (
+        workflow_version_id
+        if workflow_version_id is not None
+        else (
+            KNOWLEDGE_SIDEFLOW_VERSION_ID
+            if workflow_id == KNOWLEDGE_SIDEFLOW_WORKFLOW_ID
+            else MAIN_WORKFLOW_VERSION_ID
+        )
+    )
     return RunSnapshot(
         run_id=run_id,
         team_id=team_id,
-        workflow_id="challenge-cup-research",
-        workflow_version_id=workflow_version_id,
+        workflow_id=workflow_id,
+        workflow_version_id=resolved_version_id,
         project_id="challenge-sci-096",
         question_id=question_id,
         status=status,
         run_version=run_version,
         input_snapshot_hash="a" * 64,
+    )
+
+
+def make_knowledge_run(**kwargs: Any) -> RunSnapshot:
+    return make_run(
+        workflow_id=KNOWLEDGE_SIDEFLOW_WORKFLOW_ID,
+        workflow_version_id=KNOWLEDGE_SIDEFLOW_VERSION_ID,
+        **kwargs,
     )
 
 
@@ -111,6 +143,7 @@ class FakeDomainContext(DomainReadinessContext):
         self.revision_vector: Mapping[str, str] = {"source_collection": "rev-1"}
         self.budget: BudgetLimitsSnapshot = BudgetLimitsSnapshot(policy_hash="p-1")
         self.bindings: dict[str, Mapping[str, Any] | None] = {
+            "problem_understanding": {"snapshotId": "bs-0", "agentId": "agent-a"},
             "source_finding": {"snapshotId": "bs-1", "agentId": "agent-a"},
             "source_extraction": {"snapshotId": "bs-2", "agentId": "agent-a"},
             "evidence_relations": {"snapshotId": "bs-3", "agentId": "agent-a"},

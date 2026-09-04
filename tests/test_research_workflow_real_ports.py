@@ -41,7 +41,7 @@ def _seed_run_with_binding(harness: CommandHarness) -> None:
         "teamId": "research-team",
         "projectId": "challenge-sci-096",
         "questionId": "SCI-096",
-        "workflowVersionId": "challenge-cup-research-v2.1.0",
+        "workflowVersionId": "wv-268aa6e8dea8",
         "researchBriefHash": "b" * 64,
         "datasetRefs": [],
         "metricContract": {},
@@ -58,8 +58,8 @@ def _seed_run_with_binding(harness: CommandHarness) -> None:
         "evaluationContract": {},
         "agentBindingSnapshot": [
             {
-                "snapshotId": "snap:run-test:source_finding",
-                "nodeId": "source_finding",
+                "snapshotId": "snap:run-test:problem_understanding",
+                "nodeId": "problem_understanding",
                 "agentId": "agent-real-1",
                 "roleKey": "source_finder",
             }
@@ -113,7 +113,7 @@ def _seed_run_with_binding(harness: CommandHarness) -> None:
     harness.store.submit(mutate, force_flush=True).result(timeout=10)
 
 
-def _action(node_id: str = "source_finding") -> PendingAction:
+def _action(node_id: str = "problem_understanding") -> PendingAction:
     return PendingAction(
         action_id="act-1",
         run_id="run-test",
@@ -124,7 +124,7 @@ def _action(node_id: str = "source_finding") -> PendingAction:
         action_kind="start_agent_task",
         input_snapshot_hash="c" * 64,
         input_artifact_refs=(),
-        binding_snapshot_id="snap:run-test:source_finding",
+        binding_snapshot_id="snap:run-test:problem_understanding",
         budget_policy_hash="p-1",
     )
 
@@ -188,7 +188,7 @@ def test_real_ports_resolve_binding_from_frozen_snapshot(tmp_path: Path) -> None
         binding = ports.resolve_binding(action)
         assert binding.agent_id == "agent-real-1"
         assert binding.role_key == "source_finder"
-        assert binding.binding_snapshot_id == "snap:run-test:source_finding"
+        assert binding.binding_snapshot_id == "snap:run-test:problem_understanding"
         verdict = ports.read_back_input(action)
         assert verdict.ok
     finally:
@@ -233,14 +233,15 @@ def test_adapter_uses_real_binding_and_settles_budget(tmp_path: Path) -> None:
                 )
 
                 payload = {
-                    "teamId": "research-team",
-                    "sourceCollectionRunId": action.run_id,
-                    "candidates": [{"sourceId": "s1"}],
-                    "candidateCount": 1,
+                    "scope": "验证问题边界",
+                    "subquestions": ["当前研究问题是否可证伪？"],
+                    "assumptions": ["输入约束已冻结"],
+                    "known_unknowns": ["跨数据集泛化未知"],
+                    "human_gate": {"required": True, "decision": "pending"},
                 }
                 content_hash = canonical_sha256(payload)
                 canonical_ref = (
-                    f"source_candidate_batch://research-team/{action.run_id}/{content_hash}"
+                    f"problem_understanding://research-team/{action.run_id}/{content_hash}"
                 )
                 self._artifact_store[canonical_ref] = ArtifactReadBack(
                     canonical_ref=canonical_ref,
@@ -251,7 +252,7 @@ def test_adapter_uses_real_binding_and_settles_budget(tmp_path: Path) -> None:
                 return [
                     {
                         "canonicalRef": canonical_ref,
-                        "kind": "source_candidate_batch",
+                        "kind": "problem_understanding",
                         "sha256": content_hash,
                         "version": "1.0.0",
                     }
@@ -271,7 +272,7 @@ def test_adapter_uses_real_binding_and_settles_budget(tmp_path: Path) -> None:
             store=harness.store,
             registry=registry,
             ports=ports,
-            successor_fn=lambda node: ("source_extraction",),
+            successor_fn=lambda node: ("hypothesis_design",),
         )
         action = _action()
         _seed_adapter(harness, action)
@@ -285,8 +286,8 @@ def test_adapter_uses_real_binding_and_settles_budget(tmp_path: Path) -> None:
         anchor_json = json.loads(anchor[13])
         assert anchor_json["agentId"] == "agent-real-1"
         assert anchor_json["roleKey"] == "source_finder"
-        assert anchor_json["reservationId"] == "reservation-nr-run-test-source_finding-a1"
-        assert anchor_json["sessionId"] == "session-source_finding"
+        assert anchor_json["reservationId"] == "reservation-nr-run-test-problem_understanding-a1"
+        assert anchor_json["sessionId"] == "session-problem_understanding"
 
         receipts = harness.store.submit(
             lambda uow: uow.repository.execute(
@@ -296,7 +297,7 @@ def test_adapter_uses_real_binding_and_settles_budget(tmp_path: Path) -> None:
             force_flush=True,
         ).result(timeout=10)
         assert len(receipts) == 1
-        assert receipts[0][0] == "reservation-nr-run-test-source_finding-a1"
+        assert receipts[0][0] == "reservation-nr-run-test-problem_understanding-a1"
         assert receipts[0][1] == "settled"
 
         # settle_budget 被调用，且 usage 被传递。
@@ -317,7 +318,7 @@ def test_reserve_idempotent_same_action_reuses_reservation(tmp_path: Path) -> No
         first = ports.reserve_budget(action=action, estimate_tokens=100)
         second = ports.reserve_budget(action=action, estimate_tokens=100)
         assert first["reservationId"] == second["reservationId"]
-        assert first["reservationId"] == "reservation-nr-run-test-source_finding-a1"
+        assert first["reservationId"] == "reservation-nr-run-test-problem_understanding-a1"
         assert "nodeRunId" in first
         assert first["status"] == "reserved"
     finally:

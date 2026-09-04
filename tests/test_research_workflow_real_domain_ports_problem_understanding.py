@@ -108,8 +108,8 @@ def _snapshot() -> dict[str, object]:
     }
 
 
-def test_problem_understanding_uses_knowledge_collection_stage() -> None:
-    assert real_domain_ports._stage_for("problem_understanding") == "knowledge_collection"
+def test_problem_understanding_uses_its_own_stage() -> None:
+    assert real_domain_ports._stage_for("problem_understanding") == "problem_understanding"
 
 
 def test_problem_understanding_reuses_existing_source_run(

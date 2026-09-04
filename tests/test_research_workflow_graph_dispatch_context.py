@@ -3,7 +3,7 @@
 A start_node command must emit a graph_dispatch outbox whose payload has
 nodeId, attempt, teamId, workflowVersionId, inputSnapshotHash,
 bindingSnapshotId and budgetPolicyHash — the coordinator (challenge_cup_runtime)
-needs them so a non-starting node never boots from source_finding and the
+needs them so a non-starting node never boots from problem_understanding and the
 binding/budget freeze stays consistent. The factory is the only writer.
 """
 
@@ -29,7 +29,7 @@ def _seed_run_with_snapshot(harness: CommandHarness) -> None:
         "teamId": "research-team",
         "projectId": "challenge-sci-096",
         "questionId": "SCI-096",
-        "workflowVersionId": "challenge-cup-research-v2.1.0",
+        "workflowVersionId": "wv-268aa6e8dea8",
         "researchBriefHash": "b" * 64,
         "datasetRefs": [],
         "metricContract": {},
@@ -46,8 +46,8 @@ def _seed_run_with_snapshot(harness: CommandHarness) -> None:
         "evaluationContract": {},
         "agentBindingSnapshot": [
             {
-                "snapshotId": "snap:run-test:source_finding",
-                "nodeId": "source_finding",
+                "snapshotId": "snap:run-test:problem_understanding",
+                "nodeId": "problem_understanding",
                 "agentId": "agent-a",
                 "roleKey": "source_finder",
             }
@@ -113,22 +113,22 @@ def test_start_node_dispatch_payload_carries_frozen_fields(tmp_path: Path) -> No
         payload = json.loads(outbox[0].payload_json)
         assert payload["commandId"] == outbox[0].command_id
         assert payload["runId"] == "run-test"
-        assert payload["nodeRunId"] == "nr-run-test-source_finding-a1"
-        assert payload["nodeId"] == "source_finding"
+        assert payload["nodeRunId"] == "nr-run-test-problem_understanding-a1"
+        assert payload["nodeId"] == "problem_understanding"
         assert payload["attempt"] == 1
         assert payload["teamId"] == "research-team"
-        assert payload["workflowVersionId"] == "challenge-cup-research-v2.1.0"
+        assert payload["workflowVersionId"] == "wv-268aa6e8dea8"
         assert payload["inputSnapshotHash"] == "c" * 64
-        assert payload["bindingSnapshotId"] == "snap:run-test:source_finding"
+        assert payload["bindingSnapshotId"] == "snap:run-test:problem_understanding"
         assert payload["budgetPolicyHash"] == (
             "8b1cbcba0c1e4b6d2e10bcb0a87c0cac5d45b04f9bbbbf4a"
         ) or isinstance(payload["budgetPolicyHash"], str) and len(
             payload["budgetPolicyHash"]
         ) == 64
 
-        attempt = harness.store.latest_attempt("run-test", "source_finding")
+        attempt = harness.store.latest_attempt("run-test", "problem_understanding")
         assert attempt is not None
-        assert attempt.binding_snapshot_id == "snap:run-test:source_finding"
+        assert attempt.binding_snapshot_id == "snap:run-test:problem_understanding"
     finally:
         harness.close()
 
@@ -162,7 +162,7 @@ def test_factory_builds_complete_payload_without_command_service(tmp_path: Path)
         )
         assert payload["nodeId"] == "protocol_design"
         assert payload["teamId"] == "research-team"
-        assert payload["workflowVersionId"] == "challenge-cup-research-v2.1.0"
+        assert payload["workflowVersionId"] == "wv-268aa6e8dea8"
         assert payload["inputSnapshotHash"] == "c" * 64
         assert len(payload["budgetPolicyHash"]) == 64
         # 无该节点 binding 快照时不伪造 bindingSnapshotId。
@@ -171,9 +171,9 @@ def test_factory_builds_complete_payload_without_command_service(tmp_path: Path)
         payload_source = build_graph_dispatch_payload(
             run=run,
             attempt=build_attempt_record(
-                node_run_id="nr-run-test-source_finding-a1",
+                node_run_id="nr-run-test-problem_understanding-a1",
                 run_id="run-test",
-                node_id="source_finding",
+                node_id="problem_understanding",
                 attempt=1,
                 status="starting",
                 command_id="cmd-x",
@@ -181,13 +181,13 @@ def test_factory_builds_complete_payload_without_command_service(tmp_path: Path)
             command_id="cmd-x",
             dispatch_kind="start",
         )
-        assert payload_source["bindingSnapshotId"] == "snap:run-test:source_finding"
+        assert payload_source["bindingSnapshotId"] == "snap:run-test:problem_understanding"
 
         input_snapshot = json.loads(run.input_snapshot_json)
         assert budget_policy_hash_from_input_snapshot(input_snapshot) == payload["budgetPolicyHash"]
         assert (
-            binding_snapshot_id_for_node(input_snapshot, "source_finding")
-            == "snap:run-test:source_finding"
+            binding_snapshot_id_for_node(input_snapshot, "problem_understanding")
+            == "snap:run-test:problem_understanding"
         )
         assert binding_snapshot_id_for_node(input_snapshot, "unknown") is None
     finally:
@@ -206,9 +206,9 @@ def test_legacy_input_snapshot_without_policy_yields_empty_hash(tmp_path: Path) 
         run = harness.store.get_run("run-test")
         assert run is not None
         attempt = build_attempt_record(
-            node_run_id="nr-run-test-source_finding-a1",
+            node_run_id="nr-run-test-problem_understanding-a1",
             run_id="run-test",
-            node_id="source_finding",
+            node_id="problem_understanding",
             attempt=1,
             status="starting",
             command_id="cmd-x",

@@ -11,7 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from core.web.services.team_workflow.research_runtime.readiness import NodeReadinessService
-from tests._support.readiness_fakes import FakeDomainContext, make_run
+from tests._support.readiness_fakes import FakeDomainContext, make_knowledge_run
 from tests._support.workflow_ledger_helpers import (
     build_run_record,
     open_ledger_store,
@@ -50,7 +50,7 @@ READ_METHODS = frozenset(
 def test_rejected_readiness_touches_no_domain_writes() -> None:
     context = FakeDomainContext()
     context._candidate_stats = None  # SCI-096 无候选 -> source_extraction 拒绝
-    service = NodeReadinessService(run_source={"run-test": make_run()}.get)
+    service = NodeReadinessService(run_source={"run-test": make_knowledge_run()}.get)
     result = service.evaluate(
         team_id="research-team",
         run_id="run-test",
@@ -75,7 +75,7 @@ def test_rejected_readiness_writes_nothing_to_ledger(tmp_path: Path) -> None:
 
         context = FakeDomainContext()
         context._candidate_stats = None
-        service = NodeReadinessService(run_source={"run-test": make_run()}.get)
+        service = NodeReadinessService(run_source={"run-test": make_knowledge_run()}.get)
         result = service.evaluate(
             team_id="research-team",
             run_id="run-test",
@@ -108,7 +108,7 @@ def test_rejected_readiness_leaves_domain_counters_untouched() -> None:
         "external_outbox": 0,
     }
     context.side_effect_counters = dict(before)
-    service = NodeReadinessService(run_source={"run-test": make_run()}.get)
+    service = NodeReadinessService(run_source={"run-test": make_knowledge_run()}.get)
     result = service.evaluate(
         team_id="research-team",
         run_id="run-test",
@@ -123,7 +123,7 @@ def test_rejected_readiness_leaves_domain_counters_untouched() -> None:
 
 def test_ready_readiness_still_writes_nothing() -> None:
     context = FakeDomainContext()
-    service = NodeReadinessService(run_source={"run-test": make_run()}.get)
+    service = NodeReadinessService(run_source={"run-test": make_knowledge_run()}.get)
     result = service.evaluate(
         team_id="research-team",
         run_id="run-test",
@@ -138,7 +138,7 @@ def test_ready_readiness_still_writes_nothing() -> None:
 
 def test_cache_invalidated_by_revision_change() -> None:
     context = FakeDomainContext()
-    service = NodeReadinessService(run_source={"run-test": make_run()}.get)
+    service = NodeReadinessService(run_source={"run-test": make_knowledge_run()}.get)
     first = service.evaluate(
         team_id="research-team",
         run_id="run-test",
@@ -169,7 +169,7 @@ def test_cache_invalidated_by_revision_change() -> None:
 
 def test_cache_skipped_when_disabled() -> None:
     context = FakeDomainContext()
-    service = NodeReadinessService(run_source={"run-test": make_run()}.get)
+    service = NodeReadinessService(run_source={"run-test": make_knowledge_run()}.get)
     first = service.evaluate(
         team_id="research-team",
         run_id="run-test",

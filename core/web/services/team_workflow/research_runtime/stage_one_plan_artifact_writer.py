@@ -12,9 +12,6 @@ from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from typing import Any
 
-from core.research.competition.stage_one_completion_policy import (
-    load_stage_one_completion_policy,
-)
 from core.research.competition.stage_one_requirement_matrix import (
     G1_REQUIRED_EVIDENCE_KINDS,
     evaluate_stage_one_requirement_matrix,
@@ -28,6 +25,7 @@ from .workflow_artifact_store import list_workflow_artifacts, put_workflow_artif
 STAGE_ONE_RESEARCH_PLAN_KIND = "stage1_research_plan"
 COMPETITION_ALIGNMENT_KIND = "competition_alignment"
 SCHEMA_VERSION = 1
+RESEARCH_REQUIREMENT_SCOPE_ID = "challenge-cup-research@3.0.0"
 _SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 _COMPETITION_VIEW_FIELDS = frozenset(
     {
@@ -170,7 +168,7 @@ def _official_requirement_matrix(plan_ref: str, team: str, workflow: str, source
     )
     return matrix_to_dict(
         matrix_items,
-        scope_id=load_stage_one_completion_policy().scopeId,
+        scope_id=RESEARCH_REQUIREMENT_SCOPE_ID,
     )
 
 
