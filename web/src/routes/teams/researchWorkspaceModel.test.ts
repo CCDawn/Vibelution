@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { RESEARCH_TEAM_ID } from "../TeamsRoute.canvasData";
 import { parseResearchProcessLocation } from "./research-workflow/researchProcessLocation";
 import {
+  canonicalChallengeCupWorkspaceRouteForEffectiveTeam,
   challengeQuestionDetailRoute,
   isSameChallengeCupWorkspaceTeam,
   parseResearchWorkspaceView,
@@ -53,6 +54,21 @@ describe("researchWorkspaceModel", () => {
     expect(parsed.panel).toBe("question");
     expect(parsed.questionId).toBe("SCI-096");
     expect(parsed.runId).toBe("stage1-sci-096-v3");
+  });
+
+  it("preserves an explicitly closed responsive inspector during canonicalization", () => {
+    const route = canonicalChallengeCupWorkspaceRouteForEffectiveTeam(
+      RESEARCH_TEAM_ID,
+      new URLSearchParams(
+        "teamId=research-team&researchView=workflow&workflowId=challenge-cup-research&inspector=closed",
+      ),
+    );
+
+    const parsed = parseResearchProcessLocation(
+      new URLSearchParams(route.split("?")[1]),
+    );
+    expect(parsed.inspectorOpen).toBe(false);
+    expect(route).toContain("inspector=closed");
   });
 
   it("labels workspace views for zh and en", () => {
