@@ -825,6 +825,7 @@ def _awaiting_review_meeting(
     meeting_type: str = "hypothesis_review",
     with_draft: bool = True,
     summary_draft_error: str = "",
+    draft_extra: dict[str, Any] | None = None,
     question: str = _QUESTION_ID,
 ) -> dict[str, Any]:
     record = {
@@ -837,7 +838,7 @@ def _awaiting_review_meeting(
         "participants": ["agent-a"],
     }
     if with_draft:
-        record["digestDraft"] = {
+        draft: dict[str, Any] = {
             "digestDraftId": f"draft-{meeting_id}",
             "contentHash": f"hash-{meeting_id}",
             "evidenceRequests": [
@@ -858,6 +859,9 @@ def _awaiting_review_meeting(
                 }
             ],
         }
+        if draft_extra:
+            draft.update(draft_extra)
+        record["digestDraft"] = draft
     if summary_draft_error:
         record["summaryDraftError"] = summary_draft_error
     return record
@@ -1037,13 +1041,26 @@ def test_auto_approve_covers_candidate_generation_digests(
 ) -> None:
     """候选生成会纳入自动批准：走与手动 approve-generation-summary 完全
     同源的 approve_meeting_digest 领域分派（real domain dispatch），closedBy
-    用 generation 专属系统标识，decidedBy 随 closedBy 可追溯。"""
+    用 generation 专属系统标识，decidedBy 随 closedBy 可追溯。过质量门的
+    candgen 草稿在默认 TTL=0 下同 pass 立即批准。"""
     events = _approve_env(tmp_path, monkeypatch)
     _seed_meeting(
         _awaiting_review_meeting(
             "meeting-generation",
             updated_at=_offset_iso(0),
             meeting_type="hypothesis_candidate_generation",
+            # A gate-passing candgen draft: no validation errors, at least
+            # one proposed candidate.
+            draft_extra={
+                "proposedCandidates": [
+                    {
+                        "candidateId": "hyp-new",
+                        "statement": "预测编码 thesis 的新候选",
+                        "rationale": "来自纪要的提案",
+                        "proposedBy": "agent-a",
+                    }
+                ]
+            },
         )
     )
     generation_closes: list[dict[str, Any]] = []
@@ -1063,7 +1080,9 @@ def test_auto_approve_covers_candidate_generation_digests(
     summary = chain.auto_approve_awaiting_review_digests(
         _TEAM_ID,
         question_id=_QUESTION_ID,
-        now_ms=_offset_ms(3_600),
+        # Same instant the digest landed: under the zero default the landed
+        # digest is approved on this very pass — no human window.
+        now_ms=_offset_ms(0),
     )
 
     assert summary["awaitingApproval"] == 1
@@ -1089,7 +1108,82 @@ def test_auto_approve_covers_candidate_generation_digests(
     assert approved[0]["fields"]["closedBy"] == (
         "system:auto-approve:generation-digest"
     )
+    assert approved[0]["fields"]["meetingType"] == "hypothesis_candidate_generation"
+    assert approved[0]["fields"]["ttlMs"] == 0
     assert "hypothesis_candidate_generation" in str(approved[0]["fields"]["rationale"])
+
+
+def test_auto_approve_candgen_quality_gate_keeps_human_gate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """candgen 自动批准的质量门：validationErrors 非空或缺提案的草稿不过门，
+    保留人工门并记 warning 提醒事件（不静默跳过、绝不自动批准）；默认
+    TTL=0 下门判定发生在同一 pass，与等待窗口无关。"""
+    events = _approve_env(tmp_path, monkeypatch)
+    _seed_meeting(
+        _awaiting_review_meeting(
+            "meeting-gen-validation-errors",
+            updated_at=_offset_iso(0),
+            meeting_type="hypothesis_candidate_generation",
+            draft_extra={
+                "proposedCandidates": [
+                    {"candidateId": "hyp-new", "proposedBy": "agent-a"}
+                ],
+                "validationErrors": [
+                    {
+                        "code": "missing_falsifier",
+                        "message": "candidate hyp-new lacks a falsifier",
+                    }
+                ],
+            },
+        )
+    )
+    _seed_meeting(
+        _awaiting_review_meeting(
+            "meeting-gen-no-proposals",
+            updated_at=_offset_iso(0),
+            meeting_type="hypothesis_candidate_generation",
+        )
+    )
+    closes = _capture_close(monkeypatch)
+
+    def _must_not_be_called(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        raise AssertionError(
+            "approve_meeting_digest must not run for a failing quality gate"
+        )
+
+    monkeypatch.setattr(chain, "approve_meeting_digest", _must_not_be_called)
+
+    summary = chain.auto_approve_awaiting_review_digests(
+        _TEAM_ID,
+        question_id=_QUESTION_ID,
+        now_ms=_offset_ms(0),
+    )
+
+    assert closes == []
+    assert summary["awaitingApproval"] == 2
+    assert summary["approved"] == 0
+    assert summary["skipped"] == 2
+    reminders = [
+        item
+        for item in events
+        if item["code"] == "hypothesis_first.auto_approve_review_digest"
+        and item["outcome"] == "skipped"
+        and item["level"] == "warning"
+    ]
+    assert len(reminders) == 2
+    reasons = {item["fields"]["meetingRoundId"]: item["fields"] for item in reminders}
+    validation_failure = reasons["meeting-gen-validation-errors"]
+    no_proposals_failure = reasons["meeting-gen-no-proposals"]
+    assert validation_failure["reason"] == "candgen_digest_validation_errors"
+    assert validation_failure["validationErrorCount"] == 1
+    assert validation_failure["proposedCandidateCount"] == 1
+    assert no_proposals_failure["reason"] == "candgen_digest_no_proposals"
+    assert no_proposals_failure["validationErrorCount"] == 0
+    assert no_proposals_failure["proposedCandidateCount"] == 0
+    for fields in (validation_failure, no_proposals_failure):
+        assert "manual approval" in str(fields["reminder"])
 
 
 def test_auto_approve_skips_failed_drafts_for_both_types(
