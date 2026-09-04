@@ -136,7 +136,8 @@ def test_projection_offers_open_next_review_within_budget() -> None:
             team_id=TEAM_ID,
             question_id=QUESTION_ID,
             reset_boundary=None,
-            **_budget_projection_records(round_index=1),
+            # 历史 link 预算（已退役的旧上限 5）不得抬高 server-owned 上限。
+            **_budget_projection_records(round_index=1, round_budget=5),
         )
     )
 
@@ -145,11 +146,11 @@ def test_projection_offers_open_next_review_within_budget() -> None:
     }
     assert state.currentPhase == "convergence"
     assert state.convergence.roundIndex == 1
-    assert state.convergence.roundBudget == 5
+    assert state.convergence.roundBudget == 3
     assert commands["open_next_review"].enabled is True
     assert commands["open_next_review"].actionId == "open-next-review:round-1"
     assert commands["open_next_review"].payload.previousMeetingRoundId == "review-1"
-    assert commands["open_next_review"].payload.roundBudget == 5
+    assert commands["open_next_review"].payload.roundBudget == 3
     # Early adjudication stays available inside the budget: same action id
     # scheme, payload shape and schema ref as the exhausted-path offer.
     assert commands["human_adjudication"].actionId == "human-adjudication:round-1"
@@ -161,15 +162,16 @@ def test_projection_offers_open_next_review_within_budget() -> None:
     assert state.convergence.outcome == "none"
 
 
-def test_legacy_round_three_continues_under_single_hard_limit() -> None:
-    """A link persisted with the retired budget of 3 must not block an
-    unconverged chain before the agent can decide whether round 4 is needed."""
+def test_legacy_round_five_link_cannot_extend_hard_limit() -> None:
+    """A link persisted with the retired hard limit of 5 must neither raise the
+    published budget nor keep an unaccepted round-3 chain open: the boundary
+    stays the server-owned constant."""
     state = HypothesisFirstStateV2.model_validate(
         project_state_from_records(
             team_id=TEAM_ID,
             question_id=QUESTION_ID,
             reset_boundary=None,
-            **_budget_projection_records(round_index=3, round_budget=3),
+            **_budget_projection_records(round_index=3, round_budget=5),
         )
     )
 
@@ -177,10 +179,11 @@ def test_legacy_round_three_continues_under_single_hard_limit() -> None:
         action.command: action for action in state.allowedActions if action.kind == "command"
     }
     assert state.convergence.roundIndex == 3
-    assert state.convergence.roundBudget == 5
-    assert commands["open_next_review"].payload.roundBudget == 5
+    assert state.convergence.roundBudget == 3
+    assert "open_next_review" not in commands
     assert commands["human_adjudication"].actionId == "human-adjudication:round-3"
-    assert state.convergence.lifecycle == "waiting_human"
+    assert state.convergence.lifecycle == "completed"
+    assert state.convergence.outcome == "exhausted"
 
 
 def test_projection_switches_to_human_adjudication_when_budget_exhausted() -> None:
@@ -191,7 +194,7 @@ def test_projection_switches_to_human_adjudication_when_budget_exhausted() -> No
             team_id=TEAM_ID,
             question_id=QUESTION_ID,
             reset_boundary=None,
-            **_budget_projection_records(round_index=5),
+            **_budget_projection_records(round_index=3),
         )
     )
 
@@ -199,10 +202,10 @@ def test_projection_switches_to_human_adjudication_when_budget_exhausted() -> No
         action.command: action for action in state.allowedActions if action.kind == "command"
     }
     assert state.currentPhase == "convergence"
-    assert state.convergence.roundIndex == 5
-    assert state.convergence.roundBudget == 5
+    assert state.convergence.roundIndex == 3
+    assert state.convergence.roundBudget == 3
     assert "open_next_review" not in commands
-    assert commands["human_adjudication"].payload.hypothesisRoundId == "round-5"
+    assert commands["human_adjudication"].payload.hypothesisRoundId == "round-3"
     assert state.convergence.lifecycle == "completed"
     assert state.convergence.outcome == "exhausted"
 
@@ -447,7 +450,7 @@ def test_open_next_review_executes_under_current_snapshot_and_increments_round(
     assert sorted(int(link["roundIndex"]) for link in advanced_links) == [1, 2]
     newest = max(advanced_links, key=lambda link: int(link["roundIndex"]))
     assert newest["selectionId"] == SELECTION_ID
-    assert int(newest["roundBudget"]) == 5
+    assert int(newest["roundBudget"]) == 3
 
 
 def test_stale_expected_state_version_is_rejected_before_any_mutation(
@@ -504,7 +507,7 @@ def test_exhausted_budget_blocks_open_next_review_at_reauthorization(
     """At the budget boundary a fully current version still cannot reopen a
     review round: fresh allowedActions no longer publish the command."""
     opened = _envelope_env(tmp_path, monkeypatch)
-    _seed_completed_round(round_index=5)
+    _seed_completed_round(round_index=3)
 
     snapshot = project_hypothesis_first_state_v2(TEAM_ID, QUESTION_ID)
     commands = {
@@ -538,21 +541,21 @@ def test_exhausted_budget_blocks_open_next_review_at_reauthorization(
         for record in _chain_ledger()
         if record.get("recordKind") == "review_round_link"
     ]
-    assert [int(link["roundIndex"]) for link in links] == [5]
+    assert [int(link["roundIndex"]) for link in links] == [3]
 
 
 def test_published_hard_limit_cannot_be_replaced_by_caller(
     tmp_path,
     monkeypatch,
 ) -> None:
-    """The envelope matches the whole published payload; replacing the hard
-    limit with the retired default budget fails authorization."""
+    """The envelope matches the whole published payload; replacing the server
+    hard limit with the retired budget of 5 fails authorization."""
     opened = _envelope_env(tmp_path, monkeypatch)
     _seed_completed_round(round_index=1)
 
     snapshot = project_hypothesis_first_state_v2(TEAM_ID, QUESTION_ID)
     action = _published_command(snapshot, "open_next_review")
-    forged_payload = {**action["payload"], "roundBudget": 3}
+    forged_payload = {**action["payload"], "roundBudget": 5}
     assert forged_payload != action["payload"]
 
     with pytest.raises(chain.HypothesisFirstChainError, match="no longer allowed"):
