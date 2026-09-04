@@ -115,6 +115,8 @@ const definition: WorkflowDefinition = {
 describe("researchProcessGraphModel", () => {
   it("definition maps visual kinds and edge gate metadata", () => {
     const graph = definitionToCanvasGraph(definition);
+    expect(graph.stages.find((stage) => stage.stageId === "knowledge_collection")?.label).toBe("资料搜集");
+    expect(graph.nodes.find((node) => node.nodeId === "hypothesis_design")?.label).toBe("假说设计");
     expect(graph.nodes.find((n) => n.nodeId === "source_finding")?.visualKind).toBe("start");
     expect(graph.nodes.find((n) => n.nodeId === "knowledge_handoff")?.visualKind).toBe("human_gate");
     expect(graph.nodes.find((n) => n.nodeId === "iteration_decision")?.visualKind).toBe("decision");

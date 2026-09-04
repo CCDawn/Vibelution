@@ -428,11 +428,13 @@ describe("ResearchProcessWorkspace", () => {
     } as never;
   }
 
-  it("shows the canvas loading state while no projection is available", async () => {
+  it("shows a focused start state instead of workflow progress before a question is selected", async () => {
     const rendered = await renderWorkspace();
     root = rendered.root;
 
-    expect(rendered.container.textContent).toContain("加载流程定义");
+    expect(rendered.container.textContent).toContain("先选择研究题目");
+    expect(rendered.container.textContent).not.toContain("加载流程定义");
+    expect(rendered.container.querySelector('[data-testid="research-workflow-stage-navigator"]')).toBeNull();
     expect(rendered.container.querySelector('[data-testid="research-process-workspace-shell"]')).not.toBeNull();
     expect(rendered.container.querySelector('[data-vui="research-current-task-inspector"]')).not.toBeNull();
     expect(rendered.container.querySelector('[data-vui-region="current-task-body"]')).not.toBeNull();
@@ -472,6 +474,8 @@ describe("ResearchProcessWorkspace", () => {
   });
 
   it("mounts the unified stage navigator beside the fixed canvas and inspector", async () => {
+    harness.location.questionId = "SCI-096";
+    harness.chain.questionId = "SCI-096";
     const rendered = await renderWorkspace();
     root = rendered.root;
 
@@ -518,6 +522,8 @@ describe("ResearchProcessWorkspace", () => {
   it("routes one canvas node click through the URL-owned selection callback", async () => {
     harness.location.panel = "team";
     harness.location.inspectorOpen = false;
+    harness.location.questionId = "SCI-096";
+    harness.chain.questionId = "SCI-096";
     const rendered = await renderWorkspace();
     root = rendered.root;
 
@@ -791,6 +797,8 @@ describe("ResearchProcessWorkspace", () => {
   });
 
   it("navigates from the stage rail through URL view state only", async () => {
+    harness.location.questionId = "SCI-096";
+    harness.chain.questionId = "SCI-096";
     harness.runState.projection = {
       definition: {
         nodes: [{
@@ -823,7 +831,7 @@ describe("ResearchProcessWorkspace", () => {
     root = rendered.root;
 
     const nodeButton = Array.from(rendered.container.querySelectorAll("button"))
-      .find((button) => button.textContent?.includes("资料发现"));
+      .find((button) => button.textContent?.includes("资料寻找"));
     expect(nodeButton).toBeTruthy();
     await act(async () => nodeButton?.click());
 
@@ -840,6 +848,8 @@ describe("ResearchProcessWorkspace", () => {
   });
 
   it("surfaces run-state errors on the canvas host", async () => {
+    harness.location.questionId = "SCI-096";
+    harness.chain.questionId = "SCI-096";
     harness.runState.error = "快照同步失败，请检查网络";
     const rendered = await renderWorkspace();
     root = rendered.root;
@@ -848,6 +858,8 @@ describe("ResearchProcessWorkspace", () => {
   });
 
   it("surfaces command-layer errors on the same canvas alert", async () => {
+    harness.location.questionId = "SCI-096";
+    harness.chain.questionId = "SCI-096";
     harness.commands.error = "命令提交被拒绝";
     const rendered = await renderWorkspace();
     root = rendered.root;
@@ -1331,7 +1343,7 @@ describe("ResearchProcessWorkspace", () => {
       ?.getAttribute("data-responsive-inspector-open")).toBe("true");
   });
 
-  it("applies the launch patch directly when switching to a checkpoint-less question", async () => {
+  it("keeps checkpoint-less questions out of the experiment switcher", async () => {
     harness.catalog.questions = [checkpointQuestion, restoreQuestion, freshQuestion];
     harness.runState.run = currentRun;
     const rendered = await renderWorkspace();
@@ -1341,16 +1353,10 @@ describe("ResearchProcessWorkspace", () => {
     expect(trigger).toBeTruthy();
     const options = await openSwitchSelect(trigger!);
     const fresh = Array.from(options).find((option) => option.textContent?.includes("SCI-005")) as HTMLElement | undefined;
-    expect(fresh).toBeTruthy();
-    await pickSwitchOption(fresh!);
+    expect(fresh).toBeUndefined();
 
     expect(mockedFocus).not.toHaveBeenCalled();
-    expect(harness.location.replaceParams).toHaveBeenCalledWith({
-      questionId: "SCI-005",
-      runId: "",
-      node: null,
-      panel: "launch",
-    });
+    expect(harness.location.replaceParams).not.toHaveBeenCalled();
   });
 
   it("restores a checkpoint question through the hypothesis-first focus node", async () => {

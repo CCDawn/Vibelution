@@ -4,12 +4,10 @@
  * Mature canvas products (LangGraph Studio threads, n8n executions, AutoGen
  * Studio sessions) keep one graph and switch *instances*. Here the instance is
  * a catalog question's latest workflow checkpoint — the same record the launch
- * panel already attaches. The switcher lists the full launch-options catalog
- * (every question, including checkpoint-less and cancelled checkpoints) and
- * each option surfaces checkpoint availability/status/progress. Selecting an
- * option backed by a checkpoint restores `questionId` + `runId` + the focus
- * node; selecting a checkpoint-less option clears stale runId/node and opens
- * the launch panel prefilled for the question without auto-creating a run. It
+ * panel already attaches. The switcher lists existing experiment instances,
+ * while checkpoint-less catalog questions stay in the searchable launch panel.
+ * The current question remains visible even before its first formal checkpoint.
+ * Selecting a checkpoint restores `questionId` + `runId` + the focus node. It
  * does not fork, compare, or list the frozen Program EXP-* campaign records.
  */
 import type {
@@ -98,7 +96,7 @@ function hypothesisForQuestion(
   if (current && normalizeQuestionId(current.questionId) === questionId) {
     return formatHypothesisSummary(current.selectedCandidateIds, questionId, current.chain);
   }
-  return formatHypothesisSummary([], questionId);
+  return "假说状态未读取";
 }
 
 function checkpointAvailability(question: ResearchWorkflowLaunchOption): string {
@@ -145,11 +143,13 @@ export function buildExperimentSwitchOptions(input: {
   };
 }): ExperimentSwitchOption[] {
   const byQuestion = new Map<string, ExperimentSwitchOption>();
+  const currentQuestionId = normalizeQuestionId(input.current?.questionId ?? "");
   for (const question of input.questions) {
+    const questionId = normalizeQuestionId(question.questionId);
+    if (!question.checkpoint && questionId !== currentQuestionId) continue;
     const option = optionFromQuestion(question, input.current);
     if (option) byQuestion.set(option.questionId, option);
   }
-  const currentQuestionId = normalizeQuestionId(input.current?.questionId ?? "");
   const currentRunId = input.current?.runId.trim() ?? "";
   if (currentQuestionId && !byQuestion.has(currentQuestionId)) {
     const currentNodeId = input.current?.currentNodeId?.trim() ?? "";

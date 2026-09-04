@@ -13,8 +13,8 @@ const ACTOR_LABELS: Record<ActorKind, string> = {
   human: "人工审核",
 };
 
-export function researchStageLabel(stageId: string): string {
-  return STAGE_LABELS[stageId as WorkflowStageId] ?? "流程阶段";
+export function researchStageLabel(stageId: string, fallback = "流程阶段"): string {
+  return STAGE_LABELS[stageId as WorkflowStageId] ?? fallback;
 }
 
 export function researchActorLabel(actorKind: string): string {
