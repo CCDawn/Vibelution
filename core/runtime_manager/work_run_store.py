@@ -644,6 +644,39 @@ class WorkRunStore:
         )
         return payload
 
+    def touch_snapshot(
+        self,
+        run_kind: str,
+        run_id: str,
+        *,
+        heartbeat: dict[str, Any],
+        timestamp: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Cheap liveness touch: patch ``updatedAt`` plus a heartbeat object.
+
+        Read-modify-write of one run's snapshot file under the store lock.
+        Deliberately does NOT touch the index (active membership is
+        unchanged) and does NOT emit lifecycle events, so a per-query
+        heartbeat stays a single small JSON write.  Returns the patched
+        payload, or ``None`` when the run has no snapshot (a touch never
+        creates one) or the run id is invalid.
+        """
+
+        try:
+            normalized = normalize_run_id(run_id)
+        except ValueError:
+            return None
+        now = str(timestamp or "").strip() or _now_iso()
+        with _STORE_LOCK:
+            path = self.runs_dir(run_kind) / f"{normalized}.json"
+            payload = _load_json(path)
+            if not payload:
+                return None
+            payload["updatedAt"] = now
+            payload["heartbeat"] = json.loads(json.dumps(heartbeat, ensure_ascii=False))
+            _atomic_write_json(path, payload)
+        return payload
+
     def load_snapshot(self, run_kind: str, run_id: str) -> dict[str, Any] | None:
         try:
             normalized = normalize_run_id(run_id)

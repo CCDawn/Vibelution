@@ -778,6 +778,24 @@ def _execute_source_collection_search_body(team_id: str, run_id: str, payload: d
                 skipped_query_count += 1
                 continue
             attempted_query_ids.append(query_id)
+            # Heartbeat checkpoint for the two-tier liveness gate: one cheap
+            # touch per query (segment + counters only, never full objects)
+            # keeps the heartbeat tier (default 15 min) a true multiple of the
+            # worst single-query window (~3 providers x 60s HTTP timeout
+            # ladders + the bounded backoff budget ≈ 300s).  Best-effort: a
+            # failed touch must never fail the query.  The run-level Qwen
+            # deep search above deliberately runs before the first heartbeat,
+            # so its worst-case ladder stays judged by the coarse budget tier.
+            s._touch_source_collection_work_run_heartbeat(
+                normalized_team_id,
+                normalized_run_id,
+                segment="query_start",
+                attempted_query_count=attempted_query_count,
+                executed_query_count=executed_query_count,
+                failed_query_count=failed_query_count,
+                assignment_id=assignment_id,
+                query_id=query_id,
+            )
             query_records: list[dict[str, Any]] = []
             query_skipped_duplicate_count = 0
             query_filtered_excluded_count = 0
@@ -1084,6 +1102,18 @@ def _execute_source_collection_search_body(team_id: str, run_id: str, payload: d
                             storage_refs=[storage_artifacts["recordsPath"]],
                         )
                     )
+
+    # Loop-exit heartbeat: marks the checkpoint "queries done, materializing"
+    # so a reclaim during the final local writes still reads a live-shaped
+    # breakpoint.  Same best-effort contract as the per-query touches.
+    s._touch_source_collection_work_run_heartbeat(
+        normalized_team_id,
+        normalized_run_id,
+        segment="search_loop_exit",
+        attempted_query_count=attempted_query_count,
+        executed_query_count=executed_query_count,
+        failed_query_count=failed_query_count,
+    )
 
     final_run = s.data_processing_service.get_processing_run(normalized_run_id)
     final_assignments = s.data_processing_service.list_collection_assignments(normalized_run_id)["assignments"]

@@ -10411,6 +10411,324 @@ def test_source_collection_search_background_still_short_circuits_on_fresh_activ
     assert store.load_active_snapshot(kind)["runId"] == run_id
 
 
+def _aged_iso_for_liveness_tests() -> str:
+    """A timestamp far outside every liveness window (2026-01-01 UTC)."""
+    return "2026-01-01T00:00:00+00:00"
+
+
+def test_source_collection_liveness_tiers_judge_snapshots_independently(tmp_path, monkeypatch):
+    """Heartbeat tier and budget tier are independent liveness judgments.
+
+    Once a snapshot carries a heartbeat the budget tier must never judge it
+    (a fresh heartbeat keeps a long query alive even with a 1ms budget
+    window), and a stale heartbeat kills it even with a huge budget window.
+    """
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    service = team_workflow_orchestration_service
+    fresh = service.utc_now_iso()
+    aged = _aged_iso_for_liveness_tests()
+
+    fresh_heartbeat_snapshot = {
+        "runId": "run-liveness-a",
+        "teamId": "team-liveness",
+        "status": "running",
+        "updatedAt": aged,
+        "startedAt": aged,
+        "heartbeat": {"updatedAt": fresh, "segment": "query_start"},
+    }
+    stale_heartbeat_snapshot = dict(fresh_heartbeat_snapshot, runId="run-liveness-b")
+    stale_heartbeat_snapshot["heartbeat"] = {"updatedAt": aged, "segment": "query_start"}
+    heartbeatless_snapshot = {
+        "runId": "run-liveness-c",
+        "teamId": "team-liveness",
+        "status": "running",
+        "updatedAt": aged,
+        "startedAt": aged,
+    }
+
+    # Fresh heartbeat wins even when the budget window would call it dead.
+    monkeypatch.setenv("VIBELUTION_SOURCE_COLLECTION_SNAPSHOT_STALE_MS", "1")
+    monkeypatch.setenv("VIBELUTION_SOURCE_COLLECTION_HEARTBEAT_STALE_MS", str(15 * 60 * 1000))
+    assert service._source_collection_snapshot_is_age_stale(fresh_heartbeat_snapshot) is False
+    assert service._source_collection_snapshot_age_staleness(fresh_heartbeat_snapshot) == ""
+
+    # Stale heartbeat kills even when the budget window is a week.
+    monkeypatch.setenv("VIBELUTION_SOURCE_COLLECTION_SNAPSHOT_STALE_MS", str(7 * 24 * 3600 * 1000))
+    assert service._source_collection_snapshot_is_age_stale(stale_heartbeat_snapshot) is True
+    assert service._source_collection_snapshot_age_staleness(stale_heartbeat_snapshot) == "heartbeat"
+
+    # Heartbeat-less snapshots keep the legacy budget tier.
+    monkeypatch.setenv("VIBELUTION_SOURCE_COLLECTION_SNAPSHOT_STALE_MS", "1")
+    assert service._source_collection_snapshot_age_staleness(heartbeatless_snapshot) == "budget"
+    assert service._source_collection_snapshot_is_age_stale(heartbeatless_snapshot) is True
+
+    # An unparseable heartbeat falls back to the budget tier conservatively.
+    broken_heartbeat_snapshot = dict(heartbeatless_snapshot, runId="run-liveness-d")
+    broken_heartbeat_snapshot["heartbeat"] = {"updatedAt": "not-a-timestamp"}
+    monkeypatch.setenv("VIBELUTION_SOURCE_COLLECTION_SNAPSHOT_STALE_MS", str(30 * 60 * 1000))
+    assert service._source_collection_snapshot_age_staleness(broken_heartbeat_snapshot) == "budget"
+
+
+def test_source_collection_heartbeat_touch_records_checkpoint_and_gates_liveness(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    service = team_workflow_orchestration_service
+    team = team_service.create_team(name="挑战杯科研团队")
+    run_response = _create_source_collection_run_for_background_tests(team, topic="heartbeat checkpoint")
+    run_id = run_response["run"]["runId"]
+    kind = service.SOURCE_COLLECTION_WORK_RUN_KIND
+    store = service._source_collection_work_run_store()
+
+    service._persist_source_collection_work_run(
+        team["teamId"],
+        run_id,
+        status="running",
+        current_phase="searching",
+        run=run_response["run"],
+        team=team,
+        assignments=[],
+        records=[],
+        summary="心跳断点测试",
+        active=True,
+    )
+
+    # A fresh heartbeat keeps the snapshot alive even when the budget window
+    # is 1ms: the heartbeat tier owns the judgment once a heartbeat exists.
+    monkeypatch.setenv("VIBELUTION_SOURCE_COLLECTION_SNAPSHOT_STALE_MS", "1")
+    monkeypatch.setenv("VIBELUTION_SOURCE_COLLECTION_HEARTBEAT_STALE_MS", str(11 * 60 * 1000))
+    service._touch_source_collection_work_run_heartbeat(
+        team["teamId"],
+        run_id,
+        segment="query_start",
+        attempted_query_count=2,
+        executed_query_count=1,
+        failed_query_count=1,
+        assignment_id="assignment-1",
+        query_id="query-3",
+    )
+    snapshot = store.load_active_snapshot(kind)
+    heartbeat = snapshot.get("heartbeat")
+    assert isinstance(heartbeat, dict)
+    assert heartbeat["segment"] == "query_start"
+    assert heartbeat["assignmentId"] == "assignment-1"
+    assert heartbeat["queryId"] == "query-3"
+    assert heartbeat["attemptedQueryCount"] == 2
+    assert heartbeat["executedQueryCount"] == 1
+    assert heartbeat["failedQueryCount"] == 1
+    assert snapshot["updatedAt"] == heartbeat["updatedAt"]
+    assert service._source_collection_snapshot_is_age_stale(snapshot) is False
+
+    # Aged beyond the liveness window (budget window still 1ms-wide): the
+    # heartbeat tier fires with its own tier name.
+    store.touch_snapshot(
+        kind,
+        run_id,
+        heartbeat={"updatedAt": _aged_iso_for_liveness_tests(), "segment": "query_start", "queryId": "query-3"},
+        timestamp=_aged_iso_for_liveness_tests(),
+    )
+    snapshot = store.load_active_snapshot(kind)
+    assert service._source_collection_snapshot_age_staleness(snapshot) == "heartbeat"
+    assert service._source_collection_snapshot_is_age_stale(snapshot) is True
+
+    # The checkpoint projection exposes the minimal breakpoint only.
+    checkpoint = service._source_collection_snapshot_heartbeat_checkpoint(snapshot)
+    assert checkpoint["segment"] == "query_start"
+    assert checkpoint["queryId"] == "query-3"
+    assert checkpoint["updatedAt"] == _aged_iso_for_liveness_tests()
+    assert set(checkpoint) <= {
+        "segment",
+        "queryId",
+        "assignmentId",
+        "attemptedQueryCount",
+        "executedQueryCount",
+        "failedQueryCount",
+        "updatedAt",
+    }
+
+
+def test_source_collection_search_background_reclaims_heartbeat_stale_snapshot_with_checkpoint(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    service = team_workflow_orchestration_service
+    team = team_service.create_team(name="挑战杯科研团队")
+    run_response = _create_source_collection_run_for_background_tests(team, topic="heartbeat reclaim")
+    run_id = run_response["run"]["runId"]
+    kind = service.SOURCE_COLLECTION_WORK_RUN_KIND
+    store = service._source_collection_work_run_store()
+
+    # Dead-worker leftover whose snapshot.updatedAt is fresh, but whose last
+    # heartbeat is ancient: only the heartbeat tier may reclaim it.
+    service._persist_source_collection_work_run(
+        team["teamId"],
+        run_id,
+        status="running",
+        current_phase="searching",
+        run=run_response["run"],
+        team=team,
+        assignments=[],
+        records=[],
+        summary="带心跳的僵尸快照",
+        active=True,
+    )
+    monkeypatch.delenv("VIBELUTION_SOURCE_COLLECTION_SNAPSHOT_STALE_MS", raising=False)
+    monkeypatch.setenv("VIBELUTION_SOURCE_COLLECTION_HEARTBEAT_STALE_MS", "1")
+    store.touch_snapshot(
+        kind,
+        run_id,
+        heartbeat={
+            "updatedAt": _aged_iso_for_liveness_tests(),
+            "teamId": team["teamId"],
+            "segment": "query_start",
+            "attemptedQueryCount": 2,
+            "executedQueryCount": 1,
+            "failedQueryCount": 1,
+            "assignmentId": "assignment-1",
+            "queryId": "query-3",
+        },
+        timestamp=service.utc_now_iso(),
+    )
+    assert store.load_active_snapshot(kind)["runId"] == run_id
+
+    worker_calls = []
+
+    def recording_worker(team_id, requested_run_id, payload=None):
+        worker_calls.append({"teamId": team_id, "runId": requested_run_id})
+
+    monkeypatch.setattr(service, "_run_source_collection_search_background", recording_worker)
+    monkeypatch.setattr(service.threading, "Thread", _InstantSourceCollectionThread)
+    events = _capture_workflow_events(monkeypatch)
+
+    response = service.start_source_collection_search_background(team["teamId"], run_id, {})
+
+    assert response["alreadyRunning"] is False
+    assert worker_calls == [{"teamId": team["teamId"], "runId": run_id}]
+    reclaim_events = _workflow_scene_events_by_code(
+        events,
+        "source_collection.search_background_stale_snapshot_reclaimed",
+    )
+    assert len(reclaim_events) == 1
+    reclaim_fields = reclaim_events[0]["fields"]
+    assert reclaim_fields["staleTier"] == "heartbeat"
+    assert reclaim_fields["staleWindowMs"] == 1
+    assert reclaim_fields["checkpointSegment"] == "query_start"
+    assert reclaim_fields["checkpointQueryId"] == "query-3"
+    assert reclaim_fields["checkpointAssignmentId"] == "assignment-1"
+    assert reclaim_fields["checkpointAttemptedQueryCount"] == 2
+    assert reclaim_fields["checkpointExecutedQueryCount"] == 1
+    assert reclaim_fields["checkpointFailedQueryCount"] == 1
+    # The new worker's startup log carries the same breakpoint.
+    accepted_events = _workflow_scene_events_by_code(
+        events,
+        "source_collection.search_background_accepted",
+    )
+    assert len(accepted_events) == 1
+    accepted_fields = accepted_events[0]["fields"]
+    assert accepted_fields["reclaimedSegment"] == "query_start"
+    assert accepted_fields["reclaimedQueryId"] == "query-3"
+    assert accepted_fields["reclaimedAttemptedQueryCount"] == 2
+    # The dead marker is replaced by this start's own queued snapshot.
+    active_after = store.load_active_snapshot(kind)
+    assert active_after["runId"] == run_id
+    assert active_after["currentPhase"] == "queued"
+
+
+def test_source_collection_heartbeat_touch_failure_does_not_break_collection(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    from core.runtime_manager import work_run_store as work_run_store_module
+
+    def exploding_touch_snapshot(self, run_kind, run_id, *, heartbeat, timestamp=None):
+        raise RuntimeError("snapshot disk exploded")
+
+    monkeypatch.setattr(work_run_store_module.WorkRunStore, "touch_snapshot", exploding_touch_snapshot)
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "_execute_source_collection_query",
+        _fake_arxiv_search_response,
+    )
+    team = team_service.create_team(name="ai科学研究团队")
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "title": "Heartbeat failure batch",
+            "topic": "predictive coding cortical hierarchy",
+            "querySeeds": ["predictive coding cortical hierarchy"],
+            "searchLanguages": ["en"],
+            "sourceTypes": ["paper"],
+            "agentRoles": ["source_finder"],
+        },
+    )
+    run_id = run_response["run"]["runId"]
+
+    execution = team_workflow_orchestration_service.execute_source_collection_search(
+        team["teamId"],
+        run_id,
+        {"provider": "arxiv_api", "maxQueries": 1, "maxResultsPerQuery": 2},
+    )
+
+    # Every per-query and loop-exit heartbeat touch raised; collection still
+    # executed the query and wrote its records.
+    assert execution["executedQueryCount"] >= 1
+    assert execution["recordCount"] >= 1
+    assert execution["status"] in {"executed", "partial", "completed"}
+
+
+def test_source_collection_search_body_emits_query_heartbeats(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    service = team_workflow_orchestration_service
+    real_touch = service._touch_source_collection_work_run_heartbeat
+    touches: list[dict] = []
+
+    def recording_touch(team_id, run_id, *, segment, **kwargs):
+        touches.append(
+            {
+                "teamId": team_id,
+                "runId": run_id,
+                "segment": segment,
+                "queryId": kwargs.get("query_id", ""),
+                "assignmentId": kwargs.get("assignment_id", ""),
+                "attemptedQueryCount": kwargs.get("attempted_query_count", 0),
+                "executedQueryCount": kwargs.get("executed_query_count", 0),
+                "failedQueryCount": kwargs.get("failed_query_count", 0),
+            }
+        )
+        return real_touch(team_id, run_id, segment=segment, **kwargs)
+
+    monkeypatch.setattr(service, "_touch_source_collection_work_run_heartbeat", recording_touch)
+    monkeypatch.setattr(service, "_execute_source_collection_query", _fake_arxiv_search_response)
+    team = team_service.create_team(name="ai科学研究团队")
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "title": "Heartbeat cadence batch",
+            "topic": "predictive coding cortical hierarchy",
+            "querySeeds": ["predictive coding cortical hierarchy"],
+            "searchLanguages": ["en"],
+            "sourceTypes": ["paper"],
+            "agentRoles": ["source_finder"],
+        },
+    )
+    run_id = run_response["run"]["runId"]
+
+    team_workflow_orchestration_service.execute_source_collection_search(
+        team["teamId"],
+        run_id,
+        {"provider": "arxiv_api", "maxQueries": 1, "maxResultsPerQuery": 2},
+    )
+
+    # One heartbeat per executed query plus the loop-exit marker, each
+    # carrying the minimal checkpoint counters.
+    query_start_touches = [item for item in touches if item["segment"] == "query_start"]
+    assert len(query_start_touches) >= 1
+    assert all(item["queryId"] for item in query_start_touches)
+    assert all(item["runId"] == run_id for item in touches)
+    exit_touches = [item for item in touches if item["segment"] == "search_loop_exit"]
+    assert len(exit_touches) == 1
+    assert exit_touches[0]["attemptedQueryCount"] >= 1
+
+
 def test_source_collection_batch_terminal_writes_collection_batch_completed_event(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)

@@ -4039,19 +4039,46 @@ def _source_collection_work_run_snapshot_is_stale(snapshot: dict[str, Any] | Non
     return bool([item for item in list(snapshot.get("staleReasons") or []) if s._trim_text(item, max_length=160)])
 
 
-# An active-shaped work-run snapshot older than this window can no longer
-# block a new background start: the worker is a bare daemon thread, so a
-# snapshot without progress for this long means the worker is gone and the
-# already-running guard would otherwise deadlock the run forever.  Same
-# order of magnitude as the bounded search budgets (backoff budget, provider
-# cooldowns); one collection batch with its retry ladders stays well inside
-# the default 30 minutes.
+# Two-tier liveness for an active-shaped source-collection work-run snapshot.
+#
+# Budget tier (coarse fallback, ``VIBELUTION_SOURCE_COLLECTION_SNAPSHOT_STALE_MS``,
+# default 30 min): unchanged env name and default.  It judges snapshots that
+# carry no heartbeat at all — legacy workers, and every phase before the
+# search loop emits its first heartbeat.  That pre-loop phase includes the
+# run-level Qwen deep-search supplement (one POST per run, 300s timeout per
+# attempt, <=4 attempts + the 120s backoff budget ≈ 22 min worst case), which
+# is exactly why the coarse tier must stay far above any single transport
+# ladder: same order of magnitude as the bounded search budgets (backoff
+# budget, provider cooldowns).
+#
+# Liveness tier (heartbeat, ``VIBELUTION_SOURCE_COLLECTION_HEARTBEAT_STALE_MS``,
+# default 15 min): once a snapshot carries a ``heartbeat`` object the worker
+# is proven to be a heartbeat-emitting build, and death detection tightens to
+# this window measured from ``heartbeat.updatedAt``.  Derivation of the
+# default from the collection loop's real no-update window (one query
+# iteration, the gap between two touches):
+#   - per provider call: <=4 attempts x 15s HTTP timeout = 60s, plus backoff
+#     sleeps (exp 1/2/4s or Retry-After clamped to 30s) charged against the
+#     120s per-execution budget;
+#   - one query runs the default 3 academic providers (crossref, arxiv,
+#     openalex) => 3 x 60s HTTP = 180s, plus up to the 120s sleep budget
+#     => worst window ≈ 300s;
+#   - the liveness window takes 3x that worst window => 900s (15 min), which
+#     also keeps the ordering liveness (900s) < budget (1800s): with
+#     heartbeats flowing, the heartbeat tier always fires first and the
+#     budget tier stays an independent coarse backstop for heartbeat-less
+#     snapshots.  Operators must keep HEARTBEAT_STALE_MS below
+#     SNAPSHOT_STALE_MS; if inverted, the heartbeat tier simply becomes the
+#     binding constraint and the budget tier never fires for heartbeating
+#     snapshots.
 _SOURCE_COLLECTION_SNAPSHOT_STALE_MS_DEFAULT = 30 * 60 * 1000
 _SOURCE_COLLECTION_SNAPSHOT_STALE_MS_ENV = "VIBELUTION_SOURCE_COLLECTION_SNAPSHOT_STALE_MS"
+_SOURCE_COLLECTION_HEARTBEAT_STALE_MS_DEFAULT = 15 * 60 * 1000
+_SOURCE_COLLECTION_HEARTBEAT_STALE_MS_ENV = "VIBELUTION_SOURCE_COLLECTION_HEARTBEAT_STALE_MS"
 
 
 def _source_collection_snapshot_stale_ms() -> int:
-    """Snapshot age (ms) beyond which an active snapshot is treated as dead."""
+    """Budget-tier window (ms) for snapshots without any heartbeat."""
     raw = str(os.environ.get(_SOURCE_COLLECTION_SNAPSHOT_STALE_MS_ENV) or "").strip()
     if not raw:
         return _SOURCE_COLLECTION_SNAPSHOT_STALE_MS_DEFAULT
@@ -4062,28 +4089,136 @@ def _source_collection_snapshot_stale_ms() -> int:
     return value if value > 0 else _SOURCE_COLLECTION_SNAPSHOT_STALE_MS_DEFAULT
 
 
+def _source_collection_heartbeat_stale_ms() -> int:
+    """Liveness-tier window (ms) measured from the last heartbeat touch."""
+    raw = str(os.environ.get(_SOURCE_COLLECTION_HEARTBEAT_STALE_MS_ENV) or "").strip()
+    if not raw:
+        return _SOURCE_COLLECTION_HEARTBEAT_STALE_MS_DEFAULT
+    try:
+        value = int(float(raw))
+    except ValueError:
+        return _SOURCE_COLLECTION_HEARTBEAT_STALE_MS_DEFAULT
+    return value if value > 0 else _SOURCE_COLLECTION_HEARTBEAT_STALE_MS_DEFAULT
+
+
+def _source_collection_snapshot_age_ms(text: str) -> float | None:
+    """Age (ms) of one ISO timestamp, or ``None`` when unusable."""
+    s = _service()
+    normalized = s._trim_text(text, max_length=80)
+    if not normalized:
+        return None
+    try:
+        parsed = datetime.fromisoformat(normalized.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - parsed.astimezone(timezone.utc)).total_seconds() * 1000.0
+
+
+def _source_collection_snapshot_age_staleness(snapshot: dict[str, Any] | None) -> str:
+    """Which liveness tier judges this snapshot stale: "" | "heartbeat" | "budget".
+
+    A snapshot carrying a heartbeat is judged solely by the liveness tier
+    (age of ``heartbeat.updatedAt`` vs ``_source_collection_heartbeat_stale_ms``);
+    a heartbeat-less snapshot keeps the legacy budget tier (``updatedAt`` /
+    ``startedAt`` vs ``_source_collection_snapshot_stale_ms``).  An unparseable
+    heartbeat timestamp falls back to the budget tier conservatively.
+    """
+    s = _service()
+    if not isinstance(snapshot, dict):
+        return ""
+    heartbeat = snapshot.get("heartbeat") if isinstance(snapshot.get("heartbeat"), dict) else {}
+    heartbeat_age_ms = s._source_collection_snapshot_age_ms(str(heartbeat.get("updatedAt") or ""))
+    if heartbeat_age_ms is not None:
+        return "heartbeat" if heartbeat_age_ms > s._source_collection_heartbeat_stale_ms() else ""
+    age_ms = s._source_collection_snapshot_age_ms(
+        str(snapshot.get("updatedAt") or snapshot.get("startedAt") or "")
+    )
+    if age_ms is None:
+        return ""
+    return "budget" if age_ms > s._source_collection_snapshot_stale_ms() else ""
+
+
 def _source_collection_snapshot_is_age_stale(snapshot: dict[str, Any] | None) -> bool:
     """True when a snapshot has had no progress update for too long.
 
     Adds the missing time dimension to the active-snapshot gate: status and
-    phase alone cannot distinguish a live worker from a dead one, so an
-    active snapshot whose ``updatedAt`` (or ``startedAt``) is older than
-    ``_source_collection_snapshot_stale_ms`` must read as not active.
+    phase alone cannot distinguish a live worker from a dead one.  Two tiers
+    (see the constants above): heartbeat-emitting workers are judged by the
+    tighter liveness window so a wedged worker is reclaimed in minutes, while
+    heartbeat-less snapshots keep the coarse 30-minute budget backstop.
+    """
+    s = _service()
+    return bool(s._source_collection_snapshot_age_staleness(snapshot))
+
+
+def _source_collection_snapshot_heartbeat_checkpoint(snapshot: dict[str, Any] | None) -> dict[str, Any]:
+    """Project the minimal reclaim checkpoint off a snapshot's heartbeat.
+
+    Deliberately tiny (segment identifiers and counters only — never the
+    full run objects): enough to observe where a dead worker stopped, not
+    enough to resume planning from it.
     """
     s = _service()
     if not isinstance(snapshot, dict):
-        return False
-    text = s._trim_text(snapshot.get("updatedAt") or snapshot.get("startedAt"), max_length=80)
-    if not text:
-        return False
+        return {}
+    heartbeat = snapshot.get("heartbeat") if isinstance(snapshot.get("heartbeat"), dict) else {}
+    if not heartbeat:
+        return {}
+    checkpoint = {
+        "segment": s._trim_text(heartbeat.get("segment"), max_length=60),
+        "queryId": s._trim_text(heartbeat.get("queryId"), max_length=160),
+        "assignmentId": s._trim_text(heartbeat.get("assignmentId"), max_length=160),
+        "attemptedQueryCount": s._source_collection_count(heartbeat.get("attemptedQueryCount")),
+        "executedQueryCount": s._source_collection_count(heartbeat.get("executedQueryCount")),
+        "failedQueryCount": s._source_collection_count(heartbeat.get("failedQueryCount")),
+        "updatedAt": s._trim_text(heartbeat.get("updatedAt"), max_length=80),
+    }
+    return checkpoint
+
+
+def _touch_source_collection_work_run_heartbeat(
+    team_id: str,
+    run_id: str,
+    *,
+    segment: str,
+    attempted_query_count: int = 0,
+    executed_query_count: int = 0,
+    failed_query_count: int = 0,
+    assignment_id: str = "",
+    query_id: str = "",
+) -> None:
+    """Best-effort per-query heartbeat on the active work-run snapshot.
+
+    Called from the collection loop once per query (plus once at loop exit).
+    Writes only the snapshot's ``updatedAt`` and a tiny heartbeat checkpoint
+    (segment + query counters — never full run objects), so the liveness
+    gate has a real heartbeat source and a reclaim can read where the dead
+    worker stopped.  Must never break collection: every failure is swallowed.
+    """
+    s = _service()
+    normalized_run_id = s._trim_text(run_id, max_length=160)
+    if not normalized_run_id:
+        return
+    heartbeat = {
+        "updatedAt": s.utc_now_iso(),
+        "teamId": s._trim_text(team_id, max_length=96),
+        "segment": s._trim_text(segment, max_length=60),
+        "attemptedQueryCount": s._source_collection_count(attempted_query_count),
+        "executedQueryCount": s._source_collection_count(executed_query_count),
+        "failedQueryCount": s._source_collection_count(failed_query_count),
+        "assignmentId": s._trim_text(assignment_id, max_length=160),
+        "queryId": s._trim_text(query_id, max_length=160),
+    }
     try:
-        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
-    except ValueError:
-        return False
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    age_ms = (datetime.now(timezone.utc) - parsed.astimezone(timezone.utc)).total_seconds() * 1000.0
-    return age_ms > s._source_collection_snapshot_stale_ms()
+        s._source_collection_work_run_store().touch_snapshot(
+            s.SOURCE_COLLECTION_WORK_RUN_KIND,
+            normalized_run_id,
+            heartbeat=heartbeat,
+        )
+    except Exception:  # noqa: BLE001 - a failed heartbeat must never fail collection
+        return
 
 
 def _source_collection_work_run_store() -> Any:

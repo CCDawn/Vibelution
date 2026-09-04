@@ -1129,17 +1129,49 @@ def start_source_collection_search_background(team_id: str, run_id: str, payload
             team_id=normalized_team_id,
             run_id=normalized_run_id,
         )
+        stale_tier = (
+            s._source_collection_snapshot_age_staleness(existing_active_snapshot)
+            if isinstance(existing_active_snapshot, dict)
+            else ""
+        )
         stale_snapshot_reclaimed = (
-            isinstance(existing_active_snapshot, dict)
+            bool(stale_tier)
+            and isinstance(existing_active_snapshot, dict)
             and s._trim_text(existing_active_snapshot.get("runId"), max_length=160) == normalized_run_id
             and s._trim_text(existing_active_snapshot.get("teamId"), max_length=160) == normalized_team_id
-            and s._source_collection_snapshot_is_age_stale(existing_active_snapshot)
         )
+        # Minimal checkpoint off the dead worker's last heartbeat (segment +
+        # counters only): surfaced on the reclaim scene event and this new
+        # worker's accepted/startup event so the breakpoint is observable.
+        # Resuming the query plan from it is explicitly out of scope here.
+        reclaimed_checkpoint = (
+            s._source_collection_snapshot_heartbeat_checkpoint(existing_active_snapshot)
+            if stale_snapshot_reclaimed
+            else {}
+        )
+
+        def _checkpoint_event_fields(prefix: str) -> dict[str, Any]:
+            return {
+                f"{prefix}Segment": str(reclaimed_checkpoint.get("segment") or ""),
+                f"{prefix}QueryId": str(reclaimed_checkpoint.get("queryId") or ""),
+                f"{prefix}AssignmentId": str(reclaimed_checkpoint.get("assignmentId") or ""),
+                f"{prefix}AttemptedQueryCount": reclaimed_checkpoint.get("attemptedQueryCount") or 0,
+                f"{prefix}ExecutedQueryCount": reclaimed_checkpoint.get("executedQueryCount") or 0,
+                f"{prefix}FailedQueryCount": reclaimed_checkpoint.get("failedQueryCount") or 0,
+                f"{prefix}UpdatedAt": str(reclaimed_checkpoint.get("updatedAt") or ""),
+            }
+
         if stale_snapshot_reclaimed:
-            # The previous worker is gone (its active snapshot outlived the
-            # stale-age window without progress).  Persisting the new queued
+            # The previous worker is gone (its snapshot outlived the stale
+            # window without progress — heartbeat tier when it emitted
+            # heartbeats, budget tier otherwise).  Persisting the new queued
             # snapshot below replaces the dead active marker, and the worker
             # starts for real instead of short-circuiting forever.
+            stale_window_ms = (
+                s._source_collection_heartbeat_stale_ms()
+                if stale_tier == "heartbeat"
+                else s._source_collection_snapshot_stale_ms()
+            )
             s._record_workflow_event(
                 "source_collection.search_background_stale_snapshot_reclaimed",
                 normalized_team_id,
@@ -1151,7 +1183,9 @@ def start_source_collection_search_background(team_id: str, run_id: str, payload
                     "activeStatus": str(existing_active_snapshot.get("status") or ""),
                     "activePhase": str(existing_active_snapshot.get("currentPhase") or ""),
                     "activeUpdatedAt": str(existing_active_snapshot.get("updatedAt") or ""),
-                    "staleSnapshotMs": s._source_collection_snapshot_stale_ms(),
+                    "staleTier": stale_tier,
+                    "staleWindowMs": stale_window_ms,
+                    **_checkpoint_event_fields("checkpoint"),
                 },
             )
         if s._source_collection_background_snapshot_is_active(existing_active_snapshot, normalized_team_id, normalized_run_id):
@@ -1217,6 +1251,10 @@ def start_source_collection_search_background(team_id: str, run_id: str, payload
             "assignmentCount": len(assignments),
             "recordCount": len(records),
             "threadName": worker.name,
+            # After a reclaim this is the dead worker's breakpoint, so the
+            # new worker's startup log carries where the previous attempt
+            # stopped (observability only — no resume planning here).
+            **(_checkpoint_event_fields("reclaimed") if reclaimed_checkpoint else {}),
         },
     )
     return s._source_collection_search_background_response(
