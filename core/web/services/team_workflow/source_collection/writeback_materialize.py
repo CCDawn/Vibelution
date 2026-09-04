@@ -1593,6 +1593,124 @@ def _materialize_source_collection_stage_writeback_candidate_graph(
     return summary
 
 
+def _challenge_knowledge_scope(task: dict[str, Any], run_id: str) -> dict[str, str]:
+    s = _service()
+    contract = task.get("challengeTaskContract") if isinstance(task.get("challengeTaskContract"), dict) else {}
+    # Ordinary source-collection tasks may carry a generated ``questionId``
+    # without being a Challenge Cup task.  The challenge contract is the
+    # authority marker; treating any partial scope as Challenge Cup breaks the
+    # backwards-compatible team-knowledge ingestion path.
+    if not contract:
+        return {}
+    scope = task.get("scope") if isinstance(task.get("scope"), dict) else {}
+    question_id = s._trim_text(contract.get("questionId") or scope.get("questionId") or task.get("questionId"), max_length=200)
+    project_id = s._trim_text(
+        contract.get("researchProjectId") or scope.get("researchProjectId") or task.get("researchProjectId"),
+        max_length=160,
+    )
+    if not question_id and not project_id:
+        return {}
+    if not question_id or not project_id:
+        raise s.TeamWorkflowOrchestrationError(
+            "Challenge Cup knowledge ingestion requires authoritative researchProjectId and questionId."
+        )
+    return {
+        "researchProjectId": project_id,
+        "questionId": question_id,
+        "sourceCollectionRunId": s._trim_text(run_id, max_length=200),
+    }
+
+
+def _challenge_knowledge_manager_agent_id(team: dict[str, Any]) -> str:
+    s = _service()
+    for member in list(team.get("members") or []):
+        if not isinstance(member, dict):
+            continue
+        role = s._trim_text(member.get("roleKey") or member.get("role"), max_length=80)
+        if role == "challenge_cup_knowledge_manager":
+            return s._trim_text(member.get("agentId"), max_length=160)
+    return ""
+
+
+def _source_candidate_identity_hash(candidate: dict[str, Any]) -> str:
+    s = _service()
+    metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+    explicit = s._trim_text(metadata.get("sourceIdentityHash"), max_length=160)
+    if explicit:
+        return explicit
+    identity = s._trim_text(
+        metadata.get("sourceIdentityKey")
+        or candidate.get("sourceUrl")
+        or candidate.get("sourcePath")
+        or candidate.get("candidateId"),
+        max_length=2000,
+    )
+    return "sha256:" + hashlib.sha256(identity.encode("utf-8")).hexdigest()
+
+
+def _source_candidate_evidence_level(candidate: dict[str, Any]) -> str:
+    s = _service()
+    metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+    levels = metadata.get("evidenceLevels") if isinstance(metadata.get("evidenceLevels"), list) else []
+    return s._trim_text(
+        candidate.get("evidenceLevel")
+        or metadata.get("evidenceLevel")
+        or (levels[0] if levels else "")
+        or candidate.get("qualityStatus"),
+        max_length=80,
+    )
+
+
+def _single_source_steward_pack_output(
+    pack_output: dict[str, Any],
+    candidate: dict[str, Any],
+    *,
+    scope: dict[str, str],
+) -> dict[str, Any]:
+    s = _service()
+    candidate_id = s._trim_text(candidate.get("candidateId"), max_length=160)
+    output = s._normalize_metadata(pack_output)
+    output["candidateIds"] = [candidate_id]
+    output["sourceRefs"] = [
+        {"type": "source_manifest", "id": candidate_id, "label": s._source_manifest_label(candidate)}
+    ]
+    candidate_evidence_refs = s._normalize_ref_list(candidate.get("evidenceRefs"), max_items=24)
+    source_url = s._trim_text(candidate.get("sourceUrl"), max_length=2000)
+    if source_url and not any(str(ref.get("id") or "").strip() == source_url for ref in candidate_evidence_refs):
+        candidate_evidence_refs.append({"type": "url", "id": source_url})
+    output["evidenceRefs"] = candidate_evidence_refs or [
+        {"type": "source_manifest", "id": candidate_id, "label": s._source_manifest_label(candidate)}
+    ]
+    claims = [
+        claim
+        for claim in list(pack_output.get("claims") or [])
+        if isinstance(claim, dict) and s._trim_text(claim.get("sourceRef"), max_length=160) == candidate_id
+    ]
+    if not claims:
+        claims = [{"claim": s._trim_text(candidate.get("summary"), max_length=2000) or s._source_manifest_label(candidate), "sourceRef": candidate_id}]
+    output["claims"] = claims
+    proposal = output.get("proposalPayload") if isinstance(output.get("proposalPayload"), dict) else {}
+    proposal.update(
+        {
+            "title": s._source_manifest_label(candidate),
+            "summary": s._trim_text(candidate.get("summary"), max_length=4000),
+            "claims": claims,
+        }
+    )
+    output["proposalPayload"] = proposal
+    trace = output.get("sourceTrace") if isinstance(output.get("sourceTrace"), dict) else {}
+    trace.update(scope)
+    trace["sourceCandidateIds"] = [candidate_id]
+    if source_url:
+        trace["sourceUrl"] = source_url
+    output["sourceTrace"] = trace
+    output.update(scope)
+    output["sourceCandidateId"] = candidate_id
+    output["sourceIdentityHash"] = _source_candidate_identity_hash(candidate)
+    output["evidenceLevel"] = _source_candidate_evidence_level(candidate)
+    return output
+
+
 def _materialize_source_collection_stage_writeback_knowledge_ingestion(
     team_id: str,
     run_id: str,
@@ -1747,6 +1865,29 @@ def _materialize_source_collection_stage_writeback_knowledge_ingestion(
         or s._trim_text(task.get("agentId"), max_length=160)
         or s.agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
     )
+    try:
+        challenge_scope = _challenge_knowledge_scope(task, run_id)
+    except s.TeamWorkflowOrchestrationError as exc:
+        return s._source_collection_stage_writeback_knowledge_ingestion_summary(
+            status="failed",
+            approved_candidate_ids=approved_candidate_ids,
+            failed=[{"reason": "challenge_scope_incomplete", "error": str(exc)}],
+        )
+    team = s.team_service.get_team(team_id)
+    reviewer_agent_id = steward_agent_id
+    if challenge_scope:
+        reviewer_agent_id = _challenge_knowledge_manager_agent_id(team)
+        if not reviewer_agent_id:
+            return s._source_collection_stage_writeback_knowledge_ingestion_summary(
+                status="failed",
+                approved_candidate_ids=approved_candidate_ids,
+                failed=[{"reason": "challenge_cup_knowledge_manager_missing"}],
+            )
+    team_member_ids = {
+        s._trim_text(member.get("agentId"), max_length=160)
+        for member in list(team.get("members") or [])
+        if isinstance(member, dict) and s._trim_text(member.get("agentId"), max_length=160)
+    }
     requested_knowledge_base_id = s._trim_text(
         result.get("scopedKnowledgeBaseId")
         or decision.get("scopedKnowledgeBaseId")
@@ -1768,61 +1909,100 @@ def _materialize_source_collection_stage_writeback_knowledge_ingestion(
             knowledge_base = resolved["knowledgeBase"]
             knowledge_base_id = s._knowledge_base_raw_id(knowledge_base.get("knowledgeBaseId"))
             scoped_knowledge_base_id = s._knowledge_base_scoped_id_for_team(team_id, knowledge_base_id, knowledge_base)
-        s.team_knowledge_service.ensure_knowledge_base_review_grant(scoped_knowledge_base_id, steward_agent_id)
+        s.team_knowledge_service.ensure_knowledge_base_review_grant(scoped_knowledge_base_id, reviewer_agent_id)
         # 与 KB review grant 对称的 trusted-gate 授权确保：只把本次自动链实际执行
         # owner source 审阅的 steward agent 加进该 team 的 localStewardAgentIds，
         # 不扩 REVIEW_ROLES、不影响其他 agent。
-        s.team_knowledge_service.ensure_owner_source_review_grant("team", team_id, steward_agent_id)
+        s.team_knowledge_service.ensure_owner_source_review_grant("team", team_id, reviewer_agent_id)
         # 候选写入必须落在 authority run 的 owner 工程店里：pack/提交/审核整条
         # 链都带 run_id 走 run-owner 解析；owner 解析失败时保留历史活跃店目标
         # 并记录带 reason 的 warning 事件，不再静默漂移（SCI-091 事故根因）。
-        pack_record = s.record_local_research_model_output(
-            team_id,
-            {
-                "taskType": "steward_pack_draft",
-                "title": s._trim_text(result.get("title") or writeback.get("summary"), max_length=240) or "Knowledge expansion steward pack",
-                "createdByAgent": steward_agent_id,
-                "output": pack_output,
-            },
-            run_id=run_id,
-        )["candidate"]
-        source_pending = s.submit_steward_pack_to_knowledge_ingestion(
-            team_id,
-            pack_record["candidateId"],
-            {"knowledgeBaseId": scoped_knowledge_base_id, "proposedByAgentId": steward_agent_id},
-            run_id=run_id,
-        )
-        ingestion = source_pending["candidate"].get("metadata", {}).get("knowledgeIngestion", {}) if isinstance(source_pending.get("candidate"), dict) else {}
-        inbox_source_id = s._trim_text(ingestion.get("inboxSourceId"), max_length=160)
-        reviewed_source = s.team_knowledge_service.review_owner_inbox_source(
-            "team",
-            team_id,
-            inbox_source_id,
-            decision="accepted",
-            reviewed_by_agent_id=steward_agent_id,
-        )
-        central_source_id = s._trim_text(reviewed_source.get("centralSource", {}).get("centralSourceId") if isinstance(reviewed_source.get("centralSource"), dict) else "", max_length=160)
-        knowledge_pending = s.submit_steward_pack_to_knowledge_ingestion(
-            team_id,
-            pack_record["candidateId"],
-            {
+        pack_records: list[dict[str, Any]] = []
+        knowledge_item_ids: list[str] = []
+        source_pending: dict[str, Any] = {}
+        knowledge_pending: dict[str, Any] = {}
+        knowledge_review: dict[str, Any] = {}
+        for source_candidate_id in approved_candidate_ids:
+            source_candidate = source_candidates_by_id[source_candidate_id]
+            proposed_by_agent_id = steward_agent_id
+            if challenge_scope:
+                proposed_by_agent_id = s._trim_text(source_candidate.get("createdByAgent"), max_length=160)
+                if proposed_by_agent_id not in team_member_ids:
+                    raise s.TeamWorkflowOrchestrationError(
+                        f"Source candidate {source_candidate_id} has no trusted team Agent proposer."
+                    )
+                if proposed_by_agent_id == reviewer_agent_id:
+                    raise s.TeamWorkflowOrchestrationError(
+                        f"Source candidate {source_candidate_id} proposer cannot also be the knowledge manager reviewer."
+                    )
+            source_pack_output = _single_source_steward_pack_output(
+                pack_output,
+                source_candidate,
+                scope=challenge_scope,
+            )
+            pack_record = s.record_local_research_model_output(
+                team_id,
+                {
+                    "taskType": "steward_pack_draft",
+                    "title": s._source_manifest_label(source_candidate),
+                    "createdByAgent": proposed_by_agent_id,
+                    "output": source_pack_output,
+                },
+                run_id=run_id,
+            )["candidate"]
+            pack_records.append(pack_record)
+            ingestion_contract = {
                 "knowledgeBaseId": scoped_knowledge_base_id,
-                "proposedByAgentId": steward_agent_id,
-                "centralSourceId": central_source_id,
-            },
-            run_id=run_id,
-        )
-        knowledge_review = s.review_steward_pack_knowledge_ingestion(
-            team_id,
-            pack_record["candidateId"],
-            {
-                "knowledgeBaseId": scoped_knowledge_base_id,
-                "reviewedByAgentId": steward_agent_id,
-                "decision": "approved",
-                "resolutionNote": s._trim_text(decision.get("reason") or writeback.get("summary"), max_length=2000),
-            },
-            run_id=run_id,
-        )
+                "proposedByAgentId": proposed_by_agent_id,
+                "requiredReviewerAgentId": reviewer_agent_id if challenge_scope else "",
+                **challenge_scope,
+                "sourceCandidateId": source_candidate_id,
+                "sourceIdentityHash": source_pack_output["sourceIdentityHash"],
+                "evidenceLevel": source_pack_output["evidenceLevel"],
+            }
+            source_pending = s.submit_steward_pack_to_knowledge_ingestion(
+                team_id,
+                pack_record["candidateId"],
+                ingestion_contract,
+                run_id=run_id,
+            )
+            ingestion = source_pending["candidate"].get("metadata", {}).get("knowledgeIngestion", {}) if isinstance(source_pending.get("candidate"), dict) else {}
+            inbox_source_id = s._trim_text(ingestion.get("inboxSourceId"), max_length=160)
+            reviewed_source = s.team_knowledge_service.review_owner_inbox_source(
+                "team",
+                team_id,
+                inbox_source_id,
+                decision="accepted",
+                reviewed_by_agent_id=reviewer_agent_id,
+            )
+            central_source_id = s._trim_text(reviewed_source.get("centralSource", {}).get("centralSourceId") if isinstance(reviewed_source.get("centralSource"), dict) else "", max_length=160)
+            knowledge_pending = s.submit_steward_pack_to_knowledge_ingestion(
+                team_id,
+                pack_record["candidateId"],
+                {**ingestion_contract, "centralSourceId": central_source_id},
+                run_id=run_id,
+            )
+            knowledge_review = s.review_steward_pack_knowledge_ingestion(
+                team_id,
+                pack_record["candidateId"],
+                {
+                    "knowledgeBaseId": scoped_knowledge_base_id,
+                    "reviewedByAgentId": reviewer_agent_id,
+                    "decision": "approved",
+                    "resolutionNote": s._trim_text(decision.get("reason") or writeback.get("summary"), max_length=2000),
+                },
+                run_id=run_id,
+            )
+            official_record = (
+                knowledge_review.get("knowledgeIngestion", {}).get("officialSyncRecord", {})
+                if isinstance(knowledge_review.get("knowledgeIngestion"), dict)
+                else {}
+            )
+            knowledge_item_ids.extend(
+                s._trim_text(item, max_length=160)
+                for item in list(official_record.get("knowledgeItemIds") or [])
+                if s._trim_text(item, max_length=160)
+            )
     except (s.TeamWorkflowOrchestrationError, s.team_knowledge_service.TeamKnowledgeError, s.team_knowledge_service.TeamKnowledgeNotFoundError) as exc:
         summary = s._source_collection_stage_writeback_knowledge_ingestion_summary(
             status="failed",
@@ -1856,19 +2036,9 @@ def _materialize_source_collection_stage_writeback_knowledge_ingestion(
         )
         return summary
 
-    official_record = (
-        knowledge_review.get("knowledgeIngestion", {}).get("officialSyncRecord", {})
-        if isinstance(knowledge_review.get("knowledgeIngestion"), dict)
-        else {}
-    )
-    knowledge_item_ids = [
-        s._trim_text(item, max_length=160)
-        for item in list(official_record.get("knowledgeItemIds") or [])
-        if s._trim_text(item, max_length=160)
-    ]
     summary = s._source_collection_stage_writeback_knowledge_ingestion_summary(
         status="completed",
-        steward_pack_candidate_id=s._trim_text(pack_record.get("candidateId"), max_length=160),
+        steward_pack_candidate_id=s._trim_text(pack_records[0].get("candidateId"), max_length=160) if pack_records else "",
         knowledge_base_id=knowledge_base_id,
         scoped_knowledge_base_id=scoped_knowledge_base_id,
         approved_candidate_ids=approved_candidate_ids,

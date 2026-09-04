@@ -2757,6 +2757,17 @@ def submit_steward_pack_to_knowledge_ingestion(team_id: str, candidate_id: str, 
         output,
         proposed_by_agent_id=proposed_by_agent_id,
     )
+    source_trace = output.get("sourceTrace") if isinstance(output.get("sourceTrace"), dict) else {}
+    required_reviewer_agent_id = s._trim_text(payload.get("requiredReviewerAgentId"), max_length=160)
+    research_project_id = s._trim_text(payload.get("researchProjectId") or output.get("researchProjectId") or source_trace.get("researchProjectId"), max_length=160)
+    question_id = s._trim_text(payload.get("questionId") or output.get("questionId") or source_trace.get("questionId"), max_length=200)
+    source_collection_run_id = s._trim_text(
+        payload.get("sourceCollectionRunId") or output.get("sourceCollectionRunId") or source_trace.get("sourceCollectionRunId"),
+        max_length=200,
+    )
+    source_candidate_id = s._trim_text(payload.get("sourceCandidateId") or output.get("sourceCandidateId"), max_length=200)
+    source_identity_hash = s._trim_text(payload.get("sourceIdentityHash") or output.get("sourceIdentityHash"), max_length=160)
+    evidence_level = s._trim_text(payload.get("evidenceLevel") or output.get("evidenceLevel"), max_length=80)
     local_file_paths = _steward_pack_local_file_paths(normalized_team_id, output, run_id=normalized_run_id)
 
     if not central_source_id:
@@ -2863,6 +2874,13 @@ def submit_steward_pack_to_knowledge_ingestion(team_id: str, candidate_id: str, 
             proposal_content=ingestion_payload["proposalContent"],
             tags=ingestion_payload["tags"],
             central_source_id=central_source_id,
+            required_reviewer_agent_id=required_reviewer_agent_id,
+            research_project_id=research_project_id,
+            question_id=question_id,
+            source_collection_run_id=source_collection_run_id,
+            source_candidate_id=source_candidate_id,
+            source_identity_hash=source_identity_hash,
+            evidence_level=evidence_level,
         )
     except (s.team_knowledge_service.TeamKnowledgeError, s.team_knowledge_service.TeamKnowledgeNotFoundError) as exc:
         raise s.TeamWorkflowOrchestrationError(str(exc)) from exc

@@ -165,6 +165,134 @@ def test_team_member_can_register_source_and_submit_proposal(knowledge_env):
     assert proposal["sourceArtifactIds"] == [source["sourceArtifactId"]]
 
 
+def test_scoped_proposal_requires_designated_independent_reviewer_and_projects_scope(knowledge_env):
+    source = _create_central_source_artifact(
+        knowledge_env["base"]["knowledgeBaseId"],
+        owner_type="team",
+        owner_id=knowledge_env["team"]["teamId"],
+        actor_agent_id=knowledge_env["member"]["agentId"],
+        reviewer_agent_id=knowledge_env["lead"]["agentId"],
+        title="自闭症早期筛查来源",
+    )
+    proposal = team_knowledge_service.create_refinement_proposal(
+        knowledge_env["base"]["knowledgeBaseId"],
+        source_artifact_ids=[source["sourceArtifactId"]],
+        proposed_by_agent_id=knowledge_env["member"]["agentId"],
+        required_reviewer_agent_id=knowledge_env["lead"]["agentId"],
+        research_project_id="challenge-project",
+        question_id="SCI-096",
+        source_collection_run_id="run-source-096",
+        source_candidate_id="source-096-1",
+        source_identity_hash="sha256:source-096-1",
+        evidence_level="peer_reviewed",
+        title="自闭症早期筛查",
+        content="保留同一来源中的多条 claims。",
+        tags=["pending-review", "candidate-only", "医学"],
+    )
+
+    with pytest.raises(team_knowledge_service.TeamKnowledgePermissionError, match="not allowed|designated reviewer"):
+        team_knowledge_service.review_refinement_proposal(
+            knowledge_env["base"]["knowledgeBaseId"],
+            proposal["proposalId"],
+            status="approved",
+            reviewed_by_agent_id=knowledge_env["member"]["agentId"],
+        )
+
+    reviewed = team_knowledge_service.review_refinement_proposal(
+        knowledge_env["base"]["knowledgeBaseId"],
+        proposal["proposalId"],
+        status="approved",
+        reviewed_by_agent_id=knowledge_env["lead"]["agentId"],
+    )
+    item = reviewed["item"]
+    assert item["lifecycleStatus"] == "applied"
+    assert item["tags"] == ["医学"]
+    for field, expected in {
+        "researchProjectId": "challenge-project",
+        "questionId": "SCI-096",
+        "sourceCollectionRunId": "run-source-096",
+        "sourceCandidateId": "source-096-1",
+        "sourceIdentityHash": "sha256:source-096-1",
+        "evidenceLevel": "peer_reviewed",
+        "requiredReviewerAgentId": knowledge_env["lead"]["agentId"],
+    }.items():
+        assert item[field] == expected
+
+
+def test_scoped_proposal_cannot_be_self_reviewed(knowledge_env):
+    source_ids = _source_ids_for_env(knowledge_env, title="Self review source")
+    proposal = team_knowledge_service.create_refinement_proposal(
+        knowledge_env["base"]["knowledgeBaseId"],
+        source_artifact_ids=source_ids,
+        proposed_by_agent_id=knowledge_env["lead"]["agentId"],
+        required_reviewer_agent_id=knowledge_env["lead"]["agentId"],
+        research_project_id="challenge-project",
+        question_id="SCI-096",
+        source_collection_run_id="run-source-096",
+        source_candidate_id="source-096-self",
+        source_identity_hash="sha256:source-096-self",
+        evidence_level="peer_reviewed",
+        title="Self review is forbidden",
+        content="Designated challenge knowledge must preserve separation of duties.",
+    )
+    with pytest.raises(team_knowledge_service.TeamKnowledgePermissionError, match="own proposal"):
+        team_knowledge_service.review_refinement_proposal(
+            knowledge_env["base"]["knowledgeBaseId"],
+            proposal["proposalId"],
+            status="approved",
+            reviewed_by_agent_id=knowledge_env["lead"]["agentId"],
+        )
+
+
+def test_scoped_search_filters_questions_and_chinese_bm25_prefers_phrases(knowledge_env):
+    created = []
+    for question_id, candidate_id, title, content in [
+        ("SCI-096", "source-autism", "自闭症早期筛查", "自闭症儿童早期筛查与干预证据。"),
+        ("SCI-092", "source-cicada", "周期蝉种群预测", "周期蝉羽化周期与种群预测证据。"),
+    ]:
+        proposal = team_knowledge_service.create_refinement_proposal(
+            knowledge_env["base"]["knowledgeBaseId"],
+            source_artifact_ids=_source_ids_for_env(knowledge_env, title=title),
+            proposed_by_agent_id=knowledge_env["member"]["agentId"],
+            required_reviewer_agent_id=knowledge_env["lead"]["agentId"],
+            research_project_id="challenge-project",
+            question_id=question_id,
+            source_collection_run_id=f"run-{question_id.lower()}",
+            source_candidate_id=candidate_id,
+            source_identity_hash=f"sha256:{candidate_id}",
+            evidence_level="peer_reviewed",
+            title=title,
+            content=content,
+        )
+        created.append(
+            team_knowledge_service.review_refinement_proposal(
+                knowledge_env["base"]["knowledgeBaseId"],
+                proposal["proposalId"],
+                status="approved",
+                reviewed_by_agent_id=knowledge_env["lead"]["agentId"],
+            )["item"]
+        )
+
+    scoped = team_knowledge_service.search_knowledge_items(
+        agent_id=knowledge_env["member"]["agentId"],
+        team_id=knowledge_env["team"]["teamId"],
+        research_project_id="challenge-project",
+        question_id="SCI-096",
+        query="自闭症",
+        search_mode="bm25",
+    )
+    assert [item["knowledgeItemId"] for item in scoped["results"]] == [created[0]["knowledgeItemId"]]
+    assert scoped["results"][0]["questionId"] == "SCI-096"
+
+    unscoped = team_knowledge_service.search_knowledge_items(
+        agent_id=knowledge_env["member"]["agentId"],
+        team_id=knowledge_env["team"]["teamId"],
+        query="自闭症",
+        search_mode="bm25",
+    )
+    assert unscoped["results"][0]["knowledgeItemId"] == created[0]["knowledgeItemId"]
+
+
 def test_owner_inbox_promotes_source_to_central_registry_and_formal_artifact(knowledge_env, tmp_path):
     inbox_source = team_knowledge_service.collect_source_to_inbox(
         "team",

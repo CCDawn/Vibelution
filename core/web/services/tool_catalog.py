@@ -780,6 +780,24 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
         "permissionTier": HIGH_PERMISSION_TIER,
         "argDescriptors": [
             {
+                "name": "research_project_id",
+                "type": "string",
+                "required": False,
+                "description": "Filter formal knowledge by its research project scope.",
+            },
+            {
+                "name": "question_id",
+                "type": "string",
+                "required": False,
+                "description": "Filter formal knowledge by its research question scope.",
+            },
+            {
+                "name": "source_collection_run_id",
+                "type": "string",
+                "required": False,
+                "description": "Filter formal knowledge by its authoritative source collection run.",
+            },
+            {
                 "name": "include_user_content",
                 "type": "boolean",
                 "required": False,
