@@ -29,6 +29,8 @@ import {
   stageToneFromNodes,
 } from "../../../components/vui/product/workflow/workflowCanvasModel";
 import type { HypothesisFirstCanvasRegion } from "./hypothesisFirstCanvasRegion";
+import { getNodeAdapter } from "./nodeAdapterModel";
+import { researchStageLabel } from "./researchNodePresentation";
 
 function asActorKind(value: string | undefined | null): ActorKind {
   if (value === "human" || value === "system" || value === "agent") return value;
@@ -106,7 +108,7 @@ function mapNodes(
     return {
       nodeId: node.nodeId,
       stageId: node.stageId,
-      label: node.label,
+      label: getNodeAdapter(node.nodeId)?.label ?? node.label,
       actorKind,
       visualKind,
       description: node.description,
@@ -179,7 +181,7 @@ export function definitionToCanvasGraph(
     const members = nodes.filter((n) => n.stageId === stage.stageId);
     return {
       stageId: stage.stageId,
-      label: stage.label,
+      label: researchStageLabel(stage.stageId, stage.label),
       nodeIds: stage.nodeIds,
       index: stage.index,
       stageTone: stageToneFromNodes(members),
@@ -217,7 +219,7 @@ export function projectionToCanvasGraph(
     const members = nodes.filter((n) => n.stageId === stage.stageId);
     return {
       stageId: stage.stageId,
-      label: stage.label,
+      label: researchStageLabel(stage.stageId, stage.label),
       nodeIds: stage.nodeIds,
       index: stage.index,
       stageTone: stageToneFromNodes(members),

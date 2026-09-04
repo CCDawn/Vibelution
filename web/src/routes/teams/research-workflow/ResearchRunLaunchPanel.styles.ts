@@ -1,5 +1,5 @@
 export default {
-  root: "flex h-full min-h-0 flex-col gap-3 overflow-auto p-3",
+  root: "flex min-h-full min-w-0 flex-col gap-3 p-3",
   state: "m-3",
   selectedQuestion: "grid min-w-0 gap-1 border-[var(--vui-border-subtle)]",
   questionTitle: "truncate [font-size:var(--vui-font-xs)] font-semibold text-[var(--fg-primary)]",

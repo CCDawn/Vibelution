@@ -23,6 +23,7 @@ import {
   knowledgeSideflowRelationEdge,
 } from "./knowledgeSideflowCanvasRegion";
 import { ResearchCommandPalette } from "./ResearchCommandPalette";
+import { ResearchCenteredEmptyState } from "./ResearchCenteredEmptyState";
 import { ResearchCurrentTaskInspector } from "./ResearchCurrentTaskInspector";
 import { ResearchExperimentResetAction } from "./ResearchExperimentResetAction";
 import { fetchHypothesisFirstFocusNode } from "./hypothesisFirstFocus";
@@ -614,6 +615,7 @@ export function ResearchProcessWorkspace({
     semanticCurrentTaskNodeId,
   ]);
   const archiveOpen = location.panel === "question";
+  const hasSelectedExperiment = Boolean(chainQuestionId);
   const inspectorOpenChange = useCallback((open: boolean) => {
     location.replaceParams({
       inspector: open ? null : RESEARCH_PROCESS_INSPECTOR_CLOSED,
@@ -946,7 +948,7 @@ export function ResearchProcessWorkspace({
             onOpenChange: inspectorOpenChange,
           },
         }}
-        rail={archiveOpen ? null : (
+        rail={archiveOpen || !hasSelectedExperiment ? null : (
           <div className={styles.stageNavigator}>
             <ResearchWorkflowStageNavigator
               lang={lang}
@@ -959,6 +961,13 @@ export function ResearchProcessWorkspace({
           <div className={styles.archive} data-vui="research-question-archive-canvas">
             {inspectorPane}
           </div>
+        ) : !hasSelectedExperiment ? (
+          <ResearchCenteredEmptyState
+            title={lang === "zh" ? "先选择研究题目" : "Choose a research question first"}
+            hint={lang === "zh"
+              ? "在右侧当前任务中搜索题目；选择后再展开阶段进度与流程画布。"
+              : "Search in the current-task panel. Stage progress and the workflow canvas appear after selection."}
+          />
         ) : (
           <ResearchWorkflowCanvasPane
             graph={graph}
