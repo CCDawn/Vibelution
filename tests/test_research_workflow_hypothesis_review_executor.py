@@ -1999,12 +1999,12 @@ def test_max_concurrent_review_calls_env_override(monkeypatch):
         monkeypatch.setenv(env, junk)
         assert executor.resolve_max_concurrent_review_calls() == 4
 
-    # The override works upward too (direct env override, not a down-only cap).
+    # The operator knob may lower the width but cannot exceed the global cap.
     monkeypatch.setenv(env, "16")
-    assert executor.resolve_max_concurrent_review_calls() == 16
+    assert executor.resolve_max_concurrent_review_calls() == 4
 
     # Out-of-range values clamp instead of serializing or exploding fan-out.
     monkeypatch.setenv(env, "0")
     assert executor.resolve_max_concurrent_review_calls() == 1
     monkeypatch.setenv(env, "999")
-    assert executor.resolve_max_concurrent_review_calls() == 64
+    assert executor.resolve_max_concurrent_review_calls() == 4

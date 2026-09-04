@@ -90,13 +90,13 @@ def reset_auto_advance_sweep_throttle_for_tests() -> None:
 
 
 def workflow_worker_count() -> int:
-    """Pump dispatch parallelism: env override, clamped to >= 1."""
+    """Pump dispatch parallelism: env override, clamped to the 1..4 contract."""
     raw = os.environ.get(WORKFLOW_WORKERS_ENV, "")
     try:
         value = int(str(raw).strip())
     except (TypeError, ValueError):
         return DEFAULT_WORKFLOW_WORKERS
-    return max(1, value)
+    return max(1, min(DEFAULT_WORKFLOW_WORKERS, value))
 
 
 @dataclass(frozen=True)

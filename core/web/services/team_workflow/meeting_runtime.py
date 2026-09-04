@@ -173,11 +173,9 @@ def _meeting_discussion_max_workers() -> int:
     batch, digest, close), so this pool is the ceiling on simultaneously
     driving rounds; further rounds queue here before their first LLM call,
     which used to surface as ~10-minute round dispatch delays under campaign
-    concurrency.  Driver threads are IO-bound waiters on the speaker batch
-    pool, so the default covers a full campaign wave without adding LLM-gate
-    pressure beyond the shared gate's own cap.  24 covers a full
-    wave with two to three live rooms per question (generation + two
-    review rooms).
+    concurrency. Four drivers match the governed hypothesis capacity; the
+    environment knob may reduce that width but cannot reopen the old oversized
+    queue.
     """
 
     raw = str(
@@ -188,9 +186,7 @@ def _meeting_discussion_max_workers() -> int:
             override = int(float(raw))
         except ValueError:
             return _MEETING_DISCUSSION_MAX_WORKERS_DEFAULT
-        # Direct env override (up or down), floored at 1 so a bad env edit
-        # can neither explode the pool nor drop below a single driver.
-        return max(1, override)
+        return max(1, min(_MEETING_DISCUSSION_MAX_WORKERS_DEFAULT, override))
     return _MEETING_DISCUSSION_MAX_WORKERS_DEFAULT
 
 
