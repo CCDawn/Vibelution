@@ -26,15 +26,15 @@ from core.web.services.team_workflow.research_runtime import meeting_receipt_aut
 from tests.helpers.chat_turn_harness import wait_for_matching_event
 
 
-def test_chat_room_executor_allows_ten_concurrent_rounds() -> None:
-    assert chat_room_service._CHAT_ROOM_EXECUTOR_MAX_WORKERS_DEFAULT == 10
-    assert chat_room_service._CHAT_ROOM_EXECUTOR_MAX_WORKERS == 10
+def test_chat_room_executor_allows_four_concurrent_rounds() -> None:
+    assert chat_room_service._CHAT_ROOM_EXECUTOR_MAX_WORKERS_DEFAULT == 4
+    assert chat_room_service._CHAT_ROOM_EXECUTOR_MAX_WORKERS == 4
 
 
 def test_chat_room_executor_max_workers_env_override_and_clamping(monkeypatch):
     """``VIBELUTION_CHAT_ROOM_MAX_WORKERS`` overrides the width, clamped 1..32.
 
-    Malformed values fall back to the default (10); out-of-range values clamp
+    Malformed values fall back to the default (4); out-of-range values clamp
     instead of serializing rounds or exploding the pool.  Tests exercise the
     resolver only — the module-level executor was already built from it once
     at import, so no module state is mutated here.
@@ -42,7 +42,7 @@ def test_chat_room_executor_max_workers_env_override_and_clamping(monkeypatch):
 
     env = "VIBELUTION_CHAT_ROOM_MAX_WORKERS"
     monkeypatch.delenv(env, raising=False)
-    assert chat_room_service._chat_room_executor_max_workers() == 10
+    assert chat_room_service._chat_room_executor_max_workers() == 4
 
     monkeypatch.setenv(env, "10")
     assert chat_room_service._chat_room_executor_max_workers() == 10
@@ -54,7 +54,7 @@ def test_chat_room_executor_max_workers_env_override_and_clamping(monkeypatch):
     assert chat_room_service._chat_room_executor_max_workers() == 1
 
     monkeypatch.setenv(env, "abc")
-    assert chat_room_service._chat_room_executor_max_workers() == 10
+    assert chat_room_service._chat_room_executor_max_workers() == 4
 
 
 def _append_session_ledger_message(root, session_id: str, message: dict, *, turn_id: str) -> None:
@@ -5391,11 +5391,11 @@ def test_speaker_execution_policy_defaults_and_overrides():
     generation_round = {"config": {"meetingType": "hypothesis_candidate_generation"}}
     ordinary_round = {"config": {}}
     assert chat_room_service._speaker_execution_policy(meeting_round) == {
-        "parallel": True,
+        "parallel": False,
         "fenceRetry": True,
     }
     assert chat_room_service._speaker_execution_policy(generation_round) == {
-        "parallel": True,
+        "parallel": False,
         "fenceRetry": True,
     }
     assert chat_room_service._speaker_execution_policy(ordinary_round) == {
@@ -5447,15 +5447,14 @@ def test_speaker_round_batches_opening_all_parallel_interaction_two_batches():
 
 
 def test_speaker_batch_max_workers_default_and_env_override(monkeypatch):
-    """The speaker pool width defaults to 12 and the env overrides it directly.
+    """The speaker pool width defaults to 4 and the env overrides it directly.
 
-    ``VIBELUTION_LLM_MAX_CONCURRENT`` may raise the width above the default
-    (several concurrent meetings share the process-wide pool) or lower it,
-    with a floor of 1; malformed values fall back to the default.
+    ``VIBELUTION_LLM_MAX_CONCURRENT`` may raise or lower the width, with a
+    floor of 1; malformed values fall back to the default.
     """
 
     monkeypatch.delenv("VIBELUTION_LLM_MAX_CONCURRENT", raising=False)
-    assert chat_room_service._CHAT_ROOM_SPEAKER_BATCH_MAX_WORKERS_DEFAULT == 12
+    assert chat_room_service._CHAT_ROOM_SPEAKER_BATCH_MAX_WORKERS_DEFAULT == 4
     assert (
         chat_room_service._speaker_batch_max_workers()
         == chat_room_service._CHAT_ROOM_SPEAKER_BATCH_MAX_WORKERS_DEFAULT
@@ -5477,7 +5476,7 @@ def test_speaker_batch_max_workers_default_and_env_override(monkeypatch):
     )
 
 
-def test_meeting_opening_round_runs_speakers_concurrently_and_commits_in_order(
+def test_explicit_parallel_meeting_opening_runs_speakers_concurrently_and_commits_in_order(
     tmp_path, monkeypatch
 ):
     _isolate_chat_room_kernel(tmp_path, monkeypatch)
@@ -5505,7 +5504,11 @@ def test_meeting_opening_round_runs_speakers_concurrently_and_commits_in_order(
     detail = chat_room_service.start_chat_room_round(
         room["roomId"],
         "假说评审第 1 轮：独立评估候选",
-        config={"meetingType": "hypothesis_review", "discussionRoundIndex": 1},
+        config={
+            "meetingType": "hypothesis_review",
+            "discussionRoundIndex": 1,
+            "speakerBatchMode": "parallel",
+        },
         agent_runner=runner,
     )
 
@@ -5562,7 +5565,11 @@ def test_parallel_batch_commits_ready_prefix_before_slowest_speaker_finishes(
         started = chat_room_service.start_chat_room_round(
             room["roomId"],
             "假说评审第 1 轮",
-            config={"meetingType": "hypothesis_review", "discussionRoundIndex": 1},
+            config={
+                "meetingType": "hypothesis_review",
+                "discussionRoundIndex": 1,
+                "speakerBatchMode": "parallel",
+            },
             agent_runner=runner,
             background=True,
         )
@@ -5627,7 +5634,11 @@ def test_parallel_batch_marks_later_result_settled_without_committing_out_of_ord
         chat_room_service.start_chat_room_round(
             room["roomId"],
             "假说评审第 1 轮",
-            config={"meetingType": "hypothesis_review", "discussionRoundIndex": 1},
+            config={
+                "meetingType": "hypothesis_review",
+                "discussionRoundIndex": 1,
+                "speakerBatchMode": "parallel",
+            },
             agent_runner=runner,
             background=True,
         )
@@ -5691,7 +5702,11 @@ def test_meeting_interaction_round_second_batch_prompts_see_first_batch_messages
     detail = chat_room_service.start_chat_room_round(
         room["roomId"],
         "假说评审第 2 轮（批评与修订）：逐条批评上一轮观点",
-        config={"meetingType": "hypothesis_review", "discussionRoundIndex": 2},
+        config={
+            "meetingType": "hypothesis_review",
+            "discussionRoundIndex": 2,
+            "speakerBatchMode": "parallel",
+        },
         agent_runner=runner,
     )
 

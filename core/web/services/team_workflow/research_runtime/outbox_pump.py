@@ -5,8 +5,8 @@ Tests drain that outbox with ``runtime.run_workers_once()``. Production used to
 pass no wake callback and never started a loop, so UI-accepted start_node
 commands stayed ``pending`` with ``attempt_count=0``.
 
-Since the Challenge Cup 10-concurrency plan (B3) the pump runs a fixed pool of
-N dispatch worker threads (Temporal-style fixed task-queue pollers; default 10,
+The pump runs a fixed pool of N dispatch worker threads (Temporal-style fixed
+task-queue pollers; default 4,
 ``VIBELUTION_WORKFLOW_WORKERS`` override via ``runtime_factory``). Each worker
 loops claim (outbox lease CAS via ``runtime.claim_and_run_one``) -> execute ->
 commit and never prefetches a second action: the lease shards actions between
@@ -32,7 +32,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_WORKERS = 10
+DEFAULT_WORKERS = 4
 
 
 class WorkflowOutboxPump:
