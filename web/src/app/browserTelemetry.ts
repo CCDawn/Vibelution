@@ -10,6 +10,7 @@ export type BrowserTelemetryEventInput = {
 };
 
 const TELEMETRY_ENDPOINT = "/api/runtime/browser-telemetry";
+const TELEMETRY_DELIVERY_FAILURE_MESSAGE = "browser telemetry delivery failed";
 const BYTES_PER_MEBIBYTE = 1024 * 1024;
 const MAX_FAILED_TELEMETRY_BODIES = 20;
 
@@ -58,6 +59,10 @@ function summarizeUnknown(value: unknown, limit = 240): string {
 
 export function summarizeConsoleArgs(args: unknown[], limit = 240): string {
   return truncateText(args.map((item) => summarizeUnknown(item, Math.max(limit, 120))).join(" | "), limit);
+}
+
+export function shouldCaptureConsoleTelemetry(args: unknown[]): boolean {
+  return args[0] !== TELEMETRY_DELIVERY_FAILURE_MESSAGE;
 }
 
 export function collectBrowserPageSnapshot(): Record<string, unknown> {
@@ -130,7 +135,7 @@ export function collectBrowserMemorySnapshot(): Record<string, unknown> {
 function warnTelemetryDeliveryFailure(error: unknown): void {
   // Never post another telemetry event here: delivery failure must not recurse.
   if (typeof console !== "undefined" && typeof console.warn === "function") {
-    console.warn("browser telemetry delivery failed", compactText(summarizeUnknown(error, 180), 200));
+    console.warn(TELEMETRY_DELIVERY_FAILURE_MESSAGE, compactText(summarizeUnknown(error, 180), 200));
   }
 }
 

@@ -10,7 +10,8 @@
    （team/workflow/source-run/task）取自对账后的 canonical 任务；
 2. stageId 非 extraction 或终态非 completed 一律不调物化（终态以对账后
    状态为准，不看请求参数）；
-3. 物化失败只留诊断事件，不得翻转任务状态或阻塞 reconcile 返回。
+3. 物化失败保留诊断事件且 reconcile 正常返回，但 canonical 任务必须转为
+   incomplete 并关闭 completion gate，禁止“任务完成、证据未落库”的状态分裂。
 
 生产实锤（run dprun-20260831142015208397-93ca7108）追加的回写 quote 契约：
 completed 提炼回写若不带逐字 quote 锚（verification_status 键跑偏、
@@ -266,7 +267,7 @@ def test_materialization_gate_skips_non_extraction_stage(tmp_path, monkeypatch):
     ) == {"status": "skipped", "reason": "not_completed_extraction_task"}
 
 
-def test_reconcile_returns_normally_when_materialization_fails(tmp_path, monkeypatch):
+def test_reconcile_parks_completed_task_when_materialization_fails(tmp_path, monkeypatch):
     setup = _seed_completed_extraction_task(tmp_path, monkeypatch)
     task = setup["task"]
     _append_stage_task_tool_trace(tmp_path, task["task"])
@@ -311,10 +312,21 @@ def test_reconcile_returns_normally_when_materialization_fails(tmp_path, monkeyp
     )
 
     assert result["status"] == "reconciled"
-    assert result["taskStatus"] == "completed"
+    assert result["taskStatus"] == "incomplete"
+    assert result["completionGatePassed"] is False
+    assert result["artifactComplete"] is False
     assert result["claimMaterialization"]["status"] == "failed"
     assert result["claimMaterialization"]["errorType"] == "EvidenceMaterializationError"
     assert result["claimMaterialization"]["workflowRunId"] == setup["workflowRunId"]
+    stored_task, _run_id = team_workflow_orchestration_service._find_source_collection_stage_session_task_by_id(
+        setup["teamId"], task["taskId"]
+    )
+    assert stored_task["status"] == "incomplete"
+    assert stored_task["writeback"]["agentRequestedStatus"] == "completed"
+    assert stored_task["completionGate"]["passed"] is False
+    assert stored_task["completionGate"]["artifactComplete"] is False
+    assert stored_task["claimMaterialization"]["gate"] == "needs_claim_materialization_retry"
+    assert stored_task["result"]["claimMaterializationRemediation"]
     failures = _workflow_scene_events_by_code(
         events,
         "source_collection.stage_session_task_claim_materialization_failed",
