@@ -148,6 +148,7 @@ EXPLICIT_ALLOW_TOOLS = {
     "knowledge_rating_suggestion_tool",
     "research_knowledge_collection_tool",
     "research_knowledge_request_tool",
+    "read_chat_room_context_refs",
 }
 
 
@@ -404,6 +405,17 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
     "history_checkpoint_tool": {
         "category": "conversation_history",
         "capabilityTags": ["conversation_history", "checkpoint", "read_only"],
+        "riskTags": ["session_data_access"],
+        "permissionTier": LOW_PERMISSION_TIER,
+    },
+    "read_chat_room_context_refs": {
+        "category": "conversation_history",
+        "capabilityTags": [
+            "conversation_history",
+            "exact_refs",
+            "read_only",
+            "room_scoped",
+        ],
         "riskTags": ["session_data_access"],
         "permissionTier": LOW_PERMISSION_TIER,
     },

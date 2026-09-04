@@ -2456,8 +2456,15 @@ def test_chat_room_participant_runner_reuses_session_workspace_and_agent_llm_bin
         def mark_runtime_context_seeded_by_host(self):
             captured["runtime_context_seeded_by_host"] = True
 
-        def run_single_turn(self, initial_prompt=None, disable_tools=False):
+        def run_single_turn(
+            self,
+            initial_prompt=None,
+            disable_tools=False,
+            allowed_tool_names=None,
+        ):
             captured["active_runtime"] = agent_directory_service.current_agent_runtime()
+            captured["disable_tools"] = disable_tools
+            captured["allowed_tool_names"] = list(allowed_tool_names or [])
             return {
                 "status": "completed",
                 "raw_output": "beta 发言",
@@ -2483,10 +2490,17 @@ def test_chat_room_participant_runner_reuses_session_workspace_and_agent_llm_bin
     assert captured["workspace_path"] == str((tmp_path / "workspace" / "agents" / agent_id).resolve())
     assert captured["primary_model"] == "explorer-model"
     assert f"AgentId: {agent_id}" in captured["static_runtime_context"]
+    assert "群聊结构化输出合同：" in captured["static_runtime_context"]
     assert captured["runtime_context_seeded_by_host"] is True
+    assert captured["disable_tools"] is False
+    assert captured["allowed_tool_names"] == ["read_chat_room_context_refs"]
     assert captured["history"]
     assert captured["turn_identity"].startswith("chat-room:")
     assert captured["active_runtime"]["turnId"] == captured["turn_identity"]
+    assert captured["active_runtime"]["runtimeToolSource"] == "chat_room_context"
+    assert "read_chat_room_context_refs" in captured["active_runtime"]["toolPolicy"][
+        "allowedTools"
+    ]
     assert captured_receipt_routes == [
         {
             "modelRef": "agent-explorer-model",
@@ -2903,7 +2917,8 @@ def test_formal_challenge_room_uses_structured_message_contract_without_changing
     )
 
     formal_message = formal_detail["rounds"][-1]["messages"][0]
-    assert "挑战杯会议结构化输出合同" in captured_prompts[0]
+    assert "挑战杯会议结构化输出合同" not in captured_prompts[0]
+    assert "遵循 system 区中的群聊结构化输出合同" in captured_prompts[0]
     assert formal_message["content"].startswith("当前证据不足，暂不升级候选。")
     assert formal_message["messagePayload"]["audit"]["parseStatus"] == "structured"
     assert formal_message["messagePayload"]["audit"]["rawModelOutput"] == structured_output
@@ -2929,6 +2944,150 @@ def test_formal_challenge_room_uses_structured_message_contract_without_changing
     assert "挑战杯会议结构化输出合同" not in normal_prompts[0]
     assert normal_message["content"] == "普通会议文本保持不变。"
     assert "messagePayload" not in normal_message
+
+
+def test_ordinary_chat_room_structured_protocol_is_internal_and_display_stays_compatible(
+    tmp_path,
+    monkeypatch,
+):
+    _isolate_chat_room_kernel(tmp_path, monkeypatch)
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.delenv("VIBELUTION_CHAT_ROOM_STRUCTURED_CONTEXT_ENABLED", raising=False)
+    raw_output = json.dumps(
+        {
+            "schemaVersion": 1,
+            "display": {
+                "conclusion": "采用冻结 checkpoint。",
+                "sections": [{"title": "依据", "bullets": ["前缀保持稳定。"]}],
+            },
+            "protocol": {
+                "agreements": ["采用冻结 checkpoint"],
+                "disagreements": [],
+                "risks": [],
+                "actionItems": [],
+                "evidenceRequests": [],
+                "stateUpdates": [],
+            },
+        },
+        ensure_ascii=False,
+    )
+    prompts = []
+    room = chat_room_service.create_chat_room(
+        title="普通结构化群聊",
+        participant_session_ids=["session-alpha"],
+    )
+
+    detail = chat_room_service.start_chat_room_round(
+        room["roomId"],
+        "评估缓存",
+        agent_runner=lambda _participant, prompt, _context: (
+            prompts.append(prompt)
+            or {"status": "completed", "raw_output": raw_output, "summary": "ok"}
+        ),
+    )
+
+    public_message = detail["rounds"][-1]["messages"][0]
+    stored = chat_room_service._store().load()["rooms"][0]
+    internal_message = stored["rounds"][-1]["messages"][0]
+    assert public_message["content"] == "采用冻结 checkpoint。\n\n依据：\n- 前缀保持稳定。"
+    assert "contextPayload" not in public_message
+    assert internal_message["contextPayload"]["audit"]["parseStatus"] == "structured"
+    assert internal_message["contextPayload"]["protocol"]["agreements"] == [
+        "采用冻结 checkpoint"
+    ]
+    assert "群聊结构化输出合同：" not in prompts[0]
+    assert "遵循 system 区中的群聊结构化输出合同" in prompts[0]
+
+
+def test_structured_context_kill_switch_restores_legacy_prompt_and_storage(
+    tmp_path,
+    monkeypatch,
+):
+    _isolate_chat_room_kernel(tmp_path, monkeypatch)
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setenv("VIBELUTION_CHAT_ROOM_STRUCTURED_CONTEXT_ENABLED", "0")
+    prompts = []
+    room = chat_room_service.create_chat_room(
+        title="关闭结构化上下文",
+        participant_session_ids=["session-alpha"],
+    )
+
+    detail = chat_room_service.start_chat_room_round(
+        room["roomId"],
+        "保持旧行为",
+        agent_runner=lambda _participant, prompt, _context: (
+            prompts.append(prompt)
+            or {"status": "completed", "raw_output": "旧版自由文本。", "summary": "ok"}
+        ),
+    )
+
+    stored = chat_room_service._store().load()["rooms"][0]
+    assert detail["rounds"][-1]["messages"][0]["content"] == "旧版自由文本。"
+    assert "contextPayload" not in stored["rounds"][-1]["messages"][0]
+    assert "contextCheckpoint" not in stored
+    assert "请给出一段紧凑、可读、只读的群聊发言" in prompts[0]
+
+
+def test_room_context_snapshot_is_shared_per_round_and_lazy_checkpoint_is_internal(
+    tmp_path,
+    monkeypatch,
+):
+    _isolate_chat_room_kernel(tmp_path, monkeypatch)
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.delenv("VIBELUTION_CHAT_ROOM_STRUCTURED_CONTEXT_ENABLED", raising=False)
+    snapshot_ids: dict[str, set[int]] = {}
+
+    def runner(participant, _prompt, context):
+        snapshot_ids.setdefault(context["roundId"], set()).add(
+            id(context["_roomContextSnapshot"])
+        )
+        return {
+            "status": "completed",
+            "raw_output": json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "display": {
+                        "conclusion": f"{context['topic']} / {participant['participantId']}",
+                        "sections": [],
+                    },
+                    "protocol": {
+                        "agreements": [],
+                        "disagreements": [],
+                        "risks": [],
+                        "actionItems": [],
+                        "evidenceRequests": [],
+                        "stateUpdates": [],
+                    },
+                },
+                ensure_ascii=False,
+            ),
+            "summary": "ok",
+        }
+
+    room = chat_room_service.create_chat_room(
+        title="共享上下文快照",
+        participant_session_ids=["session-alpha", "session-beta"],
+    )
+    detail = room
+    for index in range(1, 5):
+        detail = chat_room_service.start_chat_room_round(
+            room["roomId"], f"第 {index} 轮", agent_runner=runner
+        )
+
+    stored_room = chat_room_service._store().load()["rooms"][0]
+    checkpoint = stored_room["contextCheckpoint"]
+    assert all(len(ids) == 1 for ids in snapshot_ids.values())
+    assert checkpoint["coveredRoundIds"] == [stored_room["rounds"][0]["roundId"]]
+    assert checkpoint["revision"] == 1
+    assert len(checkpoint["contentHash"]) == 64
+    assert "contextCheckpoint" not in detail
+    assert all(
+        "contextPayload" not in message
+        for round_payload in detail["rounds"]
+        for message in round_payload["messages"]
+    )
+    session_messages = _session_ledger_messages(tmp_path, "session-alpha")
+    assert all("contextPayload" not in message for message in session_messages)
 
 
 def test_formal_room_speakers_share_one_challenge_deadline(tmp_path, monkeypatch):
@@ -3206,7 +3365,8 @@ def test_candidate_generation_uses_trusted_short_answer_contract():
         },
         prior_messages=[],
     )
-    assert "挑战杯会议结构化输出合同" in grounded_prompt
+    assert "挑战杯会议结构化输出合同" not in grounded_prompt
+    assert "遵循 system 区中的群聊结构化输出合同" in grounded_prompt
     assert "只输出一条 CANDIDATE 标记" not in grounded_prompt
 
 

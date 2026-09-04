@@ -1,5 +1,6 @@
 """Chat-room speaker delta capture: contract, ordering, and isolation tests."""
 
+import json
 import queue
 import threading
 import time
@@ -79,6 +80,27 @@ def _delta_events(events: list[dict]) -> list[dict]:
     return [event for event in events if event.get("type") == "chat_room_speaker_delta"]
 
 
+def _structured_output(*, conclusion: str = "结论", bullet: str = "依据") -> str:
+    return json.dumps(
+        {
+            "schemaVersion": 1,
+            "display": {
+                "conclusion": conclusion,
+                "sections": [{"title": "说明", "bullets": [bullet]}],
+            },
+            "protocol": {
+                "agreements": [],
+                "disagreements": [],
+                "risks": [],
+                "actionItems": [],
+                "evidenceRequests": [],
+                "stateUpdates": [],
+            },
+        },
+        ensure_ascii=False,
+    )
+
+
 # ---------------------------------------------------------------------------
 # 1. schema contract: field-set and value types are pinned
 # ---------------------------------------------------------------------------
@@ -123,6 +145,133 @@ def test_terminal_completed_frame_from_caller(collector, fast_throttle):
     assert events[-1]["status"] == "completed"
     assert events[-1]["content"] == "完整发言"
     assert events[-1]["seq"] > events[0]["seq"]
+
+
+def test_structured_capture_marks_only_the_internal_service_event(collector, fast_throttle):
+    from core.ui import get_ui
+
+    with capture.speaker_delta_capture(
+        **_capture_kwargs(round_id="round-structured"),
+        structured_context=True,
+    ):
+        get_ui().stream_response(_structured_output(), done=True)
+        capture.close_speaker_delta(
+            round_id="round-structured",
+            participant_id="participant-1",
+            status="completed",
+        )
+
+    events = _delta_events(collector.snapshot())
+    assert events
+    assert all(event["_structuredContext"] is True for event in events)
+
+
+def test_structured_incomplete_json_is_not_published_to_subscriber(monkeypatch):
+    subscriber: queue.Queue = queue.Queue()
+    room_id = "room-structured-incomplete"
+    monkeypatch.setattr(
+        chat_room_service,
+        "_CHAT_ROOM_STREAM_SUBSCRIBERS",
+        {room_id: {subscriber}},
+    )
+
+    chat_room_service._publish_chat_room_speaker_delta(
+        {
+            "type": "chat_room_speaker_delta",
+            "roomId": room_id,
+            "content": '{"schemaVersion": 1, "display":',
+            "done": False,
+            "status": "running",
+            "_structuredContext": True,
+        }
+    )
+
+    assert subscriber.empty()
+
+
+def test_structured_complete_json_publishes_only_display_text(monkeypatch):
+    subscriber: queue.Queue = queue.Queue()
+    room_id = "room-structured-complete"
+    monkeypatch.setattr(
+        chat_room_service,
+        "_CHAT_ROOM_STREAM_SUBSCRIBERS",
+        {room_id: {subscriber}},
+    )
+
+    chat_room_service._publish_chat_room_speaker_delta(
+        {
+            "type": "chat_room_speaker_delta",
+            "roomId": room_id,
+            "content": _structured_output(conclusion="采用冻结检查点", bullet="缓存前缀稳定"),
+            "done": True,
+            "status": "running",
+            "_structuredContext": True,
+        }
+    )
+
+    event = subscriber.get_nowait()
+    assert set(event) <= _EVENT_FIELDS
+    assert event["content"] == "采用冻结检查点\n\n说明：\n- 缓存前缀稳定"
+    assert "protocol" not in event["content"]
+    assert "_structuredContext" not in event
+
+
+def test_structured_invalid_terminal_text_is_published_verbatim(monkeypatch):
+    subscriber: queue.Queue = queue.Queue()
+    room_id = "room-structured-invalid"
+    monkeypatch.setattr(
+        chat_room_service,
+        "_CHAT_ROOM_STREAM_SUBSCRIBERS",
+        {room_id: {subscriber}},
+    )
+
+    chat_room_service._publish_chat_room_speaker_delta(
+        {
+            "type": "chat_room_speaker_delta",
+            "roomId": room_id,
+            "content": "解析失败但仍可阅读的正文",
+            "done": True,
+            "status": "completed",
+            "_structuredContext": True,
+        }
+    )
+
+    event = subscriber.get_nowait()
+    assert event["content"] == "解析失败但仍可阅读的正文"
+    assert "_structuredContext" not in event
+
+
+def test_structured_delta_kill_switch_off_preserves_legacy_streaming(
+    monkeypatch,
+):
+    subscriber: queue.Queue = queue.Queue()
+    room_id = "room-structured-disabled"
+    monkeypatch.setattr(
+        chat_room_service,
+        "_CHAT_ROOM_STREAM_SUBSCRIBERS",
+        {room_id: {subscriber}},
+    )
+    monkeypatch.setattr(
+        chat_room_service,
+        "chat_room_structured_context_enabled",
+        lambda: False,
+    )
+
+    raw_partial = '{"schemaVersion": 1'
+    chat_room_service._publish_chat_room_speaker_delta(
+        {
+            "type": "chat_room_speaker_delta",
+            "roomId": room_id,
+            "content": raw_partial,
+            "done": False,
+            "status": "running",
+            "_structuredContext": True,
+        }
+    )
+
+    event = subscriber.get_nowait()
+    assert event["content"] == raw_partial
+    assert "_structuredContext" not in event
 
 
 # ---------------------------------------------------------------------------

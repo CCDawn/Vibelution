@@ -80,6 +80,7 @@ class _SpeakerDeltaTicket:
         "participant_id",
         "session_id",
         "turn_id",
+        "structured_context",
         "lock",
         "closed",
         "content",
@@ -95,12 +96,14 @@ class _SpeakerDeltaTicket:
         participant_id: str,
         session_id: str,
         turn_id: str,
+        structured_context: bool,
     ) -> None:
         self.room_id = room_id
         self.round_id = round_id
         self.participant_id = participant_id
         self.session_id = session_id
         self.turn_id = turn_id
+        self.structured_context = bool(structured_context)
         self.lock = threading.Lock()
         self.closed = False
         self.content = ""
@@ -124,7 +127,7 @@ def _build_event(
     done: bool,
     status: str,
 ) -> dict[str, Any]:
-    return {
+    event = {
         "type": _EVENT_TYPE,
         "roomId": ticket.room_id,
         "roundId": ticket.round_id,
@@ -137,6 +140,11 @@ def _build_event(
         "done": bool(done),
         "status": status,
     }
+    if ticket.structured_context:
+        # Service-internal routing metadata.  chat_room_service removes this
+        # field before any frame reaches a room subscriber.
+        event["_structuredContext"] = True
+    return event
 
 
 def _publish_event(event: dict[str, Any]) -> None:
@@ -283,6 +291,7 @@ def speaker_delta_capture(
     session_id: str,
     turn_id: str,
     enabled: bool = True,
+    structured_context: bool = False,
 ):
     """Capture one speaker turn's answer deltas into chat-room SSE frames.
 
@@ -301,6 +310,7 @@ def speaker_delta_capture(
         participant_id=str(participant_id or "").strip(),
         session_id=str(session_id or "").strip(),
         turn_id=str(turn_id or "").strip(),
+        structured_context=structured_context,
     )
     key = _ticket_key(ticket.round_id, ticket.participant_id)
     with _TICKETS_LOCK:
