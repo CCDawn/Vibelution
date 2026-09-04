@@ -142,19 +142,27 @@ class WorkflowRuntime:
             return True
         return self.adapter_worker.run_claim_one()
 
+    def run_receipt_persistence_once(self, limit: int = 4) -> int:
+        """Drive durable model-receipt delivery on its dedicated pump lane.
+
+        Receipt delivery is a prerequisite for an Agent turn to settle. It
+        must not share the serial maintenance loop with auto-advance sweeps,
+        because those sweeps can synchronously run multi-minute review LLMs.
+        """
+        return self.receipt_persistence_worker.run_once(limit=limit)
+
     def run_maintenance_once(self, limit: int = 4) -> int:
         """Serial driver for the non-dispatch workers + retention sweeps.
 
         One maintenance thread runs this loop (Challenge Cup 10-concurrency
         B3): fork stays serial because it writes the LangGraph checkpoint
-        store that the B4 checkpoint-parallelization task owns; receipt /
-        delivery / event / cancel-cleanup are low-frequency with run-level
-        side effects; the graph/adapter sweeps rewrite states behind
+        store that the B4 checkpoint-parallelization task owns; delivery /
+        event / cancel-cleanup are low-frequency with run-level side effects;
+        the graph/adapter sweeps rewrite states behind
         sequence-conflict checks.
         """
         handled = self.fork_worker.run_once(limit=limit)
         handled += self.cancel_run_cleanup_worker.run_once(limit=limit)
-        handled += self.receipt_persistence_worker.run_once(limit=limit)
         handled += self.event_publish_worker.run_once(limit=limit)
         handled += self.delivery_worker.run_once(limit=limit)
         handled += self.graph_worker.run_repairs_once()

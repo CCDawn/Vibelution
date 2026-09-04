@@ -41,6 +41,7 @@ class _ClaimRuntime:
         self.active = 0
         self.max_active = 0
         self.maintenance_calls = 0
+        self.receipt_persistence_calls = 0
         self.first_start = threading.Event()
 
     def claim_and_run_one(self) -> bool:
@@ -63,6 +64,11 @@ class _ClaimRuntime:
     def run_maintenance_once(self, limit: int = 4) -> int:
         with self._lock:
             self.maintenance_calls += 1
+        return 0
+
+    def run_receipt_persistence_once(self, limit: int = 4) -> int:
+        with self._lock:
+            self.receipt_persistence_calls += 1
         return 0
 
 
@@ -142,10 +148,11 @@ def test_pump_spawns_configured_threads_and_stops_bounded() -> None:
     pool_threads = list(pump.threads)
     try:
         assert pump.worker_count == 3
-        # 3 dispatch workers + 1 serial maintenance thread.
-        assert len(pool_threads) == 4
+        # 3 dispatch workers + maintenance + receipt-persistence lanes.
+        assert len(pool_threads) == 5
         assert all(thread.is_alive() for thread in pool_threads)
         assert _wait_until(lambda: runtime.maintenance_calls >= 1)
+        assert _wait_until(lambda: runtime.receipt_persistence_calls >= 1)
     finally:
         started = time.monotonic()
         pump.stop(timeout=10)
@@ -154,6 +161,29 @@ def test_pump_spawns_configured_threads_and_stops_bounded() -> None:
     assert all(not thread.is_alive() for thread in pool_threads)
     pump.stop()  # idempotent
     assert pump.threads == ()
+
+
+def test_receipt_persistence_is_not_starved_by_blocked_maintenance() -> None:
+    class BlockedMaintenanceRuntime(_ClaimRuntime):
+        def __init__(self) -> None:
+            super().__init__([])
+            self.maintenance_started = threading.Event()
+            self.release_maintenance = threading.Event()
+
+        def run_maintenance_once(self, limit: int = 4) -> int:
+            self.maintenance_started.set()
+            self.release_maintenance.wait(timeout=5)
+            return 0
+
+    runtime = BlockedMaintenanceRuntime()
+    pump = WorkflowOutboxPump(workers=1, idle_poll_s=0.05)
+    pump.attach(runtime)
+    try:
+        assert runtime.maintenance_started.wait(timeout=5)
+        assert _wait_until(lambda: runtime.receipt_persistence_calls >= 1)
+    finally:
+        runtime.release_maintenance.set()
+        pump.stop(timeout=10)
 
 
 def test_stop_lets_workers_finish_current_action_then_exits() -> None:
