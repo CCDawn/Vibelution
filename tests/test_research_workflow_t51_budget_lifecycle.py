@@ -410,6 +410,86 @@ def test_worker_voids_reserved_receipt_when_execute_returns_failed(
         harness.close()
 
 
+def test_worker_voids_reserved_receipt_on_challenge_deadline_exceeded(
+    tmp_path: Path,
+) -> None:
+    """A fenced (deadline) attempt must not strand its reservation at `reserved`.
+
+    run-cb9422dc4ad0: the ChallengeTaskDeadlineExceeded branch failed the
+    attempt without the budget compensation void, so the 2M reserved estimate
+    kept occupying the stage admission and every later retry of the same
+    run+stage was rejected fail-closed with budget_safety_limit_reached.
+    """
+    from core.web.services.team_workflow.research_runtime.action_registry import (
+        ActionRegistry,
+        AdapterPreflight,
+        AdapterResult,
+    )
+    from core.web.services.team_workflow.research_runtime.adapter_dispatch_worker import (
+        AdapterDispatchWorker,
+    )
+    from core.web.services.team_workflow.research_runtime.challenge_turn_policy import (
+        ChallengeTaskDeadlineExceeded,
+    )
+
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run()
+        action = _action()
+        _seed_dispatching_outbox(harness, action)
+        ports = RealDomainPorts(harness.store)
+        reservation_id = f"reservation-{action.node_run_id}"
+
+        class _DeadlineRaiseAdapter:
+            action_kind = "start_agent_task"
+
+            def preflight(self, action: PendingAction) -> AdapterPreflight:
+                return AdapterPreflight(ready=True)
+
+            def execute(self, action: PendingAction) -> AdapterResult:
+                # Real-incident magnitude: RealDomainPorts resolves the AGENT
+                # contract estimate from the seeded run snapshot, whose
+                # conservative fallback is 2M -- the reserved admission
+                # estimate alone filled the whole default stage limit.
+                ports.reserve_budget(action=action, estimate_tokens=2_000_000)
+                raise ChallengeTaskDeadlineExceeded(
+                    {
+                        "code": "challenge_logical_task_deadline_exhausted",
+                        "detail": "injected fence timeout",
+                    }
+                )
+
+        registry = ActionRegistry()
+        registry.register(_DeadlineRaiseAdapter())
+        worker = AdapterDispatchWorker(
+            store=harness.store,
+            registry=registry,
+            ports=ports,
+            successor_fn=lambda _node: (),
+        )
+        worker.run_once()
+
+        assert _budget_receipt_status(harness, reservation_id) == "voided"
+        attempt = harness.store.latest_attempt(action.run_id, action.node_id)
+        assert attempt is not None and attempt.status == "failed"
+
+        # With the receipt voided, a later retry attempt of the same run+stage
+        # is admissible again: before the fix this reserve was rejected
+        # fail-closed with budget_safety_limit_reached because the stranded
+        # reserved receipt still occupied its full 2M estimate.
+        retry = replace(
+            _action("source_extraction"),
+            action_id="act-budget-retry",
+            node_run_id="nr-run-test-source_extraction-a2",
+        )
+        _seed_attempt(harness, retry)
+        retried = ports.reserve_budget(action=retry, estimate_tokens=17_000)
+        assert retried["status"] == "reserved"
+        assert retried["reserved"]["estimatedTokens"] == 2_000_000
+    finally:
+        harness.close()
+
+
 def test_worker_voids_reserved_receipt_when_verify_raises(tmp_path: Path) -> None:
     from core.web.services.team_workflow.research_runtime.action_registry import (
         ActionRegistry,

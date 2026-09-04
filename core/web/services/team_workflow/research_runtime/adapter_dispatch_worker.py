@@ -1381,7 +1381,18 @@ class AdapterDispatchWorker:
                 correlation_id=str(action.action_id or outbox.action_id),
             )
 
-        self._store.submit(mutate, force_flush=True).result(timeout=30)
+        blocked = bool(self._store.submit(mutate, force_flush=True).result(timeout=30))
+        if blocked:
+            # Same compensation backstop as `_fail_attempt`: blocked attempts
+            # never settle real usage either, so a stranded `reserved`
+            # receipt must not keep occupying its admission estimate.
+            self._void_unused_reservation(
+                action,
+                reason=(
+                    "attempt_blocked_compensation:"
+                    + str(problem.get("code") or "unknown")[:100]
+                ),
+            )
 
     def _fail_attempt(self, outbox: Any, action: PendingAction, problem: dict) -> bool:
         now_ms = self._now()
@@ -1418,7 +1429,25 @@ class AdapterDispatchWorker:
             )
             return True
 
-        return bool(self._store.submit(mutate, force_flush=True).result(timeout=30))
+        failed = bool(self._store.submit(mutate, force_flush=True).result(timeout=30))
+        if failed:
+            # Compensation backstop: void the attempt's budget reservation on
+            # EVERY confirmed attempt failure, so no failure path (including
+            # ChallengeTaskDeadlineExceeded, which previously skipped the
+            # void) can strand its receipt at `reserved` and occupy the full
+            # admission estimate until the stage fail-closes every later
+            # retry (budget_safety_limit_reached, run-cb9422dc4ad0).  No
+            # failure path settles real usage, so the void is always the
+            # correct compensation; missing/already-terminal receipts and
+            # pre-reservation failures are idempotent no-ops.
+            self._void_unused_reservation(
+                action,
+                reason=(
+                    "attempt_failed_compensation:"
+                    + str(problem.get("code") or "unknown")[:100]
+                ),
+            )
+        return failed
 
     def _fail_unregistered(self, outbox: Any, action: PendingAction) -> None:
         now_ms = self._now()
