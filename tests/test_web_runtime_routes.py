@@ -35,6 +35,7 @@ from core.web.services import (
     session_service,
     supervised_control_service,
 )
+from core.web.services.team_workflow.source_collection import runs as source_collection_runs
 from tests.helpers.web_chat_state import _bind_seeded_session_agent
 from tests.helpers.web_runtime_scene import _runtime_scene_local_index_parts, _seed_runtime_scene_bundle
 
@@ -3234,6 +3235,83 @@ def test_runtime_shutdown_harvests_active_chat_room_round_then_queues_manager_cl
     finally:
         release_room.set()
         room_executor.shutdown(wait=True, cancel_futures=True)
+
+
+def test_runtime_shutdown_harvests_active_source_collection_before_local_retire(monkeypatch):
+    active = True
+    stop_calls: list[tuple[str, str, str]] = []
+    exit_calls: list[str] = []
+
+    def work_run_summary():
+        payload = (
+            {
+                "runId": "source-collection-live",
+                "runKind": "source_collection_run",
+                "teamId": "research-team",
+                "status": "running",
+                "currentPhase": "searching",
+            }
+            if active
+            else None
+        )
+        return {
+            "active": {"source_collection_run": payload},
+            "activeItems": {
+                "source_collection_run": [payload] if payload is not None else [],
+            },
+        }
+
+    def stop_source_collection(team_id: str, run_id: str, *, reason: str):
+        nonlocal active
+        stop_calls.append((team_id, run_id, reason))
+        active = False
+        return {"runId": run_id, "status": "cancelled"}
+
+    monkeypatch.setattr(runtime_service, "_work_run_summary", work_run_summary)
+    monkeypatch.setattr(runtime_service, "get_web_language", lambda: "en")
+    monkeypatch.setattr(runtime_service, "list_active_session_work_runs", lambda: [])
+    monkeypatch.setattr(
+        source_collection_runs,
+        "stop_source_collection_search",
+        stop_source_collection,
+    )
+    monkeypatch.setattr(runtime_service, "_force_cancel_self_evolution_for_shutdown", lambda reason: [])
+    monkeypatch.setattr(runtime_service, "_force_cancel_supervised_evolution_for_shutdown", lambda reason: [])
+    monkeypatch.setattr(
+        runtime_service,
+        "_force_cancel_supervised_worktree_evolution_for_shutdown",
+        lambda reason: [],
+    )
+    monkeypatch.setattr(
+        runtime_service,
+        "_schedule_local_backend_exit",
+        lambda delay_seconds=0.35: exit_calls.append("local"),
+    )
+
+    response = client.post("/api/runtime/shutdown")
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["accepted"] is True
+    assert payload["mode"] == "local_retire"
+    assert payload["sourceCollectionRuns"] == [
+        {
+            "kind": "source_collection_run",
+            "runId": "source-collection-live",
+            "teamId": "research-team",
+            "status": "stopped",
+            "terminalStatus": "cancelled",
+        }
+    ]
+    assert stop_calls == [
+        (
+            "research-team",
+            "source-collection-live",
+            "Stopped active source collection before workbench shutdown.",
+        )
+    ]
+    assert exit_calls == ["local"]
+
 
 def test_runtime_shutdown_blocks_active_evolution_runs_before_manager_close(tmp_path, monkeypatch):
     script_path = tmp_path / "vibelution_launcher.ps1"
