@@ -813,6 +813,106 @@ def test_digest_drafter_client_without_profile_is_untouched():
     assert callable(drafter)
 
 
+def test_digest_drafter_pin_clears_reasoning_effort_contract():
+    """A deep-reasoning profile contract (qwen3.8-max ships
+    ``reasoning_effort=xhigh``) must not ride the digest payload next to the
+    disabled thinking toggle: with thinking off the requested depth is
+    meaningless at best and a provider-rejection risk at worst."""
+
+    client = _digest_effort_client(
+        {"thinking_type": "enabled", "reasoning_effort": "xhigh"}
+    )
+    drafter = llm_review_runners.build_meeting_digest_drafter(
+        {**_FAKE_LLM, "client": client}
+    )
+    assert callable(drafter)
+    assert client.profile.thinking_type == "disabled"
+    assert client.profile.reasoning_effort == ""
+
+
+def test_review_runner_build_keeps_thinking_contract_untouched():
+    """Only the deterministic digest drafter pins thinking off; the review
+    runners (judgment calls) keep the profile's own thinking contract."""
+
+    client = _digest_effort_client({"thinking_type": "enabled"})
+    runners = llm_review_runners.build_hypothesis_review_runners(
+        {**_FAKE_LLM, "client": client}
+    )
+    assert runners is not None
+    assert client.profile.thinking_type == "enabled"
+
+
+def test_digest_call_event_reports_disabled_thinking_type(
+    monkeypatch, review_llm_scene_events
+):
+    """The digest call telemetry carries the thinking pin so dashboards can
+    prove the deterministic call actually ran with thinking disabled."""
+
+    _install_fake_llm(
+        monkeypatch,
+        ["# 纪要\n\n## 会议结论\n\n评审完成，倾向候选 A。\n"],
+    )
+    client = _digest_effort_client(
+        {"thinking_type": "disabled", "reasoning_effort": ""}
+    )
+    drafter = llm_review_runners.build_meeting_digest_drafter(
+        {
+            **_FAKE_LLM,
+            "providerId": "dashscope_main",
+            "modelRef": "dashscope_main/qwen3.8-max",
+            "client": client,
+        }
+    )
+    drafter(_meeting_round(), _source_messages())
+    started = next(
+        event
+        for event in review_llm_scene_events
+        if event["args"][2] == "meeting_digest.llm.started"
+    )
+    assert started["kwargs"]["fields"]["thinkingType"] == "disabled"
+
+
+def test_digest_truncated_provider_output_fails_loudly_not_silently(
+    monkeypatch, review_llm_scene_events
+):
+    """finish_reason=length (``LLMOutputTruncatedError``) must surface as a
+    failed call event with the precise llm error category — never as an
+    empty-but-successful digest."""
+
+    from core.llm.types import LLMOutputTruncatedError
+
+    def fake_invoke_llm(client, messages, tools=None, context=None, **kwargs):
+        raise LLMOutputTruncatedError(
+            provider="dashscope_main",
+            model="qwen3.8-max",
+        )
+
+    monkeypatch.setattr(llm_review_runners, "invoke_llm", fake_invoke_llm)
+    client = _digest_effort_client({"thinking_type": "disabled"})
+    drafter = llm_review_runners.build_meeting_digest_drafter(
+        {
+            **_FAKE_LLM,
+            "providerId": "dashscope_main",
+            "modelRef": "dashscope_main/qwen3.8-max",
+            "client": client,
+        }
+    )
+    with pytest.raises(LLMOutputTruncatedError):
+        drafter(
+            _meeting_round(),
+            [{"status": "completed", "participantId": "p", "content": "x"}],
+        )
+    failed = next(
+        event
+        for event in review_llm_scene_events
+        if event["args"][2] == "meeting_digest.llm.failed"
+    )
+    fields = failed["kwargs"]["fields"]
+    assert fields["llmErrorCategory"] == "output_truncated"
+    assert fields["errorType"] == "LLMOutputTruncatedError"
+    assert failed["kwargs"]["level"] == "error"
+
+
 def test_digest_drafter_fails_closed_without_completed_messages(monkeypatch):
     _install_fake_llm(monkeypatch, ["{}"])
     drafter = llm_review_runners.build_meeting_digest_drafter(dict(_FAKE_LLM))

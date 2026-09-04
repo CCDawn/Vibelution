@@ -3225,6 +3225,23 @@ def _run_meeting_discussion_impl(
                 ),
             },
         )
+        # DashScope explicit-cache keepalive: one delayed minimal probe per
+        # closed round re-arms the shared review prefix TTL for the next
+        # round.  Pure optimization — scheduling is deduplicated per round,
+        # fires only while the meeting stays open, and never raises into the
+        # discussion driver.
+        from contextlib import suppress
+
+        with suppress(Exception):
+            from core.web.services.team_workflow import review_cache_keepalive
+
+            review_cache_keepalive.schedule_meeting_cache_keepalive(
+                normalized_team_id,
+                normalized_round_id,
+                dedupe_key=str(
+                    bound.get("roundId") or round_result.get("roundId") or ""
+                ),
+            )
     else:
         # The loop-top convergence check only runs while another round is
         # still affordable.  With the default two-round budget (opening round

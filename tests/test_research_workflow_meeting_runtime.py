@@ -1218,6 +1218,79 @@ def test_discussion_driver_stops_on_convergence_signal(tmp_path, monkeypatch):
         )
 
 
+def test_round_close_schedules_one_cache_keepalive_per_round(tmp_path, monkeypatch):
+    """Every round the discussion driver closes schedules exactly one cache
+    keepalive probe, keyed by the persisted round id; scheduling failures
+    never break the driver.  The opening round closes before the driver
+    starts and is immediately followed by the driver's own round, so it is
+    the driver-loop rounds that carry the keepalive."""
+
+    from core.web.services.team_workflow import review_cache_keepalive
+
+    scheduled: list[dict[str, str]] = []
+
+    def capture_schedule(team_id, meeting_round_id, *, dedupe_key=""):
+        scheduled.append(
+            {
+                "teamId": team_id,
+                "meetingRoundId": meeting_round_id,
+                "dedupeKey": dedupe_key,
+            }
+        )
+        return {"status": "scheduled"}
+
+    monkeypatch.setattr(
+        review_cache_keepalive,
+        "schedule_meeting_cache_keepalive",
+        capture_schedule,
+    )
+    events = _capture_discussion_events(monkeypatch)
+    team_id, _agents, opened = _open_meeting(tmp_path, monkeypatch)
+    meeting_round_id = opened["meetingRound"]["meetingRoundId"]
+
+    result = meeting_runtime.run_meeting_discussion(
+        team_id, meeting_round_id, agent_runner=_marker_runner
+    )
+
+    assert result["stopReason"] == "converged"
+    assert result["roundsRun"] == 2
+    assert [event["eventCode"] for event in events].count(
+        "meeting_discussion.round.completed"
+    ) == 1
+    assert scheduled == [
+        {
+            "teamId": team_id,
+            "meetingRoundId": meeting_round_id,
+            "dedupeKey": result["chatRoomRoundIds"][-1],
+        }
+    ]
+
+
+def test_round_close_keepalive_failure_never_breaks_the_driver(
+    tmp_path, monkeypatch
+):
+    from core.web.services.team_workflow import review_cache_keepalive
+
+    def broken_schedule(*_args, **_kwargs):
+        raise RuntimeError("keepalive registry exploded")
+
+    monkeypatch.setattr(
+        review_cache_keepalive,
+        "schedule_meeting_cache_keepalive",
+        broken_schedule,
+    )
+    team_id, _agents, opened = _open_meeting(tmp_path, monkeypatch)
+    meeting_round_id = opened["meetingRound"]["meetingRoundId"]
+
+    result = meeting_runtime.run_meeting_discussion(
+        team_id, meeting_round_id, agent_runner=_marker_runner
+    )
+
+    assert result["status"] == "completed"
+    assert result["stopReason"] == "converged"
+    assert result["meetingRound"]["status"] == "awaiting_approval"
+
+
 def test_formal_discussion_driver_reuses_bound_deadline_and_starts_no_late_round(monkeypatch):
     events = _capture_discussion_events(monkeypatch)
     meeting = {

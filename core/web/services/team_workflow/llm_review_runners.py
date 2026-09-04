@@ -1238,6 +1238,17 @@ def _invoke_review_llm(
             "modelRef": str(llm.get("modelRef") or ""),
             "profileId": str(llm.get("profileId") or ""),
             "responseMode": response_mode,
+            # Bounded thinking-contract observability: proves the
+            # deterministic digest call actually carries the disabled pin
+            # while review calls keep their provider default.
+            "thinkingType": str(
+                getattr(
+                    getattr(llm.get("client"), "profile", None),
+                    "thinking_type",
+                    "",
+                )
+                or ""
+            ),
             "messageCount": len(messages),
             "inputChars": len(system_prompt) + len(user_content),
             "timeoutMs": max(0, int(timeout_seconds * 1000)),
@@ -1569,13 +1580,28 @@ def _pin_digest_drafter_thinking_disabled(resolved: Mapping[str, Any]) -> None:
     qwen-shaped routes emit the top-level toggle, openai-compatible wires
     pass it through litellm ``extra_body``; models without a declared
     thinking contract simply keep their provider default with no parameter
-    emitted beyond this drafter's calls.
+    emitted beyond this drafter's calls.  A declared reasoning-effort
+    contract (qwen3.8-max ships ``reasoning_effort=xhigh``) is cleared on
+    the same isolated runtime profile: with thinking disabled, a requested
+    thinking depth is meaningless at best and a provider-rejection risk at
+    worst, and the digest payload stays deterministic-shaped.  The pin only
+    ever mutates the drafter's own isolated client profile (each
+    ``resolve_review_llm`` call deep-copies the operator config), so the
+    review runners keep their own thinking and reasoning contracts.
     """
 
     profile = getattr(resolved.get("client"), "profile", None)
     if profile is None:
         return
     profile.thinking_type = "disabled"
+    # ``resolve_reasoning_effort_request`` returns an empty payload for an
+    # empty requested value, so this removes the ``reasoning_effort`` /
+    # ``reasoning`` body field entirely for drafter calls.  Fail-safe: a
+    # profile object without the attribute keeps working unchanged.
+    from contextlib import suppress
+
+    with suppress(AttributeError):
+        profile.reasoning_effort = ""
 
 
 def build_meeting_digest_drafter(llm: Mapping[str, Any] | None = None):
