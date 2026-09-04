@@ -708,7 +708,7 @@ class ReviewLLMTimeoutError(LLMError):
 # work above it stays queued at the outer admission boundaries.
 _LLM_GATE_MAX_CONCURRENT_ENV = "VIBELUTION_LLM_MAX_CONCURRENT"
 _LLM_GATE_MAX_CONCURRENT_DEFAULT = 4
-_LLM_GATE_MAX_CONCURRENT_LIMIT = 256
+_LLM_GATE_MAX_CONCURRENT_LIMIT = 4
 
 # Waiting on the gate must never become unbounded silent queueing: a caller
 # that cannot obtain a slot within this budget fails fast into the existing

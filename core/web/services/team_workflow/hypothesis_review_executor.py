@@ -86,7 +86,7 @@ MAX_CONCURRENT_REVIEW_CALLS = 4
 # process-wide: the global ceiling across concurrent runs/questions lives in
 # the LLM gate in ``llm_review_runners`` (``VIBELUTION_LLM_MAX_CONCURRENT``).
 _MAX_CONCURRENT_REVIEW_CALLS_ENV = "VIBELUTION_MAX_CONCURRENT_REVIEW_CALLS"
-_MAX_CONCURRENT_REVIEW_CALLS_LIMIT = 64
+_MAX_CONCURRENT_REVIEW_CALLS_LIMIT = 4
 
 
 def resolve_max_concurrent_review_calls() -> int:

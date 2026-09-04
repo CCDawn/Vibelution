@@ -131,6 +131,9 @@ def test_worker_count_defaults_to_four_and_env_overrides(
     monkeypatch.setenv(WORKFLOW_WORKERS_ENV, "3")
     assert workflow_worker_count() == 3
 
+    monkeypatch.setenv(WORKFLOW_WORKERS_ENV, "10")
+    assert workflow_worker_count() == 4
+
     monkeypatch.setenv(WORKFLOW_WORKERS_ENV, "not-a-number")
     assert workflow_worker_count() == 4
 
