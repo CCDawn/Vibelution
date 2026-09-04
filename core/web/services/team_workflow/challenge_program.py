@@ -28,7 +28,6 @@ from core.research.competition.resources import (
     CompetitionResourceError,
     DEEP_EXPERIMENT_ACTIVATION_GATE,
     DEEP_EXPERIMENT_EXECUTION_PHASE,
-    PHASE1_COMPLETION_RULE,
     PROGRAM_DIRECTION_EXECUTION_MODE,
     load_competition_program_core,
     load_full_catalog_execution_core,
@@ -36,6 +35,11 @@ from core.research.competition.resources import (
     validate_competition_program_core,
     validate_full_catalog_execution_core,
     validate_question_catalog,
+)
+from core.web.services.team_workflow.challenge_phase_boundary import (
+    build_phase_one_manifest,
+    get_challenge_phase_boundary_status,
+    project_challenge_phase_boundary,
 )
 
 
@@ -488,6 +492,7 @@ def build_competition_program_projection(
     program_core: dict[str, Any] | None = None,
     policy: dict[str, Any] | None = None,
     catalog: dict[str, Any] | None = None,
+    phase_boundary: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the active typed v2 program projection from frozen tracked resources.
 
@@ -538,6 +543,28 @@ def build_competition_program_projection(
         and len(catalog_question_ids) == CATALOG_QUESTION_COUNT
         and catalog_question_ids <= approved_question_set
     )
+    boundary = (
+        dict(phase_boundary)
+        if isinstance(phase_boundary, dict)
+        else (
+            get_challenge_phase_boundary_status(
+                _text(run_summary.get("teamId")),
+                question_run_summary=run_summary,
+            )
+            if _text(run_summary.get("teamId"))
+            else project_challenge_phase_boundary(
+                manifest=build_phase_one_manifest(run_summary),
+            )
+        )
+    )
+    phase1_content_ready = (
+        full_result_set_complete and boundary.get("phase1ContentReady") is True
+    )
+    phase1_approved = phase1_content_ready and boundary.get("phase1Approved") is True
+    phase1_knowledge_published = (
+        phase1_approved and boundary.get("phase1KnowledgePublished") is True
+    )
+    phase2_activated = phase1_approved and phase1_knowledge_published
     program_program = _mapping(program.get("program"))
     dimensions = list(program_program.get("dimensions") or [])
     deep_experiments = [
@@ -559,7 +586,7 @@ def build_competition_program_projection(
                 "required": experiment.get("required") is True,
                 "executionPhase": execution_phase,
                 "activationGate": _text(experiment.get("activationGate")) or DEEP_EXPERIMENT_ACTIVATION_GATE,
-                "phaseActive": execution_phase == 1 or full_result_set_complete,
+                "phaseActive": execution_phase == 1 or phase2_activated,
                 "questionResultApproved": question_id in approved_question_set,
                 "approved": (
                     question_id in approved_question_set
@@ -574,7 +601,7 @@ def build_competition_program_projection(
         item["approved"] for item in required_deep_experiment_records
     )
     completion_contract = _mapping(program.get("completionContract"))
-    program_completed = full_result_set_complete and all_deep_experiments_approved
+    program_completed = phase2_activated and all_deep_experiments_approved
     approved_count = len(approved_question_set)
     submission_snapshot = _mapping(execution.get("directionSubmissionRequirementSnapshot"))
     return {
@@ -603,7 +630,7 @@ def build_competition_program_projection(
                 "required": True,
                 "role": role,
                 "phase": phase,
-                "activated": phase == 1 or full_result_set_complete,
+                "activated": phase == 1 or phase2_activated,
                 **(
                     {"activationGate": DEEP_EXPERIMENT_ACTIVATION_GATE}
                     if phase == 2
@@ -619,12 +646,22 @@ def build_competition_program_projection(
         ],
         "executionPhase": {
             "mode": PROGRAM_DIRECTION_EXECUTION_MODE,
-            "currentPhase": 1,
-            "currentPhaseGoal": "方向A：完成 125 题科学假设与研究计划的六环节闭环（问题理解、知识整合、候选假说生成、证据梳理、研究计划输出、反馈修正）",
-            "phase1CompletionRule": PHASE1_COMPLETION_RULE,
-            "phase1Complete": full_result_set_complete,
-            "phase2ActivationGate": DEEP_EXPERIMENT_ACTIVATION_GATE,
-            "phase2Activated": full_result_set_complete,
+            "currentPhase": 2 if phase2_activated else 1,
+            "currentPhaseGoal": (
+                "方向B：开展两个独立深实验并形成反馈闭环"
+                if phase2_activated
+                else "方向A：完成 125 题结果整包审批并发布到团队知识库"
+            ),
+            "phase1CompletionRule": "whole_package_operator_approved",
+            "phase1ContentReady": phase1_content_ready,
+            "phase1Approved": phase1_approved,
+            "phase1KnowledgePublished": phase1_knowledge_published,
+            "phase1Complete": phase1_approved,
+            "phase1ManifestSha256": _text(
+                _mapping(boundary.get("manifest")).get("manifestSha256")
+            ),
+            "phase2ActivationGate": "phase_one_approved_and_team_knowledge_applied",
+            "phase2Activated": phase2_activated,
             "finalCompletionRequiresDeepExperiments": True,
         },
         "programContract": {

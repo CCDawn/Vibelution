@@ -8,6 +8,10 @@ class WorkflowEnsurePayload(BaseModel):
     ownerAgentId: str = Field(DEFAULT_OWNER_AGENT_ID, max_length=160)
 
 
+class ChallengePhaseOneApprovalPayload(BaseModel):
+    note: str = Field("", max_length=1000)
+
+
 class CandidateSourcePayload(BaseModel):
     candidateType: str = Field("source_manifest", max_length=80)
     title: str = Field("", max_length=240)
@@ -123,6 +127,10 @@ class ResearchStageRoundStartPayload(BaseModel):
     maxResultsPerQuery: int = Field(10, ge=1, le=100)
     promptCachePolicy: dict[str, Any] = Field(default_factory=dict)
     scope: dict[str, Any] = Field(default_factory=dict)
+    programPhase: int | None = Field(None, ge=1, le=2)
+    programDirection: str = Field("", max_length=8)
+    challengeQuestionId: str = Field("", max_length=32)
+    deepExperiment: bool = False
 
 
 class ResearchProjectListResponse(BaseModel):
@@ -310,6 +318,10 @@ class ExperimentPlanCreatePayload(BaseModel):
     revision: int = Field(1, ge=1)
     supersedesPlanId: str = Field("", max_length=200)
     notes: str = Field("", max_length=4000)
+    programPhase: int | None = Field(None, ge=1, le=2)
+    programDirection: str = Field("", max_length=8)
+    challengeQuestionId: str = Field("", max_length=32)
+    deepExperiment: bool = False
 
 
 class ExperimentEngineeringProxyHypothesisPayload(BaseModel):

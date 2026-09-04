@@ -70,11 +70,19 @@ def start_research_stage_round(team_id: str, payload: dict[str, Any] | None = No
     normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
     team = s.team_service.get_team(normalized_team_id)
     request_payload = dict(payload) if isinstance(payload, dict) else {}
+    stage_type = s._normalize_stage_type(request_payload.get("stageType"))
+    if stage_type == "experiment":
+        from core.web.services.team_workflow.challenge_phase_boundary import (
+            request_targets_challenge_phase_two,
+            require_phase_two_activation,
+        )
+
+        if request_targets_challenge_phase_two(request_payload):
+            require_phase_two_activation(normalized_team_id)
     research_project = s.resolve_research_project_identity(
         normalized_team_id,
         s._trim_text(request_payload.get("researchProjectId"), max_length=160),
     )
-    stage_type = s._normalize_stage_type(request_payload.get("stageType"))
     if stage_type == "iteration":
         from core.web.services.team_workflow.research_project_agent_tasks import (
             research_project_iteration_readiness,

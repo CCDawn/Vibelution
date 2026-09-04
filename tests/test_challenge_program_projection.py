@@ -2,6 +2,11 @@ import importlib.util
 import json
 from pathlib import Path
 
+from core.web.services.team_workflow.challenge_phase_boundary import (
+    build_phase_one_manifest,
+    project_challenge_phase_boundary,
+)
+
 
 _MODULE_PATH = Path(__file__).parents[1] / "core" / "web" / "services" / "team_workflow" / "challenge_program.py"
 _SPEC = importlib.util.spec_from_file_location("challenge_program_projection_contract", _MODULE_PATH)
@@ -38,6 +43,28 @@ def _legacy_accepted_case() -> dict:
             "bestValidatedPlanId": "exp_revision4",
         },
     }
+
+
+def _activated_phase_boundary(summary: dict) -> dict:
+    manifest_summary = dict(summary)
+    manifest_summary["completedQuestionResults"] = [
+        {
+            "questionId": question_id,
+            "runId": f"run-{question_id}",
+            "outputSha256": f"sha-{question_id}",
+        }
+        for question_id in summary.get("completedQuestionIds") or []
+    ]
+    manifest = build_phase_one_manifest(manifest_summary)
+    reference = {
+        "manifestSha256": manifest["manifestSha256"],
+        "contentSha256": manifest["contentSha256"],
+    }
+    return project_challenge_phase_boundary(
+        manifest=manifest,
+        approvals=[{"status": "approved", "approvedBy": "operator-1", **reference}],
+        knowledge_receipts=[{"status": "applied", "receiptId": "receipt-1", **reference}],
+    )
 
 
 def test_program_projection_does_not_promote_accepted_legacy_case_to_program_completion():
@@ -499,9 +526,13 @@ def test_active_competition_projection_is_phased_a_then_b():
         "mode": "a_then_b",
         "currentPhase": 1,
         "currentPhaseGoal": empty["executionPhase"]["currentPhaseGoal"],
-        "phase1CompletionRule": "full_catalog_result_set_approved",
+        "phase1CompletionRule": "whole_package_operator_approved",
+        "phase1ContentReady": False,
+        "phase1Approved": False,
+        "phase1KnowledgePublished": False,
         "phase1Complete": False,
-        "phase2ActivationGate": "full_catalog_result_set_approved",
+        "phase1ManifestSha256": empty["executionPhase"]["phase1ManifestSha256"],
+        "phase2ActivationGate": "phase_one_approved_and_team_knowledge_applied",
         "phase2Activated": False,
         "finalCompletionRequiresDeepExperiments": True,
     }
@@ -512,11 +543,13 @@ def test_active_competition_projection_is_phased_a_then_b():
     assert empty["allRequiredDeepExperimentsApproved"] is False
     assert empty["program"]["completed"] is False
 
+    complete_summary = {
+        "completedQuestionIds": [f"SCI-{index:03d}" for index in range(1, 126)],
+        "approvedDeepExperimentQuestionIds": ["SCI-091", "SCI-096"],
+    }
     complete = build_competition_program_projection(
-        question_run_summary={
-            "completedQuestionIds": [f"SCI-{index:03d}" for index in range(1, 126)],
-            "approvedDeepExperimentQuestionIds": ["SCI-091", "SCI-096"],
-        }
+        question_run_summary=complete_summary,
+        phase_boundary=_activated_phase_boundary(complete_summary),
     )
     assert complete["fullCatalogResultSet"]["complete"] is True
     assert complete["allRequiredDeepExperimentsApproved"] is True
@@ -524,13 +557,16 @@ def test_active_competition_projection_is_phased_a_then_b():
 
 
 def test_phase1_completion_does_not_require_the_gated_deep_experiments():
+    summary = {
+        "completedQuestionIds": [f"SCI-{index:03d}" for index in range(1, 126)],
+    }
     catalog_complete = build_competition_program_projection(
-        question_run_summary={
-            "completedQuestionIds": [f"SCI-{index:03d}" for index in range(1, 126)],
-        }
+        question_run_summary=summary,
+        phase_boundary=_activated_phase_boundary(summary),
     )
 
-    # 125/125 approved completes the current phase and activates phase 2...
+    # Content readiness alone is insufficient; this fixture also supplies the
+    # matching whole-package approval and Team Knowledge applied receipt.
     assert catalog_complete["fullCatalogResultSet"]["complete"] is True
     assert catalog_complete["executionPhase"]["phase1Complete"] is True
     assert catalog_complete["executionPhase"]["phase2Activated"] is True
@@ -589,10 +625,14 @@ def test_submission_readiness_uses_first_unapproved_question_ids_from_projection
     assert phase1_readiness["artifacts"][0]["primaryAction"]["questionId"] == "SCI-002"
     assert "questionId" not in phase1_readiness["artifacts"][1]["primaryAction"]
 
-    phase2_projection = build_competition_program_projection(question_run_summary={
+    phase2_summary = {
         "completedQuestionIds": [f"SCI-{index:03d}" for index in range(1, 126)],
         "approvedDeepExperimentQuestionIds": ["SCI-091"],
-    })
+    }
+    phase2_projection = build_competition_program_projection(
+        question_run_summary=phase2_summary,
+        phase_boundary=_activated_phase_boundary(phase2_summary),
+    )
     phase2_readiness = build_challenge_submission_readiness(
         team_id="research-team", competition_program_projection=phase2_projection
     )

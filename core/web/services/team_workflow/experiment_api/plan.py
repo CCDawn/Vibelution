@@ -57,6 +57,13 @@ def create_experiment_plan(team_id: str, payload: dict[str, Any] | None = None) 
     normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
     team = s.team_service.get_team(normalized_team_id)
     request_payload = payload if isinstance(payload, dict) else {}
+    from core.web.services.team_workflow.challenge_phase_boundary import (
+        request_targets_challenge_phase_two,
+        require_phase_two_activation,
+    )
+
+    if request_targets_challenge_phase_two(request_payload):
+        require_phase_two_activation(normalized_team_id)
     created_by_agent = s._trim_text(request_payload.get("createdByAgent"), max_length=160) or s.DEFAULT_OWNER_AGENT_ID
     with s._WORKFLOW_LOCK:
         workflow = s._load_or_create_workflow(normalized_team_id)

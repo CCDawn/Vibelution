@@ -2064,6 +2064,7 @@ def challenge_question_run_summary(team_id: str) -> dict[str, Any]:
             latest_candidate, latest_receipt_refs
         )
     return {
+        "teamId": team_id,
         "recordCount": len(records),
         "validCandidateCount": len(valid_candidates),
         "validatedQuestionCount": len(validated_question_ids),

@@ -42,6 +42,14 @@ def team_workflow_research_stage_round_start(team_id: str, payload: ResearchStag
             status_code=404,
             fields={"stageType": payload.stageType, "mode": payload.mode},
         )
+    except PhaseTwoLockedError as exc:
+        _raise_team_workflow_route_error(
+            "research_stage_round.start",
+            team_id,
+            exc,
+            status_code=409,
+            fields={"stageType": payload.stageType, "programPhase": payload.programPhase},
+        )
     except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
         _raise_team_workflow_route_error(
             "research_stage_round.start",
