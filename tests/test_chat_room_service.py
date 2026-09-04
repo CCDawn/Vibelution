@@ -6248,3 +6248,89 @@ def test_chat_room_keeps_short_repeat_and_changed_speaker_messages(tmp_path, mon
     ]
     # 短消息两轮逐字节相同仍都保留，语义零改变。
     assert committed_alpha_contents == [short_speech, short_speech]
+
+
+def test_speaker_watchdog_force_closes_inflight_llm_stream_and_marks_cancel(
+    tmp_path, monkeypatch
+):
+    """看门狗遗弃讲者线程时必须真断连：close 在途流 + 登记 turn 取消态。"""
+
+    _isolate_chat_room_kernel(tmp_path, monkeypatch)
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(chat_room_service.time, "time", lambda: 1000.0)
+
+    import core.llm.client as llm_client
+
+    scene_events = []
+    monkeypatch.setattr(
+        chat_room_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: scene_events.append((args, kwargs)) or {"accepted": True},
+    )
+    force_closed = threading.Event()
+    registered_hooks = {}
+
+    def runner(participant, _prompt, context):
+        round_id = str(context.get("roundId") or "").strip()
+        participant_id = str(
+            participant.get("participantId")
+            or participant.get("agentId")
+            or participant.get("sessionId")
+            or ""
+        ).strip()
+        turn_identity = f"chat-room:{round_id}:{participant_id}"
+
+        def force_close():
+            force_closed.set()
+
+        registered_hooks[turn_identity] = force_close
+        llm_client._register_llm_stream_close_hook(turn_identity, force_close)
+        if str(participant.get("sessionId") or "").strip() == "session-alpha":
+            # 只有 alpha 挂死；beta 正常返回，用于隔离断言面。
+            time.sleep(5)
+        return {
+            "status": "completed",
+            "raw_output": f"迟到发言-{participant_id}",
+            "summary": "late",
+        }
+
+    room = chat_room_service.create_chat_room(
+        title="看门狗真断连群聊",
+        participant_session_ids=["session-alpha", "session-beta"],
+    )
+    detail = chat_room_service.start_chat_room_round(
+        room["roomId"],
+        "普通讨论",
+        config={"perCallBudgetMs": 500},
+        agent_runner=runner,
+    )
+
+    latest = detail["rounds"][-1]
+    statuses = [message["status"] for message in latest["messages"]]
+    assert statuses == ["failed", "completed"] or statuses == ["stopped", "completed"]
+    failed = latest["messages"][0]
+    assert failed["content"] == ""
+    assert failed["sessionId"] == "session-alpha"
+
+    # 真断连：watchdog 在遗弃前强制 close 了在途流。
+    assert force_closed.wait(2.0)
+
+    # turn-scoped 取消态按 chat-room:{round}:{participant} 登记，可被清除。
+    round_id = str(latest.get("roundId") or "").strip()
+    participant_id = str(failed.get("participantId") or "").strip()
+    turn_identity = f"chat-room:{round_id}:{participant_id}"
+    assert turn_identity in llm_client._LLM_TURN_CANCEL_STATES
+    assert turn_identity in registered_hooks
+    llm_client.clear_llm_turn_scope_cancel(turn_identity)
+    assert turn_identity not in llm_client._LLM_TURN_CANCEL_STATES
+
+    close_events = [
+        event
+        for event in scene_events
+        if event[0][2:3] == ("chat_room.speaker_call.watchdog_stream_close",)
+    ]
+    assert len(close_events) == 1
+
+    # 清理注册的 fake hook，避免泄漏到其它测试。
+    hook = registered_hooks[turn_identity]
+    llm_client._unregister_llm_stream_close_hook(turn_identity, hook)

@@ -2740,6 +2740,67 @@ def _close_chat_room_speaker_delta(
         return
 
 
+def _speaker_turn_identity(participant: Mapping[str, Any], context: Mapping[str, Any]) -> str:
+    """Canonical LLM turn identity for one speaker call.
+
+    必须与 ``_run_participant_agent`` 里的 ``turn_identity`` 逐字一致，它同时
+    是 LLM 侧 status context 的 turnId 和 turn-scoped 取消态 / 在途流 closer
+    登记的 key。
+    """
+
+    round_id = str(context.get("roundId") or "").strip()
+    participant_id = str(
+        participant.get("participantId")
+        or participant.get("agentId")
+        or participant.get("sessionId")
+        or ""
+    ).strip()
+    return f"chat-room:{round_id}:{participant_id}"
+
+
+def _abandon_speaker_llm_streams(participant: Mapping[str, Any], context: Mapping[str, Any]) -> None:
+    """Watchdog abandon path: cancel the turn scope and force-close its streams.
+
+    被遗弃的 runner 线程原本只是被「遗弃」：底层 provider 连接继续挂着，
+    线程继续持有路由并发槽位（同路由后续调用全部排队直至冻结）。这里在
+    遗弃前置 turn-scoped 取消态并触发 client 的在途流 closer，让阻塞在
+    socket read 上的线程以异常解卷、路由槽位在 finally 归还。迟到的结果
+    依旧被丢弃（caller 独占持久化），watchdog/fence 重试语义不变。
+    """
+
+    turn_identity = _speaker_turn_identity(participant, context)
+    closed_attempts = 0
+    try:
+        from core.llm.client import cancel_llm_turn_scope
+
+        closed_attempts = cancel_llm_turn_scope(
+            turn_identity,
+            "chat_room_speaker_call_watchdog_timeout",
+        )
+    except Exception:
+        closed_attempts = -1
+    try:
+        record_runtime_scene_event(
+            "chat_room",
+            "speaker_watchdog",
+            "chat_room.speaker_call.watchdog_stream_close",
+            message=(
+                "Speaker watchdog abandoned the runner and force-closed its "
+                "in-flight provider stream so the route slot is returned."
+            ),
+            level="warning",
+            outcome="failed",
+            fields={
+                "roundId": str(context.get("roundId") or "").strip(),
+                "participantId": str(participant.get("participantId") or "").strip(),
+                "turnId": turn_identity,
+                "streamCloseAttempts": closed_attempts,
+            },
+        )
+    except Exception:
+        return
+
+
 def _invoke_speaker_runner_with_watchdog(
     runner: AgentRunner,
     participant: dict[str, Any],
@@ -2776,6 +2837,8 @@ def _invoke_speaker_runner_with_watchdog(
     worker.join(timeout_seconds)
     if worker.is_alive():
         _record_speaker_watchdog_timeout_event(context, timeout_seconds=timeout_seconds)
+        # 真断连：先取消该讲者 turn 的 LLM 作用域并强制关闭在途流，再遗弃。
+        _abandon_speaker_llm_streams(participant, context)
         raise SpeakerCallWatchdogTimeout(
             f"speaker call exceeded its per-call budget of {timeout_seconds:.0f}s "
             "and was abandoned; the runner thread was left running in the background"
@@ -3644,6 +3707,14 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
     round_id = str(context.get("roundId") or "").strip()
     participant_id = str(participant.get("participantId") or agent_id or session_id).strip()
     turn_identity = f"chat-room:{round_id}:{participant_id}"
+    try:
+        # 同一 identity 的合法新调用（含零输出围栏的轮内重试）必须先清掉
+        # 上一轮 watchdog 遗留的 turn-scoped 取消态，否则会被瞬时取消。
+        from core.llm.client import clear_llm_turn_scope_cancel
+
+        clear_llm_turn_scope_cancel(turn_identity)
+    except Exception:
+        pass
     speaker_prompt_cache_partition = _speaker_prompt_cache_partition(
         session_id,
         str(context.get("roomId") or "").strip(),
