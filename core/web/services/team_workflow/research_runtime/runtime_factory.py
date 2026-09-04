@@ -44,10 +44,11 @@ from .receipt_persistence import ReceiptPersistenceWorker
 
 logger = logging.getLogger(__name__)
 
-# Challenge Cup 10-concurrency plan (B3): the production outbox pump drives
-# dispatch with this many parallel worker threads (Temporal-style fixed
-# task-queue pollers). ``VIBELUTION_WORKFLOW_WORKERS`` overrides it.
-DEFAULT_WORKFLOW_WORKERS = 10
+# The outbox pump is the outer admission boundary for hypothesis work. Keep
+# its default aligned with the governed four-experiment capacity so downstream
+# pools cannot accumulate a hidden 10-wide launch queue.
+# ``VIBELUTION_WORKFLOW_WORKERS`` remains the operator override.
+DEFAULT_WORKFLOW_WORKERS = 4
 WORKFLOW_WORKERS_ENV = "VIBELUTION_WORKFLOW_WORKERS"
 
 # Budget-exhaustion auto-advance sweep cadence: the maintenance tick runs far
@@ -154,8 +155,8 @@ class WorkflowRuntime:
     def run_maintenance_once(self, limit: int = 4) -> int:
         """Serial driver for the non-dispatch workers + retention sweeps.
 
-        One maintenance thread runs this loop (Challenge Cup 10-concurrency
-        B3): fork stays serial because it writes the LangGraph checkpoint
+        One maintenance thread runs this loop: fork stays serial because it
+        writes the LangGraph checkpoint
         store that the B4 checkpoint-parallelization task owns; delivery /
         event / cancel-cleanup are low-frequency with run-level side effects;
         the graph/adapter sweeps rewrite states behind

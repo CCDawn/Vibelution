@@ -687,13 +687,13 @@ class ReviewLLMTimeoutError(LLMError):
 
 
 # ---------------------------------------------------------------------------
-# Global LLM concurrency gate (Challenge 10-way parallel review guard)
+# Global LLM concurrency gate (four-hypothesis review guard)
 # ---------------------------------------------------------------------------
 
 # Every review wave opens one ThreadPoolExecutor per question with
 # ``MAX_CONCURRENT_REVIEW_CALLS`` workers, so N concurrent questions multiply
 # into N x 4 in-flight provider calls with no process-wide ceiling (the
-# 10-question Challenge wave therefore fires up to 40 simultaneous LLM
+# multi-question Challenge waves therefore multiply simultaneous LLM
 # calls).  This gate adds the missing process-level ceiling around the single
 # funnel every review call passes through (`_invoke_review_llm` ->
 # `_invoke_llm_with_timeout`), so the gated in-flight count measures real
@@ -703,12 +703,11 @@ class ReviewLLMTimeoutError(LLMError):
 #
 #     max_concurrent ~= provider_calls_per_minute * avg_call_wall_clock_s / 60
 #
-# e.g. a provider sustaining 80 calls/min at a 7.5s average wall clock
-# supports ~10 concurrent calls.  Tune ``VIBELUTION_LLM_MAX_CONCURRENT`` to
-# the provider's real concurrency budget; the default 10 keeps one full
-# 10-question wave flowing without multiplicative fan-out.
+# Tune ``VIBELUTION_LLM_MAX_CONCURRENT`` to the provider's real concurrency
+# budget. The default 4 matches the product's governed hypothesis capacity;
+# work above it stays queued at the outer admission boundaries.
 _LLM_GATE_MAX_CONCURRENT_ENV = "VIBELUTION_LLM_MAX_CONCURRENT"
-_LLM_GATE_MAX_CONCURRENT_DEFAULT = 10
+_LLM_GATE_MAX_CONCURRENT_DEFAULT = 4
 _LLM_GATE_MAX_CONCURRENT_LIMIT = 256
 
 # Waiting on the gate must never become unbounded silent queueing: a caller

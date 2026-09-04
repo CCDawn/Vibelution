@@ -65,16 +65,15 @@ _ROLES = (
 
 
 def test_meeting_discussion_executor_default_and_env_override(monkeypatch) -> None:
-    """The driver pool defaults to 12; the env overrides it with a floor of 1.
+    """The driver pool defaults to 4; the env overrides it with a floor of 1.
 
-    One executor thread drives one active meeting round end-to-end, so a
-    four-thread pool queued later rounds for ~10 minutes under campaign
-    concurrency before their first LLM call.  The module-level executor is
-    built from the same helper the env override feeds.
+    One executor thread drives one active meeting round end-to-end. The
+    four-thread pool is the outer hypothesis admission boundary, and the
+    module-level executor is built from the same helper the env override feeds.
     """
 
     monkeypatch.delenv("VIBELUTION_MEETING_DISCUSSION_MAX_WORKERS", raising=False)
-    assert meeting_runtime._MEETING_DISCUSSION_MAX_WORKERS_DEFAULT == 24
+    assert meeting_runtime._MEETING_DISCUSSION_MAX_WORKERS_DEFAULT == 4
     assert (
         meeting_runtime._meeting_discussion_max_workers()
         == meeting_runtime._MEETING_DISCUSSION_MAX_WORKERS_DEFAULT
