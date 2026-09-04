@@ -23,6 +23,7 @@ from core.llm.client import (
     _llm_route_concurrency_key,
     _new_cancellable_completion_http_handler,
     _new_cancellable_responses_http_handler,
+    _qwen_inflight_cache_keepalive_enabled,
     _resolve_llm_route_concurrency_limit,
     _retry_policy_backoff_seconds,
     _retry_policy_max_attempts,
@@ -6644,6 +6645,223 @@ def _liveness_stream_client(backend):
         }
     )
     return LLMClient(config=config, backend=backend)
+
+
+def _qwen_keepalive_config(*, route_concurrency=2):
+    return make_config(
+        **{
+            "llm.route_concurrency": route_concurrency,
+            "llm.providers.default.kind": "aliyun",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "qwen3.8-flash",
+            "llm.profiles.primary.prompt_cache.mode": "explicit_cache_control",
+        }
+    )
+
+
+def _qwen_keepalive_messages():
+    return [
+        {
+            "role": "system",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "stable system prefix",
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
+        },
+        {"role": "user", "content": "run a long research task"},
+    ]
+
+
+def test_long_qwen_explicit_cache_stream_refreshes_same_payload_prefix(monkeypatch):
+    """A live stream must refresh its marked prefix before DashScope's TTL expires."""
+
+    config = _qwen_keepalive_config()
+    monkeypatch.setattr(
+        "core.llm.client._QWEN_INFLIGHT_CACHE_KEEPALIVE_INTERVAL_LIMIT", 0.05,
+        raising=False,
+    )
+    calls = []
+    probe_seen = threading.Event()
+
+    def backend(payload):
+        calls.append(payload)
+        if payload.get("stream") is False:
+            probe_seen.set()
+            return {
+                "choices": [
+                    {
+                        "message": {"role": "assistant", "content": "ok"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 12000,
+                    "completion_tokens": 1,
+                    "total_tokens": 12001,
+                    "prompt_tokens_details": {"cached_tokens": 11800},
+                },
+            }
+
+        def chunks():
+            yield {"choices": [{"index": 0, "delta": {"content": "working"}}]}
+            assert probe_seen.wait(
+                1.0
+            ), "long Qwen stream did not refresh its cache prefix"
+            yield {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}
+
+        return chunks()
+
+    client = LLMClient(config=config, backend=backend)
+    events = list(
+        client.stream_events(
+            _qwen_keepalive_messages(),
+            metadata={
+                "sessionId": "session-qwen-keepalive",
+                "turnId": "turn-qwen-keepalive",
+                "invocationId": "invocation-qwen-keepalive",
+            },
+        )
+    )
+
+    assert [event.type for event in events] == ["text_delta", "done"]
+    assert len(calls) == 2
+    original, probe = calls
+    assert original["stream"] is True
+    assert probe["stream"] is False
+    assert probe["messages"] == original["messages"]
+    assert probe.get("tools") == original.get("tools")
+    assert probe["max_tokens"] == 16
+    assert "stream_options" not in probe
+
+
+def test_qwen_inflight_cache_keepalive_requires_strategy_marker_and_spare_route_slot(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "core.llm.client._QWEN_INFLIGHT_CACHE_KEEPALIVE_INTERVAL_LIMIT", 0.05,
+        raising=False,
+    )
+    eligible_protocol = {"promptCacheProviderStrategy": "qwen_explicit_cache_control"}
+    eligible_payload = {"promptCachePayload": {"cacheControlBlockCount": 1}}
+
+    assert _qwen_inflight_cache_keepalive_enabled(
+        protocol_summary=eligible_protocol,
+        payload_summary=eligible_payload,
+        route_concurrency=2,
+    )
+    assert not _qwen_inflight_cache_keepalive_enabled(
+        protocol_summary={
+            "promptCacheProviderStrategy": "openai_compatible_automatic_key"
+        },
+        payload_summary=eligible_payload,
+        route_concurrency=2,
+    )
+    assert not _qwen_inflight_cache_keepalive_enabled(
+        protocol_summary=eligible_protocol,
+        payload_summary={"promptCachePayload": {"cacheControlBlockCount": 0}},
+        route_concurrency=2,
+    )
+    assert not _qwen_inflight_cache_keepalive_enabled(
+        protocol_summary=eligible_protocol,
+        payload_summary=eligible_payload,
+        route_concurrency=1,
+    )
+
+
+def test_short_qwen_stream_stops_before_cache_keepalive_probe(monkeypatch):
+    monkeypatch.setattr(
+        "core.llm.client._QWEN_INFLIGHT_CACHE_KEEPALIVE_INTERVAL_LIMIT", 0.1,
+        raising=False,
+    )
+    calls = []
+
+    def backend(payload):
+        calls.append(payload)
+        return iter(
+            [
+                {"choices": [{"index": 0, "delta": {"content": "done"}}]},
+                {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]},
+            ]
+        )
+
+    events = list(
+        LLMClient(config=_qwen_keepalive_config(), backend=backend).stream_events(
+            _qwen_keepalive_messages()
+        )
+    )
+    time.sleep(0.15)
+
+    assert [event.type for event in events] == ["text_delta", "done"]
+    assert len(calls) == 1
+
+
+def test_qwen_cache_keepalive_probe_failure_does_not_fail_main_stream(monkeypatch):
+    monkeypatch.setattr(
+        "core.llm.client._QWEN_INFLIGHT_CACHE_KEEPALIVE_INTERVAL_LIMIT", 0.05,
+        raising=False,
+    )
+    probe_seen = threading.Event()
+
+    def backend(payload):
+        if payload.get("stream") is False:
+            probe_seen.set()
+            raise RuntimeError("probe failed")
+
+        def chunks():
+            yield {"choices": [{"index": 0, "delta": {"content": "working"}}]}
+            assert probe_seen.wait(1.0)
+            yield {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}
+
+        return chunks()
+
+    events = list(
+        LLMClient(config=_qwen_keepalive_config(), backend=backend).stream_events(
+            _qwen_keepalive_messages()
+        )
+    )
+
+    assert [event.type for event in events] == ["text_delta", "done"]
+
+
+def test_qwen_cache_keepalive_does_not_queue_probe_after_stream_finishes(monkeypatch):
+    monkeypatch.setattr(
+        "core.llm.client._QWEN_INFLIGHT_CACHE_KEEPALIVE_INTERVAL_LIMIT", 0.05,
+        raising=False,
+    )
+    calls = []
+
+    def backend(payload):
+        calls.append(payload)
+
+        def chunks():
+            yield {"choices": [{"index": 0, "delta": {"content": "working"}}]}
+            time.sleep(0.08)
+            yield {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}
+
+        return chunks()
+
+    client = LLMClient(config=_qwen_keepalive_config(), backend=backend)
+    route_key = _llm_route_concurrency_key(
+        client.provider,
+        client.profile,
+        profile_id=client.profile_id,
+    )
+    gate = _llm_route_concurrency_gate(route_key, limit=2)
+    assert gate.acquire(blocking=False)
+    try:
+        events = list(client.stream_events(_qwen_keepalive_messages()))
+    finally:
+        gate.release()
+    time.sleep(0.08)
+
+    assert [event.type for event in events] == ["text_delta", "done"]
+    assert len(calls) == 1
 
 
 def test_route_gate_wait_is_bounded_and_raises_retryable_gate_timeout(monkeypatch):

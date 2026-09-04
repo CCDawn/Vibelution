@@ -85,8 +85,12 @@ function fallbackStageStatus(
   completed: number,
   total: number,
 ): ResearchWorkflowStageNavigatorStatus {
-  if (stage.stageTone === "attention" || nodes.some((node) => node.status === "blocked")) return "blocked";
-  if (stage.stageTone === "active" || nodes.some((node) => node.status === "current")) return "current";
+  if (nodes.some((node) => node.status === "blocked")) return "blocked";
+  if (
+    stage.stageTone === "active"
+    || stage.stageTone === "attention"
+    || nodes.some((node) => node.status === "current")
+  ) return "current";
   if (stage.stageTone === "done" || (total > 0 && completed >= total)) return "completed";
   return "upcoming";
 }
