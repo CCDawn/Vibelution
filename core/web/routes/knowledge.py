@@ -115,6 +115,13 @@ class RefinementProposalCreatePayload(BaseModel):
     summary: str = Field("", max_length=4000)
     content: str = Field("", max_length=40000)
     tags: list[str] = Field(default_factory=list, max_length=40)
+    requiredReviewerAgentId: str = Field("", max_length=160)
+    researchProjectId: str = Field("", max_length=160)
+    questionId: str = Field("", max_length=200)
+    sourceCollectionRunId: str = Field("", max_length=200)
+    sourceCandidateId: str = Field("", max_length=200)
+    sourceIdentityHash: str = Field("", max_length=160)
+    evidenceLevel: str = Field("", max_length=80)
 
 
 class IngestionPackageCreatePayload(BaseModel):
@@ -132,6 +139,13 @@ class IngestionPackageCreatePayload(BaseModel):
     proposalSummary: str = Field("", max_length=4000)
     proposalContent: str = Field("", max_length=40000)
     tags: list[str] = Field(default_factory=list, max_length=40)
+    requiredReviewerAgentId: str = Field("", max_length=160)
+    researchProjectId: str = Field("", max_length=160)
+    questionId: str = Field("", max_length=200)
+    sourceCollectionRunId: str = Field("", max_length=200)
+    sourceCandidateId: str = Field("", max_length=200)
+    sourceIdentityHash: str = Field("", max_length=160)
+    evidenceLevel: str = Field("", max_length=80)
 
 
 class RefinementProposalReviewPayload(BaseModel):
@@ -300,6 +314,9 @@ def knowledge_search(
     ownerType: str = "",
     ownerId: str = "",
     knowledgeBaseId: str = "",
+    researchProjectId: str = "",
+    questionId: str = "",
+    sourceCollectionRunId: str = "",
     tags: list[str] = Query(default=[]),
     sourceType: str = "",
     importanceLevel: str = "",
@@ -319,6 +336,9 @@ def knowledge_search(
             owner_type=ownerType,
             owner_id=ownerId,
             knowledge_base_id=knowledgeBaseId,
+            research_project_id=researchProjectId,
+            question_id=questionId,
+            source_collection_run_id=sourceCollectionRunId,
             tags=tags,
             source_type=sourceType,
             importance_level=importanceLevel,
@@ -349,6 +369,9 @@ def knowledge_rag_retrieve(
     ownerType: str = "",
     ownerId: str = "",
     knowledgeBaseId: str = "",
+    researchProjectId: str = "",
+    questionId: str = "",
+    sourceCollectionRunId: str = "",
     tags: list[str] = Query(default=[]),
     retrievalMode: str = "hybrid",
     provider: str = "local",
@@ -376,6 +399,9 @@ def knowledge_rag_retrieve(
             owner_type=ownerType,
             owner_id=ownerId,
             knowledge_base_id=knowledgeBaseId,
+            research_project_id=researchProjectId,
+            question_id=questionId,
+            source_collection_run_id=sourceCollectionRunId,
             tags=tags,
             retrieval_mode=retrievalMode,
             provider=provider,
@@ -772,6 +798,13 @@ def knowledge_refinement_proposal_create(knowledge_base_id: str, payload: Refine
             summary=payload.summary,
             content=payload.content,
             tags=payload.tags,
+            required_reviewer_agent_id=payload.requiredReviewerAgentId,
+            research_project_id=payload.researchProjectId,
+            question_id=payload.questionId,
+            source_collection_run_id=payload.sourceCollectionRunId,
+            source_candidate_id=payload.sourceCandidateId,
+            source_identity_hash=payload.sourceIdentityHash,
+            evidence_level=payload.evidenceLevel,
         )
     except TeamKnowledgePermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
@@ -804,6 +837,13 @@ def knowledge_ingestion_package_create(knowledge_base_id: str, payload: Ingestio
             proposal_summary=payload.proposalSummary,
             proposal_content=payload.proposalContent,
             tags=payload.tags,
+            required_reviewer_agent_id=payload.requiredReviewerAgentId,
+            research_project_id=payload.researchProjectId,
+            question_id=payload.questionId,
+            source_collection_run_id=payload.sourceCollectionRunId,
+            source_candidate_id=payload.sourceCandidateId,
+            source_identity_hash=payload.sourceIdentityHash,
+            evidence_level=payload.evidenceLevel,
         )
     except TeamKnowledgePermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc

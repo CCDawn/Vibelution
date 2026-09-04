@@ -71,4 +71,4 @@ MAX_LOCAL_SOURCE_COPY_BYTES = 50 * 1024 * 1024
 BM25_K1 = 1.5
 BM25_B = 0.75
 _SAFE_ID_FRAGMENT = re.compile(r"[^A-Za-z0-9_.-]+")
-_SEARCH_TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_.-]+|[\u4e00-\u9fff]")
+_SEARCH_TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_.-]+|[\u4e00-\u9fff]+")

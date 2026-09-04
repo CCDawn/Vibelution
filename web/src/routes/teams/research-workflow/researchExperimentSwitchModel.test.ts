@@ -99,8 +99,8 @@ describe("researchExperimentSwitchModel", () => {
           checkpoint: {
             runId: "run-3",
             status: "running",
-            currentNodeId: "protocol_design",
-            currentNodeLabel: "协议设计",
+            currentNodeId: "hypothesis_design",
+            currentNodeLabel: "假设设计",
             completedCount: 6,
             totalSteps: 16,
             resumable: true,
@@ -119,7 +119,8 @@ describe("researchExperimentSwitchModel", () => {
     expect(checkpointed?.runId).toBe("run-96");
 
     const running = options.find((item) => item.questionId === "SCI-003");
-    expect(running?.description).toContain("协议设计");
+    expect(running?.description).toContain("假说设计");
+    expect(running?.description).not.toContain("假设设计");
     expect(running?.description).toContain("6/16");
     expect(running?.description).toContain("运行中");
   });

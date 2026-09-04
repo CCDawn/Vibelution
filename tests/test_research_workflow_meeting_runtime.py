@@ -65,7 +65,7 @@ _ROLES = (
 
 
 def test_meeting_discussion_executor_default_and_env_override(monkeypatch) -> None:
-    """The driver pool defaults to 4; the env overrides it with a floor of 1.
+    """The driver pool is env-tunable within the hard 1..4 contract.
 
     One executor thread drives one active meeting round end-to-end. The
     four-thread pool is the outer hypothesis admission boundary, and the
@@ -83,7 +83,7 @@ def test_meeting_discussion_executor_default_and_env_override(monkeypatch) -> No
     )
 
     monkeypatch.setenv("VIBELUTION_MEETING_DISCUSSION_MAX_WORKERS", "16")
-    assert meeting_runtime._meeting_discussion_max_workers() == 16
+    assert meeting_runtime._meeting_discussion_max_workers() == 4
     monkeypatch.setenv("VIBELUTION_MEETING_DISCUSSION_MAX_WORKERS", "2")
     assert meeting_runtime._meeting_discussion_max_workers() == 2
     monkeypatch.setenv("VIBELUTION_MEETING_DISCUSSION_MAX_WORKERS", "0")

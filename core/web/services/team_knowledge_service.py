@@ -666,6 +666,13 @@ def create_refinement_proposal(
     summary: str = "",
     content: str,
     tags: list[str] | None = None,
+    required_reviewer_agent_id: str = "",
+    research_project_id: str = "",
+    question_id: str = "",
+    source_collection_run_id: str = "",
+    source_candidate_id: str = "",
+    source_identity_hash: str = "",
+    evidence_level: str = "",
 ) -> dict[str, Any]:
     owner, base = _require_base_with_owner(knowledge_base_id)
     actor_agent_id = str(proposed_by_agent_id or "").strip()
@@ -710,6 +717,13 @@ def create_refinement_proposal(
         "sourceArtifactIds": artifact_ids,
         "centralSourceIds": central_source_ids,
         "proposedByAgentId": actor_agent_id,
+        "requiredReviewerAgentId": trim_lines(required_reviewer_agent_id or "", max_lines=1).strip(),
+        "researchProjectId": trim_lines(research_project_id or "", max_lines=1).strip(),
+        "questionId": trim_lines(question_id or "", max_lines=1).strip(),
+        "sourceCollectionRunId": trim_lines(source_collection_run_id or "", max_lines=1).strip(),
+        "sourceCandidateId": trim_lines(source_candidate_id or "", max_lines=1).strip(),
+        "sourceIdentityHash": trim_lines(source_identity_hash or "", max_lines=1).strip(),
+        "evidenceLevel": trim_lines(evidence_level or "", max_lines=1).strip(),
         "status": "pending",
         "title": normalized_title,
         "summary": trim_lines(summary or "", max_lines=6).strip(),
@@ -753,6 +767,13 @@ def create_ingestion_package(
     proposal_summary: str = "",
     proposal_content: str = "",
     tags: list[str] | None = None,
+    required_reviewer_agent_id: str = "",
+    research_project_id: str = "",
+    question_id: str = "",
+    source_collection_run_id: str = "",
+    source_candidate_id: str = "",
+    source_identity_hash: str = "",
+    evidence_level: str = "",
 ) -> dict[str, Any]:
     """Create one source artifact and one pending proposal from a semi-automatic adapter."""
 
@@ -789,6 +810,13 @@ def create_ingestion_package(
         summary=normalized_proposal_summary,
         content=normalized_content,
         tags=tags,
+        required_reviewer_agent_id=required_reviewer_agent_id,
+        research_project_id=research_project_id,
+        question_id=question_id,
+        source_collection_run_id=source_collection_run_id,
+        source_candidate_id=source_candidate_id,
+        source_identity_hash=source_identity_hash,
+        evidence_level=evidence_level,
     )
     payload = {
         "schemaVersion": SCHEMA_VERSION,
@@ -838,6 +866,12 @@ def review_refinement_proposal(
             raise TeamKnowledgeNotFoundError("Knowledge proposal not found.")
         if str(proposal.get("status") or "") != "pending":
             raise TeamKnowledgeError("Only pending proposals can be reviewed.")
+        required_reviewer_id = str(proposal.get("requiredReviewerAgentId") or "").strip()
+        proposer_id = str(proposal.get("proposedByAgentId") or "").strip()
+        if required_reviewer_id and reviewer_id != required_reviewer_id:
+            raise TeamKnowledgePermissionError("This proposal must be reviewed by its designated reviewer.")
+        if required_reviewer_id and proposer_id and reviewer_id == proposer_id:
+            raise TeamKnowledgePermissionError("A designated reviewer cannot review their own proposal.")
         now = utc_now_iso()
         proposal["status"] = "rejected" if normalized_status == "rejected" else "applied"
         proposal["updatedAt"] = now
@@ -1688,6 +1722,9 @@ def search_knowledge_items(
     owner_type: str = "",
     owner_id: str = "",
     knowledge_base_id: str = "",
+    research_project_id: str = "",
+    question_id: str = "",
+    source_collection_run_id: str = "",
     tags: list[str] | None = None,
     source_type: str = "",
     importance_level: str = "",
@@ -1707,6 +1744,9 @@ def search_knowledge_items(
     normalized_owner_type = normalized_owner_type or scoped_owner_type
     normalized_owner_id = normalized_owner_id or scoped_owner_id
     normalized_tags = {item.lower() for item in _unique_strings(tags or [])}
+    normalized_research_project_id = str(research_project_id or "").strip()
+    normalized_question_id = str(question_id or "").strip()
+    normalized_source_collection_run_id = str(source_collection_run_id or "").strip()
     normalized_source_type = str(source_type or "").strip()
     if normalized_source_type and normalized_source_type not in SOURCE_TYPES:
         raise TeamKnowledgeError(f"Unsupported source type: {source_type}")
@@ -1776,6 +1816,9 @@ def search_knowledge_items(
                     created_to=created_to,
                     artifacts_by_id=artifacts_by_id,
                     search_mode=normalized_search_mode,
+                    research_project_id=normalized_research_project_id,
+                    question_id=normalized_question_id,
+                    source_collection_run_id=normalized_source_collection_run_id,
                 ):
                     continue
                 view = _search_item_view(item, base, owner, artifacts_by_id)
@@ -1830,6 +1873,9 @@ def search_knowledge_items(
             "ownerType": normalized_owner_type,
             "ownerId": normalized_owner_id,
             "knowledgeBaseId": normalized_base_id,
+            "researchProjectId": normalized_research_project_id,
+            "questionId": normalized_question_id,
+            "sourceCollectionRunId": normalized_source_collection_run_id,
             "tags": sorted(normalized_tags),
             "sourceType": normalized_source_type,
             "importanceLevel": normalized_importance,
@@ -2868,6 +2914,14 @@ def _search_item_view(
         "batchId": str(item.get("batchId") or ""),
         "sourceArtifactIds": [str(value) for value in list(item.get("sourceArtifactIds") or [])[:12] if str(value or "").strip()],
         "centralSourceIds": [str(value) for value in list(item.get("centralSourceIds") or [])[:12] if str(value or "").strip()],
+        "lifecycleStatus": str(item.get("lifecycleStatus") or ""),
+        "requiredReviewerAgentId": str(item.get("requiredReviewerAgentId") or ""),
+        "researchProjectId": str(item.get("researchProjectId") or ""),
+        "questionId": str(item.get("questionId") or ""),
+        "sourceCollectionRunId": str(item.get("sourceCollectionRunId") or ""),
+        "sourceCandidateId": str(item.get("sourceCandidateId") or ""),
+        "sourceIdentityHash": str(item.get("sourceIdentityHash") or ""),
+        "evidenceLevel": str(item.get("evidenceLevel") or ""),
         "sourceTypes": sorted({str(source.get("sourceType") or "") for source in source_artifacts if str(source.get("sourceType") or "")}),
         "localCopies": local_copies,
         "sourceSummaries": [
@@ -3133,6 +3187,7 @@ def _item_from_proposal(
     now: str,
 ) -> dict[str, Any]:
     owner = _coerce_owner_context(owner_value)
+    candidate_lifecycle_tags = {"pending-review", "pending_review", "candidate-only", "candidate_only"}
     return {
         "knowledgeItemId": _new_event_id("kitem"),
         "ownerType": owner["ownerType"],
@@ -3146,7 +3201,19 @@ def _item_from_proposal(
         "title": proposal.get("title") or "",
         "summary": proposal.get("summary") or "",
         "content": proposal.get("content") or "",
-        "tags": list(proposal.get("tags") or []),
+        "tags": [
+            str(tag)
+            for tag in list(proposal.get("tags") or [])
+            if str(tag or "").strip().lower() not in candidate_lifecycle_tags
+        ],
+        "lifecycleStatus": "applied",
+        "requiredReviewerAgentId": str(proposal.get("requiredReviewerAgentId") or "").strip(),
+        "researchProjectId": str(proposal.get("researchProjectId") or "").strip(),
+        "questionId": str(proposal.get("questionId") or "").strip(),
+        "sourceCollectionRunId": str(proposal.get("sourceCollectionRunId") or "").strip(),
+        "sourceCandidateId": str(proposal.get("sourceCandidateId") or "").strip(),
+        "sourceIdentityHash": str(proposal.get("sourceIdentityHash") or "").strip(),
+        "evidenceLevel": str(proposal.get("evidenceLevel") or "").strip(),
         "importanceLevel": "medium",
         "confidence": 0.7,
         "stability": "evolving",
