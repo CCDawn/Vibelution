@@ -10340,7 +10340,28 @@ def _build_round_candidates(
     )
     question_id = str(meeting_round.get("question") or "").strip()
     detail = question_launch._approved_details(team_id).get(question_id.upper())
-    if detail is None:
+    artifact_by_id: dict[str, Mapping[str, Any]] = {}
+    if detail is not None:
+        output = detail.get("output") if isinstance(detail.get("output"), Mapping) else {}
+        hypotheses = [
+            item
+            for item in list(output.get("hypotheses") or [])
+            if isinstance(item, Mapping)
+        ]
+        # Approved artifacts remain authoritative for identities they actually
+        # contain. A later run may legitimately select newly generated ledger
+        # candidates for the same question, so an older approved result must
+        # not erase those identities by turning them into empty placeholders.
+        artifact_by_id = {
+            str(item.get("hypothesis_id") or "").strip(): item
+            for item in hypotheses
+        }
+    missing_candidate_ids = [
+        candidate_id
+        for candidate_id in normalized_candidate_ids
+        if candidate_id not in artifact_by_id
+    ]
+    if detail is None or missing_candidate_ids:
         resolved_workflow_run_id = str(
             workflow_run_id or _meeting_workflow_run_id(meeting_round)
         ).strip()
@@ -10349,35 +10370,36 @@ def _build_round_candidates(
             question_id=question_id,
             workflow_run_id=resolved_workflow_run_id,
         )["candidates"]
-        artifact_by_id = {
-            str(item.get("candidateId") or "").strip(): {
-                "hypothesis_id": str(item.get("candidateId") or "").strip(),
-                "statement": str(item.get("statement") or item.get("claim") or "").strip(),
-                "mechanism": str(item.get("rationale") or "").strip(),
-                "novelty_basis": str(item.get("differenceFromAlternatives") or "").strip(),
-                "candidateAuthority": str(item.get("candidateAuthority") or "").strip(),
-                "lineageRefs": _normalized_str_list(item.get("lineageRefs")),
-                "testablePrediction": str(item.get("testablePrediction") or "").strip(),
-                "falsifier": str(item.get("falsifier") or "").strip(),
-                "axisProfile": (
-                    dict(item.get("axisProfile"))
-                    if isinstance(item.get("axisProfile"), Mapping)
-                    else {}
-                ),
-            }
-            for item in ledger_candidates
-            if isinstance(item, Mapping)
-        }
-    else:
-        output = detail.get("output") if isinstance(detail.get("output"), Mapping) else {}
-        hypotheses = [
-            item
-            for item in list(output.get("hypotheses") or [])
-            if isinstance(item, Mapping)
-        ]
-        artifact_by_id = {
-            str(item.get("hypothesis_id") or "").strip(): item for item in hypotheses
-        }
+        for item in ledger_candidates:
+            if not isinstance(item, Mapping):
+                continue
+            candidate_id = str(item.get("candidateId") or "").strip()
+            artifact_by_id.setdefault(
+                candidate_id,
+                {
+                    "hypothesis_id": candidate_id,
+                    "statement": str(
+                        item.get("statement") or item.get("claim") or ""
+                    ).strip(),
+                    "mechanism": str(item.get("rationale") or "").strip(),
+                    "novelty_basis": str(
+                        item.get("differenceFromAlternatives") or ""
+                    ).strip(),
+                    "candidateAuthority": str(
+                        item.get("candidateAuthority") or ""
+                    ).strip(),
+                    "lineageRefs": _normalized_str_list(item.get("lineageRefs")),
+                    "testablePrediction": str(
+                        item.get("testablePrediction") or ""
+                    ).strip(),
+                    "falsifier": str(item.get("falsifier") or "").strip(),
+                    "axisProfile": (
+                        dict(item.get("axisProfile"))
+                        if isinstance(item.get("axisProfile"), Mapping)
+                        else {}
+                    ),
+                },
+            )
     candidates: list[dict[str, Any]] = []
     for candidate_id in normalized_candidate_ids:
         artifact = artifact_by_id.get(candidate_id) or {}
