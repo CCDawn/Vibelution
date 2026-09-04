@@ -8,6 +8,7 @@ import type {
   ChatRoomDetail,
   ChatRoomMessage,
   ChatRoomParticipant,
+  ChatRoomSpeakerProgress,
   ProjectAgentBusEvent,
   ProjectAgentBusTimeline,
 } from "../../api/types";
@@ -18,7 +19,7 @@ import styles from "./ChatGroupCenterSurface.styles";
 import { ChatGroupMessageBody, ChatMentionedText } from "./ChatGroupMessagePresentation";
 import { ChatMessageChromeHeader } from "./ChatMessageChromeHeader";
 import { groupConsecutiveBy } from "./chatRoutePresentation";
-import type { GroupSpeakerStreamEntry, GroupSpeakerStreamMap } from "./useGroupRoomStream";
+import type { GroupSpeakerProgressMap, GroupSpeakerStreamEntry, GroupSpeakerStreamMap } from "./useGroupRoomStream";
 
 // The backend only publishes a full snapshot when a speaker finishes, so the
 // derived "typing" bubble can outlive a hung round forever. After this long
@@ -81,6 +82,8 @@ export type ChatGroupCenterSurfaceProps = {
   groupStreamConnected?: boolean;
   /** Live speaker streaming buffers keyed by roundId then participantId; drives the streaming bubble. */
   groupSpeakerStreams?: GroupSpeakerStreamMap;
+  /** Live per-speaker lifecycle projection carried by the same room stream. */
+  groupSpeakerProgress?: GroupSpeakerProgressMap;
   startGroupRoundPending: boolean;
   stopGroupRoundPending: boolean;
   formatTime: (value: string) => string;
@@ -119,6 +122,7 @@ function GroupRoundsTimeline({
   chatMentionTargets,
   groupStreamConnected,
   groupSpeakerStreams,
+  groupSpeakerProgress,
   onOpenMentionTarget,
   onToggleExpandedGroupMessage,
 }: {
@@ -136,19 +140,25 @@ function GroupRoundsTimeline({
   chatMentionTargets: ChatMentionTarget[];
   groupStreamConnected?: boolean;
   groupSpeakerStreams?: GroupSpeakerStreamMap;
+  groupSpeakerProgress?: GroupSpeakerProgressMap;
   onOpenMentionTarget: (target: ChatMentionTarget) => void;
   onToggleExpandedGroupMessage: (messageId: string) => void;
 }) {
-  const hasPendingSpeaker = rounds.some((round) => {
+  const hasRunningSpeaker = rounds.some((round) => {
     if (String(round.status ?? "").trim().toLowerCase() !== "running") return false;
     const delivered = new Set(
       (round.messages ?? []).map((message) => String(message.participantId ?? "").trim()),
     );
-    return (round.speakerOrder ?? []).some(
-      (participantId) => !delivered.has(String(participantId ?? "").trim()),
-    );
+    const pendingIds = (round.speakerOrder ?? [])
+      .map((participantId) => String(participantId ?? "").trim())
+      .filter((participantId) => participantId && !delivered.has(participantId));
+    return pendingIds.some((participantId, index) => {
+      const progress = groupSpeakerProgress?.[round.roundId]?.[participantId]
+        ?? round.speakerProgress?.find((item) => item.participantId === participantId);
+      return progress ? progress.state === "running" : index === 0;
+    });
   });
-  const stalenessNowMs = useStalenessNow(hasPendingSpeaker);
+  const stalenessNowMs = useStalenessNow(hasRunningSpeaker);
   return (
     <>
       {rounds.map((round, roundIndex) => {
@@ -156,30 +166,9 @@ function GroupRoundsTimeline({
         const deliveredParticipantIds = new Set(
           (round.messages ?? []).map((message) => String(message.participantId ?? "").trim()),
         );
-        const nextSpeakerId = (round.speakerOrder ?? []).find(
-          (participantId) => !deliveredParticipantIds.has(String(participantId ?? "").trim()),
-        );
-        const nextParticipant = nextSpeakerId ? activeGroupParticipantById.get(nextSpeakerId) : undefined;
-        const roundUpdatedAtMs = Date.parse(round.updatedAt || round.startedAt || "");
-        // The typing-stale clock considers the last streaming delta arrival,
-        // not just the round snapshot: a speaker that keeps producing deltas is
-        // alive even while round.updatedAt stays frozen.
-        const speakerStream: GroupSpeakerStreamEntry | undefined = nextSpeakerId
-          ? groupSpeakerStreams?.[String(round.roundId || "")]?.[String(nextSpeakerId || "").trim()]
-          : undefined;
-        const lastDeltaAtMs = speakerStream?.lastDeltaAtMs ?? 0;
-        const hasRoundUpdatedAt = Number.isFinite(roundUpdatedAtMs);
-        const lastActivityMs = Math.max(hasRoundUpdatedAt ? roundUpdatedAtMs : 0, lastDeltaAtMs);
-        const hasActivityClock = hasRoundUpdatedAt || lastDeltaAtMs > 0;
-        // A round whose last activity (snapshot or delta) has been frozen past
-        // the threshold is no longer "typing" — the backend is slow or hung.
-        // Unparsable timestamps with no delta fallback conservatively count as
-        // stale so typing never sticks forever.
-        const typingStale = roundRunning && nextParticipant
-          ? (!hasActivityClock || stalenessNowMs - lastActivityMs > GROUP_TYPING_STALE_AFTER_MS)
-          : false;
-        const streamText = typeof speakerStream?.content === "string" ? speakerStream.content : "";
-        const hasStreamText = streamText.trim().length > 0;
+        const pendingSpeakerIds = (round.speakerOrder ?? [])
+          .map((participantId) => String(participantId ?? "").trim())
+          .filter((participantId) => participantId && !deliveredParticipantIds.has(participantId));
         return (
           <section key={round.roundId} className={styles.groupRoundBlock}>
             <div className={styles.groupRoundDivider}>
@@ -280,82 +269,124 @@ function GroupRoundsTimeline({
                   })}
                 </div>
               ))}
-              {roundRunning && nextParticipant ? (
-                <article className={`${styles.groupBubbleRow} ${styles.groupBubbleRowPending}`}>
-                  {(() => {
-                    const nextIdentity = groupParticipantIdentity(nextParticipant);
-                    const staleCopy = groupStreamConnected === false
-                      ? (lang === "zh"
-                        ? "实时连接已断开，正在重连，已暂停输入状态显示。"
-                        : "Live connection lost; reconnecting. Typing status paused.")
-                      : (lang === "zh"
-                        ? "该发言已等待较久，仍在等待后端响应…"
-                        : "This speaker has been waiting a while; still waiting for the backend…");
-                    const trailingLabel = typingStale
+              {roundRunning ? pendingSpeakerIds.map((participantId, index) => {
+                const participant = activeGroupParticipantById.get(participantId);
+                if (!participant) return null;
+                const progress: ChatRoomSpeakerProgress = groupSpeakerProgress?.[round.roundId]?.[participantId]
+                  ?? round.speakerProgress?.find((item) => item.participantId === participantId)
+                  ?? {
+                    participantId,
+                    sessionId: participant.sessionId,
+                    state: index === 0 ? "running" : "queued",
+                    status: "",
+                    updatedAt: round.updatedAt || round.startedAt || "",
+                  };
+                const speakerStream: GroupSpeakerStreamEntry | undefined =
+                  groupSpeakerStreams?.[String(round.roundId || "")]?.[participantId];
+                const progressUpdatedAtMs = Date.parse(progress.updatedAt || "");
+                const lastDeltaAtMs = speakerStream?.lastDeltaAtMs ?? 0;
+                const hasProgressUpdatedAt = Number.isFinite(progressUpdatedAtMs);
+                const lastActivityMs = Math.max(
+                  hasProgressUpdatedAt ? progressUpdatedAtMs : 0,
+                  lastDeltaAtMs,
+                );
+                const hasActivityClock = hasProgressUpdatedAt || lastDeltaAtMs > 0;
+                const typingStale = progress.state === "running"
+                  && (!hasActivityClock || stalenessNowMs - lastActivityMs > GROUP_TYPING_STALE_AFTER_MS);
+                const streamText = progress.state === "running" && typeof speakerStream?.content === "string"
+                  ? speakerStream.content
+                  : "";
+                const hasStreamText = streamText.trim().length > 0;
+                const identity = groupParticipantIdentity(participant);
+                const staleCopy = groupStreamConnected === false
+                  ? (lang === "zh"
+                    ? "实时连接已断开，正在重连，已暂停输入状态显示。"
+                    : "Live connection lost; reconnecting. Typing status paused.")
+                  : (lang === "zh"
+                    ? "该发言已等待较久，仍在等待后端响应…"
+                    : "This speaker has been waiting a while; still waiting for the backend…");
+                const settledLabel = progress.status === "failed"
+                  ? (lang === "zh" ? "发言失败，等待前序发言" : "failed; waiting for earlier speaker")
+                  : progress.status === "blocked"
+                    ? (lang === "zh" ? "已阻止，等待前序发言" : "blocked; waiting for earlier speaker")
+                    : progress.status === "stopped"
+                      ? (lang === "zh" ? "已停止，等待前序发言" : "stopped; waiting for earlier speaker")
+                      : progress.status === "partial"
+                        ? (lang === "zh" ? "部分完成，等待前序发言" : "partially complete; waiting for earlier speaker")
+                        : (lang === "zh" ? "已完成，等待前序发言" : "complete; waiting for earlier speaker");
+                const trailingLabel = progress.state === "settled"
+                  ? settledLabel
+                  : progress.state === "queued"
+                    ? (lang === "zh" ? "等待发言" : "queued")
+                    : typingStale
                       ? (lang === "zh" ? "等待中" : "waiting")
                       : (lang === "zh" ? "正在输入" : "typing");
-                    return (
-                      <>
-                        <div className={styles.groupStreamIdentity} data-testid="group-stream-identity">
-                          {renderAgentAvatar(
-                            styles.groupBubbleAvatar,
-                            nextIdentity.avatarImageUrl || undefined,
-                            avatarInitials(nextParticipant.agentCode, nextIdentity.name, "AI"),
-                          )}
-                          <ChatMessageChromeHeader
-                            className={styles.groupBubbleHeader}
-                            density="bubble"
-                            title={(
-                              <strong className={styles.groupStreamName} title={nextIdentity.fullIdentityLabel}>
-                                {nextIdentity.identityLabel}
-                              </strong>
-                            )}
-                            trailing={<span>{trailingLabel}</span>}
-                          />
-                        </div>
-                        {hasStreamText ? (
-                          <div className={styles.groupStreamCopy}>
-                            <ChatGroupMessageBody
-                              message={{
-                                messageId: `streaming:${round.roundId}:${String(nextSpeakerId || "")}`,
-                                participantId: String(nextSpeakerId || ""),
-                                sessionId: speakerStream?.sessionId || "",
-                                speakerCode: nextParticipant.agentCode,
-                                speakerTitle: "",
-                                status: "completed",
-                                content: streamText,
-                                summary: "",
-                                timestamp: "",
-                              }}
-                              identityName={nextIdentity.name}
-                              lang={lang}
-                              expandedMessageIds={expandedGroupMessageIds}
-                              mentionTargets={chatMentionTargets}
-                              onOpenMentionTarget={onOpenMentionTarget}
-                              onToggleExpanded={onToggleExpandedGroupMessage}
-                            />
-                          </div>
-                        ) : typingStale ? (
-                          <div className={styles.groupStreamCopy}>
-                            <p className={styles.groupTypingStaleNote} role="status">{staleCopy}</p>
-                          </div>
-                        ) : (
-                          <div className={`${styles.groupStreamCopy} ${styles.groupTypingDots}`} aria-label={lang === "zh" ? "正在输入" : "Typing"}>
-                            <span />
-                            <span />
-                            <span />
-                          </div>
+                return (
+                  <article
+                    key={`progress:${round.roundId}:${participantId}`}
+                    className={`${styles.groupBubbleRow} ${styles.groupBubbleRowPending}`}
+                  >
+                    <div className={styles.groupStreamIdentity} data-testid="group-stream-identity">
+                      {renderAgentAvatar(
+                        styles.groupBubbleAvatar,
+                        identity.avatarImageUrl || undefined,
+                        avatarInitials(participant.agentCode, identity.name, "AI"),
+                      )}
+                      <ChatMessageChromeHeader
+                        className={styles.groupBubbleHeader}
+                        density="bubble"
+                        title={(
+                          <strong className={styles.groupStreamName} title={identity.fullIdentityLabel}>
+                            {identity.identityLabel}
+                          </strong>
                         )}
-                        {hasStreamText && typingStale ? (
-                          <div className={styles.groupStreamCopy}>
-                            <p className={styles.groupTypingStaleNote} role="status">{staleCopy}</p>
-                          </div>
-                        ) : null}
-                      </>
-                    );
-                  })()}
-                </article>
-              ) : null}
+                        trailing={<span>{trailingLabel}</span>}
+                      />
+                    </div>
+                    {hasStreamText ? (
+                      <div className={styles.groupStreamCopy}>
+                        <ChatGroupMessageBody
+                          message={{
+                            messageId: `streaming:${round.roundId}:${participantId}`,
+                            participantId,
+                            sessionId: speakerStream?.sessionId || "",
+                            speakerCode: participant.agentCode,
+                            speakerTitle: "",
+                            status: "completed",
+                            content: streamText,
+                            summary: "",
+                            timestamp: "",
+                          }}
+                          identityName={identity.name}
+                          lang={lang}
+                          expandedMessageIds={expandedGroupMessageIds}
+                          mentionTargets={chatMentionTargets}
+                          onOpenMentionTarget={onOpenMentionTarget}
+                          onToggleExpanded={onToggleExpandedGroupMessage}
+                        />
+                      </div>
+                    ) : progress.state === "running" && typingStale ? (
+                      <div className={styles.groupStreamCopy}>
+                        <p className={styles.groupTypingStaleNote} role="status">{staleCopy}</p>
+                      </div>
+                    ) : progress.state === "running" ? (
+                      <div
+                        className={`${styles.groupStreamCopy} ${styles.groupTypingDots}`}
+                        aria-label={lang === "zh" ? "正在输入" : "Typing"}
+                      >
+                        <span />
+                        <span />
+                        <span />
+                      </div>
+                    ) : null}
+                    {hasStreamText && typingStale ? (
+                      <div className={styles.groupStreamCopy}>
+                        <p className={styles.groupTypingStaleNote} role="status">{staleCopy}</p>
+                      </div>
+                    ) : null}
+                  </article>
+                );
+              }) : null}
             </div>
             {round.summary && !roundRunning ? (
               <article className={styles.groupRoundSummary}>
@@ -403,6 +434,7 @@ export function ChatGroupCenterSurface({
   groupRoomRefreshError,
   groupStreamConnected,
   groupSpeakerStreams,
+  groupSpeakerProgress,
   startGroupRoundPending,
   stopGroupRoundPending,
   formatTime,
@@ -606,6 +638,7 @@ export function ChatGroupCenterSurface({
               chatMentionTargets={chatMentionTargets}
               groupStreamConnected={groupStreamConnected}
               groupSpeakerStreams={groupSpeakerStreams}
+              groupSpeakerProgress={groupSpeakerProgress}
               onOpenMentionTarget={onOpenMentionTarget}
               onToggleExpandedGroupMessage={onToggleExpandedGroupMessage}
             />
@@ -710,6 +743,7 @@ export function ChatGroupCenterSurface({
             chatMentionTargets={chatMentionTargets}
             groupStreamConnected={groupStreamConnected}
             groupSpeakerStreams={groupSpeakerStreams}
+            groupSpeakerProgress={groupSpeakerProgress}
             onOpenMentionTarget={onOpenMentionTarget}
             onToggleExpandedGroupMessage={onToggleExpandedGroupMessage}
           />

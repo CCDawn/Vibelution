@@ -4,7 +4,9 @@ import { postBrowserTelemetry } from "../../app/browserTelemetry";
 import { isFetchAbortError } from "../../api/chat";
 import type {
   ChatRoomDetail,
+  ChatRoomSpeakerProgress,
   ChatRoomSpeakerDeltaEvent,
+  ChatRoomSpeakerStateEvent,
   ChatRoomStreamEvent,
 } from "../../api/types";
 import { consumeChatRoomEventStream } from "./chatRoomEventStream";
@@ -31,6 +33,9 @@ export type GroupSpeakerStreamEntry = {
 /** Streaming buffers keyed by roundId then participantId. */
 export type GroupSpeakerStreamMap = Record<string, Record<string, GroupSpeakerStreamEntry>>;
 
+/** Latest lifecycle projection keyed by roundId then participantId. */
+export type GroupSpeakerProgressMap = Record<string, Record<string, ChatRoomSpeakerProgress>>;
+
 // Low-latency publish cadence for the streaming buffer: well below the 350ms
 // detail coalescing, still batching delta bursts into one React commit.
 const SPEAKER_STREAM_FLUSH_DELAY_MS = 50;
@@ -46,9 +51,11 @@ export function useGroupRoomStream({
 }: UseGroupRoomStreamOptions): {
   groupStreamConnected: boolean;
   groupSpeakerStreams: GroupSpeakerStreamMap;
+  groupSpeakerProgress: GroupSpeakerProgressMap;
 } {
   const [groupStreamConnected, setGroupStreamConnected] = useState(false);
   const [groupSpeakerStreams, setGroupSpeakerStreams] = useState<GroupSpeakerStreamMap>({});
+  const [groupSpeakerProgress, setGroupSpeakerProgress] = useState<GroupSpeakerProgressMap>({});
   const groupStreamErrorLoggedRef = useRef<Record<string, boolean>>({});
   const groupStreamPayloadErrorLoggedRef = useRef<Record<string, boolean>>({});
 
@@ -64,10 +71,9 @@ export function useGroupRoomStream({
       setGroupStreamConnected(false);
       return;
     }
-    // The backend publishes a full room detail snapshot on every speaker state
-    // transition; coalesce bursts the same way the direct session stream does
-    // (350ms) so a running round does not parse+write the whole room cache per
-    // event.
+    // Full room snapshots remain authoritative and are coalesced like the
+    // direct session stream. Per-speaker lifecycle events use this same
+    // connection but update their small projection immediately.
     const MIN_APPLY_INTERVAL_MS = 350;
     const RECONNECT_DELAY_MS = 1_000;
     // Liveness watchdog: the backend emits a keep-alive comment every 15s, so
@@ -84,8 +90,54 @@ export function useGroupRoomStream({
     // published to React state on a 50ms trailing-edge schedule, mirroring the
     // direct-chat assistant delta enqueue+drain pattern at a lighter weight.
     let speakerStreams: GroupSpeakerStreamMap = {};
+    let speakerProgress: GroupSpeakerProgressMap = {};
     let speakerStreamFlushTimer: number | null = null;
     let speakerDeltaTelemetryLogged = false;
+
+    function clearSpeakerProgress() {
+      speakerProgress = {};
+      setGroupSpeakerProgress((previous) => (Object.keys(previous).length ? {} : previous));
+    }
+
+    function replaceSpeakerProgressFromDetail(detail: ChatRoomDetail) {
+      const next: GroupSpeakerProgressMap = {};
+      for (const round of detail.rounds ?? []) {
+        const roundId = String(round.roundId || "").trim();
+        if (!roundId) continue;
+        for (const item of round.speakerProgress ?? []) {
+          const participantId = String(item.participantId || "").trim();
+          if (!participantId) continue;
+          next[roundId] = {
+            ...next[roundId],
+            [participantId]: { ...item, participantId },
+          };
+        }
+      }
+      speakerProgress = next;
+      setGroupSpeakerProgress(next);
+    }
+
+    function handleSpeakerState(payload: ChatRoomSpeakerStateEvent) {
+      const roundId = String(payload.roundId || "").trim();
+      const participantId = String(payload.participantId || "").trim();
+      if (!roundId || !participantId || !["queued", "running", "settled"].includes(payload.state)) {
+        return;
+      }
+      speakerProgress = {
+        ...speakerProgress,
+        [roundId]: {
+          ...speakerProgress[roundId],
+          [participantId]: {
+            participantId,
+            sessionId: String(payload.sessionId || ""),
+            state: payload.state,
+            status: payload.status,
+            updatedAt: String(payload.updatedAt || ""),
+          },
+        },
+      };
+      setGroupSpeakerProgress(speakerProgress);
+    }
 
     function clearSpeakerStreams() {
       if (speakerStreamFlushTimer !== null) {
@@ -267,6 +319,7 @@ export function useGroupRoomStream({
         // Fresh connection: drop every streaming buffer instead of replaying.
         // content is cumulative, so the next delta frames rebuild the text.
         clearSpeakerStreams();
+        clearSpeakerProgress();
         setGroupStreamConnected(true);
         feedStreamLivenessWatchdog();
         groupStreamErrorLoggedRef.current[streamRoomId] = false;
@@ -325,6 +378,7 @@ export function useGroupRoomStream({
       // The snapshot is authoritative: it overrides any streaming buffer on
       // arrival, so delivered messages can never keep a stale streaming tail.
       clearSpeakerStreams();
+      replaceSpeakerProgressFromDetail(payload.detail);
       setGroupStreamConnected(true);
       scheduleChatRoomDetail(payload.detail);
     }
@@ -344,6 +398,19 @@ export function useGroupRoomStream({
         return;
       }
       handleSpeakerDelta(payload);
+    }
+
+    function handleSpeakerStatePayload(data: string) {
+      let payload: ChatRoomSpeakerStateEvent;
+      try {
+        payload = JSON.parse(data) as ChatRoomSpeakerStateEvent;
+      } catch {
+        return;
+      }
+      if (payload?.type !== "chat_room_speaker_state" || payload.roomId !== streamRoomId) {
+        return;
+      }
+      handleSpeakerState(payload);
     }
 
     function scheduleReconnect() {
@@ -371,6 +438,8 @@ export function useGroupRoomStream({
               handleChatRoomDetail(frame.data);
             } else if (frame.event === "chat_room_speaker_delta") {
               handleSpeakerDeltaPayload(frame.data);
+            } else if (frame.event === "chat_room_speaker_state") {
+              handleSpeakerStatePayload(frame.data);
             }
           },
         });
@@ -399,6 +468,7 @@ export function useGroupRoomStream({
       // Route switch/unmount: the buffers belong to the closed stream and must
       // not leak into the next room or reconnection cycle.
       clearSpeakerStreams();
+      clearSpeakerProgress();
       setGroupStreamConnected(false);
       clearStreamLivenessWatchdog();
       if (reconnectTimer !== null) {
@@ -418,5 +488,5 @@ export function useGroupRoomStream({
     };
   }, [activeGroupRoomId, groupStreamShouldConnect, syncChatRoomDetail]);
 
-  return { groupStreamConnected, groupSpeakerStreams };
+  return { groupStreamConnected, groupSpeakerStreams, groupSpeakerProgress };
 }

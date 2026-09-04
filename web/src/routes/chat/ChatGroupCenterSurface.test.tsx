@@ -595,4 +595,84 @@ describe("ChatGroupCenterSurface hand-test substitutes", () => {
       expect(html).not.toContain("该发言已等待较久");
     });
   });
+
+  describe("parallel speaker progress", () => {
+    const participants = [
+      {
+        participantId: "p1",
+        kind: "session_agent",
+        agentId: "a1",
+        agentCode: "A01",
+        sessionId: "s1",
+        title: "先发言者",
+        enabled: true,
+        status: "ready",
+      },
+      {
+        participantId: "p2",
+        kind: "session_agent",
+        agentId: "a2",
+        agentCode: "A02",
+        sessionId: "s2",
+        title: "后发言者",
+        enabled: true,
+        status: "ready",
+      },
+    ];
+
+    it("shows running and settled-waiting speakers independently without breaking speaker order", () => {
+      const activeGroupRoom = {
+        roomId: "room-1",
+        title: "并行研究组",
+        mode: "round_robin",
+        purpose: "discussion",
+        status: "running",
+        participants,
+        rounds: [
+          {
+            roundId: "r1",
+            status: "running",
+            mode: "round_robin",
+            purpose: "discussion",
+            topic: "并行状态",
+            startedAt: "2026-09-04T09:00:00Z",
+            updatedAt: "2026-09-04T09:00:00Z",
+            speakerOrder: ["p1", "p2"],
+            speakerProgress: [
+              { participantId: "p1", sessionId: "s1", state: "running", status: "", updatedAt: new Date().toISOString() },
+              { participantId: "p2", sessionId: "s2", state: "settled", status: "completed", updatedAt: new Date().toISOString() },
+            ],
+            messages: [],
+            summary: "",
+          },
+        ],
+      };
+      const html = renderToStaticMarkup(
+        <ChatGroupCenterSurface
+          {...baseProps({
+            activeGroupRoom: activeGroupRoom as never,
+            activeGroupParticipantById: new Map(participants.map((item) => [item.participantId, item as never])),
+            groupParticipantIdentity: (participant) => ({
+              name: participant?.title || "Agent",
+              identityLabel: participant?.title || "Agent",
+              fullIdentityLabel: participant?.title || "Agent",
+            }),
+          })}
+          {...({
+            groupSpeakerProgress: {
+              r1: {
+                p1: activeGroupRoom.rounds[0].speakerProgress[0],
+                p2: activeGroupRoom.rounds[0].speakerProgress[1],
+              },
+            },
+          } as never)}
+        />,
+      );
+
+      expect(html).toContain("先发言者");
+      expect(html).toContain("后发言者");
+      expect(html.match(/<span>正在输入<\/span>/g)).toHaveLength(1);
+      expect(html).toContain("已完成，等待前序发言");
+    });
+  });
 });

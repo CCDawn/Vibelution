@@ -1139,6 +1139,24 @@ export type ChatRoomMessage = {
   timestamp: string;
 };
 
+export type ChatRoomSpeakerProgressState = "queued" | "running" | "settled";
+
+export type ChatRoomSpeakerProgressStatus =
+  | ""
+  | "completed"
+  | "partial"
+  | "failed"
+  | "blocked"
+  | "stopped";
+
+export type ChatRoomSpeakerProgress = {
+  participantId: string;
+  sessionId: string;
+  state: ChatRoomSpeakerProgressState;
+  status: ChatRoomSpeakerProgressStatus;
+  updatedAt: string;
+};
+
 export type ChatRoomRound = {
   roundId: string;
   roomId: string;
@@ -1149,6 +1167,7 @@ export type ChatRoomRound = {
   caseState?: TeamCaseState;
   status: string;
   speakerOrder: string[];
+  speakerProgress?: ChatRoomSpeakerProgress[];
   messages: ChatRoomMessage[];
   messagesTruncated?: boolean;
   messagesTotalCount?: number;
@@ -1215,4 +1234,10 @@ export type ChatRoomSpeakerDeltaEvent = {
   content: string;
   done: boolean;
   status: string;
+};
+
+export type ChatRoomSpeakerStateEvent = ChatRoomSpeakerProgress & {
+  type: "chat_room_speaker_state";
+  roomId: string;
+  roundId: string;
 };

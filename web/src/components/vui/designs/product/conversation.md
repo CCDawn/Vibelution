@@ -111,6 +111,7 @@ import { ConversationFollowupQueueBar } from "../../conversation/ConversationFol
 | 长文 | `line-clamp` 约 8 行 +「展开全文」 | 禁止用 `hidden` 整段藏正文 |
 | 内部讨论 | 操作员时间线默认可读 | `collapsed_by_default` 不表示房间里看不见 |
 | 纪要 | 轮次发丝分割线 + 末尾一块玻璃面板 | 唯一允许的卡片 |
+| 并行发言进度 | 每个未落位成员各占一行 | 仅 `running` 显示“正在输入”；`settled` 显示“已完成，等待前序发言”且不提前展示正文 |
 
 ### 非职责
 - 不改房间协议、SSE、visibility 字段写入。
@@ -121,6 +122,8 @@ import { ConversationFollowupQueueBar } from "../../conversation/ConversationFol
 - 组内紧、组间松；失败/待发送才保留描边。
 - 头像与名字同一行（flex 横排，正文缩进对齐名字）；过程默认收起。
 - 超长正文截断可展开。
+- 正式消息始终按 `speakerOrder` 落位；成员状态来自同一群聊 SSE 的 `speakerProgress` 投影，不另开连接、不充当第二套 transcript。
+- 停滞只按该成员的状态更新时间与最近 delta 判断，不用整个轮次的更新时间替代成员活性。
 
 ### 实现落点
 - 生产：`web/src/routes/chat/ChatGroupCenterSurface.tsx`

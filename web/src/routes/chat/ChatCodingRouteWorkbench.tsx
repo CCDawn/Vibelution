@@ -935,7 +935,7 @@ export function ChatCodingRouteWorkbench() {
     },
     [chatWorkspaceCache, queryClient],
   );
-  const { groupStreamConnected, groupSpeakerStreams } = useGroupRoomStream({
+  const { groupStreamConnected, groupSpeakerStreams, groupSpeakerProgress } = useGroupRoomStream({
     activeGroupRoomId,
     groupStreamShouldConnect,
     syncChatRoomDetail,
@@ -3121,6 +3121,7 @@ export function ChatCodingRouteWorkbench() {
               groupRoomRefreshError={activeGroupRoomQuery.isError ? describeError(activeGroupRoomQuery.error, t("loadFailed")) : ""}
               groupStreamConnected={groupStreamConnected}
               groupSpeakerStreams={groupSpeakerStreams}
+              groupSpeakerProgress={groupSpeakerProgress}
               startGroupRoundPending={startGroupRoundMutation.isPending}
               stopGroupRoundPending={stopGroupRoundMutation.isPending}
               formatTime={formatTime}

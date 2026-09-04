@@ -57,6 +57,11 @@ let hookResults: {
     seq: number;
     lastDeltaAtMs: number;
   }>>;
+  groupSpeakerProgress?: Record<string, Record<string, {
+    state: string;
+    status: string;
+    updatedAt: string;
+  }>>;
 }[] = [];
 
 function Host({ props }: { props: UseGroupRoomStreamOptions }) {
@@ -107,7 +112,7 @@ function deltaFrame(overrides: Record<string, unknown> = {}) {
   });
 }
 
-function detailFrame() {
+function detailFrame(rounds: unknown[] = []) {
   return JSON.stringify({
     type: "chat_room_detail",
     roomId: "room-1",
@@ -115,9 +120,23 @@ function detailFrame() {
       roomId: "room-1",
       title: "研究组",
       status: "running",
-      rounds: [],
+      rounds,
       participants: [],
     },
+  });
+}
+
+function speakerStateFrame(overrides: Record<string, unknown> = {}) {
+  return JSON.stringify({
+    type: "chat_room_speaker_state",
+    roomId: "room-1",
+    roundId: "r1",
+    participantId: "p1",
+    sessionId: "s1",
+    state: "running",
+    status: "",
+    updatedAt: "2026-09-04T09:00:00Z",
+    ...overrides,
   });
 }
 
@@ -131,6 +150,10 @@ function openFirstConnection() {
 
 function streamsAt(index = -1) {
   return hookResults.at(index)?.groupSpeakerStreams ?? {};
+}
+
+function progressAt(index = -1) {
+  return hookResults.at(index)?.groupSpeakerProgress ?? {};
 }
 
 async function advance(ms: number) {
@@ -182,6 +205,62 @@ describe("useGroupRoomStream speaker delta streaming", () => {
     await advance(50);
     expect(streamsAt().r1?.p1?.content).toBe("你好，世界");
     expect(streamsAt().r1?.p2?.content).toBe("第二个发言");
+    unmount(root);
+  });
+
+  it("tracks independent speaker lifecycle events on the existing room stream", () => {
+    const root = mount(baseOptions());
+    const first = openFirstConnection();
+
+    act(() => {
+      first.options.onFrame({ event: "chat_room_speaker_state", data: speakerStateFrame() });
+      first.options.onFrame({
+        event: "chat_room_speaker_state",
+        data: speakerStateFrame({
+          participantId: "p2",
+          sessionId: "s2",
+          state: "settled",
+          status: "completed",
+          updatedAt: "2026-09-04T09:00:05Z",
+        }),
+      });
+    });
+
+    expect(progressAt().r1?.p1?.state).toBe("running");
+    expect(progressAt().r1?.p2).toMatchObject({
+      state: "settled",
+      status: "completed",
+      updatedAt: "2026-09-04T09:00:05Z",
+    });
+    expect(hoisted.consumeCalls).toHaveLength(1);
+    unmount(root);
+  });
+
+  it("replaces event progress with the authoritative speakerProgress snapshot", () => {
+    const root = mount(baseOptions());
+    const first = openFirstConnection();
+    act(() => {
+      first.options.onFrame({ event: "chat_room_speaker_state", data: speakerStateFrame() });
+      first.options.onFrame({
+        event: "chat_room_detail",
+        data: detailFrame([{
+          roundId: "r1",
+          speakerProgress: [{
+            participantId: "p1",
+            sessionId: "s1",
+            state: "settled",
+            status: "completed",
+            updatedAt: "2026-09-04T09:00:10Z",
+          }],
+        }]),
+      });
+    });
+
+    expect(progressAt().r1?.p1).toMatchObject({
+      state: "settled",
+      status: "completed",
+      updatedAt: "2026-09-04T09:00:10Z",
+    });
     unmount(root);
   });
 
@@ -272,6 +351,7 @@ describe("useGroupRoomStream speaker delta streaming", () => {
     const first = openFirstConnection();
     act(() => {
       first.options.onFrame({ event: "chat_room_speaker_delta", data: deltaFrame({ seq: 1, content: "断连前文本" }) });
+      first.options.onFrame({ event: "chat_room_speaker_state", data: speakerStateFrame() });
     });
     await advance(50);
     expect(hookResults.at(-1)?.groupStreamConnected).toBe(true);
@@ -282,6 +362,7 @@ describe("useGroupRoomStream speaker delta streaming", () => {
     expect(first.aborted).toBe(true);
     expect(hookResults.at(-1)?.groupStreamConnected).toBe(false);
     expect(streamsAt().r1?.p1?.content).toBe("断连前文本");
+    expect(progressAt().r1?.p1?.state).toBe("running");
 
     // Reconnect: fresh connection drops every buffer (no replay; cumulative
     // frames refill the text), and the connection reads as live again.
@@ -292,6 +373,7 @@ describe("useGroupRoomStream speaker delta streaming", () => {
     });
     expect(hookResults.at(-1)?.groupStreamConnected).toBe(true);
     expect(streamsAt()).toEqual({});
+    expect(progressAt()).toEqual({});
     unmount(root);
   });
 
