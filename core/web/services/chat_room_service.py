@@ -276,6 +276,33 @@ _SPEAKER_BATCH_PARALLEL = "parallel"
 # same policy; ordinary rooms never retry.
 _SPEAKER_FENCE_RETRY_CONFIG_KEY = "speakerFenceRetry"
 _RETRIED_AFTER_FENCE_TIMING_KEY = "retriedAfterFence"
+# A speaker turn the provider called "completed" but whose visible output was
+# re-judged as needs_continue (no conclusion / next step) used to strand
+# meeting rounds: the message projects as partial, never counts as completed,
+# and the meeting discussion driver stops the meeting as no_progress.  Meeting
+# rounds now auto-continue the SAME participant session with a deterministic
+# continuation prompt at most K times per (round, speaker); K comes from the
+# VIBELUTION_MEETING_SPEAKER_AUTO_CONTINUE_MAX_TURNS env knob (default 2,
+# 0 restores the old single-shot shape).  The quota shares the fence-retry
+# ceiling instead of multiplying with it: fence retry at most once plus
+# continuation at most K keeps every speaker call count bounded.
+_SPEAKER_AUTO_CONTINUE_MAX_TURNS_DEFAULT = 2
+_SPEAKER_AUTO_CONTINUE_PROMPT = (
+    "你的上一条发言尚未完成。请直接继续完成你的发言，不要重复已有内容。"
+)
+# A continuation only launches when at least this much meeting-clock time
+# remains (capped by the per-call budget slice); a thinner window cannot fit
+# a meaningful LLM call and would only be chopped off by the fence again.
+_SPEAKER_AUTO_CONTINUE_MIN_REMAINING_MS = 30_000
+_SPEAKER_AUTO_CONTINUE_EVENT_CODE = "chat_room.speaker.auto_continue"
+_SPEAKER_AUTO_CONTINUE_EXHAUSTED_EVENT_CODE = (
+    "chat_room.speaker.auto_continue_exhausted"
+)
+_SPEAKER_AUTO_CONTINUE_TIMING_KEY = "autoContinueAttempt"
+# When a continuation finishes the turn, the earlier needs_continue partial
+# stops counting as that speaker's outcome: it stays in the message stream
+# for audit only, flagged so round accounting ignores it.
+_SPEAKER_AUTO_CONTINUE_SUPERSEDED_TIMING_KEY = "supersededByAutoContinue"
 # Zero-output retries recover transient provider/runtime failures.  These
 # error types are configuration problems: the same turn cannot succeed on a
 # second attempt, so retrying would only burn another full budget.
@@ -2245,9 +2272,14 @@ def _execute_chat_room_round(
         # events keep their serial sequence.
         for (
             (index, participant, prompt_build_ms),
-            (message, speaker_run_ms),
+            (turn_messages, speaker_run_ms),
         ) in zip(batch_meta, batch_results):
-            if message is None:
+            if isinstance(turn_messages, Mapping):
+                # Prep-phase preflight failures stitch back a single message
+                # dict (never a list): normalize it so the per-message loop
+                # below keeps its exact serial persistence sequence.
+                turn_messages = [turn_messages]
+            if not turn_messages:
                 # A round-level fence engaged before this speaker launched;
                 # finalize the stopped round without a speaker message.
                 stopped = _stopped_chat_room_round_detail(normalized_room_id, round_id)
@@ -2255,128 +2287,139 @@ def _execute_chat_room_round(
                     _clear_chat_room_round_control(round_id)
                     return stopped
                 continue
-            message_time = utc_now_iso()
-            stop_pending = False
-            duplicate_of: tuple[dict[str, Any], str] | None = None
-            with _CHAT_ROOM_LOCK:
-                state = _store().load()
-                live_room = _find_room(state, normalized_room_id)
-                if live_room is None:
-                    raise ChatRoomNotFoundError(text_for(lang, zh="未找到群聊。", en="Chat room not found."))
-                target_round = _find_round(live_room, round_id)
-                if target_round is None:
-                    raise ChatRoomNotFoundError(text_for(lang, zh="未找到群聊轮次。", en="Chat room round not found."))
-                if _chat_room_round_is_terminal(live_room, target_round, round_id):
-                    _clear_chat_room_round_control(round_id)
-                    return _room_to_api(live_room)
-                # Speaker dedup guard: a byte-identical completed speech from
-                # the same speaker earlier in this room (the retry-path
-                # duplicate shape) is never committed into the message stream
-                # twice; it is dropped with an explicit suppression event.
-                duplicate_of = _find_committed_speaker_duplicate(
-                    live_room, round_id, messages, message
-                )
-                if duplicate_of is None:
-                    messages.append(message)
-                    if _chat_room_round_stop_reason(round_id):
-                        # A stop arrived between the outer check and this lock: persist
-                        # the latest messages without rewinding the round to running,
-                        # then let the shared stop finalizer close the round.  The
-                        # finalizer performs session sync (chat-state transaction), so
-                        # per the lock order contract it must run after releasing
-                        # _CHAT_ROOM_LOCK.
-                        target_round["messages"] = [dict(item) for item in messages]
-                        target_round["updatedAt"] = message_time
-                        _store().save(state)
-                        locked_room_snapshot = dict(live_room)
-                        stop_pending = True
-                    else:
-                        target_round["messages"] = [dict(item) for item in messages]
-                        target_round["status"] = "running"
-                        target_round["updatedAt"] = message_time
-                        live_room["status"] = "running"
-                        live_room["activeRoundId"] = round_id
-                        live_room["updatedAt"] = message_time
-                        _store().save(state)
-                        room = dict(live_room)
-                        round_payload = dict(target_round)
-            if duplicate_of is not None:
-                # Suppressed duplicates stay auditable, never silent.  A stop
-                # that engaged while this turn ran is honored exactly like the
-                # fence-skipped speaker path above.
-                _record_speaker_duplicate_suppressed_event(
+            # A needs_continue auto-continuation appends its own message; the
+            # partial prefix stays committed and auditable, and every message
+            # keeps the exact serial persistence sequence below.
+            for message in turn_messages:
+                message_time = utc_now_iso()
+                stop_pending = False
+                duplicate_of: tuple[dict[str, Any], str] | None = None
+                with _CHAT_ROOM_LOCK:
+                    state = _store().load()
+                    live_room = _find_room(state, normalized_room_id)
+                    if live_room is None:
+                        raise ChatRoomNotFoundError(text_for(lang, zh="未找到群聊。", en="Chat room not found."))
+                    target_round = _find_round(live_room, round_id)
+                    if target_round is None:
+                        raise ChatRoomNotFoundError(text_for(lang, zh="未找到群聊轮次。", en="Chat room round not found."))
+                    if _chat_room_round_is_terminal(live_room, target_round, round_id):
+                        _clear_chat_room_round_control(round_id)
+                        return _room_to_api(live_room)
+                    # Speaker dedup guard: a byte-identical completed speech from
+                    # the same speaker earlier in this room (the retry-path
+                    # duplicate shape) is never committed into the message stream
+                    # twice; it is dropped with an explicit suppression event.
+                    duplicate_of = _find_committed_speaker_duplicate(
+                        live_room, round_id, messages, message
+                    )
+                    if duplicate_of is None:
+                        messages.append(message)
+                        if _chat_room_round_stop_reason(round_id):
+                            # A stop arrived between the outer check and this lock: persist
+                            # the latest messages without rewinding the round to running,
+                            # then let the shared stop finalizer close the round.  The
+                            # finalizer performs session sync (chat-state transaction), so
+                            # per the lock order contract it must run after releasing
+                            # _CHAT_ROOM_LOCK.
+                            target_round["messages"] = [dict(item) for item in messages]
+                            target_round["updatedAt"] = message_time
+                            _store().save(state)
+                            locked_room_snapshot = dict(live_room)
+                            stop_pending = True
+                        else:
+                            target_round["messages"] = [dict(item) for item in messages]
+                            target_round["status"] = "running"
+                            target_round["updatedAt"] = message_time
+                            live_room["status"] = "running"
+                            live_room["activeRoundId"] = round_id
+                            live_room["updatedAt"] = message_time
+                            _store().save(state)
+                            room = dict(live_room)
+                            round_payload = dict(target_round)
+                if duplicate_of is not None:
+                    # Suppressed duplicates stay auditable, never silent.  A stop
+                    # that engaged while this turn ran is honored exactly like the
+                    # fence-skipped speaker path above.
+                    _record_speaker_duplicate_suppressed_event(
+                        room,
+                        round_payload,
+                        participant,
+                        message,
+                        duplicate_of[0],
+                        duplicate_of[1],
+                        speaker_index=index,
+                        prompt_build_ms=prompt_build_ms,
+                        speaker_run_ms=speaker_run_ms,
+                    )
+                    stopped = _stopped_chat_room_round_detail(normalized_room_id, round_id)
+                    if stopped is not None:
+                        _clear_chat_room_round_control(round_id)
+                        return stopped
+                    continue
+                if stop_pending:
+                    stopped = _stopped_chat_room_round_detail(normalized_room_id, round_id)
+                    if stopped is not None:
+                        _clear_chat_room_round_control(round_id)
+                        return stopped
+                    return _room_to_api(locked_room_snapshot)
+                _persist_chat_room_work_run(
                     room,
                     round_payload,
-                    participant,
-                    message,
-                    duplicate_of[0],
-                    duplicate_of[1],
-                    speaker_index=index,
-                    prompt_build_ms=prompt_build_ms,
-                    speaker_run_ms=speaker_run_ms,
+                    status="running",
+                    summary=text_for(
+                        lang,
+                        zh=f"群聊进行中：{len(messages)}/{len(speakers)} 位 Agent 已发言。",
+                        en=f"Group discussion running: {len(messages)}/{len(speakers)} agents responded.",
+                    ),
                 )
-                stopped = _stopped_chat_room_round_detail(normalized_room_id, round_id)
-                if stopped is not None:
-                    _clear_chat_room_round_control(round_id)
-                    return stopped
-                continue
-            if stop_pending:
-                stopped = _stopped_chat_room_round_detail(normalized_room_id, round_id)
-                if stopped is not None:
-                    _clear_chat_room_round_control(round_id)
-                    return stopped
-                return _room_to_api(locked_room_snapshot)
-            _persist_chat_room_work_run(
-                room,
-                round_payload,
-                status="running",
-                summary=text_for(
-                    lang,
-                    zh=f"群聊进行中：{len(messages)}/{len(speakers)} 位 Agent 已发言。",
-                    en=f"Group discussion running: {len(messages)}/{len(speakers)} agents responded.",
-                ),
-            )
-            _publish_chat_room_detail_snapshot(normalized_room_id)
-            _record_room_event(
-                "speaker",
-                _speaker_event_code(message.get("status")),
-                room,
-                round_payload,
-                fields={
-                    "participantId": participant["participantId"],
-                    "sessionId": participant.get("sessionId") or "",
-                    "speakerIndex": index,
-                    "status": message["status"],
-                    "purpose": round_purpose,
-                    "caseIntent": (round_payload.get("caseState") or {}).get("intent") if isinstance(round_payload.get("caseState"), dict) else "",
-                    "caseNextAction": (round_payload.get("caseState") or {}).get("nextAction") if isinstance(round_payload.get("caseState"), dict) else "",
-                    "caseInformationSufficiency": (round_payload.get("caseState") or {}).get("informationSufficiency") if isinstance(round_payload.get("caseState"), dict) else "",
-                    "caseUserFacingMode": (round_payload.get("caseState") or {}).get("userFacingMode") if isinstance(round_payload.get("caseState"), dict) else "",
-                    "caseDiscussionVisibility": (round_payload.get("caseState") or {}).get("discussionVisibility") if isinstance(round_payload.get("caseState"), dict) else "",
-                    "contentChars": len(message.get("content") or ""),
-                    "errorType": message.get("errorType") or "",
-                    "promptBuildMs": prompt_build_ms,
-                    "speakerRunMs": speaker_run_ms,
-                    **_participant_team_event_fields(participant),
-                    **(message.get("timings") if isinstance(message.get("timings"), dict) else {}),
-                },
-                outcome=message["status"],
-                level="info" if message["status"] == "completed" else "warning",
-            )
+                _publish_chat_room_detail_snapshot(normalized_room_id)
+                _record_room_event(
+                    "speaker",
+                    _speaker_event_code(message.get("status")),
+                    room,
+                    round_payload,
+                    fields={
+                        "participantId": participant["participantId"],
+                        "sessionId": participant.get("sessionId") or "",
+                        "speakerIndex": index,
+                        "status": message["status"],
+                        "purpose": round_purpose,
+                        "caseIntent": (round_payload.get("caseState") or {}).get("intent") if isinstance(round_payload.get("caseState"), dict) else "",
+                        "caseNextAction": (round_payload.get("caseState") or {}).get("nextAction") if isinstance(round_payload.get("caseState"), dict) else "",
+                        "caseInformationSufficiency": (round_payload.get("caseState") or {}).get("informationSufficiency") if isinstance(round_payload.get("caseState"), dict) else "",
+                        "caseUserFacingMode": (round_payload.get("caseState") or {}).get("userFacingMode") if isinstance(round_payload.get("caseState"), dict) else "",
+                        "caseDiscussionVisibility": (round_payload.get("caseState") or {}).get("discussionVisibility") if isinstance(round_payload.get("caseState"), dict) else "",
+                        "contentChars": len(message.get("content") or ""),
+                        "errorType": message.get("errorType") or "",
+                        "promptBuildMs": prompt_build_ms,
+                        "speakerRunMs": speaker_run_ms,
+                        **_participant_team_event_fields(participant),
+                        **(message.get("timings") if isinstance(message.get("timings"), dict) else {}),
+                    },
+                    outcome=message["status"],
+                    level="info" if message["status"] == "completed" else "warning",
+                )
 
-    completed_count = sum(1 for item in messages if item.get("status") == "completed")
-    failed_count = sum(1 for item in messages if item.get("status") == "failed")
-    blocked_count = sum(1 for item in messages if item.get("status") == "blocked")
-    stopped_count = sum(1 for item in messages if item.get("status") == "stopped")
-    partial_count = sum(1 for item in messages if item.get("status") == "partial")
-    unsuccessful_count = len(messages) - completed_count
-    if completed_count == len(messages):
+    # A needs_continue partial that its auto-continuation finished no longer
+    # counts as an unfinished speaker: the continuation's completed message
+    # is that speaker's outcome, and the superseded partial stays in the
+    # message stream for audit only.
+    counted_messages = [
+        item for item in messages if not _speaker_turn_superseded_by_auto_continue(item)
+    ]
+    completed_count = sum(1 for item in counted_messages if item.get("status") == "completed")
+    failed_count = sum(1 for item in counted_messages if item.get("status") == "failed")
+    blocked_count = sum(1 for item in counted_messages if item.get("status") == "blocked")
+    stopped_count = sum(1 for item in counted_messages if item.get("status") == "stopped")
+    partial_count = sum(1 for item in counted_messages if item.get("status") == "partial")
+    unsuccessful_count = len(counted_messages) - completed_count
+    if completed_count == len(counted_messages):
         final_status = "completed"
     elif completed_count > 0 or partial_count > 0:
         final_status = "partial"
     else:
         final_status = "failed"
-    summary = _round_summary(messages, lang=lang)
+    summary = _round_summary(counted_messages, lang=lang)
     finished_at = utc_now_iso()
     with _CHAT_ROOM_LOCK:
         state = _store().load()
@@ -2945,6 +2988,22 @@ def _speaker_batch_executor() -> ThreadPoolExecutor:
         return _CHAT_ROOM_SPEAKER_BATCH_EXECUTOR
 
 
+def _speaker_auto_continue_max_turns() -> int:
+    """Continuation quota per (round, speaker) for needs_continue turns."""
+
+    raw = str(
+        os.environ.get("VIBELUTION_MEETING_SPEAKER_AUTO_CONTINUE_MAX_TURNS") or ""
+    ).strip()
+    if not raw:
+        return _SPEAKER_AUTO_CONTINUE_MAX_TURNS_DEFAULT
+    try:
+        value = int(float(raw))
+    except ValueError:
+        return _SPEAKER_AUTO_CONTINUE_MAX_TURNS_DEFAULT
+    # 0 disables continuation entirely; a bad env edit cannot go negative.
+    return max(0, value)
+
+
 def _refresh_per_call_fence(context: dict[str, Any]) -> None:
     """Give this speaker call a fresh per-call fence computed from now."""
 
@@ -3141,6 +3200,124 @@ def _record_speaker_fence_retry_event(
         return
 
 
+def _speaker_turn_needs_continue(message: Mapping[str, Any]) -> bool:
+    """True when the speaker result was re-judged as needs_continue.
+
+    The provider reported a finished turn, but the visible output lacks a
+    conclusion/next-step, so the result status was demoted to needs_continue
+    and the committed message projects as partial.  This is the meeting-round
+    stranding shape: the partial message never counts as completed, so only a
+    continuation of the same participant session can finish the turn.
+    """
+
+    if str(message.get("status") or "").strip().lower() != "partial":
+        return False
+    return str(message.get("resultStatus") or "").strip().lower() == "needs_continue"
+
+
+def _speaker_turn_superseded_by_auto_continue(message: Mapping[str, Any]) -> bool:
+    """True when a later auto-continuation finished this partial message.
+
+    Superseded partials stay committed for audit but stop counting as an
+    unfinished speaker in round accounting; without the exclusion a
+    successful continuation would still leave the round stuck at partial.
+    """
+
+    timings = message.get("timings") if isinstance(message.get("timings"), Mapping) else {}
+    return bool((timings or {}).get(_SPEAKER_AUTO_CONTINUE_SUPERSEDED_TIMING_KEY))
+
+
+def _speaker_auto_continue_budget_allows(context: Mapping[str, Any]) -> bool:
+    """False when the meeting clock cannot fit another continuation call.
+
+    Per-call budgets rebuild per continuation (same as the fence retry), but
+    the meeting deadline is an absolute round fence: when less than one
+    minimal call slice remains, the continuation would only be chopped off by
+    the per-call fence again, so the exhausted path runs instead.
+    """
+
+    meeting_deadline_at_ms = _positive_int(
+        context.get("_perCallMeetingDeadlineAtMs")
+    ) or _positive_int(context.get("challengeDeadlineAtMs"))
+    if meeting_deadline_at_ms is None:
+        return True
+    per_call_budget_ms = (
+        _positive_int(context.get("_perCallBudgetMs"))
+        or _CHAT_ROOM_SPEAKER_DEFAULT_PER_CALL_BUDGET_MS
+    )
+    min_slice_ms = min(per_call_budget_ms, _SPEAKER_AUTO_CONTINUE_MIN_REMAINING_MS)
+    remaining_ms = meeting_deadline_at_ms - int(time.time() * 1000)
+    return remaining_ms >= min_slice_ms
+
+
+def _record_speaker_auto_continue_event(
+    context: Mapping[str, Any],
+    participant: Mapping[str, Any],
+    *,
+    attempt: int,
+    exhausted: bool = False,
+) -> None:
+    try:
+        record_runtime_scene_event(
+            "chat_room",
+            "speaker_call",
+            _SPEAKER_AUTO_CONTINUE_EXHAUSTED_EVENT_CODE
+            if exhausted
+            else _SPEAKER_AUTO_CONTINUE_EVENT_CODE,
+            message=(
+                "Speaker turn still needs_continue after the auto-continue "
+                "quota; keeping the partial message so the meeting driver "
+                "keeps its existing no_progress semantics."
+                if exhausted
+                else (
+                    "Speaker turn ended needs_continue; auto-continuing the "
+                    "same participant session with a deterministic prompt."
+                )
+            ),
+            level="warning",
+            outcome="exhausted" if exhausted else "retry",
+            fields={
+                "roomId": str(context.get("roomId") or "").strip(),
+                "roundId": str(context.get("roundId") or "").strip(),
+                "speakerIndex": context.get("speakerIndex"),
+                "participantId": str(participant.get("participantId") or "").strip(),
+                "attempt": attempt,
+                **_participant_team_event_fields(dict(participant)),
+            },
+        )
+    except Exception:
+        return
+
+
+def _clear_speaker_turn_scope_cancel(
+    participant: Mapping[str, Any],
+    context: Mapping[str, Any],
+) -> None:
+    """Drop the previous attempt's turn-scoped cancel state before continuing.
+
+    A watchdog abandon (or a fence retry) leaves a cancel on the LLM turn
+    scope keyed by the turn identity; without this cleanup the continuation
+    call would be cancelled instantly.  The identity matches the one built
+    inside ``_run_participant_agent``.
+    """
+
+    participant_id = str(
+        participant.get("participantId")
+        or participant.get("agentId")
+        or participant.get("sessionId")
+        or ""
+    ).strip()
+    turn_identity = (
+        f"chat-room:{str(context.get('roundId') or '').strip()}:{participant_id}"
+    )
+    try:
+        from core.llm.client import clear_llm_turn_scope_cancel
+
+        clear_llm_turn_scope_cancel(turn_identity)
+    except Exception:
+        pass
+
+
 def _find_committed_speaker_duplicate(
     room: Mapping[str, Any],
     current_round_id: str,
@@ -3242,13 +3419,16 @@ def _finish_speaker_turn(
     fence_retry_enabled: bool,
     run_turn_fences: bool = False,
     meeting_ttl_probe: dict[str, Any] | None = None,
-) -> tuple[dict[str, Any] | None, float]:
-    """Run, fence-check, and (policy permitting) retry one speaker turn.
+) -> tuple[list[dict[str, Any]], float]:
+    """Run, fence-check, (policy permitting) retry, and auto-continue one
+    speaker turn.
 
-    Returns the committed message (``None`` when a round-level fence engaged
-    before the speaker launched) plus the wall-clock the speaker stage took
-    (measured at the same point as the serial loop always did).  The late
-    result discard keeps its serial position: measured, then evaluated.
+    Returns the committed messages — ``[]`` when a round-level fence engaged
+    before the speaker launched, otherwise the first message (possibly the
+    fence-retried one) followed by one message per needs_continue
+    auto-continuation — plus the wall-clock the speaker stage took (measured
+    at the same point as the serial loop always did).  The late result
+    discard keeps its serial position: measured, then evaluated.
     """
 
     round_id = str(context.get("roundId") or "").strip()
@@ -3259,14 +3439,14 @@ def _finish_speaker_turn(
         # the remaining turns stop — the observable equivalent of the serial
         # speaker boundary.
         if _request_challenge_room_execution_stop(round_id, context, force_run_read=True):
-            return None, 0.0
+            return [], 0.0
         if _engage_meeting_digest_ttl_stop(
             context,
             meeting_ttl_probe if meeting_ttl_probe is not None else {"readAtMonotonic": 0.0, "mute": None},
             room_id=str(context.get("roomId") or "").strip(),
             round_id=round_id,
         ):
-            return None, 0.0
+            return [], 0.0
     speaker_started_at = context.get("speakerStartedAtMonotonic") or _perf_counter()
     context["speakerStartedAtMonotonic"] = speaker_started_at
     # Queue wait is the prep-to-launch gap: the shared batch pool serves
@@ -3313,8 +3493,92 @@ def _finish_speaker_turn(
         retry_timings[_RETRIED_AFTER_FENCE_TIMING_KEY] = True
         retry_message["timings"] = retry_timings
         message = retry_message
+        context.clear()
+        context.update(retry_context)
         speaker_run_ms = _elapsed_ms(speaker_started_at)
-    return message, speaker_run_ms
+    turn_messages = _run_speaker_auto_continuations(participant, context, runner, message)
+    speaker_run_ms = _elapsed_ms(speaker_started_at)
+    return turn_messages, speaker_run_ms
+
+
+def _run_speaker_auto_continuations(
+    participant: dict[str, Any],
+    context: dict[str, Any],
+    runner: AgentRunner,
+    message: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Auto-continue a needs_continue speaker turn inside the same turn.
+
+    The first (possibly fence-retried) message is kept as-is; every
+    continuation appends its own message, so a successful continuation turns
+    the speaker completed while the partial prefix stays committed and
+    auditable.  The quota is per (round, participant) turn and shares the
+    fence-retry ceiling instead of multiplying with it: fence retry at most
+    once plus continuation at most K keeps the call count bounded.  Each
+    continuation clears the turn-scoped cancel state left by the previous
+    attempt, rebuilds a fresh per-call fence, and only launches while the
+    meeting clock can still fit one more call; when the quota or the clock
+    runs out the exhausted event fires and the existing partial semantics
+    stand (the meeting driver keeps its no_progress stop).
+    """
+
+    messages = [message]
+    max_turns = _speaker_auto_continue_max_turns()
+    if max_turns <= 0 or not _speaker_turn_needs_continue(message):
+        return messages
+    round_id = str(context.get("roundId") or "").strip()
+    attempts_used = 0
+    for attempt in range(1, max_turns + 1):
+        if _chat_room_round_stop_reason(round_id):
+            # The round is ending regardless of this speaker; the partial
+            # prefix stays and no exhausted event fires (nothing was wasted).
+            return messages
+        if not _speaker_auto_continue_budget_allows(context):
+            break
+        attempts_used = attempt
+        _clear_speaker_turn_scope_cancel(participant, context)
+        _record_speaker_auto_continue_event(context, participant, attempt=attempt)
+        continuation_context = dict(context)
+        _refresh_per_call_fence(continuation_context)
+        continuation_message = _run_one_speaker(
+            participant, _SPEAKER_AUTO_CONTINUE_PROMPT, continuation_context, runner
+        )
+        continuation_stop_reason = _challenge_room_speaker_abort_reason(
+            round_id, continuation_context, force_run_read=True
+        )
+        if (
+            continuation_stop_reason
+            and str(continuation_message.get("status") or "").strip().lower() == "completed"
+        ):
+            # The provider returned after the formal fence: late content is
+            # never formal meeting evidence (same shape as the fence retry).
+            continuation_message = {
+                **continuation_message,
+                "status": "stopped",
+                "resultStatus": "stopped",
+                "content": "",
+                "summary": continuation_stop_reason,
+                "lateResultDiscarded": True,
+            }
+            continuation_message.pop("messagePayload", None)
+        continuation_timings = dict(continuation_message.get("timings") or {})
+        continuation_timings[_SPEAKER_AUTO_CONTINUE_TIMING_KEY] = attempt
+        continuation_message["timings"] = continuation_timings
+        messages.append(continuation_message)
+        context.clear()
+        context.update(continuation_context)
+        if not _speaker_turn_needs_continue(continuation_message):
+            for earlier in messages[:-1]:
+                if _speaker_turn_needs_continue(earlier):
+                    earlier_timings = dict(earlier.get("timings") or {})
+                    earlier_timings[_SPEAKER_AUTO_CONTINUE_SUPERSEDED_TIMING_KEY] = True
+                    earlier["timings"] = earlier_timings
+            return messages
+    # Quota or meeting clock used up while the turn still needs_continue.
+    _record_speaker_auto_continue_event(
+        context, participant, attempt=attempts_used, exhausted=True
+    )
+    return messages
 
 
 def _run_speaker_batch_turns(
@@ -3324,12 +3588,14 @@ def _run_speaker_batch_turns(
     fence_retry_enabled: bool,
     run_turn_fences: bool = False,
     meeting_ttl_probe: dict[str, Any] | None = None,
-) -> list[tuple[dict[str, Any] | None, float]]:
+) -> list[tuple[list[dict[str, Any]], float]]:
     """Run one batch's speaker turns concurrently, results in speaker order.
 
     Each turn is independent (its own watchdog, fence, session slot and
     supervision path), so one failed speaker never blocks its batch peers;
-    ordering is restored by collecting futures in submission order.
+    ordering is restored by collecting futures in submission order.  Every
+    result carries the turn's committed messages (first message plus any
+    needs_continue auto-continuations) and the speaker wall-clock.
     """
 
     executor = _speaker_batch_executor()

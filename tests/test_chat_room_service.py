@@ -5945,6 +5945,281 @@ def test_zero_output_retry_predicate_matrix(monkeypatch):
     )
 
 
+def _needs_continue_result(content: str) -> dict:
+    """讲者 runner 视角：provider 报完成，但输出被重判为 needs_continue。"""
+
+    return {
+        "status": "needs_continue",
+        "raw_output": content,
+        "summary": "尚未收束",
+    }
+
+
+def _scene_events_of(scene_events, event_code: str) -> list:
+    return [
+        event for event in scene_events if event[0][2:3] == (event_code,)
+    ]
+
+
+def test_needs_continue_speaker_auto_continues_once_and_completes(tmp_path, monkeypatch):
+    """讲者回合 needs_continue 时对同一参会者 session 自动续跑一次并完成。
+
+    partial 首跑消息保留入库，续跑产出作为新消息追加；续跑 prompt 是
+    确定性续跑文案，而不是重建整回合的原始 prompt。
+    """
+
+    room = _start_fence_retry_room(tmp_path, monkeypatch)
+    scene_events = []
+    monkeypatch.setattr(
+        chat_room_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: scene_events.append((args, kwargs)) or {"accepted": True},
+    )
+    attempts: dict[str, int] = {}
+    prompts_by_session: dict[str, list[str]] = {}
+
+    def runner(participant, prompt, _context):
+        session_id = participant["sessionId"]
+        attempts[session_id] = attempts.get(session_id, 0) + 1
+        prompts_by_session.setdefault(session_id, []).append(prompt)
+        if session_id == "session-alpha" and attempts[session_id] == 1:
+            return _needs_continue_result("上半段发言，尚未收束。")
+        return {
+            "status": "completed",
+            "raw_output": f"完成发言-{session_id}-{attempts[session_id]}",
+            "summary": "ok",
+        }
+
+    detail = chat_room_service.start_chat_room_round(
+        room["roomId"],
+        "假说评审第 1 轮",
+        config={"meetingType": "hypothesis_review", "speakerBatchMode": "serial"},
+        agent_runner=runner,
+    )
+
+    latest = detail["rounds"][-1]
+    assert latest["status"] == "completed"
+    assert attempts == {"session-alpha": 2, "session-beta": 1}
+    alpha_prompts = prompts_by_session["session-alpha"]
+    assert alpha_prompts[0] != chat_room_service._SPEAKER_AUTO_CONTINUE_PROMPT
+    assert alpha_prompts[1] == chat_room_service._SPEAKER_AUTO_CONTINUE_PROMPT
+    alpha_messages = [m for m in latest["messages"] if m["sessionId"] == "session-alpha"]
+    assert [m["status"] for m in alpha_messages] == ["partial", "completed"]
+    assert alpha_messages[0]["resultStatus"] == "needs_continue"
+    assert alpha_messages[0]["content"] == "上半段发言，尚未收束。"
+    assert alpha_messages[1]["content"] == "完成发言-session-alpha-2"
+    assert alpha_messages[1]["timings"]["autoContinueAttempt"] == 1
+    continue_events = _scene_events_of(scene_events, "chat_room.speaker.auto_continue")
+    assert len(continue_events) == 1
+    assert continue_events[0][1]["fields"]["attempt"] == 1
+    assert _scene_events_of(scene_events, "chat_room.speaker.auto_continue_exhausted") == []
+
+
+def test_needs_continue_speaker_auto_continue_exhausts_and_keeps_partial(
+    tmp_path, monkeypatch
+):
+    """K 次续跑耗尽仍 needs_continue：partial 语义保留并报 exhausted 事件。"""
+
+    monkeypatch.setenv("VIBELUTION_MEETING_SPEAKER_AUTO_CONTINUE_MAX_TURNS", "1")
+    room = _start_fence_retry_room(tmp_path, monkeypatch)
+    scene_events = []
+    monkeypatch.setattr(
+        chat_room_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: scene_events.append((args, kwargs)) or {"accepted": True},
+    )
+    attempts: dict[str, int] = {}
+
+    def runner(participant, _prompt, _context):
+        session_id = participant["sessionId"]
+        attempts[session_id] = attempts.get(session_id, 0) + 1
+        if session_id == "session-alpha":
+            return _needs_continue_result(f"仍未收束-{session_id}-{attempts[session_id]}")
+        return {
+            "status": "completed",
+            "raw_output": f"完成发言-{session_id}",
+            "summary": "ok",
+        }
+
+    detail = chat_room_service.start_chat_room_round(
+        room["roomId"],
+        "假说评审第 1 轮",
+        config={"meetingType": "hypothesis_review", "speakerBatchMode": "serial"},
+        agent_runner=runner,
+    )
+
+    latest = detail["rounds"][-1]
+    assert latest["status"] == "partial"
+    assert attempts == {"session-alpha": 2, "session-beta": 1}
+    alpha_messages = [m for m in latest["messages"] if m["sessionId"] == "session-alpha"]
+    assert [m["status"] for m in alpha_messages] == ["partial", "partial"]
+    assert alpha_messages[1]["timings"]["autoContinueAttempt"] == 1
+    continue_events = _scene_events_of(scene_events, "chat_room.speaker.auto_continue")
+    exhausted_events = _scene_events_of(
+        scene_events, "chat_room.speaker.auto_continue_exhausted"
+    )
+    assert [event[1]["fields"]["attempt"] for event in continue_events] == [1]
+    assert [event[1]["fields"]["attempt"] for event in exhausted_events] == [1]
+
+
+def test_needs_continue_speaker_auto_continue_disabled_keeps_current_behavior(
+    tmp_path, monkeypatch
+):
+    """旋钮=0 完全走现状：不续跑、不发事件，partial 消息单条保留。"""
+
+    monkeypatch.setenv("VIBELUTION_MEETING_SPEAKER_AUTO_CONTINUE_MAX_TURNS", "0")
+    room = _start_fence_retry_room(tmp_path, monkeypatch)
+    scene_events = []
+    monkeypatch.setattr(
+        chat_room_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: scene_events.append((args, kwargs)) or {"accepted": True},
+    )
+    attempts: dict[str, int] = {}
+
+    def runner(participant, _prompt, _context):
+        session_id = participant["sessionId"]
+        attempts[session_id] = attempts.get(session_id, 0) + 1
+        if session_id == "session-alpha":
+            return _needs_continue_result(f"仍未收束-{session_id}")
+        return {
+            "status": "completed",
+            "raw_output": f"完成发言-{session_id}",
+            "summary": "ok",
+        }
+
+    detail = chat_room_service.start_chat_room_round(
+        room["roomId"],
+        "假说评审第 1 轮",
+        config={"meetingType": "hypothesis_review", "speakerBatchMode": "serial"},
+        agent_runner=runner,
+    )
+
+    latest = detail["rounds"][-1]
+    assert latest["status"] == "partial"
+    assert attempts == {"session-alpha": 1, "session-beta": 1}
+    alpha_messages = [m for m in latest["messages"] if m["sessionId"] == "session-alpha"]
+    assert len(alpha_messages) == 1
+    assert alpha_messages[0]["status"] == "partial"
+    assert _scene_events_of(scene_events, "chat_room.speaker.auto_continue") == []
+    assert (
+        _scene_events_of(scene_events, "chat_room.speaker.auto_continue_exhausted")
+        == []
+    )
+
+
+def test_needs_continue_speaker_auto_continue_stops_at_deadline(tmp_path, monkeypatch):
+    """会议时钟剩余不足一轮最小切片：不续跑，直接走超额路径。
+
+    冻结时钟 = 1000.0s（now_ms = 1_000_000）；meetingDeadlineAtMs 只剩
+    10s，小于默认 per-call 预算（300s）的最小切片 30s，因此一次都不续。
+    """
+
+    room = _start_fence_retry_room(tmp_path, monkeypatch)
+    scene_events = []
+    monkeypatch.setattr(
+        chat_room_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: scene_events.append((args, kwargs)) or {"accepted": True},
+    )
+    attempts: dict[str, int] = {}
+
+    def runner(participant, _prompt, _context):
+        session_id = participant["sessionId"]
+        attempts[session_id] = attempts.get(session_id, 0) + 1
+        if session_id == "session-alpha":
+            return _needs_continue_result(f"仍未收束-{session_id}")
+        return {
+            "status": "completed",
+            "raw_output": f"完成发言-{session_id}",
+            "summary": "ok",
+        }
+
+    detail = chat_room_service.start_chat_room_round(
+        room["roomId"],
+        "假说评审第 1 轮",
+        config={
+            "meetingType": "hypothesis_review",
+            "speakerBatchMode": "serial",
+            "meetingDeadlineAtMs": 1_010_000,
+        },
+        agent_runner=runner,
+    )
+
+    latest = detail["rounds"][-1]
+    assert latest["status"] == "partial"
+    assert attempts == {"session-alpha": 1, "session-beta": 1}
+    alpha_messages = [m for m in latest["messages"] if m["sessionId"] == "session-alpha"]
+    assert len(alpha_messages) == 1
+    continue_events = _scene_events_of(scene_events, "chat_room.speaker.auto_continue")
+    exhausted_events = _scene_events_of(
+        scene_events, "chat_room.speaker.auto_continue_exhausted"
+    )
+    assert continue_events == []
+    assert [event[1]["fields"]["attempt"] for event in exhausted_events] == [0]
+
+
+def test_needs_continue_auto_continue_and_fence_retry_do_not_multiply(
+    tmp_path, monkeypatch
+):
+    """围栏重试与续跑共享总次数上限意识，不叠乘出无限重跑。
+
+    首跑零输出 failed → 围栏重试 1 次 → 重试结果 needs_continue →
+    续跑 K=2 次（全部完成）。alpha 总调用次数封顶 1+1+2=4。
+    """
+
+    monkeypatch.setenv("VIBELUTION_MEETING_SPEAKER_AUTO_CONTINUE_MAX_TURNS", "2")
+    room = _start_fence_retry_room(tmp_path, monkeypatch)
+    scene_events = []
+    monkeypatch.setattr(
+        chat_room_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: scene_events.append((args, kwargs)) or {"accepted": True},
+    )
+    attempts: dict[str, int] = {}
+
+    def runner(participant, _prompt, _context):
+        session_id = participant["sessionId"]
+        attempts[session_id] = attempts.get(session_id, 0) + 1
+        if session_id == "session-alpha":
+            if attempts[session_id] == 1:
+                raise RuntimeError("provider exploded")
+            if attempts[session_id] <= 3:
+                # 围栏重试与续跑第 1 次都仍未收束，第 2 次续跑才完成。
+                return _needs_continue_result("重试后仍未收束。")
+        return {
+            "status": "completed",
+            "raw_output": f"完成发言-{session_id}-{attempts[session_id]}",
+            "summary": "ok",
+        }
+
+    detail = chat_room_service.start_chat_room_round(
+        room["roomId"],
+        "假说评审第 1 轮",
+        config={"meetingType": "hypothesis_review", "speakerBatchMode": "serial"},
+        agent_runner=runner,
+    )
+
+    latest = detail["rounds"][-1]
+    assert latest["status"] == "completed"
+    assert attempts == {"session-alpha": 4, "session-beta": 1}
+    alpha_messages = [m for m in latest["messages"] if m["sessionId"] == "session-alpha"]
+    assert [m["status"] for m in alpha_messages] == ["partial", "partial", "completed"]
+    assert alpha_messages[0]["timings"]["retriedAfterFence"] is True
+    assert alpha_messages[1]["timings"]["autoContinueAttempt"] == 1
+    assert alpha_messages[2]["timings"]["autoContinueAttempt"] == 2
+    assert (
+        len(_scene_events_of(scene_events, "chat_room.speaker_call.fence_retry")) == 1
+    )
+    assert (
+        len(_scene_events_of(scene_events, "chat_room.speaker.auto_continue")) == 2
+    )
+    assert (
+        _scene_events_of(scene_events, "chat_room.speaker.auto_continue_exhausted")
+        == []
+    )
+
+
 def test_structured_stopped_result_carries_error_type(monkeypatch):
     """B：structured stopped 路径也写 errorType，零输出判定与审计拿得到类别。"""
 
