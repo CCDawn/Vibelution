@@ -3693,6 +3693,27 @@ def _speaker_prompt_cache_partition(session_id: str, room_id: str) -> str:
     )
 
 
+def _apply_meeting_history_layering_for_room(
+    messages: list[dict[str, Any]],
+    context: dict[str, Any],
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    """会议房参会者历史 seed 的确定性分层压缩门控。
+
+    仅会议房（``meetingType`` 非空）生效；非会议 session 一律原样返回，不
+    触碰装配器全局默认行为。分层作用于 assembler 的 fingerprint 校验之后的
+    history seed 视图，recap 属后处理，不参与 conversation_layer_fingerprint。
+    """
+
+    meeting_type = str(context.get("meetingType") or "").strip()
+    room_id = str(context.get("roomId") or "").strip()
+    if not meeting_type or not room_id:
+        return messages, None
+    from core.chat.meeting_history_layering import apply_meeting_history_layering
+
+    layered, state = apply_meeting_history_layering(messages, room_id=room_id)
+    return layered, state
+
+
 def _run_participant_agent(participant: dict[str, Any], prompt: str, context: dict[str, Any]) -> dict[str, Any]:
     prepare_started_at = _perf_counter()
     timings: dict[str, Any] = {}
@@ -3799,6 +3820,12 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
             recent_message_limit=None,
         )
         canonical_chat_history = list(history_assembly.history_messages or [])
+        # 会议房参会者的历史分层压缩投影：更早轮次的「[群聊同步]」原文在
+        # seed 视图上替换为确定性 recap（ledger 原文与 fingerprint 校验均不
+        # 受影响，见 core/chat/meeting_history_layering.py）。
+        canonical_chat_history, _meeting_history_layering_state = (
+            _apply_meeting_history_layering_for_room(canonical_chat_history, context)
+        )
         timings["ledgerHistoryMs"] = _elapsed_ms(stage_started_at)
         with active_agent_runtime(
             agent_id,
