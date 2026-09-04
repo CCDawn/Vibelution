@@ -239,6 +239,61 @@ class AgentActionAdapter:
                     },
                 ),
             )
+        if action.node_id == "source_finding":
+            from ..artifact_readback_registry import (
+                load_source_finding_receipt_payload,
+                parse_canonical_ref,
+            )
+            from ..human_gate_artifacts import canonical_sha256
+
+            source_receipt = next(
+                (
+                    item
+                    for item in receipts
+                    if str(item.get("artifactType") or "").split(":", 1)[0]
+                    == "source_candidate_batch"
+                ),
+                None,
+            )
+            parsed = parse_canonical_ref(
+                str((source_receipt or {}).get("canonicalRef") or "")
+            )
+            canonical_source_ref = isinstance(parsed, dict) and parsed.get("legacy") != "1"
+            receipt_payload = (
+                load_source_finding_receipt_payload(
+                    team_id=str(parsed.get("teamId") or ""),
+                    authority_run_id=str(parsed.get("authorityRunId") or ""),
+                    candidate_content_hash=str(parsed.get("contentHash") or ""),
+                )
+                if canonical_source_ref
+                else None
+            )
+            if canonical_source_ref and receipt_payload is None:
+                return VerifiedDomainResult(
+                    action_id=action.action_id,
+                    outcome="blocked",
+                    artifact_receipts=(),
+                    anchor=result.anchor,
+                    budget_receipt=None,
+                    problem={
+                        "code": "source_search_receipt_missing",
+                        "detail": (
+                            "source_finding requires four-perspective canonical search "
+                            "receipts and receipt-bound candidates"
+                        ),
+                    },
+                )
+            if source_receipt is not None and receipt_payload is not None:
+                source_receipt["searchReceiptSha256"] = canonical_sha256(
+                    receipt_payload
+                )
+                source_receipt["searchEventIds"] = [
+                    str(event_id)
+                    for item in list(receipt_payload.get("searchTrace") or [])
+                    if isinstance(item, dict)
+                    for event_id in list(item.get("eventIds") or [])
+                    if str(event_id or "").strip()
+                ]
         reserved = result.reserved or {}
         reservation_id = str(
             reserved.get("reservationId")

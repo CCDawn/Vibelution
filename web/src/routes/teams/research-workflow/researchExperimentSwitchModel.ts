@@ -13,6 +13,7 @@
 import type {
   ResearchWorkflowLaunchOption,
 } from "../../../api/researchWorkflow";
+import { getNodeAdapter } from "./nodeAdapterModel";
 import { researchRunStatusLabel } from "./researchRunPresentation";
 
 export type ExperimentSwitchOption = {
@@ -102,8 +103,12 @@ function hypothesisForQuestion(
 function checkpointAvailability(question: ResearchWorkflowLaunchOption): string {
   const checkpoint = question.checkpoint;
   if (!checkpoint) return "无 checkpoint";
+  const currentNodeLabel = getNodeAdapter(checkpoint.currentNodeId)?.label
+    || checkpoint.currentNodeLabel?.trim()
+    || checkpoint.currentNodeId?.trim()
+    || "未开始";
   return [
-    checkpoint.currentNodeLabel?.trim() || checkpoint.currentNodeId?.trim() || "未开始",
+    currentNodeLabel,
     `${checkpoint.completedCount}/${checkpoint.totalSteps}`,
     researchRunStatusLabel(checkpoint.status),
   ].filter(Boolean).join(" · ");

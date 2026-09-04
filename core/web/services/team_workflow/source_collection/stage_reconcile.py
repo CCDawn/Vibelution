@@ -2144,13 +2144,6 @@ def _source_collection_stage_task_tool_progress_from_trace(
                     if required_tool == "web_fetch_tool"
                     else required_tool in successful_tool_names
                 )
-                if (
-                    not item_complete
-                    and required_tool == "batch_web_search_tool"
-                    and writeback_observed
-                    and artifact_complete
-                ):
-                    item_complete = True
                 if item_complete and "page" in item_id:
                     # finding 的 page_existing_sources 已改为单读语义：一次成功的
                     # source_collection_context_tool 调用即勾，不再要求翻页读完或等
