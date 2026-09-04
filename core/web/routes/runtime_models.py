@@ -103,6 +103,7 @@ class RuntimeLifecycleResponse(BaseModel):
     message: str = ""
     chatTurns: list[Any] = Field(default_factory=list)
     chatRoomRounds: list[Any] = Field(default_factory=list)
+    sourceCollectionRuns: list[Any] = Field(default_factory=list)
     evolutionRuns: list[Any] = Field(default_factory=list)
 
 

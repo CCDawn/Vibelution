@@ -402,6 +402,7 @@ def request_runtime_shutdown(
     (
         stopped_chat_room_rounds,
         stopped_chat_turns,
+        stopped_source_collection_runs,
         stopped_evolution_runs,
     ) = _harvest_active_work_before_lifecycle_change(
         scene="shutdown",
@@ -426,6 +427,7 @@ def request_runtime_shutdown(
                 "unharvestedWorkRuns": _unharvested_lifecycle_work_items(
                     stopped_chat_room_rounds,
                     stopped_chat_turns,
+                    stopped_source_collection_runs,
                     stopped_evolution_runs,
                 )[:8],
             },
@@ -442,6 +444,7 @@ def request_runtime_shutdown(
             lang,
             stopped_chat_room_rounds=stopped_chat_room_rounds,
             stopped_chat_turns=stopped_chat_turns,
+            stopped_source_collection_runs=stopped_source_collection_runs,
             stopped_evolution_runs=stopped_evolution_runs,
         )
 
@@ -472,6 +475,7 @@ def request_runtime_shutdown(
                     source=normalized_source,
                     stopped_chat_room_rounds=stopped_chat_room_rounds,
                     stopped_chat_turns=stopped_chat_turns,
+                    stopped_source_collection_runs=stopped_source_collection_runs,
                     stopped_evolution_runs=stopped_evolution_runs,
                 ),
             )
@@ -485,6 +489,7 @@ def request_runtime_shutdown(
                 ),
                 "chatTurns": stopped_chat_turns,
                 "chatRoomRounds": stopped_chat_room_rounds,
+                "sourceCollectionRuns": stopped_source_collection_runs,
                 "evolutionRuns": stopped_evolution_runs,
             }
 
@@ -505,6 +510,7 @@ def request_runtime_shutdown(
                     source=normalized_source,
                     stopped_chat_room_rounds=stopped_chat_room_rounds,
                     stopped_chat_turns=stopped_chat_turns,
+                    stopped_source_collection_runs=stopped_source_collection_runs,
                     stopped_evolution_runs=stopped_evolution_runs,
                 ),
             )
@@ -518,6 +524,7 @@ def request_runtime_shutdown(
                 ),
                 "chatTurns": stopped_chat_turns,
                 "chatRoomRounds": stopped_chat_room_rounds,
+                "sourceCollectionRuns": stopped_source_collection_runs,
                 "evolutionRuns": stopped_evolution_runs,
             }
         except Exception:
@@ -531,6 +538,7 @@ def request_runtime_shutdown(
                     source=normalized_source,
                     stopped_chat_room_rounds=stopped_chat_room_rounds,
                     stopped_chat_turns=stopped_chat_turns,
+                    stopped_source_collection_runs=stopped_source_collection_runs,
                     stopped_evolution_runs=stopped_evolution_runs,
                 ),
             )
@@ -544,6 +552,7 @@ def request_runtime_shutdown(
                 ),
                 "chatTurns": stopped_chat_turns,
                 "chatRoomRounds": stopped_chat_room_rounds,
+                "sourceCollectionRuns": stopped_source_collection_runs,
                 "evolutionRuns": stopped_evolution_runs,
             }
 
@@ -557,6 +566,7 @@ def request_runtime_shutdown(
             source=normalized_source,
             stopped_chat_room_rounds=stopped_chat_room_rounds,
             stopped_chat_turns=stopped_chat_turns,
+            stopped_source_collection_runs=stopped_source_collection_runs,
             stopped_evolution_runs=stopped_evolution_runs,
         ),
     )
@@ -570,6 +580,7 @@ def request_runtime_shutdown(
         ),
         "chatTurns": stopped_chat_turns,
         "chatRoomRounds": stopped_chat_room_rounds,
+        "sourceCollectionRuns": stopped_source_collection_runs,
         "evolutionRuns": stopped_evolution_runs,
     }
 
@@ -579,6 +590,7 @@ def _electron_retire_local_shutdown(
     *,
     stopped_chat_room_rounds: list[dict[str, object]] | None = None,
     stopped_chat_turns: list[dict[str, object]] | None = None,
+    stopped_source_collection_runs: list[dict[str, object]] | None = None,
     stopped_evolution_runs: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     """Graceful self-exit for the Electron retire contract.
@@ -599,6 +611,11 @@ def _electron_retire_local_shutdown(
     stopped_chat_turns = (
         _stop_active_chat_turns_before_shutdown() if stopped_chat_turns is None else stopped_chat_turns
     )
+    stopped_source_collection_runs = (
+        _stop_active_source_collection_runs_before_shutdown()
+        if stopped_source_collection_runs is None
+        else stopped_source_collection_runs
+    )
     stopped_evolution_runs = (
         _stop_active_evolution_runs_before_shutdown() if stopped_evolution_runs is None else stopped_evolution_runs
     )
@@ -612,6 +629,7 @@ def _electron_retire_local_shutdown(
             source="electron_retire",
             stopped_chat_room_rounds=stopped_chat_room_rounds,
             stopped_chat_turns=stopped_chat_turns,
+            stopped_source_collection_runs=stopped_source_collection_runs,
             stopped_evolution_runs=stopped_evolution_runs,
         ),
     )
@@ -625,6 +643,7 @@ def _electron_retire_local_shutdown(
         ),
         "chatTurns": stopped_chat_turns,
         "chatRoomRounds": stopped_chat_room_rounds,
+        "sourceCollectionRuns": stopped_source_collection_runs,
         "evolutionRuns": stopped_evolution_runs,
     }
 
@@ -654,6 +673,7 @@ def _delegated_window_close_response(*, lang: str, source: str) -> dict[str, obj
         ),
         "chatTurns": [],
         "chatRoomRounds": [],
+        "sourceCollectionRuns": [],
         "evolutionRuns": [],
     }
     _record_shutdown_event(
@@ -694,6 +714,7 @@ def request_runtime_restart() -> dict[str, object]:
     (
         stopped_chat_room_rounds,
         stopped_chat_turns,
+        stopped_source_collection_runs,
         stopped_evolution_runs,
     ) = _harvest_active_work_before_lifecycle_change(
         scene="restart",
@@ -717,6 +738,7 @@ def request_runtime_restart() -> dict[str, object]:
                 "unharvestedWorkRuns": _unharvested_lifecycle_work_items(
                     stopped_chat_room_rounds,
                     stopped_chat_turns,
+                    stopped_source_collection_runs,
                     stopped_evolution_runs,
                 )[:8],
             },
@@ -746,6 +768,7 @@ def request_runtime_restart() -> dict[str, object]:
             ),
             "chatTurns": [],
             "chatRoomRounds": [],
+            "sourceCollectionRuns": [],
             "evolutionRuns": [],
         }
 
@@ -766,6 +789,7 @@ def request_runtime_restart() -> dict[str, object]:
                 mode="runtime_manager",
                 stopped_chat_room_rounds=stopped_chat_room_rounds,
                 stopped_chat_turns=stopped_chat_turns,
+                stopped_source_collection_runs=stopped_source_collection_runs,
                 stopped_evolution_runs=stopped_evolution_runs,
                 active_work_runs=active_work_runs,
             )
@@ -782,6 +806,7 @@ def request_runtime_restart() -> dict[str, object]:
             mode="runtime_manager",
             stopped_chat_room_rounds=stopped_chat_room_rounds,
             stopped_chat_turns=stopped_chat_turns,
+            stopped_source_collection_runs=stopped_source_collection_runs,
             stopped_evolution_runs=stopped_evolution_runs,
             active_work_runs=active_work_runs,
         )
@@ -798,6 +823,7 @@ def request_runtime_restart() -> dict[str, object]:
         ),
         "chatTurns": stopped_chat_turns,
         "chatRoomRounds": stopped_chat_room_rounds,
+        "sourceCollectionRuns": stopped_source_collection_runs,
         "evolutionRuns": stopped_evolution_runs,
     }
 
@@ -876,6 +902,7 @@ def _shutdown_event_fields(
     mode: str,
     stopped_chat_room_rounds: list[dict[str, object]],
     stopped_chat_turns: list[dict[str, object]],
+    stopped_source_collection_runs: list[dict[str, object]],
     stopped_evolution_runs: list[dict[str, object]],
     source: str = "web_ui",
 ) -> dict[str, object]:
@@ -884,9 +911,11 @@ def _shutdown_event_fields(
         "mode": mode,
         "chatRoomRoundCount": len(stopped_chat_room_rounds),
         "chatTurnCount": len(stopped_chat_turns),
+        "sourceCollectionRunCount": len(stopped_source_collection_runs),
         "evolutionRunCount": len(stopped_evolution_runs),
         "chatRoomRoundStatuses": _status_counts(stopped_chat_room_rounds),
         "chatTurnStatuses": _status_counts(stopped_chat_turns),
+        "sourceCollectionRunStatuses": _status_counts(stopped_source_collection_runs),
         "evolutionRunStatuses": _status_counts(stopped_evolution_runs),
         "evolutionRunKinds": sorted(
             {
@@ -903,6 +932,7 @@ def _restart_event_fields(
     mode: str,
     stopped_chat_room_rounds: list[dict[str, object]],
     stopped_chat_turns: list[dict[str, object]],
+    stopped_source_collection_runs: list[dict[str, object]],
     stopped_evolution_runs: list[dict[str, object]],
     active_work_runs: list[dict[str, str]] | None = None,
 ) -> dict[str, object]:
@@ -914,9 +944,11 @@ def _restart_event_fields(
         "activeWorkKinds": _active_work_kinds(active_work_runs),
         "chatRoomRoundCount": len(stopped_chat_room_rounds),
         "chatTurnCount": len(stopped_chat_turns),
+        "sourceCollectionRunCount": len(stopped_source_collection_runs),
         "evolutionRunCount": len(stopped_evolution_runs),
         "chatRoomRoundStatuses": _status_counts(stopped_chat_room_rounds),
         "chatTurnStatuses": _status_counts(stopped_chat_turns),
+        "sourceCollectionRunStatuses": _status_counts(stopped_source_collection_runs),
         "evolutionRunStatuses": _status_counts(stopped_evolution_runs),
         "evolutionRunKinds": sorted(
             {
@@ -1004,7 +1036,12 @@ def _harvest_active_work_before_lifecycle_change(
     *,
     scene: str,
     record,
-) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, object]]]:
+) -> tuple[
+    list[dict[str, object]],
+    list[dict[str, object]],
+    list[dict[str, object]],
+    list[dict[str, object]],
+]:
     """Best-effort bounded reaping of in-flight work before a lifecycle change.
 
     Every action is recorded as a lifecycle event (stopped/skipped/timeout plus
@@ -1014,8 +1051,14 @@ def _harvest_active_work_before_lifecycle_change(
     deadline = time.monotonic() + SHUTDOWN_HARVEST_TOTAL_WAIT_SECONDS
     stopped_chat_room_rounds = _stop_active_chat_room_rounds_before_shutdown(deadline=deadline)
     stopped_chat_turns = _stop_active_chat_turns_before_shutdown(deadline=deadline)
+    stopped_source_collection_runs = _stop_active_source_collection_runs_before_shutdown(deadline=deadline)
     stopped_evolution_runs = _stop_active_evolution_runs_before_shutdown(deadline=deadline)
-    for items in (stopped_chat_room_rounds, stopped_chat_turns, stopped_evolution_runs):
+    for items in (
+        stopped_chat_room_rounds,
+        stopped_chat_turns,
+        stopped_source_collection_runs,
+        stopped_evolution_runs,
+    ):
         for item in items:
             status = str(item.get("status") or "unknown")
             if status == "stopped":
@@ -1040,7 +1083,12 @@ def _harvest_active_work_before_lifecycle_change(
                     "error": str(item.get("error") or ""),
                 },
             )
-    return stopped_chat_room_rounds, stopped_chat_turns, stopped_evolution_runs
+    return (
+        stopped_chat_room_rounds,
+        stopped_chat_turns,
+        stopped_source_collection_runs,
+        stopped_evolution_runs,
+    )
 
 
 def _unharvested_lifecycle_work_items(
@@ -1287,6 +1335,129 @@ def _active_chat_room_round_items() -> list[dict[str, str]]:
             "roomId": str(payload.get("roomId") or "").strip(),
         }
     ]
+
+
+def _active_source_collection_run_items() -> list[dict[str, str]]:
+    """Active source collections with the team identity required to stop them."""
+
+    try:
+        summary = _work_run_summary()
+    except Exception:
+        return []
+    if not isinstance(summary, dict):
+        return []
+
+    candidates: list[dict] = []
+    active_items = summary.get("activeItems")
+    if isinstance(active_items, dict):
+        payloads = active_items.get("source_collection_run")
+        if isinstance(payloads, list):
+            candidates.extend(item for item in payloads if isinstance(item, dict))
+    active = summary.get("active")
+    if isinstance(active, dict):
+        payload = active.get("source_collection_run")
+        if isinstance(payload, dict):
+            candidates.append(payload)
+
+    items: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for payload in candidates:
+        if not _active_work_payload_blocks_lifecycle(payload):
+            continue
+        run_id = str(payload.get("runId") or "").strip()
+        if not run_id or run_id in seen:
+            continue
+        seen.add(run_id)
+        items.append(
+            {
+                "kind": "source_collection_run",
+                "runId": run_id,
+                "teamId": str(payload.get("teamId") or "").strip(),
+            }
+        )
+    return items
+
+
+def _stop_active_source_collection_runs_before_shutdown(
+    *,
+    deadline: float | None = None,
+) -> list[dict[str, object]]:
+    """Cancel active source searches through their existing owned stop path."""
+
+    if deadline is None:
+        deadline = time.monotonic() + SHUTDOWN_HARVEST_TOTAL_WAIT_SECONDS
+    active_completed, active_value, active_error = _run_with_bounded_wait(
+        _active_source_collection_run_items,
+        timeout_seconds=_remaining_harvest_seconds(deadline),
+    )
+    if not active_completed:
+        return [
+            {
+                "kind": "source_collection_run",
+                "runId": "",
+                "teamId": "",
+                "status": "timeout",
+                "error": "active_source_collection_read_wait_timeout",
+            }
+        ]
+    if active_error is not None:
+        return [
+            {
+                "kind": "source_collection_run",
+                "runId": "",
+                "teamId": "",
+                "status": "failed",
+                "error": f"{type(active_error).__name__}: {active_error}",
+            }
+        ]
+
+    from core.web.services.team_workflow.source_collection import runs as source_collection_runs
+
+    reason = text_for(
+        get_web_language(),
+        zh="工作台关闭前停止活跃资料搜集。",
+        en="Stopped active source collection before workbench shutdown.",
+    )
+    stopped: list[dict[str, object]] = []
+    for item in active_value or []:
+        run_id = str(item.get("runId") or "").strip()
+        team_id = str(item.get("teamId") or "").strip()
+        record: dict[str, object] = {
+            "kind": "source_collection_run",
+            "runId": run_id,
+            "teamId": team_id,
+        }
+        if not run_id or not team_id:
+            record.update(
+                status="skipped",
+                error="source_collection_stop_identity_missing",
+            )
+            stopped.append(record)
+            continue
+        stop_completed, stop_value, stop_error = _run_with_bounded_wait(
+            lambda target_team_id=team_id, target_run_id=run_id: (
+                source_collection_runs.stop_source_collection_search(
+                    target_team_id,
+                    target_run_id,
+                    reason=reason,
+                )
+            ),
+            timeout_seconds=_remaining_harvest_seconds(deadline),
+        )
+        if not stop_completed:
+            record.update(status="timeout", error="source_collection_stop_wait_timeout")
+        elif stop_error is not None:
+            record.update(
+                status="failed",
+                error=f"{type(stop_error).__name__}: {stop_error}",
+            )
+        else:
+            record.update(
+                status="stopped",
+                terminalStatus=str((stop_value or {}).get("status") or "cancelled"),
+            )
+        stopped.append(record)
+    return stopped
 
 
 def _stop_active_chat_room_rounds_before_shutdown(
