@@ -103,3 +103,67 @@ def test_approved_candidate_remains_authoritative_when_identity_matches(
 
     assert candidates[0]["claim"] == "approved statement"
     assert candidates[0]["rationale"] == "approved mechanism"
+
+
+def test_formal_review_recovers_exact_legacy_unscoped_candidate(
+    monkeypatch,
+) -> None:
+    """A formal meeting may bind a candidate created before run scoping."""
+
+    monkeypatch.setattr(
+        question_launch,
+        "_approved_details",
+        lambda _team_id: {
+            "SCI-020": {
+                "output": {
+                    "hypotheses": [
+                        {
+                            "hypothesis_id": "legacy-approved-other",
+                            "statement": "older approved statement",
+                            "mechanism": "older approved mechanism",
+                        }
+                    ]
+                }
+            }
+        },
+    )
+    calls: list[str] = []
+
+    def list_candidates(*_args, **kwargs):
+        workflow_run_id = str(kwargs.get("workflow_run_id") or "")
+        calls.append(workflow_run_id)
+        if workflow_run_id:
+            return {"candidates": []}
+        return {
+            "candidates": [
+                {
+                    "candidateId": "sci-020-legacy-bound",
+                    "statement": "legacy but formally bound statement",
+                    "rationale": "legacy but formally bound rationale",
+                },
+                {
+                    "candidateId": "sci-020-unrelated",
+                    "statement": "must not be selected",
+                    "rationale": "must not be selected",
+                },
+            ]
+        }
+
+    monkeypatch.setattr(chain, "list_hypothesis_candidates", list_candidates)
+
+    candidates = chain._build_round_candidates(
+        "research-team",
+        {
+            "question": "SCI-020",
+            "workflowRunId": "run-current",
+            "discussionItemRefs": [
+                "hypothesis_candidate:sci-020-legacy-bound"
+            ],
+        },
+        workflow_run_id="run-current",
+    )
+
+    assert calls == ["run-current", ""]
+    assert candidates[0]["candidateId"] == "sci-020-legacy-bound"
+    assert candidates[0]["claim"] == "legacy but formally bound statement"
+    assert candidates[0]["rationale"] == "legacy but formally bound rationale"
