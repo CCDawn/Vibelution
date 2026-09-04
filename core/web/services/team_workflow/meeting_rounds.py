@@ -2251,6 +2251,62 @@ def _reused_close_result(
     }
 
 
+def _record_room_context_promotion_failure(
+    *, room_id: str, digest_id: str, error: Exception
+) -> None:
+    try:
+        from core.web.services.runtime_scene_service import (
+            record_runtime_scene_event_quietly,
+        )
+
+        record_runtime_scene_event_quietly(
+            "team_workflow",
+            "meeting_closure",
+            "meeting_rounds.context_projection_failed",
+            message="Formal meeting artifacts committed but room context projection failed.",
+            level="warning",
+            outcome="degraded",
+            fields={
+                "roomId": room_id,
+                "digestId": digest_id,
+                "errorType": type(error).__name__,
+            },
+            lifecycle=False,
+        )
+    except Exception:  # noqa: BLE001 - diagnostics must never alter closure state
+        return
+
+
+def _promote_closed_meeting_room_context(
+    meeting_round: Mapping[str, Any],
+    digest: Mapping[str, Any],
+    decisions: list[Mapping[str, Any]],
+) -> None:
+    """Notify the rebuildable room projection after formal artifacts commit."""
+
+    room_id = str(meeting_round.get("linkedChatRoomId") or "").strip()
+    if not room_id or not digest:
+        return
+    try:
+        from core.web.services import chat_room_service
+
+        chat_room_service.promote_chat_room_formal_context(
+            room_id,
+            digest=digest,
+            decisions=decisions,
+        )
+    except Exception as exc:  # noqa: BLE001 - projection cannot roll back closure
+        # Formal digest/decision records are already authoritative.  A derived
+        # checkpoint failure must not roll back or duplicate those artifacts;
+        # the room projection can be rebuilt on its next terminal/read gate.
+        _record_room_context_promotion_failure(
+            room_id=room_id,
+            digest_id=str(digest.get("digestId") or "").strip(),
+            error=exc,
+        )
+        return
+
+
 def approve_meeting_closure(
     team_id: str,
     meeting_round_id: str,
@@ -2282,7 +2338,13 @@ def approve_meeting_closure(
                 raise ResearchMeetingRoundError(
                     "closed meeting round cannot be reused with different closure content"
                 )
-            return _reused_close_result(normalized_team_id, meeting_round)
+            reused = _reused_close_result(normalized_team_id, meeting_round)
+            _promote_closed_meeting_room_context(
+                meeting_round,
+                reused.get("digest") or {},
+                list(reused.get("decisions") or []),
+            )
+            return reused
         _ensure_transition_from(meeting_round, "awaiting_approval", "closed")
         digest_draft = (
             dict(meeting_round.get("digestDraft"))
@@ -2332,6 +2394,7 @@ def approve_meeting_closure(
     )
     with _write_lock("approve_meeting_closure.commit"):
         _append_round_record(normalized_team_id, closed_record)
+    _promote_closed_meeting_room_context(closed_record, digest, decisions)
     return {
         "schemaVersion": SCHEMA_VERSION,
         "teamId": normalized_team_id,
