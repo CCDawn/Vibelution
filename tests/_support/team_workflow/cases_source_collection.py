@@ -3879,6 +3879,14 @@ def test_source_collection_context_retry_evidence_returns_only_missing_anchor_ca
     assert response["writeback"]["coverageSummary"]["complete"] is True
     assert response["writeback"]["materializedContentExtraction"]["missingEvidenceAnchorCount"] == 0
     assert response["writeback"]["coverageSummary"]["blockedCandidateIds"] == [candidates[1]["candidateId"]]
+    assert response["task"]["status"] == "incomplete"
+    assert response["writeback"]["agentRequestedStatus"] == "completed"
+    assert response["task"]["completionGate"]["passed"] is False
+    assert response["writeback"]["closureSummary"]["artifactComplete"] is False
+    assert response["writeback"]["closureSummary"]["artifactStatus"] == "evidence_gap"
+    assert response["writeback"]["closureSummary"]["unresolvedBlockedIds"] == [
+        candidates[1]["candidateId"]
+    ]
     retry_context = team_workflow_orchestration_service.get_source_collection_stage_task_context(
         team["teamId"],
         task_id=task["taskId"],
@@ -4003,6 +4011,8 @@ def test_source_collection_context_retry_evidence_returns_only_missing_anchor_ca
     assert retry_writeback["writeback"]["coverageSummary"]["missing"] == 0
     assert retry_writeback["writeback"]["coverageSummary"]["complete"] is True
     assert retry_writeback["writeback"]["coverageSummary"]["coverageKind"] == "candidate_extractions"
+    assert retry_writeback["writeback"]["closureSummary"]["unresolvedBlockedIds"] == []
+    assert retry_writeback["writeback"]["closureSummary"]["artifactComplete"] is True
     assert retry_writeback["writeback"]["closureSummary"]["evidenceFetchProgress"] == {
         "required": True,
         "total": 1,

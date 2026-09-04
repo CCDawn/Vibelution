@@ -1399,7 +1399,13 @@ def _reconcile_source_collection_stage_session_task_completion_gate(
     current_status = s._trim_text(task.get("status"), max_length=80).lower()
     next_status = current_status
     if requested_status == "completed":
-        next_status = "completed" if completion_gate.get("passed") else "needs_review"
+        next_status = (
+            "completed"
+            if completion_gate.get("passed")
+            else "incomplete"
+            if current_status == "incomplete"
+            else "needs_review"
+        )
     elif current_status == "completed" and not completion_gate.get("passed"):
         next_status = "needs_review"
 

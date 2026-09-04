@@ -519,15 +519,25 @@ def _source_collection_stage_writeback_content_extraction_summary(
     }
     if evidence_ledgers is not None:
         ledger_items = [item for item in list(evidence_ledgers or []) if isinstance(item, dict)]
+        evidence_ready_candidate_ids = [
+            s._trim_text(item.get("candidateId"), max_length=160)
+            for item in ledger_items
+            if s._trim_text(item.get("candidateId"), max_length=160)
+            and s._trim_text(item.get("evidenceStatus"), max_length=80) == "evidence_ready"
+        ]
+        missing_evidence_anchor_candidate_ids = [
+            s._trim_text(item.get("candidateId"), max_length=160)
+            for item in ledger_items
+            if s._trim_text(item.get("candidateId"), max_length=160)
+            and s._trim_text(item.get("evidenceStatus"), max_length=80) == "missing_evidence_anchor"
+        ]
         summary.update(
             {
                 "evidenceLedgerCandidateCount": len(ledger_items),
-                "evidenceReadyCandidateCount": sum(
-                    1 for item in ledger_items if s._trim_text(item.get("evidenceStatus"), max_length=80) == "evidence_ready"
-                ),
-                "missingEvidenceAnchorCount": sum(
-                    1 for item in ledger_items if s._trim_text(item.get("evidenceStatus"), max_length=80) == "missing_evidence_anchor"
-                ),
+                "evidenceReadyCandidateCount": len(evidence_ready_candidate_ids),
+                "evidenceReadyCandidateIds": evidence_ready_candidate_ids[:120],
+                "missingEvidenceAnchorCount": len(missing_evidence_anchor_candidate_ids),
+                "missingEvidenceAnchorCandidateIds": missing_evidence_anchor_candidate_ids[:120],
                 "evidenceLedgerCandidateIds": [
                     s._trim_text(item.get("candidateId"), max_length=160)
                     for item in ledger_items
@@ -1264,6 +1274,25 @@ def _source_collection_stage_writeback_closure_summary(
     invalid = s._source_collection_count(coverage.get("invalid"))
     blocked = s._source_collection_count(coverage.get("blocked"))
     complete = bool(coverage.get("complete")) if coverage else False
+    evidence_ready_candidate_ids = set(
+        s._normalize_text_list(
+            materialized_content_extraction.get("evidenceReadyCandidateIds"),
+            max_items=500,
+            max_length=160,
+        )
+    )
+    unresolved_blocked_ids = [
+        *[
+            str(item)
+            for item in list(coverage.get("blockedCandidateIds") or [])
+            if str(item or "") and str(item) not in evidence_ready_candidate_ids
+        ],
+        *[
+            str(item)
+            for item in list(coverage.get("blockedRecordIds") or [])
+            if str(item or "")
+        ],
+    ][:120]
     invalid_ids = [
         *[str(item) for item in list(coverage.get("invalidRecordIds") or []) if str(item or "")],
         *[str(item) for item in list(coverage.get("invalidCandidateIds") or []) if str(item or "")],
@@ -1350,10 +1379,11 @@ def _source_collection_stage_writeback_closure_summary(
     artifact_complete = bool(
         success_count > 0
         and (not coverage or complete)
+        and not unresolved_blocked_ids
         and not relation_edges_not_materialized
         and not relation_dangling_edge_count
     )
-    if not artifact_complete and excluded_source_count > 0 and (not coverage or complete):
+    if not artifact_complete and excluded_source_count > 0 and (not coverage or complete) and not unresolved_blocked_ids:
         artifact_complete = True
     evidence_fetch_progress = s._source_collection_evidence_fetch_progress(
         task,
@@ -1394,6 +1424,17 @@ def _source_collection_stage_writeback_closure_summary(
         message = (
             f"候选关系图已生成，但有 {relation_dangling_edge_count} 条边的端点不在本轮节点表中，"
             "已被丢弃；请按真实 candidateId 补齐这些关系后再推进。"
+        )
+    elif unresolved_blocked_ids:
+        user_status = "partial"
+        artifact_status = "evidence_gap"
+        message = (
+            f"已处理 {processed}/{total} 条候选，但仍有 {len(unresolved_blocked_ids)} 条缺少可用证据锚；"
+            "请补证后再推进。"
+        )
+        retry_instruction = (
+            "请使用 retry_evidence 上下文只补 unresolvedBlockedIds 中候选的真实证据锚，"
+            "不要重做已有 evidence_ready 结果。"
         )
     elif success_count > 0 and (not coverage or complete) and task_checklist_complete:
         user_status = "success"
@@ -1471,6 +1512,7 @@ def _source_collection_stage_writeback_closure_summary(
         "excludedSourceCount": excluded_source_count,
         "failedCount": missing + invalid,
         "blockedCount": blocked,
+        "unresolvedBlockedIds": unresolved_blocked_ids,
         "coverageSummary": s._normalize_metadata(coverage),
         "invalidIds": invalid_ids,
         "retryInstruction": retry_instruction,
