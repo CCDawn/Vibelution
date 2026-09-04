@@ -4226,8 +4226,9 @@ def _missing_round_plans_for_question(
     One plan per selection whose newest link round ``N`` satisfies all of:
     every latest-attempt meeting at round ``N`` is closed, the newest closure
     is older than ``grace_ms`` (a close still running its synchronous fan-in
-    generation must never be raced), and no stored HypothesisRound references
-    any round-``N`` meeting.  A plan that fails a guard returns its skip
+    generation must never be raced), and no stored HypothesisRound covers the
+    complete latest-attempt meeting group for round ``N``.  A plan that fails
+    a guard returns its skip
     reason instead; the caller reports only the decisive outcomes.
     """
 
@@ -4250,11 +4251,11 @@ def _missing_round_plans_for_question(
             link
         )
 
-    stored_rounds = _question_hypothesis_rounds(team_id, question_id)
-    stored_meeting_ids: set[str] = set()
-    for round_record in stored_rounds:
-        if isinstance(round_record, Mapping):
-            stored_meeting_ids |= _round_refs_meeting_ids(round_record)
+    stored_round_meeting_ids = [
+        _round_refs_meeting_ids(round_record)
+        for round_record in _question_hypothesis_rounds(team_id, question_id)
+        if isinstance(round_record, Mapping)
+    ]
 
     plans: list[dict[str, Any]] = []
     for selection_id, selection_links in sorted(by_selection.items()):
@@ -4275,15 +4276,6 @@ def _missing_round_plans_for_question(
             "selectionId": selection_id,
             "roundIndex": latest_round_index,
         }
-        round_n_meeting_ids = [
-            str(item.get("meetingRoundId") or "").strip() for item in round_links
-        ]
-        # The round id is content-addressed over the whole fan-in group, so a
-        # stored round covers every attempt meeting of the round; any overlap
-        # means the round landed and nothing is missing.
-        if stored_meeting_ids.intersection(round_n_meeting_ids):
-            plans.append({**fields, "status": "skipped", "reason": "round_exists"})
-            continue
         # Retry attempts append one link per attempt while reusing the same
         # (candidateId, roundIndex) binding; only the newest attempt counts.
         latest_attempt: dict[str, dict[str, Any]] = {}
@@ -4299,6 +4291,20 @@ def _missing_round_plans_for_question(
             plans.append(
                 {**fields, "status": "skipped", "reason": "no_round_meetings"}
             )
+            continue
+        attempt_meeting_ids = {
+            str(item.get("meetingRoundId") or "").strip()
+            for item in attempt_links
+            if str(item.get("meetingRoundId") or "").strip()
+        }
+        # A generated HypothesisRound is content-addressed over the complete
+        # fan-in group.  Historical rounds may share one meeting with the
+        # current attempt, so partial overlap does not prove this attempt landed.
+        if attempt_meeting_ids and any(
+            attempt_meeting_ids <= round_meeting_ids
+            for round_meeting_ids in stored_round_meeting_ids
+        ):
+            plans.append({**fields, "status": "skipped", "reason": "round_exists"})
             continue
         attempt_meetings: list[dict[str, Any]] = []
         skip_reason = ""
@@ -10356,24 +10362,13 @@ def _build_round_candidates(
             str(item.get("hypothesis_id") or "").strip(): item
             for item in hypotheses
         }
-    missing_candidate_ids = [
-        candidate_id
-        for candidate_id in normalized_candidate_ids
-        if candidate_id not in artifact_by_id
-    ]
-    if detail is None or missing_candidate_ids:
-        resolved_workflow_run_id = str(
-            workflow_run_id or _meeting_workflow_run_id(meeting_round)
-        ).strip()
-        ledger_candidates = list_hypothesis_candidates(
-            team_id,
-            question_id=question_id,
-            workflow_run_id=resolved_workflow_run_id,
-        )["candidates"]
-        for item in ledger_candidates:
-            if not isinstance(item, Mapping):
-                continue
+    requested_candidate_ids = set(normalized_candidate_ids)
+
+    def add_ledger_candidates(items: Sequence[Mapping[str, Any]]) -> None:
+        for item in items:
             candidate_id = str(item.get("candidateId") or "").strip()
+            if not candidate_id or candidate_id not in requested_candidate_ids:
+                continue
             artifact_by_id.setdefault(
                 candidate_id,
                 {
@@ -10399,6 +10394,42 @@ def _build_round_candidates(
                         else {}
                     ),
                 },
+            )
+
+    missing_candidate_ids = [
+        candidate_id
+        for candidate_id in normalized_candidate_ids
+        if candidate_id not in artifact_by_id
+    ]
+    if detail is None or missing_candidate_ids:
+        resolved_workflow_run_id = str(
+            workflow_run_id or _meeting_workflow_run_id(meeting_round)
+        ).strip()
+        add_ledger_candidates(
+            list_hypothesis_candidates(
+                team_id,
+                question_id=question_id,
+                workflow_run_id=resolved_workflow_run_id,
+            )["candidates"]
+        )
+        # Legacy generation candidates predate workflowRunId scoping.  A
+        # current formal review meeting still binds their content-addressed
+        # candidate ids explicitly in discussionItemRefs.  If that exact id
+        # is absent from both the approved artifact and the run-scoped
+        # generation ledger, recover only the requested identity from the
+        # same question's legacy ledger.  Run-scoped and approved authorities
+        # keep precedence through setdefault.
+        unresolved_candidate_ids = [
+            candidate_id
+            for candidate_id in normalized_candidate_ids
+            if candidate_id not in artifact_by_id
+        ]
+        if resolved_workflow_run_id and unresolved_candidate_ids:
+            add_ledger_candidates(
+                list_hypothesis_candidates(
+                    team_id,
+                    question_id=question_id,
+                )["candidates"]
             )
     candidates: list[dict[str, Any]] = []
     for candidate_id in normalized_candidate_ids:

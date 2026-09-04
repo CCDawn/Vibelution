@@ -1665,11 +1665,13 @@ def test_auto_regenerate_skips_when_round_already_exists(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """该轮任一会议已被某个已存 round 的 meetingRefs 覆盖 → skipped
-    round_exists，不重复生成。"""
+    """当前 attempt 的完整会议组已被同一 round 覆盖 → 不重复生成。"""
     _regen_env(tmp_path, monkeypatch)
     _seed_regen_chain()
-    _seed_stored_round("hround-existing-r2", meeting_ids=[_REGEN_R2_MEETING_A])
+    _seed_stored_round(
+        "hround-existing-r2",
+        meeting_ids=[_REGEN_R2_MEETING_A, _REGEN_R2_MEETING_B],
+    )
     calls: list[str] = []
 
     def _regenerate(team_id, meeting_round_id, **_kwargs):
@@ -1685,6 +1687,35 @@ def test_auto_regenerate_skips_when_round_already_exists(
     assert summary["status"] == "skipped"
     assert summary["reason"] == "round_exists"
     assert calls == []
+
+
+def test_auto_regenerate_does_not_treat_partial_historical_overlap_as_round(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """旧 round 只引用当前 fan-in 的一部分时，当前完整 attempt 仍需生成。"""
+    _regen_env(tmp_path, monkeypatch)
+    _seed_regen_chain()
+    _seed_stored_round("hround-legacy-partial", meeting_ids=[_REGEN_R2_MEETING_A])
+    calls: list[str] = []
+
+    def _regenerate(team_id, meeting_round_id, **_kwargs):
+        calls.append(meeting_round_id)
+        record = _seed_stored_round(
+            "hround-current-complete",
+            meeting_ids=[_REGEN_R2_MEETING_A, _REGEN_R2_MEETING_B],
+        )
+        return {"status": "created", "round": record}
+
+    monkeypatch.setattr(chain, "regenerate_hypothesis_round", _regenerate)
+
+    summary = chain.auto_regenerate_missing_hypothesis_round(
+        _TEAM_ID, question_id=_QUESTION_ID, now_ms=_offset_ms(600)
+    )
+
+    assert summary["status"] == "created"
+    assert summary["reason"] == "round_generated"
+    assert calls == [_REGEN_R2_MEETING_B]
 
 
 def test_auto_regenerate_skips_when_review_meetings_still_open(
