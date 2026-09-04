@@ -7,6 +7,7 @@ import {
   peekBrowserTelemetryDeliveryBufferForTests,
   postBrowserTelemetry,
   resetBrowserTelemetryDeliveryBufferForTests,
+  shouldCaptureConsoleTelemetry,
 } from "./browserTelemetry";
 import { resetPageInstanceIdForTests } from "./pageInstance";
 
@@ -265,6 +266,16 @@ describe("browser telemetry", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(peekBrowserTelemetryDeliveryBufferForTests()).toHaveLength(1);
     expect(peekBrowserTelemetryDeliveryBufferForTests()[0]).toContain("browser.route.error");
+  });
+
+  it("excludes telemetry delivery failures from console telemetry capture", () => {
+    expect(shouldCaptureConsoleTelemetry([
+      "browser telemetry delivery failed",
+      "HTTP 502",
+    ])).toBe(false);
+    expect(shouldCaptureConsoleTelemetry([
+      "ordinary application warning",
+    ])).toBe(true);
   });
 
   it("buffers HTTP delivery failures without posting another telemetry event", async () => {

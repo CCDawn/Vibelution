@@ -37,6 +37,7 @@ import {
   collectBrowserMemorySnapshot,
   collectBrowserPageSnapshot,
   postBrowserTelemetry,
+  shouldCaptureConsoleTelemetry,
   summarizeConsoleArgs,
   type BrowserTelemetryEventInput,
 } from "./browserTelemetry";
@@ -1849,15 +1850,17 @@ export function AppShell() {
     const originalError = window.console.error.bind(window.console) as Console["error"];
 
     window.console.warn = ((...args: Parameters<Console["warn"]>) => {
-      emitBrowserTelemetry({
-        phase: "console",
-        eventCode: "browser.console.warn",
-        message: summarizeConsoleArgs(args as unknown[], 240) || "Console warn",
-        level: "warning",
-        fields: {
-          argsPreview: summarizeConsoleArgs(args as unknown[], 1200),
-        },
-      });
+      if (shouldCaptureConsoleTelemetry(args as unknown[])) {
+        emitBrowserTelemetry({
+          phase: "console",
+          eventCode: "browser.console.warn",
+          message: summarizeConsoleArgs(args as unknown[], 240) || "Console warn",
+          level: "warning",
+          fields: {
+            argsPreview: summarizeConsoleArgs(args as unknown[], 1200),
+          },
+        });
+      }
       originalWarn(...args);
     }) as Console["warn"];
 
