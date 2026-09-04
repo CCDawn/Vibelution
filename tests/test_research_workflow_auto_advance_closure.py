@@ -786,6 +786,9 @@ def _approve_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[dict[s
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(team_service, "assert_team_exists", lambda value: value)
     monkeypatch.setattr(meeting_rounds, "PROJECT_ROOT", tmp_path)
+    # The TTL default is an operator decision: a leaked env override must not
+    # change what "default" means in these tests.
+    monkeypatch.delenv("VIBELUTION_AUTO_APPROVE_DIGEST_TTL_MS", raising=False)
     events: list[dict[str, Any]] = []
 
     def _capture(
@@ -895,7 +898,8 @@ def test_auto_approve_closes_stale_review_digest_with_request_new_evidence(
     summary = chain.auto_approve_awaiting_review_digests(
         _TEAM_ID,
         question_id=_QUESTION_ID,
-        # 11 minutes after the digest landed: beyond the default 10min TTL.
+        # 11 minutes after the digest landed: beyond any positive window and,
+        # under the zero default, approved on this very pass regardless.
         now_ms=_offset_ms(660),
     )
 
@@ -936,8 +940,10 @@ def test_auto_approve_leaves_fresh_digests_alone(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """TTL 之内的 awaiting_approval 会议不碰（reason=within_ttl）。"""
+    """正 TTL 窗口之内的 awaiting_approval 会议不碰（reason=within_ttl）：
+    env 恢复的人工窗口语义保留。"""
     events = _approve_env(tmp_path, monkeypatch)
+    monkeypatch.setenv("VIBELUTION_AUTO_APPROVE_DIGEST_TTL_MS", "60000")
     _seed_meeting(
         _awaiting_review_meeting(_REVIEW_MEETING_ID, updated_at=_offset_iso(0))
     )
@@ -946,7 +952,7 @@ def test_auto_approve_leaves_fresh_digests_alone(
     summary = chain.auto_approve_awaiting_review_digests(
         _TEAM_ID,
         question_id=_QUESTION_ID,
-        now_ms=_offset_ms(60),  # one minute old: well within the TTL
+        now_ms=_offset_ms(30),  # 30 seconds old: well within the 60s window
     )
 
     assert closes == []
@@ -960,6 +966,43 @@ def test_auto_approve_leaves_fresh_digests_alone(
     assert len(skipped) == 1
     assert skipped[0]["outcome"] == "skipped"
     assert skipped[0]["fields"]["reason"] == "within_ttl"
+
+
+def test_auto_approve_default_ttl_zero_approves_immediately(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """默认 TTL=0：刚落地的 awaiting_approval 会议在同一个 sweep pass 内
+    立即批准，不再等待人工窗口（旧默认 180s 已移除）。"""
+    events = _approve_env(tmp_path, monkeypatch)
+    monkeypatch.delenv("VIBELUTION_AUTO_APPROVE_DIGEST_TTL_MS", raising=False)
+    assert chain.DEFAULT_AUTO_APPROVE_DIGEST_TTL_MS == 0
+    assert chain._auto_approve_digest_ttl_ms() == 0
+    _seed_meeting(
+        _awaiting_review_meeting(_REVIEW_MEETING_ID, updated_at=_offset_iso(0))
+    )
+    closes = _capture_close(monkeypatch)
+
+    summary = chain.auto_approve_awaiting_review_digests(
+        _TEAM_ID,
+        question_id=_QUESTION_ID,
+        # Same instant the digest landed: age 0 is already beyond TTL=0.
+        now_ms=_offset_ms(0),
+    )
+
+    assert summary["awaitingApproval"] == 1
+    assert summary["approved"] == 1
+    assert summary["failed"] == 0
+    assert len(closes) == 1
+    assert closes[0]["payload"]["closedBy"] == "system:auto-approve:review-digest"
+    approved = [
+        item
+        for item in events
+        if item["code"] == "hypothesis_first.auto_approve_review_digest"
+        and item["outcome"] == "approved"
+    ]
+    assert len(approved) == 1
+    assert approved[0]["fields"]["ttlMs"] == 0
 
 
 def test_auto_approve_skips_already_closed_meetings(
@@ -988,12 +1031,13 @@ def test_auto_approve_skips_already_closed_meetings(
     assert summary["approved"] == 0
 
 
-def test_auto_approve_ignores_other_types_and_failed_drafts(
+def test_auto_approve_covers_candidate_generation_digests(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """只碰假说评审会：候选生成会不碰；summaryDraftError/缺纪要是失败态，
-    留给 stuck-digest 恢复，不自动批准。"""
+    """候选生成会纳入自动批准：走与手动 approve-generation-summary 完全
+    同源的 approve_meeting_digest 领域分派（real domain dispatch），closedBy
+    用 generation 专属系统标识，decidedBy 随 closedBy 可追溯。"""
     events = _approve_env(tmp_path, monkeypatch)
     _seed_meeting(
         _awaiting_review_meeting(
@@ -1002,6 +1046,59 @@ def test_auto_approve_ignores_other_types_and_failed_drafts(
             meeting_type="hypothesis_candidate_generation",
         )
     )
+    generation_closes: list[dict[str, Any]] = []
+
+    def _close_generation(team_id, meeting_round, payload=None, **_kwargs):
+        generation_closes.append(
+            {
+                "teamId": team_id,
+                "meetingRoundId": str(meeting_round.get("meetingRoundId")),
+                "payload": dict(payload or {}),
+            }
+        )
+        return {"status": "created", "meetingRound": {"status": "closed"}}
+
+    monkeypatch.setattr(chain, "_close_generation_meeting", _close_generation)
+
+    summary = chain.auto_approve_awaiting_review_digests(
+        _TEAM_ID,
+        question_id=_QUESTION_ID,
+        now_ms=_offset_ms(3_600),
+    )
+
+    assert summary["awaitingApproval"] == 1
+    assert summary["approved"] == 1
+    assert summary["failed"] == 0
+    assert len(generation_closes) == 1
+    close = generation_closes[0]
+    assert close["teamId"] == _TEAM_ID
+    assert close["meetingRoundId"] == "meeting-generation"
+    # The real approve_meeting_digest dispatched the candgen meeting with the
+    # generation-specific system identity (decidedBy derives from closedBy).
+    assert close["payload"]["closedBy"] == (
+        chain.AUTO_APPROVE_GENERATION_DIGEST_CLOSED_BY
+    )
+    assert close["payload"]["closedBy"] == "system:auto-approve:generation-digest"
+    approved = [
+        item
+        for item in events
+        if item["code"] == "hypothesis_first.auto_approve_review_digest"
+        and item["outcome"] == "approved"
+    ]
+    assert len(approved) == 1
+    assert approved[0]["fields"]["closedBy"] == (
+        "system:auto-approve:generation-digest"
+    )
+    assert "hypothesis_candidate_generation" in str(approved[0]["fields"]["rationale"])
+
+
+def test_auto_approve_skips_failed_drafts_for_both_types(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """两类会议的 summaryDraftError/缺纪要都是失败态：留给 stuck-digest
+    恢复，绝不自动批准（领域函数一次都不该被调）。"""
+    events = _approve_env(tmp_path, monkeypatch)
     _seed_meeting(
         _awaiting_review_meeting(
             "meeting-draft-error",
@@ -1016,7 +1113,28 @@ def test_auto_approve_ignores_other_types_and_failed_drafts(
             with_draft=False,
         )
     )
+    _seed_meeting(
+        _awaiting_review_meeting(
+            "meeting-gen-draft-error",
+            updated_at=_offset_iso(0),
+            meeting_type="hypothesis_candidate_generation",
+            summary_draft_error="digest provider exploded",
+        )
+    )
+    _seed_meeting(
+        _awaiting_review_meeting(
+            "meeting-gen-no-draft",
+            updated_at=_offset_iso(0),
+            meeting_type="hypothesis_candidate_generation",
+            with_draft=False,
+        )
+    )
     closes = _capture_close(monkeypatch)
+
+    def _must_not_be_called(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        raise AssertionError("approve_meeting_digest must not run for failed drafts")
+
+    monkeypatch.setattr(chain, "approve_meeting_digest", _must_not_be_called)
 
     summary = chain.auto_approve_awaiting_review_digests(
         _TEAM_ID,
@@ -1026,7 +1144,8 @@ def test_auto_approve_ignores_other_types_and_failed_drafts(
 
     assert closes == []
     assert summary["approved"] == 0
-    assert summary["awaitingApproval"] == 2  # only the two review meetings
+    assert summary["failed"] == 0
+    assert summary["awaitingApproval"] == 4  # both types, all four meetings
     reasons = {
         item["fields"]["meetingRoundId"]: item["fields"]["reason"]
         for item in events
@@ -1034,6 +1153,8 @@ def test_auto_approve_ignores_other_types_and_failed_drafts(
     }
     assert reasons["meeting-draft-error"] == "summary_draft_error"
     assert reasons["meeting-no-draft"] == "digest_missing"
+    assert reasons["meeting-gen-draft-error"] == "summary_draft_error"
+    assert reasons["meeting-gen-no-draft"] == "digest_missing"
 
 
 def test_auto_approve_isolates_rejections_and_failures(
@@ -1124,7 +1245,8 @@ def test_auto_approve_ttl_env_override_takes_effect(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """TTL 环境变量覆盖生效，且低于 60s 下限时钳到下限。"""
+    """TTL 环境变量覆盖生效：正窗口低于 60s 钳到下限；显式 0 合法（无人工
+    窗口）；负数/垃圾值兜底回默认值（也是 0）。"""
     _approve_env(tmp_path, monkeypatch)
     _seed_meeting(
         _awaiting_review_meeting(_REVIEW_MEETING_ID, updated_at=_offset_iso(0))
@@ -1152,6 +1274,17 @@ def test_auto_approve_ttl_env_override_takes_effect(
     assert len(closes) == 1
     assert summary["approved"] == 0
     assert summary["skipped"] == 1
+
+    # An explicit "0" is the legal no-human-window value.
+    monkeypatch.setenv("VIBELUTION_AUTO_APPROVE_DIGEST_TTL_MS", "0")
+    assert chain._auto_approve_digest_ttl_ms() == 0
+
+    # A negative override is not a window: falls back to the default.
+    monkeypatch.setenv("VIBELUTION_AUTO_APPROVE_DIGEST_TTL_MS", "-1")
+    assert chain._auto_approve_digest_ttl_ms() == (
+        chain.DEFAULT_AUTO_APPROVE_DIGEST_TTL_MS
+    )
+    assert chain.DEFAULT_AUTO_APPROVE_DIGEST_TTL_MS == 0
 
     # A garbage override falls back to the default TTL.
     monkeypatch.setenv("VIBELUTION_AUTO_APPROVE_DIGEST_TTL_MS", "not-a-number")
@@ -1954,12 +2087,14 @@ def test_maintenance_sweep_retries_zombie_handoff_before_adjudicating(
 
 
 # ---------------------------------------------------------------------------
-# the auto-approval wait is an operator decision pinned to 3 minutes
+# the auto-approval wait is an operator decision pinned to 0 (immediate)
 
 
-def test_auto_approve_digest_default_ttl_is_three_minutes() -> None:
-    """自动批准等待默认值钉在 3 分钟（10 分钟收紧到 3 分钟的 operator 决定）。"""
-    assert chain.DEFAULT_AUTO_APPROVE_DIGEST_TTL_MS == 180_000
+def test_auto_approve_digest_default_ttl_is_immediate() -> None:
+    """自动批准等待默认值钉在 0：无人工窗口，落地即批（2026-09 operator
+    决定，取代此前的 3 分钟窗口）；正窗口下限常量保留供 env 覆盖钳制。"""
+    assert chain.DEFAULT_AUTO_APPROVE_DIGEST_TTL_MS == 0
+    assert chain.AUTO_APPROVE_DIGEST_TTL_MIN_MS == 60_000
 
 
 # ---------------------------------------------------------------------------

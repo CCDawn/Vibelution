@@ -97,15 +97,28 @@ SOURCE_COLLECTION_AUTO_RETRY_BACKOFF_FACTOR = 2.0
 SOURCE_COLLECTION_AUTO_RETRY_MAX_DELAY_SECONDS = 120.0
 COLLECTION_AUTO_RETRY_TAXONOMY_CODE = "collection_auto_retry_exhausted"
 
-# Review-digest auto-approval (auto-advance, step zero): how long a
-# hypothesis-review digest may sit in ``awaiting_approval`` before the
-# maintenance sweep approves it.  Deliberately an independent pair from the
-# anomaly-inbox digest TTL (that one raises a "waiting too long" alarm while
-# this one acts on the wait), so the two thresholds never move together.
+# Digest auto-approval (auto-advance, step zero): how long a digest may sit
+# in ``awaiting_approval`` before the maintenance sweep approves it.  Both
+# digest-carrying round types are covered: hypothesis-review rounds and
+# candidate-generation rounds (each keeps its own closedBy identity below so
+# automatic approvals stay traceable per type).  Deliberately an independent
+# pair from the anomaly-inbox digest TTL (that one raises a "waiting too
+# long" alarm while this one acts on the wait), so the two thresholds never
+# move together.
 AUTO_APPROVE_REVIEW_DIGEST_CLOSED_BY = "system:auto-approve:review-digest"
-# Operator decision (2026-09): the automatic approval wait shrinks from 10
-# minutes to 3 so a stalled chain reaches its next review round sooner.
-DEFAULT_AUTO_APPROVE_DIGEST_TTL_MS = 180_000
+AUTO_APPROVE_GENERATION_DIGEST_CLOSED_BY = "system:auto-approve:generation-digest"
+# Meeting types the auto-approve gate owns (the two types whose
+# ``awaiting_approval`` state is exactly the digest confirmation).
+AUTO_APPROVE_DIGEST_MEETING_TYPES = frozenset(
+    {HYPOTHESIS_REVIEW_MEETING_TYPE, CANDIDATE_GENERATION_MEETING_TYPE}
+)
+# Operator decision (2026-09): the default wait is 0 — no human window; the
+# next sweep tick approves a landed digest immediately so an unattended
+# chain never parks on a digest gate.  A positive env override restores a
+# manual window and is floored at ``AUTO_APPROVE_DIGEST_TTL_MIN_MS`` so it
+# stays an operationally meaningful wait; a negative or unparseable
+# override falls back to this default.
+DEFAULT_AUTO_APPROVE_DIGEST_TTL_MS = 0
 AUTO_APPROVE_DIGEST_TTL_MIN_MS = 60_000
 _AUTO_APPROVE_DIGEST_TTL_OVERRIDE_ENV = "VIBELUTION_AUTO_APPROVE_DIGEST_TTL_MS"
 
@@ -3466,17 +3479,28 @@ def auto_retry_blocked_formal_nodes(
 
 
 def _auto_approve_digest_ttl_ms() -> int:
-    """Configured auto-approve wait TTL; the env override is clamped to >=60s."""
+    """Configured digest auto-approve wait in ms.
+
+    ``0`` (the default) means no human window: the next sweep tick approves
+    a landed digest immediately.  A positive env override is a manual wait
+    and is clamped up to ``AUTO_APPROVE_DIGEST_TTL_MIN_MS`` so it stays an
+    operationally meaningful window; a negative or unparseable override
+    falls back to the default.
+    """
 
     raw = str(os.environ.get(_AUTO_APPROVE_DIGEST_TTL_OVERRIDE_ENV) or "").strip()
-    if raw:
-        try:
-            normalized = int(raw)
-        except ValueError:
-            normalized = 0
-        if normalized > 0:
-            return max(normalized, AUTO_APPROVE_DIGEST_TTL_MIN_MS)
-    return DEFAULT_AUTO_APPROVE_DIGEST_TTL_MS
+    if not raw:
+        return DEFAULT_AUTO_APPROVE_DIGEST_TTL_MS
+    try:
+        normalized = int(raw)
+    except ValueError:
+        return DEFAULT_AUTO_APPROVE_DIGEST_TTL_MS
+    if normalized < 0:
+        return DEFAULT_AUTO_APPROVE_DIGEST_TTL_MS
+    if normalized == 0:
+        # Explicit "no human window" — legal and identical to the default.
+        return 0
+    return max(normalized, AUTO_APPROVE_DIGEST_TTL_MIN_MS)
 
 
 def _auto_regen_round_grace_ms() -> int:
@@ -3528,27 +3552,34 @@ def auto_approve_awaiting_review_digests(
     question_id: str,
     now_ms: int | None = None,
 ) -> dict[str, Any]:
-    """Auto-approve stale review digests (auto-advance step zero).
+    """Auto-approve stale meeting digests (auto-advance step zero).
 
     The digest approval is the last per-round human gate of the
     hypothesis-first chain: every round parks at ``awaiting_approval`` once
     the digest draft lands and waits for the ``approve_summary`` command.
     This helper removes that wait by resolving it exactly the way the manual
     command resolves it — it calls the same ``approve_meeting_digest`` domain
-    implementation the ``approve_summary`` command branch reaches, with the
+    implementation the ``approve_summary`` command branch reaches (review
+    rounds close through the review closure chain, candidate-generation
+    rounds through the generation closure chain), with a type-specific
     system identity as ``closed_by`` so the persisted decisions carry
-    ``decidedBy=system:auto-approve:review-digest`` and every standard
+    ``decidedBy=system:auto-approve:review-digest`` /
+    ``decidedBy=system:auto-approve:generation-digest`` and every standard
     closure effect (request_new_evidence collection, fan-in round, deferred
-    next review) runs unchanged through the owning services.
+    next review, candidate registration) runs unchanged through the owning
+    services.
 
-    Eligibility is strict, per meeting: the hypothesis-review type only,
-    status ``awaiting_approval`` for this question, a real digest draft (a
-    non-empty ``summaryDraftError`` or a missing draft is a failure state
-    that belongs to the stuck-digest recovery, never to an approval), and an
-    ``updatedAt`` older than the configured TTL.  No offer/idempotency layer
-    is re-invented: the closure is idempotent on its closure hash and a
-    meeting that closed in the meantime is rejected by the domain status
-    assertion, so a replay can never approve twice.
+    Eligibility is strict, per meeting: one of the digest-carrying types
+    (``AUTO_APPROVE_DIGEST_MEETING_TYPES``), status ``awaiting_approval``
+    for this question, a real digest draft (a non-empty
+    ``summaryDraftError`` or a missing draft is a failure state that
+    belongs to the stuck-digest recovery, never to an approval), and an
+    ``updatedAt`` at least as old as the configured TTL — which is 0 by
+    default (no human window: the landed digest is approved on this very
+    sweep pass).  No offer/idempotency layer is re-invented: the closure is
+    idempotent on its closure hash and a meeting that closed in the
+    meantime is rejected by the domain status assertion, so a replay can
+    never approve twice.
 
     Best-effort like every auto-advance helper: nothing raises, each meeting
     is isolated, and every outcome lands as a
@@ -3580,12 +3611,11 @@ def auto_approve_awaiting_review_digests(
     for meeting in meetings:
         if not isinstance(meeting, Mapping):
             continue
-        if (
-            str(meeting.get("meetingType") or "").strip().lower()
-            != HYPOTHESIS_REVIEW_MEETING_TYPE
-        ):
-            # Only hypothesis-review rounds own the digest approval gate;
-            # other meeting types keep their own lifecycle owners.
+        meeting_type = str(meeting.get("meetingType") or "").strip().lower()
+        if meeting_type not in AUTO_APPROVE_DIGEST_MEETING_TYPES:
+            # Only the two digest-carrying round types own the digest
+            # approval gate; other meeting types keep their own lifecycle
+            # owners.
             continue
         if (
             str(meeting.get("question") or "").strip().upper()
@@ -3594,6 +3624,11 @@ def auto_approve_awaiting_review_digests(
             continue
         summary["awaitingApproval"] += 1
         meeting_round_id = str(meeting.get("meetingRoundId") or "").strip()
+        closed_by = (
+            AUTO_APPROVE_GENERATION_DIGEST_CLOSED_BY
+            if meeting_type == CANDIDATE_GENERATION_MEETING_TYPE
+            else AUTO_APPROVE_REVIEW_DIGEST_CLOSED_BY
+        )
         fields = {
             "teamId": normalized_team_id,
             "questionId": normalized_question_id,
@@ -3648,7 +3683,7 @@ def auto_approve_awaiting_review_digests(
             result = approve_meeting_digest(
                 normalized_team_id,
                 meeting_round_id,
-                closed_by=AUTO_APPROVE_REVIEW_DIGEST_CLOSED_BY,
+                closed_by=closed_by,
                 expected_digest_content_hash=content_hash,
             )
         except HypothesisFirstChainError as exc:
@@ -3701,12 +3736,12 @@ def auto_approve_awaiting_review_digests(
                     fields={
                         **fields,
                         "digestAgeMs": digest_age_ms,
-                        "closedBy": AUTO_APPROVE_REVIEW_DIGEST_CLOSED_BY,
+                        "closedBy": closed_by,
                         # Deterministic identity of the automatic approval
                         # (no timestamps): meetingRoundId + TTL semantics.
                         "rationale": (
-                            "auto-approve: hypothesis review digest awaited "
-                            f"beyond ttl ({ttl_ms} ms); meeting "
+                            "auto-approve: digest awaited beyond ttl "
+                            f"({ttl_ms} ms, type {meeting_type}); meeting "
                             f"{meeting_round_id} approved with the standard "
                             "closure chain per auto-advance policy"
                         ),
@@ -4716,9 +4751,10 @@ def sweep_auto_advance_closure() -> dict[str, Any]:
         for question_id in question_ids:
             summary["questions"] += 1
             try:
-                # Step zero, before adjudication: approve review digests that
-                # waited beyond the TTL so the closure chain (fan-in, next
-                # round) can still progress within this same pass.
+                # Step zero, before adjudication: approve landed review and
+                # candidate-generation digests once the (default-zero) TTL
+                # allows it, so the closure chain (fan-in, next round) can
+                # still progress within this same pass.
                 approval = auto_approve_awaiting_review_digests(
                     team_id, question_id=question_id
                 )
