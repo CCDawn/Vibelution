@@ -303,6 +303,25 @@ _SPEAKER_AUTO_CONTINUE_TIMING_KEY = "autoContinueAttempt"
 # stops counting as that speaker's outcome: it stays in the message stream
 # for audit only, flagged so round accounting ignores it.
 _SPEAKER_AUTO_CONTINUE_SUPERSEDED_TIMING_KEY = "supersededByAutoContinue"
+# Dead-letter isolation for exhausted auto-continues (Temporal DLQ / AgentLab
+# failure-isolation shape): when the quota or the meeting clock runs out while
+# the turn still needs_continue, the turn quarantines one structured dead
+# letter on the round record (reason + attempt count + last-error digest,
+# status open).  A later completed message from the same (round, participant)
+# is the only exit: it flips the entry to resolved.  The payload rides the
+# existing timings channel to the message-binding loop — the single writer of
+# round records under _CHAT_ROOM_LOCK — instead of writing from the speaker
+# stage, so the persistence discipline stays in one place.
+_SPEAKER_AUTO_CONTINUE_DEAD_LETTER_TIMING_KEY = "autoContinueDeadLetter"
+_SPEAKER_AUTO_CONTINUE_DEAD_LETTER_REASON_QUOTA = "quota_exhausted"
+_SPEAKER_AUTO_CONTINUE_DEAD_LETTER_REASON_DEADLINE = "deadline_insufficient"
+_SPEAKER_AUTO_CONTINUE_DEAD_LETTER_STATUS_OPEN = "open"
+_SPEAKER_AUTO_CONTINUE_DEAD_LETTER_STATUS_RESOLVED = "resolved"
+_SPEAKER_AUTO_CONTINUE_DEAD_LETTER_SUMMARY_MAX_CHARS = 240
+# Last real speaker-call error for this turn, classified by the centralized
+# LLM error classifier at the exception boundary; consumed by the dead-letter
+# digest.  Turn-scoped context key (never persisted as a message field).
+_SPEAKER_LAST_ERROR_CONTEXT_KEY = "_lastSpeakerError"
 # Zero-output retries recover transient provider/runtime failures.  These
 # error types are configuration problems: the same turn cannot succeed on a
 # second attempt, so retrying would only burn another full budget.
@@ -1504,6 +1523,7 @@ def start_chat_room_round(
                 "status": "running",
                 "speakerOrder": [item["participantId"] for item in speakers],
                 "messages": [],
+                "autoContinueDeadLetters": [],
                 "summary": "",
                 "startedAt": now,
                 "updatedAt": now,
@@ -2314,6 +2334,18 @@ def _execute_chat_room_round(
                     )
                     if duplicate_of is None:
                         messages.append(message)
+                        # Dead-letter isolation moves in the same lock: a
+                        # turn exhausted with needs_continue quarantines its
+                        # entry on the round, and a completed message from
+                        # the same (round, participant) is the exit that
+                        # resolves open entries.  Both mutate target_round
+                        # before the persistence branches below save it.
+                        _record_round_auto_continue_dead_letter(
+                            target_round, message, message_time
+                        )
+                        _resolve_round_auto_continue_dead_letters(
+                            target_round, message, message_time
+                        )
                         if _chat_room_round_stop_reason(round_id):
                             # A stop arrived between the outer check and this lock: persist
                             # the latest messages without rewinding the round to running,
@@ -3289,6 +3321,187 @@ def _record_speaker_auto_continue_event(
         return
 
 
+def _stash_speaker_last_error(
+    context: dict[str, Any],
+    exc: Exception,
+    *,
+    summary: str,
+) -> None:
+    """Record the turn's last real speaker-call error for the dead-letter digest.
+
+    The category/disposition come from the centralized LLM error classifier
+    (``core.llm.error_classification``) at the exception boundary; the stash
+    is turn-scoped context only and never persists as a message field.
+    """
+
+    try:
+        from core.llm.error_classification import classify_error
+
+        classification = classify_error(exc)
+        context[_SPEAKER_LAST_ERROR_CONTEXT_KEY] = {
+            "category": classification.category,
+            "disposition": classification.disposition,
+            "summary": summary,
+        }
+    except Exception:  # noqa: BLE001 - diagnostics must not change failure shape
+        return
+
+
+def _speaker_auto_continue_dead_letter_last_error(
+    context: Mapping[str, Any],
+    final_message: Mapping[str, Any],
+) -> dict[str, str]:
+    """One-shot diagnostic digest of the last failure this turn surfaced.
+
+    Prefers the centralized-classifier stash left by ``_run_one_speaker``'s
+    exception boundary; a needs_continue demotion carries no exception at
+    all, so the demotion reason (the message summary) stands in for the
+    summary while the category/disposition fields stay empty — the digest is
+    best-effort by contract, never invented.
+    """
+
+    stash = context.get(_SPEAKER_LAST_ERROR_CONTEXT_KEY)
+    stash = stash if isinstance(stash, Mapping) else {}
+    summary = str(stash.get("summary") or "").strip()
+    if not summary:
+        summary = str(final_message.get("summary") or "").strip()
+    summary = trim_lines(summary, max_lines=1)[
+        :_SPEAKER_AUTO_CONTINUE_DEAD_LETTER_SUMMARY_MAX_CHARS
+    ]
+    return {
+        "lastErrorCategory": str(stash.get("category") or "").strip(),
+        "lastErrorDisposition": str(stash.get("disposition") or "").strip(),
+        "lastErrorSummary": summary,
+    }
+
+
+def _attach_speaker_auto_continue_dead_letter(
+    context: Mapping[str, Any],
+    participant: Mapping[str, Any],
+    messages: list[dict[str, Any]],
+    *,
+    attempts_used: int,
+    reason: str,
+) -> None:
+    """Quarantine one dead letter for a turn exhausted with needs_continue.
+
+    The payload rides the final message's timings to the message-binding
+    loop, which moves it onto the round record; nothing is written here so
+    the speaker stage never touches round persistence directly.  attemptCount
+    is the whole turn's call count: initial call plus fence retries plus
+    auto-continuations.
+    """
+
+    try:
+        final_message = messages[-1] if messages else None
+        if not isinstance(final_message, dict):
+            return
+        first_message = messages[0] if messages else {}
+        first_timings = (
+            first_message.get("timings")
+            if isinstance(first_message.get("timings"), Mapping)
+            else {}
+        )
+        fence_retries = (
+            1 if (first_timings or {}).get(_RETRIED_AFTER_FENCE_TIMING_KEY) else 0
+        )
+        dead_letter: dict[str, Any] = {
+            "deadLetterId": _new_id("deadletter", set()),
+            "meetingId": str(context.get("roomId") or "").strip(),
+            "roundId": str(context.get("roundId") or "").strip(),
+            "participantId": str(participant.get("participantId") or "").strip(),
+            "attemptCount": 1 + fence_retries + max(0, attempts_used),
+            "reason": reason,
+            "status": _SPEAKER_AUTO_CONTINUE_DEAD_LETTER_STATUS_OPEN,
+            "createdAt": utc_now_iso(),
+            "resolvedAt": "",
+            **_speaker_auto_continue_dead_letter_last_error(context, final_message),
+        }
+        timings = dict(final_message.get("timings") or {})
+        timings[_SPEAKER_AUTO_CONTINUE_DEAD_LETTER_TIMING_KEY] = dead_letter
+        final_message["timings"] = timings
+    except Exception:  # noqa: BLE001 - dead-letter evidence must not fail the turn
+        return
+
+
+def _record_round_auto_continue_dead_letter(
+    target_round: dict[str, Any],
+    message: dict[str, Any],
+    message_time: str,
+) -> None:
+    """Move a finished turn's dead-letter payload onto the round record.
+
+    Must run inside the ``_CHAT_ROOM_LOCK`` binding block before the round
+    messages are copied for persistence.  The payload is popped from the
+    message timings so the committed message evidence stays clean and a
+    replayed binding pass cannot re-append it; ``(roundId, participantId)``
+    is the idempotency key (first entry wins on re-run/rescan).
+    """
+
+    timings = (
+        message.get("timings") if isinstance(message.get("timings"), Mapping) else None
+    )
+    payload = (timings or {}).get(_SPEAKER_AUTO_CONTINUE_DEAD_LETTER_TIMING_KEY)
+    if not isinstance(payload, Mapping):
+        return
+    remaining_timings = dict(timings or {})
+    remaining_timings.pop(_SPEAKER_AUTO_CONTINUE_DEAD_LETTER_TIMING_KEY, None)
+    message["timings"] = remaining_timings
+    try:
+        entries = [
+            item
+            for item in list(target_round.get("autoContinueDeadLetters") or [])
+            if isinstance(item, dict)
+        ]
+        participant_id = str(payload.get("participantId") or "").strip()
+        already_recorded = any(
+            str(item.get("participantId") or "").strip() == participant_id
+            for item in entries
+        )
+        if not already_recorded:
+            entries.append(dict(payload))
+        target_round["autoContinueDeadLetters"] = entries
+        target_round["updatedAt"] = message_time
+    except Exception:  # noqa: BLE001 - dead-letter evidence must not fail the round
+        return
+
+
+def _resolve_round_auto_continue_dead_letters(
+    target_round: dict[str, Any],
+    message: Mapping[str, Any],
+    message_time: str,
+) -> None:
+    """Exit the dead-letter state when the same speaker lands a completed turn.
+
+    Manual or driver retry is the only exit from quarantine (Temporal DLQ
+    shape): a completed message from the same (round, participant) proves the
+    speaker recovered, so every open entry flips to resolved with the
+    recovery timestamp.  Must run inside the same ``_CHAT_ROOM_LOCK`` binding
+    block so the state change persists atomically with the message.
+    """
+
+    if str(message.get("status") or "").strip().lower() != "completed":
+        return
+    participant_id = str(message.get("participantId") or "").strip()
+    entries = list(target_round.get("autoContinueDeadLetters") or [])
+    changed = False
+    for item in entries:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("status") or "").strip() != (
+            _SPEAKER_AUTO_CONTINUE_DEAD_LETTER_STATUS_OPEN
+        ):
+            continue
+        if str(item.get("participantId") or "").strip() != participant_id:
+            continue
+        item["status"] = _SPEAKER_AUTO_CONTINUE_DEAD_LETTER_STATUS_RESOLVED
+        item["resolvedAt"] = message_time
+        changed = True
+    if changed:
+        target_round["autoContinueDeadLetters"] = entries
+        target_round["updatedAt"] = message_time
+
+
 def _clear_speaker_turn_scope_cancel(
     participant: Mapping[str, Any],
     context: Mapping[str, Any],
@@ -3525,15 +3738,19 @@ def _run_speaker_auto_continuations(
     messages = [message]
     max_turns = _speaker_auto_continue_max_turns()
     if max_turns <= 0 or not _speaker_turn_needs_continue(message):
+        # The knob is off (no continuation quota means no exhaustion concept)
+        # or the turn did not strand: neither produces a dead letter.
         return messages
     round_id = str(context.get("roundId") or "").strip()
     attempts_used = 0
+    dead_letter_reason = _SPEAKER_AUTO_CONTINUE_DEAD_LETTER_REASON_QUOTA
     for attempt in range(1, max_turns + 1):
         if _chat_room_round_stop_reason(round_id):
             # The round is ending regardless of this speaker; the partial
             # prefix stays and no exhausted event fires (nothing was wasted).
             return messages
         if not _speaker_auto_continue_budget_allows(context):
+            dead_letter_reason = _SPEAKER_AUTO_CONTINUE_DEAD_LETTER_REASON_DEADLINE
             break
         attempts_used = attempt
         _clear_speaker_turn_scope_cancel(participant, context)
@@ -3577,6 +3794,13 @@ def _run_speaker_auto_continuations(
     # Quota or meeting clock used up while the turn still needs_continue.
     _record_speaker_auto_continue_event(
         context, participant, attempt=attempts_used, exhausted=True
+    )
+    _attach_speaker_auto_continue_dead_letter(
+        context,
+        participant,
+        messages,
+        attempts_used=attempts_used,
+        reason=dead_letter_reason,
     )
     return messages
 
@@ -3752,6 +3976,7 @@ def _run_one_speaker(
                 },
             }
         timestamp = utc_now_iso()
+        _stash_speaker_last_error(context, exc, summary=f"{type(exc).__name__}: {exc}")
         return {
             "messageId": _new_id("message", set()),
             "participantId": participant["participantId"],

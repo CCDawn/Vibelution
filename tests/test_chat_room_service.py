@@ -6220,6 +6220,314 @@ def test_needs_continue_auto_continue_and_fence_retry_do_not_multiply(
     )
 
 
+def _round_dead_letters_via_store(room_id: str, round_id: str) -> list[dict]:
+    """Read the durable round record's dead letters straight from the store."""
+
+    with chat_room_service._CHAT_ROOM_LOCK:
+        state = chat_room_service._store().load()
+        room = chat_room_service._find_room(state, room_id)
+        assert room is not None
+        target_round = chat_room_service._find_round(room, round_id)
+        assert target_round is not None
+        return [
+            dict(item)
+            for item in list(target_round.get("autoContinueDeadLetters") or [])
+        ]
+
+
+def test_needs_continue_dead_letter_records_one_open_entry_per_participant(
+    tmp_path, monkeypatch
+):
+    """K 次耗尽→恰一条 open 死信：字段齐、幂等重放不重复。
+
+    死信挂在轮记录 autoContinueDeadLetters 上；attemptCount 含首跑与续跑
+    合计；无异常路径下 category/disposition 留空、摘要取 needs_continue
+    的降级原因。
+    """
+
+    monkeypatch.setenv("VIBELUTION_MEETING_SPEAKER_AUTO_CONTINUE_MAX_TURNS", "1")
+    room = _start_fence_retry_room(tmp_path, monkeypatch)
+    scene_events = []
+    monkeypatch.setattr(
+        chat_room_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: scene_events.append((args, kwargs)) or {"accepted": True},
+    )
+    attempts: dict[str, int] = {}
+
+    def runner(participant, _prompt, _context):
+        session_id = participant["sessionId"]
+        attempts[session_id] = attempts.get(session_id, 0) + 1
+        if session_id == "session-alpha":
+            return _needs_continue_result(f"仍未收束-{session_id}-{attempts[session_id]}")
+        return {
+            "status": "completed",
+            "raw_output": f"完成发言-{session_id}",
+            "summary": "ok",
+        }
+
+    detail = chat_room_service.start_chat_room_round(
+        room["roomId"],
+        "假说评审第 1 轮",
+        config={"meetingType": "hypothesis_review", "speakerBatchMode": "serial"},
+        agent_runner=runner,
+    )
+
+    latest = detail["rounds"][-1]
+    assert latest["status"] == "partial"
+    assert attempts == {"session-alpha": 2, "session-beta": 1}
+    dead_letters = _round_dead_letters_via_store(room["roomId"], latest["roundId"])
+    assert len(dead_letters) == 1
+    entry = dead_letters[0]
+    assert entry["deadLetterId"].startswith("deadletter-")
+    assert entry["meetingId"] == room["roomId"]
+    assert entry["roundId"] == latest["roundId"]
+    alpha_participant_id = next(
+        m["participantId"]
+        for m in latest["messages"]
+        if m["sessionId"] == "session-alpha"
+    )
+    assert entry["participantId"] == alpha_participant_id
+    assert entry["attemptCount"] == 2
+    assert entry["reason"] == "quota_exhausted"
+    assert entry["status"] == "open"
+    assert entry["createdAt"]
+    assert entry["resolvedAt"] == ""
+    # 无异常链路：分类器没有可消费的对象，摘要落在 needs_continue 降级原因上。
+    assert entry["lastErrorCategory"] == ""
+    assert entry["lastErrorDisposition"] == ""
+    assert entry["lastErrorSummary"] == "尚未收束"
+    # 死信载荷不留在已提交消息的 timings 里（一次性通道，不污染消息证据）。
+    alpha_messages = [m for m in latest["messages"] if m["sessionId"] == "session-alpha"]
+    assert all(
+        "autoContinueDeadLetter" not in (m.get("timings") or {})
+        for m in alpha_messages
+    )
+    # 幂等重放：同一 (round, participant) 再次绑定死信载荷不产生重复条目。
+    replay_payload = dict(entry)
+    replay_message = {
+        "participantId": alpha_participant_id,
+        "status": "partial",
+        "timings": {"autoContinueDeadLetter": replay_payload},
+    }
+    chat_room_service._record_round_auto_continue_dead_letter(
+        {"roundId": latest["roundId"], "autoContinueDeadLetters": [
+            dict(item) for item in dead_letters
+        ]},
+        replay_message,
+        "2026-09-04T00:00:00Z",
+    )
+    assert "autoContinueDeadLetter" not in replay_message["timings"]
+
+
+def test_needs_continue_dead_letter_marks_deadline_insufficient(
+    tmp_path, monkeypatch
+):
+    """会议时钟不足最小切片：死信 reason=deadline_insufficient，attemptCount=1。"""
+
+    room = _start_fence_retry_room(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        chat_room_service, "record_runtime_scene_event", lambda *args, **kwargs: None
+    )
+    attempts: dict[str, int] = {}
+
+    def runner(participant, _prompt, _context):
+        session_id = participant["sessionId"]
+        attempts[session_id] = attempts.get(session_id, 0) + 1
+        if session_id == "session-alpha":
+            return _needs_continue_result(f"仍未收束-{session_id}")
+        return {
+            "status": "completed",
+            "raw_output": f"完成发言-{session_id}",
+            "summary": "ok",
+        }
+
+    detail = chat_room_service.start_chat_room_round(
+        room["roomId"],
+        "假说评审第 1 轮",
+        config={
+            "meetingType": "hypothesis_review",
+            "speakerBatchMode": "serial",
+            "meetingDeadlineAtMs": 1_010_000,
+        },
+        agent_runner=runner,
+    )
+
+    latest = detail["rounds"][-1]
+    assert latest["status"] == "partial"
+    assert attempts == {"session-alpha": 1, "session-beta": 1}
+    dead_letters = _round_dead_letters_via_store(room["roomId"], latest["roundId"])
+    assert len(dead_letters) == 1
+    assert dead_letters[0]["reason"] == "deadline_insufficient"
+    assert dead_letters[0]["attemptCount"] == 1
+    assert dead_letters[0]["status"] == "open"
+
+
+def test_needs_continue_dead_letter_disabled_with_knob_zero(tmp_path, monkeypatch):
+    """旋钮=0：续跑功能关闭即没有超额概念，不产生死信。"""
+
+    monkeypatch.setenv("VIBELUTION_MEETING_SPEAKER_AUTO_CONTINUE_MAX_TURNS", "0")
+    room = _start_fence_retry_room(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        chat_room_service, "record_runtime_scene_event", lambda *args, **kwargs: None
+    )
+    attempts: dict[str, int] = {}
+
+    def runner(participant, _prompt, _context):
+        session_id = participant["sessionId"]
+        attempts[session_id] = attempts.get(session_id, 0) + 1
+        if session_id == "session-alpha":
+            return _needs_continue_result(f"仍未收束-{session_id}")
+        return {
+            "status": "completed",
+            "raw_output": f"完成发言-{session_id}",
+            "summary": "ok",
+        }
+
+    detail = chat_room_service.start_chat_room_round(
+        room["roomId"],
+        "假说评审第 1 轮",
+        config={"meetingType": "hypothesis_review", "speakerBatchMode": "serial"},
+        agent_runner=runner,
+    )
+
+    latest = detail["rounds"][-1]
+    assert latest["status"] == "partial"
+    assert attempts == {"session-alpha": 1, "session-beta": 1}
+    assert _round_dead_letters_via_store(room["roomId"], latest["roundId"]) == []
+
+
+def test_needs_continue_dead_letter_carries_classifier_digest(
+    tmp_path, monkeypatch
+):
+    """围栏重试链路里出现过真实异常：死信带集中分类器的 category/disposition。
+
+    首跑挂死（watchdog 异常→集中分类）→围栏重试 needs_continue→续跑耗尽，
+    死信的 lastError 取自异常边界 stash 而不是降级摘要。
+    """
+
+    monkeypatch.setenv("VIBELUTION_MEETING_SPEAKER_AUTO_CONTINUE_MAX_TURNS", "1")
+    room = _start_fence_retry_room(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        chat_room_service, "record_runtime_scene_event", lambda *args, **kwargs: None
+    )
+    attempts: dict[str, int] = {}
+
+    def runner(participant, _prompt, _context):
+        session_id = participant["sessionId"]
+        attempts[session_id] = attempts.get(session_id, 0) + 1
+        if session_id == "session-alpha":
+            if attempts[session_id] == 1:
+                time.sleep(3)
+            return _needs_continue_result("重试后仍未收束。")
+        return {
+            "status": "completed",
+            "raw_output": f"完成发言-{session_id}",
+            "summary": "ok",
+        }
+
+    detail = chat_room_service.start_chat_room_round(
+        room["roomId"],
+        "假说评审第 1 轮",
+        config={
+            "meetingType": "hypothesis_review",
+            "speakerBatchMode": "serial",
+            "perCallBudgetMs": 500,
+        },
+        agent_runner=runner,
+    )
+
+    latest = detail["rounds"][-1]
+    assert attempts == {"session-alpha": 3, "session-beta": 1}
+    dead_letters = _round_dead_letters_via_store(room["roomId"], latest["roundId"])
+    assert len(dead_letters) == 1
+    entry = dead_letters[0]
+    assert entry["attemptCount"] == 3
+    assert entry["reason"] == "quota_exhausted"
+    assert entry["lastErrorCategory"] != ""
+    assert entry["lastErrorDisposition"] != ""
+    assert "SpeakerCallWatchdogTimeout" in entry["lastErrorSummary"]
+
+
+def test_auto_continue_dead_letter_resolve_and_record_idempotency():
+    """隔离态出口：同轮同参会者 completed 消息把 open 置 resolved。
+
+    不同参会者或非 completed 消息不动条目；record 对同一 (round,
+    participant) 重放只保留首条，且载荷从消息 timings 里弹出。
+    """
+
+    target_round: dict = {
+        "roundId": "round-1",
+        "autoContinueDeadLetters": [
+            {
+                "deadLetterId": "deadletter-1",
+                "roundId": "round-1",
+                "participantId": "participant-alpha",
+                "status": "open",
+                "resolvedAt": "",
+            }
+        ],
+    }
+    now = "2026-09-04T00:00:00Z"
+
+    chat_room_service._resolve_round_auto_continue_dead_letters(
+        target_round,
+        {"status": "partial", "participantId": "participant-alpha"},
+        now,
+    )
+    assert target_round["autoContinueDeadLetters"][0]["status"] == "open"
+    chat_room_service._resolve_round_auto_continue_dead_letters(
+        target_round,
+        {"status": "completed", "participantId": "participant-beta"},
+        now,
+    )
+    assert target_round["autoContinueDeadLetters"][0]["status"] == "open"
+
+    chat_room_service._resolve_round_auto_continue_dead_letters(
+        target_round,
+        {"status": "completed", "participantId": "participant-alpha"},
+        now,
+    )
+    assert target_round["autoContinueDeadLetters"][0]["status"] == "resolved"
+    assert target_round["autoContinueDeadLetters"][0]["resolvedAt"] == now
+    # resolved 条目不再被后续 completed 消息重复改写时间戳。
+    chat_room_service._resolve_round_auto_continue_dead_letters(
+        target_round,
+        {"status": "completed", "participantId": "participant-alpha"},
+        "2026-09-04T01:00:00Z",
+    )
+    assert target_round["autoContinueDeadLetters"][0]["resolvedAt"] == now
+
+    payload = {
+        "deadLetterId": "deadletter-2",
+        "roundId": "round-1",
+        "participantId": "participant-beta",
+        "status": "open",
+    }
+    message = {
+        "participantId": "participant-beta",
+        "status": "partial",
+        "timings": {"autoContinueAttempt": 1, "autoContinueDeadLetter": payload},
+    }
+    chat_room_service._record_round_auto_continue_dead_letter(
+        target_round, message, now
+    )
+    assert len(target_round["autoContinueDeadLetters"]) == 2
+    assert target_round["autoContinueDeadLetters"][1]["deadLetterId"] == "deadletter-2"
+    # 载荷弹出后消息证据保持干净；再绑一次同参会者载荷不产生重复条目。
+    assert message["timings"] == {"autoContinueAttempt": 1}
+    chat_room_service._record_round_auto_continue_dead_letter(
+        target_round,
+        {
+            "participantId": "participant-beta",
+            "status": "partial",
+            "timings": {"autoContinueDeadLetter": dict(payload)},
+        },
+        now,
+    )
+    assert len(target_round["autoContinueDeadLetters"]) == 2
+
+
 def test_structured_stopped_result_carries_error_type(monkeypatch):
     """B：structured stopped 路径也写 errorType，零输出判定与审计拿得到类别。"""
 
