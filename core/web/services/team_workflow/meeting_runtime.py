@@ -4234,20 +4234,17 @@ def _prepare_meeting_summary_draft_locked(
         # meeting requeues on the existing retry path instead of crashing.
         from core.web.services.team_workflow.llm_review_runners import (
             ReviewLLMTimeoutError,
+            _review_llm_error_category,
             is_recoverable_review_llm_gate_error,
         )
 
         timed_out = isinstance(exc, ReviewLLMTimeoutError)
         gate_rejected = not timed_out and is_recoverable_review_llm_gate_error(exc)
-        error_category = (
-            "timeout"
-            if timed_out
-            else "llm_gate_rejected"
-            if gate_rejected
-            else "contract_validation"
-            if isinstance(exc, ContractValidationError)
-            else "runtime_error"
-        )
+        # 类别视图统一委托 review runners（与中央 LLM 错误分类器同一出口），
+        # 消除两处独立维护映射的漂移：LLMError 与 review 域一致归
+        # provider_error，timeout / llm_gate_rejected / contract_validation /
+        # runtime_error 类别不变。
+        error_category = _review_llm_error_category(exc)
         _record_meeting_digest_scene_event(
             "meeting_digest.draft.failed",
             outcome="failed",

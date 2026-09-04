@@ -30,7 +30,7 @@ from core.context.volatility import is_volatile_context_text
 
 from .adapters import get_provider_adapter
 from .discovery import discover_model
-from .errors import classify_exception
+from .error_classification import classify_error
 from .message_projector import message_to_openai_dict as project_message_to_openai_dict
 from .payload_builder import PayloadBuildInput, compose_runtime_wire_payload
 from .payload_trace import build_llm_payload_trace
@@ -966,6 +966,7 @@ def _llm_retry_event_fields(
     attempt: int,
     max_attempts: int,
     llm_error: LLMError,
+    disposition: Optional[str] = None,
 ) -> Dict[str, Any]:
     safe_metadata = metadata or {}
     role_fields = {}
@@ -1028,6 +1029,9 @@ def _llm_retry_event_fields(
         "maxAttempts": max_attempts,
         "errorType": llm_error.category,
         "retryable": llm_error.retryable,
+        "errorDisposition": disposition
+        if disposition is not None
+        else classify_error(llm_error).disposition,
         "error": str(llm_error),
     }
 
@@ -4216,8 +4220,8 @@ class LLMClient:
             except LLMCancelledError as exc:
                 raise _llm_cancelled_error(exc.reason) from exc
             except Exception as exc:
-                llm_error = classify_exception(exc)
-                llm_error = _with_retry_details(llm_error, attempt=attempt, max_attempts=max_attempts)
+                classification = classify_error(exc)
+                llm_error = _with_retry_details(classification.error, attempt=attempt, max_attempts=max_attempts)
                 last_error = llm_error
                 error_category = llm_error.category
                 fields = _llm_retry_event_fields(
@@ -4231,8 +4235,9 @@ class LLMClient:
                     attempt=attempt,
                     max_attempts=max_attempts,
                     llm_error=llm_error,
+                    disposition=classification.disposition,
                 )
-                if not llm_error.retryable or attempt >= max_attempts:
+                if not classification.is_transient_retryable or attempt >= max_attempts:
                     _record_llm_scene_event(
                         phase,
                         event_code,
@@ -4278,6 +4283,9 @@ class LLMClient:
         max_attempts: int,
         llm_error: LLMError,
     ) -> bool:
+        # 重试判定走集中分类器的 disposition（与 ``retryable`` 同源，见
+        # error_classification），保持所有既有判定结果逐一平价。
+        classification = classify_error(llm_error)
         fields = _llm_retry_event_fields(
             role=self.role,
             profile_id=self.profile_id,
@@ -4289,8 +4297,9 @@ class LLMClient:
             attempt=attempt,
             max_attempts=max_attempts,
             llm_error=llm_error,
+            disposition=classification.disposition,
         )
-        if not llm_error.retryable or attempt >= max_attempts:
+        if not classification.is_transient_retryable or attempt >= max_attempts:
             _record_llm_scene_event(
                 phase,
                 event_code,
@@ -5059,8 +5068,8 @@ class LLMClient:
                 )
                 raise llm_error from exc
             except Exception as exc:
-                llm_error = classify_exception(exc)
-                llm_error = _with_retry_details(llm_error, attempt=attempt, max_attempts=max_attempts)
+                classification = classify_error(exc)
+                llm_error = _with_retry_details(classification.error, attempt=attempt, max_attempts=max_attempts)
                 last_error = llm_error
                 if emitted:
                     _record_llm_scene_event(
@@ -5080,6 +5089,7 @@ class LLMClient:
                             attempt=attempt,
                             max_attempts=max_attempts,
                             llm_error=llm_error,
+                            disposition=classification.disposition,
                         ),
                         lifecycle=True,
                     )
@@ -5132,6 +5142,7 @@ class LLMClient:
                             attempt=attempt,
                             max_attempts=max_attempts,
                             llm_error=llm_error,
+                            disposition=classification.disposition,
                         ),
                         lifecycle=True,
                     )

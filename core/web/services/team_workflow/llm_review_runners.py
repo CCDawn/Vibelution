@@ -55,6 +55,7 @@ from config import get_config
 from core.infrastructure.llm_utils import build_cacheable_system_message
 from core.llm import LLMInvocationContext, get_llm_client, invoke_llm
 from core.llm.agent_runtime import agent_dialogue_model_id, config_for_agent_llm_model
+from core.llm.error_classification import classify_error
 from core.llm.client import (
     MAX_OUTPUT_TOKENS_OVERRIDE_METADATA_KEY,
     llm_cancel_context,
@@ -428,15 +429,37 @@ def _record_meeting_digest_scene_event(
 
 
 def _review_llm_error_category(error: Exception) -> str:
+    """Review 域错误类别视图（对外返回值由 parity 测试锁定）。
+
+    Review 域自有异常（超时 / 闸门拒绝 / 合同校验拒绝）按本地类型先行判定
+    ——它们的语义中央分类器不可见；LLMError 与否的归属判定走中央错误类型
+    体系（``core.llm.types.LLMError``，含 provider 原生类别透传）。恢复语义
+    （可否重试）不再由本视图表达，统一由
+    ``core.llm.error_classification.classify_error`` 的 disposition 承担，
+    见 ``_review_llm_error_disposition``。
+    """
+
     if isinstance(error, ReviewLLMTimeoutError):
         return "timeout"
     if is_recoverable_review_llm_gate_error(error):
         return "llm_gate_rejected"
     if isinstance(error, ContractValidationError):
         return "contract_validation"
+    # LLMError 归属判定走中央错误类型体系（core.llm.types）；disposition
+    # 视图见 ``_review_llm_error_disposition``（集中分类器输出）。
     if isinstance(error, LLMError):
         return "provider_error"
     return "runtime_error"
+
+
+def _review_llm_error_disposition(error: Exception) -> str:
+    """集中分类器的 disposition 视图（attached 到失败事件与 dump 证据）。
+
+    三值：``transient_retryable`` / ``permanent`` / ``budget_or_context``；
+    未知错误 fail-closed 归 ``permanent``。
+    """
+
+    return classify_error(error).disposition
 
 
 # Backwards-compatible alias: the category helper predates the review-wide
@@ -525,6 +548,7 @@ def _dump_failed_review_response(
             "schemaVersion": 1,
             "purpose": str(purpose),
             "failureCategory": str(failure_category),
+            "errorDisposition": _review_llm_error_disposition(error),
             "errorType": type(error).__name__,
             "errorSummary": f"{type(error).__name__}: {error}".replace("\n", " ")[:200],
             "runId": str(run_id or ""),
@@ -762,7 +786,13 @@ class ReviewLLMRateLimitCooldownError(LLMError):
 
 
 def is_recoverable_review_llm_gate_error(error: Exception) -> bool:
-    """True for gate rejections the retry/requeue path can absorb."""
+    """True for gate rejections the retry/requeue path can absorb.
+
+    两个 gate 异常从未到达 provider，在中央分类器
+    （``core.llm.error_classification``）里同属 ``transient_retryable`` 传
+    输族；这里保留 review 域异常类型判断作为"门拒绝"的权威定义，行为由
+    parity 测试锁定。
+    """
 
     return isinstance(
         error, (ReviewLLMGateTimeoutError, ReviewLLMRateLimitCooldownError)
@@ -862,11 +892,14 @@ def _record_model_rate_limit(model_ref: str, *, now_s: float | None = None) -> N
 def _maybe_record_provider_rate_limit(error: Exception, *, model_ref: str) -> None:
     """Track a real provider 429 (transport category ``rate_limit_error``).
 
-    The gate's own fast-fail exceptions carry different categories, so a
-    storm of gate rejections can never extend the cooldown window.
+    429 家族判定委托集中分类器 ``classify_error``，不再本地比较字符串；
+    ``rate_limit_error`` 由 provider 原生 HTTP 状态映射直接产生（透传），
+    gate 自身的快速失败异常（``gate_timeout`` / ``rate_limit_cooldown`` /
+    ``timeout``）虽然也是 LLMError，但 category 不在此列，风暴再大也永远
+    不会延长 cooldown 窗口。判定范围由 parity 测试锁定。
     """
 
-    if isinstance(error, LLMError) and str(error.category) == "rate_limit_error":
+    if classify_error(error).category == "rate_limit_error":
         _record_model_rate_limit(model_ref)
 
 
@@ -1332,6 +1365,7 @@ def _invoke_review_llm(
                 ),
                 "outputChars": len(content),
                 "errorCategory": _review_llm_error_category(exc),
+                "errorDisposition": _review_llm_error_disposition(exc),
                 "errorType": type(exc).__name__,
                 "llmErrorCategory": (
                     str(exc.category) if isinstance(exc, LLMError) else ""

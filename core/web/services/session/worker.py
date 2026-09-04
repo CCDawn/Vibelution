@@ -22,6 +22,7 @@ from core.infrastructure.tool_execution_scope import (
     ToolExecutionScope,
     tool_execution_scope,
 )
+from core.llm.error_classification import PERMANENT
 from core.orchestration.context_engine import AgentContextInterrupted
 from core.web.services.session.research_thinking_budget import (
     build_research_thinking_budget_segment,
@@ -632,6 +633,24 @@ def _service():
     return session_service
 
 
+class ChallengeReceiptFailureError(RuntimeError):
+    """Challenge Cup 正式证据（model invocation receipt）fail-closed 失败。
+
+    继承 RuntimeError 保持既有 ``except RuntimeError`` 与
+    ``pytest.raises(RuntimeError)`` 兼容；携带集中分类器
+    （``core.llm.error_classification``）的 category + disposition，receipt
+    失败不再是无分类的裸异常。三类失败码（receipt 缺失 / 上下文无效 /
+    持久入队失败）一律 ``permanent``：同样的请求重发无法让证据凭空出现，
+    宁可让 turn 失败也不把无证据的成功持久化。
+    """
+
+    def __init__(self, failure_code: str) -> None:
+        super().__init__(failure_code)
+        self.failure_code = str(failure_code)
+        self.category = "challenge_receipt_failure"
+        self.disposition = PERMANENT
+
+
 def _raise_for_challenge_receipt_failure(
     turn_capture: Any,
 ) -> None:
@@ -639,7 +658,7 @@ def _raise_for_challenge_receipt_failure(
         getattr(turn_capture, "challenge_receipt_failure_code", "") or ""
     ).strip()
     if failure_code:
-        raise RuntimeError(failure_code)
+        raise ChallengeReceiptFailureError(failure_code)
 
 
 def _session_context_allows_internal_auto_continue(context: dict[str, Any]) -> bool:
