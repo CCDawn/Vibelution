@@ -14,6 +14,9 @@ from dataclasses import replace
 from typing import Any
 
 from core.research.workflow.contracts import PendingAction
+from core.web.services.session.turn_failure_classification import (
+    resolve_failure_disposition,
+)
 
 from .challenge_turn_policy import (
     CHALLENGE_TURN_WAIT_WINDOW_MS,
@@ -439,6 +442,7 @@ def _propagate_turn_terminal_failure_to_stage_task(
                 "turnId": str(detail.get("turnId") or "").strip(),
                 "terminalStatus": terminal_status,
                 "failureCode": failure_code,
+                "failureDisposition": str(detail.get("failureDisposition") or "").strip(),
             },
         )
     except Exception as exc:  # noqa: BLE001 - failure propagation is best-effort
@@ -512,6 +516,13 @@ def wait_for_agent_turn_terminal(
                     "terminal_failure"
                     if status in _FAILURE_TERMINAL_STATUSES
                     else "terminal_non_success"
+                ),
+                # Additive recovery-semantic field (existing failureClass values
+                # stay unchanged): transient / permanent / budget_or_context,
+                # aligned with the frozen retry taxonomy via the read-only
+                # mapping in turn_failure_classification.
+                "failureDisposition": resolve_failure_disposition(
+                    last_snapshot, status
                 ),
             }
             raise RuntimeError(json.dumps(detail, ensure_ascii=False))
@@ -591,6 +602,9 @@ def probe_agent_turn_terminal(
                     if status in _FAILURE_TERMINAL_STATUSES
                     else "terminal_non_success"
                 ),
+                # Additive recovery-semantic field (see
+                # wait_for_agent_turn_terminal); failureClass values unchanged.
+                "failureDisposition": resolve_failure_disposition(snapshot, status),
             },
             ensure_ascii=False,
         )

@@ -19,6 +19,12 @@ from pathlib import Path
 from typing import Any
 
 from core.web.services.session.timebase import parse_timestamp_utc
+from core.web.services.session.turn_failure_classification import (
+    BUDGET_EXHAUSTED_PROBLEM_CODE,
+    TERMINAL_STATUS_FAILURE_DISPOSITION,
+    derive_failure_disposition,
+    normalize_disposition,
+)
 
 
 def _service():
@@ -225,6 +231,36 @@ def get_session_turn_completion_snapshot(session_id: str, turn_id: str = "") -> 
             or conversation.get("terminalReason")
             or ""
         ).strip()[:256]
+        # Additive failure-classification diagnostics: the classifier verdict
+        # that produced the terminal status, persisted by persist.py. Legacy
+        # failures carry no persisted verdict, so the read-only status/problem
+        # table derives a best-effort disposition instead. Existing keys are
+        # never changed.
+        last_turn_error = conversation.get("last_turn_error")
+        failure_category = ""
+        failure_disposition = ""
+        if isinstance(last_turn_error, dict):
+            failure_category = str(
+                last_turn_error.get("failure_category")
+                or last_turn_error.get("failureCategory")
+                or ""
+            ).strip()
+            failure_disposition = str(
+                last_turn_error.get("failure_disposition")
+                or last_turn_error.get("failureDisposition")
+                or ""
+            ).strip()
+        if not failure_disposition:
+            failure_disposition = derive_failure_disposition(
+                problem_code=terminal_problem_code,
+                terminal_status=last_turn_status,
+            )
+        else:
+            failure_disposition = normalize_disposition(failure_disposition)
+        failure_terminal = (
+            last_turn_status in TERMINAL_STATUS_FAILURE_DISPOSITION
+            or terminal_problem_code == BUDGET_EXHAUSTED_PROBLEM_CODE
+        )
         messages = s._session_ledger_visible_messages(session_id)
 
     assistant_message = s._find_turn_scoped_assistant_message(messages, normalized_turn_id)
@@ -323,6 +359,11 @@ def get_session_turn_completion_snapshot(session_id: str, turn_id: str = "") -> 
         snapshot["terminalProblemCode"] = terminal_problem_code
     if terminal_reason:
         snapshot["terminalReason"] = terminal_reason
+    if failure_terminal:
+        if failure_category:
+            snapshot["failureCategory"] = failure_category
+        if failure_disposition:
+            snapshot["failureDisposition"] = failure_disposition
     if model_invocation_receipts:
         snapshot["modelInvocationReceipts"] = deepcopy(model_invocation_receipts)
         snapshot["modelInvocationReceipt"] = deepcopy(model_invocation_receipts[-1])
@@ -1610,6 +1651,8 @@ def _record_session_turn_error(
                 "eventCode": str(turn_error.get("event_code") or turn_error.get("eventCode") or "").strip(),
                 "traceId": str(turn_error.get("trace_id") or turn_error.get("traceId") or "").strip(),
                 "protocol": str(turn_error.get("protocol") or "").strip(),
+                "failureCategory": str(turn_error.get("failure_category") or turn_error.get("failureCategory") or "").strip(),
+                "failureDisposition": str(turn_error.get("failure_disposition") or turn_error.get("failureDisposition") or "").strip(),
                 "recoverable": bool(turn_error.get("recoverable", True)),
                 "rawErrorPreview": s.trim_lines(raw_error, max_lines=2),
             },
@@ -1795,6 +1838,9 @@ def _normalize_session_turn_error(value: Any) -> dict[str, Any] | None:
         "recoverable": bool(value.get("recoverable", True)),
         "timestamp": str(value.get("timestamp") or value.get("createdAt") or value.get("created_at") or "").strip(),
         "turnId": str(value.get("turnId") or value.get("turn_id") or "").strip(),
+        # Additive classifier diagnostics (empty for legacy failures).
+        "failureCategory": str(value.get("failureCategory") or value.get("failure_category") or "").strip(),
+        "failureDisposition": str(value.get("failureDisposition") or value.get("failure_disposition") or "").strip(),
     }
 
 
@@ -1939,6 +1985,8 @@ def _make_turn_error_chat_message(
             "eventCode": str(turn_error.get("event_code") or turn_error.get("eventCode") or "").strip(),
             "traceId": str(turn_error.get("trace_id") or turn_error.get("traceId") or "").strip(),
             "protocol": str(turn_error.get("protocol") or "").strip(),
+            "failureCategory": str(turn_error.get("failure_category") or turn_error.get("failureCategory") or "").strip(),
+            "failureDisposition": str(turn_error.get("failure_disposition") or turn_error.get("failureDisposition") or "").strip(),
         },
     )
     message["timestamp"] = timestamp

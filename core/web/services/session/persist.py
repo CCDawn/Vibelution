@@ -13,8 +13,26 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from core.web.services.session.turn_failure_classification import classify_turn_failure
+
 
 _CHALLENGE_DEADLINE_PROBLEM_CODE = "challenge_logical_task_deadline_exhausted"
+
+
+def _apply_turn_failure_problem_code(conversation: dict[str, Any], problem_code: str) -> None:
+    """Anchor (or clear) the terminal problem code for a classified failure.
+
+    Budget-family failures keep the established ``context_budget_exhausted``
+    code so downstream loop detection sees them; every other failure keeps the
+    historical "no problem code from this path" behavior.
+    """
+
+    normalized = str(problem_code or "").strip()
+    if normalized:
+        conversation["last_turn_terminal_problem_code"] = normalized
+        return
+    conversation.pop("last_turn_terminal_problem_code", None)
+    conversation.pop("lastTurnTerminalProblemCode", None)
 
 
 def _service():
@@ -1108,6 +1126,17 @@ def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc:
     lang = s.get_web_language()
     raw_error = str(exc or "").strip()
     error_type = s._failure_error_type(raw_error, exc=exc)
+    # Terminal-state decision comes from the centralized classifier (category +
+    # three-value disposition), not the provider-text regex. Only the existing
+    # failed/failed_provider values (plus additive diagnosis fields) are
+    # written, so journal projection / UI / diagnosis consumers stay compatible.
+    classification = classify_turn_failure(raw_error, exc=exc)
+
+    def _attach_failure_classification(turn_error: dict[str, Any]) -> dict[str, Any]:
+        turn_error["failure_category"] = classification.category
+        turn_error["failure_disposition"] = classification.disposition
+        return turn_error
+
     turn_id = str(context.get("turn_id") or "")
     work_run_summary = s.text_for(
         lang,
@@ -1120,13 +1149,15 @@ def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc:
     if conversation is None:
         return
     previous_conversation = deepcopy(conversation)
-    if s._looks_like_provider_error_text(raw_error):
-        turn_error = s._make_session_turn_error(
-            raw_error,
-            lang=lang,
-            error_type=error_type,
-            turn_id=turn_id,
-            llm_payload_trace=s._current_session_live_llm_payload_trace(session_id),
+    if classification.provider_family:
+        turn_error = _attach_failure_classification(
+            s._make_session_turn_error(
+                raw_error,
+                lang=lang,
+                error_type=error_type,
+                turn_id=turn_id,
+                llm_payload_trace=s._current_session_live_llm_payload_trace(session_id),
+            )
         )
         error_entry = s._make_provider_failure_chat_message(
             turn_error,
@@ -1135,8 +1166,7 @@ def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc:
         )
         timestamp = str(error_entry.get("timestamp") or s._now_timestamp()).strip()
         conversation.pop("messages", None)
-        conversation.pop("last_turn_terminal_problem_code", None)
-        conversation.pop("lastTurnTerminalProblemCode", None)
+        _apply_turn_failure_problem_code(conversation, classification.problem_code)
         conversation["last_turn_status"] = "failed"
         conversation["last_turn_terminal_reason"] = s._terminal_reason_for_turn("failed_provider")
         conversation["last_turn_error"] = turn_error
@@ -1188,6 +1218,8 @@ def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc:
             fields={
                 "errorType": error_type,
                 "providerFailure": True,
+                "failureCategory": classification.category,
+                "failureDisposition": classification.disposition,
                 "visibleErrorMessagePersisted": True,
                 "messageCount": len(messages) + 1,
             },
@@ -1217,6 +1249,13 @@ def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc:
                 "errorType": error_type,
                 "message": str(turn_error.get("message") or ""),
                 "rawError": raw_error,
+                "failureCategory": classification.category,
+                "failureDisposition": classification.disposition,
+                **(
+                    {"problemCode": classification.problem_code}
+                    if classification.problem_code
+                    else {}
+                ),
             },
             source="persist_session_turn_failure",
         )
@@ -1228,12 +1267,14 @@ def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc:
             last_preview=str(turn_error.get("message") or work_run_summary or ""),
         )
         return
-    turn_error = s._make_session_turn_error(
-        raw_error,
-        lang=lang,
-        error_type=error_type,
-        turn_id=turn_id,
-        llm_payload_trace=s._current_session_live_llm_payload_trace(session_id),
+    turn_error = _attach_failure_classification(
+        s._make_session_turn_error(
+            raw_error,
+            lang=lang,
+            error_type=error_type,
+            turn_id=turn_id,
+            llm_payload_trace=s._current_session_live_llm_payload_trace(session_id),
+        )
     )
     error_entry = s._make_turn_error_chat_message(
         turn_error,
@@ -1243,8 +1284,7 @@ def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc:
     )
     timestamp = str(error_entry.get("timestamp") or s._now_timestamp()).strip()
     conversation.pop("messages", None)
-    conversation.pop("last_turn_terminal_problem_code", None)
-    conversation.pop("lastTurnTerminalProblemCode", None)
+    _apply_turn_failure_problem_code(conversation, classification.problem_code)
     conversation["last_turn_error"] = turn_error
     conversation["last_turn_status"] = "failed"
     conversation["last_turn_terminal_reason"] = s._terminal_reason_for_turn("failed_runtime")
@@ -1290,6 +1330,8 @@ def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc:
         fields={
             "errorType": error_type,
             "providerFailure": False,
+            "failureCategory": classification.category,
+            "failureDisposition": classification.disposition,
             "visibleErrorMessagePersisted": True,
             "messageCount": len(messages) + 1,
         },
@@ -1325,6 +1367,13 @@ def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc:
             "errorType": error_type,
             "message": str(turn_error.get("message") or ""),
             "rawError": raw_error,
+            "failureCategory": classification.category,
+            "failureDisposition": classification.disposition,
+            **(
+                {"problemCode": classification.problem_code}
+                if classification.problem_code
+                else {}
+            ),
         },
         source="persist_session_turn_failure",
     )

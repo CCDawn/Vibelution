@@ -27,6 +27,14 @@ from tools.compression_strategy import CompressionLevel, get_compression_strateg
 from tools.token_manager import estimate_messages_tokens
 
 
+# Zero-diagnosis guard: an unconfigured (<= 0) context input hard limit used to
+# silently disable the budget gate -- evaluate_context_budget_preflight kept
+# guardReason empty and agent.context_budget_exhausted never fired. The guard
+# is still non-blocking in that case (there is no limit to fail closed on),
+# but it is now explicit in results and diagnostics.
+BUDGET_LIMIT_UNCONFIGURED_GUARD_REASON = "budget_limit_unconfigured"
+
+
 def _coerce_nonnegative_int(value: Any, *, default: int = 0) -> int:
     if isinstance(value, bool) or value is None:
         return max(0, int(default or 0))
@@ -205,14 +213,26 @@ def evaluate_context_budget_preflight(
     estimated_tokens: int,
     context_input_hard_limit: int,
 ) -> Dict[str, Any]:
-    """Pre-model-call hard input-limit gate (fail-closed, auditable)."""
+    """Pre-model-call hard input-limit gate (fail-closed, auditable).
+
+    An unconfigured limit (``<= 0``) never reports ``exhausted`` (there is no
+    limit to enforce, matching the historical contract), but it now says so:
+    ``guardReason`` carries ``budget_limit_unconfigured`` instead of an empty
+    string so budget decisions are never silent.
+    """
 
     hard_limit = _coerce_nonnegative_int(context_input_hard_limit)
     estimated = _coerce_nonnegative_int(estimated_tokens)
     exhausted = hard_limit > 0 and estimated > hard_limit
+    if exhausted:
+        guard_reason = "input_over_hard_limit"
+    elif hard_limit > 0:
+        guard_reason = ""
+    else:
+        guard_reason = BUDGET_LIMIT_UNCONFIGURED_GUARD_REASON
     return {
         "exhausted": exhausted,
-        "guardReason": "input_over_hard_limit" if exhausted else "",
+        "guardReason": guard_reason,
         "estimatedTokens": estimated,
         "hardLimit": hard_limit,
     }
@@ -394,10 +414,8 @@ def compress_turn_messages(
     # the turn before any model call (auditable context_budget_exhausted).
     after_pairing = _tool_call_pairing_snapshot(compressed)
     retention_violation = _retention_violation_reason(before_pairing, after_pairing)
-    over_hard_limit = (
-        _coerce_nonnegative_int(context_input_hard_limit) > 0
-        and after_tokens > _coerce_nonnegative_int(context_input_hard_limit)
-    )
+    normalized_hard_limit = _coerce_nonnegative_int(context_input_hard_limit)
+    over_hard_limit = normalized_hard_limit > 0 and after_tokens > normalized_hard_limit
     if retention_violation or over_hard_limit:
         guard_reason = retention_violation or "post_compression_over_hard_limit"
         recorder(
@@ -414,7 +432,7 @@ def compress_turn_messages(
                 "guardReason": guard_reason,
                 "estimatedTokens": current_tokens,
                 "afterTokens": after_tokens,
-                "contextInputHardLimit": _coerce_nonnegative_int(context_input_hard_limit),
+                "contextInputHardLimit": normalized_hard_limit,
                 "postCompressionTargetTokens": _coerce_nonnegative_int(post_compression_target_tokens),
                 "retentionBefore": {
                     "unresolvedCallCount": before_pairing.get("unresolvedCallCount"),
@@ -428,6 +446,28 @@ def compress_turn_messages(
             },
         )
         return messages, True, False, compression_count_this_turn, last_compression_iteration
+    if normalized_hard_limit <= 0:
+        # Zero-diagnosis guard: without a hard limit the budget gate cannot
+        # fail closed, which used to be fully silent. The turn still proceeds
+        # (unchanged behavior), but the unconfigured guard is now audible.
+        recorder(
+            "runtime",
+            "agent.context_budget_unconfigured",
+            message="Context input hard limit is unconfigured; the context budget gate cannot fail closed.",
+            level="warning",
+            outcome="monitored",
+            fields={
+                "agentId": agent_id,
+                "sessionId": session_id,
+                "turnId": turn_id,
+                "iteration": iteration,
+                "guardReason": BUDGET_LIMIT_UNCONFIGURED_GUARD_REASON,
+                "estimatedTokens": current_tokens,
+                "afterTokens": after_tokens,
+                "contextInputHardLimit": 0,
+                "messageCount": len(messages),
+            },
+        )
 
     # Prefix the bounded retention contract header onto the summary so scope,
     # compression generation and the tool calls that were summarized away
