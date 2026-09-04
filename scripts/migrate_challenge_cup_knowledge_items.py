@@ -27,6 +27,7 @@ EXPECTED_LEGACY_COUNT = 5
 EXPECTED_SOURCE_COUNT = 33
 MIGRATION_ACTION = "challenge_cup.knowledge_items.migrated"
 TERMINAL_ACTION = "challenge_cup.knowledge_migration.completed"
+DIRECT_INGEST_ACTION = "knowledge.item.direct_ingested"
 _CANDIDATE_TAGS = {"pending-review", "pending_review", "candidate-only", "candidate_only"}
 
 
@@ -233,24 +234,123 @@ def build_migration_plan(
     legacy_proposals = [row for row in proposals if str(row.get("proposalId") or "").strip() in legacy_proposal_ids]
     if len(legacy_batch_ids) != EXPECTED_LEGACY_COUNT or len(legacy_batches) != EXPECTED_LEGACY_COUNT:
         raise ChallengeCupKnowledgeMigrationError("Legacy item-to-batch mapping is not exactly 5 unique batches.")
-    if len(legacy_proposal_ids) != EXPECTED_LEGACY_COUNT or len(legacy_proposals) != EXPECTED_LEGACY_COUNT:
+    if len(legacy_proposals) != len(legacy_proposal_ids):
         raise ChallengeCupKnowledgeMigrationError(
-            "Legacy batch-to-proposal mapping is not exactly "
-            f"{EXPECTED_LEGACY_COUNT} unique proposals (found {len(legacy_proposal_ids)} ids and {len(legacy_proposals)} records)."
+            "One or more legacy batch proposal records are missing or duplicated "
+            f"(found {len(legacy_proposal_ids)} ids and {len(legacy_proposals)} records)."
         )
 
-    artifacts_by_id = {
-        str(artifact.get("sourceArtifactId") or "").strip(): artifact
-        for artifact in source_artifacts
-        if str(artifact.get("sourceArtifactId") or "").strip()
+    artifacts_by_id: dict[str, dict[str, Any]] = {}
+    for artifact in source_artifacts:
+        artifact_id = str(artifact.get("sourceArtifactId") or "").strip()
+        if not artifact_id:
+            continue
+        if artifact_id in artifacts_by_id:
+            raise ChallengeCupKnowledgeMigrationError(f"Source artifact {artifact_id} is duplicated.")
+        artifacts_by_id[artifact_id] = artifact
+    proposals_by_id = {
+        str(proposal.get("proposalId") or "").strip(): proposal
+        for proposal in legacy_proposals
+    }
+    batches_by_id = {
+        str(batch.get("batchId") or "").strip(): batch
+        for batch in legacy_batches
     }
     source_origins: dict[str, dict[str, str]] = {}
+    legacy_lineage_by_item_id: dict[str, dict[str, Any]] = {}
+    direct_ingested_batch_ids: list[str] = []
     for old_item in legacy_items:
+        old_item_id = str(old_item.get("knowledgeItemId") or "").strip()
+        batch_id = str(old_item.get("batchId") or "").strip()
+        old_batch = batches_by_id.get(batch_id)
+        if old_batch is None:
+            raise ChallengeCupKnowledgeMigrationError(f"Legacy item {old_item_id} has no unique batch.")
         artifact_ids = [str(value or "").strip() for value in list(old_item.get("sourceArtifactIds") or []) if str(value or "").strip()]
         if len(artifact_ids) != 1 or artifact_ids[0] not in artifacts_by_id:
             raise ChallengeCupKnowledgeMigrationError("Each legacy item must reference exactly one retained source artifact.")
         artifact = artifacts_by_id[artifact_ids[0]]
+        batch_artifact_ids = [
+            str(value or "").strip()
+            for value in list(old_batch.get("sourceArtifactIds") or [])
+            if str(value or "").strip()
+        ]
+        if batch_artifact_ids != artifact_ids:
+            raise ChallengeCupKnowledgeMigrationError(
+                f"Legacy item {old_item_id}, batch {batch_id}, and source artifact mapping is not unique."
+            )
         source_ref = artifact.get("sourceRef") if isinstance(artifact.get("sourceRef"), dict) else {}
+        item_central_ids = [
+            str(value or "").strip()
+            for value in list(old_item.get("centralSourceIds") or [])
+            if str(value or "").strip()
+        ]
+        batch_central_ids = [
+            str(value or "").strip()
+            for value in list(old_batch.get("centralSourceIds") or [])
+            if str(value or "").strip()
+        ]
+        artifact_central_id = str(artifact.get("centralSourceId") or source_ref.get("centralSourceId") or "").strip()
+        if len(item_central_ids) != 1 or batch_central_ids != item_central_ids or artifact_central_id != item_central_ids[0]:
+            raise ChallengeCupKnowledgeMigrationError(
+                f"Legacy item {old_item_id}, batch {batch_id}, and central source mapping is not unique."
+            )
+        proposal_ids = [
+            str(value or "").strip()
+            for value in list(old_batch.get("proposalIds") or [])
+            if str(value or "").strip()
+        ]
+        direct_audits = [
+            row for row in audit
+            if row.get("action") == DIRECT_INGEST_ACTION
+            and str((row.get("payload") or {}).get("teamId") or "").strip() == team_id
+            and str((row.get("payload") or {}).get("knowledgeBaseId") or "").strip() == raw_base_id
+            and str((row.get("payload") or {}).get("batchId") or "").strip() == batch_id
+            and str((row.get("payload") or {}).get("knowledgeItemId") or "").strip() == old_item_id
+        ]
+        if len(proposal_ids) == 1:
+            if direct_audits:
+                raise ChallengeCupKnowledgeMigrationError(
+                    f"Legacy batch {batch_id} has conflicting proposal-backed and direct-ingest lineage."
+                )
+            old_proposal = proposals_by_id.get(proposal_ids[0])
+            if old_proposal is None:
+                raise ChallengeCupKnowledgeMigrationError(f"Legacy batch {batch_id} has no unique proposal record.")
+            proposal_artifact_ids = [
+                str(value or "").strip()
+                for value in list(old_proposal.get("sourceArtifactIds") or [])
+                if str(value or "").strip()
+            ]
+            proposal_central_ids = [
+                str(value or "").strip()
+                for value in list(old_proposal.get("centralSourceIds") or [])
+                if str(value or "").strip()
+            ]
+            if proposal_artifact_ids != artifact_ids or proposal_central_ids != item_central_ids:
+                raise ChallengeCupKnowledgeMigrationError(
+                    f"Legacy proposal {proposal_ids[0]} does not match its item source lineage."
+                )
+            ingestion_mode = "proposal_backed"
+            old_proposal_id: str | None = proposal_ids[0]
+            content_source = old_proposal
+        elif not proposal_ids:
+            if len(direct_audits) != 1 or str((direct_audits[0].get("payload") or {}).get("proposalId") or "").strip():
+                raise ChallengeCupKnowledgeMigrationError(
+                    f"Legacy batch {batch_id} must have exactly one direct-ingest audit with no proposal."
+                )
+            ingestion_mode = "direct_ingested"
+            old_proposal_id = None
+            content_source = old_item
+            direct_ingested_batch_ids.append(batch_id)
+        else:
+            raise ChallengeCupKnowledgeMigrationError(f"Legacy batch {batch_id} has more than one proposal.")
+        legacy_lineage_by_item_id[old_item_id] = {
+            "batch": old_batch,
+            "contentSource": content_source,
+            "legacyIngestionMode": ingestion_mode,
+            "oldProposalId": old_proposal_id,
+            "sourceArtifactId": artifact_ids[0],
+            "centralSourceId": item_central_ids[0],
+        }
         trace = source_ref.get("sourceTrace") if isinstance(source_ref.get("sourceTrace"), dict) else {}
         run_id = str(trace.get("sourceCollectionRunId") or "").strip()
         candidate_ids = [str(value or "").strip() for value in list(source_ref.get("candidateIds") or trace.get("sourceCandidateIds") or []) if str(value or "").strip()]
@@ -262,7 +362,7 @@ def build_migration_plan(
             source_origins[candidate_id] = {
                 "sourceCollectionRunId": run_id,
                 "sourceArtifactId": artifact_ids[0],
-                "oldKnowledgeItemId": str(old_item.get("knowledgeItemId") or ""),
+                "oldKnowledgeItemId": old_item_id,
             }
     if len(source_origins) != EXPECTED_SOURCE_COUNT:
         raise ChallengeCupKnowledgeMigrationError(
@@ -285,7 +385,8 @@ def build_migration_plan(
     missing_candidates = sorted(set(source_origins) - set(candidates_by_id))
     if missing_candidates:
         raise ChallengeCupKnowledgeMigrationError(
-            f"Authoritative source candidates are missing: {', '.join(missing_candidates[:3])}."
+            "Authoritative source candidates are missing "
+            f"({len(missing_candidates)}): {', '.join(missing_candidates)}."
         )
     member_ids = {
         str(member.get("agentId") or "").strip()
@@ -297,17 +398,14 @@ def build_migration_plan(
     for candidate_id, candidate in sorted(candidates_by_id.items()):
         origin = source_origins[candidate_id]
         old_item = next(item for item in legacy_items if item.get("knowledgeItemId") == origin["oldKnowledgeItemId"])
-        old_batch = next(row for row in legacy_batches if row.get("batchId") == old_item.get("batchId"))
-        proposal_ids = [str(value or "").strip() for value in list(old_batch.get("proposalIds") or []) if str(value or "").strip()]
-        matching = [proposal for proposal in legacy_proposals if proposal.get("proposalId") in proposal_ids]
-        if len(matching) != 1:
-            raise ChallengeCupKnowledgeMigrationError(f"Source {candidate_id} does not have one legacy proposal through its batch.")
+        lineage = legacy_lineage_by_item_id[origin["oldKnowledgeItemId"]]
+        old_batch = lineage["batch"]
         proposer_id = str(candidate.get("createdByAgent") or "").strip()
         if proposer_id not in member_ids:
             raise ChallengeCupKnowledgeMigrationError(f"Source {candidate_id} has no trusted team Agent proposer.")
         if proposer_id == reviewer_id:
             raise ChallengeCupKnowledgeMigrationError(f"Source {candidate_id} proposer equals the required reviewer.")
-        old_proposal = matching[0]
+        content_source = lineage["contentSource"]
         metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
         research_project_id = str(metadata.get("researchProjectId") or "").strip()
         if not research_project_id:
@@ -320,7 +418,7 @@ def build_migration_plan(
         proposal_id = _stable_id("kprop-migrated", migration_id, candidate_id)
         batch_id = _stable_id("kbatch-migrated", migration_id, candidate_id)
         item_id = _stable_id("kitem-migrated", migration_id, candidate_id)
-        content = _source_content(old_proposal, candidate)
+        content = _source_content(content_source, candidate)
         scope = {
             "requiredReviewerAgentId": reviewer_id,
             "researchProjectId": research_project_id,
@@ -330,7 +428,12 @@ def build_migration_plan(
             "sourceIdentityHash": _candidate_identity_hash(candidate),
             "evidenceLevel": _candidate_evidence_level(candidate),
         }
-        new_proposal = deepcopy(old_proposal)
+        new_proposal = deepcopy(content_source) if lineage["legacyIngestionMode"] == "proposal_backed" else {
+            "targetKnowledgeBaseId": raw_base_id,
+            "sourceArtifactIds": [lineage["sourceArtifactId"]],
+            "centralSourceIds": [lineage["centralSourceId"]],
+            "tags": list(old_item.get("tags") or []),
+        }
         new_proposal.update(
             {
                 "proposalId": proposal_id,
@@ -373,6 +476,8 @@ def build_migration_plan(
                 "sourceCandidateId": candidate_id,
                 "oldKnowledgeItemId": str(old_item.get("knowledgeItemId") or ""),
                 "oldContentHash": _content_hash(old_item),
+                "oldProposalId": lineage["oldProposalId"],
+                "legacyIngestionMode": lineage["legacyIngestionMode"],
                 "proposal": new_proposal,
                 "batch": new_batch,
                 "item": new_item,
@@ -387,7 +492,13 @@ def build_migration_plan(
         {
             "migrationId": migration_id,
             "legacy": [
-                {"knowledgeItemId": item_id, "contentHash": _content_hash(next(item for item in legacy_items if item.get("knowledgeItemId") == item_id))}
+                {
+                    "knowledgeItemId": item_id,
+                    "batchId": str(next(item for item in legacy_items if item.get("knowledgeItemId") == item_id).get("batchId") or ""),
+                    "proposalId": legacy_lineage_by_item_id[item_id]["oldProposalId"],
+                    "legacyIngestionMode": legacy_lineage_by_item_id[item_id]["legacyIngestionMode"],
+                    "contentHash": _content_hash(next(item for item in legacy_items if item.get("knowledgeItemId") == item_id)),
+                }
                 for item_id in sorted(legacy_item_ids)
             ],
             "sources": sorted(candidates_by_id),
@@ -420,6 +531,7 @@ def build_migration_plan(
         "legacyKnowledgeItemIds": sorted(legacy_item_ids),
         "legacyBatchIds": sorted(legacy_batch_ids),
         "legacyProposalIds": sorted(legacy_proposal_ids),
+        "directIngestedBatchIds": sorted(direct_ingested_batch_ids),
         "sourceCandidateIds": sorted(candidates_by_id),
         "replacementKnowledgeItemIds": replacement_ids,
         "manifestHash": manifest_hash,
@@ -504,6 +616,8 @@ def apply_migration(
                         "migrationId": plan["migrationId"],
                         "oldKnowledgeItemId": row["oldKnowledgeItemId"],
                         "oldContentHash": row["oldContentHash"],
+                        "oldProposalId": row["oldProposalId"],
+                        "legacyIngestionMode": row["legacyIngestionMode"],
                         "replacementKnowledgeItemId": row["item"]["knowledgeItemId"],
                         "sourceCandidateId": row["sourceCandidateId"],
                         "operatorAgentId": plan["operatorAgentId"],
