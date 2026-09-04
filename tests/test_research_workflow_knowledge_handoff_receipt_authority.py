@@ -9,6 +9,10 @@ from typing import Any
 
 import pytest
 
+from core.web.services.team_workflow.research_runtime.knowledge_artifact_authority import (
+    load_knowledge_package_draft_payload,
+)
+
 from core.web.services.team_workflow.research_runtime.artifact_readback_registry import (
     build_canonical_ref,
 )
@@ -51,6 +55,99 @@ def _accepted_package() -> dict[str, Any]:
         "sourceArtifactIds": ["source-package-1"],
         "approval": {"reviewedByAgentId": "reviewer-1"},
     }
+
+
+def test_draft_readback_searches_tail_beyond_public_candidate_page(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from contextlib import nullcontext
+
+    from core.web.services.team_workflow.source_collection import candidates as candidate_service
+
+    noise = [
+        {
+            "candidateId": f"noise-{index:04d}",
+            "teamId": "research-team",
+            "candidateType": "local_model_output",
+            "metadata": {"taskType": "other"},
+        }
+        for index in range(500)
+    ]
+    tail = {
+        "candidateId": "draft-at-tail",
+        "teamId": "research-team",
+        "candidateType": "local_model_output",
+        "updatedAt": "2026-09-04T12:00:00Z",
+        "metadata": {
+            "taskType": "steward_pack_draft",
+            "output": {
+                "claims": [{"claim": "Tail draft is authoritative."}],
+                "requiresReview": True,
+                "sourceTrace": {
+                    "teamId": "research-team",
+                    "sourceCollectionRunId": "sc-run-1",
+                    "workflowRunId": "run-test",
+                },
+            },
+            "validation": {"valid": True},
+            "knowledgeIngestion": {"status": "official_synced"},
+        },
+    }
+
+    class FakeTeamService:
+        @staticmethod
+        def assert_team_exists(_team_id: str) -> None:
+            return None
+
+    class FakeCandidateService:
+        _WORKFLOW_LOCK = nullcontext()
+        team_service = FakeTeamService()
+
+        @staticmethod
+        def _normalize_required_id(value: str, _message: str) -> str:
+            return value
+
+        @staticmethod
+        def _trim_text(value: Any, *, max_length: int) -> str:
+            return str(value or "")[:max_length]
+
+        @staticmethod
+        def _normalize_candidate_type(value: str) -> str:
+            return value
+
+        @staticmethod
+        def _load_or_create_workflow(_team_id: str) -> dict[str, Any]:
+            return {"workflowId": "workflow-test"}
+
+        @staticmethod
+        def _load_candidate_store(_team_id: str, *, run_id: str = "") -> dict[str, Any]:
+            assert run_id == "sc-run-1"
+            return {"candidates": [*noise, tail]}
+
+        @staticmethod
+        def _filtered_candidates(store: dict[str, Any], **_filters: Any) -> list[dict[str, Any]]:
+            return list(store["candidates"])
+
+    monkeypatch.setattr(candidate_service, "_service", lambda: FakeCandidateService())
+    monkeypatch.setattr(
+        candidate_service,
+        "project_source_version_families",
+        lambda values: (list(values), {}),
+    )
+    monkeypatch.setattr(
+        candidate_service,
+        "summarize_projected_source_version_families",
+        lambda _values: {},
+    )
+
+    payload = load_knowledge_package_draft_payload(
+        team_id="research-team",
+        authority_run_id="sc-run-1",
+        workflow_run_id="run-test",
+    )
+
+    assert payload is not None
+    assert payload["candidateId"] == "draft-at-tail"
 
 
 def _stale_inventory_package() -> dict[str, Any]:

@@ -46,6 +46,40 @@ from tools.agent_tools import spawn_agent as spawn_agent_impl, set_subagent_stre
 from tools.Key_Tools import create_key_tools, create_llm_facing_tools
 
 
+def test_turn_tool_allowlist_rebinds_and_blocks_out_of_scope_execution(monkeypatch):
+    bound: list[list[object]] = []
+
+    class FakeLlm:
+        def bind_tools(self, tools):
+            bound.append(list(tools))
+            return ("bound", tuple(tools))
+
+    context_tool = object()
+    writeback_tool = object()
+    unrelated_tool = object()
+    instance = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+    instance._base_llm = FakeLlm()
+    instance.llm_with_tools = object()
+    instance._bound_llm_cache = {}
+    instance._key_tool_map = {
+        "source_collection_context_tool": context_tool,
+        "source_collection_stage_writeback_tool": writeback_tool,
+        "knowledge_governance_tasks_tool": unrelated_tool,
+    }
+    instance.key_tool_maps = set(instance._key_tool_map)
+    instance._turn_allowed_tool_names = {
+        "source_collection_context_tool",
+        "source_collection_stage_writeback_tool",
+    }
+    monkeypatch.setattr(agent_module, "client_supports_tool_calling", lambda _llm: True)
+
+    resolved = instance._get_llm_for_current_mode()
+
+    assert resolved == ("bound", (context_tool, writeback_tool))
+    assert instance._is_tool_visible_to_current_agent("source_collection_context_tool") is True
+    assert instance._is_tool_visible_to_current_agent("knowledge_governance_tasks_tool") is False
+
+
 def _build_operator_delegation_request(*, goal: str, iteration: int, total_tool_calls: int):
     """保留对独立治理器的契约覆盖，不经由对话 Agent 私有入口。"""
     governor = DelegationGovernor(

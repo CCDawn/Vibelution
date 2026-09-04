@@ -920,6 +920,84 @@ def test_continuation_loop_stops_when_token_budget_exhausted(tmp_path, monkeypat
     )
 
 
+def test_source_stage_required_tools_narrow_each_model_turn(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda _session_id: None)
+    captured: list[dict[str, object]] = []
+
+    def fake_run_existing_agent_single_turn(_agent, **kwargs):
+        captured.append(dict(kwargs))
+        return {
+            "status": "completed",
+            "summary": "已按正式写回完成。",
+            "raw_output": "已按正式写回完成。",
+            "outcome": "done",
+            "tool_call_count": 2,
+            "tool_trace": [
+                {"name": "source_collection_context_tool", "status": "done"},
+                {"name": "source_collection_stage_writeback_tool", "status": "done"},
+            ],
+        }
+
+    monkeypatch.setattr(
+        session_service,
+        "run_existing_agent_single_turn",
+        fake_run_existing_agent_single_turn,
+    )
+    required = [
+        "source_collection_context_tool",
+        "source_collection_stage_writeback_tool",
+    ]
+
+    result = worker._run_session_continuation_loop(
+        object(),
+        context={},
+        session_id="session-stage-tools",
+        initial_prompt="执行资料入库",
+        history_messages=[],
+        require_tool_progress=True,
+        required_tool_names=required,
+        allowed_tool_names=required,
+    )
+
+    assert result["status"] == "completed"
+    assert len(captured) == 1
+    assert captured[0]["allowed_tool_names"] == required
+
+
+def test_source_stage_tool_allowlist_preserves_only_stage_needed_capabilities() -> None:
+    def context(stage_id: str) -> dict[str, object]:
+        return {
+            "message_metadata": {
+                "stageId": stage_id,
+                "writebackContract": {
+                    "toolName": "source_collection_stage_writeback_tool",
+                    "taskChecklist": [
+                        {"requiredTool": "source_collection_context_tool"},
+                    ],
+                },
+            }
+        }
+
+    required = [
+        "source_collection_context_tool",
+        "source_collection_stage_writeback_tool",
+    ]
+
+    assert session_service._source_collection_stage_task_allowed_tool_names(
+        context("ingestion")
+    ) == required
+    assert session_service._source_collection_stage_task_allowed_tool_names(
+        context("relations")
+    ) == required
+    assert session_service._source_collection_stage_task_allowed_tool_names(
+        context("extraction")
+    ) == [*required, "web_fetch_tool"]
+    assert session_service._source_collection_stage_task_allowed_tool_names(
+        context("finding")
+    ) == []
+
+
 def test_continuation_loop_unaffected_below_token_budget(tmp_path, monkeypatch) -> None:
     """Usage below the default line must not alter the loop's normal flow."""
 

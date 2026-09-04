@@ -492,6 +492,51 @@ class TestTruncateResult:
         assert compact["candidates"][0]["evidenceRefs"][0]["id"] == "record-approved-1"
         assert "summaryPreview" not in compact["candidates"][0]
 
+    def test_compact_ingestion_context_does_not_duplicate_candidate_bodies_in_steward_packet(self):
+        from core.web.services.team_workflow.source_collection_context import (
+            compact_source_collection_stage_task_context,
+        )
+
+        approved_ids = [f"candidate-{index}" for index in range(40)]
+        large_candidates = [
+            {
+                "candidateId": candidate_id,
+                "title": "Approved evidence",
+                "summary": "large evidence body " * 200,
+            }
+            for candidate_id in approved_ids
+        ]
+        context = {
+            "contextMode": "compact",
+            "stageId": "ingestion",
+            "candidates": large_candidates[:5],
+            "candidatePage": {"returned": 5, "total": 40, "hasMore": False},
+            "stewardActionPacket": {
+                "schemaVersion": 1,
+                "approvedCandidateIds": approved_ids,
+                "approvedCandidateCount": 40,
+                "writebackTool": "source_collection_stage_writeback_tool",
+                "writebackResultSkeleton": {
+                    "approvedCandidateIds": approved_ids,
+                    "candidate_summary": {
+                        "approved": {
+                            "count": 40,
+                            "candidateIds": approved_ids,
+                            "candidates": large_candidates,
+                        }
+                    },
+                },
+            },
+        }
+
+        compact = compact_source_collection_stage_task_context(context)
+        packet = compact["stewardActionPacket"]
+
+        assert packet["approvedCandidateIds"] == approved_ids
+        assert packet["writebackResultSkeleton"]["approvedCandidateIds"] == approved_ids
+        assert "candidates" not in packet["writebackResultSkeleton"]["candidate_summary"]["approved"]
+        assert len(json.dumps(compact, ensure_ascii=False)) < 16_000
+
     def test_package_tool_result_compacts_source_collection_context_with_record_paging_ids(self):
         payload = {
             "status": "ok",

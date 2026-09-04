@@ -23,14 +23,18 @@ def load_knowledge_package_draft_payload(
     an already-issued canonical reference.
     """
     from core.web.services.team_workflow.source_collection.candidates import (
-        list_candidate_store,
+        list_candidate_store_authority_records,
     )
 
-    response = list_candidate_store(team_id, limit=500, run_id=authority_run_id)
+    authority_candidates = list_candidate_store_authority_records(
+        team_id,
+        run_id=authority_run_id,
+        metadata_task_type="steward_pack_draft",
+    )
 
     scoped = [
         candidate
-        for candidate in list(response.get("candidates") or [])
+        for candidate in authority_candidates
         if isinstance(candidate, dict)
         and _is_materialized_scoped_draft(
             candidate,
@@ -74,16 +78,20 @@ def load_knowledge_package_payload(
     """
     from core.web.services import team_knowledge_service, team_service
     from core.web.services.team_workflow.source_collection.candidates import (
-        list_candidate_store,
+        list_candidate_store_authority_records,
     )
 
     try:
-        response = list_candidate_store(team_id, limit=500, run_id=authority_run_id)
+        authority_candidates = list_candidate_store_authority_records(
+            team_id,
+            run_id=authority_run_id,
+            metadata_task_type="steward_pack_draft",
+        )
     except team_service.TeamNotFoundError:
         return None
     candidates = [
         candidate
-        for candidate in list(response.get("candidates") or [])
+        for candidate in authority_candidates
         if isinstance(candidate, dict)
         and _is_materialized_scoped_draft(
             candidate,

@@ -489,10 +489,17 @@ def test_run_existing_agent_single_turn_passes_supported_optional_kwargs():
     captured: dict[str, object] = {}
 
     class FakeAgent:
-        def run_single_turn(self, initial_prompt=None, disable_tools=False, attachments=None):
+        def run_single_turn(
+            self,
+            initial_prompt=None,
+            disable_tools=False,
+            attachments=None,
+            allowed_tool_names=None,
+        ):
             captured["initial_prompt"] = initial_prompt
             captured["disable_tools"] = disable_tools
             captured["attachments"] = attachments
+            captured["allowed_tool_names"] = allowed_tool_names
             return {"status": "completed"}
 
     result = run_existing_agent_single_turn(
@@ -500,6 +507,7 @@ def test_run_existing_agent_single_turn_passes_supported_optional_kwargs():
         initial_prompt="probe",
         disable_tools=True,
         attachments=[{"kind": "image"}],
+        allowed_tool_names=["source_collection_context_tool", "source_collection_stage_writeback_tool"],
     )
 
     assert result == {"status": "completed"}
@@ -507,6 +515,7 @@ def test_run_existing_agent_single_turn_passes_supported_optional_kwargs():
         "initial_prompt": "probe",
         "disable_tools": True,
         "attachments": [{"kind": "image"}],
+        "allowed_tool_names": ["source_collection_context_tool", "source_collection_stage_writeback_tool"],
     }
 
 

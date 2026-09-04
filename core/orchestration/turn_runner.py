@@ -299,6 +299,7 @@ def _execute_existing_agent_single_turn(
     *,
     initial_prompt: str,
     disable_tools: bool = False,
+    allowed_tool_names: list[str] | None = None,
     attachments: list[dict[str, Any]] | None = None,
     prompt_cache_partition: str = "",
 ) -> Any:
@@ -324,6 +325,14 @@ def _execute_existing_agent_single_turn(
         "disable_tools" in signature.parameters or supports_var_kwargs
     ):
         kwargs["disable_tools"] = True
+    if allowed_tool_names is not None and signature is not None and (
+        "allowed_tool_names" in signature.parameters or supports_var_kwargs
+    ):
+        kwargs["allowed_tool_names"] = [
+            str(item or "").strip()
+            for item in allowed_tool_names
+            if str(item or "").strip()
+        ]
     partition = _coerce_text(prompt_cache_partition).strip()
     scope = prompt_cache_partition_scope(partition) if partition else nullcontext()
     with scope:
@@ -335,6 +344,7 @@ def run_existing_agent_single_turn(
     *,
     initial_prompt: str,
     disable_tools: bool = False,
+    allowed_tool_names: list[str] | None = None,
     attachments: list[dict[str, Any]] | None = None,
     prompt_cache_partition: str = "",
     carryover: dict[str, Any] | None = None,
@@ -363,6 +373,7 @@ def run_existing_agent_single_turn(
         agent,
         initial_prompt=initial_prompt,
         disable_tools=disable_tools,
+        allowed_tool_names=allowed_tool_names,
         attachments=attachments,
         prompt_cache_partition=prompt_cache_partition,
     )

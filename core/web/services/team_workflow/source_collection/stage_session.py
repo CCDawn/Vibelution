@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from ..research_runtime.task_adapter_registry import SOURCE_NODE_TASKS
 from .stage_session_replay import (
     mark_source_collection_stage_task_session_missing,
     prepare_source_collection_stage_task_replay,
@@ -425,25 +426,25 @@ def _source_collection_problem_understanding_message(
         ]
     )
 
-# One session per (Agent, workflow run) for all source-collection stages of a
-# formal workflow run.  The label is a registry scope key component, not a
-# workflow definition node id: within one run every stage of the same Agent
-# keeps the deliberate session continuity, while a different run can never
-# inherit it.
-_SOURCE_COLLECTION_SESSION_SCOPE_NODE_ID = "source_collection"
+_SOURCE_COLLECTION_WORKFLOW_NODE_BY_STAGE = {
+    stage_id: node_id
+    for node_id, (stage_id, _role_key) in SOURCE_NODE_TASKS.items()
+}
 
 
 def _source_collection_stage_session_workflow_scope(
     run: dict[str, Any],
     problem_understanding_context: dict[str, Any],
+    *,
+    stage_id: str,
 ) -> tuple[str, str]:
     """Return ``(workflowRunId, workflowNodeId)`` for the stage session key.
 
     Formal workflow runs freeze their run id into the source run scope and,
-    for finding, into the canonical problem-understanding artifact.  Binding
-    the project-Agent session to that run keeps a formal run from inheriting
-    a legacy/dprun-era flat session (cross-run prompt-context leak).  Runs
-    without a workflow binding keep the historical flat per-agent identity.
+    for finding, into the canonical problem-understanding artifact. Binding
+    the project-Agent session to the real workflow node keeps both formal runs
+    and their stage personas isolated. Runs without a workflow binding keep
+    the historical flat per-agent identity.
     """
 
     s = _service()
@@ -458,7 +459,12 @@ def _source_collection_stage_session_workflow_scope(
         workflow_run_id = s._trim_text(run_scope.get("workflowRunId"), max_length=160)
     if not workflow_run_id:
         return "", ""
-    return workflow_run_id, _SOURCE_COLLECTION_SESSION_SCOPE_NODE_ID
+    workflow_node_id = _SOURCE_COLLECTION_WORKFLOW_NODE_BY_STAGE.get(stage_id, "")
+    if not workflow_node_id:
+        raise s.TeamWorkflowOrchestrationError(
+            f"Unsupported source collection stage session scope: {stage_id}"
+        )
+    return workflow_run_id, workflow_node_id
 
 
 def _source_collection_task_experiment_session_fields(
@@ -555,6 +561,7 @@ def seed_source_collection_agent_session_context(
     scope_workflow_run_id, scope_workflow_node_id = _source_collection_stage_session_workflow_scope(
         run,
         problem_understanding_context,
+        stage_id=stage_id,
     )
     resolved_role_key = agent_role or s._trim_text(agent.get("roleKey"), max_length=80)
     try:
@@ -1085,6 +1092,7 @@ def start_source_collection_stage_session_task(
     scope_workflow_run_id, scope_workflow_node_id = _source_collection_stage_session_workflow_scope(
         run,
         problem_understanding_context,
+        stage_id=stage_id,
     )
     try:
         experiment_session = s.resolve_research_project_agent_session(

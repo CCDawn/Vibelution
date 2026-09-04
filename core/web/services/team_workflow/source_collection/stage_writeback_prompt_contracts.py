@@ -71,4 +71,11 @@ def stage_writeback_prompt_lines(stage_id: str) -> list[str]:
             "- 端点记不住完整 ID 时可写候选标题或已声明主题的 label/裸主题 ID 作语义端点，服务端会确定性解析回注册表节点；解析不了的边按悬空处理计入 `missingLinks`（danglingEdgeCount），阻塞下游 knowledge_ingestion。",
             "- 语义枢纽必须先在同一轮回写的 `themeNodes[]` 中声明（themeId+label）再连边；禁止发明 `rh_claim` 之类未声明的逻辑端点或展示别名。",
         ]
+    if stage_id == "ingestion":
+        return [
+            "- 资料入库只调用当前任务提供的 `source_collection_context_tool` 与 `source_collection_stage_writeback_tool`；不要调用 knowledge_governance_tasks_tool 或其他知识治理工具，正式知识物化由本次写回后的服务端门禁负责。",
+            "- 调用 `source_collection_stage_writeback_tool` 时，只传工具签名中的 `team_id`、`task_id`、`status`、`summary`、`result_json` 等参数；该工具没有 `stage_id`，也没有 `writesFormalKnowledgeViaGate` 参数。",
+            "- 将 `stewardActionPacket.writebackResultSkeleton` 完整 JSON 序列化到参数 `result_json`；不要把 skeleton 的字段展开成工具顶层参数。",
+            "- 写回成功且返回 completionGate.passed=true 后立即结束本轮，不再读取上下文或调用其他工具。",
+        ]
     return []
