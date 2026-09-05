@@ -167,6 +167,13 @@ describe("nodeInspectorOpsModel", () => {
     expect(pickPrimaryCommandOffer([staleRetry, freshRetry])).toEqual(freshRetry);
   });
 
+  it("keeps an available retry visible when starting the failed node is blocked", () => {
+    const start = offer({ command: "start_node", label: "启动", available: false, reasonCode: "retry_owns_recovery" });
+    const retry = offer({ command: "retry_node", label: "重试" });
+    expect(pickPrimaryCommandOffer([start, retry])).toEqual(retry);
+    expect(pickPrimaryCommandOffer([start, { ...retry, available: false }])).toEqual(start);
+  });
+
   it("reports run-version mismatches as a refresh need for available and unavailable offers", () => {
     const stale = offer({ command: "retry_node", label: "重试", expectedRunVersion: 5 });
     expect(commandOfferUnavailableReason(stale, true, 8)).toBe("运行状态已更新，请刷新后重试");
