@@ -2584,15 +2584,6 @@ def _collect_kind_refs(
             workflow_run_id=str(workflow_run_id or "").strip(),
         )
         if payload is None:
-            from .real_readiness_context import _readiness_artifact_envelope
-
-            payload = _readiness_artifact_envelope(
-                kind,
-                team_id=team_id,
-                run_id=str(workflow_run_id or "").strip(),
-                authority_run_id=authority_run_id,
-            )
-        if payload is None:
             continue
         content_hash = canonical_sha256(payload)
         refs.append(
@@ -2684,15 +2675,6 @@ def _load_run_authority_artifact(
         authority_run_id=authority,
         workflow_run_id=str(workflow_run_id or "").strip(),
     )
-    if not isinstance(envelope, dict) or not envelope:
-        from .real_readiness_context import _readiness_artifact_envelope
-
-        envelope = _readiness_artifact_envelope(
-            kind,
-            team_id=team_id,
-            run_id=str(workflow_run_id or "").strip(),
-            authority_run_id=authority,
-        )
     return envelope if isinstance(envelope, dict) else {}
 
 

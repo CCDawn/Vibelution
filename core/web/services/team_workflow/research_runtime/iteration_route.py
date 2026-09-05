@@ -77,16 +77,5 @@ def branch_decision_from_run(run: Any) -> str:
         authority_run_id=authority,
         workflow_run_id=run_id,
     )
-    if envelope is None:
-        # Compact restore can freeze a sourceCollectionRunId that no longer
-        # matches the jsonl row. Readiness already heals that; routing must too.
-        from .real_readiness_context import _readiness_artifact_envelope
-
-        envelope = _readiness_artifact_envelope(
-            "iteration_decision",
-            team_id=team_id,
-            run_id=run_id,
-            authority_run_id=authority,
-        )
     body = envelope.get("payload") if isinstance(envelope, dict) else envelope
     return branch_decision_from_payload(body)

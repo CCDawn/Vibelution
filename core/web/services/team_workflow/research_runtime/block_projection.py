@@ -202,23 +202,14 @@ def terminal_facts_for_run(run: Any) -> tuple[str, str]:
     def _body(kind: str) -> dict[str, Any]:
         if not team_id or not run_id:
             return {}
-        from .real_readiness_context import _readiness_artifact_envelope
+        from .artifact_readback_registry import load_scoped_artifact_payload
 
-        envelope = _readiness_artifact_envelope(
+        envelope = load_scoped_artifact_payload(
             kind,
             team_id=team_id,
-            run_id=run_id,
             authority_run_id=authority,
+            workflow_run_id=run_id,
         )
-        if not isinstance(envelope, dict) or not envelope:
-            from .artifact_readback_registry import load_scoped_artifact_payload
-
-            envelope = load_scoped_artifact_payload(
-                kind,
-                team_id=team_id,
-                authority_run_id=authority,
-                workflow_run_id=run_id,
-            )
         if not isinstance(envelope, dict):
             return {}
         payload = envelope.get("payload")
