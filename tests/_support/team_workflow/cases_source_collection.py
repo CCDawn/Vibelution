@@ -809,7 +809,20 @@ def test_start_source_collection_run_accepts_traceable_query_seed_contract(tmp_p
     assert search_plan["searchLanguages"] == ["en"]
     assert search_plan["sourceTypes"] == ["paper"]
     assert search_plan["maxResultsPerQuery"] == 7
-    assert search_plan["queryCount"] == 2
+    assert search_plan["queryCount"] == 8
+    assert len({item["queryId"] for item in queries}) == 8
+    required_perspectives = {
+        "mechanism",
+        "independent_baseline",
+        "limitation_or_null",
+        "falsification",
+    }
+    for seed in search_plan["querySeeds"]:
+        assert {
+            item["perspective"]
+            for item in queries
+            if item["seed"] == seed
+        } == required_perspectives
     assert {item["assignedAgentRole"] for item in queries} == {"source_finder"}
     assert all(item["status"] == "planned" for item in queries)
     assert all(item["execution"]["externalSearchTriggered"] is False for item in queries)
@@ -9622,6 +9635,8 @@ def test_finding_close_first_step_checklist_single_read_and_gate(tmp_path, monke
     assert "写回预算" in env["submitted"][0]["content"]
     assert "总计最多接受 8 条去重来源" in env["submitted"][0]["content"]
     assert "每批 `candidateLeads[]` 最多 4 条" in env["submitted"][0]["content"]
+    assert "`assignments[].assignedQueries[]`" in env["submitted"][0]["content"]
+    assert "必须逐字使用其中的 `query`" in env["submitted"][0]["content"]
 
 
 def test_finding_close_first_step_context_has_no_continuation_invite(tmp_path, monkeypatch):
@@ -9661,6 +9676,15 @@ def test_finding_close_first_step_context_has_no_continuation_invite(tmp_path, m
     assert context["candidatePage"]["hasMore"] is False
     assert context["candidatePage"]["nextOffset"] == 5
     assert context["usage"]["continuationHint"] == ""
+    assigned_queries = context["assignments"][0]["assignedQueries"]
+    assert {item["perspective"] for item in assigned_queries} == {
+        "mechanism",
+        "independent_baseline",
+        "limitation_or_null",
+        "falsification",
+    }
+    assert all(item["assignmentId"] == context["assignments"][0]["assignmentId"] for item in assigned_queries)
+    assert all(item["queryId"] and item["query"] for item in assigned_queries)
     assert "candidate_offset" not in json.dumps(context["usage"], ensure_ascii=False)
 
 

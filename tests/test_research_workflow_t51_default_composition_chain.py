@@ -424,6 +424,66 @@ def test_deterministic_composition_integration_gate(
         sc_run_id = str(run_snap.get("sourceCollectionRunId") or "")
         assert sc_run_id
 
+        from core.web.services import data_processing_service
+        from core.web.services import team_workflow_orchestration_service as orch
+        from core.web.services.team_workflow.source_collection.search_execution import (
+            project_source_collection_search_trace,
+        )
+
+        assignment_payload = data_processing_service.list_collection_assignments(
+            sc_run_id
+        )
+        finder_assignment = next(
+            item
+            for item in assignment_payload["assignments"]
+            if item["agentId"] == seeded["finderId"]
+        )
+        assigned_queries = finder_assignment["scope"]["assignedQueries"]
+        required_perspectives = {
+            "mechanism",
+            "independent_baseline",
+            "limitation_or_null",
+            "falsification",
+        }
+        assert {item["perspective"] for item in assigned_queries} == required_perspectives
+        assert all(item["queryId"] and item["query"] for item in assigned_queries)
+
+        search_trace = project_source_collection_search_trace(
+            seeded["teamId"],
+            sc_run_id,
+            assignment_id=finder_assignment["assignmentId"],
+        )
+        assert {item["perspective"] for item in search_trace} == required_perspectives
+        assert {
+            (item["assignmentId"], item["queryId"], item["query"])
+            for item in search_trace
+        } == {
+            (
+                finder_assignment["assignmentId"],
+                item["queryId"],
+                item["query"],
+            )
+            for item in assigned_queries
+        }
+        assert all(item["status"] == "found" and item["eventIds"] for item in search_trace)
+
+        candidate_payload = orch.list_candidate_store(
+            seeded["teamId"],
+            candidate_type="source_manifest",
+        )
+        candidate_urls = {
+            str(item.get("sourceUrl") or "").strip()
+            for item in candidate_payload["candidates"]
+            if str((item.get("metadata") or {}).get("sourceCollectionRunId") or "")
+            == sc_run_id
+        }
+        assert candidate_urls
+        assert all(
+            candidate_urls.intersection(item["resultRefs"])
+            for item in search_trace
+        )
+        assert int(stub_counters["provider_calls"]) == len(assigned_queries)
+
         _drive_until_node_succeeded(runtime, "source_extraction")
         extraction = runtime.store.latest_attempt("run-t518", "source_extraction")
         assert extraction is not None

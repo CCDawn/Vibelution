@@ -1821,12 +1821,30 @@ def _source_collection_context_task_summary(task: dict[str, Any]) -> dict[str, A
 
 def _source_collection_context_assignment_summary(assignment: dict[str, Any]) -> dict[str, Any]:
     s = _service()
+    assignment_id = s._trim_text(assignment.get("assignmentId"), max_length=128)
+    scope = assignment.get("scope") if isinstance(assignment.get("scope"), dict) else {}
+    assigned_queries = []
+    for item in list(scope.get("assignedQueries") or []):
+        if not isinstance(item, dict):
+            continue
+        assigned_queries.append(
+            {
+                "assignmentId": assignment_id,
+                "queryId": s._trim_text(item.get("queryId"), max_length=160),
+                "perspective": s._trim_text(
+                    item.get("perspective") or item.get("perspectiveId"),
+                    max_length=80,
+                ),
+                "query": s._trim_text(item.get("query"), max_length=500),
+            }
+        )
     return {
-        "assignmentId": s._trim_text(assignment.get("assignmentId"), max_length=128),
+        "assignmentId": assignment_id,
         "agentId": s._trim_text(assignment.get("agentId"), max_length=160),
         "agentRole": s._trim_text(assignment.get("agentRole"), max_length=80),
         "status": s._trim_text(assignment.get("status"), max_length=80),
         "purpose": s._trim_text(assignment.get("purpose"), max_length=500),
+        "assignedQueries": assigned_queries,
     }
 
 
