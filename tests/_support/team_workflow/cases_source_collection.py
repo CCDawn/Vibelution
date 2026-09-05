@@ -13,6 +13,27 @@ from tests._support.team_workflow.helpers import *  # noqa: F403
 from tests.test_challenge_question_runs import _append_canonical_turn_output
 
 
+def _create_owned_source_collection_processing_run(team, *, title):
+    project = team_workflow_orchestration_service.create_research_project(
+        team["teamId"],
+        {"name": f"{title} project", "topic": title},
+    )["project"]
+    team_workflow_orchestration_service.activate_research_project(team["teamId"], project["projectId"])
+    return data_processing_service.create_processing_run(
+        title=title,
+        scope={
+            "teamId": team["teamId"],
+            "workflowStage": "knowledge_collection",
+            "researchProjectId": project["projectId"],
+        },
+        metadata={
+            "startedFrom": "team_workflow_source_collection",
+            "teamId": team["teamId"],
+            "researchProjectId": project["projectId"],
+        },
+    )
+
+
 def test_source_collection_summary_reuses_processing_status_for_projection(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
@@ -435,9 +456,24 @@ def test_extract_source_collection_candidates_imports_records_and_closes_extract
     _use_tmp_project_root(tmp_path, monkeypatch)
     scene_events = _capture_workflow_events(monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")
+    project = team_workflow_orchestration_service.create_research_project(
+        team["teamId"],
+        {"name": "Neural source extraction", "topic": "Neural predictive coding"},
+    )["project"]
+    team_workflow_orchestration_service.activate_research_project(team["teamId"], project["projectId"])
     run = data_processing_service.create_processing_run(
         title="Neural source collection",
-        scope={"teamId": team["teamId"], "workflowKind": "challenge_cup_research"},
+        scope={
+            "teamId": team["teamId"],
+            "workflowKind": "challenge_cup_research",
+            "workflowStage": "knowledge_collection",
+            "researchProjectId": project["projectId"],
+        },
+        metadata={
+            "startedFrom": "team_workflow_source_collection",
+            "teamId": team["teamId"],
+            "researchProjectId": project["projectId"],
+        },
     )
     data_processing_service.create_collection_assignment(
         run["runId"],
@@ -514,9 +550,24 @@ def test_extract_source_collection_candidates_imports_records_and_closes_extract
 def test_extract_source_collection_candidates_keeps_assignment_open_when_batch_is_partial(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")
+    project = team_workflow_orchestration_service.create_research_project(
+        team["teamId"],
+        {"name": "Partial source extraction", "topic": "Neural predictive coding"},
+    )["project"]
+    team_workflow_orchestration_service.activate_research_project(team["teamId"], project["projectId"])
     run = data_processing_service.create_processing_run(
         title="Neural source collection",
-        scope={"teamId": team["teamId"], "workflowKind": "challenge_cup_research"},
+        scope={
+            "teamId": team["teamId"],
+            "workflowKind": "challenge_cup_research",
+            "workflowStage": "knowledge_collection",
+            "researchProjectId": project["projectId"],
+        },
+        metadata={
+            "startedFrom": "team_workflow_source_collection",
+            "teamId": team["teamId"],
+            "researchProjectId": project["projectId"],
+        },
     )
     data_processing_service.create_collection_assignment(
         run["runId"],
@@ -2508,10 +2559,23 @@ def test_research_stage_status_repairs_missing_round_and_projects_stage_cards(tm
 def test_source_collection_stage_card_projection_is_scoped_to_current_run_artifacts(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")
+    project = team_workflow_orchestration_service.create_research_project(
+        team["teamId"],
+        {"name": "Scoped source rounds", "topic": "Neural evidence rounds"},
+    )["project"]
+    team_workflow_orchestration_service.activate_research_project(team["teamId"], project["projectId"])
     run_one = data_processing_service.create_processing_run(
         title="Knowledge collection round 1",
-        scope={"teamId": team["teamId"], "workflowStage": "knowledge_collection"},
-        metadata={"startedFrom": "team_workflow_source_collection"},
+        scope={
+            "teamId": team["teamId"],
+            "workflowStage": "knowledge_collection",
+            "researchProjectId": project["projectId"],
+        },
+        metadata={
+            "startedFrom": "team_workflow_source_collection",
+            "teamId": team["teamId"],
+            "researchProjectId": project["projectId"],
+        },
     )
     record_one = data_processing_service.add_record(
         run_one["runId"],
@@ -2551,8 +2615,16 @@ def test_source_collection_stage_card_projection_is_scoped_to_current_run_artifa
 
     run_two = data_processing_service.create_processing_run(
         title="Knowledge collection round 2",
-        scope={"teamId": team["teamId"], "workflowStage": "knowledge_collection"},
-        metadata={"startedFrom": "team_workflow_source_collection"},
+        scope={
+            "teamId": team["teamId"],
+            "workflowStage": "knowledge_collection",
+            "researchProjectId": project["projectId"],
+        },
+        metadata={
+            "startedFrom": "team_workflow_source_collection",
+            "teamId": team["teamId"],
+            "researchProjectId": project["projectId"],
+        },
     )
     record_two = data_processing_service.add_record(
         run_two["runId"],
@@ -2596,10 +2668,9 @@ def test_source_collection_stage_card_projection_ignores_stale_agent_tasks_for_c
         name="挑战杯科研团队",
         members=[{"agentId": current_agent["agentId"], "role": "source_extractor", "agentName": "当前资料提炼"}],
     )
-    run = data_processing_service.create_processing_run(
+    run = _create_owned_source_collection_processing_run(
+        team,
         title="Knowledge collection current round",
-        scope={"teamId": team["teamId"], "workflowStage": "knowledge_collection"},
-        metadata={"startedFrom": "team_workflow_source_collection"},
     )
     record = data_processing_service.add_record(
         run["runId"],
@@ -2654,10 +2725,9 @@ def test_source_collection_stage_card_projection_closes_finding_with_downstream_
             {"agentId": extractor["agentId"], "role": "source_extractor", "agentName": "资料提炼"},
         ],
     )
-    run = data_processing_service.create_processing_run(
+    run = _create_owned_source_collection_processing_run(
+        team,
         title="Knowledge collection current round",
-        scope={"teamId": team["teamId"], "workflowStage": "knowledge_collection"},
-        metadata={"startedFrom": "team_workflow_source_collection"},
     )
     finder_assignment = data_processing_service.create_collection_assignment(
         run["runId"],
@@ -2723,10 +2793,9 @@ def test_source_collection_stage_card_projection_ignores_stale_finder_assignment
             }
         ],
     )
-    run = data_processing_service.create_processing_run(
+    run = _create_owned_source_collection_processing_run(
+        team,
         title="Knowledge collection current round",
-        scope={"teamId": team["teamId"], "workflowStage": "knowledge_collection"},
-        metadata={"startedFrom": "team_workflow_source_collection"},
     )
     completed_assignment = data_processing_service.create_collection_assignment(
         run["runId"],
@@ -2791,10 +2860,9 @@ def test_source_collection_stage_card_projection_suppresses_interrupted_task_aft
         name="挑战杯科研团队",
         members=[{"agentId": finder["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
-    run = data_processing_service.create_processing_run(
+    run = _create_owned_source_collection_processing_run(
+        team,
         title="Knowledge collection current round",
-        scope={"teamId": team["teamId"], "workflowStage": "knowledge_collection"},
-        metadata={"startedFrom": "team_workflow_source_collection"},
     )
     data_processing_service.add_record(
         run["runId"],
@@ -3037,10 +3105,9 @@ def test_source_collection_stage_card_projection_marks_stale_success_as_partial_
 def test_source_collection_stage_card_projection_counts_approved_sources_pending_ingestion(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队", members=[])
-    run = data_processing_service.create_processing_run(
+    run = _create_owned_source_collection_processing_run(
+        team,
         title="Knowledge collection current round",
-        scope={"teamId": team["teamId"], "workflowStage": "knowledge_collection"},
-        metadata={"startedFrom": "team_workflow_source_collection"},
     )
     source = team_workflow_orchestration_service.register_candidate_source(
         team["teamId"],
@@ -6627,7 +6694,11 @@ def test_candidate_graph_stage_writeback_materializes_root_graph_payload_on_reus
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")
-    run_id = "run-root-relation-graph"
+    run = _create_owned_source_collection_processing_run(
+        team,
+        title="Root relation graph",
+    )
+    run_id = run["runId"]
     source_one = team_workflow_orchestration_service.register_candidate_source(
         team["teamId"],
         {
@@ -8708,7 +8779,11 @@ def test_research_stage_round_status_skips_repair_hydration_when_round_exists(tm
 def test_source_collection_stage_card_projection_resolves_current_stage_agents_once(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")
-    run_id = "run-stage-card-projection-fast-path"
+    run = _create_owned_source_collection_processing_run(
+        team,
+        title="Stage card projection fast path",
+    )
+    run_id = run["runId"]
     stage_roles = {
         "finding": "source_finder",
         "extraction": "source_extractor",

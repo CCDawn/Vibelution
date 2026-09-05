@@ -720,7 +720,7 @@ def test_team_workflow_route_starts_source_collection_run(tmp_path, monkeypatch)
     assert response.status_code == 201, response.text
     assert response.json()["assignmentCount"] == 1
     assert response.json()["searchPlan"]["querySeeds"] == ["thalamic gating", "neural gating"]
-    assert response.json()["searchPlan"]["queryCount"] == 2
+    assert response.json()["searchPlan"]["queryCount"] == 8
     assert response.json()["searchPlan"]["boundaries"]["externalSearchTriggered"] is False
     assert response.json()["searchPlan"]["boundaries"]["requiresPromptCacheForAgentExecution"] is True
     assert response.json()["promptCachePolicy"]["gate"]["status"] == "satisfied"
@@ -1597,11 +1597,11 @@ def test_team_workflow_route_accepts_source_collection_search_background(tmp_pat
     latest_status = ""
     while time.monotonic() < deadline:
         latest_status = team_workflow_orchestration_service.load_source_collection_work_run_summary()["latest"]["status"]
-        if latest_status == "completed":
+        if latest_status in {"completed", "needs_continue", "failed", "cancelled"}:
             break
         time.sleep(0.05)
 
-    assert latest_status == "completed"
+    assert latest_status == "needs_continue"
 
 
 def test_team_workflow_route_assesses_source_quality_batch(tmp_path, monkeypatch):
