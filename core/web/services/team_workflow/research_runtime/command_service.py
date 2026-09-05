@@ -402,9 +402,9 @@ class WorkflowCommandService:
                 ),
                 force_flush=True,
             )
-        elif request.command is WorkflowCommandKind.CANCEL_RUN:
+        elif request.command in {WorkflowCommandKind.CANCEL_RUN, WorkflowCommandKind.ARCHIVE_RUN}:
             future = self._store.submit(
-                lambda uow: self._handle_cancel_run(
+                lambda uow: handler(
                     uow, request, request_hash, operator_id=authorized_operator_id,
                 ),
                 force_flush=True,
@@ -1440,7 +1440,7 @@ class WorkflowCommandService:
         return _receipt(uow, request, command_id, accepted_version, sequence, now_ms)
 
     def _handle_archive_run(
-        self, uow, request: CommandRequest, request_hash: str
+        self, uow, request: CommandRequest, request_hash: str, *, operator_id: str,
     ) -> CommandReceipt:
         """Archive a terminal run without reviving its execution state."""
 
@@ -1516,6 +1516,30 @@ class WorkflowCommandService:
                 now_ms=now_ms,
             )
         )
+        from .scientific_semantic_ledger import (
+            CHALLENGE_CUP_WORKFLOW_ID,
+            append_scientific_semantic_record_in_uow,
+        )
+
+        if run.workflow_id == CHALLENGE_CUP_WORKFLOW_ID:
+            from core.research.workflow.contracts.challenge_cup_stage_one_v3 import (
+                RecordLifecycle,
+                ScientificSemanticRecord,
+            )
+
+            semantic_record = append_scientific_semantic_record_in_uow(
+                uow,
+                run_id=request.run_id,
+                record_ref=f"record:{command_id}:archived",
+                subject_ref=request.run_id,
+                semantic=ScientificSemanticRecord(
+                    record=RecordLifecycle(availability="archived"),
+                ),
+                actor_type="person",
+                actor_ref=operator_id,
+                recorded_at_ms=now_ms,
+            )
+            sequence = semantic_record["sequence"]
         return _receipt(uow, request, command_id, accepted_version, sequence, now_ms)
 
     def _handle_rebind_node(self, uow, request: CommandRequest, request_hash: str) -> CommandReceipt:

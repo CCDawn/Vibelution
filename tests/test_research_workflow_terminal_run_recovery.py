@@ -162,7 +162,7 @@ def test_failed_run_archive_preserves_terminal_facts_cancels_outbox_and_records_
 
         assert receipt.status == "accepted"
         assert receipt.accepted_run_version == 4
-        assert receipt.latest_event_sequence == 2
+        assert receipt.latest_event_sequence == 3
         run = harness.store.get_run("run-failed")
         assert run is not None
         assert run.status == RunStatus.ARCHIVED.value
@@ -179,8 +179,9 @@ def test_failed_run_archive_preserves_terminal_facts_cancels_outbox_and_records_
         assert [event.event_type for event in events] == [
             "run_created",
             "run_archived",
+            "scientific_semantic_recorded.v3",
         ]
-        event = events[-1]
+        event = events[1]
         assert event.sequence == 2
         assert event.run_version == 4
         payload = json.loads(event.payload_json)
@@ -219,7 +220,7 @@ def test_cancelled_run_archive_is_not_reconcile_and_replays_idempotently(
         run = harness.store.get_run("run-cancelled")
         assert run is not None and run.status == RunStatus.ARCHIVED.value
         assert run.run_version == 4
-        assert len(harness.store.list_events("run-cancelled")) == 2
+        assert len(harness.store.list_events("run-cancelled")) == 3
     finally:
         harness.close()
 
