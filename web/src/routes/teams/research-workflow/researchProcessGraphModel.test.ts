@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { stateV2 } from "./hypothesisFirstV2.fixture";
 
 import type { WorkflowCanvasProjection, WorkflowDefinition } from "../../../api/types/researchWorkflow";
 import {
@@ -301,28 +302,7 @@ describe("composeHypothesisFirstGraph", () => {
 
   function regionInput(overrides: Partial<HypothesisFirstCanvasRegionInput> = {}): HypothesisFirstCanvasRegionInput {
     return {
-      chainState: {
-        schemaVersion: 1,
-        teamId: "team-1",
-        questionId: "Q-01",
-        selectionId: "sel-1",
-        meetingCount: 1,
-        firstMeetingId: "hf-review-sel-1-r1",
-        firstMeetingClosed: true,
-        openMeetingIds: [],
-        collectionRequests: [],
-        collectionRequestCount: 0,
-        pendingCollectionCount: 0,
-        collectionReady: false,
-        hypothesisRoundCount: 0,
-        latestHypothesisRoundId: "",
-        hypothesisConverged: false,
-        convergenceDetail: "",
-        roundBudget: 3,
-        budgetExhausted: false,
-        templateBaselineExists: false,
-        templateBaselineIds: [],
-      },
+      stateV2: stateV2({teamId: "team-1", questionId: "Q-01", selection: {selectionId: "sel-1"}, review: {lifecycle: true ? "completed" : "not_started"}, collection: {lifecycle: false ? "completed" : "not_started", outcome: false ? "succeeded" : "none"}, convergence: {roundIndex: 0, accepted: false, problems: [{ message: "" }], roundBudget: 3, outcome: false ? "exhausted" : "none"}}),
       meetings: [
         {
           ...hfScope,
@@ -506,28 +486,7 @@ describe("composeHypothesisFirstGraph", () => {
     const base = definitionToCanvasGraph(definition);
     const region = buildHypothesisFirstCanvasRegion(regionInput({
       meetings: [],
-      chainState: {
-        schemaVersion: 1,
-        teamId: "team-1",
-        questionId: "Q-01",
-        selectionId: "sel-1",
-        meetingCount: 0,
-        firstMeetingId: "",
-        firstMeetingClosed: false,
-        openMeetingIds: [],
-        collectionRequests: [],
-        collectionRequestCount: 0,
-        pendingCollectionCount: 0,
-        collectionReady: false,
-        hypothesisRoundCount: 0,
-        latestHypothesisRoundId: "",
-        hypothesisConverged: false,
-        convergenceDetail: "",
-        roundBudget: 3,
-        budgetExhausted: false,
-        templateBaselineExists: false,
-        templateBaselineIds: [],
-      },
+      stateV2: stateV2({teamId: "team-1", questionId: "Q-01", selection: {selectionId: "sel-1"}, review: {lifecycle: false ? "completed" : "not_started"}, collection: {lifecycle: false ? "completed" : "not_started", outcome: false ? "succeeded" : "none"}, convergence: {roundIndex: 0, accepted: false, problems: [{ message: "" }], roundBudget: 3, outcome: false ? "exhausted" : "none"}}),
     }))!;
     expect(region.showDownstreamPipeline).toBe(false);
     const prerequisiteGraph = composeHypothesisFirstGraph(base, region, { formalRuntimeActive: true });

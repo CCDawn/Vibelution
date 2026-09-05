@@ -4,32 +4,28 @@
  * Canvas cards remain a projection. This panel is the current-task surface:
  * discussion, digest confirm, selection, collection progress, and recovery.
  */
-import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 
-import { fetchChatRoomDetail } from "../../../api/chat";
 import { getChallengeQuestionRunDetail } from "../../../api/challengeQuestionRuns";
+import { fetchChatRoomDetail } from "../../../api/chat";
+import type { HypothesisFirstCommandExecutionResponse } from "../../../api/hypothesisFirst";
 import {
   executeHypothesisFirstCommand,
   isFetchJsonHttpError,
   isHypothesisFirstCommandStateConflict,
-  openHypothesisCandidateGeneration,
-  openNextHypothesisReviewRound,
   parseClaimBeliefGate,
-  recordCollectionHandoff,
 } from "../../../api/hypothesisFirst";
 import { queryKeys } from "../../../api/queryKeys";
-import type { HypothesisFirstCommandExecutionResponse } from "../../../api/hypothesisFirst";
 import type {
   CommandAction,
-  HypothesisFirstChainState,
   HypothesisFirstClaimBeliefGate,
   HypothesisFirstClaimGateEvidenceGap,
   HypothesisFirstStateV2,
   MeetingRoundRecord,
-  ReviewNextRoundResponse,
   WorkflowProblem,
 } from "../../../api/types/hypothesisFirst";
+import { resolvePollingInterval, usePageVisibility } from "../../../app/pollingPolicy";
 import {
   VActionGroup,
   VButton,
@@ -42,32 +38,28 @@ import {
   VStatusChip,
   VSurface,
 } from "../../../components/vui";
-import { HypothesisSelectionList } from "../challenge-cup/HypothesisSelectionList";
 import { ChallengeQuestionReviewForm } from "../challenge-cup/ChallengeQuestionReviewForm";
+import { HypothesisSelectionList } from "../challenge-cup/HypothesisSelectionList";
 import {
-  HYPOTHESIS_FIRST_CONVERGENCE_NODE_ID,
   HYPOTHESIS_FIRST_COLLECTION_NODE_ID,
+  HYPOTHESIS_FIRST_CONVERGENCE_NODE_ID,
   HYPOTHESIS_FIRST_GENERATION_NODE_ID,
   HYPOTHESIS_FIRST_REVIEW_NODE_ID,
   HYPOTHESIS_FIRST_SELECTION_NODE_ID,
   isHypothesisReviewRetryAttempt,
 } from "./hypothesisFirstCanvasRegion";
 import { HypothesisFirstMeetingOps } from "./HypothesisFirstMeetingOps";
-import {
-  buildHypothesisFirstReviewProjection,
-  currentProjectedReview,
-} from "./hypothesisFirstMeetingProjection";
-import {
-  meetingsForHypothesisFirstQuestion,
-  resolveHypothesisFirstNextAction,
-  type HypothesisFirstNextAction,
-} from "./hypothesisFirstNextAction";
-import { resolveHypothesisFirstNextActionFromV2 } from "./hypothesisFirstStateV2Adapter";
-import type { HypothesisFirstV2NextAction } from "./hypothesisFirstStateV2Adapter";
-import { invalidateHypothesisFirstQueries, resolveHypothesisFirstRoundBudget, useHypothesisFirstChain } from "./useHypothesisFirstChain";
-import { resolvePollingInterval, usePageVisibility } from "../../../app/pollingPolicy";
-import type { ScopedDiscussionModel } from "./scopedDiscussionModel";
+import { buildHypothesisFirstReviewProjection, currentProjectedReview } from "./hypothesisFirstMeetingProjection";
+import { meetingsForHypothesisFirstQuestion, type HypothesisFirstNextAction } from "./hypothesisFirstNextAction";
 import styles from "./HypothesisFirstNodeInspector.styles";
+import type { HypothesisFirstV2NextAction } from "./hypothesisFirstStateV2Adapter";
+import { resolveHypothesisFirstNextActionFromV2 } from "./hypothesisFirstStateV2Adapter";
+import type { ScopedDiscussionModel } from "./scopedDiscussionModel";
+import {
+  invalidateHypothesisFirstQueries,
+  resolveHypothesisFirstRoundBudget,
+  useHypothesisFirstChain,
+} from "./useHypothesisFirstChain";
 
 type Language = "zh" | "en";
 
@@ -102,27 +94,16 @@ export function inspectorScopedRoomId(
     || !discussionModel.roomId
     || !discussionModel.meetingRoundId
     || discussionModel.questionId !== questionId
-    || discussionModel.scope?.questionId !== questionId
+    || discussionModel.questionId !== questionId
     || discussionModel.meetingRoundId !== meeting?.meetingRoundId
   ) {
     return "";
   }
+  if (discussionModel.navigation) return discussionModel.roomId;
   const expectedMeetingType = discussionModel.scope?.kind === "question_generation"
     ? "hypothesis_candidate_generation"
     : "hypothesis_review";
   return meeting.meetingType === expectedMeetingType ? discussionModel.roomId : "";
-}
-
-function pickGeneration(meetings: ReturnType<typeof useHypothesisFirstChain>["meetings"]) {
-  const sorted = [...meetings]
-    .filter((item) => item.meetingType === "hypothesis_candidate_generation")
-    .sort((left, right) => {
-      const leftIndex = left.roundIndex ?? 0;
-      const rightIndex = right.roundIndex ?? 0;
-      if (leftIndex !== rightIndex) return leftIndex - rightIndex;
-      return String(left.startedAt ?? "").localeCompare(String(right.startedAt ?? ""));
-    });
-  return sorted[sorted.length - 1] ?? null;
 }
 
 function pickReview(
@@ -167,12 +148,11 @@ export function inspectorNodeOwnsCurrentStep(nodeId: string, targetNodeId: strin
 
 type ReviewRoundBudgetSnapshot = {
   stateV2?: { convergence?: { roundBudget?: number; roundIndex?: number } | null } | null;
-  chainState?: { roundBudget?: number; hypothesisRoundCount?: number } | null;
 };
 
 // ---------------------------------------------------------------------------
 // Review rounds have one server-owned budget. The resolver authority lives in
-// useHypothesisFirstChain (V2 convergence → V1 chain state → hard limit);
+// useHypothesisFirstChain (V2 convergence → display limit);
 // per-round records may retain historical roundBudget values, but they are
 // not mutable budget authority.
 // ---------------------------------------------------------------------------
@@ -189,10 +169,6 @@ export function resolveHypothesisFirstNextReviewRoundIndex(
   const v2Index = snapshot.stateV2?.convergence?.roundIndex;
   if (typeof v2Index === "number" && Number.isFinite(v2Index) && v2Index >= 0) {
     return v2Index + 1;
-  }
-  const v1Count = snapshot.chainState?.hypothesisRoundCount;
-  if (typeof v1Count === "number" && Number.isFinite(v1Count) && v1Count >= 0) {
-    return v1Count + 1;
   }
   return null;
 }
@@ -430,8 +406,8 @@ export function HypothesisFirstNodeInspector({
   const [retrying, setRetrying] = useState(false);
   const chain = useHypothesisFirstChain(teamId, questionId, runId);
   const questionMeetings = meetingsForHypothesisFirstQuestion(chain.meetings, questionId);
-  const generation = pickGeneration(questionMeetings);
-  const currentSelectionId = chain.selection?.selectionId || chain.chainState?.selectionId || "";
+  const generation = questionMeetings.find((meeting) => meeting.meetingRoundId === chain.stateV2?.generation.generationMeetingId) ?? null;
+  const currentSelectionId = chain.selection?.selectionId || chain.stateV2?.selection.selectionId || "";
   const reviewProjection = buildHypothesisFirstReviewProjection(
     questionMeetings,
     chain.reviewRoundLinks,
@@ -467,23 +443,7 @@ export function HypothesisFirstNodeInspector({
         preferredCandidateId: selectedProjectedReview?.candidateId,
         preferredMeetingRoundId: activeMeeting?.meetingRoundId,
       })
-    : resolveHypothesisFirstNextAction({
-    run: { runId: runId || (questionId ? "present" : "") },
-    chainState: chain.chainState,
-    meetings: questionMeetings,
-    reviewRoundLinks: chain.reviewRoundLinks,
-    questionId,
-    selection: chain.selection,
-    collectionRequests: chain.collectionRequests,
-    // Bound chat-round statuses let the resolver tell an ended room from one
-    // still discussing, per meeting. The server-persisted terminal flag on the
-    // meeting record still wins inside the resolver; a room that has not
-    // loaded yet derives the same "not terminal" as the previous
-    // always-computed boolean did.
-    chatRounds: roomQuery.data?.rounds,
-    collectionChildStatus,
-    selectedNodeId: nodeId,
-    });
+    : { stage: "blocked" as const, targetNodeId: null, navigationLabel: "正在读取研究状态" };
   const currentChecklistRoundIndex = checklistRoundIndex(
     reviewProjection,
     nextAction.targetNodeId,
@@ -530,7 +490,7 @@ export function HypothesisFirstNodeInspector({
   const reviewHistory = reviewMeetings
     .filter((meeting) => !isHypothesisReviewRetryAttempt(meeting))
     .sort((left, right) => (left.roundIndex ?? 0) - (right.roundIndex ?? 0));
-  const stageSummary = chain.chainState?.hypothesisConverged && reviewMeetings.length > 0
+  const stageSummary = chain.stateV2?.convergence.accepted && reviewMeetings.length > 0
     ? {
         rounds: reviewMeetings.filter((meeting) => meeting.status === "closed").length,
         retries: reviewMeetings.filter(
@@ -566,13 +526,13 @@ export function HypothesisFirstNodeInspector({
       </VEmptyState>
     );
   }
-  if (chain.loading) {
+  if (chain.loading || chain.detailsLoading) {
     return <VStateSurface tone="loading" title={isZh ? "加载假说先行任务" : "Loading hypothesis-first task"} fill className={styles.fill} />;
   }
-  if (chain.error) {
+  if (chain.error || chain.detailsError) {
     return (
       <VSurface tone="panel" className={styles.panel} data-vui="hypothesis-first-node-error">
-        <div role="alert">{isZh ? "假说先行链加载失败：" : "Hypothesis-first chain failed to load: "}{chain.error}</div>
+        <div role="alert">{isZh ? "假说先行链加载失败：" : "Hypothesis-first chain failed to load: "}{chain.error || chain.detailsError}</div>
         <VButton
           type="button"
           variant="secondary"
@@ -646,7 +606,6 @@ export function HypothesisFirstNodeInspector({
             onFormalRunCreated={onFormalRunCreated}
             onOpenQuestion={onOpenQuestion}
             stateV2={chain.stateV2}
-            chainState={chain.chainState}
             formalRuntime={formalRuntime}
           />
           {(
@@ -834,7 +793,6 @@ function InspectorBody(props: {
   onFormalRunCreated?: HypothesisFirstNodeInspectorProps["onFormalRunCreated"];
   onOpenQuestion: (questionId: string) => void;
   stateV2?: HypothesisFirstStateV2 | null;
-  chainState?: HypothesisFirstChainState | null;
   formalRuntime?: boolean;
 }) {
   const { nodeId, nextAction, teamId, questionId, runId, liveMeetingRoundId, lang } = props;
@@ -886,7 +844,6 @@ function InspectorBody(props: {
           label={nextAction.commandLabel || (isZh ? "生成候选假说" : "Generate candidate hypotheses")}
           lang={lang}
           canonicalAction={nextAction.canonicalAction}
-          allowLegacyMutation={nextAction.stateSource !== "v2_canonical"}
         />
       );
     }
@@ -912,7 +869,6 @@ function InspectorBody(props: {
         label={nextAction.commandLabel || (isZh ? "生成候选假说" : "Generate candidate hypotheses")}
         lang={lang}
         canonicalAction={nextAction.canonicalAction}
-        allowLegacyMutation={nextAction.stateSource !== "v2_canonical"}
       />
     );
   }
@@ -924,10 +880,6 @@ function InspectorBody(props: {
         runId={runId}
         compact
         lang={lang}
-        canonicalAction={nextAction.canonicalAction?.command === "record_selection"
-          ? nextAction.canonicalAction
-          : undefined}
-        allowLegacyMutation={nextAction.stateSource !== "v2_canonical"}
       />
     );
   }
@@ -970,11 +922,7 @@ function InspectorBody(props: {
     const summary = props.stageSummary;
     const programDelivery = props.stateV2?.programDelivery;
     const canonicalActions = canonicalActionsFor(nextAction);
-    // V2 is the gate authority; the raw V1 chain state is only consulted on
-    // the route-unavailable fallback, never layered under an explicit V2 null.
-    const rawClaimGate = props.stateV2
-      ? props.stateV2.convergence?.claimBeliefGate
-      : props.chainState?.claimBeliefGate;
+    const rawClaimGate = props.stateV2?.convergence.claimBeliefGate;
     const claimGate = parseClaimBeliefGate(rawClaimGate);
     const gateBlockedDetail = claimGate?.status === "blocked"
       ? (isZh
@@ -1084,7 +1032,6 @@ function InspectorBody(props: {
           canonicalAction={nextAction.canonicalAction?.command === "record_program_review"
             ? nextAction.canonicalAction
             : undefined}
-          allowLegacyMutation={nextAction.stateSource !== "v2_canonical"}
         />
       );
     }
@@ -1127,14 +1074,11 @@ function InspectorBody(props: {
             canonicalAction={nextAction.canonicalAction?.command === "open_next_review"
               ? nextAction.canonicalAction
               : undefined}
-            allowLegacyMutation={nextAction.stateSource !== "v2_canonical"}
             nextRoundIndex={resolveHypothesisFirstNextReviewRoundIndex({
               stateV2: props.stateV2,
-              chainState: props.chainState,
             })}
             roundBudget={resolveHypothesisFirstReviewRoundBudget({
               stateV2: props.stateV2,
-              chainState: props.chainState,
             })}
             gateDetail={gateBlockedDetail}
             lang={lang}
@@ -1704,17 +1648,14 @@ function NextReviewRoundButton(props: {
    * server gate blocked convergence; the button authority itself is untouched. */
   gateDetail?: string | null;
   /** Signed V2 envelope for the same action; when present the dispatch goes
-   * through the CAS/re-auth command route instead of the legacy endpoint. */
+   * through the version-checked command route. */
   canonicalAction?: Extract<CommandAction, { command: "open_next_review" }>;
-  /** The legacy endpoint has no CAS/re-auth, so it is only allowed while the
-   * snapshot itself is a legacy (non-V2-canonical) fallback. */
-  allowLegacyMutation: boolean;
   lang: Language;
 }) {
   const queryClient = useQueryClient();
   const [blockedReason, setBlockedReason] = useState<string | null>(null);
   const copy = reviewRoundActionCopy(props.nextRoundIndex, props.lang, props.roundBudget);
-  const mutation = useMutation<HypothesisFirstCommandExecutionResponse | ReviewNextRoundResponse, Error, void>({
+  const mutation = useMutation<HypothesisFirstCommandExecutionResponse, Error, void>({
     mutationFn: () => {
       if (props.canonicalAction) {
         return executeHypothesisFirstCommand(
@@ -1725,16 +1666,10 @@ function NextReviewRoundButton(props: {
           { runId: props.runId },
         );
       }
-      if (props.allowLegacyMutation) {
-        return openNextHypothesisReviewRound(props.teamId, props.meetingRoundId);
-      }
       return Promise.reject(new Error("canonical_action_unavailable"));
     },
     onSuccess: (payload) => {
-      // V2 dispatch wraps the chain result in `.result`; the legacy endpoint
-      // returns it directly. Both carry the budget_exhausted status marker.
-      const outcome = (payload as { result?: { status?: string } } | null)?.result
-        ?? (payload as { status?: string } | null);
+      const outcome = payload.result as { status?: string } | null;
       setBlockedReason(
         outcome?.status === "budget_exhausted"
           ? (props.lang === "zh" ? `已达到评审上限 ${props.roundBudget}，假说仍未收敛。` : `The review limit of ${props.roundBudget} was reached without convergence.`)
@@ -1767,8 +1702,8 @@ function NextReviewRoundButton(props: {
         variant="primary"
         density="compact"
         isPending={mutation.isPending}
-        isDisabled={!props.canonicalAction && !props.meetingRoundId}
-        disabledReason={props.canonicalAction || props.meetingRoundId ? undefined : (props.lang === "zh" ? "缺少上一轮评审标识" : "The previous review round ID is missing")}
+        isDisabled={!props.canonicalAction}
+        disabledReason={props.canonicalAction ? undefined : (props.lang === "zh" ? "缺少上一轮评审标识" : "The previous review round ID is missing")}
         onPress={() => mutation.mutate()}
       >
         {copy.label}
@@ -1784,7 +1719,6 @@ function OpenGenerationButton(props: {
   label: string;
   lang: Language;
   canonicalAction?: HypothesisFirstNextAction["canonicalAction"];
-  allowLegacyMutation: boolean;
 }) {
   const queryClient = useQueryClient();
   const mutation = useMutation<unknown, Error, void>({
@@ -1798,9 +1732,6 @@ function OpenGenerationButton(props: {
           undefined,
           { runId: props.runId },
         );
-      }
-      if (props.allowLegacyMutation) {
-        return openHypothesisCandidateGeneration(props.teamId, props.questionId, props.runId);
       }
       return Promise.reject(new Error("canonical_action_unavailable"));
     },
@@ -1831,8 +1762,8 @@ function OpenGenerationButton(props: {
         variant="primary"
         density="compact"
         isPending={mutation.isPending}
-        isDisabled={!props.allowLegacyMutation && !props.canonicalAction}
-        disabledReason={!props.allowLegacyMutation && !props.canonicalAction
+        isDisabled={!props.canonicalAction}
+        disabledReason={!props.canonicalAction
           ? (props.lang === "zh" ? "当前状态没有可执行的已签名操作，请刷新状态" : "No signed action is available for the current state; refresh it")
           : undefined}
         onPress={() => mutation.mutate()}
@@ -1925,7 +1856,7 @@ function CollectionTaskBody(props: {
   const activeRequest = props.stateV2?.collection.requests.find(
     (request) => request.lifecycle !== "completed",
   ) ?? props.stateV2?.collection.requests[0] ?? null;
-  const canHandoff = props.nextAction.command === "retry_handoff"
+  const canHandoff = props.nextAction.command === "handoff_collection"
     && Boolean(requestId)
     && Boolean(collectionRunId);
   const handoff = useMutation<unknown, Error, void>({
@@ -1938,11 +1869,6 @@ function CollectionTaskBody(props: {
           undefined,
           { runId: props.runId },
         );
-      }
-      if (props.nextAction.stateSource !== "v2_canonical") {
-        return recordCollectionHandoff(props.teamId, requestId, {
-          handoffRef: `source_collection_run:${collectionRunId}`,
-        });
       }
       return Promise.reject(new Error("canonical_action_unavailable"));
     },
@@ -1976,7 +1902,7 @@ function CollectionTaskBody(props: {
             : handoff.error instanceof Error ? handoff.error.message : "handoff_failed"}
         />
       ) : null}
-      {props.nextAction.command === "retry_handoff" && canHandoff ? (
+      {props.nextAction.command === "handoff_collection" && canHandoff ? (
         <VButton
           type="button"
           variant="primary"

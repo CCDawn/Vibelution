@@ -6,6 +6,13 @@
  * functions from here — never `fetchJson` or raw URL literals.
  */
 
+/**
+ * Hypothesis-first flow transports (HF-5).
+ *
+ * Owns every `/api/teams/{teamId}/workflow-orchestration/{hypothesis-first,
+ * meeting-rounds, hypothesis-rounds}` JSON path. Routes/hooks import named
+ * functions from here — never `fetchJson` or raw URL literals.
+ */
 import { fetchJson, isFetchJsonHttpError } from "./client";
 import type {
   ActionCommand,
@@ -14,11 +21,10 @@ import type {
   AnomalyInboxItem,
   AnomalyInboxResponse,
   CandidateEvidenceTrailResponse,
-  CommandAction,
   CloseReviewMeetingResponse,
   CollectionHandoffResponse,
   CollectionRequestListResponse,
-  HypothesisFirstChainState,
+  CommandAction,
   HypothesisFirstClaimBeliefGate,
   HypothesisFirstClaimGateEntry,
   HypothesisFirstClaimGateEvidenceGap,
@@ -38,10 +44,10 @@ import type {
   MeetingRoundMutationResponse,
   MeetingSourceMessagesResponse,
   MeetingSummaryDraftRequest,
-  ReviewNextRoundResponse,
-  ReviewRoundLinkListResponse,
   QuestionRunResetPreview,
   QuestionRunResetResponse,
+  ReviewNextRoundResponse,
+  ReviewRoundLinkListResponse,
 } from "./types/hypothesisFirst";
 
 // Re-exported so inspector surfaces classify HTTP errors through this domain
@@ -79,28 +85,6 @@ function commandRunId(action: CommandAction, explicitRunId = ""): string {
   return [payload.workflowRunId, payload.runId, payload.outputRunId]
     .map((value) => typeof value === "string" ? value.trim() : "")
     .find(Boolean) ?? "";
-}
-
-const V2_ENDPOINT_UNAVAILABLE_CODES = new Set([
-  "endpoint_not_found",
-  "endpoint_unavailable",
-  "contract_not_supported",
-  "route_not_found",
-]);
-
-/** Only infrastructure-level absence permits the compatibility V1 read. */
-export function isHypothesisFirstStateV2EndpointUnavailable(error: unknown): boolean {
-  if (!isFetchJsonHttpError(error)) return false;
-  const details = isRecord(error.details) ? error.details : null;
-  const defaultRouteNotFound = details?.detail === "Not Found";
-  return error.status === 501
-    || (
-      error.status === 404
-      && (
-        V2_ENDPOINT_UNAVAILABLE_CODES.has(String(error.code || ""))
-        || (error.code === null && defaultRouteNotFound)
-      )
-    );
 }
 
 // ---------------------------------------------------------------------------
@@ -345,22 +329,7 @@ export function fetchHypothesisRound(
   );
 }
 
-// ---------------------------------------------------------------------------
-// Hypothesis-first chain (HF-4)
-// ---------------------------------------------------------------------------
-
-export function fetchHypothesisFirstChainState(
-  teamId: string,
-  questionId: string,
-  options?: { signal?: AbortSignal; runId?: string },
-): Promise<HypothesisFirstChainState> {
-  return fetchJson<HypothesisFirstChainState>(
-    `${teamPrefix(teamId)}/hypothesis-first/chain/state${scopedQuery({ questionId, runId: options?.runId })}`,
-    { signal: options?.signal },
-  );
-}
-
-/** Canonical workflow state snapshot. V1 chain state remains available below for compatibility. */
+/** Canonical workflow state snapshot. */
 export function fetchHypothesisFirstStateV2(
   teamId: string,
   questionId: string,

@@ -137,7 +137,7 @@ pathState：`idle | traversed | active | attention | danger` — 仅由 nodeRuns
 
 科研流程画布的**显示层第一类区域**：把假说先行链（选假说 → 讨论·评审 → 资料搜集 → 再讨论 → 收敛）合成为 `stages[0]` 的「假说先行」阶段带，由链台账状态驱动，不改动任何执行拓扑。区域由路由层纯函数 `buildHypothesisFirstCanvasRegion`（`routes/teams/research-workflow/hypothesisFirstCanvasRegion.ts`）从链状态 + 会议轮 + 搜集请求 + 续轮台账 + 选择记录产出 `{ stage, nodes, edges }` 片段，再经 `composeHypothesisFirstGraph` 插入主图；无链活动时区域不合成，画布保持原 16 节点形态。
 
-卡片映射（nodeId 均以 `hf_` 前缀，Inspector 据此路由到**当前任务操作面**，不是只读摘要）：
+卡片映射（nodeId 均以 `ksf_` 前缀；`knowledge_handoff` 是 `human_gate`，其余为 `agent_task`）：五卡共用全部父节点中最近一次 invocation。卡片状态优先读取子运行的最新节点尝试，保留 `pending`、`waiting_human`、`cancelled`、`skipped`、`failed`、`blocked`，不把取消归为失败。缺少节点事实时，只允许 invocation 的当前节点使用调用状态；其余节点保持 `pending`，不得按位置推断成功。描述与状态来自同一投影，等待节点不得显示“进行中”；交接成功只在后端确认完成时显示。
 
 | 卡片 | nodeId | visualKind | 状态事实源 |
 | --- | --- | --- | --- |
@@ -200,6 +200,13 @@ const graph = composeHypothesisFirstGraph(base, region, {
 - 顶栏常驻当前题号、标题与假说摘要（未选则写「假说待生成 / 尚未选择实验」）。切换器 aria 为「切换实验」。假说正文仍在赛题详情，不把 125 题假说陈述预拉进切换器。
 - 有 run 时主按钮是「前往…」当前任务；「创建运行 / 新建运行」降为次要并仍打开 launch 面板。
 
+### V2 状态与操作契约
+
+- 假说阶段、轮次、候选选择和下一操作直接读取 `hypothesis-first-state/v2`，不转成 V1 链状态、不读取旧状态接口、不回退旧写接口；V2 不可用时明确显示读取失败。
+- 正式运行以匹配当前题目与 runId 的 snapshot 和 command offers 决定可用操作；会议、资料请求、目录等辅助读取失败不得锁住已就绪的正式操作。
+- 尚未返回的快照是加载状态；只有实际返回的身份与当前选择不一致才显示范围不匹配。
+- 当前任务、协作入口和命令面板共用 V2 导航；正式讨论仍使用服务端提供的 scoped anchor，不伪造房间或 scope hash。
+
 ### 渲染契约补丁（2026-08-19 修复）
 
 - 「首轮搜集范围就绪」边指向主图起点 `source_finding`（visualKind `start`）。`WorkflowStartEndNode` 的默认极性仍是「start 无 target 把手」；但当布局给 start 节点分配了真实 target 端口（`portSides.target` 非空）时，渲染器必须镜像该端口——否则 React Flow 因找不到 target handle 静默丢边。既有契约测试（无入边 fixture 下 start 无 target 把手）不受影响。
@@ -223,7 +230,7 @@ const graph = composeHypothesisFirstGraph(base, region, {
 ### 适用范围
 
 - 主流程固定为 3.0.0 十二节点；知识搜集固定使用独立 sideflow，存在 invocation 活动时直接合成侧流程区域。
-- 画布点击 `ksf_` 卡片 → Inspector 渲染 `NodeKnowledgeCollectionSection`（四态：未发起/搜集中/等待交接/已交接 + 失败恢复），与画布共用同一次最近 invocation 推导，保证两侧一致。
+- 画布点击 `ksf_` 卡片 → Inspector 渲染 `NodeKnowledgeCollectionSection`（未发起/搜集中/等待交接/已交接/失败/阻塞/取消），与画布共用同一次最近 invocation 推导，保证两侧一致。
 - 主链节点 Inspector 在侧流程启用时挂载同一 section：`knowledgeBadge === undefined` 隐藏整节（定义无侧流程），`null` 表示未发起态（预览关键词/证据类型/时间窗/来源策略，来自命令 offer payload）。
 - 命令动作只来自 canonical knowledge command offers（`ensure_knowledge_collection` / `inspect_knowledge_collection`）；operator-only offer 渲染禁用态 + `authorizationReason`（`isOperatorGatedOffer`），不让用户撞 403。签名/过期由服务端提交时再校验，前端展示不做 fail-open。
 

@@ -1,10 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
-import {
-  VCommandPalette,
-  type VCommandPaletteItem,
-} from "../../../components/vui";
 import type { ResearchWorkflowLaunchOption } from "../../../api/researchWorkflow";
+import { VCommandPalette, type VCommandPaletteItem } from "../../../components/vui";
 import type { HypothesisFirstNextAction } from "./hypothesisFirstNextAction";
 import type { ScopedDiscussionModel } from "./scopedDiscussionModel";
 
@@ -42,9 +39,8 @@ export function ResearchCommandPalette(props: {
   const items = useMemo<VCommandPaletteItem[]>(() => {
     const commands: VCommandPaletteItem[] = [];
     if (props.workflowActive && props.nextAction.targetNodeId) {
-      const canonicalDeepLink = props.nextAction.navigationDeepLink || "";
-      const scopedDiscussionDeepLink = canonicalDeepLink || props.discussionModel?.deepLink || "";
-      const scopedDiscussionReady = Boolean(canonicalDeepLink || props.discussionModel?.status === "ready")
+      const scopedDiscussionDeepLink = props.discussionModel?.deepLink || "";
+      const scopedDiscussionReady = Boolean(props.discussionModel?.status === "ready")
         && Boolean(scopedDiscussionDeepLink)
         && Boolean(props.onNavigateDiscussion);
       commands.push({

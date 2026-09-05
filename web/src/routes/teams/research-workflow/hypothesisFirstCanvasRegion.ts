@@ -10,7 +10,7 @@
  */
 import type {
   CollectionRequestRecord,
-  HypothesisFirstChainState,
+  HypothesisFirstStateV2,
   HypothesisSelectionRecord,
   MeetingRoundRecord,
   ReviewRoundLinkRecord,
@@ -25,9 +25,7 @@ import {
   buildEdgePathStates,
   stageToneFromNodes,
 } from "../../../components/vui/product/workflow/workflowCanvasModel";
-import {
-  effectiveCollectionRequestStatus,
-} from "./hypothesisFirstCollectionStatus";
+import { effectiveCollectionRequestStatus } from "./hypothesisFirstCollectionStatus";
 
 export const HYPOTHESIS_FIRST_NODE_PREFIX = "hf_";
 export const HYPOTHESIS_FIRST_STAGE_ID = "hypothesis_first";
@@ -46,7 +44,7 @@ const HYPOTHESIS_REVIEW_MEETING_TYPE = "hypothesis_review";
 const CANDIDATE_GENERATION_MEETING_TYPE = "hypothesis_candidate_generation";
 
 export type HypothesisFirstCanvasRegionInput = {
-  chainState: HypothesisFirstChainState | null;
+  stateV2: HypothesisFirstStateV2 | null;
   meetings: MeetingRoundRecord[];
   collectionRequests: CollectionRequestRecord[];
   reviewRoundLinks: ReviewRoundLinkRecord[];
@@ -217,9 +215,9 @@ function collectionNodeDescription(request: CollectionRequestRecord): string {
   return request.collectionRunId ? "搜集子运行已触发，等待完成" : "等待搜集子运行";
 }
 
-function convergenceNodeStatus(chainState: HypothesisFirstChainState): WorkflowNodeRunStatus {
-  if (chainState.hypothesisConverged) return "succeeded";
-  if (chainState.budgetExhausted) return "blocked";
+function convergenceNodeStatus(stateV2: HypothesisFirstStateV2): WorkflowNodeRunStatus {
+  if (stateV2.convergence.accepted) return "succeeded";
+  if ((stateV2.convergence.outcome === "exhausted")) return "blocked";
   return "pending";
 }
 
@@ -263,11 +261,11 @@ function sortRequests(requests: CollectionRequestRecord[]): CollectionRequestRec
 export function buildHypothesisFirstCanvasRegion(
   input: HypothesisFirstCanvasRegionInput,
 ): HypothesisFirstCanvasRegion | null {
-  const { chainState } = input;
-  if (!chainState || !chainState.questionId) {
+  const { stateV2 } = input;
+  if (!stateV2 || !stateV2.questionId) {
     return null;
   }
-  const questionId = chainState.questionId;
+  const questionId = stateV2.questionId;
 
   const generationMeetings = sortMeetings(
     input.meetings.filter(
@@ -294,7 +292,7 @@ export function buildHypothesisFirstCanvasRegion(
   const edges: Array<Omit<WorkflowCanvasEdgeInput, "pathState"> & { pathState?: WorkflowCanvasEdgeInput["pathState"] }> = [];
 
   // --- cards ---------------------------------------------------------------
-  const candidateCount = chainState.candidateCount ?? 0;
+  const candidateCount = stateV2.generation.candidateCount ?? 0;
   const generationMeeting = generationMeetings[generationMeetings.length - 1];
   const showGenerationCard = Boolean(
     generationMeeting || candidateCount > 0 || (!selection && meetings.length === 0),
@@ -401,12 +399,12 @@ export function buildHypothesisFirstCanvasRegion(
     });
   }
 
-  const showConvergence = chainState.hypothesisConverged
-    || chainState.budgetExhausted
+  const showConvergence = stateV2.convergence.accepted
+    || (stateV2.convergence.outcome === "exhausted")
     || hasClosedReviewRound(meetings);
-  const showDownstreamPipeline = chainState.firstMeetingClosed
-    || chainState.collectionReady
-    || chainState.hypothesisConverged
+  const showDownstreamPipeline = (stateV2.review.lifecycle === "completed")
+    || (stateV2.collection.lifecycle === "completed" && stateV2.collection.outcome === "succeeded")
+    || stateV2.convergence.accepted
     || requests.length > 0
     || hasClosedReviewRound(meetings);
 
@@ -421,11 +419,11 @@ export function buildHypothesisFirstCanvasRegion(
       // fail-fast), while this gate has a single proceed exit and a human
       // decision semantic when blocked — same shape as candidate_promotion.
       visualKind: "human_gate",
-      status: convergenceNodeStatus(chainState),
-      description: chainState.convergenceDetail
-        || (chainState.hypothesisConverged
+      status: convergenceNodeStatus(stateV2),
+      description: stateV2.convergence.problems[0]?.message
+        || (stateV2.convergence.accepted
           ? "假说集已收敛"
-          : chainState.budgetExhausted
+          : (stateV2.convergence.outcome === "exhausted")
             ? "轮次预算耗尽，等待人工决策"
             : "待收敛"),
     });

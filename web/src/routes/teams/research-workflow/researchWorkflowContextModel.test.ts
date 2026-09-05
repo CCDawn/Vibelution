@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { resolveHypothesisFirstNextActionFromV2 } from "./hypothesisFirstStateV2Adapter";
+import { command, reviewState, stateV2 } from "./hypothesisFirstV2.fixture";
 
-import { CHALLENGE_CUP_WORKFLOW_ID } from "../../../api/types/researchWorkflow";
 import type { CommandAction } from "../../../api/types/hypothesisFirst";
-import { resolveHypothesisFirstNextAction } from "./hypothesisFirstNextAction";
+import { CHALLENGE_CUP_WORKFLOW_ID } from "../../../api/types/researchWorkflow";
 import {
   buildResearchWorkflowContext,
   buildResearchWorkflowScopeKey,
@@ -156,67 +157,16 @@ describe("researchWorkflowContextModel", () => {
   });
 
   it("keeps the review gate authoritative even when the chain is already converged", () => {
-    const nextAction = resolveHypothesisFirstNextAction({
-      run: { runId: "run-4", runtimeCurrentNodeIds: ["source_finding"] },
-      workflowActive: true,
-      questionId: "SCI-004",
-      chainState: {
-        schemaVersion: 1,
-        teamId: "research-team",
-        questionId: "SCI-004",
-        selectionId: "sel-4",
-        meetingCount: 1,
-        firstMeetingId: "meeting-1",
-        firstMeetingClosed: false,
-        openMeetingIds: ["meeting-1"],
-        collectionRequests: [],
-        collectionRequestCount: 0,
-        pendingCollectionCount: 0,
-        collectionReady: false,
-        hypothesisRoundCount: 1,
-        latestHypothesisRoundId: "round-1",
-        hypothesisConverged: true,
-        convergenceDetail: "ready",
-        roundBudget: 3,
-        budgetExhausted: false,
-        templateBaselineExists: false,
-        templateBaselineIds: [],
-      },
-      meetings: [{
-        schemaVersion: 1,
-        meetingRoundId: "meeting-1",
-        meetingType: "hypothesis_review",
-        mode: "review",
-        scopeHash: "scope",
-        program: "p",
-        theme: "t",
-        campaign: "c",
-        question: "SCI-004",
-        branch: "b",
-        workflow: "w",
-        agentId: "a",
-        participants: ["a"],
-        status: "awaiting_approval",
-        startedAt: "2026-08-21T00:00:00Z",
-        roundIndex: 1,
-        digestDraft: {
-          agreements: ["保留 H1"],
-          disagreements: [],
-          actionItems: [],
-          knowledgeCandidates: [],
-          evidenceRequests: [],
-        },
-      }],
-    });
+    const nextAction = resolveHypothesisFirstNextActionFromV2(stateV2({...reviewState(), convergence: {accepted: true}, review: {...reviewState().review, candidates: reviewState().review.candidates.map((candidate) => ({...candidate, lifecycle: "waiting_human", actionability: "waiting_user", discussion: {...candidate.discussion, lifecycle: "completed"}, summarization: {...candidate.summarization, lifecycle: "completed"}, approval: {...candidate.approval, lifecycle: "waiting_human"}}))}, allowedActions: [command({command: "approve_summary", payload: {meetingRoundId: "meeting-1"}}, "确认本轮评审结论")]}));
     const context = buildResearchWorkflowContext({ ...base, nextAction });
     expect(context.currentTask).toMatchObject({
       stage: "hypothesis_first",
       step: "review",
       status: "waiting_user",
       title: "确认本轮评审结论",
-      targetNodeId: "hf_meeting_1",
+      targetNodeId: "hf_meeting_1_candidate-1",
     });
-    expect(context.currentTask?.commandAction?.label).toBe("确认并结束本轮");
+    expect(context.currentTask?.commandAction?.label).toBe("确认本轮评审结论");
   });
 
   it("explains review summarization instead of saying that a minutes file is being generated", () => {
@@ -224,7 +174,7 @@ describe("researchWorkflowContextModel", () => {
       ...base,
       nextAction: {
         stage: "review_summarizing",
-        targetNodeId: "hf_meeting_1",
+        targetNodeId: "hf_meeting_1_candidate-1",
         navigationLabel: "查看评审讨论",
         statusMessage: "本轮评审已结束，系统正在整理结论",
         meetingRoundId: "meeting-1",
@@ -380,7 +330,7 @@ describe("researchWorkflowContextModel", () => {
         nextAction: canonicalOnlyAction,
       },
       primaryAction: null,
-      legacyNextAction: canonicalOnlyAction,
+      hypothesisNextAction: canonicalOnlyAction,
       view: {
         panel: "node" as const,
         selectedNodeId: null,

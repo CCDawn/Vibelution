@@ -1,3 +1,4 @@
+import { parseClaimBeliefGate } from "../../../api/hypothesisFirst";
 import type {
   AllowedAction,
   CommandAction,
@@ -8,7 +9,6 @@ import type {
   PhaseState,
   ReviewCandidateState,
 } from "../../../api/types/hypothesisFirst";
-import { parseClaimBeliefGate } from "../../../api/hypothesisFirst";
 import {
   HYPOTHESIS_FIRST_COLLECTION_NODE_ID,
   HYPOTHESIS_FIRST_CONVERGENCE_NODE_ID,
@@ -16,11 +16,7 @@ import {
   HYPOTHESIS_FIRST_REVIEW_NODE_ID,
   HYPOTHESIS_FIRST_SELECTION_NODE_ID,
 } from "./hypothesisFirstCanvasRegion";
-import type {
-  HypothesisFirstCommand,
-  HypothesisFirstNextAction,
-  HypothesisFirstStage,
-} from "./hypothesisFirstNextAction";
+import type { HypothesisFirstNextAction, HypothesisFirstStage } from "./hypothesisFirstNextAction";
 
 type ResolveV2Options = {
   preferredCandidateId?: string | null;
@@ -29,7 +25,7 @@ type ResolveV2Options = {
   lang?: "zh" | "en";
 };
 
-/** V2-only extension kept local so legacy next-action consumers remain stable. */
+/** V2 presentation fields shared by the workspace and inspector. */
 export type HypothesisFirstV2NextAction = HypothesisFirstNextAction & {
   canonicalActions?: readonly CommandAction[];
   /** Server claim belief hard gate verdict parsed from the convergence payload. */
@@ -279,55 +275,6 @@ function activeReviewCandidate(
     ?? null;
 }
 
-/**
- * Map a V2 canonical command to the legacy command name, when one exists.
- *
- * `stop_collection` / `cancel_run` / `archive_run` are V2-only commands with
- * no legacy endpoint: they must stay `undefined` here and be dispatched by the
- * button layer through `executeHypothesisFirstCommand(nextAction.canonicalAction)`.
- * Every other button datum (commandLabel / commandDetail / targetNodeId /
- * canonicalAction) is emitted from the canonical action regardless, so a
- * missing legacy mapping never drops the primary button data.
- */
-function legacyCommand(action: CommandAction | null, phase: HypothesisFirstPhase): HypothesisFirstCommand | undefined {
-  if (!action) return undefined;
-  switch (action.command) {
-    case "open_generation":
-    case "retry_generation": return "open_generation";
-    case "record_selection": return "record_selection";
-    case "regenerate_summary": return "retry_draft_summary";
-    case "approve_summary": return phase === "generation"
-      ? "approve_generation_digest"
-      : "approve_review_digest";
-    case "retry_collection": return "retry_collection";
-    case "continue_collection": return "continue_collection";
-    case "handoff_collection": return "retry_handoff";
-    case "open_next_review": return "open_next_review";
-    case "human_adjudication": return "human_adjudication";
-    case "create_formal_run": return "create_run";
-    case "retry_program_handoff": return "retry_program_handoff";
-    case "record_program_review": return "record_program_review";
-    case "create_formal_revision": return "create_formal_revision";
-    case "retry_formal_node": return "retry_formal_node";
-    case "reconcile_formal_run": return "reconcile_formal_run";
-    case "retry_review_dispatch": return "retry_review_dispatch";
-    case "reopen_review": return "reopen_review";
-    case "resume_discussion": return "resume_discussion";
-    case "stop_discussion": return "stop_discussion";
-    case "stop_collection":
-    case "cancel_run":
-    case "archive_run": return undefined;
-  }
-  // Compile-time guard: every backend ActionCommand must be handled above —
-  // either mapped to a legacy command or deliberately left canonical-only.
-  // Once the switch is exhaustive, control flow narrows `action` to `never`
-  // and this line compiles; a newly added backend command keeps it reachable
-  // and fails `tsc -b` here instead of silently losing the primary button
-  // (the P2-9 failure mode).
-  const unmapped: never = action;
-  return unmapped;
-}
-
 function stageFor(
   state: HypothesisFirstStateV2,
   reviewCandidate: ReviewCandidateState | null = null,
@@ -470,7 +417,6 @@ export function resolveHypothesisFirstNextActionFromV2(
   const current = state.currentPhase === "review" && reviewCandidate
     ? reviewCandidate
     : phaseState(state);
-  const mappedCommand = legacyCommand(command, state.currentPhase);
   // R2.2 claim belief hard gate: when a structurally converged round is held
   // back by the server gate, the guidance copy explains the block while the
   // server-authored allowedActions stay the only button authority (nothing is
@@ -481,7 +427,7 @@ export function resolveHypothesisFirstNextActionFromV2(
     stage: stageFor(state, reviewCandidate, command),
     targetNodeId: phaseTarget(state, reviewCandidate),
     navigationLabel: navigation?.label || command?.label || canonicalActions[0]?.label || "前往当前任务",
-    command: mappedCommand,
+    command: command?.command,
     commandLabel: command?.label,
     commandDetail: command?.confirmationText || gateCopy || defaultStatus(state, current, options.lang),
     disabledReason: command
@@ -504,6 +450,6 @@ export function resolveHypothesisFirstNextActionFromV2(
     canonicalActions,
     canonicalCommand: command?.command,
     expectedStateVersion: command?.expectedStateVersion,
-    navigationDeepLink: navigation?.navigation.deepLink || undefined,
+    navigation: navigation?.navigation,
   };
 }

@@ -1,12 +1,12 @@
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
 
-import { CHALLENGE_CUP_WORKFLOW_ID } from "../../../api/types/researchWorkflow";
 import {
   executeHypothesisFirstCommand,
   isHypothesisFirstCommandStateConflict,
 } from "../../../api/hypothesisFirst";
+import { CHALLENGE_CUP_WORKFLOW_ID } from "../../../api/types/researchWorkflow";
 import { WORKBENCH_LAYOUT_IDS } from "../../../components/layout/workbenchLayoutIds";
 import { VButton, VCanvasWorkbenchPage, VStateRow } from "../../../components/vui";
 import {
@@ -16,51 +16,47 @@ import {
   summarizeHypothesisReviewMeetings,
 } from "./hypothesisFirstCanvasRegion";
 import {
+  isHypothesisFirstDiscussionActive,
+  meetingsForHypothesisFirstQuestion,
+} from "./hypothesisFirstNextAction";
+import {
+  resolveHypothesisFirstNextActionFromV2,
+  type HypothesisFirstV2NextAction,
+} from "./hypothesisFirstStateV2Adapter";
+import {
   buildKnowledgeSideflowCanvasRegion,
   composeKnowledgeSideflowGraph,
   isKnowledgeSideflowCanvasNode,
   knowledgeSideflowRelationEdge,
 } from "./knowledgeSideflowCanvasRegion";
-import { ResearchCommandPalette } from "./ResearchCommandPalette";
 import { ResearchCenteredEmptyState } from "./ResearchCenteredEmptyState";
+import { ResearchCommandPalette } from "./ResearchCommandPalette";
 import { ResearchCurrentTaskInspector } from "./ResearchCurrentTaskInspector";
 import { ResearchExperimentResetAction } from "./ResearchExperimentResetAction";
-import { useResearchExperimentSwitch } from "./useResearchExperimentSwitch";
-import {
-  isHypothesisFirstDiscussionActive,
-  meetingsForHypothesisFirstQuestion,
-  resolveHypothesisFirstNextAction,
-} from "./hypothesisFirstNextAction";
-import { resolveHypothesisFirstNextActionFromV2, type HypothesisFirstV2NextAction } from "./hypothesisFirstStateV2Adapter";
-import {
-  buildExperimentChromeIdentity,
-  buildExperimentSwitchOptions,
-} from "./researchExperimentSwitchModel";
+import { buildExperimentChromeIdentity, buildExperimentSwitchOptions } from "./researchExperimentSwitchModel";
 import {
   composeHypothesisFirstGraph,
   definitionToCanvasGraph,
   projectionToCanvasGraph,
 } from "./researchProcessGraphModel";
+import { ResearchProcessInspectorPane } from "./ResearchProcessInspectorPane";
 import {
   RESEARCH_PROCESS_INSPECTOR_CLOSED,
   shouldShowResearchProcessInspector,
 } from "./researchProcessPanelSelection";
-import { ResearchProcessInspectorPane } from "./ResearchProcessInspectorPane";
+import styles from "./ResearchProcessWorkspace.styles";
+import { buildResearchRunInput } from "./researchRunLaunchContract";
+import { createResearchRunSafetyBudget } from "./researchRunSafetyBudget";
 import { ResearchWorkflowCanvasPane } from "./ResearchWorkflowCanvasPane";
+import { buildResearchWorkflowContext } from "./researchWorkflowContextModel";
 import {
   buildResearchWorkflowStageNavigatorModel,
   ResearchWorkflowStageNavigator,
 } from "./ResearchWorkflowStageNavigator";
 import { ResearchWorkflowToolbar } from "./ResearchWorkflowToolbar";
-import { buildResearchWorkflowContext } from "./researchWorkflowContextModel";
-import {
-  allowsResearchRunLaunch,
-  buildResearchWorkflowWorkspaceModel,
-} from "./researchWorkflowWorkspaceModel";
-import { buildResearchRunInput } from "./researchRunLaunchContract";
-import { createResearchRunSafetyBudget } from "./researchRunSafetyBudget";
-import { buildScopedDiscussionModel } from "./scopedDiscussionModel";
+import { allowsResearchRunLaunch, buildResearchWorkflowWorkspaceModel } from "./researchWorkflowWorkspaceModel";
 import type { ScopedDiscussionModel } from "./scopedDiscussionModel";
+import { buildScopedDiscussionModel, buildV2DiscussionModel } from "./scopedDiscussionModel";
 import {
   invalidateHypothesisFirstQueries,
   resolveHypothesisFirstCanonicalRound,
@@ -69,15 +65,15 @@ import {
   useHypothesisFirstChainInvalidation,
 } from "./useHypothesisFirstChain";
 import { useNodeDetailState } from "./useNodeDetailState";
+import { useResearchExperimentSwitch } from "./useResearchExperimentSwitch";
+import { useResearchFormalRunPromotion } from "./useResearchFormalRunPromotion";
+import { useResearchProcessAutofocus } from "./useResearchProcessAutofocus";
 import { useResearchWorkflowCatalog } from "./useResearchWorkflowCatalog";
 import { useResearchWorkflowCommand } from "./useResearchWorkflowCommand";
 import { useResearchWorkflowCommands } from "./useResearchWorkflowCommands";
 import { useResearchWorkflowInsights } from "./useResearchWorkflowInsights";
-import { useResearchFormalRunPromotion } from "./useResearchFormalRunPromotion";
-import { useResearchProcessAutofocus } from "./useResearchProcessAutofocus";
 import { useResearchWorkflowRun } from "./useResearchWorkflowRun";
 import { useResearchWorkflowWorkspace } from "./useResearchWorkflowWorkspace";
-import styles from "./ResearchProcessWorkspace.styles";
 
 export type ResearchProcessWorkspaceProps = {
   teamId: string;
@@ -135,18 +131,13 @@ export function ResearchProcessWorkspace({
   const catalog = useResearchWorkflowCatalog(teamId, runState.run?.runVersion ?? null);
   const chainQuestionId = location.questionId || runState.run?.questionId || "";
   const hypothesisFirstChain = useHypothesisFirstChain(teamId, chainQuestionId, location.runId);
-  // The server snapshot owns the review-round budget (V2 convergence first,
-  // V1 chain state fallback); the hard limit only covers payloads without one.
+  // The V2 snapshot owns the review-round budget.
   const currentRoundBudget = resolveHypothesisFirstRoundBudget({
     stateV2: hypothesisFirstChain.stateV2,
-    chainState: hypothesisFirstChain.chainState,
   });
-  // Same canonical round the experiment switcher shows: V2 activeRoundIndex,
-  // link-derived fallback. chainState.meetingCount is a physical-room count
-  // (one round fans out per candidate) and must never be displayed as a round.
+  // The workspace and experiment switcher display the same V2 logical round.
   const canonicalReviewRound = resolveHypothesisFirstCanonicalRound({
     stateV2: hypothesisFirstChain.stateV2,
-    meetings: hypothesisFirstChain.meetings,
   });
   useHypothesisFirstChainInvalidation(
     teamId,
@@ -159,19 +150,17 @@ export function ResearchProcessWorkspace({
       runState.snapshot,
       runState.projection,
       runState.run,
-      hypothesisFirstChain.chainState,
     ]) {
       const result = findActiveDiscussionAnchor(source);
       if (result.found) return result.value;
     }
     return undefined;
   }, [
-    hypothesisFirstChain.chainState,
     runState.projection,
     runState.run,
     runState.snapshot,
   ]);
-  const scopedDiscussionModel = useMemo<ScopedDiscussionModel>(
+  const formalDiscussionModel = useMemo<ScopedDiscussionModel>(
     () => buildScopedDiscussionModel({ anchor: activeDiscussionAnchor }),
     [activeDiscussionAnchor],
   );
@@ -227,7 +216,7 @@ export function ResearchProcessWorkspace({
           primaryAgentIdByNode,
         });
     const region = buildHypothesisFirstCanvasRegion({
-      chainState: hypothesisFirstChain.chainState,
+      stateV2: hypothesisFirstChain.stateV2,
       meetings: hypothesisFirstChain.meetings,
       collectionRequests: hypothesisFirstChain.collectionRequests,
       reviewRoundLinks: hypothesisFirstChain.reviewRoundLinks,
@@ -257,7 +246,6 @@ export function ResearchProcessWorkspace({
     selectedKsfNodeId,
     runState.projection,
     runState.snapshot,
-    hypothesisFirstChain.chainState,
     hypothesisFirstChain.meetings,
     hypothesisFirstChain.collectionRequests,
     hypothesisFirstChain.reviewRoundLinks,
@@ -266,18 +254,13 @@ export function ResearchProcessWorkspace({
     chainQuestionId,
   ]);
 
-  const experimentChainSummary = hypothesisFirstChain.chainState
-    ? {
-        ...hypothesisFirstChain.chainState,
-        activeRoundIndex: hypothesisFirstChain.stateV2?.review.activeRoundIndex,
-      }
-    : null;
+  const experimentChainSummary = hypothesisFirstChain.stateV2;
   const experimentIdentity = buildExperimentChromeIdentity({
     questionId: chainQuestionId,
     title: catalog.questions.find(
       (question) => question.questionId.toUpperCase() === chainQuestionId.toUpperCase(),
     )?.title ?? chainQuestionId,
-    selectedCandidateIds: hypothesisFirstChain.selection?.selectedCandidateIds,
+    selectedCandidateIds: hypothesisFirstChain.stateV2?.selection.selectedCandidateIds,
     chain: experimentChainSummary,
   });
   const experimentOptions = useMemo(() => {
@@ -296,7 +279,7 @@ export function ResearchProcessWorkspace({
         title: currentTitle,
         runId: currentRun?.runId ?? "",
         currentNodeId,
-        selectedCandidateIds: hypothesisFirstChain.selection?.selectedCandidateIds,
+        selectedCandidateIds: hypothesisFirstChain.stateV2?.selection.selectedCandidateIds,
         chain: experimentChainSummary,
       },
     });
@@ -304,7 +287,7 @@ export function ResearchProcessWorkspace({
     catalog.questions,
     chainQuestionId,
     experimentChainSummary,
-    hypothesisFirstChain.selection?.selectedCandidateIds,
+    hypothesisFirstChain.stateV2?.selection.selectedCandidateIds,
     runState.run,
   ]);
   const { selectExperiment, error: experimentSwitchError } = useResearchExperimentSwitch({
@@ -319,7 +302,6 @@ export function ResearchProcessWorkspace({
   ) || Boolean(
     hypothesisFirstChain.stateV2?.formalRuntime.runId
     || hypothesisFirstChain.stateV2?.convergence.accepted
-    || hypothesisFirstChain.chainState?.hypothesisConverged
   );
   // The canonical V2 state owns the current formal run id; the promotion hook
   // moves it into the URL when the deep link named only the question.
@@ -340,45 +322,14 @@ export function ResearchProcessWorkspace({
   const workflowActive = Boolean(
     location.runId
     || hypothesisFirstChain.stateV2
-    || hypothesisFirstChain.chainState
     || hypothesisFirstChain.selection
     || meetingsForHypothesisFirstQuestion(hypothesisFirstChain.meetings, chainQuestionId).length > 0
     || hypothesisFirstChain.collectionRequests.length > 0,
   );
   const hypothesisFirstReady = !hypothesisFirstChain.loading && !hypothesisFirstChain.scopeMismatch;
-  // A hypothesis-first collection request owns its child-run status. Do not
-  // let a formal pipeline node status mask an orphaned request recovery.
-  const collectionChildStatus = hypothesisFirstChain.collectionRequests.length > 0
-    ? null
-    : (runState.projection?.run.nodeRuns.source_finding?.status ?? null);
-  // Plan §8.3: only a route-level 404/501 may fall back to the V1 resolver.
-  // A scope whose V2 read never started (disabled / no-question launch lane)
-  // has nothing to infer from either, so it keeps the legacy launcher action.
-  const mayUseLegacyChainResolver = hypothesisFirstChain.v2ReadState === "route_unavailable"
-    || (!hypothesisFirstChain.loading && hypothesisFirstChain.v2ReadState === "pending");
-
   const nextAction = useMemo(() => {
     if (hypothesisFirstChain.stateV2) {
       return resolveHypothesisFirstNextActionFromV2(hypothesisFirstChain.stateV2);
-    }
-    if (mayUseLegacyChainResolver) {
-      return resolveHypothesisFirstNextAction({
-      run: runState.run
-        ? {
-            runId: runState.run.runId,
-            runtimeCurrentNodeIds: formalRuntimeCurrentNodeIds,
-          }
-        : null,
-      workflowActive,
-      questionId: chainQuestionId,
-      chainState: hypothesisFirstChain.chainState,
-      meetings: hypothesisFirstChain.meetings,
-      reviewRoundLinks: hypothesisFirstChain.reviewRoundLinks,
-      selection: hypothesisFirstChain.selection,
-      collectionRequests: hypothesisFirstChain.collectionRequests,
-      collectionChildStatus,
-      selectedNodeId: location.selectedNodeId,
-      });
     }
     // Pending half-data or a failed canonical read must never be re-inferred
     // into a business phase; surface waiting/error through the blocked shape.
@@ -393,32 +344,19 @@ export function ResearchProcessWorkspace({
         : (hypothesisFirstChain.error || "无法获取权威流程快照，请刷新或稍后重试"),
       recovery: null,
     };
-  }, [
-    hypothesisFirstChain.stateV2,
-    hypothesisFirstChain.chainState,
-    hypothesisFirstChain.collectionRequests,
-    hypothesisFirstChain.meetings,
-    hypothesisFirstChain.reviewRoundLinks,
-    hypothesisFirstChain.selection,
-    hypothesisFirstChain.v2ReadState,
-    hypothesisFirstChain.error,
-    mayUseLegacyChainResolver,
-    chainQuestionId,
-    location.selectedNodeId,
-    formalRuntimeCurrentNodeIds,
-    collectionChildStatus,
-    runState.run,
-    workflowActive,
-  ]);
+  }, [hypothesisFirstChain.stateV2, hypothesisFirstChain.v2ReadState, hypothesisFirstChain.error]);
+  const scopedDiscussionModel = useMemo(() => nextAction.navigation
+    ? buildV2DiscussionModel(nextAction.navigation, chainQuestionId)
+    : formalDiscussionModel, [nextAction.navigation, chainQuestionId, formalDiscussionModel]);
   const safeNextAction = useMemo(() => {
     if (!hypothesisFirstChain.scopeMismatch) return nextAction;
     const readError = runState.error || hypothesisFirstChain.error;
     return {
       stage: "blocked" as const,
       targetNodeId: null,
-      navigationLabel: readError ? "题目读取失败" : "等待题目切换",
-      disabledReason: readError || "正在切换题目，旧任务和操作已隐藏",
-      statusMessage: readError ? "题目读取失败" : "正在切换题目",
+      navigationLabel: readError ? "题目读取失败" : "研究范围不匹配",
+      disabledReason: readError || "返回的题目或运行与当前选择不一致，请重新读取",
+      statusMessage: readError ? "题目读取失败" : "研究范围不匹配",
       recovery: null,
     };
   }, [hypothesisFirstChain.scopeMismatch, hypothesisFirstChain.error, runState.error, nextAction]);
@@ -435,14 +373,7 @@ export function ResearchProcessWorkspace({
   const hypothesisFirstOwnsCurrentTask = !hypothesisFirstChain.scopeMismatch
     && safeNextAction.stage !== "converged"
     && hypothesisFirstChain.stateV2?.currentPhase !== "formal_runtime"
-    && Boolean(
-      hypothesisFirstChain.stateV2
-      ||
-      hypothesisFirstChain.chainState
-      || hypothesisFirstChain.selection
-      || meetingsForHypothesisFirstQuestion(hypothesisFirstChain.meetings, chainQuestionId).length > 0
-      || hypothesisFirstChain.collectionRequests.length > 0,
-    );
+    && Boolean(hypothesisFirstChain.stateV2);
   const semanticSelectedNodeId = hypothesisFirstSemanticNodeId(location.selectedNodeId);
   const prospectiveCurrentTaskNodeId = hypothesisFirstOwnsCurrentTask
     ? safeNextAction.targetNodeId
@@ -459,8 +390,8 @@ export function ResearchProcessWorkspace({
     commands.error
     || formalCommand.commandError
     || runState.error
-    || catalog.error
-    || hypothesisFirstChain.error;
+    || (!location.runId || hypothesisFirstOwnsCurrentTask ? catalog.error : null)
+    || (!location.runId || hypothesisFirstOwnsCurrentTask ? hypothesisFirstChain.error : null);
   const commandBusy = runState.busy || commands.busy || formalCommand.busy;
   const workspaceModel = useMemo(() => buildResearchWorkflowWorkspaceModel({
     scope: {
@@ -474,16 +405,19 @@ export function ResearchProcessWorkspace({
     },
     snapshot: runState.snapshot,
     commandOffers: runState.commandOffers,
-    legacyNextAction: safeNextAction,
+    hypothesisNextAction: safeNextAction,
     selectedNodeId: workspaceSelectedNodeId,
     panel: location.panel,
-    loading: !hypothesisFirstReady || (!runState.projection && !displayError),
+    loading: hypothesisFirstOwnsCurrentTask || !location.runId
+      ? hypothesisFirstChain.loading
+      : !runState.snapshot && !runState.error,
     error: displayError,
     resyncRequired: runState.resyncRequired,
   }), [
     chainQuestionId,
     displayError,
-    hypothesisFirstReady,
+    hypothesisFirstChain.loading,
+    runState.error,
     hypothesisFirstOwnsCurrentTask,
     location.panel,
     location.runId,
@@ -496,9 +430,10 @@ export function ResearchProcessWorkspace({
     safeNextAction,
     teamId,
   ]);
+  const workspaceReady = workspaceModel.loadState === "ready" || workspaceModel.loadState === "refreshing";
   const workspaceNextAction = workspaceModel.source === "formal_runtime"
     ? undefined
-    : workspaceModel.legacyNextAction || safeNextAction;
+    : workspaceModel.hypothesisNextAction || safeNextAction;
   const stageNavigatorModel = useMemo(() => buildResearchWorkflowStageNavigatorModel({
     graph,
     progress: workspaceModel.progress,
@@ -530,12 +465,13 @@ export function ResearchProcessWorkspace({
         recovery: null,
       }
     : safeNextAction;
+  const currentDiscussionDeepLink = scopedDiscussionModel.status === "ready" ? scopedDiscussionModel.deepLink : "";
   const semanticCurrentTaskNodeId = hypothesisFirstSemanticNodeId(
     workspaceNavigationAction.targetNodeId,
   );
   const navigateToCurrentTask = useCallback(() => {
-    if (scopedDiscussionModel.status === "ready" && scopedDiscussionModel.deepLink) {
-      navigateToDiscussion(scopedDiscussionModel.deepLink);
+    if (currentDiscussionDeepLink) {
+      navigateToDiscussion(currentDiscussionDeepLink);
       return;
     }
     if (semanticCurrentTaskNodeId) {
@@ -544,8 +480,7 @@ export function ResearchProcessWorkspace({
   }, [
     location,
     navigateToDiscussion,
-    scopedDiscussionModel.deepLink,
-    scopedDiscussionModel.status,
+    currentDiscussionDeepLink,
     semanticCurrentTaskNodeId,
   ]);
   const replaceParamsForInspector = useCallback((patch: Record<string, string | null | undefined>) => {
@@ -558,18 +493,16 @@ export function ResearchProcessWorkspace({
       && patch.panel === "node"
       && requestedSemanticNode
       && requestedSemanticNode === semanticCurrentTaskNodeId
-      && scopedDiscussionModel.status === "ready"
-      && scopedDiscussionModel.deepLink
+      && currentDiscussionDeepLink
     ) {
-      navigateToDiscussion(scopedDiscussionModel.deepLink);
+      navigateToDiscussion(currentDiscussionDeepLink);
       return;
     }
     location.replaceParams(patch);
   }, [
     location,
     navigateToDiscussion,
-    scopedDiscussionModel.deepLink,
-    scopedDiscussionModel.status,
+    currentDiscussionDeepLink,
     semanticCurrentTaskNodeId,
   ]);
   const archiveOpen = location.panel === "question" || location.panel === "progress";
@@ -620,7 +553,7 @@ export function ResearchProcessWorkspace({
     });
   }, [scopedReviewMeetings]);
   const archiveSummary = useMemo(() => ({
-    selectedHypotheses: hypothesisFirstChain.selection?.selectedCandidateIds.length,
+    selectedHypotheses: hypothesisFirstChain.stateV2?.selection.selectedCandidateIds.length,
     effectiveReviews: reviewSummary.effectiveRounds,
     retryAttempts: reviewSummary.retryAttempts,
     collectionRequests: hypothesisFirstChain.collectionRequests.filter((request) => (
@@ -631,7 +564,7 @@ export function ResearchProcessWorkspace({
   }), [
     chainQuestionId,
     hypothesisFirstChain.collectionRequests,
-    hypothesisFirstChain.selection?.selectedCandidateIds.length,
+    hypothesisFirstChain.stateV2?.selection.selectedCandidateIds.length,
     reviewHistory,
     reviewSummary,
   ]);
@@ -646,18 +579,20 @@ export function ResearchProcessWorkspace({
     dataQuestionId: hypothesisFirstChain.questionId,
     dataRunId: runState.run?.runId ?? null,
     dataRunVersion: runState.run?.runVersion ?? null,
-    dataScopeReady: hypothesisFirstReady && Boolean(runState.projection),
+    dataScopeReady: workspaceReady && Boolean(runState.projection),
     runStatus: runState.run?.status ?? runState.projection?.run.status ?? null,
     runTerminalReason: runState.run?.terminalReason ?? null,
     nodeRuns: runState.projection?.run.nodeRuns ?? null,
     scopeMismatch: hypothesisFirstChain.scopeMismatch,
-    loading: !hypothesisFirstReady || (!runState.projection && !displayError),
+    loading: hypothesisFirstOwnsCurrentTask || !location.runId
+      ? hypothesisFirstChain.loading
+      : !runState.snapshot && !runState.error,
     error: displayError,
     nextAction: workspaceNextAction,
     workspaceModel,
     selectedNodeId: location.selectedNodeId,
     panel: location.panel,
-    roundProgress: hypothesisFirstChain.chainState
+    roundProgress: hypothesisFirstChain.stateV2
       ? {
           // Canonical logical round, not the physical meeting count.
           current: canonicalReviewRound,
@@ -670,11 +605,14 @@ export function ResearchProcessWorkspace({
     chainQuestionId,
     currentRoundBudget,
     displayError,
-    hypothesisFirstChain.chainState,
     hypothesisFirstChain.questionId,
     hypothesisFirstChain.scopeMismatch,
     hypothesisFirstChain.stateV2,
-    hypothesisFirstReady,
+    workspaceReady,
+    hypothesisFirstChain.loading,
+    hypothesisFirstOwnsCurrentTask,
+    runState.snapshot,
+    runState.error,
     location.panel,
     location.runId,
     location.selectedNodeId,
@@ -705,7 +643,7 @@ export function ResearchProcessWorkspace({
   useResearchProcessAutofocus({
     panel: location.panel,
     selectedNodeId: location.selectedNodeId,
-    nextTarget: hypothesisFirstReady
+    nextTarget: workspaceReady
       ? hypothesisFirstSemanticNodeId(workflowContext.currentTask?.targetNodeId)
       : null,
     replaceParams: location.replaceParams,
@@ -836,7 +774,7 @@ export function ResearchProcessWorkspace({
       <ResearchCommandPalette
         questions={catalog.questions}
         nextAction={workspaceNavigationAction}
-        workflowActive={workflowActive && hypothesisFirstReady}
+        workflowActive={workflowActive && workspaceReady}
         onSelectExperiment={selectExperiment}
         onOpenPanel={(panel) => location.openPanel(panel)}
         onNavigateNode={(nodeId) => location.replaceParams({ node: hypothesisFirstSemanticNodeId(nodeId) ?? nodeId, panel: "node" })}
@@ -854,8 +792,8 @@ export function ResearchProcessWorkspace({
           <ResearchWorkflowToolbar
             leading={toolbarLeading}
             onOpenTeamCommunication={() => {
-              if (scopedDiscussionModel.status === "ready" && scopedDiscussionModel.deepLink) {
-                navigateToDiscussion(scopedDiscussionModel.deepLink);
+              if (currentDiscussionDeepLink) {
+                navigateToDiscussion(currentDiscussionDeepLink);
               } else {
                 location.openPanel("team");
               }
@@ -882,12 +820,12 @@ export function ResearchProcessWorkspace({
                 }}
               />
             ) : undefined}
-            navigationLabel={workflowActive && hypothesisFirstReady ? workspaceNavigationAction.navigationLabel : undefined}
-            nextActionStage={workflowActive && hypothesisFirstReady ? workspaceNavigationAction.stage : undefined}
+            navigationLabel={workflowActive && workspaceReady ? workspaceNavigationAction.navigationLabel : undefined}
+            nextActionStage={workflowActive && workspaceReady ? workspaceNavigationAction.stage : undefined}
             scopeMismatch={hypothesisFirstChain.scopeMismatch || workspaceModel.scopeMismatch}
             statusMessage={hypothesisFirstChain.scopeMismatch ? safeNextAction.statusMessage : undefined}
             chainRound={
-              workflowActive && !formalRuntimeActive && hypothesisFirstChain.chainState
+              workflowActive && !formalRuntimeActive && hypothesisFirstChain.stateV2
                 ? {
                     // Canonical logical round, not the physical meeting count.
                     current: canonicalReviewRound,
@@ -901,7 +839,7 @@ export function ResearchProcessWorkspace({
             formalRuntimeActive={formalRuntimeActive}
             atCurrentTask={atCurrentTask}
             onNavigateCurrent={
-              hypothesisFirstReady && semanticCurrentTaskNodeId
+              workspaceReady && semanticCurrentTaskNodeId
                 ? navigateToCurrentTask
                 : undefined
             }

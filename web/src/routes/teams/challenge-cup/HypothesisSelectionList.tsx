@@ -1,32 +1,17 @@
-import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   executeHypothesisFirstCommand,
   fetchCandidateEvidenceTrail,
-  fetchHypothesisSelectionContext,
   fetchHypothesisFirstStateV2,
+  fetchHypothesisSelectionContext,
   isHypothesisFirstCommandStateConflict,
-  isHypothesisFirstStateV2EndpointUnavailable,
-  recordHypothesisSelection,
 } from "../../../api/hypothesisFirst";
 import { queryKeys } from "../../../api/queryKeys";
-import {
-  observeHypothesisLegacyFallback,
-  trackHypothesisSelectionRecord,
-} from "../challengeCupTelemetry";
-import type {
-  CommandAction,
-  HypothesisSelectionContext,
-  HypothesisSelectionRecordPayload,
-} from "../../../api/types";
-import {
-  VButton,
-  VCheckbox,
-  VEmptyState,
-  VErrorSummary,
-  VStateSurface,
-} from "../../../components/vui";
+import type { HypothesisSelectionContext, HypothesisSelectionRecordPayload } from "../../../api/types";
+import { VButton, VCheckbox, VEmptyState, VErrorSummary, VStateSurface } from "../../../components/vui";
+import { trackHypothesisSelectionRecord } from "../challengeCupTelemetry";
 import { projectHypothesisFirstSelection } from "../research-workflow/hypothesisFirstStateV2Adapter";
 import { invalidateHypothesisFirstQueries } from "../research-workflow/useHypothesisFirstChain";
 import css from "./HypothesisSelectionList.styles";
@@ -41,8 +26,6 @@ export type HypothesisSelectionListProps = {
   lang?: "zh" | "en";
   compact?: boolean;
   hideSubmit?: boolean;
-  canonicalAction?: Extract<CommandAction, { command: "record_selection" }>;
-  allowLegacyMutation?: boolean;
 };
 
 function sameIdSet(left: string[], right: string[]): boolean {
@@ -58,8 +41,6 @@ export function HypothesisSelectionList({
   lang = "zh",
   compact = false,
   hideSubmit = false,
-  canonicalAction,
-  allowLegacyMutation = false,
 }: HypothesisSelectionListProps) {
   const isZh = lang === "zh";
   const queryClient = useQueryClient();
@@ -89,31 +70,11 @@ export function HypothesisSelectionList({
     }),
     [questionId, stateV2Query.data, stateV2Query.error, stateV2Query.isPending, teamId],
   );
-  const v2EndpointUnavailable = isHypothesisFirstStateV2EndpointUnavailable(stateV2Query.error);
-  const useLegacyFallback = Boolean(
-    allowLegacyMutation
-    && !stateV2Query.data
-    && v2EndpointUnavailable,
-  );
-  // Bounded degradation evidence: the V2 chain endpoint is the canonical path;
-  // falling back to the legacy mutation signals backend API degradation.
-  const legacyFallbackObservedRef = useRef(false);
-  useEffect(() => {
-    if (legacyFallbackObservedRef.current || !useLegacyFallback) return;
-    legacyFallbackObservedRef.current = true;
-    observeHypothesisLegacyFallback({ teamId, questionId });
-  }, [useLegacyFallback, teamId, questionId]);
   const canonicalSelection = selectionProjection.status === "editable"
     ? selectionProjection.canonicalAction
     : undefined;
-  const mutationCanonicalAction = canonicalSelection
-    ?? (useLegacyFallback ? canonicalAction : undefined);
+  const mutationCanonicalAction = canonicalSelection;
   const serverBaseline = useMemo(() => {
-    if (useLegacyFallback) {
-      return context?.latestSelection?.selectedCandidateIds
-        ?? context?.defaultSelectedCandidateIds
-        ?? [];
-    }
     if (selectionProjection.status === "editable") {
       // V2 owns whether mutation is allowed; the selection-context default is
       // only the initial local draft. It must not be written back into V2 or
@@ -127,7 +88,7 @@ export function HypothesisSelectionList({
     // persisted latestSelection may be shown here; default selections are
     // draft suggestions and must not be presented as already committed.
     return context?.latestSelection?.selectedCandidateIds ?? [];
-  }, [context, selectionProjection.selectedCandidateIds, selectionProjection.status, useLegacyFallback]);
+  }, [context, selectionProjection.selectedCandidateIds, selectionProjection.status]);
   const [selectedIds, setSelectedIds] = useState<string[]>(serverBaseline);
   const previousServerBaseline = useRef<string[]>(serverBaseline);
   useEffect(() => {
@@ -148,7 +109,7 @@ export function HypothesisSelectionList({
         questionId,
         selectedCount: input.selectedCandidateIds.length,
         candidateCount: context?.candidates.length ?? 0,
-        path: mutationCanonicalAction ? "canonical" : (useLegacyFallback ? "legacy" : "unavailable"),
+        path: mutationCanonicalAction ? "canonical" : "unavailable",
         previousSelectionId: input.previousSelectionId,
       }),
     }),
@@ -158,7 +119,6 @@ export function HypothesisSelectionList({
           candidateIds: input.selectedCandidateIds,
         }, { runId });
       }
-      if (useLegacyFallback) return recordHypothesisSelection(teamId, input);
       return Promise.reject(new Error("canonical_action_unavailable"));
     },
     onSuccess: (_data, _vars, ctx) => {
@@ -220,7 +180,7 @@ export function HypothesisSelectionList({
 
   const latestSelection = context.latestSelection;
   const dirty = !sameIdSet(selectedIds, serverBaseline);
-  const mutationAuthorized = Boolean(mutationCanonicalAction) || useLegacyFallback;
+  const mutationAuthorized = Boolean(mutationCanonicalAction);
   const withinBounds =
     selectedIds.length >= HYPOTHESIS_SELECTION_MIN &&
     selectedIds.length <= HYPOTHESIS_SELECTION_MAX;

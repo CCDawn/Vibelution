@@ -1,9 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { KnowledgeInvocationBadge } from "../../../api/types/research-workflow/core";
-import {
-  buildKnowledgeCollectionInspectorModel,
-} from "./knowledgeCollectionInspectorModel";
+import { buildKnowledgeCollectionInspectorModel } from "./knowledgeCollectionInspectorModel";
 
 function badge(overrides: Partial<KnowledgeInvocationBadge> = {}): KnowledgeInvocationBadge {
   return {
@@ -41,6 +39,7 @@ describe("buildKnowledgeCollectionInspectorModel", () => {
           status: "running",
           handoffState: null,
           currentKnowledgeNodeId: "source_extraction",
+          childNodeStates: {source_finding: "succeeded"},
           knowledgeChildRunId: "child-1",
           updatedAtMs: 5,
         },
@@ -109,6 +108,7 @@ describe("buildKnowledgeCollectionInspectorModel", () => {
           status: "awaiting_handoff",
           handoffState: "awaiting_human",
           currentKnowledgeNodeId: "knowledge_handoff",
+          childNodeStates: {source_finding: "succeeded", source_extraction: "succeeded", evidence_relations: "succeeded", knowledge_ingestion: "succeeded"},
           knowledgePackageRef: "kb://pkg-1",
           packageContentHash: "a".repeat(64),
           updatedAtMs: 6,
@@ -132,6 +132,7 @@ describe("buildKnowledgeCollectionInspectorModel", () => {
           status: "completed",
           handoffState: "completed",
           currentKnowledgeNodeId: "knowledge_handoff",
+          childNodeStates: {source_finding: "succeeded", source_extraction: "succeeded", evidence_relations: "succeeded", knowledge_ingestion: "succeeded"},
           updatedAtMs: 7,
         },
       }),

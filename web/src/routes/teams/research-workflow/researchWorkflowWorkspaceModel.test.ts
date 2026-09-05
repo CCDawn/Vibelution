@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 
+import type { CommandOffer } from "../../../api/types/research-workflow/commands";
 import type {
   ResearchWorkflowCurrentTask,
   ResearchWorkflowProgress,
   ResearchWorkflowSnapshot,
 } from "../../../api/types/research-workflow/core";
-import type { CommandOffer } from "../../../api/types/research-workflow/commands";
 import { CHALLENGE_CUP_WORKFLOW_ID } from "../../../api/types/researchWorkflow";
 import {
   allowsResearchRunLaunch,
@@ -156,7 +156,7 @@ describe("researchWorkflowWorkspaceModel", () => {
     ["completed", "completed"],
   ] as const)("maps formal %s to %s without legacy override", (state, status) => {
     const model = buildResearchWorkflowWorkspaceModel(baseInput({
-      legacyNextAction: {
+      hypothesisNextAction: {
         stage: "selection_required",
         targetNodeId: "hf_selection",
         navigationLabel: "前往假说选择",
@@ -321,7 +321,7 @@ describe("researchWorkflowWorkspaceModel", () => {
     const model = buildResearchWorkflowWorkspaceModel(baseInput({
       snapshot: null,
       scope: { ...baseInput().scope, runId: null, runVersion: null },
-      legacyNextAction: {
+      hypothesisNextAction: {
         stage: "generation_missing",
         targetNodeId: "hf_generation",
         navigationLabel: "前往候选生成",
@@ -344,7 +344,7 @@ describe("researchWorkflowWorkspaceModel", () => {
     const hypothesis = buildResearchWorkflowWorkspaceModel(baseInput({
       snapshot: null,
       scope: { ...baseInput().scope, runId: null, runVersion: null },
-      legacyNextAction: {
+      hypothesisNextAction: {
         stage: "generation_missing",
         targetNodeId: "hf_generation",
         navigationLabel: "前往候选生成",
@@ -357,7 +357,7 @@ describe("researchWorkflowWorkspaceModel", () => {
 
     const route = buildResearchWorkflowWorkspaceModel(baseInput({
       snapshot: null,
-      legacyNextAction: null,
+      hypothesisNextAction: null,
       scope: { ...baseInput().scope, questionId: null, runId: null, runVersion: null },
     }));
     expect(route.source).toBe("route");
@@ -376,7 +376,7 @@ describe("researchWorkflowWorkspaceModel", () => {
     const hypothesis = buildResearchWorkflowWorkspaceModel(baseInput({
       snapshot: null,
       scope: { ...baseInput().scope, questionId: "SCI-001", runId: null, runVersion: null },
-      legacyNextAction: {
+      hypothesisNextAction: {
         stage: "selection_required",
         targetNodeId: "hf_selection",
         navigationLabel: "前往假说选择",
@@ -389,7 +389,7 @@ describe("researchWorkflowWorkspaceModel", () => {
     const noRun = buildResearchWorkflowWorkspaceModel(baseInput({
       snapshot: null,
       scope: { ...baseInput().scope, questionId: "SCI-001", runId: null, runVersion: null },
-      legacyNextAction: {
+      hypothesisNextAction: {
         stage: "no_run",
         targetNodeId: null,
         navigationLabel: "选择题目开始研究",
@@ -402,7 +402,7 @@ describe("researchWorkflowWorkspaceModel", () => {
     const converged = buildResearchWorkflowWorkspaceModel(baseInput({
       snapshot: null,
       scope: { ...baseInput().scope, questionId: "SCI-001", runId: null, runVersion: null },
-      legacyNextAction: {
+      hypothesisNextAction: {
         stage: "converged",
         targetNodeId: "hf_convergence",
         navigationLabel: "创建正式研究运行",
@@ -416,7 +416,7 @@ describe("researchWorkflowWorkspaceModel", () => {
     const route = buildResearchWorkflowWorkspaceModel(baseInput({
       snapshot: null,
       scope: { ...baseInput().scope, questionId: null, runId: null, runVersion: null },
-      legacyNextAction: null,
+      hypothesisNextAction: null,
     }));
     expect(allowsResearchRunLaunch(route)).toBe(true);
   });
@@ -502,7 +502,7 @@ describe("researchWorkflowWorkspaceModel", () => {
   });
 
   it("keeps a named formal run fail-closed until its snapshot arrives", () => {
-    const legacyNextAction = {
+    const hypothesisNextAction = {
       stage: "selection_required" as const,
       targetNodeId: "hf_selection",
       navigationLabel: "前往假说选择",
@@ -515,14 +515,14 @@ describe("researchWorkflowWorkspaceModel", () => {
     ]) {
       const model = buildResearchWorkflowWorkspaceModel(baseInput({
         snapshot: null,
-        legacyNextAction,
+        hypothesisNextAction,
         loading: state.loading,
         error: state.error,
       }));
       expect(model.source).toBe("formal_runtime");
       expect(model.currentTask).toBeNull();
       expect(model.primaryAction).toBeNull();
-      expect(model.legacyNextAction).toBeNull();
+      expect(model.hypothesisNextAction).toBeNull();
     }
   });
 });

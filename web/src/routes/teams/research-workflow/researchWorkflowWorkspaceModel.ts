@@ -1,12 +1,12 @@
-import type { ResearchProcessPanel } from "./researchProcessPanelSelection";
-import type { HypothesisFirstNextAction } from "./hypothesisFirstNextAction";
+import type { CommandOffer } from "../../../api/types/research-workflow/commands";
 import type {
   ResearchWorkflowCurrentTask,
   ResearchWorkflowProgress,
   ResearchWorkflowSnapshot,
   ResearchWorkflowTaskState,
 } from "../../../api/types/research-workflow/core";
-import type { CommandOffer } from "../../../api/types/research-workflow/commands";
+import type { HypothesisFirstNextAction } from "./hypothesisFirstNextAction";
+import type { ResearchProcessPanel } from "./researchProcessPanelSelection";
 
 export type ResearchWorkflowWorkspaceScope = {
   teamId: string;
@@ -117,7 +117,7 @@ export type ResearchWorkflowWorkspaceModelInput = {
   scope: ResearchWorkflowWorkspaceScope;
   snapshot: ResearchWorkflowSnapshot | null;
   commandOffers?: readonly CommandOffer[] | null;
-  legacyNextAction?: HypothesisFirstNextAction | null;
+  hypothesisNextAction?: HypothesisFirstNextAction | null;
   catalogAuthorization?: ResearchWorkflowCatalogAuthorization | null;
   selectedNodeId?: string | null;
   panel: ResearchProcessPanel;
@@ -139,7 +139,7 @@ export type ResearchWorkflowWorkspaceModel = {
   progress: ResearchWorkflowProgress | null;
   currentTask: ResearchWorkflowWorkspaceTask | null;
   primaryAction: ResearchWorkflowFormalPrimaryAction | null;
-  legacyNextAction: HypothesisFirstNextAction | null;
+  hypothesisNextAction: HypothesisFirstNextAction | null;
   view: {
     panel: ResearchProcessPanel;
     selectedNodeId: string | null;
@@ -474,7 +474,7 @@ export function buildResearchWorkflowWorkspaceModel(
   let source: ResearchWorkflowWorkspaceModel["source"] = "route";
   let currentTask: ResearchWorkflowWorkspaceTask | null = null;
   let primaryAction: ResearchWorkflowFormalPrimaryAction | null = null;
-  let legacyNextAction: HypothesisFirstNextAction | null = null;
+  let hypothesisNextAction: HypothesisFirstNextAction | null = null;
 
   if (!scopeMismatch && formalRun && snapshot) {
     source = "formal_runtime";
@@ -490,10 +490,10 @@ export function buildResearchWorkflowWorkspaceModel(
     if (authorization) {
       source = "catalog_authorization";
       currentTask = authorization;
-    } else if (input.legacyNextAction) {
+    } else if (input.hypothesisNextAction) {
       source = "hypothesis_first";
-      legacyNextAction = input.legacyNextAction;
-      currentTask = hypothesisTask(input.scope, input.legacyNextAction);
+      hypothesisNextAction = input.hypothesisNextAction;
+      currentTask = hypothesisTask(input.scope, input.hypothesisNextAction);
     } else {
       source = "route";
       currentTask = routeTask(input.scope);
@@ -528,7 +528,7 @@ export function buildResearchWorkflowWorkspaceModel(
     progress: snapshot?.progress ?? null,
     currentTask: scopeMismatch ? null : currentTask,
     primaryAction: actionsPaused ? null : primaryAction,
-    legacyNextAction,
+    hypothesisNextAction,
     view: {
       panel: input.panel,
       selectedNodeId,

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { stateV2 } from "./hypothesisFirstV2.fixture";
 
 import type {
   CollectionRequestRecord,
-  HypothesisFirstChainState,
   HypothesisSelectionRecord,
   MeetingRoundRecord,
   ReviewRoundLinkRecord,
@@ -32,32 +32,6 @@ const scope = {
   workflow: "w",
   agentId: "a",
 };
-
-function chainState(overrides: Partial<HypothesisFirstChainState> = {}): HypothesisFirstChainState {
-  return {
-    schemaVersion: 1,
-    teamId: "team-1",
-    questionId: QUESTION_ID,
-    selectionId: "",
-    meetingCount: 0,
-    firstMeetingId: "",
-    firstMeetingClosed: false,
-    openMeetingIds: [],
-    collectionRequests: [],
-    collectionRequestCount: 0,
-    pendingCollectionCount: 0,
-    collectionReady: false,
-    hypothesisRoundCount: 0,
-    latestHypothesisRoundId: "",
-    hypothesisConverged: false,
-    convergenceDetail: "",
-    roundBudget: 3,
-    budgetExhausted: false,
-    templateBaselineExists: false,
-    templateBaselineIds: [],
-    ...overrides,
-  };
-}
 
 function selection(overrides: Partial<HypothesisSelectionRecord> = {}): HypothesisSelectionRecord {
   return {
@@ -144,7 +118,7 @@ function link(
 
 function regionOf(input: Partial<HypothesisFirstCanvasRegionInput>) {
   return buildHypothesisFirstCanvasRegion({
-    chainState: chainState(),
+    stateV2: stateV2({questionId: "Q-01"}),
     meetings: [],
     collectionRequests: [],
     reviewRoundLinks: [],
@@ -156,7 +130,7 @@ function regionOf(input: Partial<HypothesisFirstCanvasRegionInput>) {
 describe("hypothesisFirstCanvasRegion", () => {
   it("does not mark a closed generation discussion successful without candidates", () => {
     const region = regionOf({
-      chainState: chainState({ candidateCount: 0 }),
+      stateV2: stateV2({generation: {candidateCount: 0}}),
       meetings: [meeting(0, "closed", { meetingType: "hypothesis_candidate_generation", digestId: "digest" })],
     });
     expect(region.nodes.find((node) => node.nodeId === "hf_generation")?.status).toBe("blocked");
@@ -209,7 +183,7 @@ describe("hypothesisFirstCanvasRegion", () => {
   });
 
   it("returns null only when the chain has no question identity", () => {
-    expect(regionOf({ chainState: null })).toBeNull();
+    expect(regionOf({ stateV2: null })).toBeNull();
   });
 
   it("empty chain exposes candidate generation as the clear first step", () => {
@@ -246,10 +220,7 @@ describe("hypothesisFirstCanvasRegion", () => {
     };
     const region = regionOf({
       meetings: [generation],
-      chainState: chainState({
-        generationMeetingId: "hf-gen-1",
-        generationMeetingStatus: "open",
-      }),
+      stateV2: stateV2({}),
     })!;
     const ids = region.nodes.map((node) => node.nodeId);
     expect(ids[0]).toBe(HYPOTHESIS_FIRST_GENERATION_NODE_ID);
@@ -280,11 +251,7 @@ describe("hypothesisFirstCanvasRegion", () => {
     };
     const region = regionOf({
       meetings: [generation],
-      chainState: chainState({
-        candidateCount: 3,
-        generationMeetingId: "hf-gen-1",
-        generationMeetingStatus: "closed",
-      }),
+      stateV2: stateV2({generation: {candidateCount: 3}}),
     })!;
     const generationNode = region.nodes.find(
       (node) => node.nodeId === HYPOTHESIS_FIRST_GENERATION_NODE_ID,
@@ -324,7 +291,7 @@ describe("hypothesisFirstCanvasRegion", () => {
 
   it("candidates without a generation meeting still show a completed generation card", () => {
     const region = regionOf({
-      chainState: chainState({ candidateCount: 4 }),
+      stateV2: stateV2({generation: {candidateCount: 4}}),
     })!;
     const generationNode = region.nodes.find(
       (node) => node.nodeId === HYPOTHESIS_FIRST_GENERATION_NODE_ID,
@@ -349,7 +316,7 @@ describe("hypothesisFirstCanvasRegion", () => {
   it("with candidates but no selection the selection card waits for a human", () => {
     const region = regionOf({
       meetings: [meeting(1, "open")],
-      chainState: chainState({ candidateCount: 2 }),
+      stateV2: stateV2({generation: {candidateCount: 2}}),
     })!;
     const selectionNode = region.nodes.find((node) => node.nodeId === HYPOTHESIS_FIRST_SELECTION_NODE_ID)!;
     expect(selectionNode.status).toBe("waiting_human");
@@ -360,7 +327,7 @@ describe("hypothesisFirstCanvasRegion", () => {
     const region = regionOf({
       selection: selection(),
       meetings: [meeting(1, "open")],
-      chainState: chainState({ meetingCount: 1, firstMeetingId: "hf-review-sel-1-r1", openMeetingIds: ["hf-review-sel-1-r1"] }),
+      stateV2: stateV2({}),
     })!;
     const reviewNode = region.nodes.find((node) => node.nodeId === HYPOTHESIS_FIRST_REVIEW_NODE_ID)!;
     expect(reviewNode.status).toBe("running");
@@ -401,7 +368,7 @@ describe("hypothesisFirstCanvasRegion", () => {
       selection: selection(),
       meetings: [meeting(1, "closed", { digestRef: "digest-1", closedAt: "2026-08-19T02:00:00Z" })],
       collectionRequests: [request("req-1", "hf-review-sel-1-r1")],
-      chainState: chainState({ meetingCount: 1, collectionRequestCount: 1, pendingCollectionCount: 1 }),
+      stateV2: stateV2({}),
     })!;
     const reviewNode = region.nodes.find((node) => node.nodeId === HYPOTHESIS_FIRST_REVIEW_NODE_ID)!;
     expect(reviewNode.status).toBe("succeeded");
@@ -431,7 +398,7 @@ describe("hypothesisFirstCanvasRegion", () => {
         status: "pending",
         collectionRunStatus: "needs_continue",
       })],
-      chainState: chainState({ meetingCount: 1, collectionRequestCount: 1, pendingCollectionCount: 1 }),
+      stateV2: stateV2({}),
     })!;
     const collectionNode = region.nodes.find((node) => node.nodeId === HYPOTHESIS_FIRST_COLLECTION_NODE_ID)!;
     expect(collectionNode.status).toBe("failed");
@@ -457,7 +424,7 @@ describe("hypothesisFirstCanvasRegion", () => {
         }),
       ],
       reviewRoundLinks: [link("hf-review-sel-1-r2", "hf-review-sel-1-r1", "req-1", 2)],
-      chainState: chainState({ meetingCount: 2, collectionRequestCount: 1, collectionReady: true }),
+      stateV2: stateV2({collection: {lifecycle: true ? "completed" : "not_started", outcome: true ? "succeeded" : "none"}}),
     })!;
     expect(region.nodes.find((node) => node.nodeId === HYPOTHESIS_FIRST_COLLECTION_NODE_ID)?.status).toBe("succeeded");
     expect(region.nodes.find((node) => node.nodeId === HYPOTHESIS_FIRST_REVIEW_NODE_ID)?.description).toContain("2 轮有效评审");
@@ -472,7 +439,7 @@ describe("hypothesisFirstCanvasRegion", () => {
     const region = regionOf({
       selection: selection(),
       meetings: [meeting(1, "closed", { digestRef: "digest-1" })],
-      chainState: chainState({ meetingCount: 1, roundBudget: 1, budgetExhausted: true }),
+      stateV2: stateV2({convergence: {roundBudget: 1, outcome: true ? "exhausted" : "none"}}),
     })!;
     const gate = region.nodes.find((node) => node.nodeId === HYPOTHESIS_FIRST_CONVERGENCE_NODE_ID)!;
     expect(gate.status).toBe("blocked");
@@ -484,12 +451,7 @@ describe("hypothesisFirstCanvasRegion", () => {
     const region = regionOf({
       selection: selection(),
       meetings: [meeting(1, "closed", { digestRef: "digest-1" })],
-      chainState: chainState({
-        meetingCount: 1,
-        hypothesisConverged: true,
-        hypothesisRoundCount: 1,
-        convergenceDetail: "评审收敛：候选 cand-1 胜出",
-      }),
+      stateV2: stateV2({convergence: {accepted: true, roundIndex: 1, problems: [{ message: "评审收敛：候选 cand-1 胜出" }]}}),
     })!;
     const gate = region.nodes.find((node) => node.nodeId === HYPOTHESIS_FIRST_CONVERGENCE_NODE_ID)!;
     expect(gate.status).toBe("succeeded");
