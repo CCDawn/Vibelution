@@ -6,6 +6,14 @@ import {
 } from "./researchWorkflowErrorModel";
 
 describe("presentResearchWorkflowError", () => {
+  it("translates every unmet prerequisite without losing the distinct causes", () => {
+    const result = presentResearchWorkflowError("自动推进未就绪：knowledge_package_not_materialized; hypothesis_round_unconverged; template_baseline_missing");
+    expect(result.bodyZh).toContain("知识包尚未形成");
+    expect(result.bodyZh).toContain("讨论尚未收敛");
+    expect(result.bodyZh).toContain("缺少研究模板基线");
+    expect(result.bodyZh).not.toContain("_missing");
+    expect(result.recommendedAction).toBe("none");
+  });
   it("maps cascade reset recommendation for downstream experiment blocks", () => {
     const presented = presentResearchWorkflowError(
       "本项目已有实验设计或迭代产物，资料批次保留供审计，无法仅清空资料后重开。请使用「连同实验与迭代一起清空」。",

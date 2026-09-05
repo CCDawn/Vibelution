@@ -308,6 +308,24 @@ describe("useWorkflowAutoLayout behavior", () => {
     }
   }
 
+  it("keeps an in-flight layout across runtime-only updates and commits current status", async () => {
+    const engine = makeEngine();
+    let complete!: () => void;
+    engine.layout.mockImplementationOnce((input) => new Promise<ElkNode>((resolve) => {
+      complete = () => resolve(fakeLayout(input));
+    }));
+    const graph = makeGraph(["knowledge_collection", "experiment_design"]);
+    await renderWith(graph, engine);
+    const calls = engine.layout.mock.calls.length;
+    const updated = { ...graph, nodes: graph.nodes.map((node) => ({ ...node, status: "blocked" as const })) };
+    await renderWith(updated, engine);
+    expect(engine.layout).toHaveBeenCalledTimes(calls);
+    await act(async () => complete());
+    await renderWith(updated, engine);
+    expect(latest?.layoutRevision).toBe(1);
+    expect(latest?.nodes.find((node) => node.id === "knowledge_collection")?.status).toBe("blocked");
+  });
+
   it("runs one two-level layout round on first layout and reports committed nodes/edges", async () => {
     const engine = makeEngine();
     const graph = makeGraph(["knowledge_collection", "experiment_design"]);

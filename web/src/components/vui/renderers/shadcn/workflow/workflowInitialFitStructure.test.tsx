@@ -236,7 +236,7 @@ describe("ShadcnWorkflowCanvas structure (P1-1)", () => {
       duration: 0,
       minZoom: 0.8,
     });
-    expect(rfCalls[0].minZoom).toBe(0.28);
+    expect(rfCalls[0].minZoom).toBe(0.1);
 
     await act(async () => {
       root.unmount();
@@ -535,6 +535,27 @@ describe("ShadcnWorkflowCanvas structure (P1-1)", () => {
       root.unmount();
       container.remove();
     });
+    vi.mocked(useWorkflowAutoLayout).mockReturnValue(idleLayoutHook());
+  });
+
+  it("keeps explicit fit-all across a later layout commit until selection changes", async () => {
+    vi.mocked(useWorkflowAutoLayout).mockReturnValue(idleLayoutHook(sampleLayoutNodes()));
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<ShadcnWorkflowCanvas graph={sampleGraph()} selectedNodeId="protocol_design" layoutMode="serpentine" />));
+    const props = rfCalls.at(-1)!;
+    const children = (Array.isArray(props.children) ? props.children : [props.children]) as React.ReactElement<{ onFitAll: () => void }>[];
+    await act(async () => children.find((child) => child.type === WorkflowCanvasControls)!.props.onFitAll());
+    fakeInstance.setCenter.mockClear();
+    vi.mocked(useWorkflowAutoLayout).mockReturnValue({ ...idleLayoutHook(sampleLayoutNodes()), layoutRevision: 2 });
+    await act(async () => root.render(<ShadcnWorkflowCanvas graph={sampleGraph()} selectedNodeId="protocol_design" layoutMode="serpentine" />));
+    expect(fakeInstance.setCenter).not.toHaveBeenCalled();
+    await act(async () => root.render(<ShadcnWorkflowCanvas graph={sampleGraph()} selectedNodeId={null} layoutMode="serpentine" />));
+    await act(async () => root.render(<ShadcnWorkflowCanvas graph={sampleGraph()} selectedNodeId="protocol_design" layoutMode="serpentine" />));
+    expect(fakeInstance.setCenter).toHaveBeenCalled();
+    await act(async () => root.unmount());
+    container.remove();
     vi.mocked(useWorkflowAutoLayout).mockReturnValue(idleLayoutHook());
   });
 
