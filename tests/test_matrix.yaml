@@ -15,6 +15,44 @@ default:
     - "No focused rule matched; use the runner smoke as a small signal and decide broader validation from the changed surface."
 
 rules:
+  - id: retired-challenge-cup-tests
+    description: "Intentionally removed 2.x and stage-one suites stay owned without weakening generic missing-file detection."
+    allowMissingPaths: true
+    executionLayers:
+      - "hygiene"
+    paths:
+      - "core/research/competition/stage_one_completion_policy.py"
+      - "core/research/workflow/stage_one_completion.py"
+      - "core/research/workflow/stage_one_definition.py"
+      - "tests/test_knowledge_rollout_closeout.py"
+      - "tests/test_research_workflow_ledger_stage_one_closeout.py"
+      - "tests/test_research_workflow_stage_one_closeout.py"
+      - "tests/test_research_workflow_stage_one_completion_policy.py"
+      - "tests/test_research_workflow_stage_one_definition.py"
+      - "tests/test_research_workflow_stage_one_node_authority.py"
+      - "tests/test_research_workflow_stage_one_program_commands.py"
+      - "tests/test_research_workflow_stage_one_requirement_matrix.py"
+      - "tests/test_research_workflow_v21_agent_completion_reconciliation.py"
+      - "tests/test_research_workflow_v21_agent_execution.py"
+      - "tests/test_research_workflow_v21_contract.py"
+      - "tests/test_research_workflow_v21_evidence_relation_artifact.py"
+      - "tests/test_research_workflow_v21_evidence_remediation.py"
+      - "tests/test_research_workflow_v21_failed_agent_budget.py"
+      - "tests/test_research_workflow_v21_handoff_recovery.py"
+      - "tests/test_research_workflow_v21_iteration_governance.py"
+      - "tests/test_research_workflow_v21_legacy_cleanup.py"
+      - "tests/test_research_workflow_v21_node_budget_capability.py"
+      - "tests/test_research_workflow_v21_node_retry_capability.py"
+      - "tests/test_research_workflow_v21_quality_efficiency.py"
+      - "tests/test_research_workflow_v21_runtime_lifecycle.py"
+      - "tests/test_research_workflow_v21_source_extraction_artifacts.py"
+      - "tests/test_research_workflow_v21_stream_result_package.py"
+      - "tests/test_research_workflow_v21_system_adapters.py"
+      - "tests/test_research_workflow_v21_team_scope_version.py"
+    commands: []
+    notes:
+      - "This is an explicit retirement contract for Challenge Cup 2.x only; arbitrary missing tests and product files still fail normal selector coverage."
+
   - id: test-tooling
     description: "Test runner, selector, pytest fixtures, and test documentation."
     executionLayers:

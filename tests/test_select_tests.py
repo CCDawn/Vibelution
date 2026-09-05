@@ -11,6 +11,48 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_TYPECHECK_COMMAND = (
     "node web/node_modules/typescript/bin/tsc -b web/tsconfig.json --pretty false"
 )
+RETIRED_CHALLENGE_CUP_RULE_ID = "retired-challenge-cup-tests"
+RETIRED_CHALLENGE_CUP_PATHS = frozenset(
+    {
+        "core/research/competition/stage_one_completion_policy.py",
+        "core/research/workflow/stage_one_completion.py",
+        "core/research/workflow/stage_one_definition.py",
+        "tests/test_knowledge_rollout_closeout.py",
+        "tests/test_research_workflow_ledger_stage_one_closeout.py",
+        "tests/test_research_workflow_stage_one_closeout.py",
+        "tests/test_research_workflow_stage_one_completion_policy.py",
+        "tests/test_research_workflow_stage_one_definition.py",
+        "tests/test_research_workflow_stage_one_node_authority.py",
+        "tests/test_research_workflow_stage_one_program_commands.py",
+        "tests/test_research_workflow_stage_one_requirement_matrix.py",
+        "tests/test_research_workflow_v21_agent_completion_reconciliation.py",
+        "tests/test_research_workflow_v21_agent_execution.py",
+        "tests/test_research_workflow_v21_contract.py",
+        "tests/test_research_workflow_v21_evidence_relation_artifact.py",
+        "tests/test_research_workflow_v21_evidence_remediation.py",
+        "tests/test_research_workflow_v21_failed_agent_budget.py",
+        "tests/test_research_workflow_v21_handoff_recovery.py",
+        "tests/test_research_workflow_v21_iteration_governance.py",
+        "tests/test_research_workflow_v21_legacy_cleanup.py",
+        "tests/test_research_workflow_v21_node_budget_capability.py",
+        "tests/test_research_workflow_v21_node_retry_capability.py",
+        "tests/test_research_workflow_v21_quality_efficiency.py",
+        "tests/test_research_workflow_v21_runtime_lifecycle.py",
+        "tests/test_research_workflow_v21_source_extraction_artifacts.py",
+        "tests/test_research_workflow_v21_stream_result_package.py",
+        "tests/test_research_workflow_v21_system_adapters.py",
+        "tests/test_research_workflow_v21_team_scope_version.py",
+    }
+)
+
+
+def _allows_retired_challenge_cup_path(rule: dict, normalized_path: str) -> bool:
+    return (
+        rule.get("id") == RETIRED_CHALLENGE_CUP_RULE_ID
+        and rule.get("allowMissingPaths") is True
+        and rule.get("commands") == []
+        and normalized_path in RETIRED_CHALLENGE_CUP_PATHS
+    )
 
 
 def test_complete_regression_commands_override_project_fail_fast() -> None:
@@ -78,7 +120,8 @@ def test_matrix_references_existing_test_files_and_directories():
                 if not matches and not normalized.startswith(".docs/"):
                     missing_paths.append(f"{rule['id']}:{normalized}")
             elif normalized.startswith("tests/") and not (PROJECT_ROOT / normalized).exists():
-                missing_paths.append(f"{rule['id']}:{normalized}")
+                if not _allows_retired_challenge_cup_path(rule, normalized):
+                    missing_paths.append(f"{rule['id']}:{normalized}")
             elif (
                 normalized.startswith("core/")
                 or normalized.startswith("web/")
@@ -86,7 +129,8 @@ def test_matrix_references_existing_test_files_and_directories():
                 or normalized.startswith("config/")
             ) and "*" not in normalized and not (PROJECT_ROOT / normalized).exists():
                 # Non-glob source paths must still exist after package splits.
-                missing_paths.append(f"{rule['id']}:{normalized}")
+                if not _allows_retired_challenge_cup_path(rule, normalized):
+                    missing_paths.append(f"{rule['id']}:{normalized}")
 
         for command in rule.get("commands", []):
             for match in re.finditer(r"tests/[A-Za-z0-9_./-]+\.py", str(command).replace("\\", "/")):
@@ -96,6 +140,23 @@ def test_matrix_references_existing_test_files_and_directories():
 
     assert missing_paths == []
     assert missing_command_tests == []
+
+
+def test_matrix_missing_path_exception_is_only_the_explicit_challenge_cup_retirement():
+    matrix = select_tests.load_matrix()
+    rules = [rule for rule in matrix["rules"] if rule.get("allowMissingPaths")]
+
+    assert [rule["id"] for rule in rules] == [RETIRED_CHALLENGE_CUP_RULE_ID]
+    retired_rule = rules[0]
+    assert retired_rule["allowMissingPaths"] is True
+    assert retired_rule["commands"] == []
+    assert {
+        select_tests.normalize_path(str(path)) for path in retired_rule["paths"]
+    } == RETIRED_CHALLENGE_CUP_PATHS
+    assert all(
+        not (PROJECT_ROOT / path).exists()
+        for path in RETIRED_CHALLENGE_CUP_PATHS
+    )
 
 
 def test_team_workflow_aggregate_ignored_when_collecting_tests_tree():
@@ -944,36 +1005,6 @@ def test_selector_runs_unmapped_changed_python_test_file_itself(tmp_path: Path):
     assert result["coverageGaps"] == []
 
 
-def test_selector_ignores_deleted_changed_python_test_file(tmp_path: Path):
-    (tmp_path / "tests").mkdir()
-
-    result = select_tests.select_tests(
-        ["tests/test_deleted.py"],
-        {"rules": []},
-        include_always=False,
-        project_root=tmp_path,
-    )
-
-    assert result["matchedRules"] == []
-    assert result["commands"] == []
-    assert result["coverageGaps"] == []
-
-
-def test_selector_ignores_deleted_changed_python_product_file(tmp_path: Path):
-    (tmp_path / "core").mkdir()
-
-    result = select_tests.select_tests(
-        ["core/deleted_feature.py"],
-        {"rules": []},
-        include_always=False,
-        project_root=tmp_path,
-    )
-
-    assert result["matchedRules"] == []
-    assert result["commands"] == []
-    assert result["coverageGaps"] == []
-
-
 def test_selector_keeps_missing_matrix_tests_visible_to_the_gate(tmp_path: Path):
     (tmp_path / "core").mkdir()
     (tmp_path / "tests").mkdir()
@@ -1008,7 +1039,62 @@ def test_selector_keeps_missing_matrix_tests_visible_to_the_gate(tmp_path: Path)
         "tests/test_deleted.py tests/test_live.py -q -n 2 --dist loadfile "
         '-m "not serial" --maxfail=0'
     )
-    assert result["commands"] == [expected_command]
+    missing_test_fallback = (
+        ".\\.venv\\Scripts\\python.exe -m pytest "
+        "tests/test_deleted.py -q --maxfail=0"
+    )
+    assert result["commands"] == [
+        expected_command,
+        missing_test_fallback,
+    ]
+    assert result["coverageGaps"] == []
+
+
+def test_selector_keeps_unlisted_deleted_python_product_visible(tmp_path: Path):
+    (tmp_path / "core").mkdir()
+
+    result = select_tests.select_tests(
+        ["core/deleted_feature.py"],
+        {"rules": []},
+        include_always=False,
+        project_root=tmp_path,
+    )
+
+    assert result["matchedRules"] == []
+    assert result["commands"] == []
+    assert result["coverageGaps"] == [
+        {"path": "core/deleted_feature.py", "reason": "no-static-test-import"}
+    ]
+
+
+def test_selector_explicitly_retires_deleted_challenge_test(tmp_path: Path):
+    (tmp_path / "tests").mkdir()
+    matrix = {
+        "rules": [
+            {
+                "id": "retired-challenge-cup-tests",
+                "allowMissingPaths": True,
+                "paths": ["tests/test_retired_challenge.py"],
+                "commands": [],
+            }
+        ]
+    }
+
+    result = select_tests.select_tests(
+        ["tests/test_retired_challenge.py"],
+        matrix,
+        include_always=False,
+        project_root=tmp_path,
+    )
+
+    assert result["matchedRules"] == [
+        {
+            "id": "retired-challenge-cup-tests",
+            "description": "",
+            "matchedFiles": ["tests/test_retired_challenge.py"],
+        }
+    ]
+    assert result["commands"] == []
     assert result["coverageGaps"] == []
 
 

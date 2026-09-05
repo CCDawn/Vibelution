@@ -556,11 +556,7 @@ def _python_fallback_selection(
     changed_test_files = sorted(
         path
         for path in changed_files
-        if (
-            _is_python_test_path(path)
-            and path not in explicitly_owned_files
-            and (project_root / path).is_file()
-        )
+        if _is_python_test_path(path) and path not in explicitly_owned_files
     )
     if changed_test_files:
         fallback_rules.append(
@@ -593,11 +589,7 @@ def _python_fallback_selection(
     uncovered_sources = sorted(
         path
         for path in changed_files
-        if (
-            _is_python_product_path(path)
-            and path not in explicitly_owned_files
-            and (project_root / path).is_file()
-        )
+        if _is_python_product_path(path) and path not in explicitly_owned_files
     )
     if not uncovered_sources:
         return {
