@@ -20,6 +20,12 @@ from core.research.workflow.models import ActorKind
 
 from . import readiness_providers
 from .budget_authority_adapter import _stage_admitted_tokens
+from .budget_contract import (
+    DEFAULT_MAX_RETRIES,
+    DEFAULT_STAGE_TOKENS,
+    DEFAULT_TOOL_CALLS,
+    DEFAULT_WALL_CLOCK_SECONDS,
+)
 from .human_gate_artifacts import canonical_sha256
 from .smoke_release_artifact import smoke_observation_is_releasable
 from .readiness.common import (
@@ -402,12 +408,12 @@ class RealDomainReadinessContext:
         budget_policy = snapshot.get("budgetPolicy") or {}
         stage_budgets = budget_policy.get("stageBudgets") or {}
         tokens = _first_positive_limit(stage_budgets, "tokens") or int(
-            budget_policy.get("tokens") or 250_000
+            budget_policy.get("tokens") or DEFAULT_STAGE_TOKENS
         )
         tool_calls = _first_positive_limit(stage_budgets, "toolCalls") or int(
-            budget_policy.get("toolCalls") or 300
+            budget_policy.get("toolCalls") or DEFAULT_TOOL_CALLS
         )
-        max_seconds = int(budget_policy.get("wallClockSeconds") or 21_600)
+        max_seconds = int(budget_policy.get("wallClockSeconds") or DEFAULT_WALL_CLOCK_SECONDS)
         consumed = _budget_consumed_from_ledger(self._store, run_id)
         # The operator-owned safety-limits extension (extend_budget) is part
         # of the effective budget window, exactly as the admission authority
@@ -439,7 +445,7 @@ class RealDomainReadinessContext:
             auto_retries=int(
                 budget_policy.get("autoRetries")
                 or budget_policy.get("maxRetries")
-                or 2
+                or DEFAULT_MAX_RETRIES
             ),
             retries_consumed=int(consumed.get("retries") or 0),
         )

@@ -23,6 +23,7 @@ let lastSavedMode: ObservedWorkbenchWindowMode | null = null;
 let lastSavedSize = "";
 let lastSavedPosition = "";
 let started = false;
+let saveInFlight = false;
 
 /** Fullscreen covers the whole screen (including taskbar region); maximize usually does not. */
 export function observeWorkbenchWindowMode(
@@ -121,6 +122,9 @@ async function persistObservedWindow(
   size: string,
   position: string,
 ): Promise<void> {
+  // The poll observes the newest window again after this request finishes.
+  // Do not enqueue identical GET/PUT pairs while the backend is slow.
+  if (saveInFlight) return;
   if (
     mode === lastSavedMode
     && (mode === "fullscreen" || (size === lastSavedSize && position === lastSavedPosition))
@@ -142,6 +146,7 @@ async function persistObservedWindow(
   if (mode === "windowed" && position && isPersistableWorkbenchWindowPosition(position)) {
     workbench.windowPosition = position;
   }
+  saveInFlight = true;
   try {
     // Startup settings use the config hash as a CAS token. Read it immediately
     // before each write so a concurrent settings editor is rejected safely.
@@ -166,6 +171,8 @@ async function persistObservedWindow(
     }
   } catch {
     // Backend may be restarting; try again on next observation.
+  } finally {
+    saveInFlight = false;
   }
 }
 
@@ -236,6 +243,7 @@ export function startWorkbenchWindowMemory(): () => void {
 
 export function resetWorkbenchWindowMemoryForTests(): void {
   started = false;
+  saveInFlight = false;
   lastSavedMode = null;
   lastSavedSize = "";
   lastSavedPosition = "";
