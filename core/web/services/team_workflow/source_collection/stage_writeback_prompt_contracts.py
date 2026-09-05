@@ -64,10 +64,10 @@ def stage_writeback_prompt_lines(stage_id: str) -> list[str]:
         ]
     if stage_id == "relations":
         return [
-            "- 证据关系阶段必须在 `missingLinks[]` 逐条写出证据缺口；每项包含稳定 `id`、`description`、`neededEvidence` 和 `blocksConclusion`。",
+            "- 证据关系阶段必须在 `evidenceGaps[]` 逐条写出证据缺口；每项包含稳定 `id`、`description`、`neededEvidence` 和 `blocksConclusion`。`missingLinks[]` 只用于图结构缺失端点，不能替代 evidenceGaps。",
             "- 必须显式写 `counterEvidenceRefs[]`：只登记真实限制、反例或否定性证据，每项包含 `evidenceRef`、`claim` 和处置 `disposition`；支持性背景关系不得冒充反证。",
-            "- 如果没有真实反证，`counterEvidenceRefs=[]` 并保持 `status=needs_review`；不得为了通过门禁伪造反证引用。",
-            "- `candidateRelations[]` 的每条边必须绑定真实 `evidenceRefs[]`，关系图只表达候选事实，不得升级为正式结论。",
+            "- 如果没有真实反证或限制性证据，`counterEvidenceRefs=[]` 并回写 `status=blocked` 和真实原因；不得为了通过门禁伪造反证引用。",
+            "- `candidateRelations[]`、`sourceThemeEdges[]`、`topicRelations[]` 的每条边都必须绑定真实 `evidenceRefs[]`，逐字使用上下文 allowedEvidenceRefs 中的 claimEvidenceId；关系图只表达候选事实，不得升级为正式结论。",
             "- 先用 `source_collection_context_tool` 读到本批候选与写回契约：边端点优先用契约 `endpointPolicy.allowedEndpointIds` 中的完整 `candidateId`（主题枢纽端点用已声明主题的主题 ID，物化为 `source-theme:<themeId>`）。",
             "- 端点记不住完整 ID 时可写候选标题或已声明主题的 label/裸主题 ID 作语义端点，服务端会确定性解析回注册表节点；解析不了的边按悬空处理计入 `missingLinks`（danglingEdgeCount），阻塞下游 knowledge_ingestion。",
             "- 语义枢纽必须先在同一轮回写的 `themeNodes[]` 中声明（themeId+label）再连边；禁止发明 `rh_claim` 之类未声明的逻辑端点或展示别名。",

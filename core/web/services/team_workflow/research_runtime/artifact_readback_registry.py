@@ -501,47 +501,11 @@ def load_scoped_artifact_payload(
         }
 
     if normalized_kind == "evidence_relation_graph":
-        graph = _load_scoped_relation_graph(
+        return load_evidence_relation_graph_payload(
             team_id=normalized_team,
             authority_run_id=normalized_authority,
             workflow_run_id=normalized_workflow,
         )
-        from .artifact_quality_gate import (
-            ArtifactQualityError,
-            validate_evidence_relation_references,
-        )
-
-        edges = graph.get("edges") or []
-        counter_refs = graph.get("counterEvidenceRefs") or []
-        if not edges or not graph.get("evidenceGaps") or not counter_refs:
-            return None
-        if any(not isinstance(edge, dict) for edge in edges):
-            return None
-        try:
-            validate_evidence_relation_references(
-                edges,
-                counter_refs,
-                set(
-                    load_allowed_evidence_refs(
-                        team_id=normalized_team,
-                        authority_run_id=normalized_authority,
-                        workflow_run_id=normalized_workflow,
-                    )
-                ),
-            )
-        except ArtifactQualityError:
-            return None
-        return {
-            "teamId": normalized_team,
-            "sourceCollectionRunId": normalized_authority,
-            "nodes": list(graph.get("nodes") or []),
-            "edges": list(graph.get("edges") or []),
-            "missingLinks": list(graph.get("missingLinks") or []),
-            "evidenceGaps": list(graph.get("evidenceGaps") or []),
-            "counterEvidenceRefs": list(graph.get("counterEvidenceRefs") or []),
-            "summary": dict(graph.get("summary") or {}),
-            "candidateGraphId": str(graph.get("candidateGraphId") or ""),
-        }
 
     if normalized_kind == "knowledge_package_draft":
         from .knowledge_artifact_authority import load_knowledge_package_draft_payload
@@ -603,6 +567,65 @@ def load_scoped_artifact_payload(
     # Never invent empty records / hashes for unwired kinds — that would make
     # forged or missing team/run refs look like successful read-back.
     return None
+
+
+def load_evidence_relation_graph_payload(
+    *,
+    team_id: str,
+    authority_run_id: str,
+    workflow_run_id: str = "",
+    raise_on_invalid: bool = False,
+) -> dict[str, Any] | None:
+    """Use the same canonical relation validation for readback and tool feedback."""
+    graph = _load_scoped_relation_graph(
+        team_id=team_id,
+        authority_run_id=authority_run_id,
+        workflow_run_id=workflow_run_id,
+    )
+    from .artifact_quality_gate import (
+        ArtifactQualityError,
+        validate_evidence_relation_references,
+    )
+
+    edges = graph.get("edges") or []
+    counter_refs = graph.get("counterEvidenceRefs") or []
+    missing = [name for name in ("edges", "evidenceGaps", "counterEvidenceRefs") if not graph.get(name)]
+    if missing:
+        if raise_on_invalid:
+            raise ValueError("evidence_relation_graph missing required fields: " + ", ".join(missing))
+        return None
+    if any(not isinstance(edge, dict) for edge in edges):
+        if raise_on_invalid:
+            raise ValueError("evidence_relation_graph edges must be objects")
+        return None
+    try:
+        validate_evidence_relation_references(
+            edges,
+            counter_refs,
+            set(
+                load_allowed_evidence_refs(
+                    team_id=team_id,
+                    authority_run_id=authority_run_id,
+                    workflow_run_id=workflow_run_id,
+                )
+            ),
+        )
+    except ArtifactQualityError:
+        if raise_on_invalid:
+            raise
+        return None
+    return {
+        "teamId": team_id,
+        "sourceCollectionRunId": authority_run_id,
+        "nodes": list(graph.get("nodes") or []),
+        "edges": list(graph.get("edges") or []),
+        "missingLinks": list(graph.get("missingLinks") or []),
+        "evidenceGaps": list(graph.get("evidenceGaps") or []),
+        "counterEvidenceRefs": list(graph.get("counterEvidenceRefs") or []),
+        "summary": dict(graph.get("summary") or {}),
+        "candidateGraphId": str(graph.get("candidateGraphId") or ""),
+    }
+
 
 
 def load_source_finding_receipt_payload(

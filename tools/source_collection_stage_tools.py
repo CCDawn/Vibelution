@@ -142,6 +142,23 @@ def source_collection_context_tool(
                     "detail": str(exc),
                     "nextAction": "Repair the missing receipts with scoped real searches before completed writeback. Existing candidate count does not prohibit searching for their receipts; do not re-import or delete candidates.",
                 }
+        if isinstance(payload, dict) and _text(payload.get("stageId") or stage_id) == "relations":
+            from core.web.services.team_workflow.research_runtime.artifact_readback_registry import load_evidence_relation_graph_payload
+
+            payload = dict(payload)
+            try:
+                load_evidence_relation_graph_payload(
+                    team_id=resolved_team_id,
+                    authority_run_id=_text(payload.get("runId") or run_id),
+                    raise_on_invalid=True,
+                )
+                payload["relationArtifactValidation"] = {"valid": True}
+            except ValueError as exc:
+                payload["relationArtifactValidation"] = {
+                    "valid": False,
+                    "detail": str(exc),
+                    "nextAction": "Repair the existing graph: evidenceGaps, real counterEvidenceRefs, and canonical evidenceRefs for every candidateRelations/sourceThemeEdges/topicRelations edge. Never invent evidence; use status=blocked if unavailable.",
+                }
         _record_stage_tool_event(
             "tool.source_collection_context.completed",
             outcome="completed",

@@ -2441,17 +2441,18 @@ def _merge_source_collection_stage_writeback_agent_graph(
             continue
         nodes.append(node)
         node_ids.add(node_id)
-    seen_edges = {
+    edge_positions = {
         (
             s._trim_text(edge.get("sourceCandidateId"), max_length=160),
             s._trim_text(edge.get("targetCandidateId"), max_length=160),
             s._trim_text(edge.get("relation"), max_length=160),
-        )
-        for edge in edges
+        ): index
+        for index, edge in enumerate(edges)
         if s._trim_text(edge.get("sourceCandidateId"), max_length=160)
         and s._trim_text(edge.get("targetCandidateId"), max_length=160)
         and s._trim_text(edge.get("relation"), max_length=160)
     }
+    seen_edges = set(edge_positions)
     dangling_edge_count = 0
     for edge in s._source_collection_agent_graph_edges(agent_graph):
         source_id = s._trim_text(edge.get("sourceCandidateId"), max_length=160)
@@ -2463,6 +2464,15 @@ def _merge_source_collection_stage_writeback_agent_graph(
         effective_target = resolve_relation_endpoint(target_id, endpoint_registry) or target_id
         edge_key = (effective_source, effective_target, relation)
         if edge_key in seen_edges:
+            # A retry corrects the same relation's evidence; identity dedup must
+            # not freeze an earlier unbound edge forever.
+            if edge_key in edge_positions:
+                position = edge_positions[edge_key]
+                edges[position] = {
+                    **edges[position], **edge,
+                    "sourceCandidateId": effective_source,
+                    "targetCandidateId": effective_target,
+                }
             continue
         if effective_source in node_ids and effective_target in node_ids:
             if (effective_source, effective_target) != (source_id, target_id):
@@ -2472,6 +2482,7 @@ def _merge_source_collection_stage_writeback_agent_graph(
                     "targetCandidateId": effective_target,
                 }
                 semantic_binding_edge_count += 1
+            edge_positions[edge_key] = len(edges)
             edges.append(edge)
         else:
             # Fail-closed: 端点经语义解析仍未命中节点表的边降级为 missingLink，

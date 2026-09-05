@@ -625,6 +625,29 @@ def writeback_source_collection_stage_session_task(
                 "Reuse existing candidates; do not rewrite them or invent searchTrace. "
                 "Only write completed after real search receipts cover every candidate."
             ) from exc
+    if (
+        status in {"completed", "needs_review"}
+        and task.get("stageId") == "relations"
+        and task.get("workflowRunId")
+        and closure_summary.get("artifactComplete")
+    ):
+        from ..research_runtime.artifact_readback_registry import load_evidence_relation_graph_payload
+
+        try:
+            load_evidence_relation_graph_payload(
+                team_id=normalized_team_id,
+                authority_run_id=run_id,
+                workflow_run_id=task["workflowRunId"],
+                raise_on_invalid=True,
+            )
+        except ValueError as exc:
+            raise s.TeamWorkflowOrchestrationError(
+                f"evidence_relation_graph_invalid: {exc}. Read source_collection_context_tool, "
+                "then repair the existing graph with evidenceGaps and real counterEvidenceRefs. "
+                "Every candidateRelations, sourceThemeEdges and topicRelations edge needs "
+                "canonical evidenceRefs from allowedEvidenceRefs. Do not invent evidence; "
+                "if unavailable, write status=blocked with the actual reason."
+            ) from exc
     task["status"] = status
     task["summary"] = writeback["summary"] or s._trim_text(task.get("summary"), max_length=4000)
     task["result"] = writeback["result"]
