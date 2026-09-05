@@ -3690,7 +3690,7 @@ def _finish_speaker_turn(
     message = _run_one_speaker(participant, prompt, context, runner)
     speaker_run_ms = _elapsed_ms(speaker_started_at)
     stop_reason = _challenge_room_speaker_abort_reason(round_id, context, force_run_read=True)
-    if stop_reason and str(message.get("status") or "").strip().lower() == "completed":
+    if stop_reason and _speaker_returned_output(message):
         # The provider/custom runner returned after the formal fence. Keep
         # only auditable stop metadata; late content cannot become formal
         # meeting evidence.
@@ -3712,7 +3712,7 @@ def _finish_speaker_turn(
         retry_stop_reason = _challenge_room_speaker_abort_reason(
             round_id, retry_context, force_run_read=True
         )
-        if retry_stop_reason and str(retry_message.get("status") or "").strip().lower() == "completed":
+        if retry_stop_reason and _speaker_returned_output(retry_message):
             retry_message = {
                 **retry_message,
                 "status": "stopped",
@@ -3786,7 +3786,7 @@ def _run_speaker_auto_continuations(
         )
         if (
             continuation_stop_reason
-            and str(continuation_message.get("status") or "").strip().lower() == "completed"
+            and _speaker_returned_output(continuation_message)
         ):
             # The provider returned after the formal fence: late content is
             # never formal meeting evidence (same shape as the fence retry).
@@ -4027,10 +4027,17 @@ def _run_one_speaker(
         summary = _enforce_case_visible_output_boundary(summary, context, participant, record_event=False)
         result_timings = dict(result.get("timings") or {}) if isinstance(result, dict) else {}
         message_status, result_status = _structured_speaker_result_status(result)
+        protocol_error = ""
+        if message_status == "completed" and message_payload is not None:
+            audit = message_payload.get("audit") or {}
+            if audit.get("parseStatus") == "invalid":
+                message_status, result_status = "failed", "failed"
+                protocol_error = str(audit["errorCode"])
+                summary = str(audit["errorMessage"])
         _close_chat_room_speaker_delta(
             context, participant, _speaker_delta_terminal_status(message_status)
         )
-        error_type = (
+        error_type = protocol_error or (
             _structured_speaker_result_error_type(result)
             if message_status in {"failed", "stopped"}
             else ""
@@ -5235,6 +5242,17 @@ def _result_summary(result: Any) -> str:
     if isinstance(result, dict):
         return trim_lines(str(result.get("summary") or result.get("message") or ""), max_lines=4)
     return ""
+
+
+def _speaker_returned_output(message: Mapping[str, Any]) -> bool:
+    """A late completed call is discarded even when its protocol is invalid."""
+    if message.get("status") == "completed":
+        return True
+    audit = (message.get("messagePayload") or {}).get("audit") or {}
+    return bool(
+        audit.get("parseStatus") == "invalid"
+        and message.get("errorType") == audit.get("errorCode")
+    )
 
 
 def _structured_speaker_result_status(result: Any) -> tuple[str, str]:

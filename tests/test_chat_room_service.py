@@ -26,6 +26,17 @@ from core.web.services.team_workflow.research_runtime import meeting_receipt_aut
 from tests.helpers.chat_turn_harness import wait_for_matching_event
 
 
+def _valid_meeting_output(conclusion):
+    return json.dumps({
+        "schemaVersion": 1,
+        "display": {"conclusion": conclusion, "sections": []},
+        "protocol": {key: [] for key in (
+            "agreements", "disagreements", "risks", "actionItems", "knowledgeCandidates",
+            "proposedCandidates", "evidenceRequests",
+        )},
+    }, ensure_ascii=False)
+
+
 def test_chat_room_executor_allows_four_concurrent_rounds() -> None:
     assert chat_room_service._CHAT_ROOM_EXECUTOR_MAX_WORKERS_DEFAULT == 4
     assert chat_room_service._CHAT_ROOM_EXECUTOR_MAX_WORKERS == 4
@@ -1907,6 +1918,29 @@ def test_run_one_speaker_normalizes_structured_result_status(
     assert message.get("errorType", "") == expected_error_type
 
 
+@pytest.mark.parametrize("raw", ["", "not JSON", '{"schemaVersion":1,', '{"tool_name":"lookup","arguments":{}}'])
+@pytest.mark.parametrize("runner_status", ["completed", "failed_provider", "stopped_by_user", "needs_continue"])
+def test_invalid_meeting_protocol_cannot_complete_speaker(monkeypatch, raw, runner_status):
+    monkeypatch.setattr(
+        chat_room_service, "_evaluate_speaker_supervision_policy",
+        lambda participant: SimpleNamespace(allowed=True, reason="", supervision_enabled=False,
+                                            requires_review=False, review_mode="", evidence_level=""),
+    )
+    monkeypatch.setattr(agent_directory_service, "record_supervision_policy_decision", lambda decision: None)
+    message = chat_room_service._run_one_speaker(
+        {"participantId": "p", "agentId": "a", "agentCode": "A", "sessionId": "s", "title": "Agent"},
+        "test", {"_structuredMeetingMessage": True},
+        lambda *_: {"status": runner_status, "raw_output": raw},
+    )
+    assert message["messagePayload"]["audit"]["parseStatus"] == "invalid"
+    expected = {"completed": "failed", "failed_provider": "failed", "stopped_by_user": "stopped", "needs_continue": "partial"}
+    assert message["status"] == expected[runner_status]
+    if runner_status == "completed":
+        assert message["resultStatus"] == "failed"
+        assert message["errorType"] == message["messagePayload"]["audit"]["errorCode"]
+        assert message["summary"] == message["messagePayload"]["audit"]["errorMessage"]
+
+
 def test_start_chat_room_round_records_kernel_trace_without_agent_inbox_delivery(tmp_path, monkeypatch):
     _isolate_chat_room_kernel(tmp_path, monkeypatch)
     recorded_events = []
@@ -3590,7 +3624,7 @@ def test_challenge_per_call_budget_exhaustion_discards_speaker_and_round_advance
             # the meeting deadline: this one late result must be discarded.
             now_seconds[0] = 1060.0
             return {"status": "completed", "raw_output": "晚到发言", "summary": "late"}
-        return {"status": "completed", "raw_output": "正常发言", "summary": "ok"}
+        return {"status": "completed", "raw_output": _valid_meeting_output("正常发言"), "summary": "ok"}
 
     meeting_bridges = []
     auto_drafts = []
@@ -4121,7 +4155,7 @@ def test_chat_room_participant_runs_with_active_direct_turn_in_another_session(t
             return {
                 "status": "completed",
                 "summary": "room done",
-                "raw_output": "room done",
+                "raw_output": _valid_meeting_output("room done"),
                 "tool_call_count": 0,
             }
 
@@ -4255,7 +4289,7 @@ def test_two_scoped_rooms_run_same_agent_in_distinct_sessions_concurrently(tmp_p
             return {
                 "status": "completed",
                 "summary": "room done",
-                "raw_output": "room done",
+                "raw_output": _valid_meeting_output("room done"),
                 "tool_call_count": 0,
             }
 
