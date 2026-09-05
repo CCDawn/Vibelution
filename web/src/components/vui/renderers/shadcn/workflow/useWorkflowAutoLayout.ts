@@ -47,6 +47,7 @@ export type UseWorkflowAutoLayoutResult = {
   layoutRevision: number;
   /** null while healthy; non-null with a diagnostic reason when degraded. */
   degraded: { reason: string } | null;
+  initializing: boolean;
   /** Set once to the first committed revision; consumed by the canvas. */
   initialFitRevision: number | null;
   /**
@@ -101,6 +102,7 @@ export function useWorkflowAutoLayout(
 ): UseWorkflowAutoLayoutResult {
   const layoutMode = options.layoutMode ?? "stage-columns";
   const [engine, setEngine] = useState<WorkflowLayoutEngine | null>(null);
+  const [initializing, setInitializing] = useState(true);
   const [layoutRevision, setLayoutRevision] = useState(0);
   const [degraded, setDegraded] = useState<{ reason: string } | null>(null);
   const [initialFitRevision, setInitialFitRevision] = useState<number | null>(null);
@@ -128,8 +130,18 @@ export function useWorkflowAutoLayout(
 
   useEffect(() => {
     const created = createEngine();
-    setEngine(created);
+    let cancelled = false;
+    created.ready.then(() => {
+      if (cancelled) return;
+      setInitializing(false);
+      setEngine(created);
+    }, (error) => {
+      if (cancelled) return;
+      setInitializing(false);
+      setDegraded({ reason: `layout engine initialization failed: ${error instanceof Error ? error.message : String(error)}` });
+    });
     return () => {
+      cancelled = true;
       tokenRef.current += 1;
       created.terminate();
     };
@@ -300,6 +312,7 @@ export function useWorkflowAutoLayout(
     edges: visible.edges,
     layoutRevision,
     degraded,
+    initializing,
     initialFitRevision,
     structureKey: hash.structure,
     acknowledgeInitialFit,
