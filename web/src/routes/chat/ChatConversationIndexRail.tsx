@@ -342,7 +342,7 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
           </div>
 
         {standardGroupRoomActive ? (
-          <div className="grid min-w-0 gap-1">
+          <div className={styles.railGroupHeader}>
           <VTabs
             aria-label={lang === "zh" ? "左侧索引" : "Left index"}
             value={rightIndexPanel}

@@ -70,6 +70,8 @@ const styles: Record<string, string> = {
     "vui-routes-chatcodingroute panelBody min-w-0 h-full p-2 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] min-h-0 overflow-auto [scrollbar-gutter:stable]",
   railActionButton:
     "vui-routes-chatcodingroute railActionButton !size-[30px] !h-[30px] !min-h-[30px] !w-[30px] !min-w-[30px] rounded-[var(--radius-control)] !border-0 !bg-transparent p-0 [color:var(--fg-secondary)] shadow-none hover:!bg-[var(--vui-control-muted-hover)] hover:[color:var(--fg-primary)] focus-visible:!bg-[var(--vui-control-muted-hover)]",
+  railGroupHeader:
+    "vui-routes-chatcodingroute railGroupHeader grid min-w-0 gap-1",
   railOverlay:
     "vui-routes-chatcodingroute railOverlay !h-auto !bottom-0",
   railTop:
