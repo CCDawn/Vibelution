@@ -18,10 +18,8 @@ from core.research.workflow.contracts.workflow_snapshot import (
     ResearchWorkflowNodeDetail,
 )
 from core.research.workflow.definition_registry import (
-    UnknownWorkflowDefinitionVersion,
     WorkflowDefinitionRegistryError,
     resolve_definition,
-    resolve_historical_definition,
 )
 from core.research.workflow.ledger import WorkflowLedgerStore
 from core.research.workflow.ledger.errors import (
@@ -160,24 +158,20 @@ class WorkflowQueryService:
         if run.team_id != scoped_team:
             raise TeamScopeMismatchError()
 
-        definition, executable = self._definition_for_run(run)
-        offers = (
-            build_command_offers(
-                readiness_service=self._readiness,
-                context=self._readiness_context(),
-                team_id=scoped_team,
-                run=run,
-                definition=definition,
-                pending_human_tasks=human_tasks,
-                attempts=attempts,
-                evaluated_at_ms=(
-                    self._evaluated_at_ms() if self._evaluated_at_ms is not None else None
-                ),
-                revise_checkpoint_id=self._resolve_revise_checkpoint_id(run),
-                invocations=knowledge_invocations,
-            )
-            if executable
-            else ()
+        definition = self._definition_for_run(run)
+        offers = build_command_offers(
+            readiness_service=self._readiness,
+            context=self._readiness_context(),
+            team_id=scoped_team,
+            run=run,
+            definition=definition,
+            pending_human_tasks=human_tasks,
+            attempts=attempts,
+            evaluated_at_ms=(
+                self._evaluated_at_ms() if self._evaluated_at_ms is not None else None
+            ),
+            revise_checkpoint_id=self._resolve_revise_checkpoint_id(run),
+            invocations=knowledge_invocations,
         )
         return build_research_workflow_snapshot(
             ProjectionInputs(
@@ -203,8 +197,8 @@ class WorkflowQueryService:
             )
         )
 
-    def _definition_for_run(self, run: Any) -> tuple[Any, bool]:
-        """Resolve the pinned definition and whether commands may be offered."""
+    def _definition_for_run(self, run: Any) -> Any:
+        """Resolve the run's pinned definition without substitution."""
         workflow_id = str(getattr(run, "workflow_id", "") or "").strip()
         version_id = str(getattr(run, "workflow_version_id", "") or "").strip()
         structure_hash = str(getattr(run, "structure_hash", "") or "").strip()
@@ -215,20 +209,7 @@ class WorkflowQueryService:
                 workflow_version_id=version_id,
                 structure_hash=structure_hash,
                 run_id=run_id,
-            ), True
-        except UnknownWorkflowDefinitionVersion:
-            try:
-                return resolve_historical_definition(
-                    workflow_id=workflow_id,
-                    workflow_version_id=version_id,
-                    structure_hash=structure_hash,
-                    run_id=run_id,
-                ), False
-            except WorkflowDefinitionRegistryError as exc:
-                raise WorkflowQueryError(
-                    f"run {run_id or '<unknown>'} references an unavailable workflow definition",
-                    code="workflow_definition_unavailable",
-                ) from exc
+            )
         except WorkflowDefinitionRegistryError as exc:
             raise WorkflowQueryError(
                 f"run {run_id or '<unknown>'} references an unavailable workflow definition",
@@ -244,7 +225,7 @@ class WorkflowQueryService:
         except (WorkflowLedgerUnavailableError, WorkflowLedgerClosedError) as exc:
             raise WorkflowLedgerUnavailable(str(exc)) from exc
         if run is not None:
-            definition, _executable = self._definition_for_run(run)
+            definition = self._definition_for_run(run)
             node = next(
                 (item for item in definition.nodes if item.nodeId == node_id),
                 None,
