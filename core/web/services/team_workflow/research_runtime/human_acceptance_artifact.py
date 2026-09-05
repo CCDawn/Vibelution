@@ -375,6 +375,10 @@ def persist_prepared_human_acceptance_artifact(
         raise KnowledgeAcceptanceArtifactError(
             "knowledge_package_receipt_identity_conflict"
         )
+    # A terminal human node publishes its receipt through graph resume and
+    # sideflow delivery; it has no outgoing handoff to bind.
+    if not prepared.handoff_id:
+        return (prepared.receipt_id,)
     bound = uow.repository.execute(
         "SELECT 1 FROM handoff_receipts WHERE handoff_id = ? AND receipt_id = ?",
         (prepared.handoff_id, prepared.receipt_id),
@@ -407,6 +411,19 @@ def _find_knowledge_handoff(
         if str(task[4]) != "gate:knowledge_handoff":
             return None
         if not str(task[3] or ""):
+            from core.research.workflow.knowledge_sideflow_definition import (
+                KNOWLEDGE_SIDEFLOW_WORKFLOW_ID,
+            )
+
+            run = repo.get_run(run_id)
+            attempt = repo.get_attempt(str(task[2]))
+            if (
+                run is not None
+                and run.workflow_id == KNOWLEDGE_SIDEFLOW_WORKFLOW_ID
+                and attempt is not None
+                and attempt.node_id == "knowledge_handoff"
+            ):
+                return "", str(task[2])
             raise KnowledgeAcceptanceArtifactError(
                 "knowledge_package_handoff_missing"
             )

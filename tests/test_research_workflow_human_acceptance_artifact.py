@@ -34,7 +34,7 @@ from tests._support.workflow_ledger_helpers import (
 )
 
 
-def _seed_pending_knowledge_gate(harness: CommandHarness) -> None:
+def _seed_pending_knowledge_gate(harness: CommandHarness, *, terminal: bool = False) -> None:
     run = replace(
         build_run_record(last_event_sequence=1),
         input_snapshot_json=json.dumps(
@@ -44,6 +44,20 @@ def _seed_pending_knowledge_gate(harness: CommandHarness) -> None:
             }
         ),
     )
+    if terminal:
+        from core.research.workflow.knowledge_sideflow_definition import (
+            build_knowledge_sideflow_workflow_definition,
+        )
+        from core.research.workflow.definition_registry import register_or_resolve
+
+        definition = build_knowledge_sideflow_workflow_definition()
+        identity = register_or_resolve(definition)
+        run = replace(
+            run,
+            workflow_id=definition.workflowId,
+            workflow_version_id=identity.workflowVersionId,
+            structure_hash=identity.structureHash,
+        )
     attempt = replace(
         build_attempt_record(
             node_run_id="nr-run-test-knowledge_handoff-a1",
@@ -70,27 +84,28 @@ def _seed_pending_knowledge_gate(harness: CommandHarness) -> None:
             )
         )
         uow.repository.insert_attempt(attempt)
-        uow.repository.insert_handoff(
-            handoff_id="ho-knowledge-hypothesis",
-            run_id="run-test",
-            edge_id="knowledge_handoff->hypothesis_design",
-            from_node_run_id=attempt.node_run_id,
-            to_node_id="hypothesis_design",
-            to_node_run_id=None,
-            gate_kind="knowledge_package",
-            input_snapshot_hash="a" * 64,
-            offered_at_ms=FIXED_NOW_MS,
-        )
-        uow.repository.update_handoff_status(
-            "ho-knowledge-hypothesis",
-            "waiting_human",
-            FIXED_NOW_MS,
-        )
+        if not terminal:
+            uow.repository.insert_handoff(
+                handoff_id="ho-knowledge-hypothesis",
+                run_id="run-test",
+                edge_id="knowledge_handoff->hypothesis_design",
+                from_node_run_id=attempt.node_run_id,
+                to_node_id="hypothesis_design",
+                to_node_run_id=None,
+                gate_kind="knowledge_package",
+                input_snapshot_hash="a" * 64,
+                offered_at_ms=FIXED_NOW_MS,
+            )
+            uow.repository.update_handoff_status(
+                "ho-knowledge-hypothesis",
+                "waiting_human",
+                FIXED_NOW_MS,
+            )
         uow.repository.insert_human_task(
             task_id="ht-knowledge",
             run_id="run-test",
             node_run_id=attempt.node_run_id,
-            handoff_id="ho-knowledge-hypothesis",
+            handoff_id=None if terminal else "ho-knowledge-hypothesis",
             task_kind="gate:knowledge_handoff",
             prompt_json='{"nodeId":"knowledge_handoff"}',
             created_at_ms=FIXED_NOW_MS,
@@ -110,12 +125,13 @@ def _package() -> dict[str, object]:
     }
 
 
+@pytest.mark.parametrize("terminal", [False, True])
 def test_accept_materializes_and_binds_knowledge_package_receipt(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, terminal: bool
 ) -> None:
     harness = CommandHarness(tmp_path / "ledger.sqlite3")
     try:
-        _seed_pending_knowledge_gate(harness)
+        _seed_pending_knowledge_gate(harness, terminal=terminal)
         monkeypatch.setattr(
             "core.web.services.team_workflow.research_runtime."
             "human_acceptance_artifact.load_scoped_artifact_payload",
@@ -144,7 +160,7 @@ def test_accept_materializes_and_binds_knowledge_package_receipt(
         artifact_rows, handoff_rows, outbox = harness.store.read(read)
         assert len(artifact_rows) == 1
         assert artifact_rows[0][4] == "knowledge_package"
-        assert handoff_rows == [
+        assert handoff_rows == ([] if terminal else [
             (
                 "ho-knowledge-hypothesis",
                 artifact_rows[0][0],
@@ -153,7 +169,7 @@ def test_accept_materializes_and_binds_knowledge_package_receipt(
                 "1.0.0",
                 artifact_rows[0][7],
             )
-        ]
+        ])
         graph_payload = next(
             json.loads(item.payload_json)
             for item in outbox
@@ -165,12 +181,13 @@ def test_accept_materializes_and_binds_knowledge_package_receipt(
         harness.close()
 
 
+@pytest.mark.parametrize("terminal", [False, True])
 def test_accept_fails_without_materialized_knowledge_package(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, terminal: bool
 ) -> None:
     harness = CommandHarness(tmp_path / "ledger.sqlite3")
     try:
-        _seed_pending_knowledge_gate(harness)
+        _seed_pending_knowledge_gate(harness, terminal=terminal)
         monkeypatch.setattr(
             "core.web.services.team_workflow.research_runtime."
             "human_acceptance_artifact.load_scoped_artifact_payload",
