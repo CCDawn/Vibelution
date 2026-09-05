@@ -4835,6 +4835,22 @@ def _candidate_generation_runner(participant, prompt, context):
         )
     else:
         content = "AGREE: cand-a 的检验路径更直接"
+    if context.get("_structuredMeetingMessage"):
+        candidates = [
+            {"candidateId": "cand-a", "statement": "睡眠剥夺通过腺苷积累损害记忆巩固",
+             "rationale": "腺苷受体机制明确", "proposedBy": role},
+            {"candidateId": "cand-b", "statement": "睡眠剥夺通过突触稳态失衡损害记忆巩固",
+             "rationale": "突触稳态假说", "proposedBy": role},
+        ] if role in {"source_finder", "challenge_cup_search"} else []
+        content = json.dumps({
+            "schemaVersion": 1,
+            "display": {"conclusion": f"{context.get('roundId')}: {content}", "sections": []},
+            "protocol": {
+                "agreements": [] if candidates else ["cand-a test path is direct"],
+                "disagreements": [], "risks": [], "actionItems": [],
+                "knowledgeCandidates": [], "proposedCandidates": candidates, "evidenceRequests": [],
+            },
+        })
     return {"status": "completed", "raw_output": content, "summary": "ok"}
 
 
