@@ -6914,7 +6914,9 @@ def test_execute_source_collection_search_writes_records_and_imports_candidates(
     assert execution["boundaries"]["writesFormalKnowledge"] is False
     assert execution["boundaries"]["writesRag"] is False
     assert execution["boundaries"]["writesOfficialGraph"] is False
-    assert assignments[0]["status"] == "completed"
+    assert assignments[0]["status"] == "returned"
+    assert execution["remainingQueryCount"] == 3
+    assert execution["hasMore"] is True
     assert len(records) == 2
     assert records[0]["metadata"]["sourceCollectionTrace"]["queryId"] == run_response["searchPlan"]["queries"][0]["queryId"]
     assert records[0]["metadata"]["sourceCollectionTrace"]["externalSearchTriggered"] is True
@@ -7786,7 +7788,8 @@ def test_execute_source_collection_search_publishes_runtime_work_run(tmp_path, m
     assert observed_active[0]["topic"] == "neural predictive coding"
     assert summary["active"] is None
     assert summary["latest"]["runId"] == run_response["run"]["runId"]
-    assert summary["latest"]["status"] == "completed"
+    assert summary["latest"]["status"] == "needs_continue"
+    assert summary["latest"]["currentPhase"] == "waiting_for_next_batch"
     assert summary["latest"]["recordCount"] == 1
     assert summary["latest"]["importedCount"] == 1
     search_event = next(kwargs for args, kwargs in events if args[2] == "source_collection.search_executed")
@@ -7836,16 +7839,16 @@ def test_execute_source_collection_search_does_not_mark_downstream_assignments_a
     summary = team_workflow_orchestration_service.load_source_collection_work_run_summary()
 
     assert execution["executedQueryCount"] == 1
-    assert execution["sourceCollectionSummary"]["openAssignmentCount"] == 3
-    assert execution["sourceCollectionSummary"]["searchOpenAssignmentCount"] == 0
+    assert execution["sourceCollectionSummary"]["openAssignmentCount"] == 4
+    assert execution["sourceCollectionSummary"]["searchOpenAssignmentCount"] == 1
     assert execution["sourceCollectionSummary"]["downstreamOpenAssignmentCount"] == 3
-    assert execution["runStatus"]["summary"]["searchOpenAssignmentCount"] == 0
+    assert execution["runStatus"]["summary"]["searchOpenAssignmentCount"] == 1
     assert execution["runStatus"]["summary"]["downstreamOpenAssignmentCount"] == 3
     assert summary["active"] is None
-    assert summary["latest"]["status"] == "completed"
-    assert summary["latest"]["currentPhase"] == "completed"
-    assert summary["latest"]["openAssignmentCount"] == 3
-    assert summary["latest"]["searchOpenAssignmentCount"] == 0
+    assert summary["latest"]["status"] == "needs_continue"
+    assert summary["latest"]["currentPhase"] == "waiting_for_next_batch"
+    assert summary["latest"]["openAssignmentCount"] == 4
+    assert summary["latest"]["searchOpenAssignmentCount"] == 1
     assert summary["latest"]["downstreamOpenAssignmentCount"] == 3
 
 def test_execute_source_collection_search_skips_existing_query_without_force(tmp_path, monkeypatch):
@@ -7869,16 +7872,25 @@ def test_execute_source_collection_search_skips_existing_query_without_force(tmp
             "agentRoles": ["source_finder"],
         },
     )
-    first = team_workflow_orchestration_service.execute_source_collection_search(team["teamId"], run_response["run"]["runId"], {"maxQueries": 1})
+    query_count = run_response["searchPlan"]["queryCount"]
+    first = team_workflow_orchestration_service.execute_source_collection_search(
+        team["teamId"],
+        run_response["run"]["runId"],
+        {"maxQueries": query_count},
+    )
     second = team_workflow_orchestration_service.execute_source_collection_search(team["teamId"], run_response["run"]["runId"], {"maxQueries": 1})
 
-    assert first["executedQueryCount"] == 1
+    assert first["executedQueryCount"] == query_count
     assert second["executedQueryCount"] == 0
     assert second["skippedQueryCount"] == 0
     assert second["skippedDuplicateCount"] == 0
     assert second["status"] == "no_open_assignment"
-    # The first execution ran all three default providers for the same query.
-    assert calls == [run_response["searchPlan"]["queries"][0]["queryId"]] * 3
+    # The first execution ran all three default providers for every perspective query.
+    assert calls == [
+        query["queryId"]
+        for query in run_response["searchPlan"]["queries"]
+        for _provider in range(3)
+    ]
     assert data_processing_service.list_records(run_response["run"]["runId"])["summary"]["recordCount"] == 2
 
 def test_execute_source_collection_search_limits_failed_provider_attempt_to_max_queries(tmp_path, monkeypatch):
@@ -8021,17 +8033,21 @@ def test_execute_source_collection_search_records_output_per_query(tmp_path, mon
         },
     )
 
+    query_count = run_response["searchPlan"]["queryCount"]
     execution = team_workflow_orchestration_service.execute_source_collection_search(
         team["teamId"],
         run_response["run"]["runId"],
-        {"maxQueries": 2, "maxResultsPerQuery": 1},
+        {"maxQueries": query_count, "maxResultsPerQuery": 1},
     )
 
-    assert execution["executedQueryCount"] == 2
-    assert execution["recordCount"] == 2
-    assert execution["outputCount"] == 2
-    assert [output["status"] for output in execution["outputs"]] == ["returned", "completed"]
-    assert execution["runStatus"]["summary"]["outputCount"] == 2
+    assert execution["executedQueryCount"] == query_count
+    assert execution["recordCount"] == query_count
+    assert execution["outputCount"] == query_count
+    assert [output["status"] for output in execution["outputs"]] == [
+        *(["returned"] * (query_count - 1)),
+        "completed",
+    ]
+    assert execution["runStatus"]["summary"]["outputCount"] == query_count
 
 def test_execute_source_collection_search_skips_duplicate_sources_on_force_rerun(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
@@ -8058,7 +8074,7 @@ def test_execute_source_collection_search_skips_duplicate_sources_on_force_rerun
     first = team_workflow_orchestration_service.execute_source_collection_search(
         team["teamId"],
         run_response["run"]["runId"],
-        {"maxQueries": 1, "maxResultsPerQuery": 2},
+        {"maxQueries": run_response["searchPlan"]["queryCount"], "maxResultsPerQuery": 2},
     )
     second = team_workflow_orchestration_service.execute_source_collection_search(
         team["teamId"],
@@ -8106,8 +8122,8 @@ def test_execute_source_collection_search_dedupes_metadata_doi_and_sorted_url_qu
             "results": [
                 {
                     "title": "First metadata DOI source identity",
-                    "sourceRef": "metadata-doi-source",
-                    "rawLocation": "metadata-doi-location",
+                    "sourceRef": "https://example.test/metadata-doi-source-1",
+                    "rawLocation": "https://example.test/metadata-doi-location-1",
                     "summary": "First query DOI only appears in metadata.",
                     "sourceType": "paper",
                     "metadata": {"doi": "10.0000/metadata-only", "containerTitle": "Journal", "issued": "2025"},
@@ -8128,8 +8144,8 @@ def test_execute_source_collection_search_dedupes_metadata_doi_and_sorted_url_qu
             "results": [
                 {
                     "title": "Second metadata DOI source identity duplicate",
-                    "sourceRef": "different-source-ref",
-                    "rawLocation": "different-location",
+                    "sourceRef": "https://example.test/metadata-doi-source-2",
+                    "rawLocation": "https://example.test/metadata-doi-location-2",
                     "summary": "Second query same DOI only appears in metadata.",
                     "sourceType": "paper",
                     "metadata": {"doi": "10.0000/metadata-only", "containerTitle": "Journal", "issued": "2025"},
@@ -8149,7 +8165,10 @@ def test_execute_source_collection_search_dedupes_metadata_doi_and_sorted_url_qu
     def fake_search(query, *, max_results, provider):
         query_text = str(query.get("query") or "")
         base = responses[0] if "first" in query_text else responses[1]
-        return copy.deepcopy(base)
+        response = copy.deepcopy(base)
+        for result in response["results"]:
+            result["summary"] = f"{result['summary']} Relevant to {query_text}."
+        return response
 
     monkeypatch.setattr(team_workflow_orchestration_service, "_execute_source_collection_query", fake_search)
     team = team_service.create_team(name="ai科学研究团队")
@@ -8167,7 +8186,7 @@ def test_execute_source_collection_search_dedupes_metadata_doi_and_sorted_url_qu
     first = team_workflow_orchestration_service.execute_source_collection_search(
         team["teamId"],
         run_response["run"]["runId"],
-        {"maxQueries": 1, "maxResultsPerQuery": 2},
+        {"maxQueries": 4, "maxResultsPerQuery": 2},
     )
     second = team_workflow_orchestration_service.execute_source_collection_search(
         team["teamId"],
@@ -8298,7 +8317,11 @@ def test_source_collection_search_syncs_stage_round_terminal_state(tmp_path, mon
     assert first_latest["sourceCollectionSearchExecution"]["status"] == "needs_continue"
     assert first_latest["sourceCollectionSearchExecution"]["activeWorkRunId"] == ""
 
-    second = team_workflow_orchestration_service.execute_source_collection_search(team["teamId"], run_id, {"maxQueries": 1, "maxResultsPerQuery": 1})
+    second = team_workflow_orchestration_service.execute_source_collection_search(
+        team["teamId"],
+        run_id,
+        {"maxQueries": response["searchPlan"]["queryCount"] - 1, "maxResultsPerQuery": 1},
+    )
     second_status = team_workflow_orchestration_service.get_research_stage_round_status(team["teamId"])
     second_latest = second_status["latestRound"]
 
@@ -8306,7 +8329,7 @@ def test_source_collection_search_syncs_stage_round_terminal_state(tmp_path, mon
     assert second_latest["status"] == "needs_screening"
     assert second_status["phases"][0]["activeRoundId"] == ""
     assert second_latest["sourceCollectionSearchExecution"]["status"] == "completed"
-    assert second_latest["sourceCollectionSummary"]["candidateCount"] == 2
+    assert second_latest["sourceCollectionSummary"]["candidateCount"] == response["searchPlan"]["queryCount"]
 
 def test_research_stage_status_recovers_stale_running_source_collection_round(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
@@ -10289,9 +10312,9 @@ def test_relations_graph_materialization_and_precheck_follow_run_owner_store(tmp
     assert fresh_record["metadata"]["graph"]["summary"]["edgeCount"] == 4
     assert fresh_record["metadata"]["graph"]["summary"]["nodeCount"] == 5
     assert [item["taskId"] for item in fresh_record["metadata"].get("stageTaskWritebacks") or []] == [task["taskId"]]
-    # 访问即认领：写回把活跃项目 store 的存量记录一并归一到属主 store（读侧按 candidateId 去重）。
-    assert "candidate-graph-stale-misplaced" in [item.get("candidateId") for item in owner_graphs]
-    # 活跃项目 B 的 store 不新增图记录，只剩错位存量。
+    # 严格 owner store 不读取或迁移活跃项目 B 中的错位旧记录。
+    assert "candidate-graph-stale-misplaced" not in [item.get("candidateId") for item in owner_graphs]
+    # 活跃项目 B 的 store 不新增图记录，只保留自身原有记录。
     active_after = team_workflow_orchestration_service._read_json(active_store_path)
     assert [
         item.get("candidateId")
@@ -10909,7 +10932,11 @@ def test_source_collection_batch_terminal_writes_collection_batch_completed_even
     execution = team_workflow_orchestration_service.execute_source_collection_search(
         team["teamId"],
         run_id,
-        {"provider": "arxiv_api", "maxQueries": 1, "maxResultsPerQuery": 2},
+        {
+            "provider": "arxiv_api",
+            "maxQueries": run_response["searchPlan"]["queryCount"],
+            "maxResultsPerQuery": 2,
+        },
     )
     assert execution["executedQueryCount"] >= 1
 

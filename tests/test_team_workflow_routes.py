@@ -322,6 +322,7 @@ def _stub_source_collection_search_background(monkeypatch):
 
 def test_team_research_projects_create_activate_and_preserve_legacy_workspace(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _stub_source_collection_search_background(monkeypatch)
     client = _client()
     team = client.post("/api/teams", json={"name": "Research Project Team"}).json()
 
