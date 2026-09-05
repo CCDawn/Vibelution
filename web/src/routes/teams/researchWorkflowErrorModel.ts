@@ -39,6 +39,15 @@ export function presentResearchWorkflowError(
   }
   const lower = message.toLowerCase();
 
+  if (lower.includes("requires") && lower.includes("evidence_relation_graph")) {
+    return {
+      ...DEFAULT_PRESENTATION,
+      titleZh: "缺少证据关系图", titleEn: "Evidence relationship graph is missing",
+      bodyZh: "本次执行未提交必需的证据关系图，无法继续知识入库。请重试证据关系步骤，补齐产物后再继续。",
+      bodyEn: "This attempt did not submit the required evidence relationship graph. Retry the evidence relations step to provide the artifact before knowledge publication can continue.",
+    };
+  }
+
   const readinessReasons = [
     ["knowledge_package_not_materialized", "知识包尚未形成，请先完成知识搜集与交接", "The knowledge package is not ready; complete collection and handoff"],
     ["hypothesis_round_unconverged", "假说讨论尚未收敛，请检查本轮有效候选与未解决分歧", "The hypothesis round has not converged; review valid candidates and open disagreements"],

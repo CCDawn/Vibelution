@@ -74,9 +74,15 @@ export function ResearchProcessNodeInspector(props: ResearchProcessNodeInspector
 
   const { adapter, detail } = props;
   const isCurrentTask = props.isCurrentTask !== false;
-  const offers = props.hideStartOffer
+  const nodeOffers = props.hideStartOffer
     ? withoutStartNodeOffers(detail.commandOffers)
     : (detail.commandOffers ?? []);
+  // These disabled start offers repeat the visible node status and suggest
+  // an impossible next step. Keep genuine prerequisite failures explainable.
+  const offers = nodeOffers.filter((offer) => !(
+    offer.command === "start_node" && !offer.available
+    && ["retry_owns_recovery", "node_already_succeeded", "node_in_flight"].includes(offer.reasonCode)
+  ));
   const selectedPrimaryOffer = isCurrentTask && adapter.actorKind === "agent"
     ? pickPrimaryCommandOffer(offers)
     : null;
@@ -117,6 +123,12 @@ export function ResearchProcessNodeInspector(props: ResearchProcessNodeInspector
       {props.statusBanner ? (
         <div role="status" className={styles.status}>{props.statusBanner}</div>
       ) : null}
+      <NodeHandoffSection
+        handoffs={props.handoffs ?? []}
+        pending={props.handoffPending}
+        blockedReason={detail.blockedReason || ""}
+        lang={lang}
+      />
       {adapter.actorKind === "agent" ? <NodeSessionSection detail={detail} /> : null}
       {!isCurrentTask ? (
         <p className={styles.status} role="note" data-testid="node-inspector-readonly">
@@ -162,12 +174,6 @@ export function ResearchProcessNodeInspector(props: ResearchProcessNodeInspector
           ) : null}
         </div>
       ) : null}
-      <NodeHandoffSection
-        handoffs={props.handoffs ?? []}
-        pending={props.handoffPending}
-        blockedReason={detail.blockedReason || ""}
-        lang={lang}
-      />
       {props.knowledgeBadge !== undefined ? (
         <NodeKnowledgeCollectionSection
           badge={props.knowledgeBadge}
@@ -182,6 +188,7 @@ export function ResearchProcessNodeInspector(props: ResearchProcessNodeInspector
           until the primary becomes actionable (GitHub Actions shows one
           disabled primary with its reason, not a row of dead buttons). */}
       <NodeCommandSection
+        advanced={adapter.actorKind === "agent"}
         offers={!primaryOffer || primaryOffer.available ? restOffers : []}
         busy={props.busy}
         onOffer={props.onOffer}

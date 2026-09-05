@@ -45,11 +45,11 @@ function checkpointAvailability(question: ResearchWorkflowLaunchOption): string 
   const currentNodeLabel = getNodeAdapter(checkpoint.currentNodeId)?.label
     || checkpoint.currentNodeLabel?.trim()
     || checkpoint.currentNodeId?.trim()
-    || "未开始";
+    || "";
   return [
-    currentNodeLabel,
-    `${checkpoint.completedCount}/${checkpoint.totalSteps}`,
     researchRunStatusLabel(checkpoint.status),
+    `已完成 ${checkpoint.completedCount}/${checkpoint.totalSteps} 步`,
+    currentNodeLabel ? `节点：${currentNodeLabel}` : "",
   ].filter(Boolean).join(" · ");
 }
 

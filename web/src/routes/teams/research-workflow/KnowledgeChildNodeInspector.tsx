@@ -5,6 +5,10 @@ import { ResearchProcessNodeInspector } from "./ResearchProcessNodeInspector";
 import { useNodeDetailState } from "./useNodeDetailState";
 import { useResearchWorkflowCommand } from "./useResearchWorkflowCommand";
 import { useResearchWorkflowRun } from "./useResearchWorkflowRun";
+import { EvidenceGraphView } from "./EvidenceGraphView";
+import { ResearchRunTimeline } from "./ResearchRunTimeline";
+import { useResearchWorkflowInsights } from "./useResearchWorkflowInsights";
+import { handoffsForNode } from "./researchNodeHandoffModel";
 
 /** Sideflow cards execute against their ledger child, never the parent run. */
 export function KnowledgeChildNodeInspector(props: {
@@ -19,7 +23,7 @@ export function KnowledgeChildNodeInspector(props: {
   const handoffs = useQuery({
     queryKey: queryKeys.researchWorkflowHandoffs(props.runId, props.teamId),
     queryFn: () => fetchResearchWorkflowHandoffs(props.runId, { teamId: props.teamId }),
-    enabled: props.nodeId === "knowledge_handoff",
+    enabled: Boolean(props.runId),
   });
   const submit = async (offer: CommandOffer) => {
     try {
@@ -44,11 +48,33 @@ export function KnowledgeChildNodeInspector(props: {
     detail={detail.state.detail}
     effectiveBindings={null}
     budget={null}
-    handoffs={handoffs.data?.handoffs ?? []}
+    handoffs={handoffsForNode(handoffs.data?.handoffs ?? [], props.nodeId)}
     handoffPending={Boolean(run.run?.humanTasks?.some((task) => task.nodeId === props.nodeId && task.status === "pending"))}
     busy={command.busy || run.busy}
     onOffer={submit}
   />;
+}
+
+/** Read surfaces retain the selected child run; no parent-run commands. */
+export function KnowledgeChildReadPanel(props: {
+  teamId: string;
+  runId: string;
+  nodeId: string;
+  panel: "evidence" | "timeline";
+}) {
+  return props.panel === "evidence"
+    ? <EvidenceGraphView teamId={props.teamId} runId={props.runId} />
+    : <KnowledgeChildTimeline {...props} />;
+}
+
+function KnowledgeChildTimeline(props: { teamId: string; runId: string; nodeId: string }) {
+  const run = useResearchWorkflowRun(props.teamId, props.runId);
+  const insights = useResearchWorkflowInsights(props.teamId, props.runId, "timeline");
+  if (run.error) return <VStateSurface tone="error" title="知识子流程记录读取失败">
+    <VButton onClick={() => void run.refresh()}>重新读取记录</VButton>
+  </VStateSurface>;
+  if (!run.run) return <VStateSurface tone="loading" title="读取知识子流程记录" />;
+  return <ResearchRunTimeline run={run.run} projection={run.projection} insights={insights} selectedNodeId={props.nodeId} />;
 }
 import { useQuery } from "@tanstack/react-query";
 import { fetchResearchWorkflowHandoffs } from "../../../api/researchWorkflow";

@@ -107,7 +107,7 @@ export function NodeSessionSection({ detail }: { detail: ResearchWorkflowNodeDet
           )}
         </article>
       ) : (
-        <div className={styles.empty} data-vui="node-root-session-empty">未绑定节点根会话</div>
+        <div className={styles.empty} data-vui="node-root-session-empty">暂无可打开的执行记录</div>
       )}
       {childSessions.length ? (
         <div className={styles.children} data-vui="candidate-child-sessions">

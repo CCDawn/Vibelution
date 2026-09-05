@@ -1,14 +1,38 @@
+/** @vitest-environment happy-dom */
 /**
  * EvidenceGraphView contracts:
- * - idle state offers the generate action with an honest description;
+ * - entering the panel reads existing evidence without a second click;
  * - the pure graph renderer groups evidence/claim/source nodes, renders edges
  *   and explains an empty projection instead of faking a graph.
  */
-import React from "react";
+import React, { act } from "react";
+import { createRoot } from "react-dom/client";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { EvidenceGraphContent, type EvidenceGraphDto } from "./EvidenceGraphView";
+import { EvidenceGraphView, EvidenceGraphContent, type EvidenceGraphDto } from "./EvidenceGraphView";
+const fetchLedger = vi.hoisted(() => vi.fn());
+vi.mock("../../../api/research-workflow", () => ({ fetchResearchWorkflowResearchLedger: fetchLedger }));
+vi.mock("../../../i18n/useShellI18n", () => ({ useShellI18n: () => ({ lang: "zh" }) }));
+
+it("loads evidence automatically and clears the previous run while the next run loads", async () => {
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  fetchLedger.mockResolvedValueOnce({ graph: {nodes: [{id: "one", type: "source", title: "First run source"}], edges: []} });
+  const client = new QueryClient({defaultOptions: {queries: {retry: false}}});
+  const container = document.createElement("div"); const root = createRoot(container);
+  const view = (runId: string) => <QueryClientProvider client={client}><EvidenceGraphView runId={runId} teamId="team" /></QueryClientProvider>;
+  await act(async () => root.render(view("run-one")));
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
+  expect(fetchLedger).toHaveBeenCalledWith("run-one", {teamId: "team"});
+  expect(container.textContent).toContain("First run source");
+  expect(container.textContent).not.toContain("生成证据图");
+  fetchLedger.mockImplementationOnce(() => new Promise(() => undefined));
+  await act(async () => root.render(view("run-two")));
+  expect(container.textContent).not.toContain("First run source");
+  expect(container.textContent).toContain("读取证据记录");
+  await act(async () => root.unmount()); client.clear();
+});
 
 const GRAPH: EvidenceGraphDto = {
   nodes: [
