@@ -55,7 +55,8 @@ describe("NodeAgentSection", () => {
     expect(markup).toContain("pane=config");
     expect(markup).toContain("agent=agent-finder");
     expect(markup).toContain('href="/chat?session=session-1');
-    expect(markup).toContain("Tokens");
+    expect(markup).not.toContain('role="progressbar"');
+    expect(markup).toContain("暂无可计算的资源用量");
     expect(markup).not.toContain("source_finder");
     expect(markup).not.toContain("Agent 配置");
     expect(markup).not.toContain("会话已绑定");

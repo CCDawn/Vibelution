@@ -3,7 +3,9 @@ import type {
   ResearchWorkflowNodeDetail,
   ScopedSessionAnchor,
 } from "../../../api/types/research-workflow/core";
-import { VRouteLinkButton } from "../../../components/vui";
+import { useState } from "react";
+import { researchRunStatusLabel } from "./researchRunPresentation";
+import { VButton, VRouteLinkButton } from "../../../components/vui";
 import styles from "./NodeSessionSection.styles";
 
 function sessionLink(anchor: Pick<NodeSessionAnchor, "chatDeepLink" | "chatRoute">): string {
@@ -33,20 +35,22 @@ function childActionLabel(status: string | null | undefined): string {
 }
 
 function ChildSession({ anchor }: { anchor: ScopedSessionAnchor }) {
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const link = sessionLink(anchor);
   const canOpen = childCanOpen(anchor);
   return (
     <article className={styles.child} data-vui="candidate-session">
       <div className={styles.childHeader}>
         <strong className={styles.candidate}>候选 {anchor.candidateId || "—"}</strong>
-        <span className={styles.status}>{anchor.status || "—"}</span>
+        <span className={styles.status}>{researchRunStatusLabel(anchor.status || "")}</span>
       </div>
-      <dl className={styles.details} data-vui="candidate-session-anchor">
-        <dt className={styles.label}>状态</dt><dd className={styles.value}>{anchor.status || "—"}</dd>
-        <dt className={styles.label}>attempt</dt><dd className={styles.value}>{anchor.sessionAttempt ?? "—"}</dd>
+      <VButton density="compact" variant="ghost" aria-expanded={diagnosticsOpen} onClick={() => setDiagnosticsOpen((open) => !open)}>会话诊断信息</VButton>
+      <dl hidden={!diagnosticsOpen} style={{display: diagnosticsOpen ? undefined : "none"}} className={styles.details} data-vui="candidate-session-anchor">
+        <dt className={styles.label}>状态</dt><dd className={styles.value}>{researchRunStatusLabel(anchor.status || "")}</dd>
+        <dt className={styles.label}>执行次数</dt><dd className={styles.value}>{anchor.sessionAttempt ?? "—"}</dd>
         <dt className={styles.label}>会话</dt><dd className={styles.valueBreak}>{anchor.sessionId || "—"}</dd>
         {anchor.taskId ? <><dt className={styles.label}>任务</dt><dd className={styles.valueBreak}>{anchor.taskId}</dd></> : null}
-        <dt className={styles.label}>fragment</dt><dd className={styles.valueBreak}>{anchor.fragmentRef || "未就绪"}</dd>
+        <dt className={styles.label}>记录片段</dt><dd className={styles.valueBreak}>{anchor.fragmentRef || "未就绪"}</dd>
       </dl>
       {canOpen ? (
         <VRouteLinkButton className={styles.action} to={link} variant="ghost">
@@ -60,6 +64,7 @@ function ChildSession({ anchor }: { anchor: ScopedSessionAnchor }) {
 }
 
 export function NodeSessionSection({ detail }: { detail: ResearchWorkflowNodeDetail }) {
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const childSessions = detail.scopedSessions ?? [];
   const legacyRoot = childSessions.length === 0 ? {
       sessionId: detail.sessionId,
@@ -83,16 +88,17 @@ export function NodeSessionSection({ detail }: { detail: ResearchWorkflowNodeDet
     .filter(Boolean);
   return (
     <section data-vui="node-session-section">
-      <h4 className={styles.title}>会话</h4>
+      <h4 className={styles.title}>执行记录</h4>
       {root?.sessionId ? (
         <article className={styles.rootSession} data-vui="node-root-session">
-          <h5 className={styles.subtitle}>节点根会话</h5>
-          <dl className={styles.details} data-vui="session-anchor">
+          <h5 className={styles.subtitle}>节点执行会话</h5>
+          <VButton density="compact" variant="ghost" aria-expanded={diagnosticsOpen} onClick={() => setDiagnosticsOpen((open) => !open)}>会话诊断信息</VButton>
+          <dl hidden={!diagnosticsOpen} style={{display: diagnosticsOpen ? undefined : "none"}} className={styles.details} data-vui="session-anchor">
             <dt className={styles.label}>会话</dt><dd className={styles.valueBreak}>{root.sessionId}</dd>
-            <dt className={styles.label}>状态</dt><dd className={styles.value}>{root.status || "—"}</dd>
+            <dt className={styles.label}>状态</dt><dd className={styles.value}>{researchRunStatusLabel(root.status || "")}</dd>
             {root.taskId ? <><dt className={styles.label}>任务</dt><dd className={styles.valueBreak}>{root.taskId}</dd></> : null}
             {root.turnId ? <><dt className={styles.label}>轮次</dt><dd className={styles.valueBreak}>{root.turnId}</dd></> : null}
-            {root.sessionAttempt != null ? <><dt className={styles.label}>attempt</dt><dd className={styles.value}>{root.sessionAttempt}</dd></> : null}
+            {root.sessionAttempt != null ? <><dt className={styles.label}>执行次数</dt><dd className={styles.value}>{root.sessionAttempt}</dd></> : null}
           </dl>
           {canOpen ? (
             <VRouteLinkButton className={styles.action} to={rootLink} variant="ghost">查看节点总览</VRouteLinkButton>
@@ -105,7 +111,7 @@ export function NodeSessionSection({ detail }: { detail: ResearchWorkflowNodeDet
       )}
       {childSessions.length ? (
         <div className={styles.children} data-vui="candidate-child-sessions">
-          <h5 className={styles.subtitle}>候选子会话（Child Sessions）</h5>
+          <h5 className={styles.subtitle}>候选讨论</h5>
           {failedCandidateIds.length ? (
             <p className={styles.retryNote} role="status">
               节点重试仅处理失败候选 {failedCandidateIds.join("、")}，已完成候选不会重跑。

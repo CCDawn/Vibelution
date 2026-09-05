@@ -67,16 +67,13 @@ export function budgetMeterPercent(consumed: number, limit: number): number {
 export function nodeInspectorBudgetMeters(
   ledger: ResearchBudgetLedgerSnapshot | null | undefined,
 ): NodeInspectorBudgetMeter[] {
-  return METER_COPY.map((item) => {
-    if (!ledger) {
-      return {
-        key: item.key,
-        label: item.label,
-        percent: 0,
-        detail: "运行后显示用量",
-        warn: false,
-      };
-    }
+  if (!ledger) return [];
+  return METER_COPY.filter((item) => {
+    const used = ledger.consumed?.[item.key];
+    const limit = ledger.limits?.[item.key];
+    return typeof used === "number" && Number.isFinite(used) && used >= 0
+      && typeof limit === "number" && Number.isFinite(limit) && limit > 0;
+  }).map((item) => {
     const consumed = asCount(ledger.consumed?.[item.key]);
     const limit = asCount(ledger.limits?.[item.key]);
     const percent = budgetMeterPercent(consumed, limit);

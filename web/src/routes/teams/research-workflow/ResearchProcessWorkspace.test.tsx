@@ -336,17 +336,8 @@ async function renderWorkspace() {
 }
 
 async function openSwitchSelect(trigger: HTMLElement): Promise<NodeListOf<Element>> {
-  await act(async () => {
-    trigger.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-  });
-  let options = document.body.querySelectorAll('[role="option"]');
-  if (!options.length) {
-    await act(async () => {
-      trigger.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0 }));
-    });
-    options = document.body.querySelectorAll('[role="option"]');
-  }
-  return options;
+  await act(async () => trigger.click());
+  return document.body.querySelectorAll('[data-testid="vui-command-palette"] [data-index]');
 }
 
 async function pickSwitchOption(option: HTMLElement): Promise<void> {
@@ -368,7 +359,7 @@ describe("ResearchProcessWorkspace", () => {
   it("opens the team panel instead of the retired discussion route", async () => {
     const rendered = await renderWorkspace();
     root = rendered.root;
-    const button = Array.from(rendered.container.querySelectorAll("button")).find((item) => item.textContent === "协作");
+    const button = Array.from(rendered.container.querySelectorAll("button")).find((item) => item.textContent === "团队与讨论");
     expect(button).toBeDefined();
     await act(async () => button?.click());
     expect(harness.location.openPanel).toHaveBeenCalledWith("team");
@@ -1385,20 +1376,20 @@ describe("ResearchProcessWorkspace", () => {
       ?.getAttribute("data-responsive-inspector-open")).toBe("true");
   });
 
-  it("keeps checkpoint-less questions out of the experiment switcher", async () => {
+  it("opens checkpoint-less questions through the existing launch panel", async () => {
     harness.catalog.questions = [checkpointQuestion, restoreQuestion, freshQuestion];
     harness.runState.run = currentRun;
     const rendered = await renderWorkspace();
     root = rendered.root;
 
-    const trigger = rendered.container.querySelector('[data-vui-select-trigger="true"]') as HTMLElement | null;
+    const trigger = rendered.container.querySelector('[aria-label="切换研究题目"]') as HTMLElement | null;
     expect(trigger).toBeTruthy();
     const options = await openSwitchSelect(trigger!);
     const fresh = Array.from(options).find((option) => option.textContent?.includes("SCI-005")) as HTMLElement | undefined;
-    expect(fresh).toBeUndefined();
-
+    expect(fresh).toBeDefined();
+    await pickSwitchOption(fresh!);
     expect(mockedFocus).not.toHaveBeenCalled();
-    expect(harness.location.replaceParams).not.toHaveBeenCalled();
+    expect(harness.location.replaceParams).toHaveBeenCalledWith({questionId: "SCI-005", runId: "", node: null, panel: "launch"});
   });
 
   it("restores a checkpoint question through the hypothesis-first focus node", async () => {
@@ -1407,7 +1398,7 @@ describe("ResearchProcessWorkspace", () => {
     const rendered = await renderWorkspace();
     root = rendered.root;
 
-    const trigger = rendered.container.querySelector('[data-vui-select-trigger="true"]') as HTMLElement | null;
+    const trigger = rendered.container.querySelector('[aria-label="切换研究题目"]') as HTMLElement | null;
     expect(trigger).toBeTruthy();
     const options = await openSwitchSelect(trigger!);
     const restore = Array.from(options).find((option) => option.textContent?.includes("SCI-003")) as HTMLElement | undefined;
@@ -1442,7 +1433,7 @@ describe("ResearchProcessWorkspace", () => {
 
     async function choose(entry: "toolbar" | "palette", questionId: string) {
       if (entry === "toolbar") {
-        const trigger = rendered.container.querySelector('[data-vui-select-trigger="true"]') as HTMLElement;
+        const trigger = rendered.container.querySelector('[aria-label="切换研究题目"]') as HTMLElement;
         expect(trigger).toBeTruthy();
         const options = await openSwitchSelect(trigger);
         const option = Array.from(options).find((item) => item.textContent?.includes(questionId)) as HTMLElement;

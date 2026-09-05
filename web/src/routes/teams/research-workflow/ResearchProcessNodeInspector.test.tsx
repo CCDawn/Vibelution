@@ -106,7 +106,8 @@ describe("ResearchProcessNodeInspector command rendering", () => {
     expect(markup).toContain("Finder Agent");
     expect(markup).toContain("agent-1");
     expect(markup).toContain("资料搜集");
-    expect(markup).toContain("Tokens");
+    expect(markup).not.toContain('role="progressbar"');
+    expect(markup).toContain("暂无可计算的资源用量");
     expect(markup).toContain('data-testid="node-inspector-model-trigger"');
     expect(markup).not.toContain("source_finder");
     expect(markup).not.toContain("knowledge collection");

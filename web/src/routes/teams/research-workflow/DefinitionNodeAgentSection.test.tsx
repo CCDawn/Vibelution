@@ -39,7 +39,8 @@ describe("DefinitionNodeAgentSection", () => {
 
     expect(markup).toContain("资料提炼 Agent");
     expect(markup).toContain("知识搜集");
-    expect(markup).toContain("Tokens");
+    expect(markup).not.toContain('role="progressbar"');
+    expect(markup).toContain("暂无可计算的资源用量");
     expect(markup).toContain('data-testid="node-inspector-model-trigger"');
     expect(markup).toContain("pane=config");
     expect(markup).toContain("agent=agent-extractor");
