@@ -47,7 +47,7 @@ export function NodeHandoffSection(props: {
       </dl>
       {props.blockedReason ? <>
         <p>{blockedReasonLabel(props.blockedReason, isZh)}</p>
-        <VErrorSummary label={isZh ? "需要处理" : "Needs attention"} summary={isZh ? "此步骤尚未完成" : "This step has not completed"} details={props.blockedReason} openLabel={isZh ? "诊断" : "Diagnostics"} defaultOpen={false} />
+        <VErrorSummary label={isZh ? "需要处理" : "Needs attention"} summary={isZh ? "此步骤尚未完成" : "This step has not completed"} details={props.blockedReason} openLabel={isZh ? "诊断" : "Diagnostics"} closeLabel={isZh ? "收起" : "Hide"} defaultOpen={false} />
       </> : null}
       {props.handoffs.map((handoff) => (
         <article className={styles.record} key={handoff.handoffId}>
@@ -55,6 +55,7 @@ export function NodeHandoffSection(props: {
           <span>{isZh ? HANDOFF_STATUS_LABELS[handoff.status] || "状态待确认" : handoff.status} · {(handoff.outputArtifactRefs ?? []).length} {isZh ? "项交接产物" : "handoff artifacts"}</span>
           <VErrorSummary tone="info" label={isZh ? "交接记录" : "Handoff record"}
             summary={isZh ? "查看产物引用与交接状态" : "View artifact references and handoff status"}
+            openLabel={isZh ? "详情" : "Details"} closeLabel={isZh ? "收起" : "Hide"}
             details={JSON.stringify({ status: handoff.status, outputArtifactRefs: handoff.outputArtifactRefs, supersedesHandoffId: handoff.supersedesHandoffId }, null, 2)} defaultOpen={false} />
         </article>
       ))}
