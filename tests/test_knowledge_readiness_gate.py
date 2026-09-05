@@ -264,8 +264,10 @@ def test_absorb_triggers_recheck_and_creates_successor_attempt(tmp_path: Path) -
         harness.close()
 
 
+@pytest.mark.parametrize("source_run_id", ["run-parent", ""])
 def test_hypothesis_input_consumes_accepted_sideflow_snapshot(
     monkeypatch: pytest.MonkeyPatch,
+    source_run_id: str,
 ) -> None:
     """Readiness and the formal hypothesis input must share one authority."""
 
@@ -335,7 +337,7 @@ def test_hypothesis_input_consumes_accepted_sideflow_snapshot(
         "research-team",
         {
             "workflowRunId": "run-parent",
-            "sourceCollectionRunId": "run-parent",
+            "sourceCollectionRunId": source_run_id,
         },
         store=object(),
     )

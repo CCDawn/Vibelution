@@ -530,6 +530,10 @@ describe("composeHypothesisFirstGraph", () => {
       },
     }))!;
     expect(region.showDownstreamPipeline).toBe(false);
+    const prerequisiteGraph = composeHypothesisFirstGraph(base, region, { formalRuntimeActive: true });
+    expect(prerequisiteGraph.nodes.map((node) => node.nodeId)).toEqual(
+      expect.arrayContaining(base.nodes.map((node) => node.nodeId)),
+    );
     const composed = composeHypothesisFirstGraph(base, region, { demotePipelineStages: true });
     expect(composed.stages.map((stage) => stage.stageId)).toEqual(["hypothesis_first"]);
     expect(composed.nodes.map((node) => node.nodeId)).toEqual(["hf_selection", "hf_review"]);

@@ -147,7 +147,7 @@ def build_hypothesis_input_context(
     """Resolve one accepted package into evidence claims and writeback limits."""
     workflow_run_id = _text(task.get("workflowRunId"))
     source_run_id = _text(task.get("sourceCollectionRunId"))
-    if not workflow_run_id or not source_run_id:
+    if not workflow_run_id:
         return {
             "status": "blocked",
             "code": "missing_workflow_scope",

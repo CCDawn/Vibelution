@@ -268,12 +268,12 @@ export function mergeSelectionAndRuntime(options: {
 export function composeHypothesisFirstGraph(
   base: WorkflowLayoutInput,
   region: HypothesisFirstCanvasRegion | null,
-  options?: { demotePipelineStages?: boolean },
+  options?: { demotePipelineStages?: boolean; formalRuntimeActive?: boolean },
 ): WorkflowLayoutInput {
   if (!region) {
     return base;
   }
-  const includePipeline = region.showDownstreamPipeline;
+  const includePipeline = region.showDownstreamPipeline || Boolean(options?.formalRuntimeActive);
   const pipelineNodes = includePipeline ? base.nodes : [];
   const pipelineEdges = includePipeline ? base.edges : [];
   const nodeById = new Map(
