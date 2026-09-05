@@ -1556,18 +1556,27 @@ export async function executeMainLineWorkbench(
     }
     const unverifiedHandles: number[] = [];
     if (!staleReclaim.activeWorkBlocked) {
+      // reclaimStaleWorkbenchBackend settles the entire registered backend
+      // tree once the health-verified backend process and its owned port are
+      // both gone. backendLaunchPid/spawnPid can be a short-lived pythonw
+      // wrapper distinct from backendPid; re-running the root-only terminator
+      // for that already-exited wrapper turns a successful shutdown into a
+      // false failure and prevents Electron from closing the Workbench window.
+      const pendingRegisteredHandles = staleReclaim.reclaimed
+        ? retainedRegisteredHandles.filter((pid) => !retainedBackendTreePids.includes(pid))
+        : retainedRegisteredHandles;
       await retireRegisteredHandles({
-        pids: retainedRegisteredHandles,
+        pids: pendingRegisteredHandles,
         port,
         host,
         signal: input.signal,
         pidAlive: input.pidAlive,
         killPid: input.killPid,
         terminateProcessTree,
-        // reclaimStaleWorkbenchBackend has already established this one
-        // backend's completion (through graceful shutdown or a verified tree
-        // terminator). Do not re-run a root-only helper after that root exited.
-        treePids: [...retainedBackendTreePids, ...retainedExtraPids].filter((pid) => pid !== staleReclaim.verifiedPid),
+        // Backend handles were removed above after successful reclaim. The
+        // separately owned Runtime Manager daemon still needs normal verified
+        // tree retirement.
+        treePids: retainedExtraPids,
         expectedIdentities,
         ownedDirectPids: [...(input.ownedDirectPids ?? []), ...injectedOwnedDirectPids],
         reportUnverified: (pids) => unverifiedHandles.push(...pids),

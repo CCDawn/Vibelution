@@ -1851,6 +1851,45 @@ describe("runWorkbenchLifecycle", () => {
     expect(alive.has(51)).toBe(false);
   });
 
+  it("does not re-retire launch-wrapper handles after graceful backend shutdown", async () => {
+    const alive = new Set([51, 52]);
+    const terminateProcessTree = vi.fn(async () => false);
+    const result = await executeMainLineWorkbench({
+      workspaceRoot: "C:/repo",
+      pythonPath: "C:/repo/.venv/Scripts/python.exe",
+      operation: "force-stop",
+      command: { commandId: "cmd_force_distinct_launch_pid", type: "close", operation: "force-stop", noBrowser: true },
+      readState: () => ({
+        backendPid: 51,
+        backendLaunchPid: 52,
+        spawnPid: 52,
+        backendPort: 8000,
+        backendCreateTime: 1,
+        backendExecutable: "C:/Python/pythonw.exe",
+        backendLaunchCreateTime: 1,
+        backendLaunchExecutable: "C:/repo/.venv/Scripts/pythonw.exe",
+        spawnCreateTime: 1,
+        spawnExecutable: "C:/repo/.venv/Scripts/pythonw.exe"
+      }),
+      writeState: () => undefined,
+      connect: async () => alive.has(51),
+      fetchHealth: async () => ({
+        status: 200,
+        json: async () => ({ status: "ok", routesReady: true, pid: 51, workspaceRoot: "C:/repo" })
+      }),
+      pidAlive: (pid) => alive.has(pid),
+      terminateProcessTree,
+      gracefulShutdown: async () => {
+        alive.delete(51);
+        alive.delete(52);
+        return { requested: true, completed: true, status: 202, reason: "closed" };
+      }
+    });
+
+    expect(result).toMatchObject({ accepted: true, operation: "force-stop" });
+    expect(terminateProcessTree).not.toHaveBeenCalled();
+  });
+
   it("does not kill a backend during ordinary restart when its HTTP shutdown is protected", async () => {
     const terminateProcessTree = vi.fn(async () => false);
     let written: Record<string, unknown> = {};
