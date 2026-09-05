@@ -4376,13 +4376,12 @@ def _rotate_chat_room_context_checkpoint(
 ) -> dict[str, Any]:
     previous = room.get("contextCheckpoint")
     previous_checkpoint = dict(previous) if isinstance(previous, Mapping) else None
-    if (
-        allow_lazy_rebuild
-        and not force_reason
-        and previous_checkpoint is None
-        and _terminal_chat_room_round_count(room) > DEFAULT_VERBATIM_ROUNDS
-    ):
-        force_reason = "lazy_rebuild"
+    if allow_lazy_rebuild and not force_reason and previous_checkpoint is None:
+        force_reason = (
+            "lazy_rebuild"
+            if _terminal_chat_room_round_count(room) > DEFAULT_VERBATIM_ROUNDS
+            else "initial_checkpoint"
+        )
     rotation = maybe_rotate_chat_room_context_checkpoint(
         room,
         previous_checkpoint=previous_checkpoint,
@@ -4683,12 +4682,28 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
             recent_message_limit=None,
         )
         canonical_chat_history = list(history_assembly.history_messages or [])
-        # 会议房参会者的历史分层压缩投影：更早轮次的「[群聊同步]」原文在
-        # seed 视图上替换为确定性 recap（ledger 原文与 fingerprint 校验均不
-        # 受影响，见 core/chat/meeting_history_layering.py）。
+        source_session_history = list(canonical_chat_history)
+        # Structured rooms build a Room Store-owned model view and exclude the
+        # participant's direct Session replay. The kill switch retains the
+        # legacy meeting recap projection and ordinary Session behavior.
         canonical_chat_history, _meeting_history_layering_state = (
             _apply_meeting_history_layering_for_room(canonical_chat_history, context)
         )
+        chat_history_ledger_fingerprint = ""
+        if canonical_chat_history and context.get("_structuredChatRoomContext"):
+            from core.orchestration.turn_message_assembly import (
+                ledger_seeded_history_fingerprint,
+            )
+
+            # The room-scoped view is a deterministic post-processing layer
+            # over the ledger read above. Stamp that exact ledger state so the
+            # Agent's send-time reconciliation still rejects concurrent Journal
+            # movement without requiring the deliberately isolated room view to
+            # equal the direct Session replay byte-for-byte.
+            chat_history_ledger_fingerprint = ledger_seeded_history_fingerprint(
+                ledger_events,
+                turn_id=turn_identity,
+            )
         room_context_tokens = chat_room_context_segment_tokens(
             canonical_chat_history,
             estimate_tokens=_estimate_chat_room_context_tokens,
@@ -4701,6 +4716,30 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
             if stable_output_contract
             else 0
         )
+        room_id = str(context.get("roomId") or "").strip()
+        foreign_session_history = [
+            item
+            for item in source_session_history
+            if not (
+                isinstance(item, Mapping)
+                and isinstance(item.get("metadata"), Mapping)
+                and str(item["metadata"].get("kind") or "").strip()
+                == "group_room_transcript"
+                and str(item["metadata"].get("sourceRoomId") or "").strip()
+                == room_id
+            )
+        ]
+        if context.get("_structuredChatRoomContext"):
+            room_context_tokens["excludedSessionHistory"] = (
+                _estimate_chat_room_context_tokens(source_session_history)
+                if source_session_history
+                else 0
+            )
+            room_context_tokens["foreignSessionHistory"] = (
+                _estimate_chat_room_context_tokens(foreign_session_history)
+                if foreign_session_history
+                else 0
+            )
         room_context_tokens["total"] = sum(
             room_context_tokens[key]
             for key in ("system", "checkpoint", "delta", "recentRaw")
@@ -4747,6 +4786,7 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
                 turn_identity=turn_identity,
                 interrupt_checker=interrupt_checker,
                 chat_history=canonical_chat_history,
+                chat_history_ledger_fingerprint=chat_history_ledger_fingerprint,
                 runtime_context=agent_context.context_block if agent_context is not None else "",
                 static_runtime_context=(
                     _chat_room_static_runtime_context(
@@ -4820,6 +4860,7 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
                         turn_identity=turn_identity,
                         interrupt_checker=interrupt_checker,
                         chat_history=canonical_chat_history,
+                        chat_history_ledger_fingerprint=chat_history_ledger_fingerprint,
                     )
             finally:
                 if llm_response_callback_id:

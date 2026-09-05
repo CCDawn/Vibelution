@@ -799,9 +799,62 @@ def _projection_message(
     if cache_marker:
         block["cache_control"] = {"type": "ephemeral"}
     return {
-        "role": "assistant",
+        # Agent chat seeding preserves structured user content blocks but
+        # stringifies assistant block lists.  The checkpoint is room context,
+        # not an actor utterance, so a user context message keeps the explicit
+        # Qwen marker intact through the real Agent -> provider path without
+        # changing global Session message conversion.
+        "role": "user" if cache_marker else "assistant",
         "content": [block],
         "metadata": {"kind": kind},
+    }
+
+
+def _recent_round_projection_message(
+    room: Mapping[str, Any], round_payload: Mapping[str, Any]
+) -> dict[str, Any]:
+    room_id = _room_id(room)
+    round_id = _round_id(round_payload)
+    messages: list[dict[str, Any]] = []
+    for message in list(round_payload.get("messages") or []):
+        if not isinstance(message, Mapping):
+            continue
+        message_id = _message_id(message)
+        messages.append(
+            {
+                "ref": _message_ref(room_id, round_id, message) if message_id else "",
+                "messageId": message_id,
+                "participantId": str(message.get("participantId") or "").strip(),
+                "agentId": str(message.get("agentId") or "").strip(),
+                "speakerTitle": str(message.get("speakerTitle") or "").strip(),
+                "status": str(message.get("status") or "").strip(),
+                "timestamp": str(
+                    message.get("createdAt")
+                    or message.get("finishedAt")
+                    or message.get("timestamp")
+                    or ""
+                ).strip(),
+                "content": str(message.get("content") or ""),
+            }
+        )
+    return _projection_message(
+        kind="group_room_transcript",
+        payload={
+            "schemaVersion": 1,
+            "kind": "ChatRoomRecentRound.v1",
+            "roomId": room_id,
+            "roundId": round_id,
+            "topic": str(round_payload.get("topic") or ""),
+            "status": str(round_payload.get("status") or "").strip(),
+            "messages": messages,
+        },
+        cache_marker=False,
+    ) | {
+        "metadata": {
+            "kind": "group_room_transcript",
+            "sourceRoomId": room_id,
+            "sourceRoundId": round_id,
+        }
     }
 
 
@@ -880,6 +933,12 @@ def build_chat_room_context_snapshot(
         if delta_checkpoint is not None
         else None
     )
+    terminal_by_id = {_round_id(item): item for item in terminal}
+    recent_raw_messages = [
+        _recent_round_projection_message(room, terminal_by_id[round_id])
+        for round_id in recent_round_ids
+        if round_id in terminal_by_id
+    ]
     return {
         "schemaVersion": 1,
         "kind": "ChatRoomContextSnapshot.v1",
@@ -887,6 +946,7 @@ def build_chat_room_context_snapshot(
         "checkpoint": copy.deepcopy(active_checkpoint),
         "checkpointMessage": checkpoint_message,
         "deltaMessage": delta_message,
+        "recentRawMessages": recent_raw_messages,
         "coveredRoundIds": sorted(covered_ids),
         "deltaRoundIds": delta_ids,
         "recentRoundIds": recent_round_ids,
@@ -899,47 +959,27 @@ def build_chat_room_context_snapshot(
 def apply_chat_room_context_snapshot(
     history: Sequence[Mapping[str, Any]], snapshot: Mapping[str, Any]
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """Apply one precomputed room snapshot to a participant's own history."""
+    """Build the room-only model view and exclude the participant Session replay."""
 
     if snapshot.get("kind") != "ChatRoomContextSnapshot.v1":
         raise ValueError("invalid chat room context snapshot")
-    room_id = str(snapshot.get("roomId") or "").strip()
-    replace_ids = {
-        str(item)
-        for item in [
-            *list(snapshot.get("coveredRoundIds") or []),
-            *list(snapshot.get("deltaRoundIds") or []),
-        ]
-    }
-    copied_history = [copy.deepcopy(dict(item)) for item in history]
-    insertion_index: int | None = None
-    retained: list[dict[str, Any]] = []
-    for item in copied_history:
-        metadata = item.get("metadata") if isinstance(item.get("metadata"), Mapping) else {}
-        is_room_transcript = (
-            str(metadata.get("kind") or "") == "group_room_transcript"
-            and str(metadata.get("sourceRoomId") or "") == room_id
-        )
-        source_round_id = str(metadata.get("sourceRoundId") or "")
-        if is_room_transcript and insertion_index is None:
-            insertion_index = len(retained)
-        if is_room_transcript and source_round_id in replace_ids:
-            continue
-        retained.append(item)
-    if insertion_index is None:
-        insertion_index = len(retained)
-    inserts = [
+    projected = [
         copy.deepcopy(message)
-        for message in (snapshot.get("checkpointMessage"), snapshot.get("deltaMessage"))
+        for message in (
+            snapshot.get("checkpointMessage"),
+            snapshot.get("deltaMessage"),
+            *list(snapshot.get("recentRawMessages") or []),
+        )
         if isinstance(message, Mapping)
     ]
-    projected = retained[:insertion_index] + inserts + retained[insertion_index:]
     return projected, {
         "checkpointValid": bool(snapshot.get("checkpointValid")),
         "checkpointRebuilt": bool(snapshot.get("checkpointRebuilt")),
         "checkpointValidationReason": str(snapshot.get("checkpointValidationReason") or ""),
         "recentRoundIds": list(snapshot.get("recentRoundIds") or []),
         "deltaRoundIds": list(snapshot.get("deltaRoundIds") or []),
+        "excludedSessionMessageCount": len(history),
+        "roomHistoryMessageCount": len(projected),
     }
 
 

@@ -528,8 +528,12 @@ def test_projection_replaces_covered_rounds_and_keeps_recent_two_verbatim() -> N
         verbatim_rounds=2,
     )
 
-    assert projected[0] == history[0]
-    assert projected[-2:] == history[-2:]
+    assert projected[0]["metadata"]["kind"] == "chat_room_context_checkpoint"
+    assert "unrelated direct history" not in json.dumps(projected, ensure_ascii=False)
+    assert [
+        item["metadata"]["sourceRoundId"]
+        for item in projected[-2:]
+    ] == ["round-3", "round-4"]
     assert state["checkpointValid"] is True
     assert state["recentRoundIds"] == ["round-3", "round-4"]
     assert any(
@@ -581,10 +585,19 @@ def test_room_snapshot_is_built_once_and_applies_byte_identically_to_speakers() 
     projected_a, state_a = apply_chat_room_context_snapshot(history_a, snapshot)
     projected_b, state_b = apply_chat_room_context_snapshot(history_b, snapshot)
 
-    assert projected_a[1:-2] == projected_b[1:-2]
-    assert json.dumps(projected_a[1:-2], ensure_ascii=False, sort_keys=True) == json.dumps(
-        projected_b[1:-2], ensure_ascii=False, sort_keys=True
+    assert projected_a == projected_b
+    assert json.dumps(projected_a, ensure_ascii=False, sort_keys=True) == json.dumps(
+        projected_b, ensure_ascii=False, sort_keys=True
     )
+    assert all("private" not in json.dumps(item, ensure_ascii=False) for item in projected_a)
+    assert projected_a[0]["metadata"]["kind"] == "chat_room_context_checkpoint"
+    assert [
+        item["metadata"]["sourceRoundId"]
+        for item in projected_a
+        if item.get("metadata", {}).get("kind") == "group_room_transcript"
+    ] == ["round-3", "round-4"]
+    assert state_a["excludedSessionMessageCount"] == len(history_a)
+    assert state_b["excludedSessionMessageCount"] == len(history_b)
     assert state_a == state_b
 
 
@@ -787,6 +800,10 @@ def test_fixed_eight_round_three_speaker_fixture_meets_token_reduction_targets()
             )
             for speaker in participants
         ]
+        for speaker, message in zip(participants, messages):
+            message["content"] = (
+                f"第{round_index}轮 {speaker} 证据链与边界条件需要逐项核对，" * 12
+            )
         round_payload = _round(round_index, messages)
         round_payload["speakerOrder"] = participants
         rounds.append(round_payload)
