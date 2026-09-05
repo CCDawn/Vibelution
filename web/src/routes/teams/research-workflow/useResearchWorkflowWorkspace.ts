@@ -16,7 +16,12 @@ export function useResearchWorkflowWorkspace(teamId: string) {
     () => parseResearchProcessLocation(searchParams),
     [searchParams],
   );
+  const latestSearchRef = useRef(new URLSearchParams(searchParams));
   const pendingPanelRef = useRef<ResearchProcessPanel | null>(null);
+
+  useEffect(() => {
+    latestSearchRef.current = new URLSearchParams(searchParams);
+  }, [searchParams]);
 
   useEffect(() => {
     if (pendingPanelRef.current === location.panel) pendingPanelRef.current = null;
@@ -24,12 +29,15 @@ export function useResearchWorkflowWorkspace(teamId: string) {
 
   const replaceParams = useCallback(
     (patch: Record<string, string | null | undefined>) => {
-      setSearchParams(
-        patchResearchProcessSearch({ current: searchParams, teamId, patch }),
-        { replace: true },
-      );
+      const nextSearch = patchResearchProcessSearch({
+        current: latestSearchRef.current,
+        teamId,
+        patch,
+      });
+      latestSearchRef.current = nextSearch;
+      setSearchParams(nextSearch, { replace: true });
     },
-    [searchParams, setSearchParams, teamId],
+    [setSearchParams, teamId],
   );
 
   const selectNode = useCallback(

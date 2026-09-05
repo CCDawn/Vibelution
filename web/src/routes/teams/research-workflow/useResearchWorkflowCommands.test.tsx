@@ -238,4 +238,58 @@ describe("useResearchWorkflowCommands", () => {
     });
     expect(replaceParams.mock.calls[0][0].node).not.toBe("source_finding");
   });
+
+  it("stays busy through focus resolution and ignores a duplicate create-run", async () => {
+    let resolveFocus!: (node: string) => void;
+    mockedFocus.mockImplementation(() => new Promise((resolve) => {
+      resolveFocus = resolve;
+    }));
+    const createRun = vi.fn().mockResolvedValue({
+      runId: "run-new",
+      questionId: "SCI-002",
+    });
+    const replaceParams = vi.fn();
+    await act(async () => {
+      root.render(
+        <Probe
+          refresh={vi.fn().mockResolvedValue(undefined)}
+          createRun={createRun}
+          replaceParams={replaceParams}
+          onValue={(value) => {
+            latest = value;
+          }}
+        />,
+      );
+    });
+    const input: CreateResearchWorkflowRunInput = {
+      teamId: "research-team",
+      questionId: "SCI-002",
+      safetyLimits: {
+        stageTokens: { knowledge_collection: 1, experiment_design: 1, execution_iteration: 1 },
+        toolCalls: 1,
+        wallClockSeconds: 1,
+        maxRetries: 1,
+      },
+      idempotencyKey: "create-1",
+    };
+
+    let firstSubmission!: Promise<void>;
+    await act(async () => {
+      firstSubmission = latest!.submitRun(input);
+      await Promise.resolve();
+    });
+    expect(latest!.busy).toBe(true);
+
+    await act(async () => {
+      await latest!.submitRun({ ...input, idempotencyKey: "create-2" });
+    });
+    expect(createRun).toHaveBeenCalledTimes(1);
+
+    resolveFocus("hf_generation");
+    await act(async () => {
+      await firstSubmission;
+    });
+    expect(latest!.busy).toBe(false);
+    expect(replaceParams).toHaveBeenCalledTimes(1);
+  });
 });

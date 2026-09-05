@@ -41,7 +41,9 @@ export function useResearchWorkflowCommands(options: {
     replaceParams,
   } = options;
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [runBusy, setRunBusy] = useState(false);
+  const [offerBusy, setOfferBusy] = useState(false);
+  const runPendingRef = useRef(false);
   const offerPendingRef = useRef(false);
 
   const pendingTaskId = useCallback(
@@ -56,6 +58,9 @@ export function useResearchWorkflowCommands(options: {
 
   const submitRun = useCallback(
     async (input: CreateResearchWorkflowRunInput) => {
+      if (runPendingRef.current) return;
+      runPendingRef.current = true;
+      setRunBusy(true);
       const telemetry = trackResearchRunCreate({
         teamId: input.teamId,
         questionId: input.questionId,
@@ -79,6 +84,9 @@ export function useResearchWorkflowCommands(options: {
         const message = reason instanceof Error ? reason.message : String(reason);
         setError(message);
         throw reason;
+      } finally {
+        runPendingRef.current = false;
+        setRunBusy(false);
       }
     },
     [createRun, options.teamId, replaceParams],
@@ -102,7 +110,7 @@ export function useResearchWorkflowCommands(options: {
         throw reason;
       }
       offerPendingRef.current = true;
-      setBusy(true);
+      setOfferBusy(true);
       setError(null);
       try {
         try {
@@ -132,7 +140,7 @@ export function useResearchWorkflowCommands(options: {
         telemetry.succeeded();
       } finally {
         offerPendingRef.current = false;
-        setBusy(false);
+        setOfferBusy(false);
       }
     },
     [refresh, submitFormalOffer],
@@ -140,7 +148,7 @@ export function useResearchWorkflowCommands(options: {
 
   return {
     error,
-    busy,
+    busy: runBusy || offerBusy,
     pendingTaskId,
     submitRun,
     submitOffer,
