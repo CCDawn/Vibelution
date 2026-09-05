@@ -151,6 +151,49 @@ def test_accepted_evidence_does_not_imply_supports_and_relation_requires_exact_c
     assert relation.type == "refutes"
 
 
+def test_completed_evidence_review_must_report_a_precise_admissibility() -> None:
+    with pytest.raises(ValidationError):
+        EvidenceReview(
+            state="completed",
+            admissibility="undetermined",
+            evidenceRef="evidence-1",
+        )
+    with pytest.raises(ValidationError):
+        EvidenceReview(
+            state="completed",
+            admissibility="not_assessable",
+            evidenceRef="evidence-1",
+        )
+
+    review = EvidenceReview(
+        state="completed",
+        admissibility="not_assessable",
+        evidenceRef="evidence-1",
+        reasonCode="missing_full_text",
+    )
+    assert review.reasonCode == "missing_full_text"
+
+
+def test_assessment_fields_are_disposition_specific() -> None:
+    with pytest.raises(ValidationError):
+        Assessment(
+            state="completed",
+            evidencePosition="supported",
+            workflowDisposition="advance",
+            reasonCode="looks_good",
+            provenance=_provenance(),
+        )
+    with pytest.raises(ValidationError):
+        Assessment(
+            state="completed",
+            evidencePosition="insufficient",
+            workflowDisposition="escalate",
+            reasonCode="expert_review_required",
+            returnToNodeId="source_collection",
+            provenance=_provenance(),
+        )
+
+
 def test_command_receipt_distinguishes_rejected_failed_applied_and_replay() -> None:
     rejected = CommandReceiptV3(
         receiptRef="receipt-1",
@@ -210,6 +253,15 @@ def test_handoff_is_complete_only_after_payload_dispatch_and_consumer_ack() -> N
     assert complete.complete is True
 
 
+def test_failed_or_rejected_handoff_stage_requires_its_own_reason() -> None:
+    with pytest.raises(ValidationError):
+        HandoffPayload(materializationStatus="failed")
+    with pytest.raises(ValidationError):
+        HandoffDispatch(executionStatus="failed")
+    with pytest.raises(ValidationError):
+        HandoffConsumer(status="rejected", activityRef="consumer-activity-1")
+
+
 def test_archiving_and_replacing_record_never_rewrites_scientific_facts() -> None:
     failed = ScientificSemanticRecord(
         execution=ActivityExecution(
@@ -253,8 +305,9 @@ def test_supported_advance_requires_accepted_evidence_and_complete_provenance() 
             evidenceReviews=[
                 EvidenceReview(
                     state="completed",
-                    admissibility="undetermined",
+                    admissibility="not_assessable",
                     evidenceRef="evidence-1@sha256:abc",
+                    reasonCode="missing_full_text",
                 )
             ],
             evidenceRelations=[

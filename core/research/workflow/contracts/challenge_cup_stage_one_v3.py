@@ -144,10 +144,24 @@ class Assessment(_StrictModel):
             )
         if self.workflowDisposition != "advance" and not self.reasonCode:
             raise ValueError("non-advance disposition requires reasonCode")
+        if self.workflowDisposition == "advance" and self.reasonCode is not None:
+            raise ValueError("advance disposition cannot contain reasonCode")
         if self.workflowDisposition == "revise" and not (
             self.returnToNodeId and self.revisionScope
         ):
             raise ValueError("revise requires returnToNodeId and revisionScope")
+        if self.workflowDisposition != "revise" and (
+            self.returnToNodeId is not None or self.revisionScope is not None
+        ):
+            raise ValueError(
+                "returnToNodeId and revisionScope are valid only for revise"
+            )
+        if self.workflowDisposition != "escalate" and (
+            self.bestSoFarRef is not None or self.unresolvedClaimRefs
+        ):
+            raise ValueError(
+                "bestSoFarRef and unresolvedClaimRefs are valid only for escalate"
+            )
         if self.reasonCode == "review_budget_exhausted":
             if self.evidencePosition not in {"insufficient", "mixed"}:
                 raise ValueError(
@@ -165,16 +179,26 @@ class Assessment(_StrictModel):
 class EvidenceReview(_StrictModel):
     state: Literal["not_started", "running", "completed"]
     admissibility: Literal[
-        "accepted", "revision_required", "rejected", "undetermined"
+        "accepted", "revision_required", "rejected", "not_assessable"
     ] | None = None
     evidenceRef: str = Field(min_length=1)
+    reasonCode: str | None = None
 
     @model_validator(mode="after")
     def validate_review(self) -> EvidenceReview:
         if self.state == "completed" and self.admissibility is None:
             raise ValueError("completed evidence review requires admissibility")
-        if self.state != "completed" and self.admissibility is not None:
-            raise ValueError("unfinished evidence review cannot set admissibility")
+        if self.state != "completed" and (
+            self.admissibility is not None or self.reasonCode is not None
+        ):
+            raise ValueError(
+                "unfinished evidence review cannot set admissibility or reasonCode"
+            )
+        if self.state == "completed" and self.admissibility == "accepted":
+            if self.reasonCode is not None:
+                raise ValueError("accepted evidence cannot contain reasonCode")
+        elif self.state == "completed" and not self.reasonCode:
+            raise ValueError("non-accepted evidence review requires reasonCode")
         return self
 
 
@@ -227,6 +251,7 @@ class CommandReceiptV3(_StrictModel):
 class HandoffPayload(_StrictModel):
     materializationStatus: Literal["not_started", "succeeded", "failed"]
     artifactRef: str | None = None
+    reasonCode: str | None = None
 
     @model_validator(mode="after")
     def validate_payload(self) -> HandoffPayload:
@@ -234,12 +259,19 @@ class HandoffPayload(_StrictModel):
             raise ValueError("succeeded payload materialization requires artifactRef")
         if self.materializationStatus != "succeeded" and self.artifactRef is not None:
             raise ValueError("artifactRef is valid only for succeeded materialization")
+        if self.materializationStatus == "failed" and not self.reasonCode:
+            raise ValueError("failed payload materialization requires reasonCode")
+        if self.materializationStatus != "failed" and self.reasonCode is not None:
+            raise ValueError(
+                "payload reasonCode is valid only for failed materialization"
+            )
         return self
 
 
 class HandoffDispatch(_StrictModel):
     executionStatus: Literal["not_started", "succeeded", "failed"]
     receiptRef: str | None = None
+    reasonCode: str | None = None
 
     @model_validator(mode="after")
     def validate_dispatch(self) -> HandoffDispatch:
@@ -247,12 +279,19 @@ class HandoffDispatch(_StrictModel):
             raise ValueError("succeeded dispatch requires receiptRef")
         if self.executionStatus != "succeeded" and self.receiptRef is not None:
             raise ValueError("receiptRef is valid only for succeeded dispatch")
+        if self.executionStatus == "failed" and not self.reasonCode:
+            raise ValueError("failed dispatch requires reasonCode")
+        if self.executionStatus != "failed" and self.reasonCode is not None:
+            raise ValueError(
+                "dispatch reasonCode is valid only for failed execution"
+            )
         return self
 
 
 class HandoffConsumer(_StrictModel):
     status: Literal["not_started", "acknowledged", "rejected"]
     activityRef: str | None = None
+    reasonCode: str | None = None
 
     @model_validator(mode="after")
     def validate_consumer(self) -> HandoffConsumer:
@@ -260,6 +299,10 @@ class HandoffConsumer(_StrictModel):
             raise ValueError(f"{self.status} consumer requires activityRef")
         if self.status == "not_started" and self.activityRef is not None:
             raise ValueError("not_started consumer cannot have activityRef")
+        if self.status == "rejected" and not self.reasonCode:
+            raise ValueError("rejected consumer requires reasonCode")
+        if self.status != "rejected" and self.reasonCode is not None:
+            raise ValueError("consumer reasonCode is valid only for rejected status")
         return self
 
 
