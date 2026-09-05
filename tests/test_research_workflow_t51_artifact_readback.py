@@ -47,11 +47,13 @@ def test_synthetic_read_back_no_longer_accepts_arbitrary_ref() -> None:
 
 def test_artifact_readback_registry_rejects_missing_kind() -> None:
     from core.web.services.team_workflow.research_runtime.artifact_readback_registry import (
+        parse_canonical_ref,
         read_domain_artifact,
     )
 
     assert read_domain_artifact("") is None
     assert read_domain_artifact("not_a_registered_kind:abc") is None
+    assert parse_canonical_ref("source_candidate_batch:deadbeefdeadbeef") is None
 
 
 def _seed_scoped_sc_candidates(
@@ -61,7 +63,7 @@ def _seed_scoped_sc_candidates(
     team_name: str = "T51 Readback Team",
     sc_run_id: str = "sc-run-1",
     workflow_run_id: str = "wf-run-1",
-) -> str:
+) -> tuple[str, str]:
     from tests._support.team_workflow.helpers import _use_tmp_project_root
 
     _use_tmp_project_root(tmp_path, monkeypatch)
@@ -69,7 +71,12 @@ def _seed_scoped_sc_candidates(
 
     monkeypatch.setattr(path_containment, "PROJECT_ROOT", tmp_path)
 
-    from core.web.services import agent_directory_service, team_service
+    from core.web.services import (
+        agent_directory_service,
+        data_processing_service,
+        team_service,
+    )
+    from core.web.services.team_workflow import research_projects
     from core.web.services.team_workflow.source_collection.candidates import (
         register_candidate_source,
     )
@@ -84,6 +91,24 @@ def _seed_scoped_sc_candidates(
         members=[{"agentId": agent["agentId"], "role": "source_finder"}],
     )
     team_id = str(team["teamId"])
+    owner_project = research_projects.create_research_project(
+        team_id,
+        {"name": "T51 readback owner project"},
+    )["project"]
+    research_projects.activate_research_project(team_id, owner_project["projectId"])
+    source_run = data_processing_service.create_processing_run(
+        title="T51 readback source collection",
+        scope={
+            "teamId": team_id,
+            "workflowStage": "knowledge_collection",
+            "researchProjectId": owner_project["projectId"],
+        },
+        metadata={
+            "workflowRunId": workflow_run_id,
+            "researchProjectId": owner_project["projectId"],
+        },
+    )
+    sc_run_id = str(source_run["runId"])
     register_candidate_source(
         team_id,
         {
@@ -96,8 +121,9 @@ def _seed_scoped_sc_candidates(
                 "workflowRunId": workflow_run_id,
             },
         },
+        run_id=sc_run_id,
     )
-    return team_id
+    return team_id, sc_run_id
 
 
 def test_seeded_sc_candidate_read_back_returns_real_hash_and_revision(
@@ -112,11 +138,11 @@ def test_seeded_sc_candidate_read_back_returns_real_hash_and_revision(
         canonical_sha256,
     )
 
-    team_id = _seed_scoped_sc_candidates(tmp_path, monkeypatch)
+    team_id, sc_run_id = _seed_scoped_sc_candidates(tmp_path, monkeypatch)
     payload = load_scoped_artifact_payload(
         "source_candidate_batch",
         team_id=team_id,
-        authority_run_id="sc-run-1",
+        authority_run_id=sc_run_id,
         workflow_run_id="",
     )
     assert payload is not None
@@ -125,7 +151,7 @@ def test_seeded_sc_candidate_read_back_returns_real_hash_and_revision(
     ref = build_canonical_ref(
         kind="source_candidate_batch",
         team_id=team_id,
-        authority_run_id="sc-run-1",
+        authority_run_id=sc_run_id,
         content_hash=content_hash,
     )
 
@@ -150,11 +176,11 @@ def test_read_back_rejects_forged_team_run_and_hash(
         canonical_sha256,
     )
 
-    team_id = _seed_scoped_sc_candidates(tmp_path, monkeypatch)
+    team_id, sc_run_id = _seed_scoped_sc_candidates(tmp_path, monkeypatch)
     payload = load_scoped_artifact_payload(
         "source_candidate_batch",
         team_id=team_id,
-        authority_run_id="sc-run-1",
+        authority_run_id=sc_run_id,
         workflow_run_id="",
     )
     assert payload is not None
@@ -162,7 +188,7 @@ def test_read_back_rejects_forged_team_run_and_hash(
     real_ref = build_canonical_ref(
         kind="source_candidate_batch",
         team_id=team_id,
-        authority_run_id="sc-run-1",
+        authority_run_id=sc_run_id,
         content_hash=content_hash,
     )
     assert read_domain_artifact(real_ref) is not None
@@ -178,7 +204,7 @@ def test_read_back_rejects_forged_team_run_and_hash(
     forged_hash = build_canonical_ref(
         kind="source_candidate_batch",
         team_id=team_id,
-        authority_run_id="sc-run-1",
+        authority_run_id=sc_run_id,
         content_hash=("0" * 64),
     )
     assert read_domain_artifact(forged_hash) is None

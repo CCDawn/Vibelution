@@ -119,12 +119,6 @@ def build_canonical_ref(
 def parse_canonical_ref(canonical_ref: str) -> dict[str, str] | None:
     text = str(canonical_ref or "").strip()
     if "://" not in text:
-        # Legacy short form kind:prefix — not addressable without store lookup.
-        if ":" in text:
-            kind, identity = text.split(":", 1)
-            if resolve_artifact_authority(kind) is None:
-                return None
-            return {"kind": kind, "identity": identity, "legacy": "1"}
         return None
     kind, rest = text.split("://", 1)
     if resolve_artifact_authority(kind) is None:
@@ -656,8 +650,6 @@ def read_domain_artifact(
     _ = root  # parallel file store is forbidden; root is ignored
     parsed = parse_canonical_ref(canonical_ref)
     if parsed is None:
-        return None
-    if parsed.get("legacy") == "1":
         return None
     kind = parsed["kind"]
     team_id = parsed["teamId"]

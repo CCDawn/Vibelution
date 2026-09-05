@@ -142,6 +142,13 @@ class WorkflowRunInputSnapshot:
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> WorkflowRunInputSnapshot:
+        if (
+            "researchScopeEnvelope" not in payload
+            or "catalogScope" not in payload
+        ):
+            raise ContractValidationError(
+                "researchScopeEnvelope and catalogScope are required"
+            )
         require_keys(payload, _REQUIRED_FIELDS)
         canonical = {
             "teamId": require_text(payload, "teamId"),
@@ -183,18 +190,11 @@ class WorkflowRunInputSnapshot:
                 payload,
                 "evidenceRemediationContract",
             )
-        has_research_scope = "researchScopeEnvelope" in payload
-        has_catalog_scope = "catalogScope" in payload
-        if has_research_scope != has_catalog_scope:
-            raise ContractValidationError(
-                "researchScopeEnvelope and catalogScope must be provided together"
-            )
-        if has_research_scope:
-            canonical["researchScopeEnvelope"] = _normalize_research_scope(
-                payload,
-                question_id=canonical["questionId"],
-            )
-            canonical["catalogScope"] = _normalize_catalog_scope(payload)
+        canonical["researchScopeEnvelope"] = _normalize_research_scope(
+            payload,
+            question_id=canonical["questionId"],
+        )
+        canonical["catalogScope"] = _normalize_catalog_scope(payload)
         if "hypothesisSelection" in payload:
             canonical["hypothesisSelection"] = require_mapping(
                 payload,
@@ -257,10 +257,8 @@ class WorkflowRunInputSnapshot:
             workflowSessionScopeV3=copy.deepcopy(
                 canonical["workflowSessionScopeV3"]
             ),
-            researchScopeEnvelope=copy.deepcopy(
-                canonical.get("researchScopeEnvelope") or {}
-            ),
-            catalogScope=copy.deepcopy(canonical.get("catalogScope") or {}),
+            researchScopeEnvelope=copy.deepcopy(canonical["researchScopeEnvelope"]),
+            catalogScope=copy.deepcopy(canonical["catalogScope"]),
             hypothesisSelection=copy.deepcopy(
                 canonical.get("hypothesisSelection") or {}
             ),
@@ -296,11 +294,10 @@ class WorkflowRunInputSnapshot:
             "workflowSessionScopeV3": copy.deepcopy(self.workflowSessionScopeV3),
             "snapshotHash": self.snapshotHash,
         }
-        if self.researchScopeEnvelope or self.catalogScope:
-            payload["researchScopeEnvelope"] = copy.deepcopy(
-                self.researchScopeEnvelope
-            )
-            payload["catalogScope"] = copy.deepcopy(self.catalogScope)
+        payload["researchScopeEnvelope"] = copy.deepcopy(
+            self.researchScopeEnvelope
+        )
+        payload["catalogScope"] = copy.deepcopy(self.catalogScope)
         if self.hypothesisSelection:
             payload["hypothesisSelection"] = copy.deepcopy(
                 self.hypothesisSelection

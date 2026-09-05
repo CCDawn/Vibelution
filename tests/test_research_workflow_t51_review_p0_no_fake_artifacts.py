@@ -49,7 +49,12 @@ def test_forged_cross_team_readback_rejected(
 
     monkeypatch.setattr(path_containment, "PROJECT_ROOT", tmp_path)
 
-    from core.web.services import agent_directory_service, team_service
+    from core.web.services import (
+        agent_directory_service,
+        data_processing_service,
+        team_service,
+    )
+    from core.web.services.team_workflow import research_projects
     from core.web.services.team_workflow.source_collection.candidates import (
         register_candidate_source,
     )
@@ -62,6 +67,24 @@ def test_forged_cross_team_readback_rejected(
         members=[{"agentId": agent["agentId"], "role": "source_finder"}],
     )
     team_a = str(team["teamId"])
+    owner_project = research_projects.create_research_project(
+        team_a,
+        {"name": "P0 readback owner project"},
+    )["project"]
+    research_projects.activate_research_project(team_a, owner_project["projectId"])
+    source_run = data_processing_service.create_processing_run(
+        title="P0 source collection",
+        scope={
+            "teamId": team_a,
+            "workflowStage": "knowledge_collection",
+            "researchProjectId": owner_project["projectId"],
+        },
+        metadata={
+            "workflowRunId": "wf-run-a",
+            "researchProjectId": owner_project["projectId"],
+        },
+    )
+    source_run_id = str(source_run["runId"])
     register_candidate_source(
         team_a,
         {
@@ -70,16 +93,17 @@ def test_forged_cross_team_readback_rejected(
             "candidateType": "source_manifest",
             "sourceKind": "paper",
             "metadata": {
-                "sourceCollectionRunId": "sc-run-a",
+                "sourceCollectionRunId": source_run_id,
                 "workflowRunId": "wf-run-a",
             },
         },
+        run_id=source_run_id,
     )
 
     payload = load_scoped_artifact_payload(
         "source_candidate_batch",
         team_id=team_a,
-        authority_run_id="sc-run-a",
+        authority_run_id=source_run_id,
         workflow_run_id="wf-run-a",
     )
     assert payload is not None
@@ -88,14 +112,14 @@ def test_forged_cross_team_readback_rejected(
     real_ref = build_canonical_ref(
         kind="source_candidate_batch",
         team_id=team_a,
-        authority_run_id="sc-run-a",
+        authority_run_id=source_run_id,
         content_hash=content_hash,
     )
     # read_domain_artifact hashes with workflow_run_id="" — rebuild matching payload
     payload_for_read = load_scoped_artifact_payload(
         "source_candidate_batch",
         team_id=team_a,
-        authority_run_id="sc-run-a",
+        authority_run_id=source_run_id,
         workflow_run_id="",
     )
     assert payload_for_read is not None
@@ -103,7 +127,7 @@ def test_forged_cross_team_readback_rejected(
     real_ref = build_canonical_ref(
         kind="source_candidate_batch",
         team_id=team_a,
-        authority_run_id="sc-run-a",
+        authority_run_id=source_run_id,
         content_hash=read_hash,
     )
     assert read_domain_artifact(real_ref) is not None

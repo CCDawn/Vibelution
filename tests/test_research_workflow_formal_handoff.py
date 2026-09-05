@@ -5,7 +5,9 @@ from typing import Any
 
 import pytest
 
+from core.research.competition.result_set import CatalogScope
 from core.research.workflow.contracts import SCORE_DIMENSIONS, scope_hash_for
+from core.research.workflow.contracts.research_scope import scope_locators_for
 from core.research.workflow.contracts.run_input import WorkflowRunInputSnapshot
 from core.research.workflow.definition import CHALLENGE_CUP_WORKFLOW_ID
 from core.web.services.team_workflow import hypothesis_rounds, meeting_rounds
@@ -248,6 +250,26 @@ def test_question_run_does_not_persist_when_formal_handoff_fails(
 
 
 def test_run_input_preserves_handoff_and_frozen_selection() -> None:
+    scope = {
+        "program": "XH-202619",
+        "theme": "challenge-cup",
+        "campaign": "challenge-cup-research",
+        "question": "SCI-003",
+        "branch": "main",
+        "workflow": "hypothesis_and_plan",
+        "agentId": "operator",
+        "mode": "formal",
+    }
+    scope_hash = scope_hash_for(
+        program=scope["program"],
+        theme=scope["theme"],
+        campaign=scope["campaign"],
+        question=scope["question"],
+        branch=scope["branch"],
+        workflow=scope["workflow"],
+        agent_id=scope["agentId"],
+        mode=scope["mode"],
+    )
     payload = {
         "teamId": "research-team",
         "projectId": "project-sci003",
@@ -270,6 +292,20 @@ def test_run_input_preserves_handoff_and_frozen_selection() -> None:
         "agentBindingSnapshot": [{"snapshotId": "binding-1"}],
         "createdBy": "operator",
         "createdAt": "2026-08-27T00:00:00Z",
+        "researchScopeEnvelope": {
+            **scope,
+            "scopeHash": scope_hash,
+            **scope_locators_for(
+                program=scope["program"],
+                theme=scope["theme"],
+                campaign=scope["campaign"],
+                question=scope["question"],
+                branch=scope["branch"],
+                agent_id=scope["agentId"],
+                scope_hash=scope_hash,
+            ),
+        },
+        "catalogScope": CatalogScope.from_tracked_resources().to_dict(),
         "hypothesisSelection": {
             "selectionId": "selection-reviewed",
             "selectedCandidateIds": ["candidate-confirmed"],

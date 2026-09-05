@@ -11,7 +11,10 @@ from core.research.workflow.contracts.research_scope import (
     scope_hash_for,
     scope_locators_for,
 )
-from core.research.workflow.contracts import WorkflowRunInputSnapshot
+from core.research.workflow.contracts import (
+    ContractValidationError,
+    WorkflowRunInputSnapshot,
+)
 from core.research.workflow.definition import (
     CHALLENGE_CUP_WORKFLOW_ID,
     build_challenge_cup_workflow_definition,
@@ -933,18 +936,15 @@ def test_formal_attempt_authority_must_match_exactly(
 
 
 def test_formal_scope_missing_is_blocked(formal_ledger_runtime) -> None:
-    run, attempt, _snapshot = formal_ledger_runtime
+    _run, _attempt, _snapshot = formal_ledger_runtime
     raw = _frozen_input_snapshot()
     raw.pop("researchScopeEnvelope")
     raw.pop("catalogScope")
-    snapshot = WorkflowRunInputSnapshot.from_dict(raw)
-    run.input_snapshot_json = json.dumps(raw)
-    run.input_snapshot_hash = snapshot.snapshotHash
-    attempt.input_snapshot_hash = snapshot.snapshotHash
-
-    context = build_protocol_input_context("research-team", _formal_task())
-
-    assert context["status"] == "blocked_formal_authority"
+    with pytest.raises(
+        ContractValidationError,
+        match="researchScopeEnvelope and catalogScope are required",
+    ):
+        WorkflowRunInputSnapshot.from_dict(raw)
 
 
 @pytest.mark.parametrize(
