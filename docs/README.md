@@ -57,6 +57,7 @@
 
 | 草案 | 说明 |
 | --- | --- |
+| [plans/2026-09-05-independent-operator-experiment-flow-plan.md](plans/2026-09-05-independent-operator-experiment-flow-plan.md) | USER-REQUESTED / PROPOSED：独立算子优化实验流搭建方案，含成熟项目源码调研、团队讨论与知识复用、真实实验闭环、数据隔离及验收；未实施 |
 | [plans/2026-09-02-challenge-cup-10-parallel-concurrency-plan.md](plans/2026-09-02-challenge-cup-10-parallel-concurrency-plan.md) | USER-REQUESTED：10 并发链路改造任务清单（搜索 circuit/fan-in P0、dispatch 并行化、串线丢写修复、并发验收） |
 | [plans/2026-08-30-challenge-cup-automatic-chain-reliability-plan.md](plans/2026-08-30-challenge-cup-automatic-chain-reliability-plan.md) | USER-REQUESTED：挑战杯群聊、摘要、LangGraph/Ledger 自动运行链路的 deadline、durable recovery、run 隔离、上下文与自动推进修复计划 |
 | [plans/2026-08-25-challenge-cup-canonical-workflow-state-plan.md](plans/2026-08-25-challenge-cup-canonical-workflow-state-plan.md) | USER-REQUESTED：挑战杯从官方题目冷启动到产出登记与 H1–H4 审核的规范化状态 V2、服务端动作和真实链路闭环验收 |

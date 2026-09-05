@@ -7,6 +7,7 @@
 
 | 文件 | Status | 说明 |
 | --- | --- | --- |
+| [2026-09-05-independent-operator-experiment-flow-plan.md](2026-09-05-independent-operator-experiment-flow-plan.md) | USER-REQUESTED / PROPOSED FOR REVIEW | 独立算子优化实验流：单次讨论、优化假设、知识补齐、真实 GPU 实验与反馈迭代；含成熟项目源码调研、复用裁决、数据隔离、实施顺序和验收，尚未实施 |
 | [2026-09-02-challenge-cup-10-parallel-concurrency-plan.md](2026-09-02-challenge-cup-10-parallel-concurrency-plan.md) | USER-REQUESTED / ACTIVE PLAN | 10 并发链路改造与并发缺陷修复任务清单：搜索 circuit/fan-in 双花 P0、dispatch 并行化关键路径（B1–B5）、串线与丢写批次（C1–C7）、并发测试与 10 并发验收（D1–D2） |
 | [2026-08-30-challenge-cup-automatic-chain-reliability-plan.md](2026-08-30-challenge-cup-automatic-chain-reliability-plan.md) | USER-REQUESTED / ACTIVE PLAN | 挑战杯群聊、摘要、LangGraph/Ledger 调度的 deadline、durable recovery、run 隔离、上下文与自动推进完整修复任务图 |
 | [2026-08-25-challenge-cup-canonical-workflow-state-plan.md](2026-08-25-challenge-cup-canonical-workflow-state-plan.md) | USER-REQUESTED / ACTIVE PLAN | 挑战杯从官方题目冷启动到正式运行、产出登记和 H1–H4 审核的规范化状态 V2、服务端动作与真实链路验收 |
