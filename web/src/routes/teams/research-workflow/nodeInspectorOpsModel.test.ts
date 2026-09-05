@@ -58,12 +58,12 @@ describe("nodeInspectorOpsModel", () => {
     );
   });
 
-  it("computes budget percents from the stage ledger and stays at zero before a run", () => {
+  it("computes measured budget percentages without presenting missing data as zero", () => {
     expect(budgetMeterPercent(88, 100)).toBe(88);
     expect(budgetMeterPercent(8, 0)).toBe(0);
     const empty = nodeInspectorBudgetMeters(null);
-    expect(empty.map((item) => item.percent)).toEqual([0, 0, 0]);
-    expect(empty[0]?.detail).toContain("运行后显示用量");
+    expect(empty).toEqual([]);
+    expect(nodeInspectorBudgetMeters(ledger({limits: {tokens: 0, toolCalls: 0, wallClockSeconds: 0}}))).toEqual([]);
     const tight = nodeInspectorBudgetMeters(ledger({
       consumed: { tokens: 88, toolCalls: 81, wallClockSeconds: 84 },
       limits: { tokens: 100, toolCalls: 100, wallClockSeconds: 100 },

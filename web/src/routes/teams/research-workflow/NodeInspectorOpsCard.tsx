@@ -100,6 +100,7 @@ function BudgetMeter(props: NodeInspectorBudgetMeter) {
 }
 
 export function NodeInspectorOpsCard(props: NodeInspectorOpsCardProps) {
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [agentOpen, setAgentOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -109,6 +110,7 @@ export function NodeInspectorOpsCard(props: NodeInspectorOpsCardProps) {
   const primaryReason = props.primaryOffer
     ? commandOfferUnavailableReason(props.primaryOffer, isZh, props.runVersion)
     : "";
+  const alreadyRunning = props.primaryOffer?.command === "start_node" && !props.primaryOffer.available && props.primaryOffer.reasonCode === "node_in_flight";
   const modelDisabled = props.readOnly || props.unbound || props.modelPending;
   const groups = useMemo(
     () => groupAgentModelCandidates(props.candidates, "dialogue", query),
@@ -195,6 +197,8 @@ export function NodeInspectorOpsCard(props: NodeInspectorOpsCardProps) {
         )}
       </div>
 
+      <VButton density="compact" variant="ghost" aria-expanded={settingsOpen} onClick={() => setSettingsOpen((open) => !open)}>{settingsOpen ? "收起模型与资源" : "模型与资源"}</VButton>
+      <div hidden={!settingsOpen} data-testid="node-model-resources">
       <VPopover
         open={pickerOpen}
         onOpenChange={(open) => {
@@ -272,8 +276,10 @@ export function NodeInspectorOpsCard(props: NodeInspectorOpsCardProps) {
         ))}
       </section>
 
+      {!props.meters.length ? <p className={styles.resourceEmpty}>暂无可计算的资源用量</p> : null}
+      </div>
       <div className={styles.actions}>
-        {props.primaryOffer ? (
+        {props.primaryOffer && !alreadyRunning ? (
           <VButton
             type="button"
             variant="primary"
@@ -291,7 +297,7 @@ export function NodeInspectorOpsCard(props: NodeInspectorOpsCardProps) {
             {props.primaryOffer.label}
           </VButton>
         ) : null}
-        {props.primaryOffer && primaryReason ? (
+        {props.primaryOffer && primaryReason && !alreadyRunning ? (
           <span className={styles.notice} role="status">{primaryReason}</span>
         ) : null}
         {props.sessionHref ? (

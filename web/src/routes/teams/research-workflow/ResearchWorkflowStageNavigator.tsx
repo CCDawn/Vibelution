@@ -296,16 +296,16 @@ export function ResearchWorkflowStageNavigator({
       <header className={styles.header}>
         <div className={styles.headingRow}>
           <h2 className={styles.title}>{summary.authority === "formal" ? (zh ? "主流程进度" : "Main workflow progress") : (zh ? "进度" : "Progress")}</h2>
-          <span className={styles.compactProgress}>{summary.completedNodes}/{summary.totalNodes}</span>
+          <span className={styles.compactProgress}>{model.state === "ready" ? `${summary.completedNodes}/${summary.totalNodes}` : (zh ? "待同步" : "Pending")}</span>
           {summary.blockedNodes > 0 ? (
             <VStatusChip tone="danger">
               <span className={styles.statusContent}><AlertTriangle size={12} aria-hidden="true" />{zh ? `${summary.blockedNodes} 项阻塞` : `${summary.blockedNodes} blocked`}</span>
             </VStatusChip>
           ) : null}
         </div>
-        <div className={styles.progressTrack} role="progressbar" aria-label={zh ? "整体进度" : "Overall progress"} aria-valuemin={0} aria-valuemax={100} aria-valuenow={summary.percent}>
+        {model.state === "ready" ? <div className={styles.progressTrack} role="progressbar" aria-label={zh ? "整体进度" : "Overall progress"} aria-valuemin={0} aria-valuemax={100} aria-valuenow={summary.percent}>
           <div className={styles.progressFill} style={{ width: `${summary.percent}%` }} />
-        </div>
+        </div> : null}
       </header>
       <div className={styles.body}>
         {model.state === "loading" ? (

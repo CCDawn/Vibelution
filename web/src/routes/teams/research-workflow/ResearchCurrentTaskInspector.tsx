@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-import { VButton, VErrorSummary, VStatusChip, type VStatusTone } from "../../../components/vui";
+import { VButton, VErrorSummary, VStatusChip } from "../../../components/vui";
 import { presentResearchWorkflowError } from "../researchWorkflowErrorModel";
 import type {
   ResearchWorkflowContext,
@@ -8,29 +8,7 @@ import type {
 } from "./researchWorkflowContextModel";
 import styles from "./ResearchCurrentTaskInspector.styles";
 
-const STATUS_LABEL: Record<ResearchWorkflowTaskStatus, string> = {
-  not_started: "未开始",
-  running: "进行中",
-  waiting_system: "处理中",
-  waiting_user: "待确认",
-  recoverable_error: "可恢复",
-  blocked: "已阻塞",
-  never_started: "从未启动",
-  failed_to_dispatch: "启动失败",
-  completed: "已完成",
-};
-
-const STATUS_TONE: Record<ResearchWorkflowTaskStatus, VStatusTone> = {
-  not_started: "neutral",
-  running: "accent",
-  waiting_system: "accent",
-  waiting_user: "warning",
-  recoverable_error: "danger",
-  blocked: "danger",
-  never_started: "warning",
-  failed_to_dispatch: "danger",
-  completed: "success",
-};
+import { STATUS_LABEL, STATUS_TONE } from "./researchTaskPresentation";
 
 function liveRole(status: ResearchWorkflowTaskStatus): "alert" | "status" {
   return status === "recoverable_error"
@@ -44,6 +22,7 @@ function liveRole(status: ResearchWorkflowTaskStatus): "alert" | "status" {
 export type ResearchCurrentTaskInspectorProps = {
   context: ResearchWorkflowContext;
   children?: ReactNode;
+  navigation?: ReactNode;
   /** Command area stays outside the scroll container so the primary action is always perceptible. */
   footer?: ReactNode;
   onReturnCurrentTask?: () => void;
@@ -55,6 +34,7 @@ export type ResearchCurrentTaskInspectorProps = {
 export function ResearchCurrentTaskInspector({
   context,
   children,
+  navigation,
   footer,
   onReturnCurrentTask,
   onRetryDispatch,
@@ -86,6 +66,7 @@ export function ResearchCurrentTaskInspector({
           <div className={styles.empty} role={error || context.loadState === "error" ? "alert" : "status"}>
             {message}
           </div>
+          {navigation}
         </header>
         <div className={styles.body} data-vui-region="current-task-body">
           {children}
@@ -97,6 +78,11 @@ export function ResearchCurrentTaskInspector({
     );
   }
 
+  const panelTitle = context.view.panel === "evidence" ? "题目证据图谱"
+    : context.view.panel === "timeline" ? "运行记录"
+    : context.view.panel === "team" ? "团队与讨论"
+    : context.view.panel === "agents" ? "团队 Agent"
+    : context.view.panel === "leaderboard" ? "题目假说排行" : null;
   const taskError = presentResearchWorkflowError(task.detail);
   return (
     <section
@@ -109,9 +95,10 @@ export function ResearchCurrentTaskInspector({
     >
       <header className={styles.header} data-vui-region="current-task-header">
         <div className={styles.titleRow}>
-          <h2 className={styles.title}>{historyMode ? "所选节点详情" : task.title}</h2>
-          {!historyMode ? <VStatusChip tone={STATUS_TONE[task.status]}>{STATUS_LABEL[task.status]}</VStatusChip> : null}
+          <h2 className={styles.title}>{panelTitle ?? (historyMode ? "所选节点详情" : task.title)}</h2>
+          {!historyMode && !panelTitle ? <VStatusChip tone={STATUS_TONE[task.status]}>{STATUS_LABEL[task.status]}</VStatusChip> : null}
         </div>
+        {navigation}
       </header>
       <div className={styles.body} data-vui-region="current-task-body">
         <div
@@ -119,7 +106,7 @@ export function ResearchCurrentTaskInspector({
           className={styles.detail}
           role={liveRole(task.status)}
         >
-          {historyMode ? `所选节点详情 · 当前任务为“${task.title}”` : liveRole(task.status) === "alert" ? (
+          {panelTitle ? `${context.scope.questionId ?? "当前题目"} · 当前任务为“${task.title}”` : historyMode ? `所选节点详情 · 当前任务为“${task.title}”` : liveRole(task.status) === "alert" ? (
             <>
               <VErrorSummary
                 label={STATUS_LABEL[task.status]}

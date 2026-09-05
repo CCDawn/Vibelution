@@ -250,14 +250,11 @@ export function ResearchProcessWorkspace({
     chainQuestionId,
   ]);
 
-  const experimentChainSummary = hypothesisFirstChain.stateV2;
   const experimentIdentity = buildExperimentChromeIdentity({
     questionId: chainQuestionId,
     title: catalog.questions.find(
       (question) => question.questionId.toUpperCase() === chainQuestionId.toUpperCase(),
     )?.title ?? chainQuestionId,
-    selectedCandidateIds: hypothesisFirstChain.stateV2?.selection.selectedCandidateIds,
-    chain: experimentChainSummary,
   });
   const experimentOptions = useMemo(() => {
     const currentRun = runState.run;
@@ -275,15 +272,11 @@ export function ResearchProcessWorkspace({
         title: currentTitle,
         runId: currentRun?.runId ?? "",
         currentNodeId,
-        selectedCandidateIds: hypothesisFirstChain.stateV2?.selection.selectedCandidateIds,
-        chain: experimentChainSummary,
       },
     });
   }, [
     catalog.questions,
     chainQuestionId,
-    experimentChainSummary,
-    hypothesisFirstChain.stateV2?.selection.selectedCandidateIds,
     runState.run,
   ]);
   const { selectExperiment, error: experimentSwitchError } = useResearchExperimentSwitch({
@@ -794,12 +787,11 @@ export function ResearchProcessWorkspace({
                 location.openPanel("team");
               }
             }}
+            context={workflowContext}
             identity={experimentIdentity}
-            runId={location.runId}
-            runStatus={runState.run?.status || runState.projection?.run.status || ""}
+            runStatus={workspaceReady && !workspaceModel.scopeMismatch && !workspaceModel.resyncRequired ? runState.run?.status || runState.projection?.run.status || "" : ""}
             experimentOptions={experimentOptions}
             panel={location.panel}
-            workflowActive={workflowActive}
             onSelectExperiment={selectExperiment}
             onOpenPanel={location.openPanel}
             experimentActions={experimentIdentity?.questionId ? (
@@ -816,24 +808,9 @@ export function ResearchProcessWorkspace({
                 }}
               />
             ) : undefined}
-            navigationLabel={workflowActive && workspaceReady ? workspaceNavigationAction.navigationLabel : undefined}
-            nextActionStage={workflowActive && workspaceReady ? workspaceNavigationAction.stage : undefined}
             scopeMismatch={hypothesisFirstChain.scopeMismatch || workspaceModel.scopeMismatch}
             statusMessage={hypothesisFirstChain.scopeMismatch ? safeNextAction.statusMessage : undefined}
-            chainRound={
-              workflowActive && !formalRuntimeActive && hypothesisFirstChain.stateV2
-                ? {
-                    // Canonical logical round, not the physical meeting count.
-                    current: canonicalReviewRound,
-                    // Current budget N, not an immutable cap; see currentRoundBudget.
-                    budget: currentRoundBudget,
-                  }
-                : null
-            }
-            awaitingHumanCount={hypothesisFirstChain.stateV2?.awaitingHumanCount ?? 0}
-            runtimeCurrentNodeIds={formalRuntimeCurrentNodeIds}
-            formalRuntimeActive={formalRuntimeActive}
-            atCurrentTask={atCurrentTask}
+            awaitingHumanCount={currentTaskActionsReady ? hypothesisFirstChain.stateV2?.awaitingHumanCount ?? 0 : 0}
             onNavigateCurrent={
               workspaceReady && semanticCurrentTaskNodeId
                 ? navigateToCurrentTask
@@ -877,7 +854,9 @@ export function ResearchProcessWorkspace({
           />
         ) : (
           <ResearchWorkflowCanvasPane
-            graph={graph}
+            key={`${teamId}:${chainQuestionId}:${location.runId}`}
+            unavailableMessage={workspaceModel.scopeMismatch ? "正在切换题目，旧画布已隐藏" : workspaceModel.resyncRequired ? "正在同步研究状态，画布将在同步后显示" : !workspaceReady ? "正在读取当前题目的研究状态" : undefined}
+            graph={workspaceReady && !workspaceModel.scopeMismatch && !workspaceModel.resyncRequired ? graph : null}
             selectedNodeId={location.selectedNodeId}
             runtimeCurrentNodeIds={formalRuntimeCurrentNodeIds}
             currentTaskNodeId={semanticCurrentTaskNodeId}
@@ -888,6 +867,11 @@ export function ResearchProcessWorkspace({
         inspector={archiveOpen ? null : (
           <ResearchCurrentTaskInspector
             context={workflowContext}
+            navigation={<div className={styles.detailNavigation} aria-label="详情范围">
+              <VButton density="compact" variant="secondary" aria-pressed={location.panel === "node"} onClick={() => location.openPanel("node")}>节点详情</VButton>
+              <VButton density="compact" variant="secondary" aria-pressed={location.panel === "evidence"} onClick={() => location.openPanel("evidence")}>题目证据</VButton>
+              <VButton density="compact" variant="secondary" aria-pressed={location.panel === "timeline"} onClick={() => location.openPanel("timeline")}>运行记录</VButton>
+            </div>}
             error={displayError}
             footer={inlineFormalRecovery ? undefined : visibleFormalPrimaryAction ? (
               <VButton
