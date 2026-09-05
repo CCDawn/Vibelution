@@ -668,6 +668,65 @@ def test_auto_redrive_fenced_review_meeting_dispatches_once(
     assert len(dispatched) == 1
 
 
+def test_auto_redrive_does_not_restart_user_stopped_review(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A user stop is terminal until an explicit retry command is submitted."""
+    _isolate(tmp_path, monkeypatch)
+    meeting_id = "meeting-user-stopped-review"
+    _seed_meeting(
+        _fenced_meeting_record(
+            meeting_id,
+            meeting_type=chain.HYPOTHESIS_REVIEW_MEETING_TYPE,
+            status="closed",
+            extra={
+                "executionStatus": "stopped",
+                "recoveryReason": "用户请求停止当前群聊轮次。",
+                "terminalReason": "用户请求停止当前群聊轮次。",
+            },
+        )
+    )
+    chain._append_jsonl(
+        chain._storage_path(_TEAM_ID),
+        {
+            "schemaVersion": 1,
+            "recordKind": chain.REVIEW_ROUND_LINK_KIND,
+            "linkId": "link-user-stop",
+            "meetingRoundId": meeting_id,
+            "selectionId": "sel-user-stop",
+            "candidateId": "cand-user-stop",
+            "questionId": _QUESTION_ID,
+            "roundIndex": 1,
+            "createdAt": "2026-09-01T00:00:00Z",
+        },
+    )
+    _seed_review_dispatch_attempt(
+        meeting_id,
+        selection_id="sel-user-stop",
+        candidate_id="cand-user-stop",
+    )
+    monkeypatch.setattr(
+        meeting_rounds,
+        "completed_latest_bound_round_source_messages",
+        lambda _m: [{"status": "completed", "content": "AGREE"}],
+    )
+    dispatched: list[tuple[str, str, list[str]]] = []
+    monkeypatch.setattr(
+        chain,
+        "retry_review_dispatch",
+        lambda team_id, selection_id, candidate_ids: dispatched.append(
+            (team_id, selection_id, list(candidate_ids))
+        ),
+    )
+
+    summary = chain.auto_redrive_fenced_review_meeting(
+        _TEAM_ID, question_id=_QUESTION_ID
+    )
+
+    assert summary["redriven"] == 0
+    assert dispatched == []
+
+
 def test_auto_redrive_skips_dead_silent_and_capped_meetings(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

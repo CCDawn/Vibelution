@@ -3615,7 +3615,7 @@ def auto_redrive_fenced_review_meeting(
         meeting
         for meeting in _question_meetings(normalized_team_id, normalized_question_id)
         if str(meeting.get("status") or "").strip().lower() == "closed"
-        and _is_execution_stopped_meeting(meeting)
+        and _is_auto_recoverable_execution_stop(meeting)
     ]
     for meeting in meetings:
         summary["fenced"] += 1
@@ -3785,7 +3785,7 @@ def auto_retry_fenced_generation_attempt(
             normalized_team_id, normalized_question_id
         )
         if str(meeting.get("status") or "").strip().lower() == "closed"
-        and _is_execution_stopped_meeting(meeting)
+        and _is_auto_recoverable_execution_stop(meeting)
     ]
     for meeting in meetings:
         summary["fenced"] += 1
@@ -10043,6 +10043,28 @@ def _is_execution_stopped_meeting(meeting_round: Mapping[str, Any]) -> bool:
         == "stopped"
         or recovery_reason.startswith("challenge_")
     )
+
+
+def _is_auto_recoverable_execution_stop(
+    meeting_round: Mapping[str, Any],
+) -> bool:
+    """Keep explicit/user stops terminal while recovering system fences.
+
+    Older system-fenced rows may only carry ``executionStatus=stopped`` and
+    no reason, so the empty-reason shape retains its previous recovery
+    behavior.  Once a reason is present, automatic recovery is limited to the
+    machine-owned ``challenge_*`` taxonomy; operator/user reasons require the
+    existing explicit retry command.
+    """
+
+    if not _is_execution_stopped_meeting(meeting_round):
+        return False
+    reasons = [
+        str(meeting_round.get(key) or "").strip()
+        for key in ("recoveryReason", "terminalReason")
+    ]
+    populated = [reason for reason in reasons if reason]
+    return not populated or all(reason.startswith("challenge_") for reason in populated)
 
 
 def _is_superseded_review_attempt(meeting_round: Mapping[str, Any]) -> bool:
