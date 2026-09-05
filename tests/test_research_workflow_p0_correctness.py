@@ -12,6 +12,8 @@ import pytest
 from core.research.competition.real_control_batch import real_plan
 from core.research.workflow.bindings import AgentBindingLayers
 from core.research.workflow.challenge_cup_runtime import ChallengeCupGraphCoordinator
+from core.research.workflow.contracts import scope_hash_for
+from core.research.workflow.contracts.research_scope import scope_locators_for
 from core.research.workflow.definition import CHALLENGE_CUP_WORKFLOW_ID
 from core.web.services.team_workflow.research_runtime.catalog_run_authorization import (
     CatalogRunAuthorizationError,
@@ -38,6 +40,38 @@ from tests._support.workflow_ledger_helpers import (
     build_run_record,
     open_ledger_store,
 )
+
+
+def _run_input_for_question(fixture: dict, question_id: str) -> dict:
+    """Retarget the immutable v3 scope together with its question identity."""
+
+    run_input = {**fixture["runInput"], "questionId": question_id}
+    scope = {**run_input["researchScopeEnvelope"], "question": question_id}
+    scope_hash = scope_hash_for(
+        program=scope["program"],
+        theme=scope["theme"],
+        campaign=scope["campaign"],
+        question=scope["question"],
+        branch=scope["branch"],
+        workflow=scope["workflow"],
+        agent_id=scope["agentId"],
+        mode=scope["mode"],
+    )
+    scope.update(
+        {
+            "scopeHash": scope_hash,
+            **scope_locators_for(
+                program=scope["program"],
+                theme=scope["theme"],
+                campaign=scope["campaign"],
+                question=scope["question"],
+                branch=scope["branch"],
+                agent_id=scope["agentId"],
+                scope_hash=scope_hash,
+            ),
+        }
+    )
+    return {**run_input, "researchScopeEnvelope": scope}
 
 
 def test_created_run_without_start_is_failed_once(tmp_path: Path) -> None:
@@ -476,10 +510,7 @@ def test_catalog_authorization_hash_is_recorded_on_run_event(
             (Path(__file__).parent / "fixtures" / "research_workflow_v3_baseline_case.json")
             .read_text(encoding="utf-8")
         )
-        run_input = {
-            **fixture["runInput"],
-            "questionId": str(plan.question_ids[0]),
-        }
+        run_input = _run_input_for_question(fixture, str(plan.question_ids[0]))
         authorization_payload = authorization_to_dict(authorization)
         created = run_creation.create_run(
             CHALLENGE_CUP_WORKFLOW_ID,
@@ -571,7 +602,7 @@ def test_concurrent_replay_cannot_reuse_another_authorization(
             (Path(__file__).parent / "fixtures" / "research_workflow_v3_baseline_case.json")
             .read_text(encoding="utf-8")
         )
-        run_input = {**fixture["runInput"], "questionId": str(plan.question_ids[0])}
+        run_input = _run_input_for_question(fixture, str(plan.question_ids[0]))
         idempotency_key = "p0-concurrent-catalog-authorization"
         run_id = run_creation.run_id_for_create(CHALLENGE_CUP_WORKFLOW_ID, idempotency_key)
         original_get_run = store.get_run
@@ -641,7 +672,7 @@ def test_legacy_run_cannot_be_signed_after_creation(
             (Path(__file__).parent / "fixtures" / "research_workflow_v3_baseline_case.json")
             .read_text(encoding="utf-8")
         )
-        run_input = {**fixture["runInput"], "questionId": "SCI-091"}
+        run_input = _run_input_for_question(fixture, "SCI-091")
         legacy = run_creation.create_run(
             CHALLENGE_CUP_WORKFLOW_ID,
             run_input=run_input,

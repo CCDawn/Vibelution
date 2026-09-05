@@ -52,6 +52,26 @@
         "presentation_evidence_map"
       ]
     },
+    "researchScopeEnvelope": {
+      "program": "challenge-cup",
+      "theme": "energy-anomaly",
+      "campaign": "acceptance-v3",
+      "question": "question-energy-anomaly-gate-v1",
+      "branch": "baseline",
+      "workflow": "challenge-cup-research",
+      "agentId": "acceptance-fixture",
+      "mode": "dev",
+      "scopeHash": "26325773a43f653f2dec36a5ace57738cb678ec49cafebafae26c8243d59dc23",
+      "artifactLocator": "research-artifact://challenge-cup/energy-anomaly/acceptance-v3/baseline/question-energy-anomaly-gate-v1/26325773a43f653f2dec36a5ace57738cb678ec49cafebafae26c8243d59dc23",
+      "ledgerRoot": "research-ledger://challenge-cup/energy-anomaly/acceptance-v3/26325773a43f653f2dec36a5ace57738cb678ec49cafebafae26c8243d59dc23",
+      "cacheKey": "scope:26325773a43f653f2dec36a5ace57738cb678ec49cafebafae26c8243d59dc23:baseline:acceptance-fixture"
+    },
+    "catalogScope": {
+      "catalog_id": "science-125-questions-2021",
+      "catalog_version": "1",
+      "catalog_sha256": "D5035032F80574B9521CC9CC8D73F127721CCADF54451411004323727D2FAAB9",
+      "scope_hash": "95C5D81309B4C0EEE829478AE22A5BBD8CFBF39B273CB2911F9A0F9DDF9EFDEC"
+    },
     "sourcePolicy": {
       "minimumPrimarySources": 3,
       "requireCounterEvidence": true,
