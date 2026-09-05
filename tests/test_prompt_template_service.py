@@ -18,6 +18,67 @@ def _use_tmp_project_root(tmp_path, monkeypatch):
     (tmp_path / "AGENTS.md").write_text("# Test AGENTS\n\nTEST_AGENTS_CORE", encoding="utf-8")
 
 
+def test_knowledge_steward_workflow_reaches_role_snapshot_without_leaking(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    snapshot = prompt_template_service.build_agent_prompt_snapshot(
+        "prompt-knowledge-steward", agent_id="agent-knowledge-steward", project_root=tmp_path,
+    )
+    assert "## 固定处理流程" in snapshot["content"]
+    assert "knowledge_ingestion_tool" in snapshot["content"]
+    assert "workflowReconciliation" in snapshot["content"]
+    assert "不要推断截断或隐藏候选" in snapshot["content"]
+    assert "正式条目正文替换" in snapshot["content"]
+    assert snapshot["content"].count("## 固定处理流程") == 1
+    assert snapshot["reason"] == ""
+
+    workflow_path = Path(__file__).resolve().parents[1] / "core/core_prompt/roles/knowledge_steward.md"
+    detail = prompt_template_service.get_prompt_template("prompt-knowledge-steward")
+    assert detail["content"] == workflow_path.read_text(encoding="utf-8").strip()
+    for template in prompt_template_service.DEFAULT_PROMPT_TEMPLATES:
+        if template["templateId"] == "prompt-knowledge-steward":
+            continue
+        other = prompt_template_service.build_agent_prompt_snapshot(
+            template["templateId"], agent_id="ordinary-agent", project_root=tmp_path,
+        )
+        assert "## 固定处理流程" not in other["content"], template["templateId"]
+
+
+def test_knowledge_steward_workflow_upgrades_old_template_and_invalidates_snapshot(tmp_path, monkeypatch):
+    from core.web.services.session.agent_runtime import _agent_prompt_snapshot_matches_agent
+
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    payload = prompt_template_service.repair_prompt_templates()
+    other_records = [dict(item) for item in payload["templates"] if item["templateId"] != "prompt-knowledge-steward"]
+    for item in payload["templates"]:
+        if item["templateId"] == "prompt-knowledge-steward":
+            item["content"] = "OLD_STEWARD_TEMPLATE"
+            item["metadata"]["builtinContentVersion"] = 16
+    prompt_template_service.prompt_template_path().write_text(json.dumps(payload), encoding="utf-8")
+
+    versions = prompt_template_service.get_agent_prompt_snapshot_versions("prompt-knowledge-steward")
+    assert versions["builtinContentVersion"] > 16
+    old_snapshot = {
+        "agentId": "agent-knowledge-steward",
+        "promptTemplateId": "prompt-knowledge-steward",
+        "builtinContentVersion": 16,
+    }
+    assert not _agent_prompt_snapshot_matches_agent(
+        old_snapshot, agent_id="agent-knowledge-steward", prompt_template_id="prompt-knowledge-steward",
+        builtin_content_version=versions["builtinContentVersion"],
+    )
+    snapshot = prompt_template_service.build_agent_prompt_snapshot(
+        "prompt-knowledge-steward", agent_id="agent-knowledge-steward", project_root=tmp_path,
+    )
+    assert "OLD_STEWARD_TEMPLATE" not in snapshot["content"]
+    assert "## 固定处理流程" in snapshot["content"]
+    assert _agent_prompt_snapshot_matches_agent(
+        snapshot, agent_id="agent-knowledge-steward", prompt_template_id="prompt-knowledge-steward",
+        builtin_content_version=versions["builtinContentVersion"],
+    )
+    repaired = prompt_template_service.repair_prompt_templates()
+    assert [item for item in repaired["templates"] if item["templateId"] != "prompt-knowledge-steward"] == other_records
+
+
 def _contains_tool_name(content: str, tool_name: str) -> bool:
     return re.search(rf"(?<![A-Za-z0-9_]){re.escape(tool_name)}(?![A-Za-z0-9_])", content) is not None
 
