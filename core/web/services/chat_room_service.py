@@ -63,6 +63,24 @@ from core.chat.conversation_ledger import (
     rewrite_conversation_events,
 )
 from core.chat.chat_task_types import trim_lines
+from core.chatroom.context_checkpoint import (
+    DEFAULT_VERBATIM_ROUNDS,
+    apply_chat_room_context_snapshot,
+    build_chat_room_context_snapshot,
+    maybe_rotate_chat_room_context_checkpoint,
+)
+from core.chatroom.context_payload import (
+    PARSE_STATUS_STRUCTURED,
+    chat_room_context_output_contract,
+    ingest_chat_room_context_output,
+)
+from core.chatroom.context_runtime import (
+    chat_room_context_segment_tokens,
+    chat_room_message_to_public,
+    chat_room_structured_context_enabled,
+    commit_chat_room_context_checkpoint,
+    last_chat_room_message_ref,
+)
 from core.chatroom.scheduler import get_scheduler_registry
 from core.chatroom.store import ChatRoomStore, ChatRoomStoreReadError, utc_now_iso
 from core.infrastructure import developer_sandbox
@@ -94,7 +112,6 @@ from .team_workflow.meeting_message_payload import (
     ingest_meeting_message_output,
     meeting_message_output_contract,
 )
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 RUN_KIND = "chat_room_round"
@@ -1163,6 +1180,8 @@ def reset_chat_room(room_id: str) -> dict[str, Any]:
         )
         now = utc_now_iso()
         room["rounds"] = []
+        room.pop("contextCheckpoint", None)
+        room.pop("contextFormalProjections", None)
         room["status"] = "ready"
         room["activeRoundId"] = ""
         room["updatedAt"] = now
@@ -1863,7 +1882,7 @@ def _attach_chat_room_round_kernel_trace(
             live_room["updatedAt"] = utc_now_iso()
             _store().save(state)
             return dict(live_room), dict(target_round)
-    except Exception:
+    except Exception:  # noqa: BLE001 - diagnostics must not alter room behavior
         return next_room, next_round
 
 
@@ -2120,6 +2139,7 @@ def _execute_chat_room_round(
     normalized_topic = str(round_payload.get("topic") or "").strip()
 
     messages: list[dict[str, Any]] = []
+    room_context_snapshot = _prepare_chat_room_context_snapshot(room)
     # Digest-wait TTL probe cache; it outlives the per-speaker context
     # rebuild so one round re-reads the meeting record at most once per
     # poll interval.
@@ -2174,6 +2194,8 @@ def _execute_chat_room_round(
                 "_structuredMeetingMessage": _uses_structured_meeting_message(
                     room, round_payload
                 ),
+                "_structuredChatRoomContext": room_context_snapshot is not None,
+                "_roomContextSnapshot": room_context_snapshot,
                 "_modelInvocationReceiptAuthority": receipt_authority,
                 "_speakerDeltaCapture": _speaker_delta_capture_enabled(
                     room,
@@ -2470,6 +2492,7 @@ def _execute_chat_room_round(
         room["updatedAt"] = finished_at
         _store().save(state)
 
+    _refresh_chat_room_context_checkpoint_after_terminal(room)
     _persist_chat_room_work_run(room, target_round, status=final_status, summary=summary)
     _record_room_event(
         "round",
@@ -3680,6 +3703,7 @@ def _finish_speaker_turn(
             "lateResultDiscarded": True,
         }
         message.pop("messagePayload", None)
+        message.pop("contextPayload", None)
     if fence_retry_enabled and _speaker_turn_zero_output_after_per_call_fence(message, context):
         _record_speaker_fence_retry_event(context, participant)
         retry_context = dict(context)
@@ -3698,6 +3722,7 @@ def _finish_speaker_turn(
                 "lateResultDiscarded": True,
             }
             retry_message.pop("messagePayload", None)
+            retry_message.pop("contextPayload", None)
         retry_timings = dict(retry_message.get("timings") or {})
         retry_timings[_RETRIED_AFTER_FENCE_TIMING_KEY] = True
         retry_message["timings"] = retry_timings
@@ -3774,6 +3799,7 @@ def _run_speaker_auto_continuations(
                 "lateResultDiscarded": True,
             }
             continuation_message.pop("messagePayload", None)
+            continuation_message.pop("contextPayload", None)
         continuation_timings = dict(continuation_message.get("timings") or {})
         continuation_timings[_SPEAKER_AUTO_CONTINUE_TIMING_KEY] = attempt
         continuation_message["timings"] = continuation_timings
@@ -3973,6 +3999,7 @@ def _run_one_speaker(
         runner_ms = _elapsed_ms(stage_started_at)
         structured_meeting_message = bool(context.get("_structuredMeetingMessage"))
         message_payload: dict[str, Any] | None = None
+        context_payload: dict[str, Any] | None = None
         if structured_meeting_message:
             raw_content = _result_full_visible_text(result)
             if not raw_content:
@@ -3981,6 +4008,14 @@ def _run_one_speaker(
             content = str(ingested_message.get("content") or "").strip()
             payload = ingested_message.get("messagePayload")
             message_payload = dict(payload) if isinstance(payload, Mapping) else None
+        elif context.get("_structuredChatRoomContext"):
+            raw_content = _result_full_visible_text(result)
+            if not raw_content:
+                raw_content = _result_summary(result) or "No visible response."
+            ingested_message = ingest_chat_room_context_output(raw_content)
+            content = str(ingested_message.get("content") or "").strip()
+            payload = ingested_message.get("contextPayload")
+            context_payload = dict(payload) if isinstance(payload, Mapping) else None
         else:
             content = _result_visible_text(result)
             if not content:
@@ -4013,6 +4048,7 @@ def _run_one_speaker(
             "content": content,
             "summary": summary,
             **({"messagePayload": message_payload} if message_payload is not None else {}),
+            **({"contextPayload": context_payload} if context_payload is not None else {}),
             **({"errorType": error_type} if error_type else {}),
             "timestamp": timestamp,
             **_case_message_metadata(context),
@@ -4284,6 +4320,9 @@ def _apply_meeting_history_layering_for_room(
     history seed 视图，recap 属后处理，不参与 conversation_layer_fingerprint。
     """
 
+    room_snapshot = context.get("_roomContextSnapshot")
+    if isinstance(room_snapshot, Mapping):
+        return apply_chat_room_context_snapshot(messages, room_snapshot)
     meeting_type = str(context.get("meetingType") or "").strip()
     room_id = str(context.get("roomId") or "").strip()
     if not meeting_type or not room_id:
@@ -4292,6 +4331,250 @@ def _apply_meeting_history_layering_for_room(
 
     layered, state = apply_meeting_history_layering(messages, room_id=room_id)
     return layered, state
+
+
+def _estimate_chat_room_context_tokens(messages: list[Any]) -> int:
+    from tools.token_manager import estimate_messages_tokens
+
+    return max(0, int(estimate_messages_tokens(messages)))
+
+
+def _terminal_chat_room_round_count(room: Mapping[str, Any]) -> int:
+    return sum(
+        1
+        for item in list(room.get("rounds") or [])
+        if isinstance(item, Mapping)
+        and str(item.get("status") or "").strip().lower()
+        in {"completed", "partial", "stopped", "failed", "cancelled"}
+    )
+
+
+def _commit_precomputed_chat_room_checkpoint(
+    room: dict[str, Any], checkpoint: Mapping[str, Any] | None
+) -> dict[str, Any]:
+    expected_ref = last_chat_room_message_ref(room)
+    with _CHAT_ROOM_LOCK:
+        state = _store().load()
+        outcome = commit_chat_room_context_checkpoint(
+            state,
+            room_id=str(room.get("roomId") or "").strip(),
+            expected_last_message_ref=expected_ref,
+            checkpoint=checkpoint,
+        )
+        if outcome.get("committed"):
+            _store().save(state)
+    if outcome.get("committed"):
+        if checkpoint is None:
+            room.pop("contextCheckpoint", None)
+        else:
+            room["contextCheckpoint"] = copy.deepcopy(dict(checkpoint))
+    return outcome
+
+
+def _rotate_chat_room_context_checkpoint(
+    room: dict[str, Any], *, allow_lazy_rebuild: bool, force_reason: str | None = None
+) -> dict[str, Any]:
+    previous = room.get("contextCheckpoint")
+    previous_checkpoint = dict(previous) if isinstance(previous, Mapping) else None
+    if (
+        allow_lazy_rebuild
+        and not force_reason
+        and previous_checkpoint is None
+        and _terminal_chat_room_round_count(room) > DEFAULT_VERBATIM_ROUNDS
+    ):
+        force_reason = "lazy_rebuild"
+    rotation = maybe_rotate_chat_room_context_checkpoint(
+        room,
+        previous_checkpoint=previous_checkpoint,
+        estimate_tokens=_estimate_chat_room_context_tokens,
+        created_at=utc_now_iso(),
+        force_reason=force_reason,
+    )
+    if not rotation.get("rotated"):
+        return rotation
+    checkpoint = rotation.get("checkpoint")
+    commit = _commit_precomputed_chat_room_checkpoint(
+        room,
+        checkpoint if isinstance(checkpoint, Mapping) else None,
+    )
+    rotation["commit"] = commit
+    if not commit.get("committed"):
+        rotation["rotated"] = False
+        rotation["reason"] = str(commit.get("reason") or "room_advanced")
+    return rotation
+
+
+def _record_chat_room_context_rotation(
+    room: Mapping[str, Any], rotation: Mapping[str, Any]
+) -> None:
+    if not rotation.get("rotated"):
+        return
+    checkpoint = rotation.get("checkpoint") if isinstance(rotation.get("checkpoint"), Mapping) else {}
+    try:
+        record_runtime_scene_event(
+            "chat_room",
+            "context",
+            "chat_room.context_checkpoint.rotated",
+            message="Chat room context checkpoint rotated at a terminal boundary.",
+            outcome="rotated",
+            fields={
+                "roomId": str(room.get("roomId") or "").strip(),
+                "checkpointId": str(checkpoint.get("checkpointId") or ""),
+                "revision": int(checkpoint.get("revision") or 0),
+                "reason": str(rotation.get("reason") or ""),
+                "dynamicTokens": int(rotation.get("dynamicTokens") or 0),
+                "recentWindowBudgetExceeded": bool(
+                    rotation.get("recentWindowBudgetExceeded")
+                ),
+            },
+        )
+    except Exception:
+        return
+
+
+def _prepare_chat_room_context_snapshot(room: dict[str, Any]) -> dict[str, Any] | None:
+    if not chat_room_structured_context_enabled():
+        return None
+    rotation = _rotate_chat_room_context_checkpoint(room, allow_lazy_rebuild=True)
+    _record_chat_room_context_rotation(room, rotation)
+    checkpoint = room.get("contextCheckpoint")
+    return build_chat_room_context_snapshot(
+        room,
+        checkpoint=dict(checkpoint) if isinstance(checkpoint, Mapping) else None,
+    )
+
+
+def _refresh_chat_room_context_checkpoint_after_terminal(room: dict[str, Any]) -> None:
+    if not chat_room_structured_context_enabled():
+        return
+    rotation = _rotate_chat_room_context_checkpoint(room, allow_lazy_rebuild=False)
+    _record_chat_room_context_rotation(room, rotation)
+
+
+def promote_chat_room_formal_context(
+    room_id: str,
+    *,
+    digest: Mapping[str, Any],
+    decisions: list[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Project approved formal artifacts and force one checkpoint refresh."""
+
+    if not chat_room_structured_context_enabled():
+        return {"promoted": False, "reason": "feature_disabled"}
+    normalized_room_id = str(room_id or "").strip()
+    digest_ref = str(digest.get("digestId") or "").strip()
+    if not normalized_room_id or not digest_ref:
+        return {"promoted": False, "reason": "formal_reference_missing"}
+    projection = {
+        "digestRef": digest_ref,
+        "decisionRefs": sorted(
+            {
+                str(item.get("decisionId") or "").strip()
+                for item in decisions
+                if isinstance(item, Mapping) and str(item.get("decisionId") or "").strip()
+            }
+        ),
+        "sourceMessageRefs": sorted(
+            {
+                str(item).strip()
+                for item in list(digest.get("sourceMessageRefs") or [])
+                if str(item).strip()
+            }
+        ),
+        "protocol": {
+            "topics": list(digest.get("discussionTopics") or []),
+            "agreements": list(digest.get("agreements") or []),
+            "disagreements": list(digest.get("disagreements") or []),
+            "risks": [
+                *list(digest.get("risks") or []),
+                *list(digest.get("blockers") or []),
+            ],
+            "actionItems": list(digest.get("actionItems") or []),
+            "evidenceRequests": list(digest.get("evidenceRequests") or []),
+            "knowledgeCandidates": list(digest.get("knowledgeCandidates") or []),
+        },
+        "contentHash": str(digest.get("contentHash") or "").strip(),
+    }
+    with _CHAT_ROOM_LOCK:
+        state = _store().load()
+        room = _find_room(state, normalized_room_id)
+        if room is None:
+            return {"promoted": False, "reason": "room_missing"}
+        available_source_refs = {
+            "/".join(
+                [
+                    normalized_room_id,
+                    str(round_payload.get("roundId") or round_payload.get("id") or "").strip(),
+                    str(message.get("messageId") or message.get("id") or "").strip(),
+                ]
+            )
+            for round_payload in list(room.get("rounds") or [])
+            if isinstance(round_payload, Mapping)
+            for message in list(round_payload.get("messages") or [])
+            if isinstance(message, Mapping)
+            and str(round_payload.get("roundId") or round_payload.get("id") or "").strip()
+            and str(message.get("messageId") or message.get("id") or "").strip()
+        }
+        invalid_source_refs = sorted(
+            ref
+            for ref in list(projection.get("sourceMessageRefs") or [])
+            if ref not in available_source_refs
+        )
+        if not projection["sourceMessageRefs"] or invalid_source_refs:
+            return {
+                "promoted": False,
+                "reason": "source_message_ref_invalid",
+                "invalidSourceMessageRefs": (
+                    invalid_source_refs
+                    if invalid_source_refs
+                    else ["sourceMessageRefs_required"]
+                ),
+            }
+        rows = [
+            dict(item)
+            for item in list(room.get("contextFormalProjections") or [])
+            if isinstance(item, Mapping)
+            and str(item.get("digestRef") or "").strip() != digest_ref
+        ]
+        room["contextFormalProjections"] = sorted(
+            [*rows, projection], key=lambda item: str(item.get("digestRef") or "")
+        )
+        _store().save(state)
+        room_snapshot = copy.deepcopy(room)
+    rotation = _rotate_chat_room_context_checkpoint(
+        room_snapshot,
+        allow_lazy_rebuild=False,
+        force_reason="formal_promotion",
+    )
+    _record_chat_room_context_rotation(room_snapshot, rotation)
+    return {
+        "promoted": True,
+        "reason": "formal_promotion",
+        "digestRef": digest_ref,
+        "checkpointRotated": bool(rotation.get("rotated")),
+        "checkpointRevision": int(
+            ((rotation.get("checkpoint") or {}).get("revision") or 0)
+            if isinstance(rotation.get("checkpoint"), Mapping)
+            else 0
+        ),
+    }
+
+
+def _chat_room_stable_output_contract(context: Mapping[str, Any]) -> str:
+    if not context.get("_structuredChatRoomContext"):
+        return ""
+    if context.get("_structuredMeetingMessage"):
+        return meeting_message_output_contract()
+    return chat_room_context_output_contract()
+
+
+def _chat_room_static_runtime_context(
+    base_context: str, context: Mapping[str, Any]
+) -> str:
+    contract = _chat_room_stable_output_contract(context)
+    return "\n\n".join(
+        item for item in (str(base_context or "").strip(), contract.strip()) if item
+    )
 
 
 def _run_participant_agent(participant: dict[str, Any], prompt: str, context: dict[str, Any]) -> dict[str, Any]:
@@ -4406,6 +4689,24 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
         canonical_chat_history, _meeting_history_layering_state = (
             _apply_meeting_history_layering_for_room(canonical_chat_history, context)
         )
+        room_context_tokens = chat_room_context_segment_tokens(
+            canonical_chat_history,
+            estimate_tokens=_estimate_chat_room_context_tokens,
+        )
+        stable_output_contract = _chat_room_stable_output_contract(context)
+        room_context_tokens["system"] = (
+            _estimate_chat_room_context_tokens(
+                [{"role": "system", "content": stable_output_contract}]
+            )
+            if stable_output_contract
+            else 0
+        )
+        room_context_tokens["total"] = sum(
+            room_context_tokens[key]
+            for key in ("system", "checkpoint", "delta", "recentRaw")
+        )
+        for segment, token_count in room_context_tokens.items():
+            timings[f"roomContext.{segment}Tokens"] = token_count
         timings["ledgerHistoryMs"] = _elapsed_ms(stage_started_at)
         with active_agent_runtime(
             agent_id,
@@ -4413,6 +4714,16 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
             turn_id=turn_identity,
             room_id=str(context.get("roomId") or "").strip(),
             round_id=round_id,
+            runtime_tool_grants=(
+                ["read_chat_room_context_refs"]
+                if context.get("_structuredChatRoomContext")
+                else None
+            ),
+            runtime_tool_source=(
+                "chat_room_context"
+                if context.get("_structuredChatRoomContext")
+                else ""
+            ),
         ), session_service._session_tool_workspace_override(workspace):
             stage_started_at = _perf_counter()
             agent_runtime = session_service.create_chat_agent(workspace_path=workspace, config=agent_config)
@@ -4438,7 +4749,12 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
                 chat_history=canonical_chat_history,
                 runtime_context=agent_context.context_block if agent_context is not None else "",
                 static_runtime_context=(
-                    getattr(agent_context, "static_context_block", "") if agent_context is not None else ""
+                    _chat_room_static_runtime_context(
+                        getattr(agent_context, "static_context_block", "")
+                        if agent_context is not None
+                        else "",
+                        context,
+                    )
                 ),
                 dynamic_runtime_context=(
                     getattr(agent_context, "dynamic_context_block", "") if agent_context is not None else ""
@@ -4489,11 +4805,17 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
                     session_id=session_id,
                     turn_id=turn_identity,
                     enabled=bool(context.get("_speakerDeltaCapture")),
+                    structured_context=bool(context.get("_structuredChatRoomContext")),
                 ):
                     result = run_existing_agent_single_turn(
                         agent_runtime,
                         initial_prompt=prompt,
-                        disable_tools=True,
+                        disable_tools=not bool(context.get("_structuredChatRoomContext")),
+                        allowed_tool_names=(
+                            ["read_chat_room_context_refs"]
+                            if context.get("_structuredChatRoomContext")
+                            else None
+                        ),
                         prompt_cache_partition=speaker_prompt_cache_partition,
                         turn_identity=turn_identity,
                         interrupt_checker=interrupt_checker,
@@ -4610,6 +4932,7 @@ def _build_participant_prompt(
     structured_meeting_message = _uses_structured_meeting_message(
         room, round_payload
     )
+    structured_room_context = chat_room_structured_context_enabled()
     prior_lines = _format_prior_room_messages(
         prior_messages,
         preserve_meeting_semantics=_is_challenge_meeting_round(round_payload),
@@ -4630,8 +4953,8 @@ def _build_participant_prompt(
         else []
     )
     response_contract_lines = (
-        [meeting_message_output_contract()]
-        if structured_meeting_message
+        ["严格遵循 system 区中的群聊结构化输出合同；不要在 JSON 前后添加说明。"]
+        if structured_room_context
         else [
             "请给出一段紧凑、可读、只读的群聊发言。不要修改文件、不要提交、不要启动进化或部署。",
             "如果你没有新信息，请明确说明你的确认、保留意见或下一步建议。",
@@ -6454,6 +6777,8 @@ def _room_to_api(
     available_purposes: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     payload = dict(room)
+    payload.pop("contextCheckpoint", None)
+    payload.pop("contextFormalProjections", None)
     payload["mode"] = str(payload.get("mode") or DEFAULT_MODE).strip() or DEFAULT_MODE
     payload["purpose"] = _normalize_purpose(payload.get("purpose") or DEFAULT_PURPOSE)
     payload["participants"] = [dict(item) for item in list(room.get("participants") or []) if isinstance(item, dict)]
@@ -6555,7 +6880,7 @@ def _normalize_case_state_for_api(value: Any) -> dict[str, Any]:
 
 
 def _message_to_api(message: dict[str, Any], case_state: dict[str, Any]) -> dict[str, Any]:
-    payload = dict(message)
+    payload = chat_room_message_to_public(message)
     if not str(payload.get("messageKind") or "").strip():
         payload.update(_case_message_metadata({"caseState": case_state}))
     return payload
@@ -7799,11 +8124,33 @@ def _publish_chat_room_speaker_delta(event: dict[str, Any]) -> None:
     normalized_room_id = str(event.get("roomId") or "").strip()
     if not normalized_room_id:
         return
+    public_event = dict(event)
+    structured_context = bool(public_event.pop("_structuredContext", False))
+    if structured_context and chat_room_structured_context_enabled():
+        ingested = ingest_chat_room_context_output(public_event.get("content"))
+        context_payload = ingested.get("contextPayload")
+        audit = (
+            context_payload.get("audit")
+            if isinstance(context_payload, Mapping)
+            and isinstance(context_payload.get("audit"), Mapping)
+            else {}
+        )
+        if str(audit.get("parseStatus") or "") == PARSE_STATUS_STRUCTURED:
+            public_event["content"] = str(ingested.get("content") or "")
+        elif not (
+            bool(public_event.get("done"))
+            and str(public_event.get("status") or "").strip().lower()
+            in {"completed", "failed", "stopped", "aborted"}
+        ):
+            # A partial JSON object is not user-readable.  Keep it behind the
+            # room service boundary until it becomes a valid display payload
+            # or the turn closes with legacy free text.
+            return
     with _CHAT_ROOM_STREAM_SUBSCRIBERS_LOCK:
         subscribers = list(_CHAT_ROOM_STREAM_SUBSCRIBERS.get(normalized_room_id) or [])
     for subscriber in subscribers:
         try:
-            subscriber.put_nowait(event)
+            subscriber.put_nowait(public_event)
         except queue.Full:
             continue
 

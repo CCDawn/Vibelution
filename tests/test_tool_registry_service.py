@@ -47,6 +47,36 @@ def test_tool_registry_exposes_one_stable_secret_safe_descriptor_per_llm_tool(tm
     assert "argsSchema" not in grep_descriptor
 
 
+def test_exact_chat_room_context_tool_is_registered_but_requires_a_room_runtime_grant(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
+
+    payload = registry.get_tool_registry()
+    tool = next(
+        item for item in payload["tools"] if item["name"] == "read_chat_room_context_refs"
+    )
+    descriptor = next(
+        item
+        for item in payload["descriptors"]
+        if item["name"] == "read_chat_room_context_refs"
+    )
+
+    assert tool["llmVisible"] is True
+    assert tool["permissionPolicy"]["requiresExplicitAllow"] is True
+    assert descriptor["capabilities"] == [
+        "conversation_history",
+        "exact_refs",
+        "read_only",
+        "room_scoped",
+    ]
+    assert descriptor["risk"] == "read"
+    assert "read_chat_room_context_refs" not in (
+        agent_directory_service.DEFAULT_SESSION_AGENT_ALLOWED_TOOLS
+    )
+
+
 def test_tool_descriptor_schema_hash_is_order_independent():
     first = tool_catalog.build_tool_descriptor(
         "grep_search_tool",

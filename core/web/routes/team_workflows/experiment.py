@@ -1,10 +1,14 @@
 """Team workflow routes: experiment."""
 from __future__ import annotations
 
-from fastapi import HTTPException, Query, status
+from fastapi import HTTPException, Query, Request, status
 
 from core.web.services.team_service import TeamNotFoundError, TeamServiceError
 from core.web.services.team_workflow_orchestration_service import *
+from core.web.services.team_workflow.research_runtime.operator_authorization import (
+    require_privileged_server_operator,
+    server_operator_scope_from_http,
+)
 
 from ._errors import _raise_team_workflow_route_error
 from ._models import *
@@ -19,6 +23,50 @@ from .experiment_models import (
     ExperimentPlanningStatusResponse,
     ExperimentRouteResponse,
 )
+
+
+@router.get(
+    "/teams/{team_id}/workflow-orchestration/challenge-program/phase-boundary",
+    response_model=ExperimentRouteResponse,
+    response_model_exclude_unset=True,
+)
+def team_workflow_challenge_phase_boundary_status(team_id: str) -> dict:
+    try:
+        return get_challenge_phase_boundary_status(team_id)
+    except TeamNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ChallengePhaseBoundaryError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/challenge-program/phase-one/approve",
+    response_model=ExperimentRouteResponse,
+    response_model_exclude_unset=True,
+)
+def team_workflow_challenge_phase_one_approve(
+    team_id: str,
+    request: Request,
+    payload: ChallengePhaseOneApprovalPayload | None = None,
+) -> dict:
+    try:
+        with server_operator_scope_from_http(request):
+            operator = require_privileged_server_operator(command="finalize_stage_one")
+            return approve_and_publish_current_phase_one_manifest(
+                team_id,
+                operator_id=operator.operator_id,
+                operator_display_name=operator.display_name,
+                note=payload.note if payload is not None else "",
+            )
+    except PermissionError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "command_forbidden", "message": str(exc) or "command_forbidden"},
+        ) from exc
+    except TeamNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ChallengePhaseBoundaryError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.get(
@@ -207,6 +255,14 @@ def team_workflow_experiment_plan_create(team_id: str, payload: ExperimentPlanCr
             exc,
             status_code=404,
             fields={"stageRoundId": payload.stageRoundId, "createdByAgent": payload.createdByAgent},
+        )
+    except PhaseTwoLockedError as exc:
+        _raise_team_workflow_route_error(
+            "experiment_plan.create",
+            team_id,
+            exc,
+            status_code=409,
+            fields={"stageRoundId": payload.stageRoundId, "programPhase": payload.programPhase},
         )
     except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
         _raise_team_workflow_route_error(

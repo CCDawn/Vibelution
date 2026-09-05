@@ -70,11 +70,21 @@ def start_research_stage_round(team_id: str, payload: dict[str, Any] | None = No
     normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
     team = s.team_service.get_team(normalized_team_id)
     request_payload = dict(payload) if isinstance(payload, dict) else {}
+    stage_type = s._normalize_stage_type(request_payload.get("stageType"))
+    phase_two_requested = False
+    if stage_type == "experiment":
+        from core.web.services.team_workflow.challenge_phase_boundary import (
+            request_targets_challenge_phase_two,
+            require_phase_two_activation,
+        )
+
+        phase_two_requested = request_targets_challenge_phase_two(request_payload)
+        if phase_two_requested:
+            require_phase_two_activation(normalized_team_id)
     research_project = s.resolve_research_project_identity(
         normalized_team_id,
         s._trim_text(request_payload.get("researchProjectId"), max_length=160),
     )
-    stage_type = s._normalize_stage_type(request_payload.get("stageType"))
     if stage_type == "iteration":
         from core.web.services.team_workflow.research_project_agent_tasks import (
             research_project_iteration_readiness,
@@ -93,6 +103,12 @@ def start_research_stage_round(team_id: str, payload: dict[str, Any] | None = No
         store = s._load_stage_round_store(normalized_team_id)
         rounds = s._stage_rounds(store)
         active_round = s._active_stage_round(rounds, stage_type)
+        if (
+            stage_type == "experiment"
+            and active_round
+            and request_targets_challenge_phase_two(active_round)
+        ):
+            require_phase_two_activation(normalized_team_id)
         if active_round and start_mode != "new_round":
             if stage_type != "knowledge_collection":
                 memory_context = s._research_stage_memory_context(
@@ -164,6 +180,14 @@ def start_research_stage_round(team_id: str, payload: dict[str, Any] | None = No
         )
         round_payload["researchProjectId"] = research_project["projectId"]
         round_payload["experimentName"] = research_project["name"]
+        if phase_two_requested:
+            round_payload["programPhase"] = 2
+            round_payload["programDirection"] = "B"
+            round_payload["deepExperiment"] = True
+            if request_payload.get("challengeQuestionId"):
+                round_payload["challengeQuestionId"] = request_payload[
+                    "challengeQuestionId"
+                ]
         result_payload: dict[str, Any] = {}
         status = "running"
         warnings: list[dict[str, str]] = []

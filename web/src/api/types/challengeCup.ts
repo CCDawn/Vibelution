@@ -5,6 +5,9 @@ export type CompetitionProgramDirection = {
   name: string;
   required: boolean;
   role: string;
+  phase: number;
+  activated: boolean;
+  activationGate?: string;
 };
 
 export type CompetitionQuestionCatalogItem = {
@@ -20,8 +23,46 @@ export type CompetitionRequiredDeepExperiment = {
   themeId: string;
   campaignId: string;
   required: boolean;
+  executionPhase: number;
+  activationGate: string;
+  phaseActive: boolean;
   questionResultApproved: boolean;
   approved: boolean;
+};
+
+export type CompetitionExecutionPhase = {
+  mode: string;
+  currentPhase: number;
+  currentPhaseGoal: string;
+  phase1CompletionRule: string;
+  phase1ContentReady: boolean;
+  phase1Approved: boolean;
+  phase1KnowledgePublished: boolean;
+  phase1Complete: boolean;
+  phase1ManifestSha256: string;
+  phase2ActivationGate: string;
+  phase2Activated: boolean;
+  finalCompletionRequiresDeepExperiments: boolean;
+};
+
+export type ChallengePhaseBoundaryStatus = {
+  schemaVersion: number;
+  teamId: string;
+  manifest: Record<string, unknown>;
+  phase1ContentReady: boolean;
+  phase1Approved: boolean;
+  phase1KnowledgePublished: boolean;
+  phase1Complete: boolean;
+  phase2Activated: boolean;
+  approval: Record<string, unknown> | null;
+  knowledgeReceipt: Record<string, unknown> | null;
+  knowledgePublication: {
+    status: "not_requested" | "pending" | "applied" | string;
+    target: string;
+    requestedAt: string;
+    appliedAt: string;
+  };
+  updatedAt: string;
 };
 
 export type CompetitionProgramProjection = {
@@ -44,6 +85,7 @@ export type CompetitionProgramProjection = {
     completed: boolean;
   };
   directions: CompetitionProgramDirection[];
+  executionPhase: CompetitionExecutionPhase;
   programContract: {
     version: string;
     coreBehaviorHash: string;

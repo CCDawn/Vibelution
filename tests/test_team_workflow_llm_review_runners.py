@@ -1284,6 +1284,40 @@ def test_review_runners_produce_executor_compatible_outputs(monkeypatch):
     assert revision["revisedCandidate"]["claim"] == "假说 A（收窄到目标人群）"
 
 
+def test_pareto_runner_recovers_unique_science_candidate_suffix(monkeypatch):
+    """Cheap review models may omit only the question prefix from SCI ids."""
+
+    runners = llm_review_runners.build_hypothesis_review_runners(dict(_FAKE_LLM))
+    _install_fake_llm(
+        monkeypatch,
+        [
+            json.dumps(
+                {
+                    "paretoFrontCandidateIds": ["c11ccc74b"],
+                    "dominatedCandidateIds": ["c57a233fb", "c98e8eb50"],
+                    "notes": "按五维评分完成分类。",
+                },
+                ensure_ascii=False,
+            )
+        ],
+    )
+
+    pareto = runners["pareto_runner"](
+        {
+            "sci-020-c11ccc74b": {"novelty": 0.8},
+            "sci-020-c57a233fb": {"novelty": 0.6},
+            "sci-020-c98e8eb50": {"novelty": 0.5},
+        },
+        _review_context(),
+    )
+
+    assert pareto["paretoFrontCandidateIds"] == ["sci-020-c11ccc74b"]
+    assert pareto["dominatedCandidateIds"] == [
+        "sci-020-c57a233fb",
+        "sci-020-c98e8eb50",
+    ]
+
+
 def test_reflection_runner_fails_closed_on_missing_dimensions(monkeypatch):
     runners = llm_review_runners.build_hypothesis_review_runners(dict(_FAKE_LLM))
     payload = json.dumps(

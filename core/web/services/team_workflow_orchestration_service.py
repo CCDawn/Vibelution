@@ -584,6 +584,18 @@ from core.web.services.team_workflow.challenge_program import (
     build_competition_program_projection,
     build_challenge_submission_readiness,
 )
+from core.web.services.team_workflow.challenge_phase_boundary import (
+    ChallengePhaseBoundaryError,
+    PhaseTwoLockedError,
+    approve_current_phase_one_manifest,
+    get_challenge_phase_boundary_status,
+    record_phase_one_knowledge_applied_receipt,
+    require_phase_two_activation,
+)
+from core.web.services.team_workflow.challenge_phase_knowledge_publisher import (
+    approve_and_publish_current_phase_one_manifest,
+    publish_approved_phase_one_to_team_knowledge,
+)
 from core.web.services.team_workflow.challenge_cup_dev_controls import (
     ChallengeCupDevControlsError,
     DevControlsStorageError,
@@ -1342,8 +1354,13 @@ _SOURCE_COLLECTION_QUERY_TERM_TRANSLATIONS = {
 def get_challenge_submission_readiness(team_id: str) -> dict[str, Any]:
     """Return the canonical, user-facing Challenge Cup submission readiness."""
     team_service.get_team(team_id)
+    question_summary = challenge_question_run_summary(team_id)
     projection = build_competition_program_projection(
-        question_run_summary=challenge_question_run_summary(team_id),
+        question_run_summary=question_summary,
+        phase_boundary=get_challenge_phase_boundary_status(
+            team_id,
+            question_run_summary=question_summary,
+        ),
     )
     return build_challenge_submission_readiness(
         team_id=team_id,

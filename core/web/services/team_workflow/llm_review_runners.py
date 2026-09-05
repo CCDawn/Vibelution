@@ -2169,7 +2169,7 @@ def build_hypothesis_review_runners(
         )
 
     def pareto_runner(scores_by_candidate: dict[str, dict[str, float]], context: dict[str, Any]):
-        return _invoke_review_llm(
+        produced = _invoke_review_llm(
             resolved,
             agent_id=str(resolved.get("agentId") or "challenge_cup_evaluator"),
             purpose="hypothesis_pareto",
@@ -2190,6 +2190,38 @@ def build_hypothesis_review_runners(
             require_provider_receipt=require_provider_receipts,
             deadline_at_ms=int(context.get("challengeDeadlineAtMs") or 0) or None,
         )
+        provider_receipt = None
+        if isinstance(produced, ProviderBoundReviewResult):
+            provider_receipt = produced.model_invocation_receipt
+            result = dict(produced.payload)
+        else:
+            result = dict(produced)
+
+        candidate_ids = tuple(str(item) for item in scores_by_candidate)
+
+        def canonical_candidate_id(value: Any) -> str:
+            raw = str(value or "").strip()
+            if raw in candidate_ids:
+                return raw
+            # Qwen3.7 Plus can preserve the content-addressed suffix while
+            # dropping the ``sci-NNN-`` question prefix.  Recover only an
+            # exact, unique terminal segment; ambiguous or unrelated values
+            # stay untouched so the executor's strict validation still fails.
+            matches = [
+                candidate_id
+                for candidate_id in candidate_ids
+                if candidate_id.lower().startswith("sci-")
+                and candidate_id.rsplit("-", 1)[-1] == raw
+            ]
+            return matches[0] if len(matches) == 1 else raw
+
+        for field in ("paretoFrontCandidateIds", "dominatedCandidateIds"):
+            values = result.get(field)
+            if isinstance(values, list):
+                result[field] = [canonical_candidate_id(item) for item in values]
+        if provider_receipt is not None:
+            return ProviderBoundReviewResult(result, provider_receipt)
+        return result
 
     def metareview_runner(
         context: dict[str, Any],
