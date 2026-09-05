@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { WorkflowEventEnvelope } from "../../../api/types/research-workflow/events";
-import { buildResearchTimelineGroups } from "./researchWorkflowTimelineModel";
+import { buildResearchTimelineGroups, filterResearchTimelineGroups } from "./researchWorkflowTimelineModel";
 
 function event(
   partial: Partial<WorkflowEventEnvelope> & Pick<WorkflowEventEnvelope, "eventId" | "sequence" | "type">,
@@ -18,6 +18,19 @@ function event(
 }
 
 describe("researchWorkflowTimelineModel", () => {
+  it("classifies event semantics rather than treating every diagnostic as an error", () => {
+    const groups = buildResearchTimelineGroups([
+      event({ eventId: "ok", sequence: 1, type: "node_succeeded", payload: { nodeId: "source_finding", detail: "产物核验完成" } }),
+      event({ eventId: "wait", sequence: 2, type: "node_waiting_human", payload: { nodeId: "source_extraction" } }),
+      event({ eventId: "fail", sequence: 3, type: "node_failed", payload: { nodeId: "source_finding" } }),
+    ]);
+    expect(groups[0].items.map((item) => item.key)).toEqual(["fail", "ok"]);
+    expect(groups[0].items.map((item) => item.tone)).toEqual(["error", "info"]);
+    expect(groups[1].items[0].tone).toBe("warning");
+    expect(filterResearchTimelineGroups(groups, "attention").flatMap((group) => group.items.map((item) => item.key))).toEqual(["fail", "wait"]);
+    expect(filterResearchTimelineGroups(groups, "selected", "source_extraction")[0].items[0].key).toBe("wait");
+    expect(filterResearchTimelineGroups(groups, "selected", "unknown")).toEqual([]);
+  });
   it("groups formal node events by payload.nodeId and uses Chinese labels", () => {
     const groups = buildResearchTimelineGroups([
       event({ eventId: "e1", sequence: 1, type: "run_created" }),

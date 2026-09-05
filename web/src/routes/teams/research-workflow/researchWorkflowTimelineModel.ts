@@ -8,7 +8,31 @@ export type ResearchTimelineItem = {
   status: string;
   occurredAt: string;
   details?: string;
+  nodeId: string;
+  tone: "error" | "warning" | "info";
 };
+
+export type ResearchTimelineFilter = "all" | "attention" | "selected";
+
+export function filterResearchTimelineGroups(
+  groups: ResearchTimelineGroup[], filter: ResearchTimelineFilter, selectedNodeId?: string | null,
+): ResearchTimelineGroup[] {
+  return groups.map((group) => ({
+    ...group,
+    items: group.items.filter((item) => filter === "all"
+      || (filter === "attention" ? item.tone !== "info" : item.nodeId === selectedNodeId)),
+  })).filter((group) => group.items.length > 0);
+}
+
+function eventTone(event: WorkflowEventEnvelope): ResearchTimelineItem["tone"] {
+  const type = field(event, "type");
+  const status = field(event, "status");
+  if (/(?:^|[._])(failed|blocked|rejected)$/.test(type)
+    || ["failed", "blocked", "rejected"].includes(status)) return "error";
+  if (type === "node_waiting_human" || type === "reconciliation_required"
+    || status === "waiting_human") return "warning";
+  return "info";
+}
 
 export type ResearchTimelineGroup = {
   key: string;
@@ -108,7 +132,11 @@ export function buildResearchTimelineGroups(
       status: field(event, "status") || field(event, "decision") || field(event, "outcome"),
       occurredAt: field(event, "occurredAt"),
       details: field(event, "reason") || field(event, "detail") || undefined,
+      nodeId: field(event, "nodeId"),
+      tone: eventTone(event),
     });
+    // A group's most recent event determines its position, not its first event.
+    groups.delete(identity.key);
     groups.set(identity.key, group);
   }
   return [...groups.values()].map((group) => ({

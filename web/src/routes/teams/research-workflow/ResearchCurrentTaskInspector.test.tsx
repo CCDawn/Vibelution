@@ -51,6 +51,16 @@ async function render(ui: React.ReactElement) {
 }
 
 describe("ResearchCurrentTaskInspector", () => {
+  it("keeps prerequisite instructions outside the narrow diagnostic header", async () => {
+    const current = context();
+    current.currentTask = { ...current.currentTask!, status: "blocked", detail: "knowledge_package_not_materialized;hypothesis_round_unconverged;template_baseline_missing" };
+    const { container, root } = await render(<ResearchCurrentTaskInspector context={current} />);
+    expect(container.querySelector('[data-vui="error-summary"] summary')?.textContent).toContain("前置条件未满足");
+    expect(container.querySelector('[data-vui="error-summary"] summary')?.textContent).not.toContain("知识包尚未形成");
+    expect(container.querySelectorAll('[aria-label="处理建议"] li')).toHaveLength(3);
+    expect(container.querySelector('[aria-label="处理建议"]')?.textContent).toContain("检查本轮有效候选");
+    await act(async () => root.unmount());
+  });
   afterEach(() => {
     document.body.innerHTML = "";
   });

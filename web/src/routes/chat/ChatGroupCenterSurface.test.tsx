@@ -1,6 +1,8 @@
-import React from "react";
+/** @vitest-environment happy-dom */
+import React, { act } from "react";
+import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { ChatGroupCenterSurface, type ChatGroupCenterSurfaceProps } from "./ChatGroupCenterSurface";
 
@@ -68,6 +70,34 @@ function baseProps(patch: Partial<ChatGroupCenterSurfaceProps> = {}): ChatGroupC
 }
 
 describe("ChatGroupCenterSurface hand-test substitutes", () => {
+  it("leads with the digest, folds history, and reveals the failed message without starting a round", async () => {
+    const props = baseProps();
+    const startRound = vi.fn();
+    const room = { ...props.activeGroupRoom!, rounds: [
+      { roundId: "past", status: "completed", topic: "旧议题", summary: "旧轮纪要", messages: [{ messageId: "bad", participantId: "p1", content: "无法解析的发言", status: "completed", messagePayload: { kind: "challenge_meeting_message", audit: { parseStatus: "invalid" } } }] },
+      { roundId: "latest", status: "completed", topic: "新议题", summary: "可用纪要", messages: [] },
+    ] } as never;
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => { callback(0); return 1; });
+    const scroll = vi.fn();
+    vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(scroll);
+    const host = document.createElement("div"); document.body.append(host);
+    const root = createRoot(host);
+    try {
+      await act(async () => root.render(<ChatGroupCenterSurface {...props} activeGroupRoom={room} onStartGroupRound={startRound} />));
+      const transcript = host.querySelector('[data-parse-invalid="true"]')!.closest('[hidden]') as HTMLElement;
+      expect(transcript.hidden).toBe(true);
+      const latestRound = [...host.querySelectorAll("section")].find((section) => section.textContent?.includes("可用纪要"))!;
+      expect(latestRound.innerHTML.indexOf("可用纪要")).toBeLessThan(latestRound.innerHTML.indexOf("新议题"));
+      const jump = [...host.querySelectorAll("button")].find((button) => button.textContent === "定位解析失败发言")!;
+      await act(async () => jump.click());
+      expect(transcript.hidden).toBe(false);
+      expect(scroll).toHaveBeenCalled();
+      expect(startRound).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => root.unmount()); host.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals();
+    }
+  });
   it("does not call a round successful when its research output failed parsing", () => {
     const props = baseProps();
     const room = { ...props.activeGroupRoom!, rounds: [{

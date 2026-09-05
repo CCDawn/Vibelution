@@ -314,7 +314,7 @@ export function ResearchProcessInspectorPane(props: {
     );
   }
   if (scope.panel === "timeline") {
-    return <ResearchRunTimeline run={state.run} projection={state.projection} insights={state.insights} />;
+    return <ResearchRunTimeline run={state.run} projection={state.projection} insights={state.insights} selectedNodeId={scope.selectedNodeId} />;
   }
   if (scope.panel === "team") {
     return (

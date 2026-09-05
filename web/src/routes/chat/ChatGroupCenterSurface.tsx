@@ -1,5 +1,5 @@
 import { BellRing, Square, UsersRound } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 
 import { kernelTaskCenterHref } from "../../api/kernel";
@@ -144,6 +144,17 @@ function GroupRoundsTimeline({
   onOpenMentionTarget: (target: ChatMentionTarget) => void;
   onToggleExpandedGroupMessage: (messageId: string) => void;
 }) {
+  const transcriptPrefix = useId();
+  const [expandedRounds, setExpandedRounds] = useState<Record<string, boolean>>({});
+  const roundElements = useRef(new Map<string, HTMLElement>());
+  const revealFailedMessage = (roundId: string) => {
+    setExpandedRounds((current) => ({ ...current, [roundId]: true }));
+    requestAnimationFrame(() => {
+      const message = roundElements.current.get(roundId)?.querySelector<HTMLElement>('[data-parse-invalid="true"]');
+      message?.scrollIntoView({ block: "center", behavior: "smooth" });
+      message?.focus({ preventScroll: true });
+    });
+  };
   const hasRunningSpeaker = rounds.some((round) => {
     if (String(round.status ?? "").trim().toLowerCase() !== "running") return false;
     const delivered = new Set(
@@ -163,6 +174,8 @@ function GroupRoundsTimeline({
     <>
       {rounds.map((round, roundIndex) => {
         const roundRunning = String(round.status ?? "").trim().toLowerCase() === "running";
+        const expanded = roundRunning || (expandedRounds[round.roundId] ?? roundIndex === rounds.length - 1);
+        const transcriptId = `${transcriptPrefix}-${round.roundId}`;
         const challengeMessages = (round.messages ?? []).filter(
           (message) => message.messagePayload?.kind === "challenge_meeting_message",
         );
@@ -179,7 +192,10 @@ function GroupRoundsTimeline({
           .map((participantId) => String(participantId ?? "").trim())
           .filter((participantId) => participantId && !deliveredParticipantIds.has(participantId));
         return (
-          <section key={round.roundId} className={styles.groupRoundBlock}>
+          <section key={round.roundId} data-group-round-id={round.roundId} className={styles.groupRoundBlock} ref={(element) => {
+            if (element) roundElements.current.set(round.roundId, element);
+            else roundElements.current.delete(round.roundId);
+          }}>
             <div className={styles.groupRoundDivider}>
               <span>
                 {lang === "zh" ? `第 ${roundIndex + 1} 轮` : `Round ${roundIndex + 1}`}
@@ -197,6 +213,22 @@ function GroupRoundsTimeline({
                 {lang === "zh" ? `本轮结果待处理：${parsedCount}/${challengeMessages.length} 条科研发言解析成功，${invalidCount} 条解析失败。` : `Round needs attention: ${parsedCount}/${challengeMessages.length} research messages parsed, ${invalidCount} failed.`}
               </VStateRow>
             ) : null}
+            {round.summary && !roundRunning && invalidCount === 0 ? (
+              <article className={styles.groupRoundSummary}>
+                <strong>{lang === "zh" ? "本轮纪要" : "Round digest"}</strong>
+                <p>{round.summary}</p>
+              </article>
+            ) : null}
+            <div className={styles.groupRoundActions}>
+              {!roundRunning ? <VButton variant="secondary" aria-expanded={expanded} aria-controls={transcriptId}
+                onClick={() => setExpandedRounds((current) => ({ ...current, [round.roundId]: !expanded }))}>
+                {expanded ? (lang === "zh" ? "收起发言" : "Hide messages") : (lang === "zh" ? `展开 ${(round.messages ?? []).length} 条发言` : `Show ${(round.messages ?? []).length} messages`)}
+              </VButton> : null}
+              {invalidCount > 0 ? <VButton variant="secondary" onClick={() => revealFailedMessage(round.roundId)}>
+                {lang === "zh" ? "定位解析失败发言" : "Find failed message"}
+              </VButton> : null}
+            </div>
+            <div id={transcriptId} hidden={!expanded}>
             <article className={styles.groupTopicMessage}>
               <div className={styles.groupTopicBubble}>
                 <div className={styles.groupStreamIdentity} data-testid="group-stream-topic-identity">
@@ -236,6 +268,8 @@ function GroupRoundsTimeline({
                     return (
                       <article
                         key={message.messageId}
+                        tabIndex={-1}
+                        data-parse-invalid={message.messagePayload?.kind === "challenge_meeting_message" && message.messagePayload.audit?.parseStatus === "invalid" ? "true" : undefined}
                         className={
                           message.status === "failed"
                             ? `${styles.groupBubbleRow} ${styles.groupBubbleRowFailed}`
@@ -400,16 +434,7 @@ function GroupRoundsTimeline({
                 );
               }) : null}
             </div>
-            {round.summary && !roundRunning ? (
-              <article className={styles.groupRoundSummary}>
-                <strong>{lang === "zh" ? "本轮纪要" : "Round digest"}</strong>
-                {invalidCount > 0 ? (
-                  <p role="status">{lang === "zh"
-                    ? `本轮 ${challengeMessages.length} 条科研发言，${parsedCount} 条解析成功，${invalidCount} 条解析失败。解析失败的发言不能作为有效科研结果。`
-                    : `${parsedCount} of ${challengeMessages.length} research messages parsed; ${invalidCount} failed parsing and cannot be used as valid research results.`}</p>
-                ) : <p>{round.summary}</p>}
-              </article>
-            ) : null}
+            </div>
           </section>
         );
       })}
@@ -503,7 +528,10 @@ export function ChatGroupCenterSurface({
     if (!element) return;
     const firstOpen = groupTimelineOpenedRoomIdRef.current !== activeGroupRoomId;
     const nearBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 180;
-    if (firstOpen || nearBottom) {
+    const latestRound = element.querySelectorAll<HTMLElement>("[data-group-round-id]").item(rounds.length - 1);
+    if (firstOpen && lastRound?.status !== "running" && latestRound) {
+      element.scrollTop += latestRound.getBoundingClientRect().top - element.getBoundingClientRect().top;
+    } else if (firstOpen || nearBottom) {
       element.scrollTop = element.scrollHeight;
     }
     groupTimelineOpenedRoomIdRef.current = activeGroupRoomId;
@@ -511,6 +539,8 @@ export function ChatGroupCenterSurface({
     activeGroupRoomId,
     groupRoomInitialLoading,
     lastMessageKey,
+    lastRound?.status,
+    rounds.length,
     projectBusActive,
     standardGroupRoomActive,
   ]);

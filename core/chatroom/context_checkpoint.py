@@ -16,7 +16,7 @@ from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
-from .context_payload import structured_protocol_from_message
+from .context_payload import historical_message_excerpt, structured_protocol_from_message
 
 CHECKPOINT_SCHEMA_VERSION = 1
 CHECKPOINT_KIND = "ChatRoomContextCheckpoint.v1"
@@ -133,6 +133,40 @@ def _terminal_rounds(room: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     ]
 
 
+def _duplicate_message_refs(room: Mapping[str, Any]) -> set[str]:
+    """Apply the speaker retry rule across all room history, before segmenting it.
+
+    Keep the first completed long speech and retain raw records for exact-ref
+    auditing. Changed structured state is a new contribution, even when its
+    visible display happens to match. Short acknowledgements remain valid.
+    """
+    seen: set[tuple[str, str, str]] = set()
+    duplicates: set[str] = set()
+    for round_payload in _terminal_rounds(room):
+        for message in list(round_payload.get("messages") or []):
+            if not isinstance(message, Mapping):
+                continue
+            content = str(message.get("content") or "")
+            speaker = str(message.get("participantId") or "").strip()
+            if (
+                not speaker
+                or not _message_id(message)
+                or str(message.get("status") or "").strip().lower() != "completed"
+                or len(content) < 64
+            ):
+                continue
+            key = (
+                speaker,
+                content,
+                _canonical_json(structured_protocol_from_message(message)),
+            )
+            if key in seen:
+                duplicates.add(_message_ref(_room_id(room), _round_id(round_payload), message))
+            else:
+                seen.add(key)
+    return duplicates
+
+
 def _item_id(kind: str, identity: Any) -> str:
     return f"{kind}-{_sha256(identity)[:16]}"
 
@@ -180,6 +214,7 @@ def _reduce_state(
     legacy: list[dict[str, str]] = []
     source_refs: list[str] = []
     topics: list[dict[str, str]] = []
+    duplicate_refs = _duplicate_message_refs(room)
 
     for round_payload in list(room.get("rounds") or []):
         if not isinstance(round_payload, Mapping):
@@ -197,6 +232,8 @@ def _reduce_state(
             if not message_id:
                 continue
             source_ref = _message_ref(room_id, round_id, message)
+            if source_ref in duplicate_refs:
+                continue
             speaker = _speaker_id(message)
             speaker_role_id = _speaker_role_id(room, message)
             protocol = None
@@ -206,11 +243,7 @@ def _reduce_state(
                 if str(message.get("status") or "").strip().lower() != _TERMINAL_MESSAGE_STATUS:
                     continue
                 source_refs.append(source_ref)
-                content = str(message.get("content") or "")
-                first_line = next(
-                    (_clean_text(line) for line in content.splitlines() if _clean_text(line)),
-                    "",
-                )
+                first_line = _clean_text(historical_message_excerpt(message))
                 if first_line:
                     legacy.append(
                         {
@@ -811,7 +844,10 @@ def _projection_message(
 
 
 def _recent_round_projection_message(
-    room: Mapping[str, Any], round_payload: Mapping[str, Any]
+    room: Mapping[str, Any],
+    round_payload: Mapping[str, Any],
+    *,
+    duplicate_refs: set[str],
 ) -> dict[str, Any]:
     room_id = _room_id(room)
     round_id = _round_id(round_payload)
@@ -820,6 +856,8 @@ def _recent_round_projection_message(
         if not isinstance(message, Mapping):
             continue
         message_id = _message_id(message)
+        if _message_ref(room_id, round_id, message) in duplicate_refs:
+            continue
         messages.append(
             {
                 "ref": _message_ref(room_id, round_id, message) if message_id else "",
@@ -892,6 +930,7 @@ def build_chat_room_context_snapshot(
         if active_checkpoint is not None
         else set()
     )
+    recent_round_ids = [item for item in recent_round_ids if item not in covered_ids]
     recent_id_set = set(recent_round_ids)
     delta_ids = [
         _round_id(item)
@@ -934,8 +973,11 @@ def build_chat_room_context_snapshot(
         else None
     )
     terminal_by_id = {_round_id(item): item for item in terminal}
+    duplicate_refs = _duplicate_message_refs(room)
     recent_raw_messages = [
-        _recent_round_projection_message(room, terminal_by_id[round_id])
+        _recent_round_projection_message(
+            room, terminal_by_id[round_id], duplicate_refs=duplicate_refs
+        )
         for round_id in recent_round_ids
         if round_id in terminal_by_id
     ]

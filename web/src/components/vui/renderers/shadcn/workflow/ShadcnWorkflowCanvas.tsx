@@ -287,6 +287,18 @@ function WorkflowCanvasInner({
     fitCanvas(0.1, 200);
   }, [fitCanvas, selectedNodeId]);
 
+  const focusStageId = graph.nodes.find((node) => node.nodeId === (selectedNodeId || runtimeCurrentNodeIds[0]))?.stageId;
+  const fitStage = useCallback(() => {
+    if (!focusStageId) return;
+    userMovedViewportRef.current = true;
+    overviewSelectionRef.current = selectedNodeId;
+    programmaticFitRef.current = true;
+    const nodes = graph.nodes.filter((node) => node.stageId === focusStageId).map((node) => ({ id: node.nodeId }));
+    void Promise.resolve(rf.fitView({ nodes, padding: 0.14, duration: 200, maxZoom: 1 })).finally(() => {
+      programmaticFitRef.current = false;
+    });
+  }, [focusStageId, graph.nodes, rf, selectedNodeId]);
+
   const layout = useWorkflowAutoLayout(graph, createWorkflowLayoutEngine, { layoutMode });
   const currentSet = useMemo(() => new Set(runtimeCurrentNodeIds), [runtimeCurrentNodeIds]);
   const nodesInitialized = useNodesInitialized();
@@ -1011,6 +1023,7 @@ function WorkflowCanvasInner({
           <WorkflowCanvasControls
             runtimeCurrentNodeIds={runtimeCurrentNodeIds}
             onFitAll={fitAll}
+            onFitStage={focusStageId ? fitStage : undefined}
             manualLayoutPresentation={compactControls ? "menu" : "inline"}
             manualLayout={manualLayoutEnabled ? {
               canUndo: manualHistory.length > 0,

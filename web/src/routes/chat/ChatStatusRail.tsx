@@ -17,6 +17,7 @@ import { isBusyPhase } from "./chatCodingRouteViewModel";
 import { CHAT_COMPACT_DETAILS_HEIGHT_PANE, CHAT_LIST_HEIGHT_LAYOUT_ID } from "./chatListHeights";
 import { ChatPromptAssemblyInspector } from "./ChatPromptAssemblyInspector";
 import styles from "./ChatStatusRail.styles";
+import { chatRoomModeLabel, chatRoomPurposeLabel } from "./chatRoutePresentation";
 
 const LlmPayloadTracePanel = lazy(() =>
   import("./LlmPayloadTracePanel").then((module) => ({ default: module.LlmPayloadTracePanel })),
@@ -167,11 +168,11 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
             </div>
             <div className={routeStyles.resourceMetric}>
               <span>{lang === "zh" ? "调度" : "Mode"}</span>
-              <strong>{activeGroupRoom?.mode ?? "—"}</strong>
+              <strong>{activeGroupRoom?.mode ? chatRoomModeLabel({ id: activeGroupRoom.mode, label: "", status: "active" }, lang) : "—"}</strong>
             </div>
             <div className={routeStyles.resourceMetric}>
               <span>{lang === "zh" ? "目的" : "Purpose"}</span>
-              <strong>{activeGroupRoom?.purpose ?? "—"}</strong>
+              <strong>{activeGroupRoom?.purpose ? chatRoomPurposeLabel({ id: activeGroupRoom.purpose, label: "" }, lang) : "—"}</strong>
             </div>
           </div>
         </section>

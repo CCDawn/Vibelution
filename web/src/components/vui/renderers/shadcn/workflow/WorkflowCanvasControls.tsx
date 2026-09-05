@@ -1,5 +1,5 @@
 import { useReactFlow } from "@xyflow/react";
-import { Focus, LayoutDashboard, Lock, Maximize2, Minus, MoreHorizontal, Plus, Undo2, Unlock } from "lucide-react";
+import { Focus, Layers, LayoutDashboard, Lock, Maximize2, Minus, MoreHorizontal, Plus, Undo2, Unlock } from "lucide-react";
 
 import { ShadcnDropdownMenu } from "../ShadcnDropdownMenu";
 import { resolveWorkflowNodeFocusCenter } from "./workflowSelectionFocus";
@@ -7,6 +7,7 @@ import { resolveWorkflowNodeFocusCenter } from "./workflowSelectionFocus";
 export type WorkflowCanvasControlsProps = {
   runtimeCurrentNodeIds?: string[];
   onFitAll?: () => void;
+  onFitStage?: () => void;
   onFocusCurrent?: () => void;
   manualLayoutPresentation?: "inline" | "menu";
   manualLayout?: {
@@ -21,6 +22,7 @@ export type WorkflowCanvasControlsProps = {
 export function WorkflowCanvasControls({
   runtimeCurrentNodeIds = [],
   onFitAll,
+  onFitStage,
   onFocusCurrent,
   manualLayoutPresentation = "inline",
   manualLayout,
@@ -79,6 +81,9 @@ export function WorkflowCanvasControls({
       >
         <Focus className="h-4 w-4" aria-hidden />
       </button>
+      {onFitStage ? <button type="button" className={btn} aria-label="聚焦阶段" title="聚焦所选节点所在阶段；未选择时聚焦当前工作阶段" onClick={onFitStage}>
+        <Layers className="h-4 w-4" aria-hidden />
+      </button> : null}
       {manualLayout && manualLayoutPresentation === "menu" ? (
         <>
           <span className="mx-0.5 my-1 w-px bg-[var(--vui-border-subtle)]" aria-hidden />
