@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
+import React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
 import type { AgentInstance } from "../api/types";
 import {
   agentDirectorySessionCount,
+  AgentConversationDirectory,
   agentDirectorySection,
   isSessionMoreRecent,
   visibleDirectoryAgents,
@@ -35,6 +38,31 @@ function agent(overrides: Partial<AgentInstance> = {}): AgentInstance {
 }
 
 describe("AgentConversationDirectory", () => {
+  it("renders one subtitle, hides single-session counts, and keeps multi-session counts", () => {
+    const sessions = ["s1", "s2"].map((id) => ({ id, title: id, agentId: "agent-1", status: "idle", taskSummary: "", lastActive: "", updatedAt: "", currentPhase: "" }));
+    const render = (count: number) => renderToStaticMarkup(<AgentConversationDirectory
+      activeAgentId="" agents={[agent({ displayName: "gpt-pix" })]} avatarInitials={() => "G"}
+      filterText="" formatTime={() => "12:00"} lang="zh" resolveModelLabel={() => "GPT-5.6 Luna"}
+      sessions={sessions.slice(0, count)} statusLabel={(value) => value} onContextMenu={() => undefined} onOpenAgent={() => undefined}
+    />);
+    const single = render(1);
+    expect(single.match(/gpt-pix/g)).toHaveLength(1);
+    expect(single).toContain("GPT-5.6 Luna");
+    expect(single).not.toContain("1 个会话");
+    expect(single).not.toContain("12:00");
+    expect(render(2)).toContain('aria-label="2 个会话"');
+  });
+
+  it("reveals searched special Agents even though their section defaults collapsed", () => {
+    const render = (filterText: string) => renderToStaticMarkup(<AgentConversationDirectory
+      activeAgentId="" agents={[agent({ displayName: "资料员", primaryMode: "research", roleKey: "source_finder" })]}
+      avatarInitials={() => "R"} filterText={filterText} formatTime={() => ""} lang="zh" resolveModelLabel={() => "GPT"}
+      sessions={[]} statusLabel={(value) => value} onContextMenu={() => undefined} onOpenAgent={() => undefined}
+    />);
+    expect(render("")).not.toContain("资料员");
+    expect(render("资料员")).toContain("资料员");
+    expect(render("does-not-exist")).toContain("没有匹配的 Agent 或团队");
+  });
   it("renders Agent identity as the left navigation item and keeps session count as metadata", () => {
     expect(directorySource).toContain('aria-label={lang === "zh" ? "Agent 目录" : "Agent directory"}');
     expect(directorySource).toContain("agentDisplayInfo(agent, lang, { resolveModelLabel })");
@@ -109,16 +137,19 @@ describe("AgentConversationDirectory", () => {
     expect(styles.agentRow).toContain("!grid");
     expect(styles.agentRow).toContain("!h-auto");
     expect(styles.agentRow).toContain("!w-full");
-    expect(styles.agentRow).toContain("grid-cols-[32px_minmax(0,1fr)_0.875rem]");
+    expect(styles.agentRow).toContain("grid-cols-[26px_minmax(0,1fr)_auto]");
     expect(styles.agentRow).toContain("!items-stretch");
     expect(styles.agentStatusSlot).toContain("h-full");
-    expect(styles.agentStatusSlot).toContain("w-3.5");
+    expect(styles.agentStatusSlot).toContain("min-w-3.5");
     expect(styles.agentStatusSlot).toContain("self-stretch");
-    expect(styles.agentStatusSlot).toContain("place-items-center");
+    expect(styles.agentStatusSlot).toContain("items-center");
     expect(directorySource).toContain("data-agent-status-slot");
-    expect(styles.agentTitle).toContain("[font-size:var(--vui-font-sm)]");
+    expect(styles.agentTitle).toContain("[font-size:var(--vui-font-xs)]");
     expect(styles.agentTitle).toContain("[color:var(--fg-primary)]");
-    expect(styles.agentMeta).toContain("[font-size:var(--vui-font-xs)]");
+    expect(styles.agentMeta).toContain("[font-size:var(--vui-font-2xs)]");
+    expect(styles.agentMeta).toContain("font-normal");
+    expect(styles.agentMeta).not.toContain("vui-routes-");
+    expect(styles.agentMetaItem).not.toContain("vui-routes-");
     expect(styles.agentMeta).not.toContain("text-[var(--vui-font-xs)]");
   });
 
@@ -219,8 +250,7 @@ describe("AgentConversationDirectory", () => {
     expect(directorySource).toContain("<ConversationIndexSection");
     expect(directorySource).toContain("expanded={expanded}");
     expect(directorySource).toContain("toggleSection");
-    expect(styles.agentSection).toContain("gap-1.5");
-    expect(styles.agentDirectoryList).toContain("gap-1.5");
-    expect(styles.agentDirectoryList).toContain("pl-1");
+    expect(styles.agentSection).toContain("gap-0.5");
+    expect(styles.agentDirectoryList).toContain("gap-0.5");
   });
 });

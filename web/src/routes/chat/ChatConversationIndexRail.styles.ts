@@ -73,7 +73,13 @@ const styles: Record<string, string> = {
   railActionButton:
     "vui-routes-chatcodingroute railActionButton !size-[30px] !h-[30px] !min-h-[30px] !w-[30px] !min-w-[30px] rounded-[var(--radius-control)] !border-0 !bg-transparent p-0 [color:var(--fg-secondary)] shadow-none hover:!bg-[var(--vui-control-muted-hover)] hover:[color:var(--fg-primary)] focus-visible:!bg-[var(--vui-control-muted-hover)]",
   railTop:
-    "vui-routes-chatcodingroute railTop flex min-h-[38px] min-w-0 items-center gap-1 px-2 pt-2",
+    "vui-routes-chatcodingroute railTop flex min-h-[46px] min-w-0 flex-wrap items-center gap-1 px-3 pt-2",
+  railTitle:
+    "vui-routes-chatcodingroute railTitle min-w-0 flex-1 [font-size:var(--vui-font-sm)] font-semibold [color:var(--fg-primary)]",
+  directorySearch:
+    "vui-routes-chatcodingroute directorySearch min-w-0 basis-full py-2",
+  directorySearchInput:
+    "vui-routes-chatcodingroute directorySearchInput !h-9 !w-full min-w-0 rounded-lg border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] px-3 [font-size:var(--vui-font-xs)] [color:var(--fg-primary)]",
   rightIndexTab:
     `vui-routes-chatcodingroute rightIndexTab min-w-0 ${vuiControlQuietClass}`,
   rightIndexTabActive:

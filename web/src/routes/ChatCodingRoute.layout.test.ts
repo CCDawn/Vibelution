@@ -144,6 +144,8 @@ import chatSessionStreamConnectSource from "./chat/chatSessionStreamConnect.ts?r
 import sessionDetailStreamSource from "./chat/useSessionDetailStream.ts?raw";
 import groupRoomStreamSource from "./chat/useGroupRoomStream.ts?raw";
 import chatRoomEventStreamSource from "./chat/chatRoomEventStream.ts?raw";
+import guardedEventStreamSource from "./chat/guardedEventStream.ts?raw";
+import sessionEventStreamSource from "./chat/sessionEventStream.ts?raw";
 import chatSessionSelectionSource from "./chat/useChatSessionSelection.ts?raw";
 import chatArchivedAgentRetirementSource from "./chat/useChatArchivedAgentRetirement.ts?raw";
 import chatSessionDetailHelpersSource from "./chat/chatSessionDetailHelpers.ts?raw";
@@ -254,7 +256,7 @@ const routeAndLayoutSource = `${routeSource}\n${chatWorkbenchLayoutSource}\n${ch
 const routeAndCenterPackSource = `${routeSource}\n${chatCenterTabStripSource}\n${chatCenterSessionSurfaceSource}\n${chatWorkbenchCenterColumnSource}\n${chatSessionWorkbenchShellSource}`;
 const routeAndPresentationSource = `${routeSource}\n${chatWorkbenchPresentationSource}\n${chatWorkbenchFormatSource}`;
 const routeAndComposerSource = `${routeSource}\n${chatComposerSubmitModelSource}\n${chatComposerSubmitHookSource}\n${chatActiveTurnLayerSource}\n${chatSubmitTelemetrySource}`;
-const routeAndStreamSource = `${routeSource}\n${sessionDetailStreamSource}\n${groupRoomStreamSource}\n${chatRoomEventStreamSource}\n${chatSessionStreamConnectSource}\n${chatStreamApplyControllerSource}\n${chatActiveTurnLayerSource}`;
+const routeAndStreamSource = `${routeSource}\n${sessionDetailStreamSource}\n${sessionEventStreamSource}\n${groupRoomStreamSource}\n${chatRoomEventStreamSource}\n${guardedEventStreamSource}\n${chatSessionStreamConnectSource}\n${chatStreamApplyControllerSource}\n${chatActiveTurnLayerSource}`;
 const routeAndSelectionSource = `${routeSource}\n${chatSessionSelectionSource}`;
 const routeAndHelpersSource = `${routeSource}\n${chatSessionDetailHelpersSource}\n${chatRoutePresentationSource}`;
 const routeAndLifecycleSource = `${routeSource}\n${chatWorkspaceLifecycleSource}\n${chatSessionDetailHelpersSource}`;
@@ -2000,7 +2002,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("fetchChatRoomDetail(activeGroupRoomId)");
     expect(chatApiSource).toContain("`/api/chat-rooms/${encodeURIComponent(roomId)}`");
     expect(routeAndStreamSource).toContain("consumeChatRoomEventStream");
-    expect(routeAndStreamSource).toContain("fetchWithControl(chatRoomEventsUrl(options.roomId)");
+    expect(routeAndStreamSource).toContain("consumeGuardedEventStream");
+    expect(routeAndStreamSource).toContain("fetchWithControl(options.url");
     expect(routeAndStreamSource).not.toContain("new EventSource(`/api/chat-rooms/");
     expect(routeAndStreamSource).toContain("scheduleChatRoomDetail(payload.detail)");
     expect(routeAndStreamSource).toContain("browser.chat_room_stream.closed");
@@ -2267,7 +2270,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndStreamSource).toContain("stream.removeEventListener(\"session_initial\", handleSessionInitial as EventListener)");
     expect(routeAndStreamSource).toContain("stream.removeEventListener(\"assistant_delta\", handleAssistantDelta as EventListener)");
     expect(routeAndStreamSource).toContain("queryClient.invalidateQueries({ queryKey: queryKeys.session(streamSessionId) })");
-    expect(routeAndStreamSource).toContain("const stream = new EventSource(`/api/sessions/${streamSessionId}/events?initial=none`)");
+    expect(routeAndStreamSource).toContain("const stream = createSessionEventStream(streamSessionId)");
     expect(routeAndStreamSource).not.toContain("/events?initial=light");
     expect(routeAndStreamSource).not.toContain("let pendingAssistantDeltaDetail: SessionDetail | undefined");
     expect(routeAndStreamSource).not.toContain("pendingAssistantDeltaDetail = mergeAssistantDeltaIntoSessionDetail");
@@ -2403,7 +2406,7 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("keeps active chat streams stable during direct session route switches", () => {
     const sessionStreamEffectSource = routeAndStreamSource.slice(
-      routeAndStreamSource.indexOf("const stream = new EventSource(`/api/sessions/${streamSessionId}/events?initial=none`);"),
+      routeAndStreamSource.indexOf("const stream = createSessionEventStream(streamSessionId);"),
       routeAndStreamSource.length,
     );
 
@@ -2421,7 +2424,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).not.toContain("pageVisible || directSessionBackgroundSyncActive || sessionStreamRouteSwitchGraceActive");
     expect(routeSource).toContain("&& (chatPollingVisible || groupBackgroundSyncActive)");
     expect(routeAndStreamSource).toContain("const shouldConnect = sessionStreamDecisionSnapshotRef.current.shouldConnect");
-    expect(routeAndStreamSource).toContain("if (!shouldConnect || typeof EventSource === \"undefined\")");
+    expect(routeAndStreamSource).toContain("if (!shouldConnect)");
     expect(routeSource).toContain("sessionStreamDecisionSnapshotRef");
     expect(sessionStreamEffectSource).not.toContain("sessionStreamShouldConnect,");
     expect(sessionStreamEffectSource).not.toContain("sessionStreamRouteSwitchGraceActive,");
@@ -3246,8 +3249,8 @@ describe("ChatCodingRoute layout contract", () => {
 
     expect(railTopSource).toContain("<VDropdownMenu");
     expect(railTopSource.match(/<VNativeButton|<VIconButton/g)).toHaveLength(2);
-    expect(railTopSource).toContain('<SquarePen size={16} aria-hidden="true" />');
-    expect(railTopSource).toContain("icon={<Search size={16} />}");
+    expect(railTopSource).toContain('<Plus size={16} aria-hidden="true" />');
+    expect(railTopSource).toContain('<Search size={16} aria-hidden="true" />');
     expect(railTopSource).not.toContain("<VInput");
     expect(routeAndIndexRailSource).toContain('aria-keyshortcuts="Control+N Meta+N"');
     expect(routeAndIndexRailSource).toContain('aria-keyshortcuts="Control+K Meta+K"');
@@ -3650,7 +3653,7 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("requests authoritative session refresh when the session stream errors", () => {
     const sessionStreamStart = routeAndStreamSource.indexOf(
-      "const stream = new EventSource(`/api/sessions/${streamSessionId}/events?initial=none`)",
+      "const stream = createSessionEventStream(streamSessionId)",
     );
     const onErrorStart = routeAndStreamSource.indexOf("stream.onerror = () => {", sessionStreamStart);
     const onErrorEnd = routeAndStreamSource.indexOf("function handleSessionDetail", onErrorStart);
