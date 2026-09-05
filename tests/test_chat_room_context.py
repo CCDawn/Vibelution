@@ -39,6 +39,71 @@ from tools.token_manager import estimate_messages_tokens
 ROOM_ID = "room-context-test"
 
 
+def _projection_payload(message: dict) -> dict:
+    return json.loads("".join(block["text"] for block in message["content"]))
+
+
+@pytest.mark.parametrize("fenced", [False, True])
+def test_historical_json_recap_preserves_display_without_promoting_protocol(fenced) -> None:
+    raw = _structured_output(conclusion="仍缺少独立验证。不能判定假说成立。", agreements=["未经确认的结论"])
+    if fenced:
+        raw = f"```json\n{raw}\n```"
+    message = {"messageId": "old", "participantId": "role-a", "status": "completed", "content": raw}
+    room = _room([_round(1, [message])])
+    before = copy.deepcopy(room)
+    checkpoint = build_chat_room_context_checkpoint(room, covered_round_ids=["round-1"], revision=1, created_at="fixed")
+    assert checkpoint["legacyRecap"][0]["excerpt"] == "仍缺少独立验证。不能判定假说成立。"
+    assert checkpoint["state"]["agreements"] == []
+    assert room == before
+
+
+@pytest.mark.parametrize("covered", [[], ["round-1"], ["round-1", "round-2"]])
+def test_retry_duplicate_is_excluded_across_checkpoint_delta_and_recent(covered) -> None:
+    text = "This candidate still needs an independent baseline and a reproducible falsification test."
+    first = {"messageId": "first", "participantId": "role-a", "status": "completed", "content": text}
+    retry = {**first, "messageId": "retry"}
+    room = _room([_round(1, [first]), _round(2, [retry]), _round(3, [])])
+    before = copy.deepcopy(room)
+    checkpoint = build_chat_room_context_checkpoint(room, covered_round_ids=covered, revision=1, created_at="fixed") if covered else None
+    snapshot = build_chat_room_context_snapshot(room, checkpoint=checkpoint, verbatim_rounds=2)
+    projected, _ = apply_chat_room_context_snapshot([{"role": "assistant", "content": "other candidate private history"}], snapshot)
+    serialized = json.dumps(projected, ensure_ascii=False)
+    assert serialized.count(text) == 1
+    assert "other candidate private history" not in serialized
+    assert all(
+        f"{ROOM_ID}/round-2/retry" not in _projection_payload(item).get("sourceMessageRefs", [])
+        for item in projected
+    )
+    assert room == before
+    assert resolve_chat_room_context_refs(room, [f"{ROOM_ID}/round-2/retry"])[0]["content"] == text
+
+
+def test_room_history_keeps_other_speakers_short_replies_and_changed_protocol() -> None:
+    text = "The same visible conclusion can accompany a changed action state and must not erase it."
+    first = _context_message(round_id="round-1", message_id="first", participant_id="role-a", output=_structured_output(conclusion=text))
+    changed = _context_message(round_id="round-2", message_id="changed", participant_id="role-a", output=_structured_output(conclusion=text, risks=["new risk"]))
+    other = {**first, "messageId": "other", "participantId": "role-b"}
+    short = {"messageId": "short-1", "participantId": "role-a", "status": "completed", "content": "pass"}
+    room = _room([_round(1, [first, short]), _round(2, [changed, other, {**short, "messageId": "short-2"}])])
+    snapshot = build_chat_room_context_snapshot(room, checkpoint=None)
+    messages = [m for raw in snapshot["recentRawMessages"] for m in _projection_payload(raw)["messages"]]
+    assert {m["messageId"] for m in messages} == {"first", "changed", "other", "short-1", "short-2"}
+
+
+def test_old_checkpoint_is_rebuilt_with_readable_deduplicated_history() -> None:
+    raw = "```json\n" + _structured_output(conclusion="Historical finding needs validation") + "\n```"
+    first = {"messageId": "first", "participantId": "role-a", "status": "completed", "content": raw}
+    room = _room([_round(1, [first]), _round(2, [{**first, "messageId": "retry"}])])
+    old = build_chat_room_context_checkpoint(room, covered_round_ids=["round-1", "round-2"], revision=1, created_at="fixed")
+    old["legacyRecap"] = [{"excerpt": "```json", "sourceRef": f"{ROOM_ID}/round-1/first", "speaker": "role-a"}]
+    old["contentHash"] = "old-projection-hash"
+    snapshot = build_chat_room_context_snapshot(room, checkpoint=old)
+    assert snapshot["checkpointRebuilt"] is True
+    assert [item["excerpt"] for item in snapshot["checkpoint"]["legacyRecap"]] == ["Historical finding needs validation"]
+    assert snapshot["recentRawMessages"] == []
+    assert old["legacyRecap"][0]["excerpt"] == "```json"
+
+
 def _structured_output(
     *,
     conclusion: str,

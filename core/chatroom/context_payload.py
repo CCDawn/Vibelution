@@ -288,11 +288,44 @@ def structured_protocol_from_message(message: Mapping[str, Any]) -> dict[str, An
     return None
 
 
+def historical_message_excerpt(message: Mapping[str, Any]) -> str:
+    """Read a historical display without granting its unvalidated protocol authority."""
+    content = str(message.get("content") or "").strip()
+    raw = content
+    lines = raw.splitlines()
+    if (
+        len(lines) >= 3
+        and lines[0].strip().lower() in {"```json", "```"}
+        and lines[-1].strip() == "```"
+    ):
+        raw = "\n".join(lines[1:-1])
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError:
+        value = None
+    if isinstance(value, Mapping) and isinstance(value.get("display"), Mapping):
+        conclusion = value["display"].get("conclusion")
+        if isinstance(conclusion, str) and conclusion.strip():
+            return sanitize_assistant_visible_text(conclusion).strip()
+    # Code fences and JSON delimiters alone convey no historical finding.
+    return next(
+        (
+            line.strip()
+            for line in lines
+            if line.strip()
+            and not line.strip().startswith("```")
+            and line.strip() not in {"{", "}", "[", "]"}
+        ),
+        "",
+    )
+
+
 __all__ = [
     "CHAT_ROOM_CONTEXT_PAYLOAD_KIND",
     "CHAT_ROOM_CONTEXT_PAYLOAD_SCHEMA_VERSION",
     "ChatRoomContextPayloadError",
     "chat_room_context_output_contract",
     "ingest_chat_room_context_output",
+    "historical_message_excerpt",
     "structured_protocol_from_message",
 ]
