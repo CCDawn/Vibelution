@@ -1,5 +1,7 @@
 import type { NodeHandoffRecord } from "../../../api/types/researchWorkflow";
-import { VErrorSummary } from "../../../components/vui";
+import { VButton, VErrorSummary } from "../../../components/vui";
+import { useState } from "react";
+import { KnowledgePackageReader } from "./KnowledgePackageReader";
 import { presentResearchWorkflowError } from "../researchWorkflowErrorModel";
 import styles from "./NodeHandoffSection.styles";
 import { getNodeAdapter } from "./nodeAdapterModel";
@@ -31,11 +33,14 @@ function blockedReasonLabel(reason: string, isZh: boolean): string {
 }
 
 export function NodeHandoffSection(props: {
+  teamId?: string;
+  runId?: string;
   handoffs: NodeHandoffRecord[];
   pending: boolean;
   blockedReason: string;
   lang?: "zh" | "en";
 }) {
+  const [readingId, setReadingId] = useState<string | null>(null);
   const isZh = props.lang !== "en";
   if (!props.pending && !props.blockedReason && !props.handoffs.length) return null;
   return (
@@ -53,6 +58,12 @@ export function NodeHandoffSection(props: {
         <article className={styles.record} key={handoff.handoffId}>
           <strong>{getNodeAdapter(handoff.fromNodeId)?.label || (isZh ? "前序步骤" : "Previous step")} → {getNodeAdapter(handoff.toNodeId)?.label || (isZh ? "后续步骤" : "Next step")}</strong>
           <span>{isZh ? HANDOFF_STATUS_LABELS[handoff.status] || "状态待确认" : handoff.status} · {(handoff.outputArtifactRefs ?? []).length} {isZh ? "项交接产物" : "handoff artifacts"}</span>
+          {props.teamId && props.runId && handoff.outputArtifactRefs?.some(ref => ref.kind === "knowledge_package_draft") ? <>
+            <VButton variant="secondary" aria-expanded={readingId === handoff.handoffId} onClick={() => setReadingId(readingId === handoff.handoffId ? null : handoff.handoffId)}>
+              {readingId === handoff.handoffId ? (isZh ? "收起知识包" : "Hide knowledge package") : (isZh ? "阅读知识包" : "Read knowledge package")}
+            </VButton>
+            {readingId === handoff.handoffId ? <KnowledgePackageReader runId={props.runId} teamId={props.teamId} handoffId={handoff.handoffId} lang={props.lang} /> : null}
+          </> : null}
           <VErrorSummary tone="info" label={isZh ? "交接记录" : "Handoff record"}
             summary={isZh ? "查看产物引用与交接状态" : "View artifact references and handoff status"}
             openLabel={isZh ? "详情" : "Details"} closeLabel={isZh ? "收起" : "Hide"}

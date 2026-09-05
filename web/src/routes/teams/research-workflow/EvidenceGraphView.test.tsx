@@ -47,6 +47,17 @@ const GRAPH: EvidenceGraphDto = {
 };
 
 describe("EvidenceGraphContent", () => {
+  it("uses real source and topic names for canonical candidate relationships", () => {
+    const markup = renderToStaticMarkup(<EvidenceGraphContent graph={{nodes: [
+      {id: "candidate-123", type: "source_manifest", title: "Riemann survey"},
+      {id: "theme-456", type: "source_topic", title: "研究主题甲"},
+    ], edges: [{source: "candidate-123", target: "theme-456", kind: "source_supports_theme"}]}} />);
+    expect(markup).toContain("来源（1）");
+    expect(markup).toContain("研究主题（1）");
+    expect(markup).toContain("Riemann survey —提供主题依据→ 研究主题甲");
+    expect(markup).not.toContain("candidate-123");
+    expect(markup).not.toContain("其他节点");
+  });
   it("renders grouped nodes with claims and edges", () => {
     const markup = renderToStaticMarkup(<EvidenceGraphContent graph={GRAPH} />);
     expect(markup).toContain("证据（1）");

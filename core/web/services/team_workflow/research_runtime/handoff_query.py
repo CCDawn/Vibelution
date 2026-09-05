@@ -4,6 +4,41 @@ from __future__ import annotations
 
 from typing import Any
 
+from . import artifact_readback_registry as artifacts
+
+
+def _knowledge_packages(record: dict[str, Any], handoff: dict[str, Any]) -> list[dict[str, Any]]:
+    """Read only the drafts bound to this handoff, retaining their independent status."""
+    result = []
+    for ref in handoff.get("outputArtifactRefs") or []:
+        if ref.get("kind") != "knowledge_package_draft":
+            continue
+        reading: dict[str, Any] = {"artifactId": ref.get("artifactId", ""), "status": "unavailable"}
+        result.append(reading)
+        parsed = artifacts.parse_canonical_ref(str(ref.get("uri") or ""))
+        if (not parsed or parsed["kind"] != "knowledge_package_draft"
+                or parsed["teamId"] != record["teamId"]
+                or parsed["contentHash"] != ref.get("contentHash")):
+            continue
+        payload = artifacts.load_scoped_artifact_payload(
+            "knowledge_package_draft", team_id=record["teamId"],
+            authority_run_id=parsed["authorityRunId"], workflow_run_id=record["runId"],
+            content_hash=parsed["contentHash"],
+        )
+        if payload is None or artifacts.canonical_sha256(payload) != parsed["contentHash"]:
+            continue
+        draft = payload.get("draft") or {}
+        proposal = draft.get("proposalPayload") or {}
+        text = lambda value: value if isinstance(value, str) else ""
+        reading.update(
+            status="available", title=text(proposal.get("title")),
+            summary=text(proposal.get("summary")), content=text(proposal.get("content")),
+            sourceUrl=text((draft.get("sourceTrace") or {}).get("sourceUrl")),
+            riskSummary=text(draft.get("riskSummary")),
+            uncertainties=[item for item in draft.get("uncertainty", []) if isinstance(item, str)],
+        )
+    return result
+
 
 class HandoffQueryError(ValueError):
     def __init__(self, message: str, *, code: str):
@@ -49,6 +84,7 @@ def get_handoff_detail(
         "teamId": record["teamId"],
         "runVersion": record["runVersion"],
         "handoff": handoff,
+        "knowledgePackages": _knowledge_packages(record, handoff),
         "fromNodeRun": next(
             (
                 dict(item)

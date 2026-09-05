@@ -8,7 +8,7 @@ response_model_exclude_unset=True. SSE stays on StreamingResponse.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -196,6 +196,17 @@ class ResearchWorkflowQuestionLineageResponse(ResearchRuntimeJsonResponse):
     segments: dict[str, Any] = Field(default_factory=dict)
 
 
+class KnowledgePackageReadingResponse(ResearchRuntimeJsonResponse):
+    artifactId: str
+    status: Literal["available", "unavailable"]
+    title: str = ""
+    summary: str = ""
+    content: str = ""
+    sourceUrl: str = ""
+    riskSummary: str = ""
+    uncertainties: list[str] = Field(default_factory=list)
+
+
 class ResearchWorkflowHandoffDetailResponse(ResearchRuntimeJsonResponse):
     runId: str = ""
     teamId: str = ""
@@ -205,6 +216,7 @@ class ResearchWorkflowHandoffDetailResponse(ResearchRuntimeJsonResponse):
     toNodeRun: dict[str, Any] | None = None
     humanTask: dict[str, Any] | None = None
     artifactManifests: list[dict[str, Any]] = Field(default_factory=list)
+    knowledgePackages: list[KnowledgePackageReadingResponse] = Field(default_factory=list)
 
 
 class ResearchWorkflowCommandReceiptResponse(ResearchRuntimeJsonResponse):
