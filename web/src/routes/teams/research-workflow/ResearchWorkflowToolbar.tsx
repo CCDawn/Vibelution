@@ -66,7 +66,7 @@ export function ResearchWorkflowToolbar(props: {
         <div className={styles.switcher}>
           {props.experimentOptions.length > 0 ? (
             <>
-              <VButton density="compact" variant="secondary" aria-label={isZh ? "切换研究题目" : "Switch research question"} onClick={() => setPickerOpen(true)} className="max-w-full truncate" title={emptySwitcherLabel}>{emptySwitcherLabel}</VButton>
+              <VButton density="compact" variant="secondary" aria-label={isZh ? "切换研究题目" : "Switch research question"} onClick={() => setPickerOpen(true)} className={styles.questionTrigger} title={emptySwitcherLabel}>{emptySwitcherLabel}</VButton>
               <VCommandPalette open={pickerOpen} onOpenChange={setPickerOpen}
                 labels={{ searchPlaceholder: "搜索题号或题名", emptyTitle: "没有匹配的研究题目", hint: "方向键选择 · Enter 打开 · Esc 关闭" }}
                 items={props.experimentOptions.map((item) => ({ id: item.questionId, label: item.label, detail: item.description, group: "研究题目", keywords: `${item.questionId} ${item.title}`, onRun: () => props.onSelectExperiment(item.questionId) }))}

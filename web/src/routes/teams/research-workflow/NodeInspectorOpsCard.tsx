@@ -276,7 +276,7 @@ export function NodeInspectorOpsCard(props: NodeInspectorOpsCardProps) {
         ))}
       </section>
 
-      {!props.meters.length ? <p className="py-2 text-xs text-[var(--fg-secondary)]">暂无可计算的资源用量</p> : null}
+      {!props.meters.length ? <p className={styles.resourceEmpty}>暂无可计算的资源用量</p> : null}
       </div>
       <div className={styles.actions}>
         {props.primaryOffer && !alreadyRunning ? (

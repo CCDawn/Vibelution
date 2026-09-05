@@ -867,7 +867,7 @@ export function ResearchProcessWorkspace({
         inspector={archiveOpen ? null : (
           <ResearchCurrentTaskInspector
             context={workflowContext}
-            navigation={<div className="flex shrink-0 flex-wrap gap-1 border-b border-[var(--vui-border-subtle)] p-2" aria-label="详情范围">
+            navigation={<div className={styles.detailNavigation} aria-label="详情范围">
               <VButton density="compact" variant="secondary" aria-pressed={location.panel === "node"} onClick={() => location.openPanel("node")}>节点详情</VButton>
               <VButton density="compact" variant="secondary" aria-pressed={location.panel === "evidence"} onClick={() => location.openPanel("evidence")}>题目证据</VButton>
               <VButton density="compact" variant="secondary" aria-pressed={location.panel === "timeline"} onClick={() => location.openPanel("timeline")}>运行记录</VButton>

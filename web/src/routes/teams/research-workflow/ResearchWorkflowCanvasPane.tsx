@@ -40,7 +40,7 @@ export const ResearchWorkflowCanvasPane = memo(function ResearchWorkflowCanvasPa
           defaultOpen={false}
         />
       ) : null}
-      {props.graph ? <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-[var(--vui-border-subtle)] p-2" aria-label="画布展示范围">
+      {props.graph ? <div className={styles.controls} aria-label="画布展示范围">
         <VButton density="compact" variant={viewMode === "stage" ? "primary" : "secondary"} aria-pressed={viewMode === "stage"} onClick={() => setViewMode("stage")}>阶段聚焦</VButton>
         <VButton density="compact" variant={viewMode === "canvas" ? "primary" : "secondary"} aria-pressed={viewMode === "canvas"} onClick={() => setViewMode("canvas")}>全流程</VButton>
         <VButton density="compact" variant="secondary" isDisabled={!props.currentTaskNodeId} onClick={() => { setViewMode("stage"); props.onSelectNode(props.currentTaskNodeId ?? null); }}>定位当前任务</VButton>
