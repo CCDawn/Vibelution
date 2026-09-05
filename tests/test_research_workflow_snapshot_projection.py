@@ -1574,6 +1574,31 @@ def test_hypothesis_first_discussion_projection_uses_current_run_chain_state(
     assert calls == [("research-team", "SCI-096", "run-current")]
 
 
+@pytest.mark.parametrize("explicit_scope", [False, True])
+def test_knowledge_child_reads_discussions_only_with_explicit_scope(monkeypatch, explicit_scope):
+    from core.research.workflow.knowledge_sideflow_definition import KNOWLEDGE_SIDEFLOW_WORKFLOW_ID
+    from core.web.services import chat_room_service
+    from core.web.services.team_workflow import meeting_rounds
+    from core.web.services.team_workflow.research_runtime import hypothesis_first_chain
+
+    snapshot = {"researchObjectiveContract": {"hypothesisFirst": True}}
+    scope = _discussion_scope_for_projection().to_dict()
+    if explicit_scope:
+        snapshot["discussionScope"] = scope
+    run = replace(
+        build_run_record(run_id="run-knowledge-child"),
+        workflow_id=KNOWLEDGE_SIDEFLOW_WORKFLOW_ID,
+        input_snapshot_json=json.dumps(snapshot),
+    )
+    calls = []
+    monkeypatch.setattr(hypothesis_first_chain, "chain_state", lambda *_a, **_kw: pytest.fail("Child must not discover a parent discussion"))
+    monkeypatch.setattr(meeting_rounds, "list_meeting_rounds", lambda *_a: calls.append("meetings") or {"meetings": []})
+    monkeypatch.setattr(chat_room_service, "read_chat_rooms_snapshot", lambda: calls.append("rooms") or [])
+    result = _discussion_inputs_from_run(run, [], {})
+    assert result == (({"scope": scope}, [], []) if explicit_scope else (None, None, None))
+    assert calls == (["meetings", "rooms"] if explicit_scope else [])
+
+
 def test_round_candidate_ledger_fallback_uses_meeting_workflow_run(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -27,6 +27,7 @@ from core.research.workflow.ledger.errors import (
     WorkflowLedgerUnavailableError,
 )
 from core.research.workflow.ledger.repository import WorkflowLedgerRepository
+from core.research.workflow.knowledge_sideflow_definition import KNOWLEDGE_SIDEFLOW_WORKFLOW_ID
 
 from .blocked_reason import format_blocked_reason
 from .command_offers import build_command_offers
@@ -795,6 +796,10 @@ def _discussion_inputs_from_run(
     """
 
     projection = _discussion_projection_from_sources(run, events, launch_context)
+    # The child inherits the research objective, not the parent's discussion.
+    # Its node sessions are projected separately from their Ledger anchors.
+    if projection is None and getattr(run, "workflow_id", "") == KNOWLEDGE_SIDEFLOW_WORKFLOW_ID:
+        return None, None, None
     snapshot = _run_input_snapshot(run)
     objective = snapshot.get("researchObjectiveContract")
     hypothesis_first = isinstance(objective, Mapping) and objective.get(
