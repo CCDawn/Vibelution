@@ -20,6 +20,7 @@ import {
   HeartHandshake,
   MessageCircleHeart,
   RotateCcw,
+  PanelLeftOpen,
   Search,
   Sparkles,
   Trash2,
@@ -69,12 +70,13 @@ import {
 } from "../../api/types";
 import type { ConversationStreamingFramePaintMetrics } from "../../components/conversation/conversationStreamingMetrics";
 import { shouldShowNextStateSignalInConversation } from "../../components/conversation/conversationNextStateSignal";
-import { VButton, VContextualHint, VInput, VNativeInput, VStateSurface, VTooltip, type VButtonProps } from "../../components/vui";
+import { VButton, VIconButton, VContextualHint, VInput, VNativeInput, VStateSurface, VTooltip, type VButtonProps } from "../../components/vui";
 import { collectBrowserPageSnapshot, postBrowserTelemetry } from "../../app/browserTelemetry";
 import { startUserAction } from "../../app/userActionTelemetry";
 import { getPageInstanceId } from "../../app/pageInstance";
 import { usePageVisibility, useStartupWarmup } from "../../app/pollingPolicy";
 import type { TranslationKey } from "../../i18n/dictionary";
+import { PaneResizeHandle } from "../../components/layout/PaneResizeHandle";
 import { PaneCollapseHandle } from "../../components/layout/PaneCollapseHandle";
 import { useAppI18n } from "../../i18n/useAppI18n";
 import { useChatWorkbenchStore } from "../../store/chatWorkbenchStore";
@@ -2824,18 +2826,19 @@ export function ChatCodingRouteWorkbench() {
           {sessionIndexHasMore ? (
             <VButton
               type="button"
+              variant="ghost"
               className={styles.sessionLoadMoreButton}
               onClick={() => rawSessionsQuery.loadMore()}
               isDisabled={rawSessionsQuery.isLoadingMore}
               aria-label={sessionIndexLoadMoreLabel}
             >
               <span>{sessionIndexLoadMoreLabel}</span>
-              <strong>{sessionIndexProgressLabel}</strong>
+              <span className={styles.sessionLoadMoreCount}>{sessionIndexProgressLabel}</span>
             </VButton>
           ) : sessionIndexProgressVisible ? (
             <div className={styles.sessionLoadMoreStatus} role="status">
               <span>{sessionIndexFullyLoadedLabel}</span>
-              <strong>{sessionIndexProgressLabel}</strong>
+              <span className={styles.sessionLoadMoreCount}>{sessionIndexProgressLabel}</span>
             </div>
           ) : null}
           {sessionContextMenu && contextMenuSession ? (
@@ -2946,7 +2949,7 @@ export function ChatCodingRouteWorkbench() {
       </Suspense>
       )}
       leftResizeHandle={
-      responsiveLayout.leftVisible ? <PaneCollapseHandle
+      responsiveLayout.leftVisible ? verifiedCompanionMode ? <PaneCollapseHandle
         side="left"
         collapsed={conversationIndexCollapsed}
         separatorLabel={t("resizeLeftPanel")}
@@ -2958,6 +2961,15 @@ export function ChatCodingRouteWorkbench() {
         valueMin={MIN_LEFT_PANEL_WIDTH}
         valueMax={MAX_LEFT_PANEL_WIDTH}
         onToggle={() => setLeftRailCollapsed((current) => !current)}
+        onPointerDown={(event) => handleResizeStart("left", event)}
+        onKeyDown={(event) => handleResizeKeyDown("left", event)}
+      /> : conversationIndexCollapsed ? null : <PaneResizeHandle
+        label={t("resizeLeftPanel")}
+        className={styles.resizeHandleLeft}
+        active={dragState?.side === "left"}
+        valueNow={leftPanelWidth}
+        valueMin={MIN_LEFT_PANEL_WIDTH}
+        valueMax={MAX_LEFT_PANEL_WIDTH}
         onPointerDown={(event) => handleResizeStart("left", event)}
         onKeyDown={(event) => handleResizeKeyDown("left", event)}
       /> : null
@@ -2979,6 +2991,21 @@ export function ChatCodingRouteWorkbench() {
             showAgentFallbackTab={!verifiedCompanionMode}
             companionHeader={verifiedCompanionMode && activeCompanion ? (
               <CompanionConversationHeader companion={activeCompanion} lang={lang} />
+            ) : null}
+            conversationIndexControl={!verifiedCompanionMode && responsiveLayout.leftVisible && conversationIndexCollapsed ? (
+              <VIconButton
+                tooltip=""
+                id="chat-conversation-index-toggle"
+                className={styles.conversationIndexToggle}
+                label={lang === "zh" ? "展开会话列" : "Expand conversation column"}
+                aria-expanded={false}
+                aria-controls="chat-conversation-index-pane"
+                icon={<PanelLeftOpen size={16} aria-hidden="true" />}
+                onClick={() => {
+                  setLeftRailCollapsed(false);
+                  window.requestAnimationFrame(() => document.getElementById("chat-conversation-index-collapse")?.focus());
+                }}
+              />
             ) : null}
             workspaceActiveTab={workspace.activeTab}
             leftOverlayVisible={responsiveLayout.leftVisible}
@@ -3340,6 +3367,14 @@ export function ChatCodingRouteWorkbench() {
       <ChatConversationIndexRail
         conversationIndexPaneClassName={conversationIndexPaneClassName}
         conversationIndexCollapsed={conversationIndexCollapsed}
+        onCollapseConversationIndex={() => {
+          if (conversationIndexOverlayOpen) {
+            closeResponsiveOverlayPane();
+          } else {
+            setLeftRailCollapsed(true);
+            window.requestAnimationFrame(() => document.getElementById("chat-conversation-index-toggle")?.focus());
+          }
+        }}
         conversationIndexOverlayOpen={conversationIndexOverlayOpen}
         lang={lang}
         locale={locale}

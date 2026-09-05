@@ -267,9 +267,13 @@ const styles: Record<string, string> = {
   railSectionHeading:
     "vui-routes-chatcodingroute railSectionHeading m-0 min-w-0 truncate [font-size:var(--vui-font-xs)] font-[650] leading-tight text-[var(--fg-primary)]",
   sessionLoadMoreButton:
-    `vui-routes-chatcodingroute sessionLoadMoreButton min-w-0 ${vuiControlQuietClass}`,
+    "vui-routes-chatcodingroute sessionLoadMoreButton !flex !w-full min-w-0 !h-8 items-center justify-center gap-2 !border-0 !bg-transparent !px-2 !py-1 text-[var(--fg-secondary)] shadow-none hover:!bg-[var(--vui-control-muted-hover)] [&_[data-slot=vui-button-label]]:flex [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-2",
+  conversationIndexToggle:
+    "vui-routes-chatcodingroute conversationIndexToggle !size-[30px] !min-h-[30px] !min-w-[30px] !border-0 !bg-transparent text-[var(--fg-secondary)] shadow-none hover:!bg-[var(--vui-control-muted-hover)]",
+  sessionLoadMoreCount:
+    "vui-routes-chatcodingroute sessionLoadMoreCount shrink-0 [font-size:var(--vui-font-xs)] font-normal tabular-nums text-[var(--fg-tertiary)]",
   sessionLoadMoreStatus:
-    "vui-routes-chatcodingroute sessionLoadMoreStatus min-w-0",
+    "vui-routes-chatcodingroute sessionLoadMoreStatus flex min-w-0 items-center justify-center gap-2 py-2 [font-size:var(--vui-font-xs)] text-[var(--fg-tertiary)]",
   sessionBulkBar:
     "vui-routes-chatcodingroute sessionBulkBar mx-2 mb-2 min-w-0",
   tab:

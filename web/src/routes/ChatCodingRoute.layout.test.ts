@@ -2105,7 +2105,6 @@ describe("ChatCodingRoute layout contract", () => {
       [routeStyles.rightIndexTabs, "grid-cols-[repeat(2,minmax(0,1fr))]"],
       [routeStyles.memberIndexSummary, "grid-cols-[auto_minmax(0,1fr)_auto]"],
       [routeStyles.groupAgentOption, "grid-cols-[auto_28px_minmax(0,1fr)]"],
-      [routeStyles.conversationTreeRootHeader, "grid-cols-[minmax(0,1fr)_auto]"],
       [routeStyles.groupManagementActions, "grid-cols-[repeat(2,minmax(0,1fr))]"],
       [routeStyles.groupManagementControls, "grid-cols-[minmax(0,1fr)_auto]"],
       [routeStyles.groupMemberChip, "grid-cols-[18px_26px_minmax(0,1fr)_auto]"],
@@ -3241,14 +3240,14 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.sessionLoadMoreStatus).toBeTypeOf("string");
   });
 
-  it("uses two Codex-style icon controls for create and search", () => {
+  it("keeps search, create and collapse together above a compact two-row index", () => {
     const railTopSource = routeAndIndexRailSource.slice(
       routeAndIndexRailSource.indexOf("<div className={styles.railTop}>"),
       routeAndIndexRailSource.indexOf("<div", routeAndIndexRailSource.indexOf("<div className={styles.railTop}>") + 1),
     );
 
     expect(railTopSource).toContain("<VDropdownMenu");
-    expect(railTopSource.match(/<VNativeButton|<VIconButton/g)).toHaveLength(2);
+    expect(railTopSource.match(/<VNativeButton|<VIconButton/g)).toHaveLength(3);
     expect(railTopSource).toContain('<Plus size={16} aria-hidden="true" />');
     expect(railTopSource).toContain('<Search size={16} aria-hidden="true" />');
     expect(railTopSource).not.toContain("<VInput");
@@ -3260,12 +3259,19 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.railActionButton).toContain("!border-0");
     expect(routeStyles.railActionButton).toContain("!bg-transparent");
     expect(routeStyles.conversationIndexPanelBody).toContain("!overflow-hidden");
-    expect(routeStyles.conversationIndexLayout).toContain("grid-rows-[auto_minmax(0,1fr)_auto]");
+    expect(routeStyles.conversationIndexLayout).toContain("grid-rows-[minmax(0,1fr)_auto]");
     expect(routeStyles.conversationIndexScrollRegion).toContain("overflow-y-auto");
     expect(routeAndIndexRailSource).toContain("styles.conversationIndexPanelBody");
     expect(routeAndIndexRailSource).toContain("styles.conversationIndexLayout");
     expect(routeAndIndexRailSource).toContain("styles.conversationIndexScrollRegion");
     expect(routeStyles.systemEntryGroup).toContain("border-t");
+    expect(routeStyles.systemEntryGroup).toContain("content-start");
+    expect(railTopSource).toContain("onCollapseConversationIndex");
+    expect(railTopSource).toContain("PanelLeftClose");
+    expect(routeStyles.railOverlay).toContain("!h-auto !bottom-0");
+    expect(conversationIndexRailSource).not.toContain("<strong>1</strong>");
+    expect(routeSource).toContain("<PaneResizeHandle");
+    expect(routeSource).toContain("conversationIndexControl={!verifiedCompanionMode");
     expect(routeStyles.systemEntryButton).toContain("grid-cols-[28px_minmax(0,1fr)]");
     expect(routeStyles.systemEntryButton).toContain("border-transparent");
     expect(routeStyles.systemEntryButtonActive).toContain("before:absolute");
