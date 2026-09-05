@@ -304,15 +304,6 @@ class RecordLifecycle(_StrictModel):
     replacedByRef: str | None = None
     invalidatedAt: str | None = None
 
-    @model_validator(mode="after")
-    def validate_lineage(self) -> RecordLifecycle:
-        if self.revisionOfRef and self.replacedByRef:
-            raise ValueError(
-                "one record cannot be both a new revision and replaced by another revision"
-            )
-        return self
-
-
 class ScientificSemanticRecord(_StrictModel):
     execution: ActivityExecution | None = None
     result: ActivityResult | None = None
@@ -326,8 +317,19 @@ class ScientificSemanticRecord(_StrictModel):
     @model_validator(mode="after")
     def validate_cross_object_invariants(self) -> ScientificSemanticRecord:
         if self.execution and self.result:
-            if self.execution.status == "failed" and self.result.completeness == "empty":
-                raise ValueError("failed execution cannot be represented as an empty result")
+            if self.execution.status == "succeeded" and (
+                self.result.completeness == "not_produced"
+            ):
+                raise ValueError(
+                    "succeeded execution must explicitly report complete, partial, or empty result"
+                )
+            if self.execution.status == "failed" and self.result.completeness not in {
+                "not_produced",
+                "partial",
+            }:
+                raise ValueError(
+                    "failed execution result must be not_produced or partial"
+                )
             if self.execution.status not in {
                 "succeeded",
                 "failed",

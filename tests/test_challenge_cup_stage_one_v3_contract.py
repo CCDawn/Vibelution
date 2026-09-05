@@ -76,6 +76,22 @@ def test_result_allows_succeeded_empty_but_rejects_failed_empty() -> None:
             result=ActivityResult(completeness="empty", artifactRefs=[]),
         )
 
+    with pytest.raises(ValidationError):
+        ScientificSemanticRecord(
+            execution=ActivityExecution(
+                status="failed", failureReasonCode="provider_error"
+            ),
+            result=ActivityResult(
+                completeness="complete", artifactRefs=["artifact-1"]
+            ),
+        )
+
+    with pytest.raises(ValidationError):
+        ScientificSemanticRecord(
+            execution=ActivityExecution(status="succeeded"),
+            result=ActivityResult(completeness="not_produced", artifactRefs=[]),
+        )
+
 
 @pytest.mark.parametrize("position", ["insufficient", "mixed"])
 def test_review_budget_exhaustion_is_insufficient_or_mixed_escalate_only(
@@ -210,6 +226,18 @@ def test_archiving_and_replacing_record_never_rewrites_scientific_facts() -> Non
         RecordLifecycle.model_validate(
             {"availability": "active", "retentionState": "superseded"}
         )
+
+
+def test_intermediate_revision_can_reference_predecessor_and_successor() -> None:
+    lifecycle = RecordLifecycle(
+        availability="archived",
+        revisionOfRef="hypothesis-1@r1",
+        replacedByRef="hypothesis-1@r3",
+        invalidatedAt="2026-09-05T00:00:00Z",
+    )
+
+    assert lifecycle.revisionOfRef == "hypothesis-1@r1"
+    assert lifecycle.replacedByRef == "hypothesis-1@r3"
 
 
 def test_supported_advance_requires_accepted_evidence_and_complete_provenance() -> None:
