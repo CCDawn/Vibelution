@@ -32,21 +32,21 @@ def graph_record(payload, *, team_id="team-1"):
 
 
 def test_graph_uses_bound_ref_and_exact_run(monkeypatch):
-    payload = {"nodes": [{"id": "e1"}], "edges": [], "teamId": "team-1", "sourceCollectionRunId": "sc-1"}
+    payload = {"nodes": [{"candidateId": "e1", "candidateType": "source"}], "edges": [], "teamId": "team-1", "sourceCollectionRunId": "sc-1"}
     calls = []
     def load(kind, **scope):
         calls.append((kind, scope))
         return payload
     monkeypatch.setattr(artifacts, "load_scoped_artifact_payload", load)
     graph = graphs.project_evidence_graph(graph_record(payload))
-    assert graph["nodes"] == payload["nodes"]
+    assert graph["nodes"][0]["id"] == payload["nodes"][0]["candidateId"]
     assert calls[0][1]["workflow_run_id"] == "run-1"
     assert calls[0][1]["authority_run_id"] == "sc-1"
 
 
 @pytest.mark.parametrize("change", ["hash", "team", "no_ref"])
 def test_graph_rejects_unbound_or_changed_artifacts(monkeypatch, change):
-    payload = {"nodes": [{"id": "e1"}], "edges": []}
+    payload = {"nodes": [{"candidateId": "e1", "candidateType": "source"}], "edges": []}
     record = graph_record(payload, team_id="other-team" if change == "team" else "team-1")
     if change == "no_ref":
         record["artifactSummary"]["refs"] = []
@@ -60,7 +60,7 @@ def test_ledger_keeps_evidence_envelope_separate_from_bound_graph(monkeypatch):
     from core.web.services import research_evidence_service, team_knowledge_service
     from core.web.services.team_workflow.experiment_api import plan
     from core.web.services.team_workflow.research_runtime import ledger_domain_projections as projections
-    graph = {"nodes": [{"id": "current-evidence"}], "edges": []}
+    graph = {"nodes": [{"candidateId": "current-evidence", "candidateType": "evidence"}], "edges": []}
     record = {**graph_record(graph), "runVersion": 1}
     evidence = [{"evidenceId": "team-evidence"}]
     monkeypatch.setattr(projections, "snapshot_projection_record", lambda _: record)
@@ -70,7 +70,7 @@ def test_ledger_keeps_evidence_envelope_separate_from_bound_graph(monkeypatch):
     monkeypatch.setattr(artifacts, "load_scoped_artifact_payload", lambda *a, **k: graph)
     result = projections.project_research_ledger_from_snapshot(None)
     assert result["claimEvidence"] == evidence
-    assert result["graph"]["nodes"] == graph["nodes"]
+    assert result["graph"]["nodes"][0]["id"] == "current-evidence"
     assert "team-evidence" not in str(result["graph"])
 
 
@@ -98,7 +98,7 @@ def test_existing_frozen_binding_is_used_without_team_lookup(monkeypatch):
 
 
 def test_graph_projects_real_readback_and_rejects_post_receipt_mutation(monkeypatch):
-    raw = {"nodes": [{"id": "a"}, {"id": "b"}],
+    raw = {"nodes": [{"candidateId": "a", "candidateType": "source"}, {"candidateId": "b", "candidateType": "source"}],
         "edges": [{"sourceCandidateId": "a", "targetCandidateId": "b", "evidenceRefs": ["claim-1"]}],
         "evidenceGaps": [{"description": "Independent replication missing"}],
         "counterEvidenceRefs": [{"evidenceRef": "claim-2", "claim": "Null result"}]}
@@ -106,7 +106,12 @@ def test_graph_projects_real_readback_and_rejects_post_receipt_mutation(monkeypa
     monkeypatch.setattr(artifacts, "load_allowed_evidence_refs", lambda **_: ["claim-1", "claim-2"])
     payload = artifacts.load_scoped_artifact_payload("evidence_relation_graph", team_id="team-1", authority_run_id="sc-1", workflow_run_id="run-1")
     record = graph_record(payload)
-    assert graphs.project_evidence_graph(record)["edges"] == raw["edges"]
+    projected = graphs.project_evidence_graph(record)
+    assert projected["edges"][0]["source"] == "a"
+    assert projected["edges"][0]["target"] == "b"
+    assert projected["nodes"][0]["id"] == "a"
+    assert "id" not in raw["nodes"][0]
+    assert "source" not in raw["edges"][0]
     raw["evidenceGaps"][0]["description"] = "Changed after receipt"
     assert graphs.evidence_graph_availability(record)[0] is False
     with pytest.raises(graphs.NodeCommandUnavailable):
@@ -114,8 +119,8 @@ def test_graph_projects_real_readback_and_rejects_post_receipt_mutation(monkeypa
 
 
 def test_missing_current_graph_does_not_fall_back_to_prior_receipt(monkeypatch):
-    old = {"nodes": [{"id": "old"}], "edges": []}
-    new = {"nodes": [{"id": "new"}], "edges": []}
+    old = {"nodes": [{"candidateId": "old"}], "edges": []}
+    new = {"nodes": [{"candidateId": "new"}], "edges": []}
     record = graph_record(old)
     newest = graph_record(new)["artifactSummary"]["refs"][0]
     newest["verifiedAtMs"] = 20

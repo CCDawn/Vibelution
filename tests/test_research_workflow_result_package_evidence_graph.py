@@ -91,7 +91,7 @@ def test_result_package_command_stays_unavailable_without_ready_terminal_node() 
 
 def _bound_graph_record(monkeypatch):
     from core.web.services.team_workflow.research_runtime import artifact_readback_registry as registry
-    raw = {"nodes": [{"id": "n1"}, {"id": "n2"}], "edges": [{"source": "n1", "target": "n2", "kind": "supports"}]}
+    raw = {"nodes": [{"candidateId": "n1", "candidateType": "source"}, {"candidateId": "n2", "candidateType": "source"}], "edges": [{"sourceCandidateId": "n1", "targetCandidateId": "n2", "relation": "supports"}]}
     digest = registry.canonical_sha256(raw)
     ref = registry.build_canonical_ref(kind="evidence_relation_graph", team_id="team-1", authority_run_id="sc-1", content_hash=digest)
     monkeypatch.setattr(registry, "load_scoped_artifact_payload", lambda *a, **k: raw)

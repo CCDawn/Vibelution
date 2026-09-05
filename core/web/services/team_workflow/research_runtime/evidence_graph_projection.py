@@ -29,8 +29,15 @@ def _bound_graph(record: dict[str, Any]) -> dict[str, Any] | None:
     )
     if graph is None or artifacts.canonical_sha256(graph) != parsed["contentHash"]:
         return None
-    return {**graph, "runId": run_id, "source": "canonical_artifact",
-            "canonicalRef": ref["canonicalRef"]}
+    # Map domain fields to the public graph DTO only after hash verification.
+    # The stored artifact and its hash remain unchanged.
+    nodes = [{**node, "id": node["candidateId"], "type": str(node.get("candidateType") or "")}
+             for node in graph.get("nodes", [])]
+    edges = [{**edge, "source": edge["sourceCandidateId"], "target": edge["targetCandidateId"],
+              "kind": str(edge.get("relation") or "")}
+             for edge in graph.get("edges", [])]
+    return {**graph, "nodes": nodes, "edges": edges, "runId": run_id,
+            "source": "canonical_artifact", "canonicalRef": ref["canonicalRef"]}
 
 
 def evidence_graph_availability(record: dict[str, Any]) -> tuple[bool, str]:
