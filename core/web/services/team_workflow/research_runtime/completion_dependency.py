@@ -54,16 +54,16 @@ def bind_completion_resume(error: CompletionDependencyPending, action: PendingAc
     }
 
 
-def receipt_delivery_statuses(uow: Any, action: PendingAction, handle: AgentTaskHandle) -> set[str]:
+def receipt_delivery_state(uow: Any, action: PendingAction, handle: AgentTaskHandle) -> tuple[set[str], list[list[Any]]]:
     rows = uow.repository.execute(
-        "SELECT status FROM outbox_actions WHERE run_id = ? AND action_kind = 'reconcile' "
+        "SELECT action_id, status, updated_at_ms FROM outbox_actions WHERE run_id = ? AND action_kind = 'reconcile' "
         "AND json_extract(payload_json, '$.kind') = 'challenge_model_invocation_receipt_persist' "
         "AND json_extract(payload_json, '$.receipt.scope.formalNodeRunId') = ? "
         "AND json_extract(payload_json, '$.receipt.scope.sessionId') = ? "
-        "AND json_extract(payload_json, '$.receipt.scope.turnId') = ?",
+        "AND json_extract(payload_json, '$.receipt.scope.turnId') = ? ORDER BY action_id",
         (action.run_id, action.node_run_id, handle.session_id, handle.turn_id),
     ).fetchall()
-    return {str(row[0]) for row in rows}
+    return {str(row[1]) for row in rows}, [[row[0], row[2]] for row in rows if row[1] == "succeeded"]
 
 
 def defer_completion(store: Any, *, outbox: Any, action: PendingAction,
@@ -73,19 +73,20 @@ def defer_completion(store: Any, *, outbox: Any, action: PendingAction,
     handle = AgentTaskHandle(**error.resume["handle"])
 
     def mutate(uow):
-        statuses = receipt_delivery_statuses(uow, action, handle)
+        statuses, delivered = receipt_delivery_state(uow, action, handle)
         previous = json.loads(outbox.last_problem_json or "{}")
         # Delivery can commit between the Registry read and this transaction.
         # Allow one fresh read in that race; a permanently missing readback is
         # then exposed instead of polling an already-finished delivery forever.
         pending = bool(statuses & {"pending", "leased"}) or (
-            "succeeded" in statuses and previous.get("code") != COMPLETION_PENDING
+            bool(delivered) and delivered != previous.get("deliveredReceipts")
         )
         problem = {
             "code": COMPLETION_PENDING,
             "detail": str(error),
             "dependency": "model_invocation_receipt",
             "dependencyStatus": "pending" if pending else "unavailable",
+            "deliveredReceipts": delivered,
             "executionStatus": str(error.snapshot.get("terminalStatus") or ""),
             "completionResume": error.resume,
         }

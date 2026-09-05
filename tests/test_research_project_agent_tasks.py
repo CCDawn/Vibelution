@@ -1741,15 +1741,16 @@ def _append_turn_journal(session_id: str, entries: list[dict]) -> None:
     ("failed", ["artifact-1"], "completed"),
     ("failed", [], "failed"),
     ("needs_continue", [], "stopped"),
+    ("stopped_by_user", [], "stopped"),
 ])
 def test_formal_task_execution_and_business_verdict_have_separate_authority(tmp_path, monkeypatch, execution, refs, expected):
     from core.web.services.team_workflow import research_project_agent_tasks as tasks
-    from core.chat.turn_journal import EVENT_TURN_COMPLETED, EVENT_TURN_FAILED
+    from core.chat.turn_journal import EVENT_TURN_COMPLETED, EVENT_TURN_FAILED, EVENT_TURN_INTERRUPTED
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(tasks, "_project_agent_task_result_refs", lambda *_: refs)
     monkeypatch.setattr(session_service, "get_session_detail", lambda *_a, **_k: pytest.fail("current Session phase is not task authority"))
     _append_turn_journal("session-formal", [
-        {"turnId": "bound", "eventType": EVENT_TURN_FAILED if execution == "failed" else EVENT_TURN_COMPLETED,
+        {"turnId": "bound", "eventType": (EVENT_TURN_INTERRUPTED if execution == "stopped_by_user" else EVENT_TURN_FAILED if execution == "failed" else EVENT_TURN_COMPLETED),
          "status": execution, "payload": {"summary": "A final answer is not a business artifact."}},
         {"turnId": "later-unrelated", "eventType": EVENT_TURN_FAILED, "status": "failed"},
     ])

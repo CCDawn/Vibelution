@@ -1949,7 +1949,7 @@ def _reconcile_project_agent_task_from_session(team_id: str, project_id: str, ta
         # A failed post-writeback model call does not erase durable work. The
         # workflow still validates these artifacts before advancing its node.
         return {**verdict, "status": "completed"}
-    if status in {"cancelled", "canceled", "stopped", "interrupted", "needs_continue", "paused_limit"}:
+    if terminal.event_type == EVENT_TURN_INTERRUPTED or status in {"cancelled", "canceled", "stopped", "interrupted", "needs_continue", "paused_limit"}:
         return {**verdict, "status": "stopped", "failureCode": f"session_{status}"}
     if terminal.event_type == EVENT_TURN_FAILED or status in {"failed", "failed_provider", "failed_runtime", "error", "timed_out"}:
         return {**verdict, "status": "failed", "failureCode": f"session_{status}"}

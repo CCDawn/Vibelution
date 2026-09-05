@@ -177,3 +177,30 @@ def test_workflow_failure_does_not_overwrite_session_execution_projection():
     assert updated["closure"]["status"] == "failed"
     assert updated["rootSession"] == payload["rootSession"]
     assert updated["scopedSessions"] == payload["scopedSessions"]
+
+
+def test_delivery_during_leased_resume_gets_one_new_registry_read(tmp_path):
+    from core.research.workflow.ledger.outbox import lease_ready_actions
+    h = CommandHarness(tmp_path / "ledger.sqlite")
+    try:
+        h.seed_run(status="running")
+        action = _agent_action()
+        _seed(h, action, action.node_id)
+        row, _ = _delivery(action, "pending")
+        h.store.submit(lambda u: u.repository.insert_outbox(row), force_flush=True).result()
+        original = _leased_outbox(h, action, attempt_count=1)
+        defer_completion(h.store, outbox=original, action=action, error=_error(action), owner="adapter-worker", now_ms=FIXED_NOW_MS)
+        # Delivery wins after a resumed completion has read Registry, while
+        # wake cannot touch its leased adapter row.
+        h.store.submit(lambda u: u.repository.execute(
+            "UPDATE outbox_actions SET status='succeeded', updated_at_ms=? WHERE action_id='receipt-delivery'",
+            (FIXED_NOW_MS + 5000,)), force_flush=True).result()
+        resumed = lease_ready_actions(h.store, owner="adapter-worker", now_ms=FIXED_NOW_MS + 5000, limit=1)[0]
+        defer_completion(h.store, outbox=resumed, action=action, error=_error(action), owner="adapter-worker", now_ms=FIXED_NOW_MS + 5000)
+        assert _outbox_row(h, original.action_id).status == "pending"
+        # The same acknowledged delivery cannot produce an unbounded reread.
+        resumed = lease_ready_actions(h.store, owner="adapter-worker", now_ms=FIXED_NOW_MS + 10000, limit=1)[0]
+        defer_completion(h.store, outbox=resumed, action=action, error=_error(action), owner="adapter-worker", now_ms=FIXED_NOW_MS + 10000)
+        assert _outbox_row(h, original.action_id).status == "failed"
+    finally:
+        h.close()
