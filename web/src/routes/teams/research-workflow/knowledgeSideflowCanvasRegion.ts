@@ -33,7 +33,7 @@ export const KNOWLEDGE_SIDEFLOW_STAGE_ID = "knowledge_sideflow";
 export const KNOWLEDGE_SIDEFLOW_STAGE_LABEL = "知识搜集 · 子流程";
 
 /** Fixed display labels mirroring the server sideflow definition order. */
-const SIDEFLOW_NODE_LABELS: Record<(typeof KNOWLEDGE_SIDEFLOW_NODE_IDS)[number], string> = {
+export const SIDEFLOW_NODE_LABELS: Record<(typeof KNOWLEDGE_SIDEFLOW_NODE_IDS)[number], string> = {
   source_finding: "资料寻找",
   source_extraction: "资料提炼",
   evidence_relations: "证据关系",

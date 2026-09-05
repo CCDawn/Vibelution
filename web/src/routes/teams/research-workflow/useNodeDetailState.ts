@@ -12,6 +12,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { fetchResearchWorkflowNodeDetail } from "../../../api/research-workflow/runs";
 import type { ResearchWorkflowNodeDetail } from "../../../api/types/research-workflow/core";
+import { isKnowledgeSideflowCanvasNode } from "./knowledgeSideflowCanvasRegion";
 import { isHypothesisFirstCanvasNode } from "./hypothesisFirstCanvasRegion";
 
 export type NodeDetailState =
@@ -72,9 +73,9 @@ export function useNodeDetailState(
       setState({ kind: "idle" });
       return;
     }
-    // Hypothesis-first region cards are display-layer constructs: they have no
-    // backend node detail endpoint, so skip the fetch and report empty.
-    if (isHypothesisFirstCanvasNode(nodeId)) {
+    // Display-only cards are not nodes in the parent run. Knowledge details
+    // are loaded by KnowledgeChildNodeInspector from the invocation child run.
+    if (isHypothesisFirstCanvasNode(nodeId) || isKnowledgeSideflowCanvasNode(nodeId)) {
       setState({ kind: "empty", nodeId });
       return;
     }
