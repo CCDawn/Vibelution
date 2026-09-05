@@ -3631,6 +3631,29 @@ def project_state_from_records(
     active_workflow_run = _active_stage_one_run(formal_runs)
     exploratory_drafts = _question_exploratory_drafts(chain, normalized_question_id)
     formal_candidate_count = len(candidate_ids)
+    stage_one_snapshot = dict((formal_snapshots or {}).get(
+        str((active_workflow_run or {}).get("runId") or "")
+    ) or {})
+    # R0 is exploratory. The canonical main run must first understand the
+    # problem and accept the knowledge sideflow before grounded R1 can run.
+    prerequisite_blockers = {
+        "knowledge_handoff_not_accepted", "knowledge_package_not_materialized",
+    }
+    stage_one_prerequisites_pending = bool(
+        active_workflow_run
+        and exploratory_drafts
+        and formal_candidate_count < 2
+        and generation["lifecycle"] == "completed"
+        and stage_one_snapshot
+        and (
+            "problem_understanding" in list(stage_one_snapshot.get("activeNodeIds") or [])
+            or any(
+                offer.get("nodeId") == "hypothesis_design"
+                and prerequisite_blockers.intersection(offer.get("blockerIds") or [])
+                for offer in list(stage_one_snapshot.get("commandOffers") or [])
+            )
+        )
+    )
     needs_stage_one_run = (
         active_workflow_run is None
         and formal_candidate_count < 2
@@ -3696,6 +3719,7 @@ def project_state_from_records(
         active_workflow_run is not None
         and formal_candidate_count < 2
         and exploratory_drafts
+        and not stage_one_prerequisites_pending
         and not any(
             str(meeting.get("meetingType") or "") == _GENERATION_MEETING_TYPE
             and str(meeting.get("candidateAuthority") or "").strip().lower()
@@ -4160,7 +4184,9 @@ def project_state_from_records(
     # convergence.  Older clients could create the run as a container before
     # generation; letting that legacy fact win here hides the generation and
     # review actions required to ever reach convergence.
-    if formal_phase is not None and (
+    if stage_one_prerequisites_pending:
+        current_phase = "formal_runtime"
+    elif formal_phase is not None and (
         converged
         or formal_phase in {"program_delivery", "completed"}
         or formal_runtime.get("lineageDisposition") == "conflicted"

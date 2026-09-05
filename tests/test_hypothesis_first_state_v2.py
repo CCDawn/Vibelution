@@ -7794,6 +7794,26 @@ def test_stage_one_run_r0_completion_offers_grounded_stage_one_generation() -> N
     assert offer["expectedStateVersion"] == state["stateVersion"]
 
 
+@pytest.mark.parametrize("active_node", ["problem_understanding", "hypothesis_design"])
+def test_r0_completion_exposes_formal_prerequisites_before_grounded_generation(active_node: str) -> None:
+    state = _stage_one_projection(
+        chain_records=[*_stage_one_draft_records("r0"), {
+            "recordKind": "generation_attempt", "attemptId": "attempt-r0",
+            "questionId": "SCI-091", "meetingRoundId": "r0", "attemptNumber": 1,
+            "lifecycle": "completed", "outcome": "succeeded",
+        }],
+        formal_runs=[{"runId": "run-stage-one", "status": "created", "questionId": "SCI-091"}],
+        formal_snapshots={"run-stage-one": {
+            "activeNodeIds": [active_node],
+            "commandOffers": [{"nodeId": "hypothesis_design", "command": "start_node",
+                "available": False, "blockerIds": ["knowledge_package_not_materialized"]}],
+        }},
+    )
+    assert state["currentPhase"] == "formal_runtime"
+    assert "open-stage-one-generation" not in [a["actionId"] for a in state["allowedActions"]]
+    assert state["generation"]["candidateCount"] == 0
+
+
 def test_stage_one_origin_drafts_with_run_offer_grounded_generation() -> None:
     # SCI-091 field shape: the origin layer closed an R0 round (drafts carry
     # the origin meeting id); after a stage-one run exists the projection
