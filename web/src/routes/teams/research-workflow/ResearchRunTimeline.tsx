@@ -1,7 +1,7 @@
 import type { WorkflowRunRecord } from "../../../api/researchWorkflow";
 import type { WorkflowCanvasProjection } from "../../../api/types/researchWorkflow";
 import type { WorkflowEventEnvelope } from "../../../api/types/research-workflow/events";
-import { VEmptyState, VErrorSummary, VPanelHeader, VSurface } from "../../../components/vui";
+import { summarizeErrorText, VEmptyState, VErrorSummary, VPanelHeader, VSurface } from "../../../components/vui";
 import { useShellI18n } from "../../../i18n/useShellI18n";
 import { buildResearchTimelineGroups } from "./researchWorkflowTimelineModel";
 import { ResearchWorkflowInsightsPanel } from "./ResearchWorkflowInsightsPanel";
@@ -38,7 +38,17 @@ export function ResearchRunTimeline(props: {
                 <ul className={styles.items}>
                   {group.items.map((item) => (
                     <li key={item.key} className={styles.item}>
-                      {item.details ? <VErrorSummary label={isZh ? "事件详情" : "Event details"} summary={item.label} details={item.details} openLabel={isZh ? "诊断详情" : "Details"} closeLabel={isZh ? "收起详情" : "Hide details"} defaultOpen={false} /> : <span>{item.label}</span>}
+                      {item.details ? (
+                        <VErrorSummary
+                          label={isZh ? "事件详情" : "Event details"}
+                          summary={summarizeErrorText(item.label, 48).summary}
+                          details={`${item.label}\n\n${item.details}`}
+                          openLabel={isZh ? "展开" : "Details"}
+                          closeLabel={isZh ? "收起" : "Hide"}
+                          defaultOpen={false}
+                        />
+                      ) : <span>{item.label}</span>}
+                      {item.status ? <span className={styles.status}>{item.status}</span> : null}
                       <time className={styles.status} dateTime={item.occurredAt || undefined}>
                         {item.occurredAt ? new Date(item.occurredAt).toLocaleString(isZh ? "zh-CN" : "en-US", { hour12: false }) : (isZh ? "当前状态快照 · 无事件时间" : "Current snapshot · no event time")}
                       </time>
