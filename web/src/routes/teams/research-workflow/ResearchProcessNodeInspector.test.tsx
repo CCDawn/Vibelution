@@ -101,6 +101,11 @@ function renderInspector(detail: ResearchWorkflowNodeDetail | null, extras: {
 }
 
 describe("ResearchProcessNodeInspector command rendering", () => {
+  it.each(["node_already_succeeded", "node_in_flight"])("removes the redundant disabled start for %s", (reasonCode) => {
+    const markup = renderInspector(makeDetail({commandOffers: [offer({command: "start_node", label: "启动资料寻找", available: false, reasonCode})]}));
+    expect(markup).not.toContain("启动资料寻找");
+    expect(markup).not.toContain("高级操作");
+  });
   it("keeps one primary retry and collapses advanced actions below the blocker", () => {
     const markup = renderInspector(makeDetail({status: "blocked",
       blockedReason: "evidence_relations requires ['evidence_relation_graph']",

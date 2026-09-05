@@ -74,9 +74,15 @@ export function ResearchProcessNodeInspector(props: ResearchProcessNodeInspector
 
   const { adapter, detail } = props;
   const isCurrentTask = props.isCurrentTask !== false;
-  const offers = props.hideStartOffer
+  const nodeOffers = props.hideStartOffer
     ? withoutStartNodeOffers(detail.commandOffers)
     : (detail.commandOffers ?? []);
+  // These disabled start offers repeat the visible node status and suggest
+  // an impossible next step. Keep genuine prerequisite failures explainable.
+  const offers = nodeOffers.filter((offer) => !(
+    offer.command === "start_node" && !offer.available
+    && ["retry_owns_recovery", "node_already_succeeded", "node_in_flight"].includes(offer.reasonCode)
+  ));
   const selectedPrimaryOffer = isCurrentTask && adapter.actorKind === "agent"
     ? pickPrimaryCommandOffer(offers)
     : null;
