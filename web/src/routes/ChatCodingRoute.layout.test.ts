@@ -3249,8 +3249,8 @@ describe("ChatCodingRoute layout contract", () => {
 
     expect(railTopSource).toContain("<VDropdownMenu");
     expect(railTopSource.match(/<VNativeButton|<VIconButton/g)).toHaveLength(2);
-    expect(railTopSource).toContain('<SquarePen size={16} aria-hidden="true" />');
-    expect(railTopSource).toContain("icon={<Search size={16} />}");
+    expect(railTopSource).toContain('<Plus size={16} aria-hidden="true" />');
+    expect(railTopSource).toContain('<Search size={16} aria-hidden="true" />');
     expect(railTopSource).not.toContain("<VInput");
     expect(routeAndIndexRailSource).toContain('aria-keyshortcuts="Control+N Meta+N"');
     expect(routeAndIndexRailSource).toContain('aria-keyshortcuts="Control+K Meta+K"');

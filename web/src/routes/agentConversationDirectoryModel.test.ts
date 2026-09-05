@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AgentInstance, Team, TeamMember } from "../api/types";
 import {
@@ -7,7 +7,25 @@ import {
   compareAgentDirectoryStableOrder,
   isConversationDirectoryAgent,
   isEligibleDirectoryAgent,
+  readDirectoryCollapsedSections,
+  writeDirectoryCollapsedSections,
 } from "./agentConversationDirectoryModel";
+
+afterEach(() => vi.unstubAllGlobals());
+
+describe("directory display preferences", () => {
+  it("remembers explicit expanded and collapsed sections", () => {
+    const data = new Map<string, string>();
+    vi.stubGlobal("localStorage", { getItem: (key: string) => data.get(key) ?? null, setItem: (key: string, value: string) => data.set(key, value) });
+    writeDirectoryCollapsedSections({ conversation: true, special: false, "team:research": false });
+    expect(readDirectoryCollapsedSections()).toEqual({ conversation: true, special: false, "team:research": false });
+  });
+
+  it("matches the displayed model label without changing directory membership", () => {
+    const partition = buildAgentDirectoryPartition({ agents: [agent({ displayName: "日常助手" })], teams: [], filterText: "Luna", resolveModelLabel: () => "Relay GPT-5.6 Luna" });
+    expect(partition.conversationAgents.map((item) => item.agentId)).toEqual(["agent-1"]);
+  });
+});
 
 function agent(overrides: Partial<AgentInstance> = {}): AgentInstance {
   return {

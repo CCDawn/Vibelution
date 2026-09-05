@@ -1,4 +1,6 @@
 const styles = {
+  conversationGroupIdentity: "flex min-w-0 items-center gap-2",
+  conversationGroupLabel: "truncate",
   conversationGroup:
     "vui-routes-chatcodingroute conversationGroup grid min-w-0 gap-1.5",
   // surface-role: hover-fill — transparent idle; hover uses theme card token (no structure wash)

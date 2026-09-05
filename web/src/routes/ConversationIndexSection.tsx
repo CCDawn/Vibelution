@@ -8,6 +8,8 @@ type ConversationIndexSectionProps = {
   children: ReactNode;
   className?: string;
   count: number;
+  countLabel?: string;
+  activity?: ReactNode;
   expanded: boolean;
   label: string;
   onToggle: () => void;
@@ -17,6 +19,8 @@ export function ConversationIndexSection({
   children,
   className = "",
   count,
+  countLabel,
+  activity,
   expanded,
   label,
   onToggle,
@@ -38,8 +42,8 @@ export function ConversationIndexSection({
         aria-controls={listId}
       >
         <ChevronRight size={14} aria-hidden="true" />
-        <span id={headerId}>{label}</span>
-        <strong>{count}</strong>
+        <span id={headerId} className={styles.conversationGroupIdentity}><span className={styles.conversationGroupLabel}>{label}</span>{activity}</span>
+        <strong title={countLabel}>{count}</strong>
       </VNativeButton>
       {expanded ? (
         <div
