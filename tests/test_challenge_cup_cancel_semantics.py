@@ -21,6 +21,8 @@ def test_cancel_records_authenticated_operator_and_replays_once(tmp_path, monkey
         records = semantics.list_scientific_semantic_records(harness.store, request.run_id)
         assert len(records) == 1
         assert first.command_id == replay.command_id
+        assert first.latest_event_sequence == harness.store.latest_event_sequence(request.run_id)
+        assert replay.latest_event_sequence == first.latest_event_sequence
         assert records[0]["semantic"]["execution"] == {
             "status": "cancelled",
             "cancelledByAgentRef": "real-operator",
