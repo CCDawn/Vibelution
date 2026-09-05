@@ -863,6 +863,60 @@ def test_run_process_uses_utf8_and_failure_summary_tolerates_missing_streams(
     assert gate.summarize_failure(completed, "tool") == "tool: command failed"
 
 
+def test_failure_summary_reports_failed_node_and_cause_not_session_banner() -> None:
+    completed = subprocess.CompletedProcess(
+        args=["pytest"], returncode=1,
+        stdout=("================ test session starts ================\n"
+                "collected 649 items\n"
+                "E   sqlite3.OperationalError: database is locked\n"
+                "FAILED tests/test_auth.py::test_concurrent_replay - sqlite3.OperationalError\n"
+                "================ 1 failed, 648 passed ================\n"),
+        stderr="unrelated plugin warning\n",
+    )
+    summary = gate.summarize_failure(completed, "pytest")
+    assert "tests/test_auth.py::test_concurrent_replay" in summary
+    assert "database is locked" in summary
+    assert "session starts" not in summary
+    assert "plugin warning" not in summary
+    assert len(summary) <= 300
+
+
+def test_failure_summary_reports_type_error_after_progress_and_redacts_secret() -> None:
+    completed = subprocess.CompletedProcess(
+        args=["tsc"], returncode=1,
+        stdout="Building...\nsrc/page.ts(4,2): error TS2322: token=private-value is invalid\n",
+        stderr="",
+    )
+    summary = gate.summarize_failure(completed, "web-typecheck")
+    assert "TS2322" in summary
+    assert "private-value" not in summary
+    assert "[REDACTED]" in summary
+
+
+def test_failure_summary_preserves_collection_error_and_ansi_cleanup() -> None:
+    completed = subprocess.CompletedProcess(
+        args=["pytest"], returncode=2,
+        stdout="session starts\n\x1b[31mERROR tests/test_import.py\x1b[0m\nE   ModuleNotFoundError: missing package\n",
+        stderr="",
+    )
+    summary = gate.summarize_failure(completed, "pytest")
+    assert "ERROR tests/test_import.py" in summary
+    assert "ModuleNotFoundError" in summary
+    assert "\x1b" not in summary
+
+
+def test_failure_summary_does_not_pair_different_test_failures() -> None:
+    completed = subprocess.CompletedProcess(
+        args=["pytest"], returncode=1,
+        stdout="E   ValueError: final-test-only\nFAILED tests/test_a.py::first\nFAILED tests/test_b.py::last\n",
+        stderr="",
+    )
+    summary = gate.summarize_failure(completed, "pytest")
+    assert "tests/test_a.py::first" in summary
+    assert "tests/test_b.py::last" in summary
+    assert "final-test-only" not in summary
+
+
 def test_main_emits_ascii_json_when_gate_result_contains_non_ascii(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
