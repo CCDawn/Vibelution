@@ -41,6 +41,7 @@ from typing import Any
 from core.infrastructure import developer_sandbox
 from core.research.workflow.contracts import ContractValidationError, scope_hash_for
 from core.research.workflow.definition import CHALLENGE_CUP_WORKFLOW_ID
+from core.research.workflow.knowledge_sideflow_definition import KNOWLEDGE_SIDEFLOW_WORKFLOW_ID
 
 SCHEMA_VERSION = 1
 HARD_ROUND_LIMIT = 3
@@ -4777,8 +4778,8 @@ def auto_accept_knowledge_handoffs(
     accepted -> knowledge review approved -> official sync) is itself the
     human decision, so per operator policy the residual ``knowledge_handoff``
     click is accepted automatically instead of dead-waiting on a human.  The
-    helper enumerates the question's non-archived formal runs (the same
-    ``list_runs`` read as the auto-retry / auto-create steps) and, per run,
+    helper enumerates the question's non-archived main and parallel knowledge
+    sideflow runs and, per run,
     resolves every pending ``knowledge_handoff`` human task through the exact
     formal command SSOT the manual accept uses
     (``WorkflowCommandKind.RESOLVE_HUMAN_TASK``, deterministic idempotency key
@@ -4813,9 +4814,13 @@ def auto_accept_knowledge_handoffs(
     try:
         from .formal_read_runtime import get_query_service
 
-        payload = get_query_service().list_runs(
-            team_id=team_id, workflow_id=CHALLENGE_CUP_WORKFLOW_ID
-        )
+        query_service = get_query_service()
+        runs_by_id: dict[str, Mapping[str, Any]] = {}
+        for workflow_id in (CHALLENGE_CUP_WORKFLOW_ID, KNOWLEDGE_SIDEFLOW_WORKFLOW_ID):
+            payload = query_service.list_runs(team_id=team_id, workflow_id=workflow_id)
+            for run in list((payload or {}).get("runs") or []):
+                if isinstance(run, Mapping) and str(run.get("runId") or "").strip():
+                    runs_by_id[str(run["runId"]).strip()] = run
     except Exception:  # noqa: BLE001 - formal runtime absent (command line)
         return summary
     from .runtime_factory import production_workflow_runtime
@@ -4825,7 +4830,7 @@ def auto_accept_knowledge_handoffs(
         return summary
     runs = [
         run
-        for run in list((payload or {}).get("runs") or [])
+        for run in runs_by_id.values()
         if isinstance(run, Mapping)
         and str(run.get("questionId") or "").strip().upper()
         == normalized_question_id

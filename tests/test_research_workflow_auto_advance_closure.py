@@ -2906,6 +2906,46 @@ def test_auto_accept_submits_command_then_replays_as_reused(
         harness.close()
 
 
+@pytest.mark.parametrize("workflow_id", [
+    "challenge-cup-research", "challenge-cup-knowledge-sideflow",
+])
+def test_auto_accept_scans_governed_gate_in_each_workflow(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, workflow_id: str,
+) -> None:
+    from core.web.services.team_workflow.research_runtime import formal_read_runtime
+
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        _seed_auto_accept_gate(harness)
+        capturing = _CapturingCommandService(harness.command_service)
+        _kh_integration_env(tmp_path, monkeypatch, harness, capturing)
+        queried = []
+
+        class ScopedQuery:
+            def list_runs(self, *, team_id: str, workflow_id: str):
+                queried.append(workflow_id)
+                return {"runs": [
+                    {"runId": _KH_RUN_ID, "questionId": "SCI-096", "status": "waiting_human"},
+                    {"runId": "other-question", "questionId": "SCI-097", "status": "waiting_human"},
+                    {"runId": "archived-run", "questionId": "SCI-096", "status": "archived"},
+                ] if workflow_id == target_workflow else []}
+
+        target_workflow = workflow_id
+        monkeypatch.setattr(formal_read_runtime, "get_query_service", ScopedQuery)
+        summary = chain.auto_accept_knowledge_handoffs(_KH_TEAM_ID, question_id="SCI-096")
+        assert summary["accepted"] == 1
+        assert summary["runsScanned"] == 1
+        assert summary["failed"] == 0
+        assert len(capturing.requests) == 1
+        assert set(queried) == {"challenge-cup-research", "challenge-cup-knowledge-sideflow"}
+        replay = chain.auto_accept_knowledge_handoffs(_KH_TEAM_ID, question_id="SCI-096")
+        assert replay["reused"] == 1
+        assert replay["accepted"] == 0
+        assert len(capturing.requests) == 1
+    finally:
+        harness.close()
+
+
 def test_auto_accept_skips_when_no_pending_task(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
