@@ -959,6 +959,40 @@ def test_selector_ignores_deleted_changed_python_test_file(tmp_path: Path):
     assert result["coverageGaps"] == []
 
 
+def test_selector_removes_deleted_test_files_from_matching_rule_commands(tmp_path: Path):
+    (tmp_path / "core").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "core" / "feature.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (tmp_path / "tests" / "test_live.py").write_text(
+        "def test_value():\n    assert True\n",
+        encoding="utf-8",
+    )
+    matrix = {
+        "rules": [
+            {
+                "id": "feature",
+                "paths": ["core/feature.py"],
+                "commands": [
+                    ".\\.venv\\Scripts\\python.exe -m pytest "
+                    "tests/test_deleted.py tests/test_live.py -q"
+                ],
+            }
+        ]
+    }
+
+    result = select_tests.select_tests(
+        ["core/feature.py", "tests/test_deleted.py"],
+        matrix,
+        include_always=False,
+        project_root=tmp_path,
+    )
+
+    assert result["commands"] == [
+        ".\\.venv\\Scripts\\python.exe -m pytest tests/test_live.py -q --maxfail=0"
+    ]
+    assert result["coverageGaps"] == []
+
+
 def test_selector_parallelizes_multiple_unmapped_changed_python_tests(tmp_path: Path):
     (tmp_path / "tests").mkdir()
     for name in ("test_alpha.py", "test_beta.py", "test_gamma.py"):

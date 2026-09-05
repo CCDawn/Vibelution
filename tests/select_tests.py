@@ -768,7 +768,47 @@ def _parallelize_pytest_command(command: str) -> str:
     return f'{command} -n {workers} --dist loadfile -m "not serial"'
 
 
-def _rule_commands(rule: dict[str, Any]) -> list[str]:
+def _filter_deleted_changed_pytest_files(
+    command: str,
+    *,
+    project_root: Path,
+    changed_files: set[str],
+) -> str:
+    """Drop explicit pytest files deleted by the current change set."""
+    if " -m pytest " not in command:
+        return command
+    tokens = command.split()
+    explicit_test_tokens = [
+        token
+        for token in tokens
+        if token.strip("'\"").replace("\\", "/").startswith("tests/")
+        and token.strip("'\"").lower().endswith(".py")
+    ]
+    if not explicit_test_tokens:
+        return command
+    deleted_changed_tests = {
+        token
+        for token in explicit_test_tokens
+        if token.strip("'\"").replace("\\", "/") in changed_files
+        and not (project_root / token.strip("'\"").replace("\\", "/")).is_file()
+    }
+    if not deleted_changed_tests:
+        return command
+    filtered = [
+        token
+        for token in tokens
+        if token not in deleted_changed_tests
+    ]
+    if not any(token in filtered for token in explicit_test_tokens):
+        return ""
+    return " ".join(filtered)
+
+
+def _rule_commands(
+    rule: dict[str, Any],
+    project_root: Path,
+    changed_files: set[str],
+) -> list[str]:
     """Materialize a rule's commands with selector-managed xdist parallelism.
 
     Every multi-file pytest batch of a non-serial rule gets
@@ -779,7 +819,17 @@ def _rule_commands(rule: dict[str, Any]) -> list[str]:
     that pytest-xdist cannot isolate, and ``-m "not serial"`` would silently
     deselect their serial-marked coverage instead of running it elsewhere.
     """
-    commands = [str(command) for command in rule.get("commands", [])]
+    commands = [
+        filtered
+        for command in rule.get("commands", [])
+        if (
+            filtered := _filter_deleted_changed_pytest_files(
+                str(command),
+                project_root=project_root,
+                changed_files=changed_files,
+            )
+        )
+    ]
     if "local-serial" in _execution_layers(rule, ["focused"]):
         return commands
     return [_parallelize_pytest_command(command) for command in commands]
@@ -906,7 +956,7 @@ def select_tests(
             "matchedFiles": matched_files,
         }
         matched_rules.append(matched_rule)
-        commands.extend(_rule_commands(rule))
+        commands.extend(_rule_commands(rule, project_root, set(normalized_files)))
         notes.extend(str(note) for note in rule.get("notes", []))
         validation_layers.extend(_execution_layers(rule, ["focused"]))
 
