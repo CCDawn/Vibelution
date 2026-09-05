@@ -1175,7 +1175,7 @@ def test_ledger_ports_result_evaluation_fashion_mnist_formal_without_agent(
         harness.close()
 
 
-def test_result_evaluation_binding_heals_from_sibling_freeze(
+def test_result_evaluation_binding_does_not_borrow_sibling_freeze(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from core.web.services.team_workflow.research_runtime.real_readiness_context import (
@@ -1214,8 +1214,8 @@ def test_result_evaluation_binding_heals_from_sibling_freeze(
         context = RealDomainReadinessContext(harness.store)
         binding = context.binding_snapshot(run_id, "result_evaluation")
         assert binding is not None
-        assert binding["agentId"] == "agent-from-freeze"
-        assert binding["resolvedFrom"] == "sibling_freeze"
+        assert binding["agentId"] == ""
+        assert binding["snapshotId"] == "snap:empty"
         ports = RealDomainPorts(harness.store)
         resolved = ports.resolve_binding(
             PendingAction(
@@ -1232,12 +1232,12 @@ def test_result_evaluation_binding_heals_from_sibling_freeze(
                 budget_policy_hash="p-1",
             )
         )
-        assert resolved.agent_id == "agent-from-freeze"
+        assert resolved.agent_id == ""
     finally:
         harness.close()
 
 
-def test_result_evaluation_binding_heals_empty_freeze_from_team_role(
+def test_result_evaluation_binding_does_not_fill_empty_freeze_from_team(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from core.web.services.team_workflow.research_runtime.real_readiness_context import (
@@ -1270,7 +1270,7 @@ def test_result_evaluation_binding_heals_empty_freeze_from_team_role(
         context = RealDomainReadinessContext(harness.store)
         binding = context.binding_snapshot(run_id, "result_evaluation")
         assert binding is not None
-        assert binding["agentId"] == "agent-from-canvas"
+        assert binding["agentId"] == ""
         ports = RealDomainPorts(harness.store)
         resolved = ports.resolve_binding(
             PendingAction(
@@ -1287,7 +1287,7 @@ def test_result_evaluation_binding_heals_empty_freeze_from_team_role(
                 budget_policy_hash="p-1",
             )
         )
-        assert resolved.agent_id == "agent-from-canvas"
+        assert resolved.agent_id == ""
     finally:
         harness.close()
 

@@ -28,9 +28,6 @@ from core.web.services.team_workflow.research_runtime.graph_dispatch_worker impo
 from core.web.services.team_workflow.research_runtime.service import (
     ResearchWorkflowError,
 )
-from core.web.services.team_workflow.research_runtime.team_role_source import (
-    heal_agent_binding_from_sibling_freeze,
-)
 from tests._support.workflow_ledger_helpers import (
     FIXED_NOW_MS,
     build_attempt_record,
@@ -298,33 +295,6 @@ def test_created_run_with_existing_reconciliation_event_fills_status_without_new
         assert worker.run_once() == 0
     finally:
         store.close()
-
-
-def test_sibling_binding_never_crosses_role_boundary() -> None:
-    wrong_role = {
-        "agentBindingSnapshot": [
-            {
-                "nodeId": "source_finding",
-                "agentId": "agent-search",
-                "roleKey": "source_finder",
-            }
-        ]
-    }
-    assert heal_agent_binding_from_sibling_freeze(wrong_role, "hypothesis_design") is None
-
-    same_role = {
-        "agentBindingSnapshot": [
-            {
-                "nodeId": "protocol_design",
-                "agentId": "agent-planner",
-                "roleKey": "experiment_planner",
-            }
-        ]
-    }
-    bound = heal_agent_binding_from_sibling_freeze(same_role, "hypothesis_design")
-    assert bound is not None
-    assert bound["agentId"] == "agent-planner"
-    assert bound["roleKey"] == "experiment_planner"
 
 
 def test_catalog_run_authorization_is_hashed_and_idempotent(

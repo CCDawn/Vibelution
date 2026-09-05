@@ -43,6 +43,12 @@ Adapter 执行 → Domain read-back → Receipt → Handoff → 下一节点 Rea
 - Run/Turn 中的 binding、model、Prompt/system segments、history、ToolPolicy 与权限
   仅是创建时冻结的不可变历史快照，用于复现和审计，不是回写来源。
 - Canvas 仅投影 Team 成员。Canvas 保存不能反向修改 `Team.members` 或 Agent 配置。
+- Run 的节点绑定只能读取该节点的冻结记录。缺失/空 Agent 保持 unbound，由 readiness 阻塞；
+  不从当前 Team 或其他节点补全，不制造 `heal:*` 快照。更换执行者必须经过正式绑定变更。
+- 运行证据图只读该 Run `artifactSummary.refs` 绑定的最新已物化图回执，并经现有 scoped
+  artifact loader 与 SHA256 校验后展示。内容失配不得回退旧回执、同项目历史图或团队证据。
+  团队 ClaimEvidence envelope 只交由研究台账解析；不作为运行图的输入。
+
 
 ## 核心流程
 

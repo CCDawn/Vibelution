@@ -22,7 +22,6 @@ from core.research.workflow.knowledge_sideflow_definition import (
     build_knowledge_sideflow_workflow_definition,
 )
 from core.web.services.team_workflow.research_runtime.evidence_graph_projection import (
-    _project_from_loop_records,
     evidence_graph_availability,
     project_evidence_graph,
 )
@@ -90,82 +89,32 @@ def test_result_package_command_stays_unavailable_without_ready_terminal_node() 
     assert view["available"] is True
 
 
-def test_evidence_graph_availability_and_honest_unavailable() -> None:
+def _bound_graph_record(monkeypatch):
+    from core.web.services.team_workflow.research_runtime import artifact_readback_registry as registry
+    raw = {"nodes": [{"candidateId": "n1", "candidateType": "source"}, {"candidateId": "n2", "candidateType": "source"}], "edges": [{"sourceCandidateId": "n1", "targetCandidateId": "n2", "relation": "supports"}]}
+    digest = registry.canonical_sha256(raw)
+    ref = registry.build_canonical_ref(kind="evidence_relation_graph", team_id="team-1", authority_run_id="sc-1", content_hash=digest)
+    monkeypatch.setattr(registry, "load_scoped_artifact_payload", lambda *a, **k: raw)
+    return _knowledge_run_record(artifactSummary={"refs": [{"kind": "evidence_relation_graph", "canonicalRef": ref,
+        "sha256": digest, "materialized": True, "verifiedAtMs": 10}]})
+
+
+def test_evidence_graph_availability_requires_current_receipt(monkeypatch):
     ok, reason = evidence_graph_availability(_run_record())
-    assert not ok
-    assert "证据关系数据" in reason
-    ok, _ = evidence_graph_availability(
-        _run_record(langGraph={"artifacts": {"evidence_relation_graph": {"nodes": []}}})
-    )
-    assert ok
+    assert not ok and "证据关系数据" in reason
+    assert evidence_graph_availability(_bound_graph_record(monkeypatch)) == (True, "")
 
 
-def test_evidence_graph_projection_raises_when_no_data(monkeypatch) -> None:
-    import core.web.services.team_workflow.research_runtime.evidence_graph_projection as egp
-
-    monkeypatch.setattr(egp, "_loop_evidence_for_project", lambda record: [])
+def test_evidence_graph_projection_rejects_inline_history():
     with pytest.raises(NodeCommandUnavailable):
-        project_evidence_graph(_run_record())
+        project_evidence_graph(_run_record(langGraph={"artifacts": {"evidence_relation_graph": {"nodes": [{"id": "old"}]}}}))
 
 
-def test_evidence_graph_projection_prefers_artifact_dict() -> None:
-    raw = {"nodes": [{"id": "n1"}], "edges": [{"source": "n1", "target": "n2", "kind": "k"}]}
-    graph = project_evidence_graph(
-        _run_record(langGraph={"artifacts": {"evidence_relation_graph": raw}})
-    )
-    assert graph["nodes"] == raw["nodes"]
-    assert graph["runId"] == "run-1"
-
-
-def test_evidence_graph_projection_from_loop_records(monkeypatch) -> None:
-    import core.web.services.team_workflow.research_runtime.evidence_graph_projection as egp
-
-    records = [
-        {
-            "evidenceId": "ev-1",
-            "evidenceType": "benchmark_result",
-            "status": "passed",
-            "claim": "hypothesis A holds",
-            "source": "source-1",
-        },
-        {"evidenceId": "ev-2", "evidenceType": "full_run_result", "status": "pending"},
-    ]
-    monkeypatch.setattr(egp, "_loop_evidence_for_project", lambda record: records)
-    graph = project_evidence_graph(_run_record())
-    assert graph["source"] == "research_loop_evidence_records"
-    assert {node["type"] for node in graph["nodes"]} == {"evidence", "source", "claim"}
-    assert {edge["kind"] for edge in graph["edges"]} == {"supports", "derives"}
-    evidence = next(node for node in graph["nodes"] if node["id"] == "evidence:ev-1")
-    assert evidence["claim"] == "hypothesis A holds"
-
-
-def test_loop_records_projection_dedupes_and_bounds() -> None:
-    graph = _project_from_loop_records(
-        [
-            {"evidenceId": "ev-1", "claim": "c1", "source": "s1"},
-            {"evidenceId": "ev-1", "claim": "c1", "source": "s1"},
-            {},
-        ]
-    )
-    assert len([node for node in graph["nodes"] if node["id"] == "evidence:ev-1"]) == 1
-
-
-def test_open_evidence_graph_command_returns_projection(monkeypatch, tmp_path: Path) -> None:
-    import core.web.services.team_workflow.research_runtime.evidence_graph_projection as egp
-
-    monkeypatch.setattr(
-        egp,
-        "_loop_evidence_for_project",
-        lambda record: [{"evidenceId": "ev-9", "claim": "c", "source": "s"}],
-    )
-    result = apply_node_command(
-        store=WorkflowRunStore(tmp_path / "runs"),
-        checkpoint_path=str(tmp_path / "ckpt.sqlite"),
-        record=_knowledge_run_record(),
-        node_id="evidence_relations",
-        command="open_evidence_graph",
-    )
-
+def test_open_evidence_graph_command_returns_bound_projection(monkeypatch, tmp_path):
+    result = apply_node_command(store=WorkflowRunStore(tmp_path / "runs"),
+        checkpoint_path=str(tmp_path / "ckpt.sqlite"), record=_bound_graph_record(monkeypatch),
+        node_id="evidence_relations", command="open_evidence_graph")
     assert result["command"] == "open_evidence_graph"
+    assert result["graph"]["source"] == "canonical_artifact"
     assert result["graph"]["nodes"]
     assert result["graph"]["edges"]
