@@ -1,10 +1,7 @@
 import ELK from "elkjs/lib/elk.bundled.js";
 import { describe, expect, it } from "vitest";
 
-import type {
-  HypothesisFirstChainState,
-  MeetingRoundRecord,
-} from "../../../../../api/types/hypothesisFirst";
+import { stateV2 } from "../../../../../routes/teams/research-workflow/hypothesisFirstV2.fixture";
 import {
   buildHypothesisFirstCanvasRegion,
   type HypothesisFirstCanvasRegionInput,
@@ -210,126 +207,16 @@ describe("workflow serpentine layout", () => {
 /* HFC-5 · hypothesis-first region (4-stage serpentine)                */
 /* ------------------------------------------------------------------ */
 
-const HF_SCOPE = {
-  program: "p",
-  theme: "t",
-  campaign: "c",
-  question: "Q-01",
-  branch: "b",
-  workflow: "w",
-  agentId: "a",
-};
-
-function hfChainState(overrides: Partial<HypothesisFirstChainState> = {}): HypothesisFirstChainState {
-  return {
-    schemaVersion: 1,
-    teamId: "team-1",
-    questionId: "Q-01",
-    selectionId: "sel-1",
-    meetingCount: 1,
-    firstMeetingId: "hf-review-sel-1-r1",
-    firstMeetingClosed: false,
-    openMeetingIds: ["hf-review-sel-1-r1"],
-    collectionRequests: [],
-    collectionRequestCount: 0,
-    pendingCollectionCount: 0,
-    collectionReady: false,
-    hypothesisRoundCount: 0,
-    latestHypothesisRoundId: "",
-    hypothesisConverged: false,
-    convergenceDetail: "",
-    roundBudget: 3,
-    budgetExhausted: false,
-    templateBaselineExists: false,
-    templateBaselineIds: [],
-    ...overrides,
-  };
-}
-
-function hfMeeting(
-  roundIndex: number,
-  status: MeetingRoundRecord["status"],
-  overrides: Partial<MeetingRoundRecord> = {},
-): MeetingRoundRecord {
-  return {
-    ...HF_SCOPE,
-    schemaVersion: 1,
-    meetingRoundId: `hf-review-sel-1-r${roundIndex}`,
-    meetingType: "hypothesis_review",
-    mode: "review",
-    scopeHash: "sh",
-    participants: ["agent-1"],
-    status,
-    startedAt: `2026-08-19T0${roundIndex}:00:00Z`,
-    roundIndex,
-    ...overrides,
-  };
-}
-
 function hfRegionInput(rounds: 1 | 2): HypothesisFirstCanvasRegionInput {
-  const base: HypothesisFirstCanvasRegionInput = {
-    chainState: hfChainState(),
-    meetings: [hfMeeting(1, "closed", { digestRef: "digest-1", closedAt: "2026-08-19T02:00:00Z" })],
-    collectionRequests: [],
-    reviewRoundLinks: [],
-    selection: {
-      ...HF_SCOPE,
-      schemaVersion: 1,
-      selectionId: "sel-1",
-      selectionHash: "h",
-      mode: "manual",
-      scopeHash: "sh",
-      questionId: "Q-01",
-      selectedCandidateIds: ["cand-1"],
-      previousSelectionId: "",
-      decidedBy: "leader",
-      createdAt: "2026-08-19T00:00:00Z",
-    },
+  return {
+    stateV2: stateV2({
+      selection: {selectionId: "sel-1", selectedCandidateIds: ["cand-1"], lifecycle: "completed", outcome: "succeeded"},
+      review: {lifecycle: "completed", outcome: "succeeded", activeRoundIndex: rounds},
+      convergence: {lifecycle: "waiting_human", actionability: "waiting_user"},
+      collection: rounds === 2 ? {lifecycle: "completed", outcome: "succeeded"} : {},
+    }),
+    meetings: [],
   };
-  if (rounds === 2) {
-    base.meetings = [
-      ...base.meetings,
-      hfMeeting(2, "open", { previousMeetingRoundId: "hf-review-sel-1-r1" }),
-    ];
-    base.collectionRequests = [{
-      ...HF_SCOPE,
-      schemaVersion: 1,
-      recordKind: "hypothesis_first_collection_request",
-      requestId: "req-1",
-      requestHash: "rh",
-      status: "handed_off",
-      meetingRoundId: "hf-review-sel-1-r1",
-      decisionId: "dec-1",
-      questionId: "Q-01",
-      mode: "review",
-      scopeHash: "sh",
-      searchEnvelope: {},
-      requirements: {},
-      writebackPolicy: {},
-      collectionRunId: "run-req-1",
-      createdAt: "2026-08-19T02:30:00Z",
-      handedOffAt: "2026-08-19T03:00:00Z",
-      handoffRef: "kp-1",
-    }];
-    base.reviewRoundLinks = [{
-      schemaVersion: 1,
-      recordKind: "hypothesis_first_review_round_link",
-      linkId: "hf-link-2",
-      meetingRoundId: "hf-review-sel-1-r2",
-      previousMeetingRoundId: "hf-review-sel-1-r1",
-      selectionId: "sel-1",
-      collectionRequestId: "req-1",
-      questionId: "Q-01",
-      roundIndex: 2,
-      createdAt: "2026-08-19T03:00:00Z",
-    }];
-    base.chainState = hfChainState({
-      meetingCount: 2,
-      collectionRequestCount: 1,
-      collectionReady: true,
-    });
-  }
-  return base;
 }
 
 function composedHypothesisFirstGraph(rounds: 1 | 2) {

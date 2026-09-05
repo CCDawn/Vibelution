@@ -1,4 +1,4 @@
-import { command, stateV2 } from "./hypothesisFirstV2.fixture";
+import { command, reviewState, stateV2 } from "./hypothesisFirstV2.fixture";
 /**
  * HypothesisFirstNodeInspector: live task surface for generation / selection /
  * review / collection / recovery. Toolbar navigation copy must not appear as
@@ -294,6 +294,15 @@ describe("HypothesisFirstNodeInspector", () => {
     render(<HypothesisFirstNodeInspector teamId="team-1" questionId="Q-01" nodeId="hf_generation" runId="run-1" onOpenQuestion={() => {}} />);
     expect(container.querySelector('[data-testid="meeting-round-id"]')?.textContent).toBe("generation-current");
     expect(container.textContent).toContain("确认候选清单");
+  });
+
+  it("uses the V2 review meeting instead of the newest auxiliary meeting", () => {
+    mockedChain.mockReturnValue(chainData({
+      stateV2: reviewState("review-current"),
+      meetings: [scopeMeeting({meetingRoundId: "review-current", meetingType: "hypothesis_review", roundIndex: 1}), scopeMeeting({meetingRoundId: "review-newer", meetingType: "hypothesis_review", roundIndex: 2})] as never,
+    }));
+    render(<HypothesisFirstNodeInspector teamId="team-1" questionId="Q-01" nodeId="hf_review" runId="run-1" onOpenQuestion={() => {}} />);
+    expect(container.querySelector('[data-testid="meeting-round-id"]')?.textContent).toBe("review-current");
   });
 
   it("opens generation from an empty chain", () => {

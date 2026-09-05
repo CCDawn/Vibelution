@@ -1,3 +1,4 @@
+import { HYPOTHESIS_DESIGN_NODE_TERM } from "./researchTerminology";
 import type { CommandOffer } from "../../../api/types/research-workflow/commands";
 import type {
   ResearchWorkflowCurrentTask,
@@ -269,7 +270,7 @@ function retryOfferFromSnapshot(
   if (!idempotencyKey || retry.expectedRunVersion == null) return null;
   if (Number(retry.expectedRunVersion) !== runVersion) return null;
   if (text(retry.nodeId) !== text(task.nodeId)) return null;
-  const label = text(task.label);
+  const label = task.nodeId === "hypothesis_design" ? HYPOTHESIS_DESIGN_NODE_TERM.zh : text(task.label);
   return {
     command: "retry_node",
     nodeId: retry.nodeId,
@@ -344,7 +345,7 @@ function formalTask(
     state: task.state,
     status: statusForFormalTask(task.state),
     kind: task.kind,
-    label: text(task.label) || "当前任务",
+    label: task.nodeId === "hypothesis_design" ? HYPOTHESIS_DESIGN_NODE_TERM.zh : text(task.label) || "当前任务",
     detail: text(task.detail) || "工作流正在处理当前任务",
     responsibility: task.responsibility,
     automaticNextStep: task.automaticNextStep,

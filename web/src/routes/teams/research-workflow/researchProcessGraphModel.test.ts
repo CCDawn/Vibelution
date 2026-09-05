@@ -302,38 +302,11 @@ describe("composeHypothesisFirstGraph", () => {
 
   function regionInput(overrides: Partial<HypothesisFirstCanvasRegionInput> = {}): HypothesisFirstCanvasRegionInput {
     return {
-      stateV2: stateV2({teamId: "team-1", questionId: "Q-01", selection: {selectionId: "sel-1"}, review: {lifecycle: true ? "completed" : "not_started"}, collection: {lifecycle: false ? "completed" : "not_started", outcome: false ? "succeeded" : "none"}, convergence: {roundIndex: 0, accepted: false, problems: [{ message: "" }], roundBudget: 3, outcome: false ? "exhausted" : "none"}}),
-      meetings: [
-        {
-          ...hfScope,
-          schemaVersion: 1,
-          meetingRoundId: "hf-review-sel-1-r1",
-          meetingType: "hypothesis_review",
-          mode: "review",
-          scopeHash: "sh",
-          participants: ["agent-1"],
-          status: "closed",
-          startedAt: "2026-08-19T01:00:00Z",
-          closedAt: "2026-08-19T02:00:00Z",
-          digestRef: "digest-1",
-          roundIndex: 1,
-        },
-      ],
-      collectionRequests: [],
-      reviewRoundLinks: [],
-      selection: {
-        ...hfScope,
-        schemaVersion: 1,
-        selectionId: "sel-1",
-        selectionHash: "h",
-        mode: "manual",
-        scopeHash: "sh",
-        questionId: "Q-01",
-        selectedCandidateIds: ["cand-1"],
-        previousSelectionId: "",
-        decidedBy: "leader",
-        createdAt: "2026-08-19T00:00:00Z",
-      },
+      stateV2: stateV2({
+        selection: {selectionId: "sel-1", lifecycle: "completed", outcome: "succeeded"},
+        review: {lifecycle: "completed", outcome: "succeeded"},
+      }),
+      meetings: [],
       ...overrides,
     };
   }
@@ -455,6 +428,7 @@ describe("composeHypothesisFirstGraph", () => {
     };
     const base = projectionToCanvasGraph(projection);
     const region = buildHypothesisFirstCanvasRegion(regionInput({
+      stateV2: stateV2({review: {lifecycle: "running", actionability: "executing"}}),
       meetings: [{
         ...hfScope,
         schemaVersion: 1,

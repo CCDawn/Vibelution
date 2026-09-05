@@ -111,6 +111,7 @@ function pickReview(
   nodeId: string,
   reviewRoundLinks: ReturnType<typeof useHypothesisFirstChain>["reviewRoundLinks"],
   selectionId?: string | null,
+  canonicalMeetingRoundId?: string,
 ) {
   const projection = buildHypothesisFirstReviewProjection(meetings, reviewRoundLinks, selectionId);
   if (nodeId.startsWith("hf_meeting_")) {
@@ -118,7 +119,8 @@ function pickReview(
     // "not yet opened" empty state instead of another round's operations.
     return projection.byNodeId.get(nodeId)?.meeting ?? null;
   }
-  return currentProjectedReview(projection)?.meeting ?? null;
+  return meetings.find((meeting) => meeting.meetingType === "hypothesis_review"
+    && meeting.meetingRoundId === canonicalMeetingRoundId) ?? null;
 }
 
 function checklistRoundIndex(
@@ -407,13 +409,14 @@ export function HypothesisFirstNodeInspector({
   const chain = useHypothesisFirstChain(teamId, questionId, runId);
   const questionMeetings = meetingsForHypothesisFirstQuestion(chain.meetings, questionId);
   const generation = questionMeetings.find((meeting) => meeting.meetingRoundId === chain.stateV2?.generation.generationMeetingId) ?? null;
-  const currentSelectionId = chain.selection?.selectionId || chain.stateV2?.selection.selectionId || "";
+  const currentSelectionId = chain.stateV2?.selection.selectionId || "";
   const reviewProjection = buildHypothesisFirstReviewProjection(
     questionMeetings,
     chain.reviewRoundLinks,
     currentSelectionId,
   );
-  const review = pickReview(questionMeetings, nodeId, chain.reviewRoundLinks, currentSelectionId);
+  const canonicalNextAction = chain.stateV2 ? resolveHypothesisFirstNextActionFromV2(chain.stateV2) : null;
+  const review = pickReview(questionMeetings, nodeId, chain.reviewRoundLinks, currentSelectionId, canonicalNextAction?.meetingRoundId);
   const activeMeeting = nodeId === HYPOTHESIS_FIRST_GENERATION_NODE_ID ? generation : review;
   const scopedRoomId = inspectorScopedRoomId(discussionModel, activeMeeting, questionId);
   const pageVisible = usePageVisibility();

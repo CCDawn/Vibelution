@@ -179,7 +179,7 @@ import { composeHypothesisFirstGraph } from "./researchProcessGraphModel";
 
 const base = projectionToCanvasGraph(projection);
 const region = buildHypothesisFirstCanvasRegion({
-  chainState, meetings, collectionRequests, reviewRoundLinks, selection,
+  stateV2, meetings,
 });
 const graph = composeHypothesisFirstGraph(base, region, {
   demotePipelineStages: discussionActive,
