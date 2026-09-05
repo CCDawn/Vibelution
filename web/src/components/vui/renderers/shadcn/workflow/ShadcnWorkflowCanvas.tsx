@@ -35,6 +35,7 @@ import {
 } from "react";
 
 import { cn } from "../../../lib/cn";
+import { WorkflowStageView } from "./WorkflowStageView";
 import type { WorkflowLayoutInput, WorkflowLayoutNode } from "../../../product/workflow/workflowCanvasTypes";
 import type { WorkflowNodeSize } from "./workflowLayoutHash";
 import { useWorkflowAutoLayout } from "./useWorkflowAutoLayout";
@@ -100,6 +101,8 @@ export function workflowCanvasInitialFitMinZoom(
 }
 
 export type ShadcnWorkflowCanvasProps = {
+  /** Readable stage projection or the full spatial graph; no execution effect. */
+  viewMode?: "canvas" | "stage";
   graph: WorkflowLayoutInput;
   selectedNodeId?: string | null;
   runtimeCurrentNodeIds?: string[];
@@ -1091,6 +1094,7 @@ function WorkflowCanvasInner({
 }
 
 export function ShadcnWorkflowCanvas(props: ShadcnWorkflowCanvasProps) {
+  if (props.viewMode === "stage") return <WorkflowStageView {...props} />;
   return (
     <ReactFlowProvider>
       <WorkflowCanvasInner {...props} />

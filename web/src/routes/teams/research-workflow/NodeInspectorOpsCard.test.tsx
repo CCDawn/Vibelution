@@ -133,6 +133,12 @@ describe("NodeInspectorOpsCard", () => {
       );
     });
 
+    const resources = container.querySelector('[data-testid="node-model-resources"]') as HTMLElement;
+    expect(resources.hidden).toBe(true);
+    const toggle = Array.from(container.querySelectorAll("button")).find(item => item.textContent === "模型与资源");
+    await act(async () => toggle?.click());
+    expect(resources.hidden).toBe(false);
+
     const button = Array.from(container.querySelectorAll("button"))
       .find((item) => item.textContent?.includes("启动节点"));
     expect(button).toBeTruthy();

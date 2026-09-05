@@ -129,6 +129,7 @@ export function ResearchProcessInspectorPane(props: {
   };
   meetings?: readonly MeetingRoundRecord[];
 }) {
+  const [knowledgeOverviewOpen, setKnowledgeOverviewOpen] = useState(false);
   const {
     scope,
     state,
@@ -382,13 +383,6 @@ export function ResearchProcessInspectorPane(props: {
       : null;
     return (
       <>
-      <NodeKnowledgeCollectionSection
-        badge={parentBadge}
-        offers={state.snapshotOffers ?? []}
-        busy={state.busy}
-        onOffer={actions.submitOffer}
-        lang={lang}
-      />
       {parentBadge?.latest?.knowledgeChildRunId && semanticId ? (
         <KnowledgeChildNodeInspector
           key={`${parentBadge.latest.knowledgeChildRunId}:${semanticId}`}
@@ -398,6 +392,16 @@ export function ResearchProcessInspectorPane(props: {
           lang={lang}
         />
       ) : null}
+      <VButton density="compact" variant="secondary" aria-expanded={knowledgeOverviewOpen} onClick={() => setKnowledgeOverviewOpen((open) => !open)}>{knowledgeOverviewOpen ? "收起知识子流程概览" : "知识子流程概览"}</VButton>
+      <div hidden={!knowledgeOverviewOpen}>
+      <NodeKnowledgeCollectionSection
+        badge={parentBadge}
+        offers={state.snapshotOffers ?? []}
+        busy={state.busy}
+        onOffer={actions.submitOffer}
+        lang={lang}
+      />
+      </div>
       </>
     );
   }

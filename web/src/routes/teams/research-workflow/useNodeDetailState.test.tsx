@@ -75,6 +75,12 @@ describe("useNodeDetailState", () => {
     });
   }
 
+  it("does not request a projected knowledge card from the parent run", async () => {
+    await renderWith("parent-run", "ksf_source_finding");
+    expect(api.fetchResearchWorkflowNodeDetail).not.toHaveBeenCalled();
+    expect(latest).toEqual({kind: "empty", nodeId: "ksf_source_finding"});
+  });
+
   it("goes idle without a node selection", async () => {
     await renderWith("run-1", null);
     expect(latest.kind).toBe("idle");

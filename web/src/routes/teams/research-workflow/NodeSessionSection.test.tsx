@@ -79,14 +79,14 @@ describe("NodeSessionSection", () => {
       ],
     }));
 
-    expect(markup).toContain("节点根会话");
+    expect(markup).toContain("节点执行会话");
     expect(markup).toContain("root-session-1");
     expect(markup).not.toContain("child-compat-anchor");
     expect(markup).toContain("查看节点总览");
     expect(markup.indexOf("候选 H2")).toBeLessThan(markup.indexOf("候选 H1"));
     expect(markup).toContain("child-H2");
-    expect(markup).toContain("running");
-    expect(markup).toContain("succeeded");
+    expect(markup).toContain("运行中");
+    expect(markup).toContain("已完成");
     expect(markup).toContain("fragment-H1");
     expect(markup).toContain('href="/chat?session=child-H2');
   });
@@ -118,7 +118,7 @@ describe("NodeSessionSection", () => {
     }));
 
     expect(markup).toContain("候选 H3");
-    expect(markup).toContain("succeeded");
+    expect(markup).toContain("已完成");
     expect(markup).toContain("会话链接暂不可用");
     expect(markup).not.toContain('href="null"');
     expect(markup).not.toContain('href="/chat?session=child-H3');
@@ -172,7 +172,7 @@ describe("NodeSessionSection", () => {
     }));
 
     expect(markup).toContain("候选 H2");
-    expect(markup).toContain("failed");
+    expect(markup).toContain("运行失败");
     expect(markup).toContain("节点重试仅处理失败候选 H2");
     expect(markup).toContain("会话链接暂不可用");
     expect(markup).not.toContain("href=");

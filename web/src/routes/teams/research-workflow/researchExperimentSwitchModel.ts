@@ -1,16 +1,3 @@
-import type { HypothesisFirstStateV2 } from "../../../api/types/hypothesisFirst";
-/**
- * Toolbar experiment switcher (display + URL restore).
- *
- * Mature canvas products (LangGraph Studio threads, n8n executions, AutoGen
- * Studio sessions) keep one graph and switch *instances*. Here the instance is
- * a catalog question's latest workflow checkpoint — the same record the launch
- * panel already attaches. The switcher lists existing experiment instances,
- * while checkpoint-less catalog questions stay in the searchable launch panel.
- * The current question remains visible even before its first formal checkpoint.
- * Selecting a checkpoint restores `questionId` + `runId` + the focus node. It
- * does not fork, compare, or list the frozen Program EXP-* campaign records.
- */
 import type { ResearchWorkflowLaunchOption } from "../../../api/researchWorkflow";
 import { getNodeAdapter } from "./nodeAdapterModel";
 import { researchRunStatusLabel } from "./researchRunPresentation";
@@ -34,10 +21,7 @@ export type ExperimentSwitchLocationPatch = {
 export type ExperimentChromeIdentity = {
   questionId: string;
   title: string;
-  hypothesisSummary: string;
 };
-
-type ExperimentChainSummary = HypothesisFirstStateV2;
 
 function normalizeQuestionId(value: string): string {
   return value.trim().toUpperCase();
@@ -49,45 +33,15 @@ function truncateTitle(title: string, limit = 48): string {
   return `${trimmed.slice(0, Math.max(0, limit - 1)).trimEnd()}…`;
 }
 
-export function formatHypothesisSummary(
-  selectedCandidateIds: readonly string[] | null | undefined,
-  questionId: string,
-  chain?: ExperimentChainSummary | null,
-): string {
-  if (!normalizeQuestionId(questionId)) return "";
-  const ids = (selectedCandidateIds ?? []).map((item) => item.trim()).filter(Boolean);
-  if (!ids.length) return "假说待生成";
-  const count = ids.length;
-  if (chain?.convergence.accepted) return `${count} 条假说已收敛`;
-  const round = Number(chain?.review.activeRoundIndex ?? 0);
-  if (round > 0) return `${count} 条假说评审中 · 第 ${round} 轮`;
-  return `${count} 条假说待评审`;
-}
-
-export function formatExperimentSwitchLabel(
-  questionId: string,
-  hypothesisSummary: string,
-): string {
-  return `${normalizeQuestionId(questionId)} · ${hypothesisSummary.trim() || "假说待生成"}`;
-}
-
-function hypothesisForQuestion(
-  questionId: string,
-  current?: {
-    questionId: string;
-    selectedCandidateIds?: readonly string[] | null;
-    chain?: ExperimentChainSummary | null;
-  },
-): string {
-  if (current && normalizeQuestionId(current.questionId) === questionId) {
-    return formatHypothesisSummary(current.selectedCandidateIds, questionId, current.chain);
-  }
-  return "假说状态未读取";
+/** Question identity is not a research-state projection. */
+export function formatExperimentSwitchLabel(questionId: string, title: string): string {
+  const id = normalizeQuestionId(questionId);
+  return title.trim() && title.trim() !== id ? `${id} · ${truncateTitle(title)}` : id;
 }
 
 function checkpointAvailability(question: ResearchWorkflowLaunchOption): string {
   const checkpoint = question.checkpoint;
-  if (!checkpoint) return "无 checkpoint";
+  if (!checkpoint) return "尚无正式运行记录";
   const currentNodeLabel = getNodeAdapter(checkpoint.currentNodeId)?.label
     || checkpoint.currentNodeLabel?.trim()
     || checkpoint.currentNodeId?.trim()
@@ -101,11 +55,6 @@ function checkpointAvailability(question: ResearchWorkflowLaunchOption): string 
 
 function optionFromQuestion(
   question: ResearchWorkflowLaunchOption,
-  current?: {
-    questionId: string;
-    selectedCandidateIds?: readonly string[] | null;
-    chain?: ExperimentChainSummary | null;
-  },
 ): ExperimentSwitchOption | null {
   const questionId = normalizeQuestionId(question.questionId);
   if (!questionId) return null;
@@ -116,8 +65,8 @@ function optionFromQuestion(
     title,
     runId: checkpoint?.runId || undefined,
     currentNodeId: checkpoint?.currentNodeId.trim() || undefined,
-    label: formatExperimentSwitchLabel(questionId, hypothesisForQuestion(questionId, current)),
-    description: `${truncateTitle(title)} · ${checkpointAvailability(question)}`,
+    label: formatExperimentSwitchLabel(questionId, title),
+    description: `最近运行记录：${checkpointAvailability(question)}`,
   };
 }
 
@@ -128,16 +77,12 @@ export function buildExperimentSwitchOptions(input: {
     title?: string;
     runId: string;
     currentNodeId?: string;
-    selectedCandidateIds?: readonly string[] | null;
-    chain?: ExperimentChainSummary | null;
   };
 }): ExperimentSwitchOption[] {
   const byQuestion = new Map<string, ExperimentSwitchOption>();
   const currentQuestionId = normalizeQuestionId(input.current?.questionId ?? "");
   for (const question of input.questions) {
-    const questionId = normalizeQuestionId(question.questionId);
-    if (!question.checkpoint && questionId !== currentQuestionId) continue;
-    const option = optionFromQuestion(question, input.current);
+    const option = optionFromQuestion(question);
     if (option) byQuestion.set(option.questionId, option);
   }
   const currentRunId = input.current?.runId.trim() ?? "";
@@ -150,9 +95,9 @@ export function buildExperimentSwitchOptions(input: {
       currentNodeId: currentNodeId || undefined,
       label: formatExperimentSwitchLabel(
         currentQuestionId,
-        hypothesisForQuestion(currentQuestionId, input.current),
+        input.current?.title || currentQuestionId,
       ),
-      description: `${truncateTitle(input.current?.title?.trim() || currentQuestionId)} · ${currentRunId ? "当前运行" : "无 checkpoint"}`,
+      description: `${truncateTitle(input.current?.title?.trim() || currentQuestionId)} · ${currentRunId ? "当前运行" : "尚无正式运行记录"}`,
     });
   }
   const ordered = [...byQuestion.values()];
@@ -192,14 +137,11 @@ export function resolveExperimentSwitch(
 export function buildExperimentChromeIdentity(input: {
   questionId: string;
   title?: string;
-  selectedCandidateIds?: readonly string[] | null;
-  chain?: ExperimentChainSummary | null;
 }): ExperimentChromeIdentity | null {
   const questionId = normalizeQuestionId(input.questionId);
   if (!questionId) return null;
   return {
     questionId,
     title: truncateTitle(input.title?.trim() || questionId, 64),
-    hypothesisSummary: formatHypothesisSummary(input.selectedCandidateIds, questionId, input.chain),
   };
 }

@@ -1,4 +1,5 @@
 export default {
+  questionTrigger: "max-w-full truncate",
   root: "flex w-full min-w-0 flex-col flex-nowrap items-stretch gap-2 overflow-hidden xl:flex-row xl:items-center xl:gap-x-3",
   context: "flex w-full min-w-0 items-center gap-2 overflow-x-auto overflow-y-hidden xl:flex-1 xl:overflow-hidden",
   leading:
