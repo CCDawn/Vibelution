@@ -127,6 +127,21 @@ def source_collection_context_tool(
             }, "searchReceipts": project_source_collection_search_trace(
                 resolved_team_id, _text(payload.get("runId") or run_id),
             )}
+            from core.web.services.team_workflow.research_runtime.artifact_readback_registry import load_source_finding_receipt_payload
+
+            try:
+                load_source_finding_receipt_payload(
+                    team_id=resolved_team_id,
+                    authority_run_id=_text(payload.get("runId") or run_id),
+                    raise_on_invalid=True,
+                )
+                payload["searchReceiptValidation"] = {"valid": True}
+            except ValueError as exc:
+                payload["searchReceiptValidation"] = {
+                    "valid": False,
+                    "detail": str(exc),
+                    "nextAction": "Repair the missing receipts with scoped real searches before completed writeback. Existing candidate count does not prohibit searching for their receipts; do not re-import or delete candidates.",
+                }
         _record_stage_tool_event(
             "tool.source_collection_context.completed",
             outcome="completed",

@@ -64,6 +64,46 @@ def test_source_finding_quality_gate_rejects_candidates_without_receipts() -> No
         search_execution.validate_source_finding_receipt_payload(payload)
 
 
+def test_receipt_readback_can_report_exact_gap_to_active_agent(monkeypatch):
+    from core.web.services.team_workflow.research_runtime import artifact_readback_registry as registry
+
+    payload = _receipt_payload()
+    payload["candidateSources"][0]["sourceUrl"] = "https://missing.test/source"
+    monkeypatch.setattr(registry, "load_scoped_artifact_payload", lambda *_a, **_kw: {
+        "candidates": payload["candidateSources"],
+    })
+    monkeypatch.setattr(search_execution, "project_source_collection_search_trace", lambda *_: payload["searchTrace"])
+    assert registry.load_source_finding_receipt_payload(team_id="team", authority_run_id="source") is None
+    with pytest.raises(ValueError, match="unboundCandidates=.*candidate-1"):
+        registry.load_source_finding_receipt_payload(team_id="team", authority_run_id="source", raise_on_invalid=True)
+    payload["searchTrace"][0]["resultRefs"].append("https://missing.test/source")
+    assert registry.load_source_finding_receipt_payload(team_id="team", authority_run_id="source", raise_on_invalid=True)["quality"]["candidateCount"] == 4
+
+
+@pytest.mark.parametrize("requested_status", ["completed", "running"])
+def test_finding_writeback_rejects_unreceipted_completion_before_task_closes(monkeypatch, requested_status):
+    from core.web.services.team_workflow.research_runtime import artifact_readback_registry as registry
+    from core.web.services.team_workflow.source_collection import stage_writeback, writeback_materialize
+
+    s = stage_writeback._service()
+    task = {"taskId": "task", "stageId": "finding", "agentRole": "source_finder",
+            "workflowRunId": "workflow", "status": "running"}
+    monkeypatch.setattr(s.team_service, "get_team", lambda *_: {})
+    monkeypatch.setattr(s, "_find_source_collection_stage_session_task_by_id", lambda *_: (task, "source"))
+    monkeypatch.setattr(s, "_merge_source_collection_stage_writeback_result_payload", lambda *_: {})
+    monkeypatch.setattr(s, "_source_collection_stage_writeback_candidate_coverage", lambda *_: {})
+    monkeypatch.setattr(s, "_materialize_source_collection_stage_writeback_sources", lambda *_a, **_kw: {})
+    monkeypatch.setattr(writeback_materialize, "source_collection_finding_writeback_close_status", lambda *_: "completed")
+    payload = _receipt_payload()
+    payload["candidateSources"][0]["sourceUrl"] = "https://missing.test/source"
+    monkeypatch.setattr(registry, "load_scoped_artifact_payload", lambda *_a, **_kw: {"candidates": payload["candidateSources"]})
+    monkeypatch.setattr(search_execution, "project_source_collection_search_trace", lambda *_: payload["searchTrace"])
+    with pytest.raises(s.TeamWorkflowOrchestrationError, match="source_search_receipt_missing.*candidate-1") as error:
+        stage_writeback.writeback_source_collection_stage_session_task("team", "task", {"status": requested_status})
+    assert "parent_query_id" in str(error.value)
+    assert task["status"] == "running"
+
+
 def test_source_finding_quality_gate_rejects_candidate_not_linked_to_receipt() -> None:
     payload = _receipt_payload()
     payload["candidateSources"][0]["sourceUrl"] = "https://forged.test/not-returned"

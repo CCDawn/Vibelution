@@ -611,6 +611,7 @@ def load_source_finding_receipt_payload(
     authority_run_id: str,
     workflow_run_id: str = "",
     candidate_content_hash: str = "",
+    raise_on_invalid: bool = False,
 ) -> dict[str, Any] | None:
     """Read and validate the live source-finding receipt/candidate authority."""
 
@@ -621,6 +622,8 @@ def load_source_finding_receipt_payload(
         workflow_run_id=str(workflow_run_id or "").strip(),
     )
     if not isinstance(candidate_envelope, dict):
+        if raise_on_invalid:
+            raise ValueError("source finding canonical candidate batch is missing")
         return None
     expected_hash = str(candidate_content_hash or "").strip()
     if expected_hash and canonical_sha256(candidate_envelope) != expected_hash:
@@ -631,6 +634,8 @@ def load_source_finding_receipt_payload(
         if isinstance(item, dict)
     ]
     if not candidates:
+        if raise_on_invalid:
+            raise ValueError("source finding canonical candidate batch is empty")
         return None
     from ..source_collection.search_execution import (
         project_source_collection_search_trace,
@@ -708,6 +713,8 @@ def load_source_finding_receipt_payload(
             require_candidate_receipt_binding=True,
         )
     except ValueError:
+        if raise_on_invalid:
+            raise
         return None
     return payload
 

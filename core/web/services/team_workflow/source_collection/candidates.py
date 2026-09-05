@@ -29,7 +29,7 @@ def register_candidate_source(
 ) -> dict[str, Any]:
     s = _service()
     normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
-    s.team_service.get_team(normalized_team_id)
+    s.team_service.assert_team_exists(normalized_team_id)
     candidate_type = s._normalize_candidate_type(payload.get("candidateType") or "source_manifest")
     title = s._trim_text(payload.get("title"), max_length=240)
     source_url = s._trim_text(payload.get("sourceUrl"), max_length=2000)
@@ -156,7 +156,7 @@ def import_data_record_as_source_candidate(team_id: str, run_id: str, record_id:
     normalized_record_id = s._trim_text(record_id, max_length=128)
     if not normalized_run_id or not normalized_record_id:
         raise s.TeamWorkflowOrchestrationError("Data processing runId and recordId are required.")
-    s.team_service.get_team(normalized_team_id)
+    s.team_service.assert_team_exists(normalized_team_id)
     import_payload = payload if isinstance(payload, dict) else {}
     run, record = s._load_data_processing_record(normalized_run_id, normalized_record_id)
     source_identity_key = s._source_collection_record_identity_key(record)
@@ -280,7 +280,7 @@ def import_data_record_as_source_candidate(team_id: str, run_id: str, record_id:
 def extract_source_collection_candidates(team_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     s = _service()
     normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
-    s.team_service.get_team(normalized_team_id)
+    s.team_service.assert_team_exists(normalized_team_id)
     request_payload = payload if isinstance(payload, dict) else {}
     normalized_run_id = s._normalize_required_id(request_payload.get("runId"), "Data processing run id is required.")
     extraction_agent_id = (
