@@ -656,6 +656,11 @@ def _receipt_store_rows(
             files.append(item)
     stores: list[dict[str, Any]] = []
     for path in sorted(files, key=lambda value: value.as_posix().lower()):
+        # inter_process_lock leaves this coordination sidecar in place, even
+        # after a receipt is purged. It is not receipt data and must not be
+        # deleted while another writer may hold its OS lock.
+        if path.name.endswith(".json.lock"):
+            continue
         if path.suffix.lower() != ".json":
             raise ReceiptResetPortError(
                 "receipt store contains an unsupported file", code="receipt_store_corrupt"

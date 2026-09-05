@@ -189,6 +189,8 @@ def test_receipt_reset_stage_is_scoped_and_restorable(tmp_path: Path, monkeypatc
         workflow_run_id="run-096",
         receipts=[_receipt("candidate")],
     )
+    path = receipt_registry._path("research-team", "SCI-096", "run-096")
+    assert path.with_name(path.name + ".lock").is_file()
     rows = receipt_registry.list_team_scoped_model_invocation_receipts(
         "research-team", scope_authority=authority
     )
@@ -209,6 +211,11 @@ def test_receipt_reset_stage_is_scoped_and_restorable(tmp_path: Path, monkeypatc
     assert [row["receiptId"] for row in receipt_registry.list_team_scoped_model_invocation_receipts(
         "research-team", scope_authority=authority
     )] == ["receipt-candidate-run-096"]
+    path.with_name("unexpected.lock").write_text("not a receipt lock", encoding="utf-8")
+    with pytest.raises(receipt_registry.ReceiptResetPortError, match="unsupported file"):
+        receipt_registry.list_team_scoped_model_invocation_receipts(
+            "research-team", scope_authority=authority
+        )
 
 
 def test_receipt_reset_rejects_cross_team_store_and_reset_mismatch(tmp_path: Path, monkeypatch) -> None:
