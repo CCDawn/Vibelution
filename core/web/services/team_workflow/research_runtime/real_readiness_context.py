@@ -12,6 +12,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from core.research.workflow.definition import (
+    CHALLENGE_CUP_WORKFLOW_ID,
     build_challenge_cup_workflow_definition,
 )
 from core.research.workflow.ledger import WorkflowLedgerStore
@@ -167,7 +168,7 @@ class RealDomainReadinessContext:
         )
 
         run = self._store.get_run(run_id)
-        if run is None or run.team_id != team_id:
+        if run is None or run.team_id != team_id or run.workflow_id != CHALLENGE_CUP_WORKFLOW_ID:
             return False
         return hypothesis_first_chain.is_hypothesis_first_snapshot(
             hypothesis_first_chain._input_snapshot(run)
