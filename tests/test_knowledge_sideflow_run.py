@@ -149,6 +149,37 @@ def _child_rows(harness: GraphHarness):
     ).result(timeout=10)
 
 
+@pytest.mark.parametrize("repair_existing", [False, True])
+def test_cancelled_child_releases_its_knowledge_request(tmp_path: Path, repair_existing) -> None:
+    from core.research.workflow.contracts import WorkflowCommandKind
+
+    harness = GraphHarness(tmp_path)
+    try:
+        _seed_parent(harness)
+        result = _invoke(harness)
+        child_id = result["childRunId"]
+        if repair_existing:
+            harness.commands.store.submit(lambda uow: uow.repository.update_run_status(
+                child_id, "research-team", "cancelled", FIXED_NOW_MS + 2000,
+            ), force_flush=True).result(timeout=10)
+            command = WorkflowCommandKind.RECONCILE_RUN
+            target = "run-parent"
+        else:
+            command = WorkflowCommandKind.CANCEL_RUN
+            target = child_id
+        harness.commands.service.submit(harness.commands.request(
+            command=command, run_id=target, node_id=None, team_id="research-team",
+            expected_run_version=1, idempotency_key=f"cancel-knowledge:{repair_existing}",
+        ))
+        invocation = _invocation_row(harness, result["invocation"].invocation_id)
+        assert invocation.status == "cancelled"
+        assert invocation.handoff_state != "accepted"
+        assert not invocation.knowledge_package_ref
+        assert _outbox_rows(harness, child_id, "event_publish") == []
+    finally:
+        harness.close()
+
+
 def _invocation_row(harness: GraphHarness, invocation_id: str):
     return harness.commands.store.submit(
         lambda uow: uow.repository.get_knowledge_invocation(invocation_id),

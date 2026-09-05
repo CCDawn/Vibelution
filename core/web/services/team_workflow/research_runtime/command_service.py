@@ -1065,6 +1065,11 @@ class WorkflowCommandService:
             completion_kind="cancelled",
             terminal_reason=str(request.payload.get("reason") or "operator cancelled"),
         )
+        from .knowledge_sideflow_service import record_knowledge_sideflow_child_failure
+
+        record_knowledge_sideflow_child_failure(
+            uow, run_id=request.run_id, outcome="cancelled", now_ms=now_ms,
+        )
         uow.repository.insert_event(
             _event_record(
                 run_id=request.run_id,
@@ -1293,6 +1298,14 @@ class WorkflowCommandService:
         if run is None:
             raise RunNotFoundError(request.run_id)
         plan = plan_ledger_authority(attempts, node_order=formal_node_order(run))
+        from .knowledge_sideflow_service import record_knowledge_sideflow_child_failure
+
+        for invocation in uow.repository.list_knowledge_invocations_for_parent(run.run_id):
+            child = uow.repository.get_run(invocation.knowledge_child_run_id or "")
+            if child is not None and child.status in {"failed", "cancelled"}:
+                record_knowledge_sideflow_child_failure(
+                    uow, run_id=child.run_id, outcome=child.status, now_ms=now_ms,
+                )
         command_id = new_id("cmd")
         bumped = _bump(uow, request, event_count=1, now_ms=now_ms)
         accepted_version, sequence = bumped
