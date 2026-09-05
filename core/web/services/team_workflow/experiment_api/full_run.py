@@ -38,9 +38,7 @@ def formal_execution_config_is_provisioned(
     from core.research import formal_runner
 
     normalized_adapter_id = str(adapter_id or "").strip()
-    if normalized_adapter_id == formal_runner.SCI091_GPU_OPERATOR_ADAPTER:
-        required = ("pythonExecutable", "outputRoot")
-    elif normalized_adapter_id == formal_runner.SCI096_DANDI_SPIKE_ADAPTER:
+    if normalized_adapter_id == formal_runner.SCI096_DANDI_SPIKE_ADAPTER:
         required = (
             "pythonExecutable",
             "outputRoot",

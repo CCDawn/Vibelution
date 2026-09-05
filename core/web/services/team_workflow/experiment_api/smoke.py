@@ -31,7 +31,6 @@ def _resolve_declared_smoke_adapter(
     """
     formal_only = {
         s.formal_runner.FASHION_MNIST_MULTI_SEED_ADAPTER,
-        s.formal_runner.SCI091_GPU_OPERATOR_ADAPTER,
         s.formal_runner.SCI096_DANDI_SPIKE_ADAPTER,
     }
     for raw in sources:

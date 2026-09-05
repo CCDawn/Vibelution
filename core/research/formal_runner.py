@@ -23,15 +23,11 @@ from vibelution_storage import resolve_project_data_home
 
 
 FASHION_MNIST_MULTI_SEED_ADAPTER = "fashion_mnist_predictive_coding_multi_seed"
-SCI091_GPU_OPERATOR_ADAPTER = "challenge_cup_gpu_operator_benchmark"
 SCI096_DANDI_SPIKE_ADAPTER = "challenge_cup_sci096_dandi_probe"
 SCI096_DANDISET_ID = "000140"
 SCI096_DANDISET_VERSION = "0.220113.0408"
 SCI096_DANDI_ASSET_ID = "7821971e-c6a4-4568-8773-1bfa205c13f8"
 _TRUSTED_SCRIPT_RELATIVE_PATH = Path("experiments/challenge_cup_predictive_coding/fashion_mnist_smoke.py")
-_SCI091_SCRIPT_RELATIVE_PATH = Path(
-    "experiments/challenge_cup_gpu_operator/sci091_torch_benchmark.py"
-)
 _SCI096_SCRIPT_RELATIVE_PATH = Path(
     "experiments/challenge_cup_spike_coding/sci096_dandi_probe.py"
 )
@@ -61,12 +57,6 @@ def prepare_full_run(
     """
 
     normalized_adapter_id = str(adapter_id or "").strip()
-    if normalized_adapter_id == SCI091_GPU_OPERATOR_ADAPTER:
-        return _prepare_sci091_gpu_operator(
-            method_config=method_config,
-            execution_config=execution_config,
-            project_root=project_root,
-        )
     if normalized_adapter_id == SCI096_DANDI_SPIKE_ADAPTER:
         return _prepare_sci096_dandi_probe(
             method_config=method_config,
@@ -248,10 +238,7 @@ def run_full_run(
 
     root = _project_root(project_root)
     normalized_adapter_id = str(adapter_id or "").strip()
-    if normalized_adapter_id in {
-        SCI091_GPU_OPERATOR_ADAPTER,
-        SCI096_DANDI_SPIKE_ADAPTER,
-    }:
+    if normalized_adapter_id == SCI096_DANDI_SPIKE_ADAPTER:
         return _run_single_artifact_full_run(
             normalized_adapter_id,
             method_config=method_config,
@@ -334,110 +321,6 @@ def run_full_run(
     }
     atomic_write_json(result_path, result)
     return result
-
-
-def _prepare_sci091_gpu_operator(
-    *,
-    method_config: dict[str, Any] | None,
-    execution_config: dict[str, Any] | None,
-    project_root: Path | str | None,
-) -> dict[str, Any]:
-    root = _project_root(project_root)
-    method = method_config if isinstance(method_config, dict) else {}
-    execution = execution_config if isinstance(execution_config, dict) else {}
-    script_path = root / _SCI091_SCRIPT_RELATIVE_PATH
-    if not script_path.is_file():
-        raise FormalRunnerError(f"Trusted experiment script is unavailable: {script_path}")
-    python_executable = _required_path(
-        execution.get("pythonExecutable"),
-        "pythonExecutable",
-        kind="file",
-    )
-    output_root = assert_canonical_project_data_path(
-        execution.get("outputRoot"),
-        project_root=root,
-        label="outputRoot",
-        create=True,
-    )
-    options = {
-        "operatorFamily": str(method.get("operatorFamily") or "elementwise_fusion").strip(),
-        "warmupIterations": _bounded_int(
-            method.get("warmupIterations", 25),
-            "warmupIterations",
-            minimum=5,
-            maximum=1000,
-        ),
-        "measurementIterations": _bounded_int(
-            method.get("measurementIterations", 100),
-            "measurementIterations",
-            minimum=20,
-            maximum=5000,
-        ),
-        "tensorElements": _bounded_int(
-            method.get("tensorElements", 1_048_576),
-            "tensorElements",
-            minimum=1024,
-            maximum=268_435_456,
-        ),
-        "correctnessFirst": True,
-    }
-    if options["operatorFamily"] != "elementwise_fusion":
-        raise FormalRunnerError("operatorFamily is not supported by the SCI-091 formal adapter.")
-    self_check = _run_process(
-        [str(python_executable), str(script_path), "--self-check"],
-        cwd=root,
-        timeout_seconds=_SELF_CHECK_TIMEOUT_SECONDS,
-    )
-    if self_check.returncode != 0:
-        raise FormalRunnerError(
-            "SCI-091 environment preflight failed: " + _process_error(self_check)
-        )
-    output_path = output_root / "sci091-gpu-operator-result.json"
-    command = [
-        str(python_executable),
-        str(script_path),
-        "--output",
-        str(output_path),
-        "--operator-family",
-        str(options["operatorFamily"]),
-        "--warmup-iterations",
-        str(options["warmupIterations"]),
-        "--measurement-iterations",
-        str(options["measurementIterations"]),
-        "--tensor-elements",
-        str(options["tensorElements"]),
-    ]
-    return {
-        "adapterId": SCI091_GPU_OPERATOR_ADAPTER,
-        "status": "prepared",
-        "executionMode": "local_process",
-        "commands": [{"args": command, "outputPath": str(output_path)}],
-        "timeoutSecondsPerCommand": _bounded_int(
-            execution.get("timeoutSeconds", 1800),
-            "timeoutSeconds",
-            minimum=_MIN_TIMEOUT_SECONDS,
-            maximum=_MAX_TIMEOUT_SECONDS,
-        ),
-        "environment": {
-            "pythonExecutable": str(python_executable),
-            "outputRoot": str(output_root),
-            "scriptPath": str(script_path),
-            "selfCheck": _clip_process_output(self_check),
-        },
-        "runOptions": options,
-        "boundaries": [
-            "trusted_repository_script_only",
-            "shell_disabled",
-            "windowless_subprocess",
-            "artifacts_inside_current_instance_canonical_data_root",
-            "user_triggered_only",
-            "manual_result_review_required",
-            "correctness_before_timing",
-            "warmup_before_measurement",
-            "device_metadata_required",
-            "not_an_official_competition_submission",
-        ],
-    }
 
 
 def _prepare_sci096_dandi_probe(

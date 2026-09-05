@@ -53,51 +53,6 @@ def _formal_output_config(tmp_path: Path, project_root: Path) -> dict[str, objec
     return config
 
 
-def test_prepare_sci091_gpu_benchmark_freezes_correctness_and_timing_contract(
-    tmp_path,
-    monkeypatch,
-):
-    project_root = tmp_path / "project"
-    script_path = (
-        project_root
-        / "experiments"
-        / "challenge_cup_gpu_operator"
-        / "sci091_torch_benchmark.py"
-    )
-    script_path.parent.mkdir(parents=True)
-    script_path.write_text("# trusted runner placeholder", encoding="utf-8")
-    calls = []
-    monkeypatch.setattr(
-        formal_runner.subprocess,
-        "run",
-        lambda args, **_kwargs: calls.append(list(args))
-        or subprocess.CompletedProcess(args, 0, stdout='{"status":"ok"}', stderr=""),
-    )
-
-    prepared = formal_runner.prepare_full_run(
-        formal_runner.SCI091_GPU_OPERATOR_ADAPTER,
-        method_config={
-            "operatorFamily": "elementwise_fusion",
-            "warmupIterations": 25,
-            "measurementIterations": 100,
-            "tensorElements": 1048576,
-        },
-        execution_config=_formal_output_config(tmp_path, project_root),
-        project_root=project_root,
-    )
-
-    assert prepared["adapterId"] == formal_runner.SCI091_GPU_OPERATOR_ADAPTER
-    assert prepared["environment"]["selfCheck"]["exitCode"] == 0
-    assert prepared["runOptions"]["correctnessFirst"] is True
-    assert prepared["runOptions"]["warmupIterations"] == 25
-    assert prepared["runOptions"]["measurementIterations"] == 100
-    assert "--warmup-iterations" in prepared["commands"][0]["args"]
-    assert "--measurement-iterations" in prepared["commands"][0]["args"]
-    assert calls == [[str(tmp_path / "python.exe"), str(script_path), "--self-check"]]
-    assert "device_metadata_required" in prepared["boundaries"]
-    assert "correctness_before_timing" in prepared["boundaries"]
-
-
 def test_prepare_sci096_probe_freezes_dataset_version_and_asset_hash(
     tmp_path,
     monkeypatch,

@@ -120,7 +120,6 @@ def _formal_runner_artifact_digests(
     method_config = contract.get("methodConfig") if isinstance(contract.get("methodConfig"), dict) else {}
     adapter_id = str(result.get("adapterId") or "").strip()
     single_artifact_adapters = {
-        s.formal_runner.SCI091_GPU_OPERATOR_ADAPTER,
         s.formal_runner.SCI096_DANDI_SPIKE_ADAPTER,
     }
     if adapter_id in single_artifact_adapters:
@@ -538,7 +537,6 @@ def _require_formal_full_run_ready(plan: dict[str, Any]) -> tuple[str, dict[str,
     s._require_explicit_experiment_design_frozen(plan)
     formal_adapters = {
         s.formal_runner.FASHION_MNIST_MULTI_SEED_ADAPTER,
-        s.formal_runner.SCI091_GPU_OPERATOR_ADAPTER,
         s.formal_runner.SCI096_DANDI_SPIKE_ADAPTER,
     }
     if adapter_id not in formal_adapters:

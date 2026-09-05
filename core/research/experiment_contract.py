@@ -113,20 +113,6 @@ _METHODS: tuple[dict[str, Any], ...] = (
             "resultImportContract",
         ],
     },
-    {
-        "methodId": "computational_kernel_benchmark",
-        "labelZh": "计算内核基准",
-        "labelEn": "Computational kernel benchmark",
-        "requiredConfigFields": [
-            "operatorFamily",
-            "baseline",
-            "candidate",
-            "warmupIterations",
-            "measurementIterations",
-            "tensorElements",
-            "deviceRequirements",
-        ],
-    },
 )
 
 _METHODS_BY_ID = {item["methodId"]: item for item in _METHODS}
@@ -135,18 +121,6 @@ _METHODS_BY_ID = {item["methodId"]: item for item in _METHODS}
 # formal full-run request or make the UI claim that a real experiment runner is
 # available.
 _ADAPTERS: tuple[dict[str, Any], ...] = (
-    {
-        "adapterId": "challenge_cup_gpu_operator_benchmark",
-        "adapterVersion": "1.0.0",
-        "method": "computational_kernel_benchmark",
-        "executionMode": "local_process",
-        "capabilities": ["validate", "prepare", "smoke", "full_run", "collect"],
-        "availability": "available",
-        "unavailableReason": "Requires explicit PyTorch CUDA environment and a compatible NVIDIA GPU.",
-        "formalResult": True,
-        "requiresExplicitSelection": True,
-        "priority": 110,
-    },
     {
         "adapterId": "challenge_cup_sci096_dandi_probe",
         "adapterVersion": "1.0.0",
