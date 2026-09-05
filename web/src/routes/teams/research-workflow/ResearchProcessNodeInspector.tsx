@@ -124,6 +124,8 @@ export function ResearchProcessNodeInspector(props: ResearchProcessNodeInspector
         <div role="status" className={styles.status}>{props.statusBanner}</div>
       ) : null}
       <NodeHandoffSection
+        teamId={props.teamId}
+        runId={detail.runId}
         handoffs={props.handoffs ?? []}
         pending={props.handoffPending}
         blockedReason={detail.blockedReason || ""}

@@ -119,6 +119,8 @@ export const queryKeys = {
     ["research-workflow", teamId, runId, "evaluation"] as const,
   researchWorkflowHandoffs: (runId: string, teamId: string) =>
     ["research-workflow", teamId, runId, "handoffs"] as const,
+  researchWorkflowHandoffDetail: (runId: string, teamId: string, handoffId: string) =>
+    ["research-workflow", teamId, runId, "handoffs", handoffId] as const,
   teamWorkflowSourceCollectionRuns: (id: string, limit = 6) =>
     ["teams", id, "workflow-orchestration", "source-collection-runs", limit] as const,
   dataProcessingRunStatus: (id: string) => ["data-processing", "runs", id, "status"] as const,

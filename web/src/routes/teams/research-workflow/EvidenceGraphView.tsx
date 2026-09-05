@@ -11,12 +11,14 @@ import { queryKeys } from "../../../api/queryKeys";
 import { fetchResearchWorkflowResearchLedger } from "../../../api/research-workflow";
 import {
   VButton,
+  VRouteLinkButton,
   VEmptyState,
   VStateSurface,
   VSurface,
 } from "../../../components/vui";
 import { useShellI18n } from "../../../i18n/useShellI18n";
 import styles from "./EvidenceGraphView.styles";
+import { evidenceTitle, relationLabelsZh, safeSourceUrl } from "./evidenceReadingModel";
 
 export type EvidenceGraphViewProps = {
   runId: string;
@@ -38,22 +40,6 @@ export type EvidenceGraphDto = {
   }>;
 };
 
-const KIND_LABELS_ZH: Record<string, string> = {
-  supports: "支持",
-  derives: "推导",
-};
-
-const KIND_LABELS_EN: Record<string, string> = {
-  supports: "supports",
-  derives: "derives",
-};
-
-function nodeTitle(node: EvidenceGraphDto["nodes"][number]): string {
-  if (typeof node.evidenceId === "string" && node.evidenceId) return node.evidenceId;
-  if (typeof node.title === "string" && node.title) return node.title;
-  return node.id;
-}
-
 function nodeDetail(node: EvidenceGraphDto["nodes"][number]): string {
   const parts: string[] = [];
   if (typeof node.claim === "string" && node.claim) parts.push(String(node.claim));
@@ -67,17 +53,19 @@ function nodeDetail(node: EvidenceGraphDto["nodes"][number]): string {
 /** Pure graph-content renderer (separate from fetch state for testability). */
 export function EvidenceGraphContent({ graph, lang = "zh" }: { graph: EvidenceGraphDto; lang?: "zh" | "en" }) {
   const isZh = lang === "zh";
-  const kindLabels = isZh ? KIND_LABELS_ZH : KIND_LABELS_EN;
+  const kindLabels = isZh ? relationLabelsZh : {};
   const { nodes, edges } = graph;
-  const byType = (type: string) => nodes.filter((node) => node.type === type);
+  const byType = (...types: string[]) => nodes.filter((node) => types.includes(node.type));
+  const titles = new Map(nodes.map(node => [node.id, evidenceTitle(node)]));
   const sections: Array<{ key: string; label: string; items: EvidenceGraphDto["nodes"] }> = [
     { key: "evidence", label: isZh ? "证据" : "Evidence", items: byType("evidence") },
     { key: "claim", label: isZh ? "声明" : "Claims", items: byType("claim") },
-    { key: "source", label: isZh ? "来源" : "Sources", items: byType("source") },
+    { key: "source", label: isZh ? "来源" : "Sources", items: byType("source", "source_manifest") },
+    { key: "topic", label: isZh ? "研究主题" : "Research topics", items: byType("source_topic") },
     {
       key: "other",
       label: isZh ? "其他节点" : "Other nodes",
-      items: nodes.filter((n) => !["evidence", "claim", "source"].includes(n.type)),
+      items: nodes.filter((n) => !["evidence", "claim", "source", "source_manifest", "source_topic"].includes(n.type)),
     },
   ].filter((section) => section.items.length > 0);
 
@@ -90,6 +78,7 @@ export function EvidenceGraphContent({ graph, lang = "zh" }: { graph: EvidenceGr
             : `Evidence graph · ${nodes.length} nodes / ${edges.length} edges`}
         </div>
       </div>
+      {nodes.length > 0 ? <p className="text-sm leading-relaxed text-[var(--fg-secondary)]">{isZh ? "关系来自本次运行的证据记录，不等同于结论已被验证。" : "Relationships are recorded for this run; they do not imply verified conclusions."}</p> : null}
       {nodes.length === 0 ? (
         <VEmptyState title={isZh ? "暂无图数据" : "No graph data"} className={styles.empty}>
           {isZh
@@ -110,8 +99,9 @@ export function EvidenceGraphContent({ graph, lang = "zh" }: { graph: EvidenceGr
                     className={styles.item}
                   >
                     <div className={styles.itemTitle}>
-                      {nodeTitle(node)}
+                      {evidenceTitle(node)}
                     </div>
+                    {safeSourceUrl(node.sourceUrl) ? <VRouteLinkButton to={safeSourceUrl(node.sourceUrl)!} target="_blank" rel="noopener noreferrer" variant="ghost">{isZh ? "打开来源 ↗" : "Open source ↗"}</VRouteLinkButton> : null}
                     {nodeDetail(node) ? (
                       <div className={styles.itemDetail}>{nodeDetail(node)}</div>
                     ) : null}
@@ -133,7 +123,7 @@ export function EvidenceGraphContent({ graph, lang = "zh" }: { graph: EvidenceGr
                     key={`${edge.source}->${edge.target}:${edge.kind}`}
                     className={styles.relation}
                   >
-                    {edge.source} —{kindLabels[edge.kind] ?? edge.kind}→ {edge.target}
+                    {titles.get(edge.source) ?? (isZh ? "未收录的来源" : "Unlisted source")} —{kindLabels[edge.kind] ?? (isZh ? `相关关系（${edge.kind}）` : edge.kind)}→ {titles.get(edge.target) ?? (isZh ? "未收录的目标" : "Unlisted target")}
                   </li>
                 ))}
               </ul>

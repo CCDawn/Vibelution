@@ -8,6 +8,11 @@ import type {
   ResearchQuestionLineageProjection,
 } from "../types/researchWorkflow";
 import { fetchJson, teamQuery } from "./client";
+import type { ResearchHandoffReading } from "../types/research-workflow/handoffReading";
+
+export function fetchResearchWorkflowHandoffDetail(runId: string, handoffId: string, options: { teamId: string }): Promise<ResearchHandoffReading> {
+  return fetchJson(`/api/research/workflow-runs/${encodeURIComponent(runId)}/handoffs/${encodeURIComponent(handoffId)}${teamQuery(options.teamId)}`);
+}
 
 export async function fetchResearchWorkflowHandoffs(
   runId: string,
