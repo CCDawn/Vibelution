@@ -1,5 +1,6 @@
 import type { AgentInstance, SessionSummary, Team } from "../api/types";
 import { agentArchiveProtected } from "./agentArchiveProtection";
+import { agentDisplayInfo, type ModelLabelResolver } from "./agentDisplay";
 import {
   buildConversationTeamLookup,
   isConfiguredConversationIndexTeam,
@@ -78,12 +79,13 @@ export function agentDirectoryBucket(
   return isConversationDirectoryAgent(agent) ? "conversation" : "special";
 }
 
-function isAgentTextMatch(agent: AgentInstance, filterText: string) {
+function isAgentTextMatch(agent: AgentInstance, filterText: string, lang: "zh" | "en", resolveModelLabel?: ModelLabelResolver) {
   const query = String(filterText || "").trim().toLocaleLowerCase();
   if (!query) {
     return true;
   }
-  return [agent.displayName, agent.agentCode, agent.roleKey, agent.primaryMode]
+  const display = agentDisplayInfo(agent, lang, { resolveModelLabel });
+  return [display.name, display.functionLabel, display.modelLabel, agent.agentCode, agent.roleKey, agent.primaryMode]
     .join(" ")
     .toLocaleLowerCase()
     .includes(query);
@@ -186,6 +188,8 @@ export function buildAgentDirectoryPartition(options: {
   /** Optional; kept for experiment-session hooks / future filters. */
   sessions?: SessionSummary[];
   filterText?: string;
+  lang?: "zh" | "en";
+  resolveModelLabel?: ModelLabelResolver;
 }): AgentDirectoryPartition {
   void options.sessions;
   const filterText = String(options.filterText || "").trim();
@@ -235,7 +239,7 @@ export function buildAgentDirectoryPartition(options: {
       }
       seenInTeam.add(agentId);
       assignedAgentIds.add(agentId);
-      if (isAgentTextMatch(agent, filterText) || isTeamTextMatch(team, filterText)) {
+      if (isAgentTextMatch(agent, filterText, options.lang ?? "zh", options.resolveModelLabel) || isTeamTextMatch(team, filterText)) {
         memberAgents.push(agent);
       }
     }
@@ -268,7 +272,7 @@ export function buildAgentDirectoryPartition(options: {
     if (assignedAgentIds.has(agentId)) {
       continue;
     }
-    if (!isAgentTextMatch(agent, filterText)) {
+    if (!isAgentTextMatch(agent, filterText, options.lang ?? "zh", options.resolveModelLabel)) {
       continue;
     }
     // Flat visibility: team_agent without membership stays out of conversation/special
@@ -300,6 +304,26 @@ export function buildAgentDirectoryPartition(options: {
     teamBlocks,
     listedAgentIds: [...new Set(listedAgentIds)],
   };
+}
+
+const DIRECTORY_COLLAPSE_STORAGE_KEY = "vibelution.agent-directory.collapsed.v1";
+
+export function readDirectoryCollapsedSections(): Record<string, boolean> {
+  try {
+    const value: unknown = JSON.parse(globalThis.localStorage?.getItem(DIRECTORY_COLLAPSE_STORAGE_KEY) || "{}");
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    return Object.fromEntries(Object.entries(value).filter(([, collapsed]) => typeof collapsed === "boolean"));
+  } catch {
+    return {};
+  }
+}
+
+export function writeDirectoryCollapsedSections(sections: Record<string, boolean>) {
+  try {
+    globalThis.localStorage?.setItem(DIRECTORY_COLLAPSE_STORAGE_KEY, JSON.stringify(sections));
+  } catch {
+    // A storage restriction must not prevent the user from expanding a group.
+  }
 }
 
 /** @deprecated Prefer agentDirectoryBucket + buildAgentDirectoryPartition. */

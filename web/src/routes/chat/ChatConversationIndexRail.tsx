@@ -5,10 +5,11 @@ import {
   MessageSquarePlus,
   MessageCircleHeart,
   Search,
-  SquarePen,
+  Plus,
+  X,
   UsersRound,
 } from "lucide-react";
-import { useEffect, useMemo, useState, type Dispatch, type ReactNode, type Ref, type SetStateAction } from "react";
+import { useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type Ref, type SetStateAction } from "react";
 
 import type {
   AgentInstance,
@@ -24,7 +25,6 @@ import {
   VCommandPalette,
   VContextualHint,
   VDropdownMenu,
-  VIconButton,
   VNativeButton,
   VNativeInput,
   VStateSurface,
@@ -59,6 +59,8 @@ export type ChatConversationIndexRailProps = {
   conversationIndexCollapsed: boolean;
   conversationIndexOverlayOpen: boolean;
   conversationIndexPanel: ReactNode;
+  directoryFilterText: string;
+  onDirectoryFilterChange: (value: string) => void;
   conversationIndexPaneClassName: string;
   createGroupRoomPending: boolean;
   createSessionPending: boolean;
@@ -142,6 +144,8 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
     conversationIndexCollapsed,
     conversationIndexOverlayOpen,
     conversationIndexPanel,
+    directoryFilterText,
+    onDirectoryFilterChange,
     conversationIndexPaneClassName,
     createGroupRoomPending,
     createSessionPending,
@@ -192,6 +196,13 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
 
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [directorySearchOpen, setDirectorySearchOpen] = useState(false);
+  const directorySearchRef = useRef<HTMLButtonElement>(null);
+  const closeDirectorySearch = () => {
+    onDirectoryFilterChange("");
+    setDirectorySearchOpen(false);
+    directorySearchRef.current?.focus();
+  };
   const searchItems = useMemo(() => Array.from(sessionsById.values()).map((session) => ({
     id: session.id,
     group: session.teamName || session.agentDisplayName || (lang === "zh" ? "会话" : "Chats"),
@@ -253,6 +264,7 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
         id="chat-conversation-index-pane"
         className={conversationIndexPaneClassName}
         data-vui-region="chat-session-index"
+        aria-keyshortcuts="Control+K Meta+K"
         aria-hidden={conversationIndexCollapsed}
         role={conversationIndexOverlayOpen ? "dialog" : undefined}
         aria-label={conversationIndexOverlayOpen ? (lang === "zh" ? "会话列表" : "Conversation list") : undefined}
@@ -309,6 +321,20 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
           )
         ) : (
           <div className={styles.railTop}>
+            <h2 className={styles.railTitle}>{lang === "zh" ? "会话" : "Chats"}</h2>
+            <VNativeButton
+              ref={directorySearchRef}
+              type="button"
+              data-vui="icon-button"
+              className={styles.railActionButton}
+              aria-label={directorySearchOpen ? (lang === "zh" ? "关闭搜索" : "Close search") : (lang === "zh" ? "搜索 Agent 或团队" : "Search Agents or teams")}
+              aria-expanded={directorySearchOpen}
+              aria-controls={directorySearchOpen ? "chat-directory-search" : undefined}
+              onClick={() => directorySearchOpen ? closeDirectorySearch() : setDirectorySearchOpen(true)}
+              title={lang === "zh" ? "搜索 Agent 或团队；Ctrl+K 搜索全部任务" : "Search Agents or teams; Ctrl+K searches all tasks"}
+            >
+              {directorySearchOpen ? <X size={16} aria-hidden="true" /> : <Search size={16} aria-hidden="true" />}
+            </VNativeButton>
             <VDropdownMenu
               aria-label={lang === "zh" ? "新建任务" : "Create task"}
               align="start"
@@ -327,20 +353,28 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
                   aria-keyshortcuts="Control+N Meta+N"
                   title={lang === "zh" ? "新建任务（Ctrl+N）" : "Create task (Ctrl+N)"}
                 >
-                  <SquarePen size={16} aria-hidden="true" />
+                  <Plus size={16} aria-hidden="true" />
                 </VNativeButton>
               )}
             />
-            <VIconButton
-              type="button"
-              variant="ghost"
-              className={styles.railActionButton}
-              label={lang === "zh" ? "搜索任务" : "Search tasks"}
-              aria-keyshortcuts="Control+K Meta+K"
-              title={lang === "zh" ? "搜索任务（Ctrl+K）" : "Search tasks (Ctrl+K)"}
-              icon={<Search size={16} />}
-              onPress={() => setSearchOpen(true)}
-            />
+            {directorySearchOpen ? (
+              <div id="chat-directory-search" className={styles.directorySearch}>
+                <VNativeInput
+                  autoFocus
+                  aria-label={lang === "zh" ? "搜索 Agent 或团队" : "Search Agents or teams"}
+                  placeholder={lang === "zh" ? "搜索 Agent 或团队" : "Search Agents or teams"}
+                  value={directoryFilterText}
+                  onChange={(event) => onDirectoryFilterChange(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      closeDirectorySearch();
+                    }
+                  }}
+                  className={styles.directorySearchInput}
+                />
+              </div>
+            ) : null}
           </div>
         )}
 

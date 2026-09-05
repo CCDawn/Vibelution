@@ -616,6 +616,7 @@ export function ChatCodingRouteWorkbench() {
   }, [editingSessionTitle]);
 
   const [petActionFeedback, setPetActionFeedback] = useState("");
+  const [directoryFilterText, setDirectoryFilterText] = useState("");
   const [mentalModelEnabledForNextTurn, setMentalModelEnabledForNextTurn] = useState<boolean>(
     () => readStoredMentalModelToggle() ?? false,
   );
@@ -2714,7 +2715,7 @@ export function ChatCodingRouteWorkbench() {
             activeGroupRoomId={activeGroupRoomId}
             agents={archiveVisibleAgents}
             avatarInitials={avatarInitials}
-            filterText=""
+            filterText={directoryFilterText}
             formatTime={formatConversationIndexTime}
             lang={lang}
             resolveModelLabel={resolveModelLabel}
@@ -3359,6 +3360,8 @@ export function ChatCodingRouteWorkbench() {
         agentsById={agentsById}
         numberFormatter={numberFormatter}
         conversationIndexPanel={conversationIndexPanel}
+        directoryFilterText={directoryFilterText}
+        onDirectoryFilterChange={setDirectoryFilterText}
         groupComposerOpen={groupComposerOpen}
         createGroupRoomPending={createGroupRoomMutation.isPending}
         createSessionPending={createSessionMutation.isPending || !selectedChatAgent}
