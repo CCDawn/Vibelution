@@ -4,13 +4,13 @@
 >
 > 状态：USER-REQUESTED / PROPOSED FOR REVIEW
 >
-> 版本：V1.0
+> 版本：V1.1（纳入接口、投影与执行链审查）
 >
 > 文档用途：对齐产品行为、实验方法、复用边界和实施顺序，供后续开发与验收使用。
 >
-> 当前完成范围：方案编写与源码调研；未实现新流程，未启动模型调用、知识写入或 GPU 实验。
+> 当前完成范围：方案编写、成熟项目源码调研及本地接口审查修订；以下问题已进入开发与验收清单，尚未修复或实现新流程，未启动模型调用、知识写入或 GPU 实验。
 >
-> 本地代码观察基线：`7a109dea3`；本文中的现状是该版本的代码证据，不等于运行验收。
+> 本地代码观察基线：初稿 `7a109dea3`；本次审查以 `ec9eb46a4` 为起点，核对至 `0101f9225`，修订时确认 `21b29e25a` 的相关差异未消除第 4.2 节六项发现。代码与隔离测试证据不等于真实运行验收；实施前核对届时版本。
 >
 > 关闭条件：本方案被替代，或功能、真实实验和交付验收完成后，更新状态并移入 `docs/archive/plans/`，同步移除在研索引。本文不覆盖根 AGENTS.md 和现行规范。
 
@@ -79,6 +79,8 @@ NIST 对应依据：[实验目标](https://www.itl.nist.gov/div898/handbook/pri/
 
 ## 4. 当前项目能力与准确缺口
 
+### 4.1 能力与复用边界
+
 | 能力 | 当前证据 | 需要做的工作 |
 | --- | --- | --- |
 | 实验与反馈模式 | [experiment_contract.py](../../core/research/experiment_contract.py) 已有 `experiment_feedback`，目的包括对照、证伪、消融、复现和稳健性 | 新算子优化配置复用这些语义，不另建相同实验合同 |
@@ -86,12 +88,31 @@ NIST 对应依据：[实验目标](https://www.itl.nist.gov/div898/handbook/pri/
 | 独立知识搜集 | [knowledge_sideflow_definition.py](../../core/research/workflow/knowledge_sideflow_definition.py) 已定义搜集、提炼、关系、入库与交接 | 接受本轮假设和证据缺口；允许复用已有知识快照 |
 | 现有自动搜集触发 | [knowledge_sideflow_trigger.py](../../core/web/services/team_workflow/research_runtime/knowledge_sideflow_trigger.py) 在问题理解完成后触发，面向后续假说设计 | 新流程从优化讨论输出触发，不能直接复用该硬编码顺序 |
 | 正式假说与规划交接 | [experiment_stage_bootstrap.py](../../core/web/services/team_workflow/research_runtime/experiment_stage_bootstrap.py) 在 `hypothesis_design` 建立实验轮次，要求知识包；[agent_task_artifact_builder.py](../../core/web/services/team_workflow/research_runtime/agent_task_artifact_builder.py) 要求原假说任务聚合产物 | 为优化假设增加合法的结构化交接，不伪造原有假说任务完成 |
-| 工作流定义与账本 | [definition_registry.py](../../core/research/workflow/definition_registry.py) 以工作流 ID、版本和结构哈希固定定义 | 注册独立工作流，复用账本和命令；执行器分派仍需检查并补齐注册，注册定义本身不等于可运行 |
+| 工作流定义与账本 | [definition_registry.py](../../core/research/workflow/definition_registry.py) 以工作流 ID、版本和结构哈希固定定义 | 复用版本固定与账本；创建入口、Agent 绑定、readiness 和分派目前含旧流限制，须按第 10.2 节贯通 |
 | 方向 A/B 阶段依赖 | [challenge_phase_boundary.py](../../core/web/services/team_workflow/challenge_phase_boundary.py)、[research_loop.py](../../core/web/services/team_workflow/research_loop.py)、[experiment_api/plan.py](../../core/web/services/team_workflow/experiment_api/plan.py) 检查方向 A 整包状态 | 新流按服务端保存的实验身份和运行策略进入，不靠遗漏字段或伪造题目 ID 绕过旧入口 |
-| 实验执行与结果登记 | [experiment_api/full_run.py](../../core/web/services/team_workflow/experiment_api/full_run.py) 有准备、执行、登记；[iteration_decisions.py](../../core/research/workflow/iteration_decisions.py) 有重跑、修订、晋升、回滚、停止 | 复用一次试验的执行与证据，增加活动级下一轮讨论调度 |
+| 实验执行与结果登记 | [experiment_api/full_run.py](../../core/web/services/team_workflow/experiment_api/full_run.py) 有准备、执行、登记；[iteration_decisions.py](../../core/research/workflow/iteration_decisions.py) 有重跑、修订、晋升、回滚、停止 | 复用生命周期与决策语义；旧 full-run 的项目定位和适配器白名单不能直接服务新流，接入裁决见第 10.6 节 |
 | GPU 适配器 | [gpu_operator.py](../../core/research/experiment_adapters/gpu_operator.py) 当前为 CPU fixture，明确不产生真实性能结论 | 开发可核验的真实 GPU adapter；DEV fixture 保持明确身份，不能作为运行失败后的性能替代 |
 
 主要缺口是独立入口、优化假设合同、讨论后知识交接、活动级循环和真实 GPU 执行。没有必要重写普通 Session、群聊引擎、知识检索引擎或全部科研框架。
+
+### 4.2 接口与投影审查发现及处理清单
+
+F1 是已复现的现有接口缺陷；F2–F6 主要是新流程与既有合同的接入差异。下表全部为待实施项，纳入方案不代表代码问题已解决。
+
+| 编号 | 已核对事实与影响 | 必须落地的修订 | 完成判据与阶段 |
+| --- | --- | --- | --- |
+| F1 项目身份丢失 | 前端 [useTeamExperimentLoopMutations.ts](../../web/src/routes/teams/useTeamExperimentLoopMutations.ts) 发送 `researchProjectId`，但 [_models.py](../../core/web/routes/team_workflows/_models.py) 的创建/执行请求模型未声明该字段；Pydantic 将其丢弃。`full_run.py` 准备/执行时又按当前活动项目加载计划，切换项目后可找不到原计划 | 修正 HTTP DTO、服务参数、计划定位及结果回写的项目身份；既存计划按其保存的归属解析，禁止以当前页面选择代替 | P0：字段穿透实际请求模型；计划创建后切换项目仍能准备、执行、登记到原项目，伪造归属被拒绝 |
+| F2 新定义无法直接派发 | [run_creation.py](../../core/web/services/team_workflow/research_runtime/run_creation.py) 的公共入口拒绝新 workflow ID；[bindings.py](../../core/research/workflow/bindings.py) 仍按挑战杯定义生成绑定；[readiness/service.py](../../core/web/services/team_workflow/research_runtime/readiness/service.py) 默认只有旧流和知识侧流 | 独立创建入口使用服务端目标配置，绑定与执行能力检查消费 run 固定的定义；补齐新节点分派和产物写回 | P0–P1：没有 125 题结果也能创建、显示、派发新节点；绑定归属与节点集合正确，旧流回归通过 |
+| F3 前端工作区与缓存绑定旧流 | [ResearchProcessWorkspace.tsx](../../web/src/routes/teams/research-workflow/ResearchProcessWorkspace.tsx) 固定加载挑战杯目录并拼入原假说区域；[useTeamResearchSecondaryQueries.ts](../../web/src/routes/teams/useTeamResearchSecondaryQueries.ts) 的实验缓存按团队区分 | 独立活动控制器和汇总投影；复用基础画布、单 run 快照与事件订阅；活动/轮次身份进入 URL、查询键和失效处理 | P1/P6：刷新、切换活动、乱序回包和断线恢复不串数据；新流不渲染原批量假说区域 |
+| F4 活动对象语义冲突 | [ExperimentCampaign](../../core/research/workflow/contracts/experiment_campaign.py) 绑定一个 run、一项假说与一份协议；[run_domain_queries.py](../../core/web/services/team_workflow/research_runtime/run_domain_queries.py) 也是单 run 投影，不能直接承担跨轮次活动总账 | 明确外层 `OptimizationCampaign`、轮次、WorkflowRun、内层 ExperimentCampaign 和 trial 的映射；外层统一管理预算上限与最佳候选引用 | P0/P4：两轮不同 run/协议归于同一外层活动；费用去重累计，重复终态只创建一次下一轮 |
+| F5 讨论到规划缺少可消费交接 | [agent_task_artifact_builder.py](../../core/web/services/team_workflow/research_runtime/agent_task_artifact_builder.py) 要求原 TaskBundle 聚合；知识自动触发只消费问题理解产物；会议自动闭合仍经原 hypothesis-first 策略 | 增加有版本和 hash 的优化假设转换、讨论后知识调用及接受回执、规划输入转换；活动策略只接管本活动动作，不冒充原流程完成 | P3：一轮会议产生一个主优化假设，资料可复用或补齐，随后冻结计划；缺产物、反证和重复回调均有明确结果 |
+| F6 GPU 入口与评价不连通 | [gpu_operator.py](../../core/research/experiment_adapters/gpu_operator.py) 属 DEV dispatcher；[experiment_kernel.py](../../core/web/services/team_workflow/experiment_kernel.py) 的正式入口只接受两个既有适配器；[real_domain_ports.py](../../core/web/services/team_workflow/research_runtime/real_domain_ports.py) 的 bounded 评价含固定评分/覆盖率 | 采用第 10.6 节明确的新流执行口，接入真实 kernel runner 与数值评价；保留失败证据回流，不能只加一个 registry 条目便宣称可运行 | P2/P4：从冻结输入到真实设备、原始 timing、正确性及终态回执可追溯；错误 kernel 无加速结论，失败仍能进入下一轮讨论 |
+
+### 4.3 审查证据与未验证范围
+
+本轮前置审查通过了工作流定义/readiness 注册、实验请求响应合同、DEV dispatcher/GPU fixture、后端快照、前端快照/上下文/URL/运行 hook，以及会议和知识子流的部分身份、重放和复用测试。它们证明已有基础能力在相应测试条件下成立，不覆盖新活动端到端。
+
+隔离检查还确认：两个请求模型均丢弃 `researchProjectId`；显式项目准备调用仍以空项目参数查找并报 `Experiment plan not found.`；新 ID 报 `unknown_workflow`；绑定工厂仍返回 `challenge-cup-research`；GPU adapter 被正式 full-run 白名单拒绝。检查未连接真实模型、GPU 或产品运行数据。本次文档修订复用这些证据，不将它们写成已修复或新流验收通过。
 
 ## 5. 产品流程与每一步的输入输出
 
@@ -119,6 +140,8 @@ flowchart TD
 输入包括算子语义、工作负载范围、目标设备、主要指标、正确性要求、可变范围、预算以及参与团队。首次运行先建立可信基线；已有基线也必须检查代码和环境指纹是否仍适用。
 
 基线准备失败时产出环境/复现诊断，不能继续生成性能优化结论。此时的局部修复只恢复已定实验条件，不扩展研究方向。
+
+初始基线使用活动内独立的 `baselineSetup` 记录与冻结测量协议，不要求先存在优化假设或原 `hypothesis_design` 产物；它仍须有候选代码、环境、输入、预算和真实执行回执。此切口在 P2 提前验证，避免先完成多轮编排后才发现 GPU 路径无法使用。
 
 ### 5.2 单次优化讨论
 
@@ -163,7 +186,7 @@ flowchart TD
 | 字段 | 内容 |
 | --- | --- |
 | `hypothesisId / revision` | 唯一身份与修订版本 |
-| `campaignId / roundId / parentCandidateRef` | 实验归属与起始实现 |
+| `optimizationCampaignId / roundId / parentCandidateRef` | 外层优化活动、轮次与起始实现；不与内层 ExperimentCampaign 的 `campaignId` 混用 |
 | `observationRefs` | 触发改进的实测、错误或已有证据 |
 | `proposedChange` | 准备改变的参数、布局、融合或计算方式 |
 | `mechanism` | 为什么预计有效，哪些步骤构成因果解释 |
@@ -189,7 +212,17 @@ V1 使用高/中/低与简短依据，不做任意加权总分，不把 LLM 猜�
 
 为新流程注册独立的工作流类型，例如 `operator-optimization`，并保存服务端配置的实验模式与版本。名称为拟定，不是已存在 API。
 
-一个实验活动（campaign）固定目标、预算、团队、设备与初始基线；活动下有连续讨论/实验轮次；每轮关联一个工作流 run、会议、选定假设、知识快照和计划；计划下有若干具体配置试验。
+外层新增 `OptimizationCampaign`，固定目标、预算、团队、研究项目、设备与初始基线；活动下有连续讨论/实验轮次。现有 `ExperimentCampaign` 继续表达单次计划的执行合同，不能直接改成外层活动或把一份协议覆盖成下一轮协议。
+
+| 对象 | 归属与身份 | 权威边界 |
+| --- | --- | --- |
+| 外层优化活动 | `teamId / researchProjectId / optimizationCampaignId` | 配置版本、预算授权、初始基线、当前最佳、轮次引用；由新活动服务写入 |
+| 基线准备 | `optimizationCampaignId / baselineSetupId / runId` | 新定义中的基线准备入口，使用独立冻结协议和执行回执；不占优化轮次，不要求先生成假设 |
+| 优化轮次 | `optimizationCampaignId / roundId / runId` | 固定开始时的最佳候选；关联会议、假设、知识快照、计划；节点状态读 Workflow Ledger |
+| 单计划实验合同 | 现有 `ExperimentCampaign.campaignId / runId / protocolHash` | 一个 run 和冻结协议的执行合同；外层通过明确引用关联，不改写旧字段语义 |
+| 配置试验 | `roundId / planId / trialId / attempt` | 候选配置与执行回执；重试属于原试验，改算法或协议产生新版本 |
+
+`ResearchScopeEnvelope.campaign` 在新流中绑定外层 `optimizationCampaignId`，与内层 `ExperimentCampaign.campaignId` 分字段保存。新流的研究目标身份由服务端配置导出，不借用 `SCI-091` 编号或补造方向 A 的 `catalogScope`。固定方向与“科学题目包”在入口合同中区分。
 
 ```
 实验活动
@@ -205,24 +238,31 @@ V1 使用高/中/低与简短依据，不做任意加权总分，不把 LLM 猜�
 
 | 数据 | 唯一写入者与权威 | 其他模块的使用方式 |
 | --- | --- | --- |
-| 活动配置、预算授权、初始基线 | 新活动服务，复用研究项目身份与存储定位 | 不可变配置版本；投影读取 |
-| 节点状态、调度命令、取消与恢复 | 现有 Workflow Ledger 和 command service | 活动状态由轮次账本计算，不双写另一套节点状态 |
+| 活动配置、预算授权、初始基线、轮次引用、当前最佳 | 新活动服务，复用研究项目身份与存储定位 | 不可变配置版本；最佳引用和下一轮安排按活动版本更新；投影读取 |
+| 节点状态、调度命令、取消与恢复 | 现有 Workflow Ledger 和 command service | 活动投影组合活动控制状态与各 run 账本，不双写另一套节点状态 |
 | 会议文本与结构化结论 | 原生会话链及 MeetingRound 服务 | 保存引用和有界摘要 |
 | 优化假设 | 会议闭合后的专属结构化 artifact | 搜集和规划按版本/hash 读取 |
 | 知识内容 | 现有 Team Knowledge 写入与来源机制 | 实验使用不可变证据快照与本轮关联 |
 | 计划与协议 | 现有实验计划服务，增加优化配置扩展 | runner 只消费冻结版本 |
 | 原始测量与环境回执 | 真实实验 adapter 输出 artifact | 评价程序读取；LLM 无权覆盖原始值 |
-| 评价与活动级候选选择 | 确定性评价服务；选择通过命令提交 | 会议只提出建议；最佳候选指针按预期旧版本更新 |
+| 评价与活动级候选选择 | 数值评价器写不可变评价；活动服务提交选择命令 | 会议只提出建议；评价器不直接改最佳候选指针 |
+| 实际成本 | 已发生调用/设备试验的原始费用与时间回执 | 外层按回执身份去重汇总；讨论、知识子 run、执行和最终验证均计入同一预算 |
 
 存储路径必须由当前研究项目/实例的 resolver 生成。新实验有独立 namespace 和 artifact 根，不硬编码用户名或 Documents 路径，不在 checkout 写真实实验数据。具体布局在实现时落到现有 locator，不增加平行的通用存储框架。
+
+现有实验计划是项目目录中的 JSON 领域记录，节点运行状态是 Ledger 权威。复用时由一个计划领域写入者登记产物，再经现有受管回执/事务与恢复机制关联到 run；HTTP、活动协调器和投影不能分别写同一份计划。只有完成内容 hash、所属项目/活动/run 和回执的关联校验，节点才可交接。不得把“JSON 中有计划”直接投影为“账本节点已完成”。
 
 复用同一团队成员不复用同一运行会话和可变上下文。方向 A 的内容只在显式选择后作为有来源的参考输入，不能自动成为新实验的成功证据。
 
 ### 7.3 版本、幂等与恢复
 
-每次真实派发绑定 `campaignId / roundId / runId / protocolHash / candidateHash / environmentHash / workloadHash`。同一命令重试不能产生第二次会议或第二次付费实验；已有回执能恢复时，继续读取原回执。
+每次真实派发绑定 `teamId / researchProjectId / optimizationCampaignId / runId` 和策略版本；基线准备关联 `baselineSetupId`，优化轮次关联 `roundId`。具体试验再绑定 `trialId / attempt / protocolHash / candidateHash / environmentHash / workloadHash`；讨论和知识步骤绑定已有父产物，不补造尚未生成的计划或试验身份。同一命令重试不能产生第二次会议或第二次付费实验；已有回执能恢复时，继续读取原回执。
 
 每轮使用开始时固定的最佳候选引用，不能在运行中被另一轮悄悄替换。活动级选择采用现有命令/CAS 思路验证预期旧版本；不新建全局锁服务。
+
+外层活动与单 run 有各自的版本号：活动命令检查 `expectedCampaignVersion`，节点命令检查 `expectedRunVersion`。活动服务按本轮终态事件和评价回执登记一次选择与下一轮意图，重放同一事件只能返回原结果；不能因为两次回调分别创建两场付费会议。预算先在活动内预留，再绑定到实际子任务；累计投影不另行产生扣费。
+
+活动级“暂停/恢复”由新服务承担：暂停表示不再派发下一项工作，已经开始的工作按既定策略结束并留下回执；立即终止使用取消并等待执行器终态。现有 run 命令集不等于已有活动暂停能力，不能在前端改一个状态字段冒充暂停成功。
 
 取消通过现有认证命令与可追踪执行器传递。取消或超时留下终态与已发生的成本，不产生成功评价；待执行任务不再派发。恢复时重新检查设备与输入指纹，不能把旧设备测量拼进新环境比较。
 
@@ -299,32 +339,87 @@ V1 使用高/中/低与简短依据，不做任意加权总分，不把 LLM 猜�
 
 | 责任 | 现有落点/拟新增位置 | 边界 |
 | --- | --- | --- |
-| 优化领域合同 | `core/research/` 下新增紧凑优化合同，扩展 `experiment_contract.py` | 不把讨论调度和设备执行塞入合同文件 |
-| 工作流定义 | `core/research/workflow/` 新定义与版本快照 | 复用 registry；同步验证运行器、readiness 和投影注册 |
-| 活动与轮次编排 | `core/web/services/team_workflow/` 新增优化 pack | 单一 owner，使用现有 command/ledger 服务 |
-| 团队讨论适配 | `meeting_rounds.py`、`meeting_runtime.py` 对应 owner | 修改议程、输入和输出，不修改普通 Session 语义 |
-| 知识侧流接入 | `research_runtime/knowledge_sideflow_service.py` 及其消费接口 | 使用本轮假设/缺口，保留原来源与删除重建语义 |
-| 计划与评价 | `experiment_api/plan.py`、结果服务及 `iteration_decisions.py` | 保留现有正式合同；新活动消费和连接这些产物 |
-| GPU adapter | `core/research/experiment_adapters/` 新真实实现及 registry | fixture 和真实执行显式分离；不重写通用 dispatcher |
-| 后端 API | `core/web/routes/team_workflows/` 新薄入口 | DTO 明确，业务/权限归服务 |
-| 前端 API | `web/src/api/` 新领域接口或复用 `teamExperiment.ts` | 路由组件不直接写 fetch/path |
-| 用户界面 | `web/src/routes/teams/` 独立实验 surface | 使用 VUI 产品 API 和页面 recipe，复用团队壳与结果查看 |
+| 优化领域合同（F4） | `core/research/` 新增紧凑优化合同；对照 `core/research/workflow/contracts/experiment_campaign.py` | 外层活动、轮次与单计划合同分开；不改变已有 `campaignId` 的含义 |
+| 项目身份贯通（F1） | `core/web/routes/team_workflows/_models.py`、服务层 `experiment_api/plan.py`、`experiment_api/full_run.py`、`workflow_ops.py`、`research_projects.py` | DTO 接收并校验项目字段；后续定位使用记录归属；修正根因，不靠页面不许切换规避 |
+| 定义与绑定（F2） | `core/research/workflow/definition_registry.py`、`core/research/workflow/bindings.py` 及新定义/版本快照 | 绑定消费所选定义；创建后按 run 固定版本解析，不从旧工作流定义取节点 |
+| 创建、readiness 与分派（F2） | `research_runtime/run_creation.py`、`research_runtime/service.py`、`research_runtime/readiness/service.py` 及对应节点执行映射 | 公共入口接受新身份；检查目标配置与本轮产物；节点分派、artifact 写回及快照使用同一固定定义 |
+| 活动与轮次编排（F4） | `core/web/services/team_workflow/` 新增优化 pack，对照 `research_runtime/run_domain_queries.py` | 单一活动写入者；汇总预算、最佳候选和轮次引用；单 run 投影仍读原 Ledger |
+| 讨论与产物转换（F5） | `meeting_rounds.py`、`meeting_runtime.py`、`research_runtime/automation_policy_executor.py`、`research_runtime/agent_task_artifact_builder.py` | 新议程和优化产物转换；闭合 hook 按活动策略路由，不修改普通 Session 语义或伪造 TaskBundle |
+| 知识侧流与规划交接（F5） | `research_runtime/knowledge_sideflow_trigger.py`、`research_runtime/knowledge_sideflow_service.py`、`research_runtime/experiment_stage_bootstrap.py` | 接受讨论后的缺口或快照引用；新增合法规划输入，保留来源与删除重建语义 |
+| 计划和结果权威（F1/F4/F6） | `experiment_api/plan.py`、计划存储、结果服务及 `core/research/workflow/iteration_decisions.py` | 项目 JSON 计划与 Ledger 回执关联；活动只提交领域命令，不绕过服务直接写文件 |
+| 真实执行与数值评价（F6） | `core/research/experiment_adapters/`、新算子领域执行桥；对照 `experiment_kernel.py`、`core/research/formal_runner.py`、`research_runtime/real_domain_ports.py` | 按第 10.6 节接入受控 runner；成功和失败均有回执；不使用 bounded 固定分数评价 GPU |
+| 活动 HTTP API（F1/F4） | `core/web/routes/team_workflows/` 新薄入口与显式 DTO | 请求模型、服务参数、存储定位及响应身份一致；业务和授权归服务 |
+| 前端 API 与缓存（F1/F3） | `web/src/api/`、`useTeamExperimentLoopMutations.ts`、`useTeamResearchSecondaryQueries.ts` | 复用请求层；活动查询按团队/项目/活动区分，失效范围随真实归属确定 |
+| 独立控制器与投影（F3） | `ResearchProcessWorkspace.tsx`、`useResearchWorkflowCatalog.ts` 的旧流耦合点；`web/src/routes/teams/` 新活动控制器 | 新入口不自动加载题库/HF 区域；复用画布、快照、单 run SSE 与 VUI 页面 recipe |
+
+表中未写全的后端文件位于 `core/web/services/team_workflow/`，前端控制器位于 `web/src/routes/teams/` 及其 `research-workflow/` 子目录。这是责任划分，不要求把所有旧文件同时改造；先消除实际阻断新入口的耦合，再通过现有接口复用其余能力。
 
 ### 10.3 API 行为合同
 
-拟提供活动创建/读取、启动、暂停、恢复、取消、轮次列表/详情、结果包读取。具体 URL 在 DTO 阶段确定，复用已有事件通道。
+拟提供活动创建/读取、启动、暂停、恢复、取消、轮次列表/详情、结果包读取。具体 URL 在 DTO 阶段确定；以下字段是待实现合同，不表示已有接口支持。
 
-所有写命令绑定活动身份、期望配置版本与幂等键。运行前检查保存的预算授权和 scope；客户端不能把自己声明为审批人。服务端错误应明确为缺配置、缺证据、待设备、预算不足或执行失败，不要求用户理解内部枚举。
+| 调用范围 | 必须保留的身份与版本 | 服务端约束 |
+| --- | --- | --- |
+| 创建活动 | `teamId / researchProjectId`、目标配置与策略版本；返回 `optimizationCampaignId` | 创建时解析并固定项目，校验其团队归属；后续不随当前活动项目切换 |
+| 活动命令 | `optimizationCampaignId / expectedCampaignVersion / idempotencyKey`，携带所属团队/项目 | 按记录读取目标、预算和策略；检查版本后写入；客户端不能把自己声明为审批人 |
+| 基线准备/执行 | `baselineSetupId / runId / expectedRunVersion`、冻结协议及代码/环境/workload 引用，绑定外层活动 | 使用明确的基线准备合同；同样校验预算和回执，不填虚假的优化假设或 `roundId` |
+| 轮次/节点命令 | `roundId / runId / expectedRunVersion`，绑定外层活动 | run 必须属于该轮次和活动；定义及节点来源于该 run 的固定版本 |
+| 计划准备、执行及登记 | `researchProjectId / planId`，关联 `roundId / runId / trialId / attempt` 及冻结产物 hash | HTTP DTO → 服务参数 → 计划存储 → 执行回执 → 结果关联全程保留项目和父引用 |
+| 读取概览/详情 | 活动或轮次身份，响应带归属和投影版本 | 概览只含汇总与引用；原始产物按需读取；不存在和归属不匹配明确返回错误 |
 
-读接口区分活动概览、轮次摘要和按需原始产物，避免每次轮询加载全部历史。停止命令返回已接受的停止请求，最终是否已停止以执行回执为准。
+F1 先修复现有创建/执行 DTO 吞掉 `researchProjectId` 的问题，再修复 `full_run.py` 准备和执行入口未向计划存储传递项目的问题。已创建记录按其保存的身份定位；若不能唯一确定归属，返回明确的缺身份错误，不以团队当前项目代替。跨项目提交的 `planId`、run 或活动引用必须校验，不能仅凭客户端字段迁移记录。
 
-### 10.4 界面信息
+活动命令与 run 命令分开校验版本；同一动作重试返回原命令/回执，不重新派发付费工作。计划领域记录写入成功与 Ledger 节点完成是两项事实：由领域服务提交带产物引用的受管回执后才推进节点，恢复时按同一关联读取，不用前端状态补写。
+
+服务端错误应明确为缺配置、缺证据、待设备、预算不足或执行失败。暂停/取消接口返回请求接受状态，界面分别展示“不再派发后续工作”和执行器确认的实际终态，不能将请求接受直接显示为设备已经停止。
+
+### 10.4 界面与前端投影合同
 
 独立入口展示目标算子、实验目标、设备和预算。运行页展示当前步骤、上一轮结论、当前最佳、累计成本及停止/恢复动作；轮次详情按“观测 → 假设 → 资料 → 计划 → 执行 → 结果”查看。
 
 用户应能看懂：当前为什么做这个实验，和哪个版本比较，获得了什么真实证据，下一轮为什么继续。源码哈希、内部 ID 等保留在详情或导出，不堆入主流程。
 
-前端必须遵循 VUI 与页面 recipe，涉及的新 VUI 能力须登记 designs；布局记忆使用共享布局 ID。开发顺序先做隔离预览再实现正式界面，相关 route、API 和 VUI 契约在交付前通过。
+新入口使用独立活动控制器，不在 `ResearchProcessWorkspace` 上简单替换标题：该组件当前会取挑战杯目录、固定 workflow ID 并拼入 HF 区域。新控制器消费服务端活动身份，复用已有画布、快照解析、事件 reducer 和单 run SSE；独立流不显示原批量假说区域。
+
+| 投影层 | 内容与更新方式 | 验收约束 |
+| --- | --- | --- |
+| 活动概览 | 初始基线、当前最佳、轮次摘要、累计/剩余预算、活动状态、`activeRunId` 与活动 revision | 由活动服务只读汇总，单 run 完成不等于活动完成；不另存节点执行状态 |
+| 当前轮次 | 选中轮次的 run 快照、节点、产物引用和执行终态 | 继续使用团队/run 身份的现有快照和 SSE；新活动引用必须与服务端归属一致 |
+| 查询与失效 | 活动查询键含 `teamId / researchProjectId / optimizationCampaignId`，轮次详情再含 `roundId / runId` | 修正仅按 team 缓存实验的范围；写命令失效原活动的缓存，不依赖用户当前页面 |
+| URL 与切换 | 保存项目、活动和所选轮次/run；缺省时由服务端概览选择当前轮次 | 刷新可恢复；切换时清除旧的活动绑定和订阅，旧请求即使晚返回也不能覆盖新选择 |
+| 连续轮次与重连 | 活动运行期间有界刷新概览，revision 或 `activeRunId` 变化后连接对应 run；重连补拉快照 | 复用既有单 run 事件通道；切换到历史轮次时保持用户选择，不强制跳回；不复制 transcript 或建立第二套运行权威 |
+
+P1 先提供创建/读取与最小快照投影，让后端链路可观察；P6 再闭合完整交互和真实浏览器验证。前端必须遵循 VUI 与页面 recipe，涉及的新 VUI 能力须登记 designs；布局记忆使用 `WORKBENCH_LAYOUT_IDS` 与共享 pane persistence。各阶段涉及界面时先做隔离预览，相关 route、API、VUI 契约和 TypeScript build 在该阶段交付前通过。
+
+### 10.5 讨论、资料与实验规划的产物交接
+
+新流的交接不能只靠修改会议 Prompt。现有 TaskBundle 聚合、问题理解后触发知识搜集，以及 `hypothesis_design` 实验 bootstrap 都有具体上游合同；新增转换必须接受本活动产物，而不是制造旧节点已经成功的记录。
+
+| 交接 | 本活动的输入与产出 | 缺失或失败时的结果 |
+| --- | --- | --- |
+| 会议闭合 → 优化假设 | 读取真实会议 digest、候选及选定理由，生成一个有版本的 `OptimizationHypothesis` | 未闭合、无主假设或结构不合法时不创建计划；返回明确的讨论结果/修订原因 |
+| 优化假设 → 资料准备 | 从主假设提取证据缺口；已有快照适用时复用，否则启动定向知识子 run | 资料不可得留下缺口；反证可驳回或修订假设，不能为了连通流程强制接受 |
+| 资料准备 → 实验规划 | 回读有来源、hash 匹配的知识快照与接受回执，绑定假设版本和本轮身份 | 草稿、未接受快照或来源已失效时不能冒充已入库；无需方向 A 整包回执 |
+| 实验规划 → 冻结输入 | 转成现有计划服务可消费的优化实验单，保存干预、对照、预测、评价、预算和协议版本 | 缺少可执行变量或评价条件时只返回修订意见，不派发设备 |
+| 执行/评价 → 下一轮 | 原始执行回执、数值评价、失败类型、成本、父候选和选择理由组成反馈引用 | 编译失败、正确性失败或测量无效也能形成反馈；用户取消、预算耗尽等停止条件禁止再开一轮 |
+
+每段交接携带 schema 版本、产物 ID/hash、生产者引用、团队/项目/活动/轮次/run 归属和父产物引用。知识快照可以共享，但本轮的接受与消费关联必须单独登记。重复闭合/发布回调复用原产物和命令；修订生成新版本，不覆盖已经被计划冻结的输入。
+
+会议自动闭合当前会调用 `automation_policy_executor.py` 的旧 hypothesis-first 推进 hook；新活动需在该边界按保存的工作流/策略身份派发新的交接动作。是否自动接受知识、冻结计划由第 11.2 节已授权策略决定，不能以一个通用“自动完成”开关代替这些合同。
+
+### 10.6 真实 runner 与数值评价的接入裁决
+
+推荐新流复用 `experiment_adapters` 的受控生命周期，增加真实算子 adapter 和算子领域执行桥，将执行回执写入现有 Workflow Ledger。旧 `experiment_kernel.py` 经 `formal_runner.py` 的 full-run 入口目前只支持两个既有场景，不能把新活动直接送入该白名单，也不能只在 DEV registry 登记 GPU 名称便宣称接通。
+
+具体接入合同如下：
+
+1. 复用 prepare、validate、execute、collect、evaluate 与回执登记的职责划分，以及现有受控产物定位方式；新桥只转换算子输入和结果，不另建通用执行框架。P2 的 `baselineSetup` 使用独立的基线准备合同进入同一 runner，无需伪造优化假设或内层 ExperimentCampaign。
+2. 候选代码先登记为受管 artifact，冻结代码 hash、协议、环境、workload 和允许改动范围。runner 及设备配置由后端选择；客户端不提交任意 shell 命令或不受管脚本路径。实现候选只能修改获准 kernel 范围，不能改验证器、计时器或评价规则。
+3. 真实 adapter 必须在批准环境产生实际设备回执、正确性结果、原始 timing、编译/测量开销、受管日志引用和执行终态。复用已核实适用的进程管理、超时和取消能力；跨 WSL/Linux 的启动、退出和无可见控制台行为也在 P2 验证，不能仅凭 Python 函数可调用认定可运行。
+4. 算子数值评价按第 8 节从原始记录计算有效样本、逐 shape 结果、不确定性和候选比较；不调用 `real_domain_ports.py` 中含固定评分/覆盖率的 bounded 评价作为 kernel 指标。LLM 可以解释或质疑结果，无权填补缺失数值。
+5. 现有 `_ledger_controlled_run` 以执行完成回执为前提，不能假设执行失败会自动走到正常评价节点。新桥登记真实失败终态和成本，由活动服务消费成功/失败回执生成反馈或停止决定；失败执行不改写为成功，也不经成功评价路径晋升候选。
+
+DEV fixture 只用于接口和控制流测试，保留清晰身份；真实设备不可用时返回待环境/执行失败及诊断，不用 CPU fixture 产出性能结论。P2 必须先证明一条基线输入到真实测量回执的最小路径，再扩大会议、搜索和多轮自动化的验证投入。
 
 ## 11. 预算、自动推进与人工边界
 
@@ -340,13 +435,15 @@ V1 使用高/中/低与简短依据，不做任意加权总分，不把 LLM 猜�
 | 资金与设备时间 | 启动前填写总模型/搜索额度、GPU 总时间和单试验超时 | 当前未授权，不能给默认无限额度 |
 | 最终验证预留 | 建议预留至少 20% 可用预算 | 防止搜索耗尽后无法独立复验 |
 
-预算检查和费用回执复用现有设施；并发预留与实际结算必须关联同一运行身份。缓存命中等费用事实以实际 provider usage 为依据，未知明确记为未知。
+预算检查和费用回执复用现有设施；预留与实际结算绑定外层活动及具体轮次/子任务。初始基线、会议、知识搜集、失败执行、重测与最终验证都计入活动预算；重放同一回执不重复累计。缓存命中等费用事实以实际 provider usage 为依据，未知明确记为未知。
 
 ### 11.2 自动推进范围
 
 一次真实运行授权应覆盖活动内已冻结范围的讨论、定向检索、候选实现、受控设备执行、评价与后续轮次。执行范围内无需每个问题、每次讨论、每条资料都重复人工点击。
 
-当前知识交接与协议冻结存在人工行为语义。新流若采用活动级策略自动接受本活动知识快照和符合模板的计划，必须有独立、可审计的策略身份和真实写入回执，明确允许的 namespace、动作和上限。不得把 Agent 伪装成 operator，也不得制造人工审批回执；未授予相应策略时诚实停在该步骤。
+当前会议自动闭合后的推进 hook 仍面向旧 hypothesis-first 链，知识交接与协议冻结也存在人工行为语义。因此，“复用团队讨论”不代表已经拥有新活动的自动闭环。活动策略须逐项覆盖会议结论接受、优化产物转换、知识准备/接受、计划冻结和下一轮安排，并通过第 10.5 节的真实产物交接执行。
+
+新流若采用活动级策略自动接受本活动知识快照和符合模板的计划，必须有独立、可审计的策略身份和真实写入回执，明确允许的 namespace、动作和上限。不得把 Agent 伪装成 operator，也不得制造人工审批回执；未授予相应策略时停在具体待授权动作，已获授权的范围不重复询问。
 
 需要用户重新决定的情况限于改变算子语义/精度/主要目标、超出设备或费用授权、需要新增不在范围内的外部副作用，以及实验条件无法满足。预算耗尽、用户取消、没有可行高价值候选或计划声明的收敛条件触发时停止。
 
@@ -358,15 +455,15 @@ V1 使用高/中/低与简短依据，不做任意加权总分，不把 LLM 猜�
 
 | 阶段 | 可观察产出 | 依赖与主要责任 | 验收证据 |
 | --- | --- | --- | --- |
-| P0 合同与复用切口 | 冻结优化目标、动作范围、数据身份、预算模型；验证新 workflow 的 registry/dispatch/readiness 可接入点 | 基于本文；领域合同和运行层 owner | 字段、唯一事实源和权限边界清楚；未执行试验不会产生成功证据 |
-| P1 独立入口与轮次骨架 | 无方向 A 结果的新研究项目可创建和查看优化活动 | P0；活动服务、定义、DTO | 新身份不依赖 125 题；旧入口门禁仍有效；两活动不串数据 |
-| P2 单次讨论与知识交接 | 一轮会议形成 1 个主优化假设，补齐或复用知识后得到实验输入 | P1；meeting 与知识 owner | 结论来自实际会议；支持/反对证据可回读；无需原有假说 fan-out 完成 |
-| P3 实验规划与 DEV 闭环 | 生成可执行实验单，fixture 跑通计划、执行、评价和下一轮 | P2；实验合同与迭代服务 | 失败、预算、取消和恢复分支明确；所有 fixture 标为 DEV，不能晋升真实性能结果 |
-| P4 真实 GPU 执行 | 在批准环境完成基线、正确性检查、受控测量和结果登记 | P3；设备 adapter owner | 真 GPU/环境回执、源代码、原始 timing、独立评价；错误 kernel 无加速结论 |
-| P5 用户界面 | 独立创建入口、运行进度、轮次链、比较、预算和停止操作 | P1–P4 合同稳定；VUI frontend owner | 先预览对齐；API/页面/VUI tests、TypeScript build；真实界面读取真实运行 |
-| P6 真实连续实验与交付 | 至少两轮真实闭环，第二轮明确消费第一轮结果；最终结果包 | P4/P5；研究执行 owner | 正/负结果均有效；有同预算固定策略对照；真实 Qwen 凭证、可复现命令和最终留出结果 |
+| P0 身份合同与接口根因修复 | 明确外层活动、轮次、内层计划合同的映射；修复项目字段在 DTO 和计划查找中丢失；确认已接受的目标/动作边界及预算合同 | F1/F4，识别 F2 接入点；领域合同、HTTP 和计划服务 | 请求模型保留字段；创建后切换项目仍按原归属准备/执行/登记；跨范围请求拒绝；活动/run 版本不混用 |
+| P1 独立入口与最小投影 | 新研究项目可创建活动、基线准备记录和轮次；贯通新定义的创建、绑定、readiness、节点分派与快照；提供最小创建/读取界面 | P0，F2/F3；活动服务、运行层和前端 | 不需要 125 题结果；run 固定定义和节点正确；API/快照可观察；独立入口不注入旧 HF 区域，旧流回归通过 |
+| P2 最小真实 GPU 基线 | 从冻结 `baselineSetup` 经新执行桥完成基线编译、正确性、计时和回执登记 | P1，F6；受控 adapter/设备执行；实际环境与预算授权已具备 | 无优化假设也能建立真实基线；设备/代码/环境/workload/协议/原始 timing 可回读；不走旧 full-run 白名单或 CPU 性能替代；超时/取消终态可核验 |
+| P3 单次讨论、知识与冻结计划 | 使用 P2 基线开一次讨论，形成 1 个主优化假设；复用或补齐资料并转成冻结实验单 | P2，F5；meeting、知识和计划服务；相应模型/搜索与策略授权 | 结论来自真实会议，资料与反证可回读，产物版本/hash 贯通；不伪造 TaskBundle；重复闭合不再开会，无法形成计划时有明确结果 |
+| P4 单轮优化与失败反馈 | 实现候选、受控执行、数值评价、最佳引用更新和下一轮意图登记；补齐活动预算和停止/恢复 | P2/P3，F4/F6；活动编排、计划与评价 | 一轮真实输入到结果可追溯；失败也能形成反馈；错误候选不晋升；费用和下一轮去重；DEV 分支覆盖不替代真实执行证据 |
+| P5 连续真实反馈 | 至少两轮真实闭环，第二轮读取第一轮证据和当前最佳，并说明调整理由 | P4；活动编排与研究执行 | 终态重放、预算和暂停不产生重复派发；正/负结果均保留；第二轮上下文能定位第一轮回执；真实 Qwen/知识/设备证据关联 |
+| P6 完整界面与交付 | 完整轮次链、比较、预算/停止操作；同预算固定策略对照、最终留出与可复现结果包 | P1–P5；VUI frontend 与研究执行 | URL 恢复、切换/乱序/重连、历史轮次浏览与下一轮显示通过；API/页面/VUI tests 和 TypeScript build；真实浏览器读取真实结果；对照与留出结论在声明范围内成立 |
 
-P4 的环境、依赖安装和实际调用授权不得被 P0–P3 的代码或 fixture 验收替代。P6 不是要求伪造两轮“成功改进”，而是要求反馈真的改变下一轮行动。
+P2 提前解决真实执行不确定性，其环境、依赖安装和实际调用授权不能由文档、代码或 DEV fixture 验收替代。设备暂不可用时可继续独立的合同/fixture 开发，但 P2 的真实验收保持未完成，不宣称后续真实阶段完成。P5 要求反馈真正影响下一轮行动，不要求两轮都实现性能提升。
 
 每个实施阶段按项目规则在任务 worktree 中完成，先核对本地复用，再按实现范围记录复用证据；需要引用上述外部方案时按 active registry 记录 EXTERNAL 证据，不手填失真候选元数据。自审与验证后合入本地 main；远端 push、PR、发布和提交另需授权。
 
@@ -374,27 +471,34 @@ P4 的环境、依赖安装和实际调用授权不得被 P0–P3 的代码或 f
 
 ### 13.1 必须覆盖的行为
 
-1. 在没有 125 题结果的独立项目中启动新流；原方向 A/B 入口仍遵守原合同。
-2. 同一团队的两个活动拥有不同会议、知识引用、候选、计划和试验；并发回执不能跨活动写入。
-3. 单次讨论只派发一次，有界结束并形成主假设；重复命令不会再付费开会。
-4. 知识足够时复用快照，缺口时定向搜集；反证能排除主张；资料不可用不能编造引用。
-5. 优化假设能转成实验单，不伪造旧假说节点、人工审批或知识已发布状态。
-6. 编译/正确性/指标缺失/测量无效分别留痕；成功状态不自动变成优化有效。
-7. 初始基线不变，失败候选不晋升；当前最佳更新时验证旧版本与评价来源。
-8. 取消、预算耗尽、暂停与恢复不会重复产生会议、试验或扣费；实际已发生费用仍保存。
-9. 第二轮输入包含第一轮真实结果，能追溯调整理由；重复失败没有新证据时不继续无限循环。
-10. 最终留出数据不进入调优上下文；检查输入分组和泛化声明一致。
+1. **项目身份回归（F1）**：通过实际 HTTP DTO 创建计划，切换团队当前项目后仍可准备、执行和登记到原项目；验证两个请求模型都保留 `researchProjectId`，存储调用不丢字段，跨项目计划/run 引用被拒绝。
+2. **独立运行接入（F2）**：无 125 题结果也可创建新流；公共入口、固定定义、Agent 绑定、readiness、dispatch、artifact 和快照全链一致；原方向 A/B 入口仍遵守原合同。
+3. **活动隔离与前端恢复（F3/F4）**：同一团队不同项目/活动切换、刷新、乱序响应和断线重连不串数据；URL 恢复所选轮次；活动运行到下一 run 后概览能更新，历史轮次浏览不被强制跳转，新入口不渲染旧 HF 区域。
+4. **两层活动合同（F4）**：两轮不同 run/协议关联同一外层活动，内层 `ExperimentCampaign` 不被覆盖；快照是只读投影，JSON 计划存在不代表节点已完成。
+5. **一次讨论与策略交接（F5）**：单次讨论有界结束并形成一个主假设；重复命令/闭合回调不再付费开会；自动闭合进入本活动 hook，未授予的动作不冒充已授权。
+6. **资料与计划输入（F5）**：知识足够时复用快照，缺口时定向搜集；反证可排除主张；不可回读/缺 hash/未接受的资料不能伪造已发布状态；冻结计划引用正确假设版本，不依赖假造的旧 TaskBundle。
+7. **提前真实基线（F6）**：没有优化假设时，`baselineSetup` 仍能通过新桥在批准设备运行并回读测量；DEV fixture 名称不触发真实成功，旧 full-run 的限制不会被误当成新流已支持。
+8. **评价与失败回流（F6）**：编译失败、正确性失败、指标缺失、测量无效分别留痕和成本；数值评价从原始 timing 计算，禁止 bounded 固定评分进入 GPU 结论；失败终态能进入反馈，不必伪装成功评价。
+9. 初始基线不变，失败候选不晋升；当前最佳更新时验证活动旧版本、评价来源和比较条件，不能修改被冻结验证器或评价脚本取巧。
+10. 取消、预算耗尽、暂停与恢复不会重复产生会议、试验或扣费；基线、知识子 run、失败和最终验证的实际费用统一累计，活动版本与 run 版本分开检查。
+11. 第二轮输入包含第一轮真实结果，能追溯调整理由；同一终态/评价重放只生成一个下一轮意图；用户停止或没有新证据的重复失败不会无限派发。
+12. 最终留出数据不进入调优上下文；检查输入分组、同预算对照和泛化声明一致。
 
 ### 13.2 可复用的现有检查入口
 
 实施时在当前代码基线上选取相关测试，不机械重复全量套件。现有入口包括：
 
+- [test_experiment_route_contract.py](../../tests/test_experiment_route_contract.py)：F1 的 HTTP DTO、项目穿透与计划定位回归应从这里补齐。
+- [test_research_workflow_readiness_registry.py](../../tests/test_research_workflow_readiness_registry.py)：F2 的能力注册；另外补公共创建入口及固定定义绑定的联动检查，不能只测 registry。
 - [test_research_experiment_contract.py](../../tests/test_research_experiment_contract.py)：实验目的、方法和协议。
 - [test_research_workflow_meeting_rounds.py](../../tests/test_research_workflow_meeting_rounds.py)：会议来源与闭合。
-- [test_knowledge_sideflow_run.py](../../tests/test_knowledge_sideflow_run.py)：知识子流程。
+- [test_knowledge_sideflow_run.py](../../tests/test_knowledge_sideflow_run.py)、[test_research_workflow_experiment_stage_bootstrap.py](../../tests/test_research_workflow_experiment_stage_bootstrap.py)：知识与原规划交接；新优化产物需独立用例。
+- [test_experiment_adapter_dispatcher.py](../../tests/test_experiment_adapter_dispatcher.py)、[test_experiment_adapter_gpu_operator.py](../../tests/test_experiment_adapter_gpu_operator.py)：已有受控 dispatcher 和 GPU DEV fixture；不能替代新桥、真实设备及失败回流测试。
 - [test_challenge_phase_boundary.py](../../tests/test_challenge_phase_boundary.py)：旧阶段依赖回归。
-- 新增优化活动、假设交接、真实 GPU adapter 和评价逻辑的针对性测试；名称在实施时确定。
-- 前端复用实际 API/route tests，至少覆盖 VUI 路由契约与新增设计契约；交付前运行 `npx tsc -b --pretty false` 或构建。
+- [researchWorkflowSnapshotProjection.test.ts](../../web/src/routes/teams/research-workflow/researchWorkflowSnapshotProjection.test.ts)、[researchWorkflowUrlMatrix.test.ts](../../web/src/routes/teams/research-workflow/researchWorkflowUrlMatrix.test.ts)、[useResearchWorkflowRun.test.tsx](../../web/src/routes/teams/research-workflow/useResearchWorkflowRun.test.tsx) 与 [useTeamResearchSecondaryQueries.contract.test.ts](../../web/src/routes/teams/useTeamResearchSecondaryQueries.contract.test.ts)：复用基础投影；新增活动缓存、下一轮切换、乱序及重连用例。
+- 新增外层活动/内层合同映射、版本/预算幂等、假设交接、真实 GPU 桥和数值评价的针对性测试；名称在实施时确定。前端至少覆盖 VUI 路由契约与新增设计契约，交付前运行 `npx tsc -b --pretty false` 或构建。
+
+本节是后续测试落点，不表示上述新增用例已经编写或执行。本次纯文档修订仅校验文件差异、链接、章节引用和发现项到实施/验收的对应关系；无需刷新产品运行时（refresh=`not needed`），无产品版本影响。
 
 ### 13.3 产品与科学证据分层
 
@@ -402,6 +506,7 @@ P4 的环境、依赖安装和实际调用授权不得被 P0–P3 的代码或 f
 | --- | --- | --- |
 | 合同与自动测试 | 数据隔离、控制流、权限、确定性评价正确 | 不证明模型实际规划质量 |
 | DEV fixture | 新入口到多轮反馈可以连通 | 不证明 GPU 性能或真实资料搜集 |
+| 真实基线 | 无优化假设也能由新入口获得批准设备上的正确性、原始测量与回执 | 不证明模型讨论、知识交接或优化闭环可运行 |
 | 真实单轮 | Qwen/知识/编译/测量能产生可核验产物 | 不证明迭代有效或可泛化 |
 | 真实连续轮次 | 实验结果改变后续计划，并保留负结果 | 不保证每轮性能单调提升 |
 | 同预算对照与留出 | 在声明范围内比较反馈策略与固定策略的效果 | 不代表所有算子/GPU 或普遍科学能力 |
@@ -410,9 +515,9 @@ P4 的环境、依赖安装和实际调用授权不得被 P0–P3 的代码或 f
 
 ## 14. 交付物与完成定义
 
-开发交付包括独立入口、可追踪轮次、优化讨论与知识交接、实验合同、真实 adapter、确定性评价、预算/停止能力和用户界面。
+开发交付包括身份贯通的 API、独立活动及可追踪轮次、新定义运行接入、优化讨论与知识交接、冻结实验合同、真实 adapter/执行桥、数值评价、预算/停止能力和用户界面。六项审查发现必须有对应实现和回归证据，不能以“已登记定义”“DEV 测试通过”或“页面能打开”代替接入完成。
 
-每个真实活动的结果包包含：目标与约束、参与模型/团队、调用凭证引用、初始基线、每轮假设和证据、冻结计划、候选源码与环境、原始测量、评价及反馈、累计成本、最终候选、失败清单、留出验证与复现说明。密钥和完整敏感 Prompt 不进入导出。
+每个真实活动的结果包包含：目标与约束、团队/项目/外层活动到轮次/run/内层合同/试验的映射、参与模型与调用凭证引用、初始基线、每轮假设和证据、冻结计划、候选源码与环境、原始测量、评价及反馈、累计成本、最终候选、失败清单、留出验证与复现说明。产物版本/hash 与终态回执可相互回读，密钥和完整敏感 Prompt 不进入导出。
 
 方向 B 展示需要一条真实的“计划 → 执行 → 数据分析 → 调整 → 再执行”链，可调用测试 API 和交互入口。官网要求的页数、材料与提交渠道在正式交付时重新核对；本文不修改方向 A 的提交候选或替代官方提交回执。
 
@@ -423,11 +528,15 @@ P4 的环境、依赖安装和实际调用授权不得被 P0–P3 的代码或 f
 | 具体风险 | 对应设计 |
 | --- | --- |
 | 再次被方向 A 整包门禁绑定 | 新流拥有服务端身份、独立定义与启动条件，旧入口保留原合同 |
+| 项目切换后丢计划或写错结果 | P0 修复 DTO 与存储参数；按记录归属查找并校验，不依赖当前活动项目 |
+| 只注册定义，创建/绑定/投影仍走旧流 | P1 贯通固定定义的完整调用链；独立控制器复用基础投影；按活动隔离缓存 |
+| 外层活动覆盖单轮合同或重复下一轮 | 分开两层身份与版本，领域服务单写入，按终态回执去重预算和调度 |
 | 每轮搜集和讨论消耗过高 | 单次受限会议、1 个主假设、按缺口搜集、实际使用量入账 |
 | 只有调参得分，没有科学解释 | 实验单包含预测、竞争解释和结果分支，必要时安排机制对照 |
 | 用反复测量或修改口径制造提升 | 协议版本固定、原始样本保留、独立留出与总成本报告 |
-| GPU 环境不可用或受其他任务干扰 | 准备阶段验证实际设备能力；串行设备调度；环境无效时标记不可比较 |
-| 旧代码顺序与新流程混用 | 新定义和交接边界明确，不伪造旧节点完成，不复制全部旧流水线 |
+| GPU 接入过晚、环境不可用或测量受干扰 | P2 先验证新执行桥与真实基线；串行设备测量；环境无效时标记不可比较 |
+| DEV 评分冒充实测或失败无法反馈 | 新数值评价器只消费原始记录；执行桥登记失败和成本，活动服务据此形成反馈 |
+| 旧代码顺序与新流程混用 | 独立优化产物、资料接受及策略 hook，明确交接边界，不伪造旧节点完成 |
 
 首期不做多 GPU、跨设备性能迁移、无限树搜索、多候选并行演化、降低精度的近似算法或自动论文生成。后续有实测证据表明它们值得投入时再扩展。
 
@@ -435,6 +544,6 @@ P4 的环境、依赖安装和实际调用授权不得被 P0–P3 的代码或 f
 
 ## 16. 下一步对齐与实施入口
 
-先确认第 2 节的主要指标与允许改动范围，并评审活动级自动推进/知识交接策略。随后按 P0 开始合同和复用切口开发；在实际运行前单独固定设备、模型路由及可计量预算。
+本次先完成 V1.1 文档修订。后续获准开发时，以 P0 的身份合同、项目字段缺陷和活动对象映射为入口，再做 P1 的独立运行接入与最小投影；P2 提前验证真实基线。第 2 节尚未确认的主要指标、允许改动范围，以及活动自动推进/知识交接策略，在相关行为冻结前确定；设备、模型路由和可计量预算在实际调用前固定。已经对齐的独立数据流、单次讨论和实验反馈要求不重复确认。
 
-本次任务的完成标志是这份方案可审阅、源码依据可定位、实施依赖与验收清楚。它不自动开启后续实现、安装依赖或真实实验。
+本次任务的完成标志是六项发现均已进入方案的责任面、接口/产物合同、实施顺序和验收条件，且章节与引用一致。它不自动开启后续实现、安装依赖或真实实验，也不表示六项代码问题已修复。
