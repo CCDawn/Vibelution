@@ -9,45 +9,50 @@ import {
   fetchResearchWorkflowResearchLedger,
 } from "../../../api/researchWorkflow";
 import { queryKeys } from "../../../api/queryKeys";
+import type { ResearchProcessPanel } from "./researchProcessPanelSelection";
 
-export function useResearchWorkflowInsights(teamId: string, runId: string) {
-  const enabled = Boolean(teamId.trim() && runId.trim());
+export function useResearchWorkflowInsights(teamId: string, runId: string, panel: ResearchProcessPanel | null) {
+  const scoped = Boolean(teamId.trim() && runId.trim());
+  const overviewEnabled = scoped && panel === "timeline";
+  const nodeEnabled = scoped && (panel === "node" || panel === "timeline");
   const [ledger, budget, hypotheses, campaigns, evaluation, handoffs] = useQueries({
     queries: [
       {
         queryKey: queryKeys.researchWorkflowLedger(runId, teamId),
         queryFn: () => fetchResearchWorkflowResearchLedger(runId, { teamId }),
-        enabled,
+        enabled: overviewEnabled,
       },
       {
         queryKey: queryKeys.researchWorkflowBudget(runId, teamId),
         queryFn: () => fetchResearchWorkflowBudget(runId, { teamId }),
-        enabled,
+        enabled: nodeEnabled,
       },
       {
         queryKey: queryKeys.researchWorkflowHypotheses(runId, teamId),
         queryFn: () => fetchResearchWorkflowHypotheses(runId, { teamId }),
-        enabled,
+        enabled: overviewEnabled,
       },
       {
         queryKey: queryKeys.researchWorkflowCampaigns(runId, teamId),
         queryFn: () => fetchResearchWorkflowExperimentCampaigns(runId, { teamId }),
-        enabled,
+        enabled: overviewEnabled,
       },
       {
         queryKey: queryKeys.researchWorkflowEvaluation(runId, teamId),
         queryFn: () => fetchResearchWorkflowEvaluation(runId, { teamId }),
-        enabled,
+        enabled: overviewEnabled,
       },
       {
         queryKey: queryKeys.researchWorkflowHandoffs(runId, teamId),
         queryFn: () => fetchResearchWorkflowHandoffs(runId, { teamId }),
-        enabled,
+        enabled: nodeEnabled,
       },
     ],
   });
 
-  const firstError = [ledger, budget, hypotheses, campaigns, evaluation, handoffs]
+  const activeQueries = overviewEnabled ? [ledger, budget, hypotheses, campaigns, evaluation, handoffs]
+    : nodeEnabled ? [budget, handoffs] : [];
+  const firstError = activeQueries
     .map((query) => query.error)
     .find(Boolean);
 
@@ -58,7 +63,7 @@ export function useResearchWorkflowInsights(teamId: string, runId: string) {
     campaigns: campaigns.data ?? null,
     evaluation: evaluation.data ?? null,
     handoffs: handoffs.data ?? null,
-    loading: enabled && [ledger, budget, hypotheses, campaigns, evaluation, handoffs].some(
+    loading: activeQueries.some(
       (query) => query.isPending,
     ),
     error: firstError instanceof Error ? firstError.message : firstError ? String(firstError) : null,

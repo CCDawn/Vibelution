@@ -180,7 +180,7 @@ export function ResearchProcessWorkspace({
     ? location.selectedNodeId
     : null;
   const detail = nodeDetail.state.kind === "ready" ? nodeDetail.state.detail : null;
-  const insights = useResearchWorkflowInsights(teamId, location.runId);
+  const insights = useResearchWorkflowInsights(teamId, location.runId, location.inspectorOpen ? location.panel : null);
   const formalCommand = useResearchWorkflowCommand(
     teamId,
     location.runId,

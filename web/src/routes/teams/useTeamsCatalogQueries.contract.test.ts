@@ -5,12 +5,13 @@ const routeModelSource = readFileSync(new URL("./useTeamsWorkbenchModel.tsx", im
 const hookSource = readFileSync(new URL("./useTeamsCatalogQueries.ts", import.meta.url), "utf8");
 
 describe("useTeamsCatalogQueries R2-d contract", () => {
-  it("owns teams list, agent summary, project bus, and picker derivation", () => {
+  it("owns teams list, agent summary, and picker derivation without loading hidden communication", () => {
     expect(hookSource).toContain("export function useTeamsCatalogQueries");
     expect(hookSource).toContain("listTeams({ signal })");
     expect(hookSource).toContain("listAgentSummaries<AgentConfigWorkspaceAgent>({ signal })");
     expect(hookSource).toContain("queryKeys.agentSummary(false)");
-    expect(hookSource).toContain("listProjectAgentBusTimeline");
+    expect(hookSource).not.toContain("listProjectAgentBusTimeline");
+    expect(routeModelSource).toContain("useTeamCommunicationEvents(");
     expect(hookSource).toContain("TEAM_PICKER_TEAM_IDS");
     expect(hookSource).toContain("agentTeamMembership");
     expect(hookSource).toContain("fallbackVisibleTeamId");
