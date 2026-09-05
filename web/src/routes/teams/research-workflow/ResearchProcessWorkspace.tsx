@@ -238,6 +238,7 @@ export function ResearchProcessWorkspace({
       activeRoundIndex: hypothesisFirstChain.stateV2?.review.activeRoundIndex ?? null,
     });
     const withHypothesisFirst = composeHypothesisFirstGraph(base, region, {
+      formalRuntimeActive: hypothesisFirstChain.stateV2?.currentPhase === "formal_runtime",
       demotePipelineStages: isHypothesisFirstDiscussionActive(
         meetingsForHypothesisFirstQuestion(hypothesisFirstChain.meetings, chainQuestionId),
       ),

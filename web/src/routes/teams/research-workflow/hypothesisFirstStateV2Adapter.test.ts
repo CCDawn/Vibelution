@@ -325,6 +325,18 @@ describe("resolveHypothesisFirstNextActionFromV2", () => {
     expect(action.expectedStateVersion).toBe("state-1");
   });
 
+  it("keeps a completed exploratory round on its offered grounded-generation action", () => {
+    const state = stateV2({
+      generation: { ...stateV2().generation, lifecycle: "completed", outcome: "succeeded", candidateCount: 0, candidateIds: [] },
+      allowedActions: [command({ command: "open_generation", payload: { questionId: "SCI-001", runId: "run-1" } }, "开启第一阶段接地生成")],
+    });
+    const action = resolveHypothesisFirstNextActionFromV2(state);
+    expect(action.stage).toBe("generation_missing");
+    expect(action.targetNodeId).toBe(HYPOTHESIS_FIRST_GENERATION_NODE_ID);
+    expect(action.command).toBe("open_generation");
+    expect(action.canonicalAction).toBe(state.allowedActions[0]);
+  });
+
   it("maps generation summary recovery to the meeting operations panel", () => {
     const regenerate = {
       ...command({

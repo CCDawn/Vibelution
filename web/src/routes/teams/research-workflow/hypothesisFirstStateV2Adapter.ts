@@ -338,6 +338,9 @@ function stageFor(
   }
   switch (state.currentPhase) {
     case "generation":
+      if (summaryRecovery?.command === "open_generation" || summaryRecovery?.command === "retry_generation") {
+        return "generation_missing";
+      }
       if (state.generation.lifecycle === "waiting_human") return "generation_awaiting_approval";
       if (state.generation.lifecycle === "queued" || state.generation.lifecycle === "running") {
         return "generation_running";
