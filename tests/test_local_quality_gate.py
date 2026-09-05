@@ -1778,9 +1778,19 @@ def test_closeout_rejects_clean_diverged_history_even_when_merge_tree_passes(
     )
     assert merge_tree.returncode == 0
 
+    preparation: list[str] = []
+    original_toolchain = gate.resolve_validation_toolchain
+    monkeypatch.setattr(
+        gate,
+        "resolve_validation_toolchain",
+        lambda root: preparation.append("toolchain") or original_toolchain(root),
+    )
+
     result = gate.run_closeout(git_repo, "main", "claim-test")
 
     assert result.outcome == "stale_main"
+    assert preparation == []
+    assert result.commands == []
     assert result.manifest_path is not None
     manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
     assert manifest["outcome"] == "stale_main"

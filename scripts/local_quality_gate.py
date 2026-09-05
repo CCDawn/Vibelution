@@ -856,6 +856,13 @@ def run_closeout(root: Path, base: str, claim_id: str) -> GateResult:
     if not checks["claimValid"]:
         return finish("claim_conflict")
 
+    # A branch missing the captured main cannot pass the final ancestry gate.
+    # Reject it before toolchain probing, selection, or expensive test commands;
+    # keep the final checks to detect changes while validation is running.
+    ancestry_valid = is_ancestor(root, validated_main_sha, head_sha)
+    if rev_parse(main_root, main_revision) != validated_main_sha or not ancestry_valid:
+        return finish("stale_main")
+
     reuse_research_required = reuse_research_contract.reuse_research_required(files)
     if reuse_research_required:
         try:
