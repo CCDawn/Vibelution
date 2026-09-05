@@ -238,7 +238,7 @@ class FakeDomainContext(DomainReadinessContext):
         self._note("result_package")
         return self._result_package
 
-    def budget_limits(self, team_id: str, run_id: str) -> BudgetLimitsSnapshot:
+    def budget_limits(self, team_id: str, run_id: str, *, node_id: str) -> BudgetLimitsSnapshot:
         self._note("budget_limits")
         return self.budget
 

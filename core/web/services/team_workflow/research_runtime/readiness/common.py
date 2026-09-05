@@ -232,7 +232,7 @@ class DomainReadinessContext(Protocol):
 
     def result_package(self, team_id: str, run_id: str) -> Mapping[str, Any] | None: ...
 
-    def budget_limits(self, team_id: str, run_id: str) -> BudgetLimitsSnapshot: ...
+    def budget_limits(self, team_id: str, run_id: str, *, node_id: str) -> BudgetLimitsSnapshot: ...
 
     def binding_snapshot(self, run_id: str, node_id: str) -> Mapping[str, Any] | None: ...
 
@@ -450,7 +450,7 @@ def evaluate_common(
             )
         )
 
-    budget_limits = context.budget_limits(run.team_id, run.run_id)
+    budget_limits = context.budget_limits(run.team_id, run.run_id, node_id=node.nodeId)
     budget_available, budget_reason = budget_limits.available()
     budget = BudgetReadiness(
         policy_hash=budget_limits.policy_hash,

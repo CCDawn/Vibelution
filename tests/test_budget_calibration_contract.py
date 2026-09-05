@@ -798,9 +798,9 @@ def _readiness_budget(harness: CommandHarness):
         _budget_consumed_from_ledger,
     )
 
-    consumed = _budget_consumed_from_ledger(harness.store, "run-test")
+    consumed = _budget_consumed_from_ledger(harness.store, "run-test", stage_id="knowledge_collection")
     context = RealDomainReadinessContext(harness.store)
-    return consumed, context.budget_limits("research-team", "run-test")
+    return consumed, context.budget_limits("research-team", "run-test", node_id="source_finding")
 
 
 def test_readiness_without_frozen_policy_uses_admission_defaults(tmp_path: Path) -> None:
