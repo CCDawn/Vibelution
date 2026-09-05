@@ -959,7 +959,7 @@ def test_selector_ignores_deleted_changed_python_test_file(tmp_path: Path):
     assert result["coverageGaps"] == []
 
 
-def test_selector_reports_deleted_changed_python_product_file(tmp_path: Path):
+def test_selector_ignores_deleted_changed_python_product_file(tmp_path: Path):
     (tmp_path / "core").mkdir()
 
     result = select_tests.select_tests(
@@ -971,9 +971,7 @@ def test_selector_reports_deleted_changed_python_product_file(tmp_path: Path):
 
     assert result["matchedRules"] == []
     assert result["commands"] == []
-    assert result["coverageGaps"] == [
-        {"path": "core/deleted_feature.py", "reason": "no-static-test-import"}
-    ]
+    assert result["coverageGaps"] == []
 
 
 def test_selector_keeps_missing_matrix_tests_visible_to_the_gate(tmp_path: Path):
