@@ -262,27 +262,25 @@ def build_domain_revision_vector(
     if ledger_store is not None:
         # Readiness includes occupied budget. Settlement/release must invalidate
         # the cached decision even when candidate and artifact revisions stay put.
-        budget_rows = ledger_store.submit(
-            lambda uow: uow.repository.execute(
+        budget_rows = ledger_store.read(
+            lambda repo: repo.execute(
                 "SELECT receipt_id, status, reserved_json, settled_json "
                 "FROM budget_receipts WHERE run_id = ? ORDER BY receipt_id",
                 (run_id,),
             ).fetchall(),
-            force_flush=True,
-        ).result(timeout=10)
+        )
         vector["budget_receipts"] = _stable_hash(
             [tuple(row) for row in budget_rows]
         )[:32]
         try:
-            rows = ledger_store.submit(
-                lambda uow: uow.repository.execute(
+            rows = ledger_store.read(
+                lambda repo: repo.execute(
                     "SELECT artifact_kind, sha256, domain_revision "
                     "FROM artifact_receipts WHERE run_id = ? "
                     "ORDER BY created_at_ms DESC LIMIT 50",
                     (run_id,),
                 ).fetchall(),
-                force_flush=True,
-            ).result(timeout=10)
+            )
             if rows:
                 vector["artifact_receipts"] = _stable_hash(
                     [(str(r[0]), str(r[1]), str(r[2])) for r in rows]

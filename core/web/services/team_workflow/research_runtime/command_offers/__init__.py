@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, cast
 
 from core.research.workflow.contracts import CommandOffer
 from core.research.workflow.ledger.records import NodeAttemptRecord, RunRecord
@@ -22,6 +22,7 @@ from .reconcile_run import build_reconcile_run_offer
 from .resolve_human import build_resolve_human_offers
 from .retry_node import build_retry_node_offers
 from .start_node import build_start_node_offers
+from .revision_context import OfferRevisionContext
 
 def build_command_offers(
     *,
@@ -40,7 +41,7 @@ def build_command_offers(
     offers.extend(
         build_start_node_offers(
             readiness_service=readiness_service,
-            context=context,
+            context=cast(DomainReadinessContext, OfferRevisionContext(context)),
             team_id=team_id,
             run=run,
             definition=definition,
