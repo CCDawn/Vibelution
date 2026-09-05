@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import ast
+import json
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 from core.web.services.team_workflow.research_runtime import workflow_artifact_store
 from core.web.services.team_workflow.research_runtime.problem_understanding_artifact_writer import (
@@ -21,6 +25,49 @@ _SOURCE_PATH = (
     / "source_collection"
     / "stage_session.py"
 )
+
+
+@pytest.mark.parametrize("parent_team", ["team-a", "team-other"])
+def test_sideflow_reads_parent_artifact_without_reassigning_its_session(
+    monkeypatch, tmp_path, parent_team,
+) -> None:
+    from core.research.workflow.knowledge_sideflow_definition import KNOWLEDGE_SIDEFLOW_WORKFLOW_ID
+    from core.web.services.team_workflow.research_runtime import runtime_factory
+
+    service = SimpleNamespace(TeamWorkflowOrchestrationError=ValueError,
+        _trim_text=lambda value, max_length: str(value or "").strip()[:max_length])
+    monkeypatch.setattr(stage_session, "_service", lambda: service)
+    monkeypatch.setattr(workflow_artifact_store, "PROJECT_ROOT", tmp_path)
+    payload = {"scope": "Testable scope", "subquestions": ["What changes?"],
+        "assumptions": ["Comparable inputs"], "known_unknowns": ["Effect size"],
+        "human_gate": {"required": True, "decision": "pending", "rationale": "Collect evidence"}}
+    write_problem_understanding_artifact(
+        team_id="team-a", workflow_run_id="parent", source_collection_run_id="parent-source",
+        node_run_id="nr-parent-problem-a1", problem_understanding=payload,
+    )
+    runs = {
+        "child": SimpleNamespace(workflow_id=KNOWLEDGE_SIDEFLOW_WORKFLOW_ID,
+            parent_run_id="parent", team_id="team-a", question_id="Q1", project_id="project"),
+        "parent": SimpleNamespace(run_id="parent", team_id=parent_team, question_id="Q1",
+            project_id="project", input_snapshot_json=json.dumps({"sourceCollectionRunId": "parent-source"})),
+    }
+    store = SimpleNamespace(get_run=runs.get, read=lambda fn: fn(SimpleNamespace(
+        list_attempts=lambda _: [SimpleNamespace(node_id="problem_understanding", status="succeeded",
+            attempt=1, node_run_id="nr-parent-problem-a1")],
+    )))
+    monkeypatch.setattr(runtime_factory, "production_workflow_runtime", lambda: SimpleNamespace(store=store))
+    source_run = {"scope": {"teamId": "team-a", "workflowRunId": "child"}}
+    if parent_team != "team-a":
+        with pytest.raises(ValueError, match="lineage is invalid"):
+            stage_session._source_collection_problem_understanding_context("team-a", "child-source", source_run)
+        return
+    context = stage_session._source_collection_problem_understanding_context("team-a", "child-source", source_run)
+    assert context["workflowRunId"] == "parent"
+    assert context["canonicalRef"].startswith("problem_understanding://team-a/parent-source/")
+    assert context["payload"] == payload
+    assert stage_session._source_collection_stage_session_workflow_scope(
+        source_run, context, stage_id="finding",
+    ) == ("child", "source_finding")
 
 
 def _function_source(name: str) -> str:
@@ -191,6 +238,9 @@ def test_finding_context_resolves_canonical_artifact_via_succeeded_ledger_attemp
             return self.attempts
 
     class _Store:
+        def get_run(self, run_id):
+            return None
+
         def read(self, fn):
             return fn(_Repo())
 

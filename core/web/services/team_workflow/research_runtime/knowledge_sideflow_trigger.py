@@ -1,4 +1,4 @@
-"""Post-commit trigger for the Challenge Cup 3.0 knowledge sideflow."""
+"""Collect evidence after problem understanding without inventing approval."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from .human_gate_artifacts import canonical_sha256
 
 
 class KnowledgeSideflowTrigger:
-    """Ensure one child after accepted problem understanding, then return."""
+    """Ensure one child after completed problem understanding, then return."""
 
     def __init__(
         self,
@@ -62,7 +62,7 @@ class KnowledgeSideflowTrigger:
         if definition.schemaVersion != SCHEMA_VERSION:
             return {"status": "not_canonical"}
 
-        artifact = _accepted_problem_artifact(
+        artifact = problem_artifact_for_collection(
             team_id=run.team_id,
             run_id=run.run_id,
             node_run_id=str(node_run_id or "").strip(),
@@ -115,7 +115,7 @@ class KnowledgeSideflowTrigger:
                         "evidenceTypes": [],
                         "timeWindow": {},
                     },
-                    "requirements": {"trigger": "problem_understanding_accepted"},
+                    "requirements": {"trigger": "problem_understanding_completed"},
                     "sourcePolicyVersion": "1",
                     "managedSourceRootIds": roots,
                     "triggerNodeRunId": str(node_run_id or ""),
@@ -169,7 +169,7 @@ class KnowledgeSideflowTrigger:
             pass
 
 
-def _accepted_problem_artifact(
+def problem_artifact_for_collection(
     *,
     team_id: str,
     run_id: str,
@@ -189,7 +189,10 @@ def _accepted_problem_artifact(
         and str(item.get("recordId") or "").strip() == node_run_id
         and isinstance(item.get("payload"), Mapping)
         and isinstance(item["payload"].get("human_gate"), Mapping)
-        and item["payload"]["human_gate"].get("decision") == "approved"
+        # Evidence collection is preparation for review, not an approval of
+        # the hypothesis or permission to execute an experiment. Keep the
+        # original gate untouched; rejected/revision-requested scopes stop.
+        and item["payload"]["human_gate"].get("decision") in {"pending", "approved"}
     ]
     if len(matches) != 1:
         return None
@@ -212,4 +215,4 @@ def _problem_keywords(problem: Mapping[str, Any]) -> list[str]:
     return keywords
 
 
-__all__ = ["KnowledgeSideflowTrigger"]
+__all__ = ["KnowledgeSideflowTrigger", "problem_artifact_for_collection"]

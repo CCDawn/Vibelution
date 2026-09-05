@@ -2221,6 +2221,11 @@ def _start_source_collection_agent_task(
                 "goal": str(objective.get("question") or ""),
                 "topic": str(objective.get("question") or ""),
                 "inputRefs": list(input_snapshot.get("datasetRefs") or []),
+                "researchProjectId": project_id,
+                "questionId": str(input_snapshot.get("questionId") or ""),
+                "requiredModelPolicy": dict(
+                    (input_snapshot.get("modelRoutingPolicy") or {}).get("requiredModelPolicy") or {}
+                ),
                 "agentRoles": [role_key] if role_key else [],
                 "agentIds": {role_key: binding.agent_id} if role_key else {},
                 # Deterministic production-chain verification does not consume a live

@@ -23,7 +23,7 @@ from typing import Any, Literal
 from core.research.workflow.contracts.research_team_role_contract import (
     CURRENT_RESEARCH_TEAM_ROLE_CONTRACT,
 )
-from core.research.workflow.models import AgentBindingLayers
+from core.research.workflow.models import AgentBindingLayers, WorkflowDefinition
 
 RoleOwner = tuple[str, str]
 TeamMemberSourceStatus = Literal["unscoped", "found", "missing", "error"]
@@ -283,6 +283,8 @@ def heal_agent_binding_from_sibling_freeze(
 def effective_binding_layers(
     team_id: str,
     config: AgentBindingLayers,
+    *,
+    definition: WorkflowDefinition | None = None,
 ) -> AgentBindingLayers:
     """Build effective layers with Team members as the default authority.
 
@@ -300,7 +302,7 @@ def effective_binding_layers(
     )
     from core.research.workflow.models import ActorKind
 
-    definition = build_challenge_cup_workflow_definition()
+    definition = definition or build_challenge_cup_workflow_definition()
     valid_stage_ids = {stage.stageId.value for stage in definition.stages}
     source_status, members = _team_member_source(team_id)
     team_defaults = (

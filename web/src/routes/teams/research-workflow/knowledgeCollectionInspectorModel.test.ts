@@ -57,6 +57,20 @@ describe("buildKnowledgeCollectionInspectorModel", () => {
     });
   });
 
+  it("shows the real child failure while its retryable invocation remains open", () => {
+    const model = buildKnowledgeCollectionInspectorModel({
+      badge: badge({ latest: {
+        invocationId: "inv-failed", parentNodeId: "hypothesis_design",
+        status: "child_created", handoffState: "pending", updatedAtMs: 5,
+        knowledgeChildRunId: "child-failed", currentKnowledgeNodeId: "source_finding",
+        childNodeStates: { source_finding: "failed" },
+      } }),
+    });
+    expect(model.phase).toBe("failed");
+    expect(model.headline).toContain("知识搜集失败");
+    expect(model.detail).not.toContain("子运行进行中");
+  });
+
   it("counts progress from the child run's real per-node states", () => {
     const model = buildKnowledgeCollectionInspectorModel({
       badge: badge({
