@@ -266,7 +266,7 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
   return (
       <aside
         id="chat-conversation-index-pane"
-        className={conversationIndexPaneClassName}
+        className={conversationIndexOverlayOpen ? `${conversationIndexPaneClassName} ${styles.railOverlay}` : conversationIndexPaneClassName}
         data-vui-region="chat-session-index"
         aria-keyshortcuts="Control+K Meta+K"
         aria-hidden={conversationIndexCollapsed}

@@ -3268,6 +3268,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.systemEntryGroup).toContain("content-start");
     expect(railTopSource).toContain("onCollapseConversationIndex");
     expect(railTopSource).toContain("PanelLeftClose");
+    expect(routeStyles.railOverlay).toContain("!h-auto !bottom-0");
     expect(conversationIndexRailSource).not.toContain("<strong>1</strong>");
     expect(routeSource).toContain("<PaneResizeHandle");
     expect(routeSource).toContain("conversationIndexControl={!verifiedCompanionMode");
