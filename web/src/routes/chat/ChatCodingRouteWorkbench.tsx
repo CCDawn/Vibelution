@@ -2434,6 +2434,7 @@ export function ChatCodingRouteWorkbench() {
     canonicalizeBareRoute(bareRouteBootstrapTarget);
   }, [bareRouteBootstrapTarget, canonicalizeBareRoute, chatRouteSelection.kind, routeVisibleSessions]);
   const selectedChatAgentId = selectedAgentId || activeSessionAgentId || visibleChatAgents[0]?.agentId || "";
+  const selectedChatAgent = selectedChatAgentId ? agentsById.get(selectedChatAgentId) : undefined;
 
   const {
     rightIndexSessions,
@@ -2693,7 +2694,7 @@ export function ChatCodingRouteWorkbench() {
     <ChatConversationIndexPanelContent
       styles={styles}
       loadingLabel={t("loadingSession")}
-      emptyTitle={sessionFilter.trim() ? t("noSessionMatches") : t("noSessionsYet")}
+      emptyTitle={t("noSessionsYet")}
       sessionsErrorMessage={sessionsErrorMessage}
       sessionComposerSessionsError={sessionComposerErrors.__sessions__}
       sessionsTransientError={Boolean(sessionsErrorState.transientError)}
@@ -2713,7 +2714,7 @@ export function ChatCodingRouteWorkbench() {
             activeGroupRoomId={activeGroupRoomId}
             agents={archiveVisibleAgents}
             avatarInitials={avatarInitials}
-            filterText={sessionFilter}
+            filterText=""
             formatTime={formatConversationIndexTime}
             lang={lang}
             resolveModelLabel={resolveModelLabel}
@@ -3346,8 +3347,6 @@ export function ChatCodingRouteWorkbench() {
         standardGroupRoomActive={standardGroupRoomActive}
         rightIndexPanel={rightIndexPanel}
         setRightIndexPanel={setRightIndexPanel}
-        sessionFilter={sessionFilter}
-        setSessionFilter={setSessionFilter}
         availableGroupParticipantCount={availableGroupParticipantCount}
         availableGroupParticipants={availableGroupParticipants}
         activeGroupRoom={activeGroupRoom}
@@ -3362,8 +3361,14 @@ export function ChatCodingRouteWorkbench() {
         conversationIndexPanel={conversationIndexPanel}
         groupComposerOpen={groupComposerOpen}
         createGroupRoomPending={createGroupRoomMutation.isPending}
+        createSessionPending={createSessionMutation.isPending || !selectedChatAgent}
         createAgentButtonRef={agentCreateTriggerRef}
         onCreateAgent={handleCreateAgent}
+        onCreateSession={() => {
+          if (selectedChatAgent) {
+            handleCreateAgentSession(selectedChatAgent);
+          }
+        }}
         onToggleGroupComposer={handleToggleGroupComposer}
         groupTitleDraft={groupTitleDraft}
         setGroupTitleDraft={setGroupTitleDraft}
@@ -3395,10 +3400,6 @@ export function ChatCodingRouteWorkbench() {
         latestMentalSnapshot={latestMentalSnapshot}
         chatRoomModeLabel={chatRoomModeLabel}
         chatRoomPurposeLabel={chatRoomPurposeLabel}
-        sessionBulkSelectVisibleVisible={selectedBulkSessions.length === 0 && visibleDirectSessionIds.length > 0}
-        sessionBulkSelectVisibleLabel={t("bulkSelectVisibleSessions")}
-        onSessionBulkSelectVisible={selectVisibleBulkSessions}
-        sessionBulkSelectVisibleDisabled={bulkSessionPending || conversationIndexLoading}
       />
       )}
     >

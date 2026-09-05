@@ -1926,15 +1926,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndIndexRailSource).toContain("styles.systemEntryGroup");
     expect(routeAndIndexRailSource).toContain("styles.systemEntryButton");
 
-    expect(routeStyles.sessionActionRow).toBeTypeOf("string");
-    expect(routeStyles.newGroupButton).toBeTypeOf("string");
-    expect(routeStyles.sessionActionRow).not.toContain("grid-cols-[auto_auto]");
-    expect(routeStyles.newSessionButton).toContain("!h-[34px]");
-    expect(routeStyles.newSessionButton).toContain("!min-h-[34px]");
-    expect(routeStyles.newSessionButton).toContain("!w-full");
-    expect(routeStyles.newGroupButton).toContain("!h-[34px]");
-    expect(routeStyles.newGroupButton).toContain("!min-h-[34px]");
-    expect(routeStyles.newGroupButton).toContain("!w-full");
+    expect(routeAndIndexRailSource).toContain('id: "new-group"');
+    expect(routeAndIndexRailSource).toContain("onSelect: onToggleGroupComposer");
+    expect(routeStyles.railTop).toBeTypeOf("string");
+    expect(routeStyles.railActionButton).toBeTypeOf("string");
     expect(routeStyles.systemEntryGroup).toBeTypeOf("string");
     expect(routeStyles.systemEntryButton).toBeTypeOf("string");
     expect(routeStyles.systemEntryIcon).toBeTypeOf("string");
@@ -2623,9 +2618,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.panelState).not.toContain("border");
     expect(routeStyles.panelState).not.toContain("bg-");
     expect(routeStyles.panelState).not.toContain("shadow");
-    expect(routeStyles.sessionActionRow).toContain("grid-cols-2");
-    expect(routeStyles.newSessionButton).toContain("!w-full");
-    expect(routeStyles.panelSearchInput).toContain("w-full");
+    expect(routeStyles.railTop).toContain("flex");
+    expect(routeStyles.railActionButton).toContain("!size-[30px]");
+    expect(routeStyles.railActionButton).toContain("!border-0");
+    expect(routeAndIndexRailSource).toContain("<VCommandPalette");
     expect(directSessionIndexItemStyles.sessionItem).not.toContain("shadow-[var(--vui-elevation-panel)]");
   });
 
@@ -3242,36 +3238,24 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.sessionLoadMoreStatus).toBeTypeOf("string");
   });
 
-  it("keeps the conversation index toolbar buttons slot-aligned and the search field un-nested", () => {
-    const actionRowSource = routeAndIndexRailSource.slice(
-      routeAndIndexRailSource.indexOf("<div className={styles.sessionActionRow}>"),
-      routeAndIndexRailSource.indexOf("{conversationIndexPanel}", routeAndIndexRailSource.indexOf("<div className={styles.sessionActionRow}>")),
+  it("uses two Codex-style icon controls for create and search", () => {
+    const railTopSource = routeAndIndexRailSource.slice(
+      routeAndIndexRailSource.indexOf("<div className={styles.railTop}>"),
+      routeAndIndexRailSource.indexOf("<div", routeAndIndexRailSource.indexOf("<div className={styles.railTop}>") + 1),
     );
 
-    expect(actionRowSource).toContain("icon={<Plus size={15} />}");
-    expect(actionRowSource).toContain("icon={<UsersRound size={15} />}");
-    expect(routeAndIndexRailSource).toContain("<VInput");
-    expect(routeAndIndexRailSource).toContain("<Search size={15} aria-hidden=\"true\" />");
-    expect(routeStyles.newSessionButton).toContain("border");
-    expect(routeStyles.newGroupButton).toContain("bg-[var(--vui-control-muted)]");
-    expect(routeStyles.panelSearch).toContain("min-h-9");
-    expect(routeStyles.panelSearch).toMatch(/border-vui-border-subtle|border-\[var\(--vui-border-subtle\)\]/);
-    expect(routeStyles.panelSearch).toContain("focus-within:border-");
-    expect(routeStyles.panelSearchInput).toContain("[&_[data-slot=input-wrapper]]:min-h-8");
-    expect(routeStyles.panelSearchInput).toContain("[&_[data-slot=input-wrapper]]:shadow-none");
-    expect(routeStyles.panelSearchInput).toContain("[&_[data-slot=input-wrapper]]:!border-0");
-    expect(routeStyles.panelSearchInput).toContain("[&_[data-slot=input]]:[font-size:var(--vui-font-sm)]");
-    expect(routeStyles.sessionActionRow).toContain("grid-cols-2");
-    expect(routeStyles.sessionActionRow).toContain("gap-2");
-    expect(routeStyles.newSessionButton).toContain("!min-w-0");
-    expect(routeStyles.newSessionButton).toContain("!w-full");
-    expect(routeStyles.newSessionButton).toContain("[&_[data-slot=vui-button-content]]:min-w-0");
-    expect(routeStyles.newGroupButton).toContain("!min-w-0");
-    expect(routeStyles.newGroupButton).toContain("!w-full");
-    expect(routeStyles.newGroupButton).toContain("[&_[data-slot=vui-button-content]]:min-w-0");
-    expect(routeStyles.panelSearchInput).not.toContain("rounded-[var(--radius-panel)]");
-    expect(routeStyles.panelSearchInput).not.toContain("bg-[var(--vui-surface-glass)]");
-    expect(routeStyles.panelSearchInput).not.toContain("shadow-[var(--vui-shadow-hairline)]");
+    expect(railTopSource).toContain("<VDropdownMenu");
+    expect(railTopSource.match(/<VNativeButton|<VIconButton/g)).toHaveLength(2);
+    expect(railTopSource).toContain('<SquarePen size={16} aria-hidden="true" />');
+    expect(railTopSource).toContain("icon={<Search size={16} />}");
+    expect(railTopSource).not.toContain("<VInput");
+    expect(routeAndIndexRailSource).toContain('aria-keyshortcuts="Control+N Meta+N"');
+    expect(routeAndIndexRailSource).toContain('aria-keyshortcuts="Control+K Meta+K"');
+    expect(routeAndIndexRailSource).toContain("<VCommandPalette");
+    expect(routeStyles.railTop).toContain("gap-1");
+    expect(routeStyles.railActionButton).toContain("!size-[30px]");
+    expect(routeStyles.railActionButton).toContain("!border-0");
+    expect(routeStyles.railActionButton).toContain("!bg-transparent");
     expect(routeStyles.conversationIndexPanelBody).toContain("!overflow-hidden");
     expect(routeStyles.conversationIndexLayout).toContain("grid-rows-[auto_minmax(0,1fr)_auto]");
     expect(routeStyles.conversationIndexScrollRegion).toContain("overflow-y-auto");
@@ -3449,9 +3433,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(sessionBulkOperationsPanelSource).toContain("if (!hasSelection)");
     expect(sessionBulkOperationsPanelSource).toContain("return null");
     expect(sessionBulkOperationsPanelSource).not.toContain("window.confirm");
-    expect(conversationIndexRailSource).toContain("sessionBulkSelectVisibleVisible");
-    expect(conversationIndexRailSource).toContain("onSessionBulkSelectVisible");
-    expect(conversationIndexRailSource).toContain("panelSearchBulkSelect");
+    expect(conversationIndexRailSource).not.toContain("sessionBulkSelectVisibleVisible");
+    expect(conversationIndexRailSource).not.toContain("panelSearchBulkSelect");
     expect(directSessionIndexItemSource).toContain("bulkSelectionEnabled");
     expect(directSessionIndexItemSource).toContain("onToggleBulk");
     expect(conversationIndexTreeSource).toContain("selectedBulkSessionIds");

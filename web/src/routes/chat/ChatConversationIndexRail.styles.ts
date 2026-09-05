@@ -6,11 +6,9 @@ import {
 
 import {
   vuiGlassPanelClass,
-  vuiOpaqueRowClass,
   vuiStateCoolInfoClass,
   vuiStateCoolSoftClass,
   vuiStateSelectedRowClass,
-  vuiStateSelectedRowFillClass,
 } from "../../design/vuiSurfaceRecipes";
 
 const styles: Record<string, string> = {
@@ -70,17 +68,12 @@ const styles: Record<string, string> = {
     "vui-routes-chatcodingroute groupComposerInput min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
   groupComposerPanel: `vui-routes-chatcodingroute groupComposerPanel min-w-0 ${vuiGlassPanelClass} p-2`,
   memberIndexSummary: `vui-routes-chatcodingroute memberIndexSummary min-w-0 ${vuiGlassPanelClass} p-2 !grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-1.5`,
-  newGroupButton:
-    "vui-routes-chatcodingroute newGroupButton !inline-flex !h-[34px] !min-h-[34px] !min-w-0 !w-full max-w-full items-center justify-center gap-1 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-0 ![font-size:var(--vui-font-xs)] font-semibold !leading-none [color:var(--fg-secondary)] shadow-none hover:bg-[var(--vui-control-muted-hover)] [&_[data-slot=vui-button-content]]:min-w-0 [&_[data-slot=vui-button-content]]:!leading-none [&_[data-slot=vui-button-label]]:min-w-0 [&_[data-slot=vui-button-label]]:truncate [&_[data-slot=vui-button-label]]:!leading-none",
-  newSessionButton:
-    `vui-routes-chatcodingroute newSessionButton !inline-flex !h-[34px] !min-h-[34px] !min-w-0 !w-full max-w-full items-center justify-center gap-1 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-cool)_34%,var(--vui-border-subtle))] ${vuiStateSelectedRowFillClass} px-2 py-0 ![font-size:var(--vui-font-xs)] font-semibold !leading-none [color:var(--accent-cool)] shadow-none hover:bg-[color-mix(in_srgb,var(--accent-cool)_14%,var(--vui-surface-row))] [&_[data-slot=vui-button-content]]:min-w-0 [&_[data-slot=vui-button-content]]:!leading-none [&_[data-slot=vui-button-label]]:min-w-0 [&_[data-slot=vui-button-label]]:truncate [&_[data-slot=vui-button-label]]:!leading-none`,
   panelBody:
     "vui-routes-chatcodingroute panelBody min-w-0 h-full p-2 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] min-h-0 overflow-auto [scrollbar-gutter:stable]",
-  panelSearch: `vui-routes-chatcodingroute panelSearch grid min-h-9 min-w-0 grid-cols-[16px_minmax(0,1fr)_auto] items-center gap-1.5 ${vuiOpaqueRowClass} px-2 py-0 text-[var(--fg-tertiary)] shadow-none transition-colors hover:border-[color-mix(in_srgb,var(--accent-cool)_24%,var(--vui-border-subtle))] focus-within:border-[color-mix(in_srgb,var(--accent-cool)_42%,var(--vui-border-subtle))] focus-within:!bg-[var(--vui-surface-card)]`,
-  panelSearchBulkSelect:
-    "vui-routes-chatcodingroute panelSearchBulkSelect shrink-0 whitespace-nowrap",
-  panelSearchInput:
-    "vui-routes-chatcodingroute panelSearchInput min-w-0 w-full !border-0 !bg-transparent px-0 py-0 text-[var(--fg-primary)] !shadow-none [&_[data-slot=input-wrapper]]:min-h-8 [&_[data-slot=input-wrapper]]:rounded-none [&_[data-slot=input-wrapper]]:!border-0 [&_[data-slot=input-wrapper]]:!bg-transparent [&_[data-slot=input-wrapper]]:px-0 [&_[data-slot=input-wrapper]]:shadow-none [&_[data-slot=input]]:[font-size:var(--vui-font-sm)] [&_[data-slot=input]]:text-[var(--fg-primary)] [&_[data-slot=input]]:placeholder:text-[var(--fg-tertiary)] [&_[data-slot=inner-wrapper]]:gap-0",
+  railActionButton:
+    "vui-routes-chatcodingroute railActionButton !size-[30px] !h-[30px] !min-h-[30px] !w-[30px] !min-w-[30px] rounded-[var(--radius-control)] !border-0 !bg-transparent p-0 [color:var(--fg-secondary)] shadow-none hover:!bg-[var(--vui-control-muted-hover)] hover:[color:var(--fg-primary)] focus-visible:!bg-[var(--vui-control-muted-hover)]",
+  railTop:
+    "vui-routes-chatcodingroute railTop flex min-h-[38px] min-w-0 items-center gap-1 px-2 pt-2",
   rightIndexTab:
     `vui-routes-chatcodingroute rightIndexTab min-w-0 ${vuiControlQuietClass}`,
   rightIndexTabActive:
@@ -90,8 +83,6 @@ const styles: Record<string, string> = {
   sectionMetaLine:
     "vui-routes-chatcodingroute sectionMetaLine min-w-0 whitespace-normal [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] [overflow-wrap:anywhere]",
   // Surface titles in the status rail (session/group name): compact but primary.,
-  sessionActionRow:
-    "vui-routes-chatcodingroute sessionActionRow grid min-w-0 grid-cols-2 items-center gap-2 border-0 bg-transparent p-0",
   sessionCurrentBadge:
     "vui-routes-chatcodingroute sessionCurrentBadge !inline-flex !h-[22px] !min-h-[22px] !w-fit max-w-full shrink-0 items-center justify-center gap-1 overflow-hidden border-[color-mix(in_srgb,var(--accent-cool)_36%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,transparent)] px-1.5 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--accent-cool)] [&_span]:leading-none",
   systemEntryButton:
