@@ -593,7 +593,11 @@ def _python_fallback_selection(
     uncovered_sources = sorted(
         path
         for path in changed_files
-        if _is_python_product_path(path) and path not in explicitly_owned_files
+        if (
+            _is_python_product_path(path)
+            and path not in explicitly_owned_files
+            and (project_root / path).is_file()
+        )
     )
     if not uncovered_sources:
         return {

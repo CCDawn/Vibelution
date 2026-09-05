@@ -959,6 +959,21 @@ def test_selector_ignores_deleted_changed_python_test_file(tmp_path: Path):
     assert result["coverageGaps"] == []
 
 
+def test_selector_ignores_deleted_changed_python_product_file(tmp_path: Path):
+    (tmp_path / "core").mkdir()
+
+    result = select_tests.select_tests(
+        ["core/deleted_feature.py"],
+        {"rules": []},
+        include_always=False,
+        project_root=tmp_path,
+    )
+
+    assert result["matchedRules"] == []
+    assert result["commands"] == []
+    assert result["coverageGaps"] == []
+
+
 def test_selector_removes_deleted_test_files_from_matching_rule_commands(tmp_path: Path):
     (tmp_path / "core").mkdir()
     (tmp_path / "tests").mkdir()
