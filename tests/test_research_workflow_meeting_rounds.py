@@ -704,3 +704,68 @@ def test_lock_timeout_env_override_falls_back_to_defaults(monkeypatch):
         meetings._lock_timeout_seconds("VIBELUTION_MEETING_ROUNDS_WRITE_LOCK_TIMEOUT_SECONDS", 60.0)
         == 2.5
     )
+
+
+def test_meeting_reads_reuse_replay_without_sharing_mutable_records(tmp_path, monkeypatch):
+    team_id = _team(tmp_path, monkeypatch)
+    meetings.create_meeting_round(team_id, _meeting())
+    reads = []
+    original = meetings._read_jsonl
+
+    def read(path):
+        reads.append(path)
+        return original(path)
+
+    monkeypatch.setattr(meetings, "_read_jsonl", read)
+    first = meetings.get_meeting_round(team_id, "meeting-demo-1")["meetingRound"]
+    first["discussionItemRefs"].append("not-persisted")
+    second = meetings.get_meeting_round(team_id, "meeting-demo-1")["meetingRound"]
+    listed = meetings.list_meeting_rounds(team_id)["meetings"]
+    assert "not-persisted" not in second["discussionItemRefs"]
+    assert "not-persisted" not in listed[0]["discussionItemRefs"]
+    assert len(reads) == 1
+
+
+def test_meeting_replay_observes_external_append_replace_and_delete(tmp_path, monkeypatch):
+    import json
+    import os
+
+    team_id = _team(tmp_path, monkeypatch)
+    meetings.create_meeting_round(team_id, _meeting())
+    path = meetings._rounds_path(team_id)
+    record = meetings.get_meeting_round(team_id, "meeting-demo-1")["meetingRound"]
+    record["testMarker"] = "before"
+    with path.open("ab") as stream:
+        stream.write((json.dumps(record) + "\n").encode("utf-8"))
+    assert meetings.get_meeting_round(team_id, "meeting-demo-1")["meetingRound"]["testMarker"] == "before"
+    stat = path.stat()
+    replacement = path.with_suffix(".replacement")
+    replacement.write_bytes(path.read_bytes().replace(b'"before"', b'"after!"'))
+    os.utime(replacement, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+    os.replace(replacement, path)
+    assert meetings.get_meeting_round(team_id, "meeting-demo-1")["meetingRound"]["testMarker"] == "after!"
+    path.unlink()
+    with pytest.raises(meetings.ResearchMeetingRoundNotFoundError):
+        meetings.get_meeting_round(team_id, "meeting-demo-1")
+
+
+def test_meeting_replay_does_not_cache_a_read_crossing_an_append(tmp_path, monkeypatch):
+    import json
+
+    team_id = _team(tmp_path, monkeypatch)
+    meetings.create_meeting_round(team_id, _meeting())
+    original = meetings._read_jsonl
+    crossed = []
+
+    def read(path):
+        records = original(path)
+        if not crossed:
+            crossed.append(True)
+            updated = {**records[-1], "testMarker": "concurrent"}
+            with path.open("ab") as stream:
+                stream.write((json.dumps(updated) + "\n").encode("utf-8"))
+        return records
+
+    monkeypatch.setattr(meetings, "_read_jsonl", read)
+    meetings.get_meeting_round(team_id, "meeting-demo-1")
+    assert meetings.get_meeting_round(team_id, "meeting-demo-1")["meetingRound"]["testMarker"] == "concurrent"

@@ -660,6 +660,11 @@ def test_auto_redrive_fenced_review_meeting_dispatches_once(
         round_index=1,
         lifecycle="queued",
     )
+    monkeypatch.setattr(
+        meeting_rounds,
+        "completed_latest_bound_round_source_messages",
+        lambda _meeting: pytest.fail("superseded attempts must not load room history"),
+    )
     summary = chain.auto_redrive_fenced_review_meeting(
         _TEAM_ID, question_id=_QUESTION_ID
     )

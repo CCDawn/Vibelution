@@ -37,7 +37,9 @@ import os
 import re
 import tempfile
 import threading
+from collections import OrderedDict
 from collections.abc import Iterator, Mapping, Sequence
+from copy import deepcopy
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -60,6 +62,9 @@ SCHEMA_VERSION = 2
 LEGACY_DIGEST_SCHEMA_VERSION = 1
 DEFAULT_MODE = "formal"
 _LOCK = threading.RLock()
+# Latest records only, one revision per path. All access uses the meeting lock.
+_ROUND_INDEX_CACHE: OrderedDict[str, tuple[tuple[int, ...], dict[str, dict[str, Any]]]] = OrderedDict()
+_ROUND_INDEX_CACHE_LIMIT = 8
 # Bounded waits for the module lock (2026-09 ghost-lock incident): every
 # acquirer must either enter within its budget or fail with a structured
 # timeout instead of blocking its thread forever.  Writers persist under the
@@ -502,12 +507,48 @@ def _ensure_transition_from(
         )
 
 
+def _round_file_cursor(path: Path) -> tuple[int, ...] | None:
+    try:
+        stat = path.stat()
+    except FileNotFoundError:
+        return None
+    return (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+
+
+def _latest_round_index(team_id: str) -> dict[str, dict[str, Any]]:
+    """Replay unchanged meeting history once; callers must copy returned records.
+
+    File identity and revision invalidate external appends and atomic rewrites.
+    A read spanning a write is never cached. The JSONL remains the authority.
+    """
+    path = _rounds_path(team_id)
+    key = str(path.resolve())
+    with _read_lock("latest_round_index"):
+        before = _round_file_cursor(path)
+        if before is None:
+            _ROUND_INDEX_CACHE.pop(key, None)
+            return {}
+        cached = _ROUND_INDEX_CACHE.get(key)
+        if cached is not None and cached[0] == before:
+            _ROUND_INDEX_CACHE.move_to_end(key)
+            return cached[1]
+        latest = {
+            str(record.get("meetingRoundId") or ""): record
+            for record in _read_jsonl(path)
+        }
+        if before == _round_file_cursor(path):
+            _ROUND_INDEX_CACHE[key] = (before, latest)
+            _ROUND_INDEX_CACHE.move_to_end(key)
+            while len(_ROUND_INDEX_CACHE) > _ROUND_INDEX_CACHE_LIMIT:
+                _ROUND_INDEX_CACHE.popitem(last=False)
+        return latest
+
+
 def _load_meeting_round(normalized_team_id: str, meeting_round_id: str) -> dict[str, Any]:
-    records = _read_jsonl(_rounds_path(normalized_team_id))
-    meeting_round = _latest_by_id(records, "meetingRoundId", meeting_round_id)
+    meeting_round = _latest_round_index(normalized_team_id).get(meeting_round_id)
     if meeting_round is None:
         raise ResearchMeetingRoundNotFoundError("Meeting round not found.")
-    return meeting_round
+    return deepcopy(meeting_round)
 
 
 def _append_round_record(normalized_team_id: str, record: dict[str, Any]) -> dict[str, Any]:
@@ -2512,13 +2553,10 @@ def list_meeting_rounds(
         if str(item or "").strip()
     }
     with _read_lock("list_meeting_rounds"):
-        records = _read_jsonl(_rounds_path(normalized_team_id))
-    latest: dict[str, dict[str, Any]] = {}
-    for record in records:
-        latest[str(record.get("meetingRoundId") or "")] = record
+        latest = _latest_round_index(normalized_team_id)
     rows = sorted(
         (
-            record
+            deepcopy(record)
             for record in latest.values()
             if not statuses
             or str(record.get("status") or "").strip().lower() in statuses

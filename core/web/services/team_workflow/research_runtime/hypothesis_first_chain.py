@@ -3482,14 +3482,6 @@ def _fenced_review_redrive_plan(
         or not _is_execution_stopped_meeting(meeting)
     ):
         return None
-    # "Discussion really completed": the 068c92ba5 last-bound-round view —
-    # the newest bound round produced citable completed speech.  History from
-    # earlier rounds alone never qualifies.
-    try:
-        if not meeting_rounds.completed_latest_bound_round_source_messages(meeting):
-            return None
-    except meeting_rounds.ResearchMeetingRoundError:
-        return None
     link = next(
         (
             dict(item)
@@ -3538,6 +3530,16 @@ def _fenced_review_redrive_plan(
     if not eligible:
         return None
     if attempt_number >= HARD_ROUND_LIMIT:
+        return None
+    # Superseded/capped attempts need no room replay. Qualifying attempts still
+    # require the same latest-round speech evidence before any dispatch.
+    # "Discussion really completed": the 068c92ba5 last-bound-round view —
+    # the newest bound round produced citable completed speech.  History from
+    # earlier rounds alone never qualifies.
+    try:
+        if not meeting_rounds.completed_latest_bound_round_source_messages(meeting):
+            return None
+    except meeting_rounds.ResearchMeetingRoundError:
         return None
     return {
         "selectionId": selection_id,
