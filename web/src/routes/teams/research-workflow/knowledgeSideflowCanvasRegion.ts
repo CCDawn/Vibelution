@@ -118,6 +118,9 @@ function sideflowDescription(
   current: KnowledgeInvocationRecentSummary | null,
 ): string {
   if (!current) return "尚未发起知识请求";
+  const nodeState = sideflowStatusFromChildNodeState(current.childNodeStates?.[KNOWLEDGE_SIDEFLOW_NODE_IDS[position]]);
+  if (nodeState === "failed") return "知识搜集失败，可在 Inspector 恢复";
+  if (nodeState === "blocked") return "知识搜集已阻塞，可在 Inspector 查看原因";
   const status = String(current.status ?? "");
   if (status === "awaiting_handoff") {
     return position === KNOWLEDGE_SIDEFLOW_NODE_IDS.length - 1
