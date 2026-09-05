@@ -462,6 +462,7 @@ rules:
       - "local-parallel"
       - "remote-distributed"
     excludePaths:
+      - "core/web/services/team_workflow/research_runtime/scientific_semantic_ledger.py"
       - "core/web/services/team_workflow/research_runtime/hypothesis_first_chain.py"
       - "core/web/services/team_workflow/research_runtime/hypothesis_first_state_v2.py"
       - "core/web/routes/team_workflows/hypothesis_first_state_models.py"
@@ -496,6 +497,20 @@ rules:
       - "Behavioral cases are split into five domain packs for xdist loadfile; the aggregate test_team_workflow_orchestration_service.py is skipped when those packs are collected."
       - "Single-domain debug: pytest tests/test_team_workflow_source_collection_cases.py -q (or cases_*.py under _support/)."
       - "Team workflow Python tests are not serial-marked; use local-parallel / remote-distributed for speed."
+
+  - id: challenge-scientific-semantic-ledger
+    description: "Immutable V3 semantic writer and every current transactional caller."
+    executionLayers:
+      - "focused"
+      - "local-parallel"
+    paths:
+      - "core/web/services/team_workflow/research_runtime/scientific_semantic_ledger.py"
+    commands:
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_challenge_cup_stage_one_v3_contract.py tests/test_challenge_cup_scientific_semantic_ledger.py tests/test_challenge_cup_cancel_semantics.py tests/test_challenge_cup_archive_semantics.py tests/test_challenge_cup_human_wait_semantics.py tests/test_challenge_cup_human_success_semantics.py tests/test_research_workflow_adapter_idempotency.py tests/test_team_workflow_facade_contract.py tests/test_team_workflow_structure_packs.py -n 4 --dist loadfile -q"
+    notes:
+      - "Exact-file replacement only: command_service, adapter_dispatch_worker, graph_dispatch_worker, unknown runtime files and mixed changes retain teams-knowledge."
+      - "Covers the ledger contract plus all current semantic callers: success/human wait, cancel/archive and human resume; preserves public facade and pack structure gates."
+      - "No cache or worker increase. Add a caller's transactional tests here when adding a new production semantic writer consumer."
 
   - id: challenge-hypothesis-first-runtime
     description: "Hypothesis-first chain/state runtime and its direct Challenge boundary tests."
