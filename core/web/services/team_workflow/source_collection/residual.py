@@ -528,7 +528,12 @@ def _import_source_collection_local_workspace_sources(
     return summary
 
 
-def _load_candidate_store(team_id: str, *, run_id: str = "") -> dict[str, Any]:
+def _load_candidate_store(
+    team_id: str,
+    *,
+    run_id: str = "",
+    research_project_id: str = "",
+) -> dict[str, Any]:
     """Load the team candidate store, optionally scoped to a source-collection run.
 
     With ``run_id`` the owner-project store is authoritative; the active-project
@@ -539,7 +544,11 @@ def _load_candidate_store(team_id: str, *, run_id: str = "") -> dict[str, Any]:
 
     s = _service()
     normalized_run_id = s._trim_text(run_id, max_length=160)
-    path = s._candidate_store_path(team_id, normalized_run_id)
+    path = s._candidate_store_path(
+        team_id,
+        normalized_run_id,
+        research_project_id,
+    )
     legacy_fallback_path = s._candidate_store_path(team_id) if normalized_run_id else None
     if legacy_fallback_path and str(legacy_fallback_path) != str(path):
         merged = s._merge_candidate_store_payloads(path, legacy_fallback_path)
@@ -1161,9 +1170,12 @@ def _load_source_collection_exclusion_store(team_id: str) -> dict[str, Any]:
     return store
 
 
-def _load_stage_round_store(team_id: str) -> dict[str, Any]:
+def _load_stage_round_store(
+    team_id: str,
+    research_project_id: str = "",
+) -> dict[str, Any]:
     s = _service()
-    path = s._stage_round_store_path(team_id)
+    path = s._stage_round_store_path(team_id, research_project_id)
     if path.exists():
         payload = s._read_json(path)
         if isinstance(payload.get("rounds"), list):

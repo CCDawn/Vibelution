@@ -156,6 +156,7 @@ export function useTeamsMutationBundle(options: UseTeamsMutationBundleOptions) {
     recordResearchLoopDecisionMutation,
     materializeResearchLoopIterationDesignMutation,
   } = useTeamExperimentLoopMutations({
+    activeResearchProjectId: activeSourceCollectionResearchProjectId,
     sourceCollectionOwnerAgentId,
     sourceCollectionIngestorAgentId,
     sourceCollectionDraftGoal: sourceCollectionDraft.goal,

@@ -4,6 +4,9 @@ import hashlib
 from pathlib import Path
 
 from tests._support.team_workflow.helpers import *  # noqa: F403
+from core.web.services.team_workflow.research_runtime.operator_authorization import (
+    server_operator_scope,
+)
 
 
 def _draft_complete_proxy_plan(team_id: str) -> dict:
@@ -810,11 +813,12 @@ def test_explicit_design_gate_blocks_smoke_until_plan_is_frozen(tmp_path, monkey
             {"status": "passed", "metricName": "reconstruction_mse", "metricValue": "0.1"},
         )
 
-    frozen = team_workflow_orchestration_service.freeze_experiment_design(
-        team["teamId"],
-        "exp_gated_draft",
-        {"frozenByAgent": "Research Coordination Agent"},
-    )
+    with server_operator_scope("operator-1", roles=("operator",)):
+        frozen = team_workflow_orchestration_service.freeze_experiment_design(
+            team["teamId"],
+            "exp_gated_draft",
+            {"frozenByAgent": "Research Coordination Agent"},
+        )
     response = team_workflow_orchestration_service.run_experiment_smoke_run(
         team["teamId"],
         "exp_gated_draft",
@@ -822,6 +826,10 @@ def test_explicit_design_gate_blocks_smoke_until_plan_is_frozen(tmp_path, monkey
     )
 
     assert frozen["plan"]["designGate"]["status"] == "frozen"
+    assert frozen["plan"]["designGate"]["operatorApproval"]["operatorId"] == "operator-1"
+    assert len(
+        frozen["plan"]["designGate"]["operatorApproval"]["approvalSha256"]
+    ) == 64
     assert frozen["plan"]["experimentContract"]["status"] == "frozen"
     assert frozen["plan"]["readiness"]["readyForBoundedSmokeRun"] is True
     assert frozen["experimentStatus"]["lifecycleProjection"]["stage2"]["status"] == "frozen"
@@ -874,11 +882,12 @@ def test_iteration_design_freeze_requires_explicit_variable_governance(
         team_workflow_orchestration_service.TeamWorkflowOrchestrationError,
         match="allowed variable changes and frozen controls",
     ):
-        team_workflow_orchestration_service.freeze_experiment_design(
-            team["teamId"],
-            "exp_iteration_without_variable_contract",
-            {"frozenByAgent": "Research Coordination Agent"},
-        )
+        with server_operator_scope("operator-1", roles=("operator",)):
+            team_workflow_orchestration_service.freeze_experiment_design(
+                team["teamId"],
+                "exp_iteration_without_variable_contract",
+                {"frozenByAgent": "Research Coordination Agent"},
+            )
 
 
 def test_existing_frozen_plan_projects_bounded_smoke_readiness_without_rewriting_history(
@@ -2499,11 +2508,12 @@ def test_experiment_baseline_artifact_registration_unlocks_smoke_gate(tmp_path, 
             },
         },
     )
-    frozen = team_workflow_orchestration_service.freeze_experiment_design(
-        team["teamId"],
-        draft["plan"]["planId"],
-        {"frozenByAgent": "Experiment Planning Agent"},
-    )
+    with server_operator_scope("operator-1", roles=("operator",)):
+        frozen = team_workflow_orchestration_service.freeze_experiment_design(
+            team["teamId"],
+            draft["plan"]["planId"],
+            {"frozenByAgent": "Experiment Planning Agent"},
+        )
 
     registered = team_workflow_orchestration_service.register_experiment_baseline_artifact(
         team["teamId"],

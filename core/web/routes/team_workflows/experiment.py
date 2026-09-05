@@ -444,9 +444,21 @@ def team_workflow_experiment_hypothesis_resume(team_id: str, payload: Experiment
     response_model=ExperimentRouteResponse,
     response_model_exclude_unset=True,
 )
-def team_workflow_experiment_design_freeze(team_id: str, plan_id: str, payload: ExperimentDesignFreezePayload) -> dict:
+def team_workflow_experiment_design_freeze(
+    team_id: str,
+    plan_id: str,
+    request: Request,
+    payload: ExperimentDesignFreezePayload,
+) -> dict:
     try:
-        return freeze_experiment_design(team_id, plan_id, payload.model_dump())
+        with server_operator_scope_from_http(request):
+            require_privileged_server_operator(command="resolve_human_task")
+            return freeze_experiment_design(team_id, plan_id, payload.model_dump())
+    except PermissionError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "command_forbidden", "message": str(exc) or "command_forbidden"},
+        ) from exc
     except TeamNotFoundError as exc:
         _raise_team_workflow_route_error(
             "experiment_design.freeze", team_id, exc, status_code=404, fields={"planId": plan_id}

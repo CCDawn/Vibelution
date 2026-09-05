@@ -98,6 +98,12 @@ describe("team experiment loop mutations contract", () => {
     expect(mutationsSource).toContain("materializeResearchLoopIterationDesign<");
     expect(mutationsSource).toContain("allowedVariableChanges:");
     expect(mutationsSource).toContain("frozenControls:");
+    expect(mutationsSource).toContain(
+      "researchProjectId: options.activeResearchProjectId",
+    );
+    expect(mutationsSource).toContain(
+      "researchProjectId: payload.plan.researchProjectId",
+    );
   });
 
   it("updates the experiment status cache from the authoritative review response", () => {
