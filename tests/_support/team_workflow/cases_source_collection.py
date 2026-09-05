@@ -5281,6 +5281,11 @@ def test_source_collection_ingestion_reconciles_nested_approve_all_decision_afte
 
 
 def test_source_collection_stage_task_after_turn_accepts_continuation_turn_for_same_task(tmp_path, monkeypatch):
+    from core.web.services.team_workflow.research_runtime import artifact_readback_registry
+
+    # This case owns continuation-turn identity. Receipt acceptance has its
+    # own real-validator and writeback tests in test_source_finding_receipt_gate.
+    monkeypatch.setattr(artifact_readback_registry, "load_source_finding_receipt_payload", lambda **_: {"quality": {}})
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
     _stub_source_collection_search_background(monkeypatch)
@@ -9890,6 +9895,11 @@ def test_finding_running_writebacks_materialize_and_close_at_frozen_lead_limit(
     monkeypatch,
 ):
     """Two rolling batches persist immediately and the frozen cap closes the task."""
+    from core.web.services.team_workflow.research_runtime import artifact_readback_registry
+
+    # Model a receipt-accepted batch for the independent frozen-cap contract.
+    # Automatic closure with missing receipts is tested at the real validator.
+    monkeypatch.setattr(artifact_readback_registry, "load_source_finding_receipt_payload", lambda **_: {"quality": {}})
     env = _finding_close_first_step_task(tmp_path, monkeypatch)
     team = env["team"]
     run_id = env["runId"]
