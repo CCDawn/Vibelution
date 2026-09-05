@@ -6,6 +6,7 @@ import {
   MessageCircleHeart,
   Search,
   Plus,
+  PanelLeftClose,
   X,
   UsersRound,
 } from "lucide-react";
@@ -25,6 +26,7 @@ import {
   VCommandPalette,
   VContextualHint,
   VDropdownMenu,
+  VIconButton,
   VNativeButton,
   VNativeInput,
   VStateSurface,
@@ -57,6 +59,7 @@ export type ChatConversationIndexRailProps = {
   chatRoomModesPending: boolean;
   chatRoomPurposesPending: boolean;
   conversationIndexCollapsed: boolean;
+  onCollapseConversationIndex: () => void;
   conversationIndexOverlayOpen: boolean;
   conversationIndexPanel: ReactNode;
   directoryFilterText: string;
@@ -142,6 +145,7 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
     chatRoomModesPending,
     chatRoomPurposesPending,
     conversationIndexCollapsed,
+    onCollapseConversationIndex,
     conversationIndexOverlayOpen,
     conversationIndexPanel,
     directoryFilterText,
@@ -262,64 +266,13 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
   return (
       <aside
         id="chat-conversation-index-pane"
-        className={conversationIndexPaneClassName}
+        className={conversationIndexOverlayOpen ? `${conversationIndexPaneClassName} ${styles.railOverlay}` : conversationIndexPaneClassName}
         data-vui-region="chat-session-index"
         aria-keyshortcuts="Control+K Meta+K"
         aria-hidden={conversationIndexCollapsed}
         role={conversationIndexOverlayOpen ? "dialog" : undefined}
         aria-label={conversationIndexOverlayOpen ? (lang === "zh" ? "会话列表" : "Conversation list") : undefined}
       >
-        {standardGroupRoomActive ? (
-          <VTabs
-            aria-label={lang === "zh" ? "左侧索引" : "Left index"}
-            value={rightIndexPanel}
-            onValueChange={(value) => {
-              if (value === "conversations" || value === "members") {
-                setRightIndexPanel(value);
-              }
-            }}
-            className="min-w-0"
-            listClassName={styles.rightIndexTabs}
-            triggerClassName={styles.rightIndexTab}
-            items={[
-              {
-                id: "conversations",
-                label: (
-                  <>
-                    <MessageCircleHeart size={14} aria-hidden="true" />
-                    <span>{lang === "zh" ? "会话" : "Chats"}</span>
-                  </>
-                ),
-              },
-              {
-                id: "members",
-                label: (
-                  <>
-                    <UsersRound size={14} aria-hidden="true" />
-                    <span>{lang === "zh" ? "成员" : "Members"}</span>
-                  </>
-                ),
-              },
-            ]}
-          />
-        ) : null}
-
-        {rightIndexPanel === "members" && standardGroupRoomActive ? (
-          groupRoomInitialLoading ? (
-            <ProgressiveRegionSkeleton
-              variant="detail"
-              label={lang === "zh" ? "正在加载群聊成员摘要" : "Loading group member summary"}
-            />
-          ) : (
-            <div className={styles.memberIndexSummary}>
-              <UsersRound size={15} />
-              <span>
-                {availableGroupParticipantCount} {lang === "zh" ? "位可用助手" : "available agents"}
-              </span>
-              <strong>{statusLabel(activeGroupRoom?.status ?? "ready")}</strong>
-            </div>
-          )
-        ) : (
           <div className={styles.railTop}>
             <h2 className={styles.railTitle}>{lang === "zh" ? "会话" : "Chats"}</h2>
             <VNativeButton
@@ -357,6 +310,17 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
                 </VNativeButton>
               )}
             />
+            <VIconButton
+              tooltip=""
+              id="chat-conversation-index-collapse"
+              type="button"
+              className={styles.railActionButton}
+              label={lang === "zh" ? "收起会话列" : "Collapse conversation column"}
+              aria-expanded={true}
+              aria-controls="chat-conversation-index-pane"
+              onClick={onCollapseConversationIndex}
+              icon={<PanelLeftClose size={16} aria-hidden="true" />}
+            />
             {directorySearchOpen ? (
               <div id="chat-directory-search" className={styles.directorySearch}>
                 <VNativeInput
@@ -376,7 +340,60 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
               </div>
             ) : null}
           </div>
-        )}
+
+        {standardGroupRoomActive ? (
+          <div className={styles.railGroupHeader}>
+          <VTabs
+            aria-label={lang === "zh" ? "左侧索引" : "Left index"}
+            value={rightIndexPanel}
+            onValueChange={(value) => {
+              if (value === "conversations" || value === "members") {
+                setRightIndexPanel(value);
+              }
+            }}
+            className="min-w-0"
+            listClassName={styles.rightIndexTabs}
+            triggerClassName={styles.rightIndexTab}
+            items={[
+              {
+                id: "conversations",
+                label: (
+                  <>
+                    <MessageCircleHeart size={14} aria-hidden="true" />
+                    <span>{lang === "zh" ? "会话" : "Chats"}</span>
+                  </>
+                ),
+              },
+              {
+                id: "members",
+                label: (
+                  <>
+                    <UsersRound size={14} aria-hidden="true" />
+                    <span>{lang === "zh" ? "成员" : "Members"}</span>
+                  </>
+                ),
+              },
+            ]}
+          />
+
+        {rightIndexPanel === "members" ? (
+          groupRoomInitialLoading ? (
+            <ProgressiveRegionSkeleton
+              variant="detail"
+              label={lang === "zh" ? "正在加载群聊成员摘要" : "Loading group member summary"}
+            />
+          ) : (
+            <div className={styles.memberIndexSummary}>
+              <UsersRound size={15} />
+              <span>
+                {availableGroupParticipantCount} {lang === "zh" ? "位可用助手" : "available agents"}
+              </span>
+              <strong>{statusLabel(activeGroupRoom?.status ?? "ready")}</strong>
+            </div>
+          )
+        ) : null}
+          </div>
+        ) : null}
 
         <div
           className={
@@ -654,13 +671,10 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
             ) : null}
             </div>
             <section className={styles.systemEntryGroup} aria-label={lang === "zh" ? "系统入口" : "System entries"}>
-              <div className={styles.conversationTreeRootHeader}>
-                <span>{lang === "zh" ? "系统入口" : "System"}</span>
-                <strong>1</strong>
-              </div>
               <VButton
                 type="button"
                 contentLayout="plain"
+                variant="ghost"
                 aria-current={projectBusActive ? "true" : undefined}
                 className={
                   projectBusActive
