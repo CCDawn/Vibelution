@@ -97,6 +97,7 @@ export function ResearchCurrentTaskInspector({
     );
   }
 
+  const taskError = presentResearchWorkflowError(task.detail);
   return (
     <section
       aria-label={historyMode ? "所选节点详情" : "当前任务操作"}
@@ -119,14 +120,19 @@ export function ResearchCurrentTaskInspector({
           role={liveRole(task.status)}
         >
           {historyMode ? `所选节点详情 · 当前任务为“${task.title}”` : liveRole(task.status) === "alert" ? (
-            <VErrorSummary
-              label={STATUS_LABEL[task.status]}
-              summary={presentResearchWorkflowError(task.detail).bodyZh}
-              details={task.detail}
-              openLabel="诊断详情"
-              closeLabel="收起详情"
-              defaultOpen={false}
-            />
+            <>
+              <VErrorSummary
+                label={STATUS_LABEL[task.status]}
+                summary={taskError.titleZh}
+                details={task.detail}
+                openLabel="诊断"
+                closeLabel="收起"
+                defaultOpen={false}
+              />
+              <ul className={styles.errorSteps} aria-label="处理建议">
+                {taskError.bodyZh.split("；").filter(Boolean).map((step, index) => <li key={index}>{step}</li>)}
+              </ul>
+            </>
           ) : task.detail}
         </div>
         {task.progress && !historyMode ? <div className={styles.progress}>{task.progress.label}</div> : null}

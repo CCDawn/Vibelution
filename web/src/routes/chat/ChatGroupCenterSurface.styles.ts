@@ -40,6 +40,7 @@ const styles = {
   groupRefreshButton:
     `vui-routes-chatcodingroute groupRefreshButton min-w-0 ${vuiControlQuietClass}`,
   groupRoundBlock: "vui-routes-chatcodingroute groupRoundBlock min-w-0",
+  groupRoundActions: "flex flex-wrap items-center gap-2 py-2",
   groupRoundDivider:
     "vui-routes-chatcodingroute groupRoundDivider flex min-w-0 items-center gap-2 py-2 text-[10px] font-semibold tracking-wide text-[var(--fg-tertiary)] before:h-px before:flex-1 before:bg-[var(--vui-border-subtle)] after:h-px after:flex-1 after:bg-[var(--vui-border-subtle)]",
   groupRoundSummary: `vui-routes-chatcodingroute groupRoundSummary min-w-0 ${vuiGlassPanelClass} p-2`,

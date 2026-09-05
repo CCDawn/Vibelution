@@ -180,6 +180,23 @@ function sampleLayoutEdges() {
 }
 
 describe("ShadcnWorkflowCanvas structure (P1-1)", () => {
+  it("fits only the selected stage and leaves the complete graph available", async () => {
+    const graph = sampleGraph();
+    graph.nodes.push({ nodeId: "other", stageId: "other-stage", label: "其他阶段", actorKind: "agent", visualKind: "agent_task", status: "pending" });
+    vi.mocked(useWorkflowAutoLayout).mockReturnValue(idleLayoutHook(sampleLayoutNodes()));
+    const container = document.createElement("div"); document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<ShadcnWorkflowCanvas graph={graph} selectedNodeId="protocol_design" />));
+    const props = rfCalls.at(-1)!;
+    const controls = (props.children as React.ReactElement[]).find((child) => child?.type === WorkflowCanvasControls)!;
+    fakeInstance.fitView.mockClear();
+    await act(async () => controls.props.onFitStage());
+    expect(fakeInstance.fitView).toHaveBeenCalledWith(expect.objectContaining({ nodes: [{ id: "protocol_design" }], maxZoom: 1 }));
+    expect(graph.nodes).toHaveLength(2);
+    await act(async () => controls.props.onFitAll());
+    expect(fakeInstance.fitView).toHaveBeenLastCalledWith(expect.not.objectContaining({ nodes: expect.anything() }));
+    await act(async () => root.unmount()); container.remove();
+  });
   beforeEach(() => {
     vi.stubGlobal("ResizeObserver", class {
       observe() {}

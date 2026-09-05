@@ -12,6 +12,8 @@
 
 蛇形流程的初始视野和从阶段导航定位节点均保持至少 0.8 的可读缩放，不因节点数量增加而压缩成微缩图。工作区选中当前任务后定位该节点；用户明确选择「适应全部」时仍允许缩小查看全流程。
 
+「聚焦阶段」使用所选节点的 stageId；未选择节点时使用当前工作节点的 stageId，仅将该阶段节点适配进视口，最大缩放为 1。它不隐藏节点、不修改阶段状态或连线，后续状态更新不得覆盖用户的阶段视口。无有效阶段时不提供该操作；「适应全部」可恢复全图总览。
+
 外部选中节点的定位以当前已提交布局坐标为准；布局版本变化后重新定位该节点，避免临时布局的位置在 ELK 完成后失效。仅状态更新且布局版本不变时不重新定位，画布内部点击也不强制平移。
 
 - Challenge Cup / research process workspace 唯一阶段导航与运行观察表面
@@ -92,7 +94,7 @@ pathState：`idle | traversed | active | attention | danger` — 仅由 nodeRuns
 
 - 布局：`useWorkflowAutoLayout(graph, createWorkflowLayoutEngine)` 内部走**两级布局**（`layoutTwoLevel`）。默认 `stage-columns` 为阶段 A 各自 ELK DOWN、阶段 B 外层 ELK RIGHT；`serpentine` 为阶段 A 依次 RIGHT / LEFT / RIGHT、阶段 B 外层 ELK DOWN。两种模式都只包含真实 edges；跨阶段边通过 label spacer 交给 ELK 分配通道，任务绝对坐标 = meta 位置 + 阶段本地坐标，结构 hash 包含 layout mode 并避免重复布局。
 - 目标：默认模式阶段内主链单列；蛇形模式阶段内横向铺开、阶段纵向延展；gap 由 ELK 按内容自动决定（非固定值）。
-- fit：`useWorkflowInitialFit` 编排——`initialFitRevision` 只在 **settled 布局**提交后设置；等待节点进入 React Flow 内部（`useNodesInitialized`）并在下一帧执行**仅一次**；校准重排不取消 pending fit，拓扑切换（structureKey 变化）取消并重新武装；`acknowledgeInitialFit()` 后 status-only 更新不再 fit。`<ReactFlow>` 不设隐式 `fitView`；「适应全部」经 `onFitAll` 显式 fit。蛇形短流程（1–5 张卡）的**首次进入与容器重排**通过 React Flow `fitView({ minZoom: 0.8 })` 保住标题和状态的默认可读性；画布本身仍允许缩到 `0.28`，因此用户主动点「适应全部」时仍能获得全图总览。
+- fit：`useWorkflowInitialFit` 编排——`initialFitRevision` 只在 **settled 布局**提交后设置；等待节点进入 React Flow 内部（`useNodesInitialized`）并在下一帧执行**仅一次**；校准重排不取消 pending fit，拓扑切换（structureKey 变化）取消并重新武装；`acknowledgeInitialFit()` 后 status-only 更新不再 fit。`<ReactFlow>` 不设隐式 `fitView`；「适应全部」经 `onFitAll` 显式 fit。蛇形短流程（1–5 张卡）的**首次进入与容器重排**通过 React Flow `fitView({ minZoom: 0.8 })` 保住标题和状态的默认可读性；画布本身仍允许缩到 `0.1`，因此用户主动点「适应全部」时仍能获得全图总览。
 
 ### 阶段分区
 

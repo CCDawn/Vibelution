@@ -4,6 +4,7 @@ export default {
   titleRow: "flex min-w-0 items-start justify-between gap-3",
   title: "min-w-0 text-balance text-base font-semibold leading-6 text-[var(--fg-primary)]",
   detail: "px-4 pt-3 text-pretty [font-size:var(--vui-font-sm)] leading-5 text-[var(--fg-secondary)]",
+  errorSteps: "mt-2 list-disc space-y-1 pl-4 [overflow-wrap:anywhere]",
   progress: "px-4 pt-2 [font-size:var(--vui-font-xs)] text-[var(--fg-tertiary)]",
   body: "min-h-0 overflow-auto",
   empty: "flex h-full min-h-40 items-center justify-center px-5 text-center [font-size:var(--vui-font-sm)] text-[var(--fg-tertiary)]",
