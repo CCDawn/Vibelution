@@ -7,32 +7,28 @@
  * SSE progress into these queries so cross-panel chain actions (selection,
  * meeting closure, handoff) refresh the canvas region.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
 import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   executeHypothesisFirstCommand,
   fetchCollectionRequests,
-  fetchHypothesisFirstChainState,
   fetchHypothesisFirstStateV2,
   fetchHypothesisSelections,
   fetchMeetingRounds,
-  isHypothesisFirstCommandStateConflict,
-  recoverCollectionRequest,
   fetchReviewRoundLinks,
-  isHypothesisFirstStateV2EndpointUnavailable,
+  isHypothesisFirstCommandStateConflict,
 } from "../../../api/hypothesisFirst";
 import { queryKeys } from "../../../api/queryKeys";
-import { resolvePollingInterval, usePageVisibility } from "../../../app/pollingPolicy";
-import { collectionRequestNeedsPolling } from "./hypothesisFirstCollectionStatus";
 import type {
   CollectionRequestRecord,
-  HypothesisFirstChainState,
   HypothesisFirstStateV2,
   HypothesisSelectionRecord,
   MeetingRoundRecord,
   ReviewRoundLinkRecord,
 } from "../../../api/types/hypothesisFirst";
+import { resolvePollingInterval, usePageVisibility } from "../../../app/pollingPolicy";
+import { collectionRequestNeedsPolling } from "./hypothesisFirstCollectionStatus";
 
 const EMPTY_MEETINGS: MeetingRoundRecord[] = [];
 const EMPTY_REQUESTS: CollectionRequestRecord[] = [];
@@ -57,7 +53,7 @@ export const hypothesisFirstChainReviewRoundLinksKey = (
 /**
  * Display fallback for the single server-owned review-round hard limit, shared
  * with the workspace chrome. The authoritative value travels on the snapshot
- * itself (`stateV2.convergence.roundBudget` / `chainState.roundBudget`); this
+ * itself (`stateV2.convergence.roundBudget`); this
  * constant only covers payloads that carry no readable budget.
  */
 export const HYPOTHESIS_FIRST_REVIEW_ROUND_LIMIT = 5;
@@ -71,67 +67,31 @@ function isReadableRoundIndex(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= 1;
 }
 
-/**
- * Read the review-round budget from the server snapshot: V2 first, then the
- * V1 compatibility chain state, then the hard-limit fallback. Both snapshot
- * surfaces are recomputed server-side on every read, so replayed review-round
- * links written under the retired default-3 budget model never reach this
- * resolver — those historical per-round values stay replay-only data and do
- * not reduce the limit. Legacy V1 snapshots default `roundBudget` to 0, and
- * any other unreadable value (negative/NaN) also falls back so old payloads
- * keep the stable hard-limit display.
- *
- * The input is deliberately structural (optional convergence/roundBudget) so
- * partial snapshots from any consumer stay assignable; the runtime guard,
- * not the type, decides readability.
- */
+/** Read the V2 review budget; use the display limit while the snapshot is unavailable. */
 export function resolveHypothesisFirstRoundBudget(input: {
   stateV2?: { convergence?: { roundBudget?: number } | null } | null;
-  chainState?: { roundBudget?: number } | null;
 }): number {
   if (isReadableRoundBudget(input.stateV2?.convergence?.roundBudget)) {
     return input.stateV2.convergence.roundBudget;
   }
-  if (isReadableRoundBudget(input.chainState?.roundBudget)) {
-    return input.chainState.roundBudget;
-  }
   return HYPOTHESIS_FIRST_REVIEW_ROUND_LIMIT;
 }
 
-/**
- * Canonical logical review round for human-facing "第 N 轮" chrome.
- *
- * The V2 snapshot's `review.activeRoundIndex` is authoritative (the server
- * derives it from review-round links). Payloads without a readable V2 round
- * fall back to the max roundIndex the link decoration placed on the scoped
- * meetings — the same source the server itself uses. `chainState.meetingCount`
- * is a physical-room count (one logical round fans out to one meeting per
- * candidate) and must never stand in for a round number.
- */
+/** V2 owns the logical review round; zero means the snapshot has no active round. */
 export function resolveHypothesisFirstCanonicalRound(input: {
   stateV2?: { review?: { activeRoundIndex?: number | null } } | null;
-  meetings?: readonly MeetingRoundRecord[];
 }): number {
-  if (isReadableRoundIndex(input.stateV2?.review?.activeRoundIndex)) {
-    return input.stateV2.review.activeRoundIndex;
-  }
-  // Meeting records never carry roundIndex server-side; any positive value
-  // here came from the review-round link decoration, so the max is
-  // link-derived and matches the server's own active-round resolution.
-  return (input.meetings ?? []).reduce(
-    (max, meeting) => Math.max(max, Number(meeting.roundIndex ?? 0) || 0),
-    0,
-  );
+  const round = input.stateV2?.review?.activeRoundIndex;
+  return isReadableRoundIndex(round) ? round : 0;
 }
 
 /**
  * Which authority the returned chain data came from. Everything except
- * `v2_canonical` fails closed for legacy mutation gates because those gates
+ * `v2_canonical` fails closed for mutation gates because operation gates
  * compare against `"v2_canonical"` only (plan §8.3: UI must know its source).
  */
 export type HypothesisFirstStateSource =
   | "v2_canonical"
-  | "v1_legacy"
   /** V2 read failed (500 / invalid DTO / fatal). Never V1-inferred. */
   | "v2_error"
   /** No authoritative read result yet; consumers must not guess a phase. */
@@ -141,8 +101,6 @@ export type HypothesisFirstStateSource =
 export type HypothesisFirstV2ReadState =
   /** Snapshot received and parsed. */
   | "ok"
-  /** Route-level 404/501 — the only fallback that may run the V1 resolver. */
-  | "route_unavailable"
   /** Server up, route present, but 500/malformed/fatal: fail closed. */
   | "v2_error"
   /** First-frame loading or not started. */
@@ -157,11 +115,10 @@ export type HypothesisFirstChainData = {
   scopeMismatch: boolean;
   /** Canonical server snapshot when the V2 endpoint is available. */
   stateV2: HypothesisFirstStateV2 | null;
-  /** Explicitly tells consumers whether the read is canonical or compatibility data. */
+  /** Explicitly tells consumers whether the read is canonical data. */
   stateSource: HypothesisFirstStateSource;
-  /** Four-state discrimination of the canonical V2 read; drives fail-closed UI. */
+  /** Read-state discrimination of the canonical V2 read; drives fail-closed UI. */
   v2ReadState: HypothesisFirstV2ReadState;
-  chainState: HypothesisFirstChainState | null;
   /** Latest selection for the question (server already filters by questionId). */
   selection: HypothesisSelectionRecord | null;
   meetings: MeetingRoundRecord[];
@@ -169,6 +126,8 @@ export type HypothesisFirstChainData = {
   reviewRoundLinks: ReviewRoundLinkRecord[];
   loading: boolean;
   error: string | null;
+  detailsLoading: boolean;
+  detailsError: string | null;
   recoveryBusy: boolean;
   recoveryError: string | null;
   recoverCollection: (requestId: string) => Promise<void>;
@@ -192,14 +151,6 @@ function shouldPollMeetings(meetings: MeetingRoundRecord[] | undefined): boolean
   return (meetings ?? []).some((meeting) => LIVE_MEETING.has(String(meeting.status)));
 }
 
-function shouldPollCollections(
-  state: HypothesisFirstChainState | undefined,
-  requests: CollectionRequestRecord[] | undefined,
-): boolean {
-  const list = requests ?? [];
-  if (list.length > 0) return list.some(collectionRequestNeedsPolling);
-  return Boolean(state?.collectionReady && state.pendingCollectionCount > 0);
-}
 
 function normalizedQuestion(value: string | null | undefined): string {
   return String(value || "").trim().toUpperCase();
@@ -236,75 +187,19 @@ function recordMatchesRun(value: string | null | undefined, runId: string): bool
   return !runId || normalizedRun(value) === runId;
 }
 
-function isTerminalLifecycle(value: string | null | undefined): boolean {
-  return ["completed", "failed", "cancelled", "superseded"].includes(String(value || ""));
-}
-
-/**
- * Keep the existing HFC-3 return shape usable while the route consumers move
- * to `stateV2`. This is a compatibility adapter only; it does not decide the
- * current phase or create actions.
- */
-function legacyChainStateFromV2(state: HypothesisFirstStateV2): HypothesisFirstChainState {
-  const candidateMeetings = state.review.candidates
-    .map((candidate) => candidate.meetingRoundId)
-    .filter((meetingId): meetingId is string => Boolean(meetingId));
-  const firstMeetingId = state.generation.generationMeetingId
-    || candidateMeetings[0]
-    || "";
-  const reviewCompleted = isTerminalLifecycle(state.review.lifecycle)
-    && state.review.lifecycle === "completed";
-  const collectionRequests = state.collection.requests.length;
-  const collectionReady = state.collection.lifecycle === "completed"
-    && state.collection.outcome === "succeeded";
-  const latestHypothesisRoundId = state.convergence.latestHypothesisRoundId || "";
-  return {
-    schemaVersion: 1,
-    teamId: state.teamId,
-    questionId: state.questionId,
-    selectionId: state.selection.selectionId || "",
-    meetingCount: state.review.aggregate.total,
-    firstMeetingId,
-    firstMeetingClosed: reviewCompleted,
-    openMeetingIds: candidateMeetings.filter((meetingId) => (
-      !state.review.candidates.find((candidate) => candidate.meetingRoundId === meetingId
-        && isTerminalLifecycle(candidate.lifecycle))
-    )),
-    collectionRequests: [],
-    collectionRequestCount: collectionRequests,
-    pendingCollectionCount: state.collection.aggregate.pending,
-    collectionReady,
-    hypothesisRoundCount: latestHypothesisRoundId ? 1 : 0,
-    latestHypothesisRoundId,
-    hypothesisConverged: state.convergence.accepted,
-    convergenceDetail: state.convergence.problems[0]?.message || "",
-    roundBudget: state.convergence.roundBudget,
-    budgetExhausted: state.convergence.outcome === "exhausted",
-    templateBaselineExists: false,
-    templateBaselineIds: [],
-    candidateCount: state.generation.candidateCount,
-    generationMeetingId: state.generation.generationMeetingId || undefined,
-    generationMeetingStatus: state.generation.lifecycle,
-  };
-}
-
 function errorMessage(error: unknown): string | null {
   return error instanceof Error ? error.message : error ? String(error) : null;
 }
 
 export function shouldPollQuestionScopedChain(input: {
   questionId: string;
-  state?: HypothesisFirstChainState;
   requests?: CollectionRequestRecord[];
 }): boolean {
   const questionId = normalizedQuestion(input.questionId);
-  const state = input.state && recordMatchesQuestion(input.state.questionId, questionId)
-    ? input.state
-    : undefined;
   const requests = (input.requests ?? []).filter((request) => (
     recordMatchesQuestion(request.questionId, questionId)
   ));
-  return shouldPollCollections(state, requests);
+  return requests.some(collectionRequestNeedsPolling);
 }
 
 export function shouldPollHypothesisFirstStateV2(state: HypothesisFirstStateV2 | undefined): boolean {
@@ -368,25 +263,6 @@ export function useHypothesisFirstChain(
         )
         : false;
     },
-  });
-  const v2EndpointUnavailable = isHypothesisFirstStateV2EndpointUnavailable(stateV2Query.error);
-  const legacyChainStateQuery = useQuery({
-    queryKey: queryKeys.hypothesisFirstChainState(teamId, questionId, requestedRunId),
-    queryFn: ({ signal }) => fetchHypothesisFirstChainState(teamId, questionId, {
-      signal,
-      runId: requestedRunId,
-    }),
-    enabled: enabled && v2EndpointUnavailable,
-    retry: false,
-    refetchOnWindowFocus: "always",
-    refetchOnReconnect: "always",
-    refetchInterval: (query) =>
-      shouldPollQuestionScopedChain({
-        questionId: requestedQuestionId,
-        state: query.state.data,
-      })
-        ? resolvePollingInterval(pageVisible, BOUNDED_POLL_MS)
-        : false,
   });
   const selections = useQuery({
     queryKey: queryKeys.hypothesisFirstSelections(teamId, questionId, requestedRunId),
@@ -456,39 +332,11 @@ export function useHypothesisFirstChain(
     : null;
 
   const canonicalState = stateV2Query.data ?? null;
-  // Four-state V2 read discrimination. The route-level judgement itself stays
-  // owned by api/hypothesisFirst (isHypothesisFirstStateV2EndpointUnavailable);
-  // only that case may fall back to the compatibility V1 read (plan §8.3).
   const v2ReadState: HypothesisFirstV2ReadState = !enabled || stateV2Query.isPending
-    ? "pending"
-    : canonicalState
-      ? "ok"
-      : v2EndpointUnavailable
-        ? "route_unavailable"
-        : "v2_error";
+    ? "pending" : canonicalState ? "ok" : "v2_error";
   const stateSource: HypothesisFirstStateSource = v2ReadState === "ok"
-    ? "v2_canonical"
-    : v2ReadState === "route_unavailable"
-      ? "v1_legacy"
-      : v2ReadState === "v2_error"
-        ? "v2_error"
-        // Nothing authoritative has been read yet; never claim a source.
-        : "pending";
-  const chainState = v2ReadState === "ok" && canonicalState
-    ? legacyChainStateFromV2(canonicalState)
-    : v2ReadState === "route_unavailable"
-      ? (legacyChainStateQuery.data ?? null)
-      // v2_error and pending must not expose compatibility phase data, even
-      // when a stale V1 payload lingers in the query cache.
-      : null;
-  const firstError = [
-    stateV2Query.error && !v2EndpointUnavailable ? stateV2Query.error : null,
-    legacyChainStateQuery.error,
-    selections.error,
-    meetings.error,
-    requests.error,
-    links.error,
-  ].find(Boolean);
+    ? "v2_canonical" : v2ReadState === "v2_error" ? "v2_error" : "pending";
+  const detailsError = [selections.error, meetings.error, requests.error, links.error].find(Boolean);
 
   const recoverCollection = useCallback(async (requestId: string) => {
     const normalizedRequestId = requestId.trim();
@@ -510,8 +358,7 @@ export function useHypothesisFirstChain(
           undefined,
           { runId: requestedRunId },
         );
-      } else if (v2EndpointUnavailable) {
-        await recoverCollectionRequest(teamId, normalizedRequestId);
+
       } else {
         throw new Error("canonical_action_unavailable");
       }
@@ -526,7 +373,7 @@ export function useHypothesisFirstChain(
     } finally {
       setRecoveryBusy(false);
     }
-  }, [questionId, queryClient, recoveryBusy, requestedRunId, stateV2Query.data, teamId, v2EndpointUnavailable]);
+  }, [questionId, queryClient, recoveryBusy, requestedRunId, stateV2Query.data, teamId]);
 
   // Meeting records never carry roundIndex server-side; the review-round
   // links are the authority. Decorate review meetings here so node ids,
@@ -565,10 +412,10 @@ export function useHypothesisFirstChain(
     recordMatchesQuestion(request.questionId, requestedQuestionId)
     && (!requestedRunId || runMeetingIds.has(String(request.meetingRoundId || "")))
   )), [requests.data?.requests, requestedQuestionId, requestedRunId, runMeetingIds]);
-  const resolvedChainQuestionId = normalizedQuestion(chainState?.questionId);
+  const resolvedChainQuestionId = normalizedQuestion(canonicalState?.questionId);
   const resolvedStateRunId = normalizedRun(canonicalState?.scope.workflowRunId);
   const scopeMismatch = Boolean(
-    enabled
+    enabled && Boolean(canonicalState)
     && (
       (resolvedChainQuestionId && resolvedChainQuestionId !== requestedQuestionId)
       || (requestedRunId && resolvedStateRunId !== requestedRunId)
@@ -582,15 +429,14 @@ export function useHypothesisFirstChain(
     stateV2: scopeMismatch ? null : canonicalState,
     stateSource,
     v2ReadState,
-    chainState: scopeMismatch ? null : chainState,
     selection,
     meetings: decoratedMeetings,
     collectionRequests: scopedRequests,
     reviewRoundLinks: scopedLinks,
-    loading: enabled && [stateV2Query, selections, meetings, requests, links]
-      .some((query) => query.isPending)
-      || (enabled && v2EndpointUnavailable && legacyChainStateQuery.isPending),
-    error: errorMessage(firstError),
+    loading: enabled && stateV2Query.isPending,
+    error: errorMessage(stateV2Query.error),
+    detailsLoading: enabled && [selections, meetings, requests, links].some((query) => query.isPending),
+    detailsError: errorMessage(detailsError),
     recoveryBusy,
     recoveryError,
     recoverCollection,

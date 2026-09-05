@@ -1,3 +1,4 @@
+import { reviewState, stateV2, command as v2Command } from "./hypothesisFirstV2.fixture";
 /**
  * Composition-level behavior tests for ResearchProcessWorkspace: loading /
  * error surfacing, deep-link driven inspector visibility, and experiment
@@ -5,17 +6,14 @@
  * dedicated test files.
  * @vitest-environment happy-dom
  */
-import React, { act } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { queryKeys } from "../../../api/queryKeys";
-import type {
-  ResearchWorkflowLaunchOption,
-  WorkflowRunRecord,
-} from "../../../api/researchWorkflow";
+import type { ResearchWorkflowLaunchOption, WorkflowRunRecord } from "../../../api/researchWorkflow";
 
 const harness = vi.hoisted(() => ({
   location: {
@@ -52,9 +50,9 @@ const harness = vi.hoisted(() => ({
     questionScopeKey: "research-team::no-question",
     scopeMismatch: false,
     stateV2: null,
-    v2ReadState: "route_unavailable",
-    stateSource: "v1_legacy",
-    chainState: null,
+    v2ReadState: "ok",
+    stateSource: "v2_canonical",
+
     meetings: [] as unknown[],
     collectionRequests: [] as unknown[],
     reviewRoundLinks: [] as unknown[],
@@ -288,7 +286,7 @@ const currentRun = {
 
 /** Minimal canonical V2 state whose formal run owns the question (blocked). */
 function blockedFormalStateV2(): Record<string, unknown> {
-  return {
+  return stateV2({
     schemaVersion: 2,
     currentPhase: "formal_runtime",
     awaitingHumanCount: 0,
@@ -313,7 +311,7 @@ function blockedFormalStateV2(): Record<string, unknown> {
       childRunIds: [],
       currentNodeIds: ["source_finding"],
     },
-  };
+  });
 }
 
 async function renderWorkspace() {
@@ -402,6 +400,7 @@ describe("ResearchProcessWorkspace", () => {
     harness.location.inspectorOpen = true;
     harness.responsiveInspectorOnOpenChange = undefined;
     harness.runState.error = null;
+    harness.catalog.error = null;
     harness.runState.run = null;
     harness.runState.projection = null;
     harness.runState.snapshot = null;
@@ -410,11 +409,11 @@ describe("ResearchProcessWorkspace", () => {
     harness.commands.error = null;
     harness.commands.busy = false;
     harness.formalCommand.commandError = null;
-    harness.chain.chainState = null;
+    harness.chain.stateV2 = null;
     harness.chain.questionId = "";
     harness.chain.scopeMismatch = false;
     harness.chain.stateV2 = null;
-    harness.chain.v2ReadState = "route_unavailable";
+    harness.chain.v2ReadState = "ok";
     harness.chain.stateSource = "v1_legacy";
     harness.chain.meetings = [];
     harness.chain.collectionRequests = [];
@@ -586,12 +585,7 @@ describe("ResearchProcessWorkspace", () => {
     harness.location.questionId = "SCI-096";
     harness.location.selectedNodeId = "hf_review";
     harness.chain.questionId = "SCI-096";
-    harness.chain.chainState = {
-      questionId: "SCI-096",
-      selectionId: "selection-1",
-      candidateCount: 1,
-      hypothesisConverged: false,
-    } as never;
+    harness.chain.stateV2 = reviewState() as never;
     harness.chain.selection = {
       questionId: "SCI-096",
       selectionId: "selection-1",
@@ -619,14 +613,30 @@ describe("ResearchProcessWorkspace", () => {
     expect(rendered.container.querySelector('[data-current-task-node]')?.getAttribute("data-current-task-node")).toBe("hf_review");
   });
 
+  it("uses the same V2 discussion destination for collaboration and the command palette", async () => {
+    harness.location.questionId = "SCI-096";
+    harness.chain.questionId = "SCI-096";
+    harness.chain.stateV2 = stateV2({questionId: "SCI-096", allowedActions: [{
+      kind: "navigation", actionId: "discussion-1", label: "打开本轮讨论", enabled: true, disabledReason: null,
+      targetPhase: "generation", targetNodeId: "hf_generation",
+      navigation: {status: "ready", degradedReason: null, questionId: "SCI-096", roomId: "v2-room", meetingRoundId: "meeting-1", selectionId: null, candidateId: null, deepLink: "/chat?room=v2-room", returnTo: "/teams", returnLabel: "返回科研流程"},
+    }]}) as never;
+    harness.runState.projection = {definition: {nodes: [], edges: [], stages: []}, run: {teamId: "research-team", runtimeCurrentNodeIds: [], nodeRuns: {}}} as never;
+    const rendered = await renderWorkspace(); root = rendered.root;
+    expect(rendered.container.querySelector('[data-testid="research-process-inspector-pane"]')?.getAttribute("data-discussion-status")).toBe("ready");
+    await act(async () => { (rendered.container.querySelector('[data-testid="research-open-team-communication"]') as HTMLButtonElement).click(); });
+    expect(rendered.container.querySelector('[data-testid="route-probe"]')?.textContent).toBe("/chat?room=v2-room");
+    await act(async () => { window.dispatchEvent(new KeyboardEvent("keydown", {key: "k", ctrlKey: true, bubbles: true})); });
+    const item = Array.from(document.body.querySelectorAll("button")).find((button) => button.textContent?.includes("打开本轮讨论"));
+    expect(item).toBeTruthy();
+    await act(async () => item!.click());
+    expect(rendered.container.querySelector('[data-testid="route-probe"]')?.textContent).toBe("/chat?room=v2-room");
+  });
+
   it("uses the server-owned scoped discussion anchor for current-task navigation", async () => {
     harness.location.questionId = "SCI-096";
     harness.chain.questionId = "SCI-096";
-    harness.chain.chainState = {
-      questionId: "SCI-096",
-      candidateCount: 0,
-      hypothesisConverged: false,
-    } as never;
+    harness.chain.stateV2 = stateV2({ questionId: harness.chain.questionId || "SCI-096", generation: {candidateCount: 0}, allowedActions: [v2Command({command: "open_generation", payload: {}}, "生成候选假说")] }) as never;
     harness.runState.snapshot = {
       launchContext: {
         activeDiscussionAnchor: {
@@ -666,7 +676,7 @@ describe("ResearchProcessWorkspace", () => {
     });
 
     const command = Array.from(document.body.querySelectorAll("button"))
-      .find((button) => button.textContent?.includes("前往候选生成"));
+      .find((button) => button.textContent?.includes("生成候选假说"));
     expect(command).toBeTruthy();
     await act(async () => command?.click());
 
@@ -682,11 +692,7 @@ describe("ResearchProcessWorkspace", () => {
     harness.location.questionId = "SCI-096";
     harness.location.selectedNodeId = "hf_generation";
     harness.chain.questionId = "SCI-096";
-    harness.chain.chainState = {
-      questionId: "SCI-096",
-      candidateCount: 0,
-      hypothesisConverged: false,
-    } as never;
+    harness.chain.stateV2 = stateV2({ questionId: harness.chain.questionId || "SCI-096", generation: {candidateCount: 0}, allowedActions: [v2Command({command: "open_generation", payload: {}}, "生成候选假说")] }) as never;
     harness.runState.snapshot = {
       launchContext: {
         activeDiscussionAnchor: {
@@ -738,11 +744,7 @@ describe("ResearchProcessWorkspace", () => {
     harness.location.runId = "run-created";
     harness.location.questionId = "SCI-096";
     harness.chain.questionId = "SCI-096";
-    harness.chain.chainState = {
-      questionId: "SCI-096",
-      candidateCount: 0,
-      hypothesisConverged: true,
-    } as never;
+    harness.chain.stateV2 = stateV2({ questionId: harness.chain.questionId || "SCI-096", generation: {generationMeetingId: "hf-gen-1", lifecycle: "waiting_human"}, convergence: {accepted: true}, allowedActions: [v2Command({command: "approve_summary", payload: {meetingRoundId: "hf-gen-1"}}, "确认候选假说清单")] }) as never;
     harness.chain.loading = true;
     harness.chain.meetings = [{
       question: "SCI-096",
@@ -903,7 +905,7 @@ describe("ResearchProcessWorkspace", () => {
       definition: { nodes: [], edges: [], stages: [] },
       run: { runtimeCurrentNodeIds: [], nodeRuns: {} },
     } as never;
-    harness.chain.chainState = { hypothesisConverged: true } as never;
+    harness.chain.stateV2 = stateV2({ questionId: harness.chain.questionId || "SCI-096", generation: {candidateCount: 0}, allowedActions: [v2Command({command: "open_generation", payload: {}}, "生成候选假说")] }) as never;
     harness.chain.loading = true;
     const rendered = await renderWorkspace();
     root = rendered.root;
@@ -924,7 +926,7 @@ describe("ResearchProcessWorkspace", () => {
     const rendered = await renderWorkspace();
     root = rendered.root;
 
-    expect(rendered.container.textContent).toContain("正在切换题目");
+    expect(rendered.container.textContent).toContain("研究范围不匹配");
     expect(rendered.container.textContent).not.toContain("记录选择并开启评审");
     expect(rendered.container.textContent).not.toContain("选择题目开始研究");
     expect(rendered.container.querySelector('[data-vui="research-current-task-inspector"]')).not.toBeNull();
@@ -1079,11 +1081,7 @@ describe("ResearchProcessWorkspace", () => {
     harness.location.panel = "launch";
     harness.location.questionId = "SCI-004";
     harness.chain.questionId = "SCI-004";
-    harness.chain.chainState = {
-      questionId: "SCI-004",
-      candidateCount: 0,
-      hypothesisConverged: false,
-    } as never;
+    harness.chain.stateV2 = stateV2({ questionId: harness.chain.questionId || "SCI-096", generation: {candidateCount: 0}, allowedActions: [v2Command({command: "open_generation", payload: {}}, "生成候选假说")] }) as never;
     harness.runState.projection = {
       definition: { nodes: [], edges: [], stages: [] },
       run: { teamId: "research-team", runtimeCurrentNodeIds: [], nodeRuns: {} },
@@ -1131,7 +1129,10 @@ describe("ResearchProcessWorkspace", () => {
     harness.location.questionId = "SCI-003";
     harness.location.selectedNodeId = "source_finding";
     harness.chain.questionId = "SCI-003";
-    harness.chain.stateV2 = blockedFormalStateV2() as never;
+    harness.chain.stateV2 = null;
+    harness.chain.loading = true;
+    harness.chain.error = "V2 temporarily unavailable";
+    harness.catalog.error = "catalog unavailable";
     harness.runState.run = {
       ...currentRun,
       runId: "run-bcbca1400d71",
@@ -1278,6 +1279,7 @@ describe("ResearchProcessWorkspace", () => {
       selectionId: "selection-1",
       selectedCandidateIds: ["candidate-1"],
     } as never;
+    harness.chain.stateV2 = stateV2({currentPhase: "collection", collection: {lifecycle: "failed", requests: [{...stateV2().collection, requestId: "collection-request-1", childRun: {...stateV2().collection, runId: "child-1", lifecycle: "failed"}, sources: [], handoff: {...stateV2().collection}}]}, allowedActions: [{...v2Command({command: "retry_collection", payload: {requestId: "collection-request-1"}}, "重试搜集"), targetPhase: "collection"}]}) as never;
     harness.chain.collectionRequests = [{
       requestId: "collection-request-1",
       questionId: "SCI-004",

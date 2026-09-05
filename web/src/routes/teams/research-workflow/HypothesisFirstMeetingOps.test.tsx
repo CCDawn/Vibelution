@@ -1,8 +1,10 @@
+import React from "react";
+import { command } from "./hypothesisFirstV2.fixture";
 /**
  * @vitest-environment happy-dom
  */
-import React, { act } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -67,7 +69,7 @@ const AUTO_ACTION: HypothesisFirstNextAction = {
   stage: "generation_ready_to_summarize",
   targetNodeId: "hf_generation",
   navigationLabel: "前往候选生成",
-  command: "draft_summary",
+  command: "regenerate_summary",
   commandLabel: "整理候选清单",
   statusMessage: "团队讨论已结束，系统正在整理候选清单",
   meetingRoundId: "meeting-1",
@@ -95,7 +97,7 @@ const AWAITING_REVIEW_ACTION: HypothesisFirstNextAction = {
   ...AUTO_ACTION,
   stateSource: "v2_canonical",
   stage: "review_awaiting_approval",
-  command: "approve_review_digest",
+  command: "approve_summary",
   commandLabel: "确认并结束本轮",
   canonicalAction: APPROVE_SUMMARY_ACTION,
 };
@@ -168,8 +170,34 @@ function commandReceipt(result: Record<string, unknown>) {
 }
 
 describe("HypothesisFirstMeetingOps automatic organization", () => {
+  it("organizes once using the signed V2 action", async () => {
+    const canonicalAction = command({command: "regenerate_summary", payload: {meetingRoundId: "meeting-1"}}, "整理候选清单");
+    render({...AUTO_ACTION, canonicalAction});
+    await act(async () => { await vi.waitFor(() => expect(mockedExecuteCommand).toHaveBeenCalledTimes(1)); });
+    expect(mockedExecuteCommand).toHaveBeenCalledWith("team-1", "Q-01", canonicalAction, undefined, {runId: undefined});
+    expect(mockedDraftMeetingSummary).not.toHaveBeenCalled();
+    render({...AUTO_ACTION, canonicalAction});
+    expect(mockedExecuteCommand).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a V2 summary failure and leaves retry to the operator", async () => {
+    mockedExecuteCommand.mockRejectedValueOnce(new Error("worker lock timeout"));
+    render({...AUTO_ACTION, canonicalAction: command({command: "regenerate_summary", payload: {meetingRoundId: "meeting-1"}}, "整理候选清单")});
+    await act(async () => { await vi.waitFor(() => expect(container.textContent).toContain("worker lock timeout")); });
+    expect(mockedExecuteCommand).toHaveBeenCalledTimes(1);
+    expect(mockedDraftMeetingSummary).not.toHaveBeenCalled();
+  });
+
+  it("does not dispatch an unsigned operation from a completed discussion", async () => {
+    render(AUTO_ACTION);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+    expect(mockedExecuteCommand).not.toHaveBeenCalled();
+    expect(mockedDraftMeetingSummary).not.toHaveBeenCalled();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
+    mockedExecuteCommand.mockReset().mockResolvedValue(commandReceipt({}));
     mockedFetchMeetingRound.mockResolvedValue({
       schemaVersion: 1,
       teamId: "team-1",
@@ -202,56 +230,6 @@ describe("HypothesisFirstMeetingOps automatic organization", () => {
     container.remove();
   });
 
-  it("starts safe organization once for a completed discussion and removes the redundant button", async () => {
-    render(AUTO_ACTION);
-    await act(async () => {
-      await vi.waitFor(() => expect(mockedDraftMeetingSummary).toHaveBeenCalledTimes(1));
-    });
-    expect(mockedDraftMeetingSummary).toHaveBeenCalledWith(
-      "team-1",
-      "meeting-1",
-      { actor: "operator", force: false },
-    );
-    expect(container.textContent).toContain("正在整理");
-    expect(container.textContent).not.toContain("讨论中");
-
-    render({ ...AUTO_ACTION });
-    await act(async () => Promise.resolve());
-    expect(mockedDraftMeetingSummary).toHaveBeenCalledTimes(1);
-    expect(container.textContent).not.toContain("生成纪要");
-    expect([...container.querySelectorAll("button")].some((button) => button.textContent?.includes("整理候选清单"))).toBe(false);
-  });
-
-  it("surfaces approve validation errors when the API keeps the round open", async () => {
-    const mockedApprove = vi.mocked(approveHypothesisDigest);
-    mockedApprove.mockResolvedValueOnce({
-      closed: false,
-      validationErrors: [{ code: "invalid_keywords", message: "证据请求缺少有效搜集关键词" }],
-    } as never);
-    mockedFetchMeetingRound.mockResolvedValue({
-      schemaVersion: 1,
-      teamId: "team-1",
-      meetingRound: meetingRound("awaiting_approval"),
-    });
-    render({
-      ...AUTO_ACTION,
-      stage: "review_awaiting_approval",
-      command: "approve_review_digest",
-      commandLabel: "确认并结束本轮",
-    });
-    await act(async () => {
-      await vi.waitFor(() => {
-        const button = [...container.querySelectorAll("button")]
-          .find((item) => item.textContent?.includes("确认并结束本轮"));
-        expect(button).toBeTruthy();
-        button?.click();
-      });
-      await vi.waitFor(() => expect(mockedApprove).toHaveBeenCalledTimes(1));
-    });
-    expect(container.textContent).toContain("本轮结论未被确认");
-    expect(container.textContent).toContain("证据请求缺少有效搜集关键词");
-  });
-
   it("does not regenerate the digest twice after a canonical rejection", async () => {
     mockedFetchMeetingRound.mockResolvedValue({
       schemaVersion: 1,
@@ -261,7 +239,7 @@ describe("HypothesisFirstMeetingOps automatic organization", () => {
     render({
       ...AUTO_ACTION,
       stage: "review_awaiting_approval",
-      command: "approve_review_digest",
+      command: "approve_summary",
       commandLabel: "确认并结束本轮",
       canonicalAction: {
         kind: "command",
@@ -302,7 +280,7 @@ describe("HypothesisFirstMeetingOps automatic organization", () => {
       ...AUTO_ACTION,
       stateSource: "v2_canonical",
       stage: "review_awaiting_approval",
-      command: "approve_review_digest",
+      command: "approve_summary",
       commandLabel: "确认并结束本轮",
       canonicalAction: undefined,
     });
@@ -316,273 +294,6 @@ describe("HypothesisFirstMeetingOps automatic organization", () => {
     expect([...container.querySelectorAll("button")]
       .some((button) => button.textContent?.includes("退回重新整理"))).toBe(false);
     expect(approveHypothesisDigest).not.toHaveBeenCalled();
-  });
-
-  it("surfaces close-correction failures and disables competing actions while closing", async () => {
-    const mockedApprove = vi.mocked(approveHypothesisDigest);
-    mockedApprove.mockResolvedValueOnce({
-      closed: false,
-      validationErrors: [{ code: "invalid_keywords", message: "证据请求缺少有效搜集关键词" }],
-    } as never);
-    mockedCloseReviewMeeting.mockRejectedValueOnce(new Error("close correction failed"));
-    mockedFetchMeetingRound.mockResolvedValue({
-      schemaVersion: 1,
-      teamId: "team-1",
-      meetingRound: meetingRound("awaiting_approval"),
-    });
-    render({
-      ...AUTO_ACTION,
-      stage: "review_awaiting_approval",
-      command: "approve_review_digest",
-      commandLabel: "确认并结束本轮",
-    });
-
-    await act(async () => {
-      await vi.waitFor(() => {
-        const button = [...container.querySelectorAll("button")]
-          .find((item) => item.textContent?.includes("确认并结束本轮"));
-        expect(button).toBeTruthy();
-        button?.click();
-      });
-      await vi.waitFor(() => expect(mockedApprove).toHaveBeenCalledTimes(1));
-    });
-
-    const close = [...container.querySelectorAll("button")]
-      .find((button) => button.textContent?.includes("按现有结论关闭本轮"));
-    expect(close).toBeTruthy();
-    await act(async () => {
-      close?.click();
-      await vi.waitFor(() => expect(mockedCloseReviewMeeting).toHaveBeenCalledTimes(1));
-    });
-    expect(container.textContent).toContain("close correction failed");
-  });
-
-  it("disables the competing reject action while close correction is pending", async () => {
-    const mockedApprove = vi.mocked(approveHypothesisDigest);
-    mockedApprove.mockResolvedValueOnce({
-      closed: false,
-      validationErrors: [{ code: "invalid_keywords", message: "证据请求缺少有效搜集关键词" }],
-    } as never);
-    let resolveClose: (value: unknown) => void = () => undefined;
-    mockedCloseReviewMeeting.mockImplementationOnce(
-      () => new Promise((resolve) => { resolveClose = resolve; }) as never,
-    );
-    mockedFetchMeetingRound.mockResolvedValue({
-      schemaVersion: 1,
-      teamId: "team-1",
-      meetingRound: meetingRound("awaiting_approval"),
-    });
-    render({
-      ...AUTO_ACTION,
-      stage: "review_awaiting_approval",
-      command: "approve_review_digest",
-      commandLabel: "确认并结束本轮",
-    });
-
-    await act(async () => {
-      await vi.waitFor(() => {
-        const button = [...container.querySelectorAll("button")]
-          .find((item) => item.textContent?.includes("确认并结束本轮"));
-        expect(button).toBeTruthy();
-        button?.click();
-      });
-      await vi.waitFor(() => expect(mockedApprove).toHaveBeenCalledTimes(1));
-    });
-    const close = [...container.querySelectorAll("button")]
-      .find((button) => button.textContent?.includes("按现有结论关闭本轮"));
-    const reject = [...container.querySelectorAll("button")]
-      .find((button) => button.textContent?.includes("退回重新整理"));
-    expect(close).toBeTruthy();
-    expect(reject).toBeTruthy();
-
-    await act(async () => {
-      close?.click();
-      await vi.waitFor(() => expect(mockedCloseReviewMeeting).toHaveBeenCalledTimes(1));
-    });
-    const pendingClose = [...container.querySelectorAll("button")]
-      .find((button) => button.textContent?.includes("按现有结论关闭本轮"));
-    const pendingReject = [...container.querySelectorAll("button")]
-      .find((button) => button.textContent?.includes("退回重新整理"));
-    expect((pendingClose as HTMLButtonElement).disabled).toBe(true);
-    expect((pendingReject as HTMLButtonElement).disabled).toBe(true);
-
-    await act(async () => {
-      resolveClose({});
-      await Promise.resolve();
-    });
-  });
-
-  it("keeps retries manual after automatic organization fails", async () => {
-    mockedFetchMeetingRound.mockResolvedValue({
-      schemaVersion: 1,
-      teamId: "team-1",
-      meetingRound: { ...meetingRound("summarizing"), summaryError: "timeout" },
-    });
-    render({
-      ...AUTO_ACTION,
-      stage: "generation_summarizing",
-      command: undefined,
-      commandLabel: undefined,
-      recovery: {
-        command: "retry_draft_summary",
-        label: "重试整理候选清单",
-        reason: "自动整理未完成",
-      },
-    });
-    await act(async () => {
-      await vi.waitFor(() => expect(container.textContent).toContain("重试整理候选清单"));
-    });
-    expect(mockedDraftMeetingSummary).not.toHaveBeenCalled();
-
-    const retry = [...container.querySelectorAll("button")]
-      .find((button) => button.textContent?.includes("重试整理候选清单"));
-    await act(async () => {
-      retry?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-      await Promise.resolve();
-    });
-    expect(mockedDraftMeetingSummary).toHaveBeenCalledTimes(1);
-  });
-
-  it("surfaces the blocker instead of dropping a blocked automatic organization", async () => {
-    mockedDraftMeetingSummary.mockResolvedValueOnce({
-      schemaVersion: 1,
-      teamId: "team-1",
-      status: "blocked",
-      blocker: {
-        code: "discussion_has_no_completed_messages",
-        message: "讨论未产出可引用的成功发言，不能生成纪要",
-        remediationLabel: "重新发起讨论",
-      },
-      meetingRound: meetingRound("open"),
-    } as never);
-    render(AUTO_ACTION);
-    await act(async () => {
-      await vi.waitFor(() => expect(mockedDraftMeetingSummary).toHaveBeenCalledTimes(1));
-    });
-    await act(async () => {
-      await vi.waitFor(() => expect(container.textContent).toContain("自动整理暂未开始"));
-    });
-    expect(container.querySelector('[data-testid="draft-blocked-notice"]')).toBeTruthy();
-    expect(container.textContent).toContain("讨论未产出可引用的成功发言");
-    expect(container.textContent).toContain("重新发起讨论");
-  });
-
-  it("surfaces a failed draft request (e.g. 503 lock timeout) through the draft notice", async () => {
-    // 2026-09 ghost-lock incident shape: the server answered with a bounded
-    // lock timeout (503) whose detail the API client unwraps into the error
-    // message. The notice must show it instead of failing silently.
-    mockedDraftMeetingSummary.mockRejectedValueOnce(
-      new Error("meeting rounds lock wait exceeded 60.0s (caller=submit_meeting_digest_draft)"),
-    );
-    render(AUTO_ACTION);
-    await act(async () => {
-      await vi.waitFor(() => expect(mockedDraftMeetingSummary).toHaveBeenCalledTimes(1));
-    });
-    await act(async () => {
-      await vi.waitFor(() =>
-        expect(container.textContent).toContain("纪要生成请求失败"),
-      );
-    });
-    expect(container.querySelector('[data-testid="draft-blocked-notice"]')).toBeTruthy();
-    expect(container.textContent).toContain(
-      "meeting rounds lock wait exceeded 60.0s",
-    );
-  });
-
-  it("reports the number of running rounds when organization is blocked on them", async () => {
-    mockedDraftMeetingSummary.mockResolvedValueOnce({
-      schemaVersion: 1,
-      teamId: "team-1",
-      status: "blocked",
-      blocker: {
-        code: "discussion_round_running",
-        message: "讨论回合仍在进行，全部结束后才能生成纪要",
-        runningRoundIds: ["round-a", "round-b"],
-      },
-      meetingRound: meetingRound("open"),
-    } as never);
-    render(AUTO_ACTION);
-    await act(async () => {
-      await vi.waitFor(() => expect(container.textContent).toContain("自动整理暂未开始"));
-    });
-    expect(container.textContent).toContain("2 个讨论回合仍在进行");
-  });
-
-  it("shows the same blocker notice when a manual retry draft is blocked", async () => {
-    mockedFetchMeetingRound.mockResolvedValue({
-      schemaVersion: 1,
-      teamId: "team-1",
-      meetingRound: { ...meetingRound("summarizing"), summaryError: "timeout" },
-    });
-    mockedDraftMeetingSummary.mockResolvedValueOnce({
-      schemaVersion: 1,
-      teamId: "team-1",
-      status: "blocked",
-      blocker: {
-        code: "discussion_round_running",
-        message: "讨论回合仍在进行，全部结束后才能生成纪要",
-        runningRoundIds: ["round-live"],
-      },
-      meetingRound: meetingRound("summarizing"),
-    } as never);
-    render({
-      ...AUTO_ACTION,
-      stage: "generation_summarizing",
-      command: undefined,
-      commandLabel: undefined,
-      recovery: {
-        command: "retry_draft_summary",
-        label: "重试整理候选清单",
-        reason: "自动整理未完成",
-      },
-    });
-    await act(async () => {
-      await vi.waitFor(() => expect(container.textContent).toContain("重试整理候选清单"));
-    });
-    const retry = [...container.querySelectorAll("button")]
-      .find((button) => button.textContent?.includes("重试整理候选清单"));
-    await act(async () => {
-      retry?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-      await vi.waitFor(() => expect(container.textContent).toContain("自动整理暂未开始"));
-    });
-    expect(container.textContent).toContain("1 个讨论回合仍在进行");
-  });
-
-  it("restarts a review discussion when every speaker failed", async () => {
-    mockedFetchMeetingRound.mockResolvedValue({
-      schemaVersion: 1,
-      teamId: "team-1",
-      meetingRound: { ...meetingRound("open"), meetingType: "hypothesis_review" },
-    });
-    mockedFetchMessages.mockResolvedValue({
-      schemaVersion: 1,
-      teamId: "team-1",
-      meetingRoundId: "meeting-1",
-      messageCount: 2,
-      messages: [
-        { messageId: "m-1", status: "failed", content: "network_error: litellm.InternalServerError" },
-        { messageId: "m-2", status: "failed", content: "network_error: litellm.InternalServerError" },
-      ],
-    });
-
-    render({
-      ...AUTO_ACTION,
-      stage: "review_ready_to_summarize",
-      command: "draft_summary",
-      commandLabel: "整理本轮结论",
-    });
-    await act(async () => {
-      await vi.waitFor(() => expect(container.textContent).toContain("重新发起评审讨论"));
-    });
-    expect(mockedDraftMeetingSummary).not.toHaveBeenCalled();
-
-    const restart = [...container.querySelectorAll("button")]
-      .find((button) => button.textContent?.includes("重新发起评审讨论"));
-    await act(async () => {
-      restart?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-      await vi.waitFor(() => expect(mockedReopenReview).toHaveBeenCalledTimes(1));
-    });
-    expect(mockedReopenReview).toHaveBeenCalledWith("team-1", "meeting-1");
   });
 
   it("executes the canonical reopen command for an orphaned review round", async () => {
@@ -615,6 +326,7 @@ describe("HypothesisFirstMeetingOps automatic organization", () => {
       confirmationText: null,
     };
 
+    mockedExecuteCommand.mockResolvedValueOnce({result: {openStatus: "budget_exhausted"}} as never);
     render({
       ...AUTO_ACTION,
       stage: "blocked",
@@ -643,6 +355,7 @@ describe("HypothesisFirstMeetingOps automatic organization", () => {
       { runId: undefined },
     );
     expect(mockedReopenReview).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("已达到评审硬上限");
   });
 
   it("passes the active workflow run to canonical meeting commands", async () => {
@@ -734,7 +447,7 @@ describe("HypothesisFirstMeetingOps automatic organization", () => {
       ...AUTO_ACTION,
       stage: "blocked",
       stateSource: "v2_canonical",
-      command: "retry_draft_summary",
+      command: "regenerate_summary",
       commandLabel: "重试生成纪要",
       meetingRoundId: "meeting-1",
       canonicalAction,
@@ -758,139 +471,6 @@ describe("HypothesisFirstMeetingOps automatic organization", () => {
       { runId: undefined },
     );
     expect(mockedDraftMeetingSummary).not.toHaveBeenCalled();
-  });
-
-  it("restarts a candidate discussion when every speaker failed", async () => {
-    mockedFetchMeetingRound.mockResolvedValue({
-      schemaVersion: 1,
-      teamId: "team-1",
-      meetingRound: meetingRound("summarizing"),
-    });
-    mockedFetchMessages.mockResolvedValue({
-      schemaVersion: 1,
-      teamId: "team-1",
-      meetingRoundId: "meeting-1",
-      messageCount: 1,
-      messages: [{ messageId: "m-1", status: "failed", content: "protocol_error" }],
-    });
-
-    render({
-      ...AUTO_ACTION,
-      stage: "generation_summarizing",
-      command: undefined,
-      commandLabel: undefined,
-    });
-    await act(async () => {
-      await vi.waitFor(() => expect(container.textContent).toContain("重新发起候选讨论"));
-    });
-    expect(mockedDraftMeetingSummary).not.toHaveBeenCalled();
-
-    const restart = [...container.querySelectorAll("button")]
-      .find((button) => button.textContent?.includes("重新发起候选讨论"));
-    await act(async () => {
-      restart?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-      await vi.waitFor(() => expect(mockedOpenGeneration).toHaveBeenCalledTimes(1));
-    });
-    expect(mockedOpenGeneration).toHaveBeenCalledWith("team-1", "Q-01", undefined);
-  });
-
-  it("offers one manual retry when meeting creation was interrupted before chat binding", async () => {
-    mockedFetchMeetingRound.mockResolvedValue({
-      schemaVersion: 1,
-      teamId: "team-1",
-      meetingRound: { ...meetingRound("open"), chatRoomRoundIds: [] },
-    });
-    mockedFetchMessages.mockResolvedValue({
-      schemaVersion: 1,
-      teamId: "team-1",
-      meetingRoundId: "meeting-1",
-      messageCount: 0,
-      messages: [],
-    });
-
-    render({
-      ...AUTO_ACTION,
-      stage: "generation_discussing",
-      command: undefined,
-      commandLabel: undefined,
-    });
-    await act(async () => {
-      await vi.waitFor(() => expect(container.textContent).toContain("重试启动候选讨论"));
-    });
-    expect(mockedOpenGeneration).not.toHaveBeenCalled();
-
-    const retry = [...container.querySelectorAll("button")]
-      .find((button) => button.textContent?.includes("重试启动候选讨论"));
-    await act(async () => {
-      retry?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-      await vi.waitFor(() => expect(mockedOpenGeneration).toHaveBeenCalledTimes(1));
-    });
-    expect(mockedOpenGeneration).toHaveBeenCalledWith("team-1", "Q-01", undefined);
-  });
-
-  it("does not auto-loop when the request fails and exposes one manual retry", async () => {
-    mockedDraftMeetingSummary
-      .mockRejectedValueOnce(new Error("network unavailable"))
-      .mockResolvedValueOnce({
-        schemaVersion: 1,
-        teamId: "team-1",
-        status: "summarizing",
-        meetingRound: meetingRound("summarizing"),
-      });
-    render(AUTO_ACTION);
-    await act(async () => {
-      await vi.waitFor(() => expect(container.textContent).toContain("重试整理候选清单"));
-    });
-    expect(mockedDraftMeetingSummary).toHaveBeenCalledTimes(1);
-    expect(container.textContent).toContain("整理失败");
-
-    const retry = [...container.querySelectorAll("button")]
-      .find((button) => button.textContent?.includes("重试整理候选清单"));
-    await act(async () => {
-      retry?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-      await Promise.resolve();
-    });
-    expect(mockedDraftMeetingSummary).toHaveBeenCalledTimes(2);
-  });
-
-  it("surfaces skipped evidence requests with readable reasons on a successful close", async () => {
-    const mockedApprove = vi.mocked(approveHypothesisDigest);
-    mockedApprove.mockResolvedValueOnce({
-      closed: true,
-      collection: {
-        skipped: [
-          { decisionId: "d-1", reason: "search_envelope_missing" },
-          { decisionId: "d-2", reason: "collection_payload_invalid" },
-        ],
-      },
-      hypothesisRound: { roundId: "r-1", status: "open" },
-    } as never);
-    mockedFetchMeetingRound.mockResolvedValue({
-      schemaVersion: 1,
-      teamId: "team-1",
-      meetingRound: meetingRound("awaiting_approval"),
-    });
-    render({
-      ...AUTO_ACTION,
-      stage: "review_awaiting_approval",
-      command: "approve_review_digest",
-      commandLabel: "确认并结束本轮",
-    });
-
-    await act(async () => {
-      await vi.waitFor(() => {
-        const button = [...container.querySelectorAll("button")]
-          .find((item) => item.textContent?.includes("确认并结束本轮"));
-        expect(button).toBeTruthy();
-        button?.click();
-      });
-      await vi.waitFor(() => expect(mockedApprove).toHaveBeenCalledTimes(1));
-    });
-
-    const notice = container.querySelector('[data-testid="dropped-request-notice"]');
-    expect(notice?.textContent).toContain("2 条证据请求被跳过");
-    expect(notice?.textContent).toContain("缺少检索关键词");
-    expect(notice?.textContent).toContain("搜集要求无效");
   });
 
   it("treats a canonical rejection as a redraft instead of an approval", async () => {

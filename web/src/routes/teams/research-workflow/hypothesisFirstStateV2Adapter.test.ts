@@ -292,7 +292,7 @@ describe("resolveHypothesisFirstNextActionFromV2", () => {
     for (const { state, action, targetNodeId } of cases) {
       const resolved = resolveHypothesisFirstNextActionFromV2(state);
       // No legacy alias exists; the canonical channel is the only dispatcher.
-      expect(resolved.command).toBeUndefined();
+      expect(resolved.command).toBe(action.command);
       expect(resolved.canonicalCommand).toBe(action.command);
       expect(resolved.canonicalAction?.actionId).toBe(action.actionId);
       expect(resolved.canonicalAction?.enabled).toBe(true);
@@ -361,7 +361,7 @@ describe("resolveHypothesisFirstNextActionFromV2", () => {
     const action = resolveHypothesisFirstNextActionFromV2(state);
 
     expect(action.stage).toBe("generation_summarizing");
-    expect(action.command).toBe("retry_draft_summary");
+    expect(action.command).toBe("regenerate_summary");
     expect(action.commandLabel).toBe("重试生成纪要");
     expect(action.canonicalAction?.command).toBe("regenerate_summary");
   });
@@ -398,7 +398,7 @@ describe("resolveHypothesisFirstNextActionFromV2", () => {
     const action = resolveHypothesisFirstNextActionFromV2(state);
 
     expect(action.stage).toBe("generation_summarizing");
-    expect(action.command).toBe("retry_draft_summary");
+    expect(action.command).toBe("regenerate_summary");
     expect(action.commandLabel).toBe("重试生成纪要");
     expect(action.canonicalAction?.command).toBe("regenerate_summary");
     expect(action.canonicalActions.map((item) => item.command)).toEqual([
@@ -612,7 +612,7 @@ describe("resolveHypothesisFirstNextActionFromV2", () => {
     const action = resolveHypothesisFirstNextActionFromV2(state);
 
     expect(action.stage).toBe("blocked");
-    expect(action.command).toBe("retry_draft_summary");
+    expect(action.command).toBe("regenerate_summary");
     expect(action.commandLabel).toBe("重试生成纪要");
     expect(action.canonicalAction?.command).toBe("regenerate_summary");
     expect(action.canonicalActions.map((item) => item.command)).toEqual([
@@ -672,7 +672,7 @@ describe("resolveHypothesisFirstNextActionFromV2", () => {
     expect(action.targetNodeId).toBe("hf_meeting_1_cand-2");
     expect(action.stage).toBe("review_awaiting_approval");
     expect(action.meetingRoundId).toBe("meeting-cand-2");
-    expect(action.navigationDeepLink).toBe("/chat?room=room-2");
+    expect(action.navigation?.deepLink).toBe("/chat?room=room-2");
   });
 
   it("keeps mixed sibling commands bound to the selected candidate meeting", () => {
@@ -751,7 +751,7 @@ describe("resolveHypothesisFirstNextActionFromV2", () => {
       allowedActions: [command({ command: "create_formal_run", payload: { questionId: "SCI-001", hypothesisRoundId: "round-3" } }, "创建正式研究运行")],
     });
     const action = resolveHypothesisFirstNextActionFromV2(state);
-    expect(action.command).toBe("create_run");
+    expect(action.command).toBe("create_formal_run");
     expect(action.targetNodeId).toBe(HYPOTHESIS_FIRST_CONVERGENCE_NODE_ID);
   });
 
@@ -850,7 +850,7 @@ describe("resolveHypothesisFirstNextActionFromV2", () => {
     const action = resolveHypothesisFirstNextActionFromV2(state);
 
     expect(action.stage).toBe("blocked");
-    expect(action.command).toBeUndefined();
+    expect(action.command).toBe(action.canonicalCommand);
     expect(action.statusMessage).toContain("已拒绝");
   });
 
@@ -885,7 +885,7 @@ describe("resolveHypothesisFirstNextActionFromV2", () => {
     const action = resolveHypothesisFirstNextActionFromV2(state);
     expect(action.stage).toBe("program_delivery");
     expect(action.targetNodeId).toBe(HYPOTHESIS_FIRST_CONVERGENCE_NODE_ID);
-    expect(action.navigationDeepLink).toBeUndefined();
+    expect(action.navigation?.deepLink).toBeUndefined();
   });
 
   // P2-10: a rejected or revision-requested human review is the opposite of
@@ -981,7 +981,7 @@ describe("resolveHypothesisFirstNextActionFromV2", () => {
       },
     };
     const state = stateV2({ currentPhase: "review", allowedActions: [navigation] });
-    expect(resolveHypothesisFirstNextActionFromV2(state).navigationDeepLink).toBe(navigation.navigation.deepLink);
+    expect(resolveHypothesisFirstNextActionFromV2(state).navigation?.deepLink).toBe(navigation.navigation.deepLink);
   });
 });
 

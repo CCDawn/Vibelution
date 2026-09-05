@@ -1,18 +1,18 @@
 import { describe, expect, it } from "vitest";
 
 import type { KnowledgeInvocationBadge } from "../../../api/types/research-workflow/core";
+import type { WorkflowLayoutInput } from "../../../components/vui";
 import {
   buildKnowledgeSideflowCanvasRegion,
   composeKnowledgeSideflowGraph,
   isKnowledgeSideflowCanvasNode,
+  KNOWLEDGE_SIDEFLOW_NODE_PREFIX,
+  KNOWLEDGE_SIDEFLOW_RELATION_EDGE_ID,
   knowledgeSideflowCanvasNodeId,
   knowledgeSideflowRelationEdge,
   knowledgeSideflowSemanticNodeId,
-  KNOWLEDGE_SIDEFLOW_NODE_PREFIX,
-  KNOWLEDGE_SIDEFLOW_RELATION_EDGE_ID,
   sideflowNodeStatesFromBadges,
 } from "./knowledgeSideflowCanvasRegion";
-import type { WorkflowLayoutInput } from "../../../components/vui";
 
 function badge(overrides: Partial<KnowledgeInvocationBadge> = {}): KnowledgeInvocationBadge {
   return {
@@ -69,6 +69,28 @@ describe("knowledgeSideflowCanvasRegion ids", () => {
 });
 
 describe("sideflowNodeStatesFromBadges", () => {
+  it("marks unstarted descendants as waiting for recovery when the search is blocked", () => {
+    const states = sideflowNodeStatesFromBadges({ hypothesis_design: badge({ latest: {
+      invocationId: "inv-blocked", parentNodeId: "hypothesis_design", status: "child_created",
+      handoffState: "pending", currentKnowledgeNodeId: "source_finding", updatedAtMs: 1,
+      childNodeStates: { source_finding: "blocked", source_extraction: "pending" },
+    } }) });
+    expect(states.slice(1).map((node) => node.description)).toEqual(Array(4).fill("等待前置步骤恢复"));
+    expect(states.slice(1).every((node) => node.status === "pending")).toBe(true);
+  });
+
+  it("preserves cancelled and waiting node facts without inferring completed predecessors", () => {
+    const states = sideflowNodeStatesFromBadges({problem_understanding: badge({latest: {
+      invocationId: "cancelled-1", parentNodeId: "problem_understanding", status: "cancelled", handoffState: null,
+      currentKnowledgeNodeId: "source_extraction", childNodeStates: {source_extraction: "cancelled", evidence_relations: "pending", knowledge_handoff: "waiting_human"},
+    }})});
+    expect(states.map((node) => node.status)).toEqual(["pending", "cancelled", "pending", "pending", "waiting_human"]);
+    expect(states[1].description).toContain("已取消");
+    expect(states[2].description).toContain("未执行");
+    expect(states[4].description).toContain("人工确认");
+    expect(states.every((node) => !node.description.includes("进行中"))).toBe(true);
+  });
+
   it("describes failed child nodes truthfully while the invocation can recover", () => {
     const states = sideflowNodeStatesFromBadges({ hypothesis_design: badge({ latest: {
       invocationId: "inv-failed", parentNodeId: "hypothesis_design", status: "child_created",
@@ -89,6 +111,7 @@ describe("sideflowNodeStatesFromBadges", () => {
           status: "running",
           handoffState: null,
           currentKnowledgeNodeId: "evidence_relations",
+          childNodeStates: {source_finding: "succeeded", source_extraction: "succeeded"},
           knowledgeChildRunId: "child-1",
           updatedAtMs: 20,
         },

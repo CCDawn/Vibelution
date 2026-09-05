@@ -9,11 +9,9 @@
  * `hypothesis_design`) and are re-resolved by `composeHypothesisFirstGraph`.
  */
 import type {
-  CollectionRequestRecord,
-  HypothesisFirstChainState,
-  HypothesisSelectionRecord,
+  HypothesisFirstStateV2,
+  PhaseState,
   MeetingRoundRecord,
-  ReviewRoundLinkRecord,
 } from "../../../api/types/hypothesisFirst";
 import type {
   WorkflowCanvasEdgeInput,
@@ -25,9 +23,6 @@ import {
   buildEdgePathStates,
   stageToneFromNodes,
 } from "../../../components/vui/product/workflow/workflowCanvasModel";
-import {
-  effectiveCollectionRequestStatus,
-} from "./hypothesisFirstCollectionStatus";
 
 export const HYPOTHESIS_FIRST_NODE_PREFIX = "hf_";
 export const HYPOTHESIS_FIRST_STAGE_ID = "hypothesis_first";
@@ -42,17 +37,11 @@ export const HYPOTHESIS_FIRST_STAGE2_EDGE_ID = "hf_e_gate_stage2";
 
 /** Review meetings of the hypothesis-first chain carry this meetingType. */
 const HYPOTHESIS_REVIEW_MEETING_TYPE = "hypothesis_review";
-/** Round-0 candidate-generation discussions carry this meetingType. */
-const CANDIDATE_GENERATION_MEETING_TYPE = "hypothesis_candidate_generation";
 
 export type HypothesisFirstCanvasRegionInput = {
-  chainState: HypothesisFirstChainState | null;
+  stateV2: HypothesisFirstStateV2 | null;
   meetings: MeetingRoundRecord[];
-  collectionRequests: CollectionRequestRecord[];
-  reviewRoundLinks: ReviewRoundLinkRecord[];
-  selection: HypothesisSelectionRecord | null;
-  /** Canonical current round (V2 review.activeRoundIndex); unknown when absent. */
-  activeRoundIndex?: number | null;
+
 };
 
 export type HypothesisFirstCanvasRegion = {
@@ -93,33 +82,28 @@ function meetingHasDigest(meeting: MeetingRoundRecord): boolean {
   return Boolean(meeting.digestId || meeting.digestRef);
 }
 
-function meetingNodeStatus(meeting: MeetingRoundRecord): WorkflowNodeRunStatus {
-  switch (meeting.status) {
-    case "open":
-      return "running";
-    case "summarizing":
-    case "awaiting_approval":
-      return "waiting_human";
-    case "closed":
-      // fail-closed: a closed round without a digest is NOT a success.
-      return meetingHasDigest(meeting) ? "succeeded" : "blocked";
-    default:
-      return "pending";
-  }
+/** Display the canonical phase without deriving lifecycle from auxiliary records. */
+function phaseCanvasStatus(phase: PhaseState): WorkflowNodeRunStatus {
+  if (phase.lifecycle === "cancelled" || phase.lifecycle === "superseded") return "cancelled";
+  if (phase.lifecycle === "failed") return "failed";
+  if (phase.actionability === "blocked" || phase.outcome === "exhausted") return "blocked";
+  if (phase.lifecycle === "completed" && phase.outcome === "succeeded") return "succeeded";
+  if (phase.lifecycle === "waiting_human" || phase.actionability === "waiting_user") return "waiting_human";
+  if (phase.lifecycle === "running") return "running";
+  return "pending";
 }
 
-function meetingNodeDescription(meeting: MeetingRoundRecord): string {
-  switch (meeting.status) {
-    case "open":
-      return "讨论进行中";
-    case "summarizing":
-      return "正在整理本轮讨论结论";
-    case "awaiting_approval":
-      return "等待人工确认闭环";
-    case "closed":
-      return meetingHasDigest(meeting) ? "已闭环" : "已关闭但缺少纪要（fail-closed）";
-    default:
-      return "待开始";
+function phaseDescription(phase: PhaseState): string {
+  const problem = phase.problems[0]?.message;
+  if (problem) return problem;
+  switch (phaseCanvasStatus(phase)) {
+    case "running": return "正在执行";
+    case "waiting_human": return "等待人工确认";
+    case "blocked": return "当前步骤已阻塞";
+    case "failed": return "当前步骤执行失败";
+    case "cancelled": return "当前步骤已停止";
+    case "succeeded": return "当前步骤已完成";
+    default: return "等待开始";
   }
 }
 
@@ -188,49 +172,10 @@ export function summarizeHypothesisReviewMeetings(
   };
 }
 
-function collectionNodeStatus(request: CollectionRequestRecord): WorkflowNodeRunStatus {
-  if (request.handoffRef || request.handedOffAt || request.status === "handed_off") {
-    return "succeeded";
-  }
-  const status = effectiveCollectionRequestStatus(request);
-  if (status === "failed" || status === "needs_continue" || status === "error" || status === "blocked") {
-    return "failed";
-  }
-  if (status === "running" || status === "collecting" || status === "in_progress" || status === "starting" || status === "dispatching") {
-    return "running";
-  }
-  // Record-level statuses are pending / handed_off; unknown values stay pending.
-  return "pending";
-}
-
-function collectionNodeDescription(request: CollectionRequestRecord): string {
-  const status = collectionNodeStatus(request);
-  const childStatus = effectiveCollectionRequestStatus(request);
-  if (status === "succeeded") return "知识包已交接";
-  if (status === "failed") {
-    return childStatus === "needs_continue" ? "搜集子运行需要继续" : "搜集子运行失败";
-  }
-  if (status === "running") return "搜集子运行在途";
-  if (childStatus === "completed" || childStatus === "succeeded" || childStatus === "handoff_pending") {
-    return "搜集已完成，等待交接";
-  }
-  return request.collectionRunId ? "搜集子运行已触发，等待完成" : "等待搜集子运行";
-}
-
-function convergenceNodeStatus(chainState: HypothesisFirstChainState): WorkflowNodeRunStatus {
-  if (chainState.hypothesisConverged) return "succeeded";
-  if (chainState.budgetExhausted) return "blocked";
-  return "pending";
-}
-
 function cardProgress(nodes: WorkflowCanvasNodeInput[]): { completed: number; total: number } {
   const total = nodes.length;
   const completed = nodes.filter((node) => node.status === "succeeded" || node.status === "skipped").length;
   return { completed, total };
-}
-
-function hasClosedReviewRound(meetings: MeetingRoundRecord[]): boolean {
-  return meetings.some((meeting) => meeting.status === "closed");
 }
 
 function sortMeetings(meetings: MeetingRoundRecord[]): MeetingRoundRecord[] {
@@ -241,14 +186,6 @@ function sortMeetings(meetings: MeetingRoundRecord[]): MeetingRoundRecord[] {
     const byStarted = String(left.startedAt ?? "").localeCompare(String(right.startedAt ?? ""));
     if (byStarted !== 0) return byStarted;
     return left.meetingRoundId.localeCompare(right.meetingRoundId);
-  });
-}
-
-function sortRequests(requests: CollectionRequestRecord[]): CollectionRequestRecord[] {
-  return [...requests].sort((left, right) => {
-    const byCreated = String(left.createdAt ?? "").localeCompare(String(right.createdAt ?? ""));
-    if (byCreated !== 0) return byCreated;
-    return left.requestId.localeCompare(right.requestId);
   });
 }
 
@@ -263,19 +200,12 @@ function sortRequests(requests: CollectionRequestRecord[]): CollectionRequestRec
 export function buildHypothesisFirstCanvasRegion(
   input: HypothesisFirstCanvasRegionInput,
 ): HypothesisFirstCanvasRegion | null {
-  const { chainState } = input;
-  if (!chainState || !chainState.questionId) {
+  const { stateV2 } = input;
+  if (!stateV2 || !stateV2.questionId) {
     return null;
   }
-  const questionId = chainState.questionId;
+  const questionId = stateV2.questionId;
 
-  const generationMeetings = sortMeetings(
-    input.meetings.filter(
-      (meeting) =>
-        meeting.meetingType === CANDIDATE_GENERATION_MEETING_TYPE
-        && sameQuestion(meeting.question, questionId),
-    ),
-  );
   const meetings = sortMeetings(
     input.meetings.filter(
       (meeting) =>
@@ -283,44 +213,26 @@ export function buildHypothesisFirstCanvasRegion(
         && sameQuestion(meeting.question, questionId),
     ),
   );
-  const requests = sortRequests(
-    input.collectionRequests.filter((request) => sameQuestion(request.questionId, questionId)),
-  );
-  const selection = input.selection && sameQuestion(input.selection.questionId, questionId)
-    ? input.selection
-    : null;
+  const selection = stateV2.selection.selectionId ? stateV2.selection : null;
 
   const nodes: WorkflowCanvasNodeInput[] = [];
   const edges: Array<Omit<WorkflowCanvasEdgeInput, "pathState"> & { pathState?: WorkflowCanvasEdgeInput["pathState"] }> = [];
 
   // --- cards ---------------------------------------------------------------
-  const candidateCount = chainState.candidateCount ?? 0;
-  const generationMeeting = generationMeetings[generationMeetings.length - 1];
+  const candidateCount = stateV2.generation.candidateCount ?? 0;
   const showGenerationCard = Boolean(
-    generationMeeting || candidateCount > 0 || (!selection && meetings.length === 0),
+    stateV2.generation.generationMeetingId || candidateCount > 0 || !selection,
   );
   if (showGenerationCard) {
-    const generationStatus = generationMeeting
-      ? generationMeeting.status === "closed" && candidateCount === 0
-        ? "blocked"
-        : meetingNodeStatus(generationMeeting)
-      : candidateCount > 0
-        ? "succeeded"
-        : "waiting_human";
     nodes.push({
       nodeId: HYPOTHESIS_FIRST_GENERATION_NODE_ID,
       stageId: HYPOTHESIS_FIRST_STAGE_ID,
       label: "候选假说生成",
       actorKind: "agent",
       visualKind: "agent_task",
-      status: generationStatus,
-      description: generationMeeting
-        ? generationMeeting.status === "closed"
-          ? candidateCount > 0 ? `已产出 ${candidateCount} 条候选假说` : "讨论已结束，待补充有效候选结果"
-          : meetingNodeDescription(generationMeeting)
-        : candidateCount > 0
-          ? `已产出 ${candidateCount} 条候选假说`
-        : "尚未生成候选假说，点击卡片打开操作",
+      status: phaseCanvasStatus(stateV2.generation),
+      description: stateV2.generation.lifecycle === "completed" && candidateCount > 0
+        ? `已产出 ${candidateCount} 条候选假说` : phaseDescription(stateV2.generation),
     });
   }
   nodes.push({
@@ -329,16 +241,10 @@ export function buildHypothesisFirstCanvasRegion(
     label: "假说选择",
     actorKind: "human",
     visualKind: "human_gate",
-    status: selection ? "succeeded" : candidateCount > 0 ? "waiting_human" : "pending",
+    status: phaseCanvasStatus(stateV2.selection),
     description: selection
       ? `已选 ${selection.selectedCandidateIds.length} 个候选假说`
-      : candidateCount > 0
-        ? `已产出 ${candidateCount} 条候选，等待人工选择`
-        : generationMeeting
-          ? generationMeeting.status === "closed"
-            ? "讨论已结束，等待有效候选结果后再选择"
-            : "候选生成讨论进行中，产出后可选择"
-          : "等待生成候选假说",
+      : phaseDescription(stateV2.selection),
   });
 
   if (showGenerationCard) {
@@ -353,9 +259,9 @@ export function buildHypothesisFirstCanvasRegion(
     });
   }
 
-  const reviewSummary = summarizeHypothesisReviewMeetings(meetings, input.activeRoundIndex);
+  const reviewSummary = summarizeHypothesisReviewMeetings(meetings, stateV2.review.activeRoundIndex);
   const latestReview = meetings[meetings.length - 1];
-  const showReview = Boolean(selection || latestReview);
+  const showReview = Boolean(selection || stateV2.review.lifecycle !== "not_started" || stateV2.review.candidates.length);
   if (showReview) {
     // latestRound > 0 iff any real round number (roundIndex / canonical) is
     // known; effectiveRoundsKnown is false when legacy meetings leave the
@@ -370,45 +276,37 @@ export function buildHypothesisFirstCanvasRegion(
             ? `最近第 ${reviewSummary.latestRound} 轮`
             : "最近轮次未知",
         ]
-      : ["等待首次评审"];
+      : [phaseDescription(stateV2.review)];
     nodes.push({
       nodeId: HYPOTHESIS_FIRST_REVIEW_NODE_ID,
       stageId: HYPOTHESIS_FIRST_STAGE_ID,
       label: "假说评审",
       actorKind: "agent",
       visualKind: "agent_task",
-      status: latestReview
-        ? (isHypothesisReviewRetryAttempt(latestReview) ? "blocked" : meetingNodeStatus(latestReview))
-        : "pending",
+      status: phaseCanvasStatus(stateV2.review),
       description: summaryParts.join(" · "),
     });
   }
 
-  const latestRequest = requests[requests.length - 1];
-  if (latestRequest) {
-    const failedRequests = requests.filter((request) => collectionNodeStatus(request) === "failed").length;
-    const handedOffRequests = requests.filter((request) => collectionNodeStatus(request) === "succeeded").length;
+  const latestRequest = stateV2.collection.requests[0];
+  const showCollection = Boolean(latestRequest || stateV2.collection.lifecycle !== "not_started");
+  if (showCollection) {
     nodes.push({
       nodeId: HYPOTHESIS_FIRST_COLLECTION_NODE_ID,
       stageId: HYPOTHESIS_FIRST_STAGE_ID,
       label: "资料补充",
       actorKind: "system",
       visualKind: "system_task",
-      status: collectionNodeStatus(latestRequest),
-      description: failedRequests > 0
-        ? `${failedRequests} 个资料请求需要恢复 · ${handedOffRequests} 个已交接`
-        : `${requests.length} 个资料请求 · ${collectionNodeDescription(latestRequest)}`,
+      status: phaseCanvasStatus(stateV2.collection),
+      description: `${stateV2.collection.aggregate.total} 个资料请求 · ${phaseDescription(stateV2.collection)}`,
     });
   }
 
-  const showConvergence = chainState.hypothesisConverged
-    || chainState.budgetExhausted
-    || hasClosedReviewRound(meetings);
-  const showDownstreamPipeline = chainState.firstMeetingClosed
-    || chainState.collectionReady
-    || chainState.hypothesisConverged
-    || requests.length > 0
-    || hasClosedReviewRound(meetings);
+  const showConvergence = stateV2.convergence.lifecycle !== "not_started"
+    || stateV2.convergence.accepted || stateV2.convergence.outcome === "exhausted"
+    || stateV2.review.lifecycle === "completed";
+  const showDownstreamPipeline = stateV2.review.lifecycle === "completed"
+    || showCollection || stateV2.convergence.accepted || Boolean(stateV2.formalRuntime.runId);
 
   if (showConvergence) {
     nodes.push({
@@ -421,11 +319,11 @@ export function buildHypothesisFirstCanvasRegion(
       // fail-fast), while this gate has a single proceed exit and a human
       // decision semantic when blocked — same shape as candidate_promotion.
       visualKind: "human_gate",
-      status: convergenceNodeStatus(chainState),
-      description: chainState.convergenceDetail
-        || (chainState.hypothesisConverged
+      status: phaseCanvasStatus(stateV2.convergence),
+      description: stateV2.convergence.problems[0]?.message
+        || (stateV2.convergence.accepted
           ? "假说集已收敛"
-          : chainState.budgetExhausted
+          : (stateV2.convergence.outcome === "exhausted")
             ? "轮次预算耗尽，等待人工决策"
             : "待收敛"),
     });
@@ -445,7 +343,7 @@ export function buildHypothesisFirstCanvasRegion(
       labelAlwaysVisible: true,
     });
   }
-  if (showReview && latestRequest) {
+  if (showReview && showCollection) {
     edges.push({
       edgeId: "hf_e_review_collection",
       fromNodeId: HYPOTHESIS_FIRST_REVIEW_NODE_ID,
@@ -456,7 +354,7 @@ export function buildHypothesisFirstCanvasRegion(
       labelAlwaysVisible: true,
     });
   }
-  const semanticTailNodeId = latestRequest
+  const semanticTailNodeId = showCollection
     ? HYPOTHESIS_FIRST_COLLECTION_NODE_ID
     : showReview
       ? HYPOTHESIS_FIRST_REVIEW_NODE_ID

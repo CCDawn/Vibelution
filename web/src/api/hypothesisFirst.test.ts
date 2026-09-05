@@ -1,26 +1,24 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { clearControlToken, FetchJsonHttpError, seedControlTokenForTests } from "./client";
+import selectionListSource from "../routes/teams/challenge-cup/HypothesisSelectionList.tsx?raw";
+import selectionPanelSource from "../routes/teams/challenge-cup/HypothesisSelectionPanel.tsx?raw";
+import meetingOpsSource from "../routes/teams/research-workflow/HypothesisFirstMeetingOps.tsx?raw";
+import timelineSource from "../routes/teams/TeamHypothesisRoundTimeline.tsx?raw";
+import meetingPanelSource from "../routes/teams/TeamMeetingRoundPanel.tsx?raw";
+import { clearControlToken, seedControlTokenForTests } from "./client";
 import {
   executeHypothesisFirstCommand,
   fetchCollectionRequests,
-  fetchHypothesisFirstChainState,
   fetchHypothesisFirstStateV2,
-  fetchLatestHypothesisSelection,
-  fetchHypothesisSelections,
   fetchHypothesisSelectionContext,
+  fetchHypothesisSelections,
+  fetchLatestHypothesisSelection,
   fetchReviewRoundLinks,
   parseClaimBeliefGate,
   recordHypothesisSelection,
 } from "./hypothesisFirst";
-import { isHypothesisFirstStateV2EndpointUnavailable } from "./hypothesisFirst";
 import apiSource from "./hypothesisFirst.ts?raw";
 import typesSource from "./types/hypothesisFirst.ts?raw";
-import selectionPanelSource from "../routes/teams/challenge-cup/HypothesisSelectionPanel.tsx?raw";
-import meetingPanelSource from "../routes/teams/TeamMeetingRoundPanel.tsx?raw";
-import timelineSource from "../routes/teams/TeamHypothesisRoundTimeline.tsx?raw";
-import meetingOpsSource from "../routes/teams/research-workflow/HypothesisFirstMeetingOps.tsx?raw";
-import selectionListSource from "../routes/teams/challenge-cup/HypothesisSelectionList.tsx?raw";
 
 describe("hypothesis-first API", () => {
   it("keeps every run-scoped read and command transport on the requested workflow run", async () => {
@@ -46,7 +44,6 @@ describe("hypothesis-first API", () => {
         fetchHypothesisSelections("team-1", "SCI-002", { runId: "run-current" }),
         fetchLatestHypothesisSelection("team-1", "SCI-002", { runId: "run-current" }),
         fetchHypothesisSelectionContext("team-1", "SCI-002", { runId: "run-current" }),
-        fetchHypothesisFirstChainState("team-1", "SCI-002", { runId: "run-current" }),
         fetchHypothesisFirstStateV2("team-1", "SCI-002", { runId: "run-current" }),
         fetchCollectionRequests("team-1", "SCI-002", { runId: "run-current" }),
         fetchReviewRoundLinks("team-1", "SCI-002", { runId: "run-current" }),
@@ -62,7 +59,6 @@ describe("hypothesis-first API", () => {
       expect(urls).toContain("/api/teams/team-1/workflow-orchestration/hypothesis-first/selections?questionId=SCI-002&runId=run-current");
       expect(urls).toContain("/api/teams/team-1/workflow-orchestration/hypothesis-first/selections/latest?questionId=SCI-002&runId=run-current");
       expect(urls).toContain("/api/teams/team-1/workflow-orchestration/hypothesis-first/questions/SCI-002/selection-context?runId=run-current");
-      expect(urls).toContain("/api/teams/team-1/workflow-orchestration/hypothesis-first/chain/state?questionId=SCI-002&runId=run-current");
       expect(urls).toContain("/api/teams/team-1/workflow-orchestration/hypothesis-first/chain/state-v2?questionId=SCI-002&runId=run-current");
       expect(urls).toContain("/api/teams/team-1/workflow-orchestration/hypothesis-first/chain/collection-requests?questionId=SCI-002&runId=run-current");
       expect(urls).toContain("/api/teams/team-1/workflow-orchestration/hypothesis-first/chain/review-round-links?questionId=SCI-002&runId=run-current");
@@ -79,21 +75,6 @@ describe("hypothesis-first API", () => {
       clearControlToken();
       vi.unstubAllGlobals();
     }
-  });
-
-  it("falls back only for an absent route, not a domain 404", () => {
-    expect(isHypothesisFirstStateV2EndpointUnavailable(new FetchJsonHttpError(
-      JSON.stringify({ detail: "Not Found" }),
-      { status: 404, details: { detail: "Not Found" } },
-    ))).toBe(true);
-    expect(isHypothesisFirstStateV2EndpointUnavailable(new FetchJsonHttpError(
-      JSON.stringify({ detail: { code: "catalog_question_unknown" } }),
-      {
-        status: 404,
-        code: "catalog_question_unknown",
-        details: { detail: { code: "catalog_question_unknown" } },
-      },
-    ))).toBe(false);
   });
 
   it("owns the hypothesis-first selection transports", () => {
@@ -123,7 +104,7 @@ describe("hypothesis-first API", () => {
 
   it("owns the hypothesis-round and chain transports", () => {
     expect(apiSource).toContain("export function fetchHypothesisRounds");
-    expect(apiSource).toContain("export function fetchHypothesisFirstChainState");
+    expect(apiSource).not.toContain("export function fetchHypothesisFirstChainState");
     expect(apiSource).toContain("export function fetchHypothesisFirstStateV2");
     expect(apiSource).toContain("export function executeHypothesisFirstCommand");
     expect(apiSource).toContain("export function fetchCollectionRequests");
@@ -163,9 +144,10 @@ describe("hypothesis-first API", () => {
     expect(meetingPanelSource).not.toContain("closeHypothesisReviewMeeting");
     expect(meetingPanelSource).not.toContain("beginMeetingSummary");
     expect(meetingPanelSource).not.toContain("submitMeetingDigestDraft");
-    expect(selectionListSource).toContain("recordHypothesisSelection");
-    expect(meetingOpsSource).toContain("draftMeetingSummary");
-    expect(meetingOpsSource).toContain("approveHypothesisDigest");
+    expect(selectionListSource).toContain("executeHypothesisFirstCommand");
+    expect(meetingOpsSource).toContain("executeHypothesisFirstCommand");
+    expect(meetingOpsSource).not.toContain("draftMeetingSummary");
+    expect(meetingOpsSource).not.toContain("approveHypothesisDigest");
     expect(meetingOpsSource).not.toContain("beginMeetingSummary");
     expect(meetingOpsSource).not.toContain("closeHypothesisReviewMeeting");
     expect(meetingOpsSource).not.toContain("submitMeetingDigestDraft");

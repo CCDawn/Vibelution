@@ -5,9 +5,9 @@
  *
  * @vitest-environment happy-dom
  */
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -22,18 +22,18 @@ import {
   fetchReviewRoundLinks,
   recoverCollectionRequest,
 } from "../../../api/hypothesisFirst";
-import type { HypothesisFirstStateV2, MeetingRoundRecord } from "../../../api/types/hypothesisFirst";
 import { queryKeys } from "../../../api/queryKeys";
+import type { HypothesisFirstStateV2 } from "../../../api/types/hypothesisFirst";
 import {
   HYPOTHESIS_FIRST_REVIEW_ROUND_LIMIT,
   hypothesisFirstChainCollectionRequestsKey,
   hypothesisFirstChainReviewRoundLinksKey,
   resolveHypothesisFirstCanonicalRound,
   resolveHypothesisFirstRoundBudget,
+  shouldPollHypothesisFirstStateV2,
+  shouldPollQuestionScopedChain,
   useHypothesisFirstChain,
   useHypothesisFirstChainInvalidation,
-  shouldPollQuestionScopedChain,
-  shouldPollHypothesisFirstStateV2,
   type HypothesisFirstChainData,
 } from "./useHypothesisFirstChain";
 
@@ -62,6 +62,7 @@ vi.mock("../../../api/hypothesisFirst", () => ({
 const mocked = {
   executeCommand: vi.mocked(executeHypothesisFirstCommand),
   chainState: vi.mocked(fetchHypothesisFirstChainState),
+
   stateV2: vi.mocked(fetchHypothesisFirstStateV2),
   selections: vi.mocked(fetchHypothesisSelections),
   meetings: vi.mocked(fetchMeetingRounds),
@@ -267,6 +268,30 @@ describe("useHypothesisFirstChain", () => {
     container.remove();
   });
 
+  it("does not mistake a pending V2 response for a run mismatch", async () => {
+    mockAllResolved();
+    mocked.stateV2.mockReturnValue(new Promise(() => {}));
+    let latest: HypothesisFirstChainData | null = null;
+    render(<Probe teamId="team-1" questionId="Q-01" runId="run-1" onResult={(value) => {latest = value;}} />);
+    await flushQueries();
+    expect(latest!.loading).toBe(true);
+    expect(latest!.scopeMismatch).toBe(false);
+  });
+
+  it("keeps canonical state ready while auxiliary requests are pending or failed", async () => {
+    mockAllResolved();
+    mocked.requests.mockReturnValue(new Promise(() => {}));
+    mocked.links.mockRejectedValue(new Error("links unavailable"));
+    let latest: HypothesisFirstChainData | null = null;
+    render(<Probe teamId="team-1" questionId="Q-01" onResult={(value) => {latest = value;}} />);
+    await flushQueries();
+    expect(latest!.loading).toBe(false);
+    expect(latest!.error).toBeNull();
+    expect(latest!.detailsLoading).toBe(true);
+    expect(latest!.detailsError).toBe("links unavailable");
+    expect(latest!.stateV2?.contract).toBe("hypothesis-first-state/v2");
+  });
+
   it("stays idle and issues no request when questionId is empty", async () => {
     let latest: HypothesisFirstChainData | null = null;
     render(<Probe teamId="team-1" questionId="" onResult={(value) => { latest = value; }} />);
@@ -276,7 +301,7 @@ describe("useHypothesisFirstChain", () => {
     expect(latest!.questionScopeKey).toBe("team-1::no-question::no-run");
     expect(latest!.questionId).toBe("");
     expect(latest!.scopeMismatch).toBe(false);
-    expect(latest!.chainState).toBeNull();
+    expect(latest).not.toHaveProperty("chainState");
     expect(latest!.selection).toBeNull();
     expect(mocked.chainState).not.toHaveBeenCalled();
     expect(mocked.selections).not.toHaveBeenCalled();
@@ -296,7 +321,7 @@ describe("useHypothesisFirstChain", () => {
     expect(latest!.questionScopeKey).toBe("team-1::Q-01::no-run");
     expect(latest!.questionId).toBe("Q-01");
     expect(latest!.scopeMismatch).toBe(false);
-    expect(latest!.chainState?.questionId).toBe("Q-01");
+    expect(latest!.stateV2?.questionId).toBe("Q-01");
     expect(latest!.stateV2?.contract).toBe("hypothesis-first-state/v2");
     expect(latest!.stateSource).toBe("v2_canonical");
     expect(latest!.selection?.selectionId).toBe("sel-2");
@@ -517,7 +542,7 @@ describe("useHypothesisFirstChain", () => {
     // After a budget raise the next canonical read carries the larger value;
     // the display resolver reads it through stateV2 first.
     expect(latest!.stateSource).toBe("v2_canonical");
-    expect(latest!.chainState?.roundBudget).toBe(5);
+    expect(latest).not.toHaveProperty("chainState");
     expect(latest!.stateV2?.convergence.roundBudget).toBe(5);
   });
 
@@ -548,7 +573,7 @@ describe("useHypothesisFirstChain", () => {
     }
   });
 
-  it("keeps the legacy fallback read fresh on focus too", async () => {
+  it("never creates a legacy query when V2 is unavailable", async () => {
     mockAllResolved();
     mocked.stateV2.mockRejectedValue(Object.assign(new Error("route missing"), {
       status: 404,
@@ -560,9 +585,8 @@ describe("useHypothesisFirstChain", () => {
     const legacy = queryClient.getQueryCache().find({
       queryKey: queryKeys.hypothesisFirstChainState("team-1", "Q-01"),
     });
-    expect(legacy).not.toBeNull();
-    expect(legacy?.options.refetchOnWindowFocus).toBe("always");
-    expect(legacy?.options.refetchOnReconnect).toBe("always");
+    expect(legacy).toBeUndefined();
+    expect(mocked.chainState).not.toHaveBeenCalled();
   });
 
   it("fails closed when a question-keyed chain payload belongs to another question", async () => {
@@ -573,7 +597,7 @@ describe("useHypothesisFirstChain", () => {
     await flushQueries();
 
     expect(latest!.scopeMismatch).toBe(true);
-    expect(latest!.chainState).toBeNull();
+    expect(latest).not.toHaveProperty("chainState");
   });
 
   it("marks a plain V2 read failure as v2_error and surfaces the first query error", async () => {
@@ -599,11 +623,10 @@ describe("useHypothesisFirstChain", () => {
     render(<Probe teamId="team-1" questionId="Q-01" onResult={(value) => { latest = value; }} />);
     await flushQueries();
 
-    expect(latest!.v2ReadState).toBe("route_unavailable");
-    expect(latest!.stateSource).toBe("v1_legacy");
+    expect(latest!.v2ReadState).toBe("v2_error");
+    expect(latest!.stateSource).toBe("v2_error");
     expect(latest!.stateV2).toBeNull();
-    expect(latest!.chainState?.questionId).toBe("Q-01");
-    expect(mocked.chainState).toHaveBeenCalledWith("team-1", "Q-01", expect.anything());
+    expect(mocked.chainState).not.toHaveBeenCalled();
   });
 
   it("does not fallback a domain 404 or a V2 500 into legacy initial state", async () => {
@@ -618,7 +641,7 @@ describe("useHypothesisFirstChain", () => {
 
     expect(latest!.v2ReadState).toBe("v2_error");
     expect(latest!.stateSource).toBe("v2_error");
-    expect(latest!.chainState).toBeNull();
+    expect(latest).not.toHaveProperty("chainState");
     expect(latest!.error).toBe("catalog question unknown");
     expect(mocked.chainState).not.toHaveBeenCalled();
 
@@ -629,7 +652,7 @@ describe("useHypothesisFirstChain", () => {
     await flushQueries();
     expect(latest!.v2ReadState).toBe("v2_error");
     expect(latest!.stateSource).toBe("v2_error");
-    expect(latest!.chainState).toBeNull();
+    expect(latest).not.toHaveProperty("chainState");
     expect(latest!.error).toBe("server failed");
     expect(mocked.chainState).not.toHaveBeenCalledWith("team-1", "Q-02", expect.anything());
   });
@@ -644,7 +667,7 @@ describe("useHypothesisFirstChain", () => {
     expect(latest!.v2ReadState).toBe("v2_error");
     expect(latest!.stateSource).toBe("v2_error");
     expect(latest!.stateV2).toBeNull();
-    expect(latest!.chainState).toBeNull();
+    expect(latest).not.toHaveProperty("chainState");
     expect(latest!.error).toBe("Invalid hypothesis-first state V2 response");
     expect(mocked.chainState).not.toHaveBeenCalled();
   });
@@ -673,7 +696,7 @@ describe("useHypothesisFirstChain", () => {
     expect(latest!.v2ReadState).toBe("pending");
     expect(latest!.stateSource).toBe("pending");
     expect(latest!.stateV2).toBeNull();
-    expect(latest!.chainState).toBeNull();
+    expect(latest).not.toHaveProperty("chainState");
     // The cached meeting stays available as evidence, not as an inference input.
     expect(latest!.meetings.map((meeting) => meeting.meetingRoundId)).toEqual(["hf-review-sel-2-r1"]);
   });
@@ -740,78 +763,35 @@ describe("hypothesis-first round budget display contract", () => {
   it("prefers the V2 snapshot budget, then the V1 chain-state value", () => {
     expect(resolveHypothesisFirstRoundBudget({
       stateV2: v2WithRoundBudget(4),
-      chainState: { roundBudget: 3 },
+
     })).toBe(4);
     expect(resolveHypothesisFirstRoundBudget({
       stateV2: null,
-      chainState: { roundBudget: 2 },
-    })).toBe(2);
+
+    })).toBe(5);
   });
 
   it("publishes the single server-owned hard limit as the fallback", () => {
     expect(HYPOTHESIS_FIRST_REVIEW_ROUND_LIMIT).toBe(5);
-    expect(resolveHypothesisFirstRoundBudget({ stateV2: null, chainState: null })).toBe(5);
+    expect(resolveHypothesisFirstRoundBudget({ stateV2: null,  })).toBe(5);
     expect(resolveHypothesisFirstRoundBudget({})).toBe(5);
     // 非法值（0/负数/NaN）与旧 V1 快照的缺省 0 一样回落到稳定硬上限。
     expect(resolveHypothesisFirstRoundBudget({
       stateV2: null,
-      chainState: { roundBudget: 0 },
+
     })).toBe(5);
     expect(resolveHypothesisFirstRoundBudget({
       stateV2: v2WithRoundBudget(Number.NaN),
-      chainState: { roundBudget: -1 },
+
     })).toBe(5);
   });
 });
 
-describe("hypothesis-first canonical review round", () => {
-  function reviewMeeting(roundIndex?: number): MeetingRoundRecord {
-    return {
-      ...scope,
-      schemaVersion: 1,
-      meetingRoundId: `hf-review-${roundIndex ?? "legacy"}`,
-      meetingType: "hypothesis_review",
-      mode: "review",
-      scopeHash: "sh",
-      participants: ["agent-1"],
-      status: "closed",
-      startedAt: "2026-08-19T00:00:00Z",
-      ...(roundIndex === undefined ? {} : { roundIndex }),
-    };
-  }
-
-  it("prefers the V2 activeRoundIndex over decorated meeting rounds", () => {
-    expect(resolveHypothesisFirstCanonicalRound({
-      stateV2: { review: { activeRoundIndex: 3 } },
-      meetings: [reviewMeeting(2), reviewMeeting(2)],
-    })).toBe(3);
-  });
-
-  it("falls back to the max link-derived meeting roundIndex without a readable V2 round", () => {
-    expect(resolveHypothesisFirstCanonicalRound({
-      stateV2: null,
-      meetings: [reviewMeeting(2), reviewMeeting(2), reviewMeeting(1)],
-    })).toBe(2);
-    expect(resolveHypothesisFirstCanonicalRound({
-      stateV2: { review: { activeRoundIndex: null } },
-      meetings: [reviewMeeting(4)],
-    })).toBe(4);
-    expect(resolveHypothesisFirstCanonicalRound({
-      stateV2: { review: { activeRoundIndex: 0 } },
-      meetings: [],
-    })).toBe(0);
-  });
-
-  it("never derives a round from the physical meeting count", () => {
-    // Ten fan-out rooms across five logical rounds still resolve to round 5.
-    const fanOut = Array.from({ length: 10 }, (_, index) =>
-      reviewMeeting(Math.floor(index / 2) + 1));
-    expect(resolveHypothesisFirstCanonicalRound({ stateV2: null, meetings: fanOut })).toBe(5);
-    // Without any round numbers the round is unknown (0), not the room count.
-    expect(resolveHypothesisFirstCanonicalRound({
-      stateV2: null,
-      meetings: [reviewMeeting(undefined), reviewMeeting(undefined)],
-    })).toBe(0);
+describe("canonical review round", () => {
+  it("uses only the V2 logical round", () => {
+    expect(resolveHypothesisFirstCanonicalRound({ stateV2: { review: { activeRoundIndex: 3 } } })).toBe(3);
+    expect(resolveHypothesisFirstCanonicalRound({ stateV2: null })).toBe(0);
+    expect(resolveHypothesisFirstCanonicalRound({ stateV2: { review: { activeRoundIndex: null } } })).toBe(0);
   });
 });
 
@@ -834,18 +814,6 @@ describe("question-scoped hypothesis polling", () => {
     delivery.programDelivery.lifecycle = "running";
     delivery.programDelivery.actionability = "waiting_system";
     expect(shouldPollHypothesisFirstStateV2(delivery)).toBe(true);
-  });
-
-  it("does not poll a chain payload from another question", () => {
-    expect(shouldPollQuestionScopedChain({
-      questionId: "Q-01",
-      state: {
-        ...chainStatePayload(),
-        questionId: "Q-02",
-        collectionReady: true,
-        pendingCollectionCount: 1,
-      },
-    })).toBe(false);
   });
 
   it("ignores live collection requests from other questions", () => {

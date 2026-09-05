@@ -1,3 +1,4 @@
+import { command, reviewState, stateV2 } from "./hypothesisFirstV2.fixture";
 /**
  * HypothesisFirstNodeInspector: live task surface for generation / selection /
  * review / collection / recovery. Toolbar navigation copy must not appear as
@@ -5,10 +6,10 @@
  *
  * @vitest-environment happy-dom
  */
-import React, { act } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HypothesisFirstStateV2 } from "../../../api/types/hypothesisFirst";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -60,19 +61,19 @@ vi.mock("../../../api/challengeQuestionRuns", () => ({
 }));
 
 vi.mock("../challenge-cup/ChallengeQuestionReviewForm", () => ({
-  ChallengeQuestionReviewForm: (props: { detail: { selectedRunId: string }; allowLegacyMutation?: boolean }) => {
+  ChallengeQuestionReviewForm: (props: { detail: { selectedRunId: string }; canonicalAction?: unknown }) => {
     reviewFormProps(props);
     return <div data-testid="program-review-form">review:{props.detail.selectedRunId}</div>;
   },
 }));
 
+import { getChallengeQuestionRunDetail } from "../../../api/challengeQuestionRuns";
+import { fetchChatRoomDetail } from "../../../api/chat";
 import {
   executeHypothesisFirstCommand,
   openNextHypothesisReviewRound,
   recordCollectionHandoff,
 } from "../../../api/hypothesisFirst";
-import { fetchChatRoomDetail } from "../../../api/chat";
-import { getChallengeQuestionRunDetail } from "../../../api/challengeQuestionRuns";
 const mockedRecordCollectionHandoff = vi.mocked(recordCollectionHandoff);
 const mockedOpenNextReviewRound = vi.mocked(openNextHypothesisReviewRound);
 const mockedExecuteCommand = vi.mocked(executeHypothesisFirstCommand);
@@ -116,10 +117,7 @@ import {
   resolveHypothesisFirstReviewRoundBudget,
   reviewRoundActionCopy,
 } from "./HypothesisFirstNodeInspector";
-import {
-  useHypothesisFirstChain,
-  type HypothesisFirstChainData,
-} from "./useHypothesisFirstChain";
+import { useHypothesisFirstChain, type HypothesisFirstChainData } from "./useHypothesisFirstChain";
 
 vi.mock("./useHypothesisFirstChain", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./useHypothesisFirstChain")>();
@@ -133,7 +131,7 @@ const mockedChain = vi.mocked(useHypothesisFirstChain);
 
 function chainData(overrides: Partial<HypothesisFirstChainData> = {}): HypothesisFirstChainData {
   return {
-    chainState: null,
+
     selection: null,
     meetings: [],
     collectionRequests: [],
@@ -141,6 +139,7 @@ function chainData(overrides: Partial<HypothesisFirstChainData> = {}): Hypothesi
     loading: false,
     error: null,
     ...overrides,
+    stateV2: overrides.stateV2 ? stateV2(overrides.stateV2) : null,
   };
 }
 
@@ -245,7 +244,7 @@ describe("HypothesisFirstNodeInspector", () => {
   it("hides legacy generation and selection writes when the chain scope mismatches", () => {
     mockedChain.mockReturnValue(chainData({
       scopeMismatch: true,
-      chainState: { candidateCount: 2 } as HypothesisFirstChainData["chainState"],
+
       meetings: [scopeMeeting({ status: "open" })],
     }));
     render(
@@ -280,8 +279,34 @@ describe("HypothesisFirstNodeInspector", () => {
     container.remove();
   });
 
+  it("does not infer an executable phase from meetings when V2 is absent", () => {
+    mockedChain.mockReturnValue(chainData({ meetings: [scopeMeeting({status: "awaiting_approval"})] as never }));
+    render(<HypothesisFirstNodeInspector teamId="team-1" questionId="Q-01" nodeId="hf_generation" runId="run-1" onOpenQuestion={() => {}} />);
+    expect(container.textContent).toContain("当前步骤尚未确定");
+    expect(mockedExecuteCommand).not.toHaveBeenCalled();
+  });
+
+  it("binds generation operations to the meeting named by V2", () => {
+    mockedChain.mockReturnValue(chainData({
+      stateV2: stateV2({generation: {generationMeetingId: "generation-current", lifecycle: "waiting_human"}, allowedActions: [{...command({command: "approve_summary", payload: {meetingRoundId: "generation-current"}}, "确认候选清单"), targetPhase: "generation"}]}),
+      meetings: [scopeMeeting({meetingRoundId: "generation-old", status: "failed"}), scopeMeeting({meetingRoundId: "generation-current", status: "awaiting_approval"})] as never,
+    }));
+    render(<HypothesisFirstNodeInspector teamId="team-1" questionId="Q-01" nodeId="hf_generation" runId="run-1" onOpenQuestion={() => {}} />);
+    expect(container.querySelector('[data-testid="meeting-round-id"]')?.textContent).toBe("generation-current");
+    expect(container.textContent).toContain("确认候选清单");
+  });
+
+  it("uses the V2 review meeting instead of the newest auxiliary meeting", () => {
+    mockedChain.mockReturnValue(chainData({
+      stateV2: reviewState("review-current"),
+      meetings: [scopeMeeting({meetingRoundId: "review-current", meetingType: "hypothesis_review", roundIndex: 1}), scopeMeeting({meetingRoundId: "review-newer", meetingType: "hypothesis_review", roundIndex: 2})] as never,
+    }));
+    render(<HypothesisFirstNodeInspector teamId="team-1" questionId="Q-01" nodeId="hf_review" runId="run-1" onOpenQuestion={() => {}} />);
+    expect(container.querySelector('[data-testid="meeting-round-id"]')?.textContent).toBe("review-current");
+  });
+
   it("opens generation from an empty chain", () => {
-    mockedChain.mockReturnValue(chainData());
+    mockedChain.mockReturnValue(chainData({ stateV2: stateV2({ allowedActions: [command({command: "open_generation", payload: {}}, "生成候选假说")] }) }));
     render(
       <HypothesisFirstNodeInspector
         teamId="team-1"
@@ -299,7 +324,7 @@ describe("HypothesisFirstNodeInspector", () => {
   it("loads only the server-authored scoped room and never the meeting fallback room", async () => {
     mockedChain.mockReturnValue(chainData({
       meetings: [scopeMeeting({ linkedChatRoomId: "team-public-room" })],
-      chainState: { candidateCount: 0 } as HypothesisFirstChainData["chainState"],
+      stateV2: stateV2({ generation: { generationMeetingId: "hf-gen-1" } }),
     }));
     render(
       <HypothesisFirstNodeInspector
@@ -341,60 +366,10 @@ describe("HypothesisFirstNodeInspector", () => {
     expect(queriedRoomIds).not.toContain("team-public-room");
   });
 
-  it("advances the legacy stage once bound chatRounds are terminal instead of staying in discussion", async () => {
-    // The room's round statuses are the only terminal signal (no
-    // boundChatRoundsTerminal flag on the meeting): feeding them into the
-    // resolver must move the legacy stage past "discussion running".
-    mockedChain.mockReturnValue(chainData({
-      meetings: [scopeMeeting({ chatRoomRoundIds: ["round-1"] })],
-      chainState: { candidateCount: 0 } as HypothesisFirstChainData["chainState"],
-    }));
-    mockedFetchChatRoomDetail.mockResolvedValueOnce({
-      rounds: [{ roundId: "round-1", status: "completed" }],
-    } as never);
-    render(
-      <HypothesisFirstNodeInspector
-        teamId="team-1"
-        questionId="Q-01"
-        nodeId="hf_generation"
-        runId="run-1"
-        discussionModel={{
-          status: "ready",
-          degradedReason: "",
-          scope: {
-            version: 1,
-            kind: "question_generation",
-            teamId: "team-1",
-            researchProjectId: "project-1",
-            workflowRunId: "run-1",
-            workflowNodeId: "hf_generation",
-            questionId: "Q-01",
-          },
-          scopeHash: "scope-hash",
-          roomId: "scoped-room-1",
-          meetingRoundId: "hf-gen-1",
-          questionId: "Q-01",
-          selectionId: "",
-          candidateId: "",
-          query: { kind: "room", room: "scoped-room-1" },
-          search: "?room=scoped-room-1",
-          deepLink: "/chat?room=scoped-room-1",
-          selectedRoundId: "",
-        }}
-        onOpenQuestion={() => {}}
-      />,
-    );
-    await act(async () => {
-      await vi.waitFor(() => expect(container.textContent).toContain("整理候选清单"));
-    });
-    expect(container.textContent).not.toContain("generation_running");
-    expect(container.querySelector('[data-testid="meeting-round-id"]')?.textContent).toBe("hf-gen-1");
-  });
-
   it("does not read any room when the canonical anchor is degraded", async () => {
     mockedChain.mockReturnValue(chainData({
       meetings: [scopeMeeting({ linkedChatRoomId: "team-public-room" })],
-      chainState: { candidateCount: 0 } as HypothesisFirstChainData["chainState"],
+      stateV2: stateV2({ generation: { generationMeetingId: "hf-gen-1" } }),
     }));
     render(
       <HypothesisFirstNodeInspector
@@ -427,7 +402,7 @@ describe("HypothesisFirstNodeInspector", () => {
   });
 
   it("renders the empty inspector state in English without Chinese chrome", () => {
-    mockedChain.mockReturnValue(chainData());
+    mockedChain.mockReturnValue(chainData({ stateV2: stateV2({ allowedActions: [command({command: "open_generation", payload: {}}, "生成候选假说")] }) }));
     render(
       <HypothesisFirstNodeInspector
         lang="en"
@@ -444,7 +419,7 @@ describe("HypothesisFirstNodeInspector", () => {
   });
 
   it("gives an actionable next step for an empty inspector context", () => {
-    mockedChain.mockReturnValue(chainData());
+    mockedChain.mockReturnValue(chainData({ stateV2: stateV2({ allowedActions: [command({command: "open_generation", payload: {}}, "生成候选假说")] }) }));
     render(
       <HypothesisFirstNodeInspector
         teamId="team-1"
@@ -481,146 +456,6 @@ describe("HypothesisFirstNodeInspector", () => {
       type: "active",
     }));
     refetchQueries.mockRestore();
-  });
-
-  it("shows meeting ops for a generation round ready to confirm", () => {
-    mockedChain.mockReturnValue(chainData({
-      meetings: [scopeMeeting({
-        status: "awaiting_approval",
-        digestDraft: { summary: "候选清单", proposedCandidates: [{ candidateId: "c1" }], contentHash: "h1" },
-      })],
-      chainState: { candidateCount: 0 } as HypothesisFirstChainData["chainState"],
-    }));
-    render(
-      <HypothesisFirstNodeInspector
-        teamId="team-1"
-        questionId="Q-01"
-        nodeId="hf_generation"
-        runId="run-1"
-        onOpenQuestion={() => {}}
-      />,
-    );
-    expect(container.textContent).toContain("确认候选清单");
-    expect(container.textContent).not.toContain("前往确认候选");
-    expect(container.querySelector('[data-testid="meeting-run-id"]')?.textContent).toBe("run-1");
-  });
-
-  it("shows the r5 review operation when no formal run id exists yet", () => {
-    mockedChain.mockReturnValue(chainData({
-      chainState: {
-        hypothesisConverged: true,
-        selectionId: "sel-1",
-        candidateCount: 1,
-      } as HypothesisFirstChainData["chainState"],
-      selection: {
-        selectionId: "sel-1",
-        selectedCandidateIds: ["c1"],
-      } as HypothesisFirstChainData["selection"],
-      meetings: [scopeMeeting({
-        meetingRoundId: "r5",
-        meetingType: "hypothesis_review",
-        status: "open",
-        boundChatRoundsTerminal: true,
-      })],
-      reviewRoundLinks: [scopeReviewLink("r5", 5)],
-    }));
-    render(
-      <HypothesisFirstNodeInspector
-        teamId="team-1"
-        questionId="Q-01"
-        nodeId="hf_meeting_5_cand-1"
-        onOpenQuestion={() => {}}
-      />,
-    );
-
-    expect(container.querySelector('[data-testid="meeting-ops"]')?.textContent).toContain("整理本轮结论");
-    expect(container.querySelector('[data-testid="meeting-round-id"]')?.textContent).toBe("r5");
-    expect(container.textContent).not.toContain("选择题目开始研究");
-  });
-
-  it("keeps the review inspector on the current selection lineage", () => {
-    mockedChain.mockReturnValue(chainData({
-      chainState: {
-        hypothesisConverged: true,
-        selectionId: "sel-2",
-        candidateCount: 1,
-      } as HypothesisFirstChainData["chainState"],
-      selection: { selectionId: "sel-2", selectedCandidateIds: ["c2"] } as HypothesisFirstChainData["selection"],
-      meetings: [
-        scopeMeeting({
-          meetingRoundId: "old-r9",
-          meetingType: "hypothesis_review",
-          selectionId: "sel-1",
-          roundIndex: 9,
-          status: "open",
-        }),
-        scopeMeeting({
-          meetingRoundId: "current-r2",
-          meetingType: "hypothesis_review",
-          selectionId: "sel-2",
-          roundIndex: 2,
-          status: "open",
-        }),
-      ],
-      reviewRoundLinks: [
-        scopeReviewLink("old-r9", 9),
-        { ...scopeReviewLink("current-r2", 2), selectionId: "sel-2" },
-      ],
-    }));
-    render(
-      <HypothesisFirstNodeInspector
-        teamId="team-1"
-        questionId="Q-01"
-        nodeId="hf_meeting_2_cand-1"
-        onOpenQuestion={() => {}}
-      />,
-    );
-
-    expect(container.querySelector('[data-testid="meeting-round-id"]')?.textContent).toBe("current-r2");
-  });
-
-  it("keeps every candidate confirmation visible after one sibling closes", () => {
-    const onNavigateToNode = vi.fn();
-    mockedChain.mockReturnValue(chainData({
-      chainState: {
-        selectionId: "sel-1",
-        candidateCount: 2,
-      } as HypothesisFirstChainData["chainState"],
-      selection: {
-        selectionId: "sel-1",
-        selectedCandidateIds: ["cand-a", "cand-b"],
-      } as HypothesisFirstChainData["selection"],
-      meetings: [
-        scopeMeeting({ meetingRoundId: "r4-old", meetingType: "hypothesis_review", roundIndex: 4, status: "closed" }),
-        scopeMeeting({ meetingRoundId: "r5-a", meetingType: "hypothesis_review", roundIndex: 5, status: "closed" }),
-        scopeMeeting({ meetingRoundId: "r5-b", meetingType: "hypothesis_review", roundIndex: 5, status: "awaiting_approval" }),
-      ],
-      reviewRoundLinks: [
-        { ...scopeReviewLink("r4-old", 4), candidateId: "cand-old" },
-        { ...scopeReviewLink("r5-a", 5), candidateId: "cand-a" },
-        { ...scopeReviewLink("r5-b", 5), candidateId: "cand-b" },
-      ],
-    }));
-    render(
-      <HypothesisFirstNodeInspector
-        teamId="team-1"
-        questionId="Q-01"
-        nodeId="hf_review"
-        onOpenQuestion={() => {}}
-        onNavigateToNode={onNavigateToNode}
-      />,
-    );
-
-    expect(container.querySelector('[data-testid="candidate-confirmation-checklist"]')?.textContent).toContain("共 2 · 已确认 1 · 待确认 1");
-    expect(container.textContent).toContain("候选 cand-a");
-    expect(container.textContent).toContain("候选 cand-b");
-    expect(container.querySelector('[data-testid="candidate-confirmation-checklist"]')?.textContent).not.toContain("cand-old");
-    const candidateButtons = Array.from(container.querySelectorAll("button"))
-      .filter((button) => button.textContent === "查看该候选评审");
-    act(() => {
-      candidateButtons[0]?.click();
-    });
-    expect(onNavigateToNode).toHaveBeenCalledWith("hf_meeting_5_cand-a");
   });
 
   it("renders the candidate checklist directly from canonical V2 without legacy meeting projection", () => {
@@ -680,137 +515,9 @@ describe("HypothesisFirstNodeInspector", () => {
     expect(container.querySelector('[data-testid="meeting-round-id"]')?.textContent).toContain("meeting-cand-b");
   });
 
-  it("does not let another question's later meeting mask the current r5 inspector", () => {
-    mockedChain.mockReturnValue(chainData({
-      chainState: {
-        questionId: "Q-01",
-        hypothesisConverged: true,
-        selectionId: "sel-1",
-        candidateCount: 1,
-      } as HypothesisFirstChainData["chainState"],
-      selection: {
-        selectionId: "sel-1",
-        selectedCandidateIds: ["c1"],
-      } as HypothesisFirstChainData["selection"],
-      meetings: [
-        scopeMeeting({
-          question: "Q-01",
-          meetingRoundId: "r5-current",
-          roundIndex: 5,
-          meetingType: "hypothesis_review",
-          status: "open",
-          boundChatRoundsTerminal: true,
-        }),
-        scopeMeeting({
-          question: "Q-02",
-          meetingRoundId: "r6-other-question",
-          roundIndex: 6,
-          meetingType: "hypothesis_review",
-          status: "closed",
-        }),
-      ],
-    }));
-    render(
-      <HypothesisFirstNodeInspector
-        teamId="team-1"
-        questionId="Q-01"
-        nodeId="hf_meeting_5"
-        onOpenQuestion={() => {}}
-      />,
-    );
-
-    expect(container.querySelector('[data-testid="meeting-ops"]')?.textContent).toContain("整理本轮结论");
-    expect(container.querySelector('[data-testid="meeting-round-id"]')?.textContent).toBe("r5-current");
-  });
-
-  it("offers regeneration when the confirmed generation meeting produced no candidates", () => {
-    mockedChain.mockReturnValue(chainData({
-      meetings: [scopeMeeting({
-        status: "closed",
-        closedAt: "2026-08-19T02:00:00Z",
-        digestDraft: { summary: "空候选清单", proposedCandidates: [], contentHash: "h-empty" },
-      })],
-      chainState: { candidateCount: 0 } as HypothesisFirstChainData["chainState"],
-    }));
-    render(
-      <HypothesisFirstNodeInspector
-        teamId="team-1"
-        questionId="Q-01"
-        nodeId="hf_generation"
-        runId="run-1"
-        onOpenQuestion={() => {}}
-      />,
-    );
-    expect(container.textContent).toContain("重新生成候选假说");
-    expect(container.querySelector('[data-testid="meeting-ops"]')).toBeNull();
-  });
-
-  it("binds generation ops to the latest attempt after a stale failed/open one", () => {
-    mockedChain.mockReturnValue(chainData({
-      meetings: [
-        scopeMeeting({
-          meetingRoundId: "hf-gen-stale",
-          roundIndex: 0,
-          startedAt: "2026-08-19T01:00:00Z",
-          status: "open",
-        }),
-        scopeMeeting({
-          meetingRoundId: "hf-gen-current",
-          roundIndex: 1,
-          startedAt: "2026-08-19T02:00:00Z",
-          status: "awaiting_approval",
-          digestDraft: { summary: "候选清单", proposedCandidates: [{ candidateId: "c2" }], contentHash: "h2" },
-        }),
-      ],
-      chainState: { candidateCount: 0 } as HypothesisFirstChainData["chainState"],
-    }));
-    render(
-      <HypothesisFirstNodeInspector
-        teamId="team-1"
-        questionId="Q-01"
-        nodeId="hf_generation"
-        runId="run-1"
-        onOpenQuestion={() => {}}
-      />,
-    );
-    const ops = container.querySelector('[data-testid="meeting-ops"]');
-    expect(ops).toBeTruthy();
-    expect(ops?.querySelector('[data-testid="meeting-round-id"]')?.textContent).toBe("hf-gen-current");
-    expect(container.textContent).toContain("确认候选清单");
-  });
-
-  it("embeds the selection list on the selection card", () => {
-    mockedChain.mockReturnValue(chainData({
-      chainState: { candidateCount: 2 } as HypothesisFirstChainData["chainState"],
-    }));
-    render(
-      <HypothesisFirstNodeInspector
-        teamId="team-1"
-        questionId="Q-01"
-        nodeId="hf_selection"
-        runId="run-1"
-        onOpenQuestion={() => {}}
-      />,
-    );
-    expect(container.textContent).toContain("假说选择");
-    expect(container.querySelector('[data-testid="selection-list"]')?.textContent).toContain("记录选择并开启评审");
-    expect(selectionListProps.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
-      compact: true,
-      allowLegacyMutation: true,
-      runId: "run-1",
-    }));
-    expect(container.querySelector('[data-testid="selection-run-id"]')?.textContent).toBe("run-1");
-    expect(mockedChain).toHaveBeenCalledWith("team-1", "Q-01", "run-1");
-    expect(container.textContent).toContain("打开题目档案");
-  });
-
   it("shows effective review rounds as read-only history on the semantic review node", () => {
     mockedChain.mockReturnValue(chainData({
-      chainState: {
-        questionId: "Q-01",
-        selectionId: "sel-1",
-        hypothesisConverged: true,
-      } as HypothesisFirstChainData["chainState"],
+
       selection: {
         questionId: "Q-01",
         selectionId: "sel-1",
@@ -841,10 +548,7 @@ describe("HypothesisFirstNodeInspector", () => {
 
   it("groups parallel candidate meetings into one review round", () => {
     mockedChain.mockReturnValue(chainData({
-      chainState: {
-        questionId: "Q-01",
-        selectionId: "sel-1",
-      } as HypothesisFirstChainData["chainState"],
+
       selection: {
         questionId: "Q-01",
         selectionId: "sel-1",
@@ -872,10 +576,7 @@ describe("HypothesisFirstNodeInspector", () => {
 
   it("does not label an older non-terminal review round as active after a later round starts", () => {
     mockedChain.mockReturnValue(chainData({
-      chainState: {
-        questionId: "Q-01",
-        selectionId: "sel-1",
-      } as HypothesisFirstChainData["chainState"],
+
       meetings: [
         scopeMeeting({ meetingRoundId: "r1-stale", meetingType: "hypothesis_review", status: "open", roundIndex: 1 }),
         scopeMeeting({ meetingRoundId: "r2-current", meetingType: "hypothesis_review", status: "open", roundIndex: 2 }),
@@ -894,276 +595,6 @@ describe("HypothesisFirstNodeInspector", () => {
     expect(container.textContent).toContain("第 1 轮已结束");
     expect(container.textContent).toContain("后续轮次已开始，本轮不再运行。");
     expect(container.textContent).toContain("第 2 轮进行中");
-  });
-
-  it("shows 资料搜集中 without a start-collection command", () => {
-    mockedChain.mockReturnValue(chainData({
-      selection: {
-        program: "p", theme: "t", campaign: "c", question: "Q-01", branch: "b", workflow: "w", agentId: "a",
-        schemaVersion: 1,
-        selectionId: "sel-1",
-        selectionHash: "h",
-        mode: "manual",
-        scopeHash: "sh",
-        questionId: "Q-01",
-        selectedCandidateIds: ["cand-1"],
-        previousSelectionId: "",
-        decidedBy: "leader",
-        createdAt: "2026-08-19T00:00:00Z",
-      },
-      meetings: [scopeMeeting({
-        meetingRoundId: "hf-review-1",
-        meetingType: "hypothesis_review",
-        status: "closed",
-        roundIndex: 1,
-      })],
-      collectionRequests: [{
-        program: "p", theme: "t", campaign: "c", question: "Q-01", branch: "b", workflow: "w", agentId: "a",
-        schemaVersion: 1,
-        recordKind: "hypothesis_first_collection_request",
-        requestId: "req-1",
-        requestHash: "rh",
-        status: "running",
-        meetingRoundId: "hf-review-1",
-        decisionId: "dec-1",
-        questionId: "Q-01",
-        mode: "review",
-        scopeHash: "sh",
-        searchEnvelope: {},
-        requirements: {},
-        writebackPolicy: {},
-        collectionRunId: "run-collect-1",
-        createdAt: "2026-08-19T02:00:00Z",
-      }],
-    }));
-    render(
-      <HypothesisFirstNodeInspector
-        teamId="team-1"
-        questionId="Q-01"
-        nodeId="hf_collection_req-1"
-        runId="run-1"
-        collectionChildStatus="running"
-        onOpenQuestion={() => {}}
-      />,
-    );
-    expect(container.textContent).toContain("资料搜集中");
-    expect(container.textContent).not.toContain("开始资料搜集");
-    expect(container.textContent).not.toContain("启动资料寻找");
-    expect(container.querySelector('[role="status"]')).toBeTruthy();
-  });
-
-  it("offers handoff recovery after the child run completed", () => {
-    mockedChain.mockReturnValue(chainData({
-      selection: {
-        program: "p", theme: "t", campaign: "c", question: "Q-01", branch: "b", workflow: "w", agentId: "a",
-        schemaVersion: 1,
-        selectionId: "sel-1",
-        selectionHash: "h",
-        mode: "manual",
-        scopeHash: "sh",
-        questionId: "Q-01",
-        selectedCandidateIds: ["cand-1"],
-        previousSelectionId: "",
-        decidedBy: "leader",
-        createdAt: "2026-08-19T00:00:00Z",
-      },
-      meetings: [scopeMeeting({
-        meetingRoundId: "hf-review-1",
-        meetingType: "hypothesis_review",
-        status: "closed",
-        roundIndex: 1,
-      })],
-      collectionRequests: [{
-        program: "p", theme: "t", campaign: "c", question: "Q-01", branch: "b", workflow: "w", agentId: "a",
-        schemaVersion: 1,
-        recordKind: "hypothesis_first_collection_request",
-        requestId: "req-1",
-        requestHash: "rh",
-        status: "completed",
-        meetingRoundId: "hf-review-1",
-        decisionId: "dec-1",
-        questionId: "Q-01",
-        mode: "review",
-        scopeHash: "sh",
-        searchEnvelope: {},
-        requirements: {},
-        writebackPolicy: {},
-        collectionRunId: "run-collect-1",
-        createdAt: "2026-08-19T02:00:00Z",
-      }],
-    }));
-    render(
-      <HypothesisFirstNodeInspector
-        teamId="team-1"
-        questionId="Q-01"
-        nodeId="hf_collection_req-1"
-        runId="run-1"
-        collectionChildStatus="completed"
-        onOpenQuestion={() => {}}
-      />,
-    );
-    expect(container.textContent).toContain("重试自动交接");
-  });
-
-  it("builds retry handoff ref from the real collectionRunId, never requestId or unknown", async () => {
-    mockedChain.mockReturnValue(chainData({
-      selection: {
-        program: "p", theme: "t", campaign: "c", question: "Q-01", branch: "b", workflow: "w", agentId: "a",
-        schemaVersion: 1,
-        selectionId: "sel-1",
-        selectionHash: "h",
-        mode: "manual",
-        scopeHash: "sh",
-        questionId: "Q-01",
-        selectedCandidateIds: ["cand-1"],
-        previousSelectionId: "",
-        decidedBy: "leader",
-        createdAt: "2026-08-19T00:00:00Z",
-      },
-      meetings: [scopeMeeting({
-        meetingRoundId: "hf-review-1",
-        meetingType: "hypothesis_review",
-        status: "closed",
-        roundIndex: 1,
-      })],
-      collectionRequests: [{
-        program: "p", theme: "t", campaign: "c", question: "Q-01", branch: "b", workflow: "w", agentId: "a",
-        schemaVersion: 1,
-        recordKind: "hypothesis_first_collection_request",
-        requestId: "req-1",
-        requestHash: "rh",
-        status: "completed",
-        meetingRoundId: "hf-review-1",
-        decisionId: "dec-1",
-        questionId: "Q-01",
-        mode: "review",
-        scopeHash: "sh",
-        searchEnvelope: {},
-        requirements: {},
-        writebackPolicy: {},
-        collectionRunId: "run-collect-99",
-        createdAt: "2026-08-19T02:00:00Z",
-      }],
-    }));
-    render(
-      <HypothesisFirstNodeInspector
-        teamId="team-1"
-        questionId="Q-01"
-        nodeId="hf_collection_req-1"
-        runId="run-1"
-        collectionChildStatus="completed"
-        onOpenQuestion={() => {}}
-      />,
-    );
-    const button = [...container.querySelectorAll("button")].find((el) => el.textContent?.includes("重试自动交接"));
-    expect(button).toBeTruthy();
-    await act(async () => {
-      button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-      await Promise.resolve();
-    });
-    expect(mockedRecordCollectionHandoff).toHaveBeenCalledTimes(1);
-    const [teamId, requestId, body] = mockedRecordCollectionHandoff.mock.calls[0];
-    expect(teamId).toBe("team-1");
-    expect(requestId).toBe("req-1");
-    expect(body.handoffRef).toBe("source_collection_run:run-collect-99");
-    expect(body.handoffRef).not.toContain("req-1");
-    expect(body.handoffRef).not.toContain("unknown");
-  });
-
-  it("does not issue a misleading handoff when no collection run is bound", () => {
-    mockedChain.mockReturnValue(chainData({
-      selection: {
-        program: "p", theme: "t", campaign: "c", question: "Q-01", branch: "b", workflow: "w", agentId: "a",
-        schemaVersion: 1,
-        selectionId: "sel-1",
-        selectionHash: "h",
-        mode: "manual",
-        scopeHash: "sh",
-        questionId: "Q-01",
-        selectedCandidateIds: ["cand-1"],
-        previousSelectionId: "",
-        decidedBy: "leader",
-        createdAt: "2026-08-19T00:00:00Z",
-      },
-      meetings: [scopeMeeting({
-        meetingRoundId: "hf-review-1",
-        meetingType: "hypothesis_review",
-        status: "closed",
-        roundIndex: 1,
-      })],
-      collectionRequests: [{
-        program: "p", theme: "t", campaign: "c", question: "Q-01", branch: "b", workflow: "w", agentId: "a",
-        schemaVersion: 1,
-        recordKind: "hypothesis_first_collection_request",
-        requestId: "req-1",
-        requestHash: "rh",
-        status: "completed",
-        meetingRoundId: "hf-review-1",
-        decisionId: "dec-1",
-        questionId: "Q-01",
-        mode: "review",
-        scopeHash: "sh",
-        searchEnvelope: {},
-        requirements: {},
-        writebackPolicy: {},
-        collectionRunId: "",
-        createdAt: "2026-08-19T02:00:00Z",
-      }],
-    }));
-    render(
-      <HypothesisFirstNodeInspector
-        teamId="team-1"
-        questionId="Q-01"
-        nodeId="hf_collection_req-1"
-        runId="run-1"
-        collectionChildStatus="completed"
-        onOpenQuestion={() => {}}
-      />,
-    );
-    const button = [...container.querySelectorAll("button")].find((el) => el.textContent?.includes("重试自动交接"));
-    expect(button).toBeUndefined();
-    expect(container.textContent).toContain("缺少子运行标识");
-    expect(mockedRecordCollectionHandoff).not.toHaveBeenCalled();
-  });
-
-  it("surfaces human adjudication on the convergence gate", () => {
-    mockedChain.mockReturnValue(chainData({
-      chainState: {
-        schemaVersion: 1,
-        teamId: "team-1",
-        questionId: "Q-01",
-        selectionId: "sel-1",
-        meetingCount: 3,
-        firstMeetingId: "hf-review-1",
-        firstMeetingClosed: true,
-        openMeetingIds: [],
-        collectionRequests: [],
-        collectionRequestCount: 0,
-        pendingCollectionCount: 0,
-        collectionReady: false,
-        hypothesisRoundCount: 2,
-        latestHypothesisRoundId: "hr-2",
-        hypothesisConverged: false,
-        convergenceDetail: "",
-        roundBudget: 3,
-        budgetExhausted: true,
-        templateBaselineExists: false,
-        templateBaselineIds: [],
-      },
-    }));
-    const onOpenQuestion = vi.fn();
-    render(
-      <HypothesisFirstNodeInspector
-        teamId="team-1"
-        questionId="Q-01"
-        nodeId="hf_convergence_gate"
-        runId="run-1"
-        onOpenQuestion={onOpenQuestion}
-      />,
-    );
-    expect(container.textContent).toContain("假说收敛门");
-    expect(container.textContent).toContain("人工裁决");
-    expect(container.querySelector('[role="status"]')).toBeTruthy();
   });
 
   it("renders the claim belief gate panel and keeps server actions when the gate blocks", () => {
@@ -1545,35 +976,6 @@ describe("HypothesisFirstNodeInspector", () => {
     });
   });
 
-  it("keeps future-node inspectors scoped and routes back to the actual current step", async () => {
-    mockedChain.mockReturnValue(chainData({
-      meetings: [scopeMeeting({ status: "open" })],
-      chainState: { candidateCount: 0 } as HypothesisFirstChainData["chainState"],
-    }));
-    const onNavigateToNode = vi.fn();
-    render(
-      <HypothesisFirstNodeInspector
-        teamId="team-1"
-        questionId="Q-01"
-        nodeId="hf_convergence_gate"
-        runId="run-1"
-        onOpenQuestion={() => {}}
-        onNavigateToNode={onNavigateToNode}
-      />,
-    );
-    expect(container.textContent).toContain("假说收敛门");
-    expect(container.textContent).toContain("前序任务尚未完成");
-    expect(container.textContent).toContain("前往当前步骤");
-    expect(container.textContent).not.toContain("讨论进行中");
-    expect(container.querySelector('[data-testid="meeting-ops"]')).toBeNull();
-
-    const button = [...container.querySelectorAll("button")].find((item) => item.textContent?.includes("前往当前步骤"));
-    await act(async () => {
-      button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
-    expect(onNavigateToNode).toHaveBeenCalledWith("hf_generation");
-  });
-
   it("shows the loading surface while the chain is loading", () => {
     mockedChain.mockReturnValue(chainData({ loading: true }));
     render(
@@ -1605,7 +1007,7 @@ describe("HypothesisFirstNodeInspector", () => {
     });
     expect(mockedGetChallengeQuestionRunDetail).toHaveBeenCalledWith("team-1", "Q-01", "run-output-1");
     expect(reviewFormProps.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
-      allowLegacyMutation: false,
+      canonicalAction: undefined,
     }));
   });
 
@@ -2060,14 +1462,14 @@ describe("HypothesisFirstNodeInspector", () => {
   // ---------------------------------------------------------------------------
 
   describe("review round budget contract", () => {
-    it("reads the server snapshot budget: V2 first, V1 fallback, hard limit last", () => {
+    it("reads the server snapshot budget: V2 with the display limit when unavailable", () => {
       expect(resolveHypothesisFirstReviewRoundBudget({
         stateV2: { convergence: { roundBudget: 4, roundIndex: 2 } },
-        chainState: { roundBudget: 9 },
+
       })).toBe(4);
       expect(resolveHypothesisFirstReviewRoundBudget({
         stateV2: null,
-        chainState: { roundBudget: 5 },
+
       })).toBe(5);
       expect(resolveHypothesisFirstReviewRoundBudget({})).toBe(5);
       // 非法值（NaN/负数）不参与裁决，回落到稳定硬上限。
@@ -2076,19 +1478,19 @@ describe("HypothesisFirstNodeInspector", () => {
       })).toBe(5);
       expect(resolveHypothesisFirstReviewRoundBudget({
         stateV2: null,
-        chainState: { roundBudget: -1 },
+
       })).toBe(5);
     });
 
     it("derives the next review round index from the freshest snapshot", () => {
       expect(resolveHypothesisFirstNextReviewRoundIndex({
         stateV2: { convergence: { roundIndex: 2 } },
-        chainState: { hypothesisRoundCount: 7 },
+
       })).toBe(3);
       expect(resolveHypothesisFirstNextReviewRoundIndex({
         stateV2: null,
-        chainState: { hypothesisRoundCount: 2 },
-      })).toBe(3);
+
+      })).toBeNull();
       expect(resolveHypothesisFirstNextReviewRoundIndex({})).toBeNull();
     });
 
@@ -2103,68 +1505,6 @@ describe("HypothesisFirstNodeInspector", () => {
       expect(english.detail).toContain("within the limit of 4");
       expect(reviewRoundActionCopy(null, "en", 4).label).toBe("Open a new review round");
     });
-  });
-
-  it("shows the snapshot-derived budget copy on the next-review-round fallback action", async () => {
-    mockedChain.mockReturnValue(chainData({
-      chainState: {
-        schemaVersion: 1,
-        teamId: "team-1",
-        questionId: "Q-01",
-        selectionId: "sel-1",
-        meetingCount: 2,
-        firstMeetingId: "hf-review-1",
-        firstMeetingClosed: true,
-        openMeetingIds: [],
-        collectionRequests: [],
-        collectionRequestCount: 0,
-        pendingCollectionCount: 0,
-        collectionReady: false,
-        hypothesisRoundCount: 2,
-        latestHypothesisRoundId: "hr-2",
-        hypothesisConverged: false,
-        convergenceDetail: "",
-        roundBudget: 2,
-        budgetExhausted: true,
-        templateBaselineExists: false,
-        templateBaselineIds: [],
-      },
-      meetings: [scopeMeeting({
-        meetingRoundId: "r2",
-        meetingType: "hypothesis_review",
-        status: "closed",
-        roundIndex: 2,
-        digestId: "d2",
-      })],
-    }));
-    render(
-      <HypothesisFirstNodeInspector
-        teamId="team-1"
-        questionId="Q-01"
-        nodeId="hf_convergence_gate"
-        runId="run-1"
-        onOpenQuestion={() => {}}
-      />,
-    );
-    // 该 legacy 收敛快照把下一动作落到 human_adjudication 命令但没有已签名
-    // 动作可渲染，兜底出现开新轮按钮；文案读服务端快照预算（上限 2）。
-    const wrapper = container.querySelector('[data-testid="next-review-round-action"]');
-    if (wrapper) {
-      expect(wrapper.querySelector('[data-testid="next-review-round-budget"]')?.textContent)
-        .toContain("上限 2 内开启第 3 轮评审。");
-      expect(Array.from(wrapper.querySelectorAll("button")).some((button) =>
-        button.textContent === "发起新一轮评审")).toBe(true);
-    }
-    // Legacy (non-V2-canonical) snapshot: the fallback button still dispatches
-    // the legacy next-round endpoint — the V2 command route is unavailable.
-    const fallbackButton = Array.from(wrapper?.querySelectorAll("button") ?? [])
-      .find((button) => button.textContent === "发起新一轮评审");
-    await act(async () => {
-      fallbackButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-      await vi.waitFor(() => expect(mockedOpenNextReviewRound).toHaveBeenCalledTimes(1));
-    });
-    expect(mockedOpenNextReviewRound).toHaveBeenCalledWith("team-1", "r2");
-    expect(mockedExecuteCommand).not.toHaveBeenCalled();
   });
 
   it("dispatches open_next_review through the V2 command route, never the legacy endpoint", async () => {
@@ -2424,40 +1764,6 @@ describe("HypothesisFirstNodeInspector", () => {
     expect(checklist?.textContent).toContain("正在讨论 1 个 · 排队等待 1 个");
   });
 
-  it("hides the queue position summary when rows come from the legacy projection", () => {
-    mockedChain.mockReturnValue(chainData({
-      chainState: {
-        selectionId: "sel-1",
-        candidateCount: 2,
-      } as HypothesisFirstChainData["chainState"],
-      selection: {
-        selectionId: "sel-1",
-        selectedCandidateIds: ["cand-a", "cand-b"],
-      } as HypothesisFirstChainData["selection"],
-      meetings: [
-        scopeMeeting({ meetingRoundId: "r4-old", meetingType: "hypothesis_review", roundIndex: 4, status: "closed" }),
-        scopeMeeting({ meetingRoundId: "r5-a", meetingType: "hypothesis_review", roundIndex: 5, status: "closed" }),
-        scopeMeeting({ meetingRoundId: "r5-b", meetingType: "hypothesis_review", roundIndex: 5, status: "awaiting_approval" }),
-      ],
-      reviewRoundLinks: [
-        { ...scopeReviewLink("r4-old", 4), candidateId: "cand-old" },
-        { ...scopeReviewLink("r5-a", 5), candidateId: "cand-a" },
-        { ...scopeReviewLink("r5-b", 5), candidateId: "cand-b" },
-      ],
-    }));
-    render(
-      <HypothesisFirstNodeInspector
-        teamId="team-1"
-        questionId="Q-01"
-        nodeId="hf_review"
-        onOpenQuestion={() => {}}
-      />,
-    );
-    const checklist = container.querySelector('[data-testid="candidate-confirmation-checklist"]');
-    expect(checklist?.textContent).toContain("共 2 · 已确认 1 · 待确认 1");
-    expect(checklist?.textContent).not.toContain("排队等待");
-  });
-
   it("renders superseded review candidates neutrally instead of blocked", () => {
     // Fence-terminated candidates after the formal run's hypothesis stage
     // succeeded: the checklist shows a superseded state, not 已阻塞/待确认.
@@ -2556,61 +1862,5 @@ describe("HypothesisFirstNodeInspector", () => {
     expect(discussionMemberCompletion(detail)).toEqual({ spoken: 2, total: 3 });
     expect(discussionMemberCompletion({ participants: [], rounds: [] })).toBeNull();
     expect(discussionMemberCompletion(undefined)).toBeNull();
-  });
-
-  it("surfaces member completion while a scoped discussion is open", async () => {
-    mockedFetchChatRoomDetail.mockResolvedValueOnce({
-      participants: [{ participantId: "p1" }, { participantId: "p2" }, { participantId: "p3" }],
-      rounds: [{
-        messages: [
-          { participantId: "p1", status: "completed", content: "观点一" },
-          { participantId: "p2", status: "completed", content: "观点二" },
-        ],
-      }],
-    } as never);
-    mockedChain.mockReturnValue(chainData({
-      meetings: [scopeMeeting({ status: "open" })],
-      chainState: { candidateCount: 0 } as HypothesisFirstChainData["chainState"],
-    }));
-    render(
-      <HypothesisFirstNodeInspector
-        teamId="team-1"
-        questionId="Q-01"
-        nodeId="hf_generation"
-        runId="run-1"
-        discussionModel={{
-          status: "ready",
-          degradedReason: "",
-          scope: {
-            version: 1,
-            kind: "question_generation",
-            teamId: "team-1",
-            researchProjectId: "project-1",
-            workflowRunId: "run-1",
-            workflowNodeId: "hf_generation",
-            questionId: "Q-01",
-          },
-          scopeHash: "scope-hash",
-          roomId: "scoped-room-1",
-          meetingRoundId: "hf-gen-1",
-          questionId: "Q-01",
-          selectionId: "",
-          candidateId: "",
-          query: { kind: "room", room: "scoped-room-1" },
-          search: "?room=scoped-room-1",
-          deepLink: "/chat?room=scoped-room-1",
-          selectedRoundId: "",
-        }}
-        onOpenQuestion={() => {}}
-      />,
-    );
-    // 房间详情查询是异步的：轮询等待直到成员完成度随查询成功渲染。
-    await act(async () => {
-      await vi.waitFor(() => {
-        expect(container.querySelector('[data-testid="discussion-member-completion"]')).toBeTruthy();
-      });
-    });
-    const completion = container.querySelector('[data-testid="discussion-member-completion"]');
-    expect(completion?.textContent).toContain("2/3 位成员已发言");
   });
 });

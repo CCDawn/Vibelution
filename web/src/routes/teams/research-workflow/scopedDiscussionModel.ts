@@ -1,3 +1,4 @@
+import type { WorkflowNavigationAnchor } from "../../../api/types/hypothesisFirst";
 import { CHALLENGE_CUP_WORKFLOW_ID } from "../../../api/types/researchWorkflow";
 
 /**
@@ -91,6 +92,7 @@ export type ScopedDiscussionRoom = {
 };
 
 export type ScopedDiscussionModel = {
+  navigation?: WorkflowNavigationAnchor;
   status: typeof SCOPED_DISCUSSION_READY | typeof SCOPED_DISCUSSION_DEGRADED;
   degradedReason: string;
   scope: ScopedDiscussionScope | null;
@@ -492,3 +494,19 @@ export function validateScopedDiscussionAnchor(value: unknown): ScopedDiscussion
 /** Explicit name for route adapters that consume the query/search pair. */
 export const projectScopedDiscussionQuery = buildScopedDiscussionModel;
 export const buildScopedDiscussionQueryState = buildScopedDiscussionModel;
+
+/** V2 already resolves the room identity; preserve its navigation without fabricating a scope hash. */
+export function buildV2DiscussionModel(navigation: WorkflowNavigationAnchor, questionId: string): ScopedDiscussionModel {
+  const base = anchorBase(navigation.degradedReason || SCOPED_DISCUSSION_REASONS.noAnchor);
+  if (navigation.status !== "ready" || navigation.questionId !== questionId
+    || !navigation.roomId || !navigation.meetingRoundId || !navigation.deepLink?.startsWith("/chat?")) return base;
+  const query = new URLSearchParams(navigation.deepLink.slice("/chat?".length));
+  if (query.get("room") !== navigation.roomId) return base;
+  return {
+    ...base, navigation, status: "ready", degradedReason: "",
+    roomId: navigation.roomId, meetingRoundId: navigation.meetingRoundId,
+    questionId: navigation.questionId, selectionId: navigation.selectionId || "", candidateId: navigation.candidateId || "",
+    deepLink: navigation.deepLink, returnTo: navigation.returnTo, returnLabel: navigation.returnLabel,
+    query: {kind: "room", room: navigation.roomId}, search: `?${query}`, selectedRoundId: "",
+  };
+}

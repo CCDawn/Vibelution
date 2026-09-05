@@ -12,7 +12,10 @@
  *
  * Precedent: hypothesisFirstCanvasRegion (hf_ prefix → ksf_ prefix).
  */
-import type { KnowledgeInvocationBadge, KnowledgeInvocationRecentSummary } from "../../../api/types/research-workflow/core";
+import type {
+  KnowledgeInvocationBadge,
+  KnowledgeInvocationRecentSummary,
+} from "../../../api/types/research-workflow/core";
 import { KNOWLEDGE_SIDEFLOW_NODE_IDS } from "../../../api/types/researchWorkflow";
 import type {
   WorkflowCanvasEdgeInput,
@@ -78,6 +81,10 @@ export function sideflowStatusFromChildNodeState(
   if (status === "running" || status === "in_flight") return "running";
   if (status === "failed") return "failed";
   if (status === "blocked") return "blocked";
+  if (status === "pending" || status === "queued") return "pending";
+  if (status === "waiting_human") return "waiting_human";
+  if (status === "cancelled") return "cancelled";
+  if (status === "skipped") return "skipped";
   return null;
 }
 
@@ -104,13 +111,13 @@ function sideflowStatusFor(
     current.currentKnowledgeNodeId as (typeof KNOWLEDGE_SIDEFLOW_NODE_IDS)[number],
   );
   if (currentIndex < 0) return "pending";
-  if (position < currentIndex) return "succeeded";
-  if (position > currentIndex) return "pending";
+  if (position !== currentIndex) return "pending";
   const status = String(current.status ?? "");
   if (status === "awaiting_handoff") return "waiting_human";
-  if (status === "failed" || status === "cancelled") return "failed";
+  if (status === "failed") return "failed";
+  if (status === "cancelled") return "cancelled";
   if (status === "completed") return "succeeded";
-  return "running";
+  return status === "running" ? "running" : "pending";
 }
 
 function sideflowDescription(
@@ -118,18 +125,22 @@ function sideflowDescription(
   current: KnowledgeInvocationRecentSummary | null,
 ): string {
   if (!current) return "尚未发起知识请求";
-  const nodeState = sideflowStatusFromChildNodeState(current.childNodeStates?.[KNOWLEDGE_SIDEFLOW_NODE_IDS[position]]);
-  if (nodeState === "failed") return "知识搜集失败，可在 Inspector 恢复";
-  if (nodeState === "blocked") return "知识搜集已阻塞，可在 Inspector 查看原因";
-  const status = String(current.status ?? "");
-  if (status === "awaiting_handoff") {
-    return position === KNOWLEDGE_SIDEFLOW_NODE_IDS.length - 1
-      ? "知识包就绪，等待人工确认交接"
-      : "前置步骤已完成，等待交接";
+  const status = sideflowStatusFor(position, current);
+  switch (status) {
+    case "succeeded": return position === KNOWLEDGE_SIDEFLOW_NODE_IDS.length - 1 && current.status === "completed"
+      ? "知识包已回写父运行" : "该步骤已完成";
+    case "running": return "该步骤执行中";
+    case "failed": return "该步骤失败，可在操作面板查看原因";
+    case "blocked": return "该步骤已阻塞，可在操作面板查看原因";
+    case "cancelled": return "该步骤已取消";
+    case "skipped": return "该步骤已跳过";
+    case "waiting_human": return "等待人工确认";
+    default:
+      if (current.status === "cancelled") return "请求已取消，该步骤未执行";
+      return current.status === "failed" || Object.values(current.childNodeStates ?? {}).some(
+        (state) => state === "failed" || state === "blocked",
+      ) ? "等待前置步骤恢复" : "等待执行该步骤";
   }
-  if (status === "failed") return "知识搜集失败，可在 Inspector 恢复";
-  if (status === "completed") return "知识包已回写父运行";
-  return "知识搜集进行中";
 }
 
 /**

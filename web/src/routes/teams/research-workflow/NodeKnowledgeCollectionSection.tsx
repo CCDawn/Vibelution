@@ -7,19 +7,12 @@
  */
 import { useState } from "react";
 
+import { isOperatorGatedOffer, type CommandOffer } from "../../../api/types/research-workflow/commands";
 import type { KnowledgeInvocationBadge } from "../../../api/types/research-workflow/core";
-import {
-  isOperatorGatedOffer,
-  type CommandOffer,
-} from "../../../api/types/research-workflow/commands";
 import { VButton, VChip } from "../../../components/vui";
-import {
-  buildKnowledgeCollectionInspectorModel,
-} from "./knowledgeCollectionInspectorModel";
+import { buildKnowledgeCollectionInspectorModel } from "./knowledgeCollectionInspectorModel";
+import { sideflowCardStatesForBadge } from "./knowledgeSideflowCanvasRegion";
 import { commandOfferUnavailableReason } from "./nodeInspectorOpsModel";
-import {
-  sideflowCardStatesForBadge,
-} from "./knowledgeSideflowCanvasRegion";
 import styles from "./NodeKnowledgeCollectionSection.styles";
 
 const KNOWLEDGE_COMMANDS = new Set<CommandOffer["command"]>([
@@ -79,7 +72,7 @@ export function NodeKnowledgeCollectionSection(props: NodeKnowledgeCollectionSec
   );
   const requirements = offerRequirementLines(knowledgeOffers[0]?.payload);
   const phaseChipTone: "neutral" | "info" | "warning" | "danger" | "success" =
-    model.phase === "failed"
+    (model.phase === "failed" || model.phase === "blocked")
       ? "danger"
       : model.phase === "awaiting_handoff"
         ? "warning"

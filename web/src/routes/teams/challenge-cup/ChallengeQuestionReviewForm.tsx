@@ -1,23 +1,16 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
 
-import { queryKeys } from "../../../api/queryKeys";
 import {
   executeHypothesisFirstCommand,
+  fetchHypothesisFirstStateV2,
   isHypothesisFirstCommandStateConflict,
 } from "../../../api/hypothesisFirst";
-import { reviewChallengeQuestionRun } from "../../../api/teamExperiment";
+import { queryKeys } from "../../../api/queryKeys";
 import type { ChallengeQuestionRunDetailPayload, CommandAction } from "../../../api/types";
-import { trackQuestionReviewSubmit } from "../challengeCupTelemetry";
 import { CHALLENGE_CUP_WORKFLOW_ID } from "../../../api/types/researchWorkflow";
-import {
-  VButton,
-  VInput,
-  VSelect,
-  VStatusChip,
-  VSurface,
-  VTextarea,
-} from "../../../components/vui";
+import { VButton, VInput, VSelect, VStatusChip, VSurface, VTextarea } from "../../../components/vui";
+import { trackQuestionReviewSubmit } from "../challengeCupTelemetry";
 import css from "./ChallengeQuestionDetailPanel.styles";
 
 const GATES = [
@@ -117,11 +110,21 @@ export function ChallengeQuestionReviewForm(props: {
   detail: ChallengeQuestionRunDetailPayload;
   lang?: "zh" | "en";
   canonicalAction?: Extract<CommandAction, { command: "record_program_review" }>;
-  allowLegacyMutation?: boolean;
 }) {
   const { detail } = props;
   const isZh = props.lang !== "en";
   const queryClient = useQueryClient();
+  const stateQuery = useQuery({
+    queryKey: queryKeys.hypothesisFirstChainStateV2(detail.teamId, detail.questionId, detail.selectedRunId),
+    queryFn: ({ signal }) => fetchHypothesisFirstStateV2(detail.teamId, detail.questionId, { runId: detail.selectedRunId, signal }),
+    enabled: !props.canonicalAction && Boolean(detail.selectedRunId),
+    retry: false,
+  });
+  const canonicalAction = props.canonicalAction ?? stateQuery.data?.allowedActions.find(
+    (action): action is Extract<CommandAction, { command: "record_program_review" }> =>
+      action.kind === "command" && action.command === "record_program_review" && action.enabled,
+  );
+
   const [decisions, setDecisions] = useState<Record<GateKey, GateSelection>>({
     H1_problem_understanding: "pending",
     H2_hypothesis_selection: "pending",
@@ -147,24 +150,17 @@ export function ChallengeQuestionReviewForm(props: {
         rationale: rationale.trim(),
         decisions,
       };
-      if (props.canonicalAction) {
+      if (canonicalAction) {
         return executeHypothesisFirstCommand(
             detail.teamId,
             detail.questionId,
-            props.canonicalAction,
+            canonicalAction,
             input as {
               reviewer: string;
               rationale: string;
               decisions: Record<GateKey, GateDecision>;
             },
-          );
-      }
-      if (props.allowLegacyMutation !== false) {
-        return reviewChallengeQuestionRun(
-            detail.teamId,
-            detail.questionId,
-            detail.selectedRunId,
-            input,
+            { runId: detail.selectedRunId },
           );
       }
       return Promise.reject(new Error("canonical_action_unavailable"));
@@ -173,7 +169,7 @@ export function ChallengeQuestionReviewForm(props: {
       telemetry: trackQuestionReviewSubmit({
         teamId: detail.teamId,
         questionId: detail.questionId,
-        path: props.canonicalAction ? "canonical" : "legacy",
+        path: canonicalAction ? "canonical" : "unavailable",
         selectedRunId: detail.selectedRunId,
         decisions: Object.fromEntries(GATES.map(({ key }) => [key, decisions[key]])),
         reviewer: reviewer.trim().slice(0, 120),
@@ -241,7 +237,7 @@ export function ChallengeQuestionReviewForm(props: {
     && !mutation.isPending
     && !isSubmitted
     && officialCallReady;
-  const mutationAuthorized = Boolean(props.canonicalAction) || props.allowLegacyMutation !== false;
+  const mutationAuthorized = Boolean(canonicalAction?.enabled);
 
   return (
     <VSurface tone="card" className={css.reviewForm} data-vui="question-review-form">

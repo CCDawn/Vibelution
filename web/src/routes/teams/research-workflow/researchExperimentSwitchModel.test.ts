@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { stateV2 } from "./hypothesisFirstV2.fixture";
 
 import type { ResearchWorkflowLaunchOption } from "../../../api/researchWorkflow";
 import {
@@ -218,7 +219,7 @@ describe("researchExperimentSwitchModel", () => {
         questionId: "SCI-004",
         runId: "run-4",
         selectedCandidateIds: ["hyp-a", "hyp-b", "hyp-c", "hyp-d", "hyp-e"],
-        chain: { hypothesisConverged: true, meetingCount: 1 },
+        chain: stateV2({convergence: {accepted: true}}),
       },
     });
 
@@ -230,7 +231,7 @@ describe("researchExperimentSwitchModel", () => {
         questionId: "SCI-004",
         runId: "run-4",
         selectedCandidateIds: ["hyp-a", "hyp-b"],
-        chain: { meetingCount: 2 },
+        chain: stateV2({review: {activeRoundIndex: 1}}),
       },
     });
 
@@ -242,7 +243,7 @@ describe("researchExperimentSwitchModel", () => {
         questionId: "SCI-004",
         runId: "run-4",
         selectedCandidateIds: ["hyp-a", "hyp-b"],
-        chain: { meetingCount: 3 },
+        chain: stateV2({review: {activeRoundIndex: 2}}),
       },
     });
 
@@ -254,7 +255,7 @@ describe("researchExperimentSwitchModel", () => {
         questionId: "SCI-004",
         runId: "run-4",
         selectedCandidateIds: ["hyp-a", "hyp-b", "hyp-c", "hyp-d"],
-        chain: { meetingCount: 4, activeRoundIndex: 2 },
+        chain: stateV2({review: {activeRoundIndex: 2}}),
       },
     });
 

@@ -1,7 +1,9 @@
+import React from "react";
+import { command, stateV2 } from "../research-workflow/hypothesisFirstV2.fixture";
 /** @vitest-environment happy-dom */
-import React, { act } from "react";
-import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act } from "react";
+import { createRoot } from "react-dom/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ChallengeQuestionRunDetailPayload } from "../../../api/types";
@@ -9,10 +11,13 @@ import { ChallengeQuestionReviewForm } from "./ChallengeQuestionReviewForm";
 
 const reviewMock = vi.hoisted(() => vi.fn(async () => ({})));
 
-vi.mock("../../../api/teamExperiment", async (importOriginal) => ({
+vi.mock("../../../api/hypothesisFirst", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  reviewChallengeQuestionRun: reviewMock,
+  executeHypothesisFirstCommand: reviewMock,
+  fetchHypothesisFirstStateV2: vi.fn(async () => stateV2({allowedActions: [command({command: "record_program_review", payload: {}}, "提交审核")]})),
 }));
+
+vi.mock("../challengeCupTelemetry", () => ({trackQuestionReviewSubmit: () => ({succeeded: vi.fn(), failed: vi.fn()})}));
 
 function installPointerCaptureShims() {
   const proto = Element.prototype as unknown as Record<string, unknown>;
@@ -142,7 +147,7 @@ describe("ChallengeQuestionReviewForm", () => {
     });
 
     expect(reviewMock).toHaveBeenCalledTimes(1);
-    expect(reviewMock).toHaveBeenCalledWith("research-team", "SCI-096", "stage1-sci-096-v3", {
+    expect(reviewMock).toHaveBeenCalledWith("research-team", "SCI-096", expect.objectContaining({command: "record_program_review"}), {
       reviewer: "Grok",
       rationale: "边界清晰，可以进入正式流程。",
       decisions: {
@@ -151,7 +156,7 @@ describe("ChallengeQuestionReviewForm", () => {
         H3_research_plan: "approved",
         H4_external_output: "approved",
       },
-    });
+    }, {runId: "stage1-sci-096-v3"});
 
     await act(async () => {
       root.unmount();
@@ -178,9 +183,9 @@ describe("ChallengeQuestionReviewForm", () => {
       submit!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
-    expect(reviewMock).toHaveBeenCalledWith("research-team", "SCI-096", "stage1-sci-096-v3", expect.objectContaining({
+    expect(reviewMock).toHaveBeenCalledWith("research-team", "SCI-096", expect.objectContaining({command: "record_program_review"}), expect.objectContaining({
       decisions: expect.objectContaining({ H4_external_output: "revision_requested" }),
-    }));
+    }), {runId: "stage1-sci-096-v3"});
     await act(async () => {
       await vi.waitFor(() => expect(container.textContent).toContain("审核结论已提交"));
     });

@@ -1,3 +1,4 @@
+import type { HypothesisFirstStateV2 } from "../../../api/types/hypothesisFirst";
 /**
  * Toolbar experiment switcher (display + URL restore).
  *
@@ -10,9 +11,7 @@
  * Selecting a checkpoint restores `questionId` + `runId` + the focus node. It
  * does not fork, compare, or list the frozen Program EXP-* campaign records.
  */
-import type {
-  ResearchWorkflowLaunchOption,
-} from "../../../api/researchWorkflow";
+import type { ResearchWorkflowLaunchOption } from "../../../api/researchWorkflow";
 import { getNodeAdapter } from "./nodeAdapterModel";
 import { researchRunStatusLabel } from "./researchRunPresentation";
 
@@ -38,12 +37,7 @@ export type ExperimentChromeIdentity = {
   hypothesisSummary: string;
 };
 
-type ExperimentChainSummary = {
-  meetingCount?: number;
-  activeRoundIndex?: number | null;
-  roundBudget?: number;
-  hypothesisConverged?: boolean;
-};
+type ExperimentChainSummary = HypothesisFirstStateV2;
 
 function normalizeQuestionId(value: string): string {
   return value.trim().toUpperCase();
@@ -64,17 +58,8 @@ export function formatHypothesisSummary(
   const ids = (selectedCandidateIds ?? []).map((item) => item.trim()).filter(Boolean);
   if (!ids.length) return "假说待生成";
   const count = ids.length;
-  if (chain?.hypothesisConverged) return `${count} 条假说已收敛`;
-  // One logical review round fans out into one meeting per selected candidate.
-  // meetingCount is a physical-room count, so normalize it by the fan-out
-  // width before presenting a human-facing round number.
-  const canonicalRound = Number(chain?.activeRoundIndex ?? 0);
-  const meetingCount = Number(chain?.meetingCount ?? 0);
-  const round = canonicalRound > 0
-    ? canonicalRound
-    : meetingCount > 0
-      ? Math.ceil(meetingCount / count)
-      : 0;
+  if (chain?.convergence.accepted) return `${count} 条假说已收敛`;
+  const round = Number(chain?.review.activeRoundIndex ?? 0);
   if (round > 0) return `${count} 条假说评审中 · 第 ${round} 轮`;
   return `${count} 条假说待评审`;
 }

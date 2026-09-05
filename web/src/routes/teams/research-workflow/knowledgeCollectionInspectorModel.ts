@@ -6,16 +6,16 @@
  * or guessed intermediate nodes. Pure functions, no React.
  */
 import type { KnowledgeInvocationBadge } from "../../../api/types/research-workflow/core";
-import {
-  sideflowCardStatesForBadge,
-} from "./knowledgeSideflowCanvasRegion";
+import { sideflowCardStatesForBadge } from "./knowledgeSideflowCanvasRegion";
 
 export type KnowledgeCollectionPhase =
   | "not_started"
   | "collecting"
   | "awaiting_handoff"
   | "handed_off"
-  | "failed";
+  | "failed"
+  | "cancelled"
+  | "blocked";
 
 export type KnowledgeCollectionLineage = {
   sourceNodeId: string | null;
@@ -43,10 +43,12 @@ export type KnowledgeCollectionInspectorModel = {
 function phaseOf(badge: KnowledgeInvocationBadge): KnowledgeCollectionPhase {
   const status = String(badge.latest?.status ?? "").trim().toLowerCase();
   if (status === "awaiting_handoff") return "awaiting_handoff";
-  if (status === "failed" || status === "cancelled") return "failed";
+  if (status === "failed") return "failed";
+  if (status === "cancelled") return "cancelled";
   if (status === "completed") return "handed_off";
   const cards = sideflowCardStatesForBadge(badge);
-  if (cards.some((card) => card.status === "failed" || card.status === "blocked")) return "failed";
+  if (cards.some((card) => card.status === "failed")) return "failed";
+  if (cards.some((card) => card.status === "blocked")) return "blocked";
   if (status) return "collecting";
   return "not_started";
 }
@@ -65,7 +67,8 @@ function progressOf(
   // never invents middle-node facts.
   const cards = sideflowCardStatesForBadge(badge);
   let completedNodes = 0;
-  let currentNodeId: string | null = null;
+  let currentNodeId: string | null = cards.find((card) => ["running", "blocked", "failed", "waiting_human", "cancelled"].includes(card.status))?.sideflowNodeId
+    ?? badge.latest?.currentKnowledgeNodeId ?? null;
   for (const card of cards) {
     if (card.status === "succeeded") {
       completedNodes += 1;
@@ -86,6 +89,8 @@ const PHASE_HEADLINES: Record<KnowledgeCollectionPhase, string> = {
   awaiting_handoff: "等待知识交接",
   handed_off: "知识已回写",
   failed: "知识搜集失败",
+  cancelled: "知识搜集已取消",
+  blocked: "知识搜集已阻塞",
 };
 
 export function buildKnowledgeCollectionInspectorModel(input: {
@@ -118,6 +123,8 @@ export function buildKnowledgeCollectionInspectorModel(input: {
         return "知识包已产出并等待人工交接确认；请核对来源与风险后接受或要求修订。";
       case "handed_off":
         return "知识包已被父运行吸收并回写；下方可追溯包引用与来源节点。";
+      case "cancelled": return "知识请求已取消，后续步骤不会继续执行。";
+      case "blocked": return "知识搜集已阻塞，请查看节点原因和可用操作。";
       case "failed":
         return "知识搜集失败；可按剩余预算重试，失败节点与子运行见下方。";
       default:
