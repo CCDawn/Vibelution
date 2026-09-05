@@ -12,11 +12,14 @@ from __future__ import annotations
 import sqlite3
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
 from langgraph.checkpoint.sqlite import SqliteSaver
+import pytest
+from core.research.workflow import checkpoint_store
 
 from core.research.workflow.checkpoint_store import (
     CHECKPOINT_BUSY_TIMEOUT_MS,
@@ -84,10 +87,55 @@ def test_open_sqlite_checkpointer_uses_factory_connection(tmp_path: Path) -> Non
         _assert_factory_pragmas(saver.conn)
 
 
-def test_ten_concurrent_writers_and_readers_have_no_lock_failures(tmp_path: Path) -> None:
+def test_cold_wal_transition_is_serialized(tmp_path: Path, monkeypatch) -> None:
+    first_entered = threading.Event()
+    release_first = threading.Event()
+    second_started = threading.Event()
+    real_connect = sqlite3.connect
+
+    class Connection:
+        def __init__(self, *args, **kwargs):
+            self.inner = real_connect(*args, **kwargs)
+
+        def execute(self, sql):
+            if sql == "PRAGMA journal_mode = WAL":
+                if first_entered.is_set() and not release_first.is_set():
+                    raise sqlite3.OperationalError("database is locked")
+                if not first_entered.is_set():
+                    first_entered.set()
+                    assert release_first.wait(timeout=5)
+            return self.inner.execute(sql)
+
+        def close(self):
+            self.inner.close()
+
+    monkeypatch.setattr(checkpoint_store.sqlite3, "connect", Connection)
+    db = tmp_path / "cold.sqlite"
+
+    def open_second():
+        second_started.set()
+        return _connect_checkpoint_sqlite(db)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(_connect_checkpoint_sqlite, db)
+        try:
+            assert first_entered.wait(timeout=5)
+            second = pool.submit(open_second)
+            assert second_started.wait(timeout=5)
+            with pytest.raises(TimeoutError):
+                second.result(timeout=0.1)
+        finally:
+            release_first.set()
+            first.result(timeout=5).close()
+        second.result(timeout=5).close()
+
+
+@pytest.mark.parametrize("prewarm", [False, True])
+def test_ten_concurrent_writers_and_readers_have_no_lock_failures(tmp_path: Path, prewarm: bool) -> None:
     db = tmp_path / "checkpoints.sqlite"
-    with open_sqlite_checkpointer(db):
-        pass  # create schema before the barrier so setup races stay out of scope
+    if prewarm:
+        with open_sqlite_checkpointer(db):
+            pass
 
     barrier = threading.Barrier(WRITER_COUNT + READER_COUNT)
     errors: list[str] = []
