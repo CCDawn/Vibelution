@@ -1,4 +1,6 @@
 import type { NodeHandoffRecord } from "../../../api/types/researchWorkflow";
+import { VErrorSummary } from "../../../components/vui";
+import { presentResearchWorkflowError } from "../researchWorkflowErrorModel";
 import styles from "./NodeHandoffSection.styles";
 
 function blockedReasonLabel(reason: string, isZh: boolean): string {
@@ -15,7 +17,8 @@ function blockedReasonLabel(reason: string, isZh: boolean): string {
       ? "检查点仍停留在前驱节点，无法从当前节点恢复。"
       : "The checkpoint still points at a previous node; cannot resume from this node.";
   }
-  return reason;
+  const presented = presentResearchWorkflowError(reason);
+  return isZh ? presented.bodyZh : presented.bodyEn;
 }
 
 export function NodeHandoffSection(props: {
@@ -31,9 +34,9 @@ export function NodeHandoffSection(props: {
       <h4 className={styles.title}>{isZh ? "交接" : "Handoffs"}</h4>
       <dl className={styles.details}>
         <dt className={styles.label}>{isZh ? "状态" : "Status"}</dt>
-        <dd className={styles.value}>{props.pending ? (isZh ? "等待人工" : "Waiting for human") : (isZh ? "已处理" : "Handled")}</dd>
-        {props.blockedReason ? <><dt className={styles.label}>{isZh ? "阻塞" : "Blocked"}</dt><dd className={styles.valueBreak}>{blockedReasonLabel(props.blockedReason, isZh)}</dd></> : null}
+        <dd className={styles.value}>{props.pending ? (isZh ? "等待人工" : "Waiting for human") : props.blockedReason ? (isZh ? "已阻塞" : "Blocked") : props.handoffs.length ? (isZh ? "已有交接记录" : "Handoffs recorded") : (isZh ? "暂无交接" : "No handoff yet")}</dd>
       </dl>
+      {props.blockedReason ? <VErrorSummary label={isZh ? "阻塞原因" : "Blocker"} summary={blockedReasonLabel(props.blockedReason, isZh)} /> : null}
       {props.handoffs.map((handoff) => (
         <article className={styles.record} key={handoff.handoffId}>
           <strong>{handoff.fromNodeId} → {handoff.toNodeId}</strong>

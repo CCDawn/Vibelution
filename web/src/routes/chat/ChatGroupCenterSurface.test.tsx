@@ -77,6 +77,8 @@ describe("ChatGroupCenterSurface hand-test substitutes", () => {
     }] } as never;
     const html = renderToStaticMarkup(<ChatGroupCenterSurface {...props} activeGroupRoom={room} />);
     expect(html).toContain("1 条解析失败");
+    expect(html).toContain("最近一轮有 1 条科研发言解析失败");
+    expect(html).toContain("本轮结果待处理");
     expect(html).not.toContain("4/4 位参与者成功发言");
   });
   it("renders a real loading state before the first group detail arrives", () => {

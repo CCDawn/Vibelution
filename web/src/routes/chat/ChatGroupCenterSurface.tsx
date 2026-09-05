@@ -12,13 +12,13 @@ import type {
   ProjectAgentBusEvent,
   ProjectAgentBusTimeline,
 } from "../../api/types";
-import { VButton, VContextualHint, VNativeInput } from "../../components/vui";
+import { VButton, VContextualHint, VNativeInput, VStateRow } from "../../components/vui";
 import type { ChatMentionTarget } from "../chatMentionTokens";
 import { ProgressiveRegionSkeleton } from "../shared/ProgressiveRegionSkeleton";
 import styles from "./ChatGroupCenterSurface.styles";
 import { ChatGroupMessageBody, ChatMentionedText } from "./ChatGroupMessagePresentation";
 import { ChatMessageChromeHeader } from "./ChatMessageChromeHeader";
-import { groupConsecutiveBy } from "./chatRoutePresentation";
+import { chatRoomModeLabel, chatRoomPurposeLabel, groupConsecutiveBy } from "./chatRoutePresentation";
 import type { GroupSpeakerProgressMap, GroupSpeakerStreamEntry, GroupSpeakerStreamMap } from "./useGroupRoomStream";
 
 // The backend only publishes a full snapshot when a speaker finishes, so the
@@ -184,14 +184,19 @@ function GroupRoundsTimeline({
               <span>
                 {lang === "zh" ? `第 ${roundIndex + 1} 轮` : `Round ${roundIndex + 1}`}
                 {" · "}
-                {round.mode}
+                {chatRoomModeLabel({ id: round.mode, label: round.mode, status: "active" }, lang)}
                 {" · "}
-                {round.purpose ?? purposeFallback}
+                {chatRoomPurposeLabel({ id: round.purpose ?? purposeFallback, label: round.purpose ?? purposeFallback }, lang)}
                 {" · "}
-                {statusLabel(round.status)}
+                {round.status === "completed" ? (lang === "zh" ? "发言已结束" : "Speaking finished") : statusLabel(round.status)}
               </span>
               <time>{formatTime(round.updatedAt || round.startedAt)}</time>
             </div>
+            {invalidCount > 0 && !roundRunning ? (
+              <VStateRow tone="danger" role="status">
+                {lang === "zh" ? `本轮结果待处理：${parsedCount}/${challengeMessages.length} 条科研发言解析成功，${invalidCount} 条解析失败。` : `Round needs attention: ${parsedCount}/${challengeMessages.length} research messages parsed, ${invalidCount} failed.`}
+              </VStateRow>
+            ) : null}
             <article className={styles.groupTopicMessage}>
               <div className={styles.groupTopicBubble}>
                 <div className={styles.groupStreamIdentity} data-testid="group-stream-topic-identity">
@@ -473,7 +478,7 @@ export function ChatGroupCenterSurface({
         ? (lang === "zh" ? "群聊加载失败" : "Group failed to load")
         : (lang === "zh" ? "暂无群聊" : "No group room"));
   const groupRoomEyebrow = activeGroupRoom
-    ? `${activeGroupRoom.mode ?? "round_robin"} · ${activeGroupRoom.purpose ?? "discussion"}`
+    ? `${chatRoomModeLabel({ id: activeGroupRoom.mode ?? "round_robin", label: "", status: "active" }, lang)} · ${chatRoomPurposeLabel({ id: activeGroupRoom.purpose ?? "discussion", label: "" }, lang)}`
     : (lang === "zh" ? "群聊状态" : "Group status");
   const groupRoomMeta = activeGroupRoom
     ? `${availableGroupParticipantCount} ${lang === "zh" ? "位可用助手" : "available agents"} · ${statusLabel(activeGroupRoom.status ?? "ready")}`
@@ -481,6 +486,7 @@ export function ChatGroupCenterSurface({
       ? (lang === "zh" ? "读取失败" : "Load failed")
       : (lang === "zh" ? "尚未关联群聊" : "No room linked");
   const lastRound = rounds[rounds.length - 1];
+  const latestInvalidCount = (lastRound?.messages ?? []).filter((message) => message.messagePayload?.kind === "challenge_meeting_message" && message.messagePayload.audit?.parseStatus === "invalid").length;
   const lastMessageKey = `${lastRound?.roundId ?? ""}:${(lastRound?.messages ?? []).length}:${rounds.length}`;
   const groupTimelineRef = useRef<HTMLDivElement | null>(null);
   const groupTimelineOpenedRoomIdRef = useRef<string | null>(null);
@@ -717,7 +723,9 @@ export function ChatGroupCenterSurface({
         density="surface"
         eyebrow={<p>{groupRoomEyebrow}</p>}
         title={<h2>{groupRoomTitle}</h2>}
-        meta={<span>{groupRoomMeta}</span>}
+        meta={<span>{latestInvalidCount > 0 && lastRound?.status !== "running"
+          ? (lang === "zh" ? `最近一轮有 ${latestInvalidCount} 条科研发言解析失败 · 结果待处理` : `Latest round: ${latestInvalidCount} research messages failed parsing · results need attention`)
+          : groupRoomMeta}</span>}
         trailing={(
           <VButton
             type="button"

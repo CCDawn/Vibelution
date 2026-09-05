@@ -295,7 +295,7 @@ export function ResearchWorkflowStageNavigator({
     >
       <header className={styles.header}>
         <div className={styles.headingRow}>
-          <h2 className={styles.title}>{zh ? "进度" : "Progress"}</h2>
+          <h2 className={styles.title}>{summary.authority === "formal" ? (zh ? "主流程进度" : "Main workflow progress") : (zh ? "进度" : "Progress")}</h2>
           <span className={styles.compactProgress}>{summary.completedNodes}/{summary.totalNodes}</span>
           {summary.blockedNodes > 0 ? (
             <VStatusChip tone="danger">

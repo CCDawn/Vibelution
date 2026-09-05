@@ -1,11 +1,13 @@
 import type { WorkflowEventEnvelope } from "../../../api/types/research-workflow/events";
 import { getNodeAdapter } from "./nodeAdapterModel";
+import { presentResearchWorkflowError } from "../researchWorkflowErrorModel";
 
 export type ResearchTimelineItem = {
   key: string;
   label: string;
   status: string;
   occurredAt: string;
+  details?: string;
 };
 
 export type ResearchTimelineGroup = {
@@ -82,7 +84,7 @@ function eventLabel(event: WorkflowEventEnvelope): string {
   const base = EVENT_LABELS[eventType] || "运行状态已更新";
   const reason = field(event, "reason") || field(event, "detail");
   if ((eventType === "node_blocked" || eventType === "run_blocked") && reason) {
-    return `${base} · ${reason}`;
+    return `${base} · ${presentResearchWorkflowError(reason).bodyZh}`;
   }
   return base;
 }
@@ -103,8 +105,9 @@ export function buildResearchTimelineGroups(
     group.items.push({
       key: field(event, "eventId") || `${field(event, "sequence")}:${eventType}`,
       label: eventLabel(event),
-      status: field(event, "status") || field(event, "decision") || field(event, "outcome") || field(event, "reason"),
+      status: field(event, "status") || field(event, "decision") || field(event, "outcome"),
       occurredAt: field(event, "occurredAt"),
+      details: field(event, "reason") || field(event, "detail") || undefined,
     });
     groups.set(identity.key, group);
   }

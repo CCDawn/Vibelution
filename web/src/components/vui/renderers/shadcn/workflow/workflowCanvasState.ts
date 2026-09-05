@@ -247,7 +247,7 @@ export function resolveEdgeStroke(pathState: WorkflowEdgePathState, semanticKind
   }
   return {
     stroke: idle
-      ? "color-mix(in srgb, var(--vui-border-strong, #a1a1aa) 55%, transparent)"
+      ? "color-mix(in srgb, var(--vui-border-strong, #a1a1aa) 85%, transparent)"
       : "var(--vui-border-strong, #a1a1aa)",
     strokeWidth: 1.5,
     animated: false,

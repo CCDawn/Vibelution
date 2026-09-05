@@ -108,8 +108,8 @@ export function ResearchCurrentTaskInspector({
     >
       <header className={styles.header} data-vui-region="current-task-header">
         <div className={styles.titleRow}>
-          <h2 className={styles.title}>{task.title}</h2>
-          <VStatusChip tone={STATUS_TONE[task.status]}>{STATUS_LABEL[task.status]}</VStatusChip>
+          <h2 className={styles.title}>{historyMode ? "所选节点详情" : task.title}</h2>
+          {!historyMode ? <VStatusChip tone={STATUS_TONE[task.status]}>{STATUS_LABEL[task.status]}</VStatusChip> : null}
         </div>
       </header>
       <div className={styles.body} data-vui-region="current-task-body">
@@ -123,6 +123,8 @@ export function ResearchCurrentTaskInspector({
               label={STATUS_LABEL[task.status]}
               summary={presentResearchWorkflowError(task.detail).bodyZh}
               details={task.detail}
+              openLabel="诊断详情"
+              closeLabel="收起详情"
               defaultOpen={false}
             />
           ) : task.detail}

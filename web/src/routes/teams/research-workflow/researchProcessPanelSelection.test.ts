@@ -48,6 +48,9 @@ describe("researchProcessPanelSelection", () => {
 });
 
 describe("resolveResearchProcessAutofocus", () => {
+  it("preserves an explicit child-node link while the first current task loads", () => {
+    expect(resolveResearchProcessAutofocus({ panel: "node", selectedNodeId: "ksf_source_finding", nextTarget: "hypothesis_design", previousNextTarget: null })).toBeNull();
+  });
   it("opens the node inspector when panel=node and nothing is selected", () => {
     expect(resolveResearchProcessAutofocus({
       panel: "node",
