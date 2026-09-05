@@ -58,19 +58,27 @@ describe("challengeQuestionStageModel", () => {
     expect(stageOneStatusCopy(projection.stageOne, "en")).toBe("Generating");
   });
 
-  it("advances stage two when the hypothesis is settled", () => {
+  it("does not infer phase-two activation from question approval", () => {
     const waiting = deriveChallengeQuestionStageProjection(
       detailWith({ recordStatus: "pending_review", gateDecision: "pending" }),
     );
-    expect(waiting.stageTwoActive).toBe(false);
-    expect(stageTwoStatusCopy(false, "zh")).toBe("等待假说确定");
-    expect(stageTwoProgressHint(false, "zh")).toContain("自动进入");
+    expect(waiting.stageTwoActive).toBe(null);
+    expect(stageTwoStatusCopy(false, "zh")).toBe("未激活");
+    expect(stageTwoProgressHint(false, "zh")).toContain("知识发布");
 
-    const active = deriveChallengeQuestionStageProjection(
+    const approved = deriveChallengeQuestionStageProjection(
       detailWith({ recordStatus: "approved" }),
     );
+    expect(approved.stageTwoActive).toBe(null);
+  });
+
+  it("projects the backend phase boundary without treating unlock as a running experiment", () => {
+    const approved = detailWith({ recordStatus: "approved" });
+    expect(deriveChallengeQuestionStageProjection(approved, { phase2Activated: false }).stageTwoActive).toBe(false);
+    const active = deriveChallengeQuestionStageProjection(approved, { phase2Activated: true });
     expect(active.stageTwoActive).toBe(true);
-    expect(stageTwoStatusCopy(true, "zh")).toBe("进行中");
+    expect(stageTwoStatusCopy(true, "zh")).toBe("已解锁");
+    expect(stageTwoStatusCopy(null, "zh")).toBe("状态待确认");
   });
 
   it("treats a blank research plan as no proposal and a filled one as proposal-only", () => {
@@ -87,7 +95,7 @@ describe("challengeQuestionStageModel", () => {
     const projection = deriveChallengeQuestionStageProjection(undefined);
     expect(projection).toEqual({
       stageOne: "hypothesis_generating",
-      stageTwoActive: false,
+      stageTwoActive: null,
       hasResearchPlanProposal: false,
     });
   });

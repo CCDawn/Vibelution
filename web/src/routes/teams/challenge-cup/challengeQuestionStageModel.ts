@@ -3,10 +3,11 @@
  *
  * Derives the two-stage presentation state (假说生成 / 研究计划与实验) from
  * data the question detail payload already carries — the same authorities the
- * panel already renders (record status + selection human gate). The canonical
- * workflow proceeds into research planning once the hypothesis is settled.
+ * panel already renders (record status + selection human gate). Phase-two
+ * eligibility comes only from the server's approval/knowledge boundary.
  */
 import type { ChallengeQuestionRunDetailPayload } from "../../../api/types";
+import type { ChallengePhaseBoundaryStatus } from "../../../api/types/challengeCup";
 
 /** Stage one lifecycle: generating until the stage-one acceptance gate passes. */
 export type ChallengeQuestionStageOneStatus = "hypothesis_generating" | "hypothesis_settled";
@@ -15,7 +16,7 @@ export type ChallengeQuestionStageProjection = {
   /** 假说生成：run 活跃/候选评审中 → generating；stage-one 收门通过 → settled。 */
   stageOne: ChallengeQuestionStageOneStatus;
   /** 研究计划与实验是否已进入可执行阶段。 */
-  stageTwoActive: boolean;
+  stageTwoActive: boolean | null;
   /** 研究计划产物是否存在于本 run 输出。 */
   hasResearchPlanProposal: boolean;
 };
@@ -34,6 +35,7 @@ function stageOneGateApproved(
  */
 export function deriveChallengeQuestionStageProjection(
   detail: Pick<ChallengeQuestionRunDetailPayload, "record" | "output"> | undefined | null,
+  boundary?: Pick<ChallengePhaseBoundaryStatus, "phase2Activated"> | null,
 ): ChallengeQuestionStageProjection {
   const settled = Boolean(
     detail
@@ -48,7 +50,7 @@ export function deriveChallengeQuestionStageProjection(
   );
   return {
     stageOne: settled ? "hypothesis_settled" : "hypothesis_generating",
-    stageTwoActive: settled,
+    stageTwoActive: boundary?.phase2Activated ?? null,
     hasResearchPlanProposal,
   };
 }
@@ -65,9 +67,10 @@ export function stageOneStatusCopy(
 }
 
 /** Chinese/English copy for the stage-two state chip. */
-export function stageTwoStatusCopy(active: boolean, lang: "zh" | "en"): string {
-  if (active) return lang === "zh" ? "进行中" : "In progress";
-  return lang === "zh" ? "等待假说确定" : "Awaiting hypothesis";
+export function stageTwoStatusCopy(active: boolean | null, lang: "zh" | "en"): string {
+  if (active === null) return lang === "zh" ? "状态待确认" : "Status unavailable";
+  if (active) return lang === "zh" ? "已解锁" : "Unlocked";
+  return lang === "zh" ? "未激活" : "Inactive";
 }
 
 /** Zone titles — descriptive names, never ordinals. */
@@ -82,13 +85,18 @@ export function stageZoneTitle(
 }
 
 /** One-line progression semantics for the plan and experiment zone. */
-export function stageTwoProgressHint(active: boolean, lang: "zh" | "en"): string {
+export function stageTwoProgressHint(active: boolean | null, lang: "zh" | "en"): string {
+  if (active === null) {
+    return lang === "zh"
+      ? "尚未取得阶段状态；假说审批和已有计划不代表第二阶段已激活。"
+      : "Phase status is unavailable; hypothesis approval and existing plans do not prove activation.";
+  }
   if (active) {
     return lang === "zh"
-      ? "假说已确定，主流程将继续推进研究计划、协议与实验。"
-      : "The hypothesis is settled; the main workflow continues through planning, protocol, and experiments.";
+      ? "审批与知识发布已完成，第二阶段已解锁；实际执行进度以运行记录为准。"
+      : "Approval and knowledge publication are complete; phase two is unlocked. See the run for execution progress.";
   }
   return lang === "zh"
-    ? "完成假说确定后，主流程会自动进入研究计划与实验。"
-    : "The main workflow enters research planning and experiments after the hypothesis is settled.";
+    ? "第二阶段尚未激活，需完成阶段审批与知识发布；已有计划不代表实验已开始。"
+    : "Phase two requires phase approval and knowledge publication; existing plans do not mean experiments have started.";
 }

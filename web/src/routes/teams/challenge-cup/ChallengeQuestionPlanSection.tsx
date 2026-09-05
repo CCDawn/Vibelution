@@ -8,19 +8,21 @@ import {
 } from "./ChallengeQuestionDetailPrimitives";
 import { ChallengeQuestionReviewForm } from "./ChallengeQuestionReviewForm";
 import {
-  deriveChallengeQuestionStageProjection,
+  stageTwoProgressHint,
+  stageTwoStatusCopy,
+  type ChallengeQuestionStageProjection,
 } from "./challengeQuestionStageModel";
 import css from "./ChallengeQuestionDetailPanel.styles";
 
 type ChallengeQuestionPlanSectionProps = {
   detail: ChallengeQuestionRunDetailPayload;
+  stageProjection: ChallengeQuestionStageProjection;
   lang?: "zh" | "en";
 };
 
-export function ChallengeQuestionPlanSection({ detail, lang = "zh" }: ChallengeQuestionPlanSectionProps) {
+export function ChallengeQuestionPlanSection({ detail, stageProjection, lang = "zh" }: ChallengeQuestionPlanSectionProps) {
   const isZh = lang === "zh";
   const { artifact, output } = detail;
-  const stageProjection = deriveChallengeQuestionStageProjection(detail);
   const planCard = stageProjection.hasResearchPlanProposal ? (
     <VSurface className={css.plan} tone="card">
       <h4>{output.research_plan.objective}</h4>
@@ -42,13 +44,8 @@ export function ChallengeQuestionPlanSection({ detail, lang = "zh" }: ChallengeQ
   ) : (
     <VSurface className={css.plan} tone="card" data-testid="question-plan-pending-empty">
       <p className={css.archiveHint}>
-        {isZh
-          ? stageProjection.stageTwoActive
-            ? "本题尚无研究计划产物，主流程正在继续推进。"
-            : "本题尚未确定假说；确定后主流程会进入研究计划与实验。"
-          : stageProjection.stageTwoActive
-            ? "No research-plan artifact yet; the main workflow is progressing."
-            : "The hypothesis is not settled yet; planning and experiments follow automatically."}
+        {isZh ? "本题尚无研究计划产物。" : "No research-plan artifact yet. "}
+        {stageTwoProgressHint(stageProjection.stageTwoActive, lang)}
       </p>
     </VSurface>
   );
@@ -58,9 +55,7 @@ export function ChallengeQuestionPlanSection({ detail, lang = "zh" }: ChallengeQ
         <div className={css.sectionHeadingRow}>
           <ChallengeQuestionSectionHeading index="06" title={isZh ? "研究计划" : "Research plan"} />
           <VStatusChip tone={stageProjection.stageTwoActive ? "accent" : "neutral"}>
-            {stageProjection.stageTwoActive
-              ? (isZh ? "进行中" : "In progress")
-              : (isZh ? "等待假说确定" : "Awaiting hypothesis")}
+            {stageTwoStatusCopy(stageProjection.stageTwoActive, lang)}
           </VStatusChip>
         </div>
         {planCard}

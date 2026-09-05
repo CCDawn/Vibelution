@@ -19,13 +19,13 @@ import css from "./ChallengeQuestionDetailPanel.styles";
 export function ChallengeQuestionStageZoneHeading({
   zone,
   stageOneStatus,
-  stageTwoActive = false,
+  stageTwoActive = null,
   lang = "zh",
 }: {
   zone: "hypothesis" | "plan";
   /** Only read for zone="hypothesis". */
   stageOneStatus?: ChallengeQuestionStageOneStatus;
-  stageTwoActive?: boolean;
+  stageTwoActive?: boolean | null;
   lang?: "zh" | "en";
 }) {
   const isZh = lang === "zh";

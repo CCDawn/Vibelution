@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
 
 import type { ChallengeQuestionRunDetailPayload } from "../../../api/types";
+import { queryKeys } from "../../../api/queryKeys";
 import { ChallengeQuestionDetailPanel } from "./ChallengeQuestionDetailPanel";
 import detailFixture from "./challengeQuestionDetailFixture";
 import detailPanelSource from "./ChallengeQuestionDetailPanel.tsx?raw";
@@ -13,9 +14,17 @@ import {
   challengeRecordStatusLabel,
 } from "./ChallengeQuestionDetailPrimitives";
 
-function renderPanel(ui: React.ReactElement): string {
+function renderPanel(ui: React.ReactElement, phase2Activated?: boolean | "error"): string {
+  const client = new QueryClient();
+  const key = queryKeys.challengePhaseBoundary(detailFixture().teamId);
+  if (phase2Activated !== undefined) {
+    client.setQueryData(key, { phase2Activated: phase2Activated === "error" || phase2Activated });
+    if (phase2Activated === "error") {
+      client.getQueryCache().find({ queryKey: key })?.setState({ status: "error", error: new Error("offline") });
+    }
+  }
   return renderToStaticMarkup(
-    <QueryClientProvider client={new QueryClient()}>{ui}</QueryClientProvider>,
+    <QueryClientProvider client={client}>{ui}</QueryClientProvider>,
   );
 }
 
@@ -385,6 +394,7 @@ describe("ChallengeQuestionDetailPanel stage zones", () => {
     recordStatus?: string;
     gateDecision?: "pending" | "approved" | "revision_requested" | "rejected";
     withoutPlan?: boolean;
+    phase2Activated?: boolean | "error";
   }): string {
     const base = detail();
     const payload: ChallengeQuestionRunDetailPayload = {
@@ -416,6 +426,7 @@ describe("ChallengeQuestionDetailPanel stage zones", () => {
         isLoading={false}
         onClose={() => undefined}
       />,
+      overrides?.phase2Activated,
     );
   }
 
@@ -424,7 +435,7 @@ describe("ChallengeQuestionDetailPanel stage zones", () => {
     const nav = markup.match(/<nav[^>]*aria-label="单题验收章节"[\s\S]*?<\/nav>/)?.[0] || "";
 
     expect(nav).toContain("假说生成");
-    expect(nav).toContain("研究计划与实验 · 进行中");
+    expect(nav).toContain("研究计划与实验 · 状态待确认");
     // Descriptive zone names, never stage ordinals.
     expect(nav).not.toContain("第一阶段");
     expect(nav).not.toContain("第二阶段");
@@ -452,13 +463,27 @@ describe("ChallengeQuestionDetailPanel stage zones", () => {
     expect(markup).not.toContain("假说已定");
   });
 
-  it("marks the plan zone active after the hypothesis is settled", () => {
-    const markup = renderAcceptance();
+  it("marks phase two unlocked only from the backend boundary", () => {
+    const markup = renderAcceptance({ phase2Activated: true });
     expect(markup).toContain('data-testid="question-stage-zone-plan"');
-    expect(markup).toContain("进行中");
-    expect(markup).toContain("主流程将继续推进研究计划、协议与实验");
+    expect(markup).toContain("已解锁");
+    expect(markup).toContain("实际执行进度以运行记录为准");
     expect(markup).not.toContain("激活第二阶段");
     expect(markup).not.toContain("开启第二阶段");
+  });
+
+  it("does not let approved question artifacts override a locked phase boundary", () => {
+    const markup = renderAcceptance({ recordStatus: "approved", phase2Activated: false });
+    expect(markup).toContain("假说已定");
+    expect(markup).toContain("未激活");
+    expect(markup).not.toContain("已解锁");
+    expect(markup).not.toContain("进行中");
+  });
+
+  it("does not reuse a cached unlock when the boundary request fails", () => {
+    const markup = renderAcceptance({ phase2Activated: "error" });
+    expect(markup).toContain("状态待确认");
+    expect(markup).not.toContain("已解锁");
   });
 
   it("renders an existing plan artifact as current workflow output", () => {
@@ -471,7 +496,8 @@ describe("ChallengeQuestionDetailPanel stage zones", () => {
   it("shows the pending empty note when the run output carries no plan", () => {
     const markup = renderAcceptance({ withoutPlan: true });
     expect(markup).toContain('data-testid="question-plan-pending-empty"');
-    expect(markup).toContain("主流程正在继续推进");
+    expect(markup).toContain("本题尚无研究计划产物");
+    expect(markup).toContain("尚未取得阶段状态");
   });
 
   it("keeps the read-only archive free of stage zone chrome", () => {
