@@ -514,23 +514,6 @@ def writeback_source_collection_stage_session_task(
             status = finding_close_status
             writeback["status"] = status
             writeback["autoCloseReason"] = "finding_search_envelope_saturated"
-    if status == "completed" and task.get("stageId") == "finding" and task.get("workflowRunId"):
-        from ..research_runtime.artifact_readback_registry import load_source_finding_receipt_payload
-
-        try:
-            load_source_finding_receipt_payload(
-                team_id=normalized_team_id,
-                authority_run_id=run_id,
-                raise_on_invalid=True,
-            )
-        except ValueError as exc:
-            raise s.TeamWorkflowOrchestrationError(
-                f"source_search_receipt_missing: {exc}. "
-                "Read source_collection_context_tool, then search the missing candidates' actual titles/URLs "
-                "using batch_web_search_tool or paper_search_tool with parent_query_id from assignedQueries. "
-                "Reuse existing candidates; do not rewrite them or invent searchTrace. "
-                "Only write completed after real search receipts cover every candidate."
-            ) from exc
     materialized_content_extraction = s._materialize_source_collection_stage_writeback_content_extraction(
         normalized_team_id,
         run_id,
@@ -625,6 +608,23 @@ def writeback_source_collection_stage_session_task(
     writeback["materializedCandidateGraph"] = materialized_candidate_graph
     writeback["materializedKnowledgeIngestion"] = materialized_knowledge_ingestion
     writeback["closureSummary"] = closure_summary
+    if status == "completed" and task.get("stageId") == "finding" and task.get("workflowRunId"):
+        from ..research_runtime.artifact_readback_registry import load_source_finding_receipt_payload
+
+        try:
+            load_source_finding_receipt_payload(
+                team_id=normalized_team_id,
+                authority_run_id=run_id,
+                raise_on_invalid=True,
+            )
+        except ValueError as exc:
+            raise s.TeamWorkflowOrchestrationError(
+                f"source_search_receipt_missing: {exc}. "
+                "Read source_collection_context_tool, then search the missing candidates' actual titles/URLs "
+                "using batch_web_search_tool or paper_search_tool with parent_query_id from assignedQueries. "
+                "Reuse existing candidates; do not rewrite them or invent searchTrace. "
+                "Only write completed after real search receipts cover every candidate."
+            ) from exc
     task["status"] = status
     task["summary"] = writeback["summary"] or s._trim_text(task.get("summary"), max_length=4000)
     task["result"] = writeback["result"]

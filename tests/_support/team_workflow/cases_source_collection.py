@@ -1868,11 +1868,6 @@ def test_source_collection_stage_session_task_writeback_materializes_search_lead
     assert writeback_events[-1]["child_log_payload"]["materializedKnowledgeIngestion"]["status"] == "skipped_stage"
 
 def test_source_collection_stage_session_task_writeback_materializes_source_records_alias(tmp_path, monkeypatch):
-    from core.web.services.team_workflow.research_runtime import artifact_readback_registry
-
-    # Isolate alias materialization; canonical receipt rejection is covered by
-    # test_source_finding_receipt_gate and the HTTP writeback contract test.
-    monkeypatch.setattr(artifact_readback_registry, "load_source_finding_receipt_payload", lambda **_: {"quality": {}})
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
     _stub_source_collection_search_background(monkeypatch)

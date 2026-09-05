@@ -93,6 +93,15 @@ def test_finding_writeback_rejects_unreceipted_completion_before_task_closes(mon
     monkeypatch.setattr(s, "_merge_source_collection_stage_writeback_result_payload", lambda *_: {})
     monkeypatch.setattr(s, "_source_collection_stage_writeback_candidate_coverage", lambda *_: {})
     monkeypatch.setattr(s, "_materialize_source_collection_stage_writeback_sources", lambda *_a, **_kw: {})
+    for name in ["_materialize_source_collection_stage_writeback_content_extraction",
+                 "_materialize_source_collection_stage_writeback_quality",
+                 "_materialize_source_collection_stage_writeback_candidate_graph",
+                 "_materialize_source_collection_stage_writeback_knowledge_ingestion"]:
+        monkeypatch.setattr(s, name, lambda *_a, **_kw: {})
+    monkeypatch.setattr(s, "_source_collection_stage_writeback_closure_summary", lambda *_a, **_kw: {
+        "artifactComplete": True, "taskChecklistComplete": True,
+    })
+    monkeypatch.setattr(s, "_source_collection_stage_completion_gate", lambda **_: {"passed": True})
     monkeypatch.setattr(writeback_materialize, "source_collection_finding_writeback_close_status", lambda *_: "completed")
     payload = _receipt_payload()
     payload["candidateSources"][0]["sourceUrl"] = "https://missing.test/source"
