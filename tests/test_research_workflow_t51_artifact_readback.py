@@ -255,6 +255,26 @@ def test_run_scoped_artifacts_survive_active_research_project_switch(
     )
     source_run_id = str(source_run["runId"])
     workflow_run_id = "wf-owner-1"
+    from core.research.evidence import ClaimEvidenceStore
+
+    evidence = ClaimEvidenceStore(tmp_path).register(
+        team_id,
+        {
+            "claimId": "owner-claim",
+            "candidateId": "owner-candidate",
+            "sourceId": "owner-source",
+            "sourceRevision": "sha256:" + "a" * 64,
+            "locator": {"kind": "url", "url": "https://example.test/owner-source"},
+            "quote": "No independent replication",
+            "evidenceKind": "counter_evidence",
+            "reasoningRole": "fact",
+            "supportLevel": "contradicts",
+            "extractionMethod": "manual",
+            "extractorAgentId": "extractor",
+            "sourceCollectionRunId": source_run_id,
+            "workflowRunId": workflow_run_id,
+        },
+    )
 
     source_candidate = register_candidate_source(
         team_id,
@@ -280,8 +300,19 @@ def test_run_scoped_artifacts_survive_active_research_project_switch(
                 "sourceCollectionRunId": source_run_id,
                 "workflowRunId": workflow_run_id,
                 "graph": {
-                    "nodes": [{"id": "source-node"}],
-                    "edges": [],
+                    "nodes": [{"id": "source-node"}, {"id": "other-node"}],
+                    "edges": [
+                        {
+                            "sourceCandidateId": "source-node",
+                            "targetCandidateId": "other-node",
+                            "relation": "contradicts",
+                            "evidenceRefs": [evidence["claimEvidenceId"]],
+                        }
+                    ],
+                    "evidenceGaps": [{"description": "No independent replication"}],
+                    "counterEvidenceRefs": [
+                        {"evidenceRef": evidence["claimEvidenceId"]}
+                    ],
                     "summary": {"sourceCollectionRunId": source_run_id},
                 },
             },
@@ -394,6 +425,18 @@ def test_run_scoped_artifacts_survive_active_research_project_switch(
         }
 
     before_switch = snapshot()
+    from core.web.services import (
+        team_workflow_orchestration_service as workflow_service,
+    )
+
+    for mode in ("full", "compact", "minimal", "evidence"):
+        context = workflow_service.get_source_collection_stage_task_context(
+            team_id,
+            run_id=source_run_id,
+            stage_id="relations",
+            context_mode=mode,
+        )
+        assert context["allowedEvidenceRefs"] == [evidence["claimEvidenceId"]]
     source_hash = str(before_switch["hashes"]["source"])
     canonical_ref = build_canonical_ref(
         kind="source_candidate_batch",
@@ -655,7 +698,9 @@ def test_real_ports_required_kinds_follow_pinned_definition() -> None:
         WorkflowDefinitionNodeMismatch,
         register_or_resolve,
     )
-    from core.research.workflow.definition import build_challenge_cup_workflow_definition
+    from core.research.workflow.definition import (
+        build_challenge_cup_workflow_definition,
+    )
     from core.research.workflow.knowledge_sideflow_definition import (
         build_knowledge_sideflow_workflow_definition,
     )
@@ -696,7 +741,9 @@ def test_real_ports_required_kinds_follow_pinned_definition() -> None:
     with pytest.raises(WorkflowDefinitionNodeMismatch):
         v3_ports.required_artifact_kinds(action("source_finding"))
 
-    sideflow_ports = RealDomainPorts(Store(build_knowledge_sideflow_workflow_definition()))
+    sideflow_ports = RealDomainPorts(
+        Store(build_knowledge_sideflow_workflow_definition())
+    )
     assert sideflow_ports.required_artifact_kinds(action("source_finding")) == (
         "source_candidate_batch",
     )
@@ -712,5 +759,7 @@ def test_every_produced_kind_has_authority_mapping() -> None:
         for node in build_challenge_cup_workflow_definition().nodes
         for kind in node.producesArtifactKinds
     }
-    missing = [kind for kind in sorted(kinds) if resolve_artifact_authority(kind) is None]
+    missing = [
+        kind for kind in sorted(kinds) if resolve_artifact_authority(kind) is None
+    ]
     assert missing == [], f"Artifact kinds missing authority mapping: {missing}"

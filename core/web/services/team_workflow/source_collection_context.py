@@ -148,6 +148,8 @@ def compact_source_collection_stage_task_context(context: dict[str, Any]) -> dic
         compact["stewardActionPacket"] = compact_source_collection_steward_action_packet(
             context["stewardActionPacket"]
         )
+    if "allowedEvidenceRefs" in context:
+        compact["allowedEvidenceRefs"] = list(context["allowedEvidenceRefs"])
     return compact
 
 

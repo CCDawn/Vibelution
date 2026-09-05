@@ -948,10 +948,22 @@ def get_source_collection_stage_task_context(
             "fallback": "If required context is missing, write back status=blocked with a short reason.",
         },
     }
+    if normalized_stage_id == "relations" or task_agent_role == "source_relation_mapper":
+        from ..research_runtime.artifact_readback_registry import load_allowed_evidence_refs
+
+        context["allowedEvidenceRefs"] = load_allowed_evidence_refs(
+            team_id=normalized_team_id,
+            authority_run_id=normalized_run_id,
+            workflow_run_id=s._trim_text(task.get("workflowRunId"), max_length=160),
+        )
+        context["usage"]["evidenceInstruction"] = (
+            "关系 evidenceRefs[] 和 counterEvidenceRefs[].evidenceRef 必须逐字使用 "
+            "allowedEvidenceRefs 中的 claimEvidenceId；该列表为空时请报告证据缺失。"
+        )
     if retry_focus:
         context["retryFocus"] = retry_focus
         context["usage"]["retryInstruction"] = s._trim_text(retry_focus.get("retryInstruction"), max_length=1000)
-    if normalized_context_mode in {"evidence", "retry_missing", "retry_evidence"}:
+    if normalized_context_mode in {"evidence", "retry_missing", "retry_evidence"} and normalized_stage_id != "relations" and task_agent_role != "source_relation_mapper":
         context["usage"]["evidenceInstruction"] = (
             "candidates[].summary 是搜集阶段保存的摘要或元数据，不等于全文；"
             "quote 只能从 candidates[].summary 逐字复制，不能虚构页码、原文引语或全文结论。"

@@ -2392,6 +2392,8 @@ def _source_collection_stage_writeback_agent_graph_payload(result: dict[str, Any
                 }
             )
     relation_payload = {
+        "evidenceGaps": result.get("evidenceGaps"),
+        "counterEvidenceRefs": result.get("counterEvidenceRefs"),
         "relationCoverage": result.get("relationCoverage") or result.get("relation_coverage"),
         "themeNodes": normalized_theme_nodes,
         "sourceThemeEdges": source_theme_edges,
@@ -2499,6 +2501,9 @@ def _merge_source_collection_stage_writeback_agent_graph(
     merged_graph["missingLinks"] = missing_links
     merged_graph["unreviewedNodes"] = unreviewed_nodes
     merged_graph["summary"] = summary
+    for field in ("evidenceGaps", "counterEvidenceRefs"):
+        if field in agent_graph:
+            merged_graph[field] = agent_graph[field]
     return merged_graph
 
 

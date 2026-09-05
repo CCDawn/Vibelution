@@ -119,16 +119,33 @@ def _payload_for_kind(
     return dict(payload)
 
 
-def _relation_has_evidence_reference(relation: dict[str, Any]) -> bool:
-    references = relation.get("evidenceRefs") or relation.get("evidence_refs")
-    if isinstance(references, list):
-        return any(
-            isinstance(reference, str) and bool(reference.strip())
-            for reference in references
+def validate_evidence_relation_references(
+    relations: list[dict[str, Any]],
+    counter_refs: list[Any],
+    allowed_refs: set[str],
+) -> None:
+    """Authenticate every reference against the canonical run's evidence cards."""
+    if not allowed_refs:
+        raise ArtifactQualityError("canonical evidence cards are missing")
+    for relation in relations:
+        refs = relation.get("evidenceRefs")
+        if (
+            not isinstance(refs, list)
+            or not refs
+            or any(not isinstance(ref, str) or ref not in allowed_refs for ref in refs)
+        ):
+            raise ArtifactQualityError(
+                "evidence relation references must be canonical claimEvidenceId values"
+            )
+    if any(
+        not isinstance(item, dict)
+        or not isinstance(item.get("evidenceRef"), str)
+        or item["evidenceRef"] not in allowed_refs
+        for item in counter_refs
+    ):
+        raise ArtifactQualityError(
+            "counter-evidence references must be canonical claimEvidenceId values"
         )
-    return isinstance(relation.get("evidenceRef"), str) and bool(
-        relation["evidenceRef"].strip()
-    )
 
 
 def validate_artifact_quality(
@@ -192,9 +209,9 @@ def validate_artifact_quality(
                 required_perspectives - terminal_trace_perspectives
             )
             candidate_perspectives = {
-                str(
-                    item.get("perspective") or item.get("perspectiveId") or ""
-                ).strip().lower()
+                str(item.get("perspective") or item.get("perspectiveId") or "")
+                .strip()
+                .lower()
                 for item in candidates
                 if isinstance(item, dict)
             }
@@ -290,10 +307,16 @@ def validate_artifact_quality(
                 raise ArtifactQualityError(
                     "evidence relations require at least one evidence-backed relation"
                 )
-            if any(not _relation_has_evidence_reference(item) for item in relations):
-                raise ArtifactQualityError(
-                    "every evidence relation requires an evidence reference"
-                )
+            from .artifact_readback_registry import load_allowed_evidence_refs
+
+            allowed_refs = load_allowed_evidence_refs(
+                team_id=str(record.get("teamId") or ""),
+                authority_run_id=str(record.get("sourceCollectionRunId") or ""),
+                workflow_run_id=str(record.get("runId") or ""),
+            )
+            validate_evidence_relation_references(
+                relations, counter_refs, set(allowed_refs)
+            )
             details = {
                 "evidenceGapCount": len(gaps),
                 "counterEvidenceCount": len(counter_refs),
@@ -308,7 +331,9 @@ def validate_artifact_quality(
                 raise ArtifactQualityError(
                     "hypothesis portfolio requires at least one candidate"
                 )
-            if any(not candidate.counterEvidenceRefs for candidate in portfolio.candidates):
+            if any(
+                not candidate.counterEvidenceRefs for candidate in portfolio.candidates
+            ):
                 raise ArtifactQualityError(
                     "every hypothesis candidate requires counter-evidence references"
                 )
@@ -459,21 +484,22 @@ def validate_artifact_quality(
                 or ""
             )
             if candidate_ref != expected_candidate:
-                raise ArtifactQualityError(
-                    "version governance candidateRef mismatch"
-                )
+                raise ArtifactQualityError("version governance candidateRef mismatch")
             if not candidate_ref or not version_id:
                 raise ArtifactQualityError(
                     "version governance requires candidateRef and versionId"
                 )
-            expected_status = "proposed" if expected_operation == "promote" else "official"
+            expected_status = (
+                "proposed" if expected_operation == "promote" else "official"
+            )
             if status != expected_status:
                 raise ArtifactQualityError(
                     f"version governance status must be {expected_status}"
                 )
-            if expected_operation == "stop" and not str(
-                payload.get("terminalReason") or ""
-            ).strip():
+            if (
+                expected_operation == "stop"
+                and not str(payload.get("terminalReason") or "").strip()
+            ):
                 raise ArtifactQualityError(
                     "stop version governance requires terminalReason"
                 )

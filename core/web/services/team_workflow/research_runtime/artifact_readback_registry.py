@@ -36,7 +36,9 @@ class ArtifactAuthoritySpec:
 
 
 ARTIFACT_AUTHORITY: dict[str, ArtifactAuthoritySpec] = {
-    "problem_understanding": ArtifactAuthoritySpec("problem_understanding", "workflow_system"),
+    "problem_understanding": ArtifactAuthoritySpec(
+        "problem_understanding", "workflow_system"
+    ),
     "dimension_reviews": ArtifactAuthoritySpec("dimension_reviews", "experiment"),
     "review_independence": ArtifactAuthoritySpec(
         "review_independence", "workflow_system"
@@ -44,15 +46,27 @@ ARTIFACT_AUTHORITY: dict[str, ArtifactAuthoritySpec] = {
     "review_disagreement": ArtifactAuthoritySpec(
         "review_disagreement", "workflow_system"
     ),
-    "feedback_iterations": ArtifactAuthoritySpec("feedback_iterations", "workflow_system"),
-    "candidate_screening": ArtifactAuthoritySpec("candidate_screening", "workflow_system"),
+    "feedback_iterations": ArtifactAuthoritySpec(
+        "feedback_iterations", "workflow_system"
+    ),
+    "candidate_screening": ArtifactAuthoritySpec(
+        "candidate_screening", "workflow_system"
+    ),
     "core_hypothesis_coherence": ArtifactAuthoritySpec(
         "core_hypothesis_coherence", "workflow_system"
     ),
-    "source_candidate_batch": ArtifactAuthoritySpec("source_candidate_batch", "source_collection"),
-    "evidence_card_batch": ArtifactAuthoritySpec("evidence_card_batch", "source_collection"),
-    "evidence_relation_graph": ArtifactAuthoritySpec("evidence_relation_graph", "evidence"),
-    "knowledge_package_draft": ArtifactAuthoritySpec("knowledge_package_draft", "knowledge"),
+    "source_candidate_batch": ArtifactAuthoritySpec(
+        "source_candidate_batch", "source_collection"
+    ),
+    "evidence_card_batch": ArtifactAuthoritySpec(
+        "evidence_card_batch", "source_collection"
+    ),
+    "evidence_relation_graph": ArtifactAuthoritySpec(
+        "evidence_relation_graph", "evidence"
+    ),
+    "knowledge_package_draft": ArtifactAuthoritySpec(
+        "knowledge_package_draft", "knowledge"
+    ),
     "knowledge_package": ArtifactAuthoritySpec("knowledge_package", "knowledge"),
     "hypothesis_set": ArtifactAuthoritySpec("hypothesis_set", "experiment"),
     "research_plan": ArtifactAuthoritySpec("research_plan", "experiment"),
@@ -63,7 +77,9 @@ ARTIFACT_AUTHORITY: dict[str, ArtifactAuthoritySpec] = {
         "competition_alignment", "workflow_system"
     ),
     "protocol_draft": ArtifactAuthoritySpec("protocol_draft", "experiment"),
-    "protocol_review_report": ArtifactAuthoritySpec("protocol_review_report", "experiment"),
+    "protocol_review_report": ArtifactAuthoritySpec(
+        "protocol_review_report", "experiment"
+    ),
     "frozen_protocol": ArtifactAuthoritySpec("frozen_protocol", "experiment"),
     "smoke_evidence": ArtifactAuthoritySpec("smoke_evidence", "experiment"),
     "smoke_release": ArtifactAuthoritySpec("smoke_release", "experiment"),
@@ -94,11 +110,7 @@ def required_artifact_kinds(
 ) -> tuple[str, ...]:
     """Return produced kinds from the caller's already-pinned definition."""
     node = next(
-        (
-            item
-            for item in definition.nodes
-            if item.nodeId == node_id
-        ),
+        (item for item in definition.nodes if item.nodeId == node_id),
         None,
     )
     if node is None:
@@ -155,7 +167,9 @@ def _scope_ids(item: dict[str, Any]) -> dict[str, str]:
     meta = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
     summary = item.get("summary") if isinstance(item.get("summary"), dict) else {}
     graph = meta.get("graph") if isinstance(meta.get("graph"), dict) else {}
-    graph_summary = graph.get("summary") if isinstance(graph.get("summary"), dict) else {}
+    graph_summary = (
+        graph.get("summary") if isinstance(graph.get("summary"), dict) else {}
+    )
     return {
         "teamId": str(item.get("teamId") or "").strip(),
         "sourceCollectionRunId": str(
@@ -315,6 +329,30 @@ def _load_scoped_evidence(
     )
 
 
+def load_allowed_evidence_refs(
+    *,
+    team_id: str,
+    authority_run_id: str,
+    workflow_run_id: str = "",
+) -> list[str]:
+    """Use the same evidence authority for Agent context and relation validation."""
+    if not team_id or not authority_run_id:
+        return []
+    cards = _load_scoped_evidence(
+        team_id=team_id,
+        authority_run_id=authority_run_id,
+        workflow_run_id=workflow_run_id,
+    )
+    return sorted(
+        {
+            card["claimEvidenceId"]
+            for card in cards or []
+            if isinstance(card.get("claimEvidenceId"), str)
+            and card["claimEvidenceId"].strip()
+        }
+    )
+
+
 def _load_scoped_relation_graph(
     *,
     team_id: str,
@@ -395,6 +433,8 @@ def _load_scoped_relation_graph(
         "nodes": list(graph.get("nodes") or []),
         "edges": list(graph.get("edges") or []),
         "missingLinks": list(graph.get("missingLinks") or []),
+        "evidenceGaps": list(graph.get("evidenceGaps") or []),
+        "counterEvidenceRefs": list(graph.get("counterEvidenceRefs") or []),
         "summary": dict(graph.get("summary") or {}),
         "teamId": team_id,
         "sourceCollectionRunId": authority_run_id,
@@ -466,12 +506,39 @@ def load_scoped_artifact_payload(
             authority_run_id=normalized_authority,
             workflow_run_id=normalized_workflow,
         )
+        from .artifact_quality_gate import (
+            ArtifactQualityError,
+            validate_evidence_relation_references,
+        )
+
+        edges = graph.get("edges") or []
+        counter_refs = graph.get("counterEvidenceRefs") or []
+        if not edges or not graph.get("evidenceGaps") or not counter_refs:
+            return None
+        if any(not isinstance(edge, dict) for edge in edges):
+            return None
+        try:
+            validate_evidence_relation_references(
+                edges,
+                counter_refs,
+                set(
+                    load_allowed_evidence_refs(
+                        team_id=normalized_team,
+                        authority_run_id=normalized_authority,
+                        workflow_run_id=normalized_workflow,
+                    )
+                ),
+            )
+        except ArtifactQualityError:
+            return None
         return {
             "teamId": normalized_team,
             "sourceCollectionRunId": normalized_authority,
             "nodes": list(graph.get("nodes") or []),
             "edges": list(graph.get("edges") or []),
             "missingLinks": list(graph.get("missingLinks") or []),
+            "evidenceGaps": list(graph.get("evidenceGaps") or []),
+            "counterEvidenceRefs": list(graph.get("counterEvidenceRefs") or []),
             "summary": dict(graph.get("summary") or {}),
             "candidateGraphId": str(graph.get("candidateGraphId") or ""),
         }
@@ -576,7 +643,11 @@ def load_source_finding_receipt_payload(
     )
     candidate_sources: list[dict[str, Any]] = []
     for candidate in candidates:
-        metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+        metadata = (
+            candidate.get("metadata")
+            if isinstance(candidate.get("metadata"), dict)
+            else {}
+        )
         source_trace = (
             metadata.get("sourceCollectionTrace")
             if isinstance(metadata.get("sourceCollectionTrace"), dict)
@@ -667,10 +738,16 @@ def read_domain_artifact(
     # Extra forge guard: every record in the payload must match ref team/run.
     records: list[dict[str, Any]] = []
     if kind == "source_candidate_batch":
-        records = [item for item in list(payload.get("candidates") or []) if isinstance(item, dict)]
+        records = [
+            item
+            for item in list(payload.get("candidates") or [])
+            if isinstance(item, dict)
+        ]
     elif kind == "evidence_card_batch":
         records = [
-            item for item in list(payload.get("evidenceCards") or []) if isinstance(item, dict)
+            item
+            for item in list(payload.get("evidenceCards") or [])
+            if isinstance(item, dict)
         ]
     if records and not _records_pass_strict_scope(
         records, team_id=team_id, authority_run_id=authority_run_id
