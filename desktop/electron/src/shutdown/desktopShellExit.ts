@@ -15,6 +15,7 @@ export type ApprovedDesktopShellShutdownInput = {
   stopDesktopActionLoop: () => void;
   quitApp: () => void;
   stepTimeoutMs?: number;
+  forceExitOnStopFailure?: boolean;
 };
 
 export type ApprovedDesktopShellShutdownResult = {
@@ -178,13 +179,25 @@ export async function executeApprovedDesktopShellShutdown(
   }
 
   const result: ApprovedDesktopShellShutdownResult = {
-    stopManagedRuntime: true,
+    stopManagedRuntime: !managedRuntimeError,
     managedRuntimeError,
     stopPythonLauncher: input.decision.stopPythonLauncher,
     stopStatus: stopResult?.status ?? (stopError ? "failed" : "not_requested"),
     stoppedPidCount: stopResult?.terminatedPids.length ?? 0,
     stopError
   };
+
+  if ((managedRuntimeError || stopError) && !input.forceExitOnStopFailure) {
+    await input.recordEvent({
+      eventCode: "electron.desktop_shell.exit_blocked_stop_failed",
+      message: "Desktop shell exit was cancelled because managed processes did not stop cleanly.",
+      fields: {
+        managedRuntimeError: managedRuntimeError.slice(0, 500),
+        launcherStopError: stopError.slice(0, 500)
+      }
+    }).catch(() => undefined);
+    return result;
+  }
 
   await input.recordEvent({
     eventCode: "electron.launcher_service.exited",
@@ -198,7 +211,6 @@ export async function executeApprovedDesktopShellShutdown(
     }
   }).catch(() => undefined);
 
-  // Always fail-open to a real process exit once shutdown was allowed.
   input.approveShutdown();
   input.stopDesktopActionLoop();
   input.quitApp();

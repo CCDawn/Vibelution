@@ -395,20 +395,9 @@ def request_runtime_shutdown(
             "activeWorkKinds": _active_work_kinds(observed_active_work_runs),
         },
     )
-    # Harvest before guarding: a zombie running WorkRun whose stop channel is
-    # wedged must be reaped (best effort, bounded) before the guard decides.
-    # Guarding first left the process unstoppable from inside: the block message
-    # pointed at stop channels that were themselves deadlocked.
-    (
-        stopped_chat_room_rounds,
-        stopped_chat_turns,
-        stopped_source_collection_runs,
-        stopped_evolution_runs,
-    ) = _harvest_active_work_before_lifecycle_change(
-        scene="shutdown",
-        record=_record_shutdown_event,
-    )
-    active_work_runs = _restart_guard_active_work_runs()
+    # A normal shutdown request is not authorization to interrupt work. Guard
+    # before calling any stopper; explicit Launcher force-stop owns harvesting.
+    active_work_runs = observed_active_work_runs
     if active_work_runs:
         force_channel_hint = _lifecycle_force_channel_hint(lang)
         message = _lifecycle_active_work_block_message("shutdown", lang)
@@ -424,20 +413,20 @@ def request_runtime_shutdown(
                 "activeWorkRuns": active_work_runs[:8],
                 "forceAvailable": True,
                 "forceChannelHint": force_channel_hint,
-                "unharvestedWorkRuns": _unharvested_lifecycle_work_items(
-                    stopped_chat_room_rounds,
-                    stopped_chat_turns,
-                    stopped_source_collection_runs,
-                    stopped_evolution_runs,
-                )[:8],
             },
         )
+
         raise RuntimeRestartActiveWorkBlocked(
             message,
             active_work_runs[:8],
             force_available=True,
             force_channel_hint=force_channel_hint,
         )
+
+    stopped_chat_room_rounds: list[dict[str, object]] = []
+    stopped_chat_turns: list[dict[str, object]] = []
+    stopped_source_collection_runs: list[dict[str, object]] = []
+    stopped_evolution_runs: list[dict[str, object]] = []
 
     if not body_present:
         return _electron_retire_local_shutdown(
@@ -708,19 +697,9 @@ def request_runtime_restart() -> dict[str, object]:
             "activeWorkKinds": _active_work_kinds(observed_active_work_runs),
         },
     )
-    # Harvest before guarding: see request_runtime_shutdown. The guard must
-    # decide on the post-harvest world so a wedged stop channel degrades into
-    # an auditable block with forceAvailable instead of an unstoppable process.
-    (
-        stopped_chat_room_rounds,
-        stopped_chat_turns,
-        stopped_source_collection_runs,
-        stopped_evolution_runs,
-    ) = _harvest_active_work_before_lifecycle_change(
-        scene="restart",
-        record=_record_restart_event,
-    )
-    active_work_runs = _restart_guard_active_work_runs()
+    # A normal restart request must be side-effect free when work is active.
+    # The explicit Launcher force path owns stopping or cancelling that work.
+    active_work_runs = observed_active_work_runs
     if active_work_runs:
         force_channel_hint = _lifecycle_force_channel_hint(lang)
         _record_restart_event(
@@ -735,20 +714,20 @@ def request_runtime_restart() -> dict[str, object]:
                 "activeWorkRuns": active_work_runs[:8],
                 "forceAvailable": True,
                 "forceChannelHint": force_channel_hint,
-                "unharvestedWorkRuns": _unharvested_lifecycle_work_items(
-                    stopped_chat_room_rounds,
-                    stopped_chat_turns,
-                    stopped_source_collection_runs,
-                    stopped_evolution_runs,
-                )[:8],
             },
         )
+
         raise RuntimeRestartActiveWorkBlocked(
             _lifecycle_active_work_block_message("restart", lang),
             active_work_runs[:8],
             force_available=True,
             force_channel_hint=force_channel_hint,
         )
+
+    stopped_chat_room_rounds: list[dict[str, object]] = []
+    stopped_chat_turns: list[dict[str, object]] = []
+    stopped_source_collection_runs: list[dict[str, object]] = []
+    stopped_evolution_runs: list[dict[str, object]] = []
 
     if electron_owns_main_line_queue():
         _record_restart_event(
@@ -989,8 +968,8 @@ def _lifecycle_active_work_block_message(action: str, lang: str) -> str:
 def _lifecycle_force_channel_hint(lang: str) -> str:
     return text_for(
         lang,
-        zh="自动收割未能停止全部活跃任务，可由操作员通过 Launcher 强制停止/重启收尾。",
-        en="Automatic harvest could not stop every active task; an operator can force a stop or restart through the Launcher.",
+        zh="普通停止或重启不会中断活跃任务；操作员可通过 Launcher 明确确认强制停止/重启。",
+        en="Normal stop or restart will not interrupt active work; an operator can explicitly confirm a forced stop or restart through the Launcher.",
     )
 
 
@@ -1030,87 +1009,6 @@ def _run_with_bounded_wait(
 
 def _remaining_harvest_seconds(deadline: float) -> float:
     return max(0.05, min(SHUTDOWN_HARVEST_ITEM_WAIT_SECONDS, float(deadline) - time.monotonic()))
-
-
-def _harvest_active_work_before_lifecycle_change(
-    *,
-    scene: str,
-    record,
-) -> tuple[
-    list[dict[str, object]],
-    list[dict[str, object]],
-    list[dict[str, object]],
-    list[dict[str, object]],
-]:
-    """Best-effort bounded reaping of in-flight work before a lifecycle change.
-
-    Every action is recorded as a lifecycle event (stopped/skipped/timeout plus
-    runId) so an operator can audit why the process did or did not stop.
-    """
-
-    deadline = time.monotonic() + SHUTDOWN_HARVEST_TOTAL_WAIT_SECONDS
-    stopped_chat_room_rounds = _stop_active_chat_room_rounds_before_shutdown(deadline=deadline)
-    stopped_chat_turns = _stop_active_chat_turns_before_shutdown(deadline=deadline)
-    stopped_source_collection_runs = _stop_active_source_collection_runs_before_shutdown(deadline=deadline)
-    stopped_evolution_runs = _stop_active_evolution_runs_before_shutdown(deadline=deadline)
-    for items in (
-        stopped_chat_room_rounds,
-        stopped_chat_turns,
-        stopped_source_collection_runs,
-        stopped_evolution_runs,
-    ):
-        for item in items:
-            status = str(item.get("status") or "unknown")
-            if status == "stopped":
-                outcome, level = "stopped", "info"
-            elif status == "timeout":
-                outcome, level = "timeout", "warning"
-            elif status == "skipped":
-                outcome, level = "skipped", "warning"
-            else:
-                outcome, level = "failed", "warning"
-            record(
-                f"runtime.{scene}.harvest_action",
-                message=f"Lifecycle harvest action for active work: {status}.",
-                outcome=outcome,
-                level=level,
-                fields={
-                    "kind": str(item.get("kind") or ""),
-                    "runId": str(item.get("runId") or ""),
-                    "sessionId": str(item.get("sessionId") or ""),
-                    "roomId": str(item.get("roomId") or ""),
-                    "status": status,
-                    "error": str(item.get("error") or ""),
-                },
-            )
-    return (
-        stopped_chat_room_rounds,
-        stopped_chat_turns,
-        stopped_source_collection_runs,
-        stopped_evolution_runs,
-    )
-
-
-def _unharvested_lifecycle_work_items(
-    *item_lists: list[dict[str, object]],
-) -> list[dict[str, str]]:
-    """Active-work items the harvest could not safely stop (audit trail)."""
-
-    items: list[dict[str, str]] = []
-    for group in item_lists:
-        for item in group:
-            status = str(item.get("status") or "")
-            if status in {"", "stopped"}:
-                continue
-            items.append(
-                {
-                    "kind": str(item.get("kind") or ""),
-                    "runId": str(item.get("runId") or ""),
-                    "sessionId": str(item.get("sessionId") or ""),
-                    "status": status,
-                }
-            )
-    return items
 
 
 def _restart_guard_active_work_runs() -> list[dict[str, str]]:

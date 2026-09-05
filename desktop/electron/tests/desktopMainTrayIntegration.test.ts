@@ -72,6 +72,9 @@ describe("Electron main tray integration", () => {
     expect(mainSource).toContain("runTrayRestartAll");
     expect(mainSource).toContain("recordTrayForceInterruptEvidence");
     expect(mainSource).toContain("writeTrayRestartAllPending");
+    expect(mainSource).toContain("count: status.count ?? status.items?.length ?? 0");
+    expect(mainSource).toContain("interruptedActiveWorkItems: JSON.stringify(interruptedActiveWork.items)");
+    expect(mainSource).not.toContain('status.state === "active" ? 1 : 0');
   });
 
   it("routes tray stop-all through forced shell exit instead of aborting on control fetch failed", () => {
@@ -128,18 +131,18 @@ describe("Electron main tray integration", () => {
     const quitEnd = mainSource.indexOf("function notifyDesktopTray", quitStart);
     const quitSource = mainSource.slice(quitStart, quitEnd);
     const quitApprovedStart = quitSource.indexOf("runApproved: async (decision)");
-    const quitFailOpenStart = quitSource.indexOf("failOpenAfterApproval:", quitApprovedStart);
-    const quitApprovedSource = quitSource.slice(quitApprovedStart, quitFailOpenStart);
+    const quitFailureStart = quitSource.indexOf("onApprovedFailure:", quitApprovedStart);
+    const quitApprovedSource = quitSource.slice(quitApprovedStart, quitFailureStart);
     const quitTimeoutStart = quitApprovedSource.indexOf("await withDesktopShellExitTimeout(");
     const quitBudgetIndex = quitApprovedSource.lastIndexOf("DESKTOP_SHELL_EXIT_BUDGET_MS");
     const quitExitSource = quitApprovedSource.slice(quitTimeoutStart, quitBudgetIndex);
     expect(quitApprovedStart).toBeGreaterThan(-1);
-    expect(quitFailOpenStart).toBeGreaterThan(quitApprovedStart);
+    expect(quitFailureStart).toBeGreaterThan(quitApprovedStart);
     expect(quitTimeoutStart).toBeGreaterThan(-1);
     expect(quitBudgetIndex).toBeGreaterThan(quitTimeoutStart);
-    expect(quitExitSource).toContain("await bestEffortStopIsolatedInstancesForShutdown");
+    expect(quitExitSource).toContain("stopIsolatedInstancesForApprovedShutdown()");
     expect(quitExitSource).toContain("await executeApprovedDesktopShellShutdown");
-    expect(quitExitSource.indexOf("await bestEffortStopIsolatedInstancesForShutdown")).toBeLessThan(
+    expect(quitExitSource.indexOf("stopIsolatedInstancesForApprovedShutdown()")).toBeLessThan(
       quitExitSource.indexOf("await executeApprovedDesktopShellShutdown")
     );
     expect(quitApprovedSource).toContain("DESKTOP_SHELL_EXIT_BUDGET_MS");
@@ -159,10 +162,11 @@ describe("Electron main tray integration", () => {
       forcedExitSource.indexOf("await executeApprovedDesktopShellShutdown")
     );
     expect(forcedSource).toContain("DESKTOP_SHELL_EXIT_BUDGET_MS");
-    const failOpenStart = quitSource.indexOf("failOpenAfterApproval:", quitApprovedStart);
-    const failOpenSource = quitSource.slice(failOpenStart);
-    expect(failOpenSource).not.toContain("stopIsolatedInstancesForApprovedShutdown()");
-    expect(failOpenSource).toContain("retrySuppressed: true");
+    expect(forcedSource).toContain("forceExitOnStopFailure: true");
+    const failureStart = quitSource.indexOf("onApprovedFailure:", quitApprovedStart);
+    const failureSource = quitSource.slice(failureStart);
+    expect(failureSource).not.toContain("app.quit()");
+    expect(failureSource).toContain("failOpen: false");
     expect(mainSource).toContain("observedState");
   });
 });

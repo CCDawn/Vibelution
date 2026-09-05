@@ -2140,7 +2140,7 @@ async function stopIsolatedInstancesForApprovedShutdown(): Promise<void> {
   } catch (error: unknown) {
     const detail = error instanceof Error ? error.message : String(error);
     console.warn(`Unable to enumerate isolated instances for desktop shell exit: ${detail}`);
-    return;
+    throw new Error(`Unable to enumerate isolated instances for desktop shell exit: ${detail}`);
   }
   if (!instanceIds.length) {
     return;
@@ -2185,9 +2185,15 @@ async function stopIsolatedInstancesForApprovedShutdown(): Promise<void> {
     const detail = outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason);
     await recordElectronSupervisorEvent(launcherBootstrap, {
       eventCode: "electron.isolated_instance.stop_failed",
-      message: "Isolated instance stop failed during desktop shell exit; shell exit remains fail-open.",
+      message: "Isolated instance stop failed during desktop shell exit.",
       fields: { instanceId, error: detail.slice(0, 500) }
     }).catch(() => undefined);
+  }
+  const failedInstanceIds = outcomes.flatMap((outcome, index) =>
+    outcome.status === "rejected" ? [instanceIds[index]] : []
+  );
+  if (failedInstanceIds.length > 0) {
+    throw new Error(`Failed to stop isolated instances: ${failedInstanceIds.join(", ")}`);
   }
 }
 
@@ -2248,11 +2254,12 @@ async function requestDesktopShellExit(
         pendingWorkbenchCloseAck = null;
         await withDesktopShellExitTimeout(
           (async () => {
-            await bestEffortStopIsolatedInstancesForShutdown(
-              "stop isolated instances before desktop shell exit",
-              DESKTOP_SHELL_EXIT_BUDGET_MS
+            await withDesktopShellExitTimeout(
+              stopIsolatedInstancesForApprovedShutdown(),
+              DESKTOP_SHELL_EXIT_BUDGET_MS,
+              "stop isolated instances before desktop shell exit"
             );
-            await executeApprovedDesktopShellShutdown({
+            const shutdownResult = await executeApprovedDesktopShellShutdown({
               decision,
               closeDesktopSession: closeDesktopSessionIfRegistered,
               recordEvent: async (event) => {
@@ -2276,50 +2283,37 @@ async function requestDesktopShellExit(
               },
               stepTimeoutMs: DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS
             });
+            if (shutdownResult?.managedRuntimeError || shutdownResult?.stopError) {
+              notifyDesktopTray(
+                "Vibelution",
+                "运行时未能完整停止，已取消退出。请查看运行时状态后重试，或明确选择“退出壳并停止全部任务”。",
+                "warning"
+              );
+            }
           })(),
           DESKTOP_SHELL_EXIT_BUDGET_MS,
           "desktop shell exit"
         );
       },
-      failOpenAfterApproval: async (_decision, error) => {
+      onApprovedFailure: async (_decision, error) => {
         const message = error instanceof Error ? error.message : String(error);
         console.warn(message);
         await recordElectronSupervisorEvent(launcherBootstrap, {
-          eventCode: "electron.launcher_service.exited",
-          message: "Desktop shell exit budget exceeded; forcing Electron quit.",
-          fields: { closeReason, error: message.slice(0, 500), failOpen: true }
+          eventCode: "electron.desktop_shell.exit_blocked_stop_failed",
+          message: "Desktop shell exit was cancelled because managed processes did not stop within budget.",
+          fields: { closeReason, error: message.slice(0, 500), failOpen: false }
         }).catch(() => undefined);
         await recordElectronSupervisorEvent(launcherBootstrap, {
           eventCode: "electron.isolated_instances.stop_all_failed",
-          message: "Isolated instance stop did not finish before the desktop shell exit budget; no second stop attempt will be started.",
-          fields: { closeReason, error: message.slice(0, 500), failOpen: true, retrySuppressed: true }
+          message: "Isolated instance stop did not finish before the desktop shell exit budget.",
+          fields: { closeReason, error: message.slice(0, 500), failOpen: false, retrySuppressed: true }
         }).catch(() => undefined);
-        shutdownApproved = true;
         pendingWorkbenchCloseAck = null;
-        // Best-effort stop managed runtime and owned Python before force quit so orphans are less likely.
-        try {
-          await withDesktopShellExitTimeout(
-            stopMainRuntimeForApprovedShutdown(),
-            Math.min(3_000, DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS),
-            "stop managed runtime on exit budget fail-open"
-          );
-        } catch {
-          // Fail-open: stop must not block the forced Electron quit.
-        }
-        try {
-          await withDesktopShellExitTimeout(
-            stopOwnedPythonLauncherService(),
-            Math.min(3_000, DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS),
-            "stop python launcher on exit budget fail-open"
-          );
-        } catch {
-          // Fail-open: stop must not block the forced Electron quit.
-        }
-        stopDesktopActionLoop();
-        releaseElectronDesktopShellOwner(createDesktopPathsForApp().workspaceRoot);
-        desktopTray?.destroy();
-        desktopTray = null;
-        app.quit();
+        notifyDesktopTray(
+          "Vibelution",
+          "运行时或隔离实例未能完整停止，已取消退出。可检查状态后重试，或明确选择“退出壳并停止全部任务”。",
+          "warning"
+        );
       }
     });
   });
@@ -2365,9 +2359,9 @@ async function resolveTrayControlContextOrLoopback(): Promise<{
   }
 }
 
-async function resolveInterruptedActiveWorkCount(): Promise<number> {
+async function resolveInterruptedActiveWork(): Promise<{ count: number; items: Record<string, unknown>[] }> {
   if (launcherBootstrap === null) {
-    return 0;
+    return { count: 0, items: [] };
   }
   try {
     const context = await resolveDesktopActionLoopContext(launcherBootstrap);
@@ -2376,9 +2370,11 @@ async function resolveInterruptedActiveWorkCount(): Promise<number> {
       ACTIVE_WORK_STATUS_TIMEOUT_MS,
       "resolve launcher active work for tray force action"
     );
-    return status.state === "active" ? 1 : 0;
+    return status.state === "active"
+      ? { count: status.count ?? status.items?.length ?? 0, items: status.items ?? [] }
+      : { count: 0, items: [] };
   } catch {
-    return 0;
+    return { count: 0, items: [] };
   }
 }
 
@@ -2488,12 +2484,14 @@ async function runTrayRestartLauncher(): Promise<void> {
   trayRestartLauncherInFlight = true;
   const paths = createDesktopPathsForApp();
   try {
-    const interruptedActiveWorkCount = ACTIVE_WORK_POLICY_FORCE_INTERRUPT
-      ? await resolveInterruptedActiveWorkCount()
-      : 0;
+    const interruptedActiveWork = ACTIVE_WORK_POLICY_FORCE_INTERRUPT
+      ? await resolveInterruptedActiveWork()
+      : { count: 0, items: [] };
+    const interruptedActiveWorkCount = interruptedActiveWork.count;
     if (interruptedActiveWorkCount > 0) {
       await recordTrayForceInterruptEvidence("electron.tray.restart_launcher.force_interrupt", "Tray restart-launcher proceeding while active work was present.", {
-        interruptedActiveWorkCount
+        interruptedActiveWorkCount,
+        interruptedActiveWorkItems: JSON.stringify(interruptedActiveWork.items)
       });
     }
     clearTrayRestartAllPending(paths.workspaceRoot);
@@ -2609,12 +2607,14 @@ async function runTrayRestartAll(): Promise<void> {
   trayRestartAllInFlight = true;
   const paths = createDesktopPathsForApp();
   try {
-    const interruptedActiveWorkCount = ACTIVE_WORK_POLICY_FORCE_INTERRUPT
-      ? await resolveInterruptedActiveWorkCount()
-      : 0;
+    const interruptedActiveWork = ACTIVE_WORK_POLICY_FORCE_INTERRUPT
+      ? await resolveInterruptedActiveWork()
+      : { count: 0, items: [] };
+    const interruptedActiveWorkCount = interruptedActiveWork.count;
     if (interruptedActiveWorkCount > 0) {
       await recordTrayForceInterruptEvidence("electron.tray.restart_all.force_interrupt", "Tray restart-all proceeding while active work was present.", {
-        interruptedActiveWorkCount
+        interruptedActiveWorkCount,
+        interruptedActiveWorkItems: JSON.stringify(interruptedActiveWork.items)
       });
     }
     let runningInstanceIds: string[] = [];
@@ -2699,12 +2699,14 @@ async function requestForcedDesktopShellExit(
   try {
     return await desktopLifecycleCoordinator.request(closeReason, async () => {
       const ownershipMode = launcherBootstrap?.mode ?? "attached";
-      const interruptedActiveWorkCount = ACTIVE_WORK_POLICY_FORCE_INTERRUPT
-        ? await resolveInterruptedActiveWorkCount()
-        : 0;
+      const interruptedActiveWork = ACTIVE_WORK_POLICY_FORCE_INTERRUPT
+        ? await resolveInterruptedActiveWork()
+        : { count: 0, items: [] };
+      const interruptedActiveWorkCount = interruptedActiveWork.count;
       if (interruptedActiveWorkCount > 0) {
         await recordTrayForceInterruptEvidence("electron.tray.quit_all.force_interrupt", "Tray quit-all proceeding while active work was present.", {
-          interruptedActiveWorkCount
+          interruptedActiveWorkCount,
+          interruptedActiveWorkItems: JSON.stringify(interruptedActiveWork.items)
         });
       }
       try {
@@ -2751,7 +2753,8 @@ async function requestForcedDesktopShellExit(
             quitApp: () => {
               app.quit();
             },
-            stepTimeoutMs: DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS
+            stepTimeoutMs: DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS,
+            forceExitOnStopFailure: true
           });
         })(),
         DESKTOP_SHELL_EXIT_BUDGET_MS,
