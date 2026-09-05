@@ -17,6 +17,7 @@ export type ChallengeQuestionRunStatusPayload = {
   storePath: string;
   summary: {
     recordCount: number;
+    registeredQuestionIds: string[];
     validCandidateCount: number;
     validatedQuestionCount: number;
     validatedQuestionIds: string[];

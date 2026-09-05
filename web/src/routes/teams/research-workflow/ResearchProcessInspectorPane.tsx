@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import type { MeetingRoundRecord } from "../../../api/types/hypothesisFirst";
 
-import { getChallengeQuestionRunDetail } from "../../../api/challengeQuestionRuns";
+import { getChallengeQuestionRunDetail, getChallengeQuestionRunStatus } from "../../../api/challengeQuestionRuns";
 import { queryKeys } from "../../../api/queryKeys";
 import type {
   CreateResearchWorkflowRunInput,
@@ -147,6 +147,15 @@ export function ResearchProcessInspectorPane(props: {
     ? null
     : (state.projection?.run.nodeRuns.source_finding?.status ?? null);
   const [selectedQuestionRunId, setSelectedQuestionRunId] = useState("");
+  const questionArchiveEnabled = Boolean(scope.teamId && scope.questionId && scope.panel === "question");
+  const questionStatus = useQuery({
+    queryKey: queryKeys.challengeQuestionRunStatus(scope.teamId),
+    queryFn: () => getChallengeQuestionRunStatus(scope.teamId),
+    enabled: questionArchiveEnabled,
+    staleTime: 30_000,
+  });
+  const hasRegisteredOutput = questionStatus.data?.summary.registeredQuestionIds
+    .includes(scope.questionId.trim().toUpperCase()) === true;
   const questionDetail = useQuery({
     queryKey: queryKeys.challengeQuestionRunDetail(
       scope.teamId,
@@ -154,7 +163,7 @@ export function ResearchProcessInspectorPane(props: {
       selectedQuestionRunId,
     ),
     queryFn: () => getChallengeQuestionRunDetail(scope.teamId, scope.questionId, selectedQuestionRunId || undefined),
-    enabled: Boolean(scope.teamId && scope.questionId && scope.panel === "question"),
+    enabled: questionArchiveEnabled && hasRegisteredOutput,
     staleTime: 60_000,
   });
 
@@ -213,6 +222,16 @@ export function ResearchProcessInspectorPane(props: {
         />
       );
     }
+    if (questionStatus.isSuccess && !hasRegisteredOutput) {
+      return (
+        <ResearchCenteredEmptyState
+          title={`${scope.questionId} · ${isZh ? "尚无登记产出" : "No registered output yet"}`}
+          hint={isZh
+            ? "本题尚未生成可验收的产出档案，可返回当前任务继续研究流程。"
+            : "This question has no registered review artifact yet. Return to the current task to continue the workflow."}
+        />
+      );
+    }
     const returnNodeId = researchArchiveReturnNodeId(
       scope.selectedNodeId,
       nextAction?.targetNodeId,
@@ -225,8 +244,8 @@ export function ResearchProcessInspectorPane(props: {
           detail={questionDetail.data}
           selectedRunId={selectedQuestionRunId}
           onSelectRunId={setSelectedQuestionRunId}
-          isLoading={questionDetail.isPending}
-          errorMessage={questionDetail.error instanceof Error ? questionDetail.error.message : questionDetail.isError ? "challenge_question_run_unavailable" : ""}
+          isLoading={questionStatus.isPending || (hasRegisteredOutput && questionDetail.isPending)}
+          errorMessage={questionStatus.error instanceof Error ? questionStatus.error.message : questionDetail.error instanceof Error ? questionDetail.error.message : questionDetail.isError ? "challenge_question_run_unavailable" : ""}
           onClose={() => actions.replaceParams({ panel: "node", node: returnNodeId })}
           onNavigateToNode={(nodeId) => actions.replaceParams({ node: hypothesisFirstSemanticNodeId(nodeId) ?? nodeId, panel: "node" })}
           readOnlyArchive
