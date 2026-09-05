@@ -1060,6 +1060,29 @@ class AdapterDispatchWorker:
                     now_ms=now_ms,
                 )
             )
+            from .scientific_semantic_ledger import (
+                CHALLENGE_CUP_WORKFLOW_ID,
+                append_scientific_semantic_record_in_uow,
+            )
+
+            if run.workflow_id == CHALLENGE_CUP_WORKFLOW_ID:
+                from core.research.workflow.contracts.challenge_cup_stage_one_v3 import (
+                    ActivityExecution,
+                    ScientificSemanticRecord,
+                )
+
+                append_scientific_semantic_record_in_uow(
+                    uow,
+                    run_id=action.run_id,
+                    record_ref=f"execution:{action.action_id}:waiting_human",
+                    subject_ref=action.node_run_id,
+                    semantic=ScientificSemanticRecord(
+                        execution=ActivityExecution(status="running", waitReason="human_input"),
+                    ),
+                    actor_type="software_agent",
+                    actor_ref=self._owner,
+                    recorded_at_ms=now_ms,
+                )
             return True
 
         return bool(self._store.submit(mutate, force_flush=True).result(timeout=30))
