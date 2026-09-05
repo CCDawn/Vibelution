@@ -478,8 +478,13 @@ class AdapterDispatchWorker:
                 TurnNotReadyError,
             )
             from .formal_hypothesis_fanout import HypothesisAuthorityUnavailable
+            from .completion_dependency import CompletionDependencyPending, defer_completion
 
             if isinstance(exc, _OutboxLeaseLost):
+                return
+            if isinstance(exc, CompletionDependencyPending):
+                defer_completion(self._store, outbox=outbox, action=action, error=exc,
+                                 owner=self._owner, now_ms=self._now())
                 return
             if isinstance(exc, ChallengeTaskDeadlineExceeded):
                 failed = self._fail_attempt(outbox, action, exc.problem)
@@ -500,19 +505,6 @@ class AdapterDispatchWorker:
                     # Keep waiting (heartbeat) without consuming the transient
                     # budget; wall-clock bounds the wait.
                     self._requeue_live_turn_wait(
-                        outbox,
-                        action,
-                        str(exc),
-                        snapshot=dict(getattr(exc, "snapshot", None) or {}),
-                    )
-                    return
-                if isinstance(exc, TurnNotReadyError) and _receipt_persistence_pending_terminal(exc):
-                    # The turn journal is already terminal but its durable
-                    # receipt never became visible (persistence may have
-                    # silently failed). Waiting cannot make progress: reuse
-                    # the transient budget to fail fast with a dedicated
-                    # diagnosable code instead of an empty live-wait.
-                    self._requeue_receipt_persistence_pending(
                         outbox,
                         action,
                         str(exc),
@@ -1108,17 +1100,9 @@ class AdapterDispatchWorker:
             payload = {}
         if not isinstance(payload, dict):
             payload = {}
-        root = payload.get("rootSession")
-        if not isinstance(root, dict):
-            root = {}
-        root["status"] = status
-        payload["rootSession"] = root
+        # This closes workflow ownership only. Session execution projections
+        # retain their own observed status; workflow failure is not a Turn event.
         payload["status"] = status
-        scoped = payload.get("scopedSessions")
-        if isinstance(scoped, list):
-            for item in scoped:
-                if isinstance(item, dict):
-                    item["status"] = status
         payload["closure"] = {
             "code": str(problem.get("code") or "execution_failed")[:120],
             "detail": str(problem.get("detail") or "")[:400],
@@ -1848,89 +1832,9 @@ class AdapterDispatchWorker:
             problem_json=json.dumps({"code": "transient", "detail": detail}),
         )
 
-    def _requeue_receipt_persistence_pending(
-        self,
-        outbox: Any,
-        action: PendingAction,
-        detail: str,
-        *,
-        snapshot: dict[str, Any] | None = None,
-    ) -> None:
-        """Bounded fast-fail for a terminal turn whose receipt stays pending.
-
-        Same transient budget semantics as `_requeue_or_fail` — a slow receipt
-        worker still gets its bounded 5s retries — but once the budget is
-        exhausted the attempt fails with the dedicated
-        ``receipt_persistence_pending_terminal`` code instead of a generic
-        transient error after a fruitless 10-minute live wait.
-        """
-
-        now_ms = self._now()
-        if int(getattr(outbox, "attempt_count", 0) or 0) >= self._MAX_TRANSIENT_ATTEMPTS:
-            self._fail_attempt(
-                outbox,
-                action,
-                {
-                    "code": "receipt_persistence_pending_terminal",
-                    "detail": str(detail)[:400],
-                    "turnTerminalStatus": str(
-                        (dict(snapshot or {}).get("turnTerminalStatus") or "")
-                    )[:80],
-                },
-            )
-            return
-        _record_scene_event(
-            "adapter_dispatch.requeued_receipt_persistence_pending",
-            outcome="requeued",
-            fields={
-                **_action_identity(action),
-                "attemptCount": int(getattr(outbox, "attempt_count", 0) or 0),
-                "detail": str(detail)[:160],
-            },
-        )
-        outbox_api.requeue_action(
-            self._store,
-            outbox.action_id,
-            self._owner,
-            now_ms,
-            retry_at_ms=now_ms + 5_000,
-            problem_json=json.dumps(
-                {"code": "receipt_persistence_pending", "detail": str(detail)[:400]}
-            ),
-        )
-
-
-def _receipt_persistence_pending_terminal(exc: Exception) -> bool:
-    """True when the turn journal is terminal but its durable receipt never
-    became visible.
-
-    ``_require_formal_model_invocation_receipt`` overrides the raised snapshot
-    with ``terminal=False``/``completionSource=receipt_registry_pending`` even
-    when the underlying turn journal already reached a terminal state. If the
-    receipt registry never materializes (e.g. persistence silently failed),
-    waiting cannot make progress and the node must fail fast instead of
-    empty-waiting out the live-turn window.
-    """
-
-    snapshot = dict(getattr(exc, "snapshot", None) or {})
-    if str(snapshot.get("completionSource") or "").strip() != "receipt_registry_pending":
-        return False
-    return bool(snapshot.get("turnTerminal"))
-
-
 def _turn_alive_progressing(exc: Exception) -> bool:
-    """True while the logical task has a healthy, bounded wait authority.
+    """Only a genuinely running turn uses the execution wait budget."""
 
-    A terminal turn whose durable receipt projection is pending remains live
-    work too: re-running its idempotent task must wait for the receipt worker,
-    not consume the five-attempt transient budget or rerun the LLM. That only
-    holds while the turn itself is still running; a turn that is already
-    terminal at the journal level with a still-pending receipt must not keep
-    the live wait alive forever.
-    """
-
-    if _receipt_persistence_pending_terminal(exc):
-        return False
     snapshot = dict(getattr(exc, "snapshot", None) or {})
     if not snapshot:
         return False
@@ -1938,7 +1842,6 @@ def _turn_alive_progressing(exc: Exception) -> bool:
         return False
     return str(snapshot.get("completionSource") or "").strip() in {
         "running",
-        "receipt_registry_pending",
     }
 
 

@@ -893,6 +893,9 @@ def test_task_status_reconciles_ready_session_with_created_experiment_plan(
             ],
         },
     )
+    _append_turn_journal(started["task"]["sessionId"], [{
+        "turnId": "turn-1", "eventType": "turn_completed", "status": "completed", "payload": {}
+    }])
     monkeypatch.setattr(
         session_service,
         "get_session_detail",
@@ -938,6 +941,9 @@ def test_task_status_reconciles_needs_continue_session_as_stopped(
             "idempotencyKey": "design-needs-continue-1",
         },
     )
+    _append_turn_journal(started["task"]["sessionId"], [{
+        "turnId": "turn-1", "eventType": "turn_completed", "status": "needs_continue", "payload": {}
+    }])
     monkeypatch.setattr(
         session_service,
         "get_session_detail",
@@ -1011,6 +1017,9 @@ def test_reconcile_never_guesses_plan_ownership_without_task_link(
             ],
         },
     )
+    _append_turn_journal(started["task"]["sessionId"], [{
+        "turnId": "turn-1", "eventType": "turn_completed", "status": "completed", "payload": {}
+    }])
     monkeypatch.setattr(
         session_service,
         "get_session_detail",
@@ -1052,10 +1061,10 @@ def test_reconcile_fails_task_after_repeated_unreadable_sessions(
     )
     task_id = started["task"]["taskId"]
 
-    def _raise_unreadable(_session_id: str, **_kwargs):
+    def _raise_unreadable(*_args, **_kwargs):
         raise RuntimeError("session store unavailable")
 
-    monkeypatch.setattr(session_service, "get_session_detail", _raise_unreadable)
+    monkeypatch.setattr("core.chat.turn_journal.load_turn_events", _raise_unreadable)
 
     for expected_failures in range(1, SESSION_RECONCILE_MAX_UNREADABLE_FAILURES):
         reconcile_research_project_agent_task_statuses(
@@ -1082,10 +1091,10 @@ def test_reconcile_fails_task_after_repeated_unreadable_sessions(
     assert status["activeTasks"] == []
     assert status["tasks"][0]["status"] == "failed"
     assert status["tasks"][0]["failureCode"] == "session_unreadable"
-    assert status["tasks"][0]["turn"]["status"] == "failed"
+    assert status["tasks"][0]["turn"]["status"] == started["task"]["turn"]["status"]
 
 
-def test_completed_task_projects_and_persists_terminal_turn_status(
+def test_business_completion_does_not_override_execution_status(
     tmp_path, monkeypatch
 ):
     team, project, _agents = _team_project_and_agents(tmp_path, monkeypatch)
@@ -1108,7 +1117,7 @@ def test_completed_task_projects_and_persists_terminal_turn_status(
     )
 
     assert completed["status"] == "completed"
-    assert completed["turn"]["status"] == "completed"
+    assert completed["turn"]["status"] == started["task"]["turn"]["status"]
 
     root = team_workflow_orchestration_service.resolve_research_project_workspace_root(
         team["teamId"],
@@ -1128,7 +1137,7 @@ def test_completed_task_projects_and_persists_terminal_turn_status(
     )
 
     assert status["tasks"][0]["status"] == "completed"
-    assert status["tasks"][0]["turn"]["status"] == "completed"
+    assert status["tasks"][0]["turn"]["status"] == "running"
 
 
 def test_task_start_rejects_missing_fixed_role_binding(tmp_path, monkeypatch):
@@ -1273,6 +1282,9 @@ def test_agent_task_reconcile_route_repairs_stuck_running_task(
             ],
         },
     )
+    _append_turn_journal(started.json()["task"]["sessionId"], [{
+        "turnId": "turn-1", "eventType": "turn_completed", "status": "completed", "payload": {}
+    }])
     monkeypatch.setattr(
         session_service,
         "get_session_detail",
@@ -1723,6 +1735,34 @@ def _append_turn_journal(session_id: str, entries: list[dict]) -> None:
         )
 
 
+@pytest.mark.parametrize("execution,refs,expected", [
+    ("completed", [], "incomplete"),
+    ("completed", ["artifact-1"], "completed"),
+    ("failed", ["artifact-1"], "completed"),
+    ("failed", [], "failed"),
+    ("needs_continue", [], "stopped"),
+])
+def test_formal_task_execution_and_business_verdict_have_separate_authority(tmp_path, monkeypatch, execution, refs, expected):
+    from core.web.services.team_workflow import research_project_agent_tasks as tasks
+    from core.chat.turn_journal import EVENT_TURN_COMPLETED, EVENT_TURN_FAILED
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(tasks, "_project_agent_task_result_refs", lambda *_: refs)
+    monkeypatch.setattr(session_service, "get_session_detail", lambda *_a, **_k: pytest.fail("current Session phase is not task authority"))
+    _append_turn_journal("session-formal", [
+        {"turnId": "bound", "eventType": EVENT_TURN_FAILED if execution == "failed" else EVENT_TURN_COMPLETED,
+         "status": execution, "payload": {"summary": "A final answer is not a business artifact."}},
+        {"turnId": "later-unrelated", "eventType": EVENT_TURN_FAILED, "status": "failed"},
+    ])
+    verdict = tasks._reconcile_project_agent_task_from_session("t", "p", {
+        "sessionId": "session-formal", "taskKind": "hypothesis_design",
+        "challengeTaskContract": {"workflowId": "challenge-cup-research"},
+        "turn": {"turnId": "bound", "status": "running"},
+    })
+    assert verdict["status"] == expected
+    assert verdict["turnStatus"] == execution
+    assert verdict["resultRefs"] == refs
+
+
 def _final_answer_item_entry(turn_id: str, text: str) -> dict:
     return {
         "turnId": turn_id,
@@ -1766,11 +1806,10 @@ def _start_design_task(team, project, key: str):
     )
 
 
-def test_reconcile_completes_task_from_session_final_turn_when_refs_missing(
+def test_final_prose_does_not_replace_task_artifacts(
     tmp_path, monkeypatch
 ):
-    """SCI-091 回归：围栏写回拒绝盖章但 turn 已完成且有最终正文时，
-    任务按会话终 turn 证据判 completed，而不是永远 incomplete。"""
+    """A finished Turn is not evidence of business writeback."""
     team, project, _agents = _team_project_and_agents(tmp_path, monkeypatch)
     _accepted_submitter(monkeypatch)
     started = _start_design_task(team, project, "design-session-final-1")
@@ -1794,25 +1833,18 @@ def test_reconcile_completes_task_from_session_final_turn_when_refs_missing(
     )
 
     assert summary["reconciled"] == 1
-    assert summary["outcomes"][0]["status"] == "completed"
-    assert summary["outcomes"][0]["resultSource"] == "session_final_turn"
+    assert summary["outcomes"][0]["status"] == "incomplete"
+    assert summary["outcomes"][0].get("resultSource", "") == ""
     status = get_research_project_agent_task_status(
         team["teamId"],
         project["projectId"],
     )
     assert status["activeTasks"] == []
-    assert status["tasks"][0]["status"] == "completed"
-    assert status["tasks"][0]["failureCode"] == ""
-    assert status["tasks"][0]["resultRefs"] == [
-        f"session-final-turn:{session_id}:turn-1"
-    ]
-    assert status["tasks"][0]["resultSource"] == "session_final_turn"
-    # 已按会话终 turn 终结的任务不再反复进入 reconcile 目标集。
-    repeat = reconcile_research_project_agent_task_statuses(
-        team["teamId"],
-        project["projectId"],
-    )
-    assert repeat["checked"] == 0
+    assert status["tasks"][0]["status"] == "incomplete"
+    assert status["tasks"][0]["failureCode"] == "task_result_not_recorded"
+    assert status["tasks"][0]["resultRefs"] == []
+    assert status["tasks"][0]["resultSource"] == ""
+    assert status["tasks"][0]["turn"]["status"] == "completed"
 
 
 def test_reconcile_keeps_incomplete_when_final_turn_has_no_answer_text(
@@ -1936,6 +1968,10 @@ def test_reconcile_stamped_result_refs_take_precedence_over_session_final_turn(
         _ready_session_detail,
     )
 
+    update_research_project_agent_task_status(
+        team["teamId"], project["projectId"], task_id,
+        status="completed", result_refs=["plan-stamped"],
+    )
     summary = reconcile_research_project_agent_task_statuses(
         team["teamId"],
         project["projectId"],

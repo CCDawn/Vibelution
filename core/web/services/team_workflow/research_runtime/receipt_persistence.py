@@ -311,12 +311,14 @@ class ReceiptPersistenceWorker:
             return
         # Registry delivery is idempotent.  If the fresh CAS loses ownership,
         # the next owner safely replays the same receipt and acknowledges it.
-        outbox_api.ack_action(
-            self._store,
-            action.action_id,
-            self._owner,
-            self._now(),
-        )
+        from .completion_dependency import wake_receipt_completion
+
+        def acknowledge(uow):
+            now_ms = self._now()
+            if uow.repository.ack_outbox(action.action_id, self._owner, now_ms, status="succeeded"):
+                wake_receipt_completion(uow, receipt=receipt, now_ms=now_ms)
+
+        self._store.submit(acknowledge, force_flush=True).result(timeout=30)
 
     def _validated_action(
         self,

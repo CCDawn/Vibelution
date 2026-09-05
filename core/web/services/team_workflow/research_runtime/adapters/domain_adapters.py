@@ -20,6 +20,9 @@ from ..action_registry import (
 )
 from ..budget_authority_adapter import DEFAULT_AGENT_NODE_RESERVE_TOKENS
 from ..domain_ports import AgentTurnResult, DomainPorts
+from ..completion_dependency import (
+    CompletionDependencyPending, bind_completion_resume, completion_resume,
+)
 
 # The construction default is the conservative contract fallback, never a flat
 # small constant: production ports derive the real estimate from the explicit
@@ -63,11 +66,19 @@ class AgentActionAdapter:
                 problem={"code": "actor_mismatch", "detail": "agent adapter got non-agent action"},
             )
         binding = self._ports.resolve_binding(action)
-        reservation = self._ports.reserve_budget(
-            action=action, estimate_tokens=self._estimate_tokens
-        )
-        handle = self._ports.create_agent_task(action=action)
-        executed = self._ports.execute_agent_turn(action=action, handle=handle)
+        resume = completion_resume(action)
+        if resume is None:
+            reservation = self._ports.reserve_budget(
+                action=action, estimate_tokens=self._estimate_tokens
+            )
+            handle = self._ports.create_agent_task(action=action)
+        else:
+            handle, reservation = resume
+        try:
+            executed = self._ports.execute_agent_turn(action=action, handle=handle)
+        except CompletionDependencyPending as exc:
+            bind_completion_resume(exc, action, handle, reservation)
+            raise
         usage: dict[str, Any] = {"estimate_tokens": self._estimate_tokens}
         if isinstance(executed, AgentTurnResult):
             refs = list(executed.materialized_refs)
