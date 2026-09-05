@@ -562,13 +562,22 @@ def validate_claim(project_root: Path, claim_id: str, files: Sequence[str]) -> b
     )
 
 
-def selected_validation(files: Sequence[str]) -> dict[str, object]:
+def selected_validation(
+    files: Sequence[str],
+    *,
+    root: Path | None = None,
+) -> dict[str, object]:
+    selector_root = (root or PROJECT_ROOT).resolve()
     project_root = str(PROJECT_ROOT.resolve())
     if project_root not in sys.path:
         sys.path.insert(0, project_root)
     from tests.select_tests import load_matrix, select_tests
 
-    return select_tests(list(files), load_matrix())
+    return select_tests(
+        list(files),
+        load_matrix(selector_root / "tests" / "test_matrix.yaml"),
+        project_root=selector_root,
+    )
 
 
 def utc_now() -> str:
@@ -701,7 +710,7 @@ def expected_closeout_commands(
     toolchain: ValidationToolchain | None = None,
 ) -> list[CommandSpec]:
     resolved_toolchain = toolchain or resolve_validation_toolchain(root)
-    selection = selected_validation(files)
+    selection = selected_validation(files, root=root)
     raw_commands = selection.get("commands", [])
     if not isinstance(raw_commands, list):
         raise UnsupportedValidationCommand("selector commands must be a list")
