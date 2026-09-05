@@ -376,7 +376,27 @@ def staged_blob(root: Path, path: str) -> str:
 
 
 def summarize_failure(completed: subprocess.CompletedProcess[str], subject: str) -> str:
-    raw = (completed.stderr or "").strip() or (completed.stdout or "").strip() or "command failed"
+    # stderr may contain only plugin warnings while pytest writes the actual
+    # failure to stdout. Select diagnostics from both streams before bounding.
+    lines = re.sub(
+        r"\x1b\[[0-?]*[ -/]*[@-~]", "",
+        f"{completed.stdout or ''}\n{completed.stderr or ''}",
+    ).splitlines()
+    nodes = [line.strip() for line in lines if re.match(
+        r"^\s*(?:FAILED|ERROR|FAIL)\s+\S+", line
+    )]
+    causes = [line.strip() for line in lines if re.match(
+        r"^\s*E\s{2,}\S|.*\b(?:[\w.]*Error|Exception):|.*\berror TS\d+:", line
+    )]
+    # With multiple failures, do not attach an unrelated final traceback to
+    # the first failed test. Preserve their identities instead.
+    evidence = list(dict.fromkeys(
+        nodes[:2] if len(nodes) > 1 else [*nodes, *causes[-1:]]
+    ))
+    if evidence:
+        raw = " | ".join(evidence)
+    else:
+        raw = (completed.stderr or "").strip() or (completed.stdout or "").strip() or "command failed"
     return bounded_failure_summary(f"{subject}: {raw}")
 
 
