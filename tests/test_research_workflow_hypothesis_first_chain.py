@@ -2439,7 +2439,7 @@ def test_chain_state_ignores_review_artifacts_from_other_workflow_runs(
 
 def _marker_runner(participant, prompt, context):
     """Round 1 carries the DEV fixture markers; follow-up critique rounds pass."""
-    if "批评与修订" in str(prompt):
+    if "批评与修订" in str(prompt) and not context.get("_structuredMeetingMessage"):
         return {"status": "completed", "raw_output": "pass", "summary": "pass"}
     role = str(participant.get("teamRole") or "participant")
     if role in {"source_finder", "challenge_cup_search"}:
@@ -2451,6 +2451,29 @@ def _marker_runner(participant, prompt, context):
             "ACTION: researcher | 补充 hyp-b 的消融实验证据\n"
             "KNOWLEDGE: 预测编码层级最新综述"
         )
+    if context.get("_structuredMeetingMessage"):
+        # Match the same output contract the production runner was given.
+        # The ledger-bound review tests must not feed legacy markers into
+        # the strict structured-message validator.
+        is_search = role in {"source_finder", "challenge_cup_search"}
+        content = json.dumps({
+            "schemaVersion": 1,
+            "display": {"conclusion": f"{context.get('roundId')}: {content}", "sections": []},
+            "protocol": {
+                "agreements": ["hyp-a mechanism evidence is sufficient"] if is_search else [],
+                "disagreements": [] if is_search else [{
+                    "issue": "hyp-b generalization evidence is insufficient",
+                    "positions": ["reviewer: collect ablations"],
+                    "unresolvedReason": "dataset bias remains unevaluated",
+                }],
+                "risks": [] if is_search else ["dataset bias remains unevaluated"],
+                "actionItems": [] if is_search else [{
+                    "ownerRoleId": "researcher", "action": "collect hyp-b ablations", "dueGate": "review",
+                }],
+                "knowledgeCandidates": [] if is_search else ["predictive coding review"],
+                "proposedCandidates": [], "evidenceRequests": [],
+            },
+        })
     return {"status": "completed", "raw_output": content, "summary": "ok"}
 
 
@@ -3855,11 +3878,11 @@ def _freeze_template_baseline(team_id: str, agent_id: str) -> dict:
     return created["baseline"]
 
 
-def _open_first_meeting(team_id: str, agent_ids: list[str], *, agent_runner=None) -> dict:
+def _open_first_meeting(team_id: str, agent_ids: list[str]) -> dict:
     recorded = selections.record_hypothesis_selection(
         team_id,
         _selection_payload(agent_ids[0]),
-        agent_runner=agent_runner or _marker_runner,
+        agent_runner=_marker_runner,
     )
     assert recorded["status"] == "created"
     review = recorded["reviewMeeting"]
@@ -4736,20 +4759,6 @@ def test_interruption_recovery_preserves_rounds_and_idempotency(
         runtime.close()
 
 
-def _structured_review_fixture_runner(participant, prompt, context):
-    # Ledger-bound meetings require the current JSON message contract, even
-    # when a deterministic test runner supplies their content.
-    return {"status": "completed", "summary": "ok", "raw_output": json.dumps({
-        "schemaVersion": 1,
-        "display": {"conclusion": "Review fixture completed", "sections": []},
-        "protocol": {
-            "agreements": ["hyp-a has sufficient mechanism evidence"],
-            "disagreements": [], "risks": [], "actionItems": [],
-            "knowledgeCandidates": [], "proposedCandidates": [], "evidenceRequests": [],
-        },
-    })}
-
-
 def test_close_reports_failed_hypothesis_round_without_rollback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -4770,7 +4779,7 @@ def test_close_reports_failed_hypothesis_round_without_rollback(
         agent_ids = [agents[role] for role in _ROLES]
 
         with server_operator_scope("u-1", roles=("operator",)):
-            recorded = _open_first_meeting(team_id, agent_ids, agent_runner=_structured_review_fixture_runner)
+            recorded = _open_first_meeting(team_id, agent_ids)
             sibling_meetings = _review_meetings(recorded)
             assert len(sibling_meetings) == 2
             first_meeting_id = sibling_meetings[0]["meetingRoundId"]
@@ -7826,7 +7835,7 @@ def test_round_failure_traces_persist_and_backfill_on_retry(
         agent_ids = [agents[role] for role in _ROLES]
 
         with server_operator_scope("u-1", roles=("operator",)):
-            recorded = _open_first_meeting(team_id, agent_ids, agent_runner=_structured_review_fixture_runner)
+            recorded = _open_first_meeting(team_id, agent_ids)
             sibling_meetings = _review_meetings(recorded)
             assert len(sibling_meetings) == 2
             first_meeting_id = sibling_meetings[0]["meetingRoundId"]
