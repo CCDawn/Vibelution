@@ -40,6 +40,25 @@ def test_crash_after_interrupt_redispatch_reuses_same_action_id(tmp_path: Path) 
         harness.close()
 
 
+def test_run_creation_checkpoint_dispatches_entry_node(tmp_path: Path) -> None:
+    from core.web.services.team_workflow.research_runtime.checkpoint_lifecycle import prepare_initial_checkpoint
+
+    harness = GraphHarness(tmp_path)
+    try:
+        harness.seed()
+        prepare_initial_checkpoint(str(tmp_path / "checkpoints.sqlite"), "run-test")
+        harness.enqueue_graph_dispatch("run-test", "problem_understanding", 1)
+        assert harness.worker.run_once() == 1
+        pending = harness.latest_adapter_pending()
+        assert pending is not None
+        payload = json.loads(pending.payload_json)
+        assert payload["nodeId"] == "problem_understanding"
+        assert payload["runId"] == "run-test"
+        assert payload["attempt"] == 1
+    finally:
+        harness.close()
+
+
 def test_retry_creates_new_action_id_and_new_attempt(tmp_path: Path) -> None:
     harness = GraphHarness(tmp_path)
     try:

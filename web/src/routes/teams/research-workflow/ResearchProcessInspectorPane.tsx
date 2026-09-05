@@ -313,6 +313,7 @@ export function ResearchProcessInspectorPane(props: {
   }
   if (formalRuntimeOwnsInspector && scope.selectedNodeId) {
     return (
+      <>
       <HypothesisFirstNodeInspector
         lang={lang}
         teamId={scope.teamId}
@@ -336,6 +337,15 @@ export function ResearchProcessInspectorPane(props: {
             : undefined
         }
       />
+      <NodeKnowledgeCollectionSection
+        badge={state.invocationBadges?.[scope.selectedNodeId]}
+        offers={state.snapshotOffers ?? []}
+        nodeId={scope.selectedNodeId}
+        busy={state.busy}
+        onOffer={actions.submitOffer}
+        lang={lang}
+      />
+      </>
     );
   }
   // Knowledge-sideflow cards: the run-level latest invocation drives the same

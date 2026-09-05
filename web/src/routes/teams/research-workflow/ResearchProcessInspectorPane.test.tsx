@@ -502,6 +502,7 @@ describe("ResearchProcessInspectorPane convergence launch", () => {
     expect(container.querySelector('[data-testid="mock-hypothesis-first-node-inspector"]')).not.toBeNull();
     expect(hypothesisLeafHarness.props?.formalRuntime).toBe(true);
     expect(hypothesisLeafHarness.props?.nodeId).toBe("protocol_design");
+    expect(container.querySelector('[data-vui="node-knowledge-collection"]')).not.toBeNull();
 
     await act(async () => root.unmount());
     container.remove();

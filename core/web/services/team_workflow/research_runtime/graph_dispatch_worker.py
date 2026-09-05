@@ -1242,6 +1242,16 @@ class GraphDispatchWorker:
             persisted_pending.get("nodeId") or values.get("active_node_id") or ""
         )
         next_node_ids = snapshot.get("nextNodeIds") or []
+        # Run creation schedules the entry node with update_state(START),
+        # before any formal runtime channels or PendingAction exist. Start
+        # that exact scheduled node instead of treating it as an interrupt.
+        if (
+            not node_id
+            and not persisted_pending
+            and not values.get("checkpoint_version")
+            and list(next_node_ids) == [dispatch.node_id]
+        ):
+            return self._coordinator.start_attempt(dispatch)
         state_attempt = int(
             persisted_pending.get("attempt") or values.get("active_attempt") or 1
         )
