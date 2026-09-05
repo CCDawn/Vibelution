@@ -374,6 +374,7 @@ describe("ResearchProcessWorkspace", () => {
     }
     document.body.innerHTML = "";
     vi.clearAllMocks();
+    mockedFocus.mockReset().mockResolvedValue("hf_generation");
     harness.location.runId = "";
     harness.location.selectedNodeId = null;
     harness.location.questionId = "";
@@ -1093,7 +1094,7 @@ describe("ResearchProcessWorkspace", () => {
     expect(harness.location.replaceParams).toHaveBeenCalledWith({ runId: "run-bcbca1400d71" });
   });
 
-  it("surfaces the blocked formal run retry action instead of an unknown hypothesis card", async () => {
+  it.each([false, true])("keeps the formal run retry actionable with a local focus failure=%s", async (focusFailure) => {
     const startOffer = {
       command: "start_node",
       nodeId: "source_finding",
@@ -1202,8 +1203,27 @@ describe("ResearchProcessWorkspace", () => {
     } as never;
     harness.runState.commandOffers = [startOffer];
     harness.commands.submitOffer.mockResolvedValue(undefined);
+    harness.catalog.questions = [{
+      ...restoreQuestion,
+      checkpoint: { ...restoreQuestion.checkpoint!, runId: "run-bcbca1400d71" },
+    }];
     const rendered = await renderWorkspace();
     root = rendered.root;
+
+    if (focusFailure) {
+      mockedFocus.mockRejectedValueOnce(new Error("focus-read-offline"));
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true }));
+      });
+      const question = Array.from(document.body.querySelectorAll<HTMLButtonElement>('[data-testid="vui-command-palette"] button'))
+        .find((button) => button.textContent?.includes("SCI-003"));
+      expect(question).toBeTruthy();
+      await act(async () => question!.click());
+      expect(mockedFocus).toHaveBeenCalledWith("research-team", "SCI-003", "run-bcbca1400d71");
+      expect.soft(rendered.container.textContent).toContain("实验焦点读取失败");
+      expect.soft(rendered.container.textContent).toContain("focus-read-offline");
+      expect(rendered.container.querySelector('[data-vui="canvas-workbench-canvas"] [role="alert"]')).toBeNull();
+    }
 
     expect(rendered.container.textContent).not.toContain("未知的假说先行卡片");
     expect(rendered.container.querySelector('[data-testid="research-process-inspector-pane"]')).not.toBeNull();
@@ -1381,6 +1401,54 @@ describe("ResearchProcessWorkspace", () => {
       runId: "run-3",
       node: "hf_generation",
       panel: "node",
+    });
+  });
+
+  it.each(["toolbar", "palette"] as const)("keeps the last experiment across both entry points when %s starts first", async (firstEntry) => {
+    harness.catalog.questions = [checkpointQuestion, restoreQuestion, {
+      ...checkpointQuestion,
+      questionId: "SCI-005",
+      checkpoint: { ...checkpointQuestion.checkpoint!, runId: "run-5" },
+    }];
+    harness.runState.run = currentRun;
+    const pending = new Map<string, (node: string) => void>();
+    mockedFocus.mockImplementation((_teamId, questionId) => new Promise<string>((resolve) => {
+      pending.set(questionId, resolve);
+    }));
+    const rendered = await renderWorkspace();
+    root = rendered.root;
+
+    async function choose(entry: "toolbar" | "palette", questionId: string) {
+      if (entry === "toolbar") {
+        const trigger = rendered.container.querySelector('[data-vui-select-trigger="true"]') as HTMLElement;
+        expect(trigger).toBeTruthy();
+        const options = await openSwitchSelect(trigger);
+        const option = Array.from(options).find((item) => item.textContent?.includes(questionId)) as HTMLElement;
+        expect(option).toBeTruthy();
+        await pickSwitchOption(option);
+      } else {
+        await act(async () => {
+          window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true }));
+        });
+        const question = Array.from(document.body.querySelectorAll<HTMLButtonElement>('[data-testid="vui-command-palette"] button'))
+          .find((button) => button.textContent?.includes(questionId));
+        expect(question).toBeTruthy();
+        await act(async () => question!.click());
+      }
+    }
+
+    await choose(firstEntry, "SCI-003");
+    await choose(firstEntry === "toolbar" ? "palette" : "toolbar", "SCI-005");
+    expect(mockedFocus).toHaveBeenCalledTimes(2);
+    expect(pending.size).toBe(2);
+    await act(async () => { pending.get("SCI-005")!("hf_generation"); });
+    expect(harness.location.replaceParams).toHaveBeenLastCalledWith({
+      questionId: "SCI-005", runId: "run-5", node: "hf_generation", panel: "node",
+    });
+    await act(async () => { pending.get("SCI-003")!("hf_collection"); });
+    expect(harness.location.replaceParams).toHaveBeenCalledTimes(1);
+    expect(harness.location.replaceParams).toHaveBeenLastCalledWith({
+      questionId: "SCI-005", runId: "run-5", node: "hf_generation", panel: "node",
     });
   });
 });
