@@ -37,6 +37,7 @@ import useSourceCollectionWorkspaceSource from "./teams/useSourceCollectionWorks
 import useResearchExperimentWorkspaceSource from "./teams/useResearchExperimentWorkspace.ts?raw";
 import useTeamsShellCanvasWorkspaceSource from "./teams/useTeamsShellCanvasWorkspace.ts?raw";
 import useTeamsCatalogQueriesSource from "./teams/useTeamsCatalogQueries.ts?raw";
+import useTeamCommunicationEventsSource from "./teams/useTeamCommunicationEvents.ts?raw";
 import useTeamsSelectedTeamDetailSource from "./teams/useTeamsSelectedTeamDetail.ts?raw";
 import teamsWorkbenchChromeSource from "./teams/teamsWorkbenchChrome.ts?raw";
 import teamWorkflowResourceDemandSource from "./teams/teamWorkflowResourceDemand.ts?raw";
@@ -115,6 +116,7 @@ const routeSourceParts = [
   useResearchExperimentWorkspaceSource,
   useTeamsShellCanvasWorkspaceSource,
   useTeamsCatalogQueriesSource,
+  useTeamCommunicationEventsSource,
   useTeamsSelectedTeamDetailSource,
   teamsWorkbenchChromeSource,
   teamWorkflowResourceDemandSource,
@@ -2176,11 +2178,12 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).not.toContain("enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data)");
     expect(routeSource.match(/&& teamWorkflowQuery\.data\)/g) ?? []).toEqual([]);
 
-    // R2-d: teams list / agent summary / bus bootstrap live in useTeamsCatalogQueries.
+    // Catalog bootstrap excludes communication; its query follows panel visibility.
     expect(useTeamsCatalogQueriesSource).toContain("export function useTeamsCatalogQueries");
     expect(useTeamsCatalogQueriesSource).toContain("queryFn: ({ signal }) => listTeams({ signal })");
     expect(useTeamsCatalogQueriesSource).toContain("TEAM_BOOTSTRAP_REFETCH_STATUSES");
-    expect(useTeamsCatalogQueriesSource).toContain("listProjectAgentBusTimeline(PROJECT_AGENT_BUS_TEAM_TIMELINE_LIMIT, { signal })");
+    expect(useTeamCommunicationEventsSource).toContain("listProjectAgentBusTimeline(PROJECT_AGENT_BUS_TEAM_TIMELINE_LIMIT, { signal })");
+    expect(useTeamCommunicationEventsSource).toContain("enabled: Boolean(teamId) && visible");
     expect(routeSourceRaw).toContain("useTeamsCatalogQueries({");
     expect(routeSourceRaw).not.toContain("const teamsQuery = useQuery({");
     // R2-e: team detail + kind flags live in useTeamsSelectedTeamDetail.
