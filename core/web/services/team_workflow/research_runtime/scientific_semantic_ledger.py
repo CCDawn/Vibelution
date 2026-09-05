@@ -56,7 +56,7 @@ def _payload(
         exclude_none=True,
         exclude_computed_fields=True,
     )
-    if not semantic_payload:
+    if not any(semantic_payload.values()):
         raise ValueError("scientific semantic record must contain at least one object")
     return {
         "contractVersion": SCIENTIFIC_SEMANTIC_CONTRACT_VERSION,

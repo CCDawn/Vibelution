@@ -14,6 +14,42 @@ from core.web.services.team_workflow.research_runtime.scientific_semantic_ledger
 from tests._support.workflow_ledger_helpers import build_run_record, open_ledger_store
 
 
+@pytest.mark.parametrize(
+    "semantic",
+    [
+        ScientificSemanticRecord(),
+        ScientificSemanticRecord(evidenceReviews=(), evidenceRelations=()),
+    ],
+)
+def test_empty_semantic_record_is_rejected_without_ledger_mutation(
+    tmp_path, semantic
+) -> None:
+    store = open_ledger_store(tmp_path / "workflow-ledger.sqlite")
+    try:
+        run = build_run_record(workflow_id="challenge-cup-research")
+        store.submit(
+            lambda uow: uow.repository.insert_run(run), force_flush=True
+        ).result(timeout=30)
+        before = store.get_run(run.run_id)
+
+        with pytest.raises(ValueError, match="must contain at least one object"):
+            append_scientific_semantic_record(
+                store,
+                run_id=run.run_id,
+                record_ref="semantic:empty",
+                subject_ref="activity-1",
+                semantic=semantic,
+                actor_type="software_agent",
+                actor_ref="agent-source-finder-1",
+                recorded_at_ms=1_750_000_000_100,
+            )
+
+        assert store.list_events(run.run_id) == []
+        assert store.get_run(run.run_id) == before
+    finally:
+        store.close()
+
+
 def test_scientific_semantic_records_are_append_only_and_idempotent(tmp_path) -> None:
     store = open_ledger_store(tmp_path / "workflow-ledger.sqlite")
     try:
