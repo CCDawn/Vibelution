@@ -31,7 +31,7 @@ from core.web.services import (
     session_service,
     supervised_control_service,
 )
-from core.web.services.session import catalog_bridge, directory_runtime
+from core.web.services.session import catalog_bridge, directory_bridge, directory_runtime
 from tests.helpers.web_chat_state import _bind_seeded_session_agent, _seed_chat_state
 
 pytestmark = pytest.mark.serial
@@ -906,6 +906,14 @@ def test_session_query_paginates_searches_and_filters(tmp_path, monkeypatch):
     assert first_payload["nextCursor"] == ""
     assert first_payload["totalEstimate"] == 2
 
+    monkeypatch.setattr(
+        directory_bridge,
+        "list_child_session_summaries",
+        lambda session_id: {
+            "rootSessionId": "session-alpha",
+            "items": [{"id": "session-beta", "updatedAt": "2026-05-18T13:00:00"}],
+        },
+    )
     child_response = client.get("/api/sessions/session-alpha/child-sessions")
     assert child_response.status_code == 200
     assert [item["id"] for item in child_response.json()] == ["session-beta"]
@@ -2882,6 +2890,14 @@ def test_create_child_session_api_persists_root_child_relationship(tmp_path, mon
     assert parent["messages"][-1]["metadata"]["kind"] == "child_session_card"
     assert parent["messages"][-1]["metadata"]["childSessionId"] == child_id
 
+    monkeypatch.setattr(
+        directory_bridge,
+        "list_child_session_summaries",
+        lambda session_id: {
+            "rootSessionId": "session-live",
+            "items": [child],
+        },
+    )
     list_response = client.get("/api/sessions/session-live/child-sessions")
     assert list_response.status_code == 200
     assert [item["id"] for item in list_response.json()] == [child_id]
@@ -2889,42 +2905,19 @@ def test_create_child_session_api_persists_root_child_relationship(tmp_path, mon
 
 def test_list_child_sessions_uses_read_only_relationship_projection(tmp_path, monkeypatch):
     recorded_scene_events: list[tuple[tuple, dict]] = []
-    save_chat_state(
-        tmp_path,
-        {
-            "version": 1,
-            "active_conversation_id": "session-root",
-            "conversations": [
-                {
-                    "conversation_id": "session-root",
-                    "title": "Root",
-                    "session_kind": "main",
-                    "updated_at": "2026-07-30T01:00:00Z",
-                    "messages": [],
-                },
-                {
-                    "conversation_id": "session-child-a",
-                    "title": "Child A",
-                    "session_kind": "child",
-                    "root_session_id": "session-root",
-                    "parent_session_id": "session-root",
-                    "updated_at": "2026-07-30T02:00:00Z",
-                    "messages": [],
-                },
-                {
-                    "conversation_id": "session-child-b",
-                    "title": "Child B",
-                    "session_kind": "child",
-                    "root_session_id": "session-root",
-                    "parent_session_id": "session-root",
-                    "updated_at": "2026-07-30T03:00:00Z",
-                    "messages": [],
-                },
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        directory_bridge,
+        "list_child_session_summaries",
+        lambda session_id: {
+            "rootSessionId": "session-root",
+            "items": [
+                {"id": "session-child-b", "updatedAt": "2026-07-30T03:00:00Z"},
+                {"id": "session-child-a", "updatedAt": "2026-07-30T02:00:00Z"},
             ],
         },
     )
-    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(
         session_service,
         "list_sessions",
@@ -2961,11 +2954,10 @@ def test_list_child_sessions_uses_read_only_relationship_projection(tmp_path, mo
     assert fields["resultCount"] == 2
     assert fields["elapsedMs"] >= 0
     assert fields["readOnly"] is True
-    assert fields["projectionSource"] == "lightweight_child_relationship_index"
-    assert fields["chatStateWaitMs"] >= 0
-    assert fields["chatStateReadMs"] >= 0
-    assert fields["relationshipScanMs"] >= 0
-    assert fields["childProjectionMs"] >= 0
+    assert fields["projectionSource"] == "conversation_store_parent_index"
+    assert fields["directoryReadMs"] >= 0
+    assert "chatStateWaitMs" not in fields
+    assert "chatStateReadMs" not in fields
 
 
 def test_create_child_session_keeps_child_out_of_top_level_index(tmp_path, monkeypatch):
@@ -2996,6 +2988,14 @@ def test_create_child_session_keeps_child_out_of_top_level_index(tmp_path, monke
     assert parent["agentDirectSessionMismatch"] is False
     assert agent_directory_service.get_agent(agent["agentId"])["directSessionId"] == "session-live"
 
+    monkeypatch.setattr(
+        directory_bridge,
+        "list_child_session_summaries",
+        lambda session_id: {
+            "rootSessionId": "session-live",
+            "items": [child],
+        },
+    )
     child_list_response = client.get("/api/sessions/session-live/child-sessions")
     assert child_list_response.status_code == 200
     assert [item["id"] for item in child_list_response.json()] == [child_id]
@@ -3120,6 +3120,14 @@ def test_child_session_tool_uses_current_agent_runtime_session(tmp_path, monkeyp
     assert payload["childSession"]["id"] == child_id
     assert payload["childSession"]["agentId"] == agent["agentId"]
 
+    monkeypatch.setattr(
+        directory_bridge,
+        "list_child_session_summaries",
+        lambda session_id: {
+            "rootSessionId": "session-live",
+            "items": [payload["childSession"]],
+        },
+    )
     with agent_directory_service.active_agent_runtime(agent["agentId"], session_id="session-live"):
         listed = json.loads(session_child_tools.list_child_sessions_tool())
 
