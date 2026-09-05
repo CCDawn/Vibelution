@@ -42,7 +42,7 @@ export function ConversationIndexSection({
         aria-controls={listId}
       >
         <ChevronRight size={14} aria-hidden="true" />
-        <span id={headerId} className="flex min-w-0 items-center gap-2"><span className="truncate">{label}</span>{activity}</span>
+        <span id={headerId} className={styles.conversationGroupIdentity}><span className={styles.conversationGroupLabel}>{label}</span>{activity}</span>
         <strong title={countLabel}>{count}</strong>
       </VNativeButton>
       {expanded ? (
