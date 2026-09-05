@@ -206,13 +206,15 @@ def get_session_turn_completion_snapshot(session_id: str, turn_id: str = "") -> 
                 "activeTurnId": active_turn_id,
                 "turnCurrent": turn_current,
             }
+        turn_events = []
         try:
             from core.chat.turn_journal import (
                 read_model_invocation_receipts_from_events,
             )
 
+            turn_events = s._load_session_conversation_events_cached(normalized_session_id)
             model_invocation_receipts = read_model_invocation_receipts_from_events(
-                s._load_session_conversation_events_cached(normalized_session_id),
+                turn_events,
                 turn_id=normalized_turn_id,
             )
         except Exception:
@@ -306,7 +308,32 @@ def get_session_turn_completion_snapshot(session_id: str, turn_id: str = "") -> 
         and terminal_anchor_turn_id
         and terminal_anchor_turn_id == normalized_turn_id
     )
-    if last_turn_status in terminal_statuses and ready_trusted:
+    # A follow-up changes the session's last-turn anchor, not earlier turns'
+    # settlements. Read the requested turn from the same canonical journal
+    # already loaded for receipt diagnostics.
+    settled_event = next((event for event in reversed(turn_events)
+                          if normalized_turn_id
+                          and getattr(event, "turn_id", "") == normalized_turn_id
+                          and getattr(event, "event_type", "") in {
+                              s.EVENT_TURN_COMPLETED, s.EVENT_TURN_FAILED, s.EVENT_TURN_INTERRUPTED,
+                          }), None)
+    if settled_event is not None:
+        terminal = True
+        terminal_status = str(settled_event.status or "").strip().lower()
+        completion_source = "turn_journal"
+        if terminal_anchor_turn_id != normalized_turn_id:
+            # Last-turn error fields belong to the follow-up, never this turn.
+            event_payload = settled_event.payload or {}
+            terminal_problem_code = str(event_payload.get("terminalProblemCode") or "")
+            terminal_reason = str(event_payload.get("terminalReason") or "")
+            failure_terminal = terminal_status in TERMINAL_STATUS_FAILURE_DISPOSITION
+            failure_category = ""
+            failure_disposition = derive_failure_disposition(
+                problem_code=terminal_problem_code, terminal_status=terminal_status,
+            )
+    elif (last_turn_status in terminal_statuses and ready_trusted
+          and (not normalized_turn_id or not terminal_anchor_turn_id
+               or terminal_anchor_turn_id == normalized_turn_id)):
         terminal = True
         terminal_status = last_turn_status
         completion_source = "last_turn_status"

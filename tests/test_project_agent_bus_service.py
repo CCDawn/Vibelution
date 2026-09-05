@@ -3,6 +3,20 @@ from core.infrastructure import developer_sandbox
 from core.web.services import agent_directory_service, project_agent_bus_service, session_service
 
 
+def test_bus_timeline_counts_agents_without_full_activity_projection(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    calls = []
+
+    def list_agents(*, include_archived=False, detail="full"):
+        calls.append((include_archived, detail))
+        return [{"agentId": "active", "status": "active"}, {"agentId": "archived", "status": "archived"}]
+
+    monkeypatch.setattr(agent_directory_service, "list_agents", list_agents)
+    result = project_agent_bus_service.list_project_agent_bus_events()
+    assert result["activeAgentCount"] == 1
+    assert calls == [(False, "summary")]
+
+
 def _use_tmp_project_root(tmp_path, monkeypatch):
     project_root = tmp_path / "project"
     data_home = tmp_path / "operator-data"

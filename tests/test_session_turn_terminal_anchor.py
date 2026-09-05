@@ -12,6 +12,7 @@ nodes on work that never finished.
 from __future__ import annotations
 
 import pytest
+from types import SimpleNamespace
 
 from core.ui.chat_state import save_chat_state
 from core.web.services import session_service
@@ -100,3 +101,24 @@ def test_adapter_wait_rejects_restart_killed_ready_turn(monkeypatch, tmp_path):
             timeout_ms=50,
             poll_ms=10,
         )
+
+
+@pytest.mark.parametrize("event_type,event_status", [
+    ("turn_completed", "completed"),
+    ("turn_failed", "failed_runtime"),
+    ("turn_interrupted", "stopped_by_user"),
+])
+def test_older_turn_retains_journal_settlement_after_followup(monkeypatch, tmp_path, event_type, event_status):
+    monkeypatch.setattr(session_service, "_load_session_conversation_events_cached", lambda *_: [
+        SimpleNamespace(turn_id="turn-a", event_type=event_type, status=event_status, payload={}),
+        SimpleNamespace(turn_id="turn-b", event_type="turn_completed", status="completed", payload={}),
+    ])
+    snapshot = _snapshot(monkeypatch, tmp_path, status="ready", terminal_turn_id="turn-b")
+    assert snapshot["terminal"] is True
+    assert snapshot["terminalStatus"] == event_status
+    assert snapshot["completionSource"] == "turn_journal"
+
+
+def test_turn_cannot_borrow_later_turn_failure(monkeypatch, tmp_path):
+    snapshot = _snapshot(monkeypatch, tmp_path, status="failed_runtime", terminal_turn_id="turn-b")
+    assert snapshot["terminal"] is False

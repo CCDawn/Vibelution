@@ -7,10 +7,6 @@ import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 
 import { listAgentSummaries } from "../../api/agents";
-import {
-  PROJECT_AGENT_BUS_TEAM_TIMELINE_LIMIT,
-  listProjectAgentBusTimeline,
-} from "../../api/projectAgentBus";
 import { queryKeys } from "../../api/queryKeys";
 import { listTeams } from "../../api/teams";
 import type { AgentConfigWorkspaceAgent, Team } from "../../api/types";
@@ -54,10 +50,6 @@ export function useTeamsCatalogQueries({
     queryKey: queryKeys.agentSummary(false),
     queryFn: ({ signal }) => listAgentSummaries<AgentConfigWorkspaceAgent>({ signal }),
     staleTime: 10_000,
-  });
-  const projectBusQuery = useQuery({
-    queryKey: queryKeys.projectAgentBus(),
-    queryFn: ({ signal }) => listProjectAgentBusTimeline(PROJECT_AGENT_BUS_TEAM_TIMELINE_LIMIT, { signal }),
   });
 
   const activeAgents = useMemo(
@@ -125,7 +117,6 @@ export function useTeamsCatalogQueries({
   return {
     teamsQuery,
     agentSummaryQuery,
-    projectBusQuery,
     activeAgents,
     activeAgentsById,
     teams,

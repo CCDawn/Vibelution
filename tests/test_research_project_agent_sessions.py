@@ -1123,7 +1123,7 @@ def test_source_stage_exact_replay_recovers_pre_submit_missing_session_without_d
         role_label="资料寻找",
         created_from_task_id="stagetask-pre-submit",
         workflow_run_id=str(run_scope.get("workflowRunId") or ""),
-        workflow_node_id="source_collection",
+        workflow_node_id="source_finding",
     )
     session_service.delete_chat_session(first_session["sessionId"])
 
@@ -1256,7 +1256,7 @@ def test_source_stage_new_task_records_missing_project_session_recovery(
         role_label="资料寻找",
         created_from_task_id="old-project-task",
         workflow_run_id=str(run_scope.get("workflowRunId") or ""),
-        workflow_node_id="source_collection",
+        workflow_node_id="source_finding",
     )
     session_service.delete_chat_session(first_session["sessionId"])
     monkeypatch.setattr(
