@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from core.research.workflow.contracts import PendingAction
@@ -92,6 +93,16 @@ def find_reusable_source_stage_task(
                 task,
             )
         status = str(task.get("status") or "").strip().lower()
+        if not is_current_node_run and stage_id == "finding" and status == "completed" and store is not None:
+            prior = store.read(lambda repo: repo.get_attempt(node_run_id))
+            problem = json.loads(getattr(prior, "problem_json", None) or "{}")
+            if problem.get("code") == "source_search_receipt_missing":
+                from .artifact_readback_registry import load_source_finding_receipt_payload
+
+                if load_source_finding_receipt_payload(team_id=team_id, authority_run_id=source_run_id) is None:
+                    # The turn ended, but its evidence was rejected. Replaying it
+                    # cannot repair missing receipts; a retry must get a new turn.
+                    continue
         task_is_dead = was_active and status in dead_stage_task_statuses
         if (
             task_is_dead

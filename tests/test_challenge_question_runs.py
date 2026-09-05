@@ -1429,3 +1429,15 @@ def test_publish_requires_canonical_output_ref_even_when_hash_matches(tmp_path, 
                 "lineageRefs": [],
             },
         )
+
+
+@pytest.mark.parametrize("records, expected", [
+    ([], []),
+    ([{"questionId": "SCI-091", "validation": {"schemaValidation": "failed"}},
+      {"questionId": "SCI-002"}, {"questionId": "SCI-091"}], ["SCI-002", "SCI-091"]),
+])
+def test_summary_lists_registered_questions_independently_of_validation(monkeypatch, records, expected):
+    monkeypatch.setattr(challenge_question_runs, "_load_store", lambda team_id: {"records": records})
+    summary = challenge_question_runs.challenge_question_run_summary("research-team")
+    assert summary["registeredQuestionIds"] == expected
+    assert summary["validatedQuestionIds"] == []

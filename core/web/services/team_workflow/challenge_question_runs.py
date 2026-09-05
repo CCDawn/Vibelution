@@ -2066,6 +2066,11 @@ def challenge_question_run_summary(team_id: str) -> dict[str, Any]:
     return {
         "teamId": team_id,
         "recordCount": len(records),
+        "registeredQuestionIds": sorted({
+            str(record.get("questionId") or "").strip().upper()
+            for record in records
+            if isinstance(record, dict) and str(record.get("questionId") or "").strip()
+        }),
         "validCandidateCount": len(valid_candidates),
         "validatedQuestionCount": len(validated_question_ids),
         "validatedQuestionIds": validated_question_ids,

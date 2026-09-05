@@ -118,6 +118,15 @@ def source_collection_context_tool(
                 _source_context_cache_put(cache_key, payload)
         if isinstance(payload, dict) and resolution:
             payload.setdefault("toolResolution", resolution)
+        if isinstance(payload, dict) and _text(payload.get("stageId") or stage_id) == "finding":
+            from core.web.services.team_workflow.source_collection.search_execution import project_source_collection_search_trace
+
+            payload = {**payload, "formalSearchPolicy": {
+                "supplementalQueries": "Use batch_web_search_tool or paper_search_tool with parent_query_id from this task's assignedQueries. Keep the same research question and perspective. The server registers the query before search and persists real provider receipts.",
+                "candidateBinding": "Every candidate URL must appear in searchReceipts.resultRefs. If a prior candidate is missing a receipt, search its actual title/URL with the scoped tools; never invent or claim a receipt. web_fetch_tool alone is not a search receipt.",
+            }, "searchReceipts": project_source_collection_search_trace(
+                resolved_team_id, _text(payload.get("runId") or run_id),
+            )}
         _record_stage_tool_event(
             "tool.source_collection_context.completed",
             outcome="completed",

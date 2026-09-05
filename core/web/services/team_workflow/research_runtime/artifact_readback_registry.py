@@ -264,16 +264,16 @@ def _load_scoped_candidates(
     workflow_run_id: str = "",
 ) -> list[dict[str, Any]] | None:
     from core.web.services.team_workflow.source_collection.candidates import (
-        list_candidate_store,
+        list_candidate_store_authority_records,
     )
 
     try:
-        payload = list_candidate_store(team_id, limit=500, run_id=authority_run_id)
+        records = list_candidate_store_authority_records(team_id, run_id=authority_run_id)
     except Exception:
         return None
     candidates = [
         item
-        for item in list(payload.get("candidates") or [])
+        for item in records
         if isinstance(item, dict)
         and str(item.get("candidateType") or "") != "candidate_graph"
         and _matches_collect_scope(

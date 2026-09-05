@@ -152,13 +152,12 @@ export function pickPrimaryCommandOffer(offers: CommandOffer[] | null | undefine
   const startOffers = list.filter((offer) => offer.command === "start_node");
   const availableStart = startOffers.find((offer) => offer.available);
   if (availableStart) return availableStart;
-  if (startOffers[0]) return startOffers[0];
   // No fallback to an unavailable retry_node offer: once the run version has
   // moved on, the stale signed offer is dead (the workspace footer and the
   // server both reject it), so resurrecting it as a disabled primary button
   // only hides the refresh need. No available retry means no primary action.
   const retry = list.find((offer) => offer.command === "retry_node" && offer.available);
-  return retry ?? null;
+  return retry ?? startOffers[0] ?? null;
 }
 
 export function remainingCommandOffers(

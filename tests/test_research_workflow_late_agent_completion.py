@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from dataclasses import replace
 
 import pytest
 
@@ -46,6 +47,39 @@ class _AttemptStore:
                 return attempts.get(node_run_id)
 
         return callback(_Repository())
+
+
+@pytest.mark.parametrize("receipt_repaired", [False, True])
+def test_rejected_finding_parent_replays_only_after_receipt_repair(monkeypatch, receipt_repaired):
+    from core.web.services.team_workflow.source_collection import stage_reconcile
+    from core.web.services.team_workflow.research_runtime import artifact_readback_registry
+
+    store = _AttemptStore({
+        "current": SimpleNamespace(retry_of_node_run_id="parent"),
+        "parent": SimpleNamespace(run_id="run-retry", node_id="source_finding",
+            status="blocked", problem_json='{"code":"source_search_receipt_missing"}'),
+    })
+    parent_key = stage_reconcile._source_collection_stage_task_idempotency_key(
+        team_id="research-team", run_id="dprun-source", stage_id="finding",
+        agent_id="finder", agent_role="source_finder", task_id="",
+        requested_key="agent-task:parent",
+    )
+    task = {**_stage_task(task_id="prior-task"), "stageId": "finding",
+            "agentId": "finder", "agentRole": "source_finder"}
+    monkeypatch.setattr(stage_reconcile, "_find_source_collection_stage_session_task",
+        lambda *_a, idempotency_key: task if idempotency_key == parent_key else None)
+    reads = []
+    def read_receipt(**kwargs):
+        reads.append(kwargs)
+        return {"valid": True} if receipt_repaired else None
+    monkeypatch.setattr(artifact_readback_registry, "load_source_finding_receipt_payload", read_receipt)
+    replay = find_reusable_source_stage_task(
+        store=store, action=replace(_action(node_run_id="current", attempt=3), node_id="source_finding"),
+        team_id="research-team", source_run_id="dprun-source", stage_id="finding",
+        agent_id="finder", agent_role="source_finder",
+    )
+    assert (replay is not None) is receipt_repaired
+    assert reads == [{"team_id": "research-team", "authority_run_id": "dprun-source"}]
 
 
 def _stage_task(*, task_id: str, status: str = "completed") -> dict:
