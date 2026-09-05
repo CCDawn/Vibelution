@@ -799,6 +799,9 @@ def start_source_collection_stage_session_task(
         else {}
     )
     # Product bar: refuse stage open when upstream is not ready (same contract as UI preflight).
+    scope_workflow_run_id, scope_workflow_node_id = _source_collection_stage_session_workflow_scope(
+        run, problem_understanding_context, stage_id=stage_id,
+    )
     graph_metrics = _source_collection_run_graph_metrics(
         normalized_team_id,
         normalized_run_id,
@@ -938,9 +941,7 @@ def start_source_collection_stage_session_task(
                 "agentRole": agent_role,
                 **existing_session,
                 "taskId": s._trim_text(existing_task.get("taskId"), max_length=160),
-                "workflowRunId": problem_understanding_context.get("workflowRunId", "")
-                if problem_understanding_context
-                else "",
+                "workflowRunId": scope_workflow_run_id,
                 "idempotencyKey": task_idempotency_key,
                 "created": False,
                 "alreadyPresent": True,
@@ -1029,9 +1030,7 @@ def start_source_collection_stage_session_task(
         contract_workflow_run_id = s._trim_text(
             challenge_task_contract.get("workflowRunId"), max_length=160
         )
-        if contract_workflow_run_id and contract_workflow_run_id != problem_understanding_context[
-            "workflowRunId"
-        ]:
+        if contract_workflow_run_id and contract_workflow_run_id != scope_workflow_run_id:
             raise s.TeamWorkflowOrchestrationError(
                 "Formal source-collection task workflowRunId does not match the source run scope."
             )
@@ -1117,11 +1116,6 @@ def start_source_collection_stage_session_task(
         agent_role=agent_role,
         previous_task=previous_stage_task,
         source_candidates=source_candidates,
-    )
-    scope_workflow_run_id, scope_workflow_node_id = _source_collection_stage_session_workflow_scope(
-        run,
-        problem_understanding_context,
-        stage_id=stage_id,
     )
     try:
         experiment_session = s.resolve_research_project_agent_session(
@@ -1222,11 +1216,7 @@ def start_source_collection_stage_session_task(
         "idempotencyKey": task_idempotency_key,
         "teamId": normalized_team_id,
         "runId": normalized_run_id,
-        "workflowRunId": (
-            problem_understanding_context.get("workflowRunId", "")
-            if problem_understanding_context
-            else ""
-        ),
+        "workflowRunId": scope_workflow_run_id,
         "stageId": stage_id,
         "agentId": agent_id,
         "agentRole": agent_role,
@@ -1339,11 +1329,7 @@ def start_source_collection_stage_session_task(
             "taskId": task_id,
             "sourceCollectionStageTaskKey": task_idempotency_key,
             "sourceContextMode": source_context_mode,
-            "workflowRunId": (
-                problem_understanding_context.get("workflowRunId", "")
-                if problem_understanding_context
-                else ""
-            ),
+            "workflowRunId": scope_workflow_run_id,
             "problemUnderstandingContext": problem_understanding_context,
             "writebackContract": writeback_contract,
             "taskToolRequired": False,
@@ -1416,11 +1402,7 @@ def start_source_collection_stage_session_task(
         "agentRole": agent_role,
         **experiment_session,
         "taskId": task_id,
-        "workflowRunId": (
-            problem_understanding_context.get("workflowRunId", "")
-            if problem_understanding_context
-            else ""
-        ),
+        "workflowRunId": scope_workflow_run_id,
         "idempotencyKey": task_idempotency_key,
         "created": True,
         "alreadyPresent": False,
