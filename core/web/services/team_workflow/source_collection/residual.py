@@ -24,6 +24,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+from .writeback_materialize import FINDING_REQUIRED_PERSPECTIVES
+
 ARXIV_ATOM_NAMESPACE = "http://www.w3.org/2005/Atom"
 ARXIV_SCHEMA_NAMESPACE = "http://arxiv.org/schemas/atom"
 
@@ -74,45 +76,93 @@ def _build_source_collection_search_plan(
     search_roles = [role for role in roles if role in s.SOURCE_COLLECTION_SEARCH_EXECUTION_AGENT_ROLES]
     role_cycle = search_roles or ["source_finder"]
     queries: list[dict[str, Any]] = []
-    for seed in query_seeds:
-        for source_type in source_types:
-            for language in languages:
+
+    def append_query(
+        seed: str,
+        *,
+        source_type: str,
+        language: str,
+        perspective: str = "",
+    ) -> None:
+        assigned_role = role_cycle[len(queries) % len(role_cycle)]
+        query_id = f"{normalized_plan_id}-q{len(queries) + 1:03d}"
+        query_text = (
+            _source_collection_perspective_query_text(
+                seed,
+                source_type=source_type,
+                language=language,
+                perspective=perspective,
+            )
+            if perspective
+            else s._source_collection_query_text(
+                seed,
+                source_type=source_type,
+                language=language,
+            )
+        )
+        query = {
+            "queryId": query_id,
+            "query": query_text,
+            "seed": seed,
+            "language": language,
+            "sourceType": source_type,
+            "assignedAgentRole": assigned_role,
+            "maxResults": max_results,
+            "status": "planned",
+            "execution": {
+                "mode": "contract_only",
+                "externalSearchTriggered": False,
+                "conversationTraceRequired": True,
+                "promptCacheRequired": prompt_cache_policy.get("requirement") in s.SOURCE_COLLECTION_PROMPT_CACHE_REQUIRED_MODES,
+                "promptCachePartition": s._source_collection_prompt_cache_partition(
+                    team_id,
+                    assigned_role,
+                    model_id=str(prompt_cache_policy.get("modelId") or ""),
+                ),
+            },
+            "writeback": {
+                "target": "CollectionOutput.records",
+                "recordStatus": "collected",
+                "candidateImportTarget": "source_manifest",
+            },
+        }
+        if perspective:
+            query["perspective"] = perspective
+        queries.append(query)
+
+    is_challenge_cup = (
+        s._trim_text(scope.get("workflowKind"), max_length=80)
+        == s.WORKFLOW_KIND_CHALLENGE_CUP_RESEARCH
+    )
+    if is_challenge_cup:
+        for seed in query_seeds:
+            for perspective in FINDING_REQUIRED_PERSPECTIVES:
                 if len(queries) >= s.SOURCE_COLLECTION_MAX_QUERIES:
                     break
-                assigned_role = role_cycle[len(queries) % len(role_cycle)]
-                query_id = f"{normalized_plan_id}-q{len(queries) + 1:03d}"
-                queries.append(
-                    {
-                        "queryId": query_id,
-                        "query": s._source_collection_query_text(seed, source_type=source_type, language=language),
-                        "seed": seed,
-                        "language": language,
-                        "sourceType": source_type,
-                        "assignedAgentRole": assigned_role,
-                        "maxResults": max_results,
-                        "status": "planned",
-                        "execution": {
-                            "mode": "contract_only",
-                            "externalSearchTriggered": False,
-                            "conversationTraceRequired": True,
-                            "promptCacheRequired": prompt_cache_policy.get("requirement") in s.SOURCE_COLLECTION_PROMPT_CACHE_REQUIRED_MODES,
-                            "promptCachePartition": s._source_collection_prompt_cache_partition(
-                                team_id,
-                                assigned_role,
-                                model_id=str(prompt_cache_policy.get("modelId") or ""),
-                            ),
-                        },
-                        "writeback": {
-                            "target": "CollectionOutput.records",
-                            "recordStatus": "collected",
-                            "candidateImportTarget": "source_manifest",
-                        },
-                    }
+                query_index = len(queries)
+                append_query(
+                    seed,
+                    source_type=source_types[query_index % len(source_types)],
+                    language=languages[query_index % len(languages)],
+                    perspective=perspective,
                 )
             if len(queries) >= s.SOURCE_COLLECTION_MAX_QUERIES:
                 break
-        if len(queries) >= s.SOURCE_COLLECTION_MAX_QUERIES:
-            break
+    else:
+        for seed in query_seeds:
+            for source_type in source_types:
+                for language in languages:
+                    if len(queries) >= s.SOURCE_COLLECTION_MAX_QUERIES:
+                        break
+                    append_query(
+                        seed,
+                        source_type=source_type,
+                        language=language,
+                    )
+                if len(queries) >= s.SOURCE_COLLECTION_MAX_QUERIES:
+                    break
+            if len(queries) >= s.SOURCE_COLLECTION_MAX_QUERIES:
+                break
     writeback_contract = s._source_collection_writeback_contract(team_id, run_id)
     return {
         "schemaVersion": s.SCHEMA_VERSION,
@@ -2877,6 +2927,39 @@ def _source_collection_query_text(seed: str, *, source_type: str, language: str)
     }
     suffix = suffixes.get(normalized_source_type, normalized_source_type or "source")
     return s._trim_text(f"{normalized_seed} {suffix}", max_length=260)
+
+
+def _source_collection_perspective_query_text(
+    seed: str,
+    *,
+    source_type: str,
+    language: str,
+    perspective: str,
+) -> str:
+    s = _service()
+    base_query = _source_collection_query_text(
+        seed,
+        source_type=source_type,
+        language=language,
+    )
+    normalized_language = s._trim_text(language, max_length=16).lower()
+    normalized_perspective = s._trim_text(perspective, max_length=80).lower()
+    if normalized_language.startswith("zh") or normalized_language in {"cn", "chinese"}:
+        suffixes = {
+            "mechanism": "机制 因果路径 支持证据",
+            "independent_baseline": "独立基线 复现 对照比较",
+            "limitation_or_null": "限制 失败 零结果 负面结果",
+            "falsification": "反例 可证伪证据 替代解释",
+        }
+    else:
+        suffixes = {
+            "mechanism": "mechanism causal pathway supporting evidence",
+            "independent_baseline": "independent baseline replication benchmark comparison",
+            "limitation_or_null": "limitations failures null results negative findings",
+            "falsification": "falsification contradictory evidence alternative explanation",
+        }
+    suffix = suffixes[normalized_perspective]
+    return s._trim_text(f"{base_query} {suffix}", max_length=360)
 
 
 def _source_collection_record_extraction_effective_texts(extraction: dict[str, Any], record: dict[str, Any]) -> list[str]:
