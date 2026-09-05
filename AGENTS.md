@@ -49,6 +49,8 @@
 
 ## 4. Execution Baseline
 
+- 本地开发和验证按“现有 API → Playwright/CDP → 必要时桌面 UI”操作，能后台完成时不得抢焦点。本地桌面启动默认开放 loopback 调试端口且不弹 DevTools；使用 `scripts/desktop_debug.py --project "<project-root>"` 发现真实地址，按角色/instanceId/URL 选择窗口，完整重启后重新发现和连接。不得猜端口、用首个页面代替窗口识别或绕过 active-work guard。细则：[桌面调试](docs/guides/desktop-debugging.md)。
+
 - 工作分级为 `FAST_PATCH / STANDARD_TASK / HIGH_RISK`，使用足以保护正确性、并发与证据的最轻流程。
 - 写入前定位 owning surface、现有测试、用户改动和 active claim；禁止在根 `main` 直接写入任何变更。所有 development、mechanical 和文档/规则写入都必须转到任务 worktree，根 `main` 仅用于分支合入和必要同步；验证必须在合入前完成。任务 worktree 默认落在 `<project-root>/.worktrees/<task-slug>`；旧兄弟目录 `Vibelution-worktrees` 已不再存在于磁盘，仅保留兼容迁移逻辑（`core/infrastructure/branch_workspace.py`）以防目录重现，细则见 [协作规范](docs/agents/worktree-collaboration.md)。
 - 前端使用 TypeScript、Tailwind-first、VUI `V*` 产品 API 和 shadcn/Radix renderer；HeroUI 已移除。触及 UI 的写入前必须对齐 §2 前端红线；完成前跑相关 frontend contract（至少 `vuiShadcnRouteContract` 与触及的 route/layout 测试），不得以「先实现再迁 VUI」交付用户可见路径。

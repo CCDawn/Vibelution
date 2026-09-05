@@ -691,7 +691,7 @@ def _desktop_shell_electron_args(
     open_workbench: bool,
     lifecycle: str,
 ) -> list[str]:
-    args = [executable, *prefix, "--workspace", str(shell_root)]
+    args = [executable, *prefix, "--workspace", str(shell_root), "--local-debugging"]
     if slot_root is not None:
         args.extend(["--project", str(slot_root)])
     if open_workbench:
@@ -711,6 +711,23 @@ def resolve_desktop_shell_launch(
 
     shell_root, slot_root = resolve_desktop_shell_launch_roots(project_root)
     lifecycle = str(then_lifecycle or "").strip().lower()
+    # A live main owns freshness and guarded relaunch. Rebuilding here first
+    # consumes its `rebuilt` signal and leaves old main code running indefinitely.
+    if slot_root is None and lifecycle in {"start", "restart", "rebuild-and-start"}:
+        from core.launcher.desktop_shell_owner import _identity_status, read_desktop_shell_owner
+
+        owner = read_desktop_shell_owner(shell_root)
+        electron_bin = unpackaged_electron_executable(shell_root)
+        main_js = unpackaged_main_js(shell_root)
+        if (owner and owner.get("owner") == "electron" and electron_bin and main_js.is_file()
+                and Path(str(owner.get("executable", ""))).resolve() == electron_bin.resolve()
+                and _identity_status(owner) == "match"):
+            return {
+                "schemaVersion": 1, "kind": "unpackaged", "reason": "forward_to_live_shell",
+                "cwd": str(shell_root), "rebuilt": False,
+                "args": _desktop_shell_electron_args(str(electron_bin), [str(main_js)],
+                    shell_root=shell_root, slot_root=None, open_workbench=open_workbench, lifecycle=lifecycle),
+            }
     packaged_status = inspect_desktop_shell(shell_root)
     if not packaged_status.get("stale") and packaged_status.get("reason") == "current":
         args = _desktop_shell_electron_args(
@@ -785,7 +802,7 @@ def launch_packaged_desktop_shell(
     exe = packaged_desktop_exe(root)
     if not exe.is_file():
         raise FileNotFoundError(f"packaged desktop shell was not found: {exe}")
-    args = [str(exe), "--workspace", str(root)]
+    args = [str(exe), "--workspace", str(root), "--local-debugging"]
     lifecycle = str(then_lifecycle or "").strip().lower()
     if lifecycle:
         args.append(lifecycle)
