@@ -1070,7 +1070,7 @@ class WorkflowCommandService:
                 ScientificSemanticRecord,
             )
 
-            append_scientific_semantic_record_in_uow(
+            semantic_record = append_scientific_semantic_record_in_uow(
                 uow,
                 run_id=request.run_id,
                 record_ref=f"execution:{command_id}:cancelled",
@@ -1084,6 +1084,7 @@ class WorkflowCommandService:
                 actor_ref=operator_id,
                 recorded_at_ms=now_ms,
             )
+            sequence = semantic_record["sequence"]
         return _receipt(uow, request, command_id, accepted_version, sequence, now_ms)
 
     def _handle_resolve_human_task(
