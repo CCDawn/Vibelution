@@ -423,6 +423,48 @@ def test_selector_matches_teams_style_map_to_teams_validation_commands():
     assert "remote-distributed" not in result["validationLayers"]
 
 
+def test_semantic_ledger_selects_all_direct_consumers_and_public_structure():
+    result = select_tests.select_tests(
+        ["core/web/services/team_workflow/research_runtime/scientific_semantic_ledger.py"],
+        select_tests.load_matrix(),
+    )
+    assert result["coverageGaps"] == []
+    rules = {rule["id"] for rule in result["matchedRules"]}
+    assert "challenge-scientific-semantic-ledger" in rules
+    assert "teams-knowledge" not in rules
+    commands = " ".join(result["commands"])
+    for test_file in (
+        "test_challenge_cup_stage_one_v3_contract.py",
+        "test_challenge_cup_scientific_semantic_ledger.py",
+        "test_challenge_cup_cancel_semantics.py",
+        "test_challenge_cup_archive_semantics.py",
+        "test_challenge_cup_human_wait_semantics.py",
+        "test_challenge_cup_human_success_semantics.py",
+        "test_research_workflow_adapter_idempotency.py",
+        "test_team_workflow_facade_contract.py",
+        "test_team_workflow_structure_packs.py",
+    ):
+        assert test_file in commands
+    assert "test_team_service.py" not in commands
+    assert "test_team_workflow_source_collection_cases.py" not in commands
+
+
+@pytest.mark.parametrize("other_path", [
+    "core/web/services/team_workflow/research_runtime/command_service.py",
+    "core/web/services/team_workflow/research_runtime/adapter_dispatch_worker.py",
+    "core/web/services/team_workflow/research_runtime/graph_dispatch_worker.py",
+    "core/web/services/team_workflow/research_runtime/new_module.py",
+    "core/web/services/team_workflow/experiment_api/plan.py",
+])
+def test_semantic_fast_rule_does_not_exempt_other_runtime_or_mixed_changes(other_path):
+    result = select_tests.select_tests(
+        ["core/web/services/team_workflow/research_runtime/scientific_semantic_ledger.py", other_path],
+        select_tests.load_matrix(),
+    )
+    assert any(rule["id"] == "teams-knowledge" for rule in result["matchedRules"])
+    assert any("test_team_workflow_source_collection_cases.py" in command for command in result["commands"])
+
+
 def test_selector_matches_team_workflows_package_routes():
     result = select_tests.select_tests(
         [
