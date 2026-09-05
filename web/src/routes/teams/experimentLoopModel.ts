@@ -193,6 +193,8 @@ export type ExperimentKnowledgeIngestionRecord = {
 export type ExperimentPlanRecord = {
   planId: string;
   stageRoundId: string;
+  researchProjectId: string;
+  experimentName?: string;
   status: string;
   title: string;
   topic: string;
@@ -221,6 +223,17 @@ export type ExperimentPlanRecord = {
     sourceIdempotencyKey?: string;
     frozenAt: string;
     frozenByAgent: string;
+    operatorApproval?: {
+      operatorId: string;
+      operatorDisplayName: string;
+      operatorRoles: string[];
+      planId: string;
+      planRevision: number;
+      experimentContractSha256: string;
+      approvedAt: string;
+      approvalId: string;
+      approvalSha256: string;
+    };
   };
   experimentPlan: {
     dataset: string;

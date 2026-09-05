@@ -60,29 +60,39 @@ def create_experiment_plan(team_id: str, payload: dict[str, Any] | None = None) 
     from core.web.services.team_workflow.challenge_phase_boundary import (
         request_targets_challenge_phase_two,
         require_phase_two_activation,
+        research_project_targets_challenge_phase_two,
     )
 
-    if request_targets_challenge_phase_two(request_payload):
+    research_project = s.resolve_research_project_identity(
+        normalized_team_id,
+        s._trim_text(request_payload.get("researchProjectId"), max_length=160),
+    )
+    research_project_id = research_project["projectId"]
+    if (
+        request_targets_challenge_phase_two(request_payload)
+        or research_project_targets_challenge_phase_two(research_project)
+    ):
         require_phase_two_activation(normalized_team_id)
     created_by_agent = s._trim_text(request_payload.get("createdByAgent"), max_length=160) or s.DEFAULT_OWNER_AGENT_ID
     with s._WORKFLOW_LOCK:
-        workflow = s._load_or_create_workflow(normalized_team_id)
-        store = s._load_stage_round_store(normalized_team_id)
+        workflow = s._load_or_create_workflow(
+            normalized_team_id,
+            research_project_id=research_project_id,
+        )
+        store = s._load_stage_round_store(normalized_team_id, research_project_id)
         rounds = s._stage_rounds(store)
         stage_round = s._select_experiment_stage_round(request_payload, rounds)
         if request_targets_challenge_phase_two(stage_round):
             require_phase_two_activation(normalized_team_id)
-        research_project = s.resolve_research_project_identity(
+        candidate_store = s._load_candidate_store(
             normalized_team_id,
-            s._trim_text(
-                stage_round.get("researchProjectId")
-                or request_payload.get("researchProjectId"),
-                max_length=160,
-            ),
+            research_project_id=research_project_id,
         )
-        candidate_store = s._load_candidate_store(normalized_team_id)
         selected_hypotheses = s._select_experiment_hypothesis_candidates(candidate_store, request_payload)
-        plan_store = s._load_experiment_plan_store(normalized_team_id)
+        plan_store = s._load_experiment_plan_store(
+            normalized_team_id,
+            research_project_id,
+        )
         plan = s._build_experiment_plan_record(
             normalized_team_id,
             workflow,
@@ -108,16 +118,20 @@ def create_experiment_plan(team_id: str, payload: dict[str, Any] | None = None) 
         plan_store.setdefault("plans", []).append(plan)
         plan_store["activePlanId"] = plan["planId"]
         plan_store["updatedAt"] = now
-        s._write_json(s._experiment_plan_store_path(normalized_team_id), plan_store)
+        plan_store_path = s._experiment_plan_store_path(
+            normalized_team_id,
+            research_project_id,
+        )
+        s._write_json(plan_store_path, plan_store)
         stage_round["experimentPlanRef"] = {
             "planId": plan["planId"],
             "status": plan["status"],
-            "storagePath": s._relative_path(s._experiment_plan_store_path(normalized_team_id)),
+            "storagePath": s._relative_path(plan_store_path),
             "updatedAt": now,
         }
         planning_contract = stage_round.get("planningContract") if isinstance(stage_round.get("planningContract"), dict) else {}
         planning_contract["currentPlanId"] = plan["planId"]
-        planning_contract["planStoragePath"] = s._relative_path(s._experiment_plan_store_path(normalized_team_id))
+        planning_contract["planStoragePath"] = s._relative_path(plan_store_path)
         planning_contract["memoryContextId"] = memory_context["contextId"]
         planning_contract["autoExecution"] = False
         planning_contract["requiresUserDecision"] = True
@@ -126,7 +140,10 @@ def create_experiment_plan(team_id: str, payload: dict[str, Any] | None = None) 
         stage_round["updatedAt"] = now
         store["rounds"] = rounds
         store["updatedAt"] = now
-        s._write_json(s._stage_round_store_path(normalized_team_id), store)
+        s._write_json(
+            s._stage_round_store_path(normalized_team_id, research_project_id),
+            store,
+        )
         workflow["updatedAt"] = now
         workflow["activeWorkflowItems"] = s._upsert_active_item(
             workflow.get("activeWorkflowItems"),
@@ -135,9 +152,15 @@ def create_experiment_plan(team_id: str, payload: dict[str, Any] | None = None) 
             status="experiment_plan_drafted",
             transfer_id="",
         )
-        s._write_json(s._workflow_path(normalized_team_id), workflow)
+        s._write_json(
+            s._workflow_path(normalized_team_id, research_project_id),
+            workflow,
+        )
         status_payload = s._experiment_planning_status(normalized_team_id, rounds, candidate_store, plan_store)
-        stage_round_status = s.get_research_stage_round_status(normalized_team_id)
+        stage_round_status = s.get_research_stage_round_status(
+            normalized_team_id,
+            research_project_id,
+        )
     s.lock_research_project_name(
         normalized_team_id,
         research_project["projectId"],
@@ -655,12 +678,35 @@ def _hypothesis_progress_rank(plan: dict[str, Any], candidate_id: str) -> int:
 
 def freeze_experiment_design(team_id: str, plan_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     s = _service()
+    from core.web.services.team_workflow.research_runtime.human_gate_artifacts import (
+        canonical_sha256,
+    )
+    from core.web.services.team_workflow.research_runtime.operator_authorization import (
+        require_privileged_server_operator,
+    )
+
+    operator = require_privileged_server_operator(command="resolve_human_task")
     normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
     normalized_plan_id = s._normalize_required_id(plan_id, "Experiment plan id is required.")
     request_payload = payload if isinstance(payload, dict) else {}
+    research_project = s.resolve_research_project_identity(
+        normalized_team_id,
+        s._trim_text(request_payload.get("researchProjectId"), max_length=160),
+    )
+    research_project_id = research_project["projectId"]
+    from core.web.services.team_workflow.challenge_phase_boundary import (
+        require_phase_two_activation,
+        research_project_targets_challenge_phase_two,
+    )
+
+    if research_project_targets_challenge_phase_two(research_project):
+        require_phase_two_activation(normalized_team_id)
     frozen_by_agent = s._trim_text(request_payload.get("frozenByAgent"), max_length=160) or s.DEFAULT_OWNER_AGENT_ID
     with s._WORKFLOW_LOCK:
-        plan_store = s._load_experiment_plan_store(normalized_team_id)
+        plan_store = s._load_experiment_plan_store(
+            normalized_team_id,
+            research_project_id,
+        )
         plan = s._find_experiment_plan(plan_store, normalized_plan_id)
         if plan is None:
             raise s.TeamWorkflowOrchestrationError("Experiment plan not found.")
@@ -696,9 +742,22 @@ def freeze_experiment_design(team_id: str, plan_id: str, payload: dict[str, Any]
         if str(gate.get("status") or "") == "frozen":
             return {"status": "already_frozen", "plan": plan}
         now = s.utc_now_iso()
+        approval = {
+            "operatorId": operator.operator_id,
+            "operatorDisplayName": operator.display_name,
+            "operatorRoles": list(operator.roles),
+            "planId": normalized_plan_id,
+            "planRevision": s._experiment_plan_revision(plan),
+            "experimentContractSha256": canonical_sha256(contract),
+            "approvedAt": now,
+        }
+        approval_sha256 = canonical_sha256(approval)
+        approval["approvalId"] = f"experiment-design-approval-{approval_sha256[:20]}"
+        approval["approvalSha256"] = approval_sha256
         gate["status"] = "frozen"
         gate["frozenAt"] = now
         gate["frozenByAgent"] = frozen_by_agent
+        gate["operatorApproval"] = approval
         plan["designGate"] = gate
         plan["status"] = "design_frozen"
         plan["updatedAt"] = now
@@ -708,8 +767,14 @@ def freeze_experiment_design(team_id: str, plan_id: str, payload: dict[str, Any]
         plan["experimentContract"] = contract
         plan_store["activePlanId"] = normalized_plan_id
         plan_store["updatedAt"] = now
-        s._write_json(s._experiment_plan_store_path(normalized_team_id), plan_store)
-        stage_store = s._load_stage_round_store(normalized_team_id)
+        s._write_json(
+            s._experiment_plan_store_path(normalized_team_id, research_project_id),
+            plan_store,
+        )
+        stage_store = s._load_stage_round_store(
+            normalized_team_id,
+            research_project_id,
+        )
         rounds = s._stage_rounds(stage_store)
         stage_round = s._find_stage_round(rounds, str(plan.get("stageRoundId") or ""))
         if stage_round is not None:
@@ -719,8 +784,14 @@ def freeze_experiment_design(team_id: str, plan_id: str, payload: dict[str, Any]
             stage_round["updatedAt"] = now
             stage_store["rounds"] = rounds
             stage_store["updatedAt"] = now
-            s._write_json(s._stage_round_store_path(normalized_team_id), stage_store)
-        candidate_store = s._load_candidate_store(normalized_team_id)
+            s._write_json(
+                s._stage_round_store_path(normalized_team_id, research_project_id),
+                stage_store,
+            )
+        candidate_store = s._load_candidate_store(
+            normalized_team_id,
+            research_project_id=research_project_id,
+        )
         status_payload = s._experiment_planning_status(normalized_team_id, rounds, candidate_store, plan_store)
     s._record_workflow_event(
         "experiment_plan.design_frozen",
@@ -729,6 +800,8 @@ def freeze_experiment_design(team_id: str, plan_id: str, payload: dict[str, Any]
             "planId": normalized_plan_id,
             "revision": s._experiment_plan_revision(plan),
             "frozenByAgent": frozen_by_agent,
+            "approvedByOperator": operator.operator_id,
+            "approvalSha256": approval_sha256,
             "sourceProposalId": str(gate.get("sourceProposalId") or ""),
         },
     )

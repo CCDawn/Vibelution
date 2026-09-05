@@ -15,15 +15,21 @@ def _service():
     return team_workflow_orchestration_service
 
 
-def get_research_stage_round_status(team_id: str) -> dict[str, Any]:
+def get_research_stage_round_status(
+    team_id: str,
+    research_project_id: str = "",
+) -> dict[str, Any]:
     s = _service()
     normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
     team = s._source_collection_team_identity_snapshot(normalized_team_id)
     s._reconcile_source_collection_stage_session_tasks(normalized_team_id)
     s._reconcile_superseded_research_stage_rounds(normalized_team_id)
     with s._WORKFLOW_LOCK:
-        workflow = s._load_or_create_workflow(normalized_team_id)
-        store = s._load_stage_round_store(normalized_team_id)
+        workflow = s._load_or_create_workflow(
+            normalized_team_id,
+            research_project_id=research_project_id,
+        )
+        store = s._load_stage_round_store(normalized_team_id, research_project_id)
     rounds = s._stage_rounds(store)
     synced_from_work_run = False
     for stage_round in rounds:
@@ -35,8 +41,11 @@ def get_research_stage_round_status(team_id: str) -> dict[str, Any]:
             synced_from_work_run = s._sync_source_collection_stage_round_from_latest_work_run(normalized_team_id, source_run_id) is not None or synced_from_work_run
     if synced_from_work_run:
         with s._WORKFLOW_LOCK:
-            workflow = s._load_or_create_workflow(normalized_team_id)
-            store = s._load_stage_round_store(normalized_team_id)
+            workflow = s._load_or_create_workflow(
+                normalized_team_id,
+                research_project_id=research_project_id,
+            )
+            store = s._load_stage_round_store(normalized_team_id, research_project_id)
         rounds = s._stage_rounds(store)
     s._attach_source_collection_stage_card_projections(normalized_team_id, rounds)
     phases = [
@@ -60,7 +69,9 @@ def get_research_stage_round_status(team_id: str) -> dict[str, Any]:
         "activeRounds": active_rounds,
         "latestRound": latest_round,
         "roundCount": len(rounds),
-        "storagePath": s._relative_path(s._stage_round_store_path(normalized_team_id)),
+        "storagePath": s._relative_path(
+            s._stage_round_store_path(normalized_team_id, research_project_id)
+        ),
         "boundaries": s._research_stage_boundaries(),
         "updatedAt": str(store.get("updatedAt") or ""),
     }
@@ -71,20 +82,25 @@ def start_research_stage_round(team_id: str, payload: dict[str, Any] | None = No
     team = s.team_service.get_team(normalized_team_id)
     request_payload = dict(payload) if isinstance(payload, dict) else {}
     stage_type = s._normalize_stage_type(request_payload.get("stageType"))
+    research_project = s.resolve_research_project_identity(
+        normalized_team_id,
+        s._trim_text(request_payload.get("researchProjectId"), max_length=160),
+    )
     phase_two_requested = False
     if stage_type == "experiment":
         from core.web.services.team_workflow.challenge_phase_boundary import (
             request_targets_challenge_phase_two,
             require_phase_two_activation,
+            research_project_targets_challenge_phase_two,
         )
 
-        phase_two_requested = request_targets_challenge_phase_two(request_payload)
+        phase_two_requested = (
+            request_targets_challenge_phase_two(request_payload)
+            or research_project_targets_challenge_phase_two(research_project)
+        )
         if phase_two_requested:
             require_phase_two_activation(normalized_team_id)
-    research_project = s.resolve_research_project_identity(
-        normalized_team_id,
-        s._trim_text(request_payload.get("researchProjectId"), max_length=160),
-    )
+    research_project_id = research_project["projectId"]
     if stage_type == "iteration":
         from core.web.services.team_workflow.research_project_agent_tasks import (
             research_project_iteration_readiness,
@@ -99,8 +115,11 @@ def start_research_stage_round(team_id: str, payload: dict[str, Any] | None = No
     start_mode = s._normalize_stage_start_mode(request_payload.get("mode") or request_payload.get("startMode"))
     requested_by_agent = s._trim_text(request_payload.get("requestedByAgent"), max_length=160) or s._source_collection_owner_agent_id(team, request_payload)
     with s._WORKFLOW_LOCK:
-        workflow = s._load_or_create_workflow(normalized_team_id)
-        store = s._load_stage_round_store(normalized_team_id)
+        workflow = s._load_or_create_workflow(
+            normalized_team_id,
+            research_project_id=research_project_id,
+        )
+        store = s._load_stage_round_store(normalized_team_id, research_project_id)
         rounds = s._stage_rounds(store)
         active_round = s._active_stage_round(rounds, stage_type)
         if (
@@ -139,7 +158,10 @@ def start_research_stage_round(team_id: str, payload: dict[str, Any] | None = No
                 active_round["updatedAt"] = s.utc_now_iso()
                 store["rounds"] = rounds
                 store["updatedAt"] = active_round["updatedAt"]
-                s._write_json(s._stage_round_store_path(normalized_team_id), store)
+                s._write_json(
+                    s._stage_round_store_path(normalized_team_id, research_project_id),
+                    store,
+                )
             continued_payload = s._continued_stage_round_payload(active_round, stage_type)
             continued_ref = continued_payload.get("continuedSourceRunRef") if isinstance(continued_payload.get("continuedSourceRunRef"), dict) else {}
             s._record_workflow_event(
@@ -162,8 +184,18 @@ def start_research_stage_round(team_id: str, payload: dict[str, Any] | None = No
                 "continued": True,
                 "stageRound": active_round,
                 "phase": status_payload,
-                "workflow": s._workflow_to_api(normalized_team_id, workflow, s._load_candidate_store(normalized_team_id)),
-                "status": get_research_stage_round_status(normalized_team_id),
+                "workflow": s._workflow_to_api(
+                    normalized_team_id,
+                    workflow,
+                    s._load_candidate_store(
+                        normalized_team_id,
+                        research_project_id=research_project_id,
+                    ),
+                ),
+                "status": get_research_stage_round_status(
+                    normalized_team_id,
+                    research_project_id,
+                ),
                 "nextActions": s._stage_next_actions(stage_type, reused=True),
                 "boundaries": s._research_stage_boundaries(),
                 **continued_payload,
@@ -280,8 +312,14 @@ def start_research_stage_round(team_id: str, payload: dict[str, Any] | None = No
         round_payload["updatedAt"] = now
         store["rounds"] = rounds + [round_payload]
         store["updatedAt"] = now
-        s._write_json(s._stage_round_store_path(normalized_team_id), store)
-        candidate_store = s._load_candidate_store(normalized_team_id)
+        s._write_json(
+            s._stage_round_store_path(normalized_team_id, research_project_id),
+            store,
+        )
+        candidate_store = s._load_candidate_store(
+            normalized_team_id,
+            research_project_id=research_project_id,
+        )
     s.lock_research_project_name(
         normalized_team_id,
         research_project["projectId"],
@@ -314,7 +352,10 @@ def start_research_stage_round(team_id: str, payload: dict[str, Any] | None = No
         synced_round = s._sync_source_collection_stage_round_from_latest_work_run(normalized_team_id, str(source_run.get("runId") or ""))
         if synced_round is not None:
             round_payload = synced_round
-    stage_status_payload = get_research_stage_round_status(normalized_team_id)
+    stage_status_payload = get_research_stage_round_status(
+        normalized_team_id,
+        research_project_id,
+    )
     phase_payload = next(
         (item for item in list(stage_status_payload.get("phases") or []) if isinstance(item, dict) and item.get("stageType") == stage_type),
         s._stage_phase_status(normalized_team_id, stage_type, [round_payload], workflow=workflow, team=team),

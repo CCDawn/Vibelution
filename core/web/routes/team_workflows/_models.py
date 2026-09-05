@@ -361,6 +361,7 @@ class ExperimentBaselineArtifactPayload(BaseModel):
 
 class ExperimentDesignFreezePayload(BaseModel):
     frozenByAgent: str = Field("", max_length=160)
+    researchProjectId: str = Field("", max_length=160)
 
 
 class ExperimentHypothesisResumePayload(BaseModel):

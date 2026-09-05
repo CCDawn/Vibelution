@@ -79,4 +79,10 @@ describe("team workflow start mutations contract", () => {
     expect(mutationsSource).toContain("domain: payload.draft.topic.trim()");
     expect(mutationsSource).not.toContain('domain: "neuroscience-inspired algorithm discovery"');
   });
+
+  it("binds every stage start to the selected research project", () => {
+    expect(mutationsSource).toContain(
+      "researchProjectId: options.activeSourceCollectionResearchProjectId",
+    );
+  });
 });

@@ -2074,7 +2074,7 @@ def test_team_workflow_routes_accept_generic_simulation_experiment_contract(tmp_
     )
 
     assert catalog_response.status_code == 200, catalog_response.text
-    assert len(catalog_response.json()["methods"]) == 6
+    assert len(catalog_response.json()["methods"]) == 7
     assert "environment_probe" not in {item["methodId"] for item in catalog_response.json()["methods"]}
     simulation_method = next(item for item in catalog_response.json()["methods"] if item["methodId"] == "numerical_simulation")
     assert simulation_method["adapterAvailability"]["experiment_feedback"]["resolvedAdapterId"] == ""

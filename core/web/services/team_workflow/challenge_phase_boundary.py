@@ -226,6 +226,16 @@ def request_targets_challenge_phase_two(payload: dict[str, Any] | None) -> bool:
     )
 
 
+def research_project_targets_challenge_phase_two(
+    project: dict[str, Any] | None,
+) -> bool:
+    """Use the canonical project binding, not client-declared phase labels."""
+
+    record = project if isinstance(project, dict) else {}
+    question_id = _text(record.get("challengeQuestionId")).upper()
+    return question_id in PHASE_TWO_DEEP_EXPERIMENT_QUESTION_IDS
+
+
 def _store_path(team_id: str) -> Path:
     return resolve_team_program_root(team_id) / "challenge_program" / "phase_boundary.json"
 
