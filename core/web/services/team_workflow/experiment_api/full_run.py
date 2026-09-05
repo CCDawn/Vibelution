@@ -28,16 +28,33 @@ def _service():
     return team_workflow_orchestration_service
 
 
-def formal_execution_config_is_provisioned(config: dict[str, Any] | None) -> bool:
-    """True when the operator supplied the three explicit local runner paths."""
+def formal_execution_config_is_provisioned(
+    config: dict[str, Any] | None,
+    adapter_id: str = "",
+) -> bool:
+    """True when the operator supplied the adapter's explicit local inputs."""
     if not isinstance(config, dict):
         return False
-    return all(str(config.get(key) or "").strip() for key in _FORMAL_EXECUTION_PATH_KEYS)
+    from core.research import formal_runner
+
+    normalized_adapter_id = str(adapter_id or "").strip()
+    if normalized_adapter_id == formal_runner.SCI096_DANDI_SPIKE_ADAPTER:
+        required = (
+            "pythonExecutable",
+            "outputRoot",
+            "inputNwb",
+            "expectedInputSha256",
+        )
+    else:
+        required = _FORMAL_EXECUTION_PATH_KEYS
+    return all(str(config.get(key) or "").strip() for key in required)
 
 
 def resolve_formal_execution_config(
     plan: dict[str, Any] | None,
     payload: dict[str, Any] | None = None,
+    *,
+    adapter_id: str = "",
 ) -> dict[str, Any]:
     """Prefer request payload, then a stored preparation, then process env.
 
@@ -50,25 +67,32 @@ def resolve_formal_execution_config(
         if isinstance(request.get("executionConfig"), dict)
         else {}
     )
-    if formal_execution_config_is_provisioned(request_config):
+    if formal_execution_config_is_provisioned(request_config, adapter_id):
         return request_config
     for fallback in (
-        _execution_config_from_preparation(plan),
+        _execution_config_from_preparation(plan, adapter_id=adapter_id),
         _execution_config_from_env(),
     ):
-        if formal_execution_config_is_provisioned(fallback):
+        if formal_execution_config_is_provisioned(fallback, adapter_id):
             return {**fallback, **request_config}
     return request_config
 
 
-def _execution_config_from_preparation(plan: dict[str, Any] | None) -> dict[str, Any]:
+def _execution_config_from_preparation(
+    plan: dict[str, Any] | None,
+    *,
+    adapter_id: str = "",
+) -> dict[str, Any]:
     if not isinstance(plan, dict):
         return {}
     prep = plan.get("activeFullRunPreparation")
     if not isinstance(prep, dict):
         return {}
     stored = prep.get("executionConfig")
-    if formal_execution_config_is_provisioned(stored if isinstance(stored, dict) else None):
+    if formal_execution_config_is_provisioned(
+        stored if isinstance(stored, dict) else None,
+        adapter_id,
+    ):
         return dict(stored)
     environment = prep.get("environment") if isinstance(prep.get("environment"), dict) else {}
     mapped = {
@@ -152,7 +176,11 @@ def prepare_experiment_full_run(team_id: str, plan_id: str, payload: dict[str, A
         plan_snapshot = s.deepcopy(plan)
 
     adapter_id, method_config = s._require_formal_full_run_ready(plan_snapshot)
-    execution_config = resolve_formal_execution_config(plan_snapshot, request_payload)
+    execution_config = resolve_formal_execution_config(
+        plan_snapshot,
+        request_payload,
+        adapter_id=adapter_id,
+    )
     try:
         execution_config = _bind_formal_execution_config(
             execution_config,
@@ -262,7 +290,11 @@ def execute_experiment_full_run(team_id: str, plan_id: str, payload: dict[str, A
         plan_snapshot = s.deepcopy(plan)
 
     adapter_id, method_config = s._require_formal_full_run_ready(plan_snapshot)
-    execution_config = resolve_formal_execution_config(plan_snapshot, request_payload)
+    execution_config = resolve_formal_execution_config(
+        plan_snapshot,
+        request_payload,
+        adapter_id=adapter_id,
+    )
     execution_config = _bind_formal_execution_config(
         execution_config,
         project_root=s.PROJECT_ROOT,

@@ -18,7 +18,7 @@ describe("decideShutdown", () => {
     ).resolves.toEqual({
       allowed: false,
       reason: "active_work_running",
-      message: "有进行中的任务，无法重启 Vibelution。请等待任务完成或先停止任务。"
+      message: "有进行中的任务，无法退出 Vibelution。请等待任务完成或先停止任务。"
     });
   });
 
@@ -93,7 +93,7 @@ describe("decideShutdown", () => {
     expect(sideEffects).toEqual([]);
   });
 
-  it("does not enter the approved fail-open path when active-work status times out", async () => {
+  it("does not enter the approved execution failure path when active-work status times out", async () => {
     vi.useFakeTimers();
     const sideEffects: string[] = [];
     const pending = executeShutdownAuthorizationBoundary({
@@ -109,8 +109,8 @@ describe("decideShutdown", () => {
       runApproved: async () => {
         sideEffects.push("approved");
       },
-      failOpenAfterApproval: async () => {
-        sideEffects.push("fail-open");
+      onApprovedFailure: async () => {
+        sideEffects.push("approved-failure");
       }
     });
 
@@ -121,6 +121,26 @@ describe("decideShutdown", () => {
     });
     expect(sideEffects).toEqual(["denied"]);
     vi.useRealTimers();
+  });
+
+  it("routes an approved shutdown failure to a fail-closed handler", async () => {
+    const sideEffects: string[] = [];
+    await expect(
+      executeShutdownAuthorizationBoundary({
+        authorize: async () => ({ allowed: true, reason: "no_active_work", stopPythonLauncher: true }),
+        onDenied: async () => {
+          sideEffects.push("denied");
+        },
+        runApproved: async () => {
+          sideEffects.push("run-approved");
+          throw new Error("isolated instance still running");
+        },
+        onApprovedFailure: async (_decision, error) => {
+          sideEffects.push(error instanceof Error ? error.message : String(error));
+        }
+      })
+    ).resolves.toMatchObject({ allowed: true });
+    expect(sideEffects).toEqual(["run-approved", "isolated instance still running"]);
   });
 
   it("fails closed when the active-work probe explicitly returns unknown", async () => {
@@ -200,7 +220,11 @@ describe("fetchLauncherActiveWorkStatus", () => {
         JSON.stringify({
           lifecycleProof: {
             activeWorkRuns: {
-              count: 2
+              count: 2,
+              items: [
+                { kind: "chat_turn", runId: "turn-1" },
+                { kind: "source_collection_run", runId: "run-2" }
+              ]
             }
           }
         }),
@@ -216,7 +240,12 @@ describe("fetchLauncherActiveWorkStatus", () => {
       })
     ).resolves.toEqual({
       state: "active",
-      message: "2 active work item(s) block lifecycle commands."
+      message: "2 active work item(s) block lifecycle commands.",
+      count: 2,
+      items: [
+        { kind: "chat_turn", runId: "turn-1" },
+        { kind: "source_collection_run", runId: "run-2" }
+      ]
     });
     expect(requests[0].url).toBe("http://127.0.0.1:8765/api/launcher/status");
     expect(requests[0].init.headers).toMatchObject({

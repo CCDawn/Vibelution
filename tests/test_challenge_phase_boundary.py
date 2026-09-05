@@ -15,6 +15,7 @@ from core.web.services.team_workflow.challenge_phase_boundary import (
     build_phase_one_manifest,
     get_challenge_phase_boundary_status,
     project_challenge_phase_boundary,
+    research_project_targets_challenge_phase_two,
     record_phase_one_knowledge_applied_receipt,
     require_phase_two_activation_from_projection,
 )
@@ -156,6 +157,12 @@ def test_experiment_stage_start_checks_the_shared_phase_two_gate_first(monkeypat
         _normalize_required_id=lambda value, _message: value,
         team_service=SimpleNamespace(get_team=lambda _team_id: {}),
         _normalize_stage_type=lambda value: value,
+        _trim_text=lambda value, **_kwargs: str(value or "").strip(),
+        resolve_research_project_identity=lambda _team_id, _project_id: {
+            "projectId": "ordinary-project",
+            "name": "Ordinary experiment",
+            "challengeQuestionId": "",
+        },
     )
     monkeypatch.setattr(research_loop, "_service", lambda: service)
     monkeypatch.setattr(
@@ -173,10 +180,47 @@ def test_experiment_stage_start_checks_the_shared_phase_two_gate_first(monkeypat
         )
 
 
+def test_challenge_project_experiment_stage_cannot_hide_phase_two_intent(monkeypatch):
+    service = SimpleNamespace(
+        _normalize_required_id=lambda value, _message: value,
+        team_service=SimpleNamespace(get_team=lambda _team_id: {}),
+        _normalize_stage_type=lambda value: value,
+        _trim_text=lambda value, **_kwargs: str(value or "").strip(),
+        resolve_research_project_identity=lambda _team_id, project_id: {
+            "projectId": project_id,
+            "name": "SCI-091 benchmark",
+            "challengeQuestionId": "SCI-091",
+        },
+    )
+    monkeypatch.setattr(research_loop, "_service", lambda: service)
+    monkeypatch.setattr(
+        challenge_phase_boundary,
+        "require_phase_two_activation",
+        lambda _team_id: (_ for _ in ()).throw(
+            PhaseTwoLockedError("phase_two_locked: phase_one_approval_required")
+        ),
+    )
+
+    with pytest.raises(PhaseTwoLockedError, match="phase_one_approval_required"):
+        research_loop.start_research_stage_round(
+            "team-1",
+            {
+                "stageType": "experiment",
+                "researchProjectId": "challenge-sci-091",
+            },
+        )
+
+
 def test_experiment_plan_creation_checks_the_shared_phase_two_gate_first(monkeypatch):
     service = SimpleNamespace(
         _normalize_required_id=lambda value, _message: value,
         team_service=SimpleNamespace(get_team=lambda _team_id: {}),
+        _trim_text=lambda value, **_kwargs: str(value or "").strip(),
+        resolve_research_project_identity=lambda _team_id, _project_id: {
+            "projectId": "ordinary-project",
+            "name": "Ordinary experiment",
+            "challengeQuestionId": "",
+        },
     )
     monkeypatch.setattr(experiment_plan, "_service", lambda: service)
     monkeypatch.setattr(
@@ -189,6 +233,62 @@ def test_experiment_plan_creation_checks_the_shared_phase_two_gate_first(monkeyp
 
     with pytest.raises(PhaseTwoLockedError, match="phase_one_approval_required"):
         experiment_plan.create_experiment_plan("team-1", {"programPhase": 2})
+
+
+def test_challenge_project_plan_cannot_hide_phase_two_intent(monkeypatch):
+    service = SimpleNamespace(
+        _normalize_required_id=lambda value, _message: value,
+        team_service=SimpleNamespace(get_team=lambda _team_id: {}),
+        _trim_text=lambda value, **_kwargs: str(value or "").strip(),
+        resolve_research_project_identity=lambda _team_id, project_id: {
+            "projectId": project_id,
+            "name": "SCI-096 spike coding",
+            "challengeQuestionId": "SCI-096",
+        },
+    )
+    monkeypatch.setattr(experiment_plan, "_service", lambda: service)
+    monkeypatch.setattr(
+        challenge_phase_boundary,
+        "require_phase_two_activation",
+        lambda _team_id: (_ for _ in ()).throw(
+            PhaseTwoLockedError("phase_two_locked: phase_one_knowledge_receipt_required")
+        ),
+    )
+
+    with pytest.raises(
+        PhaseTwoLockedError,
+        match="phase_one_knowledge_receipt_required",
+    ):
+        experiment_plan.create_experiment_plan(
+            "team-1",
+            {"researchProjectId": "challenge-sci-096"},
+        )
+
+
+def test_only_declared_deep_experiment_projects_use_the_phase_two_boundary():
+    assert research_project_targets_challenge_phase_two(
+        {"projectId": "challenge-sci-091", "challengeQuestionId": "SCI-091"}
+    )
+    assert research_project_targets_challenge_phase_two(
+        {"projectId": "challenge-sci-096", "challengeQuestionId": "sci-096"}
+    )
+    assert not research_project_targets_challenge_phase_two(
+        {"projectId": "challenge-sci-020", "challengeQuestionId": "SCI-020"}
+    )
+
+
+def test_agent_declared_identity_cannot_freeze_an_experiment_plan(monkeypatch):
+    service = SimpleNamespace(
+        _normalize_required_id=lambda value, _message: value,
+    )
+    monkeypatch.setattr(experiment_plan, "_service", lambda: service)
+
+    with pytest.raises(PermissionError, match="command_forbidden"):
+        experiment_plan.freeze_experiment_design(
+            "team-1",
+            "plan-1",
+            {"frozenByAgent": "Experiment Planning Agent"},
+        )
 
 
 def test_persisted_approval_is_idempotent_and_applied_receipt_closes_gate(tmp_path, monkeypatch):

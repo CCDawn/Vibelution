@@ -1117,9 +1117,9 @@ def _upsert_active_item(
     return normalized_items
 
 
-def _workflow_path(team_id: str) -> Path:
+def _workflow_path(team_id: str, research_project_id: str = "") -> Path:
     s = _service()
-    return s._team_workflow_root(team_id) / "workflow_orchestration.json"
+    return s._team_workflow_root(team_id, research_project_id) / "workflow_orchestration.json"
 
 
 def _workflow_timestamp_sort_key(value: Any) -> tuple[float, str]:

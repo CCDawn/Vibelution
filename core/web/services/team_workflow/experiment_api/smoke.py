@@ -29,7 +29,10 @@ def _resolve_declared_smoke_adapter(
     SCI-096 ``controlled_run`` retry before bounded STOP can run.
     Unknown smoke-plan ids still fail closed.
     """
-    formal_only = {s.formal_runner.FASHION_MNIST_MULTI_SEED_ADAPTER}
+    formal_only = {
+        s.formal_runner.FASHION_MNIST_MULTI_SEED_ADAPTER,
+        s.formal_runner.SCI096_DANDI_SPIKE_ADAPTER,
+    }
     for raw in sources:
         text = s._trim_text(raw, max_length=120)
         if not text or text in formal_only:

@@ -298,9 +298,14 @@ def _legacy_research_lifecycle_memory_contexts(
     }
 
 
-def _load_or_create_workflow(team_id: str, *, persist_repair: bool = True) -> dict[str, Any]:
+def _load_or_create_workflow(
+    team_id: str,
+    *,
+    persist_repair: bool = True,
+    research_project_id: str = "",
+) -> dict[str, Any]:
     s = _service()
-    path = s._workflow_path(team_id)
+    path = s._workflow_path(team_id, research_project_id)
     if path.exists():
         raw_workflow = s._read_json(path)
         workflow = s._repair_workflow(raw_workflow, team_id)
@@ -527,9 +532,9 @@ def _stage_phase_status(
     }
 
 
-def _stage_round_store_path(team_id: str) -> Path:
+def _stage_round_store_path(team_id: str, research_project_id: str = "") -> Path:
     s = _service()
-    return s._team_workflow_root(team_id) / "research_stage_rounds" / "index.json"
+    return s._team_workflow_root(team_id, research_project_id) / "research_stage_rounds" / "index.json"
 
 
 def _submit_team_workflow_inbox_via_kernel(
@@ -656,9 +661,15 @@ def _team_workflow_kernel_delivery(kernel_result: dict[str, Any], target_agent_i
     return dict(deliveries[0]) if deliveries and isinstance(deliveries[0], dict) else {}
 
 
-def _team_workflow_root(team_id: str) -> Path:
-    from core.web.services.team_workflow.research_projects import resolve_team_workflow_root
+def _team_workflow_root(team_id: str, research_project_id: str = "") -> Path:
+    from core.web.services.team_workflow.research_projects import (
+        resolve_research_project_workspace_root,
+        resolve_team_workflow_root,
+    )
 
+    normalized_project_id = str(research_project_id or "").strip()
+    if normalized_project_id:
+        return resolve_research_project_workspace_root(team_id, normalized_project_id)
     return resolve_team_workflow_root(team_id)
 
 

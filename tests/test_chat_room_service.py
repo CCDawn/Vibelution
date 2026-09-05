@@ -2532,9 +2532,11 @@ def test_chat_room_real_agent_reaches_llm_with_bound_turn_identity(tmp_path, mon
         config={"maxSpeakers": 1},
     )
     invocations = []
+    invocation_messages = []
 
     def fake_invoke_llm(self, messages, *, replay_state=None):
         invocations.append(agent_directory_service.current_agent_runtime())
+        invocation_messages.append(messages)
         return None
 
     monkeypatch.setattr(SelfEvolvingAgent, "_invoke_llm", fake_invoke_llm)
@@ -2544,6 +2546,21 @@ def test_chat_room_real_agent_reaches_llm_with_bound_turn_identity(tmp_path, mon
     assert invocations
     assert invocations[0]["sessionId"]
     assert invocations[0]["turnId"].startswith("chat-room:")
+    assert any(
+        isinstance(
+            message.get("content") if isinstance(message, dict) else getattr(message, "content", None),
+            list,
+        )
+        and any(
+            isinstance(block, dict) and block.get("cache_control") == {"type": "ephemeral"}
+            for block in (
+                message.get("content")
+                if isinstance(message, dict)
+                else getattr(message, "content", [])
+            )
+        )
+        for message in invocation_messages[0]
+    )
     latest_message = detail["rounds"][-1]["messages"][0]
     assert "ledger identity" not in str(latest_message.get("content") or "").lower()
 
@@ -3028,7 +3045,7 @@ def test_structured_context_kill_switch_restores_legacy_prompt_and_storage(
     assert "请给出一段紧凑、可读、只读的群聊发言" in prompts[0]
 
 
-def test_room_context_snapshot_is_shared_per_round_and_lazy_checkpoint_is_internal(
+def test_room_context_snapshot_is_shared_per_round_and_initial_checkpoint_is_frozen(
     tmp_path,
     monkeypatch,
 ):
@@ -3069,17 +3086,24 @@ def test_room_context_snapshot_is_shared_per_round_and_lazy_checkpoint_is_intern
         participant_session_ids=["session-alpha", "session-beta"],
     )
     detail = room
+    checkpoint_hashes: list[str] = []
     for index in range(1, 5):
         detail = chat_room_service.start_chat_room_round(
             room["roomId"], f"第 {index} 轮", agent_runner=runner
+        )
+        checkpoint_hashes.append(
+            chat_room_service._store().load()["rooms"][0]["contextCheckpoint"][
+                "contentHash"
+            ]
         )
 
     stored_room = chat_room_service._store().load()["rooms"][0]
     checkpoint = stored_room["contextCheckpoint"]
     assert all(len(ids) == 1 for ids in snapshot_ids.values())
-    assert checkpoint["coveredRoundIds"] == [stored_room["rounds"][0]["roundId"]]
+    assert checkpoint["coveredRoundIds"] == []
     assert checkpoint["revision"] == 1
     assert len(checkpoint["contentHash"]) == 64
+    assert len(set(checkpoint_hashes)) == 1
     assert "contextCheckpoint" not in detail
     assert all(
         "contextPayload" not in message
@@ -3769,6 +3793,23 @@ def test_chat_room_speaker_turn_passes_stable_prompt_cache_partition(tmp_path, m
 
     monkeypatch.setattr(chat_room_service, "run_existing_agent_single_turn", fake_runner)
 
+    private_histories = {
+        alpha_session_id: [{"role": "assistant", "content": "alpha-private " * 50_000}],
+        beta_session_id: [{"role": "assistant", "content": "beta-private " * 50_000}],
+    }
+    monkeypatch.setattr(
+        session_service,
+        "assemble_conversation_context",
+        lambda *_args, **kwargs: SimpleNamespace(
+            history_messages=private_histories[str(kwargs["session_id"])]
+        ),
+    )
+
+    room_snapshots = {
+        room_one["roomId"]: chat_room_service._prepare_chat_room_context_snapshot(room_one),
+        room_two["roomId"]: chat_room_service._prepare_chat_room_context_snapshot(room_two),
+    }
+
     def run_speaker(participant, room_id):
         return chat_room_service._run_participant_agent(
             participant,
@@ -3778,6 +3819,8 @@ def test_chat_room_speaker_turn_passes_stable_prompt_cache_partition(tmp_path, m
                 "roundId": "round-partition",
                 "topic": "缓存分区",
                 "purpose": "discussion",
+                "_structuredChatRoomContext": True,
+                "_roomContextSnapshot": room_snapshots[room_id],
             },
         )
 
@@ -3785,10 +3828,13 @@ def test_chat_room_speaker_turn_passes_stable_prompt_cache_partition(tmp_path, m
     beta_one = participant_in(room_one, beta_session_id)
     alpha_two = participant_in(room_two, alpha_session_id)
 
-    assert run_speaker(alpha_one, room_one["roomId"])["status"] == "completed"
-    assert run_speaker(alpha_one, room_one["roomId"])["status"] == "completed"
-    assert run_speaker(beta_one, room_one["roomId"])["status"] == "completed"
-    assert run_speaker(alpha_two, room_two["roomId"])["status"] == "completed"
+    results = [
+        run_speaker(alpha_one, room_one["roomId"]),
+        run_speaker(alpha_one, room_one["roomId"]),
+        run_speaker(beta_one, room_one["roomId"]),
+        run_speaker(alpha_two, room_two["roomId"]),
+    ]
+    assert all(result["status"] == "completed" for result in results)
 
     assert len(captured) == 4
     partition_alpha = captured[0]["prompt_cache_partition"]
@@ -3803,6 +3849,15 @@ def test_chat_room_speaker_turn_passes_stable_prompt_cache_partition(tmp_path, m
     assert captured[2]["prompt_cache_partition"] != partition_alpha
     # Same session in a different room -> different partition.
     assert captured[3]["prompt_cache_partition"] != partition_alpha
+    # The durable direct Session remains the identity/Journal target, but its
+    # private history is not part of the room-scoped model input view.
+    assert captured[0]["chat_history"] == captured[1]["chat_history"]
+    assert captured[0]["chat_history"] == captured[2]["chat_history"]
+    assert captured[0]["chat_history"][0]["metadata"]["kind"] == "chat_room_context_checkpoint"
+    assert "alpha-private" not in json.dumps(captured[0]["chat_history"], ensure_ascii=False)
+    assert "beta-private" not in json.dumps(captured[2]["chat_history"], ensure_ascii=False)
+    assert results[0]["timings"]["roomContext.excludedSessionHistoryTokens"] > 50_000
+    assert results[0]["timings"]["roomContext.foreignSessionHistoryTokens"] > 50_000
 
 
 def test_speaker_prompt_cache_partition_requires_session_id():

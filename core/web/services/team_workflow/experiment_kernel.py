@@ -118,6 +118,31 @@ def _formal_runner_artifact_digests(
     s = _service()
     contract = plan.get("experimentContract") if isinstance(plan.get("experimentContract"), dict) else {}
     method_config = contract.get("methodConfig") if isinstance(contract.get("methodConfig"), dict) else {}
+    adapter_id = str(result.get("adapterId") or "").strip()
+    single_artifact_adapters = {
+        s.formal_runner.SCI096_DANDI_SPIKE_ADAPTER,
+    }
+    if adapter_id in single_artifact_adapters:
+        digest = _normalized_artifact_digest(result.get("artifactHash"))
+        artifact_path = _canonical_formal_path(
+            result.get("artifactPath"),
+            label="artifactPath",
+        )
+        if not digest:
+            raise s.TeamWorkflowOrchestrationError(
+                "Canonical formal runner receipt requires a valid artifact digest."
+            )
+        try:
+            actual_digest = f"sha256:{hashlib.sha256(Path(artifact_path).read_bytes()).hexdigest()}"
+        except OSError as exc:
+            raise s.TeamWorkflowOrchestrationError(
+                "Canonical formal runner receipt requires a readable result artifact."
+            ) from exc
+        if actual_digest != digest:
+            raise s.TeamWorkflowOrchestrationError(
+                "Canonical formal runner receipt artifact digest is invalid."
+            )
+        return [digest]
     try:
         plan_seeds = [int(seed) for seed in list(method_config.get("seeds") or [])]
         preparation_seeds = [int(seed) for seed in list(preparation.get("seeds") or [])]
@@ -231,6 +256,17 @@ def _build_formal_runner_receipt(
         for run in list(result.get("runs") or [])
         if isinstance(run, dict) and str(run.get("resultPath") or "").strip()
     ]
+    if str(result.get("artifactPath") or "").strip():
+        subject.append(
+            {
+                "name": str(result.get("artifactPath") or ""),
+                "digest": {
+                    "sha256": _digest_hex(
+                        _normalized_artifact_digest(result.get("artifactHash"))
+                    )
+                },
+            }
+        )
     subject.append({"name": result_path, "digest": {"sha256": _digest_hex(result_digest)}})
     predicate = {
         "planId": plan_id,
@@ -499,8 +535,14 @@ def _require_formal_full_run_ready(plan: dict[str, Any]) -> tuple[str, dict[str,
     selection = contract.get("adapterSelection") if isinstance(contract.get("adapterSelection"), dict) else {}
     adapter_id = s._trim_text(selection.get("resolvedAdapterId"), max_length=200)
     s._require_explicit_experiment_design_frozen(plan)
-    if adapter_id != s.formal_runner.FASHION_MNIST_MULTI_SEED_ADAPTER:
-        raise s.TeamWorkflowOrchestrationError("Experiment plan does not select the formal FashionMNIST multi-seed adapter.")
+    formal_adapters = {
+        s.formal_runner.FASHION_MNIST_MULTI_SEED_ADAPTER,
+        s.formal_runner.SCI096_DANDI_SPIKE_ADAPTER,
+    }
+    if adapter_id not in formal_adapters:
+        raise s.TeamWorkflowOrchestrationError(
+            "Experiment plan does not select a registered formal full-run adapter."
+        )
     if not bool(validation.get("valid")):
         raise s.TeamWorkflowOrchestrationError("Experiment plan contract must be valid before formal full-run preparation.")
     if not bool(readiness.get("readyForFullRun")):
@@ -654,9 +696,12 @@ def _experiment_result_steward_notification_child_log_payload(
     }
 
 
-def _load_experiment_plan_store(team_id: str) -> dict[str, Any]:
+def _load_experiment_plan_store(
+    team_id: str,
+    research_project_id: str = "",
+) -> dict[str, Any]:
     s = _service()
-    path = s._experiment_plan_store_path(team_id)
+    path = s._experiment_plan_store_path(team_id, research_project_id)
     if path.exists():
         payload = s._read_json(path)
         if payload.get("storeKind") == s.EXPERIMENT_PLAN_STORE_KIND and isinstance(payload.get("plans"), list):
@@ -3367,6 +3412,6 @@ def _active_experiment_plan(plan_store: dict[str, Any]) -> dict[str, Any] | None
     return plans[-1] if plans else None
 
 
-def _experiment_plan_store_path(team_id: str) -> Path:
+def _experiment_plan_store_path(team_id: str, research_project_id: str = "") -> Path:
     s = _service()
-    return s._team_workflow_root(team_id) / "experiment_plans" / "index.json"
+    return s._team_workflow_root(team_id, research_project_id) / "experiment_plans" / "index.json"

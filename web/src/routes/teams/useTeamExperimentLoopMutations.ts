@@ -74,6 +74,7 @@ import { splitDraftList } from "./source-collection/presentationModel";
 import { researchStageRoundStatusQueryKey } from "./useResearchWorkflowResources";
 
 export type UseTeamExperimentLoopMutationsOptions = {
+  activeResearchProjectId: string;
   sourceCollectionOwnerAgentId: string;
   sourceCollectionIngestorAgentId: string;
   sourceCollectionDraftGoal: string;
@@ -139,6 +140,7 @@ export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMut
     mutationFn: (payload: { teamId: string; stageRoundId?: string; title?: string; methodRequest?: ExperimentPlanMethodRequest }) =>
       createTeamExperimentPlan<ExperimentPlanCreatePayload>(payload.teamId, {
         stageRoundId: payload.stageRoundId || "",
+        researchProjectId: options.activeResearchProjectId,
         title: payload.title || "",
         createdByAgent: options.sourceCollectionOwnerAgentId,
         ...(payload.methodRequest ?? {}),
@@ -360,6 +362,7 @@ export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMut
     mutationFn: (payload: { teamId: string; plan: ExperimentPlanRecord }) =>
       freezeTeamExperimentDesign<ExperimentDesignFreezePayload>(payload.teamId, payload.plan.planId, {
         frozenByAgent: options.sourceCollectionOwnerAgentId,
+        researchProjectId: payload.plan.researchProjectId,
       }),
     onSuccess: (payload, variables, ctx) => {
       ctx?.telemetry?.succeeded();

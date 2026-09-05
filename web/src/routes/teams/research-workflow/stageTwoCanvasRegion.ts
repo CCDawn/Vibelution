@@ -20,6 +20,9 @@ import type {
 } from "../../../components/vui";
 import {
   buildEdgePathStates,
+  decisionSourceHandle,
+  edgeLabelAlwaysVisible,
+  resolveEdgeSemanticKind,
   resolveNodeVisualKind,
   stageToneFromNodes,
 } from "../../../components/vui/product/workflow/workflowCanvasModel";
@@ -104,6 +107,35 @@ const INACTIVE_STATUS: WorkflowNodeRunStatus = "pending";
 const INACTIVE_DESCRIPTION = "第二阶段未激活，需按题显式开启";
 
 /**
+ * Static mirror of the stage-two edges in core/research/workflow/definition.py.
+ * `revise` is intentionally absent: it forks a child run and therefore has no
+ * current-run edge. Decision semantics and handles reuse the public workflow
+ * model helpers used by active workflow projections.
+ */
+const STAGE_TWO_EDGE_SPECS: ReadonlyArray<{
+  edgeId: string;
+  fromNodeId: string;
+  toNodeId: string;
+  label: string;
+  gateKind: string;
+  requiresHumanAccept?: boolean;
+}> = [
+  { edgeId: "e_proto_review", fromNodeId: "protocol_design", toNodeId: "protocol_review", label: "协议草稿", gateKind: "auto" },
+  { edgeId: "e_review_freeze", fromNodeId: "protocol_review", toNodeId: "protocol_freeze", label: "评审通过", gateKind: "human", requiresHumanAccept: true },
+  { edgeId: "e_freeze_smoke", fromNodeId: "protocol_freeze", toNodeId: "smoke_gate", label: "冻结协议", gateKind: "frozen_protocol" },
+  { edgeId: "e_smoke_run", fromNodeId: "smoke_gate", toNodeId: "controlled_run", label: "试跑放行", gateKind: "smoke", requiresHumanAccept: true },
+  { edgeId: "e_run_eval", fromNodeId: "controlled_run", toNodeId: "result_evaluation", label: "运行产物", gateKind: "auto" },
+  { edgeId: "e_eval_decision", fromNodeId: "result_evaluation", toNodeId: "iteration_decision", label: "评价报告", gateKind: "auto" },
+  { edgeId: "e_decision_rerun", fromNodeId: "iteration_decision", toNodeId: "controlled_run", label: "同协议重跑", gateKind: "auto" },
+  { edgeId: "e_decision_promote", fromNodeId: "iteration_decision", toNodeId: "version_governance", label: "晋升版本", gateKind: "auto" },
+  { edgeId: "e_decision_rollback", fromNodeId: "iteration_decision", toNodeId: "version_governance", label: "回滚版本", gateKind: "auto" },
+  { edgeId: "e_decision_stop", fromNodeId: "iteration_decision", toNodeId: "version_governance", label: "停止迭代", gateKind: "auto" },
+  { edgeId: "e_version_promotion", fromNodeId: "version_governance", toNodeId: "candidate_promotion", label: "晋升提案", gateKind: "promotion", requiresHumanAccept: true },
+  { edgeId: "e_version_package", fromNodeId: "version_governance", toNodeId: "result_package", label: "停止并打包", gateKind: "auto" },
+  { edgeId: "e_promo_package", fromNodeId: "candidate_promotion", toNodeId: "result_package", label: "确认晋升/回滚", gateKind: "human", requiresHumanAccept: true },
+];
+
+/**
  * Builds the static grayed fragment. Pure display: every node is pending, the
  * stage tone is idle, and no actionable state is ever rendered.
  */
@@ -123,23 +155,19 @@ export function buildStageTwoInactiveCanvasRegion(): StageTwoInactiveCanvasRegio
     description: INACTIVE_DESCRIPTION,
   }));
 
-  // Linear canonical chain mirrors the definition's main-line order; the
-  // iteration decision's rerun branches only exist inside an active stage two,
-  // so the inactive preview renders the sequence without them.
-  const edges: Array<Omit<WorkflowCanvasEdgeInput, "pathState">> = [];
-  for (let index = 1; index < STAGE_TWO_NODE_SPECS.length; index += 1) {
-    const from = STAGE_TWO_NODE_SPECS[index - 1];
-    const to = STAGE_TWO_NODE_SPECS[index];
-    edges.push({
-      edgeId: `e_stage_two_inactive_${from.nodeId}_${to.nodeId}`,
-      fromNodeId: from.nodeId,
-      toNodeId: to.nodeId,
-      label: "",
-      gateKind: "auto",
-      semanticKind: "main",
-      labelAlwaysVisible: false,
-    });
-  }
+  const edges: Array<Omit<WorkflowCanvasEdgeInput, "pathState">> = STAGE_TWO_EDGE_SPECS.map(
+    (edge) => {
+      const semanticKind = resolveEdgeSemanticKind(edge);
+      return {
+        ...edge,
+        semanticKind,
+        sourceHandle: edge.fromNodeId === "iteration_decision"
+          ? decisionSourceHandle(semanticKind, edge.edgeId)
+          : undefined,
+        labelAlwaysVisible: edgeLabelAlwaysVisible(semanticKind, edge.gateKind),
+      };
+    },
+  );
 
   const stage: WorkflowCanvasStageInput = {
     stageId: STAGE_TWO_INACTIVE_STAGE_ID,

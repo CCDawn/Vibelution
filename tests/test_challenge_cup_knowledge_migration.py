@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -162,13 +163,19 @@ def _seed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, source_count: int 
     return paths
 
 
-def _plan(tmp_path: Path, *, migration_id: str = "migration-001") -> dict:
+def _plan(
+    tmp_path: Path,
+    *,
+    migration_id: str = "migration-001",
+    legacy_snapshot_root: Path | None = None,
+) -> dict:
     return migration.build_migration_plan(
         team_id="team-challenge",
         knowledge_base_id="team:team-challenge:kb-challenge",
         migration_id=migration_id,
         operator_agent_id="operator-agent",
         backup_root=tmp_path / f"backup-{migration_id}",
+        legacy_snapshot_root=legacy_snapshot_root,
     )
 
 
@@ -216,6 +223,9 @@ def test_apply_is_atomic_audited_and_idempotent(monkeypatch, tmp_path):
     assert all("candidate-only" not in item["tags"] and "pending-review" not in item["tags"] for item in items)
     assert all(item["requiredReviewerAgentId"] == "knowledge-manager" for item in items)
     assert all(item["title"].startswith("真实来源") for item in items)
+    proposals = migration._read_jsonl(paths["proposals"])
+    assert len(proposals) == 33
+    assert all("candidate-only" not in row["tags"] and "pending-review" not in row["tags"] for row in proposals)
     audits = migration._read_jsonl(paths["audit"])
     migration_audits = [row for row in audits if row["action"] == migration.MIGRATION_ACTION]
     assert len(migration_audits) == 33
@@ -233,6 +243,88 @@ def test_apply_is_atomic_audited_and_idempotent(monkeypatch, tmp_path):
     second = _plan(tmp_path)
     assert second["status"] == "already_applied"
     assert len(migration._read_jsonl(paths["items"])) == 33
+
+
+def test_migration_can_resume_from_completed_purge_backup_without_reviving_legacy_items(monkeypatch, tmp_path):
+    paths = _seed(monkeypatch, tmp_path)
+    purge_plan = _purge_plan(tmp_path, purge_id="purge-before-migration")
+    purge.apply_purge(
+        purge_plan,
+        maintenance_window_confirmed=True,
+        expected_manifest_hash=purge_plan["manifestHash"],
+    )
+    assert migration._read_jsonl(paths["items"]) == []
+    assert migration._read_jsonl(paths["batches"]) == []
+    assert migration._read_jsonl(paths["proposals"]) == []
+
+    plan = _plan(
+        tmp_path,
+        migration_id="migration-after-purge",
+        legacy_snapshot_root=Path(purge_plan["backupPath"]),
+    )
+    assert plan["resumeFromPurgeId"] == "purge-before-migration"
+    assert len(plan["sourceCandidateIds"]) == 33
+
+    migration.apply_migration(
+        plan,
+        maintenance_window_confirmed=True,
+        expected_manifest_hash=plan["manifestHash"],
+    )
+    assert len(migration._read_jsonl(paths["items"])) == 33
+    assert len(migration._read_jsonl(paths["batches"])) == 33
+    assert len(migration._read_jsonl(paths["proposals"])) == 33
+    audits = migration._read_jsonl(paths["audit"])
+    assert len([row for row in audits if row["action"] == purge.TERMINAL_ACTION]) == 1
+    assert len([row for row in audits if row["action"] == migration.TERMINAL_ACTION]) == 1
+
+
+def test_post_purge_resume_requires_matching_completed_purge_audit(monkeypatch, tmp_path):
+    paths = _seed(monkeypatch, tmp_path)
+    purge_plan = _purge_plan(tmp_path, purge_id="purge-without-live-audit")
+    purge.apply_purge(
+        purge_plan,
+        maintenance_window_confirmed=True,
+        expected_manifest_hash=purge_plan["manifestHash"],
+    )
+    audits = [row for row in migration._read_jsonl(paths["audit"]) if row["action"] != purge.TERMINAL_ACTION]
+    _write_jsonl(paths["audit"], audits)
+
+    with pytest.raises(migration.ChallengeCupKnowledgeMigrationError, match="matching completed purge audit"):
+        _plan(tmp_path, legacy_snapshot_root=Path(purge_plan["backupPath"]))
+
+
+def test_post_purge_resume_restores_empty_live_store_when_write_is_interrupted(monkeypatch, tmp_path):
+    paths = _seed(monkeypatch, tmp_path)
+    purge_plan = _purge_plan(tmp_path, purge_id="purge-before-interruption")
+    purge.apply_purge(
+        purge_plan,
+        maintenance_window_confirmed=True,
+        expected_manifest_hash=purge_plan["manifestHash"],
+    )
+    before = {name: path.read_bytes() for name, path in paths.items()}
+    plan = _plan(
+        tmp_path,
+        migration_id="migration-post-purge-failure",
+        legacy_snapshot_root=Path(purge_plan["backupPath"]),
+    )
+    real_write = migration.team_knowledge_service._write_jsonl
+    calls = 0
+
+    def interrupted(path, rows):
+        nonlocal calls
+        calls += 1
+        if calls == 3:
+            raise OSError("simulated post-purge interruption")
+        return real_write(path, rows)
+
+    monkeypatch.setattr(migration.team_knowledge_service, "_write_jsonl", interrupted)
+    with pytest.raises(OSError, match="simulated post-purge interruption"):
+        migration.apply_migration(
+            plan,
+            maintenance_window_confirmed=True,
+            expected_manifest_hash=plan["manifestHash"],
+        )
+    assert {name: path.read_bytes() for name, path in paths.items()} == before
 
 
 def test_apply_restores_all_files_when_write_is_interrupted(monkeypatch, tmp_path):
@@ -299,8 +391,132 @@ def test_dry_run_reports_every_missing_authoritative_candidate(monkeypatch, tmp_
 
     with pytest.raises(
         migration.ChallengeCupKnowledgeMigrationError,
-        match=r"missing \(2\): source-00, source-01",
+        match=r"missing and cannot be recovered from unique DataRecords \(2\): source-00, source-01",
     ):
+        _plan(tmp_path)
+
+
+def test_dry_run_recovers_missing_candidate_from_unique_authoritative_data_record(monkeypatch, tmp_path):
+    _seed(monkeypatch, tmp_path)
+    workspace = tmp_path / "workspace"
+    store_path = (
+        workspace
+        / "teams"
+        / "team-challenge"
+        / "research_projects"
+        / "project-0"
+        / "workspace"
+        / "candidate_store"
+        / "index.json"
+    )
+    store = json.loads(store_path.read_text(encoding="utf-8"))
+    store["candidates"] = [candidate for candidate in store["candidates"] if candidate["candidateId"] != "source-00"]
+    store_path.write_text(json.dumps(store), encoding="utf-8")
+
+    run_root = workspace / "data_processing" / "runs" / "run-0"
+    run_root.mkdir(parents=True)
+    (run_root / "run.json").write_text(
+        json.dumps(
+            {
+                "runId": "run-0",
+                "profileId": "generic_document_processing",
+                "title": "Authoritative source run",
+                "scope": {
+                    "teamId": "team-challenge",
+                    "researchProjectId": "project-0",
+                    "questionId": "SCI-000",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    _write_jsonl(
+        run_root / "records.jsonl",
+        [
+            {
+                "recordId": "record-source-00",
+                "runId": "run-0",
+                "title": "恢复的真实来源 00",
+                "summary": "source-00 claim A",
+                "sourceRef": "https://example.test/recovered-00",
+                "rawLocation": "https://example.test/recovered-00",
+                "sourceType": "paper",
+                "status": "ready_for_review",
+                "collectionTrace": {"agentId": "source-agent", "agentRole": "source_finder"},
+                "metadata": {"sourceIdentityKey": "url:https://example.test/recovered-00"},
+                "qualitySignals": {"sourceIdentityKey": "url:https://example.test/recovered-00"},
+            }
+        ],
+    )
+    _write_jsonl(
+        run_root / "collection_assignments.jsonl",
+        [{"assignmentId": "assignment-00", "agentId": "source-agent", "agentRole": "source_finder"}],
+    )
+
+    plan = _plan(tmp_path)
+
+    assert plan["recoveredSourceCandidateIds"] == ["source-00"]
+    recovered = next(row for row in plan["sourceRows"] if row["sourceCandidateId"] == "source-00")
+    assert recovered["sourceRecovery"] == {
+        "sourceCollectionRunId": "run-0",
+        "sourceRecordId": "record-source-00",
+    }
+    assert recovered["item"]["title"] == "恢复的真实来源 00"
+    assert recovered["item"]["sourceIdentityHash"] == "sha256:" + hashlib.sha256(
+        b"url:https://example.test/recovered-00"
+    ).hexdigest()
+    assert recovered["item"]["evidenceLevel"] == "source_quality_approved"
+    assert recovered["proposal"]["proposedByAgentId"] == "source-agent"
+
+
+def test_dry_run_rejects_ambiguous_data_record_recovery(monkeypatch, tmp_path):
+    _seed(monkeypatch, tmp_path)
+    workspace = tmp_path / "workspace"
+    store_path = (
+        workspace
+        / "teams"
+        / "team-challenge"
+        / "research_projects"
+        / "project-0"
+        / "workspace"
+        / "candidate_store"
+        / "index.json"
+    )
+    store = json.loads(store_path.read_text(encoding="utf-8"))
+    store["candidates"] = [candidate for candidate in store["candidates"] if candidate["candidateId"] != "source-00"]
+    store_path.write_text(json.dumps(store), encoding="utf-8")
+    run_root = workspace / "data_processing" / "runs" / "run-0"
+    run_root.mkdir(parents=True)
+    (run_root / "run.json").write_text(
+        json.dumps(
+            {
+                "runId": "run-0",
+                "scope": {
+                    "teamId": "team-challenge",
+                    "researchProjectId": "project-0",
+                    "questionId": "SCI-000",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    duplicate = {
+        "runId": "run-0",
+        "title": "Ambiguous source",
+        "summary": "source-00 claim A",
+        "sourceRef": "https://example.test/ambiguous",
+        "sourceType": "paper",
+        "status": "ready_for_review",
+        "collectionTrace": {"agentId": "source-agent"},
+        "metadata": {"sourceIdentityKey": "url:https://example.test/ambiguous"},
+    }
+    _write_jsonl(
+        run_root / "records.jsonl",
+        [dict(duplicate, recordId="record-a"), dict(duplicate, recordId="record-b")],
+    )
+    _write_jsonl(run_root / "collection_assignments.jsonl", [{"agentId": "source-agent"}])
+
+    with pytest.raises(migration.ChallengeCupKnowledgeMigrationError, match="unique matching DataRecord"):
         _plan(tmp_path)
 
 
