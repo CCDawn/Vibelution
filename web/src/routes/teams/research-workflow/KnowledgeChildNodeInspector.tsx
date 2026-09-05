@@ -69,7 +69,7 @@ export function KnowledgeChildReadPanel(props: {
 
 function KnowledgeChildTimeline(props: { teamId: string; runId: string; nodeId: string }) {
   const run = useResearchWorkflowRun(props.teamId, props.runId);
-  const insights = useResearchWorkflowInsights(props.teamId, props.runId);
+  const insights = useResearchWorkflowInsights(props.teamId, props.runId, "timeline");
   if (run.error) return <VStateSurface tone="error" title="知识子流程记录读取失败">
     <VButton onClick={() => void run.refresh()}>重新读取记录</VButton>
   </VStateSurface>;
