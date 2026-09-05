@@ -100,7 +100,7 @@ describe("NodeSessionSection", () => {
       scopedSessions: [],
     }));
 
-    expect(markup).toContain("未绑定节点根会话");
+    expect(markup).toContain("暂无可打开的执行记录");
     expect(markup).not.toContain("打开精确会话");
   });
 
@@ -153,7 +153,7 @@ describe("NodeSessionSection", () => {
       ],
     }));
 
-    expect(markup).toContain("未绑定节点根会话");
+    expect(markup).toContain("暂无可打开的执行记录");
     expect(markup).not.toContain("查看节点总览");
   });
 
