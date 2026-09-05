@@ -8,7 +8,7 @@ import {
   isHypothesisFirstCommandStateConflict,
 } from "../../../api/hypothesisFirst";
 import { WORKBENCH_LAYOUT_IDS } from "../../../components/layout/workbenchLayoutIds";
-import { VButton, VCanvasWorkbenchPage } from "../../../components/vui";
+import { VButton, VCanvasWorkbenchPage, VStateRow } from "../../../components/vui";
 import {
   buildHypothesisFirstCanvasRegion,
   hypothesisFirstSemanticNodeId,
@@ -25,7 +25,7 @@ import { ResearchCommandPalette } from "./ResearchCommandPalette";
 import { ResearchCenteredEmptyState } from "./ResearchCenteredEmptyState";
 import { ResearchCurrentTaskInspector } from "./ResearchCurrentTaskInspector";
 import { ResearchExperimentResetAction } from "./ResearchExperimentResetAction";
-import { fetchHypothesisFirstFocusNode } from "./hypothesisFirstFocus";
+import { useResearchExperimentSwitch } from "./useResearchExperimentSwitch";
 import {
   isHypothesisFirstDiscussionActive,
   meetingsForHypothesisFirstQuestion,
@@ -35,7 +35,6 @@ import { resolveHypothesisFirstNextActionFromV2 } from "./hypothesisFirstStateV2
 import {
   buildExperimentChromeIdentity,
   buildExperimentSwitchOptions,
-  resolveExperimentSwitch,
 } from "./researchExperimentSwitchModel";
 import {
   composeHypothesisFirstGraph,
@@ -310,17 +309,11 @@ export function ResearchProcessWorkspace({
     hypothesisFirstChain.selection?.selectedCandidateIds,
     runState.run,
   ]);
-  const selectExperiment = useCallback((questionId: string) => {
-    const patch = resolveExperimentSwitch(experimentOptions, questionId);
-    if (!patch) return;
-    if (patch.panel !== "node") {
-      location.replaceParams(patch);
-      return;
-    }
-    void fetchHypothesisFirstFocusNode(teamId, patch.questionId, patch.runId || "").then((node) => {
-      location.replaceParams({ ...patch, node });
-    });
-  }, [experimentOptions, location, teamId]);
+  const { selectExperiment, error: experimentSwitchError } = useResearchExperimentSwitch({
+    teamId,
+    experiments: experimentOptions,
+    replaceParams: location.replaceParams,
+  });
 
 
   const formalRuntimeActive = Boolean(
@@ -831,6 +824,9 @@ export function ResearchProcessWorkspace({
 
   return (
     <div data-fill="true" data-vui="research-process-workspace-host" className={styles.host}>
+      {experimentSwitchError ? (
+        <VStateRow tone="danger" role="alert">{experimentSwitchError}</VStateRow>
+      ) : null}
       <ResearchCommandPalette
         questions={catalog.questions}
         nextAction={workspaceNavigationAction}
