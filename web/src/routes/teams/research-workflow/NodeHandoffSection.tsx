@@ -36,7 +36,7 @@ export function NodeHandoffSection(props: {
         <dt className={styles.label}>{isZh ? "状态" : "Status"}</dt>
         <dd className={styles.value}>{props.pending ? (isZh ? "等待人工" : "Waiting for human") : props.blockedReason ? (isZh ? "已阻塞" : "Blocked") : props.handoffs.length ? (isZh ? "已有交接记录" : "Handoffs recorded") : (isZh ? "暂无交接" : "No handoff yet")}</dd>
       </dl>
-      {props.blockedReason ? <VErrorSummary label={isZh ? "阻塞原因" : "Blocker"} summary={blockedReasonLabel(props.blockedReason, isZh)} details={props.blockedReason} defaultOpen={false} /> : null}
+      {props.blockedReason ? <VErrorSummary label={isZh ? "阻塞原因" : "Blocker"} summary={blockedReasonLabel(props.blockedReason, isZh)} /> : null}
       {props.handoffs.map((handoff) => (
         <article className={styles.record} key={handoff.handoffId}>
           <strong>{handoff.fromNodeId} → {handoff.toNodeId}</strong>
