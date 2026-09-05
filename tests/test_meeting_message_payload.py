@@ -215,3 +215,25 @@ def test_structured_candidate_preserves_optional_grounding_fields() -> None:
     assert candidate["testablePrediction"] == "阻断 A1 受体后记忆表现应恢复"
     assert candidate["falsifier"] == "阻断 A1 受体后记忆表现仍不恢复"
     assert candidate["axisProfile"]["mechanism"] == "腺苷 A1 受体介导"
+
+
+def test_native_schema_rejects_unknown_source_type_and_matches_ingestion():
+    from jsonschema import Draft202012Validator
+
+    contract = payloads.meeting_message_structured_output_contract()
+    def thaw(value):
+        from collections.abc import Mapping
+        if isinstance(value, Mapping):
+            return {key: thaw(item) for key, item in value.items()}
+        if isinstance(value, tuple):
+            return [thaw(item) for item in value]
+        return value
+    schema = thaw(contract.schema)
+    validator = Draft202012Validator(schema)
+    value = json.loads(_structured_output())
+    assert list(validator.iter_errors(value)) == []
+    assert contract.validator(value)["protocol"]
+    value["protocol"]["evidenceRequests"][0]["searchEnvelope"]["sourceTypes"] = ["technical_report"]
+    assert list(validator.iter_errors(value))
+    with pytest.raises(payloads.MeetingMessagePayloadError, match="technical_report"):
+        contract.validator(value)

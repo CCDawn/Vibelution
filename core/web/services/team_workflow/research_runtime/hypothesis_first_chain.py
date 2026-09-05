@@ -5111,12 +5111,13 @@ def _submit_auto_knowledge_handoff_accept(
 
 
 def auto_open_grounded_generation(team_id: str, *, question_id: str) -> dict[str, Any]:
-    """Consume the normal R0-to-R1 offer through the same command as the UI.
+    """Open grounded generation, or resume its failed discussion, via UI commands.
 
     A completed exploratory round is not a failed generation to retry. The
     existing projection owns the join with accepted knowledge, and the command
     rechecks that offer under the question lock before opening its idempotent
-    meeting. No new run, R0 replay, or experiment action is submitted here.
+    meeting. Failed grounded discussions reuse the retry offer, capped by the
+    existing round limit within R1. No R0 replay or experiment action is submitted.
     """
     from .formal_read_runtime import get_query_service
     from .hypothesis_first_state_v2 import (
@@ -5145,6 +5146,26 @@ def auto_open_grounded_generation(team_id: str, *, question_id: str) -> dict[str
             and item.get("command") == "open_generation"
             and item.get("enabled") is True
         ), None)
+        generation = snapshot.get("generation") or {}
+        if action is None and generation.get("lifecycle") == "failed" and any(
+            problem.get("code") == "discussion_round_failed"
+            for problem in generation.get("problems") or []
+        ):
+            grounded_meetings = [
+                meeting for meeting in _question_generation_meetings(team_id, question_id)
+                if _meeting_workflow_run_id(meeting) == run_id
+                and meeting.get("candidateAuthority") == FORMAL_GROUNDED_CANDIDATE_AUTHORITY
+            ]
+            if len(grounded_meetings) < HARD_ROUND_LIMIT and any(
+                meeting.get("meetingRoundId") == generation.get("generationMeetingId")
+                for meeting in grounded_meetings
+            ):
+                action = next((
+                    item for item in snapshot.get("allowedActions", [])
+                    if item.get("actionId") == "retry-generation"
+                    and item.get("command") == "retry_generation"
+                    and item.get("enabled") is True
+                ), None)
         if action is None:
             return summary
         execute_v2_command(team_id, {

@@ -41,6 +41,60 @@ class MeetingMessagePayloadError(ValueError):
         self.code = str(code or "message_payload_invalid")
 
 
+def meeting_message_structured_output_contract():
+    """Bind the existing meeting validator to provider-enforced JSON Schema."""
+    from core.llm.semantic_messages import SemanticOutputSchema
+
+    text = {"type": "string"}
+    texts = {"type": "array", "items": text}
+
+    def obj(properties):
+        return {"type": "object", "properties": properties,
+                "required": list(properties), "additionalProperties": False}
+
+    def rows(properties):
+        return {"type": "array", "items": obj(properties)}
+
+    source_type = {"type": "string", "enum": sorted(collection_contract.SEARCH_ENVELOPE_SOURCE_TYPES)}
+    evidence_level = {"type": "string", "enum": sorted(collection_contract.SEARCH_ENVELOPE_EVIDENCE_LEVELS)}
+    schema = obj({
+        "schemaVersion": {"type": "integer", "enum": [MESSAGE_PAYLOAD_SCHEMA_VERSION]},
+        "display": obj({
+            "conclusion": text,
+            "sections": rows({"title": text, "bullets": texts}),
+        }),
+        "protocol": obj({
+            "agreements": texts,
+            "disagreements": rows({"issue": text, "positions": texts, "unresolvedReason": text}),
+            "risks": texts,
+            "actionItems": rows({"ownerRoleId": text, "action": text, "dueGate": text}),
+            "knowledgeCandidates": texts,
+            "proposedCandidates": rows({
+                "candidateId": text, "statement": text, "rationale": text,
+                "proposedBy": text, "lineageRefs": texts,
+                "testablePrediction": text, "falsifier": text,
+                "axisProfile": obj({axis: text for axis in (
+                    "mechanism", "intervention", "observable", "population", "boundary",
+                )}),
+            }),
+            "evidenceRequests": rows({
+                "rationale": text, "candidateRefs": texts,
+                "searchEnvelope": obj({
+                    "keywords": {"type": "array", "items": text, "minItems": 1},
+                    "sourceTypes": {"type": "array", "items": source_type},
+                    "evidenceLevels": {"type": "array", "items": evidence_level},
+                }),
+                "requirements": obj({"minEvidenceLevel": evidence_level, "completeness": text}),
+            }),
+        }),
+    })
+    return SemanticOutputSchema(
+        name=f"challenge_meeting_message_v{MESSAGE_PAYLOAD_SCHEMA_VERSION}",
+        schema=schema,
+        validator=_validated_model_payload,
+    )
+
+
 def meeting_message_output_contract() -> str:
     """Prompt fragment for one machine-validated meeting response object."""
 

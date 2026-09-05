@@ -2555,7 +2555,8 @@ def test_chat_room_participant_runner_reuses_session_workspace_and_agent_llm_bin
     assert latest_message["timings"]["llmElapsedMs"] >= 0
 
 
-def test_chat_room_real_agent_reaches_llm_with_bound_turn_identity(tmp_path, monkeypatch):
+@pytest.mark.parametrize("structured_meeting", [False, True])
+def test_chat_room_real_agent_reaches_llm_with_bound_turn_identity(tmp_path, monkeypatch, structured_meeting):
     _isolate_chat_room_kernel(tmp_path, monkeypatch)
     monkeypatch.setattr(session_service, "build_agent_context", _lightweight_agent_context)
     monkeypatch.setattr(chat_room_service, "build_agent_context", _lightweight_agent_context)
@@ -2567,10 +2568,13 @@ def test_chat_room_real_agent_reaches_llm_with_bound_turn_identity(tmp_path, mon
         participant_agent_ids=[alpha["agentId"], beta["agentId"]],
         config={"maxSpeakers": 1},
     )
+    monkeypatch.setattr(chat_room_service, "_uses_structured_meeting_message", lambda *args: structured_meeting)
+    output_contracts = []
     invocations = []
     invocation_messages = []
 
     def fake_invoke_llm(self, messages, *, replay_state=None):
+        output_contracts.append(getattr(self, "_turn_structured_output_contract", None))
         invocations.append(agent_directory_service.current_agent_runtime())
         invocation_messages.append(messages)
         return None
@@ -2597,6 +2601,9 @@ def test_chat_room_real_agent_reaches_llm_with_bound_turn_identity(tmp_path, mon
         )
         for message in invocation_messages[0]
     )
+    assert bool(output_contracts[0]) is structured_meeting
+    if structured_meeting:
+        assert output_contracts[0].name == "challenge_meeting_message_v1"
     latest_message = detail["rounds"][-1]["messages"][0]
     assert "ledger identity" not in str(latest_message.get("content") or "").lower()
 
@@ -4127,6 +4134,9 @@ def test_chat_room_participant_runs_with_active_direct_turn_in_another_session(t
     prompts: list[str] = []
 
     class BlockingAgent:
+        def set_turn_structured_output_contract(self, contract):
+            self.structured_output_contract = contract
+
         def __init__(self, workspace_path=None, config=None):
             pass
 
@@ -4268,6 +4278,9 @@ def test_two_scoped_rooms_run_same_agent_in_distinct_sessions_concurrently(tmp_p
     release_calls = threading.Event()
 
     class BlockingAgent:
+        def set_turn_structured_output_contract(self, contract):
+            self.structured_output_contract = contract
+
         def __init__(self, workspace_path=None, config=None):
             pass
 
@@ -4355,6 +4368,9 @@ def test_chat_room_same_session_wait_does_not_block_later_different_session_turn
     run_order: list[str] = []
 
     class BlockingAgent:
+        def set_turn_structured_output_contract(self, contract):
+            self.structured_output_contract = contract
+
         def __init__(self, workspace_path=None, config=None):
             pass
 
@@ -4470,6 +4486,9 @@ def test_force_stop_chat_room_round_cancels_waiting_agent_slot(tmp_path, monkeyp
     release_direct = threading.Event()
 
     class BlockingAgent:
+        def set_turn_structured_output_contract(self, contract):
+            self.structured_output_contract = contract
+
         def __init__(self, workspace_path=None, config=None):
             pass
 

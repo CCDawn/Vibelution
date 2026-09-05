@@ -4773,6 +4773,14 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
         ), session_service._session_tool_workspace_override(workspace):
             stage_started_at = _perf_counter()
             agent_runtime = session_service.create_chat_agent(workspace_path=workspace, config=agent_config)
+            if context.get("_structuredMeetingMessage"):
+                from core.web.services.team_workflow.meeting_message_payload import (
+                    meeting_message_structured_output_contract,
+                )
+
+                agent_runtime.set_turn_structured_output_contract(
+                    meeting_message_structured_output_contract()
+                )
             timings["agentCreateMs"] = _elapsed_ms(stage_started_at)
             _record_room_event(
                 "round",
