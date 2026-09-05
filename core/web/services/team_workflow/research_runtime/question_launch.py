@@ -41,6 +41,12 @@ from core.web.services.team_workflow.challenge_question_runs import (
     challenge_question_run_summary,
     get_challenge_question_run_detail,
 )
+from core.web.services.team_workflow.challenge_phase_boundary import (
+    ChallengePhaseBoundaryError,
+)
+from core.web.services.team_workflow.challenge_phase_knowledge_publisher import (
+    load_published_phase_one_knowledge_package,
+)
 from core.web.services.team_workflow.research_projects import (
     ResearchProjectError,
     ensure_challenge_question_project,
@@ -902,6 +908,17 @@ def build_question_run_input(
             "Deep experiment run requires its canonical campaign to be activated.",
             code="deep_experiment_campaign_not_activated",
         )
+    phase_one_knowledge_package: dict[str, Any] | None = None
+    if deep_record is not None:
+        try:
+            phase_one_knowledge_package = load_published_phase_one_knowledge_package(
+                team_id
+            )
+        except ChallengePhaseBoundaryError as exc:
+            raise QuestionLaunchError(
+                "Deep experiment run requires the published phase-one Team Knowledge package.",
+                code="phase_one_knowledge_package_unavailable",
+            ) from exc
     output = _mapping(detail.get("output"))
     artifact = _mapping(detail.get("artifact"))
     review_run_id = _text(detail.get("selectedRunId"))
@@ -934,6 +951,9 @@ def build_question_run_input(
     model_routing_policy = _server_model_routing_policy(team_id)
     directions = [_text(item) for item in program_body.get("dimensions") or [] if _text(item)]
     artifact_ref = f"challenge-question-artifact://{catalog_id}/{normalized_question_id}/{review_run_id}/{artifact_sha256}"
+    dataset_refs = [artifact_ref]
+    if phase_one_knowledge_package is not None:
+        dataset_refs.extend(phase_one_knowledge_package["datasetRefs"])
     hypothesis_first = _hypothesis_first_flag(
         team_id,
         normalized_question_id,
@@ -947,7 +967,7 @@ def build_question_run_input(
         "researchScopeEnvelope": _hypothesis_first_scope(team_id, normalized_question_id),
         "catalogScope": _tracked_catalog_scope(),
         "researchBriefHash": artifact_sha256,
-        "datasetRefs": [artifact_ref],
+        "datasetRefs": dataset_refs,
         "metricContract": {
             "primary": "evidence_coverage",
             "direction": "maximize",
@@ -958,6 +978,11 @@ def build_question_run_input(
             "challengeQuestionArtifact": artifact_ref,
             "questionReviewRunId": review_run_id,
             "competitionProgramSnapshot": competition_program_snapshot,
+            **(
+                {"phaseOneKnowledgePackage": phase_one_knowledge_package}
+                if phase_one_knowledge_package is not None
+                else {}
+            ),
         },
         "competitionProgramSnapshot": competition_program_snapshot,
         "competitionRuleRef": catalog_id,

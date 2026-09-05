@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from typing import Any
+from urllib.parse import quote
 
 from core.web.services import team_knowledge_service, team_service
 from core.web.services.team_workflow.challenge_phase_boundary import (
@@ -56,6 +57,23 @@ def _publication_agents(team: dict[str, Any]) -> tuple[str, str]:
 
 def _manifest_tag(manifest: dict[str, Any]) -> str:
     return f"{PHASE_ONE_KNOWLEDGE_TAG}:{_text(manifest.get('manifestSha256'))}"
+
+
+def _dataset_ref(
+    *,
+    knowledge_base_id: str,
+    knowledge_item_id: str,
+    batch_id: str,
+    manifest_sha256: str,
+    content_sha256: str,
+) -> str:
+    return (
+        f"team-knowledge://{quote(knowledge_base_id, safe='')}/"
+        f"{quote(knowledge_item_id, safe='')}"
+        f"?batchId={quote(batch_id, safe='')}"
+        f"&manifestSha256={manifest_sha256}"
+        f"&contentSha256={content_sha256}"
+    )
 
 
 def _knowledge_content(manifest: dict[str, Any]) -> str:
@@ -206,6 +224,94 @@ def publish_approved_phase_one_to_team_knowledge(
         raise ChallengePhaseBoundaryError(
             f"phase_one_knowledge_publish_failed: {exc}"
         ) from exc
+
+
+def load_published_phase_one_knowledge_package(
+    team_id: str,
+    *,
+    question_run_summary: dict[str, Any] | None = None,
+    knowledge_service: Any = team_knowledge_service,
+    team_snapshot: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Read back the exact Team Knowledge items bound by the phase-one receipt."""
+
+    boundary = get_challenge_phase_boundary_status(
+        team_id,
+        question_run_summary=question_run_summary,
+    )
+    if boundary.get("phase2Activated") is not True:
+        raise ChallengePhaseBoundaryError("phase_one_knowledge_receipt_required")
+    manifest = boundary["manifest"]
+    receipt = boundary.get("knowledgeReceipt") or {}
+    knowledge_base_id = _text(receipt.get("knowledgeBaseId"))
+    item_ids = [_text(item) for item in receipt.get("knowledgeItemIds") or [] if _text(item)]
+    batch_id = _text(receipt.get("batchId"))
+    team = team_snapshot if isinstance(team_snapshot, dict) else team_service.get_team(team_id)
+    _, reviewer_id = _publication_agents(team)
+    try:
+        response = knowledge_service.list_knowledge_items(
+            knowledge_base_id,
+            agent_id=reviewer_id,
+        )
+        item_by_id = {
+            _text(item.get("knowledgeItemId")): item
+            for item in response.get("items") or []
+            if isinstance(item, dict) and _text(item.get("knowledgeItemId"))
+        }
+        expected_tag = _manifest_tag(manifest)
+        expected_manifest_line = f"manifestSha256: {manifest['manifestSha256']}"
+        expected_content_line = f"contentSha256: {manifest['contentSha256']}"
+        for item_id in item_ids:
+            item = item_by_id.get(item_id)
+            if (
+                item is None
+                or _text(item.get("knowledgeBaseId")) != knowledge_base_id
+                or _text(item.get("batchId")) != batch_id
+                or expected_tag not in list(item.get("tags") or [])
+                or expected_manifest_line not in _text(item.get("content"))
+                or expected_content_line not in _text(item.get("content"))
+            ):
+                raise ChallengePhaseBoundaryError("phase_one_knowledge_lineage_invalid")
+            trace = knowledge_service.get_knowledge_trace(
+                knowledge_base_id,
+                item_id,
+                agent_id=reviewer_id,
+            )
+            nodes = trace.get("nodes") or {}
+            batches = [item for item in nodes.get("batches") or [] if isinstance(item, dict)]
+            sources = [item for item in nodes.get("sourceArtifacts") or [] if isinstance(item, dict)]
+            source_matches = any(
+                _text(source.get("sourceHash")) == manifest["manifestSha256"]
+                and _text((source.get("sourceRef") or {}).get("manifestSha256"))
+                == manifest["manifestSha256"]
+                and _text((source.get("sourceRef") or {}).get("contentSha256"))
+                == manifest["contentSha256"]
+                for source in sources
+            )
+            if not any(_text(batch.get("batchId")) == batch_id for batch in batches) or not source_matches:
+                raise ChallengePhaseBoundaryError("phase_one_knowledge_lineage_invalid")
+    except (team_knowledge_service.TeamKnowledgeError, OSError) as exc:
+        raise ChallengePhaseBoundaryError(
+            f"phase_one_knowledge_read_failed: {exc}"
+        ) from exc
+    return {
+        "knowledgeBaseId": knowledge_base_id,
+        "knowledgeItemIds": item_ids,
+        "batchId": batch_id,
+        "receiptId": _text(receipt.get("receiptId")),
+        "manifestSha256": manifest["manifestSha256"],
+        "contentSha256": manifest["contentSha256"],
+        "datasetRefs": [
+            _dataset_ref(
+                knowledge_base_id=knowledge_base_id,
+                knowledge_item_id=item_id,
+                batch_id=batch_id,
+                manifest_sha256=manifest["manifestSha256"],
+                content_sha256=manifest["contentSha256"],
+            )
+            for item_id in item_ids
+        ],
+    }
 
 
 def approve_and_publish_current_phase_one_manifest(
