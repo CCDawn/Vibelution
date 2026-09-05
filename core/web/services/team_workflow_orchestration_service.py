@@ -207,7 +207,6 @@ from core.web.services.team_workflow.source_collection.residual import (
     _import_source_collection_managed_root_sources,
     _load_candidate_store,
     _load_source_collection_exclusion_store,
-    _merge_candidate_store_payloads,
     _load_stage_round_store,
     _managed_category_policy_enabled,
     _managed_root_title_from_parse,
