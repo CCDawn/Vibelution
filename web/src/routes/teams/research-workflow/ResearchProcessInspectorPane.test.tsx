@@ -39,7 +39,12 @@ const questionDetailHarness = vi.hoisted(() => ({
 }));
 const mockedGetQuestionRunDetail = vi.hoisted(() => vi.fn().mockResolvedValue({}));
 
+const mockedGetQuestionRunStatus = vi.hoisted(() => vi.fn().mockResolvedValue({
+  summary: { registeredQuestionIds: ["SCI-002"] },
+}));
+
 vi.mock("../../../api/challengeQuestionRuns", () => ({
+  getChallengeQuestionRunStatus: mockedGetQuestionRunStatus,
   getChallengeQuestionRunDetail: mockedGetQuestionRunDetail,
 }));
 
@@ -359,10 +364,61 @@ describe("ResearchProcessInspectorPane question-run cache scope", () => {
   afterEach(() => {
     questionDetailHarness.props = null;
     mockedGetQuestionRunDetail.mockClear();
+    mockedGetQuestionRunStatus.mockReset().mockResolvedValue({ summary: { registeredQuestionIds: ["SCI-002"] } });
     document.body.innerHTML = "";
   });
 
-  it("uses the selected workflow run in the question detail query key and transport", async () => {
+  it("does not request an unregistered question artifact", async () => {
+    const { container, root } = await renderInspectorLeaf(
+      "zh", makeInspectorScope("question", { questionId: "SCI-004" }),
+    );
+    await act(async () => {
+      await vi.waitFor(() => expect(container.textContent).toContain("尚无登记产出"));
+    });
+    expect(mockedGetQuestionRunDetail).not.toHaveBeenCalled();
+    expect(container.textContent).not.toContain("challenge_question_run_not_found");
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it("loads detail when the shared status cache gains a registered output", async () => {
+    const { container, root, queryClient } = await renderInspectorLeaf(
+      "en", makeInspectorScope("question", { questionId: "SCI-004" }),
+    );
+    await act(async () => {
+      await vi.waitFor(() => expect(container.textContent).toContain("No registered output yet"));
+    });
+    expect(mockedGetQuestionRunDetail).not.toHaveBeenCalled();
+    await act(async () => {
+      queryClient.setQueryData(queryKeys.challengeQuestionRunStatus("research-team"), {
+        summary: { registeredQuestionIds: ["SCI-004"] },
+      });
+    });
+    await act(async () => {
+      await vi.waitFor(() => expect(mockedGetQuestionRunDetail).toHaveBeenCalledWith(
+        "research-team", "SCI-004", undefined,
+      ));
+    });
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it("keeps a status request failure visible without requesting an artifact", async () => {
+    mockedGetQuestionRunStatus.mockRejectedValueOnce(new Error("status unavailable"));
+    const { container, root } = await renderInspectorLeaf(
+      "zh", makeInspectorScope("question", { questionId: "SCI-004" }),
+    );
+    await act(async () => {
+      await vi.waitFor(() => expect(questionDetailHarness.props?.errorMessage).toBe("status unavailable"));
+    });
+    expect(questionDetailHarness.props?.isLoading).toBe(false);
+    expect(mockedGetQuestionRunDetail).not.toHaveBeenCalled();
+    expect(container.textContent).not.toContain("尚无登记产出");
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it("uses registered artifact runs rather than the workflow run in the detail query", async () => {
     const { container, root, queryClient } = await renderInspectorLeaf(
       "zh",
       makeInspectorScope("question", {
@@ -372,13 +428,10 @@ describe("ResearchProcessInspectorPane question-run cache scope", () => {
     );
 
     await act(async () => {
-      await vi.waitFor(() => expect(questionDetailHarness.props).not.toBeNull(), { timeout: 15_000 });
+      await vi.waitFor(() => expect(mockedGetQuestionRunDetail).toHaveBeenCalledWith(
+        "research-team", "SCI-002", undefined,
+      ), { timeout: 15_000 });
     });
-    expect(mockedGetQuestionRunDetail).toHaveBeenCalledWith(
-      "research-team",
-      "SCI-002",
-      undefined,
-    );
     expect(queryClient.getQueryCache().find({
       queryKey: queryKeys.challengeQuestionRunDetail("research-team", "SCI-002", ""),
     })).toBeDefined();

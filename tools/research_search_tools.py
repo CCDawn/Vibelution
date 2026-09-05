@@ -196,6 +196,7 @@ def _run_searches(
     max_workers: int = _MAX_WORKERS,
     receipt_context: dict | None = None,
     tool_call_id: str = "",
+    parent_query_id: str = "",
 ) -> list[tuple[str, str]]:
     limit = _clamp_int(max_results_per_query, default=5, minimum=1, maximum=_MAX_RESULTS_PER_QUERY)
     workers = _clamp_int(max_workers, default=_MAX_WORKERS, minimum=1, maximum=_MAX_WORKERS)
@@ -210,7 +211,9 @@ def _run_searches(
                 bind_formal_search_query,
             )
 
-            binding = bind_formal_search_query(receipt_context, query)
+            binding = bind_formal_search_query(receipt_context, query, **(
+                {"parent_query_id": parent_query_id} if parent_query_id else {}
+            ))
         rendered, provider_payload = _provider_or_legacy_web_search(
             query=query,
             max_results=limit,
@@ -246,7 +249,7 @@ def _run_searches(
                         if pending is not future:
                             pending.cancel()
                     raise RuntimeError(
-                        f"formal source search receipt failed for query: {query}"
+                        f"formal source search receipt failed for query: {query}: {exc}"
                     ) from exc
                 rows[index] = (query, f"[错误] 查询失败但批量任务继续: {type(exc).__name__}: {exc}")
     return [row for row in rows if row is not None]
@@ -258,6 +261,7 @@ def batch_web_search(
     allowed_domains: str = "",
     blocked_domains: str = "",
     max_workers: int = _MAX_WORKERS,
+    parent_query_id: str = "",
 ) -> str:
     """Run several public web searches concurrently and keep failures isolated."""
     parsed_queries = _parse_items(queries)
@@ -283,11 +287,12 @@ def batch_web_search(
         max_workers=max_workers,
         receipt_context=receipt_context,
         tool_call_id=tool_call_id,
+        parent_query_id=parent_query_id,
     )
     return _render_batch_result("批量公开搜索", rows)
 
 
-def paper_search(topic: str, max_results: int = 8, year_hint: str | int = "", include_domains: str = "") -> str:
+def paper_search(topic: str, max_results: int = 8, year_hint: str | int = "", include_domains: str = "", parent_query_id: str = "") -> str:
     """Search public paper pages without paid scholarly APIs."""
     topic_text = str(topic or "").strip()
     if not topic_text:
@@ -298,6 +303,14 @@ def paper_search(topic: str, max_results: int = 8, year_hint: str | int = "", in
     domains = _merge_domains(_PAPER_DOMAINS, include_domains)
     year = f" {year_text}" if year_text else ""
     provider_query = f"{topic_text}{year}".strip()
+    receipt_context = search_execution.resolve_bound_source_search_context(
+        agent_directory_service.current_agent_runtime()
+    )
+    binding = None
+    if receipt_context is not None:
+        binding = search_execution.bind_formal_search_query(
+            receipt_context, provider_query, parent_query_id=parent_query_id,
+        )
     provider_payload = research_search_backends.collect_provider_results(
         provider_query,
         [
@@ -308,6 +321,15 @@ def paper_search(topic: str, max_results: int = 8, year_hint: str | int = "", in
         ],
         max_results=max_results,
     )
+    if receipt_context is not None and binding is not None:
+        call_id = "paper-call-" + hashlib.sha256(json.dumps([
+            receipt_context["sessionId"], receipt_context["turnId"], provider_query,
+        ], ensure_ascii=False).encode("utf-8")).hexdigest()[:24]
+        search_execution.append_bound_tool_search_receipts(
+            receipt_context, binding=binding, provider_payload=provider_payload,
+            tool_call_id=call_id, tool_name="paper_search_tool",
+        )
+        return _render_provider_payload("论文公开搜索", provider_payload)
     if provider_payload.get("results"):
         return _render_provider_payload("论文公开搜索", provider_payload)
     query = f'{topic_text} paper OR preprint OR benchmark OR survey{year}{_domain_query(domains)}'

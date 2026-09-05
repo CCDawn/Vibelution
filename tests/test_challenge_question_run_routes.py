@@ -127,3 +127,15 @@ def test_get_challenge_submission_readiness_returns_single_typed_artifact_list(m
     assert response.json()["artifacts"][0]["primaryAction"]["questionId"] == "SCI-042"
     assert response.json()["blockers"][0]["code"] == "full_catalog_results_incomplete"
     assert "unexpected" not in response.json()
+
+
+def test_question_run_status_exposes_registration_without_requiring_validation(monkeypatch):
+    monkeypatch.setattr(team_workflows_experiment, "get_challenge_question_run_status", lambda team_id: {
+        "teamId": team_id,
+        "summary": {"registeredQuestionIds": ["SCI-004"], "validatedQuestionIds": []},
+    })
+    response = _client().get(
+        "/api/teams/research-team/workflow-orchestration/challenge-program/question-runs/status"
+    )
+    assert response.status_code == 200
+    assert response.json()["summary"]["registeredQuestionIds"] == ["SCI-004"]

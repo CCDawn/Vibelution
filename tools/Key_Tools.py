@@ -612,6 +612,7 @@ def _build_key_tools() -> List[BaseTool]:
         allowed_domains: str = "",
         blocked_domains: str = "",
         max_workers: int = 4,
+        parent_query_id: str = "",
     ) -> str:
         """
         【批量公开搜索】并发执行多个网络搜索，单个查询失败不影响其他查询。
@@ -628,6 +629,7 @@ def _build_key_tools() -> List[BaseTool]:
             allowed_domains: 可选域名白名单，逗号或换行分隔
             blocked_domains: 可选域名黑名单，逗号或换行分隔
             max_workers: 并发 worker 数，上限 4
+            parent_query_id: 正式资料搜集补充检索时必填，取自当前任务 assignedQueries 的 queryId；查询必须服务于该原查询的研究问题与视角。服务器先登记再检索并保存真实回执。
 
         Returns:
             按查询分组的搜索结果和来源链接；低质量结果会明确标记 `[搜索质量不足]`
@@ -638,10 +640,11 @@ def _build_key_tools() -> List[BaseTool]:
             allowed_domains=allowed_domains,
             blocked_domains=blocked_domains,
             max_workers=max_workers,
+            parent_query_id=parent_query_id,
         )
 
     @tool
-    def paper_search_tool(topic: str, max_results: int = 8, year_hint: str | int = "", include_domains: str = "") -> str:
+    def paper_search_tool(topic: str, max_results: int = 8, year_hint: str | int = "", include_domains: str = "", parent_query_id: str = "") -> str:
         """
         【论文公开搜索】搜索论文、预印本、会议页、综述和 benchmark 线索。
 
@@ -654,6 +657,7 @@ def _build_key_tools() -> List[BaseTool]:
             max_results: 最多返回结果数，默认 8
             year_hint: 可选年份或时间范围提示
             include_domains: 可选补充论文域名，逗号或换行分隔
+            parent_query_id: 正式资料搜集补充检索时必填，使用当前任务 assignedQueries 的 queryId，沿用其研究问题和视角；返回结果已保存真实检索回执，网页抓取本身不能替代搜索回执。
 
         Returns:
             论文候选来源链接、摘要片段和域名过滤信息
@@ -663,6 +667,7 @@ def _build_key_tools() -> List[BaseTool]:
             max_results=max_results,
             year_hint=year_hint,
             include_domains=include_domains,
+            parent_query_id=parent_query_id,
         )
 
     @tool
