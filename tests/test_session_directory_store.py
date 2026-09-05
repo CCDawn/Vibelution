@@ -11,7 +11,7 @@ from core.chat.turn_journal import turn_journal_path
 from core.infrastructure import developer_sandbox
 from core.ui.chat_state import chat_state_path, load_chat_state, save_chat_state
 from core.web.services import agent_directory_service, session_service
-from core.web.services.session import directory_runtime
+from core.web.services.session import directory_bridge, directory_runtime
 
 
 @pytest.fixture
@@ -176,6 +176,50 @@ def test_create_and_query_read_store_without_scanning_journals(
     assert session_id in ids
     listed = session_service.list_sessions()
     assert session_id in {str(item.get("id") or "") for item in listed}
+
+
+def test_directory_query_batches_runtime_phase_snapshot(
+    isolated_directory_runtime: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    project_root = isolated_directory_runtime
+    _write_agents_registry(agent_directory_service.registry_path())
+    directory_runtime.initialize_session_directory_runtime(project_root=project_root)
+    store = directory_runtime.get_open_directory_store()
+    assert store is not None
+    agent = store.repository.get_agent("agent-alpha")
+    assert agent is not None
+    revision_id = str(agent["currentConfigRevisionId"])
+    for index in range(3):
+        store.repository.create_session(
+            session_id=f"session-{index}",
+            agent_id="agent-alpha",
+            agent_config_revision_id=revision_id,
+            title=f"Session {index}",
+        ).result(timeout=5)
+
+    snapshot_calls: list[bool] = []
+    monkeypatch.setattr(
+        session_service,
+        "list_active_session_work_runs",
+        lambda *, reconcile=True: snapshot_calls.append(reconcile)
+        or [{"sessionId": "session-1", "status": "running"}],
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_active_chat_turn_work_run_for_session",
+        lambda *_args, **_kwargs: pytest.fail(
+            "directory projection must not scan persisted work runs per row"
+        ),
+    )
+
+    payload = directory_bridge.query_session_summaries(limit=10)
+
+    assert payload is not None
+    assert snapshot_calls == [True]
+    by_id = {str(item.get("id") or ""): item for item in payload.get("items") or []}
+    assert by_id["session-1"]["status"] == "running"
+    assert by_id["session-0"]["status"] == "ready"
 
 
 def _session_ids(include_hidden: bool = False) -> set[str]:

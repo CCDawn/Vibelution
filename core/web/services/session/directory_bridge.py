@@ -87,6 +87,7 @@ def query_session_summaries(
     include_hidden = bool(normalized_agent_id)
     before = parse_directory_cursor(cursor)
     started_at_head = before is None
+    runtime_statuses = _session_runtime_status_snapshot()
     _, experiment_bindings = _chat_state_directory_overlay()
     if normalized_sort != "updatedAt_desc":
         page = store.repository.list_directory_page(
@@ -103,6 +104,7 @@ def query_session_summaries(
                 row,
                 agent_by_id=agent_by_id,
                 experiment_binding=experiment_bindings.get(str(row.get("sessionId") or "").strip()),
+                runtime_statuses=runtime_statuses,
             )
             for row in page["rows"]
         ]
@@ -117,6 +119,7 @@ def query_session_summaries(
             agent_id=normalized_agent_id,
             query=normalized_query,
             matching_agent_ids=matching_agent_ids,
+            runtime_statuses=runtime_statuses,
         )
         summaries.sort(
             key=s._session_query_sort_key(normalized_sort),
@@ -156,6 +159,7 @@ def query_session_summaries(
                 row,
                 agent_by_id=agent_by_id,
                 experiment_binding=experiment_bindings.get(str(row.get("sessionId") or "").strip()),
+                runtime_statuses=runtime_statuses,
             )
             if not include_hidden and not s._session_agent_visible_in_indexes(summary):
                 continue
@@ -181,6 +185,7 @@ def query_session_summaries(
             agent_id=normalized_agent_id,
             query=normalized_query,
             matching_agent_ids=matching_agent_ids,
+            runtime_statuses=runtime_statuses,
         )
     return {
         "items": items,
@@ -216,11 +221,13 @@ def list_session_summaries(*, include_hidden: bool = False) -> list[dict[str, An
         if before is None:
             break
     _, experiment_bindings = _chat_state_directory_overlay()
+    runtime_statuses = _session_runtime_status_snapshot()
     summaries = [
         _summary_from_directory_row(
             row,
             agent_by_id=agent_by_id,
             experiment_binding=experiment_bindings.get(str(row.get("sessionId") or "").strip()),
+            runtime_statuses=runtime_statuses,
         )
         for row in rows
     ]
@@ -232,6 +239,7 @@ def list_session_summaries(*, include_hidden: bool = False) -> list[dict[str, An
         summaries,
         agent_by_id=agent_by_id,
         include_hidden=include_hidden,
+        runtime_statuses=runtime_statuses,
     )
     summaries.sort(
         key=lambda item: (
@@ -266,8 +274,13 @@ def list_child_session_summaries(session_id: str) -> dict[str, Any] | None:
 
     agent_by_id = _service()._agent_lookup_for_conversations()
     rows = store.repository.list_child_sessions(root_session_id)
+    runtime_statuses = _session_runtime_status_snapshot()
     items = [
-        _summary_from_directory_row(row, agent_by_id=agent_by_id)
+        _summary_from_directory_row(
+            row,
+            agent_by_id=agent_by_id,
+            runtime_statuses=runtime_statuses,
+        )
         for row in rows
     ]
     items.sort(key=lambda item: str(item.get("updatedAt") or ""), reverse=True)
@@ -532,6 +545,24 @@ def _chat_state_directory_overlay() -> tuple[str, dict[str, dict[str, Any]]]:
     return str(active_id or "").strip(), bindings
 
 
+def _session_runtime_status_snapshot() -> dict[str, str] | None:
+    """Read and reconcile active chat-turn state once per directory request."""
+    s = _service()
+    try:
+        active_items = s.list_active_session_work_runs(reconcile=True)
+    except Exception:
+        return None
+    statuses: dict[str, str] = {}
+    for item in active_items:
+        if not isinstance(item, Mapping):
+            continue
+        session_id = str(item.get("sessionId") or "").strip()
+        status = str(item.get("status") or item.get("currentPhase") or "").strip().lower()
+        if session_id and status in {"queued", "running", "stopping", "paused"}:
+            statuses[session_id] = status
+    return statuses
+
+
 def _merge_agent_directory_stub_summaries(
     summaries: list[dict[str, Any]],
     *,
@@ -540,6 +571,7 @@ def _merge_agent_directory_stub_summaries(
     agent_id: str = "",
     query: str = "",
     matching_agent_ids: tuple[str, ...] = (),
+    runtime_statuses: Mapping[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     """Surface Agent direct bindings that exist in agents.json but not yet in Store."""
 
@@ -597,6 +629,7 @@ def _merge_agent_directory_stub_summaries(
                     "childSessionIds": [],
                 },
                 agent_by_id=agent_by_id,
+                runtime_statuses=runtime_statuses,
             )
         )
         existing.add(session_id)
@@ -654,6 +687,7 @@ def _summary_from_directory_row(
     *,
     agent_by_id: Mapping[str, Mapping[str, Any]],
     experiment_binding: Mapping[str, Any] | None = None,
+    runtime_statuses: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     s = _service()
     session_id = str(row.get("sessionId") or "").strip()
@@ -669,7 +703,12 @@ def _summary_from_directory_row(
         "status": stored_status,
         "_hasLedgerMessages": bool(str(row.get("lastPreview") or "").strip()),
     }
-    status = s._conversation_phase(session_id, phase_source)
+    status = s._conversation_phase(
+        session_id,
+        phase_source,
+        active_work_run_status=(runtime_statuses or {}).get(session_id, ""),
+        persistent_work_runs_reconciled=runtime_statuses is not None,
+    )
     updated_at = _iso_from_ms(row.get("recencyAtMs") or row.get("updatedAtMs"))
     preview = str(row.get("lastPreview") or "").strip()
     raw_title = str(row.get("title") or "").strip()
