@@ -133,7 +133,9 @@ def resolve_bound_source_search_context(runtime: dict[str, Any] | None) -> dict[
     }
 
 
-def bind_formal_search_query(context: dict[str, Any], query_text: str) -> dict[str, Any]:
+def bind_formal_search_query(
+    context: dict[str, Any], query_text: str, *, parent_query_id: str = "",
+) -> dict[str, Any]:
     """Bind an Agent-supplied query string to one canonical assigned query."""
 
     s = _service()
@@ -146,9 +148,12 @@ def bind_formal_search_query(context: dict[str, Any], query_text: str) -> dict[s
             candidate = " ".join(str(query.get("query") or "").split()).casefold()
             if candidate and candidate == normalized:
                 matches.append((assignment, query))
+    if not matches and parent_query_id:
+        return _register_supplemental_search_query(context, query_text, parent_query_id)
     if len(matches) != 1:
         raise RuntimeError(
-            "formal source search query must match exactly one server-assigned query"
+            "formal source search query must match exactly one server-assigned query; "
+            "for a scoped supplemental query, pass parent_query_id from context assignedQueries"
         )
     assignment, query = matches[0]
     if not s._trim_text(query.get("queryId"), max_length=160) or not s._trim_text(
@@ -158,12 +163,52 @@ def bind_formal_search_query(context: dict[str, Any], query_text: str) -> dict[s
     return {"assignment": dict(assignment), "query": dict(query)}
 
 
+def _register_supplemental_search_query(
+    context: dict[str, Any], query_text: str, parent_query_id: str,
+) -> dict[str, Any]:
+    """Register an Agent query under its task-owned base query before provider I/O."""
+    s = _service()
+    text = " ".join(str(query_text or "").split())
+    if not text or len(text) > 1000:
+        raise RuntimeError("supplemental source query must contain 1..1000 characters")
+    parents = [
+        (assignment, query)
+        for assignment in context.get("assignments", [])
+        for query in _source_collection_assigned_queries(assignment)
+        if str(query.get("queryId") or "") == parent_query_id
+    ]
+    if len(parents) != 1:
+        raise RuntimeError("supplemental source query parent must belong to this task assignment")
+    assignment, parent = parents[0]
+    if not parent.get("perspective"):
+        raise RuntimeError("supplemental source query parent has no perspective")
+    digest = hashlib.sha256(json.dumps([
+        context["sourceCollectionRunId"], assignment["assignmentId"], parent_query_id, text.casefold(),
+    ], ensure_ascii=False).encode("utf-8")).hexdigest()[:24]
+    query = {**parent, "queryId": f"supplemental-{digest}", "query": text, "parentQueryId": parent_query_id}
+    event = _source_collection_execution_event(
+        "search.query_registered", assignment=assignment, query=query,
+        status="registered", title="Supplemental source query", summary="Registered under task-owned research scope",
+    )
+    event.update({"parentQueryId": parent_query_id, "taskId": context["taskId"],
+        "sessionId": context["sessionId"], "turnId": context["turnId"]})
+    path = s._source_collection_storage_artifact_paths(context["teamId"], context["sourceCollectionRunId"])["searchEventsPath"]
+    with s._WORKFLOW_LOCK:
+        exists = any(item.get("eventType") == "search.query_registered" and item.get("queryId") == query["queryId"]
+            for item in s._read_jsonl(path) if isinstance(item, dict))
+        if not exists:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            s._append_jsonl(path, [event])
+    return {"assignment": dict(assignment), "query": query}
+
+
 def append_bound_tool_search_receipts(
     context: dict[str, Any],
     *,
     binding: dict[str, Any],
     provider_payload: dict[str, Any],
     tool_call_id: str,
+    tool_name: str = "batch_web_search_tool",
 ) -> list[str]:
     """Persist idempotent provider-bound events before results reach the Agent."""
 
@@ -213,6 +258,9 @@ def append_bound_tool_search_receipts(
                     str(query.get("queryId") or ""),
                     provider,
                     str(tool_call_id or ""),
+                    tool_name,
+                    status,
+                    json.dumps(refs, ensure_ascii=False),
                 ]
             ).encode("utf-8", errors="replace")
         ).hexdigest()
@@ -224,7 +272,7 @@ def append_bound_tool_search_receipts(
             title=f"Tool search {provider}: {query.get('query') or ''}",
             summary=(
                 f"Provider returned {len(provider_results)} accepted structured result(s) "
-                "through batch_web_search_tool."
+                f"through {tool_name}."
             ),
             refs=refs,
             raw_location=refs[0] if refs else "",
@@ -233,8 +281,10 @@ def append_bound_tool_search_receipts(
         )
         event.update(
             {
+                "refs": list(dict.fromkeys(refs)),
+                "parentQueryId": str(query.get("parentQueryId") or ""),
                 "receiptKey": receipt_key,
-                "toolName": "batch_web_search_tool",
+                "toolName": tool_name,
                 "toolCallId": s._trim_text(tool_call_id, max_length=160),
                 "sessionId": s._trim_text(context.get("sessionId"), max_length=160),
                 "turnId": s._trim_text(context.get("turnId"), max_length=160),
