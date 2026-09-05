@@ -47,7 +47,10 @@ def list_project_agent_bus_events(*, limit: int = 80) -> dict[str, Any]:
         capped_limit = 80
     return {
         "events": events[-capped_limit:],
-        "activeAgentCount": len(_active_agents()),
+        "activeAgentCount": len([
+            agent for agent in agent_directory_service.list_agents(include_archived=False, detail="summary")
+            if str(agent.get("status") or "active").strip().lower() != "archived"
+        ]),
         "updatedAt": utc_now_iso(),
     }
 

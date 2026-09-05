@@ -84,9 +84,7 @@ import {
   systemManagedTeamArchiveReason,
 } from "./teamKindModel";
 import { fetchChatRoomDetail } from "../../api/chat";
-import {
-  projectAgentBusEventsForTeam,
-} from "../../api/projectAgentBus";
+import { useTeamCommunicationEvents } from "./useTeamCommunicationEvents";
 import { queryKeys } from "../../api/queryKeys";
 import {
   ChatRoomDetail,
@@ -171,7 +169,6 @@ export function useTeamsWorkbenchFoundation({
   const {
     teamsQuery,
     agentSummaryQuery,
-    projectBusQuery,
     activeAgents,
     activeAgentsById,
     teams,
@@ -489,9 +486,9 @@ export function useTeamsWorkbenchFoundation({
     }),
     [activeAgentsById, canvas, knowledgeExpansionWorkflowTeamSelected, selectedTeam]
   );
-  const teamBusEvents = useMemo(
-    () => projectAgentBusEventsForTeam(projectBusQuery.data, selectedTeam?.teamId),
-    [projectBusQuery.data, selectedTeam?.teamId]
+  const { projectBusQuery, teamBusEvents } = useTeamCommunicationEvents(
+    selectedTeam?.teamId ?? "",
+    !researchWorkflowTeamSelected || researchWorkspaceView === "discussion",
   );
 
   // Shell team pick / canvas frame / node-draft sync live in useTeamsShellCanvasWorkspace + useTeamsCanvasProjection.
