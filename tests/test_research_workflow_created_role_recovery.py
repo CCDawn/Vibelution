@@ -12,9 +12,6 @@ from core.research.workflow.challenge_cup_runtime import ChallengeCupGraphCoordi
 from core.web.services.team_workflow.research_runtime.graph_dispatch_worker import (
     GraphDispatchWorker,
 )
-from core.web.services.team_workflow.research_runtime.team_role_source import (
-    heal_agent_binding_from_sibling_freeze,
-)
 from tests._support.workflow_ledger_helpers import (
     FIXED_NOW_MS,
     build_attempt_record,
@@ -339,31 +336,3 @@ def test_created_repair_rejects_conflicting_failed_event_replay(
         assert len(store.list_events(run.run_id)) == 2
     finally:
         store.close()
-
-
-def test_sibling_healing_is_role_scoped_and_unbound_is_explicit() -> None:
-    same_role = {
-        "agentBindingSnapshot": [
-            {
-                "nodeId": "protocol_design",
-                "agentId": "agent-planner",
-                "roleKey": "EXPERIMENT_PLANNER",
-            }
-        ]
-    }
-    healed = heal_agent_binding_from_sibling_freeze(same_role, "hypothesis_design")
-    assert healed is not None
-    assert healed["agentId"] == "agent-planner"
-    assert healed["roleKey"] == "experiment_planner"
-
-    cross_role = {
-        "agentBindingSnapshot": [
-            {
-                "nodeId": "source_finding",
-                "agentId": "agent-search",
-                "roleKey": "source_finder",
-            }
-        ]
-    }
-    assert heal_agent_binding_from_sibling_freeze(cross_role, "hypothesis_design") is None
-    assert heal_agent_binding_from_sibling_freeze({}, "hypothesis_design") is None

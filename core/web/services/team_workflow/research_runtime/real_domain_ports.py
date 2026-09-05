@@ -364,27 +364,12 @@ class RealDomainPorts:
                 continue
             agent_id = str(binding.get("agentId") or "").strip()
             if not agent_id:
-                healed = _heal_binding_resolution(snapshot, action.node_id)
-                if healed.agent_id:
-                    return replace(
-                        healed,
-                        session_scope=_binding_session_scope(
-                            snapshot, action, healed.agent_id
-                        ),
-                    )
+                return BindingResolution(agent_id="", role_key=str(binding.get("roleKey") or ""))
             return BindingResolution(
                 agent_id=agent_id,
                 role_key=str(binding.get("roleKey") or ""),
                 binding_snapshot_id=str(binding.get("snapshotId") or "") or None,
                 session_scope=_binding_session_scope(snapshot, action, agent_id),
-            )
-        healed = _heal_binding_resolution(snapshot, action.node_id)
-        if healed.agent_id:
-            return replace(
-                healed,
-                session_scope=_binding_session_scope(
-                    snapshot, action, healed.agent_id
-                ),
             )
         return BindingResolution(agent_id="", role_key="")
 
@@ -3113,28 +3098,6 @@ def _ledger_controlled_run(
         "planId": plan_id,
         "observationRef": result_ref,
     }
-
-
-def _heal_binding_resolution(
-    snapshot: dict[str, Any],
-    node_id: str,
-) -> BindingResolution:
-    from .team_role_source import (
-        heal_agent_binding_for_node,
-        heal_agent_binding_from_sibling_freeze,
-    )
-
-    team_id = str(snapshot.get("teamId") or "").strip()
-    healed = heal_agent_binding_for_node(team_id, node_id) if team_id else None
-    if not healed:
-        healed = heal_agent_binding_from_sibling_freeze(snapshot, node_id)
-    if not healed:
-        return BindingResolution(agent_id="", role_key="")
-    return BindingResolution(
-        agent_id=str(healed.get("agentId") or ""),
-        role_key=str(healed.get("roleKey") or ""),
-        binding_snapshot_id=str(healed.get("snapshotId") or "") or None,
-    )
 
 
 def _bounded_controlled_run_execution(

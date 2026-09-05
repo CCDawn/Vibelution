@@ -8,7 +8,7 @@ RunAgentBindingSnapshot, so history never re-reads live team config.
 Rules enforced here:
 - no random fallback to arbitrary agents (a missing role is simply unbound);
 - Team ``members`` is the only role-binding source; canvas is a projection;
-- only product-Agent owners may enter binding layers or healing;
+- only product-Agent owners may enter binding layers;
 - canonical product roles project onto legacy lookup aliases, while a
   legacy-only Team keeps exact aliases independent;
 - ambiguous bindings fail closed instead of selecting the first Agent;
@@ -186,98 +186,6 @@ def _resolve_member_role_bindings(members: Any) -> dict[str, str]:
             if legacy_agent and not legacy_ambiguous:
                 bindings[legacy_key] = legacy_agent
     return bindings
-
-
-def heal_agent_binding_for_node(
-    team_id: str,
-    node_id: str,
-) -> dict[str, str] | None:
-    """Fill an empty frozen snapshot slot from the team's current role map.
-
-    Team membership may become available after an incomplete snapshot was
-    created. History stays authoritative when the freeze already named an
-    agentId.
-    """
-    from core.research.workflow.definition import node_by_id
-    from core.research.workflow.models import ActorKind
-
-    node = node_by_id().get(str(node_id or "").strip())
-    if (
-        node is None
-        or node.actorKind != ActorKind.AGENT
-        or not _product_owner_id(node.primaryRoleKey)
-    ):
-        return None
-    roles = resolve_team_role_bindings(team_id)
-    if not roles:
-        return None
-    primary = normalize_role_key(node.primaryRoleKey)
-    agent_id = _agent_id_for_product_role(roles, primary)
-    if not agent_id:
-        return None
-    return {
-        "nodeId": node.nodeId,
-        "agentId": agent_id,
-        "roleKey": node.primaryRoleKey,
-        "resolvedFrom": "team_role_heal",
-        "snapshotId": f"heal:{team_id}:{node.nodeId}",
-    }
-
-
-def heal_agent_binding_from_sibling_freeze(
-    snapshot: Mapping[str, Any] | None,
-    node_id: str,
-) -> dict[str, str] | None:
-    """Reuse another frozen node binding on the same run when this slot is empty.
-
-    Compact restores often freeze earlier Agent nodes only. This stays inside
-    the run snapshot; it is not a live-directory random pick.
-    """
-    from core.research.workflow.definition import node_by_id
-    from core.research.workflow.models import ActorKind
-
-    nodes = node_by_id()
-    node = nodes.get(str(node_id or "").strip())
-    if node is None or node.actorKind != ActorKind.AGENT:
-        return None
-    preferred = normalize_role_key(node.primaryRoleKey)
-    preferred_owner = _product_owner_id(preferred)
-    if not preferred_owner or not isinstance(snapshot, Mapping):
-        return None
-    exact_candidates: list[dict[str, str]] = []
-    owner_candidates: list[dict[str, str]] = []
-    for binding in snapshot.get("agentBindingSnapshot") or []:
-        if not isinstance(binding, Mapping):
-            continue
-        agent_id = str(binding.get("agentId") or "").strip()
-        sibling_node_id = str(binding.get("nodeId") or "").strip()
-        if not agent_id or not sibling_node_id or sibling_node_id == node.nodeId:
-            continue
-        sibling_node = nodes.get(sibling_node_id)
-        if sibling_node is None or sibling_node.actorKind != ActorKind.AGENT:
-            continue
-        sibling_owner = _product_owner_id(sibling_node.primaryRoleKey)
-        observed_role = normalize_role_key(str(binding.get("roleKey") or ""))
-        observed_owner = _product_owner_id(observed_role)
-        if (
-            not sibling_owner
-            or sibling_owner != preferred_owner
-            or observed_owner != sibling_owner
-        ):
-            continue
-        item = {
-            "nodeId": node.nodeId,
-            "agentId": agent_id,
-            "roleKey": node.primaryRoleKey,
-            "resolvedFrom": "sibling_freeze",
-            "snapshotId": f"heal-sibling:{node.nodeId}",
-        }
-        if observed_role == preferred:
-            exact_candidates.append(item)
-        else:
-            owner_candidates.append(item)
-    selected = exact_candidates if exact_candidates else owner_candidates
-    return selected[0] if len(selected) == 1 else None
 
 
 def effective_binding_layers(

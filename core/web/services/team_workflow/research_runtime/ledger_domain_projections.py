@@ -140,6 +140,7 @@ def snapshot_projection_record(snapshot: ResearchWorkflowSnapshot) -> dict[str, 
         "handoffs": [item.to_dict() for item in snapshot.handoff_summary.refs],
         "nodeRuns": [],
         "artifactManifests": [],
+        "artifactSummary": dict(snapshot.artifact_summary),
         "budgetLedgers": budget_ledgers,
         "budgetReservations": budget_reservations,
         "hypothesisPortfolios": [],
@@ -207,7 +208,7 @@ def project_research_ledger_from_snapshot(snapshot: ResearchWorkflowSnapshot) ->
         experiment_planning=experiment_planning,
     )
     try:
-        payload["graph"] = project_evidence_graph(record, claim_evidence=claim_evidence)
+        payload["graph"] = project_evidence_graph(record)
     except NodeCommandUnavailable:
         payload["graph"] = {"nodes": [], "edges": []}
     return payload

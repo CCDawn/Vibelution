@@ -459,10 +459,7 @@ class RealDomainReadinessContext:
             if str(binding.get("nodeId") or "") == node_id:
                 frozen = dict(binding)
                 break
-        if frozen and str(frozen.get("agentId") or "").strip():
-            return frozen
-        healed = _heal_binding(snapshot, node_id)
-        return healed or frozen
+        return frozen
 
     def agent_resolvable(self, agent_id: str) -> bool:
         override = self._query("agent_resolvable", agent_id)
@@ -523,24 +520,6 @@ class RealDomainReadinessContext:
             )
             for row in rows
         ]
-
-
-def _heal_binding(snapshot: Mapping[str, Any], node_id: str) -> dict[str, Any] | None:
-    from .team_role_source import (
-        heal_agent_binding_for_node,
-        heal_agent_binding_from_sibling_freeze,
-    )
-
-    team_id = str(snapshot.get("teamId") or "").strip()
-    node_key = str(node_id or "").strip()
-    if not node_key:
-        return None
-    if team_id:
-        healed = heal_agent_binding_for_node(team_id, node_key)
-        if healed:
-            return dict(healed)
-    sibling = heal_agent_binding_from_sibling_freeze(snapshot, node_key)
-    return dict(sibling) if sibling else None
 
 
 def _artifact_payload(
