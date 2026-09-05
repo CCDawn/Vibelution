@@ -902,6 +902,7 @@ class GraphDispatchWorker:
                     now_ms,
                     finished_at_ms=now_ms,
                 )
+                self._record_human_success(uow, dispatch, now_ms)
             handoff = uow.repository.get_handoff_by_from_node(
                 dispatch.run_id, dispatch.node_run_id
             )
@@ -1685,12 +1686,15 @@ class GraphDispatchWorker:
                 and dispatch.receipt.outcome == "succeeded"
             ):
                 # resume 成功：当前 attempt 完成，人工门 Handoff accepted。
+                previous_attempt = uow.repository.get_attempt(dispatch.node_run_id)
                 uow.repository.update_attempt_status(
                     dispatch.node_run_id,
                     NodeAttemptStatus.SUCCEEDED.value,
                     now_ms,
                     finished_at_ms=now_ms,
                 )
+                if previous_attempt is not None and previous_attempt.status != NodeAttemptStatus.SUCCEEDED.value:
+                    self._record_human_success(uow, dispatch, now_ms)
                 handoff = uow.repository.get_handoff_by_from_node(
                     dispatch.run_id, dispatch.node_run_id
                 )
@@ -1881,6 +1885,34 @@ class GraphDispatchWorker:
                     )
 
         self._submit(mutate, force_flush=True).result(timeout=30)
+
+    def _record_human_success(self, uow: Any, dispatch: GraphDispatch, now_ms: int) -> None:
+        """Record a real human-resume success in its owning transaction."""
+        if dispatch.dispatch_kind != "resume_human":
+            return
+        from .scientific_semantic_ledger import (
+            CHALLENGE_CUP_WORKFLOW_ID,
+            append_scientific_semantic_record_in_uow,
+        )
+
+        run = uow.repository.get_run(dispatch.run_id)
+        if run is None or run.workflow_id != CHALLENGE_CUP_WORKFLOW_ID:
+            return
+        from core.research.workflow.contracts.challenge_cup_stage_one_v3 import (
+            ActivityExecution,
+            ScientificSemanticRecord,
+        )
+
+        append_scientific_semantic_record_in_uow(
+            uow,
+            run_id=dispatch.run_id,
+            record_ref=f"execution:{dispatch.receipt.action_id}:succeeded",
+            subject_ref=dispatch.node_run_id,
+            semantic=ScientificSemanticRecord(execution=ActivityExecution(status="succeeded")),
+            actor_type="software_agent",
+            actor_ref=self._owner,
+            recorded_at_ms=now_ms,
+        )
 
     def _repair_dispatching_without_adapter(self) -> int:
         """Re-insert adapter_dispatch after a swallowed graph/adapter commit gap."""
