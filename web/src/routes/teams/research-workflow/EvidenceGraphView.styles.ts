@@ -1,4 +1,5 @@
 export default {
+  note: "text-sm leading-relaxed text-[var(--fg-secondary)]",
   header: "flex items-center justify-between gap-2",
   eyebrow: "text-xs font-medium text-[var(--fg-tertiary)]",
   empty: "h-auto w-full border-0 bg-transparent",

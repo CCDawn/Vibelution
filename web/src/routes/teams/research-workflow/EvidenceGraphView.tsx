@@ -78,7 +78,7 @@ export function EvidenceGraphContent({ graph, lang = "zh" }: { graph: EvidenceGr
             : `Evidence graph · ${nodes.length} nodes / ${edges.length} edges`}
         </div>
       </div>
-      {nodes.length > 0 ? <p className="text-sm leading-relaxed text-[var(--fg-secondary)]">{isZh ? "关系来自本次运行的证据记录，不等同于结论已被验证。" : "Relationships are recorded for this run; they do not imply verified conclusions."}</p> : null}
+      {nodes.length > 0 ? <p className={styles.note}>{isZh ? "关系来自本次运行的证据记录，不等同于结论已被验证。" : "Relationships are recorded for this run; they do not imply verified conclusions."}</p> : null}
       {nodes.length === 0 ? (
         <VEmptyState title={isZh ? "暂无图数据" : "No graph data"} className={styles.empty}>
           {isZh
