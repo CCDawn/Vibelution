@@ -23,6 +23,7 @@ export type ChatCenterTabStripProps = {
   sessionTabs: ReactNode;
   fileTabs: ReactNode;
   companionHeader?: ReactNode;
+  conversationIndexControl?: ReactNode;
   leftOverlayVisible: boolean;
   rightOverlayVisible: boolean;
   conversationIndexOverlayOpen: boolean;
@@ -46,6 +47,7 @@ export function ChatCenterTabStrip({
   sessionTabs,
   fileTabs,
   companionHeader,
+  conversationIndexControl,
   leftOverlayVisible,
   rightOverlayVisible,
   conversationIndexOverlayOpen,
@@ -56,6 +58,7 @@ export function ChatCenterTabStrip({
 }: ChatCenterTabStripProps) {
   return (
     <div className={styles.tabStrip}>
+      {conversationIndexControl}
       {chatReturnTarget ? (
         <Link
           className={styles.chatReturnLink}

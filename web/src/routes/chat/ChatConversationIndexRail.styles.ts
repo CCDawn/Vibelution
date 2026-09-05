@@ -45,13 +45,11 @@ const styles: Record<string, string> = {
   agentOptionMeta:
     `vui-routes-chatcodingroute agentOptionMeta min-w-0 flex flex-wrap items-center gap-1.5 ${vuiStateCoolInfoClass}`,
   conversationIndexLayout:
-    "vui-routes-chatcodingroute conversationIndexLayout grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-2",
+    "vui-routes-chatcodingroute conversationIndexLayout grid h-full min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-2",
   conversationIndexPanelBody:
     "vui-routes-chatcodingroute conversationIndexPanelBody !overflow-hidden",
   conversationIndexScrollRegion:
     "vui-routes-chatcodingroute conversationIndexScrollRegion min-h-0 overflow-y-auto pr-1 [scrollbar-gutter:stable]",
-  conversationTreeRootHeader:
-    "vui-routes-chatcodingroute conversationTreeRootHeader !grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-1.5 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-tertiary)] [&_strong]:font-semibold [&_strong]:tabular-nums",
   createGroupButton:
     `vui-routes-chatcodingroute createGroupButton min-w-0 ${vuiControlQuietClass}`,
   groupAgentOption:
@@ -73,7 +71,7 @@ const styles: Record<string, string> = {
   railActionButton:
     "vui-routes-chatcodingroute railActionButton !size-[30px] !h-[30px] !min-h-[30px] !w-[30px] !min-w-[30px] rounded-[var(--radius-control)] !border-0 !bg-transparent p-0 [color:var(--fg-secondary)] shadow-none hover:!bg-[var(--vui-control-muted-hover)] hover:[color:var(--fg-primary)] focus-visible:!bg-[var(--vui-control-muted-hover)]",
   railTop:
-    "vui-routes-chatcodingroute railTop flex min-h-[46px] min-w-0 flex-wrap items-center gap-1 px-3 pt-2",
+    "vui-routes-chatcodingroute railTop flex shrink-0 min-h-[46px] min-w-0 flex-wrap items-center gap-1 px-3 pt-2",
   railTitle:
     "vui-routes-chatcodingroute railTitle min-w-0 flex-1 [font-size:var(--vui-font-sm)] font-semibold [color:var(--fg-primary)]",
   directorySearch:
@@ -92,15 +90,15 @@ const styles: Record<string, string> = {
   sessionCurrentBadge:
     "vui-routes-chatcodingroute sessionCurrentBadge !inline-flex !h-[22px] !min-h-[22px] !w-fit max-w-full shrink-0 items-center justify-center gap-1 overflow-hidden border-[color-mix(in_srgb,var(--accent-cool)_36%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,transparent)] px-1.5 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--accent-cool)] [&_span]:leading-none",
   systemEntryButton:
-    "vui-routes-chatcodingroute systemEntryButton relative !grid !h-auto !min-h-[46px] !w-full grid-cols-[28px_minmax(0,1fr)] items-center justify-start gap-2 overflow-hidden rounded-[var(--radius-control)] border border-transparent bg-transparent px-1.5 py-1 text-left [color:var(--fg-secondary)] shadow-none transition-colors before:absolute before:inset-y-1.5 before:left-0 before:w-[2px] before:rounded-full before:bg-[var(--accent-cool)] before:opacity-0 hover:border-[color-mix(in_srgb,var(--accent-cool)_18%,transparent)] hover:!bg-[var(--vui-surface-card)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
+    "vui-routes-chatcodingroute systemEntryButton relative !grid !h-auto !min-h-[52px] !w-full grid-cols-[28px_minmax(0,1fr)] items-center justify-start gap-2 overflow-hidden rounded-[var(--radius-control)] border border-transparent bg-transparent px-1.5 py-1 text-left [color:var(--fg-secondary)] shadow-none transition-colors before:absolute before:inset-y-1.5 before:left-0 before:w-[2px] before:rounded-full before:bg-[var(--accent-cool)] before:opacity-0 hover:border-[color-mix(in_srgb,var(--accent-cool)_18%,transparent)] hover:!bg-[var(--vui-surface-card)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
   systemEntryButtonActive:
     "vui-routes-chatcodingroute systemEntryButtonActive border-[color-mix(in_srgb,var(--accent-cool)_22%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_7%,var(--vui-surface-card))] [color:var(--fg-primary)] before:absolute before:opacity-100",
   systemEntryCopy:
     "vui-routes-chatcodingroute systemEntryCopy grid min-w-0 gap-0.5 overflow-hidden text-left",
   systemEntryGroup:
-    "vui-routes-chatcodingroute systemEntryGroup grid min-w-0 gap-1 border-t border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] pt-2 shadow-none",
+    "vui-routes-chatcodingroute systemEntryGroup grid content-start min-w-0 gap-1 border-t border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] pt-2 shadow-none",
   systemEntryIcon:
-    "vui-routes-chatcodingroute systemEntryIcon grid size-7 shrink-0 place-items-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] [color:var(--fg-secondary)]",
+    "vui-routes-chatcodingroute systemEntryIcon grid size-7 shrink-0 place-items-center [color:var(--fg-secondary)]",
   systemEntryMeta:
     "vui-routes-chatcodingroute systemEntryMeta block min-w-0 truncate [font-size:10px] font-medium leading-tight [color:var(--fg-tertiary)]",
   systemEntryTitle:
