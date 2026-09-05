@@ -27,6 +27,15 @@ function question(overrides: Partial<ResearchWorkflowLaunchOption> = {}): Resear
 }
 
 describe("research question navigation", () => {
+  it("does not infer not-started from a terminal run without a current node", () => {
+    for (const status of ["succeeded", "failed", "cancelled"]) {
+      const options = buildExperimentSwitchOptions({ questions: [question({ checkpoint: {
+        ...question().checkpoint!, status, currentNodeId: "", currentNodeLabel: "", completedCount: 12, totalSteps: 12,
+      } })] });
+      expect(options[0].description).not.toContain("未开始");
+      expect(options[0].description).toContain("已完成 12/12 步");
+    }
+  });
   it("lists all catalog questions, including those without a formal run", () => {
     const options = buildExperimentSwitchOptions({ questions: Array.from({length: 125}, (_, i) => question({questionId: `SCI-${String(i + 1).padStart(3, "0")}`, checkpoint: i % 2 ? question().checkpoint : null})) });
     expect(options).toHaveLength(125);

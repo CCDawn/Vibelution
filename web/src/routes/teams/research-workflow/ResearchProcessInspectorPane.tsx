@@ -40,7 +40,7 @@ import {
   sideflowNodeStatesFromBadges,
 } from "./knowledgeSideflowCanvasRegion";
 import { NodeKnowledgeCollectionSection } from "./NodeKnowledgeCollectionSection";
-import { KnowledgeChildNodeInspector } from "./KnowledgeChildNodeInspector";
+import { KnowledgeChildNodeInspector, KnowledgeChildReadPanel } from "./KnowledgeChildNodeInspector";
 import {
   shouldHideSourceFindingStart,
   type HypothesisFirstNextAction,
@@ -300,9 +300,18 @@ export function ResearchProcessInspectorPane(props: {
       />
     );
   }
+  if ((scope.panel === "evidence" || scope.panel === "timeline") && isKnowledgeSideflowCanvasNode(scope.selectedNodeId)) {
+    const semanticId = knowledgeSideflowSemanticNodeId(scope.selectedNodeId);
+    const nodeState = sideflowNodeStatesFromBadges(state.invocationBadges)
+      .find((item) => item.sideflowNodeId === semanticId);
+    const childRunId = nodeState?.latest?.knowledgeChildRunId;
+    return childRunId && semanticId
+      ? <KnowledgeChildReadPanel key={`${childRunId}:${scope.panel}`} teamId={scope.teamId} runId={childRunId} nodeId={semanticId} panel={scope.panel} />
+      : <ResearchCenteredEmptyState title={isZh ? "此知识子流程尚无运行记录" : "No run records for this knowledge subflow"} />;
+  }
   if (scope.panel === "evidence") {
     return state.run
-      ? <EvidenceGraphView runId={state.run.runId} nodeId="evidence_relations" teamId={scope.teamId} runVersion={state.run.runVersion} />
+      ? <EvidenceGraphView runId={state.run.runId} teamId={scope.teamId} />
       : <ResearchCenteredEmptyState title={isZh ? "证据关系尚不可用" : "Evidence relations unavailable"} />;
   }
   if (scope.panel === "leaderboard") {

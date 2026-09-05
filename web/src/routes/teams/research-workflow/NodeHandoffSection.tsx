@@ -2,6 +2,12 @@ import type { NodeHandoffRecord } from "../../../api/types/researchWorkflow";
 import { VErrorSummary } from "../../../components/vui";
 import { presentResearchWorkflowError } from "../researchWorkflowErrorModel";
 import styles from "./NodeHandoffSection.styles";
+import { getNodeAdapter } from "./nodeAdapterModel";
+
+const HANDOFF_STATUS_LABELS: Record<string, string> = {
+  accepted: "已接收", ready: "待交接", waiting_human: "等待确认", failed: "交接失败",
+  offered: "等待接收", rejected: "未接收", superseded: "已替代", pending: "等待确认", cancelled: "已取消",
+};
 
 function blockedReasonLabel(reason: string, isZh: boolean): string {
   if (reason === "budget_exceeded") {
@@ -18,7 +24,10 @@ function blockedReasonLabel(reason: string, isZh: boolean): string {
       : "The checkpoint still points at a previous node; cannot resume from this node.";
   }
   const presented = presentResearchWorkflowError(reason);
-  return isZh ? presented.bodyZh : presented.bodyEn;
+  const body = isZh ? presented.bodyZh : presented.bodyEn;
+  return body === reason
+    ? (isZh ? "此步骤未能完成。请展开诊断查看原因，再按节点提供的操作处理。" : "This step could not finish. Review diagnostics before using the offered recovery action.")
+    : body;
 }
 
 export function NodeHandoffSection(props: {
@@ -31,17 +40,22 @@ export function NodeHandoffSection(props: {
   if (!props.pending && !props.blockedReason && !props.handoffs.length) return null;
   return (
     <section className={styles.root} data-vui="node-handoff-section">
-      <h4 className={styles.title}>{isZh ? "交接" : "Handoffs"}</h4>
+      <h4 className={styles.title}>{isZh ? "产出与缺口" : "Outputs and gaps"}</h4>
       <dl className={styles.details}>
         <dt className={styles.label}>{isZh ? "状态" : "Status"}</dt>
         <dd className={styles.value}>{props.pending ? (isZh ? "等待人工" : "Waiting for human") : props.blockedReason ? (isZh ? "已阻塞" : "Blocked") : props.handoffs.length ? (isZh ? "已有交接记录" : "Handoffs recorded") : (isZh ? "暂无交接" : "No handoff yet")}</dd>
       </dl>
-      {props.blockedReason ? <VErrorSummary label={isZh ? "阻塞原因" : "Blocker"} summary={blockedReasonLabel(props.blockedReason, isZh)} /> : null}
+      {props.blockedReason ? <>
+        <p>{blockedReasonLabel(props.blockedReason, isZh)}</p>
+        <VErrorSummary label={isZh ? "需要处理" : "Needs attention"} summary={isZh ? "此步骤尚未完成" : "This step has not completed"} details={props.blockedReason} openLabel={isZh ? "诊断" : "Diagnostics"} defaultOpen={false} />
+      </> : null}
       {props.handoffs.map((handoff) => (
         <article className={styles.record} key={handoff.handoffId}>
-          <strong>{handoff.fromNodeId} → {handoff.toNodeId}</strong>
-          <span>{handoff.status} · {(handoff.outputArtifactRefs ?? []).length} {isZh ? "项产物" : "artifacts"}</span>
-          {handoff.supersedesHandoffId ? <span>{isZh ? `接替 ${handoff.supersedesHandoffId}` : `Supersedes ${handoff.supersedesHandoffId}`}</span> : null}
+          <strong>{getNodeAdapter(handoff.fromNodeId)?.label || (isZh ? "前序步骤" : "Previous step")} → {getNodeAdapter(handoff.toNodeId)?.label || (isZh ? "后续步骤" : "Next step")}</strong>
+          <span>{isZh ? HANDOFF_STATUS_LABELS[handoff.status] || "状态待确认" : handoff.status} · {(handoff.outputArtifactRefs ?? []).length} {isZh ? "项交接产物" : "handoff artifacts"}</span>
+          <VErrorSummary tone="info" label={isZh ? "交接记录" : "Handoff record"}
+            summary={isZh ? "查看产物引用与交接状态" : "View artifact references and handoff status"}
+            details={JSON.stringify({ status: handoff.status, outputArtifactRefs: handoff.outputArtifactRefs, supersedesHandoffId: handoff.supersedesHandoffId }, null, 2)} defaultOpen={false} />
         </article>
       ))}
     </section>

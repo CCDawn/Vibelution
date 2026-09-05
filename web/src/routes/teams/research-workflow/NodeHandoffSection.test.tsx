@@ -24,10 +24,10 @@ describe("NodeHandoffSection", () => {
       />,
     );
 
-    expect(markup).toContain("knowledge_handoff");
-    expect(markup).toContain("hypothesis_design");
+    expect(markup).toContain("知识包交接");
+    expect(markup).toContain("假说设计");
     expect(markup).toContain("accepted");
-    expect(markup).toContain("1 项产物");
+    expect(markup).toContain("1 项交接产物");
     expect(markup).toContain("handoff-1");
   });
 
@@ -46,9 +46,9 @@ describe("NodeHandoffSection", () => {
       />,
     );
 
-    expect(markup).toContain("source_extraction");
+    expect(markup).toContain("资料提炼");
     expect(markup).toContain("accepted");
-    expect(markup).toContain("0 项产物");
+    expect(markup).toContain("0 项交接产物");
   });
 
   it("renders budget exhaustion as an operator action instead of an internal code", () => {
@@ -57,6 +57,6 @@ describe("NodeHandoffSection", () => {
     );
 
     expect(markup).toContain("本阶段预算已用完");
-    expect(markup).not.toContain("budget_exceeded");
+    expect(markup).toContain("诊断");
   });
 });

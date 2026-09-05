@@ -1,12 +1,12 @@
 /**
  * Evidence graph view for the research workflow knowledge drawer.
  *
- * Fetches the run's evidence graph through the real backend command
- * (`open_evidence_graph` projection) and renders the DTO as a grouped,
+ * Reads the run's evidence ledger and renders its graph as a grouped,
  * readable node/edge list. No local graph state: the backend projection is the
  * single source of truth, and the empty state explains the missing facts.
  */
-import { useCallback, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { queryKeys } from "../../../api/queryKeys";
 
 import { fetchResearchWorkflowResearchLedger } from "../../../api/research-workflow";
 import {
@@ -20,9 +20,7 @@ import styles from "./EvidenceGraphView.styles";
 
 export type EvidenceGraphViewProps = {
   runId: string;
-  nodeId: string;
   teamId: string;
-  runVersion: number;
 };
 
 export type EvidenceGraphDto = {
@@ -39,12 +37,6 @@ export type EvidenceGraphDto = {
     kind: string;
   }>;
 };
-
-type LoadState =
-  | { kind: "idle" }
-  | { kind: "loading" }
-  | { kind: "ready"; graph: EvidenceGraphDto }
-  | { kind: "error"; message: string };
 
 const KIND_LABELS_ZH: Record<string, string> = {
   supports: "支持",
@@ -154,73 +146,41 @@ export function EvidenceGraphContent({ graph, lang = "zh" }: { graph: EvidenceGr
 }
 
 export function EvidenceGraphView({ runId, teamId }: EvidenceGraphViewProps) {
-  const [state, setState] = useState<LoadState>({ kind: "idle" });
   const { lang } = useShellI18n();
   const isZh = lang === "zh";
+  const ledger = useQuery({
+    queryKey: queryKeys.researchWorkflowLedger(runId, teamId),
+    queryFn: () => fetchResearchWorkflowResearchLedger(runId, { teamId }),
+    enabled: Boolean(runId && teamId),
+  });
 
-  const loadGraph = useCallback(() => {
-    setState({ kind: "loading" });
-    fetchResearchWorkflowResearchLedger(runId, { teamId })
-      .then((ledger) => {
-        const graph = (ledger.graph ?? {}) as EvidenceGraphDto;
-        setState({
-          kind: "ready",
-          graph: {
-            nodes: Array.isArray(graph.nodes) ? graph.nodes : [],
-            edges: Array.isArray(graph.edges) ? graph.edges : [],
-          },
-        });
-      })
-      .catch((err: unknown) => {
-        setState({ kind: "error", message: err instanceof Error ? err.message : String(err) });
-      });
-  }, [runId, teamId]);
-
-  if (state.kind === "idle") {
-    return (
-      <VSurface tone="panel" className={styles.root} data-vui="evidence-graph-view">
-        <VEmptyState
-          title={isZh ? "证据关系图" : "Evidence graph"}
-          className={styles.empty}
-          actions={
-            <VButton type="button" variant="secondary" onClick={() => void loadGraph()}>
-              {isZh ? "生成证据图" : "Build evidence graph"}
-            </VButton>
-          }
-        >
-          {isZh
-            ? "从运行记录与证据记录投影证据/来源/声明关系。"
-            : "Projects evidence/source/claim relations from run and evidence records."}
-        </VEmptyState>
-      </VSurface>
-    );
-  }
-
-  if (state.kind === "loading") {
+  if (ledger.isPending) {
     return (
       <VSurface tone="panel" className={styles.root}>
-        <VStateSurface tone="loading" title={isZh ? "生成证据图" : "Building evidence graph"} fill className={styles.fill} />
+        <VStateSurface tone="loading" title={isZh ? "读取证据记录" : "Loading evidence records"} fill className={styles.fill} />
       </VSurface>
     );
   }
 
-  if (state.kind === "error") {
+  if (ledger.isError) {
     return (
       <VSurface tone="panel" className={styles.root}>
         <div
           className={styles.error}
           role="alert"
         >
-          {state.message}
+          {isZh ? "证据记录读取失败，请重试。" : "Could not load evidence records. Please retry."}
         </div>
-        <VButton type="button" variant="secondary" onClick={() => void loadGraph()}>
+        <VButton type="button" variant="secondary" onClick={() => void ledger.refetch()}>
           {isZh ? "重试" : "Retry"}
         </VButton>
       </VSurface>
     );
   }
 
-  const { nodes, edges } = state.graph;
+  const graph = (ledger.data?.graph ?? {}) as EvidenceGraphDto;
+  const nodes = Array.isArray(graph.nodes) ? graph.nodes : [];
+  const edges = Array.isArray(graph.edges) ? graph.edges : [];
   return (
     <VSurface tone="panel" className={styles.root} data-vui="evidence-graph-view">
       <EvidenceGraphContent graph={{ nodes, edges }} lang={lang} />

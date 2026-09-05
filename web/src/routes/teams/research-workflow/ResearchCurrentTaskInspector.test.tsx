@@ -51,6 +51,17 @@ async function render(ui: React.ReactElement) {
 }
 
 describe("ResearchCurrentTaskInspector", () => {
+  it.each(["evidence", "timeline"] as const)("never carries a main-task mutation into %s", async (panel) => {
+    const current = context({ panel, selectedNodeId: "ksf_evidence_relations", selectedIsCurrentTask: false });
+    current.currentTask!.retryAction = { label: "重试主流程" };
+    const { container, root } = await render(<ResearchCurrentTaskInspector context={current}
+      onRetryDispatch={vi.fn()} footer={<button>重试假说设计</button>} />);
+    expect(container.textContent).toContain("知识搜集子流程 · 证据关系");
+    expect(container.textContent).not.toContain("重试主流程");
+    expect(container.textContent).not.toContain("重试假说设计");
+    expect(container.querySelector('[data-vui-region="current-task-action"]')?.textContent).toBe("");
+    await act(async () => root.unmount());
+  });
   it("keeps prerequisite instructions outside the narrow diagnostic header", async () => {
     const current = context();
     current.currentTask = { ...current.currentTask!, status: "blocked", detail: "knowledge_package_not_materialized;hypothesis_round_unconverged;template_baseline_missing" };

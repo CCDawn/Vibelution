@@ -18,14 +18,18 @@ export function NodeCommandSection(props: {
   /** Current snapshot run version; stale-versioned offers disable with a
    * refresh hint inline instead of a tooltip-only dead button. */
   runVersion?: number | null;
+  advanced?: boolean;
 }) {
   const [actionError, setActionError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
   const isZh = props.lang !== "en";
   if (!props.offers.length) return null;
   return (
     <section data-vui="node-commands">
-      <h4 className={styles.title}>{isZh ? "操作" : "Actions"}</h4>
-      <div className={styles.actions}>
+      {props.advanced ? <VButton variant="ghost" density="compact" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
+        {isZh ? "高级操作" : "Advanced actions"}
+      </VButton> : <h4 className={styles.title}>{isZh ? "操作" : "Actions"}</h4>}
+      <div hidden={props.advanced && !expanded} className={props.advanced && !expanded ? "hidden" : styles.actions}>
         {props.offers.map((offer) => {
           const reason = offerReason(offer, isZh, props.runVersion);
           return (

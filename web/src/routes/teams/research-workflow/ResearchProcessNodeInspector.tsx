@@ -117,6 +117,12 @@ export function ResearchProcessNodeInspector(props: ResearchProcessNodeInspector
       {props.statusBanner ? (
         <div role="status" className={styles.status}>{props.statusBanner}</div>
       ) : null}
+      <NodeHandoffSection
+        handoffs={props.handoffs ?? []}
+        pending={props.handoffPending}
+        blockedReason={detail.blockedReason || ""}
+        lang={lang}
+      />
       {adapter.actorKind === "agent" ? <NodeSessionSection detail={detail} /> : null}
       {!isCurrentTask ? (
         <p className={styles.status} role="note" data-testid="node-inspector-readonly">
@@ -162,12 +168,6 @@ export function ResearchProcessNodeInspector(props: ResearchProcessNodeInspector
           ) : null}
         </div>
       ) : null}
-      <NodeHandoffSection
-        handoffs={props.handoffs ?? []}
-        pending={props.handoffPending}
-        blockedReason={detail.blockedReason || ""}
-        lang={lang}
-      />
       {props.knowledgeBadge !== undefined ? (
         <NodeKnowledgeCollectionSection
           badge={props.knowledgeBadge}
@@ -182,6 +182,7 @@ export function ResearchProcessNodeInspector(props: ResearchProcessNodeInspector
           until the primary becomes actionable (GitHub Actions shows one
           disabled primary with its reason, not a row of dead buttons). */}
       <NodeCommandSection
+        advanced={adapter.actorKind === "agent"}
         offers={!primaryOffer || primaryOffer.available ? restOffers : []}
         busy={props.busy}
         onOffer={props.onOffer}

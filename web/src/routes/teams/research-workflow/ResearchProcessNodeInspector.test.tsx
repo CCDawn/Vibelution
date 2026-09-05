@@ -101,6 +101,22 @@ function renderInspector(detail: ResearchWorkflowNodeDetail | null, extras: {
 }
 
 describe("ResearchProcessNodeInspector command rendering", () => {
+  it("keeps one primary retry and collapses advanced actions below the blocker", () => {
+    const markup = renderInspector(makeDetail({status: "blocked",
+      blockedReason: "evidence_relations requires ['evidence_relation_graph']",
+      commandOffers: [
+        offer({command: "retry_node", label: "重试资料寻找"}),
+        offer({command: "start_node", label: "启动资料寻找", available: false, reasonCode: "retry_owns_recovery"}),
+        offer({command: "fork_revision", label: "分叉修订"}),
+      ],
+    }));
+    expect(markup).toContain("重试资料寻找");
+    expect(markup).toContain("高级操作");
+    expect(markup).toContain('aria-expanded="false"');
+    expect(markup).toContain('hidden="" class="hidden"');
+    expect(markup.indexOf("产出与缺口")).toBeLessThan(markup.indexOf("执行记录"));
+    expect(markup).toContain("补齐产物后再继续");
+  });
   it("renders agent identity and model/budget ops without internal role keys", () => {
     const markup = renderInspector(makeDetail({ nodeAttempt: 2 }));
     expect(markup).toContain("Finder Agent");

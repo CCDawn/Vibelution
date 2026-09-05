@@ -25,6 +25,12 @@ import type { NodeDetailState } from "./useNodeDetailState";
 // assertions unchanged and give this file room to wait for real rendering.
 vi.setConfig({ testTimeout: 30_000 });
 
+const childReadHarness = vi.hoisted(() => ({ props: null as Record<string, unknown> | null }));
+vi.mock("./KnowledgeChildNodeInspector", () => ({
+  KnowledgeChildNodeInspector: () => <div />,
+  KnowledgeChildReadPanel: (props: Record<string, unknown>) => { childReadHarness.props = props; return <div />; },
+}));
+
 const leafHarness = vi.hoisted(() => ({
   props: null as Record<string, unknown> | null,
 }));
@@ -238,7 +244,7 @@ async function renderInspectorLeaf(
   language: "zh" | "en",
   scope: InspectorProps["scope"],
   nodeDetail: NodeDetailState = { kind: "idle" },
-  extras: Partial<Pick<InspectorProps, "nextAction" | "onRecoverCollection" | "allowLaunchPanel">> = {},
+  extras: Partial<Pick<InspectorProps, "nextAction" | "onRecoverCollection" | "allowLaunchPanel" | "state">> = {},
 ) {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -721,5 +727,18 @@ describe("ResearchProcessInspectorPane collection recovery wiring", () => {
       root.unmount();
     });
     container.remove();
+  });
+});
+
+describe("selected knowledge child read ownership", () => {
+  it.each(["evidence", "timeline"] as const)("keeps %s on the latest child run", async (panel) => {
+    const state = makeInspectorState();
+    state.run = makeRun();
+    state.invocationBadges = {
+      hypothesis_design: { count: 1, latest: { invocationId: "inv-child", knowledgeChildRunId: "child-run", status: "failed", updatedAtMs: 10, childNodeStates: { evidence_relations: "blocked" } }, recent: [] },
+    } as unknown as InspectorProps["state"]["invocationBadges"];
+    const { root, queryClient, container } = await renderInspectorLeaf("zh", makeInspectorScope(panel, {selectedNodeId: "ksf_evidence_relations"}), {kind: "idle"}, {state});
+    expect(childReadHarness.props).toMatchObject({ runId: "child-run", nodeId: "evidence_relations", panel });
+    await act(async () => root.unmount()); queryClient.clear(); container.remove();
   });
 });

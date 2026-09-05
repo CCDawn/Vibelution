@@ -9,6 +9,8 @@ import type {
 import styles from "./ResearchCurrentTaskInspector.styles";
 
 import { STATUS_LABEL, STATUS_TONE } from "./researchTaskPresentation";
+import { isKnowledgeSideflowCanvasNode, knowledgeSideflowSemanticNodeId } from "./knowledgeSideflowCanvasRegion";
+import { getNodeAdapter } from "./nodeAdapterModel";
 
 function liveRole(status: ResearchWorkflowTaskStatus): "alert" | "status" {
   return status === "recoverable_error"
@@ -42,6 +44,10 @@ export function ResearchCurrentTaskInspector({
   error,
 }: ResearchCurrentTaskInspectorProps) {
   const task = context.currentTask;
+  // Read panels never inherit a mutation belonging to the main task.
+  const readPanel = context.view.panel === "evidence" || context.view.panel === "timeline";
+  const childSelected = isKnowledgeSideflowCanvasNode(context.view.selectedNodeId);
+  const selectedLabel = getNodeAdapter(knowledgeSideflowSemanticNodeId(context.view.selectedNodeId))?.label;
   const historyMode = Boolean(
     task
     && context.view.panel === "node"
@@ -72,14 +78,14 @@ export function ResearchCurrentTaskInspector({
           {children}
         </div>
         <footer className={styles.footer} data-vui-region="current-task-action">
-          {footer}
+          {readPanel ? null : footer}
         </footer>
       </section>
     );
   }
 
-  const panelTitle = context.view.panel === "evidence" ? "题目证据图谱"
-    : context.view.panel === "timeline" ? "运行记录"
+  const panelTitle = context.view.panel === "evidence" ? (childSelected ? "知识子流程证据" : "题目证据图谱")
+    : context.view.panel === "timeline" ? (childSelected ? "知识子流程记录" : "运行记录")
     : context.view.panel === "team" ? "团队与讨论"
     : context.view.panel === "agents" ? "团队 Agent"
     : context.view.panel === "leaderboard" ? "题目假说排行" : null;
@@ -106,7 +112,10 @@ export function ResearchCurrentTaskInspector({
           className={styles.detail}
           role={liveRole(task.status)}
         >
-          {panelTitle ? `${context.scope.questionId ?? "当前题目"} · 当前任务为“${task.title}”` : historyMode ? `所选节点详情 · 当前任务为“${task.title}”` : liveRole(task.status) === "alert" ? (
+          {readPanel ? childSelected
+            ? `正在查看：知识搜集子流程 · ${selectedLabel || "所选步骤"}。证据与记录属于该子流程。`
+            : `${context.scope.questionId ?? "当前题目"} · 主流程${context.view.panel === "evidence" ? "证据" : "运行记录"}`
+          : panelTitle ? `${context.scope.questionId ?? "当前题目"} · 当前任务为“${task.title}”` : historyMode ? `所选节点详情 · 当前任务为“${task.title}”` : liveRole(task.status) === "alert" ? (
             <>
               <VErrorSummary
                 label={STATUS_LABEL[task.status]}
@@ -122,11 +131,11 @@ export function ResearchCurrentTaskInspector({
             </>
           ) : task.detail}
         </div>
-        {task.progress && !historyMode ? <div className={styles.progress}>{task.progress.label}</div> : null}
+        {task.progress && !historyMode && !panelTitle ? <div className={styles.progress}>{task.progress.label}</div> : null}
         {children}
       </div>
       <footer className={styles.footer} data-vui-region="current-task-action">
-        {historyMode ? (
+        {readPanel ? null : historyMode ? (
           <VButton type="button" variant="primary" className={styles.primaryAction} onClick={onReturnCurrentTask}>
             返回当前任务
           </VButton>
