@@ -29,6 +29,37 @@ function fakeWindow(options: {
 }
 
 describe("workbenchWindowMemory", () => {
+  it("keeps a single save in flight and saves the newest position after a slow response", async () => {
+    vi.useFakeTimers(); seedControlTokenForTests();
+    const win = { outerWidth: 1280, outerHeight: 720, screenX: 112, screenY: 88,
+      screen: { width: 1920, height: 1080, availWidth: 1920, availHeight: 1080 },
+      addEventListener: vi.fn(), removeEventListener: vi.fn(), setTimeout, setInterval };
+    vi.stubGlobal("window", win);
+    vi.stubGlobal("document", { visibilityState: "visible", addEventListener: vi.fn(), removeEventListener: vi.fn() });
+    let finishRead!: (value: unknown) => void;
+    let finishWrite!: (value: unknown) => void;
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(() => new Promise((resolve) => { finishRead = resolve; }))
+      .mockImplementationOnce(() => new Promise((resolve) => { finishWrite = resolve; }))
+      .mockResolvedValue({ ok: true, json: async () => ({ configHash: "latest" }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const dispose = startWorkbenchWindowMemory();
+    await vi.advanceTimersByTimeAsync(5700);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    finishRead({ ok: true, json: async () => ({ configHash: "initial" }) });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    win.screenX = 240;
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    finishWrite({ ok: true, json: async () => ({ ok: true }) });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(JSON.parse(fetchMock.mock.calls[3][1].body).workbench.windowPosition).toBe("240,88");
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    dispose();
+  });
   afterEach(() => {
     resetWorkbenchWindowMemoryForTests();
     resetControlTokenForTests();

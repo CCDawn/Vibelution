@@ -232,7 +232,7 @@ function rootEdges(edges: ElkNode["edges"]): ElkNode["edges"] {
 function makeEngine() {
   const layout = vi.fn(async (graph: ElkNode) => fakeLayout(graph));
   const terminate = vi.fn();
-  return { layout, terminate } satisfies WorkflowLayoutEngine;
+  return { layout, terminate, ready: Promise.resolve() } satisfies WorkflowLayoutEngine;
 }
 
 type HookValue = ReturnType<typeof useWorkflowAutoLayout>;
@@ -307,6 +307,30 @@ describe("useWorkflowAutoLayout behavior", () => {
       });
     }
   }
+
+  it("waits for Worker readiness without spending the layout timeout or queuing stale graphs", async () => {
+    vi.useFakeTimers();
+    try {
+      const engine = makeEngine();
+      let ready!: () => void;
+      engine.ready = new Promise<void>((resolve) => { ready = resolve; });
+      const initial = makeGraph(["knowledge_collection"]);
+      await renderWith(initial, engine);
+      await act(async () => { vi.advanceTimersByTime(5000); });
+      expect(engine.layout).not.toHaveBeenCalled();
+      expect(latest?.degraded).toBeNull();
+      expect(latest?.initializing).toBe(true);
+      const updated = makeGraph(["knowledge_collection", "experiment_design"]);
+      updated.nodes[0].status = "running";
+      await renderWith(updated, engine);
+      await act(async () => ready());
+      await renderWith(updated, engine);
+      expect(engine.layout).toHaveBeenCalledTimes(3);
+      expect(latest?.nodes.find((node) => node.id === "knowledge_collection")?.status).toBe("running");
+      expect(latest?.degraded).toBeNull();
+      expect(latest?.initializing).toBe(false);
+    } finally { vi.useRealTimers(); }
+  });
 
   it("keeps an in-flight layout across runtime-only updates and commits current status", async () => {
     const engine = makeEngine();
