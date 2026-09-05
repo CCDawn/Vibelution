@@ -5118,11 +5118,27 @@ def auto_open_grounded_generation(team_id: str, *, question_id: str) -> dict[str
     rechecks that offer under the question lock before opening its idempotent
     meeting. No new run, R0 replay, or experiment action is submitted here.
     """
-    from .hypothesis_first_state_v2 import project_hypothesis_first_state_v2
+    from .formal_read_runtime import get_query_service
+    from .hypothesis_first_state_v2 import (
+        _active_stage_one_run, project_hypothesis_first_state_v2,
+    )
 
     summary: dict[str, Any] = {"opened": 0, "failed": 0}
     try:
-        snapshot = project_hypothesis_first_state_v2(team_id, question_id)
+        catalog = get_query_service().list_runs(
+            team_id=team_id, workflow_id=CHALLENGE_CUP_WORKFLOW_ID,
+        )
+        run = _active_stage_one_run([
+            item for item in catalog.get("runs", [])
+            if str(item.get("questionId") or "").strip().upper()
+            == str(question_id or "").strip().upper()
+        ])
+        if run is None:
+            return summary
+        run_id = str(run["runId"])
+        snapshot = project_hypothesis_first_state_v2(
+            team_id, question_id, workflow_run_id=run_id,
+        )
         action = next((
             item for item in snapshot.get("allowedActions", [])
             if item.get("actionId") == "open-stage-one-generation"
@@ -5134,7 +5150,7 @@ def auto_open_grounded_generation(team_id: str, *, question_id: str) -> dict[str
         execute_v2_command(team_id, {
             **action,
             "expectedStateVersion": snapshot["stateVersion"],
-        }, question_id=question_id)
+        }, question_id=question_id, workflow_run_id=run_id)
         summary["opened"] = 1
     except HypothesisFirstChainError:
         # The package or offer moved after projection; the owning command

@@ -3270,13 +3270,27 @@ def test_grounded_generation_auto_consumes_only_normal_r1_offer(
     monkeypatch: pytest.MonkeyPatch, eligible: bool,
 ) -> None:
     from core.web.services.team_workflow.research_runtime import hypothesis_first_state_v2
+    from core.web.services.team_workflow.research_runtime import formal_read_runtime
+    monkeypatch.setattr(formal_read_runtime, "get_query_service", lambda: SimpleNamespace(
+        list_runs=lambda **kwargs: {"runs": [
+            {"runId": "old-broken-run", "questionId": _QUESTION_ID,
+             "status": "blocked", "createdAt": "2026-09-01"},
+            {"runId": "run-r1", "questionId": _QUESTION_ID,
+             "status": "blocked", "createdAt": "2026-09-05"},
+            {"runId": "other-question", "questionId": "SCI-999",
+             "status": "running", "createdAt": "2026-09-06"},
+        ]},
+    ))
     action = {
         "actionId": "open-stage-one-generation", "command": "open_generation",
         "enabled": eligible, "payload": {"questionId": _QUESTION_ID, "runId": "run-r1"},
         "idempotencyKey": "r1-offer", "expectedStateVersion": "action-version",
     }
-    monkeypatch.setattr(hypothesis_first_state_v2, "project_hypothesis_first_state_v2",
-                        lambda *args: {"stateVersion": "fresh-version", "allowedActions": [action]})
+    def project(team_id, question_id, *, workflow_run_id=""):
+        assert workflow_run_id == "run-r1", "old broken snapshots must not be read"
+        return {"stateVersion": "fresh-version", "allowedActions": [action]}
+
+    monkeypatch.setattr(hypothesis_first_state_v2, "project_hypothesis_first_state_v2", project)
     requests = []
     monkeypatch.setattr(chain, "execute_v2_command",
                         lambda *args, **kwargs: requests.append((args, kwargs)) or {})
@@ -3287,7 +3301,7 @@ def test_grounded_generation_auto_consumes_only_normal_r1_offer(
     assert len(requests) == int(eligible)
     if eligible:
         assert requests[0][0] == (_TEAM_ID, {**action, "expectedStateVersion": "fresh-version"})
-        assert requests[0][1] == {"question_id": _QUESTION_ID}
+        assert requests[0][1] == {"question_id": _QUESTION_ID, "workflow_run_id": "run-r1"}
 
 
 def test_sweep_automatically_launches_r1_after_knowledge_accept_and_retry(
@@ -3302,3 +3316,19 @@ def test_sweep_automatically_launches_r1_after_knowledge_accept_and_retry(
                             lambda *args, _label=label, **kwargs: order.append(_label) or {})
     chain.sweep_auto_advance_closure()
     assert order == ["accept", "retry", "r1"]
+
+
+def test_grounded_generation_skips_full_projection_without_an_active_run(monkeypatch):
+    from core.web.services.team_workflow.research_runtime import formal_read_runtime, hypothesis_first_state_v2
+
+    monkeypatch.setattr(formal_read_runtime, "get_query_service", lambda: SimpleNamespace(
+        list_runs=lambda **kwargs: {"runs": [
+            {"runId": "done", "questionId": _QUESTION_ID, "status": "succeeded"},
+        ]},
+    ))
+    def unexpected_projection(*args, **kwargs):
+        pytest.fail("historical terminal questions must not build full UI state")
+    monkeypatch.setattr(hypothesis_first_state_v2, "project_hypothesis_first_state_v2", unexpected_projection)
+    assert chain.auto_open_grounded_generation(_TEAM_ID, question_id=_QUESTION_ID) == {
+        "opened": 0, "failed": 0,
+    }
