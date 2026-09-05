@@ -27,6 +27,21 @@ from ..domain_ports import AgentTurnResult, DomainPorts
 DEFAULT_AGENT_ESTIMATE_TOKENS = DEFAULT_AGENT_NODE_RESERVE_TOKENS
 
 
+def _artifact_identity_problem(ref: Mapping[str, Any], read_back: Any) -> dict[str, str] | None:
+    if read_back.content_hash != str(ref.get("sha256") or ""):
+        return {"code": "artifact_hash_mismatch", "detail": f"hash 不符: {read_back.canonical_ref}"}
+    expected_version = str(ref.get("version") or "").strip()
+    if expected_version and expected_version != str(read_back.version or "").strip():
+        return {"code": "artifact_version_mismatch", "detail": f"version 不符: {read_back.canonical_ref}"}
+    return None
+
+
+def _missing_artifact_problem(required: tuple[str, ...], receipts: list[dict[str, Any]]) -> dict[str, str] | None:
+    present_kinds = {str(item.get("artifactType") or "").split(":", 1)[0] for item in receipts}
+    missing = [kind for kind in required if kind not in present_kinds]
+    return {"code": "required_artifact_missing", "detail": f"missing kinds: {missing}"} if missing else None
+
+
 class AgentActionAdapter:
     action_kind = "start_agent_task"
 
@@ -156,30 +171,15 @@ class AgentActionAdapter:
                         "detail": f"empty hash/revision: {read_back.canonical_ref}",
                     },
                 )
-            if read_back.content_hash != str(ref.get("sha256") or ""):
+            identity_problem = _artifact_identity_problem(ref, read_back)
+            if identity_problem:
                 return VerifiedDomainResult(
                     action_id=action.action_id,
                     outcome="blocked",
                     artifact_receipts=(),
                     anchor=result.anchor,
                     budget_receipt=None,
-                    problem={
-                        "code": "artifact_hash_mismatch",
-                        "detail": f"hash 不符: {read_back.canonical_ref}",
-                    },
-                )
-            expected_version = str(ref.get("version") or "").strip()
-            if expected_version and expected_version != str(read_back.version or "").strip():
-                return VerifiedDomainResult(
-                    action_id=action.action_id,
-                    outcome="blocked",
-                    artifact_receipts=(),
-                    anchor=result.anchor,
-                    budget_receipt=None,
-                    problem={
-                        "code": "artifact_version_mismatch",
-                        "detail": f"version 不符: {read_back.canonical_ref}",
-                    },
+                    problem=identity_problem,
                 )
             receipts.append(
                 {
@@ -190,22 +190,15 @@ class AgentActionAdapter:
                     "domainRevision": read_back.domain_revision,
                 }
             )
-        present_kinds = {
-            str(item.get("artifactType") or "").split(":", 1)[0]
-            for item in receipts
-        }
-        missing = [kind for kind in required if kind not in present_kinds]
-        if missing:
+        missing_problem = _missing_artifact_problem(required, receipts)
+        if missing_problem:
             return VerifiedDomainResult(
                 action_id=action.action_id,
                 outcome="blocked",
                 artifact_receipts=(),
                 anchor=result.anchor,
                 budget_receipt=None,
-                problem={
-                    "code": "required_artifact_missing",
-                    "detail": f"missing kinds: {missing}",
-                },
+                problem=missing_problem,
             )
         if action.node_id == "source_finding":
             from ..artifact_readback_registry import (
@@ -396,6 +389,16 @@ class SystemActionAdapter:
                         "detail": f"empty hash/revision: {read_back.canonical_ref}",
                     },
                 )
+            identity_problem = _artifact_identity_problem(ref, read_back)
+            if identity_problem:
+                return VerifiedDomainResult(
+                    action_id=action.action_id,
+                    outcome="blocked",
+                    artifact_receipts=(),
+                    anchor=result.anchor,
+                    budget_receipt=None,
+                    problem=identity_problem,
+                )
             receipts.append(
                 {
                     "artifactType": str(ref.get("kind") or read_back.canonical_ref),
@@ -404,6 +407,16 @@ class SystemActionAdapter:
                     "sha256": read_back.content_hash,
                     "domainRevision": read_back.domain_revision,
                 }
+            )
+        missing_problem = _missing_artifact_problem(required, receipts)
+        if missing_problem:
+            return VerifiedDomainResult(
+                action_id=action.action_id,
+                outcome="blocked",
+                artifact_receipts=(),
+                anchor=result.anchor,
+                budget_receipt=None,
+                problem=missing_problem,
             )
         reserved = result.reserved or {}
         reservation_id = str(reserved.get("reservationId") or f"res-{action.action_id}")
