@@ -1890,6 +1890,59 @@ describe("runWorkbenchLifecycle", () => {
     expect(terminateProcessTree).not.toHaveBeenCalled();
   });
 
+  it("does not re-retire a Runtime Manager daemon after backend reclaim already retired it", async () => {
+    const alive = new Set([51, 52, 77]);
+    const terminateProcessTree = vi.fn(async (pid: number) => {
+      if (!alive.has(pid)) {
+        return false;
+      }
+      alive.delete(pid);
+      return true;
+    });
+    const result = await executeMainLineWorkbench({
+      workspaceRoot: "C:/repo",
+      pythonPath: "C:/repo/.venv/Scripts/python.exe",
+      operation: "stop",
+      command: { commandId: "cmd_stop_distinct_daemon_pid", type: "close", operation: "stop", noBrowser: true },
+      readState: () => ({
+        backendPid: 51,
+        backendLaunchPid: 52,
+        spawnPid: 52,
+        backendPort: 8000,
+        backendCreateTime: 1,
+        backendExecutable: "C:/Python/pythonw.exe",
+        backendLaunchCreateTime: 1,
+        backendLaunchExecutable: "C:/repo/.venv/Scripts/pythonw.exe",
+        spawnCreateTime: 1,
+        spawnExecutable: "C:/repo/.venv/Scripts/pythonw.exe"
+      }),
+      writeState: () => undefined,
+      listActiveWork: () => [],
+      connect: async () => alive.has(51),
+      fetchHealth: async () => ({
+        status: 200,
+        json: async () => ({ status: "ok", routesReady: true, pid: 51, workspaceRoot: "C:/repo" })
+      }),
+      pidAlive: (pid) => alive.has(pid),
+      readDaemonPid: () => 77,
+      readDaemonIdentity: () => ({
+        pid: 77,
+        createTime: 1,
+        executable: "C:/repo/.venv/Scripts/pythonw.exe"
+      }),
+      terminateProcessTree,
+      gracefulShutdown: async () => {
+        alive.delete(51);
+        alive.delete(52);
+        return { requested: true, completed: true, status: 202, reason: "closed" };
+      }
+    });
+
+    expect(result).toMatchObject({ accepted: true, operation: "stop" });
+    expect(terminateProcessTree).toHaveBeenCalledTimes(1);
+    expect(terminateProcessTree).toHaveBeenCalledWith(77, expect.objectContaining({ pid: 77 }));
+  });
+
   it("does not kill a backend during ordinary restart when its HTTP shutdown is protected", async () => {
     const terminateProcessTree = vi.fn(async () => false);
     let written: Record<string, unknown> = {};

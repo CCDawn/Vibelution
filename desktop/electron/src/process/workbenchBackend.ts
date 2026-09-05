@@ -1555,6 +1555,7 @@ export async function executeMainLineWorkbench(
       };
     }
     const unverifiedHandles: number[] = [];
+    let postReclaimReconcileReason = "";
     if (!staleReclaim.activeWorkBlocked) {
       // reclaimStaleWorkbenchBackend settles the entire registered backend
       // tree once the health-verified backend process and its owned port are
@@ -1562,9 +1563,27 @@ export async function executeMainLineWorkbench(
       // wrapper distinct from backendPid; re-running the root-only terminator
       // for that already-exited wrapper turns a successful shutdown into a
       // false failure and prevents Electron from closing the Workbench window.
+      const postReclaimReconcile = staleReclaim.reclaimed
+        ? await reconcileDeadRegisteredHandles({
+            pids: retainedRegisteredHandles,
+            port,
+            host,
+            expectedIdentities,
+            pidAlive: input.pidAlive,
+            connect: input.connect
+          })
+        : null;
+      for (const pid of postReclaimReconcile?.reconciledPids ?? []) {
+        reconciledDeadPids.add(pid);
+      }
+      if ((postReclaimReconcile?.reconciledPids.length ?? 0) > 0) {
+        postReclaimReconcileReason = postReclaimReconcile?.reason ?? "";
+      }
       const pendingRegisteredHandles = staleReclaim.reclaimed
-        ? retainedRegisteredHandles.filter((pid) => !retainedBackendTreePids.includes(pid))
+        ? (postReclaimReconcile?.retainedPids ?? retainedRegisteredHandles)
+            .filter((pid) => !retainedBackendTreePids.includes(pid))
         : retainedRegisteredHandles;
+      const pendingExtraPids = retainedExtraPids.filter((pid) => !reconciledDeadPids.has(pid));
       await retireRegisteredHandles({
         pids: pendingRegisteredHandles,
         port,
@@ -1576,7 +1595,7 @@ export async function executeMainLineWorkbench(
         // Backend handles were removed above after successful reclaim. The
         // separately owned Runtime Manager daemon still needs normal verified
         // tree retirement.
-        treePids: retainedExtraPids,
+        treePids: pendingExtraPids,
         expectedIdentities,
         ownedDirectPids: [...(input.ownedDirectPids ?? []), ...injectedOwnedDirectPids],
         reportUnverified: (pids) => unverifiedHandles.push(...pids),
@@ -1630,8 +1649,11 @@ export async function executeMainLineWorkbench(
     const retainedBrowserLaunchPid = unverifiedHandles.includes(previousBrowserLaunchPid) ? previousBrowserLaunchPid : 0;
     const retainedBrowserWindowPid = unverifiedHandles.includes(previousBrowserWindowPid) ? previousBrowserWindowPid : 0;
     const lifecycleWarnings = [
-      reconciledDeadPids.size > 0
+      deadHandleReconcile.reconciledPids.length > 0
         ? `${deadHandleReconcile.reason}; no process was terminated during reconciliation`
+        : "",
+      postReclaimReconcileReason
+        ? `${postReclaimReconcileReason}; no process was terminated during post-reclaim reconciliation`
         : "",
       unverifiedDaemonPid > 0
         ? `Skipped unverified Runtime Manager daemon pid ${unverifiedDaemonPid}; no process was terminated.`
