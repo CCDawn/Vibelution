@@ -10,6 +10,7 @@ import {
   sameProjectRoot
 } from "./workbenchBackend.js";
 import { workbenchHealthUrl } from "./workbenchBackendHealth.js";
+import { runPythonJsonBridge, PYTHON_JSON_BRIDGE_QUERY_TIMEOUT_MS, type PythonProcessIdentity } from "./pythonJsonBridge.js";
 
 export const WORKBENCH_API_CONTRACT_VERSION = "v1";
 
@@ -33,7 +34,52 @@ type ServingVersionInput = {
   readActive?: (workspaceRoot: string) => { buildKey: string; release: string };
   currentCode?: (workspaceRoot: string) => { head: string; dirtyTreeDigest: string };
   readState?: (workspaceRoot: string) => Record<string, unknown>;
+  runIdentityBridge?: typeof runPythonJsonBridge;
 };
+
+// Windows venv pythonw.exe owns the process tree, but its interpreter child
+// serves HTTP. Verify both stable identities and their actual OS parent link;
+// a matching port, HEAD or self-reported parent PID is not ownership evidence.
+const SERVING_CHILD_IDENTITY_SCRIPT = String.raw`
+import json
+import sys
+import psutil
+from core.runtime_manager.process_identity import inspect_process_identity
+
+launch, serving = (json.loads(value) for value in sys.argv[1:3])
+matches = False
+try:
+    child = psutil.Process(serving["pid"])
+    matches = (
+        child.ppid() == launch["pid"]
+        and inspect_process_identity(launch)["status"] == "match"
+        and inspect_process_identity(serving)["status"] == "match"
+    )
+except (psutil.NoSuchProcess, psutil.ZombieProcess, psutil.AccessDenied, OSError):
+    pass
+print(json.dumps({"matches": matches}))
+`;
+
+async function servingChildIdentityMatches(
+  input: ServingVersionInput,
+  launch: PythonProcessIdentity,
+  serving: PythonProcessIdentity
+): Promise<boolean> {
+  try {
+    const raw = await (input.runIdentityBridge ?? runPythonJsonBridge)({
+      pythonPath: launch.executable,
+      args: ["-c", SERVING_CHILD_IDENTITY_SCRIPT, JSON.stringify(launch), JSON.stringify(serving)],
+      cwd: input.workspaceRoot,
+      failureLabel: "workbench serving process identity",
+      timeoutMs: PYTHON_JSON_BRIDGE_QUERY_TIMEOUT_MS,
+      killPolicy: "child"
+    });
+    const result: unknown = JSON.parse(raw);
+    return isRecord(result) && result.matches === true;
+  } catch {
+    return false;
+  }
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -179,19 +225,21 @@ export async function inspectWorkbenchServingVersion(input: ServingVersionInput)
   const healthCreateTime = Number(serving.code.createTime || 0);
   const healthExecutable = String(serving.code.executable || "").trim();
   const normalizeExecutable = (value: string): string => value.trim().replace(/\\/g, "/").toLowerCase();
-  if (
-    !Number.isFinite(statePid)
-    || statePid <= 0
-    || statePid !== serving.backendPid
-    || !Number.isFinite(stateCreateTime)
-    || stateCreateTime <= 0
-    || !Number.isFinite(healthCreateTime)
-    || healthCreateTime <= 0
-    || Math.abs(stateCreateTime - healthCreateTime) > 0.001
-    || !stateExecutable
-    || !healthExecutable
-    || normalizeExecutable(stateExecutable) !== normalizeExecutable(healthExecutable)
-  ) {
+  const identitiesComplete = Number.isInteger(statePid) && statePid > 0
+    && Number.isFinite(stateCreateTime) && stateCreateTime > 0 && Boolean(stateExecutable)
+    && Number.isInteger(serving.backendPid) && serving.backendPid > 0
+    && Number.isFinite(healthCreateTime) && healthCreateTime > 0 && Boolean(healthExecutable);
+  const sameProcess = statePid === serving.backendPid
+    && Math.abs(stateCreateTime - healthCreateTime) <= 0.001
+    && normalizeExecutable(stateExecutable) === normalizeExecutable(healthExecutable);
+  const identityMatches = identitiesComplete && (sameProcess || (
+    statePid !== serving.backendPid && await servingChildIdentityMatches(
+      input,
+      { pid: statePid, createTime: stateCreateTime, executable: stateExecutable },
+      { pid: serving.backendPid, createTime: healthCreateTime, executable: healthExecutable }
+    )
+  ));
+  if (!identityMatches) {
     return {
       ok: false,
       reason: "serving_backend_identity_mismatch",
