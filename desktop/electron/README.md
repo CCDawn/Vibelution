@@ -7,6 +7,8 @@
 迁移账本（已关闭，归档）：[CONTROL_PLANE_MIGRATION.md](../../docs/archive/plans/2026-08/CONTROL_PLANE_MIGRATION.md)。
 现行 Python 遗留面：[`core/web/services/launcher_runtime.md`](../../core/web/services/launcher_runtime.md)。
 
+本地调试：[桌面调试与后台操作](../../docs/guides/desktop-debugging.md)。本地启动默认开放仅 `127.0.0.1` 可连的动态 CDP 端口，不弹 DevTools；开发优先 API / Playwright。地址发现入口为 `scripts/desktop_debug.py`，实现归 `src/debugging/localDebugging.ts`，生命周期仍归 Launcher。
+
 ---
 
 ## 30 秒编辑表

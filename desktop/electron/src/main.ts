@@ -18,6 +18,8 @@ import {
   parseDesktopLifecycleLaunchMetadata
 } from "./cli/desktopCli.js";
 import { IPC_CHANNELS } from "./ipc.js";
+import { configureLocalDebugging, identifyDebugWindow, publishLocalDebugging } from "./debugging/localDebugging.js";
+import { captureElectronOwnerIdentity } from "./tray/desktopShellOwner.js";
 import {
   DESKTOP_LAUNCH_PROFILE_FILE,
   applyDesktopLaunchSettingsToEnvironment,
@@ -390,6 +392,8 @@ if (!runPrimaryWhenReady) {
   shutdownApproved = true;
   app.quit();
 }
+const localDebuggingEnabled = configureLocalDebugging(app, desktopLaunchArgv,
+  lockDecision.action === "continue_as_primary" && !desktopCliArgs.smoke && !desktopCliArgs.workbenchCloseCanary);
 
 function createDesktopPathsForApp(): DesktopPaths {
   const launchSettings = desktopLaunchSettings();
@@ -2870,6 +2874,7 @@ ipcMain.handle(IPC_CHANNELS.getDesktopShellSummary, (event) => {
   return {
     schemaVersion: 1,
     provider: "electron",
+    currentWindow: identifyDebugWindow(event.sender.getOSProcessId(), windowProvider?.snapshot() ?? null, windowProvider?.instanceWindowStates() ?? []),
     desktopSessionId: currentDesktopSessionId(launcherBootstrap),
     windows: windowProvider?.snapshot() ?? null,
     bootstrap: launcherBootstrap
@@ -4335,6 +4340,14 @@ app.whenReady()
   .then(async () => {
     const paths = createDesktopPathsForApp();
     claimElectronDesktopShellOwner(paths.workspaceRoot);
+    if (localDebuggingEnabled) {
+      try {
+        const retireDebugging = await publishLocalDebugging(app.getPath("userData"), paths.workspaceRoot, captureElectronOwnerIdentity());
+        app.once("quit", retireDebugging);
+      } catch (error) {
+        console.warn("Local desktop debugging unavailable", error);
+      }
+    }
     const launcherDistRootInput = {
       resourcesRoot: paths.resourcesRoot,
       workspaceRoot: paths.workspaceRoot,

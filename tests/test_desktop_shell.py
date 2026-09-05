@@ -216,6 +216,7 @@ def test_launch_packaged_desktop_shell_does_not_hide_gui(tmp_path, monkeypatch):
     result = desktop_shell.launch_packaged_desktop_shell(project_root=tmp_path, then_lifecycle="start")
     args = captured["args"]
     assert args[0] == str(exe)
+    assert "--local-debugging" in args
     assert "--workspace" in args
     assert args[-1] == "start"
     assert "startupinfo" not in captured["kwargs"]
@@ -305,6 +306,7 @@ def test_resolve_desktop_shell_launch_prefers_current_packaged(tmp_path, monkeyp
     monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: tree)
     spec = desktop_shell.resolve_desktop_shell_launch(tmp_path, then_lifecycle="start", open_workbench=True)
     assert spec["kind"] == "packaged"
+    assert "--local-debugging" in spec["args"]
     assert spec["args"][0] == str(desktop_shell.packaged_desktop_exe(tmp_path))
     assert spec["cwd"] == str(tmp_path)
     assert spec["args"][spec["args"].index("--workspace") + 1] == str(tmp_path)
@@ -319,11 +321,24 @@ def test_resolve_desktop_shell_launch_uses_unpackaged_when_packaged_missing(tmp_
     monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: tree)
     spec = desktop_shell.resolve_desktop_shell_launch(tmp_path, open_workbench=True)
     assert spec["kind"] == "unpackaged"
+    assert "--local-debugging" in spec["args"]
     assert spec["args"][:2] == [str(electron_exe), str(desktop_shell.unpackaged_main_js(tmp_path))]
     assert spec["cwd"] == str(tmp_path)
     assert spec["args"][spec["args"].index("--workspace") + 1] == str(tmp_path)
     assert "--project" not in spec["args"]
     assert "--open-workbench" in spec["args"]
+
+
+def test_live_shell_owns_rebuild_decision_before_relaunch(tmp_path, monkeypatch):
+    from core.launcher import desktop_shell_owner
+    exe = _write_unpackaged_electron(tmp_path, tree_hash="a" * 40, main_mtime=2_000_000_000)
+    monkeypatch.setattr(desktop_shell_owner, "read_desktop_shell_owner", lambda root: {"owner": "electron", "pid": 123, "executable": str(exe)})
+    monkeypatch.setattr(desktop_shell_owner, "_identity_status", lambda owner: "match")
+    monkeypatch.setattr(desktop_shell, "ensure_unpackaged_electron", lambda root: (_ for _ in ()).throw(AssertionError("Entry must not consume the live shell rebuild signal")))
+    spec = desktop_shell.resolve_desktop_shell_launch(tmp_path, then_lifecycle="restart")
+    assert spec["reason"] == "forward_to_live_shell"
+    assert spec["args"][-1] == "restart"
+    assert "--local-debugging" in spec["args"]
 
 
 def test_ensure_unpackaged_electron_rebuilds_stale_bundle(tmp_path, monkeypatch):
@@ -360,7 +375,7 @@ def test_ensure_latest_launcher_rebuilds_electron_and_frontend(tmp_path, monkeyp
     )
     monkeypatch.setattr(
         "core.runtime_manager.daemon._preflight_frontend_build_for_restart",
-        lambda command_id: {"ok": True, "skipped": True, "reason": "frontend build is current"},
+        lambda command_id, *, project_root: {"ok": True, "skipped": True, "reason": "frontend build is current"},
     )
     result = desktop_shell.ensure_latest_launcher(tmp_path)
     assert result["ok"] is True
@@ -376,7 +391,7 @@ def test_ensure_latest_launcher_raises_when_frontend_preflight_fails(tmp_path, m
     )
     monkeypatch.setattr(
         "core.runtime_manager.daemon._preflight_frontend_build_for_restart",
-        lambda command_id: {"ok": False, "skipped": False, "reason": "tsc failed"},
+        lambda command_id, *, project_root: {"ok": False, "skipped": False, "reason": "tsc failed"},
     )
     try:
         desktop_shell.ensure_latest_launcher(tmp_path)
