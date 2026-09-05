@@ -161,6 +161,52 @@ describe("executeApprovedDesktopShellShutdown", () => {
     expect(result?.stopStatus).toBe("not_requested");
     vi.useRealTimers();
   });
+
+  it("fails closed when the managed runtime cannot be stopped", async () => {
+    const calls: string[] = [];
+    const result = await executeApprovedDesktopShellShutdown({
+      decision: { allowed: true, reason: "no_active_work", stopPythonLauncher: false },
+      closeDesktopSession: async () => undefined,
+      recordEvent: async (event) => {
+        calls.push(`event:${event.eventCode}`);
+      },
+      stopManagedRuntime: async () => {
+        throw new Error("runtime still alive");
+      },
+      stopPythonLauncher: async () => {
+        throw new Error("not requested");
+      },
+      approveShutdown: () => calls.push("approve-shutdown"),
+      stopDesktopActionLoop: () => calls.push("stop-action-loop"),
+      quitApp: () => calls.push("quit-app")
+    });
+
+    expect(result?.managedRuntimeError).toBe("runtime still alive");
+    expect(calls).toContain("event:electron.desktop_shell.exit_blocked_stop_failed");
+    expect(calls).not.toContain("approve-shutdown");
+    expect(calls).not.toContain("quit-app");
+  });
+
+  it("only fail-opens a stop failure when the caller explicitly authorizes force exit", async () => {
+    const calls: string[] = [];
+    await executeApprovedDesktopShellShutdown({
+      decision: { allowed: true, reason: "no_active_work", stopPythonLauncher: false },
+      closeDesktopSession: async () => undefined,
+      recordEvent: async () => undefined,
+      stopManagedRuntime: async () => {
+        throw new Error("runtime still alive");
+      },
+      stopPythonLauncher: async () => {
+        throw new Error("not requested");
+      },
+      approveShutdown: () => calls.push("approve-shutdown"),
+      stopDesktopActionLoop: () => calls.push("stop-action-loop"),
+      quitApp: () => calls.push("quit-app"),
+      forceExitOnStopFailure: true
+    });
+
+    expect(calls).toEqual(["approve-shutdown", "stop-action-loop", "quit-app"]);
+  });
 });
 
 describe("reapManagedRuntimeOnDesktopStart", () => {

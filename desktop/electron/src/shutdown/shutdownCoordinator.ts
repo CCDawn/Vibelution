@@ -5,6 +5,8 @@ export type ActiveWorkProbeState = "active" | "idle" | "unknown";
 export type ActiveWorkStatus = {
   state: ActiveWorkProbeState;
   message: string;
+  count?: number;
+  items?: Record<string, unknown>[];
 };
 
 export type ShutdownDecision =
@@ -14,7 +16,7 @@ export type ShutdownDecision =
 type ApprovedShutdownDecision = Extract<ShutdownDecision, { allowed: true }>;
 type DeniedShutdownDecision = Extract<ShutdownDecision, { allowed: false }>;
 
-const ACTIVE_WORK_BLOCK_MESSAGE = "有进行中的任务，无法重启 Vibelution。请等待任务完成或先停止任务。";
+const ACTIVE_WORK_BLOCK_MESSAGE = "有进行中的任务，无法退出 Vibelution。请等待任务完成或先停止任务。";
 const ACTIVE_WORK_STATUS_UNAVAILABLE_MESSAGE = "暂时无法确认是否有进行中的任务，已取消退出。请稍后重试。";
 
 export async function decideShutdown(input: {
@@ -58,7 +60,7 @@ export async function executeShutdownAuthorizationBoundary(input: {
   authorize: () => Promise<ShutdownDecision>;
   onDenied: (decision: DeniedShutdownDecision) => void | Promise<void>;
   runApproved: (decision: ApprovedShutdownDecision) => Promise<void>;
-  failOpenAfterApproval: (decision: ApprovedShutdownDecision, error: unknown) => Promise<void>;
+  onApprovedFailure: (decision: ApprovedShutdownDecision, error: unknown) => Promise<void>;
 }): Promise<ShutdownDecision> {
   const decision = await input.authorize();
   if (!decision.allowed) {
@@ -68,7 +70,7 @@ export async function executeShutdownAuthorizationBoundary(input: {
   try {
     await input.runApproved(decision);
   } catch (error: unknown) {
-    await input.failOpenAfterApproval(decision, error);
+    await input.onApprovedFailure(decision, error);
   }
   return decision;
 }
@@ -142,10 +144,24 @@ export async function fetchLauncherActiveWorkStatus(input: {
       message: "launcher status did not contain a valid active-work projection"
     };
   }
+  const lifecycleProof = payload.lifecycleProof;
+  const activeWorkRuns = isRecord(lifecycleProof) && isRecord(lifecycleProof.activeWorkRuns)
+    ? lifecycleProof.activeWorkRuns
+    : {};
   return {
     state: activeWorkCount > 0 ? "active" : "idle",
-    message: activeWorkCount > 0 ? `${activeWorkCount} active work item(s) block lifecycle commands.` : ""
+    message: activeWorkCount > 0 ? `${activeWorkCount} active work item(s) block lifecycle commands.` : "",
+    count: activeWorkCount,
+    items: readActiveWorkItems(activeWorkRuns)
   };
+}
+
+function readActiveWorkItems(activeWorkRuns: Record<string, unknown>): Record<string, unknown>[] {
+  const items = activeWorkRuns.items;
+  if (!Array.isArray(items)) {
+    return [];
+  }
+  return items.filter(isRecord).slice(0, 8);
 }
 
 function readActiveWorkCount(payload: Record<string, unknown>): number | null {

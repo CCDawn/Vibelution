@@ -3005,7 +3005,7 @@ def test_runtime_restart_blocks_active_work(monkeypatch):
     assert blocked_event[3]["fields"]["activeWorkCount"] == 1
     assert blocked_event[3]["fields"]["forceAvailable"] is True
 
-def test_runtime_restart_harvests_then_blocks_surviving_active_work(monkeypatch):
+def test_runtime_restart_blocks_without_stopping_active_work(monkeypatch):
     calls: list[object] = []
     self_calls: list[str] = []
     supervised_calls: list[str] = []
@@ -3054,12 +3054,10 @@ def test_runtime_restart_harvests_then_blocks_surviving_active_work(monkeypatch)
     assert detail["code"] == "active_work_restart_blocked"
     assert detail["activeWorkRuns"][0]["runId"] == "chat-turn-live"
     assert detail["forceAvailable"] is True
-    # Harvest ran (bounded) before the guard decided; the surviving turn is
-    # what finally blocks the restart.
-    assert stop_calls == ["session-live"]
-    assert len(self_calls) == 1
-    assert len(supervised_calls) == 1
-    assert len(worktree_calls) == 1
+    assert stop_calls == []
+    assert self_calls == []
+    assert supervised_calls == []
+    assert worktree_calls == []
     assert calls == []
 
 def test_runtime_shutdown_blocks_active_chat_turn_before_manager_close(tmp_path, monkeypatch):
@@ -3144,7 +3142,7 @@ def test_runtime_shutdown_blocks_active_chat_turn_before_manager_close(tmp_path,
         session_service._clear_session_live_output("session-live")
 
 @pytest.mark.slow
-def test_runtime_shutdown_harvests_active_chat_room_round_then_queues_manager_close(tmp_path, monkeypatch):
+def test_runtime_shutdown_blocks_active_chat_room_round_without_stopping_it(tmp_path, monkeypatch):
     scene_events: list[tuple[str, str, str, dict]] = []
 
     def record_scene_event(component, phase, event_code, **kwargs):
@@ -3207,37 +3205,25 @@ def test_runtime_shutdown_harvests_active_chat_room_round_then_queues_manager_cl
     try:
         response = client.post("/api/runtime/shutdown", json={"source": "web_ui", "reason": "web_close_button"})
 
-        # Harvest-first: the active round is stopped (bounded) instead of the
-        # shutdown being blocked, so the manager close proceeds.
-        assert response.status_code == 202, json.dumps(response.json(), ensure_ascii=False, default=str)
-        payload = response.json()
-        assert payload["accepted"] is True
-        assert payload["mode"] == "runtime_manager"
-        assert payload["chatRoomRounds"][0]["runId"] == round_id
-        assert payload["chatRoomRounds"][0]["status"] == "stopped"
-        assert calls == [
-            "ensure",
-            ("close_workbench", {"reason": "web_close_button", "source": "web_ui", "stopManager": False}, "web_ui"),
-        ]
+        assert response.status_code == 409, json.dumps(response.json(), ensure_ascii=False, default=str)
+        payload = response.json()["detail"]
+        assert payload["code"] == "active_work_stop_blocked"
+        assert payload["activeWorkRuns"][0]["runId"] == round_id
+        assert calls == []
         final_detail = chat_room_service.get_chat_room_detail(room["roomId"])
-        assert final_detail["status"] == "ready"
-        assert final_detail["activeRoundId"] == ""
-        assert final_detail["rounds"][-1]["status"] == "stopped"
-        assert chat_room_service.load_chat_room_work_run_summary()["active"] is None
+        assert final_detail["status"] == "running"
+        assert final_detail["activeRoundId"] == round_id
         harvest_events = [item for item in scene_events if item[2] == "runtime.shutdown.harvest_action"]
-        assert any(
-            item[3]["fields"].get("runId") == round_id and item[3]["outcome"] == "stopped"
-            for item in harvest_events
-        )
+        assert harvest_events == []
         event_codes = [item[2] for item in scene_events]
-        assert "runtime.shutdown.blocked_active_work" not in event_codes
-        assert "runtime.shutdown.accepted" in event_codes
+        assert "runtime.shutdown.blocked_active_work" in event_codes
+        assert "runtime.shutdown.accepted" not in event_codes
     finally:
         release_room.set()
         room_executor.shutdown(wait=True, cancel_futures=True)
 
 
-def test_runtime_shutdown_harvests_active_source_collection_before_local_retire(monkeypatch):
+def test_runtime_shutdown_blocks_active_source_collection_without_stopping_it(monkeypatch):
     active = True
     stop_calls: list[tuple[str, str, str]] = []
     exit_calls: list[str] = []
@@ -3290,27 +3276,11 @@ def test_runtime_shutdown_harvests_active_source_collection_before_local_retire(
 
     response = client.post("/api/runtime/shutdown")
 
-    assert response.status_code == 202
-    payload = response.json()
-    assert payload["accepted"] is True
-    assert payload["mode"] == "local_retire"
-    assert payload["sourceCollectionRuns"] == [
-        {
-            "kind": "source_collection_run",
-            "runId": "source-collection-live",
-            "teamId": "research-team",
-            "status": "stopped",
-            "terminalStatus": "cancelled",
-        }
-    ]
-    assert stop_calls == [
-        (
-            "research-team",
-            "source-collection-live",
-            "Stopped active source collection before workbench shutdown.",
-        )
-    ]
-    assert exit_calls == ["local"]
+    assert response.status_code == 409
+    payload = response.json()["detail"]
+    assert payload["activeWorkRuns"][0]["runId"] == "source-collection-live"
+    assert stop_calls == []
+    assert exit_calls == []
 
 
 def test_runtime_shutdown_blocks_active_evolution_runs_before_manager_close(tmp_path, monkeypatch):
@@ -3373,11 +3343,9 @@ def test_runtime_shutdown_blocks_active_evolution_runs_before_manager_close(tmp_
         "web-supervised-active",
         "web-worktree-active",
     }
-    # Harvest ran before the guard decided; the projection still reports the
-    # three runs as running, so the shutdown stays blocked with force semantics.
-    assert len(self_calls) == 1
-    assert len(supervised_calls) == 1
-    assert len(worktree_calls) == 1
+    assert self_calls == []
+    assert supervised_calls == []
+    assert worktree_calls == []
     assert calls == []
 
 def test_runtime_shutdown_blocks_active_chat_turn_when_stop_fails(tmp_path, monkeypatch):
@@ -3418,18 +3386,11 @@ def test_runtime_shutdown_blocks_active_chat_turn_when_stop_fails(tmp_path, monk
     assert detail["activeWorkRuns"][0]["runId"] == "chat-turn-live"
     assert detail["forceAvailable"] is True
     assert detail["forceChannelHint"]
-    # Harvest attempts the stop (bounded) before the guard blocks the shutdown.
-    assert stop_calls == ["session-live"]
+    assert stop_calls == []
     assert calls == []
 
-def test_runtime_shutdown_blocks_with_force_available_when_room_stop_channel_hangs(monkeypatch):
-    """Incident regression: a wedged room stop channel must not hang shutdown.
-
-    Production (2026-08-31): a deadlocked chat room runner held the room stop
-    channel forever; the active-work guard blocked shutdown while pointing at
-    that same channel, leaving the process unstoppable from inside. Shutdown
-    must now harvest with bounded waits, then block with forceAvailable.
-    """
+def test_runtime_shutdown_does_not_enter_a_wedged_room_stop_channel(monkeypatch):
+    """Normal shutdown guards before the stop channel and returns promptly."""
 
     scene_events: list[tuple[str, str, str, dict]] = []
 
@@ -3497,25 +3458,17 @@ def test_runtime_shutdown_blocks_with_force_available_when_room_stop_channel_han
 
     elapsed_seconds = time.monotonic() - started_at
     assert response.status_code == 409
-    # The wedged stop channel must degrade into a bounded block, not a hang.
-    assert elapsed_seconds < 10.0
+    assert elapsed_seconds < 2.0
     detail = response.json()["detail"]
     assert detail["code"] == "active_work_stop_blocked"
     assert detail["activeWorkRuns"][0]["runId"] == "room-round-zombie"
     assert detail["forceAvailable"] is True
     assert detail["forceChannelHint"]
-    # The lock-free light path (stop flag + reservation cancel) still applied.
-    assert [item[0] for item in light_flags] == ["room-round-zombie"]
+    assert light_flags == []
     event_codes = [item[2] for item in scene_events]
-    assert "runtime.shutdown.harvest_action" in event_codes
-    harvest_events = [item for item in scene_events if item[2] == "runtime.shutdown.harvest_action"]
-    assert any(
-        item[3]["fields"].get("runId") == "room-round-zombie" and item[3]["outcome"] == "timeout"
-        for item in harvest_events
-    )
+    assert "runtime.shutdown.harvest_action" not in event_codes
     blocked_event = next(item for item in scene_events if item[2] == "runtime.shutdown.blocked_active_work")
     assert blocked_event[3]["fields"]["forceAvailable"] is True
-    assert blocked_event[3]["fields"]["unharvestedWorkRuns"][0]["runId"] == "room-round-zombie"
 
 def test_runtime_shutdown_falls_back_to_launcher_stop_when_manager_queue_fails(tmp_path, monkeypatch):
     script_path = tmp_path / "vibelution_launcher.ps1"
