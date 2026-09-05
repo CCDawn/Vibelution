@@ -5110,6 +5110,52 @@ def _submit_auto_knowledge_handoff_accept(
     return "accepted", f"resolve_human_task:{receipt_status or 'submitted'}"
 
 
+def auto_open_grounded_generation(team_id: str, *, question_id: str) -> dict[str, Any]:
+    """Consume the normal R0-to-R1 offer through the same command as the UI.
+
+    A completed exploratory round is not a failed generation to retry. The
+    existing projection owns the join with accepted knowledge, and the command
+    rechecks that offer under the question lock before opening its idempotent
+    meeting. No new run, R0 replay, or experiment action is submitted here.
+    """
+    from .hypothesis_first_state_v2 import project_hypothesis_first_state_v2
+
+    summary: dict[str, Any] = {"opened": 0, "failed": 0}
+    try:
+        snapshot = project_hypothesis_first_state_v2(team_id, question_id)
+        action = next((
+            item for item in snapshot.get("allowedActions", [])
+            if item.get("actionId") == "open-stage-one-generation"
+            and item.get("command") == "open_generation"
+            and item.get("enabled") is True
+        ), None)
+        if action is None:
+            return summary
+        execute_v2_command(team_id, {
+            **action,
+            "expectedStateVersion": snapshot["stateVersion"],
+        }, question_id=question_id)
+        summary["opened"] = 1
+    except HypothesisFirstChainError:
+        # The package or offer moved after projection; the owning command
+        # rejected before launch and the next maintenance pass will re-read.
+        return summary
+    except Exception as exc:  # noqa: BLE001 - isolate one question
+        summary["failed"] = 1
+        _record_scene_event(
+            "hypothesis_first.auto_open_grounded_generation", outcome="failed",
+            level="warning", fields={"teamId": team_id, "questionId": question_id,
+                                     "errorType": type(exc).__name__},
+        )
+        return summary
+    _record_scene_event(
+        "hypothesis_first.auto_open_grounded_generation", outcome="opened",
+        fields={"teamId": team_id, "questionId": question_id,
+                "runId": str((action.get("payload") or {}).get("runId") or "")},
+    )
+    return summary
+
+
 def sweep_auto_advance_closure() -> dict[str, Any]:
     """Maintenance sweep: auto-advance every exhausted hypothesis chain.
 
@@ -5240,6 +5286,10 @@ def sweep_auto_advance_closure() -> dict[str, Any]:
                     team_id, question_id=question_id
                 )
                 summary["retried"] += int(retry_summary.get("retried") or 0)
+                grounded_generation = auto_open_grounded_generation(
+                    team_id, question_id=question_id
+                )
+                summary["failed"] += int(grounded_generation.get("failed") or 0)
                 # Step four, every question every pass: execute the
                 # retry-review-dispatch recovery for a fenced review meeting
                 # whose discussion really completed (the offer 068c92ba5 made

@@ -3855,11 +3855,11 @@ def _freeze_template_baseline(team_id: str, agent_id: str) -> dict:
     return created["baseline"]
 
 
-def _open_first_meeting(team_id: str, agent_ids: list[str]) -> dict:
+def _open_first_meeting(team_id: str, agent_ids: list[str], *, agent_runner=None) -> dict:
     recorded = selections.record_hypothesis_selection(
         team_id,
         _selection_payload(agent_ids[0]),
-        agent_runner=_marker_runner,
+        agent_runner=agent_runner or _marker_runner,
     )
     assert recorded["status"] == "created"
     review = recorded["reviewMeeting"]
@@ -4736,6 +4736,20 @@ def test_interruption_recovery_preserves_rounds_and_idempotency(
         runtime.close()
 
 
+def _structured_review_fixture_runner(participant, prompt, context):
+    # Ledger-bound meetings require the current JSON message contract, even
+    # when a deterministic test runner supplies their content.
+    return {"status": "completed", "summary": "ok", "raw_output": json.dumps({
+        "schemaVersion": 1,
+        "display": {"conclusion": "Review fixture completed", "sections": []},
+        "protocol": {
+            "agreements": ["hyp-a has sufficient mechanism evidence"],
+            "disagreements": [], "risks": [], "actionItems": [],
+            "knowledgeCandidates": [], "proposedCandidates": [], "evidenceRequests": [],
+        },
+    })}
+
+
 def test_close_reports_failed_hypothesis_round_without_rollback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -4756,7 +4770,7 @@ def test_close_reports_failed_hypothesis_round_without_rollback(
         agent_ids = [agents[role] for role in _ROLES]
 
         with server_operator_scope("u-1", roles=("operator",)):
-            recorded = _open_first_meeting(team_id, agent_ids)
+            recorded = _open_first_meeting(team_id, agent_ids, agent_runner=_structured_review_fixture_runner)
             sibling_meetings = _review_meetings(recorded)
             assert len(sibling_meetings) == 2
             first_meeting_id = sibling_meetings[0]["meetingRoundId"]
@@ -7812,7 +7826,7 @@ def test_round_failure_traces_persist_and_backfill_on_retry(
         agent_ids = [agents[role] for role in _ROLES]
 
         with server_operator_scope("u-1", roles=("operator",)):
-            recorded = _open_first_meeting(team_id, agent_ids)
+            recorded = _open_first_meeting(team_id, agent_ids, agent_runner=_structured_review_fixture_runner)
             sibling_meetings = _review_meetings(recorded)
             assert len(sibling_meetings) == 2
             first_meeting_id = sibling_meetings[0]["meetingRoundId"]

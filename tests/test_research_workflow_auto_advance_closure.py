@@ -61,6 +61,7 @@ def _sweep_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
     reset_formal_write_runtime_for_tests()
+    monkeypatch.setattr(chain, "auto_open_grounded_generation", lambda *args, **kwargs: {})
     monkeypatch.setattr(hrounds, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chain, "PROJECT_ROOT", tmp_path)
     # The sweep's approve step enumerates meeting rounds; keep that store on
@@ -3262,3 +3263,42 @@ def test_maintenance_sweep_accepts_knowledge_handoffs_after_create(
     adjudications = _adjudications(ledger_path)
     assert len(adjudications) == 1
     assert adjudications[0]["decision"] == "accepted"
+
+
+@pytest.mark.parametrize("eligible", [False, True])
+def test_grounded_generation_auto_consumes_only_normal_r1_offer(
+    monkeypatch: pytest.MonkeyPatch, eligible: bool,
+) -> None:
+    from core.web.services.team_workflow.research_runtime import hypothesis_first_state_v2
+    action = {
+        "actionId": "open-stage-one-generation", "command": "open_generation",
+        "enabled": eligible, "payload": {"questionId": _QUESTION_ID, "runId": "run-r1"},
+        "idempotencyKey": "r1-offer", "expectedStateVersion": "action-version",
+    }
+    monkeypatch.setattr(hypothesis_first_state_v2, "project_hypothesis_first_state_v2",
+                        lambda *args: {"stateVersion": "fresh-version", "allowedActions": [action]})
+    requests = []
+    monkeypatch.setattr(chain, "execute_v2_command",
+                        lambda *args, **kwargs: requests.append((args, kwargs)) or {})
+    _capture_scene_events(monkeypatch)
+    assert chain.auto_open_grounded_generation(_TEAM_ID, question_id=_QUESTION_ID) == {
+        "opened": int(eligible), "failed": 0,
+    }
+    assert len(requests) == int(eligible)
+    if eligible:
+        assert requests[0][0] == (_TEAM_ID, {**action, "expectedStateVersion": "fresh-version"})
+        assert requests[0][1] == {"question_id": _QUESTION_ID}
+
+
+def test_sweep_automatically_launches_r1_after_knowledge_accept_and_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _sweep_env(tmp_path, monkeypatch)
+    order = []
+    for name, label in [("auto_accept_knowledge_handoffs", "accept"),
+                        ("auto_retry_blocked_formal_nodes", "retry"),
+                        ("auto_open_grounded_generation", "r1")]:
+        monkeypatch.setattr(chain, name,
+                            lambda *args, _label=label, **kwargs: order.append(_label) or {})
+    chain.sweep_auto_advance_closure()
+    assert order == ["accept", "retry", "r1"]
