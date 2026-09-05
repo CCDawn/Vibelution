@@ -240,7 +240,7 @@ const graph = composeKnowledgeSideflowGraph(withHypothesisFirst, region); // reg
 
 ### 功能
 
-科研流程画布的**显示层第三类区域**：截断定义（`challenge-cup-research@2.2.0-stage-one`，七节点、`hypothesis_design` 唯一终端）的运行画布上，把「研究计划与实验」阶段的十节点（`protocol_design` → `result_package`）以灰置「未激活」组追加在主图之后，让「第一阶段（假说生成）/第二阶段（研究计划与实验）」的分区在画布上持续可见。数据源是前端契约副本 `CHALLENGE_CUP_NODE_IDS` + 静态镜像 `core/research/workflow/definition.py` 的标签/actor，**不含任何运行时状态**：所有节点 `pending`、阶段 `stageTone: idle`、描述统一为「第二阶段未激活，需按题显式开启」。区域由路由层纯函数 `buildStageTwoInactiveCanvasRegion`（`routes/teams/research-workflow/stageTwoCanvasRegion.ts`）产出 `{ stage, nodes, edges }`，经 `composeStageTwoInactiveGraph` 拼进主图；边界边（`hypothesis_design` → `protocol_design`，常显「需按题显式开启」）只是显示层语义，不触发任何动作。
+科研流程画布的**显示层第三类区域**：截断定义（`challenge-cup-research@2.2.0-stage-one`，七节点、`hypothesis_design` 唯一终端）的运行画布上，把「研究计划与实验」阶段的十节点（`protocol_design` → `result_package`）以灰置「未激活」组追加在主图之后，让「第一阶段（假说生成）/第二阶段（研究计划与实验）」的分区在画布上持续可见。数据源是前端契约副本 `CHALLENGE_CUP_NODE_IDS` + 静态镜像 `core/research/workflow/definition.py` 的节点和边拓扑，**不含任何运行时状态**：所有节点 `pending`、阶段 `stageTone: idle`、描述统一为「第二阶段未激活，需按题显式开启」。区域保留 `iteration_decision` 的四条当前运行分支（`rerun/promote/rollback/stop`）及相应 source handle；`revise` 属于子运行谱系，不生成当前运行边。区域由路由层纯函数 `buildStageTwoInactiveCanvasRegion`（`routes/teams/research-workflow/stageTwoCanvasRegion.ts`）产出 `{ stage, nodes, edges }`，经 `composeStageTwoInactiveGraph` 拼进主图；边界边（`hypothesis_design` → `protocol_design`，常显「需按题显式开启」）只是显示层语义，不触发任何动作。
 
 ### 适用范围
 

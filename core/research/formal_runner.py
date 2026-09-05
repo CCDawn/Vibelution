@@ -11,6 +11,7 @@ This module deliberately keeps the process boundary small:
 from __future__ import annotations
 
 import json
+import hashlib
 import statistics
 import subprocess
 from pathlib import Path
@@ -22,7 +23,14 @@ from vibelution_storage import resolve_project_data_home
 
 
 FASHION_MNIST_MULTI_SEED_ADAPTER = "fashion_mnist_predictive_coding_multi_seed"
+SCI096_DANDI_SPIKE_ADAPTER = "challenge_cup_sci096_dandi_probe"
+SCI096_DANDISET_ID = "000140"
+SCI096_DANDISET_VERSION = "0.220113.0408"
+SCI096_DANDI_ASSET_ID = "7821971e-c6a4-4568-8773-1bfa205c13f8"
 _TRUSTED_SCRIPT_RELATIVE_PATH = Path("experiments/challenge_cup_predictive_coding/fashion_mnist_smoke.py")
+_SCI096_SCRIPT_RELATIVE_PATH = Path(
+    "experiments/challenge_cup_spike_coding/sci096_dandi_probe.py"
+)
 _MIN_SEED_COUNT = 3
 _MAX_SEED_COUNT = 8
 _SELF_CHECK_TIMEOUT_SECONDS = 45
@@ -48,7 +56,14 @@ def prepare_full_run(
     model, writes a result artifact, or changes a research-plan state.
     """
 
-    if str(adapter_id or "").strip() != FASHION_MNIST_MULTI_SEED_ADAPTER:
+    normalized_adapter_id = str(adapter_id or "").strip()
+    if normalized_adapter_id == SCI096_DANDI_SPIKE_ADAPTER:
+        return _prepare_sci096_dandi_probe(
+            method_config=method_config,
+            execution_config=execution_config,
+            project_root=project_root,
+        )
+    if normalized_adapter_id != FASHION_MNIST_MULTI_SEED_ADAPTER:
         raise FormalRunnerError(f"Unsupported formal adapter: {adapter_id!r}")
     root = _project_root(project_root)
     script_path = root / _TRUSTED_SCRIPT_RELATIVE_PATH
@@ -222,6 +237,14 @@ def run_full_run(
     """
 
     root = _project_root(project_root)
+    normalized_adapter_id = str(adapter_id or "").strip()
+    if normalized_adapter_id == SCI096_DANDI_SPIKE_ADAPTER:
+        return _run_single_artifact_full_run(
+            normalized_adapter_id,
+            method_config=method_config,
+            execution_config=execution_config,
+            project_root=root,
+        )
     prepared = prepare_full_run(
         adapter_id,
         method_config=method_config,
@@ -300,6 +323,189 @@ def run_full_run(
     return result
 
 
+def _prepare_sci096_dandi_probe(
+    *,
+    method_config: dict[str, Any] | None,
+    execution_config: dict[str, Any] | None,
+    project_root: Path | str | None,
+) -> dict[str, Any]:
+    root = _project_root(project_root)
+    method = method_config if isinstance(method_config, dict) else {}
+    execution = execution_config if isinstance(execution_config, dict) else {}
+    script_path = root / _SCI096_SCRIPT_RELATIVE_PATH
+    if not script_path.is_file():
+        raise FormalRunnerError(f"Trusted experiment script is unavailable: {script_path}")
+    python_executable = _required_path(
+        execution.get("pythonExecutable"),
+        "pythonExecutable",
+        kind="file",
+    )
+    input_nwb = _required_path(execution.get("inputNwb"), "inputNwb", kind="file")
+    expected_sha256 = str(execution.get("expectedInputSha256") or "").strip().lower()
+    actual_sha256 = _sha256_file(input_nwb)
+    if len(expected_sha256) != 64 or actual_sha256 != expected_sha256:
+        raise FormalRunnerError("expectedInputSha256 does not match the frozen NWB asset.")
+    dataset = {
+        "dandisetId": str(method.get("dandisetId") or "").strip(),
+        "dandisetVersion": str(method.get("dandisetVersion") or "").strip(),
+        "assetId": str(method.get("assetId") or "").strip(),
+        "sha256": actual_sha256,
+        "inputNwb": str(input_nwb),
+    }
+    expected_dataset_identity = {
+        "dandisetId": SCI096_DANDISET_ID,
+        "dandisetVersion": SCI096_DANDISET_VERSION,
+        "assetId": SCI096_DANDI_ASSET_ID,
+    }
+    if any(
+        dataset[key] != expected_value
+        for key, expected_value in expected_dataset_identity.items()
+    ):
+        raise FormalRunnerError(
+            "SCI-096 formal adapter only supports its frozen DANDI dataset version and asset id."
+        )
+    output_root = assert_canonical_project_data_path(
+        execution.get("outputRoot"),
+        project_root=root,
+        label="outputRoot",
+        create=True,
+    )
+    self_check = _run_process(
+        [str(python_executable), str(script_path), "--self-check"],
+        cwd=root,
+        timeout_seconds=_SELF_CHECK_TIMEOUT_SECONDS,
+    )
+    if self_check.returncode != 0:
+        raise FormalRunnerError(
+            "SCI-096 environment preflight failed: " + _process_error(self_check)
+        )
+    output_path = output_root / "sci096-dandi-probe-result.json"
+    return {
+        "adapterId": SCI096_DANDI_SPIKE_ADAPTER,
+        "status": "prepared",
+        "executionMode": "local_process",
+        "commands": [
+            {
+                "args": [
+                    str(python_executable),
+                    str(script_path),
+                    "--input-nwb",
+                    str(input_nwb),
+                    "--output",
+                    str(output_path),
+                ],
+                "outputPath": str(output_path),
+            }
+        ],
+        "timeoutSecondsPerCommand": _bounded_int(
+            execution.get("timeoutSeconds", 1800),
+            "timeoutSeconds",
+            minimum=_MIN_TIMEOUT_SECONDS,
+            maximum=_MAX_TIMEOUT_SECONDS,
+        ),
+        "environment": {
+            "pythonExecutable": str(python_executable),
+            "outputRoot": str(output_root),
+            "scriptPath": str(script_path),
+            "selfCheck": _clip_process_output(self_check),
+        },
+        "dataset": dataset,
+        "boundaries": [
+            "trusted_repository_script_only",
+            "shell_disabled",
+            "windowless_subprocess",
+            "artifacts_inside_current_instance_canonical_data_root",
+            "frozen_dandiset_version",
+            "frozen_asset_id",
+            "verified_nwb_sha256",
+            "manual_result_review_required",
+            "offline_decoding_does_not_prove_biological_readout",
+            "not_an_official_competition_submission",
+        ],
+    }
+
+
+def _run_single_artifact_full_run(
+    adapter_id: str,
+    *,
+    method_config: dict[str, Any] | None,
+    execution_config: dict[str, Any] | None,
+    project_root: Path,
+) -> dict[str, Any]:
+    prepared = prepare_full_run(
+        adapter_id,
+        method_config=method_config,
+        execution_config=execution_config,
+        project_root=project_root,
+    )
+    command = prepared["commands"][0]
+    completed = _run_process(
+        list(command["args"]),
+        cwd=project_root,
+        timeout_seconds=int(prepared["timeoutSecondsPerCommand"]),
+    )
+    if completed.returncode != 0:
+        raise FormalRunnerError(
+            f"Formal run failed: {_process_error(completed)}"
+        )
+    output_path = Path(str(command["outputPath"]))
+    if not output_path.is_file():
+        raise FormalRunnerError("Formal run did not create its result artifact.")
+    try:
+        artifact = json.loads(output_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise FormalRunnerError(f"Unable to read formal result artifact: {exc}") from exc
+    if not isinstance(artifact, dict):
+        raise FormalRunnerError("Formal result artifact must be a JSON object.")
+    if adapter_id == SCI096_DANDI_SPIKE_ADAPTER:
+        dataset = artifact.get("dataset") if isinstance(artifact.get("dataset"), dict) else {}
+        if str(dataset.get("sha256") or "").lower() != prepared["dataset"]["sha256"]:
+            raise FormalRunnerError("SCI-096 result does not preserve the frozen asset hash.")
+        artifact_identity = {
+            "dandisetId": str(dataset.get("dandiset_id") or ""),
+            "dandisetVersion": str(dataset.get("version") or ""),
+            "assetId": str(dataset.get("asset_id") or ""),
+        }
+        if any(
+            artifact_identity[key] != prepared["dataset"][key]
+            for key in artifact_identity
+        ):
+            raise FormalRunnerError(
+                "SCI-096 result does not preserve the frozen DANDI dataset identity."
+            )
+    output_root = Path(str(prepared["environment"]["outputRoot"]))
+    log_path = output_root / "formal-run-log.json"
+    summary_path = output_root / "formal-run-result.json"
+    atomic_write_json(
+        log_path,
+        {
+            "adapterId": adapter_id,
+            "processes": [
+                {
+                    "exitCode": int(completed.returncode),
+                    "stdout": _clip_text(completed.stdout),
+                    "stderr": _clip_text(completed.stderr),
+                }
+            ],
+        },
+    )
+    result = {
+        "adapterId": adapter_id,
+        "status": "completed",
+        "executionMode": "local_process",
+        "artifactPath": str(output_path),
+        "artifactHash": f"sha256:{_sha256_file(output_path)}",
+        "artifact": artifact,
+        "resultPath": str(summary_path),
+        "logRef": str(log_path),
+        "requiresResultReview": True,
+        "automaticPromotion": False,
+        "boundaries": list(prepared["boundaries"]),
+    }
+    atomic_write_json(summary_path, result)
+    return result
+
+
 def _project_root(value: Path | str | None) -> Path:
     root = Path(value) if value is not None else Path.cwd()
     return root.expanduser().resolve()
@@ -318,6 +524,14 @@ def _required_path(value: Any, label: str, *, kind: str) -> Path:
     if kind == "directory" and not resolved.is_dir():
         raise FormalRunnerError(f"{label} must reference an existing directory.")
     return resolved
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def assert_canonical_project_data_path(

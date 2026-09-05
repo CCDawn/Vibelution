@@ -28,6 +28,7 @@ EXPECTED_SOURCE_COUNT = 33
 MIGRATION_ACTION = "challenge_cup.knowledge_items.migrated"
 TERMINAL_ACTION = "challenge_cup.knowledge_migration.completed"
 DIRECT_INGEST_ACTION = "knowledge.item.direct_ingested"
+PURGE_TERMINAL_ACTION = "challenge_cup.legacy_knowledge_purge.completed"
 _CANDIDATE_TAGS = {"pending-review", "pending_review", "candidate-only", "candidate_only"}
 
 
@@ -128,6 +129,133 @@ def _source_content(proposal: dict[str, Any], candidate: dict[str, Any]) -> str:
     return json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
 
 
+def _recover_candidate_from_data_record(
+    *,
+    workspace_root: Path,
+    team_id: str,
+    candidate_id: str,
+    source_collection_run_id: str,
+    content_source: dict[str, Any],
+    projects_by_id: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    run_root = workspace_root / "data_processing" / "runs" / source_collection_run_id
+    run_path = run_root / "run.json"
+    records_path = run_root / "records.jsonl"
+    assignments_path = run_root / "collection_assignments.jsonl"
+    if not run_path.is_file() or not records_path.is_file() or not assignments_path.is_file():
+        raise ChallengeCupKnowledgeMigrationError(
+            f"Source {candidate_id} has no complete authoritative DataRecord run artifacts."
+        )
+
+    run = _read_json(run_path)
+    if str(run.get("runId") or "").strip() != source_collection_run_id:
+        raise ChallengeCupKnowledgeMigrationError(f"Source {candidate_id} DataRecord run identity does not match its lineage.")
+    run_scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
+    run_metadata = run.get("metadata") if isinstance(run.get("metadata"), dict) else {}
+    run_team_id = str(run_scope.get("teamId") or run_metadata.get("teamId") or "").strip()
+    research_project_id = str(
+        run_scope.get("researchProjectId") or run_metadata.get("researchProjectId") or ""
+    ).strip()
+    run_question_id = str(run_scope.get("questionId") or run_metadata.get("questionId") or "").strip()
+    project = projects_by_id.get(research_project_id) or {}
+    project_question_id = str(project.get("challengeQuestionId") or project.get("questionId") or "").strip()
+    if run_team_id != team_id or not research_project_id or not project_question_id or run_question_id != project_question_id:
+        raise ChallengeCupKnowledgeMigrationError(
+            f"Source {candidate_id} DataRecord run has conflicting team, project, or question scope."
+        )
+
+    claims = [
+        claim
+        for claim in list(_proposal_payload(content_source).get("claims") or [])
+        if isinstance(claim, dict)
+        and str(claim.get("sourceRef") or claim.get("sourceCandidateId") or "").strip() == candidate_id
+    ]
+    claim_texts = [str(claim.get("claim") or claim.get("fact") or "").strip() for claim in claims]
+    if len(claim_texts) != 1 or not claim_texts[0]:
+        raise ChallengeCupKnowledgeMigrationError(
+            f"Source {candidate_id} requires exactly one legacy claim for DataRecord recovery."
+        )
+    matching_records = [
+        record
+        for record in _read_jsonl(records_path)
+        if str(record.get("runId") or "").strip() == source_collection_run_id
+        and str(record.get("summary") or "").strip() == claim_texts[0]
+    ]
+    if len(matching_records) != 1:
+        raise ChallengeCupKnowledgeMigrationError(
+            f"Source {candidate_id} requires one unique matching DataRecord, found {len(matching_records)}."
+        )
+    record = matching_records[0]
+    record_id = str(record.get("recordId") or "").strip()
+    title = str(record.get("title") or "").strip()
+    source_url = str(record.get("sourceRef") or record.get("rawLocation") or "").strip()
+    record_metadata = record.get("metadata") if isinstance(record.get("metadata"), dict) else {}
+    quality_signals = record.get("qualitySignals") if isinstance(record.get("qualitySignals"), dict) else {}
+    collection_trace = record.get("collectionTrace") if isinstance(record.get("collectionTrace"), dict) else {}
+    source_identity_key = str(
+        record_metadata.get("sourceIdentityKey") or quality_signals.get("sourceIdentityKey") or ""
+    ).strip()
+    source_agent_id = str(
+        collection_trace.get("agentId") or record_metadata.get("sourceCollectionStageAgentId") or ""
+    ).strip()
+    assignment_agent_ids = {
+        str(assignment.get("agentId") or "").strip()
+        for assignment in _read_jsonl(assignments_path)
+        if str(assignment.get("agentId") or "").strip()
+    }
+    if not record_id or not title or not source_url.startswith("https://") or not source_identity_key:
+        raise ChallengeCupKnowledgeMigrationError(
+            f"Source {candidate_id} matching DataRecord lacks title, https URL, record identity, or source identity."
+        )
+    if not source_agent_id or source_agent_id not in assignment_agent_ids:
+        raise ChallengeCupKnowledgeMigrationError(
+            f"Source {candidate_id} matching DataRecord has no trusted run-assigned source Agent."
+        )
+
+    imported_from = {
+        "runId": source_collection_run_id,
+        "recordId": record_id,
+        "profileId": str(run.get("profileId") or "").strip(),
+        "sourceType": str(record.get("sourceType") or "").strip(),
+        "sourceRef": source_url,
+        "title": title,
+        "sourceIdentityKey": source_identity_key,
+    }
+    return {
+        "candidateId": candidate_id,
+        "candidateType": "source_manifest",
+        "teamId": team_id,
+        "title": title,
+        "summary": claim_texts[0],
+        "sourceUrl": source_url,
+        "sourcePath": "",
+        "sourceKind": str(record.get("sourceType") or "unknown").strip() or "unknown",
+        "createdByAgent": source_agent_id,
+        "qualityStatus": "source_quality_approved",
+        "evidenceRefs": [
+            {"type": "data_record", "id": record_id, "label": title},
+            {
+                "type": "data_processing_run",
+                "id": source_collection_run_id,
+                "label": str(run.get("title") or source_collection_run_id).strip(),
+            },
+        ],
+        "metadata": {
+            "researchProjectId": research_project_id,
+            "sourceCollectionRunId": source_collection_run_id,
+            "sourceIdentityKey": source_identity_key,
+            "sourceRecordId": record_id,
+            "importedFromDataRecord": imported_from,
+            "migrationRecovery": {
+                "sourceCollectionRunId": source_collection_run_id,
+                "sourceRecordId": record_id,
+            },
+        },
+        "createdAt": str(record.get("createdAt") or "").strip(),
+        "updatedAt": str(record.get("updatedAt") or record.get("createdAt") or "").strip(),
+    }
+
+
 def _knowledge_manager_id(team: dict[str, Any]) -> str:
     matches = [
         str(member.get("agentId") or "").strip()
@@ -148,6 +276,7 @@ def build_migration_plan(
     migration_id: str,
     operator_agent_id: str,
     backup_root: Path | None = None,
+    legacy_snapshot_root: Path | None = None,
 ) -> dict[str, Any]:
     required = {
         "teamId": team_id,
@@ -199,6 +328,7 @@ def build_migration_plan(
     items = _read_jsonl(paths["items"])
     audit = _read_jsonl(paths["audit"])
     source_artifacts = _read_jsonl(paths["source_artifacts"])
+    live_records = {"proposals": proposals, "batches": batches, "items": items, "audit": audit}
 
     completed = [
         row for row in audit
@@ -211,6 +341,72 @@ def build_migration_plan(
         if len(replacements) == EXPECTED_SOURCE_COUNT and set(replacements).issubset(current_ids):
             return {"status": "already_applied", "migrationId": migration_id, "replacementKnowledgeItemIds": replacements}
         raise ChallengeCupKnowledgeMigrationError("Migration audit exists but replacement knowledge is incomplete.")
+
+    resume_from_purge_id = ""
+    legacy_snapshot_manifest_hash = ""
+    legacy_audit = audit
+    snapshot_manifest: dict[str, Any] = {}
+    if legacy_snapshot_root is not None:
+        snapshot_root = Path(legacy_snapshot_root).resolve()
+        required_snapshot_files = {
+            "manifest": snapshot_root / "manifest.json",
+            "proposals": snapshot_root / "proposals.jsonl",
+            "batches": snapshot_root / "batches.jsonl",
+            "items": snapshot_root / "items.jsonl",
+            "audit": snapshot_root / "audit.jsonl",
+        }
+        missing_snapshot_files = [name for name, path in required_snapshot_files.items() if not path.is_file()]
+        if missing_snapshot_files:
+            raise ChallengeCupKnowledgeMigrationError(
+                f"Legacy snapshot is incomplete: {', '.join(sorted(missing_snapshot_files))}."
+            )
+        snapshot_manifest = _read_json(required_snapshot_files["manifest"])
+        resume_from_purge_id = str(snapshot_manifest.get("purgeId") or "").strip()
+        if (
+            snapshot_manifest.get("status") != "ready"
+            or str(snapshot_manifest.get("teamId") or "").strip() != team_id
+            or str(snapshot_manifest.get("knowledgeBaseId") or "").strip() != raw_base_id
+            or not resume_from_purge_id
+        ):
+            raise ChallengeCupKnowledgeMigrationError("Legacy snapshot is not a matching Challenge Cup purge backup.")
+        snapshot_item_ids = {
+            str(value or "").strip()
+            for value in list(snapshot_manifest.get("legacyKnowledgeItemIds") or [])
+            if str(value or "").strip()
+        }
+        snapshot_batch_ids = {
+            str(value or "").strip()
+            for value in list(snapshot_manifest.get("legacyBatchIds") or [])
+            if str(value or "").strip()
+        }
+        snapshot_proposal_ids = {
+            str(value or "").strip()
+            for value in list(snapshot_manifest.get("legacyProposalIds") or [])
+            if str(value or "").strip()
+        }
+        if len(snapshot_item_ids) != EXPECTED_LEGACY_COUNT or len(snapshot_batch_ids) != EXPECTED_LEGACY_COUNT:
+            raise ChallengeCupKnowledgeMigrationError("Legacy snapshot does not contain exactly 5 item/batch targets.")
+        if (
+            snapshot_item_ids & {str(row.get("knowledgeItemId") or "").strip() for row in items}
+            or snapshot_batch_ids & {str(row.get("batchId") or "").strip() for row in batches}
+            or snapshot_proposal_ids & {str(row.get("proposalId") or "").strip() for row in proposals}
+        ):
+            raise ChallengeCupKnowledgeMigrationError("Legacy purge targets are still present in the live knowledge store.")
+        matching_purge_audits = [
+            row for row in audit
+            if row.get("action") == PURGE_TERMINAL_ACTION
+            and str((row.get("payload") or {}).get("purgeId") or "").strip() == resume_from_purge_id
+            and set((row.get("payload") or {}).get("removedKnowledgeItemIds") or []) == snapshot_item_ids
+            and set((row.get("payload") or {}).get("removedBatchIds") or []) == snapshot_batch_ids
+            and set((row.get("payload") or {}).get("removedProposalIds") or []) == snapshot_proposal_ids
+        ]
+        if len(matching_purge_audits) != 1:
+            raise ChallengeCupKnowledgeMigrationError("Post-purge migration requires one matching completed purge audit.")
+        proposals = _read_jsonl(required_snapshot_files["proposals"])
+        batches = _read_jsonl(required_snapshot_files["batches"])
+        items = _read_jsonl(required_snapshot_files["items"])
+        legacy_audit = _read_jsonl(required_snapshot_files["audit"])
+        legacy_snapshot_manifest_hash = _content_hash(snapshot_manifest)
 
     legacy_items = [
         item for item in items
@@ -239,6 +435,23 @@ def build_migration_plan(
             "One or more legacy batch proposal records are missing or duplicated "
             f"(found {len(legacy_proposal_ids)} ids and {len(legacy_proposals)} records)."
         )
+    if resume_from_purge_id:
+        if set(snapshot_manifest.get("legacyKnowledgeItemIds") or []) != legacy_item_ids:
+            raise ChallengeCupKnowledgeMigrationError("Legacy snapshot item records do not match its purge manifest.")
+        if set(snapshot_manifest.get("legacyBatchIds") or []) != legacy_batch_ids:
+            raise ChallengeCupKnowledgeMigrationError("Legacy snapshot batch records do not match its purge manifest.")
+        if set(snapshot_manifest.get("legacyProposalIds") or []) != legacy_proposal_ids:
+            raise ChallengeCupKnowledgeMigrationError("Legacy snapshot proposal records do not match its purge manifest.")
+        expected_hashes = {
+            str(row.get("knowledgeItemId") or "").strip(): str(row.get("contentHash") or "").strip()
+            for row in list(snapshot_manifest.get("lineageRows") or [])
+            if isinstance(row, dict) and str(row.get("knowledgeItemId") or "").strip()
+        }
+        if len(expected_hashes) != EXPECTED_LEGACY_COUNT or any(
+            expected_hashes.get(str(item.get("knowledgeItemId") or "").strip()) != _content_hash(item)
+            for item in legacy_items
+        ):
+            raise ChallengeCupKnowledgeMigrationError("Legacy snapshot item hashes do not match its purge manifest.")
 
     artifacts_by_id: dict[str, dict[str, Any]] = {}
     for artifact in source_artifacts:
@@ -300,7 +513,7 @@ def build_migration_plan(
             if str(value or "").strip()
         ]
         direct_audits = [
-            row for row in audit
+            row for row in legacy_audit
             if row.get("action") == DIRECT_INGEST_ACTION
             and str((row.get("payload") or {}).get("teamId") or "").strip() == team_id
             and str((row.get("payload") or {}).get("knowledgeBaseId") or "").strip() == raw_base_id
@@ -383,10 +596,31 @@ def build_migration_plan(
             if candidate_id in source_origins:
                 candidates_by_id[candidate_id] = candidate
     missing_candidates = sorted(set(source_origins) - set(candidates_by_id))
-    if missing_candidates:
+    recovered_candidate_ids: list[str] = []
+    unrecoverable_candidates: list[str] = []
+    first_recovery_error: ChallengeCupKnowledgeMigrationError | None = None
+    for candidate_id in missing_candidates:
+        origin = source_origins[candidate_id]
+        lineage = legacy_lineage_by_item_id[origin["oldKnowledgeItemId"]]
+        try:
+            candidates_by_id[candidate_id] = _recover_candidate_from_data_record(
+                workspace_root=workspace_root,
+                team_id=team_id,
+                candidate_id=candidate_id,
+                source_collection_run_id=origin["sourceCollectionRunId"],
+                content_source=lineage["contentSource"],
+                projects_by_id=projects_by_id,
+            )
+            recovered_candidate_ids.append(candidate_id)
+        except ChallengeCupKnowledgeMigrationError as exc:
+            unrecoverable_candidates.append(candidate_id)
+            first_recovery_error = first_recovery_error or exc
+    if unrecoverable_candidates:
+        if len(unrecoverable_candidates) == 1 and first_recovery_error is not None:
+            raise first_recovery_error
         raise ChallengeCupKnowledgeMigrationError(
-            "Authoritative source candidates are missing "
-            f"({len(missing_candidates)}): {', '.join(missing_candidates)}."
+            "Authoritative source candidates are missing and cannot be recovered from unique DataRecords "
+            f"({len(unrecoverable_candidates)}): {', '.join(unrecoverable_candidates)}."
         )
     member_ids = {
         str(member.get("agentId") or "").strip()
@@ -443,7 +677,7 @@ def build_migration_plan(
                 "title": _candidate_title(candidate),
                 "summary": str(candidate.get("summary") or "").strip(),
                 "content": content,
-                "tags": [tag for tag in list(old_proposal.get("tags") or []) if str(tag).lower() not in _CANDIDATE_TAGS],
+                "tags": [tag for tag in list(content_source.get("tags") or []) if str(tag).lower() not in _CANDIDATE_TAGS],
                 "createdAt": now,
                 "updatedAt": now,
                 "reviewedAt": now,
@@ -474,6 +708,11 @@ def build_migration_plan(
         source_rows.append(
             {
                 "sourceCandidateId": candidate_id,
+                "sourceRecovery": (
+                    deepcopy(metadata.get("migrationRecovery"))
+                    if isinstance(metadata.get("migrationRecovery"), dict)
+                    else None
+                ),
                 "oldKnowledgeItemId": str(old_item.get("knowledgeItemId") or ""),
                 "oldContentHash": _content_hash(old_item),
                 "oldProposalId": lineage["oldProposalId"],
@@ -491,6 +730,8 @@ def build_migration_plan(
     manifest_hash = _content_hash(
         {
             "migrationId": migration_id,
+            "resumeFromPurgeId": resume_from_purge_id,
+            "legacySnapshotManifestHash": legacy_snapshot_manifest_hash,
             "legacy": [
                 {
                     "knowledgeItemId": item_id,
@@ -502,6 +743,7 @@ def build_migration_plan(
                 for item_id in sorted(legacy_item_ids)
             ],
             "sources": sorted(candidates_by_id),
+            "recoveredSources": sorted(recovered_candidate_ids),
             "replacements": replacement_ids,
             "scopes": sorted(
                 {
@@ -515,6 +757,7 @@ def build_migration_plan(
         "status": "ready",
         "mode": "dry-run",
         "migrationId": migration_id,
+        "resumeFromPurgeId": resume_from_purge_id,
         "operatorAgentId": operator_agent_id,
         "reviewerAgentId": reviewer_id,
         "teamId": team_id,
@@ -533,11 +776,12 @@ def build_migration_plan(
         "legacyProposalIds": sorted(legacy_proposal_ids),
         "directIngestedBatchIds": sorted(direct_ingested_batch_ids),
         "sourceCandidateIds": sorted(candidates_by_id),
+        "recoveredSourceCandidateIds": sorted(recovered_candidate_ids),
         "replacementKnowledgeItemIds": replacement_ids,
         "manifestHash": manifest_hash,
         "backupPath": str(backup_path.resolve()),
         "paths": paths,
-        "records": {"proposals": proposals, "batches": batches, "items": items, "audit": audit},
+        "records": live_records,
         "sourceRows": source_rows,
     }
 
@@ -620,6 +864,7 @@ def apply_migration(
                         "legacyIngestionMode": row["legacyIngestionMode"],
                         "replacementKnowledgeItemId": row["item"]["knowledgeItemId"],
                         "sourceCandidateId": row["sourceCandidateId"],
+                        "sourceRecovery": row["sourceRecovery"],
                         "operatorAgentId": plan["operatorAgentId"],
                     },
                 }
@@ -673,6 +918,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--migration-id", required=True)
     parser.add_argument("--operator-agent-id", required=True)
     parser.add_argument("--backup-root", type=Path)
+    parser.add_argument(
+        "--legacy-snapshot-root",
+        type=Path,
+        help="Resume from a completed Challenge Cup purge backup without restoring the legacy live records.",
+    )
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--dry-run", action="store_true")
     mode.add_argument("--apply", action="store_true")
@@ -690,6 +940,7 @@ def main() -> int:
             migration_id=args.migration_id,
             operator_agent_id=args.operator_agent_id,
             backup_root=args.backup_root,
+            legacy_snapshot_root=args.legacy_snapshot_root,
         )
         result = apply_migration(
             plan,

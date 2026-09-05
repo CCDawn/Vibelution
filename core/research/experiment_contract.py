@@ -122,6 +122,18 @@ _METHODS_BY_ID = {item["methodId"]: item for item in _METHODS}
 # available.
 _ADAPTERS: tuple[dict[str, Any], ...] = (
     {
+        "adapterId": "challenge_cup_sci096_dandi_probe",
+        "adapterVersion": "1.0.0",
+        "method": "dataset_analysis_benchmark",
+        "executionMode": "local_process",
+        "capabilities": ["validate", "prepare", "smoke", "full_run", "collect"],
+        "availability": "available",
+        "unavailableReason": "Requires a version-pinned local NWB asset with a verified SHA-256 digest.",
+        "formalResult": True,
+        "requiresExplicitSelection": True,
+        "priority": 110,
+    },
+    {
         "adapterId": "fashion_mnist_predictive_coding_multi_seed",
         "adapterVersion": "1.0.0",
         "method": "model_training_inference",

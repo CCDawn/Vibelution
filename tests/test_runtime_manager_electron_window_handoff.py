@@ -386,6 +386,8 @@ def test_explicit_headless_open_never_bootstraps_packaged_electron(monkeypatch):
 
     monkeypatch.setattr(workbench_controller, "_latest_active_electron_desktop_session", lambda: {})
     monkeypatch.setattr(workbench_controller, "_packaged_electron_desktop_executable", lambda: Path("Vibelution.exe"))
+    monkeypatch.setattr(workbench_controller, "_live_electron_owner_pid", lambda: 0)
+    monkeypatch.setattr(workbench_controller, "_electron_main_orchestrates_windows", lambda: False)
     monkeypatch.setattr(
         workbench_controller,
         "_run_waitable_launcher_process",

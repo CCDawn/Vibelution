@@ -1,6 +1,9 @@
+import ELK from "elkjs/lib/elk.bundled.js";
 import { describe, expect, it } from "vitest";
 
 import type { WorkflowLayoutInput } from "../../../components/vui";
+import { resolveElkPorts } from "../../../components/vui/renderers/shadcn/workflow/workflowElkPorts";
+import { layoutTwoLevel } from "../../../components/vui/renderers/shadcn/workflow/workflowTwoLevelLayout";
 import {
   STAGE_TWO_BOUNDARY_EDGE_ID,
   STAGE_TWO_INACTIVE_NODE_IDS,
@@ -95,9 +98,51 @@ describe("stageTwoCanvasRegion", () => {
       expect(node.isRuntimeCurrent).toBeFalsy();
       expect(node.hasPendingHumanTask).toBeFalsy();
     }
-    // Linear chain inside the group; the boundary edge is not part of the region.
-    expect(region.edges).toHaveLength(9);
+    // Canonical stage-two topology inside the group; the boundary edge is separate.
+    expect(region.edges.map((edge) => edge.edgeId)).toEqual([
+      "e_proto_review",
+      "e_review_freeze",
+      "e_freeze_smoke",
+      "e_smoke_run",
+      "e_run_eval",
+      "e_eval_decision",
+      "e_decision_rerun",
+      "e_decision_promote",
+      "e_decision_rollback",
+      "e_decision_stop",
+      "e_version_promotion",
+      "e_version_package",
+      "e_promo_package",
+    ]);
     expect(region.edges.some((edge) => edge.edgeId === STAGE_TWO_BOUNDARY_EDGE_ID)).toBe(false);
+  });
+
+  it("produces resolvable ports for every inactive stage-two decision edge", () => {
+    const region = buildStageTwoInactiveCanvasRegion();
+
+    expect(() => resolveElkPorts({ nodes: region.nodes, edges: region.edges })).not.toThrow();
+    const decisionEdges = region.edges.filter((edge) => edge.fromNodeId === "iteration_decision");
+    expect(decisionEdges.map((edge) => ({
+      semanticKind: edge.semanticKind,
+      sourceHandle: edge.sourceHandle,
+      toNodeId: edge.toNodeId,
+    }))).toEqual([
+      { semanticKind: "rerun", sourceHandle: "rerun", toNodeId: "controlled_run" },
+      { semanticKind: "promote", sourceHandle: "promote", toNodeId: "version_governance" },
+      { semanticKind: "rollback", sourceHandle: "rollback", toNodeId: "version_governance" },
+      { semanticKind: "stop", sourceHandle: "stop", toNodeId: "version_governance" },
+    ]);
+    expect(decisionEdges.some((edge) => edge.sourceHandle === "revise")).toBe(false);
+  });
+
+  it("completes the real two-level ELK layout without degrading", async () => {
+    const graph = composeStageTwoInactiveGraph(baseGraph(), buildStageTwoInactiveCanvasRegion());
+
+    const result = await layoutTwoLevel(graph, new ELK());
+
+    expect(graph.nodes.every((node) => result.nodes.some((layoutNode) => layoutNode.id === node.nodeId))).toBe(true);
+    expect(result.edges).toHaveLength(graph.edges.length);
+    expect(result.edges.find((edge) => edge.id === "e_decision_rerun")?.sections.length).toBeGreaterThan(0);
   });
 
   it("appends the group after the base graph with an explanatory boundary edge", () => {

@@ -299,6 +299,7 @@ export function useTeamWorkflowStartMutations(options: UseTeamWorkflowStartMutat
         payload.teamId,
         {
           stageType: payload.stageType,
+          researchProjectId: options.activeSourceCollectionResearchProjectId,
           mode: payload.mode || "continue_or_start",
           title: payload.draft.title.trim() || "",
           topic: payload.draft.topic.trim(),
