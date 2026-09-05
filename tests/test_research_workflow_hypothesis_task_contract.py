@@ -98,6 +98,12 @@ def test_hypothesis_node_has_a_dedicated_task_contract() -> None:
 def test_hypothesis_context_uses_the_accepted_candidate_claims(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # The accepted candidate is outside the presentation page. Authority
+    # reads must not mistake a capped list for missing evidence.
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.source_collection.candidates.list_candidate_store",
+        lambda *_args, **_kwargs: {"candidates": []},
+    )
     monkeypatch.setattr(
         "core.web.services.team_workflow.research_runtime.human_acceptance_artifact.load_accepted_knowledge_package_from_receipt",
         lambda _store, **_kwargs: {
@@ -109,9 +115,8 @@ def test_hypothesis_context_uses_the_accepted_candidate_claims(
         },
     )
     monkeypatch.setattr(
-        "core.web.services.team_workflow.source_collection.candidates.list_candidate_store",
-        lambda *_args, **_kwargs: {
-            "candidates": [
+        "core.web.services.team_workflow.source_collection.candidates.list_candidate_store_authority_records",
+        lambda *_args, **_kwargs: [
                 {
                     "candidateId": "accepted-package",
                     "metadata": {
@@ -125,8 +130,7 @@ def test_hypothesis_context_uses_the_accepted_candidate_claims(
                         }
                     },
                 }
-            ]
-        },
+            ],
     )
     monkeypatch.setattr(
         "core.web.services.team_knowledge_service.list_knowledge_items",

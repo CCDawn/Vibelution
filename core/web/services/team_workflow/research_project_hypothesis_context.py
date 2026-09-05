@@ -158,7 +158,7 @@ def build_hypothesis_input_context(
 
     from core.web.services import team_knowledge_service
     from core.web.services.team_workflow.source_collection.candidates import (
-        list_candidate_store,
+        list_candidate_store_authority_records,
     )
 
     package = _load_receipt_bound_knowledge_package(
@@ -267,19 +267,15 @@ def build_hypothesis_input_context(
                     "title": _text(item.get("title"), limit=240),
                     "summary": _text(item.get("summary"), limit=800),
                 }
-        candidate_response = list_candidate_store(
+        candidates = list_candidate_store_authority_records(
             team_id,
-            limit=500,
-            **(
-                {"run_id": _text(current.get("sourceCollectionRunId"), limit=200)}
-                if _text(current.get("sourceCollectionRunId"), limit=200)
-                else {}
-            ),
+            run_id=_text(current.get("sourceCollectionRunId"), limit=200),
+            metadata_task_type="steward_pack_draft",
         )
         accepted_candidate = next(
             (
                 candidate
-                for candidate in list(candidate_response.get("candidates") or [])
+                for candidate in candidates
                 if isinstance(candidate, Mapping)
                 and _text(candidate.get("candidateId")) == source_candidate_id
             ),

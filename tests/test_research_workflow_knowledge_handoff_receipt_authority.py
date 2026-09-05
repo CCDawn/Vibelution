@@ -307,9 +307,8 @@ def _patch_inventory(
 
 def _patch_hypothesis_lookups(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "core.web.services.team_workflow.source_collection.candidates.list_candidate_store",
-        lambda *_args, **_kwargs: {
-            "candidates": [
+        "core.web.services.team_workflow.source_collection.candidates.list_candidate_store_authority_records",
+        lambda *_args, **_kwargs: [
                 {
                     "candidateId": "accepted-package",
                     "metadata": {
@@ -336,8 +335,7 @@ def _patch_hypothesis_lookups(monkeypatch: pytest.MonkeyPatch) -> None:
                         }
                     },
                 },
-            ]
-        },
+            ],
     )
     monkeypatch.setattr(
         "core.web.services.team_knowledge_service.list_knowledge_items",

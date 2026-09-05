@@ -2746,6 +2746,25 @@ def _question_exploratory_drafts(
     )
 
 
+def _blocked_on_stage_one_knowledge(snapshot: Mapping[str, Any]) -> bool:
+    hypothesis_attempts = list(
+        (snapshot.get("nodeAttempts") or {}).get("hypothesis_design") or []
+    )
+    latest_hypothesis_attempt = max(
+        hypothesis_attempts, key=lambda item: int(item.get("attempt") or 0), default={}
+    )
+    prerequisite_problem = latest_hypothesis_attempt.get("problem") or {}
+    # A blocked attempt exposes retry_owns_recovery in command offers. Its
+    # persisted problem identifies which prerequisite needs a fresh read.
+    return bool(
+        latest_hypothesis_attempt.get("status") == "blocked"
+        and prerequisite_problem.get("code") == "auto_advance_not_ready"
+        and {"knowledge_handoff_not_accepted", "knowledge_package_not_materialized"}.intersection(
+            part.strip() for part in str(prerequisite_problem.get("detail") or "").split(";")
+        )
+    )
+
+
 def _active_stage_one_run(
     formal_runs: Sequence[Mapping[str, Any]],
 ) -> dict[str, Any] | None:
@@ -3639,21 +3658,9 @@ def project_state_from_records(
     prerequisite_blockers = {
         "knowledge_handoff_not_accepted", "knowledge_package_not_materialized",
     }
-    hypothesis_attempts = list(
-        (stage_one_snapshot.get("nodeAttempts") or {}).get("hypothesis_design") or []
-    )
-    latest_hypothesis_attempt = max(
-        hypothesis_attempts, key=lambda item: int(item.get("attempt") or 0), default={}
-    )
-    prerequisite_problem = latest_hypothesis_attempt.get("problem") or {}
-    # A blocked attempt exposes retry_owns_recovery in command offers. Its
-    # persisted readiness problem still owns why the prerequisite is missing.
     blocked_on_prerequisites = (
-        latest_hypothesis_attempt.get("status") == "blocked"
-        and prerequisite_problem.get("code") == "auto_advance_not_ready"
-        and prerequisite_blockers.intersection(
-            part.strip() for part in str(prerequisite_problem.get("detail") or "").split(";")
-        )
+        _blocked_on_stage_one_knowledge(stage_one_snapshot)
+        and stage_one_snapshot.get("stageOneGroundedContextReady") is not True
     )
     stage_one_prerequisites_pending = bool(
         active_workflow_run
@@ -4598,6 +4605,7 @@ def _scope_records(
                 status_code=404,
             )
         formal_snapshots: dict[str, dict[str, Any]] = {}
+        active_stage_one_run = _active_stage_one_run(formal_runs) or {}
         for run in formal_runs:
             run_id = str(run.get("runId") or "").strip()
             if not run_id:
@@ -4608,6 +4616,24 @@ def _scope_records(
             if not isinstance(projected, Mapping):
                 raise TypeError("formal workflow snapshot is not a mapping")
             formal_snapshots[run_id] = dict(projected)
+            if (
+                run_id == str(active_stage_one_run.get("runId") or "")
+                and _question_exploratory_drafts(chain_records, normalized)
+                and _blocked_on_stage_one_knowledge(projected)
+            ):
+                from core.web.services.team_workflow.research_project_hypothesis_context import (
+                    build_stage_one_grounded_generation_context,
+                )
+
+                # A saved attempt problem describes its old input. Reuse the
+                # launch resolver's current canonical evidence before keeping
+                # R1 behind a prerequisite that may already have arrived.
+                context = build_stage_one_grounded_generation_context(
+                    team_id, run_id, question_id=normalized,
+                )
+                formal_snapshots[run_id]["stageOneGroundedContextReady"] = bool(
+                    context and context.get("status") == "ready"
+                )
         requirement_matrix = _latest_requirement_matrix(
             team_id,
             [

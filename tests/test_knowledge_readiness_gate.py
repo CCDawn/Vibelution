@@ -313,9 +313,8 @@ def test_hypothesis_input_consumes_accepted_sideflow_snapshot(
         },
     )
     monkeypatch.setattr(
-        "core.web.services.team_workflow.source_collection.candidates.list_candidate_store",
-        lambda *_args, **_kwargs: {
-            "candidates": [
+        "core.web.services.team_workflow.source_collection.candidates.list_candidate_store_authority_records",
+        lambda *_args, **_kwargs: [
                 {
                     "candidateId": "source-candidate-1",
                     "metadata": {
@@ -329,8 +328,7 @@ def test_hypothesis_input_consumes_accepted_sideflow_snapshot(
                         }
                     },
                 }
-            ]
-        },
+            ],
     )
 
     result = research_project_hypothesis_context.build_hypothesis_input_context(
