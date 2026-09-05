@@ -102,7 +102,34 @@ def append_scientific_semantic_record(
     actor_ref: str,
     recorded_at_ms: int,
 ) -> dict[str, Any]:
-    """Append one immutable V3 record, replaying only byte-identical facts."""
+    """Append an immutable fact using the caller-independent writer queue."""
+    return store.submit(
+        lambda uow: append_scientific_semantic_record_in_uow(
+            uow,
+            run_id=run_id,
+            record_ref=record_ref,
+            subject_ref=subject_ref,
+            semantic=semantic,
+            actor_type=actor_type,
+            actor_ref=actor_ref,
+            recorded_at_ms=recorded_at_ms,
+        ),
+        force_flush=True,
+    ).result(timeout=30)
+
+
+def append_scientific_semantic_record_in_uow(
+    uow: Any,
+    *,
+    run_id: str,
+    record_ref: str,
+    subject_ref: str,
+    semantic: ScientificSemanticRecord,
+    actor_type: Literal["person", "software_agent"],
+    actor_ref: str,
+    recorded_at_ms: int,
+) -> dict[str, Any]:
+    """Append in the caller's transaction without submitting or committing it."""
 
     normalized_run_id = _required_ref(run_id, "run_id")
     normalized_record_ref = _required_ref(record_ref, "record_ref")
@@ -124,45 +151,41 @@ def append_scientific_semantic_record(
     )
     event_id = _event_id(normalized_run_id, normalized_record_ref)
 
-    def mutate(uow: Any) -> EventRecord:
-        existing = uow.repository.get_event_by_id(event_id)
-        if existing is not None:
-            if (
-                existing.run_id == normalized_run_id
-                and existing.event_type == SCIENTIFIC_SEMANTIC_EVENT_TYPE
-                and existing.payload_json == payload_json
-                and existing.actor_json == actor_json
-            ):
-                return existing
-            raise ScientificSemanticRecordConflict(
-                "semantic record ref already identifies different facts"
-            )
-        run = uow.repository.get_run(normalized_run_id)
-        if run is None:
-            raise ValueError("workflow run does not exist")
-        if run.workflow_id != CHALLENGE_CUP_WORKFLOW_ID:
-            raise ValueError("scientific semantics require a Challenge Cup workflow")
-        sequence = uow.repository.advance_last_sequence(
-            normalized_run_id, 1, recorded_at_ms
+    existing = uow.repository.get_event_by_id(event_id)
+    if existing is not None:
+        if (
+            existing.run_id == normalized_run_id
+            and existing.event_type == SCIENTIFIC_SEMANTIC_EVENT_TYPE
+            and existing.payload_json == payload_json
+            and existing.actor_json == actor_json
+        ):
+            return _public_record(existing)
+        raise ScientificSemanticRecordConflict(
+            "semantic record ref already identifies different facts"
         )
-        if sequence is None:
-            raise ValueError("workflow run does not exist")
-        event = EventRecord(
-            run_id=normalized_run_id,
-            sequence=sequence,
-            event_id=event_id,
-            run_version=run.run_version,
-            event_type=SCIENTIFIC_SEMANTIC_EVENT_TYPE,
-            actor_json=actor_json,
-            correlation_id=normalized_record_ref,
-            causation_id=None,
-            payload_json=payload_json,
-            occurred_at_ms=recorded_at_ms,
-        )
-        uow.repository.insert_event(event)
-        return event
-
-    event = store.submit(mutate, force_flush=True).result(timeout=30)
+    run = uow.repository.get_run(normalized_run_id)
+    if run is None:
+        raise ValueError("workflow run does not exist")
+    if run.workflow_id != CHALLENGE_CUP_WORKFLOW_ID:
+        raise ValueError("scientific semantics require a Challenge Cup workflow")
+    sequence = uow.repository.advance_last_sequence(
+        normalized_run_id, 1, recorded_at_ms
+    )
+    if sequence is None:
+        raise ValueError("workflow run does not exist")
+    event = EventRecord(
+        run_id=normalized_run_id,
+        sequence=sequence,
+        event_id=event_id,
+        run_version=run.run_version,
+        event_type=SCIENTIFIC_SEMANTIC_EVENT_TYPE,
+        actor_json=actor_json,
+        correlation_id=normalized_record_ref,
+        causation_id=None,
+        payload_json=payload_json,
+        occurred_at_ms=recorded_at_ms,
+    )
+    uow.repository.insert_event(event)
     return _public_record(event)
 
 
@@ -190,5 +213,6 @@ __all__ = [
     "SCIENTIFIC_SEMANTIC_EVENT_TYPE",
     "ScientificSemanticRecordConflict",
     "append_scientific_semantic_record",
+    "append_scientific_semantic_record_in_uow",
     "list_scientific_semantic_records",
 ]

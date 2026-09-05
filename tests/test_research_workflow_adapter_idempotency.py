@@ -26,6 +26,7 @@ from core.web.services.team_workflow.research_runtime.adapters.domain_adapters i
 from tests._support.adapter_fakes import FakeDomainPorts
 from tests._support.command_helpers import CommandHarness
 from tests._support.workflow_ledger_helpers import FIXED_NOW_MS
+from core.web.services.team_workflow.research_runtime import scientific_semantic_ledger as semantics
 
 
 def _action(action_id: str = "act-1") -> PendingAction:
@@ -116,6 +117,51 @@ def test_budget_reserved_before_task_creation(tmp_path: Path) -> None:
         worker.run_once()
         assert ports.order("read_back_input", "reserve_budget", "create_agent_task")
         assert ports.reservations == ["act-1"]
+    finally:
+        harness.close()
+
+
+def test_verified_execution_records_one_semantic_fact_without_scientific_judgment(tmp_path):
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run()
+        action = _action()
+        _seed(harness, action)
+        worker = _worker(harness, FakeDomainPorts())
+        worker.run_once()
+        worker.run_once()
+        records = semantics.list_scientific_semantic_records(harness.store, action.run_id)
+        assert len(records) == 1
+        assert records[0]["subjectRef"] == action.node_run_id
+        assert records[0]["semantic"]["execution"] == {"status": "succeeded"}
+        assert "assessment" not in records[0]["semantic"]
+        assert "result" not in records[0]["semantic"]
+    finally:
+        harness.close()
+
+
+def test_semantic_write_failure_rolls_back_verified_business_commit(tmp_path, monkeypatch):
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run()
+        action = _action()
+        _seed(harness, action)
+        original = semantics.append_scientific_semantic_record_in_uow
+
+        def write_then_fail(*args, **kwargs):
+            original(*args, **kwargs)
+            raise RuntimeError("semantic transaction crash")
+
+        monkeypatch.setattr(semantics, "append_scientific_semantic_record_in_uow", write_then_fail)
+        _worker(harness, FakeDomainPorts()).run_once()
+        assert semantics.list_scientific_semantic_records(harness.store, action.run_id) == []
+        assert harness.store.latest_event_sequence(action.run_id) == 1
+        assert harness.store.latest_attempt(action.run_id, action.node_id).status == "dispatching"
+        receipts = harness.store.submit(
+            lambda uow: uow.repository.list_receipts_for_node_run(action.node_run_id),
+            force_flush=True,
+        ).result(timeout=10)
+        assert receipts == []
     finally:
         harness.close()
 
