@@ -523,6 +523,28 @@ class SessionDao:
         page = self.list_directory_page(agent_id=agent_id, limit=limit, before=before)
         return list(page["rows"])
 
+    def list_children(self, parent_session_id: str) -> list[dict[str, Any]]:
+        normalized_parent_id = str(parent_session_id or "").strip()
+        if not normalized_parent_id:
+            return []
+        rows = self._connection.execute(
+            f"""
+            SELECT {_DIRECTORY_SESSION_COLUMNS}
+            FROM sessions
+            WHERE archived_at_ms IS NULL AND parent_session_id=?
+            ORDER BY recency_at_ms DESC, session_id DESC
+            """,
+            (normalized_parent_id,),
+        ).fetchall()
+        mapped = [_session_row(row) for row in rows]
+        child_ids = _child_session_ids(
+            self._connection,
+            [item["sessionId"] for item in mapped],
+        )
+        for item in mapped:
+            item["childSessionIds"] = child_ids.get(item["sessionId"], [])
+        return mapped
+
     def list_directory_page(
         self,
         *,
@@ -1461,6 +1483,10 @@ class ConversationRepository:
     def list_directory_page(self, **values: Any) -> dict[str, Any]:
         with self._database.reader() as connection:
             return SessionDao(connection).list_directory_page(**values)
+
+    def list_child_sessions(self, parent_session_id: str) -> list[dict[str, Any]]:
+        with self._database.reader() as connection:
+            return SessionDao(connection).list_children(parent_session_id)
 
     def upsert_directory_session(self, **values: Any) -> Future[dict[str, Any]]:
         frozen_values = dict(values)

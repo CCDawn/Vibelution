@@ -241,6 +241,39 @@ def list_session_summaries(*, include_hidden: bool = False) -> list[dict[str, An
     return summaries
 
 
+def list_child_session_summaries(session_id: str) -> dict[str, Any] | None:
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return {"rootSessionId": "", "items": []}
+    if directory_runtime.wait_for_directory_startup(
+        timeout=directory_runtime.LIST_QUERY_STARTUP_WAIT_SECONDS,
+    ) == "starting":
+        return {"rootSessionId": normalized_session_id, "items": []}
+    store = directory_runtime.get_open_directory_store()
+    if store is None:
+        return None
+
+    root_session_id = normalized_session_id
+    source = store.repository.get_session(normalized_session_id)
+    visited: set[str] = set()
+    while isinstance(source, Mapping):
+        parent_session_id = str(source.get("parentSessionId") or "").strip()
+        if not parent_session_id or parent_session_id in visited:
+            break
+        visited.add(root_session_id)
+        root_session_id = parent_session_id
+        source = store.repository.get_session(parent_session_id)
+
+    agent_by_id = _service()._agent_lookup_for_conversations()
+    rows = store.repository.list_child_sessions(root_session_id)
+    items = [
+        _summary_from_directory_row(row, agent_by_id=agent_by_id)
+        for row in rows
+    ]
+    items.sort(key=lambda item: str(item.get("updatedAt") or ""), reverse=True)
+    return {"rootSessionId": root_session_id, "items": items}
+
+
 def sync_conversation_record(
     conversation: Mapping[str, Any] | None,
     *,
