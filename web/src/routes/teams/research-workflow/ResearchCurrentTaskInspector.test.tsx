@@ -99,7 +99,8 @@ describe("ResearchCurrentTaskInspector", () => {
     );
 
     expect(container.querySelector('[data-history-mode="true"]')).not.toBeNull();
-    expect(container.textContent).toContain("归档记录 · 当前仍是“本轮评审正在整理”");
+    expect(container.textContent).toContain("所选节点详情 · 当前任务为“本轮评审正在整理”");
+    expect(container.textContent).not.toContain("归档记录");
     expect(container.textContent).not.toContain("历史回顾 · 只读");
     expect(container.textContent).not.toContain("不应显示的写操作");
     expect(container.querySelector('[data-vui-region="current-task-action"]')?.textContent)

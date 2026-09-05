@@ -611,6 +611,7 @@ def test_list_chat_rooms_skips_participant_repair_on_index_surface(tmp_path, mon
 def test_room_to_conversation_index_reference_uses_latest_round_summary():
     room = {
         "roomId": "room-index",
+        "config": {"teamId": "research-team"},
         "title": "聚焦群聊",
         "status": "ready",
         "updatedAt": "2026-06-13T10:00:00",
@@ -625,6 +626,7 @@ def test_room_to_conversation_index_reference_uses_latest_round_summary():
     payload = chat_room_service._room_to_conversation_index_reference(room)
 
     assert payload["summary"] == "第二轮总结"
+    assert payload["teamId"] == "research-team"
     assert payload["mode"] == "round_robin"
     assert payload["participants"] == [{"agentId": "agent-a"}, {"sessionId": "session-alpha"}]
 

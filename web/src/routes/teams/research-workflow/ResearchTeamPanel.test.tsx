@@ -108,6 +108,10 @@ describe("ResearchTeamPanel", () => {
             teamId="research-team"
             teamName="科研团队"
             linkedChatRoomId="team-room-must-not-be-used"
+            meetings={[
+              { question: "SCI-003", meetingRoundId: "history-003", meetingType: "hypothesis_candidate_generation", status: "closed", linkedChatRoomId: "history-room-003", startedAt: "2026-09-05", roundIndex: 0 },
+              { question: "SCI-004", meetingRoundId: "history-004", status: "closed", linkedChatRoomId: "other-question-room" },
+            ] as never}
             run={null}
             projection={null}
             effectiveBindings={null}
@@ -149,13 +153,21 @@ describe("ResearchTeamPanel", () => {
               degradedReason: "active_discussion_room_mismatch",
               deepLink: "",
             }}
+            meetings={[
+              { question: "SCI-003", meetingRoundId: "history-003", meetingType: "hypothesis_candidate_generation", status: "closed", linkedChatRoomId: "history-room-003", startedAt: "2026-09-05", roundIndex: 0 },
+              { question: "SCI-004", meetingRoundId: "history-004", status: "closed", linkedChatRoomId: "other-question-room" },
+            ] as never}
           />
         </MemoryRouter>
       </QueryClientProvider>,
     );
 
-    expect(html).toContain("当前题目尚未关联精确讨论会话");
+    expect(html).toContain("当前题目没有可打开的活动讨论");
     expect(html).not.toContain("team-room-must-not-be-used");
     expect(html).not.toContain("打开本题讨论");
+    expect(html).toContain("本题历史讨论");
+    expect(html).toContain("history-room-003");
+    expect(html).toContain("meetingRound=history-003");
+    expect(html).not.toContain("other-question-room");
   });
 });

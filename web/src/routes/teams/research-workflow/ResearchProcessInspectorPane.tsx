@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import type { MeetingRoundRecord } from "../../../api/types/hypothesisFirst";
 
 import { getChallengeQuestionRunDetail } from "../../../api/challengeQuestionRuns";
 import { queryKeys } from "../../../api/queryKeys";
@@ -125,6 +126,7 @@ export function ResearchProcessInspectorPane(props: {
       retryAttempts: number;
     }>;
   };
+  meetings?: readonly MeetingRoundRecord[];
 }) {
   const {
     scope,
@@ -159,14 +161,12 @@ export function ResearchProcessInspectorPane(props: {
     nextAction?.collectionRequestId
     && (nextAction.command === "retry_collection" || nextAction.command === "continue_collection"),
   );
-  // Formal-runtime recovery belongs to the run-level task surface.  The
-  // selected pipeline node is only a navigation anchor and may be stale or
-  // absent, so do not require an exact node-id match before exposing the
-  // server-authored recovery actions.
+  // Recovery actions belong to their current task, not every selected node.
   const formalRuntimeOwnsInspector = Boolean(
     scope.panel === "node"
     && scope.runId
     && nextAction
+    && ownsResearchCurrentTask(scope.selectedNodeId, nextAction.targetNodeId)
     && (
       nextAction.stage === "converged"
       || (
@@ -308,6 +308,7 @@ export function ResearchProcessInspectorPane(props: {
         meetingRoundId={nextAction?.meetingRoundId || ""}
         questionId={scope.questionId || state.run?.questionId || ""}
         discussionModel={discussionModel}
+        meetings={props.meetings}
       />
     );
   }

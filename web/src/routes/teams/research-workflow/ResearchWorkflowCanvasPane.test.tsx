@@ -69,6 +69,8 @@ describe("ResearchWorkflowCanvasPane", () => {
     root = rendered.root;
     const alert = rendered.container.querySelector('[role="alert"]');
     expect(alert?.textContent).toContain("快照加载失败，请重试");
+    expect(rendered.container.textContent).toContain("流程定义无法读取");
+    expect(rendered.container.textContent).not.toContain("加载流程定义");
   });
 
   it("clears the inline error once the workspace recovers", async () => {

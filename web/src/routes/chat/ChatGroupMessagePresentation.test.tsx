@@ -30,6 +30,21 @@ const bodyProps = {
 };
 
 describe("ChatGroupMessageBody", () => {
+  it("labels invalid research output and keeps its raw protocol collapsed", () => {
+    const html = renderToStaticMarkup(<ChatGroupMessageBody {...bodyProps} message={message({
+      content: "RAW-INVALID-PROTOCOL",
+      messagePayload: {
+        schemaVersion: 1,
+        kind: "challenge_meeting_message",
+        audit: { parseStatus: "invalid", rawModelOutput: "RAW-INVALID-PROTOCOL" },
+      } as ChatRoomMessage["messagePayload"],
+    })} />);
+    expect(html).toContain("本条讨论结果未解析");
+    expect(html).toContain("尚不能作为有效的候选或评审结果");
+    expect(html).toContain("RAW-INVALID-PROTOCOL");
+    expect(html).toMatch(/<details\b[^>]*>/);
+    expect(html).not.toMatch(/<details\b[^>]*\bopen(?:=|\s|>)/);
+  });
   it("renders a structured Challenge Cup message as scannable sections", () => {
     const html = renderToStaticMarkup(
       <ChatGroupMessageBody

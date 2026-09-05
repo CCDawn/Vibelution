@@ -260,6 +260,9 @@ export function conversationTeamFor(
   conversation: ConversationSummary,
   lookup: ConversationTeamLookup,
 ): ConversationIndexTeam | undefined {
+  if (conversation.type === "group_room") {
+    return lookup.byTeamId.get(String(conversation.teamId ?? "").trim());
+  }
   if (conversation.type !== "direct_agent") {
     return undefined;
   }
@@ -293,7 +296,7 @@ export function conversationTeamFor(
 }
 
 function conversationTeamIdentityFor(conversation: ConversationSummary): ConversationTeamIdentity | undefined {
-  if (conversation.type !== "direct_agent") {
+  if (conversation.type !== "direct_agent" && conversation.type !== "group_room") {
     return undefined;
   }
   const teamAwareConversation = conversation as TeamAwareConversationSummary;
@@ -739,7 +742,8 @@ export function buildConversationIndexModel({
   const discussionTeams = normalizeConversationIndexTeams(teams);
   const conversationTeamLookup = buildConversationTeamLookup(discussionTeams);
   const visibleConversations = mergedConversations
-    .filter((conversation) => conversation.type !== "group_room")
+    .filter((conversation) => conversation.type !== "group_room"
+      || Boolean(conversationTeamIdentityFor(conversation)?.teamId))
     .filter((conversation) => {
       const sessionId = conversation.directSessionId || conversation.conversationId;
       const session = sessionId ? sessionsById.get(sessionId) : undefined;
@@ -792,7 +796,8 @@ export function buildConversationIndexModel({
         return false;
       }
       const roomId = String(conversation.roomId || conversation.conversationId || "").trim();
-      return Boolean(roomId) && !linkedTeamRoomIds.has(roomId);
+      return Boolean(roomId) && !linkedTeamRoomIds.has(roomId)
+        && !conversationTeamIdentityFor(conversation)?.teamId;
     })
     .filter((conversation) =>
       !term

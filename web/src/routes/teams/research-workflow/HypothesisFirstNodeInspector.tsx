@@ -1279,9 +1279,9 @@ function FormalRuntimeActionBody(props: {
       {problems.length ? (
         <VErrorSummary
           label={isZh ? "正式运行问题" : "Formal run problems"}
-          summary={problems[0].message}
+          summary={isZh ? "当前运行需要处理，请查看诊断详情并选择下方恢复操作。" : "This run needs attention. Review diagnostic details and choose a recovery action below."}
           details={problems.length ? workflowProblemList(problems) : undefined}
-          defaultOpen={problems.length > 1}
+          defaultOpen={false}
         />
       ) : null}
       {actions.length ? (
@@ -1557,7 +1557,9 @@ function CanonicalCommandButton(props: {
       ) : null}
       <VButton
         type="button"
-        variant="primary"
+        variant={["cancel_run", "stop_discussion", "stop_collection", "archive_run"].includes(props.action.command)
+          ? "danger"
+          : props.action.command === "reconcile_formal_run" ? "secondary" : "primary"}
         density="compact"
         isPending={mutation.isPending}
         isDisabled={!props.action.enabled}
@@ -1582,7 +1584,7 @@ function CanonicalCommandButton(props: {
           }}
           title={props.action.label}
           description={props.action.confirmationText || canonicalCommandConfirmationText(props.action.command, props.lang)}
-          tone={["stop_discussion", "archive_run"].includes(props.action.command) ? "danger" : "neutral"}
+          tone={["cancel_run", "stop_discussion", "stop_collection", "archive_run"].includes(props.action.command) ? "danger" : "neutral"}
           confirmLabel={props.lang === "zh" ? "确认执行" : "Confirm action"}
           cancelLabel={props.lang === "zh" ? "取消" : "Cancel"}
           confirmPending={mutation.isPending}

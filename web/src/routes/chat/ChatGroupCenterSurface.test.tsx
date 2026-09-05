@@ -68,6 +68,17 @@ function baseProps(patch: Partial<ChatGroupCenterSurfaceProps> = {}): ChatGroupC
 }
 
 describe("ChatGroupCenterSurface hand-test substitutes", () => {
+  it("does not call a round successful when its research output failed parsing", () => {
+    const props = baseProps();
+    const room = { ...props.activeGroupRoom!, rounds: [{
+      roundId: "round-invalid", status: "completed", topic: "题目", summary: "4/4 位参与者成功发言",
+      messages: [{ messageId: "invalid", participantId: "p1", status: "completed", content: "invalid JSON",
+        messagePayload: { kind: "challenge_meeting_message", audit: { parseStatus: "invalid" } } }],
+    }] } as never;
+    const html = renderToStaticMarkup(<ChatGroupCenterSurface {...props} activeGroupRoom={room} />);
+    expect(html).toContain("1 条解析失败");
+    expect(html).not.toContain("4/4 位参与者成功发言");
+  });
   it("renders a real loading state before the first group detail arrives", () => {
     const html = renderToStaticMarkup(
       <ChatGroupCenterSurface

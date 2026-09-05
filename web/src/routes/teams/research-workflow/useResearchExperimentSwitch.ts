@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 
 import { fetchHypothesisFirstFocusNode } from "./hypothesisFirstFocus";
+import { presentResearchWorkflowError } from "../researchWorkflowErrorModel";
 import {
   resolveExperimentSwitch,
   type ExperimentSwitchOption,
@@ -10,6 +11,9 @@ type ReplaceParams = (patch: Record<string, string | null | undefined>) => void;
 
 function focusErrorMessage(reason: unknown): string {
   const detail = reason instanceof Error ? reason.message : String(reason);
+  if (detail.includes("workflow_definition_unavailable") || detail.includes("unavailable workflow definition")) {
+    return presentResearchWorkflowError(detail).bodyZh;
+  }
   return `实验焦点读取失败：${detail}`;
 }
 

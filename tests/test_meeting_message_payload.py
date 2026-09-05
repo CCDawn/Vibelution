@@ -88,6 +88,19 @@ def test_ingestion_preserves_full_structured_output_before_projection() -> None:
     assert "EVIDENCE_REQUEST" not in ingested["content"]
 
 
+def test_single_json_fence_is_an_output_envelope_not_invalid_json() -> None:
+    raw_output = "```json\n" + _structured_output() + "\n```"
+    ingested = payloads.ingest_meeting_message_output(raw_output)
+    assert ingested["messagePayload"]["audit"]["parseStatus"] == "structured"
+    assert ingested["messagePayload"]["audit"]["rawModelOutput"] == raw_output
+    assert "LAST-LINE" in ingested["content"]
+
+
+def test_prose_around_json_is_not_silently_accepted() -> None:
+    ingested = payloads.ingest_meeting_message_output("说明\n```json\n" + _structured_output() + "\n```")
+    assert ingested["messagePayload"]["audit"]["parseStatus"] == "invalid"
+
+
 def test_invalid_output_is_preserved_without_twenty_line_truncation() -> None:
     raw_output = "\n".join(f"第 {index:02d} 行" for index in range(1, 31))
 

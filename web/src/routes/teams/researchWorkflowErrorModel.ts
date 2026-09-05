@@ -39,6 +39,23 @@ export function presentResearchWorkflowError(
   }
   const lower = message.toLowerCase();
 
+  if (lower.includes("workflow_definition_unavailable") || lower.includes("unavailable workflow definition")) {
+    return {
+      ...DEFAULT_PRESENTATION,
+      titleZh: "此运行引用的流程定义不可用", titleEn: "This run's workflow definition is unavailable",
+      bodyZh: "当前版本无法读取此运行固定的流程定义。可查看题目档案或全局进度；等待和重复重试不会恢复已移除的定义。",
+      bodyEn: "This version cannot read the workflow definition pinned to this run. Question records and global progress remain available; waiting or retrying cannot restore a removed definition.",
+    };
+  }
+  if (lower.includes("dispatch") || lower.includes("thread")) {
+    return {
+      ...DEFAULT_PRESENTATION,
+      titleZh: "任务执行链路未就绪", titleEn: "Task execution is not ready",
+      bodyZh: "任务尚未正常启动或执行状态需要核对。请先查看诊断详情，再选择当前任务提供的恢复操作。",
+      bodyEn: "The task has not started normally or its execution state needs reconciliation. Review diagnostic details before choosing a recovery action.",
+    };
+  }
+
   if (
     lower.includes("source search is still running")
     || message.includes("资料搜索仍在进行")

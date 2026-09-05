@@ -163,6 +163,15 @@ function GroupRoundsTimeline({
     <>
       {rounds.map((round, roundIndex) => {
         const roundRunning = String(round.status ?? "").trim().toLowerCase() === "running";
+        const challengeMessages = (round.messages ?? []).filter(
+          (message) => message.messagePayload?.kind === "challenge_meeting_message",
+        );
+        const parsedCount = challengeMessages.filter(
+          (message) => message.messagePayload?.audit?.parseStatus === "structured",
+        ).length;
+        const invalidCount = challengeMessages.filter(
+          (message) => message.messagePayload?.audit?.parseStatus === "invalid",
+        ).length;
         const deliveredParticipantIds = new Set(
           (round.messages ?? []).map((message) => String(message.participantId ?? "").trim()),
         );
@@ -389,7 +398,11 @@ function GroupRoundsTimeline({
             {round.summary && !roundRunning ? (
               <article className={styles.groupRoundSummary}>
                 <strong>{lang === "zh" ? "本轮纪要" : "Round digest"}</strong>
-                <p>{round.summary}</p>
+                {invalidCount > 0 ? (
+                  <p role="status">{lang === "zh"
+                    ? `本轮 ${challengeMessages.length} 条科研发言，${parsedCount} 条解析成功，${invalidCount} 条解析失败。解析失败的发言不能作为有效科研结果。`
+                    : `${parsedCount} of ${challengeMessages.length} research messages parsed; ${invalidCount} failed parsing and cannot be used as valid research results.`}</p>
+                ) : <p>{round.summary}</p>}
               </article>
             ) : null}
           </section>
