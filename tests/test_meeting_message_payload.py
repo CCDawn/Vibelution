@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import pytest
 
 from core.web.services.team_workflow import meeting_message_payload as payloads
 
@@ -56,7 +57,7 @@ def _structured_output() -> str:
                         "candidateRefs": ["sci-002-c034eaea9"],
                         "searchEnvelope": {
                             "keywords": ["smooth initial data Navier-Stokes blowup"],
-                            "sourceTypes": ["paper", "preprint"],
+                            "sourceTypes": ["paper"],
                             "evidenceLevels": ["peer_reviewed", "preprint"],
                         },
                         "requirements": {
@@ -123,6 +124,44 @@ def test_output_contract_names_the_single_versioned_object() -> None:
     assert '"protocol"' in contract
     assert "AGREE:" not in contract
     assert "EVIDENCE_REQUEST:" not in contract
+
+
+@pytest.mark.parametrize(
+    "section,field,value,error_code",
+    [
+        ("searchEnvelope", "sourceTypes", ["survey"], "search_sourceTypes_invalid"),
+        ("searchEnvelope", "evidenceLevels", ["systematic_review"], "search_evidenceLevels_invalid"),
+        ("searchEnvelope", "keywords", [], "search_keywords_required"),
+        ("requirements", "minEvidenceLevel", "industry_report", "requirements_evidence_level_invalid"),
+    ],
+)
+def test_meeting_rejects_requests_that_collection_cannot_consume(section, field, value, error_code):
+    raw = json.loads(_structured_output())
+    raw["protocol"]["evidenceRequests"][0][section][field] = value
+    ingested = payloads.ingest_meeting_message_output(json.dumps(raw))
+    audit = ingested["messagePayload"]["audit"]
+    assert audit["parseStatus"] == "invalid"
+    assert audit["errorCode"] == error_code
+    assert "protocol.evidenceRequests[0]" in audit["errorMessage"]
+
+
+def test_meeting_request_normalization_matches_collection_and_prompt_enums():
+    from core.web.services.team_workflow.source_collection import facade
+    from core.web.services.team_workflow.meeting_runtime import validate_evidence_request_draft
+
+    raw = json.loads(_structured_output())
+    request = raw["protocol"]["evidenceRequests"][0]
+    request["searchEnvelope"]["sourceTypes"] = [s.upper() for s in sorted(facade.SEARCH_ENVELOPE_SOURCE_TYPES)]
+    request["searchEnvelope"]["evidenceLevels"] = sorted(facade.SEARCH_ENVELOPE_EVIDENCE_LEVELS)
+    payload = payloads.ingest_meeting_message_output(json.dumps(raw))["messagePayload"]
+    assert payload["audit"]["parseStatus"] == "structured"
+    accepted = payload["protocol"]["evidenceRequests"][0]
+    downstream, errors = validate_evidence_request_draft(accepted, {})
+    assert errors == []
+    assert accepted["searchEnvelope"] == downstream["searchEnvelope"]
+    contract = payloads.meeting_message_output_contract()
+    assert json.dumps(sorted(facade.SEARCH_ENVELOPE_SOURCE_TYPES)) in contract
+    assert json.dumps(sorted(facade.SEARCH_ENVELOPE_EVIDENCE_LEVELS)) in contract
 
 
 def test_nested_protocol_objects_must_match_the_versioned_schema() -> None:

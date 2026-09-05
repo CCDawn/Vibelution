@@ -14,6 +14,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from core.orchestration.output_boundary import sanitize_assistant_visible_text
+from core.web.services.team_workflow.source_collection import facade as collection_contract
 
 
 MESSAGE_PAYLOAD_SCHEMA_VERSION = 1
@@ -77,7 +78,14 @@ def meeting_message_output_contract() -> str:
     ]
   }
 }
-没有内容的数组必须保留为空数组。display 给人阅读，protocol 给 closure digest 与证据搜集消费；不要再输出行式协议标记。"""
+没有内容的数组必须保留为空数组。display 给人阅读，protocol 给 closure digest 与证据搜集消费；不要再输出行式协议标记。""" + (
+        "\n补证请求使用以下固定枚举，不要自行创造分类："
+        "\nsearchEnvelope.sourceTypes: "
+        + json.dumps(sorted(collection_contract.SEARCH_ENVELOPE_SOURCE_TYPES))
+        + "\nsearchEnvelope.evidenceLevels 和 requirements.minEvidenceLevel: "
+        + json.dumps(sorted(collection_contract.SEARCH_ENVELOPE_EVIDENCE_LEVELS))
+        + "\nsearchEnvelope.keywords 至少一个非空检索词。preprint 是 evidenceLevels，来源类型使用 paper。"
+    )
 
 
 def _required_text(value: Any, *, field: str) -> str:
@@ -319,6 +327,24 @@ def _normalize_evidence_requests(value: Any) -> list[dict[str, Any]]:
                 },
             }
         )
+        # The producer must enforce the same contract as the collection consumer.
+        # Keep the meeting projection small; the facade owns enum normalization.
+        request = normalized[-1]
+        try:
+            envelope = collection_contract._normalize_search_envelope(
+                request["searchEnvelope"], require_keywords=True,
+            )
+            requirements = collection_contract._normalize_requirements(request["requirements"])
+        except collection_contract.ResearchKnowledgeCollectionError as exc:
+            raise MeetingMessagePayloadError(
+                exc.code, f"protocol.evidenceRequests[{len(normalized) - 1}]: {exc}",
+            ) from exc
+        request["searchEnvelope"] = {
+            key: envelope[key] for key in ("keywords", "sourceTypes", "evidenceLevels")
+        }
+        request["requirements"] = {
+            key: requirements[key] for key in ("minEvidenceLevel", "completeness")
+        }
     return normalized
 
 
