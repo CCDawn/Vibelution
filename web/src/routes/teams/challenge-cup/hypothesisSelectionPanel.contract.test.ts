@@ -21,7 +21,8 @@ const inspectorPaneSource = readFileSync(
 describe("HypothesisSelectionPanel contract (HF-6)", () => {
   it("uses named hypothesisFirst API functions and never raw paths", () => {
     expect(panelSource).toContain("fetchHypothesisSelectionContext");
-    expect(listSource).toContain("recordHypothesisSelection");
+    expect(listSource).toContain("executeHypothesisFirstCommand");
+    expect(listSource).not.toContain("recordHypothesisSelection");
     expect(listSource).toContain("queryKeys.hypothesisFirstSelectionContext");
     expect(panelSource).not.toContain("fetch(");
     expect(panelSource).not.toMatch(/["'`]\/api\//);
