@@ -27,7 +27,6 @@ def test_method_registry_separates_experiment_methods_from_evidence_and_prefligh
         "statistical_causal_test",
         "theoretical_symbolic_validation",
         "external_instrument_experiment",
-        "computational_kernel_benchmark",
     }
     assert "deep_research_review" not in method_ids
     assert "environment_probe" not in method_ids
@@ -147,7 +146,6 @@ def test_explicit_fashion_mnist_multi_seed_adapter_can_satisfy_full_research_loo
 @pytest.mark.parametrize(
     ("method_id", "adapter_id"),
     [
-        ("computational_kernel_benchmark", "challenge_cup_gpu_operator_benchmark"),
         ("dataset_analysis_benchmark", "challenge_cup_sci096_dandi_probe"),
     ],
 )
@@ -165,6 +163,20 @@ def test_stage_two_formal_adapters_require_explicit_selection(method_id, adapter
     assert default_selection["resolvedAdapterId"] == ""
     assert explicit_selection["resolvedAdapterId"] == adapter_id
     assert explicit_selection["selectionSource"] == "user_override"
+
+
+def test_sci091_gpu_operator_plan_is_not_registered_as_a_formal_experiment():
+    selection = experiment_contract.resolve_adapter_selection(
+        "computational_kernel_benchmark",
+        "full_research_loop",
+        requested_adapter_id="challenge_cup_gpu_operator_benchmark",
+    )
+
+    assert selection["resolvedAdapterId"] == ""
+    assert selection["selectionSource"] == "unresolved"
+    assert selection["unavailableReason"] == (
+        "Unknown Adapter: challenge_cup_gpu_operator_benchmark."
+    )
 
 
 def test_legacy_plan_record_projection_is_idempotent_and_preserves_legacy_fields():
