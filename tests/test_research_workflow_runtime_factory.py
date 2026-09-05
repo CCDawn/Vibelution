@@ -160,7 +160,7 @@ def test_real_context_reads_frozen_snapshot_data(tmp_path: Path) -> None:
         assert question is not None
         assert question["question"] == "How to win?"
 
-        budget = context.budget_limits("research-team", "run-test")
+        budget = context.budget_limits("research-team", "run-test", node_id="source_finding")
         assert budget.stage_tokens_limit == 1000
         assert budget.max_tool_calls == 5
 
