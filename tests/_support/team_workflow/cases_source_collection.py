@@ -356,7 +356,24 @@ def test_import_data_record_as_source_candidate_preserves_trace_and_is_idempoten
     _use_tmp_project_root(tmp_path, monkeypatch)
     scene_events = _capture_workflow_events(monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")
-    run = data_processing_service.create_processing_run(title="Source collection")
+    project = team_workflow_orchestration_service.create_research_project(
+        team["teamId"],
+        {"name": "Neurology research", "topic": "Neural predictive coding"},
+    )["project"]
+    team_workflow_orchestration_service.activate_research_project(team["teamId"], project["projectId"])
+    run = data_processing_service.create_processing_run(
+        title="Source collection",
+        scope={
+            "teamId": team["teamId"],
+            "workflowStage": "knowledge_collection",
+            "researchProjectId": project["projectId"],
+        },
+        metadata={
+            "startedFrom": "team_workflow_source_collection",
+            "teamId": team["teamId"],
+            "researchProjectId": project["projectId"],
+        },
+    )
     record = data_processing_service.add_record(
         run["runId"],
         {

@@ -638,7 +638,29 @@ def test_team_workflow_route_imports_data_record_as_source_candidate(tmp_path, m
     _use_tmp_project_root(tmp_path, monkeypatch)
     client = _client()
     team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
-    run = client.post("/api/data-processing/runs", json={"title": "Source collection"}).json()
+    project = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/research-projects",
+        json={"name": "Imported source research", "topic": "Imported source evidence"},
+    ).json()["project"]
+    client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/research-projects/{project['projectId']}/activate"
+    )
+    run = client.post(
+        "/api/data-processing/runs",
+        json={
+            "title": "Source collection",
+            "scope": {
+                "teamId": team["teamId"],
+                "workflowStage": "knowledge_collection",
+                "researchProjectId": project["projectId"],
+            },
+            "metadata": {
+                "startedFrom": "team_workflow_source_collection",
+                "teamId": team["teamId"],
+                "researchProjectId": project["projectId"],
+            },
+        },
+    ).json()
     record = client.post(
         f"/api/data-processing/runs/{run['runId']}/records",
         json={
