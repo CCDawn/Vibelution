@@ -28,9 +28,7 @@ from core.research.workflow.definition_registry import (
     registered_identities,
     reset_registry_for_tests,
     resolve_definition,
-    resolve_definition_by_version_id,
     resolve_definition_for_run_record,
-    resolve_historical_definition,
     snapshot_dir,
     workflow_version_id_for,
 )
@@ -189,44 +187,6 @@ def test_builtin_snapshot_matches_current_definition_build() -> None:
     raw = (snapshot_dir() / "challenge-cup-research@3.0.0.json").read_text(encoding="utf-8")
     assert "\\" not in raw
     assert "http://" not in raw and "https://" not in raw
-
-
-@pytest.mark.parametrize(
-    ("version_id", "structure_hash", "schema_version"),
-    [
-        (
-            "wv-9a4b74e7f21a",
-            "9a4b74e7f21a409c55ed2ef0faf4a61f9c777368b775da3c666c8a8cfc320d53",
-            "2.1.0",
-        ),
-        (
-            "wv-dc2772597d64",
-            "dc2772597d64f047ef36a0bbb2add78adf4134b8d8c5442cdfcdc5e1fbd75378",
-            "2.2.0-stage-one",
-        ),
-    ],
-)
-def test_retired_definition_is_projection_only_and_never_registered(
-    version_id: str,
-    structure_hash: str,
-    schema_version: str,
-) -> None:
-    legacy = resolve_historical_definition(
-        workflow_id="challenge-cup-research",
-        workflow_version_id=version_id,
-        structure_hash=structure_hash,
-        run_id="run-retired-v21",
-    )
-    assert legacy.schemaVersion == schema_version
-    assert "source_finding" in {node.nodeId for node in legacy.nodes}
-    assert {
-        identity.workflowVersionId
-        for identity in registered_identities("challenge-cup-research")
-    } == {
-        workflow_version_id_for(build_challenge_cup_workflow_definition().structureHash)
-    }
-    with pytest.raises(UnknownWorkflowDefinitionVersion):
-        resolve_definition_by_version_id(version_id)
 
 
 def test_registry_roundtrip() -> None:

@@ -34,7 +34,6 @@ SNAPSHOT_SUFFIX = ".json"
 SNAPSHOT_FILENAME_PATTERN = re.compile(r"^(?P<workflowId>[A-Za-z0-9._-]+)@(?P<schemaVersion>[A-Za-z0-9._-]+)$")
 
 DEFAULT_SNAPSHOT_DIR = Path(__file__).resolve().parent / "definitions"
-RETIRED_SNAPSHOT_DIR = DEFAULT_SNAPSHOT_DIR / "retired"
 
 
 class WorkflowDefinitionRegistryError(RuntimeError):
@@ -371,81 +370,6 @@ def resolve_definition_for_run_record(
     )
 
 
-def resolve_historical_definition(
-    *,
-    workflow_id: str,
-    workflow_version_id: str,
-    structure_hash: str = "",
-    run_id: str = "",
-    expected_node_ids: Iterable[str] = (),
-) -> WorkflowDefinition:
-    """Resolve a retired definition for read-only historical projection.
-
-    Retired snapshots deliberately live outside the executable registry and
-    are never returned by ``resolve_definition*``. This separate port exists
-    only so Ledger-backed history and migrated JSON runs remain inspectable
-    after their runtime definitions have been retired.
-    """
-    normalized_workflow_id = str(workflow_id or "").strip()
-    normalized_version_id = str(workflow_version_id or "").strip()
-    normalized_hash = str(structure_hash or "").strip()
-    if not normalized_workflow_id or not normalized_version_id:
-        raise UnknownWorkflowDefinitionVersion(
-            "historical workflow identity is incomplete: "
-            f"runId={run_id or '<unknown>'} "
-            f"workflowId={normalized_workflow_id or '<absent>'} "
-            f"workflowVersionId={normalized_version_id or '<absent>'}"
-        )
-
-    matches: list[WorkflowDefinition] = []
-    known_versions: list[str] = []
-    for path in sorted(RETIRED_SNAPSHOT_DIR.glob(f"*{SNAPSHOT_SUFFIX}")):
-        definition = _read_snapshot_file(path)
-        if definition.workflowId != normalized_workflow_id:
-            continue
-        identity = definition_identity(definition)
-        known_versions.append(identity.workflowVersionId)
-        if identity.workflowVersionId == normalized_version_id:
-            matches.append(definition)
-
-    if not matches:
-        raise UnknownWorkflowDefinitionVersion(
-            "historical workflow definition version is unavailable: "
-            f"runId={run_id or '<unknown>'} "
-            f"workflowId={normalized_workflow_id} "
-            f"workflowVersionId={normalized_version_id}; "
-            f"historicalVersions={sorted(known_versions)}"
-        )
-    if len(matches) > 1:
-        raise WorkflowDefinitionHashMismatch(
-            "historical workflowVersionId resolves to multiple snapshots: "
-            f"workflowId={normalized_workflow_id} "
-            f"workflowVersionId={normalized_version_id}"
-        )
-
-    definition = matches[0]
-    if normalized_hash and normalized_hash != definition.structureHash:
-        raise WorkflowDefinitionHashMismatch(
-            "run structureHash does not match the retired definition: "
-            f"runId={run_id or '<unknown>'} "
-            f"workflowVersionId={normalized_version_id} "
-            f"expectedStructureHash={normalized_hash} "
-            f"historicalStructureHash={definition.structureHash}"
-        )
-    node_ids = {node.nodeId for node in definition.nodes}
-    missing = sorted(
-        {str(node_id) for node_id in expected_node_ids if node_id} - node_ids
-    )
-    if missing:
-        raise WorkflowDefinitionNodeMismatch(
-            "run references nodes missing from the retired definition: "
-            f"runId={run_id or '<unknown>'} "
-            f"workflowVersionId={normalized_version_id} "
-            f"missingNodes={missing}"
-        )
-    return definition
-
-
 # --------------------------------------------------------------------------
 # Snapshot bootstrap (this module is the only snapshot reader)
 # --------------------------------------------------------------------------
@@ -455,34 +379,29 @@ def snapshot_dir() -> Path:
     return DEFAULT_SNAPSHOT_DIR
 
 
-def _read_snapshot_file(path: Path) -> WorkflowDefinition:
-    match = SNAPSHOT_FILENAME_PATTERN.match(path.stem)
-    if match is None:
-        raise WorkflowDefinitionSnapshotInvalid(
-            f"snapshot filename does not match <workflowId>@<schemaVersion>{SNAPSHOT_SUFFIX}: "
-            f"file={path.name}"
-        )
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise WorkflowDefinitionSnapshotInvalid(
-            f"snapshot file is unreadable: file={path.name} error={exc}"
-        ) from exc
-    definition = parse_snapshot_payload(payload)
-    payload_workflow_id = str(payload.get("workflowId") or "")
-    if payload_workflow_id and payload_workflow_id != match.group("workflowId"):
-        raise WorkflowDefinitionSnapshotInvalid(
-            f"snapshot workflowId does not match filename: file={path.name} "
-            f"workflowId={payload_workflow_id}"
-        )
-    return definition
-
-
 def bootstrap_definitions_from_dir(directory: Path) -> tuple[DefinitionIdentity, ...]:
     """Register every snapshot file in one directory; any bad file fails closed."""
     identities: list[DefinitionIdentity] = []
     for path in sorted(Path(directory).glob(f"*{SNAPSHOT_SUFFIX}")):
-        identity = register_definition(_read_snapshot_file(path), source="snapshot")
+        match = SNAPSHOT_FILENAME_PATTERN.match(path.stem)
+        if match is None:
+            raise WorkflowDefinitionSnapshotInvalid(
+                f"snapshot filename does not match <workflowId>@<schemaVersion>{SNAPSHOT_SUFFIX}: "
+                f"file={path.name}"
+            )
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise WorkflowDefinitionSnapshotInvalid(
+                f"snapshot file is unreadable: file={path.name} error={exc}"
+            ) from exc
+        identity = register_definition_snapshot(payload)
+        payload_workflow_id = str(payload.get("workflowId") or "")
+        if payload_workflow_id and payload_workflow_id != match.group("workflowId"):
+            raise WorkflowDefinitionSnapshotInvalid(
+                f"snapshot workflowId does not match filename: file={path.name} "
+                f"workflowId={payload_workflow_id}"
+            )
         identities.append(identity)
     return tuple(identities)
 
