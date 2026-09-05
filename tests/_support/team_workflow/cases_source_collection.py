@@ -10652,6 +10652,8 @@ def test_source_collection_liveness_tiers_judge_snapshots_independently(tmp_path
 
 
 def test_source_collection_heartbeat_touch_records_checkpoint_and_gates_liveness(tmp_path, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
     service = team_workflow_orchestration_service
@@ -10678,6 +10680,10 @@ def test_source_collection_heartbeat_touch_records_checkpoint_and_gates_liveness
     # is 1ms: the heartbeat tier owns the judgment once a heartbeat exists.
     monkeypatch.setenv("VIBELUTION_SOURCE_COLLECTION_SNAPSHOT_STALE_MS", "1")
     monkeypatch.setenv("VIBELUTION_SOURCE_COLLECTION_HEARTBEAT_STALE_MS", str(11 * 60 * 1000))
+    # Make the heartbeat instant differ from the store clock deterministically.
+    # A single touch must persist one timestamp, even across a second boundary.
+    heartbeat_time = (datetime.now(timezone.utc) - timedelta(seconds=2)).isoformat(timespec="seconds")
+    monkeypatch.setattr(service, "utc_now_iso", lambda: heartbeat_time)
     service._touch_source_collection_work_run_heartbeat(
         team["teamId"],
         run_id,

@@ -4250,6 +4250,7 @@ def _touch_source_collection_work_run_heartbeat(
             s.SOURCE_COLLECTION_WORK_RUN_KIND,
             normalized_run_id,
             heartbeat=heartbeat,
+            timestamp=heartbeat["updatedAt"],
         )
     except Exception:  # noqa: BLE001 - a failed heartbeat must never fail collection
         return
