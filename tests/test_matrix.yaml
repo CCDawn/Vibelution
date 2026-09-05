@@ -506,6 +506,7 @@ rules:
     paths:
       - "core/web/services/team_workflow/research_runtime/scientific_semantic_ledger.py"
     commands:
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_challenge_cup_semantic_replay_contract.py -q"
       - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_challenge_cup_stage_one_v3_contract.py tests/test_challenge_cup_scientific_semantic_ledger.py tests/test_challenge_cup_cancel_semantics.py tests/test_challenge_cup_archive_semantics.py tests/test_challenge_cup_human_wait_semantics.py tests/test_challenge_cup_human_success_semantics.py tests/test_research_workflow_adapter_idempotency.py tests/test_team_workflow_facade_contract.py tests/test_team_workflow_structure_packs.py -n 4 --dist loadfile -q"
     notes:
       - "Exact-file replacement only: command_service, adapter_dispatch_worker, graph_dispatch_worker, unknown runtime files and mixed changes retain teams-knowledge."
