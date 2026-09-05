@@ -225,7 +225,7 @@ const graph = composeHypothesisFirstGraph(base, region, {
 - 主流程固定为 3.0.0 十二节点；知识搜集固定使用独立 sideflow，存在 invocation 活动时直接合成侧流程区域。
 - 画布点击 `ksf_` 卡片 → Inspector 渲染 `NodeKnowledgeCollectionSection`（四态：未发起/搜集中/等待交接/已交接 + 失败恢复），与画布共用同一次最近 invocation 推导，保证两侧一致。
 - 主链节点 Inspector 在侧流程启用时挂载同一 section：`knowledgeBadge === undefined` 隐藏整节（定义无侧流程），`null` 表示未发起态（预览关键词/证据类型/时间窗/来源策略，来自命令 offer payload）。
-- 命令动作只来自 canonical knowledge command offers（`ensure_knowledge_collection` / `inspect_knowledge_collection`）；operator-only offer 渲染禁用态 + `authorizationReason`（`isOperatorGatedOffer`），不让用户撞 403。签名/过期由服务端提交时再校验，前端展示不做 fail-open。
+- 搜集请求动作来自 canonical knowledge command offers（`ensure_knowledge_collection` / `inspect_knowledge_collection`）；选择知识子流程节点时，复用 `ResearchProcessNodeInspector` 展示该子运行的节点命令、会话和交接状态。节点命令从子运行读取并提交到同一子运行，不能套用父运行的版本或命令。operator-only offer 渲染禁用态 + `authorizationReason`（`isOperatorGatedOffer`），不让用户撞 403。签名/过期由服务端提交时再校验，前端展示不做 fail-open。
 
 ### 使用方式
 

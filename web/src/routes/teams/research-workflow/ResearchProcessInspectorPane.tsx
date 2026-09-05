@@ -40,6 +40,7 @@ import {
   sideflowNodeStatesFromBadges,
 } from "./knowledgeSideflowCanvasRegion";
 import { NodeKnowledgeCollectionSection } from "./NodeKnowledgeCollectionSection";
+import { KnowledgeChildNodeInspector } from "./KnowledgeChildNodeInspector";
 import {
   shouldHideSourceFindingStart,
   type HypothesisFirstNextAction,
@@ -361,6 +362,7 @@ export function ResearchProcessInspectorPane(props: {
         ) ?? null
       : null;
     return (
+      <>
       <NodeKnowledgeCollectionSection
         badge={parentBadge}
         offers={state.snapshotOffers ?? []}
@@ -368,6 +370,16 @@ export function ResearchProcessInspectorPane(props: {
         onOffer={actions.submitOffer}
         lang={lang}
       />
+      {parentBadge?.latest?.knowledgeChildRunId && semanticId ? (
+        <KnowledgeChildNodeInspector
+          key={`${parentBadge.latest.knowledgeChildRunId}:${semanticId}`}
+          teamId={scope.teamId}
+          runId={parentBadge.latest.knowledgeChildRunId}
+          nodeId={semanticId}
+          lang={lang}
+        />
+      ) : null}
+      </>
     );
   }
   // Hypothesis-first region cards: summary + deep link, in definition and run views alike.
