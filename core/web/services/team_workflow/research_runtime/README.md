@@ -15,6 +15,22 @@ Adapter 执行 → Domain read-back → Receipt → Handoff → 下一节点 Rea
 - **运行时组装**：`runtime_factory.py`（composition root）——Ledger + coordinator +
   readiness + real ports/context + graph/adapter worker 一次性组装。
 
+### 执行、业务结果与工作流进度
+
+| 事实 | 唯一来源 | 派生规则 |
+| --- | --- | --- |
+| Session / Turn 执行状态 | 原生 Session Journal | 按任务绑定的 sessionId + turnId 读取；当前 Session phase、其他 Turn 和业务状态不得覆盖 |
+| 任务业务结果 | 领域任务 Store 与任务关联的持久产物 | Turn 终结后核验关联产物；有正文不等于有产物，写回后的执行失败不抹除已有产物 |
+| 模型调用证据 | Model Invocation Receipt Registry | 由现有持久 Outbox 投递；Session 快照只能作为投影，不回写 Registry |
+| 工作流进度 | Workflow Ledger | 任务结果、正式回执和产物 read-back/verify 全部满足后才提交节点成功 |
+
+回执等待只挂起原 adapter action 的完成处理，保留原任务、Turn 和预算 reservation。
+投递未完成时重排完成处理，不消耗模型重试额度；投递缺失或失败时阻塞工作流，
+不伪造 Session 失败。匹配回执到达后只唤醒仍为最新且未取消的原节点尝试，
+继续校验与提交，不新建任务或调用模型。工作流 anchor 的 closure 表达工作流关闭原因，
+不得覆盖其 rootSession/scopedSessions 的执行状态。
+此恢复只适用于保存了完成游标的新等待记录；旧版本已终结的失败尝试不自动重开。
+
 ### Agent 配置与绑定权威
 
 - `Team.members` 只保存 `role -> agentId`，是团队成员关系的唯一来源。

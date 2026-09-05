@@ -47,7 +47,9 @@ _FAILURE_TERMINAL_STATUSES = frozenset(
     }
 )
 
-_PROJECT_TASK_RECONCILABLE_TURN_STATUSES = frozenset({"needs_continue"})
+# Project tasks reconcile every terminal execution against their task-bound
+# artifacts. A provider failure after writeback must not erase business work.
+_PROJECT_TASK_RECONCILABLE_TURN_STATUSES = _FAILURE_TERMINAL_STATUSES | frozenset({"timed_out"})
 
 # Canonical resumable terminal turn statuses per the session protocol: a turn
 # that stops here is parked awaiting an explicit continue request, not broken
@@ -160,32 +162,6 @@ def _canonical_agent_task_started_at_ms(
     return int(started.timestamp() * 1000) if started is not None else 0
 
 
-def _persist_question_model_invocation_receipts(
-    snapshot: dict[str, Any],
-    *,
-    team_id: str,
-    question_id: str,
-    workflow_run_id: str,
-) -> list[dict[str, Any]]:
-    raw = snapshot.get("modelInvocationReceipts")
-    receipts = [item for item in list(raw or []) if isinstance(item, dict)]
-    if not receipts:
-        legacy = snapshot.get("modelInvocationReceipt")
-        receipts = [legacy] if isinstance(legacy, dict) else []
-    if not receipts or not question_id:
-        return []
-    from .model_invocation_receipt_registry import (
-        register_question_model_invocation_receipts,
-    )
-
-    return register_question_model_invocation_receipts(
-        team_id,
-        question_id=question_id,
-        workflow_run_id=workflow_run_id,
-        receipts=receipts,
-    )
-
-
 def _attach_registered_model_invocation_receipts(
     snapshot: dict[str, Any],
     *,
@@ -197,8 +173,6 @@ def _attach_registered_model_invocation_receipts(
 ) -> dict[str, Any]:
     """Project Challenge Cup audit receipts without reading conversation JSONL."""
 
-    if snapshot.get("modelInvocationReceipts") or snapshot.get("modelInvocationReceipt"):
-        return snapshot
     from .model_invocation_receipt_registry import (
         question_model_invocation_receipts,
     )
@@ -210,11 +184,11 @@ def _attach_registered_model_invocation_receipts(
         session_id=session_id,
         turn_id=turn_id,
     )
-    if not receipts:
-        return snapshot
     projected = dict(snapshot)
+    projected.pop("modelInvocationReceipt", None)
     projected["modelInvocationReceipts"] = receipts
-    projected["modelInvocationReceipt"] = receipts[-1]
+    if receipts:
+        projected["modelInvocationReceipt"] = receipts[-1]
     return projected
 
 
@@ -286,16 +260,11 @@ def _require_formal_model_invocation_receipt(
     )
     if not receipt_required or formal_receipt is not None:
         return
-    raise TurnNotReadyError(
+    from .completion_dependency import CompletionDependencyPending
+    raise CompletionDependencyPending(
         "model invocation receipt persistence is pending",
         snapshot={
             **snapshot,
-            "terminal": False,
-            "terminalStatus": "",
-            "completionSource": "receipt_registry_pending",
-            "turnTerminal": bool(snapshot.get("terminal")),
-            "turnTerminalStatus": str(snapshot.get("terminalStatus") or ""),
-            "turnCompletionSource": str(snapshot.get("completionSource") or ""),
             "receiptPersistencePending": True,
             "challengeTaskStartedAtMs": int(task_started_at_ms or 0),
         },
@@ -1135,6 +1104,7 @@ def complete_agent_turn_outputs(
     and closeout are about to read.
     """
     from .task_adapter_registry import resolve_agent_task_adapter
+    from .completion_dependency import CompletionDependencyPending, completion_resume
 
     team_id = str(input_snapshot.get("teamId") or "").strip()
     if not team_id:
@@ -1151,18 +1121,35 @@ def complete_agent_turn_outputs(
         project_id=str(input_snapshot.get("projectId") or "").strip(),
         adapter_spec=adapter_spec,
     ) or current_challenge_task_started_at_ms() or 0
-    with challenge_task_deadline_scope(
-        task_started_at_ms,
-        resume_problem=current_challenge_task_resume_problem(),
-    ):
-        snapshot, final_turn_id, continuations = _wait_with_bounded_turn_continuation(
-            handle,
-            action=action,
-            input_snapshot=input_snapshot,
-            adapter_spec=adapter_spec,
-            timeout_ms=timeout_ms,
-            poll_ms=poll_ms,
+    if completion_resume(action) is not None:
+        # Execution has already settled. Re-read it, but never continue it or
+        # charge its execution deadline for delayed persistence/verification.
+        reconcilable = (
+            _PROJECT_TASK_RECONCILABLE_TURN_STATUSES
+            if adapter_spec is not None and adapter_spec.family == "research_project"
+            else AGENT_TURN_CONTINUABLE_TERMINAL_STATUSES
         )
+        if (adapter_spec is not None and adapter_spec.family == "source_collection"
+                and _stage_task_work_already_complete(team_id=team_id, task_id=handle.task_id)):
+            reconcilable = reconcilable | _FAILURE_TERMINAL_STATUSES
+        snapshot = wait_for_agent_turn_terminal(
+            handle.session_id, handle.turn_id, timeout_ms=0,
+            reconcilable_terminal_statuses=reconcilable,
+        )
+        final_turn_id, continuations = handle.turn_id, []
+    else:
+        with challenge_task_deadline_scope(
+            task_started_at_ms,
+            resume_problem=current_challenge_task_resume_problem(),
+        ):
+            snapshot, final_turn_id, continuations = _wait_with_bounded_turn_continuation(
+                handle,
+                action=action,
+                input_snapshot=input_snapshot,
+                adapter_spec=adapter_spec,
+                timeout_ms=timeout_ms,
+                poll_ms=poll_ms,
+            )
     if continuations:
         # Downstream reconciliation must reference the final continuation
         # turn, not the originally parked one.
@@ -1180,18 +1167,16 @@ def complete_agent_turn_outputs(
     formal_receipt, receipt_stage_id, receipt_policy_sha256, receipt_usage = (
         _formal_receipt_writeback_context(snapshot)
     )
-    _require_formal_model_invocation_receipt(
-        snapshot,
-        input_snapshot=input_snapshot,
-        task_started_at_ms=task_started_at_ms,
-        formal_receipt=formal_receipt,
-    )
-    _persist_question_model_invocation_receipts(
-        snapshot,
-        team_id=team_id,
-        question_id=question_id,
-        workflow_run_id=workflow_run_id,
-    )
+    try:
+        _require_formal_model_invocation_receipt(
+            snapshot,
+            input_snapshot=input_snapshot,
+            task_started_at_ms=task_started_at_ms,
+            formal_receipt=formal_receipt,
+        )
+    except CompletionDependencyPending as exc:
+        exc.handle = handle
+        raise
 
     task_id = str(handle.task_id or "").strip()
     if task_id and adapter_spec is not None and adapter_spec.family == "source_collection":
@@ -1308,28 +1293,13 @@ def _require_project_task_terminal(
         raise RuntimeError("completed project Agent task is missing from its authority")
     task_status = str(task.get("status") or "").strip().lower()
     if task_status in {"queued", "running"}:
-        # The canonical turn already completed; only the task store lags its
-        # reconcile. This is live progress, not a broken dispatch: carrying a
-        # proper non-terminal snapshot keeps the dispatcher on the bounded
-        # live-wait path instead of consuming the transient retry budget
-        # (a slow model makes the lag exceed the 5-attempt transient cap and
-        # fail the node as transient_exhausted).
-        raise TurnNotReadyError(
-            json.dumps(
-                {
-                    "code": "project_agent_task_not_reconciled",
-                    "taskId": task_id,
-                    "status": task_status,
-                },
-                ensure_ascii=False,
-            ),
-            snapshot={
-                "terminal": False,
-                "completionSource": "running",
-                "taskId": task_id,
-                "taskStatus": task_status,
-            },
-        )
+        # The caller already observed a terminal Turn. A lagging task record
+        # cannot turn that execution back into a live model wait.
+        raise RuntimeError(json.dumps({
+            "code": "project_agent_task_not_reconciled",
+            "taskId": task_id,
+            "status": task_status,
+        }, ensure_ascii=False))
     if task_status != "completed":
         raise RuntimeError(
             json.dumps(

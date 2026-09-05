@@ -172,8 +172,29 @@ def test_completion_projects_registered_receipt_without_journal(monkeypatch) -> 
     }
 
 
+@pytest.mark.parametrize("old", [
+    {"modelInvocationReceipt": {"receiptId": "stale"}},
+    {"modelInvocationReceipts": [{"receiptId": "stale"}]},
+])
+@pytest.mark.parametrize("registered", [[], [{"receiptId": "current"}]])
+def test_completion_receipts_are_always_projected_from_registry(monkeypatch, old, registered):
+    from core.web.services.team_workflow.research_runtime import agent_turn_completion as atc
+    from core.web.services.team_workflow.research_runtime import model_invocation_receipt_registry as registry
+    monkeypatch.setattr(registry, "question_model_invocation_receipts", lambda *a, **k: registered)
+    original = {**old, "terminal": True, "terminalStatus": "completed"}
+    result = atc._attach_registered_model_invocation_receipts(
+        original, team_id="team-1", question_id="SCI-096", workflow_run_id="run-test",
+        session_id="sess-1", turn_id="turn-main",
+    )
+    assert result.get("modelInvocationReceipts", []) == registered
+    assert result.get("modelInvocationReceipt") == (registered[-1] if registered else None)
+    assert result["terminalStatus"] == "completed"
+    assert original == {**old, "terminal": True, "terminalStatus": "completed"}
+
+
 def test_formal_completion_waits_for_durable_receipt_projection() -> None:
     import core.web.services.team_workflow.research_runtime.agent_turn_completion as atc
+    from core.web.services.team_workflow.research_runtime.completion_dependency import CompletionDependencyPending
 
     snapshot = _snapshot("completed", "turn-main")
     input_snapshot = {
@@ -185,16 +206,16 @@ def test_formal_completion_waits_for_durable_receipt_projection() -> None:
         },
     }
 
-    with pytest.raises(atc.TurnNotReadyError) as raised:
+    with pytest.raises(CompletionDependencyPending) as raised:
         atc._require_formal_model_invocation_receipt(
             snapshot,
             input_snapshot=input_snapshot,
             task_started_at_ms=123,
         )
 
-    assert raised.value.snapshot["terminal"] is False
-    assert raised.value.snapshot["completionSource"] == "receipt_registry_pending"
-    assert raised.value.snapshot["turnTerminalStatus"] == "completed"
+    assert raised.value.snapshot["terminal"] is True
+    assert raised.value.snapshot["terminalStatus"] == "completed"
+    assert raised.value.snapshot["completionSource"] == snapshot["completionSource"]
     assert raised.value.snapshot["challengeTaskStartedAtMs"] == 123
 
 
@@ -836,7 +857,8 @@ def test_settled_predicate_requires_completed_stage_task(monkeypatch):
     assert atc._stage_task_work_already_complete(team_id="", task_id="task-1") is False
 
 
-def test_research_project_parked_turn_is_never_continued(monkeypatch):
+@pytest.mark.parametrize("terminal_status", ["needs_continue", "failed_provider", "completed"])
+def test_research_project_terminal_turn_is_never_continued(monkeypatch, terminal_status):
     """Project tasks keep their authority-owned verdict: a parked turn returns
     as reconcilable without any continuation or predicate call."""
     import core.web.services.team_workflow.research_runtime.agent_turn_completion as atc
@@ -845,7 +867,8 @@ def test_research_project_parked_turn_is_never_continued(monkeypatch):
 
     def _wait(session_id, turn_id, *, timeout_ms, poll_ms, reconcilable_terminal_statuses):
         events.append(f"poll:{turn_id}")
-        return _snapshot("needs_continue", turn_id)
+        assert terminal_status == "completed" or terminal_status in reconcilable_terminal_statuses
+        return _snapshot(terminal_status, turn_id)
 
     monkeypatch.setattr(atc, "wait_for_agent_turn_terminal", _wait)
     monkeypatch.setattr(
@@ -868,7 +891,7 @@ def test_research_project_parked_turn_is_never_continued(monkeypatch):
     )
 
     assert final_turn_id == "turn-main"
-    assert snapshot["terminalStatus"] == "needs_continue"
+    assert snapshot["terminalStatus"] == terminal_status
     assert used == []
     assert events == ["poll:turn-main"]
 
