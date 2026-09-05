@@ -803,6 +803,61 @@ def _readiness_budget(harness: CommandHarness):
     return consumed, context.budget_limits("research-team", "run-test")
 
 
+def test_readiness_without_frozen_policy_uses_admission_defaults(tmp_path: Path) -> None:
+    from core.web.services.team_workflow.research_runtime.budget_authority_adapter import _policy_limits
+
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run()
+        _write_snapshot(harness, {})
+        _insert_budget_receipt(
+            harness, receipt_id="br-default", node_id="source_finding",
+            node_run_id="nr-run-test-source_finding-a1", estimate=2_000_000,
+            status="settled", usage={"tokens": REAL_NODE_USAGE},
+        )
+        _, budget = _readiness_budget(harness)
+        limits = _policy_limits({}, "knowledge_collection")
+        assert budget.stage_tokens_limit == limits["tokens"]
+        assert budget.max_tool_calls == limits["toolCalls"]
+        assert budget.max_seconds == limits["seconds"]
+        assert budget.auto_retries == limits["retries"]
+        assert budget.available() == (True, "")
+    finally:
+        harness.close()
+
+
+def test_readiness_revision_changes_when_reservation_settles(tmp_path: Path, monkeypatch) -> None:
+    from core.web.services.team_workflow.research_runtime import readiness_providers
+    from core.web.services.team_workflow.source_collection import candidates
+    from core.research.evidence import ClaimEvidenceStore
+
+    monkeypatch.setattr(candidates, "list_candidate_store", lambda *_a, **_kw: {"candidates": []})
+    monkeypatch.setattr(ClaimEvidenceStore, "list", lambda *_a: [])
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run()
+        _insert_budget_receipt(
+            harness, receipt_id="br-revision", node_id="source_finding",
+            node_run_id="nr-run-test-source_finding-a1", estimate=2_000_000,
+            status="reserved",
+        )
+        def revision():
+            return readiness_providers.build_domain_revision_vector(
+                "research-team", "run-test", ledger_store=harness.store,
+            )
+        reserved = revision()
+        assert revision() == reserved
+        harness.store.submit(lambda uow: uow.repository.update_budget_receipt(
+            "br-revision", status="settled", now_ms=1_750_000_000_002,
+            settled_json=json.dumps({"usage": {"tokens": REAL_NODE_USAGE}}),
+        ), force_flush=True).result(timeout=10)
+        settled = revision()
+        assert settled != reserved
+        assert settled["budget_receipts"] != reserved["budget_receipts"]
+    finally:
+        harness.close()
+
+
 def test_readiness_consumption_releases_settled_estimates(tmp_path: Path) -> None:
     """Two settled attempts with small real usage keep a serial successor
     admissible even though each reserved the full stage estimate."""
@@ -1050,7 +1105,9 @@ def test_readiness_snapshot_dual_reads_retry_vocabulary(tmp_path: Path) -> None:
             _, budget = _readiness_budget(harness)
             return budget.auto_retries
 
-        assert _auto_retries() == 2  # default when neither key is present
+        from core.web.services.team_workflow.research_runtime.budget_contract import DEFAULT_MAX_RETRIES
+
+        assert _auto_retries() == DEFAULT_MAX_RETRIES
 
         _write_snapshot(
             harness,
