@@ -31,6 +31,13 @@ Adapter 执行 → Domain read-back → Receipt → Handoff → 下一节点 Rea
 不得覆盖其 rootSession/scopedSessions 的执行状态。
 此恢复只适用于保存了完成游标的新等待记录；旧版本已终结的失败尝试不自动重开。
 
+### Readiness 来源约束
+
+- 执行检查按显式 nodeId 解析阶段，复用预算准入的额度规则（包括 operator 扩容）和用量计算；
+  budget receipt 查询同时限定 runId 与 stageId，不依赖 JSON 字段顺序或其他阶段的消耗。
+- 指定 runId 的题目检查只读取该运行冻结快照；未指定运行的历史查询不参与执行检查。
+- 产物检查只使用 canonical scoped loader；归属失配或缺失不再从宽松的列表读取中恢复。
+
 ### Agent 配置与绑定权威
 
 - `Team.members` 只保存 `role -> agentId`，是团队成员关系的唯一来源。

@@ -19,13 +19,7 @@ from core.research.workflow.ledger import WorkflowLedgerStore
 from core.research.workflow.models import ActorKind
 
 from . import readiness_providers
-from .budget_authority_adapter import _stage_admitted_tokens
-from .budget_contract import (
-    DEFAULT_MAX_RETRIES,
-    DEFAULT_STAGE_TOKENS,
-    DEFAULT_TOOL_CALLS,
-    DEFAULT_WALL_CLOCK_SECONDS,
-)
+from .budget_authority_adapter import _policy_limits, _stage_admitted_tokens, stage_for_node
 from .human_gate_artifacts import canonical_sha256
 from .smoke_release_artifact import smoke_observation_is_releasable
 from .readiness.common import (
@@ -103,9 +97,8 @@ class RealDomainReadinessContext:
         if snapshot is not None:
             return snapshot
         preferred = str(run_id or "").strip()
-        for candidate_run_id in _run_ids_for(
-            self._store, team_id, preferred_run_id=preferred or None
-        ):
+        candidate_run_ids = ([preferred] if preferred else _run_ids_for(self._store, team_id))
+        for candidate_run_id in candidate_run_ids:
             run_snapshot = self._input_snapshot(candidate_run_id)
             objective = run_snapshot.get("researchObjectiveContract") or {}
             if str(objective.get("question") or "") and str(
@@ -402,51 +395,23 @@ class RealDomainReadinessContext:
             "terminal_reason": str(package.get("terminalReason") or "").strip(),
         }
 
-    def budget_limits(self, team_id: str, run_id: str) -> BudgetLimitsSnapshot:
+    def budget_limits(self, team_id: str, run_id: str, *, node_id: str) -> BudgetLimitsSnapshot:
         _ = team_id
         snapshot = self._input_snapshot(run_id)
-        budget_policy = snapshot.get("budgetPolicy") or {}
-        stage_budgets = budget_policy.get("stageBudgets") or {}
-        tokens = _first_positive_limit(stage_budgets, "tokens") or int(
-            budget_policy.get("tokens") or DEFAULT_STAGE_TOKENS
+        stage_id = stage_for_node(node_id)
+        limits = _policy_limits(
+            snapshot, stage_id, operator_limits=_safety_limits_override(self._run(run_id))
         )
-        tool_calls = _first_positive_limit(stage_budgets, "toolCalls") or int(
-            budget_policy.get("toolCalls") or DEFAULT_TOOL_CALLS
-        )
-        max_seconds = int(budget_policy.get("wallClockSeconds") or DEFAULT_WALL_CLOCK_SECONDS)
-        consumed = _budget_consumed_from_ledger(self._store, run_id)
-        # The operator-owned safety-limits extension (extend_budget) is part
-        # of the effective budget window, exactly as the admission authority
-        # (budget_authority_adapter._policy_limits) applies it: only-widen,
-        # per-run, never the frozen contract or a global default.  Without
-        # this mirror, a mid-run budget exhaustion would keep failing the
-        # readiness gate (and retry/start with 412) even after the operator
-        # raised the ceiling — leaving run abandonment as the only exit.
-        override = _safety_limits_override(self._run(run_id))
-        stage_token_override = _max_positive_mapping_int(
-            override.get("stageTokens") if isinstance(override, Mapping) else None
-        )
-        if stage_token_override is not None:
-            tokens = max(tokens, stage_token_override)
-        tool_override = _positive_override_int(override.get("toolCalls"))
-        if tool_override is not None:
-            tool_calls = max(tool_calls, tool_override)
-        seconds_override = _positive_override_int(override.get("wallClockSeconds"))
-        if seconds_override is not None:
-            max_seconds = max(max_seconds, seconds_override)
+        consumed = _budget_consumed_from_ledger(self._store, run_id, stage_id=stage_id)
         return BudgetLimitsSnapshot(
-            policy_hash=_policy_hash(budget_policy),
-            stage_tokens_limit=tokens,
+            policy_hash=_policy_hash(snapshot.get("budgetPolicy") or {}),
+            stage_tokens_limit=limits["tokens"],
             stage_tokens_consumed=int(consumed.get("tokens") or 0),
-            max_tool_calls=tool_calls,
+            max_tool_calls=limits["toolCalls"],
             tool_calls_consumed=int(consumed.get("toolCalls") or 0),
-            max_seconds=max_seconds,
+            max_seconds=limits["seconds"],
             seconds_consumed=int(consumed.get("seconds") or 0),
-            auto_retries=int(
-                budget_policy.get("autoRetries")
-                or budget_policy.get("maxRetries")
-                or DEFAULT_MAX_RETRIES
-            ),
+            auto_retries=limits["retries"],
             retries_consumed=int(consumed.get("retries") or 0),
         )
 
@@ -543,13 +508,6 @@ def _artifact_payload(
         workflow_run_id=run_id,
     )
     if envelope is None:
-        envelope = _readiness_artifact_envelope(
-            kind,
-            team_id=team_id,
-            run_id=run_id,
-            authority_run_id=authority_run_id,
-        )
-    if envelope is None:
         return None
     raw_payload = envelope.get("payload")
     payload = dict(raw_payload) if isinstance(raw_payload, dict) else dict(envelope)
@@ -561,52 +519,15 @@ def _artifact_payload(
     }
 
 
-def _readiness_artifact_envelope(
-    kind: str,
-    *,
-    team_id: str,
-    run_id: str,
-    authority_run_id: str,
-) -> dict[str, Any] | None:
-    """Recover a same-run record when authority/run ids drifted in compact restore."""
-    from .workflow_artifact_store import list_workflow_artifacts
-
-    workflow = str(run_id or "").strip()
-    team = str(team_id or "").strip()
-    if not team or not workflow:
-        return None
-    rows = list_workflow_artifacts(team, kind=kind, workflow_run_id=workflow)
-    authority = str(authority_run_id or "").strip()
-    if not rows and authority and authority != workflow:
-        rows = [
-            item
-            for item in list_workflow_artifacts(
-                team, kind=kind, source_collection_run_id=authority
-            )
-            if str(item.get("workflowRunId") or "") in {workflow, authority}
-        ]
-    for latest in reversed(rows):
-        payload = latest.get("payload")
-        if isinstance(payload, dict) and payload:
-            return {
-                "teamId": team,
-                "kind": kind,
-                "workflowRunId": str(latest.get("workflowRunId") or workflow),
-                "sourceCollectionRunId": str(
-                    latest.get("sourceCollectionRunId") or authority or workflow
-                ),
-                "payload": payload,
-            }
-    return None
-
-
-def _budget_consumed_from_ledger(store: WorkflowLedgerStore, run_id: str) -> dict[str, int]:
+def _budget_consumed_from_ledger(
+    store: WorkflowLedgerStore, run_id: str, *, stage_id: str
+) -> dict[str, int]:
     try:
         rows = store.submit(
             lambda uow: uow.repository.execute(
                 "SELECT reserved_json, settled_json, status FROM budget_receipts "
-                "WHERE run_id = ?",
-                (run_id,),
+                "WHERE run_id = ? AND stage_id = ?",
+                (run_id, stage_id),
             ).fetchall(),
             force_flush=True,
         ).result(timeout=10)
@@ -656,39 +577,15 @@ def _budget_consumed_from_ledger(store: WorkflowLedgerStore, run_id: str) -> dic
     }
 
 
-def _run_ids_for(
-    store: WorkflowLedgerStore,
-    team_id: str,
-    *,
-    preferred_run_id: str | None = None,
-) -> list[str]:
-    """Return team run ids, preferring the caller's current run when provided."""
-    preferred = str(preferred_run_id or "").strip()
+def _run_ids_for(store: WorkflowLedgerStore, team_id: str) -> list[str]:
+    """Team history lookup for callers that did not request an execution run."""
     rows = store.submit(
         lambda uow: uow.repository.execute(
             "SELECT run_id FROM workflow_runs WHERE team_id = ? "
-            "ORDER BY created_at_ms DESC LIMIT 50",
-            (team_id,),
-        ).fetchall(),
-        force_flush=True,
+            "ORDER BY created_at_ms DESC LIMIT 50", (team_id,),
+        ).fetchall(), force_flush=True,
     ).result(timeout=10)
-    run_ids = [str(row[0]) for row in rows]
-    if not preferred:
-        return run_ids
-    ordered = [preferred]
-    for rid in run_ids:
-        if rid != preferred:
-            ordered.append(rid)
-    return ordered
-
-
-def _first_positive_limit(stage_budgets: Mapping[str, Any], key: str) -> int | None:
-    if not isinstance(stage_budgets, Mapping):
-        return None
-    for _stage, limits in stage_budgets.items():
-        if isinstance(limits, Mapping) and int(limits.get(key) or 0) > 0:
-            return int(limits[key])
-    return None
+    return [str(row[0]) for row in rows]
 
 
 def _safety_limits_override(run: Any) -> dict[str, Any]:
@@ -702,25 +599,6 @@ def _safety_limits_override(run: Any) -> dict[str, Any]:
     except (TypeError, ValueError):
         return {}
     return decoded if isinstance(decoded, dict) else {}
-
-
-def _positive_override_int(value: object) -> int | None:
-    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-        return None
-    return int(value)
-
-
-def _max_positive_mapping_int(value: object) -> int | None:
-    """Largest positive int in a stage->limit mapping (adapter semantics)."""
-
-    if not isinstance(value, Mapping):
-        return None
-    widest: int | None = None
-    for item in value.values():
-        normalized = _positive_override_int(item)
-        if normalized is not None and (widest is None or normalized > widest):
-            widest = normalized
-    return widest
 
 
 def _policy_hash(budget_policy: Mapping[str, Any]) -> str:
