@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from .definition import build_challenge_cup_workflow_definition, node_by_id
-from .models import ActorKind, AgentBindingLayers, RunAgentBindingSnapshot, WorkflowNodeSpec
+from .models import ActorKind, AgentBindingLayers, RunAgentBindingSnapshot, WorkflowDefinition, WorkflowNodeSpec
 
 
 def resolve_effective_agent_id(
@@ -37,9 +37,10 @@ def build_run_binding_snapshots(
     layers: AgentBindingLayers,
     captured_at: str,
     snapshot_prefix: str = "snap",
+    definition: WorkflowDefinition | None = None,
 ) -> list[RunAgentBindingSnapshot]:
     """Materialize run-time snapshots for all agent nodes at run start."""
-    definition = build_challenge_cup_workflow_definition()
+    definition = definition or build_challenge_cup_workflow_definition()
     snapshots: list[RunAgentBindingSnapshot] = []
     for node in definition.nodes:
         if node.actorKind is not ActorKind.AGENT:

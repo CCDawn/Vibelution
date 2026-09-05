@@ -69,6 +69,17 @@ describe("knowledgeSideflowCanvasRegion ids", () => {
 });
 
 describe("sideflowNodeStatesFromBadges", () => {
+  it("describes failed child nodes truthfully while the invocation can recover", () => {
+    const states = sideflowNodeStatesFromBadges({ hypothesis_design: badge({ latest: {
+      invocationId: "inv-failed", parentNodeId: "hypothesis_design", status: "child_created",
+      handoffState: "pending", currentKnowledgeNodeId: "source_finding", updatedAtMs: 1,
+      childNodeStates: { source_finding: "failed" },
+    } }) });
+    expect(states[0].status).toBe("failed");
+    expect(states[0].description).toContain("失败");
+    expect(states[0].description).not.toContain("进行中");
+  });
+
   it("derives five cards from the most recent invocation only", () => {
     const states = sideflowNodeStatesFromBadges({
       problem_understanding: badge({

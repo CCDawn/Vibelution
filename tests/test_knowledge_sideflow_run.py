@@ -106,6 +106,38 @@ def _invoke(harness: GraphHarness, parent_run_id: str = "run-parent", **override
     )
 
 
+def test_child_freezes_its_own_agent_bindings(tmp_path: Path, monkeypatch) -> None:
+    from core.web.services.team_workflow.research_runtime import team_role_source
+
+    roles = ["source_finder", "source_extractor", "source_relation_mapper", "source_ingestor"]
+    monkeypatch.setattr(
+        team_role_source, "_team_member_source",
+        lambda team_id: ("found", [
+            {"agentId": f"agent-{role}", "role": role} for role in roles
+        ]),
+    )
+    harness = GraphHarness(tmp_path)
+    try:
+        _seed_parent(harness)
+        result = _invoke(harness)
+        child = harness.commands.store.get_run(result["childRunId"])
+        snapshot = json.loads(child.input_snapshot_json)
+        bindings = snapshot["agentBindingSnapshot"]
+        assert {item["nodeId"] for item in bindings} == set(KNOWLEDGE_SIDEFLOW_NODE_IDS[:-1])
+        assert {item["agentId"] for item in bindings} == {f"agent-{role}" for role in roles}
+        assert snapshot["workflowId"] == KNOWLEDGE_SIDEFLOW_WORKFLOW_ID
+        assert snapshot["workflowVersionId"] == child.workflow_version_id
+        assert all(item["snapshotId"].startswith(f"snap:{child.run_id}:") for item in bindings)
+        entry = harness.commands.store.latest_attempt(child.run_id, "source_finding")
+        assert entry.binding_snapshot_id == next(item["snapshotId"] for item in bindings if item["nodeId"] == "source_finding")
+        monkeypatch.setattr(team_role_source, "_team_member_source", lambda _: ("found", []))
+        replay = _invoke(harness)
+        assert replay["childRunId"] == child.run_id
+        assert harness.commands.store.get_run(child.run_id).input_snapshot_json == child.input_snapshot_json
+    finally:
+        harness.close()
+
+
 def _child_rows(harness: GraphHarness):
     return harness.commands.store.submit(
         lambda uow: uow.repository.execute(
@@ -476,9 +508,11 @@ def test_child_run_creation_is_crash_replay_idempotent(tmp_path: Path) -> None:
         harness.close()
 
 
+@pytest.mark.parametrize("decision", ["pending", "approved", "rejected", "revision_requested"])
 def test_problem_understanding_success_auto_ensures_sideflow_once(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    decision: str,
 ) -> None:
     """The v3 post-commit hook performs only one local, non-blocking ensure."""
 
@@ -524,7 +558,7 @@ def test_problem_understanding_success_auto_ensures_sideflow_once(
                 "known_unknowns": ["Energy benefit under sparse workloads"],
                 "human_gate": {
                     "required": True,
-                    "decision": "approved",
+                    "decision": decision,
                     "rationale": "Scope is testable.",
                 },
             },
@@ -546,12 +580,57 @@ def test_problem_understanding_success_auto_ensures_sideflow_once(
             node_run_id="nr-problem-a1",
         )
 
+        if decision in {"rejected", "revision_requested"}:
+            assert first["status"] == "failed"
+            assert second["status"] == "failed"
+            assert _child_rows(harness) == []
+            return
+
         assert first["status"] == "submitted"
         assert first["childRunId"]
         assert second["status"] == "replayed"
         assert second["invocationId"] == first["invocationId"]
         assert second["childRunId"] == first["childRunId"]
         assert len(_child_rows(harness)) == 1
+        records = workflow_artifact_store.list_workflow_artifacts(
+            "research-team", kind="problem_understanding", workflow_run_id="run-parent"
+        )
+        assert records[0]["payload"]["human_gate"]["decision"] == decision
+    finally:
+        harness.close()
+
+
+def test_manual_knowledge_request_uses_completed_problem_scope(tmp_path: Path, monkeypatch) -> None:
+    from core.research.workflow.contracts import WorkflowCommandKind
+    from core.web.services.team_workflow.research_runtime import workflow_artifact_store
+    from core.web.services.team_workflow.research_runtime.knowledge_sideflow_service import search_envelope_hash
+
+    monkeypatch.setattr(workflow_artifact_store, "PROJECT_ROOT", tmp_path)
+    harness = GraphHarness(tmp_path)
+    try:
+        _seed_parent(harness)
+        workflow_artifact_store.put_workflow_artifact(
+            "research-team", kind="problem_understanding", workflow_run_id="run-parent",
+            source_collection_run_id="source-1", artifact_identity="nr-problem-a1",
+            payload={"scope": "Evaporative cooling", "subquestions": ["Humidity effect"],
+                "known_unknowns": [], "assumptions": [],
+                "human_gate": {"required": True, "decision": "pending", "rationale": "Collect evidence"}},
+        )
+        original = harness.commands.store.latest_attempt
+        monkeypatch.setattr(harness.commands.store, "latest_attempt", lambda run_id, node_id:
+            SimpleNamespace(status="succeeded", node_run_id="nr-problem-a1")
+            if node_id == "problem_understanding" else original(run_id, node_id))
+        receipt = harness.commands.command_service.submit(harness.commands.request(
+            command=WorkflowCommandKind.ENSURE_KNOWLEDGE_COLLECTION,
+            run_id="run-parent", team_id="research-team", node_id="hypothesis_design",
+            expected_run_version=1, idempotency_key="manual-from-completed-problem",
+            payload={"questionId": "SCI-096"},
+        ))
+        invocation = _invocation_row(harness, receipt.result["invocationId"])
+        assert invocation.search_envelope_hash == search_envelope_hash({
+            "keywords": ["Evaporative cooling", "Humidity effect"],
+            "evidenceTypes": [], "timeWindow": {},
+        }, "1")
     finally:
         harness.close()
 

@@ -45,6 +45,8 @@ function phaseOf(badge: KnowledgeInvocationBadge): KnowledgeCollectionPhase {
   if (status === "awaiting_handoff") return "awaiting_handoff";
   if (status === "failed" || status === "cancelled") return "failed";
   if (status === "completed") return "handed_off";
+  const cards = sideflowCardStatesForBadge(badge);
+  if (cards.some((card) => card.status === "failed" || card.status === "blocked")) return "failed";
   if (status) return "collecting";
   return "not_started";
 }

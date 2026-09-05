@@ -429,6 +429,30 @@ def ensure_knowledge_child_run(
 
     definition = build_knowledge_sideflow_workflow_definition()
     identity = register_or_resolve(definition)
+    from datetime import datetime, timezone
+
+    from core.research.workflow.bindings import build_run_binding_snapshots
+    from .binding_config import WorkflowBindingConfigStore
+    from .paths import research_workflow_data_root
+    from .run_lifecycle import binding_snapshot_payload
+    from .team_role_source import effective_binding_layers
+
+    now_ms = now()
+    layers = effective_binding_layers(
+        parent.team_id,
+        WorkflowBindingConfigStore(research_workflow_data_root() / "runs").load(
+            definition.workflowId, parent.team_id
+        ),
+        definition=definition,
+    )
+    bindings = build_run_binding_snapshots(
+        run_id=child_run_id,
+        workflow_version_id=identity.workflowVersionId,
+        layers=layers,
+        captured_at=datetime.fromtimestamp(now_ms / 1000, timezone.utc).isoformat(),
+        definition=definition,
+    )
+    parent_snapshot = json.loads(parent.input_snapshot_json or "{}")
 
     input_snapshot = {
         "kind": "knowledge_sideflow_child",
@@ -439,6 +463,13 @@ def ensure_knowledge_child_run(
         "parentNodeRunId": invocation.parent_node_run_id,
         "parentAttempt": invocation.parent_attempt,
         "teamId": parent.team_id,
+        "projectId": parent.project_id,
+        "workflowId": definition.workflowId,
+        "workflowVersionId": identity.workflowVersionId,
+        "agentBindingSnapshot": [binding_snapshot_payload(item) for item in bindings],
+        "researchObjectiveContract": parent_snapshot.get("researchObjectiveContract") or {},
+        "modelRoutingPolicy": parent_snapshot.get("modelRoutingPolicy") or {},
+        "datasetRefs": parent_snapshot.get("datasetRefs") or [],
         "questionId": invocation.question_id,
         "scopeHash": invocation.scope_hash,
         "requestHash": invocation.request_hash,
@@ -457,8 +488,7 @@ def ensure_knowledge_child_run(
 
     thread_id = child_run_id  # threadId == runId (spec 7.3)
 
-    now_ms = now()
-    created_at = parent.created_at_ms
+    created_at = now_ms
     child = RunRecord(
         run_id=child_run_id,
         team_id=parent.team_id,
@@ -569,7 +599,10 @@ def ensure_knowledge_child_run(
         actor_kind="agent",
         status="starting",
         command_id=command_id,
-        binding_snapshot_id=None,
+        binding_snapshot_id=next(
+            item.snapshotId for item in bindings
+            if item.nodeId == KNOWLEDGE_SIDEFLOW_ENTRY_NODE_ID
+        ),
         input_snapshot_hash=snapshot_hash,
         pending_action_id=None,
         execution_anchor_id=None,

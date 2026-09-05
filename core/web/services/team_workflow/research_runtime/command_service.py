@@ -566,6 +566,26 @@ class WorkflowCommandService:
         except (TypeError, ValueError):
             parent_attempt = 1
         managed_root_ids = normalize_root_ids(payload.get("managedSourceRootIds"))
+        search_envelope = _normalized_search_envelope(payload.get("searchEnvelope"))
+        if "searchEnvelope" not in payload:
+            # The frontend's default action names a question. Resolve its
+            # search scope from the exact completed attempt, not a UI guess.
+            from .knowledge_sideflow_trigger import (
+                _problem_keywords,
+                problem_artifact_for_collection,
+            )
+
+            problem_attempt = self._store.latest_attempt(run.run_id, "problem_understanding")
+            if problem_attempt is not None and problem_attempt.status == "succeeded":
+                artifact = problem_artifact_for_collection(
+                    team_id=run.team_id, run_id=run.run_id,
+                    node_run_id=problem_attempt.node_run_id,
+                )
+                if artifact is not None:
+                    search_envelope = {
+                        "keywords": _problem_keywords(artifact["payload"]),
+                        "evidenceTypes": [], "timeWindow": {},
+                    }
         scope = {
             "questionId": question_id.strip().upper(),
             "projectId": str(run.project_id or ""),
@@ -578,9 +598,7 @@ class WorkflowCommandService:
                 parent_node_id=parent_node_id,
                 question_id=question_id,
                 scope=scope,
-                search_envelope=_normalized_search_envelope(
-                    payload.get("searchEnvelope")
-                ),
+                search_envelope=search_envelope,
                 requirements=_normalized_requirements(payload.get("requirements")),
                 source_policy_version=_normalized_source_policy_version(
                     payload.get("sourcePolicyVersion")

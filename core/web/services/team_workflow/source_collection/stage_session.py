@@ -264,6 +264,32 @@ def _canonical_problem_understanding_record_id(workflow_run_id: str) -> str:
     return max(succeeded, key=lambda attempt: getattr(attempt, "attempt", 0)).node_run_id
 
 
+def _problem_understanding_authority_scope(
+    team_id: str, workflow_run_id: str, source_run_id: str,
+) -> tuple[str, str]:
+    """Resolve sideflow input through Ledger parentage, never client refs."""
+    import json
+
+    from core.research.workflow.knowledge_sideflow_definition import KNOWLEDGE_SIDEFLOW_WORKFLOW_ID
+    from core.web.services.team_workflow.research_runtime import runtime_factory
+
+    runtime = runtime_factory.production_workflow_runtime()
+    child = runtime.store.get_run(workflow_run_id) if runtime is not None else None
+    if child is None or child.workflow_id != KNOWLEDGE_SIDEFLOW_WORKFLOW_ID:
+        return workflow_run_id, source_run_id
+    parent = runtime.store.get_run(child.parent_run_id or "")
+    if (
+        parent is None or child.team_id != team_id or parent.team_id != team_id
+        or child.question_id != parent.question_id or child.project_id != parent.project_id
+    ):
+        raise _service().TeamWorkflowOrchestrationError("Knowledge sideflow problem authority lineage is invalid.")
+    parent_snapshot = json.loads(parent.input_snapshot_json or "{}")
+    parent_source_id = str(parent_snapshot.get("sourceCollectionRunId") or "").strip()
+    if not parent_source_id:
+        raise _service().TeamWorkflowOrchestrationError("Knowledge sideflow parent problem authority is missing.")
+    return parent.run_id, parent_source_id
+
+
 def _source_collection_problem_understanding_context(
     team_id: str,
     source_run_id: str,
@@ -296,6 +322,9 @@ def _source_collection_problem_understanding_context(
         raise s.TeamWorkflowOrchestrationError(
             "Finding stage requires workflowRunId in the source run scope."
         )
+    workflow_run_id, normalized_source_run_id = _problem_understanding_authority_scope(
+        normalized_team_id, workflow_run_id, normalized_source_run_id,
+    )
 
     from core.web.services.team_workflow.research_runtime.artifact_readback_registry import (
         build_canonical_ref,
@@ -448,15 +477,15 @@ def _source_collection_stage_session_workflow_scope(
     """
 
     s = _service()
-    workflow_run_id = ""
-    if isinstance(problem_understanding_context, dict):
+    run_scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
+    # The source run owns execution. A sideflow may read its parent's problem
+    # artifact, whose canonical context must not reassign the child session.
+    workflow_run_id = s._trim_text(run_scope.get("workflowRunId"), max_length=160)
+    if not workflow_run_id and isinstance(problem_understanding_context, dict):
         workflow_run_id = s._trim_text(
             problem_understanding_context.get("workflowRunId"),
             max_length=160,
         )
-    if not workflow_run_id:
-        run_scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
-        workflow_run_id = s._trim_text(run_scope.get("workflowRunId"), max_length=160)
     if not workflow_run_id:
         return "", ""
     workflow_node_id = _SOURCE_COLLECTION_WORKFLOW_NODE_BY_STAGE.get(stage_id, "")

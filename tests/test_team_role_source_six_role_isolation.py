@@ -173,7 +173,7 @@ def test_persisted_stage_overrides_drop_unknown_workflow_stage_ids() -> None:
         "",
         AgentBindingLayers(
             stageOverrides={
-                "knowledge_collection": {
+                "problem_understanding": {
                     "source_finder": "agent-search-stage",
                 },
                 "unknown_stage": {
@@ -184,7 +184,7 @@ def test_persisted_stage_overrides_drop_unknown_workflow_stage_ids() -> None:
     )
 
     assert layers.stageOverrides == {
-        "knowledge_collection": {"source_finder": "agent-search-stage"}
+        "problem_understanding": {"source_finder": "agent-search-stage"}
     }
 
 
@@ -219,7 +219,7 @@ def test_team_lookup_failure_does_not_revive_persisted_workflow_defaults(
         AgentBindingLayers(
             workflowDefaults={"source_finder": "stale-config-search"},
             stageOverrides={
-                "knowledge_collection": {"source_finder": "stage-search"}
+                "problem_understanding": {"source_finder": "stage-search"}
             },
             nodeOverrides={"hypothesis_design": "node-revision"},
         ),
@@ -227,9 +227,24 @@ def test_team_lookup_failure_does_not_revive_persisted_workflow_defaults(
 
     assert layers.workflowDefaults == {}
     assert layers.stageOverrides == {
-        "knowledge_collection": {"source_finder": "stage-search"}
+        "problem_understanding": {"source_finder": "stage-search"}
     }
     assert layers.nodeOverrides == {"hypothesis_design": "node-revision"}
+
+
+def test_sideflow_overrides_are_scoped_to_its_definition() -> None:
+    from core.research.workflow.knowledge_sideflow_definition import build_knowledge_sideflow_workflow_definition
+
+    config = AgentBindingLayers(
+        stageOverrides={"knowledge_collection": {"source_finder": "stage-search"}},
+        nodeOverrides={"source_finding": "node-search", "hypothesis_design": "unrelated"},
+    )
+    layers = team_role_source.effective_binding_layers("", config, definition=build_knowledge_sideflow_workflow_definition())
+    assert layers.stageOverrides == config.stageOverrides
+    assert layers.nodeOverrides == {"source_finding": "node-search"}
+    main_layers = team_role_source.effective_binding_layers("", config)
+    assert main_layers.stageOverrides == {}
+    assert main_layers.nodeOverrides == {"hypothesis_design": "unrelated"}
 
 
 def test_missing_team_does_not_revive_persisted_workflow_defaults(monkeypatch) -> None:
