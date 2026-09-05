@@ -203,7 +203,7 @@ class EvidenceReview(_StrictModel):
 
 
 class EvidenceRelation(_StrictModel):
-    type: Literal["supports", "refutes", "qualifies", "disputes"]
+    type: Literal["supports", "refutes", "qualifies"]
     claimRef: str = Field(min_length=1)
     evidenceRef: str = Field(min_length=1)
 
@@ -230,6 +230,8 @@ class CommandReceiptV3(_StrictModel):
             raise ValueError("not_started command cannot have an effect")
         if self.executionStatus == "failed" and self.effect == "applied":
             raise ValueError("failed command cannot claim an applied effect")
+        if self.executionStatus == "failed" and not self.reasonCode:
+            raise ValueError("failed command requires reasonCode")
         if self.effect == "unknown" and self.executionStatus != "failed":
             raise ValueError("unknown effect is allowed only after failed execution")
         if self.idempotency == "replay":
@@ -245,6 +247,13 @@ class CommandReceiptV3(_StrictModel):
                 )
         elif self.originalReceiptRef is not None:
             raise ValueError("originalReceiptRef is valid only for replay")
+        if (
+            self.idempotency == "original"
+            and self.executionStatus == "succeeded"
+            and self.effect == "no_change"
+            and not self.reasonCode
+        ):
+            raise ValueError("original no_change receipt requires reasonCode")
         return self
 
 
@@ -346,6 +355,21 @@ class RecordLifecycle(_StrictModel):
     revisionOfRef: str | None = None
     replacedByRef: str | None = None
     invalidatedAt: str | None = None
+
+    @model_validator(mode="after")
+    def validate_lifecycle(self) -> RecordLifecycle:
+        if self.availability == "active" and (
+            self.replacedByRef is not None or self.invalidatedAt is not None
+        ):
+            raise ValueError(
+                "active record cannot be replaced or carry an invalidation time"
+            )
+        if (
+            self.revisionOfRef is not None
+            and self.revisionOfRef == self.replacedByRef
+        ):
+            raise ValueError("revision predecessor and replacement successor must differ")
+        return self
 
 class ScientificSemanticRecord(_StrictModel):
     execution: ActivityExecution | None = None

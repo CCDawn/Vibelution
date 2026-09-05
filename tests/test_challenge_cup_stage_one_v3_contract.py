@@ -149,6 +149,10 @@ def test_accepted_evidence_does_not_imply_supports_and_relation_requires_exact_c
         type="refutes", evidenceRef="evidence-1", claimRef="claim-1"
     )
     assert relation.type == "refutes"
+    with pytest.raises(ValidationError):
+        EvidenceRelation(
+            type="disputes", evidenceRef="evidence-1", claimRef="claim-1"
+        )
 
 
 def test_completed_evidence_review_must_report_a_precise_admissibility() -> None:
@@ -232,6 +236,23 @@ def test_command_receipt_distinguishes_rejected_failed_applied_and_replay() -> N
     )
     assert replay.originalReceiptRef == "receipt-2"
 
+    with pytest.raises(ValidationError):
+        CommandReceiptV3(
+            receiptRef="receipt-4",
+            authorization="accepted",
+            executionStatus="failed",
+            effect="unknown",
+            idempotency="original",
+        )
+    with pytest.raises(ValidationError):
+        CommandReceiptV3(
+            receiptRef="receipt-5",
+            authorization="accepted",
+            executionStatus="succeeded",
+            effect="no_change",
+            idempotency="original",
+        )
+
 
 def test_handoff_is_complete_only_after_payload_dispatch_and_consumer_ack() -> None:
     pending = Handoff(
@@ -290,6 +311,18 @@ def test_intermediate_revision_can_reference_predecessor_and_successor() -> None
 
     assert lifecycle.revisionOfRef == "hypothesis-1@r1"
     assert lifecycle.replacedByRef == "hypothesis-1@r3"
+
+    with pytest.raises(ValidationError):
+        RecordLifecycle(
+            availability="active",
+            replacedByRef="hypothesis-1@r3",
+        )
+    with pytest.raises(ValidationError):
+        RecordLifecycle(
+            availability="archived",
+            revisionOfRef="hypothesis-1@r2",
+            replacedByRef="hypothesis-1@r2",
+        )
 
 
 def test_supported_advance_requires_accepted_evidence_and_complete_provenance() -> None:
