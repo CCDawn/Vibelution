@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 /**
  * Behavior contract for direct-session stream lifecycle stability (perf root cause:
- * shouldConnect flapping on route settling must not close/reopen the EventSource
+ * shouldConnect flapping on route settling must not close/reopen the guarded stream
  * and must not trigger authoritative session detail refreshes).
  */
 import React, { act } from "react";
@@ -109,6 +109,7 @@ function baseOptions(overrides: Partial<UseSessionDetailStreamOptions> = {}): {
     desktopConversationNotifierRef: {
       current: { handleSessionDetail: vi.fn(), handleAssistantDelta: vi.fn() },
     },
+    createSessionEventStream: () => new FakeEventSource("/api/sessions/s1/events?initial=none") as never,
     sessionTitleForNotifications: "title",
     ...overrides,
   };
@@ -203,7 +204,6 @@ describe("useSessionDetailStream stream lifecycle stability", () => {
   beforeEach(() => {
     FakeEventSource.reset();
     hookResults = [];
-    vi.stubGlobal("EventSource", FakeEventSource);
   });
 
   afterEach(() => {

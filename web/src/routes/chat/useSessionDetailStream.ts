@@ -28,6 +28,10 @@ import {
   SESSION_STREAM_ROUTE_SWITCH_GRACE_MS,
   type SessionStreamDecisionSnapshot,
 } from "./chatSessionStreamConnect";
+import {
+  createSessionEventStream as createDefaultSessionEventStream,
+  type SessionEventStream,
+} from "./sessionEventStream";
 
 type DesktopConversationNotifier = {
   handleSessionDetail: (
@@ -50,13 +54,14 @@ export type UseSessionDetailStreamOptions = {
   lastAssistantDeltaAppliedAtRef: MutableRefObject<Record<string, number>>;
   sessionStreamDecisionSnapshotRef: MutableRefObject<SessionStreamDecisionSnapshot>;
   desktopConversationNotifierRef: MutableRefObject<DesktopConversationNotifier>;
+  createSessionEventStream?: (sessionId: string) => SessionEventStream;
   /** Live title for desktop notifications (detail title or summary title). */
   sessionTitleForNotifications: string;
   viewedSessionId?: string;
 };
 
 /**
- * Sole owner of the direct-session detail EventSource.
+ * Sole owner of the direct-session guarded event stream.
  * Do not open a second /api/sessions/:id/events connection elsewhere.
  */
 export function useSessionDetailStream({
@@ -69,6 +74,7 @@ export function useSessionDetailStream({
   lastAssistantDeltaAppliedAtRef,
   sessionStreamDecisionSnapshotRef,
   desktopConversationNotifierRef,
+  createSessionEventStream = createDefaultSessionEventStream,
   sessionTitleForNotifications,
   viewedSessionId,
 }: UseSessionDetailStreamOptions): { sessionStreamConnected: boolean } {
@@ -89,7 +95,7 @@ export function useSessionDetailStream({
   const prevShouldConnectRef = useRef<boolean | null>(null);
   const graceCloseTimerRef = useRef<number | null>(null);
   const graceClosedSessionRef = useRef(false);
-  const activeStreamRef = useRef<{ stream: EventSource; sessionId: string } | null>(null);
+  const activeStreamRef = useRef<{ stream: SessionEventStream; sessionId: string } | null>(null);
   const forceCloseStreamRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
@@ -121,7 +127,7 @@ export function useSessionDetailStream({
 
   useEffect(() => {
     const shouldConnect = sessionStreamDecisionSnapshotRef.current.shouldConnect;
-    if (!shouldConnect || typeof EventSource === "undefined") {
+    if (!shouldConnect) {
       const decisionSnapshot = sessionStreamDecisionSnapshotRef.current;
       setSessionStreamConnected(false);
       postBrowserTelemetry({
@@ -140,7 +146,7 @@ export function useSessionDetailStream({
           routeSettling: decisionSnapshot.routeSettling,
           routeSwitchGraceActive: decisionSnapshot.routeSwitchGraceActive,
           visibilityState: typeof document === "undefined" ? "unknown" : document.visibilityState,
-          eventSourceAvailable: typeof EventSource !== "undefined",
+          guardedFetchStreamAvailable: typeof fetch !== "undefined",
           pageInstanceId: getPageInstanceId(),
           ...collectBrowserPageSnapshot(),
         },
@@ -187,7 +193,7 @@ export function useSessionDetailStream({
         ...collectBrowserPageSnapshot(),
       },
     });
-    const stream = new EventSource(`/api/sessions/${streamSessionId}/events?initial=none`);
+    const stream = createSessionEventStream(streamSessionId);
     activeStreamRef.current = { stream, sessionId: streamSessionId };
     let closeTelemetryFired = false;
 
@@ -570,7 +576,7 @@ export function useSessionDetailStream({
       // pending payload from the old stream must be discarded, never applied to
       // the React Query cache or the active-turn layer. Cleanup also cancels the
       // coalesce timer and the assistant-delta animation frame so no expensive
-      // main-thread work outlives the old EventSource.
+      // main-thread work outlives the old guarded stream.
       disposed = true;
       const readyStateBeforeClose = stream.readyState;
       if (applyTimer) {
@@ -609,6 +615,7 @@ export function useSessionDetailStream({
     };
   }, [
     activeSessionId,
+    createSessionEventStream,
     queryClient,
     syncSessionDetail,
     streamReconnectTick,
