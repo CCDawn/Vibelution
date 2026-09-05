@@ -3639,6 +3639,22 @@ def project_state_from_records(
     prerequisite_blockers = {
         "knowledge_handoff_not_accepted", "knowledge_package_not_materialized",
     }
+    hypothesis_attempts = list(
+        (stage_one_snapshot.get("nodeAttempts") or {}).get("hypothesis_design") or []
+    )
+    latest_hypothesis_attempt = max(
+        hypothesis_attempts, key=lambda item: int(item.get("attempt") or 0), default={}
+    )
+    prerequisite_problem = latest_hypothesis_attempt.get("problem") or {}
+    # A blocked attempt exposes retry_owns_recovery in command offers. Its
+    # persisted readiness problem still owns why the prerequisite is missing.
+    blocked_on_prerequisites = (
+        latest_hypothesis_attempt.get("status") == "blocked"
+        and prerequisite_problem.get("code") == "auto_advance_not_ready"
+        and prerequisite_blockers.intersection(
+            part.strip() for part in str(prerequisite_problem.get("detail") or "").split(";")
+        )
+    )
     stage_one_prerequisites_pending = bool(
         active_workflow_run
         and exploratory_drafts
@@ -3647,6 +3663,7 @@ def project_state_from_records(
         and stage_one_snapshot
         and (
             "problem_understanding" in list(stage_one_snapshot.get("activeNodeIds") or [])
+            or blocked_on_prerequisites
             or any(
                 offer.get("nodeId") == "hypothesis_design"
                 and prerequisite_blockers.intersection(offer.get("blockerIds") or [])

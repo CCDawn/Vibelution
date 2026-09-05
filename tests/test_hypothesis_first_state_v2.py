@@ -7814,6 +7814,30 @@ def test_r0_completion_exposes_formal_prerequisites_before_grounded_generation(a
     assert state["generation"]["candidateCount"] == 0
 
 
+def test_blocked_hypothesis_attempt_keeps_knowledge_recovery_visible() -> None:
+    state = _stage_one_projection(
+        chain_records=[*_stage_one_draft_records("r0"), {
+            "recordKind": "generation_attempt", "attemptId": "attempt-r0",
+            "questionId": "SCI-091", "meetingRoundId": "r0", "attemptNumber": 1,
+            "lifecycle": "completed", "outcome": "succeeded",
+        }],
+        formal_runs=[{"runId": "run-stage-one", "status": "blocked", "questionId": "SCI-091"}],
+        formal_snapshots={"run-stage-one": {
+            "activeNodeIds": ["hypothesis_design"],
+            "nodeAttempts": {"hypothesis_design": [{
+                "attempt": 1, "status": "blocked", "problem": {
+                    "code": "auto_advance_not_ready",
+                    "detail": "knowledge_package_not_materialized; hypothesis_round_unconverged; template_baseline_missing",
+                },
+            }]},
+            "commandOffers": [{"nodeId": "hypothesis_design", "command": "start_node",
+                "available": False, "blockerIds": ["retry_owns_recovery"]}],
+        }},
+    )
+    assert state["currentPhase"] == "formal_runtime"
+    assert "open-stage-one-generation" not in [a["actionId"] for a in state["allowedActions"]]
+
+
 def test_stage_one_origin_drafts_with_run_offer_grounded_generation() -> None:
     # SCI-091 field shape: the origin layer closed an R0 round (drafts carry
     # the origin meeting id); after a stage-one run exists the projection
