@@ -31,10 +31,13 @@ def _problem_understanding() -> dict[str, object]:
 
 
 def _record(node_run_id: str = "nr-problem-a1") -> dict[str, object]:
+    definition = build_challenge_cup_workflow_definition()
     return {
         "teamId": "team-a",
         "runId": "run-a",
-        "workflowVersionId": "challenge-cup-research@2.1.0",
+        "workflowId": definition.workflowId,
+        "workflowVersionId": "wv-268aa6e8dea8",
+        "structureHash": definition.structureHash,
         "inputSnapshot": {},
         "nodeRuns": [
             {

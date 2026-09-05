@@ -25,11 +25,6 @@ ENTRY_NODE_ID = "problem_understanding"
 
 NODE_ORDER = [
     ENTRY_NODE_ID,
-    "source_finding",
-    "source_extraction",
-    "evidence_relations",
-    "knowledge_ingestion",
-    "knowledge_handoff",
     "hypothesis_design",
     "protocol_design",
     "protocol_review",
@@ -42,6 +37,13 @@ NODE_ORDER = [
     "candidate_promotion",
     "result_package",
 ]
+
+
+def workflow_version_id_for_run(harness: "GraphHarness", run_id: str) -> str:
+    record = harness.commands.store.get_run(run_id)
+    if record is None:
+        raise AssertionError(f"run {run_id} is not seeded")
+    return str(record.workflow_version_id)
 
 
 class GraphHarness:

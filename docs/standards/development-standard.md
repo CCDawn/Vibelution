@@ -573,6 +573,8 @@ When validation is blocked by unrelated failures, report the exact command, the 
 
 ## 12. Launcher-Gated Runtime Refresh
 
+Local development and verification use existing APIs first, then Playwright/CDP, and desktop UI only when necessary. Local Electron launches expose a loopback-only dynamic debugging endpoint without opening DevTools; distributed packaged launches default off. Discover the verified endpoint with `scripts/desktop_debug.py`, identify the Launcher/main/branch target using the existing shell summary, and rediscover after a full shell restart. Never steal focus for operations supported in the background or bypass active-work guards. See [Desktop debugging](../guides/desktop-debugging.md) for launch scope, examples, reconnect behavior, and runtime acceptance.
+
 Runtime refresh must go through Launcher by default.
 
 Any Agent changing running UI code, backend code, launcher lifecycle code, runtime-manager behavior, web API contracts, or frontend build inputs must treat Launcher refresh as part of the definition of done unless the user explicitly says to skip it.

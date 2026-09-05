@@ -20,12 +20,16 @@ from core.web.services.team_workflow.challenge_phase_boundary import (
     require_phase_two_activation_from_projection,
 )
 from core.web.services.team_workflow.challenge_phase_knowledge_publisher import (
+    load_published_phase_one_knowledge_package,
     publish_approved_phase_one_to_team_knowledge,
 )
 from core.web.services.team_workflow.challenge_program import (
     build_competition_program_projection,
 )
 from core.web.services.team_workflow.experiment_api import plan as experiment_plan
+from core.web.services.team_workflow.research_runtime import (
+    question_launch,
+)
 
 
 def _complete_summary(*, changed_hash: str = "") -> dict:
@@ -580,3 +584,132 @@ def test_phase_one_publication_reaches_real_team_knowledge_store(tmp_path, monke
     ]
     assert items["items"][0]["batchId"] == receipt["batchId"]
     assert published["manifest"]["manifestSha256"] in items["items"][0]["content"]
+
+    package = load_published_phase_one_knowledge_package(
+        team["teamId"],
+        question_run_summary=summary,
+    )
+    assert package == {
+        "knowledgeBaseId": receipt["knowledgeBaseId"],
+        "knowledgeItemIds": receipt["knowledgeItemIds"],
+        "batchId": receipt["batchId"],
+        "receiptId": receipt["receiptId"],
+        "manifestSha256": published["manifest"]["manifestSha256"],
+        "contentSha256": published["manifest"]["contentSha256"],
+        "datasetRefs": [
+            "team-knowledge://"
+            f"{receipt['knowledgeBaseId']}/{receipt['knowledgeItemIds'][0]}"
+            f"?batchId={receipt['batchId']}"
+            f"&manifestSha256={published['manifest']['manifestSha256']}"
+            f"&contentSha256={published['manifest']['contentSha256']}"
+        ],
+    }
+
+    monkeypatch.setattr(
+        team_knowledge_service,
+        "get_knowledge_trace",
+        lambda *_args, **_kwargs: {"nodes": {"batches": [], "sourceArtifacts": []}},
+    )
+    with pytest.raises(ChallengePhaseBoundaryError, match="phase_one_knowledge_lineage_invalid"):
+        load_published_phase_one_knowledge_package(
+            team["teamId"],
+            question_run_summary=summary,
+        )
+
+
+def test_deep_experiment_input_consumes_published_phase_one_lineage(tmp_path, monkeypatch):
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path))
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_knowledge_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        challenge_phase_boundary,
+        "resolve_team_program_root",
+        lambda _team_id: tmp_path / "program",
+    )
+    proposer = agent_directory_service.create_agent_instance(
+        display_name="Research Agent",
+        direct_session_id="session-research",
+    )
+    reviewer = agent_directory_service.create_agent_instance(
+        display_name="Knowledge Manager",
+        direct_session_id="session-knowledge",
+    )
+    team = team_service.create_team(
+        name="Challenge Cup Team",
+        members=[
+            {"agentId": proposer["agentId"], "role": "lead"},
+            {
+                "agentId": reviewer["agentId"],
+                "role": "challenge_cup_knowledge_manager",
+            },
+        ],
+    )
+    summary = _complete_summary()
+    approve_current_phase_one_manifest(
+        team["teamId"],
+        operator_id="operator-1",
+        question_run_summary=summary,
+    )
+    published = publish_approved_phase_one_to_team_knowledge(
+        team["teamId"],
+        question_run_summary=summary,
+    )
+    from core.web.services.team_workflow import challenge_question_runs
+
+    monkeypatch.setattr(
+        challenge_question_runs,
+        "challenge_question_run_summary",
+        lambda _team_id: summary,
+    )
+    monkeypatch.setattr(
+        question_launch,
+        "_approved_details",
+        lambda _team_id: {
+            "SCI-096": {
+                "selectedRunId": "run-096",
+                "artifact": {"sha256": "a" * 64},
+                "output": {
+                    "schema_version": 2,
+                    "identity": {
+                        "catalog_id": "science-125-questions-2021",
+                        "question_id": "SCI-096",
+                        "question_en": "How does the brain retrieve memories?",
+                    },
+                    "problem_understanding": {"scope": "memory retrieval"},
+                },
+            }
+        },
+    )
+    monkeypatch.setattr(question_launch, "_is_campaign_active", lambda *_args: True)
+    monkeypatch.setattr(
+        question_launch,
+        "ensure_challenge_question_project",
+        lambda *_args, **_kwargs: {"project": {"projectId": "challenge-sci-096"}},
+    )
+    monkeypatch.setattr(question_launch, "_server_model_routing_policy", lambda _team_id: {})
+    monkeypatch.setattr(question_launch, "_hypothesis_first_scope", lambda *_args: {})
+    monkeypatch.setattr(question_launch, "_hypothesis_first_flag", lambda *_args, **_kwargs: False)
+
+    run_input = question_launch.build_question_run_input(
+        team["teamId"],
+        question_id="SCI-096",
+        safety_limits={
+            "stageTokens": {
+                "knowledge_collection": 1,
+                "experiment_design": 1,
+                "execution_iteration": 1,
+            },
+            "toolCalls": 1,
+            "wallClockSeconds": 1,
+            "maxRetries": 1,
+        },
+    )
+
+    package = load_published_phase_one_knowledge_package(team["teamId"])
+    assert run_input["datasetRefs"] == [
+        "challenge-question-artifact://science-125-questions-2021/SCI-096/run-096/" + "a" * 64,
+        *package["datasetRefs"],
+    ]
+    assert run_input["constraintSnapshot"]["phaseOneKnowledgePackage"] == package
+    assert package["manifestSha256"] == published["manifest"]["manifestSha256"]

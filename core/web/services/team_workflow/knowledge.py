@@ -1844,7 +1844,7 @@ def build_candidate_graph(team_id: str, payload: dict[str, Any] | None = None) -
     with s._WORKFLOW_LOCK:
         workflow = s._load_or_create_workflow(normalized_team_id)
         # Run-scoped builds resolve the candidate store through the shared
-        # run-owner resolver (owner-first merged read) so the graph
+        # run-owner resolver so the graph
         # materializes into the run's owning project instead of whichever
         # project happens to be active; writes stay normalized to the
         # owner-project store path.
@@ -2450,10 +2450,8 @@ def record_local_research_model_output(team_id: str, payload: dict[str, Any], *,
     s = _service()
     normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
     s.team_service.get_team(normalized_team_id)
-    # Run-scoped callers (stage writeback auto chains) resolve the store
-    # through the authority run's owner project; an unresolvable owner keeps
-    # the historical active-store target but records an explicit warning
-    # instead of drifting silently (SCI-091 incident).
+    # Run-scoped callers resolve the store through the authority run's owner
+    # project and fail closed when that immutable owner cannot be resolved.
     normalized_run_id = s._resolve_candidate_store_write_run(normalized_team_id, run_id)
     task_type = s._normalize_local_research_task_type(payload.get("taskType"))
     output = payload.get("output")
@@ -2522,11 +2520,10 @@ def record_local_research_model_output(team_id: str, payload: dict[str, Any], *,
         "workflow": s._workflow_to_api(normalized_team_id, workflow, candidate_store),
     }
     if s._trim_text(run_id, max_length=160):
-        # 写入定位证据：owner 解析失败回退活跃店时，返回里带明确 reason。
         response["candidateStoreScope"] = {
             "requestedRunId": s._trim_text(run_id, max_length=160),
             "resolvedRunId": normalized_run_id,
-            "resolution": "owner_project" if normalized_run_id else "active_project_owner_unresolved",
+            "resolution": "owner_project",
         }
     return response
 
@@ -2678,8 +2675,7 @@ def _steward_pack_local_file_paths(team_id: str, output: dict[str, Any], *, run_
 
     s = _service()
     candidate_ids = s._normalize_text_list(output.get("candidateIds"), max_items=32, max_length=160)
-    # Run-scoped submissions read through the owner-project store (merged with
-    # the active store as read-compat) so referenced sources stay discoverable.
+    # Run-scoped submissions read only through the run owner's project store.
     candidate_store = (
         s._load_candidate_store(team_id, run_id=run_id)
         if run_id
@@ -2719,9 +2715,7 @@ def submit_steward_pack_to_knowledge_ingestion(team_id: str, candidate_id: str, 
     normalized_candidate_id = s._normalize_required_id(candidate_id, "Candidate id is required.")
     s.team_service.get_team(normalized_team_id)
     # Run-scoped auto chains resolve the pack store through the authority
-    # run's owner project (unresolvable owners keep the active-store target
-    # with an explicit warning); run-less manual submissions keep the
-    # historical active-store behavior.
+    # run's owner project; run-less manual submissions use the selected project.
     normalized_run_id = s._resolve_candidate_store_write_run(normalized_team_id, run_id)
     knowledge_base_id = s._trim_text(payload.get("knowledgeBaseId"), max_length=256)
     if not knowledge_base_id:

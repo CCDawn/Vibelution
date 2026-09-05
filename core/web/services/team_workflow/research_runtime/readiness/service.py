@@ -14,6 +14,10 @@ from typing import Any
 
 from core.research.workflow.contracts import NodeReadiness
 from core.research.workflow.definition import build_challenge_cup_workflow_definition
+from core.research.workflow.definition_registry import definition_identity
+from core.research.workflow.knowledge_sideflow_definition import (
+    build_knowledge_sideflow_workflow_definition,
+)
 from core.research.workflow.models import WorkflowNodeSpec
 
 from .common import (
@@ -65,9 +69,25 @@ class NodeReadinessService:
     ) -> None:
         self._run_source = run_source
         self._attempt_count_source = attempt_count_source or (lambda run_id, node_id: 0)
-        self._definition = definition or build_challenge_cup_workflow_definition()
+        self._definitions = (
+            (definition,)
+            if definition is not None
+            else (
+                build_challenge_cup_workflow_definition(),
+                build_knowledge_sideflow_workflow_definition(),
+            )
+        )
         self._node_by_id: dict[str, WorkflowNodeSpec] = {
-            node.nodeId: node for node in self._definition.nodes
+            node.nodeId: node
+            for current_definition in self._definitions
+            for node in current_definition.nodes
+        }
+        self._definition_node_ids_by_identity = {
+            (
+                current_definition.workflowId,
+                definition_identity(current_definition).workflowVersionId,
+            ): {node.nodeId for node in current_definition.nodes}
+            for current_definition in self._definitions
         }
         self._registry: dict[str, EvaluatorFn] = _build_registry()
         self._cache: OrderedDict[tuple[str, ...], NodeReadiness] = OrderedDict()
@@ -162,7 +182,9 @@ class NodeReadinessService:
             run=run,
             node=node,
             requested_team_id=team_id,
-            definition_node_ids=set(self._node_by_id),
+            definition_node_ids=self._definition_node_ids_by_identity.get(
+                (run.workflow_id, run.workflow_version_id), set()
+            ),
             live_attempt_count=self._attempt_count_source(run_id, node_id),
             context=context,
         )

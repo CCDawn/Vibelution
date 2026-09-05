@@ -1,4 +1,4 @@
-"""T4 RED: formal runner — interrupt/resume over all 17 nodes, deterministic
+"""Formal runner: interrupt/resume over the current main graph, deterministic
 actionIds across checkpoint restarts, no side effects before interrupt."""
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ from core.research.workflow.challenge_cup_runtime import (
     GraphDispatch,
     action_id_for,
 )
-from tests._support.graph_helpers import GraphHarness, NODE_ORDER
+from tests._support.graph_helpers import GraphHarness, NODE_ORDER, workflow_version_id_for_run
 
 
 def test_start_dispatch_interrupts_with_pending_action(tmp_path: Path) -> None:
@@ -48,7 +48,9 @@ def test_checkpoint_restart_yields_same_action_id(tmp_path: Path) -> None:
 
         # 重启 coordinator（新连接、同一 checkpoint 文件）。
         restarted = ChallengeCupGraphCoordinator(harness.tmp_path / "checkpoints.sqlite")
-        snapshot = restarted.snapshot("run-test")
+        snapshot = restarted.snapshot(
+            "run-test", workflow_version_id_for_run(harness, "run-test")
+        )
         values = snapshot["values"]
         from core.research.workflow.challenge_cup_runtime import build_pending_action
 
@@ -60,7 +62,7 @@ def test_checkpoint_restart_yields_same_action_id(tmp_path: Path) -> None:
         harness.close()
 
 
-def test_full_17_node_walk_interrupts_every_node(tmp_path: Path) -> None:
+def test_full_current_graph_walk_interrupts_every_node(tmp_path: Path) -> None:
     harness = GraphHarness(tmp_path)
     try:
         harness.seed()
@@ -136,7 +138,7 @@ def test_node_fn_has_no_side_effect_before_interrupt(tmp_path: Path) -> None:
             attempt=1,
             dispatch_kind="start",
             input_snapshot_hash="a" * 64,
-            workflow_version_id="challenge-cup-research-v2.1.0",
+            workflow_version_id="wv-268aa6e8dea8",
             team_id="research-team",
         )
         result = harness.coordinator.start_attempt(dispatch)

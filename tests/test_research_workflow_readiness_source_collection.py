@@ -10,11 +10,16 @@ from core.web.services.team_workflow.research_runtime.readiness import (
 from core.web.services.team_workflow.research_runtime.readiness.common import (
     hypothesis_first_chain_state,
 )
-from tests._support.readiness_fakes import FakeDomainContext, make_run
+from tests._support.readiness_fakes import (
+    FakeDomainContext,
+    make_knowledge_run,
+    make_run,
+)
 
 
-def _service(runs=None) -> NodeReadinessService:
-    return NodeReadinessService(run_source=(runs or {"run-test": make_run()}).get)
+def _service(runs=None, *, main_workflow: bool = False) -> NodeReadinessService:
+    default_run = make_run() if main_workflow else make_knowledge_run()
+    return NodeReadinessService(run_source=(runs or {"run-test": default_run}).get)
 
 
 def _evaluate(service, context, node_id):
@@ -28,7 +33,7 @@ def _evaluate(service, context, node_id):
 
 
 def test_problem_understanding_ready_with_question() -> None:
-    service = _service()
+    service = _service(main_workflow=True)
     context = FakeDomainContext()
     context.bindings["problem_understanding"] = {
         "snapshotId": "bs-problem",
@@ -40,7 +45,7 @@ def test_problem_understanding_ready_with_question() -> None:
 
 
 def test_problem_understanding_missing_question_blocks() -> None:
-    service = _service()
+    service = _service(main_workflow=True)
     context = FakeDomainContext()
     context.bindings["problem_understanding"] = {
         "snapshotId": "bs-problem",

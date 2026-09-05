@@ -347,8 +347,8 @@ def test_approved_team_knowledge_is_the_package_authority(
     }
     monkeypatch.setattr(
         "core.web.services.team_workflow.source_collection.candidates."
-        "list_candidate_store",
-        lambda team_id, limit, run_id: {"candidates": [candidate]},
+        "list_candidate_store_authority_records",
+        lambda team_id, run_id, metadata_task_type: [candidate],
     )
     monkeypatch.setattr(
         "core.web.services.team_knowledge_service.list_knowledge_items",

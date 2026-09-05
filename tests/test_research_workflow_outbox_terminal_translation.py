@@ -303,7 +303,7 @@ def test_identity_mismatch_fails_fast_without_transient_loop(tmp_path: Path) -> 
             "attempt": 2,
             "dispatchKind": "resume_action",
             "teamId": "research-team",
-            "workflowVersionId": "challenge-cup-research-v2.1.0",
+            "workflowVersionId": "wv-268aa6e8dea8",
             "inputSnapshotHash": "a" * 64,
             "budgetPolicyHash": "",
             "receipt": {

@@ -291,9 +291,9 @@ _DEFAULT_RETRY_TAXONOMY_ENTRIES: tuple[RetryTaxonomyEntry, ...] = (
         RetryOutcomeClass.RETRYABLE_INFRA,
         RetryOutcomeOwner.STAGE_SESSION,
         "retry_policy.py INFRASTRUCTURE_FAILURE_CODES (pre-freeze set); "
-        "tests/test_research_workflow_v21_node_retry_capability.py::"
-        "test_infrastructure_interruption_recovers_without_reopening_business_"
-        "retry_budget pins countsAgainstRetryBudget=false",
+        "tests/test_research_workflow_retry_taxonomy.py::"
+        "test_infra_recovery_never_charges_the_retry_budget pins "
+        "countsAgainstRetryBudget=false",
     ),
     _entry(
         "lease_expired",
@@ -309,7 +309,8 @@ _DEFAULT_RETRY_TAXONOMY_ENTRIES: tuple[RetryTaxonomyEntry, ...] = (
         RetryOutcomeClass.RETRYABLE_BUSINESS,
         RetryOutcomeOwner.STAGE_SESSION,
         "default business failure code of "
-        "tests/test_research_workflow_v21_node_retry_capability.py; "
+        "tests/test_research_workflow_retry_taxonomy.py::"
+        "test_business_failures_charge_and_exhaust_the_budget; "
         "exhausts maxRetries with the charged-business lineage kind",
     ),
     _entry(

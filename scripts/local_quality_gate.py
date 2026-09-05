@@ -376,7 +376,27 @@ def staged_blob(root: Path, path: str) -> str:
 
 
 def summarize_failure(completed: subprocess.CompletedProcess[str], subject: str) -> str:
-    raw = (completed.stderr or "").strip() or (completed.stdout or "").strip() or "command failed"
+    # stderr may contain only plugin warnings while pytest writes the actual
+    # failure to stdout. Select diagnostics from both streams before bounding.
+    lines = re.sub(
+        r"\x1b\[[0-?]*[ -/]*[@-~]", "",
+        f"{completed.stdout or ''}\n{completed.stderr or ''}",
+    ).splitlines()
+    nodes = [line.strip() for line in lines if re.match(
+        r"^\s*(?:FAILED|ERROR|FAIL)\s+\S+", line
+    )]
+    causes = [line.strip() for line in lines if re.match(
+        r"^\s*E\s{2,}\S|.*\b(?:[\w.]*Error|Exception):|.*\berror TS\d+:", line
+    )]
+    # With multiple failures, do not attach an unrelated final traceback to
+    # the first failed test. Preserve their identities instead.
+    evidence = list(dict.fromkeys(
+        nodes[:2] if len(nodes) > 1 else [*nodes, *causes[-1:]]
+    ))
+    if evidence:
+        raw = " | ".join(evidence)
+    else:
+        raw = (completed.stderr or "").strip() or (completed.stdout or "").strip() or "command failed"
     return bounded_failure_summary(f"{subject}: {raw}")
 
 
@@ -562,13 +582,22 @@ def validate_claim(project_root: Path, claim_id: str, files: Sequence[str]) -> b
     )
 
 
-def selected_validation(files: Sequence[str]) -> dict[str, object]:
+def selected_validation(
+    files: Sequence[str],
+    *,
+    root: Path | None = None,
+) -> dict[str, object]:
+    selector_root = (root or PROJECT_ROOT).resolve()
     project_root = str(PROJECT_ROOT.resolve())
     if project_root not in sys.path:
         sys.path.insert(0, project_root)
     from tests.select_tests import load_matrix, select_tests
 
-    return select_tests(list(files), load_matrix())
+    return select_tests(
+        list(files),
+        load_matrix(selector_root / "tests" / "test_matrix.yaml"),
+        project_root=selector_root,
+    )
 
 
 def utc_now() -> str:
@@ -701,7 +730,7 @@ def expected_closeout_commands(
     toolchain: ValidationToolchain | None = None,
 ) -> list[CommandSpec]:
     resolved_toolchain = toolchain or resolve_validation_toolchain(root)
-    selection = selected_validation(files)
+    selection = selected_validation(files, root=root)
     raw_commands = selection.get("commands", [])
     if not isinstance(raw_commands, list):
         raise UnsupportedValidationCommand("selector commands must be a list")
@@ -826,6 +855,13 @@ def run_closeout(root: Path, base: str, claim_id: str) -> GateResult:
     checks["claimValid"] = validate_claim(main_root, claim_id, files)
     if not checks["claimValid"]:
         return finish("claim_conflict")
+
+    # A branch missing the captured main cannot pass the final ancestry gate.
+    # Reject it before toolchain probing, selection, or expensive test commands;
+    # keep the final checks to detect changes while validation is running.
+    ancestry_valid = is_ancestor(root, validated_main_sha, head_sha)
+    if rev_parse(main_root, main_revision) != validated_main_sha or not ancestry_valid:
+        return finish("stale_main")
 
     reuse_research_required = reuse_research_contract.reuse_research_required(files)
     if reuse_research_required:

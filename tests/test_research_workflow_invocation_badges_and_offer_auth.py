@@ -24,9 +24,6 @@ from core.research.workflow.definition_registry import (
     resolve_definition,
     workflow_version_id_for,
 )
-from core.research.workflow.knowledge_sideflow_definition import (
-    build_challenge_cup_workflow_definition_v3,
-)
 from core.research.workflow.ledger.records import KnowledgeInvocationRecord
 from core.web.services.team_workflow.research_runtime.knowledge_invocation_projection import (
     current_knowledge_node_id,
@@ -45,6 +42,7 @@ from core.web.services.team_workflow.research_runtime.projection_builder import 
 )
 from core.web.services.team_workflow.research_runtime.query_service import (
     NodeNotFoundError,
+    WorkflowQueryError,
     WorkflowQueryService,
 )
 from tests._support.command_helpers import CommandHarness
@@ -311,7 +309,7 @@ def test_snapshot_serializes_operator_gate_and_signature_into_offers(
 
 
 def test_query_service_resolves_run_pinned_definition(tmp_path: Path) -> None:
-    v3 = build_challenge_cup_workflow_definition_v3()
+    v3 = build_challenge_cup_workflow_definition()
     v3_version_id = workflow_version_id_for(v3.structureHash)
     harness = CommandHarness(tmp_path / "ledger.sqlite3")
     try:
@@ -368,33 +366,15 @@ def test_query_service_resolves_run_pinned_definition(tmp_path: Path) -> None:
         snapshot_v3 = query.get_snapshot(team_id="research-team", run_id="run-v3")
         assert snapshot_v3.definition["schemaVersion"] == "3.0.0"
         assert len(snapshot_v3.definition["nodes"]) == 12
-        assert snapshot_v3.definition_resolution == "pinned"
-        assert snapshot_v3.to_dict()["definitionResolution"] == "pinned"
 
-        # Registered version id but mismatched structureHash: read stays soft
-        # but is visibly degraded, not silently swapped.
-        snapshot_mismatch = query.get_snapshot(
-            team_id="research-team", run_id="run-v3-hashmismatch"
-        )
-        assert snapshot_mismatch.definition_resolution == "degraded"
-        assert snapshot_mismatch.to_dict()["definitionResolution"] == "degraded"
-
-        # Unregistered (non-empty) version id also degrades visibly.
-        snapshot_degraded = query.get_snapshot(
-            team_id="research-team", run_id="run-legacy-unregistered"
-        )
-        assert snapshot_degraded.definition_resolution == "degraded"
-        assert snapshot_degraded.definition["schemaVersion"] == "2.1.0"
-        assert len(snapshot_degraded.definition["nodes"]) == 17
-
-        # Ancient run without a version identity falls back to the REGISTERED
-        # 2.1.0 snapshot (never the current in-code build), marked as such.
-        snapshot_ancient = query.get_snapshot(
-            team_id="research-team", run_id="run-ancient"
-        )
-        assert snapshot_ancient.definition_resolution == "legacy_default"
-        assert snapshot_ancient.definition["schemaVersion"] == "2.1.0"
-        assert len(snapshot_ancient.definition["nodes"]) == 17
+        for invalid_run_id in (
+            "run-v3-hashmismatch",
+            "run-legacy-unregistered",
+            "run-ancient",
+        ):
+            with pytest.raises(WorkflowQueryError) as excinfo:
+                query.get_snapshot(team_id="research-team", run_id=invalid_run_id)
+            assert excinfo.value.code == "workflow_definition_unavailable"
     finally:
         harness.close()
 
@@ -402,7 +382,7 @@ def test_query_service_resolves_run_pinned_definition(tmp_path: Path) -> None:
 def test_get_node_detail_judges_membership_against_pinned_definition(
     tmp_path: Path,
 ) -> None:
-    v3 = build_challenge_cup_workflow_definition_v3()
+    v3 = build_challenge_cup_workflow_definition()
     v3_version_id = workflow_version_id_for(v3.structureHash)
     harness = CommandHarness(tmp_path / "ledger.sqlite3")
     try:
@@ -421,17 +401,19 @@ def test_get_node_detail_judges_membership_against_pinned_definition(
         )
         query = _query(harness)
 
-        # knowledge_handoff only exists in the 17-node legacy chain; a 3.0.0
-        # run must reject it against its OWN pinned definition.
+        # knowledge_handoff belongs to the separate knowledge sideflow, so the
+        # main run must reject it against its own pinned definition.
         with pytest.raises(NodeNotFoundError):
             query.get_node_detail(
                 team_id="research-team", run_id="run-v3", node_id="knowledge_handoff"
             )
-        # The legacy fallback still resolves it for an ancient run.
-        detail = query.get_node_detail(
-            team_id="research-team", run_id="run-ancient", node_id="knowledge_handoff"
-        )
-        assert detail.node_id == "knowledge_handoff"
+        with pytest.raises(WorkflowQueryError) as excinfo:
+            query.get_node_detail(
+                team_id="research-team",
+                run_id="run-ancient",
+                node_id="knowledge_handoff",
+            )
+        assert excinfo.value.code == "workflow_definition_unavailable"
     finally:
         harness.close()
 

@@ -273,7 +273,7 @@ def create_passed_manifest(
     monkeypatch.setattr(
         gate,
         "selected_validation",
-        lambda changed: {"commands": ["git diff --check"]},
+        lambda changed, *, root=None: {"commands": ["git diff --check"]},
     )
     result = gate.run_closeout(git_repo, "main", "claim-test")
 
@@ -288,6 +288,15 @@ def create_recorded_contract_manifest(
 ) -> Path:
     git(git_repo, "branch", "-M", "main")
     commit_file(git_repo, ".gitignore", ".runtime/\n", "ignore gate runtime")
+    commit_file(
+        git_repo,
+        "tests/test_matrix.yaml",
+        "always:\n"
+        "  commands:\n"
+        "    - git diff --check\n"
+        "rules: []\n",
+        "add gate matrix",
+    )
     validated_main_sha = git(git_repo, "rev-parse", "HEAD").stdout.strip()
     git(git_repo, "switch", "-c", "codex/test-task")
     commit_file(git_repo, "scripts/local_quality_gate.py", "VALUE = 1\n", "gate change")
@@ -732,6 +741,62 @@ def test_selected_validation_loads_from_isolated_script_execution(
     assert result.returncode == 0, result.stderr
 
 
+def test_selected_validation_uses_task_root_matrix(tmp_path: Path) -> None:
+    (tmp_path / "core").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "core" / "feature.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (tmp_path / "tests" / "test_matrix.yaml").write_text(
+        "always:\n"
+        "  commands: []\n"
+        "rules:\n"
+        "  - id: task-only\n"
+        "    paths:\n"
+        "      - core/feature.py\n"
+        "    commands:\n"
+        "      - git diff --check\n",
+        encoding="utf-8",
+    )
+
+    selection = gate.selected_validation(["core/feature.py"], root=tmp_path)
+
+    assert selection["commands"] == ["git diff --check"]
+    assert selection["matchedRules"] == [
+        {
+            "id": "task-only",
+            "description": "",
+            "matchedFiles": ["core/feature.py"],
+        }
+    ]
+
+
+def test_selected_validation_uses_task_root_import_graph(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "core").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "core" / "feature.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (tmp_path / "tests" / "test_feature.py").write_text(
+        "from core import feature\n\n"
+        "def test_value():\n"
+        "    assert feature.VALUE == 1\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "tests" / "test_matrix.yaml").write_text(
+        "always:\n"
+        "  commands: []\n"
+        "rules: []\n",
+        encoding="utf-8",
+    )
+
+    selection = gate.selected_validation(["core/feature.py"], root=tmp_path)
+
+    assert selection["commands"] == [
+        ".\\.venv\\Scripts\\python.exe -m pytest "
+        "tests/test_feature.py -q --maxfail=0"
+    ]
+    assert selection["coverageGaps"] == []
+
+
 @pytest.mark.parametrize(
     "command",
     [
@@ -796,6 +861,60 @@ def test_run_process_uses_utf8_and_failure_summary_tolerates_missing_streams(
     assert captured["encoding"] == "utf-8"
     assert captured["errors"] == "replace"
     assert gate.summarize_failure(completed, "tool") == "tool: command failed"
+
+
+def test_failure_summary_reports_failed_node_and_cause_not_session_banner() -> None:
+    completed = subprocess.CompletedProcess(
+        args=["pytest"], returncode=1,
+        stdout=("================ test session starts ================\n"
+                "collected 649 items\n"
+                "E   sqlite3.OperationalError: database is locked\n"
+                "FAILED tests/test_auth.py::test_concurrent_replay - sqlite3.OperationalError\n"
+                "================ 1 failed, 648 passed ================\n"),
+        stderr="unrelated plugin warning\n",
+    )
+    summary = gate.summarize_failure(completed, "pytest")
+    assert "tests/test_auth.py::test_concurrent_replay" in summary
+    assert "database is locked" in summary
+    assert "session starts" not in summary
+    assert "plugin warning" not in summary
+    assert len(summary) <= 300
+
+
+def test_failure_summary_reports_type_error_after_progress_and_redacts_secret() -> None:
+    completed = subprocess.CompletedProcess(
+        args=["tsc"], returncode=1,
+        stdout="Building...\nsrc/page.ts(4,2): error TS2322: token=private-value is invalid\n",
+        stderr="",
+    )
+    summary = gate.summarize_failure(completed, "web-typecheck")
+    assert "TS2322" in summary
+    assert "private-value" not in summary
+    assert "[REDACTED]" in summary
+
+
+def test_failure_summary_preserves_collection_error_and_ansi_cleanup() -> None:
+    completed = subprocess.CompletedProcess(
+        args=["pytest"], returncode=2,
+        stdout="session starts\n\x1b[31mERROR tests/test_import.py\x1b[0m\nE   ModuleNotFoundError: missing package\n",
+        stderr="",
+    )
+    summary = gate.summarize_failure(completed, "pytest")
+    assert "ERROR tests/test_import.py" in summary
+    assert "ModuleNotFoundError" in summary
+    assert "\x1b" not in summary
+
+
+def test_failure_summary_does_not_pair_different_test_failures() -> None:
+    completed = subprocess.CompletedProcess(
+        args=["pytest"], returncode=1,
+        stdout="E   ValueError: final-test-only\nFAILED tests/test_a.py::first\nFAILED tests/test_b.py::last\n",
+        stderr="",
+    )
+    summary = gate.summarize_failure(completed, "pytest")
+    assert "tests/test_a.py::first" in summary
+    assert "tests/test_b.py::last" in summary
+    assert "final-test-only" not in summary
 
 
 def test_main_emits_ascii_json_when_gate_result_contains_non_ascii(
@@ -890,7 +1009,7 @@ def test_closeout_writes_bounded_passed_manifest(
     monkeypatch.setattr(
         gate,
         "selected_validation",
-        lambda changed: {"commands": ["git diff --check"]},
+        lambda changed, *, root=None: {"commands": ["git diff --check"]},
     )
     result = gate.run_closeout(git_repo, "main", "claim-test")
 
@@ -952,7 +1071,7 @@ def test_closeout_rejects_implementation_change_without_reuse_research(
     monkeypatch.setattr(
         gate,
         "selected_validation",
-        lambda changed: {"commands": ["git diff --check"]},
+        lambda changed, *, root=None: {"commands": ["git diff --check"]},
     )
 
     result = gate.run_closeout(git_repo, "main", "claim-test")
@@ -981,7 +1100,7 @@ def test_closeout_embeds_validated_reuse_research_for_implementation_change(
     monkeypatch.setattr(
         gate,
         "selected_validation",
-        lambda changed: {"commands": ["git diff --check"]},
+        lambda changed, *, root=None: {"commands": ["git diff --check"]},
     )
     snapshot = {
         "schemaVersion": 1,
@@ -1029,7 +1148,7 @@ def test_closeout_keeps_deleted_python_in_ownership_without_linting_it(
     monkeypatch.setattr(
         gate,
         "selected_validation",
-        lambda changed: {"commands": ["git diff --check"]},
+        lambda changed, *, root=None: {"commands": ["git diff --check"]},
     )
     snapshot = {
         "schemaVersion": 1,
@@ -1083,7 +1202,7 @@ def test_closeout_checks_committed_diff_range_for_trailing_whitespace(
     monkeypatch.setattr(
         gate,
         "selected_validation",
-        lambda changed: {"commands": ["git diff --check"]},
+        lambda changed, *, root=None: {"commands": ["git diff --check"]},
     )
 
     result = gate.run_closeout(git_repo, "main", "claim-test")
@@ -1121,7 +1240,7 @@ def test_closeout_records_exact_committed_diff_range_for_valid_diff(
     monkeypatch.setattr(
         gate,
         "selected_validation",
-        lambda changed: {"commands": ["git diff --check"]},
+        lambda changed, *, root=None: {"commands": ["git diff --check"]},
     )
 
     result = gate.run_closeout(git_repo, "main", "claim-test")
@@ -1240,7 +1359,7 @@ def test_closeout_reports_unsupported_validation_command(
     monkeypatch.setattr(
         gate,
         "selected_validation",
-        lambda changed: {"commands": ["pwsh -Command Get-ChildItem"]},
+        lambda changed, *, root=None: {"commands": ["pwsh -Command Get-ChildItem"]},
     )
 
     result = gate.run_closeout(git_repo, "main", "claim-test")
@@ -1574,6 +1693,11 @@ def test_closeout_detects_main_moving_during_commands(
         "read_guard_status",
         lambda root: active_claim("claim-test", ["README.md"]),
     )
+    monkeypatch.setattr(
+        gate,
+        "selected_validation",
+        lambda changed, *, root=None: {"commands": ["git diff --check"]},
+    )
     original_execute = gate.execute_command
 
     def execute_and_move_main(spec: gate.CommandSpec) -> gate.ProcessResult:
@@ -1613,7 +1737,7 @@ def test_closeout_prioritizes_stale_main_over_merge_conflict(
     monkeypatch.setattr(
         gate,
         "selected_validation",
-        lambda changed: {"commands": ["git diff --check"]},
+        lambda changed, *, root=None: {"commands": ["git diff --check"]},
     )
 
     result = gate.run_closeout(git_repo, "main", "claim-test")
@@ -1642,7 +1766,7 @@ def test_closeout_rejects_clean_diverged_history_even_when_merge_tree_passes(
     monkeypatch.setattr(
         gate,
         "selected_validation",
-        lambda changed: {"commands": ["git diff --check"]},
+        lambda changed, *, root=None: {"commands": ["git diff --check"]},
     )
     merge_tree = git(
         git_repo,
@@ -1654,9 +1778,19 @@ def test_closeout_rejects_clean_diverged_history_even_when_merge_tree_passes(
     )
     assert merge_tree.returncode == 0
 
+    preparation: list[str] = []
+    original_toolchain = gate.resolve_validation_toolchain
+    monkeypatch.setattr(
+        gate,
+        "resolve_validation_toolchain",
+        lambda root: preparation.append("toolchain") or original_toolchain(root),
+    )
+
     result = gate.run_closeout(git_repo, "main", "claim-test")
 
     assert result.outcome == "stale_main"
+    assert preparation == []
+    assert result.commands == []
     assert result.manifest_path is not None
     manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
     assert manifest["outcome"] == "stale_main"
@@ -1684,7 +1818,7 @@ def test_closeout_reports_stale_main_when_main_moves_during_merge_tree_preflight
     monkeypatch.setattr(
         gate,
         "selected_validation",
-        lambda changed: {"commands": ["git diff --check"]},
+        lambda changed, *, root=None: {"commands": ["git diff --check"]},
     )
     original_run_process = gate.run_process
     merge_bases: list[str] = []
@@ -1732,7 +1866,7 @@ def test_closeout_reports_stale_main_when_main_moves_during_ancestry_preflight(
     monkeypatch.setattr(
         gate,
         "selected_validation",
-        lambda changed: {"commands": ["git diff --check"]},
+        lambda changed, *, root=None: {"commands": ["git diff --check"]},
     )
     original_run_process = gate.run_process
     ancestry_bases: list[str] = []
@@ -1778,7 +1912,7 @@ def test_closeout_reads_claim_from_linked_main_worktree(
     monkeypatch.setattr(
         gate,
         "selected_validation",
-        lambda changed: {"commands": ["git diff --check"]},
+        lambda changed, *, root=None: {"commands": ["git diff --check"]},
     )
 
     result = gate.run_closeout(task_worktree, "main", "claim-test")
@@ -1807,7 +1941,7 @@ def test_closeout_appends_gate_self_tests_when_gate_definition_changes(
     monkeypatch.setattr(
         gate,
         "selected_validation",
-        lambda changed: {"commands": ["git diff --check"]},
+        lambda changed, *, root=None: {"commands": ["git diff --check"]},
     )
     monkeypatch.setattr(
         gate,

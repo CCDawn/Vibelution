@@ -298,10 +298,13 @@ def test_human_revise_decision_forks_child_run(tmp_path: Path) -> None:
     harness = CommandHarness(tmp_path / "ledger.sqlite3")
     try:
         harness.seed_run()
-        harness.service.submit(harness.request(idempotency_key="ui:key-1"))
+        harness.service.submit(
+            harness.request(node_id="protocol_freeze", idempotency_key="ui:key-1")
+        )
 
-        # 准备一个 pending human task（模拟 knowledge_handoff 人工门）。
-        attempt = harness.store.latest_attempt("run-test", "source_finding")
+        # 准备一个 pending human task（模拟当前主流程的 protocol_freeze 人工门）。
+        attempt = harness.store.latest_attempt("run-test", "protocol_freeze")
+        assert attempt is not None
 
         def seed_human_task(uow):
             from tests._support.workflow_ledger_helpers import FIXED_NOW_MS as NOW
@@ -311,8 +314,8 @@ def test_human_revise_decision_forks_child_run(tmp_path: Path) -> None:
                 run_id="run-test",
                 node_run_id=attempt.node_run_id,
                 handoff_id=None,
-                task_kind="gate:knowledge_handoff",
-                prompt_json='{"nodeId": "knowledge_handoff"}',
+                task_kind="gate:protocol_freeze",
+                prompt_json='{"nodeId": "protocol_freeze"}',
                 created_at_ms=NOW,
             )
 
@@ -324,7 +327,7 @@ def test_human_revise_decision_forks_child_run(tmp_path: Path) -> None:
             run_id="run-test",
             team_id="research-team",
             command=WorkflowCommandKind.RESOLVE_HUMAN_TASK,
-            node_id="knowledge_handoff",
+            node_id="protocol_freeze",
             expected_run_version=2,
             idempotency_key="ui:revise-1",
             payload={

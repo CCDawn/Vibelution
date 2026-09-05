@@ -105,7 +105,6 @@ def facade_calls(monkeypatch):
                     "invocations": [{"invocationId": "kinv-1"}],
                     "childRun": {"runId": "collect-1"},
                     "recoveryActions": ["none"],
-                    "knowledgeSideflowMode": "on",
                 },
             )
 
@@ -213,7 +212,6 @@ def test_request_and_status_use_workflow_command_service(
                     "invocations": [{"invocationId": "kinv-1"}],
                     "childRun": {"runId": "run-child-1"},
                     "recoveryActions": ["none"],
-                    "knowledgeSideflowMode": "on",
                 },
             )
 

@@ -11,12 +11,8 @@ from core.research.workflow.contracts import (
     CommandRequest,
     WorkflowCommandKind,
 )
-from core.research.workflow.definition_registry import (
-    resolve_definition_for_run_record,
-)
-from core.research.workflow.knowledge_sideflow_definition import (
-    CHALLENGE_CUP_RESEARCH_SCHEMA_VERSION_V3,
-)
+from core.research.workflow.definition import SCHEMA_VERSION
+from core.research.workflow.definition_registry import resolve_definition_for_run_record
 from core.research.workflow.ledger import WorkflowLedgerStore
 
 from .human_gate_artifacts import canonical_sha256
@@ -45,10 +41,6 @@ class KnowledgeSideflowTrigger:
     ) -> dict[str, Any]:
         if str(node_id or "").strip() != "problem_understanding":
             return {"status": "ignored"}
-        from .knowledge_rollout import knowledge_ensure_enabled
-
-        if not knowledge_ensure_enabled():
-            return {"status": "disabled"}
         run = self._store.get_run(str(run_id or "").strip())
         if run is None:
             return {"status": "unknown_run"}
@@ -67,8 +59,8 @@ class KnowledgeSideflowTrigger:
         except Exception as exc:
             self._record("failed", run, error=type(exc).__name__)
             return {"status": "failed", "error": "definition_resolution_failed"}
-        if definition.schemaVersion != CHALLENGE_CUP_RESEARCH_SCHEMA_VERSION_V3:
-            return {"status": "not_v3"}
+        if definition.schemaVersion != SCHEMA_VERSION:
+            return {"status": "not_canonical"}
 
         artifact = _accepted_problem_artifact(
             team_id=run.team_id,

@@ -54,7 +54,6 @@ ARTIFACT_KINDS = (
     "feedback_iterations",
     "stage1_research_plan",
     "competition_alignment",
-    "stage_one_completion_manifest",
     "evolution_lineage",
     "candidate_screening",
     "core_hypothesis_coherence",
@@ -463,12 +462,10 @@ def _run_scope_rows(team_id: str) -> list[dict[str, str]]:
             "projectId": _text(_first(raw, "projectId", "project_id", "researchProjectId")),
         }
         result.append(item)
-    # A pre-formal runtime used ``thread-<workflowRunId>`` checkpoint threads
-    # before the ledger began persisting matching run/thread rows.  That
-    # legacy convention is not enough by itself: it is admitted only when a
-    # current team-owned canonical workflow artifact proves the exact run and
-    # the checkpoint port subsequently validates the stored team/run fields.
-    # Any unpaired checkpoint thread remains a hard blocker.
+    # Historical checkpoints may outlive their run-list projection.  Admit
+    # one only when a current team-owned canonical artifact proves the exact
+    # workflow run and its checkpoint thread ID already equals that run ID.
+    # Prefix inference is forbidden; any unpaired checkpoint stays blocked.
     from core.research.workflow.checkpoint_store import list_checkpoint_thread_ids
     from core.web.services.team_workflow.research_runtime.workflow_artifact_store import (
         list_workflow_artifacts,
@@ -478,17 +475,17 @@ def _run_scope_rows(team_id: str) -> list[dict[str, str]]:
     by_thread = {item["threadId"]: item for item in result}
     if not checkpoint_threads:
         return sorted(by_thread.values(), key=lambda item: item["runId"])
-    legacy_threads: dict[str, dict[str, str]] = {}
+    artifact_proven_threads: dict[str, dict[str, str]] = {}
     for kind in ARTIFACT_KINDS:
         for artifact in list_workflow_artifacts(team_id, kind=kind):
             if not isinstance(artifact, Mapping):
-                raise LiveInventoryAuthorityError("legacy artifact run authority is malformed")
+                raise LiveInventoryAuthorityError("artifact run authority is malformed")
             if _text(_first(artifact, "teamId", "team_id")) != team_id:
-                raise LiveInventoryAuthorityError("legacy artifact run authority has a team mismatch")
+                raise LiveInventoryAuthorityError("artifact run authority has a team mismatch")
             workflow_run_id = _text(_first(artifact, "workflowRunId", "workflow_run_id"))
             if not workflow_run_id:
                 continue
-            thread_id = f"thread-{workflow_run_id}"
+            thread_id = workflow_run_id
             if thread_id not in checkpoint_threads:
                 continue
             candidate = {
@@ -499,11 +496,11 @@ def _run_scope_rows(team_id: str) -> list[dict[str, str]]:
                 "questionId": "",
                 "projectId": "",
             }
-            previous = legacy_threads.get(thread_id) or by_thread.get(thread_id)
+            previous = artifact_proven_threads.get(thread_id) or by_thread.get(thread_id)
             if previous is not None and previous != candidate:
-                raise LiveInventoryAuthorityError("legacy checkpoint thread authority conflicts")
-            legacy_threads[thread_id] = candidate
-    by_thread.update(legacy_threads)
+                raise LiveInventoryAuthorityError("checkpoint thread authority conflicts")
+            artifact_proven_threads[thread_id] = candidate
+    by_thread.update(artifact_proven_threads)
     unresolved_threads = checkpoint_threads - set(by_thread)
     if unresolved_threads:
         raise LiveInventoryAuthorityError("checkpoint thread scope authority is absent")

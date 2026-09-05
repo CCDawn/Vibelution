@@ -19,7 +19,7 @@ def test_human_node_interrupts_with_human_task_action(tmp_path: Path) -> None:
     harness = GraphHarness(tmp_path)
     try:
         harness.seed()
-        # 走到 knowledge_handoff（第 5 个节点，human）。
+        # 走到 protocol_freeze（第 5 个节点，human）。
         harness.enqueue_graph_dispatch("run-test", "problem_understanding", 1)
         last_action: str | None = None
         for _ in range(30):
@@ -33,7 +33,7 @@ def test_human_node_interrupts_with_human_task_action(tmp_path: Path) -> None:
             if payload["actionId"] == last_action:
                 break
             last_action = payload["actionId"]
-            if payload["nodeId"] == "knowledge_handoff":
+            if payload["nodeId"] == "protocol_freeze":
                 break
             harness.resume(
                 run_id="run-test",
@@ -42,15 +42,15 @@ def test_human_node_interrupts_with_human_task_action(tmp_path: Path) -> None:
                 action_id=payload["actionId"],
             )
             harness.consume_adapter(pending.action_id)
-        # 最后一个 pending 是 knowledge_handoff。
+        # 最后一个 pending 是 protocol_freeze。
         pending = harness.latest_adapter_pending()
         assert pending is not None
         import json
 
         payload = json.loads(pending.payload_json)
-        assert payload["nodeId"] == "knowledge_handoff"
+        assert payload["nodeId"] == "protocol_freeze"
         assert payload["actorKind"] == "human"
-        assert payload["actionKind"] == "human_task:knowledge_handoff"
+        assert payload["actionKind"] == "human_task:protocol_freeze"
     finally:
         harness.close()
 
@@ -81,9 +81,9 @@ def test_human_accept_resume_proceeds_to_next_node(tmp_path: Path) -> None:
             harness.consume_adapter(pending.action_id)
         attempts = harness.commands.store.list_attempts("run-test")
         attempt_nodes = {attempt.node_id for attempt in attempts}
-        assert "knowledge_handoff" in attempt_nodes
-        # 人工接受后进入 hypothesis_design。
-        assert "hypothesis_design" in attempt_nodes
+        assert "protocol_freeze" in attempt_nodes
+        # 人工接受后进入 smoke_gate。
+        assert "smoke_gate" in attempt_nodes
     finally:
         harness.close()
 
@@ -105,7 +105,7 @@ def test_human_reject_marker_stops_advance(tmp_path: Path) -> None:
             if payload["actionId"] == last_action:
                 break
             last_action = payload["actionId"]
-            if payload["nodeId"] == "knowledge_handoff":
+            if payload["nodeId"] == "protocol_freeze":
                 break
             harness.resume(
                 run_id="run-test",
@@ -120,12 +120,12 @@ def test_human_reject_marker_stops_advance(tmp_path: Path) -> None:
         import json
 
         payload = json.loads(pending.payload_json)
-        assert payload["nodeId"] == "knowledge_handoff"
+        assert payload["nodeId"] == "protocol_freeze"
 
-        # 人工拒绝：failed receipt 不推进到 hypothesis_design。
+        # 人工拒绝：failed receipt 不推进到 smoke_gate。
         harness.resume(
             run_id="run-test",
-            node_id="knowledge_handoff",
+            node_id="protocol_freeze",
             attempt=int(payload["attempt"]),
             action_id=payload["actionId"],
             outcome="failed",
@@ -138,7 +138,7 @@ def test_human_reject_marker_stops_advance(tmp_path: Path) -> None:
         assert next_pending is None
         attempts = harness.commands.store.list_attempts("run-test")
         handoff_attempt = next(
-            attempt for attempt in attempts if attempt.node_id == "knowledge_handoff"
+            attempt for attempt in attempts if attempt.node_id == "protocol_freeze"
         )
         assert handoff_attempt.status == "failed"
     finally:

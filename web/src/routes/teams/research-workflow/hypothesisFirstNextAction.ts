@@ -120,8 +120,8 @@ export type HypothesisFirstNextActionInput = {
   /** Explicit override for "the discussion ended abnormally"; derived from
    *  chatRounds when absent. */
   boundChatRoundsTerminalFailed?: boolean;
-  /** Bound chat-room rounds; legacy fallback for terminal/failed derivation
-   *  when the caller has not precomputed a boolean. */
+  /** Bound chat-room rounds used for terminal/failed derivation when the
+   * caller has not precomputed a boolean. */
   chatRounds?: ReadonlyArray<{ roundId: string; status: string }> | null;
   collectionChildStatus?: string | null;
   selectedNodeId?: string | null;

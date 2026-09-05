@@ -19,6 +19,7 @@ export type {
 export type ActorKind = "agent" | "system" | "human";
 
 export type WorkflowStageId =
+  | "problem_understanding"
   | "knowledge_collection"
   | "experiment_design"
   | "execution_iteration";
@@ -255,14 +256,9 @@ export type NodeHandoffRecord = {
   humanTaskId?: string;
 };
 
-/** Canonical Challenge Cup fixed node ids (v1 topology, must mirror core/research/workflow/definition.py). */
+/** Canonical Challenge Cup 3.0.0 main-flow node ids. */
 export const CHALLENGE_CUP_NODE_IDS = [
   "problem_understanding",
-  "source_finding",
-  "source_extraction",
-  "evidence_relations",
-  "knowledge_ingestion",
-  "knowledge_handoff",
   "hypothesis_design",
   "protocol_design",
   "protocol_review",

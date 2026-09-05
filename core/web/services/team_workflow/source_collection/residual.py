@@ -9,10 +9,8 @@ Late-bound facade keeps monkeypatches stable.
 
 from __future__ import annotations
 
-import copy
 import hashlib
 import html
-import json
 import os
 import re
 import sys
@@ -23,6 +21,8 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
+
+from .writeback_materialize import FINDING_REQUIRED_PERSPECTIVES
 
 ARXIV_ATOM_NAMESPACE = "http://www.w3.org/2005/Atom"
 ARXIV_SCHEMA_NAMESPACE = "http://arxiv.org/schemas/atom"
@@ -74,45 +74,93 @@ def _build_source_collection_search_plan(
     search_roles = [role for role in roles if role in s.SOURCE_COLLECTION_SEARCH_EXECUTION_AGENT_ROLES]
     role_cycle = search_roles or ["source_finder"]
     queries: list[dict[str, Any]] = []
-    for seed in query_seeds:
-        for source_type in source_types:
-            for language in languages:
+
+    def append_query(
+        seed: str,
+        *,
+        source_type: str,
+        language: str,
+        perspective: str = "",
+    ) -> None:
+        assigned_role = role_cycle[len(queries) % len(role_cycle)]
+        query_id = f"{normalized_plan_id}-q{len(queries) + 1:03d}"
+        query_text = (
+            _source_collection_perspective_query_text(
+                seed,
+                source_type=source_type,
+                language=language,
+                perspective=perspective,
+            )
+            if perspective
+            else s._source_collection_query_text(
+                seed,
+                source_type=source_type,
+                language=language,
+            )
+        )
+        query = {
+            "queryId": query_id,
+            "query": query_text,
+            "seed": seed,
+            "language": language,
+            "sourceType": source_type,
+            "assignedAgentRole": assigned_role,
+            "maxResults": max_results,
+            "status": "planned",
+            "execution": {
+                "mode": "contract_only",
+                "externalSearchTriggered": False,
+                "conversationTraceRequired": True,
+                "promptCacheRequired": prompt_cache_policy.get("requirement") in s.SOURCE_COLLECTION_PROMPT_CACHE_REQUIRED_MODES,
+                "promptCachePartition": s._source_collection_prompt_cache_partition(
+                    team_id,
+                    assigned_role,
+                    model_id=str(prompt_cache_policy.get("modelId") or ""),
+                ),
+            },
+            "writeback": {
+                "target": "CollectionOutput.records",
+                "recordStatus": "collected",
+                "candidateImportTarget": "source_manifest",
+            },
+        }
+        if perspective:
+            query["perspective"] = perspective
+        queries.append(query)
+
+    is_challenge_cup = (
+        s._trim_text(scope.get("workflowKind"), max_length=80)
+        == s.WORKFLOW_KIND_CHALLENGE_CUP_RESEARCH
+    )
+    if is_challenge_cup:
+        for seed in query_seeds:
+            for perspective in FINDING_REQUIRED_PERSPECTIVES:
                 if len(queries) >= s.SOURCE_COLLECTION_MAX_QUERIES:
                     break
-                assigned_role = role_cycle[len(queries) % len(role_cycle)]
-                query_id = f"{normalized_plan_id}-q{len(queries) + 1:03d}"
-                queries.append(
-                    {
-                        "queryId": query_id,
-                        "query": s._source_collection_query_text(seed, source_type=source_type, language=language),
-                        "seed": seed,
-                        "language": language,
-                        "sourceType": source_type,
-                        "assignedAgentRole": assigned_role,
-                        "maxResults": max_results,
-                        "status": "planned",
-                        "execution": {
-                            "mode": "contract_only",
-                            "externalSearchTriggered": False,
-                            "conversationTraceRequired": True,
-                            "promptCacheRequired": prompt_cache_policy.get("requirement") in s.SOURCE_COLLECTION_PROMPT_CACHE_REQUIRED_MODES,
-                            "promptCachePartition": s._source_collection_prompt_cache_partition(
-                                team_id,
-                                assigned_role,
-                                model_id=str(prompt_cache_policy.get("modelId") or ""),
-                            ),
-                        },
-                        "writeback": {
-                            "target": "CollectionOutput.records",
-                            "recordStatus": "collected",
-                            "candidateImportTarget": "source_manifest",
-                        },
-                    }
+                query_index = len(queries)
+                append_query(
+                    seed,
+                    source_type=source_types[query_index % len(source_types)],
+                    language=languages[query_index % len(languages)],
+                    perspective=perspective,
                 )
             if len(queries) >= s.SOURCE_COLLECTION_MAX_QUERIES:
                 break
-        if len(queries) >= s.SOURCE_COLLECTION_MAX_QUERIES:
-            break
+    else:
+        for seed in query_seeds:
+            for source_type in source_types:
+                for language in languages:
+                    if len(queries) >= s.SOURCE_COLLECTION_MAX_QUERIES:
+                        break
+                    append_query(
+                        seed,
+                        source_type=source_type,
+                        language=language,
+                    )
+                if len(queries) >= s.SOURCE_COLLECTION_MAX_QUERIES:
+                    break
+            if len(queries) >= s.SOURCE_COLLECTION_MAX_QUERIES:
+                break
     writeback_contract = s._source_collection_writeback_contract(team_id, run_id)
     return {
         "schemaVersion": s.SCHEMA_VERSION,
@@ -534,13 +582,7 @@ def _load_candidate_store(
     run_id: str = "",
     research_project_id: str = "",
 ) -> dict[str, Any]:
-    """Load the team candidate store, optionally scoped to a source-collection run.
-
-    With ``run_id`` the owner-project store is authoritative; the active-project
-    store is merged in as a read-compat fallback for candidates materialized
-    under a pre-fix wrong project (owner entries win, dedup by candidateId).
-    Writes stay normalized to the owner-project path.
-    """
+    """Load the authoritative candidate store for the selected project/run."""
 
     s = _service()
     normalized_run_id = s._trim_text(run_id, max_length=160)
@@ -549,13 +591,7 @@ def _load_candidate_store(
         normalized_run_id,
         research_project_id,
     )
-    legacy_fallback_path = s._candidate_store_path(team_id) if normalized_run_id else None
-    if legacy_fallback_path and str(legacy_fallback_path) != str(path):
-        merged = s._merge_candidate_store_payloads(path, legacy_fallback_path)
-        if merged is not None:
-            return merged
-        # Neither store exists yet: seed the owner-project store below.
-    elif path.exists():
+    if path.exists():
         payload = s._read_json(path)
         if isinstance(payload.get("candidates"), list):
             return payload
@@ -572,43 +608,6 @@ def _load_candidate_store(
         payload["sourceCollectionRunId"] = normalized_run_id
     s._write_json(path, payload)
     return payload
-
-
-def _merge_candidate_store_payloads(primary_path: Path, fallback_path: Path) -> dict[str, Any] | None:
-    """Owner-first merged candidate store read (compat for misplaced stores)."""
-
-    s = _service()
-    primary_payload = s._read_json(primary_path) if primary_path.exists() else {}
-    fallback_payload = s._read_json(fallback_path) if fallback_path.exists() else {}
-    primary_candidates = (
-        list(primary_payload.get("candidates"))
-        if isinstance(primary_payload.get("candidates"), list)
-        else None
-    )
-    fallback_candidates = (
-        list(fallback_payload.get("candidates"))
-        if isinstance(fallback_payload.get("candidates"), list)
-        else None
-    )
-    if primary_candidates is None and fallback_candidates is None:
-        return None
-    merged: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for source in (primary_candidates or [], fallback_candidates or []):
-        for item in source:
-            if not isinstance(item, dict):
-                continue
-            candidate_id = s._trim_text(item.get("candidateId"), max_length=160)
-            if candidate_id and candidate_id in seen:
-                continue
-            if candidate_id:
-                seen.add(candidate_id)
-            merged.append(item)
-    payload = dict(primary_payload if primary_candidates is not None else fallback_payload)
-    payload["candidates"] = merged
-    return payload
-
-
 def _normalize_managed_root_request(payload: dict[str, Any]) -> dict[str, Any]:
     """解析 run payload 中的受管根选择：managedSourceRoots / managedSourceRootIds。"""
 
@@ -2879,6 +2878,39 @@ def _source_collection_query_text(seed: str, *, source_type: str, language: str)
     return s._trim_text(f"{normalized_seed} {suffix}", max_length=260)
 
 
+def _source_collection_perspective_query_text(
+    seed: str,
+    *,
+    source_type: str,
+    language: str,
+    perspective: str,
+) -> str:
+    s = _service()
+    base_query = _source_collection_query_text(
+        seed,
+        source_type=source_type,
+        language=language,
+    )
+    normalized_language = s._trim_text(language, max_length=16).lower()
+    normalized_perspective = s._trim_text(perspective, max_length=80).lower()
+    if normalized_language.startswith("zh") or normalized_language in {"cn", "chinese"}:
+        suffixes = {
+            "mechanism": "机制 因果路径 支持证据",
+            "independent_baseline": "独立基线 复现 对照比较",
+            "limitation_or_null": "限制 失败 零结果 负面结果",
+            "falsification": "反例 可证伪证据 替代解释",
+        }
+    else:
+        suffixes = {
+            "mechanism": "mechanism causal pathway supporting evidence",
+            "independent_baseline": "independent baseline replication benchmark comparison",
+            "limitation_or_null": "limitations failures null results negative findings",
+            "falsification": "falsification contradictory evidence alternative explanation",
+        }
+    suffix = suffixes[normalized_perspective]
+    return s._trim_text(f"{base_query} {suffix}", max_length=360)
+
+
 def _source_collection_record_extraction_effective_texts(extraction: dict[str, Any], record: dict[str, Any]) -> list[str]:
     s = _service()
     texts: list[str] = []
@@ -3830,8 +3862,8 @@ def _source_collection_run_owner_research_project_id(team_id: str, run_id: str) 
     """Resolve the owning research project of a source-collection run.
 
     Authority: the data_processing run record (scope/metadata.researchProjectId)
-    frozen at run start. Returns "" when the run record is unavailable so
-    callers keep the historical active-project behavior.
+    frozen at run start. Returns "" when the run record is unavailable; callers
+    with an explicit run must fail closed instead of selecting another project.
     """
 
     s = _service()
@@ -3841,7 +3873,7 @@ def _source_collection_run_owner_research_project_id(team_id: str, run_id: str) 
     try:
         # 轻量读取 run.json 的 scope/metadata，不触发 records/status 重算。
         run_identity = s.data_processing_service.get_processing_run_scope(normalized_run_id)
-    except Exception:  # noqa: BLE001 - missing/unreadable run keeps active-project behavior
+    except Exception:  # noqa: BLE001 - caller decides whether missing authority is allowed
         return ""
     scope = run_identity.get("scope") if isinstance(run_identity.get("scope"), dict) else {}
     metadata = run_identity.get("metadata") if isinstance(run_identity.get("metadata"), dict) else {}
@@ -3858,11 +3890,9 @@ def _resolve_candidate_store_write_run(team_id: str, run_id: str) -> str:
     land in the run owner project's store (SCI-091 steward-pack incident: the
     pack materialized into whichever project happened to be active). Returns
     the normalized run id once the owner project resolves so callers use the
-    owner-scoped store. Returns "" when no run context was supplied (the
-    historical active-store behavior) — and also when a supplied run cannot be
-    resolved to an owner project (legacy/deleted run record): the historical
-    active-store target is kept, but a warning event records the explicit
-    reason so the drift is never silent. No new fallback path is introduced.
+    owner-scoped store. Returns "" only when no run context was supplied. An
+    explicit run without a resolvable owner fails closed so writes cannot drift
+    into whichever project is currently active.
     """
 
     s = _service()
@@ -3871,23 +3901,14 @@ def _resolve_candidate_store_write_run(team_id: str, run_id: str) -> str:
         return ""
     owner_project_id = s._source_collection_run_owner_research_project_id(team_id, normalized_run_id)
     if not owner_project_id:
-        s._record_workflow_event(
-            "candidate.store_owner_project_unresolved",
-            team_id,
-            fields={
-                "runId": normalized_run_id,
-                "reason": "authority_run_has_no_resolvable_owner_research_project",
-                "storeTarget": "active_project",
-            },
-            level="warning",
-            outcome="degraded",
+        raise s.TeamWorkflowOrchestrationError(
+            "Source collection run owner research project is required."
         )
-        return ""
     return normalized_run_id
 
 
 def _source_collection_run_workflow_root(team_id: str, run_id: str) -> Path:
-    """Workflow root resolved by the run owner project (fallback: active project).
+    """Resolve the workflow root from the immutable run owner project.
 
     Stage task ledgers, candidate stores, and run artifact directories must all
     live under the run owner project; the team's *active* project drifts when
@@ -3895,25 +3916,29 @@ def _source_collection_run_workflow_root(team_id: str, run_id: str) -> Path:
     """
 
     s = _service()
-    owner_project_id = s._source_collection_run_owner_research_project_id(team_id, run_id)
-    if owner_project_id:
-        try:
-            from core.web.services.team_workflow.research_projects import (
-                resolve_research_project_workspace_root,
-            )
+    normalized_run_id = s._trim_text(run_id, max_length=160)
+    if not normalized_run_id:
+        return s._team_workflow_root(team_id)
+    owner_project_id = s._source_collection_run_owner_research_project_id(
+        team_id,
+        normalized_run_id,
+    )
+    if not owner_project_id:
+        raise s.TeamWorkflowOrchestrationError(
+            "Source collection run owner research project is required."
+        )
+    from core.web.services.team_workflow.research_projects import (
+        resolve_research_project_workspace_root,
+    )
 
-            return resolve_research_project_workspace_root(team_id, owner_project_id)
-        except Exception:  # noqa: BLE001 - unknown project id falls back to active root
-            pass
-    return s._team_workflow_root(team_id)
+    return resolve_research_project_workspace_root(team_id, owner_project_id)
 
 
 def _source_collection_task_store_search_roots(team_id: str) -> list[Path]:
     """All plausible ``source_collection_runs`` roots for cross-run lookups.
 
-    Covers the active project root (historical default), every isolated
-    research-project root, and the legacy base root, so tasks stored under a
-    pre-fix wrong project stay discoverable.
+    Covers the active project root and every isolated research-project root.
+    The retired team-level store is intentionally excluded.
     """
 
     s = _service()
@@ -3926,14 +3951,11 @@ def _source_collection_task_store_search_roots(team_id: str) -> list[Path]:
         base_root = formal_team_workspace_root(team_id)
     except Exception:  # noqa: BLE001 - unknown team keeps the active root only
         return roots
-    candidates = [
-        base_root / "source_collection_runs",
-        *sorted(
-            (child / "workspace" / "source_collection_runs")
-            for child in (base_root / "research_projects").glob("*")
-            if (child / "workspace" / "source_collection_runs").is_dir()
-        ),
-    ]
+    candidates = sorted(
+        (child / "workspace" / "source_collection_runs")
+        for child in (base_root / "research_projects").glob("*")
+        if (child / "workspace" / "source_collection_runs").is_dir()
+    )
     for candidate in candidates:
         if candidate not in roots:
             roots.append(candidate)
@@ -4228,6 +4250,7 @@ def _touch_source_collection_work_run_heartbeat(
             s.SOURCE_COLLECTION_WORK_RUN_KIND,
             normalized_run_id,
             heartbeat=heartbeat,
+            timestamp=heartbeat["updatedAt"],
         )
     except Exception:  # noqa: BLE001 - a failed heartbeat must never fail collection
         return

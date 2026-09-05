@@ -216,6 +216,6 @@ def _baseline_run_input() -> dict:
     import json as _json
 
     fixture_path = (
-        Path(__file__).parent / "fixtures" / "research_workflow_v21_baseline_case.json"
+        Path(__file__).parent / "fixtures" / "research_workflow_v3_baseline_case.json"
     )
     return _json.loads(fixture_path.read_text(encoding="utf-8"))["runInput"]

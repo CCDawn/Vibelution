@@ -33,6 +33,7 @@ def stage_writeback_prompt_lines(stage_id: str) -> list[str]:
             "- 调用 `source_collection_stage_writeback_tool` 时，结构化结果必须 JSON 序列化到参数 `result_json`；该工具没有 `payload_json` 参数，禁止使用 `payload_json`。",
             "- 本任务只负责资料寻找：新资料只写入 `candidateLeads[]`，无效来源只写入 `invalidSources[]`；不要把检索结果写成 `candidateExtractions[]`、`recordExtractions[]` 或 `candidateDecisions[]`。",
             "- 检索计划必须同时覆盖四类视角：`mechanism`（机制/支持）、`independent_baseline`（独立基线或复现）、`limitation_or_null`（限制、失败或零结果）和 `falsification`（反例或可证伪线索）；不得只检索支持当前设想的资料。",
+            "- 先从 `source_collection_context_tool` 返回的 `assignments[].assignedQueries[]` 读取服务端冻结查询；调用 `batch_web_search_tool` 时必须逐字使用其中的 `query`，不得改写、扩展或提交未分配的 generic query。每条正式查询的 `assignmentId`、`queryId` 与 `perspective` 由服务端回执链绑定。",
             "- 每条 `candidateLeads[]` 至少包含 `title`、`locator`（可验证 DOI 或 https URL）、`sourceType`、`summary`、本条资料对应的 `query`，以及上述四类之一的 `perspective`；可额外填写 `doi`、`authors`、`year`、`container`、`relevance`。",
             "- 服务端会从真实检索执行事件生成 canonical searchTrace；你可以在结果中提交查询说明，但 Agent 自报 `result.searchTrace[]` 不作为审计权威，也不能替代真实 provider 调用。",
             "- 至少一条候选资料必须属于 `limitation_or_null` 或 `falsification`，并能作为后续反证候选；如果真实检索后仍未找到，保留完整 `searchTrace[]`、写 `status=needs_review`，不得伪造负面资料或把支持性背景冒充反证。",

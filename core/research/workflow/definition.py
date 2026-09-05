@@ -1,4 +1,4 @@
-"""Fixed Challenge Cup research workflow definition and structure hash."""
+"""Canonical Challenge Cup research workflow definition and structure hash."""
 
 from __future__ import annotations
 
@@ -18,58 +18,18 @@ from .models import (
 )
 
 CHALLENGE_CUP_WORKFLOW_ID = "challenge-cup-research"
-SCHEMA_VERSION = "2.1.0"
+SCHEMA_VERSION = "3.0.0"
 
-# Canonical fixed node order within each stage (ADR 0006 / PRD / ADR 0007).
-_KNOWLEDGE_NODES: tuple[WorkflowNodeSpec, ...] = (
+# The main flow starts with problem understanding. Knowledge collection is a
+# separate child workflow owned by ``knowledge_sideflow_definition.py``.
+_PROBLEM_NODES: tuple[WorkflowNodeSpec, ...] = (
     WorkflowNodeSpec(
         nodeId="problem_understanding",
-        stageId=WorkflowStageId.KNOWLEDGE_COLLECTION,
+        stageId=WorkflowStageId.PROBLEM_UNDERSTANDING,
         label="问题理解",
         actorKind=ActorKind.AGENT,
         primaryRoleKey="source_finder",
         producesArtifactKinds=("problem_understanding",),
-    ),
-    WorkflowNodeSpec(
-        nodeId="source_finding",
-        stageId=WorkflowStageId.KNOWLEDGE_COLLECTION,
-        label="资料寻找",
-        actorKind=ActorKind.AGENT,
-        primaryRoleKey="source_finder",
-        producesArtifactKinds=("source_candidate_batch",),
-    ),
-    WorkflowNodeSpec(
-        nodeId="source_extraction",
-        stageId=WorkflowStageId.KNOWLEDGE_COLLECTION,
-        label="资料提炼",
-        actorKind=ActorKind.AGENT,
-        primaryRoleKey="source_extractor",
-        producesArtifactKinds=("evidence_card_batch",),
-    ),
-    WorkflowNodeSpec(
-        nodeId="evidence_relations",
-        stageId=WorkflowStageId.KNOWLEDGE_COLLECTION,
-        label="证据关系",
-        actorKind=ActorKind.AGENT,
-        primaryRoleKey="source_relation_mapper",
-        producesArtifactKinds=("evidence_relation_graph",),
-    ),
-    WorkflowNodeSpec(
-        nodeId="knowledge_ingestion",
-        stageId=WorkflowStageId.KNOWLEDGE_COLLECTION,
-        label="知识入库",
-        actorKind=ActorKind.AGENT,
-        primaryRoleKey="source_ingestor",
-        producesArtifactKinds=("knowledge_package_draft",),
-    ),
-    WorkflowNodeSpec(
-        nodeId="knowledge_handoff",
-        stageId=WorkflowStageId.KNOWLEDGE_COLLECTION,
-        label="知识包交接",
-        actorKind=ActorKind.HUMAN,
-        primaryRoleKey="research_owner",
-        acceptsGateKinds=(GateKind.KNOWLEDGE_PACKAGE, GateKind.HUMAN),
-        producesArtifactKinds=("knowledge_package",),
     ),
 )
 
@@ -177,37 +137,6 @@ _ITERATION_NODES: tuple[WorkflowNodeSpec, ...] = (
 def _edges() -> tuple[WorkflowEdgeSpec, ...]:
     auto = GateKind.AUTO
     return (
-        # Knowledge pipeline
-        WorkflowEdgeSpec(
-            "e_problem_find",
-            "problem_understanding",
-            "source_finding",
-            "问题理解",
-            auto,
-            ("problem_understanding",),
-        ),
-        WorkflowEdgeSpec("e_find_extract", "source_finding", "source_extraction", "候选资料", auto, ("source_candidate_batch",)),
-        WorkflowEdgeSpec("e_extract_rel", "source_extraction", "evidence_relations", "证据卡", auto, ("evidence_card_batch",)),
-        WorkflowEdgeSpec("e_rel_ingest", "evidence_relations", "knowledge_ingestion", "关系图", auto, ("evidence_relation_graph",)),
-        WorkflowEdgeSpec(
-            "e_ingest_handoff",
-            "knowledge_ingestion",
-            "knowledge_handoff",
-            "入库草稿",
-            GateKind.HUMAN,
-            ("knowledge_package_draft",),
-            requiresHumanAccept=True,
-        ),
-        # Cross-stage: knowledge -> experiment
-        WorkflowEdgeSpec(
-            "e_kc_hypothesis",
-            "knowledge_handoff",
-            "hypothesis_design",
-            "Knowledge Package",
-            GateKind.KNOWLEDGE_PACKAGE,
-            ("knowledge_package",),
-            requiresHumanAccept=True,
-        ),
         # Experiment pipeline
         WorkflowEdgeSpec("e_hyp_proto", "hypothesis_design", "protocol_design", "假设集", auto, ("hypothesis_set",)),
         WorkflowEdgeSpec("e_proto_review", "protocol_design", "protocol_review", "协议草稿", auto, ("protocol_draft",)),
@@ -301,6 +230,14 @@ def _edges() -> tuple[WorkflowEdgeSpec, ...]:
             ("promotion_proposal",),
             requiresHumanAccept=True,
         ),
+        WorkflowEdgeSpec(
+            "e_problem_hypothesis",
+            "problem_understanding",
+            "hypothesis_design",
+            "问题理解",
+            auto,
+            ("problem_understanding",),
+        ),
     )
 
 
@@ -368,10 +305,10 @@ def definition_structure_hash(definition: WorkflowDefinition) -> str:
 def build_challenge_cup_workflow_definition() -> WorkflowDefinition:
     stages = (
         WorkflowStageSpec(
-            stageId=WorkflowStageId.KNOWLEDGE_COLLECTION,
+            stageId=WorkflowStageId.PROBLEM_UNDERSTANDING,
             index=1,
-            label="知识搜集",
-            nodeIds=tuple(n.nodeId for n in _KNOWLEDGE_NODES),
+            label="问题理解",
+            nodeIds=tuple(n.nodeId for n in _PROBLEM_NODES),
         ),
         WorkflowStageSpec(
             stageId=WorkflowStageId.EXPERIMENT_DESIGN,
@@ -386,7 +323,7 @@ def build_challenge_cup_workflow_definition() -> WorkflowDefinition:
             nodeIds=tuple(n.nodeId for n in _ITERATION_NODES),
         ),
     )
-    nodes = _KNOWLEDGE_NODES + _EXPERIMENT_NODES + _ITERATION_NODES
+    nodes = _PROBLEM_NODES + _EXPERIMENT_NODES + _ITERATION_NODES
     edges = _edges()
     draft = WorkflowDefinition(
         workflowId=CHALLENGE_CUP_WORKFLOW_ID,

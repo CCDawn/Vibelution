@@ -47,7 +47,7 @@ def fork_iteration_revision(
         source_checkpoint_id = str(
             (parent.get("langGraph") or {}).get("checkpointId") or ""
         )
-        child_thread_id = f"thread-{child_run_id}"
+        child_thread_id = child_run_id
         # Fail-closed: fork on the parent's pinned graph; the child record
         # copies the parent's workflowVersionId/structureHash below.
         definition = resolve_definition_for_run_record(parent)

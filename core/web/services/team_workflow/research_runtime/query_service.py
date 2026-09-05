@@ -7,7 +7,6 @@ fails closed; legacy JSON stores are never consulted.
 from __future__ import annotations
 
 import json
-import logging
 from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, timezone
 from typing import Any
@@ -18,7 +17,10 @@ from core.research.workflow.contracts.workflow_snapshot import (
     HumanTaskSummary,
     ResearchWorkflowNodeDetail,
 )
-from core.research.workflow.definition import build_challenge_cup_workflow_definition
+from core.research.workflow.definition_registry import (
+    WorkflowDefinitionRegistryError,
+    resolve_definition,
+)
 from core.research.workflow.ledger import WorkflowLedgerStore
 from core.research.workflow.ledger.errors import (
     WorkflowLedgerClosedError,
@@ -27,19 +29,12 @@ from core.research.workflow.ledger.errors import (
 from core.research.workflow.ledger.repository import WorkflowLedgerRepository
 
 from .blocked_reason import format_blocked_reason
-from .command_offer_builder import build_command_offers
+from .command_offers import build_command_offers
 from .node_scoped_session_projection import project_ledger_scoped_sessions
 from .projection_builder import ProjectionInputs, build_research_workflow_snapshot
 from .readiness import NodeReadinessService
 from .readiness.common import DomainReadinessContext
 from .run_catalog import catalog_dict_from_run
-
-logger = logging.getLogger(__name__)
-
-# Schema version of the registered legacy snapshot that pre-identity runs
-# fall back to (challenge-cup-research@2.1.0, the 17-node chain).
-_LEGACY_SCHEMA_VERSION = "2.1.0"
-
 
 class WorkflowQueryError(RuntimeError):
     code = "workflow_query_error"
@@ -87,7 +82,6 @@ class WorkflowQueryService:
         readiness_context: Callable[[], DomainReadinessContext],
         clock_iso: Callable[[], str] | None = None,
         evaluated_at_ms: Callable[[], int] | None = None,
-        definition: Any | None = None,
         revise_checkpoint_resolver: Callable[[str], str] | None = None,
         session_detail_reader: Callable[[str], Mapping[str, Any] | None] | None = None,
     ) -> None:
@@ -96,7 +90,6 @@ class WorkflowQueryService:
         self._readiness_context = readiness_context
         self._clock_iso = clock_iso or _default_iso_clock
         self._evaluated_at_ms = evaluated_at_ms
-        self._definition = definition or build_challenge_cup_workflow_definition()
         self._revise_checkpoint_resolver = revise_checkpoint_resolver
         self._session_detail_reader = session_detail_reader
 
@@ -165,7 +158,7 @@ class WorkflowQueryService:
         if run.team_id != scoped_team:
             raise TeamScopeMismatchError()
 
-        definition, definition_resolution = self._definition_for_run(run)
+        definition = self._definition_for_run(run)
         offers = build_command_offers(
             readiness_service=self._readiness,
             context=self._readiness_context(),
@@ -179,13 +172,11 @@ class WorkflowQueryService:
             ),
             revise_checkpoint_id=self._resolve_revise_checkpoint_id(run),
             invocations=knowledge_invocations,
-            definition_resolution=definition_resolution,
         )
         return build_research_workflow_snapshot(
             ProjectionInputs(
                 run=run,
                 definition=definition,
-                definition_resolution=definition_resolution,
                 attempts=tuple(attempts),
                 pending_human_tasks=tuple(human_tasks),
                 handoffs=tuple(handoffs),
@@ -206,103 +197,35 @@ class WorkflowQueryService:
             )
         )
 
-    def _definition_for_run(self, run: Any) -> tuple[Any, str]:
-        """Resolve the definition pinned by the run's version identity.
-
-        The canvas must render the topology the run was created with (2.1.0
-        legacy runs keep the 17-node chain; 3.0.0/sideflow runs render their
-        own pinned graph).  Returns ``(definition, resolution)`` where
-        resolution is one of:
-
-        - ``"pinned"``: the registry resolved the run's version identity
-          (including its structureHash).
-        - ``"legacy_default"``: the run predates version identities (empty
-          ``workflow_version_id``); the fallback is the REGISTERED 2.1.0
-          snapshot definition — never the current in-code build.
-        - ``"degraded"``: the run's version identity exists but could not be
-          honored (unknown version / hash mismatch / registry unavailable).
-          The substitution is diagnostic-visible in the snapshot
-          (``definitionResolution``) and logged, never silent.
-        """
+    def _definition_for_run(self, run: Any) -> Any:
+        """Resolve the run's pinned definition without substitution."""
         workflow_id = str(getattr(run, "workflow_id", "") or "").strip()
         version_id = str(getattr(run, "workflow_version_id", "") or "").strip()
         structure_hash = str(getattr(run, "structure_hash", "") or "").strip()
         run_id = str(getattr(run, "run_id", "") or "")
-        if not version_id:
-            legacy = self._registered_legacy_definition(workflow_id)
-            if legacy is not None:
-                return legacy, "legacy_default"
-            logger.warning(
-                "workflow_definition_degraded: run has no version identity and "
-                "no registered %s snapshot; falling back to the service default "
-                "(runId=%s workflowId=%s)",
-                _LEGACY_SCHEMA_VERSION,
-                run_id or "<unknown>",
-                workflow_id or "<unknown>",
-            )
-            return self._definition, "degraded"
         try:
-            from core.research.workflow.definition_registry import resolve_definition
-
-            return (
-                resolve_definition(
-                    workflow_id=workflow_id,
-                    workflow_version_id=version_id,
-                    structure_hash=structure_hash,
-                    run_id=run_id,
-                ),
-                "pinned",
+            return resolve_definition(
+                workflow_id=workflow_id,
+                workflow_version_id=version_id,
+                structure_hash=structure_hash,
+                run_id=run_id,
             )
-        except Exception as exc:  # noqa: BLE001 - snapshot reads fail soft, visibly
-            logger.warning(
-                "workflow_definition_degraded: pinned resolution failed; "
-                "falling back to the service default "
-                "(runId=%s workflowId=%s workflowVersionId=%s structureHash=%s error=%s)",
-                run_id or "<unknown>",
-                workflow_id or "<unknown>",
-                version_id,
-                structure_hash or "<absent>",
-                exc,
-            )
-            return self._definition, "degraded"
-
-    def _registered_legacy_definition(self, workflow_id: str) -> Any | None:
-        """The registered 2.1.0 snapshot definition for ``workflow_id``.
-
-        Ancient runs carry no version identity; the only honest fallback is
-        the registered legacy snapshot, resolved through the registry (the
-        same reader every other consumer uses) — never a fresh compile of the
-        current graph.
-        """
-        try:
-            from core.research.workflow.definition_registry import (
-                registered_definitions,
-            )
-
-            return next(
-                (
-                    item
-                    for item in registered_definitions()
-                    if str(item.workflowId) == workflow_id
-                    and str(item.schemaVersion) == _LEGACY_SCHEMA_VERSION
-                ),
-                None,
-            )
-        except Exception:  # noqa: BLE001 - legacy fallback stays fail-soft
-            return None
+        except WorkflowDefinitionRegistryError as exc:
+            raise WorkflowQueryError(
+                f"run {run_id or '<unknown>'} references an unavailable workflow definition",
+                code="workflow_definition_unavailable",
+            ) from exc
 
     def get_node_detail(
         self, *, team_id: str, run_id: str, node_id: str
     ) -> ResearchWorkflowNodeDetail:
-        # Node membership is judged against the run's OWN pinned definition,
-        # not the service default: a 2.1.0 run and a 3.0.0 run have different
-        # node sets (e.g. knowledge_handoff exists only in the legacy chain).
+        # Node membership is judged against the run's pinned definition.
         try:
             run = self._store.get_run(run_id)
         except (WorkflowLedgerUnavailableError, WorkflowLedgerClosedError) as exc:
             raise WorkflowLedgerUnavailable(str(exc)) from exc
         if run is not None:
-            definition, _ = self._definition_for_run(run)
+            definition = self._definition_for_run(run)
             node = next(
                 (item for item in definition.nodes if item.nodeId == node_id),
                 None,

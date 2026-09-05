@@ -18,7 +18,11 @@ from core.research.workflow.iteration_decisions import (
 )
 
 
-def routed_successors(node_id: str, branch_decision: str | None) -> tuple[str, ...]:
+def routed_successors(
+    node_id: str,
+    branch_decision: str | None,
+    workflow_version_id: str,
+) -> tuple[str, ...]:
     """Return the single routed successor, or () when the decision is unknown."""
     if node_id == "iteration_decision":
         raw = str(branch_decision or "").strip()
@@ -38,7 +42,7 @@ def routed_successors(node_id: str, branch_decision: str | None) -> tuple[str, .
         except IterationDecisionError:
             return ()
         return (target,)
-    return successor_map().get(node_id, ())
+    return successor_map(workflow_version_id).get(node_id, ())
 
 
 def branch_decision_from_payload(payload: Any) -> str:

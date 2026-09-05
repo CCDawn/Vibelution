@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { inspectWorkbenchServingVersion } from "../src/process/servingVersion.js";
 
 function healthPayload(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -32,11 +32,72 @@ function input(overrides: Record<string, unknown> = {}) {
       backendCreateTime: 123.5,
       backendExecutable: "python.exe"
     }),
+    runIdentityBridge: async () => JSON.stringify({ matches: false }),
     ...overrides,
   };
 }
 
 describe("workbench serving-version handshake", () => {
+  it("accepts the verified interpreter child of a Windows venv launcher", async () => {
+    const runIdentityBridge = vi.fn(async () => JSON.stringify({ matches: true }));
+    const result = await inspectWorkbenchServingVersion(input({
+      readState: () => ({
+        backendPid: 4000,
+        backendCreateTime: 123.4,
+        backendExecutable: "C:/workspace/.venv/Scripts/pythonw.exe"
+      }),
+      runIdentityBridge
+    }));
+
+    expect(result.ok).toBe(true);
+    expect(result.backendPid).toBe(4321);
+    expect(runIdentityBridge).toHaveBeenCalledWith(expect.objectContaining({
+      pythonPath: "C:/workspace/.venv/Scripts/pythonw.exe",
+      cwd: "C:/workspace",
+      killPolicy: "child",
+      args: ["-c", expect.stringContaining("inspect_process_identity"),
+        JSON.stringify({ pid: 4000, createTime: 123.4, executable: "C:/workspace/.venv/Scripts/pythonw.exe" }),
+        JSON.stringify({ pid: 4321, createTime: 123.5, executable: "python.exe" })]
+    }));
+  });
+
+  it("still rejects stale frontend releases after verifying the interpreter child", async () => {
+    const result = await inspectWorkbenchServingVersion(input({
+      readState: () => ({ backendPid: 4000, backendCreateTime: 123.4, backendExecutable: "pythonw.exe" }),
+      runIdentityBridge: async () => JSON.stringify({ matches: true }),
+      readActive: () => ({ buildKey: "build-new", release: "release-new" })
+    }));
+    expect(result.reason).toBe("serving_release_mismatch");
+  });
+
+  it.each(["{}", "not-json"])("rejects an unverified child when the identity bridge returns %s", async (reply) => {
+    const result = await inspectWorkbenchServingVersion(input({
+      readState: () => ({ backendPid: 4000, backendCreateTime: 123.4, backendExecutable: "pythonw.exe" }),
+      runIdentityBridge: async () => reply
+    }));
+    expect(result.reason).toBe("serving_backend_identity_mismatch");
+  });
+
+  it("rejects an inaccessible child identity", async () => {
+    const result = await inspectWorkbenchServingVersion(input({
+      readState: () => ({ backendPid: 4000, backendCreateTime: 123.4, backendExecutable: "pythonw.exe" }),
+      runIdentityBridge: async () => { throw new Error("access denied"); }
+    }));
+    expect(result.reason).toBe("serving_backend_identity_mismatch");
+  });
+
+  it("does not treat a reused PID or incomplete launch identity as a child", async () => {
+    const runIdentityBridge = vi.fn(async () => JSON.stringify({ matches: true }));
+    for (const state of [
+      { backendPid: 4321, backendCreateTime: 999, backendExecutable: "python.exe" },
+      { backendPid: 4000, backendCreateTime: 0, backendExecutable: "pythonw.exe" }
+    ]) {
+      const result = await inspectWorkbenchServingVersion(input({ readState: () => state, runIdentityBridge }));
+      expect(result.reason).toBe("serving_backend_identity_mismatch");
+    }
+    expect(runIdentityBridge).not.toHaveBeenCalled();
+  });
+
   it("accepts a healthy backend whose release and code match disk", async () => {
     const result = await inspectWorkbenchServingVersion(input());
 

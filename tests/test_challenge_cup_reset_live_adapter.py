@@ -9,8 +9,11 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import pytest
+
 from core.web.services.team_workflow.challenge_cup_reset_live_adapter import (
     ChallengeCupInventoryPorts,
+    LiveInventoryAuthorityError,
     LiveChallengeCupInventoryReader,
 )
 from core.web.services.team_workflow import challenge_cup_reset_live_adapter as live_adapter
@@ -223,7 +226,40 @@ def test_missing_checkpoint_authority_is_fail_closed_without_sqlite_scan() -> No
     assert any(item["code"] == "object_id_missing" for item in preview["blockers"])
 
 
-def test_legacy_checkpoint_scope_requires_a_matching_team_artifact(monkeypatch) -> None:
+def test_historical_checkpoint_scope_requires_exact_run_id_and_team_artifact(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(live_adapter, "_list_runs", lambda _team_id: {"runs": []})
+    monkeypatch.setattr(
+        checkpoint_store,
+        "list_checkpoint_thread_ids",
+        lambda: ["run-legacy"],
+    )
+    monkeypatch.setattr(
+        workflow_artifact_store,
+        "list_workflow_artifacts",
+        lambda team_id, *, kind: [
+            {"teamId": team_id, "workflowRunId": "run-legacy"}
+        ]
+        if kind == "protocol_draft"
+        else [],
+    )
+
+    assert live_adapter._run_scope_rows("research-team") == [
+        {
+            "teamId": "research-team",
+            "runId": "run-legacy",
+            "threadId": "run-legacy",
+            "scopeHash": "",
+            "questionId": "",
+            "projectId": "",
+        }
+    ]
+
+
+def test_prefixed_checkpoint_thread_id_is_not_accepted_as_run_identity(
+    monkeypatch,
+) -> None:
     monkeypatch.setattr(live_adapter, "_list_runs", lambda _team_id: {"runs": []})
     monkeypatch.setattr(
         checkpoint_store,
@@ -240,13 +276,8 @@ def test_legacy_checkpoint_scope_requires_a_matching_team_artifact(monkeypatch) 
         else [],
     )
 
-    assert live_adapter._run_scope_rows("research-team") == [
-        {
-            "teamId": "research-team",
-            "runId": "thread-run-legacy",
-            "threadId": "thread-run-legacy",
-            "scopeHash": "",
-            "questionId": "",
-            "projectId": "",
-        }
-    ]
+    with pytest.raises(
+        LiveInventoryAuthorityError,
+        match="checkpoint thread scope authority is absent",
+    ):
+        live_adapter._run_scope_rows("research-team")

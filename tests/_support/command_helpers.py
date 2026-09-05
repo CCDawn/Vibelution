@@ -101,9 +101,16 @@ class CommandHarness:
     def close(self) -> None:
         self.store.close()
 
-    def seed_run(self, run_id: str = "run-test", **overrides: Any) -> None:
-        definition = build_challenge_cup_workflow_definition()
+    def seed_run(
+        self,
+        run_id: str = "run-test",
+        *,
+        workflow_definition: Any | None = None,
+        **overrides: Any,
+    ) -> None:
+        definition = workflow_definition or build_challenge_cup_workflow_definition()
         identity = register_or_resolve(definition)
+        overrides.setdefault("workflow_id", definition.workflowId)
         overrides.setdefault("workflow_version_id", identity.workflowVersionId)
         structure_hash = str(overrides.pop("structure_hash", identity.structureHash))
         record = dataclasses.replace(
@@ -129,7 +136,7 @@ class CommandHarness:
         self,
         *,
         command: WorkflowCommandKind = WorkflowCommandKind.START_NODE,
-        node_id: str | None = "source_finding",
+        node_id: str | None = "problem_understanding",
         run_id: str = "run-test",
         team_id: str = "research-team",
         expected_run_version: int = 1,

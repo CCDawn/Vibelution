@@ -11,8 +11,15 @@ from core.research.workflow.contracts.research_scope import (
     scope_hash_for,
     scope_locators_for,
 )
-from core.research.workflow.contracts import WorkflowRunInputSnapshot
-from core.research.workflow.definition import build_challenge_cup_workflow_definition
+from core.research.workflow.contracts import (
+    ContractValidationError,
+    WorkflowRunInputSnapshot,
+)
+from core.research.workflow.definition import (
+    CHALLENGE_CUP_WORKFLOW_ID,
+    build_challenge_cup_workflow_definition,
+)
+from core.research.workflow.definition_registry import definition_identity
 from core.web.services import team_workflow_orchestration_service
 from core.web.services.team_workflow import research_project_agent_tasks
 from core.web.services.team_workflow.research_project_protocol_context import (
@@ -40,6 +47,11 @@ from core.web.services.team_workflow.research_runtime.workflow_artifact_store im
 from tools.challenge_cup_operations_tools import (
     challenge_cup_experiment_writeback_tool,
 )
+
+
+CURRENT_VERSION_ID = definition_identity(
+    build_challenge_cup_workflow_definition()
+).workflowVersionId
 
 
 def _task() -> dict[str, object]:
@@ -231,7 +243,7 @@ def _frozen_input_snapshot() -> dict[str, object]:
         "teamId": "research-team",
         "projectId": "project-1",
         "questionId": question_id,
-        "workflowVersionId": "challenge-cup-v2",
+        "workflowVersionId": CURRENT_VERSION_ID,
         "researchBriefHash": "a" * 64,
         "datasetRefs": ["dataset-1"],
         "metricContract": {"primaryMetric": "balanced_accuracy"},
@@ -350,6 +362,7 @@ def test_experiment_task_context_exposes_formal_protocol_input(monkeypatch) -> N
     task = _task()
     service = SimpleNamespace(
         _WORKFLOW_LOCK=threading.RLock(),
+        _normalize_required_id=lambda value, _message: str(value).strip(),
         get_research_project=lambda *_args: {"name": "Project 1"},
         _load_experiment_plan_store=lambda _team_id: {"plans": []},
     )
@@ -357,6 +370,11 @@ def test_experiment_task_context_exposes_formal_protocol_input(monkeypatch) -> N
     monkeypatch.setattr(
         research_project_agent_tasks,
         "require_research_project_agent_task",
+        lambda *_args, **_kwargs: task,
+    )
+    monkeypatch.setattr(
+        research_project_agent_tasks,
+        "_read_research_project_agent_task_record",
         lambda *_args, **_kwargs: task,
     )
     monkeypatch.setattr(
@@ -918,18 +936,15 @@ def test_formal_attempt_authority_must_match_exactly(
 
 
 def test_formal_scope_missing_is_blocked(formal_ledger_runtime) -> None:
-    run, attempt, _snapshot = formal_ledger_runtime
+    _run, _attempt, _snapshot = formal_ledger_runtime
     raw = _frozen_input_snapshot()
     raw.pop("researchScopeEnvelope")
     raw.pop("catalogScope")
-    snapshot = WorkflowRunInputSnapshot.from_dict(raw)
-    run.input_snapshot_json = json.dumps(raw)
-    run.input_snapshot_hash = snapshot.snapshotHash
-    attempt.input_snapshot_hash = snapshot.snapshotHash
-
-    context = build_protocol_input_context("research-team", _formal_task())
-
-    assert context["status"] == "blocked_formal_authority"
+    with pytest.raises(
+        ContractValidationError,
+        match="researchScopeEnvelope and catalogScope are required",
+    ):
+        WorkflowRunInputSnapshot.from_dict(raw)
 
 
 @pytest.mark.parametrize(
@@ -995,7 +1010,9 @@ def _protocol_builder_fixture() -> tuple[
     record = {
         "teamId": "research-team",
         "runId": "run-1",
-        "workflowVersionId": "challenge-cup-v2",
+        "workflowId": CHALLENGE_CUP_WORKFLOW_ID,
+        "workflowVersionId": CURRENT_VERSION_ID,
+        "structureHash": definition.structureHash,
         "inputSnapshot": {"environmentSnapshotRef": "env-1"},
         "artifactManifests": [],
     }

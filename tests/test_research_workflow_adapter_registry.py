@@ -15,6 +15,9 @@ from core.research.workflow.contracts import PendingAction
 from core.research.workflow.definition import (
     build_challenge_cup_workflow_definition,
 )
+from core.research.workflow.knowledge_sideflow_definition import (
+    build_knowledge_sideflow_workflow_definition,
+)
 from core.research.workflow.models import ActorKind
 from core.web.services.team_workflow.research_runtime.action_registry import ActionRegistry
 from core.web.services.team_workflow.research_runtime.adapter_dispatch_worker import (
@@ -104,25 +107,30 @@ def test_registry_registers_every_node_exact_action_kind() -> None:
     ports = FakeDomainPorts()
     registry = register_default_adapters(ActionRegistry(), ports)
 
-    definition = build_challenge_cup_workflow_definition()
+    definitions = (
+        build_challenge_cup_workflow_definition(),
+        build_knowledge_sideflow_workflow_definition(),
+    )
     expected: set[str] = set()
-    for node in definition.nodes:
-        if node.actorKind == ActorKind.AGENT:
-            expected.add("start_agent_task")
-        elif node.actorKind == ActorKind.SYSTEM:
-            expected.add(f"system_action:{node.nodeId}")
-        else:
-            expected.add(f"human_task:{node.nodeId}")
+    for definition in definitions:
+        for node in definition.nodes:
+            if node.actorKind == ActorKind.AGENT:
+                expected.add("start_agent_task")
+            elif node.actorKind == ActorKind.SYSTEM:
+                expected.add(f"system_action:{node.nodeId}")
+            else:
+                expected.add(f"human_task:{node.nodeId}")
 
     assert registry.kinds() == expected
     # 每个节点 kind 都能解析到 adapter。
-    for node in definition.nodes:
-        kind = "start_agent_task" if node.actorKind == ActorKind.AGENT else (
-            f"system_action:{node.nodeId}"
-            if node.actorKind == ActorKind.SYSTEM
-            else f"human_task:{node.nodeId}"
-        )
-        assert registry.get(kind) is not None, f"missing adapter for {kind}"
+    for definition in definitions:
+        for node in definition.nodes:
+            kind = "start_agent_task" if node.actorKind == ActorKind.AGENT else (
+                f"system_action:{node.nodeId}"
+                if node.actorKind == ActorKind.SYSTEM
+                else f"human_task:{node.nodeId}"
+            )
+            assert registry.get(kind) is not None, f"missing adapter for {kind}"
 
 
 def _run_adapter_for_node(

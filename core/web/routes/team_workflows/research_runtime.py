@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Literal
+from typing import Any
 
 from fastapi import Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
@@ -25,7 +25,6 @@ from core.web.services.team_workflow.research_runtime.command_service import (
     InvalidHumanTaskStateError,
     KnowledgeCommandError,
     NodeNotReadyError,
-    StageOneCommandError,
     WorkflowCommandError,
 )
 from core.web.services.team_workflow.research_runtime.command_service import (
@@ -154,21 +153,6 @@ class CommandPayload(VersionedCommandPayload):
     payload: dict[str, Any] = Field(default_factory=dict)
 
 
-class StageOneCommandPayload(VersionedCommandPayload):
-    """Stage-one G1 closeout operator commands (Challenge Program flow).
-
-    Thin facade over the ledger WorkflowCommandService: ``command`` must be
-    one of the two first-class stage-one commands.  The closure node defaults
-    to the run's ``stageOneCompletionPolicy.closureNodeId`` inside the command
-    handlers, so callers never hard-code the workflow shape; a request
-    ``nodeId`` must name that same closure node.
-    """
-
-    command: Literal["build_stage_one_package", "finalize_stage_one"]
-    nodeId: str = ""
-    payload: dict[str, Any] = Field(default_factory=dict)
-
-
 class KnowledgeSearchEnvelopePayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -235,7 +219,7 @@ def _map_error(exc: ResearchWorkflowError) -> HTTPException:
     elif code in {
         "run_version_conflict",
         "idempotency_conflict",
-        "definition_resolution_degraded",
+        "workflow_definition_unavailable",
         "lease_owner_mismatch",
         "invalid_node_state",
         "invalid_human_task_state",
@@ -246,9 +230,6 @@ def _map_error(exc: ResearchWorkflowError) -> HTTPException:
         "experiment_activation_not_allowed",
         "campaign_theme_mismatch",
         "dev_theme_not_activatable",
-        "stage_one_package_not_ready",
-        "stage_one_program_review_not_approved",
-        "stage_one_result_package_missing",
     }:
         status = 409
     elif code in {
@@ -832,14 +813,6 @@ def _submit_workflow_command(
                 "message": str(exc),
             },
         ) from exc
-    except StageOneCommandError as exc:
-        # Fail-closed stage-one gates are state conflicts: the evidence or the
-        # Program approval is not there yet, so the operator retries later.
-        code = str(getattr(exc, "code", "") or "stage_one_command_failed")
-        raise HTTPException(
-            status_code=422 if code == "stage_one_command_invalid" else 409,
-            detail={"code": code, "message": str(exc)},
-        ) from exc
     except CommandTeamScopeMismatchError as exc:
         raise HTTPException(
             status_code=404,
@@ -877,31 +850,3 @@ def _submit_workflow_command(
             status_code=422,
             detail={"code": "unknown_command", "message": str(exc)},
         ) from exc
-
-
-@router.post(
-    "/research/workflow-runs/{run_id}/stage-one/commands",
-)
-def research_workflow_stage_one_command(
-    run_id: str,
-    payload: StageOneCommandPayload,
-    request: Request,
-) -> dict:
-    """Stage-one G1 closeout facade over the ledger command service (thin).
-
-    ``build_stage_one_package`` registers the Challenge Program result
-    package; ``finalize_stage_one`` re-reads Program authority and promotes
-    the pending closeout.  Team scope and runVersion CAS are owned by the
-    WorkflowCommandService; the operator gate is server-side.  All semantics
-    stay in the command service and the shared stage-one validators.
-    """
-    return _submit_workflow_command(
-        run_id=run_id,
-        team_id=payload.teamId,
-        kind=WorkflowCommandKind(payload.command),
-        node_id=payload.nodeId or None,
-        expected_run_version=payload.expectedRunVersion,
-        idempotency_key=payload.idempotencyKey,
-        payload=dict(payload.payload or {}),
-        request=request,
-    )

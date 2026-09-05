@@ -501,89 +501,6 @@ def test_research_stage_status_does_not_reconcile_nonterminal_failed_tool_event(
     assert collection_card["agentTaskStatus"] == "running"
     assert collection_card["status"] == "agent_running"
 
-def test_source_quality_reconcile_retries_legacy_no_assessable_keep_decisions(tmp_path, monkeypatch):
-    _use_tmp_project_root(tmp_path, monkeypatch)
-    _use_fake_local_research_config(monkeypatch)
-    agent = agent_directory_service.create_agent_instance(display_name="资料提炼")
-    team = team_service.create_team(
-        name="挑战杯科研团队",
-        members=[{"agentId": agent["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
-    )
-    run_id = "run-legacy-keep-quality-reconcile"
-    candidate = team_workflow_orchestration_service.register_candidate_source(
-        team["teamId"],
-        {
-            "title": "Predictive coding keep decision source",
-            "sourceUrl": "https://doi.org/10.0000/legacy-keep",
-            "sourceKind": "paper",
-            "summary": "Neural predictive coding evidence suitable for keeping.",
-            "allowedForAnalysis": True,
-            "metadata": {"sourceCollectionRunId": run_id, "doi": "10.0000/legacy-keep"},
-            "createdByAgent": agent["agentId"],
-        },
-    )["candidate"]
-    team_workflow_orchestration_service._upsert_source_collection_stage_session_task(
-        team["teamId"],
-        run_id,
-        {
-            "taskId": "stagetask-legacy-keep-quality",
-            "runId": run_id,
-            "stageId": "extraction",
-            "agentId": agent["agentId"],
-            "agentRole": "source_extractor",
-            "sessionId": "session-legacy-keep-quality",
-            "status": "completed",
-            "summary": "旧版本把 keep 判定跳过为 unsupported_decision。",
-            "writeback": {
-                "status": "completed",
-                "summary": "旧版本回写。",
-                "result": {
-                    "candidateDecisions": [
-                        {
-                            "candidateId": candidate["candidateId"],
-                            "decision": "keep",
-                            "reason": "有价值资料，保留进入关系整理。",
-                        }
-                    ]
-                },
-                "materializedSourceQuality": {
-                    "status": "no_assessable_decisions",
-                    "skippedCandidateCount": 1,
-                    "skippedCandidates": [{"candidateId": candidate["candidateId"], "reason": "unsupported_decision"}],
-                },
-            },
-            "result": {
-                "candidateDecisions": [
-                    {
-                        "candidateId": candidate["candidateId"],
-                        "decision": "keep",
-                        "reason": "有价值资料，保留进入关系整理。",
-                    }
-                ],
-                "materializedSourceQuality": {
-                    "status": "no_assessable_decisions",
-                    "skippedCandidateCount": 1,
-                    "skippedCandidates": [{"candidateId": candidate["candidateId"], "reason": "unsupported_decision"}],
-                },
-            },
-            "createdAt": "2026-06-30T00:00:00+00:00",
-            "updatedAt": "2026-06-30T00:00:00+00:00",
-        },
-    )
-
-    changed = team_workflow_orchestration_service._reconcile_source_collection_stage_session_tasks(team["teamId"])
-
-    store = team_workflow_orchestration_service._load_source_collection_stage_session_task_store(team["teamId"], run_id)
-    stored_task = next(item for item in store["tasks"] if item["taskId"] == "stagetask-legacy-keep-quality")
-    candidates = {
-        item["candidateId"]: item
-        for item in team_workflow_orchestration_service.list_candidate_store(team["teamId"], candidate_type="source_manifest")["candidates"]
-    }
-    assert changed is True
-    assert stored_task["writeback"]["materializedSourceQuality"]["status"] == "completed"
-    assert stored_task["writeback"]["materializedSourceQuality"]["approvedCandidateCount"] == 1
-    assert candidates[candidate["candidateId"]]["qualityStatus"] == "source_quality_approved"
-
 def test_content_extraction_writeback_accumulates_partial_candidate_batches(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
@@ -3250,7 +3167,7 @@ def test_local_research_model_invoke_rejects_unparseable_output_without_candidat
 
 def test_steward_pack_writeback_lands_in_run_owner_project_store(tmp_path, monkeypatch):
     """SCI-091 回归：活跃工程 A + authority run 属工程 B 时，writeback 自动链物化的
-    steward_pack_draft 候选必须落 B 的 owner 工程店；owner+active 读兼容合并仍工作。"""
+    steward_pack_draft 候选必须落 B，run-scoped 读取也只认 B。"""
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
     ingestor = agent_directory_service.create_agent_instance(display_name="资料入库")
@@ -3399,7 +3316,7 @@ def test_steward_pack_writeback_lands_in_run_owner_project_store(tmp_path, monke
     ]
     assert active_pack_candidates == []
 
-    # 读兼容合并仍工作：活跃店候选通过 owner-first merged read 仍可见。
+    # Run-scoped reads stay isolated to the authoritative owner project.
     stray = team_workflow_orchestration_service.record_local_research_model_output(
         team["teamId"],
         {
@@ -3415,10 +3332,10 @@ def test_steward_pack_writeback_lands_in_run_owner_project_store(tmp_path, monke
             },
         },
     )["candidate"]
-    merged = team_workflow_orchestration_service._load_candidate_store(team["teamId"], run_id=run_id)
-    merged_ids = {str(item.get("candidateId") or "") for item in list(merged.get("candidates") or [])}
-    assert materialized["stewardPackCandidateId"] in merged_ids
-    assert stray["candidateId"] in merged_ids
+    owner_only = team_workflow_orchestration_service._load_candidate_store(team["teamId"], run_id=run_id)
+    owner_only_ids = {str(item.get("candidateId") or "") for item in list(owner_only.get("candidates") or [])}
+    assert materialized["stewardPackCandidateId"] in owner_only_ids
+    assert stray["candidateId"] not in owner_only_ids
     # 无 run 的读取仍以活跃店为视角。
     active_only = team_workflow_orchestration_service._load_candidate_store(team["teamId"])
     active_only_ids = {str(item.get("candidateId") or "") for item in list(active_only.get("candidates") or [])}
@@ -3426,61 +3343,33 @@ def test_steward_pack_writeback_lands_in_run_owner_project_store(tmp_path, monke
     assert materialized["stewardPackCandidateId"] not in active_only_ids
 
 
-def test_run_scoped_steward_pack_write_records_reason_when_owner_unresolved(tmp_path, monkeypatch):
-    """带 authority run 但 owner 工程不可解析（legacy/已删 run）时：保持历史活跃店
-    目标（legacy 流程不破坏），但必须记录明确 reason 的 warning 事件并在返回里带
-    candidateStoreScope，不静默漂移。"""
+def test_run_scoped_steward_pack_write_fails_closed_when_owner_unresolved(tmp_path, monkeypatch):
+    """显式 authority run 缺少 owner 时不得回退到当前活跃工程。"""
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")
     active_store_path = team_workflow_orchestration_service._candidate_store_path(team["teamId"])
 
-    recorded_events: list[tuple[tuple, dict]] = []
-    real_record_event = team_workflow_orchestration_service.record_runtime_scene_event
+    before = team_workflow_orchestration_service._read_json(active_store_path)
 
-    def _spy_record_event(*args, **kwargs):
-        recorded_events.append((args, kwargs))
-        return real_record_event(*args, **kwargs)
-
-    monkeypatch.setattr(
-        team_workflow_orchestration_service,
-        "record_runtime_scene_event",
-        _spy_record_event,
-    )
-
-    response = team_workflow_orchestration_service.record_local_research_model_output(
-        team["teamId"],
-        {
-            "taskType": "steward_pack_draft",
-            "title": "owner 不可解析的包",
-            "createdByAgent": "knowledge-steward",
-            "output": {
-                "candidateType": "review_record",
-                "sourceRefs": [{"type": "paper", "id": "paper-x", "label": "Paper X"}],
-                "evidenceRefs": [{"type": "review", "id": "review-x", "label": "Review X"}],
-                "candidateIds": ["candidate-x"],
-                "proposalPayload": {"title": "包", "summary": "摘要", "excerpt": "证据摘录", "ratingSuggestion": {"rating": 4, "confidence": 0.9}, "claims": [], "uncertainty": [], "riskSummary": "", "nextAction": "提交审核"},
+    with pytest.raises(
+        team_workflow_orchestration_service.TeamWorkflowOrchestrationError,
+        match="owner research project is required",
+    ):
+        team_workflow_orchestration_service.record_local_research_model_output(
+            team["teamId"],
+            {
+                "taskType": "steward_pack_draft",
+                "title": "owner 不可解析的包",
+                "createdByAgent": "knowledge-steward",
+                "output": {
+                    "candidateType": "review_record",
+                    "sourceRefs": [{"type": "paper", "id": "paper-x", "label": "Paper X"}],
+                    "evidenceRefs": [{"type": "review", "id": "review-x", "label": "Review X"}],
+                    "candidateIds": ["candidate-x"],
+                    "proposalPayload": {"title": "包", "summary": "摘要", "excerpt": "证据摘录", "ratingSuggestion": {"rating": 4, "confidence": 0.9}, "claims": [], "uncertainty": [], "riskSummary": "", "nextAction": "提交审核"},
+                },
             },
-        },
-        run_id="dprun-owner-unresolvable",
-    )
+            run_id="dprun-owner-unresolvable",
+        )
 
-    # 返回里带明确 reason。
-    scope = response.get("candidateStoreScope")
-    assert scope["requestedRunId"] == "dprun-owner-unresolvable"
-    assert scope["resolvedRunId"] == ""
-    assert scope["resolution"] == "active_project_owner_unresolved"
-    # warning 事件带明确 reason，不静默。
-    warning_events = [
-        (args, kwargs)
-        for args, kwargs in recorded_events
-        if len(args) >= 3 and args[2] == "candidate.store_owner_project_unresolved"
-    ]
-    assert warning_events, "expected a store_owner_project_unresolved workflow event"
-    event_fields = warning_events[0][0][3] if len(warning_events[0][0]) > 3 else warning_events[0][1].get("fields") or {}
-    assert event_fields.get("runId") == "dprun-owner-unresolvable"
-    assert event_fields.get("reason") == "authority_run_has_no_resolvable_owner_research_project"
-    assert warning_events[0][1].get("level") == "warning"
-    # 历史行为保持：候选仍写入活跃店（legacy run 场景不破坏）。
-    store = team_workflow_orchestration_service._read_json(active_store_path)
-    store_ids = {str(item.get("candidateId") or "") for item in list(store.get("candidates") or [])}
-    assert response["candidate"]["candidateId"] in store_ids
+    assert team_workflow_orchestration_service._read_json(active_store_path) == before

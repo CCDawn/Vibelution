@@ -79,21 +79,21 @@ def test_not_ready_successor_blocked_no_adapter(tmp_path: Path) -> None:
     harness = GraphHarness(tmp_path)
     try:
         harness.seed()
-        harness.start_thread_to("source_finding")
+        harness.start_thread_to("problem_understanding")
         first_pending = harness.latest_adapter_pending()
         assert first_pending is not None
         first_action_id = json.loads(first_pending.payload_json)["actionId"]
         _consume_adapter(harness, first_pending.action_id)
 
-        # resume succeeded -> graph 推进到 source_extraction（新节点）。
+        # resume succeeded -> graph 推进到 hypothesis_design（新节点）。
         harness.resume(
             run_id="run-test",
-            node_id="source_finding",
+            node_id="problem_understanding",
             attempt=1,
             action_id=first_action_id,
             outcome="succeeded",
         )
-        # 后继 source_extraction 不 ready。
+        # 后继 hypothesis_design 不 ready。
         worker = _worker_with_readiness(
             harness,
             StubReadiness(
@@ -106,7 +106,7 @@ def test_not_ready_successor_blocked_no_adapter(tmp_path: Path) -> None:
 
         attempts = harness.commands.store.list_attempts("run-test")
         extraction = next(
-            (a for a in attempts if a.node_id == "source_extraction"), None
+            (a for a in attempts if a.node_id == "hypothesis_design"), None
         )
         assert extraction is not None
         assert extraction.status == "blocked"
@@ -119,8 +119,8 @@ def test_not_ready_successor_blocked_no_adapter(tmp_path: Path) -> None:
             ).fetchall(),
             force_flush=True,
         ).result(timeout=10)
-        # 入口与 source_finding 的 adapter 均已 consume，source_extraction 未创建。
-        assert len(adapter_rows) == 2
+        # 入口 adapter 已 consume，hypothesis_design 未创建。
+        assert len(adapter_rows) == 1
         assert all(row[0] == "succeeded" for row in adapter_rows)
         # 事件记录 node_blocked。
         events = harness.commands.store.list_events("run-test")
@@ -133,7 +133,7 @@ def test_ready_successor_creates_adapter_outbox(tmp_path: Path) -> None:
     harness = GraphHarness(tmp_path)
     try:
         harness.seed()
-        harness.start_thread_to("source_finding")
+        harness.start_thread_to("problem_understanding")
         first_pending = harness.latest_adapter_pending()
         assert first_pending is not None
         first_action_id = json.loads(first_pending.payload_json)["actionId"]
@@ -141,7 +141,7 @@ def test_ready_successor_creates_adapter_outbox(tmp_path: Path) -> None:
 
         harness.resume(
             run_id="run-test",
-            node_id="source_finding",
+            node_id="problem_understanding",
             attempt=1,
             action_id=first_action_id,
             outcome="succeeded",
@@ -154,7 +154,7 @@ def test_ready_successor_creates_adapter_outbox(tmp_path: Path) -> None:
             (
                 a
                 for a in harness.commands.store.list_attempts("run-test")
-                if a.node_id == "source_extraction"
+                if a.node_id == "hypothesis_design"
             ),
             None,
         )
@@ -162,7 +162,7 @@ def test_ready_successor_creates_adapter_outbox(tmp_path: Path) -> None:
         assert extraction.status == "dispatching"
         pending = harness.latest_adapter_pending()
         assert pending is not None
-        assert json.loads(pending.payload_json)["nodeId"] == "source_extraction"
+        assert json.loads(pending.payload_json)["nodeId"] == "hypothesis_design"
     finally:
         harness.close()
 
@@ -171,14 +171,14 @@ def test_no_readiness_wiring_defaults_to_pass(tmp_path: Path) -> None:
     harness = GraphHarness(tmp_path)
     try:
         harness.seed()
-        harness.start_thread_to("source_finding")
+        harness.start_thread_to("problem_understanding")
         first_pending = harness.latest_adapter_pending()
         assert first_pending is not None
         first_action_id = json.loads(first_pending.payload_json)["actionId"]
         _consume_adapter(harness, first_pending.action_id)
         harness.resume(
             run_id="run-test",
-            node_id="source_finding",
+            node_id="problem_understanding",
             attempt=1,
             action_id=first_action_id,
             outcome="succeeded",
@@ -189,7 +189,7 @@ def test_no_readiness_wiring_defaults_to_pass(tmp_path: Path) -> None:
             (
                 a
                 for a in harness.commands.store.list_attempts("run-test")
-                if a.node_id == "source_extraction"
+                if a.node_id == "hypothesis_design"
             ),
             None,
         )

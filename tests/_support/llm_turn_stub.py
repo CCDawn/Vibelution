@@ -10,6 +10,7 @@ dispatches it; only the model decision is stubbed. A later invocation returns
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from typing import Any, Callable
@@ -40,6 +41,7 @@ def install_fast_stage_writeback_llm_stub(monkeypatch: Any) -> dict[str, Any]:
         "final_answers": 0,
         "claim_evidence_errors": 0,
         "receipts_attached": 0,
+        "provider_calls": 0,
     }
 
     def _invoke(
@@ -89,30 +91,47 @@ def install_fast_stage_writeback_llm_stub(monkeypatch: Any) -> dict[str, Any]:
         # High-permission writeback would otherwise block on UI approval (300s).
         return ToolApprovalOutcome(True, "t518_auto_approved")
 
-    def _deterministic_search(**_kwargs: Any) -> str:
-        return json.dumps(
-            {
-                "status": "completed",
-                "results": [
-                    {
-                        "title": "T5.1 deterministic search observation",
-                        "url": "https://doi.org/10.0000/t518",
-                    }
-                ],
-            },
-            ensure_ascii=False,
-        )
+    def _deterministic_provider_payload(
+        query: str,
+        _providers: Any,
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        counters["provider_calls"] += 1
+        result_url = _deterministic_search_url(query)
+        return {
+            "status": "ok",
+            "query": query,
+            "rawResultCount": 1,
+            "rejectedCount": 0,
+            "providers": [
+                {
+                    "provider": "t518_stub",
+                    "status": "ok",
+                    "resultCount": 1,
+                }
+            ],
+            "results": [
+                {
+                    "provider": "t518_stub",
+                    "title": "T5.1 deterministic search observation",
+                    "url": result_url,
+                    "sourceType": "paper",
+                }
+            ],
+        }
 
     monkeypatch.setattr(invocation, "invoke_llm_outcome", _invoke)
     monkeypatch.setattr(invocation, "run_streaming_llm_outcome", _stream)
     # Agent imports the helpers by name at module load time.
     import agent as agent_module
-    import tools.Key_Tools as key_tools_module
+    from tools import research_search_backends
 
     monkeypatch.setattr(agent_module, "invoke_llm_outcome", _invoke)
     monkeypatch.setattr(agent_module, "run_streaming_llm_outcome", _stream)
     monkeypatch.setattr(
-        key_tools_module, "_batch_web_search_impl", _deterministic_search
+        research_search_backends,
+        "collect_provider_results",
+        _deterministic_provider_payload,
     )
     monkeypatch.setattr(
         "core.web.services.session.tool_approvals.authorize_or_wait",
@@ -199,6 +218,11 @@ def _outcome_for_messages(
         str(getattr(context, "session_id", "") or "")
     )
     if binding is not None and not _stage_already_writeback_completed(binding):
+        assigned_queries = (
+            _assigned_queries_for_binding(binding)
+            if str(binding.get("stageId") or "").strip().lower() == "finding"
+            else []
+        )
         calls = [
             CanonicalToolCall(
                 identity=identity,
@@ -214,6 +238,8 @@ def _outcome_for_messages(
             )
         ]
         if str(binding.get("stageId") or "").strip().lower() == "finding":
+            if not assigned_queries:
+                raise RuntimeError("finding stub requires canonical assigned queries")
             calls.append(
                 CanonicalToolCall(
                     identity=identity,
@@ -221,12 +247,8 @@ def _outcome_for_messages(
                     name="batch_web_search_tool",
                     arguments={
                         "queries": json.dumps(
-                            [
-                                "spike coding mechanism",
-                                "neural coding independent baseline",
-                                "spike coding limitation null result",
-                                "spike coding falsification",
-                            ]
+                            [item["query"] for item in assigned_queries],
+                            ensure_ascii=False,
                         )
                     },
                 )
@@ -236,7 +258,10 @@ def _outcome_for_messages(
                 identity=identity,
                 call_id=f"call-writeback-{binding['taskId']}",
                 name="source_collection_stage_writeback_tool",
-                arguments=_writeback_tool_arguments(binding),
+                arguments=_writeback_tool_arguments(
+                    binding,
+                    assigned_queries=assigned_queries,
+                ),
             )
         )
         return TurnOutcome(
@@ -544,12 +569,79 @@ def _lookup_binding_by_session(session_id: str) -> dict[str, str] | None:
     return None
 
 
-def _writeback_tool_arguments(binding: dict[str, str]) -> dict[str, Any]:
+def _assigned_queries_for_binding(binding: dict[str, str]) -> list[dict[str, str]]:
+    team_id = str(binding.get("teamId") or "").strip()
+    task_id = str(binding.get("taskId") or "").strip()
+    if not team_id or not task_id:
+        return []
+    from core.web.services import data_processing_service
+    from core.web.services import team_workflow_orchestration_service as orch
+
+    task, run_id = orch._find_source_collection_stage_session_task_by_id(
+        team_id,
+        task_id,
+    )
+    if not isinstance(task, dict) or not run_id:
+        return []
+    assignment_ids = {
+        str(item or "").strip()
+        for item in list(task.get("assignmentIds") or [])
+        if str(item or "").strip()
+    }
+    agent_id = str(task.get("agentId") or "").strip()
+    payload = data_processing_service.list_collection_assignments(run_id)
+    assigned_queries: list[dict[str, str]] = []
+    for assignment in list(payload.get("assignments") or []):
+        if not isinstance(assignment, dict):
+            continue
+        assignment_id = str(assignment.get("assignmentId") or "").strip()
+        if assignment_id not in assignment_ids:
+            continue
+        if agent_id and str(assignment.get("agentId") or "").strip() not in {
+            "",
+            agent_id,
+        }:
+            continue
+        scope = (
+            assignment.get("scope")
+            if isinstance(assignment.get("scope"), dict)
+            else {}
+        )
+        for item in list(scope.get("assignedQueries") or []):
+            if not isinstance(item, dict):
+                continue
+            query = str(item.get("query") or "").strip()
+            query_id = str(item.get("queryId") or "").strip()
+            perspective = str(
+                item.get("perspective") or item.get("perspectiveId") or ""
+            ).strip()
+            if query and query_id and perspective:
+                assigned_queries.append(
+                    {
+                        "assignmentId": assignment_id,
+                        "queryId": query_id,
+                        "perspective": perspective,
+                        "query": query,
+                    }
+                )
+    return assigned_queries
+
+
+def _writeback_tool_arguments(
+    binding: dict[str, str],
+    *,
+    assigned_queries: list[dict[str, str]] | None = None,
+) -> dict[str, Any]:
     stage_id = str(binding.get("stageId") or "").strip().lower()
     team_id = str(binding.get("teamId") or "").strip()
     task_id = str(binding.get("taskId") or "").strip()
     run_id = str(binding.get("runId") or "").strip()
-    result = _result_for_stage(stage_id, team_id=team_id, run_id=run_id)
+    result = _result_for_stage(
+        stage_id,
+        team_id=team_id,
+        run_id=run_id,
+        assigned_queries=assigned_queries,
+    )
     return {
         "team_id": team_id,
         "task_id": task_id,
@@ -563,61 +655,48 @@ def _writeback_tool_arguments(binding: dict[str, str]) -> dict[str, Any]:
     }
 
 
-def _result_for_stage(stage_id: str, *, team_id: str, run_id: str) -> dict[str, Any]:
+def _deterministic_search_url(query: str) -> str:
+    digest = hashlib.sha256(str(query or "").encode("utf-8")).hexdigest()[:16]
+    return f"https://example.test/t518/{digest}"
+
+
+def _result_for_stage(
+    stage_id: str,
+    *,
+    team_id: str,
+    run_id: str,
+    assigned_queries: list[dict[str, str]] | None = None,
+) -> dict[str, Any]:
     if stage_id == "finding":
+        queries = list(assigned_queries or [])
         return {
             "candidateLeads": [
                 {
-                    "leadId": "t518-lead-mechanism",
-                    "title": "Spike coding mechanisms in cortical populations",
-                    "locator": "https://doi.org/10.0000/t518-mechanism",
+                    "leadId": f"t518-lead-{index}",
+                    "title": f"T5.1 {item['perspective']} observation",
+                    "locator": _deterministic_search_url(item["query"]),
                     "sourceType": "paper",
-                    "query": "spike train information coding mechanism",
-                    "perspective": "mechanism",
-                    "summary": "Primary mechanism evidence for T5.1 gate.",
-                    "doi": "10.0000/t518-mechanism",
-                },
-                {
-                    "leadId": "t518-lead-baseline",
-                    "title": "Independent baseline for neural coding metrics",
-                    "locator": "https://doi.org/10.0000/t518-baseline",
-                    "sourceType": "paper",
-                    "query": "neural coding independent baseline",
-                    "perspective": "independent_baseline",
-                    "summary": "Baseline evidence for T5.1 gate.",
-                    "doi": "10.0000/t518-baseline",
-                },
-                {
-                    "leadId": "t518-lead-falsification",
-                    "title": "Null-result and limitation cases for spike coding",
-                    "locator": "https://doi.org/10.0000/t518-falsification",
-                    "sourceType": "paper",
-                    "query": "spike coding null result limitation",
-                    "perspective": "falsification",
-                    "summary": "Counter-evidence / limitation candidate for T5.1 gate.",
-                    "doi": "10.0000/t518-falsification",
-                },
+                    "query": item["query"],
+                    "queryId": item["queryId"],
+                    "perspective": item["perspective"],
+                    "summary": (
+                        "Deterministic provider-bound evidence for "
+                        f"{item['perspective']}."
+                    ),
+                }
+                for index, item in enumerate(queries, start=1)
             ],
             "invalidSources": [],
             "searchTrace": [
                 {
-                    "perspective": "mechanism",
-                    "query": "spike train information coding mechanism",
+                    "assignmentId": item["assignmentId"],
+                    "queryId": item["queryId"],
+                    "perspective": item["perspective"],
+                    "query": item["query"],
                     "status": "found",
-                    "resultRefs": ["https://doi.org/10.0000/t518-mechanism"],
-                },
-                {
-                    "perspective": "independent_baseline",
-                    "query": "neural coding independent baseline",
-                    "status": "found",
-                    "resultRefs": ["https://doi.org/10.0000/t518-baseline"],
-                },
-                {
-                    "perspective": "falsification",
-                    "query": "spike coding null result limitation",
-                    "status": "found",
-                    "resultRefs": ["https://doi.org/10.0000/t518-falsification"],
-                },
+                    "resultRefs": [_deterministic_search_url(item["query"])],
+                }
+                for item in queries
             ],
         }
 

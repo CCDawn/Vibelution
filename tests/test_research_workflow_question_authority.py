@@ -584,12 +584,90 @@ def _create_research_team(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
     assert team["teamId"] == "research-team"
 
 
+def _publish_phase_one_knowledge_package(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Materialize the real hash-bound approval and Team Knowledge receipt."""
+
+    from core.web.services import agent_directory_service, team_knowledge_service
+    from core.web.services.team_workflow import (
+        challenge_phase_boundary,
+        challenge_question_runs,
+    )
+    from core.web.services.team_workflow.challenge_phase_boundary import (
+        approve_current_phase_one_manifest,
+    )
+    from core.web.services.team_workflow.challenge_phase_knowledge_publisher import (
+        load_published_phase_one_knowledge_package,
+        publish_approved_phase_one_to_team_knowledge,
+    )
+
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_knowledge_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        challenge_phase_boundary,
+        "resolve_team_program_root",
+        lambda _team_id: tmp_path / "program",
+    )
+    proposer = agent_directory_service.create_agent_instance(
+        display_name="Question Authority Research Agent",
+        direct_session_id="session-question-authority-research",
+    )
+    reviewer = agent_directory_service.create_agent_instance(
+        display_name="Question Authority Knowledge Manager",
+        direct_session_id="session-question-authority-knowledge",
+    )
+    team_service.update_team(
+        "research-team",
+        members=[
+            {"agentId": proposer["agentId"], "role": "lead"},
+            {
+                "agentId": reviewer["agentId"],
+                "role": "challenge_cup_knowledge_manager",
+            },
+        ],
+    )
+    results = [
+        {
+            "questionId": f"SCI-{index:03d}",
+            "runId": f"run-{index:03d}",
+            "outputSha256": f"sha-{index:03d}",
+            "artifactPath": f"artifacts/SCI-{index:03d}.json",
+        }
+        for index in range(1, 126)
+    ]
+    summary = {
+        "completedQuestionIds": [item["questionId"] for item in results],
+        "completedQuestionResults": results,
+    }
+    approve_current_phase_one_manifest(
+        "research-team",
+        operator_id="operator-question-authority",
+        question_run_summary=summary,
+    )
+    publish_approved_phase_one_to_team_knowledge(
+        "research-team",
+        question_run_summary=summary,
+    )
+    monkeypatch.setattr(
+        challenge_question_runs,
+        "challenge_question_run_summary",
+        lambda _team_id: deepcopy(summary),
+    )
+    assert load_published_phase_one_knowledge_package(
+        "research-team",
+        question_run_summary=summary,
+    )["datasetRefs"]
+
+
 def test_launch_options_and_frozen_input_derive_from_one_approved_question(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _create_research_team(tmp_path, monkeypatch)
     _patch_approved_question(monkeypatch)
+    _publish_phase_one_knowledge_package(tmp_path, monkeypatch)
 
     options = question_launch.list_question_launch_options("research-team")
     run_input = question_launch.build_question_run_input(
@@ -615,9 +693,15 @@ def test_launch_options_and_frozen_input_derive_from_one_approved_question(
     }
     assert run_input["projectId"] == "challenge-sci-096"
     assert run_input["researchBriefHash"] == "a" * 64
-    assert run_input["datasetRefs"] == [
-        "challenge-question-artifact://science-125-questions-2021/SCI-096/stage1-sci-096-v3/" + "a" * 64
-    ]
+    assert run_input["datasetRefs"][0] == (
+        "challenge-question-artifact://science-125-questions-2021/SCI-096/"
+        "stage1-sci-096-v3/" + "a" * 64
+    )
+    assert len(run_input["datasetRefs"]) == 2
+    assert run_input["datasetRefs"][1].startswith("team-knowledge://")
+    assert run_input["constraintSnapshot"]["phaseOneKnowledgePackage"][
+        "datasetRefs"
+    ] == run_input["datasetRefs"][1:]
     assert run_input["researchObjectiveContract"]["question"] == "How does the brain retrieve memories?"
     assert run_input["budgetPolicy"]["stageBudgets"]["execution_iteration"]["tokens"] == 250000
     assert run_input["modelRoutingPolicy"]["requiredModelPolicy"]["family"] == "qwen"
@@ -643,6 +727,7 @@ def test_new_question_input_freezes_typed_research_and_catalog_scopes(
 ) -> None:
     _create_research_team(tmp_path, monkeypatch)
     _patch_approved_question(monkeypatch)
+    _publish_phase_one_knowledge_package(tmp_path, monkeypatch)
 
     run_input = question_launch.build_question_run_input(
         "research-team",
@@ -680,6 +765,7 @@ def test_typed_scope_snapshot_rejects_tampering_and_partial_authority(
 ) -> None:
     _create_research_team(tmp_path, monkeypatch)
     _patch_approved_question(monkeypatch)
+    _publish_phase_one_knowledge_package(tmp_path, monkeypatch)
     run_input = question_launch.build_question_run_input(
         "research-team",
         question_id="SCI-096",
@@ -746,35 +832,38 @@ def test_typed_scope_snapshot_rejects_tampering_and_partial_authority(
         WorkflowRunInputSnapshot.from_dict(partial)
 
 
-def test_legacy_run_input_snapshot_without_typed_scopes_remains_readable() -> None:
+def test_run_input_snapshot_requires_current_typed_scopes() -> None:
     payload = {
-        "teamId": "legacy-team",
-        "projectId": "legacy-project",
-        "questionId": "legacy-question",
-        "workflowVersionId": "legacy-workflow",
+        "teamId": "research-team",
+        "projectId": "challenge-sci-096",
+        "questionId": "SCI-096",
+        "workflowVersionId": "wv-current",
         "researchBriefHash": "a" * 64,
-        "datasetRefs": ["fixture://legacy"],
+        "datasetRefs": ["fixture://current"],
         "metricContract": {"primary": "coverage"},
         "constraintSnapshot": {},
-        "competitionRuleRef": "legacy-rule",
-        "competitionRuleVersion": "1",
-        "trackAndRubricSnapshot": {"track": "legacy"},
-        "researchObjectiveContract": {"question": "legacy"},
+        "competitionRuleRef": "challenge-cup-rule",
+        "competitionRuleVersion": "3.0.0",
+        "trackAndRubricSnapshot": {"track": "challenge-cup"},
+        "researchObjectiveContract": {"question": "current"},
         "sourcePolicy": {"minimumPrimarySources": 1},
         "budgetPolicy": {"tokens": 1},
         "stopPolicy": {"stopOnBudgetExhaustion": True},
-        "environmentSnapshotRef": "fixture://legacy-env",
+        "environmentSnapshotRef": "fixture://current-env",
         "modelRoutingPolicy": {"reasoning": "fixture"},
         "evaluationContract": {"minimumClaimEvidenceCoverage": 0.0},
-        "agentBindingSnapshot": [{"nodeId": "source_finding", "agentId": "legacy-agent"}],
-        "createdBy": "legacy",
-        "createdAt": "2026-08-22T00:00:00Z",
+        "agentBindingSnapshot": [
+            {"nodeId": "problem_understanding", "agentId": "agent-current"}
+        ],
+        "createdBy": "operator",
+        "createdAt": "2026-09-05T00:00:00Z",
     }
-    snapshot = WorkflowRunInputSnapshot.from_dict(payload)
-    assert snapshot.researchScopeEnvelope == {}
-    assert snapshot.catalogScope == {}
-    assert "researchScopeEnvelope" not in snapshot.to_dict()
-    assert "catalogScope" not in snapshot.to_dict()
+
+    with pytest.raises(
+        ContractValidationError,
+        match="researchScopeEnvelope and catalogScope are required",
+    ):
+        WorkflowRunInputSnapshot.from_dict(payload)
 
 
 def test_question_launch_rejects_unknown_questions_and_invalid_limits(
@@ -838,9 +927,9 @@ def test_attach_question_run_checkpoints_uses_latest_run() -> None:
     assert attached[0]["checkpoint"]["runId"] == "run-new"
     assert attached[0]["checkpoint"]["currentNodeId"] == "protocol_design"
     assert attached[0]["checkpoint"]["currentNodeLabel"] == "协议设计"
-    assert attached[0]["checkpoint"]["completedCount"] == 7
+    assert attached[0]["checkpoint"]["completedCount"] == 2
     assert attached[0]["checkpoint"]["resumable"] is True
-    assert attached[0]["checkpoint"]["totalSteps"] == 17
+    assert attached[0]["checkpoint"]["totalSteps"] == 12
     assert attached[1]["checkpoint"] is None
 
     finished = question_launch.attach_question_run_checkpoints(
@@ -857,7 +946,7 @@ def test_attach_question_run_checkpoints_uses_latest_run() -> None:
     )
     assert finished[0]["checkpoint"]["runId"] == "run-iso"
     assert finished[0]["checkpoint"]["resumable"] is False
-    assert finished[0]["checkpoint"]["completedCount"] == 17
+    assert finished[0]["checkpoint"]["completedCount"] == 12
 
 
 def test_attach_question_run_checkpoints_keeps_prior_success() -> None:
@@ -876,7 +965,7 @@ def test_attach_question_run_checkpoints_keeps_prior_success() -> None:
                 "runId": "run-retry",
                 "questionId": "SCI-003",
                 "status": "failed",
-                "runtimeCurrentNodeIds": ["source_finding"],
+                "runtimeCurrentNodeIds": ["problem_understanding"],
                 "updatedAtMs": 9,
             },
         ],
@@ -884,7 +973,7 @@ def test_attach_question_run_checkpoints_keeps_prior_success() -> None:
     checkpoint = attached[0]["checkpoint"]
     assert checkpoint["runId"] == "run-won"
     assert checkpoint["status"] == "succeeded"
-    assert checkpoint["completedCount"] == 17
+    assert checkpoint["completedCount"] == 12
     assert checkpoint["resumable"] is False
 
     # An in-flight retry still surfaces as running/resumable.
@@ -928,7 +1017,7 @@ def test_attach_question_run_checkpoints_keeps_prior_success() -> None:
                 "runId": "run-shallow",
                 "questionId": "SCI-003",
                 "status": "failed",
-                "runtimeCurrentNodeIds": ["source_finding"],
+                "runtimeCurrentNodeIds": ["problem_understanding"],
                 "updatedAtMs": 9,
             },
         ],
@@ -975,7 +1064,7 @@ def test_launch_options_overlay_live_checkpoints(
                         "runId": "run-live",
                         "questionId": "SCI-001",
                         "status": "running",
-                        "runtimeCurrentNodeIds": ["source_finding"],
+                        "runtimeCurrentNodeIds": ["problem_understanding"],
                         "updatedAtMs": 42,
                     }
                 ]
@@ -993,7 +1082,7 @@ def test_launch_options_overlay_live_checkpoints(
     assert detail_calls == []
     assert by_id["SCI-096"]["source"] == "catalog"
     assert by_id["SCI-001"]["checkpoint"]["runId"] == "run-live"
-    assert by_id["SCI-001"]["checkpoint"]["currentNodeLabel"] == "资料寻找"
+    assert by_id["SCI-001"]["checkpoint"]["currentNodeLabel"] == "问题理解"
     assert by_id["SCI-001"]["checkpoint"]["resumable"] is True
     assert by_id["SCI-002"]["checkpoint"] is None
 
@@ -1088,6 +1177,7 @@ def test_create_endpoint_forbids_client_authored_contract_fields(
     request.addfinalizer(formal_runtime.close)
     canonical_input = question_launch.build_question_run_input
     _patch_approved_question(monkeypatch)
+    _publish_phase_one_knowledge_package(tmp_path, monkeypatch)
     _patch_team_exists(monkeypatch)
     monkeypatch.setattr(
         runtime_service_module,

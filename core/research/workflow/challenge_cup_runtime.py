@@ -40,7 +40,6 @@ from core.research.workflow.iteration_decisions import (
     route_target_for_decision,
 )
 from core.research.workflow.models import ActorKind
-from core.research.workflow.stage_one_completion import route_after_stage_one_closure
 
 # Durable checkpoint schema identity for the formal Challenge Cup graph.  A
 # checkpoint whose stored version differs from this constant is discarded, not
@@ -49,10 +48,9 @@ from core.research.workflow.stage_one_completion import route_after_stage_one_cl
 # every channel-set change so stale schemas fail closed instead of silently
 # dropping writes (langgraph discards input keys that are not declared
 # channels).
-# v3: renamed the last-value ``artifact_refs`` channel to
-# ``latest_node_artifact_refs`` to make its overwrite-only semantics
-# explicit (cumulative lineage stays on the run record).
-CHALLENGE_CUP_CHECKPOINT_VERSION = 3
+# v4: removed the obsolete stage-one terminal channels.  The canonical graph
+# always continues from ``hypothesis_design`` to ``protocol_design``.
+CHALLENGE_CUP_CHECKPOINT_VERSION = 4
 
 
 def merge_node_attempts(
@@ -102,12 +100,6 @@ class ChallengeCupGraphState(TypedDict, total=False):
     scope_binding_required: bool
     scope_binding_status: str
     scope_binding_problem: dict[str, Any]
-    stage_one_completion_state: str
-    # Terminal closeout outcome for a server-authorized stage-one acceptance.
-    # Last-value channel, declared so checkpoint writes (the enqueued resume
-    # and the direct marker write) persist the outcome instead of silently
-    # dropping it as undeclared input.
-    stage_one_closeout: dict[str, Any]
     # Declared last-value channels.  Fork/state patches write these keys and
     # they must survive into the persisted checkpoint instead of being dropped
     # as undeclared input.
@@ -125,8 +117,8 @@ class GraphDispatch:
     node_id: str
     attempt: int
     dispatch_kind: Literal["start", "resume_action", "resume_human"]
+    workflow_version_id: str
     input_snapshot_hash: str = ""
-    workflow_version_id: str = ""
     team_id: str = ""
     binding_snapshot_id: str | None = None
     budget_policy_hash: str = ""
@@ -142,6 +134,10 @@ class GraphDispatch:
     business_checkpoint_ref: Any = None
     participant_binding_refs: tuple[Any, ...] = ()
     scope_binding_required: bool = False
+
+    def __post_init__(self) -> None:
+        if not str(self.workflow_version_id or "").strip():
+            raise ValueError("workflowVersionId is required for graph dispatch")
 
     @classmethod
     def from_payload(cls, payload: Mapping[str, Any]) -> GraphDispatch:
@@ -433,7 +429,7 @@ def build_pending_action(state: ChallengeCupGraphState, node_id: str) -> Pending
     )
 
 
-def _actor_kind_for(node_id: str, workflow_version_id: str = "") -> ActorKind:
+def _actor_kind_for(node_id: str, workflow_version_id: str) -> ActorKind:
     definition = resolve_definition_for_version(workflow_version_id)
     for node in definition.nodes:
         if node.nodeId == node_id:
@@ -442,34 +438,30 @@ def _actor_kind_for(node_id: str, workflow_version_id: str = "") -> ActorKind:
 
 
 def resolve_definition_for_version(
-    workflow_version_id: str = "",
+    workflow_version_id: str,
     *,
     definition: Any = None,
 ) -> Any:
     """Resolve the pinned definition for a run-facing version id.
 
-    Empty version ids keep the legacy behavior: compile the current main
-    definition (or the explicitly provided one).  Registered version ids
-    (sideflow, main-flow 3.0.0, snapshot-pinned versions) resolve through
-    the definition registry; an ambiguous id still fails closed.  A version
-    id unknown to the registry can only come from runs created before the
-    registry existed (or synthetic test ids) — those keep the historical
-    behavior of being driven by the current graph; checkpoint-pinning
-    callers remain fail-closed through ``resolve_definition_for_run_record``.
+    An explicitly supplied definition is used while constructing a new graph.
+    Otherwise the run-facing version id must resolve through the definition
+    registry; empty, unknown, and ambiguous ids fail closed.
     """
     if definition is not None:
         return definition
     if not str(workflow_version_id or "").strip():
-        return build_challenge_cup_workflow_definition()
+        from core.research.workflow.definition_registry import (
+            UnknownWorkflowDefinitionVersion,
+        )
+
+        raise UnknownWorkflowDefinitionVersion(
+            "workflow definition version id is required for runtime graph resolution"
+        )
     from core.research.workflow.definition_registry import (
-        UnknownWorkflowDefinitionVersion,
         resolve_definition_by_version_id,
     )
-
-    try:
-        return resolve_definition_by_version_id(workflow_version_id)
-    except UnknownWorkflowDefinitionVersion:
-        return build_challenge_cup_workflow_definition()
+    return resolve_definition_by_version_id(workflow_version_id)
 
 
 def _action_kind_for(actor_kind: ActorKind, node_id: str) -> str:
@@ -480,12 +472,12 @@ def _action_kind_for(actor_kind: ActorKind, node_id: str) -> str:
     return f"human_task:{node_id}"
 
 
-def _node_order(workflow_version_id: str = "") -> list[str]:
+def _node_order(workflow_version_id: str) -> list[str]:
     definition = resolve_definition_for_version(workflow_version_id)
     return [node.nodeId for node in definition.nodes]
 
 
-def _fork_predecessor_for(node_id: str, workflow_version_id: str = "") -> str | None:
+def _fork_predecessor_for(node_id: str, workflow_version_id: str) -> str | None:
     """Unique static predecessor used as ``as_node`` when forking a checkpoint.
 
     A fresh thread's bare ``update_state`` only schedules the graph entry
@@ -507,7 +499,7 @@ def _fork_predecessor_for(node_id: str, workflow_version_id: str = "") -> str | 
     return None
 
 
-def _retry_predecessor_for(node_id: str, workflow_version_id: str = "") -> str | None:
+def _retry_predecessor_for(node_id: str, workflow_version_id: str) -> str | None:
     """Return the graph source that schedules ``node_id`` on a retry.
 
     ``graph.invoke(Command(goto=...))`` is a valid LangGraph input shape, but
@@ -609,20 +601,16 @@ def route_after_version_governance(
 
 
 def _route_after_linear(source: str, target: str):
-    stage_one_route = route_after_stage_one_closure(target)
-
     def route(state: ChallengeCupGraphState) -> Literal["__end__"] | str:
         if state.get("blocked_outcome"):
             return END  # type: ignore[return-value]
-        if source == "hypothesis_design":
-            return stage_one_route(state)
         return target
 
     route.__name__ = f"route_after_{source}"
     return route
 
 
-def successor_map(workflow_version_id: str = "") -> dict[str, tuple[str, ...]]:
+def successor_map(workflow_version_id: str) -> dict[str, tuple[str, ...]]:
     """Deterministic successor set per node (drives worker attempt injection)."""
     definition = resolve_definition_for_version(workflow_version_id)
     collected: dict[str, list[str]] = {node_id: [] for node_id in _node_order(workflow_version_id)}
@@ -638,11 +626,11 @@ def successor_map(workflow_version_id: str = "") -> dict[str, tuple[str, ...]]:
 def build_formal_graph(definition: Any = None) -> StateGraph:
     """Build the formal runtime graph for one pinned workflow definition.
 
-    ``definition=None`` keeps the historical main-definition behavior; the
-    coordinator passes the definition resolved from the dispatch's
-    workflowVersionId so sideflow / 3.0.0 threads compile their own topology.
+    The coordinator passes the definition resolved from the dispatch's
+    workflowVersionId. Direct construction defaults to the one current main
+    definition and never resolves an unpinned run.
     """
-    resolved = resolve_definition_for_version("", definition=definition)
+    resolved = definition or build_challenge_cup_workflow_definition()
     order = [node.nodeId for node in resolved.nodes]
     successors = successor_map_for_definition(resolved)
     builder: StateGraph = StateGraph(ChallengeCupGraphState)
@@ -764,7 +752,7 @@ class ChallengeCupGraphCoordinator:
         self._checkpoint_path = Path(checkpoint_path)
         self._checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
 
-    def _compile(self, workflow_version_id: str = ""):
+    def _compile(self, workflow_version_id: str):
         from contextlib import ExitStack
 
         from core.research.workflow.checkpoint_store import open_sqlite_checkpointer
@@ -1029,7 +1017,7 @@ class ChallengeCupGraphCoordinator:
             stack.close()
 
     def snapshot(
-        self, run_id: str, workflow_version_id: str = ""
+        self, run_id: str, workflow_version_id: str
     ) -> Mapping[str, Any]:
         graph, stack = self._compile(workflow_version_id)
         try:
@@ -1057,7 +1045,7 @@ class ChallengeCupGraphCoordinator:
     def apply_state_update(
         self,
         run_id: str,
-        workflow_version_id: str = "",
+        workflow_version_id: str,
         update: Mapping[str, Any] | None = None,
     ) -> str:
         """Write state values into the thread's current checkpoint (no invoke).
@@ -1084,6 +1072,7 @@ class ChallengeCupGraphCoordinator:
     def fork_from_checkpoint(
         self,
         *,
+        workflow_version_id: str,
         source_thread_id: str,
         source_checkpoint_id: str,
         child_thread_id: str,
@@ -1094,10 +1083,10 @@ class ChallengeCupGraphCoordinator:
 
         Checkpoint forking is not business advancement; the child becomes
         runnable only after the Ledger transaction commits (spec 8.4).
-        Forks exist only on the main flow today, so the graph compiles from
-        the current main definition.
+        The parent run's pinned definition compiles both source and child
+        checkpoint state.
         """
-        graph, stack = self._compile()
+        graph, stack = self._compile(workflow_version_id)
         try:
             child_config = self._config(child_thread_id)
             existing = graph.get_state(child_config)
@@ -1138,7 +1127,9 @@ class ChallengeCupGraphCoordinator:
                 )
                 inherited["scope_binding_required"] = True
             _validate_state_scope_binding(inherited)
-            predecessor = _fork_predecessor_for(resume_node_id)
+            predecessor = _fork_predecessor_for(
+                resume_node_id, workflow_version_id
+            )
             if predecessor is not None:
                 # A leftover failure marker would route the linear edge to END.
                 inherited.pop("blocked_outcome", None)

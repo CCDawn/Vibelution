@@ -62,9 +62,6 @@ ARTIFACT_AUTHORITY: dict[str, ArtifactAuthoritySpec] = {
     "competition_alignment": ArtifactAuthoritySpec(
         "competition_alignment", "workflow_system"
     ),
-    "stage_one_completion_manifest": ArtifactAuthoritySpec(
-        "stage_one_completion_manifest", "workflow_system"
-    ),
     "protocol_draft": ArtifactAuthoritySpec("protocol_draft", "experiment"),
     "protocol_review_report": ArtifactAuthoritySpec("protocol_review_report", "experiment"),
     "frozen_protocol": ArtifactAuthoritySpec("frozen_protocol", "experiment"),
@@ -122,12 +119,6 @@ def build_canonical_ref(
 def parse_canonical_ref(canonical_ref: str) -> dict[str, str] | None:
     text = str(canonical_ref or "").strip()
     if "://" not in text:
-        # Legacy short form kind:prefix — not addressable without store lookup.
-        if ":" in text:
-            kind, identity = text.split(":", 1)
-            if resolve_artifact_authority(kind) is None:
-                return None
-            return {"kind": kind, "identity": identity, "legacy": "1"}
         return None
     kind, rest = text.split("://", 1)
     if resolve_artifact_authority(kind) is None:
@@ -517,7 +508,6 @@ def load_scoped_artifact_payload(
         "research_plan",
         "stage1_research_plan",
         "competition_alignment",
-        "stage_one_completion_manifest",
         "protocol_draft",
         "protocol_review_report",
         "iteration_decision",
@@ -660,8 +650,6 @@ def read_domain_artifact(
     _ = root  # parallel file store is forbidden; root is ignored
     parsed = parse_canonical_ref(canonical_ref)
     if parsed is None:
-        return None
-    if parsed.get("legacy") == "1":
         return None
     kind = parsed["kind"]
     team_id = parsed["teamId"]

@@ -18,7 +18,6 @@ import {
 import {
   buildKnowledgeSideflowCanvasRegion,
   composeKnowledgeSideflowGraph,
-  definitionNeedsSideflowRegion,
   isKnowledgeSideflowCanvasNode,
   knowledgeSideflowRelationEdge,
 } from "./knowledgeSideflowCanvasRegion";
@@ -43,12 +42,6 @@ import {
   definitionToCanvasGraph,
   projectionToCanvasGraph,
 } from "./researchProcessGraphModel";
-import {
-  buildStageTwoInactiveCanvasRegion,
-  composeStageTwoInactiveGraph,
-  definitionNeedsStageTwoInactiveRegion,
-  isStageTwoInactiveCanvasNode,
-} from "./stageTwoCanvasRegion";
 import {
   RESEARCH_PROCESS_INSPECTOR_CLOSED,
   shouldShowResearchProcessInspector,
@@ -190,25 +183,10 @@ export function ResearchProcessWorkspace({
     if (!deepLink.startsWith("/chat?")) return;
     navigate(deepLink);
   }, [navigate]);
-  // Stage-two truncated runs: protocol/experiment nodes are a grayed display
-  // region, not runtime nodes, so node detail never fetches for them. Legacy
-  // 17-node runs keep real stage-two nodes and their normal detail path.
-  const stageTwoInactiveRegion = useMemo(
-    () => definitionNeedsStageTwoInactiveRegion(
-      runState.projection?.definition as { nodes: Array<{ nodeId: string }> } | undefined,
-    )
-      ? buildStageTwoInactiveCanvasRegion()
-      : null,
-    [runState.projection],
-  );
-  const nodeDetailTargetNodeId = stageTwoInactiveRegion
-      && isStageTwoInactiveCanvasNode(location.selectedNodeId)
-    ? null
-    : location.selectedNodeId;
   const nodeDetail = useNodeDetailState(
     teamId,
     location.runId,
-    nodeDetailTargetNodeId,
+    location.selectedNodeId,
     runState.run?.runVersion ?? null,
   );
   // Scalar selection input for the sideflow relation edge: identity-stable
@@ -265,15 +243,9 @@ export function ResearchProcessWorkspace({
         meetingsForHypothesisFirstQuestion(hypothesisFirstChain.meetings, chainQuestionId),
       ),
     });
-    // The fixed five-node knowledge sideflow only composes for runs whose
-    // pinned definition has no in-graph knowledge chain (main 3.0.0); 2.1.0
-    // runs already draw those nodes in-graph and their badges come from the
-    // snapshot aggregates instead.
-    const sideflowRegion = definitionNeedsSideflowRegion(
-      runState.projection.definition as { nodes: Array<{ nodeId: string }> },
-    )
-      ? buildKnowledgeSideflowCanvasRegion(invocationBadges ?? null)
-      : null;
+    // The fixed five-node knowledge sideflow is composed beside the canonical
+    // main definition; invocation badges come from snapshot aggregates.
+    const sideflowRegion = buildKnowledgeSideflowCanvasRegion(invocationBadges ?? null);
     // The only main↔sideflow relation is a temporary line drawn while a
     // ksf_ card is selected; the relation anchors on the invocation's own
     // parentNodeId, never a fixed downstream node. Endpoint validation
@@ -281,12 +253,7 @@ export function ResearchProcessWorkspace({
     const relationEdge = sideflowRegion
       ? knowledgeSideflowRelationEdge(invocationBadges ?? null, selectedKsfNodeId)
       : null;
-    // Truncated stage-one runs append the grayed "研究计划与实验 · 未激活"
-    // group so the two-stage split stays visible without offering actions.
-    return composeStageTwoInactiveGraph(
-      composeKnowledgeSideflowGraph(withHypothesisFirst, sideflowRegion, relationEdge),
-      stageTwoInactiveRegion,
-    );
+    return composeKnowledgeSideflowGraph(withHypothesisFirst, sideflowRegion, relationEdge);
   }, [
     catalog.effectiveBindings,
     location.runId,
@@ -300,7 +267,6 @@ export function ResearchProcessWorkspace({
     hypothesisFirstChain.selection,
     hypothesisFirstChain.stateV2,
     chainQuestionId,
-    stageTwoInactiveRegion,
   ]);
 
   const experimentChainSummary = hypothesisFirstChain.chainState
@@ -834,7 +800,6 @@ export function ResearchProcessWorkspace({
         busy: commandBusy,
         invocationBadges: runState.snapshot?.invocationBadges ?? null,
         snapshotOffers: runState.snapshot?.commandOffers ?? [],
-        definitionResolution: runState.snapshot?.definitionResolution,
       }}
       actions={{
         replaceParams: replaceParamsForInspector,
@@ -981,7 +946,6 @@ export function ResearchProcessWorkspace({
         inspector={archiveOpen ? null : (
           <ResearchCurrentTaskInspector
             context={workflowContext}
-            stageOne={runState.snapshot?.stageOne}
             footer={visibleFormalPrimaryAction ? (
               <VButton
                 type="button"

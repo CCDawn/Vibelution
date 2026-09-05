@@ -9,6 +9,7 @@
  * contract test bans the retired synonyms in the owning source files.
  */
 export const RESEARCH_STAGE_TERMS = {
+  problem_understanding: { zh: "问题理解", en: "Problem understanding" },
   knowledge_collection: { zh: "资料搜集", en: "Knowledge collection" },
   experiment_design: { zh: "实验设计", en: "Experiment design" },
   execution_iteration: { zh: "执行迭代", en: "Execution & iteration" },

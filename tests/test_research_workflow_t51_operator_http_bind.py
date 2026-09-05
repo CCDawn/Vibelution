@@ -26,7 +26,7 @@ from core.web.services.team_workflow.research_runtime.store import WorkflowRunSt
 
 def _baseline_run_input() -> dict:
     fixture_path = (
-        Path(__file__).parent / "fixtures" / "research_workflow_v21_baseline_case.json"
+        Path(__file__).parent / "fixtures" / "research_workflow_v3_baseline_case.json"
     )
     return json.loads(fixture_path.read_text(encoding="utf-8"))["runInput"]
 

@@ -1,4 +1,5 @@
 export const queryKeys = {
+  challengePhaseBoundary: (teamId: string) => ["teams", teamId, "challenge-phase-boundary"] as const,
   runtimeSummary: () => ["runtime", "summary"] as const,
   codeFreshness: () => ["runtime", "code-freshness"] as const,
   usageSummary: (scope = "global", sessionId = "", agentId = "", provider = "", model = "") =>

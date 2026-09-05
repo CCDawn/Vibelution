@@ -109,6 +109,12 @@ def compact_source_collection_stage_task_context(context: dict[str, Any]) -> dic
         compact["task"] = compact_source_collection_context_task(context.get("task") if isinstance(context.get("task"), dict) else {})
         compact["unassessedCandidateIds"] = normalize_text_list(context.get("unassessedCandidateIds"), max_items=80, max_length=160)
         compact["allUnassessedCandidateCount"] = source_collection_count(context.get("allUnassessedCandidateCount"))
+        if finding_stage:
+            compact["assignments"] = [
+                normalize_metadata(item)
+                for item in list(context.get("assignments") or [])[:12]
+                if isinstance(item, dict)
+            ]
     if records:
         compact["records"] = records
     if not minimal_mode:

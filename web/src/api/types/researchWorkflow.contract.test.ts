@@ -11,10 +11,19 @@ import {
 const typeSource = readFileSync(resolve(import.meta.dirname, "researchWorkflow.ts"), "utf8");
 
 describe("researchWorkflow TS domain contract (Task 1)", () => {
-  it("exposes seventeen fixed challenge-cup nodes", () => {
-    expect(CHALLENGE_CUP_NODE_IDS).toHaveLength(17);
+  it("exposes the twelve-node canonical challenge-cup main flow", () => {
+    expect(CHALLENGE_CUP_NODE_IDS).toHaveLength(12);
     expect(CHALLENGE_CUP_NODE_IDS[0]).toBe("problem_understanding");
-    expect(CHALLENGE_CUP_NODE_IDS[16]).toBe("result_package");
+    expect(CHALLENGE_CUP_NODE_IDS[11]).toBe("result_package");
+    expect(CHALLENGE_CUP_NODE_IDS).not.toEqual(
+      expect.arrayContaining([
+        "source_finding",
+        "source_extraction",
+        "evidence_relations",
+        "knowledge_ingestion",
+        "knowledge_handoff",
+      ]),
+    );
     expect(CHALLENGE_CUP_WORKFLOW_ID).toBe("challenge-cup-research");
   });
 

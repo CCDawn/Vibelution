@@ -477,9 +477,21 @@ class RealDomainReadinessContext:
     def adapter_registered(self, node_id: str) -> bool:
         if self._registry is None:
             return True
-        definition = build_challenge_cup_workflow_definition()
+        from core.research.workflow.knowledge_sideflow_definition import (
+            build_knowledge_sideflow_workflow_definition,
+        )
+
         node = next(
-            (n for n in definition.nodes if n.nodeId == node_id), None
+            (
+                node
+                for definition in (
+                    build_challenge_cup_workflow_definition(),
+                    build_knowledge_sideflow_workflow_definition(),
+                )
+                for node in definition.nodes
+                if node.nodeId == node_id
+            ),
+            None,
         )
         if node is None:
             return False

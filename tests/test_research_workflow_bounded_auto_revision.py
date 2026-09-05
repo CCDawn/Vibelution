@@ -33,6 +33,7 @@ from typing import Any
 
 import pytest
 
+from core.research.competition.result_set import CatalogScope
 from core.research.workflow.bindings import AgentBindingLayers
 from core.research.workflow.contracts import (
     DEFAULT_RETRY_TAXONOMY,
@@ -43,6 +44,10 @@ from core.research.workflow.contracts.automation_policy import (
 )
 from core.research.workflow.contracts.evolution_lineage import (
     REVISION_EXHAUSTED_EXCEPTION,
+)
+from core.research.workflow.contracts.research_scope import (
+    scope_hash_for,
+    scope_locators_for,
 )
 from core.research.workflow.definition import CHALLENGE_CUP_WORKFLOW_ID
 from core.web.services.team_workflow import hypothesis_rounds, meeting_rounds
@@ -75,10 +80,36 @@ def _bind_server_operator(tmp_path, monkeypatch):
 
 
 def _input() -> dict[str, Any]:
+    scope_identity = {
+        "program": "challenge-cup",
+        "theme": "bounded-revision",
+        "campaign": "test-iteration",
+        "question": "question-iteration",
+        "branch": "baseline",
+    }
+    scope_hash = scope_hash_for(
+        **scope_identity,
+        workflow=CHALLENGE_CUP_WORKFLOW_ID,
+        agent_id="test-operator",
+        mode="dev",
+    )
     return {
         "teamId": "team-iteration",
         "projectId": "project-iteration",
         "questionId": "question-iteration",
+        "researchScopeEnvelope": {
+            **scope_identity,
+            "workflow": CHALLENGE_CUP_WORKFLOW_ID,
+            "agentId": "test-operator",
+            "mode": "dev",
+            "scopeHash": scope_hash,
+            **scope_locators_for(
+                **scope_identity,
+                agent_id="test-operator",
+                scope_hash=scope_hash,
+            ),
+        },
+        "catalogScope": CatalogScope.from_tracked_resources().to_dict(),
         "researchBriefHash": "1" * 64,
         "datasetRefs": ["fixture://dataset/iteration"],
         "metricContract": {"primary": "score", "direction": "maximize"},
@@ -148,11 +179,7 @@ def _manifest(
 
 
 _PRE_ITERATION_NODES = [
-    "source_finding",
-    "source_extraction",
-    "evidence_relations",
-    "knowledge_ingestion",
-    "knowledge_handoff",
+    "problem_understanding",
     "hypothesis_design",
     "protocol_design",
     "protocol_review",
@@ -588,8 +615,8 @@ def _insert_remediation_continuation(
             "parentRunId": parent_run_id,
             "supersedesRunId": parent_run_id,
             "forkedFromRunId": parent_run_id,
-            "forkedFromNodeId": "source_extraction",
-            "sourceNodeId": "source_extraction",
+            "forkedFromNodeId": "protocol_design",
+            "sourceNodeId": "protocol_design",
             "resolutionKind": "add_budget",
         },
     )

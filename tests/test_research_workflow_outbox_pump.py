@@ -22,7 +22,7 @@ from core.web.services.team_workflow.research_runtime.outbox_pump import (
     WorkflowOutboxPump,
 )
 
-WORKFLOW_VERSION_ID = "challenge-cup-research-v2.1.0"
+WORKFLOW_VERSION_ID = "wv-268aa6e8dea8"
 
 
 class _ClaimRuntime:
@@ -287,8 +287,8 @@ def _input_snapshot(run_id: str, workflow_version_id: str) -> dict[str, Any]:
         "evaluationContract": {},
         "agentBindingSnapshot": [
             {
-                "snapshotId": f"snap:{run_id}:source_finding",
-                "nodeId": "source_finding",
+                "snapshotId": f"snap:{run_id}:problem_understanding",
+                "nodeId": "problem_understanding",
                 "agentId": "agent-real-1",
                 "roleKey": "source_finder",
             }
@@ -401,6 +401,7 @@ def test_parallel_graph_dispatch_keeps_receipt_ownership_per_run(
             release_invoke.wait(timeout=3)
             state = {
                 "run_id": dispatch.run_id,
+                "workflow_version_id": dispatch.workflow_version_id,
                 "active_node_id": dispatch.node_id,
                 "active_attempt": dispatch.attempt,
                 "node_attempts": {dispatch.node_id: dispatch.attempt},
@@ -438,7 +439,7 @@ def test_parallel_graph_dispatch_keeps_receipt_ownership_per_run(
                 run_id=run_id,
                 team_id="research-team",
                 command=WorkflowCommandKind.START_NODE,
-                node_id="source_finding",
+                node_id="problem_understanding",
                 expected_run_version=1,
                 idempotency_key=f"ui:parallel-{index}",
                 payload={},
@@ -462,7 +463,7 @@ def test_parallel_graph_dispatch_keeps_receipt_ownership_per_run(
                 statuses = {str(row[0]) for row in graph_rows}
                 if statuses != {"succeeded"}:
                     return False
-                attempt = runtime.store.latest_attempt(run_id, "source_finding")
+                attempt = runtime.store.latest_attempt(run_id, "problem_understanding")
                 if attempt is None or attempt.status == "starting":
                     return False
             return True
@@ -482,8 +483,8 @@ def test_parallel_graph_dispatch_keeps_receipt_ownership_per_run(
             )
             assert len(attempt_rows) == 1, attempt_rows
             row = attempt_rows[0]
-            assert row[0] == run_id and row[1] == "source_finding"
-            assert row[2] == f"nr-{run_id}-source_finding-a1"
+            assert row[0] == run_id and row[1] == "problem_understanding"
+            assert row[2] == f"nr-{run_id}-problem_understanding-a1"
             adapter_rows = _rows(
                 runtime.store,
                 "SELECT run_id, status FROM outbox_actions "

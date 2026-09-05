@@ -3,11 +3,11 @@
  *
  * Derives the two-stage presentation state (假说生成 / 研究计划与实验) from
  * data the question detail payload already carries — the same authorities the
- * panel already renders (record status + selection human gate). Stage two is
- * never auto-activated server-side (allowPhaseTwoAdvance=false), so the stage
- * projection treats "未激活" as the constant default, not a fetched state.
+ * panel already renders (record status + selection human gate). Phase-two
+ * eligibility comes only from the server's approval/knowledge boundary.
  */
 import type { ChallengeQuestionRunDetailPayload } from "../../../api/types";
+import type { ChallengePhaseBoundaryStatus } from "../../../api/types/challengeCup";
 
 /** Stage one lifecycle: generating until the stage-one acceptance gate passes. */
 export type ChallengeQuestionStageOneStatus = "hypothesis_generating" | "hypothesis_settled";
@@ -15,9 +15,9 @@ export type ChallengeQuestionStageOneStatus = "hypothesis_generating" | "hypothe
 export type ChallengeQuestionStageProjection = {
   /** 假说生成：run 活跃/候选评审中 → generating；stage-one 收门通过 → settled。 */
   stageOne: ChallengeQuestionStageOneStatus;
-  /** 研究计划与实验：恒为未激活（二阶段只能按题显式开启，永不自动激活）。 */
-  stageTwoActive: false;
-  /** 历史/预投影研究计划产物是否存在于本 run 输出（SCI-091 类历史题）。 */
+  /** 研究计划与实验是否已进入可执行阶段。 */
+  stageTwoActive: boolean | null;
+  /** 研究计划产物是否存在于本 run 输出。 */
   hasResearchPlanProposal: boolean;
 };
 
@@ -35,6 +35,7 @@ function stageOneGateApproved(
  */
 export function deriveChallengeQuestionStageProjection(
   detail: Pick<ChallengeQuestionRunDetailPayload, "record" | "output"> | undefined | null,
+  boundary?: Pick<ChallengePhaseBoundaryStatus, "phase2Activated"> | null,
 ): ChallengeQuestionStageProjection {
   const settled = Boolean(
     detail
@@ -49,7 +50,7 @@ export function deriveChallengeQuestionStageProjection(
   );
   return {
     stageOne: settled ? "hypothesis_settled" : "hypothesis_generating",
-    stageTwoActive: false,
+    stageTwoActive: boundary?.phase2Activated ?? null,
     hasResearchPlanProposal,
   };
 }
@@ -65,8 +66,10 @@ export function stageOneStatusCopy(
   return lang === "zh" ? "假说生成中" : "Generating";
 }
 
-/** Chinese/English copy for the constant stage-two state chip. */
-export function stageTwoStatusCopy(lang: "zh" | "en"): string {
+/** Chinese/English copy for the stage-two state chip. */
+export function stageTwoStatusCopy(active: boolean | null, lang: "zh" | "en"): string {
+  if (active === null) return lang === "zh" ? "状态待确认" : "Status unavailable";
+  if (active) return lang === "zh" ? "已解锁" : "Unlocked";
   return lang === "zh" ? "未激活" : "Inactive";
 }
 
@@ -81,9 +84,19 @@ export function stageZoneTitle(
   return lang === "zh" ? "研究计划与实验" : "Research plan & experiment";
 }
 
-/** One-line stage-two activation semantics shown with the inactive zone. */
-export function stageTwoInactiveHint(lang: "zh" | "en"): string {
+/** One-line progression semantics for the plan and experiment zone. */
+export function stageTwoProgressHint(active: boolean | null, lang: "zh" | "en"): string {
+  if (active === null) {
+    return lang === "zh"
+      ? "尚未取得阶段状态；假说审批和已有计划不代表第二阶段已激活。"
+      : "Phase status is unavailable; hypothesis approval and existing plans do not prove activation.";
+  }
+  if (active) {
+    return lang === "zh"
+      ? "审批与知识发布已完成，第二阶段已解锁；实际执行进度以运行记录为准。"
+      : "Approval and knowledge publication are complete; phase two is unlocked. See the run for execution progress.";
+  }
   return lang === "zh"
-    ? "第二阶段未激活，需按题显式开启；以下内容为历史/预投影（proposal only）产物，仅供参考。"
-    : "Stage two is inactive and must be enabled explicitly per question; content below is historical / proposal-only.";
+    ? "第二阶段尚未激活，需完成阶段审批与知识发布；已有计划不代表实验已开始。"
+    : "Phase two requires phase approval and knowledge publication; existing plans do not mean experiments have started.";
 }

@@ -6,6 +6,9 @@ from pathlib import Path
 
 import pytest
 
+from core.research.workflow.knowledge_sideflow_definition import (
+    build_knowledge_sideflow_workflow_definition,
+)
 from core.research.workflow.ledger import RunVersionConflictError
 from core.web.services.team_workflow.research_runtime.command_service import (
     NodeNotReadyError,
@@ -43,7 +46,9 @@ def test_version_conflict_after_concurrent_accept(tmp_path: Path) -> None:
 def test_not_ready_node_rejected_without_side_effects(tmp_path: Path) -> None:
     harness = CommandHarness(tmp_path / "ledger.sqlite3")
     try:
-        harness.seed_run()
+        harness.seed_run(
+            workflow_definition=build_knowledge_sideflow_workflow_definition()
+        )
         # SCI-096 无候选 -> source_extraction 不可执行。
         harness.context._candidate_stats = None
         with pytest.raises(NodeNotReadyError) as excinfo:
@@ -68,7 +73,9 @@ def test_not_ready_node_rejected_without_side_effects(tmp_path: Path) -> None:
 def test_ready_node_accepts_even_with_blocked_sibling(tmp_path: Path) -> None:
     harness = CommandHarness(tmp_path / "ledger.sqlite3")
     try:
-        harness.seed_run()
+        harness.seed_run(
+            workflow_definition=build_knowledge_sideflow_workflow_definition()
+        )
         harness.context._candidate_stats = None
         with pytest.raises(NodeNotReadyError):
             harness.service.submit(

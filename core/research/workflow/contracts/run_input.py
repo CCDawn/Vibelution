@@ -8,10 +8,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from core.research.competition.result_set import CatalogScope, ResultSetContractError
-from core.research.competition.stage_one_completion_policy import (
-    StageOneCompletionPolicy,
-    StageOneCompletionPolicyError,
-)
 
 from ._validation import (
     ContractValidationError,
@@ -46,23 +42,6 @@ _REQUIRED_FIELDS = (
     "createdBy",
     "createdAt",
 )
-
-
-def _definition_id_for_registry_version(workflow_version_id: str) -> str:
-    """Resolve ``workflowId@schemaVersion`` from the immutable registry id."""
-
-    try:
-        from core.research.workflow.definition_registry import (
-            WorkflowDefinitionRegistryError,
-            resolve_definition_by_version_id,
-        )
-
-        definition = resolve_definition_by_version_id(workflow_version_id)
-    except WorkflowDefinitionRegistryError as exc:
-        raise ContractValidationError(
-            "workflowVersionId cannot resolve the stage-one workflow definition"
-        ) from exc
-    return f"{definition.workflowId}@{definition.schemaVersion}"
 
 
 def _normalize_research_scope(
@@ -159,11 +138,17 @@ class WorkflowRunInputSnapshot:
     catalogScope: dict[str, Any]
     hypothesisSelection: dict[str, Any]
     hypothesisConvergenceHandoff: dict[str, Any]
-    stageOneCompletionPolicy: dict[str, Any]
     snapshotHash: str
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> WorkflowRunInputSnapshot:
+        if (
+            "researchScopeEnvelope" not in payload
+            or "catalogScope" not in payload
+        ):
+            raise ContractValidationError(
+                "researchScopeEnvelope and catalogScope are required"
+            )
         require_keys(payload, _REQUIRED_FIELDS)
         canonical = {
             "teamId": require_text(payload, "teamId"),
@@ -205,18 +190,11 @@ class WorkflowRunInputSnapshot:
                 payload,
                 "evidenceRemediationContract",
             )
-        has_research_scope = "researchScopeEnvelope" in payload
-        has_catalog_scope = "catalogScope" in payload
-        if has_research_scope != has_catalog_scope:
-            raise ContractValidationError(
-                "researchScopeEnvelope and catalogScope must be provided together"
-            )
-        if has_research_scope:
-            canonical["researchScopeEnvelope"] = _normalize_research_scope(
-                payload,
-                question_id=canonical["questionId"],
-            )
-            canonical["catalogScope"] = _normalize_catalog_scope(payload)
+        canonical["researchScopeEnvelope"] = _normalize_research_scope(
+            payload,
+            question_id=canonical["questionId"],
+        )
+        canonical["catalogScope"] = _normalize_catalog_scope(payload)
         if "hypothesisSelection" in payload:
             canonical["hypothesisSelection"] = require_mapping(
                 payload,
@@ -227,32 +205,6 @@ class WorkflowRunInputSnapshot:
                 payload,
                 "hypothesisConvergenceHandoff",
             )
-        if "stageOneCompletionPolicy" in payload:
-            raw_stage_one_policy = require_mapping(
-                payload,
-                "stageOneCompletionPolicy",
-            )
-            try:
-                stage_one_policy = StageOneCompletionPolicy.from_dict(
-                    raw_stage_one_policy
-                )
-            except StageOneCompletionPolicyError as exc:
-                raise ContractValidationError(
-                    f"stageOneCompletionPolicy is malformed: {exc}"
-                ) from exc
-            resolved_definition_id = _definition_id_for_registry_version(
-                canonical["workflowVersionId"]
-            )
-            if stage_one_policy.workflowDefinitionId != resolved_definition_id:
-                raise ContractValidationError(
-                    "stageOneCompletionPolicy.workflowDefinitionId must match the "
-                    "definition resolved by workflowVersionId"
-                )
-            if canonical["questionId"] not in stage_one_policy.questionIds:
-                raise ContractValidationError(
-                    "stageOneCompletionPolicy.questionIds must contain questionId"
-                )
-            canonical["stageOneCompletionPolicy"] = stage_one_policy.to_dict()
         raw_scope_mode = payload.get("workflowSessionScopeV3")
         if raw_scope_mode is None:
             canonical["workflowSessionScopeV3"] = {"hypothesis_design": "off"}
@@ -305,18 +257,13 @@ class WorkflowRunInputSnapshot:
             workflowSessionScopeV3=copy.deepcopy(
                 canonical["workflowSessionScopeV3"]
             ),
-            researchScopeEnvelope=copy.deepcopy(
-                canonical.get("researchScopeEnvelope") or {}
-            ),
-            catalogScope=copy.deepcopy(canonical.get("catalogScope") or {}),
+            researchScopeEnvelope=copy.deepcopy(canonical["researchScopeEnvelope"]),
+            catalogScope=copy.deepcopy(canonical["catalogScope"]),
             hypothesisSelection=copy.deepcopy(
                 canonical.get("hypothesisSelection") or {}
             ),
             hypothesisConvergenceHandoff=copy.deepcopy(
                 canonical.get("hypothesisConvergenceHandoff") or {}
-            ),
-            stageOneCompletionPolicy=copy.deepcopy(
-                canonical.get("stageOneCompletionPolicy") or {}
             ),
             snapshotHash=snapshot_hash,
         )
@@ -347,11 +294,10 @@ class WorkflowRunInputSnapshot:
             "workflowSessionScopeV3": copy.deepcopy(self.workflowSessionScopeV3),
             "snapshotHash": self.snapshotHash,
         }
-        if self.researchScopeEnvelope or self.catalogScope:
-            payload["researchScopeEnvelope"] = copy.deepcopy(
-                self.researchScopeEnvelope
-            )
-            payload["catalogScope"] = copy.deepcopy(self.catalogScope)
+        payload["researchScopeEnvelope"] = copy.deepcopy(
+            self.researchScopeEnvelope
+        )
+        payload["catalogScope"] = copy.deepcopy(self.catalogScope)
         if self.hypothesisSelection:
             payload["hypothesisSelection"] = copy.deepcopy(
                 self.hypothesisSelection
@@ -363,9 +309,5 @@ class WorkflowRunInputSnapshot:
         if self.evidenceRemediationContract:
             payload["evidenceRemediationContract"] = copy.deepcopy(
                 self.evidenceRemediationContract
-            )
-        if self.stageOneCompletionPolicy:
-            payload["stageOneCompletionPolicy"] = copy.deepcopy(
-                self.stageOneCompletionPolicy
             )
         return payload

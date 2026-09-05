@@ -24,7 +24,7 @@ _QUESTION_ID = "question-energy-anomaly-gate-v1"
 
 def _baseline_run_input() -> dict:
     fixture_path = (
-        Path(__file__).parent / "fixtures" / "research_workflow_v21_baseline_case.json"
+        Path(__file__).parent / "fixtures" / "research_workflow_v3_baseline_case.json"
     )
     return json.loads(fixture_path.read_text(encoding="utf-8"))["runInput"]
 
@@ -33,23 +33,11 @@ def _headers() -> dict:
     return {CONTROL_TOKEN_HEADER: get_control_token()}
 
 
-def _config_with_sideflow_mode(monkeypatch, mode: str) -> None:
-    """Patch get_config with a full AppConfig whose sideflow mode is set."""
-    from config.models import AppConfig
-
-    config = AppConfig()
-    config.research.knowledge_sideflow.mode = mode
-    monkeypatch.setattr("config.settings.get_config", lambda: config)
-
-
 @pytest.fixture(autouse=True)
 def _isolated_registry(monkeypatch):
     from core.research.workflow.definition_registry import reset_registry_for_tests
 
     reset_registry_for_tests()
-    # The ensure route creates a real child run, which is rollout-gated to
-    # mode "on"; these HTTP tests exercise the route surface itself.
-    _config_with_sideflow_mode(monkeypatch, "on")
     yield
     reset_registry_for_tests()
 

@@ -50,11 +50,6 @@ from core.research.competition.real_control_batch import (
     validate_real_failure_budget,
 )
 from core.research.competition.result_set import CatalogScope, QuestionResult
-from core.research.competition.stage_one_completion_policy import (
-    STAGE_ONE_POLICY_QUESTION_IDS,
-    STAGE_ONE_POLICY_WORKFLOW_DEFINITION_ID,
-    stage_one_policy_snapshot_for,
-)
 from core.research.workflow.definition import CHALLENGE_CUP_WORKFLOW_ID
 from core.web.services import team_service
 from core.web.services.team_workflow.challenge_cup_dev_controls import (
@@ -672,15 +667,6 @@ def _batch_scope(team_id: str, plan_id: str) -> dict[str, Any]:
         "questionIds": [str(question_id) for question_id in plan.question_ids],
         "modelPolicy": model_policy,
     }
-    if scope["questionIds"] and set(scope["questionIds"]) <= set(
-        STAGE_ONE_POLICY_QUESTION_IDS
-    ):
-        snapshot = stage_one_policy_snapshot_for(
-            STAGE_ONE_POLICY_QUESTION_IDS[0],
-            STAGE_ONE_POLICY_WORKFLOW_DEFINITION_ID,
-        )
-        if snapshot is not None:
-            scope["stageOneCompletionPolicy"] = snapshot
     return scope
 
 
@@ -826,7 +812,6 @@ def record_catalog_run_authorization(
             approved_at_ms=approved_at_ms,
             authorization_id=authorization_id,
             require_model_policy=True,
-            require_stage_one_policy=normalized_plan == "real-1",
         )
     except CatalogRunAuthorizationError as exc:
         raise ChallengeCupRealBatchError(

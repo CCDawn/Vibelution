@@ -13,6 +13,27 @@ from tests._support.team_workflow.helpers import *  # noqa: F403
 from tests.test_challenge_question_runs import _append_canonical_turn_output
 
 
+def _create_owned_source_collection_processing_run(team, *, title):
+    project = team_workflow_orchestration_service.create_research_project(
+        team["teamId"],
+        {"name": f"{title} project", "topic": title},
+    )["project"]
+    team_workflow_orchestration_service.activate_research_project(team["teamId"], project["projectId"])
+    return data_processing_service.create_processing_run(
+        title=title,
+        scope={
+            "teamId": team["teamId"],
+            "workflowStage": "knowledge_collection",
+            "researchProjectId": project["projectId"],
+        },
+        metadata={
+            "startedFrom": "team_workflow_source_collection",
+            "teamId": team["teamId"],
+            "researchProjectId": project["projectId"],
+        },
+    )
+
+
 def test_source_collection_summary_reuses_processing_status_for_projection(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
@@ -356,7 +377,24 @@ def test_import_data_record_as_source_candidate_preserves_trace_and_is_idempoten
     _use_tmp_project_root(tmp_path, monkeypatch)
     scene_events = _capture_workflow_events(monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")
-    run = data_processing_service.create_processing_run(title="Source collection")
+    project = team_workflow_orchestration_service.create_research_project(
+        team["teamId"],
+        {"name": "Neurology research", "topic": "Neural predictive coding"},
+    )["project"]
+    team_workflow_orchestration_service.activate_research_project(team["teamId"], project["projectId"])
+    run = data_processing_service.create_processing_run(
+        title="Source collection",
+        scope={
+            "teamId": team["teamId"],
+            "workflowStage": "knowledge_collection",
+            "researchProjectId": project["projectId"],
+        },
+        metadata={
+            "startedFrom": "team_workflow_source_collection",
+            "teamId": team["teamId"],
+            "researchProjectId": project["projectId"],
+        },
+    )
     record = data_processing_service.add_record(
         run["runId"],
         {
@@ -418,9 +456,24 @@ def test_extract_source_collection_candidates_imports_records_and_closes_extract
     _use_tmp_project_root(tmp_path, monkeypatch)
     scene_events = _capture_workflow_events(monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")
+    project = team_workflow_orchestration_service.create_research_project(
+        team["teamId"],
+        {"name": "Neural source extraction", "topic": "Neural predictive coding"},
+    )["project"]
+    team_workflow_orchestration_service.activate_research_project(team["teamId"], project["projectId"])
     run = data_processing_service.create_processing_run(
         title="Neural source collection",
-        scope={"teamId": team["teamId"], "workflowKind": "challenge_cup_research"},
+        scope={
+            "teamId": team["teamId"],
+            "workflowKind": "challenge_cup_research",
+            "workflowStage": "knowledge_collection",
+            "researchProjectId": project["projectId"],
+        },
+        metadata={
+            "startedFrom": "team_workflow_source_collection",
+            "teamId": team["teamId"],
+            "researchProjectId": project["projectId"],
+        },
     )
     data_processing_service.create_collection_assignment(
         run["runId"],
@@ -497,9 +550,24 @@ def test_extract_source_collection_candidates_imports_records_and_closes_extract
 def test_extract_source_collection_candidates_keeps_assignment_open_when_batch_is_partial(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")
+    project = team_workflow_orchestration_service.create_research_project(
+        team["teamId"],
+        {"name": "Partial source extraction", "topic": "Neural predictive coding"},
+    )["project"]
+    team_workflow_orchestration_service.activate_research_project(team["teamId"], project["projectId"])
     run = data_processing_service.create_processing_run(
         title="Neural source collection",
-        scope={"teamId": team["teamId"], "workflowKind": "challenge_cup_research"},
+        scope={
+            "teamId": team["teamId"],
+            "workflowKind": "challenge_cup_research",
+            "workflowStage": "knowledge_collection",
+            "researchProjectId": project["projectId"],
+        },
+        metadata={
+            "startedFrom": "team_workflow_source_collection",
+            "teamId": team["teamId"],
+            "researchProjectId": project["projectId"],
+        },
     )
     data_processing_service.create_collection_assignment(
         run["runId"],
@@ -809,7 +877,20 @@ def test_start_source_collection_run_accepts_traceable_query_seed_contract(tmp_p
     assert search_plan["searchLanguages"] == ["en"]
     assert search_plan["sourceTypes"] == ["paper"]
     assert search_plan["maxResultsPerQuery"] == 7
-    assert search_plan["queryCount"] == 2
+    assert search_plan["queryCount"] == 8
+    assert len({item["queryId"] for item in queries}) == 8
+    required_perspectives = {
+        "mechanism",
+        "independent_baseline",
+        "limitation_or_null",
+        "falsification",
+    }
+    for seed in search_plan["querySeeds"]:
+        assert {
+            item["perspective"]
+            for item in queries
+            if item["seed"] == seed
+        } == required_perspectives
     assert {item["assignedAgentRole"] for item in queries} == {"source_finder"}
     assert all(item["status"] == "planned" for item in queries)
     assert all(item["execution"]["externalSearchTriggered"] is False for item in queries)
@@ -2478,10 +2559,23 @@ def test_research_stage_status_repairs_missing_round_and_projects_stage_cards(tm
 def test_source_collection_stage_card_projection_is_scoped_to_current_run_artifacts(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")
+    project = team_workflow_orchestration_service.create_research_project(
+        team["teamId"],
+        {"name": "Scoped source rounds", "topic": "Neural evidence rounds"},
+    )["project"]
+    team_workflow_orchestration_service.activate_research_project(team["teamId"], project["projectId"])
     run_one = data_processing_service.create_processing_run(
         title="Knowledge collection round 1",
-        scope={"teamId": team["teamId"], "workflowStage": "knowledge_collection"},
-        metadata={"startedFrom": "team_workflow_source_collection"},
+        scope={
+            "teamId": team["teamId"],
+            "workflowStage": "knowledge_collection",
+            "researchProjectId": project["projectId"],
+        },
+        metadata={
+            "startedFrom": "team_workflow_source_collection",
+            "teamId": team["teamId"],
+            "researchProjectId": project["projectId"],
+        },
     )
     record_one = data_processing_service.add_record(
         run_one["runId"],
@@ -2521,8 +2615,16 @@ def test_source_collection_stage_card_projection_is_scoped_to_current_run_artifa
 
     run_two = data_processing_service.create_processing_run(
         title="Knowledge collection round 2",
-        scope={"teamId": team["teamId"], "workflowStage": "knowledge_collection"},
-        metadata={"startedFrom": "team_workflow_source_collection"},
+        scope={
+            "teamId": team["teamId"],
+            "workflowStage": "knowledge_collection",
+            "researchProjectId": project["projectId"],
+        },
+        metadata={
+            "startedFrom": "team_workflow_source_collection",
+            "teamId": team["teamId"],
+            "researchProjectId": project["projectId"],
+        },
     )
     record_two = data_processing_service.add_record(
         run_two["runId"],
@@ -2566,10 +2668,9 @@ def test_source_collection_stage_card_projection_ignores_stale_agent_tasks_for_c
         name="挑战杯科研团队",
         members=[{"agentId": current_agent["agentId"], "role": "source_extractor", "agentName": "当前资料提炼"}],
     )
-    run = data_processing_service.create_processing_run(
+    run = _create_owned_source_collection_processing_run(
+        team,
         title="Knowledge collection current round",
-        scope={"teamId": team["teamId"], "workflowStage": "knowledge_collection"},
-        metadata={"startedFrom": "team_workflow_source_collection"},
     )
     record = data_processing_service.add_record(
         run["runId"],
@@ -2624,10 +2725,9 @@ def test_source_collection_stage_card_projection_closes_finding_with_downstream_
             {"agentId": extractor["agentId"], "role": "source_extractor", "agentName": "资料提炼"},
         ],
     )
-    run = data_processing_service.create_processing_run(
+    run = _create_owned_source_collection_processing_run(
+        team,
         title="Knowledge collection current round",
-        scope={"teamId": team["teamId"], "workflowStage": "knowledge_collection"},
-        metadata={"startedFrom": "team_workflow_source_collection"},
     )
     finder_assignment = data_processing_service.create_collection_assignment(
         run["runId"],
@@ -2693,10 +2793,9 @@ def test_source_collection_stage_card_projection_ignores_stale_finder_assignment
             }
         ],
     )
-    run = data_processing_service.create_processing_run(
+    run = _create_owned_source_collection_processing_run(
+        team,
         title="Knowledge collection current round",
-        scope={"teamId": team["teamId"], "workflowStage": "knowledge_collection"},
-        metadata={"startedFrom": "team_workflow_source_collection"},
     )
     completed_assignment = data_processing_service.create_collection_assignment(
         run["runId"],
@@ -2761,10 +2860,9 @@ def test_source_collection_stage_card_projection_suppresses_interrupted_task_aft
         name="挑战杯科研团队",
         members=[{"agentId": finder["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
-    run = data_processing_service.create_processing_run(
+    run = _create_owned_source_collection_processing_run(
+        team,
         title="Knowledge collection current round",
-        scope={"teamId": team["teamId"], "workflowStage": "knowledge_collection"},
-        metadata={"startedFrom": "team_workflow_source_collection"},
     )
     data_processing_service.add_record(
         run["runId"],
@@ -3007,10 +3105,9 @@ def test_source_collection_stage_card_projection_marks_stale_success_as_partial_
 def test_source_collection_stage_card_projection_counts_approved_sources_pending_ingestion(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队", members=[])
-    run = data_processing_service.create_processing_run(
+    run = _create_owned_source_collection_processing_run(
+        team,
         title="Knowledge collection current round",
-        scope={"teamId": team["teamId"], "workflowStage": "knowledge_collection"},
-        metadata={"startedFrom": "team_workflow_source_collection"},
     )
     source = team_workflow_orchestration_service.register_candidate_source(
         team["teamId"],
@@ -6597,7 +6694,11 @@ def test_candidate_graph_stage_writeback_materializes_root_graph_payload_on_reus
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")
-    run_id = "run-root-relation-graph"
+    run = _create_owned_source_collection_processing_run(
+        team,
+        title="Root relation graph",
+    )
+    run_id = run["runId"]
     source_one = team_workflow_orchestration_service.register_candidate_source(
         team["teamId"],
         {
@@ -6813,7 +6914,9 @@ def test_execute_source_collection_search_writes_records_and_imports_candidates(
     assert execution["boundaries"]["writesFormalKnowledge"] is False
     assert execution["boundaries"]["writesRag"] is False
     assert execution["boundaries"]["writesOfficialGraph"] is False
-    assert assignments[0]["status"] == "completed"
+    assert assignments[0]["status"] == "returned"
+    assert execution["remainingQueryCount"] == 3
+    assert execution["hasMore"] is True
     assert len(records) == 2
     assert records[0]["metadata"]["sourceCollectionTrace"]["queryId"] == run_response["searchPlan"]["queries"][0]["queryId"]
     assert records[0]["metadata"]["sourceCollectionTrace"]["externalSearchTriggered"] is True
@@ -7685,7 +7788,8 @@ def test_execute_source_collection_search_publishes_runtime_work_run(tmp_path, m
     assert observed_active[0]["topic"] == "neural predictive coding"
     assert summary["active"] is None
     assert summary["latest"]["runId"] == run_response["run"]["runId"]
-    assert summary["latest"]["status"] == "completed"
+    assert summary["latest"]["status"] == "needs_continue"
+    assert summary["latest"]["currentPhase"] == "waiting_for_next_batch"
     assert summary["latest"]["recordCount"] == 1
     assert summary["latest"]["importedCount"] == 1
     search_event = next(kwargs for args, kwargs in events if args[2] == "source_collection.search_executed")
@@ -7735,16 +7839,16 @@ def test_execute_source_collection_search_does_not_mark_downstream_assignments_a
     summary = team_workflow_orchestration_service.load_source_collection_work_run_summary()
 
     assert execution["executedQueryCount"] == 1
-    assert execution["sourceCollectionSummary"]["openAssignmentCount"] == 3
-    assert execution["sourceCollectionSummary"]["searchOpenAssignmentCount"] == 0
+    assert execution["sourceCollectionSummary"]["openAssignmentCount"] == 4
+    assert execution["sourceCollectionSummary"]["searchOpenAssignmentCount"] == 1
     assert execution["sourceCollectionSummary"]["downstreamOpenAssignmentCount"] == 3
-    assert execution["runStatus"]["summary"]["searchOpenAssignmentCount"] == 0
+    assert execution["runStatus"]["summary"]["searchOpenAssignmentCount"] == 1
     assert execution["runStatus"]["summary"]["downstreamOpenAssignmentCount"] == 3
     assert summary["active"] is None
-    assert summary["latest"]["status"] == "completed"
-    assert summary["latest"]["currentPhase"] == "completed"
-    assert summary["latest"]["openAssignmentCount"] == 3
-    assert summary["latest"]["searchOpenAssignmentCount"] == 0
+    assert summary["latest"]["status"] == "needs_continue"
+    assert summary["latest"]["currentPhase"] == "waiting_for_next_batch"
+    assert summary["latest"]["openAssignmentCount"] == 4
+    assert summary["latest"]["searchOpenAssignmentCount"] == 1
     assert summary["latest"]["downstreamOpenAssignmentCount"] == 3
 
 def test_execute_source_collection_search_skips_existing_query_without_force(tmp_path, monkeypatch):
@@ -7768,16 +7872,25 @@ def test_execute_source_collection_search_skips_existing_query_without_force(tmp
             "agentRoles": ["source_finder"],
         },
     )
-    first = team_workflow_orchestration_service.execute_source_collection_search(team["teamId"], run_response["run"]["runId"], {"maxQueries": 1})
+    query_count = run_response["searchPlan"]["queryCount"]
+    first = team_workflow_orchestration_service.execute_source_collection_search(
+        team["teamId"],
+        run_response["run"]["runId"],
+        {"maxQueries": query_count},
+    )
     second = team_workflow_orchestration_service.execute_source_collection_search(team["teamId"], run_response["run"]["runId"], {"maxQueries": 1})
 
-    assert first["executedQueryCount"] == 1
+    assert first["executedQueryCount"] == query_count
     assert second["executedQueryCount"] == 0
     assert second["skippedQueryCount"] == 0
     assert second["skippedDuplicateCount"] == 0
     assert second["status"] == "no_open_assignment"
-    # The first execution ran all three default providers for the same query.
-    assert calls == [run_response["searchPlan"]["queries"][0]["queryId"]] * 3
+    # The first execution ran all three default providers for every perspective query.
+    assert calls == [
+        query["queryId"]
+        for query in run_response["searchPlan"]["queries"]
+        for _provider in range(3)
+    ]
     assert data_processing_service.list_records(run_response["run"]["runId"])["summary"]["recordCount"] == 2
 
 def test_execute_source_collection_search_limits_failed_provider_attempt_to_max_queries(tmp_path, monkeypatch):
@@ -7920,17 +8033,21 @@ def test_execute_source_collection_search_records_output_per_query(tmp_path, mon
         },
     )
 
+    query_count = run_response["searchPlan"]["queryCount"]
     execution = team_workflow_orchestration_service.execute_source_collection_search(
         team["teamId"],
         run_response["run"]["runId"],
-        {"maxQueries": 2, "maxResultsPerQuery": 1},
+        {"maxQueries": query_count, "maxResultsPerQuery": 1},
     )
 
-    assert execution["executedQueryCount"] == 2
-    assert execution["recordCount"] == 2
-    assert execution["outputCount"] == 2
-    assert [output["status"] for output in execution["outputs"]] == ["returned", "completed"]
-    assert execution["runStatus"]["summary"]["outputCount"] == 2
+    assert execution["executedQueryCount"] == query_count
+    assert execution["recordCount"] == query_count
+    assert execution["outputCount"] == query_count
+    assert [output["status"] for output in execution["outputs"]] == [
+        *(["returned"] * (query_count - 1)),
+        "completed",
+    ]
+    assert execution["runStatus"]["summary"]["outputCount"] == query_count
 
 def test_execute_source_collection_search_skips_duplicate_sources_on_force_rerun(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
@@ -7957,7 +8074,7 @@ def test_execute_source_collection_search_skips_duplicate_sources_on_force_rerun
     first = team_workflow_orchestration_service.execute_source_collection_search(
         team["teamId"],
         run_response["run"]["runId"],
-        {"maxQueries": 1, "maxResultsPerQuery": 2},
+        {"maxQueries": run_response["searchPlan"]["queryCount"], "maxResultsPerQuery": 2},
     )
     second = team_workflow_orchestration_service.execute_source_collection_search(
         team["teamId"],
@@ -8005,8 +8122,8 @@ def test_execute_source_collection_search_dedupes_metadata_doi_and_sorted_url_qu
             "results": [
                 {
                     "title": "First metadata DOI source identity",
-                    "sourceRef": "metadata-doi-source",
-                    "rawLocation": "metadata-doi-location",
+                    "sourceRef": "https://example.test/metadata-doi-source-1",
+                    "rawLocation": "https://example.test/metadata-doi-location-1",
                     "summary": "First query DOI only appears in metadata.",
                     "sourceType": "paper",
                     "metadata": {"doi": "10.0000/metadata-only", "containerTitle": "Journal", "issued": "2025"},
@@ -8027,8 +8144,8 @@ def test_execute_source_collection_search_dedupes_metadata_doi_and_sorted_url_qu
             "results": [
                 {
                     "title": "Second metadata DOI source identity duplicate",
-                    "sourceRef": "different-source-ref",
-                    "rawLocation": "different-location",
+                    "sourceRef": "https://example.test/metadata-doi-source-2",
+                    "rawLocation": "https://example.test/metadata-doi-location-2",
                     "summary": "Second query same DOI only appears in metadata.",
                     "sourceType": "paper",
                     "metadata": {"doi": "10.0000/metadata-only", "containerTitle": "Journal", "issued": "2025"},
@@ -8048,7 +8165,10 @@ def test_execute_source_collection_search_dedupes_metadata_doi_and_sorted_url_qu
     def fake_search(query, *, max_results, provider):
         query_text = str(query.get("query") or "")
         base = responses[0] if "first" in query_text else responses[1]
-        return copy.deepcopy(base)
+        response = copy.deepcopy(base)
+        for result in response["results"]:
+            result["summary"] = f"{result['summary']} Relevant to {query_text}."
+        return response
 
     monkeypatch.setattr(team_workflow_orchestration_service, "_execute_source_collection_query", fake_search)
     team = team_service.create_team(name="ai科学研究团队")
@@ -8066,7 +8186,7 @@ def test_execute_source_collection_search_dedupes_metadata_doi_and_sorted_url_qu
     first = team_workflow_orchestration_service.execute_source_collection_search(
         team["teamId"],
         run_response["run"]["runId"],
-        {"maxQueries": 1, "maxResultsPerQuery": 2},
+        {"maxQueries": 4, "maxResultsPerQuery": 2},
     )
     second = team_workflow_orchestration_service.execute_source_collection_search(
         team["teamId"],
@@ -8197,7 +8317,11 @@ def test_source_collection_search_syncs_stage_round_terminal_state(tmp_path, mon
     assert first_latest["sourceCollectionSearchExecution"]["status"] == "needs_continue"
     assert first_latest["sourceCollectionSearchExecution"]["activeWorkRunId"] == ""
 
-    second = team_workflow_orchestration_service.execute_source_collection_search(team["teamId"], run_id, {"maxQueries": 1, "maxResultsPerQuery": 1})
+    second = team_workflow_orchestration_service.execute_source_collection_search(
+        team["teamId"],
+        run_id,
+        {"maxQueries": response["searchPlan"]["queryCount"] - 1, "maxResultsPerQuery": 1},
+    )
     second_status = team_workflow_orchestration_service.get_research_stage_round_status(team["teamId"])
     second_latest = second_status["latestRound"]
 
@@ -8205,7 +8329,7 @@ def test_source_collection_search_syncs_stage_round_terminal_state(tmp_path, mon
     assert second_latest["status"] == "needs_screening"
     assert second_status["phases"][0]["activeRoundId"] == ""
     assert second_latest["sourceCollectionSearchExecution"]["status"] == "completed"
-    assert second_latest["sourceCollectionSummary"]["candidateCount"] == 2
+    assert second_latest["sourceCollectionSummary"]["candidateCount"] == response["searchPlan"]["queryCount"]
 
 def test_research_stage_status_recovers_stale_running_source_collection_round(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
@@ -8678,7 +8802,11 @@ def test_research_stage_round_status_skips_repair_hydration_when_round_exists(tm
 def test_source_collection_stage_card_projection_resolves_current_stage_agents_once(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")
-    run_id = "run-stage-card-projection-fast-path"
+    run = _create_owned_source_collection_processing_run(
+        team,
+        title="Stage card projection fast path",
+    )
+    run_id = run["runId"]
     stage_roles = {
         "finding": "source_finder",
         "extraction": "source_extractor",
@@ -9622,6 +9750,8 @@ def test_finding_close_first_step_checklist_single_read_and_gate(tmp_path, monke
     assert "写回预算" in env["submitted"][0]["content"]
     assert "总计最多接受 8 条去重来源" in env["submitted"][0]["content"]
     assert "每批 `candidateLeads[]` 最多 4 条" in env["submitted"][0]["content"]
+    assert "`assignments[].assignedQueries[]`" in env["submitted"][0]["content"]
+    assert "必须逐字使用其中的 `query`" in env["submitted"][0]["content"]
 
 
 def test_finding_close_first_step_context_has_no_continuation_invite(tmp_path, monkeypatch):
@@ -9661,6 +9791,15 @@ def test_finding_close_first_step_context_has_no_continuation_invite(tmp_path, m
     assert context["candidatePage"]["hasMore"] is False
     assert context["candidatePage"]["nextOffset"] == 5
     assert context["usage"]["continuationHint"] == ""
+    assigned_queries = context["assignments"][0]["assignedQueries"]
+    assert {item["perspective"] for item in assigned_queries} == {
+        "mechanism",
+        "independent_baseline",
+        "limitation_or_null",
+        "falsification",
+    }
+    assert all(item["assignmentId"] == context["assignments"][0]["assignmentId"] for item in assigned_queries)
+    assert all(item["queryId"] and item["query"] for item in assigned_queries)
     assert "candidate_offset" not in json.dumps(context["usage"], ensure_ascii=False)
 
 
@@ -10173,9 +10312,9 @@ def test_relations_graph_materialization_and_precheck_follow_run_owner_store(tmp
     assert fresh_record["metadata"]["graph"]["summary"]["edgeCount"] == 4
     assert fresh_record["metadata"]["graph"]["summary"]["nodeCount"] == 5
     assert [item["taskId"] for item in fresh_record["metadata"].get("stageTaskWritebacks") or []] == [task["taskId"]]
-    # 访问即认领：写回把活跃项目 store 的存量记录一并归一到属主 store（读侧按 candidateId 去重）。
-    assert "candidate-graph-stale-misplaced" in [item.get("candidateId") for item in owner_graphs]
-    # 活跃项目 B 的 store 不新增图记录，只剩错位存量。
+    # 严格 owner store 不读取或迁移活跃项目 B 中的错位旧记录。
+    assert "candidate-graph-stale-misplaced" not in [item.get("candidateId") for item in owner_graphs]
+    # 活跃项目 B 的 store 不新增图记录，只保留自身原有记录。
     active_after = team_workflow_orchestration_service._read_json(active_store_path)
     assert [
         item.get("candidateId")
@@ -10513,6 +10652,8 @@ def test_source_collection_liveness_tiers_judge_snapshots_independently(tmp_path
 
 
 def test_source_collection_heartbeat_touch_records_checkpoint_and_gates_liveness(tmp_path, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
     service = team_workflow_orchestration_service
@@ -10539,6 +10680,10 @@ def test_source_collection_heartbeat_touch_records_checkpoint_and_gates_liveness
     # is 1ms: the heartbeat tier owns the judgment once a heartbeat exists.
     monkeypatch.setenv("VIBELUTION_SOURCE_COLLECTION_SNAPSHOT_STALE_MS", "1")
     monkeypatch.setenv("VIBELUTION_SOURCE_COLLECTION_HEARTBEAT_STALE_MS", str(11 * 60 * 1000))
+    # Make the heartbeat instant differ from the store clock deterministically.
+    # A single touch must persist one timestamp, even across a second boundary.
+    heartbeat_time = (datetime.now(timezone.utc) - timedelta(seconds=2)).isoformat(timespec="seconds")
+    monkeypatch.setattr(service, "utc_now_iso", lambda: heartbeat_time)
     service._touch_source_collection_work_run_heartbeat(
         team["teamId"],
         run_id,
@@ -10793,7 +10938,11 @@ def test_source_collection_batch_terminal_writes_collection_batch_completed_even
     execution = team_workflow_orchestration_service.execute_source_collection_search(
         team["teamId"],
         run_id,
-        {"provider": "arxiv_api", "maxQueries": 1, "maxResultsPerQuery": 2},
+        {
+            "provider": "arxiv_api",
+            "maxQueries": run_response["searchPlan"]["queryCount"],
+            "maxResultsPerQuery": 2,
+        },
     )
     assert execution["executedQueryCount"] >= 1
 

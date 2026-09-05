@@ -18,7 +18,7 @@ def _service(runs=None, attempts=None) -> NodeReadinessService:
     return NodeReadinessService(run_source=runs.get, attempt_count_source=attempt_count)
 
 
-def _evaluate(service, context, node_id="source_finding"):
+def _evaluate(service, context, node_id="problem_understanding"):
     return service.evaluate(
         team_id="research-team",
         run_id="run-test",
@@ -37,7 +37,7 @@ def test_team_scope_mismatch_blocks() -> None:
     result = service.evaluate(
         team_id="other-team",
         run_id="run-test",
-        node_id="source_finding",
+        node_id="problem_understanding",
         context=context,
         use_cache=False,
     )
@@ -50,7 +50,7 @@ def test_run_missing_returns_run_not_found() -> None:
     result = service.evaluate(
         team_id="research-team",
         run_id="run-missing",
-        node_id="source_finding",
+        node_id="problem_understanding",
         context=FakeDomainContext(),
         use_cache=False,
     )
@@ -73,7 +73,7 @@ def test_reconciliation_required_blocks() -> None:
 
 
 def test_live_attempt_blocks() -> None:
-    service = _service(attempts={("run-test", "source_finding"): 1})
+    service = _service(attempts={("run-test", "problem_understanding"): 1})
     result = _evaluate(service, FakeDomainContext())
     assert result.ready is False
     assert any(b.code == "node_live_attempt" for b in result.blockers)
@@ -82,13 +82,13 @@ def test_live_attempt_blocks() -> None:
 def test_unaccepted_incoming_handoff_blocks() -> None:
     service = _service()
     context = FakeDomainContext()
-    context.handoffs["source_extraction"] = [
+    context.handoffs["protocol_design"] = [
         type("H", (), {"handoff_id": "ho-1", "from_node_run_id": "nr-1", "status": "pending"})()
     ]
     result = service.evaluate(
         team_id="research-team",
         run_id="run-test",
-        node_id="source_extraction",
+        node_id="protocol_design",
         context=context,
         use_cache=False,
     )
@@ -99,13 +99,13 @@ def test_unaccepted_incoming_handoff_blocks() -> None:
 def test_accepted_handoff_unlocks_downstream() -> None:
     service = _service()
     context = FakeDomainContext()
-    context.handoffs["source_extraction"] = [
+    context.handoffs["protocol_design"] = [
         type("H", (), {"handoff_id": "ho-1", "from_node_run_id": "nr-1", "status": "accepted"})()
     ]
     result = service.evaluate(
         team_id="research-team",
         run_id="run-test",
-        node_id="source_extraction",
+        node_id="protocol_design",
         context=context,
         use_cache=False,
     )
@@ -184,7 +184,7 @@ def test_budget_limit_blocker_offers_extend_budget_remediation() -> None:
 def test_agent_not_configured_blocks_agent_node() -> None:
     service = _service()
     context = FakeDomainContext()
-    context.bindings["source_finding"] = None
+    context.bindings["problem_understanding"] = None
     result = _evaluate(service, context)
     assert result.ready is False
     assert any(b.code == "agent_not_configured" for b in result.blockers)
@@ -209,7 +209,7 @@ def test_human_node_always_actor_ready() -> None:
     result = service.evaluate(
         team_id="research-team",
         run_id="run-test",
-        node_id="knowledge_handoff",
+        node_id="protocol_freeze",
         context=context,
         use_cache=False,
     )
@@ -220,7 +220,9 @@ def test_human_node_always_actor_ready() -> None:
 def test_missing_adapter_blocks() -> None:
     service = _service()
     context = FakeDomainContext()
-    context.registered_adapters = set(context.registered_adapters) - {"source_finding"}
+    context.registered_adapters = set(context.registered_adapters) - {
+        "problem_understanding"
+    }
     result = _evaluate(service, context)
     assert result.ready is False
     assert any(b.code == "adapter_not_registered" for b in result.blockers)

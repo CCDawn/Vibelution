@@ -23,6 +23,9 @@ from core.research.workflow.iteration_decisions import (
     ITERATION_DEFINITION_EDGE_IDS,
     IterationDecisionKind,
 )
+from core.research.workflow.knowledge_sideflow_definition import (
+    build_knowledge_sideflow_workflow_definition,
+)
 from core.research.workflow.models import (
     ActorKind,
     AgentBindingLayers,
@@ -45,23 +48,21 @@ def test_definition_hash_is_stable() -> None:
     assert a.workflowId == CHALLENGE_CUP_WORKFLOW_ID
 
 
-def test_definition_has_three_stages_and_seventeen_nodes() -> None:
+def test_current_definitions_split_main_and_knowledge_nodes() -> None:
     d = build_challenge_cup_workflow_definition()
+    knowledge = build_knowledge_sideflow_workflow_definition()
     assert len(d.stages) == 3
-    assert len(d.nodes) == 17
+    assert len(d.nodes) == 12
+    assert len(knowledge.stages) == 1
+    assert len(knowledge.nodes) == 5
     assert {s.stageId.value for s in d.stages} == {
-        "knowledge_collection",
+        "problem_understanding",
         "experiment_design",
         "execution_iteration",
     }
     node_ids = [n.nodeId for n in d.nodes]
     assert node_ids == [
         "problem_understanding",
-        "source_finding",
-        "source_extraction",
-        "evidence_relations",
-        "knowledge_ingestion",
-        "knowledge_handoff",
         "hypothesis_design",
         "protocol_design",
         "protocol_review",
@@ -74,10 +75,24 @@ def test_definition_has_three_stages_and_seventeen_nodes() -> None:
         "candidate_promotion",
         "result_package",
     ]
+    assert [n.nodeId for n in knowledge.nodes] == [
+        "source_finding",
+        "source_extraction",
+        "evidence_relations",
+        "knowledge_ingestion",
+        "knowledge_handoff",
+    ]
 
 
 def test_actor_kinds_match_adr0007() -> None:
-    by_id = {n.nodeId: n for n in build_challenge_cup_workflow_definition().nodes}
+    by_id = {
+        n.nodeId: n
+        for definition in (
+            build_challenge_cup_workflow_definition(),
+            build_knowledge_sideflow_workflow_definition(),
+        )
+        for n in definition.nodes
+    }
     assert by_id["source_finding"].actorKind is ActorKind.AGENT
     assert by_id["knowledge_handoff"].actorKind is ActorKind.HUMAN
     assert by_id["protocol_freeze"].actorKind is ActorKind.HUMAN
@@ -109,7 +124,7 @@ def test_iteration_outcomes_have_distinct_definition_edges() -> None:
 
 
 def test_binding_resolution_order_node_over_stage_over_workflow() -> None:
-    d = build_challenge_cup_workflow_definition()
+    d = build_knowledge_sideflow_workflow_definition()
     node = next(n for n in d.nodes if n.nodeId == "source_finding")
     layers = AgentBindingLayers(
         workflowDefaults={"source_finder": "agent-workflow"},
@@ -135,7 +150,7 @@ def test_binding_resolution_order_node_over_stage_over_workflow() -> None:
 
 
 def test_run_snapshot_not_rewritten_by_live_config_change() -> None:
-    layers = AgentBindingLayers(workflowDefaults={"source_finder": "agent-a"})
+    layers = AgentBindingLayers(workflowDefaults={"experiment_planner": "agent-a"})
     snaps = build_run_binding_snapshots(
         run_id="run-1",
         workflow_version_id="wv-1",
@@ -143,15 +158,15 @@ def test_run_snapshot_not_rewritten_by_live_config_change() -> None:
         captured_at="2026-08-07T00:00:00Z",
     )
     by_node = {s.nodeId: s for s in snaps}
-    assert by_node["source_finding"].agentId == "agent-a"
+    assert by_node["hypothesis_design"].agentId == "agent-a"
 
     # Live config would now point elsewhere — history still reads snapshot.
-    live = AgentBindingLayers(workflowDefaults={"source_finder": "agent-b"})
+    live = AgentBindingLayers(workflowDefaults={"experiment_planner": "agent-b"})
     assert resolve_effective_agent_id(
-        next(n for n in build_challenge_cup_workflow_definition().nodes if n.nodeId == "source_finding"),
+        next(n for n in build_challenge_cup_workflow_definition().nodes if n.nodeId == "hypothesis_design"),
         live,
     )[0] == "agent-b"
-    assert agent_id_from_run_snapshot(by_node, "source_finding") == "agent-a"
+    assert agent_id_from_run_snapshot(by_node, "hypothesis_design") == "agent-a"
 
 
 def test_handoff_only_accepted_is_consumable() -> None:
@@ -212,12 +227,12 @@ def test_plan_alone_does_not_unlock_controlled_run() -> None:
 def test_projection_never_includes_selected_node_id() -> None:
     proj = build_canvas_projection(
         run_id="run-1",
-        runtime_current_node_ids=["source_extraction"],
+        runtime_current_node_ids=["protocol_design"],
     )
     raw = str(proj)
     assert "selectedNodeId" not in raw
     assert "selected_node" not in raw
-    assert proj["run"]["runtimeCurrentNodeIds"] == ["source_extraction"]
+    assert proj["run"]["runtimeCurrentNodeIds"] == ["protocol_design"]
     assert proj["definition"]["workflowId"] == CHALLENGE_CUP_WORKFLOW_ID
 
 

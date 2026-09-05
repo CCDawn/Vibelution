@@ -1,58 +1,55 @@
 import { vuiStateSelectedOpaqueRowClass } from "../design/vuiSurfaceRecipes";
 
 const styles = {
+  // Keep the route marker on the root only: base.css treats every marker as a primary-color surface.
   agentDirectory:
-    "vui-routes-agentconversationdirectory grid min-w-0 gap-1.5 border-b border-[var(--vui-border-subtle)] pb-2",
-  agentDirectoryHeader:
-    "vui-routes-agentconversationdirectory agentDirectoryHeader flex min-w-0 items-center justify-between px-2.5 pt-1 [font-size:var(--vui-font-xs)] font-semibold uppercase tracking-[0.08em] [color:var(--fg-tertiary)]",
-  agentDirectoryCount:
-    "vui-routes-agentconversationdirectory agentDirectoryCount tabular-nums [color:var(--fg-secondary)]",
+    "vui-routes-agentconversationdirectory grid min-w-0 gap-1 border-b border-[var(--vui-border-subtle)] pb-2",
   agentSection:
-    "vui-routes-agentconversationdirectory agentSection grid min-w-0 gap-1.5",
+    "agentSection grid min-w-0 gap-0.5 [&>button]:min-h-10 [&>button]:font-medium [&>button]:!text-vui-fg-secondary [&>button]:[font-size:var(--vui-font-xs)] [&>div]:gap-0.5 [&>div]:pl-0",
   agentDirectoryList:
-    "vui-routes-agentconversationdirectory agentDirectoryList grid min-w-0 gap-1.5 pl-1",
-  // surface-role: hover-fill — col3 stretches full row height so the light sits on card mid-line.
+    "agentDirectoryList grid min-w-0 gap-0.5",
+  // surface-role: hover-fill — the trailing count and activity stay on the row mid-line.
   agentRow:
-    "vui-routes-agentconversationdirectory agentRow !grid !h-auto !min-h-[3.25rem] !w-full min-w-0 max-w-full " +
-    "grid-cols-[32px_minmax(0,1fr)_0.875rem] !items-stretch !justify-items-stretch !justify-start " +
+    "agentRow !grid !h-auto !min-h-[54px] !w-full min-w-0 max-w-full " +
+    "grid-cols-[26px_minmax(0,1fr)_auto] !items-stretch !justify-items-stretch !justify-start " +
     "gap-x-2.5 gap-y-0 rounded-[var(--radius-control)] !border-0 [border:0] !bg-transparent px-2.5 py-2 " +
-    "text-left font-normal shadow-none transition-[background-color] hover:!border-transparent hover:!bg-vui-surface-card " +
+    "text-left !font-normal shadow-none transition-[background-color] hover:!border-transparent hover:!bg-vui-surface-card " +
     "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)]",
   agentRowActive:
-    `vui-routes-agentconversationdirectory agentRowActive !border-0 [border:0] ${vuiStateSelectedOpaqueRowClass} shadow-none`,
+    `agentRowActive !border-0 [border:0] ${vuiStateSelectedOpaqueRowClass} shadow-none`,
   agentAvatar:
-    "vui-routes-agentconversationdirectory agentAvatar grid h-8 w-8 shrink-0 place-items-center self-center overflow-hidden rounded-full border border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_9%,transparent)] [font-size:var(--vui-font-xs)] font-semibold [color:var(--accent-cool)]",
+    "agentAvatar grid h-[26px] w-[26px] shrink-0 place-items-center self-center overflow-hidden rounded-lg bg-[var(--vui-control-muted)] [font-size:var(--vui-font-xs)] font-medium [color:var(--fg-secondary)]",
   agentAvatarImage:
-    "vui-routes-agentconversationdirectory agentAvatarImage h-full w-full object-cover",
+    "agentAvatarImage h-full w-full object-cover",
   agentCopy:
-    "vui-routes-agentconversationdirectory agentCopy grid min-w-0 gap-0.5 self-center overflow-hidden text-left",
+    "agentCopy grid min-w-0 gap-0.5 self-center overflow-hidden text-left",
   agentTitleRow:
-    "vui-routes-agentconversationdirectory agentTitleRow flex min-w-0 items-center",
+    "agentTitleRow flex min-w-0 items-center",
   agentTitle:
-    "vui-routes-agentconversationdirectory agentTitle min-w-0 truncate [font-size:var(--vui-font-sm)] font-semibold leading-tight [color:var(--fg-primary)]",
+    "agentTitle min-w-0 truncate [font-size:var(--vui-font-xs)] font-medium leading-tight [color:var(--fg-primary)]",
   // Stretch to row height then center the light — survives VButton/Shadcn justify/items defaults.
   agentStatusSlot:
-    "vui-routes-agentconversationdirectory agentStatusSlot grid h-full min-h-full w-3.5 shrink-0 place-items-center self-stretch justify-self-center",
+    "agentStatusSlot flex h-full min-h-full min-w-3.5 shrink-0 items-center justify-end gap-1.5 self-stretch",
   agentActivity:
-    "vui-routes-agentconversationdirectory agentActivity grid h-2.5 w-2.5 shrink-0 place-items-center",
+    "agentActivity grid h-2.5 w-2.5 shrink-0 place-items-center",
   agentActivitySpinner:
-    "vui-routes-agentconversationdirectory agentActivitySpinner animate-spin",
+    "agentActivitySpinner animate-spin",
   agentActivityRunning:
-    "vui-routes-agentconversationdirectory agentActivityRunning h-3 w-3 text-[var(--state-success)]",
+    "agentActivityRunning h-3 w-3 text-[var(--state-success)]",
   agentActivityApproval:
-    "vui-routes-agentconversationdirectory agentActivityApproval h-3 w-3 text-[var(--state-warning)]",
+    "agentActivityApproval h-3 w-3 text-[var(--state-warning)]",
   agentActivityError:
-    "vui-routes-agentconversationdirectory agentActivityError h-2.5 w-2.5 rounded-full bg-[var(--state-error)]",
+    "agentActivityError h-2.5 w-2.5 rounded-full bg-[var(--state-error)]",
   agentActivityCompleted:
-    "vui-routes-agentconversationdirectory agentActivityCompleted h-2.5 w-2.5 rounded-full bg-[var(--accent-cool)]",
+    "agentActivityCompleted h-2.5 w-2.5 rounded-full bg-[var(--accent-cool)]",
   agentMeta:
-    "vui-routes-agentconversationdirectory agentMeta flex min-w-0 items-center gap-1.5 overflow-hidden [font-size:var(--vui-font-xs)] leading-tight [color:var(--fg-secondary)]",
+    "agentMeta flex min-w-0 items-center gap-1.5 overflow-hidden [font-size:var(--vui-font-2xs)] font-normal leading-tight [color:var(--fg-secondary)]",
   agentMetaItem:
-    "vui-routes-agentconversationdirectory agentMetaItem min-w-0 truncate",
+    "agentMetaItem min-w-0 truncate",
   agentMetaCount:
-    "vui-routes-agentconversationdirectory agentMetaCount shrink-0 [color:var(--fg-tertiary)]",
+    "agentMetaCount shrink-0 rounded bg-[var(--vui-control-muted)] px-1.5 [font-size:var(--vui-font-xs)] tabular-nums [color:var(--fg-secondary)]",
   agentEmpty:
-    "vui-routes-agentconversationdirectory agentEmpty rounded-[var(--radius-control)] border border-dashed border-[var(--vui-border-subtle)] px-2.5 py-3 [font-size:var(--vui-font-sm)] [color:var(--fg-secondary)]",
+    "agentEmpty rounded-[var(--radius-control)] border border-dashed border-[var(--vui-border-subtle)] px-2.5 py-3 [font-size:var(--vui-font-sm)] [color:var(--fg-secondary)]",
 } as const;
 
 export default styles;

@@ -10,13 +10,7 @@ collections.  Both commands are team-authorized (never operator-only):
   offer points at inspection instead).
 - ``inspect_knowledge_collection``: available on any non-archived run.
 
-Rollout gating:
-- ``mode = "off"``: both offers hidden — the disabled semantics stay
-  unambiguous at the offer layer instead of surfacing blocked placeholders.
-- ``mode = "shadow"``: inspection only.  Shadow is a comparison projection
-  and must never create a real child run, so the ensure offer does not exist
-  there (plan §10.1).
-- ``mode = "on"``: both offers surface.
+The canonical architecture always exposes this child-workflow capability.
 """
 
 from __future__ import annotations
@@ -43,48 +37,35 @@ def build_knowledge_collection_offers(
 ) -> list[CommandOffer]:
     """One ensure offer anchored at the run's active node plus one inspect
     offer for the whole run."""
-    from ..knowledge_rollout import (
-        knowledge_ensure_enabled,
-        knowledge_inspect_enabled,
-    )
-
-    ensure_enabled = knowledge_ensure_enabled()
-    inspect_enabled = knowledge_inspect_enabled()
-    if not ensure_enabled and not inspect_enabled:
-        # mode="off": the sideflow surface stays invisible; no offer rows at
-        # all so clients cannot even render a disabled placeholder.
-        return []
-
     offers: list[CommandOffer] = []
     node_id = str(active_node_id or run.active_node_id or "").strip() or None
 
-    if ensure_enabled and not _offer_blocked(run, invocations):
+    if not _offer_blocked(run, invocations):
         offers.append(_ensure_offer(run, node_id=node_id, available=True, live=None))
-    elif ensure_enabled:
+    else:
         live = _live_invocation(invocations)
         offers.append(
             _ensure_offer(run, node_id=node_id, available=False, live=live)
         )
 
-    if inspect_enabled:
-        inspect_available = str(run.status) != "archived"
-        offers.append(
-            CommandOffer(
-                command=WorkflowCommandKind.INSPECT_KNOWLEDGE_COLLECTION,
-                node_id=None,
-                available=inspect_available,
-                label="查看知识搜集进度",
-                reason_code=(
-                    "inspect_available" if inspect_available else "run_archived"
-                ),
-                blocker_ids=() if inspect_available else ("run_archived",),
-                idempotency_key=(
-                    f"offer:{run.run_id}:inspect_knowledge_collection:"
-                    f"v{run.run_version}"
-                ),
-                expected_run_version=run.run_version,
-            )
+    inspect_available = str(run.status) != "archived"
+    offers.append(
+        CommandOffer(
+            command=WorkflowCommandKind.INSPECT_KNOWLEDGE_COLLECTION,
+            node_id=None,
+            available=inspect_available,
+            label="查看知识搜集进度",
+            reason_code=(
+                "inspect_available" if inspect_available else "run_archived"
+            ),
+            blocker_ids=() if inspect_available else ("run_archived",),
+            idempotency_key=(
+                f"offer:{run.run_id}:inspect_knowledge_collection:"
+                f"v{run.run_version}"
+            ),
+            expected_run_version=run.run_version,
         )
+    )
     return offers
 
 

@@ -330,50 +330,7 @@ class RealDomainPorts:
             },
             expected_node_ids=[action.node_id],
         )
-        produced = required_artifact_kinds(action.node_id, definition=definition)
-        snapshot = self._run_input_snapshot(action.run_id)
-        policy = snapshot.get("stageOneCompletionPolicy")
-        if not isinstance(policy, Mapping):
-            return produced
-        closure_node_id = str(policy.get("closureNodeId") or "").strip()
-        raw_required = policy.get("requiredArtifactKinds")
-        if closure_node_id != action.node_id:
-            return produced
-        if not isinstance(raw_required, list) or not raw_required:
-            raise RuntimeError("stage-one completion policy artifact kinds are missing")
-        stage_one_required = tuple(
-            str(item).strip() for item in raw_required if str(item).strip()
-        )
-        if len(stage_one_required) != len(raw_required):
-            raise RuntimeError("stage-one completion policy artifact kinds are invalid")
-        # Hypothesis-first chain launches cannot demand the authorities whose
-        # source (approved question artifact / canonically addressable review
-        # rows) the launch shape never produces; the shape gate waives exactly
-        # those, with persisted evidence, and leaves every other demand and
-        # every question-driven run untouched.
-        try:
-            from .stage_one_shape_gate import (
-                downgraded_stage_one_kinds,
-                drop_downgraded_kinds,
-            )
-
-            downgrades = downgraded_stage_one_kinds(
-                stage_one_required,
-                team_id=str(snapshot.get("teamId") or ""),
-                question_id=str(snapshot.get("questionId") or ""),
-                input_snapshot=snapshot,
-                source_collection_run_id=str(
-                    snapshot.get("sourceCollectionRunId") or ""
-                ),
-                workflow_run_id=str(action.run_id or ""),
-            )
-        except Exception:  # noqa: BLE001 - gate demand stays complete on doubt
-            downgrades = {}
-        return tuple(
-            dict.fromkeys(
-                (*produced, *drop_downgraded_kinds(stage_one_required, downgrades))
-            )
-        )
+        return required_artifact_kinds(action.node_id, definition=definition)
 
     def _run_input_snapshot(self, run_id: str) -> dict[str, Any]:
         run = self._store.get_run(run_id)
@@ -1009,25 +966,6 @@ class RealDomainPorts:
             return AgentTurnResult(materialized_refs=(), handle=handle)
 
         snapshot = self._run_input_snapshot(action.run_id)
-        # Stage-one closure authorities live in the hypothesis-first chain, not
-        # in the Agent turn output.  They are materialized AFTER the turn's own
-        # artifacts land and BEFORE the refs readback (see the
-        # ``before_refs_collection`` hook below / the fan-out aggregation
-        # path): embedding the gate/receipts before the turn ran let the turn
-        # append a newer ungated ``hypothesis_set`` row, so the completion gate
-        # and closeout kept reading a latest row without the gate
-        # (``stage_one_human_gate_missing`` retry loop).  A skipped/blocked
-        # materialization keeps the existing fail-closed
-        # ``required_artifact_missing`` semantics untouched.
-        materialize_chain_authority = (
-            (
-                lambda: self._materialize_stage_one_chain_authority(
-                    action=action, snapshot=snapshot
-                )
-            )
-            if action.node_id == "hypothesis_design"
-            else None
-        )
         bounded = _bounded_agent_node_can_complete(
             action.node_id,
             team_id=str(snapshot.get("teamId") or ""),
@@ -1057,7 +995,6 @@ class RealDomainPorts:
                 action=action,
                 handle=handle,
                 snapshot=snapshot,
-                materialize_chain_authority=materialize_chain_authority,
             )
         return complete_agent_turn_outputs(
             action=action,
@@ -1065,69 +1002,7 @@ class RealDomainPorts:
             input_snapshot=snapshot,
             required_kinds=self.required_artifact_kinds(action),
             return_result=True,
-            before_refs_collection=materialize_chain_authority,
         )
-
-    _CHAIN_AUTHORITY_REPORT_LIMIT = 32
-
-    def _remember_chain_authority_report(
-        self, action: PendingAction, report: Mapping[str, Any]
-    ) -> None:
-        """Keep the latest materialization report per action for problem detail."""
-        reports = getattr(self, "_chain_authority_reports", None)
-        if not isinstance(reports, dict):
-            reports = {}
-            self._chain_authority_reports = reports
-        reports.pop(str(action.action_id), None)
-        reports[str(action.action_id)] = dict(report)
-        while len(reports) > self._CHAIN_AUTHORITY_REPORT_LIMIT:
-            reports.pop(next(iter(reports)))
-
-    def chain_authority_materialization_report(
-        self, action: PendingAction
-    ) -> dict[str, Any] | None:
-        """Return the node's last stage-one chain authority report, if any."""
-        reports = getattr(self, "_chain_authority_reports", None)
-        if not isinstance(reports, dict):
-            return None
-        report = reports.get(str(action.action_id))
-        return dict(report) if isinstance(report, Mapping) else None
-
-    def _materialize_stage_one_chain_authority(
-        self, *, action: PendingAction, snapshot: Mapping[str, Any]
-    ) -> dict[str, Any] | None:
-        """Best-effort chain authority materialization for the closure node.
-
-        Never raises and never fakes success: on any failure the report records
-        the error and the artifact requirement gate keeps its existing
-        fail-closed behaviour.
-        """
-        team_id = str(snapshot.get("teamId") or "").strip()
-        question_id = str(snapshot.get("questionId") or "").strip()
-        if not team_id or not question_id:
-            return None
-        try:
-            from .hypothesis_first_chain import materialize_stage_one_node_authority
-
-            report = materialize_stage_one_node_authority(
-                team_id,
-                question_id,
-                workflow_run_id=str(action.run_id or "").strip(),
-                node_run_id=str(action.node_run_id or "").strip(),
-                input_snapshot_hash=str(action.input_snapshot_hash or "").strip(),
-                source_collection_run_id=str(
-                    snapshot.get("sourceCollectionRunId") or ""
-                ).strip(),
-                input_snapshot=snapshot,
-            )
-        except Exception as exc:  # noqa: BLE001 - diagnostic only, gate still authoritative
-            report = {
-                "status": "error",
-                "reason": str(exc) or type(exc).__name__,
-                "missingKinds": [],
-            }
-        self._remember_chain_authority_report(action, report)
-        return report
 
     def _create_hypothesis_fan_out(
         self,
@@ -1360,7 +1235,6 @@ class RealDomainPorts:
         action: PendingAction,
         handle: AgentTaskHandle,
         snapshot: dict[str, Any],
-        materialize_chain_authority: Any = None,
     ) -> AgentTurnResult:
         """Collect candidate fragments and deterministically fan in a set.
 
@@ -1369,9 +1243,6 @@ class RealDomainPorts:
         requeue signal while any candidate is still live — the pump thread is
         never held waiting for children.  ``[research] blocking_fanout_wait``
         restores the legacy in-thread wait-per-child semantics.
-        ``materialize_chain_authority`` (never raises) runs after the fan-in
-        aggregation row lands and before the refs readback, so the closeout
-        gate/receipts are embedded on the exact row the completion gate reads.
         """
 
         from .agent_turn_completion import (
@@ -1854,12 +1725,6 @@ class RealDomainPorts:
             },
             discriminator="aggregation-completed",
         )
-        if callable(materialize_chain_authority):
-            # Same ordering contract as the non-fan-out path: the aggregation
-            # just appended the latest ``hypothesis_set`` row, so the stage-one
-            # gate/receipt embedding must target THAT row before the refs
-            # readback and closeout read it.
-            materialize_chain_authority()
         refs = collect_required_artifact_refs(
             required_kinds=self.required_artifact_kinds(action),
             team_id=team_id,
@@ -1976,7 +1841,7 @@ class RealDomainPorts:
 
 def _stage_for(node_id: str) -> str:
     _STAGE_BY_NODE = {
-        "problem_understanding": "knowledge_collection",
+        "problem_understanding": "problem_understanding",
         "source_finding": "knowledge_collection",
         "source_extraction": "knowledge_collection",
         "evidence_relations": "knowledge_collection",

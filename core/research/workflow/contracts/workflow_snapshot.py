@@ -432,21 +432,6 @@ class ResearchWorkflowSnapshot:
     # commandOffers entries (additive keys) so the canonical action DTO carries
     # requiresOperator/authorizationStatus/... without a second truth source.
     command_authorizations: tuple[CommandOfferAuthorization, ...] = ()
-    # How the read layer resolved this run's pinned definition:
-    # "pinned" | "legacy_default" | "degraded".  "degraded" means the run's
-    # version identity could not be honored and a fallback definition is in
-    # use — the snapshot is diagnostic-visible, never a silent substitution.
-    definition_resolution: str = "pinned"
-    # Current knowledge-sideflow rollout mode ("off" | "shadow" | "on") as
-    # read from trusted operator config at projection time.  Additive and
-    # diagnostic-visible so operators can see which surface is live without
-    # reading the config file.
-    knowledge_sideflow_mode: str = "off"
-    # Server-authored Stage 1 semantics.  This is a read projection over the
-    # pinned workflow definition and terminal run facts, not another lifecycle
-    # state machine.  Clients use it to distinguish the formal execution graph,
-    # the hf_* operator overlay, and the optional knowledge child workflow.
-    stage_one: Mapping[str, Any] = field(default_factory=dict)
 
     def _serialized_command_offers(self) -> list[dict[str, Any]]:
         auth_by_key = {
@@ -494,9 +479,4 @@ class ResearchWorkflowSnapshot:
                 node_id: badge.to_dict()
                 for node_id, badge in self.invocation_badges.items()
             },
-            "definitionResolution": str(self.definition_resolution or "pinned"),
-            "knowledgeSideflowMode": str(
-                self.knowledge_sideflow_mode or "off"
-            ),
-            "stageOne": dict(self.stage_one),
         }

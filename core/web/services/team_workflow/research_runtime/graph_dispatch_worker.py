@@ -48,7 +48,6 @@ from .block_projection import (
 from .blocked_reason import format_blocked_reason, problem_from_graph_error
 from .ids import new_id
 from .iteration_route import branch_decision_from_run, routed_successors
-from .stage_one_closeout import stage_one_terminal_facts
 
 # A run is created before START_NODE is accepted so the request can be made
 # idempotent.  That window must nevertheless be bounded: after this deadline
@@ -747,7 +746,9 @@ class GraphDispatchWorker:
         successors = successor_map(dispatch.workflow_version_id).get(dispatch.node_id, ())
         run = self._store.get_run(dispatch.run_id)
         branch = branch_decision_from_run(run)
-        routed = routed_successors(dispatch.node_id, branch)
+        routed = routed_successors(
+            dispatch.node_id, branch, dispatch.workflow_version_id
+        )
         if routed:
             successors = routed
         elif dispatch.node_id in {"iteration_decision", "version_governance"}:
@@ -1302,8 +1303,8 @@ class GraphDispatchWorker:
     ) -> GraphDispatchResult:
         """Lag-walk failed, but ledger already owns the retry target.
 
-        SCI-096: thread stays interrupted at ``source_finding`` (so
-        ``nextNodeIds`` is non-empty) while ``retry_node`` targets
+        A thread can stay interrupted at an earlier current-definition node
+        (so ``nextNodeIds`` is non-empty) while ``retry_node`` targets
         ``controlled_run`` attempt >= 2. Synthesize pending from ledger
         identity instead of raising ``checkpoint_node_mismatch``.
         """
@@ -1375,8 +1376,7 @@ class GraphDispatchWorker:
     ) -> GraphDispatchResult | None:
         """Resume succeeded predecessors so retry can enter the target node.
 
-        Ledger may already be many hops ahead of LangGraph (SCI-096: thread
-        still at ``source_finding`` while retrying ``controlled_run``). Walk
+        Ledger may already be many hops ahead of LangGraph. Walk
         the unique linear path, resuming each succeeded + accepted hop.
         """
         path = _linear_successor_path(
@@ -1405,7 +1405,7 @@ class GraphDispatchWorker:
             return None
         # Re-enter the target interrupt with the ledger attempt. Never
         # Command.goto a different node — that overwrites active_node_id
-        # while leaving the stale source_finding interrupt in place.
+        # while leaving the stale predecessor interrupt in place.
         return self._result_at_target(dispatch, snapshot)
 
     def _resume_lagging_predecessor(
@@ -1415,7 +1415,7 @@ class GraphDispatchWorker:
 
         SCI-096: Command.goto split ``values.active_node_id`` from the persisted
         interrupt, then a later replay rebuilt that interrupt with an empty
-        ``runId`` (``nr--source_finding-a1``). Ledger may already be many hops
+        ``runId``. Ledger may already be many hops
         ahead, and compact snapshots can omit accepted handoffs, so this hop
         does not wait on handoff rows. It still refuses to fake-succeed a
         predecessor that is mid-flight unless the dispatch is a downstream
@@ -1514,7 +1514,7 @@ class GraphDispatchWorker:
         ):
             # Live SCI-096 interrupt already has formula identity. Resume it
             # before restart_attempt — time-travel on a dirty checkpoint can
-            # leave the hop at source_finding and look like success.
+            # leave the hop at the predecessor and look like success.
             try:
                 self._coordinator.resume_action(
                     replace(
@@ -1614,7 +1614,9 @@ class GraphDispatchWorker:
         ):
             merged["branch_decision"] = branch
         branch_for_route = str(merged.get("branch_decision") or branch or "")
-        routed = routed_successors(dispatch.node_id, branch_for_route)
+        routed = routed_successors(
+            dispatch.node_id, branch_for_route, dispatch.workflow_version_id
+        )
         if routed:
             successors = routed
         elif dispatch.node_id in {"iteration_decision", "version_governance"}:
@@ -1696,8 +1698,7 @@ class GraphDispatchWorker:
                 latest = uow.repository.latest_attempt(dispatch.run_id, pending.node_id)
                 if latest is not None and latest.attempt == pending.attempt:
                     # 同一节点中断点恢复（命令层已通过 readiness）：直接 dispatching。
-                    # 已终态的 attempt 不得倒回 dispatching（SCI-096 泵曾把
-                    # source_finding succeeded → dispatching 打爆）。
+                    # 已终态的 attempt 不得倒回 dispatching。
                     try:
                         current_status = NodeAttemptStatus(latest.status)
                     except ValueError:
@@ -2021,8 +2022,13 @@ class GraphDispatchWorker:
         """
         if not run_id:
             return False
+        run = self._store.get_run(run_id)
+        if run is None:
+            return False
         try:
-            snapshot = self._coordinator.snapshot(run_id)
+            snapshot = self._coordinator.snapshot(
+                run_id, str(getattr(run, "workflow_version_id", "") or "")
+            )
         except Exception as exc:
             _record_repair_skip(run_id, "snapshot", exc)
             return False
@@ -2442,13 +2448,6 @@ def _terminal_facts_for_close(
     """
     if _is_sideflow_run(run):
         return "knowledge_sideflow", "knowledge_package_accepted"
-    stage_one = stage_one_terminal_facts(
-        run,
-        node_id=node_id,
-        state_update=state_update,
-    )
-    if stage_one is not None:
-        return stage_one
     return terminal_facts_for_run(run)
 
 
@@ -2459,21 +2458,12 @@ def _run_terminal_close_applies(
 ) -> bool:
     """Whether a completed dispatch on this run closes it as succeeded.
 
-    Main-flow runs close only on ``result_package`` (historical behavior).
+    Main-flow runs close only on ``result_package``.
     Knowledge sideflow child runs close on their terminal
     ``knowledge_handoff`` node, which has no outgoing edge in the pinned
     sideflow definition.
     """
     if _is_sideflow_run(run):
-        return True
-    if (
-        stage_one_terminal_facts(
-            run,
-            node_id=node_id,
-            state_update=state_update,
-        )
-        is not None
-    ):
         return True
     return str(node_id or "") == "result_package"
 
@@ -2521,7 +2511,7 @@ def _sideflow_child_failed(
 def _linear_successor_path(
     start_node_id: str,
     target_node_id: str,
-    workflow_version_id: str = "",
+    workflow_version_id: str,
 ) -> list[str] | None:
     """Unique linear path from an interrupt node to a downstream retry target."""
     start = str(start_node_id or "").strip()

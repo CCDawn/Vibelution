@@ -4,7 +4,7 @@ import type { ChallengeQuestionRunDetailPayload } from "../../../api/types";
 import {
   deriveChallengeQuestionStageProjection,
   stageOneStatusCopy,
-  stageTwoInactiveHint,
+  stageTwoProgressHint,
   stageTwoStatusCopy,
   stageZoneTitle,
 } from "./challengeQuestionStageModel";
@@ -58,11 +58,27 @@ describe("challengeQuestionStageModel", () => {
     expect(stageOneStatusCopy(projection.stageOne, "en")).toBe("Generating");
   });
 
-  it("never activates stage two and labels it inactive", () => {
-    const projection = deriveChallengeQuestionStageProjection(detailWith({}));
-    expect(projection.stageTwoActive).toBe(false);
-    expect(stageTwoStatusCopy("zh")).toBe("未激活");
-    expect(stageTwoInactiveHint("zh")).toContain("需按题显式开启");
+  it("does not infer phase-two activation from question approval", () => {
+    const waiting = deriveChallengeQuestionStageProjection(
+      detailWith({ recordStatus: "pending_review", gateDecision: "pending" }),
+    );
+    expect(waiting.stageTwoActive).toBe(null);
+    expect(stageTwoStatusCopy(false, "zh")).toBe("未激活");
+    expect(stageTwoProgressHint(false, "zh")).toContain("知识发布");
+
+    const approved = deriveChallengeQuestionStageProjection(
+      detailWith({ recordStatus: "approved" }),
+    );
+    expect(approved.stageTwoActive).toBe(null);
+  });
+
+  it("projects the backend phase boundary without treating unlock as a running experiment", () => {
+    const approved = detailWith({ recordStatus: "approved" });
+    expect(deriveChallengeQuestionStageProjection(approved, { phase2Activated: false }).stageTwoActive).toBe(false);
+    const active = deriveChallengeQuestionStageProjection(approved, { phase2Activated: true });
+    expect(active.stageTwoActive).toBe(true);
+    expect(stageTwoStatusCopy(true, "zh")).toBe("已解锁");
+    expect(stageTwoStatusCopy(null, "zh")).toBe("状态待确认");
   });
 
   it("treats a blank research plan as no proposal and a filled one as proposal-only", () => {
@@ -79,7 +95,7 @@ describe("challengeQuestionStageModel", () => {
     const projection = deriveChallengeQuestionStageProjection(undefined);
     expect(projection).toEqual({
       stageOne: "hypothesis_generating",
-      stageTwoActive: false,
+      stageTwoActive: null,
       hasResearchPlanProposal: false,
     });
   });

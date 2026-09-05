@@ -25,7 +25,7 @@ def test_retry_attempt_from_terminal_checkpoint_rebuilds_interrupt(
     harness = GraphHarness(tmp_path)
     try:
         harness.seed()
-        pending = harness.start_thread_to("source_finding")
+        pending = harness.start_thread_to("hypothesis_design")
         assert pending is not None
         payload = json.loads(pending.payload_json)
         harness.consume_adapter(pending.action_id)
@@ -45,10 +45,11 @@ def test_retry_attempt_from_terminal_checkpoint_rebuilds_interrupt(
                 action_id=receipt.action_id,
                 run_id="run-test",
                 node_run_id=receipt.node_run_id,
-                node_id="source_finding",
+                node_id="hypothesis_design",
                 attempt=1,
                 dispatch_kind="resume_action",
                 team_id="research-team",
+                workflow_version_id="wv-268aa6e8dea8",
                 receipt=receipt,
             )
         )
@@ -59,22 +60,23 @@ def test_retry_attempt_from_terminal_checkpoint_rebuilds_interrupt(
             GraphDispatch(
                 action_id="act-retry-driver",
                 run_id="run-test",
-                node_run_id="nr-run-test-source_finding-a2",
-                node_id="source_finding",
+                node_run_id="nr-run-test-hypothesis_design-a2",
+                node_id="hypothesis_design",
                 attempt=2,
                 dispatch_kind="start",
                 team_id="research-team",
+                workflow_version_id="wv-268aa6e8dea8",
             )
         )
 
         assert retried.pending_action is not None
-        assert retried.pending_action.node_id == "source_finding"
+        assert retried.pending_action.node_id == "hypothesis_design"
         assert retried.pending_action.attempt == 2
         assert retried.pending_action.action_id == action_id_for(
-            "run-test", "source_finding", 2
+            "run-test", "hypothesis_design", 2
         )
-        assert harness.coordinator.snapshot("run-test")["nextNodeIds"] == [
-            "source_finding"
+        assert harness.coordinator.snapshot("run-test", "wv-268aa6e8dea8")["nextNodeIds"] == [
+            "hypothesis_design"
         ]
     finally:
         harness.close()
@@ -88,7 +90,7 @@ def test_enter_node_from_terminal_checkpoint_rebuilds_target_interrupt(
     harness = GraphHarness(tmp_path)
     try:
         harness.seed()
-        pending = harness.start_thread_to("source_finding")
+        pending = harness.start_thread_to("hypothesis_design")
         assert pending is not None
         payload = json.loads(pending.payload_json)
         harness.consume_adapter(pending.action_id)
@@ -107,10 +109,11 @@ def test_enter_node_from_terminal_checkpoint_rebuilds_target_interrupt(
                 action_id=receipt.action_id,
                 run_id="run-test",
                 node_run_id=receipt.node_run_id,
-                node_id="source_finding",
+                node_id="hypothesis_design",
                 attempt=1,
                 dispatch_kind="resume_action",
                 team_id="research-team",
+                workflow_version_id="wv-268aa6e8dea8",
                 receipt=receipt,
             )
         )
@@ -119,16 +122,17 @@ def test_enter_node_from_terminal_checkpoint_rebuilds_target_interrupt(
             GraphDispatch(
                 action_id="act-enter-driver",
                 run_id="run-test",
-                node_run_id="nr-run-test-source_extraction-a2",
-                node_id="source_extraction",
+                node_run_id="nr-run-test-protocol_design-a2",
+                node_id="protocol_design",
                 attempt=2,
                 dispatch_kind="start",
                 team_id="research-team",
+                workflow_version_id="wv-268aa6e8dea8",
             )
         )
 
         assert entered.pending_action is not None
-        assert entered.pending_action.node_id == "source_extraction"
+        assert entered.pending_action.node_id == "protocol_design"
         assert entered.pending_action.attempt == 2
     finally:
         harness.close()

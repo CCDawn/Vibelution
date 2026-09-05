@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Download, MoreHorizontal, RotateCcw } from "lucide-react";
 
 import { queryKeys } from "../../../api/queryKeys";
-import { fetchChallengeCupTokenUsage } from "../../../api/teamExperiment";
+import { fetchChallengeCupTokenUsage, fetchChallengePhaseBoundaryStatus } from "../../../api/teamExperiment";
 import { fetchHypothesisRounds } from "../../../api/hypothesisFirst";
 
 import type { ChallengeQuestionRunDetailPayload } from "../../../api/types";
@@ -149,7 +149,19 @@ export function ChallengeQuestionDetailPanel({
   const { lang } = useShellI18n();
   const isZh = lang === "zh";
   const detailAnchorGroups = isZh ? DETAIL_ANCHOR_GROUPS_ZH : DETAIL_ANCHOR_GROUPS_EN;
-  const stageProjection = deriveChallengeQuestionStageProjection(detail);
+  const phaseTeamId = detail?.teamId || teamId;
+  const phaseBoundaryQuery = useQuery({
+    queryKey: queryKeys.challengePhaseBoundary(phaseTeamId),
+    queryFn: ({ signal }) => fetchChallengePhaseBoundaryStatus(phaseTeamId, { signal }),
+    enabled: !readOnlyArchive && Boolean(phaseTeamId.trim()),
+    staleTime: 0,
+    refetchInterval: 15_000,
+    retry: false,
+  });
+  const stageProjection = deriveChallengeQuestionStageProjection(
+    detail,
+    phaseBoundaryQuery.isSuccess ? phaseBoundaryQuery.data : null,
+  );
   const tokenUsageQuery = useQuery({
     queryKey: queryKeys.challengeCupTokenUsage(teamId),
     queryFn: () => fetchChallengeCupTokenUsage(teamId),
@@ -410,7 +422,7 @@ export function ChallengeQuestionDetailPanel({
             <div className={css.anchorGroup} key={group.zone} data-stage-zone={group.zone}>
               <span className={css.anchorGroupTitle}>
                 {group.zone === "plan"
-                  ? `${stageZoneTitle(group.zone, lang)} · ${stageTwoStatusCopy(lang)}`
+                  ? `${stageZoneTitle(group.zone, lang)} · ${stageTwoStatusCopy(stageProjection.stageTwoActive, lang)}`
                   : stageZoneTitle(group.zone, lang)}
               </span>
               <span className={css.anchorGroupLinks}>
@@ -476,9 +488,10 @@ export function ChallengeQuestionDetailPanel({
           <TeamHypothesisRoundTimeline teamId={detail.teamId} questionId={detail.questionId} />
           <ChallengeQuestionStageZoneHeading
             zone="plan"
+            stageTwoActive={stageProjection.stageTwoActive}
             lang={lang}
           />
-          <ChallengeQuestionPlanSection detail={detail} lang={lang} />
+          <ChallengeQuestionPlanSection detail={detail} stageProjection={stageProjection} lang={lang} />
         </>
       )}
 

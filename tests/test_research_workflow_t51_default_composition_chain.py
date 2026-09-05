@@ -16,15 +16,16 @@ from pathlib import Path
 import pytest
 
 from core.research.competition.question_result_package import canonical_model_policy
-from core.research.workflow.challenge_cup_runtime import GraphDispatch, action_id_for
 from core.research.workflow.contracts import (
     ActorRef,
     CommandRequest,
-    ExecutionReceipt,
     WorkflowCommandKind,
 )
-from core.research.workflow.definition import build_challenge_cup_workflow_definition
 from core.research.workflow.definition_registry import register_or_resolve
+from core.research.workflow.knowledge_sideflow_definition import (
+    KNOWLEDGE_SIDEFLOW_WORKFLOW_ID,
+    build_knowledge_sideflow_workflow_definition,
+)
 from core.web.services.team_workflow.research_runtime.operator_authorization import (
     server_operator_scope,
 )
@@ -40,11 +41,7 @@ from tests._support.team_workflow.helpers import (
     _use_fake_local_research_config,
     _use_tmp_project_root,
 )
-from tests._support.workflow_ledger_helpers import (
-    FIXED_NOW_MS,
-    build_event_record,
-    build_run_record,
-)
+from tests._support.workflow_ledger_helpers import build_event_record, build_run_record
 
 
 def _seed_team_and_agents(tmp_path: Path):
@@ -106,7 +103,7 @@ def _seed_team_and_agents(tmp_path: Path):
 
 def _seed_run(store, *, team_id: str, project_id: str, agents: dict[str, str]) -> None:
     definition_identity = register_or_resolve(
-        build_challenge_cup_workflow_definition()
+        build_knowledge_sideflow_workflow_definition()
     )
     required_model_policy = canonical_model_policy(
         {
@@ -129,7 +126,7 @@ def _seed_run(store, *, team_id: str, project_id: str, agents: dict[str, str]) -
         "teamId": team_id,
         "projectId": project_id,
         "questionId": "SCI-096",
-        "workflowId": "challenge-cup-research",
+        "workflowId": KNOWLEDGE_SIDEFLOW_WORKFLOW_ID,
         "workflowVersionId": definition_identity.workflowVersionId,
         "researchBriefHash": "b" * 64,
         "datasetRefs": [],
@@ -199,6 +196,7 @@ def _seed_run(store, *, team_id: str, project_id: str, agents: dict[str, str]) -
         build_run_record(
             run_id="run-t518",
             team_id=team_id,
+            workflow_id=KNOWLEDGE_SIDEFLOW_WORKFLOW_ID,
             workflow_version_id=definition_identity.workflowVersionId,
             last_event_sequence=1,
             input_snapshot_hash="c" * 64,
@@ -227,53 +225,6 @@ def _seed_run(store, *, team_id: str, project_id: str, agents: dict[str, str]) -
         )
 
     store.submit(mutate, force_flush=True).result(timeout=10)
-
-
-def _seed_checkpoint_at_source_finding(runtime, *, team_id: str) -> None:
-    """Complete the unrelated entry checkpoint through the canonical graph API."""
-
-    node_id = "problem_understanding"
-    node_run_id = "nr-run-t518-problem_understanding-a1"
-    action_id = action_id_for("run-t518", node_id, 1)
-    started = runtime.coordinator.start_attempt(
-        GraphDispatch(
-            action_id=action_id,
-            run_id="run-t518",
-            node_run_id=node_run_id,
-            node_id=node_id,
-            attempt=1,
-            dispatch_kind="start",
-            input_snapshot_hash="c" * 64,
-            workflow_version_id=runtime.store.get_run(
-                "run-t518"
-            ).workflow_version_id,
-            team_id=team_id,
-        )
-    )
-    assert started.pending_action is not None
-    assert started.pending_action.node_id == node_id
-    advanced = runtime.coordinator.resume_action(
-        GraphDispatch(
-            action_id=action_id,
-            run_id="run-t518",
-            node_run_id=node_run_id,
-            node_id=node_id,
-            attempt=1,
-            dispatch_kind="resume_action",
-            receipt=ExecutionReceipt(
-                action_id=action_id,
-                node_run_id=node_run_id,
-                outcome="succeeded",
-                artifact_receipt_ids=(),
-                execution_anchor_id=None,
-                budget_receipt_id=None,
-                problem=None,
-                completed_at_ms=FIXED_NOW_MS,
-            ),
-        )
-    )
-    assert advanced.pending_action is not None
-    assert advanced.pending_action.node_id == "source_finding"
 
 
 def _seed_problem_context(runtime, *, seeded: dict[str, str]) -> None:
@@ -415,8 +366,6 @@ def test_deterministic_composition_integration_gate(
             agents=seeded,
         )
         _seed_problem_context(runtime, seeded=seeded)
-        _seed_checkpoint_at_source_finding(runtime, team_id=seeded["teamId"])
-
         with server_operator_scope("u-1", roles=("operator",)):
             receipt = runtime.command_service.submit(
                 CommandRequest(
@@ -474,6 +423,66 @@ def test_deterministic_composition_integration_gate(
         run_snap = json.loads(runtime.store.get_run("run-t518").input_snapshot_json)
         sc_run_id = str(run_snap.get("sourceCollectionRunId") or "")
         assert sc_run_id
+
+        from core.web.services import data_processing_service
+        from core.web.services import team_workflow_orchestration_service as orch
+        from core.web.services.team_workflow.source_collection.search_execution import (
+            project_source_collection_search_trace,
+        )
+
+        assignment_payload = data_processing_service.list_collection_assignments(
+            sc_run_id
+        )
+        finder_assignment = next(
+            item
+            for item in assignment_payload["assignments"]
+            if item["agentId"] == seeded["finderId"]
+        )
+        assigned_queries = finder_assignment["scope"]["assignedQueries"]
+        required_perspectives = {
+            "mechanism",
+            "independent_baseline",
+            "limitation_or_null",
+            "falsification",
+        }
+        assert {item["perspective"] for item in assigned_queries} == required_perspectives
+        assert all(item["queryId"] and item["query"] for item in assigned_queries)
+
+        search_trace = project_source_collection_search_trace(
+            seeded["teamId"],
+            sc_run_id,
+            assignment_id=finder_assignment["assignmentId"],
+        )
+        assert {item["perspective"] for item in search_trace} == required_perspectives
+        assert {
+            (item["assignmentId"], item["queryId"], item["query"])
+            for item in search_trace
+        } == {
+            (
+                finder_assignment["assignmentId"],
+                item["queryId"],
+                item["query"],
+            )
+            for item in assigned_queries
+        }
+        assert all(item["status"] == "found" and item["eventIds"] for item in search_trace)
+
+        candidate_payload = orch.list_candidate_store(
+            seeded["teamId"],
+            candidate_type="source_manifest",
+        )
+        candidate_urls = {
+            str(item.get("sourceUrl") or "").strip()
+            for item in candidate_payload["candidates"]
+            if str((item.get("metadata") or {}).get("sourceCollectionRunId") or "")
+            == sc_run_id
+        }
+        assert candidate_urls
+        assert all(
+            candidate_urls.intersection(item["resultRefs"])
+            for item in search_trace
+        )
+        assert int(stub_counters["provider_calls"]) == len(assigned_queries)
 
         _drive_until_node_succeeded(runtime, "source_extraction")
         extraction = runtime.store.latest_attempt("run-t518", "source_extraction")

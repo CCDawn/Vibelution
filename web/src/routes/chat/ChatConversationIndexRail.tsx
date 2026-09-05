@@ -1,13 +1,15 @@
 import {
   BellRing,
-  CheckSquare,
+  Bot,
   ChevronRight,
+  MessageSquarePlus,
   MessageCircleHeart,
-  Plus,
   Search,
+  Plus,
+  X,
   UsersRound,
 } from "lucide-react";
-import type { Dispatch, ReactNode, Ref, SetStateAction } from "react";
+import { useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type Ref, type SetStateAction } from "react";
 
 import type {
   AgentInstance,
@@ -20,13 +22,16 @@ import type {
 } from "../../api/types";
 import {
   VButton,
+  VCommandPalette,
   VContextualHint,
-  VInput,
+  VDropdownMenu,
+  VNativeButton,
   VNativeInput,
   VStateSurface,
   VStringSelect,
   VTabs,
 } from "../../components/vui";
+import type { VDropdownMenuItem } from "../../components/vui";
 import type { TranslationKey } from "../../i18n/dictionary";
 import { agentDisplayInfo } from "../agentDisplay";
 import {
@@ -54,8 +59,11 @@ export type ChatConversationIndexRailProps = {
   conversationIndexCollapsed: boolean;
   conversationIndexOverlayOpen: boolean;
   conversationIndexPanel: ReactNode;
+  directoryFilterText: string;
+  onDirectoryFilterChange: (value: string) => void;
   conversationIndexPaneClassName: string;
   createGroupRoomPending: boolean;
+  createSessionPending: boolean;
   createAgentButtonRef?: Ref<HTMLButtonElement>;
   describeError: (error: unknown, fallback: string) => string;
   expandedGroupAgentDetailsBySessionId: Map<string, { data?: SessionDetail; isPending?: boolean; isError?: boolean; error?: unknown }>;
@@ -70,6 +78,7 @@ export type ChatConversationIndexRailProps = {
   locale: string;
   numberFormatter: Intl.NumberFormat;
   onCreateAgent: () => void;
+  onCreateSession: () => void;
   onCreateGroupRoom: () => void;
   onOpenDirectSession: (sessionId: string) => void;
   onPrefetchDirectSession?: (sessionId: string) => void;
@@ -109,21 +118,15 @@ export type ChatConversationIndexRailProps = {
   statusLabel: (status: string) => string;
   resolveModelLabel: (modelId: string) => string | undefined;
   rightIndexPanel: ConversationIndexPanelKey;
-  sessionFilter: string;
   sessionsById: Map<string, SessionSummary>;
   setExpandedGroupAgentSessionIds: Dispatch<SetStateAction<string[]>>;
   setGroupModeDraft: Dispatch<SetStateAction<string>>;
   setGroupPurposeDraft: Dispatch<SetStateAction<string>>;
   setGroupTitleDraft: Dispatch<SetStateAction<string>>;
   setRightIndexPanel: Dispatch<SetStateAction<ConversationIndexPanelKey>>;
-  setSessionFilter: Dispatch<SetStateAction<string>>;
   standardGroupRoomActive: boolean;
   t: (key: TranslationKey) => string;
   currentSessionLabel: string;
-  sessionBulkSelectVisibleVisible?: boolean;
-  sessionBulkSelectVisibleLabel?: string;
-  onSessionBulkSelectVisible?: () => void;
-  sessionBulkSelectVisibleDisabled?: boolean;
 };
 
 export function ChatConversationIndexRail(props: ChatConversationIndexRailProps) {
@@ -141,8 +144,11 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
     conversationIndexCollapsed,
     conversationIndexOverlayOpen,
     conversationIndexPanel,
+    directoryFilterText,
+    onDirectoryFilterChange,
     conversationIndexPaneClassName,
     createGroupRoomPending,
+    createSessionPending,
     createAgentButtonRef,
     describeError,
     expandedGroupAgentDetailsBySessionId,
@@ -157,6 +163,7 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
     locale,
     numberFormatter,
     onCreateAgent,
+    onCreateSession,
     onCreateGroupRoom,
     onOpenDirectSession,
     onPrefetchDirectSession,
@@ -176,28 +183,88 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
     statusLabel,
     resolveModelLabel,
     rightIndexPanel,
-    sessionFilter,
     sessionsById,
     setExpandedGroupAgentSessionIds,
     setGroupModeDraft,
     setGroupPurposeDraft,
     setGroupTitleDraft,
     setRightIndexPanel,
-    setSessionFilter,
     standardGroupRoomActive,
     t,
     currentSessionLabel,
-    sessionBulkSelectVisibleVisible = false,
-    sessionBulkSelectVisibleLabel = "",
-    onSessionBulkSelectVisible,
-    sessionBulkSelectVisibleDisabled = false,
   } = props;
+
+  const [createMenuOpen, setCreateMenuOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [directorySearchOpen, setDirectorySearchOpen] = useState(false);
+  const directorySearchRef = useRef<HTMLButtonElement>(null);
+  const closeDirectorySearch = () => {
+    onDirectoryFilterChange("");
+    setDirectorySearchOpen(false);
+    directorySearchRef.current?.focus();
+  };
+  const searchItems = useMemo(() => Array.from(sessionsById.values()).map((session) => ({
+    id: session.id,
+    group: session.teamName || session.agentDisplayName || (lang === "zh" ? "会话" : "Chats"),
+    label: String(session.taskTitle || session.resultCard?.title || session.title || session.id).trim(),
+    detail: String(session.taskSummary || session.resultCard?.summary || session.agentDisplayName || "").trim() || undefined,
+    keywords: [
+      session.agentCode,
+      session.agentDisplayName,
+      session.workspacePath,
+      session.currentPhase,
+      session.status,
+    ].filter(Boolean).join(" "),
+    onRun: () => onOpenDirectSession(session.id),
+  })), [lang, onOpenDirectSession, sessionsById]);
+
+  const createItems = useMemo<VDropdownMenuItem[]>(() => [
+    {
+      id: "new-session",
+      icon: <MessageSquarePlus size={14} />,
+      label: lang === "zh" ? "新建会话" : "New session",
+      disabled: createSessionPending,
+      onSelect: onCreateSession,
+    },
+    {
+      id: "new-agent",
+      icon: <Bot size={14} />,
+      label: lang === "zh" ? "新建 Agent" : "New Agent",
+      onSelect: onCreateAgent,
+    },
+    {
+      id: "new-group",
+      icon: <UsersRound size={14} />,
+      label: lang === "zh" ? "新建群聊" : "New group",
+      disabled: createGroupRoomPending,
+      onSelect: onToggleGroupComposer,
+    },
+  ], [createGroupRoomPending, createSessionPending, lang, onCreateAgent, onCreateSession, onToggleGroupComposer]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) {
+        return;
+      }
+      const key = event.key.toLocaleLowerCase();
+      if (key === "k") {
+        event.preventDefault();
+        setSearchOpen(true);
+      } else if (key === "n") {
+        event.preventDefault();
+        setCreateMenuOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   return (
       <aside
         id="chat-conversation-index-pane"
         className={conversationIndexPaneClassName}
         data-vui-region="chat-session-index"
+        aria-keyshortcuts="Control+K Meta+K"
         aria-hidden={conversationIndexCollapsed}
         role={conversationIndexOverlayOpen ? "dialog" : undefined}
         aria-label={conversationIndexOverlayOpen ? (lang === "zh" ? "会话列表" : "Conversation list") : undefined}
@@ -253,27 +320,60 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
             </div>
           )
         ) : (
-          <div className={styles.panelSearch}>
-            <Search size={15} aria-hidden="true" />
-            <VInput
-              className={styles.panelSearchInput}
-              type="text"
-              value={sessionFilter}
-              onChange={(event) => setSessionFilter(event.target.value)}
-              placeholder={t("searchSessionsPlaceholder")}
-              aria-label={t("searchSessionsPlaceholder")}
+          <div className={styles.railTop}>
+            <h2 className={styles.railTitle}>{lang === "zh" ? "会话" : "Chats"}</h2>
+            <VNativeButton
+              ref={directorySearchRef}
+              type="button"
+              data-vui="icon-button"
+              className={styles.railActionButton}
+              aria-label={directorySearchOpen ? (lang === "zh" ? "关闭搜索" : "Close search") : (lang === "zh" ? "搜索 Agent 或团队" : "Search Agents or teams")}
+              aria-expanded={directorySearchOpen}
+              aria-controls={directorySearchOpen ? "chat-directory-search" : undefined}
+              onClick={() => directorySearchOpen ? closeDirectorySearch() : setDirectorySearchOpen(true)}
+              title={lang === "zh" ? "搜索 Agent 或团队；Ctrl+K 搜索全部任务" : "Search Agents or teams; Ctrl+K searches all tasks"}
+            >
+              {directorySearchOpen ? <X size={16} aria-hidden="true" /> : <Search size={16} aria-hidden="true" />}
+            </VNativeButton>
+            <VDropdownMenu
+              aria-label={lang === "zh" ? "新建任务" : "Create task"}
+              align="start"
+              side="bottom"
+              open={createMenuOpen}
+              onOpenChange={setCreateMenuOpen}
+              items={createItems}
+              trigger={(
+                <VNativeButton
+                  ref={createAgentButtonRef}
+                  id="chat-agent-create-trigger"
+                  type="button"
+                  data-vui="icon-button"
+                  className={styles.railActionButton}
+                  aria-label={lang === "zh" ? "新建任务" : "Create task"}
+                  aria-keyshortcuts="Control+N Meta+N"
+                  title={lang === "zh" ? "新建任务（Ctrl+N）" : "Create task (Ctrl+N)"}
+                >
+                  <Plus size={16} aria-hidden="true" />
+                </VNativeButton>
+              )}
             />
-            {sessionBulkSelectVisibleVisible && onSessionBulkSelectVisible ? (
-              <VButton
-                type="button"
-                variant="secondary"
-                className={styles.panelSearchBulkSelect}
-                icon={<CheckSquare size={14} />}
-                isDisabled={sessionBulkSelectVisibleDisabled}
-                onPress={onSessionBulkSelectVisible}
-              >
-                {sessionBulkSelectVisibleLabel}
-              </VButton>
+            {directorySearchOpen ? (
+              <div id="chat-directory-search" className={styles.directorySearch}>
+                <VNativeInput
+                  autoFocus
+                  aria-label={lang === "zh" ? "搜索 Agent 或团队" : "Search Agents or teams"}
+                  placeholder={lang === "zh" ? "搜索 Agent 或团队" : "Search Agents or teams"}
+                  value={directoryFilterText}
+                  onChange={(event) => onDirectoryFilterChange(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      closeDirectorySearch();
+                    }
+                  }}
+                  className={styles.directorySearchInput}
+                />
+              </div>
             ) : null}
           </div>
         )}
@@ -453,28 +553,6 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
             )
           ) : (
             <div className={styles.conversationIndexLayout}>
-            <div className={styles.sessionActionRow}>
-              <VButton
-                ref={createAgentButtonRef}
-                id="chat-agent-create-trigger"
-                type="button"
-                className={styles.newSessionButton}
-                icon={<Plus size={15} />}
-                onClick={onCreateAgent}
-              >
-                <span>{lang === "zh" ? "新建 Agent" : "New Agent"}</span>
-              </VButton>
-              <VButton
-                type="button"
-                className={styles.newGroupButton}
-                icon={<UsersRound size={15} />}
-                onClick={onToggleGroupComposer}
-                aria-expanded={groupComposerOpen}
-                isDisabled={createGroupRoomPending}
-              >
-                <span>{groupComposerOpen ? (lang === "zh" ? "收起" : "Close") : (lang === "zh" ? "新建群聊" : "New group")}</span>
-              </VButton>
-            </div>
             <div className={styles.conversationIndexScrollRegion}>
             {conversationIndexPanel}
             {groupComposerOpen ? (
@@ -608,6 +686,18 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
             </div>
           )}
           </div>
+          <VCommandPalette
+            open={searchOpen}
+            onOpenChange={setSearchOpen}
+            items={searchItems}
+            labels={{
+              searchPlaceholder: lang === "zh" ? "搜索任务、会话摘要或工作区" : "Search tasks, summaries, or workspaces",
+              emptyTitle: lang === "zh" ? "没有找到匹配任务" : "No matching tasks",
+              hint: lang === "zh" ? "↑↓ 选择 · Enter 打开 · Esc 关闭" : "↑↓ Select · Enter open · Esc close",
+            }}
+            maxVisible={7}
+            data-vui="chat-left-rail-search"
+          />
         </aside>
   );
 }

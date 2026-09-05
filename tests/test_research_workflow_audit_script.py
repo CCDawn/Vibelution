@@ -43,7 +43,7 @@ def _build_run_record(**overrides) -> dict:
     record = {
         "runId": run_id,
         "workflowId": "challenge-cup-research",
-        "workflowVersionId": "challenge-cup-research-v2.1.0",
+        "workflowVersionId": "wv-268aa6e8dea8",
         "structureHash": "a" * 64,
         "teamId": "research-team",
         "projectId": "challenge-sci-096",
@@ -57,7 +57,7 @@ def _build_run_record(**overrides) -> dict:
             "teamId": "research-team",
             "projectId": "challenge-sci-096",
             "questionId": "SCI-096",
-            "workflowVersionId": "challenge-cup-research-v2.1.0",
+            "workflowVersionId": "wv-268aa6e8dea8",
             "snapshotHash": "b" * 64,
             "budgetPolicy": {},
             "agentBindingSnapshot": [],

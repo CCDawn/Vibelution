@@ -7,6 +7,8 @@ from pathlib import Path
 import pytest
 
 from core.research.workflow.contracts import WorkflowCommandKind
+from core.research.workflow.definition import build_challenge_cup_workflow_definition
+from core.research.workflow.definition_registry import definition_identity
 from core.web.services.team_workflow.research_runtime.command_service import (
     WorkflowCommandError,
 )
@@ -17,6 +19,11 @@ from core.web.services.team_workflow.research_runtime.operator_authorization imp
     server_operator_scope,
 )
 from tests._support.graph_helpers import GraphHarness
+
+
+CURRENT_VERSION_ID = definition_identity(
+    build_challenge_cup_workflow_definition()
+).workflowVersionId
 
 
 def test_fork_revision_requires_checkpoint_id(tmp_path: Path) -> None:
@@ -31,11 +38,11 @@ def test_fork_revision_requires_checkpoint_id(tmp_path: Path) -> None:
                 harness.commands.request(
                     command=WorkflowCommandKind.FORK_REVISION,
                     run_id="run-parent",
-                    node_id="source_finding",
+                    node_id="hypothesis_design",
                     expected_run_version=2,
                     idempotency_key="ui:fork-no-ckpt",
                     payload={
-                        "fromNodeId": "source_finding",
+                        "fromNodeId": "hypothesis_design",
                         "reason": "missing checkpoint",
                     },
                 )
@@ -55,22 +62,22 @@ def test_fork_revision_child_thread_id_equals_run_id_and_resumes(
         )
 
         harness.seed(run_id="run-parent")
-        harness.start_thread_to("source_finding", run_id="run-parent")
-        parent_snap = harness.coordinator.snapshot("run-parent")
+        harness.start_thread_to("hypothesis_design", run_id="run-parent")
+        parent_snap = harness.coordinator.snapshot("run-parent", CURRENT_VERSION_ID)
         parent_ckpt = parent_snap["checkpointId"]
         assert parent_ckpt
-        assert parent_snap["nextNodeIds"] == ["source_finding"]
+        assert parent_snap["nextNodeIds"] == ["hypothesis_design"]
 
         with server_operator_scope("u-1", roles=("operator",)):
             receipt = harness.commands.command_service.submit(
                 harness.commands.request(
                     command=WorkflowCommandKind.FORK_REVISION,
                     run_id="run-parent",
-                    node_id="source_finding",
+                    node_id="hypothesis_design",
                     expected_run_version=1,
                     idempotency_key="ui:fork-real-1",
                     payload={
-                        "fromNodeId": "source_finding",
+                        "fromNodeId": "hypothesis_design",
                         "reason": "branch for independent exploration",
                         "checkpointId": parent_ckpt,
                     },
@@ -94,7 +101,7 @@ def test_fork_revision_child_thread_id_equals_run_id_and_resumes(
         assert thread_id == child_run_id
         assert not str(thread_id).startswith("thread-")
         assert forked_ckpt == parent_ckpt
-        assert active_node == "source_finding"
+        assert active_node == "hypothesis_design"
         assert status in {"created", "reconciliation_required"}
 
         fork_outbox = harness.commands.store.submit(
@@ -111,16 +118,16 @@ def test_fork_revision_child_thread_id_equals_run_id_and_resumes(
         assert harness.fork_worker.run_once() == 1
 
         # Post-commit fork must seed child checkpoint at resume node.
-        child_snap = harness.coordinator.snapshot(child_run_id)
+        child_snap = harness.coordinator.snapshot(child_run_id, CURRENT_VERSION_ID)
         assert child_snap["checkpointId"]
-        assert child_snap["nextNodeIds"] == ["source_finding"]
+        assert child_snap["nextNodeIds"] == ["hypothesis_design"]
         assert child_snap["values"].get("run_id") == child_run_id
-        assert child_snap["values"].get("active_node_id") == "source_finding"
+        assert child_snap["values"].get("active_node_id") == "hypothesis_design"
 
         # Parent remains at its own checkpoint (immutable lineage).
-        parent_again = harness.coordinator.snapshot("run-parent")
+        parent_again = harness.coordinator.snapshot("run-parent", CURRENT_VERSION_ID)
         assert parent_again["checkpointId"] == parent_ckpt
-        assert parent_again["nextNodeIds"] == ["source_finding"]
+        assert parent_again["nextNodeIds"] == ["hypothesis_design"]
 
         # Child graph_dispatch recovers from forked checkpoint (no START re-run).
         harness.worker.run_once()
@@ -129,7 +136,7 @@ def test_fork_revision_child_thread_id_equals_run_id_and_resumes(
         import json
 
         payload = json.loads(pending.payload_json)
-        assert payload["nodeId"] == "source_finding"
+        assert payload["nodeId"] == "hypothesis_design"
         assert payload["runId"] == child_run_id
     finally:
         harness.close()
@@ -145,8 +152,8 @@ def test_checkpoint_fork_replay_when_child_already_forked_enqueues_dispatch(
             lambda: harness.coordinator
         )
         harness.seed(run_id="run-parent")
-        harness.start_thread_to("source_finding", run_id="run-parent")
-        parent_ckpt = harness.coordinator.snapshot("run-parent")["checkpointId"]
+        harness.start_thread_to("hypothesis_design", run_id="run-parent")
+        parent_ckpt = harness.coordinator.snapshot("run-parent", CURRENT_VERSION_ID)["checkpointId"]
         assert parent_ckpt
 
         with server_operator_scope("u-1", roles=("operator",)):
@@ -154,11 +161,11 @@ def test_checkpoint_fork_replay_when_child_already_forked_enqueues_dispatch(
                 harness.commands.request(
                     command=WorkflowCommandKind.FORK_REVISION,
                     run_id="run-parent",
-                    node_id="source_finding",
+                    node_id="hypothesis_design",
                     expected_run_version=1,
                     idempotency_key="ui:fork-replay-half",
                     payload={
-                        "fromNodeId": "source_finding",
+                        "fromNodeId": "hypothesis_design",
                         "reason": "simulate crash after fork I/O",
                         "checkpointId": parent_ckpt,
                     },
@@ -176,20 +183,21 @@ def test_checkpoint_fork_replay_when_child_already_forked_enqueues_dispatch(
         execute_checkpoint_fork(
             harness.coordinator,
             parent_run_id="run-parent",
+            workflow_version_id=CURRENT_VERSION_ID,
             checkpoint_id=parent_ckpt,
             child_run_id=child_run_id,
-            resume_node_id="source_finding",
+            resume_node_id="hypothesis_design",
             state_patch={
                 "run_id": child_run_id,
                 "parent_run_id": "run-parent",
-                "active_node_id": "source_finding",
+                "active_node_id": "hypothesis_design",
                 "active_attempt": 1,
-                "node_attempts": {"source_finding": 1},
+                "node_attempts": {"hypothesis_design": 1},
             },
         )
-        child_snap = harness.coordinator.snapshot(child_run_id)
+        child_snap = harness.coordinator.snapshot(child_run_id, CURRENT_VERSION_ID)
         assert child_snap["checkpointId"]
-        assert child_snap["nextNodeIds"] == ["source_finding"]
+        assert child_snap["nextNodeIds"] == ["hypothesis_design"]
 
         fork_row = harness.commands.store.submit(
             lambda uow: uow.repository.execute(
@@ -245,18 +253,18 @@ def test_fork_checkpoint_failure_marks_reconciliation_required(
             lambda: harness.coordinator
         )
         harness.seed(run_id="run-parent")
-        harness.start_thread_to("source_finding", run_id="run-parent")
+        harness.start_thread_to("hypothesis_design", run_id="run-parent")
 
         with server_operator_scope("u-1", roles=("operator",)):
             harness.commands.command_service.submit(
                 harness.commands.request(
                     command=WorkflowCommandKind.FORK_REVISION,
                     run_id="run-parent",
-                    node_id="source_finding",
+                    node_id="hypothesis_design",
                     expected_run_version=1,
                     idempotency_key="ui:fork-bad-ckpt",
                     payload={
-                        "fromNodeId": "source_finding",
+                        "fromNodeId": "hypothesis_design",
                         "reason": "bad checkpoint probe",
                         "checkpointId": "ckpt-does-not-exist",
                     },

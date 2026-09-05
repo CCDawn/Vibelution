@@ -209,11 +209,7 @@ def register_definition_snapshot(
     *,
     source: str = "snapshot",
 ) -> DefinitionIdentity:
-    """Ops re-entry point: register one verified snapshot payload.
-
-    Used by bootstrap loading and available for operators to rebuild registry
-    state for older versions (e.g. pre-2.1.0 in-flight runs).
-    """
+    """Register one verified snapshot payload."""
     definition = parse_snapshot_payload(payload)
     return register_definition(definition, source=source)
 
@@ -256,20 +252,20 @@ def reset_registry_for_tests() -> None:
 
 def resolve_definition_by_version_id(
     workflow_version_id: str,
-    *,
-    fallback_definition: WorkflowDefinition | None = None,
 ) -> WorkflowDefinition:
     """Resolve one registered definition by its workflowVersionId alone.
 
     Runtime graph helpers (coordinator/worker) often only know the version id
     carried by a dispatch; the workflowId is implied by the registry because
-    version ids embed the structure hash.  An empty version id keeps the
-    legacy behavior (compile the current main definition or the provided
-    fallback).  Zero matches or an ambiguous match fail closed.
+    version ids embed the structure hash.  Empty, unknown, or ambiguous ids
+    fail closed; callers that are constructing a new current-definition graph
+    must pass that definition explicitly instead of entering this resolver.
     """
     normalized = str(workflow_version_id or "").strip()
     if not normalized:
-        return fallback_definition
+        raise UnknownWorkflowDefinitionVersion(
+            "workflow definition version id is required"
+        )
     _ensure_bootstrapped()
     with _LOCK:
         matches = [

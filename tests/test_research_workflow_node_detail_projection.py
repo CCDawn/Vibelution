@@ -32,16 +32,16 @@ def test_node_detail_includes_definition_and_attempt_fields(tmp_path: Path) -> N
         detail = query.get_node_detail(
             team_id="research-team",
             run_id="run-node",
-            node_id="source_finding",
+            node_id="problem_understanding",
         )
         payload = detail.to_dict()
-        assert payload["nodeId"] == "source_finding"
+        assert payload["nodeId"] == "problem_understanding"
         assert payload["actorKind"] == "agent"
         assert payload["label"]
         assert payload["primaryRoleKey"]
         assert payload["runtimeCurrent"] is True
         assert payload["attempts"]
-        assert payload["latestAttempt"]["nodeId"] == "source_finding"
+        assert payload["latestAttempt"]["nodeId"] == "problem_understanding"
         assert payload["latestEventSequence"] >= 1
         assert "commandOffers" in payload
         assert payload["sessionAnchorDegraded"] is True
@@ -91,7 +91,7 @@ def _formal_child_detail(session_id: str, candidate_id: str) -> dict:
             "researchProjectId": "project-1",
             "agentId": "agent-finder",
             "workflowRunId": "run-scoped",
-            "workflowNodeId": "source_finding",
+            "workflowNodeId": "problem_understanding",
             "selectionId": "selection-1",
             "candidateId": candidate_id,
             "scope": {
@@ -101,7 +101,7 @@ def _formal_child_detail(session_id: str, candidate_id: str) -> dict:
                 "researchProjectId": "project-1",
                 "agentId": "agent-finder",
                 "workflowRunId": "run-scoped",
-                "workflowNodeId": "source_finding",
+                "workflowNodeId": "problem_understanding",
                 "selectionId": "selection-1",
                 "candidateId": candidate_id,
             },
@@ -130,7 +130,7 @@ def test_node_detail_projects_complete_session_anchor(tmp_path: Path) -> None:
         seeded = query.get_node_detail(
             team_id="research-team",
             run_id="run-anchor",
-            node_id="source_finding",
+            node_id="problem_understanding",
         )
         assert seeded.latest_attempt is not None
         _insert_anchor(
@@ -144,7 +144,7 @@ def test_node_detail_projects_complete_session_anchor(tmp_path: Path) -> None:
         payload = query.get_node_detail(
             team_id="research-team",
             run_id="run-anchor",
-            node_id="source_finding",
+            node_id="problem_understanding",
         ).to_dict()
         assert payload["agentId"] == "agent-finder"
         assert payload["sessionId"] == "session-1"
@@ -171,7 +171,7 @@ def test_node_detail_degrades_incomplete_agent_anchor(tmp_path: Path) -> None:
         seeded = query.get_node_detail(
             team_id="research-team",
             run_id="run-degraded",
-            node_id="source_finding",
+            node_id="problem_understanding",
         )
         assert seeded.latest_attempt is not None
         _insert_anchor(
@@ -185,7 +185,7 @@ def test_node_detail_degrades_incomplete_agent_anchor(tmp_path: Path) -> None:
         payload = query.get_node_detail(
             team_id="research-team",
             run_id="run-degraded",
-            node_id="source_finding",
+            node_id="problem_understanding",
         ).to_dict()
         assert payload["sessionId"] == "session-only"
         assert payload["sessionAnchorDegraded"] is True
@@ -223,7 +223,7 @@ def test_node_detail_projects_formal_candidate_sessions_from_ledger_anchor(
         seeded = query.get_node_detail(
             team_id="research-team",
             run_id="run-scoped",
-            node_id="source_finding",
+            node_id="problem_understanding",
         )
         assert seeded.latest_attempt is not None
         _insert_anchor(
@@ -273,7 +273,7 @@ def test_node_detail_projects_formal_candidate_sessions_from_ledger_anchor(
         payload = query.get_node_detail(
             team_id="research-team",
             run_id="run-scoped",
-            node_id="source_finding",
+            node_id="problem_understanding",
         ).to_dict()
 
         assert payload["rootSession"]["sessionId"] == "root-session"
@@ -327,7 +327,7 @@ def test_node_detail_formal_projection_clears_child_compat_scalars_when_root_mis
         seeded = query.get_node_detail(
             team_id="research-team",
             run_id="run-formal-root-missing",
-            node_id="source_finding",
+            node_id="problem_understanding",
         )
         assert seeded.latest_attempt is not None
         _insert_anchor(
@@ -354,7 +354,7 @@ def test_node_detail_formal_projection_clears_child_compat_scalars_when_root_mis
         payload = query.get_node_detail(
             team_id="research-team",
             run_id="run-formal-root-missing",
-            node_id="source_finding",
+            node_id="problem_understanding",
         ).to_dict()
 
         assert payload["sessionId"] is None
@@ -406,7 +406,7 @@ def test_node_detail_uses_frozen_binding_when_anchor_missing(tmp_path: Path) -> 
             "teamId": "research-team",
             "projectId": "challenge-sci-096",
             "questionId": "SCI-096",
-            "workflowVersionId": "challenge-cup-research-v2.1.0",
+            "workflowVersionId": "wv-268aa6e8dea8",
             "researchBriefHash": "b" * 64,
             "datasetRefs": [],
             "metricContract": {},
@@ -423,8 +423,8 @@ def test_node_detail_uses_frozen_binding_when_anchor_missing(tmp_path: Path) -> 
             "evaluationContract": {},
             "agentBindingSnapshot": [
                 {
-                    "snapshotId": "snap:run-bound:source_finding",
-                    "nodeId": "source_finding",
+                    "snapshotId": "snap:run-bound:problem_understanding",
+                    "nodeId": "problem_understanding",
                     "agentId": "agent-finder",
                     "roleKey": "source_finder",
                     "resolvedFrom": "workflow_default",
@@ -460,7 +460,7 @@ def test_node_detail_uses_frozen_binding_when_anchor_missing(tmp_path: Path) -> 
         payload = _query(harness).get_node_detail(
             team_id="research-team",
             run_id="run-bound",
-            node_id="source_finding",
+            node_id="problem_understanding",
         ).to_dict()
         assert payload["agentId"] == "agent-finder"
         assert payload["resolvedFrom"] == "workflow_default"

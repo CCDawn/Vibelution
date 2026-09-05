@@ -22,7 +22,7 @@ def _dispatch() -> GraphDispatch:
         attempt=1,
         dispatch_kind="start",
         input_snapshot_hash="a" * 64,
-        workflow_version_id="challenge-cup-research-v2.1.0",
+        workflow_version_id="wv-268aa6e8dea8",
         team_id="research-team",
     )
 

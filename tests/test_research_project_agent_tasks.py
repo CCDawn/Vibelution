@@ -51,7 +51,7 @@ def test_source_collection_task_receipt_context_uses_server_task_authority(
                 "questionId": "SCI-096",
                 "workflowRunId": "run-source-formal-1",
                 "workflowId": "challenge-cup-research",
-                "workflowVersionId": "v2.1",
+                "workflowVersionId": "v3.0",
                 "workflowNodeId": "source_finding",
                 "nodeRunId": "node-run-source-1",
                 "nodeAttempt": 1,

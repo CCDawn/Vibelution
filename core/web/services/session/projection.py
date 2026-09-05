@@ -4100,36 +4100,54 @@ def _latest_message_summary(messages: list[dict[str, Any]]) -> str:
     return ""
 
 
-def _conversation_phase(conversation_id: str, conversation: dict[str, Any]) -> str:
+def _conversation_phase(
+    conversation_id: str,
+    conversation: dict[str, Any],
+    *,
+    active_work_run_status: str = "",
+    persistent_work_runs_reconciled: bool = False,
+) -> str:
     s = _service()
     if s._is_session_stop_requested(conversation_id):
         return "stopping"
     normalized = str(conversation.get("last_turn_status") or conversation.get("lastTurnStatus") or "").strip().lower()
-    if s._is_session_running(conversation_id):
+    normalized_active_work_run_status = str(active_work_run_status or "").strip().lower()
+    if s._is_session_running(conversation_id) or normalized_active_work_run_status in {
+        "queued",
+        "running",
+        "stopping",
+        "paused",
+    }:
         # C1: worker may still claim a hung turn after tool timeout — settle if hang criteria hit.
-        try:
-            s.reconcile_stale_chat_turn_work_runs()
-        except Exception:
-            pass
+        if not persistent_work_runs_reconciled:
+            try:
+                s.reconcile_stale_chat_turn_work_runs()
+            except Exception:
+                pass
         if s._is_session_running(conversation_id):
             if normalized == "queued":
                 return "queued"
             return "running"
+        if normalized_active_work_run_status == "queued":
+            return "queued"
+        if normalized_active_work_run_status:
+            return "running"
         # Hang settlement may have cleared in-memory running; fall through to ready path.
     # Process-local worker is gone. If a chat_turn work-run is still marked
     # active for this session, release it so shell/top-bar stop showing "running".
-    stale_work_run = s._active_chat_turn_work_run_for_session(conversation_id)
-    if isinstance(stale_work_run, dict):
-        finished_at = str(stale_work_run.get("updatedAt") or s._now_timestamp()).strip() or s._now_timestamp()
-        s._release_stale_chat_turn_work_run(
-            session_id=conversation_id,
-            finished_at=finished_at,
-            summary=s.text_for(
-                s.get_web_language(),
-                zh="会话 worker 已结束，已清除残留运行态。",
-                en="Session worker finished; cleared residual running state.",
-            ),
-        )
+    if not persistent_work_runs_reconciled:
+        stale_work_run = s._active_chat_turn_work_run_for_session(conversation_id)
+        if isinstance(stale_work_run, dict):
+            finished_at = str(stale_work_run.get("updatedAt") or s._now_timestamp()).strip() or s._now_timestamp()
+            s._release_stale_chat_turn_work_run(
+                session_id=conversation_id,
+                finished_at=finished_at,
+                summary=s.text_for(
+                    s.get_web_language(),
+                    zh="会话 worker 已结束，已清除残留运行态。",
+                    en="Session worker finished; cleared residual running state.",
+                ),
+            )
     if normalized in {
         "queued",
         "failed",

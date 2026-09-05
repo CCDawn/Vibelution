@@ -29,10 +29,6 @@ from core.research.competition.resources import (
     load_science_question_catalog,
 )
 from core.research.competition.result_set import CatalogScope
-from core.research.competition.stage_one_completion_policy import (
-    STAGE_ONE_POLICY_WORKFLOW_DEFINITION_ID,
-    stage_one_policy_snapshot_for,
-)
 from core.research.workflow.contracts import DEFAULT_PROGRAM_ID
 from core.research.workflow.definition import build_challenge_cup_workflow_definition
 from core.web.services.team_workflow.challenge_question_runs import (
@@ -40,6 +36,12 @@ from core.web.services.team_workflow.challenge_question_runs import (
     _package_bound_model_invocation_receipt_refs,
     challenge_question_run_summary,
     get_challenge_question_run_detail,
+)
+from core.web.services.team_workflow.challenge_phase_boundary import (
+    ChallengePhaseBoundaryError,
+)
+from core.web.services.team_workflow.challenge_phase_knowledge_publisher import (
+    load_published_phase_one_knowledge_package,
 )
 from core.web.services.team_workflow.research_projects import (
     ResearchProjectError,
@@ -54,14 +56,6 @@ _MAX_WALL_CLOCK_SECONDS = 12 * 60 * 60
 _MAX_RETRIES = 5
 _CATALOG_SEED_REVIEW_RUN_ID = "catalog-seed"
 _TERMINAL_RUN_STATUSES = frozenset({"succeeded", "failed", "cancelled"})
-
-
-def _stage_one_policy_fields(question_id: str) -> dict[str, Any]:
-    snapshot = stage_one_policy_snapshot_for(
-        question_id,
-        STAGE_ONE_POLICY_WORKFLOW_DEFINITION_ID,
-    )
-    return {"stageOneCompletionPolicy": snapshot} if snapshot is not None else {}
 
 
 class QuestionLaunchError(ValueError):
@@ -310,7 +304,6 @@ def _dev_authorization_ready(team_id: str) -> bool:
         )
         scope_plan = real_plan("real-1")
         scope = {
-            **_stage_one_policy_fields(str(scope_plan.question_ids[0])),
             "planId": "real-1",
             "gateId": str(scope_plan.gate_id),
             "questionIds": [str(question_id) for question_id in scope_plan.question_ids],
@@ -810,7 +803,6 @@ def _build_catalog_seed_run_input(
     directions = [_text(item) for item in program_body.get("dimensions") or [] if _text(item)]
     hypothesis_scope = _hypothesis_first_scope(team_id, question_id)
     return {
-        **_stage_one_policy_fields(question_id),
         "teamId": _text(team_id),
         "projectId": _text(project.get("projectId")),
         "questionId": question_id,
@@ -902,6 +894,17 @@ def build_question_run_input(
             "Deep experiment run requires its canonical campaign to be activated.",
             code="deep_experiment_campaign_not_activated",
         )
+    phase_one_knowledge_package: dict[str, Any] | None = None
+    if deep_record is not None:
+        try:
+            phase_one_knowledge_package = load_published_phase_one_knowledge_package(
+                team_id
+            )
+        except ChallengePhaseBoundaryError as exc:
+            raise QuestionLaunchError(
+                "Deep experiment run requires the published phase-one Team Knowledge package.",
+                code="phase_one_knowledge_package_unavailable",
+            ) from exc
     output = _mapping(detail.get("output"))
     artifact = _mapping(detail.get("artifact"))
     review_run_id = _text(detail.get("selectedRunId"))
@@ -934,20 +937,22 @@ def build_question_run_input(
     model_routing_policy = _server_model_routing_policy(team_id)
     directions = [_text(item) for item in program_body.get("dimensions") or [] if _text(item)]
     artifact_ref = f"challenge-question-artifact://{catalog_id}/{normalized_question_id}/{review_run_id}/{artifact_sha256}"
+    dataset_refs = [artifact_ref]
+    if phase_one_knowledge_package is not None:
+        dataset_refs.extend(phase_one_knowledge_package["datasetRefs"])
     hypothesis_first = _hypothesis_first_flag(
         team_id,
         normalized_question_id,
         scope=_hypothesis_first_scope(team_id, normalized_question_id),
     )
     return {
-        **_stage_one_policy_fields(normalized_question_id),
         "teamId": _text(team_id),
         "projectId": _text(project.get("projectId")),
         "questionId": normalized_question_id,
         "researchScopeEnvelope": _hypothesis_first_scope(team_id, normalized_question_id),
         "catalogScope": _tracked_catalog_scope(),
         "researchBriefHash": artifact_sha256,
-        "datasetRefs": [artifact_ref],
+        "datasetRefs": dataset_refs,
         "metricContract": {
             "primary": "evidence_coverage",
             "direction": "maximize",
@@ -958,6 +963,11 @@ def build_question_run_input(
             "challengeQuestionArtifact": artifact_ref,
             "questionReviewRunId": review_run_id,
             "competitionProgramSnapshot": competition_program_snapshot,
+            **(
+                {"phaseOneKnowledgePackage": phase_one_knowledge_package}
+                if phase_one_knowledge_package is not None
+                else {}
+            ),
         },
         "competitionProgramSnapshot": competition_program_snapshot,
         "competitionRuleRef": catalog_id,

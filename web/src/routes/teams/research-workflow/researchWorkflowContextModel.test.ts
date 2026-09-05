@@ -286,24 +286,25 @@ describe("researchWorkflowContextModel", () => {
   it("hands a converged chain to the formal runtime stage without inventing a second state machine", () => {
     const context = buildResearchWorkflowContext({
       ...base,
-      selectedNodeId: "source_finding",
+      selectedNodeId: "problem_understanding",
       nextAction: {
         stage: "converged",
-        targetNodeId: "source_finding",
-        navigationLabel: "前往资料寻找",
+        targetNodeId: "problem_understanding",
+        navigationLabel: "前往问题理解",
         statusMessage: "假说先行闭环已完成",
         commandDetail: "假说阶段完成，无需再操作假说；查看下一步研究任务",
       },
     });
     expect(context.currentTask).toMatchObject({
-      stage: "knowledge_collection",
+      stage: "problem_understanding",
       step: "formal_runtime",
       authority: "formal_runtime",
-      title: "资料寻找",
+      title: "问题理解",
     });
     expect(context.stages.map((stage) => stage.state)).toEqual([
       "completed",
       "current",
+      "upcoming",
       "upcoming",
       "upcoming",
     ]);

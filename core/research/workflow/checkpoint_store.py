@@ -458,6 +458,7 @@ def ensure_checkpoint_parent(path: Path) -> Path:
 # auto-checkpoints; it never changes the checkpoint schema.
 CHECKPOINT_BUSY_TIMEOUT_MS = 5000
 CHECKPOINT_WAL_JOURNAL_SIZE_LIMIT_BYTES = 67108864
+_CHECKPOINT_WAL_INIT_LOCK = RLock()
 
 
 def _connect_checkpoint_sqlite(path: Path, *, read_only: bool = False) -> sqlite3.Connection:
@@ -473,7 +474,11 @@ def _connect_checkpoint_sqlite(path: Path, *, read_only: bool = False) -> sqlite
         # busy_timeout first so the pragma writes below wait on a competing
         # writer instead of failing fast.
         connection.execute(f"PRAGMA busy_timeout = {CHECKPOINT_BUSY_TIMEOUT_MS}")
-        connection.execute("PRAGMA journal_mode = WAL")
+        # A fresh database's journal-mode transition needs an exclusive lock;
+        # competing transitions can fail immediately despite busy_timeout.
+        # Serialize only this bootstrap step, not checkpoint reads or writes.
+        with _CHECKPOINT_WAL_INIT_LOCK:
+            connection.execute("PRAGMA journal_mode = WAL")
         connection.execute("PRAGMA synchronous = NORMAL")
         connection.execute(
             f"PRAGMA journal_size_limit = {CHECKPOINT_WAL_JOURNAL_SIZE_LIMIT_BYTES}"

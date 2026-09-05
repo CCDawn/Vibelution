@@ -47,6 +47,7 @@ from tests._support.workflow_ledger_helpers import (
 )
 
 RUN_ID = "run-multi-interrupt"
+WORKFLOW_VERSION_ID = "wv-268aa6e8dea8"
 
 
 def _branch_node(node_id: str):
@@ -157,6 +158,7 @@ def _resume_dispatch(node_id: str) -> GraphDispatch:
         node_id=node_id,
         attempt=1,
         dispatch_kind="resume_action",
+        workflow_version_id=WORKFLOW_VERSION_ID,
         receipt=_receipt(node_id),
     )
 
@@ -165,7 +167,7 @@ def _thread_interrupts(coordinator: _RecordingCoordinator) -> dict[str, str]:
     """Return {nodeId: interruptId} for every task-level pending interrupt."""
     from core.research.workflow.challenge_cup_runtime import _pending_interrupt_items
 
-    graph, stack = coordinator._compile()
+    graph, stack = coordinator._compile(WORKFLOW_VERSION_ID)
     try:
         state = coordinator._read_state(
             graph, coordinator._config(RUN_ID), heal=True
@@ -184,7 +186,7 @@ def _start_multi_interrupt_thread(tmp_path: Path) -> _RecordingCoordinator:
     coordinator = _RecordingCoordinator(
         tmp_path / "checkpoints.sqlite", _build_fanout_builder()
     )
-    graph, stack = coordinator._compile()
+    graph, stack = coordinator._compile(WORKFLOW_VERSION_ID)
     try:
         graph.invoke({"run_id": RUN_ID}, coordinator._config(RUN_ID))
     finally:
@@ -249,7 +251,7 @@ def test_single_interrupt_keeps_legacy_bare_resume(tmp_path: Path) -> None:
     coordinator = _RecordingCoordinator(
         tmp_path / "checkpoints.sqlite", _build_single_builder("branch_a")
     )
-    graph, stack = coordinator._compile()
+    graph, stack = coordinator._compile(WORKFLOW_VERSION_ID)
     try:
         graph.invoke({"run_id": RUN_ID}, coordinator._config(RUN_ID))
     finally:
@@ -294,17 +296,17 @@ def _seed_live_resume_dispatch(commands: CommandHarness) -> None:
     payload = {
         "commandId": "cmd-driver",
         "runId": "run-test",
-        "nodeRunId": "nr-run-test-evidence_relations-a2",
-        "nodeId": "evidence_relations",
+        "nodeRunId": "nr-run-test-protocol_design-a2",
+        "nodeId": "protocol_design",
         "attempt": 2,
         "dispatchKind": "resume_action",
         "teamId": "research-team",
-        "workflowVersionId": "challenge-cup-research-v2.1.0",
+        "workflowVersionId": "wv-268aa6e8dea8",
         "inputSnapshotHash": "a" * 64,
         "budgetPolicyHash": "",
         "receipt": {
             "actionId": "act-5cd0046334264954",
-            "nodeRunId": "nr-run-test-evidence_relations-a2",
+            "nodeRunId": "nr-run-test-protocol_design-a2",
             "outcome": "succeeded",
             "artifactReceiptIds": [],
             "completedAtMs": FIXED_NOW_MS,
@@ -317,7 +319,7 @@ def _seed_live_resume_dispatch(commands: CommandHarness) -> None:
             command_id="cmd-a2",
             idempotency_key="graph:resume:live-multi-interrupt",
         ),
-        node_run_id="nr-run-test-evidence_relations-a2",
+        node_run_id="nr-run-test-protocol_design-a2",
         payload_json=json.dumps(payload),
     )
 
@@ -328,14 +330,14 @@ def _seed_live_resume_dispatch(commands: CommandHarness) -> None:
                 command_id="cmd-a2",
                 run_id="run-test",
                 idempotency_key="key:a2",
-                node_id="evidence_relations",
+                node_id="protocol_design",
             )
         )
         uow.repository.insert_attempt(
             build_attempt_record(
-                node_run_id="nr-run-test-evidence_relations-a2",
+                node_run_id="nr-run-test-protocol_design-a2",
                 run_id="run-test",
-                node_id="evidence_relations",
+                node_id="protocol_design",
                 attempt=2,
                 # Terminal attempt: forces the run-level reconciliation
                 # translation (the production run-d02722658d8b shape).

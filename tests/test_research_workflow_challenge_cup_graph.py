@@ -1,10 +1,8 @@
-"""Challenge Cup v2.1 graph with 17 nodes and human gates."""
+"""Challenge Cup 3.0.0 main graph contract."""
 
 from __future__ import annotations
 
 from pathlib import Path
-
-from langgraph.types import Command
 
 from core.research.workflow.challenge_cup_graph import (
     build_challenge_cup_graph,
@@ -27,17 +25,11 @@ def test_graph_contains_all_definition_nodes() -> None:
     definition = build_challenge_cup_workflow_definition()
     # compile to ensure graph builds
     path = Path(__file__).resolve()  # noqa: F841
-    assert len(definition.nodes) == 17
+    assert len(definition.nodes) == 12
 
 
 def test_graph_static_edges_are_definition_owned() -> None:
     expected_static = (
-        ("problem_understanding", "source_finding"),
-        ("source_finding", "source_extraction"),
-        ("source_extraction", "evidence_relations"),
-        ("evidence_relations", "knowledge_ingestion"),
-        ("knowledge_ingestion", "knowledge_handoff"),
-        ("knowledge_handoff", "hypothesis_design"),
         ("hypothesis_design", "protocol_design"),
         ("protocol_design", "protocol_review"),
         ("protocol_review", "protocol_freeze"),
@@ -46,6 +38,7 @@ def test_graph_static_edges_are_definition_owned() -> None:
         ("controlled_run", "result_evaluation"),
         ("result_evaluation", "iteration_decision"),
         ("candidate_promotion", "result_package"),
+        ("problem_understanding", "hypothesis_design"),
     )
     assert graph_static_edge_pairs() == expected_static
     assert graph_conditional_targets("iteration_decision") == (
@@ -58,20 +51,10 @@ def test_graph_static_edges_are_definition_owned() -> None:
     )
 
     graph = build_challenge_cup_graph()
-    compiled_static = set(expected_static) - {
-        ("hypothesis_design", "protocol_design")
-    }
     assert graph.edges == {
-        *compiled_static,
+        *expected_static,
         ("__start__", "problem_understanding"),
         ("result_package", "__end__"),
-    }
-    stage_one_branch = graph.branches["hypothesis_design"][
-        "route_after_stage_one_closure"
-    ]
-    assert stage_one_branch.ends == {
-        "protocol_design": "protocol_design",
-        "__end__": "__end__",
     }
     expected_successors = {node.nodeId: () for node in build_challenge_cup_workflow_definition().nodes}
     for source, target in expected_static:
@@ -82,7 +65,7 @@ def test_graph_static_edges_are_definition_owned() -> None:
     expected_successors["version_governance"] = graph_conditional_targets(
         "version_governance"
     )
-    assert successor_map() == expected_successors
+    assert successor_map("wv-268aa6e8dea8") == expected_successors
 
 
 def test_direct_graph_requires_durable_adapter_execution(tmp_path: Path) -> None:
@@ -96,15 +79,15 @@ def test_direct_graph_requires_durable_adapter_execution(tmp_path: Path) -> None
         assert state.values == {}
 
 
-def test_checkpoint_lifecycle_advances_source_chain_to_human_handoff(tmp_path: Path) -> None:
+def test_checkpoint_lifecycle_advances_main_chain_to_protocol_freeze(tmp_path: Path) -> None:
     db = tmp_path / "cc.sqlite"
     checkpoint_id = prepare_initial_checkpoint(str(db), "cc-1")
     completed: list[str] = []
     for node_id, expected_next in (
-        ("source_finding", "source_extraction"),
-        ("source_extraction", "evidence_relations"),
-        ("evidence_relations", "knowledge_ingestion"),
-        ("knowledge_ingestion", "knowledge_handoff"),
+        ("problem_understanding", "hypothesis_design"),
+        ("hypothesis_design", "protocol_design"),
+        ("protocol_design", "protocol_review"),
+        ("protocol_review", "protocol_freeze"),
     ):
         completed.append(node_id)
         checkpoint_id, scheduled = advance_checkpoint(
@@ -120,29 +103,22 @@ def test_checkpoint_lifecycle_advances_source_chain_to_human_handoff(tmp_path: P
         assert scheduled == [expected_next]
 
     assert completed == [
-        "source_finding",
-        "source_extraction",
-        "evidence_relations",
-        "knowledge_ingestion",
+        "problem_understanding",
+        "hypothesis_design",
+        "protocol_design",
+        "protocol_review",
     ]
 
 
-def test_reject_knowledge_handoff_does_not_set_package_accepted(tmp_path: Path) -> None:
-    db = tmp_path / "cc2.sqlite"
-    with open_sqlite_checkpointer(db) as checkpointer:
-        graph = compile_challenge_cup_graph(checkpointer)
-        cfg = {"configurable": {"thread_id": "cc-2"}}
-        graph.invoke({}, cfg)
-        state = graph.get_state(cfg)
-        # resume until we hit a human decision we can reject
-        guard = 0
-        while state.next and guard < 10:
-            guard += 1
-            # reject first human decision
-            graph.invoke(Command(resume={"accept": False}), cfg)
-            state = graph.get_state(cfg)
-            if state.values.get("knowledge_package_accepted") is False:
-                break
-            if "knowledge_handoff" in (state.values.get("completed_node_ids") or []):
-                break
-        assert state.values.get("knowledge_package_accepted") is not True
+def test_main_definition_contains_no_knowledge_sideflow_nodes() -> None:
+    definition = build_challenge_cup_workflow_definition()
+    node_ids = {node.nodeId for node in definition.nodes}
+    assert node_ids.isdisjoint(
+        {
+            "source_finding",
+            "source_extraction",
+            "evidence_relations",
+            "knowledge_ingestion",
+            "knowledge_handoff",
+        }
+    )
