@@ -40,6 +40,9 @@ from core.web.services.team_workflow.research_runtime.projection_builder import 
     ProjectionInputs,
     build_research_workflow_snapshot,
 )
+from core.web.services.team_workflow.research_runtime.command_service import (
+    WorkflowDefinitionUnavailableError,
+)
 from core.web.services.team_workflow.research_runtime.query_service import (
     NodeNotFoundError,
     WorkflowQueryError,
@@ -375,6 +378,33 @@ def test_query_service_resolves_run_pinned_definition(tmp_path: Path) -> None:
             with pytest.raises(WorkflowQueryError) as excinfo:
                 query.get_snapshot(team_id="research-team", run_id=invalid_run_id)
             assert excinfo.value.code == "workflow_definition_unavailable"
+    finally:
+        harness.close()
+
+
+def test_retired_run_projects_read_only_without_command_offers(tmp_path: Path) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run(
+            run_id="run-retired-v21",
+            status="created",
+            run_version=1,
+            workflow_version_id="wv-9a4b74e7f21a",
+            structure_hash="9a4b74e7f21a409c55ed2ef0faf4a61f9c777368b775da3c666c8a8cfc320d53",
+        )
+        snapshot = _query(harness).get_snapshot(
+            team_id="research-team", run_id="run-retired-v21"
+        )
+        assert snapshot.definition["schemaVersion"] == "2.1.0"
+        assert snapshot.command_offers == ()
+        with pytest.raises(WorkflowDefinitionUnavailableError):
+            harness.service.submit(
+                harness.request(
+                    run_id="run-retired-v21",
+                    command=WorkflowCommandKind.START_NODE,
+                    node_id="problem_understanding",
+                )
+            )
     finally:
         harness.close()
 
