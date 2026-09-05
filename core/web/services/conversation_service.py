@@ -131,6 +131,7 @@ def _list_group_conversations_with_count(
             {
                 "conversationId": room_id,
                 "type": "group_room",
+                "teamId": str(room.get("teamId") or "").strip(),
                 "title": str(room.get("title") or room.get("roomId") or "").strip(),
                 "agentId": "",
                 "directSessionId": "",

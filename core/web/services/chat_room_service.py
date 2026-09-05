@@ -6844,6 +6844,7 @@ def _room_to_conversation_index_reference(room: dict[str, Any]) -> dict[str, Any
     latest_round = rounds[-1] if rounds else {}
     return {
         "roomId": str(room.get("roomId") or "").strip(),
+        "teamId": str((room.get("config") or {}).get("teamId") or "").strip(),
         "title": str(room.get("title") or room.get("roomId") or "").strip(),
         "status": str(room.get("status") or "").strip(),
         "summary": str(latest_round.get("summary") or "").strip(),

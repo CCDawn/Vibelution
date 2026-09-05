@@ -31,7 +31,7 @@ import {
   meetingsForHypothesisFirstQuestion,
   resolveHypothesisFirstNextAction,
 } from "./hypothesisFirstNextAction";
-import { resolveHypothesisFirstNextActionFromV2 } from "./hypothesisFirstStateV2Adapter";
+import { resolveHypothesisFirstNextActionFromV2, type HypothesisFirstV2NextAction } from "./hypothesisFirstStateV2Adapter";
 import {
   buildExperimentChromeIdentity,
   buildExperimentSwitchOptions,
@@ -86,8 +86,6 @@ export type ResearchProcessWorkspaceProps = {
   linkedChatRoomId?: string;
   /** Team switcher rendered in the process toolbar so chrome stays a single row. */
   toolbarLeading?: ReactNode;
-  /** Opens the shared team communication surface without duplicating its mutations. */
-  onOpenTeamCommunication?: () => void;
 };
 
 // Stable identity so the memoized canvas pane does not re-render when no run
@@ -129,7 +127,6 @@ export function ResearchProcessWorkspace({
   teamName = "",
   linkedChatRoomId = "",
   toolbarLeading,
-  onOpenTeamCommunication,
 }: ResearchProcessWorkspaceProps) {
   const isZh = lang === "zh";
   const navigate = useNavigate();
@@ -415,15 +412,16 @@ export function ResearchProcessWorkspace({
   ]);
   const safeNextAction = useMemo(() => {
     if (!hypothesisFirstChain.scopeMismatch) return nextAction;
+    const readError = runState.error || hypothesisFirstChain.error;
     return {
       stage: "blocked" as const,
       targetNodeId: null,
-      navigationLabel: "等待题目切换",
-      disabledReason: "正在切换题目，旧任务和操作已隐藏",
-      statusMessage: "正在切换题目",
+      navigationLabel: readError ? "题目读取失败" : "等待题目切换",
+      disabledReason: readError || "正在切换题目，旧任务和操作已隐藏",
+      statusMessage: readError ? "题目读取失败" : "正在切换题目",
       recovery: null,
     };
-  }, [hypothesisFirstChain.scopeMismatch, nextAction]);
+  }, [hypothesisFirstChain.scopeMismatch, hypothesisFirstChain.error, runState.error, nextAction]);
   // A formal run may already be staged while an unresolved hypothesis gate is
   // still the only visible/operable task. Use question-scoped evidence and the
   // resolved next action as the authority: meeting gates deliberately outrank
@@ -574,7 +572,7 @@ export function ResearchProcessWorkspace({
     scopedDiscussionModel.status,
     semanticCurrentTaskNodeId,
   ]);
-  const archiveOpen = location.panel === "question";
+  const archiveOpen = location.panel === "question" || location.panel === "progress";
   const hasSelectedExperiment = Boolean(chainQuestionId);
   const inspectorOpenChange = useCallback((open: boolean) => {
     location.replaceParams({
@@ -727,6 +725,12 @@ export function ResearchProcessWorkspace({
   const formalPrimaryAction = workspaceModel.primaryAction;
   const visibleFormalPrimaryAction = currentTaskActionsReady ? formalPrimaryAction : null;
   const currentTaskCommand = workflowContext.currentTask?.commandAction;
+  const inlineFormalRecovery = location.panel === "node"
+    && workflowContext.view.selectedIsCurrentTask
+    && Boolean(location.runId)
+    && (workspaceNavigationAction.stage === "converged" || workspaceNavigationAction.stage === "blocked")
+    && Boolean(nextAction.canonicalAction
+      || (nextAction as HypothesisFirstV2NextAction).canonicalActions?.length);
   const allowLaunchPanel = allowsResearchRunLaunch(workspaceModel);
   const collectionRecoveryAction = currentTaskActionsReady
     && workspaceModel.source === "hypothesis_first"
@@ -774,8 +778,9 @@ export function ResearchProcessWorkspace({
         ? canonicalCommandMutation.error.message
         : String(canonicalCommandMutation.error);
 
-  const inspectorPane = showInspector && (currentTaskActionsReady || location.panel === "question") ? (
+  const inspectorPane = (showInspector || archiveOpen) && (currentTaskActionsReady || location.panel !== "node") ? (
     <ResearchProcessInspectorPane
+      meetings={hypothesisFirstChain.meetings}
       scope={{
         teamId,
         teamName,
@@ -848,7 +853,13 @@ export function ResearchProcessWorkspace({
         toolbar={(
           <ResearchWorkflowToolbar
             leading={toolbarLeading}
-            onOpenTeamCommunication={onOpenTeamCommunication}
+            onOpenTeamCommunication={() => {
+              if (scopedDiscussionModel.status === "ready" && scopedDiscussionModel.deepLink) {
+                navigateToDiscussion(scopedDiscussionModel.deepLink);
+              } else {
+                location.openPanel("team");
+              }
+            }}
             identity={experimentIdentity}
             runId={location.runId}
             runStatus={runState.run?.status || runState.projection?.run.status || ""}
@@ -943,7 +954,8 @@ export function ResearchProcessWorkspace({
         inspector={archiveOpen ? null : (
           <ResearchCurrentTaskInspector
             context={workflowContext}
-            footer={visibleFormalPrimaryAction ? (
+            error={displayError}
+            footer={inlineFormalRecovery ? undefined : visibleFormalPrimaryAction ? (
               <VButton
                 type="button"
                 variant="primary"
@@ -1004,7 +1016,7 @@ export function ResearchProcessWorkspace({
                 ) : null}
               </>
             ) : undefined}
-            onRetryDispatch={visibleFormalPrimaryAction || collectionRecoveryAction || !currentTaskActionsReady ? undefined : retryDispatch}
+            onRetryDispatch={inlineFormalRecovery || visibleFormalPrimaryAction || collectionRecoveryAction || !currentTaskActionsReady ? undefined : retryDispatch}
             retryPending={commandBusy}
             onReturnCurrentTask={
               semanticCurrentTaskNodeId

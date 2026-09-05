@@ -154,6 +154,15 @@ function regionOf(input: Partial<HypothesisFirstCanvasRegionInput>) {
 }
 
 describe("hypothesisFirstCanvasRegion", () => {
+  it("does not mark a closed generation discussion successful without candidates", () => {
+    const region = regionOf({
+      chainState: chainState({ candidateCount: 0 }),
+      meetings: [meeting(0, "closed", { meetingType: "hypothesis_candidate_generation", digestId: "digest" })],
+    });
+    expect(region.nodes.find((node) => node.nodeId === "hf_generation")?.status).toBe("blocked");
+    expect(region.nodes.find((node) => node.nodeId === "hf_generation")?.description).toContain("待补充有效候选结果");
+    expect(region.nodes.find((node) => node.nodeId === "hf_selection")?.description).not.toContain("讨论进行中");
+  });
   it("counts fan-out siblings as one logical review round", () => {
     const summary = summarizeHypothesisReviewMeetings([
       meeting(1, "closed", { meetingRoundId: "r1-a", digestId: "d1-a" }),

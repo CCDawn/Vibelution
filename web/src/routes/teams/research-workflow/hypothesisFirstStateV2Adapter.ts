@@ -405,7 +405,17 @@ function defaultStatus(
       : state.convergence.outcome === "rejected"
         ? "人工已拒绝当前收敛结果"
         : "等待假说收敛";
-    case "formal_runtime": return state.formalRuntime.runId ? "正式研究运行进行中" : "可以创建正式研究运行";
+    case "formal_runtime": {
+      if (!state.formalRuntime.runId) return "可以创建正式研究运行";
+      if (state.formalRuntime.actionability === "blocked") return "正式研究运行已阻塞";
+      switch (state.formalRuntime.runStatus) {
+        case "failed": return "正式研究运行失败";
+        case "cancelled": return "正式研究运行已取消";
+        case "reconciliation_required": return "正式研究运行状态待核对";
+        case "succeeded": return "正式研究运行已完成";
+        default: return "正式研究运行进行中";
+      }
+    }
     case "program_delivery": {
       // P2-10: a rejected or revision-requested human review is the opposite
       // of "delivering" — say so instead of the generic delivery copy.

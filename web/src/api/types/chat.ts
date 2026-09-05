@@ -215,6 +215,8 @@ export type SessionChildHandoffContext = {
 };
 
 export type ConversationSummary = {
+  teamId?: string;
+  teamName?: string;
   conversationId: string;
   type: "direct_agent" | "group_room" | string;
   title: string;

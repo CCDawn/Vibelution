@@ -1,5 +1,5 @@
 export default {
-  root: "flex h-full min-h-0 flex-col gap-3 overflow-auto p-3",
+  root: "flex shrink-0 flex-col gap-3 p-3",
   fill: "h-full min-h-0",
   error: "rounded border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-raised)] px-2 py-1.5 [font-size:var(--vui-font-2xs)] text-[var(--fg-primary)]",
   header: "flex items-start justify-between gap-2",

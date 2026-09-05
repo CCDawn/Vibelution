@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
-import { VButton, VStatusChip, type VStatusTone } from "../../../components/vui";
+import { VButton, VErrorSummary, VStatusChip, type VStatusTone } from "../../../components/vui";
+import { presentResearchWorkflowError } from "../researchWorkflowErrorModel";
 import type {
   ResearchWorkflowContext,
   ResearchWorkflowTaskStatus,
@@ -48,6 +49,7 @@ export type ResearchCurrentTaskInspectorProps = {
   onReturnCurrentTask?: () => void;
   onRetryDispatch?: () => void;
   retryPending?: boolean;
+  error?: string | null;
 };
 
 export function ResearchCurrentTaskInspector({
@@ -57,6 +59,7 @@ export function ResearchCurrentTaskInspector({
   onReturnCurrentTask,
   onRetryDispatch,
   retryPending = false,
+  error,
 }: ResearchCurrentTaskInspectorProps) {
   const task = context.currentTask;
   const historyMode = Boolean(
@@ -67,7 +70,7 @@ export function ResearchCurrentTaskInspector({
   );
 
   if (!task) {
-    const message = context.loadState === "scope_mismatch"
+    const message = error ? "当前任务读取失败，请查看画布中的错误详情" : context.loadState === "scope_mismatch"
       ? "正在切换题目，旧任务已隐藏"
       : context.loadState === "error"
         ? "当前任务暂时无法读取"
@@ -80,7 +83,7 @@ export function ResearchCurrentTaskInspector({
         data-load-state={context.loadState}
       >
         <header className={styles.header} data-vui-region="current-task-header">
-          <div className={styles.empty} role={context.loadState === "error" ? "alert" : "status"}>
+          <div className={styles.empty} role={error || context.loadState === "error" ? "alert" : "status"}>
             {message}
           </div>
         </header>
@@ -96,7 +99,7 @@ export function ResearchCurrentTaskInspector({
 
   return (
     <section
-      aria-label={historyMode ? "历史任务回顾" : "当前任务操作"}
+      aria-label={historyMode ? "所选节点详情" : "当前任务操作"}
       className={styles.root}
       data-vui="research-current-task-inspector"
       data-history-mode={historyMode ? "true" : "false"}
@@ -115,7 +118,14 @@ export function ResearchCurrentTaskInspector({
           className={styles.detail}
           role={liveRole(task.status)}
         >
-          {historyMode ? `归档记录 · 当前仍是“${task.title}”` : task.detail}
+          {historyMode ? `所选节点详情 · 当前任务为“${task.title}”` : liveRole(task.status) === "alert" ? (
+            <VErrorSummary
+              label={STATUS_LABEL[task.status]}
+              summary={presentResearchWorkflowError(task.detail).bodyZh}
+              details={task.detail}
+              defaultOpen={false}
+            />
+          ) : task.detail}
         </div>
         {task.progress && !historyMode ? <div className={styles.progress}>{task.progress.label}</div> : null}
         {children}

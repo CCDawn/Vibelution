@@ -238,6 +238,16 @@ describe("conversationIndexModel", () => {
     });
   });
 
+  it("groups a research discussion by its explicit team while preserving unassigned rooms", () => {
+    const model = buildConversationIndexModel({
+      conversations: [groupConversation({ teamId: "research-team" }), groupConversation({ conversationId: "unassigned", roomId: "unassigned" })],
+      lang: "zh", linkedTeamRoomIds: new Set(), rawSessions: [], rightIndexSessions: [],
+      sessionFilter: "", sessionsById: new Map(), teams: [],
+    });
+    expect(model.groupedConversations.find((group) => group.teamId === "research-team")?.items.map((item) => item.roomId)).toEqual(["room-1"]);
+    expect(model.filteredStandaloneGroupConversations.map((item) => item.roomId)).toEqual(["unassigned"]);
+  });
+
   it("preserves backend source authority refs when converting sessions", () => {
     const summary = sessionToConversationSummary(session({
       id: "session-source",

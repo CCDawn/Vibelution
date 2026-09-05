@@ -229,7 +229,6 @@ export function createResearchPrimarySurfaceRenderers(ctx: ResearchPrimarySurfac
         lang={lang}
         teamName={String(selectedTeam?.name || "")}
         linkedChatRoomId={String(selectedTeam?.linkedChatRoomId || "")}
-        onOpenTeamCommunication={() => selectResearchWorkspaceView("discussion")}
         toolbarLeading={(
           <TeamShellToolbar
             lang={lang}

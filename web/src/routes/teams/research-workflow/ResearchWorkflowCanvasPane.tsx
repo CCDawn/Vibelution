@@ -1,9 +1,10 @@
 import { memo } from "react";
 
 import type { WorkflowLayoutInput } from "../../../components/vui";
-import { VStateSurface, VWorkflowCanvas } from "../../../components/vui";
+import { VErrorSummary, VStateSurface, VWorkflowCanvas } from "../../../components/vui";
 import { useShellI18n } from "../../../i18n/useShellI18n";
 import styles from "./ResearchWorkflowCanvasPane.styles";
+import { presentResearchWorkflowError } from "../researchWorkflowErrorModel";
 
 // Memoized: the canvas subtree is expensive (ELK layout + node rendering) and
 // must not re-render on unrelated workspace polls; graph identity is already
@@ -29,12 +30,13 @@ export const ResearchWorkflowCanvasPane = memo(function ResearchWorkflowCanvasPa
       data-composer="research-process-canvas"
     >
       {props.error ? (
-        <div
+        <VErrorSummary
           className={styles.error}
-          role="alert"
-        >
-          {props.error}
-        </div>
+          label={lang === "zh" ? presentResearchWorkflowError(props.error).titleZh : presentResearchWorkflowError(props.error).titleEn}
+          summary={lang === "zh" ? presentResearchWorkflowError(props.error).bodyZh : presentResearchWorkflowError(props.error).bodyEn}
+          details={props.error}
+          defaultOpen={false}
+        />
       ) : null}
       <div className={styles.stage}>
         {props.graph ? (
@@ -52,8 +54,10 @@ export const ResearchWorkflowCanvasPane = memo(function ResearchWorkflowCanvasPa
           />
         ) : (
           <VStateSurface
-            tone="loading"
-            title={lang === "zh" ? "加载流程定义" : "Loading workflow definition"}
+            tone={props.error ? "error" : "loading"}
+            title={props.error
+              ? (lang === "zh" ? "流程定义无法读取" : "Workflow definition unavailable")
+              : (lang === "zh" ? "加载流程定义" : "Loading workflow definition")}
             fill
             className={styles.loading}
           />

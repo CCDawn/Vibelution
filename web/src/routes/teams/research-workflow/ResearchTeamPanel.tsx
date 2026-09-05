@@ -1,4 +1,5 @@
 import type { WorkflowRunRecord } from "../../../api/researchWorkflow";
+import type { MeetingRoundRecord } from "../../../api/types/hypothesisFirst";
 import type {
   EffectiveAgentBinding,
   WorkflowCanvasProjection,
@@ -26,6 +27,7 @@ export function ResearchTeamPanel(props: {
   meetingRoundId?: string;
   questionId?: string;
   discussionModel?: ScopedDiscussionModel;
+  meetings?: readonly MeetingRoundRecord[];
 }) {
   const { lang } = useShellI18n();
   const isZh = lang === "zh";
@@ -55,8 +57,13 @@ export function ResearchTeamPanel(props: {
   );
   const returnTo = teamWorkspaceRoute(props.teamId, {
     runId: props.run?.runId,
+    questionId: scopedQuestionId,
     panel: "team",
   });
+  const pastDiscussions = (props.meetings ?? []).filter((meeting) =>
+    meeting.question.toUpperCase() === scopedQuestionId.toUpperCase()
+    && meeting.status === "closed" && meeting.linkedChatRoomId,
+  );
   const roomRoute = scopedQuestionId
     ? (scopedDiscussionReady ? props.discussionModel?.deepLink || "" : "")
     : teamChatRoomRoute(
@@ -118,10 +125,24 @@ export function ResearchTeamPanel(props: {
       ) : (
         <div className={styles.roomMissing} role="status">
           {scopedQuestionId
-            ? (isZh ? "当前题目尚未关联精确讨论会话" : "No exact discussion is linked to this question yet")
+            ? (isZh ? "当前题目没有可打开的活动讨论" : "No active discussion is available for this question")
             : (isZh ? "团队尚未关联讨论会话" : "No chat room is linked to this team yet")}
         </div>
       )}
+      {pastDiscussions.length ? (
+        <section>
+          <h4 className={styles.sectionTitle}>{isZh ? "本题历史讨论" : "Question discussion history"}</h4>
+          {pastDiscussions.map((meeting) => (
+            <VRouteLinkButton key={meeting.meetingRoundId} variant="secondary" to={teamChatRoomRoute(
+              meeting.linkedChatRoomId || "", returnTo,
+              isZh ? "返回科研流程" : "Back to research workflow", meeting.meetingRoundId,
+            )}>
+              {meeting.meetingType === "hypothesis_candidate_generation" ? (isZh ? "候选生成" : "Candidate generation") : (isZh ? "假说评审" : "Hypothesis review")}
+              {` · ${(meeting.roundIndex ?? 0) + 1} · ${meeting.closedAt || meeting.startedAt}`}
+            </VRouteLinkButton>
+          ))}
+        </section>
+      ) : null}
     </VSurface>
   );
 }

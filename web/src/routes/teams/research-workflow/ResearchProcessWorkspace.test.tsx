@@ -367,6 +367,26 @@ async function openDropdown(trigger: HTMLElement): Promise<void> {
 describe("ResearchProcessWorkspace", () => {
   let root: Root | null = null;
 
+  it("opens the team panel instead of the retired discussion route", async () => {
+    const rendered = await renderWorkspace();
+    root = rendered.root;
+    const button = Array.from(rendered.container.querySelectorAll("button")).find((item) => item.textContent === "协作");
+    expect(button).toBeDefined();
+    await act(async () => button?.click());
+    expect(harness.location.openPanel).toHaveBeenCalledWith("team");
+  });
+
+  it("keeps the global progress surface available when a run cannot load", async () => {
+    harness.location.panel = "progress";
+    harness.location.questionId = "SCI-020";
+    harness.runState.error = "workflow_definition_unavailable";
+    const rendered = await renderWorkspace();
+    root = rendered.root;
+    expect(rendered.container.querySelector('[data-vui="research-question-archive-canvas"]')).not.toBeNull();
+    expect(rendered.container.querySelector('[data-testid="research-process-inspector-pane"]')?.getAttribute("data-panel")).toBe("progress");
+    expect(rendered.container.querySelector('[data-vui="research-current-task-inspector"]')).toBeNull();
+  });
+
   afterEach(async () => {
     if (root) {
       await act(async () => root?.unmount());

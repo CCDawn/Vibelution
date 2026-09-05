@@ -1,6 +1,6 @@
 import { useId } from "react";
 
-import { VButton, VSurface } from "../../components/vui";
+import { VButton, VErrorSummary, VSurface } from "../../components/vui";
 import type {
   ChallengeMeetingEvidenceRequest,
   ChallengeMeetingMessagePayload,
@@ -260,6 +260,19 @@ export function ChatGroupMessageBody({
   onToggleExpanded,
 }: ChatGroupMessageBodyProps) {
   const structuredPayload = structuredChallengePayload(message);
+  if (message.messagePayload?.kind === "challenge_meeting_message"
+    && message.messagePayload.audit?.parseStatus === "invalid") {
+    return (
+      <VErrorSummary
+        label={lang === "zh" ? "本条讨论结果未解析" : "Discussion result could not be parsed"}
+        summary={lang === "zh"
+          ? "发言已结束，但结果格式不符合要求，尚不能作为有效的候选或评审结果。"
+          : "The response finished, but its format is invalid and cannot be used as a candidate or review result."}
+        details={<pre className={styles.rawProtocol}>{message.messagePayload.audit.rawModelOutput || message.content}</pre>}
+        defaultOpen={false}
+      />
+    );
+  }
   if (structuredPayload) {
     return (
       <StructuredChallengeMessage

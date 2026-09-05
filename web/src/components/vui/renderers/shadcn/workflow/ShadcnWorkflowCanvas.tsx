@@ -95,7 +95,7 @@ export function workflowCanvasInitialFitMinZoom(
   layoutMode: WorkflowCanvasLayoutMode,
   nodeCount: number,
 ): number | undefined {
-  if (layoutMode === "serpentine" && nodeCount > 0 && nodeCount <= 5) return 0.8;
+  if (layoutMode === "serpentine" && nodeCount > 0) return 0.8;
   return undefined;
 }
 
@@ -269,6 +269,7 @@ function WorkflowCanvasInner({
   const programmaticFitRef = useRef(false);
   const canvasOriginSelectionRef = useRef<string | null>(null);
   const lastPannedSelectionRef = useRef<string | null>(null);
+  const lastPannedLayoutRevisionRef = useRef<number | null>(null);
   const initialFitWasPendingRef = useRef(false);
   const lastHostSizeRef = useRef({ width: 0, height: 0 });
   const initialFitMinZoom = workflowCanvasInitialFitMinZoom(layoutMode, graph.nodes.length);
@@ -850,27 +851,29 @@ function WorkflowCanvasInner({
     if (!shouldPanWorkflowSelectionIntoView({
       selectedNodeId,
       canvasOriginNodeId: canvasOriginSelectionRef.current,
-      lastPannedNodeId: lastPannedSelectionRef.current,
+      lastPannedNodeId: lastPannedLayoutRevisionRef.current === layout.layoutRevision
+        ? lastPannedSelectionRef.current : null,
       pendingInitialFit,
       nodesInitialized,
     })) {
       return;
     }
     const currentNodes = nodesRef.current;
-    const node = rf.getNode(selectedNodeId) ?? currentNodes.find((item) => item.id === selectedNodeId);
+    const node = currentNodes.find((item) => item.id === selectedNodeId) ?? rf.getNode(selectedNodeId);
     if (!node) return;
-    const getNode = (id: string) => rf.getNode(id) ?? currentNodes.find((item) => item.id === id);
+    const getNode = (id: string) => currentNodes.find((item) => item.id === id) ?? rf.getNode(id);
     const center = resolveWorkflowNodeFocusCenter(node, getNode);
     programmaticFitRef.current = true;
     userMovedViewportRef.current = true;
     void Promise.resolve(rf.setCenter(center.x, center.y, {
-      zoom: rf.getZoom(),
+      zoom: Math.max(rf.getZoom(), initialFitMinZoom ?? 0),
       duration: 220,
     })).finally(() => {
       programmaticFitRef.current = false;
     });
     lastPannedSelectionRef.current = selectedNodeId;
-  }, [focusableNodeCount, nodesInitialized, pendingInitialFit, rf, selectedNodeId]);
+    lastPannedLayoutRevisionRef.current = layout.layoutRevision;
+  }, [focusableNodeCount, initialFitMinZoom, layout.layoutRevision, nodesInitialized, pendingInitialFit, rf, selectedNodeId]);
 
   const onNodeClick = useCallback(
     (_event: unknown, node: Node) => {

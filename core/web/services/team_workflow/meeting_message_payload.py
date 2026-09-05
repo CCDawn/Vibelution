@@ -9,6 +9,7 @@ readable and untruncated but is never promoted to structured protocol facts.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -402,8 +403,12 @@ def ingest_meeting_message_output(raw_output: Any) -> dict[str, Any]:
     """Validate a full visible model output before deriving display content."""
 
     raw_text = sanitize_assistant_visible_text(raw_output)
+    # A single fenced JSON object is presentation wrapping, not a second
+    # protocol. Preserve the exact output for audit and validate the same schema.
+    fenced = re.fullmatch(r"```(?:json)?[ \t]*\r?\n([\s\S]*?)\r?\n```", raw_text.strip(), re.IGNORECASE)
+    json_text = fenced.group(1) if fenced else raw_text
     try:
-        parsed = json.loads(raw_text)
+        parsed = json.loads(json_text)
     except json.JSONDecodeError as exc:
         error = MeetingMessagePayloadError(
             "message_payload_json_invalid",

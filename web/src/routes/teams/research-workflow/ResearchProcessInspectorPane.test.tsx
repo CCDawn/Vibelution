@@ -481,7 +481,7 @@ describe("ResearchProcessInspectorPane convergence launch", () => {
     container.remove();
   });
 
-  it("routes a formal run-level recovery action to the current-task inspector without requiring a canvas node match", async () => {
+  it("routes formal recovery actions to their matching current node", async () => {
     const { container, root } = await renderInspectorLeaf(
       "zh",
       makeInspectorScope("node", {
@@ -504,6 +504,18 @@ describe("ResearchProcessInspectorPane convergence launch", () => {
     expect(hypothesisLeafHarness.props?.nodeId).toBe("protocol_design");
     expect(container.querySelector('[data-vui="node-knowledge-collection"]')).not.toBeNull();
 
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it("does not replace another selected node with formal recovery actions", async () => {
+    const { container, root } = await renderInspectorLeaf("zh", makeInspectorScope("node", {
+      runId: "run-1", questionId: "SCI-004", selectedNodeId: "hf_generation",
+    }), { kind: "idle" }, { nextAction: {
+      stage: "converged", targetNodeId: "problem_understanding", navigationLabel: "正式运行待恢复",
+    } });
+    expect(hypothesisLeafHarness.props?.nodeId).toBe("hf_generation");
+    expect(hypothesisLeafHarness.props?.formalRuntime).toBe(false);
     await act(async () => root.unmount());
     container.remove();
   });

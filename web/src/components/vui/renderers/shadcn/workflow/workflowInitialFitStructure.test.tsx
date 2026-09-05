@@ -67,7 +67,8 @@ describe("workflowCanvasInitialFitMinZoom", () => {
   it("keeps the default short-flow view readable without removing overview zoom", () => {
     expect(workflowCanvasInitialFitMinZoom("serpentine", 3)).toBe(0.8);
     expect(workflowCanvasInitialFitMinZoom("serpentine", 5)).toBe(0.8);
-    expect(workflowCanvasInitialFitMinZoom("serpentine", 6)).toBeUndefined();
+    expect(workflowCanvasInitialFitMinZoom("serpentine", 6)).toBe(0.8);
+    expect(workflowCanvasInitialFitMinZoom("serpentine", 20)).toBe(0.8);
     expect(workflowCanvasInitialFitMinZoom("stage-columns", 3)).toBeUndefined();
   });
 });
@@ -523,6 +524,12 @@ describe("ShadcnWorkflowCanvas structure (P1-1)", () => {
       );
     });
     expect(fakeInstance.setCenter).not.toHaveBeenCalled();
+
+    vi.mocked(useWorkflowAutoLayout).mockReturnValue({ ...idleLayoutHook(moved), layoutRevision: 2 });
+    await act(async () => {
+      root.render(<ShadcnWorkflowCanvas graph={sampleGraph()} selectedNodeId="protocol_design" layoutMode="serpentine" />);
+    });
+    expect(fakeInstance.setCenter).toHaveBeenCalledWith(550, 436, expect.objectContaining({ zoom: 0.9 }));
 
     await act(async () => {
       root.unmount();

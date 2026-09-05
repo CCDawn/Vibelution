@@ -10,6 +10,10 @@
 
 ### 适用范围
 
+蛇形流程的初始视野和从阶段导航定位节点均保持至少 0.8 的可读缩放，不因节点数量增加而压缩成微缩图。工作区选中当前任务后定位该节点；用户明确选择「适应全部」时仍允许缩小查看全流程。
+
+外部选中节点的定位以当前已提交布局坐标为准；布局版本变化后重新定位该节点，避免临时布局的位置在 ELK 完成后失效。仅状态更新且布局版本不变时不重新定位，画布内部点击也不强制平移。
+
 - Challenge Cup / research process workspace 唯一阶段导航与运行观察表面
 - 只读运行投影 + UI selection（`selectedNodeId` 不得回写 runtime）
 - graph 输入使用公共 `WorkflowLayoutInput`（从 `components/vui` 导入，禁止 route 直连 renderers/shadcn）

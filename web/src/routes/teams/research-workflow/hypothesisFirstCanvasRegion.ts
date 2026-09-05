@@ -301,7 +301,9 @@ export function buildHypothesisFirstCanvasRegion(
   );
   if (showGenerationCard) {
     const generationStatus = generationMeeting
-      ? meetingNodeStatus(generationMeeting)
+      ? generationMeeting.status === "closed" && candidateCount === 0
+        ? "blocked"
+        : meetingNodeStatus(generationMeeting)
       : candidateCount > 0
         ? "succeeded"
         : "waiting_human";
@@ -314,7 +316,7 @@ export function buildHypothesisFirstCanvasRegion(
       status: generationStatus,
       description: generationMeeting
         ? generationMeeting.status === "closed"
-          ? `已产出 ${candidateCount} 条候选假说`
+          ? candidateCount > 0 ? `已产出 ${candidateCount} 条候选假说` : "讨论已结束，待补充有效候选结果"
           : meetingNodeDescription(generationMeeting)
         : candidateCount > 0
           ? `已产出 ${candidateCount} 条候选假说`
@@ -333,7 +335,9 @@ export function buildHypothesisFirstCanvasRegion(
       : candidateCount > 0
         ? `已产出 ${candidateCount} 条候选，等待人工选择`
         : generationMeeting
-          ? "候选生成讨论进行中，产出后可选择"
+          ? generationMeeting.status === "closed"
+            ? "讨论已结束，等待有效候选结果后再选择"
+            : "候选生成讨论进行中，产出后可选择"
           : "等待生成候选假说",
   });
 
