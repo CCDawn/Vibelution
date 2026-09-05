@@ -117,8 +117,14 @@ export function useWorkflowAutoLayout(
   const sizesRef = useRef<Map<string, WorkflowNodeSize>>(new Map());
   const settlingRef = useRef<"design" | "calibration" | "settled">("design");
   const [sizesTick, setSizesTick] = useState(0);
+  const failedLayoutRef = useRef(false);
+  const [retryTick, setRetryTick] = useState(0);
   const graphRef = useRef(graph);
   graphRef.current = graph;
+  useEffect(() => {
+    // A fresh snapshot can retry a finished failure, but never cancel work.
+    if (failedLayoutRef.current) setRetryTick((tick) => tick + 1);
+  }, [graph]);
 
   useEffect(() => {
     const created = createEngine();
@@ -139,11 +145,14 @@ export function useWorkflowAutoLayout(
       full: `${graphHash.full}|layout:${layoutMode}`,
     };
   }, [graph, layoutMode, sizesTick]);
+  const { full: layoutKey, structure: structureKey } = hash;
 
   useEffect(() => {
     if (!engine) {
       return;
     }
+    const graph = graphRef.current;
+    const hash = { full: layoutKey, structure: structureKey };
     const cache = cacheRef.current;
     if (cache && cache.hash.full === hash.full) {
       setDisplay({
@@ -165,9 +174,13 @@ export function useWorkflowAutoLayout(
     }
 
     const token = ++tokenRef.current;
+    failedLayoutRef.current = false;
     let cancelled = false;
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
-    const recover = () => resolveWorkflowLayoutRecovery(cache, hash, graph, layoutMode, fallback);
+    const recover = () => resolveWorkflowLayoutRecovery(
+      cache, hash, graphRef.current, layoutMode,
+      createDeterministicWorkflowLayout(graphRef.current, layoutMode),
+    );
     if (graph.nodes.length > 0) {
       timeoutId = setTimeout(() => {
         if (cancelled || token !== tokenRef.current) {
@@ -199,6 +212,7 @@ export function useWorkflowAutoLayout(
         }
         const diagnostic = layoutDiagnostic(result, input);
         if (diagnostic) {
+          failedLayoutRef.current = true;
           setDegraded(diagnostic);
           setDisplay({ layout: recover(), structure: hash.structure });
           return;
@@ -224,7 +238,7 @@ export function useWorkflowAutoLayout(
         };
         setDegraded(null);
         setDisplay({
-          layout: mergeRuntimeFields(cacheRef.current, input, layoutMode),
+          layout: mergeRuntimeFields(cacheRef.current, graphRef.current, layoutMode),
           structure: hash.structure,
         });
       })
@@ -237,6 +251,7 @@ export function useWorkflowAutoLayout(
           timeoutId = null;
         }
         setDegraded({ reason: error instanceof Error ? error.message : String(error) });
+        failedLayoutRef.current = true;
         setDisplay({ layout: recover(), structure: hash.structure });
       });
     return () => {
@@ -245,7 +260,9 @@ export function useWorkflowAutoLayout(
         clearTimeout(timeoutId);
       }
     };
-  }, [engine, fallback, hash, graph, layoutMode]);
+    // Runtime status/bindings are merged at render time. Restarting pending
+    // geometry for those updates starves the worker and re-arms viewport moves.
+  }, [engine, layoutKey, structureKey, layoutMode, retryTick]);
 
   const reportMeasuredSize = useCallback((nodeId: string, size: WorkflowNodeSize) => {
     const previous = sizesRef.current.get(nodeId);

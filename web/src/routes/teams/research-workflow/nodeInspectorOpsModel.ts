@@ -212,6 +212,7 @@ export function commandOfferUnavailableReason(
     return isZh ? "前往闭环首轮假说讨论" : "Go to the first hypothesis discussion";
   }
   if (code === "retry_owns_recovery") return isZh ? "当前节点已阻塞，请使用重试" : "Node is blocked; use retry";
+  if (code === "rebind_target_required") return isZh ? "请先选择要重绑的 Agent" : "Select the replacement Agent first";
   if (code === "node_in_flight") return isZh ? "当前节点已在执行" : "Node is already running";
   if (code === "node_already_succeeded") return isZh ? "当前节点已完成" : "Node already completed";
   return code;

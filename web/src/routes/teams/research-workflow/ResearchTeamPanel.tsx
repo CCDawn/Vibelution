@@ -138,7 +138,7 @@ export function ResearchTeamPanel(props: {
               isZh ? "返回科研流程" : "Back to research workflow", meeting.meetingRoundId,
             )}>
               {meeting.meetingType === "hypothesis_candidate_generation" ? (isZh ? "候选生成" : "Candidate generation") : (isZh ? "假说评审" : "Hypothesis review")}
-              {` · ${(meeting.roundIndex ?? 0) + 1} · ${meeting.closedAt || meeting.startedAt}`}
+              {` · ${isZh ? "第 " : "Round "}${(meeting.roundIndex ?? 0) + 1}${isZh ? " 轮" : ""} · ${new Date(meeting.closedAt || meeting.startedAt).toLocaleString(isZh ? "zh-CN" : "en-US", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false })}`}
             </VRouteLinkButton>
           ))}
         </section>

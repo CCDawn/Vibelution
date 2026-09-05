@@ -80,7 +80,8 @@ export function resolveResearchProcessAutofocus(input: {
   const target = input.nextTarget?.trim() || null;
   if (!target) return null;
   if (input.selectedNodeId === target) return null;
-  const targetChanged = input.previousNextTarget !== target;
+  // First snapshot arrival is not a task transition: preserve explicit links.
+  const targetChanged = Boolean(input.previousNextTarget && input.previousNextTarget !== target);
   const noSelection = !input.selectedNodeId;
   if (!noSelection && !targetChanged) return null;
   return { node: target, panel: "node" };

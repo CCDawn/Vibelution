@@ -266,6 +266,7 @@ function WorkflowCanvasInner({
   const rf = useReactFlow();
   const hostRef = useRef<HTMLDivElement | null>(null);
   const userMovedViewportRef = useRef(false);
+  const overviewSelectionRef = useRef<string | null | undefined>(undefined);
   const programmaticFitRef = useRef(false);
   const canvasOriginSelectionRef = useRef<string | null>(null);
   const lastPannedSelectionRef = useRef<string | null>(null);
@@ -280,9 +281,11 @@ function WorkflowCanvasInner({
     });
   }, [rf]);
   const fitAll = useCallback(() => {
-    userMovedViewportRef.current = false;
+    // An explicit overview owns the viewport until selection or scope changes.
+    userMovedViewportRef.current = true;
+    overviewSelectionRef.current = selectedNodeId;
     fitCanvas(0.1, 200);
-  }, [fitCanvas]);
+  }, [fitCanvas, selectedNodeId]);
 
   const layout = useWorkflowAutoLayout(graph, createWorkflowLayoutEngine, { layoutMode });
   const currentSet = useMemo(() => new Set(runtimeCurrentNodeIds), [runtimeCurrentNodeIds]);
@@ -587,7 +590,7 @@ function WorkflowCanvasInner({
     structureKey: layout.structureKey,
     nodesInitialized,
     fit: () => {
-      fitCanvas(0.08, 0, initialFitMinZoom);
+      if (!userMovedViewportRef.current) fitCanvas(0.08, 0, initialFitMinZoom);
     },
     acknowledgeInitialFit: layout.acknowledgeInitialFit,
   });
@@ -605,6 +608,7 @@ function WorkflowCanvasInner({
 
   useEffect(() => {
     userMovedViewportRef.current = false;
+    overviewSelectionRef.current = undefined;
     lastHostSizeRef.current = { width: 0, height: 0 };
     lastPannedSelectionRef.current = null;
   }, [layout.structureKey]);
@@ -844,6 +848,8 @@ function WorkflowCanvasInner({
   );
 
   useEffect(() => {
+    if (overviewSelectionRef.current === selectedNodeId) return;
+    overviewSelectionRef.current = undefined;
     if (!selectedNodeId) {
       lastPannedSelectionRef.current = null;
       return;
@@ -967,7 +973,7 @@ function WorkflowCanvasInner({
           edges={edges}
           nodeTypes={measuredNodeTypes}
           edgeTypes={edgeTypes}
-          minZoom={layoutMode === "serpentine" ? 0.28 : 0.35}
+          minZoom={layoutMode === "serpentine" ? 0.1 : 0.35}
           maxZoom={1.6}
           nodesDraggable={manualLayoutEnabled && !manualLayoutLocked}
           nodesConnectable={reconnectSession !== null}

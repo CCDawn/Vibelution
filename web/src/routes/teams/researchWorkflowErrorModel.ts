@@ -39,6 +39,22 @@ export function presentResearchWorkflowError(
   }
   const lower = message.toLowerCase();
 
+  const readinessReasons = [
+    ["knowledge_package_not_materialized", "知识包尚未形成，请先完成知识搜集与交接", "The knowledge package is not ready; complete collection and handoff"],
+    ["hypothesis_round_unconverged", "假说讨论尚未收敛，请检查本轮有效候选与未解决分歧", "The hypothesis round has not converged; review valid candidates and open disagreements"],
+    ["template_baseline_missing", "缺少研究模板基线，请核对题目档案中的基线配置", "The research template baseline is missing; check the question baseline configuration"],
+    ["rebind_target_required", "请先选择要重绑的 Agent", "Select the replacement agent first"],
+    ["four-perspective canonical search receipts", "资料检索缺少四视角的有效回执或与回执关联的候选，请查看资料寻找的来源记录", "Source search requires valid four-perspective receipts and receipt-bound candidates"],
+  ].filter(([code]) => lower.includes(code));
+  if (readinessReasons.length) {
+    return {
+      ...DEFAULT_PRESENTATION,
+      titleZh: "前置条件未满足", titleEn: "Prerequisites are not ready",
+      bodyZh: readinessReasons.map(([, zh]) => zh).join("；") + "。",
+      bodyEn: readinessReasons.map(([, , en]) => en).join("; ") + ".",
+    };
+  }
+
   if (lower.includes("workflow_definition_unavailable") || lower.includes("unavailable workflow definition")) {
     return {
       ...DEFAULT_PRESENTATION,
