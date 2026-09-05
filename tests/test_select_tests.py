@@ -959,7 +959,7 @@ def test_selector_ignores_deleted_changed_python_test_file(tmp_path: Path):
     assert result["coverageGaps"] == []
 
 
-def test_selector_ignores_deleted_changed_python_product_file(tmp_path: Path):
+def test_selector_reports_deleted_changed_python_product_file(tmp_path: Path):
     (tmp_path / "core").mkdir()
 
     result = select_tests.select_tests(
@@ -971,10 +971,12 @@ def test_selector_ignores_deleted_changed_python_product_file(tmp_path: Path):
 
     assert result["matchedRules"] == []
     assert result["commands"] == []
-    assert result["coverageGaps"] == []
+    assert result["coverageGaps"] == [
+        {"path": "core/deleted_feature.py", "reason": "no-static-test-import"}
+    ]
 
 
-def test_selector_removes_deleted_test_files_from_matching_rule_commands(tmp_path: Path):
+def test_selector_keeps_missing_matrix_tests_visible_to_the_gate(tmp_path: Path):
     (tmp_path / "core").mkdir()
     (tmp_path / "tests").mkdir()
     (tmp_path / "core" / "feature.py").write_text("VALUE = 1\n", encoding="utf-8")
@@ -982,15 +984,16 @@ def test_selector_removes_deleted_test_files_from_matching_rule_commands(tmp_pat
         "def test_value():\n    assert True\n",
         encoding="utf-8",
     )
+    missing_test_command = (
+        ".\\.venv\\Scripts\\python.exe -m pytest "
+        "tests/test_deleted.py tests/test_live.py -q"
+    )
     matrix = {
         "rules": [
             {
                 "id": "feature",
                 "paths": ["core/feature.py"],
-                "commands": [
-                    ".\\.venv\\Scripts\\python.exe -m pytest "
-                    "tests/test_deleted.py tests/test_live.py -q"
-                ],
+                "commands": [missing_test_command],
             }
         ]
     }
@@ -1002,9 +1005,12 @@ def test_selector_removes_deleted_test_files_from_matching_rule_commands(tmp_pat
         project_root=tmp_path,
     )
 
-    assert result["commands"] == [
-        ".\\.venv\\Scripts\\python.exe -m pytest tests/test_live.py -q --maxfail=0"
-    ]
+    expected_command = (
+        ".\\.venv\\Scripts\\python.exe -m pytest "
+        "tests/test_deleted.py tests/test_live.py -q -n 2 --dist loadfile "
+        '-m "not serial" --maxfail=0'
+    )
+    assert result["commands"] == [expected_command]
     assert result["coverageGaps"] == []
 
 
