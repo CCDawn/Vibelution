@@ -105,7 +105,7 @@ def _ensure_offer(
                 f"v{run.run_version}"
             ),
             expected_run_version=run.run_version,
-            payload={},
+            payload={"questionId": run.question_id},
         )
     if str(run.status) in _TERMINAL_RUN_STATUSES:
         return CommandOffer(
