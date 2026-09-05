@@ -331,8 +331,9 @@ class WorkflowCommandService:
             # fail-closes after the runVersion CAS, before any handler runs.
             self._assert_pinned_definition_for_mutation(run)
 
+        authorized_operator_id = ""
         if request.command in _OPERATOR_ONLY_COMMANDS:
-            self._authorize_operator(request)
+            authorized_operator_id = self._authorize_operator(request)
 
         if request.command in _KNOWLEDGE_FLOW_COMMANDS:
             # The knowledge sideflow service owns its own single-writer
@@ -401,6 +402,13 @@ class WorkflowCommandService:
                 ),
                 force_flush=True,
             )
+        elif request.command is WorkflowCommandKind.CANCEL_RUN:
+            future = self._store.submit(
+                lambda uow: self._handle_cancel_run(
+                    uow, request, request_hash, operator_id=authorized_operator_id,
+                ),
+                force_flush=True,
+            )
         else:
             future = self._store.submit(
                 lambda uow: handler(uow, request, request_hash),
@@ -417,7 +425,7 @@ class WorkflowCommandService:
             self._close_cancel_run_inflight_turns(request.run_id)
         return receipt
 
-    def _authorize_operator(self, request: CommandRequest) -> None:
+    def _authorize_operator(self, request: CommandRequest) -> str:
         """Authorize high-impact commands from server request context only.
 
         Client body ``requestedBy`` must never self-declare operator authority.
@@ -452,6 +460,8 @@ class WorkflowCommandService:
             and not operator_has_privileged_role(context.roles)
         ):
             raise CommandForbiddenError("command_forbidden")
+
+        return context.operator_id
 
     # ------------------------------------------------ cancel_run turn closure
 
@@ -996,7 +1006,9 @@ class WorkflowCommandService:
         )
         return _receipt(uow, request, command_id, accepted_version, sequence, now_ms)
 
-    def _handle_cancel_run(self, uow, request: CommandRequest, request_hash: str) -> CommandReceipt:
+    def _handle_cancel_run(
+        self, uow, request: CommandRequest, request_hash: str, *, operator_id: str,
+    ) -> CommandReceipt:
         now_ms = self._clock()
         run = uow.repository.get_run(request.run_id)
         require_run_transition(RunStatus(run.status), RunStatus.CANCELLED)
@@ -1047,6 +1059,31 @@ class WorkflowCommandService:
                 now_ms=now_ms,
             )
         )
+        from .scientific_semantic_ledger import (
+            CHALLENGE_CUP_WORKFLOW_ID,
+            append_scientific_semantic_record_in_uow,
+        )
+
+        if run.workflow_id == CHALLENGE_CUP_WORKFLOW_ID:
+            from core.research.workflow.contracts.challenge_cup_stage_one_v3 import (
+                ActivityExecution,
+                ScientificSemanticRecord,
+            )
+
+            append_scientific_semantic_record_in_uow(
+                uow,
+                run_id=request.run_id,
+                record_ref=f"execution:{command_id}:cancelled",
+                subject_ref=request.run_id,
+                semantic=ScientificSemanticRecord(execution=ActivityExecution(
+                    status="cancelled",
+                    cancelledByAgentRef=operator_id,
+                    terminationReasonCode="operator_cancelled",
+                )),
+                actor_type="person",
+                actor_ref=operator_id,
+                recorded_at_ms=now_ms,
+            )
         return _receipt(uow, request, command_id, accepted_version, sequence, now_ms)
 
     def _handle_resolve_human_task(
