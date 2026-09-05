@@ -1563,27 +1563,53 @@ export async function executeMainLineWorkbench(
       // wrapper distinct from backendPid; re-running the root-only terminator
       // for that already-exited wrapper turns a successful shutdown into a
       // false failure and prevents Electron from closing the Workbench window.
-      const postReclaimReconcile = staleReclaim.reclaimed
-        ? await reconcileDeadRegisteredHandles({
-            pids: retainedRegisteredHandles,
-            port,
-            host,
-            expectedIdentities,
-            pidAlive: input.pidAlive,
-            connect: input.connect
-          })
-        : null;
-      for (const pid of postReclaimReconcile?.reconciledPids ?? []) {
+      const postReclaimReconcile = await reconcileDeadRegisteredHandles({
+        pids: retainedRegisteredHandles,
+        port,
+        host,
+        expectedIdentities,
+        pidAlive: input.pidAlive,
+        connect: input.connect
+      });
+      for (const pid of postReclaimReconcile.reconciledPids) {
         reconciledDeadPids.add(pid);
       }
-      if ((postReclaimReconcile?.reconciledPids.length ?? 0) > 0) {
-        postReclaimReconcileReason = postReclaimReconcile?.reason ?? "";
+      if (postReclaimReconcile.reconciledPids.length > 0) {
+        postReclaimReconcileReason = postReclaimReconcile.reason;
       }
-      const pendingRegisteredHandles = staleReclaim.reclaimed
-        ? (postReclaimReconcile?.retainedPids ?? retainedRegisteredHandles)
-            .filter((pid) => !retainedBackendTreePids.includes(pid))
-        : retainedRegisteredHandles;
+      const pendingBackendTreePids = retainedBackendTreePids.filter((pid) => !reconciledDeadPids.has(pid));
       const pendingExtraPids = retainedExtraPids.filter((pid) => !reconciledDeadPids.has(pid));
+      if (
+        !staleReclaim.reclaimed
+        && pendingBackendTreePids.length === 0
+        && pendingExtraPids.length === 0
+      ) {
+        // The first reclaim can release the backend port before discovering
+        // that a persisted daemon/root PID was already dead. Once the existing
+        // identity-bound dead-handle reconciler has released every owned tree
+        // registration, recompute the reclaim result with those stale roots
+        // removed instead of sending a second termination request.
+        staleReclaim = await reclaimStaleWorkbenchBackend({
+          port,
+          host,
+          workspaceRoot: input.workspaceRoot,
+          signal: input.signal,
+          connect: input.connect,
+          fetchHealth: input.fetchHealth,
+          pidAlive: input.pidAlive,
+          killPid: input.killPid,
+          terminateProcessTree,
+          expectedIdentities,
+          captureProcessIdentity: captureCurrentBackendIdentity,
+          controlToken: input.controlToken,
+          gracefulShutdown,
+          forceRetireOnActiveWorkRefusal: operation === "force-stop",
+          registeredPids: pendingBackendTreePids,
+          extraPids: pendingExtraPids
+        });
+      }
+      const pendingRegisteredHandles = postReclaimReconcile.retainedPids
+        .filter((pid) => !staleReclaim.reclaimed || !retainedBackendTreePids.includes(pid));
       await retireRegisteredHandles({
         pids: pendingRegisteredHandles,
         port,

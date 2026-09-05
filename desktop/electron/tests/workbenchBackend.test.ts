@@ -1890,8 +1890,8 @@ describe("runWorkbenchLifecycle", () => {
     expect(terminateProcessTree).not.toHaveBeenCalled();
   });
 
-  it("does not re-retire a Runtime Manager daemon after backend reclaim already retired it", async () => {
-    const alive = new Set([51, 52, 77]);
+  it("reconciles a stale dead Runtime Manager daemon after the backend releases its port", async () => {
+    const alive = new Set([51, 52]);
     const terminateProcessTree = vi.fn(async (pid: number) => {
       if (!alive.has(pid)) {
         return false;
