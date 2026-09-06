@@ -1127,7 +1127,7 @@ def test_receipt_required_runner_fails_before_provider_call_without_authority(mo
     calls = []
     monkeypatch.setattr(
         llm_review_runners,
-        "invoke_llm_outcome",
+        "run_streaming_llm_outcome",
         lambda *_args, **_kwargs: calls.append(True),
     )
     runners = llm_review_runners.build_hypothesis_review_runners(
@@ -1142,7 +1142,7 @@ def test_receipt_required_runner_fails_before_provider_call_without_authority(mo
 def test_receipt_required_runner_rejects_provider_outcome_without_receipt(monkeypatch):
     monkeypatch.setattr(
         llm_review_runners,
-        "invoke_llm_outcome",
+        "run_streaming_llm_outcome",
         lambda *_args, **kwargs: _final_outcome(kwargs["context"]),
     )
     runners = llm_review_runners.build_hypothesis_review_runners(
@@ -1164,7 +1164,7 @@ def test_receipt_required_runner_returns_provider_bound_result(monkeypatch):
     }
     monkeypatch.setattr(
         llm_review_runners,
-        "invoke_llm_outcome",
+        "run_streaming_llm_outcome",
         lambda *_args, **kwargs: _final_outcome(kwargs["context"], receipt=receipt),
     )
     runners = llm_review_runners.build_hypothesis_review_runners(
@@ -1496,7 +1496,7 @@ def test_formal_parallel_runner_calls_see_only_their_own_receipt_scope(monkeypat
             final_text=payload_by_purpose[purpose],
         )
 
-    monkeypatch.setattr(llm_review_runners, "invoke_llm_outcome", fake_invoke_llm_outcome)
+    monkeypatch.setattr(llm_review_runners, "run_streaming_llm_outcome", fake_invoke_llm_outcome)
     runners = llm_review_runners.build_hypothesis_review_runners(
         dict(_FORMAL_FAKE_LLM), require_provider_receipts=True
     )
@@ -1863,7 +1863,7 @@ def test_receipt_bound_runner_times_out_with_structured_error(monkeypatch):
         now[0] = 1_001.0
         return object()
 
-    monkeypatch.setattr(llm_review_runners, "invoke_llm_outcome", hanging_invoke_outcome)
+    monkeypatch.setattr(llm_review_runners, "run_streaming_llm_outcome", hanging_invoke_outcome)
     monkeypatch.setattr(
         llm_review_runners, "review_llm_call_timeout_seconds", lambda **_kwargs: 0.2
     )
@@ -1972,7 +1972,7 @@ def test_receipt_bound_runner_invalid_json_dumps_outcome_final_text(
         )
 
     monkeypatch.setattr(
-        llm_review_runners, "invoke_llm_outcome", fake_invoke_llm_outcome
+        llm_review_runners, "run_streaming_llm_outcome", fake_invoke_llm_outcome
     )
     runners = llm_review_runners.build_hypothesis_review_runners(
         dict(_FORMAL_FAKE_LLM), require_provider_receipts=True
@@ -2443,7 +2443,7 @@ def test_receipt_bound_structured_call_passes_schema_and_clamp(monkeypatch):
         captured.append(dict(kwargs))
         return _final_outcome(kwargs["context"], receipt=receipt)
 
-    monkeypatch.setattr(llm_review_runners, "invoke_llm_outcome", fake_invoke_llm_outcome)
+    monkeypatch.setattr(llm_review_runners, "run_streaming_llm_outcome", fake_invoke_llm_outcome)
     runners = llm_review_runners.build_hypothesis_review_runners(
         dict(llm), require_provider_receipts=True
     )
@@ -2458,6 +2458,7 @@ def test_receipt_bound_structured_call_passes_schema_and_clamp(monkeypatch):
     assert result.payload["outcome"] == "left_wins"
     assert captured[0]["output_schema"] is not None
     assert captured[0]["output_schema"].name == "hypothesis_pairwise_v1"
+    assert callable(captured[0]["on_event"])
     # Receipt-bound structured calls keep the review clamp (digest-only
     # unclamping does not touch the hypothesis review purposes).
     assert captured[0]["metadata"] == {"llmMaxOutputTokensOverride": 8192}
@@ -2687,7 +2688,7 @@ def test_receipt_bound_reflection_submits_canonical_ref_enum(monkeypatch):
             final_text=_reflection_output_payload(),
         )
 
-    monkeypatch.setattr(llm_review_runners, "invoke_llm_outcome", invoke)
+    monkeypatch.setattr(llm_review_runners, "run_streaming_llm_outcome", invoke)
     runners = llm_review_runners.build_hypothesis_review_runners(
         llm, require_provider_receipts=True
     )

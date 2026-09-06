@@ -62,7 +62,7 @@ from core.llm.client import (
     llm_cancel_context,
     model_invocation_receipt_context_scope,
 )
-from core.llm.invocation import invoke_llm_outcome
+from core.llm.invocation import run_streaming_llm_outcome
 from core.llm.semantic_messages import SemanticOutputSchema
 from core.llm.types import LLMError
 from core.research.competition.question_result_package import (
@@ -1477,10 +1477,11 @@ def _invoke_review_llm_impl(
             else None
         )
         with model_invocation_receipt_context_scope(receipt_context):
-            return invoke_llm_outcome(
+            return run_streaming_llm_outcome(
                 llm["client"],
                 messages,
                 context=invocation_context,
+                on_event=lambda _event: None,
                 metadata=bound_override_metadata,
                 output_schema=_purpose_output_schema(purpose, llm, user_payload=user_payload),
             )
