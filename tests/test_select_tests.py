@@ -108,6 +108,29 @@ def test_matrix_loads_with_builtin_subset_parser():
     assert any(rule["id"] == "web-session-chat" for rule in matrix["rules"])
 
 
+def test_web_route_contract_rule_avoids_static_python_fallback() -> None:
+    result = select_tests.select_tests(
+        ["core/web/routes/conversations.py"],
+        select_tests.load_matrix(),
+    )
+
+    assert [rule["id"] for rule in result["matchedRules"]] == [
+        "web-route-contract-coverage"
+    ]
+    assert result["coverageGaps"] == []
+    assert result["commands"] == [
+        "git diff --check",
+        ".\\.venv\\Scripts\\python.exe -m pytest tests/test_web_route_contract_coverage.py -q --maxfail=0",
+    ]
+
+
+def test_pytest_configuration_is_owned_by_test_tooling() -> None:
+    result = select_tests.select_tests(["pytest.ini"], select_tests.load_matrix())
+
+    assert [rule["id"] for rule in result["matchedRules"]] == ["test-tooling"]
+    assert result["coverageGaps"] == []
+
+
 def test_matrix_references_existing_test_files_and_directories():
     matrix = select_tests.load_matrix()
     missing_paths: list[str] = []
@@ -157,62 +180,6 @@ def test_matrix_missing_path_exception_is_only_the_explicit_challenge_cup_retire
         not (PROJECT_ROOT / path).exists()
         for path in RETIRED_CHALLENGE_CUP_PATHS
     )
-
-
-def test_team_workflow_aggregate_ignored_when_collecting_tests_tree():
-    """Full-suite discovery must prefer domain packs over the aggregate re-export."""
-    aggregate = PROJECT_ROOT / "tests" / "test_team_workflow_orchestration_service.py"
-
-    class _Config:
-        args = ["tests"]
-
-    assert test_conftest.pytest_ignore_collect(collection_path=aggregate, config=_Config()) is True
-
-    class _ExplicitAggregate:
-        args = ["tests/test_team_workflow_orchestration_service.py"]
-
-    assert (
-        test_conftest.pytest_ignore_collect(
-            collection_path=aggregate, config=_ExplicitAggregate()
-        )
-        is False
-    )
-
-    class _WithDomainPack:
-        args = [
-            "tests/test_team_workflow_orchestration_service.py",
-            "tests/test_team_workflow_source_collection_cases.py",
-        ]
-
-    assert (
-        test_conftest.pytest_ignore_collect(
-            collection_path=aggregate, config=_WithDomainPack()
-        )
-        is True
-    )
-
-
-def test_team_workflow_collection_modifyitems_drops_aggregate_when_domains_present():
-    class _Item:
-        def __init__(self, nodeid: str):
-            self.nodeid = nodeid
-
-    items = [
-        _Item("tests/test_team_workflow_orchestration_service.py::test_a"),
-        _Item("tests/test_team_workflow_source_collection_cases.py::test_a"),
-        _Item("tests/test_team_workflow_structure_cases.py::test_b"),
-        _Item("tests/test_other.py::test_c"),
-    ]
-    test_conftest.drop_team_workflow_aggregate_duplicates(items)
-    assert [item.nodeid for item in items] == [
-        "tests/test_team_workflow_source_collection_cases.py::test_a",
-        "tests/test_team_workflow_structure_cases.py::test_b",
-        "tests/test_other.py::test_c",
-    ]
-
-    only_aggregate = [_Item("tests/test_team_workflow_orchestration_service.py::test_a")]
-    test_conftest.drop_team_workflow_aggregate_duplicates(only_aggregate)
-    assert len(only_aggregate) == 1
 
 
 def test_runtime_manager_isolation_hint_skips_pure_test_files(tmp_path: Path):

@@ -522,7 +522,7 @@ P1/P2 不列入本轮 Critical Path。
 
 P0 绿的定义：
 
-- 聚焦测试：`tests/test_team_workflow_orchestration_service.py`（经 cases_experiment / cases_research_knowledge）、`tests/test_research_loop_service.py` 中记忆与实验登记相关用例。
+- 聚焦测试：`tests/test_team_workflow_experiment_cases.py`、`tests/test_team_workflow_research_knowledge_cases.py` 与 `tests/test_research_loop_service.py` 中记忆与实验登记相关用例。
 - 新用例至少覆盖：failed smoke 写出当前有效 `falsifies`；passed full-run 写出当前有效 `supports`；同 claim 后一次失败把先前 `supports.validUntil` 写上且旧边仍在；无边旧 plan 回退启发式；同 signature 禁止重复建议；claimId 与 `_claim_map` 一致。
 - 不跑全仓；不改 `web/` 故不跑 `tsc -b`。
 - Launcher refresh：`not needed`（纯后端工作流 JSON 字段；用户测挑战杯记忆时建议重启会话，不强制 rebuild）。

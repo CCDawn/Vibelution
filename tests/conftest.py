@@ -33,21 +33,6 @@ if os.name == "nt":
         _short_temp_root = os.path.join(tempfile.gettempdir(), "vtmp")
     os.environ.setdefault("PYTEST_DEBUG_TEMPROOT", _short_temp_root)
 
-# Team-workflow behavioral cases live in five domain packs for xdist loadfile.
-# The historical aggregate re-exports the same cases and must not be collected
-# together with those packs (double-count / double-run).
-_TEAM_WORKFLOW_AGGREGATE = "test_team_workflow_orchestration_service.py"
-_TEAM_WORKFLOW_DOMAIN_PACKS = frozenset(
-    {
-        "test_team_workflow_structure_cases.py",
-        "test_team_workflow_source_collection_cases.py",
-        "test_team_workflow_experiment_cases.py",
-        "test_team_workflow_research_knowledge_cases.py",
-        "test_team_workflow_remainder_cases.py",
-    }
-)
-
-
 # ============================================================================
 # web/dist 自包含占位 — worktree 里 route contract 测试的环境自足
 # ============================================================================
@@ -76,52 +61,6 @@ def pytest_sessionfinish(session, exitstatus):
             release_web_dist_placeholder(placeholder)
         except Exception:  # noqa: BLE001
             pass
-
-
-def _pytest_arg_paths(config) -> list[Path]:
-    paths: list[Path] = []
-    for raw in getattr(config, "args", []) or []:
-        text = str(raw).split("::", 1)[0].strip()
-        if not text or text.startswith("-"):
-            continue
-        path = Path(text)
-        if not path.is_absolute():
-            path = (Path.cwd() / path).resolve()
-        else:
-            path = path.resolve()
-        paths.append(path)
-    return paths
-
-
-def pytest_ignore_collect(collection_path=None, path=None, config=None):
-    """Skip the team-workflow aggregate when domain packs (or a tests tree) are collected.
-
-    Note: some pytest invocations still collect explicit file args even when this
-    hook returns True; ``pytest_collection_modifyitems`` is the hard dedupe gate.
-    """
-    if config is None:
-        return False
-    raw = collection_path if collection_path is not None else path
-    try:
-        file_path = Path(raw)
-    except TypeError:
-        file_path = Path(str(raw))
-    if file_path.name != _TEAM_WORKFLOW_AGGREGATE:
-        return False
-
-    targets = _pytest_arg_paths(config)
-    if not targets:
-        # No explicit args: default discovery under testpaths → prefer domain packs.
-        return True
-
-    for target in targets:
-        if target.is_dir():
-            # Collecting tests/ (or any parent tree) already picks up domain packs.
-            return True
-        if target.name in _TEAM_WORKFLOW_DOMAIN_PACKS:
-            return True
-        # Explicit aggregate path (alone or with non-domain files) keeps compatibility.
-    return False
 
 
 # Storage bootstrap modules resolve checkout-owned mutable state (runtime
@@ -576,21 +515,6 @@ def project_root():
 # 自动标记 — 根据文件路径自动应用 pytest markers
 # ============================================================================
 
-def drop_team_workflow_aggregate_duplicates(items) -> None:
-    """Prefer domain packs over the aggregate re-export when both are collected."""
-    has_domain_pack = any(
-        any(pack in item.nodeid.replace("\\", "/") for pack in _TEAM_WORKFLOW_DOMAIN_PACKS)
-        for item in items
-    )
-    if not has_domain_pack:
-        return
-    items[:] = [
-        item
-        for item in items
-        if _TEAM_WORKFLOW_AGGREGATE not in item.nodeid.replace("\\", "/")
-    ]
-
-
 def pytest_collection_modifyitems(items):
     """
     根据测试文件路径自动应用 markers，无需在每个文件手动加装饰器。
@@ -601,12 +525,8 @@ def pytest_collection_modifyitems(items):
     - tests/test_xxx.py (core/orchestration/)  → orchestration
     - tests/test_xxx.py (config/)  → config
 
-    Also drop the team-workflow aggregate re-export when any domain pack is
-    present so full-suite / multi-path collection never double-runs cases.
     """
     from pathlib import Path
-
-    drop_team_workflow_aggregate_duplicates(items)
 
     source_cache: dict[Path, str] = {}
 

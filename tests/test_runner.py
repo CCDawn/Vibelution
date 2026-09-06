@@ -118,7 +118,7 @@ class TestRunner:
     ]
 
     def _discover_test_modules(self) -> List[Tuple[str, str]]:
-        """Auto-discover test files, excluding backups, runners, and utilities."""
+        """Auto-discover current top-level test modules, excluding the runner itself."""
         test_dir = PROJECT_ROOT / "tests"
         test_files = sorted(
             f for f in test_dir.glob("test_*.py")

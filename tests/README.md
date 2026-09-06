@@ -46,8 +46,6 @@ Team workflow 行为用例实现在 `tests/_support/team_workflow/`，由 **五�
 | `test_team_workflow_remainder_cases.py` | `cases_remainder.py` |
 | `helpers.py` | 共享 fakes（无模块级 `serial`） |
 
-`test_team_workflow_orchestration_service.py` 仍是 **兼容聚合入口**（单独指定路径时 re-export 全部域）。全量 `pytest tests/` 或与 domain pack 同跑时，`conftest.pytest_ignore_collect` 会跳过聚合，避免双重收集。
-
 配套结构门（优先 fail-fast，不跑全量 SC 用例）：
 
 | 文件 | 作用 |
