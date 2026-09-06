@@ -790,3 +790,28 @@ def test_gc_scans_legacy_lease_dir_and_never_deletes_fingerprints(
     # Fingerprint copies are never treated as GC-managed leases.
     assert governed_fingerprint.is_file()
     assert legacy_fingerprint.is_file()
+
+
+def test_generated_vite_config_is_not_a_build_input(monkeypatch, tmp_path):
+    _write_project(tmp_path)
+    _stub_build_identity(monkeypatch)
+    before = frontend_build.build_inputs(tmp_path)
+    (tmp_path / "web" / "vite.config.js").write_text("// stale generated output", encoding="utf-8")
+    after = frontend_build.build_inputs(tmp_path)
+    assert frontend_build.compute_build_key(before) == frontend_build.compute_build_key(after)
+    assert before["productionInputStateDigest"] == after["productionInputStateDigest"]
+
+
+def test_release_build_selects_typescript_config(monkeypatch, tmp_path):
+    _write_project(tmp_path)
+    _stub_build_identity(monkeypatch)
+    commands = []
+
+    def run(command, *, cwd, label):
+        commands.append((label, command))
+        return _successful_runner(command, cwd=cwd, label=label)
+
+    monkeypatch.setattr(frontend_build, "_run_checked", run)
+    frontend_build.ensure_frontend_build(tmp_path)
+    command = next(command for label, command in commands if label == "vite build")
+    assert command[command.index("--config") + 1] == "vite.config.ts"

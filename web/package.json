@@ -4,7 +4,7 @@
   "version": "1.1.2",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --config vite.config.ts",
     "preview:stream": "vite --config vite.design-preview.config.ts --host 127.0.0.1 --port 5179",
     "build": "node scripts/parallelBuild.mjs",
     "build:probe": "node scripts/checkElkWorkerHandshake.mjs --build-only",
@@ -14,8 +14,8 @@
     "test": "vitest run",
     "test:changed": "vitest run --changed",
     "test:parallel": "vitest run --maxWorkers=50%",
-    "bun:dev": "vite",
-    "bun:build": "tsc -b && vite build",
+    "bun:dev": "vite --config vite.config.ts",
+    "bun:build": "tsc -b && vite build --config vite.config.ts",
     "bun:test": "vitest run --maxWorkers=50%"
   },
   "devDependencies": {

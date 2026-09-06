@@ -42,7 +42,6 @@ _BUILD_INPUT_FILES = (
     "tsconfig.app.json",
     "tsconfig.node.json",
     "vite.config.ts",
-    "vite.config.js",
     "scripts/parallelBuild.mjs",
     ".env",
     ".env.local",
@@ -310,9 +309,9 @@ def build_inputs(project_root: Path | str, *, package_manager: str | None = None
         "nodeVersion": _run_version(command),
         "packageManager": manager,
         "buildCommand": (
-            "bun x tsc -b && bun x vite build --outDir <staging>"
+            "bun x tsc -b && bun x vite build --config vite.config.ts --outDir <staging>"
             if manager == "bun"
-            else "node tsc -b && node vite build --outDir <staging>"
+            else "node tsc -b && node vite build --config vite.config.ts --outDir <staging>"
         ),
         "environment": _build_environment_inputs(),
         "sourceCommit": _capture_git(root, ["rev-parse", "HEAD"]),
@@ -877,7 +876,7 @@ def ensure_frontend_build(
             stage = create_staging_release(root)
             commands = [
                 ("tsc -b", [bun, "x", "tsc", "-b"]),
-                ("vite build", [bun, "x", "vite", "build", "--outDir", str(stage)]),
+                ("vite build", [bun, "x", "vite", "build", "--config", "vite.config.ts", "--outDir", str(stage)]),
             ]
         else:
             node = _node_command()
@@ -890,7 +889,7 @@ def ensure_frontend_build(
             stage = create_staging_release(root)
             commands = [
                 ("tsc -b", [node, str(web_dir / "node_modules" / "typescript" / "bin" / "tsc"), "-b"]),
-                ("vite build", [node, str(web_dir / "node_modules" / "vite" / "bin" / "vite.js"), "build", "--outDir", str(stage)]),
+                ("vite build", [node, str(web_dir / "node_modules" / "vite" / "bin" / "vite.js"), "build", "--config", "vite.config.ts", "--outDir", str(stage)]),
             ]
         try:
             outputs = {label: _run_checked(command, cwd=web_dir, label=label) for label, command in commands}

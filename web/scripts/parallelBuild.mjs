@@ -7,7 +7,7 @@ import process from "node:process";
 // .cmd shims without a shell); fail the build if either fails.
 const steps = [
   { label: "tsc -b", args: ["node_modules/typescript/bin/tsc", "-b"] },
-  { label: "vite build", args: ["node_modules/vite/bin/vite.js", "build"] },
+  { label: "vite build", args: ["node_modules/vite/bin/vite.js", "build", "--config", "vite.config.ts"] },
 ];
 
 const children = steps.map((step) => {
