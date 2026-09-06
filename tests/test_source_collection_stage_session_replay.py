@@ -230,3 +230,83 @@ def test_reconcile_legacy_flip_without_failure_code_unchanged(monkeypatch):
     assert reconciled is not task
     assert reconciled["status"] == "needs_review"
     assert reconciled["turn"]["status"] == "needs_review"
+
+
+def test_turn_journal_completed_result_preserves_completed_status(monkeypatch):
+    """A completed native turn is execution evidence, not an interruption."""
+    import core.web.services.team_workflow.source_collection.stage_reconcile as reconcile_module
+
+    fake = _FakeService(session_detail={"sessionId": "session-1"})
+    monkeypatch.setattr(reconcile_module, "_service", lambda: fake)
+    result = reconcile_module._source_collection_stage_session_task_turn_journal_result(
+        "session-1",
+        "turn-1",
+        events=[
+            SimpleNamespace(
+                turn_id="turn-1",
+                event_type="turn_completed",
+                status="completed",
+                payload={"summary": "本轮执行完成。"},
+                event_id="event-completed",
+                timestamp="2026-09-06T12:00:00Z",
+            )
+        ],
+    )
+
+    assert result["status"] == "completed"
+    assert result["eventId"] == "event-completed"
+    assert result["summary"] == "本轮执行完成。"
+
+
+def test_turn_journal_needs_continue_result_stays_interrupted(monkeypatch):
+    """A paused completion event remains resumable instead of becoming done."""
+    import core.web.services.team_workflow.source_collection.stage_reconcile as reconcile_module
+
+    fake = _FakeService(session_detail={"sessionId": "session-1"})
+    monkeypatch.setattr(reconcile_module, "_service", lambda: fake)
+    result = reconcile_module._source_collection_stage_session_task_turn_journal_result(
+        "session-1",
+        "turn-1",
+        events=[
+            SimpleNamespace(
+                turn_id="turn-1",
+                event_type="turn_completed",
+                status="needs_continue",
+                payload={"summary": "本轮暂停，等待继续。"},
+                event_id="event-needs-continue",
+                timestamp="2026-09-06T12:00:00Z",
+            )
+        ],
+    )
+
+    assert result["status"] == "interrupted"
+    assert result["eventId"] == "event-needs-continue"
+
+
+@pytest.mark.parametrize(
+    ("terminal_status", "expected_status"),
+    [("completed", "completed"), ("ready", "interrupted")],
+)
+def test_completion_snapshot_maps_completed_without_reclassifying_ready(
+    monkeypatch, terminal_status, expected_status
+):
+    """Only an explicit completed terminal snapshot is completed evidence."""
+    import core.web.services.team_workflow.source_collection.stage_reconcile as reconcile_module
+
+    fake = _FakeService(session_detail={"sessionId": "session-1"})
+    fake.session_service.get_session_turn_completion_snapshot = lambda session_id, turn_id: {
+        "sessionId": session_id,
+        "turnId": turn_id,
+        "terminal": True,
+        "terminalStatus": terminal_status,
+        "completionSource": "turn_journal",
+        "assistantText": "本轮已有最终回复。",
+        "isRunning": False,
+    }
+    monkeypatch.setattr(reconcile_module, "_service", lambda: fake)
+
+    result = reconcile_module._source_collection_stage_session_task_completion_snapshot_result(
+        "session-1", "turn-1"
+    )
+
+    assert result["status"] == expected_status

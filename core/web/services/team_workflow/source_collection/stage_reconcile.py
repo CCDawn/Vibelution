@@ -1605,8 +1605,17 @@ def _source_collection_stage_session_task_turn_journal_result(
             payload = {}
         next_status = ""
         fallback_summary = ""
-        if event_type == "turn_interrupted" or (
-            event_type == "assistant_message" and status in {"interrupted", "stopped"}
+        if event_type == "turn_completed" and status in {"completed", "done", "succeeded", "success"}:
+            next_status = "completed"
+            fallback_summary = "Agent 私聊已完成，但尚未完成阶段写回。"
+        elif (
+            event_type == "turn_interrupted"
+            or event_type == "assistant_message" and status in {"interrupted", "stopped"}
+            or event_type == "turn_completed" and status in {
+                "needs_continue",
+                "paused_limit",
+                "stopped_by_user",
+            }
         ):
             next_status = "interrupted"
             fallback_summary = "Agent 私聊已中断，尚未完成阶段写回。"
@@ -1662,6 +1671,9 @@ def _source_collection_stage_session_task_completion_snapshot_result(session_id:
     elif terminal_status in {"cancelled", "canceled", "superseded"}:
         next_status = "cancelled"
         fallback_summary = "Agent 私聊已取消。"
+    elif terminal_status in {"completed", "done", "succeeded", "success"}:
+        next_status = "completed"
+        fallback_summary = "Agent 私聊已完成，但尚未完成阶段写回。"
     else:
         next_status = "interrupted"
         fallback_summary = "Agent 私聊已结束，但尚未完成阶段写回。"
