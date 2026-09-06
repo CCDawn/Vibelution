@@ -6270,6 +6270,7 @@ def test_runtime_summary_exposes_work_run_kinds(monkeypatch):
         "self_evolution_run",
         "self_evolution_autonomous_loop",
         "source_collection_run",
+        "formal_review",
         "supervised_evolution_run",
         "supervised_worktree_evolution_run",
     }
