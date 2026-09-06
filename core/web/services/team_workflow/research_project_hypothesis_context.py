@@ -224,9 +224,17 @@ def build_hypothesis_input_context(
                 "packageContentHash": package_hash,
             }
         )
+        package_candidate_ids = [
+            _text(value, limit=200)
+            for value in list(current.get("candidateIds") or [])
+            if _text(value, limit=200)
+        ]
         source_candidate_id = _text(current.get("candidateId"))
-        if source_candidate_id and source_candidate_id not in source_candidate_ids:
-            source_candidate_ids.append(source_candidate_id)
+        if source_candidate_id and source_candidate_id not in package_candidate_ids:
+            package_candidate_ids.append(source_candidate_id)
+        for package_candidate_id in package_candidate_ids:
+            if package_candidate_id not in source_candidate_ids:
+                source_candidate_ids.append(package_candidate_id)
         source_artifact_ids.update(
             _text(value, limit=200)
             for value in list(current.get("sourceArtifactIds") or [])
@@ -237,7 +245,12 @@ def build_hypothesis_input_context(
             if isinstance(current.get("approval"), Mapping)
             else {}
         )
-        if approval:
+        package_approvals = current.get("approvals")
+        if isinstance(package_approvals, list):
+            for package_approval in package_approvals:
+                if isinstance(package_approval, Mapping):
+                    approvals.append(dict(package_approval))
+        elif approval:
             approvals.append(approval)
         item_ids = {
             _text(item.get("knowledgeItemId"))
@@ -272,37 +285,36 @@ def build_hypothesis_input_context(
             run_id=_text(current.get("sourceCollectionRunId"), limit=200),
             metadata_task_type="steward_pack_draft",
         )
-        accepted_candidate = next(
-            (
-                candidate
-                for candidate in candidates
-                if isinstance(candidate, Mapping)
-                and _text(candidate.get("candidateId")) == source_candidate_id
-            ),
-            None,
-        )
-        metadata = (
-            accepted_candidate.get("metadata")
-            if isinstance(accepted_candidate, Mapping)
-            and isinstance(accepted_candidate.get("metadata"), Mapping)
-            else {}
-        )
-        output = (
-            metadata.get("output")
-            if isinstance(metadata.get("output"), Mapping)
-            else {}
-        )
-        for claim in list(output.get("claims") or []):
-            if not isinstance(claim, Mapping):
-                continue
-            source_ref = _text(claim.get("sourceRef"), limit=200)
-            statement = _text(claim.get("claim"), limit=1200)
-            key = (statement, source_ref)
-            if source_ref and statement and key not in seen_claims:
-                seen_claims.add(key)
-                evidence_claims.append(
-                    {"claim": statement, "sourceRef": source_ref}
-                )
+        candidates_by_id = {
+            _text(candidate.get("candidateId"), limit=200): candidate
+            for candidate in candidates
+            if isinstance(candidate, Mapping)
+            and _text(candidate.get("candidateId"), limit=200)
+        }
+        for package_candidate_id in package_candidate_ids:
+            accepted_candidate = candidates_by_id.get(package_candidate_id)
+            metadata = (
+                accepted_candidate.get("metadata")
+                if isinstance(accepted_candidate, Mapping)
+                and isinstance(accepted_candidate.get("metadata"), Mapping)
+                else {}
+            )
+            output = (
+                metadata.get("output")
+                if isinstance(metadata.get("output"), Mapping)
+                else {}
+            )
+            for claim in list(output.get("claims") or []):
+                if not isinstance(claim, Mapping):
+                    continue
+                source_ref = _text(claim.get("sourceRef"), limit=200)
+                statement = _text(claim.get("claim"), limit=1200)
+                key = (statement, source_ref)
+                if source_ref and statement and key not in seen_claims:
+                    seen_claims.add(key)
+                    evidence_claims.append(
+                        {"claim": statement, "sourceRef": source_ref}
+                    )
 
     allowed_refs = sorted(
         {

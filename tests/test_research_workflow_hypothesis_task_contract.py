@@ -168,6 +168,135 @@ def test_hypothesis_context_uses_the_accepted_candidate_claims(
     ]
 
 
+def test_hypothesis_context_consumes_all_accepted_package_candidates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    package = {
+        "teamId": "research-team",
+        "sourceCollectionRunId": "sc-run-1",
+        "accepted": True,
+        "candidateId": "accepted-package-0",
+        "candidateIds": ["accepted-package-0", "accepted-package-1"],
+        "knowledgeBaseId": "team:research-team:kb-1",
+        "knowledgeItems": [
+            {"knowledgeItemId": "item-0", "contentHash": "a" * 64},
+            {"knowledgeItemId": "item-1", "contentHash": "b" * 64},
+        ],
+        "sourceArtifactIds": ["source-package-0", "source-package-1"],
+        "approval": {"reviewedByAgentId": "reviewer-1"},
+    }
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime."
+        "human_acceptance_artifact.load_accepted_knowledge_package_from_receipt",
+        lambda _store, **_kwargs: package,
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.source_collection.candidates."
+        "list_candidate_store_authority_records",
+        lambda *_args, **_kwargs: [
+            {
+                "candidateId": "accepted-package-0",
+                "metadata": {
+                    "output": {
+                        "claims": [
+                            {
+                                "claim": "Accepted evidence claim 0.",
+                                "sourceRef": "candidate-source-0",
+                            }
+                        ]
+                    }
+                },
+            },
+            {
+                "candidateId": "accepted-package-1",
+                "metadata": {
+                    "output": {
+                        "claims": [
+                            {
+                                "claim": "Accepted evidence claim 1.",
+                                "sourceRef": "candidate-source-1",
+                            }
+                        ]
+                    }
+                },
+            },
+            {
+                "candidateId": "stale-package",
+                "metadata": {
+                    "output": {
+                        "claims": [
+                            {
+                                "claim": "Stale evidence claim.",
+                                "sourceRef": "source-stale",
+                            }
+                        ]
+                    }
+                },
+            },
+        ],
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_knowledge_service.list_knowledge_items",
+        lambda *_args, **_kwargs: {
+            "items": [
+                {
+                    "knowledgeItemId": "item-0",
+                    "title": "Accepted 0",
+                    "summary": "Bound receipt 0",
+                },
+                {
+                    "knowledgeItemId": "item-1",
+                    "title": "Accepted 1",
+                    "summary": "Bound receipt 1",
+                },
+            ]
+        },
+    )
+
+    context = build_hypothesis_input_context(
+        "research-team",
+        {
+            "workflowRunId": "run-sci-096",
+            "sourceCollectionRunId": "sc-run-1",
+        },
+        store=object(),
+    )
+
+    assert context["status"] == "ready"
+    assert context["knowledgePackage"]["candidateIds"] == [
+        "accepted-package-0",
+        "accepted-package-1",
+    ]
+    assert context["knowledgePackage"]["knowledgeItems"] == [
+        {
+            "knowledgeItemId": "item-0",
+            "title": "Accepted 0",
+            "summary": "Bound receipt 0",
+        },
+        {
+            "knowledgeItemId": "item-1",
+            "title": "Accepted 1",
+            "summary": "Bound receipt 1",
+        },
+    ]
+    assert context["evidenceClaims"] == [
+        {
+            "claim": "Accepted evidence claim 0.",
+            "sourceRef": "candidate-source-0",
+        },
+        {
+            "claim": "Accepted evidence claim 1.",
+            "sourceRef": "candidate-source-1",
+        },
+    ]
+    assert context["allowedEvidenceRefs"] == [
+        "candidate-source-0",
+        "candidate-source-1",
+        "source-package-0",
+        "source-package-1",
+    ]
+
+
 def test_stage_one_grounded_context_uses_the_run_pinned_source_scope(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
