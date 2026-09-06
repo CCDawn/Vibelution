@@ -40,6 +40,7 @@ paths never write anything, and a dump failure only logs.
 from __future__ import annotations
 
 import contextlib
+from copy import deepcopy
 import json
 import logging
 import os
@@ -360,7 +361,12 @@ _REVIEW_JSON_SCHEMAS: dict[str, dict[str, Any]] = {
 }
 
 
-def _purpose_output_schema(purpose: str, llm: Mapping[str, Any]) -> SemanticOutputSchema | None:
+def _purpose_output_schema(
+    purpose: str,
+    llm: Mapping[str, Any],
+    *,
+    user_payload: Mapping[str, Any] | None = None,
+) -> SemanticOutputSchema | None:
     """Structured-output schema for ``purpose`` when the provider supports it.
 
     Returns ``None`` — keeping the prompt + brace-tolerant parsing path — for
@@ -375,6 +381,21 @@ def _purpose_output_schema(purpose: str, llm: Mapping[str, Any]) -> SemanticOutp
     capabilities = getattr(llm.get("client"), "capabilities", None)
     if not bool(getattr(capabilities, "supports_strict_json_schema", False)):
         return None
+    if purpose == "hypothesis_reflection" and user_payload is not None:
+        # Bind generated citations to this invocation's canonical evidence.
+        # Copy before specializing: parallel candidates have different refs.
+        schema_body = deepcopy(schema_body)
+        refs = list(user_payload.get("refsWhitelist") or [])
+        props = schema_body["properties"]
+        evidence_arrays = (
+            props["dimensionReviews"]["items"]["properties"]["evidence_refs"],
+            props["coreHypothesisCoherence"]["properties"]["checks"]["items"]["properties"]["evidenceRefs"],
+        )
+        for evidence_array in evidence_arrays:
+            if refs:
+                evidence_array["items"]["enum"] = refs
+            else:
+                evidence_array["maxItems"] = 0
     return SemanticOutputSchema(name=f"{purpose}_v1", schema=schema_body)
 
 
@@ -1276,7 +1297,7 @@ def _invoke_review_llm_impl(
         # JSON schema (capability-gated); both stay None/unset for purposes
         # that keep the profile default (revision) or text-unstructured paths.
         max_output_tokens = _purpose_max_output_tokens(purpose)
-        output_schema = _purpose_output_schema(purpose, llm)
+        output_schema = _purpose_output_schema(purpose, llm, user_payload=user_payload)
         override_metadata = (
             {MAX_OUTPUT_TOKENS_OVERRIDE_METADATA_KEY: max_output_tokens}
             if max_output_tokens
@@ -1461,7 +1482,7 @@ def _invoke_review_llm_impl(
                 messages,
                 context=invocation_context,
                 metadata=bound_override_metadata,
-                output_schema=_purpose_output_schema(purpose, llm),
+                output_schema=_purpose_output_schema(purpose, llm, user_payload=user_payload),
             )
 
     final_text = ""

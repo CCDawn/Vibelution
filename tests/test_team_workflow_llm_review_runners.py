@@ -2150,6 +2150,7 @@ def test_structured_review_calls_carry_schema_and_clamp_when_capability_allows(
     assert reflection_schema.name == "hypothesis_reflection_v1"
     assert pairwise_schema.name == "hypothesis_pairwise_v1"
     assert reflection_schema.schema["type"] == "object"
+    assert reflection_schema.schema["properties"]["dimensionReviews"]["items"]["properties"]["evidence_refs"]["maxItems"] == 0
     assert set(reflection_schema.schema["required"]) >= {"claim", "scores", "dimensionReviews"}
     assert captured[0]["metadata"] == {"llmMaxOutputTokensOverride": 8192}
     assert captured[1]["metadata"] == {"llmMaxOutputTokensOverride": 8192}
@@ -2647,3 +2648,51 @@ def test_concurrent_review_calls_use_separate_owned_clients(monkeypatch):
     assert len(clients) == 2
     assert all(client.closed for client in clients)
     assert not template.closed
+
+
+def test_reflection_schema_binds_each_invocation_evidence_whitelist():
+    llm = _fake_llm_with_strict_json_capability(supported=True)
+    for refs in (["evidence:first"], ["evidence:second"], []):
+        output = llm_review_runners._purpose_output_schema(
+            "hypothesis_reflection", llm, user_payload={"refsWhitelist": refs}
+        )
+        props = output.schema["properties"]
+        arrays = [
+            props["dimensionReviews"]["items"]["properties"]["evidence_refs"],
+            props["coreHypothesisCoherence"]["properties"]["checks"]["items"]["properties"]["evidenceRefs"],
+        ]
+        for array in arrays:
+            if refs:
+                assert list(array["items"]["enum"]) == refs
+            else:
+                assert array["maxItems"] == 0
+    original = llm_review_runners._REVIEW_JSON_SCHEMAS["hypothesis_reflection"]
+    assert "enum" not in original["properties"]["dimensionReviews"]["items"]["properties"]["evidence_refs"]["items"]
+
+
+def test_receipt_bound_reflection_submits_canonical_ref_enum(monkeypatch):
+    llm = {
+        **_fake_llm_with_strict_json_capability(supported=True),
+        "providerId": "opencode",
+        "modelId": "deepseek-v4-flash",
+        "modelRef": "opencode/deepseek-v4-flash",
+    }
+    captured = []
+
+    def invoke(_client, _messages, **kwargs):
+        captured.append(kwargs["output_schema"].schema)
+        return _final_outcome(
+            kwargs["context"],
+            receipt={"receiptId": "provider-review-receipt", "status": "succeeded"},
+            final_text=_reflection_output_payload(),
+        )
+
+    monkeypatch.setattr(llm_review_runners, "invoke_llm_outcome", invoke)
+    runners = llm_review_runners.build_hypothesis_review_runners(
+        llm, require_provider_receipts=True
+    )
+    candidate = {**_candidate("cand-a", "hypothesis"), "lineageRefs": ["canonical:one"]}
+    result = runners["reflection_runner"](candidate, _formal_review_context())
+    assert isinstance(result, ProviderBoundReviewResult)
+    refs = captured[0]["properties"]["dimensionReviews"]["items"]["properties"]["evidence_refs"]
+    assert list(refs["items"]["enum"]) == ["canonical:one"]
