@@ -1047,6 +1047,21 @@ def test_selector_runs_unmapped_changed_python_test_file_itself(tmp_path: Path):
     assert result["coverageGaps"] == []
 
 
+def test_selector_skips_deleted_unmapped_python_test_file(tmp_path: Path):
+    (tmp_path / "tests").mkdir()
+
+    result = select_tests.select_tests(
+        ["tests/test_retired.py"],
+        {"rules": []},
+        include_always=False,
+        project_root=tmp_path,
+    )
+
+    assert result["matchedRules"] == []
+    assert result["commands"] == []
+    assert result["coverageGaps"] == []
+
+
 def test_selector_keeps_missing_matrix_tests_visible_to_the_gate(tmp_path: Path):
     (tmp_path / "core").mkdir()
     (tmp_path / "tests").mkdir()
@@ -1081,14 +1096,7 @@ def test_selector_keeps_missing_matrix_tests_visible_to_the_gate(tmp_path: Path)
         "tests/test_deleted.py tests/test_live.py -q -n 2 --dist loadfile "
         '-m "not serial" --maxfail=0'
     )
-    missing_test_fallback = (
-        ".\\.venv\\Scripts\\python.exe -m pytest "
-        "tests/test_deleted.py -q --maxfail=0"
-    )
-    assert result["commands"] == [
-        expected_command,
-        missing_test_fallback,
-    ]
+    assert result["commands"] == [expected_command]
     assert result["coverageGaps"] == []
 
 
