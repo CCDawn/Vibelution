@@ -19,6 +19,7 @@ from core.research.workflow.knowledge_sideflow_definition import (
 from core.research.workflow.ledger import WorkflowLedgerStore
 
 from .human_gate_artifacts import canonical_sha256
+from .knowledge_sideflow_service import DEFAULT_SOURCE_POLICY_VERSION
 
 CHALLENGE_CUP_TEAM_ID = "research-team"
 RECOVERABLE_BLOCK_CODE = "auto_advance_not_ready"
@@ -125,7 +126,7 @@ class KnowledgeSideflowTrigger:
                         "timeWindow": {},
                     },
                     "requirements": {"trigger": "problem_understanding_completed"},
-                    "sourcePolicyVersion": "1",
+                    "sourcePolicyVersion": DEFAULT_SOURCE_POLICY_VERSION,
                     "managedSourceRootIds": roots,
                     "triggerNodeRunId": str(node_run_id or ""),
                 },

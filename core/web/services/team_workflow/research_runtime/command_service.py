@@ -2207,8 +2207,10 @@ def _normalized_requirements(raw: Any) -> dict[str, Any]:
 
 
 def _normalized_source_policy_version(raw: Any) -> str:
+    from .knowledge_sideflow_service import DEFAULT_SOURCE_POLICY_VERSION
+
     version = str(raw or "").strip()
-    return version or "1"
+    return version or DEFAULT_SOURCE_POLICY_VERSION
 
 
 def _knowledge_recovery_actions(
