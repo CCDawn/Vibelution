@@ -330,7 +330,7 @@ def test_verified_flow_updates_existing_live_anchor_without_duplicate(
         harness.close()
 
 
-def test_verify_failure_closes_a_live_scoped_anchor(tmp_path: Path) -> None:
+def test_verify_failure_closes_anchor_without_rewriting_session_results(tmp_path: Path) -> None:
     harness = CommandHarness(tmp_path / "ledger.sqlite3")
     try:
         harness.seed_run()
@@ -389,8 +389,10 @@ def test_verify_failure_closes_a_live_scoped_anchor(tmp_path: Path) -> None:
         ).result(timeout=10)
         assert row is not None
         payload = json.loads(row[13])
-        assert payload["rootSession"]["status"] == "blocked"
-        assert payload["scopedSessions"][0]["status"] == "blocked"
+        assert payload["status"] == "blocked"
+        assert payload["closure"]["status"] == "blocked"
+        assert payload["rootSession"]["status"] == "succeeded"
+        assert payload["scopedSessions"][0]["status"] == "succeeded"
         assert row[12] == "blocked"
     finally:
         harness.close()
