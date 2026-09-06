@@ -1603,6 +1603,8 @@ def _force_cancel_supervised_worktree_evolution_for_shutdown(reason: str) -> lis
 
 
 def _work_run_summary() -> dict[str, dict[str, dict | None]]:
+    from core.runtime_manager.formal_review_work import summary as formal_review_summary
+    formal_review = formal_review_summary()
     chat = _safe_load_chat_turn_work_run_summary()
     chat_room = _safe_load_chat_room_work_run_summary()
     source_collection = _safe_load_source_collection_work_run_summary()
@@ -1616,6 +1618,7 @@ def _work_run_summary() -> dict[str, dict[str, dict | None]]:
     autonomous_self_latest = _safe_load_autonomous_self_evolution_work_run(active=False)
     return {
         "active": {
+            "formal_review": formal_review.get("active"),
             "chat_turn": chat.get("active"),
             "chat_room_round": chat_room.get("active"),
             "self_evolution_run": self_active,
@@ -1625,6 +1628,7 @@ def _work_run_summary() -> dict[str, dict[str, dict | None]]:
             "source_collection_run": source_collection.get("active"),
         },
         "latest": {
+            "formal_review": formal_review.get("latest"),
             "chat_turn": chat.get("latest"),
             "chat_room_round": chat_room.get("latest"),
             "self_evolution_run": self_latest,
@@ -1634,6 +1638,7 @@ def _work_run_summary() -> dict[str, dict[str, dict | None]]:
             "source_collection_run": source_collection.get("latest"),
         },
         "activeItems": {
+            "formal_review": formal_review.get("activeItems", []),
             "chat_turn": [
                 item for item in (chat.get("activeItems") or [])
                 if isinstance(item, dict)
