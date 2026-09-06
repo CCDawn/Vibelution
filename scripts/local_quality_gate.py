@@ -102,7 +102,7 @@ GATE_SELF_TEST_COMMANDS = (
     (
         ".\\.venv\\Scripts\\python.exe -m pytest "
         "tests/test_git_claim_guard.py tests/test_local_quality_gate.py tests/test_task_closeout.py tests/test_ci_workflow_contract.py "
-        "tests/test_select_tests.py tests/test_reuse_research_contract.py tests/test_validation_toolchain.py "
+        "tests/test_reuse_research_contract.py tests/test_validation_toolchain.py "
         "tests/test_github_project_library_service.py -n 4 --dist load -m \"not serial\" -q --maxfail=0"
     ),
 )

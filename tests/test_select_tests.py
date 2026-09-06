@@ -320,6 +320,31 @@ def test_selector_skips_environment_doctor_for_core_gate_only():
     assert "local-serial" not in result["validationLayers"]
 
 
+def test_selector_runs_selector_contract_once_when_quality_gate_also_matches():
+    result = select_tests.select_tests(
+        [
+            "tests/select_tests.py",
+            "tests/test_matrix.yaml",
+            "scripts/local_quality_gate.py",
+        ],
+        select_tests.load_matrix(),
+    )
+
+    selector_contract_commands = [
+        command
+        for command in result["commands"]
+        if "tests/test_select_tests.py" in command
+    ]
+
+    assert len(selector_contract_commands) == 1
+    assert "tests/test_runner.py" in selector_contract_commands[0]
+    assert any(
+        "tests/test_local_quality_gate.py" in command
+        and "tests/test_select_tests.py" not in command
+        for command in result["commands"]
+    )
+
+
 def test_selector_scopes_pre_commit_hook_to_hook_contract_tests():
     result = select_tests.select_tests(
         [".githooks/pre-commit"],
