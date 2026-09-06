@@ -8771,3 +8771,29 @@ def test_close_review_meeting_records_rejected_outcome_when_gate_blocks(
     assert [item["decidedBy"] for item in adjudications] == [
         "system:auto-advance:gate-blocked"
     ]
+
+
+def test_quality_failed_round_automatically_records_rejected_terminal_result(tmp_path, monkeypatch):
+    team_id, ledger_path, _events = _auto_advance_env(tmp_path, monkeypatch)
+    _allow_chain_claim_belief_gate(monkeypatch)
+    record = hrounds.get_hypothesis_round(team_id, _AUTO_ROUND_ID)["round"]
+    record.update({
+        "qualityStatus": "failed",
+        "qualityFailureCode": "coherence_failure",
+        "qualityFailureCandidateIds": [_AUTO_CANDIDATE_ID],
+        "coreHypothesisCoherenceArtifactRef": "artifact:coherence-negative",
+    })
+    # Even an otherwise allowed claim gate cannot accept negative quality.
+    with pytest.raises(chain.ClaimBeliefGateBlockedError):
+        chain.record_human_adjudication(
+            team_id, question_id=_QUESTION_ID, hypothesis_round_id=_AUTO_ROUND_ID,
+            decision="accepted", rationale="attempt acceptance", idempotency_key="accept-negative",
+        )
+    assert _auto_adjudication_records(ledger_path) == []
+    result = chain.auto_adjudicate_exhausted_round(team_id, question_id=_QUESTION_ID)
+    assert result["decision"] == "rejected"
+    records = _auto_adjudication_records(ledger_path)
+    assert len(records) == 1
+    assert "coherence_failure" in records[0]["rationale"]
+    chain.auto_adjudicate_exhausted_round(team_id, question_id=_QUESTION_ID)
+    assert len(_auto_adjudication_records(ledger_path)) == 1

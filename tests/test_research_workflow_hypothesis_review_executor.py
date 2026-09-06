@@ -751,7 +751,7 @@ def _coherence_payload(candidate_id: str, *, failed_check: str = "") -> dict:
     }
 
 
-def test_stage_one_coherence_failure_stops_before_pairwise_pareto_and_metareview():
+def test_stage_one_coherence_failure_keeps_review_steps_and_marks_quality():
     calls = {"pairwise": 0, "pareto": 0, "metareview": 0}
     runners = _complete_review_runners()
 
@@ -774,20 +774,95 @@ def test_stage_one_coherence_failure_stops_before_pairwise_pareto_and_metareview
 
         return wrapped
 
-    with pytest.raises(ContractValidationError, match="coherence_failure"):
-        hypothesis_review_executor.execute_hypothesis_review(
-            {
-                **_direct_review_context(),
-                "requireCoreHypothesisCoherence": True,
-            },
-            reflection_runner=reflection,
-            pairwise_runner=counted("pairwise", runners["pairwise_runner"]),
-            pareto_runner=counted("pareto", runners["pareto_runner"]),
-            metareview_runner=counted("metareview", runners["metareview_runner"]),
-            reviewer_assignments={"metareview": "coordinator"},
-        )
+    result = hypothesis_review_executor.execute_hypothesis_review(
+        {
+            **_direct_review_context(),
+            "requireCoreHypothesisCoherence": True,
+        },
+        reflection_runner=reflection,
+        pairwise_runner=counted("pairwise", runners["pairwise_runner"]),
+        pareto_runner=counted("pareto", runners["pareto_runner"]),
+        metareview_runner=counted("metareview", runners["metareview_runner"]),
+        reviewer_assignments={"metareview": "coordinator"},
+    )
 
-    assert calls == {"pairwise": 0, "pareto": 0, "metareview": 0}
+    assert calls == {"pairwise": 1, "pareto": 0, "metareview": 1}
+    assert result["qualityStatus"] == "failed"
+    assert result["qualityFailureCode"] == "coherence_failure"
+    assert result["qualityFailureCandidateIds"] == ["cand-b"]
+    assert result["coreHypothesisCoherence"][1]["passed"] is False
+
+
+def test_formal_stage_one_coherence_failure_runs_all_review_steps_and_revision(
+    tmp_path, monkeypatch
+):
+    from core.web.services.team_workflow.research_runtime import workflow_artifact_store
+
+    monkeypatch.setattr(workflow_artifact_store, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        hypothesis_review_executor,
+        "_source_collection_run_id_for_formal_workflow",
+        lambda workflow_run_id: (
+            "source-run-formal" if workflow_run_id == "workflow-run-formal" else ""
+        ),
+    )
+    base = _complete_review_runners()
+    calls = {name: 0 for name in ("reflection", "pairwise", "pareto", "metareview", "revision")}
+
+    def counted(name, runner):
+        def wrapped(*args):
+            calls[name] += 1
+            result = runner(*args)
+            if name == "reflection":
+                result["coreHypothesisCoherence"] = _coherence_payload(
+                    args[0]["candidateId"],
+                    failed_check=(
+                        "prediction_entails_mechanism"
+                        if args[0]["candidateId"] == "cand-b"
+                        else ""
+                    ),
+                )
+            return result
+
+        return wrapped
+
+    runners = {
+        f"{name}_runner": counted(name, base[f"{name}_runner"])
+        for name in calls
+    }
+    runners = _provider_bound_review_runners(runners=runners)
+    context = {
+        **_parallel_reflection_context("cand-a", "cand-b", "cand-c"),
+        "teamId": "team-stage-one",
+        "questionId": "SCI-091",
+        "_modelInvocationReceiptAuthority": {
+            "workflowRunId": "workflow-run-formal",
+        },
+        "requireCoreHypothesisCoherence": True,
+    }
+    context["candidates"] = [
+        {**candidate, "candidateAuthority": "formal_grounded_candidate"}
+        for candidate in context["candidates"]
+    ]
+
+    result = hypothesis_review_executor.execute_hypothesis_review(
+        context,
+        execution_mode="formal",
+        **runners,
+        reviewer_assignments={"metareview": "coordinator"},
+    )
+
+    assert calls == {
+        "reflection": 3,
+        "pairwise": 3,
+        "pareto": 1,
+        "metareview": 1,
+        "revision": 1,
+    }
+    assert result["qualityStatus"] == "failed"
+    assert result["qualityFailureCandidateIds"] == ["cand-b"]
+    assert result["coreHypothesisCoherenceArtifactRef"]
+    assert result["revisionEnvelope"]["revision"]["status"] == "completed"
 
 
 def test_stage_one_coherence_passes_with_same_reflection_calls_and_is_returned():

@@ -220,6 +220,11 @@ def _round_definition(record: Mapping[str, Any]) -> dict[str, Any]:
             "modelInvocationReceipts",
             "reviewCallBudget",
             "revisionEnvelope",
+            "coreHypothesisCoherence",
+            "coreHypothesisCoherenceArtifactRef",
+            "qualityStatus",
+            "qualityFailureCode",
+            "qualityFailureCandidateIds",
             "lineage",
             "meetingRefs",
         )
@@ -311,6 +316,12 @@ def create_hypothesis_round(team_id: str, payload: Mapping[str, Any] | None = No
         record["reviewCallBudget"] = dict(request["reviewCallBudget"])
     if isinstance(request.get("revisionEnvelope"), Mapping):
         record["revisionEnvelope"] = dict(request["revisionEnvelope"])
+    for key in (
+        "coreHypothesisCoherence", "coreHypothesisCoherenceArtifactRef",
+        "qualityStatus", "qualityFailureCode", "qualityFailureCandidateIds",
+    ):
+        if key in request:
+            record[key] = request[key]
     # Fail closed before persistence: parse validates shape, completeness of
     # candidates and scope; a complete round must pass validate_complete().
     parsed = HypothesisRound.from_dict(record)
@@ -892,6 +903,14 @@ def generate_hypothesis_round_from_meeting(
                 "roles": review["roles"],
                 "modelInvocationReceipts": review.get("modelInvocationReceipts", []),
                 "reviewCallBudget": review.get("reviewCallBudget"),
+                **{
+                    key: review[key]
+                    for key in (
+                        "coreHypothesisCoherence", "coreHypothesisCoherenceArtifactRef",
+                        "qualityStatus", "qualityFailureCode", "qualityFailureCandidateIds",
+                    )
+                    if key in review
+                },
                 **(
                     {"revisionEnvelope": dict(review["revisionEnvelope"])}
                     if isinstance(review.get("revisionEnvelope"), Mapping)

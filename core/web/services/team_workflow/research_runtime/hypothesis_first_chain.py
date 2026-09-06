@@ -2583,6 +2583,20 @@ def record_human_adjudication(
             recommended_candidate_id = str(
                 meta_review.get("recommendationCandidateId") or ""
             ).strip()
+            # A completed review may carry a negative scientific verdict.
+            # Persisting that result must never turn it into accepted quality.
+            if round_record.get("qualityStatus") == "failed":
+                raise ClaimBeliefGateBlockedError(
+                    "hypothesis review quality did not pass",
+                    stage="converge_question",
+                    question_id=normalized_question_id,
+                    candidate_id=recommended_candidate_id,
+                    blockers=[{
+                        "reason": str(round_record.get("qualityFailureCode") or "coherence_failure"),
+                        "candidateIds": list(round_record.get("qualityFailureCandidateIds") or []),
+                        "artifactRef": str(round_record.get("coreHypothesisCoherenceArtifactRef") or ""),
+                    }],
+                )
             try:
                 acceptance = _apply_human_acceptance_for_recommended_candidate(
                     team_id,
@@ -14821,6 +14835,7 @@ def chain_state(
     converged = bool(
         latest_round
         and latest_round_closed
+        and latest_round.get("qualityStatus") != "failed"
         and (bool(meta_review.get("accepted")) or adjudication_accepted)
         and not pending_requests
         and (not new_requests_this_round or adjudication_accepted)
@@ -14829,6 +14844,8 @@ def chain_state(
         convergence_detail = "尚无闭环的假说评审轮次"
     elif not latest_round_closed:
         convergence_detail = f"最近一轮 {latest_round_id} 尚未 closed"
+    elif latest_round.get("qualityStatus") == "failed":
+        convergence_detail = "评审流程已完成，科学质量未通过；质量问题已记录"
     elif converged:
         convergence_detail = (
             f"最近一轮 {latest_round_id} 已由人工裁决收敛"

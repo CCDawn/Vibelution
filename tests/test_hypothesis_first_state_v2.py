@@ -8558,3 +8558,18 @@ def test_matrix_readback_non_mapping_nested_matrix_stays_tolerant(
     assert section["submissionReady"] is False
     assert len(section["g1RequiredUnmet"]) == 3
     assert len(section["notYetEvidenced"]) == 8
+
+
+def test_negative_quality_never_projects_as_accepted_convergence():
+    state = HypothesisFirstStateV2.model_validate(project_state_from_records(
+        team_id="team-1", question_id="SCI-001", reset_boundary=None,
+        chain_records=[], selection_records=[], meeting_records=[],
+        digest_records=[], decision_records=[],
+        hypothesis_round_records=[{
+            "roundId": "round-quality-failed", "question": "SCI-001",
+            "roundIndex": 3, "status": "closed", "qualityStatus": "failed",
+            "metaReview": {"accepted": True, "recommendationCandidateId": "candidate-1"},
+        }],
+    ))
+    assert state.convergence.accepted is False
+    assert state.convergence.outcome != "succeeded"

@@ -3538,6 +3538,7 @@ def project_state_from_records(
     converged = bool(
         latest_round
         and latest_round.get("status") == "closed"
+        and latest_round.get("qualityStatus") != "failed"
         and accepted
         and not pending_collection
         and (not new_requests_this_round or adjudication_accepted)

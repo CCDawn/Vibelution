@@ -23,9 +23,13 @@ DEV fixtures are deterministic (seeded from the review context id).  The
 explicit ``DEV`` / ``FORMAL`` execution fence keeps those fixtures out of
 formal review: FORMAL requires all five real runners and one provider-bound
 model invocation receipt for every model call.
-Every step fails closed: a missing dimension, an invalid or missing
-comparison, an unclassified candidate, or a missing recommendation raises
-``ContractValidationError`` before anything is persisted.
+Every structural step fails closed: a missing dimension, an invalid or
+missing comparison, an unclassified candidate, or a missing
+recommendation raises ``ContractValidationError`` before anything is
+persisted.  A valid core-coherence review may still return a scientific
+quality failure; that result is carried explicitly so the round can close
+with a quality issue while downstream gates keep the result blocked for
+approval.
 """
 
 from __future__ import annotations
@@ -197,19 +201,6 @@ RevisionRunner = Callable[
 
 class HypothesisReviewExecutionError(RuntimeError):
     """Base error for hypothesis review execution."""
-
-
-class CoreHypothesisCoherenceFailure(ContractValidationError):
-    """Stage-one reflection found a non-compensable coherence defect."""
-
-    code = "coherence_failure"
-
-    def __init__(self, candidate_ids: Sequence[str], *, artifact_ref: str = "") -> None:
-        self.candidate_ids = tuple(str(item) for item in candidate_ids)
-        self.artifact_ref = str(artifact_ref or "")
-        super().__init__(
-            "coherence_failure: " + ", ".join(self.candidate_ids)
-        )
 
 
 def _validated_runner_payload(
@@ -1388,13 +1379,18 @@ def execute_hypothesis_review(
             for item in coherence_results
             if item.get("passed") is not True
         ]
-        if failed:
-            raise CoreHypothesisCoherenceFailure(
-                failed,
-                artifact_ref=coherence_artifact_ref,
-            )
+        # Coherence is a scientific quality verdict, not a transport or
+        # schema failure.  The artifact writer has already persisted the
+        # complete per-candidate result (including ``passed=false``), so
+        # continue through pairwise/Pareto/MetaReview and, in FORMAL mode,
+        # revision.  The round owner can persist this explicit status and keep
+        # approval/readiness blocked without spending the same reflection wave
+        # again on every maintenance sweep.
+        coherence_quality_status = "failed" if failed else "passed"
     else:
         coherence_artifact_ref = ""
+        failed = []
+        coherence_quality_status = ""
     # One bounded wave carries the pairwise fan-out and the single Pareto
     # call (Pareto only consumes the reflection scores); the raw outputs are
     # then validated sequentially — pairwise first, then Pareto — so the
@@ -1493,4 +1489,14 @@ def execute_hypothesis_review(
     if require_core_coherence:
         result["coreHypothesisCoherence"] = coherence_results
         result["coreHypothesisCoherenceArtifactRef"] = coherence_artifact_ref
+        result["qualityStatus"] = coherence_quality_status
+        result["qualityFailureCode"] = "coherence_failure" if failed else ""
+        result["qualityFailureCandidateIds"] = failed
+        if failed:
+            _LOGGER.warning(
+                "stage-one hypothesis review closed with coherence quality failure: "
+                "candidateIds=%s artifactRef=%s",
+                ",".join(failed),
+                coherence_artifact_ref or "<none>",
+            )
     return result

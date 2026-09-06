@@ -829,3 +829,23 @@ def test_run_bound_dev_theme_executes_receipt_bound_review(tmp_path, monkeypatch
     monkeypatch.setattr(hypothesis_review_executor, "execute_hypothesis_review", execute)
     with pytest.raises(ModeCaptured):
         hypothesis_rounds_service.generate_hypothesis_round_from_meeting(team_id, "meeting-a", _group_payload())
+
+
+def test_negative_quality_round_is_persisted_and_reused_without_losing_verdict(tmp_path, monkeypatch):
+    team_id = _team(tmp_path, monkeypatch)
+    quality = {
+        "qualityStatus": "failed", "qualityFailureCode": "coherence_failure",
+        "qualityFailureCandidateIds": ["cand-b"],
+        "coreHypothesisCoherence": [{"candidateId": "cand-b", "passed": False}],
+        "coreHypothesisCoherenceArtifactRef": "artifact:coherence-negative",
+    }
+    payload = _round_payload(**quality)
+    created = hypothesis_rounds_service.create_hypothesis_round(team_id, payload)
+    closed = hypothesis_rounds_service.close_hypothesis_round(
+        team_id, created["round"]["roundId"], _closure(created["round"]),
+    )
+    assert closed["round"]["status"] == "closed"
+    reused = hypothesis_rounds_service.find_reusable_hypothesis_round(team_id, created["round"]["roundId"])
+    assert reused is not None
+    for key, value in quality.items():
+        assert reused[key] == value
