@@ -36,6 +36,52 @@ def _service():
 
 _FORMAL_SEARCH_EVENT_TYPE = "search.tool_result_returned"
 
+_DOI_PRESENTATION_SUFFIXES = frozenset({
+    "abstract",
+    "full",
+    "fulltext",
+    "html",
+    "pdf",
+})
+
+
+def _source_finding_receipt_binding_keys(value: Any) -> set[str]:
+    """Project one candidate/receipt locator to stable evidence identities.
+
+    Search providers commonly return an HTTP arXiv URL for a candidate stored
+    with HTTPS, or a publisher presentation URL whose path appends ``/full`` or
+    ``/pdf`` to the DOI.  Exact locator comparison therefore rejects real
+    provider receipts.  Keep the raw locator, then add only domain identifiers
+    that can be derived from the returned locator itself.
+    """
+
+    s = _service()
+    raw = s._trim_text(value, max_length=1000)
+    if not raw:
+        return set()
+    keys = {raw}
+    identity_value = raw.removeprefix("identity:")
+    if identity_value != raw:
+        keys.add(identity_value)
+
+    arxiv_id = s._source_collection_qwen_url_arxiv_id(identity_value)
+    if arxiv_id:
+        keys.add(f"arxiv:{arxiv_id.lower()}")
+
+    doi = s._source_collection_normalized_doi(identity_value)
+    if doi:
+        if s._looks_like_url(identity_value):
+            suffix_match = re.search(
+                r"(?:/|\.)(abstract|full|fulltext|html|pdf)$",
+                doi,
+                flags=re.IGNORECASE,
+            )
+            if suffix_match and suffix_match.group(1).lower() in _DOI_PRESENTATION_SUFFIXES:
+                doi = doi[: suffix_match.start()].rstrip("/.")
+        if doi:
+            keys.add(f"doi:{doi}")
+    return keys
+
 
 def resolve_bound_source_search_context(runtime: dict[str, Any] | None) -> dict[str, Any] | None:
     """Resolve a formal finding turn from server-owned Task/assignment records.
@@ -340,10 +386,10 @@ def validate_source_finding_receipt_payload(
         for item in candidates
     }
     receipt_refs = {
-        str(ref or "").strip()
+        key
         for item in trace
         for ref in list(item.get("resultRefs") or [])
-        if str(ref or "").strip()
+        for key in _source_finding_receipt_binding_keys(ref)
     }
     unbound_candidates: list[str] = []
     for candidate in candidates:
@@ -362,7 +408,12 @@ def validate_source_finding_receipt_payload(
         }
         if identity:
             locators.add(f"identity:{identity}")
-        if require_candidate_receipt_binding and not locators.intersection(receipt_refs):
+        binding_keys = {
+            key
+            for locator in locators
+            for key in _source_finding_receipt_binding_keys(locator)
+        }
+        if require_candidate_receipt_binding and not binding_keys.intersection(receipt_refs):
             unbound_candidates.append(str(candidate.get("candidateId") or candidate.get("sourceId") or "unknown"))
     missing_perspectives = sorted(required - perspectives)
     missing_terminal = sorted(required - terminal)
