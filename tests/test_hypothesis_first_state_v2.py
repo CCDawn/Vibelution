@@ -9013,3 +9013,24 @@ def test_negative_quality_never_projects_as_accepted_convergence():
     ))
     assert state.convergence.accepted is False
     assert state.convergence.outcome != "succeeded"
+
+
+def test_auto_rejected_convergence_keeps_claim_gate_reason(monkeypatch):
+    _blocked_claim_belief_gate(monkeypatch, "candidate_evidence_gap")
+    rounds = _converged_chain_records()
+    state = HypothesisFirstStateV2.model_validate(project_state_from_records(
+        team_id="team-1", question_id="SCI-001", reset_boundary=None,
+        chain_records=[{
+            "recordKind": "human_adjudication", "questionId": "SCI-001",
+            "hypothesisRoundId": rounds[0]["roundId"],
+            "adjudicationId": "auto-rejected", "decision": "rejected",
+            "decidedBy": "system:auto-advance:gate-blocked",
+            "createdAt": "2026-08-26T00:00:00Z",
+        }],
+        selection_records=[], meeting_records=[], digest_records=[],
+        decision_records=[], hypothesis_round_records=rounds, formal_runs=[],
+    ))
+    assert state.convergence.outcome == "rejected"
+    assert state.convergence.accepted is False
+    assert state.convergence.claimBeliefGate["reason"] == "candidate_evidence_gap"
+    assert not any(a.kind == "command" and a.command == "create_formal_run" for a in state.allowedActions)

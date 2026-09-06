@@ -14997,6 +14997,7 @@ def chain_state(
     converged = bool(
         latest_round
         and latest_round_closed
+        and not adjudication_rejected
         and latest_round.get("qualityStatus") != "failed"
         and (bool(meta_review.get("accepted")) or adjudication_accepted)
         and not pending_requests
@@ -15010,12 +15011,12 @@ def chain_state(
         convergence_detail = "评审流程已完成，科学质量未通过；质量问题已记录"
     elif converged:
         convergence_detail = (
-            f"最近一轮 {latest_round_id} 已由人工裁决收敛"
+            f"最近一轮 {latest_round_id} 已由裁决确认收敛"
             if adjudication_accepted
             else "converged"
         )
     elif adjudication_rejected:
-        convergence_detail = f"最近一轮 {latest_round_id} 已被人工裁决拒绝"
+        convergence_detail = f"最近一轮 {latest_round_id} 已被裁决拒绝"
     elif not (bool(meta_review.get("accepted")) or adjudication_accepted):
         convergence_detail = f"最近一轮 {latest_round_id} 的 MetaReview 未 accepted"
     elif pending_requests:
@@ -15035,7 +15036,12 @@ def chain_state(
     # gates above passed, so the read model pays the claim-ledger I/O only on
     # the otherwise-converged path.
     claim_belief_gate: dict[str, Any] | None = None
-    if converged:
+    rejected_by_claim_gate = bool(
+        adjudication_rejected
+        and (latest_adjudication or {}).get("decidedBy")
+        == "system:auto-advance:gate-blocked"
+    )
+    if converged or rejected_by_claim_gate:
         recommended_candidate_id = str(
             meta_review.get("recommendationCandidateId") or ""
         ).strip()

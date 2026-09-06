@@ -3598,7 +3598,12 @@ def project_state_from_records(
         and gate_candidate_id
     )
     claim_belief_gate: dict[str, Any] | None = None
-    if converged or exhausted_surface:
+    rejected_by_claim_gate = bool(
+        adjudication_rejected
+        and (latest_adjudication or {}).get("decidedBy")
+        == "system:auto-advance:gate-blocked"
+    )
+    if converged or exhausted_surface or rejected_by_claim_gate:
         try:
             verdict = _claim_belief_gate_verdict(
                 team_id, normalized_question_id, gate_candidate_id
