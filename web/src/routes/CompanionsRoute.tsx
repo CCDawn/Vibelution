@@ -227,9 +227,9 @@ export function CompanionsRoute() {
                       type="button"
                       className={styles.primaryAction}
                       onPress={openCompanion}
+                      trailingIcon={<ArrowRight size={16} aria-hidden="true" />}
                     >
                       {copy.enter}
-                      <ArrowRight size={16} aria-hidden="true" />
                     </VButton>
                     <VRouteLinkButton
                       variant="secondary"

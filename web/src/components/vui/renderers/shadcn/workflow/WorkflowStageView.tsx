@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef } from "react";
 import type { ShadcnWorkflowCanvasProps } from "./ShadcnWorkflowCanvas";
 import { resolveNodeStatusVisual } from "./workflowCanvasState";
 import { cn } from "../../../lib/cn";
+import { VNativeButton } from "../../../primitives/VNativeButton";
 
 /** A readable projection of the SAME graph. Dependencies are explicit links,
  * never inferred from card order; cross-stage links retain their real target. */
@@ -26,7 +27,7 @@ export function WorkflowStageView(props: ShadcnWorkflowCanvasProps) {
         const isCurrent = props.runtimeCurrentNodeIds?.includes(node.nodeId) ?? false;
         const outgoing = props.graph.edges.filter((edge) => edge.fromNodeId === node.nodeId);
         return <article key={node.nodeId} className={cn("min-w-0 rounded-xl border bg-[var(--vui-surface-panel)]", visual.borderClass)} data-node-id={node.nodeId} data-node-status={node.status}>
-          <button type="button" aria-pressed={node.nodeId === props.selectedNodeId} onClick={() => props.onSelectNode?.(node.nodeId)}
+          <VNativeButton type="button" aria-pressed={node.nodeId === props.selectedNodeId} onClick={() => props.onSelectNode?.(node.nodeId)}
             className="flex min-h-[122px] w-full flex-col gap-2 rounded-xl p-4 text-left outline-none hover:bg-[var(--vui-surface-row)] focus-visible:ring-2 focus-visible:ring-[var(--accent-cool)] aria-pressed:ring-2 aria-pressed:ring-[var(--accent-cool)]">
             <span className="flex w-full flex-wrap items-center justify-between gap-2 text-xs">
               <span className="text-[var(--fg-secondary)]">{isCurrent ? "当前任务" : node.actorKind === "human" ? "人工确认" : node.actorKind === "agent" ? "Agent 任务" : "系统任务"}</span>
@@ -36,15 +37,15 @@ export function WorkflowStageView(props: ShadcnWorkflowCanvasProps) {
             {node.description ? <span className="text-xs leading-5 text-[var(--fg-secondary)]">{node.description}</span> : null}
             {node.blockedReason ? <span className="text-xs text-[var(--state-warning)]">{node.blockedReason}</span> : null}
             {node.knowledgeBadge ? <span className="text-xs text-[var(--fg-secondary)]">知识子任务 {node.knowledgeBadge.total} · 进行中 {node.knowledgeBadge.running} · 待交接 {node.knowledgeBadge.awaitingHandoff}</span> : null}
-          </button>
+          </VNativeButton>
           {outgoing.length ? <ul aria-label={`${node.label}的后续依赖`} className="space-y-1 border-t border-[var(--vui-border-subtle)] px-4 py-2">
             {outgoing.map((edge) => {
               const target = props.graph.nodes.find((item) => item.nodeId === edge.toNodeId);
               if (!target) return null;
               return <li key={edge.edgeId} data-edge-id={edge.edgeId} data-path-state={edge.pathState} className="text-xs">
-                <button type="button" onClick={() => props.onSelectNode?.(target.nodeId)} className="rounded py-1 text-left text-[var(--accent-cool)] underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2">
+                <VNativeButton type="button" onClick={() => props.onSelectNode?.(target.nodeId)} className="inline rounded py-1 text-left text-[var(--accent-cool)] underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2">
                   {edge.label ? `${edge.label} → ` : "→ "}{target.label}{target.stageId !== stageId ? "（跨阶段）" : ""}
-                </button>
+                </VNativeButton>
               </li>;
             })}
           </ul> : null}

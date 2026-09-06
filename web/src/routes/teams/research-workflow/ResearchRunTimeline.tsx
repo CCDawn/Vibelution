@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { WorkflowRunRecord } from "../../../api/researchWorkflow";
 import type { WorkflowCanvasProjection } from "../../../api/types/researchWorkflow";
 import type { WorkflowEventEnvelope } from "../../../api/types/research-workflow/events";
-import { summarizeErrorText, VEmptyState, VErrorSummary, VNativeSelect, VPanelHeader, VSurface } from "../../../components/vui";
+import { summarizeErrorText, VEmptyState, VErrorSummary, VPanelHeader, VStringSelect, VSurface } from "../../../components/vui";
 import { useShellI18n } from "../../../i18n/useShellI18n";
 import { buildResearchTimelineGroups, filterResearchTimelineGroups, type ResearchTimelineFilter } from "./researchWorkflowTimelineModel";
 import { ResearchWorkflowInsightsPanel } from "./ResearchWorkflowInsightsPanel";
@@ -29,16 +29,22 @@ export function ResearchRunTimeline(props: {
   );
   const effectiveFilter = filter === "selected" && !props.selectedNodeId ? "all" : filter;
   const groups = filterResearchTimelineGroups(allGroups, effectiveFilter, props.selectedNodeId);
+  const filterOptions = [
+    { value: "attention", label: isZh ? "仅异常与待处理" : "Errors and pending actions" },
+    { value: "selected", label: isZh ? "所选节点" : "Selected node", disabled: !props.selectedNodeId },
+    { value: "all", label: isZh ? "全部事件" : "All events" },
+  ];
   return (
     <div className={styles.root}>
       <VSurface tone="panel" className={styles.surface}>
         <VPanelHeader title={isZh ? RUN_TIMELINE_TERM.zh : RUN_TIMELINE_TERM.en} headingLevel={3} />
-        <VNativeSelect aria-label={isZh ? "筛选运行事件" : "Filter run events"} value={effectiveFilter}
-          onChange={(event) => setFilter(event.target.value as ResearchTimelineFilter)}>
-          <option value="attention">{isZh ? "仅异常与待处理" : "Errors and pending actions"}</option>
-          <option value="selected" disabled={!props.selectedNodeId}>{isZh ? "所选节点" : "Selected node"}</option>
-          <option value="all">{isZh ? "全部事件" : "All events"}</option>
-        </VNativeSelect>
+        <VStringSelect
+          ariaLabel={isZh ? "筛选运行事件" : "Filter run events"}
+          className="max-w-max"
+          value={effectiveFilter}
+          options={filterOptions}
+          onValueChange={(value) => setFilter(value as ResearchTimelineFilter)}
+        />
         {groups.length ? (
           <ol className={styles.groups}>
             {groups.map((group) => (
