@@ -7,11 +7,13 @@ import type { ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import { getKernelTaskTimeline, listKernelTasks, selectKernelTaskId } from "../api/kernel";
+import { listAgentSummaries } from "../api/agents";
 import { queryKeys } from "../api/queryKeys";
 import type { KernelDelivery, KernelTask, KernelTimelineItem } from "../api/types";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import {
   VActionGroup,
+  VButton,
   VIconButton,
   VListDetailPage,
   VMetricStrip,
@@ -25,6 +27,7 @@ import {
 import { useShellI18n } from "../i18n/useShellI18n";
 import styles from "./KernelTaskCenterRoute.styles";
 import { agentRunStatusLabel } from "./agents/agentRunPresentation";
+import { kernelTaskTitle } from "./kernelTaskPresentation";
 import { ProgressiveRegionSkeleton } from "./shared/ProgressiveRegionSkeleton";
 
 const ALL_STATUS_KEY = "all";
@@ -139,6 +142,13 @@ function describeError(error: unknown, fallback: string) {
 
 export function KernelTaskCenterRoute() {
   const { lang } = useShellI18n();
+  const [technicalTaskId, setTechnicalTaskId] = useState("");
+  const agentQuery = useQuery({
+    queryKey: queryKeys.agentSummary(true),
+    queryFn: ({ signal }) => listAgentSummaries({ includeArchived: true, signal }),
+    staleTime: 60_000,
+  });
+  const agentNames = useMemo(() => new Map((agentQuery.data ?? []).map((agent) => [agent.agentId, agent.displayName || agent.agentCode || agent.agentId])), [agentQuery.data]);
   const copy = COPY[lang];
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedTaskId = searchParams.get("taskId") ?? "";
@@ -206,6 +216,7 @@ export function KernelTaskCenterRoute() {
         onSelect={() => updateSelectedTaskId(task.taskId)}
         copy={copy}
         lang={lang}
+        agentNames={agentNames}
       />
     ))
   );
@@ -225,22 +236,31 @@ export function KernelTaskCenterRoute() {
         <div className={styles.detailHeaderClass}>
           <div className={styles.detailTitleWrapClass}>
             <p className={styles.eyebrowClass}>{copy.detail}</p>
-            <h2 className={styles.detailTitleClass}>{shortId(timeline.taskId)}</h2>
+            <h2 className={styles.detailTitleClass}>{kernelTaskTitle(timeline.task.goal, shortId(timeline.taskId), lang)}</h2>
           </div>
           <StatusPill lang={lang} status={timeline.task.status} />
         </div>
 
-        <VMetricStrip
-          ariaLabel={copy.detail}
-          className={styles.summaryGridClass}
-          metrics={[
-            { id: "authority", label: copy.factAuthority, value: timeline.readModel.truthSource || "-", tone: "info" },
-            { id: "view", label: copy.viewType, value: timeline.readModel.projection ? copy.projectionView : copy.directView },
-            { id: "event", label: copy.event, value: shortId(timeline.event.eventId) },
-            { id: "work-run", label: copy.workRun, value: shortId(timeline.execution.workRunId) },
-            { id: "outcome", label: copy.outcome, value: timeline.outcome.status || "-" },
-          ]}
-        />
+        <p className={styles.mutedLineClass}>{copy.assigned}: {timeline.task.assignedAgentIds.map((id) => agentNames.get(id) || shortId(id)).join(", ") || "-"}</p>
+        <VButton variant="ghost" aria-expanded={technicalTaskId === timeline.taskId} aria-controls="kernel-task-technical-details" onPress={() => setTechnicalTaskId(technicalTaskId === timeline.taskId ? "" : timeline.taskId)}>
+          {lang === "zh" ? "原始任务与技术标识" : "Original task and technical IDs"}
+        </VButton>
+        {technicalTaskId === timeline.taskId ? <VSurface id="kernel-task-technical-details" padding="compact" tone="inset">
+          <VMetricStrip
+            ariaLabel={copy.detail}
+            className={styles.summaryGridClass}
+            metrics={[
+              { id: "authority", label: copy.factAuthority, value: timeline.readModel.truthSource || "-", tone: "info" },
+              { id: "view", label: copy.viewType, value: timeline.readModel.projection ? copy.projectionView : copy.directView },
+              { id: "outcome", label: copy.outcome, value: agentRunStatusLabel(timeline.outcome.status || "-", lang) },
+            ]}
+          />
+          <p className={styles.rawGoalClass}>{timeline.task.goal}</p>
+          <code className={styles.monoCodeClass}>Task: {timeline.taskId}</code>
+          <code className={styles.monoCodeClass}>Agent: {timeline.task.assignedAgentIds.join(", ")}</code>
+          <code className={styles.monoCodeClass}>Event: {timeline.event.eventId}</code>
+          <code className={styles.monoCodeClass}>WorkRun: {timeline.execution.workRunId}</code>
+        </VSurface> : null}
 
         {selectedTaskHiddenFromList ? <div className={styles.selectionNoticeClass}>{copy.taskHidden}</div> : null}
 
@@ -253,7 +273,7 @@ export function KernelTaskCenterRoute() {
             <LedgerBucket title={copy.deliveryResult} count={timeline.deliveries.length}>
               <div className={styles.deliveryGridClass}>
                 {timeline.deliveries.map((delivery) => (
-                  <DeliveryRow key={`${delivery.targetAgentId}-${delivery.inboxMessageId}`} delivery={delivery} copy={copy} lang={lang} />
+                  <DeliveryRow key={`${delivery.targetAgentId}-${delivery.inboxMessageId}`} delivery={delivery} copy={copy} lang={lang} agentNames={agentNames} />
                 ))}
               </div>
             </LedgerBucket>
@@ -344,12 +364,14 @@ function TaskRow({
   onSelect,
   copy,
   lang,
+  agentNames,
 }: {
   task: KernelTask;
   selected: boolean;
   onSelect: () => void;
   copy: (typeof COPY)["zh"] | (typeof COPY)["en"];
   lang: "zh" | "en";
+  agentNames: Map<string, string>;
 }) {
   return (
     <VNativeButton
@@ -359,14 +381,13 @@ function TaskRow({
       aria-pressed={selected}
     >
       <span className={styles.taskRowTopClass}>
-        <strong className={styles.taskRowTitleClass} title={task.goal}>{task.goal || shortId(task.taskId)}</strong>
+        <strong className={styles.taskRowTitleClass} title={task.goal}>{kernelTaskTitle(task.goal, shortId(task.taskId), lang)}</strong>
         <StatusPill lang={lang} status={task.status} />
       </span>
       <span className={styles.taskRowMetaClass}>
-        <span>{copy.assigned}: {(task.assignedAgentIds ?? []).map(shortId).join(", ") || "-"}</span>
+        <span>{copy.assigned}: {(task.assignedAgentIds ?? []).map((id) => agentNames.get(id) || shortId(id)).join(", ") || "-"}</span>
         <span>{copy.updated}: {formatTime(task.updatedAt, lang)}</span>
       </span>
-      <code className={styles.monoCodeClass}>{task.taskId}</code>
     </VNativeButton>
   );
 }
@@ -375,15 +396,17 @@ function DeliveryRow({
   delivery,
   copy,
   lang,
+  agentNames,
 }: {
   delivery: KernelDelivery;
   lang: "zh" | "en";
+  agentNames: Map<string, string>;
   copy: (typeof COPY)["zh"] | (typeof COPY)["en"];
 }) {
   return (
     <div className={styles.deliveryRowClass}>
       <div className={styles.deliveryRowTopClass}>
-        <strong>{shortId(delivery.targetAgentId)}</strong>
+        <strong title={delivery.targetAgentId}>{agentNames.get(delivery.targetAgentId) || shortId(delivery.targetAgentId)}</strong>
         <StatusPill lang={lang} status={delivery.status} />
       </div>
       <span className={styles.mutedLineClass}>{copy.inbox}: {shortId(delivery.inboxMessageId)}</span>

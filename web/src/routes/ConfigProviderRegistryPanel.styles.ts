@@ -90,8 +90,8 @@ const styles = {
   modelsWorkspace: "vui-routes-configproviderregistrypanel modelsWorkspace grid h-full min-h-0 min-w-0 [grid-template-rows:auto_minmax(0,1fr)] gap-2 overflow-hidden",
   modelChrome: "vui-routes-configproviderregistrypanel modelChrome grid min-w-0 gap-2",
   modelToolbar:
-    "vui-routes-configproviderregistrypanel modelToolbar grid min-w-0 [grid-template-columns:minmax(16rem,0.7fr)_minmax(0,1fr)] items-center gap-2",
-  modelSearch: "vui-routes-configproviderregistrypanel modelSearch min-w-0",
+    "vui-routes-configproviderregistrypanel modelToolbar flex min-w-0 flex-wrap items-center gap-2",
+  modelSearch: "vui-routes-configproviderregistrypanel modelSearch min-w-0 flex-[1_1_16rem]",
   modelFilters: "vui-routes-configproviderregistrypanel modelFilters flex min-w-0 flex-wrap items-center justify-end gap-1",
   pinBanner:
     "vui-routes-configproviderregistrypanel pinBanner flex min-w-0 flex-wrap items-center justify-end gap-1.5",
@@ -100,7 +100,11 @@ const styles = {
   tableScroll:
     "vui-routes-configproviderregistrypanel tableScroll h-full min-h-0 min-w-0 overflow-auto rounded-[var(--radius-control)]",
   table:
-    "vui-routes-configproviderregistrypanel table min-w-[820px] !overflow-visible [&_thead]:sticky [&_thead]:top-0 [&_thead]:z-10",
+    "vui-routes-configproviderregistrypanel table w-full min-w-0 [&_table]:w-full [&_table]:table-fixed [&_td]:whitespace-normal [&_td]:break-words !overflow-visible [&_thead]:sticky [&_thead]:top-0 [&_thead]:z-10",
+  modelName: "min-w-0 break-words [overflow-wrap:anywhere]",
+  compactModelActions: "flex min-w-0 flex-wrap items-center gap-1",
+  modelDetails: "grid min-w-0 gap-4",
+  modelDetailSection: "grid min-w-0 gap-2 [&_h3]:font-semibold [&_h3]:text-vui-fg-secondary [&_strong]:whitespace-normal [&_strong]:break-all [&_span]:max-w-full [&_.ellipsis]:whitespace-normal [&_.ellipsis]:break-all",
   modelIdentity: "vui-routes-configproviderregistrypanel modelIdentity grid min-w-0 gap-0.5",
   modelActionState:
     "vui-routes-configproviderregistrypanel modelActionState inline-flex min-h-6 items-center rounded-full border border-vui-border-subtle bg-vui-surface-row/70 px-2 [font-size:var(--vui-font-xs)] font-semibold text-vui-fg-tertiary",

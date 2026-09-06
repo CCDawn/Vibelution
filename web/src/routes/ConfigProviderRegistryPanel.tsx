@@ -8,6 +8,8 @@ import {
   VButton,
   VCheckbox,
   VDenseTable,
+  VDialog,
+  type VDenseTableColumn,
   VEntityList,
   VInput,
   VPanelHeader,
@@ -504,6 +506,191 @@ export function ProviderModelsTab({
         ? "没有已发现模型。先运行「发现」，或切换到「全部」。"
         : "没有匹配的模型。请调整搜索或筛选条件。";
 
+  const [detailModelRef, setDetailModelRef] = useState("");
+  const detailModel = provider.models.find((model) => model.modelRef === detailModelRef);
+  const verificationColumn: VDenseTableColumn<ConfigCatalogModel> = {
+    id: "verification",
+    header: "真实调用",
+    render: (model) => {
+      const verificationStatus = model.verificationStatus || "unverified";
+      const errorLabel = (() => {
+        const kind = String(model.verificationErrorType || "").trim();
+        if (!kind) return "";
+        if (kind === "timeout") return "超时";
+        if (kind === "bad_request") return "上游 400 拒绝";
+        if (kind === "auth_failed") return "鉴权失败";
+        if (kind === "rate_limited") return "限流";
+        if (kind === "not_found") return "模型不存在";
+        if (kind === "network") return "网络错误";
+        if (kind === "missing_credential") return "缺 Key";
+        if (kind === "service_unavailable" || kind === "upstream_unavailable") return "上游不可用";
+        return kind;
+      })();
+      const detail = [
+        model.verificationHttpStatus ? `HTTP ${model.verificationHttpStatus}` : "",
+        errorLabel,
+        model.verificationMessage || "",
+        model.verificationCheckedAt || (verificationStatus === "unverified" ? "未测试" : ""),
+      ].filter(Boolean).join(" · ");
+      return (
+        <VTooltip content={detail || "未测试"} width="wide">
+          <span className={styles.capabilityHover}>
+            <VStatusChip
+              tone={verificationStatus === "verified" ? "success" : verificationStatus === "failed" ? "danger" : "warning"}
+            >
+              {verificationStatus === "verified" ? "可调用" : verificationStatus === "failed" ? "调用失败" : "未测试"}
+            </VStatusChip>
+          </span>
+        </VTooltip>
+      );
+    },
+  };
+  const detailColumns: VDenseTableColumn<ConfigCatalogModel>[] = [
+
+    {
+      id: "model-ref",
+      header: "模型引用",
+      render: (model) => (
+        <span className={styles.modelIdentity} data-model-availability={model.availability}>
+          <strong className={styles.ellipsis} title={model.modelRef}>{model.modelRef}</strong>
+          <small className={styles.muted}>{model.label || model.modelKey}</small>
+        </span>
+      ),
+    },
+    {
+      id: "upstream",
+      header: "上游 ID",
+      render: (model) => <span className={styles.ellipsis} title={model.upstreamId}>{model.upstreamId}</span>,
+    },
+    { id: "availability", header: "可用性", render: (model) => <VStatusChip tone={model.availability === "disabled" ? "danger" : "neutral"}>{providerStatusLabel(model.availability)}</VStatusChip> },
+    verificationColumn,
+    { id: "capabilities", header: "能力来源", render: (model) => <CapabilityList model={model} /> },
+    {
+      id: "actions",
+      header: "操作",
+      render: (model) => {
+        const action = deriveProviderModelActionState(
+          provider,
+          model,
+          liveReferenceCountByModelRef[model.modelRef] ?? 0,
+          disabled,
+        );
+        const testAvailable = canTestProviderModel(model);
+        const imageCapability = model.capabilities?.image_input;
+        const imageProbeAvailable = (
+          ["observed", "pinned"].includes(model.availability)
+          && !provider.refreshDue
+        );
+        const reasoningFeedback = reasoningFeedbackByModelRef[model.modelRef];
+        const reasoningValues = reasoningFeedback?.phase === "success"
+          ? reasoningFeedback.values
+          : model.reasoningEffortValues ?? [];
+        const reasoningSource = String(model.reasoningCapabilitySource || "");
+        const reasoningDeclared = (
+          reasoningValues.length > 0
+          && (
+            reasoningSource === "operator_override"
+            || model.reasoningVerificationStatus === "declared"
+          )
+        );
+        const reasoningVerified = reasoningFeedback?.phase === "success"
+          || model.reasoningVerificationStatus === "verified";
+        const reasoningHasContract = reasoningDeclared || reasoningVerified || reasoningValues.length > 0;
+        // T6: probe is optional evidence; operator declaration already enables UI (D1).
+        const reasoningProbeAvailable = (
+          provider.defaultProtocol === "responses"
+          && ["observed", "pinned"].includes(model.availability)
+          && !reasoningHasContract
+          && !provider.refreshDue
+        );
+        return (
+          <VActionGroup ariaLabel={`${model.modelRef} 模型操作`}>
+            {imageProbeAvailable ? (
+              <VButton
+                data-model-capability-action="image_input"
+                density="compact"
+                icon={<ImageIcon size={14} />}
+                isDisabled={disabled || imageCapabilityBusy}
+                title="发送一张最小有效图片，验证当前模型路由是否支持图像输入，并保存运行时能力证据。"
+                onPress={() => onProbeImageInput?.(model.modelRef)}
+              >
+                {imageCapabilityBusy
+                  ? "验证图片中…"
+                  : imageCapability?.value === "supported" || imageCapability?.value === "unsupported"
+                    ? "重新验证图片"
+                    : "验证图片输入"}
+              </VButton>
+            ) : null}
+            {reasoningHasContract ? (
+              <span
+                className={styles.modelActionState}
+                data-model-reasoning={reasoningDeclared && !reasoningVerified ? "declared" : "verified"}
+                title={
+                  reasoningDeclared && !reasoningVerified
+                    ? "运营协议合同已声明；Composer 可显示档位。可选再验证 low/high 取证。"
+                    : "运行时验证已保存能力证据。完整档位仍以运营协议合同为准。"
+                }
+              >
+                {reasoningDeclared && !reasoningVerified
+                  ? `协议已声明 ${reasoningValues.join(" / ")}`
+                  : `推理 ${reasoningValues.join(" / ")} 已验证`}
+              </span>
+            ) : reasoningProbeAvailable ? (
+              <VButton
+                density="compact"
+                isDisabled={disabled || reasoningFeedback?.phase === "busy"}
+                title="一期探测仅验证 low/high + reasoning_object（Responses）。成功后保存能力证据；完整档位（medium/xhigh 等）请在 pin defaults 写协议合同。"
+                onPress={() => onProbeReasoning?.(model.modelRef)}
+              >
+                {reasoningFeedback?.phase === "busy" ? "验证推理中…" : "验证推理 low / high"}
+              </VButton>
+            ) : null}
+            {action.kind === "pin" ? (
+              <VButton
+                variant="primary"
+                density="compact"
+                data-model-action="pin"
+                isDisabled={action.disabled || pinBusy}
+                title={action.reason}
+                onPress={() => onPin(provider.providerId, [model])}
+              >
+                {pinBusy ? "固定中…" : action.label}
+              </VButton>
+            ) : null}
+            {testAvailable ? (
+              <VButton
+                density="compact"
+                isDisabled={disabled}
+                title="发送最小真实模型请求并保存脱敏结果。"
+                onPress={() => onTestModel(model.modelRef)}
+              >
+                测试调用
+              </VButton>
+            ) : null}
+            {action.kind === "unpin" ? (
+              <VButton
+                variant="danger"
+                density="compact"
+                isDisabled={action.disabled}
+                title={action.reason || undefined}
+                onPress={() => onUnpin(model.modelRef)}
+              >
+                {action.label}
+              </VButton>
+            ) : action.kind === "in_use" || action.kind === "unavailable" ? (
+              <span className={styles.modelActionState} data-model-action={action.kind}>
+                {action.label}{action.kind === "in_use" ? ` · ${action.referenceCount} 个引用` : ""}
+              </span>
+            ) : null}
+            {reasoningFeedback?.phase === "error" ? (
+              <small className={styles.critical} role="alert">{reasoningFeedback.message}</small>
+            ) : null}
+          </VActionGroup>
+        );
+      },
+    },
+  ];
+
   return (
     <div className={styles.modelsWorkspace}>
       <div className={styles.modelChrome}>
@@ -572,192 +759,30 @@ export function ProviderModelsTab({
           getRowKey={(model) => model.modelRef}
           emptyText={emptyText}
           columns={[
-          {
-            id: "model-ref",
-            header: "Canonical modelRef",
-            className: "w-[23%]",
-            render: (model) => (
+            { id: "model", header: "模型", className: "w-[42%]", render: (model) => (
               <span className={styles.modelIdentity} data-model-availability={model.availability}>
-                <strong className={styles.ellipsis} title={model.modelRef}>{model.modelRef}</strong>
-                <small className={styles.muted}>{model.label || model.modelKey}</small>
+                <strong className={styles.modelName} title={model.modelRef}>{model.label || model.modelKey}</strong>
+                <small className={styles.muted}>{providerStatusLabel(model.availability)}</small>
               </span>
-            ),
-          },
-          {
-            id: "upstream",
-            header: "Upstream ID",
-            className: "w-[18%]",
-            render: (model) => <span className={styles.ellipsis} title={model.upstreamId}>{model.upstreamId}</span>,
-          },
-          { id: "availability", header: "可用性", className: "w-[11%]", render: (model) => <VStatusChip tone={model.availability === "disabled" ? "danger" : "neutral"}>{providerStatusLabel(model.availability)}</VStatusChip> },
-          {
-            id: "verification",
-            header: "真实调用",
-            className: "w-[18%]",
-            render: (model) => {
-              const verificationStatus = model.verificationStatus || "unverified";
-              const errorLabel = (() => {
-                const kind = String(model.verificationErrorType || "").trim();
-                if (!kind) return "";
-                if (kind === "timeout") return "超时";
-                if (kind === "bad_request") return "上游 400 拒绝";
-                if (kind === "auth_failed") return "鉴权失败";
-                if (kind === "rate_limited") return "限流";
-                if (kind === "not_found") return "模型不存在";
-                if (kind === "network") return "网络错误";
-                if (kind === "missing_credential") return "缺 Key";
-                if (kind === "service_unavailable" || kind === "upstream_unavailable") return "上游不可用";
-                return kind;
-              })();
-              const detail = [
-                model.verificationHttpStatus ? `HTTP ${model.verificationHttpStatus}` : "",
-                errorLabel,
-                model.verificationMessage || "",
-                model.verificationCheckedAt || (verificationStatus === "unverified" ? "未测试" : ""),
-              ].filter(Boolean).join(" · ");
-              return (
-                <VTooltip content={detail || "未测试"} width="wide">
-                  <span className={styles.capabilityHover}>
-                    <VStatusChip
-                      tone={verificationStatus === "verified" ? "success" : verificationStatus === "failed" ? "danger" : "warning"}
-                    >
-                      {verificationStatus === "verified" ? "可调用" : verificationStatus === "failed" ? "调用失败" : "未测试"}
-                    </VStatusChip>
-                  </span>
-                </VTooltip>
-              );
-            },
-          },
-          { id: "capabilities", header: "能力来源", className: "w-[13%]", render: (model) => <CapabilityList model={model} /> },
-          {
-            id: "actions",
-            header: "操作",
-            className: "w-[17%]",
-            align: "right",
-            render: (model) => {
-              const action = deriveProviderModelActionState(
-                provider,
-                model,
-                liveReferenceCountByModelRef[model.modelRef] ?? 0,
-                disabled,
-              );
-              const testAvailable = canTestProviderModel(model);
-              const imageCapability = model.capabilities?.image_input;
-              const imageProbeAvailable = (
-                ["observed", "pinned"].includes(model.availability)
-                && !provider.refreshDue
-              );
-              const reasoningFeedback = reasoningFeedbackByModelRef[model.modelRef];
-              const reasoningValues = reasoningFeedback?.phase === "success"
-                ? reasoningFeedback.values
-                : model.reasoningEffortValues ?? [];
-              const reasoningSource = String(model.reasoningCapabilitySource || "");
-              const reasoningDeclared = (
-                reasoningValues.length > 0
-                && (
-                  reasoningSource === "operator_override"
-                  || model.reasoningVerificationStatus === "declared"
-                )
-              );
-              const reasoningVerified = reasoningFeedback?.phase === "success"
-                || model.reasoningVerificationStatus === "verified";
-              const reasoningHasContract = reasoningDeclared || reasoningVerified || reasoningValues.length > 0;
-              // T6: probe is optional evidence; operator declaration already enables UI (D1).
-              const reasoningProbeAvailable = (
-                provider.defaultProtocol === "responses"
-                && ["observed", "pinned"].includes(model.availability)
-                && !reasoningHasContract
-                && !provider.refreshDue
-              );
-              return (
-                <VActionGroup ariaLabel={`${model.modelRef} 模型操作`}>
-                  {imageProbeAvailable ? (
-                    <VButton
-                      data-model-capability-action="image_input"
-                      density="compact"
-                      icon={<ImageIcon size={14} />}
-                      isDisabled={disabled || imageCapabilityBusy}
-                      title="发送一张最小有效图片，验证当前模型路由是否支持图像输入，并保存运行时能力证据。"
-                      onPress={() => onProbeImageInput?.(model.modelRef)}
-                    >
-                      {imageCapabilityBusy
-                        ? "验证图片中…"
-                        : imageCapability?.value === "supported" || imageCapability?.value === "unsupported"
-                          ? "重新验证图片"
-                          : "验证图片输入"}
-                    </VButton>
-                  ) : null}
-                  {reasoningHasContract ? (
-                    <span
-                      className={styles.modelActionState}
-                      data-model-reasoning={reasoningDeclared && !reasoningVerified ? "declared" : "verified"}
-                      title={
-                        reasoningDeclared && !reasoningVerified
-                          ? "运营协议合同已声明；Composer 可显示档位。可选再验证 low/high 取证。"
-                          : "运行时验证已保存能力证据。完整档位仍以运营协议合同为准。"
-                      }
-                    >
-                      {reasoningDeclared && !reasoningVerified
-                        ? `协议已声明 ${reasoningValues.join(" / ")}`
-                        : `推理 ${reasoningValues.join(" / ")} 已验证`}
-                    </span>
-                  ) : reasoningProbeAvailable ? (
-                    <VButton
-                      density="compact"
-                      isDisabled={disabled || reasoningFeedback?.phase === "busy"}
-                      title="一期探测仅验证 low/high + reasoning_object（Responses）。成功后保存能力证据；完整档位（medium/xhigh 等）请在 pin defaults 写协议合同。"
-                      onPress={() => onProbeReasoning?.(model.modelRef)}
-                    >
-                      {reasoningFeedback?.phase === "busy" ? "验证推理中…" : "验证推理 low / high"}
-                    </VButton>
-                  ) : null}
-                  {action.kind === "pin" ? (
-                    <VButton
-                      variant="primary"
-                      density="compact"
-                      data-model-action="pin"
-                      isDisabled={action.disabled || pinBusy}
-                      title={action.reason}
-                      onPress={() => onPin(provider.providerId, [model])}
-                    >
-                      {pinBusy ? "固定中…" : action.label}
-                    </VButton>
-                  ) : null}
-                  {testAvailable ? (
-                    <VButton
-                      density="compact"
-                      isDisabled={disabled}
-                      title="发送最小真实模型请求并保存脱敏结果。"
-                      onPress={() => onTestModel(model.modelRef)}
-                    >
-                      测试调用
-                    </VButton>
-                  ) : null}
-                  {action.kind === "unpin" ? (
-                    <VButton
-                      variant="danger"
-                      density="compact"
-                      isDisabled={action.disabled}
-                      title={action.reason || undefined}
-                      onPress={() => onUnpin(model.modelRef)}
-                    >
-                      {action.label}
-                    </VButton>
-                  ) : action.kind === "in_use" || action.kind === "unavailable" ? (
-                    <span className={styles.modelActionState} data-model-action={action.kind}>
-                      {action.label}{action.kind === "in_use" ? ` · ${action.referenceCount} 个引用` : ""}
-                    </span>
-                  ) : null}
-                  {reasoningFeedback?.phase === "error" ? (
-                    <small className={styles.critical} role="alert">{reasoningFeedback.message}</small>
-                  ) : null}
-                </VActionGroup>
-              );
-            },
-          },
+            ) },
+            { ...verificationColumn, className: "w-[25%]" },
+            { id: "actions", header: "操作", className: "w-[33%]", render: (model) => (
+              <div className={styles.compactModelActions}>
+                <VButton density="compact" variant="ghost" onPress={() => setDetailModelRef(model.modelRef)} aria-label={`${model.label || model.modelKey} 详情`}>详情</VButton>
+                {canTestProviderModel(model) ? <VButton density="compact" isDisabled={disabled} title="发送最小真实模型请求并保存脱敏结果。" onPress={() => onTestModel(model.modelRef)}>测试调用</VButton> : null}
+              </div>
+            ) },
           ]}
         />
       </div>
+      <VDialog open={Boolean(detailModel)} onOpenChange={(open) => { if (!open) setDetailModelRef(""); }} title={detailModel?.label || detailModel?.modelKey || "模型详情"} description="完整标识、能力与验证记录">
+        {detailModel ? <div className={styles.modelDetails}>
+          {detailColumns.map((column) => <section key={column.id} className={styles.modelDetailSection}>
+            <h3>{column.header}</h3>
+            {column.render(detailModel)}
+          </section>)}
+        </div> : null}
+      </VDialog>
     </div>
   );
 }

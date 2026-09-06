@@ -197,7 +197,7 @@ describe("KernelTaskCenterRoute layout contract", () => {
 
   it("keeps long Kernel reference chips compact inside the flat ledger", () => {
     expect(styles.detailHeaderClass).toContain("max-w-full");
-    expect(styles.detailTitleClass).toContain("truncate");
+    expect(styles.detailTitleClass).toContain("break-words");
     expect(styles.deliveryRowClass).toContain("max-w-full");
     expect(styles.deliveryRowTopClass).toContain("grid-cols-[minmax(0,1fr)_auto]");
     expect(styles.mutedLineClass).toContain("break-words");

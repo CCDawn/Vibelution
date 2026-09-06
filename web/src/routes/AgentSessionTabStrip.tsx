@@ -1,9 +1,10 @@
 import { Bot, Check, LoaderCircle, Plus, SquareTerminal, X } from "lucide-react";
 import type { DragEvent, KeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { AgentInstance, SessionReferenceAttachment, SessionSummary, Team } from "../api/types";
-import { VButton, VIconButton, VNativeInput } from "../components/vui";
+import { VButton, VDialog, VIconButton, VNativeButton, VNativeInput, VStateSurface } from "../components/vui";
+import { recentAgentSessions, searchAgentSessionHistory } from "./agentSessionHistory";
 import type { TranslationKey } from "../i18n/dictionary";
 import { sessionAgentDisplayInfo } from "./agentDisplay";
 import {
@@ -201,6 +202,10 @@ export function AgentSessionTabStrip({
   onSetActiveTab,
   onSubmitRename,
 }: AgentSessionTabStripProps) {
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyQuery, setHistoryQuery] = useState("");
+  const visibleSessions = recentAgentSessions(sessions, [activeSessionId, editingSessionId, contextMenuSessionId]);
+  const historySessions = searchAgentSessionHistory(sessions, historyQuery);
   const tabGroupRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const activeTab = tabGroupRef.current?.querySelector<HTMLElement>('[data-session-tab-active="true"]');
@@ -213,7 +218,7 @@ export function AgentSessionTabStrip({
     runtimeRunningSessionIds.map((id) => String(id || "").trim()).filter(Boolean),
   );
   const navigationTabs = [
-    ...sessions.map((session) => ({ kind: "session" as const, id: session.id })),
+    ...visibleSessions.map((session) => ({ kind: "session" as const, id: session.id })),
     ...cliAgentRuns.map((run) => ({ kind: "cli" as const, id: run.id })),
   ];
   const keyboardTabs = navigationTabs.filter((tab) => (
@@ -264,6 +269,8 @@ export function AgentSessionTabStrip({
   };
 
   return (
+    <>
+    <div className={styles.sessionHeader}>
     <div className={styles.agentSessionTabRail}>
       <div
         className={styles.agentSessionTabGroup}
@@ -271,7 +278,7 @@ export function AgentSessionTabStrip({
         role={keyboardTabs.length > 0 ? "tablist" : undefined}
         aria-label={keyboardTabs.length > 0 ? (lang === "zh" ? "Agent 会话" : "Agent sessions") : undefined}
       >
-      {sessions.map((session) => {
+      {visibleSessions.map((session) => {
         const sessionAgent = session.agentId ? agentsById.get(session.agentId) : undefined;
         const sessionDisplay = sessionAgentDisplayInfo(session, sessionAgent, lang, resolveModelLabel);
         const sessionStatus = session.childStatus || session.status || session.currentPhase;
@@ -558,5 +565,28 @@ export function AgentSessionTabStrip({
         />
       )}
     </div>
+    <VButton variant="ghost" density="compact" className={styles.historyButton} onPress={() => setHistoryOpen(true)}>
+      {lang === "zh" ? `全部会话（${sessions.length}）` : `All sessions (${sessions.length})`}
+    </VButton>
+    </div>
+    <VDialog open={historyOpen} onOpenChange={setHistoryOpen} title={lang === "zh" ? "全部会话" : "All sessions"} description={lang === "zh" ? "搜索并继续历史会话" : "Search and resume a conversation"}>
+      <VNativeInput type="search" aria-label={lang === "zh" ? "搜索会话" : "Search sessions"} placeholder={lang === "zh" ? "标题、摘要或会话编号" : "Title, summary or session ID"} value={historyQuery} onChange={(event) => setHistoryQuery(event.target.value)} />
+      <div className={styles.historyList}>
+        {historySessions.map((session) => {
+          const tone = agentSessionStatusTone(session.status || "", { session, isActive: session.id === activeSessionId, needsApproval: approvalSessionIds.has(session.id), isRuntimeRunning: runtimeSessionIds.has(session.id) });
+          return <VNativeButton key={session.id} className={styles.historyRow} aria-pressed={session.id === activeSessionId} onClick={() => {
+            if (session.id === activeSessionId) onSetActiveTab(session.id, "agent");
+            else onOpenDirectSession(session.id);
+            setHistoryOpen(false);
+          }}>
+            <strong>{session.title || session.id}</strong>
+            <span>{[session.agentDisplayName, sessionActivityLabel(tone, lang)].filter(Boolean).join(" · ")}</span>
+            <small>{session.updatedAt || session.lastActive}</small>
+          </VNativeButton>;
+        })}
+        {historySessions.length === 0 ? <VStateSurface tone="empty" title={lang === "zh" ? "没有匹配的会话" : "No matching sessions"} /> : null}
+      </div>
+    </VDialog>
+    </>
   );
 }

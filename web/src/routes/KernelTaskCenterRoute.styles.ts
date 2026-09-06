@@ -27,7 +27,7 @@ const taskRowMetaClass = "grid w-full min-w-0 gap-[3px] [font-size:var(--vui-fon
 const monoCodeClass = "block w-full min-w-0 break-all [font-size:var(--vui-font-xs)] text-vui-fg-tertiary";
 const detailHeaderClass = `flex min-w-0 max-w-full items-center justify-between gap-2 ${cardSurface}`;
 const detailTitleWrapClass = "min-w-0";
-const detailTitleClass = "m-0 min-w-0 truncate text-base text-vui-fg-primary";
+const detailTitleClass = "m-0 min-w-0 break-words [overflow-wrap:anywhere] text-base text-vui-fg-primary";
 const summaryGridClass = "min-w-0 max-w-full overflow-x-auto";
 const selectionNoticeClass = "rounded-[var(--radius-control)] bg-[color-mix(in_srgb,var(--state-warning)_8%,transparent)] px-2 py-[7px] [font-size:var(--vui-font-xs)] leading-[1.35] text-vui-fg-secondary";
 const ledgerSectionClass = "grid min-w-0 gap-[7px] pt-2";
@@ -58,6 +58,7 @@ const emptyStateClass = "grid min-h-16 content-start gap-1 break-words rounded-[
 const loadingRegionClass = "min-h-0 min-w-0 [&_[aria-hidden=true]>div]:!border-0";
 
 const styles = {
+  rawGoalClass: "whitespace-pre-wrap break-words [overflow-wrap:anywhere]",
   routeClass,
   headerClass,
   headerActionsClass,

@@ -1,4 +1,8 @@
 const styles = {
+  sessionHeader: "flex min-w-0 max-w-full items-center gap-1",
+  historyButton: "shrink-0",
+  historyList: "grid max-h-[min(60vh,480px)] min-w-0 gap-1 overflow-auto",
+  historyRow: "grid w-full min-w-0 gap-1 rounded-[var(--radius-control)] bg-vui-surface-row p-3 text-left hover:bg-vui-control-muted-hover aria-pressed:bg-vui-control-muted [&_strong]:break-words [&_span]:text-vui-fg-secondary [&_small]:text-vui-fg-tertiary",
   // Card chrome lives on the outer tab shell so close control sits inside the same surface.
   agentSessionTab:
     "vui-routes-chatcodingroute agentSessionTab -mb-px min-w-0 inline-flex h-9 w-fit max-w-[16rem] shrink-0 items-center gap-0 rounded-t-[var(--radius-control)] rounded-b-none border border-transparent bg-transparent pr-0.5 text-[var(--fg-secondary)] hover:border-[var(--vui-border-subtle)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--vui-control-hover-fg)]",

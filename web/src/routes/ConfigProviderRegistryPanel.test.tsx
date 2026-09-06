@@ -1,6 +1,8 @@
-import React from "react";
+// @vitest-environment happy-dom
+import React, { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ConfigCatalogModel } from "../api/types";
 import {
@@ -108,6 +110,28 @@ function renderModels(
   );
 }
 
+let mountedRoots: Root[] = [];
+afterEach(async () => {
+  for (const root of mountedRoots) await act(async () => root.unmount());
+  mountedRoots = [];
+  document.body.innerHTML = "";
+});
+
+async function renderModelDetails(models: ConfigCatalogModel[], options: {liveReferences?: Record<string, number>; imageCapabilityBusy?: boolean; onTestModel?: (modelRef: string) => void} = {}) {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  mountedRoots.push(root);
+  await act(async () => root.render(<ProviderModelsTab provider={provider(models)} disabled={false}
+    modelQuery="" modelFilter="all" liveReferenceCountByModelRef={options.liveReferences ?? {}}
+    onQueryChange={() => {}} onFilterChange={() => {}} onPin={() => {}} onUnpin={() => {}}
+    onTestModel={options.onTestModel ?? (() => {})} onProbeImageInput={() => {}} imageCapabilityBusy={options.imageCapabilityBusy} />));
+  const details = container.querySelector<HTMLButtonElement>('button[aria-label$=" 详情"]');
+  expect(details).not.toBeNull();
+  await act(async () => details!.click());
+  return Array.from(document.body.querySelectorAll('[role="dialog"]')).at(-1)!.outerHTML;
+}
+
 describe("ConfigProviderRegistryPanel", () => {
   it("renders a searchable model toolbar with status counts", () => {
     const models = [
@@ -127,12 +151,12 @@ describe("ConfigProviderRegistryPanel", () => {
     expect(markup).toContain('aria-pressed="true"');
   });
 
-  it("renders pin controls for discovered models and bulk pin banner", () => {
-    const observedMarkup = renderModels([model("observed", "observed")]);
+  it("renders pin controls for discovered models and bulk pin banner", async () => {
+    const observedMarkup = await renderModelDetails([model("observed", "observed")]);
     expect(observedMarkup).toContain("固定到配置");
-    expect(observedMarkup).toContain("固定全部已发现");
+    expect(renderModels([model("observed", "observed")])).toContain("固定全部已发现");
     expect(observedMarkup).toContain('data-model-action="pin"');
-    expect(observedMarkup).toContain('data-model-action="pin-all"');
+    expect(renderModels([model("observed", "observed")])).toContain('data-model-action="pin-all"');
     expect(observedMarkup).not.toContain("取消固定");
     expect(observedMarkup).not.toContain("测试调用");
     expect(observedMarkup).toContain("验证推理 low / high");
@@ -140,20 +164,18 @@ describe("ConfigProviderRegistryPanel", () => {
     expect(renderModels([model("disabled", "disabled")])).not.toContain("取消固定");
 
     const pinned = model("pinned", "pinned");
-    const inUseMarkup = renderModels([pinned], { liveReferences: { [pinned.modelRef]: 2 } });
+    const inUseMarkup = await renderModelDetails([pinned], { liveReferences: { [pinned.modelRef]: 2 } });
     expect(inUseMarkup).toContain("使用中 · 2 个引用");
     expect(inUseMarkup).not.toContain("取消固定");
 
     expect(renderModels([pinned])).toContain("测试调用");
-    expect(renderModels([pinned])).toContain("取消固定");
+    expect(await renderModelDetails([pinned])).toContain("取消固定");
     expect(observedMarkup).not.toContain("发现 1 个可固定模型");
     expect(observedMarkup).not.toContain("「发现」不等于已入库");
   });
 
-  it("exposes a per-model image input capability probe with current-state copy", () => {
-    const unknownMarkup = renderToStaticMarkup(
-      <ConfigProviderRegistryPanel {...panelProps([model("terra", "observed")])} />,
-    );
+  it("exposes a per-model image input capability probe with current-state copy", async () => {
+    const unknownMarkup = await renderModelDetails([model("terra", "observed")]);
     const supportedModel = {
       ...model("terra", "observed"),
       capabilities: {
@@ -165,12 +187,8 @@ describe("ConfigProviderRegistryPanel", () => {
         },
       },
     };
-    const supportedMarkup = renderToStaticMarkup(
-      <ConfigProviderRegistryPanel {...panelProps([supportedModel])} />,
-    );
-    const busyMarkup = renderToStaticMarkup(
-      <ConfigProviderRegistryPanel {...panelProps([supportedModel], { imageCapabilityBusy: true })} />,
-    );
+    const supportedMarkup = await renderModelDetails([supportedModel]);
+    const busyMarkup = await renderModelDetails([supportedModel], { imageCapabilityBusy: true });
 
     expect(unknownMarkup).toContain('data-model-capability-action="image_input"');
     expect(unknownMarkup).toContain("验证图片输入");
@@ -178,14 +196,14 @@ describe("ConfigProviderRegistryPanel", () => {
     expect(busyMarkup).toContain("验证图片中…");
   });
 
-  it("shows verified reasoning efforts as maintained model capability", () => {
+  it("shows verified reasoning efforts as maintained model capability", async () => {
     const reasoningModel = {
       ...model("reasoning", "observed"),
       reasoningEffortValues: ["low", "high"],
       reasoningVerificationStatus: "verified",
     };
 
-    const markup = renderModels([reasoningModel]);
+    const markup = await renderModelDetails([reasoningModel]);
 
     expect(markup).toContain("推理 low / high 已验证");
     expect(markup).not.toContain("验证推理 low / high");
@@ -194,7 +212,7 @@ describe("ConfigProviderRegistryPanel", () => {
     expect(panelSource).toContain("一期探测仅验证 low/high");
   });
 
-  it("shows operator-declared reasoning contract without requiring probe", () => {
+  it("shows operator-declared reasoning contract without requiring probe", async () => {
     const declared = {
       ...model("luna", "pinned"),
       reasoningEffortValues: ["low", "medium", "high"],
@@ -203,10 +221,19 @@ describe("ConfigProviderRegistryPanel", () => {
       defaultReasoningEffort: "medium",
       reasoningAdapter: "reasoning_object",
     };
-    const markup = renderModels([declared]);
+    const markup = await renderModelDetails([declared]);
     expect(markup).toContain("协议已声明 low / medium / high");
     expect(markup).toContain("思考深度: low/medium/high");
     expect(markup).not.toContain("验证推理 low / high");
+  });
+
+  it("keeps the real model test callback in details", async () => {
+    const onTestModel = vi.fn();
+    await renderModelDetails([model("luna", "pinned")], { onTestModel });
+    const action = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')).find(button => button.textContent?.trim() === "测试调用");
+    expect(action).toBeTruthy();
+    await act(async () => action!.click());
+    expect(onTestModel).toHaveBeenCalledWith("relay_a/luna");
   });
 
   it("distinguishes an empty directory from filtered no results", () => {
@@ -220,23 +247,24 @@ describe("ConfigProviderRegistryPanel", () => {
     // Observed (not pinned) must not spam "thinking not declared" warnings.
     expect(markup).not.toContain("思考深度: 未配置");
     expect(markup).not.toContain("reasoning: 未声明");
-    expect(markup).toContain("—");
+    expect(markup).toContain("详情");
     expect(markup).not.toContain("unknown · 未观测");
     expect(panelStyles.tableScroll).toContain("h-full");
     expect(panelStyles.tableScroll).not.toContain("max-h-[calc(100dvh-33rem)]");
     expect(panelStyles.tableScroll).toContain("overflow-auto");
-    expect(panelStyles.table).toContain("min-w-[820px]");
+    expect(panelStyles.table).not.toContain("min-w-[820px]");
+    expect(panelStyles.table).toContain("table-fixed");
     expect(panelStyles.table).toContain("[&amp;_thead]:sticky".replace("&amp;", "&"));
     const heroUiImportToken = ["@heroui", "react"].join("/");
     expect(panelSource).not.toContain(heroUiImportToken);
   });
 
-  it("only warns about missing reasoning contracts on pinned models", () => {
+  it("only warns about missing reasoning contracts on pinned models", async () => {
     const pinned = {
       ...model("luna", "pinned"),
       reasoningEffortValues: [],
     };
-    const markup = renderModels([pinned]);
+    const markup = await renderModelDetails([pinned]);
     expect(markup).toContain("思考深度: 未配置");
   });
 
