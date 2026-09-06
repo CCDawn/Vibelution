@@ -122,7 +122,7 @@ def source_collection_context_tool(
 
             payload = {**payload, "formalSearchPolicy": {
                 "supplementalQueries": "Use batch_web_search_tool or paper_search_tool with parent_query_id from this task's assignedQueries. Keep the same research question and perspective. The server registers the query before search and persists real provider receipts.",
-                "candidateBinding": "Every candidate URL must appear in searchReceipts.resultRefs. If a prior candidate is missing a receipt, search its actual title/URL with the scoped tools; never invent or claim a receipt. web_fetch_tool alone is not a search receipt.",
+                "candidateBinding": "Treat searchReceiptValidation.valid as the authoritative receipt check. When it is true, the server has bound candidates to real search receipts through canonical source identity validation (including DOI/arXiv identity matching, presentation URLs, and HTTP/HTTPS variants); do not repeat a search just because a candidate URL is not verbatim in searchReceipts.resultRefs. When it is false, use the scoped search tools to repair the reported receipt gap; never invent or claim a receipt. web_fetch_tool alone is not a search receipt.",
             }, "searchReceipts": project_source_collection_search_trace(
                 resolved_team_id, _text(payload.get("runId") or run_id),
             )}

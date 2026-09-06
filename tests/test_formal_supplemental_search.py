@@ -10,10 +10,12 @@ from tools import research_search_tools
 def test_finding_context_refreshes_receipts_even_when_context_is_cached(monkeypatch):
     from tools import source_collection_stage_tools as stage_tools
     from core.web.services import team_workflow_orchestration_service as service
+    from core.web.services.team_workflow.research_runtime import artifact_readback_registry
 
     monkeypatch.setattr(stage_tools, "_SOURCE_CONTEXT_CACHE", OrderedDict())
     monkeypatch.setattr(stage_tools, "_resolve_source_collection_team_id", lambda **_: ("team-1", {}))
     monkeypatch.setattr(stage_tools, "_record_stage_tool_event", lambda *_a, **_kw: None)
+    monkeypatch.setattr(artifact_readback_registry, "load_source_finding_receipt_payload", lambda **_: {})
     calls = []
     def context(*_a, **_kw):
         calls.append(1)
@@ -27,6 +29,12 @@ def test_finding_context_refreshes_receipts_even_when_context_is_cached(monkeypa
     assert first["searchReceipts"] == []
     assert second["searchReceipts"] == receipts
     assert "parent_query_id" in second["formalSearchPolicy"]["supplementalQueries"]
+    assert second["searchReceiptValidation"] == {"valid": True}
+    candidate_binding = second["formalSearchPolicy"]["candidateBinding"]
+    assert "searchReceiptValidation.valid" in candidate_binding
+    assert "canonical source identity" in candidate_binding
+    assert "do not repeat a search" in candidate_binding
+    assert "Every candidate URL must appear" not in candidate_binding
     assert len(calls) == 1
 
 
