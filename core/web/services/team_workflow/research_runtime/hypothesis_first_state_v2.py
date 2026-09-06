@@ -4223,6 +4223,12 @@ def project_state_from_records(
         current_phase = "collection"
     elif review_candidates and review["lifecycle"] != "completed":
         current_phase = "review"
+    elif review_candidates and not latest_round:
+        # Review closure is persisted before its synchronous fan-in writes a
+        # HypothesisRound.  Keep the authoritative phase at convergence while
+        # that durable round is still missing; otherwise the completed review
+        # would be copied into ``overall`` and falsely terminate the chain.
+        current_phase = "convergence"
     elif latest_round:
         current_phase = "convergence"
     elif selection_id:
@@ -4518,6 +4524,24 @@ def _scope_records(
                 continue
             meeting_id = str(record.get("meetingRoundId") or "").strip()
             if meeting_id and meeting_id in meeting_ids:
+                chain_records.append(record)
+                continue
+            # Human adjudication records bind to the complete round through
+            # ``meetingRoundIds`` rather than a singular ``meetingRoundId``.
+            # Older auto-advance records may have no workflowRunId; retain
+            # them only when every referenced meeting belongs to this exact
+            # run, so the run-scoped projector can consume the durable
+            # authority without broad historical fallback.
+            record_meeting_ids = {
+                str(item or "").strip()
+                for item in list(record.get("meetingRoundIds") or [])
+                if str(item or "").strip()
+            }
+            if (
+                record_kind == _HUMAN_ADJUDICATION_KIND
+                and record_meeting_ids
+                and record_meeting_ids.issubset(meeting_ids)
+            ):
                 chain_records.append(record)
     else:
         chain_records = all_chain_records

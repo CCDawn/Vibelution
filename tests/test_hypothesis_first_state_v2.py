@@ -544,6 +544,81 @@ def test_same_round_index_keeps_each_candidate_in_review_aggregate() -> None:
     ]
 
 
+def test_completed_review_without_hypothesis_round_waits_for_convergence() -> None:
+    """Closed review meetings must not make the whole chain terminal.
+
+    The review closure persists before the synchronous fan-in writes its
+    HypothesisRound.  During that gap the chain is waiting for convergence;
+    projecting the completed review as the top-level phase falsely tells the
+    frontend that the workflow has finished.
+    """
+
+    candidate_ids = ["candidate-a", "candidate-b", "candidate-c"]
+    state = HypothesisFirstStateV2.model_validate(
+        project_state_from_records(
+            team_id="team-1",
+            question_id="SCI-001",
+            reset_boundary=None,
+            chain_records=(
+                [
+                    {
+                        "recordKind": "hypothesis_candidate",
+                        "candidateId": candidate_id,
+                        "questionId": "SCI-001",
+                        "createdAt": "2026-08-25T00:00:00Z",
+                    }
+                    for candidate_id in candidate_ids
+                ]
+                + [
+                    {
+                        "recordKind": "review_round_link",
+                        "linkId": f"link-{candidate_id}",
+                        "questionId": "SCI-001",
+                        "selectionId": "selection-1",
+                        "candidateId": candidate_id,
+                        "candidateOrder": order,
+                        "roundIndex": 1,
+                        "meetingRoundId": f"meeting-{candidate_id}",
+                        "createdAt": "2026-08-25T00:02:00Z",
+                    }
+                    for order, candidate_id in enumerate(candidate_ids)
+                ]
+            ),
+            selection_records=[
+                {
+                    "selectionId": "selection-1",
+                    "questionId": "SCI-001",
+                    "selectedCandidateIds": candidate_ids,
+                    "createdAt": "2026-08-25T00:01:00Z",
+                }
+            ],
+            meeting_records=[
+                {
+                    "meetingRoundId": f"meeting-{candidate_id}",
+                    "meetingType": "hypothesis_review",
+                    "question": "SCI-001",
+                    "selectionId": "selection-1",
+                    "status": "closed",
+                    "createdAt": "2026-08-25T00:03:00Z",
+                    "updatedAt": "2026-08-25T00:04:00Z",
+                }
+                for candidate_id in candidate_ids
+            ],
+            digest_records=[],
+            decision_records=[],
+            hypothesis_round_records=[],
+        )
+    )
+
+    assert state.review.lifecycle == "completed"
+    assert state.convergence.latestHypothesisRoundId is None
+    assert state.convergence.lifecycle == "not_started"
+    assert state.currentPhase == "convergence"
+    assert state.overall.lifecycle == "not_started"
+    assert state.overall.outcome == "none"
+    assert state.overall.actionability == "idle"
+
+
 def test_stale_round_awaiting_candidate_keeps_approve_entry() -> None:
     """A non-latest round's awaiting digest keeps its confirmation entry.
 
@@ -6547,6 +6622,107 @@ def test_scope_records_keeps_question_boundary_without_run_filter(
     assert [item["roundId"] for item in sources["hypothesis_round_records"]] == [
         "round-target"
     ]
+    state_module.clear_hypothesis_first_state_v2_cache()
+
+
+def test_scope_records_keeps_legacy_adjudication_only_for_exact_meeting_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Legacy adjudications without workflowRunId stay run-scoped by refs.
+
+    Auto-advance records written before the run-id field was added identify a
+    round through ``meetingRoundIds``.  A record is recoverable only when all
+    of those refs belong to the current run; a mixed historical record must
+    remain excluded rather than widening the run boundary.
+    """
+
+    state_module = hypothesis_first_routes.hypothesis_first_state_v2
+    state_module.clear_hypothesis_first_state_v2_cache()
+    monkeypatch.setattr(
+        state_module.hypothesis_first_chain,
+        "_question_reset_snapshot",
+        lambda *_args: {
+            "targetMeetingIds": {"meeting-target", "meeting-other"},
+            "targetRoundIds": set(),
+            "chainRecords": [
+                {
+                    "recordKind": "human_adjudication",
+                    "adjudicationId": "legacy-in-scope",
+                    "questionId": "SCI-001",
+                    "decision": "rejected",
+                    "meetingRoundIds": ["meeting-target"],
+                },
+                {
+                    "recordKind": "human_adjudication",
+                    "adjudicationId": "legacy-cross-run",
+                    "questionId": "SCI-001",
+                    "decision": "rejected",
+                    "meetingRoundIds": ["meeting-target", "meeting-other"],
+                },
+                {
+                    "recordKind": "human_adjudication",
+                    "adjudicationId": "explicit-other-run",
+                    "questionId": "SCI-001",
+                    "decision": "accepted",
+                    "workflowRunId": "run-other",
+                    "meetingRoundIds": ["meeting-other"],
+                },
+            ],
+            "selectionRecords": [],
+            "meetingRecords": [
+                {
+                    "meetingRoundId": "meeting-target",
+                    "modelInvocationReceiptAuthority": {
+                        "workflowRunId": "run-target",
+                    },
+                },
+                {
+                    "meetingRoundId": "meeting-other",
+                    "modelInvocationReceiptAuthority": {
+                        "workflowRunId": "run-other",
+                    },
+                },
+            ],
+            "digestRecords": [],
+            "decisionRecords": [],
+            "hypothesisRoundRecords": [],
+        },
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.formal_read_runtime.get_query_service",
+        lambda: type(
+            "QueryService",
+            (),
+            {
+                "list_runs": lambda self, **_kwargs: {
+                    "runs": [
+                        {
+                            "runId": "run-target",
+                            "workflowId": "challenge-cup-research",
+                            "questionId": "SCI-001",
+                        }
+                    ]
+                },
+                "get_snapshot": lambda self, **_kwargs: {},
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.challenge_question_runs.get_challenge_question_run_detail",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            ValueError("challenge_question_run_not_found")
+        ),
+    )
+
+    sources = state_module._scope_records(
+        "team-adjudication-scope",
+        "SCI-001",
+        workflow_run_id="run-target",
+    )
+
+    assert [
+        item["adjudicationId"] for item in sources["chain_records"]
+    ] == ["legacy-in-scope"]
     state_module.clear_hypothesis_first_state_v2_cache()
 
 

@@ -2245,10 +2245,9 @@ def _adjudication_workflow_run_id(
     The budget-exhaustion auto-advance reuses ``record_human_adjudication``
     without a ``workflow_run_id`` (chain rounds pre-date run-scoped
     adjudications), so fall back to the round's own meeting refs — the same
-    meetings the adjudication already validated.  Empty is a valid answer:
-    the materialization then keys run scope off the source evidence records
-    instead of a run identity, and a caller that cannot resolve one simply
-    skips the run-scoped tag.
+    meetings the adjudication already validated.  Every referenced meeting
+    must resolve to the same run; a partial or mixed lineage stays empty so
+    an automatic writer never guesses across historical runs.
     """
 
     normalized = str(workflow_run_id or "").strip()
@@ -2265,13 +2264,21 @@ def _adjudication_workflow_run_id(
         return ""
     from core.web.services.team_workflow import meeting_rounds
 
-    for meeting in meeting_rounds.list_meeting_rounds(team_id)["meetings"]:
-        if str(meeting.get("meetingRoundId") or "").strip() not in meeting_ids:
-            continue
-        resolved = _meeting_workflow_run_id(meeting)
-        if resolved:
-            return resolved
-    return ""
+    resolved_by_meeting = {
+        str(meeting.get("meetingRoundId") or "").strip(): _meeting_workflow_run_id(
+            meeting
+        )
+        for meeting in meeting_rounds.list_meeting_rounds(team_id)["meetings"]
+        if str(meeting.get("meetingRoundId") or "").strip() in meeting_ids
+    }
+    if set(resolved_by_meeting) != meeting_ids:
+        return ""
+    resolved_run_ids = {
+        run_id for run_id in resolved_by_meeting.values() if run_id
+    }
+    if len(resolved_run_ids) != 1:
+        return ""
+    return next(iter(resolved_run_ids))
 
 
 def _materialize_recommended_candidate_claim_bindings(
@@ -2748,6 +2755,84 @@ def _latest_round_adjudication(
     return None
 
 
+def _repair_auto_adjudication_workflow_run_binding(
+    team_id: str,
+    *,
+    question_id: str,
+    round_record: Mapping[str, Any],
+    adjudication: Mapping[str, Any],
+    workflow_run_id: str,
+) -> dict[str, Any] | None:
+    """Append a run-binding amendment for one unscoped auto adjudication.
+
+    Early auto-advance records predate ``workflowRunId``.  The append-only
+    ledger cannot be edited in place, so the maintenance path may append one
+    corrected projection when the record is provably the automatic decision
+    for this exact closed round.  Human records, foreign idempotency keys,
+    incomplete meeting refs, and mixed-run rounds remain untouched.
+    """
+
+    normalized_team_id = str(team_id or "").strip()
+    normalized_question_id = str(question_id or "").strip().upper()
+    normalized_round_id = str(round_record.get("roundId") or "").strip()
+    normalized_run_id = str(workflow_run_id or "").strip()
+    if not normalized_round_id or not normalized_run_id:
+        return None
+    if str(adjudication.get("recordKind") or "") != HUMAN_ADJUDICATION_KIND:
+        return None
+    if str(adjudication.get("questionId") or "").strip().upper() != normalized_question_id:
+        return None
+    if str(adjudication.get("hypothesisRoundId") or "").strip() != normalized_round_id:
+        return None
+    if str(adjudication.get("workflowRunId") or "").strip():
+        return None
+    if not str(adjudication.get("decidedBy") or "").strip().startswith(
+        "system:auto-advance:"
+    ):
+        return None
+    idempotency_key = str(adjudication.get("idempotencyKey") or "").strip()
+    if idempotency_key not in {
+        _auto_adjudication_idempotency_key(normalized_round_id),
+        _auto_adjudication_rejected_key(normalized_round_id),
+    }:
+        return None
+    expected_meeting_ids = _round_refs_meeting_ids(round_record)
+    record_meeting_ids = {
+        str(meeting_id or "").strip()
+        for meeting_id in list(adjudication.get("meetingRoundIds") or [])
+        if str(meeting_id or "").strip()
+    }
+    if not expected_meeting_ids or record_meeting_ids != expected_meeting_ids:
+        return None
+
+    with _LOCK:
+        records = _read_jsonl(_storage_path(normalized_team_id))
+        latest = next(
+            (
+                dict(item)
+                for item in reversed(records)
+                if str(item.get("recordKind") or "") == HUMAN_ADJUDICATION_KIND
+                and str(item.get("idempotencyKey") or "").strip()
+                == idempotency_key
+            ),
+            None,
+        )
+        if latest is None or str(latest.get("workflowRunId") or "").strip():
+            return latest
+        if (
+            str(latest.get("questionId") or "").strip().upper()
+            != normalized_question_id
+            or str(latest.get("hypothesisRoundId") or "").strip()
+            != normalized_round_id
+        ):
+            return None
+        amended = dict(latest)
+        amended["workflowRunId"] = normalized_run_id
+        amended["updatedAt"] = _utc_now()
+        _append_jsonl(_storage_path(normalized_team_id), amended)
+        return amended
+
+
 # ---------------------------------------------------------------------------
 # Budget-exhaustion auto-advance (adjudication -> formal run creation)
 #
@@ -2870,7 +2955,9 @@ def auto_adjudicate_exhausted_round(
     idempotency key ``hf2:auto-adjudication:<roundId>`` and
     ``decidedBy=system:auto-advance:budget-exhausted`` keep replays returning
     ``reused`` forever.  A pre-existing human (or foreign-policy) adjudication
-    is never overwritten — ``skipped``.
+    is never overwritten — ``skipped``.  A legacy auto adjudication for the
+    exact round may receive one append-only run-binding amendment when every
+    round meeting resolves to the same workflow run.
 
     Claim-belief hard gate: the gate keeps its fail-closed semantics (blocked
     never reaches the formal path), but per the challenge-cup retention policy
@@ -2909,6 +2996,43 @@ def auto_adjudicate_exhausted_round(
             question_id=normalized_question_id,
             round_id=round_id,
         )
+        # Resolve the immutable run from every meeting ref before inspecting
+        # an existing auto decision.  This lets the maintenance sweep append
+        # an audit-preserving binding amendment for records written before
+        # workflowRunId existed; no in-place data mutation is performed.
+        adjudication_workflow_run_id = _adjudication_workflow_run_id(
+            normalized_team_id,
+            latest_round,
+            workflow_run_id="",
+        )
+        if existing is not None and adjudication_workflow_run_id:
+            repaired = _repair_auto_adjudication_workflow_run_binding(
+                normalized_team_id,
+                question_id=normalized_question_id,
+                round_record=latest_round,
+                adjudication=existing,
+                workflow_run_id=adjudication_workflow_run_id,
+            )
+            if repaired is not None:
+                if (
+                    str(repaired.get("workflowRunId") or "").strip()
+                    == adjudication_workflow_run_id
+                    and not str(existing.get("workflowRunId") or "").strip()
+                ):
+                    _record_scene_event(
+                        "hypothesis_first.auto_adjudication_binding_repaired",
+                        outcome="applied",
+                        fields={
+                            "teamId": normalized_team_id,
+                            "questionId": normalized_question_id,
+                            "roundId": round_id,
+                            "workflowRunId": adjudication_workflow_run_id,
+                            "adjudicationId": str(
+                                repaired.get("adjudicationId") or ""
+                            ),
+                        },
+                    )
+                existing = repaired
         if existing is not None:
             existing_key = str(existing.get("idempotencyKey") or "")
             if existing_key == _auto_adjudication_rejected_key(round_id):
@@ -2946,6 +3070,7 @@ def auto_adjudicate_exhausted_round(
                 "budget-exhaustion policy"
             ),
             idempotency_key=idempotency_key,
+            workflow_run_id=adjudication_workflow_run_id,
             decided_by="system:auto-advance:budget-exhausted",
         )
         status = str(result.get("status") or "")
@@ -3009,6 +3134,7 @@ def auto_adjudicate_exhausted_round(
                     "recorded per challenge-cup retention policy"
                 ),
                 idempotency_key=_auto_adjudication_rejected_key(round_id),
+                workflow_run_id=adjudication_workflow_run_id,
                 decided_by="system:auto-advance:gate-blocked",
             )
         except Exception as record_exc:  # noqa: BLE001 - stay retryable
