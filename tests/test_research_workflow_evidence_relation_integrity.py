@@ -103,10 +103,32 @@ def test_graph_materialization_preserves_evidence_fields(graph_store):
 
 @pytest.mark.parametrize("mode", ["compact", "minimal", "evidence"])
 def test_context_compaction_preserves_canonical_whitelist(mode):
+    evidence = [{"claimEvidenceId": "claim-1", "candidateId": "a", "quote": "observed result"}]
     result = compact_source_collection_stage_task_context(
-        {"contextMode": mode, "allowedEvidenceRefs": ["claim-1", "claim-2"]}
+        {"contextMode": mode, "allowedEvidenceRefs": ["claim-1", "claim-2"], "relationEvidence": evidence}
     )
     assert result["allowedEvidenceRefs"] == ["claim-1", "claim-2"]
+    assert result["relationEvidence"] == evidence
+
+
+def test_relation_context_maps_only_scoped_evidence(monkeypatch):
+    from core.research.evidence import ClaimEvidenceStore
+
+    card = {
+        "claimEvidenceId": "ce-1", "claimId": "claim-1", "candidateId": "a",
+        "sourceId": "a", "quote": "observed result", "supportLevel": "contradicts",
+        "sourceCollectionRunId": "sc", "workflowRunId": "wf", "teamId": "team",
+    }
+    monkeypatch.setattr(ClaimEvidenceStore, "list", lambda *a, **k: [
+        card, {**card, "claimEvidenceId": "ce-other", "sourceCollectionRunId": "other"},
+    ])
+    result = registry.load_relation_evidence_context(
+        team_id="team", authority_run_id="sc", workflow_run_id="wf",
+    )
+    assert [item["claimEvidenceId"] for item in result] == ["ce-1"]
+    assert result[0]["candidateId"] == "a"
+    assert result[0]["quote"] == "observed result"
+    assert result[0]["supportLevel"] == "contradicts"
 
 
 def test_other_run_evidence_cannot_authorize_graph(graph_store, monkeypatch):
