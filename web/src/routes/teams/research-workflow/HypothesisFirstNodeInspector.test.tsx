@@ -265,6 +265,17 @@ describe("HypothesisFirstNodeInspector", () => {
     expect(container.textContent).not.toContain("记录选择并开启评审");
   });
 
+  it("routes rejected reselection to the existing candidate form without empty submission", () => {
+    const offer = {...command({command: "record_selection", payload: {questionId: "Q-01", previousSelectionId: "sel-old"}}, "重新选择候选"), targetPhase: "convergence" as const, targetNodeId: "hf_convergence"};
+    mockedChain.mockReturnValue(chainData({stateV2: stateV2({currentPhase: "convergence",
+      convergence: {lifecycle: "completed", outcome: "rejected", actionability: "terminal"},
+      allowedActions: [offer]})}));
+    render(<HypothesisFirstNodeInspector teamId="team-1" questionId="Q-01" nodeId="hf_convergence_gate" runId="run-current" onOpenQuestion={() => {}} />);
+    expect(container.querySelector('[data-testid="selection-list"]')).not.toBeNull();
+    expect(selectionListProps).toHaveBeenCalledWith(expect.objectContaining({runId: "run-current", compact: true}));
+    expect(mockedExecuteCommand).not.toHaveBeenCalled();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     container = document.createElement("div");

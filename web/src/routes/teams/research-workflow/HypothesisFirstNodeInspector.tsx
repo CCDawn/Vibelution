@@ -1475,6 +1475,10 @@ function CanonicalCommandButton(props: {
       }
     },
   });
+  if (props.action.command === "record_selection") {
+    return <HypothesisSelectionList teamId={props.teamId} questionId={props.questionId}
+      runId={props.runId} compact lang={props.lang} />;
+  }
   return (
     <div className={styles.task} data-testid={`canonical-command-${props.action.command}`}>
       {mutation.isError ? (() => {

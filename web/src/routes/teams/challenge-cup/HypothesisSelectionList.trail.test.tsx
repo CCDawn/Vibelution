@@ -197,6 +197,37 @@ describe("candidate evidence trail expansion", () => {
   let root: Root;
   let queryClient: QueryClient;
 
+  it("reopens all candidates and submits explicit ids after rejected review", async () => {
+    const context = candidateContext() as any;
+    const ids = ["candidate-a", "candidate-b", "candidate-c"];
+    mockedContext.mockResolvedValue({...context,
+      candidates: ids.map(id => ({...context.candidates[0], hypothesis_id: id, statement: id})),
+      defaultSelectedCandidateIds: ["candidate-a", "candidate-b"],
+      latestSelection: {selectionId: "sel-old", selectedCandidateIds: ["candidate-a", "candidate-b"]},
+      reviewMeeting: {meetingRoundId: "old-review", status: "closed"}} as never);
+    const state = stateV2Payload({currentPhase: "convergence", selection: {selectionId: "sel-old", selectedCandidateIds: ["candidate-a", "candidate-b"]}}) as any;
+    state.convergence = {...state.convergence, lifecycle: "completed", outcome: "rejected", actionability: "terminal"};
+    const offer = {...stateV2Payload().allowedActions[0], targetPhase: "convergence", targetNodeId: "hf_convergence",
+      payload: {questionId: "SCI-001", previousSelectionId: "sel-old"}};
+    state.allowedActions = [offer];
+    mockedStateV2.mockResolvedValue(state);
+    act(() => root.render(<QueryClientProvider client={queryClient}><HypothesisSelectionList teamId="team-1" questionId="SCI-001" runId="run-current" /></QueryClientProvider>));
+    await act(async () => {await vi.waitFor(() => expect(container.querySelectorAll('input[type="checkbox"]')).toHaveLength(3));});
+    expect(container.textContent).toContain("candidate-c");
+    let submit = [...container.querySelectorAll('button')].find(button => button.textContent?.includes("记录选择并开启评审"));
+    expect(submit?.disabled).toBe(true);
+    await act(async () => {
+      (container.querySelector('input[aria-label="选择假说 candidate-c"]') as HTMLInputElement).click();
+    });
+    await act(async () => {
+      (container.querySelector('input[aria-label="选择假说 candidate-a"]') as HTMLInputElement).click();
+    });
+    submit = [...container.querySelectorAll('button')].find(button => button.textContent?.includes("记录选择并开启评审"));
+    expect(submit?.disabled, container.textContent || "").toBe(false);
+    await act(async () => {submit?.click(); await vi.waitFor(() => expect(mockedExecuteCommand).toHaveBeenCalled());});
+    expect(mockedExecuteCommand).toHaveBeenCalledWith("team-1", "SCI-001", offer, {candidateIds: ["candidate-b", "candidate-c"]}, {runId: "run-current"});
+  });
+
   beforeEach(() => {
     container = document.createElement("div");
     document.body.appendChild(container);

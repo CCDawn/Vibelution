@@ -165,6 +165,24 @@ export function projectHypothesisFirstSelection(
     return lockedSelectionProjection("state_not_unique", selectedCandidateIds, selectionId);
   }
 
+  // A rejected round can expose a fresh, scoped replacement command even
+  // though the previous selection and review remain immutable history.
+  if (state.currentPhase === "convergence" && state.convergence.lifecycle === "completed"
+    && state.convergence.outcome === "rejected" && selectionId) {
+    const reselections = (state.allowedActions ?? []).filter(
+      (action): action is Extract<CommandAction, { command: "record_selection" }> => (
+        action.kind === "command" && action.command === "record_selection" && action.enabled
+        && action.targetPhase === "convergence"
+        && String(action.payload.previousSelectionId || "") === selectionId
+        && String(action.payload.questionId || "").toUpperCase() === state.questionId.toUpperCase()
+      ),
+    );
+    if (reselections.length === 1) {
+      return {status: "editable", locked: false, selectedCandidateIds, selectionId,
+        lockReason: null, canonicalAction: reselections[0]};
+    }
+  }
+
   if (selectionId || selectedCandidateIds.length > 0) {
     return lockedSelectionProjection("selection_committed", selectedCandidateIds, selectionId, "committed");
   }

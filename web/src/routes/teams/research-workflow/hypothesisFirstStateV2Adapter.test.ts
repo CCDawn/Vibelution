@@ -1078,3 +1078,15 @@ describe("projectHypothesisFirstSelection", () => {
     });
   });
 });
+
+
+it("allows only a scoped replacement offer to reopen a rejected selection", () => {
+  const state = stateV2({currentPhase: "convergence",
+    selection: {...stateV2().selection, selectionId: "sel-old", selectedCandidateIds: ["a"]},
+    convergence: {...stateV2().convergence, lifecycle: "completed", outcome: "rejected", actionability: "terminal"}});
+  const offer = {...command({command: "record_selection", payload: {questionId: state.questionId, previousSelectionId: "sel-old"}}), targetPhase: "convergence" as const};
+  state.allowedActions = [offer];
+  expect(projectHypothesisFirstSelection({state})).toMatchObject({status: "editable", canonicalAction: offer});
+  state.allowedActions = [{...offer, payload: {...offer.payload, previousSelectionId: "another-selection"}}];
+  expect(projectHypothesisFirstSelection({state}).locked).toBe(true);
+});

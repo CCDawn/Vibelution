@@ -136,7 +136,9 @@ export function HypothesisSelectionList({
   });
 
   const candidates = context?.candidates ?? [];
-  const reviewClosed = context?.reviewMeeting?.status === "closed";
+  // A current replacement offer reopens the existing form after rejection.
+  const reviewClosed = context?.reviewMeeting?.status === "closed"
+    && selectionProjection.status !== "editable";
   const effectiveSelectedIds = serverBaseline;
   const effectiveSelectedIdSet = new Set(effectiveSelectedIds);
   const visibleCandidates = reviewClosed
