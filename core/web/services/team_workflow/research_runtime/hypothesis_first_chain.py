@@ -5299,7 +5299,7 @@ def auto_advance_stage_one_generation(team_id: str, *, question_id: str) -> dict
         ), None)
         generation = snapshot.get("generation") or {}
         if action is None and generation.get("lifecycle") == "failed" and any(
-            problem.get("code") == "discussion_round_failed"
+            problem.get("code") in {"discussion_round_failed", "diversity_collapse"}
             for problem in generation.get("problems") or []
         ):
             grounded_meetings = [
@@ -9190,7 +9190,20 @@ def open_candidate_generation_meeting(
         # A single candidate can never satisfy the >=2 selection floor; reuse
         # only when the registered set is actually selectable, otherwise let a
         # fresh generation attempt run instead of dead-locking the question.
-        has_candidates = candidate_count >= 2
+        from .candidate_screening_artifact_writer import read_collapsed_screening
+
+        collapsed_screening = read_collapsed_screening(
+            normalized_team_id, question_id=normalized_question_id,
+            workflow_run_id=workflow_run_id,
+            candidate_ids=[str(item.get("candidateId") or "") for item in candidates],
+        ) if candidate_authority == FORMAL_GROUNDED_CANDIDATE_AUTHORITY else None
+        has_candidates = candidate_count >= 2 and collapsed_screening is None
+        if collapsed_screening:
+            generation_context["screeningFeedback"] = {
+                "code": "diversity_collapse",
+                "screeningId": collapsed_screening["screeningId"],
+                "previousAxes": [item["axisProfile"] for item in collapsed_screening["candidates"]],
+            }
         if has_candidates:
             existing = latest_closed_meeting
             meeting_runtime._require_matching_model_invocation_receipt_authority(
@@ -9333,6 +9346,7 @@ def open_candidate_generation_meeting(
                 "inputArtifactRefs": [*knowledge_refs, *draft_refs],
                 "generationContext": {
                     "candidateAuthority": candidate_authority,
+                    "screeningFeedback": generation_context.get("screeningFeedback"),
                     "evidenceClaims": list(
                         generation_context.get("evidenceClaims") or []
                     )[:8],
