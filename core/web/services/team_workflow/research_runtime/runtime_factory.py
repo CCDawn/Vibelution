@@ -114,6 +114,7 @@ class WorkflowRuntime:
     receipt_persistence_worker: ReceiptPersistenceWorker
     delivery_worker: DeliveryOrchestrationWorker
     event_publish_worker: EventPublishWorker
+    knowledge_sideflow_trigger: Any
 
     def run_workers_once(self, limit: int = 4) -> int:
         handled = self.fork_worker.run_once(limit=limit)
@@ -167,6 +168,7 @@ class WorkflowRuntime:
         handled += self.delivery_worker.run_once(limit=limit)
         handled += self.graph_worker.run_repairs_once()
         handled += self.adapter_worker.run_repairs_once(limit=limit)
+        self._recover_missing_knowledge_sideflows_best_effort(limit=limit)
         self._reconcile_expired_task_bundles_best_effort()
         self._sweep_stuck_digest_works_best_effort()
         self._sweep_meetings_missing_digest_best_effort()
@@ -174,6 +176,18 @@ class WorkflowRuntime:
         self._sweep_auto_advance_closure_best_effort()
         self._recover_challenge_meeting_drivers_best_effort()
         return handled
+
+    def _recover_missing_knowledge_sideflows_best_effort(self, *, limit: int) -> None:
+        """Recover knowledge children lost after problem-understanding commit."""
+        try:
+            recovered = self.knowledge_sideflow_trigger.recover_missing(limit=limit)
+            if recovered:
+                logger.info(
+                    "knowledge sideflow recovery created or replayed %s invocation(s)",
+                    recovered,
+                )
+        except Exception:  # noqa: BLE001 - recovery must never break maintenance
+            logger.exception("knowledge sideflow recovery sweep failed")
 
     def _reconcile_expired_task_bundles_best_effort(self) -> None:
         """Enforce task-bundle ``deadlineSeconds`` from the resident tick.
@@ -494,6 +508,7 @@ def build_workflow_runtime(
         receipt_persistence_worker=receipt_persistence_worker,
         delivery_worker=delivery_worker,
         event_publish_worker=event_publish_worker,
+        knowledge_sideflow_trigger=knowledge_sideflow_trigger,
     )
 
 
