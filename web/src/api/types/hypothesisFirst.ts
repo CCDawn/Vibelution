@@ -573,6 +573,7 @@ export type PhaseState = {
 };
 
 export type ActionCommand =
+  | "create_stage_one_run"
   | "open_generation"
   | "retry_generation"
   | "record_selection"
@@ -598,6 +599,7 @@ export type ActionCommand =
   | "create_formal_revision";
 
 export type ActionPayloadByCommand = {
+  create_stage_one_run: { questionId: string };
   open_generation: { questionId: string };
   retry_generation: { questionId: string; previousAttemptId: string };
   record_selection: { questionId: string; generationAttemptId: string };

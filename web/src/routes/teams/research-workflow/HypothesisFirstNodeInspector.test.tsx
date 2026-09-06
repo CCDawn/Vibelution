@@ -305,6 +305,17 @@ describe("HypothesisFirstNodeInspector", () => {
     expect(container.querySelector('[data-testid="meeting-round-id"]')?.textContent).toBe("review-current");
   });
 
+  it("dispatches the offered stage-one creation action from the generation button", async () => {
+    const create = command({ command: "create_stage_one_run", payload: { questionId: "Q-01" } }, "创建第一阶段运行");
+    mockedChain.mockReturnValue(chainData({ stateV2: stateV2({ allowedActions: [create] }) }));
+    render(<HypothesisFirstNodeInspector teamId="team-1" questionId="Q-01" nodeId="hf_generation" onOpenQuestion={() => {}} />);
+    const button = Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "创建第一阶段运行");
+    expect(button).toBeTruthy();
+    await act(async () => { button?.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
+    expect(mockedExecuteCommand).toHaveBeenCalledWith("team-1", "Q-01", create, undefined, { runId: "" });
+    expect(container.textContent).not.toContain("canonical_action_unavailable");
+  });
+
   it("opens generation from an empty chain", () => {
     mockedChain.mockReturnValue(chainData({ stateV2: stateV2({ allowedActions: [command({command: "open_generation", payload: {}}, "生成候选假说")] }) }));
     render(

@@ -1727,7 +1727,9 @@ function OpenGenerationButton(props: {
   const mutation = useMutation<unknown, Error, void>({
     mutationFn: () => {
       if (props.canonicalAction
-        && (props.canonicalAction.command === "open_generation" || props.canonicalAction.command === "retry_generation")) {
+        && (props.canonicalAction.command === "create_stage_one_run"
+          || props.canonicalAction.command === "open_generation"
+          || props.canonicalAction.command === "retry_generation")) {
         return executeHypothesisFirstCommand(
           props.teamId,
           props.questionId,
