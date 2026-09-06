@@ -8,6 +8,13 @@ const previewRoot = dirname(fileURLToPath(import.meta.url));
 const vuiRoot = resolve(previewRoot, "../../components/vui");
 const indexPath = join(vuiRoot, "designs", "INDEX.md");
 
+// These named design sections document composition inside their owning product
+// surfaces; neither is an independently implemented VUI component to render.
+const previewExemptDesignSections = new Set([
+  "ChallengeQuestionStageZones",
+  "ResearchAnomalyInboxExtendCta",
+]);
+
 function collectPreviewSources(directory: string): string {
   return readdirSync(directory, { withFileTypes: true })
     .flatMap((entry) => {
@@ -32,11 +39,11 @@ function implementedDesignComponents(): string[] {
 }
 
 describe("VUI component preview coverage", () => {
-  it("renders every implemented component registered in the design index", () => {
+  it("renders every standalone implemented component registered in the design index", () => {
     const previewSources = collectPreviewSources(previewRoot);
-    const missing = implementedDesignComponents().filter(
-      (name) => !previewSources.includes(`<${name}`),
-    );
+    const missing = implementedDesignComponents()
+      .filter((name) => !previewExemptDesignSections.has(name))
+      .filter((name) => !previewSources.includes(`<${name}`));
 
     expect(missing).toEqual([]);
   });

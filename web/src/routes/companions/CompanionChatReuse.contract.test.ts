@@ -6,6 +6,7 @@ import lobbySource from "../CompanionsRoute.tsx?raw";
 import chatSource from "../chat/ChatCodingRouteWorkbench.tsx?raw";
 import centerTabsSource from "../chat/ChatCenterTabStrip.tsx?raw";
 import streamSource from "../chat/useSessionDetailStream.ts?raw";
+import sessionEventStreamSource from "../chat/sessionEventStream.ts?raw";
 import conversationHeaderSource from "./CompanionConversationHeader.tsx?raw";
 import lifeRailSource from "./CompanionLifeRail.tsx?raw";
 import personRailSource from "./CompanionPersonRail.tsx?raw";
@@ -54,8 +55,11 @@ describe("virtual-human native Chat reuse", () => {
     expect(personRailSource).not.toContain("/companions/${");
   });
 
-  it("keeps one SSE owner and removes person/session pickers in companion mode", () => {
-    expect(streamSource).toContain("new EventSource");
+  it("keeps one guarded session-stream owner and removes person/session pickers in companion mode", () => {
+    expect(streamSource).toContain("createSessionEventStream = createDefaultSessionEventStream");
+    expect(streamSource).toContain("const stream = createSessionEventStream(streamSessionId);");
+    expect(sessionEventStreamSource).toContain("consumeGuardedEventStream(");
+    expect(sessionEventStreamSource).not.toContain("new EventSource");
     expect(lobbySource).not.toContain("EventSource");
     expect(lifeRailSource).not.toContain("EventSource");
     expect(personRailSource).not.toContain("EventSource");
