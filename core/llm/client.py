@@ -328,7 +328,7 @@ _NO_PROXY_LOCK = threading.Lock()
 _NO_PROXY_ENV_NAMES = ("NO_PROXY", "no_proxy")
 _PROXY_ENV_NAMES = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")
 _PROXY_ENV_CONDITION = threading.Condition(threading.RLock())
-_PROXY_ENV_STATE = {"readers": 0, "writer": False}
+_PROXY_ENV_STATE: Dict[str, Any] = {"users": 0, "proxy": None, "previous": {}}
 PROMPT_CACHE_OPPORTUNITY_PREFIX_CHARS = 4096
 # Controlled per-call output clamp channel: callers (e.g. the structured
 # review chain) may pass this metadata key with a positive int so the payload
@@ -2011,40 +2011,37 @@ def _llm_provider_proxy_env(config: Any, base_url: Any) -> Iterator[None]:
         yield
         return
     desired_proxy = proxy_url if proxy_enabled and proxy_url else None
-    mode = "read"
-    previous: Dict[str, str | None] = {}
+    # Calls with the same effective proxy share one environment lease. The
+    # first entrant installs it and the last exit restores it; holding an
+    # exclusive writer for a whole stream would serialize identical callers.
     with _PROXY_ENV_CONDITION:
-        while _PROXY_ENV_STATE["writer"]:
+        while _PROXY_ENV_STATE["users"] and _PROXY_ENV_STATE["proxy"] != desired_proxy:
             _PROXY_ENV_CONDITION.wait()
-        env_matches = all(os.environ.get(env_name) == desired_proxy for env_name in _PROXY_ENV_NAMES)
-        if env_matches:
-            _PROXY_ENV_STATE["readers"] += 1
-        else:
-            mode = "write"
-            while _PROXY_ENV_STATE["writer"] or int(_PROXY_ENV_STATE["readers"]) > 0:
-                _PROXY_ENV_CONDITION.wait()
-            _PROXY_ENV_STATE["writer"] = True
-            previous = {env_name: os.environ.get(env_name) for env_name in _PROXY_ENV_NAMES}
-            if desired_proxy:
-                for env_name in _PROXY_ENV_NAMES:
-                    os.environ[env_name] = desired_proxy
-            else:
-                for env_name in _PROXY_ENV_NAMES:
+        if not _PROXY_ENV_STATE["users"]:
+            _PROXY_ENV_STATE["previous"] = {
+                env_name: os.environ.get(env_name) for env_name in _PROXY_ENV_NAMES
+            }
+            _PROXY_ENV_STATE["proxy"] = desired_proxy
+            for env_name in _PROXY_ENV_NAMES:
+                if desired_proxy is None:
                     os.environ.pop(env_name, None)
+                else:
+                    os.environ[env_name] = desired_proxy
+        _PROXY_ENV_STATE["users"] += 1
     try:
         yield
     finally:
         with _PROXY_ENV_CONDITION:
-            if mode == "write":
-                for env_name, value in previous.items():
+            _PROXY_ENV_STATE["users"] -= 1
+            if not _PROXY_ENV_STATE["users"]:
+                for env_name, value in _PROXY_ENV_STATE["previous"].items():
                     if value is None:
                         os.environ.pop(env_name, None)
                     else:
                         os.environ[env_name] = value
-                _PROXY_ENV_STATE["writer"] = False
-            else:
-                _PROXY_ENV_STATE["readers"] = max(0, int(_PROXY_ENV_STATE["readers"]) - 1)
-            _PROXY_ENV_CONDITION.notify_all()
+                _PROXY_ENV_STATE["previous"] = {}
+                _PROXY_ENV_STATE["proxy"] = None
+                _PROXY_ENV_CONDITION.notify_all()
 
 
 def _default_completion_backend(payload: Dict[str, Any]) -> Any:

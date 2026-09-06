@@ -7078,3 +7078,66 @@ def test_cancel_llm_turn_scope_marks_cancel_reason_and_closes_registered_streams
         client_module.clear_llm_turn_scope_cancel(turn_key)
         client_module._unregister_llm_stream_close_hook(turn_key, close_hook)
     assert client_module._LLM_TURN_CANCEL_STATES.get(turn_key) is None
+
+
+@pytest.mark.parametrize("desired", [None, "http://127.0.0.1:7897"])
+def test_proxy_environment_same_config_calls_overlap_and_restore_after_last_exit(monkeypatch, desired):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+    from types import SimpleNamespace
+    from core.llm.client import _PROXY_ENV_NAMES
+
+    for name in _PROXY_ENV_NAMES:
+        monkeypatch.setenv(name, "http://original.invalid:7890")
+    config = SimpleNamespace(network=SimpleNamespace(proxy_enabled=bool(desired), proxy_url=desired or ""))
+    entered = Event()
+    release = Event()
+
+    def second_call():
+        with _llm_provider_proxy_env(config, "https://provider.invalid/v1"):
+            entered.set()
+            assert release.wait(3)
+            assert all(os.environ.get(name) == desired for name in _PROXY_ENV_NAMES)
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        try:
+            with _llm_provider_proxy_env(config, "https://provider.invalid/v1"):
+                future = pool.submit(second_call)
+                assert entered.wait(1), "same-config LLM calls must overlap while the first stream is open"
+            assert all(os.environ.get(name) == desired for name in _PROXY_ENV_NAMES)
+        finally:
+            release.set()
+        future.result(timeout=3)
+    assert all(os.environ.get(name) == "http://original.invalid:7890" for name in _PROXY_ENV_NAMES)
+
+
+def test_proxy_environment_conflicting_config_waits_and_restores_after_error(monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+    from types import SimpleNamespace
+    from core.llm.client import _PROXY_ENV_NAMES
+
+    for name in _PROXY_ENV_NAMES:
+        monkeypatch.delenv(name, raising=False)
+    direct = SimpleNamespace(network=SimpleNamespace(proxy_enabled=False, proxy_url=""))
+    proxied = SimpleNamespace(network=SimpleNamespace(proxy_enabled=True, proxy_url="http://127.0.0.1:7897"))
+    trying = Event()
+    entered = Event()
+
+    def conflicting_call():
+        trying.set()
+        with _llm_provider_proxy_env(proxied, "https://provider.invalid/v1"):
+            entered.set()
+            assert all(os.environ.get(name) == proxied.network.proxy_url for name in _PROXY_ENV_NAMES)
+            raise ValueError("provider failed")
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with _llm_provider_proxy_env(direct, "https://provider.invalid/v1"):
+            future = pool.submit(conflicting_call)
+            assert trying.wait(1)
+            assert not entered.wait(0.05)
+            assert all(os.environ.get(name) is None for name in _PROXY_ENV_NAMES)
+        with pytest.raises(ValueError, match="provider failed"):
+            future.result(timeout=3)
+    assert entered.is_set()
+    assert all(os.environ.get(name) is None for name in _PROXY_ENV_NAMES)
