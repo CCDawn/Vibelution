@@ -690,6 +690,22 @@ def test_selector_does_not_duplicate_existing_xdist_arguments():
     assert all(command.count(" --dist ") == 1 for command in pytest_commands)
 
 
+def test_selector_uses_test_level_balancing_for_weighted_team_workflow_packs():
+    result = select_tests.select_tests(
+        ["core/web/services/team_workflow/command_service.py"],
+        select_tests.load_matrix(),
+    )
+
+    workflow_command = next(
+        command
+        for command in result["commands"]
+        if "tests/test_team_workflow_source_collection_cases.py" in command
+    )
+
+    assert "-n 6 --dist load -q" in workflow_command
+    assert "--dist loadfile" not in workflow_command
+
+
 def test_selector_bounds_workers_by_test_files_and_keeps_single_file_serial():
     result = select_tests.select_tests(
         ["scripts/remote_test_runner.py"],

@@ -35,7 +35,7 @@ tests/
 | `test_service_pack_path_literals.py` | service pack 路径字面量回归（防 extract 吃掉 `.jsonl`/`.json`） | structure |
 | 其它 `test_*.py` | 按被测模块命名，优先靠 `tests/test_matrix.yaml` 和文件名定位 | module-specific |
 
-Team workflow 行为用例实现在 `tests/_support/team_workflow/`，由 **五个 domain pack** 收集（便于 `pytest-xdist --dist loadfile` 按文件并行）：
+Team workflow 行为用例实现在 `tests/_support/team_workflow/`，由 **五个 domain pack** 收集。与 routes pack 合跑时，source-collection 用例明显更重，使用 `pytest-xdist --dist load` 做测试级均衡；单域排查仍直接运行对应文件：
 
 | Domain pack（`tests/`） | 实现 |
 |------|-----|
@@ -61,16 +61,17 @@ Team workflow 行为用例实现在 `tests/_support/team_workflow/`，由 **五�
 & '.\.venv\Scripts\python.exe' -m pytest tests/_support/team_workflow/cases_source_collection.py -q
 ```
 
-五域并行（PowerShell 请显式列出文件，勿依赖未展开的 `*_cases.py` glob）：
+Team workflow 矩阵并行（routes + 五域；PowerShell 请显式列出文件，勿依赖未展开的 `*_cases.py` glob）：
 
 ```bash
 & '.\.venv\Scripts\python.exe' -m pytest `
+  tests/test_team_workflow_routes.py `
   tests/test_team_workflow_structure_cases.py `
   tests/test_team_workflow_source_collection_cases.py `
   tests/test_team_workflow_experiment_cases.py `
   tests/test_team_workflow_research_knowledge_cases.py `
   tests/test_team_workflow_remainder_cases.py `
-  -n 4 --dist loadfile -q
+  -n 6 --dist load -q
 ```
 
 HTTP routes 现位于 `core/web/routes/team_workflows/` 包（不再是单文件 `team_workflows.py`）。
@@ -162,7 +163,7 @@ npm --prefix web run build
 
 ### 3.4 进程级并行策略
 
-Vibelution 支持通过 `pytest-xdist` 做进程级并行。直接运行 pytest 和 `test_runner.py` 的默认入口仍保持串行，避免全局状态、真实工作区、端口和后台进程类测试被误并发执行；影响面 selector 对只标记 `local-parallel` 的规则会按显式测试文件数自动输出最多 4-worker 的并行命令，同时含 `local-serial` 的规则保持串行。
+Vibelution 支持通过 `pytest-xdist` 做进程级并行。直接运行 pytest 和 `test_runner.py` 的默认入口仍保持串行，避免全局状态、真实工作区、端口和后台进程类测试被误并发执行；影响面 selector 对只标记 `local-parallel` 的规则会按显式测试文件数自动输出最多 6-worker 的并行命令，同时含 `local-serial` 的规则保持串行。
 
 推荐入口：
 
@@ -189,7 +190,7 @@ Vibelution 支持通过 `pytest-xdist` 做进程级并行。直接运行 pytest 
 
 ### 3.5 使用影响面测试选择器
 
-`tests/test_matrix.yaml` 记录高频改动范围到验证命令的映射，`tests/select_tests.py` 根据变更文件输出建议测试命令。它不直接执行命令；对只含 `local-parallel`、不含 `local-serial` 的规则，以及多个未被矩阵认领且未标记 `serial` 的 changed test files，会输出最多 4-worker 的 `loadfile` 并行命令；显式 `serial` 文件拆到独立串行命令。单文件、非 pytest 命令和已有 xdist 参数保持不变。
+`tests/test_matrix.yaml` 记录高频改动范围到验证命令的映射，`tests/select_tests.py` 根据变更文件输出建议测试命令。它不直接执行命令；对只含 `local-parallel`、不含 `local-serial` 的规则，以及多个未被矩阵认领且未标记 `serial` 的 changed test files，会输出最多 6-worker 的 `loadfile` 并行命令；显式 `serial` 文件拆到独立串行命令。单文件、非 pytest 命令和已有 xdist 参数保持不变。对已测得文件内明显不均衡的矩阵批次，保留明确的 `--dist load` 覆盖。
 
 选择器的三层默认语义如下：`always` 只有 `git diff --check`；无专项规则命中时的 `default` 只有轻量 `test_runner.py` smoke，不做全树 `collect-only`；`frontend-workbench`（UI）和 `frontend-non-ui`（API/types/i18n）都是逐文件 fallback，只有存在未被 Chat/Teams 等专项规则覆盖的 Web 文件时才保留。未映射的 Python 产品文件会用标准库 AST 沿产品 import 的反向路径寻找最近的“测试直接 import”边界；每条路径到达该边界即停止，因此不会膨胀为完整反向闭包。动态 import 或没有静态链路时仍输出 coverage gap，不把 smoke 当覆盖。专项可见 UI 规则仍必须保留 focused Vitest、两个 VUI contract 和增量 `tsc -b`；非 UI 前端只跑 changed Vitest 与增量 typecheck。选择器输出的 Vitest 命令从仓库根执行并固定追加 `--root web`，TypeScript 则固定为 `node web/node_modules/typescript/bin/tsc -b web/tsconfig.json --pretty false`，因此不会误扫 `.worktrees` 或 `.runtime`。
 
