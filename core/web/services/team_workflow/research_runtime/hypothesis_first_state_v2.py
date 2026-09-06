@@ -2801,6 +2801,7 @@ def project_state_from_records(
     chat_room_round_snapshots: Mapping[str, Mapping[str, Any]] | None = None,
     requirement_matrix: Mapping[str, Any] | None = None,
     exploratory_draft_records: Sequence[Mapping[str, Any]] | None = None,
+    candidate_screening_records: Sequence[Mapping[str, Any]] = (),
     workflow_run_id: str = "",
     return_to: str = "",
     include_source_cursor: bool = False,
@@ -3263,6 +3264,28 @@ def project_state_from_records(
         }
     else:
         selection = {**_phase(), "selectionId": None, "selectedCandidateIds": []}
+
+    from .candidate_screening_artifact_writer import collapsed_screening_for_candidates
+
+    screening_run_id = normalized_workflow_run_id or str(
+        (_active_stage_one_run(formal_runs) or {}).get("runId") or ""
+    )
+    collapsed_screening = collapsed_screening_for_candidates(
+        candidate_screening_records, question_id=normalized_question_id,
+        workflow_run_id=screening_run_id, candidate_ids=candidate_ids,
+    ) if not selection_id else None
+    if collapsed_screening and generation["lifecycle"] == "completed":
+        problem = _problem(
+            "diversity_collapse",
+            "候选筛选后不足两种不同机制，需要根据筛选反馈重新生成候选",
+            category="validation", source_kind="candidate_screening",
+            source_id=str(collapsed_screening.get("screeningId") or ""),
+            detected_at=str(collapsed_screening.get("createdAt") or computed_at),
+        )
+        generation = {**generation, "lifecycle": "failed", "outcome": "none",
+                      "actionability": "available", "problems": [problem]}
+    if collapsed_screening:
+        selection = {**selection, "lifecycle": "not_started", "actionability": "blocked"}
 
     links = [
         item
@@ -4251,7 +4274,7 @@ def project_state_from_records(
         current_phase = "convergence"
     elif selection_id:
         current_phase = "review"
-    elif len(candidate_ids) >= 2:
+    elif len(candidate_ids) >= 2 and not collapsed_screening:
         # A single candidate cannot open the selector (no comparable pair), so
         # the authoritative phase stays on generation where the retry offer
         # lives; advertising "selection" would fence every recovery action.
@@ -4807,11 +4830,20 @@ def project_hypothesis_first_state_v2(
         normalized_question_id,
         workflow_run_id=normalized_workflow_run_id,
     )
+    from .workflow_artifact_store import list_workflow_artifacts
+
+    screening_run_id = normalized_workflow_run_id or str(
+        (_active_stage_one_run(sources.get("formal_runs") or []) or {}).get("runId") or ""
+    )
+    screening_records = list_workflow_artifacts(
+        normalized_team_id, kind="candidate_screening", workflow_run_id=screening_run_id,
+    ) if screening_run_id else []
     return project_state_from_records(
         team_id=normalized_team_id,
         question_id=normalized_question_id,
         workflow_run_id=normalized_workflow_run_id,
         return_to=return_to,
         include_source_cursor=include_source_cursor,
+        candidate_screening_records=screening_records,
         **sources,
     )

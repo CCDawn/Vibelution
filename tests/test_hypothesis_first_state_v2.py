@@ -7905,6 +7905,31 @@ def _stage_one_projection(**overrides: object) -> dict[str, object]:
     return project_state_from_records(**payload)
 
 
+@pytest.mark.parametrize("screened_ids,expected", [(["a", "b", "c"], True), (["a", "b"], False)])
+def test_collapsed_current_pool_offers_regeneration_not_selection(screened_ids, expected):
+    state = _stage_one_projection(
+        workflow_run_id="run-stage-one",
+        chain_records=[
+            {"recordKind": "hypothesis_candidate", "candidateId": cid,
+             "questionId": "SCI-091", "candidateAuthority": "formal_grounded_candidate",
+             "createdAt": "2026-09-06T10:00:00Z"} for cid in ["a", "b", "c"]
+        ],
+        candidate_screening_records=[{"workflowRunId": "run-stage-one", "payload": {
+            "screeningId": "screening-1", "questionId": "SCI-091",
+            "candidates": [{"candidateId": cid, "axisProfile": {"mechanism": "same"}}
+                           for cid in screened_ids],
+            "pairwiseCandidateIds": ["a"], "createdAt": "2026-09-06T10:00:01Z",
+        }}],
+        formal_runs=[{"runId": "run-stage-one", "status": "blocked", "questionId": "SCI-091"}],
+    )
+    HypothesisFirstStateV2.model_validate(state)
+    commands = {a["command"] for a in state["allowedActions"] if a.get("kind") == "command"}
+    assert ("retry_generation" in commands) is expected
+    assert ("record_selection" in commands) is not expected
+    if expected:
+        assert state["generation"]["problems"][0]["code"] == "diversity_collapse"
+
+
 def test_stage_one_origin_entry_redirects_to_run_creation() -> None:
     state = _stage_one_projection()
 

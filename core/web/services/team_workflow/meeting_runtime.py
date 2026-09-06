@@ -22,6 +22,7 @@ queues its post-opening rounds on a bounded in-process executor.
 
 from __future__ import annotations
 
+import json
 import os
 import threading
 import time
@@ -1339,6 +1340,17 @@ def _generation_opening_topic(
         lines.append("赛题正文：" + question_text)
     if domain:
         lines.append("赛题领域：" + domain)
+    screening_feedback = grounded.get("screeningFeedback") or {}
+    if screening_feedback.get("code") == "diversity_collapse":
+        lines.append(
+            "上次筛选结果：候选去重后不足两种不同机制。请依据受控证据提出机制不同的新候选，"
+            "不要仅改写同一主张；证据不支持时明确指出缺口，不得编造。"
+        )
+        lines.append("已筛选候选的结构（仅供避免重复，不作为证据）：")
+        lines.extend(
+            "- " + json.dumps(axes, ensure_ascii=False)
+            for axes in list(screening_feedback.get("previousAxes") or [])[:8]
+        )
     evidence_claims = [
         dict(item)
         for item in list(grounded.get("evidenceClaims") or [])[:8]

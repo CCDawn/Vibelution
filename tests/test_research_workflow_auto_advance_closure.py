@@ -3335,7 +3335,8 @@ def test_grounded_generation_skips_full_projection_without_an_active_run(monkeyp
 
 
 @pytest.mark.parametrize("attempts,expected", [(0, 0), (1, 1), (3, 0)])
-def test_failed_grounded_generation_retries_only_within_r1_budget(monkeypatch, attempts, expected):
+@pytest.mark.parametrize("failure_code", ["discussion_round_failed", "diversity_collapse"])
+def test_failed_grounded_generation_retries_only_within_r1_budget(monkeypatch, attempts, expected, failure_code):
     from core.web.services.team_workflow.research_runtime import formal_read_runtime, hypothesis_first_state_v2
 
     monkeypatch.setattr(formal_read_runtime, "get_query_service", lambda: SimpleNamespace(
@@ -3348,7 +3349,7 @@ def test_failed_grounded_generation_retries_only_within_r1_budget(monkeypatch, a
     monkeypatch.setattr(hypothesis_first_state_v2, "project_hypothesis_first_state_v2",
                         lambda *args, **kwargs: {"stateVersion": "fresh", "allowedActions": [action],
                             "generation": {"lifecycle": "failed", "generationMeetingId": "r1-current",
-                                "problems": [{"code": "discussion_round_failed"}]}})
+                                "problems": [{"code": failure_code}]}})
     meetings = [{"meetingRoundId": "r0", "modelInvocationReceiptAuthority": {"workflowRunId": "run-r1"},
                  "candidateAuthority": "exploratory_draft"}]
     meetings.extend({"meetingRoundId": "r1-current" if i == 0 else f"r1-{i}",
