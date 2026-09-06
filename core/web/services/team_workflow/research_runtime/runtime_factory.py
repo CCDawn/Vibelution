@@ -443,7 +443,7 @@ def build_workflow_runtime(
     knowledge_sideflow_trigger = KnowledgeSideflowTrigger(
         store=store,
         command_service=command_service,
-        now_provider=clock,
+        now_provider=clock or (lambda: int(time.time() * 1000)),
     )
     graph_worker = GraphDispatchWorker(
         store=store,

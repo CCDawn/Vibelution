@@ -662,7 +662,6 @@ def test_maintenance_recovers_missing_problem_understanding_sideflow_once(
     runtime = build_workflow_runtime(
         tmp_path / "ledger.sqlite3",
         checkpoint_path=tmp_path / "checkpoints.sqlite3",
-        clock=lambda: FIXED_NOW_MS + 3000,
     )
     try:
         blocked_problem = json.dumps(
