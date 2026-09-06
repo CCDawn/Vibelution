@@ -1902,11 +1902,10 @@ def _materialize_source_collection_stage_writeback_knowledge_ingestion(
             ],
         )
 
-    steward_agent_id = (
-        s._trim_text(writeback.get("recordedByAgent"), max_length=160)
-        or s._trim_text(task.get("agentId"), max_length=160)
-        or s.agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
-    )
+    # The stage task is the server-created authority for this writeback.  The
+    # model-provided recordedByAgent is provenance data and cannot authorize
+    # TeamKnowledge mutations.
+    steward_agent_id = s._trim_text(task.get("agentId"), max_length=160)
     try:
         challenge_scope = _challenge_knowledge_scope(task, run_id)
     except s.TeamWorkflowOrchestrationError as exc:
