@@ -2800,6 +2800,7 @@ def project_state_from_records(
     program_output: Mapping[str, Any] | None = None,
     chat_room_round_snapshots: Mapping[str, Mapping[str, Any]] | None = None,
     requirement_matrix: Mapping[str, Any] | None = None,
+    exploratory_draft_records: Sequence[Mapping[str, Any]] | None = None,
     workflow_run_id: str = "",
     return_to: str = "",
     include_source_cursor: bool = False,
@@ -3649,7 +3650,10 @@ def project_state_from_records(
     # convergence), so the run — which auto-opens R0 and pins the grounded
     # R1 context — is the real entry point.
     active_workflow_run = _active_stage_one_run(formal_runs)
-    exploratory_drafts = _question_exploratory_drafts(chain, normalized_question_id)
+    exploratory_drafts = _question_exploratory_drafts(
+        chain if exploratory_draft_records is None else exploratory_draft_records,
+        normalized_question_id,
+    )
     formal_candidate_count = len(candidate_ids)
     stage_one_snapshot = dict((formal_snapshots or {}).get(
         str((active_workflow_run or {}).get("runId") or "")
@@ -3667,10 +3671,10 @@ def project_state_from_records(
         active_workflow_run
         and exploratory_drafts
         and formal_candidate_count < 2
-        and generation["lifecycle"] == "completed"
         and stage_one_snapshot
         and (
-            "problem_understanding" in list(stage_one_snapshot.get("activeNodeIds") or [])
+            stage_one_snapshot.get("stageOneGroundedContextReady") is False
+            or "problem_understanding" in list(stage_one_snapshot.get("activeNodeIds") or [])
             or blocked_on_prerequisites
             or any(
                 offer.get("nodeId") == "hypothesis_design"
@@ -4559,6 +4563,7 @@ def _scope_records(
                 chain_records.append(record)
     else:
         chain_records = all_chain_records
+    exploratory_draft_records = _question_exploratory_drafts(chain_records, normalized)
     referenced_selection_ids = {
         str(record.get("selectionId") or "").strip()
         for record in chain_records
@@ -4645,6 +4650,18 @@ def _scope_records(
             )
         formal_snapshots: dict[str, dict[str, Any]] = {}
         active_stage_one_run = _active_stage_one_run(formal_runs) or {}
+        if (
+            normalized_workflow_run_id
+            and active_stage_one_run
+            and not exploratory_draft_records
+            and _question_exploratory_drafts(all_chain_records, normalized)
+        ):
+            # Match the creation/launch resolver: an origin R0 may already
+            # supply this run's inputs. Keep those drafts separate from the
+            # run's meetings, candidates and review history.
+            exploratory_draft_records = hypothesis_first_chain._available_exploratory_drafts(
+                team_id, normalized, workflow_run_id=normalized_workflow_run_id,
+            )
         for run in formal_runs:
             run_id = str(run.get("runId") or "").strip()
             if not run_id:
@@ -4657,8 +4674,7 @@ def _scope_records(
             formal_snapshots[run_id] = dict(projected)
             if (
                 run_id == str(active_stage_one_run.get("runId") or "")
-                and _question_exploratory_drafts(chain_records, normalized)
-                and _blocked_on_stage_one_knowledge(projected)
+                and exploratory_draft_records
             ):
                 from core.web.services.team_workflow.research_project_hypothesis_context import (
                     build_stage_one_grounded_generation_context,
@@ -4755,6 +4771,7 @@ def _scope_records(
         "program_output": program_output,
         "chat_room_round_snapshots": chat_room_round_snapshots,
         "requirement_matrix": requirement_matrix,
+        "exploratory_draft_records": exploratory_draft_records,
     }
 
 
