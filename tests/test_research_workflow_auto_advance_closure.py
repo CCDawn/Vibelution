@@ -1,8 +1,8 @@
-"""Budget-exhaustion auto-advance closure: maintenance sweep tests.
+"""Budget-exhaustion auto-advance closure: recovery sweep tests.
 
 The close hook advances a chain in place, but chains can be left stuck at the
 adjudication gate by an older build or a process death between closure and
-advance. The serial maintenance tick therefore hosts a self-throttled sweep
+advance. The serial recovery tick therefore hosts a self-throttled sweep
 (same peek + throttle discipline as the stuck-digest watchdog) that reuses the
 chain's own idempotent helpers:
 
@@ -137,60 +137,43 @@ def _adjudications(ledger_path: Path) -> list[dict[str, Any]]:
     ]
 
 
-def test_maintenance_tick_auto_advances_stuck_exhausted_chain(
+def test_recovery_tick_auto_advances_stuck_exhausted_chain(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """存量卡链（第 5/5 轮、无裁决）被一次 maintenance tick 救活：自动裁决
+    """存量卡链（第 5/5 轮、无裁决）被一次 recovery tick 救活：自动裁决
     accepted + 自动创建并自动启动 formal run，全程无人工步骤。"""
-    from core.web.services.team_workflow.research_runtime import run_creation
+    from core.web.services.team_workflow.research_runtime import hypothesis_first_state_v2
 
     ledger_path = _sweep_env(tmp_path, monkeypatch)
-    create_calls: list[dict] = []
-    monkeypatch.setattr(
-        run_creation,
-        "create_question_run",
-        lambda *_args, **kwargs: (
-            create_calls.append(kwargs) or {"runId": "run-sweep-1"}
-        ),
-    )
-    start_calls: list[dict] = []
-    monkeypatch.setattr(
-        chain,
-        "_auto_start_created_formal_run",
-        lambda _team_id, *, run, idempotency_key: (
-            start_calls.append(
-                {
-                    "runId": str(run.get("runId") or ""),
-                    "idempotencyKey": idempotency_key,
-                }
-            )
-            or {"status": "accepted"}
-        ),
-    )
+    offer = {"kind": "command", "command": "create_formal_run", "enabled": True,
+             "actionId": "create-formal-run-v2:round", "idempotencyKey": "shared-create-key",
+             "payload": {"questionId": _QUESTION_ID, "hypothesisRoundId": _ROUND_ID}}
+    monkeypatch.setattr(hypothesis_first_state_v2, "project_hypothesis_first_state_v2",
+                        lambda *_args: {"stateVersion": "current-state", "allowedActions": [offer]})
+    create_calls = []
+    def execute(team, request, **kwargs):
+        create_calls.append((team, request, kwargs))
+        return {"result": {"runId": "run-sweep-1"}}
+    monkeypatch.setattr(chain, "execute_v2_command", execute)
     runtime = build_workflow_runtime(
         tmp_path / "ledger.sqlite3",
         checkpoint_path=tmp_path / "ledger-checkpoints.sqlite",
     )
     try:
         runtime_factory.reset_auto_advance_sweep_throttle_for_tests()
-        runtime.run_maintenance_once(limit=2)
+        runtime.run_hypothesis_recovery_once(limit=2)
     finally:
         runtime.close()
         runtime_factory.reset_auto_advance_sweep_throttle_for_tests()
 
     assert len(create_calls) == 1
-    call = create_calls[0]
-    assert call["team_id"] == _TEAM_ID
-    assert call["question_id"] == _QUESTION_ID
-    assert call["idempotency_key"] == f"hf2:auto-formal-run:{_QUESTION_ID}:{_ROUND_ID}"
-    assert call["formal_hypothesis_round_id"] == _ROUND_ID
-    assert start_calls == [
-        {
-            "runId": "run-sweep-1",
-            "idempotencyKey": f"hf2:auto-formal-run:{_QUESTION_ID}:{_ROUND_ID}",
-        }
-    ]
+    team, request, kwargs = create_calls[0]
+    assert team == _TEAM_ID
+    assert kwargs["question_id"] == _QUESTION_ID
+    assert request["idempotencyKey"] == "shared-create-key"
+    assert request["payload"]["hypothesisRoundId"] == _ROUND_ID
+    assert request["expectedStateVersion"] == "current-state"
     adjudications = _adjudications(ledger_path)
     assert len(adjudications) == 1
     assert adjudications[0]["decision"] == "accepted"
@@ -200,7 +183,7 @@ def test_maintenance_tick_auto_advances_stuck_exhausted_chain(
     )
 
 
-def test_maintenance_tick_records_rejected_outcome_when_gate_blocks(
+def test_recovery_tick_records_rejected_outcome_when_gate_blocks(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -239,7 +222,7 @@ def test_maintenance_tick_records_rejected_outcome_when_gate_blocks(
     )
     try:
         runtime_factory.reset_auto_advance_sweep_throttle_for_tests()
-        runtime.run_maintenance_once(limit=2)
+        runtime.run_hypothesis_recovery_once(limit=2)
     finally:
         runtime.close()
         runtime_factory.reset_auto_advance_sweep_throttle_for_tests()
@@ -254,7 +237,7 @@ def test_maintenance_tick_records_rejected_outcome_when_gate_blocks(
     assert create_calls == []
 
 
-def test_maintenance_tick_sweep_is_self_throttled(
+def test_recovery_tick_sweep_is_self_throttled(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -273,11 +256,11 @@ def test_maintenance_tick_sweep_is_self_throttled(
     )
     try:
         runtime_factory.reset_auto_advance_sweep_throttle_for_tests()
-        runtime.run_maintenance_once(limit=2)
-        runtime.run_maintenance_once(limit=2)
+        runtime.run_hypothesis_recovery_once(limit=2)
+        runtime.run_hypothesis_recovery_once(limit=2)
         assert len(sweep_calls) == 1
         runtime_factory.reset_auto_advance_sweep_throttle_for_tests()
-        runtime.run_maintenance_once(limit=2)
+        runtime.run_hypothesis_recovery_once(limit=2)
         assert len(sweep_calls) == 2
     finally:
         runtime.close()
