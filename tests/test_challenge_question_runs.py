@@ -315,6 +315,7 @@ def _isolate_store(tmp_path, monkeypatch) -> None:
         lambda _team_id: tmp_path,
     )
     monkeypatch.setattr(challenge_question_runs.team_service, "get_team", lambda team_id: {"teamId": team_id})
+    monkeypatch.setattr(challenge_question_runs.team_service, "assert_team_exists", lambda team_id: team_id)
     monkeypatch.setattr(challenge_question_runs, "record_runtime_scene_event", lambda *args, **kwargs: None)
     evidence_path = tmp_path / "official_model_evidence" / "index.json"
     evidence_path.parent.mkdir(parents=True, exist_ok=True)
@@ -657,6 +658,40 @@ def test_get_question_detail_can_select_prior_run_without_active_project_fallbac
     assert detail["selectedRunId"] == "sci-096-v1"
     assert detail["output"]["identity"]["question_id"] == "SCI-096"
     assert "researchProjectId" not in detail
+
+
+def test_get_question_detail_uses_existence_only_team_guard(tmp_path, monkeypatch):
+    _isolate_store(tmp_path, monkeypatch)
+    output = _output(approved=True)
+    response = challenge_question_runs.register_challenge_question_output(
+        "research-team",
+        {
+            "output": output,
+            "citationChecks": _citation_checks(output),
+            "registeredBy": "source-finder-agent",
+        },
+    )
+
+    calls: list[str] = []
+    monkeypatch.setattr(
+        challenge_question_runs.team_service,
+        "assert_team_exists",
+        lambda team_id: calls.append(team_id) or team_id,
+    )
+    monkeypatch.setattr(
+        challenge_question_runs.team_service,
+        "get_team",
+        lambda _team_id: pytest.fail("detail lookup must not hydrate or repair Team"),
+    )
+
+    detail = challenge_question_runs.get_challenge_question_run_detail(
+        "research-team",
+        "SCI-096",
+        run_id=response["record"]["runId"],
+    )
+
+    assert calls == ["research-team"]
+    assert detail["selectedRunId"] == response["record"]["runId"]
 
 
 def test_v1_artifact_remains_readable_but_never_enters_formal_summary(tmp_path, monkeypatch):

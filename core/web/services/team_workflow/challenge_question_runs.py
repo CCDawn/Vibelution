@@ -2105,7 +2105,7 @@ def get_challenge_question_run_detail(
 ) -> dict[str, Any]:
     """Return one immutable Challenge Program question artifact without project fallback."""
 
-    team_service.get_team(team_id)
+    team_service.assert_team_exists(team_id)
     normalized_question_id = str(question_id or "").strip().upper()
     normalized_run_id = str(run_id or "").strip()
     if _catalog_question(normalized_question_id) is None:
