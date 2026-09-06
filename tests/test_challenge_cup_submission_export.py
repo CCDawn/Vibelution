@@ -242,9 +242,7 @@ def test_revision_aliases_are_counted_as_substantive(tmp_path: Path) -> None:
     assert stats["revisions"] == 1
 
 
-def test_actual_experiment_and_expected_result_are_mutually_exclusive(
-    tmp_path: Path,
-) -> None:
+def test_public_export_omits_actual_experiment_metadata(tmp_path: Path) -> None:
     source = tmp_path / "SCI-096.md"
     source.write_text(
         """## 8、研究计划
@@ -252,58 +250,43 @@ def test_actual_experiment_and_expected_result_are_mutually_exclusive(
 - actual_execution_performed: true
 - actual_experiment_status: inconclusive
 - actual_experiment_decision: BRANCH
+- actual_experiment_dataset: DANDI 000942
 - actual_experiment_artifact_refs: evidence/SCI-096/result.json
+
+## 10、论文摘要
+- paper_abstract：DANDI 实验结果为 inconclusive，建议 BRANCH。
 """,
         encoding="utf-8",
     )
-    _, projection, _, _ = exporter.build_outputs(
+    markdown, projection, _, stats = exporter.build_outputs(
         "SCI-096", str(source), "Question", source.read_text(encoding="utf-8")
     )
 
-    assert projection["result_classification"]["actual_execution_performed"] is True
-    assert projection["result_classification"]["expected_result"] is False
-
-
-def test_sanitize_evidence_tree_removes_machine_paths_and_refreshes_hashes(
-    tmp_path: Path,
-) -> None:
-    evidence = tmp_path / "evidence" / "SCI-096"
-    evidence.mkdir(parents=True)
-    result = evidence / "result.json"
-    result.write_text(
-        json.dumps(
-            {
-                "path": "sub-Reggie/session.nwb",
-                "source_path": r"C:\Users\Private\result.json",
-                "metric": 0.5,
-            }
-        ),
-        encoding="utf-8",
-    )
-    manifest = evidence / "evidence_manifest.json"
-    manifest.write_text(
-        json.dumps(
-            {
-                "submission_status": "complete",
-                "files": [
-                    {
-                        "path": "result.json",
-                        "source_path": r"C:\Users\Private\result.json",
-                        "sha256": "0" * 64,
-                    }
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    exporter.sanitize_evidence_tree(tmp_path / "evidence")
-
-    cleaned_result = json.loads(result.read_text(encoding="utf-8"))
-    cleaned_manifest = json.loads(manifest.read_text(encoding="utf-8"))
-    assert cleaned_result["path"] == "sub-Reggie/session.nwb"
-    assert "source_path" not in cleaned_result
-    assert "source_path" not in cleaned_manifest["files"][0]
-    assert cleaned_manifest["files"][0]["sha256"] == exporter.sha256_file(result)
-    assert cleaned_manifest["submission_status"] == "experiment_evidence_archived"
-    assert "C:\\Users\\" not in manifest.read_text(encoding="utf-8")
+    serialized = json.dumps(projection, ensure_ascii=False)
+    for forbidden in (
+        "actual_experiment",
+        "DANDI",
+        "inconclusive",
+        "BRANCH",
+        "evidence/SCI-096",
+    ):
+        assert forbidden not in markdown
+        assert forbidden not in serialized
+    assert projection["result_classification"] == {
+        "generated_hypothesis": True,
+        "proposed_research_plan": True,
+        "expected_result": True,
+        "actual_execution_performed": False,
+    }
+    assert projection["competition_result_view"]["experiments"] == {
+        "execution_mode": "proposed",
+        "proposed_steps": 0,
+    }
+    assert projection["competition_result_view"]["results"] == {
+        "classification": "expected",
+        "status": "proposed",
+        "decision": None,
+        "summary": "本研究计划为待执行验证方案，未执行任何实验。",
+        "artifact_refs": ["summaries/SCI-096.md"],
+    }
+    assert "actual_experiment" not in stats

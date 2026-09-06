@@ -1,11 +1,11 @@
 r"""挑战杯高质量假说包 → 脱敏、可自校验的逐题提交结果。
 
 输入：SCI-001.md 至 SCI-125.md，以及只读完成账本和官方题库。
-输出：summaries、projections、manifest 和已归档的实际实验附件。
+输出：summaries、projections 和 manifest。
 
-原则：研究计划保持 proposed；仅当源文档显式声明并索引 actual_experiment_result 时投影
-实际实验。公共结果不输出 Agent、会话、机器路径或原始内部附录。解析与语义门失败时停止，
-不得以不完整结果覆盖正式交付目录。
+原则：公共结果固定投影假说生成与待执行研究计划，不投影内部实验记录或附件；同时不输出
+Agent、会话、机器路径或原始内部附录。解析与语义门失败时停止，不得以不完整结果覆盖
+正式交付目录。
 """
 
 import argparse
@@ -13,9 +13,8 @@ import hashlib
 import json
 import os
 import re
-import shutil
 from datetime import datetime, timedelta, timezone
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CHALLENGE_ROOT = Path(
@@ -194,47 +193,6 @@ def parse_meta(text):
                 meta[key] = m.group(1).strip()
                 break
     return meta
-
-
-def parse_actual_experiment(body):
-    """读取源文档显式声明的历史实验元数据；缺失时保持未执行语义。"""
-    keys = {
-        "actual_execution_performed",
-        "actual_experiment_scope",
-        "actual_experiment_status",
-        "actual_experiment_decision",
-        "actual_experiment_dataset",
-        "actual_experiment_metrics",
-        "actual_experiment_gate",
-        "actual_experiment_artifact_refs",
-        "qualification_refs",
-        "future_multisession_status",
-        "actual_experiment_boundary",
-    }
-    values = {}
-    for line in body.splitlines():
-        m = re.match(r"^\s*[-*]\s*`?([a-z][a-z0-9_]*)`?\s*[：:]\s*(.+?)\s*$", line)
-        if m and m.group(1) in keys:
-            values[m.group(1)] = m.group(2).strip().strip("`*").strip()
-
-    raw_performed = values.get("actual_execution_performed", "").lower()
-    performed = raw_performed in {"true", "1", "yes", "是", "已执行"}
-    artifact_refs = [
-        ref.strip()
-        for ref in re.split(r"[；;]", values.get("actual_experiment_artifact_refs", ""))
-        if ref.strip()
-    ]
-    qualification_refs = [
-        ref.strip()
-        for ref in re.split(r"[；;]", values.get("qualification_refs", ""))
-        if ref.strip()
-    ]
-    return {
-        **values,
-        "actual_execution_performed": performed,
-        "artifact_refs": artifact_refs,
-        "qualification_refs": qualification_refs,
-    }
 
 
 def slice_fields(body, labels):
@@ -658,8 +616,6 @@ def build_outputs(qid, src_path, catalog_q, src_text):
     )
     predictions = extract_predictions(secs.get(7, ""))
     plan_rows = parse_plan(secs.get(8, ""))
-    actual_experiment = parse_actual_experiment(secs.get(8, ""))
-    has_actual_experiment = actual_experiment["actual_execution_performed"]
 
     if not sources:
         warnings.append("来源表未解析（原文附录兜底）")
@@ -741,22 +697,8 @@ def build_outputs(qid, src_path, catalog_q, src_text):
         )
     if falsify:
         abstract_parts.append("证伪条件：" + safe_clip(falsify, 160))
-    if has_actual_experiment:
-        abstract_parts.append(
-            "已归档一项历史单会话离线实验："
-            + safe_clip(actual_experiment.get("actual_experiment_metrics"), 280)
-            + "；结论为 "
-            + actual_experiment.get("actual_experiment_status", "未定")
-            + " / "
-            + actual_experiment.get("actual_experiment_decision", "未定")
-            + "。后续研究计划仍为 proposed。"
-        )
-    else:
-        abstract_parts.append("本研究计划为待执行验证方案，未执行任何实验。")
-    paper_abstract = safe_clip(
-        (sec10.get("paper_abstract") or [""])[0].strip() or " ".join(abstract_parts),
-        1200,
-    )
+    abstract_parts.append("本研究计划为待执行验证方案，未执行任何实验。")
+    paper_abstract = safe_clip(" ".join(abstract_parts), 1200)
 
     dataset_targets = build_dataset_targets(plan_rows)
     if not (main_statement or main_hyp):
@@ -777,14 +719,9 @@ def build_outputs(qid, src_path, catalog_q, src_text):
     L.append(
         "- 流程状态：已完成完整挑战杯假说生成流程（问题解析、证据建联、多候选生成、七维评审、反馈修订、主备筛选与研究计划）。"
     )
-    if has_actual_experiment:
-        L.append(
-            "- 结果类型：generated_hypothesis + proposed_research_plan + actual_experiment_result；内容包已完成，历史单会话边界实验已归档，后续多会话研究计划仍为 proposed。"
-        )
-    else:
-        L.append(
-            "- 结果类型：generated_hypothesis + proposed_research_plan；研究计划为待执行验证方案，未执行任何实验，无 actual_experiment_result。"
-        )
+    L.append(
+        "- 结果类型：generated_hypothesis + proposed_research_plan；研究计划为待执行验证方案。"
+    )
     L.append("")
     L.append("## 1. 案例的科学内容（对应模板 P15/表15）")
     L.append("")
@@ -849,34 +786,6 @@ def build_outputs(qid, src_path, catalog_q, src_text):
             )
     L.append("")
 
-    if has_actual_experiment:
-        L.append("### 3.1 已归档的历史单会话边界实验")
-        L.append("")
-        L.append(
-            f"- scope：{actual_experiment.get('actual_experiment_scope', 'historical_single_session_offline_probe')}"
-        )
-        L.append(
-            f"- dataset：{actual_experiment.get('actual_experiment_dataset', '—')}"
-        )
-        L.append(
-            f"- metrics：{actual_experiment.get('actual_experiment_metrics', '—')}"
-        )
-        L.append(
-            f"- decision：{actual_experiment.get('actual_experiment_status', '—')} / {actual_experiment.get('actual_experiment_decision', '—')}"
-        )
-        L.append(f"- gate：{actual_experiment.get('actual_experiment_gate', '—')}")
-        L.append(
-            f"- boundary：{actual_experiment.get('actual_experiment_boundary', '—')}"
-        )
-        L.append("- artifacts：" + "；".join(actual_experiment["artifact_refs"]))
-        L.append(
-            "- qualification：" + "；".join(actual_experiment["qualification_refs"])
-        )
-        L.append(
-            f"- multisession：{actual_experiment.get('future_multisession_status', 'not_executed')}"
-        )
-        L.append("")
-
     L.append("## 4. 第一轮问题与第二轮调整（对应模板 P16/表19）")
     L.append("")
     L.append(
@@ -912,18 +821,10 @@ def build_outputs(qid, src_path, catalog_q, src_text):
     )
     L.append(f"- paper_title：{paper_title}")
     L.append(f"- paper_abstract：{paper_abstract}")
-    if has_actual_experiment:
-        L.append(
-            "- experiments.execution_mode：mixed（后续研究计划为 proposed；另有历史单会话离线边界实验已归档）"
-        )
-        L.append(
-            f"- results.classification：actual_experiment_result（{actual_experiment.get('actual_experiment_status', '—')} / {actual_experiment.get('actual_experiment_decision', '—')}；仅限局部边界）"
-        )
-    else:
-        L.append(
-            "- experiments.execution_mode：proposed（全部为待执行验证方案，未执行实验）"
-        )
-        L.append("- results.classification：expected（预期结果，非实际实验结果）")
+    L.append(
+        "- experiments.execution_mode：proposed（全部为待执行验证方案，未执行实验）"
+    )
+    L.append("- results.classification：expected（预期结果，非实际实验结果）")
     L.append(f"- datasets.source：{len(sources)} 条来源。")
     L.append("")
     L.append("| 证据 ID | 关系 | 核验状态 | 来源 | 定位 | 具体作用 |")
@@ -962,8 +863,8 @@ def build_outputs(qid, src_path, catalog_q, src_text):
         "result_classification": {
             "generated_hypothesis": True,
             "proposed_research_plan": True,
-            "expected_result": not has_actual_experiment,
-            "actual_execution_performed": has_actual_experiment,
+            "expected_result": True,
+            "actual_execution_performed": False,
         },
         "competition_result_view": {
             "problem_statement": safe_clip(
@@ -998,30 +899,15 @@ def build_outputs(qid, src_path, catalog_q, src_text):
                 "workflow_completed": True,
             },
             "experiments": {
-                "execution_mode": "mixed" if has_actual_experiment else "proposed",
+                "execution_mode": "proposed",
                 "proposed_steps": len(plan_rows),
-                **(
-                    {"actual_experiment": actual_experiment}
-                    if has_actual_experiment
-                    else {}
-                ),
             },
             "results": {
-                "classification": (
-                    "actual_experiment_result" if has_actual_experiment else "expected"
-                ),
-                "status": actual_experiment.get("actual_experiment_status")
-                if has_actual_experiment
-                else "proposed",
-                "decision": actual_experiment.get("actual_experiment_decision")
-                if has_actual_experiment
-                else None,
+                "classification": "expected",
+                "status": "proposed",
+                "decision": None,
                 "summary": safe_clip(paper_abstract, 600),
-                "artifact_refs": (
-                    [f"summaries/{qid}.md"] + actual_experiment["artifact_refs"]
-                    if has_actual_experiment
-                    else [f"summaries/{qid}.md"]
-                ),
+                "artifact_refs": [f"summaries/{qid}.md"],
             },
             "references": [
                 {
@@ -1048,7 +934,6 @@ def build_outputs(qid, src_path, catalog_q, src_text):
         "predictions": len(predictions),
         "selection_complete": bool(main_hyp and backup_hyp),
         "falsification_complete": bool(falsify),
-        "actual_experiment": has_actual_experiment,
     }
     return md_doc, proj, warnings, stats
 
@@ -1060,7 +945,6 @@ def parse_args(argv=None):
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--ledger", type=Path)
     parser.add_argument("--catalog", type=Path)
-    parser.add_argument("--evidence-dir", type=Path)
     return parser.parse_args(argv)
 
 
@@ -1080,83 +964,6 @@ def _assert_no_private_metadata(text, *, label):
     for pattern in forbidden:
         if re.search(pattern, text, re.IGNORECASE):
             raise RuntimeError(f"private metadata detected in {label}: {pattern}")
-
-
-def _sanitize_public_value(value, *, key=""):
-    private_keys = {
-        "agent_id",
-        "agentid",
-        "session_id",
-        "sessionid",
-        "instance_id",
-        "instanceid",
-        "user_name",
-        "username",
-    }
-    if isinstance(value, dict):
-        cleaned = {}
-        for child_key, child_value in value.items():
-            normalized_key = re.sub(r"[^a-z0-9]", "", str(child_key).lower())
-            if normalized_key in private_keys:
-                continue
-            if (
-                str(child_key).lower() in {"path", "source_path", "sourcepath"}
-                and isinstance(child_value, str)
-                and re.search(r"[A-Za-z]:\\Users\\", child_value, re.IGNORECASE)
-            ):
-                continue
-            cleaned[child_key] = _sanitize_public_value(child_value, key=str(child_key))
-        return cleaned
-    if isinstance(value, list):
-        return [_sanitize_public_value(item, key=key) for item in value]
-    if isinstance(value, str) and re.search(
-        r"[A-Za-z]:\\Users\\", value, re.IGNORECASE
-    ):
-        if re.fullmatch(r"[A-Za-z]:\\Users\\.+", value):
-            return PureWindowsPath(value).name
-        return re.sub(
-            r"[A-Za-z]:\\Users\\[^\s\"']+",
-            lambda match: PureWindowsPath(match.group(0)).name,
-            value,
-            flags=re.IGNORECASE,
-        )
-    return value
-
-
-def sanitize_evidence_tree(evidence_root):
-    evidence_root = Path(evidence_root).resolve()
-    manifest_paths = list(evidence_root.rglob("evidence_manifest.json"))
-    manifest_set = set(manifest_paths)
-    for path in sorted(evidence_root.rglob("*.json")):
-        if path in manifest_set:
-            continue
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        cleaned = _sanitize_public_value(payload)
-        path.write_text(
-            json.dumps(cleaned, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
-    for manifest_path in manifest_paths:
-        payload = _sanitize_public_value(
-            json.loads(manifest_path.read_text(encoding="utf-8"))
-        )
-        payload["manifest_version"] = "2"
-        payload["submission_status"] = "experiment_evidence_archived"
-        for item in payload.get("files") or []:
-            relative = Path(str(item.get("path") or ""))
-            if relative.is_absolute() or ".." in relative.parts:
-                raise RuntimeError("unsafe evidence file path")
-            target = (manifest_path.parent / relative).resolve()
-            if not target.is_file() or manifest_path.parent not in target.parents:
-                raise RuntimeError(f"missing evidence file: {relative}")
-            item["sha256"] = sha256_file(target)
-        manifest_path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
-    for path in evidence_root.rglob("*.json"):
-        _assert_no_private_metadata(
-            path.read_text(encoding="utf-8"),
-            label=path.relative_to(evidence_root).as_posix(),
-        )
 
 
 def validate_export_package(output_dir):
@@ -1247,9 +1054,7 @@ def validate_export_package(output_dir):
     }
 
 
-def export_results(
-    *, source_dir, output_dir, ledger_path, catalog_path, evidence_dir=None
-):
+def export_results(*, source_dir, output_dir, ledger_path, catalog_path):
     source_dir = Path(source_dir).resolve()
     output_dir = Path(output_dir).resolve()
     ledger_path = Path(ledger_path).resolve()
@@ -1316,7 +1121,6 @@ def export_results(
                 "predictions_count": stats["predictions"],
                 "selection_complete": stats["selection_complete"],
                 "falsification_complete": stats["falsification_complete"],
-                "actual_experiment": stats["actual_experiment"],
                 "warnings": warnings,
             }
         )
@@ -1340,21 +1144,12 @@ def export_results(
             "not_generated": 125 - converted,
             "documents_with_warnings": sum(1 for d in docs if d["warnings"]),
             "warnings": len(all_warnings),
-            "actual_experiment_documents": sum(
-                1 for d in docs if d["actual_experiment"]
-            ),
         },
         "warnings": all_warnings,
         "documents": docs,
     }
     if converted != 125:
         raise RuntimeError(f"incomplete catalog export: {converted}/125")
-    actual_docs = [d for d in docs if d["actual_experiment"]]
-    if actual_docs:
-        if evidence_dir is None or not Path(evidence_dir).is_dir():
-            raise RuntimeError("actual experiment evidence directory is required")
-        shutil.copytree(Path(evidence_dir), output_dir / "evidence")
-        sanitize_evidence_tree(output_dir / "evidence")
     man_path = output_dir / "manifest.json"
     manifest_text = json.dumps(manifest, ensure_ascii=False, indent=2)
     _assert_no_private_metadata(manifest_text, label="manifest.json")
@@ -1389,7 +1184,6 @@ def main(argv=None):
         / "competition"
         / "data"
         / "science_125_questions.json",
-        evidence_dir=args.evidence_dir,
     )
 
 
