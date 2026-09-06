@@ -8983,3 +8983,41 @@ def test_quality_failed_round_automatically_records_rejected_terminal_result(tmp
     assert "coherence_failure" in records[0]["rationale"]
     chain.auto_adjudicate_exhausted_round(team_id, question_id=_QUESTION_ID)
     assert len(_auto_adjudication_records(ledger_path)) == 1
+
+
+@pytest.mark.parametrize("request_status", ["handed_off", "collecting"])
+def test_auto_adjudicate_accepted_second_round_preserves_handoff_gate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request_status: str
+) -> None:
+    team_id, ledger_path, _events = _auto_advance_env(
+        tmp_path, monkeypatch, request_status=request_status
+    )
+    record = chain._question_hypothesis_rounds(team_id, _QUESTION_ID)[0]
+    record.update(roundIndex=2, qualityStatus="passed")
+    record["metaReview"]["accepted"] = True
+    _allow_chain_claim_belief_gate(monkeypatch)
+    result = chain.auto_adjudicate_exhausted_round(team_id, question_id=_QUESTION_ID)
+    if request_status == "collecting":
+        assert result["reason"] == "pending_collection"
+        assert _auto_adjudication_records(ledger_path) == []
+    else:
+        assert result["status"] == "created"
+        authority = _auto_adjudication_records(ledger_path)[0]
+        assert authority["decidedBy"] == "system:auto-advance:meta-review-accepted"
+        assert "budget exhausted" not in authority["rationale"]
+        assert chain.auto_adjudicate_exhausted_round(
+            team_id, question_id=_QUESTION_ID
+        )["status"] == "reused"
+
+
+@pytest.mark.parametrize("quality, accepted", [("failed", True), ("passed", False)])
+def test_auto_adjudicate_second_round_requires_passed_review(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, quality: str, accepted: bool
+) -> None:
+    team_id, ledger_path, _events = _auto_advance_env(tmp_path, monkeypatch)
+    record = chain._question_hypothesis_rounds(team_id, _QUESTION_ID)[0]
+    record.update(roundIndex=2, qualityStatus=quality)
+    record["metaReview"]["accepted"] = accepted
+    result = chain.auto_adjudicate_exhausted_round(team_id, question_id=_QUESTION_ID)
+    assert result["status"] == "skipped"
+    assert _auto_adjudication_records(ledger_path) == []

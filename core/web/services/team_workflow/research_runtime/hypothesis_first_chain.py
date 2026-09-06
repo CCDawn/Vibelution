@@ -2898,7 +2898,7 @@ def _round_index_from_review_links(
 def _latest_closed_exhausted_round(
     team_id: str, question_id: str
 ) -> dict[str, Any] | None:
-    """The fan-in latest hypothesis round once the hard budget is spent."""
+    """Latest closed round eligible for accepted-review or budget closeout."""
     rounds = _question_hypothesis_rounds(team_id, question_id)
     latest = rounds[-1] if rounds else None
     if not latest or str(latest.get("status") or "").strip().lower() != "closed":
@@ -2917,9 +2917,14 @@ def _latest_closed_exhausted_round(
             round_index = int(raw_index)
         except (TypeError, ValueError):
             return None
-    if round_index < HARD_ROUND_LIMIT:
+    meta_review = latest.get("metaReview") or {}
+    accepted_review = (
+        latest.get("qualityStatus") == "passed"
+        and meta_review.get("accepted") is True
+    )
+    if round_index < HARD_ROUND_LIMIT and not accepted_review:
         return None
-    return latest
+    return {**latest, "roundIndex": round_index}
 
 
 def _auto_adjudication_idempotency_key(round_id: str) -> str:
@@ -2944,16 +2949,16 @@ def auto_adjudicate_exhausted_round(
     *,
     question_id: str,
 ) -> dict[str, Any]:
-    """Record the missing accepted adjudication for an exhausted review round.
+    """Close an accepted review early, or adjudicate an exhausted review round.
 
-    Budget-exhaustion auto-advance, step one.  Fires only when the question's
-    latest HypothesisRound is ``closed`` with ``roundIndex >= HARD_ROUND_LIMIT``,
+    Fires when the latest closed HypothesisRound has an accepted meta-review
+    and passed quality checks, or its review-round budget has been spent,
     no adjudication exists for it yet, and no collection request is still
     pending (the same pending-collection clause that blocks an accepted
     adjudication in the convergence read model).  The appended record is the
     ordinary convergence authority: deterministic rationale (no timestamps),
     idempotency key ``hf2:auto-adjudication:<roundId>`` and
-    ``decidedBy=system:auto-advance:budget-exhausted`` keep replays returning
+    a system actor identifying accepted-review or budget closeout keep replays returning
     ``reused`` forever.  A pre-existing human (or foreign-policy) adjudication
     is never overwritten — ``skipped``.  A legacy auto adjudication for the
     exact round may receive one append-only run-binding amendment when every
@@ -2976,6 +2981,7 @@ def auto_adjudicate_exhausted_round(
 
     round_id = ""
     round_index = 0
+    accepted_review_closeout = False
     normalized_team_id = team_id
     normalized_question_id = str(question_id or "").strip().upper()
     try:
@@ -2990,6 +2996,7 @@ def auto_adjudicate_exhausted_round(
             round_index = int(latest_round.get("roundIndex") or 0)
         except (TypeError, ValueError):
             round_index = 0
+        accepted_review_closeout = round_index < HARD_ROUND_LIMIT
         idempotency_key = _auto_adjudication_idempotency_key(round_id)
         existing = _latest_round_adjudication(
             _records(normalized_team_id),
@@ -3065,13 +3072,21 @@ def auto_adjudicate_exhausted_round(
             hypothesis_round_id=round_id,
             decision="accepted",
             rationale=(
+                "auto-advance: accepted meta-review and passed quality checks; "
+                "all evidence handoffs completed"
+                if accepted_review_closeout
+                else
                 "auto-advance: review round budget exhausted "
                 f"({round_index}/{HARD_ROUND_LIMIT}); auto-advanced per "
                 "budget-exhaustion policy"
             ),
             idempotency_key=idempotency_key,
             workflow_run_id=adjudication_workflow_run_id,
-            decided_by="system:auto-advance:budget-exhausted",
+            decided_by=(
+                "system:auto-advance:meta-review-accepted"
+                if accepted_review_closeout
+                else "system:auto-advance:budget-exhausted"
+            ),
         )
         status = str(result.get("status") or "")
         adjudication = result.get("adjudication")
@@ -3129,8 +3144,13 @@ def auto_adjudicate_exhausted_round(
                 decision="rejected",
                 rationale=(
                     "auto-advance: claim belief gate blocked "
-                    f"({gate_reason}); review round budget exhausted "
-                    f"({round_index}/{HARD_ROUND_LIMIT}); unconverged outcome "
+                    f"({gate_reason}); "
+                    + (
+                        "accepted meta-review could not pass the claim gate; "
+                        if accepted_review_closeout else
+                        f"review round budget exhausted ({round_index}/{HARD_ROUND_LIMIT}); "
+                    )
+                    + "unconverged outcome "
                     "recorded per challenge-cup retention policy"
                 ),
                 idempotency_key=_auto_adjudication_rejected_key(round_id),
