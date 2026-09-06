@@ -182,6 +182,7 @@ const HYPOTHESIS_STAGE_LABELS: Record<string, string> = {
   budget_exhausted: "需要人工裁决",
   program_delivery: "正式结果交付与审核",
   completed: "挑战杯流程已闭环",
+  rejected: "本轮已结束，假说未收敛",
   converged: "假说阶段完成",
   blocked: "当前流程需要处理",
 };
@@ -399,7 +400,7 @@ function hypothesisTask(
         ? "running"
         : ["generation_awaiting_approval", "selection_required", "budget_exhausted", "program_delivery"].includes(nextAction.stage)
           ? "waiting_user"
-          : nextAction.stage === "completed"
+          : ["completed", "rejected"].includes(nextAction.stage)
             ? "completed"
           : nextAction.stage === "no_run"
             ? "not_started"

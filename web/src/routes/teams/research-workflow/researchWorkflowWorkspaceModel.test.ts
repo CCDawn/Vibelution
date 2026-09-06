@@ -552,3 +552,13 @@ describe("researchWorkflowWorkspaceModel", () => {
     expect(resolved.hypothesisNextAction).toBeNull();
   });
 });
+
+
+it("keeps terminal rejection complete in the workspace task model", () => {
+  const model = buildResearchWorkflowWorkspaceModel(baseInput({
+    snapshot: null,
+    scope: {...baseInput().scope, runId: null, runVersion: null},
+    hypothesisNextAction: {stage: "rejected", targetNodeId: "hf_convergence_gate", navigationLabel: "查看结果"},
+  }));
+  expect(model.currentTask).toMatchObject({status: "completed", title: "本轮已结束，假说未收敛"});
+});

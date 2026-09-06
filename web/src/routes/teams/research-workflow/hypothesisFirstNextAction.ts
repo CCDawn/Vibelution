@@ -34,6 +34,7 @@ export type HypothesisFirstStage =
   | "budget_exhausted"
   | "program_delivery"
   | "completed"
+  | "rejected"
   | "blocked";
 
 export type HypothesisFirstCommand = ActionCommand;

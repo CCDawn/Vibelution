@@ -314,6 +314,7 @@ function stageFor(
       }
       return "collecting";
     case "convergence":
+      if (state.convergence.lifecycle === "completed" && state.convergence.outcome === "rejected") return "rejected";
       if (state.convergence.outcome === "exhausted") return "budget_exhausted";
       if (state.convergence.accepted) return "converged";
       return state.convergence.lifecycle === "waiting_human" ? "next_review" : "blocked";

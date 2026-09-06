@@ -470,6 +470,15 @@ function presentationFor(action: HypothesisFirstNextAction): TaskPresentation {
         detail: action.statusMessage || "正式研究结果和 H1–H4 审核均已完成。",
         authority: "hypothesis_first",
       };
+    case "rejected":
+      return {
+        stage: "hypothesis_first",
+        step: "convergence",
+        status: "completed",
+        title: "本轮已结束，假说未收敛",
+        detail: action.statusMessage || "当前收敛结果已拒绝，可重新选择候选假说。",
+        authority: "hypothesis_first",
+      };
     case "blocked":
       return {
         stage: "hypothesis_first",

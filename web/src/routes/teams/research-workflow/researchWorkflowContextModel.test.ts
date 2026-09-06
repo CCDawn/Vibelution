@@ -368,3 +368,14 @@ describe("researchWorkflowContextModel", () => {
     expect(context.currentTask?.commandAction).toBeNull();
   });
 });
+
+
+it("presents a rejected round as completed without claiming research success", () => {
+  const action = resolveHypothesisFirstNextActionFromV2(stateV2({
+    currentPhase: "convergence",
+    convergence: {lifecycle: "completed", outcome: "rejected", actionability: "terminal"},
+  }));
+  const context = buildResearchWorkflowContext({...base, nextAction: action});
+  expect(context.currentTask).toMatchObject({status: "completed", title: "本轮已结束，假说未收敛"});
+  expect(context.currentTask?.detail).toContain("已拒绝");
+});

@@ -85,7 +85,7 @@ function meetingHasDigest(meeting: MeetingRoundRecord): boolean {
 /** Display the canonical phase without deriving lifecycle from auxiliary records. */
 function phaseCanvasStatus(phase: PhaseState): WorkflowNodeRunStatus {
   if (phase.lifecycle === "cancelled" || phase.lifecycle === "superseded") return "cancelled";
-  if (phase.lifecycle === "failed") return "failed";
+  if (phase.lifecycle === "failed" || (phase.lifecycle === "completed" && phase.outcome === "rejected")) return "failed";
   if (phase.actionability === "blocked" || phase.outcome === "exhausted") return "blocked";
   if (phase.lifecycle === "completed" && phase.outcome === "succeeded") return "succeeded";
   if (phase.lifecycle === "waiting_human" || phase.actionability === "waiting_user") return "waiting_human";
@@ -321,7 +321,9 @@ export function buildHypothesisFirstCanvasRegion(
       visualKind: "human_gate",
       status: phaseCanvasStatus(stateV2.convergence),
       description: stateV2.convergence.problems[0]?.message
-        || (stateV2.convergence.accepted
+        || (stateV2.convergence.outcome === "rejected"
+          ? "本轮已结束，假说未收敛"
+          : stateV2.convergence.accepted
           ? "假说集已收敛"
           : (stateV2.convergence.outcome === "exhausted")
             ? "轮次预算耗尽，等待人工决策"

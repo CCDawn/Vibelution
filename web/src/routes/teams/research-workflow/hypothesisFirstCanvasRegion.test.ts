@@ -119,3 +119,10 @@ describe("review history summaries", () => {
     expect(summary.latestRound).toBe(5);
   });
 });
+
+
+it("renders a rejected convergence as terminal failure instead of pending", () => {
+  const graph = region(stateV2({convergence: {lifecycle: "completed", outcome: "rejected", actionability: "terminal"}}))!;
+  expect(graph.nodes.find(node => node.nodeId === "hf_convergence_gate"))
+    .toMatchObject({status: "failed", description: "本轮已结束，假说未收敛"});
+});

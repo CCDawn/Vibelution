@@ -849,7 +849,7 @@ describe("resolveHypothesisFirstNextActionFromV2", () => {
 
     const action = resolveHypothesisFirstNextActionFromV2(state);
 
-    expect(action.stage).toBe("blocked");
+    expect(action.stage).toBe("rejected");
     expect(action.command).toBe(action.canonicalCommand);
     expect(action.statusMessage).toContain("已拒绝");
     expect(action.statusMessage).not.toContain("人工");
