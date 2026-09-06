@@ -441,12 +441,12 @@ _SOURCE_COLLECTION_SEARCH_HTTP_TIMEOUT_SECONDS = 15
 _SOURCE_COLLECTION_SEARCH_RATE_LIMIT_DEFAULT_BACKOFF_SECONDS = 5.0
 
 # The Qwen deep-search call runs a live multi-round web search under the hood,
-# so it legitimately takes far longer than the academic metadata APIs (live
-# smoke 2026-09-03: 13.7s for a precise lookup, 237s for an open-ended
-# survey).  The default 300s covers the survey shape; the timeout is
-# env-tunable because it is the one knob that trades worker-thread pin time
-# against premature deep-search skips (fail-open either way).
-_SOURCE_COLLECTION_QWEN_SEARCH_HTTP_TIMEOUT_DEFAULT_SECONDS = 300.0
+# so it can legitimately take longer than the academic metadata APIs.  It is
+# still an optional supplement: cap one attempt at 120s so an unavailable or
+# slow DashScope request cannot pin a source-collection worker for minutes.
+# Operators may choose a shorter budget, but cannot raise the hard cap here.
+_SOURCE_COLLECTION_QWEN_SEARCH_HTTP_TIMEOUT_DEFAULT_SECONDS = 120.0
+_SOURCE_COLLECTION_QWEN_SEARCH_HTTP_TIMEOUT_MAX_SECONDS = 120.0
 _SOURCE_COLLECTION_QWEN_SEARCH_HTTP_TIMEOUT_SECONDS_ENV = (
     "VIBELUTION_SOURCE_COLLECTION_QWEN_SEARCH_TIMEOUT_SECONDS"
 )
@@ -754,6 +754,84 @@ def _source_collection_rate_limited_http_get(
         # the Retry-After waits on every following query for this provider.
         _source_collection_enter_provider_cooldown(provider)
     raise last_error
+
+
+def _source_collection_qwen_http_post_json(
+    url: str,
+    *,
+    payload: dict[str, Any],
+    headers: dict[str, str],
+    timeout: float,
+) -> bytes:
+    """POST one Qwen request with a hard wall-clock deadline.
+
+    ``httpx``'s read timeout is a per-read/chunk timeout and can be extended
+    indefinitely by a server that trickles bytes.  A short-lived timer closes
+    the client, matching the existing cancellable LLM transport pattern while
+    retaining httpx's system proxy handling.  This supplement deliberately
+    has no retry ladder: academic providers remain responsible for ordinary
+    metadata retry behavior.
+    """
+
+    bounded_timeout = min(
+        max(float(timeout), 0.001),
+        _SOURCE_COLLECTION_QWEN_SEARCH_HTTP_TIMEOUT_MAX_SECONDS,
+    )
+    deadline = time.monotonic() + bounded_timeout
+    try:
+        import httpx
+    except Exception as exc:  # pragma: no cover - httpx is a project dependency
+        raise urllib.error.URLError("httpx is unavailable for Qwen deep search") from exc
+    client = httpx.Client(
+        timeout=bounded_timeout,
+        follow_redirects=False,
+        trust_env=True,
+    )
+    deadline_fired = threading.Event()
+
+    def abort_client() -> None:
+        deadline_fired.set()
+        try:
+            client.close()
+        except Exception:  # noqa: BLE001 - deadline cleanup must not mask transport errors
+            pass
+
+    timer = threading.Timer(bounded_timeout, abort_client)
+    timer.daemon = True
+    timer.start()
+    try:
+        try:
+            response = client.post(
+                url,
+                headers=headers,
+                content=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            )
+            if response.status_code >= 400:
+                raise urllib.error.HTTPError(
+                    url,
+                    response.status_code,
+                    response.reason_phrase,
+                    dict(response.headers),
+                    None,
+                )
+            payload_bytes = response.content
+        except Exception as exc:  # noqa: BLE001 - preserve non-deadline transport errors
+            if deadline_fired.is_set() or time.monotonic() >= deadline:
+                raise TimeoutError(
+                    f"Qwen deep-search HTTP request exceeded {bounded_timeout:g}s deadline"
+                ) from exc
+            if isinstance(exc, (urllib.error.HTTPError, urllib.error.URLError)):
+                raise
+            raise urllib.error.URLError(exc) from exc
+        if deadline_fired.is_set() or time.monotonic() >= deadline:
+            raise TimeoutError(
+                f"Qwen deep-search HTTP request exceeded {bounded_timeout:g}s deadline"
+            )
+        return payload_bytes
+    finally:
+        timer.cancel()
+        client.close()
+        timer.join(timeout=0.2)
 
 
 def _source_collection_rate_limited_http_post_json(
@@ -1869,9 +1947,12 @@ def _execute_openalex_source_collection_query(
 
 
 def _source_collection_qwen_search_http_timeout() -> float:
-    return _source_collection_env_seconds(
-        _SOURCE_COLLECTION_QWEN_SEARCH_HTTP_TIMEOUT_SECONDS_ENV,
-        _SOURCE_COLLECTION_QWEN_SEARCH_HTTP_TIMEOUT_DEFAULT_SECONDS,
+    return min(
+        _source_collection_env_seconds(
+            _SOURCE_COLLECTION_QWEN_SEARCH_HTTP_TIMEOUT_SECONDS_ENV,
+            _SOURCE_COLLECTION_QWEN_SEARCH_HTTP_TIMEOUT_DEFAULT_SECONDS,
+        ),
+        _SOURCE_COLLECTION_QWEN_SEARCH_HTTP_TIMEOUT_MAX_SECONDS,
     )
 
 
@@ -2056,7 +2137,7 @@ def _execute_qwen_deep_search_for_run(
         "query": s._trim_text(task_text, max_length=240),
     }
     try:
-        payload_bytes = _source_collection_rate_limited_http_post_json(
+        payload_bytes = _source_collection_qwen_http_post_json(
             endpoint,
             payload=s._qwen_deep_search_request_payload(task_text),
             headers={
@@ -2065,7 +2146,6 @@ def _execute_qwen_deep_search_for_run(
                 "Accept": "application/json",
                 "User-Agent": "Vibelution-ChallengeCup/1.0 (metadata-only research source collection)",
             },
-            provider=s.SOURCE_COLLECTION_SEARCH_PROVIDER_QWEN_WEB_SEARCH,
             timeout=_source_collection_qwen_search_http_timeout(),
         )
         payload = json.loads(payload_bytes.decode("utf-8", errors="replace"))

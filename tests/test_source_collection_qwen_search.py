@@ -13,7 +13,10 @@ mapping with identity dedupe, once-per-run idempotency, fail-open semantics
 from __future__ import annotations
 
 import json
+import threading
+import time
 import urllib.error
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
@@ -103,11 +106,11 @@ def captured_post(monkeypatch):
     """Stub the Responses API POST transport with the smoke-verified payload."""
     calls = []
 
-    def fake_post(url, *, payload, headers, provider, timeout):
-        calls.append({"url": url, "payload": payload, "headers": headers, "provider": provider, "timeout": timeout})
+    def fake_post(url, *, payload, headers, timeout):
+        calls.append({"url": url, "payload": payload, "headers": headers, "timeout": timeout})
         return json.dumps(_QWEN_RESPONSES_PAYLOAD).encode("utf-8")
 
-    monkeypatch.setattr(search_execution, "_source_collection_rate_limited_http_post_json", fake_post)
+    monkeypatch.setattr(search_execution, "_source_collection_qwen_http_post_json", fake_post)
     return calls
 
 
@@ -230,6 +233,17 @@ def test_qwen_deep_search_request_env_overrides(monkeypatch):
     assert payload["max_output_tokens"] == 2048
 
 
+def test_qwen_search_timeout_keeps_short_override_and_hard_caps_at_120(monkeypatch):
+    monkeypatch.delenv("VIBELUTION_SOURCE_COLLECTION_QWEN_SEARCH_TIMEOUT_SECONDS", raising=False)
+    assert search_execution._source_collection_qwen_search_http_timeout() == 120.0
+
+    monkeypatch.setenv("VIBELUTION_SOURCE_COLLECTION_QWEN_SEARCH_TIMEOUT_SECONDS", "30")
+    assert search_execution._source_collection_qwen_search_http_timeout() == 30.0
+
+    monkeypatch.setenv("VIBELUTION_SOURCE_COLLECTION_QWEN_SEARCH_TIMEOUT_SECONDS", "300")
+    assert search_execution._source_collection_qwen_search_http_timeout() == 120.0
+
+
 # ---------------------------------------------------------------------------
 # Response parsing (live-verified shape)
 # ---------------------------------------------------------------------------
@@ -344,7 +358,6 @@ def test_deep_search_executes_once_and_merges_through_identity_dedupe(
     # Exactly one Responses API call per run, shaped for the verified endpoint.
     assert len(captured_post) == 1
     call = captured_post[0]
-    assert call["provider"] == "qwen_web_search"
     assert call["headers"]["Authorization"] == "Bearer sk-test-key-for-unit-tests"
     assert call["payload"]["tools"] == [{"type": "web_search"}]
     assert call["payload"]["model"] == "qwen3.8-flash"
@@ -436,10 +449,13 @@ def test_deep_search_transport_failure_fails_open(tmp_path, monkeypatch, dashsco
     _use_fake_local_research_config(monkeypatch)
     _stub_academic_providers(monkeypatch)
 
-    def failing_post(url, *, payload, headers, provider, timeout):
+    calls = []
+
+    def failing_post(url, *, payload, headers, timeout):
+        calls.append({"url": url, "timeout": timeout})
         raise urllib.error.URLError("dashscope unreachable")
 
-    monkeypatch.setattr(search_execution, "_source_collection_rate_limited_http_post_json", failing_post)
+    monkeypatch.setattr(search_execution, "_source_collection_qwen_http_post_json", failing_post)
     team = team_service.create_team(name="qwen transport 团队")
     run_response = _create_run(team["teamId"], query_seeds=["predictive coding", "free energy principle"])
     run_id = run_response["run"]["runId"]
@@ -448,11 +464,59 @@ def test_deep_search_transport_failure_fails_open(tmp_path, monkeypatch, dashsco
 
     assert execution["qwenDeepSearch"]["status"] == "skipped"
     assert execution["qwenDeepSearch"]["reason"] == "transport_failed"
+    assert len(calls) == 1
     assert execution["status"] == "executed"
     records = data_processing_service.list_records(run_id)["records"]
     assert records and all(
         item.get("metadata", {}).get("searchProvider") != "qwen_web_search" for item in records
     )
+
+
+def test_qwen_http_transport_closes_inflight_response_at_wall_clock_deadline():
+    request_started = threading.Event()
+    connection_closed = threading.Event()
+
+    class SlowResponseHandler(BaseHTTPRequestHandler):
+        def log_message(self, *_args):
+            return
+
+        def do_POST(self):  # noqa: N802 - BaseHTTPRequestHandler protocol hook
+            request_started.set()
+            self.send_response(200)
+            self.send_header("Content-Length", "1000000")
+            self.end_headers()
+            while True:
+                try:
+                    # Keep each read below httpx's 120ms socket timeout.  The
+                    # wall-clock timer must close the client; a per-read
+                    # timeout alone would never fire for this drip.
+                    self.wfile.write(b"x")
+                    self.wfile.flush()
+                    time.sleep(0.02)
+                except OSError:
+                    connection_closed.set()
+                    return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), SlowResponseHandler)
+    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+    server_thread.start()
+    try:
+        started_at = time.monotonic()
+        with pytest.raises(TimeoutError, match="Qwen deep-search HTTP request exceeded"):
+            search_execution._source_collection_qwen_http_post_json(
+                f"http://127.0.0.1:{server.server_port}/responses",
+                payload={"input": "deadline test"},
+                headers={"Content-Type": "application/json"},
+                timeout=0.12,
+            )
+        elapsed = time.monotonic() - started_at
+        assert request_started.wait(timeout=1.0)
+        assert connection_closed.wait(timeout=1.0)
+        assert elapsed < 1.0
+    finally:
+        server.shutdown()
+        server.server_close()
+        server_thread.join(timeout=1.0)
 
 
 def test_deep_search_executed_event_persists_answer_text_and_metrics(
