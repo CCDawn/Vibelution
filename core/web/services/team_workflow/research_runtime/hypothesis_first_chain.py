@@ -14994,6 +14994,10 @@ def chain_state(
     # never converges; the v2 projection mirrors these exact clauses.
     adjudication_accepted = adjudication_decision == "accepted"
     adjudication_rejected = adjudication_decision == "rejected"
+    adjudication_actor = (
+        "系统" if str((latest_adjudication or {}).get("decidedBy") or "").startswith("system:")
+        else "人工"
+    )
     converged = bool(
         latest_round
         and latest_round_closed
@@ -15011,12 +15015,12 @@ def chain_state(
         convergence_detail = "评审流程已完成，科学质量未通过；质量问题已记录"
     elif converged:
         convergence_detail = (
-            f"最近一轮 {latest_round_id} 已由裁决确认收敛"
+            f"最近一轮 {latest_round_id} 已由{adjudication_actor}裁决收敛"
             if adjudication_accepted
             else "converged"
         )
     elif adjudication_rejected:
-        convergence_detail = f"最近一轮 {latest_round_id} 已被裁决拒绝"
+        convergence_detail = f"最近一轮 {latest_round_id} 已被{adjudication_actor}裁决拒绝"
     elif not (bool(meta_review.get("accepted")) or adjudication_accepted):
         convergence_detail = f"最近一轮 {latest_round_id} 的 MetaReview 未 accepted"
     elif pending_requests:
