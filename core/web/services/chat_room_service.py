@@ -2422,7 +2422,8 @@ def _execute_chat_room_round(
                         en=f"Group discussion running: {len(messages)}/{len(speakers)} agents responded.",
                     ),
                 )
-                _publish_chat_room_detail_snapshot(normalized_room_id)
+                if not batch_is_parallel:
+                    _publish_chat_room_detail_snapshot(normalized_room_id)
                 _record_room_event(
                     "speaker",
                     _speaker_event_code(message.get("status")),
@@ -2449,6 +2450,9 @@ def _execute_chat_room_round(
                     outcome=message["status"],
                     level="info" if message["status"] == "completed" else "warning",
                 )
+
+        if batch_is_parallel:
+            _publish_chat_room_detail_snapshot(normalized_room_id)
 
     # A needs_continue partial that its auto-continuation finished no longer
     # counts as an unfinished speaker: the continuation's completed message
