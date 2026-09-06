@@ -213,6 +213,14 @@ _SCOPED_DISCUSSION_SCOPE_AUTHORITY = "workflow_discussion_scope.v1"
 _PREFORMAL_CANDIDATE_ROOM_SOURCE = "hypothesis_first_candidate_review.v1"
 _PREFORMAL_GENERATION_ROOM_SOURCE = "hypothesis_first_candidate_generation.v1"
 _PREFORMAL_DISCUSSION_SCOPE_AUTHORITY = "preformal_candidate_review_scope.v1"
+_FORMAL_PARALLEL_MEETING_TYPES = frozenset(
+    {
+        "hypothesis_candidate_generation",
+        "hypothesis_review",
+    }
+)
+_SPEAKER_BATCH_MODE_CONFIG_KEY = "speakerBatchMode"
+_SPEAKER_BATCH_MODE_PARALLEL = "parallel"
 
 
 @contextmanager
@@ -1407,6 +1415,7 @@ def _round_config(
     discussion_round_index: int,
     team_id: str = "",
     auto_drive_discussion: bool = False,
+    room_config: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     discussion_scope = meeting_round.get("discussionScope")
     discussion_scope_hash = str(
@@ -1420,10 +1429,18 @@ def _round_config(
         else _SCOPED_DISCUSSION_SCOPE_AUTHORITY
     )
     challenge_deadline_at_ms = meeting_round.get("challengeDeadlineAtMs")
-    return {
+    meeting_type = str(
+        meeting_round.get("meetingType") or "hypothesis_review"
+    ).strip().lower()
+    formal_single_question = bool(
+        meeting_type in _FORMAL_PARALLEL_MEETING_TYPES
+        and str(meeting_round.get("question") or "").strip()
+        and isinstance(meeting_round.get("modelInvocationReceiptAuthority"), Mapping)
+    )
+    config = {
         "source": MEETING_SOURCE,
         "meetingRoundId": str(meeting_round.get("meetingRoundId") or ""),
-        "meetingType": str(meeting_round.get("meetingType") or "hypothesis_review"),
+        "meetingType": meeting_type,
         "meetingStage": str(meeting_round.get("stage") or ""),
         "meetingRoundType": str(meeting_round.get("roundType") or ""),
         "candidateAuthority": str(meeting_round.get("candidateAuthority") or ""),
@@ -1479,6 +1496,21 @@ def _round_config(
             if meeting_round.get(field) not in (None, "")
         },
     }
+    # ``start_chat_room_round`` merges the room config before this round
+    # config. Keep an explicit room setting visible here so the default below
+    # cannot overwrite a caller's serial/parallel choice. A legacy meeting
+    # record carrying the key is treated the same way.
+    if isinstance(room_config, Mapping) and _SPEAKER_BATCH_MODE_CONFIG_KEY in room_config:
+        config[_SPEAKER_BATCH_MODE_CONFIG_KEY] = room_config.get(
+            _SPEAKER_BATCH_MODE_CONFIG_KEY
+        )
+    elif _SPEAKER_BATCH_MODE_CONFIG_KEY in meeting_round:
+        config[_SPEAKER_BATCH_MODE_CONFIG_KEY] = meeting_round.get(
+            _SPEAKER_BATCH_MODE_CONFIG_KEY
+        )
+    elif formal_single_question:
+        config[_SPEAKER_BATCH_MODE_CONFIG_KEY] = _SPEAKER_BATCH_MODE_PARALLEL
+    return config
 
 
 def _normalized_model_invocation_receipt_authority(
@@ -1601,6 +1633,16 @@ def _round_id_from_start_result(result: Mapping[str, Any], meeting_round_id: str
     if rounds:
         return str(rounds[-1].get("roundId") or "").strip()
     raise ResearchMeetingRuntimeError("chat room round did not return a roundId")
+
+
+def _chat_room_round_config(room_id: str) -> dict[str, Any]:
+    """Read the linked room config that can explicitly override round defaults."""
+
+    from core.web.services import chat_room_service
+
+    room = chat_room_service.get_chat_room_compact(room_id)
+    config = room.get("config") if isinstance(room, Mapping) else None
+    return dict(config) if isinstance(config, Mapping) else {}
 
 
 def open_hypothesis_review_meeting(
@@ -1763,6 +1805,7 @@ def open_hypothesis_review_meeting(
             discussion_round_index=1,
             team_id=str(team_id or ""),
             auto_drive_discussion=background and agent_runner is None,
+            room_config=_chat_room_round_config(room_id),
         ),
         agent_runner=agent_runner,
         background=background,
@@ -1977,6 +2020,7 @@ def open_candidate_generation_meeting(
             discussion_round_index=1,
             team_id=str(team_id or ""),
             auto_drive_discussion=background and agent_runner is None,
+            room_config=_chat_room_round_config(room_id),
         ),
         agent_runner=agent_runner,
         background=background,
@@ -3169,6 +3213,7 @@ def _run_meeting_discussion_impl(
                     selection,
                     discussion_round_index=discussion_round_index,
                     team_id=normalized_team_id,
+                    room_config=_chat_room_round_config(room_id),
                 ),
                 agent_runner=agent_runner,
                 background=False,

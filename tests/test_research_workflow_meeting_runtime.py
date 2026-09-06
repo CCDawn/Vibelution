@@ -1469,6 +1469,86 @@ def test_review_meeting_round_config_carries_derived_per_call_budget(
     assert round_config["meetingDeadlineAtMs"] == meeting_round["meetingDeadlineAtMs"]
 
 
+def test_formal_hypothesis_round_config_enables_parallel_batches_and_room_override():
+    authority = {
+        "schemaVersion": 1,
+        "authorityKind": "workflow_run",
+        "workflowRunId": "run-parallel-round-config",
+    }
+    formal = {
+        "meetingRoundId": "meeting-parallel-round-config",
+        "meetingType": "hypothesis_review",
+        "question": "SCI-096",
+        "modelInvocationReceiptAuthority": authority,
+        "participants": ["agent-0", "agent-1", "agent-2", "agent-3"],
+        "participantRoleIds": ["role-0", "role-1", "role-2", "role-3"],
+        "participantRoleSnapshot": [
+            {"agentId": f"agent-{index}"} for index in range(4)
+        ],
+        "teamRoleContractVersion": 1,
+        "participantPolicyVersion": 1,
+        "roleContractFingerprint": "role-contract",
+        "resolutionHash": "resolution",
+    }
+    speakers = [{"participantId": f"p{index}"} for index in range(4)]
+
+    opening = meeting_runtime._round_config(
+        formal,
+        {},
+        discussion_round_index=1,
+    )
+    opening_policy = chat_room_service._speaker_execution_policy(
+        {"config": opening}
+    )
+    assert opening["speakerBatchMode"] == "parallel"
+    assert opening_policy["parallel"] is True
+    assert chat_room_service._speaker_round_batches(
+        speakers,
+        {"config": opening},
+        opening_policy,
+    ) == [[0, 1, 2, 3]]
+
+    interaction = meeting_runtime._round_config(
+        formal,
+        {},
+        discussion_round_index=2,
+    )
+    interaction_policy = chat_room_service._speaker_execution_policy(
+        {"config": interaction}
+    )
+    assert interaction["speakerBatchMode"] == "parallel"
+    assert chat_room_service._speaker_round_batches(
+        speakers,
+        {"config": interaction},
+        interaction_policy,
+    ) == [[0, 1], [2, 3]]
+
+    serial_room = meeting_runtime._round_config(
+        formal,
+        {},
+        discussion_round_index=1,
+        room_config={"speakerBatchMode": "serial"},
+    )
+    assert serial_room["speakerBatchMode"] == "serial"
+    assert chat_room_service._speaker_execution_policy(
+        {"config": serial_room}
+    )["parallel"] is False
+
+    generation = meeting_runtime._round_config(
+        {**formal, "meetingType": "hypothesis_candidate_generation"},
+        {},
+        discussion_round_index=1,
+    )
+    assert generation["speakerBatchMode"] == "parallel"
+
+    ordinary = meeting_runtime._round_config(
+        {**formal, "meetingType": "plan_review"},
+        {},
+        discussion_round_index=1,
+    )
+    assert "speakerBatchMode" not in ordinary
+
+
 def test_legacy_meeting_recovers_persisted_per_call_policy_from_bound_round(monkeypatch):
     """A legacy meeting without its own policy fields recovers them from the
     bound room round config so follow-up rounds keep the per-call fence."""
