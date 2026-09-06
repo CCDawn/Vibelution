@@ -432,12 +432,11 @@ def read_chat_rooms_snapshot() -> list[dict[str, Any]]:
     service that only needs the persisted room/scope bindings.
     """
 
+    # ChatRoomStore.load decodes a fresh JSON object on every read.  Its
+    # nested values already belong to this caller; copying the entire room
+    # history again makes every workflow projection pay for it twice.
     state = _store().load()
-    return [
-        copy.deepcopy(item)
-        for item in list(state.get("rooms") or [])
-        if isinstance(item, dict)
-    ]
+    return [item for item in state.get("rooms") or [] if isinstance(item, dict)]
 
 
 def _challenge_cup_reset_text(value: Any, *, field: str) -> str:
