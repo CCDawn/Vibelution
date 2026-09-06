@@ -7918,7 +7918,7 @@ def test_stage_one_origin_entry_redirects_to_run_creation() -> None:
     assert offer["actionId"] == "create-stage-one-run"
     assert offer["label"] == "创建第一阶段运行"
     assert offer["payload"] == {"questionId": "SCI-091"}
-    assert offer["idempotencyKey"].startswith("hf2:")
+    assert offer["idempotencyKey"].startswith("hf2:create-stage-one-run:")
     assert offer["expectedStateVersion"] == state["stateVersion"]
 
 
@@ -8011,7 +8011,78 @@ def test_terminal_exploratory_success_reopens_stage_one_run(
         if action.get("kind") == "command"
     ]
     assert [action["command"] for action in commands] == ["create_stage_one_run"]
+    assert commands[0]["actionId"] == "create-stage-one-run:1"
+    assert commands[0]["idempotencyKey"].startswith(
+        "hf2:create-stage-one-run:1:"
+    )
     assert commands[0]["payload"] == {"questionId": "SCI-091"}
+
+
+def test_stage_one_creation_ordinal_key_is_stable_and_changes_run_identity() -> None:
+    from core.research.workflow.definition import CHALLENGE_CUP_WORKFLOW_ID
+    from core.web.services.team_workflow.research_runtime.run_lifecycle import (
+        run_id_for_create,
+    )
+
+    chain_records = [
+        *_stage_one_draft_records("hf-candgen-run-r0"),
+        {
+            "recordKind": "generation_attempt",
+            "attemptId": "attempt-r0",
+            "attemptNumber": 1,
+            "questionId": "SCI-091",
+            "meetingRoundId": "hf-candgen-run-r0",
+            "lifecycle": "completed",
+            "outcome": "succeeded",
+            "createdAt": "2026-08-25T00:02:00Z",
+        },
+    ]
+
+    first_offer = next(
+        action
+        for action in _stage_one_projection(chain_records=chain_records)[
+            "allowedActions"
+        ]
+        if action.get("command") == "create_stage_one_run"
+    )
+    retired_history = [
+        {
+            "runId": "run-archived",
+            "status": "archived",
+            "questionId": "SCI-091",
+            "createdAt": "2026-08-25T00:03:00Z",
+        }
+    ]
+    retired_state = _stage_one_projection(
+        chain_records=chain_records,
+        formal_runs=retired_history,
+    )
+    retired_offer = next(
+        action
+        for action in retired_state["allowedActions"]
+        if action.get("command") == "create_stage_one_run"
+    )
+    repeated_offer = next(
+        action
+        for action in _stage_one_projection(
+            chain_records=chain_records,
+            formal_runs=retired_history,
+        )["allowedActions"]
+        if action.get("command") == "create_stage_one_run"
+    )
+
+    assert first_offer["actionId"] == "create-stage-one-run"
+    assert retired_offer["actionId"] == "create-stage-one-run:1"
+    assert retired_offer["idempotencyKey"] != first_offer["idempotencyKey"]
+    assert (retired_offer["actionId"], retired_offer["idempotencyKey"]) == (
+        repeated_offer["actionId"],
+        repeated_offer["idempotencyKey"],
+    )
+    assert run_id_for_create(
+        CHALLENGE_CUP_WORKFLOW_ID, retired_offer["idempotencyKey"]
+    ) != run_id_for_create(
+        CHALLENGE_CUP_WORKFLOW_ID, first_offer["idempotencyKey"]
+    )
 
 
 def test_active_stage_one_run_blocks_exploratory_relaunch() -> None:

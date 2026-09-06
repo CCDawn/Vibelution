@@ -3698,10 +3698,18 @@ def project_state_from_records(
         )
     )
     if needs_stage_one_run:
+        # Keep the first creation key backward-compatible, then bind each
+        # rebuild to its ordinal in the question's complete run history.  The
+        # creation service derives the run id from this key and replays any
+        # archived record that uses the old key, so terminal history must be
+        # part of the command identity even though it is hidden from the
+        # projected formal phase.
+        rebuild_ordinal = len(formal_runs)
+        creation_suffix = f":{rebuild_ordinal}" if rebuild_ordinal else ""
         allowed_actions.append(
             _command_action(
                 "create_stage_one_run",
-                action_id="create-stage-one-run",
+                action_id=f"create-stage-one-run{creation_suffix}",
                 label="创建第一阶段运行",
                 target_phase="generation",
                 target_node_id="hf_generation",
