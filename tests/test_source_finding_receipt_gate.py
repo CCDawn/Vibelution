@@ -124,6 +124,40 @@ def test_source_finding_quality_gate_rejects_candidate_not_linked_to_receipt() -
         )
 
 
+def test_source_finding_quality_gate_binds_publisher_presentation_url_to_doi() -> None:
+    payload = _receipt_payload()
+    candidate = payload["candidateSources"][0]
+    candidate["sourceUrl"] = "https://doi.org/10.3389/fcell.2026.1891553"
+    candidate["metadata"] = {"sourceIdentityKey": "doi:10.3389/fcell.2026.1891553"}
+    payload["searchTrace"][0]["resultRefs"] = [
+        "https://www.frontiersin.org/journals/cell-and-developmental-biology/articles/10.3389/fcell.2026.1891553/full",
+        "identity:doi:10.3389/fcell.2026.1891553/full",
+    ]
+
+    search_execution.validate_source_finding_receipt_payload(
+        payload,
+        require_candidate_receipt_binding=True,
+    )
+
+
+def test_source_finding_quality_gate_binds_arxiv_url_across_http_schemes() -> None:
+    payload = _receipt_payload()
+    candidate = payload["candidateSources"][0]
+    candidate["sourceUrl"] = "https://arxiv.org/abs/2607.20544v3"
+    candidate["metadata"] = {
+        "sourceIdentityKey": "url:https://arxiv.org/abs/2607.20544v3"
+    }
+    payload["searchTrace"][0]["resultRefs"] = [
+        "http://arxiv.org/abs/2607.20544v3",
+        "identity:url:http://arxiv.org/abs/2607.20544v3",
+    ]
+
+    search_execution.validate_source_finding_receipt_payload(
+        payload,
+        require_candidate_receipt_binding=True,
+    )
+
+
 def test_formal_search_context_uses_message_only_as_canonical_task_locator(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

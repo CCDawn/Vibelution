@@ -25,6 +25,7 @@ from core.research.workflow.contracts.research_scope import (
     scope_locators_for,
 )
 from core.research.workflow.definition import CHALLENGE_CUP_WORKFLOW_ID
+from core.research.workflow.definition_registry import definition_identity
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.services import team_service
@@ -162,6 +163,14 @@ def _safety_limits() -> dict:
         "toolCalls": 300,
         "wallClockSeconds": 21600,
         "maxRetries": 2,
+    }
+
+
+def _current_workflow_identity() -> dict[str, str]:
+    identity = definition_identity(question_launch.build_challenge_cup_workflow_definition())
+    return {
+        "workflowVersionId": identity.workflowVersionId,
+        "structureHash": identity.structureHash,
     }
 
 
@@ -908,6 +917,7 @@ def test_attach_question_run_checkpoints_uses_latest_run() -> None:
         questions,
         [
             {
+                **_current_workflow_identity(),
                 "runId": "run-old",
                 "questionId": "SCI-003",
                 "status": "blocked",
@@ -915,6 +925,7 @@ def test_attach_question_run_checkpoints_uses_latest_run() -> None:
                 "updatedAtMs": 1,
             },
             {
+                **_current_workflow_identity(),
                 "runId": "run-new",
                 "questionId": "SCI-003",
                 "status": "waiting_human",
@@ -936,6 +947,7 @@ def test_attach_question_run_checkpoints_uses_latest_run() -> None:
         [{"questionId": "SCI-003"}],
         [
             {
+                **_current_workflow_identity(),
                 "runId": "run-iso",
                 "questionId": "SCI-003",
                 "status": "succeeded",
@@ -955,6 +967,7 @@ def test_attach_question_run_checkpoints_keeps_prior_success() -> None:
         [{"questionId": "SCI-003"}],
         [
             {
+                **_current_workflow_identity(),
                 "runId": "run-won",
                 "questionId": "SCI-003",
                 "status": "succeeded",
@@ -962,6 +975,7 @@ def test_attach_question_run_checkpoints_keeps_prior_success() -> None:
                 "updatedAtMs": 1,
             },
             {
+                **_current_workflow_identity(),
                 "runId": "run-retry",
                 "questionId": "SCI-003",
                 "status": "failed",
@@ -981,6 +995,7 @@ def test_attach_question_run_checkpoints_keeps_prior_success() -> None:
         [{"questionId": "SCI-003"}],
         [
             {
+                **_current_workflow_identity(),
                 "runId": "run-won",
                 "questionId": "SCI-003",
                 "status": "succeeded",
@@ -988,6 +1003,7 @@ def test_attach_question_run_checkpoints_keeps_prior_success() -> None:
                 "updatedAtMs": 1,
             },
             {
+                **_current_workflow_identity(),
                 "runId": "run-retry",
                 "questionId": "SCI-003",
                 "status": "running",
@@ -1007,6 +1023,7 @@ def test_attach_question_run_checkpoints_keeps_prior_success() -> None:
         [{"questionId": "SCI-003"}],
         [
             {
+                **_current_workflow_identity(),
                 "runId": "run-deep",
                 "questionId": "SCI-003",
                 "status": "failed",
@@ -1014,6 +1031,7 @@ def test_attach_question_run_checkpoints_keeps_prior_success() -> None:
                 "updatedAtMs": 1,
             },
             {
+                **_current_workflow_identity(),
                 "runId": "run-shallow",
                 "questionId": "SCI-003",
                 "status": "failed",
@@ -1026,6 +1044,47 @@ def test_attach_question_run_checkpoints_keeps_prior_success() -> None:
     assert regressed["runId"] == "run-shallow"
     assert regressed["status"] == "failed"
     assert regressed["completedCount"] > 1
+
+
+def test_attach_question_run_checkpoints_ignores_retired_definition_runs() -> None:
+    current = _current_workflow_identity()
+    attached = question_launch.attach_question_run_checkpoints(
+        [{"questionId": "SCI-003"}, {"questionId": "SCI-004"}],
+        [
+            {
+                "runId": "run-retired-success",
+                "questionId": "SCI-003",
+                "status": "succeeded",
+                "runtimeCurrentNodeIds": ["result_package"],
+                "workflowVersionId": "wv-retired",
+                "structureHash": "f" * 64,
+                "updatedAtMs": 20,
+            },
+            {
+                **current,
+                "runId": "run-current",
+                "questionId": "SCI-003",
+                "status": "blocked",
+                "runtimeCurrentNodeIds": ["protocol_design"],
+                "updatedAtMs": 10,
+            },
+            {
+                "runId": "run-retired-only",
+                "questionId": "SCI-004",
+                "status": "running",
+                "runtimeCurrentNodeIds": ["controlled_run"],
+                "workflowVersionId": "wv-retired",
+                "structureHash": "f" * 64,
+                "updatedAtMs": 30,
+            },
+        ],
+    )
+
+    checkpoint = attached[0]["checkpoint"]
+    assert checkpoint["runId"] == "run-current"
+    assert checkpoint["status"] == "blocked"
+    assert checkpoint["completedCount"] == 2
+    assert attached[1]["checkpoint"] is None
 
 
 def test_launch_options_overlay_live_checkpoints(
@@ -1061,6 +1120,7 @@ def test_launch_options_overlay_live_checkpoints(
             return {
                 "runs": [
                     {
+                        **_current_workflow_identity(),
                         "runId": "run-live",
                         "questionId": "SCI-001",
                         "status": "running",

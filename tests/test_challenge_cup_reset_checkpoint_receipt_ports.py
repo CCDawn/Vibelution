@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 from pathlib import Path
 
 import pytest
@@ -11,10 +10,12 @@ from core.research.workflow.checkpoint_store import (
     CheckpointResetPortError,
     list_checkpoint_thread_ids,
     list_team_scoped_checkpoints,
-    prepare_operator_checkpoint_full_purge,
     prepare_checkpoint_reset_stage,
-    purge_operator_checkpoint_full_purge,
+    prepare_operator_checkpoint_full_purge,
+    prepare_operator_checkpoint_thread_purge,
     purge_checkpoint_reset_stage,
+    purge_operator_checkpoint_full_purge,
+    purge_operator_checkpoint_thread_purge,
     restore_checkpoint_reset_stage,
 )
 from core.research.workflow.contracts.model_invocation_receipt import (
@@ -172,6 +173,33 @@ def test_operator_checkpoint_full_purge_requires_exact_payload_free_preflight(tm
     _checkpoint(path, thread_id="new-thread", team_id="research-team", checkpoint_id="ck-new")
     with pytest.raises(CheckpointResetPortError, match="changed after full purge preflight"):
         purge_operator_checkpoint_full_purge(preflight, checkpoint_path=path)
+
+
+def test_operator_checkpoint_thread_purge_preserves_unselected_threads(tmp_path: Path) -> None:
+    path = tmp_path / "checkpoints.sqlite"
+    _checkpoint(path, thread_id="run-retired", team_id="research-team", checkpoint_id="ck-old")
+    _checkpoint(path, thread_id="run-current", team_id="research-team", checkpoint_id="ck-current")
+
+    preflight = prepare_operator_checkpoint_thread_purge(
+        "reset-threads-1",
+        ["run-retired"],
+        checkpoint_path=path,
+    )
+    assert preflight["threadIds"] == ["run-retired"]
+    assert preflight["checkpointCount"] == 1
+    assert "ck-old" not in json.dumps(preflight)
+
+    purged = purge_operator_checkpoint_thread_purge(
+        preflight,
+        checkpoint_path=path,
+        reset_id="reset-threads-1",
+    )
+    assert purged["deletedCheckpoints"] == 1
+    assert list_checkpoint_thread_ids(path) == ["run-current"]
+
+    _checkpoint(path, thread_id="run-retired", team_id="research-team", checkpoint_id="ck-new")
+    with pytest.raises(CheckpointResetPortError, match="changed after purge preflight"):
+        purge_operator_checkpoint_thread_purge(preflight, checkpoint_path=path)
 
 
 def test_receipt_reset_stage_is_scoped_and_restorable(tmp_path: Path, monkeypatch) -> None:

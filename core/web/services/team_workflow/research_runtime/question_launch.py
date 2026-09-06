@@ -31,23 +31,25 @@ from core.research.competition.resources import (
 from core.research.competition.result_set import CatalogScope
 from core.research.workflow.contracts import DEFAULT_PROGRAM_ID
 from core.research.workflow.definition import build_challenge_cup_workflow_definition
-from core.web.services.team_workflow.challenge_question_runs import (
-    REQUIRED_HUMAN_GATE_KEYS,
-    _package_bound_model_invocation_receipt_refs,
-    challenge_question_run_summary,
-    get_challenge_question_run_detail,
-)
+from core.research.workflow.definition_registry import definition_identity
 from core.web.services.team_workflow.challenge_phase_boundary import (
     ChallengePhaseBoundaryError,
 )
 from core.web.services.team_workflow.challenge_phase_knowledge_publisher import (
     load_published_phase_one_knowledge_package,
 )
+from core.web.services.team_workflow.challenge_question_runs import (
+    REQUIRED_HUMAN_GATE_KEYS,
+    _package_bound_model_invocation_receipt_refs,
+    challenge_question_run_summary,
+    get_challenge_question_run_detail,
+)
 from core.web.services.team_workflow.research_projects import (
     ResearchProjectError,
     ensure_challenge_question_project,
     get_theme_activation,
 )
+
 from .budget_contract import FORMAL_STAGE_IDS
 
 _STAGES = FORMAL_STAGE_IDS
@@ -555,6 +557,7 @@ def attach_question_run_checkpoints(
     """Attach the latest workflow checkpoint for each catalog question."""
 
     definition = build_challenge_cup_workflow_definition()
+    identity = definition_identity(definition)
     node_ids = [node.nodeId for node in definition.nodes]
     labels = {node.nodeId: node.label for node in definition.nodes}
     index_by_id = {node_id: index for index, node_id in enumerate(node_ids)}
@@ -563,6 +566,11 @@ def attach_question_run_checkpoints(
     succeeded_by_question: dict[str, Mapping[str, Any]] = {}
     max_completed_by_question: dict[str, int] = {}
     for run in runs:
+        if (
+            _text(run.get("workflowVersionId")) != identity.workflowVersionId
+            or _text(run.get("structureHash")) != identity.structureHash
+        ):
+            continue
         question_id = _text(run.get("questionId")).upper()
         run_id = _text(run.get("runId"))
         if not question_id or not run_id:
