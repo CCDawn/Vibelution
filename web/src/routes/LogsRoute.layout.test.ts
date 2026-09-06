@@ -77,7 +77,7 @@ describe("LogsRoute layout contract", () => {
     expect(routeSource).toContain("logsCompactSubtitle");
     expect(routeSource).toContain("VTooltip");
     expect(routeSource).toContain('content={t("logsSubtitle")}');
-    expect(routeSource).toContain("tooltip={`${root.summary.userGuide || root.path} · ${root.path} · ${latestLabel}`}");
+    expect(routeSource).toContain("content={`${root.summary.userGuide || root.path} · ${root.path} · ${latestLabel}`}");
     expect(routeSource).not.toContain('title={root.summary.userGuide || root.path}');
     expect(routeSource).not.toContain("rootButtonGuide");
   });

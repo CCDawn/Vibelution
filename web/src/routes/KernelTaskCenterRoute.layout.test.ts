@@ -39,7 +39,7 @@ function expectBackgroundAware(className: string) {
 describe("KernelTaskCenterRoute layout contract", () => {
   it("routes Kernel task center controls through VUI primitives", () => {
     expect(routeSource).toContain('from "../components/vui"');
-    expect(routeSource).toContain("<VButton");
+    expect(routeSource).toContain("<VNativeButton");
     expect(routeSource).not.toMatch(/<button\b/);
   });
 
@@ -243,10 +243,10 @@ describe("KernelTaskCenterRoute layout contract", () => {
     expect(stylesSource).not.toContain("timelineRowClass");
   });
 
-  it("allows Kernel task rows to render multiline content inside VButton", () => {
-    expect(routeSource).toContain("<VButton");
-    expect(stylesSource).toContain("data-slot=vui-button-content");
-    expect(stylesSource).toContain("data-slot=vui-button-label");
+  it("allows Kernel task rows to render multiline content with the multiline VNativeButton facade", () => {
+    expect(routeSource).toContain("<VNativeButton");
+    expect(stylesSource).not.toContain("data-slot=vui-button-content");
+    expect(stylesSource).not.toContain("data-slot=vui-button-label");
     expect(stylesSource).toContain("!h-auto");
     expect(styles.taskRowClass).toContain("!min-h-[72px]");
     expect(styles.taskRowClass).not.toContain("!min-h-[112px]");

@@ -104,6 +104,16 @@ const MODEL_FILTERS: Array<{
   { id: "unavailable", label: "不可用", countKey: "unavailable" },
 ];
 
+function providerStatusLabel(status: string): string {
+  const labels: Record<string, string> = {
+    reachable: "可连接", stale: "目录待刷新", not_discovered: "尚未发现模型", configured: "已配置",
+    auth_failed: "认证失败", discovery_failed: "模型发现失败", protocol_mismatch: "协议不匹配",
+    blocked: "已阻塞", observed: "已发现", pinned: "已固定", missing_remote: "远端目录未返回",
+    disabled: "已禁用",
+  };
+  return labels[status] || status;
+}
+
 function statusTone(status: string): VStatusTone {
   if (status === "reachable") return "success";
   if (status === "stale" || status === "not_discovered" || status === "configured") return "warning";
@@ -149,7 +159,7 @@ function ProviderAssetRow({
           </small>
         </span>
         <span className={styles.providerStatusRow}>
-          <VStatusChip tone={statusTone(row.status)} data-provider-status={row.status}>{row.status}</VStatusChip>
+          <VStatusChip tone={statusTone(row.status)} data-provider-status={row.status}>{providerStatusLabel(row.status)}</VStatusChip>
         </span>
       </VButton>
       <VButton
@@ -579,7 +589,7 @@ export function ProviderModelsTab({
             className: "w-[18%]",
             render: (model) => <span className={styles.ellipsis} title={model.upstreamId}>{model.upstreamId}</span>,
           },
-          { id: "availability", header: "可用性", className: "w-[11%]", render: (model) => <VStatusChip tone={model.availability === "disabled" ? "danger" : "neutral"}>{model.availability}</VStatusChip> },
+          { id: "availability", header: "可用性", className: "w-[11%]", render: (model) => <VStatusChip tone={model.availability === "disabled" ? "danger" : "neutral"}>{providerStatusLabel(model.availability)}</VStatusChip> },
           {
             id: "verification",
             header: "真实调用",
@@ -611,7 +621,7 @@ export function ProviderModelsTab({
                     <VStatusChip
                       tone={verificationStatus === "verified" ? "success" : verificationStatus === "failed" ? "danger" : "warning"}
                     >
-                      {verificationStatus === "verified" ? "verified · 可调用" : verificationStatus === "failed" ? "failed · 调用失败" : "unverified · 未测试"}
+                      {verificationStatus === "verified" ? "可调用" : verificationStatus === "failed" ? "调用失败" : "未测试"}
                     </VStatusChip>
                   </span>
                 </VTooltip>
@@ -783,12 +793,12 @@ function DiagnosticsTab({
     <div className={styles.tabSurface}>
       {isCritical ? (
         <p className={styles.critical} role="alert">
-          当前 Provider 状态为 {provider.status}。请修复认证或协议后再用于运行路由。
+          当前 Provider 状态为 {providerStatusLabel(provider.status)}。请修复认证或协议后再用于运行路由。
         </p>
       ) : null}
       <VStateSurface
         tone={isCritical ? "error" : provider.refreshDue ? "unavailable" : "info"}
-        title={provider.refreshDue ? "目录已 stale，需要刷新" : "Provider 诊断"}
+        title={provider.refreshDue ? "目录已过期，需要刷新" : "Provider 诊断"}
         facts={[
           { key: "attempt", label: "最近尝试", value: provider.lastAttemptAt || "从未" },
           { key: "success", label: "最近成功", value: provider.lastSuccessAt || "从未" },

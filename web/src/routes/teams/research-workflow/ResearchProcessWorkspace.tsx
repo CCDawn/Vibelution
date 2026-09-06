@@ -394,7 +394,7 @@ export function ResearchProcessWorkspace({
     },
     snapshot: runState.snapshot,
     commandOffers: runState.commandOffers,
-    hypothesisNextAction: safeNextAction,
+    hypothesisNextAction: chainQuestionId ? safeNextAction : null,
     selectedNodeId: workspaceSelectedNodeId,
     panel: location.panel,
     loading: hypothesisFirstOwnsCurrentTask || !location.runId
@@ -420,7 +420,7 @@ export function ResearchProcessWorkspace({
     teamId,
   ]);
   const workspaceReady = workspaceModel.loadState === "ready" || workspaceModel.loadState === "refreshing";
-  const workspaceNextAction = workspaceModel.source === "formal_runtime"
+  const workspaceNextAction = !chainQuestionId || workspaceModel.source === "formal_runtime"
     ? undefined
     : workspaceModel.hypothesisNextAction || safeNextAction;
   const stageNavigatorModel = useMemo(() => buildResearchWorkflowStageNavigatorModel({

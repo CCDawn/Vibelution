@@ -440,15 +440,29 @@ describe("ResearchProcessWorkspace", () => {
   }
 
   it("shows a focused start state instead of workflow progress before a question is selected", async () => {
+    harness.chain.v2ReadState = "pending";
     const rendered = await renderWorkspace();
     root = rendered.root;
 
     expect(rendered.container.textContent).toContain("先选择研究题目");
+    expect(rendered.container.textContent).not.toContain("当前流程需要处理");
+    expect(rendered.container.textContent).not.toContain("已阻塞");
     expect(rendered.container.textContent).not.toContain("加载流程定义");
     expect(rendered.container.querySelector('[data-testid="research-workflow-stage-navigator"]')).toBeNull();
     expect(rendered.container.querySelector('[data-testid="research-process-workspace-shell"]')).not.toBeNull();
     expect(rendered.container.querySelector('[data-vui="research-current-task-inspector"]')).not.toBeNull();
     expect(rendered.container.querySelector('[data-vui-region="current-task-body"]')).not.toBeNull();
+  });
+
+  it("retains a canonical read error after a question is selected", async () => {
+    harness.location.questionId = "SCI-096";
+    harness.chain.questionId = "SCI-096";
+    harness.chain.v2ReadState = "v2_error";
+    harness.chain.error = "无法读取研究状态";
+    const rendered = await renderWorkspace();
+    root = rendered.root;
+    expect(rendered.container.textContent).toContain("无法读取研究状态");
+    expect(rendered.container.textContent).not.toContain("先选择研究题目");
   });
 
   it("opens the guarded reset dialog from selected-experiment actions", async () => {

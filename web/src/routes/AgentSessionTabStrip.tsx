@@ -1,5 +1,6 @@
 import { Bot, Check, LoaderCircle, Plus, SquareTerminal, X } from "lucide-react";
 import type { DragEvent, KeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
+import { useEffect, useRef } from "react";
 
 import type { AgentInstance, SessionReferenceAttachment, SessionSummary, Team } from "../api/types";
 import { VButton, VIconButton, VNativeInput } from "../components/vui";
@@ -200,6 +201,11 @@ export function AgentSessionTabStrip({
   onSetActiveTab,
   onSubmitRename,
 }: AgentSessionTabStripProps) {
+  const tabGroupRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const activeTab = tabGroupRef.current?.querySelector<HTMLElement>('[data-session-tab-active="true"]');
+    activeTab?.closest<HTMLElement>("[data-agent-session-tab-container]")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [activeSessionId, activeCliAgentRunId, workspaceActiveTab, sessions.length, cliAgentRuns.length]);
   const approvalSessionIds = new Set(
     sessionIdsNeedingApproval.map((id) => String(id || "").trim()).filter(Boolean),
   );
@@ -261,6 +267,7 @@ export function AgentSessionTabStrip({
     <div className={styles.agentSessionTabRail}>
       <div
         className={styles.agentSessionTabGroup}
+        ref={tabGroupRef}
         role={keyboardTabs.length > 0 ? "tablist" : undefined}
         aria-label={keyboardTabs.length > 0 ? (lang === "zh" ? "Agent 会话" : "Agent sessions") : undefined}
       >

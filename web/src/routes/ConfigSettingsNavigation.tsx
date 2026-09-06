@@ -197,6 +197,13 @@ export function ConfigSettingsSidebar({
               </VButton>
             ))}
           </nav>
+        ) : searchQuery.trim() ? (
+          <div className={styles.searchResults} role="status">
+            <span>{language === "zh" ? "没有匹配设置" : "No matching settings"}</span>
+            <VButton variant="ghost" onPress={() => setSearchQuery("")}>
+              {language === "zh" ? "清空搜索" : "Clear search"}
+            </VButton>
+          </div>
         ) : null}
       </div>
       <div className={styles.status} role="status">

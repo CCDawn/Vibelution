@@ -12,10 +12,10 @@ import type { KernelDelivery, KernelTask, KernelTimelineItem } from "../api/type
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import {
   VActionGroup,
-  VButton,
   VIconButton,
   VListDetailPage,
   VMetricStrip,
+  VNativeButton,
   VSelect,
   VStateSurface,
   VStatusChip,
@@ -24,6 +24,7 @@ import {
 } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import styles from "./KernelTaskCenterRoute.styles";
+import { agentRunStatusLabel } from "./agents/agentRunPresentation";
 import { ProgressiveRegionSkeleton } from "./shared/ProgressiveRegionSkeleton";
 
 const ALL_STATUS_KEY = "all";
@@ -184,9 +185,9 @@ export function KernelTaskCenterRoute() {
   const statusOptions = useMemo(
     () => [
       { id: ALL_STATUS_KEY, label: copy.allStatus },
-      ...STATUS_OPTIONS.map((option) => ({ id: option, label: option })),
+      ...STATUS_OPTIONS.map((option) => ({ id: option, label: agentRunStatusLabel(option, lang) })),
     ],
-    [copy.allStatus],
+    [copy.allStatus, lang],
   );
   const taskPaneContent = taskQuery.isError ? (
     <VStateSurface fill className={styles.emptyStateClass} title={copy.loadFailed} tone="error">
@@ -226,7 +227,7 @@ export function KernelTaskCenterRoute() {
             <p className={styles.eyebrowClass}>{copy.detail}</p>
             <h2 className={styles.detailTitleClass}>{shortId(timeline.taskId)}</h2>
           </div>
-          <StatusPill status={timeline.task.status} />
+          <StatusPill lang={lang} status={timeline.task.status} />
         </div>
 
         <VMetricStrip
@@ -252,7 +253,7 @@ export function KernelTaskCenterRoute() {
             <LedgerBucket title={copy.deliveryResult} count={timeline.deliveries.length}>
               <div className={styles.deliveryGridClass}>
                 {timeline.deliveries.map((delivery) => (
-                  <DeliveryRow key={`${delivery.targetAgentId}-${delivery.inboxMessageId}`} delivery={delivery} copy={copy} />
+                  <DeliveryRow key={`${delivery.targetAgentId}-${delivery.inboxMessageId}`} delivery={delivery} copy={copy} lang={lang} />
                 ))}
               </div>
             </LedgerBucket>
@@ -351,36 +352,39 @@ function TaskRow({
   lang: "zh" | "en";
 }) {
   return (
-    <VButton
+    <VNativeButton
       type="button"
       className={selected ? `${styles.taskRowClass} ${styles.taskRowSelectedClass}` : styles.taskRowClass}
       onClick={onSelect}
+      aria-pressed={selected}
     >
       <span className={styles.taskRowTopClass}>
-        <strong className={styles.taskRowTitleClass}>{task.goal || shortId(task.taskId)}</strong>
-        <StatusPill status={task.status} />
+        <strong className={styles.taskRowTitleClass} title={task.goal}>{task.goal || shortId(task.taskId)}</strong>
+        <StatusPill lang={lang} status={task.status} />
       </span>
       <span className={styles.taskRowMetaClass}>
         <span>{copy.assigned}: {(task.assignedAgentIds ?? []).map(shortId).join(", ") || "-"}</span>
         <span>{copy.updated}: {formatTime(task.updatedAt, lang)}</span>
       </span>
       <code className={styles.monoCodeClass}>{task.taskId}</code>
-    </VButton>
+    </VNativeButton>
   );
 }
 
 function DeliveryRow({
   delivery,
   copy,
+  lang,
 }: {
   delivery: KernelDelivery;
+  lang: "zh" | "en";
   copy: (typeof COPY)["zh"] | (typeof COPY)["en"];
 }) {
   return (
     <div className={styles.deliveryRowClass}>
       <div className={styles.deliveryRowTopClass}>
         <strong>{shortId(delivery.targetAgentId)}</strong>
-        <StatusPill status={delivery.status} />
+        <StatusPill lang={lang} status={delivery.status} />
       </div>
       <span className={styles.mutedLineClass}>{copy.inbox}: {shortId(delivery.inboxMessageId)}</span>
       <span className={styles.mutedLineClass}>{copy.wake}: {delivery.wake?.wakeStatus || "-"}</span>
@@ -418,7 +422,7 @@ function LifecycleRow({ item, lang }: { item: KernelTimelineItem; lang: "zh" | "
       <div>
         <div className={styles.lifecycleTitleClass}>
           <strong className={styles.lifecycleKindClass}>{item.kind}</strong>
-          <StatusPill status={item.status} />
+          <StatusPill lang={lang} status={item.status} />
         </div>
         <p className={styles.lifecycleSummaryClass}>{item.summary}</p>
         <span className={styles.mutedLineClass}>{formatTime(item.at, lang)}</span>
@@ -463,10 +467,10 @@ function RefList({
   );
 }
 
-function StatusPill({ status }: { status: string }) {
+function StatusPill({ status, lang }: { status: string; lang: "zh" | "en" }) {
   return (
     <VStatusChip tone={statusTone(status)} className={styles.statusPillBaseClass}>
-      {status || "unknown"}
+      {status === "delivered" && lang === "zh" ? "已投递" : agentRunStatusLabel(status || "unknown", lang)}
     </VStatusChip>
   );
 }

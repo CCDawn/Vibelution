@@ -9,6 +9,7 @@ import type {
 import { VButton, VStateSurface, VTooltip } from "../components/vui";
 import styles from "./AgentActivityHistoryPanel.styles";
 import { ProgressiveRegionSkeleton } from "./shared/ProgressiveRegionSkeleton";
+import { agentRunStatusLabel, agentRunSummary } from "./agents/agentRunPresentation";
 
 export type AgentActivityTimelineItem = {
   id: string;
@@ -210,10 +211,10 @@ export function AgentActivityHistoryPanel({
                   content={`${run.currentPhase || run.sessionId || "-"} · ${formatTimestamp(run.updatedAt || run.startedAt, lang)}`}
                 >
                   <strong className={styles.metadataTrigger} tabIndex={0}>
-                    {run.status || run.currentPhase || run.runKind}
+                    {agentRunStatusLabel(run.status || run.currentPhase || run.runKind, lang)}
                   </strong>
                 </VTooltip>
-                <span>{run.summary || run.runId}</span>
+                <span>{agentRunSummary(run.summary) || run.runId}</span>
               </article>
             ))}
             {runHistory?.subAgentRuns.map((run) => (
@@ -223,10 +224,10 @@ export function AgentActivityHistoryPanel({
                   content={`${run.contextMode || "-"} · ${copy.maxDepth} ${run.depth}/${run.maxDepth} · ${formatTimestamp(run.updatedAt || run.createdAt, lang)}`}
                 >
                   <strong className={styles.metadataTrigger} tabIndex={0}>
-                    {copy.subAgentRuns} · {run.status || run.currentPhase || run.runKind}
+                    {copy.subAgentRuns} · {agentRunStatusLabel(run.status || run.currentPhase || run.runKind, lang)}
                   </strong>
                 </VTooltip>
-                <span>{run.summary || run.subRunId || run.runId}</span>
+                <span>{agentRunSummary(run.summary) || run.subRunId || run.runId}</span>
               </article>
             ))}
           </div>

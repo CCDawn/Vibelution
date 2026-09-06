@@ -41,7 +41,7 @@ import {
   LogRoot,
   LogTreeResponse,
 } from "../api/types";
-import { VActionGroup, VButton, VConfirmDialog, VDenseOpsPage, VIconButton, VNativeInput, VStateSurface, VStatusStrip, VSurface, VTabs, VTooltip } from "../components/vui";
+import { VActionGroup, VButton, VConfirmDialog, VDenseOpsPage, VIconButton, VNativeButton, VNativeInput, VStateSurface, VStatusStrip, VSurface, VTabs, VTooltip } from "../components/vui";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
 import { PaneHeightResizeHandle } from "../components/layout/PaneHeightResizeHandle";
 import {
@@ -1249,34 +1249,36 @@ export function LogsRoute() {
               const stateLabel = root.exists ? t("present") : t("missing");
               const timestampLabel = root.exists ? formatTimestamp(root.summary.lastModifiedAt, lang) : "";
               return (
-                <VButton
+                <VTooltip
                   key={root.id}
-                  type="button"
-                  variant="ghost"
-                  className={isActive ? `${styles.rootButton} ${styles.rootButtonActive}` : styles.rootButton}
-                  onPress={() => setActiveRootId(root.id)}
-                  aria-pressed={isActive}
-                  tooltip={`${root.summary.userGuide || root.path} · ${root.path} · ${latestLabel}`}
+                  content={`${root.summary.userGuide || root.path} · ${root.path} · ${latestLabel}`}
                 >
-                  <span className={styles.rootButtonHeader}>
-                    <span className={styles.rootButtonLabel}>{rootLabel}</span>
-                    <span className={root.exists ? styles.rootState : `${styles.rootState} ${styles.rootStateMissing}`}>
-                      {stateLabel}
+                  <VNativeButton
+                    type="button"
+                    className={isActive ? `${styles.rootButton} ${styles.rootButtonActive}` : styles.rootButton}
+                    onClick={() => setActiveRootId(root.id)}
+                    aria-pressed={isActive}
+                  >
+                    <span className={styles.rootButtonHeader}>
+                      <span className={styles.rootButtonLabel}>{rootLabel}</span>
+                      <span className={root.exists ? styles.rootState : `${styles.rootState} ${styles.rootStateMissing}`}>
+                        {stateLabel}
+                      </span>
                     </span>
-                  </span>
-                  <span className={styles.rootButtonPath}>
-                    {root.path}
-                  </span>
-                  <span className={styles.rootButtonFooter}>
-                    <span className={styles.rootButtonStats}>
-                      {root.summary.fileCount} {lang === "zh" ? "个文件" : "files"} · {formatBytes(root.summary.sizeBytes)}
+                    <span className={styles.rootButtonPath}>
+                      {root.path}
                     </span>
-                    {timestampLabel ? <span className={styles.rootButtonTime}>{timestampLabel}</span> : null}
-                  </span>
-                  <span className={styles.rootButtonLatest}>
-                    {latestLabel}
-                  </span>
-                </VButton>
+                    <span className={styles.rootButtonFooter}>
+                      <span className={styles.rootButtonStats}>
+                        {root.summary.fileCount} {lang === "zh" ? "个文件" : "files"} · {formatBytes(root.summary.sizeBytes)}
+                      </span>
+                      {timestampLabel ? <span className={styles.rootButtonTime}>{timestampLabel}</span> : null}
+                    </span>
+                    <span className={styles.rootButtonLatest}>
+                      {latestLabel}
+                    </span>
+                  </VNativeButton>
+                </VTooltip>
               );
             })}
           </nav>

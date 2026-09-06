@@ -19,10 +19,10 @@ const panelHeaderClass = "flex items-center justify-between gap-2 px-2 pb-1 pt-2
 const eyebrowClass = "m-0 mb-0.5 [font-size:var(--vui-font-xs)] font-bold uppercase tracking-[0.08em] text-vui-fg-tertiary";
 const panelCountClass = "text-base text-vui-fg-primary";
 const taskListClass = "grid min-h-0 min-w-0 max-w-full content-start gap-[7px] overflow-auto overflow-x-hidden p-2 max-[1120px]:max-h-[min(38vh,320px)]";
-const taskRowClass = "grid !h-auto !min-h-[72px] w-full min-w-0 max-w-full content-start justify-self-stretch gap-1 overflow-hidden whitespace-normal !rounded-[var(--radius-control)] !border-0 !bg-vui-surface-row px-2 py-1.5 text-left text-vui-fg-primary !shadow-none hover:!bg-[var(--vui-surface-row-hover)] [&_[data-slot=vui-button-content]]:grid [&_[data-slot=vui-button-content]]:min-w-0 [&_[data-slot=vui-button-content]]:w-full [&_[data-slot=vui-button-content]]:items-start [&_[data-slot=vui-button-content]]:justify-stretch [&_[data-slot=vui-button-content]]:gap-1 [&_[data-slot=vui-button-label]]:contents [&_[data-slot=vui-button-label]]:overflow-visible [&_[data-slot=vui-button-label]]:whitespace-normal";
+const taskRowClass = "grid !h-auto !min-h-[72px] w-full min-w-0 max-w-full content-start justify-self-stretch gap-1 overflow-hidden whitespace-normal !rounded-[var(--radius-control)] !border-0 !bg-vui-surface-row px-2 py-1.5 text-left text-vui-fg-primary !shadow-none hover:!bg-[var(--vui-surface-row-hover)]";
 const taskRowSelectedClass = "!bg-[var(--vui-surface-row-hover)] shadow-[var(--vui-shadow-inset-accent)]";
 const taskRowTopClass = "grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2";
-const taskRowTitleClass = "block min-w-0 truncate";
+const taskRowTitleClass = "block min-w-0 line-clamp-2 break-words [overflow-wrap:anywhere]";
 const taskRowMetaClass = "grid w-full min-w-0 gap-[3px] [font-size:var(--vui-font-xs)] leading-[1.35] text-vui-fg-secondary";
 const monoCodeClass = "block w-full min-w-0 break-all [font-size:var(--vui-font-xs)] text-vui-fg-tertiary";
 const detailHeaderClass = `flex min-w-0 max-w-full items-center justify-between gap-2 ${cardSurface}`;
