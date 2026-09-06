@@ -989,16 +989,33 @@ def get_source_collection_stage_task_context(
         },
     }
     if normalized_stage_id == "relations" or task_agent_role == "source_relation_mapper":
-        from ..research_runtime.artifact_readback_registry import load_allowed_evidence_refs
+        from ..research_runtime.artifact_readback_registry import (
+            load_allowed_evidence_refs,
+            load_relation_evidence_context,
+        )
 
         context["allowedEvidenceRefs"] = load_allowed_evidence_refs(
             team_id=normalized_team_id,
             authority_run_id=normalized_run_id,
             workflow_run_id=s._trim_text(task.get("workflowRunId"), max_length=160),
         )
+        page_candidate_ids = {
+            str(item.get("candidateId") or "") for item in selected_candidates
+        }
+        context["relationEvidence"] = [
+            card for card in load_relation_evidence_context(
+                team_id=normalized_team_id,
+                authority_run_id=normalized_run_id,
+                workflow_run_id=s._trim_text(task.get("workflowRunId"), max_length=160),
+            )
+            if card.get("candidateId") in page_candidate_ids
+            or card.get("sourceId") in page_candidate_ids
+        ]
         context["usage"]["evidenceInstruction"] = (
             "关系 evidenceRefs[] 和 counterEvidenceRefs[].evidenceRef 必须逐字使用 "
-            "allowedEvidenceRefs 中的 claimEvidenceId；该列表为空时请报告证据缺失。"
+            "allowedEvidenceRefs 中的 claimEvidenceId；relationEvidence[] 给出本页证据 ID、"
+            "候选 ID、原文引述和支持方向的对应关系，不要通过重复读取猜测映射。"
+            "该列表为空时请报告证据缺失。"
         )
     if retry_focus:
         context["retryFocus"] = retry_focus

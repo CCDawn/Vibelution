@@ -329,6 +329,29 @@ def _load_scoped_evidence(
     )
 
 
+def load_relation_evidence_context(
+    *,
+    team_id: str,
+    authority_run_id: str,
+    workflow_run_id: str = "",
+) -> list[dict[str, Any]]:
+    """Expose the source mapping behind the relation validator's evidence IDs."""
+    if not team_id or not authority_run_id:
+        return []
+    cards = _load_scoped_evidence(
+        team_id=team_id,
+        authority_run_id=authority_run_id,
+        workflow_run_id=workflow_run_id,
+    )
+    fields = ("claimEvidenceId", "claimId", "candidateId", "sourceId", "quote", "supportLevel")
+    return [
+        {key: card.get(key, "") for key in fields}
+        for card in cards or []
+        if isinstance(card.get("claimEvidenceId"), str)
+        and card["claimEvidenceId"].strip()
+    ]
+
+
 def load_allowed_evidence_refs(
     *,
     team_id: str,
