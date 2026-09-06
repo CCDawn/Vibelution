@@ -7141,3 +7141,19 @@ def test_proxy_environment_conflicting_config_waits_and_restores_after_error(mon
             future.result(timeout=3)
     assert entered.is_set()
     assert all(os.environ.get(name) is None for name in _PROXY_ENV_NAMES)
+
+
+def test_owned_http_clients_close_once_after_invocation():
+    client = LLMClient(config=make_config())
+    closed = []
+    class Handler:
+        def close(self):
+            closed.append(self)
+    completion, responses = Handler(), Handler()
+    client._cancellable_completion_http_handler = completion
+    client._cancellable_responses_http_handler = responses
+    client.close_http_clients()
+    client.close_http_clients()
+    assert closed == [completion, responses]
+    assert client._cancellable_completion_http_handler is None
+    assert client._cancellable_responses_http_handler is None

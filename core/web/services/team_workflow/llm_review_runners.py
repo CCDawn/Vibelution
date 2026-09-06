@@ -1147,6 +1147,9 @@ def resolve_review_llm() -> dict[str, Any] | None:
         return None
     return {
         "client": client,
+        "clientFactory": lambda: get_llm_client(
+            profile_id=REVIEW_LLM_PROFILE_ID, config=runtime_config
+        ),
         "profileId": REVIEW_LLM_PROFILE_ID,
         "modelId": model_id,
         "providerId": str(getattr(provider, "provider_id", "") or "").strip(),
@@ -1180,7 +1183,20 @@ def _parse_json_object(text: str, *, what: str) -> dict[str, Any]:
     return payload
 
 
-def _invoke_review_llm(
+def _invoke_review_llm(llm: Mapping[str, Any], **kwargs: Any) -> Any:
+    """Give each parallel review its own abortable transport and lifetime."""
+    factory = llm.get("clientFactory")
+    if factory is None:
+        # Explicitly injected clients remain owned by their caller.
+        return _invoke_review_llm_impl(llm, **kwargs)
+    client = factory()
+    try:
+        return _invoke_review_llm_impl({**llm, "client": client}, **kwargs)
+    finally:
+        client.close_http_clients()
+
+
+def _invoke_review_llm_impl(
     llm: Mapping[str, Any],
     *,
     agent_id: str,

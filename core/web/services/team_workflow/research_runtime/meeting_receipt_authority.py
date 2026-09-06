@@ -72,6 +72,20 @@ def _is_chain_resolvable_hypothesis_block(run: Any) -> bool:
     )
 
 
+def requires_bound_review_receipts(meeting: Mapping[str, Any]) -> bool:
+    """Require real receipts for an explicit formal or run-bound review.
+
+    Theme classification describes campaign membership, not execution proof.
+    A persisted authority opts into validation; it never grants validity by
+    itself. Malformed authorities therefore fail in the existing validator
+    instead of silently taking the DEV fixture path.
+    """
+    return (
+        str(meeting.get("mode") or "").strip().lower() == "formal"
+        or meeting.get("modelInvocationReceiptAuthority") is not None
+    )
+
+
 def _required_text(value: Any, field: str) -> str:
     normalized = str(value or "").strip()
     if not normalized:

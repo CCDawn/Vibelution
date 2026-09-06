@@ -2493,6 +2493,19 @@ class LLMClient:
             )
         self._last_payload_protocol_summary: Dict[str, Any] = {}
 
+    def close_http_clients(self) -> None:
+        """Release owned HTTP transports once this client's calls have finished."""
+        for attribute, lock in (
+            ("_cancellable_completion_http_handler", self._cancellable_completion_http_handler_lock),
+            ("_cancellable_responses_http_handler", self._cancellable_responses_http_handler_lock),
+        ):
+            with lock:
+                handler = getattr(self, attribute)
+                setattr(self, attribute, None)
+                setattr(self, attribute + "_key", None)
+            if handler is not None:
+                handler.close()
+
     def _record_responses_websocket_state(self, state: str, fields: Dict[str, Any]) -> None:
         outcomes = {
             "connected": "succeeded",

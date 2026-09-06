@@ -64,7 +64,7 @@ EVIDENCE_GAP_STATUS = "evidence_gap_unavailable"
 GAP_CONVERGENCE_KIND = "hypothesis_gap_convergence"
 HYPOTHESIS_REVIEW_MEETING_TYPE = "hypothesis_review"
 CANDIDATE_GENERATION_MEETING_TYPE = "hypothesis_candidate_generation"
-# Server-owned scope mode that fences formal review: only this marker makes
+# Explicit formal scope marker; run-bound reviews also require real receipts.
 # the hypothesis review executor run in FORMAL mode (provider-bound receipts).
 HYPOTHESIS_REVIEW_FORMAL_MODE = "formal"
 HYPOTHESIS_DESIGN_NODE_ID = "hypothesis_design"
@@ -13646,10 +13646,9 @@ def _resolve_review_runners(
             build_hypothesis_review_runners,
         )
 
-        formal_meeting = (
-            str(meeting_round.get("mode") or "").strip().lower()
-            == HYPOTHESIS_REVIEW_FORMAL_MODE
-        )
+        from .meeting_receipt_authority import requires_bound_review_receipts
+
+        formal_meeting = requires_bound_review_receipts(meeting_round)
         real_runners = build_hypothesis_review_runners(
             require_provider_receipts=formal_meeting
         )

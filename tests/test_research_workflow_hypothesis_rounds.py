@@ -809,3 +809,23 @@ def test_in_flight_generation_rejects_second_trigger_then_reuses(
     assert hypothesis_rounds_service.list_hypothesis_rounds(team_id)[
         "roundCount"
     ] == 1
+
+
+def test_run_bound_dev_theme_executes_receipt_bound_review(tmp_path, monkeypatch):
+    from core.web.services.team_workflow import meeting_rounds, hypothesis_review_executor
+    team_id = _race_env(tmp_path, monkeypatch)
+    original_get = meeting_rounds.get_meeting_round
+    authority = {"authorityKind": "workflow_run", "workflowRunId": "run-single"}
+    def get_meeting(*args, **kwargs):
+        result = original_get(*args, **kwargs)
+        return {**result, "meetingRound": {**result["meetingRound"], "modelInvocationReceiptAuthority": authority}}
+    monkeypatch.setattr(meeting_rounds, "get_meeting_round", get_meeting)
+    class ModeCaptured(Exception):
+        pass
+    def execute(context, **kwargs):
+        assert kwargs["execution_mode"] is hypothesis_review_executor.HypothesisReviewExecutionMode.FORMAL
+        assert context["_modelInvocationReceiptAuthority"] == authority
+        raise ModeCaptured
+    monkeypatch.setattr(hypothesis_review_executor, "execute_hypothesis_review", execute)
+    with pytest.raises(ModeCaptured):
+        hypothesis_rounds_service.generate_hypothesis_round_from_meeting(team_id, "meeting-a", _group_payload())

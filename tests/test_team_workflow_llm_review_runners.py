@@ -2602,3 +2602,48 @@ def test_digest_strict_mode_timeout_keeps_existing_failure_semantics(monkeypatch
 
     with pytest.raises(llm_review_runners.ReviewLLMTimeoutError):
         drafter(_meeting_round(), _source_messages())
+
+
+@pytest.mark.parametrize("authority", [{"authorityKind": "workflow_run", "workflowRunId": "run-single"}, {}])
+def test_single_question_review_requires_receipts_even_under_dev_theme(monkeypatch, authority):
+    chain, meeting_rounds, meeting, captured = _formal_fence_env(monkeypatch, mode="dev")
+    meeting["modelInvocationReceiptAuthority"] = authority
+    with pytest.raises(HypothesisFirstChainError, match="receipt-bound review runners"):
+        chain._resolve_review_runners(meeting, "meeting-1", "hypothesis_review")
+    assert captured == {"require_provider_receipts": True}
+
+
+def test_concurrent_review_calls_use_separate_owned_clients(monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    barrier = threading.Barrier(2)
+    clients = []
+
+    class Client:
+        def __init__(self):
+            self.lock = threading.Lock()
+            self.closed = False
+        def close_http_clients(self):
+            self.closed = True
+
+    def factory():
+        client = Client()
+        clients.append(client)
+        return client
+
+    def invoke(client, *_args, **_kwargs):
+        with client.lock:
+            barrier.wait(timeout=1)
+            return _FakeResponse('{"ok": true}')
+
+    template = Client()
+    monkeypatch.setattr(llm_review_runners, "invoke_llm", invoke)
+    resolved = {**_FAKE_LLM, "client": template, "clientFactory": factory}
+    def call():
+        return llm_review_runners._invoke_review_llm(resolved, agent_id="reviewer",
+            purpose="hypothesis_reflection", system_prompt="score", user_payload={}, session_id="team-test")
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(call) for _ in range(2)]
+        assert [f.result(timeout=3) for f in futures] == [{"ok": True}, {"ok": True}]
+    assert len(clients) == 2
+    assert all(client.closed for client in clients)
+    assert not template.closed

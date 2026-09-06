@@ -507,10 +507,9 @@ def generate_hypothesis_round_from_meeting(
     double-checked after acquisition so a trigger that raced the winner's
     create still reuses instead of re-running the executor.
 
-    The executor's explicit DEV/FORMAL fence is driven by the bound meeting's
-    server-owned scope ``mode``: only ``mode=formal`` runs ``FORMAL`` (real
-    runners + one provider-bound receipt per model call); dev/platform scopes
-    and a missing marker fail closed to ``DEV`` fixtures.
+    Explicit formal meetings and meetings with server-owned run authority
+    require real runners and one provider-bound receipt per model call.
+    Unbound dev/platform meetings retain their fixture execution contract.
     """
 
     from core.web.services.team_service import assert_team_exists
@@ -797,16 +796,14 @@ def generate_hypothesis_round_from_meeting(
         prior_round=prior_round,
         extra_evidence_refs=_normalized_str_list(request.get("evidenceRefs")),
     )
-    # The closed meeting's server-owned scope mode is the explicit execution
-    # fence authority: only ``mode=formal`` runs the FORMAL review.  Dev and
-    # platform scopes — and any meeting missing the marker — fail closed to
-    # the deterministic DEV path; FORMAL is never inferred from runner
-    # presence or payload hints.
-    review_mode = str(meeting.get("mode") or "").strip().lower()
+    # Run-bound single-question execution requires real receipts independently
+    # of theme classification. Existing receipt validation checks the authority;
+    # caller-injected runners and payload hints never grant execution proof.
+    from .research_runtime.meeting_receipt_authority import requires_bound_review_receipts
+
     execution_mode = (
         hypothesis_review_executor.HypothesisReviewExecutionMode.FORMAL
-        if review_mode
-        == hypothesis_review_executor.HypothesisReviewExecutionMode.FORMAL.value
+        if requires_bound_review_receipts(meeting)
         else hypothesis_review_executor.HypothesisReviewExecutionMode.DEV
     )
     if execution_mode is hypothesis_review_executor.HypothesisReviewExecutionMode.FORMAL:
