@@ -174,9 +174,13 @@ class WorkflowRuntime:
         self._sweep_stuck_digest_works_best_effort()
         self._sweep_meetings_missing_digest_best_effort()
         self._refresh_queued_meeting_activity_best_effort()
-        self._sweep_auto_advance_closure_best_effort()
         self._recover_challenge_meeting_drivers_best_effort()
         return handled
+
+    def run_hypothesis_recovery_once(self, limit: int = 4) -> int:
+        """Run slow review recovery without starving delivery and repairs."""
+        self._sweep_auto_advance_closure_best_effort()
+        return 0
 
     def _recover_missing_knowledge_sideflows_best_effort(self, *, limit: int) -> None:
         """Recover knowledge children lost after problem-understanding commit."""
@@ -295,7 +299,7 @@ class WorkflowRuntime:
         and advance) are picked up here — the sweep reuses the chain's own
         idempotent helpers (adjudicate accepted, then create + auto-start the
         formal run), so replays converge instead of duplicating.  Hosted on
-        the serial maintenance tick with the same peek + self-throttle
+        the dedicated serial hypothesis recovery tick with the same peek + self-throttle
         discipline as the digest watchdog; never raises, never re-drives.
         """
         now_ms = int(time.time() * 1000)

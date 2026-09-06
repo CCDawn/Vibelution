@@ -181,8 +181,8 @@ def test_pump_spawns_configured_threads_and_stops_bounded() -> None:
     pool_threads = list(pump.threads)
     try:
         assert pump.worker_count == 3
-        # 3 dispatch workers + maintenance + receipt-persistence lanes.
-        assert len(pool_threads) == 5
+        # 3 dispatch workers + maintenance + receipt + hypothesis recovery lanes.
+        assert len(pool_threads) == 6
         assert all(thread.is_alive() for thread in pool_threads)
         assert _wait_until(lambda: runtime.maintenance_calls >= 1)
         assert _wait_until(lambda: runtime.receipt_persistence_calls >= 1)
@@ -498,3 +498,28 @@ def test_parallel_graph_dispatch_keeps_receipt_ownership_per_run(
     finally:
         pump.stop()
         runtime.close()
+
+
+def test_slow_hypothesis_recovery_does_not_starve_maintenance():
+    class SlowRecoveryRuntime(_ClaimRuntime):
+        def __init__(self):
+            super().__init__([])
+            self.started = threading.Event()
+            self.release = threading.Event()
+
+        def run_hypothesis_recovery_once(self, limit=4):
+            self.started.set()
+            self.release.wait(timeout=5)
+            return 0
+
+    runtime = SlowRecoveryRuntime()
+    pump = WorkflowOutboxPump(workers=1, idle_poll_s=0.05)
+    pump.attach(runtime)
+    try:
+        assert runtime.started.wait(timeout=5)
+        before = runtime.maintenance_calls
+        assert _wait_until(lambda: runtime.maintenance_calls > before)
+        assert runtime.receipt_persistence_calls > 0
+    finally:
+        runtime.release.set()
+        pump.stop(timeout=10)

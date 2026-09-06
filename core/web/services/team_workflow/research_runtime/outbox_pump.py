@@ -12,11 +12,12 @@ loops claim (outbox lease CAS via ``runtime.claim_and_run_one``) -> execute ->
 commit and never prefetches a second action: the lease shards actions between
 workers, the B2 heartbeat keeps each lease alive during long invokes, and all
 ledger writes funnel through the single writer queue. graph/adapter dispatch
-parallelize; fork / delivery / event / cancel-cleanup and the repair sweeps
+parallelize; fork / delivery / event / cancel-cleanup and the short repair sweeps
 stay on ONE serial maintenance thread (their sequence-conflict checks are not
 designed for concurrent rewrites of the same run, and the fork worker writes
 the checkpoint store that the B4 task owns). Receipt persistence has its own
-serial lane so turn settlement cannot starve behind multi-minute repair LLMs.
+serial lane. Hypothesis recovery has its own serial lane so multi-minute
+review LLM calls cannot starve delivery, reconciliation or receipt persistence.
 
 The pump threads are the only places that run LangGraph / adapters.
 ``wake()`` only releases a semaphore token, so the Ledger writer / HTTP thread
@@ -60,7 +61,7 @@ class WorkflowOutboxPump:
 
     @property
     def worker_count(self) -> int:
-        """Configured dispatch workers (maintenance/receipt lanes are extra)."""
+        """Configured dispatch workers (maintenance/receipt/recovery lanes are extra)."""
         return self._workers
 
     @property
@@ -97,6 +98,13 @@ class WorkflowOutboxPump:
                 threading.Thread(
                     target=self._receipt_persistence_loop,
                     name="vibelution-workflow-receipt-persistence",
+                    daemon=True,
+                )
+            )
+            self._threads.append(
+                threading.Thread(
+                    target=self._hypothesis_recovery_loop,
+                    name="vibelution-workflow-hypothesis-recovery",
                     daemon=True,
                 )
             )
@@ -193,3 +201,14 @@ class WorkflowOutboxPump:
                 self._stop.wait(timeout=self._idle_poll_s)
         finally:
             logger.info("research workflow receipt persistence stopped")
+
+    def _hypothesis_recovery_loop(self) -> None:
+        """One recovery lane replays the existing durable meeting authority."""
+        while not self._stop.is_set():
+            recover = getattr(self._runtime, "run_hypothesis_recovery_once", None)
+            if recover is not None:
+                try:
+                    recover(limit=self._batch_limit)
+                except Exception:
+                    logger.exception("hypothesis recovery iteration failed")
+            self._stop.wait(timeout=self._idle_poll_s)

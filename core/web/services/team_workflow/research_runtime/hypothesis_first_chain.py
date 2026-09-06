@@ -2944,7 +2944,16 @@ def _claim_gate_block_reason(exc: ClaimBeliefGateBlockedError) -> str:
     return "claim_belief_gate_blocked"
 
 
-def auto_adjudicate_exhausted_round(
+def auto_adjudicate_exhausted_round(team_id: str, *, question_id: str) -> dict[str, Any]:
+    """Serialize automatic read/check/write with frontend adjudication commands."""
+    try:
+        with hypothesis_first_scope_lock(team_id, question_id):
+            return _auto_adjudicate_exhausted_round_locked(team_id, question_id=question_id)
+    except Exception as exc:
+        return {"status": "failed", "reason": type(exc).__name__, "detail": str(exc)[:200]}
+
+
+def _auto_adjudicate_exhausted_round_locked(
     team_id: str,
     *,
     question_id: str,
@@ -3288,8 +3297,8 @@ def auto_create_formal_run_after_convergence(
     present.  The action reuses the exact ``create_formal_run`` command
     channel — ``create_question_run`` plus ``_auto_start_created_formal_run``
     (the start rides its own offer gate; readiness is never bypassed) — with
-    the deterministic idempotency key
-    ``hf2:auto-formal-run:<questionId>:<roundId>``.  Stage-one policy-covered
+    the canonical V2 offer and idempotency key shared with the frontend.
+    Stage-one policy-covered
     questions carry the durable CatalogRunAuthorization like the
     ``_create_stage_one_question_run`` precedent; a missing authorization or
     an authorization replay mismatch is a structured ``failed`` plus scene
@@ -3297,9 +3306,6 @@ def auto_create_formal_run_after_convergence(
     """
     from core.web.services import team_service
 
-    from core.web.services.team_workflow.research_runtime.run_creation import (
-        create_question_run,
-    )
     from .service import ResearchWorkflowError
 
     try:
@@ -3372,29 +3378,23 @@ def auto_create_formal_run_after_convergence(
                 "reason": "formal_run_exists",
                 "roundId": round_id,
             }
-        idempotency_key = f"hf2:auto-formal-run:{normalized_question_id}:{round_id}"
-        result = create_question_run(
-            CHALLENGE_CUP_WORKFLOW_ID,
-            team_id=normalized_team_id,
+        from .hypothesis_first_state_v2 import project_hypothesis_first_state_v2
+
+        state = project_hypothesis_first_state_v2(normalized_team_id, normalized_question_id)
+        offer = next((item for item in state.get("allowedActions") or []
+                      if item.get("kind") == "command"
+                      and item.get("command") == "create_formal_run"
+                      and item.get("enabled") is True), None)
+        if offer is None:
+            return {"status": "skipped", "reason": "formal_creation_not_offered", "roundId": round_id}
+        executed = execute_v2_command(
+            normalized_team_id,
+            {**offer, "expectedStateVersion": state["stateVersion"]},
             question_id=normalized_question_id,
-            safety_limits=_formal_run_safety_limits(),
-            idempotency_key=idempotency_key,
-            formal_hypothesis_round_id=round_id,
+            _actor="system:auto-advance:formal-creation",
         )
-        run_id = (
-            str(result.get("runId") or "").strip()
-            if isinstance(result, Mapping)
-            else ""
-        )
-        if run_id:
-            # Same channel as the create_formal_run command: the entry
-            # start_node rides the offer gate; readiness-blocked offers keep
-            # the historical wait-for-manual-start behavior.
-            _auto_start_created_formal_run(
-                normalized_team_id,
-                run=result,
-                idempotency_key=idempotency_key,
-            )
+        result = executed.get("result") or {}
+        run_id = str(result.get("runId") or "").strip()
         _record_scene_event(
             "hypothesis_first.auto_formal_run",
             outcome="created",
@@ -14084,35 +14084,10 @@ def close_review_meeting(
     _auto_advance_converge_tick(
         normalized_team_id, str(closed_record.get("question") or "")
     )
-    # Budget-exhaustion auto-advance (in-place): when this closure produced a
-    # fan-in round at/after the hard limit, adjudicate it accepted and create
-    # the formal run without waiting for a human.  Strictly best-effort — the
-    # helpers never raise, and this wrapper swallows anything left so the
-    # closed fact and the closure result stand regardless.
+    # Recovery owns adjudication and formal creation under the shared V2
+    # scope lock. Closure may already hold that OS lock; never nest it here.
     auto_adjudication: dict[str, Any] | None = None
     auto_formal_run: dict[str, Any] | None = None
-    try:
-        auto_adjudication = auto_adjudicate_exhausted_round(
-            normalized_team_id,
-            question_id=str(closed_record.get("question") or ""),
-        )
-        if str(auto_adjudication.get("status") or "") in {"created", "reused"}:
-            auto_formal_run = auto_create_formal_run_after_convergence(
-                normalized_team_id,
-                question_id=str(closed_record.get("question") or ""),
-            )
-    except Exception as exc:  # noqa: BLE001 - closure must never fail on auto-advance
-        _record_scene_event(
-            "hypothesis_first.auto_advance_failed",
-            outcome="failed",
-            level="warning",
-            fields={
-                "teamId": normalized_team_id,
-                "meetingRoundId": normalized_round_id,
-                "reason": type(exc).__name__,
-                "error": str(exc)[:400],
-            },
-        )
     # The sibling archive gate may have deferred this round's open-next; a
     # first-time archive of the newest logical round's last sibling retries it
     # here.  Replay closures ("reused") never re-trigger, and the gate inside
