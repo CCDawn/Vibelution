@@ -243,6 +243,17 @@ def test_user_stop_closes_every_active_review_for_the_same_selection(
 def _hf_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
+    # These orchestration fixtures use deterministic DEV review adapters,
+    # including when a fake parent run supplies lineage. Keep explicit FORMAL
+    # fence tests live; real run-bound DEV receipts are covered by the runner
+    # and hypothesis-round executor contract tests.
+    from core.web.services.team_workflow.research_runtime import meeting_receipt_authority
+
+    monkeypatch.setattr(
+        meeting_receipt_authority,
+        "requires_bound_review_receipts",
+        lambda meeting: str(meeting.get("mode") or "").lower() == "formal",
+    )
     reset_formal_write_runtime_for_tests()
     monkeypatch.setattr(meetings, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(memories, "PROJECT_ROOT", tmp_path)
@@ -4764,15 +4775,6 @@ def test_close_reports_failed_hypothesis_round_without_rollback(
 ) -> None:
     """A candidate without a claim fails round generation, not the closure."""
     team_id, agents = _hf_env(tmp_path, monkeypatch)
-    # This fixture tests closure/collection behavior without provider calls.
-    # Keep run lineage; exercise only the deterministic review adapter here.
-    # Receipt enforcement has separate runner/executor contract tests.
-    from core.web.services.team_workflow.research_runtime import meeting_receipt_authority
-
-    monkeypatch.setattr(
-        meeting_receipt_authority, "requires_bound_review_receipts", lambda _meeting: False
-    )
-
     _patch_approved_question(
         monkeypatch,
         hypotheses=[
@@ -6407,15 +6409,6 @@ def test_converged_chain_without_evidence_requests_is_collection_ready(
     (converged, all rounds closed, zero evidence requests) must not wedge the
     first source-collection round: the closure decision itself is the scope."""
     team_id, agents = _hf_env(tmp_path, monkeypatch)
-    # This fixture tests closure/collection behavior without provider calls.
-    # Keep run lineage; exercise only the deterministic review adapter here.
-    # Receipt enforcement has separate runner/executor contract tests.
-    from core.web.services.team_workflow.research_runtime import meeting_receipt_authority
-
-    monkeypatch.setattr(
-        meeting_receipt_authority, "requires_bound_review_receipts", lambda _meeting: False
-    )
-
     _patch_approved_question(monkeypatch)
     runtime = _build_runtime(tmp_path)
     try:
