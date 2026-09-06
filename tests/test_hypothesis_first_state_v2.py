@@ -8250,6 +8250,62 @@ def test_stage_one_origin_drafts_with_run_offer_grounded_generation() -> None:
     assert offer_ids == ["open-stage-one-generation"]
 
 
+@pytest.mark.parametrize("context_ready", [False, True])
+def test_scoped_run_consumes_origin_r0_without_importing_its_history(
+    monkeypatch: pytest.MonkeyPatch, context_ready: bool,
+) -> None:
+    state_module = hypothesis_first_routes.hypothesis_first_state_v2
+    drafts = _stage_one_draft_records("origin-r0")
+    monkeypatch.setattr(state_module, "_cached_question_reset_snapshot", lambda *_args: {
+        "targetMeetingIds": ["origin-r0"], "targetRoundIds": [],
+        "chainRecords": [*drafts, {
+            "recordKind": "hypothesis_candidate", "questionId": "SCI-091",
+            "candidateId": "old-formal", "meetingRoundId": "origin-r0",
+        }],
+        "meetingRecords": [{"meetingRoundId": "origin-r0", "status": "closed"}],
+        "selectionRecords": [], "digestRecords": [], "decisionRecords": [],
+        "hypothesisRoundRecords": [],
+    })
+    resolved = []
+
+    def available(team_id, question_id, *, workflow_run_id):
+        resolved.append((team_id, question_id, workflow_run_id))
+        return drafts
+
+    monkeypatch.setattr(state_module.hypothesis_first_chain, "_available_exploratory_drafts", available)
+
+    class Query:
+        def list_runs(self, **_kwargs):
+            return {"runs": [{"runId": "run-new", "questionId": "SCI-091", "status": "blocked"}]}
+
+        def get_snapshot(self, **_kwargs):
+            return {"activeNodeIds": ["hypothesis_design"]}
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.formal_read_runtime.get_query_service",
+        lambda: Query(),
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_project_hypothesis_context.build_stage_one_grounded_generation_context",
+        lambda *_a, **_kw: {"status": "ready" if context_ready else "blocked"},
+    )
+    monkeypatch.setattr(state_module, "_latest_requirement_matrix", lambda *_a, **_kw: None)
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.challenge_question_runs.get_challenge_question_run_detail",
+        lambda *_a, **_kw: (_ for _ in ()).throw(ValueError("challenge_question_run_not_found")),
+    )
+    sources = state_module._scope_records("team-1", "SCI-091", workflow_run_id="run-new")
+    assert resolved == [("team-1", "SCI-091", "run-new")]
+    assert sources["chain_records"] == []
+    assert sources["meeting_records"] == []
+    state = state_module.project_state_from_records(
+        team_id="team-1", question_id="SCI-091", workflow_run_id="run-new", **sources,
+    )
+    assert state["generation"]["candidateCount"] == 0
+    assert state["generation"]["generationMeetingId"] is None
+    assert ("open-stage-one-generation" in [a["actionId"] for a in state["allowedActions"]]) is context_ready
+
+
 def test_stage_one_live_r1_meeting_suppresses_duplicate_offer() -> None:
     state = _stage_one_projection(
         chain_records=_stage_one_draft_records("hf-candgen-run-r0"),
