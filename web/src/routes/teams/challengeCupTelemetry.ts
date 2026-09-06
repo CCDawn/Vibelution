@@ -347,17 +347,6 @@ export function observeCatalogActiveWorkChanged(input: {
   );
 }
 
-export function observeHypothesisLegacyFallback(input: {
-  teamId: string;
-  questionId: string;
-}): void {
-  postUserActionObservation(
-    "challenge_hypothesis_legacy_fallback",
-    { teamId: input.teamId, questionId: input.questionId },
-    { level: "warning", forceTimeline: true },
-  );
-}
-
 export function observeSubmissionReadinessChanged(input: {
   teamId: string;
   previousStatus: string;

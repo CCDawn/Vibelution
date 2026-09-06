@@ -573,7 +573,7 @@ describe("useHypothesisFirstChain", () => {
     }
   });
 
-  it("never creates a legacy query when V2 is unavailable", async () => {
+  it("never reads a retired legacy endpoint when V2 is unavailable", async () => {
     mockAllResolved();
     mocked.stateV2.mockRejectedValue(Object.assign(new Error("route missing"), {
       status: 404,
@@ -582,10 +582,6 @@ describe("useHypothesisFirstChain", () => {
     render(<Probe teamId="team-1" questionId="Q-01" onResult={() => undefined} />);
     await flushQueries();
 
-    const legacy = queryClient.getQueryCache().find({
-      queryKey: queryKeys.hypothesisFirstChainState("team-1", "Q-01"),
-    });
-    expect(legacy).toBeUndefined();
     expect(mocked.chainState).not.toHaveBeenCalled();
   });
 

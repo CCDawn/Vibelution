@@ -121,7 +121,6 @@ describe("domain user-action telemetry contract", () => {
       "challenge_question_output_schema_rejected",
       "challenge_real_batch_phase_changed",
       "challenge_catalog_active_work_changed",
-      "challenge_hypothesis_legacy_fallback",
       "challenge_submission_readiness_changed",
     ];
     for (const code of observations) {
@@ -163,7 +162,7 @@ describe("domain user-action telemetry contract", () => {
 
   it("wires challenge-cup hypothesis selection and catalog overview surfaces", () => {
     expect(hypothesisSelectionListSource).toContain("trackHypothesisSelectionRecord(");
-    expect(hypothesisSelectionListSource).toContain("observeHypothesisLegacyFallback(");
+    expect(hypothesisSelectionListSource).not.toContain("observeHypothesisLegacyFallback(");
     expect(hypothesisSelectionPanelSource).toContain("trackHypothesisCandidateGenerationOpen(");
     expect(challengeCatalogOverviewSource).toContain("trackDevBatchRun(");
     expect(challengeCatalogOverviewSource).toContain("observeCatalogActiveWorkChanged(");

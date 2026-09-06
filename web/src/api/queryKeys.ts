@@ -87,8 +87,6 @@ export const queryKeys = {
     ["teams", teamId, "hypothesis-first", "selection-context", questionId, runId] as const,
   hypothesisFirstSelections: (teamId: string, questionId = "", runId = "") =>
     ["teams", teamId, "hypothesis-first", "selections", questionId, runId] as const,
-  hypothesisFirstChainState: (teamId: string, questionId: string, runId = "") =>
-    ["teams", teamId, "hypothesis-first", "chain", "state", questionId, runId] as const,
   hypothesisFirstChainStateV2: (teamId: string, questionId: string, runId = "") =>
     ["teams", teamId, "hypothesis-first", "chain", "state-v2", questionId, runId] as const,
   hypothesisFirstChainAnomalyInbox: (teamId: string, questionId: string) =>

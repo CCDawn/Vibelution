@@ -18,7 +18,6 @@ import { postBrowserTelemetry } from "../../app/browserTelemetry";
 import { resetUserActionTelemetryForTests, type UserActionTracker } from "../../app/userActionTelemetry";
 import {
   observeCatalogActiveWorkChanged,
-  observeHypothesisLegacyFallback,
   observeQuestionOutputSchemaRejected,
   observeRealBatchAuthorizeShapeInvalid,
   observeRealBatchPhaseChanged,
@@ -307,14 +306,6 @@ describe("challengeCupTelemetry round-2 observations", () => {
     expect(payloads[0]).toMatchObject({ level: "info" });
     expect(payloads[1]).toMatchObject({ level: "warning" });
     expect(payloads[1].fields).toMatchObject({ active: false, failed: 25, awaitingApprovalCount: 8 });
-  });
-
-  it("reports hypothesis legacy fallback degradation", () => {
-    observeHypothesisLegacyFallback({ teamId: "research-team", questionId: "Q010" });
-    const payloads = postedPayloads();
-    expect(payloads[0].eventCode).toBe("browser.user_action.challenge_hypothesis_legacy_fallback_observed");
-    expect(payloads[0]).toMatchObject({ level: "warning" });
-    expect(payloads[0].fields).toMatchObject({ questionId: "Q010" });
   });
 
   it("reports submission readiness transitions with bounded blocker codes", () => {
