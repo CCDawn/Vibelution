@@ -631,6 +631,137 @@ def test_problem_understanding_success_auto_ensures_sideflow_once(
         harness.close()
 
 
+def test_maintenance_recovers_missing_problem_understanding_sideflow_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A lost post-commit trigger is recovered from durable parent facts."""
+
+    from core.web.services.team_workflow.research_runtime import (
+        workflow_artifact_store,
+    )
+    from core.web.services.team_workflow.research_runtime.runtime_factory import (
+        build_workflow_runtime,
+    )
+    from tests._support.workflow_ledger_helpers import (
+        build_attempt_record,
+        build_command_record,
+        build_run_record,
+    )
+
+    monkeypatch.setattr(workflow_artifact_store, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        "config.settings.get_config",
+        lambda: SimpleNamespace(
+            research=SimpleNamespace(
+                knowledge_sideflow=SimpleNamespace(mode="on")
+            )
+        ),
+    )
+    identity = register_or_resolve(build_challenge_cup_workflow_definition())
+    runtime = build_workflow_runtime(
+        tmp_path / "ledger.sqlite3",
+        checkpoint_path=tmp_path / "checkpoints.sqlite3",
+        clock=lambda: FIXED_NOW_MS + 3000,
+    )
+    try:
+        blocked_problem = json.dumps(
+            {
+                "code": "auto_advance_not_ready",
+                "detail": (
+                    "knowledge_package_not_materialized; "
+                    "hypothesis_round_unconverged; template_baseline_missing"
+                ),
+            }
+        )
+        parent = replace(
+            build_run_record(
+                run_id="run-lost-trigger",
+                workflow_version_id=identity.workflowVersionId,
+                status="blocked",
+                run_version=2,
+                last_event_sequence=2,
+            ),
+            active_node_id="hypothesis_design",
+            blocked_problem_json=blocked_problem,
+            structure_hash=identity.structureHash,
+        )
+        problem_attempt = replace(
+            build_attempt_record(
+                node_run_id="nr-lost-problem-a1",
+                run_id=parent.run_id,
+                node_id="problem_understanding",
+                status="succeeded",
+                command_id="cmd-lost-problem",
+            ),
+            finished_at_ms=FIXED_NOW_MS + 1000,
+        )
+        hypothesis_attempt = build_attempt_record(
+            node_run_id="nr-lost-hypothesis-a1",
+            run_id=parent.run_id,
+            node_id="hypothesis_design",
+            status="blocked",
+            command_id="cmd-lost-hypothesis",
+            problem_json=blocked_problem,
+        )
+        runtime.store.submit(
+            lambda uow: (
+                uow.repository.insert_run(parent),
+                uow.repository.insert_command(
+                    build_command_record(
+                        command_id=problem_attempt.command_id,
+                        run_id=parent.run_id,
+                        node_id=problem_attempt.node_id,
+                        idempotency_key="lost-trigger:problem",
+                    )
+                ),
+                uow.repository.insert_attempt(problem_attempt),
+                uow.repository.insert_command(
+                    build_command_record(
+                        command_id=hypothesis_attempt.command_id,
+                        run_id=parent.run_id,
+                        node_id=hypothesis_attempt.node_id,
+                        idempotency_key="lost-trigger:hypothesis",
+                    )
+                ),
+                uow.repository.insert_attempt(hypothesis_attempt),
+            ),
+            force_flush=True,
+        ).result(timeout=10)
+        workflow_artifact_store.put_workflow_artifact(
+            parent.team_id,
+            kind="problem_understanding",
+            workflow_run_id=parent.run_id,
+            source_collection_run_id="source-lost-trigger",
+            artifact_identity=problem_attempt.node_run_id,
+            payload={
+                "scope": "Evaluate predictive coding for redundant spike reduction.",
+                "subquestions": ["Which redundancy metrics change?"],
+                "assumptions": ["Comparable encoding budget"],
+                "known_unknowns": ["Energy benefit under sparse workloads"],
+                "human_gate": {
+                    "required": True,
+                    "decision": "pending",
+                    "rationale": "Collect evidence before hypothesis review.",
+                },
+            },
+        )
+
+        runtime.run_maintenance_once(limit=2)
+        runtime.run_maintenance_once(limit=2)
+
+        invocations = runtime.store.read(
+            lambda repo: repo.list_knowledge_invocations_for_parent(parent.run_id)
+        )
+        assert len(invocations) == 1
+        child = runtime.store.get_run(invocations[0].knowledge_child_run_id)
+        assert child is not None
+        assert child.parent_run_id == parent.run_id
+        assert child.workflow_id == KNOWLEDGE_SIDEFLOW_WORKFLOW_ID
+    finally:
+        runtime.close()
+
+
 def test_manual_knowledge_request_uses_completed_problem_scope(tmp_path: Path, monkeypatch) -> None:
     from core.research.workflow.contracts import WorkflowCommandKind
     from core.web.services.team_workflow.research_runtime import workflow_artifact_store

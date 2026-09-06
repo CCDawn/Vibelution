@@ -11,11 +11,15 @@ from core.research.workflow.contracts import (
     CommandRequest,
     WorkflowCommandKind,
 )
-from core.research.workflow.definition import SCHEMA_VERSION
+from core.research.workflow.definition import CHALLENGE_CUP_WORKFLOW_ID, SCHEMA_VERSION
 from core.research.workflow.definition_registry import resolve_definition_for_run_record
 from core.research.workflow.ledger import WorkflowLedgerStore
 
 from .human_gate_artifacts import canonical_sha256
+
+CHALLENGE_CUP_TEAM_ID = "research-team"
+RECOVERABLE_BLOCK_CODE = "auto_advance_not_ready"
+MISSING_KNOWLEDGE_BLOCKER = "knowledge_package_not_materialized"
 
 
 class KnowledgeSideflowTrigger:
@@ -133,6 +137,62 @@ class KnowledgeSideflowTrigger:
             "childRunId": str(result.get("childRunId") or ""),
         }
 
+    def recover_missing(self, *, limit: int = 4) -> int:
+        """Replay lost problem-understanding callbacks from durable facts.
+
+        The normal path invokes :meth:`on_node_succeeded` after the graph
+        transaction commits.  That callback is deliberately best-effort, so a
+        process interruption can leave a parent blocked at hypothesis design
+        even though its problem artifact and successful attempt are durable.
+        Only that exact state is eligible here; the existing trigger remains
+        the sole writer for knowledge invocation creation.
+        """
+        remaining = max(0, int(limit))
+        if remaining == 0:
+            return 0
+
+        def load_candidates(repo: Any) -> list[tuple[Any, str]]:
+            candidates: list[tuple[Any, str]] = []
+            for run in repo.list_runs_for_team(
+                CHALLENGE_CUP_TEAM_ID,
+                CHALLENGE_CUP_WORKFLOW_ID,
+            ):
+                if len(candidates) >= remaining:
+                    break
+                if (
+                    str(run.status or "").strip() != "blocked"
+                    or str(run.active_node_id or "").strip() != "hypothesis_design"
+                    or not _has_missing_knowledge_blocker(run.blocked_problem_json)
+                ):
+                    continue
+                if repo.list_knowledge_invocations_for_parent(run.run_id):
+                    continue
+                attempt = repo.latest_attempt(run.run_id, "problem_understanding")
+                if (
+                    attempt is None
+                    or str(attempt.status or "").strip() != "succeeded"
+                    or not str(attempt.node_run_id or "").strip()
+                ):
+                    continue
+                candidates.append((run, str(attempt.node_run_id).strip()))
+            return candidates
+
+        candidates = self._store.read(load_candidates)
+        recovered = 0
+        for run, node_run_id in candidates:
+            try:
+                result = self.on_node_succeeded(
+                    run_id=run.run_id,
+                    node_id="problem_understanding",
+                    node_run_id=node_run_id,
+                )
+            except Exception as exc:  # noqa: BLE001 - one stale run must not stop the sweep
+                self._record("failed", run, error=type(exc).__name__)
+                continue
+            if str(result.get("status") or "") in {"submitted", "replayed"}:
+                recovered += 1
+        return recovered
+
     @staticmethod
     def _record(
         status: str,
@@ -213,6 +273,23 @@ def _problem_keywords(problem: Mapping[str, Any]) -> list[str]:
         if len(keywords) >= 8:
             break
     return keywords
+
+
+def _has_missing_knowledge_blocker(raw_problem: str | None) -> bool:
+    try:
+        problem = json.loads(str(raw_problem or "") or "{}")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return False
+    if not isinstance(problem, Mapping):
+        return False
+    if str(problem.get("code") or "").strip() != RECOVERABLE_BLOCK_CODE:
+        return False
+    blockers = {
+        item.strip()
+        for item in str(problem.get("detail") or "").split(";")
+        if item.strip()
+    }
+    return MISSING_KNOWLEDGE_BLOCKER in blockers
 
 
 __all__ = ["KnowledgeSideflowTrigger", "problem_artifact_for_collection"]
