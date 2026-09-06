@@ -280,6 +280,12 @@ def _auto_advance_selection_tick(
 ) -> None:
     """Try autoSelectCandidates right after generation candidates register."""
 
+    if (
+        meeting_round.get("candidateAuthority") == FORMAL_GROUNDED_CANDIDATE_AUTHORITY
+        and _meeting_workflow_run_id(meeting_round)
+    ):
+        return
+
     from core.web.services.team_workflow.research_runtime import (
         automation_policy_executor,
     )
@@ -5112,14 +5118,17 @@ def _submit_auto_knowledge_handoff_accept(
     return "accepted", f"resolve_human_task:{receipt_status or 'submitted'}"
 
 
-def auto_open_grounded_generation(team_id: str, *, question_id: str) -> dict[str, Any]:
-    """Open grounded generation, or resume its failed discussion, via UI commands.
+def auto_advance_stage_one_generation(team_id: str, *, question_id: str) -> dict[str, Any]:
+    """Advance single-run generation and screened selection via UI commands.
 
     A completed exploratory round is not a failed generation to retry. The
     existing projection owns the join with accepted knowledge, and the command
     rechecks that offer under the question lock before opening its idempotent
     meeting. Failed grounded discussions reuse the retry offer, capped by the
-    existing round limit within R1. No R0 replay or experiment action is submitted.
+    existing round limit within R1. A completed grounded meeting submits its
+    complete candidate pool to the existing quality/diversity screening command.
+    Single-question review is workflow-owned, independent of batch calibration.
+    No R0 replay or experiment action is submitted.
     """
     from .formal_read_runtime import get_query_service
     from .hypothesis_first_state_v2 import (
@@ -5168,13 +5177,40 @@ def auto_open_grounded_generation(team_id: str, *, question_id: str) -> dict[str
                     and item.get("command") == "retry_generation"
                     and item.get("enabled") is True
                 ), None)
+        selection_input: dict[str, Any] = {}
+        selection = snapshot.get("selection") or {}
+        if (
+            action is None
+            and generation.get("lifecycle") == "completed"
+            and selection.get("lifecycle") == "waiting_human"
+            and not selection.get("selectionId")
+        ):
+            owns_grounded_result = any(
+                meeting.get("meetingRoundId") == generation.get("generationMeetingId")
+                and meeting.get("status") == "closed"
+                and _meeting_workflow_run_id(meeting) == run_id
+                and meeting.get("candidateAuthority") == FORMAL_GROUNDED_CANDIDATE_AUTHORITY
+                for meeting in _question_generation_meetings(team_id, question_id)
+            )
+            if owns_grounded_result:
+                action = next((
+                    item for item in snapshot.get("allowedActions", [])
+                    if item.get("actionId") == "record-selection"
+                    and item.get("command") == "record_selection"
+                    and item.get("enabled") is True
+                ), None)
+                if action is not None:
+                    selection_input = {"candidateIds": list(generation.get("candidateIds") or [])}
         if action is None:
             return summary
-        execute_v2_command(team_id, {
-            **action,
-            "expectedStateVersion": snapshot["stateVersion"],
-        }, question_id=question_id, workflow_run_id=run_id)
-        summary["opened"] = 1
+        request = {**action, "expectedStateVersion": snapshot["stateVersion"]}
+        actor_args = {}
+        if selection_input:
+            request["input"] = selection_input
+            actor_args["_actor"] = "system:stage-one-auto-selection"
+        execute_v2_command(team_id, request, question_id=question_id,
+                           workflow_run_id=run_id, **actor_args)
+        summary["selected" if selection_input else "opened"] = 1
     except HypothesisFirstChainError:
         # The package or offer moved after projection; the owning command
         # rejected before launch and the next maintenance pass will re-read.
@@ -5182,15 +5218,15 @@ def auto_open_grounded_generation(team_id: str, *, question_id: str) -> dict[str
     except Exception as exc:  # noqa: BLE001 - isolate one question
         summary["failed"] = 1
         _record_scene_event(
-            "hypothesis_first.auto_open_grounded_generation", outcome="failed",
+            "hypothesis_first.auto_advance_stage_one_generation", outcome="failed",
             level="warning", fields={"teamId": team_id, "questionId": question_id,
                                      "errorType": type(exc).__name__},
         )
         return summary
     _record_scene_event(
-        "hypothesis_first.auto_open_grounded_generation", outcome="opened",
+        "hypothesis_first.auto_advance_stage_one_generation", outcome="selected" if selection_input else "opened",
         fields={"teamId": team_id, "questionId": question_id,
-                "runId": str((action.get("payload") or {}).get("runId") or "")},
+                "runId": run_id},
     )
     return summary
 
@@ -5325,7 +5361,7 @@ def sweep_auto_advance_closure() -> dict[str, Any]:
                     team_id, question_id=question_id
                 )
                 summary["retried"] += int(retry_summary.get("retried") or 0)
-                grounded_generation = auto_open_grounded_generation(
+                grounded_generation = auto_advance_stage_one_generation(
                     team_id, question_id=question_id
                 )
                 summary["failed"] += int(grounded_generation.get("failed") or 0)
@@ -5823,6 +5859,7 @@ def execute_v2_command(
     *,
     question_id: str = "",
     workflow_run_id: str = "",
+    _actor: str = _OPERATOR_AGENT_ID,
 ) -> dict[str, Any]:
     """Execute one V2 command under scope-lock reauthorization and CAS.
 
@@ -5848,6 +5885,7 @@ def execute_v2_command(
             request,
             question_id=question_id,
             workflow_run_id=workflow_run_id,
+            _actor=_actor,
         )
     except Exception as exc:
         _record_scene_event(
@@ -5880,6 +5918,7 @@ def _execute_v2_command_impl(
     *,
     question_id: str = "",
     workflow_run_id: str = "",
+    _actor: str = _OPERATOR_AGENT_ID,
 ) -> dict[str, Any]:
     """Execute one V2 command under scope-lock reauthorization and CAS.
 
@@ -6206,7 +6245,7 @@ def _execute_v2_command_impl(
                 workflow_run_id=normalized_workflow_run_id,
                 selected_candidate_ids=selected_candidate_ids,
                 scope=selection_scope,
-                screened_by=_OPERATOR_AGENT_ID,
+                screened_by=_actor,
             )
             selected_candidate_ids = list(screening["candidateIds"])
             selection_payload = {
@@ -6214,7 +6253,7 @@ def _execute_v2_command_impl(
                 "questionId": normalized_question_id,
                 "workflowRunId": normalized_workflow_run_id,
                 "selectedCandidateIds": selected_candidate_ids,
-                "decidedBy": _OPERATOR_AGENT_ID,
+                "decidedBy": _actor,
             }
             if previous_selection_id:
                 selection_payload["previousSelectionId"] = previous_selection_id

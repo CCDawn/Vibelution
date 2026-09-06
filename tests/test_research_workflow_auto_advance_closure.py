@@ -61,7 +61,7 @@ def _sweep_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
     reset_formal_write_runtime_for_tests()
-    monkeypatch.setattr(chain, "auto_open_grounded_generation", lambda *args, **kwargs: {})
+    monkeypatch.setattr(chain, "auto_advance_stage_one_generation", lambda *args, **kwargs: {})
     monkeypatch.setattr(hrounds, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chain, "PROJECT_ROOT", tmp_path)
     # The sweep's approve step enumerates meeting rounds; keep that store on
@@ -3295,7 +3295,7 @@ def test_grounded_generation_auto_consumes_only_normal_r1_offer(
     monkeypatch.setattr(chain, "execute_v2_command",
                         lambda *args, **kwargs: requests.append((args, kwargs)) or {})
     _capture_scene_events(monkeypatch)
-    assert chain.auto_open_grounded_generation(_TEAM_ID, question_id=_QUESTION_ID) == {
+    assert chain.auto_advance_stage_one_generation(_TEAM_ID, question_id=_QUESTION_ID) == {
         "opened": int(eligible), "failed": 0,
     }
     assert len(requests) == int(eligible)
@@ -3311,7 +3311,7 @@ def test_sweep_automatically_launches_r1_after_knowledge_accept_and_retry(
     order = []
     for name, label in [("auto_accept_knowledge_handoffs", "accept"),
                         ("auto_retry_blocked_formal_nodes", "retry"),
-                        ("auto_open_grounded_generation", "r1")]:
+                        ("auto_advance_stage_one_generation", "r1")]:
         monkeypatch.setattr(chain, name,
                             lambda *args, _label=label, **kwargs: order.append(_label) or {})
     chain.sweep_auto_advance_closure()
@@ -3329,7 +3329,7 @@ def test_grounded_generation_skips_full_projection_without_an_active_run(monkeyp
     def unexpected_projection(*args, **kwargs):
         pytest.fail("historical terminal questions must not build full UI state")
     monkeypatch.setattr(hypothesis_first_state_v2, "project_hypothesis_first_state_v2", unexpected_projection)
-    assert chain.auto_open_grounded_generation(_TEAM_ID, question_id=_QUESTION_ID) == {
+    assert chain.auto_advance_stage_one_generation(_TEAM_ID, question_id=_QUESTION_ID) == {
         "opened": 0, "failed": 0,
     }
 
@@ -3358,6 +3358,43 @@ def test_failed_grounded_generation_retries_only_within_r1_budget(monkeypatch, a
     calls = []
     monkeypatch.setattr(chain, "execute_v2_command", lambda *args, **kwargs: calls.append((args, kwargs)))
     _capture_scene_events(monkeypatch)
-    result = chain.auto_open_grounded_generation(_TEAM_ID, question_id=_QUESTION_ID)
+    result = chain.auto_advance_stage_one_generation(_TEAM_ID, question_id=_QUESTION_ID)
     assert result == {"opened": expected, "failed": 0}
     assert len(calls) == expected
+
+
+@pytest.mark.parametrize("authority,meeting_run,enabled,expected", [
+    ("formal_grounded_candidate", "run-r1", True, 1),
+    ("exploratory_draft", "run-r1", True, 0),
+    ("formal_grounded_candidate", "another-run", True, 0),
+    ("formal_grounded_candidate", "run-r1", False, 0),
+])
+def test_single_question_automatically_screens_all_grounded_candidates(
+    monkeypatch, authority, meeting_run, enabled, expected,
+):
+    from core.web.services.team_workflow.research_runtime import formal_read_runtime, hypothesis_first_state_v2
+    monkeypatch.setattr(formal_read_runtime, "get_query_service", lambda: SimpleNamespace(
+        list_runs=lambda **kwargs: {"runs": [
+            {"runId": "run-r1", "questionId": _QUESTION_ID, "status": "blocked"},
+        ]},
+    ))
+    action = {"actionId": "record-selection", "command": "record_selection", "enabled": enabled,
+              "payload": {"questionId": _QUESTION_ID}, "idempotencyKey": "select-r1"}
+    ids = ["candidate-a", "candidate-b", "candidate-c", "candidate-d"]
+    monkeypatch.setattr(hypothesis_first_state_v2, "project_hypothesis_first_state_v2",
+        lambda *args, **kwargs: {"stateVersion": "fresh", "allowedActions": [action],
+            "generation": {"lifecycle": "completed", "generationMeetingId": "r1-current", "candidateIds": ids},
+            "selection": {"lifecycle": "waiting_human", "selectionId": None}})
+    monkeypatch.setattr(chain, "_question_generation_meetings", lambda *args: [
+        {"meetingRoundId": "r1-current", "status": "closed", "candidateAuthority": authority,
+         "modelInvocationReceiptAuthority": {"workflowRunId": meeting_run}},
+    ])
+    calls = []
+    monkeypatch.setattr(chain, "execute_v2_command", lambda *args, **kwargs: calls.append((args, kwargs)))
+    _capture_scene_events(monkeypatch)
+    chain.auto_advance_stage_one_generation(_TEAM_ID, question_id=_QUESTION_ID)
+    assert len(calls) == expected
+    if expected:
+        assert calls[0][0][1]["input"] == {"candidateIds": ids}
+        assert calls[0][1]["workflow_run_id"] == "run-r1"
+        assert calls[0][1]["_actor"] == "system:stage-one-auto-selection"

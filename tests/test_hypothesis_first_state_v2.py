@@ -5923,9 +5923,11 @@ def test_v2_selection_command_replays_original_ids_before_stale_cas(
     assert len(calls) == 1
 
 
+@pytest.mark.parametrize("actor", ["operator", "system:stage-one-auto-selection"])
 def test_stage_one_selection_screens_before_persisting_or_opening_review(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    actor: str,
 ) -> None:
     from core.web.services import team_service
     from core.web.services.team_workflow import hypothesis_selection
@@ -5976,6 +5978,7 @@ def test_stage_one_selection_screens_before_persisting_or_opening_review(
 
     def screen(**kwargs):
         order.append("screen")
+        assert kwargs["screened_by"] == actor
         assert kwargs["selected_candidate_ids"] == ["cand-a", "cand-b", "cand-c", "cand-d"]
         return {
             "candidateIds": ["cand-b", "cand-c", "cand-d"],
@@ -5984,6 +5987,7 @@ def test_stage_one_selection_screens_before_persisting_or_opening_review(
 
     def record(_team_id, payload, **_kwargs):
         order.append("record")
+        assert payload["decidedBy"] == actor
         assert payload["selectedCandidateIds"] == ["cand-b", "cand-c", "cand-d"]
         return {
             "status": "created",
@@ -6010,6 +6014,7 @@ def test_stage_one_selection_screens_before_persisting_or_opening_review(
         ),
         question_id="SCI-001",
         workflow_run_id="run-stage-one",
+        _actor=actor,
     )
 
     assert order == ["screen", "record"]
