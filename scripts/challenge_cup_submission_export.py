@@ -21,6 +21,52 @@ DEFAULT_CHALLENGE_ROOT = Path(
     os.environ.get("VIBELUTION_CHALLENGE_CUP_ROOT", Path.home() / "Desktop" / "挑战杯")
 )
 TZ = timezone(timedelta(hours=8))
+_CANDIDATE_TOKEN = r"[A-Z](?:[′’'])?"
+
+
+def normalize_candidate_key(value):
+    return str(value or "").upper().replace("'", "′").replace("’", "′")
+
+
+def extract_candidate_key(value):
+    text = str(value or "").strip()
+    match = re.search(
+        rf"候选\s*\**\s*({_CANDIDATE_TOKEN})\s*\**", text, re.IGNORECASE
+    )
+    if not match:
+        match = re.match(
+            rf"\**\s*({_CANDIDATE_TOKEN})\s*\**(?=$|[\s，,：:。.)（(])",
+            text,
+            re.IGNORECASE,
+        )
+    return normalize_candidate_key(match.group(1)) if match else ""
+
+
+def extract_header_candidate_key(value):
+    key = extract_candidate_key(value)
+    if key:
+        return key
+    match = re.match(
+        rf"\**\s*({_CANDIDATE_TOKEN})(?=\s|\**$)",
+        str(value or "").strip(),
+        re.IGNORECASE,
+    )
+    return normalize_candidate_key(match.group(1)) if match else ""
+
+
+def candidate_base_key(value):
+    key = normalize_candidate_key(value)
+    return key[:1]
+
+
+def resolve_candidate_key(reference, candidates):
+    reference = normalize_candidate_key(reference)
+    candidate_keys = [candidate["letter"] for candidate in candidates]
+    if reference in candidate_keys:
+        return reference
+    base = candidate_base_key(reference)
+    base_matches = [key for key in candidate_keys if candidate_base_key(key) == base]
+    return base_matches[0] if len(base_matches) == 1 else ""
 
 
 def sha256_file(path):
@@ -71,12 +117,14 @@ def normalize_source_url(locator):
     raw = str(locator or "").strip()
     url = re.search(r"https?://[^\s，。；（]+", raw, re.IGNORECASE)
     if url:
-        return _trim_locator(url.group(0))
+        normalized = _trim_locator(url.group(0))
+        return None if _is_placeholder_locator(normalized) else normalized
     doi = re.search(
         r"(?:doi\s*[:：]?\s*)?(10\.\d{4,9}/[^\s\"'，。；（]+)", raw, re.IGNORECASE
     )
     if doi:
-        return "https://doi.org/" + _trim_locator(doi.group(1))
+        normalized = "https://doi.org/" + _trim_locator(doi.group(1))
+        return None if _is_placeholder_locator(normalized) else normalized
     pmc = re.search(r"\b(PMC\d+)\b", raw, re.IGNORECASE)
     if pmc:
         return f"https://pmc.ncbi.nlm.nih.gov/articles/{pmc.group(1).upper()}/"
@@ -99,17 +147,23 @@ def normalize_source_url(locator):
         re.IGNORECASE,
     )
     if domain:
-        return "https://" + _trim_locator(domain.group(0))
+        normalized = "https://" + _trim_locator(domain.group(0))
+        return None if _is_placeholder_locator(normalized) else normalized
     return None
 
 
 def _trim_locator(value):
-    locator = str(value or "").rstrip(".,，。；")
+    locator = str(value or "").rstrip(".,，。；）】")
     while locator.endswith(")") and locator.count(")") > locator.count("("):
         locator = locator[:-1]
     while locator.endswith("]") and locator.count("]") > locator.count("["):
         locator = locator[:-1]
     return locator
+
+
+def _is_placeholder_locator(value):
+    locator = str(value or "")
+    return "…" in locator or re.search(r"(?:^|/)\.\.\.(?:/|$)", locator) is not None
 
 
 def load_catalog_questions(catalog_path):
@@ -199,8 +253,13 @@ def slice_fields(body, labels):
     """按字段标签切片正文。标签可带（括注）。重叠/嵌套标签保留最长匹配。"""
     matches = []
     for lab in labels:
+        prediction_suffix = (
+            r"(?:\s*P\d+(?:（[^）]*）)?)?"
+            if lab in ("可检验预测", "预测")
+            else ""
+        )
         for m in re.finditer(
-            rf"(?:^|\n|[；;]\s*)(?:[-*]\s*)?\**({re.escape(lab)})\**\s*(（[^）]*）)?\s*\**\s*[：:=＝]",
+            rf"(?:^|\n|[；;]\s*)(?:[-*]\s*)?\**({re.escape(lab)}){prediction_suffix}\**\s*(（[^）]*）)?\s*\**\s*[：:=＝]",
             body,
         ):
             actual = m.group(1) + (m.group(2) or "")
@@ -229,7 +288,9 @@ def extract_predictions(body):
     """提取『可检验预测 P1（…）：值』式逐行预测。"""
     preds = []
     lines = body.splitlines()
-    for index, ln in enumerate(lines):
+    index = 0
+    while index < len(lines):
+        ln = lines[index]
         s = ln.strip()
         m = re.match(
             r"(?:[-*]\s*)?\**(?:可检验预测|预测)\s*(?:P\d(?:（[^）]*）)?)?\**\s*[：:]\s*(.*)$",
@@ -237,20 +298,37 @@ def extract_predictions(body):
         )
         if m:
             v = m.group(1).strip().strip("*").strip()
-            if not v:
-                for following in lines[index + 1 :]:
-                    v = following.strip().lstrip(">-").strip()
-                    if v:
-                        break
             if v:
                 preds.append(v)
+                index += 1
                 continue
+            following_index = index + 1
+            numbered = []
+            while following_index < len(lines):
+                following = lines[following_index].strip()
+                if not following:
+                    following_index += 1
+                    continue
+                if re.match(r"(?:#{1,6}\s+|\**(?:证伪|适用边界|不确定性))", following):
+                    break
+                numbered_match = re.match(r"\d+[.、)]\s*(.+)$", following)
+                if numbered_match:
+                    numbered.append(numbered_match.group(1).strip())
+                    following_index += 1
+                    continue
+                if not numbered:
+                    numbered.append(following.lstrip(">-").strip())
+                break
+            preds.extend(value for value in numbered if value)
+            index = following_index
+            continue
         m = re.match(r"(?:[-*]\s*)?\**P\d+[^：:]*\**\s*[：:]\s*(.+)$", s, re.IGNORECASE)
         if m:
             v = m.group(1).strip().strip("*").strip()
             if v:
                 preds.append(v)
-    return preds
+        index += 1
+    return list(dict.fromkeys(preds))
 
 
 def parse_sources(sec):
@@ -304,13 +382,13 @@ def parse_sources(sec):
 
 def parse_candidates(sec):
     heading_re = re.compile(
-        r"^(?:###\s*|\*\*)候选\s*([A-Z])\s*[：:·\-—–\s]*(.*?)(?:\*\*)?\s*$",
+        rf"^(?:###\s*|\*\*)候选\s*\**\s*({_CANDIDATE_TOKEN})\s*\**\s*[：:·\-—–\s]*(.*?)(?:\*\*)?\s*$",
         re.MULTILINE,
     )
     marks = list(heading_re.finditer(sec))
     cands = []
     for i, m in enumerate(marks):
-        letter = m.group(1)
+        letter = normalize_candidate_key(m.group(1))
         name = m.group(2).strip().strip("：:·-— ").strip()
         body = sec[m.end() : marks[i + 1].start() if i + 1 < len(marks) else len(sec)]
         f = slice_fields(body, ["陈述", "机制", "证据指向", "风险", "风险/薄弱点"])
@@ -344,37 +422,66 @@ def parse_candidates(sec):
 
 
 def parse_review(sec):
-    header, rows, total = None, [], None
-    best_header_candidates = -1
-    best_total_values = -1
+    blocks = []
+    current = []
     for line in sec.splitlines():
         line = line.strip()
         if not line.startswith("|"):
+            if current:
+                blocks.append(current)
+                current = []
             continue
         cells = [c.strip().strip("*") for c in line.strip("|").split("|")]
-        if not cells or not cells[0]:
+        if cells and cells[0]:
+            current.append(cells)
+    if current:
+        blocks.append(current)
+
+    best = (None, [], None)
+    best_rank = (-1, -1)
+    for block in blocks:
+        header = next(
+            (
+                cells
+                for cells in block
+                if cells[0] in ("维度", "评价维度", "评分维度")
+            ),
+            None,
+        )
+        total = next(
+            (
+                cells
+                for cells in block
+                if cells[0].startswith("总分") or cells[0] in ("合计", "总计")
+            ),
+            None,
+        )
+        if not header:
             continue
-        if cells[0] in ("维度", "评价维度", "评分维度"):
-            candidate_count = sum(
-                bool(re.search(r"(?:候选\s*)?[A-Z]", c, re.IGNORECASE))
-                for c in cells[1:]
+        candidate_count = sum(
+            bool(extract_header_candidate_key(c)) for c in header[1:]
+        )
+        value_count = (
+            sum(
+                bool(re.fullmatch(r"\s*\d+(?:\.\d+)?\s*", c))
+                for c in total[1:]
             )
-            if candidate_count > best_header_candidates:
-                header = cells
-                best_header_candidates = candidate_count
+            if total
+            else 0
+        )
+        rank = (candidate_count, value_count)
+        if rank <= best_rank:
             continue
-        if set(cells[0]) <= set("-: "):
-            continue
-        if cells[0].startswith("总分") or cells[0] in ("合计", "总计"):
-            value_count = sum(
-                bool(re.fullmatch(r"\s*\d+(?:\.\d+)?\s*", c)) for c in cells[1:]
-            )
-            if value_count > best_total_values:
-                total = cells
-                best_total_values = value_count
-            continue
-        rows.append(cells)
-    return header, rows, total
+        rows = [
+            cells
+            for cells in block
+            if cells is not header
+            and cells is not total
+            and not set(cells[0]) <= set("-: ")
+        ]
+        best = (header, rows, total)
+        best_rank = rank
+    return best
 
 
 def _heading_trigger(sec, pos):
@@ -498,25 +605,56 @@ def parse_plan(sec):
     return rows
 
 
-def parse_scores(header, total, review_sec):
+def parse_scores(header, total, review_sec, *, warnings=None):
     """按候选字母映射总分；正文显式总分只补缺，不覆盖结构化总分行。"""
+    warnings = warnings if warnings is not None else []
     scores = {}
+    candidate_columns = {}
     if header and total:
         for i, cname in enumerate(header[1:], 1):
             if re.search(r"理由|说明|结论|备注", cname):
                 continue
-            lm = re.search(r"(?:候选\s*)?([A-Z])", cname, re.IGNORECASE)
-            if lm and i < len(total):
+            key = extract_header_candidate_key(cname)
+            if key:
+                candidate_columns[i] = key
+            if key and i < len(total):
                 value = re.search(r"\d+(?:\.\d+)?", total[i])
                 if value:
-                    scores[lm.group(1).upper()] = value.group(0)
+                    scores[key] = value.group(0)
+
+    _, rows, _ = parse_review(review_sec)
+    sums = {key: 0.0 for key in candidate_columns.values()}
+    counts = {key: 0 for key in candidate_columns.values()}
+    for row in rows:
+        for index, key in candidate_columns.items():
+            if index >= len(row):
+                continue
+            value = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*(?:/\s*\d+(?:\.\d+)?)?\s*", row[index])
+            if value:
+                sums[key] += float(value.group(1))
+                counts[key] += 1
+    for key in candidate_columns.values():
+        if counts[key] != 7:
+            continue
+        computed = sums[key]
+        computed_text = str(int(computed)) if computed.is_integer() else str(computed)
+        declared = scores.get(key)
+        if declared is not None and float(declared) != computed:
+            warnings.append(
+                f"候选 {key} 七维明细求和 {computed_text} 与声明总分 {declared} 不一致（采用明细求和）"
+            )
+        scores[key] = computed_text
+
     for m in re.finditer(
-        r"(?<![A-Z0-9−-])([A-Z])\s*[=＝]\s*(\d+(?:\.\d+)?)"
+        r"(?<![A-Z0-9−-])([A-F](?:[′’'])?)\s*[=＝]\s*(\d+(?:\.\d+)?)"
         r"(?!\s*[+＋])(?:\s*(?:分|/\s*35)?)?(?=$|[；;，,\n|])",
         review_sec,
         re.IGNORECASE,
     ):
-        scores.setdefault(m.group(1).upper(), m.group(2))
+        key = normalize_candidate_key(m.group(1))
+        if candidate_columns and key not in candidate_columns.values():
+            continue
+        scores.setdefault(key, m.group(2))
     return scores
 
 
@@ -534,7 +672,10 @@ def infer_source_relation(source_type, contribution):
 
 
 def infer_verification_status(source_url):
-    return "metadata_checked" if source_url else "unverified"
+    # URL normalization proves only that a locator can be represented.  A real
+    # verification status requires a durable provider or human-review receipt,
+    # which this exporter does not receive.
+    return "unverified"
 
 
 def build_dataset_targets(plan_rows):
@@ -603,6 +744,10 @@ def build_outputs(qid, src_path, catalog_q, src_text):
         [
             "假说陈述",
             "可证伪假说",
+            "竞争解释",
+            "替代解释",
+            "可检验预测",
+            "预测",
             "证伪条件",
             "证伪/退出条件",
             "证伪/削弱条件",
@@ -641,21 +786,16 @@ def build_outputs(qid, src_path, catalog_q, src_text):
         or main_pkg.get("可证伪假说")
         or [""]
     )[0]
-    selected_letter = ""
-    m = re.search(r"候选\s*([A-Z])", main_hyp) or re.match(
-        r"\**\s*([A-Z])", main_hyp.strip()
-    )
-    if m:
-        selected_letter = m.group(1)
+    competing_explanation = (
+        main_pkg.get("竞争解释") or main_pkg.get("替代解释") or [""]
+    )[0]
+    selected_ref = extract_candidate_key(main_hyp)
+    selected_letter = resolve_candidate_key(selected_ref, cands)
     if not selected_letter and cands:
         selected_letter = cands[0]["letter"]
 
-    backup_letter = ""
-    mb = re.search(r"候选\s*([A-Z])", backup_hyp) or re.match(
-        r"\**\s*([A-Z])", backup_hyp.strip()
-    )
-    if mb:
-        backup_letter = mb.group(1)
+    backup_ref = extract_candidate_key(backup_hyp)
+    backup_letter = resolve_candidate_key(backup_ref, cands)
 
     falsify = (
         main_pkg.get("证伪条件")
@@ -665,7 +805,7 @@ def build_outputs(qid, src_path, catalog_q, src_text):
     )[0]
     uncertainty = (main_pkg.get("不确定性声明") or main_pkg.get("不确定性") or [""])[0]
 
-    scores = parse_scores(header, total, secs.get(4, ""))
+    scores = parse_scores(header, total, secs.get(4, ""), warnings=warnings)
     unscored = [c["letter"] for c in cands if c["letter"] not in scores]
     if unscored:
         warnings.append("候选总分未结构化：" + "、".join(unscored) + "（保留为 —）")
@@ -691,6 +831,8 @@ def build_outputs(qid, src_path, catalog_q, src_text):
         abstract_parts.append(main_statement)
     elif main_hyp:
         abstract_parts.append(main_hyp)
+    if competing_explanation:
+        abstract_parts.append("竞争解释：" + safe_clip(competing_explanation, 240))
     if predictions:
         abstract_parts.append(
             "主要可检验预测：" + "；".join(safe_clip(p, 160) for p in predictions[:2])
@@ -745,6 +887,9 @@ def build_outputs(qid, src_path, catalog_q, src_text):
 
     L.append("## 2. 候选假设与第一轮处理结果（对应模板 P15/表16）")
     L.append("")
+    L.append(f"- 最终主假说：{safe_clip(main_hyp, 500)}")
+    L.append(f"- 最终备选假说：{safe_clip(backup_hyp, 500)}")
+    L.append("")
     L.append(
         "| 候选假设 | 主要依据 | 反对证据或替代解释 | 可检验预测 | 第一轮处理结果 |"
     )
@@ -759,9 +904,25 @@ def build_outputs(qid, src_path, catalog_q, src_text):
         if not preds:
             preds = "未单列（非选中候选，保留为审计对照）"
         if c["letter"] == selected_letter:
-            outcome = f"七维总分 {scores.get(c['letter'], '—')}；选中为主假说"
+            selected_note = (
+                f"（最终筛选：候选{selected_ref}）"
+                if selected_ref and selected_ref != selected_letter
+                else ""
+            )
+            outcome = (
+                f"七维总分 {scores.get(c['letter'], '—')}；"
+                f"选中为主假说{selected_note}"
+            )
         elif backup_letter and c["letter"] == backup_letter:
-            outcome = f"七维总分 {scores.get(c['letter'], '—')}；保留为备选假说"
+            backup_note = (
+                f"（最终筛选：候选{backup_ref}）"
+                if backup_ref and backup_ref != backup_letter
+                else ""
+            )
+            outcome = (
+                f"七维总分 {scores.get(c['letter'], '—')}；"
+                f"保留为备选假说{backup_note}"
+            )
         elif c["letter"] not in scores:
             outcome = "七维总分 —；落选（正文无该候选逐维评分依据，保留为对照）"
         else:
@@ -816,6 +977,8 @@ def build_outputs(qid, src_path, catalog_q, src_text):
         f"- problem_statement：{safe_clip((s1f.get('复述') or s1f.get('问题复述') or [''])[0] or question, 500)}"
     )
     L.append(f"- rationale：{main_statement or main_hyp}")
+    if competing_explanation:
+        L.append(f"- competing_explanation：{safe_clip(competing_explanation, 500)}")
     L.append(
         f"- technical_details：研究计划共 {len(plan_rows)} 步（见第 3 节）；候选 {len(cands)} 个、实质修订 {len(revisions)} 次、来源 {len(sources)} 条。"
     )
@@ -871,6 +1034,7 @@ def build_outputs(qid, src_path, catalog_q, src_text):
                 (s1f.get("复述") or s1f.get("问题复述") or [""])[0] or question, 2000
             ),
             "rationale": main_statement or main_hyp,
+            "competing_explanation": competing_explanation or None,
             "technical_details": f"研究计划 {len(plan_rows)} 步；候选 {len(cands)} 个；修订 {len(revisions)} 次；来源 {len(sources)} 条。",
             "paper_title": paper_title,
             "paper_abstract": paper_abstract,
@@ -896,6 +1060,12 @@ def build_outputs(qid, src_path, catalog_q, src_text):
             "methods": {
                 "candidate_generation": "complete challenge-cup hypothesis generation workflow",
                 "review": "seven-dimension review",
+                "selection": {
+                    "primary": main_hyp,
+                    "backup": backup_hyp,
+                    "primary_ref": selected_ref or None,
+                    "backup_ref": backup_ref or None,
+                },
                 "workflow_completed": True,
             },
             "experiments": {
