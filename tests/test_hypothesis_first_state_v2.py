@@ -7975,6 +7975,118 @@ def test_stage_one_run_r0_completion_offers_grounded_stage_one_generation() -> N
     assert offer["expectedStateVersion"] == state["stateVersion"]
 
 
+@pytest.mark.parametrize("retired_run_status", ["cancelled", "archived"])
+def test_terminal_exploratory_success_reopens_stage_one_run(
+    retired_run_status: str,
+) -> None:
+    """A terminal container must not hide the only restartable stage-one entry."""
+
+    state = _stage_one_projection(
+        chain_records=[
+            *_stage_one_draft_records("hf-candgen-run-r0"),
+            {
+                "recordKind": "generation_attempt",
+                "attemptId": "attempt-r0",
+                "attemptNumber": 1,
+                "questionId": "SCI-091",
+                "meetingRoundId": "hf-candgen-run-r0",
+                "lifecycle": "completed",
+                "outcome": "succeeded",
+                "createdAt": "2026-08-25T00:02:00Z",
+            },
+        ],
+        formal_runs=[
+            {
+                "runId": f"run-{retired_run_status}",
+                "status": retired_run_status,
+                "questionId": "SCI-091",
+                "createdAt": "2026-08-25T00:03:00Z",
+            }
+        ],
+    )
+
+    commands = [
+        action
+        for action in state["allowedActions"]
+        if action.get("kind") == "command"
+    ]
+    assert [action["command"] for action in commands] == ["create_stage_one_run"]
+    assert commands[0]["payload"] == {"questionId": "SCI-091"}
+
+
+def test_active_stage_one_run_blocks_exploratory_relaunch() -> None:
+    state = _stage_one_projection(
+        chain_records=[
+            *_stage_one_draft_records("hf-candgen-run-r0"),
+            {
+                "recordKind": "generation_attempt",
+                "attemptId": "attempt-r0",
+                "attemptNumber": 1,
+                "questionId": "SCI-091",
+                "meetingRoundId": "hf-candgen-run-r0",
+                "lifecycle": "completed",
+                "outcome": "succeeded",
+            },
+        ],
+        formal_runs=[
+            {
+                "runId": "run-active",
+                "status": "running",
+                "questionId": "SCI-091",
+                "createdAt": "2026-08-25T00:03:00Z",
+            }
+        ],
+    )
+
+    commands = [
+        action
+        for action in state["allowedActions"]
+        if action.get("kind") == "command"
+    ]
+    assert "create_stage_one_run" not in [action["command"] for action in commands]
+    assert "open_generation" in [action["command"] for action in commands]
+
+
+def test_grounded_candidate_blocks_terminal_exploratory_relaunch() -> None:
+    state = _stage_one_projection(
+        chain_records=[
+            *_stage_one_draft_records("hf-candgen-run-r0"),
+            {
+                "recordKind": "generation_attempt",
+                "attemptId": "attempt-r0",
+                "attemptNumber": 1,
+                "questionId": "SCI-091",
+                "meetingRoundId": "hf-candgen-run-r0",
+                "lifecycle": "completed",
+                "outcome": "succeeded",
+            },
+            {
+                "recordKind": "hypothesis_candidate",
+                "candidateId": "grounded-candidate",
+                "questionId": "SCI-091",
+                "candidateAuthority": "formal_grounded_candidate",
+                "createdAt": "2026-08-25T00:03:00Z",
+            },
+        ],
+        formal_runs=[
+            {
+                "runId": "run-archived",
+                "status": "archived",
+                "questionId": "SCI-091",
+                "createdAt": "2026-08-25T00:04:00Z",
+            }
+        ],
+    )
+
+    commands = [
+        action
+        for action in state["allowedActions"]
+        if action.get("kind") == "command"
+    ]
+    assert "create_stage_one_run" not in [action["command"] for action in commands]
+    assert "retry_generation" in [action["command"] for action in commands]
+
+
 @pytest.mark.parametrize("active_node", ["problem_understanding", "hypothesis_design"])
 def test_r0_completion_exposes_formal_prerequisites_before_grounded_generation(active_node: str) -> None:
     state = _stage_one_projection(

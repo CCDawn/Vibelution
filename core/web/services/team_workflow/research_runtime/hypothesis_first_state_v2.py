@@ -3686,8 +3686,14 @@ def project_state_from_records(
             generation["lifecycle"] == "not_started"
             or (
                 generation["lifecycle"] in {"completed", "failed"}
-                and generation.get("outcome") in {"empty", "failed", "none"}
                 and bool(exploratory_drafts)
+                and (
+                    generation.get("outcome") in {"empty", "failed", "none"}
+                    or (
+                        generation.get("outcome") == "succeeded"
+                        and formal_candidate_count == 0
+                    )
+                )
             )
         )
     )
