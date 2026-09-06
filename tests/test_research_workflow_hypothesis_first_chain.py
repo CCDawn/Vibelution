@@ -8348,6 +8348,192 @@ def test_auto_adjudicate_gate_blocked_records_rejected_outcome(
     ]
 
 
+def test_auto_adjudicate_binds_rejected_outcome_to_round_workflow_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Run-scoped reads must retain an auto-recorded rejection.
+
+    The adjudication record is linked to the round through meeting refs.  The
+    old auto path left ``workflowRunId`` empty, so a run-scoped projector
+    dropped the otherwise valid rejection from its chain snapshot.
+    """
+
+    team_id, ledger_path, _events = _auto_advance_env(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        meetings,
+        "list_meeting_rounds",
+        lambda _team_id: {
+            "meetings": [
+                {
+                    "meetingRoundId": _AUTO_MEETING_ID,
+                    "meetingType": chain.HYPOTHESIS_REVIEW_MEETING_TYPE,
+                    "question": _QUESTION_ID,
+                    "modelInvocationReceiptAuthority": {
+                        "workflowRunId": "run-auto-advance",
+                    },
+                }
+            ]
+        },
+    )
+
+    def _blocked(_team_id, _question_id, candidate_ids):
+        return {
+            candidate_id: {
+                "status": "blocked",
+                "reason": "claim_data_missing",
+                "claims": [],
+                "blockedClaims": [],
+            }
+            for candidate_id in candidate_ids
+        }
+
+    monkeypatch.setattr(chain, "evaluate_claim_belief_gate", _blocked)
+
+    result = chain.auto_adjudicate_exhausted_round(
+        team_id, question_id=_QUESTION_ID
+    )
+
+    assert result["status"] == "rejected"
+    adjudications = _auto_adjudication_records(ledger_path)
+    assert len(adjudications) == 1
+    assert adjudications[0]["workflowRunId"] == "run-auto-advance"
+
+
+def test_adjudication_run_scope_requires_complete_single_run_lineage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Auto binding refuses partial or mixed meeting lineage."""
+
+    round_record = {
+        "roundId": "hround-lineage",
+        "meetingRefs": [
+            {"kind": "meeting_round", "id": "meeting-a"},
+            {"kind": "meeting_round", "id": "meeting-b"},
+        ],
+    }
+    monkeypatch.setattr(
+        meetings,
+        "list_meeting_rounds",
+        lambda _team_id: {
+            "meetings": [
+                {
+                    "meetingRoundId": "meeting-a",
+                    "modelInvocationReceiptAuthority": {
+                        "workflowRunId": "run-a",
+                    },
+                },
+                {
+                    "meetingRoundId": "meeting-b",
+                    "modelInvocationReceiptAuthority": {
+                        "workflowRunId": "run-b",
+                    },
+                },
+            ]
+        },
+    )
+
+    assert chain._adjudication_workflow_run_id(
+        "team-lineage",
+        round_record,
+        workflow_run_id="",
+    ) == ""
+
+    monkeypatch.setattr(
+        meetings,
+        "list_meeting_rounds",
+        lambda _team_id: {
+            "meetings": [
+                {
+                    "meetingRoundId": "meeting-a",
+                    "modelInvocationReceiptAuthority": {
+                        "workflowRunId": "run-a",
+                    },
+                },
+                {
+                    "meetingRoundId": "meeting-b",
+                    "modelInvocationReceiptAuthority": {
+                        "workflowRunId": "run-a",
+                    },
+                },
+            ]
+        },
+    )
+
+    assert chain._adjudication_workflow_run_id(
+        "team-lineage",
+        round_record,
+        workflow_run_id="",
+    ) == "run-a"
+
+
+def test_auto_adjudicate_repairs_legacy_rejected_binding_append_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Maintenance repairs an old exact-round auto verdict by appending.
+
+    The live ledger may already contain the gate-blocked rejection without a
+    run id.  The sweep must make that same authority visible to run-scoped
+    reads while preserving the original JSONL row for audit/replay.
+    """
+
+    legacy = {
+        "recordKind": chain.HUMAN_ADJUDICATION_KIND,
+        "adjudicationId": "hf-adjudication-legacy-rejected",
+        "idempotencyKey": chain._auto_adjudication_rejected_key(_AUTO_ROUND_ID),
+        "questionId": _QUESTION_ID,
+        "hypothesisRoundId": _AUTO_ROUND_ID,
+        "workflowRunId": "",
+        "meetingRoundIds": [_AUTO_MEETING_ID],
+        "decision": "rejected",
+        "rationale": "legacy automatic rejection",
+        "decidedBy": "system:auto-advance:gate-blocked",
+        "createdAt": "2026-09-01T00:02:00Z",
+        "updatedAt": "2026-09-01T00:02:00Z",
+    }
+    team_id, ledger_path, scene_events = _auto_advance_env(
+        tmp_path,
+        monkeypatch,
+        existing_adjudication=legacy,
+    )
+    monkeypatch.setattr(
+        meetings,
+        "list_meeting_rounds",
+        lambda _team_id: {
+            "meetings": [
+                {
+                    "meetingRoundId": _AUTO_MEETING_ID,
+                    "meetingType": chain.HYPOTHESIS_REVIEW_MEETING_TYPE,
+                    "question": _QUESTION_ID,
+                    "modelInvocationReceiptAuthority": {
+                        "workflowRunId": "run-auto-advance",
+                    },
+                }
+            ]
+        },
+    )
+
+    result = chain.auto_adjudicate_exhausted_round(
+        team_id, question_id=_QUESTION_ID
+    )
+    replay = chain.auto_adjudicate_exhausted_round(
+        team_id, question_id=_QUESTION_ID
+    )
+
+    assert result["status"] == "reused"
+    assert result["decision"] == "rejected"
+    assert replay["status"] == "reused"
+    adjudications = _auto_adjudication_records(ledger_path)
+    assert len(adjudications) == 2
+    assert adjudications[0] == legacy
+    assert adjudications[1]["adjudicationId"] == legacy["adjudicationId"]
+    assert adjudications[1]["workflowRunId"] == "run-auto-advance"
+    assert [
+        fields["outcome"]
+        for event, fields in scene_events
+        if event == "hypothesis_first.auto_adjudication_binding_repaired"
+    ] == ["applied"]
+
+
 def test_auto_adjudicate_gate_blocked_rejection_replays_as_reused(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
