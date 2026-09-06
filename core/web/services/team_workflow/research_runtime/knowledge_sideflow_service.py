@@ -61,6 +61,9 @@ from .run_lifecycle import run_id_for_create
 KNOWLEDGE_SIDEFLOW_COMPLETION_KIND = "knowledge_sideflow"
 KNOWLEDGE_SIDEFLOW_ENTRY_NODE_ID = "source_finding"
 KNOWLEDGE_SIDEFLOW_TERMINAL_NODE_ID = "knowledge_handoff"
+# Version 2 hands off every approved member in a source run. Its reuse key
+# must not match version 1 invocations that accepted only the newest member.
+DEFAULT_SOURCE_POLICY_VERSION = "2"
 
 PARENT_EVENT_INVOCATION_CREATED = "knowledge_invocation_created"
 PARENT_EVENT_INVOCATION_REUSED = "knowledge_invocation_reused"

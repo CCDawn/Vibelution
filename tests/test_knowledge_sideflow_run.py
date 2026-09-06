@@ -344,6 +344,28 @@ def test_invocation_call_idempotency_replays_same_invocation_and_child(
         harness.close()
 
 
+def test_complete_package_policy_does_not_reuse_old_single_member_package(tmp_path: Path) -> None:
+    from core.web.services.team_workflow.research_runtime.command_service import _normalized_source_policy_version
+
+    harness = GraphHarness(tmp_path)
+    try:
+        _seed_parent(harness)
+        first = _invoke(harness, source_policy_version="1")
+        harness.commands.store.submit(
+            lambda uow: uow.repository.update_knowledge_invocation(
+                first["invocation"].invocation_id, FIXED_NOW_MS + 5,
+                status="completed", knowledge_package_ref="old-single-member-package",
+                package_content_hash="a" * 64, handoff_state="accepted",
+            ), force_flush=True,
+        ).result(timeout=10)
+        fresh = _invoke(harness, source_policy_version=_normalized_source_policy_version(None))
+        assert fresh["replayed"] is False
+        assert fresh["reused"] is False
+        assert fresh["childRunId"] != first["childRunId"]
+    finally:
+        harness.close()
+
+
 def test_knowledge_reuse_references_existing_package_without_new_child(
     tmp_path: Path,
 ) -> None:
@@ -623,6 +645,10 @@ def test_problem_understanding_success_auto_ensures_sideflow_once(
         assert second["invocationId"] == first["invocationId"]
         assert second["childRunId"] == first["childRunId"]
         assert len(_child_rows(harness)) == 1
+        invocation = harness.commands.store.read(
+            lambda repo: repo.get_knowledge_invocation(first["invocationId"])
+        )
+        assert invocation.source_policy_version == "2"
         records = workflow_artifact_store.list_workflow_artifacts(
             "research-team", kind="problem_understanding", workflow_run_id="run-parent"
         )
@@ -942,7 +968,7 @@ def test_manual_knowledge_request_uses_completed_problem_scope(tmp_path: Path, m
         assert invocation.search_envelope_hash == search_envelope_hash({
             "keywords": ["Evaporative cooling", "Humidity effect"],
             "evidenceTypes": [], "timeWindow": {},
-        }, "1")
+        }, "2")
     finally:
         harness.close()
 
