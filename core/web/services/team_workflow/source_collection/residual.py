@@ -4048,18 +4048,15 @@ def _source_collection_team_identity_snapshot(team_id: str) -> dict[str, Any]:
 
 def _source_collection_team_member_snapshot(team_id: str) -> list[dict[str, Any]]:
     s = _service()
-    try:
-        with s.team_service._TEAM_LOCK:  # type: ignore[attr-defined]
-            state = s.team_service._load_index()  # type: ignore[attr-defined]
-            team = s.team_service._find_team(state, team_id)  # type: ignore[attr-defined]
-    except Exception:
-        try:
-            team = s.team_service.get_team(team_id)
-        except Exception:
-            team = {}
+    normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
+    with s.team_service._TEAM_LOCK:  # type: ignore[attr-defined]
+        state = s.team_service._load_index()  # type: ignore[attr-defined]
+        team = s.team_service._find_team(state, normalized_team_id)  # type: ignore[attr-defined]
+    if not isinstance(team, dict):
+        raise s.team_service.TeamNotFoundError("Team not found.")
     return [
         dict(member)
-        for member in list((team or {}).get("members") or [])
+        for member in list(team.get("members") or [])
         if isinstance(member, dict)
     ]
 

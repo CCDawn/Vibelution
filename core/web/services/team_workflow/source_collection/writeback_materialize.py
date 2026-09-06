@@ -1914,10 +1914,10 @@ def _materialize_source_collection_stage_writeback_knowledge_ingestion(
             approved_candidate_ids=approved_candidate_ids,
             failed=[{"reason": "challenge_scope_incomplete", "error": str(exc)}],
         )
-    team = s.team_service.get_team(team_id)
+    team_members = s._source_collection_team_member_snapshot(team_id)
     reviewer_agent_id = steward_agent_id
     if challenge_scope:
-        reviewer_agent_id = _challenge_knowledge_manager_agent_id(team)
+        reviewer_agent_id = _challenge_knowledge_manager_agent_id({"members": team_members})
         if not reviewer_agent_id:
             return s._source_collection_stage_writeback_knowledge_ingestion_summary(
                 status="failed",
@@ -1926,7 +1926,7 @@ def _materialize_source_collection_stage_writeback_knowledge_ingestion(
             )
     team_member_ids = {
         s._trim_text(member.get("agentId"), max_length=160)
-        for member in list(team.get("members") or [])
+        for member in team_members
         if isinstance(member, dict) and s._trim_text(member.get("agentId"), max_length=160)
     }
     requested_knowledge_base_id = s._trim_text(

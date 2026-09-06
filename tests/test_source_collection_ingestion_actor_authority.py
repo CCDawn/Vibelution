@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from tests._support.team_workflow.helpers import (
     _append_stage_task_tool_trace,
     _use_fake_local_research_config,
@@ -227,3 +229,57 @@ def test_ingestion_does_not_authorize_non_member_from_writeback_actor(
     assert team_knowledge_service.list_team_knowledge_bases(
         team["teamId"], internal=True
     )["summary"]["knowledgeBaseCount"] == 0
+
+
+def test_source_collection_member_snapshot_selects_challenge_knowledge_manager_without_full_team_read(
+    tmp_path,
+    monkeypatch,
+):
+    from core.web.services.team_workflow.source_collection.writeback_materialize import (
+        _challenge_knowledge_manager_agent_id,
+    )
+
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    manager = agent_directory_service.create_agent_instance(display_name="知识库管理员")
+    coordinator = agent_directory_service.create_agent_instance(display_name="科研协调")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[
+            {
+                "agentId": coordinator["agentId"],
+                "role": "research_coordination",
+                "agentName": "科研协调",
+            },
+            {
+                "agentId": manager["agentId"],
+                "role": "challenge_cup_knowledge_manager",
+                "agentName": "知识库管理员",
+            },
+        ],
+    )
+
+    def fail_full_team_read(_team_id):
+        raise AssertionError("member snapshot must not hydrate full team detail")
+
+    monkeypatch.setattr(team_service, "get_team", fail_full_team_read)
+    members = team_workflow_orchestration_service._source_collection_team_member_snapshot(
+        f" {team['teamId']} "
+    )
+
+    assert _challenge_knowledge_manager_agent_id({"members": members}) == manager["agentId"]
+
+
+def test_source_collection_member_snapshot_raises_for_missing_team_without_full_team_fallback(
+    tmp_path,
+    monkeypatch,
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+
+    def fail_full_team_read(_team_id):
+        raise AssertionError("missing team must not fall back to full team detail")
+
+    monkeypatch.setattr(team_service, "get_team", fail_full_team_read)
+    with pytest.raises(team_service.TeamNotFoundError, match="Team not found"):
+        team_workflow_orchestration_service._source_collection_team_member_snapshot(
+            "missing-team"
+        )
