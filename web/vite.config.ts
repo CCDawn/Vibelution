@@ -150,11 +150,11 @@ export default defineConfig({
     include: ["src/**/*.test.ts", "src/**/*.test.tsx", "*.test.ts"],
     // File-level parallelism: contract/layout suites are independent modules.
     // Forks isolate process-global state better than threads on Windows.
-    // Keep Windows source-scan contracts below the point where concurrent full-tree
-    // reads exhaust their fixed per-test timeout on a 16-core developer machine.
+    // Keep half of the 16-core developer machine available so Windows source-scan
+    // contracts retain I/O headroom while independent test files run in forks.
     pool: "forks",
     fileParallelism: true,
-    maxWorkers: "25%",
+    maxWorkers: "50%",
     isolate: true,
   },
   build: {
