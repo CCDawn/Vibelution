@@ -709,19 +709,10 @@ def test_maintenance_sweep_retries_transient_blocked_formal_node_after_create(
 
     ledger_path = _sweep_env(tmp_path, monkeypatch)
     order: list[str] = []
-    monkeypatch.setattr(
-        run_creation,
-        "create_question_run",
-        lambda *_args, **kwargs: (
-            order.append("create")
-            or {"runId": "run-sweep-retry", "questionId": _QUESTION_ID}
-        ),
-    )
-    monkeypatch.setattr(
-        chain,
-        "_auto_start_created_formal_run",
-        lambda _team_id, *, run, idempotency_key: order.append("start") or None,
-    )
+    # Sequencing seam: the canonical creation command owns create + start.
+    monkeypatch.setattr(chain, "auto_create_formal_run_after_convergence",
+                        lambda *_args, **_kwargs: (order.extend(["create", "start"])
+                            or {"status": "created", "runId": "run-sweep", "roundId": _ROUND_ID}))
 
     def _record_retry(team_id: str, *, question_id: str) -> dict[str, Any]:
         order.append(f"retry:{question_id}")
@@ -1413,18 +1404,10 @@ def test_maintenance_sweep_approves_stale_digests_before_adjudicating(
         chain, "auto_regenerate_missing_hypothesis_round", _record_regen
     )
     monkeypatch.setattr(chain, "auto_retry_blocked_formal_nodes", _record_retry)
-    monkeypatch.setattr(
-        run_creation,
-        "create_question_run",
-        lambda *_args, **kwargs: (
-            order.append("create") or {"runId": "run-sweep-approve"}
-        ),
-    )
-    monkeypatch.setattr(
-        chain,
-        "_auto_start_created_formal_run",
-        lambda _team_id, *, run, idempotency_key: order.append("start") or None,
-    )
+    # Sequencing seam: the canonical creation command owns create + start.
+    monkeypatch.setattr(chain, "auto_create_formal_run_after_convergence",
+                        lambda *_args, **_kwargs: (order.extend(["create", "start"])
+                            or {"status": "created", "runId": "run-sweep", "roundId": _ROUND_ID}))
 
     summary = chain.sweep_auto_advance_closure()
 
@@ -3193,18 +3176,10 @@ def test_maintenance_sweep_accepts_knowledge_handoffs_after_create(
 
     ledger_path = _sweep_env(tmp_path, monkeypatch)
     order: list[str] = []
-    monkeypatch.setattr(
-        run_creation,
-        "create_question_run",
-        lambda *_args, **kwargs: (
-            order.append("create") or {"runId": "run-sweep-kh", "questionId": _QUESTION_ID}
-        ),
-    )
-    monkeypatch.setattr(
-        chain,
-        "_auto_start_created_formal_run",
-        lambda _team_id, *, run, idempotency_key: order.append("start") or None,
-    )
+    # Sequencing seam: the canonical creation command owns create + start.
+    monkeypatch.setattr(chain, "auto_create_formal_run_after_convergence",
+                        lambda *_args, **_kwargs: (order.extend(["create", "start"])
+                            or {"status": "created", "runId": "run-sweep", "roundId": _ROUND_ID}))
 
     def _record_accept(team_id: str, *, question_id: str) -> dict[str, Any]:
         order.append(f"knowledge-handoff:{question_id}")

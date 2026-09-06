@@ -8826,11 +8826,9 @@ def test_close_review_meeting_reports_skipped_auto_advance_within_budget(
 
     result = chain.close_review_meeting(team_id, _AUTO_MEETING_ID, {"decisions": []})
 
-    # Budget not spent: the closure result stands and the auto-advance keys
-    # report the structural skip only.
+    # Closure leaves automatic adjudication to the recovery lane.
     assert result["status"] == "created"
-    assert result["autoAdjudication"]["status"] == "skipped"
-    assert result["autoAdjudication"]["reason"] == "round_not_exhausted"
+    assert result["autoAdjudication"] is None
     assert result["autoFormalRun"] is None
     assert result["deferredNextReview"] is None
 
@@ -8861,25 +8859,21 @@ def test_close_review_meeting_auto_advances_exhausted_round(
 
     result = chain.close_review_meeting(team_id, _AUTO_MEETING_ID, {"decisions": []})
 
-    # Round 5/5 closed in place: adjudicated accepted and the formal run
-    # created without any human step, without touching the closure result.
+    # Even an exhausted closure defers adjudication until its lock is released.
     assert result["status"] == "created"
-    assert result["autoAdjudication"]["status"] == "created"
+    assert result["autoAdjudication"] is None
     # The recovery lane performs canonical V2 creation after the closure
     # releases its scope lock; no nested lock or second creation path.
     assert result["autoFormalRun"] is None
     assert create_calls == []
     adjudications = _auto_adjudication_records(tmp_path / "chain.jsonl")
-    assert [item["decidedBy"] for item in adjudications] == [
-        "system:auto-advance:budget-exhausted"
-    ]
+    assert adjudications == []
 
 
 def test_close_review_meeting_records_rejected_outcome_when_gate_blocks(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Closing the 5/5 round into a blocked claim gate records the rejected
-    outcome in place; no formal run is created for a rejected chain."""
+    """Closure never takes a nested adjudication lock, including blocked gates."""
     team_id = _close_review_meeting_auto_advance_env(
         tmp_path, monkeypatch, round_index=5
     )
@@ -8908,15 +8902,12 @@ def test_close_review_meeting_records_rejected_outcome_when_gate_blocks(
     result = chain.close_review_meeting(team_id, _AUTO_MEETING_ID, {"decisions": []})
 
     assert result["status"] == "created"
-    assert result["autoAdjudication"]["status"] == "rejected"
-    assert result["autoAdjudication"]["decision"] == "rejected"
+    assert result["autoAdjudication"] is None
     # A rejected chain owns no formal-run transition.
     assert result["autoFormalRun"] is None
     assert create_calls == []
     adjudications = _auto_adjudication_records(tmp_path / "chain.jsonl")
-    assert [item["decidedBy"] for item in adjudications] == [
-        "system:auto-advance:gate-blocked"
-    ]
+    assert adjudications == []
 
 
 def test_quality_failed_round_automatically_records_rejected_terminal_result(tmp_path, monkeypatch):
@@ -8981,3 +8972,29 @@ def test_auto_adjudicate_second_round_requires_passed_review(
     result = chain.auto_adjudicate_exhausted_round(team_id, question_id=_QUESTION_ID)
     assert result["status"] == "skipped"
     assert _auto_adjudication_records(ledger_path) == []
+
+
+def test_auto_adjudication_rechecks_after_frontend_scope_lock(tmp_path, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    team_id, ledger_path, _ = _auto_advance_env(tmp_path, monkeypatch)
+    started = Event()
+    def automatic():
+        started.set()
+        return chain.auto_adjudicate_exhausted_round(team_id, question_id=_QUESTION_ID)
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with chain.hypothesis_first_scope_lock(team_id, _QUESTION_ID):
+            future = pool.submit(automatic)
+            assert started.wait(timeout=5)
+            assert not future.done()
+            chain.record_human_adjudication(
+                team_id, question_id=_QUESTION_ID, hypothesis_round_id=_AUTO_ROUND_ID,
+                decision="rejected", rationale="operator decision", idempotency_key="frontend-key",
+            )
+        result = future.result(timeout=10)
+    assert result["reason"] == "adjudication_exists"
+    records = _auto_adjudication_records(ledger_path)
+    assert len(records) == 1
+    assert records[0]["idempotencyKey"] == "frontend-key"

@@ -2944,7 +2944,16 @@ def _claim_gate_block_reason(exc: ClaimBeliefGateBlockedError) -> str:
     return "claim_belief_gate_blocked"
 
 
-def auto_adjudicate_exhausted_round(
+def auto_adjudicate_exhausted_round(team_id: str, *, question_id: str) -> dict[str, Any]:
+    """Serialize automatic read/check/write with frontend adjudication commands."""
+    try:
+        with hypothesis_first_scope_lock(team_id, question_id):
+            return _auto_adjudicate_exhausted_round_locked(team_id, question_id=question_id)
+    except Exception as exc:
+        return {"status": "failed", "reason": type(exc).__name__, "detail": str(exc)[:200]}
+
+
+def _auto_adjudicate_exhausted_round_locked(
     team_id: str,
     *,
     question_id: str,
@@ -14075,33 +14084,10 @@ def close_review_meeting(
     _auto_advance_converge_tick(
         normalized_team_id, str(closed_record.get("question") or "")
     )
-    # Budget-exhaustion auto-advance (in-place): when this closure produced a
-    # fan-in round at/after the hard limit, adjudicate it accepted and create
-    # the formal run without waiting for a human.  Strictly best-effort — the
-    # helpers never raise, and this wrapper swallows anything left so the
-    # closed fact and the closure result stand regardless.
+    # Recovery owns adjudication and formal creation under the shared V2
+    # scope lock. Closure may already hold that OS lock; never nest it here.
     auto_adjudication: dict[str, Any] | None = None
     auto_formal_run: dict[str, Any] | None = None
-    try:
-        auto_adjudication = auto_adjudicate_exhausted_round(
-            normalized_team_id,
-            question_id=str(closed_record.get("question") or ""),
-        )
-        # Formal creation is driven by the recovery lane through the canonical
-        # V2 command.  A closure can already hold the V2 scope lock, so it must
-        # not acquire that same OS lock recursively here.
-    except Exception as exc:  # noqa: BLE001 - closure must never fail on auto-advance
-        _record_scene_event(
-            "hypothesis_first.auto_advance_failed",
-            outcome="failed",
-            level="warning",
-            fields={
-                "teamId": normalized_team_id,
-                "meetingRoundId": normalized_round_id,
-                "reason": type(exc).__name__,
-                "error": str(exc)[:400],
-            },
-        )
     # The sibling archive gate may have deferred this round's open-next; a
     # first-time archive of the newest logical round's last sibling retries it
     # here.  Replay closures ("reused") never re-trigger, and the gate inside
