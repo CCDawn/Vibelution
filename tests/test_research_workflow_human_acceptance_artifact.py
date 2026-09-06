@@ -19,6 +19,7 @@ from core.web.services.team_workflow.research_runtime.human_gate_artifacts impor
     canonical_sha256,
 )
 from core.web.services.team_workflow.research_runtime.knowledge_artifact_authority import (
+    _accepted_package_payload,
     load_knowledge_package_payload,
 )
 from core.web.services.team_workflow.research_runtime.readiness.common import (
@@ -391,3 +392,153 @@ def test_approved_team_knowledge_is_the_package_authority(
         content_hash=issued_hash,
     )
     assert replay == first
+
+
+def _steward_package_candidate(
+    index: int,
+    *,
+    source_collection_run_id: str = "sc-run-1",
+    workflow_run_id: str = "run-test",
+    ingestion_status: str = "official_synced",
+) -> dict[str, object]:
+    candidate_id = f"candidate-draft-{index}"
+    item_id = f"ki-{index}"
+    return {
+        "candidateId": candidate_id,
+        "teamId": "research-team",
+        "updatedAt": f"2026-08-14T00:00:{index:02d}Z",
+        "metadata": {
+            "taskType": "steward_pack_draft",
+            "output": {
+                "approvalRequired": True,
+                "claims": [
+                    {
+                        "claim": f"Accepted evidence claim {index}.",
+                        "sourceRef": f"source-{index}",
+                    }
+                ],
+                "sourceTrace": {
+                    "teamId": "research-team",
+                    "sourceCollectionRunId": source_collection_run_id,
+                    "workflowRunId": workflow_run_id,
+                },
+            },
+            "validation": {"valid": True},
+            "knowledgeIngestion": {
+                "status": ingestion_status,
+                "knowledgeBaseId": "team:research-team:kb-1",
+                "knowledgeItemIds": [item_id],
+                "sourceArtifactId": f"artifact-{index}",
+                "proposalId": f"proposal-{index}",
+                "batchId": f"batch-{index}",
+                "reviewedAt": f"2026-08-14T00:00:{index:02d}Z",
+                "reviewedByAgentId": "agent-reviewer",
+            },
+        },
+    }
+
+
+def _steward_package_item(index: int) -> dict[str, object]:
+    item_id = f"ki-{index}"
+    return {
+        "knowledgeItemId": item_id,
+        "knowledgeBaseId": "team:research-team:kb-1",
+        "title": f"Accepted source {index}",
+        "summary": f"Evidence-grounded package {index}",
+        "content": f"Stable approved content {index}",
+        "sourceArtifactIds": [f"artifact-{index}"],
+        "createdAt": f"2026-08-14T00:00:{index:02d}Z",
+    }
+
+
+@pytest.mark.parametrize("different_reviewers", [False, True])
+def test_accepted_package_aggregates_current_official_steward_drafts(
+    monkeypatch: pytest.MonkeyPatch,
+    different_reviewers: bool,
+) -> None:
+    current = [_steward_package_candidate(index) for index in range(8)]
+    if different_reviewers:
+        current[3]["metadata"]["knowledgeIngestion"]["reviewedByAgentId"] = "agent-reviewer-two"
+    pending = _steward_package_candidate(8, ingestion_status="pending_review")
+    old_run = _steward_package_candidate(
+        9,
+        source_collection_run_id="sc-run-old",
+    )
+    records = [*current, pending, old_run]
+    items = [_steward_package_item(index) for index in range(8)]
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.source_collection.candidates."
+        "list_candidate_store_authority_records",
+        lambda *_args, **_kwargs: records,
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_knowledge_service.list_knowledge_items",
+        lambda *_args, **_kwargs: {"items": items},
+    )
+
+    package = load_knowledge_package_payload(
+        team_id="research-team",
+        authority_run_id="sc-run-1",
+        workflow_run_id="run-test",
+    )
+
+    assert package is not None
+    assert package["accepted"] is True
+    assert len({approval["reviewedByAgentId"] for approval in package["approvals"]}) == (2 if different_reviewers else 1)
+    assert package["candidateIds"] == [
+        f"candidate-draft-{index}" for index in range(8)
+    ]
+    assert package["candidateId"] == "candidate-draft-0"
+    assert [item["knowledgeItemId"] for item in package["knowledgeItems"]] == [
+        f"ki-{index}" for index in range(8)
+    ]
+    assert package["sourceArtifactIds"] == [
+        f"artifact-{index}" for index in range(8)
+    ]
+    assert "candidate-draft-8" not in package["candidateIds"]
+    assert "candidate-draft-9" not in package["candidateIds"]
+
+    aggregate_hash = canonical_sha256(package)
+    replay = load_knowledge_package_payload(
+        team_id="research-team",
+        authority_run_id="sc-run-1",
+        workflow_run_id="run-test",
+        content_hash=aggregate_hash,
+    )
+    assert replay == package
+
+
+def test_accepted_package_preserves_legacy_single_draft_hash_readback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    current = [_steward_package_candidate(index) for index in range(8)]
+    items = [_steward_package_item(index) for index in range(8)]
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.source_collection.candidates."
+        "list_candidate_store_authority_records",
+        lambda *_args, **_kwargs: current,
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_knowledge_service.list_knowledge_items",
+        lambda *_args, **_kwargs: {"items": items},
+    )
+
+    legacy = _accepted_package_payload(
+        current[7],
+        team_id="research-team",
+        authority_run_id="sc-run-1",
+        knowledge_base_id="team:research-team:kb-1",
+        item_ids=("ki-7",),
+        item_by_id={"ki-7": items[7]},
+    )
+    legacy_hash = canonical_sha256(legacy)
+
+    replay = load_knowledge_package_payload(
+        team_id="research-team",
+        authority_run_id="sc-run-1",
+        workflow_run_id="run-test",
+        content_hash=legacy_hash,
+    )
+
+    assert replay == legacy
