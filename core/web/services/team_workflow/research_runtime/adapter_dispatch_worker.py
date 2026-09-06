@@ -1472,6 +1472,12 @@ class AdapterDispatchWorker:
         except (TypeError, ValueError):
             continuation_no_progress_count = 0
         continuation_problem = {}
+        try:
+            stage_task_remediations_used = max(
+                0, int(snapshot.get("stageTaskRemediationContinuationsUsed") or 0)
+            )
+        except (TypeError, ValueError):
+            stage_task_remediations_used = 0
         if (
             continuation_root_turn_id
             and continuation_turn_id
@@ -1486,6 +1492,7 @@ class AdapterDispatchWorker:
                 "continuationTurnChain": continuation_chain,
                 "continuationsUsed": continuations_used,
                 "continuationNoProgressCount": continuation_no_progress_count,
+                "stageTaskRemediationContinuationsUsed": stage_task_remediations_used,
             }
         if created_at_ms and decision.should_stop:
             failed = self._fail_attempt(

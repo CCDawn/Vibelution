@@ -761,6 +761,157 @@ def test_maintenance_recovers_missing_problem_understanding_sideflow_once(
         runtime.close()
 
 
+@pytest.mark.parametrize("case", ["quote", "scientific_review", "already_retried", "other_artifact"])
+def test_maintenance_retries_only_blocked_quote_anchor_extraction_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    case: str,
+) -> None:
+    """A blocked child is retried through CommandService from canonical facts."""
+
+    from core.web.services.team_workflow.research_runtime import (
+        stage_task_remediation,
+    )
+    from core.web.services.team_workflow.research_runtime.runtime_factory import (
+        build_workflow_runtime,
+    )
+    from tests._support.workflow_ledger_helpers import (
+        build_attempt_record,
+        build_command_record,
+        build_run_record,
+    )
+
+    identity = register_or_resolve(build_knowledge_sideflow_workflow_definition())
+    runtime = build_workflow_runtime(
+        tmp_path / "ledger.sqlite3",
+        checkpoint_path=tmp_path / "checkpoints.sqlite3",
+    )
+    problem = json.dumps(
+        {
+            "code": "required_artifact_missing",
+            "detail": (
+                "source_extraction requires ['other_artifact']"
+                if case == "other_artifact"
+                else "source_extraction requires ['evidence_card_batch']"
+            ),
+        }
+    )
+    node_run_id = "nr-run-quote-source_extraction-a1"
+    child = replace(
+        build_run_record(
+            run_id="run-quote",
+            workflow_id=KNOWLEDGE_SIDEFLOW_WORKFLOW_ID,
+            workflow_version_id=identity.workflowVersionId,
+            status="blocked",
+        ),
+        active_node_id="source_extraction",
+        blocked_problem_json=problem,
+        input_snapshot_json=json.dumps(
+            {
+                "snapshotHash": "a" * 64,
+                "sourceCollectionRunId": "source-quote",
+                "agentBindingSnapshot": [
+                    {
+                        "snapshotId": "snap:run-quote:source_extraction",
+                        "nodeId": "source_extraction",
+                        "agentId": "agent-extractor",
+                        "roleKey": "source_extractor",
+                        "actorKind": "agent",
+                        "resolvedFrom": "workflow_default",
+                    }
+                ],
+            }
+        ),
+        structure_hash=identity.structureHash,
+    )
+    attempt = replace(
+        build_attempt_record(
+            node_run_id=node_run_id,
+            run_id=child.run_id,
+            node_id="source_extraction",
+            status="blocked",
+            command_id="cmd-quote-a1",
+            problem_json=problem,
+        ),
+        finished_at_ms=FIXED_NOW_MS + 1,
+        retry_of_node_run_id="nr-prior" if case == "already_retried" else None,
+        attempt=2 if case == "already_retried" else 1,
+    )
+    runtime.store.submit(
+        lambda uow: (
+            uow.repository.insert_run(child),
+            uow.repository.insert_command(
+                build_command_record(
+                    command_id=attempt.command_id,
+                    run_id=child.run_id,
+                    node_id="source_extraction",
+                    idempotency_key="quote-a1",
+                )
+            ),
+            uow.repository.insert_attempt(
+                replace(attempt, node_run_id="nr-prior", attempt=1, retry_of_node_run_id=None)
+            ) if case == "already_retried" else None,
+            uow.repository.insert_attempt(attempt),
+        ),
+        force_flush=True,
+    ).result(timeout=10)
+
+    observed: list[tuple[str, str, str]] = []
+
+    def task_for_node_run(*, team_id, source_run_id, node_run_id):
+        observed.append((team_id, source_run_id, node_run_id))
+        return {
+            "stageId": "extraction",
+            "status": "needs_review",
+            "claimMaterialization": {
+                "gate": "scientific_review_required"
+                if case == "scientific_review"
+                else "needs_quote_anchor_retry"
+            },
+        }
+
+    monkeypatch.setattr(
+        stage_task_remediation,
+        "source_stage_task_for_node_run",
+        task_for_node_run,
+    )
+    monkeypatch.setattr(
+        runtime.readiness,
+        "evaluate",
+        lambda **_kwargs: SimpleNamespace(ready=True, blockers=()),
+    )
+    recovery_events: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        runtime.knowledge_sideflow_trigger,
+        "_record_quote_retry",
+        lambda status, _run, **fields: recovery_events.append(
+            (status, str(fields.get("error") or ""))
+        ),
+    )
+    try:
+        first = runtime.knowledge_sideflow_trigger.recover_blocked_quote_anchor_extractions(
+            limit=2
+        )
+        second = runtime.knowledge_sideflow_trigger.recover_blocked_quote_anchor_extractions(
+            limit=2
+        )
+
+        if case != "quote":
+            assert first == second == 0
+            assert recovery_events == []
+            assert runtime.store.latest_attempt(child.run_id, "source_extraction").attempt == attempt.attempt
+            return
+        assert (first, recovery_events) == (1, [("submitted", "")])
+        assert second == 0
+        assert observed == [("research-team", "source-quote", node_run_id)]
+        latest = runtime.store.latest_attempt(child.run_id, "source_extraction")
+        assert latest is not None
+        assert latest.attempt == 2
+        assert latest.retry_of_node_run_id == node_run_id
+    finally:
+        runtime.close()
+
+
 def test_manual_knowledge_request_uses_completed_problem_scope(tmp_path: Path, monkeypatch) -> None:
     from core.research.workflow.contracts import WorkflowCommandKind
     from core.web.services.team_workflow.research_runtime import workflow_artifact_store

@@ -169,6 +169,7 @@ class WorkflowRuntime:
         handled += self.graph_worker.run_repairs_once()
         handled += self.adapter_worker.run_repairs_once(limit=limit)
         self._recover_missing_knowledge_sideflows_best_effort(limit=limit)
+        self._recover_blocked_quote_anchor_extractions_best_effort(limit=limit)
         self._reconcile_expired_task_bundles_best_effort()
         self._sweep_stuck_digest_works_best_effort()
         self._sweep_meetings_missing_digest_best_effort()
@@ -188,6 +189,25 @@ class WorkflowRuntime:
                 )
         except Exception:  # noqa: BLE001 - recovery must never break maintenance
             logger.exception("knowledge sideflow recovery sweep failed")
+
+    def _recover_blocked_quote_anchor_extractions_best_effort(
+        self, *, limit: int
+    ) -> None:
+        """Retry narrowly correctable blocked knowledge extractions."""
+
+        try:
+            recovered = (
+                self.knowledge_sideflow_trigger.recover_blocked_quote_anchor_extractions(
+                    limit=limit
+                )
+            )
+            if recovered:
+                logger.info(
+                    "knowledge sideflow recovery retried %s quote-anchor extraction(s)",
+                    recovered,
+                )
+        except Exception:  # noqa: BLE001 - recovery must never break maintenance
+            logger.exception("knowledge sideflow quote-anchor recovery sweep failed")
 
     def _reconcile_expired_task_bundles_best_effort(self) -> None:
         """Enforce task-bundle ``deadlineSeconds`` from the resident tick.

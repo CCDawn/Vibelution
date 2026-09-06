@@ -66,6 +66,12 @@ AGENT_TURN_CONTINUABLE_TERMINAL_STATUSES = frozenset(
 # the absolute bound for a legitimately long progressing chain.
 MAX_AGENT_TURN_CONTINUATIONS = 3
 
+# An extraction task may discover its quote-anchor remediation only after the
+# model has already emitted a successful terminal turn. Give that canonical
+# task authority one same-session correction turn; a second unresolved result
+# must remain fail-closed instead of starting an unbounded model loop.
+MAX_STAGE_TASK_REMEDIATION_CONTINUATIONS = 1
+
 # A source-collection stage task whose canonical status settled to
 # "completed" is domain-verified finished work: the writeback tool downgrades
 # any completed-but-gate-failed outcome to "needs_review", so canonical
@@ -109,6 +115,32 @@ def _stage_task_work_already_complete(*, team_id: str, task_id: str) -> bool:
         str(task_record.get("status") or "").strip().lower()
         == _STAGE_TASK_SETTLED_COMPLETED_STATUS
     )
+
+
+def _stage_task_actionable_remediation(*, team_id: str, task_id: str) -> str:
+    """Return the bounded automatic correction instruction, when authoritative.
+
+    Only the extraction quote-anchor failure is automatically correctable.
+    Other ``needs_review`` states may represent scientific or operator review
+    decisions and must keep their existing fail-closed behavior.
+    """
+
+    normalized_team = str(team_id or "").strip()
+    normalized_task = str(task_id or "").strip()
+    if not normalized_team or not normalized_task:
+        return ""
+    try:
+        from core.web.services.team_workflow.source_collection.stage_task_query import (
+            get_source_collection_stage_session_task,
+        )
+
+        record = get_source_collection_stage_session_task(normalized_team, normalized_task)
+    except Exception:  # noqa: BLE001 - authority read failure keeps fail-closed behavior
+        return ""
+    from .stage_task_remediation import extraction_quote_anchor_remediation
+
+    task = record.get("task") if isinstance(record, dict) else None
+    return extraction_quote_anchor_remediation(task)
 
 
 def _canonical_agent_task_started_at_ms(
@@ -665,6 +697,7 @@ def _submit_agent_turn_continuation(
     attempt: int,
     from_turn_id: str,
     paused_status: str,
+    continuation_message: str = "继续",
 ) -> str:
     """First-class protocol step: continue the parked turn on the same session.
 
@@ -696,7 +729,7 @@ def _submit_agent_turn_continuation(
     )
     turn = submit_session_message(
         handle.session_id,
-        "继续",
+        str(continuation_message or "继续"),
         mental_model_enabled=False,
         turn_mode="task",
         write_intent=False,
@@ -839,7 +872,15 @@ def _wait_with_bounded_turn_continuation(
         )
     except (TypeError, ValueError):
         resume_no_progress_continuations = 0
+    try:
+        resume_stage_task_remediations = max(
+            0,
+            int(resume_problem.get("stageTaskRemediationContinuationsUsed") or 0),
+        )
+    except (TypeError, ValueError):
+        resume_stage_task_remediations = 0
     consecutive_no_progress_continuations = 0
+    stage_task_remediation_continuations = 0
     if (
         str(resume_problem.get("code") or "").strip() == "live_turn_wait"
         and resume_used > 0
@@ -849,6 +890,7 @@ def _wait_with_bounded_turn_continuation(
         == str(resume_problem.get("continuationTurnId") or "").strip()
     ):
         consecutive_no_progress_continuations = resume_no_progress_continuations
+        stage_task_remediation_continuations = resume_stage_task_remediations
         turn_chain = resume_chain
         turn_id = resume_chain[-1]
         continuations = [
@@ -939,6 +981,9 @@ def _wait_with_bounded_turn_continuation(
                         "continuationNoProgressCount": (
                             consecutive_no_progress_continuations
                         ),
+                        "stageTaskRemediationContinuationsUsed": (
+                            stage_task_remediation_continuations
+                        ),
                     }
                 )
             raise
@@ -1008,7 +1053,17 @@ def _wait_with_bounded_turn_continuation(
         status = str(
             snapshot.get("terminalStatus") or snapshot.get("lastTurnStatus") or ""
         ).strip().lower()
-        if status not in continuable:
+        stage_task_remediation = ""
+        if source_collection_scope and status in _SUCCESS_TERMINAL_STATUSES:
+            stage_task_remediation = _stage_task_actionable_remediation(
+                team_id=team_id,
+                task_id=handle.task_id,
+            )
+        remediation_continuable = bool(stage_task_remediation) and (
+            stage_task_remediation_continuations
+            < MAX_STAGE_TASK_REMEDIATION_CONTINUATIONS
+        )
+        if status not in continuable and not remediation_continuable:
             return snapshot, turn_id, continuations
         if original_snapshot is None:
             original_snapshot = snapshot
@@ -1060,20 +1115,24 @@ def _wait_with_bounded_turn_continuation(
                 )
             )
         _bounded_wait_timeout_ms()
+        paused_status = "stage_task_needs_review" if remediation_continuable else status
         next_turn_id = _submit_agent_turn_continuation(
             handle,
             action=action,
             input_snapshot=input_snapshot,
             attempt=len(continuations) + 1,
             from_turn_id=turn_id,
-            paused_status=status,
+            paused_status=paused_status,
+            continuation_message=stage_task_remediation or "继续",
         )
+        if remediation_continuable:
+            stage_task_remediation_continuations += 1
         continuations.append(
             {
                 "attempt": len(continuations) + 1,
                 "fromTurnId": turn_id,
                 "toTurnId": next_turn_id,
-                "pausedStatus": status,
+                "pausedStatus": paused_status,
                 "progressAdvanced": progress_advanced,
                 "consecutiveNoProgressContinuations": (
                     consecutive_no_progress_continuations

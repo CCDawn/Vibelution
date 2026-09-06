@@ -137,6 +137,219 @@ def _wait_waiter(events: list[str], continuations: list[str]):
     return _wait, _submit
 
 
+def test_completed_turn_with_actionable_stage_remediation_continues_same_session_once(
+    monkeypatch,
+) -> None:
+    """SCI-098: a successful LLM turn cannot close an extraction task whose
+    canonical task state still carries an automatic quote-anchor correction."""
+    import core.web.services.session.submit as submit_module
+    import core.web.services.team_workflow.research_runtime.agent_turn_completion as atc
+
+    messages: list[str] = []
+    remediation_pending = {"value": True}
+
+    def _wait(session_id, turn_id, **_kwargs):
+        return _snapshot("completed", turn_id)
+
+    def _submit(session_id, message, **_kwargs):
+        messages.append(message)
+        remediation_pending["value"] = False
+        return {"turnId": "turn-remediation-1"}
+
+    monkeypatch.setattr(atc, "wait_for_agent_turn_terminal", _wait)
+    monkeypatch.setattr(atc, "_record_turn_continuation_scene_event", lambda *a, **k: None)
+    monkeypatch.setattr(atc, "_stage_task_work_already_complete", lambda **_k: False)
+    monkeypatch.setattr(
+        atc,
+        "_stage_task_actionable_remediation",
+        lambda **_k: "copy exact quote blocks" if remediation_pending["value"] else "",
+    )
+    monkeypatch.setattr(submit_module, "submit_session_message", _submit)
+
+    snapshot, final_turn_id, used = _wait_with_bounded_turn_continuation(
+        _handle(),
+        action=_action(node_id="source_extraction"),
+        input_snapshot=_input_snapshot(),
+        adapter_spec=AgentTaskAdapterSpec(
+            node_id="source_extraction",
+            family="source_collection",
+            task_key="extraction",
+            role_key="source_extractor",
+        ),
+        timeout_ms=1000,
+        poll_ms=10,
+    )
+
+    assert snapshot["terminalStatus"] == "completed"
+    assert final_turn_id == "turn-remediation-1"
+    assert messages == ["copy exact quote blocks"]
+    assert len(used) == 1
+    assert used[0]["pausedStatus"] == "stage_task_needs_review"
+
+
+def test_actionable_stage_remediation_is_bounded_to_one_turn(monkeypatch) -> None:
+    import core.web.services.session.submit as submit_module
+    import core.web.services.team_workflow.research_runtime.agent_turn_completion as atc
+
+    messages: list[str] = []
+
+    monkeypatch.setattr(
+        atc,
+        "wait_for_agent_turn_terminal",
+        lambda session_id, turn_id, **_kwargs: _snapshot("completed", turn_id),
+    )
+    monkeypatch.setattr(atc, "_record_turn_continuation_scene_event", lambda *a, **k: None)
+    monkeypatch.setattr(atc, "_stage_task_work_already_complete", lambda **_k: False)
+    monkeypatch.setattr(
+        atc,
+        "_stage_task_actionable_remediation",
+        lambda **_k: "still needs exact quote blocks",
+    )
+
+    def _submit(session_id, message, **_kwargs):
+        messages.append(message)
+        return {"turnId": f"turn-remediation-{len(messages)}"}
+
+    monkeypatch.setattr(submit_module, "submit_session_message", _submit)
+
+    _snapshot_result, final_turn_id, used = _wait_with_bounded_turn_continuation(
+        _handle(),
+        action=_action(node_id="source_extraction"),
+        input_snapshot=_input_snapshot(),
+        adapter_spec=AgentTaskAdapterSpec(
+            node_id="source_extraction",
+            family="source_collection",
+            task_key="extraction",
+            role_key="source_extractor",
+        ),
+        timeout_ms=1000,
+        poll_ms=10,
+    )
+
+    assert final_turn_id == "turn-remediation-1"
+    assert messages == ["still needs exact quote blocks"]
+    assert len(used) == 1
+
+
+def test_stage_remediation_limit_survives_live_wait_requeue(monkeypatch) -> None:
+    import core.web.services.session.submit as submit_module
+    import core.web.services.team_workflow.research_runtime.agent_turn_completion as atc
+    from core.web.services.team_workflow.research_runtime.challenge_turn_policy import (
+        challenge_task_deadline_scope,
+    )
+
+    submitted: list[str] = []
+    resume_problem: dict = {}
+
+    def wait(_session_id, turn_id, **_kwargs):
+        if turn_id == "turn-main":
+            return _snapshot("completed", turn_id)
+        if not resume_problem:
+            raise atc.TurnNotReadyError(
+                "remediation still running",
+                snapshot={"terminal": False, "completionSource": "running"},
+            )
+        return _snapshot("completed", turn_id)
+
+    monkeypatch.setattr(atc, "wait_for_agent_turn_terminal", wait)
+    monkeypatch.setattr(atc, "_record_turn_continuation_scene_event", lambda *a, **k: None)
+    monkeypatch.setattr(atc, "_stage_task_work_already_complete", lambda **_k: False)
+    monkeypatch.setattr(
+        atc,
+        "_stage_task_actionable_remediation",
+        lambda **_k: "still needs exact quote blocks",
+    )
+    monkeypatch.setattr(atc, "remaining_challenge_task_ms", lambda: 1_000)
+
+    def submit(_session_id, _message, **_kwargs):
+        submitted.append("turn-remediation-1")
+        return {"turnId": "turn-remediation-1"}
+
+    monkeypatch.setattr(submit_module, "submit_session_message", submit)
+
+    with pytest.raises(atc.TurnNotReadyError) as raised:
+        _wait_with_bounded_turn_continuation(
+            _handle(),
+            action=_action(node_id="source_extraction"),
+            input_snapshot=_input_snapshot(),
+            adapter_spec=AgentTaskAdapterSpec(
+                node_id="source_extraction",
+                family="source_collection",
+                task_key="extraction",
+                role_key="source_extractor",
+            ),
+            timeout_ms=1_000,
+            poll_ms=10,
+        )
+
+    resume_problem.update({"code": "live_turn_wait", **raised.value.snapshot})
+    assert resume_problem["stageTaskRemediationContinuationsUsed"] == 1
+
+    with challenge_task_deadline_scope(1, resume_problem=resume_problem):
+        _snapshot_result, final_turn_id, used = _wait_with_bounded_turn_continuation(
+            _handle(),
+            action=_action(node_id="source_extraction"),
+            input_snapshot=_input_snapshot(),
+            adapter_spec=AgentTaskAdapterSpec(
+                node_id="source_extraction",
+                family="source_collection",
+                task_key="extraction",
+                role_key="source_extractor",
+            ),
+            timeout_ms=1_000,
+            poll_ms=10,
+        )
+
+    assert final_turn_id == "turn-remediation-1"
+    assert submitted == ["turn-remediation-1"]
+    assert len(used) == 1
+
+
+def test_stage_task_actionable_remediation_only_accepts_quote_anchor_failure(
+    monkeypatch,
+) -> None:
+    import core.web.services.team_workflow.research_runtime.agent_turn_completion as atc
+    from core.web.services.team_workflow.source_collection import stage_task_query
+
+    task = {
+        "taskId": "task-1",
+        "stageId": "extraction",
+        "status": "needs_review",
+        "writeback": {
+            "evidenceReviewRequiredReason": "missing_evidence_anchor",
+            "materializedContentExtraction": {"missingEvidenceAnchorCount": 8},
+        },
+    }
+    monkeypatch.setattr(
+        stage_task_query,
+        "get_source_collection_stage_session_task",
+        lambda team_id, task_id: {"task": task},
+    )
+
+    instruction = atc._stage_task_actionable_remediation(
+        team_id="team-1", task_id="task-1"
+    )
+    assert "status=completed" in instruction
+    assert "quotableSources" in instruction
+
+    task["writeback"]["evidenceReviewRequiredReason"] = "scientific_review_required"
+    assert (
+        atc._stage_task_actionable_remediation(team_id="team-1", task_id="task-1")
+        == ""
+    )
+
+    task["status"] = "needs_review"
+    task["writeback"] = {}
+    task["claimMaterialization"] = {
+        "gate": "needs_claim_materialization_retry",
+        "remediation": "retry materialization",
+    }
+    assert (
+        atc._stage_task_actionable_remediation(team_id="team-1", task_id="task-1")
+        == ""
+    )
+
+
 def test_completion_projects_registered_receipt_without_journal(monkeypatch) -> None:
     import core.web.services.team_workflow.research_runtime.agent_turn_completion as atc
     from core.web.services.team_workflow.research_runtime import (

@@ -13,6 +13,9 @@ from core.research.workflow.contracts import (
 )
 from core.research.workflow.definition import CHALLENGE_CUP_WORKFLOW_ID, SCHEMA_VERSION
 from core.research.workflow.definition_registry import resolve_definition_for_run_record
+from core.research.workflow.knowledge_sideflow_definition import (
+    KNOWLEDGE_SIDEFLOW_WORKFLOW_ID,
+)
 from core.research.workflow.ledger import WorkflowLedgerStore
 
 from .human_gate_artifacts import canonical_sha256
@@ -20,6 +23,8 @@ from .human_gate_artifacts import canonical_sha256
 CHALLENGE_CUP_TEAM_ID = "research-team"
 RECOVERABLE_BLOCK_CODE = "auto_advance_not_ready"
 MISSING_KNOWLEDGE_BLOCKER = "knowledge_package_not_materialized"
+QUOTE_ANCHOR_RETRY_NODE_ID = "source_extraction"
+QUOTE_ANCHOR_MISSING_ARTIFACT = "evidence_card_batch"
 
 
 class KnowledgeSideflowTrigger:
@@ -193,6 +198,108 @@ class KnowledgeSideflowTrigger:
                 recovered += 1
         return recovered
 
+    def recover_blocked_quote_anchor_extractions(self, *, limit: int = 4) -> int:
+        """Retry only knowledge children blocked after correctable quote review.
+
+        The node blocker alone is insufficient: the matching canonical stage
+        task must still carry the exact automatic quote-anchor remediation.
+        The retry uses the normal command service and an attempt-scoped
+        idempotency key, so maintenance replays cannot create a second retry.
+        """
+
+        remaining = max(0, int(limit))
+        if remaining == 0:
+            return 0
+
+        def load_candidates(repo: Any) -> list[tuple[Any, Any, str]]:
+            candidates: list[tuple[Any, Any, str]] = []
+            for run in repo.list_runs_for_team(
+                CHALLENGE_CUP_TEAM_ID,
+                KNOWLEDGE_SIDEFLOW_WORKFLOW_ID,
+            ):
+                if len(candidates) >= remaining:
+                    break
+                if (
+                    str(run.status or "").strip() != "blocked"
+                    or str(run.active_node_id or "").strip()
+                    != QUOTE_ANCHOR_RETRY_NODE_ID
+                    or not _has_quote_anchor_artifact_blocker(run.blocked_problem_json)
+                ):
+                    continue
+                attempt = repo.latest_attempt(run.run_id, QUOTE_ANCHOR_RETRY_NODE_ID)
+                if (
+                    attempt is None
+                    or str(attempt.status or "").strip() != "blocked"
+                    or bool(str(attempt.retry_of_node_run_id or "").strip())
+                    or not _has_quote_anchor_artifact_blocker(attempt.problem_json)
+                ):
+                    continue
+                try:
+                    snapshot = json.loads(str(run.input_snapshot_json or "{}"))
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    continue
+                source_run_id = str(snapshot.get("sourceCollectionRunId") or "").strip()
+                if source_run_id:
+                    candidates.append((run, attempt, source_run_id))
+            return candidates
+
+        candidates = self._store.read(load_candidates)
+        recovered = 0
+        from .stage_task_remediation import (
+            extraction_quote_anchor_remediation,
+            source_stage_task_for_node_run,
+        )
+
+        for run, attempt, source_run_id in candidates:
+            try:
+                task = source_stage_task_for_node_run(
+                    team_id=run.team_id,
+                    source_run_id=source_run_id,
+                    node_run_id=attempt.node_run_id,
+                )
+                if not extraction_quote_anchor_remediation(task):
+                    continue
+                fresh = self._store.get_run(run.run_id)
+                if (
+                    fresh is None
+                    or str(fresh.status or "").strip() != "blocked"
+                    or int(fresh.run_version) != int(run.run_version)
+                ):
+                    continue
+                identity_hash = canonical_sha256(
+                    {
+                        "runId": run.run_id,
+                        "nodeId": QUOTE_ANCHOR_RETRY_NODE_ID,
+                        "nodeRunId": attempt.node_run_id,
+                        "reason": "quote_anchor_remediation",
+                    }
+                )
+                self._command_service.submit(
+                    CommandRequest(
+                        command_id=f"cmd-knowledge-retry-{identity_hash[:24]}",
+                        run_id=run.run_id,
+                        team_id=run.team_id,
+                        command=WorkflowCommandKind.RETRY_NODE,
+                        node_id=QUOTE_ANCHOR_RETRY_NODE_ID,
+                        expected_run_version=int(fresh.run_version),
+                        idempotency_key=f"knowledge-auto-quote-retry:{identity_hash}",
+                        payload={
+                            "reason": "quote_anchor_remediation",
+                            "retryOfNodeRunId": attempt.node_run_id,
+                        },
+                        requested_by=ActorRef(
+                            "system", "knowledge-sideflow-remediation"
+                        ),
+                        requested_at_ms=self._now(),
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001 - isolate one stale child
+                self._record_quote_retry("failed", run, error=type(exc).__name__)
+                continue
+            recovered += 1
+            self._record_quote_retry("submitted", run, node_run_id=attempt.node_run_id)
+        return recovered
+
     @staticmethod
     def _record(
         status: str,
@@ -226,6 +333,34 @@ class KnowledgeSideflowTrigger:
                 },
             )
         except Exception:
+            pass
+
+    @staticmethod
+    def _record_quote_retry(
+        status: str,
+        run: Any,
+        *,
+        node_run_id: str = "",
+        error: str = "",
+    ) -> None:
+        try:
+            from core.web.services.runtime_scene_service import (
+                record_runtime_scene_event_quietly,
+            )
+
+            record_runtime_scene_event_quietly(
+                "team_workflow_orchestration",
+                "knowledge_sideflow_trigger",
+                "knowledge_sideflow.quote_anchor_retry",
+                level="warning" if status == "failed" else "info",
+                outcome=status,
+                fields={
+                    "runId": str(run.run_id or ""),
+                    "nodeRunId": str(node_run_id or ""),
+                    "error": error,
+                },
+            )
+        except Exception:  # noqa: BLE001, S110 - telemetry cannot break recovery
             pass
 
 
@@ -290,6 +425,19 @@ def _has_missing_knowledge_blocker(raw_problem: str | None) -> bool:
         if item.strip()
     }
     return MISSING_KNOWLEDGE_BLOCKER in blockers
+
+
+def _has_quote_anchor_artifact_blocker(raw_problem: str | None) -> bool:
+    try:
+        problem = json.loads(str(raw_problem or "") or "{}")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return False
+    if not isinstance(problem, Mapping):
+        return False
+    return (
+        str(problem.get("code") or "").strip() == "required_artifact_missing"
+        and QUOTE_ANCHOR_MISSING_ARTIFACT in str(problem.get("detail") or "")
+    )
 
 
 __all__ = ["KnowledgeSideflowTrigger", "problem_artifact_for_collection"]
