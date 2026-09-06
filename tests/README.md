@@ -185,6 +185,7 @@ Vibelution 支持通过 `pytest-xdist` 做进程级并行。直接运行 pytest 
 - 需要完整验证时优先使用 `--hybrid`：先并行运行 `not serial`，再串行运行 `serial`，避免把并行子集误判为全量通过。
 - 不把 `-n auto` 作为默认；本地开发建议先用 `--workers 2` 或 `--workers 4`，再根据耗时和稳定性调整。
 - `test_runner.py` 会把并行 worker 数限制在目标测试文件数以内，避免小批次启动空闲 worker。
+- 当目标文件数低于 worker 上限时，`test_runner.py` 还会识别模块级 `pytestmark = pytest.mark.serial`；若排除这些文件后只剩一个 `not serial` 文件，则保留 marker 筛选并跳过 xdist，避免无收益的进程启动开销。
 - 广义全量回归仍应保留串行兜底；并行适合日常快速反馈和已标注边界的稳定子集。
 - **Teams / team_workflow / structure packs** 未标 `serial`，应走 `local-parallel` 或 `test_runner.py --parallel`；不要误当成必须串行的 Launcher 层。
 - **前端 Vitest** 默认 `pool=forks` + `fileParallelism` + `maxWorkers=50%`（见 `web/vite.config.ts`）；`test` 与 `test:parallel` 都保持该上限。全量：`npm --prefix web run test`；也可 `npm --prefix web run test:parallel`。
