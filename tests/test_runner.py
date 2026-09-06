@@ -153,10 +153,12 @@ class TestRunner:
         self,
         *targets: str,
         parallel: Optional[bool] = None,
+        workers: Optional[int] = None,
         marker_expression: Optional[str] = None,
     ) -> List[str]:
         """构建统一的 pytest 调用命令。"""
         use_parallel = self.parallel if parallel is None else parallel
+        parallel_workers = self.workers if workers is None else max(1, workers)
         cmd = [
             sys.executable, "-m", "pytest",
             *targets,
@@ -171,7 +173,7 @@ class TestRunner:
         if self.fast:
             marker_parts.append("not slow")
         if use_parallel:
-            cmd.extend(["-n", str(self.workers), "--dist", "loadfile"])
+            cmd.extend(["-n", str(parallel_workers), "--dist", "loadfile"])
             marker_parts.append("not serial")
         if marker_expression:
             marker_parts.append(marker_expression)
@@ -197,6 +199,10 @@ class TestRunner:
             else:
                 missing.append(str(test_path))
         return targets, missing
+
+    def _parallel_workers_for_targets(self, targets: List[str]) -> int:
+        """Avoid starting idle xdist workers for a smaller file batch."""
+        return max(1, min(self.workers, len(targets)))
 
     def _run_pytest_command(
         self,
@@ -299,10 +305,6 @@ class TestRunner:
 
     def run_parallel_tests(self, modules: List[Tuple[str, str]]) -> Tuple[bool, Dict]:
         """使用 pytest-xdist 在一个 pytest 进程组里运行测试模块。"""
-        print(f"\n{'='*60}")
-        print(f"⚙️ 进程级并行测试: {self.workers} workers")
-        print(f"{'='*60}")
-
         prerequisite_error = self._parallel_prerequisite_error()
         if prerequisite_error:
             return False, {
@@ -321,11 +323,15 @@ class TestRunner:
                 "message": "测试文件不存在: " + ", ".join(missing),
             }
 
-        cmd = self.build_pytest_command(*targets)
+        workers = self._parallel_workers_for_targets(targets)
+        print(f"\n{'='*60}")
+        print(f"⚙️ 进程级并行测试: {workers} workers")
+        print(f"{'='*60}")
+        cmd = self.build_pytest_command(*targets, workers=workers)
         return self._run_pytest_command(
             cmd,
             module="parallel-suite",
-            description=f"Parallel pytest suite ({self.workers} workers)",
+            description=f"Parallel pytest suite ({workers} workers)",
             timeout=max(300, 60 * max(1, len(modules))),
             timeout_message="并行测试超时",
             allow_no_tests=True,
@@ -333,10 +339,6 @@ class TestRunner:
 
     def run_hybrid_tests(self, modules: List[Tuple[str, str]]) -> Tuple[bool, List[Dict]]:
         """先并行运行可并行测试，再串行运行 serial 测试，形成完整验证。"""
-        print(f"\n{'='*60}")
-        print(f"⚙️ 混合测试: not serial 并行 {self.workers} workers + serial 串行")
-        print(f"{'='*60}")
-
         prerequisite_error = self._parallel_prerequisite_error()
         if prerequisite_error:
             return False, [{
@@ -355,12 +357,16 @@ class TestRunner:
                 "message": "测试文件不存在: " + ", ".join(missing),
             }]
 
+        workers = self._parallel_workers_for_targets(targets)
+        print(f"\n{'='*60}")
+        print(f"⚙️ 混合测试: not serial 并行 {workers} workers + serial 串行")
+        print(f"{'='*60}")
         timeout = max(300, 60 * max(1, len(modules)))
-        parallel_cmd = self.build_pytest_command(*targets, parallel=True)
+        parallel_cmd = self.build_pytest_command(*targets, parallel=True, workers=workers)
         parallel_success, parallel_result = self._run_pytest_command(
             parallel_cmd,
             module="hybrid-parallel-suite",
-            description=f"Hybrid pytest suite: not serial ({self.workers} workers)",
+            description=f"Hybrid pytest suite: not serial ({workers} workers)",
             timeout=timeout,
             timeout_message="混合测试并行阶段超时",
             allow_no_tests=True,
@@ -387,9 +393,9 @@ class TestRunner:
         if self.fast:
             mode_parts.append("快速")
         if self.hybrid:
-            mode_parts.append(f"混合并行 {self.workers} workers")
+            mode_parts.append(f"混合并行（最多 {self.workers} workers）")
         if self.parallel:
-            mode_parts.append(f"进程并行 {self.workers} workers")
+            mode_parts.append(f"进程并行（最多 {self.workers} workers）")
         if self.per_file:
             mode_parts.append("逐文件诊断")
         print(f"模式: {' / '.join(mode_parts)}")
@@ -555,6 +561,39 @@ def test_runner_builds_parallel_pytest_command():
     assert cmd[marker_index + 1] == "not slow and not serial"
 
 
+def test_runner_caps_parallel_workers_by_target_count(monkeypatch):
+    runner = TestRunner(environment_smoke=True, parallel=True, workers=8)
+
+    monkeypatch.setattr(runner, "_parallel_prerequisite_error", lambda: None)
+    monkeypatch.setattr(
+        runner,
+        "_module_targets",
+        lambda modules: (["tests/test_alpha.py", "tests/test_beta.py"], []),
+    )
+    commands = []
+
+    def fake_run(cmd, **kwargs):
+        commands.append((cmd, kwargs["description"]))
+        return True, {
+            "module": kwargs["module"],
+            "description": kwargs["description"],
+            "status": "PASS",
+            "passed": 1,
+            "failed": 0,
+            "skipped": 0,
+            "total": 1,
+        }
+
+    monkeypatch.setattr(runner, "_run_pytest_command", fake_run)
+
+    success, result = runner.run_parallel_tests(runner.ENVIRONMENT_SMOKE_MODULES)
+
+    assert success is True
+    assert commands[0][0][commands[0][0].index("-n") + 1] == "2"
+    assert commands[0][1] == "Parallel pytest suite (2 workers)"
+    assert result["status"] == "PASS"
+
+
 def test_runner_default_parallel_worker_cap_prefers_eight_on_large_machines(monkeypatch):
     monkeypatch.setattr(os, "cpu_count", lambda: 16)
 
@@ -598,13 +637,13 @@ def test_runner_defaults_to_batched_execution(monkeypatch):
 
 
 def test_runner_hybrid_runs_parallel_and_serial_stages(monkeypatch):
-    runner = TestRunner(environment_smoke=True, hybrid=True, workers=2)
+    runner = TestRunner(environment_smoke=True, hybrid=True, workers=8)
 
     monkeypatch.setattr(runner, "_parallel_prerequisite_error", lambda: None)
     monkeypatch.setattr(
         runner,
         "_module_targets",
-        lambda modules: (["tests/test_environment_smoke.py"], []),
+        lambda modules: (["tests/test_environment_smoke.py", "tests/test_environment_doctor.py"], []),
     )
     commands = []
 
@@ -630,6 +669,7 @@ def test_runner_hybrid_runs_parallel_and_serial_stages(monkeypatch):
         "hybrid-serial-suite",
     ]
     assert "-n" in commands[0][0]
+    assert commands[0][0][commands[0][0].index("-n") + 1] == "2"
     parallel_marker_index = commands[0][0].index("-m", 3)
     serial_marker_index = commands[1][0].index("-m", 3)
     assert "not serial" in commands[0][0][parallel_marker_index + 1]

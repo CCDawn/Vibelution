@@ -184,9 +184,10 @@ Vibelution 支持通过 `pytest-xdist` 做进程级并行。直接运行 pytest 
 - 在并行模式下排除 `serial` 标记；涉及真实进程、端口、共享全局状态、真实 workspace、外部 config 或 Launcher/runtime 生命周期的测试应标记为 `serial`。
 - 需要完整验证时优先使用 `--hybrid`：先并行运行 `not serial`，再串行运行 `serial`，避免把并行子集误判为全量通过。
 - 不把 `-n auto` 作为默认；本地开发建议先用 `--workers 2` 或 `--workers 4`，再根据耗时和稳定性调整。
+- `test_runner.py` 会把并行 worker 数限制在目标测试文件数以内，避免小批次启动空闲 worker。
 - 广义全量回归仍应保留串行兜底；并行适合日常快速反馈和已标注边界的稳定子集。
 - **Teams / team_workflow / structure packs** 未标 `serial`，应走 `local-parallel` 或 `test_runner.py --parallel`；不要误当成必须串行的 Launcher 层。
-- **前端 Vitest** 默认 `pool=forks` + `fileParallelism` + `maxWorkers=25%`（见 `web/vite.config.ts`）；只有 `test:parallel` 显式提高到 `50%`。全量：`npm --prefix web run test`；也可 `npm --prefix web run test:parallel`。
+- **前端 Vitest** 默认 `pool=forks` + `fileParallelism` + `maxWorkers=50%`（见 `web/vite.config.ts`）；`test` 与 `test:parallel` 都保持该上限。全量：`npm --prefix web run test`；也可 `npm --prefix web run test:parallel`。
 
 ### 3.5 使用影响面测试选择器
 
