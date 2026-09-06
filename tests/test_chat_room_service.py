@@ -1426,6 +1426,12 @@ def test_start_chat_room_round_runs_participants_in_round_robin_and_persists_wor
         "record_runtime_scene_event",
         lambda *args, **kwargs: recorded_events.append((args, kwargs)) or {"accepted": True},
     )
+    snapshot_calls = []
+    monkeypatch.setattr(
+        chat_room_service,
+        "_publish_chat_room_detail_snapshot",
+        lambda room_id: snapshot_calls.append(room_id),
+    )
     prompts = []
 
     def fake_runner(participant, prompt, context):
@@ -1463,6 +1469,7 @@ def test_start_chat_room_round_runs_participants_in_round_robin_and_persists_wor
     assert prompts[1][0] == "session-alpha"
     assert "Beta Agent 对 讨论群聊 MVP 怎么切第一版 的发言" in prompts[1][1]
     assert "- 你是本轮第一位发言者。" not in prompts[1][1]
+    assert snapshot_calls == [room["roomId"]] * (len(latest_round["messages"]) + 2)
 
     work_run_summary = chat_room_service.load_chat_room_work_run_summary()
     assert work_run_summary["active"] is None
@@ -5756,6 +5763,12 @@ def test_explicit_parallel_meeting_opening_runs_speakers_concurrently_and_commit
         title="开幕轮并行群聊",
         participant_session_ids=sessions,
     )
+    snapshot_calls = []
+    monkeypatch.setattr(
+        chat_room_service,
+        "_publish_chat_room_detail_snapshot",
+        lambda room_id: snapshot_calls.append(room_id),
+    )
     barrier = threading.Barrier(4, timeout=10)
     started = []
     start_lock = threading.Lock()
@@ -5784,6 +5797,7 @@ def test_explicit_parallel_meeting_opening_runs_speakers_concurrently_and_commit
 
     latest = detail["rounds"][-1]
     assert latest["status"] == "completed"
+    assert snapshot_calls == [room["roomId"]] * 3
     assert sorted(started) == sorted(sessions)
     # Messages commit in speaker order even though the batch ran concurrently.
     participant_order = [
