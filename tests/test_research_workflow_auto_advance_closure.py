@@ -1935,7 +1935,8 @@ def test_review_round_link_reuses_existing_when_only_request_id_differs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """同一逻辑轮的两个兄弟请求交接双写同一 link：仅 collectionRequestId
-    不同 → reuse 返回首写 link，不 raise，账本不追加重复 link。"""
+    和 previousMeetingRoundId 不同 → reuse 返回首写 link，不 raise，账本
+    不追加重复 link。"""
     _chain_env(tmp_path, monkeypatch)
     ledger_path = chain._storage_path(_TEAM_ID)
     first = _seed_review_round_link(
@@ -1945,7 +1946,7 @@ def test_review_round_link_reuses_existing_when_only_request_id_differs(
     second = chain._record_review_round_link(
         _TEAM_ID,
         meeting_round_id="meeting-next-5",
-        previous_meeting_round_id="meeting-prev-1",
+        previous_meeting_round_id="meeting-prev-2",
         selection_id="hsel-sibling-1",
         collection_request_id="request-sib-2",
         question_id=_QUESTION_ID,

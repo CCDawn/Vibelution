@@ -7446,7 +7446,7 @@ def _record_review_round_link(
         )
         if existing is not None:
             backfilled = dict(existing)
-            sibling_request_only = False
+            sibling_provenance_only = False
             for key in (
                 "previousMeetingRoundId",
                 "collectionRequestId",
@@ -7469,25 +7469,27 @@ def _record_review_round_link(
                         backfilled[key] = record[key]
                     continue
                 if existing_value != record.get(key):
-                    if key == "collectionRequestId":
-                        # Defer the decision: a difference confined to the
-                        # collectionRequestId is sibling fan-out (below);
-                        # any other difference still rejects, so keep
-                        # scanning and only decide after the loop.
-                        sibling_request_only = True
+                    if key in {"previousMeetingRoundId", "collectionRequestId"}:
+                        # Defer the decision: both fields identify the
+                        # sibling handoff that supplied the same logical
+                        # round, rather than the round's content.  A fan-out
+                        # replay can legitimately differ on either (or both);
+                        # any business-field difference still rejects, so
+                        # keep scanning and decide only after the loop.
+                        sibling_provenance_only = True
                         continue
                     raise HypothesisFirstChainError(
                         f"review round link for {meeting_round_id} is already bound to different content"
                     )
-            if sibling_request_only:
+            if sibling_provenance_only:
                 # Sibling fan-out: the two sibling collection requests of one
                 # logical round both hand off into the same fan-out of
                 # next-round meetings, so both legitimately race to bind the
-                # identical link.  That double-write is competition, not
-                # content drift — reuse the existing link with the first
-                # writer's collectionRequestId kept as provenance instead of
-                # rejecting the late sibling (which used to park its request
-                # in handoff_pending forever with no retry path).
+                # identical link.  Their previous meeting and request are
+                # provenance, not content drift — reuse the existing link
+                # with the first writer's provenance instead of rejecting the
+                # late sibling (which used to park its request in
+                # handoff_pending forever with no retry path).
                 return existing
             if backfilled != existing:
                 _append_jsonl(_storage_path(team_id), backfilled)
