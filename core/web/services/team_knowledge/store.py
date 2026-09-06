@@ -323,6 +323,26 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def _read_team_graph_reference(team_id: str) -> dict[str, Any] | None:
+    """Read one Team identity/membership projection without Team repair."""
+
+    s = _service()
+    normalized_id = str(team_id or "").strip()
+    if not normalized_id:
+        return None
+    try:
+        payload = s.team_service.list_team_graph_references(include_archived=True)
+    except Exception:
+        return None
+    for candidate in list(payload.get("teams") or []) if isinstance(payload, dict) else []:
+        if (
+            isinstance(candidate, dict)
+            and str(candidate.get("teamId") or "").strip() == normalized_id
+        ):
+            return candidate
+    return None
+
+
 def _owner_context(
     owner_type: str,
     owner_id: str,
@@ -340,10 +360,10 @@ def _owner_context(
         "agent": agent if isinstance(agent, dict) else {},
     }
     if normalized_type == "team" and not payload["team"] and normalized_id:
-        try:
-            payload["team"] = s.team_service.get_team(normalized_id)
-        except Exception:
-            payload["team"] = {"teamId": normalized_id, "name": ""}
+        payload["team"] = _read_team_graph_reference(normalized_id) or {
+            "teamId": normalized_id,
+            "name": "",
+        }
     if normalized_type == "agent" and not payload["agent"] and normalized_id:
         try:
             payload["agent"] = s.agent_directory_service.get_agent(normalized_id) or {"agentId": normalized_id}

@@ -1767,6 +1767,35 @@ def test_memory_knowledge_graph_uses_lightweight_team_graph_references(knowledge
     )
 
 
+def test_knowledge_owner_context_uses_readonly_team_reference(knowledge_env, monkeypatch):
+    def fail_get_team(*args, **kwargs):
+        raise AssertionError("knowledge reads must not hydrate or repair full Team detail")
+
+    monkeypatch.setattr(team_service, "get_team", fail_get_team)
+    monkeypatch.setattr(
+        team_service,
+        "_repair_team",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("knowledge reads must not repair Team state")
+        ),
+    )
+
+    payload = team_knowledge_service.list_knowledge_items(
+        knowledge_env["base"]["knowledgeBaseId"],
+        agent_id=knowledge_env["member"]["agentId"],
+    )
+
+    assert payload["teamId"] == knowledge_env["team"]["teamId"]
+    assert payload["knowledgeBase"]["teamId"] == knowledge_env["team"]["teamId"]
+    assert payload["knowledgeBase"]["teamName"] == knowledge_env["team"]["name"]
+
+    with pytest.raises(team_knowledge_service.TeamKnowledgePermissionError):
+        team_knowledge_service.list_knowledge_items(
+            knowledge_env["base"]["knowledgeBaseId"],
+            agent_id=knowledge_env["outsider"]["agentId"],
+        )
+
+
 def test_steward_recommendations_are_read_only_actions(knowledge_env):
     orphan_source = _create_central_source_artifact(
         knowledge_env["base"]["knowledgeBaseId"],
