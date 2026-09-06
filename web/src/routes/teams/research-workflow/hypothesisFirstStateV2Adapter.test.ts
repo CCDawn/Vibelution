@@ -852,6 +852,7 @@ describe("resolveHypothesisFirstNextActionFromV2", () => {
     expect(action.stage).toBe("blocked");
     expect(action.command).toBe(action.canonicalCommand);
     expect(action.statusMessage).toContain("已拒绝");
+    expect(action.statusMessage).not.toContain("人工");
   });
 
   it("keeps program delivery as an explicit phase", () => {

@@ -363,6 +363,25 @@ export function ResearchProcessWorkspace({
     && safeNextAction.stage !== "converged"
     && hypothesisFirstChain.stateV2?.currentPhase !== "formal_runtime"
     && Boolean(hypothesisFirstChain.stateV2);
+  // The formal snapshot and canonical V2 state are read independently. A
+  // scoped formal snapshot can therefore arrive with no currentTask while
+  // V2 is still resolving whether the question is in a live hypothesis gate.
+  // Keep that read window explicit instead of letting the created-run
+  // dispatch heuristic present a transient "never started" task.
+  const formalSnapshotNeedsResolution = Boolean(
+    location.runId
+    && runState.snapshot
+    && !runState.snapshot.currentTask
+    && !hypothesisFirstOwnsCurrentTask
+    && (
+      hypothesisFirstChain.v2ReadState === "pending"
+      || hypothesisFirstChain.v2ReadState === "v2_error"
+    ),
+  );
+  const formalSnapshotResolutionError = formalSnapshotNeedsResolution
+    && hypothesisFirstChain.v2ReadState === "v2_error"
+    ? hypothesisFirstChain.error || "无法获取权威假说状态"
+    : null;
   const semanticSelectedNodeId = hypothesisFirstSemanticNodeId(location.selectedNodeId);
   const prospectiveCurrentTaskNodeId = hypothesisFirstOwnsCurrentTask
     ? safeNextAction.targetNodeId
@@ -379,6 +398,7 @@ export function ResearchProcessWorkspace({
     commands.error
     || formalCommand.commandError
     || runState.error
+    || formalSnapshotResolutionError
     || (!location.runId || hypothesisFirstOwnsCurrentTask ? catalog.error : null)
     || (!location.runId || hypothesisFirstOwnsCurrentTask ? hypothesisFirstChain.error : null);
   const commandBusy = runState.busy || commands.busy || formalCommand.busy;
@@ -400,6 +420,7 @@ export function ResearchProcessWorkspace({
     loading: hypothesisFirstOwnsCurrentTask || !location.runId
       ? hypothesisFirstChain.loading
       : !runState.snapshot && !runState.error,
+    refreshing: formalSnapshotNeedsResolution && !formalSnapshotResolutionError,
     error: displayError,
     resyncRequired: runState.resyncRequired,
   }), [
@@ -416,6 +437,7 @@ export function ResearchProcessWorkspace({
     runState.run?.runVersion,
     runState.resyncRequired,
     runState.snapshot,
+    formalSnapshotNeedsResolution,
     safeNextAction,
     teamId,
   ]);

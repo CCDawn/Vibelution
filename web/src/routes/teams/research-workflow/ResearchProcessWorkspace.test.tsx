@@ -322,17 +322,24 @@ async function renderWorkspace() {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
+  const renderTree = () => (
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter>
+        <RouteProbe />
+        <ResearchProcessWorkspace teamId="research-team" lang="zh" />
+      </MemoryRouter>
+    </QueryClientProvider>
+  );
   await act(async () => {
-    root.render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter>
-          <RouteProbe />
-          <ResearchProcessWorkspace teamId="research-team" lang="zh" />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
+    root.render(renderTree());
   });
-  return { container, root };
+  return {
+    container,
+    root,
+    rerender: async () => {
+      await act(async () => root.render(renderTree()));
+    },
+  };
 }
 
 async function openSwitchSelect(trigger: HTMLElement): Promise<NodeListOf<Element>> {
@@ -970,6 +977,71 @@ describe("ResearchProcessWorkspace", () => {
     expect(rendered.container.textContent).not.toContain("查看评审讨论");
     expect(rendered.container.textContent).not.toContain("整理本轮结论");
     expect(rendered.container.textContent).not.toContain("生成候选假说");
+  });
+
+  it("keeps an incomplete formal snapshot in the read window while V2 resolves", async () => {
+    harness.location.panel = "node";
+    harness.location.runId = "run-created";
+    harness.location.questionId = "SCI-096";
+    harness.location.selectedNodeId = "source_finding";
+    harness.chain.questionId = "SCI-096";
+    harness.chain.stateV2 = null;
+    harness.chain.v2ReadState = "pending";
+    harness.chain.stateSource = "pending";
+    harness.chain.loading = true;
+    harness.runState.run = {
+      ...currentRun,
+      runId: "run-created",
+      questionId: "SCI-096",
+      status: "created",
+      runVersion: 1,
+    } as WorkflowRunRecord;
+    harness.runState.projection = {
+      definition: { nodes: [], edges: [], stages: [] },
+      run: {
+        runId: "run-created",
+        teamId: "research-team",
+        runVersion: 1,
+        status: "created",
+        runtimeCurrentNodeIds: [],
+        nodeRuns: { source_finding: { status: "pending", attempt: 0 } },
+      },
+    } as never;
+    harness.runState.snapshot = {
+      run: {
+        runId: "run-created",
+        teamId: "research-team",
+        workflowId: "challenge-cup-research",
+        workflowVersionId: "v1",
+        runVersion: 1,
+        questionId: "SCI-096",
+        status: "created",
+      },
+      activeNodeIds: [],
+      nodeAttempts: {},
+      commandOffers: [],
+      currentTask: null,
+      progress: null,
+      latestEventSequence: 0,
+    } as never;
+    const rendered = await renderWorkspace();
+    root = rendered.root;
+
+    const inspector = rendered.container.querySelector('[data-vui="research-current-task-inspector"]');
+    expect(inspector?.getAttribute("data-load-state")).toBe("refreshing");
+    expect(rendered.container.textContent).toContain("正在读取当前任务");
+    expect(rendered.container.textContent).not.toContain("运行从未启动");
+    expect(rendered.container.querySelector('[data-task-status="never_started"]')).toBeNull();
+    expect(rendered.container.querySelector('[data-vui-region="current-task-action"] button')).toBeNull();
+
+    harness.chain.v2ReadState = "ok";
+    harness.chain.stateV2 = stateV2({ currentPhase: "formal_runtime" }) as never;
+    await rendered.rerender();
+
+    const resolvedInspector = rendered.container.querySelector('[data-vui="research-current-task-inspector"]');
+    expect(resolvedInspector?.getAttribute("data-load-state")).toBe("ready");
+    expect(rendered.container.textContent).not.toContain("运行从未启动");
+    expect(rendered.container.querySelector('[data-task-status="never_started"]')).toBeNull();
   });
 
   it("surfaces a v2_error read failure and withholds every legacy write action", async () => {

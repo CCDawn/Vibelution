@@ -525,4 +525,30 @@ describe("researchWorkflowWorkspaceModel", () => {
       expect(model.hypothesisNextAction).toBeNull();
     }
   });
+
+  it("keeps an incomplete formal snapshot refreshing until the V2 read resolves", () => {
+    const pending = buildResearchWorkflowWorkspaceModel(baseInput({
+      snapshot: snapshot({ currentTask: undefined }),
+      commandOffers: [],
+      refreshing: true,
+    }));
+
+    expect(pending.source).toBe("formal_runtime");
+    expect(pending.loadState).toBe("refreshing");
+    expect(pending.currentTask).toBeNull();
+    expect(pending.primaryAction).toBeNull();
+    expect(pending.hypothesisNextAction).toBeNull();
+
+    const resolved = buildResearchWorkflowWorkspaceModel(baseInput({
+      snapshot: snapshot({ currentTask: undefined }),
+      commandOffers: [],
+      refreshing: false,
+    }));
+
+    expect(resolved.source).toBe("formal_runtime");
+    expect(resolved.loadState).toBe("ready");
+    expect(resolved.currentTask).toBeNull();
+    expect(resolved.primaryAction).toBeNull();
+    expect(resolved.hypothesisNextAction).toBeNull();
+  });
 });

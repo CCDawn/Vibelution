@@ -350,7 +350,7 @@ function defaultStatus(
     case "convergence": return state.convergence.accepted
       ? "假说已经收敛"
       : state.convergence.outcome === "rejected"
-        ? "人工已拒绝当前收敛结果"
+        ? "当前收敛结果已拒绝"
         : "等待假说收敛";
     case "formal_runtime": {
       if (!state.formalRuntime.runId) return "可以创建正式研究运行";
