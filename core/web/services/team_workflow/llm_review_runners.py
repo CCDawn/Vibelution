@@ -1476,7 +1476,9 @@ def _invoke_review_llm_impl(
             if bound_max_output_tokens
             else None
         )
-        with model_invocation_receipt_context_scope(receipt_context):
+        from core.runtime_manager.formal_review_work import active_formal_review
+
+        with active_formal_review(receipt_context, purpose=purpose), model_invocation_receipt_context_scope(receipt_context):
             return run_streaming_llm_outcome(
                 llm["client"],
                 messages,

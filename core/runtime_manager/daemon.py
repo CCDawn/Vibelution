@@ -369,6 +369,9 @@ def _runtime_manager_active_work_runs() -> list[dict[str, str]]:
             kind=kind,
             payload={**payload, "runId": str(payload.get("runId") or active_run_id)},
         )
+    from .formal_review_work import summary as formal_review_summary
+    for payload in formal_review_summary()["activeItems"]:
+        _append_active_work_run(items, seen, kind="formal_review", payload=payload)
     return items
 
 
