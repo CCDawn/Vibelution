@@ -17,8 +17,8 @@ from uuid import uuid4
 
 from .store import WorkflowLedgerStore
 
-
 LEDGER_RESET_PORT_KIND = "workflow_ledger_team_reset"
+LEDGER_RUN_RESET_PORT_KIND = "workflow_ledger_run_reset"
 LEDGER_RESET_PORT_SCHEMA_VERSION = 1
 
 
@@ -81,13 +81,12 @@ def _in_clause(values: list[str]) -> tuple[str, tuple[str, ...]]:
     return "(" + ",".join("?" for _ in values) + ")", tuple(values)
 
 
-def _snapshot(connection: Any, team_id: str) -> dict[str, list[dict[str, Any]]]:
-    runs = _rows(
-        connection,
-        "workflow_runs",
-        "SELECT * FROM workflow_runs WHERE team_id = ? ORDER BY run_id",
-        (team_id,),
-    )
+def _snapshot_for_runs(
+    connection: Any,
+    runs: list[dict[str, Any]],
+    *,
+    catalog_authorizations: list[dict[str, Any]] | None = None,
+) -> dict[str, list[dict[str, Any]]]:
     run_ids = [str(row["run_id"]) for row in runs]
     run_in, run_params = _in_clause(run_ids)
     attempts = _rows(
@@ -122,12 +121,7 @@ def _snapshot(connection: Any, team_id: str) -> dict[str, list[dict[str, Any]]]:
 
     return {
         "knowledge_invocations": invocations,
-        "catalog_run_authorizations": _rows(
-            connection,
-            "catalog_run_authorizations",
-            "SELECT * FROM catalog_run_authorizations WHERE team_id = ? ORDER BY authorization_id",
-            (team_id,),
-        ),
+        "catalog_run_authorizations": catalog_authorizations or [],
         "workflow_runs": runs,
         "workflow_commands": _rows(connection, "workflow_commands", f"SELECT * FROM workflow_commands WHERE run_id IN {run_in} ORDER BY command_id", run_params),
         "node_attempts": attempts,
@@ -144,14 +138,50 @@ def _snapshot(connection: Any, team_id: str) -> dict[str, list[dict[str, Any]]]:
     }
 
 
+def _snapshot(connection: Any, team_id: str) -> dict[str, list[dict[str, Any]]]:
+    runs = _rows(
+        connection,
+        "workflow_runs",
+        "SELECT * FROM workflow_runs WHERE team_id = ? ORDER BY run_id",
+        (team_id,),
+    )
+    authorizations = _rows(
+        connection,
+        "catalog_run_authorizations",
+        "SELECT * FROM catalog_run_authorizations WHERE team_id = ? ORDER BY authorization_id",
+        (team_id,),
+    )
+    return _snapshot_for_runs(
+        connection,
+        runs,
+        catalog_authorizations=authorizations,
+    )
+
+
+def _snapshot_run_ids(connection: Any, run_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
+    run_in, run_params = _in_clause(run_ids)
+    runs = _rows(
+        connection,
+        "workflow_runs",
+        f"SELECT * FROM workflow_runs WHERE run_id IN {run_in} ORDER BY run_id",
+        run_params,
+    )
+    return _snapshot_for_runs(connection, runs)
+
+
 def _summary(stage: Mapping[str, Any]) -> dict[str, Any]:
     rows = stage.get("rows") if isinstance(stage.get("rows"), Mapping) else {}
     return {
         "schemaVersion": LEDGER_RESET_PORT_SCHEMA_VERSION,
-        "kind": LEDGER_RESET_PORT_KIND,
+        "kind": str(stage.get("kind") or LEDGER_RESET_PORT_KIND),
         "stageId": str(stage["stageId"]),
         "resetId": str(stage["resetId"]),
         "teamId": str(stage["teamId"]),
+        **(
+            {"runIds": list(stage.get("runIds") or [])}
+            if stage.get("kind") == LEDGER_RUN_RESET_PORT_KIND
+            else {}
+        ),
         "status": str(stage.get("status") or "staged"),
         "runCount": len(rows.get("workflow_runs") or []),
         "recordCount": sum(len(value) for value in rows.values() if isinstance(value, list)),
@@ -162,14 +192,20 @@ def _summary(stage: Mapping[str, Any]) -> dict[str, Any]:
 def _stage(stage: Mapping[str, Any], *, reset_id: str | None = None) -> dict[str, Any]:
     if not isinstance(stage, Mapping):
         raise WorkflowLedgerResetError("ledger stage must be an object")
-    if stage.get("schemaVersion") != LEDGER_RESET_PORT_SCHEMA_VERSION or stage.get("kind") != LEDGER_RESET_PORT_KIND:
+    if stage.get("schemaVersion") != LEDGER_RESET_PORT_SCHEMA_VERSION or stage.get("kind") not in {
+        LEDGER_RESET_PORT_KIND,
+        LEDGER_RUN_RESET_PORT_KIND,
+    }:
         raise WorkflowLedgerResetError("ledger stage schema is invalid")
     stage_id = _text(stage.get("stageId"), field="stageId")
     with _LOCK:
         cached = _STAGES.get(stage_id)
     if cached is None:
         raise WorkflowLedgerResetError("ledger stage is unavailable")
-    for key in ("resetId", "teamId", "fingerprint"):
+    keys = ["resetId", "teamId", "fingerprint"]
+    if cached.get("kind") == LEDGER_RUN_RESET_PORT_KIND:
+        keys.append("runIds")
+    for key in keys:
         if str(stage.get(key) or "") != str(cached.get(key) or ""):
             raise WorkflowLedgerResetError(f"ledger stage {key} does not match")
     if reset_id is not None and str(reset_id).strip() != str(cached["resetId"]):
@@ -188,9 +224,46 @@ def prepare_team_ledger_reset_stage(
     reset = _text(reset_id, field="resetId")
     rows = store.read(lambda repo: _snapshot(repo.connection, team))
     stage = {
+        "kind": LEDGER_RESET_PORT_KIND,
         "stageId": f"ledger-stage-{uuid4().hex}",
         "resetId": reset,
         "teamId": team,
+        "rows": rows,
+        "fingerprint": _json_hash(rows),
+        "status": "staged",
+    }
+    with _LOCK:
+        _STAGES[str(stage["stageId"])] = stage
+    return _summary(stage)
+
+
+def prepare_run_ledger_reset_stage(
+    store: WorkflowLedgerStore,
+    run_ids: list[str] | tuple[str, ...],
+    reset_id: str,
+    *,
+    team_id: str,
+) -> dict[str, Any]:
+    """Capture exact named runs without touching team-wide authorization state."""
+
+    team = _text(team_id, field="teamId")
+    reset = _text(reset_id, field="resetId")
+    normalized = sorted({_text(value, field="runId") for value in run_ids})
+    if not normalized:
+        raise WorkflowLedgerResetError("runIds are required")
+    rows = store.read(lambda repo: _snapshot_run_ids(repo.connection, normalized))
+    staged_runs = rows.get("workflow_runs") or []
+    observed_ids = [str(row["run_id"]) for row in staged_runs]
+    if observed_ids != normalized:
+        raise WorkflowLedgerResetError("one or more staged runs are unavailable")
+    if any(str(row.get("team_id") or "") != team for row in staged_runs):
+        raise WorkflowLedgerResetError("staged run belongs to another team")
+    stage = {
+        "kind": LEDGER_RUN_RESET_PORT_KIND,
+        "stageId": f"ledger-run-stage-{uuid4().hex}",
+        "resetId": reset,
+        "teamId": team,
+        "runIds": normalized,
         "rows": rows,
         "fingerprint": _json_hash(rows),
         "status": "staged",
@@ -270,6 +343,34 @@ def purge_team_ledger_reset_stage(
     return {**_summary(cached), "operation": "purge", "changedRows": changed}
 
 
+def purge_run_ledger_reset_stage(
+    store: WorkflowLedgerStore,
+    stage: Mapping[str, Any],
+    *,
+    reset_id: str | None = None,
+) -> dict[str, Any]:
+    """Remove only the exact staged run graph while preserving other team rows."""
+
+    cached = _stage(stage, reset_id=reset_id)
+    if cached.get("kind") != LEDGER_RUN_RESET_PORT_KIND:
+        raise WorkflowLedgerResetError("ledger stage is not run-scoped")
+    if cached.get("status") == "destroyed":
+        raise WorkflowLedgerResetError("finalized ledger stage cannot be purged")
+    run_ids = list(cached["runIds"])
+    rows = cached["rows"]
+
+    def mutate(uow: Any) -> int:
+        current = _snapshot_run_ids(uow.connection, run_ids)
+        if _json_hash(current) != str(cached["fingerprint"]):
+            raise WorkflowLedgerResetError("ledger changed after reset staging")
+        return _delete_snapshot(uow.connection, rows)
+
+    changed = int(store.submit(mutate, force_flush=True).result())
+    with _LOCK:
+        cached["status"] = "purged"
+    return {**_summary(cached), "operation": "purge", "changedRows": changed}
+
+
 def restore_team_ledger_reset_stage(
     store: WorkflowLedgerStore,
     stage: Mapping[str, Any],
@@ -308,6 +409,46 @@ def restore_team_ledger_reset_stage(
     return {**_summary(cached), "operation": "restore", "changedRows": changed}
 
 
+def restore_run_ledger_reset_stage(
+    store: WorkflowLedgerStore,
+    stage: Mapping[str, Any],
+    *,
+    reset_id: str | None = None,
+) -> dict[str, Any]:
+    """Restore a purged run-scoped stage without disturbing unrelated rows."""
+
+    cached = _stage(stage, reset_id=reset_id)
+    if cached.get("kind") != LEDGER_RUN_RESET_PORT_KIND:
+        raise WorkflowLedgerResetError("ledger stage is not run-scoped")
+    if cached.get("status") == "destroyed":
+        raise WorkflowLedgerResetError("finalized ledger stage cannot be restored")
+    rows = cached["rows"]
+    run_ids = list(cached["runIds"])
+
+    def mutate(uow: Any) -> int:
+        current = _snapshot_run_ids(uow.connection, run_ids)
+        if any(current.values()):
+            if _json_hash(current) == str(cached["fingerprint"]):
+                return 0
+            raise WorkflowLedgerResetError("ledger reset restore conflicts with current run records")
+        uow.connection.execute("PRAGMA defer_foreign_keys = ON")
+        restored = 0
+        for table in _RESTORE_TABLES:
+            for row in rows.get(table) or []:
+                columns = list(row)
+                uow.connection.execute(
+                    f"INSERT INTO {table} (" + ",".join(columns) + ") VALUES (" + ",".join("?" for _ in columns) + ")",
+                    tuple(row[column] for column in columns),
+                )
+                restored += 1
+        return restored
+
+    changed = int(store.submit(mutate, force_flush=True).result())
+    with _LOCK:
+        cached["status"] = "restored"
+    return {**_summary(cached), "operation": "restore", "changedRows": changed}
+
+
 def destroy_team_ledger_reset_stage(
     stage: Mapping[str, Any],
     *,
@@ -324,12 +465,33 @@ def destroy_team_ledger_reset_stage(
     return _summary(cached)
 
 
+def destroy_run_ledger_reset_stage(
+    stage: Mapping[str, Any],
+    *,
+    reset_id: str | None = None,
+) -> dict[str, Any]:
+    cached = _stage(stage, reset_id=reset_id)
+    if cached.get("kind") != LEDGER_RUN_RESET_PORT_KIND:
+        raise WorkflowLedgerResetError("ledger stage is not run-scoped")
+    if cached.get("status") not in {"purged", "destroyed"}:
+        raise WorkflowLedgerResetError("only a purged ledger stage can be finalized")
+    with _LOCK:
+        cached["status"] = "destroyed"
+        cached["rows"] = {}
+    return _summary(cached)
+
+
 __all__ = [
     "LEDGER_RESET_PORT_KIND",
     "LEDGER_RESET_PORT_SCHEMA_VERSION",
+    "LEDGER_RUN_RESET_PORT_KIND",
     "WorkflowLedgerResetError",
+    "destroy_run_ledger_reset_stage",
     "destroy_team_ledger_reset_stage",
+    "prepare_run_ledger_reset_stage",
     "prepare_team_ledger_reset_stage",
+    "purge_run_ledger_reset_stage",
     "purge_team_ledger_reset_stage",
+    "restore_run_ledger_reset_stage",
     "restore_team_ledger_reset_stage",
 ]

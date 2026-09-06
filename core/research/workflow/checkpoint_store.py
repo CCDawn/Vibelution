@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
-import os
-import copy
 import base64
+import copy
 import hashlib
 import json
+import os
 import sqlite3
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
-from threading import RLock
-from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from threading import RLock
 from typing import Any
 from uuid import uuid4
 
@@ -534,6 +534,7 @@ def assert_not_memory_saver(checkpointer: Any) -> None:
 CHECKPOINT_RESET_PORT_SCHEMA_VERSION = 1
 CHECKPOINT_RESET_PORT_KIND = "challenge_cup_checkpoint_reset"
 CHECKPOINT_FULL_PURGE_PORT_KIND = "challenge_cup_checkpoint_full_purge"
+CHECKPOINT_THREAD_PURGE_PORT_KIND = "challenge_cup_checkpoint_thread_purge"
 
 
 class CheckpointResetPortError(ValueError):
@@ -947,7 +948,10 @@ def _checkpoint_open_connection(path: Path, *, read_only: bool) -> sqlite3.Conne
         ) from exc
 
 
-def _checkpoint_full_purge_snapshot(connection: sqlite3.Connection) -> dict[str, Any]:
+def _checkpoint_full_purge_snapshot(
+    connection: sqlite3.Connection,
+    thread_ids: Sequence[str] | None = None,
+) -> dict[str, Any]:
     """Return a payload-free fingerprint for an operator-authorized full purge.
 
     This intentionally does not decode checkpoint state or infer ownership.
@@ -1000,14 +1004,22 @@ def _checkpoint_full_purge_snapshot(connection: sqlite3.Connection) -> dict[str,
             "checkpoint store schema is unsupported", code="checkpoint_store_corrupt"
         )
 
+    normalized_threads = sorted({str(value).strip() for value in thread_ids or [] if str(value).strip()})
+    where = ""
+    params: tuple[str, ...] = ()
+    if thread_ids is not None:
+        where = "WHERE thread_id IN (" + ",".join("?" for _ in normalized_threads) + ") "
+        params = tuple(normalized_threads)
     checkpoint_rows = connection.execute(
         "SELECT thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, "
-        "type, checkpoint, metadata FROM checkpoints "
-        "ORDER BY thread_id, checkpoint_ns, checkpoint_id"
+        "type, checkpoint, metadata FROM checkpoints " + where +
+        "ORDER BY thread_id, checkpoint_ns, checkpoint_id",
+        params,
     ).fetchall()
     write_rows = connection.execute(
         "SELECT thread_id, checkpoint_ns, checkpoint_id, task_id, idx, channel, type, value "
-        "FROM writes ORDER BY thread_id, checkpoint_ns, checkpoint_id, task_id, idx"
+        "FROM writes " + where + "ORDER BY thread_id, checkpoint_ns, checkpoint_id, task_id, idx",
+        params,
     ).fetchall()
     checkpoints = [
         {
@@ -1041,6 +1053,147 @@ def _checkpoint_full_purge_snapshot(connection: sqlite3.Connection) -> dict[str,
         "storeFingerprint": _reset_json_hash(
             {"checkpoints": checkpoints, "writes": writes}
         ),
+    }
+
+
+def prepare_operator_checkpoint_thread_purge(
+    reset_id: str,
+    thread_ids: Sequence[str],
+    *,
+    checkpoint_path: Path | str | None = None,
+) -> dict[str, Any]:
+    """Capture a payload-free preflight for an exact set of retired threads."""
+
+    normalized_reset_id = _reset_text(reset_id, field="resetId")
+    normalized_threads = sorted({_reset_text(value, field="threadId") for value in thread_ids})
+    if not normalized_threads:
+        raise CheckpointResetPortError(
+            "checkpoint threadIds are required", code="checkpoint_thread_purge_invalid"
+        )
+    path = _reset_path(checkpoint_path)
+    if not path.exists():
+        raise CheckpointResetPortError(
+            "checkpoint store is not available", code="checkpoint_store_missing"
+        )
+    connection = _checkpoint_open_connection(path, read_only=True)
+    try:
+        snapshot = _checkpoint_full_purge_snapshot(connection, normalized_threads)
+    finally:
+        connection.close()
+    if snapshot["threadCount"] != len(normalized_threads):
+        raise CheckpointResetPortError(
+            "one or more checkpoint threads are unavailable",
+            code="checkpoint_thread_purge_invalid",
+        )
+    return {
+        "schemaVersion": CHECKPOINT_RESET_PORT_SCHEMA_VERSION,
+        "kind": CHECKPOINT_THREAD_PURGE_PORT_KIND,
+        "resetId": normalized_reset_id,
+        "checkpointPath": str(path),
+        "threadIds": normalized_threads,
+        **snapshot,
+    }
+
+
+def purge_operator_checkpoint_thread_purge(
+    preflight: Mapping[str, Any],
+    *,
+    checkpoint_path: Path | str | None = None,
+    reset_id: str | None = None,
+) -> dict[str, Any]:
+    """Atomically remove only the exact checkpoint threads in a preflight."""
+
+    if not isinstance(preflight, Mapping) or (
+        preflight.get("schemaVersion") != CHECKPOINT_RESET_PORT_SCHEMA_VERSION
+        or preflight.get("kind") != CHECKPOINT_THREAD_PURGE_PORT_KIND
+    ):
+        raise CheckpointResetPortError(
+            "checkpoint thread purge preflight is invalid",
+            code="checkpoint_thread_purge_invalid",
+        )
+    expected_reset_id = _reset_text(preflight.get("resetId"), field="resetId")
+    if reset_id is not None and _reset_text(reset_id, field="resetId") != expected_reset_id:
+        raise CheckpointResetPortError(
+            "checkpoint thread purge resetId does not match preflight",
+            code="checkpoint_thread_purge_invalid",
+        )
+    path = _reset_path(checkpoint_path or preflight.get("checkpointPath"))
+    if str(path) != str(preflight.get("checkpointPath") or ""):
+        raise CheckpointResetPortError(
+            "checkpoint thread purge path does not match preflight",
+            code="checkpoint_thread_purge_invalid",
+        )
+    thread_ids = preflight.get("threadIds")
+    if not isinstance(thread_ids, list) or not thread_ids:
+        raise CheckpointResetPortError(
+            "checkpoint thread purge preflight has no threadIds",
+            code="checkpoint_thread_purge_invalid",
+        )
+    normalized_threads = sorted({_reset_text(value, field="threadId") for value in thread_ids})
+    if normalized_threads != thread_ids:
+        raise CheckpointResetPortError(
+            "checkpoint thread purge threadIds are not canonical",
+            code="checkpoint_thread_purge_invalid",
+        )
+    expected = {
+        key: preflight.get(key)
+        for key in ("checkpointCount", "writeCount", "threadCount", "storeFingerprint")
+    }
+    connection = _checkpoint_open_connection(path, read_only=False)
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        observed = _checkpoint_full_purge_snapshot(connection, normalized_threads)
+        if observed != expected:
+            raise CheckpointResetPortError(
+                "checkpoint threads changed after purge preflight",
+                code="checkpoint_thread_purge_stale",
+            )
+        placeholders = ",".join("?" for _ in normalized_threads)
+        params = tuple(normalized_threads)
+        deleted_writes = int(
+            connection.execute(
+                f"DELETE FROM writes WHERE thread_id IN ({placeholders})", params
+            ).rowcount
+            or 0
+        )
+        deleted_checkpoints = int(
+            connection.execute(
+                f"DELETE FROM checkpoints WHERE thread_id IN ({placeholders})", params
+            ).rowcount
+            or 0
+        )
+        remaining = _checkpoint_full_purge_snapshot(connection, normalized_threads)
+        if remaining["checkpointCount"] or remaining["writeCount"]:
+            raise CheckpointResetPortError(
+                "checkpoint thread purge verification failed",
+                code="checkpoint_thread_purge_failed",
+            )
+        connection.execute("COMMIT")
+    except CheckpointResetPortError:
+        try:
+            connection.execute("ROLLBACK")
+        except sqlite3.Error:
+            pass
+        raise
+    except sqlite3.Error as exc:
+        try:
+            connection.execute("ROLLBACK")
+        except sqlite3.Error:
+            pass
+        raise CheckpointResetPortError(
+            "checkpoint thread purge failed", code="checkpoint_thread_purge_failed"
+        ) from exc
+    finally:
+        connection.close()
+    return {
+        "ok": True,
+        "kind": CHECKPOINT_THREAD_PURGE_PORT_KIND,
+        "resetId": expected_reset_id,
+        "threadIds": normalized_threads,
+        "checkpointCount": expected["checkpointCount"],
+        "writeCount": expected["writeCount"],
+        "deletedCheckpoints": deleted_checkpoints,
+        "deletedWrites": deleted_writes,
     }
 
 
@@ -1698,40 +1851,43 @@ restore_team_checkpoint_reset_stage = restore_checkpoint_reset_stage
 
 __all__ = [
     "CANDIDATE_REVIEW_SCOPE_KIND",
+    "CHECKPOINT_FULL_PURGE_PORT_KIND",
+    "CHECKPOINT_RESET_PORT_KIND",
+    "CHECKPOINT_RESET_PORT_SCHEMA_VERSION",
+    "CHECKPOINT_THREAD_PURGE_PORT_KIND",
     "DISCUSSION_SCOPE_KINDS",
     "DISCUSSION_SCOPE_VERSION",
     "QUESTION_GENERATION_SCOPE_KIND",
     "SCOPE_BINDING_MISMATCH",
+    "CheckpointResetPortError",
     "ScopeBindingMismatch",
     "ScopeBindingValidation",
     "assert_five_way_scope_binding",
+    "assert_not_memory_saver",
     "assert_scope_bindings_match",
     "build_checkpoint_binding_payload",
     "canonical_discussion_scope",
     "checkpoint_store_has_rows",
+    "default_checkpoint_path",
     "destroy_checkpoint_reset_stage",
     "discussion_scope_hash",
     "discussion_scope_identity",
+    "ensure_checkpoint_parent",
+    "list_checkpoint_thread_ids",
+    "list_checkpoints_for_team",
+    "list_team_scoped_checkpoints",
+    "open_sqlite_checkpointer",
+    "prepare_checkpoint_reset_stage",
+    "prepare_operator_checkpoint_full_purge",
+    "prepare_operator_checkpoint_thread_purge",
+    "prepare_team_checkpoint_reset_stage",
+    "purge_checkpoint_reset_stage",
+    "purge_operator_checkpoint_full_purge",
+    "purge_operator_checkpoint_thread_purge",
+    "purge_team_checkpoint_reset_stage",
+    "restore_checkpoint_reset_stage",
+    "restore_team_checkpoint_reset_stage",
+    "scope_without_agent_id",
     "validate_five_way_scope_binding",
     "validate_scope_bindings",
-    "scope_without_agent_id",
-    "assert_not_memory_saver",
-    "default_checkpoint_path",
-    "ensure_checkpoint_parent",
-    "open_sqlite_checkpointer",
-    "CHECKPOINT_RESET_PORT_KIND",
-    "CHECKPOINT_RESET_PORT_SCHEMA_VERSION",
-    "CHECKPOINT_FULL_PURGE_PORT_KIND",
-    "CheckpointResetPortError",
-    "prepare_operator_checkpoint_full_purge",
-    "purge_operator_checkpoint_full_purge",
-    "list_team_scoped_checkpoints",
-    "list_checkpoint_thread_ids",
-    "prepare_checkpoint_reset_stage",
-    "purge_checkpoint_reset_stage",
-    "restore_checkpoint_reset_stage",
-    "list_checkpoints_for_team",
-    "prepare_team_checkpoint_reset_stage",
-    "purge_team_checkpoint_reset_stage",
-    "restore_team_checkpoint_reset_stage",
 ]
