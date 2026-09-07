@@ -479,6 +479,7 @@ class AdapterDispatchWorker:
             )
             from .formal_hypothesis_fanout import HypothesisAuthorityUnavailable
             from .completion_dependency import CompletionDependencyPending, defer_completion
+            from .task_adapter_registry import SOURCE_NODE_TASKS
 
             if isinstance(exc, _OutboxLeaseLost):
                 return
@@ -517,6 +518,28 @@ class AdapterDispatchWorker:
                     else "hypothesis_authority_unavailable"
                 )
                 self._requeue_or_fail(outbox, action, f"{prefix}:{exc}")
+                return
+            from core.web.services.session_service import SessionBusyError
+
+            if isinstance(exc, SessionBusyError):
+                # The bound Session was still finishing its previous turn when
+                # this one was dispatched or continued. The ordinary admission
+                # guard is correct; a short backoff lets it clear instead of
+                # turning a recoverable race into a failed node.
+                self._requeue_or_fail(outbox, action, f"session_busy:{exc}")
+                return
+            if (
+                str(action.node_id or "") in SOURCE_NODE_TASKS
+                and "context_budget_exhausted" in str(exc)
+            ):
+                # The turn terminalized on the context hard cap. Requeue so the
+                # next start replays this stage task into a NEW attempt session
+                # (stage_session_replay.CONTEXT_BUDGET_RETRY_NEW_SESSION) with a
+                # bounded context instead of parking the run forever. The
+                # transient-attempt cap still terminalizes a hopeless loop.
+                self._requeue_or_fail(
+                    outbox, action, f"context_budget_replay:{exc}"
+                )
                 return
             # Compensation-void unused reservation if execute reserved then crashed.
             self._void_unused_reservation(

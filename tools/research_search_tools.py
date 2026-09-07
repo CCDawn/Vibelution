@@ -101,6 +101,9 @@ def _merge_domains(defaults: tuple[str, ...], include_domains: str) -> list[str]
     return result
 
 
+_MAX_BATCH_RENDER_CHARS = 12_000
+
+
 def _render_batch_result(title: str, rows: list[tuple[str, str]]) -> str:
     if not rows:
         return "[错误] 未提供有效搜索词"
@@ -113,8 +116,25 @@ def _render_batch_result(title: str, rows: list[tuple[str, str]]) -> str:
     else:
         prefix = f"[{title}] 共执行 {len(rows)} 个查询。"
     parts = [prefix]
+    rendered = len(prefix)
+    seen_rows: set[tuple[str, str]] = set()
+    omitted = 0
     for index, (query, result) in enumerate(rows, 1):
-        parts.append(f"\n## {index}. {query}\n{result}")
+        row_key = (str(query or "").strip(), str(result or "").strip())
+        if row_key in seen_rows:
+            continue
+        seen_rows.add(row_key)
+        block = f"\n## {index}. {query}\n{result}"
+        if rendered + len(block) > _MAX_BATCH_RENDER_CHARS:
+            omitted = len(rows) - index + 1
+            break
+        parts.append(block)
+        rendered += len(block)
+    if omitted:
+        parts.append(
+            f"\n[输出截断] 为控制上下文预算，本批另有 {omitted} 个查询的结果未展示；"
+            "结构化搜索小票已持久化绑定，可通过 artifacts read-back 获取完整记录。"
+        )
     return "\n".join(parts)
 
 

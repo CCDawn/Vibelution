@@ -227,6 +227,156 @@ def test_adapter_worker_contains_phase_exceptions(tmp_path: Path, boom_phase: st
         harness.close()
 
 
+def _outbox_row(harness: CommandHarness, action_id: str) -> tuple[str, str | None]:
+    row = harness.store.submit(
+        lambda uow: uow.repository.execute(
+            "SELECT status, last_problem_json FROM outbox_actions WHERE action_id = ?",
+            (f"adapter-outbox-{action_id}",),
+        ).fetchone(),
+        force_flush=True,
+    ).result(timeout=10)
+    assert row is not None
+    return str(row[0]), (str(row[1]) if row[1] else None)
+
+
+def test_session_busy_execute_requeues_instead_of_failing(tmp_path: Path) -> None:
+    from core.web.services.session_service import SessionBusyError
+
+    harness = CommandHarness(tmp_path / "ledger-busy.sqlite3")
+    try:
+        action = PendingAction(
+            action_id="act-busy",
+            run_id="run-busy",
+            node_run_id="nr-run-busy-evidence_relations-a1",
+            node_id="evidence_relations",
+            attempt=1,
+            actor_kind=ActorKind.AGENT,
+            action_kind="start_agent_task",
+            input_snapshot_hash="a" * 64,
+            input_artifact_refs=(),
+            binding_snapshot_id=None,
+            budget_policy_hash="p-1",
+        )
+        _seed_dispatching(harness, action)
+
+        class BusyPorts(FakeDomainPorts):
+            def create_agent_task(self, *, action):  # type: ignore[override]
+                raise SessionBusyError(
+                    "This session is still running. Wait for the current turn to finish."
+                )
+
+        registry = ActionRegistry()
+        registry.register(AgentActionAdapter(BusyPorts()))
+        worker = AdapterDispatchWorker(
+            store=harness.store,
+            registry=registry,
+            ports=BusyPorts(),
+            successor_fn=lambda _node: (),
+        )
+        worker.run_once()
+
+        status, problem = _outbox_row(harness, action.action_id)
+        assert status == "pending"
+        assert problem is not None and "session_busy" in problem
+        attempt = harness.store.latest_attempt(action.run_id, action.node_id)
+        assert attempt is not None
+        assert attempt.status != "failed"
+        run = harness.store.get_run(action.run_id)
+        assert run is not None
+        assert run.status != "blocked"
+    finally:
+        harness.close()
+
+
+def test_source_context_budget_failure_requeues_for_new_session_replay(
+    tmp_path: Path,
+) -> None:
+    harness = CommandHarness(tmp_path / "ledger-budget.sqlite3")
+    try:
+        action = PendingAction(
+            action_id="act-budget",
+            run_id="run-budget",
+            node_run_id="nr-run-budget-source_finding-a1",
+            node_id="source_finding",
+            attempt=1,
+            actor_kind=ActorKind.AGENT,
+            action_kind="start_agent_task",
+            input_snapshot_hash="a" * 64,
+            input_artifact_refs=(),
+            binding_snapshot_id=None,
+            budget_policy_hash="p-1",
+        )
+        _seed_dispatching(harness, action)
+
+        class BudgetPorts(FakeDomainPorts):
+            def create_agent_task(self, *, action):  # type: ignore[override]
+                raise RuntimeError(
+                    "网页工作台这一轮执行失败，请检查配置或稍后重试。"
+                    "（context_budget_exhausted）"
+                )
+
+        registry = ActionRegistry()
+        registry.register(AgentActionAdapter(BudgetPorts()))
+        worker = AdapterDispatchWorker(
+            store=harness.store,
+            registry=registry,
+            ports=BudgetPorts(),
+            successor_fn=lambda _node: (),
+        )
+        worker.run_once()
+
+        status, problem = _outbox_row(harness, action.action_id)
+        assert status == "pending"
+        assert problem is not None and "context_budget_replay" in problem
+        attempt = harness.store.latest_attempt(action.run_id, action.node_id)
+        assert attempt is not None
+        assert attempt.status != "failed"
+    finally:
+        harness.close()
+
+
+def test_non_source_context_budget_failure_still_fails(tmp_path: Path) -> None:
+    harness = CommandHarness(tmp_path / "ledger-budget-formal.sqlite3")
+    try:
+        action = PendingAction(
+            action_id="act-budget-formal",
+            run_id="run-budget-formal",
+            node_run_id="nr-run-budget-formal-analysis-a1",
+            node_id="analysis",
+            attempt=1,
+            actor_kind=ActorKind.AGENT,
+            action_kind="start_agent_task",
+            input_snapshot_hash="a" * 64,
+            input_artifact_refs=(),
+            binding_snapshot_id=None,
+            budget_policy_hash="p-1",
+        )
+        _seed_dispatching(harness, action)
+
+        class BudgetFormalPorts(FakeDomainPorts):
+            def create_agent_task(self, *, action):  # type: ignore[override]
+                raise RuntimeError("formal node failed (context_budget_exhausted)")
+
+        registry = ActionRegistry()
+        registry.register(AgentActionAdapter(BudgetFormalPorts()))
+        worker = AdapterDispatchWorker(
+            store=harness.store,
+            registry=registry,
+            ports=BudgetFormalPorts(),
+            successor_fn=lambda _node: (),
+        )
+        worker.run_once()
+
+        attempt = harness.store.latest_attempt(action.run_id, action.node_id)
+        assert attempt is not None
+        assert attempt.status == "failed"
+        run = harness.store.get_run(action.run_id)
+        assert run is not None
+        assert run.status == "blocked"
+    finally:
+        harness.close()
+
+
 def _seed_run_with_snapshot(harness: CommandHarness, *, run_id: str, snapshot: dict) -> None:
     import json
 
