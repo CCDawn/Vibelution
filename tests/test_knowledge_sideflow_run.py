@@ -1397,5 +1397,5 @@ def test_knowledge_delivery_query_is_not_limited_to_first_500_events(
         harness.close()
 
 
-def test_ledger_schema_is_v7() -> None:
-    assert SCHEMA_VERSION == 7
+def test_ledger_schema_is_v8() -> None:
+    assert SCHEMA_VERSION == 8
