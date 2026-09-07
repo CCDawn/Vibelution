@@ -265,6 +265,11 @@ class _InlineExecutor:
 def hf_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
+    # A machine-level pin of this env (e.g. a leftover 600000 from the
+    # pre-2026-09-03 fence) fails the governed-domain check fail-loud and
+    # blocks every meeting open; tests must not depend on ambient operator
+    # env at all, so drop it and let the receipt-derived default apply.
+    monkeypatch.delenv("VIBELUTION_CHALLENGE_MEETING_PER_CALL_BUDGET_MS", raising=False)
     reset_formal_write_runtime_for_tests()
     from core.web.services.team_workflow import (
         hypothesis_rounds as hrounds,
@@ -1043,22 +1048,97 @@ def test_unimplemented_capability_is_audited_not_implemented(hf_env) -> None:
     team_id, _ = hf_env
     policy, payload = _injected_policy()  # every switch on
 
-    for point, capability in (
-        ("evidence_repair", "autoStartEvidenceRepair"),
-        ("batch_gate", "autoAdvanceBatchGate"),
-    ):
-        record = executor.attempt_capability(
-            decision_point=point,
-            team_id=team_id,
-            question_id=_QUESTION_ID,
-            policy=policy,
-            payload=payload,
-            calibration_verdict={"passed": True},
-        )
-        assert record["decision"] == "not_implemented"
-        assert record["reasonCode"] == "capability_not_implemented"
-        assert record["capability"] == capability
-        assert record["capabilityEnabled"] is True
-        assert "human stays in the loop" in record["detail"]["note"]
+    record = executor.attempt_capability(
+        decision_point="evidence_repair",
+        team_id=team_id,
+        question_id=_QUESTION_ID,
+        policy=policy,
+        payload=payload,
+        calibration_verdict={"passed": True},
+    )
+    assert record["decision"] == "not_implemented"
+    assert record["reasonCode"] == "capability_not_implemented"
+    assert record["capability"] == "autoStartEvidenceRepair"
+    assert record["capabilityEnabled"] is True
+    assert "human stays in the loop" in record["detail"]["note"]
 
-    assert len(_audits(team_id)) == 2
+    assert len(_audits(team_id)) == 1
+
+
+def test_batch_gate_without_plan_id_is_skipped(hf_env) -> None:
+    team_id, _ = hf_env
+    policy, payload = _injected_policy()
+
+    record = executor.attempt_capability(
+        decision_point="batch_gate",
+        team_id=team_id,
+        question_id=_QUESTION_ID,
+        policy=policy,
+        payload=payload,
+        calibration_verdict={"passed": True},
+    )
+    assert record["decision"] == "skipped"
+    assert record["reasonCode"] == "plan_id_missing"
+    assert record["capability"] == "autoAdvanceBatchGate"
+
+
+def test_batch_gate_executes_confirmed_start(hf_env, monkeypatch) -> None:
+    team_id, _ = hf_env
+    policy, payload = _injected_policy()
+
+    from core.web.services.team_workflow import challenge_cup_real_batch
+
+    calls: list[dict] = []
+
+    def fake_start(team_id_arg, *, plan_id, confirmed, **_kwargs):
+        calls.append(
+            {"teamId": team_id_arg, "planId": plan_id, "confirmed": confirmed}
+        )
+        return {"status": "started", "started": ["q-1", "q-2"]}
+
+    monkeypatch.setattr(challenge_cup_real_batch, "start_real_batch", fake_start)
+
+    record = executor.attempt_capability(
+        decision_point="batch_gate",
+        team_id=team_id,
+        question_id=_QUESTION_ID,
+        policy=policy,
+        payload={**payload, "planId": "real-5"},
+        calibration_verdict={"passed": True},
+    )
+    assert record["decision"] == "executed"
+    assert record["detail"]["planId"] == "real-5"
+    assert record["detail"]["startedCount"] == 2
+    assert calls == [{"teamId": team_id, "planId": "real-5", "confirmed": True}]
+
+
+def test_batch_gate_refusal_is_a_recorded_skip(hf_env, monkeypatch) -> None:
+    team_id, _ = hf_env
+    policy, payload = _injected_policy()
+
+    from core.web.services.team_workflow import challenge_cup_real_batch
+
+    calls: list[dict] = []
+
+    def refusing_start(team_id_arg, *, plan_id, confirmed, **_kwargs):
+        calls.append({"confirmed": confirmed})
+        raise challenge_cup_real_batch.ChallengeCupRealBatchError(
+            "previous gate incomplete", code="previous_gate_incomplete"
+        )
+
+    monkeypatch.setattr(
+        challenge_cup_real_batch, "start_real_batch", refusing_start
+    )
+
+    record = executor.attempt_capability(
+        decision_point="batch_gate",
+        team_id=team_id,
+        question_id=_QUESTION_ID,
+        policy=policy,
+        payload={**payload, "planId": "real-5"},
+        calibration_verdict={"passed": True},
+    )
+    assert record["decision"] == "skipped"
+    assert record["reasonCode"] == "previous_gate_incomplete"
+    assert record["detail"]["planId"] == "real-5"
+    assert calls == [{"confirmed": True}]

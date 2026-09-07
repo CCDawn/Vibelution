@@ -75,15 +75,18 @@ AUTO_ADVANCE_DISABLED_ENV = "VIBELUTION_AUTO_ADVANCE_DISABLED"
 ACTIVATION_AUDIT_STORE_FILENAME = "policy_activation_audit.jsonl"
 SYSTEM_ACTOR_PREFIX = "system:auto-advance:"
 
-# Decision points with a real executor body in this module; the remaining
-# capability switches (autoStartEvidenceRepair, autoAdvanceBatchGate) are
-# audited as ``not_implemented`` whenever their decision point is attempted,
-# never silently ignored.
+# Decision points with a real executor body in this module. The remaining
+# capability switch (autoStartEvidenceRepair) is audited as
+# ``not_implemented`` whenever its decision point is attempted, never
+# silently ignored: ``hypothesis_revision_evidence_missing`` is fail-closed
+# on missing artifacts rather than an approval gate, so there is no existing
+# human decision for a policy to automate — inventing a repair loop is a
+# separate design task.
 EXECUTABLE_DECISION_POINTS = frozenset(
-    {"meeting_close", "candidate_selection", "converge_question"}
+    {"meeting_close", "candidate_selection", "converge_question", "batch_gate"}
 )
 NOT_IMPLEMENTED_DECISION_POINTS = frozenset(
-    {"evidence_repair", "batch_gate"}
+    {"evidence_repair"}
 )
 
 _KILL_SWITCH_TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
@@ -736,6 +739,49 @@ def _execute_converge_question(
     }
 
 
+def _execute_batch_gate(
+    team_id: str,
+    *,
+    plan_id: str,
+) -> dict[str, Any]:
+    """Auto-confirm the next gate batch through the operator start entry.
+
+    The call goes through ``start_real_batch`` with ``confirmed=True``: every
+    existing hard gate (gate progression, current-authorization fence,
+    concurrency elevation) still applies and a refusal is a recorded skip,
+    never a bypass. The caller must have surfaced the start intent (operator
+    request or the batch flow itself); this only replaces the manual
+    confirmation with an audited policy decision.
+    """
+
+    from core.web.services.team_workflow import challenge_cup_real_batch
+
+    normalized_plan = str(plan_id or "").strip()
+    if not normalized_plan:
+        raise _PointSkip("plan_id_missing")
+    try:
+        result = challenge_cup_real_batch.start_real_batch(
+            team_id,
+            plan_id=normalized_plan,
+            confirmed=True,
+        )
+    except challenge_cup_real_batch.ChallengeCupRealBatchError as exc:
+        raise _PointSkip(
+            str(getattr(exc, "code", "") or "").strip() or "batch_start_refused",
+            {"planId": normalized_plan, "reason": str(exc)},
+        ) from exc
+    started = (
+        result.get("started")
+        if isinstance(result, Mapping) and isinstance(result.get("started"), list)
+        else None
+    )
+    return {
+        "status": str(result.get("status") or "") if isinstance(result, Mapping) else "",
+        "planId": normalized_plan,
+        "startedCount": len(started) if started is not None else None,
+    }
+
+
 # ---------------------------------------------------------------------------
 # dispatch entry
 
@@ -886,6 +932,11 @@ def attempt_capability(
                     selection_scope=selection_scope,
                     workflow_run_id=workflow_run_id,
                     policy=active_policy,
+                )
+            elif point == "batch_gate":
+                detail = _execute_batch_gate(
+                    normalized_team_id,
+                    plan_id=str((payload or {}).get("planId") or "").strip(),
                 )
             else:  # converge_question
                 detail = _execute_converge_question(
