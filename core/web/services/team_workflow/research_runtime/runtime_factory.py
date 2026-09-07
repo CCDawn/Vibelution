@@ -175,6 +175,7 @@ class WorkflowRuntime:
         self._sweep_meetings_missing_digest_best_effort()
         self._refresh_queued_meeting_activity_best_effort()
         self._recover_challenge_meeting_drivers_best_effort()
+        self._sweep_real_batches_best_effort()
         return handled
 
     def run_hypothesis_recovery_once(self, limit: int = 4) -> int:
@@ -339,6 +340,25 @@ class WorkflowRuntime:
             meeting_driver_work.sweep_challenge_meeting_drivers()
         except Exception:  # noqa: BLE001 - recovery must never break maintenance
             logger.exception("challenge meeting driver recovery sweep failed")
+
+    def _sweep_real_batches_best_effort(self) -> None:
+        """Advance started real catalog batches from this tick.
+
+        A started batch previously advanced only when a human or the HTTP
+        route called ``poll_real_batch``: harvest, approval promotion, start
+        re-dispatch and the concurrency refill all waited on that call.  The
+        sweep reuses that same idempotent poll entry for every persisted batch
+        envelope with the same peek + self-throttle discipline as the other
+        resident sweeps: no second scheduler, and any failure is swallowed
+        after logging.  Batch START stays a gated decision; the sweep only
+        advances envelopes that already exist.
+        """
+        try:
+            from core.web.services.team_workflow import challenge_cup_real_batch
+
+            challenge_cup_real_batch.sweep_real_batches()
+        except Exception:  # noqa: BLE001 - sweep must never break maintenance
+            logger.exception("real catalog batch sweep failed")
 
     def close(self) -> None:
         from .budget_window_resolver import (

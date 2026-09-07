@@ -1373,6 +1373,106 @@ def test_cancel_blocks_pending_and_forbids_restart(harness: _Harness) -> None:
         svc.cancel_real_batch(TEAM_ID, plan_id="real-5", confirmed=False)
 
 
+# ---------------------------------------------------------------------------
+# Resident maintenance sweep
+# ---------------------------------------------------------------------------
+
+
+def _wire_sweep_defaults(harness: _Harness, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Point the sweep's default poll dependencies at the harness fakes."""
+
+    monkeypatch.setattr(svc, "_default_run_status_reader", harness.reader)
+    monkeypatch.setattr(svc, "_default_approved_output_reader", harness.approved_reader)
+    monkeypatch.setattr(svc, "_default_question_run_launcher", harness.launcher)
+    monkeypatch.setattr(svc, "_default_start_dispatcher", harness.start_dispatcher)
+
+
+def test_sweep_real_batches_advances_started_batch_without_route(
+    harness: _Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _wire_sweep_defaults(harness, monkeypatch)
+    scene_events: list[dict] = []
+    monkeypatch.setattr(svc, "_record_real_batch_sweep_scene_event", scene_events.append)
+
+    _start(harness, "real-1")
+    harness.set_run_status("SCI-091", "succeeded")
+    harness.approve("SCI-091", "real-1")
+
+    summary = svc.sweep_real_batches(force=True)
+
+    assert summary["teams"] == 1
+    assert summary["batchesScanned"] == 1
+    assert summary["polled"] == 1
+    assert summary["harvested"] == 1
+    assert summary["launched"] == 0
+    assert summary["skipped"] == 0
+    state = svc._state_of(svc._load_envelope(TEAM_ID, "real-1"))
+    assert state.status("SCI-091") is QuestionStatus.SUCCEEDED
+    assert len(scene_events) == 1
+    assert scene_events[0]["harvested"] == 1
+
+    # A completed gate has no pending work: the next sweep scans but does not
+    # poll, and the quiet pattern records no second scene event.
+    again = svc.sweep_real_batches(force=True)
+    assert again["batchesScanned"] == 1
+    assert again["polled"] == 0
+    assert len(scene_events) == 1
+
+
+def test_sweep_self_throttles_and_env_overrides_interval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(svc, "_discover_real_batch_envelopes", list)
+    svc.reset_real_batch_sweep_throttle_for_tests()
+    try:
+        first = svc.sweep_real_batches(now_ms=1_000_000)
+        assert first.get("throttled") is not True
+        # 10s later is still inside the 30s default window.
+        throttled = svc.sweep_real_batches(now_ms=1_010_000)
+        assert throttled.get("throttled") is True
+        assert throttled["batchesScanned"] == 0
+        # The env override shrinks the window to 2s, so 12.5s after the last
+        # executed sweep is due again.
+        monkeypatch.setenv(svc.REAL_BATCH_SWEEP_INTERVAL_ENV, "2000")
+        resumed = svc.sweep_real_batches(now_ms=1_012_500)
+        assert resumed.get("throttled") is not True
+    finally:
+        svc.reset_real_batch_sweep_throttle_for_tests()
+
+
+def test_sweep_skips_cancelled_batch(
+    harness: _Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _wire_sweep_defaults(harness, monkeypatch)
+    _start(harness, "real-1")
+    cancelled = svc.cancel_real_batch(TEAM_ID, plan_id="real-1", confirmed=True)
+    assert cancelled["cancelled"] is True
+
+    summary = svc.sweep_real_batches(force=True)
+
+    assert summary["batchesScanned"] == 1
+    assert summary["polled"] == 0
+    assert summary["harvested"] == 0
+
+
+def test_sweep_isolates_broken_envelope(
+    harness: _Harness, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _wire_sweep_defaults(harness, monkeypatch)
+    _start(harness, "real-1")
+    broken_dir = (
+        tmp_path / "teams" / "team-broken" / svc.CONTROLS_DIRNAME / svc.BATCHES_DIRNAME
+    )
+    broken_dir.mkdir(parents=True)
+    (broken_dir / "real-1.json").write_text("{not json", encoding="utf-8")
+
+    summary = svc.sweep_real_batches(force=True)
+
+    assert summary["batchesScanned"] == 2
+    assert summary["skipped"] == 1
+    assert summary["polled"] == 1
+
+
 def test_gate_progression_unlocks_after_previous_gate_completes(harness: _Harness) -> None:
     _open_gate(harness, "real-1")
 

@@ -17,7 +17,9 @@ requires the previous gate's batch to be fully succeeded before it may start.
 from __future__ import annotations
 
 import json
+import os
 import threading
+import time
 from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from functools import partial
@@ -1344,3 +1346,191 @@ def get_real_batch_status(team_id: str, plan_id: str) -> dict[str, Any]:
             concurrency_limit=_envelope_concurrency_limit(envelope),
         ),
     }
+
+
+# Periodic batch-advance sweep on the resident maintenance tick ----------------
+#
+# A started batch used to advance only when a human or the HTTP route called
+# ``poll_real_batch``: harvest, approval promotion, start-dispatch retries and
+# the concurrency refill all waited on that call.  The sweep reuses the same
+# idempotent poll entry so a started batch keeps advancing on its own —
+# hosted by the resident maintenance tick (same minimal-intrusion host as the
+# challenge meeting driver recovery sweep) with its own self-throttle instead
+# of a second scheduler.  Batch START stays a gated decision (operator route
+# or the batch_gate policy executor); the sweep only advances envelopes that
+# already exist.
+REAL_BATCH_SWEEP_INTERVAL_MS = 30_000
+REAL_BATCH_SWEEP_INTERVAL_ENV = "VIBELUTION_REAL_BATCH_SWEEP_INTERVAL_MS"
+_LAST_REAL_BATCH_SWEEP_MS: int | None = None
+_REAL_BATCH_SWEEP_LOCK = threading.Lock()
+
+
+def _real_batch_sweep_interval_ms() -> int:
+    raw = str(os.environ.get(REAL_BATCH_SWEEP_INTERVAL_ENV) or "").strip()
+    if raw:
+        try:
+            value = int(raw)
+        except ValueError:
+            return REAL_BATCH_SWEEP_INTERVAL_MS
+        if value > 0:
+            return max(value, 1000)
+    return REAL_BATCH_SWEEP_INTERVAL_MS
+
+
+def _real_batch_sweep_due(now_ms: int) -> bool:
+    global _LAST_REAL_BATCH_SWEEP_MS
+    with _REAL_BATCH_SWEEP_LOCK:
+        last = _LAST_REAL_BATCH_SWEEP_MS
+        if last is not None and now_ms - last < _real_batch_sweep_interval_ms():
+            return False
+        _LAST_REAL_BATCH_SWEEP_MS = now_ms
+        return True
+
+
+def reset_real_batch_sweep_throttle_for_tests() -> None:
+    """Test seam: forget the last sweep run so the next sweep executes."""
+
+    global _LAST_REAL_BATCH_SWEEP_MS
+    with _REAL_BATCH_SWEEP_LOCK:
+        _LAST_REAL_BATCH_SWEEP_MS = None
+
+
+def _teams_workspace_root() -> Path:
+    """Parent of every team workspace, resolved exactly like the envelopes."""
+
+    # A probe id inherits the formal workspace resolution without duplicating
+    # it; any real team resolves to <teams-root>/<team-id>/...
+    return formal_team_workspace_root("real-batch-sweep-probe").parent
+
+
+def _discover_real_batch_envelopes() -> list[tuple[str, str]]:
+    """(team workspace id, plan id) for every persisted batch envelope."""
+
+    root = _teams_workspace_root()
+    if not root.exists():
+        return []
+    discovered: list[tuple[str, str]] = []
+    for path in sorted(root.glob(f"*/{CONTROLS_DIRNAME}/{BATCHES_DIRNAME}/*.json")):
+        parts = path.parts
+        # .../<team-id>/<controls>/<batches>/<plan-id>.json
+        if len(parts) < 4 or not parts[-4]:
+            continue
+        plan_id = path.stem.strip()
+        if not plan_id:
+            continue
+        discovered.append((parts[-4], plan_id))
+    return discovered
+
+
+def _envelope_has_pending_work(
+    envelope: Mapping[str, Any], state: CatalogExecutionState
+) -> bool:
+    """Whether one batch still needs poll-driven advancement."""
+
+    if bool(envelope.get("cancelled")):
+        return False
+    statuses = [state.status(question_id) for question_id in state.plan.question_ids]
+    if QuestionStatus.RUNNING in statuses:
+        return True
+    if envelope.get("awaitingApproval"):
+        return True
+    if QuestionStatus.PENDING not in statuses:
+        return False
+    # Pending refill only matters while the breaker still allows launches.
+    return not circuit_breaker_tripped(
+        int(envelope.get("consecutiveFailures") or 0),
+        failure_budget=int(envelope.get("failureBudget") or DEFAULT_REAL_FAILURE_BUDGET),
+    )
+
+
+def sweep_real_batches(
+    *,
+    now_ms: int | None = None,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Advance every active real batch from the resident maintenance tick.
+
+    For each persisted envelope that still has work (running runs, an
+    awaiting-approval question, or pending questions under a live circuit
+    breaker) the sweep calls the same idempotent :func:`poll_real_batch` the
+    route exposes: terminal runs are harvested, human-approved packages are
+    promoted, unstarted run references are re-dispatched and the concurrency
+    budget is refilled.  Every hard gate (current-authorization fence, circuit
+    breaker, cancel) stays inside poll — a refusal is a recorded skip, never a
+    bypass.  Self-throttled like the meeting driver recovery sweep
+    (``force=True`` bypasses for tests); one broken envelope or refused poll is
+    isolated into ``skipped`` and never raises.  Scene evidence is written only
+    for actionable runs so the 30s cadence cannot grow the event store.
+    """
+
+    current_ms = int(time.time() * 1000) if now_ms is None else int(now_ms)
+    summary: dict[str, Any] = {
+        "teams": 0,
+        "batchesScanned": 0,
+        "polled": 0,
+        "harvested": 0,
+        "launched": 0,
+        "skipped": 0,
+    }
+    if not force and not _real_batch_sweep_due(current_ms):
+        summary["throttled"] = True
+        return summary
+    try:
+        discovered = _discover_real_batch_envelopes()
+    except Exception:  # noqa: BLE001 - discovery must never break maintenance
+        return summary
+    summary["teams"] = len({team_id for team_id, _plan_id in discovered})
+    for team_id, plan_id in discovered:
+        summary["batchesScanned"] += 1
+        try:
+            envelope = _load_envelope(team_id, plan_id)
+            if envelope is None:
+                summary["skipped"] += 1
+                continue
+            state = _state_of(envelope)
+        except (ChallengeCupRealBatchError, RealBatchStorageError, RealBatchError):
+            summary["skipped"] += 1
+            continue
+        if not _envelope_has_pending_work(envelope, state):
+            continue
+        canonical_team = str(envelope.get("teamId") or "").strip() or team_id
+        try:
+            result = poll_real_batch(canonical_team, plan_id=plan_id)
+        except Exception:  # noqa: BLE001 - one batch cannot stop the sweep
+            summary["skipped"] += 1
+            continue
+        summary["polled"] += 1
+        summary["harvested"] += len(result.get("harvested") or [])
+        summary["launched"] += len(result.get("launched") or [])
+    if summary["harvested"] or summary["launched"]:
+        _record_real_batch_sweep_scene_event(summary)
+    return summary
+
+
+def _record_real_batch_sweep_scene_event(summary: Mapping[str, Any]) -> None:
+    """Bounded sweep evidence, following the meeting driver quiet pattern."""
+
+    try:
+        from core.web.services.runtime_scene_service import (
+            record_runtime_scene_event_quietly,
+        )
+
+        record_runtime_scene_event_quietly(
+            "team_workflow",
+            "challenge_real_batch",
+            "challenge_real_batch.sweep_advanced",
+            message="Real catalog batch sweep advanced active batches.",
+            level="info",
+            outcome="completed",
+            fields={
+                "teams": int(summary.get("teams") or 0),
+                "batchesScanned": int(summary.get("batchesScanned") or 0),
+                "polled": int(summary.get("polled") or 0),
+                "harvested": int(summary.get("harvested") or 0),
+                "launched": int(summary.get("launched") or 0),
+                "skipped": int(summary.get("skipped") or 0),
+            },
+            lifecycle=True,
+        )
+    except Exception:  # noqa: BLE001 - evidence must never break the sweep
+        pass
