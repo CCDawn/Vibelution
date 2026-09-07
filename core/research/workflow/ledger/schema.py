@@ -20,7 +20,7 @@ class Migration:
         return hashlib.sha256("\n".join(self.statements).encode("utf-8")).hexdigest()
 
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 # v5 was first deployed with a checksum that is already present in user
 # ledgers.  It is accepted only together with an independent schema-shape
@@ -549,6 +549,49 @@ MIGRATIONS: tuple[Migration, ...] = (
             """
             CREATE INDEX idx_knowledge_invocations_parent
             ON knowledge_invocations(parent_run_id, created_at_ms, invocation_id)
+            """,
+        ),
+    ),
+    # Additive: external_batch_registrations is a *registration index* for
+    # research work executed OUTSIDE the in-product runtime (e.g. external
+    # agent batches whose raw records live on the filesystem).  It is a
+    # certified-copy receipt registry in the LIMS sense — NOT an original
+    # record and NOT an event stream: workflow_events remains the only
+    # authority for what actually executed in-product.  One row per batch;
+    # per-question facts stay in the batch manifest referenced by hash.
+    # Idempotency is UNIQUE(plane, layer, manifest_sha256): re-registering an
+    # identical batch returns the existing row instead of duplicating it.
+    # Deliberately NO foreign key to workflow_runs — an external batch may
+    # never have an in-product run; related_run_id stays optional.
+    Migration(
+        version=8,
+        statements=(
+            """
+            CREATE TABLE external_batch_registrations (
+              batch_id TEXT PRIMARY KEY,
+              plane TEXT NOT NULL CHECK (plane IN (
+                'external_agent','content_conversion'
+              )),
+              layer TEXT NOT NULL CHECK (layer IN (
+                'raw_hypothesis_reports','hypothesis_generation','content_layer'
+              )),
+              manifest_sha256 TEXT NOT NULL,
+              manifest_ref_json TEXT NOT NULL CHECK (json_valid(manifest_ref_json)),
+              question_count INTEGER NOT NULL CHECK (question_count >= 0),
+              batch_generated_at_ms INTEGER NOT NULL CHECK (batch_generated_at_ms > 0),
+              registered_by TEXT NOT NULL,
+              registered_at_ms INTEGER NOT NULL CHECK (registered_at_ms > 0),
+              verified INTEGER NOT NULL CHECK (verified IN (0,1)),
+              related_run_id TEXT,
+              note TEXT,
+              UNIQUE (plane, layer, manifest_sha256)
+            )
+            """,
+            """
+            CREATE INDEX idx_external_batch_layer_time
+            ON external_batch_registrations(
+              plane, layer, batch_generated_at_ms DESC, batch_id DESC
+            )
             """,
         ),
     ),

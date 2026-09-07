@@ -12,6 +12,7 @@ from .errors import WorkflowLedgerClosedError
 from .records import (
     CatalogRunAuthorization,
     EventRecord,
+    ExternalBatchRegistration,
     NodeAttemptRecord,
     OutboxRecord,
     RunRecord,
@@ -150,6 +151,65 @@ class WorkflowLedgerStore:
         self, run_id: str | None = None, limit: int = 200
     ) -> list[OutboxRecord]:
         return self.read(lambda repo: repo.list_pending_outbox(run_id, limit))
+
+    # ------------------------------------------------- external batches
+
+    def register_external_batch(
+        self, batch: ExternalBatchRegistration
+    ) -> tuple[ExternalBatchRegistration, bool]:
+        """Register one external batch (idempotent on its manifest hash).
+
+        Returns ``(record, created)``.  When the same
+        (plane, layer, manifest_sha256) triple already exists the existing
+        row is returned with ``created=False`` — the caller-supplied
+        ``batch_id`` is discarded in favour of the registered one.
+        """
+
+        def _write(uow):
+            repo = uow.repository
+            created = repo.insert_external_batch(batch)
+            if created:
+                return batch, True
+            existing = repo.find_external_batch_by_manifest(
+                plane=batch.plane,
+                layer=batch.layer,
+                manifest_sha256=batch.manifest_sha256,
+            )
+            if existing is None:  # pragma: no cover — conflict implies a row
+                raise RuntimeError(
+                    "external batch conflict reported but row not found"
+                )
+            return existing, False
+
+        future = self.submit(_write, force_flush=True)
+        return future.result(timeout=30)
+
+    def get_external_batch(
+        self, batch_id: str
+    ) -> ExternalBatchRegistration | None:
+        return self.read(lambda repo: repo.get_external_batch(batch_id))
+
+    def find_external_batch_by_manifest(
+        self, *, plane: str, layer: str, manifest_sha256: str
+    ) -> ExternalBatchRegistration | None:
+        return self.read(
+            lambda repo: repo.find_external_batch_by_manifest(
+                plane=plane, layer=layer, manifest_sha256=manifest_sha256
+            )
+        )
+
+    def list_external_batches(
+        self,
+        *,
+        plane: str | None = None,
+        layer: str | None = None,
+        limit: int = 200,
+    ) -> list[ExternalBatchRegistration]:
+        return self.read(
+            lambda repo: repo.list_external_batches(
+                plane=plane, layer=layer, limit=limit
+            )
+        )
 
     def read(self, fn: Callable[[Any], Any]) -> Any:
         """Run callback inside one explicit read transaction (SQLite snapshot).

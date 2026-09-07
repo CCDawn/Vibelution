@@ -165,3 +165,29 @@ class CatalogRunAuthorization:
         """Compatibility spelling for callers that use the shorter name."""
 
         return self.readiness_report_sha256
+
+
+@dataclass(frozen=True)
+class ExternalBatchRegistration:
+    """Certified-copy receipt for one batch of externally executed research.
+
+    The batch itself ran OUTSIDE the in-product runtime; its raw records and
+    per-question facts live on the filesystem behind ``manifest_ref_json`` and
+    are pinned by ``manifest_sha256``.  This row is a registration index —
+    never an original record and never a workflow event: workflow_events
+    remains the sole authority for what actually executed in-product.
+    Idempotency is UNIQUE(plane, layer, manifest_sha256).
+    """
+
+    batch_id: str
+    plane: str
+    layer: str
+    manifest_sha256: str
+    manifest_ref_json: str
+    question_count: int
+    batch_generated_at_ms: int
+    registered_by: str
+    registered_at_ms: int
+    verified: int
+    related_run_id: str | None
+    note: str | None

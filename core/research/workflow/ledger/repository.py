@@ -16,6 +16,7 @@ from .records import (
     CatalogRunAuthorization,
     CommandRecord,
     EventRecord,
+    ExternalBatchRegistration,
     NodeAttemptRecord,
     OutboxRecord,
     RunRecord,
@@ -144,6 +145,32 @@ def _row_catalog_run_authorization(row: Any) -> CatalogRunAuthorization | None:
         readiness_report_sha256=str(row[7]),
         record_hash=str(row[8]),
         created_at_ms=int(row[9]),
+    )
+
+
+_EXTERNAL_BATCH_COLUMNS = (
+    "batch_id, plane, layer, manifest_sha256, manifest_ref_json, question_count, "
+    "batch_generated_at_ms, registered_by, registered_at_ms, verified, "
+    "related_run_id, note"
+)
+
+
+def _row_external_batch(row: Any) -> ExternalBatchRegistration | None:
+    if row is None:
+        return None
+    return ExternalBatchRegistration(
+        batch_id=str(row[0]),
+        plane=str(row[1]),
+        layer=str(row[2]),
+        manifest_sha256=str(row[3]),
+        manifest_ref_json=str(row[4]),
+        question_count=int(row[5]),
+        batch_generated_at_ms=int(row[6]),
+        registered_by=str(row[7]),
+        registered_at_ms=int(row[8]),
+        verified=int(row[9]),
+        related_run_id=row[10],
+        note=row[11],
     )
 
 
@@ -425,6 +452,101 @@ class WorkflowLedgerRepository:
             record
             for row in rows
             if (record := _row_catalog_run_authorization(row)) is not None
+        ]
+
+    # ------------------------------------------------- external batches
+
+    def insert_external_batch(self, batch: ExternalBatchRegistration) -> bool:
+        """Insert one external-batch receipt; idempotent on the manifest.
+
+        Returns True when a new row was created, False when the same
+        (plane, layer, manifest_sha256) triple was already registered —
+        callers then read the existing row instead of duplicating it.
+        """
+        self.execute(
+            """
+            INSERT INTO external_batch_registrations (
+              batch_id, plane, layer, manifest_sha256, manifest_ref_json,
+              question_count, batch_generated_at_ms, registered_by,
+              registered_at_ms, verified, related_run_id, note
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (plane, layer, manifest_sha256) DO NOTHING
+            """,
+            (
+                batch.batch_id,
+                batch.plane,
+                batch.layer,
+                batch.manifest_sha256,
+                batch.manifest_ref_json,
+                batch.question_count,
+                batch.batch_generated_at_ms,
+                batch.registered_by,
+                batch.registered_at_ms,
+                batch.verified,
+                batch.related_run_id,
+                batch.note,
+            ),
+        )
+        return self.affected() > 0
+
+    def get_external_batch(
+        self, batch_id: str
+    ) -> ExternalBatchRegistration | None:
+        row = self.execute(
+            f"""
+            SELECT {_EXTERNAL_BATCH_COLUMNS}
+            FROM external_batch_registrations
+            WHERE batch_id = ?
+            """,
+            (batch_id,),
+        ).fetchone()
+        return _row_external_batch(row)
+
+    def find_external_batch_by_manifest(
+        self, *, plane: str, layer: str, manifest_sha256: str
+    ) -> ExternalBatchRegistration | None:
+        row = self.execute(
+            f"""
+            SELECT {_EXTERNAL_BATCH_COLUMNS}
+            FROM external_batch_registrations
+            WHERE plane = ? AND layer = ? AND manifest_sha256 = ?
+            LIMIT 1
+            """,
+            (plane, layer, manifest_sha256),
+        ).fetchone()
+        return _row_external_batch(row)
+
+    def list_external_batches(
+        self,
+        *,
+        plane: str | None = None,
+        layer: str | None = None,
+        limit: int = 200,
+    ) -> list[ExternalBatchRegistration]:
+        where: list[str] = []
+        params: list[Any] = []
+        if plane is not None:
+            where.append("plane = ?")
+            params.append(plane)
+        if layer is not None:
+            where.append("layer = ?")
+            params.append(layer)
+        clause = f"WHERE {' AND '.join(where)}" if where else ""
+        params.append(int(limit))
+        rows = self.execute(
+            f"""
+            SELECT {_EXTERNAL_BATCH_COLUMNS}
+            FROM external_batch_registrations
+            {clause}
+            ORDER BY batch_generated_at_ms DESC, batch_id DESC
+            LIMIT ?
+            """,
+            tuple(params),
+        ).fetchall()
+        return [
+            record
+            for row in rows
+            if (record := _row_external_batch(row)) is not None
         ]
 
     def update_run_safety_limits(
