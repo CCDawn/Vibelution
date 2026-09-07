@@ -23,6 +23,20 @@ export type CatalogOverviewQuestion = {
   blocker: CatalogOverviewBlocker | null;
 };
 
+export type CatalogOverviewExternalBatchReceipt = {
+  batchId: string;
+  layer: string;
+  manifestSha256: string;
+  questionCount: number;
+  verified: boolean;
+};
+
+export type CatalogOverviewSource = {
+  plane: string;
+  layer: string;
+  externalBatches: CatalogOverviewExternalBatchReceipt[];
+};
+
 export type CatalogOverview = {
   schemaVersion: number;
   teamId: string;
@@ -35,6 +49,8 @@ export type CatalogOverview = {
     failed: number;
   };
   questions: CatalogOverviewQuestion[];
+  /** Dual-plane provenance (Master Plan P3.1); absent on pre-v8 backends. */
+  source?: CatalogOverviewSource;
 };
 
 const STATUS_ORDER: Record<CatalogOverviewDisplayStatus, number> = {
@@ -112,7 +128,10 @@ export function catalogOverviewStageLabel(stage: string, zh: boolean): string {
   if (stage === "catalog_execution") return zh ? "目录执行" : "Catalog execution";
   if (stage === "complete") return zh ? "完成" : "Complete";
   if (stage === "blocked") return zh ? "阻塞" : "Blocked";
-  return zh ? "排队" : "Queued";
+  if (stage === "queued") return zh ? "排队" : "Queued";
+  // Fail-closed: an unrecognized stage must stay visibly unknown — mapping it
+  // to 排队/Queued would silently misreport new server-side stages.
+  return zh ? `未知阶段（${stage}）` : `Unknown stage (${stage})`;
 }
 
 export function catalogOverviewActionLabel(action: CatalogOverviewAction, zh: boolean): string {

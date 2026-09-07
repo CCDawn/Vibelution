@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sqlite3
 import tempfile
 import threading
 from contextlib import contextmanager
@@ -31,6 +32,9 @@ from core.research.competition.catalog_execution import (
     CatalogExecutionState,
     QuestionStatus,
     dev_plan,
+)
+from core.web.services.team_workflow.research_runtime.paths import (
+    workflow_ledger_path,
 )
 from core.research.competition.dev_control_batch import (
     ALLOWED_DEV_BATCH_PLAN_IDS,
@@ -793,7 +797,57 @@ def _get_challenge_cup_catalog_overview_transaction(
         "questionCount": len(questions),
         "counts": counts,
         "questions": questions,
+        # Dual-plane provenance (Master Plan P3.1): this overview is the
+        # in-product catalog projection; externally executed batches are
+        # surfaced as read-only receipts from external_batch_registrations
+        # so the UI can label which plane each fact came from.
+        "source": {
+            "plane": "product_runtime",
+            "layer": "catalog_dev_checkpoint",
+            "externalBatches": _external_batch_registrations(),
+        },
     }
+
+
+def _external_batch_registrations() -> list[dict[str, Any]]:
+    """Read-only receipt listing from the ledger's v8 registration table.
+
+    Uses a bare read-only connection (never the writer store) so the overview
+    cannot trigger migrations or contend for the write lock.  Missing table
+    (pre-v8 ledger) degrades to an empty list — fail-open for display only.
+    """
+    ledger_path = workflow_ledger_path()
+    if not ledger_path.exists():
+        return []
+    try:
+        connection = sqlite3.connect(
+            f"file:{ledger_path}?mode=ro", uri=True, timeout=2
+        )
+    except sqlite3.Error:
+        return []
+    try:
+        rows = connection.execute(
+            """
+            SELECT batch_id, layer, manifest_sha256, question_count, verified
+            FROM external_batch_registrations
+            ORDER BY batch_generated_at_ms DESC, batch_id DESC
+            LIMIT 50
+            """
+        ).fetchall()
+    except sqlite3.Error:
+        return []
+    finally:
+        connection.close()
+    return [
+        {
+            "batchId": str(row[0]),
+            "layer": str(row[1]),
+            "manifestSha256": str(row[2])[:16],
+            "questionCount": int(row[3]),
+            "verified": bool(row[4]),
+        }
+        for row in rows
+    ]
 
 
 def _execution_status_rank(status: str) -> int:

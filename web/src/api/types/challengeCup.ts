@@ -492,6 +492,20 @@ export type ChallengeCupCatalogOverviewQuestion = {
   blocker: ChallengeCupCatalogOverviewBlocker | null;
 };
 
+export type ChallengeCupExternalBatchReceipt = {
+  batchId: string;
+  layer: string;
+  manifestSha256: string;
+  questionCount: number;
+  verified: boolean;
+};
+
+export type ChallengeCupCatalogOverviewSource = {
+  plane: string;
+  layer: string;
+  externalBatches: ChallengeCupExternalBatchReceipt[];
+};
+
 export type ChallengeCupCatalogOverview = {
   schemaVersion: number;
   teamId: string;
@@ -504,6 +518,7 @@ export type ChallengeCupCatalogOverview = {
     failed: number;
   };
   questions: ChallengeCupCatalogOverviewQuestion[];
+  source?: ChallengeCupCatalogOverviewSource;
 };
 
 export type ChallengeCupTokenUsageStage = {

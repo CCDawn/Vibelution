@@ -217,8 +217,23 @@ export function ChallengeCatalogOverviewView({
         <div className={styles.detail} data-testid="catalog-overview-detail">
           <div className={styles.detailTitle}>{selected.questionId} · {selected.title}</div>
           <div className={styles.detailMeta}>
-            {catalogOverviewStageLabel(selected.currentStage, zh)} · {selected.checkpointProgress} · attempts={selected.attempts}
+            {catalogOverviewStageLabel(selected.currentStage, zh)} · {selected.checkpointProgress} · {zh ? `尝试 ${selected.attempts} 次` : `${selected.attempts} attempt(s)`}
           </div>
+          {overview.source?.externalBatches?.length ? (
+            <div className={styles.sourceRow} data-testid="catalog-overview-source">
+              {zh
+                ? `数据来源：产品运行时投影 · 已登记外部批次 ${overview.source.externalBatches.length} 个${
+                    overview.source.externalBatches.every((batch) => batch.verified)
+                      ? "（全部已核验）"
+                      : "（存在未核验）"
+                  }`
+                : `Source: product runtime projection · ${overview.source.externalBatches.length} registered external batch(es)${
+                    overview.source.externalBatches.every((batch) => batch.verified)
+                      ? " (all verified)"
+                      : " (unverified present)"
+                  }`}
+            </div>
+          ) : null}
           <VStatusChip tone={statusTone(catalogOverviewDisplayStatus(selected))}>
             {catalogOverviewStatusLabel(catalogOverviewDisplayStatus(selected), zh)}
           </VStatusChip>
