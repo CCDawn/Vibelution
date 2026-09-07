@@ -472,3 +472,141 @@ def test_invoke_skipped_when_lease_lost_before_invoke(tmp_path: Path) -> None:
         assert row.lease_owner == "graph-worker-new"
     finally:
         harness.close()
+
+
+# ---------------------------------------------------------------------------
+# B2-direct renewal channel: heartbeat renewals run on a dedicated connection
+# (never the single-writer business queue). A transient renewal miss (queue
+# stall / busy timeout -> None) must NOT abort a live invoke; only a
+# definitive loss (rows_affected == 0 -> False) may.
+# ---------------------------------------------------------------------------
+
+
+def test_transient_renewal_misses_do_not_abort_invoke(tmp_path: Path) -> None:
+    harness = GraphHarness(tmp_path)
+    try:
+        harness.seed(status="running")
+        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
+        leased = outbox_api.lease_ready_actions(
+            harness.commands.store,
+            owner="graph-worker-beat",
+            now_ms=int(time.time() * 1000),
+            lease_ms=400,
+            action_kinds=("graph_dispatch",),
+        )
+        assert len(leased) == 1
+        action = leased[0]
+        dispatch = _dispatch(action)
+        worker = _realtime_worker(
+            harness, owner="graph-worker-beat", lease_ms=400
+        )
+        # Emulate the production cadence ratio: with the 15-minute default
+        # lease the 30s interval cap makes the staleness window (half the
+        # lease) tolerate many misses. For the 400ms test lease, shrink the
+        # cap so 3 consecutive misses still fit inside the window.
+        worker._HEARTBEAT_INTERVAL_CAP_SECONDS = 0.05
+
+        # The invoke completes via the legal dispatching -> succeeded commit;
+        # the seeded attempt starts at "starting".
+        def mark_dispatching(uow):
+            uow.repository.update_attempt_status(
+                "nr-run-test-source_finding-a1",
+                "dispatching",
+                int(time.time() * 1000),
+            )
+
+        harness.commands.store.submit(
+            mark_dispatching, force_flush=True
+        ).result(timeout=10)
+
+        store = harness.commands.store
+        real_direct = store.renew_outbox_lease_direct
+        calls = {"count": 0}
+
+        def flaky_direct(action_id, owner, *, now_ms, lease_ms):
+            calls["count"] += 1
+            if calls["count"] <= 4:
+                # First four renewals (pre-invoke + heartbeats) stall.
+                return None
+            return real_direct(action_id, owner, now_ms=now_ms, lease_ms=lease_ms)
+
+        store.renew_outbox_lease_direct = flaky_direct  # type: ignore[method-assign]
+
+        invoke_entered = threading.Event()
+        release_invoke = threading.Event()
+
+        def slow_start(_dispatch: GraphDispatch) -> GraphDispatchResult:
+            invoke_entered.set()
+            assert release_invoke.wait(timeout=10)
+            return _completed_start_result("ckpt-flaky")
+
+        worker._start_or_recover = slow_start  # type: ignore[method-assign]
+
+        thread = threading.Thread(
+            target=worker._handle,
+            args=(action,),
+            name="handle-under-test",
+        )
+        thread.start()
+        assert invoke_entered.wait(timeout=5)
+        # Stay inside the invoke past four transient renewal misses (interval
+        # is 50ms with the shrunken cap): the invoke must survive them.
+        time.sleep(0.6)
+        release_invoke.set()
+        thread.join(timeout=10)
+
+        row = store.read(lambda repo: repo.get_outbox(action.action_id))
+        # The invoke was not aborted and the commit-point CAS still fenced.
+        assert row is not None and row.status == "succeeded"
+    finally:
+        harness.close()
+
+
+def test_transient_requeue_backoff_is_exponential_and_capped(
+    tmp_path: Path, monkeypatch
+) -> None:
+    harness = GraphHarness(tmp_path)
+    try:
+        harness.seed(status="running")
+        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
+        leased = outbox_api.lease_ready_actions(
+            harness.commands.store,
+            owner="graph-worker-backoff",
+            now_ms=FIXED_NOW_MS + 1000,
+            lease_ms=30_000,
+            action_kinds=("graph_dispatch",),
+        )
+        assert len(leased) == 1
+        action = leased[0]
+        dispatch = _dispatch(action)
+        worker = GraphDispatchWorker(
+            store=harness.commands.store,
+            coordinator=harness.coordinator,
+            owner_id="graph-worker-backoff",
+            now_provider=lambda: FIXED_NOW_MS + 2000,
+        )
+
+        requeues: list[int] = []
+
+        def capture_requeue(store, action_id, owner, now_ms, *, retry_at_ms, problem_json):
+            requeues.append(retry_at_ms - now_ms)
+            return True
+
+        monkeypatch.setattr(outbox_api, "requeue_action", capture_requeue)
+
+        base = worker._TRANSIENT_RETRY_BASE_MS
+        cap = worker._TRANSIENT_RETRY_MAX_MS
+        for attempt in range(worker._MAX_TRANSIENT_ATTEMPTS):
+            action = replace(action, attempt_count=attempt)
+            worker._requeue_or_fail(action, dispatch, "boom")
+        assert requeues == [
+            min(base * (2**attempt), cap)
+            for attempt in range(worker._MAX_TRANSIENT_ATTEMPTS)
+        ]
+        # Past the transient threshold the dispatch blocks instead of
+        # requeueing: no further delay entries appear.
+        action = replace(action, attempt_count=worker._MAX_TRANSIENT_ATTEMPTS)
+        worker._requeue_or_fail(action, dispatch, "boom")
+        assert len(requeues) == worker._MAX_TRANSIENT_ATTEMPTS
+    finally:
+        harness.close()

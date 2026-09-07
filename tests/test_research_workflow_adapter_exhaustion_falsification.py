@@ -27,7 +27,10 @@ from pathlib import Path
 
 from core.research.workflow.contracts import PendingAction, WorkflowCommandKind
 from core.research.workflow.ledger import outbox as outbox_api
-from core.research.workflow.ledger.repository import MAX_OUTBOX_LEASE_ATTEMPTS
+from core.research.workflow.ledger.repository import (
+    MAX_OUTBOX_LEASE_ATTEMPTS,
+    MAX_OUTBOX_LEASE_RECOVERIES,
+)
 from core.research.workflow.models import ActorKind
 from core.web.services.team_workflow.research_runtime.action_registry import (
     ActionRegistry,
@@ -125,7 +128,11 @@ def test_time_advance_lease_exhaustion_converges_without_revival(
                 action_kinds=("adapter_dispatch",),
             )
 
-        for tick in range(MAX_OUTBOX_LEASE_ATTEMPTS):
+        # Tick 0 is the one genuine execution claim (pending → leased);
+        # every later tick is an expiry reclaim — infrastructure recovery
+        # that must NOT consume the attempt budget. The crash-only loop is
+        # instead bounded by the independent recovery gate.
+        for tick in range(MAX_OUTBOX_LEASE_RECOVERIES + 1):
             leased = lease_tick()
             assert [action.action_id for action in leased] == [_OUTBOX_ID], (
                 f"tick {tick}: the crash-only row must stay the sole lease target"
@@ -133,21 +140,23 @@ def test_time_advance_lease_exhaustion_converges_without_revival(
             row = harness.store.read(lambda repo: repo.get_outbox(_OUTBOX_ID))
             assert row is not None
             assert row.status == "leased"
-            assert row.attempt_count == tick + 1
+            assert row.attempt_count == 1
             assert harness.store.get_run("run-test").status == "running"
             # The next lease only happens after this lease expires.
             now["ms"] += _LEASE_MS + 1_000
 
-        # One more lease pass after the final expiry: the attempt gate must
+        # One more lease pass after the final expiry: the recovery gate must
         # terminalize the row instead of leasing it again.
         assert lease_tick() == []
         gated = harness.store.read(lambda repo: repo.get_outbox(_OUTBOX_ID))
         assert gated is not None
         assert gated.status == "failed"
-        assert gated.attempt_count == MAX_OUTBOX_LEASE_ATTEMPTS
+        assert gated.attempt_count == 1
         gated_problem = json.loads(str(gated.last_problem_json))
         assert gated_problem["code"] == "lease_attempt_exhausted"
         assert gated_problem["maxLeaseAttempts"] == MAX_OUTBOX_LEASE_ATTEMPTS
+        assert gated_problem["gate"] == "lease_recovery"
+        assert gated_problem["maxLeaseRecoveries"] == MAX_OUTBOX_LEASE_RECOVERIES
 
         # The repair sweep lands the dead letter exactly once.
         worker = AdapterDispatchWorker(

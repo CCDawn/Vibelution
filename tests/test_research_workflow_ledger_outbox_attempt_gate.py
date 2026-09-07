@@ -14,7 +14,10 @@ import pytest
 
 from core.research.workflow.ledger import WorkflowLedgerStore
 from core.research.workflow.ledger import outbox as outbox_api
-from core.research.workflow.ledger.repository import MAX_OUTBOX_LEASE_ATTEMPTS
+from core.research.workflow.ledger.repository import (
+    MAX_OUTBOX_LEASE_ATTEMPTS,
+    MAX_OUTBOX_LEASE_RECOVERIES,
+)
 from tests._support.workflow_ledger_helpers import (
     FIXED_NOW_MS,
     OutboxRecord,
@@ -86,24 +89,57 @@ def test_rows_below_gate_lease_normally(tmp_path: Path) -> None:
         expired = outbox_api.lease_ready_actions(
             store, owner="w2", now_ms=4000, lease_ms=1000
         )
-        # 此时 act-almost 已到闸值、act-fresh 才第 2 次：只有后者继续被领。
+        # act-almost 的 attempt 预算已真实耗尽（12 次执行 claim），闸值收口；
+        # act-fresh 才第 2 次，继续被领。恢复免费只保护未耗尽预算的行。
         assert [item.action_id for item in expired] == ["act-fresh"]
+        assert _get_action(store, "act-almost").status == "failed"
+        assert json.loads(
+            str(_get_action(store, "act-almost").last_problem_json)
+        )["gate"] == "attempt"
     finally:
         store.close()
 
 
-def test_exhausted_row_fails_once_with_problem_json(tmp_path: Path) -> None:
+def test_expiry_reclaim_does_not_consume_attempt_budget(tmp_path: Path) -> None:
+    store = open_ledger_store(tmp_path / "ledger.sqlite3")
+    try:
+        _seed(store, _outbox_record("act-recovered", attempt_count=3))
+        first = outbox_api.lease_ready_actions(
+            store, owner="w1", now_ms=2000, lease_ms=1000
+        )
+        assert [item.action_id for item in first] == ["act-recovered"]
+        # pending → leased 是真实执行 claim：attempt +1。
+        assert first[0].attempt_count == 4
+
+        # 租约过期后被另一个 worker 重领：同一个逻辑 attempt 的恢复。
+        reclaimed = outbox_api.lease_ready_actions(
+            store, owner="w2", now_ms=4000, lease_ms=1000
+        )
+        assert [item.action_id for item in reclaimed] == ["act-recovered"]
+        assert reclaimed[0].attempt_count == 4
+
+        record = _get_action(store, "act-recovered")
+        assert record.status == "leased"
+        assert record.attempt_count == 4
+        assert record.lease_owner == "w2"
+    finally:
+        store.close()
+
+
+def test_recovery_gate_bounds_the_crash_loop(tmp_path: Path) -> None:
     store = open_ledger_store(tmp_path / "ledger.sqlite3")
     try:
         _seed(store, _outbox_record("act-poison"))
         # 模拟反复崩溃 / 租约超时：每轮正常领取后不 ack，等租约过期再领。
+        # 第 1 轮是真实执行 claim（recovery=0），其后每轮是一次免费恢复；
+        # recovery 计满 MAX_OUTBOX_LEASE_RECOVERIES 后由恢复闸收口。
         now_ms = 1000
-        for round_index in range(MAX_OUTBOX_LEASE_ATTEMPTS):
+        for round_index in range(MAX_OUTBOX_LEASE_RECOVERIES + 1):
             leased = outbox_api.lease_ready_actions(
                 store, owner=f"w{round_index}", now_ms=now_ms, lease_ms=1000
             )
             assert [item.action_id for item in leased] == ["act-poison"]
-            assert leased[0].attempt_count == round_index + 1
+            assert leased[0].attempt_count == 1
             now_ms += 2000
 
         exhausted = outbox_api.lease_ready_actions(
@@ -113,12 +149,14 @@ def test_exhausted_row_fails_once_with_problem_json(tmp_path: Path) -> None:
 
         record = _get_action(store, "act-poison")
         assert record.status == "failed"
-        assert record.attempt_count == MAX_OUTBOX_LEASE_ATTEMPTS
+        assert record.attempt_count == 1
         assert record.lease_owner is None and record.lease_expires_at_ms is None
         assert store.list_pending_outbox() == []
         problem = json.loads(str(record.last_problem_json))
         assert problem["code"] == "lease_attempt_exhausted"
         assert problem["maxLeaseAttempts"] == MAX_OUTBOX_LEASE_ATTEMPTS
+        assert problem["gate"] == "lease_recovery"
+        assert problem["maxLeaseRecoveries"] == MAX_OUTBOX_LEASE_RECOVERIES
     finally:
         store.close()
 

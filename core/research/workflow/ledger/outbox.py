@@ -10,7 +10,11 @@ from __future__ import annotations
 from typing import Any
 
 from .records import OutboxRecord
-from .repository import MAX_OUTBOX_LEASE_ATTEMPTS
+from .repository import (
+    DEFAULT_OUTBOX_LEASE_MS,
+    MAX_OUTBOX_LEASE_ATTEMPTS,
+    MAX_OUTBOX_LEASE_RECOVERIES,
+)
 
 
 def lease_ready_actions(
@@ -19,12 +23,13 @@ def lease_ready_actions(
     owner: str,
     now_ms: int,
     limit: int = 8,
-    lease_ms: int = 30_000,
+    lease_ms: int = DEFAULT_OUTBOX_LEASE_MS,
     action_kinds: tuple[str, ...] | None = None,
     idempotency_prefix: str | None = None,
     background_workflow_ids: tuple[str, ...] | None = None,
     background_limit: int | None = None,
     max_attempts: int = MAX_OUTBOX_LEASE_ATTEMPTS,
+    max_lease_recoveries: int = MAX_OUTBOX_LEASE_RECOVERIES,
 ) -> list[OutboxRecord]:
     future = store.submit(
         lambda uow: uow.repository.lease_outbox_actions(
@@ -37,6 +42,7 @@ def lease_ready_actions(
             background_workflow_ids=background_workflow_ids,
             background_limit=background_limit,
             max_attempts=max_attempts,
+            max_lease_recoveries=max_lease_recoveries,
         ),
         force_flush=True,
     )
@@ -71,6 +77,37 @@ def renew_lease(
         force_flush=True,
     )
     return bool(future.result(timeout=30))
+
+
+def renew_lease_direct(
+    store: Any,
+    action_id: str,
+    owner: str,
+    *,
+    now_ms: int,
+    lease_ms: int,
+) -> bool | None:
+    """Renew a lease on a dedicated short-lived connection, bypassing the
+    single-writer queue.
+
+    Tri-state: ``True`` renewed; ``False`` definitive loss (rows_affected ==
+    0 — lease reclaimed or expired); ``None`` transient miss (queue/busy
+    contention, store closed) — the lease state is unknown and the window
+    outlives several misses. The renewal is one atomic UPDATE, so running it
+    on its own WAL connection is safe. Stores that do not implement the
+    direct path (test fakes) fall back to the queued renewal, which only
+    reports the binary renewed/not-renewed result.
+    """
+    direct = getattr(store, "renew_outbox_lease_direct", None)
+    if direct is None:
+        return renew_lease(
+            store,
+            action_id,
+            owner,
+            now_ms=now_ms,
+            lease_ms=lease_ms,
+        )
+    return direct(action_id, owner, now_ms=now_ms, lease_ms=lease_ms)
 
 
 def fail_action(

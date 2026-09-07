@@ -75,6 +75,48 @@ class WorkflowLedgerStore:
             raise WorkflowLedgerClosedError("workflow ledger store is not open")
         return self._writer.submit(fn, force_flush=force_flush)
 
+    def renew_outbox_lease_direct(
+        self,
+        action_id: str,
+        owner: str,
+        *,
+        now_ms: int,
+        lease_ms: int,
+    ) -> bool | None:
+        """Renew one outbox lease on a dedicated short-lived connection.
+
+        Lease-heartbeat renewals are load-bearing keepalives for in-flight
+        graph invokes; funneling them through the single-writer queue means a
+        deep or stalled queue delays the keepalive past the lease window and
+        another worker reclaims a live action. The renewal is one atomic
+        UPDATE, so it runs here on its own WAL connection outside the queue.
+
+        Tri-state result so callers can separate the two failure modes:
+
+        - ``True`` — renewed; the owner still holds the lease;
+        - ``False`` — definitive loss: the UPDATE affected 0 rows, so the
+          lease was reclaimed or already expired;
+        - ``None`` — transient miss (writer contention past the busy
+          timeout, connection error, store closed): the lease state is
+          unknown and the window outlives several such misses."""
+        if self._closed:
+            return None
+        from .repository import WorkflowLedgerRepository
+
+        connection = self._database.open_writer()
+        try:
+            repository = WorkflowLedgerRepository(connection)
+            return bool(
+                repository.renew_outbox_lease(action_id, owner, now_ms, lease_ms)
+            )
+        except Exception:
+            return None
+        finally:
+            try:
+                connection.close()
+            except Exception:
+                pass
+
     # ------------------------------------------------------- read-only
 
     def get_run(self, run_id: str) -> RunRecord | None:

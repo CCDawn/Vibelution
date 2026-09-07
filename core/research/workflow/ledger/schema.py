@@ -20,7 +20,7 @@ class Migration:
         return hashlib.sha256("\n".join(self.statements).encode("utf-8")).hexdigest()
 
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 # v5 was first deployed with a checksum that is already present in user
 # ledgers.  It is accepted only together with an independent schema-shape
@@ -593,6 +593,21 @@ MIGRATIONS: tuple[Migration, ...] = (
               plane, layer, batch_generated_at_ms DESC, batch_id DESC
             )
             """,
+        ),
+    ),
+    # Additive: outbox_actions.lease_recovery_count counts lease-expiry
+    # recoveries of an already-leased action (lease lost mid-invoke, process
+    # crash) separately from attempt_count, which now counts only genuine
+    # pending → leased execution claims. Infrastructure recovery must not
+    # consume the business attempt budget, but a hard crash loop still needs
+    # its own bounded gate (MAX_OUTBOX_LEASE_RECOVERIES).
+    Migration(
+        version=9,
+        statements=(
+            (
+                "ALTER TABLE outbox_actions "
+                "ADD COLUMN lease_recovery_count INTEGER NOT NULL DEFAULT 0"
+            ),
         ),
     ),
 )

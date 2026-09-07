@@ -33,6 +33,7 @@ from core.research.workflow.knowledge_sideflow_definition import (
 )
 from core.research.workflow.ledger import WorkflowLedgerStore
 from core.research.workflow.ledger import outbox as outbox_api
+from core.research.workflow.ledger.repository import DEFAULT_OUTBOX_LEASE_MS
 from core.research.workflow.transitions import (
     NodeAttemptStatus,
     can_transition_node_attempt,
@@ -161,7 +162,7 @@ class GraphDispatchWorker:
         store: WorkflowLedgerStore,
         coordinator: ChallengeCupGraphCoordinator,
         owner_id: str = "graph-worker",
-        lease_ms: int = 30_000,
+        lease_ms: int = DEFAULT_OUTBOX_LEASE_MS,
         start_deadline_ms: int = DEFAULT_START_DEADLINE_MS,
         created_start_deadline_ms: int | None = None,
         now_provider: Callable[[], int] | None = None,
@@ -622,26 +623,32 @@ class GraphDispatchWorker:
     ) -> GraphDispatchResult:
         """Invoke the graph while a heartbeat keeps the outbox lease alive.
 
-        A LangGraph invoke can run far past the default 30s lease (long LLM
-        turns reach minutes). Without renewal the lease expires mid-invoke
-        and another worker can re-lease the same action and drive the thread
-        twice. The heartbeat renews every ``lease_ms / 3`` (Temporal-style
-        heartbeat), so the lease can no longer expire while this worker is
-        live. Renewal failure (rows_affected == 0 — the lease was reclaimed
-        or expired) sets the lost signal; the invoke itself cannot be
-        interrupted mid-flight, but its result is then discarded (see
-        ``_GraphLeaseLost``) and the pre-invoke renewal plus the commit-point
-        owner CAS keep the ledger fenced.
+        A LangGraph invoke can run far past any fixed lease window (long LLM
+        turns reach minutes). The default lease (DEFAULT_OUTBOX_LEASE_MS,
+        15 minutes) already outlives a single worst-case governed model call;
+        the heartbeat is the backup that extends the lease across a chain of
+        calls. Renewals take the DIRECT channel
+        (``outbox_api.renew_lease_direct`` — a dedicated short-lived
+        connection), never the single-writer business queue: a stalled queue
+        must not be able to expire a live lease.
+
+        Failure semantics are two-tier:
+
+        - A renewal that definitively returns False (the UPDATE affected 0
+          rows — the lease was reclaimed or expired) sets the lost signal;
+          the invoke result is discarded (see ``_GraphLeaseLost``) and the
+          commit-point owner CAS keeps the ledger fenced.
+        - A renewal that fails transiently (queue/busy timeout, connection
+          error) does NOT abort the invoke: the lease window outlives many
+          missed heartbeats, so the loop keeps retrying and only declares
+          the lease lost once no renewal has succeeded for half the lease
+          window.
         """
         # Push the lease to its full window and prove ownership BEFORE the
-        # invoke: a reclaimed action never enters the graph on this worker.
-        if not outbox_api.renew_lease(
-            self._store,
-            action.action_id,
-            self._owner,
-            now_ms=self._now(),
-            lease_ms=self._lease_ms,
-        ):
+        # invoke: a definitive loss (False) never enters the graph on this
+        # worker; a transient miss (None) still proceeds — the lease was just
+        # granted at claim time and outlives the miss.
+        if self._renew_lease(action) is False:
             _record_scene_event(
                 "graph_dispatch.lease_lost_before_invoke",
                 outcome="failed",
@@ -654,21 +661,38 @@ class GraphDispatchWorker:
             raise _GraphLeaseLost("graph dispatch lease was lost before invoke")
         stop = threading.Event()
         lost = threading.Event()
-        interval_seconds = max(0.001, float(self._lease_ms) / 3000.0)
+        # Cap the interval so renewals stay responsive even with the long
+        # default lease: a definitive loss is detected within ~30s instead of
+        # lease/3 = 5 minutes. Small test leases keep the lease/3 cadence.
+        interval_seconds = min(
+            max(0.001, float(self._lease_ms) / 3000.0),
+            self._HEARTBEAT_INTERVAL_CAP_SECONDS,
+        )
+        # ``monotonic`` timestamp of the last renewal that either succeeded or
+        # definitively proved the lease gone. Transient renewal failures only
+        # become fatal once this goes stale relative to the lease window.
+        last_progress = time.monotonic()
 
         def heartbeat() -> None:
+            nonlocal last_progress
             while not stop.wait(interval_seconds):
                 try:
-                    renewed = outbox_api.renew_lease(
-                        self._store,
-                        action.action_id,
-                        self._owner,
-                        now_ms=self._now(),
-                        lease_ms=self._lease_ms,
-                    )
+                    renewed = self._renew_lease(action)
                 except Exception:
-                    renewed = False
-                if not renewed:
+                    renewed = None
+                if renewed is False:
+                    lost.set()
+                    return
+                if renewed is True:
+                    last_progress = time.monotonic()
+                    continue
+                # Transient miss: keep the invoke alive while the lease
+                # window has demonstrably not run out since the last
+                # successful renewal.
+                if (time.monotonic() - last_progress) > (
+                    float(self._lease_ms) / 1000.0
+                    * self._HEARTBEAT_LOST_AFTER_MISSES_RATIO
+                ):
                     lost.set()
                     return
 
@@ -693,6 +717,27 @@ class GraphDispatchWorker:
         if lost.is_set():
             raise _GraphLeaseLost("graph dispatch lease was lost")
         return result
+
+    # Renewal cadence cap (seconds): with the 15-minute default lease,
+    # lease/3 would make the loop wait 5 minutes between renewals; a 30s cap
+    # detects a definitive takeover quickly without meaningful load.
+    _HEARTBEAT_INTERVAL_CAP_SECONDS = 30.0
+    # A lease is declared lost only after no renewal succeeded for this
+    # fraction of the lease window — many consecutive transient misses.
+    _HEARTBEAT_LOST_AFTER_MISSES_RATIO = 0.5
+
+    def _renew_lease(self, action: Any) -> bool | None:
+        """One lease renewal over the direct channel (never the write queue).
+
+        Tri-state per ``outbox_api.renew_lease_direct``: True renewed,
+        False definitive loss, None transient miss."""
+        return outbox_api.renew_lease_direct(
+            self._store,
+            action.action_id,
+            self._owner,
+            now_ms=self._now(),
+            lease_ms=self._lease_ms,
+        )
 
     def _budget_admission(self, dispatch: GraphDispatch, pending: Any):
         """Stage-boundary budget admission for a NEW successor attempt.
@@ -2443,10 +2488,18 @@ class GraphDispatchWorker:
         self._submit(mutate, force_flush=True).result(timeout=30)
 
     _MAX_TRANSIENT_ATTEMPTS = 5
+    # Exponential requeue backoff for transient worker-loop errors: 5s base
+    # doubling per attempt, capped at 5 minutes. A fixed 5s cadence burned
+    # the attempt budget in seconds and hammered the ledger during provider
+    # incidents; the cap keeps the worst-case wall clock bounded (5+10+20+40
+    # +80 = 155s before the exhaustion branch).
+    _TRANSIENT_RETRY_BASE_MS = 5_000
+    _TRANSIENT_RETRY_MAX_MS = 300_000
 
     def _requeue_or_fail(self, action: Any, dispatch: Any, detail: str) -> None:
         now_ms = self._now()
-        if int(getattr(action, "attempt_count", 0) or 0) >= self._MAX_TRANSIENT_ATTEMPTS:
+        attempt_count = int(getattr(action, "attempt_count", 0) or 0)
+        if attempt_count >= self._MAX_TRANSIENT_ATTEMPTS:
             # Deterministic failures must not retry forever; mark the dispatch
             # blocked so the run surfaces a diagnosis instead of live-locking.
             self._mark_blocked(
@@ -2462,17 +2515,21 @@ class GraphDispatchWorker:
                 "teamId": str(getattr(dispatch, "team_id", "") or ""),
                 "runId": str(getattr(dispatch, "run_id", "") or ""),
                 "nodeId": str(getattr(dispatch, "node_id", "") or ""),
-                "attemptCount": int(getattr(action, "attempt_count", 0) or 0),
+                "attemptCount": attempt_count,
                 "errorType": type(detail).__name__ if not isinstance(detail, str) else "",
                 "detail": str(detail)[:160],
             },
+        )
+        backoff_ms = min(
+            self._TRANSIENT_RETRY_BASE_MS * (2**max(attempt_count, 0)),
+            self._TRANSIENT_RETRY_MAX_MS,
         )
         outbox_api.requeue_action(
             self._store,
             action.action_id,
             self._owner,
             now_ms,
-            retry_at_ms=now_ms + 5_000,
+            retry_at_ms=now_ms + backoff_ms,
             problem_json=json.dumps({"code": "transient", "detail": detail}),
         )
 

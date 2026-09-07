@@ -26,7 +26,27 @@ from .records import (
 # reaches the workers' transient-exhaustion branch, so the ledger itself must
 # stop re-leasing it. Higher than the workers' transient threshold (5), which
 # only covers errors raised inside the worker loop.
+#
+# ``attempt_count`` counts only GENUINE execution claims (pending → leased).
+# An expiry reclaim of an already-leased row is infrastructure recovery of the
+# SAME logical attempt and must not consume the attempt budget; it is counted
+# separately by ``lease_recovery_count`` (schema v9) and bounded by its own
+# gate below so a hard crash loop still cannot churn forever.
 MAX_OUTBOX_LEASE_ATTEMPTS = 12
+
+# Reclaim gate for expiry recoveries (lease lost mid-invoke, process crash).
+# Each recovery requires the previous lease to run out, so with the default
+# 15-minute lease this caps a poisoned action at a slow, visible churn instead
+# of a fast live-lock. Higher than the attempt gate because recoveries are
+# free of the business retry budget by design.
+MAX_OUTBOX_LEASE_RECOVERIES = 24
+
+# Default outbox lease window. Sized to outlast a single worst-case governed
+# model call (per-call fence 800s) plus margin, and aligned with
+# CHALLENGE_NO_PROGRESS_TIMEOUT_MS (900s): the heartbeat is a backup, not the
+# load-bearing keepalive, so a stalled writer queue can no longer expire a
+# lease mid-invoke.
+DEFAULT_OUTBOX_LEASE_MS = 900_000
 
 # Sentinel for "leave this nullable column unchanged" in partial updates.
 _UNSET = object()
@@ -938,20 +958,24 @@ class WorkflowLedgerRepository:
         owner: str,
         now_ms: int,
         limit: int = 8,
-        lease_ms: int = 30_000,
+        lease_ms: int = DEFAULT_OUTBOX_LEASE_MS,
         action_kinds: tuple[str, ...] | None = None,
         idempotency_prefix: str | None = None,
         background_workflow_ids: tuple[str, ...] | None = None,
         background_limit: int | None = None,
         max_attempts: int = MAX_OUTBOX_LEASE_ATTEMPTS,
+        max_lease_recoveries: int = MAX_OUTBOX_LEASE_RECOVERIES,
     ) -> list[OutboxRecord]:
         if max_attempts < 1:
             raise ValueError("max_attempts must be >= 1")
+        if max_lease_recoveries < 1:
+            raise ValueError("max_lease_recoveries must be >= 1")
         if background_limit is not None and background_limit < 0:
             raise ValueError("background_limit must be >= 0")
         self._fail_leases_over_attempt_gate(
             now_ms=now_ms,
             max_attempts=max_attempts,
+            max_lease_recoveries=max_lease_recoveries,
             action_kinds=action_kinds,
             idempotency_prefix=idempotency_prefix,
         )
@@ -1037,7 +1061,14 @@ class WorkflowLedgerRepository:
                 """
                 UPDATE outbox_actions
                 SET status = 'leased', lease_owner = ?, lease_expires_at_ms = ?,
-                    attempt_count = attempt_count + 1, updated_at_ms = ?
+                    attempt_count = CASE WHEN status = 'pending'
+                                         THEN attempt_count + 1
+                                         ELSE attempt_count END,
+                    lease_recovery_count = lease_recovery_count +
+                                           CASE WHEN status = 'leased'
+                                                THEN 1
+                                                ELSE 0 END,
+                    updated_at_ms = ?
                 WHERE action_id = ? AND status IN ('pending', 'leased')
                   AND (lease_expires_at_ms IS NULL OR lease_expires_at_ms <= ?)
                 """,
@@ -1048,11 +1079,18 @@ class WorkflowLedgerRepository:
             record = self._row_outbox(row)
             if record is None:
                 continue
+            # attempt_count in the fetched row predates this claim; the CASE
+            # above incremented it only for a genuine pending → leased claim.
+            claimed_attempt = (
+                record.attempt_count + 1
+                if record.status == "pending"
+                else record.attempt_count
+            )
             leased.append(
                 replace(
                     record,
                     status="leased",
-                    attempt_count=record.attempt_count + 1,
+                    attempt_count=claimed_attempt,
                     lease_owner=owner,
                     lease_expires_at_ms=now_ms + lease_ms,
                     updated_at_ms=now_ms,
@@ -1065,17 +1103,49 @@ class WorkflowLedgerRepository:
         *,
         now_ms: int,
         max_attempts: int,
+        max_lease_recoveries: int,
         action_kinds: tuple[str, ...] | None,
         idempotency_prefix: str | None,
     ) -> None:
-        """Sweep actions at/over the lease-attempt gate to terminal failed in
-        the caller's unit of work. Scope and eligibility mirror the lease scan;
-        conditioning on the non-terminal statuses makes the failure marker land
-        exactly once per action even under competing sweeps."""
-        problem_json = json.dumps(
-            {"code": "lease_attempt_exhausted", "maxLeaseAttempts": int(max_attempts)}
+        """Sweep actions at/over the lease gates to terminal failed in the
+        caller's unit of work. Two independent gates, one per counter:
+
+        - attempt gate: ``attempt_count >= max_attempts`` — genuine execution
+          claims (pending → leased) are exhausted;
+        - recovery gate: ``lease_recovery_count >= max_lease_recoveries`` —
+          the action kept losing its lease (crash loop / expiry churn) even
+          though its attempt budget was never consumed.
+
+        Scope and eligibility mirror the lease scan; conditioning on the
+        non-terminal statuses makes the failure marker land exactly once per
+        action even under competing sweeps."""
+        attempt_problem_json = json.dumps(
+            {
+                "code": "lease_attempt_exhausted",
+                "maxLeaseAttempts": int(max_attempts),
+                "gate": "attempt",
+            }
         )
-        params: list[Any] = [problem_json, now_ms, max_attempts, now_ms]
+        recovery_problem_json = json.dumps(
+            {
+                "code": "lease_attempt_exhausted",
+                "maxLeaseAttempts": int(max_attempts),
+                "maxLeaseRecoveries": int(max_lease_recoveries),
+                "gate": "lease_recovery",
+            }
+        )
+        # Placeholder order mirrors the SQL text exactly:
+        # CASE(>=, THEN, ELSE), updated_at_ms, WHERE counters, available_at,
+        # [kind/idempotency filters], lease expiry.
+        params: list[Any] = [
+            max_attempts,
+            attempt_problem_json,
+            recovery_problem_json,
+            now_ms,
+            max_attempts,
+            max_lease_recoveries,
+            now_ms,
+        ]
         kind_filter = ""
         if action_kinds:
             placeholders = ",".join("?" for _ in action_kinds)
@@ -1089,9 +1159,12 @@ class WorkflowLedgerRepository:
             f"""
             UPDATE outbox_actions
             SET status = 'failed', lease_owner = NULL, lease_expires_at_ms = NULL,
-                last_problem_json = ?, updated_at_ms = ?
+                last_problem_json = CASE WHEN attempt_count >= ?
+                                         THEN ?
+                                         ELSE ? END,
+                updated_at_ms = ?
             WHERE status IN ('pending', 'leased')
-              AND attempt_count >= ?
+              AND (attempt_count >= ? OR lease_recovery_count >= ?)
               AND available_at_ms <= ?
               {kind_filter}
               AND (lease_expires_at_ms IS NULL OR lease_expires_at_ms <= ?)
@@ -1170,11 +1243,22 @@ class WorkflowLedgerRepository:
             UPDATE outbox_actions
             SET status = 'pending', lease_owner = NULL, lease_expires_at_ms = NULL,
                 available_at_ms = ?, last_problem_json = ?, updated_at_ms = ?,
-                attempt_count = CASE WHEN ? THEN 0 ELSE attempt_count END
+                attempt_count = CASE WHEN ? THEN 0 ELSE attempt_count END,
+                lease_recovery_count = CASE WHEN ? THEN 0
+                                            ELSE lease_recovery_count END
             WHERE action_id = ? AND status = 'leased' AND lease_owner = ?
               AND lease_expires_at_ms > ?
             """,
-            (retry_at_ms, problem_json, now_ms, 1 if reset_attempts else 0, action_id, owner, now_ms),
+            (
+                retry_at_ms,
+                problem_json,
+                now_ms,
+                1 if reset_attempts else 0,
+                1 if reset_attempts else 0,
+                action_id,
+                owner,
+                now_ms,
+            ),
         )
         return self.affected() > 0
 

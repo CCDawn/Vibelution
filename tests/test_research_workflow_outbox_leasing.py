@@ -172,7 +172,9 @@ def test_expired_lease_is_releasable(tmp_path: Path) -> None:
         assert blocked == []
         released = outbox_api.lease_ready_actions(store, owner="w2", now_ms=1100, lease_ms=100)
         assert len(released) == 1
-        assert released[0].attempt_count == 2
+        # 到期重领是同一逻辑 attempt 的基础设施恢复：不消耗 attempt 预算
+        # （recovery 由 lease_recovery_count 单独计数并有独立闸值）。
+        assert released[0].attempt_count == 1
     finally:
         store.close()
 
