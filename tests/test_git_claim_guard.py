@@ -216,6 +216,19 @@ def test_reference_transaction_allows_other_refs_without_permit(tmp_path: Path) 
     )
 
 
+def test_reference_transaction_allows_same_sha_repack_without_permit(
+    tmp_path: Path,
+) -> None:
+    root = _repo(tmp_path)
+    sha = _git(root, "rev-parse", "HEAD").stdout.strip()
+    for phase in ("preparing", "prepared", "committed"):
+        guard.check_reference_transaction(
+            root,
+            phase,
+            io.StringIO(f"{sha} {sha} refs/heads/main\n"),
+        )
+
+
 def test_main_permit_is_exact_expiring_and_one_use(tmp_path: Path) -> None:
     root = _repo(tmp_path)
     old_sha = _git(root, "rev-parse", "HEAD").stdout.strip()

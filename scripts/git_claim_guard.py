@@ -425,6 +425,13 @@ def check_reference_transaction(
     update = _main_update(lines)
     if update is None:
         return
+    if update[0] == update[1]:
+        # Value-preserving repack (e.g. git pack-refs / git gc rewriting
+        # refs/heads/main without moving it). There is no main movement to
+        # guard; blocking these aborts maintenance transactions and freezes
+        # packed-refs on a stale snapshot, which makes remote-tracking refs
+        # fall back to outdated values.
+        return
     payload = _read_permit(root_path)
     if update != (payload.get("oldSha"), payload.get("newSha")):
         raise ClaimGuardError("main_update_permit_mismatch")
