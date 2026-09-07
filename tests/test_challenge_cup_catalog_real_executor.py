@@ -1470,7 +1470,112 @@ def test_sweep_isolates_broken_envelope(
 
     assert summary["batchesScanned"] == 2
     assert summary["skipped"] == 1
+
+
+def test_sweep_offers_awaiting_approval_questions_to_adjudication(
+    harness: _Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _wire_sweep_defaults(harness, monkeypatch)
+    svc.reset_real_batch_sweep_throttle_for_tests()
+    svc.reset_real_batch_adjudication_cooldown_for_tests()
+    scene_events: list[dict] = []
+    monkeypatch.setattr(svc, "_record_real_batch_sweep_scene_event", scene_events.append)
+    offers: list[dict] = []
+
+    def executing_adjudicator(**kwargs):
+        offers.append(dict(kwargs))
+        # The real executor's effect: the formal review lands and the
+        # approved output becomes readable for the same-pass re-poll.
+        harness.approve("SCI-091", "real-1")
+        return {"decision": "executed"}
+
+    monkeypatch.setattr(svc, "attempt_capability_quietly", executing_adjudicator)
+
+    _start(harness, "real-1")
+    harness.set_run_status("SCI-091", "succeeded")
+
+    summary = svc.sweep_real_batches(force=True)
+
+    assert offers == [
+        {
+            "decision_point": "question_review",
+            "team_id": TEAM_ID,
+            "question_id": "SCI-091",
+            "payload": {"runId": "run-sci-091"},
+        }
+    ]
+    assert summary["adjudicated"] == 1
+    assert summary["polled"] == 2
+    assert summary["harvested"] == 2  # awaiting_human_approval + approved
+    assert summary["skipped"] == 0
+    state = svc._state_of(svc._load_envelope(TEAM_ID, "real-1"))
+    assert state.status("SCI-091") is QuestionStatus.SUCCEEDED
+    assert scene_events and scene_events[-1]["adjudicated"] == 1
+
+
+def test_sweep_adjudication_cooldown_bounds_repeated_offers(
+    harness: _Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _wire_sweep_defaults(harness, monkeypatch)
+    svc.reset_real_batch_sweep_throttle_for_tests()
+    svc.reset_real_batch_adjudication_cooldown_for_tests()
+    offers: list[dict] = []
+
+    def refusing_adjudicator(**kwargs):
+        offers.append(dict(kwargs))
+        return {
+            "decision": "skipped",
+            "reasonCode": "deterministic_evidence_gate_failed",
+        }
+
+    monkeypatch.setattr(svc, "attempt_capability_quietly", refusing_adjudicator)
+
+    _start(harness, "real-1")
+    harness.set_run_status("SCI-091", "succeeded")
+
+    first = svc.sweep_real_batches(force=True)
+    assert first["adjudicated"] == 0
+    assert first["polled"] == 1  # no executed decision -> no re-poll
+    assert len(offers) == 1
+
+    # The decisive skip parks the question for human review; the cooldown
+    # keeps the next sweep tick from re-offering (and re-auditing) it.
+    second = svc.sweep_real_batches(force=True)
+    assert second["polled"] == 1
+    assert len(offers) == 1
+
+    # The test seam resets the cooldown window; the next sweep re-offers.
+    svc.reset_real_batch_adjudication_cooldown_for_tests()
+    third = svc.sweep_real_batches(force=True)
+    assert third["polled"] == 1
+    assert len(offers) == 2
+
+
+def test_sweep_adjudication_without_an_active_policy_is_a_quiet_noop(
+    harness: _Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _wire_sweep_defaults(harness, monkeypatch)
+    svc.reset_real_batch_sweep_throttle_for_tests()
+    svc.reset_real_batch_adjudication_cooldown_for_tests()
+    offers: list[dict] = []
+
+    def no_policy_adjudicator(**kwargs):
+        offers.append(dict(kwargs))
+        return None
+
+    monkeypatch.setattr(svc, "attempt_capability_quietly", no_policy_adjudicator)
+
+    _start(harness, "real-1")
+    harness.set_run_status("SCI-091", "succeeded")
+
+    summary = svc.sweep_real_batches(force=True)
+
+    assert len(offers) == 1
+    assert summary["adjudicated"] == 0
     assert summary["polled"] == 1
+    assert summary["harvested"] == 1  # parked as awaiting_human_approval
+    state = svc._state_of(svc._load_envelope(TEAM_ID, "real-1"))
+    assert state.status("SCI-091") is QuestionStatus.BLOCKED
 
 
 def test_gate_progression_unlocks_after_previous_gate_completes(harness: _Harness) -> None:

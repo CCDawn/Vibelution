@@ -46,8 +46,12 @@ from ._validation import ContractValidationError
 AUTO_ADVANCE_POLICY_SCHEMA_VERSION = "2.0.0-preview.1"
 HUMAN_REVIEW_POLICY_SCHEMA_VERSION = "2.0.0-preview.1"
 
-# The five decision-#10 capability switches.  Unknown or missing switches are
-# rejected fail-closed; every switch is an explicit boolean (no implicit off).
+# The six capability switches: five frozen by decision #10/#12/#13 plus the
+# question-review auto-adjudication switch from the zero-human roadmap
+# (Phase 3b).  Unknown or missing switches are rejected fail-closed; every
+# switch is an explicit boolean (no implicit off).  Adding a switch invalidates
+# older policy documents (missing_capability) — they must be re-issued through
+# the supersedes path.
 AUTO_ADVANCE_CAPABILITIES: frozenset[str] = frozenset(
     {
         "autoCloseMeetingRound",
@@ -55,6 +59,7 @@ AUTO_ADVANCE_CAPABILITIES: frozenset[str] = frozenset(
         "autoStartEvidenceRepair",
         "autoConvergeQuestion",
         "autoAdvanceBatchGate",
+        "autoAdjudicateQuestionReview",
     }
 )
 
@@ -368,7 +373,7 @@ def _validated_capabilities(
             _error(
                 "missing_or_invalid",
                 "capabilities",
-                "must be an object with exactly the five capability switches",
+                "must be an object with exactly the six capability switches",
             )
         )
         return {}

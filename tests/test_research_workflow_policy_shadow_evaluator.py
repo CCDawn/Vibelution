@@ -532,6 +532,57 @@ def test_would_decide_table(shadow_policy: AutoAdvancePolicyV2) -> None:
             {"stageGates": {"g1": True}, "budgetExhausted": True},
             "hold",
         ),
+        # question_review / autoAdjudicateQuestionReview -> auto_adjudicate
+        # iff every deterministic evidence gate passed and the formal review
+        # is still undecided.
+        (
+            "question_review",
+            {
+                "schemaValidationPassed": True,
+                "citationValidationPassed": True,
+                "semanticValidationPassed": True,
+                "officialModelCallVerified": True,
+                "artifactHashConsistent": True,
+                "reviewAlreadyDecided": False,
+            },
+            "auto_adjudicate",
+        ),
+        (
+            "question_review",
+            {
+                "schemaValidationPassed": True,
+                "citationValidationPassed": False,
+                "semanticValidationPassed": True,
+                "officialModelCallVerified": True,
+                "artifactHashConsistent": True,
+                "reviewAlreadyDecided": False,
+            },
+            "hold",
+        ),
+        (
+            "question_review",
+            {
+                "schemaValidationPassed": True,
+                "citationValidationPassed": True,
+                "semanticValidationPassed": True,
+                "officialModelCallVerified": True,
+                "artifactHashConsistent": False,
+                "reviewAlreadyDecided": False,
+            },
+            "hold",
+        ),
+        (
+            "question_review",
+            {
+                "schemaValidationPassed": True,
+                "citationValidationPassed": True,
+                "semanticValidationPassed": True,
+                "officialModelCallVerified": True,
+                "artifactHashConsistent": True,
+                "reviewAlreadyDecided": True,
+            },
+            "hold",
+        ),
     ]
     for decision_point, context, expected in cases:
         decision = ev.evaluate_policy_shadow_decision(

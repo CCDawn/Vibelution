@@ -1142,3 +1142,240 @@ def test_batch_gate_refusal_is_a_recorded_skip(hf_env, monkeypatch) -> None:
     assert record["reasonCode"] == "previous_gate_incomplete"
     assert record["detail"]["planId"] == "real-5"
     assert calls == [{"confirmed": True}]
+
+
+# ---------------------------------------------------------------------------
+# question_review / autoAdjudicateQuestionReview
+# ---------------------------------------------------------------------------
+
+
+def _question_review_detail(validation: dict, review_status: str = "pending") -> dict:
+    """The immutable run-detail shape _execute_question_review re-verifies."""
+
+    return {
+        "record": {"validation": dict(validation)},
+        "output": {"audit": {"human_review_status": review_status}},
+    }
+
+
+_PASSING_VALIDATION = {
+    "schemaValidation": "passed",
+    "citationValidation": "passed",
+    "semanticValidation": "passed",
+    "officialModelCall": True,
+}
+
+
+def test_question_review_without_run_id_is_skipped(hf_env) -> None:
+    team_id, _ = hf_env
+    policy, payload = _injected_policy()
+
+    record = executor.attempt_capability(
+        decision_point="question_review",
+        team_id=team_id,
+        question_id=_QUESTION_ID,
+        policy=policy,
+        payload=payload,
+        calibration_verdict={"passed": True},
+    )
+    assert record["decision"] == "skipped"
+    assert record["reasonCode"] == "run_id_missing"
+    assert record["capability"] == "autoAdjudicateQuestionReview"
+
+
+def test_question_review_executes_approval_with_system_actor(
+    hf_env, monkeypatch
+) -> None:
+    team_id, _ = hf_env
+    policy, payload = _injected_policy()
+
+    from core.web.services.team_workflow import challenge_question_runs
+
+    review_calls: list[dict] = []
+
+    def fake_detail(team_id_arg, question_id, *, run_id, **_kwargs):
+        return _question_review_detail(dict(_PASSING_VALIDATION))
+
+    def fake_review(team_id_arg, question_id, run_id, submission):
+        review_calls.append(
+            {
+                "teamId": team_id_arg,
+                "questionId": question_id,
+                "runId": run_id,
+                "submission": submission,
+            }
+        )
+        return {"output": {"audit": {"human_review_status": "approved"}}}
+
+    monkeypatch.setattr(
+        challenge_question_runs, "get_challenge_question_run_detail", fake_detail
+    )
+    monkeypatch.setattr(
+        challenge_question_runs, "review_challenge_question_output", fake_review
+    )
+
+    record = executor.attempt_capability(
+        decision_point="question_review",
+        team_id=team_id,
+        question_id=_QUESTION_ID,
+        policy=policy,
+        payload={**payload, "runId": "run-sci-096"},
+        calibration_verdict={"passed": True},
+    )
+    assert record["decision"] == "executed"
+    assert record["capability"] == "autoAdjudicateQuestionReview"
+    assert record["detail"]["questionId"] == _QUESTION_ID
+    assert record["detail"]["runId"] == "run-sci-096"
+    assert record["detail"]["reviewer"] == _SYSTEM_ACTOR
+    assert record["detail"]["humanReviewStatus"] == "approved"
+    assert len(review_calls) == 1
+    submitted = review_calls[0]["submission"]
+    assert submitted["reviewer"] == _SYSTEM_ACTOR
+    assert policy.policyId in submitted["rationale"]
+    assert submitted["decisions"] == {
+        "H1_problem_understanding": "approved",
+        "H2_hypothesis_selection": "approved",
+        "H3_research_plan": "approved",
+        "H4_external_output": "approved",
+    }
+
+
+def test_question_review_records_evidence_gate_failure_without_executing(
+    hf_env, monkeypatch
+) -> None:
+    team_id, _ = hf_env
+    policy, payload = _injected_policy()
+
+    from core.web.services.team_workflow import challenge_question_runs
+
+    review_calls: list[dict] = []
+
+    def fake_detail(team_id_arg, question_id, *, run_id, **_kwargs):
+        broken = dict(_PASSING_VALIDATION)
+        broken["citationValidation"] = "failed"
+        return _question_review_detail(broken)
+
+    monkeypatch.setattr(
+        challenge_question_runs, "get_challenge_question_run_detail", fake_detail
+    )
+    monkeypatch.setattr(
+        challenge_question_runs,
+        "review_challenge_question_output",
+        lambda *args, **kwargs: review_calls.append(args),
+    )
+
+    record = executor.attempt_capability(
+        decision_point="question_review",
+        team_id=team_id,
+        question_id=_QUESTION_ID,
+        policy=policy,
+        payload={**payload, "runId": "run-sci-096"},
+        calibration_verdict={"passed": True},
+    )
+    assert record["decision"] == "skipped"
+    assert record["reasonCode"] == "deterministic_evidence_gate_failed"
+    assert record["detail"]["failedGates"] == ["citationValidationPassed"]
+    assert review_calls == []
+
+
+def test_question_review_never_overwrites_an_already_decided_review(
+    hf_env, monkeypatch
+) -> None:
+    team_id, _ = hf_env
+    policy, payload = _injected_policy()
+
+    from core.web.services.team_workflow import challenge_question_runs
+
+    review_calls: list[dict] = []
+
+    def fake_detail(team_id_arg, question_id, *, run_id, **_kwargs):
+        # A human reviewer already approved this output.
+        return _question_review_detail(
+            dict(_PASSING_VALIDATION), review_status="approved"
+        )
+
+    monkeypatch.setattr(
+        challenge_question_runs, "get_challenge_question_run_detail", fake_detail
+    )
+    monkeypatch.setattr(
+        challenge_question_runs,
+        "review_challenge_question_output",
+        lambda *args, **kwargs: review_calls.append(args),
+    )
+
+    record = executor.attempt_capability(
+        decision_point="question_review",
+        team_id=team_id,
+        question_id=_QUESTION_ID,
+        policy=policy,
+        payload={**payload, "runId": "run-sci-096"},
+        calibration_verdict={"passed": True},
+    )
+    assert record["decision"] == "skipped"
+    assert record["reasonCode"] == "review_already_decided"
+    assert record["detail"]["humanReviewStatus"] == "approved"
+    assert review_calls == []
+
+
+def test_question_review_run_detail_failure_is_a_recorded_skip(
+    hf_env, monkeypatch
+) -> None:
+    team_id, _ = hf_env
+    policy, payload = _injected_policy()
+
+    from core.web.services.team_workflow import challenge_question_runs
+
+    def refusing_detail(team_id_arg, question_id, *, run_id, **_kwargs):
+        raise ValueError("artifact hash mismatch against the index record")
+
+    monkeypatch.setattr(
+        challenge_question_runs, "get_challenge_question_run_detail", refusing_detail
+    )
+
+    record = executor.attempt_capability(
+        decision_point="question_review",
+        team_id=team_id,
+        question_id=_QUESTION_ID,
+        policy=policy,
+        payload={**payload, "runId": "run-sci-096"},
+        calibration_verdict={"passed": True},
+    )
+    assert record["decision"] == "skipped"
+    assert record["reasonCode"] == "run_detail_unavailable"
+    assert "artifact hash mismatch" in record["detail"]["reason"]
+
+
+def test_question_review_refused_review_path_is_a_recorded_skip(
+    hf_env, monkeypatch
+) -> None:
+    team_id, _ = hf_env
+    policy, payload = _injected_policy()
+
+    from core.web.services.team_workflow import challenge_question_runs
+
+    monkeypatch.setattr(
+        challenge_question_runs,
+        "get_challenge_question_run_detail",
+        lambda *args, **kwargs: _question_review_detail(dict(_PASSING_VALIDATION)),
+    )
+
+    def refusing_review(team_id_arg, question_id, run_id, submission):
+        raise ValueError("run not fully validated for formal review")
+
+    monkeypatch.setattr(
+        challenge_question_runs,
+        "review_challenge_question_output",
+        refusing_review,
+    )
+
+    record = executor.attempt_capability(
+        decision_point="question_review",
+        team_id=team_id,
+        question_id=_QUESTION_ID,
+        policy=policy,
+        payload={**payload, "runId": "run-sci-096"},
+        calibration_verdict={"passed": True},
+    )
+    assert record["decision"] == "skipped"
+    assert record["reasonCode"] == "review_refused"
+    assert "not fully validated" in record["detail"]["reason"]

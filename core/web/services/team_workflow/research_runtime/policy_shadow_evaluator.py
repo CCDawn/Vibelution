@@ -225,6 +225,23 @@ def _evaluate_batch_gate_gates(context: Mapping[str, Any]) -> list[dict[str, Any
     ]
 
 
+def _evaluate_question_review_gates(context: Mapping[str, Any]) -> list[dict[str, Any]]:
+    return [
+        _gate("schemaValidationPassed", _context_bool(context, "schemaValidationPassed")),
+        _gate("citationValidationPassed", _context_bool(context, "citationValidationPassed")),
+        _gate("semanticValidationPassed", _context_bool(context, "semanticValidationPassed")),
+        _gate("officialModelCallVerified", _context_bool(context, "officialModelCallVerified")),
+        _gate(
+            "artifactHashConsistent",
+            _context_bool(context, "artifactHashConsistent"),
+        ),
+        _gate(
+            "reviewNotYetDecided",
+            not _context_bool(context, "reviewAlreadyDecided"),
+        ),
+    ]
+
+
 def _evaluate_gates(
     policy: AutoAdvancePolicyV2, decision_point: str, context: Mapping[str, Any]
 ) -> list[dict[str, Any]]:
@@ -238,6 +255,8 @@ def _evaluate_gates(
         return _evaluate_converge_question_gates(context)
     if decision_point == "batch_gate":
         return _evaluate_batch_gate_gates(context)
+    if decision_point == "question_review":
+        return _evaluate_question_review_gates(context)
     raise PolicyShadowEvaluationError(
         f"unsupported policy shadow decision point: {decision_point!r}",
         code="unsupported_decision_point",
@@ -260,6 +279,8 @@ def _would_decide_payload(
         payload["roundId"] = str(context.get("roundId") or "").strip()
     elif decision_point == "meeting_close":
         payload["meetingRoundId"] = str(context.get("meetingRoundId") or "").strip()
+    elif decision_point == "question_review":
+        payload["runId"] = str(context.get("runId") or "").strip()
     for entry in evidence:
         if entry.get("gateId") == "capabilityEnabled":
             continue

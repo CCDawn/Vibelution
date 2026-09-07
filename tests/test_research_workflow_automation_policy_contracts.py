@@ -141,6 +141,7 @@ def _auto_advance_v2_payload() -> dict:
         "executionMode": "shadow",
         "createdAt": "2026-08-28T00:00:00+08:00",
         "capabilities": {
+            "autoAdjudicateQuestionReview": False,
             "autoAdvanceBatchGate": False,
             "autoCloseMeetingRound": False,
             "autoConvergeQuestion": False,
@@ -301,6 +302,7 @@ def test_valid_auto_advance_v2_candidate_passes_validation_and_roundtrips() -> N
     assert policy.status == "candidate_pending_approval"
     assert policy.executionMode == "shadow"
     assert policy.capabilities == {
+        "autoAdjudicateQuestionReview": False,
         "autoAdvanceBatchGate": False,
         "autoCloseMeetingRound": False,
         "autoConvergeQuestion": False,

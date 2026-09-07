@@ -83,7 +83,7 @@ SYSTEM_ACTOR_PREFIX = "system:auto-advance:"
 # human decision for a policy to automate — inventing a repair loop is a
 # separate design task.
 EXECUTABLE_DECISION_POINTS = frozenset(
-    {"meeting_close", "candidate_selection", "converge_question", "batch_gate"}
+    {"meeting_close", "candidate_selection", "converge_question", "batch_gate", "question_review"}
 )
 NOT_IMPLEMENTED_DECISION_POINTS = frozenset(
     {"evidence_repair"}
@@ -782,6 +782,125 @@ def _execute_batch_gate(
     }
 
 
+def _execute_question_review(
+    team_id: str,
+    *,
+    question_id: str,
+    run_id: str,
+    policy: AutoAdvancePolicyV2,
+) -> dict[str, Any]:
+    """Auto-adjudicate one awaiting-review question through the formal review path.
+
+    The deterministic evidence gates of the tournament adjudicator's first
+    slice (roadmap Phase 3b §5.1-1): the immutable run record must show every
+    machine-verifiable check green — schema, citation and semantic validation
+    passed, the official model call verified, and the artifact hash consistent
+    with its index record (re-verified by ``get_challenge_question_run_detail``).
+    Only when every gate passes does the executor press the same
+    ``review_challenge_question_output`` button a human reviewer would, with
+    the honest system actor as reviewer — never a disguised
+    ``human_approved`` identity.  Any missing or failed evidence is a
+    recorded skip (fail-closed); the question stays awaiting human review.
+    """
+
+    from core.web.services.team_workflow import challenge_question_runs
+
+    normalized_question = str(question_id or "").strip().upper()
+    normalized_run = str(run_id or "").strip()
+    if not normalized_question:
+        raise _PointSkip("question_id_missing")
+    if not normalized_run:
+        raise _PointSkip("run_id_missing")
+    try:
+        detail = challenge_question_runs.get_challenge_question_run_detail(
+            team_id, normalized_question, run_id=normalized_run
+        )
+    except ValueError as exc:
+        # Not registered / artifact mismatch: the evidence chain itself is
+        # broken, so the adjudication fail-closes instead of guessing.
+        raise _PointSkip(
+            "run_detail_unavailable", {"reason": str(exc)[:500]}
+        ) from exc
+    record = detail.get("record") if isinstance(detail.get("record"), Mapping) else {}
+    output = detail.get("output") if isinstance(detail.get("output"), Mapping) else {}
+    validation = (
+        record.get("validation") if isinstance(record.get("validation"), Mapping) else {}
+    )
+    review_status = str(
+        (output.get("audit") or {}).get("human_review_status")
+        or (output.get("review") or {}).get("human_review_status")
+        or ""
+    ).strip()
+    if review_status and review_status != "pending":
+        # Already decided (by a human or a prior automation pass): never
+        # overwrite an existing formal review decision.
+        raise _PointSkip("review_already_decided", {"humanReviewStatus": review_status})
+    failed_gates = [
+        gate_name
+        for gate_name, passed in (
+            ("schemaValidationPassed", validation.get("schemaValidation") == "passed"),
+            ("citationValidationPassed", validation.get("citationValidation") == "passed"),
+            ("semanticValidationPassed", validation.get("semanticValidation") == "passed"),
+            ("officialModelCallVerified", validation.get("officialModelCall") is True),
+        )
+        if not passed
+    ]
+    if failed_gates:
+        raise _PointSkip(
+            "deterministic_evidence_gate_failed",
+            {"failedGates": failed_gates},
+        )
+    rationale = (
+        f"auto-advance: policy {policy.policyId} v{policy.version} auto-adjudicated "
+        "the formal review after every deterministic evidence gate passed "
+        "(schema, citation, semantic, official model call; artifact hash "
+        "re-verified against the immutable index record)"
+    )
+    try:
+        result = challenge_question_runs.review_challenge_question_output(
+            team_id,
+            normalized_question,
+            normalized_run,
+            {
+                "reviewer": system_actor_for(policy),
+                "rationale": rationale,
+                "decisions": {
+                    "H1_problem_understanding": "approved",
+                    "H2_hypothesis_selection": "approved",
+                    "H3_research_plan": "approved",
+                    "H4_external_output": "approved",
+                },
+            },
+        )
+    except ValueError as exc:
+        # The review path re-runs its own fail-closed validation (only fully
+        # validated official-model candidates may enter review); a refusal is
+        # a recorded skip, never a bypass.
+        raise _PointSkip(
+            "review_refused", {"reason": str(exc)[:500]}
+        ) from exc
+    reviewed_output = (
+        result.get("output") if isinstance(result.get("output"), Mapping) else {}
+    )
+    return {
+        "questionId": normalized_question,
+        "runId": normalized_run,
+        "reviewer": system_actor_for(policy),
+        "humanReviewStatus": str(
+            (reviewed_output.get("audit") or {}).get("human_review_status") or ""
+        ),
+        "decisions": {
+            key: "approved"
+            for key in (
+                "H1_problem_understanding",
+                "H2_hypothesis_selection",
+                "H3_research_plan",
+                "H4_external_output",
+            )
+        },
+    }
+
+
 # ---------------------------------------------------------------------------
 # dispatch entry
 
@@ -937,6 +1056,13 @@ def attempt_capability(
                 detail = _execute_batch_gate(
                     normalized_team_id,
                     plan_id=str((payload or {}).get("planId") or "").strip(),
+                )
+            elif point == "question_review":
+                detail = _execute_question_review(
+                    normalized_team_id,
+                    question_id=normalized_question,
+                    run_id=str((payload or {}).get("runId") or "").strip(),
+                    policy=active_policy,
                 )
             else:  # converge_question
                 detail = _execute_converge_question(

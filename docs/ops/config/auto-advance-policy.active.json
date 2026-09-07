@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0.0",
   "policyId": "cc-auto-advance-policy-002",
-  "version": "2.0.0-approved.1",
+  "version": "2.1.0-approved.1",
   "status": "approved",
   "executionMode": "active",
   "createdAt": "2026-09-02T00:00:00+08:00",
@@ -10,7 +10,8 @@
     "autoCloseMeetingRound": true,
     "autoConvergeQuestion": true,
     "autoSelectCandidates": true,
-    "autoStartEvidenceRepair": true
+    "autoStartEvidenceRepair": true,
+    "autoAdjudicateQuestionReview": true
   },
   "candidateSelection": {
     "maxSelected": 2,
@@ -46,6 +47,7 @@
       "label": "full_auto",
       "description": "in-question and between-batch auto advance",
       "displayCapabilities": [
+        "autoAdjudicateQuestionReview",
         "autoAdvanceBatchGate",
         "autoCloseMeetingRound",
         "autoConvergeQuestion",
@@ -83,12 +85,12 @@
   },
   "supersedes": {
     "policyId": "cc-auto-advance-policy-002",
-    "supersededVersion": "2.0.0-candidate.1",
+    "supersededVersion": "2.0.0-approved.1",
     "supersededFields": [
-      "status",
-      "executionMode",
-      "approval",
-      "candidateSelection"
+      "capabilities",
+      "uiPresets",
+      "version",
+      "approval"
     ]
   },
   "activationRequires": "explicit approval recorded against policyId + version + contentHash; a hash change starts a new checkpoint generation; the G12 calibration gate requires persisted decision-#13 judgement records (g12-calibration REST entry) and stays fail-closed without them",
@@ -99,8 +101,8 @@
     "approvedBy": [
       "operator"
     ],
-    "frozenAt": "2026-09-02T00:00:00+08:00",
-    "contentHash": "70B57F5E47BEC8C4494620C6990FEF5973E0214BAF8F1ADC471BB98BDA952B05",
+    "frozenAt": "2026-09-07T15:47:46+08:00",
+    "contentHash": "FA0361A52A217541FBD546E8E221AF68F0366AC994924BD8DF763B0714548923",
     "contentHashRule": "sha256 over canonical JSON (sort_keys=True, separators=(',', ':'), ensure_ascii=False) with contentHash set to null; uppercase hex"
   }
 }

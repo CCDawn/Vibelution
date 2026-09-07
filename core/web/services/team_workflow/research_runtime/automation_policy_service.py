@@ -41,6 +41,10 @@ CAPABILITY_DESCRIPTIONS: dict[str, str] = {
     "autoStartEvidenceRepair": "start an evidence repair pass automatically on detected gaps",
     "autoConvergeQuestion": "converge a question automatically when all hard gates pass",
     "autoAdvanceBatchGate": "advance a batch gate automatically between questions",
+    "autoAdjudicateQuestionReview": (
+        "adjudicate a pending question review automatically when every "
+        "deterministic evidence gate passes"
+    ),
 }
 
 DRAIN_MODE_DESCRIPTIONS: dict[str, str] = {

@@ -35,7 +35,7 @@ from ._validation import ContractValidationError
 
 POLICY_SHADOW_SCHEMA_VERSION = "1"
 
-# The five real decision points (one per capability switch, frozen mapping).
+# The six real decision points (one per capability switch, frozen mapping).
 POLICY_SHADOW_DECISION_POINTS: frozenset[str] = frozenset(
     {
         "meeting_close",
@@ -43,6 +43,7 @@ POLICY_SHADOW_DECISION_POINTS: frozenset[str] = frozenset(
         "evidence_repair",
         "converge_question",
         "batch_gate",
+        "question_review",
     }
 )
 
@@ -52,6 +53,7 @@ POLICY_SHADOW_CAPABILITY_FOR_POINT: dict[str, str] = {
     "evidence_repair": "autoStartEvidenceRepair",
     "converge_question": "autoConvergeQuestion",
     "batch_gate": "autoAdvanceBatchGate",
+    "question_review": "autoAdjudicateQuestionReview",
 }
 
 # The action the system policy would take when the switch is enabled and all
@@ -63,6 +65,7 @@ POLICY_SHADOW_ACTION_FOR_POINT: dict[str, str] = {
     "evidence_repair": "auto_repair",
     "converge_question": "auto_converge",
     "batch_gate": "auto_gate",
+    "question_review": "auto_adjudicate",
 }
 
 POLICY_SHADOW_AUTO_ACTIONS: frozenset[str] = frozenset(
