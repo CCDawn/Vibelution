@@ -57,3 +57,9 @@
 - 再查 SCI-011 父/知识子运行的冻结路由：搜索为 Flash，提炼/整合/修订为 Plus，评估为 Max；实际两个 finding session 的用量回执均为 Flash。未运行的后续节点只证明冻结配置。
 - 前端首版已交回选择入口及单一 canonical action 校验；主 Agent 核查后端 pending 前置条件明确要求正式候选少于两个，不能凭推测删除 phase fence。外层 Inspector 路由、会议刷新与第一阶段进度正在补充限定验收。
 - 来源排除的独立缺陷已确认：DataRecord 按既有 exclusion store 过滤，但 `_source_collection_candidates_for_run` 和 finding canonical candidate reader 未使用该决定。主 Agent已在 CandidateStore owner 新增同一主题/身份的活跃过滤，并接入下游候选消费；历史 authority list 保持原始记录。隔离测试中错误 DOI 排除后正确 DOI 仍可用、旧候选与纠正证据仍保留、其他主题不受影响、仅缺回执不被自动排除；2 项新测试与 3 项原排除/质量回归通过。待来源 Agent 交付后串行接入 finding receipt reader；活数据仍未处理。
+
+## 持久化中断与第三轮主审
+
+- 主 Agent 独立注入五个持久化边界：DataRecord 写入前失败、写入后响应丢失、candidate 导入前失败、导入后响应丢失、最终 task 保存失败。使用隔离实际文件存储，固定搜索投影，不调用模型。相同批次恢复并再次重放后均为一条 DataRecord、一条候选、一批预算；保存的 lineage 可对上候选 ID。5 项通过，因此不新建事务框架。此证据仅覆盖同一批次重放，不宣称跨多个 JSON 文件原子提交，也不等于 SCI-011 活数据已恢复。
+- 来源分组主审再次定位到旧平铺回执的 union fallback：一个不含 DOI 的 A URL 与另一个 B DOI 可混为同一候选，并因只有一个 DOI 通过。已要求删除该兼容推断；没有逐 result 映射的旧回执只能用 locator 自身可规范化的同一身份，不能猜测 A URL 与 B DOI 同源。
+- 前端主审发现无 canonical action 时隐藏全部正式候选会丢失已选定后的只读回看能力。已要求复用原列表的 committed/locked projection；缺动作禁止提交，正式候选仍可查看，只有 R0/无正式候选进入等待态。
