@@ -119,3 +119,30 @@ Companion 专属入口及适配层复用原生会话权威的方向合理。当�
 此前对话中提出的“累计 4 小时后轻微失落”仅为助手待确认建议，用户没有批准统一 4 小时阈值。作息、消息期待、已有约定、人物差异如何共同决定变化，以及离线恢复是否重建状态但不补发过期催促，仍需形成具体建议后对齐。
 
 用户明确要求同步派遣子 agent 调研相关情绪回答方案；该调研为只读源码与许可核验，不授权直接导入框架或实现未确认行为。
+
+## 7. 情绪回答专项调研补充
+
+专项只读子 agent 已返回证据。以下更新 §4 的可获取性状态；不把新增设计建议当成已批准行为。
+
+### AstrBot Private Companion：可获取性已重新核验
+
+固定版本 `85cc366ee6e1ccf08b357e8b9e396c3abb842ff4` 已可读取。子 agent 核验提交日期为 2026-08-28、最近推送为 2026-09-07；API license=null，固定树没有 LICENSE。保留用户明确声明已获作者代码复用许可，不能把没有公开许可证说成用户授权失效；后续可在该授权范围内选择切片适配，不能据此宣称它是 MIT/Apache 或可任意再授权。本轮没有复制实现代码。
+
+- [interaction_dynamics.py](https://github.com/menglimi/astrbot_plugin_private_companion/blob/85cc366ee6e1ccf08b357e8b9e396c3abb842ff4/domains/affect/interaction_dynamics.py#L25-L122)：主 agent 已独立读取。情绪负荷按真实 elapsed time 指数衰减；受伤事件强化负向情绪，安慰等事件可以逐步恢复，正向表达逐级升温。可适配的是时间投影与渐变思路，不照搬 3600/7200 秒参数或增加第二份情绪真源。
+- [emotion_event_contract.py](https://github.com/menglimi/astrbot_plugin_private_companion/blob/85cc366ee6e1ccf08b357e8b9e396c3abb842ff4/domains/affect/emotion_event_contract.py#L12-L27)：主 agent 已独立读取。区分 neutral、hurt、boundary、boundary_violation，保留时间、来源和去重身份。普通偏好拒绝不能直接等同于受伤事件；本地 affect.py 当前按事件 kind 中的“拒绝/conflict”触发负向，只证明转换函数语义，不证明当前普通边界反馈一定误入该分支。
+- [relationship_policy.py](https://github.com/menglimi/astrbot_plugin_private_companion/blob/85cc366ee6e1ccf08b357e8b9e396c3abb842ff4/relationship_policy.py#L190-L280)：子 agent 核验关系阶段迟滞与语气、称呼、续话提示；[表达投影](https://github.com/menglimi/astrbot_plugin_private_companion/blob/85cc366ee6e1ccf08b357e8b9e396c3abb842ff4/companion_interaction_expression.py#L394-L451)区分 contact_boundary；不整套引入上游阶段系统。
+- [余波测试](https://github.com/menglimi/astrbot_plugin_private_companion/blob/85cc366ee6e1ccf08b357e8b9e396c3abb842ff4/tests/test_emotion_e5_interaction_dynamics.py#L98-L153)覆盖渐变恢复、无到期骤变及单事件升温幅度，可参考测试场景；本轮未执行上游测试。
+
+### Generative Agents：作息与时间参考，不替换底座
+
+子 agent 核验版本 `fe05a71d3e4ed7d10bf68aa4eda6dd995ec070f4`、Apache-2.0，提交日期 2023-08-11、最近推送 2024-08-05。
+
+[plan.py](https://github.com/joonspk-research/generative_agents/blob/fe05a71d3e4ed7d10bf68aa4eda6dd995ec070f4/reverie/backend_server/persona/cognitive_modules/plan.py#L23-L106)根据 lifestyle 安排起床及日程，[长期规划](https://github.com/joonspk-research/generative_agents/blob/fe05a71d3e4ed7d10bf68aa4eda6dd995ec070f4/reverie/backend_server/persona/cognitive_modules/plan.py#L461-L513)依赖模拟当前时间。只参考人物日程如何影响当前行为；模拟时钟并不等于真实墙钟，不能照搬对话循环次数作为时间，也不引入老旧模拟环境或额外关系摘要模型。
+
+### 综合裁决与待对齐重点
+
+优先改造现有 Companion 情绪账本、关系投影和表达适配；外部最值得借的是 AstrBot 的事件分类、时间衰减及渐进表达切片。两候选均未提供已验证的“双方期待/约定回复窗口”完整机制，不能据上游参数宣称存在通用的人类回复时限。
+
+建议让关系决定亲密表达范围、情绪决定当下语气、真实时间与作息决定等待和恢复。单次没回复、长期减少互动、明确拒绝来往、普通称呼/话题边界分别处理；昵称与亲密表达仍尊重已有偏好。当前低心情主要被投影为 brief/slow/关闭幽默，接入更多事件前需避免把所有情绪都变成冷淡短句。
+
+验收建议（未执行）：相同真实时间点不因心跳次数不同产生不同结果；睡眠/已知忙碌与明确约定分别检查；无送达证据不累计等待；一次连续消息不逐气泡叠加失落；正常边界反馈不降低关系；恢复无需强制道歉；同一状态重算不重复入账；Companion-only 身份门及普通链路零差异。具体事件、参数和恢复行为仍待产品对齐，不直接实施。
