@@ -1,396 +1,119 @@
-# Vibelution
+<p align="center">
+  <img src="docs/assets/readme/vibelution-showcase.png" alt="Vibelution — 本地多 Agent 协作工作台。让 Agent 分工，让协作看得见。" width="100%">
+</p>
 
-![Vibelution](docs/assets/readme/vibelution-github-hero.png)
+<p align="center"><strong>组织你的 AI 团队，从分工、讨论到执行与评审。</strong></p>
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/Python-3.11%2B-green.svg)](https://www.python.org/)
-[![React](https://img.shields.io/badge/Frontend-React%20%2B%20Vite-61dafb.svg)](web/)
-[![本地优先](https://img.shields.io/badge/Local--First-%E6%9C%AC%E5%9C%B0%E4%BC%98%E5%85%88-brightgreen.svg)](#隐私与安全)
+<p align="center">
+  中文 · <a href="README.en.md">English</a><br>
+  <a href="#多-agent-如何一起工作">多 Agent 协作</a> · <a href="#看一支科研团队如何工作">挑战杯演示</a> · <a href="#从协作能力长出来的小产品">附加产品</a> · <a href="#开始使用">开始使用</a>
+</p>
 
-本地优先的 AI Agent 工作台：把编码会话、科研团队、Git 证据、监督评测与运行态证据收进同一个**本机控制室**；仓库、配置与密钥默认只留在你自己的机器上。
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/Code-MIT-38bdae?style=flat-square" alt="代码许可证：MIT"></a>
+  <a href="docs/guides/install-windows.md"><img src="https://img.shields.io/badge/Desktop-Windows-4979e8?style=flat-square" alt="Windows 桌面工作台"></a>
+  <a href="https://github.com/CCDawn/Vibelution/issues"><img src="https://img.shields.io/badge/Feedback-welcome-f2b36d?style=flat-square" alt="欢迎反馈"></a>
+</p>
 
-当前版本 **1.1.2**（见 [VERSION](VERSION) · [CHANGELOG.md](CHANGELOG.md)）。
+一个复杂任务，往往需要不同的角色：有人搜集资料，有人提出方案，有人负责执行，也有人检查结果。
 
-[快速开始](#快速开始) · [当前能力](#当前能力) · [Windows 安装](docs/guides/install-windows.md) · [Agent 开发](#agent-开发) · [LICENSE](LICENSE)
+**Vibelution 是一个本地多 Agent 协作工作台。** 你可以为角色配置模型、工具与技能，把任务组织成团队和工作流，在同一个界面里查看讨论、执行过程与交接产物。挑战杯科研团队是这套能力的实际应用；虚拟人和桌宠则是基于工作台探索的附加产品。
 
-## 为什么 Vibelution
+## 多 Agent 如何一起工作
 
-- **一个本地控制室**：编码会话、科研团队、Git 证据、监督评测与运行态证据都收进同一套本机工作台，不必在多工具间来回切换。
-- **证据驱动的工作流**：会话、评测与运行都留下可审计的日志与证据，改进有据可查。
-- **本地所有权与控制**：仓库、配置与密钥默认只留本机；外部 `config.toml` 里的密钥不进 git 仓库。
+![研究画布历史回放：任务节点与前后环节的交接关系](docs/assets/readme/research-workflow.png)
 
-## 当前能力
+### 分工清楚，过程看得见
 
-| 面 | 做什么 |
-| --- | --- |
-| Chat | 多会话编码协作，群聊入口、消息流、停/续、工具与 Prompt 装配侧栏 |
-| Agent | 注册表、提示词、工具与技能边界、模型槽位、权限 |
-| Teams | 科研团队壳 + **运行态工作流画布**（知识搜集 → 实验设计 → 执行迭代；Agent / 人工门禁 / 系统 / 决策节点；条件分支与 Inspector） |
-| Memory | 知识库、图谱与治理入口 |
-| Git | 顶栏状态、diff、选文件提交、commit message 草稿 |
-| Self Evolution | 有边界的自检 / 自改，带审计和回滚记录 |
-| Supervised Evolution | dataset / bundle 对比、run、提案和建议基线 |
-| Runtime Scenes | 按次打包前后端、浏览器、生命周期日志，方便查卡住或失败 |
-| Config / Reset / Pet | 模型与运行配置、白名单清理、陪伴体状态 |
+- **先组队：** 为 Agent 指定角色，配置各自的提示词、模型、工具与技能，让不同任务由合适的成员承担。
+- **再串起任务：** 用工作流画布组织节点、条件分支和人工确认环节，查看前后步骤如何交接。
+- **一起讨论和执行：** 在会话中查看成员讨论、工具调用和任务状态；需要时停止、继续或由人接手。
+- **把产物留下来：** 将资料、知识关系、假说和评审记录放回工作流程，方便下一步使用和回看。
 
-默认按本机 workbench 用。Windows 最终用户见下方 [快速开始 · 最终用户](#最终用户windows推荐)；开发者见 [开发者路径](#开发者路径)。没有零安装的在线 SaaS 形态。Phase 2 规划便携包（内嵌运行时），见 [docs/product/2026-08-06-windows-end-user-install.md](docs/product/2026-08-06-windows-end-user-install.md)。
+你不必为每个 Agent 分别翻找聊天窗口，也不必只等一个最终答案。团队现在走到哪里、哪一步需要你，都应该能在工作台里找到。
 
-## 运行模式
+## 看一支科研团队如何工作
 
-| 模式 | 作用 | 常用入口 |
-| --- | --- | --- |
-| `chat` | 日常对话式编码协作、文件阅读、会话状态管理 | Web `/chat` 或 `python agent.py --mode chat` |
-| `self_evolution` | 在当前仓库内执行有界自检、自修改、验证和回滚记录 | Web `/self-evolution` 或 headless 模式 |
-| `supervised_evolution` | 用 dataset / bundle 比较 baseline 与 candidate，生成决策、lineage 和 proposal | Web `/supervised-evolution` 或 CLI 参数 |
+### 挑战杯：从一个问题，到可讨论、可追溯的研究方案
 
-模式定义与策略入口位于 [core/orchestration/agent_modes.py](core/orchestration/agent_modes.py)。
+[![点击观看挑战杯演示：研究画布、团队讨论与知识图谱](docs/assets/readme/challenge-cup-preview.gif)](docs/assets/readme/challenge-cup-demo.mp4)
 
-## 项目结构
+**[▶ 观看完整演示 · 2 分 37 秒 · 1080p](docs/assets/readme/challenge-cup-demo.mp4)** · [下载 MP4](docs/assets/readme/challenge-cup-demo.mp4?raw=true) · [放大查看图谱](docs/assets/readme/challenge-cup-graph.png)
 
-```text
-Vibelution/
-├── agent.py                    # Agent 主入口与主循环编排
-├── config/                     # 配置模型库、provider、runtime defaults 与 public config 同步
-├── core/
-│   ├── chat/                   # Chat session、结果格式与任务状态
-│   ├── evaluation/             # 监督进化、dataset registry、dashboard、chat case review
-│   ├── gym/                    # proposal lifecycle、advisory baseline、promotion 记录
-│   ├── infrastructure/         # session、tool executor、git memory、security、workspace
-│   ├── orchestration/          # 模式策略、委托、输出边界、回合收束
-│   ├── prompt_manager/         # prompt 组装、任务分析、代码库地图
-│   ├── runtime_manager/        # Web workbench 与运行进程生命周期
-│   ├── web/                    # FastAPI app、routes、services
-│   └── logging/                # transcript、tool tracker、runtime scene 日志
-├── tools/                      # Agent 可见工具与内部工具封装
-├── docs/                       # 文档地图：standards / product / ops / adr / archive
-├── web/                        # React + Vite 前端工程
-├── workspace/                  # 本地运行态产物、evaluation 数据和日志
-├── tests/                      # Python 测试套件
-├── scripts/                    # launcher、install、migrate_project_storage 等
-└── .worktrees/                 # 任务 worktree 池（gitignored）
-```
+不同角色围绕同一个问题讨论、搜集资料、提取内容、建立知识关系，再提出和评审研究假说。视频把这些环节串成一段完整的展示：
 
-项目记忆不在仓库树里当现行目录：先跑 `python scripts/migrate_project_storage.py inventory`，再读 `activePaths.memory`。`.docs/project-memory/` 仅迁移前只读兼容。
+**研究画布 → 团队讨论 → 资料搜集与提炼 → 知识图谱 → 交接记录 → 假说与评审修订。**
 
-## 快速开始
+这段 SCI-003 历史回放保留了 **21 个节点、56 条关系**，并展示一条具体假说修改前后的区别。沿着图谱连线，可以看到结论关联的来源资料。
 
-### 最终用户（Windows，推荐）
+> 录制于 2026-09-08，使用已确认的真实历史数据回放展示页，带配音和字幕。它展示研究过程，不代表现场重新执行、假说已被实验验证或比赛已正式验收。
 
-目标：尽量少步骤打开本机工作台并开始对话配置。详细步骤见 **[docs/guides/install-windows.md](docs/guides/install-windows.md)**。
+[了解研究工作流](core/web/services/team_workflow/README.md)
 
-**Phase 1 前提**（本机需已安装）：Python 3.11+、Node.js 18+（含 npm）、Git、Edge 推荐。
-Phase 2 将提供尽量不要求预装 Python/Node 的便携包。
+## 协作之外，日常工作也在这里
 
-```powershell
-# 在仓库根目录（或发布包解压目录）
-powershell -ExecutionPolicy Bypass -File scripts/install_windows.ps1
-# 可选：装完直接启动
-powershell -ExecutionPolicy Bypass -File scripts/install_windows.ps1 -Start
-```
+![Agent 配置工作台：模型绑定与工具配置](docs/assets/readme/web-workbench-chat.png)
 
-然后：
+- **编码与对话：** 管理多个会话，查看工具调用，停止或继续任务。
+- **知识与 Git：** 整理资料，查看代码 diff，选择要提交的文件。
+- **评测与改进：** 比较基线与候选结果，保留评测记录；自修改能力有明确的验证与回滚边界。
 
-1. 在 `%USERPROFILE%\Documents\Vibelution\config\config.toml` 配置模型与密钥（首次 Launcher 启动常会创建 starter 文件）
-2. 双击桌面 **Vibelution Launcher**，或：
+<details>
+<summary>查看监督评测工作台</summary>
+
+![监督评测工作台演示截图](docs/assets/readme/web-workbench-supervised.png)
+
+</details>
+
+## 从协作能力长出来的小产品
+
+工作台也承载了一些更轻松的尝试。这些是附加体验，项目的核心仍是多 Agent 协作。
+
+<p align="center">
+  <img src="docs/assets/readme/companions.png" alt="虚拟人人物大厅" width="72%">
+  <img src="docs/assets/readme/desktop-pet.gif" alt="桌面伙伴待机动效实录" width="22%">
+</p>
+
+**虚拟人 · 聊完之后，她的一天还在继续。** 人物有日程、心情、日记与长期记忆，也能主动发来消息。生活经历与对话的连续性仍在打磨。为 Agent 启用「虚拟人生活」能力后，可从人物大厅进入。[了解人物能力](core/agent_plugins/virtual_human_life/README.md)
+
+**桌面伙伴 · 不用一直盯着会话窗口。** 角色随会话运行、等待确认、完成或出错切换提示与轻动效；点击查看实时对话，拖动调整位置，关闭后从系统托盘重新打开。
+
+[展示素材与录制说明](docs/assets/readme/README.md)
+
+## 开始使用
+
+目前以 **Windows 本地桌面体验**为主。准备好 **Python 3.11+（推荐 3.12）、Node.js 18+ 和 Git**，在 PowerShell 中执行：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/vibelution_launcher.ps1 -Action start
-```
-
-密钥只放外部配置或环境变量，不要提交进 git。
-
-发布方可用 `scripts/package_windows_release.ps1` 打出 `dist/release/windows/` 快照包（仍属 Phase 1：需本机 Python/Node）。
-
-### 开发者路径
-
-依赖：Python 3.11+（建议 3.12）、Node.js 18+（npm）、Git。Windows 若走桌面窗口，建议本机有 Edge。Debian/Ubuntu 还需系统包 `python3-venv`（例如 `sudo apt install python3.12-venv`）；这些发行版 PATH 里通常是 `python3` 而不是 `python`。
-
-```bash
 git clone https://github.com/CCDawn/Vibelution.git
 cd Vibelution
+powershell -ExecutionPolicy Bypass -File scripts/install_windows.ps1
 ```
 
-#### 1. 用 launcher（推荐）
+安装完成后，打开桌面上的 **Vibelution Launcher**。首次启动会准备外部配置文件；按[模型配置指南](docs/ops/config/INDEX.md)配置模型与密钥后，就可以开始对话。
+
+也可以通过正式 Launcher 入口启动：
 
 ```powershell
-# Windows
-powershell -ExecutionPolicy Bypass -File scripts/vibelution_launcher.ps1 -Action start
+& "$env:LOCALAPPDATA\Vibelution\Launcher\VibelutionLauncher.exe" --project "$PWD" start
 ```
 
-```bash
-# macOS / Linux（不自动开浏览器）
-python3 scripts/vibelution_launcher.py --action start --no-browser
-# 本机打开 http://127.0.0.1:8000（以日志为准）
-```
+[Windows 安装说明](docs/guides/install-windows.md) · [开发环境与贡献](CONTRIBUTING.md) · [Linux 部署参考](docs/ops/linux-bootstrap.md)
 
-首次会检查系统依赖，缺 `.venv` / 前端依赖 / `web/dist` 时在项目内装齐或构建。缺 Python、Node 会直接报错停住。过程日志在 `.runtime/launcher/launcher-control.log` 和 `logs/runtime_scenes/`。之后启动只做指纹检查，能复用就复用。
+工作台运行在本机，模型由你配置。**使用云端模型时，相应请求会发送给所选模型服务商**；本地运行不等于所有推理都离线。模型调用可能产生服务商费用，密钥与运行配置保存在仓库之外。
 
-正式路径以 npm / `package-lock` 为准；Bun 只是本地辅助，别为了它改锁文件策略。
+## 最近在做什么
 
-#### 2. 手动装 Python 依赖
+这份首页展示 **2026 年 9 月的开发进展**；具体发布版本以 [VERSION](VERSION) 和 [CHANGELOG](CHANGELOG.md) 为准。
 
-```bash
-python3 -m venv .venv
-# Windows: .\.venv\Scripts\activate
-# macOS / Linux: source .venv/bin/activate
-pip install -r requirements.txt
-```
+- **团队与工作流：** 持续改进多 Agent 分工、任务交接、节点运行与中断恢复，让长流程更稳定。
+- **科研应用：** 打磨第一阶段资料、知识和假说评审链路；第二阶段实验结果另行验证。
+- **附加产品：** 虚拟人继续改善生活经历与对话的衔接，桌宠继续丰富会话反馈和动作。
 
-#### 3. 手动装前端依赖
+如果你喜欢其中一个方向，欢迎带着具体场景来提 [Issue](https://github.com/CCDawn/Vibelution/issues)，或从[贡献指南](CONTRIBUTING.md)开始。一次体验反馈、一张问题截图、一处文档修正，都能帮助项目往前走。
 
-```bash
-cd web
-npm install
-npm run build
-cd ..
-```
+---
 
-如果本机已安装 Bun，可以在依赖已就绪后使用辅助脚本加快本地开发循环：
+[文档地图](docs/README.md) · [开发规范](docs/standards/README.md) · [安全问题](SECURITY.md) · [第三方组件](THIRD_PARTY_COMPONENTS.md) · [MIT 代码许可证](LICENSE)
 
-```bash
-cd web
-bun run bun:dev
-bun run bun:test
-bun run bun:build
-```
-
-#### 4. 配置 LLM
-
-运行配置统一存放在用户级外部路径（默认：`%USERPROFILE%\Documents\Vibelution\config\config.toml`）。新环境通过 Launcher 首次启动时会自动创建该目录和 starter 文件；也可以设置 `VIBELUTION_CONFIG_HOME` 或 `VIBELUTION_CONFIG_PATH` 指向其他外部配置位置。
-
-```toml
-[runtime]
-profile = "safe_remote"
-preflight_doctor = true
-require_venv = true
-
-[llm.model_library.openai_gpt_4_1]
-model = "gpt-4.1"
-label = "OpenAI GPT-4.1"
-api_key_env = "VIBELUTION_LLM_MODEL_OPENAI_GPT_4_1_API_KEY"
-transport = "chat_completions"
-contract = "tool_chat"
-temperature = 0.7
-max_output_tokens = 8192
-timeout = 120
-streaming = true
-
-[llm.model_library.openai_gpt_4_1.provider]
-kind = "openai"
-api_key_env = "OPENAI_API_KEY"
-base_url = "https://api.openai.com/v1"
-compat_mode = "openai"
-requires_api_key = true
-```
-
-示例环境变量：
-
-```powershell
-$env:OPENAI_API_KEY="your-api-key"
-$env:DEEPSEEK_API_KEY="your-api-key"
-$env:MINIMAX_API_KEY="your-api-key"
-```
-
-外部 `config.toml` 不在仓库里，别提交真实密钥。上面示例只有环境变量名。
-
-问题与讨论：[Issues](https://github.com/CCDawn/Vibelution/issues/new/choose) · [Discussions](https://github.com/CCDawn/Vibelution/discussions) · 贡献见 [CONTRIBUTING.md](CONTRIBUTING.md) · 版本 [CHANGELOG.md](CHANGELOG.md) / [VERSION](VERSION)
-
-## Agent 开发
-
-给 coding agent / 维护者看的路由说明（最终用户可跳过；细则在 `docs/standards/`）：
-
-- [docs/guides/README.md](docs/guides/README.md) — 加载顺序
-- [docs/guides/route.md](docs/guides/route.md) — 任务类型 → READ / EDIT / TEST
-- [docs/guides/ownership.md](docs/guides/ownership.md) — 写入落点
-- [docs/guides/loop.md](docs/guides/loop.md) — 分级 / 命令 / 完成报告块
-
-全局红线：[AGENTS.md](AGENTS.md)。
-
-## 本地任务闭环
-
-首次在本仓库开发时配置 tracked pre-commit hook。`scripts/doctor.ps1` 只读检查环境与 `core.hooksPath`；如果配置不匹配，它只在输出中提示下面的修复命令，不会静默改写 Git 配置。
-
-日常提交时，hook 自动调用 `local_quality_gate.py commit`，以 staged paths 驱动快速检查：diff check 与 Python Ruff 读取 Git index 中的 staged 内容。它不是对 unstaged worktree 的完全隔离；gate-definition 文件会额外检查同一路径是否同时存在 staged 与 unstaged 改动，且 gate-definition staged 时会在当前 worktree 运行 focused self-test，因此未 stage 的测试或 `conftest.py` 也可能影响结果。任务内容全部提交、task worktree clean 后，在该 task worktree 运行 `closeout` 和 manifest 复核：
-
-```powershell
-git config core.hooksPath .githooks
-$claimId = $env:VIBELUTION_CLAIM_ID
-if ([string]::IsNullOrWhiteSpace($claimId)) { throw "Set VIBELUTION_CLAIM_ID first." }
-powershell -ExecutionPolicy Bypass -File scripts/doctor.ps1 -Json
-& .\.venv\Scripts\python.exe scripts/local_quality_gate.py closeout --base main --claim-id $claimId
-$taskId = (git branch --show-current).Replace("codex/", "")
-& .\.venv\Scripts\python.exe scripts/local_quality_gate.py verify-manifest --manifest ".runtime/quality_gates/$taskId.json" --base main
-```
-
-`closeout` 绑定本任务 claim、当前本地 `main` SHA、task HEAD SHA、影响面 selector 命令、fast-forward ancestry 与 merge preflight。`verify-manifest` 会在合并前重查 branch/worktree/HEAD/changed files、active claim、clean 状态、checks 与 commands，而不只复核 schema 和 SHA。manifest 的 `outcome=passed` 只表示这些当前授权证据通过，不代表任务已经 merge；进入 root local `main` 前仍须确认 root clean，并只用 `git merge --ff-only <task-branch>`。如果得到 `stale_main`、`claim_conflict`、`dirty_worktree` 或合并冲突，按 `tests/README.md` 的 outcome matrix 回 task worktree 修复并重新运行 `closeout`。
-
-质量门不会执行 merge、release 或删除。所有审查、验证和验收证据必须在 fast-forward 前闭合；`git merge --ff-only <task-branch>` 成功后不再等待 post-merge verification，任务拥有者立即清理可证明属于本任务的临时内容，释放本任务 claim，并只移除本任务创建的 junction（如有）、干净 worktree 与已合并本地 branch。清理后的 Git/worktree/registry 检查只证明吸收和资源收口，不属于产品验证；不得清理其他未完成任务。远端 push、PR 和 CI `workflow_dispatch` 是可选发布/远端验证步骤，不属于默认本地闭环。
-
-## 启动方式
-
-### Web Workbench
-
-统一 launcher 入口：
-
-```bash
-# Windows
-powershell -ExecutionPolicy Bypass -File scripts/vibelution_launcher.ps1 -Action start
-
-# macOS/Linux headless adapter
-python scripts/vibelution_launcher.py --action start --no-browser
-```
-
-后端与静态前端入口：
-
-```bash
-python scripts/web_workbench.py --reload
-```
-
-默认监听 `http://127.0.0.1:8000`，并保持无浏览器窗口；桌面入口和 launcher 负责打开托管窗口。调试时如果确实要打开系统默认浏览器，可显式追加 `--open-browser`。如果只跑前端开发服务器：
-
-```bash
-cd web
-npm run dev
-```
-
-Vite 默认监听 `http://127.0.0.1:5173`，并把 `/api` 代理到本地后端。
-
-本地前端调试也可以使用 `bun run bun:dev`，但不要因此提交 `bun.lock`/`bun.lockb`，除非本轮明确迁移包管理器。
-
-### 统一 Agent 入口
-
-```bash
-python agent.py
-```
-
-常用 headless / 单轮执行：
-
-```bash
-python agent.py --auto
-python agent.py --mode chat --prompt "分析当前仓库结构" --single-turn
-python agent.py --mode self_evolution --prompt "检查最近变更的回归风险"
-```
-
-### 监督进化 CLI
-
-```bash
-python agent.py --list-datasets
-python agent.py --choose-dataset
-python agent.py --supervised-evolution --bundle supervised_evolution_dry_run_v1
-python agent.py --dataset custom_prompt_jsonl --dataset-limit 20
-python agent.py --supervised-dashboard
-```
-
-## Web 工作台页面
-
-| 路由 | 作用 |
-| --- | --- |
-| `/chat` | 对话式编码工作台：会话列表、消息流、运行侧栏与输入区。 |
-| `/teams` | 团队与科研流程：挑战杯单页运行态画布、人工门禁与 Inspector。 |
-| `/agents` | Agent 管理：注册表、配置、工具与技能边界。 |
-| `/memory` | 知识库与记忆治理入口（含图谱等子视图）。 |
-| `/git` | 仓库局势页：变化文件、diff、最近提交、手动提交和 AI commit message。 |
-| `/self-evolution` | 自进化现场：readiness、事务历史、fitness、审计与回滚。 |
-| `/supervised-evolution` | 监督进化控制台：dataset / bundle 运行与进度。 |
-| `/supervised-evolution/runs` | 监督运行记录。 |
-| `/supervised-evolution/library` | Proposal library 与待推进建议。 |
-| `/supervised-evolution/review` | 对话样本审核面。 |
-| `/logs` | Runtime scene 与日志观察。 |
-| `/config` | 模型库、全局运行项与高级配置检查。 |
-| `/kernel` | Kernel 任务中心。 |
-| `/reset` | 受保护的本地清理入口。 |
-| `/pet` | 长期陪伴体状态入口。 |
-
-## 自进化与监督进化边界
-
-### Self Evolution
-
-自进化负责在当前仓库中执行一轮有界改进。它关注：
-
-- 当前目标和 readiness
-- Git working tree 信号
-- 演化事务与 fitness 摘要
-- 工具调用、验证、审计尾迹
-- 回滚 manifest 与冲突说明
-
-自进化不是无限后台任务。每轮都应有目标、证据、验证和停止条件。
-
-### Supervised Evolution
-
-监督进化负责用评测样本比较 baseline 与 candidate，并把结果沉淀成可审核的 proposal / advisory baseline。它关注：
-
-- dataset / bundle materialization
-- baseline / candidate 对比
-- decision record 与 lineage
-- proposal lifecycle
-- active advisory baseline
-- chat case review
-
-`active advisory baseline` 是建议和治理语义，不代表系统会自动把新能力重写进 runtime。
-
-## 测试与验证
-
-Python：
-
-```bash
-pytest tests -q --maxfail=0
-```
-
-常用局部验证：
-
-```bash
-pytest tests/test_web_app.py -q
-pytest tests/test_git_status_service.py -q
-pytest tests/test_supervised_evolution.py -q
-```
-
-前端：
-
-```bash
-cd web
-npm run test
-npm run build
-```
-
-Bun 辅助验证：
-
-```bash
-cd web
-bun run bun:test
-bun run bun:build
-```
-
-CI 通常覆盖：
-
-- Windows Python `3.11` / `3.12`
-- Python compile 与 pytest
-- 变更文件 ruff check
-- 前端 `npm ci`、`npm run test`、`npm run build`
-
-## 隐私与安全
-
-- 默认当本地 workbench 用；写接口有本机 control token 和来源校验。
-- 截图是脱敏演示，不是某台机器的真实状态。
-- 外部 `config.toml` 里的密钥、私有 provider 地址、个人绝对路径不要提交。
-- Git 页只提交你勾选的文件；还有未选中的 staged 改动时后端会拒提。
-- Reset 走白名单，不能乱清任意路径。
-- Runtime scene 包里可能有敏感信息，外传前自己过一遍。
-- 安全漏洞按 [SECURITY.md](SECURITY.md) 私下报，别在公开 issue 里贴利用细节。
-
-## 许可证
-
-[MIT](LICENSE)。贡献见 [CONTRIBUTING.md](CONTRIBUTING.md)。可选第三方组件说明见 [THIRD_PARTY_COMPONENTS.md](THIRD_PARTY_COMPONENTS.md)（默认不启用）。
-
-## 进一步阅读
-
-| 文档 | 作用 |
-| --- | --- |
-| [docs/product/README.md](docs/product/README.md) | 产品定位 |
-| [docs/README.md](docs/README.md) | 文档地图 |
-| [docs/standards/README.md](docs/standards/README.md) | 开发规范入口 |
-| [INDEX.md](INDEX.md) | 目录地图（流程以 AGENTS / docs 为准） |
-| [docs/agents/domain.md](docs/agents/domain.md) | 领域词 |
-| [core/core_prompt/SOUL.md](core/core_prompt/SOUL.md) | 行为边界 |
-| [docs/standards/development-standard.md](docs/standards/development-standard.md) | 交付标准 |
-
-根目录若有 `AGENTS.md`，本仓库协作按它来。
+角色名称与第三方素材的权利归各自权利人所有；代码的 MIT 许可不授予第三方角色或素材的权利。
