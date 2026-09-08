@@ -1379,6 +1379,13 @@ def _reconcile_source_collection_stage_session_task_completion_gate(
         materialized_knowledge_ingestion=materialized_knowledge_ingestion,
         conversation_events_by_session=conversation_events_by_session,
     )
+    from .stage_writeback import (
+        _apply_finding_receipt_gate_to_closure,
+        _source_collection_stage_finding_receipt_postcheck,
+    )
+
+    receipt_gate = _source_collection_stage_finding_receipt_postcheck(team_id, run_id, task)
+    _apply_finding_receipt_gate_to_closure(closure_summary, receipt_gate)
     task_checklist = [
         item for item in list(task.get("taskChecklist") or [])
         if isinstance(item, dict)
@@ -1426,6 +1433,8 @@ def _reconcile_source_collection_stage_session_task_completion_gate(
 
     next_task = dict(task)
     next_writeback = dict(writeback)
+    if receipt_gate is not None:
+        next_writeback["receiptGate"] = receipt_gate
     next_result = dict(result)
     next_writeback.setdefault("agentRequestedStatus", requested_status or current_status)
     next_writeback["status"] = next_status

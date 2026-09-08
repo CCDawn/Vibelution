@@ -1106,7 +1106,7 @@ describe("HypothesisFirstNodeInspector", () => {
     expect(container.querySelector('[data-testid="selection-list"]')).toBeNull();
     expect(container.querySelector('[data-testid="formal-runtime-action-body"]')).toBeNull();
     expect(container.textContent).toContain("等待正式候选假说");
-    expect(container.textContent).toContain("当前只有 R0 探索草案或知识前置条件尚未完成");
+    expect(container.textContent).toContain("候选假说尚未就绪，请先完成问题理解与知识搜集");
     const navigate = Array.from(container.querySelectorAll("button"))
       .find((button) => button.textContent?.includes("前往待处理步骤"));
     expect(navigate).toBeTruthy();
@@ -1162,11 +1162,10 @@ describe("HypothesisFirstNodeInspector", () => {
       />,
     );
 
-    expect(container.querySelector('[data-testid="hypothesis-selection-waiting"]')).not.toBeNull();
-    expect(container.querySelector('[data-testid="selection-list"]')).toBeNull();
+    expect(container.querySelector('[data-testid="hypothesis-selection-waiting"]')).toBeNull();
+    expect(container.querySelector('[data-testid="selection-list"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="formal-runtime-action-body"]')).toBeNull();
-    expect(container.textContent).toContain("选择操作暂不可用");
-    expect(container.textContent).toContain("当前暂不能选择，请前往待处理步骤");
+    expect(selectionListProps).toHaveBeenLastCalledWith(expect.objectContaining({ hideSubmit: true }));
     expect(onNavigateToNode).not.toHaveBeenCalled();
     expect(mockedExecuteCommand).not.toHaveBeenCalled();
   });

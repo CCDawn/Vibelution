@@ -63,3 +63,14 @@
 - 主 Agent 独立注入五个持久化边界：DataRecord 写入前失败、写入后响应丢失、candidate 导入前失败、导入后响应丢失、最终 task 保存失败。使用隔离实际文件存储，固定搜索投影，不调用模型。相同批次恢复并再次重放后均为一条 DataRecord、一条候选、一批预算；保存的 lineage 可对上候选 ID。5 项通过，因此不新建事务框架。此证据仅覆盖同一批次重放，不宣称跨多个 JSON 文件原子提交，也不等于 SCI-011 活数据已恢复。
 - 来源分组主审再次定位到旧平铺回执的 union fallback：一个不含 DOI 的 A URL 与另一个 B DOI 可混为同一候选，并因只有一个 DOI 通过。已要求删除该兼容推断；没有逐 result 映射的旧回执只能用 locator 自身可规范化的同一身份，不能猜测 A URL 与 B DOI 同源。
 - 前端主审发现无 canonical action 时隐藏全部正式候选会丢失已选定后的只读回看能力。已要求复用原列表的 committed/locked projection；缺动作禁止提交，正式候选仍可查看，只有 R0/无正式候选进入等待态。
+
+## 组合验收与主 Agent 接管收尾
+
+- 来源 Agent 交付 `7233b979c` 后停止写入。主 Agent 独立复现并修复两个遗漏：record projection 将原 URL 移至 rawLocation，导致预校验忽略它；同 query/provider 聚合新旧事件时，有新分组便漏掉旧单 locator 回执。现在预校验保留原输入 locator，旧 locator 分别保留独立组，仍禁止跨结果拼接 URL/DOI。两项先 RED 后 GREEN。
+- finding canonical reader 已接入同一 exclusion store 的活跃候选过滤；真实 DataRecord 导入→明确排除→canonical batch 读回测试先 RED 后 GREEN，历史候选与纠正证据仍保留。
+- 来源/排除/紧凑回包/中断恢复组合 44 项通过。更深的 source cases 发现读取 stage card 时，`stage_reconcile` 重新用通用记录计数晋升 completed，忽略 receiptGate；已复用写回的真实 postcheck 与同一 closure helper 修正，相关 writeback/finding 30 项通过。
+- 并发导入测试旧 fixture 创建无 owner research project 的 processing run，被现行合同正确拒绝；测试改用已有 owned-run helper，不修改生产权限或兼容入口，5 项通过。
+- 前端 Agent 的两个已提交选择修复和外层 Inspector 两文件由主 Agent接管集成。正式候选无操作权限时复用原列表只读查看并隐藏提交；候选尚未生成时明确等待问题理解/知识搜集。未选题的假说入口显示研究文案，不显示实验运行配置；原独立实验入口保留自身语义，未改变预算或 API。
+- 主 Agent独立前端相关回归 151 项通过，选择面板/来源展开与 VUI route/design 另 34 项通过。测试中部分既有 telemetry 请求 localhost:3000 被拒绝，但无测试失败；这些不是浏览器真实验收证据。现有 chain 保留 4 秒有界轮询、250 ms SSE invalidation、team/question/run 缓存身份与 reconnect/focus 刷新，无依据新增第二套轮询。
+- 检索上下文 Agent 接到新的独立只读验收：核对当前 12 节点主流程是否确实在第一阶段终止。`projection_builder` 当前按整份 pinned definition 计数；必须先查清真实执行与终止合同，不能只改 UI 分母掩盖阶段边界缺口。本项尚待结论。
+- 集成树用正常 `npm ci` 安装测试依赖，没有新建 junction。前端子树已有 node_modules junction 属任务残留，最终清理只处理其链接。

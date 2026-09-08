@@ -439,7 +439,10 @@ def _source_collection_stage_finding_receipt_preflight(
             index=index,
         )
         if projected_lead:
-            projected_lead = dict(projected_lead)
+            # The record projection moves a declared URL to rawLocation.
+            # Preserve incoming locators here so a second paper's URL cannot
+            # disappear behind the canonical DOI during preflight.
+            projected_lead = {**lead, **projected_lead}
             projected_lead["leadId"] = lead_label
             staged_leads.append(projected_lead)
         else:
@@ -526,6 +529,26 @@ def _source_collection_stage_finding_receipt_postcheck(
         "error": "" if isinstance(payload, dict) else "source finding receipt is missing",
         "quality": payload.get("quality") if isinstance(payload, dict) and isinstance(payload.get("quality"), dict) else {},
     }
+
+
+def _apply_finding_receipt_gate_to_closure(
+    closure_summary: dict[str, Any],
+    receipt_gate: dict[str, Any] | None,
+) -> None:
+    """Keep immediate writeback and later task reconciliation on one gate."""
+    if receipt_gate is None:
+        return
+    closure_summary["sourceFindingReceiptGate"] = receipt_gate
+    if receipt_gate.get("passed"):
+        return
+    closure_summary.update({
+        "artifactComplete": False,
+        "userStatus": "partial",
+        "advanceOutcome": "partial",
+        "completionGatePassed": False,
+        "message": "原始资料已写回，但当前运行的来源回执或视角覆盖尚不完整；请按具体缺口补证后推进。",
+        "retryInstruction": "请读取当前 source_collection_context_tool，只补真实回执与视角缺口；不要按标题猜测论文或重复检索已绑定来源。",
+    })
 
 
 def writeback_source_collection_stage_session_task(
@@ -748,29 +771,7 @@ def writeback_source_collection_stage_session_task(
             materialized_candidate_graph=materialized_candidate_graph,
             materialized_knowledge_ingestion=materialized_knowledge_ingestion,
         )
-    if finding_receipt_gate is not None and not finding_receipt_gate.get("passed"):
-        # The generic artifact summary only knows about record counts and the
-        # task checklist.  Finding completion also requires canonical search
-        # receipts, so make the derived projection agree with the status.
-        closure_summary["sourceFindingReceiptGate"] = finding_receipt_gate
-        # Formal finding tasks carry workflowRunId and are later reconciled
-        # from this summary.  Persisting artifactComplete=False here keeps a
-        # subsequent read from rebuilding completionGate.passed=True from the
-        # generic record-count gate.  Legacy stage tasks without a formal
-        # binding keep their historical artifact summary semantics.
-        if s._trim_text(task.get("workflowRunId"), max_length=160):
-            closure_summary["artifactComplete"] = False
-        closure_summary["userStatus"] = "partial"
-        closure_summary["advanceOutcome"] = "partial"
-        closure_summary["completionGatePassed"] = False
-        closure_summary["message"] = (
-            "原始资料已写回，但当前运行的真实检索回执尚未覆盖全部候选；"
-            "请补齐回执或修订来源后再推进。"
-        )
-        closure_summary["retryInstruction"] = (
-            "请先读取当前 source_collection_context_tool，只补回执缺口中的真实 DOI/URL；"
-            "不要按标题猜测论文或重复检索已绑定来源。"
-        )
+    _apply_finding_receipt_gate_to_closure(closure_summary, finding_receipt_gate)
     task_checklist = [
         item for item in list(task.get("taskChecklist") or [])
         if isinstance(item, dict)

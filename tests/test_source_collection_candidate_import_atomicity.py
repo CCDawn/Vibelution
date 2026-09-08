@@ -16,6 +16,7 @@ from __future__ import annotations
 import threading
 
 from tests._support.team_workflow.helpers import *  # noqa: F403
+from tests._support.team_workflow.cases_source_collection import _create_owned_source_collection_processing_run
 
 
 def _run_import_workers(team_id: str, run_id: str, records: list[dict]) -> list[dict]:
@@ -53,7 +54,7 @@ def test_concurrent_import_same_source_creates_single_candidate(tmp_path, monkey
     _use_tmp_project_root(tmp_path, monkeypatch)
     _capture_workflow_events(monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")
-    run = data_processing_service.create_processing_run(title="Source collection")
+    run = _create_owned_source_collection_processing_run(team, title="Source collection")
     same_ref = "https://example.test/duplicated-neuro-paper"
     records = [
         data_processing_service.add_record(
@@ -91,7 +92,7 @@ def test_concurrent_import_distinct_sources_all_persist(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _capture_workflow_events(monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")
-    run = data_processing_service.create_processing_run(title="Source collection")
+    run = _create_owned_source_collection_processing_run(team, title="Source collection")
     records = [
         data_processing_service.add_record(
             run["runId"],

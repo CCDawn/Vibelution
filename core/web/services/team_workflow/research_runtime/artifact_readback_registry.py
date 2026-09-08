@@ -264,6 +264,7 @@ def _load_scoped_candidates(
     workflow_run_id: str = "",
 ) -> list[dict[str, Any]] | None:
     from core.web.services.team_workflow.source_collection.candidates import (
+        filter_active_source_candidates,
         list_candidate_store_authority_records,
     )
 
@@ -287,6 +288,7 @@ def _load_scoped_candidates(
         candidates, team_id=team_id, authority_run_id=authority_run_id
     ):
         return None
+    candidates = filter_active_source_candidates(team_id, authority_run_id, candidates)
     return sorted(
         candidates,
         key=lambda item: str(item.get("candidateId") or item.get("sourceUrl") or ""),

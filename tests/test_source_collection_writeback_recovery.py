@@ -5,6 +5,7 @@ import pytest
 from core.web.services import data_processing_service
 from core.web.services import team_workflow_orchestration_service as service
 from core.web.services.team_workflow.source_collection import search_execution
+from core.web.services.team_workflow.source_collection import stage_writeback
 from core.web.services.team_workflow.source_collection.candidates import list_candidate_store_authority_records
 from tests._support.team_workflow.cases_source_collection import _finding_close_first_step_task
 
@@ -73,3 +74,33 @@ def test_finding_replays_interrupted_batch_without_duplicate_sources_or_budget(
     assert len(batches) == 1
     assert sum(batch["newAcceptedLeadCount"] for batch in batches) == 1
     assert stored["writeback"]["materializedSources"]["lineage"][0]["candidate"]["candidateId"] == candidates[0]["candidateId"]
+
+
+def test_finding_preflight_preserves_incoming_url_identity_before_record_projection(monkeypatch):
+    doi = "10.1038/paper-b"
+    url = "https://publisher.test/paper-a"
+    monkeypatch.setattr(search_execution, "project_source_collection_search_trace", lambda *_a, **_kw: [{
+        "status": "found", "eventIds": ["event"], "resultRefs": [url, doi],
+        "receiptRefSets": [[url], [doi]],
+    }])
+    with pytest.raises(service.TeamWorkflowOrchestrationError, match="source_search_receipt_missing"):
+        stage_writeback._source_collection_stage_finding_receipt_preflight(
+            "team", "source", {"taskId": "task", "stageId": "finding", "workflowRunId": "workflow"},
+            {"candidateLeads": [{"title": "Mismatched source", "doi": doi, "url": url}]},
+        )
+
+
+def test_search_projection_keeps_single_locator_receipts_alongside_grouped_results(tmp_path, monkeypatch):
+    events_path = tmp_path / "events.jsonl"
+    old_doi, new_doi = "10.1038/old-paper", "10.1038/new-paper"
+    common = {"assignmentId": "assignment", "queryId": "query", "provider": "provider",
+              "eventType": "search.tool_result_returned", "query": "papers", "perspective": "mechanism"}
+    service._append_jsonl(events_path, [
+        {**common, "eventId": "old-event", "refs": [old_doi]},
+        {**common, "eventId": "new-event", "refs": [new_doi], "receiptRefSets": [[new_doi]]},
+    ])
+    monkeypatch.setattr(service, "_source_collection_storage_artifact_paths", lambda *_: {"searchEventsPath": events_path})
+    trace = search_execution.project_source_collection_search_trace("team", "source")
+    groups = search_execution._source_finding_trace_receipt_ref_sets(trace)
+    assert search_execution._source_finding_candidate_receipt_is_bound({"sourceUrl": f"https://doi.org/{old_doi}"}, groups)
+    assert search_execution._source_finding_candidate_receipt_is_bound({"sourceUrl": f"https://doi.org/{new_doi}"}, groups)

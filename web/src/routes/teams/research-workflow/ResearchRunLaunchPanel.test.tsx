@@ -1032,6 +1032,18 @@ describe("ResearchRunLaunchPanel session draft", () => {
     expect(markup).not.toContain("SCI-003 · Is the Riemann hypothesis true?");
   });
 
+  it("shows the hypothesis entry before a question is selected without experiment limits", () => {
+    const markup = renderToStaticMarkup(
+      <ResearchRunLaunchPanel teamId="team-1" busy={false}
+        onStartHypothesis={async () => undefined}
+        onSubmit={async () => undefined} onCancel={() => undefined} />,
+    );
+    expect(markup).toContain("选择题目并开始假说研究");
+    expect(markup).toContain("开始假说研究");
+    expect(markup).not.toContain("开始实验");
+    expect(markup).not.toContain("三阶段合计");
+  });
+
   it("tracks a new explicit deep-link question while the launch panel stays mounted", async () => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     Object.assign(queryState.current, {

@@ -3057,6 +3057,14 @@ def project_source_collection_search_trace(
                             normalized_receipt_refs.append(text)
                     if normalized_receipt_refs and normalized_receipt_refs not in receipt_ref_sets:
                         receipt_ref_sets.append(normalized_receipt_refs)
+            else:
+                # A query may contain both grouped and older single-locator
+                # receipts. Preserve each ungrouped locator independently;
+                # never infer a URL/DOI pair from an event's flattened refs.
+                for value in [*(event.get("refs") if isinstance(event.get("refs"), list) else []), event.get("rawLocation")]:
+                    text = s._trim_text(value, max_length=1000)
+                    if text and [text] not in receipt_ref_sets:
+                        receipt_ref_sets.append([text])
             event_id = s._trim_text(event.get("eventId"), max_length=160)
             if event_id and event_id not in event_ids:
                 event_ids.append(event_id)

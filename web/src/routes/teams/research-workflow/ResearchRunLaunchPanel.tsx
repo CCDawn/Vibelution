@@ -400,7 +400,9 @@ export function ResearchRunLaunchPanel(props: {
       : restartableCheckpoint
         ? (isZh ? "新建运行" : "New run")
         : (isZh ? "查看进展" : "View progress"))
-    : (isZh ? "开始实验" : "Start experiment");
+    : onStartHypothesis
+      ? (isZh ? "开始假说研究" : "Start hypothesis research")
+      : (isZh ? "开始实验" : "Start experiment");
 
   const submitNewRun = () => {
     try {
@@ -424,7 +426,9 @@ export function ResearchRunLaunchPanel(props: {
 
   return (
     <VSurface tone="panel" className={styles.root}>
-      <VPanelHeader title={isZh ? "选择题目并开始实验" : "Choose a question and start an experiment"} headingLevel={3} />
+      <VPanelHeader title={onStartHypothesis
+        ? (isZh ? "选择题目并开始假说研究" : "Choose a question and start hypothesis research")
+        : (isZh ? "选择题目并开始实验" : "Choose a question and start an experiment")} headingLevel={3} />
       <VFieldRow label={isZh ? "搜索题目" : "Search questions"} description={isZh ? "题号、英文问题或学科" : "Question ID, English question, or field"}>
         <VInput
           aria-label={isZh ? "搜索 125 题" : "Search 125 questions"}
@@ -505,7 +509,7 @@ export function ResearchRunLaunchPanel(props: {
             : "The selected question matches multiple formal experiments; run creation is blocked."}
         </div>
       ) : null}
-      {!startsHypothesisFirst ? (
+      {!onStartHypothesis || checkpoint ? (
         <ResearchRunSafetyLimitPanel
           budget={safetyBudget}
           isDisabled={busy}

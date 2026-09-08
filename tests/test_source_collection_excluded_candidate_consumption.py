@@ -2,6 +2,7 @@
 
 from core.web.services import data_processing_service, team_service
 from core.web.services import team_workflow_orchestration_service as service
+from core.web.services.team_workflow.research_runtime.artifact_readback_registry import load_scoped_artifact_payload
 from core.web.services.team_workflow.source_collection.candidates import (
     filter_active_source_candidates,
     list_candidate_store_authority_records,
@@ -32,6 +33,9 @@ def test_wrong_doi_exclusion_keeps_corrected_source_and_auditable_history(tmp_pa
     )
     active = service._source_collection_candidates_for_run(team_id, run_id)
     assert [item["candidateId"] for item in active] == [corrected_id]
+    canonical = load_scoped_artifact_payload("source_candidate_batch", team_id=team_id, authority_run_id=run_id)
+    assert canonical is not None
+    assert [item["candidateId"] for item in canonical["candidates"]] == [corrected_id]
     history = list_candidate_store_authority_records(team_id, run_id=run_id)
     assert {item["candidateId"] for item in history} == {old_id, corrected_id}
     assert exclusion["recordIds"] == [records[0]["recordId"]]

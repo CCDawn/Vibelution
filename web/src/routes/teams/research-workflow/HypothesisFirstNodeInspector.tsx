@@ -800,11 +800,6 @@ function HypothesisSelectionWaitingState(props: {
     && candidate.sourceId === problem.sourceId
     && candidate.message === problem.message
   )) === index);
-  const hasFormalCandidates = new Set(
-    (props.stateV2?.generation?.candidateIds ?? [])
-      .map((candidateId) => String(candidateId || "").trim())
-      .filter(Boolean),
-  ).size >= 2;
   const pendingNodeId = props.nextAction.targetNodeId
     && props.nextAction.targetNodeId !== HYPOTHESIS_FIRST_SELECTION_NODE_ID
     ? props.nextAction.targetNodeId
@@ -812,16 +807,12 @@ function HypothesisSelectionWaitingState(props: {
   return (
     <div className={styles.task} data-testid="hypothesis-selection-waiting">
       <VStateRow tone="warning">
-        {hasFormalCandidates
-          ? (isZh ? "选择操作暂不可用" : "Selection action is not available yet")
-          : (isZh ? "等待正式候选假说" : "Waiting for formal candidate hypotheses")}
+        {isZh ? "等待正式候选假说" : "Waiting for formal candidate hypotheses"}
       </VStateRow>
       <p className={styles.description}>
-        {hasFormalCandidates
-          ? (isZh ? "当前暂不能选择，请前往待处理步骤。" : "Selection is temporarily unavailable; go to the pending step.")
-          : (isZh
-            ? "当前只有 R0 探索草案或知识前置条件尚未完成，暂不能提交候选选择。"
-            : "Only R0 exploratory drafts are available or knowledge prerequisites are incomplete; selection cannot be submitted yet.")}
+        {isZh
+          ? "候选假说尚未就绪，请先完成问题理解与知识搜集。"
+          : "Candidate hypotheses are not ready. Complete problem understanding and knowledge collection first."}
       </p>
       {problems.map((problem, index) => (
         <p className={styles.status} key={`${problem.code}:${problem.sourceId || ""}:${index}`}>
@@ -877,12 +868,13 @@ function InspectorBody(props: {
     // knowledge prerequisites do not expose a canonical record_selection
     // action, so they remain visible as an explicit wait state with no submit
     // path. Candidate count alone never authorizes a mutation.
-    if (selectionAction) {
+    if (selectionAction || (props.stateV2?.generation?.candidateIds ?? []).length > 0) {
       return (
         <HypothesisSelectionList
           teamId={teamId}
           questionId={questionId}
           runId={runId}
+          hideSubmit={!selectionAction}
           compact
           lang={lang}
         />
