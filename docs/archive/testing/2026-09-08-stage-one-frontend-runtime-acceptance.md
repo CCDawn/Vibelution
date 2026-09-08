@@ -114,9 +114,24 @@
 - 生产复验（真实前端按钮链）：重启后收件箱出现 budget_exhausted 项（scope=子 run/evidence_relations）+「一键补预算」CTA（两段式误触防护）；arm→「确认补预算」→ `extend_budget` 命令落库（cmd-f7705a8cfb…，accepted，runVersion 10→11，幂等键 inbox-extend-budget:…:2000000:262347）→ `budget_settled` 上限 2,000,000→2,262,347。前端随后「重试 证据关系」正确 POST 到子 run（retry_node a2/v11）——被 412 拒绝，暴露缺陷⑨。
 - 附带环境事实：Launcher exe 经 git-bash/cmd 转义调用会静默失败（native-launcher-entry.log `native_entry.failed 路径中具有非法字符`），须用 PowerShell 干净引号；`/api/runtime/code-freshness` 可判定 `backend_behind`（本次曾因 closeout 全量选择器耗时导致「重启早于合入」，靠该端点发现并二次重启）。
 
-### B.11 缺陷⑨：补预算基线公式忽略超支——上限提到 2,262,347 仍低于已消耗 2,726,303（修复中）
+### B.11 缺陷⑨：补预算基线公式忽略超支——上限提到 2,262,347 仍低于已消耗 2,726,303（已修复，真实前端两轮复验）
 
 - 现象：缺陷⑧补预算落库后，「重试 证据关系」仍 412 `node_not_ready / budget_safety_limit_reached / stage_tokens_limit_reached`。
 - 根因：CTA（`extend_budget_action`）与端点都写死 `new = limit + suggested`；但本阶段消耗已超上限 726,303（准入只在节点边界拦，末节点跑过头），准入公式是 `consumed + estimated > limit`——剩余仍为 0。正确基线：`max(limit, consumed) + suggested` = 2,988,650（恰留 262,347 余量）。
 - 连带：幂等键含 limit:suggested 而非新总额，修公式后会与已执行旧命令同键、幂等重放不加预算，必须改含新总额。
 - 修复（在途）：action/端点/请求模型（+stageConsumedTokens 字段）/前端透传四处同源修正 + 测试更新；落地后按 CTA→重试→evidence_relations 执行继续验收。
+
+
+#### B.11 复验结果（38ab5f18c 合入并 rebuild-and-start 后）
+
+- CTA 新总额正确：收件箱渲染「+262,347 tokens · 新上限 2,988,650」，hint 如实表述「基准 2,726,303 + 262,347；含已消耗 2,726,303」。
+- 第一轮真实点击（arm→确认补预算）：`extend_budget` 落库 cmd-0caf16c113…（键 `inbox-extend-budget:…knowledge_collection:2988650`，v11→12），上限→2,988,650。
+- 前端「重试 证据关系」从 412 变 **202 accepted**（cmd-be7355a343…，retry_node a2/v12→13）：节点真实执行（execution_anchor_bound + artifact_verified + handoff ho-be23f2d99fb…，node_succeeded），子 run blocked→running→执行完成。
+- 后继 knowledge_ingestion 再次预算阻塞（消耗 2,837,952/参考 262,347/建议 +111,649）→ 收件箱自动出现新项且公式正确（max(2,988,650, 2,837,952)+111,649=3,100,299）；第二轮 CTA 点击落库 cmd-652cb45cb4…（键 …:3100299，v13→14），上限→3,100,299。**自续环成立：每轮阻塞都有一键补预算 + 重试出口。**
+- 噪声观察（未修）：evidence_relations 成功后其陈旧阻塞项仍留在收件箱并渲染可点 CTA；点击会以 `idempotency_conflict`（同键不同请求）失败。操作员需按节点核对当前状态，建议后续对已成功节点的阻塞项做消解或标注。
+
+### B.12 缺陷⑩：预算先挡的交错使「重跑上游」合同出口永久不可达（已定案，修复中）
+
+- 现象：补足预算后「重试 知识入库」被 412 拒（blockers=evidence_graph_incomplete——关系图有 1 条 missingLink：source_relation_mapper 断言了指向不存在候选 `…-9143d4d6` 的 contradicts_scale_claim 边，同秒真实候选为 `…-9143d85a`；随机 id 笔误无法被标题/别名语义端点解析修复，merger fail-closed 降级为 missingLink——门禁本身工作正常）。同时「重试 证据关系」按钮 disabled（toast `retry_not_available`），操作员互锁无解。
+- 根因：`sync_run_blocked` 对已 blocked 的 run 直接 return——阻塞原因一经写入永不刷新。run 的 blocked_problem 停留在旧的 `budget_precheck_insufficient`；而 `succeeded_node_rerun_target`（重跑 evidence_relations 的合同出口，注释明确覆盖本场景）只认 `auto_advance_not_ready/evidence_graph_incomplete` 形状；命令级拒绝（NodeNotReadyError）按设计零写入。三段共同构成：预算先挡 → 补预算 → 真实阻塞（图缺口）永远写不进投影 → 重跑出口永不出现。
+- 修复（在途）：拒绝路径 best-effort 刷新已 blocked run 的 blocked_problem 为当前真实 blockers（auto_advance_not_ready + blocker codes，与 worker 的 not-ready 写法同形）；不建 attempt、不 bump 版本、不写事件、幂等。
