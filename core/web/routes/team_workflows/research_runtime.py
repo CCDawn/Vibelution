@@ -33,6 +33,12 @@ from core.web.services.team_workflow.research_runtime.command_service import (
 from core.web.services.team_workflow.research_runtime.command_service import (
     TeamScopeMismatchError as CommandTeamScopeMismatchError,
 )
+from core.web.services.team_workflow.research_runtime.evidence_graph_waiver import (
+    EvidenceGraphWaiverError,
+    MissingLinkWaiverConfirmationError,
+    assert_missing_link_waiver_confirmation,
+    waive_missing_link,
+)
 from core.web.services.team_workflow.research_runtime.event_stream_service import (
     InvalidLastEventIdError,
 )
@@ -188,6 +194,24 @@ class KnowledgeCollectionPayload(VersionedCommandPayload):
 class AgentBindingConfigPayload(TeamScopedPayload):
     stageOverrides: dict[str, dict[str, str]] = Field(default_factory=dict)
     nodeOverrides: dict[str, str] = Field(default_factory=dict)
+
+
+class EvidenceGraphMissingLinkWaivePayload(BaseModel):
+    """Confirmed human waiver for one evidence-graph missing link (缺陷⑪)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    teamId: str = ""
+    sourceCandidateId: str = Field(..., min_length=1)
+    targetCandidateId: str = Field(..., min_length=1)
+    relation: str = Field(..., min_length=1)
+    justification: str = ""
+    confirmed: StrictBool = False
+
+    @field_validator("teamId")
+    @classmethod
+    def normalize_optional_team_id(cls, value: str) -> str:
+        return str(value or "").strip()
 
 
 def _svc():
@@ -750,6 +774,60 @@ def research_workflow_ensure_knowledge_collection(
         },
         request=request,
     )
+
+
+@router.post(
+    "/research/workflow-runs/{run_id}/evidence-graph/missing-links/waive",
+    response_model=dict[str, Any],
+    response_model_exclude_unset=True,
+)
+def research_workflow_waive_missing_link(
+    run_id: str,
+    payload: EvidenceGraphMissingLinkWaivePayload,
+    request: Request,
+) -> dict:
+    """Waive one evidence-graph missing link (human quality decision).
+
+    误触防护在服务端闭合：缺少显式 ``confirmed=true`` 或 ≥8 字符理由时以
+    428 拒绝（``waiver_confirmation_required`` / ``waiver_justification_required``），
+    绝不静默执行。豁免只在图记录上登记人工接受（waiver 审计内容），
+    缺口本身保留、``missingLinkCount`` 不变，因此任何门禁都不会因此放宽；
+    就绪读侧按同一口径统计 waiver 后不再产出 ``evidence_graph_incomplete``。
+    幂等：目标缺口已被豁免时返回 200 no-op（``alreadyWaived=true``），
+    既有审计内容不被改写。
+    """
+    try:
+        assert_missing_link_waiver_confirmation(
+            confirmed=payload.confirmed,
+            justification=payload.justification,
+        )
+    except MissingLinkWaiverConfirmationError as exc:
+        raise HTTPException(
+            status_code=428,
+            detail={"code": exc.code, "message": exc.message},
+        ) from exc
+    try:
+        with server_operator_scope_from_http(request):
+            result = waive_missing_link(
+                run_id=run_id,
+                team_id=payload.teamId,
+                source_candidate_id=payload.sourceCandidateId,
+                target_candidate_id=payload.targetCandidateId,
+                relation=payload.relation,
+                justification=payload.justification,
+                operator=current_server_operator(),
+            )
+    except PermissionError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "command_forbidden", "message": str(exc) or "command_forbidden"},
+        ) from exc
+    except EvidenceGraphWaiverError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={"code": exc.code, "message": exc.message},
+        ) from exc
+    return result.to_dict()
 
 
 def _submit_workflow_command(

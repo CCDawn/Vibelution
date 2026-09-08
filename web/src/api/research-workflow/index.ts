@@ -23,6 +23,11 @@ export type { WorkflowDefinitionResponse } from "./definitions";
 export {
   fetchResearchWorkflowSnapshot,
   fetchResearchWorkflowNodeDetail,
+  waiveEvidenceGraphMissingLink,
+} from "./runs";
+export type {
+  EvidenceGraphMissingLinkWaiveResponse,
+  EvidenceGraphMissingLinkWaiverAudit,
 } from "./runs";
 export {
   submitResearchWorkflowCommand,

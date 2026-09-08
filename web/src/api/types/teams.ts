@@ -1154,6 +1154,14 @@ export type TeamWorkflowCandidateGraphEdge = {
   targetCandidateId: string;
   relation: string;
   edgeState: string;
+  /** Human waiver audit fields (缺陷⑪); present on waived missing links only. */
+  waived?: boolean;
+  status?: string;
+  waiver?: {
+    by: string;
+    at: string;
+    justification: string;
+  };
 };
 
 export type TeamWorkflowCandidateGraphPayload = {

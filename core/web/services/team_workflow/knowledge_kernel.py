@@ -230,6 +230,193 @@ def _attach_candidate_graph_stage_writeback_metadata(
             )
 
 
+def _count_waived_missing_links(missing_links: list[Any]) -> int:
+    """Waiver counting rule — identical to the readiness read side.
+
+    ``readiness_providers.fetch_evidence_graph_stats`` counts an item as
+    waived when it carries a truthy ``waived`` flag, a ``status`` of
+    ``waived``/``accepted``, or a ``waiver`` dict.  Keeping the write side on
+    the same rule is what makes the operator waiver actually move the gate.
+    """
+
+    return sum(
+        1
+        for item in missing_links
+        if isinstance(item, dict)
+        and (
+            bool(item.get("waived"))
+            or str(item.get("status") or "").strip().lower() in {"waived", "accepted"}
+            or isinstance(item.get("waiver"), dict)
+        )
+    )
+
+
+def apply_missing_link_waiver(
+    team_id: str,
+    *,
+    authority_run_id: str,
+    source_candidate_id: str,
+    target_candidate_id: str,
+    relation: str,
+    justification: str,
+    operator_id: str,
+    workflow_run_id: str = "",
+) -> dict[str, Any]:
+    """Mark matching ``missingLinks`` waived on scoped candidate_graph records.
+
+    Human quality decision recorded in place on the graph record through the
+    canonical candidate-store write surface (same lock / run-owner store
+    resolver / ``_write_json`` save path as ``build_candidate_graph`` and
+    ``_attach_candidate_graph_stage_writeback_metadata``).  The missing link
+    itself is never removed and ``missingLinkCount`` never changes — the gate
+    read side (``fetch_evidence_graph_stats``) still sees the gap, it just
+    also sees the human waiver.  Scope matching reuses
+    ``artifact_readback_registry._matches_collect_scope`` so the write can
+    only touch records the read side would count for this run.
+
+    Already-waived targets are a no-op (``alreadyWaived``) and an existing
+    waiver's audit content is never rewritten.
+
+    Outcome is one of ``waived`` / ``already_waived`` / ``graph_not_found`` /
+    ``missing_link_not_found``.
+    """
+
+    s = _service()
+    normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
+    normalized_run_id = s._trim_text(authority_run_id, max_length=160)
+    normalized_source = s._trim_text(source_candidate_id, max_length=200)
+    normalized_target = s._trim_text(target_candidate_id, max_length=200)
+    normalized_relation = s._trim_text(relation, max_length=160)
+    normalized_justification = s._trim_text(justification, max_length=4000)
+    normalized_operator = s._trim_text(operator_id, max_length=160) or "local-control-operator"
+    if not normalized_run_id:
+        return {"outcome": "graph_not_found", "teamId": normalized_team_id}
+    from core.web.services.team_workflow.research_runtime.artifact_readback_registry import (
+        _matches_collect_scope,
+        _records_pass_strict_scope,
+    )
+
+    now = s.utc_now_iso()
+    with s._WORKFLOW_LOCK:
+        candidate_store = s._load_candidate_store(normalized_team_id, run_id=normalized_run_id)
+        graphs = [
+            item
+            for item in list(candidate_store.get("candidates") or [])
+            if isinstance(item, dict)
+            and str(item.get("candidateType") or "") == "candidate_graph"
+            and _matches_collect_scope(
+                item,
+                team_id=normalized_team_id,
+                source_collection_run_id=normalized_run_id,
+                workflow_run_id=workflow_run_id,
+            )
+        ]
+        if not graphs or not _records_pass_strict_scope(
+            graphs, team_id=normalized_team_id, authority_run_id=normalized_run_id
+        ):
+            return {"outcome": "graph_not_found", "teamId": normalized_team_id, "sourceCollectionRunId": normalized_run_id}
+
+        def _link_matches(item: dict[str, Any]) -> bool:
+            return (
+                s._trim_text(item.get("sourceCandidateId"), max_length=200) == normalized_source
+                and s._trim_text(item.get("targetCandidateId"), max_length=200) == normalized_target
+                and s._trim_text(item.get("relation"), max_length=160) == normalized_relation
+            )
+
+        changed = False
+        already_waived = False
+        newly_waived = False
+        touched_ids: list[str] = []
+        waiver_count_after = 0
+        missing_link_count = 0
+        existing_waiver: dict[str, Any] = {}
+        for record in graphs:
+            metadata = record.get("metadata") if isinstance(record.get("metadata"), dict) else {}
+            graph = metadata.get("graph") if isinstance(metadata.get("graph"), dict) else {}
+            missing_links = [item for item in list(graph.get("missingLinks") or []) if isinstance(item, dict)]
+            matched = [item for item in missing_links if _link_matches(item)]
+            if not matched:
+                continue
+            record_newly_waived = False
+            for item in matched:
+                if _count_waived_missing_links([item]) > 0:
+                    already_waived = True
+                    waiver_dict = item.get("waiver") if isinstance(item.get("waiver"), dict) else {}
+                    existing_waiver = {
+                        "by": str(waiver_dict.get("by") or ""),
+                        "at": str(waiver_dict.get("at") or ""),
+                        "justification": str(waiver_dict.get("justification") or item.get("justification") or ""),
+                    }
+                    continue
+                item["waived"] = True
+                item["status"] = "waived"
+                item["waiver"] = {
+                    "by": normalized_operator,
+                    "at": now,
+                    "justification": normalized_justification,
+                }
+                changed = True
+                newly_waived = True
+                record_newly_waived = True
+            if record_newly_waived:
+                # Recount on the read-side rule and keep missingLinkCount
+                # frozen — the gap stays visible; only the human acceptance
+                # is new.  An already-waived match never rewrites the record
+                # (idempotent no-op preserves the original audit content).
+                graph = dict(graph)
+                graph["missingLinks"] = missing_links
+                graph_summary = graph.get("summary") if isinstance(graph.get("summary"), dict) else {}
+                graph_summary = dict(graph_summary)
+                graph_summary["waiverCount"] = _count_waived_missing_links(missing_links)
+                graph["summary"] = graph_summary
+                metadata = dict(metadata)
+                metadata["graph"] = graph
+                record["metadata"] = metadata
+                record["updatedAt"] = now
+                changed = True
+            touched_ids.append(str(record.get("candidateId") or ""))
+            graph_summary = (
+                graph.get("summary") if isinstance(graph.get("summary"), dict) else {}
+            )
+            waiver_count_after = max(
+                waiver_count_after,
+                int(graph_summary.get("waiverCount") or _count_waived_missing_links(missing_links)),
+            )
+            missing_link_count = max(
+                missing_link_count,
+                int(graph_summary.get("missingLinkCount") or len(missing_links)),
+            )
+        if not touched_ids:
+            return {
+                "outcome": "missing_link_not_found",
+                "teamId": normalized_team_id,
+                "sourceCollectionRunId": normalized_run_id,
+            }
+        if changed:
+            candidate_store["updatedAt"] = now
+            s._write_json(
+                s._candidate_store_path(normalized_team_id, normalized_run_id),
+                candidate_store,
+            )
+        return {
+            "outcome": "already_waived" if not newly_waived else "waived",
+            "alreadyWaived": bool(already_waived),
+            "teamId": normalized_team_id,
+            "sourceCollectionRunId": normalized_run_id,
+            "workflowRunId": workflow_run_id,
+            "graphCandidateIds": touched_ids,
+            "waiverCount": waiver_count_after,
+            "missingLinkCount": missing_link_count,
+            "waiver": {
+                "by": normalized_operator,
+                "at": now,
+                "justification": normalized_justification,
+            }
+            if newly_waived
+            else existing_waiver,
+        }
+
+
 def _research_review_checklist(candidate: dict[str, Any]) -> tuple[dict[str, bool], list[str]]:
     """对单个候选做科研审稿 checklist，返回 (checklist, blockingRiskFlags)。"""
     s = _service()

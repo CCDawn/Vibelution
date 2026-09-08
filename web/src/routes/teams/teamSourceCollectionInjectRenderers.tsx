@@ -202,6 +202,7 @@ export function createSourceCollectionInjectRenderers(ctx: SourceCollectionInjec
     sourceCollectionUnverifiableCandidateIds,
     excludeUnverifiableSourceCollectionCandidates,
     selectSourceCollectionStage,
+    searchParams,
   } = ctx;
 
   function renderSourceCollectionStageAgents(stageId: SourceCollectionStageModuleId) {
@@ -426,6 +427,8 @@ export function createSourceCollectionInjectRenderers(ctx: SourceCollectionInjec
         selectedTeamBuildCandidateGraphError={selectedTeamBuildCandidateGraphError}
         selectedSourceCollectionCandidateId={selectedSourceCollectionCandidateId}
         selectSourceCollectionCandidate={selectSourceCollectionCandidate}
+        teamId={String(selectedTeam?.teamId || "")}
+        workflowRunId={String(searchParams?.get("runId") || "").trim()}
       />
     );
   }

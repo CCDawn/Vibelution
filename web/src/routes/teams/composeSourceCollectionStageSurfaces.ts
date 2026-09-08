@@ -34,6 +34,7 @@ export function composeSourceCollectionStageSurfaces(input: ComposeSourceCollect
   const {
     lang,
     navigate,
+    searchParams,
     selectedTeam,
     selectedSourceCollectionRunEffectiveId,
     startSourceCollectionStageSessionTaskMutation,
@@ -589,6 +590,7 @@ export function composeSourceCollectionStageSurfaces(input: ComposeSourceCollect
     sourceCollectionUnverifiableCandidateIds,
     excludeUnverifiableSourceCollectionCandidates,
     selectSourceCollectionStage,
+    searchParams,
   });
 
   return {
