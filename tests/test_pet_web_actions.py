@@ -9,6 +9,7 @@ from core.pet_system import pet_system as pet_system_module
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.services import pet_service
+from core.web.services import pet_activity_service
 
 
 def setup_function() -> None:
@@ -107,3 +108,34 @@ def test_pet_action_rejects_unknown_action_and_records_scene_event(monkeypatch, 
     assert event_kwargs["outcome"] == "rejected"
     assert event_kwargs["level"] == "warning"
     assert event_kwargs["fields"]["action"] == "dance"
+
+
+def test_pet_activity_route_exposes_explicit_safe_contract(monkeypatch, isolated_pet_storage):
+    monkeypatch.setattr(
+        pet_activity_service,
+        "get_pet_activity",
+        lambda: {
+            "schemaVersion": 1,
+            "aggregateTone": "running",
+            "animationState": "tooling",
+            "activeCount": 1,
+            "attentionCount": 0,
+            "generatedAt": "2026-09-08T02:00:00+00:00",
+            "sessions": [
+                {
+                    "sessionId": "session-a",
+                    "title": "Agent A 的会话",
+                    "agentId": "agent-a",
+                    "agentDisplayName": "Agent A",
+                    "tone": "running",
+                    "phase": "tooling",
+                    "updatedAt": "2026-09-08T02:00:00+00:00",
+                }
+            ],
+        },
+    )
+
+    response = _client().get("/api/pet/activity")
+
+    assert response.status_code == 200
+    assert response.json() == pet_activity_service.get_pet_activity()

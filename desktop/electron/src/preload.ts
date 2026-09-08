@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from "electron";
 import { IPC_CHANNELS } from "./ipc.js";
 
 const isLauncherControlWindow = process.argv.includes("--vibelution-window-role=launcher-control");
+const isDesktopPetWindow = process.argv.includes("--vibelution-window-role=desktop-pet");
 
 contextBridge.exposeInMainWorld("vibelutionLauncher", {
   getVersion: () => ipcRenderer.invoke(IPC_CHANNELS.getVersion),
@@ -29,6 +30,12 @@ contextBridge.exposeInMainWorld("vibelutionLauncher", {
     ? {
         launcherInvoke: (payload: unknown) => ipcRenderer.invoke(IPC_CHANNELS.launcherInvoke, payload),
         refreshLauncherState: () => ipcRenderer.invoke(IPC_CHANNELS.refreshLauncherState)
+      }
+    : {}),
+  ...(isDesktopPetWindow
+    ? {
+        openConversationFromPet: (sessionId: string) =>
+          ipcRenderer.invoke(IPC_CHANNELS.openConversationFromPet, sessionId)
       }
     : {})
 });

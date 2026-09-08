@@ -88,6 +88,13 @@ describe("router route contracts", () => {
     expect(workbench.children?.find((item) => item.index)).toBeTruthy();
   });
 
+  it("keeps the transparent desktop pet outside the workbench shell", () => {
+    const pet = findTopRoute("/desktop-pet");
+    expectRouteErrorSurface(pet, "workbench");
+    expectLazyFallback(pet, "正在打开工作台", "workbench");
+    expect(findWorkbenchRoute("pet")).toBeTruthy();
+  });
+
   it("guards split evolution routes with loading fallback and error boundary elements", () => {
     [
       "supervised-evolution",

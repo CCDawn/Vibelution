@@ -1,4 +1,4 @@
-import { BrowserWindow, Notification, app, dialog, ipcMain, nativeImage, nativeTheme, protocol } from "electron";
+import { BrowserWindow, Notification, app, dialog, ipcMain, nativeImage, nativeTheme, protocol, type IpcMainInvokeEvent } from "electron";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, statSync, watch, writeFileSync, type FSWatcher } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -216,6 +216,7 @@ import { ElectronWindowProvider } from "./windows/electronWindowProvider.js";
 import type { ManagedWindowState } from "./windows/windowProviderTypes.js";
 import { createLauncherWindow } from "./windows/launcherWindow.js";
 import { createWorkbenchWindow } from "./windows/workbenchWindow.js";
+import { createPetWindow, isDesktopPetWindowUrl } from "./windows/petWindow.js";
 import {
     resolveLauncherWindowUrl,
   resolveWorkbenchUrl
@@ -510,6 +511,7 @@ function createWindowProvider(paths: DesktopPaths, bootstrap: LauncherBootstrapR
     {
       createLauncherWindow,
       createWorkbenchWindow,
+      createPetWindow,
       launcherContentVersion: () => resolveLauncherDistRoot(launcherDistRootInput),
       listLauncherWindows: (launcherOrigin) =>
         BrowserWindow.getAllWindows().filter((window) => {
@@ -522,7 +524,8 @@ function createWindowProvider(paths: DesktopPaths, bootstrap: LauncherBootstrapR
       listWorkbenchWindows: (workbenchOrigin) =>
         BrowserWindow.getAllWindows().filter((window) => {
           try {
-            return isLiveWorkbenchWindowUrl(window.webContents.getURL(), workbenchOrigin);
+            const url = window.webContents.getURL();
+            return !isDesktopPetWindowUrl(url) && isLiveWorkbenchWindowUrl(url, workbenchOrigin);
           } catch {
             return false;
           }
@@ -928,6 +931,11 @@ async function openWorkbenchAtCurrentLauncherUrl(
     workbenchUrl = resolveWorkbenchUrl(desktopEnvironment(), payloadUrl || bootstrap.workbenchUrl);
     currentWorkbenchUrl = workbenchUrl;
     const state = await provider.openOrFocusWorkbench(workbenchUrl);
+    try {
+      await provider.openPet(workbenchUrl);
+    } catch (error: unknown) {
+      console.warn(`Desktop pet window unavailable: ${error instanceof Error ? error.message : String(error)}`);
+    }
     await recordElectronSupervisorEvent(bootstrap, {
       eventCode: "electron.workbench.navigation.ready",
       message: "Electron loaded the current Workbench URL before acknowledging the open action.",
@@ -982,9 +990,10 @@ async function persistManagedWindowState(
   bootstrap: LauncherBootstrapResult | null,
   state: ManagedWindowState
 ): Promise<void> {
-  if (bootstrap === null || !desktopSessionMutations.accepts("window")) {
+  if (state.role === "pet" || bootstrap === null || !desktopSessionMutations.accepts("window")) {
     return;
   }
+  const managedRole: "launcher" | "workbench" = state.role;
   await desktopSessionMutations.enqueue("window", async () => {
     const context = await resolveDesktopActionLoopContext(bootstrap);
     if (!desktopSessionRegistered) {
@@ -1015,14 +1024,14 @@ async function persistManagedWindowState(
     }
     const result = inProcessDesktopSessionStore.reportWindow({
       desktopSessionId: context.desktopSessionId,
-      role: state.role,
+      role: managedRole,
       revision: desktopSessionRevision,
       state
     });
     desktopSessionRevision = result.revision;
     void desktopSessionMirror.mutate("window", (mirrorRevision) => reportDesktopWindowState({
       ...context,
-      role: state.role,
+      role: managedRole,
       revision: mirrorRevision,
       state
     })).catch(() => undefined);
@@ -2894,6 +2903,39 @@ ipcMain.handle(IPC_CHANNELS.focusWorkbenchWindow, async (event) => {
   assertTrustedIpcSender(event, trustedIpcOrigins());
   return await windowProvider?.focusWorkbench();
 });
+
+ipcMain.handle(IPC_CHANNELS.openConversationFromPet, async (event, rawSessionId: unknown) => {
+  assertDesktopPetIpcSender(event);
+  const sessionId = String(rawSessionId || "").trim();
+  if (!/^[A-Za-z0-9._:-]{1,128}$/.test(sessionId)) {
+    throw new Error("invalid desktop pet session id");
+  }
+  const provider = windowProvider;
+  if (provider === null) {
+    return { schemaVersion: 1, opened: false };
+  }
+  let state = await provider.focusWorkbench();
+  if (!state.open) {
+    const url = currentWorkbenchUrl || launcherBootstrap?.workbenchUrl;
+    if (!url) {
+      return { schemaVersion: 1, opened: false };
+    }
+    state = await provider.openOrFocusWorkbench(url);
+  }
+  const delivered = provider.sendToWorkbench(IPC_CHANNELS.conversationNotificationOpened, {
+    schemaVersion: 1,
+    sessionId,
+  });
+  return { schemaVersion: 1, opened: state.open && delivered };
+});
+
+function assertDesktopPetIpcSender(event: IpcMainInvokeEvent): void {
+  assertTrustedIpcSender(event, trustedIpcOrigins());
+  const rawUrl = String(event.senderFrame?.url || "");
+  if (!isDesktopPetWindowUrl(rawUrl)) {
+    throw new Error("blocked desktop pet ipc sender");
+  }
+}
 
 ipcMain.handle(IPC_CHANNELS.requestDesktopShellExit, async (event) => {
   assertTrustedIpcSender(event, trustedIpcOrigins());

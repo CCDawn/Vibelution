@@ -1,8 +1,13 @@
 import { fetchJson } from "./client";
 import type { PetActionResponse, PetSummary } from "./types";
+import type { PetActivity } from "./types/petActivity";
 
 export function fetchPetSummary(): Promise<PetSummary> {
   return fetchJson<PetSummary>("/api/pet/summary");
+}
+
+export function fetchPetActivity(): Promise<PetActivity> {
+  return fetchJson<PetActivity>("/api/pet/activity");
 }
 
 export function postPetAction(action: "feed" | "talk" | "care"): Promise<PetActionResponse> {

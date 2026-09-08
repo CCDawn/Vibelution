@@ -2,6 +2,7 @@ export const IPC_CHANNELS = {
   getVersion: "launcher:get-version",
   getDesktopShellSummary: "launcher:get-desktop-shell-summary",
   focusWorkbenchWindow: "launcher:focus-workbench-window",
+  openConversationFromPet: "pet:open-conversation",
   requestDesktopShellExit: "launcher:request-desktop-shell-exit",
   notifyConversationCompleted: "launcher:notify-conversation-completed",
   conversationNotificationOpened: "launcher:conversation-notification-opened",

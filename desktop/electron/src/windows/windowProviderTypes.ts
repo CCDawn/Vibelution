@@ -1,4 +1,4 @@
-export type ElectronWindowRole = "launcher" | "workbench";
+export type ElectronWindowRole = "launcher" | "workbench" | "pet";
 
 export type ManagedWindowState = {
   role: ElectronWindowRole;

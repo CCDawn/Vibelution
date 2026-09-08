@@ -51,6 +51,7 @@ const LauncherToolsRoute = lazyRoute(() => import("../routes/LauncherToolsRoute"
 const LogsRoute = lazyRoute(() => import("../routes/LogsRoute").then((module) => ({ default: module.LogsRoute })));
 const MemoryRoute = lazyRoute(() => import("../routes/MemoryRoute").then((module) => ({ default: module.MemoryRoute })));
 const PetRoute = lazyRoute(() => import("../routes/PetRoute").then((module) => ({ default: module.PetRoute })));
+const DesktopPetRoute = lazyRoute(() => import("../routes/desktopPet/DesktopPetRoute").then((module) => ({ default: module.DesktopPetRoute })));
 const PromptTemplatesRoute = lazyRoute(() => import("../routes/PromptTemplatesRoute").then((module) => ({ default: module.PromptTemplatesRoute })));
 const ResetRoute = lazyRoute(() => import("../routes/ResetRoute").then((module) => ({ default: module.ResetRoute })));
 const SkillsRoute = lazyRoute(() => import("../routes/SkillsRoute").then((module) => ({ default: module.SkillsRoute })));
@@ -107,6 +108,10 @@ function guardedLazyElement(
 }
 
 export const router = createBrowserRouter([
+  {
+    path: "/desktop-pet",
+    ...guardedLazyElement(<DesktopPetRoute />, "workbench"),
+  },
   {
     path: "/launcher",
     element: <LauncherShell />,

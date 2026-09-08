@@ -119,6 +119,12 @@
 | --- | --- |
 | 人物大厅与聊天人物栏 | [virtual-human-companion.md](./virtual-human-companion.md) |
 
+## Product — desktop pet
+
+| 组件 | 设计说明 |
+| --- | --- |
+| 桌面宠物窗口 | [product/desktop-pet.md](./product/desktop-pet.md#desktoppetroute) |
+
 ## Product — agent-management
 
 | 组件 | 设计说明 |

@@ -7,6 +7,8 @@ response_model_exclude_unset=True.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict
 
 
@@ -26,3 +28,47 @@ class PetActionResponse(BaseModel):
 
     action: str = ""
     message: str = ""
+
+
+PetActivityTone = Literal["approval", "error", "running", "completed", "idle"]
+PetActivityPhase = Literal[
+    "waiting",
+    "error",
+    "thinking",
+    "reading",
+    "tooling",
+    "verifying",
+    "answering",
+    "completed",
+]
+PetAnimationState = Literal[
+    "idle",
+    "waiting",
+    "alert",
+    "thinking",
+    "reading",
+    "tooling",
+    "verifying",
+    "answering",
+    "celebrating",
+]
+
+
+class PetActivitySessionResponse(BaseModel):
+    sessionId: str
+    title: str
+    agentId: str = ""
+    agentDisplayName: str = ""
+    tone: PetActivityTone
+    phase: PetActivityPhase
+    updatedAt: str = ""
+
+
+class PetActivityResponse(BaseModel):
+    schemaVersion: Literal[1] = 1
+    aggregateTone: PetActivityTone
+    animationState: PetAnimationState
+    activeCount: int
+    attentionCount: int
+    generatedAt: str
+    sessions: list[PetActivitySessionResponse]
