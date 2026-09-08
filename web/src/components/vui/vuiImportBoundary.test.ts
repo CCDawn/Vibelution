@@ -67,6 +67,8 @@ const productSharedParentStyleConsumers = [
 ] as const;
 const isolatedDesignReferenceArtifacts = new Set([
   "design/challenge-cup-platform-home-preview-tooltips.tsx",
+  // Standalone HTML entry; deliberately absent from the product router and build input.
+  "design/frontend-governance-preview.tsx",
 ]);
 // VWorkflowCanvas is the sanctioned product facade for the React Flow canvas renderer;
 // workflowLayoutTypes re-exports the layout graph types. They are the only product files
