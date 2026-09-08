@@ -570,6 +570,7 @@ def _record_formal_full_run_execution(
     team_id: str,
     plan_id: str,
     *,
+    research_project_id: str,
     execution_id: str,
     adapter_id: str,
     recorded_by_agent: str,
@@ -587,6 +588,7 @@ def _record_formal_full_run_execution(
     execution_record = {
         "executionId": execution_id,
         "planId": plan_id,
+        "researchProjectId": research_project_id,
         "status": status,
         "adapterId": adapter_id,
         "recordedByAgent": recorded_by_agent,
@@ -618,7 +620,7 @@ def _record_formal_full_run_execution(
             result=result,
         )
     with s._WORKFLOW_LOCK:
-        plan_store = s._load_experiment_plan_store(team_id)
+        plan_store = s._load_experiment_plan_store(team_id, research_project_id)
         plan = s._find_experiment_plan(plan_store, plan_id)
         if plan is None:
             raise s.TeamWorkflowOrchestrationError("Experiment plan not found.")
@@ -632,8 +634,8 @@ def _record_formal_full_run_execution(
         s._refresh_experiment_plan_readiness(plan)
         plan_store["activePlanId"] = plan["planId"]
         plan_store["updatedAt"] = finished_at
-        s._write_json(s._experiment_plan_store_path(team_id), plan_store)
-        workflow = s._load_or_create_workflow(team_id)
+        s._write_json(s._experiment_plan_store_path(team_id, research_project_id), plan_store)
+        workflow = s._load_or_create_workflow(team_id, research_project_id=research_project_id)
         workflow["updatedAt"] = finished_at
         workflow["activeWorkflowItems"] = s._upsert_active_item(
             workflow.get("activeWorkflowItems"),
@@ -642,7 +644,7 @@ def _record_formal_full_run_execution(
             status=f"full_run_execution_{status}",
             transfer_id="",
         )
-        s._write_json(s._workflow_path(team_id), workflow)
+        s._write_json(s._workflow_path(team_id, research_project_id), workflow)
     s._record_workflow_event(
         f"experiment.full_run_{status}",
         team_id,

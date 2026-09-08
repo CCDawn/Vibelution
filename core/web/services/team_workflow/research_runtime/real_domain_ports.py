@@ -2524,6 +2524,13 @@ def _execute_real_system_action(
     """
     node_id = str(action.node_id or "").strip()
     snapshot = dict(input_snapshot or {})
+    if node_id == "operator_baseline":
+        from ..operator_optimization.dispatch import dispatch_baseline
+        dispatch_baseline(action, snapshot)
+        refs = _collect_system_artifact_refs(required_kinds=required_kinds,
+            team_id=snapshot["teamId"], workflow_run_id=action.run_id,
+            source_collection_run_id=action.run_id)
+        return refs, {"systemActionId": f"sys-{action.action_id}", "runnerId": "operator_cuda_v1"}
     if node_id == "controlled_run":
         return _ledger_controlled_run(action, snapshot, required_kinds=required_kinds)
     if node_id == "result_package":

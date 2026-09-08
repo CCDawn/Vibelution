@@ -483,9 +483,12 @@ def register_default_adapters(registry: Any, ports: DomainPorts) -> Any:
     if not isinstance(registry, ActionRegistry):
         registry = ActionRegistry()
     registry.register(AgentActionAdapter(ports))
+    from core.research.workflow.operator_optimization_definition import build_operator_definition
     definitions = (
         build_challenge_cup_workflow_definition(),
         build_knowledge_sideflow_workflow_definition(),
+        build_operator_definition(),
+        build_operator_definition(baseline=True),
     )
     for definition in definitions:
         for node in definition.nodes:

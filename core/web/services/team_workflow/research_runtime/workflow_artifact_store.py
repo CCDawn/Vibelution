@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from core.infrastructure.path_containment import PROJECT_ROOT
+from core.research.workflow.operator_optimization_definition import OPERATOR_ARTIFACT_KINDS
 from core.web.services.team_workflow.storage_ids import safe_storage_component
 from vibelution_storage import resolve_project_workspace_home
 
@@ -24,7 +25,7 @@ from .human_gate_artifacts import canonical_sha256
 
 _LOCK = threading.RLock()
 
-_SUPPORTED_KINDS = frozenset(
+_SUPPORTED_KINDS = OPERATOR_ARTIFACT_KINDS | frozenset(
     {
         "run_artifacts",
         "research_result_package",
