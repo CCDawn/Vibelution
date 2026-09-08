@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="README.md">中文</a> · English<br>
-  <a href="#how-agents-work-together">Multi-agent collaboration</a> · <a href="#watch-a-research-team-at-work">Research demo</a> · <a href="#side-products-built-on-the-workbench">Side products</a> · <a href="#get-started">Get started</a>
+  <a href="#how-agents-work-together">Multi-agent collaboration</a> · <a href="#watch-a-research-team-at-work">Research demo</a> · <a href="#all-features">All features</a> · <a href="#side-products-built-on-the-workbench">Side products</a> · <a href="#get-started">Get started</a>
 </p>
 
 Complex work often needs several roles: someone gathers sources, someone proposes an approach, someone executes it, and someone checks the result.
@@ -42,20 +42,83 @@ This SCI-003 historical replay includes **21 nodes and 56 relationships**, and a
 
 [Workflow reference](core/web/services/team_workflow/README.md)
 
-## A workbench for everyday work, too
+## All features
+
+Multi-agent collaboration is the core; these capabilities make it a usable everyday workbench. UI features and Agent tools are described separately. Availability depends on model, permission, and runtime configuration.
+
+### Conversations, group discussions, and tasks
+
+- **Individual sessions:** Create and manage conversations, follow streamed replies, inspect tools, pending approvals, and history, and stop or resume work.
+- **Multi-agent rooms:** Bring several members into a shared discussion, with direct conversations and group rooms in one index.
+- **Coding workspace:** Browse project files, read their contents, work with terminals and tools, and inspect related child sessions.
+- **Kernel Task Center:** Filter tasks by status and assigned Agent, then follow dispatch, execution, delivery outcomes, and artifact references on a timeline.
+- **External agents:** Execution and terminal entry points for configured CLI agents. An MCP gateway lets external coding tools submit tasks to managed project agents and query their results. Both require the appropriate setup.
+
+[Conversation workspace](web/src/routes/chat/README.md) · [MCP setup](docs/agents/mcp-managed-agent-gateway.md)
+
+### Agents, prompts, tools, and skills
 
 ![Agent configuration workbench with model bindings and tools](docs/assets/readme/web-workbench-chat.png)
 
-- **Coding and conversations:** Multiple sessions, tool-call inspection, and stop/resume controls.
-- **Knowledge and Git:** Organize source material, inspect diffs, and choose files to commit.
-- **Evaluation and improvement:** Compare baselines and candidates, retain evaluation records, and bound self-modification with validation and rollback.
+- **Agent management:** Create, edit, archive, and bulk-manage roles; inspect model bindings and capabilities.
+- **Prompt templates:** Browse and maintain reusable role instructions, and inspect the context assembled for a conversation.
+- **Tool management:** Inspect the catalog and each Agent's permissions. Configured tools cover files, code edits, commands, tests, webpage retrieval, and paper, news, and project search.
+- **Skill library:** Search and read skill descriptions and details so agents can find reusable methods. The current UI is primarily a browsing surface.
+- **Agent plugins:** Bind optional capabilities to selected agents, such as Virtual Human Life.
+- **Browser automation:** Controlled Computer Use in a sandbox browser; disabled by default and enabled through configuration.
+- **Image generation:** An Agent tool for generating images, requiring the corresponding image service configuration and tool permission.
+
+[Agent configuration](core/web/services/agent_directory/README.md) · [Tool catalog](tools/README.md) · [Tool permissions](docs/agents/tool-authorization-entrypoints.md)
+
+### Teams, research, and knowledge
+
+- **Teams and workflows:** Manage members and role relationships, reuse team templates, and inspect task nodes, branches, human checkpoints, and stage handoffs on a canvas.
+- **Research pipeline:** Work from questions and sources through knowledge organization, hypotheses, review, and experiment design. Keep candidate proposals, revisions, and stage artifacts. Experiment execution and acceptance have their own requirements.
+- **Source processing:** Agent tools for source intake, processing, and retrieval, with source references for subsequent work.
+- **Personal memory and team knowledge:** Separate views of Agent memories and shared knowledge, including proposals, ingestion, and review records.
+- **Search and graphs:** Search memory and knowledge and explore relationships. Optional vector indexing can enhance retrieval when configured.
+- **GitHub project library:** Index shallow clones of public repositories so agents can find code worth reusing.
+- **User documents and governance:** Manage Markdown content, sources, indexes, and effective content. Preview the scope before protected cleanup.
+
+[Team workflows](core/web/services/team_workflow/README.md) · [Knowledge base](core/web/services/team_knowledge/README.md) · [Memory and retrieval](core/web/services/memory_rag_services.md)
+
+### Supervised evolution and self-evolution
+
+![Supervised evaluation workbench with runs and result comparisons](docs/assets/readme/web-workbench-supervised.png)
+
+**Supervised evolution: compare before deciding.** Manage datasets and evaluation bundles, compare baselines with candidates, and inspect live runs, history, and the library. Conversation samples have a separate review queue. Proposals and advisory baselines retain records; candidate execution and integration use isolated validation.
+
+**Self-evolution: give each improvement a clear goal.** Inspect repository and runtime state, start bounded inspection, modification, and validation, and retain transaction, audit, and rollback records. Continuing loops require user approval and explicit stop conditions.
+
+Neither mode grants unrestricted permission to change the project. Producing a proposal does not, by itself, demonstrate an improvement.
+
+[Evolution modes and execution](core/web/services/evolution_services.md) · [Configuration](docs/ops/config/06-agent-evolution.md)
+
+### Models, configuration, and usage
+
+- **Models and providers:** Manage providers, model libraries, role bindings, and runtime parameters. Choose models per Agent and configure protocols, output limits, and caching for each provider.
+- **Configuration workspace:** Inspect and adjust runtime settings, model references, and provider drafts. Credentials live outside the repository.
+- **Token usage:** View all-time, daily, seven-day, and latest-call totals, with Agent, session, and model breakdowns, cache reads, context limits, and latency. Records distinguish provider-reported usage, estimates, and missing data.
+- **Interface preferences:** Chinese and English, themes and backgrounds, and persistent pane layouts.
+
+[Model and configuration guide](docs/ops/config/INDEX.md)
+
+### Git, runtime management, and troubleshooting
+
+- **Git workbench:** Inspect status, diffs, and history, select files to commit, and draft commit messages.
+- **Launcher and system tray:** Start, stop, restart, and open the workbench. Active-task checks protect lifecycle actions while work is running.
+- **Branch instances:** Inspect isolated branch workspaces and their runtime state, and manage separate development instances.
+- **Logs and runtime scenes:** Browse logs and diagnostics, connect session, tool, and process problems, and inspect or export per-run evidence packages.
+- **Maintenance and reset:** Preview cleanup scope and perform protected maintenance on allowed targets.
 
 <details>
-<summary>View the supervised evaluation workbench</summary>
+<summary>View the Git workbench</summary>
 
-![Supervised evaluation demonstration screenshot](docs/assets/readme/web-workbench-supervised.png)
+![Git workbench demonstration screenshot](docs/assets/readme/web-workbench-git.png)
 
 </details>
+
+[Launcher and desktop](desktop/electron/README.md) · [Logging and diagnostics](core/logging/README.md) · [Runtime configuration](docs/ops/config/07-launcher-runtime-workbench.md)
 
 ## Side products built on the workbench
 
@@ -69,6 +132,8 @@ There is room for lighter experiments, too. These are additional experiences; mu
 **Virtual humans — her day continues after the conversation.** Characters have schedules, moods, diaries, and long-term memories, and can reach out proactively. Continuity between life events and dialogue is still being refined. Enable Virtual Human Life for an Agent to meet them in the lobby. [Capability reference](core/agent_plugins/virtual_human_life/README.md)
 
 **Desktop buddy — keep an eye on work without watching every session.** A character changes its cues and lightweight animation as sessions run, wait for approval, finish, or encounter errors. Click to inspect live conversations, drag to reposition, and reopen it from the system tray after closing.
+
+**Pet space — growth and status.** A separate page shows the pet's level, experience, state, and achievements, apart from the floating desktop character.
 
 [Media and recording notes](docs/assets/readme/README.md)
 
