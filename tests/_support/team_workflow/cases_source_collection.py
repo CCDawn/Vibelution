@@ -4817,6 +4817,13 @@ def test_content_extraction_writeback_materializes_candidate_evidence_ledger(tmp
     )
     _append_stage_task_tool_trace(tmp_path, task["task"])
 
+    append_conversation_event(
+        tmp_path, task["sessionId"], task["turn"]["turnId"], "tool_result", status="done",
+        payload={"toolCall": {"name": "web_fetch_tool", "status": "done",
+            "arguments": {"url": candidate["sourceUrl"]},
+            "result": "[网页内容] " + candidate["sourceUrl"] + "\n\n" + candidate["summary"]}},
+    )
+
     response = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
         team["teamId"],
         task["taskId"],
@@ -4844,7 +4851,7 @@ def test_content_extraction_writeback_materializes_candidate_evidence_ledger(tmp
                                 "fact": "Predictive coding uses hierarchical prediction errors.",
                                 # Completed extraction writebacks on the formal
                                 # claim path require a verbatim quote anchor
-                                # copied from the stored candidate summary.
+                                # copied from the successful fetch receipt.
                                 "quote": "Predictive coding evidence",
                                 "sourceRef": "source-1",
                                 "supportLevel": "strong",
@@ -5809,6 +5816,13 @@ def test_record_extraction_writeback_materializes_evidence_ledger_on_imported_ca
         {"stageId": "extraction", "agentId": agent["agentId"], "agentRole": "source_extractor"},
     )
 
+    append_conversation_event(
+        tmp_path, task["sessionId"], task["turn"]["turnId"], "tool_result", status="done",
+        payload={"toolCall": {"name": "web_fetch_tool", "status": "done",
+            "arguments": {"url": record["sourceRef"]},
+            "result": "[网页内容] " + record["sourceRef"] + "\n\n" + record["summary"]}},
+    )
+
     response = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
         team["teamId"],
         task["taskId"],
@@ -5834,8 +5848,8 @@ def test_record_extraction_writeback_materializes_evidence_ledger_on_imported_ca
                             {
                                 "claim": "Predictive coding raw record supports hierarchical control analogy.",
                                 "fact": "Predictive coding raw record supports hierarchical control analogy.",
-                                # Verbatim quote anchor from the stored record
-                                # summary (formal claim path contract).
+                                # Verbatim quote anchor from the successful
+                                # fetch receipt (formal claim path contract).
                                 "quote": "A raw DataRecord",
                                 "sourceRef": "record-source-1",
                                 "supportLevel": "medium",

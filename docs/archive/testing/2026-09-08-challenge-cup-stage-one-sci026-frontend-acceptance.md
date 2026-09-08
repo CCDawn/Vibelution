@@ -119,3 +119,5 @@
 - 修复：复用现有 inter_process_lock 按 source run 串行处理入库；在当前 run 的 candidate store 按相同 source pack 完整 output 与目标知识库复用 pack/officialSyncRecord。已完成时直接返回已有 KnowledgeItem，pending_review 直接继续 proposal review，已接受 inbox source 的中断恢复跳过第二次 source review。没有新增入库队列或延长工具 timeout。
 - 验证：新增 stale task 重放、source 接受后中断恢复、重叠请求不能重复进入副作用 3 项通过；现有入库 actor 授权 4 项通过。
 - 精确限制：这次修正超时重放的重复副作用，不能据此宣称首次 8 条串行入库已少于 180 秒；未删除历史重复对象。SCI-026 正式候选、评审与最终结果包仍待运行验收，不能将现有摘要引文或存量重复项自动作为合格科研成果。
+
+- 合入检查中的两处既有 evidence ledger 用例仍用未抓取的 summary 作引文，按新契约正确失败；测试 fixture 已补本任务成功 web_fetch_tool 回执，两处窄回归通过，未放宽生产引用门。
