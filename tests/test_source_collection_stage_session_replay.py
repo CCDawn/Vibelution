@@ -310,3 +310,49 @@ def test_completion_snapshot_maps_completed_without_reclassifying_ready(
     )
 
     assert result["status"] == expected_status
+
+
+def test_context_budget_replay_accepts_interrupted_task(monkeypatch):
+    """continuation 耗尽/needs_continue 的 turn 会被 reconcile 归一成 interrupted，
+    但 failure summary 仍携带 context_budget 证据：interrupted 必须同样换新会话，
+    否则每次重试都复用已超限的中毒会话（事故：同一会话 a4/a5 连续两轮死于
+    同一上下文硬上限前置闸）。"""
+    fake = _FakeService(session_detail={"sessionId": "session-1"})
+    result = _prepare(
+        monkeypatch,
+        fake,
+        _task(
+            status="interrupted",
+            failureCode="agent_turn_continuation_exhausted",
+            failureMessage=(
+                "连续 3 级 continuation 全部被前置闸拒绝，无进展。"
+                "上下文预算超出硬上限（context_budget_exhausted）。"
+            ),
+        ),
+    )
+
+    assert result["action"] == "formal_retry_same_task"
+    assert result["recoveryReason"] == replay_module.CONTEXT_BUDGET_RETRY_NEW_SESSION
+    assert result["task"]["taskId"] == "stagetask-1"
+    assert any(
+        event_type == "source_collection.stage_session_task_context_budget_retry"
+        for event_type, _team_id, _fields in fake.events
+    )
+
+
+def test_interrupted_without_context_marker_keeps_reuse(monkeypatch):
+    """interrupted 但 summary 无 context budget 标记 → 保持既有 reuse 语义（回归）。"""
+    fake = _FakeService(session_detail={"sessionId": "session-1"})
+    result = _prepare(
+        monkeypatch,
+        fake,
+        _task(
+            status="interrupted",
+            failureCode="agent_turn_continuation_exhausted",
+            failureMessage="Continuation exhausted without progress.",
+            summary="连续续跑无进展，任务已暂停。",
+        ),
+    )
+
+    assert result["action"] == "reuse"
+    assert result["task"]["taskId"] == "stagetask-1"

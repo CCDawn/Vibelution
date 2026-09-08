@@ -131,10 +131,16 @@ def prepare_source_collection_stage_task_replay(
         )
         return {"action": "resume_same_task", "task": current}
 
-    if status == "failed" and _failed_on_context_budget_loop(current):
-        # Reusing the poisoned session would feed the failed turn's error
-        # summary back into the history and re-trigger the context budget
-        # gate. Retry the same task on a fresh session instead.
+    if status in {"failed", "interrupted"} and _failed_on_context_budget_loop(current):
+        # Continuation-exhausted / needs-continue turns are normalized to
+        # "interrupted" by stage reconcile instead of "failed", but their
+        # failure summary still carries the context_budget evidence. Leaving
+        # "interrupted" out of this gate made every retry reuse the over-limit
+        # session forever (one session died on the same budget gate across
+        # consecutive turns a4/a5). Reusing the poisoned session would feed
+        # the failed turn's error summary back into the history and
+        # re-trigger the context budget gate. Retry the same task on a fresh
+        # session instead.
         s._record_workflow_event(
             "source_collection.stage_session_task_context_budget_retry",
             team_id,
