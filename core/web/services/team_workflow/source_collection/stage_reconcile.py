@@ -1826,7 +1826,7 @@ def _source_collection_context_task_summary(task: dict[str, Any]) -> dict[str, A
         if isinstance(writeback.get("closureSummary"), dict)
         else result.get("closureSummary") if isinstance(result.get("closureSummary"), dict) else {}
     )
-    return {
+    summary = {
         "taskId": s._trim_text(task.get("taskId"), max_length=160),
         "stageId": s._trim_text(task.get("stageId"), max_length=80),
         "agentId": s._trim_text(task.get("agentId"), max_length=160),
@@ -1841,6 +1841,15 @@ def _source_collection_context_task_summary(task: dict[str, Any]) -> dict[str, A
         "completionGate": task.get("completionGate") if isinstance(task.get("completionGate"), dict) else {},
         "closureSummary": closure_summary,
     }
+    contract = task.get("writebackContract") if isinstance(task.get("writebackContract"), dict) else {}
+    if task.get("stageId") == "finding" and isinstance(contract.get("searchEnvelope"), dict):
+        from ..source_collection_context import summarize_source_collection_writeback_batches
+
+        summary["sourceCollectionWritebackBatchSummary"] = summarize_source_collection_writeback_batches(
+            task.get("sourceCollectionWritebackBatches"),
+            search_envelope=contract["searchEnvelope"],
+        )
+    return summary
 
 
 def _source_collection_context_assignment_summary(assignment: dict[str, Any]) -> dict[str, Any]:

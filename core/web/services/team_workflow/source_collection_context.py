@@ -238,6 +238,11 @@ def compact_source_collection_stage_task_context(context: dict[str, Any]) -> dic
         "candidatePage": normalize_metadata(candidate_page),
         "usage": compact_usage,
     }
+    task = context.get("task") if isinstance(context.get("task"), dict) else {}
+    if isinstance(task.get("sourceCollectionWritebackBatchSummary"), dict):
+        # Minimal retry context needs the same remaining budget as the initial
+        # task, even though its descriptive task card is omitted.
+        compact["writebackBudget"] = dict(task["sourceCollectionWritebackBatchSummary"])
     if not minimal_mode:
         compact["visibleCandidateCount"] = len(candidates)
         compact["omittedReturnedCandidateCount"] = max(0, returned_candidate_count - len(candidates))
@@ -599,8 +604,6 @@ def compact_source_collection_context_task(task: dict[str, Any]) -> dict[str, An
             for key in ("passed", "artifactComplete", "taskChecklistComplete")
             if key in gate
         }
-    if isinstance(task.get("sourceCollectionWritebackBatchSummary"), dict):
-        compact["sourceCollectionWritebackBatchSummary"] = dict(task["sourceCollectionWritebackBatchSummary"])
     return compact
 
 

@@ -40,9 +40,19 @@
 
 ## 现场成本补核与第二轮主审
 
-- 2026-09-08 再次通过 `agent_log_context` 确認 active instance 为 `bcabd5ca`。只读查询该实例 `workspace/usage/usage_ledger.sqlite3` 的 `usage_events`，按明确 session ID、`provider_usage/chat_session` 聚合；未混入其他题目。
+- 2026-09-08 再次通过 `agent_log_context` 确认 active instance 为 `bcabd5ca`。只读查询该实例 `workspace/usage/usage_ledger.sqlite3` 的 `usage_events`，按明确 session ID、`provider_usage/chat_session` 聚合；未混入其他题目。
 - 初次 `session-20260908-124218-168766`：18 次模型调用，累计输入 661,266、输出 20,526、cached input 299,670、单次最大输入 77,067；模型调用延迟合计 316,055 ms。
 - 重试 `session-20260908-125613-559737`：12 次模型调用，累计输入 641,520、输出 30,506、cached input 214,011、单次最大输入 93,930；模型调用延迟合计 434,313 ms。两次均为 `qwen3.8-flash`。延迟合计不等于完整业务墙钟时间，token 数不等于已结算人民币费用。
 - 重试 Journal 中两条 `source_collection_context_tool` 的完整 toolCall JSON 分别约 119,886 / 166,561 字符（包含工具参数与回包）；已将原始文件的只读定位交给检索 Agent，要求拆分 result 字段并重放测量，不能把此长度直接当作模型 token 数。原始 Prompt/回包不复制进仓库。
 - 主审退回的新增问题：回执数不超过 4 时原样返回仍允许单条超大上下文；两个冲突 DOI 都曾出现在当前 run 的回执集合时，集合包含判断仍不能证明同源。已要求统一有界投影，以及“两个 DOI 都有真实回执但同一候选混用”的拒绝测试。
 - 带 session 的日志上下文扩展扫描长时间无输出，已终止本任务这次只读扫描进程，改用已确认 active path 下的精确 Journal 和用量账本；未停止产品进程。
+
+## 检索分支接管与输入体积验收
+
+- 检索 Agent 交回现场测量后仍有未提交改动、旧 fixture 和未闭合的预算摘要。主 Agent 接管其文件，移除残余未使用的兼容分支，统一单条/多条回执投影，展示最新回执及完整数量摘要；独立通过 23 项查询种子/上下文测试后提交并组合进集成分支。
+- 找到预算丢失的真实落点：`stage_reconcile._source_collection_context_task_summary` 丢弃 task 的批次账本，后续 compact helper 无数据可用；minimal 模式又省略 task 卡。修复从冻结 searchEnvelope 与真实批次派生预算摘要，在 compact/minimal/retry_missing 三种模式统一保留；不保存第二份预算权威。
+- 原写回工具仅回传计数，来源 ID 与完整失败原因在裁剪中丢失。现在复用物化 lineage 与本批 fingerprint，只返回本批 record/candidate ID、各自写入状态、真实 receipt gate 和剩余预算；完成时不再邀请继续搜索。相关工具/摘要/JSON 测试 20 项通过，原批次/失败诊断/检索记忆/写回合同回归另 28 项通过。
+- 主 Agent 只读重放 SCI-011 重试 Journal 第 10 / 66 行的 result；用同一 UTF-8 JSON 紧凑序列化和项目 `estimate_tokens_precise` 比较，不复制原文到仓库。第 10 行 compact：47,810 → 28,697 字符，估算 14,940 → 9,170 tokens。第 66 行 minimal：66,150 → 15,837 字符，估算 20,078 → 4,774 tokens。均可 JSON round-trip；保留全回执数量、当前可见回执 scope/locator，以及从当前任务快照派生的预算。此测量并未修改历史 task，也不证明重试继承后的新预算已在活数据执行。
+- Journal 同时保存 toolCall.summary/result 的重复文本属于存储事实；本轮没有据此声称模型一定重复读取两份，也未修改普通 Session。
+- 再查 SCI-011 父/知识子运行的冻结路由：搜索为 Flash，提炼/整合/修订为 Plus，评估为 Max；实际两个 finding session 的用量回执均为 Flash。未运行的后续节点只证明冻结配置。
+- 前端首版已交回选择入口及单一 canonical action 校验；主 Agent 核查后端 pending 前置条件明确要求正式候选少于两个，不能凭推测删除 phase fence。外层 Inspector 路由、会议刷新与第一阶段进度正在补充限定验收。

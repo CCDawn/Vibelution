@@ -172,8 +172,8 @@ def test_compact_context_preserves_writeback_batch_budget_without_fingerprints()
         "task": {"status": "running", "sourceCollectionWritebackBatchSummary": budget},
         "writebackContract": {"searchEnvelope": envelope},
     })
-    assert context["task"]["sourceCollectionWritebackBatchSummary"]["newAcceptedLeadCount"] == 7
-    assert context["task"]["sourceCollectionWritebackBatchSummary"]["remainingAcceptedLeadCount"] == 1
-    assert context["task"]["sourceCollectionWritebackBatchSummary"]["remainingBatchCount"] == 0
+    assert context["writebackBudget"]["newAcceptedLeadCount"] == 7
+    assert context["writebackBudget"]["remainingAcceptedLeadCount"] == 1
+    assert context["writebackBudget"]["remainingBatchCount"] == 0
     assert context["writebackContract"]["searchEnvelope"]["effectiveAcceptedLeadLimit"] == 8
     assert "leadFingerprints" not in json.dumps(context, ensure_ascii=False)

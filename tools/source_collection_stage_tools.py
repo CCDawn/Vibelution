@@ -369,7 +369,7 @@ def _compact_source_collection_stage_writeback_response(response: dict[str, Any]
     task = response.get("task") if isinstance(response.get("task"), dict) else {}
     result = writeback.get("result") if isinstance(writeback.get("result"), dict) else {}
     closure_summary = writeback.get("closureSummary") if isinstance(writeback.get("closureSummary"), dict) else {}
-    return {
+    compact = {
         "schemaVersion": response.get("schemaVersion", 1),
         "status": _text(writeback.get("status") or task.get("status") or payload.get("status")),
         "requestedStatus": _text(writeback.get("agentRequestedStatus") or payload.get("status")),
@@ -398,6 +398,47 @@ def _compact_source_collection_stage_writeback_response(response: dict[str, Any]
         "nextActionCount": len(payload.get("nextActions") or []),
         "nextStep": "Use source_collection_context_tool for details if another page or retry is needed.",
     }
+    if compact["stageId"] == "finding":
+        from core.web.services.team_workflow.source_collection.writeback_materialize import (
+            _source_collection_stage_writeback_lead_fingerprint,
+            _source_collection_stage_writeback_source_leads,
+        )
+        from core.web.services.team_workflow.source_collection_context import summarize_source_collection_writeback_batches
+
+        incoming = payload.get("result") if isinstance(payload.get("result"), dict) else {}
+        fingerprints = {
+            _source_collection_stage_writeback_lead_fingerprint(lead)
+            for lead in _source_collection_stage_writeback_source_leads(incoming)
+        }
+        materialized = writeback.get("materializedSources") if isinstance(writeback.get("materializedSources"), dict) else {}
+        # Return this batch's persisted identities instead of asking the Agent
+        # to reread the full context just to find its new record/candidate IDs.
+        compact["sourceReceipts"] = [
+            {
+                "leadId": item.get("leadId"),
+                "recordId": (item.get("record") or {}).get("recordId"),
+                "recordStatus": (item.get("record") or {}).get("status"),
+                "candidateId": (item.get("candidate") or {}).get("candidateId"),
+                "candidateStatus": (item.get("candidate") or {}).get("status"),
+                "reason": item.get("reason", ""),
+            }
+            for item in materialized.get("lineage", [])
+            if isinstance(item, dict) and item.get("fingerprint") in fingerprints
+        ]
+        contract = task.get("writebackContract") if isinstance(task.get("writebackContract"), dict) else {}
+        compact["writebackBudget"] = summarize_source_collection_writeback_batches(
+            task.get("sourceCollectionWritebackBatches"), search_envelope=contract.get("searchEnvelope"),
+        )
+        gate = writeback.get("receiptGate") if isinstance(writeback.get("receiptGate"), dict) else {}
+        if gate:
+            compact["receiptGate"] = {"passed": bool(gate.get("passed")), "error": _text(gate.get("error"))[:1200]}
+        compact["nextStep"] = (
+            "Finding completed; no further search or writeback is required."
+            if compact["status"] == "completed" and compact["completionGate"].get("passed")
+            else _text(closure_summary.get("retryInstruction"))[:1000]
+            or "Continue only within the remaining frozen budget; read context only for unresolved gaps."
+        )
+    return compact
 
 
 def _compact_count_summary(value: Any) -> dict[str, Any]:
