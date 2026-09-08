@@ -1995,7 +1995,9 @@ def _source_collection_candidates_for_run(team_id: str, run_id: str) -> list[dic
         )
         if candidate_run_id == normalized_run_id:
             candidates.append(item)
-    return candidates
+    from .candidates import filter_active_source_candidates
+
+    return filter_active_source_candidates(team_id, normalized_run_id, candidates)
 
 
 def _source_collection_collection_mode(value: Any) -> str:

@@ -671,6 +671,49 @@ def list_candidate_store_authority_records(
             ]
         return records
 
+def filter_active_source_candidates(
+    team_id: str,
+    run_id: str,
+    candidates: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Apply existing source exclusions to consumption, preserving history.
+
+    Records obey this scope/identity decision already. Candidate consumption
+    previously ignored it, leaving an excluded DOI in receipt validation and
+    downstream extraction. The authority list still returns historical rows.
+    """
+    s = _service()
+    with s._WORKFLOW_LOCK:
+        store = s._load_source_collection_exclusion_store(team_id)
+    entries = [item for item in store.get("entries", []) if isinstance(item, dict)]
+    if not entries:
+        return candidates
+    run = s.data_processing_service.get_processing_run(run_id)
+    scope_key = s._source_collection_exclusion_scope(run)["scopeKey"]
+    excluded_keys = {
+        str(entry.get("sourceIdentityKey") or "").strip()
+        for entry in entries
+        if entry.get("scopeKey") == scope_key and entry.get("sourceIdentityKey")
+    }
+    if not excluded_keys:
+        return candidates
+    active: list[dict[str, Any]] = []
+    for candidate in candidates:
+        if candidate.get("candidateType") != "source_manifest":
+            active.append(candidate)
+            continue
+        metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+        imported = metadata.get("importedFromDataRecord") if isinstance(metadata.get("importedFromDataRecord"), dict) else {}
+        record = {
+            **candidate,
+            "recordId": imported.get("recordId"),
+            "sourceRef": candidate.get("sourceRef") or candidate.get("sourceUrl"),
+        }
+        if s._source_collection_record_identity_or_record_key(record) not in excluded_keys:
+            active.append(candidate)
+    return active
+
+
 def validate_candidate_store(team_id: str) -> dict[str, Any]:
     s = _service()
     normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")

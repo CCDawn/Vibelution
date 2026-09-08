@@ -56,3 +56,4 @@
 - Journal 同时保存 toolCall.summary/result 的重复文本属于存储事实；本轮没有据此声称模型一定重复读取两份，也未修改普通 Session。
 - 再查 SCI-011 父/知识子运行的冻结路由：搜索为 Flash，提炼/整合/修订为 Plus，评估为 Max；实际两个 finding session 的用量回执均为 Flash。未运行的后续节点只证明冻结配置。
 - 前端首版已交回选择入口及单一 canonical action 校验；主 Agent 核查后端 pending 前置条件明确要求正式候选少于两个，不能凭推测删除 phase fence。外层 Inspector 路由、会议刷新与第一阶段进度正在补充限定验收。
+- 来源排除的独立缺陷已确认：DataRecord 按既有 exclusion store 过滤，但 `_source_collection_candidates_for_run` 和 finding canonical candidate reader 未使用该决定。主 Agent已在 CandidateStore owner 新增同一主题/身份的活跃过滤，并接入下游候选消费；历史 authority list 保持原始记录。隔离测试中错误 DOI 排除后正确 DOI 仍可用、旧候选与纠正证据仍保留、其他主题不受影响、仅缺回执不被自动排除；2 项新测试与 3 项原排除/质量回归通过。待来源 Agent 交付后串行接入 finding receipt reader；活数据仍未处理。
