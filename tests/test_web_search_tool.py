@@ -242,3 +242,197 @@ def test_extract_plain_text_prefers_trafilatura_when_available(monkeypatch):
     text = web_search_tool._extract_plain_text("<html><body><script>x()</script><article>fallback</article></body></html>")
 
     assert text == "Main article text\n\nMain article text"
+
+
+# ============================================================================
+# web_fetch: PDF 提取与同站（注册域）重定向跟随
+# ============================================================================
+
+
+def _build_pdf_bytes(*page_texts: str) -> bytes:
+    """Assemble a minimal valid multi-page PDF with one text line per page."""
+    page_count = len(page_texts)
+    font_num = 3 + 2 * page_count
+    kids = " ".join(f"{3 + 2 * i} 0 R" for i in range(page_count))
+    bodies = {
+        1: b"<< /Type /Catalog /Pages 2 0 R >>",
+        2: f"<< /Type /Pages /Kids [{kids}] /Count {page_count} >>".encode("ascii"),
+        font_num: b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    }
+    for index, text in enumerate(page_texts):
+        page_num = 3 + 2 * index
+        content_num = page_num + 1
+        stream = f"BT /F1 24 Tf 72 700 Td ({text}) Tj ET".encode("ascii")
+        bodies[page_num] = (
+            f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+            f"/Contents {content_num} 0 R /Resources << /Font << /F1 {font_num} 0 R >> >> >>"
+        ).encode("ascii")
+        bodies[content_num] = (
+            b"<< /Length "
+            + str(len(stream)).encode("ascii")
+            + b" >>\nstream\n"
+            + stream
+            + b"\nendstream"
+        )
+
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = {}
+    for num in sorted(bodies):
+        offsets[num] = len(out)
+        out += f"{num} 0 obj\n".encode("ascii")
+        out += bodies[num]
+        out += b"\nendobj\n"
+    xref_pos = len(out)
+    max_num = max(bodies)
+    out += f"xref\n0 {max_num + 1}\n".encode("ascii")
+    out += b"0000000000 65535 f \n"
+    for num in range(1, max_num + 1):
+        out += f"{offsets[num]:010d} 00000 n \n".encode("ascii")
+    out += f"trailer\n<< /Size {max_num + 1} /Root 1 0 R >>\nstartxref\n{xref_pos}\n%%EOF\n".encode("ascii")
+    return bytes(out)
+
+
+def test_web_fetch_extracts_pdf_text(monkeypatch):
+    pdf_bytes = _build_pdf_bytes("Alpha page one marker", "Bravo page two marker")
+
+    def fake_get(method, url, **kwargs):
+        return httpx.Response(
+            200,
+            headers={"content-type": "application/pdf"},
+            content=pdf_bytes,
+            request=httpx.Request("GET", url),
+        )
+
+    install_fake_client(monkeypatch, fake_get)
+
+    result = web_search_tool.web_fetch("https://repository.example.com/report.pdf")
+
+    assert result.startswith("[PDF 文本] https://repository.example.com/report.pdf")
+    assert "Alpha page one marker" in result
+    assert "Bravo page two marker" in result
+
+
+def test_web_fetch_pdf_over_size_limit_rejected(monkeypatch):
+    oversized = b"%PDF-1.4\n" + b"0" * (web_search_tool._WEB_FETCH_MAX_BYTES + 1)
+
+    def fake_get(method, url, **kwargs):
+        return httpx.Response(
+            200,
+            headers={"content-type": "application/pdf"},
+            content=oversized,
+            request=httpx.Request("GET", url),
+        )
+
+    install_fake_client(monkeypatch, fake_get)
+
+    result = web_search_tool.web_fetch("https://repository.example.com/huge.pdf")
+
+    assert result.startswith("[错误]")
+    assert "超过安全上限" in result
+
+
+def test_web_fetch_pdf_without_text_reports_scanned(monkeypatch):
+    blank_pdf = _build_pdf_bytes("", "")
+
+    def fake_get(method, url, **kwargs):
+        return httpx.Response(
+            200,
+            headers={"content-type": "application/pdf"},
+            content=blank_pdf,
+            request=httpx.Request("GET", url),
+        )
+
+    install_fake_client(monkeypatch, fake_get)
+
+    result = web_search_tool.web_fetch("https://repository.example.com/scanned.pdf")
+
+    assert result.startswith("[错误]")
+    assert "PDF 无可提取文本" in result
+    assert "扫描件" in result
+
+
+def test_web_fetch_follows_same_site_idp_redirect_with_cookies(monkeypatch):
+    article = "https://www.nature.com/articles/s41586-026-1"
+    idp = "https://idp.nature.com/authorize?redirect_uri=abc"
+    article_gets = []
+
+    def fake_get(method, url, **kwargs):
+        request = httpx.Request("GET", url)
+        if url == article:
+            article_gets.append(url)
+            if len(article_gets) == 1:
+                # 真实 nature 链路：文章 303 → idp/authorize（设 cookie）。
+                return httpx.Response(303, headers={"location": idp}, request=request)
+            # idp 回跳原样 URL；同 client cookie jar 让第二次请求落到 200。
+            return httpx.Response(
+                200,
+                request=request,
+                text="<html><body><article>Full text unlocked</article></body></html>",
+            )
+        if url == idp:
+            return httpx.Response(302, headers={"location": article}, request=request)
+        raise AssertionError(f"Unexpected fetch: {url}")
+
+    install_fake_client(monkeypatch, fake_get)
+
+    result = web_search_tool.web_fetch(article)
+
+    assert "跨主机重定向" not in result
+    assert article in result
+    assert "Full text unlocked" in result
+    assert article_gets == [article, article]
+
+
+def test_web_fetch_stops_cross_site_redirect(monkeypatch):
+    springer = "https://link.springer.com/article/10.1007/example"
+
+    def fake_get(method, url, **kwargs):
+        return httpx.Response(
+            302,
+            headers={"location": springer},
+            request=httpx.Request("GET", url),
+        )
+
+    install_fake_client(monkeypatch, fake_get)
+
+    result = web_search_tool.web_fetch("https://doi.org/10.1007/example")
+
+    assert "跨主机重定向" in result
+    assert "停止自动跟随" in result
+    assert springer in result
+
+
+def test_web_fetch_detects_redirect_loop(monkeypatch):
+    calls = []
+
+    def fake_get(method, url, **kwargs):
+        calls.append(url)
+        target = "https://example.com/b" if url == "https://example.com/a" else "https://example.com/a"
+        return httpx.Response(
+            302,
+            headers={"location": target},
+            request=httpx.Request("GET", url),
+        )
+
+    install_fake_client(monkeypatch, fake_get)
+
+    result = web_search_tool.web_fetch("https://example.com/a")
+
+    # 同一 URL 允许到达 2 次（cookie 预授权回跳），第 3 次出现判真实环路。
+    assert result == "[错误] 重定向循环: https://example.com/a"
+    assert calls == [
+        "https://example.com/a",
+        "https://example.com/b",
+        "https://example.com/a",
+        "https://example.com/b",
+    ]
+
+
+def test_registrable_host_suffix_rules():
+    registrable = web_search_tool._registrable_host
+
+    assert registrable("nature.com") == registrable("idp.nature.com") == "nature.com"
+    assert registrable("doi.org") != registrable("link.springer.com")
+    assert registrable("www.oecd.org") == registrable("oecd.org") == "oecd.org"
+    assert registrable("bbc.co.uk") == registrable("www.bbc.co.uk") == "bbc.co.uk"
+    assert registrable("bbc.co.uk") != registrable("itv.co.uk")

@@ -61,3 +61,13 @@
 - 测试：`tests/test_completion_dependency_recovery.py` 新增 2 个（观测 usage → settled 且 1,066,138 不丢；无 usage → voided 且终态幂等）；`tests/test_reconcile_run_ledger_authority_recompute.py` 新增 1 个（reconcile 补偿 completion-pending 僵尸预留 + 非 completion-pending 反例不触碰）。
 - 恢复计划（修复加载后）：前端知识节点「对账运行」（reconcile_run）触发③的补偿闭合 a2 僵尸预留（按 usage settle），阶段准入释放后再「启动 资料提炼」（start_node source_extraction）续链。
 - 恢复路径更正：经前端核实，知识节点 offer 白名单不含 reconcile_run（仅 ensure/inspect），子 run 无任何对账入口，上述恢复计划不可操作；故将对账补偿扩展到主 run reconcile 的知识子 run 扫描（缺陷③，本次提交），操作路径=主 run 面板「对账运行」。
+
+### B.5 缺陷④：补源后的 a3 提炼在抓取层 8/8 全败——PDF 不支持 + 同站 IdP 跳转被误停（已修复，待加载复验）
+
+- 现象：缺陷①②③修复加载并经前端补源（注册 8 篇可及来源）后，a3 提炼 attempt 对全部 8 个候选执行 web_fetch 全败，failureCode 清单：`http_403`×2、`redirect_loop`×4、`unsupported_content_type_pdf`×1、`403`×1。开放获取仓库（edepot.wur.nl 等）全文就是 PDF，提炼层拿不到任何原文。
+- 根因（`tools/web_search_tool.py`，两个工具层缺口，均真机复现定案）：
+  1. `_read_response_text` 只放行 text/html/xml/json/javascript/xhtml，`application/pdf` 直接返回「不支持的内容类型」，开放仓库 PDF 全文永远无法进入提炼；venv 已有 `pypdf`。
+  2. `_fetch_with_same_host_redirects` 只跟同 host 重定向：nature.com 文章 303 → `idp.nature.com/authorize`（设 cookie）→ 302 回跳原样文章 URL →（带 cookie）200。工具在跨 host 一跳停下并提示「请直接抓重定向后的 URL」，agent 照做又被 303 弹回 idp，形成指令级 A→B→A 死循环（生产 `redirect_loop`×4 即此）。httpx.Client 自带 cookie jar，同一 Client 内跟完三跳即 200（真机复现：`www.nature.com/articles/s41586-021-03819-2` 303 → idp → 回原 URL → 200 全文）。
+- 修复：① `_read_response_text` 对 content-type 含 `pdf` 走新增 `_extract_pdf_text`：pypdf 逐页 `extract_text()`（页间 `\n\n`，局部 import，异常/空文本分别返回 `[错误] PDF 文本提取失败` / `[错误] PDF 无可提取文本（可能是扫描件）`），保留 `_WEB_FETCH_MAX_BYTES` 超限拒绝，硬上限前 200 页并在文末标注截断；`web_fetch` 对 PDF 输出改用 `[PDF 文本] {final_url}` 前缀并跳过 trafilatura（实测 `trafilatura.extract` 对纯文本输入返回 None，跳过以免二次加工失真）。② 重定向判定改按注册域（`_registrable_host`，含 co.uk/org.uk/ac.uk/gov.uk/com.au/net.au/org.au/co.jp/ne.jp/or.jp/com.cn/net.cn/org.cn/edu.cn 多段后缀表）：同注册域跳转（nature.com ↔ idp.nature.com）继续跟随并由同一 Client 自然携带 cookie；真正跨站（doi.org → link.springer.com）保留原「跨主机重定向，已按安全策略停止自动跟随」语义与文案。③ 环路保护：同一 URL 允许到达 2 次（IdP 预授权回跳常是原样 URL，中间跳设置的 cookie 使第二次请求落 200——若按「第二次出现即报错」会掐死目标场景本身，真机冒烟证实），第 3 次出现返回 `[错误] 重定向循环: {url}`；`_WEB_FETCH_MAX_REDIRECTS` 上限语义保留。函数更名 `_fetch_with_same_site_redirects`。
+- 测试：`tests/test_web_search_tool.py` 新增 6 个（PDF 提取/超限拒绝/扫描件报错/同站 IdP 三跳回原 URL 200/跨站停止/重定向循环，含 `_registrable_host` 多段后缀单测，PDF fixture 由测试内最小 PDF 构造器现场生成）；`tests/test_research_search_tools.py` 的 `test_web_fetch_stops_cross_host_redirect` 目标改真跨站 URL（原 `example.com → other.example.com` 是同注册域，新语义下应跟随）。三套件 100 过。
+- 真机冒烟：`edepot.wur.nl/577712` 实测为 >2MB 的 application/pdf，被保留的 2MB 字节上限按设计拒绝（该仓库大文件需走其他来源）；`www.orimi.com/pdf-test.pdf` 返回 `[PDF 文本]` 开头且含正文子串；`www.nature.com/articles/s41586-021-03819-2` 跟完 idp 三跳返回文章正文，无 redirect_loop。

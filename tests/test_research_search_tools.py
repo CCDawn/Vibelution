@@ -380,11 +380,13 @@ def test_web_fetch_blocks_private_hosts_before_network(monkeypatch):
 
 
 def test_web_fetch_stops_cross_host_redirect(monkeypatch):
+    # 同注册域跳转（如 nature.com → idp.nature.com）现在会跟随；只有真正跨站（不同注册域）
+    # 才按安全策略停止自动跟随。
     def fake_request(method, url, **kwargs):
         return httpx.Response(
             302,
             request=httpx.Request("GET", url),
-            headers={"location": "https://other.example.com/final"},
+            headers={"location": "https://other-site.org/final"},
         )
 
     install_fake_client(monkeypatch, fake_request)
@@ -392,7 +394,7 @@ def test_web_fetch_stops_cross_host_redirect(monkeypatch):
     result = web_search_tool.web_fetch("https://example.com/start")
 
     assert "跨主机重定向" in result
-    assert "https://other.example.com/final" in result
+    assert "https://other-site.org/final" in result
 
 
 def test_web_fetch_user_agent_is_browser_like():

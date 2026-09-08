@@ -13,6 +13,7 @@ API 协议（参考 C:\\Users\\17533\\.agents\\skills\\autoglm-websearch\\SKILL.
 
 from __future__ import annotations
 
+import io
 import os
 import json
 import time
@@ -47,6 +48,24 @@ _PUBLIC_SEARCH_MAX_RESULTS = 20
 _WEB_FETCH_TIMEOUT = 30.0
 _WEB_FETCH_MAX_BYTES = 2 * 1024 * 1024
 _WEB_FETCH_MAX_REDIRECTS = 5
+_WEB_FETCH_MAX_PDF_PAGES = 200
+# 常见多段公共后缀：同站（注册域）判定时需多保留一段，避免 bbc.co.uk 被压成 co.uk。
+_MULTI_PART_PUBLIC_SUFFIXES = (
+    "co.uk",
+    "org.uk",
+    "ac.uk",
+    "gov.uk",
+    "com.au",
+    "net.au",
+    "org.au",
+    "co.jp",
+    "ne.jp",
+    "or.jp",
+    "com.cn",
+    "net.cn",
+    "org.cn",
+    "edu.cn",
+)
 # 浏览器式 UA：Wikimedia 等站点按 UA 形状拦截 "compatible; <tool>" 形式的机器人 UA，
 # 工具身份不再写入 User-Agent，避免 web_fetch/公开搜索被反爬直接 403。
 _USER_AGENT = (
@@ -722,8 +741,28 @@ def web_search(query: str, max_results: int = 10) -> str:
 # 网页内容抓取
 # ============================================================================
 
+def _registrable_host(hostname: str) -> str:
+    """Return the registrable domain (site key) for redirect same-site decisions.
+
+    Covers a small allowlist of multi-part public suffixes; anything else falls
+    back to the last two labels. Pure function, no network access.
+    """
+    host = str(hostname or "").strip().lower().strip(".")
+    if not host:
+        return ""
+    labels = host.split(".")
+    if len(labels) <= 2:
+        return host
+    last_two = ".".join(labels[-2:])
+    if last_two in _MULTI_PART_PUBLIC_SUFFIXES:
+        return ".".join(labels[-3:])
+    return last_two
+
+
 def _read_response_text(response: httpx.Response) -> str:
     content_type = str(response.headers.get("content-type") or "").lower()
+    if "pdf" in content_type:
+        return _extract_pdf_text(response)
     if content_type and not any(
         marker in content_type
         for marker in ("text/", "html", "xml", "json", "javascript", "xhtml")
@@ -734,6 +773,30 @@ def _read_response_text(response: httpx.Response) -> str:
         return f"[错误] 网页内容超过安全上限 {_WEB_FETCH_MAX_BYTES} bytes，已停止处理。"
     encoding = response.encoding or "utf-8"
     return content.decode(encoding, errors="replace")
+
+
+def _extract_pdf_text(response: httpx.Response) -> str:
+    """Extract plain text from a PDF response; never raises, returns [错误] strings on failure."""
+    if len(response.content) > _WEB_FETCH_MAX_BYTES:
+        return f"[错误] 网页内容超过安全上限 {_WEB_FETCH_MAX_BYTES} bytes，已停止处理。"
+    try:
+        from pypdf import PdfReader
+
+        reader = PdfReader(io.BytesIO(response.content))
+        total_pages = len(reader.pages)
+        page_limit = min(total_pages, _WEB_FETCH_MAX_PDF_PAGES)
+        parts: list[str] = []
+        for page in reader.pages[:page_limit]:
+            parts.append(page.extract_text() or "")
+        text = "\n\n".join(parts).strip()
+    except Exception as exc:
+        reason = f"{type(exc).__name__}: {exc}"[:200]
+        return f"[错误] PDF 文本提取失败: {reason}"
+    if not text:
+        return "[错误] PDF 无可提取文本（可能是扫描件）"
+    if total_pages > page_limit:
+        text = f"{text}\n\n[PDF 已截断至前 {page_limit} 页，共 {total_pages} 页]"
+    return text
 
 
 def _extract_plain_text(document: str) -> str:
@@ -774,9 +837,13 @@ def _format_http_fetch_error(status_code: int, url: str) -> str:
     return base
 
 
-def _fetch_with_same_host_redirects(url: str) -> tuple[str, httpx.Response | None]:
+def _fetch_with_same_site_redirects(url: str) -> tuple[str, httpx.Response | None]:
     current_url = url
     original_host = (urlparse(url).hostname or "").lower()
+    original_site = _registrable_host(original_host)
+    # 同一 URL 允许到达 2 次：同站 IdP 预授权链（article → idp/authorize → article）回跳的
+    # 常常是原样 URL，中间跳设置的 cookie 会让第二次请求落到 200；第 3 次出现才判真实环路。
+    visit_counts: dict[str, int] = {current_url: 1}
     try:
         with httpx.Client(timeout=_WEB_FETCH_TIMEOUT, follow_redirects=False) as client:
             for _ in range(_WEB_FETCH_MAX_REDIRECTS + 1):
@@ -796,7 +863,11 @@ def _fetch_with_same_host_redirects(url: str) -> tuple[str, httpx.Response | Non
                     if validation_error:
                         return f"[错误] 重定向目标被拒绝: {validation_error}: {next_url}", None
                     next_host = (urlparse(next_url).hostname or "").lower()
-                    if next_host != original_host:
+                    same_site = (
+                        next_host == original_host
+                        or _registrable_host(next_host) == original_site
+                    )
+                    if not same_site:
                         return (
                             "[网页抓取] 目标发生跨主机重定向，已按安全策略停止自动跟随。\n"
                             f"原 URL: {url}\n"
@@ -804,6 +875,12 @@ def _fetch_with_same_host_redirects(url: str) -> tuple[str, httpx.Response | Non
                             "如确认该目标可信，请直接用 web_fetch_tool 抓取重定向后的 URL。",
                             None,
                         )
+                    next_visits = visit_counts.get(next_url, 0) + 1
+                    if next_visits > 2:
+                        return f"[错误] 重定向循环: {next_url}", None
+                    # 同一 httpx.Client 自带 cookie jar：跨请求携带中间跳（如 IdP authorize）设置的
+                    # cookie，同站三跳（article → idp → article）即可落到 200。
+                    visit_counts[next_url] = next_visits
                     current_url = next_url
                     continue
                 response.raise_for_status()
@@ -839,15 +916,20 @@ def web_fetch(url: str, max_chars: int = 8000, prompt: str = "") -> str:
     if validation_error:
         return f"[错误] {validation_error}: {url}"
 
-    final_url_or_error, response = _fetch_with_same_host_redirects(url)
+    final_url_or_error, response = _fetch_with_same_site_redirects(url)
     if response is None:
         return final_url_or_error
 
+    is_pdf = "pdf" in str(response.headers.get("content-type") or "").lower()
     document_or_error = _read_response_text(response)
     if document_or_error.startswith("[错误]"):
         return document_or_error
 
-    text = _extract_plain_text(document_or_error)
+    if is_pdf:
+        # PDF 提取结果已是纯文本；trafilatura 对纯文本输入返回 None，跳过以免二次加工失真。
+        text = document_or_error
+    else:
+        text = _extract_plain_text(document_or_error)
 
     limit = _clamp_int(max_chars, default=8000, minimum=500, maximum=50000)
     if len(text) > limit:
@@ -857,7 +939,8 @@ def web_fetch(url: str, max_chars: int = 8000, prompt: str = "") -> str:
         return f"[网页抓取] URL 内容为空: {final_url_or_error}"
 
     focus = f"\n关注点: {prompt.strip()[:240]}" if prompt and prompt.strip() else ""
-    return f"[网页内容] {final_url_or_error}{focus}\n\n{text}"
+    prefix = f"[PDF 文本] {final_url_or_error}" if is_pdf else f"[网页内容] {final_url_or_error}"
+    return f"{prefix}{focus}\n\n{text}"
 
 
 # ============================================================================
