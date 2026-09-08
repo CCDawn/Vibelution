@@ -35,7 +35,7 @@ export function VPanelHeader({
     >
       <div className="min-w-0">
         {eyebrow ? (
-          <p className="m-0 mb-px text-[var(--fg-tertiary)] text-[0.61rem] tracking-[0.07em] uppercase">
+          <p className="m-0 mb-px text-[var(--fg-tertiary)] [font-size:var(--vui-type-caption-size)] leading-[var(--vui-type-caption-line)] tracking-[var(--vui-tracking-label)] uppercase">
             {eyebrow}
           </p>
         ) : null}

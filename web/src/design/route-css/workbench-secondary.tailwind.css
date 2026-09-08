@@ -1,5 +1,6 @@
 /* Secondary workbench routes that are not chat-primary. */
 @import "tailwindcss" source(none);
+@import "../theme.tailwind.css";
 
 /* Shared recipe class literals (import constants are not followed by Tailwind). */
 @source "../vuiSurfaceRecipes.ts";

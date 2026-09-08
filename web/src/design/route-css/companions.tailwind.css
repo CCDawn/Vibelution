@@ -1,5 +1,6 @@
 /* Loaded by the companion lobby and native Chat companion rails. */
 @import "tailwindcss" source(none);
+@import "../theme.tailwind.css";
 
 /* Shared recipe class literals (imports are not followed by Tailwind). */
 @source "../vuiSurfaceRecipes.ts";

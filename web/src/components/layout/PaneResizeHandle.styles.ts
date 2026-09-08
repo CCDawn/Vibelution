@@ -1,12 +1,12 @@
 /**
  * Shared vertical resize handle for left/right workbench rails (Wave 4B contract).
  * Wide hit target (~12px) with a 1px visual rule that lights on hover/active.
- * Placement (grid-column, absolute offsets) stays on route className overrides.
+ * Placement and responsive visibility stay with the owning layout. Hiding a
+ * grid child here would move adjacent panes into the separator track.
  */
 const styles = {
   handle:
     "relative z-20 h-full w-1 shrink-0 cursor-col-resize touch-none select-none border-0 bg-transparent p-0 outline-none "
-    + "max-[860px]:hidden "
     + "before:pointer-events-none before:absolute before:inset-y-0 before:left-1/2 before:w-px before:-translate-x-1/2 "
     + "before:bg-transparent before:opacity-0 before:transition before:content-[''] "
     + "hover:before:bg-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)] hover:before:opacity-100 "

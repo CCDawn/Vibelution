@@ -21,6 +21,7 @@ const baseSource = readFileSync(resolve(designRoot, "base.css"), "utf8");
 const tokensSource = readFileSync(resolve(designRoot, "tokens.css"), "utf8");
 const shellStylesSource = readFileSync(resolve(designRoot, "workbench-shell.css"), "utf8");
 const tailwindSource = readFileSync(resolve(designRoot, "tailwind.css"), "utf8");
+const themeSource = readFileSync(resolve(designRoot, "theme.tailwind.css"), "utf8");
 const providerThemeSource = readFileSync(resolve(designRoot, "vui-provider-theme.css"), "utf8");
 const routeStyleMapSource = readdirSync(routesRoot)
   .filter((fileName) => fileName.endsWith(".styles.ts"))
@@ -101,10 +102,10 @@ describe("VUI dual-theme foundation", () => {
     expect(tokensSource).not.toContain("#8bdad2");
     expect(tokensSource).not.toContain("#0f766e");
     expect(tokensSource).not.toContain("#0d9488");
-    expect(tailwindSource).toContain("--color-vui-surface-rail: var(--vui-surface-rail)");
-    expect(tailwindSource).toContain("--color-vui-surface-raised: var(--vui-surface-raised)");
-    expect(tailwindSource).toContain("--color-vui-surface-card: var(--vui-surface-card)");
-    expect(tailwindSource).toContain("--color-vui-surface-popover: var(--vui-surface-popover)");
+    expect(themeSource).toContain("--color-vui-surface-rail: var(--vui-surface-rail)");
+    expect(themeSource).toContain("--color-vui-surface-raised: var(--vui-surface-raised)");
+    expect(themeSource).toContain("--color-vui-surface-card: var(--vui-surface-card)");
+    expect(themeSource).toContain("--color-vui-surface-popover: var(--vui-surface-popover)");
 
     const lightThemeBlock = tokensSource.slice(tokensSource.indexOf('[data-theme="light"]'));
     expect(lightThemeBlock).toContain("--vui-surface-glass");
@@ -177,13 +178,13 @@ describe("VUI dual-theme foundation", () => {
   });
 
   it("maps Tailwind and provider theme classes to Vibelution semantic tokens", () => {
-    expect(tailwindSource).toContain("@theme inline");
-    expect(tailwindSource).toContain("--color-vui-surface-glass: var(--vui-surface-glass)");
-    expect(tailwindSource).toContain("--color-vui-surface-toolbar: var(--vui-surface-toolbar)");
-    expect(tailwindSource).toContain("--color-vui-surface-row: var(--vui-surface-row)");
-    expect(tailwindSource).toContain("--color-vui-surface-page: var(--vui-surface-workspace)");
-    expect(tailwindSource).toContain("--color-vui-control-muted: var(--vui-control-muted)");
-    expect(tailwindSource).toContain("--color-vui-border-subtle: var(--vui-border-subtle)");
+    expect(themeSource).toContain("@theme inline");
+    expect(themeSource).toContain("--color-vui-surface-glass: var(--vui-surface-glass)");
+    expect(themeSource).toContain("--color-vui-surface-toolbar: var(--vui-surface-toolbar)");
+    expect(themeSource).toContain("--color-vui-surface-row: var(--vui-surface-row)");
+    expect(themeSource).toContain("--color-vui-surface-page: var(--vui-surface-workspace)");
+    expect(themeSource).toContain("--color-vui-control-muted: var(--vui-control-muted)");
+    expect(themeSource).toContain("--color-vui-border-subtle: var(--vui-border-subtle)");
     expect(providerThemeSource).toContain("--vui-component-border");
     expect(providerThemeSource).toContain("--vui-component-surface");
     expect(providerThemeSource).toContain('[data-vui-provider="shadcn"]');

@@ -158,6 +158,8 @@ import { VStateSurface } from "@/components/vui";
 | density / facts | compact 横幅；键值 facts | 中断横幅用 compact |
 | actions | 诊断恢复等次要操作 | 用 `VButton` compact/secondary；不要把杀进程放进状态面 |
 
+facts 标签和值使用共享 caption token 与可读行高；compact 只压缩间距，不缩小事实文字。
+
 ### 实现落点
 - `layout/VStateSurface.tsx`
 

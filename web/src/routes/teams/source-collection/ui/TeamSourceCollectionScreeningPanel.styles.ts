@@ -19,7 +19,7 @@ const styles = {
   workflowIngestionActions:
     "workflowIngestionActions min-w-0 flex flex-wrap items-center gap-1.5",
   workflowSourceQualityStats:
-    "workflowSourceQualityStats min-w-0 grid gap-2 !grid grid-cols-[repeat(5,minmax(72px,1fr))] gap-[5px]",
+    "workflowSourceQualityStats min-w-0 grid gap-2 !grid grid-cols-[repeat(auto-fit,minmax(min(100%,96px),1fr))] gap-[5px]",
 } as const;
 
 export default styles;

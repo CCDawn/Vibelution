@@ -1,4 +1,5 @@
 @import "tailwindcss" source(none);
+@import "./theme.tailwind.css";
 
 /* Shell + shared UI (always loaded). */
 @source "../app/**/*.{ts,tsx}";
@@ -45,38 +46,6 @@
 @source "../routes/HomeRedirect.tsx";
 @source "../routes/WorkbenchDomainRoute.tsx";
 @source "../routes/WorkbenchModeRoute.tsx";
-
-@theme inline {
-  --font-sans: var(--font-body);
-  --color-vui-bg-canvas: var(--bg-canvas);
-  --color-vui-surface-page: var(--vui-surface-workspace);
-  --color-vui-surface-panel: var(--vui-surface-panel);
-  --color-vui-surface-card: var(--vui-surface-card);
-  --color-vui-surface-rail: var(--vui-surface-rail);
-  --color-vui-surface-raised: var(--vui-surface-raised);
-  --color-vui-surface-chat: var(--vui-surface-chat);
-  --color-vui-surface-chat-panel: var(--vui-surface-chat-panel);
-  --color-vui-surface-glass: var(--vui-surface-glass);
-  --color-vui-surface-toolbar: var(--vui-surface-toolbar);
-  --color-vui-surface-row: var(--vui-surface-row);
-  --color-vui-surface-row-hover: var(--vui-surface-row-hover);
-  --color-vui-surface-workspace: var(--vui-surface-workspace);
-  --color-vui-surface-region: var(--vui-surface-region);
-  --color-vui-surface-inset: var(--vui-surface-inset);
-  --color-vui-surface-control: var(--vui-surface-control);
-  --color-vui-surface-popover: var(--vui-surface-popover);
-  --color-vui-control-muted: var(--vui-control-muted);
-  --color-vui-fg-primary: var(--fg-primary);
-  --color-vui-fg-secondary: var(--fg-secondary);
-  --color-vui-fg-tertiary: var(--fg-tertiary);
-  --color-vui-border-hairline: var(--border-hairline);
-  --color-vui-border-soft: var(--border-soft);
-  --color-vui-border-subtle: var(--vui-border-subtle);
-  --color-vui-accent-cool: var(--accent-cool);
-  --color-vui-accent-warm: var(--accent-warm);
-  --radius-vui-control: var(--radius-control);
-  --radius-vui-panel: var(--radius-panel);
-}
 
 :where(small) {
   font-size: var(--vui-font-xs);

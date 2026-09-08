@@ -86,10 +86,10 @@ const FACT_COMPACT =
   "grid min-w-0 max-w-[min(100%,18rem)] gap-0 rounded-[7px] border border-[var(--vui-border-subtle)] " +
   "bg-[color-mix(in_srgb,var(--vui-surface-panel)_72%,transparent)] px-2 py-1 " +
   "grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-1.5 gap-y-0";
-const FACT_LABEL = "truncate text-[0.6rem] font-[760] uppercase text-[var(--fg-tertiary)]";
-const FACT_LABEL_COMPACT = "shrink-0 text-[0.6rem] font-[760] uppercase text-[var(--fg-tertiary)]";
-const FACT_VALUE = "truncate text-[0.72rem] font-[820] text-[var(--fg-primary)]";
-const FACT_VALUE_COMPACT = "min-w-0 truncate font-mono text-[0.72rem] font-[820] text-[var(--fg-primary)]";
+const FACT_LABEL = "truncate [font-size:var(--vui-type-caption-size)] leading-[var(--vui-type-caption-line)] font-semibold uppercase text-[var(--fg-tertiary)]";
+const FACT_LABEL_COMPACT = "shrink-0 [font-size:var(--vui-type-caption-size)] leading-[var(--vui-type-caption-line)] font-semibold uppercase text-[var(--fg-tertiary)]";
+const FACT_VALUE = "truncate [font-size:var(--vui-type-caption-size)] leading-[var(--vui-type-caption-line)] font-bold text-[var(--fg-primary)]";
+const FACT_VALUE_COMPACT = "min-w-0 truncate font-mono [font-size:var(--vui-type-caption-size)] leading-[var(--vui-type-caption-line)] font-bold text-[var(--fg-primary)]";
 const ACTIONS = "flex min-w-0 flex-wrap items-center gap-1.5";
 const SKELETON_STACK = "grid min-w-0 gap-1.5";
 /** Align with VSkeleton / shadcn pulse (border mix, reduced motion via global pulse). */

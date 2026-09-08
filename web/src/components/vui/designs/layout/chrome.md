@@ -50,6 +50,8 @@ import { VRouteHeader, VButton } from "@/components/vui";
 ### 功能
 面板/侧栏标题 + 可选 contextual hint，用于队列与列表头。
 
+eyebrow 使用共享 caption 字号和行高，字距使用 label token；不得在侧栏中缩为小于可读辅助文字的独立字号。
+
 ### 适用范围
 - **适用**：队列面板、列表头、inspector 标题。
 - **不适用**：整页路由标题 → `VRouteHeader`。

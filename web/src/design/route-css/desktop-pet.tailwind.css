@@ -1,4 +1,5 @@
 @import "tailwindcss" source(none);
+@import "../theme.tailwind.css";
 
 @source "../../routes/desktopPet/DesktopPetRoute.tsx";
 @source "../../routes/desktopPet/DesktopPetCharacter.tsx";

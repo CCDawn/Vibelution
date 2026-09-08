@@ -17,7 +17,7 @@ const styles = {
   tabBar: "min-w-0 flex-none",
   tabLabel: "inline-flex min-w-0 items-center gap-1.5",
   tabCount:
-    "inline-flex min-w-5 items-center justify-center rounded-full border border-vui-border-subtle bg-vui-surface-muted px-1.5 py-0.5 [font-size:var(--vui-font-2xs)] text-vui-fg-secondary",
+    "inline-flex min-w-5 items-center justify-center rounded-full border border-vui-border-subtle bg-vui-control-muted px-1.5 py-0.5 [font-size:var(--vui-font-2xs)] text-vui-fg-secondary",
   tabBody: "mt-1.5 flex min-h-0 min-w-0 flex-1 flex-col",
   tabHeader: "flex min-w-0 shrink-0 flex-wrap items-end justify-between gap-2",
   tabHint: "m-0 min-w-0 [font-size:var(--vui-font-xs)] text-vui-fg-tertiary",

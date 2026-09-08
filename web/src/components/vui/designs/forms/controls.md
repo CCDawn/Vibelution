@@ -302,6 +302,8 @@ import { VFieldRow, VInput } from "@/components/vui";
 | label / description | 标签与帮助 | 错误放 description 旁或下方 |
 | children | 控件 | 必须是 V* 控件 |
 
+共享表单标签使用 label 字号和行高，辅助说明与错误使用 caption 字号和可读行高；密度调整不把文字缩为独立的 11px。
+
 ### 非职责
 - 不做整表校验引擎。
 

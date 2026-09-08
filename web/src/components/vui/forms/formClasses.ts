@@ -27,10 +27,10 @@ export function vuiFormControlClass(density: VuiDensity | undefined): string {
 }
 
 export const vuiFormHelperClass =
-  "text-[11px] leading-4 text-vui-fg-tertiary peer-aria-[invalid=true]:text-[var(--state-error)]";
+  "[font-size:var(--vui-type-caption-size)] leading-[var(--vui-line-readable)] text-vui-fg-tertiary peer-aria-[invalid=true]:text-[var(--state-error)]";
 
 export const vuiFormLabelClass =
-  "text-[11px] font-semibold tracking-normal text-vui-fg-secondary";
+  "[font-size:var(--vui-type-label-size)] leading-[var(--vui-type-label-line)] font-semibold tracking-normal text-vui-fg-secondary";
 
 export const vuiFormErrorClass =
-  "text-[11px] leading-4 text-[var(--state-error)]";
+  "[font-size:var(--vui-type-caption-size)] leading-[var(--vui-line-readable)] text-[var(--state-error)]";
