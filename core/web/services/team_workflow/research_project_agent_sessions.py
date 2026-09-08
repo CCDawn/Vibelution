@@ -22,6 +22,10 @@ from core.research.workflow.contracts.session_scope import (
 SCHEMA_VERSION = 3
 REGISTRY_FILE_NAME = "research_project_agent_sessions.json"
 ACTIVE_TASK_STATUSES = {"queued", "running"}
+# Post-normalization vocabulary: stage_reconcile folds stopped/stopped_by_user/
+# needs_continue into ``interrupted`` before any retry reads the task status, so
+# the formal-retry terminal gate must accept it — otherwise every marker-gated
+# context-budget retry on an interrupted task dies at session creation.
 TERMINAL_TASK_STATUSES = {
     "blocked",
     "canceled",
@@ -30,6 +34,7 @@ TERMINAL_TASK_STATUSES = {
     "error",
     "failed",
     "incomplete",
+    "interrupted",
     "stopped",
     "superseded",
     "timed_out",

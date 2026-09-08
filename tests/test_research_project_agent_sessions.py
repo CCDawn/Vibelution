@@ -939,6 +939,44 @@ def test_formal_retry_requires_terminal_task_and_keeps_attempts_flat(
     assert session_service.get_session_detail(retry["sessionId"]) is not None
 
 
+def test_formal_retry_accepts_normalized_interrupted_previous_task(
+    tmp_path, monkeypatch
+):
+    """stage_reconcile folds stopped/needs_continue into interrupted; the
+    formal-retry terminal gate must accept that post-normalization status or
+    every marker-gated context-budget retry dies at session creation."""
+    team, project, agent, _legacy_direct_session = _project_and_agent(
+        tmp_path, monkeypatch
+    )
+    first = resolve_research_project_agent_session(
+        team["teamId"],
+        research_project_id=project["projectId"],
+        agent_id=agent["agentId"],
+        role_key="source_finder",
+        role_label="资料寻找",
+        created_from_task_id="task-1",
+    )
+
+    retry = resolve_research_project_agent_session(
+        team["teamId"],
+        research_project_id=project["projectId"],
+        agent_id=agent["agentId"],
+        role_key="source_finder",
+        role_label="资料寻找",
+        created_from_task_id="task-2",
+        formal_retry=True,
+        previous_task={
+            "taskId": "task-1",
+            "sessionId": first["sessionId"],
+            "status": "interrupted",
+        },
+    )
+
+    assert retry["sessionCreated"] is True
+    assert retry["sessionAttempt"] == 2
+    assert retry["retryOfSessionId"] == first["sessionId"]
+
+
 def test_session_binding_recovers_registry_without_creating_a_duplicate(
     tmp_path, monkeypatch
 ):
