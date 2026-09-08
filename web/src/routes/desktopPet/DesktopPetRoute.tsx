@@ -23,8 +23,6 @@ import {
   type DesktopPetDragState,
 } from "./desktopPetWindowDrag";
 
-const CHARACTER_IMAGE = "/desktop-pet/luo-tianyi-chibi-v1.png";
-
 const EMPTY_ACTIVITY: PetActivity = {
   schemaVersion: 1,
   aggregateTone: "idle",
@@ -37,7 +35,7 @@ const EMPTY_ACTIVITY: PetActivity = {
 
 const COPY = {
   zh: {
-    name: "洛天依",
+    name: "小洛",
     sessions: "实时对话",
     empty: "现在没有运行中的对话",
     open: "展开实时对话",
@@ -46,7 +44,7 @@ const COPY = {
     unavailable: "暂时无法读取对话状态",
   },
   en: {
-    name: "Luo Tianyi",
+    name: "Xiao Luo",
     sessions: "Live conversations",
     empty: "No conversations are running",
     open: "Show live conversations",
@@ -217,7 +215,6 @@ export function DesktopPetRoute() {
         onPointerCancel={cancelCharacterDrag}
       >
         <DesktopPetCharacter
-          imageSrc={CHARACTER_IMAGE}
           name={copy.name}
           tone={activity.aggregateTone}
           animationState={activity.animationState}
