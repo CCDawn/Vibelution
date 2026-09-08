@@ -173,6 +173,17 @@ class RealDomainReadinessContext:
             hypothesis_first_chain._input_snapshot(run)
         )
 
+    def phase_two_flow(self, team_id: str, run_id: str) -> bool:
+        """Phase two launches freeze their published phase-one knowledge handoff."""
+        run = self._run(run_id)
+        if run is None or run.team_id != team_id or run.workflow_id != CHALLENGE_CUP_WORKFLOW_ID:
+            return False
+        constraints = self._input_snapshot(run_id).get("constraintSnapshot")
+        if not isinstance(constraints, Mapping):
+            return False
+        package = constraints.get("phaseOneKnowledgePackage")
+        return isinstance(package, Mapping) and bool(package)
+
     def accepted_knowledge_invocations(
         self, team_id: str, run_id: str
     ) -> list[Mapping[str, Any]]:

@@ -163,6 +163,9 @@ class FakeDomainContext(DomainReadinessContext):
     def _note(self, method: str) -> None:
         self.calls.append(method)
 
+    def phase_two_flow(self, team_id: str, run_id: str) -> bool:
+        return False
+
     def domain_revision_vector(self, team_id: str, run_id: str) -> Mapping[str, str]:
         self._note("domain_revision_vector")
         return self.revision_vector

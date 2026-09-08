@@ -56,8 +56,10 @@ def evaluate_hypothesis_design(
                 "人工接受必须绑定可回读的 Team Knowledge 产物",
             )
         )
-    if hypothesis_first_run(context, run):
-        state = hypothesis_first_chain_state(context, run)
+    is_hypothesis_first = hypothesis_first_run(context, run)
+    is_phase_two = context.phase_two_flow(run.team_id, run.run_id)
+    state = hypothesis_first_chain_state(context, run) if is_hypothesis_first or is_phase_two else {}
+    if is_hypothesis_first:
         pending = int(state.get("pendingCollectionCount") or 0)
         if pending > 0:
             blockers.append(
@@ -87,18 +89,17 @@ def evaluate_hypothesis_design(
                     remediation_label="推进假说评审收敛",
                 )
             )
-        if not state.get("templateBaselineExists"):
-            blockers.append(
-                blocker(
-                    "template_baseline_missing",
-                    "模板基线缺失",
-                    "实验设计要求该题作用域下存在 frozen 的模板基线；"
-                    "请先通过 POST /teams/{team_id}/workflow-orchestration/template-baselines "
-                    "为该题创建并冻结模板基线，再启动实验设计节点",
-                    remediation_kind=RemediationKind.RESOLVE_HUMAN,
-                    remediation_label="冻结模板基线",
-                )
+    if is_phase_two and not state.get("templateBaselineExists"):
+        blockers.append(
+            blocker(
+                "template_baseline_missing",
+                "模板基线缺失",
+                "第二阶段实验设计要求该题作用域下存在 frozen 的模板基线；"
+                "请先为该题创建并冻结模板基线，再启动实验设计节点",
+                remediation_kind=RemediationKind.RESOLVE_HUMAN,
+                remediation_label="冻结模板基线",
             )
+        )
     return DomainVerdict(
         blockers=tuple(blockers),
         revision_vector=common.domain_revision_vector,

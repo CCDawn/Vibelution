@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from core.web.services.team_workflow.research_runtime.readiness import (
     NodeReadinessService,
 )
@@ -85,6 +87,36 @@ def test_hypothesis_design_legacy_run_does_not_require_selection() -> None:
 
     assert result.ready is True
     assert all(blocker.code != "hypothesis_round_unconverged" for blocker in result.blockers)
+
+
+@pytest.mark.parametrize("phase_two,hypothesis_first,template,converged,pending,expected", [
+    (False, True, False, True, 0, set()),
+    (False, True, False, False, 1, {"hypothesis_round_unconverged", "knowledge_gap_pending"}),
+    (True, True, False, True, 0, {"template_baseline_missing"}),
+    (True, True, True, True, 0, set()),
+    (True, False, False, True, 0, {"template_baseline_missing"}),
+])
+def test_template_gate_belongs_only_to_phase_two(
+    phase_two, hypothesis_first, template, converged, pending, expected,
+) -> None:
+    context = FakeDomainContext()
+    context._knowledge_package = {
+        "accepted": True,
+        "knowledgeItems": [{"knowledgeItemId": "ki-phase", "contentHash": "a" * 64}],
+    }
+    context.handoffs["hypothesis_design"] = [
+        HandoffSnapshot(handoff_id="ho-phase", from_node_run_id="nr-knowledge", status="accepted"),
+    ]
+    context.phase_two_flow = lambda *_args: phase_two
+    context.hypothesis_first_flow = lambda *_args: hypothesis_first
+    context.hypothesis_first_chain_state = lambda *_args: {
+        "templateBaselineExists": template,
+        "hypothesisConverged": converged,
+        "pendingCollectionCount": pending,
+    }
+    result = _evaluate(context, "hypothesis_design")
+    assert {b.code for b in result.blockers} == expected
+    assert result.ready is (not expected)
 
 
 def test_protocol_design_blocks_without_hypotheses() -> None:
