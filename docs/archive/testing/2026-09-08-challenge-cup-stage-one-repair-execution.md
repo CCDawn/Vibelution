@@ -75,3 +75,13 @@
 - 检索上下文 Agent 接到新的独立只读验收：核对当前 12 节点主流程是否确实在第一阶段终止。`projection_builder` 当前按整份 pinned definition 计数；必须先查清真实执行与终止合同，不能只改 UI 分母掩盖阶段边界缺口。本项尚待结论。
 - 集成树用正常 `npm ci` 安装测试依赖，没有新建 junction。前端子树已有 node_modules junction 属任务残留，最终清理只处理其链接。
 - 完整 selector 首轮：facade/structure pack/team/knowledge 组通过；下一组在两条旧 fixture 失败。一个仅断言旧展示文案，现改为真实 receipt gate 不通过的结构断言；另一个只测试后续 turn 的 checklist 完成，却未提供任何检索回执，现用既有局部 fixture 固定回执合法性、继续测其原时间边界。两项独立通过；没有增加生产绕过。零实际来源时的提示同步改为“资料搜集尚未满足真实回执与视角覆盖要求”，避免声称已经写入资料。TypeScript build 已通过。
+
+## 阶段终止根因与第四轮验收
+
+- 独立只读核验已确认：当前 3.0.0 主流程固定为 12 节点，`hypothesis_design → protocol_design`，主运行只在 `result_package` 终止；`formalWrites=false` 仅控制结果包内容，未控制调度。结果包启动门仍需要实验 STOP/rollback 治理。因此不能仅修改 UI 的 12 步分母，也不能在此状态启动新付费验收并声称第一阶段已闭环。
+- 最小修复合同：只为新第一阶段入口冻结 `problem_understanding → hypothesis_design → result_package` 的独立版本；知识搜集保留现有独立子流程。创建、readiness、调度、终态与进度读取同一冻结定义。旧 SCI-011 等 3.0.0 运行保留原图与失败事实，不静默迁移或改成功。此项由子 Agent 实现，主 Agent 独立验收。
+- 本地复用检查：只读发现旧 `.worktrees/hypothesis-stop-preview/core/research/workflow/stage_one_definition.py`，它依赖已废弃的 2.1.0 七节点合并主图。只借鉴独立 schemaVersion、structureHash、registry 与 snapshot 冻结方式，不复制旧拓扑，不导入旧目录整包，也不把残留目录视为已合入或已验证代码。
+- 结果计划的根因已通过真实隔离存储复现：writer 写 `stage1_research_plan`，producer 读 `research_plan`；原大测试把 reader 全部替换为手工字典，掩盖实际 kind 不一致。现改为 frozen proposal 合同读取阶段一 kind，独立实验仍读取协议计划；无 alias 或历史 fallback。
+- 结果包测试改为真实 workflow artifact store 写入并 canonical 读回计划/假说/评审等产物，仅隔离来源和模型依赖。修复前明确报 `canonical artifact is missing: research_plan`，修复后通过；另验证阶段一计划只存在于其他运行时，即使当前运行有协议计划也必须失败。结果包 v2 共 29 项通过，终态包原 3 项通过；不是模型、前端或科研质量验收。
+- 完整 selector 第二轮在两条 interrupted journal / continuation fixture 失败，来源 Agent 正按精确测试独立诊断；前组已通过。失败 manifest 不能用于合入，后续新增代码也必须绑定新验证结果。
+- 开发 guard 发现同一主任务初始注册 ID 与 worktree 自动 ID 重叠；已将初始注册正常标为完成并注明交接到现有主 claim，重新 preflight 无重叠。未触碰其他项目任务的注册或改动。

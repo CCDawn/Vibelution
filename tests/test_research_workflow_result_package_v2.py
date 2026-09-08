@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from contextlib import nullcontext
 from typing import Any
 
 import pytest
@@ -1080,7 +1081,10 @@ def test_stage_one_model_route_fails_closed_without_receipts(monkeypatch) -> Non
 # ----------------------------- end-to-end stage-one accepted-round build
 
 
-def test_v2_build_projects_full_stage_one_authority_end_to_end(monkeypatch) -> None:
+@pytest.mark.parametrize("wrong_plan_run", [False, True])
+def test_v2_build_projects_full_stage_one_authority_end_to_end(
+    monkeypatch, tmp_path, wrong_plan_run
+) -> None:
     expected = _authority_sections()[0]
     artifacts = {
         "problem_understanding": {
@@ -1134,7 +1138,7 @@ def test_v2_build_projects_full_stage_one_authority_end_to_end(monkeypatch) -> N
                 "riskNotes": "Overhead quantification is missing.",
             },
         },
-        "research_plan": {
+        "stage1_research_plan": {
             "objective": "Bound the question to measurable ops/s calibers.",
             "method": "Separate erasure cost from heat removal.",
             "work_packages": [
@@ -1168,11 +1172,32 @@ def test_v2_build_projects_full_stage_one_authority_end_to_end(monkeypatch) -> N
             }
         },
     }
+    from core.web.services.team_workflow.research_runtime import workflow_artifact_store
+
+    monkeypatch.setattr(workflow_artifact_store, "_root", lambda: tmp_path)
     monkeypatch.setattr(
-        result_package_v2,
-        "_artifact_payload",
-        lambda kind, **_kwargs: deepcopy(artifacts[kind]),
+        workflow_artifact_store, "resolve_project_workspace_home", lambda _root: tmp_path
     )
+    for kind, payload in artifacts.items():
+        if kind in {"source_candidate_batch", "evidence_card_batch"}:
+            continue
+        workflow_artifact_store.put_workflow_artifact(
+            "research-team", kind=kind,
+            workflow_run_id=(
+                "run-other" if wrong_plan_run and kind == "stage1_research_plan"
+                else "run-sci-096"
+            ),
+            source_collection_run_id="source-sci-096", payload=payload,
+            artifact_identity=f"test:{kind}",
+        )
+    canonical_reader = result_package_v2._artifact_payload
+
+    def read_artifact(kind, **kwargs):
+        if kind in {"source_candidate_batch", "evidence_card_batch"}:
+            return deepcopy(artifacts[kind])
+        return canonical_reader(kind, **kwargs)
+
+    monkeypatch.setattr(result_package_v2, "_artifact_payload", read_artifact)
     monkeypatch.setattr(
         result_package_v2,
         "_feedback_iterations",
@@ -1195,13 +1220,28 @@ def test_v2_build_projects_full_stage_one_authority_end_to_end(monkeypatch) -> N
         ],
     )
 
-    package = result_package_v2.build_challenge_result_package_v2(
-        generic_package={"runId": "run-sci-096", "factChainHash": "f" * 64},
-        record=_record(),
-        team_id="research-team",
-        workflow_run_id="run-sci-096",
+    record = _record()
+    record["inputSnapshot"]["constraintSnapshot"] = {"formalWrites": False}
+    # A protocol plan cannot substitute for the current stage-one authority.
+    workflow_artifact_store.put_workflow_artifact(
+        "research-team", kind="research_plan", workflow_run_id="run-sci-096",
         source_collection_run_id="source-sci-096",
+        payload={"researchPlan": deepcopy(expected["research_plan"])},
+        artifact_identity="test:protocol-plan",
     )
+    with (
+        pytest.raises(result_package_v2.ResultPackageV2Error, match="stage1_research_plan")
+        if wrong_plan_run else nullcontext()
+    ):
+        package = result_package_v2.build_challenge_result_package_v2(
+            generic_package={"runId": "run-sci-096", "factChainHash": "f" * 64},
+            record=record,
+            team_id="research-team",
+            workflow_run_id="run-sci-096",
+            source_collection_run_id="source-sci-096",
+        )
+    if wrong_plan_run:
+        return
     output = package["challengeQuestionOutput"]
 
     assert challenge_question_runs._schema_issues(output) == []

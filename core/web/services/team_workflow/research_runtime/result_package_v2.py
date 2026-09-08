@@ -1307,7 +1307,7 @@ def build_challenge_result_package_v2(
         authority_run_id=authority,
     )
     research_payload = _artifact_payload(
-        "research_plan",
+        "stage1_research_plan" if is_proposal_only_challenge_run(record) else "research_plan",
         team_id=team_id,
         workflow_run_id=workflow_run_id,
         authority_run_id=authority,
