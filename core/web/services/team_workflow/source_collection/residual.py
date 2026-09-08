@@ -3652,12 +3652,65 @@ def _source_collection_search_plan_ref(search_plan: dict[str, Any]) -> dict[str,
 
 
 def _source_collection_seed_from_input_ref(value: Any) -> str:
+    """Project one run input reference into a searchable seed.
+
+    ``inputRefs`` are lineage locators by default.  They are copied to the
+    run/assignment records, but only an explicit query prefix (or a direct
+    DOI locator) is a search seed.  Treating every unknown locator as prose
+    was the reason catalog artifact URIs ended up in frozen search queries.
+    """
     s = _service()
     text = s._trim_text(value, max_length=220)
+    if not text:
+        return ""
     lowered = text.lower()
     for prefix in ("seed-query:", "query:", "keyword:", "topic:"):
         if lowered.startswith(prefix):
             return text[len(prefix) :].strip()
+
+    # A bare DOI or a DOI.org locator is intentionally searchable: it is a
+    # precise request to resolve one known publication.  Keep this check
+    # before the generic URI filter below.  The DOI shape is anchored so an
+    # arbitrary URL containing a DOI-like substring cannot become a seed.
+    doi_match = re.fullmatch(r"10\.\d{4,9}/[^\s\"'<>]+", text, flags=re.IGNORECASE)
+    if doi_match:
+        return text.rstrip(".,;:)]}").strip()
+    if lowered.startswith((
+        "https://doi.org/",
+        "http://doi.org/",
+        "https://dx.doi.org/",
+        "http://dx.doi.org/",
+        "doi:",
+    )):
+        doi = s._source_collection_extract_doi(text)
+        if doi and re.fullmatch(r"10\.\d{4,9}/[^\s\"'<>]+", doi, flags=re.IGNORECASE):
+            return doi.rstrip(".,;:)]}").strip()
+
+    # All URI schemes (including challenge-question-catalog:// and
+    # challenge-question-artifact://) are locators, not natural-language
+    # queries.  Windows drive paths need a separate check because urlsplit
+    # would otherwise mistake ``C:\\...`` for a URI scheme.
+    if re.match(r"^[A-Za-z]:[\\/]", text) or text.startswith(("/", "\\\\", "./", "../", ".\\", "..\\")):
+        return ""
+    try:
+        # ``urlsplit`` follows the RFC scheme grammar and therefore ignores
+        # project-specific schemes that contain an underscore (for example
+        # ``dimension_reviews://``).  The explicit lexical check covers those
+        # lineage refs as well.
+        if urllib.parse.urlsplit(text).scheme or re.match(r"^[A-Za-z][A-Za-z0-9+._-]*:", text):
+            return ""
+    except ValueError:
+        return ""
+
+    # Hashes and common local document names can arrive without a URI scheme.
+    # Filter only unambiguous forms so ordinary prose such as ``neural
+    # routing`` remains a valid seed.
+    if re.fullmatch(r"(?:sha(?:1|256|512)?|md5|hash)[:=_/-][0-9a-f]{16,128}", lowered):
+        return ""
+    if re.fullmatch(r"[0-9a-f]{64}", lowered):
+        return ""
+    if re.search(r"(?:^|[\\/])[^\\/]+\.(?:pdf|md|txt|docx?|xlsx?|csv|json|html?)$", lowered):
+        return ""
     return text
 
 
