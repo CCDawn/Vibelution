@@ -338,6 +338,130 @@ def _compensate_completion_pending_reservations(
     return compensated
 
 
+def _apply_ledger_reconcile_for_run(
+    uow,
+    *,
+    run,
+    node_order,
+    now_ms: int,
+) -> tuple[Any, int]:
+    """Re-project one run onto ledger authority inside the caller's transaction.
+
+    Shared re-plan core for the formal parent reconcile and the knowledge
+    sideflow child cascade: (a) load the run's attempts, (b) re-derive the
+    authority plan from the ledger, (c) retire plan-superseded blocked
+    attempts as STALE and cancel their graph_dispatch rows, (d) re-arm failed
+    graph_dispatch rows for this run so the worker gets a fresh routing
+    decision.  Rows whose node's latest attempt holds a readiness-pipeline
+    verdict (``auto_advance_not_ready``) stay dead in every scope: replaying
+    them would deterministically re-fail and overwrite that verdict, which
+    both the landing ladder and the V2 rerun mapping depend on.  Returns
+    ``(plan, revived_dispatch_count)``; reservation compensation and the run's
+    own landing stay owned by the caller.
+    """
+    attempts = uow.repository.list_attempts(run.run_id)
+    plan = plan_ledger_authority(attempts, node_order=node_order)
+    for node_run_id in plan.superseded_node_run_ids:
+        uow.repository.update_attempt_status(
+            node_run_id,
+            NodeAttemptStatus.STALE.value,
+            now_ms,
+            finished_at_ms=now_ms,
+        )
+        uow.repository.execute(
+            """
+            UPDATE outbox_actions
+            SET status = 'cancelled',
+                lease_owner = NULL,
+                lease_expires_at_ms = NULL,
+                updated_at_ms = ?
+            WHERE node_run_id = ?
+              AND action_kind = 'graph_dispatch'
+              AND status IN ('failed', 'pending', 'leased')
+            """,
+            (now_ms, node_run_id),
+        )
+    # Reconciliation re-derives execution from the durable ledger.  A
+    # blocked run usually got there via a terminal-failed graph_dispatch
+    # (e.g. checkpoint_node_mismatch); reviving only the run status would
+    # strand it as running with nothing left to advance, until the sweep
+    # flips it back to reconciliation_required.  Give the worker a fresh
+    # routing decision by re-arming failed dispatch rows in this same
+    # transaction (same repair shape as _repair_starting_without_progress);
+    # live or deliberately cancelled rows stay untouched.
+    uow.repository.execute(
+        """
+        UPDATE outbox_actions
+        SET status = 'pending',
+            lease_owner = NULL,
+            lease_expires_at_ms = NULL,
+            available_at_ms = ?,
+            attempt_count = 0,
+            last_problem_json = NULL,
+            updated_at_ms = ?
+        WHERE run_id = ?
+          AND action_kind = 'graph_dispatch'
+          AND status = 'failed'
+          AND NOT EXISTS (
+            SELECT 1 FROM node_attempts na
+            WHERE na.node_run_id = outbox_actions.node_run_id
+              AND na.status = 'blocked'
+              AND INSTR(na.problem_json, 'auto_advance_not_ready') > 0
+          )
+        """,
+        (now_ms, now_ms, run.run_id),
+    )
+    revived = int(uow.repository.affected() or 0)
+    return plan, revived
+
+
+def _bump_child_run_version(
+    uow,
+    *,
+    run,
+    now_ms: int,
+) -> tuple[int, int]:
+    """Child-scoped variant of _bump: request-free version+sequence bump.
+
+    The cascade runs under the parent's command request, so there is no
+    client-supplied expectedRunVersion to guard the child with; the expected
+    version is the child row read earlier in this same transaction (the UoW
+    writer lock makes that race-free).  Returns (new_version, last_sequence)
+    exactly like ``bump_run_version``.
+    """
+    bumped = uow.repository.bump_run_version(
+        run.run_id,
+        run.team_id,
+        run.run_version,
+        1,
+        now_ms,
+    )
+    if bumped is None:
+        raise RunVersionConflictError()
+    return bumped
+
+
+def _run_has_active_work(uow, *, run_id: str) -> bool:
+    row = uow.repository.execute(
+        """
+        SELECT
+            EXISTS(
+                SELECT 1 FROM outbox_actions
+                WHERE run_id = ?
+                  AND action_kind IN ('graph_dispatch', 'adapter_dispatch', 'checkpoint_fork')
+                  AND status IN ('pending', 'leased')
+            )
+            OR EXISTS(
+                SELECT 1 FROM node_attempts
+                WHERE run_id = ?
+                  AND status IN ('starting', 'dispatching', 'running', 'waiting_human')
+            )
+        """,
+        (run_id, run_id),
+    ).fetchone()
+    return bool(row and row[0])
+
+
 class WorkflowCommandService:
     def __init__(
         self,
@@ -1431,7 +1555,6 @@ class WorkflowCommandService:
     ) -> CommandReceipt:
         now_ms = self._clock()
         run = uow.repository.get_run(request.run_id)
-        attempts = uow.repository.list_attempts(request.run_id)
         # Reconciliation resets the run projection to ledger authority BEFORE
         # any dispatch is revived. Incident blocked attempts covered by an
         # earlier successful advance (operator-misassigned retries whose
@@ -1439,7 +1562,6 @@ class WorkflowCommandService:
         # active_node_id and re-derive the same failing dispatch forever.
         if run is None:
             raise RunNotFoundError(request.run_id)
-        plan = plan_ledger_authority(attempts, node_order=formal_node_order(run))
         from .knowledge_sideflow_service import record_knowledge_sideflow_child_failure
 
         knowledge_child_run_ids: list[str] = []
@@ -1471,60 +1593,12 @@ class WorkflowCommandService:
             prepared=prepared_artifact,
             now_ms=now_ms,
         )
-        for node_run_id in plan.superseded_node_run_ids:
-            uow.repository.update_attempt_status(
-                node_run_id,
-                NodeAttemptStatus.STALE.value,
-                now_ms,
-                finished_at_ms=now_ms,
-            )
-            uow.repository.execute(
-                """
-                UPDATE outbox_actions
-                SET status = 'cancelled',
-                    lease_owner = NULL,
-                    lease_expires_at_ms = NULL,
-                    updated_at_ms = ?
-                WHERE node_run_id = ?
-                  AND action_kind = 'graph_dispatch'
-                  AND status IN ('failed', 'pending', 'leased')
-                """,
-                (now_ms, node_run_id),
-            )
-        # Reconciliation re-derives execution from the durable ledger.  A
-        # blocked run usually got there via a terminal-failed graph_dispatch
-        # (e.g. checkpoint_node_mismatch); reviving only the run status would
-        # strand it as running with nothing left to advance, until the sweep
-        # flips it back to reconciliation_required.  Give the worker a fresh
-        # routing decision by re-arming failed dispatch rows in this same
-        # transaction (same repair shape as _repair_starting_without_progress);
-        # live or deliberately cancelled rows stay untouched. Rows whose node's
-        # latest attempt holds a readiness-pipeline verdict stay dead: replay
-        # them would deterministically re-fail and overwrite that verdict,
-        # which both the landing above and the V2 rerun mapping depend on.
-        uow.repository.execute(
-            """
-            UPDATE outbox_actions
-            SET status = 'pending',
-                lease_owner = NULL,
-                lease_expires_at_ms = NULL,
-                available_at_ms = ?,
-                attempt_count = 0,
-                last_problem_json = NULL,
-                updated_at_ms = ?
-            WHERE run_id = ?
-              AND action_kind = 'graph_dispatch'
-              AND status = 'failed'
-              AND NOT EXISTS (
-                SELECT 1 FROM node_attempts na
-                WHERE na.node_run_id = outbox_actions.node_run_id
-                  AND na.status = 'blocked'
-                  AND INSTR(na.problem_json, 'auto_advance_not_ready') > 0
-              )
-            """,
-            (now_ms, now_ms, request.run_id),
+        plan, revived = _apply_ledger_reconcile_for_run(
+            uow,
+            run=run,
+            node_order=formal_node_order(run),
+            now_ms=now_ms,
         )
-        revived = int(uow.repository.affected() or 0)
         compensated = _compensate_completion_pending_reservations(
             uow,
             run_id=request.run_id,
@@ -1544,24 +1618,9 @@ class WorkflowCommandService:
                     now_ms=now_ms,
                 )
             )
-        active_work_row = uow.repository.execute(
-            """
-            SELECT
-                EXISTS(
-                    SELECT 1 FROM outbox_actions
-                    WHERE run_id = ?
-                      AND action_kind IN ('graph_dispatch', 'adapter_dispatch', 'checkpoint_fork')
-                      AND status IN ('pending', 'leased')
-                )
-                OR EXISTS(
-                    SELECT 1 FROM node_attempts
-                    WHERE run_id = ?
-                      AND status IN ('starting', 'dispatching', 'running', 'waiting_human')
-                )
-            """,
-            (request.run_id, request.run_id),
-        ).fetchone()
-        has_active_work = revived > 0 or bool(active_work_row and active_work_row[0])
+        has_active_work = revived > 0 or _run_has_active_work(
+            uow, run_id=request.run_id
+        )
         zero_work_problem = {
             "code": "reconcile_no_active_work",
             "detail": "ledger authority has no active or revivable workflow work",
@@ -1633,7 +1692,90 @@ class WorkflowCommandService:
                 now_ms=now_ms,
             )
         )
-        if revived > 0:
+        # 知识 sideflow 子 run 的 reconcile_run 没有任何前端入口（知识节点
+        # offer 白名单只含 ensure/inspect），只靠父 run 面板的「对账运行」
+        # 闭合。父 run 落态后必须在同一事务内把同一套 ledger 权威重排级联
+        # 到卡死在 reconciliation_required 的子 run，否则子 run 永远带着
+        # 死 dispatch 卡在该状态（验收缺陷 ⑫：run-1ca97605acf3 的
+        # knowledge_ingestion dispatch 因 receipt 身份错配被标 failed）。
+        # 只治愈 reconciliation_required：blocked 子 run 持有诚实的
+        # readiness 裁决，running/waiting_human/终态子 run 不归对账管。
+        from core.research.workflow.knowledge_sideflow_definition import (
+            KNOWLEDGE_SIDEFLOW_NODE_IDS,
+        )
+
+        child_revived_total = 0
+        for child_run_id in knowledge_child_run_ids:
+            child = uow.repository.get_run(child_run_id)
+            if child is None or child.status != RunStatus.RECONCILIATION_REQUIRED.value:
+                continue
+            child_plan, revived_child = _apply_ledger_reconcile_for_run(
+                uow,
+                run=child,
+                node_order=KNOWLEDGE_SIDEFLOW_NODE_IDS,
+                now_ms=now_ms,
+            )
+            child_has_active_work = revived_child > 0 or _run_has_active_work(
+                uow, run_id=child.run_id
+            )
+            # 与父 run 相同的落态决策梯：plan 判 blocked 优先；有复活或
+            # 活跃工作落 RUNNING；零工作的子 run 保持 reconciliation_required
+            # 的诚实落态，不伪造前进。
+            if child_plan.lands_blocked:
+                child_target = RunStatus.BLOCKED
+                child_landing_problem = dict(child_plan.landing_problem)
+            elif child_has_active_work:
+                child_target = RunStatus.RUNNING
+                child_landing_problem = None
+            else:
+                continue
+            require_run_transition(RunStatus(child.status), child_target)
+            child_version, child_sequence = _bump_child_run_version(
+                uow, run=child, now_ms=now_ms
+            )
+            if child_target == RunStatus.BLOCKED:
+                # 落态裁决逐字复制自管线写下的最深 readiness 裁决，与父
+                # run 相同：对账只把 ledger 真相投影回 run 记录，从不手工
+                # 编造状态。
+                uow.repository.update_run_status(
+                    child.run_id,
+                    child.team_id,
+                    child_target.value,
+                    now_ms,
+                    active_node_id=str(child_plan.active_node_id or ""),
+                    blocked_problem_json=json.dumps(
+                        child_landing_problem, ensure_ascii=False
+                    ),
+                )
+            else:
+                uow.repository.update_run_status(
+                    child.run_id,
+                    child.team_id,
+                    child_target.value,
+                    now_ms,
+                    blocked_problem_json=None,
+                )
+            uow.repository.insert_event(
+                _event_record(
+                    run_id=child.run_id,
+                    sequence=child_sequence,
+                    event_id=new_id("evt"),
+                    run_version=child_version,
+                    event_type="run_blocked",
+                    correlation_id=request.idempotency_key,
+                    payload={
+                        "reconciled": True,
+                        "revivedDispatchCount": revived_child,
+                        "activeWorkFound": child_has_active_work,
+                        "reconciledStatus": child_target.value,
+                        "staleAttemptIds": list(child_plan.superseded_node_run_ids),
+                        "parentRunId": run.run_id,
+                    },
+                    now_ms=now_ms,
+                )
+            )
+            child_revived_total += revived_child
+        if revived > 0 or child_revived_total > 0:
             uow.after_commit(self._wake_worker)
         return _receipt(uow, request, command_id, accepted_version, sequence, now_ms)
 

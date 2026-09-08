@@ -1060,3 +1060,584 @@ def test_reconcile_compensates_zombie_reservation_in_knowledge_child_run(
         )
     finally:
         commands.close()
+
+
+# --------------------------------------------------------------------------
+# 父 run 对账运行 → 知识 sideflow 子 run 的 ledger 权威重排级联（缺陷 ⑫）
+# --------------------------------------------------------------------------
+
+# 验收缺陷 ⑫ 的真实卡死形态：手动节点重跑与 worker 排队的 knowledge_ingestion
+# graph_dispatch 竞态，dispatch 提交时发现 execution receipt 身份错配被终态
+# failed，子 run 被标 reconciliation_required 且再无前端出口。
+_RECEIPT_MISMATCH_PROBLEM = {
+    "code": "graph_dispatch_invalid",
+    "detail": (
+        "execution receipt identity mismatch: expected "
+        "(act-aa29dfbd433a91ed, knowledge_ingestion), "
+        "got (act-e4b7c78cb9c22c12, evidence_relations)"
+    ),
+}
+
+
+def _seed_parent_with_knowledge_children(
+    commands: CommandHarness,
+    *,
+    run_id: str,
+    children: list[dict[str, Any]],
+    parent_run_version: int = 3,
+    parent_last_event_sequence: int = 8,
+) -> None:
+    """Parent formal run + knowledge invocations + child runs（共享底座）.
+
+    父 run 自身保持与既有测试一致的形状：一个 running attempt + 一个无关的
+    failed adapter_dispatch（非 graph_dispatch，不参与复活）。
+    """
+    store = commands.store
+
+    def seed(uow):
+        uow.repository.insert_run(
+            build_run_record(
+                workflow_version_id=_PINNED_WORKFLOW_VERSION_ID,
+                run_id=run_id,
+                status="reconciliation_required",
+                run_version=parent_run_version,
+                last_event_sequence=parent_last_event_sequence,
+            )
+        )
+        uow.repository.insert_command(
+            build_command_record(
+                command_id=f"cmd-{run_id}",
+                run_id=run_id,
+                idempotency_key=f"key:{run_id}",
+                node_id="hypothesis_design",
+            )
+        )
+        for index, child_spec in enumerate(children):
+            child_run_id = child_spec["run_id"]
+            uow.repository.insert_run(
+                build_run_record(
+                    workflow_version_id=_PINNED_WORKFLOW_VERSION_ID,
+                    run_id=child_run_id,
+                    status=child_spec["status"],
+                    run_version=int(child_spec.get("run_version", 2)),
+                    last_event_sequence=int(child_spec.get("last_event_sequence", 4)),
+                    parent_run_id=run_id,
+                )
+            )
+            uow.repository.insert_command(
+                build_command_record(
+                    command_id=f"cmd-{child_run_id}",
+                    run_id=child_run_id,
+                    idempotency_key=f"key:{child_run_id}",
+                    node_id=child_spec.get("node_id", "knowledge_ingestion"),
+                )
+            )
+            uow.repository.insert_knowledge_invocation(
+                KnowledgeInvocationRecord(
+                    invocation_id=f"ki-{run_id}-{index}",
+                    parent_run_id=run_id,
+                    parent_node_id="hypothesis_design",
+                    parent_node_run_id=f"nr-{run_id}-hypothesis_design-a1",
+                    parent_attempt=1,
+                    question_id="SCI-096",
+                    scope_hash="scope",
+                    request_hash=f"req-{child_run_id}",
+                    search_envelope_hash="env",
+                    requirements_hash="req-hash",
+                    source_policy_version="v1",
+                    knowledge_child_run_id=child_run_id,
+                    status="running",
+                    knowledge_package_ref=None,
+                    package_content_hash=None,
+                    handoff_state="pending",
+                    error_json=None,
+                    created_at_ms=FIXED_NOW_MS - 1_000,
+                    updated_at_ms=FIXED_NOW_MS,
+                )
+            )
+        uow.repository.insert_attempt(
+            _attempt(
+                "hypothesis_design",
+                status="running",
+                run_id=run_id,
+                command_id=f"cmd-{run_id}",
+            )
+        )
+        uow.repository.insert_outbox(
+            replace(
+                build_outbox_record(
+                    f"act-{run_id}-adapter",
+                    run_id=run_id,
+                    command_id=f"cmd-{run_id}",
+                    action_kind="adapter_dispatch",
+                    status="failed",
+                ),
+                node_run_id=f"nr-{run_id}-hypothesis_design-a1",
+                last_problem_json=json.dumps(
+                    {"code": "adapter_execution_exception"}
+                ),
+            )
+        )
+
+    store.submit(seed, force_flush=True).result(timeout=10)
+
+
+def _outbox_status(commands: CommandHarness, action_id: str) -> str:
+    return commands.store.submit(
+        lambda uow: uow.repository.execute(
+            "SELECT status FROM outbox_actions WHERE action_id = ?",
+            (action_id,),
+        ).fetchone(),
+        force_flush=True,
+    ).result(timeout=10)[0]
+
+
+def _attempt_status(commands: CommandHarness, node_run_id: str) -> str:
+    return commands.store.submit(
+        lambda uow: uow.repository.execute(
+            "SELECT status FROM node_attempts WHERE node_run_id = ?",
+            (node_run_id,),
+        ).fetchone(),
+        force_flush=True,
+    ).result(timeout=10)[0]
+
+
+def test_reconcile_cascades_ledger_replan_to_stuck_knowledge_child_run(
+    tmp_path: Path,
+) -> None:
+    """父 run 对账运行必须把 ledger 权威重排级联进卡死的知识子 run。
+
+    缺陷 ⑫（run-1ca97605acf3）：knowledge 子 run 没有 reconcile 前端入口，
+    其 graph_dispatch 因 receipt 身份错配终态 failed 后永远困在
+    reconciliation_required。父 run 的对账运行必须同一事务内复活死
+    dispatch 并按与父 run 相同的落态梯落子 run。"""
+    commands = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        run_id = "run-parent-cascade"
+        child_run_id = "run-child-cascade"
+        stuck_node_run_id = f"nr-{child_run_id}-knowledge_ingestion-a2"
+        _seed_parent_with_knowledge_children(
+            commands,
+            run_id=run_id,
+            children=[{"run_id": child_run_id, "status": "reconciliation_required"}],
+        )
+        store = commands.store
+
+        def seed_child_ledger(uow):
+            # 姊妹节点（手动重跑 a3）已成功；入库 dispatch 竞态终态失败。
+            uow.repository.insert_attempt(
+                _attempt(
+                    "evidence_relations",
+                    attempt=3,
+                    status="succeeded",
+                    run_id=child_run_id,
+                    command_id=f"cmd-{child_run_id}",
+                )
+            )
+            uow.repository.insert_attempt(
+                _attempt(
+                    "knowledge_ingestion",
+                    attempt=2,
+                    status="failed",
+                    problem=_RECEIPT_MISMATCH_PROBLEM,
+                    run_id=child_run_id,
+                    command_id=f"cmd-{child_run_id}",
+                )
+            )
+            uow.repository.insert_outbox(
+                replace(
+                    build_outbox_record(
+                        "act-child-dispatch-dead",
+                        run_id=child_run_id,
+                        command_id=f"cmd-{child_run_id}",
+                        action_kind="graph_dispatch",
+                        status="failed",
+                    ),
+                    node_run_id=stuck_node_run_id,
+                    last_problem_json=json.dumps(
+                        _RECEIPT_MISMATCH_PROBLEM, ensure_ascii=False
+                    ),
+                )
+            )
+
+        store.submit(seed_child_ledger, force_flush=True).result(timeout=10)
+
+        commands.service.submit(
+            commands.request(
+                command=WorkflowCommandKind.RECONCILE_RUN,
+                run_id=run_id,
+                node_id=None,
+                expected_run_version=3,
+                idempotency_key="ui:reconcile-cascade",
+            )
+        )
+
+        child = store.get_run(child_run_id)
+        # 落态梯实际输出：failed 前沿 attempt 自身的问题把子 run 判 blocked
+        #（与父 run 的 failed-frontier 契约一致），同时死 dispatch 已复活。
+        assert child.status == "blocked"
+        assert json.loads(str(child.blocked_problem_json)) == _RECEIPT_MISMATCH_PROBLEM
+        assert child.active_node_id == "knowledge_ingestion"
+        # 子 run 版本按子 run 自身推进（2 → 3），事件序列同 bump。
+        assert child.run_version == 3
+
+        assert _outbox_status(commands, "act-child-dispatch-dead") == "pending"
+        # 姊妹成功 attempt 不被误判 stale。
+        assert (
+            _attempt_status(commands, f"nr-{child_run_id}-evidence_relations-a3")
+            == "succeeded"
+        )
+
+        child_events = store.list_events(child_run_id)
+        assert [event.event_type for event in child_events] == ["run_blocked"]
+        payload = json.loads(child_events[-1].payload_json)
+        assert payload["reconciled"] is True
+        assert payload["revivedDispatchCount"] == 1
+        assert payload["reconciledStatus"] == "blocked"
+        assert payload["staleAttemptIds"] == []
+        assert payload["parentRunId"] == run_id
+
+        # 父 run 行为不变：自身 attempt 仍在跑 → 落 RUNNING。
+        parent = store.get_run(run_id)
+        assert parent.status == "running"
+        # 子 run 有复活 → worker 必须被唤醒。
+        assert commands.wake_count == 1
+    finally:
+        commands.close()
+
+
+def test_reconcile_cascade_lands_inflight_child_running(tmp_path: Path) -> None:
+    """无 blocked/failed 前沿、只有复活 dispatch 的子 run 落 RUNNING。"""
+    commands = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        run_id = "run-parent-cascade-running"
+        child_run_id = "run-child-inflight"
+        stuck_node_run_id = f"nr-{child_run_id}-source_extraction-a1"
+        _seed_parent_with_knowledge_children(
+            commands,
+            run_id=run_id,
+            children=[{"run_id": child_run_id, "status": "reconciliation_required"}],
+        )
+        store = commands.store
+
+        def seed_child_ledger(uow):
+            uow.repository.insert_attempt(
+                _attempt(
+                    "source_finding",
+                    status="succeeded",
+                    run_id=child_run_id,
+                    command_id=f"cmd-{child_run_id}",
+                )
+            )
+            # 提炼节点仍在途（worker 崩溃前 dispatch 租约过期的形态）：
+            # ledger 无 failed/blocked 前沿 → plan 不判 blocked。
+            uow.repository.insert_attempt(
+                _attempt(
+                    "source_extraction",
+                    status="dispatching",
+                    run_id=child_run_id,
+                    command_id=f"cmd-{child_run_id}",
+                )
+            )
+            uow.repository.insert_outbox(
+                replace(
+                    build_outbox_record(
+                        "act-child-dispatch-inflight",
+                        run_id=child_run_id,
+                        command_id=f"cmd-{child_run_id}",
+                        action_kind="graph_dispatch",
+                        status="failed",
+                    ),
+                    node_run_id=stuck_node_run_id,
+                    last_problem_json=json.dumps(
+                        {"code": "lease_expired", "detail": "worker restart"}
+                    ),
+                )
+            )
+
+        store.submit(seed_child_ledger, force_flush=True).result(timeout=10)
+
+        commands.service.submit(
+            commands.request(
+                command=WorkflowCommandKind.RECONCILE_RUN,
+                run_id=run_id,
+                node_id=None,
+                expected_run_version=3,
+                idempotency_key="ui:reconcile-inflight",
+            )
+        )
+
+        child = store.get_run(child_run_id)
+        assert child.status == "running"
+        assert child.blocked_problem_json is None
+        assert _outbox_status(commands, "act-child-dispatch-inflight") == "pending"
+        child_events = store.list_events(child_run_id)
+        assert [event.event_type for event in child_events] == ["run_blocked"]
+        payload = json.loads(child_events[-1].payload_json)
+        assert payload["reconciled"] is True
+        assert payload["revivedDispatchCount"] == 1
+        assert payload["reconciledStatus"] == "running"
+        assert payload["parentRunId"] == run_id
+    finally:
+        commands.close()
+
+
+def test_reconcile_cascade_keeps_readiness_blocked_child_dispatch_dead(
+    tmp_path: Path,
+) -> None:
+    """readiness 裁决困住的子 run dispatch 不得复活（与父 run 同一排除）。"""
+    commands = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        run_id = "run-parent-cascade-readiness"
+        child_run_id = "run-child-readiness"
+        blocked_node_run_id = f"nr-{child_run_id}-knowledge_ingestion-a1"
+        _seed_parent_with_knowledge_children(
+            commands,
+            run_id=run_id,
+            children=[{"run_id": child_run_id, "status": "reconciliation_required"}],
+        )
+        store = commands.store
+
+        def seed_child_ledger(uow):
+            uow.repository.insert_attempt(
+                _attempt(
+                    "source_finding",
+                    status="succeeded",
+                    run_id=child_run_id,
+                    command_id=f"cmd-{child_run_id}",
+                )
+            )
+            # 评估管线自身的 readiness 裁决：重放会覆盖它，必须保持死。
+            uow.repository.insert_attempt(
+                _attempt(
+                    "knowledge_ingestion",
+                    status="blocked",
+                    problem=_READINESS_PROBLEM,
+                    run_id=child_run_id,
+                    command_id=f"cmd-{child_run_id}",
+                )
+            )
+            uow.repository.insert_outbox(
+                replace(
+                    build_outbox_record(
+                        "act-child-dispatch-readiness",
+                        run_id=child_run_id,
+                        command_id=f"cmd-{child_run_id}",
+                        action_kind="graph_dispatch",
+                        status="failed",
+                    ),
+                    node_run_id=blocked_node_run_id,
+                    last_problem_json=json.dumps(
+                        {"code": "graph_dispatch_failed", "detail": "transient_exhausted"}
+                    ),
+                )
+            )
+
+        store.submit(seed_child_ledger, force_flush=True).result(timeout=10)
+
+        commands.service.submit(
+            commands.request(
+                command=WorkflowCommandKind.RECONCILE_RUN,
+                run_id=run_id,
+                node_id=None,
+                expected_run_version=3,
+                idempotency_key="ui:reconcile-readiness",
+            )
+        )
+
+        child = store.get_run(child_run_id)
+        # 子 run 落 blocked 在评估管线自己的裁决上，但 dispatch 不复活：
+        # 重放会确定性再失败并覆盖 readiness 裁决（V2 重跑映射依赖它）。
+        assert child.status == "blocked"
+        assert json.loads(str(child.blocked_problem_json)) == _READINESS_PROBLEM
+        assert child.active_node_id == "knowledge_ingestion"
+        assert _outbox_status(commands, "act-child-dispatch-readiness") == "failed"
+        assert _attempt_status(commands, blocked_node_run_id) == "blocked"
+
+        child_events = store.list_events(child_run_id)
+        payload = json.loads(child_events[-1].payload_json)
+        assert payload["reconciled"] is True
+        assert payload["revivedDispatchCount"] == 0
+        assert payload["reconciledStatus"] == "blocked"
+        # 无任何复活：worker 不被唤醒。
+        assert commands.wake_count == 0
+    finally:
+        commands.close()
+
+
+def test_reconcile_cascade_skips_blocked_and_terminal_children(
+    tmp_path: Path,
+) -> None:
+    """只有 reconciliation_required 的子 run 归级联管。
+
+    blocked 子 run 持有诚实的 readiness 裁决；running/waiting_human 之外的
+    终态子 run（succeeded/failed/cancelled）不归对账管，一律不碰。"""
+    commands = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        run_id = "run-parent-cascade-skip"
+        blocked_child = "run-child-blocked"
+        succeeded_child = "run-child-succeeded"
+        failed_child = "run-child-failed"
+        cancelled_child = "run-child-cancelled"
+        _seed_parent_with_knowledge_children(
+            commands,
+            run_id=run_id,
+            children=[
+                {"run_id": blocked_child, "status": "blocked"},
+                {"run_id": succeeded_child, "status": "succeeded"},
+                {"run_id": failed_child, "status": "failed"},
+                {"run_id": cancelled_child, "status": "cancelled"},
+            ],
+        )
+        store = commands.store
+
+        def seed_children_ledger(uow):
+            # blocked 子 run 带一个非 readiness 的死 dispatch：不归父对账
+            # 复活——它的 blocked 是管线自己的裁决。
+            uow.repository.insert_attempt(
+                _attempt(
+                    "knowledge_ingestion",
+                    status="blocked",
+                    problem=_READINESS_PROBLEM,
+                    run_id=blocked_child,
+                    command_id=f"cmd-{blocked_child}",
+                )
+            )
+            uow.repository.insert_outbox(
+                replace(
+                    build_outbox_record(
+                        "act-blocked-child-dispatch",
+                        run_id=blocked_child,
+                        command_id=f"cmd-{blocked_child}",
+                        action_kind="graph_dispatch",
+                        status="failed",
+                    ),
+                    node_run_id=f"nr-{blocked_child}-knowledge_ingestion-a1",
+                    last_problem_json=json.dumps(
+                        {"code": "graph_dispatch_failed", "detail": "transient"}
+                    ),
+                )
+            )
+
+        store.submit(seed_children_ledger, force_flush=True).result(timeout=10)
+
+        commands.service.submit(
+            commands.request(
+                command=WorkflowCommandKind.RECONCILE_RUN,
+                run_id=run_id,
+                node_id=None,
+                expected_run_version=3,
+                idempotency_key="ui:reconcile-skip",
+            )
+        )
+
+        # 全部子 run 原样：状态不变、无新事件、死 dispatch 不复活、版本不动。
+        for child_run_id, expected_status in (
+            (blocked_child, "blocked"),
+            (succeeded_child, "succeeded"),
+            (failed_child, "failed"),
+            (cancelled_child, "cancelled"),
+        ):
+            child = store.get_run(child_run_id)
+            assert child.status == expected_status, child_run_id
+            assert child.run_version == 2, child_run_id
+            assert store.list_events(child_run_id) == [], child_run_id
+        assert _outbox_status(commands, "act-blocked-child-dispatch") == "failed"
+
+        parent = store.get_run(run_id)
+        assert parent.status == "running"
+        assert commands.wake_count == 0
+    finally:
+        commands.close()
+
+
+def test_reconcile_cascade_is_idempotent_across_repeated_reconciles(
+    tmp_path: Path,
+) -> None:
+    """同一父 run 连续两次对账不得重复落子 run。
+
+    第一次：子 run 落 blocked + dispatch 复活。第二次：子 run 已不在
+    reconciliation_required，级联跳过——无第二个 reconciled 事件、无二次
+    版本 bump、已复活的 dispatch 不被再次触碰。"""
+    commands = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        run_id = "run-parent-cascade-idem"
+        child_run_id = "run-child-idem"
+        stuck_node_run_id = f"nr-{child_run_id}-knowledge_ingestion-a2"
+        _seed_parent_with_knowledge_children(
+            commands,
+            run_id=run_id,
+            children=[{"run_id": child_run_id, "status": "reconciliation_required"}],
+        )
+        store = commands.store
+
+        def seed_child_ledger(uow):
+            uow.repository.insert_attempt(
+                _attempt(
+                    "evidence_relations",
+                    attempt=3,
+                    status="succeeded",
+                    run_id=child_run_id,
+                    command_id=f"cmd-{child_run_id}",
+                )
+            )
+            uow.repository.insert_attempt(
+                _attempt(
+                    "knowledge_ingestion",
+                    attempt=2,
+                    status="failed",
+                    problem=_RECEIPT_MISMATCH_PROBLEM,
+                    run_id=child_run_id,
+                    command_id=f"cmd-{child_run_id}",
+                )
+            )
+            uow.repository.insert_outbox(
+                replace(
+                    build_outbox_record(
+                        "act-child-dispatch-idem",
+                        run_id=child_run_id,
+                        command_id=f"cmd-{child_run_id}",
+                        action_kind="graph_dispatch",
+                        status="failed",
+                    ),
+                    node_run_id=stuck_node_run_id,
+                    last_problem_json=json.dumps(
+                        _RECEIPT_MISMATCH_PROBLEM, ensure_ascii=False
+                    ),
+                )
+            )
+
+        store.submit(seed_child_ledger, force_flush=True).result(timeout=10)
+
+        commands.service.submit(
+            commands.request(
+                command=WorkflowCommandKind.RECONCILE_RUN,
+                run_id=run_id,
+                node_id=None,
+                expected_run_version=3,
+                idempotency_key="ui:reconcile-idem-1",
+            )
+        )
+        commands.service.submit(
+            commands.request(
+                command=WorkflowCommandKind.RECONCILE_RUN,
+                run_id=run_id,
+                node_id=None,
+                expected_run_version=4,
+                idempotency_key="ui:reconcile-idem-2",
+            )
+        )
+
+        child = store.get_run(child_run_id)
+        assert child.status == "blocked"
+        assert child.run_version == 3  # 只 bump 过一次
+        assert _outbox_status(commands, "act-child-dispatch-idem") == "pending"
+        child_events = store.list_events(child_run_id)
+        assert [event.event_type for event in child_events] == ["run_blocked"]
+        payload = json.loads(child_events[-1].payload_json)
+        assert payload["revivedDispatchCount"] == 1
+
+        parent = store.get_run(run_id)
+        assert parent.status == "running"
+    finally:
+        commands.close()
