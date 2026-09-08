@@ -85,3 +85,4 @@
 - 结果包测试改为真实 workflow artifact store 写入并 canonical 读回计划/假说/评审等产物，仅隔离来源和模型依赖。修复前明确报 `canonical artifact is missing: research_plan`，修复后通过；另验证阶段一计划只存在于其他运行时，即使当前运行有协议计划也必须失败。结果包 v2 共 29 项通过，终态包原 3 项通过；不是模型、前端或科研质量验收。
 - 完整 selector 第二轮在两条 interrupted journal / continuation fixture 失败，来源 Agent 正按精确测试独立诊断；前组已通过。失败 manifest 不能用于合入，后续新增代码也必须绑定新验证结果。
 - 开发 guard 发现同一主任务初始注册 ID 与 worktree 自动 ID 重叠；已将初始注册正常标为完成并注明交接到现有主 claim，重新 preflight 无重叠。未触碰其他项目任务的注册或改动。
+- 第二轮失败已区分并修复：中断尚未写回时没有 canonical candidate batch 是正常事实，但新增 receipt helper 无条件覆盖 `userStatus=interrupted`、中断原因和续接指导，这是本轮引入的真实回归。现保留中断/失败语义，同时仍记录 receipt gate 并禁止 artifact/completion 显示通过，没有跳过来源真实性校验。另一 continuation case 原来只固定终态 receipt reader，新预校验入口仍读空事件；补已有 receipt-binding fixture，生产 preflight 不变。主 Agent 独立重跑两个精确 node 均通过。

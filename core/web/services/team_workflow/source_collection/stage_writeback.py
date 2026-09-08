@@ -541,11 +541,15 @@ def _apply_finding_receipt_gate_to_closure(
     closure_summary["sourceFindingReceiptGate"] = receipt_gate
     if receipt_gate.get("passed"):
         return
+    closure_summary["artifactComplete"] = False
+    closure_summary["completionGatePassed"] = False
+    if closure_summary.get("userStatus") in {"interrupted", "failed"}:
+        # Receipt absence is expected before writeback. Keep the actual
+        # interruption/failure and its recovery instructions visible.
+        return
     closure_summary.update({
-        "artifactComplete": False,
         "userStatus": "partial",
         "advanceOutcome": "partial",
-        "completionGatePassed": False,
         "message": "资料搜集尚未满足真实回执与视角覆盖要求；请先查看具体缺口再推进。",
         "retryInstruction": "请读取当前 source_collection_context_tool，只补真实回执与视角缺口；不要按标题猜测论文或重复检索已绑定来源。",
     })

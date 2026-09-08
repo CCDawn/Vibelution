@@ -5286,6 +5286,7 @@ def test_source_collection_stage_task_after_turn_accepts_continuation_turn_for_s
     # This case owns continuation-turn identity. Receipt acceptance has its
     # own real-validator and writeback tests in test_source_finding_receipt_gate.
     monkeypatch.setattr(artifact_readback_registry, "load_source_finding_receipt_payload", lambda **_: {"quality": {}})
+    _stub_source_finding_receipt_binding(monkeypatch)
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
     _stub_source_collection_search_background(monkeypatch)
