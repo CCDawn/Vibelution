@@ -317,6 +317,11 @@ def test_stage_one_grounded_context_uses_the_run_pinned_source_scope(
         "build_hypothesis_input_context",
         fake_build,
     )
+    monkeypatch.setattr(
+        research_project_hypothesis_context,
+        "_grounded_problem_context",
+        lambda *_args, **_kwargs: {"contentHash": "current-problem-hash"},
+    )
     definition = build_challenge_cup_workflow_definition()
     identity = register_or_resolve(definition)
     run = SimpleNamespace(
@@ -341,6 +346,7 @@ def test_stage_one_grounded_context_uses_the_run_pinned_source_scope(
     assert context == {
         "status": "ready",
         "allowedEvidenceRefs": ["evidence:accepted-1"],
+        "problemUnderstandingContext": {"contentHash": "current-problem-hash"},
     }
     assert captured["task"] == {
         "workflowRunId": "run-stage-one",

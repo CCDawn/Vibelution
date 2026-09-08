@@ -141,6 +141,9 @@ _FORMAL_GROUNDED_GENERATION_AGENDA_RULES = (
     "lineageRefs 必须来自本轮 allowedEvidenceRefs 白名单，且每个候选至少一条；testablePrediction 不得为空",
     "axisProfile 必须恰好描述 mechanism、intervention、observable、population、boundary 五轴；falsifier 必须能够否定或显著削弱核心机制",
     "必须说明相对 R0 草案的具体机制变化，不得只改写措辞",
+    "以本轮问题理解的 scope、假设和未知项核对 R0 草案；范围冲突必须修订，待确认的范围不得声称已获批准",
+    "区分已有事实、待检验预测与设计参数；数值结论引用来源，预测阈值说明选择理由，不得把未经检验的关系写成事实",
+    "检验路径说明干预、对照、读出、观测时间、可推翻核心机制的结果、替代解释与当前资源可行性；缺少资源或证据时明确提出修订缺口",
     "没有新内容时回复 pass；分歧必须显式记录",
 )
 
@@ -1348,6 +1351,10 @@ def _generation_opening_topic(
         lines.append("赛题正文：" + question_text)
     if domain:
         lines.append("赛题领域：" + domain)
+    problem_context = grounded.get("problemUnderstandingContext")
+    if isinstance(problem_context, Mapping):
+        lines.append("本轮问题理解（范围与版本以此为准；审批状态保持原值）：")
+        lines.append(json.dumps(dict(problem_context), ensure_ascii=False))
     screening_feedback = grounded.get("screeningFeedback") or {}
     if screening_feedback.get("code") == "diversity_collapse":
         lines.append(

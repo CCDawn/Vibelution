@@ -369,6 +369,35 @@ def build_hypothesis_input_context(
     return bind_hypothesis_input_to_task(result, task)
 
 
+def _grounded_problem_context(
+    team_id: str, workflow_run_id: str, *, store: Any,
+) -> dict[str, Any] | None:
+    """Read the current problem attempt, never an older successful scope."""
+    attempts = store.read(lambda repo: repo.list_attempts(workflow_run_id))
+    problem_attempts = [item for item in attempts if item.node_id == "problem_understanding"]
+    if not problem_attempts:
+        return None
+    current = max(problem_attempts, key=lambda item: item.attempt)
+    if current.status != "succeeded":
+        return None
+    from .research_runtime.agent_task_artifact_builder import load_canonical_problem_understanding_payload
+    from .research_runtime.human_gate_artifacts import canonical_sha256
+    from .research_runtime.problem_understanding_artifact_writer import validate_problem_understanding
+
+    payload = validate_problem_understanding(load_canonical_problem_understanding_payload(
+        record={"teamId": team_id, "runId": workflow_run_id},
+        node_run={"nodeRunId": current.node_run_id},
+    ))
+    if payload["human_gate"]["decision"] in {"rejected", "revision_requested"}:
+        return None
+    return {
+        "workflowRunId": workflow_run_id,
+        "nodeRunId": current.node_run_id,
+        "contentHash": canonical_sha256(payload),
+        "payload": payload,
+    }
+
+
 def build_stage_one_grounded_generation_context(
     team_id: str,
     workflow_run_id: str,
@@ -435,7 +464,7 @@ def build_stage_one_grounded_generation_context(
             "code": "workflow_scope_mismatch",
             "allowedEvidenceRefs": [],
         }
-    return build_hypothesis_input_context(
+    context = build_hypothesis_input_context(
         normalized_team_id,
         {
             "workflowRunId": _text(workflow_run_id),
@@ -443,3 +472,19 @@ def build_stage_one_grounded_generation_context(
         },
         store=resolved,
     )
+    if context.get("status") != "ready":
+        return context
+    try:
+        problem = _grounded_problem_context(
+            normalized_team_id, _text(workflow_run_id), store=resolved,
+        )
+    except (TypeError, ValueError):
+        problem = None
+    if problem is None:
+        return {
+            "status": "blocked",
+            "code": "problem_understanding_not_ready",
+            "workflowRunId": _text(workflow_run_id),
+            "allowedEvidenceRefs": [],
+        }
+    return {**context, "problemUnderstandingContext": problem}

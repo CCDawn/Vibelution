@@ -1493,6 +1493,9 @@ def _reconcile_source_collection_stage_session_task_from_turn_result(
     next_task = dict(task)
     next_task["status"] = next_status
     next_task["summary"] = s._trim_text(turn_result.get("summary"), max_length=500) or s._trim_text(task.get("summary"), max_length=500)
+    if next_status == "failed" and turn_result.get("failureCode"):
+        next_task["failureCode"] = s._trim_text(turn_result["failureCode"], max_length=120)
+        next_task["failureMessage"] = s._trim_text(turn_result.get("failureMessage") or next_task["summary"], max_length=500)
     next_task["updatedAt"] = now
     next_task["reconciledFromTurn"] = {
         "turnId": turn_id,
@@ -1637,8 +1640,13 @@ def _source_collection_stage_session_task_turn_journal_result(
                 or s._trim_text(payload.get("content"), max_length=500)
                 or s._trim_text(payload.get("error"), max_length=500)
                 or s._trim_text(payload.get("reason"), max_length=500)
+                or s._trim_text(payload.get("message"), max_length=500)
                 or fallback_summary
             ),
+            **({
+                "failureCode": s._trim_text(payload.get("problemCode"), max_length=120),
+                "failureMessage": s._trim_text(payload.get("message"), max_length=500),
+            } if next_status == "failed" and payload.get("problemCode") else {}),
             "createdAt": s._trim_text(getattr(event, "timestamp", ""), max_length=120),
             "source": "conversation_ledger",
         }
@@ -1684,6 +1692,10 @@ def _source_collection_stage_session_task_completion_snapshot_result(session_id:
         "sessionId": s._trim_text(session_id, max_length=160),
         "status": next_status,
         "summary": assistant_text or fallback_summary,
+        **({
+            "failureCode": s._trim_text(snapshot.get("terminalProblemCode"), max_length=120),
+            "failureMessage": assistant_text or fallback_summary,
+        } if next_status == "failed" and snapshot.get("terminalProblemCode") else {}),
         "createdAt": "",
         "source": "session_completion_snapshot",
     }

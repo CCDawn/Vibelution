@@ -9368,6 +9368,7 @@ def open_candidate_generation_meeting(
                 "inputArtifactRefs": [*knowledge_refs, *draft_refs],
                 "generationContext": {
                     "candidateAuthority": candidate_authority,
+                    "problemUnderstandingContext": generation_context.get("problemUnderstandingContext"),
                     "screeningFeedback": generation_context.get("screeningFeedback"),
                     "evidenceClaims": list(
                         generation_context.get("evidenceClaims") or []

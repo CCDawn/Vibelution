@@ -99,7 +99,10 @@ class EventPublishWorker:
         # a failing re-check never fails the delivery (the parent event is
         # already durably absorbed and the ACK below must still land).
         recheck = self._readiness_recheck
-        if recheck is not None and isinstance(result, dict) and result.get("status") == "absorbed":
+        # Absorption can commit before a crash prevents the readiness hook.
+        # Redelivery must finish that hook too; its command key/live-attempt
+        # checks already make repeated invocation idempotent.
+        if recheck is not None and isinstance(result, dict) and result.get("status") in {"absorbed", "already_absorbed"}:
             try:
                 recheck(payload)
             except Exception:  # noqa: BLE001 - advisory by contract
