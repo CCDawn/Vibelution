@@ -27,7 +27,10 @@ def test_finding_context_refreshes_receipts_even_when_context_is_cached(monkeypa
     receipts.append({"resultRefs": ["https://example.org/new"]})
     second = json.loads(stage_tools.source_collection_context_tool(team_id="team-1", run_id="source-1", stage_id="finding"))
     assert first["searchReceipts"] == []
-    assert second["searchReceipts"] == receipts
+    assert [item["resultRefs"] for item in second["searchReceipts"]] == [
+        item["resultRefs"] for item in receipts
+    ]
+    assert second["searchReceipts"][0]["resultRefCount"] == 1
     assert "parent_query_id" in second["formalSearchPolicy"]["supplementalQueries"]
     assert second["searchReceiptValidation"] == {"valid": True}
     candidate_binding = second["formalSearchPolicy"]["candidateBinding"]

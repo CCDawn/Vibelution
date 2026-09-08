@@ -285,7 +285,7 @@ def test_graph_and_worker_routes_share_iteration_decision_tables() -> None:
             assert routed_successors("version_governance", kind.value, CURRENT_VERSION_ID) == ()
 
 
-def test_branch_decision_from_run_heals_compact_authority_drift(
+def test_branch_decision_requires_current_frozen_source_authority(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     import json
@@ -319,6 +319,13 @@ def test_branch_decision_from_run_heals_compact_authority_drift(
                 "sourceCollectionRunId": "sc-compact-drift",
             }
         ),
+    )
+    assert branch_decision_from_run(run) == ""
+    put_workflow_artifact(
+        "research-team", kind="iteration_decision",
+        workflow_run_id="run-317ed54cb838", source_collection_run_id="sc-compact-drift",
+        artifact_identity="current-source-decision",
+        payload={"decisionKind": "stop", "terminalReason": "formal_runner_unavailable"},
     )
     assert branch_decision_from_run(run) == "stop"
 
@@ -357,7 +364,7 @@ def test_stop_artifact_routes_when_graph_state_lacks_branch(
                     json.dumps(
                         {
                             "teamId": "research-team",
-                            "sourceCollectionRunId": "sc-compact-drift",
+                            "sourceCollectionRunId": "run-test",
                         }
                     ),
                     "run-test",
@@ -513,7 +520,14 @@ def test_repair_resumes_succeeded_iteration_interrupt_from_artifact(
             harness.commands.store.latest_attempt("run-test", "version_governance")
             is None
         )
-        # The event-triggered (or explicit) repair still heals the strand.
+        # A different source authority cannot drive a frozen run's branch.
+        assert harness.worker.repair_stranded_iteration_route_for_run("run-test") is False
+        put_workflow_artifact(
+            "research-team", kind="iteration_decision", workflow_run_id="run-test",
+            source_collection_run_id="sc-compact-drift", artifact_identity="current-source-decision",
+            payload={"decisionKind": "stop", "terminalReason": "formal_runner_unavailable"},
+        )
+        # The explicit repair consumes only the current scoped decision.
         assert harness.worker.repair_stranded_iteration_route_for_run("run-test") is True
         pending = harness.latest_adapter_pending()
         assert pending is not None
