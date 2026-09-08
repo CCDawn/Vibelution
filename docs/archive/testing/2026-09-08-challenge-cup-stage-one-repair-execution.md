@@ -22,6 +22,8 @@
 5. **运行验收保持未完成**：SCI-011 的两次原始失败、旧错误 DOI 与新增正确候选均保留事实；本轮尚未写活数据，未启动新付费运行。
 6. **知识重投漏推进，已复现**：`event_publish_worker._handle` 只在 `absorbed` 时调用 readiness recheck。模拟接收提交后、recheck/ACK 前中断，事件重投返回 `already_absorbed`，父节点没有任何 attempt。修复将两种接收结果都送入现有幂等 recheck；不改写 checkpoint、不新增重试框架。
 7. **预算诊断在阶段投影丢失，已复现**：Session `turn_failed` 提供 `problemCode/message`，但 `stage_reconcile` 只读取 summary/content/error/reason，丢掉结构化原因；随后任务重试无法可靠命中既有 fresh-session 分支。修复保留 journal/snapshot 的预算代码与错误摘要到 task failureCode/failureMessage，不修改普通 Session，不靠增大模型窗口处理。
+8. **来源写回首稿被主审退回**：独立检查 worker 未提交 diff 时发现 compact receipt stub、legacy sourceRecords/records、needs_review 状态可绕过本批校验。已要求移除生产测试专用/兼容绕过，修测试 fixture 而非降低真实门；任何新增 lead 都先验证，无论状态或字段别名。此首稿未验收、未合入。
+9. **新重试任务重置批次预算，已确认**：`stage_session` 创建任务时没有继承 `sourceCollectionWritebackBatches`，而接受上限只读当前 task 的该字段。现已沿 `retrySourceTaskId` 继承去重后的真实批次，并保持原 `searchEnvelope`；同 task 的 fresh session 保留预算。无关任务不参与，断裂血缘不能重置额度。
 
 ## 验证与剩余工作
 
@@ -31,5 +33,7 @@
 - 交接恢复：新增故障边界测试在修复前失败（父 `hypothesis_design` attempt 为 None）；修复后与现有 readiness/cross-run 共 13 项通过，无重复父事件/dispatch。
 - 预算诊断：新增 journal→task→fresh retry 行为在修复前缺少 failureCode，修复后与既有 replay 共 14 项通过；保留已接收来源，不把旧 writeback 覆盖成虚构成功。
 - 主线独立回归：假说状态/链路、知识子运行与交接回执共 343 项通过；阶段一合同、质量、结果包及第二阶段边界共 106 项通过。此处不等价于真实模型输出质量与前端闭环验收。
+- 重试预算：继承/去重/断链/额度耗尽与问题上下文、子运行血缘共 12 项通过；实际 source collection task/session/retry 行为另 39 项通过。
+- 当前浏览器只读复核：活跃实例仍为 `bcabd5ca`，SCI-011 仍显示旧运行待处理。新代码尚未刷新到运行实例，本轮没有点击“继续运行”或启动新题。
 - 待记录：各 Agent 的实际变更、主 Agent 独立测试、组合合同、Launcher 刷新、SCI-011 恢复与新题全前端验收。
 - 已知环境问题：此前 fetch 遇到无效 Agent checkpoint ref；不删除未知归属 ref，本轮未请求远端 push。

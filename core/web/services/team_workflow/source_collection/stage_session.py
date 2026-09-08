@@ -7,6 +7,7 @@ monkeypatches on ``team_workflow_orchestration_service`` stable.
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from typing import Any
 
 from ..research_runtime.task_adapter_registry import SOURCE_NODE_TASKS
@@ -34,6 +35,35 @@ _FORMAL_RETRY_DEPTH_CHAIN_WALK_LIMIT = 32
 
 # Ingestion must not open when the candidate graph is clearly not ready.
 _INGESTION_GRAPH_MISSING_LINK_HARD_LIMIT = 5
+
+
+def _source_collection_retry_writeback_batches(
+    task: dict[str, Any], prior_tasks: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Carry accepted batches across sessions within the same retry lineage."""
+    by_id = {str(item.get("taskId") or ""): item for item in prior_tasks}
+    lineage: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    current = task
+    while current:
+        task_id = str(current.get("taskId") or "")
+        if task_id in seen:
+            raise ValueError("finding retry budget lineage contains a cycle")
+        seen.add(task_id)
+        lineage.append(current)
+        parent_id = str(current.get("retrySourceTaskId") or "")
+        # A same-task fresh-session replay replaces the session, not its budget.
+        if not parent_id or parent_id == task_id:
+            break
+        if parent_id not in by_id:
+            raise ValueError("finding retry budget lineage is missing its parent task")
+        current = by_id[parent_id]
+    batches = {}
+    for item in reversed(lineage):
+        for batch in item.get("sourceCollectionWritebackBatches") or []:
+            if isinstance(batch, dict) and batch.get("batchFingerprint"):
+                batches[str(batch["batchFingerprint"])] = deepcopy(batch)
+    return list(batches.values())
 
 
 def _source_collection_stage_task_formal_retry_depth(
@@ -1118,6 +1148,16 @@ def start_source_collection_stage_session_task(
         source_candidates=source_candidates,
     )
     try:
+        inherited_writeback_batches = (
+            _source_collection_retry_writeback_batches(
+                replay_task or previous_stage_task, prior_stage_tasks,
+            )
+            if stage_id == "finding" and isinstance(replay_task or previous_stage_task, dict)
+            else []
+        )
+    except ValueError as exc:
+        raise s.TeamWorkflowOrchestrationError(str(exc)) from exc
+    try:
         experiment_session = s.resolve_research_project_agent_session(
             normalized_team_id,
             research_project_id=research_project["projectId"],
@@ -1166,6 +1206,11 @@ def start_source_collection_stage_session_task(
             else None
         ),
     )
+    budget_parent = replay_task or previous_stage_task
+    if stage_id == "finding" and isinstance(budget_parent, dict):
+        parent_contract = budget_parent.get("writebackContract") or {}
+        if isinstance(parent_contract, dict) and isinstance(parent_contract.get("searchEnvelope"), dict):
+            writeback_contract["searchEnvelope"] = deepcopy(parent_contract["searchEnvelope"])
     task_checklist = s._source_collection_stage_task_checklist(
         stage_id,
         agent_role,
@@ -1278,6 +1323,7 @@ def start_source_collection_stage_session_task(
         "writeback": {},
         "sourceContextMode": source_context_mode,
         "problemUnderstandingContext": problem_understanding_context,
+        "sourceCollectionWritebackBatches": inherited_writeback_batches,
         "retrySourceTaskId": (
             s._trim_text(previous_stage_task.get("taskId"), max_length=160)
             if (
