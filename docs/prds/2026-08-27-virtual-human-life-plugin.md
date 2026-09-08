@@ -2300,3 +2300,29 @@ Dialogue V2 完成时，用户可观察到人物有时一句说完、有时自�
 - 未确认偏好、无来源记忆或虚构生活经历进入 Prompt；
 - 新配置、权限、网络依赖或数据迁移超出本节范围；
 - 任何不同人物、隐藏 Companion Session 与普通 Session 串线证据。
+
+## 33. 真实生活连续性增量（2026-09-08）
+
+本轮接受范围：约定闭环、真实时间重逢、共同经历进展。只在 `virtual_human_life` 和现有 Agent-scoped 工具内实施；普通 Session admission、Journal、worker、persist、projection、SSE、ConversationStore、composer 零差异。不增加工具注册、公共 HTTP API、依赖、模型调用或 UI 控件。
+
+### 33.1 分工与复用
+
+1. `commitments.py`：纯状态机复用 `calendar.py` 校验和 `calendar/events.jsonl`。propose 只写候选，后续用户轮确认转正式 upsert；拒绝改约不取消原约，cancel 撤销，complete 由服务核验该日程活动成功事件。
+2. `reunion.py`：纯投影复用 mailbox 到达 receipt、open loops 与 Life Events。UTC 真实时间差与人物时区跨日分别计算；主动 Turn 不冒充用户归来。
+3. 主服务、工具与 Prompt：唯一集成 owner；校验人物自身 directSession 和非空当前用户 Turn，幂等落盘，按既有日历同步日程。新字段只注入专属人物会话。
+
+本地复用优先：既有日历、原子 Agent store、open-loop 生命周期、成功事件以及原生 Turn 身份。外部参考 AstrBot Private Companion 固定版本 `85cc366ee6e1ccf08b357e8b9e396c3abb842ff4` 的候选→确认与真实 elapsed-time 语义，AI Town 固定版本 `8e05997f2409275669c8344b84a51692e83f3f33` 的上次交谈时间与对象相关回忆；不引入模拟世界、独立会话引擎或新记忆权威。AstrBot 用户已声明作者许可，公开仓库仍未识别许可证，本轮仅参考设计并复用本地实现，不复制第三方源码或改变分发授权。
+
+### 33.2 行为契约
+
+- 约定属于同一人物和 directSession；提议/确认/拒绝/取消/完成走现有 schedule 工具新 action。模型不得用普通 calendar action 绕过共同约定确认。到点只进入 awaitingOutcome，不自动完成、不判定失约、更不改变关系。
+- 同一 receipt 重放不重复前移“上次消息”，也不清除已绑定 Turn；未知时间保留 unknown，不用当前时间补造历史。用户当前意图优先，不强制问旧话题，不人为等待。
+- 共同经历是“成功生活事件在本会话中被讨论”的有来源关联，不等于用户现实共同参与。只保存简短摘要与事件/Turn/日期引用，复用 open-loop 的既有有效期；最多向 Prompt 投影 6 项，过期 open loop 不用于接续，resolved 可作回忆。不新建向量库或重写原生 episodic memory。
+- 此轮不实施未回复固定时限扣心情/关系、学习新偏好、自我披露策略、新通知或 UI。上述情绪规则仍需独立对齐。
+
+### 33.3 验证与交付层次
+
+- 纯函数：提议不排程、后轮确认、改约/取消/过期/真实结果、跨 session、重复操作冲突、账本不截掉普通长期日历；时区跨日、未知/逆序时间、主动与用户到达区分、成功来源和有界只读。
+- 集成：实际工具→服务→同一日历/open loop→Prompt，禁用/错误会话/管家/伪造或过期 Turn 拒绝；失败/无关活动不成为共同结果，跨日来源仍可验证。
+- 普通链路：受保护文件差异为空，并运行普通 Session 与现有 Companion 工具、Prompt、mailbox、continuity 回归。未改前端，不要求额外 UI 生产构建。
+- 代码验证与真实自然聊天验收分开；本轮不运行外部模型、不重启产品、不 push/发布。后续运行态刷新只经 Launcher 且遵守 active-work guard。

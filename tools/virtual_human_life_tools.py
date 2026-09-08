@@ -87,6 +87,22 @@ def virtual_human_status_tool() -> str:
     return _invoke(lambda agent_id: {"status": "ready", "snapshot": _service().snapshot(agent_id)})
 
 
+def _invoke_companion_turn(operation) -> str:
+    """Bind continuity actions to the actual speaker, never a steward target."""
+    runtime = _runtime_context()
+
+    def invoke(agent_id: str) -> dict[str, Any]:
+        if agent_id != str(runtime.get("agentId") or "").strip():
+            raise RuntimeError("Companion continuity requires the speaking Agent itself.")
+        return operation(
+            agent_id,
+            session_id=str(runtime.get("sessionId") or "").strip(),
+            turn_id=str(runtime.get("turnId") or runtime.get("runId") or "").strip(),
+        )
+
+    return _invoke(invoke)
+
+
 def virtual_human_schedule_tool(
     local_date: str = "",
     action: str = "view",
@@ -110,9 +126,32 @@ def virtual_human_schedule_tool(
     """查询日程、维护长期日历，或提出受 ToolPolicy 约束的工具型活动。
 
     action: view | propose_tool_activity | upsert_calendar | cancel_calendar |
-    set_calendar_exception。日历只负责长期约定和重复安排，活动执行仍由每日
+    set_calendar_exception | propose_commitment | confirm_commitment |
+    reject_commitment | cancel_commitment | complete_commitment。
+    双方约定必须先 propose，用户后续明确同意后才 confirm；改约仍先 propose。
+    event_id 是约定 ID，complete 时 source_ref 必须是真实成功生活事件 ID。
+    日历只负责长期约定和重复安排，活动执行仍由每日
     schedule 与原生 proactive turn 负责，不能因为日历存在就宣称完成。
     """
+
+    commitment_actions = {
+        "propose_commitment": "propose", "confirm_commitment": "confirm",
+        "reject_commitment": "reject", "cancel_commitment": "cancel",
+        "complete_commitment": "complete",
+    }
+    commitment_action = commitment_actions.get(str(action or "").strip().lower())
+    if commitment_action:
+        return _invoke_companion_turn(
+            lambda agent_id, **runtime: {
+                "status": "applied",
+                "commitment": _service().change_companion_commitment(
+                    agent_id, **runtime, action=commitment_action,
+                    commitment_id=event_id, operation_id=idempotency_key,
+                    title=title, start_at=start_at, end_at=end_at, reason=reason,
+                    source_event_id=source_ref,
+                ),
+            }
+        )
 
     def operation(agent_id: str) -> dict[str, Any]:
         normalized_action = str(action or "view").strip().lower()
@@ -147,6 +186,11 @@ def virtual_human_schedule_tool(
         }
         calendar_command = calendar_commands.get(normalized_action, "")
         if calendar_command:
+            if (calendar_command == "upsertCalendarEvent" and calendar_kind == "commitment") or any(
+                row.get("eventId") == event_id and row.get("commitmentState")
+                for row in _service().store.read_jsonl(agent_id, "calendar/events.jsonl")
+            ):
+                raise ValueError("Use the commitment actions for a shared commitment; calendar actions cannot bypass confirmation.")
             key = str(idempotency_key or "").strip()
             if not key:
                 return {
@@ -604,12 +648,24 @@ def virtual_human_proactive_message_tool(
 ) -> str:
     """申请主动消息，或维护未完话题、承诺和回应状态。
 
-    action: request | record_open_loop | resolve_open_loop | record_reply。
+    action: request | record_open_loop | resolve_open_loop | record_reply | record_shared_experience。
+    record_shared_experience 只关联当前用户轮次讨论过的真实成功生活事件；
+    source_event_id 必须有成功 outcome，summary 是讨论摘要，不代表双方共同在场。
     request 仍受候选价值、额度、间隔、免打扰和 binding revision 约束；
     其他动作只更新 Agent 私有的连续性账本，不直接创建会话 Turn。
     """
 
     normalized_action = str(action or "request").strip().lower()
+    if normalized_action == "record_shared_experience":
+        return _invoke_companion_turn(
+            lambda agent_id, **runtime: {
+                "status": "recorded",
+                "sharedExperience": _service().record_companion_shared_experience(
+                    agent_id, **runtime, event_id=source_event_id,
+                    topic_key=topic_key, summary=summary,
+                ),
+            }
+        )
     if normalized_action == "request":
         return _invoke(
             lambda agent_id: {
