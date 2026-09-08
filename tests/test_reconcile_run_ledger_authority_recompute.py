@@ -11,12 +11,19 @@ frontier. These tests pin:
   blockers);
 - the acceptance shape: dirty blocked attempt + real readiness blocker +
   terminal-failed dispatch → reconcile lands the run on ``blocked`` with the
-  evaluator-authored ``auto_advance_not_ready``/``evidence_graph_incomplete``
-  verdict and the V2 ``retry-formal-node:…:evidence_relations`` rerun action;
+  evaluator-authored ``auto_advance_not_ready`` verdict and the V2
+  ``retry-formal-node:…:<frontier>`` retry action;
 - no more reconcile death loop: no revived dispatch remains for the worker to
   re-fail;
 - the plain-drift repair contract from 97e227263 still revives unrelated
   failed rows.
+
+The knowledge chain (source_finding/source_extraction/evidence_relations/
+knowledge_ingestion/knowledge_handoff) has moved out of the main workflow
+definition into the challenge-cup-knowledge-sideflow, so fixtures are shaped
+on current main-chain nodes (problem_understanding → hypothesis_design →
+protocol_design → protocol_review → protocol_freeze → …) while keeping the
+original behavioral semantics.
 """
 
 from __future__ import annotations
@@ -61,13 +68,16 @@ NODE_ORDER = tuple(
     node.nodeId for node in build_challenge_cup_workflow_definition().nodes
 )
 
-_INGESTION_PROBLEM = {
+# Readiness-pipeline verdict that blocks the auto-advanced successor of
+# protocol_review (the freeze gate): the evaluator's own detail names the
+# missing domain fact.
+_READINESS_PROBLEM = {
     "code": EVALUATOR_BLOCK_CODE,
-    "detail": "evidence_graph_incomplete",
+    "detail": "protocol_review_report_missing",
 }
 _MISMATCH_PROBLEM = {
     "code": "checkpoint_node_mismatch",
-    "detail": "thread 中断于 knowledge_handoff，但 dispatch 目标是 source_finding",
+    "detail": "thread 中断于 protocol_freeze，但 dispatch 目标是 hypothesis_design",
 }
 
 
@@ -102,25 +112,30 @@ def _attempt(
 
 
 def production_shape_attempts(run_id: str = "run-test") -> list[Any]:
-    """run-d02722658d8b ledger facts, in start-time order."""
+    """run-d02722658d8b ledger facts, in start-time order.
+
+    Migrated onto the current main chain (the knowledge nodes of the original
+    incident now live in the sideflow): mid-chain successes, a readiness-gated
+    successor block, and a late misassigned retry behind the covered frontier.
+    """
     base = FIXED_NOW_MS - 10_000
     step = 1_000
     return [
         _attempt("problem_understanding", status="succeeded", started_at_ms=base + 0 * step, run_id=run_id),
-        _attempt("source_finding", attempt=5, status="succeeded", started_at_ms=base + 1 * step, run_id=run_id),
-        _attempt("source_extraction", status="succeeded", started_at_ms=base + 2 * step, run_id=run_id),
-        _attempt("evidence_relations", attempt=2, status="succeeded", started_at_ms=base + 3 * step, run_id=run_id),
+        _attempt("hypothesis_design", attempt=5, status="succeeded", started_at_ms=base + 1 * step, run_id=run_id),
+        _attempt("protocol_design", status="succeeded", started_at_ms=base + 2 * step, run_id=run_id),
+        _attempt("protocol_review", attempt=2, status="succeeded", started_at_ms=base + 3 * step, run_id=run_id),
         # Auto-advance readied this successor; readiness blocked it. Real gate.
         _attempt(
-            "knowledge_ingestion",
+            "protocol_freeze",
             status="blocked",
-            problem=_INGESTION_PROBLEM,
+            problem=_READINESS_PROBLEM,
             started_at_ms=base + 4 * step,
             run_id=run_id,
         ),
         # Late operator-misassigned retry behind the covered frontier.
         _attempt(
-            "source_finding",
+            "hypothesis_design",
             attempt=6,
             status="blocked",
             problem=_MISMATCH_PROBLEM,
@@ -133,10 +148,10 @@ def production_shape_attempts(run_id: str = "run-test") -> list[Any]:
 def test_plan_supersedes_covered_incident_block_only() -> None:
     plan = plan_ledger_authority(production_shape_attempts(), node_order=NODE_ORDER)
 
-    assert plan.superseded_node_run_ids == ("nr-run-test-source_finding-a6",)
+    assert plan.superseded_node_run_ids == ("nr-run-test-hypothesis_design-a6",)
     assert plan.lands_blocked is True
-    assert plan.active_node_id == "knowledge_ingestion"
-    assert dict(plan.landing_problem or {}) == _INGESTION_PROBLEM
+    assert plan.active_node_id == "protocol_freeze"
+    assert dict(plan.landing_problem or {}) == _READINESS_PROBLEM
 
 
 def test_plan_lands_failed_frontier_blocked_for_retry() -> None:
@@ -191,16 +206,16 @@ def test_plan_prefers_deepest_evaluator_block_over_incidents() -> None:
     """多个 blocker 并存时，落态取最深的评估管线裁决。"""
     base = FIXED_NOW_MS - 8_000
     attempts = [
-        _attempt("evidence_relations", status="succeeded", started_at_ms=base),
+        _attempt("protocol_review", status="succeeded", started_at_ms=base),
         _attempt(
-            "knowledge_ingestion",
+            "protocol_freeze",
             attempt=1,
             status="blocked",
-            problem=_INGESTION_PROBLEM,
+            problem=_READINESS_PROBLEM,
             started_at_ms=base + 1_000,
         ),
         _attempt(
-            "source_finding",
+            "hypothesis_design",
             attempt=6,
             status="blocked",
             problem=_MISMATCH_PROBLEM,
@@ -210,10 +225,10 @@ def test_plan_prefers_deepest_evaluator_block_over_incidents() -> None:
 
     plan = plan_ledger_authority(attempts, node_order=NODE_ORDER)
 
-    assert plan.superseded_node_run_ids == ("nr-run-test-source_finding-a6",)
+    assert plan.superseded_node_run_ids == ("nr-run-test-hypothesis_design-a6",)
     assert plan.lands_blocked is True
-    assert plan.active_node_id == "knowledge_ingestion"
-    assert dict(plan.landing_problem or {}) == _INGESTION_PROBLEM
+    assert plan.active_node_id == "protocol_freeze"
+    assert dict(plan.landing_problem or {}) == _READINESS_PROBLEM
 
 
 def test_plan_is_noop_without_unknown_nodes_or_blockers() -> None:
@@ -251,7 +266,7 @@ def _seed_production_ledger(commands: CommandHarness, *, run_id: str = "run-test
                 command_id="cmd-chain",
                 run_id=run_id,
                 idempotency_key="key:chain",
-                node_id="evidence_relations",
+                node_id="protocol_review",
             )
         )
         uow.repository.insert_command(
@@ -259,7 +274,7 @@ def _seed_production_ledger(commands: CommandHarness, *, run_id: str = "run-test
                 command_id="cmd-a6",
                 run_id=run_id,
                 idempotency_key="key:a6",
-                node_id="source_finding",
+                node_id="hypothesis_design",
             )
         )
         for attempt in production_shape_attempts(run_id):
@@ -267,7 +282,7 @@ def _seed_production_ledger(commands: CommandHarness, *, run_id: str = "run-test
         uow.repository.execute(
             """
             UPDATE workflow_runs
-            SET active_node_id = 'source_finding',
+            SET active_node_id = 'hypothesis_design',
                 blocked_problem_json = ?
             WHERE run_id = ?
             """,
@@ -279,13 +294,13 @@ def _seed_production_ledger(commands: CommandHarness, *, run_id: str = "run-test
         uow.repository.insert_outbox(
             replace(
                 build_outbox_record(
-                    "act-source-finding-a6-dead",
+                    "act-hypothesis-design-a6-dead",
                     run_id=run_id,
                     command_id="cmd-a6",
-                    idempotency_key="graph:resume:act-source-finding-a6",
+                    idempotency_key="graph:resume:act-hypothesis-design-a6",
                     status="failed",
                 ),
-                node_run_id=f"nr-{run_id}-source_finding-a6",
+                node_run_id=f"nr-{run_id}-hypothesis_design-a6",
                 last_problem_json=json.dumps(
                     {"code": "graph_dispatch_failed", "detail": "transient_exhausted"}
                 ),
@@ -393,15 +408,15 @@ def test_reconcile_lands_run_on_real_readiness_blocker(tmp_path: Path) -> None:
         run = commands.store.get_run("run-test")
         # 验收核心：落到 blocked + 真实 readiness 阻塞，active 归位链条权威。
         assert run.status == "blocked"
-        assert run.active_node_id == "knowledge_ingestion"
-        assert json.loads(str(run.blocked_problem_json)) == _INGESTION_PROBLEM
+        assert run.active_node_id == "protocol_freeze"
+        assert json.loads(str(run.blocked_problem_json)) == _READINESS_PROBLEM
 
         # 脏 attempt 被判 stale；其失败 dispatch 不再复活（断开死循环）。
         stale = commands.store.submit(
             lambda uow: [
                 row.status
                 for row in uow.repository.list_attempts("run-test")
-                if row.node_run_id == "nr-run-test-source_finding-a6"
+                if row.node_run_id == "nr-run-test-hypothesis_design-a6"
             ][0],
             force_flush=True,
         ).result(timeout=10)
@@ -414,20 +429,23 @@ def test_reconcile_lands_run_on_real_readiness_blocker(tmp_path: Path) -> None:
             ],
             force_flush=True,
         ).result(timeout=10)
-        dead_row = [row for row in outbox_rows if row[0] == "act-source-finding-a6-dead"]
+        dead_row = [
+            row for row in outbox_rows if row[0] == "act-hypothesis-design-a6-dead"
+        ]
         assert not dead_row or dead_row[0][1] != "pending"
         # 没有任何复活：worker 无需被唤醒。
         assert commands.wake_count == 0
 
-        # V2 allowedActions 出现可用的重跑证据关系入口。
+        # V2 allowedActions 出现可用的重试入口：被 readiness 阻塞的前沿节点
+        # （最新 attempt 仍为 blocked）保持可重试，对账不得把它一并打死。
         refreshed = commands.store.get_run("run-test")
         definition = build_challenge_cup_workflow_definition()
         attempts = commands.store.list_attempts("run-test")
         offers = build_retry_node_offers(
             run=refreshed, definition=definition, attempts=attempts
         )
-        rel_offer = next(o for o in offers if o.node_id == "evidence_relations")
-        assert rel_offer.available is True
+        frontier_offer = next(o for o in offers if o.node_id == "protocol_freeze")
+        assert frontier_offer.available is True
         actions = _formal_actions_from_offers(
             run_id="run-test",
             run_version=refreshed.run_version,
@@ -437,7 +455,7 @@ def test_reconcile_lands_run_on_real_readiness_blocker(tmp_path: Path) -> None:
             a
             for a in actions
             if a.command == "retry_formal_node"
-            and getattr(a.payload, "nodeId", None) == "evidence_relations"
+            and getattr(a.payload, "nodeId", None) == "protocol_freeze"
         )
         assert retry.enabled is True
         assert retry.idempotencyKey  # durable offer key rides along
@@ -474,7 +492,7 @@ def test_reconciled_shape_does_not_reenter_reconciliation_loop(tmp_path: Path) -
 
         run = commands.store.get_run("run-test")
         assert run.status == "blocked"
-        assert run.active_node_id == "knowledge_ingestion"
+        assert run.active_node_id == "protocol_freeze"
     finally:
         commands.close()
 
@@ -591,12 +609,12 @@ def test_reconcile_with_zero_revivable_or_active_work_lands_blocked_for_retry(
                     command_id="cmd-zero-work",
                     run_id=run_id,
                     idempotency_key="key:zero-work",
-                    node_id="knowledge_ingestion",
+                    node_id="protocol_freeze",
                 )
             )
             uow.repository.insert_attempt(
                 _attempt(
-                    "evidence_relations",
+                    "protocol_review",
                     status="succeeded",
                     run_id=run_id,
                     command_id="cmd-zero-work",
@@ -604,11 +622,11 @@ def test_reconcile_with_zero_revivable_or_active_work_lands_blocked_for_retry(
             )
             uow.repository.insert_attempt(
                 _attempt(
-                    "knowledge_ingestion",
+                    "protocol_freeze",
                     status="failed",
                     problem={
                         "code": "adapter_execution_exception",
-                        "detail": "evidence graph has nodes but no relations",
+                        "detail": "protocol_freeze adapter raised on review handoff",
                     },
                     started_at_ms=FIXED_NOW_MS + 1_000,
                     run_id=run_id,
@@ -616,7 +634,7 @@ def test_reconcile_with_zero_revivable_or_active_work_lands_blocked_for_retry(
                 )
             )
             uow.repository.execute(
-                "UPDATE workflow_runs SET active_node_id = 'knowledge_ingestion'"
+                "UPDATE workflow_runs SET active_node_id = 'protocol_freeze'"
                 " WHERE run_id = ?",
                 (run_id,),
             )
@@ -629,7 +647,7 @@ def test_reconcile_with_zero_revivable_or_active_work_lands_blocked_for_retry(
                         action_kind="adapter_dispatch",
                         status="failed",
                     ),
-                    node_run_id=f"nr-{run_id}-knowledge_ingestion-a1",
+                    node_run_id=f"nr-{run_id}-protocol_freeze-a1",
                     last_problem_json=json.dumps(
                         {"code": "adapter_execution_exception"}
                     ),
@@ -660,7 +678,7 @@ def test_reconcile_with_zero_revivable_or_active_work_lands_blocked_for_retry(
 
         run = store.get_run(run_id)
         assert run.status == "blocked"
-        assert run.active_node_id == "knowledge_ingestion"
+        assert run.active_node_id == "protocol_freeze"
         assert json.loads(str(run.blocked_problem_json))["code"] == (
             "adapter_execution_exception"
         )
