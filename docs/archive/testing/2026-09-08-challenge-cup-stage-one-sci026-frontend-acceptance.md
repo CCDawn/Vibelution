@@ -97,3 +97,25 @@
 - invocation `kinv-94901d8c91104d9ebd2db590d0be4650` 为 completed/accepted，包引用 `knowledge_package://research-team/dprun-20260908101213756078-3e9f641a/49bcd8c1ac96b24e1cfbfe018742104467628ae22f776367aeae3fef3eb6a907`，package_content_hash 与引用 hash 相同。
 - P1 待定位：父运行 `run-d8fded98c181` 仍 blocked / hypothesis_design，前端主进度 `1/3`，仍提示 `knowledge_package_not_materialized; hypothesis_round_unconverged`。子回执完成并不等于父运行吸收完成；需追踪 accepted invocation → 父节点当前 scope 产物读回/恢复事件，不能用重建运行或历史 fallback 消除提示。
 - 本次未继续触发正式候选生成、评审或结果包；终态仍为完整闭环验收未通过。最终记录已同时保留“代码测试通过”“子流程完成”“父流程受阻”和“内容质量不足”四层事实。
+
+
+## 本次快速修复：原文引用根因与验收
+
+- 已确认根因：quote supply 无差别采用 candidate.summary / record.summary，实际模型摘要因此被提升成可引用原文；DataRecord 的普通 content/metadata 也没有提供抓取回执权威。
+- 复用方案：复用 Session Journal 的成功 web_fetch_tool 结果、既有任务绑定轮次与 quotableSources/逐字校验。没有新增抓取引擎、工具、存储或自动重试。模型 summary 只保留为检索线索，不能成为引用块。
+- 新路径：当前任务绑定轮次内抓取已有 URL → 再读取上下文 → 从对应来源的原文块引用 → 用同一抓取回执校验写回。上下文保留 eventId/locator；抓取网页文本不自动声明已读整篇论文。
+- 验证：引用供给和写回集成 11 项通过，包含模型摘要拒绝、不同轮次隔离、真实抓取后可引用、无原文诚实跳过；既有提炼对账与证据物化 21 项通过。提示词与 claim 契约相关 54 项通过。
+- 验证中发现一个既有 fixture 失败：test_retry_attempt_passes_evidence_scope_without_forcing_session_retry 缺少 source run owner，报 Source collection run owner research project is required。在未修改的 main 上复现同一失败；不修改生产路径绕过该约束，不把它计为通过。
+- 版本判断：不修改冻结工作流身份、模型等级、第二阶段边界；本轮是现有第一阶段服务修复。后端代码合入后需要 Launcher 刷新。
+- 科研质量边界：未改写 SCI-026 已入库的 8 个知识项，未将已有模型摘要升级为合格引文。代码回归通过不能替代 SCI-026 重新获取原文后的正式候选与最终结果包验收。
+
+
+## 本次快速修复：交接状态与入库重放
+
+- 父流程根因更正：父 Ledger sequence 12 已记录 knowledge_result_absorbed，旧 knowledge_package_not_materialized 来自 auto_advance_not_ready 的陈旧 blocked 投影。知识交接后的 START_NODE 被新的 hypothesis_round_unconverged 拒绝时，只记了日志，没有更新原先的阻塞原因。本次从该新鲜 readiness 结果更新已有 run/attempt 的阻塞原因并发出 node_blocked 事件；保留评审门、不创建额外 attempt/dispatch，CAS 不匹配或已有其他阻塞原因时不改写。
+- 父流程验证：新增陈旧原因刷新与幂等测试、既有知识交接测试共 8 项通过。此修复不会把未评审假说标为收敛，也不自动修改已结束的历史事件。
+- 入库重复副作用已由主 Agent 独立核对 canonical candidate store：同一 source run 的 8 个 sourceCandidateId 各对应两个 official_synced steward pack，共 16 个 KnowledgeItem ID。前一套为 kitem-701cf19c0d1b / kitem-6bd1ec4bc01b / kitem-47f86216a0b8 / kitem-2844e799a210 / kitem-ef39942a2f4c / kitem-21cb9e42a8a4 / kitem-750a405198e8 / kitem-b1689d98fde2；后一套为上文已记录的 8 个 ID。前一套 pack 在 10:37:42 至 10:41:03 UTC 逐条完成，后一套 10:41:11 至 10:43:12 UTC 逐条完成。先前只记录最后一次写回的 8 个 ID，不能据此否认前一套副作用。
+- 入库根因：materializer 只读取传入 task 的旧 writeback 汇总，逐来源总是创建新的 steward pack。超时后请求仍在完成，下一请求持有旧 task 时会重建同一批来源；新的 pack candidateId 又改变下游 source/proposal 身份，绕开原有内容去重。
+- 修复：复用现有 inter_process_lock 按 source run 串行处理入库；在当前 run 的 candidate store 按相同 source pack 完整 output 与目标知识库复用 pack/officialSyncRecord。已完成时直接返回已有 KnowledgeItem，pending_review 直接继续 proposal review，已接受 inbox source 的中断恢复跳过第二次 source review。没有新增入库队列或延长工具 timeout。
+- 验证：新增 stale task 重放、source 接受后中断恢复、重叠请求不能重复进入副作用 3 项通过；现有入库 actor 授权 4 项通过。
+- 精确限制：这次修正超时重放的重复副作用，不能据此宣称首次 8 条串行入库已少于 180 秒；未删除历史重复对象。SCI-026 正式候选、评审与最终结果包仍待运行验收，不能将现有摘要引文或存量重复项自动作为合格科研成果。

@@ -61,6 +61,7 @@ from core.web.services.team_workflow.research_runtime.agent_claim_evidence_mater
 from core.web.services.team_workflow.source_collection.stage_writeback import (
     _materialize_extraction_claim_evidence_after_reconcile,
 )
+from core.chat.conversation_ledger import append_conversation_event
 from tests._support.team_workflow.helpers import (
     _append_stage_task_tool_trace,
     _capture_workflow_events,
@@ -130,6 +131,13 @@ def _seed_completed_extraction_task(tmp_path, monkeypatch):
         run_id,
         {"stageId": "extraction", "agentId": agent["agentId"], "agentRole": "source_extractor"},
     )
+    for candidate in candidates:
+        append_conversation_event(
+            tmp_path, task["sessionId"], task["turn"]["turnId"], "tool_result", status="done",
+            payload={"toolCall": {"name": "web_fetch_tool", "status": "done",
+                "arguments": {"url": candidate["sourceUrl"]},
+                "result": "[网页内容] " + candidate["sourceUrl"] + "\n\n" + candidate["summary"]}},
+        )
     return {
         "teamId": team["teamId"],
         "runId": run_id,

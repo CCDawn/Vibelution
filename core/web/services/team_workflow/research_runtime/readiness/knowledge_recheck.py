@@ -41,7 +41,7 @@ from core.research.workflow.ledger import (
     WorkflowLedgerStore,
 )
 
-from ..command_service import WorkflowCommandError
+from ..command_service import NodeNotReadyError, WorkflowCommandError
 
 _LIVE_ATTEMPT_STATUSES = frozenset(
     {"starting", "dispatching", "running", "waiting_human"}
@@ -156,6 +156,11 @@ def _recheck_once(
     )
     try:
         command_service.submit(request)
+    except NodeNotReadyError as exc:
+        _refresh_knowledge_block(store, parent, node_id, invocation_id, exc,
+                                 now_provider() if now_provider else 0)
+        _record_recheck_blocked(payload, node_id, exc)
+        return
     except (
         WorkflowCommandError,
         CommandNotAllowedError,
@@ -167,6 +172,44 @@ def _recheck_once(
         _record_recheck_blocked(payload, node_id, exc)
         return
     _record_recheck_started(payload, node_id)
+
+
+def _refresh_knowledge_block(store, parent, node_id, invocation_id, exc, now_ms):
+    """Replace an obsolete auto-advance reason with the fresh readiness verdict."""
+    from ..blocked_reason import format_blocked_reason, parse_problem_json
+    from ..ids import new_id
+
+    codes = [str(item.code) for item in exc.readiness.blockers]
+    problem = {"code": "auto_advance_not_ready", "detail": "; ".join(codes)}
+
+    def mutate(uow):
+        current = uow.repository.get_run(parent.run_id)
+        if (current is None or current.status != "blocked"
+                or current.run_version != exc.run_version or current.active_node_id != node_id):
+            return
+        old = parse_problem_json(current.blocked_problem_json) or {}
+        if old.get("code") != "auto_advance_not_ready" or old == problem:
+            return
+        latest = uow.repository.latest_attempt(parent.run_id, node_id)
+        if latest is None or latest.status != "blocked":
+            return
+        problem_json = json.dumps(problem, ensure_ascii=False)
+        uow.repository.update_attempt_status(latest.node_run_id, "blocked", now_ms,
+                                             problem_json=problem_json)
+        uow.repository.update_run_status(parent.run_id, current.team_id, "blocked", now_ms,
+                                         active_node_id=node_id, blocked_problem_json=problem_json)
+        sequence = uow.repository.advance_last_sequence(parent.run_id, 1, now_ms)
+        uow.repository.insert_event(EventRecord(
+            run_id=parent.run_id, sequence=sequence, event_id=new_id("evt"),
+            run_version=current.run_version, event_type="node_blocked",
+            actor_json=json.dumps({"actorType": "system", "actorId": "knowledge-readiness-recheck"}),
+            correlation_id=invocation_id, causation_id=None,
+            payload_json=json.dumps({"nodeId": node_id, "nodeRunId": latest.node_run_id,
+                **problem, "reason": format_blocked_reason(problem), "blockers": codes}, ensure_ascii=False),
+            occurred_at_ms=now_ms,
+        ))
+
+    store.submit(mutate, force_flush=True).result(timeout=30)
 
 
 def _record_revision_available(

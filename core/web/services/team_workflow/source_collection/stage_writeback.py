@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..source_collection_common import project_source_version_families
+from .extraction_fetch_text import task_fetched_text
 from .extraction_quote_anchor_supply import (
     QUOTE_BLOCK_MAX_CHARS,
     QUOTE_SOURCES_TOTAL_CHAR_BUDGET,
@@ -121,17 +122,9 @@ def _source_collection_stage_writeback_formal_claim_bound(
 def _source_collection_stage_writeback_quote_anchor_blocks(
     team_id: str,
     run_id: str,
+    task: dict[str, Any],
 ) -> tuple[dict[str, list[dict[str, Any]]], set[str]]:
-    """Build the audit blocks for every known source id of the run.
-
-    One authoritative quotable-text index shared by the context supply and
-    the writeback gate: candidates index their stored summary plus the
-    linked data record's content/abstract; records index their own
-    ``content``/``summary``.  The 4000-char block bound is the historical
-    gate trim, so every quote the previous validator accepted is still a
-    verbatim block substring (zero-diff for the compliant path).  Sources
-    with no stored text map to an empty block list.
-    """
+    """Use the same task-scoped original texts as the context supply."""
     s = _service()
     records = s._source_collection_stage_records_for_run(run_id)
     try:
@@ -144,6 +137,7 @@ def _source_collection_stage_writeback_quote_anchor_blocks(
         for record in records
         if s._trim_text(record.get("recordId"), max_length=160)
     }
+    fetched_text = task_fetched_text(task)
     blocks_by_id: dict[str, list[dict[str, Any]]] = {}
     for candidate in s._source_collection_candidates_for_run(team_id, run_id):
         candidate_id = s._trim_text(candidate.get("candidateId"), max_length=160)
@@ -152,6 +146,7 @@ def _source_collection_stage_writeback_quote_anchor_blocks(
         blocks_by_id[candidate_id] = source_quotable_blocks(
             candidate,
             record_by_id,
+            fetched_text_by_locator=fetched_text,
             block_max_chars=4000,
         )
     for record_id, record in record_by_id.items():
@@ -160,6 +155,7 @@ def _source_collection_stage_writeback_quote_anchor_blocks(
             blocks_by_id[record_id] = source_quotable_blocks(
                 record,
                 {},
+                fetched_text_by_locator=fetched_text,
                 block_max_chars=4000,
             )
     return blocks_by_id, set(blocks_by_id)
@@ -192,6 +188,7 @@ def _source_collection_stage_writeback_quote_anchor_audit(
     blocks_by_id, _known_source_ids = _source_collection_stage_writeback_quote_anchor_blocks(
         team_id,
         run_id,
+        task,
     )
 
     def _is_honest_skip(entry: dict[str, Any]) -> bool:
@@ -1219,15 +1216,15 @@ def get_source_collection_stage_task_context(
     if normalized_context_mode in {"evidence", "retry_missing", "retry_evidence"} and normalized_stage_id != "relations" and task_agent_role != "source_relation_mapper":
         context["usage"]["evidenceInstruction"] = (
             "candidates[].summary 是搜集阶段保存的摘要或元数据，不等于全文；"
-            "quote 只能从 candidates[].summary 逐字复制，不能虚构页码、原文引语或全文结论。"
+            "模型摘要只作检索线索；请用 web_fetch_tool 抓取既有 URL 后重新读取上下文，quote 仅引用 quotableSources 的真实抓取文本。"
         )
     if (normalized_stage_id == "extraction" or task_agent_role == "source_extractor") and (
         normalized_context_mode != "minimal"
     ):
         # Quote-anchor supply (run-882610596ddb): the agent can only write a
         # verbatim quote when the context carries copyable source text, so
-        # every page candidate/record ships its quotable blocks (fetched body
-        # → abstract → stored summary) with explicit per-source access
+        # every page candidate/record ships its quotable blocks from successful
+        # fetch receipts with explicit per-source access
         # markers.  The same block texts back the writeback gate, so a quote
         # copied from ``quotableSources`` always validates.  Minimal mode
         # stays id-and-locator-only: it can re-read with compact mode to get
@@ -1245,18 +1242,19 @@ def get_source_collection_stage_task_context(
             [item for item in selected_candidates if isinstance(item, dict)],
             [item for item in selected_records if isinstance(item, dict)],
             failed_fetch_by_candidate_id=failed_fetch_by_candidate_id,
+            fetched_text_by_locator=task_fetched_text(task),
             block_max_chars=QUOTE_BLOCK_MAX_CHARS,
             total_char_budget=QUOTE_SOURCES_TOTAL_CHAR_BUDGET,
         )
         context["usage"]["quoteAnchorInstruction"] = (
             "quote 锚供给：quotableSources[] 为每个候选/记录给出可逐字复制的原文块"
-            "（blocks[].text，来源优先级 fetched_body>abstract>stored_summary，"
+            "（blocks[].text 来自本任务 web_fetch_tool 的成功回执，"
             "超长块已截断并标注 truncated=true，只允许引用块内文本）；"
             "claims[].quote 与 evidenceRefs[].quote 必须逐字取自对应 sourceId 的 blocks[].text，"
             "原样复制，禁止改写、拼接、凭记忆重写或写空串；"
-            "sourceAccess.access=abstract_only 的来源只有摘要级原文"
-            "（引用时写 evidenceStatus=verified_abstract）；"
+            "抓取页面不等于获取整篇论文，必须按实际文本判断主张；"
             "sourceAccess.access=no_quotable_text 的来源没有可引用原文："
+            "先用 web_fetch_tool 抓取该来源 URL，再重新读取上下文；抓取失败时"
             "跳过其 quote 并声明 evidenceStatus=missing_evidence_anchor，"
             "不要为它产出 claim 或空 quote。"
         )
@@ -1275,13 +1273,13 @@ def get_source_collection_stage_task_context(
             "正式 claim 路径的 completed 提炼回写会被服务端逐条校验："
             "(1) 证据状态字段名是 evidenceStatus（不是 verification_status；"
             "verification_status 只属于 Challenge v2 证据卡元数据）；"
-            "(2) 候选/记录有可引用原文块（quotableSources blocks）或存储 summary 非空时，"
+            "(2) 候选/记录有可引用原文块（quotableSources blocks）时，"
             "每条非 exclude 条目必须至少带一个逐字 quote 锚："
             "嵌套 claims[]/keyFindings[] 项含 quote，或 evidenceRefs[] 项含 {id, quote}；"
-            "(3) quote 必须是 quotableSources 对应 sourceId 原文块/存储 summary 的逐字子串，"
+            "(3) quote 必须是 quotableSources 对应 sourceId 原文块的逐字子串，"
             "从上下文原样复制，禁止改写；"
-            "引述存储摘要时写 evidenceStatus=verified_abstract；"
-            "(4) 无可引用原文（sourceAccess=no_quotable_text）或存储 summary 为空的来源，"
+            "模型 summary 不得作为引文；"
+            "(4) 无可引用原文（sourceAccess=no_quotable_text）的来源，"
             "必须声明 evidenceStatus=missing_evidence_anchor（诚实跳过，不物化），不产空 quote；"
             "(5) quote 非逐字子串时，首次回写不拒绝：任务停靠 needs_review 并返回"
             " quoteAnchorRemediation 结构化修正反馈（含最近匹配块片段），只有一次机会；"
@@ -1474,10 +1472,10 @@ def _apply_extraction_claim_materialization_visibility_and_gate(
             message = "资料提炼内容已回写，但 ClaimEvidence 物化失败，当前阶段需要重试。"
         else:
             remediation = (
-                "提炼回写缺少逐字 quote 锚：候选存储摘要非空但物化出 0 条 claim 证据。"
+                "提炼回写缺少逐字 quote 锚：物化出 0 条 claim 证据。"
                 "请重新回写 completed：每条非 exclude 条目至少带一个 quote 锚"
                 "（嵌套 claims[]/keyFindings[] 项含 quote，或 evidenceRefs[] 项含 {id, quote}），"
-                "quote 必须从 candidates[].summary 逐字复制，并写 evidenceStatus=verified_abstract。"
+                "quote 必须从 quotableSources[].blocks[].text 逐字复制；无原文时先抓取已有 URL 并重读上下文。"
             )
             gate_code = "needs_quote_anchor_retry"
             artifact_status = "claim_evidence_missing"

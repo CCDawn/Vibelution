@@ -3648,11 +3648,9 @@ def test_source_collection_context_compact_candidate_paging_stays_model_visible(
     assert pages[0]["omittedReturnedCandidateCount"] == 0
     assert "summaryPreview" in pages[0]["candidates"][0]
     assert "summary" not in pages[0]["candidates"][0]
-    # quote 锚供给链：compact 页现在必须携带 quotableSources[].blocks 可逐字
-    # 复制原文块与 quote 锚指令（run-882610596ddb：无块可抄导致 quote=''），
-    # 页体量护栏相应放宽，但仍保持有界（模型可见）。
+    # compact 页保留来源与抓取指令；只有模型 summary 的候选没有可引用原文。
     supply = {item["sourceId"]: item for item in pages[0]["quotableSources"]}
-    assert all(supply[item["candidateId"]]["quoteAvailable"] for item in pages[0]["candidates"])
+    assert all(not supply[item["candidateId"]]["quoteAvailable"] for item in pages[0]["candidates"])
     assert "禁止改写" in pages[0]["usage"]["quoteAnchorInstruction"]
     assert len(json.dumps(pages[0], ensure_ascii=False)) < 9000
 

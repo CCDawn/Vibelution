@@ -1,43 +1,8 @@
-"""Verbatim quote-anchor supply chain for source-collection extraction.
+"""Bounded original-text supply and quote validation for source extraction.
 
-Production blocker (run-882610596ddb): the extraction agent systematically
-wrote ``quote=''`` and only record-anchor reference ids, so the hardened
-writeback contract (verbatim-quote-anchored claims) rejected every completed
-writeback, zero claims materialized, and the run blocked on
-``required_artifact_missing: evidence_card_batch``.  Root cause: the stage
-task context never contained copyable source text — compact candidate
-summaries stop at a 24-char preview, so there was nothing verbatim to quote.
-
-This module owns the supply side once, as importable pure functions, so the
-context boundary and the writeback boundary enforce one rule set:
-
-1. ``extraction_quotable_sources`` builds, per candidate/record, the quotable
-   source blocks embedded into the stage task context.  Block priority
-   follows evidence quality: fetched body text (linked data record
-   ``content``) first, then the stored abstract (record ``summary``), then
-   the candidate's own stored ``summary``.  Blocks are length-capped and the
-   total char budget is bounded, so a large candidate page cannot explode the
-   prompt.  Every source also carries a ``sourceAccess`` marker
-   (``full_text`` / ``abstract_only`` / ``no_quotable_text``) so fetch
-   failures (403/auth wall) degrade the source to abstract-level evidence
-   instead of inviting fabricated full-text quotes.
-2. ``audit_extraction_quote_anchors`` classifies each non-exclude extraction
-   entry against the exact same block texts: ``has_anchor`` (verbatim quote
-   found), ``mismatched_quote`` (quotes supplied but never verbatim),
-   ``missing_quote`` (no quote at all — still a hard contract rejection) and
-   ``empty_source`` (no quotable text stored; the entry must honestly declare
-   ``evidenceStatus=missing_evidence_anchor``).
-3. ``build_quote_anchor_remediation`` renders the structured one-shot
-   remediation feedback (nearest matching snippet + similarity per failing
-   source).  The writeback boundary parks the first mismatching completed
-   writeback at ``needs_review`` with this payload; a second mismatch falls
-   through to the existing hard rejection, so the loop is bounded.
-
-Zero-diff contract: every quote that the pre-existing validator accepted
-(verbatim substring of the stored candidate summary / record summary or
-content) is still accepted — the audit only widens acceptance to the linked
-record blocks it now supplies to the context, and only downgrades one
-failure shape (first-time mismatched quote) from rejection to remediation.
+Only successful web_fetch_tool results from the task's Session Journal are
+quotable. Search Agent summaries remain discovery hints, never source text.
+The same receipt-backed blocks feed context and writeback validation.
 """
 
 from __future__ import annotations
@@ -88,61 +53,44 @@ def _clip_at_boundary(text: str, max_chars: int) -> tuple[str, bool]:
     return window[: cut + 1].rstrip(), True
 
 
-def _record_content(record: Mapping[str, Any]) -> str:
-    return _clean(record.get("content"))
-
-
 def source_quotable_blocks(
     source: Mapping[str, Any],
     record_by_id: Mapping[str, Mapping[str, Any]],
     *,
+    fetched_text_by_locator: Mapping[str, Mapping[str, str]] | None = None,
     block_max_chars: int = QUOTE_BLOCK_MAX_CHARS,
 ) -> list[dict[str, Any]]:
-    """Return the ordered quotable blocks for one candidate/record.
-
-    Priority: fetched body text (linked data record ``content``) → abstract
-    (record ``summary``) → the source's own stored ``summary``.  Identical
-    texts are deduped so an imported candidate does not repeat the abstract
-    of its origin record twice.
-    """
-    candidates_for_blocks: list[tuple[str, str]] = []
-    if source.get("candidateId"):
-        metadata = source.get("metadata") if isinstance(source.get("metadata"), dict) else {}
-        linked_record_id = _clean(metadata.get("sourceRecordId"))
-        if not linked_record_id:
-            for key in _LINKED_RECORD_KEYS:
-                linked = metadata.get(key) if isinstance(metadata.get(key), dict) else {}
-                linked_record_id = _clean(linked.get("recordId"))
-                if linked_record_id:
-                    break
-        linked_record = record_by_id.get(linked_record_id) if linked_record_id else None
-        if linked_record:
-            candidates_for_blocks.append(("fetched_body", _record_content(linked_record)))
-            candidates_for_blocks.append(("abstract", _clean(linked_record.get("summary"))))
-        candidates_for_blocks.append(("stored_summary", _clean(source.get("summary"))))
-    else:
-        record_content = _record_content(source)
-        if record_content:
-            candidates_for_blocks.append(("fetched_body", record_content))
-        candidates_for_blocks.append(("abstract", _clean(source.get("summary"))))
-
+    """Bind a source locator to original text from this task's fetch receipts."""
+    records = [source]
+    metadata = source.get("metadata") if isinstance(source.get("metadata"), dict) else {}
+    linked_id = _clean(metadata.get("sourceRecordId"))
+    if not linked_id:
+        for key in _LINKED_RECORD_KEYS:
+            linked = metadata.get(key) if isinstance(metadata.get(key), dict) else {}
+            linked_id = _clean(linked.get("recordId"))
+            if linked_id:
+                break
+    if linked_id in record_by_id:
+        records.append(record_by_id[linked_id])
+    fetched = fetched_text_by_locator or {}
     blocks: list[dict[str, Any]] = []
-    seen_texts: set[str] = set()
-    for origin, text in candidates_for_blocks:
-        if not text or text in seen_texts:
-            continue
-        seen_texts.add(text)
-        clipped, truncated = _clip_at_boundary(text, block_max_chars)
-        if not clipped:
-            continue
-        blocks.append(
-            {
-                "origin": origin,
-                "text": clipped,
-                "chars": len(clipped),
-                "truncated": truncated,
-            }
-        )
+    seen: set[str] = set()
+    for record in records:
+        for key in ("sourceUrl", "sourceRef", "rawLocation"):
+            receipt = fetched.get(_clean(record.get(key)))
+            if not receipt:
+                continue
+            text = _clean(receipt.get("text"))
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            clipped, truncated = _clip_at_boundary(text, block_max_chars)
+            if clipped:
+                blocks.append({
+                    **{k: receipt[k] for k in ("locator", "resolvedUrl", "eventId", "sessionId", "turnId") if k in receipt},
+                    "origin": "fetched_text", "text": clipped,
+                    "chars": len(clipped), "truncated": truncated,
+                })
     return blocks
 
 
@@ -151,23 +99,13 @@ def source_access_marker(
     *,
     fetch_failure: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Return the ``sourceAccess`` marker for a source's quotable blocks.
-
-    A failed full-text fetch (403/auth wall/PDF failure recorded in
-    ``evidenceFetchAttempts``) degrades the source to abstract-level
-    evidence; sources with no quotable text at all are marked so the
-    extraction agent skips their quote honestly instead of emitting an empty
-    one.
-    """
-    if not blocks:
-        return {"access": "no_quotable_text", "reason": "no_stored_quotable_text"}
-    has_full_text = any(block.get("origin") == "fetched_body" for block in blocks)
-    if has_full_text:
-        return {"access": "full_text", "reason": ""}
+    """Fetching a page proves text access, not access to the full paper."""
+    if blocks:
+        return {"access": "retrieved_text", "reason": "page_text_not_full_paper_verification"}
+    reason = "no_fetched_source_text"
     if fetch_failure:
-        failure_code = _clean(fetch_failure.get("failureCode")) or "fetch_failed"
-        return {"access": "abstract_only", "reason": f"fetch_failed:{failure_code}"}
-    return {"access": "abstract_only", "reason": "metadata_only_download"}
+        reason = "fetch_failed:" + (_clean(fetch_failure.get("failureCode")) or "fetch_failed")
+    return {"access": "no_quotable_text", "reason": reason}
 
 
 def latest_failed_fetch_attempts(
@@ -177,7 +115,7 @@ def latest_failed_fetch_attempts(
 
     Later entries win per candidateId (same ordering rule as the writeback
     merge), and only ``failed`` attempts are kept: they are the auth-wall /
-    403 / PDF-failure signal for abstract-only degradation.
+    403 / PDF-failure signal when no original text is available.
     """
     failed: dict[str, dict[str, Any]] = {}
     for result in task_results:
@@ -204,6 +142,7 @@ def extraction_quotable_sources(
     records: list[Mapping[str, Any]],
     *,
     failed_fetch_by_candidate_id: Mapping[str, Mapping[str, Any]] | None = None,
+    fetched_text_by_locator: Mapping[str, Mapping[str, str]] | None = None,
     block_max_chars: int = QUOTE_BLOCK_MAX_CHARS,
     total_char_budget: int = QUOTE_SOURCES_TOTAL_CHAR_BUDGET,
 ) -> list[dict[str, Any]]:
@@ -231,6 +170,7 @@ def extraction_quotable_sources(
         blocks = source_quotable_blocks(
             candidate,
             record_by_id,
+            fetched_text_by_locator=fetched_text_by_locator,
             block_max_chars=block_max_chars,
         )
         metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
@@ -260,6 +200,7 @@ def extraction_quotable_sources(
         blocks = source_quotable_blocks(
             record,
             {},
+            fetched_text_by_locator=fetched_text_by_locator,
             block_max_chars=block_max_chars,
         )
         source = _quotable_source_entry(
@@ -572,17 +513,17 @@ def quote_anchor_error_message(
         source_label = f"{source_kind} {source_id}"
         if kind == "empty_source":
             errors.append(
-                f"{source_label} 存储摘要为空：条目必须声明 evidenceStatus=missing_evidence_anchor 诚实跳过，"
+                f"{source_label} 没有真实抓取原文：条目必须声明 evidenceStatus=missing_evidence_anchor 诚实跳过，"
                 "不能在没有任何锚点的情况下声称证据。"
             )
         elif kind == "missing_quote":
             errors.append(
                 f"{source_label} 缺少逐字 quote 锚：嵌套 claims[]/keyFindings[] 项需含 quote，"
-                "或 evidenceRefs[] 项需含 {id, quote}（quote 为存储 summary 的逐字子串）。"
+                "或 evidenceRefs[] 项需含 {id, quote}（quote 为 quotableSources 原文块的逐字子串）。"
             )
         elif kind == "mismatched_quote":
             errors.append(
-                f"{source_label} 的 quote 不是存储 summary 的逐字子串："
-                "quote 必须从 candidates[].summary 原样复制，禁止改写、拼接或凭记忆重写。"
+                f"{source_label} 的 quote 不是 quotableSources 原文块的逐字子串："
+                "quote 必须从 quotableSources[].blocks[].text 原样复制，禁止改写、拼接或凭记忆重写。"
             )
     return errors

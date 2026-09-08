@@ -1754,6 +1754,39 @@ def _single_source_steward_pack_output(
 
 
 def _materialize_source_collection_stage_writeback_knowledge_ingestion(
+    team_id: str, run_id: str, task: dict[str, Any], writeback: dict[str, Any],
+) -> dict[str, Any]:
+    """Serialize the existing ingestion side effects for one source run."""
+    s = _service()
+    stage = s._normalize_source_collection_stage_id(task.get("stageId"), default="")
+    role = s._normalize_source_collection_agent_role(task.get("agentRole"))
+    if not s._source_collection_stage_can_materialize_formal_knowledge(stage, role):
+        return s._source_collection_stage_writeback_knowledge_ingestion_summary(status="skipped_stage")
+    if s._trim_text(writeback.get("status"), max_length=80).lower() not in s.SOURCE_COLLECTION_STAGE_WRITEBACK_MATERIALIZED_STATUSES:
+        return s._source_collection_stage_writeback_knowledge_ingestion_summary(status="skipped_status")
+    from ..storage_durability import inter_process_lock
+
+    directory = s._source_collection_storage_artifact_paths(team_id, run_id)["runDirectory"]
+    with inter_process_lock(directory / "knowledge_ingestion_materialize"):
+        return _materialize_source_collection_stage_writeback_knowledge_ingestion_locked(team_id, run_id, task, writeback)
+
+
+def _reusable_source_ingestion_pack(team_id, run_id, output, knowledge_base_id):
+    """Reuse this exact source payload, including completed application receipts."""
+    s = _service()
+    store = s._load_candidate_store(team_id, run_id=run_id)
+    for candidate in reversed(list(store.get("candidates") or [])):
+        metadata = candidate.get("metadata") or {}
+        ingestion = metadata.get("knowledgeIngestion") or {}
+        if (metadata.get("taskType") == "steward_pack_draft"
+                and not s._candidate_is_archived(candidate)
+                and metadata.get("output") == output
+                and ingestion.get("knowledgeBaseId", knowledge_base_id) == knowledge_base_id):
+            return candidate
+    return None
+
+
+def _materialize_source_collection_stage_writeback_knowledge_ingestion_locked(
     team_id: str,
     run_id: str,
     task: dict[str, Any],
@@ -1981,16 +2014,19 @@ def _materialize_source_collection_stage_writeback_knowledge_ingestion(
                 source_candidate,
                 scope=challenge_scope,
             )
-            pack_record = s.record_local_research_model_output(
-                team_id,
-                {
-                    "taskType": "steward_pack_draft",
-                    "title": s._source_manifest_label(source_candidate),
-                    "createdByAgent": proposed_by_agent_id,
-                    "output": source_pack_output,
-                },
-                run_id=run_id,
-            )["candidate"]
+            pack_record = _reusable_source_ingestion_pack(team_id, run_id, source_pack_output, scoped_knowledge_base_id)
+            reused_pack = pack_record is not None
+            if pack_record is None:
+                pack_record = s.record_local_research_model_output(
+                    team_id,
+                    {
+                        "taskType": "steward_pack_draft",
+                        "title": s._source_manifest_label(source_candidate),
+                        "createdByAgent": proposed_by_agent_id,
+                        "output": source_pack_output,
+                    },
+                    run_id=run_id,
+                )["candidate"]
             pack_records.append(pack_record)
             ingestion_contract = {
                 "knowledgeBaseId": scoped_knowledge_base_id,
@@ -2001,28 +2037,32 @@ def _materialize_source_collection_stage_writeback_knowledge_ingestion(
                 "sourceIdentityHash": source_pack_output["sourceIdentityHash"],
                 "evidenceLevel": source_pack_output["evidenceLevel"],
             }
-            source_pending = s.submit_steward_pack_to_knowledge_ingestion(
-                team_id,
-                pack_record["candidateId"],
-                ingestion_contract,
-                run_id=run_id,
-            )
-            ingestion = source_pending["candidate"].get("metadata", {}).get("knowledgeIngestion", {}) if isinstance(source_pending.get("candidate"), dict) else {}
-            inbox_source_id = s._trim_text(ingestion.get("inboxSourceId"), max_length=160)
-            reviewed_source = s.team_knowledge_service.review_owner_inbox_source(
-                "team",
-                team_id,
-                inbox_source_id,
-                decision="accepted",
-                reviewed_by_agent_id=reviewer_agent_id,
-            )
-            central_source_id = s._trim_text(reviewed_source.get("centralSource", {}).get("centralSourceId") if isinstance(reviewed_source.get("centralSource"), dict) else "", max_length=160)
-            knowledge_pending = s.submit_steward_pack_to_knowledge_ingestion(
-                team_id,
-                pack_record["candidateId"],
-                {**ingestion_contract, "centralSourceId": central_source_id},
-                run_id=run_id,
-            )
+            metadata = pack_record.get("metadata") or {}
+            ingestion = metadata.get("knowledgeIngestion") or {}
+            official = metadata.get("officialSyncRecord") or {}
+            if (ingestion.get("status") == "official_synced"
+                    and official.get("decision") == "approved" and official.get("knowledgeItemIds")):
+                knowledge_item_ids.extend(official["knowledgeItemIds"])
+                knowledge_review = {"knowledgeIngestion": {"status": "official_synced", "officialSyncRecord": official}}
+                continue
+            if ingestion.get("status") != "pending_review":
+                if not ingestion.get("inboxSourceId"):
+                    source_pending = s.submit_steward_pack_to_knowledge_ingestion(
+                        team_id, pack_record["candidateId"], ingestion_contract, run_id=run_id)
+                    ingestion = source_pending["candidate"].get("metadata", {}).get("knowledgeIngestion", {})
+                inbox_source_id = s._trim_text(ingestion.get("inboxSourceId"), max_length=160)
+                central_source_id = ""
+                if reused_pack:
+                    inbox = s.team_knowledge_service.list_owner_source_inbox("team", team_id, agent_id=reviewer_agent_id)
+                    source = next((item for item in inbox.get("sources", []) if item.get("inboxSourceId") == inbox_source_id), {})
+                    if source.get("status") == "accepted":
+                        central_source_id = s._trim_text(source.get("centralSourceId"), max_length=160)
+                if not central_source_id:
+                    reviewed_source = s.team_knowledge_service.review_owner_inbox_source(
+                        "team", team_id, inbox_source_id, decision="accepted", reviewed_by_agent_id=reviewer_agent_id)
+                    central_source_id = s._trim_text((reviewed_source.get("centralSource") or {}).get("centralSourceId"), max_length=160)
+                knowledge_pending = s.submit_steward_pack_to_knowledge_ingestion(
+                    team_id, pack_record["candidateId"], {**ingestion_contract, "centralSourceId": central_source_id}, run_id=run_id)
             knowledge_review = s.review_steward_pack_knowledge_ingestion(
                 team_id,
                 pack_record["candidateId"],
