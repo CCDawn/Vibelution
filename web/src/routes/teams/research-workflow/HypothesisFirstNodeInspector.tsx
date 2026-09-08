@@ -53,7 +53,10 @@ import { buildHypothesisFirstReviewProjection, currentProjectedReview } from "./
 import { meetingsForHypothesisFirstQuestion, type HypothesisFirstNextAction } from "./hypothesisFirstNextAction";
 import styles from "./HypothesisFirstNodeInspector.styles";
 import type { HypothesisFirstV2NextAction } from "./hypothesisFirstStateV2Adapter";
-import { resolveHypothesisFirstNextActionFromV2 } from "./hypothesisFirstStateV2Adapter";
+import {
+  canonicalHypothesisSelectionActionForState,
+  resolveHypothesisFirstNextActionFromV2,
+} from "./hypothesisFirstStateV2Adapter";
 import type { ScopedDiscussionModel } from "./scopedDiscussionModel";
 import {
   invalidateHypothesisFirstQueries,
@@ -782,6 +785,63 @@ function inspectorTitle(nodeId: string, lang: Language): string {
   return lang === "zh" ? "当前任务" : "Current task";
 }
 
+function HypothesisSelectionWaitingState(props: {
+  stateV2?: HypothesisFirstStateV2 | null;
+  lang: Language;
+  nextAction: HypothesisFirstNextAction;
+  onNavigateToNode?: (nodeId: string) => void;
+}) {
+  const isZh = props.lang === "zh";
+  const problems = [
+    ...(props.stateV2?.formalRuntime?.problems ?? []),
+    ...(props.stateV2?.problems ?? []),
+  ].filter((problem, index, all) => all.findIndex((candidate) => (
+    candidate.code === problem.code
+    && candidate.sourceId === problem.sourceId
+    && candidate.message === problem.message
+  )) === index);
+  const hasFormalCandidates = new Set(
+    (props.stateV2?.generation?.candidateIds ?? [])
+      .map((candidateId) => String(candidateId || "").trim())
+      .filter(Boolean),
+  ).size >= 2;
+  const pendingNodeId = props.nextAction.targetNodeId
+    && props.nextAction.targetNodeId !== HYPOTHESIS_FIRST_SELECTION_NODE_ID
+    ? props.nextAction.targetNodeId
+    : null;
+  return (
+    <div className={styles.task} data-testid="hypothesis-selection-waiting">
+      <VStateRow tone="warning">
+        {hasFormalCandidates
+          ? (isZh ? "选择操作暂不可用" : "Selection action is not available yet")
+          : (isZh ? "等待正式候选假说" : "Waiting for formal candidate hypotheses")}
+      </VStateRow>
+      <p className={styles.description}>
+        {hasFormalCandidates
+          ? (isZh ? "当前暂不能选择，请前往待处理步骤。" : "Selection is temporarily unavailable; go to the pending step.")
+          : (isZh
+            ? "当前只有 R0 探索草案或知识前置条件尚未完成，暂不能提交候选选择。"
+            : "Only R0 exploratory drafts are available or knowledge prerequisites are incomplete; selection cannot be submitted yet.")}
+      </p>
+      {problems.map((problem, index) => (
+        <p className={styles.status} key={`${problem.code}:${problem.sourceId || ""}:${index}`}>
+          {problem.message}
+        </p>
+      ))}
+      {pendingNodeId && props.onNavigateToNode ? (
+        <VButton
+          type="button"
+          variant="primary"
+          density="compact"
+          onPress={() => props.onNavigateToNode?.(pendingNodeId)}
+        >
+          {isZh ? "前往待处理步骤" : "Go to pending step"}
+        </VButton>
+      ) : null}
+    </div>
+  );
+}
+
 function InspectorBody(props: {
   teamId: string;
   questionId: string;
@@ -810,6 +870,37 @@ function InspectorBody(props: {
     ),
     staleTime: 30_000,
   });
+  const selectionAction = canonicalHypothesisSelectionActionForState(props.stateV2);
+  const formalCandidateCount = new Set(
+    (props.stateV2?.generation?.candidateIds ?? [])
+      .map((candidateId) => String(candidateId || "").trim())
+      .filter(Boolean),
+  ).size;
+  if (nodeId === HYPOTHESIS_FIRST_SELECTION_NODE_ID) {
+    // A selected hypothesis card keeps its own action surface even while the
+    // formal runtime owns the canonical current phase.  R0 drafts and
+    // knowledge prerequisites do not enter generation.candidateIds, so they
+    // remain visible as an explicit wait state with no submit path.
+    if (selectionAction || formalCandidateCount >= 2) {
+      return (
+        <HypothesisSelectionList
+          teamId={teamId}
+          questionId={questionId}
+          runId={runId}
+          compact
+          lang={lang}
+        />
+      );
+    }
+    return (
+      <HypothesisSelectionWaitingState
+        stateV2={props.stateV2}
+        lang={lang}
+        nextAction={nextAction}
+        onNavigateToNode={props.onNavigateToNode}
+      />
+    );
+  }
   if (props.formalRuntime) {
     return (
       <FormalRuntimeActionBody
@@ -872,17 +963,6 @@ function InspectorBody(props: {
         label={nextAction.commandLabel || (isZh ? "生成候选假说" : "Generate candidate hypotheses")}
         lang={lang}
         canonicalAction={nextAction.canonicalAction}
-      />
-    );
-  }
-  if (nodeId === HYPOTHESIS_FIRST_SELECTION_NODE_ID) {
-    return (
-      <HypothesisSelectionList
-        teamId={teamId}
-        questionId={questionId}
-        runId={runId}
-        compact
-        lang={lang}
       />
     );
   }
@@ -1216,7 +1296,11 @@ function FormalRuntimeActionBody(props: {
     && candidate.sourceId === problem.sourceId
     && candidate.message === problem.message
   )) === index);
-  const actions = canonicalActionsFor(props.nextAction);
+  // A formal runtime snapshot may carry a cross-phase hypothesis selection
+  // offer so the selected hf_selection card remains actionable.  Keep that
+  // offer out of the formal node's recovery action list.
+  const actions = canonicalActionsFor(props.nextAction)
+    .filter((action) => action.targetPhase === "formal_runtime");
   return (
     <div className={styles.task} data-testid="formal-runtime-action-body">
       <VStateRow tone={formalRuntimeStatusTone(status)}>
