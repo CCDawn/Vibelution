@@ -353,7 +353,7 @@ function presentationFor(action: HypothesisFirstNextAction): TaskPresentation {
         step: "generation",
         status: "waiting_user",
         title: "确认候选假说清单",
-        detail: "确认后候选会进入假说选择，由你决定哪些进入评审。",
+        detail: "确认后，证据不足的草案先补充知识；正式候选再进入假说选择。",
         authority: "hypothesis_first",
       };
     case "selection_required":
