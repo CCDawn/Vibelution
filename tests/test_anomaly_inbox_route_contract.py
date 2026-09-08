@@ -338,3 +338,158 @@ def test_extend_budget_action_is_registered_on_the_router() -> None:
         "/teams/{team_id}/workflow-orchestration"
         "/hypothesis-first/chain/anomaly-inbox/actions/extend-budget"
     ) in posted
+
+
+# -- knowledge sideflow child runs own their budget blocks --------------------
+
+
+class _FakeEvent:
+    def __init__(self, event_type: str, payload: dict[str, Any]) -> None:
+        self.event_type = event_type
+        self.payload = payload
+        self.occurred_at_ms = 1_759_000_000_000
+
+
+class _FakeEventPage:
+    def __init__(self, latest: int, events: tuple[_FakeEvent, ...]) -> None:
+        self.latest_event_sequence = latest
+        self.events = events
+
+
+class _FakeReplayService:
+    """Ledger tails keyed by run id (formal + knowledge child runs)."""
+
+    def __init__(self, tails: dict[str, _FakeEventPage]) -> None:
+        self._tails = tails
+        self.replayed: list[str] = []
+
+    def list_events(
+        self,
+        *,
+        team_id: str,
+        run_id: str,
+        after_sequence: int = 0,
+        limit: int = 500,
+    ) -> _FakeEventPage:
+        self.replayed.append(run_id)
+        page = self._tails.get(run_id)
+        if page is None:
+            raise LookupError(run_id)
+        return page
+
+
+def _blocked_formal_snapshot() -> dict[str, Any]:
+    return {
+        "schemaVersion": 2,
+        "teamId": _TEAM,
+        "questionId": "SCI-009",
+        "computedAt": "2026-08-28T01:00:00Z",
+        "awaitingHumanCount": 0,
+        "problems": [],
+        "formalRuntime": {"runId": "run-formal-9", "runStatus": "blocked"},
+    }
+
+
+def _child_block_payload() -> dict[str, Any]:
+    return {
+        "code": "budget_precheck_insufficient",
+        "nodeId": "evidence_relations",
+        "stageId": "evidence_relations",
+        "stageLimitTokens": 2_000_000,
+        "stageConsumedTokens": 2_726_303,
+        "suggestedExtensionTokens": 262_347,
+    }
+
+
+def test_anomaly_inbox_surfaces_child_run_budget_block(monkeypatch) -> None:
+    """A budget precheck blocked inside a knowledge child run is surfaced.
+
+    The formal tail carries the ``knowledge_invocation_created`` event; the
+    child run's own tail carries the ``budget_precheck_blocked`` payload. The
+    inbox item (and its extend CTA action) must scope to the child run.
+    """
+
+    snapshot = _blocked_formal_snapshot()
+    monkeypatch.setattr(
+        hypothesis_first_state_v2,
+        "project_hypothesis_first_state_v2",
+        lambda team_id, question_id, **kwargs: snapshot,
+    )
+    replay = _FakeReplayService(
+        {
+            "run-formal-9": _FakeEventPage(
+                3,
+                (
+                    _FakeEvent(
+                        "knowledge_invocation_created",
+                        {"childRunId": "child-run-x", "invocationId": "inv-1"},
+                    ),
+                    _FakeEvent("run_blocked", {"reason": "budget"}),
+                ),
+            ),
+            "child-run-x": _FakeEventPage(
+                8,
+                (_FakeEvent("budget_precheck_blocked", _child_block_payload()),),
+            ),
+        }
+    )
+    monkeypatch.setattr(hf_routes, "get_event_replay_service", lambda: replay)
+
+    response = _client().get(_ROUTE, params={"questionId": "SCI-009"})
+    assert response.status_code == 200
+    # Each run tail is replayed probe+page; both runs were visited in order.
+    assert list(dict.fromkeys(replay.replayed)) == ["run-formal-9", "child-run-x"]
+    items = response.json()["inbox"]["items"]
+    budget_items = [item for item in items if item["kind"] == "budget_exhausted"]
+    assert len(budget_items) == 1
+    item = budget_items[0]
+    assert item["scope"]["runId"] == "child-run-x"
+    assert item["scope"]["nodeId"] == "evidence_relations"
+    # The extend CTA is attached and authorizes the child run, not the formal.
+    action = item["action"]
+    assert action["command"] == "extend_budget"
+    assert action["params"]["runId"] == "child-run-x"
+    assert action["params"]["newStageTokens"] == 2_000_000 + 262_347
+
+
+def test_extend_budget_action_resolves_child_run_version_via_sideflow_listing(
+    monkeypatch,
+) -> None:
+    """The extend endpoint resolves versions for sideflow child runs too."""
+
+    captured: dict[str, Any] = {}
+
+    def fake_submit(**kwargs: Any) -> dict[str, Any]:
+        captured.update(kwargs)
+        return {"status": "accepted", "commandId": "cmd-9"}
+
+    listings: dict[str, dict[str, Any]] = {
+        "challenge-cup-research": {"runs": [{"runId": "run-formal-9", "runVersion": 4}]},
+        "challenge-cup-knowledge-sideflow": {"runs": [{"runId": "child-run-x", "runVersion": 6}]},
+    }
+    seen_workflows: list[str] = []
+
+    class _FakeQueryService:
+        def list_runs(self, *, team_id: str, workflow_id: str) -> dict[str, Any]:
+            seen_workflows.append(workflow_id)
+            return listings[workflow_id]
+
+    monkeypatch.setattr(hf_routes, "_submit_workflow_command", fake_submit)
+    monkeypatch.setattr(hf_routes, "get_query_service", _FakeQueryService)
+    payload = _extend_payload(
+        runId="child-run-x",
+        nodeId="evidence_relations",
+        stageId="evidence_relations",
+        stageLimitTokens=2_000_000,
+        suggestedExtensionTokens=262_347,
+    )
+    response = _client().post(_ACTION_ROUTE, json=payload)
+    assert response.status_code == 200
+    assert response.json()["status"] == "accepted"
+    # The challenge-cup listing missed; the sideflow listing resolved the run.
+    assert seen_workflows == [
+        "challenge-cup-research",
+        "challenge-cup-knowledge-sideflow",
+    ]
+    assert captured["run_id"] == "child-run-x"
+    assert captured["expected_run_version"] == 6

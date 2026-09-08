@@ -839,6 +839,7 @@ def team_workflow_hypothesis_first_chain_state_v2(
 
 _ANOMALY_GATE_WAIT_THRESHOLD_ENV = "VIBELUTION_ANOMALY_GATE_WAIT_THRESHOLD_MS"
 _EVENT_PAGE_SIZE = 500
+_KNOWLEDGE_INVOCATION_CREATED_EVENT_TYPE = "knowledge_invocation_created"
 
 
 def _gate_wait_threshold_ms() -> int:
@@ -921,8 +922,13 @@ def _collect_budget_precheck_blocks(
     The state-v2 snapshot pins the current formal run to ``blocked`` but does
     not carry the structured stage-boundary problem, so the route replays the
     run's ledger tail (last ``_EVENT_PAGE_SIZE`` events) and collects the
-    precheck payloads.  Failures degrade to «no signal»; the inbox never
-    fails because the ledger is unavailable.
+    precheck payloads.  Budget prechecks may also block inside a knowledge
+    sideflow child run: those child run ids are resolved from the
+    ``knowledge_invocation_created`` events in the formal tail and each child
+    tail is replayed the same way (with ``runId`` pointing at the child run,
+    so the extend CTA targets the run that actually owns the block).  Each
+    replay fails soft on its own — one unreadable ledger never fails the
+    inbox, and one unreadable child never hides the others.
     """
 
     formal = snapshot.get("formalRuntime")
@@ -932,49 +938,78 @@ def _collect_budget_precheck_blocks(
     if not run_id or str(formal.get("runStatus") or "").strip().lower() != "blocked":
         return []
     replay = get_event_replay_service()
-    try:
-        probe = replay.list_events(team_id=team_id, run_id=run_id, limit=1)
+
+    def _tail_blocks_and_children(
+        target_run_id: str,
+    ) -> tuple[list[dict[str, Any]], list[str]]:
+        probe = replay.list_events(team_id=team_id, run_id=target_run_id, limit=1)
         after = max(0, int(probe.latest_event_sequence) - _EVENT_PAGE_SIZE)
         page = replay.list_events(
-            team_id=team_id, run_id=run_id, after_sequence=after, limit=_EVENT_PAGE_SIZE
+            team_id=team_id, run_id=target_run_id, after_sequence=after, limit=_EVENT_PAGE_SIZE
         )
+        blocks: list[dict[str, Any]] = []
+        child_run_ids: list[str] = []
+        for event in page.events:
+            event_type = str(event.event_type)
+            payload = event.payload if isinstance(event.payload, Mapping) else {}
+            if event_type == _KNOWLEDGE_INVOCATION_CREATED_EVENT_TYPE:
+                child_run_id = str(payload.get("childRunId") or "").strip()
+                if child_run_id and child_run_id not in child_run_ids:
+                    child_run_ids.append(child_run_id)
+            if event_type != (
+                anomaly_inbox_service.BUDGET_PRECHECK_BLOCKED_EVENT_TYPE
+            ):
+                continue
+            blocks.append(
+                {
+                    **dict(payload),
+                    "runId": target_run_id,
+                    "nodeId": str(payload.get("nodeId") or ""),
+                    "occurredAt": _iso_from_ms(event.occurred_at_ms),
+                }
+            )
+        return blocks, child_run_ids
+
+    try:
+        blocks, child_run_ids = _tail_blocks_and_children(run_id)
     except Exception:  # noqa: BLE001 - an unavailable ledger is not an inbox error
         return []
-    blocks: list[dict[str, Any]] = []
-    for event in page.events:
-        if str(event.event_type) != (
-            anomaly_inbox_service.BUDGET_PRECHECK_BLOCKED_EVENT_TYPE
-        ):
+    for child_run_id in child_run_ids:
+        try:
+            child_blocks, _ = _tail_blocks_and_children(child_run_id)
+        except Exception:  # noqa: BLE001 - one unreadable child must not break the rest
             continue
-        payload = event.payload if isinstance(event.payload, Mapping) else {}
-        blocks.append(
-            {
-                **dict(payload),
-                "runId": run_id,
-                "nodeId": str(payload.get("nodeId") or ""),
-                "occurredAt": _iso_from_ms(event.occurred_at_ms),
-            }
-        )
+        blocks.extend(child_blocks)
     return blocks
 
 
 def _resolve_run_version(team_id: str, run_id: str) -> int:
-    """Current ledger run version for CAS; 0 when the run cannot be seen."""
+    """Current ledger run version for CAS; 0 when the run cannot be seen.
 
-    try:
-        listing = get_query_service().list_runs(
-            team_id=team_id,
-            workflow_id=_challenge_workflow_id(),
-        )
-    except Exception:  # noqa: BLE001 - resolution failure is mapped by the caller
-        return 0
-    for record in listing.get("runs") or []:
-        if (
-            isinstance(record, Mapping)
-            and str(record.get("runId") or "").strip() == run_id
-        ):
-            version = record.get("runVersion")
-            return int(version) if isinstance(version, int) and version > 0 else 0
+    Knowledge sideflow child runs belong to their own workflow listing, so a
+    miss in the challenge-cup listing falls back to that listing.  Both
+    lookups fail soft; only when neither listing resolves the run does this
+    return 0.
+    """
+
+    for workflow_id in (
+        _challenge_workflow_id(),
+        _knowledge_sideflow_workflow_id(),
+    ):
+        try:
+            listing = get_query_service().list_runs(
+                team_id=team_id,
+                workflow_id=workflow_id,
+            )
+        except Exception:  # noqa: BLE001 - resolution failure is mapped by the caller
+            continue
+        for record in listing.get("runs") or []:
+            if (
+                isinstance(record, Mapping)
+                and str(record.get("runId") or "").strip() == run_id
+            ):
+                version = record.get("runVersion")
+                return int(version) if isinstance(version, int) and version > 0 else 0
     return 0
 
 
@@ -982,6 +1017,14 @@ def _challenge_workflow_id() -> str:
     from core.research.workflow.definition import CHALLENGE_CUP_WORKFLOW_ID
 
     return CHALLENGE_CUP_WORKFLOW_ID
+
+
+def _knowledge_sideflow_workflow_id() -> str:
+    from core.research.workflow.knowledge_sideflow_definition import (
+        KNOWLEDGE_SIDEFLOW_WORKFLOW_ID,
+    )
+
+    return KNOWLEDGE_SIDEFLOW_WORKFLOW_ID
 
 
 @router.get(
