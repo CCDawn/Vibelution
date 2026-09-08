@@ -47,6 +47,9 @@ _PUBLIC_SEARCH_TIMEOUT = 12.0
 _PUBLIC_SEARCH_MAX_RESULTS = 20
 _WEB_FETCH_TIMEOUT = 30.0
 _WEB_FETCH_MAX_BYTES = 2 * 1024 * 1024
+# Repository/oa full texts are routinely larger than the HTML safety cap; the
+# PDF path parses to bounded plain text (page limit), so it gets its own cap.
+_WEB_FETCH_MAX_PDF_BYTES = 20 * 1024 * 1024
 _WEB_FETCH_MAX_REDIRECTS = 5
 _WEB_FETCH_MAX_PDF_PAGES = 200
 # 常见多段公共后缀：同站（注册域）判定时需多保留一段，避免 bbc.co.uk 被压成 co.uk。
@@ -777,8 +780,8 @@ def _read_response_text(response: httpx.Response) -> str:
 
 def _extract_pdf_text(response: httpx.Response) -> str:
     """Extract plain text from a PDF response; never raises, returns [错误] strings on failure."""
-    if len(response.content) > _WEB_FETCH_MAX_BYTES:
-        return f"[错误] 网页内容超过安全上限 {_WEB_FETCH_MAX_BYTES} bytes，已停止处理。"
+    if len(response.content) > _WEB_FETCH_MAX_PDF_BYTES:
+        return f"[错误] PDF 内容超过安全上限 {_WEB_FETCH_MAX_PDF_BYTES} bytes，已停止处理。"
     try:
         from pypdf import PdfReader
 

@@ -313,7 +313,7 @@ def test_web_fetch_extracts_pdf_text(monkeypatch):
 
 
 def test_web_fetch_pdf_over_size_limit_rejected(monkeypatch):
-    oversized = b"%PDF-1.4\n" + b"0" * (web_search_tool._WEB_FETCH_MAX_BYTES + 1)
+    oversized = b"%PDF-1.4\n" + b"0" * (web_search_tool._WEB_FETCH_MAX_PDF_BYTES + 1)
 
     def fake_get(method, url, **kwargs):
         return httpx.Response(
@@ -329,6 +329,29 @@ def test_web_fetch_pdf_over_size_limit_rejected(monkeypatch):
 
     assert result.startswith("[错误]")
     assert "超过安全上限" in result
+
+
+def test_web_fetch_pdf_accepts_repository_sized_files_under_html_cap(monkeypatch):
+    # Repository full texts commonly exceed the HTML cap; the PDF cap must let
+    # them through to text extraction (bounded separately by the page limit).
+    body = _build_pdf_bytes("plastic export estimate", "uncertainty envelope")
+    assert len(body) <= web_search_tool._WEB_FETCH_MAX_PDF_BYTES
+    monkeypatch.setattr(web_search_tool, "_WEB_FETCH_MAX_BYTES", max(1, len(body) - 1))
+
+    def fake_get(method, url, **kwargs):
+        return httpx.Response(
+            200,
+            headers={"content-type": "application/pdf"},
+            content=body,
+            request=httpx.Request("GET", url),
+        )
+
+    install_fake_client(monkeypatch, fake_get)
+
+    result = web_search_tool.web_fetch("https://edepot.example.org/577712.pdf")
+
+    assert result.startswith("[PDF 文本]")
+    assert "plastic export estimate" in result
 
 
 def test_web_fetch_pdf_without_text_reports_scanned(monkeypatch):
