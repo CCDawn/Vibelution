@@ -6,7 +6,7 @@
 
 <p align="center">
   中文 · <a href="README.en.md">English</a><br>
-  <a href="#多-agent-如何一起工作">多 Agent 协作</a> · <a href="#看一支科研团队如何工作">挑战杯演示</a> · <a href="#完整功能">完整功能</a> · <a href="#从协作能力长出来的小产品">附加产品</a> · <a href="#开始使用">开始使用</a>
+  <a href="#看一支科研团队如何工作">挑战杯演示</a> · <a href="#核心能力">核心能力</a> · <a href="#从协作能力长出来的小产品">附加产品</a> · <a href="#开始使用">开始使用</a>
 </p>
 
 <p align="center">
@@ -15,46 +15,52 @@
   <a href="https://github.com/CCDawn/Vibelution/issues"><img src="https://img.shields.io/badge/Feedback-welcome-f2b36d?style=flat-square" alt="欢迎反馈"></a>
 </p>
 
-一个复杂任务，往往需要不同的角色：有人搜集资料，有人提出方案，有人负责执行，也有人检查结果。
-
-**Vibelution 是一个本地多 Agent 协作工作台。** 你可以为角色配置模型、工具与技能，把任务组织成团队和工作流，在同一个界面里查看讨论、执行过程与交接产物。挑战杯科研团队是这套能力的实际应用；虚拟人和桌宠则是基于工作台探索的附加产品。
-
-## 多 Agent 如何一起工作
-
-![研究画布历史回放：任务节点与前后环节的交接关系](docs/assets/readme/research-workflow.png)
-
-### 分工清楚，过程看得见
-
-- **先组队：** 为 Agent 指定角色，配置各自的提示词、模型、工具与技能，让不同任务由合适的成员承担。
-- **再串起任务：** 用工作流画布组织节点、条件分支和人工确认环节，查看前后步骤如何交接。
-- **一起讨论和执行：** 在会话中查看成员讨论、工具调用和任务状态；需要时停止、继续或由人接手。
-- **把产物留下来：** 将资料、知识关系、假说和评审记录放回工作流程，方便下一步使用和回看。
-
-你不必为每个 Agent 分别翻找聊天窗口，也不必只等一个最终答案。团队现在走到哪里、哪一步需要你，都应该能在工作台里找到。
+**Vibelution 是一个本地多 Agent 协作工作台。** 为成员配置角色、模型和工具，让他们分工、讨论、执行与评审；你在一个界面里跟进过程、接手关键决策、查看交接产物。
 
 ## 看一支科研团队如何工作
 
-### 挑战杯：从一个问题，到可讨论、可追溯的研究方案
+挑战杯科研演示：看不同角色如何围绕一个问题搜集资料、形成假说，再根据评审意见修改方案。
 
 [![点击观看挑战杯演示：研究画布、团队讨论与知识图谱](docs/assets/readme/challenge-cup-preview.gif)](docs/assets/readme/challenge-cup-demo.mp4)
 
 **[▶ 观看完整演示 · 2 分 37 秒 · 1080p](docs/assets/readme/challenge-cup-demo.mp4)** · [下载 MP4](docs/assets/readme/challenge-cup-demo.mp4?raw=true) · [放大查看图谱](docs/assets/readme/challenge-cup-graph.png)
 
-不同角色围绕同一个问题讨论、搜集资料、提取内容、建立知识关系，再提出和评审研究假说。视频把这些环节串成一段完整的展示：
+**团队讨论 → 资料搜集与提炼 → 知识图谱 → 假说与评审修订。**
 
-**研究画布 → 团队讨论 → 资料搜集与提炼 → 知识图谱 → 交接记录 → 假说与评审修订。**
+重点看一条假说修改前后的区别，以及它如何关联到来源资料：协作留下的不只有对话，还有下一步可以继续使用的研究记录。
 
-这段 SCI-003 历史回放保留了 **21 个节点、56 条关系**，并展示一条具体假说修改前后的区别。沿着图谱连线，可以看到结论关联的来源资料。
-
-> 录制于 2026-09-08，使用已确认的真实历史数据回放展示页，带配音和字幕。它展示研究过程，不代表现场重新执行、假说已被实验验证或比赛已正式验收。
+> 2026-09-08 录制的真实历史数据回放，含配音和字幕；不代表现场执行、实验验证或比赛正式验收。[素材说明](docs/assets/readme/README.md)
 
 [了解研究工作流](core/web/services/team_workflow/README.md)
 
-## 完整功能
+## 核心能力
 
-多 Agent 协作是主线，下面这些能力负责把它变成日常可用的工作台。功能按使用场景展开；页面入口与工具能力分别说明，具体可用性取决于模型、权限和运行配置。
+### 让不同角色一起完成任务
 
-### 对话、群聊与任务追踪
+给 Agent 分配职责，在个人会话和团队群聊中推进工作。讨论、工具调用、任务状态与交接产物集中可查，需要时可以停止、继续或由人接手。
+
+### 把长任务组织成可见的工作流
+
+用画布连接任务、条件分支和人工确认环节，查看每一步的进展与上下游关系。科研流程把资料、知识、假说和评审串起来，保留候选方案与修订记录。
+
+### 让下一次任务用得上这一次积累
+
+个人记忆与团队知识库保存资料和研究记录；检索与知识图谱帮助追溯来源、发现联系。GitHub 项目库让 Agent 查找可借鉴的代码。
+
+### 为每个角色配好模型与工具
+
+按 Agent 选择模型，复用提示词、技能和插件，连接文件、终端、搜索与代码工具。可按需接入外部 CLI Agent、MCP、浏览器自动化和图像生成，并查看模型用量。
+
+### 用评测检查改进是否有效
+
+监督进化支持基线与候选对照；自进化支持有明确目标和停止条件的自检、修改与验证。保留评测、审核和回滚记录，让改进有据可查。
+
+<details>
+<summary>展开全部功能与配置入口</summary>
+
+功能可用性取决于模型、权限与运行配置；浏览器自动化默认关闭，技能库页面目前以浏览为主。
+
+#### 对话、群聊与任务追踪
 
 - **单 Agent 会话：** 创建和管理对话，查看流式回复、工具调用、待确认操作与历史记录，停止或继续任务。
 - **多 Agent 群聊：** 让多个成员围绕同一主题讨论，在统一会话入口查看个人对话和团队群聊。
@@ -64,9 +70,7 @@
 
 [会话工作台](web/src/routes/chat/README.md) · [MCP 接入指南](docs/agents/mcp-managed-agent-gateway.md)
 
-### Agent、提示词、工具与技能
-
-![Agent 配置工作台：模型绑定与工具配置](docs/assets/readme/web-workbench-chat.png)
+#### Agent、提示词、工具与技能
 
 - **Agent 管理：** 创建、编辑、归档和批量管理角色，查看角色配置、模型绑定与能力范围。
 - **Prompt 模板：** 浏览和维护提示词模板，为不同角色复用工作方法，查看会话实际装配的上下文。
@@ -78,7 +82,7 @@
 
 [Agent 配置](core/web/services/agent_directory/README.md) · [工具目录](tools/README.md) · [工具授权说明](docs/agents/tool-authorization-entrypoints.md)
 
-### 团队、科研与知识积累
+#### 团队、科研与知识积累
 
 - **团队与工作流：** 管理成员和角色关系，复用团队模板，通过画布查看任务节点、条件分支、人工确认和阶段交接。
 - **科研流程：** 从题目、资料搜集、知识整理推进到假说、评审与实验设计；保留候选方案、修订记录和各阶段产物。实验执行与结果验收有独立条件。
@@ -90,9 +94,7 @@
 
 [团队工作流](core/web/services/team_workflow/README.md) · [知识库](core/web/services/team_knowledge/README.md) · [记忆与检索](core/web/services/memory_rag_services.md)
 
-### 监督进化与自进化
-
-![监督评测工作台：评测运行与结果对照](docs/assets/readme/web-workbench-supervised.png)
+#### 监督进化与自进化
 
 **监督进化：先比较，再决定。** 管理评测数据集和测试包，运行基线与候选对照，查看当前运行、历史结果和资料库。会话样本有独立审核入口；改进提案与建议基线保留记录，候选执行和集成经过隔离验证。
 
@@ -102,7 +104,7 @@
 
 [进化模式与运行说明](core/web/services/evolution_services.md) · [相关配置](docs/ops/config/06-agent-evolution.md)
 
-### 模型配置与用量
+#### 模型配置与用量
 
 - **模型与服务商：** 管理服务商、模型库、角色绑定和运行参数，为不同 Agent 选择不同模型；按服务商设置协议、输出限制与缓存选项。
 - **配置工作台：** 查看和调整运行配置、模型引用与服务商草稿，密钥保存在仓库之外。
@@ -111,7 +113,7 @@
 
 [模型与配置指南](docs/ops/config/INDEX.md)
 
-### Git、运行管理与问题排查
+#### Git、运行管理与问题排查
 
 - **Git 工作台：** 查看状态、diff 和历史，选择文件提交，并生成提交说明草稿。
 - **Launcher 与系统托盘：** 统一启动、停止、重启和打开工作台；有进行中的任务时，生命周期操作受活动任务保护。
@@ -119,31 +121,20 @@
 - **日志与运行现场：** 浏览日志文件、诊断信息和按次整理的运行记录，关联会话、工具与进程问题；可查看和导出现场包。
 - **维护与重置：** 预览清理范围，按允许的对象执行受保护维护，避免随意删除工作数据。
 
-<details>
-<summary>查看 Git 工作台</summary>
-
-![Git 工作台演示截图](docs/assets/readme/web-workbench-git.png)
+[Launcher 与桌面说明](desktop/electron/README.md) · [日志与诊断](core/logging/README.md) · [配置入口](docs/ops/config/07-launcher-runtime-workbench.md)
 
 </details>
 
-[Launcher 与桌面说明](desktop/electron/README.md) · [日志与诊断](core/logging/README.md) · [配置入口](docs/ops/config/07-launcher-runtime-workbench.md)
-
 ## 从协作能力长出来的小产品
 
-工作台也承载了一些更轻松的尝试。这些是附加体验，项目的核心仍是多 Agent 协作。
-
 <p align="center">
-  <img src="docs/assets/readme/companions.png" alt="虚拟人人物大厅" width="72%">
-  <img src="docs/assets/readme/desktop-pet.gif" alt="桌面伙伴待机动效实录" width="22%">
+  <img src="docs/assets/readme/companions.png" alt="虚拟人人物大厅" width="52%">
+  <img src="docs/assets/readme/desktop-pet.gif" alt="桌面伙伴待机动效实录" width="16%">
 </p>
 
-**虚拟人 · 聊完之后，她的一天还在继续。** 人物有日程、心情、日记与长期记忆，也能主动发来消息。生活经历与对话的连续性仍在打磨。为 Agent 启用「虚拟人生活」能力后，可从人物大厅进入。[了解人物能力](core/agent_plugins/virtual_human_life/README.md)
-
-**桌面伙伴 · 不用一直盯着会话窗口。** 角色随会话运行、等待确认、完成或出错切换提示与轻动效；点击查看实时对话，拖动调整位置，关闭后从系统托盘重新打开。
-
-**宠物空间 · 查看成长与状态。** 独立页面展示宠物等级、经验、状态和成就，与桌面悬浮角色分开呈现。
-
-[展示素材与录制说明](docs/assets/readme/README.md)
+- **虚拟人：** 带日程、心情、日记和长期记忆的角色，可主动发来消息；生活与对话的连续性仍在打磨。[人物能力](core/agent_plugins/virtual_human_life/README.md)
+- **桌面伙伴：** 在桌面提示会话状态，点击查看对话，拖动调整位置，关闭后可从系统托盘重新打开。
+- **宠物空间：** 查看宠物等级、经验、状态与成就。
 
 ## 开始使用
 
@@ -157,25 +148,13 @@ powershell -ExecutionPolicy Bypass -File scripts/install_windows.ps1
 
 安装完成后，打开桌面上的 **Vibelution Launcher**。首次启动会准备外部配置文件；按[模型配置指南](docs/ops/config/INDEX.md)配置模型与密钥后，就可以开始对话。
 
-也可以通过正式 Launcher 入口启动：
-
-```powershell
-& "$env:LOCALAPPDATA\Vibelution\Launcher\VibelutionLauncher.exe" --project "$PWD" start
-```
-
 [Windows 安装说明](docs/guides/install-windows.md) · [开发环境与贡献](CONTRIBUTING.md) · [Linux 部署参考](docs/ops/linux-bootstrap.md)
 
 工作台运行在本机，模型由你配置。**使用云端模型时，相应请求会发送给所选模型服务商**；本地运行不等于所有推理都离线。模型调用可能产生服务商费用，密钥与运行配置保存在仓库之外。
 
-## 最近在做什么
+## 文档与贡献
 
-这份首页展示 **2026 年 9 月的开发进展**；具体发布版本以 [VERSION](VERSION) 和 [CHANGELOG](CHANGELOG.md) 为准。
-
-- **团队与工作流：** 持续改进多 Agent 分工、任务交接、节点运行与中断恢复，让长流程更稳定。
-- **科研应用：** 打磨第一阶段资料、知识和假说评审链路；第二阶段实验结果另行验证。
-- **附加产品：** 虚拟人继续改善生活经历与对话的衔接，桌宠继续丰富会话反馈和动作。
-
-如果你喜欢其中一个方向，欢迎带着具体场景来提 [Issue](https://github.com/CCDawn/Vibelution/issues)，或从[贡献指南](CONTRIBUTING.md)开始。一次体验反馈、一张问题截图、一处文档修正，都能帮助项目往前走。
+首页展示 2026 年 9 月的开发进展，发布记录见 [CHANGELOG](CHANGELOG.md)。使用中遇到问题或有具体场景，欢迎提 [Issue](https://github.com/CCDawn/Vibelution/issues)，或从[贡献指南](CONTRIBUTING.md)开始。
 
 ---
 
