@@ -84,3 +84,39 @@
 - 73667e3f2 修复的是 idempotency 重放门；但 retry_node 实际走**前任务血缘门** `_AUTO_FORMAL_RETRY_STATUSES`（stage_session.py:20，原含 error/failed/incomplete/timed_out/timeout/blocked）。a5 任务落 interrupted → a6 重试仍复用超限会话（formalRetry=False、retryOfSessionId 空，已核账本）。
 - 修复：auto_formal_retry 判定扩为 `status in 集合 OR (status=="interrupted" AND _failed_on_context_budget_loop(前任务))`——**带 context 标记的 interrupted** 才升格新会话 formal retry；无标记的 interrupted（读中断原地续作是既有设计语义，test_source_collection_extraction_resume_after_interrupted_reading_prioritizes_writeback 守护）保持 reuse。dprec 记录承载 quotable text/quote 锚，新会话可无损续作。
 - 测试：test_interrupted_on_context_budget_loop_upgrades_to_formal_retry（正例/反例/None/集合不变式）；首版直接把 interrupted 加进集合被 closeout 影响选择器抓出回归后改为标记门。
+
+
+### B.7 缺陷⑥：v3 上下文策略 trigger 高于窗口推导的 hard limit——压缩永不触发、前置闸死锁（已修复，已加载复验）
+
+- 现象：a7/a8 两轮「重试 资料提炼」全部死在模型调用前的 `context_budget_exhausted` 前置闸（`_context_budget_preflight_guard`），会话被暂停-续跑梯子（3 级 continuation）耗尽后 `agent_turn_continuation_exhausted`。
+- 根因：挑战杯 v3 冻结策略按 262,144 窗口推导 trigger=204,800 / hard=221,184；但运行模型 qwen3.7-plus 的窗口是 131,072，策略合并（`effective_agent_context_compression_policy`）把 effectiveTokenLimit 钳到 131,072 却不改 trigger——trigger(204,800) 永远达不到，压缩永不触发，粗估 139,554 tokens 一直堆到 hard limit 前被前置闸拦死。
+- 修复（9191b21eb）：策略合并新增窗口不变量钳制——policyVersion≥3 时 trigger=min(trigger, effective−16,384)（退化取 effective）、target=min(target, int(effective×2/3))；只降不升，operator 更低值原样透传。新增 3 测试（131,072→trigger 114,688/target 87,381、operator 低值透传、未版本化 trigger≤effective）。
+- 生产验证：a9 重试通过前置闸（粗估 139,554 > trigger 114,688 → 切精确估算 ≈3–4 万 < hard 131,072 → 模型真实调用）。
+
+### B.8 缺陷⑦：formal retry 终态门缺 interrupted——a8 被拒「前任务不在终态」（已修复，已加载复验）
+
+- 现象：缺陷⑤第二层修复后 a8 仍失败，报「Formal retry requires the previous task to be in a terminal state」。
+- 根因：`stage_reconcile` 把 stopped/stopped_by_user/needs_continue 归一成 interrupted 后，`TERMINAL_TASK_STATUSES`（research_project_agent_sessions.py）不含 interrupted——每个 marker 门升级的 context-budget 重试都在会话创建处被拒。
+- 修复（919d2b856）：TERMINAL_TASK_STATUSES 增补 interrupted（附归一化口径注释）；新增 test_formal_retry_accepts_normalized_interrupted_previous_task。
+- 生产验证：a9 formal retry 会话创建成功（attempt 2、retryOfSessionId 回填）。
+
+### B.9 a9 资料提炼成功：22 次抓取、10 次写回、零预算命中（缺陷④⑤⑥⑦链路闭合实证）
+
+- 时间线：a9 会话通过缺陷⑥的钳制闸 + 缺陷⑦的终态门，21:47:26 完成 source_extraction。
+- 量级：22 次 web_fetch、10 次写回、预算零命中；dprec 记录承载 6/8 候选的 quotable text + quote 锚。
+- 产出：candidate_store 21 条 source_manifest 候选——6 keep / 15 needs_more_info，15 条带真实锚 id（不复述具体锚内容，避免报告携带无界原文）。
+
+### B.10 缺陷⑧：预算阻塞事件在知识子 run 上——异常收件箱零信号、一键补预算 CTA 不可达（已修复，真实前端复验）
+
+- 现象：evidence_relations 被 `budget_precheck_insufficient` 阻塞（consumed 2,726,303 > limit 2,000,000，suggested 262,347），但异常收件箱对 SCI-009 返回 0 项——运维台看不到阻塞、也没有恢复入口；`调整上限` 只作用于新建/续跑 run，活 run 无解。
+- 根因（两层，都在 hypothesis_first.py）：`_collect_budget_precheck_blocks` 只回放 formal run 尾部，而阻塞事件挂在 knowledge sideflow 子 run（run-1ca97605acf3）的事件流上；`_resolve_run_version` 只列 challenge-cup-research 的 run，子 run 属 challenge-cup-knowledge-sideflow，补预算端点必 404。
+- 修复（02a1a3135）：formal 尾部顺带解析 `knowledge_invocation_created.childRunId`（生产账本实证 formal seq10 就有），逐子 run fail-soft 回放尾部并给 block 标记子 run id；版本解析 miss 后回退 sideflow listing。route contract +2 测试（11 过）。
+- 生产复验（真实前端按钮链）：重启后收件箱出现 budget_exhausted 项（scope=子 run/evidence_relations）+「一键补预算」CTA（两段式误触防护）；arm→「确认补预算」→ `extend_budget` 命令落库（cmd-f7705a8cfb…，accepted，runVersion 10→11，幂等键 inbox-extend-budget:…:2000000:262347）→ `budget_settled` 上限 2,000,000→2,262,347。前端随后「重试 证据关系」正确 POST 到子 run（retry_node a2/v11）——被 412 拒绝，暴露缺陷⑨。
+- 附带环境事实：Launcher exe 经 git-bash/cmd 转义调用会静默失败（native-launcher-entry.log `native_entry.failed 路径中具有非法字符`），须用 PowerShell 干净引号；`/api/runtime/code-freshness` 可判定 `backend_behind`（本次曾因 closeout 全量选择器耗时导致「重启早于合入」，靠该端点发现并二次重启）。
+
+### B.11 缺陷⑨：补预算基线公式忽略超支——上限提到 2,262,347 仍低于已消耗 2,726,303（修复中）
+
+- 现象：缺陷⑧补预算落库后，「重试 证据关系」仍 412 `node_not_ready / budget_safety_limit_reached / stage_tokens_limit_reached`。
+- 根因：CTA（`extend_budget_action`）与端点都写死 `new = limit + suggested`；但本阶段消耗已超上限 726,303（准入只在节点边界拦，末节点跑过头），准入公式是 `consumed + estimated > limit`——剩余仍为 0。正确基线：`max(limit, consumed) + suggested` = 2,988,650（恰留 262,347 余量）。
+- 连带：幂等键含 limit:suggested 而非新总额，修公式后会与已执行旧命令同键、幂等重放不加预算，必须改含新总额。
+- 修复（在途）：action/端点/请求模型（+stageConsumedTokens 字段）/前端透传四处同源修正 + 测试更新；落地后按 CTA→重试→evidence_relations 执行继续验收。
