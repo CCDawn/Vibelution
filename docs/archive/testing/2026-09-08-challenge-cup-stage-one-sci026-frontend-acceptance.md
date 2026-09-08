@@ -130,3 +130,16 @@
 - 新资料寻找阶段真实执行搜索并分两批写回。首次写回接受 4 条并保持 `partial`；第二批曾因 `doi:10.1016/j.resconrec.2024.105624` 没有绑定真实搜索回执而被 `source_search_receipt_missing` 拒绝，Agent 补充同范围搜索后恢复。终态为 successCount=4、excludedSourceCount=3、completionGatePassed=true，说明真实回执门能拒绝错误来源身份且允许有界恢复。
 - 资料提炼随后尝试抓取原文；NRDC 与 Science 页面均返回 HTTP 403。新契约没有把搜索摘要冒充原文，最终 8/8 候选均被标记为缺口，stage writeback 返回 blockedCount=8 / status=needs_review，节点因缺少 `evidence_card_batch` 停在资料提炼，证据关系、知识入库与知识包交接均未启动。
 - 当前闭环结论：引用真实性修复生效，低质量资料不会再静默进入知识库；但来源寻找仍可能选择不可抓取或主题弱相关页面，资料提炼只有“重试同节点”入口，缺少从原文不可达结果返回资料寻找并替换来源的前端闭环。重复候选与重复检索范围也说明候选整理阶段缺少版本归并。完整高质量假说链路仍未通过。
+
+## SCI-009 本轮根因与修复记录
+
+- 候选根因已用活跃实例 `bcabd5ca` 的 `hf-candgen-cdbc9f498d8ef387-r0` 复核：归并只按完整 ID，`C01` / `C01-R1` 等四族被当成独立候选；检索请求累加原版与修订版需求，另有五条引用了未经登记的发言者前缀别名。
+- 复用现有 marker/structured protocol 归并与 evidence request validator：明确 `-R<正整数>` 修订身份，按最高修订保留、维持候选族首次出现顺序；当前修订显式提供的检索需求替换旧版范围，没有新需求时保留旧需求并更新引用。仅完全相同的结构化需求去重，不做模糊语义删除。候选生成会议用实际候选绑定检索请求，错误别名按现有 validationErrors 返回。
+- 对上述活数据做只读重放：9 个候选归并为 5 个，22 条需求归并并校验后为 6 条，另有 5 个 `candidate_ref_unbound` 错误。5 条并不等于总结宣称的 4 条；没有凭自然语言总结强行截断，也没有改写已关闭会议或历史候选。
+- 来源根因：当前 `run-df28b794bdab` 提炼因 `required_artifact_missing` / `source_extraction requires ['evidence_card_batch']` 阻塞，现有上游重跑只覆盖缺候选和缺关系图。复用同一 command offer/handler/current-task 投影，提供“返回资料寻找补源”，仍不接受缺失证据卡。
+- 同一 source run 的 `stagetask-20260908123501-2dbfeea8` 记录 8 条 missing_evidence_anchor；实际仅两个 URL 抓取返回 403，其余包含 `known_publisher_paywall` 推断。提示词补充逐来源核实要求，未尝试不得伪装成失败抓取回执。
+- 补源上下文复用现有 evidence retry focus，只传当前 run 来源定位与缺口，要求在冻结主题范围内找开放版本/替代来源并真实抓取检查。已完成 finding 后的新补源任务开启新的有界批次账本、保留原冻结 envelope，并记录 `sourceRepairOfTaskId`；失败重试/同任务重放仍继承原账本。新来源没有旧 contentExtraction，提炼重试必须将其纳入分页，避免永远只返回旧不可达来源。
+- 补源命令与原有执行回归 34 项通过；补源上下文、新批次额度、替代来源提炼覆盖测试 5 项通过；原有 source retry/分页/冻结写回 4 项通过，失败重试额度回归 4 项通过。候选初版窄回归 29 项通过，后续完整会议回归继续核验。
+- 进一步发现真实流程检查点风险：上游 finding 重跑若只创建 Ledger pending，而 graph 仍停在 extraction interrupt，finding receipt 无法匹配当前 checkpoint。此项须以真实 graph 重入回归闭合后才可声明补源流程可运行。
+- 当前记录仅为根因、代码与测试证据；未据此宣称新模型运行、有效原文、正式知识交接或高质量假说全链路验收完成。配置分级、第一/第二阶段边界未改动。
+- 检查点根因已修复并用真实 LangGraph + Ledger 回归复核：仅在 extraction blocked 且显式 finding attempt ≥ 2 时，复用 coordinator.enter_node 调度新的 finding interrupt；提交时将旧 blocked extraction 标为 stale 并取消其残余 outbox。真实回归走 finding-a1 → extraction-a1 阻塞 → finding-a2 成功 → extraction-a2 dispatching，检查点与回执身份均一致，没有清空运行。会议相关完整回归 58 项通过。

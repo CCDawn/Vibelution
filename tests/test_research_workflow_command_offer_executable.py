@@ -590,8 +590,10 @@ def _seed_finding_rerun_run(
     harness.store.submit(mutate, force_flush=True).result(timeout=10)
 
 
+@pytest.mark.parametrize("source_repair", [False, True])
 def test_succeeded_finding_rerun_offer_available_and_executable(
     tmp_path: Path,
+    source_repair: bool,
 ) -> None:
     """A restart can kill the agent turn after the ledger already marked
     source_finding succeeded, leaving the candidate store empty and the run
@@ -607,6 +609,8 @@ def test_succeeded_finding_rerun_offer_available_and_executable(
             run_id="run-finding-rerun",
             run_status="blocked",
             blocked_problem_json=_json.dumps(
+                {"code": "required_artifact_missing", "detail": "source_extraction requires ['evidence_card_batch']"}
+                if source_repair else
                 {"code": "auto_advance_not_ready", "detail": "source_candidates_missing"}
             ),
             attempt_status="succeeded",
@@ -622,7 +626,7 @@ def test_succeeded_finding_rerun_offer_available_and_executable(
             and offer.node_id == "source_finding"
         )
         assert retry.available is True
-        assert retry.label == "重跑 资料寻找"
+        assert retry.label == ("返回资料寻找补源" if source_repair else "重跑 资料寻找")
 
         receipt = harness.service.submit(
             harness.request(

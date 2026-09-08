@@ -15,6 +15,7 @@ from .stage_session_replay import (
     mark_source_collection_stage_task_session_missing,
     prepare_source_collection_stage_task_replay,
 )
+from .source_repair_context import source_repair_message
 
 _AUTO_FORMAL_RETRY_STATUSES = {
     "error",
@@ -710,6 +711,11 @@ def seed_source_collection_agent_session_context(
         message_content += s._source_collection_finding_prior_query_memory_message(
             prior_finding_tasks
         )
+    if stage_id == "finding":
+        message_content += source_repair_message(
+            team_id=normalized_team_id, run_id=normalized_run_id,
+            candidates=source_candidates,
+        )
     if problem_understanding_context:
         message_content += _source_collection_problem_understanding_message(
             problem_understanding_context
@@ -1147,12 +1153,25 @@ def start_source_collection_stage_session_task(
         previous_task=previous_stage_task,
         source_candidates=source_candidates,
     )
+    repair_message = (
+        source_repair_message(
+            team_id=normalized_team_id, run_id=normalized_run_id,
+            candidates=source_candidates,
+        ) if stage_id == "finding" else ""
+    )
+    # A new finding pass after completed finding and rejected extraction is
+    # replacement work. A replay/failed-task retry still owns its old budget.
+    source_repair_pass = bool(
+        repair_message and previous_stage_task_status == "completed"
+        and not replay_task and not formal_retry
+    )
     try:
         inherited_writeback_batches = (
             _source_collection_retry_writeback_batches(
                 replay_task or previous_stage_task, prior_stage_tasks,
             )
-            if stage_id == "finding" and isinstance(replay_task or previous_stage_task, dict)
+            if stage_id == "finding" and not source_repair_pass
+            and isinstance(replay_task or previous_stage_task, dict)
             else []
         )
     except ValueError as exc:
@@ -1249,6 +1268,8 @@ def start_source_collection_stage_session_task(
         task_message += s._source_collection_finding_prior_query_memory_message(
             prior_stage_tasks
         )
+    if stage_id == "finding":
+        task_message += repair_message
     if problem_understanding_context:
         task_message += _source_collection_problem_understanding_message(
             problem_understanding_context
@@ -1324,6 +1345,9 @@ def start_source_collection_stage_session_task(
         "sourceContextMode": source_context_mode,
         "problemUnderstandingContext": problem_understanding_context,
         "sourceCollectionWritebackBatches": inherited_writeback_batches,
+        "sourceRepairOfTaskId": (
+            str(previous_stage_task.get("taskId") or "") if source_repair_pass else ""
+        ),
         "retrySourceTaskId": (
             s._trim_text(previous_stage_task.get("taskId"), max_length=160)
             if (

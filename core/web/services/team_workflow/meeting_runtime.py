@@ -131,6 +131,8 @@ _GENERATION_AGENDA_QUESTIONS = (
 _GENERATION_AGENDA_RULES = (
     "本次会议中提出候选是假说生成临时职责，优先于日常岗位边界；每位参与者必须直接提出至少一个可证伪候选，不得等待其他角色代为提出",
     "每个候选假说独占一行，格式：CANDIDATE: <候选编号> | <假说陈述> | <提出理由>",
+    "修订已有候选使用同一编号加 -R<正整数>，如 C01 → C01-R1 → C01-R2；系统每个候选族只保留最高修订，不要为同一候选另造无关编号。独立机制才使用新编号。",
+    "EVIDENCE_REQUEST 的 candidateRefs 引用候选当前修订编号；修订版的检索需求替换该候选旧版需求，因此须完整写出仍需验证的范围。相同检索需求只输出一次，不要重复前面成员的请求，不得为编号添加发言者前缀。",
     "结论必须引用证据或消息来源",
     "没有新内容时回复 pass",
     "分歧必须显式记录，不得省略",
@@ -3991,6 +3993,17 @@ def _collect_evidence_requests(
     markers: Mapping[str, Any],
     source_refs: Sequence[str],
 ) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    if meeting_round.get("meetingType") == CANDIDATE_GENERATION_MEETING_TYPE:
+        # Generation has no selectedCandidateIds yet. Bind requests to its
+        # actual proposals so invented speaker-prefixed IDs cannot enter scope.
+        meeting_round = {
+            **meeting_round,
+            "selectedCandidateIds": [
+                str(item.get("candidateId") or "")
+                for item in markers.get("proposedCandidates") or []
+                if item.get("candidateId")
+            ],
+        }
     validation_errors = [
         dict(item)
         for item in list(markers.get("evidenceRequestErrors") or [])

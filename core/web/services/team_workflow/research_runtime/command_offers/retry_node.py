@@ -37,6 +37,14 @@ def succeeded_node_rerun_target(run: RunRecord) -> str | None:
         problem = json.loads(str(run.blocked_problem_json or "") or "{}")
     except (TypeError, ValueError):
         return None
+    if (
+        str(problem.get("code") or "") == "required_artifact_missing"
+        and str(problem.get("detail") or "")
+        == "source_extraction requires ['evidence_card_batch']"
+    ):
+        # Extraction cannot produce evidence from inaccessible sources. Offer
+        # the existing upstream retry without accepting any missing evidence.
+        return "source_finding"
     if str(problem.get("code") or "") != "auto_advance_not_ready":
         return None
     return _RERUN_BLOCKER_TARGET_NODES.get(str(problem.get("detail") or "")) or None
@@ -90,7 +98,12 @@ def build_retry_node_offers(
                 command=WorkflowCommandKind.RETRY_NODE,
                 node_id=node.nodeId,
                 available=available,
-                label=f"{'重跑' if rerun_available else '重试'} {node.label}",
+                label=(
+                    "返回资料寻找补源"
+                    if rerun_available and node.nodeId == "source_finding"
+                    and "required_artifact_missing" in str(run.blocked_problem_json or "")
+                    else f"{'重跑' if rerun_available else '重试'} {node.label}"
+                ),
                 reason_code="retry_available" if available else "retry_not_available",
                 blocker_ids=() if available else ("retry_not_available",),
                 idempotency_key=(

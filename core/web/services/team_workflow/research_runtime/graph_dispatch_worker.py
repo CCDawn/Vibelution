@@ -1320,6 +1320,16 @@ class GraphDispatchWorker:
         if node_id == dispatch.node_id:
             # retry：以新 attempt 重启节点，产生新的 actionId。
             return self._coordinator.restart_attempt(dispatch)
+        if (
+            node_id == "source_extraction"
+            and dispatch.node_id == "source_finding"
+            and dispatch.attempt >= 2
+        ):
+            extraction = self._store.latest_attempt(dispatch.run_id, "source_extraction")
+            if extraction is not None and extraction.status == NodeAttemptStatus.BLOCKED.value:
+                # A source-repair command must move the actual interrupt, not
+                # synthesize a finding action over an extraction checkpoint.
+                return self._coordinator.enter_node(dispatch)
         advanced = self._advance_lagging_checkpoint(dispatch, interrupt_node_id=node_id)
         if advanced is not None:
             return advanced
@@ -1725,6 +1735,18 @@ class GraphDispatchWorker:
             acked = uow.repository.ack_outbox(action.action_id, self._owner, now_ms)
             if not acked:
                 return
+            if (
+                dispatch.dispatch_kind == "start"
+                and dispatch.node_id == "source_finding"
+                and dispatch.attempt >= 2
+                and pending_node == "source_finding"
+            ):
+                extraction = uow.repository.latest_attempt(dispatch.run_id, "source_extraction")
+                if extraction is not None and extraction.status == NodeAttemptStatus.BLOCKED.value:
+                    uow.repository.update_attempt_status(
+                        extraction.node_run_id, NodeAttemptStatus.STALE.value, now_ms,
+                    )
+                    uow.repository.cancel_outbox_by_node_run(extraction.node_run_id, now_ms)
             if (
                 dispatch.dispatch_kind in ("resume_action", "resume_human")
                 and dispatch.receipt is not None

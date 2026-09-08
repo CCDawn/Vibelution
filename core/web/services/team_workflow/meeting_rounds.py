@@ -89,6 +89,10 @@ _MARKER_LINE_PATTERN = re.compile(
     r"^(?:[-*+]\s+)?(?P<emphasis>\*\*|__)?(?P<marker>[A-Z_]+)\s*:\s*(?P<value>.+)$",
     re.IGNORECASE,
 )
+_CANDIDATE_REVISION_SUFFIX_PATTERN = re.compile(
+    r"^(?P<base>.+)-R(?P<revision>[1-9][0-9]*)$",
+    re.IGNORECASE,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 
@@ -1385,7 +1389,49 @@ def extract_discussion_markers(messages: Sequence[Mapping[str, Any]]) -> dict[st
     extracted["proposedCandidates"] = _canonical_proposed_candidates(
         extracted["proposedCandidates"]
     )
+    current_ids = {
+        _candidate_revision_identity(str(item.get("candidateId") or ""))[0]: str(item.get("candidateId") or "")
+        for item in extracted["proposedCandidates"] if item.get("candidateId")
+    }
+    explicitly_requested_ids = {
+        str(ref).casefold()
+        for request in extracted["evidenceRequests"]
+        for ref in request.get("candidateRefs") or []
+    }
+    requests = []
+    seen_requests: set[str] = set()
+    for raw in extracted["evidenceRequests"]:
+        request = dict(raw)
+        if "candidateRefs" in request:
+            original_refs = list(request.get("candidateRefs") or [])
+            # When a revision supplies its own search needs, they replace the
+            # earlier version's scope. Preserve earlier needs only if the new
+            # revision did not specify any replacement request.
+            active_refs = [
+                str(ref) for ref in original_refs
+                if (current := current_ids.get(_candidate_revision_identity(str(ref))[0])) is None
+                or current.casefold() == str(ref).casefold()
+                or current.casefold() not in explicitly_requested_ids
+            ]
+            if original_refs and not active_refs:
+                continue
+            request["candidateRefs"] = list(dict.fromkeys(
+                current_ids.get(_candidate_revision_identity(str(ref))[0], str(ref))
+                for ref in active_refs
+            ))
+        fingerprint = json.dumps(request, sort_keys=True, ensure_ascii=False)
+        if fingerprint not in seen_requests:
+            seen_requests.add(fingerprint)
+            requests.append(request)
+    extracted["evidenceRequests"] = requests
     return extracted
+
+
+def _candidate_revision_identity(candidate_id: str) -> tuple[str, int]:
+    match = _CANDIDATE_REVISION_SUFFIX_PATTERN.fullmatch(candidate_id.strip())
+    if match:
+        return match.group("base").casefold(), int(match.group("revision"))
+    return candidate_id.strip().casefold(), 0
 
 
 def _canonical_proposed_candidates(value: Any) -> list[dict[str, Any]]:
@@ -1393,21 +1439,25 @@ def _canonical_proposed_candidates(value: Any) -> list[dict[str, Any]]:
 
     canonical: list[dict[str, Any]] = []
     positions_by_id: dict[str, int] = {}
+    revisions_by_id: dict[str, int] = {}
     for raw in list(value or []):
         if not isinstance(raw, Mapping):
             continue
         candidate = dict(raw)
         candidate_id = str(candidate.get("candidateId") or "").strip()
-        identity = candidate_id.casefold()
+        identity, revision = _candidate_revision_identity(candidate_id)
         if not identity:
             canonical.append(candidate)
             continue
         previous_position = positions_by_id.get(identity)
         if previous_position is None:
             positions_by_id[identity] = len(canonical)
+            revisions_by_id[identity] = revision
             canonical.append(candidate)
             continue
-        canonical[previous_position] = candidate
+        if revision >= revisions_by_id[identity]:
+            canonical[previous_position] = candidate
+            revisions_by_id[identity] = revision
     return canonical
 
 

@@ -2022,7 +2022,10 @@ def _source_collection_stage_evidence_retry_focus(
             or s._source_collection_extraction_has_evidence_anchor(evidence_ledger)
         )
         explicit_gap = s._trim_text(extraction.get("evidenceStatus"), max_length=80) == "missing_evidence_anchor"
-        if candidate_id and not evidence_ready and (explicit_gap or candidate_id in blocked_ids):
+        # A replacement discovered after the previous extraction task has no
+        # extraction yet. Include it in the retry, otherwise paging silently
+        # limits the task to the old inaccessible sources forever.
+        if candidate_id and not evidence_ready and (explicit_gap or candidate_id in blocked_ids or not extraction):
             evidence_gap_ids.append(candidate_id)
     if not evidence_gap_ids:
         return {}
@@ -3033,6 +3036,7 @@ def _source_collection_stage_session_task_message(
             (
                 "- 资料提炼阶段若受控摘要不足，但 `candidates[].sourceUrl` 或 `doi` 存在，可用 `web_fetch_tool` 仅抓取该既有定位符补证；"
                 "不要扩展检索方向、生成新候选或调用搜索工具。当前批读取完毕后一次性补证（可连续调用 `web_fetch_tool`），随后以 1-2 次回写完成本批结果；抓取失败后再标记 `needs_more_info`。"
+                "每个来源分别核实；某网站的 403 不能代表其他来源也不可访问。未尝试的来源不得填写失败抓取回执或根据出版商名称推断付费墙。"
                 if stage_id == "extraction" and context_mode in {"evidence", "retry_evidence"} and not writeback_resume
                 else ""
             ),
