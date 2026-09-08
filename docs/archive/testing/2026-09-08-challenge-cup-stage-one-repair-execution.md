@@ -37,3 +37,12 @@
 - 当前浏览器只读复核：活跃实例仍为 `bcabd5ca`，SCI-011 仍显示旧运行待处理。新代码尚未刷新到运行实例，本轮没有点击“继续运行”或启动新题。
 - 待记录：各 Agent 的实际变更、主 Agent 独立测试、组合合同、Launcher 刷新、SCI-011 恢复与新题全前端验收。
 - 已知环境问题：此前 fetch 遇到无效 Agent checkpoint ref；不删除未知归属 ref，本轮未请求远端 push。
+
+## 现场成本补核与第二轮主审
+
+- 2026-09-08 再次通过 `agent_log_context` 确認 active instance 为 `bcabd5ca`。只读查询该实例 `workspace/usage/usage_ledger.sqlite3` 的 `usage_events`，按明确 session ID、`provider_usage/chat_session` 聚合；未混入其他题目。
+- 初次 `session-20260908-124218-168766`：18 次模型调用，累计输入 661,266、输出 20,526、cached input 299,670、单次最大输入 77,067；模型调用延迟合计 316,055 ms。
+- 重试 `session-20260908-125613-559737`：12 次模型调用，累计输入 641,520、输出 30,506、cached input 214,011、单次最大输入 93,930；模型调用延迟合计 434,313 ms。两次均为 `qwen3.8-flash`。延迟合计不等于完整业务墙钟时间，token 数不等于已结算人民币费用。
+- 重试 Journal 中两条 `source_collection_context_tool` 的完整 toolCall JSON 分别约 119,886 / 166,561 字符（包含工具参数与回包）；已将原始文件的只读定位交给检索 Agent，要求拆分 result 字段并重放测量，不能把此长度直接当作模型 token 数。原始 Prompt/回包不复制进仓库。
+- 主审退回的新增问题：回执数不超过 4 时原样返回仍允许单条超大上下文；两个冲突 DOI 都曾出现在当前 run 的回执集合时，集合包含判断仍不能证明同源。已要求统一有界投影，以及“两个 DOI 都有真实回执但同一候选混用”的拒绝测试。
+- 带 session 的日志上下文扩展扫描长时间无输出，已终止本任务这次只读扫描进程，改用已确认 active path 下的精确 Journal 和用量账本；未停止产品进程。
