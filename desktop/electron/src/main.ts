@@ -4443,6 +4443,16 @@ app.whenReady()
           console.warn(error instanceof Error ? error.message : String(error));
         });
       },
+      openPet: () => {
+        const url = currentWorkbenchUrl || launcherBootstrap?.workbenchUrl;
+        if (!url) {
+          console.warn("Desktop pet window unavailable: Workbench URL is not ready.");
+          return;
+        }
+        void windowProvider?.openPet(url).catch((error: unknown) => {
+          console.warn(`Desktop pet window unavailable: ${error instanceof Error ? error.message : String(error)}`);
+        });
+      },
       listInstances: async () => {
         return classifyTrayBranchInstances(launcherStateStore.projectBranchInstances());
       },

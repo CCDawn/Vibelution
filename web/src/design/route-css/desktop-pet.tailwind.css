@@ -157,7 +157,11 @@ body[data-vibelution-desktop-pet="true"] #root {
   border-radius: 28px;
   padding: 0;
   background: transparent;
+  cursor: grab;
+  touch-action: none;
 }
+
+.desktop-pet-root[data-dragging="true"] .desktop-pet-character-button { cursor: grabbing; }
 
 .desktop-pet-character {
   position: absolute;

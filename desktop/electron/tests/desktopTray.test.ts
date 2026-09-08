@@ -70,6 +70,7 @@ const desktopPaths: DesktopPaths = {
 function createActions() {
   return {
     openLauncher: vi.fn(),
+    openPet: vi.fn(),
     listInstances: vi.fn().mockResolvedValue([
       { id: "main", label: "主", startable: false, stoppable: true },
       { id: "worktree:task", label: "task", startable: true, stoppable: false }
@@ -105,6 +106,7 @@ describe("Electron desktop tray", () => {
   it("uses launcher-centric tray labels without direct main-workbench restart actions", () => {
     expect(DESKTOP_TRAY_MENU_LABELS).toEqual({
       openLauncher: "打开 Launcher 控制窗口",
+      openPet: "显示桌面宠物",
       startProject: "启动工作区…",
       stopProject: "停止工作区…",
       restartLauncher: "全部停止并启动最新 Launcher",
@@ -118,12 +120,13 @@ describe("Electron desktop tray", () => {
     });
   });
 
-  it("exposes start/stop submenus and launcher lifecycle actions only", async () => {
+  it("exposes the persistent desktop pet entry beside launcher lifecycle actions", async () => {
     const actions = createActions();
     const tray = createDesktopTray(desktopPaths, actions) as unknown as InstanceType<typeof FakeTray>;
 
     expect(topLabels(menuTemplates[0])).toEqual([
       DESKTOP_TRAY_MENU_LABELS.openLauncher,
+      DESKTOP_TRAY_MENU_LABELS.openPet,
       DESKTOP_TRAY_MENU_LABELS.freshnessLoading,
       "separator",
       DESKTOP_TRAY_MENU_LABELS.startProject,
@@ -142,22 +145,24 @@ describe("Electron desktop tray", () => {
     });
 
     const refreshed = menuTemplates[menuTemplates.length - 1];
-    expect(refreshed[1]?.label).toBe("Launcher 落后本地 main · aaa111 → bbb222");
-    expect(refreshed[1]?.enabled).toBe(false);
-    const startMenu = refreshed[3]?.submenu as Array<Record<string, unknown>>;
-    const stopMenu = refreshed[4]?.submenu as Array<Record<string, unknown>>;
+    expect(refreshed[2]?.label).toBe("Launcher 落后本地 main · aaa111 → bbb222");
+    expect(refreshed[2]?.enabled).toBe(false);
+    const startMenu = refreshed[4]?.submenu as Array<Record<string, unknown>>;
+    const stopMenu = refreshed[5]?.submenu as Array<Record<string, unknown>>;
     expect(startMenu.map((item) => item.label)).toEqual(["启动「task」工作区"]);
     expect(stopMenu.map((item) => item.label)).toEqual(["停止「主」工作区"]);
 
     (startMenu[0].click as () => void)();
     (stopMenu[0].click as () => void)();
     (refreshed[0].click as () => void)();
-    (refreshed[6].click as () => void)();
+    (refreshed[1].click as () => void)();
     (refreshed[7].click as () => void)();
+    (refreshed[8].click as () => void)();
 
     expect(actions.startInstance).toHaveBeenCalledWith("worktree:task", "task");
     expect(actions.stopInstance).toHaveBeenCalledWith("main", "主");
     expect(actions.openLauncher).toHaveBeenCalledTimes(1);
+    expect(actions.openPet).toHaveBeenCalledTimes(1);
     expect(actions.stopAll).toHaveBeenCalledTimes(1);
     expect(actions.restartLauncher).toHaveBeenCalledTimes(1);
   });
@@ -178,7 +183,7 @@ describe("Electron desktop tray", () => {
       expect(menuTemplates.length).toBeGreaterThan(1);
     });
     const firstLive = menuTemplates[menuTemplates.length - 1];
-    expect((firstLive[4]?.submenu as Array<Record<string, unknown>>).map((item) => item.label)).toEqual([
+    expect((firstLive[5]?.submenu as Array<Record<string, unknown>>).map((item) => item.label)).toEqual([
       "停止「main」工作区"
     ]);
 
@@ -188,8 +193,8 @@ describe("Electron desktop tray", () => {
       expect(menuTemplates.length).toBeGreaterThan(2);
     });
     const failed = menuTemplates[menuTemplates.length - 1];
-    expect(failed[1]?.label).toBe("Launcher 已是最新 · abc123");
-    expect((failed[4]?.submenu as Array<Record<string, unknown>>).map((item) => item.label)).toEqual([
+    expect(failed[2]?.label).toBe("Launcher 已是最新 · abc123");
+    expect((failed[5]?.submenu as Array<Record<string, unknown>>).map((item) => item.label)).toEqual([
       "停止「main」工作区"
     ]);
   });

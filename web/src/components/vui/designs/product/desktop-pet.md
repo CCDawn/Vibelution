@@ -9,6 +9,8 @@
 ### 适用范围
 
 - 适用于 `/desktop-pet` 独立窗口、角色状态动效与展开式 Session HUD。
+- 人物主体使用 4px 移动阈值区分单击与拖动：单击展开 HUD，拖动通过 Electron 窗口位移移动桌宠并沿用原有位置持久化。
+- 关闭按钮只关闭桌宠窗口；系统托盘的“显示桌面宠物”是稳定恢复入口。
 - 不适用于普通 `/chat`、Companion 人物会话正文或第二套 transcript；这些仍由原生 Session、Journal 与 SSE 拥有。
 - 不作为 3D 引擎。未来 Blender 资产由 `DesktopPetCharacter` 的 renderer 边界接入，不改变活动投影和 HUD。
 
