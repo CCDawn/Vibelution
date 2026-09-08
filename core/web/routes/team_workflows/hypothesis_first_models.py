@@ -501,9 +501,13 @@ class AnomalyInboxExtendBudgetRequest(BaseModel):
 
     ``confirmed`` is the mandatory human-authorization flag (误触防护):
     the endpoint refuses the request without it.  ``stageLimitTokens`` and
-    ``suggestedExtensionTokens`` echo the amounts shown in the CTA; the
-    server recomputes the new stage total and derives the idempotency key,
-    so a repeated identical confirmation replays instead of double-charging.
+    ``suggestedExtensionTokens`` echo the amounts shown in the CTA;
+    ``stageConsumedTokens`` carries the overrun-aware baseline (admission
+    only blocks at node boundaries, so consumed may already exceed the
+    configured limit); the server recomputes the new stage total as
+    ``max(stageLimitTokens, stageConsumedTokens) + suggestedExtensionTokens``
+    and derives the idempotency key from that total, so a repeated identical
+    confirmation replays instead of double-charging.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -514,5 +518,13 @@ class AnomalyInboxExtendBudgetRequest(BaseModel):
     stageId: str = Field(..., min_length=1, max_length=200)
     stageLimitTokens: int = Field(..., ge=1)
     suggestedExtensionTokens: int = Field(..., ge=1)
+    stageConsumedTokens: int = Field(
+        0,
+        ge=0,
+        description=(
+            "Stage tokens already consumed; 0 means unknown (fall back to "
+            "stageLimitTokens as the baseline)."
+        ),
+    )
     confirmed: StrictBool = False
     expectedRunVersion: int = Field(0, ge=0)

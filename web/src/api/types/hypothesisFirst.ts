@@ -957,6 +957,7 @@ export type AnomalyInboxExtendBudgetAction = {
     stageId: string;
     stageLimitTokens: number;
     suggestedExtensionTokens: number;
+    stageConsumedTokens: number;
     newStageTokens: number;
     limits: { stageTokens: Record<string, number> };
   };
@@ -986,6 +987,8 @@ export type AnomalyInboxExtendBudgetRequest = {
   stageId: string;
   stageLimitTokens: number;
   suggestedExtensionTokens: number;
+  /** Overrun-aware baseline: consumed may already exceed the configured limit (0 = unknown). */
+  stageConsumedTokens: number;
   /** 误触防护：显式确认后才执行（缺失/False 服务端 428 拒绝）。 */
   confirmed: boolean;
   expectedRunVersion?: number;

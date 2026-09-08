@@ -64,6 +64,7 @@ const extendAction = {
     stageId: "hypothesis",
     stageLimitTokens: 300000,
     suggestedExtensionTokens: 260000,
+    stageConsumedTokens: 280000,
     newStageTokens: 560000,
     limits: { stageTokens: { hypothesis: 560000 } },
   },
@@ -327,6 +328,7 @@ describe("ResearchAnomalyInboxPanel", () => {
       stageId: "hypothesis",
       stageLimitTokens: 300000,
       suggestedExtensionTokens: 260000,
+      stageConsumedTokens: 280000,
       confirmed: true,
     });
   });

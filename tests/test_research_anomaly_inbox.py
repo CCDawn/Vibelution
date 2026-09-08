@@ -915,11 +915,57 @@ def test_extend_budget_action_carries_confirmed_contract_shape() -> None:
     assert action["requiresConfirmation"] is True
     assert "260000" in action["confirmHint"]
     # limits is directly usable as the extend_budget command payload and the
-    # new total is limit + suggested (extend only accepts increases).
+    # new total uses the overrun-aware baseline (consumed ≤ limit → the
+    # configured limit wins, so limit + suggested like before).
     assert action["params"]["limits"] == {"stageTokens": {"hypothesis": 560_000}}
     assert action["params"]["newStageTokens"] == 560_000
     assert action["params"]["suggestedExtensionTokens"] == 260_000
+    assert action["params"]["stageConsumedTokens"] == 280_000
     assert action["params"]["runId"] == "run-7"
+
+
+def test_extend_budget_action_bases_total_on_overrun_consumed() -> None:
+    """Admission only blocks at node boundaries: consumed may exceed the limit.
+
+    The real SCI-009 failure (run with limit 2,000,000 but 2,726,303
+    consumed) produced ``limit + suggested`` = 2,262,347 — still below the
+    consumed total, so the extension left zero usable budget.  The baseline
+    must be ``max(limit, consumed)`` so the new total actually leaves the
+    suggested headroom.
+    """
+
+    action = anomaly_inbox_service.extend_budget_action(
+        _precheck_block(
+            stageId="evidence_relations",
+            nodeId="evidence_relations",
+            runId="run-1ca97605acf3",
+            stageLimitTokens=2_000_000,
+            stageConsumedTokens=2_726_303,
+            suggestedExtensionTokens=262_347,
+        )
+    )
+    assert action is not None
+    expected_total = max(2_000_000, 2_726_303) + 262_347
+    assert expected_total == 2_988_650
+    assert action["params"]["newStageTokens"] == 2_988_650
+    assert action["params"]["stageConsumedTokens"] == 2_726_303
+    assert action["params"]["limits"] == {
+        "stageTokens": {"evidence_relations": 2_988_650}
+    }
+    # The hint must state the new total and its baseline, not imply the
+    # extension starts from the (already overrun) configured limit.
+    assert "2988650" in action["confirmHint"]
+    assert "2726303" in action["confirmHint"]
+
+
+def test_extend_budget_action_falls_back_to_limit_when_consumed_unknown() -> None:
+    for consumed_override in ({"stageConsumedTokens": 0}, {"stageConsumedTokens": None}):
+        action = anomaly_inbox_service.extend_budget_action(
+            _precheck_block(**consumed_override)
+        )
+        assert action is not None
+        assert action["params"]["newStageTokens"] == 560_000
+        assert action["params"]["stageConsumedTokens"] == 0
 
 
 def test_extend_budget_action_requires_computable_contract() -> None:

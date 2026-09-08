@@ -306,10 +306,49 @@ def test_extend_budget_action_executes_confirmed_contract(monkeypatch) -> None:
         "command": "extend_budget",
         "then": "retry_node",
     }
-    # The idempotency key is derived from the confirmed amounts, so a repeated
-    # identical confirmation replays instead of double-extending.
+    # The idempotency key is derived from the confirmed amounts (via the
+    # server-computed new total), so a repeated identical confirmation
+    # replays instead of double-extending.
     assert captured["idempotency_key"] == (
-        "inbox-extend-budget:run-7:hypothesis:300000:260000"
+        "inbox-extend-budget:run-7:hypothesis:560000"
+    )
+
+
+def test_extend_budget_action_uses_overrun_consumed_baseline(monkeypatch) -> None:
+    """The endpoint bases the new total on max(limit, consumed).
+
+    A payload carrying the overrun consumption (SCI-009: limit 2,000,000 but
+    2,726,303 already consumed) must produce a total that actually leaves
+    the suggested headroom, and the idempotency key must include that new
+    total so legacy (insufficient) totals are never replayed.
+    """
+
+    captured: dict[str, Any] = {}
+
+    def fake_submit(**kwargs: Any) -> dict[str, Any]:
+        captured.update(kwargs)
+        return {"status": "accepted", "commandId": "cmd-overrun"}
+
+    monkeypatch.setattr(hf_routes, "_submit_workflow_command", fake_submit)
+    monkeypatch.setattr(hf_routes, "_resolve_run_version", lambda team, run: 3)
+    response = _client().post(
+        _ACTION_ROUTE,
+        json=_extend_payload(
+            stageId="evidence_relations",
+            nodeId="evidence_relations",
+            runId="run-1ca97605acf3",
+            stageLimitTokens=2_000_000,
+            suggestedExtensionTokens=262_347,
+            stageConsumedTokens=2_726_303,
+        ),
+    )
+    assert response.status_code == 200
+    assert captured["payload"]["limits"] == {
+        "stageTokens": {"evidence_relations": 2_988_650}
+    }
+    assert captured["idempotency_key"].endswith(":2988650")
+    assert captured["idempotency_key"] == (
+        "inbox-extend-budget:run-1ca97605acf3:evidence_relations:2988650"
     )
 
 
@@ -449,7 +488,11 @@ def test_anomaly_inbox_surfaces_child_run_budget_block(monkeypatch) -> None:
     action = item["action"]
     assert action["command"] == "extend_budget"
     assert action["params"]["runId"] == "child-run-x"
-    assert action["params"]["newStageTokens"] == 2_000_000 + 262_347
+    # Overrun-aware baseline: consumed already exceeds the configured limit.
+    assert action["params"]["newStageTokens"] == (
+        max(2_000_000, 2_726_303) + 262_347
+    )
+    assert action["params"]["stageConsumedTokens"] == 2_726_303
 
 
 def test_extend_budget_action_resolves_child_run_version_via_sideflow_listing(

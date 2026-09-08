@@ -1106,10 +1106,13 @@ def team_workflow_hypothesis_first_anomaly_inbox_extend_budget(
     """Execute the inbox one-click extend CTA (human-authorized, confirmed).
 
     误触防护在服务端闭合：缺少显式 ``confirmed=true``、额度数字无效或
-    run/stage 缺失时直接拒绝（428/422 语义），绝不静默执行。幂等键由
-    run/stage/额度决定，因此同一确认重复提交会幂等重放而不是重复加预算；
-    extend 只提高 stageTokens 上限，随后对该节点的 retry_node 仍走既有
-    命令授权面（本端点不自动补预算、不自动重试）。
+    run/stage 缺失时直接拒绝（428/422 语义），绝不静默执行。新上限按
+    overrun-aware 基线计算（准入只在节点边界拦截，已消耗可能已超过配置
+    上限）：``max(stageLimitTokens, stageConsumedTokens) +
+    suggestedExtensionTokens``；幂等键由 run/stage/新总额决定，因此同一
+    确认重复提交会幂等重放而不是重复加预算，且旧命令不会以不足的新上限
+    被重放命中。extend 只提高 stageTokens 上限，随后对该节点的
+    retry_node 仍走既有命令授权面（本端点不自动补预算、不自动重试）。
     ``questionId`` 只作请求上下文；命令授权由 team+run 的既有命令面完成。
     """
 
@@ -1137,10 +1140,13 @@ def team_workflow_hypothesis_first_anomaly_inbox_extend_budget(
                 "message": f"workflow run {payload.runId} not found",
             },
         )
-    new_stage_tokens = payload.stageLimitTokens + payload.suggestedExtensionTokens
+    new_stage_tokens = (
+        max(payload.stageLimitTokens, payload.stageConsumedTokens)
+        + payload.suggestedExtensionTokens
+    )
     idempotency_key = (
         f"inbox-extend-budget:{payload.runId}:{payload.stageId}"
-        f":{payload.stageLimitTokens}:{payload.suggestedExtensionTokens}"
+        f":{new_stage_tokens}"
     )
     return _submit_workflow_command(
         run_id=payload.runId,

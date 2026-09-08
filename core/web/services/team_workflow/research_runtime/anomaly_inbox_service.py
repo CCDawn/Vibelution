@@ -800,12 +800,15 @@ def extend_budget_action(block: Mapping[str, Any]) -> dict[str, Any] | None:
     The command shape mirrors the verified recovery contract
     (``extend_budget`` with a ``limits.stageTokens`` increase, then
     ``retry_node`` on the blocked node): ``limits`` is directly usable as the
-    command payload.  ``newStageTokens`` is the *new total* stage limit
-    (current limit + suggested extension) because extend_budget only accepts
-    increases above the prior value.  ``requiresConfirmation`` is part of the
-    contract: the amount is displayed and the execution endpoint refuses any
-    call without the explicit ``confirmed`` flag (误触防护), so the extend
-    stays a human-authorized action — never an automatic top-up.
+    command payload.  ``newStageTokens`` is the *new total* stage limit,
+    computed from an overrun-aware baseline: admission only blocks at node
+    boundaries, so the consumed tokens may already exceed the configured
+    limit — the baseline is therefore ``max(stageLimitTokens,
+    stageConsumedTokens)`` (falling back to the limit when consumed is
+    unknown), plus the suggested extension.  ``requiresConfirmation`` is
+    part of the contract: the amount is displayed and the execution endpoint
+    refuses any call without the explicit ``confirmed`` flag (误触防护), so
+    the extend stays a human-authorized action — never an automatic top-up.
     """
 
     code = _text(block, "code")
@@ -820,7 +823,11 @@ def extend_budget_action(block: Mapping[str, Any]) -> dict[str, Any] | None:
         return None
     node_id = _text(block, "nodeId")
     run_id = _first_non_empty(_text(block, "runId"), _text(block, "sourceId"))
-    new_stage_tokens = stage_limit + suggested
+    consumed = _as_int(_get(block, "stageConsumedTokens"))
+    baseline = (
+        stage_limit if consumed is None or consumed <= 0 else max(stage_limit, consumed)
+    )
+    new_stage_tokens = baseline + suggested
     return {
         "command": BUDGET_PRECHECK_RECOVERY_COMMAND,
         "params": {
@@ -829,6 +836,7 @@ def extend_budget_action(block: Mapping[str, Any]) -> dict[str, Any] | None:
             "stageId": stage_id,
             "stageLimitTokens": stage_limit,
             "suggestedExtensionTokens": suggested,
+            "stageConsumedTokens": consumed if consumed is not None else 0,
             "newStageTokens": new_stage_tokens,
             "limits": {"stageTokens": {stage_id: new_stage_tokens}},
         },
@@ -841,9 +849,10 @@ def extend_budget_action(block: Mapping[str, Any]) -> dict[str, Any] | None:
         ),
         "requiresConfirmation": True,
         "confirmHint": (
-            f"将阶段 {stage_id} 预算上限从 {stage_limit} 提高到 "
-            f"{new_stage_tokens} tokens（+{suggested}）；补预算是人工授权动作，"
-            "执行需二次确认"
+            f"将阶段 {stage_id} 预算上限提高到 {new_stage_tokens} tokens"
+            f"（基准 {baseline} + {suggested}；含已消耗 "
+            f"{consumed if consumed is not None else 0}）；"
+            "补预算是人工授权动作，执行需二次确认"
         ),
     }
 

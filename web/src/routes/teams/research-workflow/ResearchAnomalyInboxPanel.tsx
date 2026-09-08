@@ -160,6 +160,7 @@ export function AnomalyInboxExtendCta({
         stageId: params.stageId,
         stageLimitTokens: params.stageLimitTokens,
         suggestedExtensionTokens: params.suggestedExtensionTokens,
+        stageConsumedTokens: params.stageConsumedTokens ?? 0,
         confirmed: true,
       });
       setArmed(false);
