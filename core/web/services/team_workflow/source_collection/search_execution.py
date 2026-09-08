@@ -83,6 +83,183 @@ def _source_finding_receipt_binding_keys(value: Any) -> set[str]:
     return keys
 
 
+def _source_finding_trace_receipt_ref_sets(
+    trace: list[dict[str, Any]],
+) -> list[set[str]]:
+    """Expand projected receipt groups into binding-key sets.
+
+    New events carry ``receiptRefSets`` with one nested group per provider
+    result.  Older events only have the flattened ``resultRefs`` projection;
+    treat each legacy locator as its own strict group.  A flat list never
+    proves that multiple locators belong to one source.
+    """
+
+    receipt_ref_sets: list[set[str]] = []
+    for item in trace:
+        if not isinstance(item, dict):
+            continue
+        if "receiptRefSets" in item:
+            nested = item.get("receiptRefSets")
+            if not isinstance(nested, list):
+                continue
+            for raw_group in nested:
+                if isinstance(raw_group, dict):
+                    raw_refs = raw_group.get("refs")
+                else:
+                    raw_refs = raw_group
+                if not isinstance(raw_refs, list):
+                    continue
+                keys = {
+                    key
+                    for ref in raw_refs
+                    for key in _source_finding_receipt_binding_keys(ref)
+                }
+                if keys:
+                    receipt_ref_sets.append(keys)
+            continue
+        # Legacy events have no per-result mapping.  Keep each locator
+        # separate; matching aliases still work because each locator is
+        # expanded through the same canonical identity helper.
+        for ref in list(item.get("resultRefs") or []):
+            keys = _source_finding_receipt_binding_keys(ref)
+            if keys:
+                receipt_ref_sets.append(keys)
+    return receipt_ref_sets
+
+
+def _source_finding_candidate_receipt_requirements(
+    candidate: dict[str, Any],
+) -> tuple[set[str], set[str]]:
+    """Return the primary and identity keys a candidate must bind to.
+
+    A candidate can carry both a canonical locator and presentation metadata.
+    Those fields are useful only when they describe the same source: a real
+    provider result may expose a DOI URL, an arXiv URL, and an ``identity:``
+    reference for one paper, while a wrong DOI must never be hidden by a
+    matching secondary URL.  The primary locator is therefore selected from
+    the first identity-bearing locator, and every DOI/arXiv identity declared
+    by the candidate must be present in the real receipt set.
+    """
+
+    item = candidate if isinstance(candidate, dict) else {}
+    metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    identity_value = str(metadata.get("sourceIdentityKey") or "").strip()
+    identity_locator = identity_value
+    if identity_locator.lower().startswith("url:"):
+        identity_locator = identity_locator[4:].strip()
+    locators = [
+        item.get("sourceRef"),
+        item.get("sourceUrl"),
+        item.get("locator"),
+        item.get("url"),
+        item.get("rawLocation"),
+        metadata.get("sourceRef"),
+        metadata.get("sourceUrl"),
+        metadata.get("url"),
+        metadata.get("doi"),
+        item.get("doi"),
+        item.get("DOI"),
+        identity_locator,
+    ]
+    normalized_locators = [str(value or "").strip() for value in locators if str(value or "").strip()]
+    primary_keys: set[str] = set()
+    identity_keys: set[str] = set()
+    fallback_keys: set[str] = set()
+    for locator in normalized_locators:
+        keys = _source_finding_receipt_binding_keys(locator)
+        if not keys:
+            continue
+        if not fallback_keys:
+            fallback_keys = keys
+        candidate_identity_keys = {
+            key for key in keys if key.startswith(("doi:", "arxiv:"))
+        }
+        identity_keys.update(candidate_identity_keys)
+        if not primary_keys and candidate_identity_keys:
+            primary_keys = keys
+    if not primary_keys:
+        primary_keys = fallback_keys
+    # Distinct DOI/arXiv identities in one candidate are contradictory until
+    # a server-owned source record resolves them.  A global run receipt set
+    # cannot establish that two identifiers belong to the same paper, so make
+    # the candidate unbindable instead of allowing one identity to mask the
+    # other.  Matching presentation URLs still collapse to one identity.
+    doi_keys = {key for key in identity_keys if key.startswith("doi:")}
+    arxiv_keys = {key for key in identity_keys if key.startswith("arxiv:")}
+    if len(doi_keys) > 1 or len(arxiv_keys) > 1:
+        primary_keys = set()
+    return primary_keys, identity_keys
+
+
+def _source_finding_candidate_receipt_locator_key_sets(
+    candidate: dict[str, Any],
+) -> list[set[str]]:
+    """Return binding keys for every declared candidate locator.
+
+    A DOI and a presentation URL may both describe one result, but that
+    relationship is only trusted when one server-owned search event contains
+    both bindings.  ``rawLocation`` is a retrieval fallback for records that
+    have no explicit locator; when an explicit locator exists it may be a
+    provider endpoint and must not be treated as a second source identity.
+    """
+
+    item = candidate if isinstance(candidate, dict) else {}
+    metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    identity_value = str(metadata.get("sourceIdentityKey") or "").strip()
+    identity_locator = identity_value
+    if identity_locator.lower().startswith("url:"):
+        identity_locator = identity_locator[4:].strip()
+    values = [
+        item.get("sourceRef"),
+        item.get("sourceUrl"),
+        item.get("locator"),
+        item.get("url"),
+        metadata.get("sourceRef"),
+        metadata.get("sourceUrl"),
+        metadata.get("url"),
+        metadata.get("doi"),
+        item.get("doi"),
+        item.get("DOI"),
+        identity_locator,
+    ]
+    if not any(str(value or "").strip() for value in values):
+        values.append(item.get("rawLocation"))
+    groups: list[set[str]] = []
+    seen: set[frozenset[str]] = set()
+    for value in values:
+        keys = _source_finding_receipt_binding_keys(value)
+        frozen = frozenset(keys)
+        if not frozen or frozen in seen:
+            continue
+        seen.add(frozen)
+        groups.append(keys)
+    return groups
+
+
+def _source_finding_candidate_receipt_is_bound(
+    candidate: dict[str, Any],
+    receipt_ref_sets: list[set[str]],
+) -> bool:
+    """Require one real search event to bind every declared identity.
+
+    ``receipt_ref_sets`` is kept per projected search event.  Flattening it
+    across a run would let a candidate combine an identity from one result
+    with a URL from another result or query and pass the writeback gate.
+    """
+
+    primary_keys, identity_keys = _source_finding_candidate_receipt_requirements(candidate)
+    locator_key_sets = _source_finding_candidate_receipt_locator_key_sets(candidate)
+    if not primary_keys or not locator_key_sets:
+        return False
+    for event_refs in receipt_ref_sets:
+        if not all(keys.intersection(event_refs) for keys in locator_key_sets):
+            continue
+        if identity_keys and not identity_keys.issubset(event_refs):
+            continue
+        return True
+    return False
+
+
 def resolve_bound_source_search_context(runtime: dict[str, Any] | None) -> dict[str, Any] | None:
     """Resolve a formal finding turn from server-owned Task/assignment records.
 
@@ -248,6 +425,28 @@ def _register_supplemental_search_query(
     return {"assignment": dict(assignment), "query": query}
 
 
+def _source_finding_provider_result_receipt_refs(result: dict[str, Any]) -> list[str]:
+    """Return the URL/DOI/identity refs belonging to one provider result."""
+
+    s = _service()
+    url = s._trim_text(result.get("url"), max_length=1000)
+    doi = s._trim_text(result.get("doi") or result.get("DOI"), max_length=1000)
+    identity = s._source_collection_identity_key(
+        source_ref=url,
+        raw_location=url,
+        doi=doi,
+        url=url,
+        title=result.get("title"),
+        container=result.get("source") or result.get("container"),
+        published=result.get("published"),
+    )
+    refs: list[str] = []
+    for value in (url, doi, f"identity:{identity}" if identity else ""):
+        if value and value not in refs:
+            refs.append(value)
+    return refs
+
+
 def append_bound_tool_search_receipts(
     context: dict[str, Any],
     *,
@@ -273,21 +472,12 @@ def append_bound_tool_search_receipts(
             if (s._trim_text(item.get("provider"), max_length=80) or provider) == provider
         ]
         refs: list[str] = []
+        receipt_ref_sets: list[list[str]] = []
         for result in provider_results:
-            url = s._trim_text(result.get("url"), max_length=1000)
-            identity = s._source_collection_identity_key(
-                source_ref=url,
-                raw_location=url,
-                doi=result.get("doi"),
-                url=url,
-                title=result.get("title"),
-                container=result.get("source") or result.get("container"),
-                published=result.get("published"),
-            )
-            if url:
-                refs.append(url)
-            if identity:
-                refs.append(f"identity:{identity}")
+            result_refs = _source_finding_provider_result_receipt_refs(result)
+            if result_refs:
+                receipt_ref_sets.append(result_refs)
+                refs.extend(result_refs)
         status = s._trim_text(provider_row.get("status"), max_length=80).lower()
         event_type = (
             "search.failed"
@@ -328,6 +518,7 @@ def append_bound_tool_search_receipts(
         event.update(
             {
                 "refs": list(dict.fromkeys(refs)),
+                "receiptRefSets": receipt_ref_sets,
                 "parentQueryId": str(query.get("parentQueryId") or ""),
                 "receiptKey": receipt_key,
                 "toolName": tool_name,
@@ -385,35 +576,14 @@ def validate_source_finding_receipt_payload(
         str(item.get("perspective") or item.get("perspectiveId") or "").strip().lower()
         for item in candidates
     }
-    receipt_refs = {
-        key
-        for item in trace
-        for ref in list(item.get("resultRefs") or [])
-        for key in _source_finding_receipt_binding_keys(ref)
-    }
+    receipt_ref_sets = _source_finding_trace_receipt_ref_sets(trace)
     unbound_candidates: list[str] = []
     for candidate in candidates:
-        metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
-        identity = str(metadata.get("sourceIdentityKey") or "").strip()
-        locators = {
-            str(value or "").strip()
-            for value in (
-                candidate.get("sourceRef"),
-                candidate.get("sourceUrl"),
-                candidate.get("locator"),
-                metadata.get("sourceRef"),
-                metadata.get("sourceUrl"),
-            )
-            if str(value or "").strip()
-        }
-        if identity:
-            locators.add(f"identity:{identity}")
-        binding_keys = {
-            key
-            for locator in locators
-            for key in _source_finding_receipt_binding_keys(locator)
-        }
-        if require_candidate_receipt_binding and not binding_keys.intersection(receipt_refs):
+        is_bound = _source_finding_candidate_receipt_is_bound(
+            candidate,
+            receipt_ref_sets,
+        )
+        if require_candidate_receipt_binding and not is_bound:
             unbound_candidates.append(str(candidate.get("candidateId") or candidate.get("sourceId") or "unknown"))
     missing_perspectives = sorted(required - perspectives)
     missing_terminal = sorted(required - terminal)
@@ -2859,6 +3029,7 @@ def project_source_collection_search_trace(
         group = grouped[(assignment, query_id, provider)]
         terminal_status = ""
         refs: list[str] = []
+        receipt_ref_sets: list[list[str]] = []
         event_ids: list[str] = []
         for event in group:
             event_type = s._trim_text(event.get("eventType"), max_length=120)
@@ -2872,6 +3043,20 @@ def project_source_collection_search_trace(
                 text = s._trim_text(value, max_length=1000)
                 if text and text not in refs:
                     refs.append(text)
+            raw_receipt_ref_sets = event.get("receiptRefSets")
+            if isinstance(raw_receipt_ref_sets, list):
+                for raw_receipt_refs in raw_receipt_ref_sets:
+                    if isinstance(raw_receipt_refs, dict):
+                        raw_receipt_refs = raw_receipt_refs.get("refs")
+                    if not isinstance(raw_receipt_refs, list):
+                        continue
+                    normalized_receipt_refs: list[str] = []
+                    for value in raw_receipt_refs:
+                        text = s._trim_text(value, max_length=1000)
+                        if text and text not in normalized_receipt_refs:
+                            normalized_receipt_refs.append(text)
+                    if normalized_receipt_refs and normalized_receipt_refs not in receipt_ref_sets:
+                        receipt_ref_sets.append(normalized_receipt_refs)
             event_id = s._trim_text(event.get("eventId"), max_length=160)
             if event_id and event_id not in event_ids:
                 event_ids.append(event_id)
@@ -2881,25 +3066,26 @@ def project_source_collection_search_trace(
         if terminal_status == "returned" and not refs:
             terminal_status = "no_credible_source"
             failure_reason = "terminal_provider_receipt_without_results"
-        projected.append(
-            {
-                "sourceCollectionRunId": normalized_run_id,
-                "assignmentId": assignment,
-                "queryId": query_id,
-                "provider": provider,
-                "query": s._trim_text(group[0].get("query"), max_length=1000),
-                "perspective": s._trim_text(
-                    group[0].get("perspective"),
-                    max_length=80,
-                ),
-                "status": terminal_status,
-                "resultRefs": refs,
-                "eventIds": event_ids,
-                "failureReason": failure_reason,
-                "startedAt": s._trim_text(group[0].get("createdAt"), max_length=80),
-                "terminalAt": s._trim_text(group[-1].get("createdAt"), max_length=80),
-            }
-        )
+        projected_item = {
+            "sourceCollectionRunId": normalized_run_id,
+            "assignmentId": assignment,
+            "queryId": query_id,
+            "provider": provider,
+            "query": s._trim_text(group[0].get("query"), max_length=1000),
+            "perspective": s._trim_text(
+                group[0].get("perspective"),
+                max_length=80,
+            ),
+            "status": terminal_status,
+            "resultRefs": refs,
+            "eventIds": event_ids,
+            "failureReason": failure_reason,
+            "startedAt": s._trim_text(group[0].get("createdAt"), max_length=80),
+            "terminalAt": s._trim_text(group[-1].get("createdAt"), max_length=80),
+        }
+        if receipt_ref_sets:
+            projected_item["receiptRefSets"] = receipt_ref_sets
+        projected.append(projected_item)
     return projected
 
 
