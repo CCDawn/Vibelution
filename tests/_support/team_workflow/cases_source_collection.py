@@ -1666,6 +1666,7 @@ def test_source_collection_stage_session_task_writeback_closes_running_turn_stat
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
     _stub_source_collection_search_background(monkeypatch)
+    _stub_source_finding_receipt_binding(monkeypatch)
     discovery = agent_directory_service.create_agent_instance(display_name="资料寻找")
     session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料寻找")
     team = team_service.create_team(
@@ -1735,6 +1736,7 @@ def test_source_collection_stage_session_task_writeback_materializes_search_lead
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
     _stub_source_collection_search_background(monkeypatch)
+    _stub_source_finding_receipt_binding(monkeypatch)
     scene_events = _capture_workflow_events(monkeypatch)
     discovery = agent_directory_service.create_agent_instance(display_name="资料寻找")
     session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料寻找")
@@ -1871,6 +1873,7 @@ def test_source_collection_stage_session_task_writeback_materializes_source_reco
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
     _stub_source_collection_search_background(monkeypatch)
+    _stub_source_finding_receipt_binding(monkeypatch)
     discovery = agent_directory_service.create_agent_instance(display_name="资料寻找")
     session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料寻找")
     team = team_service.create_team(
@@ -1936,7 +1939,7 @@ def test_source_collection_stage_session_task_writeback_materializes_source_reco
 
     materialized = response["writeback"]["materializedSources"]
     assert response["task"]["status"] == "needs_review"
-    assert response["task"]["result"]["closureSummary"]["artifactComplete"] is True
+    assert response["task"]["result"]["closureSummary"]["artifactComplete"] is False
     assert response["task"]["result"]["closureSummary"]["completionGatePassed"] is False
     assert response["task"]["result"]["closureSummary"]["taskToolProgress"]["taskCreateObserved"] is False
     assert materialized["sourceLeadCount"] == 1
@@ -1952,8 +1955,8 @@ def test_source_collection_stage_session_task_writeback_materializes_source_reco
     status_payload = team_workflow_orchestration_service.get_research_stage_round_status(team["teamId"])
     latest_round = status_payload["latestRound"]
     collection_card = next(card for card in latest_round["sourceCollectionStageCards"] if card["stageId"] == "finding")
-    assert collection_card["latestTask"]["status"] == "completed"
-    assert collection_card["latestTask"]["closureSummary"]["completionGatePassed"] is True
+    assert collection_card["latestTask"]["status"] == "needs_review"
+    assert collection_card["latestTask"]["closureSummary"]["completionGatePassed"] is False
     assert collection_card["latestTask"]["closureSummary"]["taskToolProgress"]["completed"] == len(response["task"]["taskChecklist"])
 
 def test_source_collection_stage_session_task_writeback_rejects_leads_without_identity(tmp_path, monkeypatch):
@@ -1993,24 +1996,21 @@ def test_source_collection_stage_session_task_writeback_rejects_leads_without_id
         {"stageId": "finding", "agentId": discovery["agentId"], "agentRole": "source_finder"},
     )
 
-    response = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
-        team["teamId"],
-        task["taskId"],
-        {
-            "status": "completed",
-            "summary": "只有一条缺少 locator 的线索。",
-            "result": {"source_records": [{"title": "A vague source without locator", "year": "2020"}]},
-        },
-    )
+    with pytest.raises(
+        team_workflow_orchestration_service.TeamWorkflowOrchestrationError,
+        match="source_search_receipt_missing.*unknown",
+    ):
+        team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+            team["teamId"],
+            task["taskId"],
+            {
+                "status": "completed",
+                "summary": "只有一条缺少 locator 的线索。",
+                "result": {"source_records": [{"title": "A vague source without locator", "year": "2020"}]},
+            },
+        )
 
-    assert response["task"]["status"] == "needs_review"
-    materialized = response["writeback"]["materializedSources"]
-    assert materialized["sourceLeadCount"] == 1
-    assert materialized["createdRecordCount"] == 0
-    assert materialized["importedCandidateCount"] == 0
-    assert materialized["skippedCount"] == 1
-    assert response["task"]["result"]["closureSummary"]["artifactComplete"] is False
-    assert response["task"]["result"]["closureSummary"]["completionGatePassed"] is False
+    assert data_processing_service.list_records(stage_response["run"]["runId"])["records"] == []
 
 def test_source_ingestor_writeback_auto_ingests_high_confidence_sources(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
@@ -9703,6 +9703,29 @@ def _finding_close_first_step_task(
     return {"team": team, "runId": run_id, "task": task, "submitted": submitted}
 
 
+def _stub_source_finding_receipt_binding(monkeypatch):
+    """Keep materialization/cap cases focused on their own contract.
+
+    Receipt binding has dedicated tests in ``test_source_finding_receipt_gate``;
+    these older fixtures do not create provider search events, so they inject
+    the pure binding boundary explicitly instead of weakening production code.
+    """
+    from core.web.services.team_workflow.research_runtime import artifact_readback_registry
+
+    monkeypatch.setattr(
+        artifact_readback_registry,
+        "inspect_source_finding_candidate_receipts",
+        lambda **kwargs: {
+            "passed": True,
+            "candidateCount": len(kwargs.get("candidate_sources") or []),
+            "boundCandidateIds": [],
+            "unboundCandidateIds": [],
+            "receiptRefCount": 0,
+            "traceCount": 0,
+        },
+    )
+
+
 def _append_single_context_tool_event(tmp_path, task) -> None:
     append_conversation_event(
         tmp_path,
@@ -9810,6 +9833,7 @@ def test_finding_close_first_step_context_has_no_continuation_invite(tmp_path, m
 
 def test_finding_close_first_step_writeback_batch_limit_and_replay(tmp_path, monkeypatch):
     """第五个不同批次被拒；同批重放幂等且不重复消耗来源预算。"""
+    _stub_source_finding_receipt_binding(monkeypatch)
     env = _finding_close_first_step_task(tmp_path, monkeypatch)
     team = env["team"]
     run_id = env["runId"]
@@ -9899,6 +9923,7 @@ def test_finding_running_writebacks_materialize_and_close_at_frozen_lead_limit(
 
     # Model a receipt-accepted batch for the independent frozen-cap contract.
     # Automatic closure with missing receipts is tested at the real validator.
+    _stub_source_finding_receipt_binding(monkeypatch)
     monkeypatch.setattr(artifact_readback_registry, "load_source_finding_receipt_payload", lambda **_: {"quality": {}})
     env = _finding_close_first_step_task(tmp_path, monkeypatch)
     team = env["team"]
@@ -9991,6 +10016,7 @@ def test_finding_running_writebacks_materialize_and_close_at_frozen_lead_limit(
 
 def test_finding_close_first_step_writeback_rejects_oversized_lead_batch(tmp_path, monkeypatch):
     """单批 candidateLeads[] 超过每批上限即拒绝整批，不物化任何来源。"""
+    _stub_source_finding_receipt_binding(monkeypatch)
     env = _finding_close_first_step_task(tmp_path, monkeypatch)
     team = env["team"]
     run_id = env["runId"]
@@ -10400,6 +10426,7 @@ def test_agent_graph_edges_extract_candidate_relations_contract_payload() -> Non
 
 def test_finding_writeback_candidates_carry_scope_markers(tmp_path, monkeypatch):
     """根因 B：finding 写回物化创建的候选带 SC run / workflow run / 研究项目三类定界标记。"""
+    _stub_source_finding_receipt_binding(monkeypatch)
     env = _finding_close_first_step_task(tmp_path, monkeypatch)
     team = env["team"]
     run_id = env["runId"]

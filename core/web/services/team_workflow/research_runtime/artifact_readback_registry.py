@@ -692,37 +692,10 @@ def load_source_finding_receipt_payload(
         str(team_id or "").strip(),
         str(authority_run_id or "").strip(),
     )
-    candidate_sources: list[dict[str, Any]] = []
-    for candidate in candidates:
-        metadata = (
-            candidate.get("metadata")
-            if isinstance(candidate.get("metadata"), dict)
-            else {}
-        )
-        source_trace = (
-            metadata.get("sourceCollectionTrace")
-            if isinstance(metadata.get("sourceCollectionTrace"), dict)
-            else {}
-        )
-        candidate_sources.append(
-            {
-                **candidate,
-                "sourceId": str(candidate.get("candidateId") or "").strip(),
-                "sourceRef": str(
-                    candidate.get("sourceRef")
-                    or candidate.get("sourceUrl")
-                    or metadata.get("sourceRef")
-                    or metadata.get("sourceUrl")
-                    or ""
-                ).strip(),
-                "perspective": str(
-                    candidate.get("perspective")
-                    or metadata.get("perspective")
-                    or source_trace.get("perspective")
-                    or ""
-                ).strip(),
-            }
-        )
+    candidate_sources = [
+        _source_finding_candidate_source(candidate)
+        for candidate in candidates
+    ]
     perspectives = list(
         dict.fromkeys(
             str(item.get("perspective") or "").strip()
@@ -763,6 +736,115 @@ def load_source_finding_receipt_payload(
             raise
         return None
     return payload
+
+
+def _source_finding_candidate_source(candidate: dict[str, Any]) -> dict[str, Any]:
+    """Project one stored or prospective source into the receipt shape.
+
+    Writeback preflight uses the same projection as canonical readback while
+    the candidate is still only a proposed lead.  Keeping this conversion in
+    the registry prevents a second locator/perspective interpretation from
+    drifting away from the production receipt validator.
+    """
+
+    metadata = (
+        candidate.get("metadata")
+        if isinstance(candidate.get("metadata"), dict)
+        else {}
+    )
+    source_trace = (
+        metadata.get("sourceCollectionTrace")
+        if isinstance(metadata.get("sourceCollectionTrace"), dict)
+        else {}
+    )
+    return {
+        **candidate,
+        "sourceId": str(
+            candidate.get("sourceId")
+            or candidate.get("candidateId")
+            or candidate.get("leadId")
+            or candidate.get("id")
+            or ""
+        ).strip(),
+        "sourceRef": str(
+            candidate.get("sourceRef")
+            or candidate.get("sourceUrl")
+            or candidate.get("locator")
+            or candidate.get("url")
+            or metadata.get("sourceRef")
+            or metadata.get("sourceUrl")
+            or ""
+        ).strip(),
+        "perspective": str(
+            candidate.get("perspective")
+            or candidate.get("perspectiveId")
+            or metadata.get("perspective")
+            or source_trace.get("perspective")
+            or ""
+        ).strip(),
+    }
+
+
+def inspect_source_finding_candidate_receipts(
+    *,
+    team_id: str,
+    authority_run_id: str,
+    candidate_sources: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Inspect real search-event bindings for stored or staged candidates.
+
+    This is intentionally narrower than the full finding quality gate.  It is
+    used before source writeback side effects to distinguish an illegal new
+    candidate (which must be rejected) from a legal increment whose global
+    search envelope is still incomplete (which can be persisted as
+    ``needs_review``).  It reads only the canonical event projection and never
+    accepts an Agent-authored ``searchTrace`` or title-only match.
+    """
+
+    from ..source_collection.search_execution import (
+        _source_finding_candidate_receipt_is_bound,
+        _source_finding_trace_receipt_ref_sets,
+        project_source_collection_search_trace,
+    )
+
+    normalized_team_id = str(team_id or "").strip()
+    normalized_run_id = str(authority_run_id or "").strip()
+    trace = project_source_collection_search_trace(
+        normalized_team_id,
+        normalized_run_id,
+    )
+    receipt_ref_sets = _source_finding_trace_receipt_ref_sets(trace)
+    receipt_refs = set().union(*receipt_ref_sets) if receipt_ref_sets else set()
+    unbound: list[str] = []
+    bound: list[str] = []
+    for candidate in candidate_sources:
+        if not isinstance(candidate, dict):
+            continue
+        projected = _source_finding_candidate_source(candidate)
+        candidate_id = str(
+            projected.get("sourceId")
+            or projected.get("candidateId")
+            or projected.get("leadId")
+            or "unknown"
+        ).strip()
+        is_bound = _source_finding_candidate_receipt_is_bound(
+            projected,
+            receipt_ref_sets,
+        )
+        if is_bound:
+            bound.append(candidate_id)
+        else:
+            unbound.append(candidate_id)
+    return {
+        "passed": not unbound,
+        "teamId": normalized_team_id,
+        "sourceCollectionRunId": normalized_run_id,
+        "candidateCount": len([item for item in candidate_sources if isinstance(item, dict)]),
+        "boundCandidateIds": bound[:120],
+        "unboundCandidateIds": unbound[:120],
+        "receiptRefCount": len(receipt_refs),
+        "traceCount": len(trace),
+    }
 
 
 def read_domain_artifact(

@@ -373,6 +373,161 @@ def _park_source_collection_stage_task_quote_anchor_remediation(
     }
 
 
+def _source_collection_stage_finding_receipt_preflight(
+    team_id: str,
+    run_id: str,
+    task: dict[str, Any],
+    incoming_result: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Validate staged finding leads before any record/candidate side effect.
+
+    The canonical candidate store cannot contain a new lead until the
+    materializer runs, so a post-materialization readback alone is too late:
+    a rejected receipt would leave a DataRecord behind.  This preflight checks
+    each newly supplied lead against the immutable search-event projection.
+    Global finding completeness is deliberately deferred to the post-write
+    readback; an otherwise legal increment must be persisted as
+    ``needs_review`` when another perspective or counter source is still
+    missing.
+    """
+
+    s = _service()
+    stage_id = s._normalize_source_collection_stage_id(task.get("stageId"), default="")
+    agent_role = s._normalize_source_collection_agent_role(task.get("agentRole"))
+    if (
+        stage_id != "finding"
+        and agent_role != "source_finder"
+    ) or not s._trim_text(task.get("workflowRunId"), max_length=160):
+        return None
+
+    from ..research_runtime import artifact_readback_registry as registry
+
+    incoming_leads = s._source_collection_stage_writeback_source_leads(
+        incoming_result if isinstance(incoming_result, dict) else {}
+    )
+    incoming_labels: set[str] = set()
+    staged_leads: list[dict[str, Any]] = []
+    for index, lead in enumerate(incoming_leads, start=1):
+        if not isinstance(lead, dict):
+            continue
+        lead_label = s._trim_text(
+            lead.get("leadId")
+            or lead.get("candidateId")
+            or lead.get("sourceId")
+            or lead.get("id")
+            or s._source_collection_stage_writeback_lead_fingerprint(lead),
+            max_length=160,
+        )
+        if lead_label:
+            incoming_labels.add(lead_label)
+        for key in ("leadId", "candidateId", "sourceId", "id"):
+            value = s._trim_text(lead.get(key), max_length=160)
+            if value:
+                incoming_labels.add(value)
+        # Run the same pure record projection used by materialization before
+        # binding.  In particular, a wrong DOI must remain the identity even
+        # when an Agent also supplies a title-derived metadata key; title
+        # similarity is never a receipt mapping.
+        projected_lead = s._source_collection_stage_writeback_record_payload(
+            lead,
+            team_id=team_id,
+            run_id=run_id,
+            task_id=s._trim_text(task.get("taskId"), max_length=160),
+            stage_id=stage_id,
+            agent_id=s._trim_text(task.get("agentId"), max_length=160),
+            agent_role=agent_role,
+            index=index,
+        )
+        if projected_lead:
+            projected_lead = dict(projected_lead)
+            projected_lead["leadId"] = lead_label
+            staged_leads.append(projected_lead)
+        else:
+            staged_leads.append(lead)
+
+    # A missing incoming batch still needs the post-write full receipt check,
+    # but there is no new source identity to validate before materialization.
+    # Keeping this read-free preserves the distinction between batch legality
+    # and global finding completeness.
+    if not staged_leads:
+        return {
+            "passed": True,
+            "binding": {
+                "passed": True,
+                "unboundCandidateIds": [],
+                "candidateCount": 0,
+            },
+            "incomingCandidateIds": [],
+            "incomingCandidateCount": 0,
+        }
+
+    binding = registry.inspect_source_finding_candidate_receipts(
+        team_id=team_id,
+        authority_run_id=run_id,
+        candidate_sources=staged_leads,
+    )
+    # ``staged_leads`` is built exclusively from this request's incoming
+    # finding batch.  Filtering the registry result through optional Agent
+    # aliases would let an empty/unknown source id escape rejection, so every
+    # unbound staged lead is a batch error.
+    incoming_unbound = [
+        item for item in list(binding.get("unboundCandidateIds") or [])
+    ]
+    # A new unbound locator is an illegal batch and is rejected before
+    # materialization. Existing candidates are checked only by the post-write
+    # global receipt readback, so a legal increment can still be persisted as
+    # needs_review while the rest of the finding is repaired.
+    if incoming_unbound:
+        raise s.TeamWorkflowOrchestrationError(
+            "source_search_receipt_missing: incoming candidate lead(s) are not bound "
+            f"to real search receipts: {incoming_unbound[:12]}. "
+            "Reuse the actual DOI/URL returned by the assigned search and do not "
+            "match by title. Read source_collection_context_tool and use "
+            "parent_query_id for a scoped search before retrying."
+        )
+    return {
+        "passed": bool(binding.get("passed")),
+        "binding": binding,
+        "incomingCandidateIds": sorted(incoming_labels),
+        "incomingCandidateCount": len(staged_leads),
+    }
+
+
+def _source_collection_stage_finding_receipt_postcheck(
+    team_id: str,
+    run_id: str,
+    task: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Read the complete finding receipt after staged sources are persisted."""
+
+    s = _service()
+    if (
+        s._normalize_source_collection_stage_id(task.get("stageId"), default="") != "finding"
+        and s._normalize_source_collection_agent_role(task.get("agentRole")) != "source_finder"
+    ) or not s._trim_text(task.get("workflowRunId"), max_length=160):
+        return None
+    from ..research_runtime import artifact_readback_registry as registry
+
+    try:
+        payload = registry.load_source_finding_receipt_payload(
+            team_id=team_id,
+            authority_run_id=run_id,
+            workflow_run_id=s._trim_text(task.get("workflowRunId"), max_length=160),
+            raise_on_invalid=True,
+        )
+    except ValueError as exc:
+        return {
+            "passed": False,
+            "error": s._trim_text(str(exc), max_length=1200),
+            "quality": {},
+        }
+    return {
+        "passed": isinstance(payload, dict),
+        "error": "" if isinstance(payload, dict) else "source finding receipt is missing",
+        "quality": payload.get("quality") if isinstance(payload, dict) and isinstance(payload.get("quality"), dict) else {},
+    }
+
+
 def writeback_source_collection_stage_session_task(
     team_id: str,
     task_id: str,
@@ -404,6 +559,12 @@ def writeback_source_collection_stage_session_task(
         result_payload,
         team_id=normalized_team_id,
         run_id=run_id,
+    )
+    finding_receipt_preflight = _source_collection_stage_finding_receipt_preflight(
+        normalized_team_id,
+        run_id,
+        task,
+        incoming_result_payload,
     )
     if status == "completed":
         # Fail-closed quote-anchor contract: a completed extraction writeback
@@ -538,6 +699,24 @@ def writeback_source_collection_stage_session_task(
         task,
         writeback,
     )
+    finding_receipt_gate = (
+        _source_collection_stage_finding_receipt_postcheck(
+            normalized_team_id,
+            run_id,
+            task,
+        )
+        if finding_receipt_preflight is not None
+        else None
+    )
+    if finding_receipt_gate is not None:
+        writeback["receiptGate"] = finding_receipt_gate
+        if not finding_receipt_gate.get("passed") and status == "completed":
+            # A legal batch may already have been materialized while the
+            # global finding envelope is still incomplete.  Persist that
+            # increment and expose the real review state instead of raising
+            # after the side effects have happened.
+            status = "needs_review"
+            writeback["status"] = status
     if status == "completed" and s._source_collection_count(materialized_content_extraction.get("missingEvidenceAnchorCount")):
         status = "needs_review"
         writeback["status"] = status
@@ -569,6 +748,29 @@ def writeback_source_collection_stage_session_task(
             materialized_candidate_graph=materialized_candidate_graph,
             materialized_knowledge_ingestion=materialized_knowledge_ingestion,
         )
+    if finding_receipt_gate is not None and not finding_receipt_gate.get("passed"):
+        # The generic artifact summary only knows about record counts and the
+        # task checklist.  Finding completion also requires canonical search
+        # receipts, so make the derived projection agree with the status.
+        closure_summary["sourceFindingReceiptGate"] = finding_receipt_gate
+        # Formal finding tasks carry workflowRunId and are later reconciled
+        # from this summary.  Persisting artifactComplete=False here keeps a
+        # subsequent read from rebuilding completionGate.passed=True from the
+        # generic record-count gate.  Legacy stage tasks without a formal
+        # binding keep their historical artifact summary semantics.
+        if s._trim_text(task.get("workflowRunId"), max_length=160):
+            closure_summary["artifactComplete"] = False
+        closure_summary["userStatus"] = "partial"
+        closure_summary["advanceOutcome"] = "partial"
+        closure_summary["completionGatePassed"] = False
+        closure_summary["message"] = (
+            "原始资料已写回，但当前运行的真实检索回执尚未覆盖全部候选；"
+            "请补齐回执或修订来源后再推进。"
+        )
+        closure_summary["retryInstruction"] = (
+            "请先读取当前 source_collection_context_tool，只补回执缺口中的真实 DOI/URL；"
+            "不要按标题猜测论文或重复检索已绑定来源。"
+        )
     task_checklist = [
         item for item in list(task.get("taskChecklist") or [])
         if isinstance(item, dict)
@@ -579,6 +781,12 @@ def writeback_source_collection_stage_session_task(
         artifact_complete=bool(closure_summary.get("artifactComplete")),
         task_checklist_complete=bool(closure_summary.get("taskChecklistComplete")),
     )
+    if finding_receipt_gate is not None:
+        completion_gate["sourceFindingReceiptComplete"] = bool(
+            finding_receipt_gate.get("passed")
+        )
+        if not finding_receipt_gate.get("passed"):
+            completion_gate["passed"] = False
     closure_summary["completionGate"] = completion_gate
     closure_summary["completionGatePassed"] = bool(completion_gate.get("passed"))
     if status == "completed" and not bool(closure_summary.get("completionGatePassed")):
@@ -608,23 +816,6 @@ def writeback_source_collection_stage_session_task(
     writeback["materializedCandidateGraph"] = materialized_candidate_graph
     writeback["materializedKnowledgeIngestion"] = materialized_knowledge_ingestion
     writeback["closureSummary"] = closure_summary
-    if status == "completed" and task.get("stageId") == "finding" and task.get("workflowRunId"):
-        from ..research_runtime.artifact_readback_registry import load_source_finding_receipt_payload
-
-        try:
-            load_source_finding_receipt_payload(
-                team_id=normalized_team_id,
-                authority_run_id=run_id,
-                raise_on_invalid=True,
-            )
-        except ValueError as exc:
-            raise s.TeamWorkflowOrchestrationError(
-                f"source_search_receipt_missing: {exc}. "
-                "Read source_collection_context_tool, then search the missing candidates' actual titles/URLs "
-                "using batch_web_search_tool or paper_search_tool with parent_query_id from assignedQueries. "
-                "Reuse existing candidates; do not rewrite them or invent searchTrace. "
-                "Only write completed after real search receipts cover every candidate."
-            ) from exc
     if (
         status in {"completed", "needs_review"}
         and task.get("stageId") == "relations"

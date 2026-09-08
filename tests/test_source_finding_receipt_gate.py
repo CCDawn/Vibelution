@@ -80,9 +80,8 @@ def test_receipt_readback_can_report_exact_gap_to_active_agent(monkeypatch):
     assert registry.load_source_finding_receipt_payload(team_id="team", authority_run_id="source", raise_on_invalid=True)["quality"]["candidateCount"] == 4
 
 
-@pytest.mark.parametrize("requested_status", ["completed", "running"])
-def test_finding_writeback_rejects_unreceipted_completion_before_task_closes(monkeypatch, requested_status):
-    from core.web.services.team_workflow.research_runtime import artifact_readback_registry as registry
+@pytest.mark.parametrize("requested_status", ["completed", "running", "needs_review"])
+def test_finding_writeback_rejects_unreceipted_batch_before_materialization(monkeypatch, requested_status):
     from core.web.services.team_workflow.source_collection import stage_writeback, writeback_materialize
 
     s = stage_writeback._service()
@@ -90,9 +89,18 @@ def test_finding_writeback_rejects_unreceipted_completion_before_task_closes(mon
             "workflowRunId": "workflow", "status": "running"}
     monkeypatch.setattr(s.team_service, "get_team", lambda *_: {})
     monkeypatch.setattr(s, "_find_source_collection_stage_session_task_by_id", lambda *_: (task, "source"))
-    monkeypatch.setattr(s, "_merge_source_collection_stage_writeback_result_payload", lambda *_: {})
+    monkeypatch.setattr(
+        s,
+        "_merge_source_collection_stage_writeback_result_payload",
+        lambda *args: args[-1],
+    )
     monkeypatch.setattr(s, "_source_collection_stage_writeback_candidate_coverage", lambda *_: {})
-    monkeypatch.setattr(s, "_materialize_source_collection_stage_writeback_sources", lambda *_a, **_kw: {})
+    materialize_calls = []
+    monkeypatch.setattr(
+        s,
+        "_materialize_source_collection_stage_writeback_sources",
+        lambda *_a, **_kw: materialize_calls.append(True) or {},
+    )
     for name in ["_materialize_source_collection_stage_writeback_content_extraction",
                  "_materialize_source_collection_stage_writeback_quality",
                  "_materialize_source_collection_stage_writeback_candidate_graph",
@@ -104,12 +112,25 @@ def test_finding_writeback_rejects_unreceipted_completion_before_task_closes(mon
     monkeypatch.setattr(s, "_source_collection_stage_completion_gate", lambda **_: {"passed": True})
     monkeypatch.setattr(writeback_materialize, "source_collection_finding_writeback_close_status", lambda *_: "completed")
     payload = _receipt_payload()
-    payload["candidateSources"][0]["sourceUrl"] = "https://missing.test/source"
-    monkeypatch.setattr(registry, "load_scoped_artifact_payload", lambda *_a, **_kw: {"candidates": payload["candidateSources"]})
     monkeypatch.setattr(search_execution, "project_source_collection_search_trace", lambda *_: payload["searchTrace"])
+    incoming = {
+        "candidateLeads": [
+            {
+                "leadId": "candidate-1",
+                "title": "Unreceipted source",
+                "sourceUrl": "https://missing.test/source",
+                "perspective": "mechanism",
+            }
+        ]
+    }
     with pytest.raises(s.TeamWorkflowOrchestrationError, match="source_search_receipt_missing.*candidate-1") as error:
-        stage_writeback.writeback_source_collection_stage_session_task("team", "task", {"status": requested_status})
+        stage_writeback.writeback_source_collection_stage_session_task(
+            "team",
+            "task",
+            {"status": requested_status, "result": incoming},
+        )
     assert "parent_query_id" in str(error.value)
+    assert materialize_calls == []
     assert task["status"] == "running"
 
 
@@ -140,6 +161,48 @@ def test_source_finding_quality_gate_binds_publisher_presentation_url_to_doi() -
     )
 
 
+def test_source_finding_quality_gate_requires_url_and_doi_in_one_receipt_event() -> None:
+    payload = _receipt_payload()
+    candidate = payload["candidateSources"][0]
+    candidate["sourceUrl"] = "https://publisher.test/article/4580"
+    candidate["metadata"] = {"sourceIdentityKey": "doi:10.1038/4580"}
+    payload["searchTrace"][0]["resultRefs"] = [candidate["sourceUrl"]]
+    payload["searchTrace"].append(
+        {
+            "query": "query with split DOI receipt",
+            "perspective": "mechanism",
+            "status": "found",
+            "resultRefs": ["identity:doi:10.1038/4580"],
+            "eventIds": ["evt-split-doi"],
+        }
+    )
+
+    with pytest.raises(ValueError, match="unboundCandidates=.*candidate-1"):
+        search_execution.validate_source_finding_receipt_payload(
+            payload,
+            require_candidate_receipt_binding=True,
+        )
+
+
+def test_source_finding_quality_gate_accepts_url_and_doi_from_one_receipt_event() -> None:
+    payload = _receipt_payload()
+    candidate = payload["candidateSources"][0]
+    candidate["sourceUrl"] = "https://publisher.test/article/4580"
+    candidate["metadata"] = {"sourceIdentityKey": "doi:10.1038/4580"}
+    payload["searchTrace"][0]["resultRefs"] = [
+        candidate["sourceUrl"],
+        "identity:doi:10.1038/4580",
+    ]
+    payload["searchTrace"][0]["receiptRefSets"] = [
+        [candidate["sourceUrl"], "identity:doi:10.1038/4580"],
+    ]
+
+    search_execution.validate_source_finding_receipt_payload(
+        payload,
+        require_candidate_receipt_binding=True,
+    )
+
+
 def test_source_finding_quality_gate_binds_arxiv_url_across_http_schemes() -> None:
     payload = _receipt_payload()
     candidate = payload["candidateSources"][0]
@@ -156,6 +219,78 @@ def test_source_finding_quality_gate_binds_arxiv_url_across_http_schemes() -> No
         payload,
         require_candidate_receipt_binding=True,
     )
+
+
+def test_source_finding_quality_gate_rejects_conflicting_doi_hidden_by_matching_url() -> None:
+    payload = _receipt_payload()
+    candidate = payload["candidateSources"][0]
+    candidate["sourceRef"] = "https://doi.org/10.9999/wrong-doi"
+    candidate["sourceUrl"] = "https://publisher.test/articles/10.1038/4580"
+    payload["searchTrace"][0]["resultRefs"] = [candidate["sourceUrl"]]
+    payload["searchTrace"].append(
+        {
+            "query": "query with wrong DOI",
+            "perspective": "mechanism",
+            "status": "found",
+            "resultRefs": [candidate["sourceRef"]],
+            "eventIds": ["evt-wrong-doi"],
+        }
+    )
+
+    with pytest.raises(ValueError, match="unboundCandidates=.*candidate-1"):
+        search_execution.validate_source_finding_receipt_payload(
+            payload,
+            require_candidate_receipt_binding=True,
+        )
+
+
+def test_source_finding_quality_gate_rejects_agent_identity_key_conflict() -> None:
+    payload = _receipt_payload()
+    candidate = payload["candidateSources"][0]
+    candidate["sourceUrl"] = "https://doi.org/10.1038/4580"
+    candidate["metadata"] = {"sourceIdentityKey": "doi:10.9999/wrong-doi"}
+    payload["searchTrace"][0]["resultRefs"] = [candidate["sourceUrl"]]
+
+    with pytest.raises(ValueError, match="unboundCandidates=.*candidate-1"):
+        search_execution.validate_source_finding_receipt_payload(
+            payload,
+            require_candidate_receipt_binding=True,
+        )
+
+
+def test_candidate_receipt_registry_rejects_conflicting_doi_before_writeback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.web.services.team_workflow.research_runtime import artifact_readback_registry as registry
+
+    payload = _receipt_payload()
+    candidate = dict(payload["candidateSources"][0])
+    candidate["sourceRef"] = "https://doi.org/10.9999/wrong-doi"
+    candidate["sourceUrl"] = "https://publisher.test/articles/10.1038/4580"
+    payload["searchTrace"][0]["resultRefs"] = [candidate["sourceUrl"]]
+    payload["searchTrace"].append(
+        {
+            "query": "query with wrong DOI",
+            "perspective": "mechanism",
+            "status": "found",
+            "resultRefs": [candidate["sourceRef"]],
+            "eventIds": ["evt-wrong-doi"],
+        }
+    )
+    monkeypatch.setattr(
+        search_execution,
+        "project_source_collection_search_trace",
+        lambda *_: payload["searchTrace"],
+    )
+
+    binding = registry.inspect_source_finding_candidate_receipts(
+        team_id="team",
+        authority_run_id="source",
+        candidate_sources=[candidate],
+    )
+
+    assert binding["passed"] is False
+    assert binding["unboundCandidateIds"] == ["candidate-1"]
 
 
 def test_formal_search_context_uses_message_only_as_canonical_task_locator(
@@ -327,6 +462,176 @@ def test_bound_tool_receipt_is_persisted_idempotently_before_return(
     assert written[0]["perspective"] == "mechanism"
     assert written[0]["toolCallId"] == "call-1"
     assert "identity:url:bound-result" in written[0]["refs"]
+
+
+def test_bound_tool_receipt_preserves_each_provider_result_binding_group(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = search_execution._service()
+    events_path = tmp_path / "search_events.jsonl"
+    monkeypatch.setattr(
+        service,
+        "_source_collection_storage_artifact_paths",
+        lambda _team, _run: {
+            "runDirectory": tmp_path,
+            "artifactsDirectory": tmp_path,
+            "searchEventsPath": events_path,
+        },
+    )
+    context = {
+        "teamId": "team-1",
+        "sourceCollectionRunId": "source-1",
+        "taskId": "task-1",
+        "sessionId": "session-1",
+        "turnId": "turn-1",
+    }
+    binding = {
+        "assignment": {"assignmentId": "assignment-1", "agentId": "agent-1", "agentRole": "source_finder"},
+        "query": {"queryId": "query-1", "query": "two papers", "perspective": "mechanism"},
+    }
+    provider_payload = {
+        "providers": [{"provider": "ddgs", "status": "ok", "resultCount": 2}],
+        "results": [
+            {
+                "provider": "ddgs",
+                "title": "Paper A",
+                "url": "https://publisher.test/articles/10.1038/paper-a",
+                "doi": "10.1038/paper-a",
+            },
+            {
+                "provider": "ddgs",
+                "title": "Paper B",
+                "url": "https://doi.org/10.1038/paper-b",
+                "doi": "10.1038/paper-b",
+            },
+        ],
+    }
+
+    search_execution.append_bound_tool_search_receipts(
+        context,
+        binding=binding,
+        provider_payload=provider_payload,
+        tool_call_id="call-1",
+    )
+
+    events = service._read_jsonl(events_path)
+    assert len(events) == 1
+    event = events[0]
+    receipt_ref_sets = event["receiptRefSets"]
+    assert len(receipt_ref_sets) == 2
+    assert {
+        "https://publisher.test/articles/10.1038/paper-a",
+        "10.1038/paper-a",
+        "identity:doi:10.1038/paper-a",
+    }.issubset(receipt_ref_sets[0])
+    assert {
+        "https://doi.org/10.1038/paper-b",
+        "10.1038/paper-b",
+        "identity:doi:10.1038/paper-b",
+    }.issubset(receipt_ref_sets[1])
+
+    trace = search_execution.project_source_collection_search_trace("team-1", "source-1")
+    assert len(trace) == 1
+    assert trace[0]["resultRefs"] == event["refs"]
+    assert trace[0]["receiptRefSets"] == receipt_ref_sets
+
+
+def test_source_finding_quality_gate_rejects_mixed_locators_from_real_projection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = search_execution._service()
+    events_path = tmp_path / "search_events.jsonl"
+    monkeypatch.setattr(
+        service,
+        "_source_collection_storage_artifact_paths",
+        lambda _team, _run: {
+            "runDirectory": tmp_path,
+            "artifactsDirectory": tmp_path,
+            "searchEventsPath": events_path,
+        },
+    )
+    context = {
+        "teamId": "team-1",
+        "sourceCollectionRunId": "source-1",
+        "taskId": "task-1",
+        "sessionId": "session-1",
+        "turnId": "turn-1",
+    }
+    assignment = {"assignmentId": "assignment-1", "agentId": "agent-1", "agentRole": "source_finder"}
+    urls = {
+        "mechanism": "https://publisher.test/paper-a",
+        "independent_baseline": "https://example.test/baseline",
+        "limitation_or_null": "https://example.test/limitation",
+        "falsification": "https://example.test/falsification",
+    }
+    for index, perspective in enumerate(PERSPECTIVES, start=1):
+        binding = {
+            "assignment": assignment,
+            "query": {
+                "queryId": f"query-{index}",
+                "query": f"query {perspective}",
+                "perspective": perspective,
+            },
+        }
+        results = [
+            {
+                "provider": "ddgs",
+                "title": perspective,
+                "url": urls[perspective],
+            }
+        ]
+        if perspective == "mechanism":
+            results.append(
+                {
+                    "provider": "ddgs",
+                    "title": "Paper B",
+                    "url": "https://doi.org/10.1038/paper-b",
+                    "doi": "10.1038/paper-b",
+                }
+            )
+        search_execution.append_bound_tool_search_receipts(
+            context,
+            binding=binding,
+            provider_payload={
+                "providers": [{"provider": "ddgs", "status": "ok", "resultCount": len(results)}],
+                "results": results,
+            },
+            tool_call_id=f"call-{index}",
+        )
+
+    trace = search_execution.project_source_collection_search_trace("team-1", "source-1")
+    mechanism_trace = next(item for item in trace if item["perspective"] == "mechanism")
+    assert {
+        urls["mechanism"],
+        "https://doi.org/10.1038/paper-b",
+    }.issubset(mechanism_trace["resultRefs"])
+    assert len(mechanism_trace["receiptRefSets"]) == 2
+
+    candidates = []
+    for index, perspective in enumerate(PERSPECTIVES, start=1):
+        candidate = {
+            "candidateId": f"candidate-{index}",
+            "sourceUrl": urls[perspective],
+            "perspective": perspective,
+        }
+        if perspective == "mechanism":
+            candidate["metadata"] = {"sourceIdentityKey": "doi:10.1038/paper-b"}
+        candidates.append(candidate)
+    payload = {
+        "perspectives": list(PERSPECTIVES),
+        "queries": [item["query"] for item in trace],
+        "candidateSources": candidates,
+        "counterEvidenceCandidateSources": candidates[2:],
+        "searchTrace": trace,
+    }
+
+    with pytest.raises(ValueError, match="unboundCandidates=.*candidate-1"):
+        search_execution.validate_source_finding_receipt_payload(
+            payload,
+            require_candidate_receipt_binding=True,
+        )
 
 
 def test_formal_batch_search_persists_structured_provider_receipt(
