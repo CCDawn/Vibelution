@@ -303,7 +303,7 @@ def test_source_collection_stage_session_task_writeback_records_structured_resul
     assert result["task"]["result"]["recordCount"] == 3
     assert result["task"]["result"]["closureSummary"]["artifactComplete"] is False
     assert result["task"]["result"]["closureSummary"]["completionGatePassed"] is False
-    assert "没有生成可用" in result["task"]["result"]["closureSummary"]["message"]
+    assert result["task"]["result"]["closureSummary"]["sourceFindingReceiptGate"]["passed"] is False
     assert result["task"]["writesFormalKnowledge"] is False
     assert result["task"]["writesRag"] is False
     assert result["writeback"]["status"] == "needs_review"

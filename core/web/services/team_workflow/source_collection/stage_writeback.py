@@ -546,7 +546,7 @@ def _apply_finding_receipt_gate_to_closure(
         "userStatus": "partial",
         "advanceOutcome": "partial",
         "completionGatePassed": False,
-        "message": "原始资料已写回，但当前运行的来源回执或视角覆盖尚不完整；请按具体缺口补证后推进。",
+        "message": "资料搜集尚未满足真实回执与视角覆盖要求；请先查看具体缺口再推进。",
         "retryInstruction": "请读取当前 source_collection_context_tool，只补真实回执与视角缺口；不要按标题猜测论文或重复检索已绑定来源。",
     })
 

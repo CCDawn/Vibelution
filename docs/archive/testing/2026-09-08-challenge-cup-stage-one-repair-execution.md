@@ -74,3 +74,4 @@
 - 主 Agent独立前端相关回归 151 项通过，选择面板/来源展开与 VUI route/design 另 34 项通过。测试中部分既有 telemetry 请求 localhost:3000 被拒绝，但无测试失败；这些不是浏览器真实验收证据。现有 chain 保留 4 秒有界轮询、250 ms SSE invalidation、team/question/run 缓存身份与 reconnect/focus 刷新，无依据新增第二套轮询。
 - 检索上下文 Agent 接到新的独立只读验收：核对当前 12 节点主流程是否确实在第一阶段终止。`projection_builder` 当前按整份 pinned definition 计数；必须先查清真实执行与终止合同，不能只改 UI 分母掩盖阶段边界缺口。本项尚待结论。
 - 集成树用正常 `npm ci` 安装测试依赖，没有新建 junction。前端子树已有 node_modules junction 属任务残留，最终清理只处理其链接。
+- 完整 selector 首轮：facade/structure pack/team/knowledge 组通过；下一组在两条旧 fixture 失败。一个仅断言旧展示文案，现改为真实 receipt gate 不通过的结构断言；另一个只测试后续 turn 的 checklist 完成，却未提供任何检索回执，现用既有局部 fixture 固定回执合法性、继续测其原时间边界。两项独立通过；没有增加生产绕过。零实际来源时的提示同步改为“资料搜集尚未满足真实回执与视角覆盖要求”，避免声称已经写入资料。TypeScript build 已通过。

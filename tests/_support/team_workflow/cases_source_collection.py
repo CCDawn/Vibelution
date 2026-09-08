@@ -5491,6 +5491,12 @@ def test_source_collection_stage_task_after_turn_rejects_unrelated_new_turn(tmp_
     assert stored_task["turn"]["turnId"] == "turn-stage-task-original"
 
 def test_source_collection_stage_task_progress_counts_later_turn_tool_updates(tmp_path, monkeypatch):
+    from core.web.services.team_workflow.research_runtime import artifact_readback_registry
+
+    # This case isolates later-turn checklist progress. Source authenticity
+    # and missing receipt gates are exercised by the real receipt cases.
+    _stub_source_finding_receipt_binding(monkeypatch)
+    monkeypatch.setattr(artifact_readback_registry, "load_source_finding_receipt_payload", lambda **_: {"quality": {}})
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
     _stub_source_collection_search_background(monkeypatch)
