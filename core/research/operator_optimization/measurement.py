@@ -7,12 +7,21 @@ from pydantic import Field, model_validator
 
 from .contracts import (
     MEASUREMENT_PROTOCOL_ARTIFACT_KIND,
-    ArtifactRef,
     Contract,
     Digest,
     Identity,
     MeasurementProtocolRef,
 )
+
+__all__ = [
+    "MEASUREMENT_PROTOCOL_ARTIFACT_KIND",
+    "CaseMeasurement",
+    "MeasurementProtocol",
+    "MeasurementProtocolRef",
+    "OperatorMeasurement",
+    "PairedTiming",
+    "WorkloadCase",
+]
 
 
 class WorkloadCase(Contract):

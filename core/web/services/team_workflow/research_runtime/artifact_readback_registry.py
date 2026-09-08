@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
+from core.research.workflow.operator_optimization_definition import OPERATOR_ARTIFACT_KINDS
 
 from core.web.services.team_workflow.research_runtime.domain_ports import (
     ArtifactReadBack,
@@ -36,6 +37,7 @@ class ArtifactAuthoritySpec:
 
 
 ARTIFACT_AUTHORITY: dict[str, ArtifactAuthoritySpec] = {
+    **{kind: ArtifactAuthoritySpec(kind, "workflow_system") for kind in OPERATOR_ARTIFACT_KINDS},
     "problem_understanding": ArtifactAuthoritySpec(
         "problem_understanding", "workflow_system"
     ),
@@ -553,7 +555,7 @@ def load_scoped_artifact_payload(
         )
 
     # Experiment / result-package / smoke kinds: formal workflow_artifact_store.
-    if normalized_kind in {
+    if normalized_kind in OPERATOR_ARTIFACT_KINDS or normalized_kind in {
         "run_artifacts",
         "research_result_package",
         "smoke_evidence",

@@ -5,7 +5,7 @@ from typing import Literal
 
 from pydantic import Field, model_validator
 
-from .candidate import CudaCandidateRef, Contract, Digest, Identity, Text
+from .candidate import Contract, CudaCandidateRef, Digest, Identity, Text
 
 
 class ArtifactRef(Contract):
