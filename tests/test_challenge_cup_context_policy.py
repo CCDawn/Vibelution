@@ -736,6 +736,63 @@ def test_effective_policy_carries_explicit_trigger_and_target():
     assert int(effective["effectiveTokenLimit"]) == HARD_LIMIT
 
 
+def test_effective_policy_window_clamp_rederives_versioned_trigger_and_target():
+    """A v3 policy replayed on a smaller runtime window stays deadlock-free.
+
+    Regression: the frozen 262,144-window trigger (204,800) passed through
+    verbatim onto a 131,072 runtime window, so compression could never fire
+    before the fail-closed ``context_budget_exhausted`` preflight gate.
+    """
+    agent_policy = ccp.challenge_cup_role_context_policy("challenge_cup_extractor")
+    assert agent_policy is not None
+    effective = agent_directory_service.effective_agent_context_compression_policy(
+        {"contextCompressionPolicy": agent_policy},
+        None,
+        context_window_limit=131_072,
+    )
+    assert int(effective["effectiveTokenLimit"]) == 131_072
+    assert int(effective["compressionTriggerTokenLimit"]) == 114_688
+    assert int(effective["postCompressionTargetTokenLimit"]) == 87_381
+    assert int(effective["compressionTriggerTokenLimit"]) < int(effective["effectiveTokenLimit"])
+
+
+def test_effective_policy_window_clamp_keeps_operator_lower_values():
+    """Clamping only lowers: deliberate smaller v3 values pass through."""
+    agent_policy = ccp.challenge_cup_role_context_policy("challenge_cup_extractor")
+    assert agent_policy is not None
+    agent_policy["compressionTriggerTokenLimit"] = 50_000
+    agent_policy["postCompressionTargetTokenLimit"] = 30_000
+    effective = agent_directory_service.effective_agent_context_compression_policy(
+        {"contextCompressionPolicy": agent_policy},
+        None,
+        context_window_limit=131_072,
+    )
+    assert int(effective["effectiveTokenLimit"]) == 131_072
+    assert int(effective["compressionTriggerTokenLimit"]) == 50_000
+    assert int(effective["postCompressionTargetTokenLimit"]) == 30_000
+
+
+def test_effective_policy_unversioned_trigger_never_exceeds_effective_limit():
+    effective = agent_directory_service.effective_agent_context_compression_policy(
+        {
+            "contextCompressionPolicy": {
+                "mode": "custom",
+                "enabled": True,
+                "maxTokenLimit": 200_000,
+                "compressionTriggerTokenLimit": 190_000,
+                "postCompressionTargetTokenLimit": 195_000,
+            }
+        },
+        None,
+        context_window_limit=100_000,
+    )
+    assert int(effective["effectiveTokenLimit"]) == 100_000
+    assert int(effective["compressionTriggerTokenLimit"]) <= 100_000
+    assert int(effective["postCompressionTargetTokenLimit"]) < int(
+        effective["compressionTriggerTokenLimit"]
+    )
+
+
 # ---------------------------------------------------------------------------
 # 6) Bootstrap hook: fail-soft, version-gated one-time migration
 # ---------------------------------------------------------------------------

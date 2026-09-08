@@ -1090,6 +1090,13 @@ def effective_agent_context_compression_policy(
     *,
     context_window_limit: int = 0,
 ) -> dict[str, Any]:
+    """Merge an Agent-owned compression policy with the runtime window limit.
+
+    Window clamp semantics: ``effectiveTokenLimit`` is capped by the runtime
+    ``context_window_limit``, and the trigger/target contract is re-derived so
+    both always stay strictly below that window-derived hard limit (clamping
+    only lowers values, never raises a deliberately smaller operator value).
+    """
     s = _service()
     raw_agent_policy = s.normalize_agent_context_compression_policy(
         (agent or {}).get("contextCompressionPolicy") if isinstance(agent, dict) else None
@@ -1163,6 +1170,41 @@ def effective_agent_context_compression_policy(
         default=0,
         maximum=2_000_000,
     )
+    # Window invariant: the trigger must stay below the window-derived hard
+    # limit. When an explicit trigger (e.g. the 262,144-window Challenge Cup
+    # v3 values) is replayed on a smaller runtime window (qwen3.7-plus,
+    # 131,072), trigger > effectiveTokenLimit means automatic compression can
+    # never fire before the fail-closed context_budget_exhausted preflight
+    # gate rejects the call — the continuation ladder then replays the same
+    # oversized context until it exhausts. Clamp only downward so deliberate
+    # operator values under the cap stay untouched.
+    effective_limit = int(merged.get("effectiveTokenLimit") or 0)
+    if effective_limit > 0:
+        from core.web.services.team.challenge_cup_context_policy import (
+            CHALLENGE_CUP_CONTEXT_POLICY_VERSION,
+            POST_COMPRESSION_TARGET_RATIO,
+            TRIGGER_SAFETY_MARGIN_TOKENS,
+        )
+
+        clamped_trigger = int(merged.get("compressionTriggerTokenLimit") or 0)
+        clamped_target = int(merged.get("postCompressionTargetTokenLimit") or 0)
+        if int(merged.get("policyVersion") or 0) >= CHALLENGE_CUP_CONTEXT_POLICY_VERSION:
+            trigger_cap = effective_limit - TRIGGER_SAFETY_MARGIN_TOKENS
+            if trigger_cap <= 0:
+                # Degenerate tiny window: keep the trigger at/under the hard
+                # limit itself instead of pushing it to/below zero.
+                trigger_cap = effective_limit
+            clamped_trigger = min(clamped_trigger, trigger_cap)
+            if clamped_target > 0:
+                clamped_target = min(clamped_target, int(effective_limit * POST_COMPRESSION_TARGET_RATIO))
+        else:
+            # Unversioned custom policies: deadlock invariant only — trigger
+            # never above the hard limit, target never at/above the trigger.
+            clamped_trigger = min(clamped_trigger, effective_limit)
+            if clamped_trigger > 1 and clamped_target > 0:
+                clamped_target = min(clamped_target, clamped_trigger - 1)
+        merged["compressionTriggerTokenLimit"] = clamped_trigger
+        merged["postCompressionTargetTokenLimit"] = clamped_target
     merged["contextWindowLimit"] = context_window or int(merged.get("effectiveTokenLimit") or 0)
     merged["modelContextWindowLimit"] = int(merged.get("contextWindowLimit") or 0)
     return merged
