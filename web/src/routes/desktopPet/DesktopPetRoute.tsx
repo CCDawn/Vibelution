@@ -2,7 +2,7 @@ import "../../design/route-css/desktop-pet.tailwind.css";
 
 import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, ChevronUp, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 
 import { fetchPetActivity } from "../../api/pet";
 import { queryKeys } from "../../api/queryKeys";
@@ -17,6 +17,11 @@ import {
   petPhaseLabel,
   petToneLabel,
 } from "./desktopPetModel";
+import {
+  beginDesktopPetDrag,
+  updateDesktopPetDrag,
+  type DesktopPetDragState,
+} from "./desktopPetWindowDrag";
 
 const CHARACTER_IMAGE = "/desktop-pet/luo-tianyi-chibi-v1.png";
 
@@ -55,6 +60,9 @@ export function DesktopPetRoute() {
   const { lang } = useShellI18n();
   const copy = COPY[lang];
   const [expanded, setExpanded] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const dragStateRef = useRef<DesktopPetDragState | null>(null);
+  const suppressClickRef = useRef(false);
   const activityQuery = useQuery({
     queryKey: queryKeys.petActivity(),
     queryFn: fetchPetActivity,
@@ -78,6 +86,66 @@ export function DesktopPetRoute() {
     }
   }
 
+  function beginCharacterDrag(event: ReactPointerEvent<HTMLButtonElement>) {
+    if (event.button !== 0) {
+      return;
+    }
+    suppressClickRef.current = false;
+    dragStateRef.current = beginDesktopPetDrag(event.pointerId, {
+      screenX: event.screenX,
+      screenY: event.screenY,
+    });
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function moveCharacterDrag(event: ReactPointerEvent<HTMLButtonElement>) {
+    const current = dragStateRef.current;
+    if (current === null) {
+      return;
+    }
+    const update = updateDesktopPetDrag(current, event.pointerId, {
+      screenX: event.screenX,
+      screenY: event.screenY,
+    });
+    if (update === null) {
+      return;
+    }
+    dragStateRef.current = update.state;
+    if (update.state.moved) {
+      suppressClickRef.current = true;
+      setDragging(true);
+    }
+    if (update.delta !== null) {
+      event.preventDefault();
+      window.moveBy(update.delta.screenX, update.delta.screenY);
+    }
+  }
+
+  function endCharacterDrag(event: ReactPointerEvent<HTMLButtonElement>) {
+    const current = dragStateRef.current;
+    if (current === null || current.pointerId !== event.pointerId) {
+      return;
+    }
+    dragStateRef.current = null;
+    setDragging(false);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }
+
+  function cancelCharacterDrag(event: ReactPointerEvent<HTMLButtonElement>) {
+    endCharacterDrag(event);
+    suppressClickRef.current = false;
+  }
+
+  function toggleExpanded() {
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false;
+      return;
+    }
+    setExpanded((value) => !value);
+  }
+
   const visibleSessions = activity.sessions.slice(0, 5);
   const statusText = activityQuery.isError
     ? copy.unavailable
@@ -89,6 +157,7 @@ export function DesktopPetRoute() {
       data-desktop-pet-root="true"
       data-vui-domain-recipe="desktop-pet"
       data-tone={activity.aggregateTone}
+      data-dragging={dragging ? "true" : "false"}
       aria-label={copy.name}
     >
       <div className={styles.dragStrip} aria-hidden="true" />
@@ -141,7 +210,11 @@ export function DesktopPetRoute() {
         className={styles.characterButton}
         aria-expanded={expanded}
         aria-label={expanded ? copy.collapse : copy.open}
-        onClick={() => setExpanded((value) => !value)}
+        onClick={toggleExpanded}
+        onPointerDown={beginCharacterDrag}
+        onPointerMove={moveCharacterDrag}
+        onPointerUp={endCharacterDrag}
+        onPointerCancel={cancelCharacterDrag}
       >
         <DesktopPetCharacter
           imageSrc={CHARACTER_IMAGE}
