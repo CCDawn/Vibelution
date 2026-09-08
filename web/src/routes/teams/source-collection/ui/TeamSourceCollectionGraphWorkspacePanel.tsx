@@ -32,6 +32,7 @@ import { workflowGraphLayout } from "../../../TeamWorkflowGraphLayout";
 import { TeamWorkflowGraphView } from "../../../TeamWorkflowGraphView";
 import { workflowStateLabel } from "../../workflowPresentation";
 import { TeamSourceCollectionGraphPanel } from "./TeamSourceCollectionGraphPanel";
+import panelStyles from "./TeamSourceCollectionGraphWorkspacePanel.styles";
 import shellStyles from "../../../TeamsRoute.styles";
 import workflowStyles from "../../../TeamsRoute.workflow.styles";
 
@@ -40,12 +41,6 @@ const styles = { ...shellStyles, ...workflowStyles } as Record<string, string>;
 type Lang = "zh" | "en";
 
 const WAIVER_JUSTIFICATION_MIN_CHARS = 8;
-
-const missingLinkRowClass = "min-w-0 grid gap-1.5 rounded-[var(--radius-control)] border border-[color:var(--border-soft)] p-1.5 [font-size:var(--vui-font-xs)] leading-[var(--vui-line-tight)] text-[var(--fg-secondary)]";
-const missingLinkMetaClass = "min-w-0 flex flex-wrap items-center gap-x-2 gap-y-1";
-const missingLinkPathClass = "min-w-0 truncate text-[var(--fg-primary)]";
-const missingLinkWaivedBadgeClass = "shrink-0 rounded-[var(--radius-control)] border border-[color:var(--border-soft)] px-1.5 py-0.5 text-[var(--fg-tertiary)]";
-const missingLinkEditorClass = "min-w-0 grid gap-1";
 
 const missingLinkEdgeKey = (edge: TeamWorkflowCandidateGraphEdge) =>
   `${edge.sourceCandidateId}->${edge.targetCandidateId}:${edge.relation}`;
@@ -170,20 +165,20 @@ export function TeamSourceCollectionGraphWorkspacePanel(props: TeamSourceCollect
     const editorOpen = waiverEditorKey === edgeKey;
     const justificationReady = waiverJustification.trim().length >= WAIVER_JUSTIFICATION_MIN_CHARS;
     return (
-      <div key={edgeKey} className={missingLinkRowClass} data-testid="graph-missing-link-row">
-        <div className={missingLinkMetaClass}>
-          <span className={missingLinkPathClass}>
+      <div key={edgeKey} className={panelStyles.graphMissingLinkRow} data-testid="graph-missing-link-row">
+        <div className={panelStyles.graphMissingLinkMeta}>
+          <span className={panelStyles.graphMissingLinkPath}>
             {edge.relation}: {edge.sourceCandidateId} → {edge.targetCandidateId}
           </span>
           {waived ? (
-            <span className={missingLinkWaivedBadgeClass} data-testid="graph-missing-link-waived">
+            <span className={panelStyles.graphMissingLinkWaivedBadge} data-testid="graph-missing-link-waived">
               {lang === "zh" ? "已豁免" : "waived"}
             </span>
           ) : null}
           {!waived && workflowRunId ? (
             <VNativeButton
               data-testid="graph-missing-link-waive"
-              className="shrink-0"
+              className={panelStyles.graphMissingLinkWaiveButton}
               disabled={waiverPending}
               title={lang === "zh" ? "人工确认接受该缺口（需理由，缺口仍保留计数）" : "Accept this gap with a confirmed waiver (justification required; the gap stays counted)"}
               onClick={() => openWaiverEditor(edge)}
@@ -193,7 +188,7 @@ export function TeamSourceCollectionGraphWorkspacePanel(props: TeamSourceCollect
           ) : null}
         </div>
         {editorOpen ? (
-          <div className={missingLinkEditorClass} data-testid="graph-missing-link-editor">
+          <div className={panelStyles.graphMissingLinkEditor} data-testid="graph-missing-link-editor">
             <VNativeInput
               aria-label={lang === "zh" ? "豁免理由" : "Waiver justification"}
               placeholder={lang === "zh"
@@ -203,7 +198,7 @@ export function TeamSourceCollectionGraphWorkspacePanel(props: TeamSourceCollect
               disabled={waiverPending}
               onChange={(event) => setWaiverJustification(event.target.value)}
             />
-            <div className={missingLinkMetaClass}>
+            <div className={panelStyles.graphMissingLinkMeta}>
               <VNativeButton
                 data-testid="graph-missing-link-waive-confirm"
                 disabled={waiverPending || !justificationReady}
@@ -216,7 +211,7 @@ export function TeamSourceCollectionGraphWorkspacePanel(props: TeamSourceCollect
               </VNativeButton>
             </div>
             {waiverError ? (
-              <div role="alert" data-testid="graph-missing-link-error" className="text-[var(--fg-danger)]">
+              <div role="alert" data-testid="graph-missing-link-error" className={panelStyles.graphMissingLinkError}>
                 {waiverError}
               </div>
             ) : null}
@@ -279,24 +274,24 @@ export function TeamSourceCollectionGraphWorkspacePanel(props: TeamSourceCollect
     <section
       data-testid="graph-missing-links"
       aria-label={lang === "zh" ? "缺口清单与豁免" : "Missing links and waivers"}
-      className="min-w-0 grid gap-1.5"
+      className={panelStyles.graphMissingLinkSection}
     >
-      <div className={missingLinkMetaClass}>
+      <div className={panelStyles.graphMissingLinkMeta}>
         <strong>{lang === "zh" ? "缺口" : "Missing links"}</strong>
-        <span className="text-[var(--fg-tertiary)]">
+        <span className={panelStyles.graphMissingLinkHint}>
           {lang === "zh"
             ? "豁免 = 人工接受该缺口（需理由审计）；缺口计数保留，不放宽门禁。"
             : "Waiver = human acceptance with an audited justification; the gap stays counted and the gate is not loosened."}
         </span>
         {!workflowRunId ? (
-          <span className="text-[var(--fg-tertiary)]">
+          <span className={panelStyles.graphMissingLinkHint}>
             {lang === "zh" ? "缺少正式运行上下文，暂不能登记豁免。" : "No formal run context; waivers are unavailable here."}
           </span>
         ) : null}
       </div>
       {visibleGraph?.missingLinks.map(renderMissingLinkWaiverRow)}
       {waiverNotice ? (
-        <div role="status" data-testid="graph-missing-link-notice" className="text-[var(--fg-secondary)]">
+        <div role="status" data-testid="graph-missing-link-notice" className={panelStyles.graphMissingLinkNotice}>
           {waiverNotice}
         </div>
       ) : null}
