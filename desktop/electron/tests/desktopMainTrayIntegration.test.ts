@@ -8,6 +8,8 @@ describe("Electron main tray integration", () => {
   it("routes tray actions through launcher control without direct main-workbench restart menu paths", () => {
     expect(mainSource).toContain('from "./tray/desktopTray.js"');
     expect(mainSource).toContain("desktopTray = createDesktopTray(paths,");
+    expect(mainSource).toContain("openPet:");
+    expect(mainSource).toContain("windowProvider?.openPet(url)");
     expect(mainSource).toContain("listInstances:");
     expect(mainSource).toContain("restartLauncher:");
     expect(mainSource).toContain("runTrayRestartLauncher");

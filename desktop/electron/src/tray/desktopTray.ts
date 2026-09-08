@@ -15,6 +15,7 @@ export type TrayFreshness = {
 
 export type DesktopTrayActions = {
   openLauncher: () => void;
+  openPet: () => void;
   listInstances: () => Promise<TrayBranchInstance[]>;
   getFreshness: () => Promise<TrayFreshness>;
   startInstance: (instanceId: string, label: string) => void;
@@ -25,6 +26,7 @@ export type DesktopTrayActions = {
 
 export const DESKTOP_TRAY_MENU_LABELS = {
   openLauncher: "打开 Launcher 控制窗口",
+  openPet: "显示桌面宠物",
   startProject: "启动工作区…",
   stopProject: "停止工作区…",
   restartLauncher: "全部停止并启动最新 Launcher",
@@ -62,6 +64,7 @@ export function buildDesktopTrayTemplate(
       : DESKTOP_TRAY_MENU_LABELS.noRunning;
   return [
     { label: DESKTOP_TRAY_MENU_LABELS.openLauncher, click: actions.openLauncher },
+    { label: DESKTOP_TRAY_MENU_LABELS.openPet, click: actions.openPet },
     { label: freshness.label || DESKTOP_TRAY_MENU_LABELS.freshnessUnknown, enabled: false },
     { type: "separator" },
     {
