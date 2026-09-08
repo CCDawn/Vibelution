@@ -973,11 +973,15 @@ class WorkflowCommandService:
             now_ms=self._clock(),
         )
         receipt = self._handle_start_node(uow, request, request_hash)
-        uow.repository.update_attempt_status(
-            latest.node_run_id,
-            NodeAttemptStatus.STALE.value,
-            self._clock(),
-        )
+        # Successful upstream reruns must preserve their completed ancestry:
+        # source task replay uses it to distinguish regeneration from recovery
+        # of a timed-out task whose side effects already completed.
+        if latest.status != NodeAttemptStatus.SUCCEEDED.value:
+            uow.repository.update_attempt_status(
+                latest.node_run_id,
+                NodeAttemptStatus.STALE.value,
+                self._clock(),
+            )
         return receipt
 
     def _handle_cancel_node(self, uow, request: CommandRequest, request_hash: str) -> CommandReceipt:

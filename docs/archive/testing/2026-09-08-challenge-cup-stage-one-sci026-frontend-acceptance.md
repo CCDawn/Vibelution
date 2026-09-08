@@ -143,3 +143,4 @@
 - 进一步发现真实流程检查点风险：上游 finding 重跑若只创建 Ledger pending，而 graph 仍停在 extraction interrupt，finding receipt 无法匹配当前 checkpoint。此项须以真实 graph 重入回归闭合后才可声明补源流程可运行。
 - 当前记录仅为根因、代码与测试证据；未据此宣称新模型运行、有效原文、正式知识交接或高质量假说全链路验收完成。配置分级、第一/第二阶段边界未改动。
 - 检查点根因已修复并用真实 LangGraph + Ledger 回归复核：仅在 extraction blocked 且显式 finding attempt ≥ 2 时，复用 coordinator.enter_node 调度新的 finding interrupt；提交时将旧 blocked extraction 标为 stale 并取消其残余 outbox。真实回归走 finding-a1 → extraction-a1 阻塞 → finding-a2 成功 → extraction-a2 dispatching，检查点与回执身份均一致，没有清空运行。会议相关完整回归 58 项通过。
+- 首次合入 push 并通过 Launcher 刷新后，前端实际出现“返回资料寻找补源”。点击后发现新提炼任务 `stagetask-20260908134010-6d43de7a` 启动，却没有新 finding task：命令层把 succeeded 父 attempt 无条件改为 stale，抹掉了既有 source task replay 用于“成功后显式重跑不可复用旧任务”的判断依据。因此首轮点击不能计为有效补源。后续最小修复保留已成功父 attempt 的成功事实，只将失败/阻塞重试的父项标为 stale，复用既有排除成功父任务逻辑。

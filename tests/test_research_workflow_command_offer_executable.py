@@ -643,6 +643,11 @@ def test_succeeded_finding_rerun_offer_available_and_executable(
         assert latest is not None
         assert latest.attempt == 2
         assert latest.status == "starting"
+        previous = next(
+            item for item in harness.store.list_attempts("run-finding-rerun")
+            if item.node_id == "source_finding" and item.attempt == 1
+        )
+        assert previous.status == "succeeded"
     finally:
         harness.close()
 
