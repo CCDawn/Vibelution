@@ -2,6 +2,25 @@ from types import SimpleNamespace
 
 import pytest
 
+
+def test_run_without_drafts_cannot_consume_another_runs_r0(monkeypatch):
+    from core.web.services.team_workflow.research_runtime import hypothesis_first_chain as chain
+    monkeypatch.setattr(chain, "list_exploratory_drafts", lambda *_, **kw: {
+        "drafts": [] if kw.get("workflow_run_id") else [
+            {"draftId": "origin", "meetingRoundId": "origin-meeting"},
+            {"draftId": "other-run", "meetingRoundId": "other-meeting"},
+            {"draftId": "tagged-run", "meetingRoundId": "tagged-meeting"},
+        ],
+    })
+    monkeypatch.setattr(chain, "_question_generation_meetings", lambda *_: [
+        {"meetingRoundId": "origin-meeting"},
+        {"meetingRoundId": "other-meeting", "modelInvocationReceiptAuthority": {"workflowRunId": "run-other"}},
+        {"meetingRoundId": "tagged-meeting", "workflowRunId": "run-other"},
+    ])
+    assert chain._available_exploratory_drafts("team", "SCI-009", workflow_run_id="run-current") == [
+        {"draftId": "origin", "meetingRoundId": "origin-meeting"},
+    ]
+
 from core.web.services.team_workflow import meeting_runtime
 from core.web.services.team_workflow import research_project_hypothesis_context as context
 from core.web.services.team_workflow.research_runtime import agent_task_artifact_builder

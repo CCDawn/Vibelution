@@ -2803,6 +2803,23 @@ def test_formal_meeting_speaker_turn_projects_receipt_outside_journal(
         participant_session_ids=["session-beta"],
     )
     participant = room["participants"][0]
+    from core.research.competition.question_result_package import canonical_model_policy, model_family_for_model_id
+    from core.web.services.team_workflow.research_runtime import formal_write_runtime
+
+    required_policy = canonical_model_policy({
+        "family": model_family_for_model_id("explorer-model"), "providerIds": [_provider_id],
+        "modelIds": ["explorer-model"], "requireOfficialProvider": False,
+    })
+    frozen_policy = {
+        "requiredModelPolicy": required_policy, "modelPolicySha256": required_policy["policySha256"],
+        "routes": {"reasoning": {"byProductRole": {"generator": {
+            "agentId": agent_id, "productRoleId": "generator", "providerId": _provider_id,
+            "modelRef": _model_key, "modelId": "explorer-model",
+        }}}},
+    }
+    monkeypatch.setattr(formal_write_runtime, "get_write_store", lambda: SimpleNamespace(
+        get_run=lambda _: SimpleNamespace(team_id="team-formal", input_snapshot_json=json.dumps({"modelRoutingPolicy": frozen_policy})),
+    ))
     authority = {
         "schemaVersion": 1,
         "authorityKind": "workflow_run",
@@ -2811,7 +2828,7 @@ def test_formal_meeting_speaker_turn_projects_receipt_outside_journal(
         "workflowRunId": "run-formal",
         "workflowId": "challenge-cup-research",
         "workflowVersionId": "wv-formal",
-        "modelPolicySha256": "a" * 64,
+        "modelPolicySha256": required_policy["policySha256"],
     }
 
     result = chat_room_service._run_participant_agent(
@@ -4087,6 +4104,11 @@ def test_update_agent_chat_room_membership_rejects_unknown_room(tmp_path, monkey
 
 @pytest.mark.slow
 def test_chat_room_participant_runs_with_active_direct_turn_in_another_session(tmp_path, monkeypatch):
+    # Session concurrency uses a synthetic receipt authority, not a formal Ledger.
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.meeting_model_route.resolve_meeting_speaker_llm",
+        lambda agent, _context, resolver: resolver(agent),
+    )
     _isolate_chat_room_kernel(tmp_path, monkeypatch)
     _wait_for_lifecycle_phase, scheduler_events = _capture_session_lifecycle_events(monkeypatch)
     monkeypatch.setattr(session_service, "build_agent_context", _lightweight_agent_context)
@@ -4223,6 +4245,10 @@ def test_chat_room_participant_runs_with_active_direct_turn_in_another_session(t
 
 @pytest.mark.slow
 def test_two_scoped_rooms_run_same_agent_in_distinct_sessions_concurrently(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.meeting_model_route.resolve_meeting_speaker_llm",
+        lambda agent, _context, resolver: resolver(agent),
+    )
     _isolate_chat_room_kernel(tmp_path, monkeypatch)
     monkeypatch.setattr(session_service, "build_agent_context", _lightweight_agent_context)
     monkeypatch.setattr(chat_room_service, "build_agent_context", _lightweight_agent_context)

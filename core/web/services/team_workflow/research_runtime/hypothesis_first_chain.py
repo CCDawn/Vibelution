@@ -8600,6 +8600,17 @@ def _available_exploratory_drafts(
             team_id,
             question_id=question_id,
         )["drafts"]
+        if normalized_workflow_run_id:
+            origin_meeting_ids = {
+                str(meeting.get("meetingRoundId") or "")
+                for meeting in _question_generation_meetings(team_id, question_id)
+                if not _meeting_workflow_run_id(meeting)
+                and not str(meeting.get("workflowRunId") or "").strip()
+            }
+            drafts = [
+                draft for draft in drafts
+                if str(draft.get("meetingRoundId") or "") in origin_meeting_ids
+            ]
     return drafts
 
 

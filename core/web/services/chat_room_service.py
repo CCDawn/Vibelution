@@ -4668,7 +4668,9 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
         timings["workspacePolicyMs"] = _elapsed_ms(stage_started_at)
         workspace = agent_workspace if not write_decision or write_decision.allowed else session_workspace
         stage_started_at = _perf_counter()
-        resolved_agent_llm = _resolve_chat_room_agent_llm(agent)
+        from core.web.services.team_workflow.research_runtime.meeting_model_route import resolve_meeting_speaker_llm
+
+        resolved_agent_llm = resolve_meeting_speaker_llm(agent, context, _resolve_chat_room_agent_llm)
         agent_config = resolved_agent_llm.config
         receipt_context = build_speaker_receipt_context(
             participant,
