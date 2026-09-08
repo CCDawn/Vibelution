@@ -578,6 +578,50 @@ describe("ResearchProcessInspectorPane convergence launch", () => {
     await act(async () => root.unmount());
     container.remove();
   });
+
+  it("keeps hf_selection owned when formal runtime exposes its canonical selection action", async () => {
+    const selectionAction = {
+      kind: "command",
+      actionId: "record-selection:formal-runtime",
+      label: "记录选择并开启评审",
+      enabled: true,
+      disabledReason: null,
+      targetPhase: "selection",
+      targetNodeId: "hf_selection",
+      command: "record_selection",
+      payload: { questionId: "SCI-004", generationAttemptId: "generation-1" },
+      inputSchemaRef: null,
+      idempotencyKey: "hf2:record-selection:formal-runtime",
+      expectedStateVersion: "hf2-state:formal-runtime",
+      requiresConfirmation: false,
+      confirmationText: null,
+    } as const;
+    const { container, root } = await renderInspectorLeaf(
+      "zh",
+      makeInspectorScope("node", {
+        runId: "run-1",
+        questionId: "SCI-004",
+        selectedNodeId: "hf_selection",
+      }),
+      { kind: "idle" },
+      {
+        nextAction: {
+          stage: "blocked",
+          targetNodeId: "hypothesis_design",
+          navigationLabel: "正式运行等待假说选择",
+          canonicalAction: selectionAction,
+          canonicalActions: [selectionAction],
+        } as never,
+      },
+    );
+
+    expect(ownsResearchCurrentTask("hf_selection", "hypothesis_design")).toBe(false);
+    expect(hypothesisLeafHarness.props?.nodeId).toBe("hf_selection");
+    expect(hypothesisLeafHarness.props?.formalRuntime).toBe(true);
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
 });
 
 describe("ResearchProcessInspectorPane collection recovery wiring", () => {

@@ -16,6 +16,7 @@ import {
   HYPOTHESIS_FIRST_SELECTION_NODE_ID,
 } from "./hypothesisFirstCanvasRegion";
 import {
+  canonicalHypothesisSelectionActionForState,
   projectHypothesisFirstSelection,
   resolveHypothesisFirstNextActionFromV2,
 } from "./hypothesisFirstStateV2Adapter";
@@ -119,7 +120,9 @@ function command(
     enabled: true,
     disabledReason: null,
     targetPhase,
-    targetNodeId: null,
+    targetNodeId: action.command === "record_selection"
+      ? HYPOTHESIS_FIRST_SELECTION_NODE_ID
+      : null,
     payload: action.payload,
     inputSchemaRef: null,
     idempotencyKey: `idem:${action.command}`,
@@ -216,6 +219,84 @@ describe("resolveHypothesisFirstNextActionFromV2", () => {
 
     expect(action.stage).toBe("blocked");
     expect(action.canonicalActions?.map((item) => item.command)).toEqual(["reconcile_formal_run"]);
+  });
+
+  it("keeps a valid selection offer reachable while formal runtime is ahead", () => {
+    const selection = {
+      ...command({
+        command: "record_selection",
+        payload: { questionId: "SCI-001", generationAttemptId: "generation-1" },
+      }, "选择候选假说"),
+      targetPhase: "selection" as const,
+      targetNodeId: HYPOTHESIS_FIRST_SELECTION_NODE_ID,
+    };
+    const state = stateV2({
+      isInitial: false,
+      currentPhase: "formal_runtime",
+      generation: {
+        ...stateV2().generation,
+        lifecycle: "completed",
+        outcome: "succeeded",
+        actionability: "terminal",
+        candidateCount: 2,
+        candidateIds: ["cand-1", "cand-2"],
+      },
+      formalRuntime: {
+        ...stateV2().formalRuntime,
+        runId: "formal-run-1",
+        runStatus: "blocked",
+        actionability: "blocked",
+      },
+      allowedActions: [selection],
+    });
+
+    expect(canonicalHypothesisSelectionActionForState(state)).toBe(selection);
+    const action = resolveHypothesisFirstNextActionFromV2(state);
+    expect(action.canonicalAction).toBe(selection);
+    expect(action.canonicalActions).toEqual([selection]);
+    expect(projectHypothesisFirstSelection({ state })).toMatchObject({
+      status: "editable",
+      locked: false,
+      canonicalAction: selection,
+    });
+  });
+
+  it("does not authorize selection from R0-only drafts while formal runtime is ahead", () => {
+    const selection = {
+      ...command({
+        command: "record_selection",
+        payload: { questionId: "SCI-001", generationAttemptId: "generation-1" },
+      }, "选择候选假说"),
+      targetPhase: "selection" as const,
+      targetNodeId: HYPOTHESIS_FIRST_SELECTION_NODE_ID,
+    };
+    const state = stateV2({
+      isInitial: false,
+      currentPhase: "formal_runtime",
+      generation: {
+        ...stateV2().generation,
+        lifecycle: "completed",
+        outcome: "succeeded",
+        actionability: "terminal",
+        candidateCount: 0,
+        candidateIds: [],
+      },
+      formalRuntime: {
+        ...stateV2().formalRuntime,
+        runId: "formal-run-1",
+        runStatus: "blocked",
+        actionability: "blocked",
+      },
+      allowedActions: [selection],
+    });
+
+    expect(canonicalHypothesisSelectionActionForState(state)).toBeNull();
+    expect(resolveHypothesisFirstNextActionFromV2(state).canonicalActions).toEqual([]);
+    expect(projectHypothesisFirstSelection({ state })).toMatchObject({
+      status: "locked",
+      locked: true,
+      lockReason: "selection_not_current",
+    });
   });
 
   // P2-9: stop_collection / cancel_run / archive_run have no legacy endpoint.

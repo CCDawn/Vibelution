@@ -1,4 +1,5 @@
 import type { PhaseState, HypothesisFirstStateV2, CommandAction } from "../../../api/types/hypothesisFirst";
+import { HYPOTHESIS_FIRST_SELECTION_NODE_ID } from "./hypothesisFirstCanvasRegion";
 
 const idle: PhaseState = {
   lifecycle: "not_started",
@@ -102,7 +103,9 @@ export function command(
     enabled: true,
     disabledReason: null,
     targetPhase,
-    targetNodeId: null,
+    targetNodeId: action.command === "record_selection"
+      ? HYPOTHESIS_FIRST_SELECTION_NODE_ID
+      : null,
     payload: action.payload,
     inputSchemaRef: null,
     idempotencyKey: `idem:${action.command}`,

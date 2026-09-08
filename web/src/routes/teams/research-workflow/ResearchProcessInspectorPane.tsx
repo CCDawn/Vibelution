@@ -31,6 +31,7 @@ import {
 } from "../teamLazyPanels";
 import {
   HYPOTHESIS_FIRST_GENERATION_NODE_ID,
+  HYPOTHESIS_FIRST_SELECTION_NODE_ID,
   hypothesisFirstSemanticNodeId,
   isHypothesisFirstCanvasNode,
 } from "./hypothesisFirstCanvasRegion";
@@ -73,6 +74,18 @@ export function researchArchiveReturnNodeId(
 ): string | null {
   return hypothesisFirstSemanticNodeId(currentTaskNodeId)
     ?? hypothesisFirstSemanticNodeId(selectedNodeId);
+}
+
+function isEnabledCanonicalSelectionAction(
+  action: HypothesisFirstV2NextAction["canonicalAction"],
+): boolean {
+  return Boolean(
+    action?.kind === "command"
+    && action.command === "record_selection"
+    && action.enabled
+    && action.targetPhase === "selection"
+    && action.targetNodeId === HYPOTHESIS_FIRST_SELECTION_NODE_ID,
+  );
 }
 
 export function ResearchProcessInspectorPane(props: {
@@ -172,12 +185,28 @@ export function ResearchProcessInspectorPane(props: {
     nextAction?.collectionRequestId
     && (nextAction.command === "retry_collection" || nextAction.command === "continue_collection"),
   );
+  // A formal runtime can be blocked on `hypothesis_design` while its canonical
+  // V2 action still authorizes selection on the separate `hf_selection` card.
+  // That cross-phase action is the ownership proof for the selected card; the
+  // formal runtime target itself remains the authoritative execution cursor.
+  const selectedHypothesisSelectionOwnsInspector = Boolean(
+    scope.selectedNodeId === HYPOTHESIS_FIRST_SELECTION_NODE_ID
+    && nextAction
+    && (
+      isEnabledCanonicalSelectionAction(nextAction.canonicalAction)
+      || ((nextAction as HypothesisFirstV2NextAction).canonicalActions ?? [])
+        .some(isEnabledCanonicalSelectionAction)
+    ),
+  );
   // Recovery actions belong to their current task, not every selected node.
   const formalRuntimeOwnsInspector = Boolean(
     scope.panel === "node"
     && scope.runId
     && nextAction
-    && ownsResearchCurrentTask(scope.selectedNodeId, nextAction.targetNodeId)
+    && (
+      ownsResearchCurrentTask(scope.selectedNodeId, nextAction.targetNodeId)
+      || selectedHypothesisSelectionOwnsInspector
+    )
     && (
       nextAction.stage === "converged"
       || (

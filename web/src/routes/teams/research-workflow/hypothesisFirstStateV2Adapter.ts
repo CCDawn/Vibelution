@@ -97,6 +97,51 @@ export type HypothesisFirstSelectionProjectionInput = {
   expectedQuestionId?: string | null;
 };
 
+type CanonicalSelectionAction = Extract<CommandAction, { command: "record_selection" }>;
+
+function formalCandidateIds(state: HypothesisFirstStateV2): string[] {
+  return Array.from(new Set(
+    (Array.isArray(state.generation?.candidateIds) ? state.generation.candidateIds : [])
+      .map((candidateId) => String(candidateId || "").trim())
+      .filter(Boolean),
+  ));
+}
+
+/**
+ * Find the server-owned selector offer even when another phase owns the
+ * overall snapshot. The formal runtime can be ahead of hypothesis-first while
+ * its prerequisite block still leaves a valid R1 selection offer actionable.
+ * R0 exploratory drafts never enter generation.candidateIds, so they cannot
+ * satisfy this gate.
+ */
+export function canonicalHypothesisSelectionActionForState(
+  state: HypothesisFirstStateV2 | null | undefined,
+): CanonicalSelectionAction | null {
+  if (
+    !state
+    || !["selection", "formal_runtime"].includes(state.currentPhase)
+    || formalCandidateIds(state).length < 2
+  ) return null;
+  const questionId = String(state.questionId || "").trim().toUpperCase();
+  const actions = (state.allowedActions ?? []).filter(
+    (action): action is CanonicalSelectionAction => {
+      if (
+        action.kind !== "command"
+        || action.command !== "record_selection"
+        || !action.enabled
+        || action.targetPhase !== "selection"
+        || action.targetNodeId !== HYPOTHESIS_FIRST_SELECTION_NODE_ID
+      ) {
+        return false;
+      }
+      const payloadQuestionId = String(action.payload.questionId || "").trim().toUpperCase();
+      return payloadQuestionId === questionId
+        && Boolean(String(action.payload.generationAttemptId || "").trim());
+    },
+  );
+  return actions.length === 1 ? actions[0] : null;
+}
+
 function lockedSelectionProjection(
   reason: string,
   selectedCandidateIds: string[] = [],
@@ -187,19 +232,13 @@ export function projectHypothesisFirstSelection(
     return lockedSelectionProjection("selection_committed", selectedCandidateIds, selectionId, "committed");
   }
   if (reviewHasFacts(state)) return lockedSelectionProjection("review_has_facts");
-  if (state.currentPhase !== "selection") return lockedSelectionProjection("selection_not_current");
-
-  const recordSelectionActions = (state.allowedActions ?? []).filter(
-    (action): action is Extract<CommandAction, { command: "record_selection" }> => (
-      action.kind === "command"
-      && action.command === "record_selection"
-      && action.enabled
-      && action.targetPhase === "selection"
-    ),
-  );
-  if (recordSelectionActions.length !== 1) {
+  const recordSelectionAction = canonicalHypothesisSelectionActionForState(state);
+  if (state.currentPhase !== "selection" && !recordSelectionAction) {
+    return lockedSelectionProjection("selection_not_current");
+  }
+  if (!recordSelectionAction) {
     return lockedSelectionProjection(
-      recordSelectionActions.length === 0 ? "record_selection_unavailable" : "state_not_unique",
+      "record_selection_unavailable",
     );
   }
 
@@ -209,7 +248,7 @@ export function projectHypothesisFirstSelection(
     selectedCandidateIds,
     selectionId,
     lockReason: null,
-    canonicalAction: recordSelectionActions[0],
+    canonicalAction: recordSelectionAction,
   };
 }
 
@@ -217,10 +256,14 @@ function commandActionsForPhase(
   actions: readonly AllowedAction[],
   phase: HypothesisFirstPhase,
   reviewCandidate: ReviewCandidateState | null,
+  crossPhaseSelectionAction?: CanonicalSelectionAction | null,
 ): CommandAction[] {
   const commands = actions.filter((action): action is CommandAction => (
     action.kind === "command" && action.targetPhase === phase
   ));
+  if (phase === "formal_runtime" && crossPhaseSelectionAction) {
+    commands.push(crossPhaseSelectionAction);
+  }
   if (phase !== "review" || !reviewCandidate) return commands;
   return commands.filter((action) => {
     const payload = action.payload as Record<string, unknown>;
@@ -239,8 +282,9 @@ function firstEnabledCommand(
   actions: readonly AllowedAction[],
   phase: HypothesisFirstPhase,
   reviewCandidate: ReviewCandidateState | null,
+  crossPhaseSelectionAction?: CanonicalSelectionAction | null,
 ): CommandAction | null {
-  const commands = commandActionsForPhase(actions, phase, reviewCandidate);
+  const commands = commandActionsForPhase(actions, phase, reviewCandidate, crossPhaseSelectionAction);
   if (phase === "generation") {
     const regenerateSummary = commands.find((action) => (
       action.enabled && action.command === "regenerate_summary"
@@ -415,15 +459,18 @@ export function resolveHypothesisFirstNextActionFromV2(
   const reviewCandidate = state.currentPhase === "review"
     ? activeReviewCandidate(state, options)
     : null;
+  const crossPhaseSelectionAction = canonicalHypothesisSelectionActionForState(state);
   const command = firstEnabledCommand(
     state.allowedActions,
     state.currentPhase,
     reviewCandidate,
+    crossPhaseSelectionAction,
   );
   const canonicalActions = commandActionsForPhase(
     state.allowedActions,
     state.currentPhase,
     reviewCandidate,
+    crossPhaseSelectionAction,
   );
   const navigation = firstReadyNavigation(
     state.allowedActions,
