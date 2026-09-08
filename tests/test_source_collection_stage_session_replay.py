@@ -356,3 +356,29 @@ def test_interrupted_without_context_marker_keeps_reuse(monkeypatch):
 
     assert result["action"] == "reuse"
     assert result["task"]["taskId"] == "stagetask-1"
+
+
+def test_interrupted_on_context_budget_loop_upgrades_to_formal_retry() -> None:
+    """An interrupted task with context-budget evidence re-opens on a fresh
+    session; marker-less interrupted tasks keep the resume-in-place semantics.
+
+    Incident: the context-saturated extraction session was reused across
+    retries because the lineage-based auto-formal-retry gate did not
+    recognize the interrupted-with-context-marker form, so every retry
+    replayed the poisoned history and died on the same front gate
+    (a5 -> a6 on session-20260909-004717-003871).
+    """
+    from core.web.services.team_workflow.source_collection import stage_session
+
+    saturated = {
+        "status": "interrupted",
+        "summary": "context budget exceeded the hard cap (context_budget_exhausted)",
+    }
+    assert stage_session._interrupted_on_context_budget_loop(saturated) is True
+
+    mid_work_interrupt = {"status": "interrupted", "summary": "read interrupted by operator"}
+    assert stage_session._interrupted_on_context_budget_loop(mid_work_interrupt) is False
+    assert stage_session._interrupted_on_context_budget_loop(None) is False
+    assert "interrupted" not in stage_session._AUTO_FORMAL_RETRY_STATUSES
+    for retained in ("error", "failed", "incomplete", "timed_out", "timeout", "blocked"):
+        assert retained in stage_session._AUTO_FORMAL_RETRY_STATUSES

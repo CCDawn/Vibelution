@@ -26,6 +26,17 @@ _AUTO_FORMAL_RETRY_STATUSES = {
     # Product bar: blocked/no-product stage tasks are failures and must re-open as formal retry.
     "blocked",
 }
+# "interrupted" alone keeps the resume-in-place semantics (an operator retry
+# after a mid-work interrupt continues the same session). Only an interrupted
+# task whose recorded failure carries the context-budget loop evidence is
+# upgraded to a formal fresh-session retry: replaying that history front-gates
+# every model call (a5/a6 on one saturated session in the 2026-09-08 run).
+def _interrupted_on_context_budget_loop(previous_stage_task: Any) -> bool:
+    if not isinstance(previous_stage_task, dict):
+        return False
+    from .stage_session_replay import _failed_on_context_budget_loop
+
+    return _failed_on_context_budget_loop(previous_stage_task)
 
 # Auto formal retry used to re-open unbounded times along the retryOfSessionId
 # chain (observed 13 attempts). Past this depth the chain is a systemic failure,
@@ -1104,7 +1115,13 @@ def start_source_collection_stage_session_task(
     )
     auto_formal_retry = (
         not formal_retry_requested
-        and previous_stage_task_status in _AUTO_FORMAL_RETRY_STATUSES
+        and (
+            previous_stage_task_status in _AUTO_FORMAL_RETRY_STATUSES
+            or (
+                previous_stage_task_status == "interrupted"
+                and _interrupted_on_context_budget_loop(previous_stage_task)
+            )
+        )
     )
     formal_retry = formal_retry_requested or auto_formal_retry
     formal_retry_reason = (

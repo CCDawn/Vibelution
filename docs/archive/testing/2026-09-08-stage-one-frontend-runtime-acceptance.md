@@ -78,3 +78,9 @@
 - 根因：`core/web/services/team_workflow/source_collection/stage_session_replay.py::prepare_source_collection_stage_task_replay` 的新会话重放逃生口条件是 `status == "failed" and _failed_on_context_budget_loop(current)`——continuation 耗尽/needs_continue 的 turn 会被归一成 interrupted，而 interrupted 状态永远进不了该逃生口，于是每次 retry 都复用中毒会话，确定性死循环（同一会话 a4/a5 连续两轮死于同一前置闸）。
 - 修复：重放门改为 `status in {"failed", "interrupted"}` 且保留 `_failed_on_context_budget_loop` 证据匹配——interrupted 但 summary 携带 context_budget 标记的同样换新会话，无标记的 interrupted 仍走既有 reuse 语义。测试：`tests/test_source_collection_stage_session_replay.py` 新增 2 个（interrupted+context 标记 → `formal_retry_same_task` + `context_budget_retry_new_session`；interrupted 无标记 → `reuse`），该文件 14 过。
 - 恢复计划：再点一次前端「重试 资料提炼」（a6）应命中 `formal_retry_same_task` 重放进新会话，并经 stage context 工具从 dprec 记录读取 6/8 候选的 quotable text + quote 锚产出证据卡，无需重新抓取。
+
+#### B.6 补遗：auto_formal_retry 门同样缺 interrupted（缺陷⑤第二层）
+
+- 73667e3f2 修复的是 idempotency 重放门；但 retry_node 实际走**前任务血缘门** `_AUTO_FORMAL_RETRY_STATUSES`（stage_session.py:20，原含 error/failed/incomplete/timed_out/timeout/blocked）。a5 任务落 interrupted → a6 重试仍复用超限会话（formalRetry=False、retryOfSessionId 空，已核账本）。
+- 修复：auto_formal_retry 判定扩为 `status in 集合 OR (status=="interrupted" AND _failed_on_context_budget_loop(前任务))`——**带 context 标记的 interrupted** 才升格新会话 formal retry；无标记的 interrupted（读中断原地续作是既有设计语义，test_source_collection_extraction_resume_after_interrupted_reading_prioritizes_writeback 守护）保持 reuse。dprec 记录承载 quotable text/quote 锚，新会话可无损续作。
+- 测试：test_interrupted_on_context_budget_loop_upgrades_to_formal_retry（正例/反例/None/集合不变式）；首版直接把 interrupted 加进集合被 closeout 影响选择器抓出回归后改为标记门。
