@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from types import SimpleNamespace
 from typing import Any
 
 from core.research.workflow.contracts.node_readiness import (
     ActorReadiness,
     BudgetReadiness,
+    ReadinessBlocker,
 )
 from core.research.workflow.definition import build_challenge_cup_workflow_definition
 from core.research.workflow.definition_registry import definition_identity
@@ -264,6 +266,25 @@ class FakeDomainContext(DomainReadinessContext):
     def incoming_handoffs(self, run_id: str, node_id: str) -> Sequence[HandoffSnapshot]:
         self._note("incoming_handoffs")
         return self.handoffs.get(node_id, [])
+
+
+class StubNotReadyReadiness:
+    """Readiness-service double that always refuses with fixed blocker codes.
+
+    Reproduces the production interleaving where a run wedged by an earlier
+    precheck (e.g. budget) is later refused with a different, recoverable
+    readiness blocker (e.g. evidence_graph_incomplete).
+    """
+
+    def __init__(self, blocker_codes: Sequence[str]) -> None:
+        self.blockers = tuple(
+            ReadinessBlocker(code=code, title=code, detail=code)
+            for code in blocker_codes
+        )
+
+    def evaluate(self, **kwargs: Any):
+        _ = kwargs
+        return SimpleNamespace(ready=False, blockers=self.blockers)
 
 
 def actor_for_node(node_id: str) -> str:

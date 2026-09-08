@@ -24,10 +24,11 @@ from core.web.services.team_workflow.research_runtime.query_service import (
     WorkflowQueryService,
 )
 from core.web.services.team_workflow.research_runtime.command_service import (
+    NodeNotReadyError,
     WorkflowCommandError,
 )
 from tests._support.command_helpers import CommandHarness
-from tests._support.readiness_fakes import FakeDomainContext
+from tests._support.readiness_fakes import FakeDomainContext, StubNotReadyReadiness
 from tests._support.workflow_ledger_helpers import (
     FIXED_NOW_MS,
     build_attempt_record,
@@ -529,10 +530,10 @@ def _seed_finding_rerun_run(
     run_status: str,
     blocked_problem_json: str | None,
     attempt_status: str,
+    node_id: str = "source_finding",
 ) -> None:
-    """Seed a run plus one source_finding attempt in one ledger transaction."""
+    """Seed a run plus one attempt in one ledger transaction."""
 
-    import json as _json
     from dataclasses import replace
 
     from tests._support.workflow_ledger_helpers import (
@@ -571,7 +572,7 @@ def _seed_finding_rerun_run(
             build_command_record(
                 command_id=f"cmd-{run_id}-a1",
                 run_id=run_id,
-                node_id="source_finding",
+                node_id=node_id,
                 command_kind="start_node",
                 idempotency_key=f"seed-{run_id}",
             )
@@ -580,7 +581,7 @@ def _seed_finding_rerun_run(
             build_attempt_record(
                 node_run_id=f"nr-{run_id}-a1",
                 run_id=run_id,
-                node_id="source_finding",
+                node_id=node_id,
                 status=attempt_status,
                 command_id=f"cmd-{run_id}-a1",
                 attempt=1,
@@ -781,3 +782,67 @@ def test_succeeded_node_rerun_available_heals_evidence_graph_gap() -> None:
             ),
         ),
     )
+
+
+def test_refused_retry_refresh_feeds_evidence_relations_rerun_offer(
+    tmp_path: Path,
+) -> None:
+    """Deadlock break, end to end: the refusal-path blocked-reason refresh in
+    the command service writes exactly the auto_advance_not_ready /
+    evidence_graph_incomplete shape that succeeded_node_rerun_target requires,
+    so the succeeded evidence_relations node projects an available rerun offer
+    even when the run was first wedged by a different (budget) precheck."""
+    import json as _json
+
+    from core.web.services.team_workflow.research_runtime.command_offers.retry_node import (
+        build_retry_node_offers,
+        succeeded_node_rerun_target,
+    )
+
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        _seed_finding_rerun_run(
+            harness,
+            run_id="run-evidence-rerun",
+            run_status="blocked",
+            blocked_problem_json=_json.dumps(
+                {
+                    "code": "budget_precheck_insufficient",
+                    "detail": "stage admission exhausted the toolCalls budget",
+                }
+            ),
+            attempt_status="succeeded",
+            node_id="evidence_relations",
+        )
+        harness.command_service._readiness = StubNotReadyReadiness(
+            ("evidence_graph_incomplete",)
+        )
+        with pytest.raises(NodeNotReadyError):
+            harness.service.submit(
+                harness.request(
+                    run_id="run-evidence-rerun",
+                    command=WorkflowCommandKind.RETRY_NODE,
+                    node_id="knowledge_ingestion",
+                    expected_run_version=2,
+                    idempotency_key="ui:retry-knowledge",
+                )
+            )
+
+        refreshed = harness.store.get_run("run-evidence-rerun")
+        assert refreshed is not None
+        assert _json.loads(refreshed.blocked_problem_json) == {
+            "code": "auto_advance_not_ready",
+            "detail": "evidence_graph_incomplete",
+        }
+        assert succeeded_node_rerun_target(refreshed) == "evidence_relations"
+
+        offers = build_retry_node_offers(
+            run=refreshed,
+            definition=build_knowledge_sideflow_workflow_definition(),
+            attempts=harness.store.list_attempts("run-evidence-rerun"),
+        )
+        rerun = next(offer for offer in offers if offer.node_id == "evidence_relations")
+        assert rerun.available is True
+        assert rerun.label == "重跑 证据关系"
+    finally:
+        harness.close()

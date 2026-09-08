@@ -7,7 +7,12 @@ Synchronous acceptance flow:
      different hash raises idempotency_conflict;
   4. expectedRunVersion check;
   5. NodeReadiness recomputed (never cached) for attempt-creating commands;
-  6. not ready -> NodeNotReadyError, zero side effects;
+  6. not ready -> NodeNotReadyError: no attempt, no runVersion bump, no
+     event.  Sole exception: a run that is ALREADY blocked gets its stale
+     blocked_problem_json refreshed to the current readiness blockers
+     (pure projection, idempotent) so recovery offers keyed off that
+     projection (evidence_graph_incomplete -> rerun evidence_relations)
+     can surface;
   7. ready -> one BEGIN IMMEDIATE transaction: conditional version bump,
      accepted command, NodeAttempt(starting), graph_dispatch outbox,
      command_accepted + node_starting events;
@@ -435,6 +440,7 @@ class WorkflowCommandService:
                 use_cache=False,
             )
             if not readiness.ready:
+                self._refresh_blocked_problem_before_refusal(run, request, readiness)
                 raise NodeNotReadyError(readiness, run.run_version)
         if request.command is WorkflowCommandKind.RESOLVE_HUMAN_TASK:
             future = self._store.submit(
@@ -488,6 +494,74 @@ class WorkflowCommandService:
             # cancel_run cannot re-run this side effect.
             self._close_cancel_run_inflight_turns(request.run_id)
         return receipt
+
+    def _refresh_blocked_problem_before_refusal(
+        self, run: Any, request: CommandRequest, readiness: Any
+    ) -> None:
+        """Refresh a stale blocked reason when a refused retry reveals blockers.
+
+        ``sync_run_blocked`` early-returns for runs that are already blocked,
+        so a run first wedged by a different precheck (e.g.
+        budget_precheck_insufficient) keeps that stale reason forever even
+        after readiness now fails on a different, recoverable blocker.  The
+        recovery offers (``succeeded_node_rerun_target``) key off exactly this
+        projection, so the stale reason hides the "rerun evidence_relations"
+        escape hatch and the operator is deadlocked: the retry is refused 412
+        while the rerun offer never projects as available.
+
+        The refresh reuses the worker's ``auto_advance_not_ready`` problem
+        shape so single-blocker details satisfy the rerun mapping's exact
+        match.  It is a pure projection update on the already-blocked run:
+        no attempt, no run_version bump, no event.  The blocked status is
+        re-verified inside the transaction so a concurrent unblock can never
+        be pulled back to blocked.  Best-effort: any failure is swallowed —
+        the NodeNotReadyError refusal semantics are untouched.  Idempotent:
+        identical current and new problems skip the write.
+        """
+        if str(run.status) != "blocked" or not request.node_id:
+            return
+        blockers = tuple(getattr(readiness, "blockers", ()) or ())
+        if not blockers:
+            return
+        problem = {
+            "code": "auto_advance_not_ready",
+            "detail": "; ".join(
+                str(getattr(blocker, "code", "") or "") for blocker in blockers
+            ),
+        }
+        try:
+            current = json.loads(str(run.blocked_problem_json or "") or "{}")
+        except (TypeError, ValueError):
+            current = {}
+        if (
+            isinstance(current, dict)
+            and str(current.get("code") or "") == problem["code"]
+            and str(current.get("detail") or "") == problem["detail"]
+        ):
+            return
+        problem_json = json.dumps(problem, ensure_ascii=False)
+
+        def refresh(uow):
+            current_run = uow.repository.get_run(request.run_id)
+            if current_run is None or str(current_run.status) != "blocked":
+                return False
+            return uow.repository.update_run_status(
+                request.run_id,
+                request.team_id,
+                str(current_run.status),
+                self._clock(),
+                active_node_id=request.node_id,
+                blocked_problem_json=problem_json,
+            )
+
+        try:
+            self._store.submit(refresh, force_flush=True).result(timeout=30)
+        except Exception:  # noqa: BLE001 - refresh must never mask the refusal
+            logger.exception(
+                "blocked_problem refresh failed on refused retry: runId=%s nodeId=%s",
+                request.run_id,
+                request.node_id,
+            )
 
     def _authorize_operator(self, request: CommandRequest) -> str:
         """Authorize high-impact commands from server request context only.

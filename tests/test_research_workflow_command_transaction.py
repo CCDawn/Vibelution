@@ -3,13 +3,19 @@ together; crash injection never leaves a half commit."""
 
 from __future__ import annotations
 
+import itertools
+import json
 from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
 
 from core.web.routes.team_workflows.research_runtime import _map_node_not_ready_error
 from core.research.workflow.contracts import WorkflowCommandKind
 from core.web.services.team_workflow.research_runtime.command_service import NodeNotReadyError
 from tests._support.command_helpers import CommandHarness
+from tests._support.readiness_fakes import StubNotReadyReadiness
+from tests._support.workflow_ledger_helpers import FIXED_NOW_MS
 
 
 def test_start_node_commits_command_attempt_outbox_events(tmp_path: Path) -> None:
@@ -269,5 +275,143 @@ def test_retry_creates_new_attempt_with_retry_lineage(tmp_path: Path) -> None:
         original = next(attempt for attempt in attempts if attempt.attempt == 1)
         assert retry.retry_of_node_run_id == original.node_run_id
         assert original.status == "stale"
+    finally:
+        harness.close()
+
+
+# ----------------------------------------------------- blocked reason refresh
+
+
+def _seed_budget_wedged_sideflow_run(
+    harness: CommandHarness, run_id: str = "run-test"
+) -> None:
+    """Seed the production interleaving: a knowledge sideflow run wedged by
+    the budget precheck before any readiness verdict was ever recorded."""
+    from core.research.workflow.knowledge_sideflow_definition import (
+        build_knowledge_sideflow_workflow_definition,
+    )
+
+    harness.seed_run(run_id, workflow_definition=build_knowledge_sideflow_workflow_definition())
+
+    def wedge(uow):
+        uow.repository.update_run_status(
+            run_id,
+            "research-team",
+            "blocked",
+            FIXED_NOW_MS,
+            active_node_id="knowledge_ingestion",
+            blocked_problem_json=json.dumps(
+                {
+                    "code": "budget_precheck_insufficient",
+                    "detail": "stage admission exhausted the toolCalls budget",
+                },
+                ensure_ascii=False,
+            ),
+        )
+
+    harness.store.submit(wedge, force_flush=True).result(timeout=10)
+
+
+def test_refused_retry_refreshes_stale_blocked_problem(tmp_path: Path) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        _seed_budget_wedged_sideflow_run(harness)
+        harness.command_service._readiness = StubNotReadyReadiness(
+            ("evidence_graph_incomplete",)
+        )
+
+        with pytest.raises(NodeNotReadyError) as excinfo:
+            harness.service.submit(
+                harness.request(
+                    command=WorkflowCommandKind.RETRY_NODE,
+                    node_id="knowledge_ingestion",
+                    expected_run_version=1,
+                    idempotency_key="ui:retry-knowledge",
+                )
+            )
+        assert any(
+            blocker.code == "evidence_graph_incomplete"
+            for blocker in excinfo.value.readiness.blockers
+        )
+
+        # The refusal itself is unchanged (412 semantics), but the stale
+        # budget reason on the already-blocked run is refreshed to the
+        # current blockers as a pure projection.
+        run = harness.store.get_run("run-test")
+        assert run is not None
+        assert json.loads(run.blocked_problem_json) == {
+            "code": "auto_advance_not_ready",
+            "detail": "evidence_graph_incomplete",
+        }
+        assert run.active_node_id == "knowledge_ingestion"
+        assert run.run_version == 1
+        assert harness.store.list_attempts("run-test") == []
+        assert harness.store.latest_event_sequence("run-test") == 1
+    finally:
+        harness.close()
+
+
+def test_refused_retry_blocked_problem_refresh_idempotent(tmp_path: Path) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    ticks = itertools.count(FIXED_NOW_MS + 1000, 1000)
+    harness.command_service._clock = lambda: next(ticks)
+    try:
+        _seed_budget_wedged_sideflow_run(harness)
+        harness.command_service._readiness = StubNotReadyReadiness(
+            ("evidence_graph_incomplete",)
+        )
+
+        for key in ("ui:retry-knowledge-1", "ui:retry-knowledge-2"):
+            with pytest.raises(NodeNotReadyError):
+                harness.service.submit(
+                    harness.request(
+                        command=WorkflowCommandKind.RETRY_NODE,
+                        node_id="knowledge_ingestion",
+                        expected_run_version=1,
+                        idempotency_key=key,
+                    )
+                )
+
+        # The second identical refusal hit the idempotent short-circuit: only
+        # the first refresh wrote (FIXED_NOW_MS + 1000); a second write would
+        # have stamped FIXED_NOW_MS + 2000.
+        run = harness.store.get_run("run-test")
+        assert run is not None
+        assert run.updated_at_ms == FIXED_NOW_MS + 1000
+        assert json.loads(run.blocked_problem_json) == {
+            "code": "auto_advance_not_ready",
+            "detail": "evidence_graph_incomplete",
+        }
+        assert run.run_version == 1
+        assert harness.store.list_attempts("run-test") == []
+    finally:
+        harness.close()
+
+
+def test_refused_retry_on_running_run_keeps_zero_side_effects(tmp_path: Path) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    ticks = itertools.count(FIXED_NOW_MS + 1000, 1000)
+    harness.command_service._clock = lambda: next(ticks)
+    try:
+        harness.seed_run()
+        harness.service.submit(harness.request(idempotency_key="ui:key-1"))
+        first = harness.store.get_run("run-test")
+        assert first is not None and first.status == "running"
+
+        with pytest.raises(NodeNotReadyError):
+            harness.service.submit(
+                harness.request(idempotency_key="ui:key-2", expected_run_version=2)
+            )
+
+        # A refused command on a non-blocked run keeps the original
+        # zero-side-effects contract: no run write of any kind.
+        run = harness.store.get_run("run-test")
+        assert run is not None
+        assert run.status == "running"
+        assert run.run_version == 2
+        assert run.blocked_problem_json is None
+        assert run.updated_at_ms == FIXED_NOW_MS + 1000
+        assert len(harness.store.list_attempts("run-test")) == 1
+        assert harness.store.latest_event_sequence("run-test") == 3
     finally:
         harness.close()
