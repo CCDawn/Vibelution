@@ -383,10 +383,15 @@ def test_extend_budget_action_is_registered_on_the_router() -> None:
 
 
 class _FakeEvent:
-    def __init__(self, event_type: str, payload: dict[str, Any]) -> None:
+    def __init__(
+        self,
+        event_type: str,
+        payload: dict[str, Any],
+        occurred_at_ms: int = 1_759_000_000_000,
+    ) -> None:
         self.event_type = event_type
         self.payload = payload
-        self.occurred_at_ms = 1_759_000_000_000
+        self.occurred_at_ms = occurred_at_ms
 
 
 class _FakeEventPage:
@@ -493,6 +498,271 @@ def test_anomaly_inbox_surfaces_child_run_budget_block(monkeypatch) -> None:
         max(2_000_000, 2_726_303) + 262_347
     )
     assert action["params"]["stageConsumedTokens"] == 2_726_303
+
+
+# -- stale budget blocks must stop surfacing once the node moved past --------
+
+
+def _formal_block_payload(
+    node_run_id: str,
+    suggested: int,
+    node_id: str = "evidence_relations",
+) -> dict[str, Any]:
+    return {
+        "code": "budget_precheck_insufficient",
+        "nodeId": node_id,
+        "nodeRunId": node_run_id,
+        "stageId": "knowledge_collection",
+        "stageLimitTokens": 3_000_000,
+        "stageConsumedTokens": 2_726_303,
+        "suggestedExtensionTokens": suggested,
+        "remainingTokens": 0,
+        "referenceTokens": 262_347,
+    }
+
+
+def test_anomaly_inbox_drops_stale_budget_block_once_node_succeeded(
+    monkeypatch,
+) -> None:
+    """A precheck block whose node later succeeded no longer surfaces.
+
+    Ground truth from the live ledger: the graph worker commits the block
+    BEFORE the attempt starts; after extend_budget → retry, progression shows
+    up as a later ``node_starting`` for a newer attempt of the same node and
+    an adapter-worker ``node_succeeded`` ledger event.  Keeping the old block
+    would render a clickable CTA that always fails with 409
+    idempotency_conflict.
+    """
+
+    snapshot = _blocked_formal_snapshot()
+    monkeypatch.setattr(
+        hypothesis_first_state_v2,
+        "project_hypothesis_first_state_v2",
+        lambda team_id, question_id, **kwargs: snapshot,
+    )
+    replay = _FakeReplayService(
+        {
+            "run-formal-9": _FakeEventPage(
+                5,
+                (
+                    _FakeEvent(
+                        "budget_precheck_blocked",
+                        _formal_block_payload(
+                            "nr-run-formal-9-evidence_relations-a1", 262_347
+                        ),
+                        occurred_at_ms=1_759_000_000_000,
+                    ),
+                    _FakeEvent(
+                        "node_starting",
+                        {
+                            "nodeId": "evidence_relations",
+                            "nodeRunId": "nr-run-formal-9-evidence_relations-a2",
+                            "attempt": 2,
+                        },
+                        occurred_at_ms=1_759_000_050_000,
+                    ),
+                    _FakeEvent(
+                        "node_succeeded",
+                        {
+                            "nodeRunId": "nr-run-formal-9-evidence_relations-a2",
+                            "handoffId": "handoff-1",
+                        },
+                        occurred_at_ms=1_759_000_090_000,
+                    ),
+                    _FakeEvent("run_blocked", {"reason": "budget"}),
+                ),
+            ),
+        }
+    )
+    monkeypatch.setattr(hf_routes, "get_event_replay_service", lambda: replay)
+
+    response = _client().get(_ROUTE, params={"questionId": "SCI-009"})
+    assert response.status_code == 200
+    items = response.json()["inbox"]["items"]
+    assert [item for item in items if item["kind"] == "budget_exhausted"] == []
+
+
+def test_collect_budget_precheck_blocks_dedupes_same_node_blocks_to_newest(
+    monkeypatch,
+) -> None:
+    """Two tail blocks for the same node collapse to the newest block.
+
+    A re-block after a refused retry re-emits the precheck event for a new
+    attempt; the inbox must carry only the current numbers, not both.
+    """
+
+    snapshot = _blocked_formal_snapshot()
+    replay = _FakeReplayService(
+        {
+            "run-formal-9": _FakeEventPage(
+                2,
+                (
+                    _FakeEvent(
+                        "budget_precheck_blocked",
+                        _formal_block_payload(
+                            "nr-run-formal-9-evidence_relations-a2", 111_111
+                        ),
+                        occurred_at_ms=1_759_000_000_000,
+                    ),
+                    _FakeEvent(
+                        "budget_precheck_blocked",
+                        _formal_block_payload(
+                            "nr-run-formal-9-evidence_relations-a4", 262_347
+                        ),
+                        occurred_at_ms=1_759_000_300_000,
+                    ),
+                ),
+            ),
+        }
+    )
+    monkeypatch.setattr(hf_routes, "get_event_replay_service", lambda: replay)
+    blocks = hf_routes._collect_budget_precheck_blocks(_TEAM, snapshot)
+
+    assert len(blocks) == 1
+    newest = blocks[0]
+    assert newest["runId"] == "run-formal-9"
+    assert newest["nodeId"] == "evidence_relations"
+    assert newest["nodeRunId"] == "nr-run-formal-9-evidence_relations-a4"
+    assert newest["suggestedExtensionTokens"] == 262_347
+
+
+def test_collect_budget_precheck_blocks_keeps_fresh_block_while_node_not_progressed(
+    monkeypatch,
+) -> None:
+    """A still-current block survives; another node retrying does not drop it.
+
+    Only progression of the BLOCKED node itself (newer attempt, attributed
+    success, newer different-node precheck, run terminal) makes a block
+    stale — exactly the evidence the live ledger records.
+    """
+
+    snapshot = _blocked_formal_snapshot()
+    replay = _FakeReplayService(
+        {
+            "run-formal-9": _FakeEventPage(
+                3,
+                (
+                    _FakeEvent(
+                        "budget_precheck_blocked",
+                        _formal_block_payload(
+                            "nr-run-formal-9-knowledge_ingestion-a1",
+                            111_649,
+                            node_id="knowledge_ingestion",
+                        ),
+                        occurred_at_ms=1_759_000_000_000,
+                    ),
+                    # A different node retrying afterwards must NOT drop the
+                    # knowledge_ingestion block (real incident ordering).
+                    _FakeEvent(
+                        "node_starting",
+                        {
+                            "nodeId": "evidence_relations",
+                            "nodeRunId": "nr-run-formal-9-evidence_relations-a3",
+                            "attempt": 3,
+                        },
+                        occurred_at_ms=1_759_000_150_000,
+                    ),
+                    _FakeEvent("run_blocked", {"reason": "budget"}),
+                ),
+            ),
+        }
+    )
+    monkeypatch.setattr(hf_routes, "get_event_replay_service", lambda: replay)
+    blocks = hf_routes._collect_budget_precheck_blocks(_TEAM, snapshot)
+
+    assert len(blocks) == 1
+    fresh = blocks[0]
+    assert fresh["runId"] == "run-formal-9"
+    assert fresh["nodeId"] == "knowledge_ingestion"
+    assert fresh["nodeRunId"] == "nr-run-formal-9-knowledge_ingestion-a1"
+
+
+def test_anomaly_inbox_keeps_only_fresh_child_block_alongside_stale_formal_block(
+    monkeypatch,
+) -> None:
+    """The real incident: stale formal block + fresh child block co-rendered.
+
+    The formal node succeeded after its block (stale → dropped), while the
+    knowledge child-run block is still current.  Exactly one budget item may
+    remain, scoped to the child run with its extend CTA — the arm→confirm
+    flow can no longer hit a stale formal-run CTA.
+    """
+
+    snapshot = _blocked_formal_snapshot()
+    monkeypatch.setattr(
+        hypothesis_first_state_v2,
+        "project_hypothesis_first_state_v2",
+        lambda team_id, question_id, **kwargs: snapshot,
+    )
+    replay = _FakeReplayService(
+        {
+            "run-formal-9": _FakeEventPage(
+                6,
+                (
+                    _FakeEvent(
+                        "budget_precheck_blocked",
+                        _formal_block_payload(
+                            "nr-run-formal-9-evidence_relations-a1", 262_347
+                        ),
+                        occurred_at_ms=1_759_000_000_000,
+                    ),
+                    _FakeEvent(
+                        "node_starting",
+                        {
+                            "nodeId": "evidence_relations",
+                            "nodeRunId": "nr-run-formal-9-evidence_relations-a2",
+                            "attempt": 2,
+                        },
+                        occurred_at_ms=1_759_000_050_000,
+                    ),
+                    _FakeEvent(
+                        "node_succeeded",
+                        {
+                            "nodeRunId": "nr-run-formal-9-evidence_relations-a2",
+                            "handoffId": "handoff-1",
+                        },
+                        occurred_at_ms=1_759_000_090_000,
+                    ),
+                    _FakeEvent(
+                        "knowledge_invocation_created",
+                        {"childRunId": "child-run-x", "invocationId": "inv-1"},
+                    ),
+                    _FakeEvent("run_blocked", {"reason": "budget"}),
+                ),
+            ),
+            "child-run-x": _FakeEventPage(
+                8,
+                (
+                    _FakeEvent(
+                        "budget_precheck_blocked",
+                        {
+                            "code": "budget_precheck_insufficient",
+                            "nodeId": "knowledge_ingestion",
+                            "nodeRunId": "nr-child-run-x-knowledge_ingestion-a1",
+                            "stageId": "knowledge_collection",
+                            "stageLimitTokens": 2_000_000,
+                            "stageConsumedTokens": 2_726_303,
+                            "suggestedExtensionTokens": 111_649,
+                        },
+                    ),
+                ),
+            ),
+        }
+    )
+    monkeypatch.setattr(hf_routes, "get_event_replay_service", lambda: replay)
+
+    response = _client().get(_ROUTE, params={"questionId": "SCI-009"})
+    assert response.status_code == 200
+    items = response.json()["inbox"]["items"]
+    budget_items = [item for item in items if item["kind"] == "budget_exhausted"]
+    assert len(budget_items) == 1
+    item = budget_items[0]
+    assert item["scope"]["runId"] == "child-run-x"
+    assert item["scope"]["nodeId"] == "knowledge_ingestion"
+    action = item["action"]
+    assert action["command"] == "extend_budget"
+    assert action["params"]["runId"] == "child-run-x"
+    assert action["params"]["suggestedExtensionTokens"] == 111_649
 
 
 def test_extend_budget_action_resolves_child_run_version_via_sideflow_listing(

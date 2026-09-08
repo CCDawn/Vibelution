@@ -11,6 +11,7 @@ round 记录），不由客户端推断。
 from __future__ import annotations
 
 import os
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from typing import Any, Mapping, NoReturn
 
@@ -929,6 +930,13 @@ def _collect_budget_precheck_blocks(
     so the extend CTA targets the run that actually owns the block).  Each
     replay fails soft on its own — one unreadable ledger never fails the
     inbox, and one unreadable child never hides the others.
+
+    The tail window keeps EVERY ``budget_precheck_blocked`` event, so a block
+    whose node has since been extended and retried to success would keep
+    rendering a live extend CTA for an already-succeeded node (and co-render
+    with the next node's fresh block, letting the arm→confirm flow hit the
+    wrong item).  Each tail is therefore filtered to blocks that are still
+    CURRENTLY blocking: see ``_drop_stale_budget_blocks``.
     """
 
     formal = snapshot.get("formalRuntime")
@@ -939,6 +947,85 @@ def _collect_budget_precheck_blocks(
         return []
     replay = get_event_replay_service()
 
+    def _drop_stale_budget_blocks(
+        ordered_events: Sequence[Any],
+        block_slots: list[tuple[int, dict[str, Any]]],
+    ) -> list[dict[str, Any]]:
+        """Keep only blocks whose node is still currently blocked on budget.
+
+        Ground truth from the live ledger (run with evidence_relations then
+        knowledge_ingestion precheck blocks): the graph worker commits the
+        block BEFORE the attempt ever starts, and when the operator extends
+        budget and retries, progression is recorded by a later
+        ``node_starting`` for a newer attempt of the same node; the
+        adapter-worker path also appends ``node_succeeded`` ledger events,
+        while the graph-worker path only flips the ``node_attempts`` status
+        (no ledger event) before the NEXT node's precheck fires.  A block is
+        therefore stale — and dropped — when a LATER event in the same tail
+        proves the node moved past it:
+
+        - ``node_starting`` for the same node on a newer attempt (the blocked
+          attempt never started; a newer attempt means the retry began);
+        - ``node_succeeded`` attributed to this node via the
+          ``nodeRunId → nodeId`` map built from ``node_starting`` and precheck
+          payloads (unattributable successes fail visible and keep the item);
+        - a newer ``budget_precheck_blocked`` for a DIFFERENT node of the
+          same run (that precheck only fires after this node's newer attempt
+          succeeded, so the run advanced past this block);
+        - ``run_succeeded`` (the run reached terminal; nothing is blocked).
+
+        Remaining same-node re-blocks dedupe to the newest entry.  Filtering
+        runs per run tail, so knowledge child-run blocks keep their own
+        ``runId`` scope (defect-⑧ behaviour untouched).
+        """
+
+        if not block_slots:
+            return []
+        node_by_node_run: dict[str, str] = {}
+        for event in ordered_events:
+            payload = event.payload if isinstance(event.payload, Mapping) else {}
+            node_run_id = str(payload.get("nodeRunId") or "")
+            node_id = str(payload.get("nodeId") or "")
+            if node_run_id and node_id:
+                node_by_node_run.setdefault(node_run_id, node_id)
+
+        def _is_stale(slot: int, entry: dict[str, Any]) -> bool:
+            node_id = str(entry.get("nodeId") or "")
+            blocked_node_run = str(entry.get("nodeRunId") or "")
+            for event in ordered_events[slot + 1 :]:
+                event_type = str(event.event_type)
+                payload = event.payload if isinstance(event.payload, Mapping) else {}
+                if event_type == "run_succeeded":
+                    return True
+                if event_type == "node_starting":
+                    if (
+                        str(payload.get("nodeId") or "") == node_id
+                        and str(payload.get("nodeRunId") or "") != blocked_node_run
+                    ):
+                        return True
+                elif event_type == "node_succeeded":
+                    later_node_run = str(payload.get("nodeRunId") or "")
+                    if (
+                        later_node_run
+                        and node_by_node_run.get(later_node_run) == node_id
+                    ):
+                        return True
+                elif (
+                    event_type
+                    == anomaly_inbox_service.BUDGET_PRECHECK_BLOCKED_EVENT_TYPE
+                    and str(payload.get("nodeId") or "") != node_id
+                ):
+                    return True
+            return False
+
+        deduped: dict[tuple[str, str], dict[str, Any]] = {}
+        for slot, entry in block_slots:
+            if _is_stale(slot, entry):
+                continue
+            key = (str(entry.get("runId") or ""), str(entry.get("nodeId") or ""))
+            deduped[key] = entry  # later (newest) surviving block wins
+        return list(deduped.values())
+
     def _tail_blocks_and_children(
         target_run_id: str,
     ) -> tuple[list[dict[str, Any]], list[str]]:
@@ -947,9 +1034,10 @@ def _collect_budget_precheck_blocks(
         page = replay.list_events(
             team_id=team_id, run_id=target_run_id, after_sequence=after, limit=_EVENT_PAGE_SIZE
         )
-        blocks: list[dict[str, Any]] = []
+        ordered_events = list(page.events)
+        block_slots: list[tuple[int, dict[str, Any]]] = []
         child_run_ids: list[str] = []
-        for event in page.events:
+        for slot, event in enumerate(ordered_events):
             event_type = str(event.event_type)
             payload = event.payload if isinstance(event.payload, Mapping) else {}
             if event_type == _KNOWLEDGE_INVOCATION_CREATED_EVENT_TYPE:
@@ -960,15 +1048,18 @@ def _collect_budget_precheck_blocks(
                 anomaly_inbox_service.BUDGET_PRECHECK_BLOCKED_EVENT_TYPE
             ):
                 continue
-            blocks.append(
-                {
-                    **dict(payload),
-                    "runId": target_run_id,
-                    "nodeId": str(payload.get("nodeId") or ""),
-                    "occurredAt": _iso_from_ms(event.occurred_at_ms),
-                }
+            block_slots.append(
+                (
+                    slot,
+                    {
+                        **dict(payload),
+                        "runId": target_run_id,
+                        "nodeId": str(payload.get("nodeId") or ""),
+                        "occurredAt": _iso_from_ms(event.occurred_at_ms),
+                    },
+                )
             )
-        return blocks, child_run_ids
+        return _drop_stale_budget_blocks(ordered_events, block_slots), child_run_ids
 
     try:
         blocks, child_run_ids = _tail_blocks_and_children(run_id)
