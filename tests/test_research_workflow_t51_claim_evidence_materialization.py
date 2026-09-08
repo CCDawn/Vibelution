@@ -751,6 +751,12 @@ def test_retry_attempt_passes_evidence_scope_without_forcing_session_retry(
     )
 
     captured: dict = {}
+    # This test owns payload construction, not canonical task-store lookup.
+    # Replay identity/owner validation has its own store-backed regressions.
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.source_stage_task_replay.find_reusable_source_stage_task",
+        lambda **kwargs: captured.update({"replayLookup": kwargs}),
+    )
     monkeypatch.setattr(
         "core.web.services.team_workflow.research_runtime.agent_claim_evidence_materializer.build_formal_evidence_retry_contract",
         lambda **_k: {
@@ -783,6 +789,8 @@ def test_retry_attempt_passes_evidence_scope_without_forcing_session_retry(
     )
 
     assert captured["payload"]["formalRetry"] is False
+    assert captured["replayLookup"]["source_run_id"] == "sc-run-a"
+    assert captured["replayLookup"]["action"].attempt == 8
     assert captured["payload"]["evidenceRemediationContract"]["scopeCandidateIds"] == [
         "candidate-a"
     ]

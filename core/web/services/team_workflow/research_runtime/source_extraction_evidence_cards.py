@@ -62,6 +62,15 @@ def _text(value: object) -> str:
     return str(value or "").strip()
 
 
+def extraction_has_materializable_evidence(extraction: Mapping[str, Any]) -> bool:
+    """Shared skip rule for formal claim storage and artifact construction."""
+    return (
+        _text(extraction.get("decision")).lower() != "exclude"
+        and _text(extraction.get("evidenceStatus")).lower()
+        not in {"missing_evidence_anchor", "missing", "unverified"}
+    )
+
+
 def _required_text(
     item: Mapping[str, Any],
     parent: Mapping[str, Any],
@@ -300,6 +309,10 @@ def _first_nested_citation_locator(item: Mapping[str, Any]) -> dict[str, Any]:
             locator = _direct_citation_locator(raw)
             if _has_locator_value(locator):
                 return locator
+            if collection_key == "evidenceRefs" and _text(raw.get("quote")):
+                ref_id = _text(raw.get("id") or raw.get("evidenceRefId") or raw.get("refId"))
+                if ref_id:
+                    return {"evidenceRef": ref_id}
     return {}
 
 
@@ -455,17 +468,23 @@ def build_source_extraction_evidence_cards(
                     f"{key}[{extraction_index}] must be an object"
                 )
             extraction = dict(raw)
-            findings_value = extraction.get("keyFindings")
-            if isinstance(findings_value, list) and findings_value:
+            if not extraction_has_materializable_evidence(extraction):
+                continue
+            nested_cards = False
+            for collection_key in ("claims", "keyFindings"):
+                findings_value = extraction.get(collection_key)
+                if not isinstance(findings_value, list) or not findings_value:
+                    continue
+                nested_cards = True
                 for finding_index, raw_finding in enumerate(findings_value):
                     if not isinstance(raw_finding, Mapping):
                         raise SourceExtractionEvidenceContractError(
-                            f"{key}[{extraction_index}].keyFindings[{finding_index}] must be an object"
+                            f"{key}[{extraction_index}].{collection_key}[{finding_index}] must be an object"
                         )
                     card = _v2_card(
                         dict(raw_finding),
                         extraction,
-                        path=f"{key}[{extraction_index}].keyFindings[{finding_index}]",
+                        path=f"{key}[{extraction_index}].{collection_key}[{finding_index}]",
                     )
                     identity = json.dumps(
                         card,
@@ -477,6 +496,7 @@ def build_source_extraction_evidence_cards(
                     if identity not in seen:
                         seen.add(identity)
                         cards.append(card)
+            if nested_cards:
                 continue
             cards.append(
                 _v2_card(
@@ -491,5 +511,6 @@ def build_source_extraction_evidence_cards(
 __all__ = [
     "SourceExtractionEvidenceContractError",
     "build_source_extraction_evidence_cards",
+    "extraction_has_materializable_evidence",
     "normalize_challenge_evidence_fields",
 ]

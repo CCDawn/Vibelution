@@ -255,12 +255,9 @@ def _source_collection_stage_writeback_extraction_card_contract_errors(
 
     This boundary rejects the same violation at writeback acceptance with a
     precise path so the agent can fix and rewrite within the same task.  The
-    rules are NOT duplicated here: this gate reuses the materializer's own
-    ``_materializable_claims`` (skip semantics for ``exclude`` and honest
-    ``missing_evidence_anchor`` entries) plus
-    ``normalize_challenge_evidence_fields`` (the exact validator the
-    materializer calls), so a writeback is rejected exactly when
-    materialization would raise.
+    gate runs the production card builder, whose eligibility and field
+    normalization are shared with claim materialization. Shape and locator
+    errors therefore reach the agent before the task completes.
 
     Returns human-readable errors; an empty list means the writeback passes.
     """
@@ -271,22 +268,16 @@ def _source_collection_stage_writeback_extraction_card_contract_errors(
         return []
     if not _source_collection_stage_writeback_formal_claim_bound(task, run_id):
         return []
-    from ..research_runtime.agent_claim_evidence_materializer import (
-        _materializable_claims,
-    )
     from ..research_runtime.source_extraction_evidence_cards import (
         SourceExtractionEvidenceContractError,
-        normalize_challenge_evidence_fields,
+        build_source_extraction_evidence_cards,
     )
 
-    errors: list[str] = []
-    task_like = {"result": result_payload}
-    for extraction, claim, claim_path in _materializable_claims(task_like):
-        try:
-            normalize_challenge_evidence_fields(claim, extraction, path=claim_path)
-        except SourceExtractionEvidenceContractError as exc:
-            errors.append(s._trim_text(str(exc), max_length=400))
-    return errors
+    try:
+        build_source_extraction_evidence_cards(result_payload)
+    except SourceExtractionEvidenceContractError as exc:
+        return [s._trim_text(str(exc), max_length=400)]
+    return []
 
 
 def _park_source_collection_stage_task_quote_anchor_remediation(

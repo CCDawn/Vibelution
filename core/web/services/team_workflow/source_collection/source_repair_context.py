@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from .extraction_quote_anchor_supply import latest_failed_fetch_attempts
+
 
 def source_repair_message(
     *, team_id: str, run_id: str, candidates: list[dict[str, Any]]
@@ -23,14 +25,10 @@ def source_repair_message(
     # A failed fetch needs another source even when a metadata/record anchor
     # made the generic extraction ledger ready. Successful fetches do not.
     result = task.get("result") if isinstance(task.get("result"), dict) else {}
-    latest_fetches = {
-        attempt.get("candidateId"): attempt.get("status")
-        for attempt in result.get("evidenceFetchAttempts", [])
-        if isinstance(attempt, dict) and attempt.get("candidateId")
-    }
+    failed_fetches = latest_failed_fetch_attempts([result])
     gap_ids.update(
         candidate.get("candidateId") for candidate in candidates
-        if latest_fetches.get(candidate.get("candidateId")) == "failed"
+        if candidate.get("candidateId") in failed_fetches
         and (candidate.get("metadata") or {}).get("contentExtraction", {}).get("taskId") == task.get("taskId")
     )
     if not gap_ids:

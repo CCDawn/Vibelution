@@ -31,6 +31,14 @@ def test_initial_finding_has_no_repair_instruction(monkeypatch):
     assert source_repair_message(team_id="team", run_id="new", candidates=[]) == ""
 
 
+def test_latest_successful_fetch_clears_previous_failure():
+    from core.web.services.team_workflow.source_collection.extraction_quote_anchor_supply import latest_failed_fetch_attempts
+    assert latest_failed_fetch_attempts([
+        {"evidenceFetchAttempts": [{"candidateId": "source", "status": "failed", "failureCode": "HTTP_403"}]},
+        {"evidenceFetchAttempts": [{"candidateId": "source", "status": "fetched"}]},
+    ]) == {}
+
+
 def test_current_failed_fetch_is_a_repair_gap_even_with_ready_metadata(monkeypatch):
     task = {
         "taskId": "extraction-current", "stageId": "extraction",
@@ -85,7 +93,6 @@ def test_extraction_retry_includes_new_replacement_source():
 
 def test_completed_finding_repair_starts_bounded_new_batch_ledger(tmp_path, monkeypatch):
     from tests._support.team_workflow.cases_source_collection import _finding_close_first_step_task
-    from core.web.services.team_workflow.source_collection import stage_session
     env = _finding_close_first_step_task(tmp_path, monkeypatch)
     team_id, run_id = env["team"]["teamId"], env["runId"]
     previous = dict(env["task"]["task"])
@@ -94,7 +101,20 @@ def test_completed_finding_repair_starts_bounded_new_batch_ledger(tmp_path, monk
         {"batchFingerprint": "old", "leadFingerprints": ["https://example.org/old"]},
     ]
     s._upsert_source_collection_stage_session_task(team_id, run_id, previous)
-    monkeypatch.setattr(stage_session, "source_repair_message", lambda **_: "current extraction gaps")
+    extraction_task_id = "extraction-failed-fetch"
+    candidate = s.register_candidate_source(team_id, {
+        "title": "Unavailable original", "sourceUrl": "https://example.org/unavailable",
+        "sourceKind": "paper", "allowedForAnalysis": True,
+        "metadata": {"sourceCollectionRunId": run_id, "contentExtraction": {
+            "taskId": extraction_task_id, "decision": "needs_more_info", "evidenceStatus": "evidence_ready",
+        }},
+    })["candidate"]
+    s._upsert_source_collection_stage_session_task(team_id, run_id, {
+        "taskId": extraction_task_id, "stageId": "extraction", "status": "needs_review",
+        "result": {"evidenceFetchAttempts": [{
+            "candidateId": candidate["candidateId"], "status": "failed", "failureCode": "HTTP_403",
+        }]},
+    })
     created = s.start_source_collection_stage_session_task(team_id, run_id, {
         "stageId": "finding", "agentId": previous["agentId"], "agentRole": "source_finder",
         "idempotencyKey": "replacement-finding-pass",
@@ -102,4 +122,5 @@ def test_completed_finding_repair_starts_bounded_new_batch_ledger(tmp_path, monk
     assert created["sourceRepairOfTaskId"] == previous["taskId"]
     assert created["sourceCollectionWritebackBatches"] == []
     assert created["writebackContract"]["searchEnvelope"] == previous["writebackContract"]["searchEnvelope"]
-    assert "current extraction gaps" in env["submitted"][-1]["content"]
+    assert "本轮提炼退回的来源缺口" in env["submitted"][-1]["content"]
+    assert candidate["candidateId"] in env["submitted"][-1]["content"]

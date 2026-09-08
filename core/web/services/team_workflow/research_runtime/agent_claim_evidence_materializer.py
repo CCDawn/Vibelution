@@ -36,7 +36,10 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
-from .source_extraction_evidence_cards import normalize_challenge_evidence_fields
+from .source_extraction_evidence_cards import (
+    extraction_has_materializable_evidence,
+    normalize_challenge_evidence_fields,
+)
 
 
 class EvidenceMaterializationError(RuntimeError):
@@ -150,10 +153,7 @@ def _materializable_claims(
             if not isinstance(raw_extraction, dict):
                 continue
             extraction = dict(raw_extraction)
-            if _text(extraction.get("decision")).lower() == "exclude":
-                continue
-            evidence_status = _text(extraction.get("evidenceStatus")).lower()
-            if evidence_status in {"missing_evidence_anchor", "missing", "unverified"}:
+            if not extraction_has_materializable_evidence(extraction):
                 continue
             extraction_path = f"{collection}[{extraction_index}]"
             claims_items = list(extraction.get("claims") or [])

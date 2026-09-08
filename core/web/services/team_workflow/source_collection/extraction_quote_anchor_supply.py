@@ -127,6 +127,9 @@ def latest_failed_fetch_attempts(
                 continue
             candidate_id = _clean(item.get("candidateId"))
             status = _clean(item.get("status")).lower()
+            if candidate_id and status == "fetched":
+                failed.pop(candidate_id, None)
+                continue
             if not candidate_id or status != "failed":
                 continue
             attempt: dict[str, Any] = {
