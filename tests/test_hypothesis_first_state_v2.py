@@ -6395,8 +6395,14 @@ result.write_text(str(response["result"]["status"]), encoding="utf-8")
             for result_path in result_paths
         )
         ready_paths = [path.with_suffix(".ready") for path in result_paths]
-        deadline = time.monotonic() + 10
+        # Cold imports compete with the other xdist workers. This bounds
+        # startup only; both processes still enter the same contention window.
+        deadline = time.monotonic() + 60
         while not all(path.exists() for path in ready_paths):
+            for worker in workers:
+                if worker.poll() is not None:
+                    _, stderr = worker.communicate()
+                    pytest.fail(f"worker exited before start barrier: {stderr.decode('utf-8', 'replace')}")
             assert time.monotonic() < deadline, "workers did not reach the start barrier"
             time.sleep(0.01)
         start.write_text("start", encoding="utf-8")
