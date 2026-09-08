@@ -71,8 +71,10 @@ def defer_completion(store: Any, *, outbox: Any, action: PendingAction,
     """Wait on receipt delivery, not the model retry counter or execution clock."""
     from .block_projection import apply_node_run_block
     handle = AgentTaskHandle(**error.resume["handle"])
+    compensation: str | None = None
 
     def mutate(uow):
+        nonlocal compensation
         statuses, delivered = receipt_delivery_state(uow, action, handle)
         previous = json.loads(outbox.last_problem_json or "{}")
         # Delivery can commit between the Registry read and this transaction.
@@ -103,8 +105,28 @@ def defer_completion(store: Any, *, outbox: Any, action: PendingAction,
                                  node_id=action.node_id, problem=problem, now_ms=now_ms,
                                  actor_id=owner, correlation_id=action.action_id,
                                  update_attempt=False)
+            # Same-transaction compensation: without it the attempt's budget
+            # reservation stays 'reserved' forever and its full estimate keeps
+            # occupying the stage admission window (zombie attempt lockout).
+            from .budget_authority_adapter import (
+                compensate_terminal_attempt_reservation_in_uow,
+            )
+            compensation = compensate_terminal_attempt_reservation_in_uow(
+                uow, run_id=action.run_id, node_run_id=action.node_run_id,
+                reason="completion_dependency_unavailable_compensation",
+                correlation_id=action.action_id, now_ms=now_ms,
+            )
 
     store.submit(mutate, force_flush=True).result(timeout=30)
+    if compensation in {"settled", "voided"}:
+        from .adapter_dispatch_worker import _record_scene_event
+        _record_scene_event(
+            "completion_dependency.reservation_compensated",
+            outcome=compensation,
+            fields={"runId": action.run_id, "nodeRunId": action.node_run_id,
+                    "reservationId": f"reservation-{action.node_run_id}",
+                    "result": compensation},
+        )
 
 
 def wake_receipt_completion(uow: Any, *, receipt: dict[str, Any], now_ms: int) -> None:

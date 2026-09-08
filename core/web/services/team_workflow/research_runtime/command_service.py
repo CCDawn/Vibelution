@@ -1382,6 +1382,55 @@ class WorkflowCommandService:
             (now_ms, now_ms, request.run_id),
         )
         revived = int(uow.repository.affected() or 0)
+        # Completion-dependency terminal failures used to leave the attempt's
+        # budget receipt in 'reserved' with no compensation, so its full
+        # estimate occupied the stage admission window forever and every later
+        # start_node/retry_node was rejected with budget_safety_limit_reached.
+        # Close those zombie reservations here, in this same transaction.
+        from .budget_authority_adapter import (
+            compensate_terminal_attempt_reservation_in_uow,
+        )
+        from .completion_dependency import COMPLETION_PENDING
+
+        compensated = []
+        zombie_rows = uow.repository.execute(
+            """
+            SELECT node_run_id FROM node_attempts na
+            WHERE na.run_id = ? AND na.status = 'running'
+              AND EXISTS (
+                SELECT 1 FROM outbox_actions oa
+                WHERE oa.node_run_id = na.node_run_id
+                  AND oa.action_kind = 'adapter_dispatch'
+                  AND oa.status = 'failed'
+              )
+            """,
+            (request.run_id,),
+        ).fetchall()
+        for (zombie_node_run_id,) in zombie_rows:
+            problem_row = uow.repository.execute(
+                "SELECT last_problem_json FROM outbox_actions "
+                "WHERE node_run_id = ? AND action_kind = 'adapter_dispatch' "
+                "AND status = 'failed' ORDER BY updated_at_ms DESC LIMIT 1",
+                (zombie_node_run_id,),
+            ).fetchone()
+            try:
+                problem = json.loads(str(problem_row[0]) or "{}") if problem_row else {}
+            except ValueError:
+                continue
+            if not isinstance(problem, dict) or problem.get("code") != COMPLETION_PENDING:
+                continue
+            result = compensate_terminal_attempt_reservation_in_uow(
+                uow,
+                run_id=request.run_id,
+                node_run_id=zombie_node_run_id,
+                reason="reconcile_completion_dependency_compensation",
+                correlation_id=str(request.idempotency_key),
+                now_ms=now_ms,
+            )
+            if result in {"settled", "voided"}:
+                compensated.append(
+                    {"nodeRunId": zombie_node_run_id, "result": result}
+                )
         active_work_row = uow.repository.execute(
             """
             SELECT
@@ -1455,6 +1504,7 @@ class WorkflowCommandService:
                     "reconciledStatus": target_status.value,
                     "artifactReceiptIds": list(artifact_receipt_ids),
                     "staleAttemptIds": list(plan.superseded_node_run_ids),
+                    "compensatedReservations": compensated,
                     "recomputedActiveNodeId": plan.active_node_id,
                     "landingProblemCode": (
                         str(landing_problem.get("code") or "")

@@ -1015,6 +1015,88 @@ def settle_budget_authority(
     ).result(timeout=30)
 
 
+def compensate_terminal_attempt_reservation_in_uow(
+    uow: Any,
+    *,
+    run_id: str,
+    node_run_id: str,
+    reason: str,
+    correlation_id: str = "",
+    now_ms: int | None = None,
+) -> str:
+    """Compensate the budget reservation of a terminally failed attempt.
+
+    The completion-dependency permanently-unavailable path neither settles on
+    success nor voids on failure (adapter_dispatch_worker's generic failure
+    branches all compensate), so the attempt's ``reserved`` receipt keeps
+    occupying its full admission estimate inside the stage window forever —
+    one zombie attempt holding 1,480,468 of a 2,000,000 stage limit locked
+    every later start_node/retry_node behind
+    ``budget_safety_limit_reached``.  A model call that really happened is
+    settled at its observed usage; a never-used reservation receives a
+    compensation void.  A receipt already in a terminal state is an
+    idempotent no-op and its own status is returned.
+
+    Returns one of ``"settled"``, ``"voided"``, the receipt's terminal
+    status, ``"missing"`` (no receipt for the reservation id) or
+    ``"binding_mismatch"`` (receipt belongs to another run/node).
+    """
+    run_id = _identity(run_id, "run_id")
+    node_run_id = _identity(node_run_id, "node_run_id")
+    reservation_id = f"reservation-{node_run_id}"
+    resolved_now_ms = int(now_ms if now_ms is not None else time.time() * 1000)
+    row = uow.repository.execute(
+        "SELECT receipt_id, run_id, node_run_id, settled_json, status "
+        "FROM budget_receipts WHERE reservation_id = ?",
+        (reservation_id,),
+    ).fetchone()
+    if row is None:
+        return "missing"
+    receipt_id, row_run_id, row_node_run_id, settled_raw, status = row
+    if (
+        str(row_run_id or "") != run_id
+        or str(row_node_run_id or "") != node_run_id
+    ):
+        return "binding_mismatch"
+    status = str(status or "")
+    if status != "reserved":
+        # Already settled/voided/released/failed: compensation is a no-op.
+        return status
+    payload = _payload(settled_raw, label="settled_json")
+    usage = dict(_usage_payload(payload))
+    invocations = payload.get("invocations")
+    if usage or (isinstance(invocations, Mapping) and bool(invocations)):
+        # The model call really happened; keep the observed usage projection
+        # (settle merges and never loses the committed cumulative usage).
+        settle_budget_authority_in_uow(
+            uow,
+            reservation={
+                "reservationId": reservation_id,
+                "runId": run_id,
+                "nodeRunId": node_run_id,
+            },
+            usage=usage,
+            now_ms=resolved_now_ms,
+        )
+        return "settled"
+    payload.update(
+        {
+            "reason": reason,
+            "source": "budget-authority-adapter",
+            "terminal": "voided",
+        }
+    )
+    if correlation_id:
+        payload["correlationId"] = correlation_id
+    uow.repository.update_budget_receipt(
+        receipt_id,
+        status="voided",
+        now_ms=resolved_now_ms,
+        settled_json=json.dumps(payload, ensure_ascii=False),
+    )
+    return "voided"
+
+
 _TERMINAL_BUDGET_STATUSES = frozenset(
     {"settled", "released", "failed", "voided"}
 )

@@ -41,6 +41,9 @@ from core.web.services.team_workflow.research_runtime.command_offers.reconcile_r
 from core.web.services.team_workflow.research_runtime.command_offers.retry_node import (
     build_retry_node_offers,
 )
+from core.web.services.team_workflow.research_runtime.completion_dependency import (
+    COMPLETION_PENDING,
+)
 from core.web.services.team_workflow.research_runtime.reconcile_authority import (
     EVALUATOR_BLOCK_CODE,
     plan_ledger_authority,
@@ -665,5 +668,171 @@ def test_reconcile_with_zero_revivable_or_active_work_lands_blocked_for_retry(
             "reconcile"
         ]
         assert commands.wake_count == 0
+    finally:
+        commands.close()
+
+
+def test_reconcile_compensates_completion_pending_reservation(tmp_path: Path) -> None:
+    """Reconcile closes reservations stranded by completion-dependency failures.
+
+    A terminal completion-dependency failure (defer_completion's unavailable
+    branch) historically left the attempt's budget receipt 'reserved', so its
+    full estimate kept occupying the stage admission window and every later
+    start_node/retry_node was rejected with budget_safety_limit_reached. The
+    operator reconcile path must settle such zombie reservations (observed
+    usage) and leave receipts of other failure shapes untouched."""
+
+    commands = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        run_id = "run-zombie-lock"
+        zombie_node_run_id = f"nr-{run_id}-source_finding-a2"
+        other_node_run_id = f"nr-{run_id}-source_extraction-a1"
+        store = commands.store
+
+        def seed(uow):
+            uow.repository.insert_run(
+                build_run_record(
+                    workflow_version_id=_PINNED_WORKFLOW_VERSION_ID,
+                    run_id=run_id,
+                    status="reconciliation_required",
+                    run_version=3,
+                    last_event_sequence=8,
+                )
+            )
+            uow.repository.insert_command(
+                build_command_record(
+                    command_id="cmd-zombie",
+                    run_id=run_id,
+                    idempotency_key="key:zombie",
+                    node_id="source_finding",
+                )
+            )
+            uow.repository.insert_attempt(
+                _attempt(
+                    "source_finding",
+                    attempt=2,
+                    status="running",
+                    run_id=run_id,
+                    command_id="cmd-zombie",
+                )
+            )
+            uow.repository.insert_outbox(
+                replace(
+                    build_outbox_record(
+                        "act-zombie-adapter",
+                        run_id=run_id,
+                        command_id="cmd-zombie",
+                        action_kind="adapter_dispatch",
+                        status="failed",
+                    ),
+                    node_run_id=zombie_node_run_id,
+                    last_problem_json=json.dumps(
+                        {
+                            "code": COMPLETION_PENDING,
+                            "dependencyStatus": "unavailable",
+                        }
+                    ),
+                )
+            )
+            uow.repository.insert_budget_receipt(
+                receipt_id="budget-receipt-zombie",
+                run_id=run_id,
+                node_run_id=zombie_node_run_id,
+                reservation_id=f"reservation-{zombie_node_run_id}",
+                stage_id="knowledge_collection",
+                policy_hash="p-1",
+                reserved_json=json.dumps(
+                    {
+                        "reserved": {
+                            "estimatedTokens": 1_480_468,
+                            "tokens": 1_480_468,
+                        },
+                        "limits": {"tokens": 2_000_000},
+                    }
+                ),
+                created_at_ms=FIXED_NOW_MS,
+            )
+            uow.repository.update_budget_receipt(
+                "budget-receipt-zombie",
+                status="reserved",
+                now_ms=FIXED_NOW_MS,
+                settled_json=json.dumps(
+                    {
+                        "usage": {"tokens": 1_066_138},
+                        "invocations": {"i1": {"tokens": 1_066_138}},
+                    }
+                ),
+            )
+            # 反例：非 completion-pending 的 failed act + running attempt
+            # 的预留不得被 reconcile 触碰。
+            uow.repository.insert_attempt(
+                _attempt(
+                    "source_extraction",
+                    status="running",
+                    run_id=run_id,
+                    command_id="cmd-zombie",
+                )
+            )
+            uow.repository.insert_outbox(
+                replace(
+                    build_outbox_record(
+                        "act-other-adapter",
+                        run_id=run_id,
+                        command_id="cmd-zombie",
+                        action_kind="adapter_dispatch",
+                        status="failed",
+                    ),
+                    node_run_id=other_node_run_id,
+                    last_problem_json=json.dumps(
+                        {"code": "adapter_execution_exception"}
+                    ),
+                )
+            )
+            uow.repository.insert_budget_receipt(
+                receipt_id="budget-receipt-other",
+                run_id=run_id,
+                node_run_id=other_node_run_id,
+                reservation_id=f"reservation-{other_node_run_id}",
+                stage_id="knowledge_collection",
+                policy_hash="p-1",
+                reserved_json=json.dumps(
+                    {"reserved": {"estimatedTokens": 300_000, "tokens": 300_000}}
+                ),
+                created_at_ms=FIXED_NOW_MS,
+            )
+
+        store.submit(seed, force_flush=True).result(timeout=10)
+        commands.service.submit(
+            commands.request(
+                command=WorkflowCommandKind.RECONCILE_RUN,
+                run_id=run_id,
+                node_id=None,
+                expected_run_version=3,
+                idempotency_key="ui:reconcile-zombie",
+            )
+        )
+
+        def receipt_status(reservation_id: str) -> str:
+            return store.submit(
+                lambda uow: uow.repository.execute(
+                    "SELECT status FROM budget_receipts WHERE reservation_id = ?",
+                    (reservation_id,),
+                ).fetchone(),
+                force_flush=True,
+            ).result(timeout=10)[0]
+
+        assert receipt_status(f"reservation-{zombie_node_run_id}") == "settled"
+        assert receipt_status(f"reservation-{other_node_run_id}") == "reserved"
+
+        blocked_events = [
+            event
+            for event in store.list_events(run_id)
+            if event.event_type == "run_blocked"
+        ]
+        payload = json.loads(blocked_events[-1].payload_json)
+        assert {
+            "nodeRunId": zombie_node_run_id,
+            "result": "settled",
+        } in payload["compensatedReservations"]
     finally:
         commands.close()

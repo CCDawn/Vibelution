@@ -9,6 +9,9 @@ from core.web.services.team_workflow.research_runtime.completion_dependency impo
     defer_completion, wake_receipt_completion,
 )
 from core.web.services.team_workflow.research_runtime.adapters.domain_adapters import AgentActionAdapter
+from core.web.services.team_workflow.research_runtime.budget_authority_adapter import (
+    compensate_terminal_attempt_reservation_in_uow,
+)
 from core.web.services.team_workflow.research_runtime.challenge_turn_policy import challenge_task_deadline_scope
 from core.web.services.team_workflow.research_runtime.domain_ports import AgentTaskHandle
 from tests._support.adapter_fakes import FakeDomainPorts
@@ -35,6 +38,45 @@ def _delivery(action, status):
         status=status, attempt_count=0, available_at_ms=FIXED_NOW_MS, lease_owner=None,
         lease_expires_at_ms=None, last_problem_json=None, created_at_ms=FIXED_NOW_MS, updated_at_ms=FIXED_NOW_MS,
     ), receipt
+
+
+def _budget_receipt_row(h, action):
+    return h.store.submit(
+        lambda u: u.repository.execute(
+            "SELECT status, settled_json FROM budget_receipts WHERE reservation_id = ?",
+            (f"reservation-{action.node_run_id}",),
+        ).fetchone(),
+        force_flush=True,
+    ).result(timeout=10)
+
+
+def _seed_reserved_receipt(h, action, *, settled_payload):
+    """Live reservation-{node_run_id} receipt, mirroring reserve_budget_authority's columns."""
+
+    def mutate(uow):
+        uow.repository.insert_budget_receipt(
+            receipt_id="budget-receipt-1",
+            run_id=action.run_id,
+            node_run_id=action.node_run_id,
+            reservation_id=f"reservation-{action.node_run_id}",
+            stage_id="knowledge_collection",
+            policy_hash=action.budget_policy_hash or "",
+            reserved_json=json.dumps(
+                {
+                    "reserved": {"estimatedTokens": 1_480_468, "tokens": 1_480_468},
+                    "limits": {"tokens": 2_000_000},
+                }
+            ),
+            created_at_ms=FIXED_NOW_MS,
+        )
+        uow.repository.update_budget_receipt(
+            "budget-receipt-1",
+            status="reserved",
+            now_ms=FIXED_NOW_MS,
+            settled_json=json.dumps(settled_payload, ensure_ascii=False),
+        )
+
+    h.store.submit(mutate, force_flush=True).result(timeout=10)
 
 
 @pytest.mark.parametrize("delivery_status", ["pending", "leased", "succeeded"])
@@ -202,5 +244,67 @@ def test_delivery_during_leased_resume_gets_one_new_registry_read(tmp_path):
         resumed = lease_ready_actions(h.store, owner="adapter-worker", now_ms=FIXED_NOW_MS + 10000, limit=1)[0]
         defer_completion(h.store, outbox=resumed, action=action, error=_error(action), owner="adapter-worker", now_ms=FIXED_NOW_MS + 10000)
         assert _outbox_row(h, original.action_id).status == "failed"
+    finally:
+        h.close()
+
+
+def test_unavailable_dependency_settles_reservation_with_observed_usage(tmp_path):
+    """Terminal unavailable completion must settle at observed usage, not strand 'reserved'.
+
+    Production incident: the turn's 1,066,138-token call really happened but its
+    receipt readback was missing, so the attempt's 1,480,468 reservation stayed
+    'reserved' and, added to a1's settled 519,532, permanently filled the
+    2,000,000 stage limit (every later start_node rejected with
+    budget_safety_limit_reached)."""
+    h = CommandHarness(tmp_path / "ledger.sqlite")
+    try:
+        h.seed_run(status="running")
+        action = _agent_action()
+        _seed(h, action, action.node_id)
+        _seed_reserved_receipt(
+            h,
+            action,
+            settled_payload={
+                "usage": {"tokens": 1_066_138},
+                "invocations": {"i1": {"tokens": 1_066_138}},
+            },
+        )
+        outbox = _leased_outbox(h, action, attempt_count=9)
+        defer_completion(h.store, outbox=outbox, action=action, error=_error(action), owner="adapter-worker", now_ms=FIXED_NOW_MS + 1)
+        assert _outbox_row(h, outbox.action_id).status == "failed"
+        status, settled_json = _budget_receipt_row(h, action)
+        assert status == "settled"
+        # The settle merge must keep the observed usage, not reset it.
+        assert json.loads(settled_json)["usage"]["tokens"] == 1_066_138
+    finally:
+        h.close()
+
+
+def test_unavailable_dependency_voids_unused_reservation(tmp_path):
+    h = CommandHarness(tmp_path / "ledger.sqlite")
+    try:
+        h.seed_run(status="running")
+        action = _agent_action()
+        _seed(h, action, action.node_id)
+        _seed_reserved_receipt(h, action, settled_payload={})
+        outbox = _leased_outbox(h, action, attempt_count=9)
+        defer_completion(h.store, outbox=outbox, action=action, error=_error(action), owner="adapter-worker", now_ms=FIXED_NOW_MS + 1)
+        assert _outbox_row(h, outbox.action_id).status == "failed"
+        status, _ = _budget_receipt_row(h, action)
+        assert status == "voided"
+        # A terminal receipt makes compensation an idempotent no-op that
+        # returns the receipt's own status.
+        rerun = h.store.submit(
+            lambda u: compensate_terminal_attempt_reservation_in_uow(
+                u,
+                run_id=action.run_id,
+                node_run_id=action.node_run_id,
+                reason="completion_dependency_unavailable_compensation",
+                correlation_id=action.action_id,
+                now_ms=FIXED_NOW_MS + 2,
+            ),
+            force_flush=True,
+        ).result(timeout=10)
+        assert rerun == "voided"
     finally:
         h.close()
