@@ -147,3 +147,15 @@
 - 现有操作面核查：formal run 面板「对账运行」是对账唯一前端入口；知识子 run 的节点 offer 白名单只含 ensure/inspect——**子 run 没有任何对账入口**（grep 全仓确认）。真实前端点「对账运行」：`reconcile_formal_run` 200 受理，formal 落 v5 blocked（`knowledge_package_not_materialized` + `hypothesis_round_unconverged`），但子 run 纹丝不动仍 reconciliation_required v15。
 - 根因：`_handle_reconcile_run`（command_service.py）只对 `request.run_id` 做 ledger 权威重规划（superseded→stale、复活 failed graph_dispatch、落位 run 状态）；对知识子 run 仅做 `_compensate_completion_pending_reservations` 预留补偿——复活 SQL 的 `WHERE run_id = ?` 永远指父 run，子 run 的 failed dispatch 无人复活。
 - 修复（在途，codex/fix-reconcile-cascade-child-runs）：把单 run 重规划核心抽成复用 helper，父 run 对账落位后对 `reconciliation_required` 的知识子 run 在**同一事务**内做同构重规划（`KNOWLEDGE_SIDEFLOW_NODE_IDS` 节点序、同样的 auto_advance_not_ready 排除、同款落位阶梯 lands_blocked→BLOCKED / 有活→RUNNING / 零活→保持）+ 子 run 版本递增与 reconciled 事件；blocked/终态子 run 不动。
+
+### B.14 缺陷⑬：收件箱陈旧预算项渲染可点 CTA——点击 409、误点风险（已修复，2fa079183）
+
+- 现象（B.11 复验中实录）：evidence_relations 补预算重试成功后，其旧 `budget_precheck_blocked` 事件仍留在 tail 窗口里，收件箱继续渲染该项的可点「一键补预算」CTA；点击以 `idempotency_conflict`（同键不同请求）409 失败。且当 knowledge_ingestion 随后被阻时两项同屏，arm→确认流程须靠肉眼分辨新旧项，误点陈旧项即 409。
+- 根因：`_collect_budget_precheck_blocks` 无差别收集 tail 里全部 precheck 事件，不判节点是否已越过阻塞。
+- 修复（2fa079183）：派生层按账本真实事件判时效——同节点更新 attempt 的 `node_starting`、经 nodeRunId→nodeId 归属的 `node_succeeded`、同 run 异节点的新 precheck（构造上仅在本节点成功后才触发）、`run_succeeded` 四类证据任一出现即判陈旧丢弃；同节点多块去重保最新；每 run tail 独立过滤保住 ⑧ 的子 run 信号；无法归属的成功保持可见（fail-visible）。+4 测试（16 全绿）。
+- 价值：补预算→重试→成功的自续环每转一圈不再遗留幽灵 CTA，操作员见到的每一项都是当前真阻塞。
+
+### B.15 缺陷⑫修复与⑪豁免面（合入后复验在 B.16 记录）
+
+- ⑫ 修复（72f1af139）：`_handle_reconcile_run` 抽出 `_apply_ledger_reconcile_for_run` 复用核心；父落态后同事务级联 `reconciliation_required` 子 run（`KNOWLEDGE_SIDEFLOW_NODE_IDS` 重排、同款 auto_advance_not_ready 排除、同款落位梯 lands_blocked→BLOCKED/有活→RUNNING/零活→保持、子 run 版本递增 + reconciled run_blocked 事件含 parentRunId）。+5 测试（16 全绿，含幂等与 readiness 裁决保护）。
+- ⑪（19ae6ffad→rebase）：`evidence_graph_waiver` 服务 + `POST /api/research/workflow-runs/{run_id}/evidence-graph/missing-links/waive`（服务端 428 闭合 confirmed/理由≥8 字、404 族、operator scope、幂等 no-op 不改写审计）；写入走 knowledge_kernel 正规候选店面（同锁同 `sourceCollectionRunId` 权威 scope）；`missingLinkCount` 冻结、`waiverCount` 按读侧同口径重算——**门禁不放宽，只登记人工接受**；图工作台「缺口」行清单 + 豁免两段式交互（理由输入→确认），成功后 refetch。后端 18 测试 + 面板 5 测试绿；首版因 VUI 边界门（本地类常量/内联视觉串）打回返工，类串迁入兄弟 `.styles.ts` 后过门。
