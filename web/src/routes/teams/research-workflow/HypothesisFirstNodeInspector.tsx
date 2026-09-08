@@ -871,17 +871,13 @@ function InspectorBody(props: {
     staleTime: 30_000,
   });
   const selectionAction = canonicalHypothesisSelectionActionForState(props.stateV2);
-  const formalCandidateCount = new Set(
-    (props.stateV2?.generation?.candidateIds ?? [])
-      .map((candidateId) => String(candidateId || "").trim())
-      .filter(Boolean),
-  ).size;
   if (nodeId === HYPOTHESIS_FIRST_SELECTION_NODE_ID) {
     // A selected hypothesis card keeps its own action surface even while the
     // formal runtime owns the canonical current phase.  R0 drafts and
-    // knowledge prerequisites do not enter generation.candidateIds, so they
-    // remain visible as an explicit wait state with no submit path.
-    if (selectionAction || formalCandidateCount >= 2) {
+    // knowledge prerequisites do not expose a canonical record_selection
+    // action, so they remain visible as an explicit wait state with no submit
+    // path. Candidate count alone never authorizes a mutation.
+    if (selectionAction) {
       return (
         <HypothesisSelectionList
           teamId={teamId}

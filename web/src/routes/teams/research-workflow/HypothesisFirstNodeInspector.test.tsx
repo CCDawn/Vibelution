@@ -1117,6 +1117,60 @@ describe("HypothesisFirstNodeInspector", () => {
     expect(mockedExecuteCommand).not.toHaveBeenCalled();
   });
 
+  it("keeps the selection surface locked when formal candidates lack a canonical action", () => {
+    const onNavigateToNode = vi.fn();
+    mockedChain.mockReturnValue(chainData({
+      stateV2: stateV2({
+        currentPhase: "formal_runtime",
+        generation: {
+          lifecycle: "completed",
+          outcome: "succeeded",
+          actionability: "terminal",
+          candidateCount: 2,
+          candidateIds: ["cand-1", "cand-2"],
+          generationMeetingId: "generation-1",
+        },
+        formalRuntime: {
+          runId: "formal-run-1",
+          runVersion: 1,
+          runStatus: "blocked",
+          actionability: "blocked",
+          lifecycle: "waiting_user",
+          outcome: "none",
+          attempt: null,
+          updatedAt: null,
+          problems: [],
+          completionKind: null,
+          lineageDisposition: "current",
+          isCurrentRevision: true,
+          parentRunId: null,
+          childRunIds: [],
+          currentNodeIds: ["hypothesis_design"],
+        },
+        allowedActions: [],
+      }),
+    }));
+    render(
+      <HypothesisFirstNodeInspector
+        teamId="team-1"
+        questionId="Q-01"
+        nodeId="hf_selection"
+        runId="formal-run-1"
+        formalRuntime
+        onOpenQuestion={() => {}}
+        onNavigateToNode={onNavigateToNode}
+      />,
+    );
+
+    expect(container.querySelector('[data-testid="hypothesis-selection-waiting"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="selection-list"]')).toBeNull();
+    expect(container.querySelector('[data-testid="formal-runtime-action-body"]')).toBeNull();
+    expect(container.textContent).toContain("选择操作暂不可用");
+    expect(container.textContent).toContain("当前暂不能选择，请前往待处理步骤");
+    expect(onNavigateToNode).not.toHaveBeenCalled();
+    expect(mockedExecuteCommand).not.toHaveBeenCalled();
+  });
+
   it("shows the loading surface while the chain is loading", () => {
     mockedChain.mockReturnValue(chainData({ loading: true }));
     render(
