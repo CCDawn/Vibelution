@@ -11,6 +11,144 @@ from .source_collection.extraction_quote_anchor_supply import (
 from .source_collection_common import normalize_metadata, normalize_text_list, source_collection_count, trim_text
 
 
+# Only the receipt identity and bounded locators are sent to the Agent; the
+# append-only search JSONL remains the authority for the omitted query/timing
+# details.  The projection is applied even to a one-item trace because one
+# provider can return an oversized query or locator list.
+MAX_COMPACT_SOURCE_COLLECTION_SEARCH_RECEIPTS = 12
+MAX_COMPACT_SOURCE_COLLECTION_SEARCH_RESULT_REFS = 16
+MAX_COMPACT_SOURCE_COLLECTION_SEARCH_EVENT_IDS = 24
+
+
+def _source_collection_search_receipt_list(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
+
+
+def _compact_source_collection_search_receipt(receipt: dict[str, Any]) -> dict[str, Any]:
+    raw_refs = receipt.get("resultRefs") if isinstance(receipt.get("resultRefs"), list) else []
+    raw_event_ids = receipt.get("eventIds") if isinstance(receipt.get("eventIds"), list) else []
+    result_refs = normalize_text_list(
+        raw_refs,
+        max_items=MAX_COMPACT_SOURCE_COLLECTION_SEARCH_RESULT_REFS,
+        max_length=1000,
+    )
+    event_ids = normalize_text_list(
+        raw_event_ids,
+        max_items=MAX_COMPACT_SOURCE_COLLECTION_SEARCH_EVENT_IDS,
+        max_length=160,
+    )
+    compact = {
+        "sourceCollectionRunId": trim_text(receipt.get("sourceCollectionRunId"), max_length=160),
+        "assignmentId": trim_text(receipt.get("assignmentId"), max_length=128),
+        "queryId": trim_text(receipt.get("queryId"), max_length=160),
+        "provider": trim_text(receipt.get("provider"), max_length=80),
+        "perspective": trim_text(receipt.get("perspective"), max_length=80),
+        "status": trim_text(receipt.get("status"), max_length=80),
+        "resultRefs": result_refs,
+        "eventIds": event_ids,
+        "failureReason": trim_text(receipt.get("failureReason"), max_length=500),
+        "resultRefCount": len(raw_refs),
+        "eventIdCount": len(raw_event_ids),
+    }
+    if len(result_refs) < len(raw_refs) or len(event_ids) < len(raw_event_ids):
+        compact["truncated"] = True
+    return compact
+
+
+def compact_source_collection_search_receipts(receipts: Any) -> list[dict[str, Any]]:
+    """Project a large canonical search trace without clipping JSON text.
+
+    Every trace is projected item by item, retaining only the canonical scope
+    IDs, receipt locators, status and failure information needed for a finding
+    decision.  Array overflow is explicit in the item and the summary helper
+    below retains aggregate counts, so the Agent never mistakes a compact view
+    for the full authority.
+    """
+    entries = _source_collection_search_receipt_list(receipts)
+    return [
+        _compact_source_collection_search_receipt(item)
+        for item in entries[-MAX_COMPACT_SOURCE_COLLECTION_SEARCH_RECEIPTS:]
+    ]
+
+
+def summarize_source_collection_search_receipts(
+    receipts: Any,
+    *,
+    next_action: Any = "",
+) -> dict[str, Any]:
+    """Summarize all canonical receipts, including entries omitted from view."""
+    entries = _source_collection_search_receipt_list(receipts)
+    status_counts: dict[str, int] = {}
+    result_ref_count = 0
+    event_id_count = 0
+    item_truncated = False
+    for receipt in entries:
+        status = trim_text(receipt.get("status"), max_length=80).lower() or "unknown"
+        status_counts[status] = status_counts.get(status, 0) + 1
+        refs = receipt.get("resultRefs") if isinstance(receipt.get("resultRefs"), list) else []
+        event_ids = receipt.get("eventIds") if isinstance(receipt.get("eventIds"), list) else []
+        result_ref_count += len(refs)
+        event_id_count += len(event_ids)
+        if (
+            len(refs) > MAX_COMPACT_SOURCE_COLLECTION_SEARCH_RESULT_REFS
+            or len(event_ids) > MAX_COMPACT_SOURCE_COLLECTION_SEARCH_EVENT_IDS
+        ):
+            item_truncated = True
+    visible_count = min(len(entries), MAX_COMPACT_SOURCE_COLLECTION_SEARCH_RECEIPTS)
+    summary: dict[str, Any] = {
+        "receiptCount": len(entries),
+        "visibleReceiptCount": visible_count,
+        "omittedReceiptCount": max(0, len(entries) - visible_count),
+        "foundCount": status_counts.get("found", 0),
+        "failedCount": status_counts.get("failed", 0),
+        "returnedCount": status_counts.get("returned", 0),
+        "resultRefCount": result_ref_count,
+        "eventIdCount": event_id_count,
+        "statusCounts": status_counts,
+        "truncated": len(entries) > MAX_COMPACT_SOURCE_COLLECTION_SEARCH_RECEIPTS or item_truncated,
+    }
+    action = trim_text(next_action, max_length=1000)
+    if action:
+        summary["nextAction"] = action
+    return summary
+
+
+def summarize_source_collection_writeback_batches(
+    batches: Any,
+    *,
+    search_envelope: Any = None,
+) -> dict[str, Any]:
+    """Keep finding batch usage and remaining frozen budget visible."""
+    entries = [item for item in list(batches or []) if isinstance(item, dict)] if isinstance(batches, list) else []
+    lead_count = sum(source_collection_count(item.get("leadCount")) for item in entries)
+    accepted_count = sum(source_collection_count(item.get("newAcceptedLeadCount")) for item in entries)
+    summary: dict[str, Any] = {
+        "batchCount": len(entries),
+        "leadCount": lead_count,
+        "newAcceptedLeadCount": accepted_count,
+    }
+    envelope = search_envelope if isinstance(search_envelope, dict) else {}
+    total_budget = source_collection_count(envelope.get("totalAcceptedLeadBudget"))
+    accepted_limit = source_collection_count(
+        envelope.get("effectiveAcceptedLeadLimit") or total_budget
+    )
+    batch_limit = source_collection_count(envelope.get("maxWritebackBatches"))
+    per_batch_limit = source_collection_count(envelope.get("maxLeadsPerWriteback"))
+    if total_budget:
+        summary["totalAcceptedLeadBudget"] = total_budget
+    if accepted_limit:
+        summary["effectiveAcceptedLeadLimit"] = accepted_limit
+        summary["remainingAcceptedLeadCount"] = max(0, accepted_limit - accepted_count)
+    if batch_limit:
+        summary["maxWritebackBatches"] = batch_limit
+        summary["remainingBatchCount"] = max(0, batch_limit - len(entries))
+    if per_batch_limit:
+        summary["maxLeadsPerWriteback"] = per_batch_limit
+    return summary
+
+
 def normalize_source_collection_context_mode(value: Any) -> str:
     normalized = trim_text(value, max_length=40).lower()
     if normalized in {"full", "compact", "minimal", "evidence", "retry_missing", "retry_evidence"}:
@@ -461,11 +599,13 @@ def compact_source_collection_context_task(task: dict[str, Any]) -> dict[str, An
             for key in ("passed", "artifactComplete", "taskChecklistComplete")
             if key in gate
         }
+    if isinstance(task.get("sourceCollectionWritebackBatchSummary"), dict):
+        compact["sourceCollectionWritebackBatchSummary"] = dict(task["sourceCollectionWritebackBatchSummary"])
     return compact
 
 
 def compact_source_collection_writeback_contract(contract: dict[str, Any]) -> dict[str, Any]:
-    return {
+    compact = {
         key: contract.get(key)
         for key in (
             "taskId",
@@ -480,6 +620,22 @@ def compact_source_collection_writeback_contract(contract: dict[str, Any]) -> di
         )
         if key in contract
     }
+    search_envelope = contract.get("searchEnvelope") if isinstance(contract.get("searchEnvelope"), dict) else {}
+    if search_envelope:
+        compact["searchEnvelope"] = {
+            key: search_envelope.get(key)
+            for key in (
+                "schemaVersion",
+                "totalAcceptedLeadBudget",
+                "maxLeadsPerWriteback",
+                "maxWritebackBatches",
+                "effectiveAcceptedLeadLimit",
+                "requiredPerspectives",
+                "authority",
+            )
+            if key in search_envelope
+        }
+    return compact
 
 
 def compact_source_collection_boundaries(boundaries: dict[str, Any]) -> dict[str, Any]:

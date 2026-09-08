@@ -119,13 +119,37 @@ def source_collection_context_tool(
             payload.setdefault("toolResolution", resolution)
         if isinstance(payload, dict) and _text(payload.get("stageId") or stage_id) == "finding":
             from core.web.services.team_workflow.source_collection.search_execution import project_source_collection_search_trace
+            from core.web.services.team_workflow.source_collection_context import (
+                compact_source_collection_search_receipts,
+                summarize_source_collection_search_receipts,
+            )
+
+            # The service context is already scoped to this task's matching
+            # assignments.  Apply the same scope to the canonical trace so a
+            # finding Agent does not receive receipts belonging to another
+            # assignment in the same run.
+            assignment_ids = {
+                _text(item.get("assignmentId"))
+                for item in list(payload.get("assignments") or [])
+                if isinstance(item, dict) and _text(item.get("assignmentId"))
+            }
+            search_receipts = project_source_collection_search_trace(
+                resolved_team_id, _text(payload.get("runId") or run_id),
+            )
+            if assignment_ids and isinstance(search_receipts, list):
+                search_receipts = [
+                    item
+                    for item in search_receipts
+                    if isinstance(item, dict) and _text(item.get("assignmentId")) in assignment_ids
+                ]
+            compact_receipts = compact_source_collection_search_receipts(search_receipts)
 
             payload = {**payload, "formalSearchPolicy": {
                 "supplementalQueries": "Use batch_web_search_tool or paper_search_tool with parent_query_id from this task's assignedQueries. Keep the same research question and perspective. The server registers the query before search and persists real provider receipts.",
                 "candidateBinding": "Treat searchReceiptValidation.valid as the authoritative receipt check. When it is true, the server has bound candidates to real search receipts through canonical source identity validation (including DOI/arXiv identity matching, presentation URLs, and HTTP/HTTPS variants); do not repeat a search just because a candidate URL is not verbatim in searchReceipts.resultRefs. When it is false, use the scoped search tools to repair the reported receipt gap; never invent or claim a receipt. web_fetch_tool alone is not a search receipt.",
-            }, "searchReceipts": project_source_collection_search_trace(
-                resolved_team_id, _text(payload.get("runId") or run_id),
-            )}
+            }, "searchReceipts": compact_receipts,
+                "searchReceiptSummary": summarize_source_collection_search_receipts(search_receipts),
+            }
             from core.web.services.team_workflow.research_runtime.artifact_readback_registry import load_source_finding_receipt_payload
 
             try:
@@ -141,6 +165,10 @@ def source_collection_context_tool(
                     "detail": str(exc),
                     "nextAction": "Repair the missing receipts with scoped real searches before completed writeback. Existing candidate count does not prohibit searching for their receipts; do not re-import or delete candidates.",
                 }
+                payload["searchReceiptSummary"] = summarize_source_collection_search_receipts(
+                    search_receipts,
+                    next_action=payload["searchReceiptValidation"]["nextAction"],
+                )
         if isinstance(payload, dict) and _text(payload.get("stageId") or stage_id) == "relations":
             from core.web.services.team_workflow.research_runtime.artifact_readback_registry import load_evidence_relation_graph_payload
 
