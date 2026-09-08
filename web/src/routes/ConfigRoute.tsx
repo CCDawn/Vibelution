@@ -3389,6 +3389,9 @@ export function ConfigRoute() {
         resize={{
           layoutId: CONFIG_SETTINGS_LAYOUT_ID,
           sidebar: CONFIG_SETTINGS_SIDEBAR_RESIZE,
+          collapse: {
+            sidebar: { separatorLabel: "设置导航宽度", collapseLabel: "收起设置导航", expandLabel: "展开设置导航" },
+          },
         }}
         sidebar={(
           <ConfigSettingsSidebar
@@ -3530,34 +3533,26 @@ export function ConfigRoute() {
           <div className={styles.providerModelsLayout}>
             {workspace.schemaVersion === 2 ? (
               <>
-                <VSection
-                  title="模型连接"
-                  eyebrow="已配置的服务与模型"
-                  tooltip="本页默认展示已连接服务与已固定模型。点服务旁「编辑」在右侧改 API Key 与上下文窗口。添加连接会直接写入 operator config；改路由仍需 preview 确认。"
-                  tooltipLabel="模型连接工作台说明"
-                  actions={(
-                    <VActionGroup ariaLabel="模型连接操作">
-                      <VButton
-                        tooltip="选模板 → Key → 检测 → 固定模型，完成后写回配置。"
-                        className={styles.providerModeButton}
-                        aria-pressed={providerConnecting}
-                        variant={providerConnecting ? "primary" : "secondary"}
-                        onPress={() => setProviderConnecting(true)}
-                      >
-                        添加连接
-                      </VButton>
-                      <VButton
-                        tooltip="模板向导、迁移与底层参数。"
-                        className={styles.providerModeButton}
-                        aria-pressed={providerShowMore}
-                        variant={providerShowMore ? "primary" : "ghost"}
-                        onPress={() => setProviderShowMore((open) => !open)}
-                      >
-                        {providerShowMore ? "收起更多" : "更多"}
-                      </VButton>
-                    </VActionGroup>
-                  )}
-                />
+                <VActionGroup ariaLabel="模型连接操作">
+                  <VButton
+                    tooltip="选模板 → Key → 检测 → 固定模型，完成后写回配置。"
+                    className={styles.providerModeButton}
+                    aria-pressed={providerConnecting}
+                    variant={providerConnecting ? "primary" : "secondary"}
+                    onPress={() => setProviderConnecting(true)}
+                  >
+                    添加连接
+                  </VButton>
+                  <VButton
+                    tooltip="模板向导、迁移与底层参数。"
+                    className={styles.providerModeButton}
+                    aria-pressed={providerShowMore}
+                    variant={providerShowMore ? "primary" : "ghost"}
+                    onPress={() => setProviderShowMore((open) => !open)}
+                  >
+                    {providerShowMore ? "收起高级设置" : "高级设置"}
+                  </VButton>
+                </VActionGroup>
                 {providerConnecting ? (
                   <>
                     <VButton

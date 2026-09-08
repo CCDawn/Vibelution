@@ -56,11 +56,12 @@ const templateButtonBaseClass = [
   "!grid gap-[5px]",
 ].join(" ");
 const templateButtonActiveClass = "border-[color-mix(in_srgb,var(--accent-warm)_30%,transparent)] bg-[var(--vui-surface-row-hover)] shadow-[var(--vui-shadow-inset-accent)]";
-const templateMainClass = "grid min-w-0 gap-0.5 [&_*]:min-w-0 [&_*]:truncate";
+const templateMainClass = "grid min-w-0 gap-0.5 [&_*]:min-w-0 [&>strong]:line-clamp-2 [&>strong]:break-words [&>small]:truncate";
 const templateMetaClass =
   `flex min-w-0 max-w-full flex-wrap gap-1 overflow-hidden [&_span]:inline-flex [&_span]:min-h-5 [&_span]:min-w-0 [&_span]:max-w-full [&_span]:items-center [&_span]:justify-center [&_span]:truncate [&_span]:whitespace-nowrap [&_span]:rounded-full [&_span]:border [&_span]:border-[color-mix(in_srgb,var(--vui-border-soft)_74%,transparent)] [&_span]:${vuiOpaqueRowClass} [&_span]:px-1.5 [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-vui-fg-tertiary`;
 const categoryPillClass = `${pillSurfaceClass} text-[var(--accent-cool-2)]`;
 const editorHeaderClass = "flex min-w-0 items-start justify-between gap-3";
+const sourceDetailsClass = "min-w-0 [&>summary]:cursor-pointer [&>summary]:py-1 [&>summary]:text-vui-fg-secondary";
 const editorMetaClass = "grid grid-cols-3 gap-1.5 max-[980px]:grid-cols-1";
 const detailRowClass = "grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-2 gap-y-0 border-0 border-b border-[color-mix(in_srgb,var(--border-soft)_62%,transparent)] bg-transparent px-0 py-[5px] last:border-b-0";
 const detailLabelClass = "[font-size:var(--vui-font-xs)] text-vui-fg-tertiary";
@@ -71,13 +72,13 @@ const fieldInputClass = `min-h-8 w-full min-w-0 ${fieldSurfaceClass} px-2 text-v
 const nameFieldClass = "self-start";
 const contentFieldClass = "grid min-h-0 content-stretch grid-rows-[auto_minmax(0,1fr)] overflow-hidden";
 const contentTextareaClass = `h-full min-h-0 w-full min-w-0 resize-none self-stretch ${fieldSurfaceClass} p-2.5 font-[var(--font-mono)] [font-size:var(--vui-font-xs)] leading-[1.5] text-vui-fg-primary`;
-const bottomGridClass = "grid min-h-0 grid-cols-[minmax(0,1fr)_clamp(240px,22vw,340px)] gap-2 max-[980px]:grid-cols-1";
+const bottomGridClass = "grid min-h-0 max-h-[28vh] overflow-auto grid-cols-[minmax(0,1fr)_clamp(240px,22vw,340px)] gap-2 max-[980px]:grid-cols-1";
 const detailCardClass = "grid min-h-0 min-w-0 content-start gap-1.5 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--border-soft)_64%,transparent)] bg-transparent p-2 grid-rows-[auto_minmax(0,1fr)_auto]";
 const agentListClass = "grid min-h-0 min-w-0 content-start gap-1.5 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--border-soft)_64%,transparent)] bg-transparent p-2";
-const contentHeaderClass = "flex min-w-0 items-center justify-between gap-3";
 const cardTitleClass = "m-0 font-[var(--font-display)] text-[0.92rem] text-vui-fg-primary";
 const helperTextClass = "m-0 [font-size:var(--vui-font-xs)] leading-[1.3] text-vui-fg-secondary";
-const detailCardHelperClass = `${helperTextClass} max-h-[58px] overflow-auto`;
+const defaultPreviewSummaryClass = "cursor-pointer list-item py-1 [&>h3]:inline [&>span]:ml-2";
+const detailCardHelperClass = `${helperTextClass} max-h-[20rem] overflow-auto whitespace-pre-wrap break-words`;
 const agentRowsClass = "grid max-h-[140px] gap-[5px] overflow-auto";
 const agentItemClass = `grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-x-2.5 gap-y-1 ${vuiOpaqueRowClass} px-2 py-1.5 [&_*]:min-w-0`;
 const agentItemLinkedClass = "border-[color-mix(in_srgb,var(--accent-cool)_46%,var(--border-soft))] bg-[color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-row))]";
@@ -132,6 +133,7 @@ const styles = {
   categoryPillClass,
   editorHeaderClass,
   editorMetaClass,
+  sourceDetailsClass,
   detailRowClass,
   detailLabelClass,
   detailValueClass,
@@ -144,10 +146,10 @@ const styles = {
   bottomGridClass,
   detailCardClass,
   agentListClass,
-  contentHeaderClass,
   cardTitleClass,
   helperTextClass,
   detailCardHelperClass,
+  defaultPreviewSummaryClass,
   agentRowsClass,
   agentItemClass,
   agentItemLinkedClass,

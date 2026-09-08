@@ -55,7 +55,7 @@ const styles = {
   agentPermissionSummaryPanel:
     `agentPermissionSummaryPanel min-w-0 max-w-full rounded-[var(--radius-panel)] ${vuiStateCoolInfoClass} p-2 text-[var(--accent-cool)]`,
   agentPolicyPanel:
-    `agentPolicyPanel min-w-0 rounded-[var(--radius-panel)] ${vuiStateCoolInfoClass} p-2 text-[var(--accent-cool)]`,
+    `agentPolicyPanel min-w-0 rounded-[var(--radius-panel)] ${vuiOpaquePanelClass} p-2 text-[var(--fg-primary)]`,
   agentPolicySelect:
     `agentPolicySelect min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full ${vuiStateCoolInfoClass}`,
   agentScopeBar:

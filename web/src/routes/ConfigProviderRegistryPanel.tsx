@@ -1,4 +1,4 @@
-import { AlertTriangle, Database, Image as ImageIcon, Pencil, RefreshCw, Route, Save, Trash2, X } from "lucide-react";
+import { AlertTriangle, Database, Image as ImageIcon, Pencil, RefreshCw, Route, Save, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
@@ -156,8 +156,7 @@ function ProviderAssetRow({
         <span className={styles.providerIdentity}>
           <strong className={styles.providerLabel}>{row.label || row.providerId}</strong>
           <small className={styles.providerMeta}>
-            {row.providerId}
-            {row.pinnedCount > 0 ? ` · 已固定 ${row.pinnedCount}` : ""}
+            {row.pinnedCount > 0 ? `已固定 ${row.pinnedCount} 个模型` : "尚未固定模型"}
           </small>
         </span>
         <span className={styles.providerStatusRow}>
@@ -323,6 +322,7 @@ function ConnectionTab({
   onCancelCredential: () => void;
   onSaveCredential: () => void;
 }) {
+  const [showTechnicalDetails, setShowTechnicalDetails] = useState(false);
   const needsKey = provider.credentialState !== "not_required";
   const keyReady = provider.credentialState === "configured" || provider.credentialState === "not_required";
   return (
@@ -331,8 +331,7 @@ function ConnectionTab({
         <VPanelHeader
           className={styles.connectionCardHeader}
           headingLevel={3}
-          eyebrow="1 · API Key"
-          title="全站共用凭据"
+          title="API 密钥"
           tooltip="一个中转站 / Provider = 一把 API Key。下方 Key 对该 Provider 下全部固定模型共用，不必按模型重复填写。"
           tooltipLabel="API Key 说明"
           actions={(
@@ -396,8 +395,7 @@ function ConnectionTab({
         <VPanelHeader
           className={styles.connectionCardHeader}
           headingLevel={3}
-          eyebrow="2 · 上下文窗口"
-          title="context_window（token）"
+          title="上下文上限（token）"
           tooltip="上下文窗口是 Provider 级兜底（token 数）。填中转站/模型真实上限，例如 32000、128000。未填时依赖发现结果，缺失会导致 Agent 启动失败。保存后立即写入配置。"
           tooltipLabel="上下文窗口说明"
           actions={(
@@ -425,30 +423,35 @@ function ConnectionTab({
         </div>
       </section>
 
-      <div className={styles.detailGrid}>
-        <span className={styles.fact}>
-          <small className={styles.factLabel}>服务端点</small>
-          <strong className={styles.factValue} title={provider.baseUrl || "未配置"}>{provider.baseUrl || "未配置"}</strong>
-        </span>
-        <span className={styles.fact}>
-          <small className={styles.factLabel}>驱动 / 类型</small>
-          <strong className={styles.factValue}>{provider.driver || "未配置"} · {provider.serviceClass || "未配置"}</strong>
-        </span>
-        {provider.serviceClass === "local_runtime" ? (
-          <VSection className={`${styles.deployment} col-span-full`} title="本地部署" meta="与模型 upstream ID 分离">
-            <div className={styles.detailGrid}>
-              <span className={styles.fact}>
-                <small className={styles.factLabel}>Runtime framework</small>
-                <strong className={styles.factValue}>{provider.runtimeFramework || "未知"}</strong>
-              </span>
-              <span className={styles.fact}>
-                <small className={styles.factLabel}>Artifact path</small>
-                <strong className={styles.factValue} title={provider.artifactPath || "未配置"}>{provider.artifactPath || "未配置"}</strong>
-              </span>
-            </div>
-          </VSection>
+      <VButton variant="ghost" aria-expanded={showTechnicalDetails} onPress={() => setShowTechnicalDetails((open) => !open)}>
+        {showTechnicalDetails ? "收起连接与部署详情" : "连接与部署详情"}
+      </VButton>
+      {showTechnicalDetails ? (
+        <div className={styles.detailGrid}>
+          <span className={styles.fact}>
+            <small className={styles.factLabel}>服务端点</small>
+            <strong className={styles.factValue} title={provider.baseUrl || "未配置"}>{provider.baseUrl || "未配置"}</strong>
+          </span>
+          <span className={styles.fact}>
+            <small className={styles.factLabel}>驱动 / 类型</small>
+            <strong className={styles.factValue}>{provider.driver || "未配置"} · {provider.serviceClass || "未配置"}</strong>
+          </span>
+          {provider.serviceClass === "local_runtime" ? (
+            <VSection className={`${styles.deployment} col-span-full`} title="本地部署" meta="与模型 upstream ID 分离">
+              <div className={styles.detailGrid}>
+                <span className={styles.fact}>
+                  <small className={styles.factLabel}>运行框架</small>
+                  <strong className={styles.factValue}>{provider.runtimeFramework || "未知"}</strong>
+                </span>
+                <span className={styles.fact}>
+                  <small className={styles.factLabel}>模型文件路径</small>
+                  <strong className={styles.factValue} title={provider.artifactPath || "未配置"}>{provider.artifactPath || "未配置"}</strong>
+                </span>
+              </div>
+            </VSection>
         ) : null}
       </div>
+      ) : null}
     </div>
   );
 }
@@ -1092,8 +1095,7 @@ export function ConfigProviderRegistryPanel({
     <VSurface as="section" id="config-models" className={styles.sectionSurface} padding="none">
       <VPanelHeader
         className={styles.header}
-        eyebrow="模型资产"
-        title="已配置的连接与模型"
+        title="服务与模型"
         tooltip="左栏默认只显示可用服务（已配 Key 且连接正常）。异常服务收在下方折叠区；新厂商请用「添加连接」。"
         tooltipLabel="模型连接列表说明"
         actions={(
@@ -1120,16 +1122,13 @@ export function ConfigProviderRegistryPanel({
         </div>
       ) : null}
       <VSplitWorkspace
-        className={inspectorOpen ? styles.registryWorkspaceTriple : styles.registryWorkspace}
-        columnsClassName={
-          inspectorOpen
-            ? "grid-cols-[minmax(18rem,22rem)_minmax(0,1fr)_minmax(18rem,22rem)]"
-            : "grid-cols-[minmax(18rem,22rem)_minmax(0,1fr)]"
-        }
+        className={styles.registryWorkspace}
         resize={{
           layoutId: WORKBENCH_LAYOUT_IDS.configModelAssets,
-          sidebar: { defaultWidth: 320, minWidth: 260, maxWidth: 420 },
-          aside: { defaultWidth: 320, minWidth: 260, maxWidth: 440 },
+          sidebar: { defaultWidth: 260, minWidth: 220, maxWidth: 420 },
+          collapse: {
+            sidebar: { separatorLabel: "服务列表宽度", collapseLabel: "收起服务列表", expandLabel: "展开服务列表" },
+          },
         }}
         sidebar={(
           <div className={styles.providerRail}>
@@ -1202,7 +1201,7 @@ export function ConfigProviderRegistryPanel({
               <span className={styles.detailIdentity}>
                 <strong title={provider.providerId}>{provider.label || provider.providerId}</strong>
                 <small className={styles.muted}>
-                  {provider.providerId} · 已固定 {provider.pinnedCount}
+                  已固定 {provider.pinnedCount} 个模型
                   {provider.contextWindow ? ` · 窗口 ${provider.contextWindow}` : " · 窗口未配置"}
                 </small>
               </span>
@@ -1266,25 +1265,18 @@ export function ConfigProviderRegistryPanel({
             </div>
           </div>
         ) : (
-          <VStateSurface tone="empty" icon={<Database size={16} />} title="选择左侧已配置服务">点选服务查看已固定模型；点「编辑」在右侧改配置。</VStateSurface>
+          <VStateSurface tone="empty" icon={<Database size={16} />} title="选择左侧已配置服务">点选服务查看已固定模型；点「编辑」修改连接配置。</VStateSurface>
         )}
-        aside={inspectorProvider ? (
+      />
+      <VDialog
+        open={Boolean(inspectorProvider)}
+        onOpenChange={(open) => { if (!open) closeInspector(); }}
+        title={inspectorProvider ? `编辑服务 · ${inspectorProvider.label || inspectorProvider.providerId}` : "编辑服务"}
+        description="常用配置：API Key 与上下文窗口。协议、诊断和合并可按需查看。"
+        size="lg"
+      >
+        {inspectorProvider ? (
           <div className={styles.inspectorPanel} data-vui-region="config-asset-inspector" data-provider-id={inspectorProvider.providerId}>
-            <div className={styles.inspectorHeader}>
-              <div className={styles.detailIdentity}>
-                <p className={styles.connectionCardEyebrow}>资产配置</p>
-                <strong title={inspectorProvider.providerId}>{inspectorProvider.label || inspectorProvider.providerId}</strong>
-                <small className={styles.muted}>API Key · 上下文窗口 · 连接</small>
-              </div>
-              <VButton
-                density="compact"
-                variant="ghost"
-                isIconOnly
-                aria-label="关闭配置栏"
-                icon={<X size={16} />}
-                onPress={closeInspector}
-              />
-            </div>
             <div className={styles.inspectorBody}>
               <ConnectionTab
                 provider={inspectorProvider}
@@ -1304,7 +1296,7 @@ export function ConfigProviderRegistryPanel({
                   data-provider-action="route"
                   icon={<Route size={14} />}
                   isDisabled={disabled}
-                  onPress={() => onEditRoute(inspectorProvider.providerId)}
+                  onPress={() => { closeInspector(); onEditRoute(inspectorProvider.providerId); }}
                 >
                   修改路由
                 </VButton>
@@ -1381,8 +1373,8 @@ export function ConfigProviderRegistryPanel({
               </div>
             </div>
           </div>
-        ) : undefined}
-      />
+        ) : null}
+      </VDialog>
     </VSurface>
   );
 }

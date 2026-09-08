@@ -80,30 +80,35 @@ export function AgentTaskProfilePanel({
           <span>{copy.responsibilities}</span>
           <VNativeTextarea value={draft.responsibilities} onChange={(event) => onDraftChange({ responsibilities: event.target.value })} />
         </label>
-        <label className={styles.fieldWide}>
-          <span>{copy.preferredTasks}</span>
-          <VNativeTextarea value={draft.preferredTasks} onChange={(event) => onDraftChange({ preferredTasks: event.target.value })} />
-        </label>
-        <label className={styles.fieldWide}>
-          <span>{copy.avoidTasks}</span>
-          <VNativeTextarea value={draft.avoidTasks} onChange={(event) => onDraftChange({ avoidTasks: event.target.value })} />
-        </label>
-        <label className={styles.fieldWide}>
-          <span>{copy.successCriteria}</span>
-          <VNativeTextarea value={draft.successCriteria} onChange={(event) => onDraftChange({ successCriteria: event.target.value })} />
-        </label>
-        <label className={styles.fieldWide}>
-          <span>{copy.deliverables}</span>
-          <VNativeTextarea value={draft.deliverables} onChange={(event) => onDraftChange({ deliverables: event.target.value })} />
-        </label>
-        <label className={styles.fieldWide}>
-          <span>{copy.constraints}</span>
-          <VNativeTextarea value={draft.constraints} onChange={(event) => onDraftChange({ constraints: event.target.value })} />
-        </label>
-        <label className={styles.fieldWide}>
-          <span>{copy.handoffNotes}</span>
-          <VNativeTextarea value={draft.handoffNotes} onChange={(event) => onDraftChange({ handoffNotes: event.target.value })} />
-        </label>
+        <details className={styles.advancedDetails}>
+          <summary>{lang === "zh" ? "偏好、交付要求与交接" : "More profile details"}</summary>
+          <div className={styles.advancedBody}>
+            <label className={styles.fieldWide}>
+              <span>{copy.preferredTasks}</span>
+              <VNativeTextarea value={draft.preferredTasks} onChange={(event) => onDraftChange({ preferredTasks: event.target.value })} />
+            </label>
+            <label className={styles.fieldWide}>
+              <span>{copy.avoidTasks}</span>
+              <VNativeTextarea value={draft.avoidTasks} onChange={(event) => onDraftChange({ avoidTasks: event.target.value })} />
+            </label>
+            <label className={styles.fieldWide}>
+              <span>{copy.successCriteria}</span>
+              <VNativeTextarea value={draft.successCriteria} onChange={(event) => onDraftChange({ successCriteria: event.target.value })} />
+            </label>
+            <label className={styles.fieldWide}>
+              <span>{copy.deliverables}</span>
+              <VNativeTextarea value={draft.deliverables} onChange={(event) => onDraftChange({ deliverables: event.target.value })} />
+            </label>
+            <label className={styles.fieldWide}>
+              <span>{copy.constraints}</span>
+              <VNativeTextarea value={draft.constraints} onChange={(event) => onDraftChange({ constraints: event.target.value })} />
+            </label>
+            <label className={styles.fieldWide}>
+              <span>{copy.handoffNotes}</span>
+              <VNativeTextarea value={draft.handoffNotes} onChange={(event) => onDraftChange({ handoffNotes: event.target.value })} />
+            </label>
+          </div>
+        </details>
       </div>
       <div className={styles.editorActions}>
         <VButton

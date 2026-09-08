@@ -1882,7 +1882,7 @@ export function ToolsRoute() {
             <div className={styles.panelHeader}>
               <div>
                 <p className={styles.panelEyebrow}>{lang === "zh" ? "Agent 工具配置" : "Agent tool configuration"}</p>
-                <h2>{activePolicyAgent ? `${activePolicyAgent.agentCode || ""} ${activePolicyAgent.displayName || activePolicyAgent.agentId}`.trim() : "-"}</h2>
+                <h2>{lang === "zh" ? "工具权限" : "Tool permissions"}</h2>
               </div>
               <span className={toolPolicyDirty ? styles.stateBadge : styles.countPill}>
                 {toolPolicyDirty ? (lang === "zh" ? "未保存" : "Unsaved") : (lang === "zh" ? "已同步" : "Synced")}
@@ -2156,7 +2156,6 @@ export function ToolsRoute() {
                       width="wide"
                     />
                   </p>
-                  <h3>{activePolicyAgent ? `${activePolicyAgent.agentCode || ""} ${activePolicyAgent.displayName || activePolicyAgent.agentId}`.trim() : "-"}</h3>
                   <span>{activePolicy.policyId || activePolicyAgent?.toolPolicyId || "-"}</span>
                 </div>
                 <strong className={`${styles.policyStatePill} ${styles[`policy_${activePolicyMode}`]}`}>
@@ -2209,33 +2208,36 @@ export function ToolsRoute() {
                       <span>{image2ModelConfig?.selectedModel.resolvedModel || image2ModelConfig?.fallbackModel.resolvedModel || "-"}</span>
                     </div>
                   </div>
-                  <div className={styles.policyMeta}>
-                    <span>
-                      provider: <strong>{image2ModelConfig?.selectedModel.providerKind || "-"}</strong>
-                    </span>
-                    <span>
-                      modelRef: <strong>{image2ModelConfig?.defaultModelRef || "-"}</strong>
-                    </span>
-                    <span>
-                      apiKeyEnv: <strong>{image2ModelConfig?.selectedModel.apiKeyEnv || "-"}</strong>
-                    </span>
-                    <span>
-                      {lang === "zh" ? "密钥状态" : "key"}:{" "}
-                      <strong>{image2KeyStateLabel(image2ModelConfig, lang)}</strong>
-                    </span>
-                    <span>
-                      {lang === "zh" ? "配置模型" : "configured"}:{" "}
-                      <strong>{image2ModelConfig?.selectedModel.configuredModel || "-"}</strong>
-                    </span>
-                    <span>
-                      {lang === "zh" ? "实际请求" : "request model"}:{" "}
-                      <strong>{image2ModelConfig?.selectedModel.resolvedModel || "-"}</strong>
-                    </span>
-                    <span>
-                      {lang === "zh" ? "远端发现" : "discovery"}:{" "}
-                      <strong>{image2DiscoveryStateLabel(image2ModelConfig, lang)}</strong>
-                    </span>
-                  </div>
+                  <details className={styles.schemaDisclosure}>
+                    <summary>{lang === "zh" ? "模型连接详情" : "Connection details"}</summary>
+                    <div className={styles.policyMeta}>
+                      <span>
+                        provider: <strong>{image2ModelConfig?.selectedModel.providerKind || "-"}</strong>
+                      </span>
+                      <span>
+                        modelRef: <strong>{image2ModelConfig?.defaultModelRef || "-"}</strong>
+                      </span>
+                      <span>
+                        apiKeyEnv: <strong>{image2ModelConfig?.selectedModel.apiKeyEnv || "-"}</strong>
+                      </span>
+                      <span>
+                        {lang === "zh" ? "密钥状态" : "key"}:{" "}
+                        <strong>{image2KeyStateLabel(image2ModelConfig, lang)}</strong>
+                      </span>
+                      <span>
+                        {lang === "zh" ? "配置模型" : "configured"}:{" "}
+                        <strong>{image2ModelConfig?.selectedModel.configuredModel || "-"}</strong>
+                      </span>
+                      <span>
+                        {lang === "zh" ? "实际请求" : "request model"}:{" "}
+                        <strong>{image2ModelConfig?.selectedModel.resolvedModel || "-"}</strong>
+                      </span>
+                      <span>
+                        {lang === "zh" ? "远端发现" : "discovery"}:{" "}
+                        <strong>{image2DiscoveryStateLabel(image2ModelConfig, lang)}</strong>
+                      </span>
+                    </div>
+                  </details>
                   {image2ModelConfig?.selectedModel.modelDiscoveryError ? (
                     <p className={styles.noticeError}>{image2ModelConfig.selectedModel.modelDiscoveryError}</p>
                   ) : null}
@@ -2277,21 +2279,24 @@ export function ToolsRoute() {
                           : webSearchHealth?.status || (lang === "zh" ? "不可用" : "unavailable")}
                     </span>
                   </div>
-                  <div className={styles.policyMeta}>
-                    <span>
-                      dependency: <strong>{webSearchHealth?.dependency || "autoglm_token_service"}</strong>
-                    </span>
-                    <span>
-                      stage: <strong>{webSearchHealth?.stage || "token_fetch"}</strong>
-                    </span>
-                    <span>
-                      tokenUrl: <strong>{webSearchHealth?.tokenUrl || "-"}</strong>
-                    </span>
-                    <span>
-                      searchApiCalled:{" "}
-                      <strong>{webSearchHealth?.searchApiCalled === undefined ? "-" : String(webSearchHealth.searchApiCalled)}</strong>
-                    </span>
-                  </div>
+                  <details className={styles.schemaDisclosure}>
+                    <summary>{lang === "zh" ? "依赖连接详情" : "Connection details"}</summary>
+                    <div className={styles.policyMeta}>
+                      <span>
+                        dependency: <strong>{webSearchHealth?.dependency || "autoglm_token_service"}</strong>
+                      </span>
+                      <span>
+                        stage: <strong>{webSearchHealth?.stage || "token_fetch"}</strong>
+                      </span>
+                      <span>
+                        tokenUrl: <strong>{webSearchHealth?.tokenUrl || "-"}</strong>
+                      </span>
+                      <span>
+                        searchApiCalled:{" "}
+                        <strong>{webSearchHealth?.searchApiCalled === undefined ? "-" : String(webSearchHealth.searchApiCalled)}</strong>
+                      </span>
+                    </div>
+                  </details>
                   {webSearchHealth && !webSearchHealth.available ? (
                     <p className={styles.notice}>
                       {lang === "zh" ? "Token 服务不可用，搜索请求不会发送至外网 API。" : "The token service is unavailable, so the search request will not reach the external API."}
@@ -2323,7 +2328,10 @@ export function ToolsRoute() {
                   </span>
                 </div>
                 <p>{activeTool.testPolicy.reason}</p>
-                <pre>{jsonPreview(activeTool.testPolicy.argsPreview)}</pre>
+                <details className={styles.schemaDisclosure}>
+                  <summary>{lang === "zh" ? "测试参数" : "Test arguments"}</summary>
+                  <pre>{jsonPreview(activeTool.testPolicy.argsPreview)}</pre>
+                </details>
               </section>
               <div className={styles.detailActions}>
                 <VButton

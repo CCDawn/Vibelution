@@ -264,7 +264,7 @@ describe("ConfigRoute layout contract", () => {
     expect(providerPanelSource).toContain("onEditCredential");
     expect(providerPanelSource).toContain("API Key");
     expect(providerPanelSource).toContain("一个中转站 / Provider = 一把 API Key");
-    expect(providerPanelSource).toContain("context_window");
+    expect(providerPanelSource).toContain("上下文上限（token）");
     expect(providerPanelSource).toContain('type="password"');
     expect(providerPanelSource).toContain('provider.credentialState === "not_required"');
     expect(routeSource).toContain("updateDraftProvider(");
@@ -519,10 +519,10 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("subtitleHint");
     expect(routeSource).toContain('subtitleHint={copy.subtitleHint}');
     expect(overviewPanelSource).toContain("sourceBodyShort");
-    expect(providerPanelSource).toContain("已配置的连接与模型");
+    expect(providerPanelSource).toContain("服务与模型");
     expect(providerPanelSource).toContain("固定全部已发现");
     expect(providerPanelSource).toContain("编辑");
-    expect(routeSource).toContain('tooltipLabel="模型连接工作台说明"');
+    expect(providerPanelSource).toContain('tooltipLabel="模型连接列表说明"');
     expect(overviewPanelSource).toContain('title={copy.sourceBody}');
     expect(providerPanelSource).toContain('title={provider.providerId}');
     expect(routeSource).toContain('title={copy.openEnvironmentHint}');

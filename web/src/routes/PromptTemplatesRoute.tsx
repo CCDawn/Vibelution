@@ -195,11 +195,6 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error || "");
 }
 
-function clip(value: string, max = 420) {
-  const text = String(value || "").trim();
-  return text.length > max ? `${text.slice(0, max)}...` : text;
-}
-
 function editorFromTemplate(template: PromptTemplate): PromptEditorState {
   return {
     templateId: template.promptTemplateId,
@@ -575,51 +570,55 @@ export function PromptTemplatesRoute() {
             >
               {allVisibleTemplatesSelected ? copy.bulkClear : copy.bulkSelectVisible}
             </VButton>
-            <label className={styles.bulkSelectFieldClass}>
-              <Tags size={14} />
-              <span>{copy.bulkCategory}</span>
-              <VStringSelect
-                className={styles.bulkSelectClass}
-                ariaLabel={copy.bulkCategory}
-                value={bulkCategory}
-                isDisabled={bulkPromptPending}
-                onValueChange={setBulkCategory}
-                options={CATEGORY_FILTERS.filter((filter) => filter !== "all").map((filter) => ({
-                  value: filter,
-                  label: categoryLabel(filter, lang),
-                }))}
-              />
-            </label>
-            <VButton
-              type="button"
-              className={styles.primaryButtonClass}
-              icon={<CheckCircle2 size={14} />}
-              isDisabled={!selectedTemplates.length || bulkPromptPending}
-              disabledReason={bulkPromptPending ? copy.bulkWorking : copy.bulkNoSelection}
-              onPress={() => bulkPatchTemplates({ category: bulkCategory }, copy.bulkCategoryResult)}
-            >
-              {bulkPromptPending ? copy.bulkWorking : copy.bulkApplyCategory}
-            </VButton>
-            <VButton
-              type="button"
-              className={styles.secondaryButtonClass}
-              icon={<RotateCcw size={14} />}
-              isDisabled={!selectedTemplates.length || bulkPromptPending}
-              disabledReason={bulkPromptPending ? copy.bulkWorking : copy.bulkNoSelection}
-              onPress={() => setBulkConfirm("reset")}
-            >
-              {bulkPromptPending ? copy.bulkWorking : copy.bulkReset}
-            </VButton>
-            <VButton
-              type="button"
-              className={styles.secondaryButtonClass}
-              icon={<Archive size={14} />}
-              isDisabled={!selectedTemplates.length || bulkPromptPending}
-              disabledReason={bulkPromptPending ? copy.bulkWorking : copy.bulkNoSelection}
-              onPress={() => setBulkConfirm("deactivate")}
-            >
-              {bulkPromptPending ? copy.bulkWorking : copy.bulkDeactivate}
-            </VButton>
+            {selectedTemplates.length > 0 ? (
+              <>
+                <label className={styles.bulkSelectFieldClass}>
+                  <Tags size={14} />
+                  <span>{copy.bulkCategory}</span>
+                  <VStringSelect
+                    className={styles.bulkSelectClass}
+                    ariaLabel={copy.bulkCategory}
+                    value={bulkCategory}
+                    isDisabled={bulkPromptPending}
+                    onValueChange={setBulkCategory}
+                    options={CATEGORY_FILTERS.filter((filter) => filter !== "all").map((filter) => ({
+                      value: filter,
+                      label: categoryLabel(filter, lang),
+                    }))}
+                  />
+                </label>
+                <VButton
+                  type="button"
+                  className={styles.primaryButtonClass}
+                  icon={<CheckCircle2 size={14} />}
+                  isDisabled={!selectedTemplates.length || bulkPromptPending}
+                  disabledReason={bulkPromptPending ? copy.bulkWorking : copy.bulkNoSelection}
+                  onPress={() => bulkPatchTemplates({ category: bulkCategory }, copy.bulkCategoryResult)}
+                >
+                  {bulkPromptPending ? copy.bulkWorking : copy.bulkApplyCategory}
+                </VButton>
+                <VButton
+                  type="button"
+                  className={styles.secondaryButtonClass}
+                  icon={<RotateCcw size={14} />}
+                  isDisabled={!selectedTemplates.length || bulkPromptPending}
+                  disabledReason={bulkPromptPending ? copy.bulkWorking : copy.bulkNoSelection}
+                  onPress={() => setBulkConfirm("reset")}
+                >
+                  {bulkPromptPending ? copy.bulkWorking : copy.bulkReset}
+                </VButton>
+                <VButton
+                  type="button"
+                  className={styles.secondaryButtonClass}
+                  icon={<Archive size={14} />}
+                  isDisabled={!selectedTemplates.length || bulkPromptPending}
+                  disabledReason={bulkPromptPending ? copy.bulkWorking : copy.bulkNoSelection}
+                  onPress={() => setBulkConfirm("deactivate")}
+                >
+                  {bulkPromptPending ? copy.bulkWorking : copy.bulkDeactivate}
+                </VButton>
+              </>
+            ) : null}
           </VDenseToolbar>
 
           <div className={styles.templateListClass}>
@@ -670,7 +669,7 @@ export function PromptTemplatesRoute() {
                         <span className={styles.categoryPillClass}>{categoryLabel(template.category, lang)}</span>
                         <span>{template.status || "active"}</span>
                         <span>{copy.usage}: {linkedCount}</span>
-                        <span>{template.sourcePath || "-"}</span>
+                        <span title={template.sourcePath || undefined}>{template.sourcePath || "-"}</span>
                       </span>
                     </VButton>
                   </div>
@@ -688,33 +687,36 @@ export function PromptTemplatesRoute() {
               <VPanelHeader
                 className={styles.editorHeaderClass}
                 eyebrow={copy.editor}
-                title={editableTemplate.promptTemplateId}
+                title={editableTemplate.name || editableTemplate.promptTemplateId}
                 actions={<SquarePen size={18} />}
               />
-              <p className={styles.panelDescriptionClass}>{editableTemplate.sourcePath || editableTemplate.category}</p>
+              <details className={styles.sourceDetailsClass}>
+                <summary>{lang === "zh" ? "来源与状态" : "Source and status"}</summary>
+                <p className={styles.panelDescriptionClass}>{editableTemplate.sourcePath || editableTemplate.category}</p>
 
-              <div className={styles.editorMetaClass}>
-                <section className={styles.detailRowClass}>
-                  <span className={styles.detailLabelClass}>{copy.category}</span>
-                  <strong className={styles.detailValueClass}>{categoryLabel(editor.category, lang)}</strong>
-                </section>
-                <section className={styles.detailRowClass}>
-                  <span className={styles.detailLabelClass}>{copy.sourceExists}</span>
-                  <strong className={styles.detailValueClass}>{editableTemplate.sourceExists ? copy.yes : copy.no}</strong>
-                </section>
-                <section className={styles.detailRowClass}>
-                  <span className={styles.detailLabelClass}>{copy.sourceAuthority}</span>
-                  <strong className={styles.detailValueClass}>{editableTemplate.sourceAuthority || "-"}</strong>
-                </section>
-                <section className={styles.detailRowClass}>
-                  <span className={styles.detailLabelClass}>{copy.sourceDrift}</span>
-                  <strong className={styles.detailValueClass}>{editableTemplate.sourceDriftStatus || "-"}</strong>
-                </section>
-                <section className={styles.detailRowClass}>
-                  <span className={styles.detailLabelClass}>{copy.status}</span>
-                  <strong className={styles.detailValueClass}>{editableTemplate.status || "active"}</strong>
-                </section>
-              </div>
+                <div className={styles.editorMetaClass}>
+                  <section className={styles.detailRowClass}>
+                    <span className={styles.detailLabelClass}>{copy.category}</span>
+                    <strong className={styles.detailValueClass}>{categoryLabel(editor.category, lang)}</strong>
+                  </section>
+                  <section className={styles.detailRowClass}>
+                    <span className={styles.detailLabelClass}>{copy.sourceExists}</span>
+                    <strong className={styles.detailValueClass}>{editableTemplate.sourceExists ? copy.yes : copy.no}</strong>
+                  </section>
+                  <section className={styles.detailRowClass}>
+                    <span className={styles.detailLabelClass}>{copy.sourceAuthority}</span>
+                    <strong className={styles.detailValueClass}>{editableTemplate.sourceAuthority || "-"}</strong>
+                  </section>
+                  <section className={styles.detailRowClass}>
+                    <span className={styles.detailLabelClass}>{copy.sourceDrift}</span>
+                    <strong className={styles.detailValueClass}>{editableTemplate.sourceDriftStatus || "-"}</strong>
+                  </section>
+                  <section className={styles.detailRowClass}>
+                    <span className={styles.detailLabelClass}>{copy.status}</span>
+                    <strong className={styles.detailValueClass}>{editableTemplate.status || "active"}</strong>
+                  </section>
+                </div>
+              </details>
 
               <label className={`${styles.fieldClass} ${styles.nameFieldClass}`}>
                 <span className={styles.fieldLabelClass}>{copy.templates}</span>
@@ -727,17 +729,17 @@ export function PromptTemplatesRoute() {
               </label>
 
               <div className={styles.bottomGridClass}>
-                <section className={styles.detailCardClass}>
-                  <div className={styles.contentHeaderClass}>
+                <details className={styles.detailCardClass}>
+                  <summary className={styles.defaultPreviewSummaryClass}>
                     <h3 className={styles.cardTitleClass}>{copy.defaultPreview}</h3>
                     <VStatusChip tone={hasDefault ? "success" : "neutral"}>{hasDefault ? copy.yes : copy.no}</VStatusChip>
-                  </div>
-                  <p className={styles.detailCardHelperClass}>{clip(editableTemplate.defaultContent || editableTemplate.defaultContentPreview || copy.resetUnavailable)}</p>
+                  </summary>
+                  <p className={styles.detailCardHelperClass}>{editableTemplate.defaultContent || editableTemplate.defaultContentPreview || copy.resetUnavailable}</p>
                   <section className={styles.detailRowClass}>
                     <span className={styles.detailLabelClass}>{copy.hash}</span>
                     <strong className={styles.detailValueClass}>{editableTemplate.contentHash || "-"}</strong>
                   </section>
-                </section>
+                </details>
 
                 <section className={styles.agentListClass}>
                   <h3 className={styles.cardTitleClass}>{copy.linkedAgents}</h3>

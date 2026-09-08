@@ -3,6 +3,9 @@ import {
 } from "../design/vuiSurfaceRecipes";
 
 const styles = {
+  advancedDetails: "col-span-full min-w-0 border-t border-[var(--vui-border-subtle)] pt-2 [&>summary]:cursor-pointer [&>summary]:py-2 [&>summary]:font-semibold",
+  advancedBody: "grid min-w-0 gap-2 py-2",
+
   contextualHintRow: "inline-flex [align-items:center] [gap:6px]",
   cleanPill: "inline-flex [align-items:center] [min-height:24px] [padding:0_8px] [border-radius:999px] [font-size:var(--vui-font-xs)] [font-weight:700] [border:1px_solid_color-mix(in_srgb,_var(--state-success)_26%,_transparent)] [background:color-mix(in_srgb,_var(--state-success)_8%,_transparent)] [color:var(--state-success)]",
   configEditor: `grid [gap:8px] min-w-0 [padding:10px] ${vuiFlatPanelClass}`,

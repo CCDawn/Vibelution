@@ -79,24 +79,29 @@ export function AgentPersonaProfilePanel({
         <VFieldRow label={copy.personality} className="col-span-full">
           <VNativeTextarea value={draft.personality} onChange={(event) => onDraftChange({ personality: event.target.value })} />
         </VFieldRow>
-        <VFieldRow label={copy.communicationStyle} className="col-span-full">
-          <VNativeTextarea
-            value={draft.communicationStyle}
-            onChange={(event) => onDraftChange({ communicationStyle: event.target.value })}
-          />
-        </VFieldRow>
-        <VFieldRow label={copy.background} className="col-span-full">
-          <VNativeTextarea value={draft.background} onChange={(event) => onDraftChange({ background: event.target.value })} />
-        </VFieldRow>
-        <VFieldRow label={copy.collaborationPreference} className="col-span-full">
-          <VNativeTextarea
-            value={draft.collaborationPreference}
-            onChange={(event) => onDraftChange({ collaborationPreference: event.target.value })}
-          />
-        </VFieldRow>
-        <VFieldRow label={copy.identityNotes} className="col-span-full">
-          <VNativeTextarea value={draft.identityNotes} onChange={(event) => onDraftChange({ identityNotes: event.target.value })} />
-        </VFieldRow>
+        <details className={styles.advancedDetails}>
+          <summary>{lang === "zh" ? "沟通、背景与协作偏好" : "More profile details"}</summary>
+          <div className={styles.advancedBody}>
+            <VFieldRow label={copy.communicationStyle} className="col-span-full">
+              <VNativeTextarea
+                value={draft.communicationStyle}
+                onChange={(event) => onDraftChange({ communicationStyle: event.target.value })}
+              />
+            </VFieldRow>
+            <VFieldRow label={copy.background} className="col-span-full">
+              <VNativeTextarea value={draft.background} onChange={(event) => onDraftChange({ background: event.target.value })} />
+            </VFieldRow>
+            <VFieldRow label={copy.collaborationPreference} className="col-span-full">
+              <VNativeTextarea
+                value={draft.collaborationPreference}
+                onChange={(event) => onDraftChange({ collaborationPreference: event.target.value })}
+              />
+            </VFieldRow>
+            <VFieldRow label={copy.identityNotes} className="col-span-full">
+              <VNativeTextarea value={draft.identityNotes} onChange={(event) => onDraftChange({ identityNotes: event.target.value })} />
+            </VFieldRow>
+          </div>
+        </details>
       </div>
       <div className={styles.editorActions}>
         <VButton

@@ -24,7 +24,7 @@ describe("PaneCollapseHandle", () => {
     expect(source).toContain("ChevronRight");
     expect(source).toContain("aria-pressed={collapsed}");
     expect(source).toContain('const tooltip = `${separatorLabel} · ${label}`');
-    expect(source).toContain("tooltip={tooltip}");
+    expect(source).toContain("title={tooltip}");
   });
 
   it("composes the shared PaneResizeHandle visual contract", () => {

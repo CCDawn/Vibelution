@@ -19,8 +19,6 @@ const styles = {
     "vui-routes-configproviderregistrypanel abnormalToggle !flex !h-auto !min-h-9 !w-full !items-center !justify-between gap-2 px-2 py-1.5 text-left [&_span]:grid [&_span]:min-w-0 [&_span]:gap-0.5 [&_small]:[font-size:10px] [&_small]:font-normal [&_small]:text-vui-fg-tertiary",
   registryWorkspace:
     "vui-routes-configproviderregistrypanel registryWorkspace h-full min-h-0 min-w-0 [--vui-workspace-sidebar:clamp(18rem,24vw,22rem)] [--vui-workspace-aside:clamp(18rem,24vw,22rem)] gap-2 overflow-hidden",
-  registryWorkspaceTriple:
-    "vui-routes-configproviderregistrypanel registryWorkspaceTriple h-full min-h-0 min-w-0 [--vui-workspace-sidebar:clamp(18rem,24vw,22rem)] [--vui-workspace-aside:clamp(18rem,24vw,22rem)] gap-2 overflow-hidden",
   providerRail: "vui-routes-configproviderregistrypanel providerRail grid h-full min-h-0 min-w-0 content-start gap-2 overflow-y-auto",
   providerList: "vui-routes-configproviderregistrypanel providerList h-full min-h-0 min-w-0 overflow-y-auto pr-1",
   providerRow:
@@ -40,9 +38,7 @@ const styles = {
   modelsColumn:
     "vui-routes-configproviderregistrypanel modelsColumn grid h-full min-h-0 min-w-0 [grid-template-rows:auto_auto_minmax(0,1fr)] gap-2 overflow-hidden",
   inspectorPanel:
-    "vui-routes-configproviderregistrypanel inspectorPanel grid h-full min-h-0 min-w-0 [grid-template-rows:auto_minmax(0,1fr)] gap-2 overflow-hidden rounded-lg border border-vui-border-subtle bg-vui-surface-row/50 p-2",
-  inspectorHeader:
-    "vui-routes-configproviderregistrypanel inspectorHeader flex min-w-0 items-start justify-between gap-2 border-b border-vui-border-hairline pb-2",
+    "vui-routes-configproviderregistrypanel inspectorPanel grid min-h-0 min-w-0 max-h-[65vh] overflow-hidden",
   inspectorBody:
     "vui-routes-configproviderregistrypanel inspectorBody relative isolate z-0 grid min-h-0 min-w-0 content-start gap-3 overflow-y-auto overflow-x-hidden pr-0.5",
   inspectorAdvanced:
