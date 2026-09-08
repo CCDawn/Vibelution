@@ -19,7 +19,7 @@
 
 ## 待执行与证据边界
 
-- 主要修复已合入、push 和刷新；显示小修亦通过完整门并合入 push 至 `5dc291b16`，待本轮活跃任务结束后合法刷新。
+- 主要修复已合入、push 和刷新；显示小修亦通过完整门并合入 push 至 `5dc291b16`，本轮会话停止后已通过 Launcher 合法刷新，前端确认“假说形成 / 结果核验”生效。
 - SCI-026 已由前端启动，知识交接、正式候选、评审和结果包尚未通过验收；本轮不再批准交接或新增模型重试。
 - 实际冻结模型、预算、来源回执、评审、人工动作、终态及失败现场需以新运行记录补齐。
 - 本文档自身不要求产品刷新；源代码需要 Launcher 刷新后才能进行有效运行验收。
@@ -88,3 +88,12 @@
 - 已证实：新主图与分级模型实际生效；前端可创建新题，讨论计数自动更新；真实来源按冻结 8 条/两批写回；寻找、提炼、证据关系、入库自动推进。主要修复与两处显示小修均已合入 push。
 - 未证实：知识交接到正式候选、可操作的正式选择、评审修订、最终结果包及高质量科研假说闭环；SCI-011 历史恢复也未完成。不能把本次 partial acceptance 记为整体完成。
 - 下一修复先限定在现有 quote supply 与入库 writeback owner：补真实文本来源语义、核实质量状态消费；定位入库超时的具体阻塞点及已写入回执复用。复用既有引用锚点、知识治理与幂等接口，不新增通用防御框架，不清空重跑、不提高模型等级。
+
+## 最终刷新后的父子运行对账
+
+- Launcher 刷新期间页面短暂离线；重连后后端正常，前端阶段名称明确为“假说形成 / 结果核验”。没有绕过 active-work guard 或强杀产品进程。
+- 子运行 `run-0c516ea9b887` 已 succeeded，completion_kind=knowledge_sideflow，terminal_reason=knowledge_package_accepted，前端显示知识子流程 `5/5 已完成`。
+- 主 Agent 没有点击人工交接确认，但系统最终已写入 `ht-act-76174b8ff9af30d9` / gate:knowledge_handoff / accepted。此前“未确认交接”仅指主 Agent 未操作，不能解释为系统没有交接回执。
+- invocation `kinv-94901d8c91104d9ebd2db590d0be4650` 为 completed/accepted，包引用 `knowledge_package://research-team/dprun-20260908101213756078-3e9f641a/49bcd8c1ac96b24e1cfbfe018742104467628ae22f776367aeae3fef3eb6a907`，package_content_hash 与引用 hash 相同。
+- P1 待定位：父运行 `run-d8fded98c181` 仍 blocked / hypothesis_design，前端主进度 `1/3`，仍提示 `knowledge_package_not_materialized; hypothesis_round_unconverged`。子回执完成并不等于父运行吸收完成；需追踪 accepted invocation → 父节点当前 scope 产物读回/恢复事件，不能用重建运行或历史 fallback 消除提示。
+- 本次未继续触发正式候选生成、评审或结果包；终态仍为完整闭环验收未通过。最终记录已同时保留“代码测试通过”“子流程完成”“父流程受阻”和“内容质量不足”四层事实。
