@@ -2,6 +2,7 @@
 
 @source "../../routes/desktopPet/DesktopPetRoute.tsx";
 @source "../../routes/desktopPet/DesktopPetCharacter.tsx";
+@source "../../routes/desktopPet/DesktopPetCharacter.styles.ts";
 
 html[data-vibelution-desktop-pet="true"],
 body[data-vibelution-desktop-pet="true"],
@@ -169,7 +170,6 @@ body[data-vibelution-desktop-pet="true"] #root {
   display: block;
   height: 258px;
   transform-origin: 50% 92%;
-  animation: desktop-pet-breathe 3.6s ease-in-out infinite;
 }
 
 .desktop-pet-character__halo {
@@ -181,24 +181,13 @@ body[data-vibelution-desktop-pet="true"] #root {
   filter: blur(8px);
 }
 
-.desktop-pet-character__image {
+.desktop-pet-character__canvas {
   position: relative;
   z-index: 1;
   width: 100%;
   height: 100%;
-  object-fit: contain;
-  object-position: center bottom;
   filter: drop-shadow(0 14px 12px rgb(2 12 23 / 28%));
 }
-
-.desktop-pet-character[data-animation-state="thinking"],
-.desktop-pet-character[data-animation-state="reading"],
-.desktop-pet-character[data-animation-state="answering"] { animation: desktop-pet-think 2.1s ease-in-out infinite; }
-.desktop-pet-character[data-animation-state="tooling"],
-.desktop-pet-character[data-animation-state="verifying"] { animation: desktop-pet-work 1.1s ease-in-out infinite; }
-.desktop-pet-character[data-animation-state="waiting"] { animation: desktop-pet-wait .9s ease-in-out infinite alternate; }
-.desktop-pet-character[data-animation-state="alert"] { animation: desktop-pet-alert .5s ease-in-out 2; }
-.desktop-pet-character[data-animation-state="celebrating"] { animation: desktop-pet-celebrate .72s cubic-bezier(.2,.9,.3,1.2) 2; }
 
 .desktop-pet-expand-cue {
   position: absolute;
@@ -214,15 +203,4 @@ body[data-vibelution-desktop-pet="true"] #root {
   background: rgb(7 25 38 / 72%);
   color: #dffefa;
   backdrop-filter: blur(10px);
-}
-
-@keyframes desktop-pet-breathe { 0%,100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-3px) scale(1.012); } }
-@keyframes desktop-pet-think { 0%,100% { transform: translateY(0) rotate(-.4deg); } 50% { transform: translateY(-5px) rotate(.6deg); } }
-@keyframes desktop-pet-work { 0%,100% { transform: translateY(0) rotate(0); } 50% { transform: translateY(-3px) rotate(1deg); } }
-@keyframes desktop-pet-wait { from { transform: translateY(0) scale(1); } to { transform: translateY(-2px) scale(1.018); } }
-@keyframes desktop-pet-alert { 0%,100% { transform: translateX(0); } 25% { transform: translateX(-5px) rotate(-1deg); } 75% { transform: translateX(5px) rotate(1deg); } }
-@keyframes desktop-pet-celebrate { 0%,100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-12px) scale(1.025); } }
-
-@media (prefers-reduced-motion: reduce) {
-  .desktop-pet-character { animation: none !important; transform: none !important; }
 }
