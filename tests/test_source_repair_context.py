@@ -31,6 +31,34 @@ def test_initial_finding_has_no_repair_instruction(monkeypatch):
     assert source_repair_message(team_id="team", run_id="new", candidates=[]) == ""
 
 
+def test_current_failed_fetch_is_a_repair_gap_even_with_ready_metadata(monkeypatch):
+    task = {
+        "taskId": "extraction-current", "stageId": "extraction",
+        "writeback": {"coverageSummary": {"blockedCandidateIds": ["gap", "resolved", "same-task-resolved"]}},
+        "result": {"evidenceFetchAttempts": [
+            {"candidateId": "gap", "status": "failed"},
+            {"candidateId": "resolved", "status": "failed"},
+            {"candidateId": "same-task-resolved", "status": "failed"},
+            {"candidateId": "same-task-resolved", "status": "fetched"},
+        ]},
+    }
+    monkeypatch.setattr(s, "_source_collection_stage_session_tasks", lambda *_: [task])
+    candidates = [
+        {"candidateId": "gap", "title": "Full text unavailable", "metadata": {
+            "contentExtraction": {"taskId": "extraction-current", "decision": "needs_more_info",
+                                  "evidenceStatus": "evidence_ready"}}},
+        {"candidateId": "resolved", "title": "Later verified source", "metadata": {
+            "contentExtraction": {"taskId": "extraction-later", "evidenceStatus": "evidence_ready"}}},
+        {"candidateId": "same-task-resolved", "title": "Verified in same task", "metadata": {
+            "contentExtraction": {"taskId": "extraction-current", "decision": "needs_more_info",
+                                  "evidenceStatus": "evidence_ready"}}},
+    ]
+    message = source_repair_message(team_id="team", run_id="current", candidates=candidates)
+    assert '"candidateId": "gap"' in message
+    assert "Later verified source" not in message
+    assert "Verified in same task" not in message
+
+
 def test_resolved_gaps_do_not_request_more_search(monkeypatch):
     monkeypatch.setattr(s, "_source_collection_stage_session_tasks", lambda *_: [
         {"taskId": "done", "stageId": "extraction"},

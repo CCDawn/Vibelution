@@ -20,6 +20,19 @@ def source_repair_message(
         return ""
     focus = s._source_collection_stage_evidence_retry_focus(task, candidates)
     gap_ids = set(focus.get("evidenceGapCandidateIds") or [])
+    # A failed fetch needs another source even when a metadata/record anchor
+    # made the generic extraction ledger ready. Successful fetches do not.
+    result = task.get("result") if isinstance(task.get("result"), dict) else {}
+    latest_fetches = {
+        attempt.get("candidateId"): attempt.get("status")
+        for attempt in result.get("evidenceFetchAttempts", [])
+        if isinstance(attempt, dict) and attempt.get("candidateId")
+    }
+    gap_ids.update(
+        candidate.get("candidateId") for candidate in candidates
+        if latest_fetches.get(candidate.get("candidateId")) == "failed"
+        and (candidate.get("metadata") or {}).get("contentExtraction", {}).get("taskId") == task.get("taskId")
+    )
     if not gap_ids:
         return ""
     gaps = [

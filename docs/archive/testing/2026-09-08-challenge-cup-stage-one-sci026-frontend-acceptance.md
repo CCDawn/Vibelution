@@ -144,3 +144,11 @@
 - 当前记录仅为根因、代码与测试证据；未据此宣称新模型运行、有效原文、正式知识交接或高质量假说全链路验收完成。配置分级、第一/第二阶段边界未改动。
 - 检查点根因已修复并用真实 LangGraph + Ledger 回归复核：仅在 extraction blocked 且显式 finding attempt ≥ 2 时，复用 coordinator.enter_node 调度新的 finding interrupt；提交时将旧 blocked extraction 标为 stale 并取消其残余 outbox。真实回归走 finding-a1 → extraction-a1 阻塞 → finding-a2 成功 → extraction-a2 dispatching，检查点与回执身份均一致，没有清空运行。会议相关完整回归 58 项通过。
 - 首次合入 push 并通过 Launcher 刷新后，前端实际出现“返回资料寻找补源”。点击后发现新提炼任务 `stagetask-20260908134010-6d43de7a` 启动，却没有新 finding task：命令层把 succeeded 父 attempt 无条件改为 stale，抹掉了既有 source task replay 用于“成功后显式重跑不可复用旧任务”的判断依据。因此首轮点击不能计为有效补源。后续最小修复保留已成功父 attempt 的成功事实，只将失败/阻塞重试的父项标为 stale，复用既有排除成功父任务逻辑。
+
+### SCI-009 补源缺口判定续修（2026-09-08 21:58）
+
+- 前端新建 finding `stagetask-20260908135006-80dba87e`，但 `sourceRepairOfTaskId` 为空且继承旧两批额度，不能计作补源成功。
+- 已核实当前 extraction `stagetask-20260908134010-6d43de7a` 的覆盖结果明确 blocked=8；同任务 candidate metadata 同时有 decision=needs_more_info 与 evidenceStatus=evidence_ready。原 retry focus 先用泛化 ready 字段排除来源，错误吞掉明确缺口。
+- 最小修复：补源消息读取同任务真实 evidenceFetchAttempts，最后一次抓取 failed 的来源必须补源，即使泛化记录锚显示 ready；fetched 或后续任务已修复的来源不重复补源。保留既有提炼 focus，不改变受控摘要记录的完成规则，无新 API。
+- 回归先复现空消息失败；完整检查发现泛化 blocked 优先会让受控摘要已补好的来源重复出现，因此撤回该方案，限定在补源消息的真实抓取失败判定。修复后新场景、真实 graph 和既有补证完成回归通过。实际新原文抓取、提炼与高质量假说全链路尚未验收通过。
+- 同步检查遇到本地 refs/agents 下无效 checkpoint object，普通 fetch 失败；ls-remote 已确认远端 main 与本地一致。未删除其他任务 refs。
