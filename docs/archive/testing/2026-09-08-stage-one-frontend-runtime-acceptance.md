@@ -135,3 +135,15 @@
 - 现象：补足预算后「重试 知识入库」被 412 拒（blockers=evidence_graph_incomplete——关系图有 1 条 missingLink：source_relation_mapper 断言了指向不存在候选 `…-9143d4d6` 的 contradicts_scale_claim 边，同秒真实候选为 `…-9143d85a`；随机 id 笔误无法被标题/别名语义端点解析修复，merger fail-closed 降级为 missingLink——门禁本身工作正常）。同时「重试 证据关系」按钮 disabled（toast `retry_not_available`），操作员互锁无解。
 - 根因：`sync_run_blocked` 对已 blocked 的 run 直接 return——阻塞原因一经写入永不刷新。run 的 blocked_problem 停留在旧的 `budget_precheck_insufficient`；而 `succeeded_node_rerun_target`（重跑 evidence_relations 的合同出口，注释明确覆盖本场景）只认 `auto_advance_not_ready/evidence_graph_incomplete` 形状；命令级拒绝（NodeNotReadyError）按设计零写入。三段共同构成：预算先挡 → 补预算 → 真实阻塞（图缺口）永远写不进投影 → 重跑出口永不出现。
 - 修复（在途）：拒绝路径 best-effort 刷新已 blocked run 的 blocked_problem 为当前真实 blockers（auto_advance_not_ready + blocker codes，与 worker 的 not-ready 写法同形）；不建 attempt、不 bump 版本、不写事件、幂等。
+
+#### B.12 复验结果（4bb3adf2d 合入并重启后）
+
+- 前端点「重试 知识入库」：命令被 412 拒（预期），但拒绝路径刷新了投影——run 的 blocked_problem 从陈旧 `budget_precheck_insufficient` 更新为 `auto_advance_not_ready / evidence_graph_incomplete`，「重试 证据关系」按钮随即变为「**重跑 证据关系**」且可点（`succeeded_node_rerun` 合同出口首次可达）。
+- 点击「重跑 证据关系」→ retry_node a3 **202 accepted**（evidence_relations 真实重跑）。但重跑产物重新并入时，`source_relation_mapper` 再次断言同一条指向不存在候选 `…-9143d4d6` 的 contradicts 边（讲者读取候选店内自己上一版图并复述——自回声），missingLink 仍为 1；豁免（缺陷⑪）成为合同内的唯一收口面。
+
+### B.13 缺陷⑫：知识子 run 卡 reconciliation_required——「对账运行」不级联、子 run 无任何对账操作面（已定案，修复中）
+
+- 现象：a3 重跑与 worker 已排队的 knowledge_ingestion-a2 graph_dispatch 竞速，dispatch 提交时发现执行回执身份失配（expected `(act-aa29dfbd…, nr-…-knowledge_ingestion-a2)`，got `(act-e4b7c78…, nr-…-evidence_relations-a3)`），子 run run-1ca97605acf3 被标记 `reconciliation_required`（v15，graph_dispatch_invalid），outbox `act-8ec85658…` 终态 failed。此后整条 sideflow 冻结：知识入库/交接全停。
+- 现有操作面核查：formal run 面板「对账运行」是对账唯一前端入口；知识子 run 的节点 offer 白名单只含 ensure/inspect——**子 run 没有任何对账入口**（grep 全仓确认）。真实前端点「对账运行」：`reconcile_formal_run` 200 受理，formal 落 v5 blocked（`knowledge_package_not_materialized` + `hypothesis_round_unconverged`），但子 run 纹丝不动仍 reconciliation_required v15。
+- 根因：`_handle_reconcile_run`（command_service.py）只对 `request.run_id` 做 ledger 权威重规划（superseded→stale、复活 failed graph_dispatch、落位 run 状态）；对知识子 run 仅做 `_compensate_completion_pending_reservations` 预留补偿——复活 SQL 的 `WHERE run_id = ?` 永远指父 run，子 run 的 failed dispatch 无人复活。
+- 修复（在途，codex/fix-reconcile-cascade-child-runs）：把单 run 重规划核心抽成复用 helper，父 run 对账落位后对 `reconciliation_required` 的知识子 run 在**同一事务**内做同构重规划（`KNOWLEDGE_SIDEFLOW_NODE_IDS` 节点序、同样的 auto_advance_not_ready 排除、同款落位阶梯 lands_blocked→BLOCKED / 有活→RUNNING / 零活→保持）+ 子 run 版本递增与 reconciled 事件；blocked/终态子 run 不动。
