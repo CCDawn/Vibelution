@@ -394,6 +394,27 @@ class RealDomainReadinessContext:
             return override
         artifact = self._artifact("research_result_package", team_id, run_id)
         if artifact is None:
+            from core.research.workflow.stage_one_definition import is_stage_one_workflow_version
+
+            run = self._run(run_id)
+            if run is not None and is_stage_one_workflow_version(run.workflow_version_id):
+                kinds = (
+                    "problem_understanding", "hypothesis_set", "dimension_reviews",
+                    "stage1_research_plan", "competition_alignment",
+                )
+                inputs = {kind: self._artifact(kind, team_id, run_id) for kind in kinds}
+                plan = inputs["stage1_research_plan"] or {}
+                pending = self._store.read(
+                    lambda repo: len(repo.list_pending_human_tasks(run_id))
+                )
+                return {
+                    "packaging_ready": bool(
+                        all(inputs.values())
+                        and (plan.get("human_gate") or {}).get("decision") == "approved"
+                    ),
+                    "pending_human_tasks": pending,
+                    "terminal_reason": "stage_one_proposal_completed",
+                }
             return None
         package = artifact.get("package") if isinstance(artifact.get("package"), dict) else artifact
         traceability = package.get("traceability") if isinstance(package.get("traceability"), dict) else {}

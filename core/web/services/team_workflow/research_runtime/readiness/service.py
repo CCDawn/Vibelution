@@ -15,6 +15,7 @@ from typing import Any
 from core.research.workflow.contracts import NodeReadiness
 from core.research.workflow.definition import build_challenge_cup_workflow_definition
 from core.research.workflow.definition_registry import definition_identity
+from core.research.workflow.stage_one_definition import build_stage_one_workflow_definition
 from core.research.workflow.knowledge_sideflow_definition import (
     build_knowledge_sideflow_workflow_definition,
 )
@@ -74,6 +75,7 @@ class NodeReadinessService:
             if definition is not None
             else (
                 build_challenge_cup_workflow_definition(),
+                build_stage_one_workflow_definition(),
                 build_knowledge_sideflow_workflow_definition(),
             )
         )

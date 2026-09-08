@@ -167,7 +167,9 @@ def _safety_limits() -> dict:
 
 
 def _current_workflow_identity() -> dict[str, str]:
-    identity = definition_identity(question_launch.build_challenge_cup_workflow_definition())
+    from core.research.workflow.definition import build_challenge_cup_workflow_definition
+
+    identity = definition_identity(build_challenge_cup_workflow_definition())
     return {
         "workflowVersionId": identity.workflowVersionId,
         "structureHash": identity.structureHash,

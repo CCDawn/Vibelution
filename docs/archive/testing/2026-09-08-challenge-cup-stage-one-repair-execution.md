@@ -86,3 +86,7 @@
 - 完整 selector 第二轮在两条 interrupted journal / continuation fixture 失败，来源 Agent 正按精确测试独立诊断；前组已通过。失败 manifest 不能用于合入，后续新增代码也必须绑定新验证结果。
 - 开发 guard 发现同一主任务初始注册 ID 与 worktree 自动 ID 重叠；已将初始注册正常标为完成并注明交接到现有主 claim，重新 preflight 无重叠。未触碰其他项目任务的注册或改动。
 - 第二轮失败已区分并修复：中断尚未写回时没有 canonical candidate batch 是正常事实，但新增 receipt helper 无条件覆盖 `userStatus=interrupted`、中断原因和续接指导，这是本轮引入的真实回归。现保留中断/失败语义，同时仍记录 receipt gate 并禁止 artifact/completion 显示通过，没有跳过来源真实性校验。另一 continuation case 原来只固定终态 receipt reader，新预校验入口仍读空事件；补已有 receipt-binding fixture，生产 preflight 不变。主 Agent 独立重跑两个精确 node 均通过。
+- 来源写回、中断、续接组合 37 项通过。结果包适配、题目结果与阶段边界另 161 项通过。
+- 阶段图 Agent 在首个检查点留下定义与创建入口三文件半成品，尚未测试；用户要求加速后主 Agent 中断扩展探索并接管。补齐创建时 definition/identity/binding 同源、3.1 冻结 snapshot、默认 readiness 版本集合、当前阶段一产物启动门及真实 Ledger system adapter 的运行投影。第一阶段终态新增明确 `proposal_completed`（后端与前端类型一致），不借用实验 STOP 原因；旧 3.0.0 builder/snapshot 保持不变。
+- 主 Agent 的新纵切面验证覆盖：registry 重启读回新 snapshot、真实 LangGraph 初始 checkpoint 编译/持久化、新旧 successor 与进度隔离、真实 artifact store 中当前计划/评审/假说缺失阻断、system port 从 Ledger 构造运行投影、真实 Ledger 终态关闭与幂等。7 项通过；registry/原正式交接/自动修订组合共 36 项通过。确定性测试使用隔离数据与模型替身，不能写成真实模型闭环。
+- 前端独立只读核验确认：已有 runId 的正式 snapshot/画布/Inspector 均消费 pinned definition，正常正式进度来自后端。仅 question URL 尚未提升为 formal runId 的短暂窗口仍可能出现默认图，这是显示层待观察项；没有据此扩大本轮 UI 改造，待浏览器验收确认实际影响。

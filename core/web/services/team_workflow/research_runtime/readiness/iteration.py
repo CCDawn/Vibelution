@@ -247,6 +247,21 @@ def evaluate_result_package(
     """
     blockers: list[Any] = []
     package = context.result_package(run.team_id, run.run_id)
+    from core.research.workflow.stage_one_definition import is_stage_one_workflow_version
+
+    if is_stage_one_workflow_version(run.workflow_version_id):
+        ready = bool(
+            package
+            and (package.get("packaging_ready") or _result_package_is_complete(package))
+            and int(package.get("pending_human_tasks") or 0) == 0
+        )
+        return DomainVerdict(
+            blockers=() if ready else (blocker(
+                "result_package_incomplete", "第一阶段结果待核验",
+                "当前运行的假说、评审、研究计划或交接产物未齐，或仍有待处理确认",
+            ),),
+            revision_vector=common.domain_revision_vector,
+        )
     if _result_package_is_complete(package):
         return DomainVerdict(
             blockers=(),

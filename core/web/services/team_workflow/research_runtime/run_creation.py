@@ -355,11 +355,27 @@ def create_question_run(
         run_input=run_input,
         idempotency_key=idempotency_key,
         catalog_run_authorization=catalog_run_authorization,
+        workflow_definition=_question_run_creation_definition(),
     )
     generation = _auto_open_candidate_generation(run_input, created_run=created)
     if generation is not None:
         created = {**created, "candidateGeneration": generation}
     return created
+
+
+def _question_run_creation_definition() -> WorkflowDefinition:
+    """Return the pinned definition for a new Challenge Cup question run.
+
+    Question launches are the stage-one entry.  The independent ``create_run``
+    API remains available for callers that explicitly create a full 3.0.0
+    experiment, and historical runs retain their frozen definition identity.
+    """
+
+    from core.research.workflow.stage_one_definition import (
+        build_stage_one_workflow_definition,
+    )
+
+    return build_stage_one_workflow_definition()
 
 
 def _create_request_fingerprints(run_input: Mapping[str, Any]) -> tuple[str, ...]:
@@ -601,6 +617,7 @@ def create_run(
         workflow_version_id=workflow_version_id,
         layers=layers,
         captured_at=created_at,
+        definition=definition,
     )
     binding_payloads = [binding_snapshot_payload(item) for item in snapshots]
     try:

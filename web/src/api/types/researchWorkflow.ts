@@ -75,6 +75,7 @@ export type CompletionKind =
   | "branched_revision"
   | "stopped"
   | "promoted"
+  | "proposal_completed"
   | "rolled_back"
   | "failed";
 

@@ -30,8 +30,10 @@ from core.research.competition.resources import (
 )
 from core.research.competition.result_set import CatalogScope
 from core.research.workflow.contracts import DEFAULT_PROGRAM_ID
-from core.research.workflow.definition import build_challenge_cup_workflow_definition
-from core.research.workflow.definition_registry import definition_identity
+from core.research.workflow.definition import CHALLENGE_CUP_WORKFLOW_ID
+from core.research.workflow.definition_registry import (
+    resolve_definition_by_version_id, WorkflowDefinitionRegistryError,
+)
 from core.web.services.team_workflow.challenge_phase_boundary import (
     ChallengePhaseBoundaryError,
 )
@@ -556,37 +558,41 @@ def attach_question_run_checkpoints(
 ) -> list[dict[str, Any]]:
     """Attach the latest workflow checkpoint for each catalog question."""
 
-    definition = build_challenge_cup_workflow_definition()
-    identity = definition_identity(definition)
-    node_ids = [node.nodeId for node in definition.nodes]
-    labels = {node.nodeId: node.label for node in definition.nodes}
-    index_by_id = {node_id: index for index, node_id in enumerate(node_ids)}
-    total_steps = len(node_ids)
+    definitions: dict[str, Any] = {}
     latest_by_question: dict[str, Mapping[str, Any]] = {}
-    succeeded_by_question: dict[str, Mapping[str, Any]] = {}
-    max_completed_by_question: dict[str, int] = {}
+    succeeded_by_question: dict[tuple[str, str], Mapping[str, Any]] = {}
+    max_completed_by_question: dict[tuple[str, str], int] = {}
     for run in runs:
+        try:
+            definition = resolve_definition_by_version_id(_text(run.get("workflowVersionId")))
+        except WorkflowDefinitionRegistryError:
+            continue
         if (
-            _text(run.get("workflowVersionId")) != identity.workflowVersionId
-            or _text(run.get("structureHash")) != identity.structureHash
+            definition.workflowId != CHALLENGE_CUP_WORKFLOW_ID
+            or definition.structureHash != _text(run.get("structureHash"))
         ):
             continue
+        definitions[_text(run.get("runId"))] = definition
+        node_ids = [node.nodeId for node in definition.nodes]
+        index_by_id = {node_id: index for index, node_id in enumerate(node_ids)}
+        total_steps = len(node_ids)
         question_id = _text(run.get("questionId")).upper()
         run_id = _text(run.get("runId"))
         if not question_id or not run_id:
             continue
+        progress_key = (question_id, definition.structureHash)
         previous = latest_by_question.get(question_id)
         if previous is None or _run_timestamp_ms(run) >= _run_timestamp_ms(previous):
             latest_by_question[question_id] = run
         run_status = _text(run.get("status"))
         if run_status == "succeeded":
-            previous_success = succeeded_by_question.get(question_id)
+            previous_success = succeeded_by_question.get(progress_key)
             if previous_success is None or _run_timestamp_ms(run) >= _run_timestamp_ms(previous_success):
-                succeeded_by_question[question_id] = run
+                succeeded_by_question[progress_key] = run
         run_node_index = index_by_id.get(_run_current_node_id(run), 0)
         run_completed = total_steps if run_status == "succeeded" else run_node_index
-        max_completed_by_question[question_id] = max(
-            max_completed_by_question.get(question_id, 0),
+        max_completed_by_question[progress_key] = max(
+            max_completed_by_question.get(progress_key, 0),
             run_completed,
         )
     attached: list[dict[str, Any]] = []
@@ -603,16 +609,20 @@ def attach_question_run_checkpoints(
         # succeeded the question keeps its succeeded checkpoint (artifacts
         # remain usable), while an in-flight newer run still shows as running.
         status_run = run
+        progress_key = (question_id, _text(run.get("structureHash")))
         if status in _TERMINAL_RUN_STATUSES and status != "succeeded":
-            status_run = succeeded_by_question.get(question_id) or run
+            status_run = succeeded_by_question.get(progress_key) or run
             status = _text(status_run.get("status")) or status
         node_id = _run_current_node_id(status_run)
+        definition = definitions[_text(status_run.get("runId"))]
+        labels = {node.nodeId: node.label for node in definition.nodes}
+        total_steps = len(definition.nodes)
         record["checkpoint"] = {
             "runId": _text(status_run.get("runId")),
             "status": status,
             "currentNodeId": node_id,
             "currentNodeLabel": labels.get(node_id, ""),
-            "completedCount": max_completed_by_question.get(question_id, 0),
+            "completedCount": max_completed_by_question.get(progress_key, 0),
             "totalSteps": total_steps,
             "resumable": _text(run.get("status")) not in _TERMINAL_RUN_STATUSES,
         }

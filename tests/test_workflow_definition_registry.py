@@ -172,17 +172,20 @@ def test_builtin_snapshot_matches_current_definition_build() -> None:
         workflowVersionId=workflow_version_id_for(current.structureHash),
         structureHash=current.structureHash,
     ) in identities
-    assert [
+    from core.research.workflow.stage_one_definition import stage_one_creation_definition
+
+    assert set(
         item
         for item in identities
         if item.workflowId == "challenge-cup-research"
-    ] == [
+    ) == {
         DefinitionIdentity(
             workflowId=current.workflowId,
             workflowVersionId=workflow_version_id_for(current.structureHash),
             structureHash=current.structureHash,
-        )
-    ]
+        ),
+        stage_one_creation_definition()[1],
+    }
     # snapshot is pure structure: no secrets, paths, or runtime data
     raw = (snapshot_dir() / "challenge-cup-research@3.0.0.json").read_text(encoding="utf-8")
     assert "\\" not in raw

@@ -236,6 +236,13 @@ def terminal_facts_for_run(run: Any) -> tuple[str, str]:
     ).strip()
     if not terminal:
         terminal = str(governance.get("terminalReason") or "").strip()
+    from core.research.workflow.stage_one_definition import is_stage_one_workflow_version
+
+    if (
+        is_stage_one_workflow_version(str(getattr(run, "workflow_version_id", "")))
+        and terminal == "stage_one_proposal_completed"
+    ):
+        return "proposal_completed", terminal
     kind = _normalized_terminal_decision(operation or decision)
     if kind == "rollback_candidate":
         return "rolled_back", terminal or "rollback"

@@ -1,0 +1,110 @@
+{
+  "snapshotKind": "workflow_definition_snapshot",
+  "snapshotVersion": 1,
+  "workflowId": "challenge-cup-research",
+  "schemaVersion": "3.1.0-stage-one",
+  "workflowVersionId": "wv-26ff976466f4",
+  "contentHash": "26ff976466f4ff355b975869a46cd5566a58bd2529f4cd424ba1b5ab577f819e",
+  "definition": {
+    "workflowId": "challenge-cup-research",
+    "schemaVersion": "3.1.0-stage-one",
+    "label": "挑战杯第一阶段科研流程",
+    "structureHash": "26ff976466f4ff355b975869a46cd5566a58bd2529f4cd424ba1b5ab577f819e",
+    "stages": [
+      {
+        "stageId": "problem_understanding",
+        "index": 1,
+        "label": "问题理解",
+        "nodeIds": [
+          "problem_understanding"
+        ]
+      },
+      {
+        "stageId": "experiment_design",
+        "index": 2,
+        "label": "假说形成",
+        "nodeIds": [
+          "hypothesis_design"
+        ]
+      },
+      {
+        "stageId": "execution_iteration",
+        "index": 3,
+        "label": "结果核验",
+        "nodeIds": [
+          "result_package"
+        ]
+      }
+    ],
+    "nodes": [
+      {
+        "nodeId": "problem_understanding",
+        "stageId": "problem_understanding",
+        "label": "问题理解",
+        "actorKind": "agent",
+        "primaryRoleKey": "source_finder",
+        "description": "",
+        "collaboratorRoleKeys": [],
+        "acceptsGateKinds": [],
+        "producesArtifactKinds": [
+          "problem_understanding"
+        ],
+        "sessionScopePolicy": "node_shared"
+      },
+      {
+        "nodeId": "hypothesis_design",
+        "stageId": "experiment_design",
+        "label": "假设设计",
+        "actorKind": "agent",
+        "primaryRoleKey": "experiment_planner",
+        "description": "",
+        "collaboratorRoleKeys": [],
+        "acceptsGateKinds": [
+          "knowledge_package"
+        ],
+        "producesArtifactKinds": [
+          "hypothesis_set"
+        ],
+        "sessionScopePolicy": "candidate_fan_out"
+      },
+      {
+        "nodeId": "result_package",
+        "stageId": "execution_iteration",
+        "label": "结果打包",
+        "actorKind": "system",
+        "primaryRoleKey": "package_builder",
+        "description": "",
+        "collaboratorRoleKeys": [],
+        "acceptsGateKinds": [],
+        "producesArtifactKinds": [
+          "research_result_package"
+        ],
+        "sessionScopePolicy": "node_shared"
+      }
+    ],
+    "edges": [
+      {
+        "edgeId": "e_problem_hypothesis",
+        "fromNodeId": "problem_understanding",
+        "toNodeId": "hypothesis_design",
+        "label": "问题理解",
+        "gateKind": "auto",
+        "requiredArtifactKinds": [
+          "problem_understanding"
+        ],
+        "requiresHumanAccept": false
+      },
+      {
+        "edgeId": "e_hyp_result",
+        "fromNodeId": "hypothesis_design",
+        "toNodeId": "result_package",
+        "label": "假设集",
+        "gateKind": "auto",
+        "requiredArtifactKinds": [
+          "hypothesis_set"
+        ],
+        "requiresHumanAccept": false
+      }
+    ]
+  }
+}

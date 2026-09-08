@@ -33,6 +33,7 @@ from core.research.workflow.definition import (
     build_challenge_cup_workflow_definition,
 )
 from core.research.workflow.definition_registry import register_or_resolve
+from core.research.workflow.stage_one_definition import build_stage_one_workflow_definition
 from core.research.workflow.models import ActorKind
 from core.research.workflow.projection import build_canvas_projection
 
@@ -471,8 +472,9 @@ def _definition_meta_from(
     """Validate the workflowId and return its canonical creation identity."""
     if workflow_id != CHALLENGE_CUP_WORKFLOW_ID:
         raise ResearchWorkflowError(f"Unknown workflowId: {workflow_id}", code="unknown_workflow")
-    if definition is None or identity is None:
+    if definition is None:
         definition = build_challenge_cup_workflow_definition()
+    if identity is None:
         identity = register_or_resolve(definition)
     return definition, identity
 
@@ -594,6 +596,7 @@ class ResearchWorkflowRuntimeService:
             workflow_id,
             run_input=run_input,
             idempotency_key=idempotency_key,
+            workflow_definition=build_stage_one_workflow_definition(),
         )
 
     def _effective_binding_layers(self, workflow_id: str, team_id: str) -> AgentBindingLayers:
@@ -776,12 +779,16 @@ class ResearchWorkflowRuntimeService:
         run_input: Mapping[str, Any],
         binding_layers: AgentBindingLayers | None = None,
         idempotency_key: str = "",
+        workflow_definition: Any | None = None,
     ) -> dict[str, Any]:
         with self._lock:
             # ONE rollout-mode reading per creation: the (definition, identity)
             # The canonical definition identity is threaded through every
             # downstream use in this transaction.
-            creation_definition, creation_identity = _definition_meta_from(workflow_id)
+            creation_definition, creation_identity = _definition_meta_from(
+                workflow_id,
+                definition=workflow_definition,
+            )
             create_input_fingerprints = _create_request_fingerprints(run_input)
             create_input_fingerprint = create_input_fingerprints[0]
             run_id = run_id_for_create(workflow_id, idempotency_key)
@@ -827,6 +834,7 @@ class ResearchWorkflowRuntimeService:
                 workflow_version_id=creation_identity.workflowVersionId,
                 layers=layers,
                 captured_at=_utc_now(),
+                definition=creation_definition,
             )
             binding_payloads = [binding_snapshot_payload(snapshot) for snapshot in snapshots]
             created_at = _utc_now()

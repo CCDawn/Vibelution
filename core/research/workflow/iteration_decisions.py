@@ -26,6 +26,7 @@ class CompletionKind(str, Enum):
     BRANCHED_REVISION = "branched_revision"
     STOPPED = "stopped"
     PROMOTED = "promoted"
+    PROPOSAL_COMPLETED = "proposal_completed"
     ROLLED_BACK = "rolled_back"
     FAILED = "failed"
 

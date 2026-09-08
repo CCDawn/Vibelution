@@ -1771,9 +1771,22 @@ class RealDomainPorts:
     def execute_system_action(
         self, *, action: PendingAction
     ) -> tuple[list[dict[str, str]], dict[str, Any]]:
+        snapshot = self._run_input_snapshot(action.run_id)
+        if action.node_id == "result_package":
+            from core.research.workflow.stage_one_definition import is_stage_one_workflow_version
+            from .run_catalog import catalog_dict_from_run
+
+            run = self._store.get_run(action.run_id)
+            if run is not None and is_stage_one_workflow_version(run.workflow_version_id):
+                snapshot["workflowRunProjection"] = {
+                    **catalog_dict_from_run(run),
+                    "inputSnapshot": dict(snapshot),
+                    "terminalReason": "stage_one_proposal_completed",
+                    "inheritedArtifactRefs": [ref.artifactId for ref in action.input_artifact_refs],
+                }
         return _execute_real_system_action(
             action,
-            input_snapshot=self._run_input_snapshot(action.run_id),
+            input_snapshot=snapshot,
             required_kinds=self.required_artifact_kinds(action),
         )
 
