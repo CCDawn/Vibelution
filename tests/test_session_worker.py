@@ -390,6 +390,100 @@ def test_receipt_context_accepts_binding_without_research_project_id(
     assert context["expectedModelRoute"]["modelRef"] == "default/qwen-alias"
 
 
+def test_receipt_context_accepts_continuation_turn_of_stage_task(
+    monkeypatch,
+) -> None:
+    """A "继续" continuation turn keeps leaving model invocation receipts.
+
+    The orchestration-driven continuation runs on the same stage task and
+    session under a new turn id while the task record still pins the parked
+    turn, and its inherited metadata carries no researchProjectId. Without
+    the receipt context the whole turn runs receipt-less and the node's
+    completion dependency terminally blocks on a turn that actually
+    succeeded.
+    """
+    task = {
+        "taskId": "stagetask-1",
+        "sessionId": "session-1",
+        "researchProjectId": "project-1",
+        "turn": {"turnId": "turn-1", "turnIds": ["turn-1", "turn-2"]},
+        "modelInvocationReceiptBinding": None,
+        "challengeTaskContract": {
+            "stageId": "generation",
+            "questionId": "SCI-009",
+            "workflowRunId": "run-1",
+            "workflowId": "challenge-cup-knowledge-sideflow",
+            "workflowVersionId": "wv-1",
+            "workflowNodeId": "source_finding",
+            "nodeRunId": "node-run-1",
+            "nodeAttempt": 2,
+            "modelPolicySha256": "b" * 64,
+            "effectiveRoute": {
+                "modelRef": "dashscope_main/qwen3.8-flash",
+                "providerId": "dashscope_main",
+                "modelId": "qwen3.8-flash",
+            },
+        },
+    }
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.source_collection.stage_session._read_source_collection_stage_session_task_record",
+        lambda *_args, **_kwargs: task,
+    )
+
+    context = worker._model_invocation_receipt_context(
+        {
+            "message_metadata": {
+                "kind": "source_collection_stage_session_task",
+                "sourceSurface": "team_workflow_agent_turn_continuation",
+                "teamId": "team-1",
+                "taskId": "stagetask-1",
+                "sourceCollectionStageTaskId": "stagetask-1",
+                "continuationOfTurnId": "turn-1",
+            }
+        },
+        session_id="session-1",
+        turn_id="turn-2",
+    )
+
+    assert context is not None
+    assert context["teamId"] == "team-1"
+    binding = context["questionStageBinding"]
+    assert binding["formalNodeRunId"] == "node-run-1"
+    assert binding["turnId"] == "turn-2"
+    assert binding["taskId"] == "stagetask-1"
+
+    # A turn id that neither matches the stored turn nor continues it stays
+    # rejected: the strict single-turn pin must survive this change.
+    stranger = worker._model_invocation_receipt_context(
+        {
+            "message_metadata": {
+                "teamId": "team-1",
+                "taskId": "stagetask-1",
+                "sourceCollectionStageTaskId": "stagetask-1",
+                "continuationOfTurnId": "turn-9",
+            }
+        },
+        session_id="session-1",
+        turn_id="turn-3",
+    )
+    assert stranger is None
+
+    # Without any continuation claim, a differing turn id is still rejected.
+    unclaimed = worker._model_invocation_receipt_context(
+        {
+            "message_metadata": {
+                "teamId": "team-1",
+                "researchProjectId": "project-1",
+                "taskId": "stagetask-1",
+                "sourceCollectionStageTaskId": "stagetask-1",
+            }
+        },
+        session_id="session-1",
+        turn_id="turn-3",
+    )
+    assert unclaimed is None
+
+
 def test_challenge_receipt_sink_enqueues_durable_registry_intent(monkeypatch) -> None:
     recorded: list[dict] = []
     runtime = SimpleNamespace(store=object())

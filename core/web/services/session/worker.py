@@ -272,12 +272,17 @@ def _model_invocation_receipt_context(
     task_id = str(metadata.get("taskId") or "").strip()
     team_id = str(metadata.get("teamId") or "").strip()
     project_id = str(metadata.get("researchProjectId") or "").strip()
-    if not task_id or not team_id or not project_id:
+    if not task_id or not team_id:
         return None
     # Metadata is only a locator. The binding itself must be read back from
     # the server-owned project task record; a client-supplied metadata object
     # must never become receipt authority.
     source_task = str(metadata.get("sourceCollectionStageTaskId") or "").strip()
+    if not project_id and not (source_task and source_task == task_id):
+        # Only source-collection stage tasks may omit researchProjectId here
+        # (their turn continuations inherit the stage-task metadata minus it);
+        # the canonical task record supplies it after read-back below.
+        return None
     try:
         if source_task and source_task == task_id:
             from core.web.services.team_workflow.source_collection.stage_session import (
@@ -302,11 +307,32 @@ def _model_invocation_receipt_context(
         return None
     if task is None or str(task.get("sessionId") or "").strip() != str(session_id or "").strip():
         return None
+    if not project_id:
+        # Turn continuations of source-collection stage tasks inherit the
+        # stage-task metadata except researchProjectId; the canonical task
+        # record owns that identity, so read it back instead of rejecting.
+        if not (source_task and source_task == task_id):
+            return None
+        project_id = str(task.get("researchProjectId") or "").strip()
+        if not project_id:
+            return None
     if str(task.get("researchProjectId") or "").strip() != project_id:
         return None
     task_turn = task.get("turn") if isinstance(task.get("turn"), dict) else {}
     stored_turn_id = str(task_turn.get("turnId") or "").strip()
-    if stored_turn_id and stored_turn_id != str(turn_id or "").strip():
+    if (
+        stored_turn_id
+        and stored_turn_id != str(turn_id or "").strip()
+        # The orchestration-driven turn continuation ("继续" after a paused
+        # turn) runs on the same task/session but under a new turn id while
+        # the task record still pins the parked turn. Its model calls must
+        # keep leaving receipts, or the completion dependency for the node
+        # can never find a receipt scoped to the final turn and fails the
+        # node terminally. Only the exact continuation of the stored turn is
+        # accepted; every other turn id keeps the strict single-turn pin.
+        and stored_turn_id
+        != str(metadata.get("continuationOfTurnId") or "").strip()
+    ):
         return None
     seed = task.get("modelInvocationReceiptBinding")
     if isinstance(seed, dict):
