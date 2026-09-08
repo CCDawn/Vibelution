@@ -269,6 +269,70 @@ _OPERATOR_ONLY_COMMANDS = frozenset(
 )
 
 
+def _compensate_completion_pending_reservations(
+    uow,
+    *,
+    run_id: str,
+    correlation_id: str,
+    now_ms: int,
+) -> list[dict]:
+    """Settle/void zombie budget reservations stranded by completion-pending.
+
+    Completion-dependency terminal failures used to leave the attempt's
+    budget receipt in 'reserved' with no compensation, so its full estimate
+    occupied the stage admission window forever and every later
+    start_node/retry_node was rejected with budget_safety_limit_reached.
+    Only exact COMPLETION_PENDING adapter_dispatch failures are compensated;
+    entries carry the owning ``runId`` so parent-run and knowledge-child-run
+    compensations stay distinguishable in the run_blocked payload.
+    """
+    from .budget_authority_adapter import (
+        compensate_terminal_attempt_reservation_in_uow,
+    )
+    from .completion_dependency import COMPLETION_PENDING
+
+    compensated: list[dict] = []
+    zombie_rows = uow.repository.execute(
+        """
+        SELECT node_run_id FROM node_attempts na
+        WHERE na.run_id = ? AND na.status = 'running'
+          AND EXISTS (
+            SELECT 1 FROM outbox_actions oa
+            WHERE oa.node_run_id = na.node_run_id
+              AND oa.action_kind = 'adapter_dispatch'
+              AND oa.status = 'failed'
+          )
+        """,
+        (run_id,),
+    ).fetchall()
+    for (zombie_node_run_id,) in zombie_rows:
+        problem_row = uow.repository.execute(
+            "SELECT last_problem_json FROM outbox_actions "
+            "WHERE node_run_id = ? AND action_kind = 'adapter_dispatch' "
+            "AND status = 'failed' ORDER BY updated_at_ms DESC LIMIT 1",
+            (zombie_node_run_id,),
+        ).fetchone()
+        try:
+            problem = json.loads(str(problem_row[0]) or "{}") if problem_row else {}
+        except ValueError:
+            continue
+        if not isinstance(problem, dict) or problem.get("code") != COMPLETION_PENDING:
+            continue
+        result = compensate_terminal_attempt_reservation_in_uow(
+            uow,
+            run_id=run_id,
+            node_run_id=zombie_node_run_id,
+            reason="reconcile_completion_dependency_compensation",
+            correlation_id=correlation_id,
+            now_ms=now_ms,
+        )
+        if result in {"settled", "voided"}:
+            compensated.append(
+                {"runId": run_id, "nodeRunId": zombie_node_run_id, "result": result}
+            )
+    return compensated
+
+
 class WorkflowCommandService:
     def __init__(
         self,
@@ -1304,9 +1368,14 @@ class WorkflowCommandService:
         plan = plan_ledger_authority(attempts, node_order=formal_node_order(run))
         from .knowledge_sideflow_service import record_knowledge_sideflow_child_failure
 
+        knowledge_child_run_ids: list[str] = []
         for invocation in uow.repository.list_knowledge_invocations_for_parent(run.run_id):
             child = uow.repository.get_run(invocation.knowledge_child_run_id or "")
-            if child is not None and child.status in {"failed", "cancelled"}:
+            if child is None:
+                continue
+            if child.run_id != run.run_id and child.run_id not in knowledge_child_run_ids:
+                knowledge_child_run_ids.append(child.run_id)
+            if child.status in {"failed", "cancelled"}:
                 record_knowledge_sideflow_child_failure(
                     uow, run_id=child.run_id, outcome=child.status, now_ms=now_ms,
                 )
@@ -1382,55 +1451,25 @@ class WorkflowCommandService:
             (now_ms, now_ms, request.run_id),
         )
         revived = int(uow.repository.affected() or 0)
-        # Completion-dependency terminal failures used to leave the attempt's
-        # budget receipt in 'reserved' with no compensation, so its full
-        # estimate occupied the stage admission window forever and every later
-        # start_node/retry_node was rejected with budget_safety_limit_reached.
-        # Close those zombie reservations here, in this same transaction.
-        from .budget_authority_adapter import (
-            compensate_terminal_attempt_reservation_in_uow,
+        compensated = _compensate_completion_pending_reservations(
+            uow,
+            run_id=request.run_id,
+            correlation_id=str(request.idempotency_key),
+            now_ms=now_ms,
         )
-        from .completion_dependency import COMPLETION_PENDING
-
-        compensated = []
-        zombie_rows = uow.repository.execute(
-            """
-            SELECT node_run_id FROM node_attempts na
-            WHERE na.run_id = ? AND na.status = 'running'
-              AND EXISTS (
-                SELECT 1 FROM outbox_actions oa
-                WHERE oa.node_run_id = na.node_run_id
-                  AND oa.action_kind = 'adapter_dispatch'
-                  AND oa.status = 'failed'
-              )
-            """,
-            (request.run_id,),
-        ).fetchall()
-        for (zombie_node_run_id,) in zombie_rows:
-            problem_row = uow.repository.execute(
-                "SELECT last_problem_json FROM outbox_actions "
-                "WHERE node_run_id = ? AND action_kind = 'adapter_dispatch' "
-                "AND status = 'failed' ORDER BY updated_at_ms DESC LIMIT 1",
-                (zombie_node_run_id,),
-            ).fetchone()
-            try:
-                problem = json.loads(str(problem_row[0]) or "{}") if problem_row else {}
-            except ValueError:
-                continue
-            if not isinstance(problem, dict) or problem.get("code") != COMPLETION_PENDING:
-                continue
-            result = compensate_terminal_attempt_reservation_in_uow(
-                uow,
-                run_id=request.run_id,
-                node_run_id=zombie_node_run_id,
-                reason="reconcile_completion_dependency_compensation",
-                correlation_id=str(request.idempotency_key),
-                now_ms=now_ms,
-            )
-            if result in {"settled", "voided"}:
-                compensated.append(
-                    {"nodeRunId": zombie_node_run_id, "result": result}
+        # 知识 sideflow 子 run 的 reconcile_run 没有任何前端入口（知识节点
+        # offer 白名单只含 ensure/inspect），其 completion-dependency 终态
+        # 失败困住的僵尸预留只能靠主 run 面板的「对账运行」闭合；必须在同
+        # 一事务内一并扫描补偿，否则阶段准入继续被子 run 的满额预留锁死。
+        for child_run_id in knowledge_child_run_ids:
+            compensated.extend(
+                _compensate_completion_pending_reservations(
+                    uow,
+                    run_id=child_run_id,
+                    correlation_id=str(request.idempotency_key),
+                    now_ms=now_ms,
                 )
+            )
         active_work_row = uow.repository.execute(
             """
             SELECT

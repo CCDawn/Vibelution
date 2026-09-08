@@ -38,6 +38,7 @@ import pytest
 from core.research.workflow.contracts import WorkflowCommandKind
 from core.research.workflow.definition import build_challenge_cup_workflow_definition
 from core.research.workflow.definition_registry import register_or_resolve
+from core.research.workflow.ledger.records import KnowledgeInvocationRecord
 
 _PINNED_WORKFLOW_VERSION_ID = register_or_resolve(
     build_challenge_cup_workflow_definition()
@@ -849,8 +850,213 @@ def test_reconcile_compensates_completion_pending_reservation(tmp_path: Path) ->
         ]
         payload = json.loads(blocked_events[-1].payload_json)
         assert {
+            "runId": run_id,
             "nodeRunId": zombie_node_run_id,
             "result": "settled",
         } in payload["compensatedReservations"]
+    finally:
+        commands.close()
+
+
+def test_reconcile_compensates_zombie_reservation_in_knowledge_child_run(
+    tmp_path: Path,
+) -> None:
+    """Reconciling the main run must also close child-run zombie reservations.
+
+    Real acceptance (run-332a539909a6 / run-1ca97605acf3) found the zombie in
+    a knowledge sideflow child run, whose reconcile_run offer has no frontend
+    entry at all: the knowledge-node offer whitelist only exposes
+    ensure/inspect, and only the main formal run panel carries the
+    reconcile button. Unless the parent-run reconcile compensates the child
+    run's stranded reservation in the same transaction, the stage admission
+    window stays locked with no operable path out."""
+
+    commands = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        run_id = "run-parent-reconcile"
+        child_run_id = "run-knowledge-child"
+        child_node_run_id = f"nr-{child_run_id}-source_finding-a1"
+        parent_node_run_id = f"nr-{run_id}-hypothesis_design-a1"
+        store = commands.store
+
+        def seed(uow):
+            uow.repository.insert_run(
+                build_run_record(
+                    workflow_version_id=_PINNED_WORKFLOW_VERSION_ID,
+                    run_id=run_id,
+                    status="reconciliation_required",
+                    run_version=3,
+                    last_event_sequence=8,
+                )
+            )
+            # 知识 sideflow 子 run（challenge-cup-knowledge-sideflow 定义）。
+            uow.repository.insert_run(
+                build_run_record(
+                    workflow_version_id=_PINNED_WORKFLOW_VERSION_ID,
+                    run_id=child_run_id,
+                    status="running",
+                    run_version=2,
+                    last_event_sequence=4,
+                    parent_run_id=run_id,
+                )
+            )
+            uow.repository.insert_command(
+                build_command_record(
+                    command_id="cmd-parent",
+                    run_id=run_id,
+                    idempotency_key="key:parent",
+                    node_id="hypothesis_design",
+                )
+            )
+            uow.repository.insert_command(
+                build_command_record(
+                    command_id="cmd-child",
+                    run_id=child_run_id,
+                    idempotency_key="key:child",
+                    node_id="source_finding",
+                )
+            )
+            uow.repository.insert_knowledge_invocation(
+                KnowledgeInvocationRecord(
+                    invocation_id="ki-child-zombie",
+                    parent_run_id=run_id,
+                    parent_node_id="hypothesis_design",
+                    parent_node_run_id=parent_node_run_id,
+                    parent_attempt=1,
+                    question_id="SCI-096",
+                    scope_hash="scope",
+                    request_hash="req-child-zombie",
+                    search_envelope_hash="env",
+                    requirements_hash="req-hash",
+                    source_policy_version="v1",
+                    knowledge_child_run_id=child_run_id,
+                    status="running",
+                    knowledge_package_ref=None,
+                    package_content_hash=None,
+                    handoff_state="pending",
+                    error_json=None,
+                    created_at_ms=FIXED_NOW_MS - 1_000,
+                    updated_at_ms=FIXED_NOW_MS,
+                )
+            )
+            # 反例：父 run 自身只有一个非 completion-pending 的 failed
+            # adapter_dispatch + running attempt，扫描不得为它产生条目。
+            uow.repository.insert_attempt(
+                _attempt(
+                    "hypothesis_design",
+                    status="running",
+                    run_id=run_id,
+                    command_id="cmd-parent",
+                )
+            )
+            uow.repository.insert_outbox(
+                replace(
+                    build_outbox_record(
+                        "act-parent-adapter",
+                        run_id=run_id,
+                        command_id="cmd-parent",
+                        action_kind="adapter_dispatch",
+                        status="failed",
+                    ),
+                    node_run_id=parent_node_run_id,
+                    last_problem_json=json.dumps(
+                        {"code": "adapter_execution_exception"}
+                    ),
+                )
+            )
+            # 子 run 的僵尸：running attempt + COMPLETION_PENDING failed act
+            # + 满额 reserved budget receipt。
+            uow.repository.insert_attempt(
+                _attempt(
+                    "source_finding",
+                    status="running",
+                    run_id=child_run_id,
+                    command_id="cmd-child",
+                )
+            )
+            uow.repository.insert_outbox(
+                replace(
+                    build_outbox_record(
+                        "act-child-adapter",
+                        run_id=child_run_id,
+                        command_id="cmd-child",
+                        action_kind="adapter_dispatch",
+                        status="failed",
+                    ),
+                    node_run_id=child_node_run_id,
+                    last_problem_json=json.dumps(
+                        {
+                            "code": COMPLETION_PENDING,
+                            "dependencyStatus": "unavailable",
+                        }
+                    ),
+                )
+            )
+            uow.repository.insert_budget_receipt(
+                receipt_id="budget-receipt-child-zombie",
+                run_id=child_run_id,
+                node_run_id=child_node_run_id,
+                reservation_id=f"reservation-{child_node_run_id}",
+                stage_id="knowledge_collection",
+                policy_hash="p-1",
+                reserved_json=json.dumps(
+                    {
+                        "reserved": {
+                            "estimatedTokens": 1_480_468,
+                            "tokens": 1_480_468,
+                        },
+                        "limits": {"tokens": 2_000_000},
+                    }
+                ),
+                created_at_ms=FIXED_NOW_MS,
+            )
+            uow.repository.update_budget_receipt(
+                "budget-receipt-child-zombie",
+                status="reserved",
+                now_ms=FIXED_NOW_MS,
+                settled_json=json.dumps(
+                    {
+                        "usage": {"tokens": 1_066_138},
+                        "invocations": {"i1": {"tokens": 1_066_138}},
+                    }
+                ),
+            )
+
+        store.submit(seed, force_flush=True).result(timeout=10)
+        commands.service.submit(
+            commands.request(
+                command=WorkflowCommandKind.RECONCILE_RUN,
+                run_id=run_id,
+                node_id=None,
+                expected_run_version=3,
+                idempotency_key="ui:reconcile-parent",
+            )
+        )
+
+        child_status = store.submit(
+            lambda uow: uow.repository.execute(
+                "SELECT status FROM budget_receipts WHERE reservation_id = ?",
+                (f"reservation-{child_node_run_id}",),
+            ).fetchone(),
+            force_flush=True,
+        ).result(timeout=10)[0]
+        assert child_status == "settled"
+
+        blocked_events = [
+            event
+            for event in store.list_events(run_id)
+            if event.event_type == "run_blocked"
+        ]
+        payload = json.loads(blocked_events[-1].payload_json)
+        assert {
+            "runId": child_run_id,
+            "nodeRunId": child_node_run_id,
+            "result": "settled",
+        } in payload["compensatedReservations"]
+        # 父 run 自身无 completion-pending 僵尸：不产生额外条目。
+        assert all(
+            entry.get("runId") == child_run_id
+            for entry in payload["compensatedReservations"]
+        )
     finally:
         commands.close()
