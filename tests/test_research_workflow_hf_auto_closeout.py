@@ -28,6 +28,8 @@ or product runtime is involved.
 
 from __future__ import annotations
 
+import json
+import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -38,8 +40,12 @@ from core.web.services import team_service
 from core.web.services.team_workflow import meeting_driver_work
 from core.web.services.team_workflow import meeting_rounds
 from core.web.services.team_workflow import meeting_runtime
+from core.web.services.team_workflow import storage_durability
 from core.web.services.team_workflow.research_runtime import (
     hypothesis_first_chain as chain,
+)
+from core.web.services.team_workflow.research_runtime.atomic_fs import (
+    atomic_write_text,
 )
 
 from tests._support.team_workflow.helpers import _use_tmp_project_root
@@ -982,7 +988,7 @@ def test_auto_advance_sweep_counts_redrives(
     monkeypatch.setattr(
         chain,
         "question_ids_with_chain_records",
-        lambda _team_id: [_QUESTION_ID],
+        lambda _team_id, records=None: [_QUESTION_ID],
     )
     monkeypatch.setattr(
         chain,
@@ -990,7 +996,7 @@ def test_auto_advance_sweep_counts_redrives(
         lambda: [_TEAM_ID],
     )
 
-    def _noop_review(_team_id, *, question_id):
+    def _noop_review(_team_id, *, question_id, records=None):
         return {"fenced": 1, "redriven": 1, "skipped": 0, "failed": 0}
 
     def _noop_generation(_team_id, *, question_id):
@@ -1019,6 +1025,180 @@ def test_auto_advance_sweep_counts_redrives(
 
     assert summary["fencedReviewsRedriven"] == 1
     assert summary["closedGenerationsRetried"] == 1
+
+
+# ---------------------------------------------------------------------------
+# spec 3.5: sweep-pass ledger read economy (defect 18 — the recovery sweep
+# re-parsed the whole chain JSONL per fenced meeting and starved the backend
+# loop; reads are now memoized per mtime+size and the redrive plan consumes
+# one ledger snapshot per sweep pass)
+
+
+def _count_chain_parses(monkeypatch: pytest.MonkeyPatch) -> list[Path]:
+    """Count tolerant reads of the chain ledger file (the expensive parse)."""
+    parses: list[Path] = []
+    real = storage_durability.read_jsonl_tolerant
+
+    def _counting(path: Path) -> list[dict[str, Any]]:
+        if Path(path).name == "hypothesis_first_chain.jsonl":
+            parses.append(Path(path))
+        return real(path)
+
+    monkeypatch.setattr(storage_durability, "read_jsonl_tolerant", _counting)
+    return parses
+
+
+def _seed_fenced_review_meeting(meeting_id: str, *, link_id: str, selection_id: str) -> None:
+    """One closed execution-stopped review meeting with link + attempt state."""
+    _seed_meeting(
+        _fenced_meeting_record(
+            meeting_id,
+            meeting_type=chain.HYPOTHESIS_REVIEW_MEETING_TYPE,
+            status="closed",
+            extra={"executionStatus": "stopped", "terminalReason": "challenge_deadline"},
+        )
+    )
+    chain._append_jsonl(
+        chain._storage_path(_TEAM_ID),
+        {
+            "schemaVersion": 1,
+            "recordKind": chain.REVIEW_ROUND_LINK_KIND,
+            "linkId": link_id,
+            "meetingRoundId": meeting_id,
+            "selectionId": selection_id,
+            "candidateId": f"cand-{selection_id}",
+            "questionId": _QUESTION_ID,
+            "roundIndex": 1,
+            "createdAt": "2026-09-01T00:00:00Z",
+        },
+    )
+    _seed_review_dispatch_attempt(
+        meeting_id,
+        selection_id=selection_id,
+        candidate_id=f"cand-{selection_id}",
+    )
+
+
+def test_sweep_pass_parses_chain_ledger_once_for_many_fenced_meetings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """一次 sweep pass 走 3 个围栏评审会：链 ledger 只解析一次。sweep 入口
+    读一份快照，计划构建沿 records 下传，不再每会全量重读（defect 18）。"""
+    _isolate(tmp_path, monkeypatch)
+    for index in (1, 2, 3):
+        _seed_fenced_review_meeting(
+            f"meeting-fenced-once-{index}",
+            link_id=f"link-once-{index}",
+            selection_id=f"sel-once-{index}",
+        )
+    # Dead-silent speech: every plan resolves to None, so the whole meeting
+    # list is walked in one pass without any dispatch side effect.
+    monkeypatch.setattr(
+        meeting_rounds,
+        "completed_latest_bound_round_source_messages",
+        lambda _m: [],
+    )
+    monkeypatch.setattr(chain, "_team_ids_with_chain_storage", lambda: [_TEAM_ID])
+    for name in (
+        "auto_approve_awaiting_review_digests",
+        "auto_regenerate_missing_hypothesis_round",
+        "auto_retry_pending_collection_handoffs",
+        "auto_adjudicate_exhausted_round",
+        "auto_accept_knowledge_handoffs",
+        "auto_retry_blocked_formal_nodes",
+        "auto_advance_stage_one_generation",
+        "auto_retry_fenced_generation_attempt",
+    ):
+        monkeypatch.setattr(chain, name, lambda *_args, **_kwargs: {})
+
+    parses = _count_chain_parses(monkeypatch)
+    summary = chain.sweep_auto_advance_closure()
+
+    assert summary["fencedReviewsRedriven"] == 0
+    assert summary["failed"] == 0
+    assert summary["questions"] == 1
+    # One parse for the sweep-entry snapshot; the per-meeting plan builds and
+    # the question enumeration must all serve from it.
+    assert len(parses) == 1
+
+
+def test_chain_records_cache_invalidates_on_append_and_external_rewrite(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """_records 读缓存：命中不重解析且返回副本；_append_jsonl 后新记录立即可见；
+    绕过本模块写入口的外部改写也经 mtime/size 失效重读。"""
+    _isolate(tmp_path, monkeypatch)
+    path = chain._storage_path(_TEAM_ID)
+    chain._append_jsonl(path, {"recordKind": "cache-probe", "seq": 1})
+    first = chain._records(_TEAM_ID)
+    assert [item.get("seq") for item in first] == [1]
+
+    parses = _count_chain_parses(monkeypatch)
+    second = chain._records(_TEAM_ID)
+    assert second == first
+    assert second is not first  # callers get a copy; the cache stays pristine
+    second.append({"recordKind": "mutant"})
+    assert [item.get("seq") for item in chain._records(_TEAM_ID)] == [1]
+    assert parses == []  # unchanged file: served from cache, no re-parse
+
+    chain._append_jsonl(path, {"recordKind": "cache-probe", "seq": 2})
+    assert [item.get("seq") for item in chain._records(_TEAM_ID)] == [1, 2]
+    assert len(parses) == 1  # the append bumped mtime+size: exactly one re-parse
+
+    # An external writer bypassing this module's helpers still invalidates:
+    # the file now has a different size (and an explicitly distinct mtime).
+    external_line = json.dumps(
+        {"recordKind": "cache-probe", "seq": 3, "note": "external"},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    atomic_write_text(path, external_line + "\n")
+    os.utime(path, ns=(1_800_000_000_000_000_000, 1_800_000_000_000_000_000))
+    assert [item.get("seq") for item in chain._records(_TEAM_ID)] == [3]
+    assert len(parses) == 2
+
+
+def test_records_of_missing_team_reads_empty_without_caching(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """不存在的 team ledger：读为空、不缓存、随后落盘能被读到。"""
+    _isolate(tmp_path, monkeypatch)
+    assert chain._records("team-never-seeded") == []
+    path = chain._storage_path("team-never-seeded")
+    chain._append_jsonl(path, {"recordKind": "late", "seq": 1})
+    assert [item.get("seq") for item in chain._records("team-never-seeded")] == [1]
+
+
+def test_auto_redrive_yields_between_fenced_meetings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """多个围栏会顺序处理时，会议之间插入极短 yield：长排空不再独占 GIL，
+    调度让步不改变任何判定。"""
+    _isolate(tmp_path, monkeypatch)
+    for index in (1, 2):
+        _seed_fenced_review_meeting(
+            f"meeting-fenced-yield-{index}",
+            link_id=f"link-yield-{index}",
+            selection_id=f"sel-yield-{index}",
+        )
+    monkeypatch.setattr(
+        meeting_rounds,
+        "completed_latest_bound_round_source_messages",
+        lambda _m: [],
+    )
+    sleeps: list[float] = []
+    monkeypatch.setattr(chain.time, "sleep", lambda seconds: sleeps.append(seconds))
+
+    summary = chain.auto_redrive_fenced_review_meeting(
+        _TEAM_ID, question_id=_QUESTION_ID
+    )
+
+    # Both meetings visited (no early return), one yield between them, and
+    # none before the first.
+    assert summary["fenced"] == 2
+    assert summary["redriven"] == 0
+    assert sleeps == [chain._SWEEP_ITERATION_YIELD_SECONDS]
 
 
 # ---------------------------------------------------------------------------
