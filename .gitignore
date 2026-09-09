@@ -16,6 +16,8 @@ downloads/
 eggs/
 .eggs/
 lib/
+!web/public/desktop-pet/whale-rig/lib/
+!web/public/desktop-pet/whale-rig/lib/*.js
 lib64/
 parts/
 sdist/

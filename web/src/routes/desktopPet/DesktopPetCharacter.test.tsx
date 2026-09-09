@@ -21,7 +21,7 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); });
 async function render(state: PetAnimationState = "idle") {
-  await act(async () => root.render(<DesktopPetCharacter name="小洛" tone="idle" animationState={state} />));
+  await act(async () => root.render(<DesktopPetCharacter characterId="xiaoluo" name="小洛" tone="idle" animationState={state} />));
 }
 async function ready() { await act(async () => resolve({ createLive2dController: mock.create })); }
 describe("Live2D desktop pet", () => {
@@ -56,5 +56,21 @@ describe("Live2D desktop pet", () => {
     await render();
     expect(host.textContent).toContain("Live2D 加载失败");
     expect(host.querySelector("img")).toBeNull();
+  });
+
+  it("switches to the approved Dafeiyu layered rig without booting Cubism", async () => {
+    await act(async () => root.render(
+      <DesktopPetCharacter
+        characterId="dafeiyu"
+        name="大肥鲸"
+        tone="idle"
+        animationState="idle"
+      />,
+    ));
+    const frame = host.querySelector<HTMLIFrameElement>("iframe");
+    expect(frame?.getAttribute("src")).toBe("/desktop-pet/whale-rig/index.html?embed=1");
+    expect(frame?.getAttribute("title")).toBe("大肥鲸 2.5D 桌面伙伴");
+    expect(host.textContent).toContain("正在加载大肥鲸");
+    expect(mock.load).not.toHaveBeenCalled();
   });
 });

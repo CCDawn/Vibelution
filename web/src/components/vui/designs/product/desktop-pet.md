@@ -12,15 +12,16 @@
 - 人物主体使用 4px 移动阈值区分单击与拖动：单击展开 HUD；拖动按动画帧把绝对屏幕坐标交给 Electron 主进程，并始终保持拖动开始时的窗口宽高，沿用原有位置持久化。
 - 关闭按钮只关闭桌宠窗口；系统托盘的“显示桌面宠物”是稳定恢复入口。
 - 不适用于普通 `/chat`、Companion 人物会话正文或第二套 transcript；这些仍由原生 Session、Journal 与 SSE 拥有。
-- 采用用户确认的 小洛 Live2D 形态；无 3D 引擎、模型导入或市场。
+- 采用用户确认的双角色形态：小洛 Cubism Live2D 与 DeepSeek 大肥鲸分层 WebGL 骨骼；无 3D 引擎、模型导入或市场。
 
 ### 使用方式
 
 - 页面只调用 `/api/pet/activity` 的安全投影；活动或注意状态每秒刷新，空闲时每三秒刷新。
-- 角色点击使用 `VNativeButton` 展开 HUD，Session 行仍使用 `VNativeButton`；关闭使用 `VIconButton`。
+- 角色点击使用 `VNativeButton` 展开 HUD，Session 行仍使用 `VNativeButton`；角色切换与关闭使用 `VIconButton`。
 - Session 点击只调用 Electron preload 的 `openConversationFromPet(sessionId)`，由主进程聚焦原工作台并复用通知打开事件。
-- 角色组件只接收名称、tone 与 animation state；Live2D 只渲染活动投影，不持有会话。
-- 显示模型加载与失败状态，不静默切回旧 PNG；保留小洛的作者标注。
+- 角色组件只接收角色 ID、名称、tone 与 animation state；两个渲染器只消费活动投影，不持有会话。
+- 工具栏切换按钮只切换当前窗口的角色渲染器，不改变 Session、Agent 或消息内容。
+- 显示模型加载与失败状态，不静默切回旧 PNG；保留两个角色各自的作者标注。
 
 ### 非职责
 
@@ -33,6 +34,7 @@
 - 状态优先级由后端投影固定为 `approval > error > running > completed > idle`。
 - `prefers-reduced-motion` 下停止全部非必要角色动画。
 - 复用官方 Cubism SDK 5-r.5 的眨眼、呼吸、视线与物理；九种状态为参数姿态与小洛原生摸头动作，不是九套定制动画。
+- 大肥鲸复用 Anime2.5DRig 的 22 层 PSD、眨眼、呼吸、头发弹簧、视线和参数姿态；它是实时分层骨骼，不冒充 Cubism `.moc3`。
 - 标签页隐藏时停止渲染，关闭/卸载时取消加载并释放模型资源。
 - 本机集成不代表已获公开发布许可，详见 `web/live2d/README.md`。
 
@@ -40,6 +42,7 @@
 
 - `web/src/routes/desktopPet/DesktopPetRoute.tsx`
 - `web/src/routes/desktopPet/DesktopPetCharacter.tsx`
+- `web/src/routes/desktopPet/WhaleRigCharacter.tsx`
 - `web/src/design/route-css/desktop-pet.tailwind.css`
 
 ### 反冗余

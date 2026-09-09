@@ -1,17 +1,22 @@
 import { useEffect, useRef, useState } from "react";
 import type { PetAnimationState, PetActivityTone } from "../../api/types/petActivity";
 import { useShellI18n } from "../../i18n/useShellI18n";
+import type { DesktopPetCharacterId } from "./desktopPetCharacterModel";
 import { loadLive2d } from "./loadLive2d";
 import type { Live2dController, Live2dStatus } from "./live2dContract";
+import { WhaleRigCharacter } from "./WhaleRigCharacter";
 import styles from "./DesktopPetCharacter.styles";
 
 type DesktopPetCharacterProps = {
   animationState: PetAnimationState;
+  characterId: DesktopPetCharacterId;
   name: string;
   tone: PetActivityTone;
 };
 
-export function DesktopPetCharacter({ animationState, name, tone }: DesktopPetCharacterProps) {
+type XiaoLuoCharacterProps = Omit<DesktopPetCharacterProps, "characterId">;
+
+function XiaoLuoCharacter({ animationState, name, tone }: XiaoLuoCharacterProps) {
   const { lang } = useShellI18n();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const controllerRef = useRef<Live2dController | null>(null);
@@ -47,4 +52,16 @@ export function DesktopPetCharacter({ animationState, name, tone }: DesktopPetCh
       <span className={styles.credit} title="小洛模型：火爆鸡王；洛天依：上海禾念。用户已确认取得使用许可。">小洛 · 火爆鸡王</span>
     </span>
   );
+}
+
+export function DesktopPetCharacter({
+  animationState,
+  characterId,
+  name,
+  tone,
+}: DesktopPetCharacterProps) {
+  if (characterId === "dafeiyu") {
+    return <WhaleRigCharacter animationState={animationState} name={name} tone={tone} />;
+  }
+  return <XiaoLuoCharacter animationState={animationState} name={name} tone={tone} />;
 }

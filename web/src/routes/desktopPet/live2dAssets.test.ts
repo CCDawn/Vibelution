@@ -24,4 +24,23 @@ describe("bounded XiaoLuo Live2D assets",()=>{
     expect(existsSync(resolve(assets,"Core/live2dcubismcore.min.js"))).toBe(true);
     expect(existsSync(resolve(assets,"LICENSE.md"))).toBe(true);
   });
+
+  it("ships the pinned Dafeiyu layered rig and its license notices",()=>{
+    const whale=resolve(webRoot,"public/desktop-pet/whale-rig");
+    for(const file of [
+      "index.html",
+      "model.psd",
+      "eye_close.psd",
+      "mouth_close.psd",
+      "lib/ag-psd.min.js",
+      "lib/genericparts.js",
+      "lib/rigger.js",
+      "LICENSE",
+      "LICENSE-Anime2.5DRig",
+      "NOTICE.md",
+    ]) {
+      expect(existsSync(resolve(whale,file))).toBe(true);
+    }
+    expect(readFileSync(resolve(whale,"NOTICE.md"),"utf8")).toContain("78d2110b341f3d101cc143f7e0210050a93326ff");
+  });
 });

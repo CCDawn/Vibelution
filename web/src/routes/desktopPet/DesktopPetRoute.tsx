@@ -1,7 +1,7 @@
 import "../../design/route-css/desktop-pet.tailwind.css";
 
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, ChevronUp, X } from "lucide-react";
+import { ChevronDown, ChevronUp, RefreshCw, X } from "lucide-react";
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 
 import { fetchPetActivity } from "../../api/pet";
@@ -10,6 +10,10 @@ import type { PetActivity } from "../../api/types/petActivity";
 import { VIconButton, VNativeButton } from "../../components/vui";
 import { useShellI18n } from "../../i18n/useShellI18n";
 import { DesktopPetCharacter } from "./DesktopPetCharacter";
+import {
+  nextDesktopPetCharacter,
+  type DesktopPetCharacterId,
+} from "./desktopPetCharacterModel";
 import styles from "./DesktopPetRoute.styles";
 import {
   openSessionFromDesktopPet,
@@ -38,7 +42,8 @@ const EMPTY_ACTIVITY: PetActivity = {
 
 const COPY = {
   zh: {
-    name: "小洛",
+    names: { xiaoluo: "小洛", dafeiyu: "DeepSeek 大肥鲸" },
+    switchTo: { xiaoluo: "切换到小洛", dafeiyu: "切换到大肥鲸" },
     sessions: "实时对话",
     empty: "现在没有运行中的对话",
     open: "展开实时对话",
@@ -47,7 +52,8 @@ const COPY = {
     unavailable: "暂时无法读取对话状态",
   },
   en: {
-    name: "Xiao Luo",
+    names: { xiaoluo: "Xiao Luo", dafeiyu: "DeepSeek Whale" },
+    switchTo: { xiaoluo: "Switch to Xiao Luo", dafeiyu: "Switch to DeepSeek Whale" },
     sessions: "Live conversations",
     empty: "No conversations are running",
     open: "Show live conversations",
@@ -60,6 +66,7 @@ const COPY = {
 export function DesktopPetRoute() {
   const { lang } = useShellI18n();
   const copy = COPY[lang];
+  const [characterId, setCharacterId] = useState<DesktopPetCharacterId>("xiaoluo");
   const [expanded, setExpanded] = useState(false);
   const [dragging, setDragging] = useState(false);
   const dragStateRef = useRef<DesktopPetDragState | null>(null);
@@ -191,10 +198,16 @@ export function DesktopPetRoute() {
     setExpanded((value) => !value);
   }
 
+  function switchCharacter() {
+    setCharacterId((current) => nextDesktopPetCharacter(current));
+  }
+
   const visibleSessions = activity.sessions.slice(0, 5);
   const statusText = activityQuery.isError
     ? copy.unavailable
     : petToneLabel(activity.aggregateTone, lang);
+  const characterName = copy.names[characterId];
+  const nextCharacterId = nextDesktopPetCharacter(characterId);
 
   return (
     <main
@@ -203,7 +216,7 @@ export function DesktopPetRoute() {
       data-vui-domain-recipe="desktop-pet"
       data-tone={activity.aggregateTone}
       data-dragging={dragging ? "true" : "false"}
-      aria-label={copy.name}
+      aria-label={characterName}
     >
       <div className={styles.stage}>
         <div className={styles.toolbar}>
@@ -211,13 +224,22 @@ export function DesktopPetRoute() {
             <span className={styles.statusDot} aria-hidden="true" />
             {statusText}
           </span>
-          <VIconButton
-            label={copy.close}
-            icon={<X size={14} aria-hidden="true" />}
-            variant="ghost"
-            className={styles.close}
-            onPress={() => window.close()}
-          />
+          <div className={styles.toolbarActions}>
+            <VIconButton
+              label={copy.switchTo[nextCharacterId]}
+              icon={<RefreshCw size={14} aria-hidden="true" />}
+              variant="ghost"
+              className={styles.switchCharacter}
+              onPress={switchCharacter}
+            />
+            <VIconButton
+              label={copy.close}
+              icon={<X size={14} aria-hidden="true" />}
+              variant="ghost"
+              className={styles.close}
+              onPress={() => window.close()}
+            />
+          </div>
         </div>
 
         {expanded ? (
@@ -261,7 +283,8 @@ export function DesktopPetRoute() {
           onPointerCancel={cancelCharacterDrag}
         >
           <DesktopPetCharacter
-            name={copy.name}
+            characterId={characterId}
+            name={characterName}
             tone={activity.aggregateTone}
             animationState={activity.animationState}
           />

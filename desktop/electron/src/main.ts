@@ -938,11 +938,6 @@ async function openWorkbenchAtCurrentLauncherUrl(
     workbenchUrl = resolveWorkbenchUrl(desktopEnvironment(), payloadUrl || bootstrap.workbenchUrl);
     currentWorkbenchUrl = workbenchUrl;
     const state = await provider.openOrFocusWorkbench(workbenchUrl);
-    try {
-      await provider.openPet(workbenchUrl);
-    } catch (error: unknown) {
-      console.warn(`Desktop pet window unavailable: ${error instanceof Error ? error.message : String(error)}`);
-    }
     await recordElectronSupervisorEvent(bootstrap, {
       eventCode: "electron.workbench.navigation.ready",
       message: "Electron loaded the current Workbench URL before acknowledging the open action.",

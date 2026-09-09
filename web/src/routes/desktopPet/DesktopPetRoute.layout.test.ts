@@ -18,6 +18,13 @@ describe("DesktopPetRoute compact window layout", () => {
     expect(routeStylesSource).not.toContain("inset: 5px 6px auto 6px");
   });
 
+  it("keeps character switching inside the floating pet toolbar", () => {
+    expect(routeSource).toContain("switchCharacter");
+    expect(routeSource).toContain("setCharacterId");
+    expect(routeSource).toContain("<VIconButton");
+    expect(routeStylesSource).toContain(".desktop-pet-toolbar__actions");
+  });
+
   it("delegates window motion to Electron instead of renderer window.moveBy", () => {
     expect(routeSource).toContain("desktopPetWindowDragBridge");
     expect(routeSource).toContain("window.requestAnimationFrame(flushWindowDrag)");

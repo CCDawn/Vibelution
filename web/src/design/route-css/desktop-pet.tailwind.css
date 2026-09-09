@@ -56,9 +56,17 @@ body[data-vibelution-desktop-pet="true"] #root {
 
 .desktop-pet-status,
 .desktop-pet-close,
+.desktop-pet-switch-character,
 .desktop-pet-hud,
 .desktop-pet-character-button {
   -webkit-app-region: no-drag;
+}
+
+.desktop-pet-toolbar__actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  pointer-events: auto;
 }
 
 .desktop-pet-status {
@@ -89,10 +97,15 @@ body[data-vibelution-desktop-pet="true"] #root {
   box-shadow: 0 0 12px rgb(var(--pet-accent-rgb) / 70%);
 }
 
-.desktop-pet-close {
+.desktop-pet-close,
+.desktop-pet-switch-character {
   pointer-events: auto;
   color: rgb(233 255 255 / 78%) !important;
   background: rgb(8 25 38 / 55%) !important;
+}
+
+.desktop-pet-switch-character:hover {
+  color: var(--pet-accent) !important;
 }
 
 .desktop-pet-hud {
@@ -196,6 +209,38 @@ body[data-vibelution-desktop-pet="true"] #root {
   width: 100%;
   height: 100%;
   filter: drop-shadow(0 14px 12px rgb(2 12 23 / 28%));
+}
+
+.desktop-pet-character__frame {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  filter: drop-shadow(0 14px 12px rgb(2 12 23 / 28%));
+  pointer-events: none;
+}
+
+.desktop-pet-character[data-character="dafeiyu"] {
+  height: 252px;
+}
+
+.desktop-pet-character[data-character="dafeiyu"][data-animation-state="celebrating"] .desktop-pet-character__frame {
+  animation: desktop-pet-whale-celebrate 780ms cubic-bezier(.2, .8, .2, 1) infinite;
+}
+
+@keyframes desktop-pet-whale-celebrate {
+  0%, 100% { transform: translateY(0) rotate(0); }
+  45% { transform: translateY(-9px) rotate(-1.5deg); }
+  70% { transform: translateY(-3px) rotate(1deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .desktop-pet-character[data-character="dafeiyu"] .desktop-pet-character__frame {
+    animation: none !important;
+  }
 }
 
 .desktop-pet-expand-cue {
