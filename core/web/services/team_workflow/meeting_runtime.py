@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 import time
 import uuid
@@ -3895,6 +3896,29 @@ def _allowed_candidate_ids(meeting_round: Mapping[str, Any]) -> set[str]:
     return {item for item in allowed if item}
 
 
+_REVIEW_ROUND_SUFFIX_RE = re.compile(r"-r\d+$")
+
+
+def _bind_candidate_ref(ref: str, allowed: set[str]) -> str:
+    """Resolve one model-written candidate ref to its bound canonical id.
+
+    Speakers naturally scope refs with a colon prefix or a trailing
+    review-round suffix (``sci-009-cbf2d6930-r3``); the binding authority is
+    the bare candidate id, and that canonical form is what the normalized
+    request must carry downstream.
+    """
+    colon_last = ref.split(":")[-1].strip() if ":" in ref else ref
+    for candidate in (
+        ref,
+        colon_last,
+        _REVIEW_ROUND_SUFFIX_RE.sub("", ref),
+        _REVIEW_ROUND_SUFFIX_RE.sub("", colon_last),
+    ):
+        if candidate and candidate in allowed:
+            return candidate
+    return ""
+
+
 def validate_evidence_request_draft(
     raw: Mapping[str, Any] | None,
     meeting_round: Mapping[str, Any],
@@ -3921,11 +3945,14 @@ def validate_evidence_request_draft(
     candidate_refs = _normalized_str_list(raw.get("candidateRefs"))
     allowed = _allowed_candidate_ids(meeting_round)
     if allowed:
-        unknown = [
-            item
-            for item in candidate_refs
-            if item not in allowed and item.split(":")[-1] not in allowed
-        ]
+        bound_candidate_refs: list[str] = []
+        unknown: list[str] = []
+        for item in candidate_refs:
+            bound = _bind_candidate_ref(item, allowed)
+            if bound:
+                bound_candidate_refs.append(bound)
+            else:
+                unknown.append(item)
         if unknown:
             errors.append(
                 {
@@ -3934,6 +3961,8 @@ def validate_evidence_request_draft(
                     + ", ".join(unknown),
                 }
             )
+    else:
+        bound_candidate_refs = list(candidate_refs)
     evidence_refs = _normalized_str_list(raw.get("evidenceRefs"))
     allowed_refs = {str(item) for item in list(source_refs or []) if str(item)}
     for ref in evidence_refs:
@@ -3976,7 +4005,7 @@ def validate_evidence_request_draft(
         return None, errors
     return {
         "rationale": rationale,
-        "candidateRefs": candidate_refs,
+        "candidateRefs": bound_candidate_refs,
         "evidenceRefs": evidence_refs,
         "searchEnvelope": {
             "keywords": list(envelope.get("keywords") or []),

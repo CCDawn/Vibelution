@@ -1391,3 +1391,57 @@ def test_summary_draft_timeout_error_maps_through_runtime_error(
         assert "180" in failed["summaryDraftError"]["message"]
         with meeting_runtime._SUMMARY_DRAFT_LOCKS_GUARD:
             assert (team_id, meeting_id) not in meeting_runtime._SUMMARY_DRAFT_LOCKS
+
+
+def test_evidence_request_binds_round_suffixed_candidate_refs() -> None:
+    """Speakers suffix the review round onto candidate refs; binding must
+    resolve the bare candidate id and canonicalize the normalized request."""
+    meeting = {
+        "meetingType": "hypothesis_review",
+        "selectedCandidateIds": ["sci-009-cbf2d6930", "sci-009-c38102c57"],
+        "discussionItemRefs": ["hypothesis_candidate:sci-009-cbf2d6930"],
+    }
+    normalized, errors = meeting_runtime.validate_evidence_request_draft(
+        {
+            "rationale": "需要跨境转移口径数据。",
+            "candidateRefs": ["sci-009-cbf2d6930-r3", "hypothesis_candidate:sci-009-c38102c57-r12"],
+            "evidenceRefs": ["evidence:review-gap"],
+            "searchEnvelope": {
+                "keywords": ["transboundary plastic waste"],
+                "sourceTypes": ["paper"],
+                "evidenceLevels": ["peer_reviewed"],
+            },
+            "requirements": {"minEvidenceLevel": "medium"},
+        },
+        meeting,
+    )
+    assert errors == []
+    assert normalized is not None
+    assert normalized["candidateRefs"] == [
+        "sci-009-cbf2d6930",
+        "sci-009-c38102c57",
+    ]
+
+
+def test_evidence_request_still_rejects_unbound_candidate_refs() -> None:
+    normalized, errors = meeting_runtime.validate_evidence_request_draft(
+        {
+            "rationale": "需要补充资料。",
+            "candidateRefs": ["sci-009-c020177fe-r3"],
+            "searchEnvelope": {
+                "keywords": ["plastic waste statistics"],
+                "sourceTypes": ["paper"],
+            },
+        },
+        {
+            "meetingType": "hypothesis_review",
+            "selectedCandidateIds": ["sci-009-cbf2d6930"],
+        },
+    )
+    assert normalized is None
+    assert errors == [
+        {
+            "code": "candidate_ref_unbound",
+            "message": "candidateRefs are not bound to this meeting: sci-009-c020177fe-r3",
+        }
+    ]
