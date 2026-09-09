@@ -1792,7 +1792,6 @@ export function ToolsRoute() {
                 <div className={styles.toolBundleItems}>
                   {group.tools.map((tool) => {
                     const isActive = tool.id === activeTool?.id;
-                    const policyMode = activePolicyAgent ? toolPolicyMode(activePolicy, tool) : "inherited";
                     const bulkSelected = selectedToolIds.has(tool.id);
                     return (
                       <div key={`${group.bundleId}-${tool.source}-${tool.id}`} className={styles.selectableToolRow}>
@@ -1827,12 +1826,6 @@ export function ToolsRoute() {
                             <span>
                             {toolCategoryLabel(tool.category, tool.categoryLabel, lang)} · {toolTierLabel(tool.permissionTier, lang)}
                           </span>
-                        </span>
-                        <span className={styles.toolBadges}>
-                          <span className={`${styles.policyStatePill} ${styles[`policy_${policyMode}`]}`}>
-                            {toolPolicyModeLabel(policyMode, lang)}
-                          </span>
-                          <span className={styles.sourcePill}>{displaySource(tool.source, lang)}</span>
                         </span>
                         </VButton>
                       </div>

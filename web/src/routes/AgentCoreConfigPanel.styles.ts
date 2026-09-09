@@ -4,9 +4,10 @@ import {
 } from "../design/vuiSurfaceRecipes";
 
 const styles = {
-  configGroup: "grid min-w-0 content-start gap-3 border-t border-[var(--vui-border-subtle)] pt-3",
+  configGroup: "grid min-w-0 grid-cols-[10rem_minmax(0,1fr)] content-start gap-6 border-t border-vui-border-subtle pt-5",
+  groupFields: "grid min-w-0 content-start gap-4",
   groupTitle: "m-0 text-base font-semibold text-vui-fg-primary",
-  configEditor: `grid [gap:6px] min-w-0 [padding:8px] ${vuiFlatPanelClass}`,
+  configEditor: "grid min-w-0 gap-5 p-5 border border-vui-border-subtle bg-vui-surface-panel",
   panelHeader: "flex [align-items:center] [justify-content:space-between] [gap:8px] min-w-0 [&_div]:min-w-0",
   contextualHintRow: "inline-flex min-w-0 items-center gap-1.5",
   panelEyebrow: "[margin:0] [color:var(--fg-tertiary)] [font-size:var(--vui-font-xs)] [letter-spacing:0.07em] [text-transform:uppercase]",
@@ -18,7 +19,7 @@ const styles = {
   healthGuide_info: "[border-color:color-mix(in_srgb,_var(--accent-warm)_28%,_transparent)] [background:color-mix(in_srgb,_var(--accent-warm)_7%,_var(--vui-surface-row))]",
   healthGuide_ok: "[border-color:color-mix(in_srgb,_var(--state-success)_24%,_transparent)] [background:color-mix(in_srgb,_var(--state-success)_7%,_var(--vui-surface-row))]",
   healthGuide_warning: "[border-color:color-mix(in_srgb,_var(--accent-warm)_28%,_transparent)] [background:color-mix(in_srgb,_var(--accent-warm)_7%,_var(--vui-surface-row))]",
-  editorGrid: "grid grid-cols-[repeat(auto-fit,minmax(min(100%,26rem),1fr))] gap-5 min-w-0 max-w-[100rem]",
+  editorGrid: "grid grid-cols-1 gap-6 min-w-0 w-full max-w-[80rem]",
   fieldWide: "grid [grid-column:1_/_-1] [gap:4px] min-w-0 [&_span]:[color:var(--fg-tertiary)] [&_span]:[font-size:var(--vui-font-xs)] [&_small]:[color:var(--fg-tertiary)] [&_small]:[font-size:var(--vui-font-xs)] [&_small]:[line-height:1.32] [&_textarea]:[width:100%] [&_textarea]:min-w-0 [&_textarea]:[border:1px_solid_var(--vui-border-subtle)] [&_textarea]:[border-radius:var(--radius-control)] [&_textarea]:[background:var(--vui-surface-row)] [&_textarea]:[color:var(--fg-primary)] [&_textarea]:[font:inherit] [&_textarea]:[font-size:var(--vui-font-xs)] [&_textarea]:[min-height:62px] [&_textarea]:[resize:vertical] [&_textarea]:[padding:7px_9px] [&_textarea]:[line-height:1.35] [&_textarea]:focus:[outline:2px_solid_color-mix(in_srgb,_var(--accent-cool)_24%,_transparent)] [&_textarea]:focus:[border-color:color-mix(in_srgb,_var(--accent-cool)_48%,_transparent)]",
   llmSlotGrid: "grid [grid-template-columns:repeat(2,_minmax(0,_1fr))] [gap:6px] min-w-0 max-[860px]:[grid-template-columns:1fr]",
   primaryLlmSlot: "min-w-0",

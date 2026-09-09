@@ -312,7 +312,7 @@ def test_hypothesis_participants_resolve_four_roles_in_contract_order(monkeypatc
     monkeypatch.setattr(
         chat_room_service,
         "get_chat_room_detail",
-        lambda room_id: room if room_id == "room-1" else None,
+        lambda room_id, **_kwargs: room if room_id == "room-1" else None,
     )
     monkeypatch.setattr(team_service, "get_team", lambda team_id: {"members": []})
 
@@ -380,7 +380,7 @@ def test_hypothesis_participant_resolution_fails_closed(monkeypatch, participant
     monkeypatch.setattr(
         chat_room_service,
         "get_chat_room_detail",
-        lambda room_id: {"participants": participants},
+        lambda room_id, **_kwargs: {"participants": participants},
     )
     monkeypatch.setattr(team_service, "get_team", lambda team_id: {"members": []})
 
@@ -2214,6 +2214,154 @@ def test_accepted_round_materializes_stage_one_plan_from_approved_question_autho
     assert calls[0]["question_detail"] == _canonical_stage_one_question_detail()
 
 
+# --------------------------- A04: live plan projection binds the R2 authority
+
+
+def _live_plan_projection_round(
+    *, revision_envelope: dict[str, Any] | None
+) -> dict[str, Any]:
+    from core.web.services.team_workflow import hypothesis_review_executor
+
+    candidates = [
+        {
+            "candidateId": "cand-a",
+            "claim": "R1 claim a",
+            "rationale": "R1 rationale a",
+        },
+        {"candidateId": "cand-b", "claim": "R1 claim b", "rationale": "R1 rationale b"},
+    ]
+    round_record: dict[str, Any] = {
+        "roundId": "hround-1",
+        "metaReview": {"accepted": True, "recommendationCandidateId": "cand-a"},
+        "candidates": candidates,
+    }
+    if revision_envelope is not None:
+        round_record["revisionEnvelope"] = revision_envelope
+    return round_record
+
+
+def _r2_revision_envelope(*, output_hash: str | None = None) -> dict[str, Any]:
+    from core.web.services.team_workflow import hypothesis_review_executor
+
+    rows = [
+        {
+            "candidateId": "cand-a",
+            "claim": "R2 claim a",
+            "testablePrediction": "R2 prediction a",
+            "falsifier": "R2 falsifier a",
+            "axisProfile": {"mechanism": "R2 mechanism a", "boundary": "R2 boundary a"},
+            "lineageRefs": [],
+        },
+        {"candidateId": "cand-b", "claim": "R1 claim b"},
+    ]
+    return {
+        "schemaVersion": 1,
+        "phase": "review_revision",
+        "parentCandidateId": "cand-a",
+        "revision": {
+            "changes": ["收窄适用边界"],
+            "unresolvedIssues": [],
+            "status": "completed",
+            "actual": True,
+            "outputHash": output_hash or hypothesis_review_executor._stable_hash(
+                hypothesis_review_executor.canonical_hypothesis_revision_snapshot(rows)
+            ),
+            "output": {"candidates": rows},
+        },
+    }
+
+
+def _patch_live_plan_projection_inputs(monkeypatch: pytest.MonkeyPatch) -> None:
+    from core.web.services.team_workflow.research_runtime import workflow_artifact_store
+
+    monkeypatch.setattr(question_launch, "_approved_details", lambda _team_id: {})
+
+    def fake_list(_team_id, **kwargs):
+        if kwargs.get("kind") == "problem_understanding":
+            return [
+                {
+                    "payload": {
+                        "scope": "Bound the question to measurable calibers.",
+                        "subquestions": ["sq-1"],
+                    }
+                }
+            ]
+        return []
+
+    monkeypatch.setattr(workflow_artifact_store, "list_workflow_artifacts", fake_list)
+
+
+def test_live_stage_one_question_detail_binds_revision_envelope_r2_claim(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_live_plan_projection_inputs(monkeypatch)
+
+    detail = chain._project_live_stage_one_question_detail(
+        "team-plan-r2",
+        _QUESTION_ID,
+        workflow_run_id="run-plan-r2",
+        accepted_round=_live_plan_projection_round(
+            revision_envelope=_r2_revision_envelope()
+        ),
+        selected_candidate_id="cand-a",
+    )
+
+    assert detail is not None
+    statements = {
+        row["hypothesis_id"]: row["statement"]
+        for row in detail["output"]["hypotheses"]
+    }
+    # The selected hypothesis carries the bound R2 claim; the unselected
+    # candidate stays at its R1 content.
+    assert statements["cand-a"] == "R2 claim a"
+    assert statements["cand-b"] == "R1 claim b"
+    assert (
+        detail["output"]["competition_result_view"]["paper_abstract"]
+        == "R2 claim a"
+    )
+
+
+def test_live_stage_one_question_detail_fails_closed_on_revision_hash_conflict(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_live_plan_projection_inputs(monkeypatch)
+
+    detail = chain._project_live_stage_one_question_detail(
+        "team-plan-r2",
+        _QUESTION_ID,
+        workflow_run_id="run-plan-r2",
+        accepted_round=_live_plan_projection_round(
+            revision_envelope=_r2_revision_envelope(output_hash="0" * 64)
+        ),
+        selected_candidate_id="cand-a",
+    )
+
+    # A tampered revision envelope blocks the plan projection (fail-closed)
+    # instead of silently presenting the stale R1 claim as the final version.
+    assert detail is None
+
+
+def test_live_stage_one_question_detail_keeps_r1_without_revision_envelope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_live_plan_projection_inputs(monkeypatch)
+
+    detail = chain._project_live_stage_one_question_detail(
+        "team-plan-r2",
+        _QUESTION_ID,
+        workflow_run_id="run-plan-r2",
+        accepted_round=_live_plan_projection_round(revision_envelope=None),
+        selected_candidate_id="cand-a",
+    )
+
+    assert detail is not None
+    statements = {
+        row["hypothesis_id"]: row["statement"]
+        for row in detail["output"]["hypotheses"]
+    }
+    assert statements["cand-a"] == "R1 claim a"
+
+
 def test_chain_state_projects_first_open_candidate_anchor(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2422,7 +2570,7 @@ def test_chain_state_ignores_review_artifacts_from_other_workflow_runs(
     monkeypatch.setattr(
         meetings,
         "list_meeting_rounds",
-        lambda _team_id: {"meetings": meeting_rows},
+        lambda _team_id, **_kwargs: {"meetings": meeting_rows},
     )
     monkeypatch.setattr(
         chain,
@@ -7009,7 +7157,7 @@ def test_retry_review_dispatch_exits_completed_speech_failed_round3(
     # reader so the fresh-attempt participant resolution keeps working.
     real_room_detail = chat_room_service.get_chat_room_detail
 
-    def fake_room_detail(detail_room_id: str):
+    def fake_room_detail(detail_room_id: str, **_kwargs):
         if detail_room_id == room_id:
             return {
                 "roomId": detail_room_id,
@@ -7986,7 +8134,7 @@ def _stage_stopped_v2_meeting(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(
         chat_room_service,
         "get_chat_room_detail",
-        lambda room_id: (
+        lambda room_id, **_kwargs: (
             {
                 "roomId": "room-stop-1",
                 "rounds": [
@@ -8079,7 +8227,7 @@ def test_v2_stop_discussion_keeps_supersede_semantics_for_empty_attempts(
     monkeypatch.setattr(
         chat_room_service,
         "get_chat_room_detail",
-        lambda room_id: (
+        lambda room_id, **_kwargs: (
             {
                 "roomId": "room-stop-1",
                 "rounds": [
@@ -8362,7 +8510,7 @@ def test_auto_adjudicate_binds_rejected_outcome_to_round_workflow_run(
     monkeypatch.setattr(
         meetings,
         "list_meeting_rounds",
-        lambda _team_id: {
+        lambda _team_id, **_kwargs: {
             "meetings": [
                 {
                     "meetingRoundId": _AUTO_MEETING_ID,
@@ -8414,7 +8562,7 @@ def test_adjudication_run_scope_requires_complete_single_run_lineage(
     monkeypatch.setattr(
         meetings,
         "list_meeting_rounds",
-        lambda _team_id: {
+        lambda _team_id, **_kwargs: {
             "meetings": [
                 {
                     "meetingRoundId": "meeting-a",
@@ -8441,7 +8589,7 @@ def test_adjudication_run_scope_requires_complete_single_run_lineage(
     monkeypatch.setattr(
         meetings,
         "list_meeting_rounds",
-        lambda _team_id: {
+        lambda _team_id, **_kwargs: {
             "meetings": [
                 {
                     "meetingRoundId": "meeting-a",
@@ -8498,7 +8646,7 @@ def test_auto_adjudicate_repairs_legacy_rejected_binding_append_only(
     monkeypatch.setattr(
         meetings,
         "list_meeting_rounds",
-        lambda _team_id: {
+        lambda _team_id, **_kwargs: {
             "meetings": [
                 {
                     "meetingRoundId": _AUTO_MEETING_ID,

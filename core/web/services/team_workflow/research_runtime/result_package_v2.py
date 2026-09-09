@@ -598,11 +598,141 @@ def _citation_checks(evidence: Sequence[Mapping[str, Any]]) -> list[dict[str, An
     return checks
 
 
+def _accepted_round_record(
+    *,
+    team_id: str,
+    dimension_payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Read the accepted hypothesis round record referenced by the reviews.
+
+    Returns {} when no round reference is available (fixture payloads without
+    team/round binding keep their legacy behavior).  An unreadable round fails
+    closed naming the round: the final-version binding below must never
+    silently degrade to pre-revision content.
+    """
+
+    from core.web.services.team_workflow import hypothesis_rounds
+
+    round_id = _text(dimension_payload.get("reviewRoundId"))
+    if not team_id or not round_id:
+        return {}
+    try:
+        round_payload = hypothesis_rounds.get_hypothesis_round(team_id, round_id)
+    except Exception as exc:  # noqa: BLE001 - fail closed naming the round
+        raise ResultPackageV2Error(
+            f"canonical hypothesis round {round_id} is unreadable: {exc}"
+        ) from exc
+    return _mapping((round_payload or {}).get("round"))
+
+
+def _final_revision_bindings_from_round(
+    round_record: Mapping[str, Any],
+) -> dict[str, dict[str, Any]]:
+    """Pin the accepted round's FORMAL R2 revision as the final version.
+
+    The FORMAL review executor deliberately keeps ``round.candidates`` at R1
+    and stores the actual R2 only inside ``revisionEnvelope``.  This returns
+    ``{candidateId: canonical R2 snapshot row}`` for the revised candidate so
+    every consumer projects the same final version.  The envelope content is
+    verified against its own ``revision.outputHash`` using the exact canonical
+    snapshot convention the executor wrote, so a stale or tampered envelope
+    fails closed here at the handoff instead of at export time.  Rounds
+    without a review-revision envelope bind nothing.
+    """
+
+    if not round_record:
+        return {}
+    round_id = _text(round_record.get("roundId"))
+    envelope = _mapping(round_record.get("revisionEnvelope"))
+    if not envelope or _text(envelope.get("phase")) != "review_revision":
+        return {}
+    revision = _mapping(envelope.get("revision"))
+    if (
+        revision.get("actual") is not True
+        or _text(revision.get("status")) != "completed"
+    ):
+        return {}
+    revised_id = _text(envelope.get("parentCandidateId"))
+    output_rows = _list_of_mappings(_mapping(revision.get("output")).get("candidates"))
+    matches = [
+        row for row in output_rows if _text(row.get("candidateId")) == revised_id
+    ]
+    if not revised_id or len(matches) != 1:
+        raise ResultPackageV2Error(
+            f"canonical hypothesis round {round_id} revision envelope does not "
+            f"carry exactly one R2 output row for candidate {revised_id or '<missing>'}",
+            code="challenge_v2_feedback_conflict",
+        )
+    from core.web.services.team_workflow import hypothesis_review_executor
+
+    # Hash authority alignment: the envelope outputHash was written by the
+    # review executor's canonical snapshot + stable hash, so the same functions
+    # verify the version here (never a locally re-invented hash).
+    recomputed = hypothesis_review_executor._stable_hash(
+        hypothesis_review_executor.canonical_hypothesis_revision_snapshot(output_rows)
+    )
+    recorded = _text(revision.get("outputHash")).lower()
+    if recomputed != recorded:
+        raise ResultPackageV2Error(
+            f"canonical hypothesis round {round_id} revision envelope outputHash "
+            f"does not match its R2 snapshot for candidate {revised_id}; the "
+            "final version binding failed closed",
+            code="challenge_v2_feedback_conflict",
+        )
+    return {revised_id: matches[0]}
+
+
+def _apply_final_revision_binding(
+    row: dict[str, Any],
+    r2: Mapping[str, Any],
+    *,
+    hypothesis_id: str,
+    round_id: str,
+) -> None:
+    """Overwrite one projected hypothesis row with its bound R2 final version.
+
+    claim/testablePrediction/falsifier/axisProfile/lineageRefs come from the
+    same hash-pinned R2 snapshot row; no field is stitched from the R1 round
+    record or the chain candidate store.  ``novelty_basis`` is the one
+    exception the revision contract itself defines: the canonical revision
+    snapshot deliberately excludes prose, so the parent's
+    ``differenceFromAlternatives`` remains the only persisted novelty
+    statement and stays in the row.  Historical R1 scores are untouched and
+    are never presented as R2 review verdicts.
+    """
+
+    def _required_r2_text(field: str, value: Any) -> str:
+        text = _text(value)
+        if not text:
+            raise ResultPackageV2Error(
+                f"canonical hypothesis {hypothesis_id} final revision (R2) is "
+                f"missing {field} (round {round_id})"
+            )
+        return text
+
+    axis = _mapping(r2.get("axisProfile"))
+    row["statement"] = _required_r2_text("claim", r2.get("claim"))
+    row["falsifiability"] = _required_r2_text("falsifier", r2.get("falsifier"))
+    row["mechanism"] = _required_r2_text(
+        "axisProfile.mechanism", axis.get("mechanism")
+    )
+    row["predictions"] = [
+        text for text in (_text(r2.get("testablePrediction")),) if text
+    ]
+    row["boundary_conditions"] = [
+        text for text in (_text(axis.get("boundary")),) if text
+    ]
+    row["supporting_evidence_refs"] = [
+        _text(ref) for ref in list(r2.get("lineageRefs") or []) if _text(ref)
+    ]
+
+
 def _hypotheses_from_accepted_round(
     *,
     team_id: str,
     question_id: str,
     dimension_payload: Mapping[str, Any],
+    _accepted_round: Mapping[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Project hypotheses from the accepted hypothesis-first round authority.
 
@@ -618,9 +748,13 @@ def _hypotheses_from_accepted_round(
     Every projected value comes verbatim from those records; a candidate
     whose chain record carries no ``falsifier`` fails closed naming the
     candidate and its round.
-    """
 
-    from core.web.services.team_workflow import hypothesis_rounds
+    A04 final-version binding: when the accepted round carries a FORMAL
+    ``revisionEnvelope`` (review_revision, actual=True), the revised
+    candidate is projected from its hash-pinned R2 snapshot row instead of
+    the pre-revision R1/chain content — the same binding every other
+    consumer resolves through ``_final_revision_bindings_from_round``.
+    """
 
     round_id = _text(dimension_payload.get("reviewRoundId"))
     if not round_id:
@@ -628,15 +762,14 @@ def _hypotheses_from_accepted_round(
             "canonical dimension_reviews is missing reviewRoundId; "
             "the accepted hypothesis round cannot be resolved"
         )
-    try:
-        round_payload = hypothesis_rounds.get_hypothesis_round(team_id, round_id)
-    except Exception as exc:  # noqa: BLE001 - fail closed naming the round
-        raise ResultPackageV2Error(
-            f"canonical hypothesis round {round_id} is unreadable: {exc}"
-        ) from exc
-    round_candidates = _list_of_mappings(
-        (round_payload.get("round") or {}).get("candidates")
-    )
+    if isinstance(_accepted_round, Mapping) and _accepted_round:
+        round_record = _mapping(_accepted_round)
+    else:
+        round_record = _accepted_round_record(
+            team_id=team_id, dimension_payload=dimension_payload
+        )
+    final_bindings = _final_revision_bindings_from_round(round_record)
+    round_candidates = _list_of_mappings(round_record.get("candidates"))
     if not round_candidates:
         raise ResultPackageV2Error(
             f"canonical hypothesis round {round_id} contains no candidates"
@@ -664,6 +797,35 @@ def _hypotheses_from_accepted_round(
         hypothesis_id = _require_text(
             candidate.get("candidateId"), "hypothesis.round_candidate_id"
         )
+        binding = final_bindings.get(hypothesis_id)
+        if binding is not None:
+            # R2 is the final version: take the body verbatim from the
+            # hash-pinned revision snapshot instead of the R1/chain stores.
+            novelty = _mapping(candidate.get("noveltyContrast"))
+            novelty_basis = _text(
+                candidate.get("differenceFromAlternatives")
+                or novelty.get("deltaStatement")
+            )
+            if not novelty_basis:
+                raise ResultPackageV2Error(
+                    f"canonical hypothesis {hypothesis_id} is missing novelty_basis"
+                )
+            row = {
+                "hypothesis_id": hypothesis_id,
+                "statement": "",
+                "mechanism": "",
+                "novelty_basis": novelty_basis,
+                "falsifiability": "",
+                "predictions": [],
+                "supporting_evidence_refs": [],
+                "challenging_evidence_refs": [],
+                "boundary_conditions": [],
+            }
+            _apply_final_revision_binding(
+                row, binding, hypothesis_id=hypothesis_id, round_id=round_id
+            )
+            result.append(row)
+            continue
         chain = _mapping(chain_by_id.get(hypothesis_id))
         axis = _mapping(chain.get("axisProfile"))
         novelty = _mapping(candidate.get("noveltyContrast"))
@@ -731,6 +893,15 @@ def _hypotheses(
         return direct
     candidates = _list_of_mappings(payload.get("candidates"))
     details = _mapping(payload.get("candidateDetails"))
+    # A04 unified final-version resolution: both the fragment candidateDetails
+    # branch below and the accepted-round fallback bind the same hash-pinned
+    # R2 revision envelope, so the package never projects pre-revision R1
+    # content (or cross-version stitched fields) for a revised candidate.
+    accepted_round = _accepted_round_record(
+        team_id=team_id, dimension_payload=dimension_payload or {}
+    )
+    final_bindings = _final_revision_bindings_from_round(accepted_round)
+    bound_round_id = _text(accepted_round.get("roundId"))
     result: list[dict[str, Any]] = []
     needs_round_projection = not candidates
     for candidate in candidates:
@@ -740,26 +911,30 @@ def _hypotheses(
         if not isinstance(criteria, list) or not criteria:
             needs_round_projection = True
             break
-        result.append(
-            {
-                "hypothesis_id": hypothesis_id,
-                "statement": _require_text(
-                    detail.get("statement") or candidate.get("claim"), "hypothesis.statement"
-                ),
-                "mechanism": _require_text(detail.get("mechanism"), "hypothesis.mechanism"),
-                "novelty_basis": _require_text(
-                    detail.get("novelty_basis") or detail.get("noveltyBasis"),
-                    "hypothesis.novelty_basis",
-                ),
-                "falsifiability": "; ".join(_require_text(item, "falsificationCriteria[]") for item in criteria),
-                "predictions": deepcopy(list(detail.get("predictions") or [])),
-                "supporting_evidence_refs": deepcopy(list(detail.get("evidenceRefs") or [])),
-                "challenging_evidence_refs": deepcopy(list(detail.get("counterEvidenceRefs") or [])),
-                "boundary_conditions": deepcopy(
-                    list(detail.get("boundary_conditions") or detail.get("boundaryConditions") or [])
-                ),
-            }
-        )
+        row = {
+            "hypothesis_id": hypothesis_id,
+            "statement": _require_text(
+                detail.get("statement") or candidate.get("claim"), "hypothesis.statement"
+            ),
+            "mechanism": _require_text(detail.get("mechanism"), "hypothesis.mechanism"),
+            "novelty_basis": _require_text(
+                detail.get("novelty_basis") or detail.get("noveltyBasis"),
+                "hypothesis.novelty_basis",
+            ),
+            "falsifiability": "; ".join(_require_text(item, "falsificationCriteria[]") for item in criteria),
+            "predictions": deepcopy(list(detail.get("predictions") or [])),
+            "supporting_evidence_refs": deepcopy(list(detail.get("evidenceRefs") or [])),
+            "challenging_evidence_refs": deepcopy(list(detail.get("counterEvidenceRefs") or [])),
+            "boundary_conditions": deepcopy(
+                list(detail.get("boundary_conditions") or detail.get("boundaryConditions") or [])
+            ),
+        }
+        binding = final_bindings.get(hypothesis_id)
+        if binding is not None:
+            _apply_final_revision_binding(
+                row, binding, hypothesis_id=hypothesis_id, round_id=bound_round_id
+            )
+        result.append(row)
     if needs_round_projection:
         if dimension_payload is None or not team_id:
             raise ResultPackageV2Error(
@@ -770,6 +945,7 @@ def _hypotheses(
             team_id=team_id,
             question_id=question_id,
             dimension_payload=dimension_payload,
+            _accepted_round=accepted_round or None,
         )
     if len(result) < 2:
         raise ResultPackageV2Error("canonical hypothesis_set contains fewer than two hypotheses")

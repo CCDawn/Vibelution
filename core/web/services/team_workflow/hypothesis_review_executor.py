@@ -1065,6 +1065,77 @@ def _candidates_with_review_contrast(
     return merged
 
 
+# A03 contract: these scientific fields make a revision an actual, reviewable
+# hypothesis.  A revision may inherit or refine them, but may never explicitly
+# blank one that the parent candidate still carries.
+_REVISION_REQUIRED_SCIENCE_FIELDS: dict[str, str] = {
+    "testablePrediction": "可检验预测",
+    "falsifier": "证伪条件",
+    "axisProfile": "机制与边界（axisProfile）",
+    "lineageRefs": "来源引用（lineageRefs）",
+}
+
+
+def _revision_field_is_empty(value: Any) -> bool:
+    if isinstance(value, str):
+        return not value.strip()
+    if isinstance(value, Mapping):
+        return not value
+    if isinstance(value, (list, tuple)):
+        return not value
+    return False
+
+
+def enforce_revision_science_field_contract(
+    raw_revised: Mapping[str, Any],
+    parent: Mapping[str, Any],
+) -> None:
+    """Reject revisions that explicitly blank a required science field.
+
+    A03 contract: when ``revisedCandidate`` explicitly carries an empty value
+    (""/{}) for one of the required fields while the parent candidate still
+    has content, the output cannot be an actual revision — accepting it would
+    publish an R2 whose prediction/falsifier/axis/lineage were silently
+    dropped and later stitched back from stale stores downstream.  Required
+    fields with a wrong type are rejected outright so a malformed value can
+    never masquerade as inherited content.  Fields absent from
+    ``revisedCandidate`` keep the existing inherit-from-parent behavior, and a
+    field the parent itself left empty stays legitimately completable.  The
+    failure message names the concrete field path so the model can retry the
+    revision.
+    """
+
+    for field, label in _REVISION_REQUIRED_SCIENCE_FIELDS.items():
+        if field not in raw_revised:
+            continue
+        value = raw_revised[field]
+        if field == "axisProfile":
+            if not isinstance(value, Mapping):
+                raise ContractValidationError(
+                    f"修订输出字段类型错误：revisedCandidate.{field} 必须是对象，"
+                    f"实际收到 {type(value).__name__}"
+                )
+        elif field == "lineageRefs":
+            if not isinstance(value, (list, tuple)):
+                raise ContractValidationError(
+                    f"修订输出字段类型错误：revisedCandidate.{field} 必须是字符串列表，"
+                    f"实际收到 {type(value).__name__}"
+                )
+        elif not isinstance(value, str):
+            raise ContractValidationError(
+                f"修订输出字段类型错误：revisedCandidate.{field} 必须是字符串，"
+                f"实际收到 {type(value).__name__}"
+            )
+        if _revision_field_is_empty(value) and not _revision_field_is_empty(
+            parent.get(field)
+        ):
+            raise ContractValidationError(
+                f"修订输出违反必填科学字段契约：revisedCandidate.{field} 被显式置空，"
+                f"而父候选的{label}仍有内容；修订必须保留或完善父候选的{label}，"
+                "不得显式清空。"
+            )
+
+
 def _revision_step(
     context: Mapping[str, Any],
     parent_candidates: list[dict[str, Any]],
@@ -1130,6 +1201,10 @@ def _revision_step(
         raise ContractValidationError(
             "formal revision must produce genuinely new hypothesis text"
         )
+    # A03: a genuinely new claim that explicitly blanks the parent's science
+    # fields is a degraded revision, not an actual one — fail closed before
+    # any field is copied into the R2 candidate.
+    enforce_revision_science_field_contract(raw_revised, parent)
     revised = dict(parent)
     for key in (
         "claim",

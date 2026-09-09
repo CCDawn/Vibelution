@@ -353,6 +353,60 @@ _RECONCILE_SURVIVING_BLOCKER_PROBLEM = {
 }
 
 
+def _accept_orphaned_auto_gate_handoffs(
+    uow,
+    run_id: str,
+    now_ms: int,
+) -> list[str]:
+    """Accept one run's orphaned ready auto-gate handoffs, in caller's UoW.
+
+    Extracted from reconcile pass (4) (defect ⑳) so the parent reconcile's
+    child cascade can run the same repair BEFORE its reconciliation_required
+    gate (defect ⑳-b): after ⑮'s surviving-blocker landing a stuck child is
+    usually ``blocked`` — a steady state it never leaves — so a gate that
+    only admits ``reconciliation_required`` children would never reach the
+    pass and the orphan handoff would keep pinning the successor.
+
+    Condition and repair are unchanged from pass (4): only
+    ``status='ready' AND gate_kind='auto'`` handoffs whose from-attempt is
+    ``succeeded`` (see pass (4) docstring in
+    :func:`_apply_ledger_reconcile_for_run` for why).  Idempotent by the
+    ``status='ready'`` filter; ``ready→accepted`` is a legal frozen
+    transition and the ``accepted_by`` shape mirrors the worker's.  Like the
+    worker's finalize, no dedicated event is written — the acceptance is
+    audited through the caller's reconcile event payload
+    (``autoAcceptedHandoffIds`` / ``childAutoAcceptedHandoffIds``).
+
+    Returns the accepted handoff ids.
+    """
+    accepted = [
+        str(row[0])
+        for row in uow.repository.execute(
+            """
+            SELECT h.handoff_id
+            FROM handoffs h
+            JOIN node_attempts na ON na.node_run_id = h.from_node_run_id
+            WHERE h.run_id = ?
+              AND h.status = 'ready'
+              AND h.gate_kind = 'auto'
+              AND na.run_id = h.run_id
+              AND na.status = 'succeeded'
+            """,
+            (run_id,),
+        ).fetchall()
+    ]
+    for handoff_id in accepted:
+        uow.repository.update_handoff_status(
+            handoff_id,
+            "accepted",
+            now_ms,
+            accepted_by_json=json.dumps(
+                {"actorType": "system", "actorId": "reconcile"}
+            ),
+        )
+    return accepted
+
+
 def _apply_ledger_reconcile_for_run(
     uow,
     *,
@@ -405,7 +459,11 @@ def _apply_ledger_reconcile_for_run(
         transition and the ``accepted_by`` shape mirrors the worker's.  Like
         the worker's finalize, no dedicated event is written — the
         acceptance is audited through the caller's reconcile event payload
-        (``autoAcceptedHandoffIds``).
+        (``autoAcceptedHandoffIds``).  The repair body is extracted as
+        ``_accept_orphaned_auto_gate_handoffs`` and reused by the parent
+        reconcile's child cascade before its ``reconciliation_required``
+        gate, so ⑮'s blocked-steady-state children are covered too (defect
+        ⑳-b; audit key there: ``childAutoAcceptedHandoffIds``).
     (5) re-arm failed graph_dispatch rows for this run so the worker gets a
         fresh routing decision.  Rows stay dead in every scope when
         replaying them cannot succeed: a dispatch bound to a terminal
@@ -524,32 +582,12 @@ def _apply_ledger_reconcile_for_run(
     # -- (4) orphaned auto-gate handoff acceptance (defect ⑳). --------------
     # Runs AFTER the supersede pass so stale/succeeded attempt statuses are
     # already settled, and BEFORE the revive pass so every revived routing
-    # decision in this same UoW sees the handoff accepted.
-    auto_accepted_handoff_ids = [
-        str(row[0])
-        for row in uow.repository.execute(
-            """
-            SELECT h.handoff_id
-            FROM handoffs h
-            JOIN node_attempts na ON na.node_run_id = h.from_node_run_id
-            WHERE h.run_id = ?
-              AND h.status = 'ready'
-              AND h.gate_kind = 'auto'
-              AND na.run_id = h.run_id
-              AND na.status = 'succeeded'
-            """,
-            (run.run_id,),
-        ).fetchall()
-    ]
-    for handoff_id in auto_accepted_handoff_ids:
-        uow.repository.update_handoff_status(
-            handoff_id,
-            "accepted",
-            now_ms,
-            accepted_by_json=json.dumps(
-                {"actorType": "system", "actorId": "reconcile"}
-            ),
-        )
+    # decision in this same UoW sees the handoff accepted.  The repair body
+    # lives in _accept_orphaned_auto_gate_handoffs, shared with the child
+    # cascade's pre-gate sweep in _handle_reconcile_run (defect ⑳-b).
+    auto_accepted_handoff_ids = _accept_orphaned_auto_gate_handoffs(
+        uow, run.run_id, now_ms
+    )
     # -- (5) revive pass: re-arm failed graph_dispatch rows. ----------------
     # Reconciliation re-derives execution from the durable ledger.  A
     # blocked run usually got there via a terminal-failed graph_dispatch
@@ -1865,38 +1903,6 @@ class WorkflowCommandService:
                     else None
                 ),
             )
-        uow.repository.insert_event(
-            _event_record(
-                run_id=request.run_id,
-                sequence=sequence,
-                event_id=new_id("evt"),
-                run_version=accepted_version,
-                event_type="run_blocked",
-                correlation_id=request.idempotency_key,
-                payload={
-                    "reconciled": True,
-                    "revivedDispatchCount": revived,
-                    "activeWorkFound": has_active_work,
-                    "reconciledStatus": target_status.value,
-                    "artifactReceiptIds": list(artifact_receipt_ids),
-                    "staleAttemptIds": list(plan.superseded_node_run_ids),
-                    "autoAcceptedHandoffIds": auto_accepted_handoff_ids,
-                    "compensatedReservations": compensated,
-                    "recomputedActiveNodeId": plan.active_node_id,
-                    "landingProblemCode": (
-                        str(landing_problem.get("code") or "")
-                        if landing_problem
-                        else None
-                    ),
-                    "landingProblemDetail": (
-                        str(landing_problem.get("detail") or "")
-                        if landing_problem
-                        else None
-                    ),
-                },
-                now_ms=now_ms,
-            )
-        )
         # 知识 sideflow 子 run 的 reconcile_run 没有任何前端入口（知识节点
         # offer 白名单只含 ensure/inspect），只靠父 run 面板的「对账运行」
         # 闭合。父 run 落态后必须在同一事务内把同一套 ledger 权威重排级联
@@ -1905,14 +1911,29 @@ class WorkflowCommandService:
         # knowledge_ingestion dispatch 因 receipt 身份错配被标 failed）。
         # 只治愈 reconciliation_required：blocked 子 run 持有诚实的
         # readiness 裁决，running/waiting_human/终态子 run 不归对账管。
+        # 缺陷 ⑳-b：在 reconciliation_required gate 之前，先对每个存在的
+        # child（不管状态）补接受孤儿 auto handoff——⑮ 的 surviving-blocker
+        # landing 之后 child 的常见稳态是 blocked 且不会再回到
+        # reconciliation_required，先 continue 会让 pass (4) 永远跑不到。
+        # gate 跳过的 child 只补接受、不重跑完整 reconcile（⑮ ladder 语义
+        # 不变）；这类接受没有 child 自身事件可审计，并入父 run_blocked
+        # 事件载荷 childAutoAcceptedHandoffIds（走 ladder 的 child 仍审计
+        # 在自己的 autoAcceptedHandoffIds，来源可区分）。
         from core.research.workflow.knowledge_sideflow_definition import (
             KNOWLEDGE_SIDEFLOW_NODE_IDS,
         )
 
         child_revived_total = 0
+        child_unaudited_handoff_ids: list[str] = []
         for child_run_id in knowledge_child_run_ids:
             child = uow.repository.get_run(child_run_id)
-            if child is None or child.status != RunStatus.RECONCILIATION_REQUIRED.value:
+            if child is None:
+                continue
+            pre_accepted = _accept_orphaned_auto_gate_handoffs(
+                uow, child.run_id, now_ms
+            )
+            if child.status != RunStatus.RECONCILIATION_REQUIRED.value:
+                child_unaudited_handoff_ids.extend(pre_accepted)
                 continue
             child_plan, revived_child, child_auto_accepted = (
                 _apply_ledger_reconcile_for_run(
@@ -1959,6 +1980,8 @@ class WorkflowCommandService:
                     uow, run_id=child.run_id, node_order=KNOWLEDGE_SIDEFLOW_NODE_IDS
                 )
                 if survivor is None:
+                    # 零工作 continue：无 child 事件可审计，同归父载荷。
+                    child_unaudited_handoff_ids.extend(pre_accepted)
                     continue
                 child_target = RunStatus.BLOCKED
                 child_active_node_id = str(survivor.node_id)
@@ -2001,7 +2024,11 @@ class WorkflowCommandService:
                 "activeWorkFound": child_has_active_work,
                 "reconciledStatus": child_target.value,
                 "staleAttemptIds": list(child_plan.superseded_node_run_ids),
-                "autoAcceptedHandoffIds": child_auto_accepted,
+                # pass (4) 在上面的 pre-gate 补接受后只会返回空清单；并集
+                # 保证 pre-gate 接受也审计在本 child 的事件里（缺陷 ⑳-b）。
+                "autoAcceptedHandoffIds": sorted(
+                    {*child_auto_accepted, *pre_accepted}
+                ),
                 "parentRunId": run.run_id,
             }
             if child_landing:
@@ -2021,6 +2048,44 @@ class WorkflowCommandService:
             child_revived_total += revived_child
         if revived > 0 or child_revived_total > 0:
             uow.after_commit(self._wake_worker)
+        # 父 run 事件在 child cascade 之后写入：childAutoAcceptedHandoffIds
+        # 需要 cascade 的补接受结果（缺陷 ⑳-b）。sequence/run_version 在
+        # cascade 前已预留，事件序与键均与旧实现一致。
+        uow.repository.insert_event(
+            _event_record(
+                run_id=request.run_id,
+                sequence=sequence,
+                event_id=new_id("evt"),
+                run_version=accepted_version,
+                event_type="run_blocked",
+                correlation_id=request.idempotency_key,
+                payload={
+                    "reconciled": True,
+                    "revivedDispatchCount": revived,
+                    "activeWorkFound": has_active_work,
+                    "reconciledStatus": target_status.value,
+                    "artifactReceiptIds": list(artifact_receipt_ids),
+                    "staleAttemptIds": list(plan.superseded_node_run_ids),
+                    "autoAcceptedHandoffIds": auto_accepted_handoff_ids,
+                    "childAutoAcceptedHandoffIds": sorted(
+                        set(child_unaudited_handoff_ids)
+                    ),
+                    "compensatedReservations": compensated,
+                    "recomputedActiveNodeId": plan.active_node_id,
+                    "landingProblemCode": (
+                        str(landing_problem.get("code") or "")
+                        if landing_problem
+                        else None
+                    ),
+                    "landingProblemDetail": (
+                        str(landing_problem.get("detail") or "")
+                        if landing_problem
+                        else None
+                    ),
+                },
+                now_ms=now_ms,
+            )
+        )
         return _receipt(uow, request, command_id, accepted_version, sequence, now_ms)
 
     def _handle_archive_run(

@@ -621,7 +621,9 @@ def _question_requested_evidence(
             str(meeting.get("meetingRoundId") or ""): str(
                 meeting.get("question") or ""
             ).upper()
-            for meeting in meeting_rounds.list_meeting_rounds(team_id)["meetings"]
+            for meeting in meeting_rounds.list_meeting_rounds(
+                team_id, read_only=True
+            )["meetings"]
         }
     except Exception:
         # Unreadable meetings fail closed: cannot prove the request belongs to
@@ -1614,7 +1616,10 @@ def _active_review_binding_groups(
         selection_id = str(record.get("selectionId") or "").strip()
         if selection_id:
             selection_by_id[selection_id] = record
-    meetings = meeting_rounds.list_meeting_rounds(team_id).get("meetings") or []
+    meetings = (
+        meeting_rounds.list_meeting_rounds(team_id, read_only=True).get("meetings")
+        or []
+    )
     meeting_by_id = {
         str(item.get("meetingRoundId") or "").strip(): dict(item)
         for item in meetings
@@ -2310,7 +2315,9 @@ def _adjudication_workflow_run_id(
         str(meeting.get("meetingRoundId") or "").strip(): _meeting_workflow_run_id(
             meeting
         )
-        for meeting in meeting_rounds.list_meeting_rounds(team_id)["meetings"]
+        for meeting in meeting_rounds.list_meeting_rounds(
+            team_id, read_only=True
+        )["meetings"]
         if str(meeting.get("meetingRoundId") or "").strip() in meeting_ids
     }
     if set(resolved_by_meeting) != meeting_ids:
@@ -3672,6 +3679,37 @@ _CLOSED_GENERATION_RETRY_INFLIGHT: dict[tuple[str, str], object] = {}
 # per-iteration decisions and their order are unchanged.
 _SWEEP_ITERATION_YIELD_SECONDS = 0.002
 
+# Wall-clock budget for one sweep pass (defect 19): a pass used to walk every
+# team/question with no time cap, and one slow pass (per-record deep copies in
+# the meeting/chat-room read path) monopolized the GIL long enough to starve
+# backend HTTP handlers — reproduced twice in production. A pass now stops
+# opening new questions once the budget elapses and resumes round-robin from
+# the stop cursor on the next pass; every step is idempotent, so losing the
+# in-memory cursor on restart only restarts the scan from the front.
+DEFAULT_AUTO_ADVANCE_SWEEP_BUDGET_MS = 5_000
+_AUTO_ADVANCE_SWEEP_BUDGET_ENV = "VIBELUTION_AUTO_ADVANCE_SWEEP_BUDGET_MS"
+_SWEEP_ROUND_ROBIN_CURSOR: tuple[int, int] | None = None
+
+
+def _auto_advance_sweep_budget_ms() -> int:
+    """Configured wall-clock budget in ms for one sweep pass.
+
+    A nonpositive or unparseable override falls back to the default, matching
+    the digest-TTL env style. The budget bounds one pass without changing any
+    per-question decision.
+    """
+
+    raw = str(os.environ.get(_AUTO_ADVANCE_SWEEP_BUDGET_ENV) or "").strip()
+    if not raw:
+        return DEFAULT_AUTO_ADVANCE_SWEEP_BUDGET_MS
+    try:
+        normalized = int(raw)
+    except ValueError:
+        return DEFAULT_AUTO_ADVANCE_SWEEP_BUDGET_MS
+    if normalized <= 0:
+        return DEFAULT_AUTO_ADVANCE_SWEEP_BUDGET_MS
+    return normalized
+
 
 def _fenced_review_redrive_plan(
     team_id: str,
@@ -4200,7 +4238,7 @@ def auto_approve_awaiting_review_digests(
 
         meetings = list(
             meeting_rounds.list_meeting_rounds(
-                normalized_team_id, status="awaiting_approval"
+                normalized_team_id, status="awaiting_approval", read_only=True
             )["meetings"]
         )
     except Exception:  # noqa: BLE001 - enumeration outages stay invisible
@@ -5477,6 +5515,8 @@ def sweep_auto_advance_closure() -> dict[str, Any]:
     counted; questions whose latest round is not an unadjudicated exhausted
     round cost one cheap guard read.
     """
+    global _SWEEP_ROUND_ROBIN_CURSOR
+
     summary: dict[str, Any] = {
         "teams": 0,
         "questions": 0,
@@ -5492,6 +5532,8 @@ def sweep_auto_advance_closure() -> dict[str, Any]:
         "closedGenerationsRetried": 0,
         "failed": 0,
         "skipped": 0,
+        "budgetExhausted": False,
+        "questionsDeferred": 0,
     }
     try:
         team_ids = _team_ids_with_chain_storage()
@@ -5503,7 +5545,16 @@ def sweep_auto_advance_closure() -> dict[str, Any]:
             fields={"reason": "team_enumeration_failed"},
         )
         return summary
-    for team_id in team_ids:
+    resume_team, resume_question = _SWEEP_ROUND_ROBIN_CURSOR or (0, 0)
+    if resume_team >= len(team_ids):
+        resume_team, resume_question = 0, 0
+    budget_ms = _auto_advance_sweep_budget_ms()
+    round_started_at = time.monotonic()
+    processed_any = False
+    budget_exhausted = False
+    for team_offset in range(len(team_ids)):
+        team_index = (resume_team + team_offset) % len(team_ids)
+        team_id = team_ids[team_index]
         summary["teams"] += 1
         try:
             # One ledger read per team per sweep pass: the redrive plan
@@ -5517,9 +5568,28 @@ def sweep_auto_advance_closure() -> dict[str, Any]:
         except Exception:  # noqa: BLE001 - one broken team cannot stop the sweep
             summary["skipped"] += 1
             continue
-        for question_index, question_id in enumerate(question_ids):
-            if question_index:
+        question_start = resume_question if team_offset == 0 else 0
+        if question_start >= len(question_ids):
+            question_start = 0
+        pending = question_ids[question_start:]
+        for pending_index, question_id in enumerate(pending):
+            # Budget gate (defect 19): before opening a new question, stop
+            # once the pass exceeded its wall-clock budget. The first question
+            # always runs so a tiny budget can never stall progress entirely;
+            # the stop cursor resumes round-robin on the next pass.
+            if processed_any and budget_ms > 0:
+                elapsed_ms = (time.monotonic() - round_started_at) * 1000.0
+                if elapsed_ms >= budget_ms:
+                    budget_exhausted = True
+                    summary["questionsDeferred"] += len(pending) - pending_index
+                    _SWEEP_ROUND_ROBIN_CURSOR = (
+                        team_index,
+                        question_start + pending_index,
+                    )
+                    break
+            if pending_index or question_start:
                 time.sleep(_SWEEP_ITERATION_YIELD_SECONDS)
+            processed_any = True
             summary["questions"] += 1
             try:
                 # Step zero, before adjudication: approve landed review and
@@ -5618,6 +5688,11 @@ def sweep_auto_advance_closure() -> dict[str, Any]:
                 )
             except Exception:  # noqa: BLE001 - one broken question is isolated
                 summary["failed"] += 1
+        if budget_exhausted:
+            break
+    if not budget_exhausted:
+        _SWEEP_ROUND_ROBIN_CURSOR = None
+    summary["budgetExhausted"] = budget_exhausted
     _record_scene_event(
         "hypothesis_first.auto_advance_sweep",
         outcome="completed",
@@ -5636,6 +5711,8 @@ def sweep_auto_advance_closure() -> dict[str, Any]:
             "closedGenerationsRetried": int(summary["closedGenerationsRetried"]),
             "failed": int(summary["failed"]),
             "skipped": int(summary["skipped"]),
+            "budgetExhausted": bool(summary["budgetExhausted"]),
+            "questionsDeferred": int(summary["questionsDeferred"]),
         },
     )
     return summary
@@ -7340,7 +7417,9 @@ def terminate_review_selection_execution(
         if str(item.get("selectionId") or "").strip() == selection_id
         and str(item.get("meetingRoundId") or "").strip()
     }
-    meetings = meeting_rounds.list_meeting_rounds(team_id)["meetings"]
+    meetings = meeting_rounds.list_meeting_rounds(
+        team_id, read_only=True
+    )["meetings"]
     active_statuses = {"open", "summarizing", "awaiting_approval"}
     target_ids = [
         str(meeting.get("meetingRoundId") or "").strip()
@@ -8407,7 +8486,9 @@ def _question_generation_meetings(
     from core.web.services.team_workflow import meeting_rounds
 
     normalized_workflow_run_id = str(workflow_run_id or "").strip()
-    meetings = meeting_rounds.list_meeting_rounds(team_id)["meetings"]
+    meetings = meeting_rounds.list_meeting_rounds(team_id, read_only=True)[
+        "meetings"
+    ]
     return [
         meeting
         for meeting in meetings
@@ -8495,7 +8576,9 @@ def candidate_evidence_trail(
     ]
 
     trail: dict[str, list[dict[str, Any]]] = {cid: [] for cid in candidate_ids}
-    meetings = meeting_rounds.list_meeting_rounds(normalized_team_id)["meetings"]
+    meetings = meeting_rounds.list_meeting_rounds(
+        normalized_team_id, read_only=True
+    )["meetings"]
     question_meetings = [
         meeting
         for meeting in meetings
@@ -11401,6 +11484,28 @@ def _project_live_stage_one_question_detail(
         return None
     selected_statement = str(selected_row.get("claim") or "").strip()
     selected_rationale = str(selected_row.get("rationale") or "").strip()
+    # A04 minimal alignment: when the accepted round carries a FORMAL R2
+    # revision envelope, the proposal binds the same hash-pinned R2 authority
+    # the result package reads (shared resolver), so the plan never presents
+    # the pre-revision R1 claim as the selected hypothesis.  The canonical
+    # revision snapshot excludes prose, so rationale/novelty stay R1 by the
+    # revision contract itself; any binding conflict degrades to the caller's
+    # fail-closed blocker via the None return below.
+    final_claim = ""
+    try:
+        from .result_package_v2 import _final_revision_bindings_from_round
+
+        binding = _final_revision_bindings_from_round(accepted_round).get(
+            selected_candidate_id
+        )
+        if binding is not None:
+            final_claim = str(binding.get("claim") or "").strip()
+            if not final_claim:
+                return None
+    except Exception:  # noqa: BLE001 - final-version conflicts stay fail-closed
+        return None
+    if final_claim:
+        selected_statement = final_claim
     round_id = str(accepted_round.get("roundId") or "").strip()
     acceptance_gate = {
         "required": True,
@@ -11469,7 +11574,15 @@ def _project_live_stage_one_question_detail(
             "hypotheses": [
                 {
                     "hypothesis_id": str(item.get("candidateId") or "").strip(),
-                    "statement": str(item.get("claim") or "").strip(),
+                    # The selected row carries the bound final (R2) claim when
+                    # a revision envelope exists; unselected candidates stay
+                    # at their R1 content.
+                    "statement": (
+                        selected_statement
+                        if str(item.get("candidateId") or "").strip()
+                        == selected_candidate_id
+                        else str(item.get("claim") or "").strip()
+                    ),
                 }
                 for item in round_candidates
             ],
@@ -14686,7 +14799,9 @@ def _question_meetings(
     from core.web.services.team_workflow import meeting_rounds
 
     normalized_workflow_run_id = str(workflow_run_id or "").strip()
-    meetings = meeting_rounds.list_meeting_rounds(team_id)["meetings"]
+    meetings = meeting_rounds.list_meeting_rounds(team_id, read_only=True)[
+        "meetings"
+    ]
     return [
         meeting
         for meeting in meetings

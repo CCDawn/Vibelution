@@ -64,9 +64,10 @@ describe("SkillsRoute layout contract", () => {
     expect(routeSource).not.toMatch(/<input\b/);
     expect(routeSource).not.toMatch(/<select\b/);
     expect(routeSource).not.toMatch(/<textarea\b/);
-    expect(routeSource).toContain("disabledReason={copy.bulkReadOnlyReason}");
+    expect(routeSource).not.toContain("{copy.bulkEdit}");
+    expect(routeSource).not.toContain("{copy.bulkDelete}");
     expect(routeSource).toContain("<VTooltip content={`${copy.bulkSelected}: ${skill.name}`}");
-    expect(routeSource).not.toContain("bulkReadOnlyNoteClass");
+    expect(routeSource).toContain("bulkReadOnlyNoteClass");
     expect(routeSource).not.toContain("title={copy.bulkReadOnlyReason}");
     expect(routeSource).toContain("<VDenseToolbar");
     expect(styles.listPanelClass).toContain("grid-rows-[auto_auto_auto_auto_minmax(0,1fr)]");
@@ -79,7 +80,7 @@ describe("SkillsRoute layout contract", () => {
 
   it("keeps the narrow skill workspace in normal document flow with compact empty details", () => {
     expect(routeSource).toContain("workspaceClass");
-    expect(stylesSource).toContain("clamp(240px,26vw,340px)");
+    expect(stylesSource).toContain("clamp(280px,26vw,420px)");
     expect(stylesSource).toContain("minmax(0,1fr)");
     expect(stylesSource).toContain("max-[920px]:grid-cols-1");
     expect(stylesSource).toContain("max-[920px]:content-start");
@@ -135,7 +136,7 @@ describe("SkillsRoute layout contract", () => {
     expect(skillButtonBaseClass).toContain("w-full");
     expect(skillButtonBaseClass).toContain("!h-auto");
     expect(skillButtonBaseClass).toContain("!grid");
-    expect(skillButtonBaseClass).toContain("grid-cols-[10px_minmax(0,1fr)_auto]");
+    expect(skillButtonBaseClass).toContain("grid-cols-[10px_minmax(0,1fr)]");
     expect(routeSource).toMatch(/contentLayout="plain"[\s\S]{0,180}styles\.skillButtonBaseClass/);
   });
 

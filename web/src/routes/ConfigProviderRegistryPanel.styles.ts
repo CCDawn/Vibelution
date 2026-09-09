@@ -29,7 +29,7 @@ const styles = {
     "vui-routes-configproviderregistrypanel providerStatusRow flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1",
   ellipsis: "vui-routes-configproviderregistrypanel ellipsis min-w-0 truncate",
   modelsColumn:
-    "vui-routes-configproviderregistrypanel modelsColumn grid h-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] gap-4 overflow-hidden [&:has(>_[data-feedback-phase])]:grid-rows-[auto_auto_minmax(0,1fr)]",
+    "vui-routes-configproviderregistrypanel modelsColumn grid h-full min-h-0 min-w-0 grid-rows-[minmax(0,1fr)] gap-2 overflow-hidden [&:has(>_[data-feedback-phase])]:grid-rows-[auto_minmax(0,1fr)]",
   inspectorPanel:
     "vui-routes-configproviderregistrypanel inspectorPanel grid min-h-0 min-w-0 max-h-[72vh] overflow-hidden",
   inspectorBody:
@@ -37,8 +37,6 @@ const styles = {
   inspectorAdvanced:
     "vui-routes-configproviderregistrypanel inspectorAdvanced relative isolate z-0 grid min-w-0 content-start gap-2 rounded-lg border border-vui-border-subtle bg-vui-surface-panel p-2",
   detailSurface: "vui-routes-configproviderregistrypanel detailSurface grid h-full min-h-0 min-w-0 [grid-template-rows:auto_auto_auto_auto_minmax(0,1fr)_auto_auto] gap-2 overflow-y-auto overflow-x-hidden pr-1",
-  detailHeader:
-    "vui-routes-configproviderregistrypanel detailHeader flex min-w-0 flex-wrap items-center justify-between gap-3 border-b border-vui-border-subtle pb-4",
   detailIdentity: "vui-routes-configproviderregistrypanel detailIdentity grid min-w-0 gap-0.5",
   setupChecklist:
     "vui-routes-configproviderregistrypanel setupChecklist relative isolate z-0 grid min-w-0 gap-1.5 rounded-md border border-vui-border-subtle !bg-vui-surface-panel px-2.5 py-2",
@@ -79,8 +77,8 @@ const styles = {
   modelsWorkspace: "vui-routes-configproviderregistrypanel modelsWorkspace grid h-full min-h-0 min-w-0 [grid-template-rows:auto_minmax(0,1fr)] gap-2 overflow-hidden",
   modelChrome: "vui-routes-configproviderregistrypanel modelChrome grid min-w-0 gap-2",
   modelToolbar:
-    "vui-routes-configproviderregistrypanel modelToolbar flex min-w-0 flex-wrap items-center justify-between gap-3",
-  modelSearch: "vui-routes-configproviderregistrypanel modelSearch min-w-0 w-full max-w-80 flex-[1_1_14rem]",
+    "vui-routes-configproviderregistrypanel modelToolbar flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 pb-2 border-b border-vui-border-subtle",
+  modelSearch: "vui-routes-configproviderregistrypanel modelSearch min-w-0 w-full max-w-64 flex-[1_1_10rem]",
   modelFilters: "vui-routes-configproviderregistrypanel modelFilters flex min-w-0 flex-wrap items-center justify-end gap-1",
   pinBanner:
     "vui-routes-configproviderregistrypanel pinBanner flex min-w-0 flex-wrap items-center justify-end gap-1.5",

@@ -38,3 +38,7 @@
 @source "../../routes/Supervised*.styles.ts";
 @source "../../routes/RuntimeScenesPane.tsx";
 @source "../../routes/RuntimeScenesPane.styles.ts";
+
+/* Shared Agent navigation must also render on direct catalog entry. */
+@source "../../routes/AgentManagementModuleBar.styles.ts";
+@source "../../routes/AgentManagementNav.styles.ts";

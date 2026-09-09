@@ -1399,3 +1399,84 @@ def test_knowledge_delivery_query_is_not_limited_to_first_500_events(
 
 def test_ledger_schema_is_v9() -> None:
     assert SCHEMA_VERSION == 9
+
+
+def test_problem_understanding_trigger_accepts_stage_one_pinned_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """2026-09-09 production stall: live stage-one runs pin 3.1.0-stage-one.
+
+    The trigger's canonical check compared against the global 3.0.0
+    SCHEMA_VERSION only, so the automatic post-commit ensure returned
+    ``not_canonical`` for every stage-one run (the manual frontend path had
+    masked it). The trigger must proceed to ``submitted`` for the sanctioned
+    stage-one schema version.
+    """
+    from core.research.workflow import stage_one_definition
+    from core.research.workflow.stage_one_definition import (
+        build_stage_one_workflow_definition,
+    )
+    from core.web.services.team_workflow.research_runtime import (
+        workflow_artifact_store,
+    )
+    from core.web.services.team_workflow.research_runtime.knowledge_sideflow_trigger import (
+        KnowledgeSideflowTrigger,
+    )
+
+    monkeypatch.setattr(workflow_artifact_store, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        "config.settings.get_config",
+        lambda: SimpleNamespace(
+            research=SimpleNamespace(
+                knowledge_sideflow=SimpleNamespace(mode="on")
+            )
+        ),
+    )
+    identity = register_or_resolve(build_stage_one_workflow_definition())
+    resolved_stage_one = resolve_definition_by_version_id(identity.workflowVersionId)
+    assert resolved_stage_one.schemaVersion == stage_one_definition.STAGE_ONE_SCHEMA_VERSION
+
+    harness = GraphHarness(tmp_path)
+    try:
+        harness.commands.seed_run(
+            "run-stage-one",
+            workflow_id="challenge-cup-research",
+            workflow_version_id=identity.workflowVersionId,
+            structure_hash=identity.structureHash,
+            status="running",
+        )
+        workflow_artifact_store.put_workflow_artifact(
+            "research-team",
+            kind="problem_understanding",
+            workflow_run_id="run-stage-one",
+            source_collection_run_id="source-1",
+            artifact_identity="nr-problem-a1",
+            payload={
+                "scope": "Reduce plastic waste leakage into oceans.",
+                "subquestions": ["Which policy levers cut leakage fastest?"],
+                "assumptions": ["Regional data is comparable"],
+                "known_unknowns": ["Export displacement effects"],
+                "human_gate": {
+                    "required": True,
+                    "decision": "approved",
+                    "rationale": "Scope is testable.",
+                },
+            },
+        )
+        trigger = KnowledgeSideflowTrigger(
+            store=harness.commands.store,
+            command_service=harness.commands.command_service,
+            now_provider=lambda: FIXED_NOW_MS + 3000,
+        )
+
+        result = trigger.on_node_succeeded(
+            run_id="run-stage-one",
+            node_id="problem_understanding",
+            node_run_id="nr-problem-a1",
+        )
+
+        assert result["status"] == "submitted", result
+        assert result["childRunId"]
+    finally:
+        harness.close()

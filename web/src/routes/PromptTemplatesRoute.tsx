@@ -489,6 +489,7 @@ export function PromptTemplatesRoute() {
         workspaceClassName={styles.workspaceClass}
         columnsClassName=""
         layoutId={WORKBENCH_LAYOUT_IDS.promptTemplates}
+        resize={{ sidebar: { defaultWidth: 400, minWidth: 300, maxWidth: 520 } }}
         data-vui-domain-recipe="prompt-templates-workbench"
         ariaLabel={copy.title}
         eyebrow={copy.eyebrow}
@@ -663,13 +664,11 @@ export function PromptTemplatesRoute() {
                     >
                       <span className={styles.templateMainClass}>
                         <strong>{template.name || template.promptTemplateId}</strong>
-                        <span>{template.promptTemplateId}</span>
                       </span>
                       <span className={styles.templateMetaClass}>
                         <span className={styles.categoryPillClass}>{categoryLabel(template.category, lang)}</span>
-                        <span>{template.status || "active"}</span>
+                        {template.status && template.status !== "active" ? <span>{template.status}</span> : null}
                         <span>{copy.usage}: {linkedCount}</span>
-                        <span title={template.sourcePath || undefined}>{template.sourcePath || "-"}</span>
                       </span>
                     </VButton>
                   </div>
@@ -692,6 +691,7 @@ export function PromptTemplatesRoute() {
               />
               <details className={styles.sourceDetailsClass}>
                 <summary>{lang === "zh" ? "来源与状态" : "Source and status"}</summary>
+                <p className={styles.panelDescriptionClass}>{editableTemplate.promptTemplateId}</p>
                 <p className={styles.panelDescriptionClass}>{editableTemplate.sourcePath || editableTemplate.category}</p>
 
                 <div className={styles.editorMetaClass}>

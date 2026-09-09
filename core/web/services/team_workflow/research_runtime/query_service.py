@@ -864,7 +864,7 @@ def _discussion_inputs_from_run(
         # append-only log and validates the team scope without writing, so do
         # not bypass that owner through its private path helpers.
         meeting_payload = meeting_rounds.list_meeting_rounds(
-            str(getattr(run, "team_id", ""))
+            str(getattr(run, "team_id", "")), read_only=True
         )
         raw_meetings = (
             meeting_payload.get("meetings")

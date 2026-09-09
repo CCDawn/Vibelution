@@ -24,7 +24,6 @@ const backgroundAwarePanelStyles = [
   "agentPermissionSummaryPanel",
   "bulkSummary",
   "dependencyHealthPanel",
-  "detailPanel",
   "emptyDetail",
   "image2ModelPanel",
   "image2ModelSummary",
@@ -32,7 +31,6 @@ const backgroundAwarePanelStyles = [
   "notice",
   "noticeError",
   "noticeSuccess",
-  "policyDraftPanel",
   "policyDraftSummary",
   "policyPanel",
   "readinessCard",
@@ -52,9 +50,7 @@ const backgroundAwareRepeatedStyles = [
   "selectableToolRow",
   "summaryCard",
   "toolBundleApplyBar",
-  "toolBundleGroup",
   "toolBundleSummary",
-  "toolPermissionGroup",
   "toolPermissionRow",
   "workspaceScopePanel",
 ] as const;
@@ -323,7 +319,7 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).toContain("tool.permissionPolicy?.requiresExplicitAllow");
     expect(routeSource).toContain("需显式授权");
     expect(routeSource).toContain("capabilityPreview.explicitAllowed");
-    expect(routeSource).toContain("policy_${policyMode}");
+    expect(routeSource).toContain("toolPolicyModeLabel(activePolicyMode, lang)");
     expect(routeSource).toContain("policy_${activePolicyMode}");
   });
 
@@ -423,7 +419,7 @@ describe("ToolsRoute layout contract", () => {
     expect(styles.toolButton).toContain("!h-auto");
     expect(styles.toolButton).toContain("!grid");
     expect(styles.toolButton).toContain("w-full");
-    expect(styles.toolButton).toContain("grid-cols-[auto_minmax(0,1fr)_auto]");
+    expect(styles.toolButton).toContain("grid-cols-[auto_minmax(0,1fr)]");
     expect(styles.toolCopy).toContain("[font-size:var(--vui-font-xs)]");
     expect(styles.toolCopy).toContain("[&>span]:truncate");
     expect(styles.toolList).toContain("overflow-auto");
@@ -470,7 +466,7 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).toContain("styles.toolDetailPanel");
     expect(routeSource).toContain("styles.detailPanel");
     expect(styles.permissionSummaryGrid).toContain("grid");
-    expect(styles.detailPanel).toContain("panel");
+    expect(styles.detailPanel).toContain("overflow-auto");
     expect(styles.toolDetailPanel).toContain("panel");
   });
 
@@ -560,7 +556,7 @@ describe("ToolsRoute layout contract", () => {
     expect(styles.searchBox).toContain("grid-cols-[auto_minmax(0,1fr)]");
     expect(styles.bulkActionBar).toContain("flex-wrap");
     expect(styles.selectableToolRow).toContain("grid-cols-[28px_minmax(0,1fr)]");
-    expect(styles.toolCopy).toContain("[&>strong]:truncate");
+    expect(styles.toolCopy).toContain("[&>strong]:line-clamp-2");
     expect(styles.toolPermissionRow).toContain("max-[640px]:grid-cols-[1fr]");
     expect(styles.policyTabsHost).toContain("max-[640px]:justify-start");
     expect(styles.policyTabsHost).toContain("data-policy-mode=blocked");

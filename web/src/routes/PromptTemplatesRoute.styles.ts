@@ -16,10 +16,10 @@ const pillSurfaceClass =
   `inline-flex min-h-5 max-w-full items-center justify-center rounded-full border border-[color-mix(in_srgb,var(--vui-border-soft)_74%,transparent)] ${vuiOpaqueRowClass} px-1.5 [font-size:var(--vui-font-xs)]`;
 const refreshButtonClass = `${controlButtonClass} h-[var(--vui-control-height-sm)] w-[var(--vui-control-height-sm)] p-0`;
 const returnButtonClass = `${controlButtonClass} gap-[5px] text-[var(--accent-cool)] no-underline`;
-const workspaceClass = "grid h-full min-h-0 min-w-0 grid-cols-[clamp(260px,26vw,380px)_minmax(0,1fr)] gap-1.5 overflow-hidden px-2 pb-2 pt-1.5 max-[980px]:grid-cols-1 max-[980px]:content-start max-[980px]:overflow-auto";
+const workspaceClass = "grid h-full min-h-0 min-w-0 grid-cols-[clamp(280px,26vw,440px)_minmax(0,1fr)] gap-4 overflow-hidden px-4 pb-4 pt-3 max-[980px]:grid-cols-1 max-[980px]:content-start max-[980px]:overflow-auto";
 const panelBaseClass = "grid h-full min-h-0 min-w-0 content-start gap-2 overflow-hidden";
 const listPanelClass = `${panelBaseClass} grid-rows-[auto_auto_auto_auto_minmax(0,1fr)] max-[980px]:max-h-[44vh]`;
-const editorPanelClass = `${panelBaseClass} grid-rows-[auto_auto_auto_minmax(260px,1fr)_auto_auto] content-stretch min-[1400px]:grid-cols-[minmax(0,1fr)_minmax(240px,0.4fr)] min-[1400px]:grid-rows-[auto_auto_auto_minmax(260px,1fr)_auto] max-[980px]:grid-rows-[auto_auto_auto_minmax(180px,0.8fr)_auto_auto] max-[980px]:overflow-auto`;
+const editorPanelClass = `${panelBaseClass} grid-rows-[auto_auto_auto_minmax(260px,1fr)_auto_auto] content-stretch max-[980px]:grid-rows-[auto_auto_auto_minmax(180px,0.8fr)_auto_auto] max-[980px]:overflow-auto`;
 const editorPanelFocusedClass = "border-[color-mix(in_srgb,var(--accent-cool)_40%,var(--border-soft))]";
 const panelHeaderClass = "flex min-w-0 items-start justify-between gap-3";
 const panelEyebrowClass = "m-0 mb-px [font-size:var(--vui-font-xs)] uppercase tracking-[0.07em] text-vui-fg-tertiary";
@@ -53,7 +53,7 @@ const linkedBorderClass = "border-[color-mix(in_srgb,var(--accent-cool)_44%,var(
 const hiddenCheckboxClass = "pointer-events-none absolute h-px w-px opacity-0";
 const templateButtonBaseClass = [
   rowButtonSurfaceClass,
-  "!grid gap-[5px]",
+  "!grid !justify-stretch !justify-items-start !text-left gap-[5px]",
 ].join(" ");
 const templateButtonActiveClass = "border-[color-mix(in_srgb,var(--accent-warm)_30%,transparent)] bg-[var(--vui-surface-row-hover)] shadow-[var(--vui-shadow-inset-accent)]";
 const templateMainClass = "grid min-w-0 gap-0.5 [&_*]:min-w-0 [&>strong]:line-clamp-2 [&>strong]:break-words [&>small]:truncate";
@@ -72,9 +72,9 @@ const fieldInputClass = `min-h-8 w-full min-w-0 ${fieldSurfaceClass} px-2 text-v
 const nameFieldClass = "min-[1400px]:col-span-full self-start";
 const contentFieldClass = "grid min-h-0 content-stretch grid-rows-[auto_minmax(0,1fr)] overflow-hidden";
 const contentTextareaClass = `h-full min-h-0 w-full min-w-0 resize-none self-stretch ${fieldSurfaceClass} p-2.5 font-[var(--font-mono)] [font-size:var(--vui-font-xs)] leading-[1.5] text-vui-fg-primary`;
-const bottomGridClass = "min-[1400px]:grid-cols-1 min-[1400px]:max-h-full min-[1400px]:content-start grid items-start min-h-0 max-h-[28vh] overflow-auto grid-cols-[minmax(0,1fr)_clamp(240px,22vw,340px)] gap-2 max-[980px]:grid-cols-1";
-const detailCardClass = "grid min-h-0 min-w-0 content-start gap-1.5 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--border-soft)_64%,transparent)] bg-transparent p-2 grid-rows-[auto_minmax(0,1fr)_auto]";
-const agentListClass = "grid min-h-0 min-w-0 content-start gap-1.5 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--border-soft)_64%,transparent)] bg-transparent p-2";
+const bottomGridClass = "grid items-start min-h-0 max-h-[28vh] overflow-auto grid-cols-[minmax(0,1fr)_clamp(240px,22vw,340px)] gap-2 max-[980px]:grid-cols-1";
+const detailCardClass = "grid min-h-0 min-w-0 content-start gap-1.5 border-t border-vui-border-subtle bg-transparent py-3 grid-rows-[auto_minmax(0,1fr)_auto]";
+const agentListClass = "grid min-h-0 min-w-0 content-start gap-1.5 border-t border-vui-border-subtle bg-transparent py-3";
 const cardTitleClass = "m-0 font-[var(--font-display)] text-[0.92rem] text-vui-fg-primary";
 const helperTextClass = "m-0 [font-size:var(--vui-font-xs)] leading-[1.3] text-vui-fg-secondary";
 const defaultPreviewSummaryClass = "cursor-pointer list-item py-1 [&>h3]:inline [&>span]:ml-2";

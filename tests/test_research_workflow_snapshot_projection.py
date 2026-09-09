@@ -1513,7 +1513,7 @@ def test_discussion_query_uses_formal_meeting_read_and_raw_room_read(
     monkeypatch.setattr(
         meeting_rounds,
         "list_meeting_rounds",
-        lambda team_id: meeting_calls.append(team_id) or {"meetings": []},
+        lambda team_id, **_kwargs: meeting_calls.append(team_id) or {"meetings": []},
     )
 
     class ReadOnlyRoomStore:
@@ -1592,7 +1592,7 @@ def test_knowledge_child_reads_discussions_only_with_explicit_scope(monkeypatch,
     )
     calls = []
     monkeypatch.setattr(hypothesis_first_chain, "chain_state", lambda *_a, **_kw: pytest.fail("Child must not discover a parent discussion"))
-    monkeypatch.setattr(meeting_rounds, "list_meeting_rounds", lambda *_a: calls.append("meetings") or {"meetings": []})
+    monkeypatch.setattr(meeting_rounds, "list_meeting_rounds", lambda *_a, **_k: calls.append("meetings") or {"meetings": []})
     monkeypatch.setattr(chat_room_service, "read_chat_rooms_snapshot", lambda: calls.append("rooms") or [])
     result = _discussion_inputs_from_run(run, [], {})
     assert result == (({"scope": scope}, [], []) if explicit_scope else (None, None, None))

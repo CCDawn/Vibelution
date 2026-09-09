@@ -377,7 +377,7 @@ describe("ConfigRoute layout contract", () => {
     expect(quickSetupStyles.field).toContain("[&_[data-vui=select-trigger]]:!h-10");
     expect(quickSetupStyles.field).toContain("[&_[data-vui=select-trigger]]:!min-h-10");
     expect(quickSetupStyles.primaryAction).toContain("min-h-10");
-    expect(styles.providerModeButton).toContain("min-h-10");
+    expect(styles.providerModeButton).toContain("min-h-8");
     expect(routeSource).toContain("aria-pressed={providerConnecting}");
     expect(routeSource).toContain("aria-pressed={providerShowMore}");
     expect(routeSource).not.toContain('aria-pressed={providerWorkspaceMode === "quick"}');
@@ -703,7 +703,7 @@ describe("ConfigRoute layout contract", () => {
     expect(styles.themeBackgroundImageValue).toContain("[max-width:100%]");
 
     expect(stylesSource).toContain("userProfileAvatarFields:");
-    expect(styles.userProfileAvatarFields).toContain("max-[900px]:[grid-template-columns:1fr]");
+    expect(styles.userProfileAvatarFields).toContain("grid-cols-1");
   });
 
   it("supports Agent Center return links and section deep links", () => {
@@ -891,11 +891,8 @@ describe("ConfigRoute layout contract", () => {
     expect(stylesSource).toContain("userProfileAvatarFields:");
     expect(stylesSource).toContain("userProfileAdvancedFields:");
     expect(stylesSource).toContain("[display:grid]");
-    expect(styles.userProfilePrimaryGrid).toContain("[grid-template-columns:minmax(240px,0.38fr)_minmax(0,0.62fr)]");
-    expect(styles.userProfileAvatarFields).toContain("[grid-template-columns:repeat(2,minmax(0,1fr))]");
-    expect(styles.userProfileAvatarFields).toContain(
-      "[&_.treeFieldCardView]:![grid-template-columns:minmax(132px,0.44fr)_minmax(0,1fr)]",
-    );
+    expect(styles.userProfilePrimaryGrid).toContain("grid-cols-1");
+    expect(styles.userProfileAvatarFields).toContain("grid-cols-1");
     expect(styles.userProfileAdvancedFields).toContain("[grid-template-columns:minmax(0,1fr)]");
   });
 
@@ -926,36 +923,11 @@ describe("ConfigRoute layout contract", () => {
     expect(stylesSource).toContain("configAdvancedToggle:");
     expect(stylesSource).toContain("configAdvancedBody:");
     expect(styles.configAdvancedToggle).toContain("w-full");
-    expect(routeSource).toContain("styles.configCommonGridOne");
-    expect(routeSource).toContain("styles.configCommonGridFour");
-    expect(routeSource).toContain("styles.configCommonGridContext");
-    expect(routeSource).toContain("styles.configAdvancedGrid");
-    expect(styles.configCommonGridOne).toContain("![grid-template-columns:minmax(0,1fr)]");
-    expect(styles.configCommonGridFour).toContain("![grid-template-columns:repeat(4,minmax(0,1fr))]");
-    expect(styles.configCommonGridContext).toContain("![grid-template-columns:repeat(3,minmax(0,1fr))]");
-    expect(styles.configCommonGridContext).not.toContain("repeat(5");
-    expect(styles.configAdvancedGrid).toContain("![grid-template-columns:repeat(3,minmax(0,1fr))]");
-    expect(styles.configAdvancedGrid).toContain("max-[1180px]:![grid-template-columns:repeat(2,minmax(0,1fr))]");
-    expect(styles.configProgressiveBody).toContain("[&_.treeFieldCardView]:[grid-template-columns:minmax(0,1fr)]");
-    expect(styles.configProgressiveBody).toContain("[&_.treeFieldValue]:[grid-row:2]");
-    expect(styles.configProgressiveBody).toContain("[&_.treeFieldLabel]:[white-space:normal]");
-    expect(styles.configCompactPathProgressiveBody).toContain("[&_.treeFieldCardView]:![grid-template-columns:minmax(150px,0.42fr)_minmax(0,1fr)]");
-    expect(styles.configCompactPathProgressiveBody).toContain("[&_.treeFieldValue]:![grid-row:1/span_2]");
-    expect(styles.configCompactPathProgressiveBody).toContain("[&_.treeFieldCardView]:![padding:8px]");
-    expect(styles.configCompactPathProgressiveBody).toContain("[&_.treeObjectBlock_>_.treeToggle]:![width:100%]");
-    expect(styles.configCompactPathProgressiveBody).toContain("[&_.treeObjectBlock_>_.treeToggle]:![min-height:50px]");
-    expect(styles.configCompactAdvancedProgressiveBody).toContain("[&_.configAdvancedToggle]:![min-height:64px]");
-    expect(styles.configCompactAdvancedProgressiveBody).toContain("[&_.configAdvancedToggle_.configTierHeaderCopy]:![display:grid]");
-  });
-
-  it("sizes progressive common grids to the number of visible controls", () => {
-    expect(routeSource).toContain("function configCommonGridClass(commonEntryCount: number)");
-    expect(routeSource).toContain("configCommonGridClass(commonEntries.length)");
-    expect(styles.configCommonGridOne).toContain("![grid-template-columns:minmax(0,1fr)]");
-    expect(routeSource).toContain("styles.configCommonGridTwo");
-    expect(routeSource).toContain("styles.configCommonGridThree");
-    expect(styles.configCommonGridTwo).toContain("![grid-template-columns:repeat(2,minmax(0,1fr))]");
-    expect(styles.configCommonGridThree).toContain("![grid-template-columns:repeat(3,minmax(0,1fr))]");
+    expect(styles.treeGrid).toContain("grid-cols-1");
+    expect(styles.treeFieldCardView).toContain("grid-cols-[16rem_minmax(0,1fr)]");
+    expect(styles.configProgressiveBody).toContain("max-w-[72rem]");
+    expect(styles.treeFieldCard).not.toContain("bg-vui-surface-row");
+    expect(routeSource).not.toContain("configCommonGridClass");
   });
 
   it("uses a compact layout for large config sections with many fields", () => {
@@ -982,11 +954,11 @@ describe("ConfigRoute layout contract", () => {
     expect(styles.page).toContain("isolation-isolate");
     expect(styles.sidebar).toMatch(/bg-vui-surface-panel|var\(--vui-surface-panel\)/);
     expect(styles.sectionSurface).toMatch(/bg-vui-surface-panel|var\(--vui-surface-panel\)/);
-    expect(styles.treeGrid).toContain("[grid-template-columns:repeat(2,minmax(0,1fr))]");
+    expect(styles.treeGrid).toContain("grid-cols-1");
     expect(styles.configDenseSection).toContain("[&>_.treeGrid]:[grid-template-columns:repeat(3,minmax(220px,1fr))]");
     expect(styles.configDenseSection).not.toContain("repeat(auto-fit");
     expect(styles.configDiscoverySection).toContain("[&>_.treeGrid]:[grid-template-columns:repeat(3,minmax(220px,1fr))]");
-    expect(styles.treeFieldValue).toContain("color-mix(in_srgb,var(--vui-surface-workspace)_92%,var(--vui-surface-panel))");
+    expect(styles.treeFieldValue).toContain("text-vui-fg-secondary");
     expect(healthDiagnosticsPanelStylesSource).toContain("vuiSurfaceRecipes");
     expect(healthDiagnosticsPanelStyles.sectionSurface).toMatch(/bg-vui-surface-panel|var\(--vui-surface-panel\)/);
     expect(healthDiagnosticsPanelStyles.findingCard).toMatch(/bg-vui-surface-row|var\(--vui-surface-row\)/);
@@ -1026,7 +998,7 @@ describe("ConfigRoute layout contract", () => {
     // Header chrome lives inside VSettingsFormPage (settings-form-page recipe).
     expect(routeSource).toContain("VSettingsFormPage");
     expect(routeSource).not.toMatch(/<VRouteHeader[\s\S]*?<VStatusStrip[\s\S]*?<\/VRouteHeader>/);
-    expect(styles.configHeader).toContain("[grid-template-columns:minmax(0,1fr)]");
+    expect(styles.configHeader).toContain("[&>[data-vui=route-header]]:!border-0");
   });
 
   it("keeps a canonical Config h1 across loaded and placeholder states", () => {
