@@ -2191,3 +2191,301 @@ def test_reconcile_finalizes_completion_pending_zombie_once_reservation_settled(
         )
     finally:
         commands.close()
+
+
+# --------------------------------------------------------------------------
+# 缺陷 ⑮：子 run 级联的幸存阻塞落态（production run-1ca97605acf3 最后一层）
+#
+# 生产现场：僵尸 attempt 已终态化、receipt 错配 dispatch 已保持死、预留已
+# 补偿——但子 run 仍卡 reconciliation_required：唯一幸存 blocked attempt 是
+# knowledge_ingestion-a1 + budget_precheck_insufficient（incident block，
+# 预算后续已扩容、重试本可通过准入）。plan_ledger_authority 只让评估管线
+# 的 readiness 裁决 author 落态，incident block 不 author（FORMAL 父 run 上
+# 其恢复归 extend-budget/retry 等契约），落态梯于是走到 continue——子 run
+# 零可操作面地永久停机。子 run 没有自己的对账/恢复 surface，落到幸存阻塞
+# 的真实 problem 上（露出 extend-budget CTA + 重试路径）严格更可操作。
+# --------------------------------------------------------------------------
+
+_BUDGET_PROBLEM = {
+    "code": "budget_precheck_insufficient",
+    "detail": "estimated 1_480_468 tokens exceeds remaining stage admission window",
+}
+
+
+def test_reconcile_cascade_lands_child_on_surviving_incident_block(
+    tmp_path: Path,
+) -> None:
+    """incident-only 子 run 落到幸存 blocked attempt 的真实 problem 上。
+
+    唯一幸存 blocked attempt 不 author plan 落态、无复活 dispatch、无活跃
+    工作——旧行为是 continue 永久卡死；子 run 现落 BLOCKED 在该 attempt 的
+    node 上，problem_json 逐字复制存储（不解析重写），事件带 landing 判别
+    符与 parentRunId。"""
+    commands = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        run_id = "run-parent-cascade-incident"
+        child_run_id = "run-child-incident"
+        _seed_parent_with_knowledge_children(
+            commands,
+            run_id=run_id,
+            children=[{"run_id": child_run_id, "status": "reconciliation_required"}],
+        )
+        store = commands.store
+
+        def seed_child_ledger(uow):
+            uow.repository.insert_attempt(
+                _attempt(
+                    "source_finding",
+                    status="succeeded",
+                    run_id=child_run_id,
+                    command_id=f"cmd-{child_run_id}",
+                )
+            )
+            uow.repository.insert_attempt(
+                _attempt(
+                    "knowledge_ingestion",
+                    status="blocked",
+                    problem=_BUDGET_PROBLEM,
+                    run_id=child_run_id,
+                    command_id=f"cmd-{child_run_id}",
+                )
+            )
+
+        store.submit(seed_child_ledger, force_flush=True).result(timeout=10)
+
+        commands.service.submit(
+            commands.request(
+                command=WorkflowCommandKind.RECONCILE_RUN,
+                run_id=run_id,
+                node_id=None,
+                expected_run_version=3,
+                idempotency_key="ui:reconcile-incident",
+            )
+        )
+
+        child = store.get_run(child_run_id)
+        assert child.status == "blocked"
+        assert child.active_node_id == "knowledge_ingestion"
+        # 逐字复制：存储串原样落 run 记录，不解析重写。
+        assert child.blocked_problem_json == json.dumps(
+            _BUDGET_PROBLEM, ensure_ascii=False
+        )
+        assert child.run_version == 3
+
+        child_events = store.list_events(child_run_id)
+        assert [event.event_type for event in child_events] == ["run_blocked"]
+        payload = json.loads(child_events[-1].payload_json)
+        assert payload["reconciled"] is True
+        assert payload["revivedDispatchCount"] == 0
+        assert payload["activeWorkFound"] is False
+        assert payload["reconciledStatus"] == "blocked"
+        assert payload["staleAttemptIds"] == []
+        assert payload["parentRunId"] == run_id
+        assert payload["landing"] == "surviving_blocker"
+        # 无任何复活：worker 不被唤醒。
+        assert commands.wake_count == 0
+    finally:
+        commands.close()
+
+
+def test_reconcile_cascade_skips_child_with_zero_blocked_attempts(
+    tmp_path: Path,
+) -> None:
+    """真零工作子 run（无 blocked attempt、无活跃工作）保持诚实跳过。"""
+    commands = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        run_id = "run-parent-cascade-empty"
+        child_run_id = "run-child-empty"
+        _seed_parent_with_knowledge_children(
+            commands,
+            run_id=run_id,
+            children=[{"run_id": child_run_id, "status": "reconciliation_required"}],
+        )
+        store = commands.store
+
+        def seed_child_ledger(uow):
+            uow.repository.insert_attempt(
+                _attempt(
+                    "source_finding",
+                    status="succeeded",
+                    run_id=child_run_id,
+                    command_id=f"cmd-{child_run_id}",
+                )
+            )
+
+        store.submit(seed_child_ledger, force_flush=True).result(timeout=10)
+
+        commands.service.submit(
+            commands.request(
+                command=WorkflowCommandKind.RECONCILE_RUN,
+                run_id=run_id,
+                node_id=None,
+                expected_run_version=3,
+                idempotency_key="ui:reconcile-empty",
+            )
+        )
+
+        child = store.get_run(child_run_id)
+        assert child.status == "reconciliation_required"
+        assert child.run_version == 2
+        assert store.list_events(child_run_id) == []
+        assert commands.wake_count == 0
+    finally:
+        commands.close()
+
+
+def test_reconcile_cascade_does_not_land_on_superseded_blocked_attempt(
+    tmp_path: Path,
+) -> None:
+    """被更深成功覆盖的 incident block 先翻 stale，不得用于落态。
+
+    supersede pass 在同一事务内把 covered blocked attempt 翻成 stale；其后
+    的幸存查询必须看不到它——若无其它幸存阻塞，子 run 保持诚实跳过。"""
+    commands = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        run_id = "run-parent-cascade-covered"
+        child_run_id = "run-child-covered"
+        covered_node_run_id = f"nr-{child_run_id}-evidence_relations-a1"
+        _seed_parent_with_knowledge_children(
+            commands,
+            run_id=run_id,
+            children=[{"run_id": child_run_id, "status": "reconciliation_required"}],
+        )
+        store = commands.store
+
+        def seed_child_ledger(uow):
+            # 更深的成功：知识入库已成功，覆盖前面的证据关系 incident block。
+            uow.repository.insert_attempt(
+                _attempt(
+                    "knowledge_ingestion",
+                    status="succeeded",
+                    run_id=child_run_id,
+                    command_id=f"cmd-{child_run_id}",
+                    started_at_ms=FIXED_NOW_MS - 2_000,
+                )
+            )
+            uow.repository.insert_attempt(
+                _attempt(
+                    "evidence_relations",
+                    status="blocked",
+                    problem=_BUDGET_PROBLEM,
+                    run_id=child_run_id,
+                    command_id=f"cmd-{child_run_id}",
+                    started_at_ms=FIXED_NOW_MS - 1_000,
+                )
+            )
+            uow.repository.insert_outbox(
+                replace(
+                    build_outbox_record(
+                        "act-child-covered-dispatch",
+                        run_id=child_run_id,
+                        command_id=f"cmd-{child_run_id}",
+                        action_kind="graph_dispatch",
+                        status="failed",
+                    ),
+                    node_run_id=covered_node_run_id,
+                    last_problem_json=json.dumps(
+                        {"code": "graph_dispatch_failed", "detail": "transient"}
+                    ),
+                )
+            )
+
+        store.submit(seed_child_ledger, force_flush=True).result(timeout=10)
+
+        commands.service.submit(
+            commands.request(
+                command=WorkflowCommandKind.RECONCILE_RUN,
+                run_id=run_id,
+                node_id=None,
+                expected_run_version=3,
+                idempotency_key="ui:reconcile-covered",
+            )
+        )
+
+        # supersede 先翻 stale → 无幸存 blocked → 诚实跳过；其死 dispatch
+        # 由 supersede pass 一并 cancel（既有第 3 步契约），不得复活。
+        assert _attempt_status(commands, covered_node_run_id) == "stale"
+        child = store.get_run(child_run_id)
+        assert child.status == "reconciliation_required"
+        assert child.run_version == 2
+        assert store.list_events(child_run_id) == []
+        assert _outbox_status(commands, "act-child-covered-dispatch") == "cancelled"
+    finally:
+        commands.close()
+
+
+def test_parent_reconcile_keeps_no_active_work_landing_on_incident_only_shape(
+    tmp_path: Path,
+) -> None:
+    """FORMAL 父 run 同形态仍落 reconciliation_required（回归守卫）。
+
+    incident-only（budget_precheck_insufficient）不 author 父 run 落态：
+    其恢复归 extend-budget/retry 契约；父 run 零工作分支保持
+    reconcile_no_active_work 的诚实落态，与子 run 的幸存阻塞落态分叉。"""
+    commands = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        run_id = "run-parent-incident-only"
+        store = commands.store
+
+        def seed(uow):
+            uow.repository.insert_run(
+                build_run_record(
+                    workflow_version_id=_PINNED_WORKFLOW_VERSION_ID,
+                    run_id=run_id,
+                    status="reconciliation_required",
+                    run_version=3,
+                    last_event_sequence=8,
+                )
+            )
+            uow.repository.insert_command(
+                build_command_record(
+                    command_id="cmd-parent-incident",
+                    run_id=run_id,
+                    idempotency_key="key:parent-incident",
+                    node_id="protocol_freeze",
+                )
+            )
+            uow.repository.insert_attempt(
+                _attempt(
+                    "protocol_review",
+                    status="succeeded",
+                    run_id=run_id,
+                    command_id="cmd-parent-incident",
+                )
+            )
+            uow.repository.insert_attempt(
+                _attempt(
+                    "protocol_freeze",
+                    status="blocked",
+                    problem=_BUDGET_PROBLEM,
+                    run_id=run_id,
+                    command_id="cmd-parent-incident",
+                )
+            )
+
+        store.submit(seed, force_flush=True).result(timeout=10)
+        commands.service.submit(
+            commands.request(
+                command=WorkflowCommandKind.RECONCILE_RUN,
+                run_id=run_id,
+                node_id=None,
+                expected_run_version=3,
+                idempotency_key="ui:reconcile-parent-incident",
+            )
+        )
+
+        run = store.get_run(run_id)
+        assert run.status == "reconciliation_required"
+        assert run.run_version == 4
+        events = [
+            event
+            for event in store.list_events(run_id)
+            if event.event_type == "run_blocked"
+        ]
+        payload = json.loads(events[-1].payload_json)
+        assert payload["reconciledStatus"] == "reconciliation_required"
+        assert payload["landingProblemCode"] == "reconcile_no_active_work"
+        # 幸存阻塞落态是子 run 专属：父 run 事件不带 landing 判别符。
+        assert "landing" not in payload
+    finally:
+        commands.close()

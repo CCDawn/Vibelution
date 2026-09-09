@@ -345,6 +345,13 @@ _RECONCILE_ZOMBIE_ATTEMPT_PROBLEM = {
     "detail": "active attempt has no live dispatch after reconcile",
 }
 
+# Fallback for the child-only surviving-blocker landing when the surviving
+# blocked attempt carries no stored problem at all (defect ⑮ layer 4).
+_RECONCILE_SURVIVING_BLOCKER_PROBLEM = {
+    "code": "reconcile_landed_on_surviving_blocker",
+    "detail": "child run has a surviving blocked attempt with no landing verdict",
+}
+
 
 def _apply_ledger_reconcile_for_run(
     uow,
@@ -581,6 +588,34 @@ def _run_has_active_work(uow, *, run_id: str) -> bool:
         (run_id, run_id),
     ).fetchone()
     return bool(row and row[0])
+
+
+def _deepest_surviving_blocked_attempt(uow, *, run_id: str, node_order) -> Any | None:
+    """Post-supersede deepest surviving 'blocked' attempt (child-only landing).
+
+    Must be called AFTER ``_apply_ledger_reconcile_for_run`` in the same
+    transaction: the supersede pass has already flipped plan-covered blocked
+    attempts to ``stale``, so re-querying the repository yields the
+    post-supersede truth and only uncovered blocked attempts survive.
+    Deepest = max node position in ``node_order``; ties prefer the most
+    recently updated attempt.  Returns None when nothing survives.
+    """
+    depth_of = {node: index for index, node in enumerate(node_order)}
+    survivors = [
+        attempt
+        for attempt in uow.repository.list_attempts(run_id)
+        if attempt.status == NodeAttemptStatus.BLOCKED.value
+        and str(attempt.node_id) in depth_of
+    ]
+    if not survivors:
+        return None
+    return sorted(
+        survivors,
+        key=lambda attempt: (
+            -depth_of[str(attempt.node_id)],
+            -int(attempt.updated_at_ms or 0),
+        ),
+    )[0]
 
 
 class WorkflowCommandService:
@@ -1840,16 +1875,51 @@ class WorkflowCommandService:
                 uow, run_id=child.run_id
             )
             # 与父 run 相同的落态决策梯：plan 判 blocked 优先；有复活或
-            # 活跃工作落 RUNNING；零工作的子 run 保持 reconciliation_required
-            # 的诚实落态，不伪造前进。
+            # 活跃工作落 RUNNING。零工作分支与父 run 分叉（见下）。
+            child_landing = ""
             if child_plan.lands_blocked:
                 child_target = RunStatus.BLOCKED
-                child_landing_problem = dict(child_plan.landing_problem)
+                child_active_node_id = str(child_plan.active_node_id or "")
+                child_blocked_problem_json = json.dumps(
+                    dict(child_plan.landing_problem), ensure_ascii=False
+                )
             elif child_has_active_work:
                 child_target = RunStatus.RUNNING
-                child_landing_problem = None
+                child_active_node_id = None
+                child_blocked_problem_json = None
             else:
-                continue
+                # 子 run 专属的幸存阻塞落态（缺陷 ⑮ 最后一层）。与父 run 的
+                # 差异根源：plan_ledger_authority 只让评估管线自己的
+                # readiness 裁决（auto_advance_not_ready）author 落态——
+                # FORMAL 父 run 上的事件型阻塞（如 budget_precheck_insufficient）
+                # 的恢复由 extend-budget/retry 等既有契约拥有，incident
+                # block 从不 author 落态，父 run 的零工作分支因此保持
+                # reconcile_no_active_work → reconciliation_required。但知识
+                # 子 run 没有任何自己的对账/恢复 surface（knowledge 节点
+                # offer 白名单只含 ensure/inspect，对账入口只在父 run 面板），
+                # 此处 continue 会让它带着幸存 blocked attempt 永远停在
+                # reconciliation_required，零可操作面。把子 run 落到该幸存
+                # 阻塞上（problem_json 逐字复制存储，不解析重写）：预算阻塞
+                # 由此露出 extend-budget CTA + 重试路径，严格优于永久
+                # reconciliation_required。supersede pass 已在本事务内把被
+                # 覆盖的 incident block 翻成 stale，重新查询即 post-supersede
+                # 真相；真零工作子 run 仍保持诚实跳过，不伪造前进。
+                survivor = _deepest_surviving_blocked_attempt(
+                    uow, run_id=child.run_id, node_order=KNOWLEDGE_SIDEFLOW_NODE_IDS
+                )
+                if survivor is None:
+                    continue
+                child_target = RunStatus.BLOCKED
+                child_active_node_id = str(survivor.node_id)
+                stored_problem = str(survivor.problem_json or "")
+                child_blocked_problem_json = (
+                    stored_problem
+                    if stored_problem.strip()
+                    else json.dumps(
+                        _RECONCILE_SURVIVING_BLOCKER_PROBLEM, ensure_ascii=False
+                    )
+                )
+                child_landing = "surviving_blocker"
             require_run_transition(RunStatus(child.status), child_target)
             child_version, child_sequence = _bump_child_run_version(
                 uow, run=child, now_ms=now_ms
@@ -1863,10 +1933,8 @@ class WorkflowCommandService:
                     child.team_id,
                     child_target.value,
                     now_ms,
-                    active_node_id=str(child_plan.active_node_id or ""),
-                    blocked_problem_json=json.dumps(
-                        child_landing_problem, ensure_ascii=False
-                    ),
+                    active_node_id=child_active_node_id,
+                    blocked_problem_json=child_blocked_problem_json,
                 )
             else:
                 uow.repository.update_run_status(
@@ -1876,6 +1944,16 @@ class WorkflowCommandService:
                     now_ms,
                     blocked_problem_json=None,
                 )
+            child_payload = {
+                "reconciled": True,
+                "revivedDispatchCount": revived_child,
+                "activeWorkFound": child_has_active_work,
+                "reconciledStatus": child_target.value,
+                "staleAttemptIds": list(child_plan.superseded_node_run_ids),
+                "parentRunId": run.run_id,
+            }
+            if child_landing:
+                child_payload["landing"] = child_landing
             uow.repository.insert_event(
                 _event_record(
                     run_id=child.run_id,
@@ -1884,14 +1962,7 @@ class WorkflowCommandService:
                     run_version=child_version,
                     event_type="run_blocked",
                     correlation_id=request.idempotency_key,
-                    payload={
-                        "reconciled": True,
-                        "revivedDispatchCount": revived_child,
-                        "activeWorkFound": child_has_active_work,
-                        "reconciledStatus": child_target.value,
-                        "staleAttemptIds": list(child_plan.superseded_node_run_ids),
-                        "parentRunId": run.run_id,
-                    },
+                    payload=child_payload,
                     now_ms=now_ms,
                 )
             )
