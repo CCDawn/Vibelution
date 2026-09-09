@@ -196,3 +196,19 @@
 - **R1 收敛硬门**（hypothesis_design readiness = accepted 知识包 + pendingCollectionCount==0 + hypothesisConverged）：收敛要求 latest 评审轮 closed + 质量非 failed + **claim belief 五态门**（无 contradicted/disputed）+ metaReview/人工裁决 accepted + 无 pending 搜集请求；HARD_ROUND_LIMIT=3 触发 budgetExhausted 时有 auto-adjudication 兜底。死局族：每轮新增 evidence request 未交接（循环搜集）、claim gate rejected 终态（需人工修订 claim/证据）、会议未关闭。
 - **结果包段**：protocol_freeze/smoke_gate/candidate_promotion 三道 HUMAN 门 + stage-one 结果核验（packaging_ready 且无未决 HumanTask）；stop/rollback governance 反而放行 packaging；version_lineage_invalid 与非 promote governance 是无出口形态。
 - 风险排序：⑰豁免不可达（已立项）> 知识包写回/审计未完成 > 后端停摆积压（⑯修复即解）> accept 时包 receipt 缺失无自动重试 > claim rejected 终态。
+
+### B.20 缺陷⑯复验（崩溃环闭合）+ 缺陷⑱：hypothesis 恢复清扫 O(N²) 重读饿死后端（py-spy 定案，修复中）
+
+- ⑯ 复验（34da1731a 合入重启）：后端拉起、毒条目（archived-from-cancelled 的 run-20f4bcdf8c84）清理失败不再杀进程（stderr 出现带 runId/actionId 上下文的受控失败日志而非穿透 traceback），Layer 1 状态血缘判定 + Layer 2 有界停驻（8 次 attempt 上限）按设计工作。
+- ⑰ 合入（8af04ceb9）：豁免 section 抽共享组件挂载画布知识节点「证据关系」tab（EvidenceGraphView 下方）；child run id 从 run 级 invocation badges 线程传入并注释禁止替换为 formal URL runId；25 前端测试 + tsc 0 错全过。待 rebuild 生效。
+- 缺陷⑱现场：后端进程在启动排空阶段 HTTP 全超时；py-spy 实锤唯一活跃线程 `vibelution-workflow-hypothesis-recovery`（active+gil）在 `auto_redrive_fenced_review_meeting → _fenced_review_redrive_plan → _records → read_jsonl_tolerant` 反复全量重读 6.4MB/9127 行团队链 JSONL（每次 1–2s），GIL 独占饿死 asyncio。**非死循环**：JSONL 3 分钟 +3.6KB（redrive 记录持续落盘），是 O(N²) 慢排空——重启积压的围栏评审会议逐个 redrive、每个都重读全量。
+- ⑱修复方向（codex/fix-recovery-sweep-reparse）：清扫单趟只读一次 records 并向下传参；`_records` 加 mtime+size 键缓存（append 后自然失效）；逐会议间让出；redrive 决策逻辑零改动。
+- 环境事实：期间另一会话两次推进 main（desktop-ui-corrections 5fb9e522c、stage-one-feedback-fixes 25e660c22），各收口均已 rebase 适配，无冲突。
+
+### B.20 缺陷⑯复验（崩溃环闭合）+ 缺陷⑱：hypothesis 恢复清扫 O(N²) 重读饿死后端（py-spy 定案，修复中）
+
+- ⑯ 复验（34da1731a 合入重启）：后端拉起、毒条目（archived-from-cancelled 的 run-20f4bcdf8c84）清理失败不再杀进程（stderr 出现带 runId/actionId 上下文的受控失败日志而非穿透 traceback），Layer 1 状态血缘判定 + Layer 2 有界停驻（8 次 attempt 上限）按设计工作。
+- ⑰ 合入（8af04ceb9）：豁免 section 抽共享组件挂载画布知识节点「证据关系」tab（EvidenceGraphView 下方）；child run id 从 run 级 invocation badges 线程传入并注释禁止替换为 formal URL runId；25 前端测试 + tsc 0 错全过。待 rebuild 生效。
+- 缺陷⑱现场：后端进程在启动排空阶段 HTTP 全超时；py-spy 实锤唯一活跃线程 `vibelution-workflow-hypothesis-recovery`（active+gil）在 `auto_redrive_fenced_review_meeting → _fenced_review_redrive_plan → _records → read_jsonl_tolerant` 反复全量重读 6.4MB/9127 行团队链 JSONL（每次 1–2s），GIL 独占饿死 asyncio。**非死循环**：JSONL 3 分钟 +3.6KB（redrive 记录持续落盘），是 O(N²) 慢排空——重启积压的围栏评审会议逐个 redrive、每个都重读全量。
+- ⑱修复方向（codex/fix-recovery-sweep-reparse）：清扫单趟只读一次 records 并向下传参；`_records` 加 mtime+size 键缓存（append 后自然失效）；逐会议间让出；redrive 决策逻辑零改动。
+- 环境事实：期间另一会话两次推进 main（desktop-ui-corrections 5fb9e522c、stage-one-feedback-fixes 25e660c22），各收口均已 rebase 适配，无冲突；doc worktree 二次注册时命中陈旧 active 协调记录（claim_overlap），已 complete 释放后重注册。
