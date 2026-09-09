@@ -1102,6 +1102,31 @@ _TERMINAL_BUDGET_STATUSES = frozenset(
 )
 
 
+def _latest_archived_from_status(uow, run_id: str) -> str:
+    """Read ``archivedFromStatus`` from the run's ``run_archived`` event.
+
+    Returns "" when the run was never archived or the event payload is
+    unreadable.  The ledger event is the authoritative record of which
+    terminal state the run was archived from; there is at most one archive
+    per run because ``archive_run`` requires an already-terminal status.
+    """
+    row = uow.repository.execute(
+        "SELECT payload_json FROM workflow_events "
+        "WHERE run_id = ? AND event_type = 'run_archived' "
+        "ORDER BY sequence DESC LIMIT 1",
+        (run_id,),
+    ).fetchone()
+    if row is None:
+        return ""
+    try:
+        payload = json.loads(str(row[0] or "{}"))
+    except (TypeError, ValueError):
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    return str(payload.get("archivedFromStatus") or "").strip().lower()
+
+
 def finalize_cancelled_run_budget_receipts(
     store: WorkflowLedgerStore,
     run_id: str,
@@ -1116,6 +1141,14 @@ def finalize_cancelled_run_budget_receipts(
     are intentionally released.  The whole run is handled in one Ledger
     transaction so a cancellation cleanup cannot acknowledge a partial budget
     terminalization.
+
+    Acceptance is decided on the run's cancel lineage, not only its current
+    status: a run archived FROM ``cancelled`` still owns the stranded receipts
+    this function exists to settle, so its ``run_archived`` event
+    (``archivedFromStatus``) is read inside the same transaction and the
+    finalize is accepted.  Runs archived from any other status keep failing
+    loudly with ``budget_cancel_state_mismatch`` — this is a hard contract,
+    not a silent no-op for unrelated terminal states.
     """
     normalized_run_id = _identity(run_id, "run_id")
     normalized_reason = str(reason or "run_cancelled").strip() or "run_cancelled"
@@ -1128,11 +1161,18 @@ def finalize_cancelled_run_budget_receipts(
                 f"workflow run missing for {normalized_run_id}",
                 code="budget_run_missing",
             )
-        if str(run.status or "") != "cancelled":
-            raise BudgetAuthorityError(
-                f"workflow run {normalized_run_id} is not cancelled",
-                code="budget_cancel_state_mismatch",
-            )
+        run_status = str(run.status or "")
+        if run_status != "cancelled":
+            archived_from = ""
+            if run_status == "archived":
+                archived_from = _latest_archived_from_status(uow, normalized_run_id)
+            if archived_from != "cancelled":
+                raise BudgetAuthorityError(
+                    f"workflow run {normalized_run_id} is not cancelled "
+                    f"(status={run_status or 'unknown'}, "
+                    f"archivedFrom={archived_from or 'n/a'})",
+                    code="budget_cancel_state_mismatch",
+                )
 
         counts = {"settled": 0, "released": 0}
         rows = uow.repository.list_budget_receipts_for_run(normalized_run_id)
