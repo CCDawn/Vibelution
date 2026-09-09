@@ -12941,6 +12941,10 @@ def _generate_hypothesis_round(
         # from the same immutable round; neither is derived from the other.
         dimension_reviews_authority: dict[str, Any]
         try:
+            from core.web.services.team_workflow.research_runtime.dimension_reviews_input_binding import (
+                canonicalize_dimension_review_evidence,
+                recompute_round_input_snapshot_hash,
+            )
             from core.web.services.team_workflow.research_runtime.dimension_reviews_artifact_writer import (
                 materialize_dimension_reviews_authority,
             )
@@ -12963,6 +12967,21 @@ def _generate_hypothesis_round(
                 or (receipt_authority or {}).get("inputSnapshotHash")
                 or ""
             ).strip()
+            if not input_snapshot_hash:
+                # Rounds generated before the snapshot binding existed carry no
+                # stored hash: recompute it from the exact durable records the
+                # generation path hashed.  An unresolvable input returns "" so
+                # the writer stays fail-closed instead of binding a guess.
+                input_snapshot_hash = recompute_round_input_snapshot_hash(
+                    team_id, round_record, meetings=bound_meetings
+                )
+            # Bare reflection citations are projected onto readable canonical
+            # evidence refs (idempotent; already-canonical rounds pass through
+            # untouched).  Citation-less rows stay empty: the writer's
+            # fail-closed contract, not this projection, judges them.
+            review_projection, evidence_binding_report = (
+                canonicalize_dimension_review_evidence(team_id, round_record)
+            )
             dimension_reviews_authority = materialize_dimension_reviews_authority(
                 team_id=team_id,
                 workflow_run_id=workflow_run_id,
@@ -12973,10 +12992,21 @@ def _generate_hypothesis_round(
                 input_refs=input_refs,
                 input_snapshot_hash=input_snapshot_hash,
                 candidates=candidates,
-                review=round_record,
+                review=review_projection,
                 workflow_authority=receipt_authority,
                 source_collection_run_id=source_collection_run_id,
             )
+            dimension_reviews_authority["evidenceBinding"] = {
+                "resolvedCitationCount": int(
+                    evidence_binding_report.get("resolvedCitationCount") or 0
+                ),
+                "unresolvedRefs": list(
+                    evidence_binding_report.get("unresolvedRefs") or []
+                ),
+                "rowsWithoutRefs": int(
+                    evidence_binding_report.get("rowsWithoutRefs") or 0
+                ),
+            }
         except Exception as exc:
             # A closed meeting/round is append-only and remains valid.  A
             # persistence or binding failure must be visible to readiness and

@@ -1452,7 +1452,9 @@ def test_generate_round_writes_all_three_review_authorities(
 
     assert result["dimensionReviewsAuthority"]["status"] == "written"
     assert result["reviewIndependenceAuthority"]["status"] == "written"
-    assert calls["dimensions"]["review"] is round_record
+    # The writer receives the evidence-canonicalized projection of the stored
+    # round; with nothing to canonicalize it is content-identical.
+    assert calls["dimensions"]["review"] == round_record
     assert calls["independence"]["review"] is round_record
     assert calls["independence"]["receipt_contexts"] == round_record[
         "modelInvocationReceipts"

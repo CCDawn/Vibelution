@@ -338,6 +338,12 @@ def create_hypothesis_round(team_id: str, payload: Mapping[str, Any] | None = No
         record["reviewCallBudget"] = dict(request["reviewCallBudget"])
     if isinstance(request.get("revisionEnvelope"), Mapping):
         record["revisionEnvelope"] = dict(request["revisionEnvelope"])
+    input_snapshot_hash = str(request.get("inputSnapshotHash") or "").strip()
+    if input_snapshot_hash:
+        # Deliberately outside _round_definition: the derived binding must not
+        # flip append-only id reuse for rounds generated before the binding
+        # existed.  The audit path recomputes it for those.
+        record["inputSnapshotHash"] = input_snapshot_hash
     for key in (
         "coreHypothesisCoherence", "coreHypothesisCoherenceArtifactRef",
         "qualityStatus", "qualityFailureCode", "qualityFailureCandidateIds",
@@ -906,6 +912,37 @@ def generate_hypothesis_round_from_meeting(
                 else {}
             ),
         )
+        # Contract input binding for the fail-closed dimension_reviews writer:
+        # the snapshot hash covers exactly this round's durable inputs (the
+        # ordered bound meetings with their digest content hashes, the
+        # decision ids and the reviewed candidate scopes) and is recomputable
+        # from the stored round; bare reflection citations are mapped to
+        # readable claim-evidence batch refs.  Nothing is invented — rows the
+        # reviewer left without citations stay citation-less and keep blocking
+        # the writer.
+        from core.web.services.team_workflow.research_runtime.dimension_reviews_input_binding import (
+            canonicalize_dimension_review_evidence,
+            round_input_snapshot_hash,
+            selection_id_from_meeting,
+        )
+
+        input_snapshot_hash = round_input_snapshot_hash(
+            team_id=normalized_team_id,
+            question_id=meeting.get("question"),
+            selection_id=selection_id_from_meeting(meetings[0]),
+            scope_hash=scope_hash,
+            meetings=meetings,
+            digests=digests,
+            decisions=decisions,
+            candidates=review["candidates"],
+        )
+        canonical_review, _evidence_binding_report = (
+            canonicalize_dimension_review_evidence(
+                normalized_team_id,
+                {"candidates": review["candidates"]},
+            )
+        )
+        review = {**review, "candidates": canonical_review["candidates"]}
         meeting_refs: list[dict[str, str]] = []
         for bound_meeting, digest, decision_ids in zip(
             meetings, digests, meeting_decision_ids
@@ -951,6 +988,7 @@ def generate_hypothesis_round_from_meeting(
                     if isinstance(review.get("revisionEnvelope"), Mapping)
                     else {}
                 ),
+                "inputSnapshotHash": input_snapshot_hash,
                 "meetingRefs": meeting_refs,
                 "lineage": lineage,
                 "status": "closed",

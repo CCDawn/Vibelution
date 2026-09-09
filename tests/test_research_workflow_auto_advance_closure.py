@@ -2427,8 +2427,10 @@ def test_auto_backfill_surfaces_blockers_for_legacy_review_rows(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """真实数据形态回归（脱敏）：轮次候选行携带非 canonical 证据引用且会议/轮
-    /receipt authority 均无 inputSnapshotHash 时，backfill 穿透到物化器并
-    fail-closed 暴露精确 blocker，store 零写入、不伪造。"""
+    /receipt authority 均无 inputSnapshotHash 时，backfill 穿透到物化器；
+    快照哈希可从真实会议/轮记录确定性复算（不再是 blocker），但行级证据
+    引用无法合法 canonical 化的部分仍 fail-closed 暴露精确 blocker，store
+    零写入、不伪造。"""
     events = _backfill_env(tmp_path, monkeypatch)
     _seed_review_link(_BACKFILL_MEETING_ID, round_index=1)
     _seed_backfill_selection()
@@ -2538,8 +2540,10 @@ def test_auto_backfill_surfaces_blockers_for_legacy_review_rows(
     assert summary["reason"] == "authority_still_blocked"
     assert summary["backfilled"] == 0
     blockers = set(summary["blockerCodes"])
-    assert "inputSnapshotHash_missing" in blockers
-    assert "input_snapshot_hash_invalid" in blockers
+    # 快照绑定已由真实记录确定性复算（可复算 = 可审计），不再是 blocker。
+    assert "inputSnapshotHash_missing" not in blockers
+    assert "input_snapshot_hash_invalid" not in blockers
+    # 行级证据引用无法合法派生的部分保持精确 blocker。
     assert "dimension_review_evidence_ref_invalid" in blockers
     assert "dimension_review_evidence_refs_missing" in blockers
     assert _dimension_reviews_store_rows() == []
