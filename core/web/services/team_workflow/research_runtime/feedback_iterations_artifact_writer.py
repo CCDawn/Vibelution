@@ -64,10 +64,12 @@ def _alias(mapping: Mapping[str, Any], *names: str) -> Any:
     return None
 
 
-def _string_list(value: Any, field: str) -> list[str]:
-    if not isinstance(value, (list, tuple)) or not value:
+def _string_list(
+    value: Any, field: str, *, allow_empty: bool = False
+) -> list[str]:
+    if not isinstance(value, list):
         raise FeedbackIterationAuthorityError(
-            f"feedback iteration {field} must be a non-empty array"
+            f"feedback iteration {field} must be an array"
         )
     result: list[str] = []
     for item in value:
@@ -78,7 +80,7 @@ def _string_list(value: Any, field: str) -> list[str]:
         text = item.strip()
         if text not in result:
             result.append(text)
-    if not result:
+    if not result and not allow_empty:
         raise FeedbackIterationAuthorityError(
             f"feedback iteration {field} must be a non-empty array"
         )
@@ -176,6 +178,7 @@ def _normalize_inputs(
     unresolved = _string_list(
         _alias(revision_map, "unresolvedIssues", "unresolved_issues"),
         "unresolvedIssues",
+        allow_empty=True,
     )
     output_refs = _string_list(
         _alias(revision_map, "outputRefs", "output_refs"),

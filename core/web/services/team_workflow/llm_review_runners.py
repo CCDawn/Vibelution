@@ -1889,7 +1889,7 @@ _REVISION_SYSTEM_PROMPT = """你是科研假说修订员。根据 MetaReview 的
 要求：
 - revisedCandidate.candidateId 必须与 parentCandidate.candidateId 完全一致，但 claim 必须是实质修订后的新文本，不能复制原文。
 - 保留并完善可检验预测、机制靶向 falsifier、差异说明与 axisProfile；lineageRefs 只能从 refsWhitelist 选择，不得编造引用。
-- changes 必须逐条说明实际改动；unresolvedIssues 必须逐条保留仍未解决的边界或风险，两者都不能为空。
+- changes 必须逐条说明实际改动且不能为空；unresolvedIssues 必须存在且为字符串列表，逐条保留仍未解决的边界或风险；若本次反馈全部解决可为空。
 - 不得把 MetaReview rationale、riskNotes、分数或收据本身冒充 revisedCandidate。
 - 严格输出单个 JSON 对象。
 

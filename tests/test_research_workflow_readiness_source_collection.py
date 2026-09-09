@@ -156,10 +156,10 @@ def test_knowledge_ingestion_blocked_without_waivered_links() -> None:
     assert any(b.code == "evidence_graph_incomplete" for b in result.blockers)
 
 
-def test_knowledge_ingestion_ready_with_waiver() -> None:
+def test_knowledge_ingestion_ready_with_all_links_waived() -> None:
     service = _service()
     context = FakeDomainContext()
-    context._evidence_graph = {"node_count": 4, "missing_link_count": 2, "waiver_count": 1}
+    context._evidence_graph = {"node_count": 4, "missing_link_count": 2, "waiver_count": 2}
     result = _evaluate(service, context, "knowledge_ingestion")
     assert result.ready is True
 
@@ -288,9 +288,12 @@ def test_fetch_candidate_stats_unlocks_with_tagged_candidates(tmp_path, monkeypa
     )
     from tests._support.team_workflow.cases_source_collection import (
         _finding_close_first_step_task,
+        _stub_source_finding_receipt_binding,
     )
 
     env = _finding_close_first_step_task(tmp_path, monkeypatch)
+    # This test exercises scoped candidate readback, not the search provider.
+    _stub_source_finding_receipt_binding(monkeypatch)
     team = env["team"]
     run_id = env["runId"]
     task = env["task"]

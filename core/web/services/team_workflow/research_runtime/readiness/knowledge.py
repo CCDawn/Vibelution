@@ -43,12 +43,13 @@ def evaluate_knowledge_ingestion(
             )
         missing_links = int(graph.get("missing_link_count") or 0)
         waivers = int(graph.get("waiver_count") or 0)
-        if missing_links > 0 and waivers <= 0:
+        unresolved_links = max(0, missing_links - waivers)
+        if unresolved_links > 0:
             blockers.append(
                 blocker(
                     "evidence_graph_incomplete",
                     "证据关系图不完整",
-                    f"存在 {missing_links} 个未豁免的 blocking missing links",
+                    f"存在 {unresolved_links} 个未豁免的 blocking missing links",
                 )
             )
     return DomainVerdict(

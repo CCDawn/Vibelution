@@ -1015,17 +1015,25 @@ def _metareview_step(
     }
 
 
-def _required_text_list(value: Any, *, field: str) -> list[str]:
-    if not isinstance(value, (list, tuple)):
+def _required_text_list(
+    value: Any, *, field: str, allow_empty: bool = False
+) -> list[str]:
+    if not isinstance(value, list):
         raise ContractValidationError(f"formal revision {field} must be a list")
-    normalized = [
-        str(item).strip() for item in value if str(item or "").strip()
-    ]
-    if not normalized:
+    normalized: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item.strip():
+            raise ContractValidationError(
+                f"formal revision {field} must contain only non-empty strings"
+            )
+        text = item.strip()
+        if text not in normalized:
+            normalized.append(text)
+    if not normalized and not allow_empty:
         raise ContractValidationError(
             f"formal revision {field} must contain explicit evidence"
         )
-    return list(dict.fromkeys(normalized))
+    return normalized
 
 
 def _candidates_with_review_contrast(
@@ -1162,7 +1170,9 @@ def _revision_step(
         )
     changes = _required_text_list(produced.get("changes"), field="changes")
     unresolved = _required_text_list(
-        produced.get("unresolvedIssues"), field="unresolvedIssues"
+        produced.get("unresolvedIssues"),
+        field="unresolvedIssues",
+        allow_empty=True,
     )
     r1_refs = [
         f"hypothesis_candidate:{item['candidateId']}:r1" for item in parent_snapshot

@@ -18,6 +18,7 @@ import os
 import re
 from typing import Any
 
+from ..research_runtime.evidence_graph_gaps import evidence_graph_gap_counts
 from ..source_collection_common import project_source_version_families
 from .relation_endpoints import build_relation_endpoint_registry, resolve_relation_endpoint
 
@@ -1307,6 +1308,7 @@ def _source_collection_stage_writeback_closure_summary(
     materialized_relation_edge_count = 0
     relation_edges_not_materialized = False
     relation_dangling_edge_count = 0
+    relation_unresolved_link_count = 0
     excluded_source_count = s._source_collection_count(materialized_sources.get("excludedSourceCount"))
     if stage_id == "finding" or agent_role == "source_finder":
         target_label = "原始资料"
@@ -1345,12 +1347,18 @@ def _source_collection_stage_writeback_closure_summary(
         relation_edge_claim_count = len(s._source_collection_agent_graph_edges(agent_graph))
         materialized_relation_edge_count = s._source_collection_count(materialized_candidate_graph.get("edgeCount"))
         relation_dangling_edge_count = s._source_collection_count(materialized_candidate_graph.get("danglingEdgeCount"))
+        relation_unresolved_link_count = max(
+            0, s._source_collection_count(materialized_candidate_graph.get("missingLinkCount"))
+            - s._source_collection_count(materialized_candidate_graph.get("waiverCount")),
+        )
         relation_edges_not_materialized = relation_edge_claim_count > 0 and materialized_relation_edge_count <= 0
         artifact_status = (
             "candidate_graph_relation_edges_missing"
             if relation_edges_not_materialized
             else "candidate_graph_dangling_edges"
             if relation_dangling_edge_count > 0
+            else "candidate_graph_missing_links"
+            if relation_unresolved_link_count > 0
             else "candidate_graph_ready"
             if success_count
             else "no_effect"
@@ -1368,6 +1376,12 @@ def _source_collection_stage_writeback_closure_summary(
                 "语义枢纽必须先在同一轮回写的 themeNodes[] 中声明再连边，"
                 "不要发明 rh_claim 之类未声明的逻辑端点，重新回写这些关系。"
             )
+        if relation_unresolved_link_count > 0:
+            retry_instruction += (
+                f" 候选图仍有 {relation_unresolved_link_count} 项未豁免缺口。"
+                "请读取 materializedCandidateGraph.missingLinks 的来源、目标及关系，"
+                "重读允许的节点 ID 后完整重写关系；真实证据缺口必须补证。"
+            )
     elif stage_id == "ingestion" or agent_role == "source_ingestor":
         target_label = "入库审核包"
         action_label = "入库审核"
@@ -1382,8 +1396,9 @@ def _source_collection_stage_writeback_closure_summary(
         and not unresolved_blocked_ids
         and not relation_edges_not_materialized
         and not relation_dangling_edge_count
+        and not relation_unresolved_link_count
     )
-    if not artifact_complete and excluded_source_count > 0 and (not coverage or complete) and not unresolved_blocked_ids:
+    if stage_id in {"finding", "extraction"} and not artifact_complete and excluded_source_count > 0 and (not coverage or complete) and not unresolved_blocked_ids:
         artifact_complete = True
     evidence_fetch_progress = s._source_collection_evidence_fetch_progress(
         task,
@@ -1425,6 +1440,9 @@ def _source_collection_stage_writeback_closure_summary(
             f"候选关系图已生成，但有 {relation_dangling_edge_count} 条边的端点不在本轮节点表中，"
             "已被丢弃；请按真实 candidateId 补齐这些关系后再推进。"
         )
+    elif relation_unresolved_link_count > 0:
+        user_status = "partial"
+        message = f"候选关系图仍有 {relation_unresolved_link_count} 项未豁免缺口，请补齐后再推进。"
     elif unresolved_blocked_ids:
         user_status = "partial"
         artifact_status = "evidence_gap"
@@ -1511,7 +1529,7 @@ def _source_collection_stage_writeback_closure_summary(
         "successCount": success_count,
         "excludedSourceCount": excluded_source_count,
         "failedCount": missing + invalid,
-        "blockedCount": blocked,
+        "blockedCount": blocked + max(relation_unresolved_link_count, relation_dangling_edge_count),
         "unresolvedBlockedIds": unresolved_blocked_ids,
         "coverageSummary": s._normalize_metadata(coverage),
         "invalidIds": invalid_ids,
@@ -1550,6 +1568,7 @@ def _materialize_source_collection_stage_writeback_candidate_graph(
             {
                 "createdByAgent": created_by_agent,
                 "sourceCollectionRunId": run_id,
+                "writebackRevision": {"taskId": task.get("taskId"), "agentGraph": agent_graph},
                 "title": s._trim_text(writeback.get("summary"), max_length=240) or "Source collection candidate graph",
             },
         )
@@ -1595,11 +1614,14 @@ def _materialize_source_collection_stage_writeback_candidate_graph(
             agent_graph=agent_graph,
             run_id=run_id,
         )
+    missing_link_count, waiver_count = evidence_graph_gap_counts(graph)
     materialized = {
         "candidateGraphId": candidate_graph_id,
         "nodeCount": s._source_collection_count(graph_summary.get("nodeCount")),
         "edgeCount": s._source_collection_count(graph_summary.get("edgeCount")),
-        "missingLinkCount": s._source_collection_count(graph_summary.get("missingLinkCount")),
+        "missingLinkCount": missing_link_count,
+        "waiverCount": waiver_count,
+        "missingLinks": list(graph.get("missingLinks") or [])[:120],
         "danglingEdgeCount": s._source_collection_count(graph_summary.get("danglingEdgeCount")),
         "semanticBindingEdgeCount": s._source_collection_count(graph_summary.get("semanticBindingEdgeCount")),
         "unreviewedNodeCount": s._source_collection_count(graph_summary.get("unreviewedNodeCount")),
@@ -2292,6 +2314,8 @@ def _source_collection_stage_writeback_candidate_graph_summary(
         "nodeCount": s._source_collection_count(graph.get("nodeCount")),
         "edgeCount": s._source_collection_count(graph.get("edgeCount")),
         "missingLinkCount": s._source_collection_count(graph.get("missingLinkCount")),
+        "waiverCount": s._source_collection_count(graph.get("waiverCount")),
+        "missingLinks": list(graph.get("missingLinks") or [])[:120],
         "danglingEdgeCount": s._source_collection_count(graph.get("danglingEdgeCount")),
         "semanticBindingEdgeCount": s._source_collection_count(graph.get("semanticBindingEdgeCount")),
         "unreviewedNodeCount": s._source_collection_count(graph.get("unreviewedNodeCount")),

@@ -47,7 +47,17 @@ def succeeded_node_rerun_target(run: RunRecord) -> str | None:
         return "source_finding"
     if str(problem.get("code") or "") != "auto_advance_not_ready":
         return None
-    return _RERUN_BLOCKER_TARGET_NODES.get(str(problem.get("detail") or "")) or None
+    # Worker/command readiness serializes all blocker codes with '; '.
+    # Resolve exact codes, in dependency order, rather than matching the
+    # whole display string. Other blockers still apply at command admission.
+    blocker_codes = {
+        code.strip() for code in str(problem.get("detail") or "").split(";")
+        if code.strip()
+    }
+    return next((
+        target for code, target in _RERUN_BLOCKER_TARGET_NODES.items()
+        if code in blocker_codes
+    ), None)
 
 
 def succeeded_node_rerun_available(

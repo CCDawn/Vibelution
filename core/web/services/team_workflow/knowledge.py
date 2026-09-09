@@ -12,6 +12,7 @@ Facade re-exports keep route imports and monkeypatches stable.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import threading
@@ -1878,6 +1879,14 @@ def build_candidate_graph(team_id: str, payload: dict[str, Any] | None = None) -
             purpose="candidate_graph",
             curation_mode=curation_mode,
         )
+        writeback_revision = payload.get("writebackRevision")
+        if isinstance(writeback_revision, dict):
+            # A corrected relation writeback must not reuse a graph carrying an
+            # earlier revision's edges or gaps. Identical replays remain idempotent.
+            graph_fingerprint = hashlib.sha256(json.dumps(
+                {"candidateFingerprint": graph_fingerprint, "writebackRevision": writeback_revision},
+                ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+            ).encode("utf-8")).hexdigest()
         if not force_rebuild:
             reusable_graph = s._find_reusable_candidate_graph(candidate_store, graph_fingerprint)
             if reusable_graph is not None:

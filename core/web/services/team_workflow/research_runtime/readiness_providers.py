@@ -124,26 +124,9 @@ def fetch_evidence_graph_stats(
         edges = list(graph.get("edges") or [])
         if not nodes and not edges:
             return None
-        missing_links = list(graph.get("missingLinks") or [])
-        summary = graph.get("summary") if isinstance(graph.get("summary"), dict) else {}
-        missing_link_count = max(
-            len(missing_links),
-            int(summary.get("missingLinkCount") or 0),
-        )
-        waiver_count = max(
-            int(summary.get("waiverCount") or 0),
-            sum(
-                1
-                for item in missing_links
-                if isinstance(item, dict)
-                and (
-                    bool(item.get("waived"))
-                    or str(item.get("status") or "").strip().lower()
-                    in {"waived", "accepted"}
-                    or isinstance(item.get("waiver"), dict)
-                )
-            ),
-        )
+        from .evidence_graph_gaps import evidence_graph_gap_counts
+
+        missing_link_count, waiver_count = evidence_graph_gap_counts(graph)
         return {
             "graph_count": 1,
             "node_count": len(nodes),

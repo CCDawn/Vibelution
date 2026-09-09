@@ -6548,8 +6548,21 @@ def test_candidate_graph_stage_writeback_requires_materialized_relation_edges(tm
         response["task"],
     )
 
-    assert reconciled["status"] == "completed"
-    assert reconciled["writeback"]["materializedCandidateGraph"]["edgeCount"] == 1
+    # Replaying the same revision cannot erase its recorded gap.
+    assert reconciled["status"] == "needs_review"
+    corrected = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        team["teamId"], task["taskId"], {
+            "status": "completed", "summary": "使用真实 candidateId 修正关系。",
+            "result": {"candidateGraph": {"edges": [{
+                "sourceCandidateId": source_one["candidateId"],
+                "targetCandidateId": source_two["candidateId"],
+                "relation": "candidate_supports_candidate",
+            }]}}, "recordedByAgent": agent["agentId"],
+        },
+    )
+    assert corrected["task"]["status"] == "completed"
+    assert corrected["writeback"]["materializedCandidateGraph"]["edgeCount"] == 1
+    assert corrected["writeback"]["materializedCandidateGraph"]["missingLinkCount"] == 0
 
 
 def test_candidate_graph_dangling_edges_block_closure_until_rebound(tmp_path, monkeypatch):
@@ -6647,7 +6660,8 @@ def test_candidate_graph_dangling_edges_block_closure_until_rebound(tmp_path, mo
                             "sourceCandidateId": source_one["candidateId"],
                             "targetCandidateId": source_two["candidateId"],
                             "relation": "candidate_supports_candidate",
-                        }
+                        },
+                        {"sourceCandidateId": source_one["candidateId"], "targetCandidateId": "rh_claim", "relation": "candidate_supports_claim"}
                     ],
                 },
                 "missingLinks": [
@@ -6786,13 +6800,13 @@ def test_candidate_graph_stage_writeback_materializes_root_graph_payload_on_reus
         },
     )
 
-    graph_candidate = team_workflow_orchestration_service.list_candidate_store(
+    graph_candidate = next(item for item in team_workflow_orchestration_service.list_candidate_store(
         team["teamId"],
         candidate_type="candidate_graph",
-    )["candidates"][0]
+    )["candidates"] if item["candidateId"] == materialized["candidateGraphId"])
     graph = graph_candidate["metadata"]["graph"]
 
-    assert materialized["reusedCandidateGraph"] is True
+    assert materialized["reusedCandidateGraph"] is False
     assert materialized["edgeCount"] == 1
     assert graph["summary"]["edgeCount"] == 1
     assert {
