@@ -81,6 +81,20 @@ from tests._support.workflow_ledger_helpers import (
     build_run_record,
 )
 
+
+@pytest.fixture(autouse=True)
+def _pin_hard_round_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin the review-round cap at its long-standing value 3 for this suite.
+
+    The product default is temporarily lowered to 2 as an acceptance-cost
+    lever; the round-budget scenarios here verify the 3-round boundary
+    contract, so they pin the cap explicitly instead of following the
+    deployment default. ``test_hard_round_limit_env_resolution`` asserts the
+    resolver against ``_HARD_ROUND_LIMIT_DEFAULT`` and stays pin-independent.
+    """
+    monkeypatch.setattr(chain, "HARD_ROUND_LIMIT", 3)
+
+
 _ROLES = ("coordinator", "researcher")
 _QUESTION_ID = "SCI-096"
 _CANDIDATE_IDS = ("hyp-a", "hyp-b", "hyp-c")
@@ -9222,15 +9236,18 @@ def test_auto_adjudication_rechecks_after_frontend_scope_lock(tmp_path, monkeypa
 def test_hard_round_limit_env_resolution(monkeypatch):
     from core.web.services.team_workflow.research_runtime import hypothesis_first_chain as chain
 
-    assert chain._resolve_hard_round_limit() == 3  # unset keeps the default
-    assert chain.HARD_ROUND_LIMIT == 3
+    default = chain._HARD_ROUND_LIMIT_DEFAULT
+    assert default == 2  # temporary acceptance-cost lever; restore with the acceptance wrap-up
+    assert chain._resolve_hard_round_limit() == default  # unset keeps the default
 
-    monkeypatch.setenv(chain._HARD_ROUND_LIMIT_ENV, "2")
-    assert chain._resolve_hard_round_limit() == 2
+    monkeypatch.setenv(chain._HARD_ROUND_LIMIT_ENV, "1")
+    assert chain._resolve_hard_round_limit() == 1
 
-    for invalid in ("", "0", "4", "abc", "-1"):
+    # Values above the default (including the historical 3) fall back to the
+    # built-in default: the env can only shrink the budget, never grow it.
+    for invalid in ("", "0", "3", "4", "abc", "-1"):
         monkeypatch.setenv(chain._HARD_ROUND_LIMIT_ENV, invalid)
-        assert chain._resolve_hard_round_limit() == 3, invalid
+        assert chain._resolve_hard_round_limit() == default, invalid
 
     monkeypatch.delenv(chain._HARD_ROUND_LIMIT_ENV, raising=False)
-    assert chain._resolve_hard_round_limit() == 3
+    assert chain._resolve_hard_round_limit() == default

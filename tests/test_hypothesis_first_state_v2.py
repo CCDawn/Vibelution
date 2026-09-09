@@ -21,6 +21,9 @@ from core.web.routes.team_workflows.hypothesis_first_state_models import (
     PhaseState,
 )
 from core.web.services.team_workflow.research_runtime import (
+    hypothesis_first_chain as hypothesis_first_chain,
+)
+from core.web.services.team_workflow.research_runtime import (
     hypothesis_first_state_v2 as hf_state_v2_module,
 )
 from core.web.services.team_workflow.research_runtime.hypothesis_first_state_v2 import (
@@ -30,6 +33,17 @@ from core.web.services.team_workflow.research_runtime.hypothesis_first_state_v2 
 from tests.helpers.managed_processes import managed_processes
 
 _REAL_CLAIM_BELIEF_GATE_VERDICT = hf_state_v2_module._claim_belief_gate_verdict
+
+
+@pytest.fixture(autouse=True)
+def _pin_hard_round_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin the review-round cap at its long-standing value 3 for this suite.
+
+    The product default is temporarily lowered to 2 as an acceptance-cost
+    lever; the boundary-projection tests here verify the 3-round contract, so
+    they pin the cap explicitly instead of following the deployment default.
+    """
+    monkeypatch.setattr(hypothesis_first_chain, "HARD_ROUND_LIMIT", 3)
 
 
 @pytest.fixture(autouse=True)

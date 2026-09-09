@@ -54,6 +54,17 @@ SELECTION_ID = "selection-1"
 SELECTION_VERSION = "sel-ver-1"
 
 
+@pytest.fixture(autouse=True)
+def _pin_hard_round_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin the review-round cap at its long-standing value 3 for this suite.
+
+    The product default is temporarily lowered to 2 as an acceptance-cost
+    lever; these tests verify the 3-round boundary contract, so they pin the
+    cap explicitly instead of following the deployment default.
+    """
+    monkeypatch.setattr(chain, "HARD_ROUND_LIMIT", 3)
+
+
 def _phase(
     *,
     lifecycle: str = "not_started",
