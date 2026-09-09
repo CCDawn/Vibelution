@@ -2400,12 +2400,15 @@ def _materialize_recommended_candidate_claim_bindings(
         for item in list((candidate_record or {}).get("lineageRefs") or [])
         if str(item or "").strip()
     }
-    if not candidate_record or not statement or not lineage_refs:
+    if not candidate_record or not statement:
         return {
             "status": "skipped",
             "reason": "candidate_lineage_missing",
             "candidateId": normalized_candidate,
         }
+    # Open-generation candidates cite parent drafts in lineageRefs while their
+    # review evidence is registered directly under the hypothesis candidate
+    # id; both associations are already-collected evidence for this candidate.
     matching_sources = [
         dict(record)
         for record in evidence_records
@@ -2415,6 +2418,7 @@ def _materialize_recommended_candidate_claim_bindings(
         and (
             str(record.get("sourceId") or "").strip() in lineage_refs
             or str(record.get("claimEvidenceId") or "").strip() in lineage_refs
+            or str(record.get("candidateId") or "").strip() == normalized_candidate
         )
     ]
     if not matching_sources:

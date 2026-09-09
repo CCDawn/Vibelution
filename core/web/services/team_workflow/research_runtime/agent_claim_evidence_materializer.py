@@ -641,13 +641,20 @@ def materialize_candidate_claim_bindings_from_existing_evidence(
         lineage_refs = {
             _text(item) for item in list(candidate.get("lineageRefs") or []) if _text(item)
         }
-        if not candidate_id or not claim_text or not lineage_refs:
+        if not candidate_id or not claim_text:
             continue
+        # Two legitimate associations reach the same store: formal grounded
+        # candidates cite their collected evidence through lineageRefs, while
+        # open-generation candidates accumulate review evidence registered
+        # directly under the hypothesis candidate id (the source candidate id
+        # space ``candidate-<ts>-<hex>`` is disjoint by construction, so the
+        # direct match can never cross candidates).
         matching = [
             record
             for record in source_records
             if _text(record.get("sourceId")) in lineage_refs
             or _text(record.get("claimEvidenceId")) in lineage_refs
+            or _text(record.get("candidateId")) == candidate_id
         ]
         if not matching:
             continue

@@ -1171,6 +1171,68 @@ def test_formal_candidate_binds_existing_lineage_without_reusing_source_fact(
     ]["claimId"]
 
 
+def test_formal_candidate_binds_review_evidence_registered_directly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Open-generation candidates cite parent drafts in lineageRefs while
+    their review evidence is registered under the hypothesis candidate id.
+
+    The binding materializer must recognize that direct association too;
+    lineageRefs-only matching left every accept adjudication fail-closed on
+    ``candidate_claim_binding_missing`` for such candidates.
+    """
+    team_id, scope = _claim_bridge_env(tmp_path, monkeypatch)
+    ClaimEvidenceStore(tmp_path).register(
+        team_id,
+        {
+            "claimId": "claim-review-fact-1",
+            "candidateId": HYPOTHESIS_CANDIDATE_ID,
+            "sourceId": "https://example.org/paper-review",
+            "sourceRevision": "sha256:" + "0" * 64,
+            "locator": {"kind": "quote", "section": "results"},
+            "quote": "A verbatim excerpt supporting the review verdict.",
+            "evidenceKind": "primary_result",
+            "reasoningRole": "fact",
+            "supportLevel": "supports",
+            "extractionMethod": "model",
+            "extractorAgentId": "agent-reviewer",
+            "modelRef": "provider/model-a",
+            "sourceCollectionRunId": "dprun-review-1",
+        },
+    )
+
+    bound = materialize_candidate_claim_bindings_from_existing_evidence(
+        project_root=tmp_path,
+        team_id=team_id,
+        workflow_run_id="wf-run-a",
+        question_scope=scope,
+        candidates=[
+            {
+                "candidateId": HYPOTHESIS_CANDIDATE_ID,
+                "statement": "Candidate A predicts a bounded mechanism.",
+                # Parent-draft lineage deliberately shares no id with the
+                # registered evidence source.
+                "lineageRefs": ["candidate-20260908171716-ce855d14"],
+            }
+        ],
+    )
+
+    assert len(bound) == 1
+    assert bound[0]["candidateId"] == HYPOTHESIS_CANDIDATE_ID
+    stored = ClaimEvidenceStore(tmp_path).list(team_id)
+    strict = [
+        item
+        for item in stored
+        if item["candidateId"] == HYPOTHESIS_CANDIDATE_ID
+        and item["reasoningRole"] == "hypothesis"
+    ]
+    assert strict
+    assert strict[0]["reviewStatus"] == "pending"
+    # The source fact record is never rewritten into the strict role.
+    facts = [item for item in stored if item["reasoningRole"] == "fact"]
+    assert len(facts) == 1
+
+
 def test_materialization_without_question_scope_fails_closed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

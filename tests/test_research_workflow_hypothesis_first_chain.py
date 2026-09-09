@@ -6005,6 +6005,75 @@ def test_accepted_adjudication_cannot_waive_pending_collection_requests(
     assert state["pendingCollectionCount"] == 1
 
 
+def test_recommended_candidate_binding_uses_directly_registered_review_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Open-generation candidates cite parent drafts in lineageRefs while the
+    review path registers their evidence under the hypothesis candidate id.
+
+    The adjudication-time binding materializer must bind that directly
+    associated evidence; lineageRefs-only matching made every accepted
+    adjudication fail the strict claim gate (candidate_claim_binding_missing)
+    and the retention policy then poisoned the round as rejected."""
+    from core.research.evidence import ClaimEvidenceStore
+
+    team_id, _agents = _hf_env(tmp_path, monkeypatch)
+    candidate_id = "sci-096-c00000001"
+    chain._append_jsonl(
+        chain._storage_path(team_id),
+        {
+            "schemaVersion": 1,
+            "recordKind": chain.CANDIDATE_KIND,
+            "candidateId": candidate_id,
+            "questionId": _QUESTION_ID,
+            "statement": "Candidate predicts a bounded mechanism.",
+            # Parent-draft lineage deliberately shares no id with the
+            # registered evidence source.
+            "lineageRefs": ["candidate-20260908171716-ce855d14"],
+            "createdAt": "2026-09-09T00:00:00Z",
+        },
+    )
+    ClaimEvidenceStore(tmp_path).register(
+        team_id,
+        {
+            "claimId": "claim-review-fact-1",
+            "candidateId": candidate_id,
+            "sourceId": "https://example.org/paper-review",
+            "sourceRevision": "sha256:" + "0" * 64,
+            "locator": {"kind": "quote", "section": "results"},
+            "quote": "A verbatim excerpt supporting the review verdict.",
+            "evidenceKind": "primary_result",
+            "reasoningRole": "fact",
+            "supportLevel": "supports",
+            "extractionMethod": "model",
+            "extractorAgentId": "agent-reviewer",
+            "modelRef": "provider/model-a",
+            "sourceCollectionRunId": "dprun-review-1",
+        },
+    )
+
+    result = chain._materialize_recommended_candidate_claim_bindings(
+        team_id, _QUESTION_ID, candidate_id, workflow_run_id="wf-run-a"
+    )
+
+    assert result["status"] == "applied"
+    assert result["materializedCount"] >= 1
+    strict = [
+        record
+        for record in ClaimEvidenceStore(tmp_path).list(team_id)
+        if record["candidateId"] == candidate_id
+        and record["reasoningRole"] == "hypothesis"
+    ]
+    assert strict
+    # Idempotent replay stays write-free.
+    replay = chain._materialize_recommended_candidate_claim_bindings(
+        team_id, _QUESTION_ID, candidate_id, workflow_run_id="wf-run-a"
+    )
+    assert replay["status"] == "skipped"
+    assert replay["reason"] == "strict_binding_present"
+    assert len(ClaimEvidenceStore(tmp_path).list(team_id)) == len(strict) + 1
+
+
 def test_unadjudicated_new_requests_keep_exhausted_round_unconverged(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
