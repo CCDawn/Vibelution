@@ -34,7 +34,7 @@ class ProposalBulkDeletePayload(BaseModel):
 class SupervisedWorktreeRunStartPayload(BaseModel):
     sourceKind: str = "bundle"
     datasetName: str = ""
-    datasetLimit: int | None = None
+    datasetLimit: int | None = Field(default=None, gt=0, strict=True)
     bundleName: str = ""
     keepWorktree: bool = True
     mode: str = "auto"

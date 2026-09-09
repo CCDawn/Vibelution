@@ -629,7 +629,7 @@ def test_evolution_workspace_snapshot_keeps_current_agent_bindings_separate_from
         },
     )
     monkeypatch.setattr(evolution_routes, "get_active_supervised_worktree_run", lambda: None)
-    monkeypatch.setattr(evolution_routes, "list_supervised_worktree_runs", lambda: [])
+    monkeypatch.setattr(evolution_routes, "list_supervised_worktree_runs", lambda **kwargs: [])
     monkeypatch.setattr(evolution_routes, "get_self_evolution_light_overview", lambda: {"enabled": True})
     monkeypatch.setattr(evolution_routes, "list_self_evolution_transactions", lambda: [])
     monkeypatch.setattr(evolution_routes, "record_evolution_workspace_snapshot_perf", lambda **kwargs: None)
@@ -690,7 +690,7 @@ def test_evolution_workspace_snapshot_reuses_supervised_dashboard_scan(monkeypat
     monkeypatch.setattr(evolution_routes, "get_active_supervised_run", lambda: calls.append("active") or None)
     monkeypatch.setattr(evolution_routes, "get_latest_supervised_run", lambda **kwargs: kwargs.get("active_run"))
     monkeypatch.setattr(evolution_routes, "get_active_supervised_worktree_run", lambda: None)
-    monkeypatch.setattr(evolution_routes, "list_supervised_worktree_runs", lambda: [])
+    monkeypatch.setattr(evolution_routes, "list_supervised_worktree_runs", lambda **kwargs: [])
     monkeypatch.setattr(evolution_routes, "get_self_evolution_light_overview", lambda: {"enabled": True, "goal": "light"})
     monkeypatch.setattr(evolution_routes, "get_self_evolution_overview", lambda: pytest.fail("default snapshot should be light"))
     monkeypatch.setattr(evolution_routes, "list_self_evolution_transactions", lambda: pytest.fail("default snapshot should not load transactions"))
@@ -762,7 +762,7 @@ def test_evolution_workspace_snapshot_can_include_full_self_payload(monkeypatch)
         "startRequest": {"requestSource": "api:evolution.worktree-runs"},
     }
     monkeypatch.setattr(evolution_routes, "get_active_supervised_worktree_run", lambda: self_worktree)
-    monkeypatch.setattr(evolution_routes, "list_supervised_worktree_runs", lambda: [supervised_worktree, self_worktree])
+    monkeypatch.setattr(evolution_routes, "list_supervised_worktree_runs", lambda **kwargs: [supervised_worktree, self_worktree])
     monkeypatch.setattr(evolution_routes, "get_self_evolution_light_overview", lambda: pytest.fail("includeSelf should request full overview"))
     monkeypatch.setattr(evolution_routes, "get_self_evolution_overview", lambda: {"enabled": True, "goal": "full"})
     monkeypatch.setattr(evolution_routes, "list_self_evolution_transactions", lambda: [{"txnId": "txn-1"}])

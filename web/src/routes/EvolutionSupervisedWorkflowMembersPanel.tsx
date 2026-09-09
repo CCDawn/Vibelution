@@ -103,7 +103,6 @@ export function EvolutionSupervisedWorkflowMembersPanel({
                   <span>{step.meta}</span>
                 </span>
                 <strong>{step.label}</strong>
-                <span className={styles.workflowStepPreview}>{step.preview}</span>
               </VButton>
               {step.sessionRoute ? (
                 <VTooltip content={sessionTooltip}>

@@ -18,8 +18,8 @@ const evolutionDictionarySource = readFileSync(
 );
 
 describe("supervised workspace controls", () => {
-  it("prefers auto when the overview reports auto mode", () => {
-    expect(getEffectiveIntakeMode("auto", "manual_review")).toBe("auto");
+  it("keeps the saved manual mode authoritative over a stale auto overview", () => {
+    expect(getEffectiveIntakeMode("auto", "manual_review")).toBe("manual_review");
   });
 
   it("falls back to config auto mode when overview mode is absent", () => {

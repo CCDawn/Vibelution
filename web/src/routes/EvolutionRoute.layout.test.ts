@@ -74,8 +74,8 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("VMetricStrip");
     expect(supervisedLibraryViewSource).toContain("VStateSurface");
     expect(supervisedLiveSetupPanelSource).toContain("VStringSelect");
-    expect(routeSource).toContain("onKeepWorktreeChange={setKeepWorktree}");
-    expect(supervisedLiveSetupPanelSource).toContain("onChange={onKeepWorktreeChange}");
+    expect(routeSource).not.toContain("onKeepWorktreeChange={setKeepWorktree}");
+    expect(supervisedLiveSetupPanelSource).not.toContain("onKeepWorktreeChange");
     expect(routeSource).toContain("hideIntro: hideSupervisedToolbarIntro");
     expect(routeSource).not.toContain('"\\u200B"');
     expect(activeRunMonitorPanelSource).toContain("<VButton");
@@ -649,7 +649,7 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(supervisedWorkflowMembersPanelSource).toContain("styles.workflowStepRail");
     expect(supervisedWorkflowMembersPanelSource).toContain("styles.workflowStepButton");
     expect(supervisedWorkflowMembersPanelSource).toContain("styles.workflowStepButtonActive");
-    expect(supervisedWorkflowMembersPanelSource).toContain("styles.workflowStepPreview");
+    expect(supervisedWorkflowMembersPanelSource).not.toContain("styles.workflowStepPreview");
     expect(routeSource).toContain("<SupervisedAgentConversationPanel");
     expect(routeSource).toContain("selectedRole={supervisedSelectedAgentRole}");
     expect(routeSource).toContain("activeRole={supervisedActiveAgentRole}");
@@ -659,7 +659,7 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).not.toContain("styles.supervisedWorkflowCardFooter");
     expect(supervisedWorkflowMembersPanelSource).toContain("监督进化步骤导航");
     expect(routeStyles.supervisedWorkflowPanel).toContain("[overflow:hidden]");
-    expect(routeStyles.workflowStepRail).toContain("[max-height:min(196px,_30vh)]");
+    expect(routeStyles.workflowStepRail).not.toContain("max-height");
     expect(routeStyles.workflowStepButton).toContain("hover:[border-color:");
     expect(routeStyles.workflowStepButton).toContain("[background:var(--vui-surface-row)]");
     expect(routeStyles.workflowStepButton).toContain("w-full");
@@ -874,7 +874,7 @@ describe("EvolutionRoute library user flow contract", () => {
   });
 
   it("keeps the supervised live console as a dense desktop split before narrow layouts", () => {
-    expect(routeStyles.overviewGrid).toContain("[grid-template-columns:minmax(300px,_var(--evolution-live-launch-width,_348px))");
+    expect(routeStyles.overviewGrid).toContain("grid-cols-[var(--evolution-live-launch-width,440px)");
     expect(routeStyles.overviewGrid).toContain("[grid-template-rows:minmax(0,_1fr)]");
     expect(routeStyles.overviewGrid).not.toContain("grid-template-areas");
     expect(routeStyles.overviewGrid).not.toContain("--evolution-overview-areas");
@@ -902,8 +902,8 @@ describe("EvolutionRoute library user flow contract", () => {
   });
 
   it("uses denser supervised launch and member panels at narrow workbench widths", () => {
-    expect(routeStyles.overviewGrid).toContain("minmax(300px,_var(--evolution-live-launch-width,_348px))");
-    expect(routeStyles.overviewGrid).toContain("minmax(300px,_var(--evolution-live-run-width,_360px))");
+    expect(routeStyles.overviewGrid).toContain("var(--evolution-live-launch-width,440px)");
+    expect(routeStyles.overviewGrid).toContain("var(--evolution-live-run-width,380px)");
     expect(routeStyles.supervisedRunConsole).toContain("[container-type:inline-size]");
     expect(routeStyles.supervisedRunConsoleGrid).toContain("[@container(min-width:560px)]:[grid-template-columns:minmax(0,_1.08fr)_minmax(214px,_0.72fr)]");
     expect(routeStyles.supervisedRunConsoleGrid).toContain("[@container(min-width:560px)]:[align-items:start]");

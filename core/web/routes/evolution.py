@@ -213,7 +213,7 @@ def evolution_workspace_snapshot(includeSelf: bool = False) -> dict:
         list_self_evolution_transactions if includeSelf else (lambda: []),
     )
     worktree_active_run = timed("worktree_active_run", get_active_supervised_worktree_run)
-    worktree_runs = timed("worktree_runs", list_supervised_worktree_runs)
+    worktree_runs = timed("worktree_runs", lambda: list_supervised_worktree_runs(summary_only=True))
     self_worktree_runs = [item for item in worktree_runs if _is_self_evolution_worktree_run(item)]
     self_worktree_active_run = worktree_active_run if _is_self_evolution_worktree_run(worktree_active_run) else None
     self_observation_active_run = timed(

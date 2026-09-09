@@ -3,7 +3,6 @@ import { LoaderCircle, Play } from "lucide-react";
 
 import {
   VButton,
-  VCheckbox,
   VContextualHint,
   VInput,
   VStringSelect,
@@ -32,8 +31,6 @@ export type EvolutionSupervisedLiveSetupPanelProps = {
   selectedSourceCaseText?: string;
   selectedSourceOfficialWarning?: string;
   showMissingBundleError: boolean;
-  keepWorktree: boolean;
-  onKeepWorktreeChange: (value: boolean) => void;
   approvalMode: "human" | "agent";
   onApprovalModeChange: (value: "human" | "agent") => void;
   supervisedMentalModelMode: SupervisedMentalModelMode;
@@ -76,8 +73,6 @@ export function EvolutionSupervisedLiveSetupPanel({
   selectedSourceCaseText,
   selectedSourceOfficialWarning,
   showMissingBundleError,
-  keepWorktree,
-  onKeepWorktreeChange,
   approvalMode,
   onApprovalModeChange,
   supervisedMentalModelMode,
@@ -161,13 +156,6 @@ export function EvolutionSupervisedLiveSetupPanel({
       </div>
 
       <div className={styles.supervisedRunOptions}>
-        <VCheckbox
-          className={styles.checkboxRow}
-          isSelected={keepWorktree}
-          onChange={onKeepWorktreeChange}
-        >
-          <span className={styles.checkboxLabel}>{lang === "zh" ? "保留 worktree" : "Keep worktree"}</span>
-        </VCheckbox>
         <div className={styles.formField}>
           <div className={styles.formLabelWithHint}>
             <label>{lang === "zh" ? "最终审批方式" : "Final approval mode"}</label>

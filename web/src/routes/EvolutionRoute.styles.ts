@@ -247,7 +247,7 @@ const styles = {
   noticeTextCompact:
     `[margin:0] [padding:9px_10px] [line-height:1.45] [overflow-wrap:anywhere] [color:var(--fg-secondary)] ${rowSurfaceSoft}`,
   overviewGrid:
-    "grid [grid-template-columns:minmax(300px,_var(--evolution-live-launch-width,_348px))_12px_minmax(360px,_1fr)_12px_minmax(300px,_var(--evolution-live-run-width,_360px))] [grid-template-rows:minmax(0,_1fr)] [grid-auto-rows:minmax(0,_1fr)] [align-items:stretch] [align-content:stretch] min-h-0 [height:100%] [overflow:hidden] [padding-right:4px] max-[1360px]:[grid-template-columns:minmax(292px,_0.92fr)_12px_minmax(360px,_1.32fr)_12px_minmax(292px,_0.9fr)] max-[1360px]:[grid-template-rows:minmax(0,_1fr)] max-[1360px]:[gap:0] max-[1360px]:[overflow:hidden] max-[1200px]:[grid-template-columns:minmax(0,_1fr)_minmax(292px,_0.82fr)] max-[1200px]:[grid-template-rows:minmax(180px,_0.58fr)_minmax(300px,_1fr)] max-[1200px]:[overflow:auto] max-[1200px]:[gap:10px] max-[900px]:[grid-template-columns:1fr] max-[900px]:[grid-template-rows:max-content_max-content_max-content] max-[900px]:[align-content:start] max-[900px]:[height:auto] max-[900px]:[min-height:100%] max-[900px]:[overflow:auto]",
+    "grid grid-cols-[var(--evolution-live-launch-width,440px)_12px_minmax(360px,1fr)_12px_var(--evolution-live-run-width,380px)] [grid-template-rows:minmax(0,_1fr)] items-stretch min-h-0 h-full overflow-hidden pr-1 max-[1200px]:[grid-template-columns:minmax(0,_1fr)_minmax(292px,_0.82fr)] max-[1200px]:[grid-template-rows:minmax(180px,_0.58fr)_minmax(300px,_1fr)] max-[1200px]:[overflow:auto] max-[1200px]:[gap:10px] max-[900px]:[grid-template-columns:1fr] max-[900px]:[grid-template-rows:max-content_max-content_max-content] max-[900px]:[align-content:start] max-[900px]:[height:auto] max-[900px]:[min-height:100%] max-[900px]:[overflow:auto]",
   // Fill geometry owned by VTrackWorkbenchPage; keep padding/gap chrome only.
   page:
     "min-h-0 min-w-0 max-w-full gap-1.5 p-[6px_10px_10px] max-[640px]:px-2.5",
@@ -412,7 +412,7 @@ const styles = {
   workflowStepPreview:
     "min-w-0 [overflow:hidden] [text-overflow:ellipsis] [display:-webkit-box] [color:var(--fg-secondary)] [font-size:var(--vui-font-xs)] [line-height:1.35] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]",
   workflowStepRail:
-    "grid [gap:5px] min-w-0 [max-height:min(196px,_30vh)] [overflow:auto] max-[900px]:[max-height:none] max-[900px]:[overflow:visible]",
+    "grid gap-1 min-w-0",
 } as const;
 
 export default styles;

@@ -357,7 +357,19 @@ export function supervisedDatasetLimitFromInput(sourceKind: string, value: strin
     return null;
   }
   const parsed = Number(normalized);
-  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : null;
+  if (!Number.isSafeInteger(parsed) || parsed < 1) {
+    throw new Error("样本数量必须是大于 0 的整数；留空表示全部样本。");
+  }
+  return parsed;
+}
+
+export function supervisedDatasetLimitError(sourceKind: string, value: string): string {
+  try {
+    supervisedDatasetLimitFromInput(sourceKind, value);
+    return "";
+  } catch (error) {
+    return (error as Error).message;
+  }
 }
 
 export function compactTimestamp(value: string) {

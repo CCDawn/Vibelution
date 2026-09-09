@@ -324,7 +324,7 @@ def get_active_supervised_worktree_run() -> dict[str, Any] | None:
     return _decorate_snapshot(snapshot)
 
 
-def list_supervised_worktree_runs(limit: int = 20) -> list[dict[str, Any]]:
+def list_supervised_worktree_runs(limit: int = 20, *, summary_only: bool = False) -> list[dict[str, Any]]:
     store = _work_run_store()
     runs_dir = store.runs_dir(RUN_KIND)
     if not runs_dir.exists():
@@ -341,9 +341,33 @@ def list_supervised_worktree_runs(limit: int = 20) -> list[dict[str, Any]]:
             payload = _reconcile_runtime_activation(payload) or payload
             if payload != before_reconcile:
                 payload = _persist_snapshot(payload, active_run_id="")
-            items.append(_decorate_snapshot(payload))
+            items.append(payload)
     items.sort(key=lambda item: str(item.get("updatedAt") or item.get("startedAt") or ""), reverse=True)
-    return items[: max(1, min(int(limit or 20), 100))]
+    selected = items[: max(1, min(int(limit or 20), 100))]
+    return [summarize_supervised_worktree_run(item) if summary_only else _decorate_snapshot(item) for item in selected]
+
+
+def summarize_supervised_worktree_run(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """History rows carry identity and review metadata; evidence belongs to run detail."""
+    fields = (
+        "runId", "runKind", "status", "phase", "runtimeStatus", "outcome", "mode",
+        "approvalMode", "executionMode", "sourceKind", "datasetName", "datasetLimit",
+        "bundleName", "keepWorktree", "startedAt", "updatedAt", "finishedAt", "latestMessage",
+        "selfEvolutionOrigin", "startRequest", "costEstimate",
+        "baselineConversationSessionId", "rerunConversationSessionId", "judgeConversationSessionId",
+    )
+    payload = {key: snapshot[key] for key in fields if key in snapshot}
+    for field, keys in {
+        "decision": ("judgeDecision", "baselineScore", "candidateScore", "scoreDelta", "evaluationState"),
+        "reviewGate": ("required", "status"),
+        "approvalDecision": ("mode", "status", "decision"),
+    }.items():
+        source = snapshot.get(field) or {}
+        payload[field] = {key: source[key] for key in keys if key in source}
+    payload["mergeAnalysis"] = {}
+    payload["actionStates"] = _action_states(snapshot)
+    payload["detailLevel"] = "summary"
+    return _clone(payload)
 
 
 def force_cancel_active_supervised_worktree_runs_for_shutdown(reason: str = "") -> list[dict[str, Any]]:
@@ -1068,7 +1092,10 @@ def _normalize_start_payload(
     keep_worktree = bool(payload.get("keepWorktree"))
     dataset_name = str(payload.get("datasetName") or "").strip()
     bundle_name = str(payload.get("bundleName") or "").strip()
-    dataset_limit = _coerce_optional_int(payload.get("datasetLimit"))
+    raw_limit = payload.get("datasetLimit")
+    if raw_limit is not None and (type(raw_limit) is not int or raw_limit < 1):
+        raise SupervisedWorktreeRunValidationError("样本数量必须是大于 0 的整数；留空表示全部样本。")
+    dataset_limit = raw_limit
     self_origin = _normalize_self_evolution_origin(payload)
     review_gate = _normalize_review_gate(payload, self_origin, approval_mode=approval_mode)
     mental_model_mode = normalize_supervised_mental_model_mode(payload.get("mentalModelMode") or "follow")

@@ -116,7 +116,7 @@ describe("selectRecentSupervisedWorktreeRun", () => {
     expect(selectRecentSupervisedWorktreeRun([appliedRun], null)).toBe(appliedRun);
   });
 
-  it("does not recover terminal history that has no pending manual decision", () => {
+  it("keeps terminal history available when no manual decision is pending", () => {
     const completedRun = runWith({
       runId: "swte-complete",
       status: "done",
@@ -128,7 +128,7 @@ describe("selectRecentSupervisedWorktreeRun", () => {
       outcome: "candidate_modify_failed",
     });
 
-    expect(selectRecentSupervisedWorktreeRun([completedRun, failedRun], null)).toBeNull();
+    expect(selectRecentSupervisedWorktreeRun([completedRun, failedRun], null)).toBe(completedRun);
   });
 });
 

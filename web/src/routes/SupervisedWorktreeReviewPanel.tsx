@@ -5,6 +5,7 @@ import type { EvolutionActionState, SupervisedWorktreeRun } from "../api/types";
 import { VButton, VStatusChip } from "../components/vui";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { isSelfEvolutionWorktreeRun } from "./supervisedWorktreeReview";
+import { useSupervisedRunDetail } from "./evolution/useSupervisedRunDetail";
 import styles from "./SupervisedWorktreeReviewPanel.styles";
 
 const WORKTREE_ACTION_ITEMS = [
@@ -85,7 +86,8 @@ export function SupervisedWorktreeReviewPanel({
   const selectedWorktreeRun = selectedWorktreeRunId
     ? runs.find((item) => item.runId === selectedWorktreeRunId) ?? null
     : null;
-  const highlightedWorktreeRun = activeRun ?? selectedWorktreeRun ?? runs[0] ?? null;
+  const detail = useSupervisedRunDetail(activeRun ?? selectedWorktreeRun ?? runs[0] ?? null);
+  const highlightedWorktreeRun = detail.run;
   const highlightedReviewGate = worktreeReviewGate(highlightedWorktreeRun);
   const highlightedSelfOrigin = highlightedWorktreeRun?.selfEvolutionOrigin;
   const highlightedIsSelfOrigin = isSelfEvolutionWorktreeRun(highlightedWorktreeRun);
@@ -127,6 +129,8 @@ export function SupervisedWorktreeReviewPanel({
         </span>
       </div>
       <p className={styles.noticeTextClass}>{t("worktreeReviewPanelHint")}</p>
+      {detail.loading ? <p role="status">正在加载运行详情…</p> : null}
+      {detail.error ? <p role="alert">详情加载失败：{detail.error.message}<VButton onPress={() => void detail.retry()}>重试</VButton></p> : null}
       <div className={styles.controlFooterClass}>
         {highlightedWorktreeRun ? (
           <div className={styles.closedLoopStatusClass}>

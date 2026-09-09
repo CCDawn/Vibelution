@@ -80,7 +80,7 @@ export function selectRecentSupervisedWorktreeRun(
       && String(run.status || "").trim().toLowerCase() === "done"
       && SUPERVISED_REVIEW_OUTCOMES.has(outcome)
     );
-  }) ?? null;
+  }) ?? runs.find((run) => !isSelfEvolutionWorktreeRun(run)) ?? null;
 }
 
 export function buildSupervisedWorktreeLedgerSummary(

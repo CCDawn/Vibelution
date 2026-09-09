@@ -540,6 +540,7 @@ export type SupervisedJudgeJudgment = {
 };
 
 export type SupervisedWorktreeRun = {
+  detailLevel?: "summary";
   runId: string;
   runKind: string;
   status: string;

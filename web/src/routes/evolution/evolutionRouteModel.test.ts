@@ -64,9 +64,11 @@ describe("evolutionRouteModel", () => {
 
   it("submits the visible supervised dataset limit and ignores invalid limits", () => {
     expect(supervisedDatasetLimitFromInput("dataset", " 1 ")).toBe(1);
-    expect(supervisedDatasetLimitFromInput("dataset", "4.8")).toBe(4);
+    expect(() => supervisedDatasetLimitFromInput("dataset", "4.8")).toThrow();
     expect(supervisedDatasetLimitFromInput("dataset", "")).toBeNull();
-    expect(supervisedDatasetLimitFromInput("dataset", "0")).toBeNull();
+    for (const value of ["0", "-1", "NaN", "9007199254740992"]) {
+      expect(() => supervisedDatasetLimitFromInput("dataset", value)).toThrow();
+    }
     expect(supervisedDatasetLimitFromInput("bundle", "1")).toBeNull();
   });
 

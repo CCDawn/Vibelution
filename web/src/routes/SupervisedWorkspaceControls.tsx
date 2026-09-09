@@ -30,7 +30,7 @@ export function getEffectiveIntakeMode(
   overviewIntakeMode?: string | null,
   configIntakeMode?: string | null,
 ): IntakeMode {
-  if (overviewIntakeMode === "auto" || configIntakeMode === "auto") {
+  if ((configIntakeMode ?? overviewIntakeMode) === "auto") {
     return "auto";
   }
   return "manual_review";
@@ -70,6 +70,7 @@ export function SupervisedWorkspaceControls({
         queryClient.invalidateQueries({ queryKey: queryKeys.configPublic() }),
         queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() }),
         queryClient.invalidateQueries({ queryKey: queryKeys.evolutionOverview() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionWorkspaceSnapshot() }),
         queryClient.invalidateQueries({ queryKey: queryKeys.evolutionWorkbench() }),
         queryClient.invalidateQueries({ queryKey: queryKeys.evolutionLibrary() }),
         queryClient.invalidateQueries({ queryKey: queryKeys.evolutionChatReview() }),
@@ -138,6 +139,11 @@ export function SupervisedWorkspaceControls({
           />
         </div>
       </div>
+      {intakeModeMutation.isError ? (
+        <p role="alert" className="col-span-full text-sm text-[var(--state-error)]">
+          模式切换失败：{intakeModeMutation.error.message}。请重试。
+        </p>
+      ) : null}
     </div>
   );
 }

@@ -177,6 +177,7 @@ export const queryKeys = {
   evolutionProposal: (sessionId: string) => ["evolution", "proposal", sessionId] as const,
   evolutionWorkbench: () => ["evolution", "workbench"] as const,
   evolutionWorktreeRuns: () => ["evolution", "worktree-runs"] as const,
+  evolutionWorktreeRun: (runId: string) => ["evolution", "worktree-runs", runId] as const,
   evolutionWorktreeActiveRun: () => ["evolution", "worktree-runs", "active"] as const,
   evolutionSelfWorkspaceSnapshot: () => ["evolution", "self", "workspace-snapshot"] as const,
   evolutionSelfObservationRun: (runId: string) => ["evolution", "self", "observation-runs", runId] as const,
