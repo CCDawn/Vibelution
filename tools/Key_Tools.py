@@ -629,7 +629,7 @@ def _build_key_tools() -> List[BaseTool]:
             allowed_domains: 可选域名白名单，逗号或换行分隔
             blocked_domains: 可选域名黑名单，逗号或换行分隔
             max_workers: 并发 worker 数，上限 4
-            parent_query_id: 正式资料搜集补充检索时必填，取自当前任务 assignedQueries 的 queryId；查询必须服务于该原查询的研究问题与视角。服务器先登记再检索并保存真实回执。
+            parent_query_id: 正式资料搜集补充检索时必填，取自当前任务 assignedQueries 的 queryId；查询需服务于该原查询的研究问题与视角。服务器先登记再检索并保存真实回执。
 
         Returns:
             按查询分组的搜索结果和来源链接；低质量结果会明确标记 `[搜索质量不足]`
@@ -1270,8 +1270,8 @@ def _build_key_tools() -> List[BaseTool]:
         """
         【群聊精确引用读取】读取当前群聊 checkpoint/delta 引用的原始消息。
 
-        仅在当前 Agent 正在群聊中发言时可用；引用必须是服务端给出的
-        roomId/roundId/messageId，且必须属于当前 room。每次最多 5 条，
+        仅在当前 Agent 正在群聊中发言时可用；引用仅可为服务端给出的
+        roomId/roundId/messageId，且仅限当前 room。每次最多 5 条，
         总返回超过 32 KiB 时会要求缩小集合，不会静默截断。
 
         Args:
@@ -2626,8 +2626,8 @@ def _build_key_tools() -> List[BaseTool]:
             knowledge_base_id: 可选知识库 ID；为空时检索当前 Agent 可访问的知识库
             owner_type: 可选 owner 类型，支持 team / agent
             owner_id: 可选 owner id，teamId 或 agentId
-            research_project_id: 可选研究项目过滤；挑战杯自动链必须使用权威运行绑定
-            question_id: 可选题目过滤；挑战杯自动链必须使用权威运行绑定
+            research_project_id: 可选研究项目过滤；挑战杯自动链需使用权威运行绑定
+            question_id: 可选题目过滤；挑战杯自动链需使用权威运行绑定
             source_collection_run_id: 可选来源搜集 run 过滤
             tags: 逗号分隔标签过滤
             limit: 最多返回结果数，范围 1-25

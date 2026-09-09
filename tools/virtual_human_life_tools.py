@@ -128,8 +128,8 @@ def virtual_human_schedule_tool(
     action: view | propose_tool_activity | upsert_calendar | cancel_calendar |
     set_calendar_exception | propose_commitment | confirm_commitment |
     reject_commitment | cancel_commitment | complete_commitment。
-    双方约定必须先 propose，用户后续明确同意后才 confirm；改约仍先 propose。
-    event_id 是约定 ID，complete 时 source_ref 必须是真实成功生活事件 ID。
+    双方约定需先 propose，用户后续明确同意后才 confirm；改约仍先 propose。
+    event_id 是约定 ID，complete 时 source_ref 需为真实成功生活事件 ID。
     日历只负责长期约定和重复安排，活动执行仍由每日
     schedule 与原生 proactive turn 负责，不能因为日历存在就宣称完成。
     """
@@ -650,7 +650,7 @@ def virtual_human_proactive_message_tool(
 
     action: request | record_open_loop | resolve_open_loop | record_reply | record_shared_experience。
     record_shared_experience 只关联当前用户轮次讨论过的真实成功生活事件；
-    source_event_id 必须有成功 outcome，summary 是讨论摘要，不代表双方共同在场。
+    source_event_id 需有成功 outcome，summary 是讨论摘要，不代表双方共同在场。
     request 仍受候选价值、额度、间隔、免打扰和 binding revision 约束；
     其他动作只更新 Agent 私有的连续性账本，不直接创建会话 Turn。
     """
