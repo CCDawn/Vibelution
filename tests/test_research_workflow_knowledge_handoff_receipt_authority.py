@@ -9,6 +9,8 @@ from typing import Any
 
 import pytest
 
+from core.research.workflow.ledger.records import KnowledgeInvocationRecord
+
 from core.web.services.team_workflow.research_runtime.knowledge_artifact_authority import (
     load_knowledge_package_draft_payload,
 )
@@ -507,6 +509,204 @@ def test_bootstrap_reads_bound_receipt_not_inventory(
         }
         assert calls == [("research-team", result)]
         assert loads == [accepted_hash]
+    finally:
+        harness.close()
+
+
+def _seed_sideflow_absorbed_invocation(
+    harness: CommandHarness,
+    *,
+    invocation_id: str,
+    content_hash: str,
+    child_run_id: str,
+    with_delivery_event: bool = True,
+) -> None:
+    """Absorb one sideflow knowledge package into the parent run.
+
+    The child receipt is never copied into the parent run: only the
+    knowledge invocation row plus the parent delivery event carry the
+    accepted package, matching the production sideflow absorption path.
+    """
+    canonical_ref = build_canonical_ref(
+        kind="knowledge_package",
+        team_id="research-team",
+        authority_run_id="sc-run-1",
+        content_hash=content_hash,
+    )
+
+    def mutate(uow):
+        uow.repository.insert_knowledge_invocation(
+            KnowledgeInvocationRecord(
+                invocation_id=invocation_id,
+                parent_run_id="run-test",
+                parent_node_id="hypothesis_design",
+                parent_node_run_id="nr-run-test-knowledge_handoff-a1",
+                parent_attempt=1,
+                question_id="SCI-009",
+                scope_hash="scope-sideflow",
+                request_hash=f"req-{invocation_id}",
+                search_envelope_hash="env-sideflow",
+                requirements_hash="req-sideflow",
+                source_policy_version="v1",
+                knowledge_child_run_id=child_run_id,
+                status="completed",
+                knowledge_package_ref=json.dumps({"canonicalRef": canonical_ref}),
+                package_content_hash=content_hash,
+                handoff_state="accepted",
+                error_json=None,
+                created_at_ms=FIXED_NOW_MS,
+                updated_at_ms=FIXED_NOW_MS,
+            )
+        )
+        if with_delivery_event:
+            uow.repository.insert_event(
+                replace(
+                    build_event_record(
+                        sequence=2,
+                        event_type="knowledge_result_absorbed",
+                        event_id=f"evt-absorbed-{invocation_id}",
+                    ),
+                    payload_json=json.dumps(
+                        {
+                            "invocationId": invocation_id,
+                            "packageContentHash": content_hash,
+                        }
+                    ),
+                )
+            )
+
+    harness.store.submit(mutate, force_flush=True).result(timeout=10)
+
+
+def test_bootstrap_falls_back_to_invocation_absorbed_package(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from core.web.services.team_workflow.research_runtime import (
+        experiment_stage_bootstrap,
+    )
+
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        accepted = _accepted_package()
+        package_hash = canonical_sha256(accepted)
+        _seed_pending_knowledge_gate(harness)
+        # Sideflow authority: the child receipt stays inside the child run,
+        # so the parent run has no bound kp receipt, only the invocation.
+        _seed_sideflow_absorbed_invocation(
+            harness,
+            invocation_id="kinv-sideflow-1",
+            content_hash=package_hash,
+            child_run_id="run-kp-child-1",
+        )
+        loads = _patch_inventory(
+            monkeypatch,
+            accepted=accepted,
+            stale=_stale_inventory_package(),
+            accepted_hash=package_hash,
+        )
+        calls: list[tuple[str, dict[str, Any]]] = []
+        monkeypatch.setattr(
+            experiment_stage_bootstrap,
+            "_start_research_stage_round",
+            lambda team_id, payload: calls.append((team_id, payload)) or payload,
+        )
+
+        result = ensure_experiment_stage_round_for_agent_node(
+            node_id="hypothesis_design",
+            team_id="research-team",
+            project_id="challenge-sci-009",
+            input_snapshot={"researchObjectiveContract": {"question": "研究问题"}},
+            requested_by_agent="agent-hypothesis",
+            store=harness.store,
+            run_id="run-test",
+        )
+
+        assert result == {
+            "stageType": "experiment",
+            "researchProjectId": "challenge-sci-009",
+            "requestedByAgent": "agent-hypothesis",
+            "topic": "研究问题",
+        }
+        assert calls == [("research-team", result)]
+        assert loads == [package_hash]
+    finally:
+        harness.close()
+
+
+def test_bootstrap_fallback_requires_invocation_delivery_proof(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        accepted = _accepted_package()
+        package_hash = canonical_sha256(accepted)
+        _seed_pending_knowledge_gate(harness)
+        # Completed+accepted invocation row, but the parent run never recorded
+        # the delivery event: both authorities stay empty -> fail closed.
+        _seed_sideflow_absorbed_invocation(
+            harness,
+            invocation_id="kinv-sideflow-undelivered",
+            content_hash=package_hash,
+            child_run_id="run-kp-child-2",
+            with_delivery_event=False,
+        )
+        _patch_inventory(
+            monkeypatch,
+            accepted=accepted,
+            stale=_stale_inventory_package(),
+            accepted_hash=package_hash,
+        )
+
+        with pytest.raises(
+            ExperimentStageBootstrapError,
+            match="knowledge_package_not_materialized",
+        ):
+            ensure_experiment_stage_round_for_agent_node(
+                node_id="hypothesis_design",
+                team_id="research-team",
+                project_id="challenge-sci-009",
+                input_snapshot={"researchObjectiveContract": {"question": "研究问题"}},
+                requested_by_agent="agent-hypothesis",
+                store=harness.store,
+                run_id="run-test",
+            )
+    finally:
+        harness.close()
+
+
+def test_bootstrap_fallback_rejects_unaccepted_invocation_package(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        unaccepted = dict(_accepted_package(), accepted=False)
+        package_hash = canonical_sha256(unaccepted)
+        _seed_pending_knowledge_gate(harness)
+        _seed_sideflow_absorbed_invocation(
+            harness,
+            invocation_id="kinv-sideflow-unaccepted",
+            content_hash=package_hash,
+            child_run_id="run-kp-child-3",
+        )
+        monkeypatch.setattr(
+            "core.web.services.team_workflow.research_runtime."
+            "human_acceptance_artifact.load_scoped_artifact_payload",
+            lambda *args, **kwargs: unaccepted,
+        )
+
+        with pytest.raises(
+            ExperimentStageBootstrapError,
+            match="knowledge_package_not_materialized",
+        ):
+            ensure_experiment_stage_round_for_agent_node(
+                node_id="hypothesis_design",
+                team_id="research-team",
+                project_id="challenge-sci-009",
+                input_snapshot={"researchObjectiveContract": {"question": "研究问题"}},
+                requested_by_agent="agent-hypothesis",
+                store=harness.store,
+                run_id="run-test",
+            )
     finally:
         harness.close()
 

@@ -6,8 +6,11 @@ stage round exists, so the workflow runtime must establish that round before it
 starts the first experiment Agent task.  Later nodes reuse the same active round
 through ``start_research_stage_round``'s idempotent continuation contract.
 
-The accepted Knowledge Package receipt is the only handoff source for this
-bootstrap. Candidate inventory is not consulted as a second authority.
+The accepted Knowledge Package handoff resolves receipt-first: the parent-run
+handoff receipt is the primary authority, and when no receipt is bound (a
+sideflow child receipt is never copied into the parent run) the packages the
+parent run absorbed through completed knowledge invocations are the fallback
+authority. Candidate inventory is not consulted as a second authority.
 """
 
 from __future__ import annotations
@@ -17,7 +20,7 @@ from typing import Any
 
 
 class ExperimentStageBootstrapError(RuntimeError):
-    """Hypothesis entry cannot start without the accepted package receipt."""
+    """Hypothesis entry cannot start without an accepted package authority."""
 
 
 def ensure_experiment_stage_round_for_agent_node(
@@ -31,7 +34,14 @@ def ensure_experiment_stage_round_for_agent_node(
     run_id: str = "",
     accepted_knowledge_package: Mapping[str, Any] | None = None,
 ) -> dict[str, Any] | None:
-    """Create or reuse the experiment round before the first experiment node."""
+    """Create or reuse the experiment round before the first experiment node.
+
+    The accepted package resolves through two authorities in order: the
+    parent-run handoff receipt first, then the invocation-absorbed packages
+    (sideflow children never copy their receipt into the parent run). Both
+    loaders re-verify lineage, delivery proof and the canonical content hash
+    internally; candidate inventory still never unlocks this bootstrap.
+    """
 
     if node_id != "hypothesis_design":
         return None
@@ -42,7 +52,9 @@ def ensure_experiment_stage_round_for_agent_node(
     )
     if package is None and store is not None and str(run_id or "").strip():
         from .human_acceptance_artifact import (
+            is_accepted_knowledge_package,
             load_accepted_knowledge_package_from_receipt,
+            load_accepted_knowledge_packages_from_invocations,
         )
 
         package = load_accepted_knowledge_package_from_receipt(
@@ -50,6 +62,20 @@ def ensure_experiment_stage_round_for_agent_node(
             team_id=team_id,
             run_id=str(run_id),
         )
+        if package is None:
+            # Sideflow fallback: the parent run absorbed the accepted package
+            # through a completed knowledge invocation instead of a bound
+            # handoff receipt. The loader keeps the invocation lineage, parent
+            # delivery proof and canonical ref pinning fail-closed.
+            for record in load_accepted_knowledge_packages_from_invocations(
+                store,
+                team_id=team_id,
+                parent_run_id=str(run_id),
+            ):
+                candidate = record.get("package")
+                if is_accepted_knowledge_package(candidate):
+                    package = dict(candidate)
+                    break
     from .human_acceptance_artifact import is_accepted_knowledge_package
 
     if not is_accepted_knowledge_package(package):
