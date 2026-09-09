@@ -107,6 +107,16 @@ const MODEL_FILTERS: Array<{
   { id: "discovered", label: "添加模型", countKey: "discovered" },
 ];
 
+export function modelTestRecoveryHint(kind: string): string {
+  if (["auth_failed", "missing_credential"].includes(kind)) return "请在连接设置中检查 API Key。";
+  if (kind === "rate_limited") return "请求受到限流，请稍后重试；若持续出现，请检查服务额度。";
+  if (kind === "network") return "无法连接服务，请检查网络和服务是否启动。";
+  if (kind === "timeout") return "服务响应超时，请稍后重试并检查服务负载。";
+  if (["service_unavailable", "upstream_unavailable"].includes(kind)) return "上游服务暂不可用，请稍后重试或切换服务。";
+  if (kind === "not_found") return "请核对模型名称与服务地址，必要时刷新模型目录。";
+  return "请查看错误详情，核对请求参数后重试。";
+}
+
 function providerStatusLabel(status: string): string {
   const labels: Record<string, string> = {
     reachable: "目录已更新", stale: "目录待更新", not_discovered: "尚未发现模型", configured: "已配置",
@@ -349,7 +359,7 @@ function ConnectionTab({
                 <VButton
                   variant="primary"
                   isDisabled={disabled || !credentialValue.trim()}
-                  tooltip="保存后会立即写入 operator config 的环境变量引用；不会把 Key 明文写进 config.toml。"
+                  title="保存后，此服务下的模型将共用新的密钥。"
                   onPress={onSaveCredential}
                 >
                   保存 Key
@@ -361,7 +371,7 @@ function ConnectionTab({
               <VButton
                 variant="primary"
                 isDisabled={disabled}
-                tooltip={
+                title={
                   provider.credentialState === "configured"
                     ? "已有 Key。需要轮换时点此更新（仍是这一把，覆盖全站模型）。"
                     : "还没有 Key。中转站通常只发一把 Key，配一次即可调用该站所有固定模型。"
@@ -534,7 +544,7 @@ export function ProviderModelsTab({
           </VStatusChip>
           {verificationStatus === "failed" ? <>
             <small className={styles.verificationError}>{errorLabel || "请求未成功"}{model.verificationHttpStatus ? ` · HTTP ${model.verificationHttpStatus}` : ""}</small>
-            <small className={styles.muted}>{["auth_failed", "missing_credential"].includes(model.verificationErrorType || "") ? "请检查连接设置中的 API Key。" : "请检查服务地址与模型名称，再重新测试。"}</small>
+            <small className={styles.muted}>{modelTestRecoveryHint(model.verificationErrorType || "")}</small>
             <details><summary className={styles.verificationDetails}>错误详情</summary><p className={styles.verificationMessage}>{detail}</p></details>
           </> : model.verificationCheckedAt ? <small className={styles.muted}>{model.verificationCheckedAt}</small> : null}
         </div>
