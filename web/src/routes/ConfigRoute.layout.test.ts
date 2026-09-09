@@ -392,7 +392,7 @@ describe("ConfigRoute layout contract", () => {
     expect(providerPanelStyles.providerList).toContain("h-full");
     expect(providerPanelStyles.providerList).toContain("overflow-y-auto");
     expect(providerPanelStyles.detailSurface).toContain("overflow-y-auto");
-    expect(styles.providerModelsLayout).toContain("[grid-template-rows:auto_minmax(0,1fr)]");
+    expect(styles.providerModelsLayout).toContain("[grid-template-rows:auto_minmax(28rem,1fr)]");
   });
 
   it("passes the workspace schema version into legacy model account compatibility", () => {

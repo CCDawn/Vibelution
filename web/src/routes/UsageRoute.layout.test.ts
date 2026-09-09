@@ -179,7 +179,7 @@ describe("UsageRoute layout contract", () => {
     expect(styles.countPill).toContain("whitespace-nowrap");
     expect(styles.sourceTile).toContain("[&_span]:text-ellipsis");
     expect(styles.sourceTile).toContain("[&_strong]:text-[0.9rem]");
-    expect(styles.usageRow).toContain("grid-cols-[minmax(96px,0.64fr)_minmax(0,1fr)_minmax(58px,max-content)_minmax(54px,max-content)]");
+    expect(styles.usageRow).toContain("grid-cols-[minmax(96px,0.2fr)_minmax(0,1fr)_minmax(58px,max-content)_minmax(54px,max-content)]");
     expect(styles.usageRow).toContain("max-[620px]:grid-cols-[minmax(0,1fr)]");
     expect(styles.usageRow).toContain("[&_code]:max-w-full");
     expect(styles.usageRowWide).toContain("max-[620px]:grid-cols-[minmax(0,1fr)]");

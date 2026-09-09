@@ -278,136 +278,148 @@ export function AgentCoreConfigPanel({
         </section>
       ) : null}
       <div className={styles.editorGrid}>
-        <VFieldRow label="Agent">
-          <VNativeInput
-            value={draft.displayName}
-            onChange={(event) => onDraftChange({ displayName: event.target.value })}
-          />
-        </VFieldRow>
-        <VFieldRow label={copy.status}>
-          <VStringSelect
-            ariaLabel={copy.status}
-            value={draft.status}
-            onValueChange={(status) => onDraftChange({ status })}
-            options={[{ value: "active", label: lang === "zh" ? "活跃" : "Active" }]}
-          />
-        </VFieldRow>
-        <VFieldRow
-          label={lang === "zh" ? "工具调用批准" : "Tool approval"}
-          tooltip={lang === "zh"
-            ? "这是此 Agent 的唯一权限配置。消息框中的选择会写回同一字段，并从下一回合生效。"
-            : "This is the Agent's sole permission setting. Composer changes write the same field and apply next turn."}
-        >
-          <AgentPermissionPresetControl
-            value={draft.permissionPreset}
-            lang={lang}
-            surface="settings"
-            disabled={pending}
-            pending={pending}
-            agentName={agentName}
-            onChange={(permissionPreset) => onDraftChange({ permissionPreset })}
-          />
-        </VFieldRow>
-        {primaryLlmSlot ? (
-          <section className={styles.fieldWide} aria-label={copy.llmSlotsHint}>
-            <div className={styles.contextualHintRow}>
-              <span>{primaryModelLabel}</span>
-              <VContextualHint
-                content={copy.llmSlotsHint}
-                label={`${primaryModelLabel} ${lang === "zh" ? "说明" : "details"}`}
-                width="wide"
+        <section className={styles.configGroup}>
+          <h3 className={styles.groupTitle}>{lang === "zh" ? "身份与权限" : "Identity and permissions"}</h3>
+          <VFieldRow label="Agent">
+            <VNativeInput
+              value={draft.displayName}
+              onChange={(event) => onDraftChange({ displayName: event.target.value })}
+            />
+          </VFieldRow>
+          <VFieldRow label={copy.status}>
+            <VStringSelect
+              ariaLabel={copy.status}
+              value={draft.status}
+              onValueChange={(status) => onDraftChange({ status })}
+              options={[{ value: "active", label: lang === "zh" ? "活跃" : "Active" }]}
+            />
+          </VFieldRow>
+          <VFieldRow
+            label={lang === "zh" ? "工具调用批准" : "Tool approval"}
+            tooltip={lang === "zh"
+              ? "这是此 Agent 的唯一权限配置。消息框中的选择会写回同一字段，并从下一回合生效。"
+              : "This is the Agent's sole permission setting. Composer changes write the same field and apply next turn."}
+          >
+            <AgentPermissionPresetControl
+              value={draft.permissionPreset}
+              lang={lang}
+              surface="settings"
+              disabled={pending}
+              pending={pending}
+              agentName={agentName}
+              onChange={(permissionPreset) => onDraftChange({ permissionPreset })}
+            />
+          </VFieldRow>
+        </section>
+        <section className={styles.configGroup}>
+          <h3 className={styles.groupTitle}>{lang === "zh" ? "模型与提示词" : "Model and prompt"}</h3>
+          {primaryLlmSlot ? (
+            <section className={styles.fieldWide} aria-label={copy.llmSlotsHint}>
+              <div className={styles.contextualHintRow}>
+                <span>{primaryModelLabel}</span>
+                <VContextualHint
+                  content={copy.llmSlotsHint}
+                  label={`${primaryModelLabel} ${lang === "zh" ? "说明" : "details"}`}
+                  width="wide"
+                />
+              </div>
+              <div className={styles.primaryLlmSlot}>
+                <AgentLlmSlotField
+                  {...primaryLlmSlot}
+                  copy={copy}
+                  lang={lang}
+                  pending={pending}
+                  pendingModelRef={pendingModelRef}
+                  configDraftDirty={configDraftDirty}
+                  dirty={dirty}
+                  compact
+                  hideLabel
+                  onLlmSlotModelChange={onLlmSlotModelChange}
+                  onPromoteModel={onPromoteModel}
+                  onReasoningEffortChange={onReasoningEffortChange}
+                />
+              </div>
+            </section>
+          ) : null}
+          <section className={`${styles.fieldWide} ${styles.promptConfigField}`}>
+            <span>{copy.prompt}</span>
+            <div className={styles.promptConfigRow}>
+              <VStringSelect
+                ariaLabel={copy.prompt}
+                placeholder={lang === "zh" ? "请选择提示词" : "Select prompt"}
+                value={draft.promptTemplateId}
+                onValueChange={(promptTemplateId) => onDraftChange({ promptTemplateId })}
+                options={[
+                  { value: "", label: "-" },
+                  ...promptTemplateOptions.map((template) => ({
+                    value: template.value,
+                    label: template.label,
+                  })),
+                ]}
               />
-            </div>
-            <div className={styles.primaryLlmSlot}>
-              <AgentLlmSlotField
-                {...primaryLlmSlot}
-                copy={copy}
-                lang={lang}
-                pending={pending}
-                pendingModelRef={pendingModelRef}
-                configDraftDirty={configDraftDirty}
-                dirty={dirty}
-                compact
-                hideLabel
-                onLlmSlotModelChange={onLlmSlotModelChange}
-                onPromoteModel={onPromoteModel}
-                onReasoningEffortChange={onReasoningEffortChange}
-              />
+              <VButton
+                type="button"
+                variant="secondary"
+                icon={<SquarePen size={15} />}
+                onPress={onOpenPromptConfig}
+              >
+                {lang === "zh" ? "配置提示词" : "Configure prompt"}
+              </VButton>
             </div>
           </section>
-        ) : null}
-        <section className={`${styles.fieldWide} ${styles.promptConfigField}`}>
-          <span>{copy.prompt}</span>
-          <div className={styles.promptConfigRow}>
-            <VStringSelect
-              ariaLabel={copy.prompt}
-              value={draft.promptTemplateId}
-              onValueChange={(promptTemplateId) => onDraftChange({ promptTemplateId })}
-              options={[
-                { value: "", label: "-" },
-                ...promptTemplateOptions.map((template) => ({
-                  value: template.value,
-                  label: template.label,
-                })),
-              ]}
-            />
+          <div className={styles.configDeepLinkRow}>
             <VButton
               type="button"
               variant="secondary"
-              icon={<SquarePen size={15} />}
-              onPress={onOpenPromptConfig}
+              icon={<ExternalLink size={15} />}
+              onPress={onOpenModelConfig}
             >
-              {lang === "zh" ? "配置提示词" : "Configure prompt"}
+              {lang === "zh" ? "去模型库配置" : "Open model library"}
+            </VButton>
+            <VButton
+              type="button"
+              variant="ghost"
+              icon={<ExternalLink size={15} />}
+              onPress={onOpenContextConfig}
+            >
+              {lang === "zh" ? "去上下文配置" : "Open context config"}
             </VButton>
           </div>
         </section>
-        <div className={styles.bindingRow}>
-          <VFieldRow
-            label={copy.tools}
-            tooltip={toolPolicyTooltip}
-          >
-            <VStringSelect
-              ariaLabel={copy.tools}
-              value={draft.toolPolicyId}
-              onValueChange={(toolPolicyId) => onDraftChange({ toolPolicyId })}
-              options={toolPolicyOptions.map((policy) => ({
-                value: policy.value,
-                label: policy.label,
-                description: policy.title,
-              }))}
-            />
-          </VFieldRow>
-          <VFieldRow label={copy.memory} tooltip={memoryPolicyTooltip}>
-            <VStringSelect
-              ariaLabel={copy.memory}
-              value={draft.memoryPolicyId}
-              onValueChange={(memoryPolicyId) => onDraftChange({ memoryPolicyId })}
-              options={memoryPolicyOptions.map((policy) => ({
-                value: policy.value,
-                label: policy.label,
-                description: policy.title,
-              }))}
-            />
-          </VFieldRow>
-        </div>
-        <div className={`${styles.fieldWide} ${styles.configDeepLinkRow}`}>
-          <VButton
-            type="button"
-            variant="secondary"
-            icon={<ExternalLink size={15} />}
-            onPress={onOpenModelConfig}
-          >
-            {lang === "zh" ? "去模型库配置" : "Open model library"}
-          </VButton>
-          <VButton
-            type="button"
-            variant="ghost"
-            icon={<ExternalLink size={15} />}
-            onPress={onOpenContextConfig}
-          >
-            {lang === "zh" ? "去上下文配置" : "Open context config"}
-          </VButton>
-        </div>
+        <section className={styles.configGroup}>
+          <h3 className={styles.groupTitle}>{lang === "zh" ? "工具与记忆" : "Tools and memory"}</h3>
+          <div className={styles.bindingRow}>
+            <VFieldRow
+              label={copy.tools}
+              tooltip={toolPolicyTooltip}
+            >
+              <VStringSelect
+                ariaLabel={copy.tools}
+                placeholder={lang === "zh" ? "请选择工具策略" : "Select tools"}
+                value={draft.toolPolicyId}
+                onValueChange={(toolPolicyId) => onDraftChange({ toolPolicyId })}
+                options={toolPolicyOptions.map((policy) => ({
+                  value: policy.value,
+                  label: policy.label,
+                  description: policy.title,
+                }))}
+              />
+            </VFieldRow>
+            <VFieldRow label={copy.memory} tooltip={memoryPolicyTooltip}>
+              <VStringSelect
+                ariaLabel={copy.memory}
+                placeholder={lang === "zh" ? "请选择记忆策略" : "Select memory"}
+                value={draft.memoryPolicyId}
+                onValueChange={(memoryPolicyId) => onDraftChange({ memoryPolicyId })}
+                options={memoryPolicyOptions.map((policy) => ({
+                  value: policy.value,
+                  label: policy.label,
+                  description: policy.title,
+                }))}
+              />
+            </VFieldRow>
+          </div>
+        </section>
         <details className={styles.advancedConfig}>
           <summary>
             <span>{advancedLabel}</span>

@@ -48,12 +48,13 @@ const compactField =
 const scrollStack = "grid min-h-0 content-start gap-1 overflow-auto";
 
 const styles = {
+  permissionSummary: "cursor-pointer min-w-0 py-2 px-1 [&>span]:font-semibold [&>small]:ml-3 [&>small]:text-vui-fg-secondary",
   agentBulkPolicyPanel:
     `agentBulkPolicyPanel min-w-0 rounded-[var(--radius-panel)] ${vuiStateCoolInfoClass} p-2 text-[var(--accent-cool)]`,
   agentCompatibility:
     `agentCompatibility min-w-0 ${vuiStateCoolInfoClass}`,
   agentPermissionSummaryPanel:
-    `agentPermissionSummaryPanel min-w-0 max-w-full rounded-[var(--radius-panel)] ${vuiStateCoolInfoClass} p-2 text-[var(--accent-cool)]`,
+    `agentPermissionSummaryPanel min-w-0 max-w-full rounded-[var(--radius-panel)] ${vuiOpaquePanelClass} p-2 text-vui-fg-primary`,
   agentPolicyPanel:
     `agentPolicyPanel min-w-0 rounded-[var(--radius-panel)] ${vuiOpaquePanelClass} p-2 text-[var(--fg-primary)]`,
   agentPolicySelect:
@@ -462,14 +463,12 @@ const styles = {
     "toolList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   toolPermissionGroup:
     "toolPermissionGroup min-w-0 max-w-full rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--accent-warm)_16%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-warm)_4%,transparent)] p-[5px]",
-  toolPermissionGroupHeader:
-    "toolPermissionGroupHeader min-w-0 flex flex-wrap items-center justify-between gap-1 px-1 pb-[3px] [font-size:var(--vui-font-xs)]",
   toolPermissionGroupList:
-    "toolPermissionGroupList min-w-0 grid min-h-0 content-start gap-1 overflow-auto",
+    "toolPermissionGroupList min-w-0 grid max-h-[24rem] min-h-0 content-start gap-1 overflow-auto",
   toolPermissionList:
     "toolPermissionList min-w-0 grid min-h-0 content-start gap-1 overflow-auto",
   toolPermissionMeta:
-    "toolPermissionMeta min-w-0 flex flex-wrap items-center gap-1.5",
+    "toolPermissionMeta text-vui-fg-secondary [&_em]:not-italic min-w-0 flex flex-wrap items-center gap-1.5",
   toolPermissionRow:
     "toolPermissionRow min-w-0 max-w-full rounded-[7px] border border-[color:color-mix(in_srgb,var(--border-soft)_58%,transparent)] !bg-[var(--vui-surface-row)] !grid grid-cols-[minmax(0,1fr)_auto] items-center gap-[7px] px-[7px] py-[5px] max-[640px]:grid-cols-[1fr]",
   ts:

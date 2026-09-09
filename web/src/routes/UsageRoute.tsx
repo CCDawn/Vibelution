@@ -1,7 +1,7 @@
 import "../design/route-css/workbench-secondary.tailwind.css";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Activity, Database, Gauge, RefreshCw } from "lucide-react";
+import { Database, RefreshCw } from "lucide-react";
 
 import { fetchUsageSummary } from "../api/usage";
 import { queryKeys } from "../api/queryKeys";
@@ -202,7 +202,7 @@ export function UsageRoute() {
       aria-busy={initialUsageLoading}
       eyebrow="Token"
       title={label(lang, "全局 Token 用量", "Global token usage")}
-      meta={label(lang, "按 Codex 风格展示最近一次、最近会话、最近 Agent、今日、七日和全局累计。", "Codex-style latest, latest session, latest agent, today, seven-day, and all-time usage.")}
+      meta={label(lang, "查看今日、最近七日与累计用量。", "Review today, seven-day and cumulative usage.")}
       actions={(
         <VStatusStrip
           className={styles.headerMeta}
@@ -298,10 +298,10 @@ export function UsageRoute() {
               ))}
             </div>
             <div className={styles.usageList}>
-              {renderUsageRow(label(lang, "输入", "Input"), allTimeLoaded.inputTokens, totalTokens, label(lang, "prompt", "prompt"))}
+              {renderUsageRow(label(lang, "输入", "Input"), allTimeLoaded.inputTokens, totalTokens, "")}
               {renderUsageRow(label(lang, "缓存输入", "Cached input"), allTimeLoaded.cachedInputTokens, allTimeLoaded.inputTokens, percentText(allTimeLoaded.cacheHitRate))}
-              {renderUsageRow(label(lang, "输出", "Output"), allTimeLoaded.outputTokens, totalTokens, label(lang, "answer", "answer"))}
-              {renderUsageRow(label(lang, "推理输出", "Reasoning output"), allTimeLoaded.reasoningOutputTokens, totalTokens, "reasoningOutputTokens")}
+              {renderUsageRow(label(lang, "输出", "Output"), allTimeLoaded.outputTokens, totalTokens, "")}
+              {renderUsageRow(label(lang, "推理输出", "Reasoning output"), allTimeLoaded.reasoningOutputTokens, totalTokens, "")}
             </div></>}
           </VSurface>
 
@@ -329,27 +329,22 @@ export function UsageRoute() {
               <div className={`${styles.usageRow} ${styles.usageRowWide}`}>
                 <span>{label(lang, "当前范围", "Current scope")}</span>
                 <strong>{usageValue(usageValueState, scopeUsage?.totalTokens, label(lang, "正在加载范围用量", "Loading scope usage"))}</strong>
-                <code>{summary?.scope ?? "global"}</code>
               </div>
               <div className={`${styles.usageRow} ${styles.usageRowWide}`}>
                 <span>{label(lang, "最近会话", "Latest session")}</span>
                 <strong>{usageValue(usageValueState, sessionUsage?.totalTokens, label(lang, "正在加载会话用量", "Loading session usage"))}</strong>
-                <code>{sessionRollupLabel}</code>
               </div>
               <div className={`${styles.usageRow} ${styles.usageRowWide}`}>
                 <span>{label(lang, "最近 Agent", "Latest agent")}</span>
                 <strong>{usageValue(usageValueState, agentUsage?.totalTokens, label(lang, "正在加载 Agent 用量", "Loading agent usage"))}</strong>
-                <code>{agentRollupLabel}</code>
               </div>
               <div className={`${styles.usageRow} ${styles.usageRowWide}`}>
                 <span>{label(lang, "上下文窗口", "Context window")}</span>
                 <strong>{usageValue(usageValueState, summary?.modelContextWindow, label(lang, "正在加载上下文窗口", "Loading context window"))}</strong>
-                <code><Gauge size={13} /> window</code>
               </div>
               <div className={`${styles.usageRow} ${styles.usageRowWide}`}>
                 <span>{label(lang, "延迟累计", "Latency total")}</span>
                 <strong>{usageValue(usageValueState, allTime?.latencyMs, label(lang, "正在加载延迟", "Loading latency"))} ms</strong>
-                <code><Activity size={13} /> api</code>
               </div>
             </div>}
           </VSurface>
@@ -378,12 +373,8 @@ export function UsageRoute() {
             />
           ) : <><div className={styles.detailGrid}>
             <div className={styles.detailRow}>
-              <span>provider / model</span>
+              <span>{label(lang, "服务与模型", "Provider / model")}</span>
               <strong>{[lastTokenUsage?.provider, lastTokenUsage?.model].filter(Boolean).join(" / ") || "-"}</strong>
-            </div>
-            <div className={styles.detailRow}>
-              <span>event</span>
-              <strong>{lastTokenUsage?.eventId || "-"}</strong>
             </div>
             <div className={styles.detailRow}>
               <span>{label(lang, "缓存读取", "Cache read")}</span>
@@ -398,6 +389,18 @@ export function UsageRoute() {
               <strong>{numberText(summary?.diagnostics?.skippedRecordCount)}</strong>
             </div>
           </div>
+          <details className={styles.technicalDetails}>
+            <summary>{label(lang, "记录与诊断详情", "Record and diagnostic details")}</summary>
+            <div className={styles.detailGrid}>
+              <div className={styles.detailRow}>
+                <span>event</span>
+                <strong>{lastTokenUsage?.eventId || "-"}</strong>
+              </div>
+              <div className={styles.detailRow}><span>{label(lang, "会话 ID", "Session ID")}</span><strong>{sessionRollupLabel}</strong></div>
+              <div className={styles.detailRow}><span>{label(lang, "Agent ID", "Agent ID")}</span><strong>{agentRollupLabel}</strong></div>
+              <div className={styles.detailRow}><span>{label(lang, "统计范围", "Scope")}</span><strong>{summary?.scope ?? "global"}</strong></div>
+            </div>
+          </details>
           {renderBreakdownList(summary?.breakdowns?.models ?? [], emptyBreakdownLabel)}</>}
         </VSurface>
       </div>
