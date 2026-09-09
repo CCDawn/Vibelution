@@ -28,6 +28,30 @@ from pathlib import Path
 
 _IS_WINDOWS = os.name == "nt"
 
+# Without LongPathsEnabled the Win32 layer rejects any path >= 260 with
+# FileNotFoundError errno 2 even when every component exists; deep live
+# run directories already sit within ~30 chars of that ceiling.
+_WINDOWS_EXTENDED_LENGTH_PREFIX = "\\\\?\\"
+_WINDOWS_LONG_PATH_THRESHOLD = 248
+
+
+def _windows_extended_length_path(path: Path) -> Path:
+    """Lift ``path`` past MAX_PATH with the ``\\\\?\\`` prefix when needed.
+
+    Drive-letter absolute paths only: UNC paths need the ``\\\\?\\UNC\\``
+    form and are left untouched. Short paths round-trip unchanged so
+    existing lock identities stay byte-stable.
+    """
+    text = str(path)
+    if (
+        _IS_WINDOWS
+        and len(text) >= _WINDOWS_LONG_PATH_THRESHOLD
+        and text[1:3] == ":\\"
+        and not text.startswith(_WINDOWS_EXTENDED_LENGTH_PREFIX)
+    ):
+        return Path(_WINDOWS_EXTENDED_LENGTH_PREFIX + text)
+    return path
+
 
 @contextlib.contextmanager
 def inter_process_lock(store_path: Path, *, timeout_s: float = 10.0) -> Iterator[None]:
@@ -36,7 +60,9 @@ def inter_process_lock(store_path: Path, *, timeout_s: float = 10.0) -> Iterator
     OS file locks release when the owning process dies, so a crashed
     writer cannot leave a stale lock behind.
     """
-    lock_path = store_path.with_name(store_path.name + ".lock")
+    lock_path = _windows_extended_length_path(
+        store_path.with_name(store_path.name + ".lock")
+    )
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     handle = open(lock_path, "a+b")
     try:

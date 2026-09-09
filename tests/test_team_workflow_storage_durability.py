@@ -91,6 +91,36 @@ def test_missing_store_reads_empty_and_lock_releases(tmp_path: Path) -> None:
     assert (tmp_path / "missing.jsonl.lock").exists()
 
 
+def test_inter_process_lock_survives_max_path_run_directories(tmp_path: Path) -> None:
+    """2026-09-09 production failure: live run directory (233 chars) plus the
+    35-char ``knowledge_ingestion_materialize`` lock name pushed the lock path
+    to 270 > MAX_PATH; with LongPathsEnabled=0 ``open`` raised FileNotFoundError
+    errno 2 even though the parent directory existed."""
+    from core.web.services.team_workflow.storage_durability import (
+        _windows_extended_length_path,
+    )
+
+    # Grow a nested chain until the lock file path clears the Win32 ceiling,
+    # mirroring how deep live instance data roots sit near the limit.
+    component = "d" * 60
+    directory = tmp_path
+    while len(str(directory / component / "knowledge_ingestion_materialize.lock")) < 270:
+        directory = directory / component
+    lock_store = directory / "knowledge_ingestion_materialize"
+
+    with inter_process_lock(lock_store):
+        pass  # must acquire and release instead of FileNotFoundError
+
+    lock_file = _windows_extended_length_path(
+        lock_store.with_name(lock_store.name + ".lock")
+    )
+    assert lock_file.exists()
+
+    # Short lock paths round-trip unchanged so existing identities stay stable.
+    short = tmp_path / "chain.jsonl.lock"
+    assert _windows_extended_length_path(short) == short
+
+
 def test_evidence_trail_cache_serves_repeated_reads_and_invalidates(tmp_path: Path, monkeypatch) -> None:
     """P3-8: the trail computation caches per (team, question) on store mtime."""
     from core.web.services.team_workflow import meeting_rounds
