@@ -182,3 +182,17 @@
 - 根因（backend.stderr 五连 traceback + 账本交叉）：`cancel_run_cleanup._handle → _finalize_budget_receipts → finalize_cancelled_run_budget_receipts` 对 run-20f4bcdf8c84 硬断言 `status=='cancelled'`，而该 run 早在 09-05 已从 cancelled 归档为 **archived**（run_archived evt13 archivedFromStatus=cancelled）→ `BudgetAuthorityError` 未捕获穿透 → 进程崩溃；每次启动排空清理队列即重演 = 崩溃环，后端起不来。
 - 影响面：全部运行时验证被硬阻塞（本 run 数据完好：formal blocked v8 / child blocked v17，账本无损）。
 - 修复方向（codex/fix-cancel-cleanup-crash-loop）：(1) finalize 接受 archived-from-cancelled（归档来源权威判定，其余终态保持 fail-loud）；(2) 清理 handler 每任务异常隔离 + 有界重试/停驻，毒条目不得杀进程；(3) 排查四天前陈旧任务为何仍在队列被 re-arm，补完成标记幂等性。
+
+### B.18 缺陷⑰：豁免操作面无存活挂载点——standalone 工作台退役后豁免 UI 成死代码（审计定案，修复中）
+
+- 双路独立审计交叉定案：⑪ 交付的豁免面板（TeamSourceCollectionGraphWorkspacePanel 的缺口行）唯一挂载链在已退役的「资料搜集 standalone 工作台」——`researchWorkspaceModel.ts:94-122,238-251` 将 `source_collection/knowledge_collection` 视图规范化回工作流画布；挑战杯画布「证据关系」tab 用的是只读 `EvidenceGraphView`（无 missingLink 渲染），research-workflow 目录 grep missingLink 零命中。操作员在本路由内对 evidence_graph_incomplete 无任何豁免出口。
+- 账本核验：唯一 candidate_graph 记录 scope = 子 run 的 SC 权威（dprun-…c0caf640），含 1 条未豁免缺口（contradicts_scale_claim → 不存在候选 …-9143d4d6，自回声边）；formal 与 child 快照的 `sourceCollectionRunId` 指向**不同** SC run——豁免面必须传**子 sideflow run id**（run-1ca97605acf3），传 URL 的 formal runId 必 404 graph_not_found。
+- 修复（codex/fix-canvas-waiver-surface）：抽取缺口豁免 section 为共享组件，挂载到画布知识节点检查器的证据视图；child run id 从收集中 childRun 投影取权威值；两段式确认与 ⑪ 交互一致；VUI 边界（兄弟 .styles.ts）+ 三道机器门 + tsc 全过。
+
+### B.19 剩余链路静态审计结论（交接后全自动解阻；R1 收敛硬门清单）
+
+- **交接接受→父 run 解阻全自动**：handoff accept（RESOLVE_HUMAN_TASK decision=accept，需已物化包 receipt）→ 子 run terminal close → `record_knowledge_sideflow_child_success`（无包证据则 invocation FAILED fail-closed）→ outbox `knowledge_result_available` → `absorb_knowledge_result` 写父 run 幂等事件（父 blocked 不影响，仅拒 archived/cancelled）→ readiness recheck 自动 START_NODE 到 hypothesis_design（幂等键 knowledge-ready:{invocationId}；CAS 冲突 advisory skip，靠 sweep 补位）。后端停摆期间积压、恢复后 durable outbox 补跑。
+- **handoff 隐性前置**：knowledge_handoff 自身 readiness 要求 Knowledge Store 已写回 draft 知识包且审计完成（否则 `knowledge_package_not_reviewable`，无 pending human task、offer 不可用）——ingestion 成功≠立即可交接。
+- **R1 收敛硬门**（hypothesis_design readiness = accepted 知识包 + pendingCollectionCount==0 + hypothesisConverged）：收敛要求 latest 评审轮 closed + 质量非 failed + **claim belief 五态门**（无 contradicted/disputed）+ metaReview/人工裁决 accepted + 无 pending 搜集请求；HARD_ROUND_LIMIT=3 触发 budgetExhausted 时有 auto-adjudication 兜底。死局族：每轮新增 evidence request 未交接（循环搜集）、claim gate rejected 终态（需人工修订 claim/证据）、会议未关闭。
+- **结果包段**：protocol_freeze/smoke_gate/candidate_promotion 三道 HUMAN 门 + stage-one 结果核验（packaging_ready 且无未决 HumanTask）；stop/rollback governance 反而放行 packaging；version_lineage_invalid 与非 promote governance 是无出口形态。
+- 风险排序：⑰豁免不可达（已立项）> 知识包写回/审计未完成 > 后端停摆积压（⑯修复即解）> accept 时包 receipt 缺失无自动重试 > claim rejected 终态。
