@@ -456,6 +456,8 @@ function ConnectionTab({
 }
 
 export type ProviderModelsTabProps = {
+  toolbarIdentity?: ReactNode;
+  toolbarActions?: ReactNode;
   provider: ProviderRegistryRow;
   disabled: boolean;
   modelQuery: string;
@@ -478,6 +480,8 @@ export type ProviderModelsTabProps = {
 };
 
 export function ProviderModelsTab({
+  toolbarIdentity,
+  toolbarActions,
   provider,
   disabled,
   modelQuery,
@@ -701,6 +705,7 @@ export function ProviderModelsTab({
     <div className={styles.modelsWorkspace}>
       <div className={styles.modelChrome}>
       <div className={styles.modelToolbar}>
+        {toolbarIdentity}
         <VInput
           aria-label="搜索模型"
           className={styles.modelSearch}
@@ -721,6 +726,7 @@ export function ProviderModelsTab({
             </VButton>
           ))}
         </VActionGroup>
+        {toolbarActions}
       </div>
       {modelFilter === "discovered" && pinnableModels.length > 0 ? (
         <div className={styles.pinBanner} role="region" aria-label="批量添加模型">
@@ -1185,7 +1191,26 @@ export function ConfigProviderRegistryPanel({
         )}
         main={provider ? (
           <div className={styles.modelsColumn} data-provider-status={provider.status} data-vui-region="config-models-main">
-            <div className={styles.detailHeader}>
+            {visibleFeedback ? (
+              <p
+                className={
+                  visibleFeedback.phase === "error"
+                    ? styles.actionFeedbackError
+                    : visibleFeedback.phase === "success"
+                      ? styles.actionFeedbackSuccess
+                      : styles.actionFeedback
+                }
+                data-feedback-phase={visibleFeedback.phase}
+                data-feedback-kind={visibleFeedback.kind}
+                role={visibleFeedback.phase === "error" ? "alert" : "status"}
+                aria-live="polite"
+              >
+                {visibleFeedback.message}
+              </p>
+            ) : null}
+            <div className={styles.detailBody} data-provider-tab="models">
+              <ProviderModelsTab
+                toolbarIdentity={(
               <span className={styles.detailIdentity}>
                 <strong title={provider.providerId}>{provider.label || provider.providerId}</strong>
                 <small className={styles.muted}>
@@ -1193,7 +1218,9 @@ export function ConfigProviderRegistryPanel({
 
                 </small>
               </span>
-              <VActionGroup ariaLabel="模型库操作" className={styles.actions}>
+                )}
+                toolbarActions={(
+              <VActionGroup ariaLabel="模型库操作" className={`${styles.actions} ml-auto`}>
                 <VButton
                   data-provider-action="discover"
                   variant="secondary"
@@ -1214,26 +1241,7 @@ export function ConfigProviderRegistryPanel({
                   连接设置
                 </VButton>
               </VActionGroup>
-            </div>
-            {visibleFeedback ? (
-              <p
-                className={
-                  visibleFeedback.phase === "error"
-                    ? styles.actionFeedbackError
-                    : visibleFeedback.phase === "success"
-                      ? styles.actionFeedbackSuccess
-                      : styles.actionFeedback
-                }
-                data-feedback-phase={visibleFeedback.phase}
-                data-feedback-kind={visibleFeedback.kind}
-                role={visibleFeedback.phase === "error" ? "alert" : "status"}
-                aria-live="polite"
-              >
-                {visibleFeedback.message}
-              </p>
-            ) : null}
-            <div className={styles.detailBody} data-provider-tab="models">
-              <ProviderModelsTab
+                )}
                 provider={provider}
                 disabled={disabled}
                 modelQuery={modelQuery}

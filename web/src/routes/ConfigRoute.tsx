@@ -3407,10 +3407,35 @@ export function ConfigRoute() {
         data-vui-region="config-settings-main"
         headerClassName={styles.configHeader}
         bodyClassName="!gap-0 !overflow-hidden !content-stretch"
-        eyebrow="Config"
         title={activeGroup?.title ?? copy.pageTitle}
         actions={
           <div className={styles.configStatusActions}>
+            {isSectionVisible("models") && workspace.schemaVersion === 2 ? (
+                <VActionGroup ariaLabel="模型连接操作">
+                  <VButton
+                    title="选择服务商，填写连接信息，检测后选择模型并保存。"
+                    className={styles.providerModeButton}
+                    aria-pressed={providerConnecting}
+                    variant={providerConnecting ? "primary" : "secondary"}
+                    onPress={() => {
+                      if (providerQuickSetupState.phase === "success") dispatchProviderQuickSetup({ type: "reset" });
+                      setProviderShowMore(false);
+                      setProviderConnecting(true);
+                    }}
+                  >
+                    添加连接
+                  </VButton>
+                  <VButton
+                    title="模板向导、迁移与底层参数。"
+                    className={styles.providerModeButton}
+                    aria-pressed={providerShowMore}
+                    variant={providerShowMore ? "primary" : "ghost"}
+                    onPress={() => { setProviderConnecting(false); setProviderShowMore((open) => !open); }}
+                  >
+                    {providerShowMore ? "收起高级设置" : "高级设置"}
+                  </VButton>
+                </VActionGroup>
+            ) : null}
             <VButton
               type="button"
               className={styles.actionButton}
@@ -3517,30 +3542,7 @@ export function ConfigRoute() {
           <div className={styles.providerModelsLayout}>
             {workspace.schemaVersion === 2 ? (
               <>
-                <VActionGroup ariaLabel="模型连接操作">
-                  <VButton
-                    title="选择服务商，填写连接信息，检测后选择模型并保存。"
-                    className={styles.providerModeButton}
-                    aria-pressed={providerConnecting}
-                    variant={providerConnecting ? "primary" : "secondary"}
-                    onPress={() => {
-                      if (providerQuickSetupState.phase === "success") dispatchProviderQuickSetup({ type: "reset" });
-                      setProviderShowMore(false);
-                      setProviderConnecting(true);
-                    }}
-                  >
-                    添加连接
-                  </VButton>
-                  <VButton
-                    title="模板向导、迁移与底层参数。"
-                    className={styles.providerModeButton}
-                    aria-pressed={providerShowMore}
-                    variant={providerShowMore ? "primary" : "ghost"}
-                    onPress={() => { setProviderConnecting(false); setProviderShowMore((open) => !open); }}
-                  >
-                    {providerShowMore ? "收起高级设置" : "高级设置"}
-                  </VButton>
-                </VActionGroup>
+
                 {providerConnecting ? (
                   <>
                     <VButton
