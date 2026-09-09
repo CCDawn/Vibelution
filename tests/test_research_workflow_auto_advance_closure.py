@@ -3358,3 +3358,50 @@ def test_single_question_automatically_screens_all_grounded_candidates(
         assert calls[0][0][1]["input"] == {"candidateIds": ids}
         assert calls[0][1]["workflow_run_id"] == "run-r1"
         assert calls[0][1]["_actor"] == "system:stage-one-auto-selection"
+
+
+def test_sweep_budget_stops_new_questions_and_resumes_from_stop_cursor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """缺陷 19 兜底：一轮超出墙钟预算后停止开新题，summary 记录
+    budgetExhausted/questionsDeferred；下一轮从停点 round-robin 续扫。"""
+    import time
+
+    _sweep_env(tmp_path, monkeypatch)
+    monkeypatch.setattr(chain, "_SWEEP_ROUND_ROBIN_CURSOR", None)
+    monkeypatch.setenv(chain._AUTO_ADVANCE_SWEEP_BUDGET_ENV, "1")
+    questions = ["SCI-A", "SCI-B", "SCI-C"]
+    visited: list[str] = []
+    monkeypatch.setattr(
+        chain, "_team_ids_with_chain_storage", lambda: ["team-budget-1"]
+    )
+    monkeypatch.setattr(
+        chain,
+        "question_ids_with_chain_records",
+        lambda _team_id, records=None: list(questions),
+    )
+
+    def _slow_adjudicate(_team_id, *, question_id):
+        visited.append(question_id)
+        # 50ms per question: after the first one the 1ms budget is always
+        # exhausted, deterministically, without relying on wall-clock flake.
+        time.sleep(0.05)
+        return {"status": "skipped"}
+
+    monkeypatch.setattr(chain, "auto_adjudicate_exhausted_round", _slow_adjudicate)
+
+    first = chain.sweep_auto_advance_closure()
+
+    assert first["questions"] == 1
+    assert first["budgetExhausted"] is True
+    assert first["questionsDeferred"] == 2
+    assert visited == ["SCI-A"]
+
+    second = chain.sweep_auto_advance_closure()
+
+    # The stop cursor resumed at SCI-B instead of restarting from SCI-A.
+    assert second["questions"] == 1
+    assert second["budgetExhausted"] is True
+    assert second["questionsDeferred"] == 1
+    assert visited == ["SCI-A", "SCI-B"]

@@ -65,6 +65,16 @@ _LOCK = threading.RLock()
 # Latest records only, one revision per path. All access uses the meeting lock.
 _ROUND_INDEX_CACHE: OrderedDict[str, tuple[tuple[int, ...], dict[str, dict[str, Any]]]] = OrderedDict()
 _ROUND_INDEX_CACHE_LIMIT = 8
+# Shared sorted snapshots for read-only list_meeting_rounds callers (defect
+# 19): one list per (round-file cursor, status filter), so internal filter /
+# serialize readers stop re-deepcopying the whole team history per call.
+# Same magnitude as _ROUND_INDEX_CACHE_LIMIT. Elements are shared with the
+# latest-round index; only read_only callers may receive them.
+_ROUND_LIST_COPY_CACHE: OrderedDict[
+    tuple[str, tuple[tuple[int, ...] | int, ...], tuple[str, ...]],
+    list[dict[str, Any]],
+] = OrderedDict()
+_ROUND_LIST_COPY_CACHE_LIMIT = 8
 # Bounded waits for the module lock (2026-09 ghost-lock incident): every
 # acquirer must either enter within its budget or fail with a structured
 # timeout instead of blocking its thread forever.  Writers persist under the
@@ -824,7 +834,10 @@ def _load_bound_room_rounds(meeting_round: Mapping[str, Any]) -> dict[str, dict[
         return {}
     from core.web.services import chat_room_service
 
-    room_detail = chat_room_service.get_chat_room_detail(room_id)
+    # Read-only chain (defect 19): the bound-round read must not trigger the
+    # chat room's write-side round-state reconciliation (it persists under
+    # the room lock); sweep reads stay zero-write by contract.
+    room_detail = chat_room_service.get_chat_room_detail(room_id, reconcile=False)
     if room_detail is None:
         raise ResearchMeetingRoundError("Linked chat room not found for the meeting round.")
     rounds_by_id = _room_rounds_by_id(room_detail)
@@ -2591,7 +2604,18 @@ def list_meeting_rounds(
     team_id: str,
     *,
     status: str | Sequence[str] | None = None,
+    read_only: bool = False,
 ) -> dict[str, Any]:
+    """List the latest round per meeting, sorted by ``startedAt``.
+
+    Shared-snapshot contract (defect 19): with ``read_only=True`` the
+    ``meetings`` list and its record dicts may be served from the copy memo
+    and shared across concurrent read-only callers — the caller must treat
+    the list and every element as immutable. Use it only for internal
+    filter/serialize readers; route handlers and any caller that mutates the
+    returned records must keep the default ``read_only=False``, which always
+    deep-copies each record exactly as before.
+    """
     from core.web.services.team_service import assert_team_exists
 
     normalized_team_id = assert_team_exists(team_id)
@@ -2602,17 +2626,47 @@ def list_meeting_rounds(
         )
         if str(item or "").strip()
     }
+    status_key = tuple(sorted(statuses))
+    rows: list[dict[str, Any]]
     with _read_lock("list_meeting_rounds"):
         latest = _latest_round_index(normalized_team_id)
-    rows = sorted(
-        (
-            deepcopy(record)
-            for record in latest.values()
-            if not statuses
-            or str(record.get("status") or "").strip().lower() in statuses
-        ),
-        key=lambda item: str(item.get("startedAt") or ""),
-    )
+        if not read_only:
+            # Mutation-safe path: build the deep copies outside the read lock
+            # below, exactly as before (the cached index is never mutated in
+            # place, so releasing the lock first stays safe).
+            shared = latest
+        else:
+            path = _rounds_path(normalized_team_id)
+            memo_key = (
+                str(path.resolve()),
+                (_round_file_cursor(path) or ()),
+                status_key,
+            )
+            rows = _ROUND_LIST_COPY_CACHE.get(memo_key)
+            if rows is None:
+                rows = sorted(
+                    (
+                        record
+                        for record in latest.values()
+                        if not statuses
+                        or str(record.get("status") or "").strip().lower() in statuses
+                    ),
+                    key=lambda item: str(item.get("startedAt") or ""),
+                )
+                _ROUND_LIST_COPY_CACHE[memo_key] = rows
+            _ROUND_LIST_COPY_CACHE.move_to_end(memo_key)
+            while len(_ROUND_LIST_COPY_CACHE) > _ROUND_LIST_COPY_CACHE_LIMIT:
+                _ROUND_LIST_COPY_CACHE.popitem(last=False)
+    if not read_only:
+        rows = sorted(
+            (
+                deepcopy(record)
+                for record in shared.values()
+                if not statuses
+                or str(record.get("status") or "").strip().lower() in statuses
+            ),
+            key=lambda item: str(item.get("startedAt") or ""),
+        )
     return {
         "schemaVersion": SCHEMA_VERSION,
         "teamId": normalized_team_id,

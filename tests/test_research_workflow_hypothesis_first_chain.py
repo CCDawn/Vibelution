@@ -312,7 +312,7 @@ def test_hypothesis_participants_resolve_four_roles_in_contract_order(monkeypatc
     monkeypatch.setattr(
         chat_room_service,
         "get_chat_room_detail",
-        lambda room_id: room if room_id == "room-1" else None,
+        lambda room_id, **_kwargs: room if room_id == "room-1" else None,
     )
     monkeypatch.setattr(team_service, "get_team", lambda team_id: {"members": []})
 
@@ -380,7 +380,7 @@ def test_hypothesis_participant_resolution_fails_closed(monkeypatch, participant
     monkeypatch.setattr(
         chat_room_service,
         "get_chat_room_detail",
-        lambda room_id: {"participants": participants},
+        lambda room_id, **_kwargs: {"participants": participants},
     )
     monkeypatch.setattr(team_service, "get_team", lambda team_id: {"members": []})
 
@@ -2422,7 +2422,7 @@ def test_chain_state_ignores_review_artifacts_from_other_workflow_runs(
     monkeypatch.setattr(
         meetings,
         "list_meeting_rounds",
-        lambda _team_id: {"meetings": meeting_rows},
+        lambda _team_id, **_kwargs: {"meetings": meeting_rows},
     )
     monkeypatch.setattr(
         chain,
@@ -7009,7 +7009,7 @@ def test_retry_review_dispatch_exits_completed_speech_failed_round3(
     # reader so the fresh-attempt participant resolution keeps working.
     real_room_detail = chat_room_service.get_chat_room_detail
 
-    def fake_room_detail(detail_room_id: str):
+    def fake_room_detail(detail_room_id: str, **_kwargs):
         if detail_room_id == room_id:
             return {
                 "roomId": detail_room_id,
@@ -7986,7 +7986,7 @@ def _stage_stopped_v2_meeting(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(
         chat_room_service,
         "get_chat_room_detail",
-        lambda room_id: (
+        lambda room_id, **_kwargs: (
             {
                 "roomId": "room-stop-1",
                 "rounds": [
@@ -8079,7 +8079,7 @@ def test_v2_stop_discussion_keeps_supersede_semantics_for_empty_attempts(
     monkeypatch.setattr(
         chat_room_service,
         "get_chat_room_detail",
-        lambda room_id: (
+        lambda room_id, **_kwargs: (
             {
                 "roomId": "room-stop-1",
                 "rounds": [
@@ -8362,7 +8362,7 @@ def test_auto_adjudicate_binds_rejected_outcome_to_round_workflow_run(
     monkeypatch.setattr(
         meetings,
         "list_meeting_rounds",
-        lambda _team_id: {
+        lambda _team_id, **_kwargs: {
             "meetings": [
                 {
                     "meetingRoundId": _AUTO_MEETING_ID,
@@ -8414,7 +8414,7 @@ def test_adjudication_run_scope_requires_complete_single_run_lineage(
     monkeypatch.setattr(
         meetings,
         "list_meeting_rounds",
-        lambda _team_id: {
+        lambda _team_id, **_kwargs: {
             "meetings": [
                 {
                     "meetingRoundId": "meeting-a",
@@ -8441,7 +8441,7 @@ def test_adjudication_run_scope_requires_complete_single_run_lineage(
     monkeypatch.setattr(
         meetings,
         "list_meeting_rounds",
-        lambda _team_id: {
+        lambda _team_id, **_kwargs: {
             "meetings": [
                 {
                     "meetingRoundId": "meeting-a",
@@ -8498,7 +8498,7 @@ def test_auto_adjudicate_repairs_legacy_rejected_binding_append_only(
     monkeypatch.setattr(
         meetings,
         "list_meeting_rounds",
-        lambda _team_id: {
+        lambda _team_id, **_kwargs: {
             "meetings": [
                 {
                     "meetingRoundId": _AUTO_MEETING_ID,
