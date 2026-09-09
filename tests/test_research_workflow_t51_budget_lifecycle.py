@@ -976,3 +976,130 @@ def test_reserve_stage_admission_is_atomic_under_concurrency(tmp_path: Path) -> 
         total = sum(json.loads(row[0])["reserved"]["estimatedTokens"] for row in rows)
         assert total <= 500
         harness.close()
+
+
+def _seed_cancel_run_receipts(harness: CommandHarness, run_id: str) -> None:
+    """One usage-bearing receipt plus one unused reservation on a run."""
+    used_action = replace(
+        _action(),
+        action_id=f"act-used-{run_id}",
+        run_id=run_id,
+        node_run_id=f"{run_id}-nr-used",
+    )
+    unused_action = replace(
+        _action("source_extraction"),
+        action_id=f"act-unused-{run_id}",
+        run_id=run_id,
+        node_run_id=f"{run_id}-nr-unused",
+    )
+    _seed_attempt(harness, used_action)
+    _seed_attempt(harness, unused_action)
+
+    def seed(uow):
+        for receipt_id, node_run_id in (
+            (f"br-used-{run_id}", used_action.node_run_id),
+            (f"br-unused-{run_id}", unused_action.node_run_id),
+        ):
+            uow.repository.insert_budget_receipt(
+                receipt_id=receipt_id,
+                run_id=run_id,
+                node_run_id=node_run_id,
+                reservation_id=f"reservation-{node_run_id}",
+                stage_id="execution_iteration",
+                policy_hash="policy-cancel",
+                reserved_json=json.dumps({"reserved": {"tokens": 1_000}}),
+                created_at_ms=1_750_000_000_000,
+            )
+        uow.repository.update_budget_receipt(
+            f"br-used-{run_id}",
+            status="reserved",
+            now_ms=1_750_000_000_001,
+            settled_json=json.dumps(
+                {
+                    "invocations": {
+                        "inv-used": {
+                            "inputTokens": 80,
+                            "outputTokens": 20,
+                            "tokens": 100,
+                            "usageEstimated": False,
+                        }
+                    },
+                    "usage": {
+                        "inputTokens": 80,
+                        "outputTokens": 20,
+                        "tokens": 100,
+                        "usageEstimated": False,
+                    },
+                }
+            ),
+        )
+
+    harness.store.submit(seed, force_flush=True).result(timeout=10)
+
+
+def test_finalize_accepts_run_archived_from_cancelled(tmp_path: Path) -> None:
+    """A run archived FROM cancelled still settles its stranded receipts.
+
+    Regression for defect 16: cancel cleanup re-ran after the run was already
+    archived (from cancelled), the hard status assert raised, and the backend
+    crash-looped on every maintenance tick.
+    """
+    from core.web.services.team_workflow.research_runtime.budget_authority_adapter import (
+        finalize_cancelled_run_budget_receipts,
+    )
+
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run(run_id="run-archived", status="cancelled")
+        harness.archive_run("run-archived", from_status="cancelled")
+        _seed_cancel_run_receipts(harness, "run-archived")
+
+        counts = finalize_cancelled_run_budget_receipts(
+            harness.store, "run-archived", reason="run_cancelled"
+        )
+        rows = harness.store.read(
+            lambda repo: repo.execute(
+                "SELECT receipt_id, status FROM budget_receipts "
+                "WHERE run_id = ? ORDER BY receipt_id",
+                ("run-archived",),
+            ).fetchall()
+        )
+    finally:
+        harness.close()
+
+    assert counts == {"settled": 1, "released": 1}
+    by_id = {row[0]: row[1] for row in rows}
+    assert by_id["br-used-run-archived"] == "settled"
+    assert by_id["br-unused-run-archived"] == "released"
+
+
+def test_finalize_rejects_run_archived_from_non_cancelled(tmp_path: Path) -> None:
+    """Archived-from-failed keeps failing loudly; receipts stay untouched."""
+    from core.web.services.team_workflow.research_runtime.budget_authority_adapter import (
+        BudgetAuthorityError,
+        finalize_cancelled_run_budget_receipts,
+    )
+
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run(run_id="run-archived-failed", status="failed")
+        harness.archive_run("run-archived-failed", from_status="failed")
+        _seed_cancel_run_receipts(harness, "run-archived-failed")
+
+        with pytest.raises(BudgetAuthorityError) as exc_info:
+            finalize_cancelled_run_budget_receipts(
+                harness.store, "run-archived-failed", reason="run_cancelled"
+            )
+        rows = harness.store.read(
+            lambda repo: repo.execute(
+                "SELECT receipt_id, status FROM budget_receipts "
+                "WHERE run_id = ? ORDER BY receipt_id",
+                ("run-archived-failed",),
+            ).fetchall()
+        )
+    finally:
+        harness.close()
+
+    assert exc_info.value.code == "budget_cancel_state_mismatch"
+    # The failed finalize must not have terminalized anything.
+    assert all(row[1] not in ("settled", "released", "failed", "voided") for row in rows)

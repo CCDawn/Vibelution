@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import dataclasses
+import json
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from core.research.workflow.contracts import ActorRef, CommandRequest, WorkflowCommandKind
-from core.research.workflow.ledger import WorkflowLedgerStore
+from core.research.workflow.ledger import EventRecord, WorkflowLedgerStore
 from core.research.workflow.definition import build_challenge_cup_workflow_definition
 from core.research.workflow.definition_registry import register_or_resolve
 
@@ -131,6 +132,33 @@ class CommandHarness:
             )
 
         store.submit(mutate, force_flush=True).result(timeout=10)
+
+    def archive_run(self, run_id: str, *, from_status: str, team_id: str = "research-team") -> None:
+        """Replay the ledger archive: run row to ``archived`` plus the
+        ``run_archived`` event recording ``archivedFromStatus``."""
+        archived_at_ms = FIXED_NOW_MS + 5_000
+        event = EventRecord(
+            run_id=run_id,
+            sequence=2,
+            event_id=f"evt-archived-{run_id}",
+            run_version=2,
+            event_type="run_archived",
+            actor_json=json.dumps({"actorType": "user", "actorId": "u-1"}),
+            correlation_id="corr-archive",
+            causation_id=None,
+            payload_json=json.dumps(
+                {"archivedFromStatus": from_status, "archiveReason": "test"}
+            ),
+            occurred_at_ms=archived_at_ms,
+        )
+
+        def mutate(uow):
+            uow.repository.update_run_status(
+                run_id, team_id, "archived", archived_at_ms
+            )
+            uow.repository.insert_event(event)
+
+        self.store.submit(mutate, force_flush=True).result(timeout=10)
 
     def request(
         self,

@@ -840,3 +840,242 @@ def test_cleanup_worker_recovers_pending_intent_after_store_reopen(
         assert real_store.load_run_index("chat_turn")["activeRunId"] == ""
     finally:
         reopened.close()
+
+
+def test_cleanup_worker_settles_run_archived_from_cancelled(tmp_path, monkeypatch):
+    """Defect 16: a run archived FROM cancelled still finishes its cleanup.
+
+    The cleanup intent must settle the stranded receipts and ack instead of
+    hard-failing on every maintenance tick.
+    """
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.command_service."
+        "_collect_cancel_run_turn_pairs",
+        lambda _run_id: [],
+    )
+
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run(run_id="run-cancel", status="cancelled")
+        harness.archive_run("run-cancel", from_status="cancelled")
+        _seed_budget_receipt(
+            harness,
+            settled={
+                "invocations": {
+                    "inv-cancel": {
+                        "inputTokens": 100,
+                        "outputTokens": 50,
+                        "tokens": 150,
+                        "usageEstimated": False,
+                    }
+                },
+                "usage": {
+                    "inputTokens": 100,
+                    "outputTokens": 50,
+                    "tokens": 150,
+                    "usageEstimated": False,
+                },
+            },
+        )
+        cleanup = build_cancel_run_cleanup_record(
+            run_id="run-cancel",
+            command_id="cmd-cancel",
+            now_ms=1_750_000_010_000,
+        )
+
+        def seed_intent(uow):
+            uow.repository.insert_command(
+                build_command_record(
+                    command_id="cmd-cancel",
+                    run_id="run-cancel",
+                    idempotency_key="cancel:key",
+                )
+            )
+            uow.repository.insert_outbox(cleanup)
+
+        harness.store.submit(seed_intent, force_flush=True).result(timeout=10)
+        worker = CancelRunCleanupWorker(
+            store=harness.store,
+            now_provider=lambda: 1_750_000_010_000,
+            retry_delay_ms=0,
+        )
+
+        assert worker.run_once() == 1
+        receipt, cleanup_row = harness.store.read(
+            lambda repo: (
+                repo.execute(
+                    "SELECT status FROM budget_receipts WHERE receipt_id = ?",
+                    ("br-cancel",),
+                ).fetchone(),
+                repo.execute(
+                    "SELECT status FROM outbox_actions WHERE idempotency_key = ?",
+                    ("cancel_run_cleanup:run-cancel",),
+                ).fetchone(),
+            )
+        )
+    finally:
+        harness.close()
+
+    assert receipt[0] == "settled"
+    assert cleanup_row[0] == "succeeded"
+
+
+def test_cleanup_worker_survives_poisoned_entry_and_continues_queue(
+    tmp_path, monkeypatch
+):
+    """One failing entry must not kill the tick nor starve later entries."""
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.command_service."
+        "_collect_cancel_run_turn_pairs",
+        lambda _run_id: [],
+    )
+
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        # The poisoned run's finalize raises (budget_cancel_state_mismatch):
+        # its run is neither cancelled nor archived-from-cancelled.
+        harness.seed_run(run_id="run-poison", status="running")
+        harness.seed_run(run_id="run-ok", status="cancelled")
+        _seed_budget_receipt(
+            harness,
+            run_id="run-ok",
+            receipt_id="br-ok",
+            settled={
+                "usage": {
+                    "inputTokens": 10,
+                    "outputTokens": 5,
+                    "tokens": 15,
+                    "usageEstimated": False,
+                }
+            },
+        )
+        poison = build_cancel_run_cleanup_record(
+            run_id="run-poison",
+            command_id="cmd-poison",
+            now_ms=1_750_000_009_000,
+        )
+        ok = build_cancel_run_cleanup_record(
+            run_id="run-ok",
+            command_id="cmd-ok",
+            now_ms=1_750_000_010_000,
+        )
+
+        def seed_intents(uow):
+            uow.repository.insert_command(
+                build_command_record(
+                    command_id="cmd-poison",
+                    run_id="run-poison",
+                    idempotency_key="poison:key",
+                )
+            )
+            uow.repository.insert_command(
+                build_command_record(
+                    command_id="cmd-ok",
+                    run_id="run-ok",
+                    idempotency_key="ok:key",
+                )
+            )
+            uow.repository.insert_outbox(poison)
+            uow.repository.insert_outbox(ok)
+
+        harness.store.submit(seed_intents, force_flush=True).result(timeout=10)
+        worker = CancelRunCleanupWorker(
+            store=harness.store,
+            now_provider=lambda: 1_750_000_010_000,
+            retry_delay_ms=0,
+        )
+
+        # Must not raise even though the first leased entry hard-fails.
+        handled = worker.run_once(limit=4)
+        rows = harness.store.submit(
+            lambda uow: uow.repository.execute(
+                """
+                SELECT idempotency_key, status, attempt_count, last_problem_json
+                FROM outbox_actions
+                WHERE idempotency_key LIKE 'cancel_run_cleanup:%'
+                ORDER BY idempotency_key
+                """
+            ).fetchall(),
+            force_flush=True,
+        ).result(timeout=10)
+        receipt = harness.store.read(
+            lambda repo: repo.execute(
+                "SELECT status FROM budget_receipts WHERE receipt_id = ?",
+                ("br-ok",),
+            ).fetchone()
+        )
+    finally:
+        harness.close()
+
+    assert handled == 2
+    by_key = {row[0]: row for row in rows}
+    poison_row = by_key["cancel_run_cleanup:run-poison"]
+    ok_row = by_key["cancel_run_cleanup:run-ok"]
+    assert ok_row[1] == "succeeded"
+    # The poisoned entry stays retryable (bounded), never process-fatal.
+    assert poison_row[1] == "pending"
+    assert poison_row[2] == 1
+    assert "cancel_run_cleanup_transient" in str(poison_row[3])
+    assert receipt[0] == "settled"
+
+
+def test_cleanup_worker_parks_persistent_failure_after_attempt_cap(
+    tmp_path, monkeypatch
+):
+    """A permanently failing intent parks terminally instead of looping."""
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.command_service."
+        "_collect_cancel_run_turn_pairs",
+        lambda _run_id: [],
+    )
+
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run(run_id="run-poison", status="running")
+        cleanup = build_cancel_run_cleanup_record(
+            run_id="run-poison",
+            command_id="cmd-poison",
+            now_ms=1_750_000_010_000,
+        )
+
+        def seed_intent(uow):
+            uow.repository.insert_command(
+                build_command_record(
+                    command_id="cmd-poison",
+                    run_id="run-poison",
+                    idempotency_key="poison:key",
+                )
+            )
+            uow.repository.insert_outbox(cleanup)
+            # One attempt already consumed; the lease below is the last one.
+            uow.repository.execute(
+                "UPDATE outbox_actions SET attempt_count = 1 WHERE action_id = ?",
+                (cleanup.action_id,),
+            )
+
+        harness.store.submit(seed_intent, force_flush=True).result(timeout=10)
+        worker = CancelRunCleanupWorker(
+            store=harness.store,
+            now_provider=lambda: 1_750_000_010_000,
+            retry_delay_ms=0,
+            max_attempts=2,
+        )
+
+        worker.run_once(limit=4)
+        row = harness.store.submit(
+            lambda uow: uow.repository.execute(
+                "SELECT status, last_problem_json FROM outbox_actions "
+                "WHERE idempotency_key = ?",
+                ("cancel_run_cleanup:run-poison",),
+            ).fetchone(),
+            force_flush=True,
+        ).result(timeout=10)
+
+        # A parked entry is terminal: the next tick leases nothing.
+        handled_after_park = worker.run_once(limit=4)
+    finally:
+        harness.close()
+
+    assert row[0] == "failed"
+    assert "cancel_run_cleanup_parked" in str(row[1])
+    assert handled_after_park == 0

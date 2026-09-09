@@ -31,6 +31,12 @@ CANCEL_RUN_CLEANUP_PAYLOAD_KIND = "cancel_run_chat_turn_cleanup"
 CANCEL_RUN_CLEANUP_IDEMPOTENCY_PREFIX = "cancel_run_cleanup:"
 DEFAULT_CANCEL_RUN_CLEANUP_LEASE_MS = 30_000
 DEFAULT_CANCEL_RUN_CLEANUP_RETRY_DELAY_MS = 1_000
+# Bounded failure budget for one cleanup intent.  Transient failures are
+# requeued WITHOUT resetting ``attempt_count`` so the lease attempt gate stays
+# meaningful; once this cap is reached the intent is parked terminally as
+# ``failed`` (dead-letter) instead of retrying forever.  Only the legitimate
+# long wait for chat turns to reach a terminal state still resets attempts.
+DEFAULT_CANCEL_RUN_CLEANUP_MAX_ATTEMPTS = 8
 
 
 def cancel_run_cleanup_idempotency_key(run_id: str) -> str:
@@ -85,12 +91,14 @@ class CancelRunCleanupWorker:
         lease_ms: int = DEFAULT_CANCEL_RUN_CLEANUP_LEASE_MS,
         now_provider: Callable[[], int] | None = None,
         retry_delay_ms: int = DEFAULT_CANCEL_RUN_CLEANUP_RETRY_DELAY_MS,
+        max_attempts: int = DEFAULT_CANCEL_RUN_CLEANUP_MAX_ATTEMPTS,
     ) -> None:
         self._store = store
         self._owner = str(owner_id or "cancel-run-cleanup-worker").strip()
         self._lease_ms = max(1, int(lease_ms))
         self._now = now_provider or (lambda: int(time.time() * 1000))
         self._retry_delay_ms = max(0, int(retry_delay_ms))
+        self._max_attempts = max(1, int(max_attempts))
 
     def run_once(self, limit: int = 4) -> int:
         """Process one resident-tick batch and return handled work count."""
@@ -109,6 +117,15 @@ class CancelRunCleanupWorker:
         return repaired + len(leased)
 
     def _handle(self, action: Any) -> None:
+        """Handle one leased cleanup intent without ever raising.
+
+        A per-run cleanup failure is a poisoned queue entry, not a process
+        fault: the resident maintenance tick drives this worker on backend
+        startup/shutdown drains, so any exception escaping ``_handle``
+        (including a failure of the ack/requeue write itself, e.g. the writer
+        shutting down) kills the whole backend in a crash loop.  Every path
+        here ends in an ack, a bounded requeue, or a terminal parked failure.
+        """
         run_id = ""
         payload: dict[str, Any] = {}
         try:
@@ -120,7 +137,7 @@ class CancelRunCleanupWorker:
             pass
 
         if str(payload.get("kind") or "").strip() != CANCEL_RUN_CLEANUP_PAYLOAD_KIND or not run_id:
-            self._fail(
+            self._safe_fail(
                 action,
                 problem={
                     "code": "invalid_cancel_run_cleanup_action",
@@ -135,12 +152,15 @@ class CancelRunCleanupWorker:
                 self._finalize_budget_receipts(run_id)
         except Exception as exc:
             logger.exception(
-                "cancel_run cleanup attempt failed: runId=%s actionId=%s",
+                "cancel_run cleanup attempt failed: runId=%s actionId=%s attempt=%s/%s",
                 run_id,
                 str(getattr(action, "action_id", "") or ""),
+                int(getattr(action, "attempt_count", 0) or 0),
+                self._max_attempts,
             )
-            self._requeue(
+            self._park_or_requeue(
                 action,
+                run_id=run_id,
                 problem={
                     "code": "cancel_run_cleanup_transient",
                     "detail": str(exc)[:400],
@@ -149,18 +169,58 @@ class CancelRunCleanupWorker:
             return
 
         if complete:
-            self._ack(action)
+            # The budget finalize above is idempotent (terminal receipts are
+            # skipped), so a failed ack can safely fall back to a requeue and
+            # re-run the settlement on the next tick.
+            self._safe_ack(action, run_id=run_id)
         else:
             # A stop request may only move the live turn to ``stopping``.  Do
             # not acknowledge until the persisted terminal record and its
-            # activeRunId cleanup are both observable on the next read.
-            self._requeue(
+            # activeRunId cleanup are both observable on the next read.  This
+            # is a legitimate long wait, so the attempt budget is reset.
+            self._safe_requeue(
                 action,
+                run_id=run_id,
                 problem={
                     "code": "cancel_run_cleanup_pending",
                     "detail": "one or more chat turns are not terminal yet",
                 },
+                reset_attempts=True,
             )
+
+    def _park_or_requeue(
+        self,
+        action: Any,
+        *,
+        run_id: str,
+        problem: dict[str, str],
+    ) -> None:
+        """Bound a failing intent: requeue within the attempt cap, park after.
+
+        Requeueing preserves ``attempt_count`` so the ledger's lease attempt
+        gate stays accurate; at the cap the intent is marked terminally
+        ``failed`` (persistent dead-letter with the recorded problem) so a
+        permanently poisoned entry cannot re-arm on every tick.
+        """
+        attempt_count = int(getattr(action, "attempt_count", 0) or 0)
+        if attempt_count >= self._max_attempts:
+            logger.error(
+                "cancel_run cleanup parked after %d attempts: runId=%s actionId=%s code=%s",
+                attempt_count,
+                run_id,
+                str(getattr(action, "action_id", "") or ""),
+                str(problem.get("code") or ""),
+            )
+            self._safe_fail(
+                action,
+                problem={
+                    "code": "cancel_run_cleanup_parked",
+                    "attempts": str(attempt_count),
+                    "detail": str(problem.get("detail") or "")[:400],
+                },
+            )
+            return
+        self._safe_requeue(action, run_id=run_id, problem=problem, reset_attempts=False)
 
     def _repair_completed_cleanup_budget_receipts(self, *, limit: int) -> int:
         """Repair cancellations completed by runtimes that omitted budgets."""
@@ -233,6 +293,56 @@ class CancelRunCleanupWorker:
                 complete = False
         return complete
 
+    def _safe_ack(self, action: Any, *, run_id: str) -> None:
+        try:
+            self._ack(action)
+        except Exception:
+            # The settlement succeeded; the ack write failing (e.g. the ledger
+            # writer shutting down during a drain) must not escape.  Fall back
+            # to a bounded requeue — the idempotent finalize makes the retry
+            # harmless, and the lease gates prevent unbounded retries.
+            logger.exception(
+                "cancel_run cleanup ack failed: runId=%s actionId=%s",
+                run_id,
+                str(getattr(action, "action_id", "") or ""),
+            )
+            self._park_or_requeue(
+                action,
+                run_id=run_id,
+                problem={
+                    "code": "cancel_run_cleanup_ack_failed",
+                    "detail": "cleanup succeeded but the ack write failed",
+                },
+            )
+
+    def _safe_requeue(
+        self,
+        action: Any,
+        *,
+        run_id: str,
+        problem: dict[str, str],
+        reset_attempts: bool,
+    ) -> None:
+        try:
+            self._requeue(action, problem=problem, reset_attempts=reset_attempts)
+        except Exception:
+            # The lease will expire and the recovery gates re-arm or retire
+            # the action; never propagate into the resident tick.
+            logger.exception(
+                "cancel_run cleanup requeue failed: runId=%s actionId=%s",
+                run_id,
+                str(getattr(action, "action_id", "") or ""),
+            )
+
+    def _safe_fail(self, action: Any, *, problem: dict[str, str]) -> None:
+        try:
+            self._fail(action, problem=problem)
+        except Exception:
+            logger.exception(
+                "cancel_run cleanup terminal-fail write failed: actionId=%s",
+                str(getattr(action, "action_id", "") or ""),
+            )
+
     def _ack(self, action: Any) -> None:
         now_ms = self._now()
 
@@ -241,7 +351,13 @@ class CancelRunCleanupWorker:
 
         self._store.submit(mutate, force_flush=True).result(timeout=30)
 
-    def _requeue(self, action: Any, *, problem: dict[str, str]) -> None:
+    def _requeue(
+        self,
+        action: Any,
+        *,
+        problem: dict[str, str],
+        reset_attempts: bool = False,
+    ) -> None:
         now_ms = self._now()
         outbox_api.requeue_action(
             self._store,
@@ -250,10 +366,12 @@ class CancelRunCleanupWorker:
             now_ms,
             retry_at_ms=now_ms + self._retry_delay_ms,
             problem_json=json.dumps(problem, ensure_ascii=False, sort_keys=True),
-            # A live turn may legitimately take longer than the generic
-            # transient-attempt budget.  The lease itself remains protected
-            # by the ledger attempt gate if the worker process dies.
-            reset_attempts=True,
+            # Only the pending-turn wait resets the attempt budget (a live
+            # turn may legitimately take longer than any transient-attempt
+            # budget).  Failure requeues keep the count so the cap parks the
+            # entry instead of looping forever.  The lease itself remains
+            # protected by the ledger attempt gate if the worker dies.
+            reset_attempts=reset_attempts,
         )
 
     def _fail(self, action: Any, *, problem: dict[str, str]) -> None:
@@ -326,6 +444,7 @@ __all__ = [
     "CANCEL_RUN_CLEANUP_IDEMPOTENCY_PREFIX",
     "CANCEL_RUN_CLEANUP_OUTBOX_KIND",
     "CANCEL_RUN_CLEANUP_PAYLOAD_KIND",
+    "DEFAULT_CANCEL_RUN_CLEANUP_MAX_ATTEMPTS",
     "CancelRunCleanupWorker",
     "build_cancel_run_cleanup_record",
     "cancel_run_cleanup_idempotency_key",
