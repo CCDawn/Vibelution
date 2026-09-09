@@ -2489,3 +2489,393 @@ def test_parent_reconcile_keeps_no_active_work_landing_on_incident_only_shape(
         assert "landing" not in payload
     finally:
         commands.close()
+
+
+# --------------------------------------------------------------------------
+# 缺陷 ⑳：auto-gate ready handoff 无人接受 → 下游重试永久 412。
+#
+# 生产现场（run-1ca97605acf3，ho-f67bc7db）：上游 attempt 经 receipt 写回
+# 路径成功，不经 graph worker 的成功收尾（唯一的 auto-accept 执行者），
+# auto handoff 永远停在 ready；readiness 用 handoff_not_accepted 钉死下游
+# 重试（412 node_not_ready），而产品没有任何按钮/后台执行者能接受它。
+# 修复：reconcile 新增守门 pass——status='ready' AND gate_kind='auto' AND
+# from attempt succeeded 的孤儿 handoff 就地接受；人工门（语义归
+# auto_accept_knowledge_handoffs 等专属路径）与非 succeeded from-attempt
+# （stale/failed 意味着 supersede 链还会有新 handoff）一律不动。
+# --------------------------------------------------------------------------
+
+
+def _seed_handoff(
+    uow,
+    *,
+    handoff_id: str,
+    run_id: str,
+    from_node_run_id: str,
+    to_node_id: str = "knowledge_ingestion",
+    gate_kind: str = "auto",
+    status: str = "ready",
+    offered_at_ms: int = FIXED_NOW_MS,
+) -> None:
+    uow.repository.insert_handoff(
+        handoff_id=handoff_id,
+        run_id=run_id,
+        edge_id="evidence_relations->knowledge_ingestion",
+        from_node_run_id=from_node_run_id,
+        to_node_id=to_node_id,
+        to_node_run_id=None,
+        gate_kind=gate_kind,
+        input_snapshot_hash="h" * 64,
+        offered_at_ms=offered_at_ms,
+    )
+    # insert_handoff 固定以 'pending' 落行；按目标状态走合法迁移链。
+    uow.repository.update_handoff_status(handoff_id, "ready", offered_at_ms)
+    if status == "accepted":
+        uow.repository.update_handoff_status(
+            handoff_id,
+            "accepted",
+            offered_at_ms,
+            accepted_by_json=json.dumps(
+                {"actorType": "system", "actorId": "graph-worker"}
+            ),
+        )
+
+
+def _handoff_row(commands: CommandHarness, handoff_id: str) -> tuple:
+    return commands.store.submit(
+        lambda uow: uow.repository.get_handoff(handoff_id),
+        force_flush=True,
+    ).result(timeout=10)
+
+
+def _ingestion_handoff_blocker_codes(
+    commands: CommandHarness, run_id: str
+) -> list[str]:
+    """Real-context readiness for knowledge_ingestion（生产 412 的判定面）。
+
+    Harness 默认 FakeDomainContext 不读账本 handoff，必须用
+    RealDomainReadinessContext 才能复现 handoff_not_accepted blocker。
+    """
+    from core.research.workflow.knowledge_sideflow_definition import (
+        KNOWLEDGE_SIDEFLOW_NODE_IDS,
+        build_knowledge_sideflow_workflow_definition,
+    )
+    from core.web.services.team_workflow.research_runtime.readiness.common import (
+        RunSnapshot as ReadinessRunSnapshot,
+    )
+    from core.web.services.team_workflow.research_runtime.readiness.common import (
+        evaluate_common,
+    )
+    from core.web.services.team_workflow.research_runtime.real_readiness_context import (
+        RealDomainReadinessContext,
+    )
+
+    record = commands.store.get_run(run_id)
+    run_snapshot = ReadinessRunSnapshot(
+        run_id=record.run_id,
+        team_id=record.team_id,
+        workflow_id=record.workflow_id,
+        workflow_version_id=record.workflow_version_id,
+        project_id=record.project_id,
+        question_id=record.question_id,
+        status=record.status,
+        run_version=record.run_version,
+        input_snapshot_hash=record.input_snapshot_hash,
+    )
+    sideflow = build_knowledge_sideflow_workflow_definition()
+    node = next(n for n in sideflow.nodes if n.nodeId == "knowledge_ingestion")
+    result = evaluate_common(
+        run=run_snapshot,
+        node=node,
+        requested_team_id=record.team_id,
+        definition_node_ids=set(KNOWLEDGE_SIDEFLOW_NODE_IDS),
+        live_attempt_count=0,
+        context=RealDomainReadinessContext(commands.store),
+    )
+    return [b.code for b in result.blockers]
+
+
+def _seed_orphan_auto_handoff_run(uow, run_id: str) -> None:
+    """复刻生产现场：succeeded from-attempt + ready auto handoff + blocked 下游。"""
+    uow.repository.insert_run(
+        build_run_record(
+            workflow_version_id=_PINNED_WORKFLOW_VERSION_ID,
+            run_id=run_id,
+            status="blocked",
+            run_version=3,
+            last_event_sequence=8,
+        )
+    )
+    uow.repository.insert_command(
+        build_command_record(
+            command_id=f"cmd-{run_id}",
+            run_id=run_id,
+            idempotency_key=f"key:{run_id}",
+            node_id="knowledge_ingestion",
+        )
+    )
+    # 上游 a2 成功且收尾正常：旧 handoff 已被 worker 接受（ho-be23f2d9）。
+    uow.repository.insert_attempt(
+        _attempt(
+            "evidence_relations",
+            attempt=2,
+            status="succeeded",
+            run_id=run_id,
+            command_id=f"cmd-{run_id}",
+        )
+    )
+    _seed_handoff(
+        uow,
+        handoff_id=f"ho-{run_id}-accepted-a2",
+        run_id=run_id,
+        from_node_run_id=f"nr-{run_id}-evidence_relations-a2",
+        status="accepted",
+        offered_at_ms=FIXED_NOW_MS - 2_000,
+    )
+    # 上游 a3 经 receipt 写回路径成功：无人收尾，auto handoff 永远 ready
+    # （ho-f67bc7db，input_snapshot_hash 与前者相同）。
+    uow.repository.insert_attempt(
+        _attempt(
+            "evidence_relations",
+            attempt=3,
+            status="succeeded",
+            run_id=run_id,
+            command_id=f"cmd-{run_id}",
+        )
+    )
+    _seed_handoff(
+        uow,
+        handoff_id=f"ho-{run_id}-orphan-a3",
+        run_id=run_id,
+        from_node_run_id=f"nr-{run_id}-evidence_relations-a3",
+    )
+    # 下游 attempt 卡 blocked，readiness 被 handoff_not_accepted 钉死。
+    uow.repository.insert_attempt(
+        _attempt(
+            "knowledge_ingestion",
+            status="blocked",
+            problem=_READINESS_PROBLEM,
+            run_id=run_id,
+            command_id=f"cmd-{run_id}",
+        )
+    )
+
+
+def test_reconcile_accepts_orphaned_ready_auto_handoff(tmp_path: Path) -> None:
+    """现场复刻：对账接受孤儿 auto handoff，readiness blocker 消失。"""
+    commands = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        run_id = "run-orphan-auto-handoff"
+        store = commands.store
+        store.submit(
+            lambda uow: _seed_orphan_auto_handoff_run(uow, run_id),
+            force_flush=True,
+        ).result(timeout=10)
+
+        # 对账前：生产现场的 412 blocker 真实存在。
+        assert "handoff_not_accepted" in _ingestion_handoff_blocker_codes(
+            commands, run_id
+        )
+
+        commands.service.submit(
+            commands.request(
+                command=WorkflowCommandKind.RECONCILE_RUN,
+                run_id=run_id,
+                node_id=None,
+                expected_run_version=3,
+                idempotency_key="ui:reconcile-orphan",
+            )
+        )
+
+        orphan = _handoff_row(commands, f"ho-{run_id}-orphan-a3")
+        assert orphan[8] == "accepted"
+        assert json.loads(orphan[9]) == {"actorType": "system", "actorId": "reconcile"}
+        assert orphan[13] == FIXED_NOW_MS + 1000  # accepted_at_ms = 对账时钟
+        # 更早的 accepted handoff 原样保留（accepted_by 不被改写）。
+        older = _handoff_row(commands, f"ho-{run_id}-accepted-a2")
+        assert older[8] == "accepted"
+        assert json.loads(older[9]) == {
+            "actorType": "system",
+            "actorId": "graph-worker",
+        }
+
+        # blocker 消失：重试 precheck 的 handoff 闸不再拦截。
+        assert "handoff_not_accepted" not in _ingestion_handoff_blocker_codes(
+            commands, run_id
+        )
+        events = [
+            event
+            for event in store.list_events(run_id)
+            if event.event_type == "run_blocked"
+        ]
+        payload = json.loads(events[-1].payload_json)
+        assert payload["autoAcceptedHandoffIds"] == [f"ho-{run_id}-orphan-a3"]
+    finally:
+        commands.close()
+
+
+def test_reconcile_does_not_touch_human_gate_handoff(tmp_path: Path) -> None:
+    """人工门语义保留：gate_kind 非 auto 的 ready handoff 一律不动。"""
+    commands = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        run_id = "run-human-gate-handoff"
+        store = commands.store
+
+        def seed(uow):
+            _seed_orphan_auto_handoff_run(uow, run_id)
+            # 现场之上追加一枚人工门 ready handoff（另一条边）。
+            _seed_handoff(
+                uow,
+                handoff_id=f"ho-{run_id}-human",
+                run_id=run_id,
+                from_node_run_id=f"nr-{run_id}-knowledge_ingestion-a1",
+                to_node_id="knowledge_handoff",
+                gate_kind="human",
+            )
+
+        store.submit(seed, force_flush=True).result(timeout=10)
+
+        commands.service.submit(
+            commands.request(
+                command=WorkflowCommandKind.RECONCILE_RUN,
+                run_id=run_id,
+                node_id=None,
+                expected_run_version=3,
+                idempotency_key="ui:reconcile-human-gate",
+            )
+        )
+
+        human = _handoff_row(commands, f"ho-{run_id}-human")
+        assert human[8] == "ready"
+        assert human[9] is None and human[13] is None
+        events = [
+            event
+            for event in store.list_events(run_id)
+            if event.event_type == "run_blocked"
+        ]
+        payload = json.loads(events[-1].payload_json)
+        assert payload["autoAcceptedHandoffIds"] == [f"ho-{run_id}-orphan-a3"]
+    finally:
+        commands.close()
+
+
+def test_reconcile_does_not_touch_non_succeeded_from_attempt_handoff(
+    tmp_path: Path,
+) -> None:
+    """from attempt 非 succeeded（stale/failed）的 ready auto handoff 不动。"""
+    commands = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        run_id = "run-non-succeeded-from"
+        store = commands.store
+
+        def seed(uow):
+            _seed_orphan_auto_handoff_run(uow, run_id)
+            # stale from-attempt：supersede 链还会提供新 handoff。
+            uow.repository.insert_attempt(
+                _attempt(
+                    "knowledge_handoff",
+                    status="stale",
+                    run_id=run_id,
+                    command_id=f"cmd-{run_id}",
+                )
+            )
+            _seed_handoff(
+                uow,
+                handoff_id=f"ho-{run_id}-stale-from",
+                run_id=run_id,
+                from_node_run_id=f"nr-{run_id}-knowledge_handoff-a1",
+                to_node_id="report_publication",
+            )
+            # failed from-attempt 同样不动。
+            uow.repository.insert_attempt(
+                _attempt(
+                    "report_publication",
+                    attempt=2,
+                    status="failed",
+                    run_id=run_id,
+                    command_id=f"cmd-{run_id}",
+                )
+            )
+            _seed_handoff(
+                uow,
+                handoff_id=f"ho-{run_id}-failed-from",
+                run_id=run_id,
+                from_node_run_id=f"nr-{run_id}-report_publication-a2",
+                to_node_id="smoke_gate",
+            )
+
+        store.submit(seed, force_flush=True).result(timeout=10)
+
+        commands.service.submit(
+            commands.request(
+                command=WorkflowCommandKind.RECONCILE_RUN,
+                run_id=run_id,
+                node_id=None,
+                expected_run_version=3,
+                idempotency_key="ui:reconcile-non-succeeded",
+            )
+        )
+
+        for handoff_id in (f"ho-{run_id}-stale-from", f"ho-{run_id}-failed-from"):
+            row = _handoff_row(commands, handoff_id)
+            assert row[8] == "ready"
+            assert row[13] is None
+        events = [
+            event
+            for event in store.list_events(run_id)
+            if event.event_type == "run_blocked"
+        ]
+        payload = json.loads(events[-1].payload_json)
+        assert payload["autoAcceptedHandoffIds"] == [f"ho-{run_id}-orphan-a3"]
+    finally:
+        commands.close()
+
+
+def test_reconcile_auto_handoff_accept_is_idempotent(tmp_path: Path) -> None:
+    """幂等：第二次对账不再产生新的接受动作，accepted_at_ms 不变。"""
+    commands = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        run_id = "run-orphan-auto-idem"
+        store = commands.store
+        store.submit(
+            lambda uow: _seed_orphan_auto_handoff_run(uow, run_id),
+            force_flush=True,
+        ).result(timeout=10)
+
+        commands.service.submit(
+            commands.request(
+                command=WorkflowCommandKind.RECONCILE_RUN,
+                run_id=run_id,
+                node_id=None,
+                expected_run_version=3,
+                idempotency_key="ui:reconcile-orphan-idem-1",
+            )
+        )
+        commands.service.submit(
+            commands.request(
+                command=WorkflowCommandKind.RECONCILE_RUN,
+                run_id=run_id,
+                node_id=None,
+                expected_run_version=4,
+                idempotency_key="ui:reconcile-orphan-idem-2",
+            )
+        )
+
+        orphan = _handoff_row(commands, f"ho-{run_id}-orphan-a3")
+        assert orphan[8] == "accepted"
+        assert orphan[13] == FIXED_NOW_MS + 1000  # 首次对账时间，未被改写
+        # 每次 reconcile 恰好一条对账事件；第二次的接受清单为空。
+        events = [
+            event
+            for event in store.list_events(run_id)
+            if event.event_type == "run_blocked"
+        ]
+        assert [event.event_type for event in store.list_events(run_id)] == [
+            "run_blocked",
+            "run_blocked",
+        ]
+        assert json.loads(events[0].payload_json)["autoAcceptedHandoffIds"] == [
+            f"ho-{run_id}-orphan-a3"
+        ]
+        assert json.loads(events[1].payload_json)["autoAcceptedHandoffIds"] == []
+    finally:
+        commands.close()
