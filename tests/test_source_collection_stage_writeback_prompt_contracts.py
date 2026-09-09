@@ -522,3 +522,177 @@ def test_merge_keeps_fail_closed_for_undeclared_semantic_hubs() -> None:
     assert summary["semanticBindingEdgeCount"] == 0
     dropped = graph["missingLinks"][0]
     assert dropped["targetCandidateId"] == "rh_claim"
+
+
+def test_merge_promotes_stale_dangling_edge_once_endpoint_registered() -> None:
+    # 生产实锤（SCI-014）：早期写回在主题节点注册前判悬空的 missingLink 被
+    # 逐轮照抄，completionGate 永久失败。目标端点现已是注册节点时，合并必须
+    # 对继承悬空边用最终注册表重判并恢复为正常边。
+    stored = {
+        "nodes": [
+            {"candidateId": "candidate-20260901-e3d6e8eb", "title": "3DP Pharma Paper"},
+            {
+                "candidateId": "source-theme:theme-3dp-pharma",
+                "candidateType": "source_topic",
+                "title": "3D Printing Pharma",
+            },
+        ],
+        "edges": [],
+        "missingLinks": [
+            {
+                "sourceCandidateId": "candidate-20260901-e3d6e8eb",
+                "targetCandidateId": "source-theme:theme-3dp-pharma",
+                "relation": "provides_manufacturing_mechanism",
+                "edgeState": "candidate_only",
+            },
+            # 无端点的研究性缺口没有边身份：不参与重判，保留原样。
+            {"id": "gap-cross-domain", "description": "缺少跨被试重复验证。"},
+        ],
+    }
+
+    graph = _merge_source_collection_stage_writeback_agent_graph(stored, {})
+
+    summary = graph["summary"]
+    assert summary["edgeCount"] == 1
+    assert summary["danglingEdgeCount"] == 0
+    assert summary["recoveredDanglingEdgeCount"] == 1
+    assert summary["missingLinkCount"] == 1
+    assert graph["edges"] == [
+        {
+            "sourceCandidateId": "candidate-20260901-e3d6e8eb",
+            "targetCandidateId": "source-theme:theme-3dp-pharma",
+            "relation": "provides_manufacturing_mechanism",
+            "edgeState": "candidate_only",
+        }
+    ]
+    assert graph["missingLinks"] == [
+        {"id": "gap-cross-domain", "description": "缺少跨被试重复验证。"}
+    ]
+
+
+def test_merge_promotes_stale_dangling_edge_via_theme_alias_resolution() -> None:
+    # 悬空边端点是主题 label 的大小写变体（非精确 candidateId）：最终注册表
+    # 的确定性规范化解析命中后同样晋升，端点改写回真实 id。
+    stored = {
+        "nodes": [
+            {"candidateId": "candidate-20260901-e3d6e8eb", "title": "3DP Pharma Paper"},
+            {
+                "candidateId": "source-theme:theme-3dp-pharma",
+                "candidateType": "source_topic",
+                "title": "3D Printing Pharma",
+            },
+        ],
+        "edges": [],
+        "missingLinks": [
+            {
+                "sourceCandidateId": "candidate-20260901-e3d6e8eb",
+                "targetCandidateId": "3d printing PHARMA",
+                "relation": "provides_manufacturing_mechanism",
+                "edgeState": "candidate_only",
+            }
+        ],
+    }
+
+    graph = _merge_source_collection_stage_writeback_agent_graph(stored, {})
+
+    summary = graph["summary"]
+    assert summary["edgeCount"] == 1
+    assert summary["danglingEdgeCount"] == 0
+    assert summary["recoveredDanglingEdgeCount"] == 1
+    assert summary["semanticBindingEdgeCount"] == 1
+    assert graph["missingLinks"] == []
+    assert graph["edges"][0]["targetCandidateId"] == "source-theme:theme-3dp-pharma"
+
+
+def test_merge_keeps_unresolvable_stale_dangling_edge_fail_closed() -> None:
+    # 端点在最终节点表仍无命中：保持 fail-closed，缺口留 missingLinks 并计数。
+    stored = {
+        "nodes": [{"candidateId": "candidate-20260901-e3d6e8eb"}],
+        "edges": [],
+        "missingLinks": [
+            {
+                "sourceCandidateId": "candidate-20260901-e3d6e8eb",
+                "targetCandidateId": "rh_claim",
+                "relation": "provides_manufacturing_mechanism",
+                "edgeState": "candidate_only",
+            }
+        ],
+    }
+
+    graph = _merge_source_collection_stage_writeback_agent_graph(stored, {})
+
+    summary = graph["summary"]
+    assert summary["edgeCount"] == 0
+    assert summary["danglingEdgeCount"] == 1
+    assert summary["recoveredDanglingEdgeCount"] == 0
+    assert len(graph["missingLinks"]) == 1
+
+
+def test_merge_replay_of_recovered_dangling_edge_is_idempotent() -> None:
+    stored = {
+        "nodes": [
+            {"candidateId": "candidate-20260901-e3d6e8eb"},
+            {
+                "candidateId": "source-theme:theme-3dp-pharma",
+                "candidateType": "source_topic",
+                "title": "3D Printing Pharma",
+            },
+        ],
+        "edges": [],
+        "missingLinks": [
+            {
+                "sourceCandidateId": "candidate-20260901-e3d6e8eb",
+                "targetCandidateId": "source-theme:theme-3dp-pharma",
+                "relation": "provides_manufacturing_mechanism",
+                "edgeState": "candidate_only",
+            }
+        ],
+    }
+
+    first = _merge_source_collection_stage_writeback_agent_graph(stored, {})
+    second = _merge_source_collection_stage_writeback_agent_graph(first, {})
+
+    assert second["edges"] == first["edges"]
+    assert second["missingLinks"] == []
+    assert second["summary"]["edgeCount"] == 1
+    assert second["summary"]["danglingEdgeCount"] == 0
+    assert second["summary"]["recoveredDanglingEdgeCount"] == 0
+
+
+def test_merge_promotes_dangling_edge_without_duplicating_existing_edge() -> None:
+    # 边已在 edges、缺口条目残留（同三元组）：只移除缺口，不追加重复边。
+    stored = {
+        "nodes": [
+            {"candidateId": "candidate-20260901-e3d6e8eb"},
+            {
+                "candidateId": "source-theme:theme-3dp-pharma",
+                "candidateType": "source_topic",
+                "title": "3D Printing Pharma",
+            },
+        ],
+        "edges": [
+            {
+                "sourceCandidateId": "candidate-20260901-e3d6e8eb",
+                "targetCandidateId": "source-theme:theme-3dp-pharma",
+                "relation": "provides_manufacturing_mechanism",
+                "edgeState": "candidate_only",
+            }
+        ],
+        "missingLinks": [
+            {
+                "sourceCandidateId": "candidate-20260901-e3d6e8eb",
+                "targetCandidateId": "source-theme:theme-3dp-pharma",
+                "relation": "provides_manufacturing_mechanism",
+                "edgeState": "candidate_only",
+            }
+        ],
+    }
+
+    graph = _merge_source_collection_stage_writeback_agent_graph(stored, {})
+
+    summary = graph["summary"]
+    assert summary["edgeCount"] == 1
+    assert summary["danglingEdgeCount"] == 0
+    assert summary["recoveredDanglingEdgeCount"] == 1
+    assert summary["semanticBindingEdgeCount"] == 0
+    assert graph["missingLinks"] == []

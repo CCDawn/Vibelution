@@ -2706,6 +2706,45 @@ def _merge_source_collection_stage_writeback_agent_graph(
                 # （证据修正不被旧值冻结），不追加重复条目。
                 missing_links[existing_position] = {**missing_links[existing_position], **edge}
         seen_edges.add(edge_key)
+    # 继承悬空边对最终注册表重判：早期写回在目标节点注册前降级的 missingLink
+    # 会被逐轮照抄、永久悬空。这里对携带完整三元组的存量条目，用合并完成后
+    # 的最终节点表重建注册表重新解析：两端都命中才恢复为正常边（与既有边按
+    # (source,target,relation) 查重，已存在同 key 边则只移除缺口不重复加边）；
+    # 仍解析不到的条目保持原 fail-closed 语义留在 missingLinks，不放宽门禁。
+    final_endpoint_registry = build_relation_endpoint_registry(nodes)
+    recovered_dangling_edge_count = 0
+    recovered_missing_link_indexes: set[int] = set()
+    for index, item in enumerate(missing_links):
+        missing_key = _missing_link_identity_key(item)
+        if missing_key is None:
+            continue
+        source_id, relation, target_id = missing_key
+        effective_source = resolve_relation_endpoint(source_id, final_endpoint_registry)
+        effective_target = resolve_relation_endpoint(target_id, final_endpoint_registry)
+        if not effective_source or not effective_target:
+            continue
+        if effective_source not in node_ids or effective_target not in node_ids:
+            continue
+        edge_key = (effective_source, effective_target, relation)
+        if edge_key not in seen_edges:
+            if (effective_source, effective_target) != (source_id, target_id):
+                item = {
+                    **item,
+                    "sourceCandidateId": effective_source,
+                    "targetCandidateId": effective_target,
+                }
+                semantic_binding_edge_count += 1
+            edge_positions[edge_key] = len(edges)
+            edges.append(item)
+            seen_edges.add(edge_key)
+        recovered_missing_link_indexes.add(index)
+        recovered_dangling_edge_count += 1
+    if recovered_missing_link_indexes:
+        missing_links = [
+            item
+            for index, item in enumerate(missing_links)
+            if index not in recovered_missing_link_indexes
+        ]
     # 悬空边计数按图内现存完整三元组条目重算（而非仅本轮新增），首次物化与
     # 幂等重放产出一致，供 relations 阶段完整性判定（danglingEdgeCount>0 即
     # 图不完整）；无端点的研究性缺口不在此列。
@@ -2720,6 +2759,7 @@ def _merge_source_collection_stage_writeback_agent_graph(
             "edgeCount": len(edges),
             "missingLinkCount": len(missing_links),
             "danglingEdgeCount": dangling_edge_count,
+            "recoveredDanglingEdgeCount": recovered_dangling_edge_count,
             "unreviewedNodeCount": len(unreviewed_nodes),
             "agentRelationNodeCount": len(agent_relation_nodes),
             "agentRelationEdgeCount": len(s._source_collection_agent_graph_edges(agent_graph)),
