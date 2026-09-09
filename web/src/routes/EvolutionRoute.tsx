@@ -2456,11 +2456,11 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     />
                   )
                   : (
-                    <div className="grid content-start gap-4" key={supervisedSelectedWorkflowStepId}>
+                    <div className={styles.stepResultStack} key={supervisedSelectedWorkflowStepId}>
                     <SupervisedStepResult run={reviewCandidateWorktree} title={supervisedSelectedWorkflowStep.label} summary={supervisedSelectedWorkflowStep.summary || supervisedSelectedWorkflowStep.livePreview || ""} />
                     <details className={styles.rawBlock} onToggle={(event) => setSupervisedEvidenceStep(event.currentTarget.open ? supervisedSelectedWorkflowStepId : null)}>
                     <summary>查看完整 Agent 会话与证据</summary>
-                    <div className="mt-3 h-[65vh] min-h-0">
+                    <div className={styles.stepEvidenceBody}>
                     {supervisedEvidenceStep === supervisedSelectedWorkflowStepId ? <SupervisedAgentConversationPanel
                       members={supervisedRunMembers}
                       selectedRole={supervisedSelectedAgentRole}

@@ -140,7 +140,7 @@ export function SupervisedWorkspaceControls({
         </div>
       </div>
       {intakeModeMutation.isError ? (
-        <p role="alert" className="col-span-full text-sm text-[var(--state-error)]">
+        <p role="alert" className={styles.errorText}>
           模式切换失败：{intakeModeMutation.error.message}。请重试。
         </p>
       ) : null}

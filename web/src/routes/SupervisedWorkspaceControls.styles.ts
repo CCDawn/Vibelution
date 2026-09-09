@@ -15,6 +15,7 @@ const intakeTabsTriggerClass = [
 ].join(" ");
 
 const styles = {
+  errorText: "col-span-full text-sm text-[var(--state-error)]",
   controlsShellClass,
   flowRegionClass,
   modeRegionClass,

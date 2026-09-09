@@ -409,8 +409,8 @@ const styles = {
     "[color:var(--accent-warm-2)]",
   workflowStepMeta:
     "grid min-w-0 [grid-template-columns:minmax(0,_1fr)_auto] [align-items:center] [gap:6px] [color:var(--fg-tertiary)] [font-size:var(--vui-font-xs)] [font-weight:650] [line-height:1.2] [white-space:nowrap] [&>span:first-child]:min-w-0 [&>span:first-child]:[overflow:hidden] [&>span:first-child]:[text-overflow:ellipsis]",
-  workflowStepPreview:
-    "min-w-0 [overflow:hidden] [text-overflow:ellipsis] [display:-webkit-box] [color:var(--fg-secondary)] [font-size:var(--vui-font-xs)] [line-height:1.35] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]",
+  stepResultStack: "grid content-start gap-4",
+  stepEvidenceBody: "mt-3 h-[65vh] min-h-0",
   workflowStepRail:
     "grid gap-1 min-w-0",
 } as const;
