@@ -29,7 +29,6 @@ from core.web.services.team_workflow.research_runtime.operator_authorization imp
 from tests.test_research_workflow_hypothesis_first_chain import (
     _QUESTION_ID,
     _ROLES,
-    _build_runtime,
     _candidate_generation_runner,
     _fake_collection_runs,
     _hf_env,
@@ -37,7 +36,6 @@ from tests.test_research_workflow_hypothesis_first_chain import (
     _open_first_meeting,
     _patch_approved_question,
     _selection_payload,
-    _seed_parent_run,
 )
 
 
@@ -420,12 +418,15 @@ def test_approve_review_digest_rejects_mixed_source_type_contract(
     team_id, agents = _hf_env(tmp_path, monkeypatch)
     _patch_approved_question(monkeypatch)
     collection_calls = _fake_collection_runs(monkeypatch)
-    runtime = _build_runtime(tmp_path)
     from core.web.services.team_workflow import hypothesis_selection as selections
 
     agent_ids = [agents[role] for role in _ROLES]
     with server_operator_scope("u-1", roles=("operator",)):
-        _seed_parent_run(runtime, team_id, agents["experiment_planner"])
+        # No seeded workflow run: the review rooms stay preformal and accept
+        # free-marker output, which is the only path where an invalid
+        # sourceTypes value can survive message ingestion and reach the
+        # digest boundary under test. Formal scoped rooms enforce the same
+        # producer contract at ingestion (tests/test_meeting_message_payload.py).
         recorded = selections.record_hypothesis_selection(
             team_id,
             {
@@ -469,7 +470,6 @@ def test_approve_review_digest_rejects_mixed_source_type_contract(
             meeting_id,
             closed_by=agent_ids[0],
             expected_digest_content_hash=drafted["digestDraft"]["contentHash"],
-            runtime=runtime,
         )
         assert approved["closed"] is False
         assert approved["status"] == "awaiting_approval"
@@ -1391,3 +1391,57 @@ def test_summary_draft_timeout_error_maps_through_runtime_error(
         assert "180" in failed["summaryDraftError"]["message"]
         with meeting_runtime._SUMMARY_DRAFT_LOCKS_GUARD:
             assert (team_id, meeting_id) not in meeting_runtime._SUMMARY_DRAFT_LOCKS
+
+
+def test_evidence_request_binds_round_suffixed_candidate_refs() -> None:
+    """Speakers suffix the review round onto candidate refs; binding must
+    resolve the bare candidate id and canonicalize the normalized request."""
+    meeting = {
+        "meetingType": "hypothesis_review",
+        "selectedCandidateIds": ["sci-009-cbf2d6930", "sci-009-c38102c57"],
+        "discussionItemRefs": ["hypothesis_candidate:sci-009-cbf2d6930"],
+    }
+    normalized, errors = meeting_runtime.validate_evidence_request_draft(
+        {
+            "rationale": "需要跨境转移口径数据。",
+            "candidateRefs": ["sci-009-cbf2d6930-r3", "hypothesis_candidate:sci-009-c38102c57-r12"],
+            "evidenceRefs": ["evidence:review-gap"],
+            "searchEnvelope": {
+                "keywords": ["transboundary plastic waste"],
+                "sourceTypes": ["paper"],
+                "evidenceLevels": ["peer_reviewed"],
+            },
+            "requirements": {"minEvidenceLevel": "medium"},
+        },
+        meeting,
+    )
+    assert errors == []
+    assert normalized is not None
+    assert normalized["candidateRefs"] == [
+        "sci-009-cbf2d6930",
+        "sci-009-c38102c57",
+    ]
+
+
+def test_evidence_request_still_rejects_unbound_candidate_refs() -> None:
+    normalized, errors = meeting_runtime.validate_evidence_request_draft(
+        {
+            "rationale": "需要补充资料。",
+            "candidateRefs": ["sci-009-c020177fe-r3"],
+            "searchEnvelope": {
+                "keywords": ["plastic waste statistics"],
+                "sourceTypes": ["paper"],
+            },
+        },
+        {
+            "meetingType": "hypothesis_review",
+            "selectedCandidateIds": ["sci-009-cbf2d6930"],
+        },
+    )
+    assert normalized is None
+    assert errors == [
+        {
+            "code": "candidate_ref_unbound",
+            "message": "candidateRefs are not bound to this meeting: sci-009-c020177fe-r3",
+        }
+    ]
