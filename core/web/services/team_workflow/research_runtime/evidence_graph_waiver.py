@@ -8,6 +8,13 @@ justification (audited on the graph record), it never removes the missing
 link itself, and it never loosens the gate — ``missingLinkCount`` stays
 untouched while ``summary.waiverCount`` moves.
 
+It also owns the run-scoped missing-link READ face (A05,
+``list_run_missing_links``): the knowledge sideflow inspector must render the
+gaps of the run's own scoped candidate_graph authority, not the team-latest
+record.  Read and write share ``resolve_scoped_graph_authority`` so the
+record the operator sees is exactly the record a waiver mutates and the
+readiness gate counts.
+
 The graph authority is the scoped ``candidate_graph`` record(s) in the
 candidate store (same scope semantics as
 ``artifact_readback_registry._load_scoped_relation_graph``); all writes go
@@ -99,25 +106,22 @@ def assert_missing_link_waiver_confirmation(
         )
 
 
-def waive_missing_link(
+def resolve_scoped_graph_authority(
     *,
     run_id: str,
-    source_candidate_id: str,
-    target_candidate_id: str,
-    relation: str,
-    justification: str,
-    operator: ServerOperatorContext | None = None,
     team_id: str = "",
-) -> MissingLinkWaiverResult:
-    """Apply one confirmed missing-link waiver on the scoped graph authority.
+) -> tuple[str, str]:
+    """Resolve ``(resolved_team_id, source_collection_run_id)`` for one run.
 
-    The run must exist (404 otherwise); ``teamId`` optionally narrows the
-    scope and mismatches map to 404 ``team_scope_mismatch`` like the other
-    run-scoped endpoints.  The authority SC run id comes from the run's frozen
-    input snapshot — without one there is no scoped graph to waive (404
-    ``graph_not_found``).
+    Single server-side authority resolution shared by the waiver write and the
+    run-scoped missing-link read (A05): the run must exist (404 otherwise);
+    ``teamId`` optionally narrows the scope and mismatches map to 404
+    ``team_scope_mismatch`` like the other run-scoped endpoints; the SC run id
+    comes from the run's frozen input snapshot — without one there is no
+    scoped graph (404 ``graph_not_found``).  Never fall back to a team-latest
+    candidate_graph lookup: that is the cross-run leak this module exists to
+    prevent.
     """
-
     normalized_run_id = str(run_id or "").strip()
     if not normalized_run_id:
         raise EvidenceGraphWaiverError(
@@ -156,6 +160,84 @@ def waive_missing_link(
             f"run {normalized_run_id} has no sourceCollectionRunId in its input snapshot",
             status_code=404,
         )
+    return resolved_team, authority_run_id
+
+
+def list_run_missing_links(
+    *,
+    run_id: str,
+    team_id: str = "",
+) -> dict[str, Any]:
+    """Read the run-scoped candidate-graph missing links (A05 read face).
+
+    Same scoped authority the readiness gate counts
+    (``fetch_evidence_graph_stats``) and the waiver write mutates:
+    ``artifact_readback_registry.load_scoped_artifact_payload`` keyed by the
+    run's snapshot ``sourceCollectionRunId`` — never the team-latest
+    ``candidate_graph`` record.  The live (non receipt-hash-bound) read is
+    deliberate: waivers are written in place on the graph record, while the
+    receipt-bound ledger projection freezes its content hash at
+    materialization and therefore cannot serve this face once a waiver exists.
+    """
+    normalized_run_id = str(run_id or "").strip()
+    resolved_team, authority_run_id = resolve_scoped_graph_authority(
+        run_id=normalized_run_id,
+        team_id=team_id,
+    )
+    from .artifact_readback_registry import load_scoped_artifact_payload
+
+    graph = load_scoped_artifact_payload(
+        "evidence_relation_graph",
+        team_id=resolved_team,
+        authority_run_id=authority_run_id,
+        workflow_run_id=normalized_run_id,
+    )
+    if not isinstance(graph, dict):
+        raise EvidenceGraphWaiverError(
+            "graph_not_found",
+            "no scoped candidate_graph record for this run",
+            status_code=404,
+        )
+    missing_links = [
+        item
+        for item in list(graph.get("missingLinks") or [])
+        if isinstance(item, dict)
+    ]
+    summary = graph.get("summary")
+    return {
+        "runId": normalized_run_id,
+        "teamId": resolved_team,
+        "sourceCollectionRunId": authority_run_id,
+        "candidateGraphId": str(graph.get("candidateGraphId") or ""),
+        "missingLinks": missing_links,
+        "summary": dict(summary) if isinstance(summary, dict) else {},
+    }
+
+
+def waive_missing_link(
+    *,
+    run_id: str,
+    source_candidate_id: str,
+    target_candidate_id: str,
+    relation: str,
+    justification: str,
+    operator: ServerOperatorContext | None = None,
+    team_id: str = "",
+) -> MissingLinkWaiverResult:
+    """Apply one confirmed missing-link waiver on the scoped graph authority.
+
+    The run must exist (404 otherwise); ``teamId`` optionally narrows the
+    scope and mismatches map to 404 ``team_scope_mismatch`` like the other
+    run-scoped endpoints.  The authority SC run id comes from the run's frozen
+    input snapshot — without one there is no scoped graph to waive (404
+    ``graph_not_found``).
+    """
+
+    normalized_run_id = str(run_id or "").strip()
+    resolved_team, authority_run_id = resolve_scoped_graph_authority(
+        run_id=normalized_run_id,
+        team_id=team_id,
+    )
 
     from ..knowledge_kernel import apply_missing_link_waiver
 

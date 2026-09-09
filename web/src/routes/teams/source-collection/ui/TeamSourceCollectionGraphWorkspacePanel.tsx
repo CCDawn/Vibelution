@@ -153,7 +153,7 @@ export function TeamSourceCollectionGraphWorkspacePanel(props: TeamSourceCollect
       lang={lang}
       teamId={teamId}
       childWorkflowRunId={workflowRunId}
-      graph={visibleGraph}
+      missingLinks={visibleGraph?.missingLinks}
       refetchGraph={teamWorkflowCandidateGraphQuery.refetch}
     />
   ) : null;

@@ -10,6 +10,7 @@ export {
   fetchTeamWorkflowResearchProjects,
   fetchResearchWorkflowSnapshot,
   fetchResearchWorkflowNodeDetail,
+  fetchEvidenceGraphMissingLinks,
   waiveEvidenceGraphMissingLink,
   submitResearchWorkflowCommand,
   submitResearchWorkflowCommandOffer,
@@ -37,4 +38,5 @@ export type {
   EventPage,
   EvidenceGraphMissingLinkWaiveResponse,
   EvidenceGraphMissingLinkWaiverAudit,
+  EvidenceGraphMissingLinksResponse,
 } from "./research-workflow";

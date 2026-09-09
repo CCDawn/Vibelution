@@ -12,13 +12,16 @@
  * the ``candidate_graph`` record — on the canvas that is the knowledge
  * sideflow CHILD workflow run id; the formal URL run id has no such snapshot
  * and deterministically 404s ``graph_not_found``.
+ *
+ * A05: the enumerated gaps must come from the SAME run-scoped authority the
+ * waive endpoint mutates (run snapshot → sourceCollectionRunId) — callers
+ * pass the ``missingLinks`` of that scoped graph, never a team-latest record.
  */
 import { useState } from "react";
 
 import { waiveEvidenceGraphMissingLink } from "../../../api/researchWorkflow";
 import type {
   TeamWorkflowCandidateGraphEdge,
-  TeamWorkflowCandidateGraphPayload,
 } from "../../../api/types";
 import { VNativeButton, VNativeInput } from "../../../components/vui";
 import styles from "./MissingLinkWaiverSection.styles";
@@ -43,15 +46,15 @@ export type MissingLinkWaiverSectionProps = {
   /** Run whose frozen input snapshot scopes the graph authority — the
    * knowledge sideflow CHILD workflow run id on the canvas surface. */
   childWorkflowRunId: string;
-  /** Candidate-graph payload whose ``missingLinks`` are enumerated; ``null``
+  /** Gaps of the run-scoped candidate-graph authority (A05); ``null``/``undefined``
    * renders a graph-unavailable hint instead of a silent no-op. */
-  graph: TeamWorkflowCandidateGraphPayload | null | undefined;
-  /** Refetch of the candidate-graph query; called after a confirmed waiver. */
+  missingLinks?: TeamWorkflowCandidateGraphEdge[] | null;
+  /** Refetch of the run-scoped missing-link query; called after a waiver. */
   refetchGraph: () => Promise<unknown>;
 };
 
 export function MissingLinkWaiverSection(props: MissingLinkWaiverSectionProps) {
-  const { lang, teamId, childWorkflowRunId, graph, refetchGraph } = props;
+  const { lang, teamId, childWorkflowRunId, missingLinks, refetchGraph } = props;
   const [waiverEditorKey, setWaiverEditorKey] = useState<string | null>(null);
   const [waiverJustification, setWaiverJustification] = useState("");
   const [waiverPending, setWaiverPending] = useState(false);
@@ -164,9 +167,9 @@ export function MissingLinkWaiverSection(props: MissingLinkWaiverSectionProps) {
     );
   };
 
-  const missingLinks = graph?.missingLinks ?? [];
-  if (!missingLinks.length) {
-    if (graph == null) {
+  const gaps = missingLinks ?? [];
+  if (!gaps.length) {
+    if (missingLinks == null) {
       // Candidate graph missing: say so instead of a silent no-op surface (the
       // source-collection panel only mounts this section with a loaded graph).
       return (
@@ -207,7 +210,7 @@ export function MissingLinkWaiverSection(props: MissingLinkWaiverSectionProps) {
           </span>
         ) : null}
       </div>
-      {missingLinks.map(renderMissingLinkWaiverRow)}
+      {gaps.map(renderMissingLinkWaiverRow)}
       {waiverNotice ? (
         <div role="status" data-testid="graph-missing-link-notice" className={styles.missingLinkWaiverNotice}>
           {waiverNotice}

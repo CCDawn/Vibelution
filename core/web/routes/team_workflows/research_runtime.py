@@ -37,6 +37,7 @@ from core.web.services.team_workflow.research_runtime.evidence_graph_waiver impo
     EvidenceGraphWaiverError,
     MissingLinkWaiverConfirmationError,
     assert_missing_link_waiver_confirmation,
+    list_run_missing_links,
     waive_missing_link,
 )
 from core.web.services.team_workflow.research_runtime.event_stream_service import (
@@ -774,6 +775,31 @@ def research_workflow_ensure_knowledge_collection(
         },
         request=request,
     )
+
+
+@router.get(
+    "/research/workflow-runs/{run_id}/evidence-graph/missing-links",
+    response_model=dict[str, Any],
+    response_model_exclude_unset=True,
+)
+def research_workflow_missing_links(
+    run_id: str,
+    team_id: str = Query("", alias="teamId"),
+) -> dict:
+    """Run-scoped missing-link list (A05 read face of 缺陷⑪'s authority).
+
+    豁免面与图展示必须读当前子运行自己的缺口：服务端按 run 冻结快照解析
+    ``sourceCollectionRunId``（与豁免写路径同一权威单点），再走与就绪读侧
+    相同的 scoped candidate_graph 读取；绝不回退到团队最新记录。run 不存在
+    /teamId 不匹配/无快照 SC run/无 scoped 图分别映射 404 语义。
+    """
+    try:
+        return list_run_missing_links(run_id=run_id, team_id=team_id)
+    except EvidenceGraphWaiverError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={"code": exc.code, "message": exc.message},
+        ) from exc
 
 
 @router.post(
