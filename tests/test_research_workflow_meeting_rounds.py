@@ -427,7 +427,7 @@ def _bind_stop_room(monkeypatch, round_id: str, messages: list[dict]) -> None:
     monkeypatch.setattr(
         chat_room_service,
         "get_chat_room_detail",
-        lambda room_id: _room_detail(round_id, messages)
+        lambda room_id, *, reconcile=True: _room_detail(round_id, messages)
         if room_id == "room-stop-1"
         else None,
     )
@@ -534,7 +534,7 @@ def _bind_multi_round_room(
     monkeypatch.setattr(
         chat_room_service,
         "get_chat_room_detail",
-        lambda room_id: detail if room_id == "room-stop-1" else None,
+        lambda room_id, *, reconcile=True: detail if room_id == "room-stop-1" else None,
     )
 
 
@@ -769,3 +769,67 @@ def test_meeting_replay_does_not_cache_a_read_crossing_an_append(tmp_path, monke
     monkeypatch.setattr(meetings, "_read_jsonl", read)
     meetings.get_meeting_round(team_id, "meeting-demo-1")
     assert meetings.get_meeting_round(team_id, "meeting-demo-1")["meetingRound"]["testMarker"] == "concurrent"
+
+
+def test_list_meeting_rounds_read_only_shares_snapshot_and_default_isolates(tmp_path, monkeypatch):
+    """read_only=True 命中拷贝 memo：数据与全拷贝路径等价，且两次调用拿到
+    相同的列表/元素身份（共享契约）；默认路径仍逐记录深拷贝，调用方改动
+    不回流共享快照，文件游标变化（append）后 memo 重建。"""
+    team_id = _team(tmp_path, monkeypatch)
+    meetings.create_meeting_round(team_id, _meeting())
+    meetings.create_meeting_round(team_id, _meeting(meetingRoundId="meeting-demo-2"))
+
+    shared_first = meetings.list_meeting_rounds(team_id, read_only=True)
+    shared_second = meetings.list_meeting_rounds(team_id, read_only=True)
+    copied = meetings.list_meeting_rounds(team_id)
+
+    # 等价数据：共享快照与全拷贝路径内容一致。
+    assert shared_first["meetings"] == copied["meetings"]
+    # 共享契约：read_only 两次调用共享同一个列表和元素对象。
+    assert shared_second["meetings"] is shared_first["meetings"]
+    assert shared_second["meetings"][0] is shared_first["meetings"][0]
+    # 默认路径隔离：全拷贝元素与共享快照不同身份。
+    assert copied["meetings"][0] is not shared_first["meetings"][0]
+
+    # 非 read_only 的调用方修改绝不污染共享 memo。
+    copied["meetings"][0]["status"] = "mutated"
+    fresh = meetings.list_meeting_rounds(team_id)
+    assert fresh["meetings"][0]["status"] != "mutated"
+    assert shared_first["meetings"][0]["status"] != "mutated"
+
+    # append 改变 round-file 游标：read_only memo 重建，不返回旧快照。
+    meetings.create_meeting_round(team_id, _meeting(meetingRoundId="meeting-demo-3"))
+    after_append = meetings.list_meeting_rounds(team_id, read_only=True)
+    assert after_append["meetings"] is not shared_first["meetings"]
+    assert len(after_append["meetings"]) == 3
+    assert after_append["meetings"] == meetings.list_meeting_rounds(team_id)["meetings"]
+
+
+def test_bound_room_rounds_read_uses_non_reconciling_detail_read(monkeypatch):
+    """MR 只读链路（_load_bound_room_rounds）必须以 reconcile=False 读群聊
+    detail：sweep 驱动的读不触发写侧 round-state 对账（零写纪律）。"""
+    from core.web.services import chat_room_service
+
+    captured = {}
+
+    def _fake_detail(room_id, *, reconcile=True):
+        captured["roomId"] = room_id
+        captured["reconcile"] = reconcile
+        return {
+            "roomId": room_id,
+            "rounds": [
+                {"roundId": "room-round-1", "messages": []},
+                {"roundId": "room-round-2", "messages": []},
+            ],
+        }
+
+    monkeypatch.setattr(chat_room_service, "get_chat_room_detail", _fake_detail)
+
+    meeting = {
+        "linkedChatRoomId": "room-1",
+        "chatRoomRoundIds": ["room-round-1", "room-round-2"],
+    }
+    rounds = meetings._load_bound_room_rounds(meeting)
+
+    assert captured == {"roomId": "room-1", "reconcile": False}
+    assert list(rounds) == ["room-round-1", "room-round-2"]

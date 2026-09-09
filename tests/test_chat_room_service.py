@@ -7404,3 +7404,75 @@ def test_speaker_watchdog_force_closes_inflight_llm_stream_and_marks_cancel(
     # 清理注册的 fake hook，避免泄漏到其它测试。
     hook = registered_hooks[turn_identity]
     llm_client._unregister_llm_stream_close_hook(turn_identity, hook)
+
+
+def test_get_chat_room_detail_reconcile_false_skips_write_side_reconcile(tmp_path, monkeypatch):
+    """缺陷 19：reconcile=False 的 detail 读不触发写侧 round-state 对账；
+    默认调用仍对账一次。"""
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    room = chat_room_service.create_chat_room(title="只读链路群聊")
+
+    reconcile_calls = []
+    original_reconcile = chat_room_service._reconcile_chat_room_round_state
+
+    def _counting_reconcile():
+        reconcile_calls.append(1)
+        return original_reconcile()
+
+    monkeypatch.setattr(
+        chat_room_service, "_reconcile_chat_room_round_state", _counting_reconcile
+    )
+
+    detail = chat_room_service.get_chat_room_detail(room["roomId"], reconcile=False)
+
+    assert reconcile_calls == []
+    assert detail["roomId"] == room["roomId"]
+
+    chat_room_service.get_chat_room_detail(room["roomId"])
+
+    assert len(reconcile_calls) == 1
+
+
+def test_chat_state_participant_index_signature_skips_journal_walk(tmp_path, monkeypatch):
+    """缺陷 19：participant 索引签名不再逐会话触碰 turn journal（每会话一次
+    跨进程文件锁）；签名取 conversation 展示字段——消息追加/updated_at 类
+    变化不失效索引，title 变化仍失效；签名与 session scope 无关。"""
+    import core.chat.conversation_ledger as conversation_ledger
+
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+
+    def _forbidden(*_args, **_kwargs):
+        raise AssertionError("signature must not touch per-session turn journals")
+
+    monkeypatch.setattr(conversation_ledger, "latest_turn_sequence", _forbidden)
+    state = {
+        "version": 1,
+        "active_conversation_id": "session-alpha",
+        "conversations": [
+            {
+                "conversation_id": "session-alpha",
+                "title": "Alpha Agent",
+                "updated_at": "2026-05-26T10:00:00",
+            }
+        ],
+    }
+    save_chat_state(tmp_path, state)
+
+    plain = chat_room_service._chat_state_participant_index_signature()
+    scoped = chat_room_service._chat_state_participant_index_signature(
+        session_ids={"session-alpha"}
+    )
+
+    assert plain == scoped
+    assert plain[0] == "chat_state_conversation_fields_v2"
+
+    state["conversations"][0]["updated_at"] = "2026-05-26T10:04:00"
+    save_chat_state(tmp_path, state)
+    assert chat_room_service._chat_state_participant_index_signature() == plain
+
+    state["conversations"][0]["title"] = "Alpha Renamed Agent"
+    save_chat_state(tmp_path, state)
+    assert chat_room_service._chat_state_participant_index_signature() != plain

@@ -58,7 +58,6 @@ from core.chat.conversation_ledger import (
     EVENT_ASSISTANT_MESSAGE,
     append_conversation_event,
     conversation_visible_messages_from_events,
-    latest_ledger_sequence,
     load_conversation_events,
     rewrite_conversation_events,
 )
@@ -662,11 +661,26 @@ def get_chat_room_compact(room_id: str) -> dict[str, Any] | None:
     return _room_to_compact_reference(room) if room else None
 
 
-def get_chat_room_detail(room_id: str) -> dict[str, Any] | None:
+def get_chat_room_detail(
+    room_id: str,
+    *,
+    reconcile: bool = True,
+) -> dict[str, Any] | None:
+    """Return the full room detail payload.
+
+    ``reconcile=False`` (defect 19) serves the detail without the write-side
+    round-state reconciliation pass: the read must not persist repairs —
+    internal read-only chains (meeting-round bound rounds) use this so a
+    sweep-driven read can neither write nor take the reconciliation cost.
+    Interactive callers keep the default ``reconcile=True``.
+    """
+
     started_at = _perf_counter()
     phase_timings: list[dict[str, Any]] = []
     stage_started_at = _perf_counter()
-    reconciled_rounds = _reconcile_chat_room_round_state()
+    reconciled_rounds = (
+        _reconcile_chat_room_round_state() if reconcile else []
+    )
     _append_chat_room_detail_timing(
         phase_timings,
         "round_state.reconcile",
@@ -6531,6 +6545,19 @@ def _participant_refresh_index_signature(
 
 
 def _chat_state_participant_index_signature(*, session_ids: set[str] | None = None) -> tuple[Any, ...]:
+    """Conversation-field cache key over the chat-state authority (defect 19).
+
+    The previous signature additionally touched each session's turn journal
+    (``latest_ledger_sequence`` takes the journal's cross-process file lock
+    per session), so every ``get_chat_room_detail`` — including cache hits —
+    paid O(sessions) journal reads just to decide whether the participant
+    index was fresh. The summary index itself is built purely from
+    conversation fields and never reads journals, so the per-session
+    ``has_ledger_messages`` sentinel is dropped. Precision trade-off:
+    journal-only activity no longer invalidates the index by itself — safe,
+    because journal growth cannot change anything the index projects; an
+    unchanged signature still proves the conversation rows are unchanged.
+    """
     path = chat_state_path(PROJECT_ROOT)
     payload = load_chat_state(PROJECT_ROOT)
     conversations = payload.get("conversations") if isinstance(payload, dict) else None
@@ -6546,7 +6573,6 @@ def _chat_state_participant_index_signature(*, session_ids: set[str] | None = No
             continue
         if target_session_ids is not None and session_id not in target_session_ids:
             continue
-        has_ledger_messages = bool(latest_ledger_sequence(PROJECT_ROOT, session_id))
         rows.append(
             (
                 session_id,
@@ -6558,10 +6584,9 @@ def _chat_state_participant_index_signature(*, session_ids: set[str] | None = No
                 bool(raw.get("agentDirectSessionMismatch")),
                 _signature_text(raw, "agentPrimaryDirectSessionId"),
                 _signature_text(raw, "workspace_path", "workspacePath"),
-                has_ledger_messages,
             )
         )
-    return ("chat_state_participants_v1", str(path), tuple(rows))
+    return ("chat_state_conversation_fields_v2", str(path), tuple(rows))
 
 
 def _signature_text(item: dict[str, Any], *keys: str) -> str:

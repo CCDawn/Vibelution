@@ -103,7 +103,7 @@ def test_evidence_trail_cache_serves_repeated_reads_and_invalidates(tmp_path: Pa
     monkeypatch.setattr(chain, "_records", lambda _team: [])
     list_calls = {"count": 0}
 
-    def fake_list_meetings(_team_id):
+    def fake_list_meetings(_team_id, **_kwargs):
         list_calls["count"] += 1
         return {"meetings": []}
 

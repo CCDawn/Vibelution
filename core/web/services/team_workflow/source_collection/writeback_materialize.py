@@ -1621,6 +1621,9 @@ def _materialize_source_collection_stage_writeback_candidate_graph(
         "edgeCount": s._source_collection_count(graph_summary.get("edgeCount")),
         "missingLinkCount": missing_link_count,
         "waiverCount": waiver_count,
+        "evidenceGapCount": len(
+            [item for item in list(graph.get("evidenceGaps") or []) if isinstance(item, dict)]
+        ),
         "missingLinks": list(graph.get("missingLinks") or [])[:120],
         "danglingEdgeCount": s._source_collection_count(graph_summary.get("danglingEdgeCount")),
         "semanticBindingEdgeCount": s._source_collection_count(graph_summary.get("semanticBindingEdgeCount")),
@@ -2315,6 +2318,7 @@ def _source_collection_stage_writeback_candidate_graph_summary(
         "edgeCount": s._source_collection_count(graph.get("edgeCount")),
         "missingLinkCount": s._source_collection_count(graph.get("missingLinkCount")),
         "waiverCount": s._source_collection_count(graph.get("waiverCount")),
+        "evidenceGapCount": s._source_collection_count(graph.get("evidenceGapCount")),
         "missingLinks": list(graph.get("missingLinks") or [])[:120],
         "danglingEdgeCount": s._source_collection_count(graph.get("danglingEdgeCount")),
         "semanticBindingEdgeCount": s._source_collection_count(graph.get("semanticBindingEdgeCount")),
@@ -2332,10 +2336,16 @@ def _source_collection_stage_writeback_agent_graph_payload(result: dict[str, Any
     explicit_graph = result.get("candidateGraph") if isinstance(result.get("candidateGraph"), dict) else {}
     if not explicit_graph and isinstance(result.get("candidate_graph"), dict):
         explicit_graph = result["candidate_graph"]
+    # 根级 missingLinks 与 candidateGraph.missingLinks 是 Agent 自报缺口的两种
+    # 写回形状（缺陷 A01）：显式图存在时根级条目并入显式图，隐式图路径继续
+    # 直接携带；合并去重由 merger 的缺口身份归一完成。
+    root_missing_links = [
+        dict(item) for item in list(result.get("missingLinks") or []) if isinstance(item, dict)
+    ]
     if not explicit_graph and any(isinstance(result.get(key), list) for key in ("nodes", "edges", "missingLinks", "unreviewedNodes")):
         explicit_graph = {
             key: result[key]
-            for key in ("nodes", "edges", "missingLinks", "unreviewedNodes", "clusters", "gaps", "qualityNotes", "scope")
+            for key in ("nodes", "edges", "unreviewedNodes", "clusters", "gaps", "qualityNotes", "scope")
             if result.get(key) is not None
         }
     theme_nodes = (
@@ -2471,12 +2481,143 @@ def _source_collection_stage_writeback_agent_graph_payload(result: dict[str, Any
     if not explicit_graph:
         return relation_payload
     merged = dict(explicit_graph)
+    if root_missing_links:
+        existing_missing_links = merged.get("missingLinks")
+        if isinstance(existing_missing_links, list):
+            merged["missingLinks"] = [
+                *[dict(item) for item in existing_missing_links if isinstance(item, dict)],
+                *root_missing_links,
+            ]
+        else:
+            merged["missingLinks"] = list(root_missing_links)
     for key, value in relation_payload.items():
         if isinstance(value, list) and isinstance(merged.get(key), list):
             merged[key] = [*merged[key], *value]
         else:
             merged.setdefault(key, value)
     return merged
+
+
+def _missing_link_identity_key(item: dict[str, Any]) -> tuple[str, str, str] | None:
+    """Stable structural identity of a missing link (dangling edge).
+
+    缺陷 A02：同一 ``taskId+agentGraph`` 指纹会复用同一张已含该缺口的存储图；
+    以 ``(source, relation, target)`` 三元组为稳定身份去重后，重放与重复对账
+    不再累计重复缺口。缺任一端点/关系的条目（研究性缺口形状）没有边身份，
+    永不互相去重。
+    """
+    s = _service()
+    source_id = s._trim_text(
+        item.get("sourceCandidateId") or item.get("sourceCandidate") or item.get("source") or item.get("from"),
+        max_length=160,
+    )
+    target_id = s._trim_text(
+        item.get("targetCandidateId") or item.get("targetCandidate") or item.get("target") or item.get("to"),
+        max_length=160,
+    )
+    relation = s._trim_text(
+        item.get("relation") or item.get("relationType") or item.get("relation_type") or item.get("type"),
+        max_length=160,
+    )
+    if not source_id or not target_id or not relation:
+        return None
+    return (source_id, relation, target_id)
+
+
+def _evidence_gap_identity(item: dict[str, Any]) -> str:
+    """Stable identity of an evidence gap entry (declared or normalized)."""
+    s = _service()
+    gap_id = s._trim_text(
+        item.get("id") or item.get("gapId") or item.get("evidenceGapId") or item.get("linkId"),
+        max_length=160,
+    )
+    if gap_id:
+        return f"id:{gap_id}"
+    payload = {
+        "description": s._trim_text(item.get("description") or item.get("reason"), max_length=1000),
+        "neededEvidence": s._normalize_text_list(item.get("neededEvidence"), max_items=16, max_length=320),
+        "relation": s._trim_text(item.get("relation"), max_length=160),
+    }
+    return "sha256:" + hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def _normalize_agent_missing_link_to_evidence_gap(item: dict[str, Any]) -> dict[str, Any] | None:
+    """缺陷 A01 合同裁决：Agent 自报 missingLinks 归一化为 evidenceGaps 条目。
+
+    现行 relations 写回合同把研究性缺口定向到 ``evidenceGaps[]``，
+    ``missingLinks`` 语义 = 服务端悬空边。两种自报形状在这里归一化进
+    evidenceGaps 通道：不造端点、不进 missingLinks；``waived``/``waiver``/
+    ``status`` 等豁免类字段一律丢弃——人工豁免只能经服务端豁免端点（缺陷⑪）
+    授予，Agent 自报不构成授权。
+    """
+    s = _service()
+    description = s._trim_text(
+        item.get("description") or item.get("reason") or item.get("detail"),
+        max_length=1000,
+    )
+    needed_evidence = s._normalize_text_list(
+        item.get("neededEvidence") or item.get("needed_evidence"),
+        max_items=16,
+        max_length=320,
+    )
+    if not description and not needed_evidence:
+        # 没有任何可读缺口语义：不造条目（fail-closed，不虚构缺口）。
+        return None
+    gap_id = s._trim_text(item.get("id") or item.get("gapId") or item.get("linkId"), max_length=160)
+    source_id = s._trim_text(
+        item.get("sourceCandidateId") or item.get("source") or item.get("from"), max_length=160
+    )
+    target_id = s._trim_text(
+        item.get("targetCandidateId") or item.get("target") or item.get("to"), max_length=160
+    )
+    relation = s._trim_text(
+        item.get("relation") or item.get("relationType") or item.get("type"), max_length=160
+    )
+    if not gap_id:
+        content = json.dumps(
+            {
+                "description": description,
+                "neededEvidence": needed_evidence,
+                "missingRelation": {
+                    "sourceCandidateId": source_id,
+                    "targetCandidateId": target_id,
+                    "relation": relation,
+                },
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        gap_id = "agent-missing-link:" + hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
+    gap: dict[str, Any] = {"origin": "agentReportedMissingLink", "id": gap_id}
+    if description:
+        gap["description"] = description
+    if needed_evidence:
+        gap["neededEvidence"] = needed_evidence
+    blocks_conclusion = item.get("blocksConclusion")
+    if isinstance(blocks_conclusion, bool):
+        gap["blocksConclusion"] = blocks_conclusion
+    else:
+        blocks_text = s._trim_text(blocks_conclusion, max_length=320)
+        if blocks_text:
+            gap["blocksConclusion"] = blocks_text
+    evidence_refs = s._normalize_text_list(
+        item.get("evidenceRefs") or item.get("evidence_refs") or item.get("evidenceRef"),
+        max_items=64,
+        max_length=320,
+    )
+    if evidence_refs:
+        gap["evidenceRefs"] = evidence_refs
+    if source_id or target_id or relation:
+        # 端点/关系只作可读注记保留：不构成图端点，也不参与 ⑪ 豁免协议。
+        gap["missingRelation"] = {
+            "sourceCandidateId": source_id,
+            "targetCandidateId": target_id,
+            "relation": relation,
+        }
+    return gap
 
 
 def _merge_source_collection_stage_writeback_agent_graph(
@@ -2516,7 +2657,13 @@ def _merge_source_collection_stage_writeback_agent_graph(
         and s._trim_text(edge.get("relation"), max_length=160)
     }
     seen_edges = set(edge_positions)
-    dangling_edge_count = 0
+    # 缺陷 A02：与 seen_edges 对称的缺口身份集合，循环前从已有 missingLinks
+    # 构建；悬空边 append 前查重，重放/重复对账不再累计同一条缺口。
+    missing_link_positions: dict[tuple[str, str, str], int] = {}
+    for index, item in enumerate(missing_links):
+        missing_key = _missing_link_identity_key(item)
+        if missing_key is not None and missing_key not in missing_link_positions:
+            missing_link_positions[missing_key] = index
     for edge in s._source_collection_agent_graph_edges(agent_graph):
         source_id = s._trim_text(edge.get("sourceCandidateId"), max_length=160)
         target_id = s._trim_text(edge.get("targetCandidateId"), max_length=160)
@@ -2548,11 +2695,23 @@ def _merge_source_collection_stage_writeback_agent_graph(
             edge_positions[edge_key] = len(edges)
             edges.append(edge)
         else:
-            # Fail-closed: 端点经语义解析仍未命中节点表的边降级为 missingLink，
-            # 并单独计数，供 relations 阶段完整性判定（danglingEdgeCount>0 即图不完整）。
-            missing_links.append(edge)
-            dangling_edge_count += 1
+            # Fail-closed: 端点经语义解析仍未命中节点表的边降级为 missingLink。
+            missing_key = (effective_source, relation, effective_target)
+            existing_position = missing_link_positions.get(missing_key)
+            if existing_position is None:
+                missing_links.append(edge)
+                missing_link_positions[missing_key] = len(missing_links) - 1
+            else:
+                # 缺陷 A02：同一缺口已在存储图中——用本轮字段刷新既有条目
+                # （证据修正不被旧值冻结），不追加重复条目。
+                missing_links[existing_position] = {**missing_links[existing_position], **edge}
         seen_edges.add(edge_key)
+    # 悬空边计数按图内现存完整三元组条目重算（而非仅本轮新增），首次物化与
+    # 幂等重放产出一致，供 relations 阶段完整性判定（danglingEdgeCount>0 即
+    # 图不完整）；无端点的研究性缺口不在此列。
+    dangling_edge_count = sum(
+        1 for item in missing_links if _missing_link_identity_key(item) is not None
+    )
     summary = merged_graph.get("summary") if isinstance(merged_graph.get("summary"), dict) else {}
     summary = dict(summary)
     summary.update(
@@ -2575,7 +2734,35 @@ def _merge_source_collection_stage_writeback_agent_graph(
     merged_graph["missingLinks"] = missing_links
     merged_graph["unreviewedNodes"] = unreviewed_nodes
     merged_graph["summary"] = summary
-    for field in ("evidenceGaps", "counterEvidenceRefs"):
+    # 缺陷 A01：Agent 自报 missingLinks（candidateGraph.missingLinks 与根级
+    # missingLinks 两种形状，见 payload 归一）不进 missingLinks（豁免协议⑪
+    # 只服务服务端悬空边缺口），归一化转入 evidenceGaps 通道，沿其现有消费链
+    # （merger → read-back → readiness）保留可见性；声明 evidenceGaps 的替换
+    # 语义保持不变。
+    declared_gaps = agent_graph.get("evidenceGaps")
+    if isinstance(declared_gaps, list):
+        evidence_gaps = [dict(item) for item in declared_gaps if isinstance(item, dict)]
+        declared_evidence_gaps = True
+    else:
+        evidence_gaps = [
+            dict(item) for item in list(merged_graph.get("evidenceGaps") or []) if isinstance(item, dict)
+        ]
+        declared_evidence_gaps = False
+    seen_gap_identities = {_evidence_gap_identity(item) for item in evidence_gaps}
+    for raw_item in list(agent_graph.get("missingLinks") or []):
+        if not isinstance(raw_item, dict):
+            continue
+        normalized_gap = _normalize_agent_missing_link_to_evidence_gap(raw_item)
+        if normalized_gap is None:
+            continue
+        gap_identity = _evidence_gap_identity(normalized_gap)
+        if gap_identity in seen_gap_identities:
+            continue
+        seen_gap_identities.add(gap_identity)
+        evidence_gaps.append(normalized_gap)
+    if declared_evidence_gaps or evidence_gaps:
+        merged_graph["evidenceGaps"] = evidence_gaps[:200]
+    for field in ("counterEvidenceRefs",):
         if field in agent_graph:
             merged_graph[field] = agent_graph[field]
     return merged_graph

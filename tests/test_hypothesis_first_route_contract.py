@@ -806,7 +806,7 @@ def test_selection_context_derives_scope_from_frozen_registry(monkeypatch) -> No
     monkeypatch.setattr(
         meeting_rounds,
         "list_meeting_rounds",
-        lambda team_id: {
+        lambda team_id, **_kwargs: {
             "schemaVersion": 1,
             "teamId": team_id,
             "meetingCount": 3,
@@ -967,7 +967,7 @@ def test_selection_context_cold_start_uses_ledger_candidates(monkeypatch) -> Non
     monkeypatch.setattr(
         meeting_rounds,
         "list_meeting_rounds",
-        lambda team_id: {
+        lambda team_id, **_kwargs: {
             "schemaVersion": 1,
             "teamId": team_id,
             "meetingCount": 1,
@@ -1053,7 +1053,7 @@ def test_meeting_round_read_routes(monkeypatch) -> None:
     monkeypatch.setattr(
         meeting_rounds,
         "list_meeting_rounds",
-        lambda team_id: {
+        lambda team_id, **_kwargs: {
             "schemaVersion": 1,
             "teamId": team_id,
             "meetingCount": 1,
@@ -1240,7 +1240,7 @@ def test_hypothesis_round_read_routes(monkeypatch) -> None:
     monkeypatch.setattr(
         hypothesis_rounds,
         "list_hypothesis_rounds",
-        lambda team_id: {
+        lambda team_id, **_kwargs: {
             "schemaVersion": 1,
             "teamId": team_id,
             "roundCount": 1,
@@ -1659,7 +1659,7 @@ def test_approve_digest_route_passes_hash_and_maps_stale(monkeypatch) -> None:
 
 
 def test_routes_map_team_not_found_to_404(monkeypatch) -> None:
-    def fake_list(team_id):
+    def fake_list(team_id, **_kwargs):
         raise TeamNotFoundError("team missing")
 
     monkeypatch.setattr(meeting_rounds, "list_meeting_rounds", fake_list)
