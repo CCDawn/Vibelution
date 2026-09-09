@@ -8,6 +8,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from core.infrastructure import git_process
+from scripts import git_claim_guard, local_quality_gate, task_closeout
 
 
 class CandidateIntegrationError(RuntimeError):
@@ -74,7 +75,7 @@ def integrate_candidate(
         raise CandidateIntegrationError("候选与 main 工作树相同，禁止空晋升。")
 
     run_label = str(run_id or "").strip()
-    _run_git_checked(root, "merge", "--ff-only", candidate_head)
+    governance_cleanup = _merge_validated_candidate(root, candidate, expected_head=frozen_head, candidate_head=candidate_head)
     mechanism = "git_merge_ff"
 
     commit_sha = _git_text(root, "rev-parse", "HEAD")
@@ -118,6 +119,7 @@ def integrate_candidate(
         "changedFiles": changed_paths,
         "rollbackManifestPath": str(manifest_path),
         "committedAt": _now_iso(),
+        "governanceCleanup": governance_cleanup,
     }
 
 
@@ -167,6 +169,55 @@ def revert_candidate_commit(
         "revertCommit": revert_sha,
         "revertedAt": _now_iso(),
     }
+
+
+def _merge_validated_candidate(root: Path, candidate: Path, *, expected_head: str, candidate_head: str) -> dict[str, Any]:
+    """Use the same validation, lease and exact-ref permit as task integration."""
+    binding = git_claim_guard.read_claim_binding(candidate)
+    if binding is None:
+        raise CandidateIntegrationError("候选缺少开发归属记录，请在受管 codex 分支完成候选验证后重试。")
+    if binding.branch != _git_text(candidate, "branch", "--show-current"):
+        raise CandidateIntegrationError("候选分支与开发归属记录不匹配，禁止集成。")
+    context = task_closeout.CloseoutContext(root, candidate, binding.branch)
+    merged_sha = ""
+    cleanup_errors: list[str] = []
+    try:
+        task_closeout.validate_development_claim(
+            context, claim_id=binding.claim_id, agent_id=binding.agent_id,
+        )
+        manifest = task_closeout.discover_manifest(context)
+        verified = local_quality_gate.verify_manifest(manifest, candidate, "main") if manifest else None
+        if verified is None or verified.outcome != "passed":
+            verified = local_quality_gate.run_closeout(candidate, "main", binding.claim_id)
+        if verified.outcome != "passed" or verified.manifest_path is None:
+            raise CandidateIntegrationError(f"候选集成验证未通过：{verified.outcome}。候选已保留，请查看验证记录。")
+        lease = task_closeout.acquire_integration_claim_with_retry(context, agent_id=binding.agent_id)
+        try:
+            verified = local_quality_gate.verify_manifest(verified.manifest_path, candidate, "main")
+            if (
+                verified.outcome != "passed"
+                or _git_text(root, "rev-parse", "HEAD") != expected_head
+                or _git_text(candidate, "rev-parse", "HEAD") != candidate_head
+            ):
+                raise CandidateIntegrationError("stale_main: 主线或候选验证证据已变化，请重新评估候选。")
+            merged_sha = task_closeout.merge_ff_only(context, integration_claim_id=lease)
+        finally:
+            try:
+                task_closeout.release_claim(context, lease, status="released", reason="Supervised integration finished")
+            except (OSError, RuntimeError, ValueError) as error:
+                if not merged_sha:
+                    raise
+                cleanup_errors.append(str(error)[:300])
+        try:
+            task_closeout.release_claim(context, binding.claim_id, status="completed", reason="Supervised candidate integrated")
+            task_closeout.complete_agent(context, agent_id=binding.agent_id, merge_sha=merged_sha)
+        except (OSError, RuntimeError, ValueError) as error:
+            cleanup_errors.append(str(error)[:300])
+        return {"status": "pending" if cleanup_errors else "completed", "errors": cleanup_errors}
+    except (OSError, RuntimeError, ValueError) as error:
+        if isinstance(error, CandidateIntegrationError):
+            raise
+        raise CandidateIntegrationError(f"受控集成未完成：{error}") from error
 
 
 def _freeze_candidate_head(

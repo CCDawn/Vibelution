@@ -1,11 +1,36 @@
 from __future__ import annotations
 
 import subprocess
+import sys
+from types import SimpleNamespace
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from core.web.services import supervised_candidate_integration_service as service
+
+
+@pytest.fixture(autouse=True)
+def isolated_validation_authority(monkeypatch, tmp_path):
+    install_validation_authority(monkeypatch, tmp_path)
+
+
+def install_validation_authority(monkeypatch, tmp_path):
+    """Model passed validation; keep the production permit and Git merge real."""
+    monkeypatch.setattr(service.git_claim_guard, "read_claim_binding", lambda candidate: SimpleNamespace(
+        branch=_git(candidate, "branch", "--show-current").stdout.strip(), claim_id="development-test", agent_id="test-owner",
+    ))
+    monkeypatch.setattr(service.task_closeout, "validate_development_claim", lambda *a, **kw: None)
+    monkeypatch.setattr(service.task_closeout, "discover_manifest", lambda *a: tmp_path / "validated.json")
+    monkeypatch.setattr(service.local_quality_gate, "verify_manifest", lambda *a: SimpleNamespace(outcome="passed", manifest_path=tmp_path / "validated.json"))
+    monkeypatch.setattr(service.task_closeout, "acquire_integration_claim_with_retry", lambda *a, **kw: "integration-test")
+    monkeypatch.setattr(service.task_closeout, "release_claim", lambda *a, **kw: None)
+    monkeypatch.setattr(service.task_closeout, "complete_agent", lambda *a, **kw: None)
+    merge = service.task_closeout.merge_ff_only
+    monkeypatch.setattr(service.task_closeout, "merge_ff_only", lambda context, **kw: merge(
+        replace(context, branch="refs/vibelution/supervised-promote"), **kw,
+    ))
 
 
 def _git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -54,11 +79,81 @@ def _changes() -> list[dict[str, str]]:
     ]
 
 
+def test_failed_validation_never_acquires_integration_permission(tmp_path, monkeypatch):
+    project, candidate = tmp_path / "project", tmp_path / "candidate"
+    base = _init_repo(project)
+    _candidate_worktree(project, candidate)
+    failed = SimpleNamespace(outcome="failed", manifest_path=tmp_path / "failed.json")
+    monkeypatch.setattr(service.local_quality_gate, "verify_manifest", lambda *a: failed)
+    monkeypatch.setattr(service.local_quality_gate, "run_closeout", lambda *a: failed)
+    monkeypatch.setattr(service.task_closeout, "acquire_integration_claim_with_retry", lambda *a, **kw: pytest.fail("validation must precede permission"))
+    with pytest.raises(service.CandidateIntegrationError, match="验证未通过"):
+        service._merge_validated_candidate(project, candidate, expected_head=base, candidate_head=_git(candidate, "rev-parse", "HEAD").stdout.strip())
+    assert _git(project, "rev-parse", "HEAD").stdout.strip() == base
+
+
+def test_changed_manifest_under_lease_releases_lease_without_merging(tmp_path, monkeypatch):
+    project, candidate = tmp_path / "project", tmp_path / "candidate"
+    base = _init_repo(project)
+    _candidate_worktree(project, candidate)
+    calls = []
+    results = iter(["passed", "stale_main"])
+    monkeypatch.setattr(service.local_quality_gate, "verify_manifest", lambda *a: SimpleNamespace(
+        outcome=next(results), manifest_path=tmp_path / "manifest.json",
+    ))
+    monkeypatch.setattr(service.task_closeout, "merge_ff_only", lambda *a, **kw: pytest.fail("changed evidence must not merge"))
+    monkeypatch.setattr(service.task_closeout, "release_claim", lambda *a, **kw: calls.append(a[1]))
+    with pytest.raises(service.CandidateIntegrationError, match="stale_main"):
+        service._merge_validated_candidate(project, candidate, expected_head=base, candidate_head=_git(candidate, "rev-parse", "HEAD").stdout.strip())
+    assert calls == ["integration-test"]
+    assert _git(project, "rev-parse", "HEAD").stdout.strip() == base
+
+
+def test_cleanup_failure_does_not_hide_a_completed_merge(tmp_path, monkeypatch):
+    project, candidate = tmp_path / "project", tmp_path / "candidate"
+    base = _init_repo(project)
+    candidate_head = _candidate_worktree(project, candidate)
+    def release(*args, **kwargs):
+        raise RuntimeError("cleanup unavailable")
+    monkeypatch.setattr(service.task_closeout, "release_claim", release)
+    result = service.integrate_candidate(
+        project_root=project, candidate_root=candidate, changed_files=_changes(),
+        expected_head=base, expected_variant_id="variant-123", run_id="swte-cleanup",
+        manifest_root=tmp_path / "manifests",
+    )
+    assert result["commitSha"] == candidate_head
+    assert result["governanceCleanup"]["status"] == "pending"
+    assert not service.git_claim_guard._permit_path(project).exists()
+
+
+def test_candidate_changed_during_validation_is_not_promoted(tmp_path, monkeypatch):
+    project, candidate = tmp_path / "project", tmp_path / "candidate"
+    base = _init_repo(project)
+    frozen = _candidate_worktree(project, candidate)
+    def acquire(*args, **kwargs):
+        (candidate / "agent.py").write_text("UNREVIEWED = True\n", encoding="utf-8")
+        _git(candidate, "add", "agent.py")
+        _git(candidate, "commit", "-m", "unreviewed change")
+        return "integration-test"
+    monkeypatch.setattr(service.task_closeout, "acquire_integration_claim_with_retry", acquire)
+    with pytest.raises(service.CandidateIntegrationError, match="stale_main"):
+        service._merge_validated_candidate(project, candidate, expected_head=base, candidate_head=frozen)
+    assert _git(project, "rev-parse", "HEAD").stdout.strip() == base
+
+
 def test_integrate_candidate_creates_exact_clean_commit(tmp_path):
     project = tmp_path / "project"
     candidate = tmp_path / "candidate"
     base_commit = _init_repo(project)
     candidate_head = _candidate_worktree(project, candidate)
+    hooks = tmp_path / "hooks"
+    hooks.mkdir()
+    guard = Path(service.git_claim_guard.__file__).resolve().as_posix()
+    (hooks / "reference-transaction").write_text(
+        f'#!/bin/sh\nexec "{Path(sys.executable).as_posix()}" "{guard}" reference-transaction --repo "{project.as_posix()}" --phase "$1"\n',
+        encoding="utf-8",
+    )
+    _git(project, "config", "core.hooksPath", hooks.as_posix())
 
     result = service.integrate_candidate(
         project_root=project,
@@ -164,19 +259,19 @@ def test_integrate_candidate_restores_clean_tree_when_commit_fails(tmp_path, mon
     candidate = tmp_path / "candidate"
     base_commit = _init_repo(project)
     _candidate_worktree(project, candidate)
-    original_run_git = service.git_process.run_git
+    original_run_git = service.local_quality_gate.run_process
 
-    def fail_merge(args, **kwargs):
-        if list(args[:1]) == ["merge"]:
+    def fail_merge(args, *pos, **kwargs):
+        if list(args[:2]) == ["git", "merge"]:
             return subprocess.CompletedProcess(
                 ["git", *args],
                 1,
                 stdout="",
                 stderr="synthetic merge failure",
             )
-        return original_run_git(args, **kwargs)
+        return original_run_git(args, *pos, **kwargs)
 
-    monkeypatch.setattr(service.git_process, "run_git", fail_merge)
+    monkeypatch.setattr(service.local_quality_gate, "run_process", fail_merge)
 
     with pytest.raises(service.CandidateIntegrationError, match="synthetic merge failure"):
         service.integrate_candidate(

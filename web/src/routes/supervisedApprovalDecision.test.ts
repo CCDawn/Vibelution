@@ -466,7 +466,7 @@ describe("buildSupervisedApprovalDecision", () => {
     );
 
     expect(model.phase).toBe("ready_merge");
-    expect(model.primaryAction).toBeNull();
+    expect(model.primaryAction).toBe("merge");
     expect(model.headline).toContain("后端受控合入");
     expect(model.runtimeEffect).toBe("not_applied");
   });
@@ -553,4 +553,23 @@ describe("buildSupervisedApprovalDecision", () => {
     expect(model.headline).toContain("已恢复合入前文件状态");
     expect(model.runtimeEffect).toBe("rolled_back");
   });
+});
+
+it("marks an unavailable pending candidate as blocked without approval actions", () => {
+  const model = buildSupervisedApprovalDecision(worktreeRun({
+    candidateAvailability: { status: "unavailable", reason: "missing workspace" },
+  }), "zh");
+  expect(model.phase).toBe("blocked");
+  expect(model.statusLabel).toBe("候选已失效");
+  expect(model.primaryAction).toBeNull();
+  expect(model.secondaryActions).toEqual([]);
+});
+
+it("keeps applied evidence authoritative after candidate cleanup", () => {
+  const model = buildSupervisedApprovalDecision(worktreeRun({
+    candidateAvailability: { status: "unavailable", reason: "cleaned" },
+    merge: { status: "applied" },
+    runtimeActivation: { status: "applied", proof: { verified: true } },
+  }), "zh");
+  expect(model.phase).toBe("applied");
 });

@@ -2031,6 +2031,11 @@ def _real_candidate_modifier(worktree_path: Path, prompt: str, context: dict[str
             cancel_checker=cancel_checker,
         )
 
+    prompt += (
+        "\n候选提交必须遵守当前项目的开发门禁：保留受管 codex 分支，"
+        "完成实际本地复用评估并通过 scripts/reuse_research_evidence.py 记录证据，"
+        "只提交本轮候选修改。不要合入 main、删除候选或重启产品；审批后的后端负责最终验证与受控合入。"
+    )
     result = run_self_edit_turn(prompt, session_id=conversation_session_id)
     observed_protocol = _candidate_self_edit_protocol_violation(result)
     retry_count = 0
@@ -2088,6 +2093,10 @@ def _real_candidate_modifier(worktree_path: Path, prompt: str, context: dict[str
 def _default_worktree_factory(project_root: Path, run_id: str) -> dict[str, Any]:
     snapshot = create_checkpoint_snapshot(project_root, run_id)
     worktree_path = create_worktree(project_root, snapshot, run_id)
+    git_process.run_git(
+        ["switch", "-c", f"codex/supervised-{run_id}"],
+        cwd=worktree_path, capture_output=True, check=True,
+    )
     return {
         "path": str(worktree_path),
         "cleanupOwner": RUN_KIND,
@@ -2889,7 +2898,7 @@ def _build_self_evolution_workflow_steps(snapshot: dict[str, Any]) -> list[dict[
     self_running = status in _ACTIVE_STATUSES and phase not in {"complete", "failed", "baseline_unavailable", "shutdown"}
     self_terminal_status = "failed" if status == "failed" else ("cancelled" if status == "cancelled" else "done")
     self_status = "running" if self_running else (self_terminal_status if status in _TERMINAL_STATUSES else "pending")
-    approval_status = "pending" if status == "done" else ("failed" if status == "failed" else ("cancelled" if status == "cancelled" else "pending"))
+    approval_status = _approval_workflow_status(snapshot)
     self_summary = (
         modification.get("summary")
         or (snapshot.get("reflection") if isinstance(snapshot.get("reflection"), dict) else {}).get("summary")
@@ -2984,7 +2993,7 @@ def _build_workflow_steps(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
     rerun_fields = _conversation_fields("rerun_eval", rerun_session_id)
     rerun_judge_fields = _conversation_fields("rerun_judge", judge_session_id)
     changed_files = list((snapshot.get("candidateWorktree") if isinstance(snapshot.get("candidateWorktree"), dict) else {}).get("changedFiles") or [])
-    approval_status = "pending" if str(snapshot.get("status") or "").strip().lower() == "done" else _workflow_status(snapshot, "approval")
+    approval_status = _approval_workflow_status(snapshot)
     if str(snapshot.get("status") or "").strip().lower() in {"failed", "cancelled"}:
         approval_status = str(snapshot.get("status") or "").strip().lower()
 
@@ -3098,6 +3107,25 @@ def _current_workflow_step_id(snapshot: dict[str, Any]) -> str:
     return "baseline_eval"
 
 
+def _approval_workflow_status(snapshot: dict[str, Any]) -> str:
+    outcome = str(snapshot.get("outcome") or "")
+    activation = snapshot.get("runtimeActivation") or {}
+    approval = snapshot.get("approvalDecision") or {}
+    if outcome == "applied" or activation.get("status") == "applied":
+        return "done"
+    if outcome == "activation_failed" or activation.get("status") in {"activation_failed", "activation_blocked"}:
+        return "failed"
+    if snapshot.get("phase") == "approval" or activation.get("status") in {"restart_queued", "activating", "activation_verifying"}:
+        return "running"
+    if approval.get("status") == "decided" and approval.get("decision") in {"REJECT", "RERUN_REQUIRED"}:
+        return "done"
+    if (snapshot.get("candidateAvailability") or {}).get("status") == "unavailable" and not snapshot.get("merge"):
+        return "failed"
+    if snapshot.get("status") in {"failed", "cancelled"}:
+        return str(snapshot["status"])
+    return "pending"
+
+
 def _workflow_status(snapshot: dict[str, Any], step_id: str) -> str:
     status = str(snapshot.get("status") or "").strip().lower()
     phase = str(snapshot.get("phase") or "").strip().lower()
@@ -3128,7 +3156,7 @@ def _workflow_status(snapshot: dict[str, Any], step_id: str) -> str:
             return "running"
         return "done" if snapshot.get("candidateJudgment") or snapshot.get("decision") else "pending"
     if step_id == "approval":
-        return "pending"
+        return _approval_workflow_status(snapshot)
     return "pending"
 
 
@@ -3604,6 +3632,7 @@ def _merge_candidate(snapshot: dict[str, Any], *, force: bool) -> dict[str, Any]
         "candidateVariantId": str(integration.get("candidateVariantId") or ""),
         "changedFiles": list(integration.get("changedFiles") or []),
         "rollbackManifestPath": str(integration.get("rollbackManifestPath") or ""),
+        "governanceCleanup": integration.get("governanceCleanup"),
     }
     updated["rollback"] = {
         "status": "available",
@@ -4860,6 +4889,12 @@ def _decorate_snapshot(snapshot: dict[str, Any] | None) -> dict[str, Any] | None
         if reason:
             worktree.pop("path", None)
             worktree["pathValidationError"] = reason
+    if isinstance(worktree, dict):
+        unavailable = bool(worktree.get("pathValidationError")) or not str(worktree.get("path") or "").strip()
+        payload["candidateAvailability"] = {
+            "status": "unavailable" if unavailable else "available",
+            "reason": "候选工作树已失效，无法继续审批或合入。请按本轮配置重新运行。" if unavailable else "",
+        }
     payload["actionStates"] = _action_states(payload)
     payload["workflowSteps"] = _build_workflow_steps(payload)
     return payload
@@ -4884,7 +4919,7 @@ def _action_states(snapshot: dict[str, Any]) -> dict[str, Any]:
     judge_scoring_complete = judge_merge_allowed(candidate_judgment)
     merge_status = str(merge.get("status") or "").strip().lower()
     integrated = merge_status in {"committed", "applied", "reverted"}
-    return {
+    actions = {
         "terminate": {
             "enabled": active,
             "reason": "" if active else "这一轮没有正在运行的监督工作树进化任务。",
@@ -4968,6 +5003,10 @@ def _action_states(snapshot: dict[str, Any]) -> dict[str, Any]:
             and merge_status in {"committed", "applied"}
         },
     }
+    if done and not has_worktree and not integrated:
+        for name in ("approveReview", "runAgentApproval", "rejectReview", "requestRerun", "merge", "analyzeMerge"):
+            actions[name]["reason"] = "候选工作树已失效，请重新运行以生成可审批的候选。"
+    return actions
 
 
 def _encode_sse(event_name: str, payload: dict[str, Any]) -> str:

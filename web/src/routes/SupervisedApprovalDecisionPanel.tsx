@@ -25,6 +25,7 @@ type SupervisedApprovalDecisionPanelProps = {
   pending: boolean;
   error?: string;
   onAction: (runId: string, action: SupervisedApprovalAction) => void;
+  onPrepareRerun?: (run: SupervisedWorktreeRun) => void;
 };
 
 const TONE_MAP: Record<SupervisedApprovalTone, "neutral" | "info" | "warning" | "success" | "danger"> = {
@@ -77,6 +78,7 @@ export function SupervisedApprovalDecisionPanel({
   pending,
   error = "",
   onAction,
+  onPrepareRerun,
 }: SupervisedApprovalDecisionPanelProps) {
   const model = buildSupervisedApprovalDecision(run, lang);
   const primaryActionState = model.primaryAction && run
@@ -359,6 +361,11 @@ export function SupervisedApprovalDecisionPanel({
           {model.runtimeEffectLabel}
         </span>
         <div className={styles.actionButtons}>
+        {model.phase === "blocked" && run?.candidateAvailability?.status === "unavailable" && onPrepareRerun ? (
+          <VButton variant="primary" isDisabled={pending} onPress={() => onPrepareRerun(run)}>
+            {lang === "zh" ? "按本轮配置重新准备" : "Prepare a new run with these settings"}
+          </VButton>
+        ) : null}
         {model.secondaryActions.map((item) => {
           const state = run?.actionStates?.[actionStateKey(item.action)];
           return (

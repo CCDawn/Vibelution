@@ -540,6 +540,7 @@ export type SupervisedJudgeJudgment = {
 };
 
 export type SupervisedWorktreeRun = {
+  candidateAvailability?: { status: "available" | "unavailable"; reason: string };
   detailLevel?: "summary";
   runId: string;
   runKind: string;

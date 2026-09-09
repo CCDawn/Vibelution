@@ -2314,6 +2314,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                   controlError={datasetLimitError || supervisedControlError}
                   onStart={() => startWorktreeRunMutation.mutate()}
                 />
+                {actionFeedback ? <p role="status" className={styles.noticeTextCompact}>{actionFeedback}</p> : null}
                 <EvolutionSupervisedWorkflowMembersPanel
                   lang={lang}
                   membersSource={supervisedMembersSource}
@@ -2451,6 +2452,16 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                       run={reviewCandidateWorktree}
                       lang={lang}
                       pending={approvalWorktreeActionMutation.isPending}
+                      onPrepareRerun={(run) => {
+                        setSourceKind(run.sourceKind === "dataset" ? "dataset" : "bundle");
+                        setDatasetName(run.datasetName || "");
+                        setBundleNameInput(run.bundleName || "");
+                        setDatasetLimitInput(run.datasetLimit == null ? "" : String(run.datasetLimit));
+                        setApprovalMode(run.approvalMode === "agent" ? "agent" : "human");
+                        setLiveLaunchCollapsed(false);
+                        setActionFeedback(lang === "zh" ? "已恢复本轮来源、样本数和审批方式；请检查当前配置后点击开始监督运行。" : "Source, sample limit and approval mode restored. Check current settings before starting.");
+                        requestAnimationFrame(() => datasetLimitInputRef.current?.focus());
+                      }}
                       error={approvalWorktreeActionMutation.error?.message ?? ""}
                       onAction={(runId, action) => approvalWorktreeActionMutation.mutate({ runId, action })}
                     />

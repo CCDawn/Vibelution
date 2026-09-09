@@ -8,6 +8,7 @@ export type SupervisedApprovalAction =
   | "run_agent_approval"
   | "reject_review"
   | "request_rerun"
+  | "merge"
   | "rollback";
 
 export type SupervisedApprovalPhase =
@@ -408,6 +409,9 @@ function approvalPhase(run: SupervisedWorktreeRun): SupervisedApprovalPhase {
   if (!evaluationState(run, "zh").mergeEligible) {
     return "blocked";
   }
+  if (run.candidateAvailability?.status === "unavailable") {
+    return "blocked";
+  }
   if (
     enabled(run, "approveReview")
     || enabled(run, "runAgentApproval")
@@ -442,6 +446,17 @@ function phaseCopy(
     run.latestMessage,
   ].map((value) => String(value ?? "").trim()).find(Boolean) ?? "";
 
+  if (phase === "blocked" && run.candidateAvailability?.status === "unavailable") {
+    return {
+      tone: "danger" as const,
+      statusLabel: text(lang, "候选已失效", "Candidate unavailable"),
+      headline: text(lang, "本轮候选不可用，需要重新运行", "This candidate must be regenerated"),
+      reason: text(lang, "历史评分仍可查看，但候选工作树已失效，无法继续审批或合入。", "Historical scores remain available, but the candidate workspace is unavailable for approval or merge."),
+      primaryAction: null,
+      primaryActionLabel: "",
+    };
+  }
+
   if (phase === "running") {
     return {
       tone: "info" as const,
@@ -472,9 +487,9 @@ function phaseCopy(
       tone: "success" as const,
       statusLabel: text(lang, "审批已通过", "Approval recorded"),
       headline: text(lang, "审批记录已授权后端受控合入", "Approval record authorizes backend controlled merge"),
-      reason: decisionReason || text(lang, "不再提供独立人工 merge 旁路。", "No separate manual merge bypass is exposed."),
-      primaryAction: null,
-      primaryActionLabel: "",
+      reason: text(lang, "已有审批决定保持不变；继续时仍会重新检查验证记录、候选版本和主线状态。", "The recorded approval remains unchanged. Validation, candidate identity and main are checked again."),
+      primaryAction: "merge" as const,
+      primaryActionLabel: text(lang, "继续受控合入", "Continue controlled integration"),
     };
   }
   if (phase === "blocked") {
@@ -737,6 +752,8 @@ function buildEvidence(
   lang: ApprovalLanguage,
 ): SupervisedApprovalEvidenceModel[] {
   const evidence: SupervisedApprovalEvidenceModel[] = [];
+  const missingUnmergedCandidate = run.candidateAvailability?.status === "unavailable"
+    && !["committed", "applied", "reverted"].includes(normalized(run.merge?.status));
   const recommendation = judgeRecommendation(run, lang);
   const state = evaluationState(run, lang);
   const activation = runtimeActivationModel(run);
@@ -744,8 +761,8 @@ function buildEvidence(
     tone: state.mergeEligible ? "positive" : "warning",
     text: text(
       lang,
-      `评估状态：${state.label}。${state.description}`,
-      `Evaluation state: ${state.label}. ${state.description}`,
+      missingUnmergedCandidate ? `历史评估状态：${state.label}。当前候选工作树不可用，历史评分不能代替新的运行验证。` : `评估状态：${state.label}。${state.description}`,
+      missingUnmergedCandidate ? `Historical evaluation: ${state.label}. The unavailable workspace requires a new validated run.` : `Evaluation state: ${state.label}. ${state.description}`,
     ),
   });
   if (recommendation.code) {
@@ -918,7 +935,7 @@ export function buildSupervisedApprovalDecision(
             : copy.primaryAction
       ]?.reason ?? ""
       : "",
-    secondaryActions: mode.code === "human"
+    secondaryActions: run.candidateAvailability?.status !== "unavailable" && mode.code === "human"
       && normalized(run.approvalDecision?.status) !== "decided"
       && !ACTIVE_RUN_STATUSES.has(normalized(run.status))
       ? [
@@ -945,6 +962,8 @@ export function buildSupervisedApprovalDecision(
     evidence: buildEvidence(run, metrics, lang),
     steps: buildSteps(phase, run, lang),
     changedFiles,
-    blockers,
+    blockers: phase === "blocked" && run.candidateAvailability?.status === "unavailable"
+      ? [text(lang, "候选工作树已失效，请重新运行生成候选。", "The candidate workspace is unavailable. Generate a new candidate.")]
+      : blockers,
   };
 }

@@ -8,12 +8,34 @@ import pytest
 from core.infrastructure import developer_sandbox
 from core.web.services import supervised_worktree_evolution_service as service
 from scripts.evolution_harness import HarnessResult
+from tests.test_supervised_candidate_integration_service import install_validation_authority
 
 pytestmark = pytest.mark.slow
 
 
+@pytest.mark.parametrize("activation,expected", [("applied", "done"), ("activating", "running"), ("activation_failed", "failed")])
+def test_approval_step_tracks_integration_and_activation(activation, expected):
+    decorated = service._decorate_snapshot({
+        "runId": "projection-test", "status": "done", "phase": "complete",
+        "approvalDecision": {"status": "decided", "decision": "APPROVE"},
+        "runtimeActivation": {"status": activation},
+    })
+    assert next(step for step in decorated["workflowSteps"] if step["id"] == "approval")["status"] == expected
+
+
+def test_missing_candidate_explains_disabled_approval(tmp_path):
+    decorated = service._decorate_snapshot({
+        "runId": "missing-test", "status": "done", "phase": "complete",
+        "candidateWorktree": {"path": str(tmp_path / "missing"), "preserved": True},
+    })
+    assert decorated["candidateAvailability"]["status"] == "unavailable"
+    assert not decorated["actionStates"]["approveReview"]["enabled"]
+    assert "重新运行" in decorated["actionStates"]["approveReview"]["reason"]
+
+
 @pytest.fixture(autouse=True)
-def _isolate_launcher_activation(monkeypatch):
+def _isolate_launcher_activation(monkeypatch, tmp_path):
+    install_validation_authority(monkeypatch, tmp_path)
     monkeypatch.setattr(
         service,
         "_queue_runtime_activation",

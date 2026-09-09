@@ -273,6 +273,8 @@ export function useEvolutionRunMutations(options: UseEvolutionRunMutationsOption
       }
       await options.afterWorktreeRunChanged();
     },
+    // Approval can persist before integration fails; reload that authoritative decision.
+    onError: () => void options.afterWorktreeRunChanged(),
   });
 
   return {
