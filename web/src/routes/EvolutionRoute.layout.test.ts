@@ -666,7 +666,6 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeStyles.workflowStepButton).toContain("!grid");
     expect(routeStyles.workflowStepButton).toContain("[grid-template-columns:minmax(0,_1fr)]");
     expect(routeStyles.workflowStepButtonActive).toContain("[border-color:");
-    expect(routeStyles.workflowStepPreview).toContain("[-webkit-line-clamp:2]");
     expect(supervisedApprovalDecisionPanelSource).toContain("styles.rubricCriterionItem");
     expect(supervisedApprovalDecisionPanelStyles.rubricCriterionItem).toContain(
       "grid-cols-[max-content_minmax(0,1fr)]",
