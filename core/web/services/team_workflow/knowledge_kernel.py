@@ -177,11 +177,13 @@ def _attach_candidate_graph_stage_writeback_metadata(
             else s._load_candidate_store(normalized_team_id)
         )
         changed = False
+        graph_changed = False
         for candidate in list(candidate_store.get("candidates") or []):
             if not isinstance(candidate, dict) or str(candidate.get("candidateId") or "") != normalized_candidate_graph_id:
                 continue
-            metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
-            metadata = dict(metadata)
+            existing_metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+            metadata = dict(existing_metadata)
+            old_graph = metadata.get("graph") if isinstance(metadata.get("graph"), dict) else None
             existing_refs = metadata.get("stageTaskWritebacks") if isinstance(metadata.get("stageTaskWritebacks"), list) else []
             refs = [
                 item for item in existing_refs
@@ -218,8 +220,17 @@ def _attach_candidate_graph_stage_writeback_metadata(
             metadata["workflowStage"] = normalized_stage_id
             metadata["stageAgentRole"] = normalized_agent_role
             metadata["reusedCandidateGraph"] = bool(graph_response.get("reusedCandidateGraph"))
+            if metadata == existing_metadata:
+                # 缺陷 A02：内容幂等重放（同 taskId+agentGraph 指纹复用同一张
+                # 图且图本体与审计 ref 均未变化）不刷新 updatedAt、不重写存储，
+                # 避免 canonical 回执时间戳漂移。
+                break
+            new_graph = metadata.get("graph") if isinstance(metadata.get("graph"), dict) else None
+            graph_changed = (new_graph or None) != (old_graph or None)
             candidate["metadata"] = metadata
-            candidate["updatedAt"] = s.utc_now_iso()
+            if graph_changed:
+                # 图本体变化才推进记录 updatedAt；纯审计 ref 更新保持内容时间戳。
+                candidate["updatedAt"] = s.utc_now_iso()
             changed = True
             break
         if changed:
