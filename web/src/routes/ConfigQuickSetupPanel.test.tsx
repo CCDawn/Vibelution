@@ -44,6 +44,13 @@ function props(overrides: Partial<ConfigQuickSetupPanelProps> = {}): ConfigQuick
 }
 
 describe("ConfigQuickSetupPanel", () => {
+  it("offers save retry without requiring a credential or repeating detection", () => {
+    const state = { ...initialProviderQuickSetupState(), phase: "error" as const, errorKind: "partial_save" as const, selectedModelRef: "test/model" };
+    const markup = renderToStaticMarkup(<ConfigQuickSetupPanel {...props({ state })} />);
+    expect(markup).toContain("重试保存");
+    expect(markup).not.toContain("检测连接");
+    expect(markup).toContain("要添加的模型");
+  });
   it("maps actual preset credential requirements instead of treating missing credential_ref as no auth", () => {
     const preset = { ...templates[0], provider: { kind: "openai_compatible", requires_api_key: true, base_url: "https://relay.example.com/v1", api_key_env: "OPENAI_API_KEY" }, default_model: { transport: "chat_completions" } };
     const provider = templateToProvider(preset);
@@ -145,7 +152,7 @@ describe("ConfigQuickSetupPanel", () => {
     };
     const markup = renderToStaticMarkup(<ConfigQuickSetupPanel {...props({ state })} />);
 
-    expect(markup).toContain("默认模型");
+    expect(markup).toContain("要添加的模型");
     expect(markup).toContain("GPT-5");
     expect(markup).toContain("保存并完成");
   });

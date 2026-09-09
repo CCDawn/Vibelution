@@ -23,7 +23,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { type BlockerFunction, useBlocker, useSearchParams } from "react-router-dom";
+import { type BlockerFunction, useBlocker, useNavigate, useSearchParams } from "react-router-dom";
 
 import {
   addDraftModel,
@@ -2214,6 +2214,7 @@ async function createCroppedAvatarFile(draft: AvatarCropDraft): Promise<File> {
 }
 
 export function ConfigRoute() {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const contentViewportRef = useRef<HTMLDivElement | null>(null);
@@ -2654,11 +2655,6 @@ export function ConfigRoute() {
     readableErrorMessage,
   });
 
-  useEffect(() => {
-    if (providerQuickSetupState.phase === "success") {
-      setProviderConnecting(false);
-    }
-  }, [providerQuickSetupState.phase]);
 
   async function handleUnpinProviderModel(modelRef: string) {
     const unpinned = await unpinProviderModel(modelRef, (ref) => {
@@ -3539,7 +3535,10 @@ export function ConfigRoute() {
                     className={styles.providerModeButton}
                     aria-pressed={providerConnecting}
                     variant={providerConnecting ? "primary" : "secondary"}
-                    onPress={() => setProviderConnecting(true)}
+                    onPress={() => {
+                      if (providerQuickSetupState.phase === "success") dispatchProviderQuickSetup({ type: "reset" });
+                      setProviderConnecting(true);
+                    }}
                   >
                     添加连接
                   </VButton>
@@ -3567,6 +3566,7 @@ export function ConfigRoute() {
                       templates={providerPresetOptions}
                       credentialValue={providerQuickCredential}
                       disabled={structuredActionsDisabled || Boolean(busyAction)}
+                      onConfigureAgent={() => void navigate("/agents")}
                       onCredentialChange={setProviderQuickCredential}
                       onProviderChange={(provider) => {
                         if (provider.templateId !== providerQuickSetupState.provider.templateId || provider.authKind !== providerQuickSetupState.provider.authKind) setProviderQuickCredential("");
@@ -3731,9 +3731,6 @@ export function ConfigRoute() {
                     setSelectedProviderTab("connection");
                     setProviderCredentialEditId(providerId);
                     setProviderCredentialValue("");
-                    setRouteEditProviderId("");
-                    setRouteEditProvider({});
-                    setRoutePreview(null);
                     setProviderActionFeedback(null);
                   }}
                   onCredentialValueChange={setProviderCredentialValue}
@@ -3749,8 +3746,6 @@ export function ConfigRoute() {
                     void handleUpdateProviderContextWindow(providerId, contextWindow);
                   }}
                   onEditRoute={(providerId) => {
-                    setProviderCredentialEditId("");
-                    setProviderCredentialValue("");
                     handleBeginProviderRouteEdit(providerId);
                   }}
                   onPin={(providerId, models) => {

@@ -32,7 +32,7 @@ export type UseConfigProviderQuickSetupActionsOptions = {
   handleSuggestProviderId: (provider: Record<string, unknown>) => Promise<string>;
   handleCreateProvider: (state: ProviderWizardState, credentialValue: string) => Promise<void>;
   handleDiscoverProvider: (providerId: string, credentialValue?: string) => Promise<ConfigCatalogModel[]>;
-  handlePinProviderModels: (providerId: string, models: ConfigCatalogModel[]) => Promise<boolean | void>;
+  handlePinProviderModels: (providerId: string, models: ConfigCatalogModel[]) => Promise<boolean>;
   handleApply: (pendingLabel?: string, draftOverride?: ConfigApplyDraftOverride) => Promise<boolean>;
   readableErrorMessage: (error: unknown) => string;
 };
@@ -105,12 +105,21 @@ export function useConfigProviderQuickSetupActions(options: UseConfigProviderQui
   const handleConfirmProviderQuickSetup = useCallback(async () => {
     const { provider, selectedModelRef, discoveredModels: quickModels } = providerQuickSetupState;
     const selectedModel = quickModels.find((model) => model.modelRef === selectedModelRef);
-    if (providerQuickSetupState.phase !== "review" || !selectedModel || !selectedModelRef.startsWith(`${provider.providerId}/`)) {
+    const retrySave = providerQuickSetupState.phase === "error" && ["partial_save", "save"].includes(providerQuickSetupState.errorKind);
+    if ((providerQuickSetupState.phase !== "review" && !retrySave) || !selectedModel || !selectedModelRef.startsWith(`${provider.providerId}/`)) {
       return;
     }
     dispatchProviderQuickSetup({ type: "start_save" });
+    let modelAdded = providerQuickSetupState.errorKind === "partial_save";
     try {
-      await handlePinProviderModels(provider.providerId, [selectedModel]);
+      if (providerQuickSetupState.errorKind !== "partial_save") {
+        const pinned = await handlePinProviderModels(provider.providerId, [selectedModel]);
+        if (!pinned) {
+          dispatchProviderQuickSetup({ type: "save_failed", errorKind: "save", errorMessage: "模型未添加成功，请重试保存。已检测结果和选择已保留。" });
+          return;
+        }
+        modelAdded = true;
+      }
       const snapshot = providerDraftRequestRef.current;
       const draftOverride: ConfigApplyDraftOverride | undefined = snapshot
         ? {
@@ -124,7 +133,7 @@ export function useConfigProviderQuickSetupActions(options: UseConfigProviderQui
         dispatchProviderQuickSetup({
           type: "save_failed",
           errorKind: "partial_save",
-          errorMessage: "Provider 草稿已保留，但正式配置尚未应用。请重试确认保存。",
+          errorMessage: "配置尚未保存，已检测结果和模型选择已保留。请点击「重试保存」。",
         });
         return;
       }
@@ -134,7 +143,7 @@ export function useConfigProviderQuickSetupActions(options: UseConfigProviderQui
     } catch (error) {
       dispatchProviderQuickSetup({
         type: "save_failed",
-        errorKind: "partial_save",
+        errorKind: modelAdded ? "partial_save" : "save",
         errorMessage: readableErrorMessage(error).slice(0, 320),
       });
     }

@@ -28,6 +28,7 @@ export type ConfigQuickSetupPanelProps = {
   onModelChange: (modelRef: string) => void;
   onConfirm: () => void;
   onReset: () => void;
+  onConfigureAgent?: () => void;
 };
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -111,6 +112,7 @@ export function ConfigQuickSetupPanel({
   onModelChange,
   onConfirm,
   onReset,
+  onConfigureAgent,
 }: ConfigQuickSetupPanelProps) {
   const result = resultCopy(state);
   const selectedTemplate = templates.find((template) => template.provider_preset_id === state.provider.templateId);
@@ -122,10 +124,11 @@ export function ConfigQuickSetupPanel({
     && state.phase !== "checking"
     && state.phase !== "saving",
   );
-  const canConfirm = state.phase === "review" && Boolean(state.selectedModelRef) && !disabled;
+  const retrySave = state.phase === "error" && ["partial_save", "save"].includes(state.errorKind);
+  const canConfirm = (state.phase === "review" || retrySave) && Boolean(state.selectedModelRef) && !disabled;
   const showResult = state.phase !== "input";
-  const showDetectAction = state.phase === "input" || state.phase === "checking" || state.phase === "error";
-  const showReviewActions = state.phase === "review" || state.phase === "saving";
+  const showDetectAction = state.phase === "input" || state.phase === "checking" || (state.phase === "error" && !retrySave);
+  const showReviewActions = state.phase === "review" || state.phase === "saving" || retrySave;
   const detectLabel = state.phase === "checking"
     ? "检测中…"
     : state.phase === "error"
@@ -167,7 +170,7 @@ export function ConfigQuickSetupPanel({
       tooltipLabel="快速模型连接说明"
     >
       <div className={styles.workspace}>
-        <div className={styles.inputPanel}>
+        {state.phase !== "success" ? <div className={styles.inputPanel}>
           <div className={styles.inputGrid}>
             <label className={styles.field}>
               <span>选择服务商</span>
@@ -260,7 +263,7 @@ export function ConfigQuickSetupPanel({
               </label>
             </div>
           </details>
-        </div>
+        </div> : null}
 
         {showResult ? (
           <section className={styles.resultRegion} data-quick-setup-result="true" aria-live="polite">
@@ -281,14 +284,17 @@ export function ConfigQuickSetupPanel({
               {resultMessage}
             </VStateSurface>
 
+            {state.phase === "success" && onConfigureAgent ? (
+              <VButton variant="primary" onPress={onConfigureAgent}>去配置 Agent</VButton>
+            ) : null}
             {showReviewActions ? (
               <div className={styles.reviewActions}>
                 <label className={styles.field}>
-                  <span>默认模型</span>
+                  <span>要添加的模型</span>
                   <VStringSelect
-                    ariaLabel="默认模型"
+                    ariaLabel="要添加的模型"
                     value={state.selectedModelRef}
-                    isDisabled={state.phase === "saving"}
+                    isDisabled={state.phase === "saving" || retrySave}
                     options={state.discoveredModels.map((model) => ({
                       value: model.modelRef,
                       label: model.label || model.modelRef,
@@ -306,7 +312,7 @@ export function ConfigQuickSetupPanel({
                   isDisabled={!canConfirm}
                   onPress={onConfirm}
                 >
-                  {state.phase === "saving" ? "保存中…" : "保存并完成"}
+                  {state.phase === "saving" ? "保存中…" : retrySave ? "重试保存" : "保存并完成"}
                 </VButton>
               </div>
             ) : null}

@@ -115,7 +115,7 @@ function hardDisabledReason(candidate: AgentModelChoice, slot: string) {
     return "上游模型当前不可用";
   }
   if (candidate.missingApiKey) {
-    return "Provider 尚未配置 API Key";
+    return "此服务尚未配置 API Key";
   }
   return "";
 }
@@ -136,8 +136,8 @@ export function agentModelChoiceDisabledReason(
 
 function candidateStatus(candidate: AgentModelChoice) {
   if (candidate.catalogStale || candidate.verificationStatus === "stale") return "已过期";
-  if (candidate.source === "both") return "已固定 · 已发现";
-  if (candidate.source === "pinned") return "已固定";
+  if (candidate.source === "both") return "已添加 · 已发现";
+  if (candidate.source === "pinned") return "已添加";
   if (candidate.verificationStatus === "verified") return "已发现 · 已验证";
   return "已发现 · 未验证";
 }
@@ -334,12 +334,12 @@ export function AgentModelPicker({
               <span>{dialogTitle}</span>
               <VContextualHint
                 label="模型选择说明"
-                content="按 Provider 分组。可直接搜索模型名 / gpt / luna。已固定的点「使用」；未固定的点「固定后使用」会先加入模型库再绑定。"
+                content="按服务商分组。可直接搜索模型名 / gpt / luna。已添加的点「使用」；未添加的点「添加并使用」会先加入模型库再绑定。"
                 width="wide"
               />
             </span>
           )}
-          description="按 Provider 分组浏览；搜索支持模型名、Provider 与 modelRef。"
+          description="按服务商分组浏览；搜索支持模型名、Provider 与 modelRef。"
           size="xl"
           contentClassName={styles.dialogContent}
           aria-label={dialogTitle}
@@ -419,7 +419,7 @@ export function AgentModelPicker({
                           </span>
                         </span>
                         <span className={styles.action}>
-                          {pending ? "处理中…" : candidate.runtimeSelectable ? "使用" : "固定后使用"}
+                          {pending ? "处理中…" : candidate.runtimeSelectable ? "使用" : "添加并使用"}
                         </span>
                         {reason ? <span className={styles.reason}>{reason}</span> : null}
                       </VButton>
@@ -441,10 +441,10 @@ export function AgentModelPicker({
             closePromoteConfirm();
           }
         }}
-        title="固定后使用模型"
-        description="此操作将修改 operator config，并只更新当前 Agent 的模型绑定。"
+        title="添加并使用模型"
+        description="此操作将修改 模型库配置，并只更新当前 Agent 的模型绑定。"
         tone="neutral"
-        confirmLabel="固定并绑定"
+        confirmLabel="添加并使用"
         cancelLabel="取消"
         confirmPending={Boolean(
           pendingPromote && pendingModelRef && pendingPromote.modelRef === pendingModelRef,

@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConfigCatalogModel } from "../api/types";
 import {
   ConfigProviderRegistryPanel,
+  modelTestRecoveryHint,
   ProviderModelsTab,
   type ConfigProviderRegistryPanelProps,
 } from "./ConfigProviderRegistryPanel";
@@ -133,6 +134,12 @@ async function renderModelDetails(models: ConfigCatalogModel[], options: {liveRe
 }
 
 describe("ConfigProviderRegistryPanel", () => {
+  it.each([
+    ["auth_failed", "API Key"], ["network", "网络"], ["timeout", "服务负载"],
+    ["rate_limited", "额度"], ["service_unavailable", "切换服务"], ["not_found", "模型名称"],
+  ])("gives an actionable recovery hint for %s", (kind, hint) => {
+    expect(modelTestRecoveryHint(kind)).toContain(hint);
+  });
   it("adds only discovered models matching the current search", async () => {
     const models = [model("alpha", "observed"), model("beta", "observed")];
     const onPin = vi.fn();
