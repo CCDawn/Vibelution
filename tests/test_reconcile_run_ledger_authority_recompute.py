@@ -2879,3 +2879,267 @@ def test_reconcile_auto_handoff_accept_is_idempotent(tmp_path: Path) -> None:
         assert json.loads(events[1].payload_json)["autoAcceptedHandoffIds"] == []
     finally:
         commands.close()
+
+
+# --------------------------------------------------------------------------
+# 缺陷 ⑳-b：⑳ 的孤儿 handoff 接受 pass 触发面缺口。
+#
+# 生产实测（run-332a539909a6 → run-1ca97605acf3，ho-f67bc7db）：⑳ 的 pass (4)
+# 只在 _apply_ledger_reconcile_for_run 里跑，而父 reconcile 的 child cascade
+# 在 reconciliation_required gate 就把 child continue 了——⑮ 的
+# surviving-blocker landing 之后 child 的稳态是 blocked 且不会回退，孤儿
+# handoff 因此永远无人接受。修复：gate 之前对每个存在的 child 补接受；
+# blocked child 只补接受、不重跑完整 reconcile（⑮ ladder 语义不变）。
+# --------------------------------------------------------------------------
+
+
+def test_reconcile_accepts_orphan_handoff_on_blocked_child_before_gate(
+    tmp_path: Path,
+) -> None:
+    """生产形态复刻：blocked child + 孤儿 ready auto handoff。
+
+    父 reconcile 后 handoff=accepted、412 blocker 消失；child 不走 ladder
+    （状态/版本/事件零变化、死 dispatch 不复活），接受审计在父事件载荷
+    childAutoAcceptedHandoffIds。"""
+    commands = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        run_id = "run-parent-20b"
+        blocked_child = "run-child-20b-blocked"
+        _seed_parent_with_knowledge_children(
+            commands,
+            run_id=run_id,
+            children=[{"run_id": blocked_child, "status": "blocked"}],
+        )
+        store = commands.store
+
+        def seed_child_ledger(uow):
+            # 上游 a2 正常收尾：旧 handoff 已被 worker 接受。
+            uow.repository.insert_attempt(
+                _attempt(
+                    "evidence_relations",
+                    attempt=2,
+                    status="succeeded",
+                    run_id=blocked_child,
+                    command_id=f"cmd-{blocked_child}",
+                )
+            )
+            _seed_handoff(
+                uow,
+                handoff_id=f"ho-{blocked_child}-accepted-a2",
+                run_id=blocked_child,
+                from_node_run_id=f"nr-{blocked_child}-evidence_relations-a2",
+                status="accepted",
+                offered_at_ms=FIXED_NOW_MS - 2_000,
+            )
+            # 上游 a3 经 receipt 写回成功：孤儿 ready auto handoff（⑳ 形态）。
+            uow.repository.insert_attempt(
+                _attempt(
+                    "evidence_relations",
+                    attempt=3,
+                    status="succeeded",
+                    run_id=blocked_child,
+                    command_id=f"cmd-{blocked_child}",
+                )
+            )
+            _seed_handoff(
+                uow,
+                handoff_id=f"ho-{blocked_child}-orphan-a3",
+                run_id=blocked_child,
+                from_node_run_id=f"nr-{blocked_child}-evidence_relations-a3",
+            )
+            # 下游 blocked attempt 被 handoff_not_accepted 钉死；附带一枚
+            # 死 dispatch，证明 gate 跳过的 child 不重跑完整 reconcile。
+            uow.repository.insert_attempt(
+                _attempt(
+                    "knowledge_ingestion",
+                    status="blocked",
+                    problem=_READINESS_PROBLEM,
+                    run_id=blocked_child,
+                    command_id=f"cmd-{blocked_child}",
+                )
+            )
+            uow.repository.insert_outbox(
+                replace(
+                    build_outbox_record(
+                        "act-child-20b-dispatch",
+                        run_id=blocked_child,
+                        command_id=f"cmd-{blocked_child}",
+                        action_kind="graph_dispatch",
+                        status="failed",
+                    ),
+                    node_run_id=f"nr-{blocked_child}-knowledge_ingestion-a1",
+                    last_problem_json=json.dumps(
+                        {"code": "graph_dispatch_failed", "detail": "transient"}
+                    ),
+                )
+            )
+
+        store.submit(seed_child_ledger, force_flush=True).result(timeout=10)
+
+        # 对账前：生产现场的 412 blocker 真实存在。
+        assert "handoff_not_accepted" in _ingestion_handoff_blocker_codes(
+            commands, blocked_child
+        )
+
+        commands.service.submit(
+            commands.request(
+                command=WorkflowCommandKind.RECONCILE_RUN,
+                run_id=run_id,
+                node_id=None,
+                expected_run_version=3,
+                idempotency_key="ui:reconcile-20b",
+            )
+        )
+
+        # 孤儿 handoff 被补接受，accepted_by 形态与 pass (4) 一致。
+        orphan = _handoff_row(commands, f"ho-{blocked_child}-orphan-a3")
+        assert orphan[8] == "accepted"
+        assert json.loads(orphan[9]) == {"actorType": "system", "actorId": "reconcile"}
+        assert orphan[13] == FIXED_NOW_MS + 1000
+        # 更早的 accepted handoff 原样保留。
+        older = _handoff_row(commands, f"ho-{blocked_child}-accepted-a2")
+        assert older[8] == "accepted"
+        assert json.loads(older[9]) == {
+            "actorType": "system",
+            "actorId": "graph-worker",
+        }
+        # 412 blocker 消失（下游解锁交给既有 sweep/readiness recheck）。
+        assert "handoff_not_accepted" not in _ingestion_handoff_blocker_codes(
+            commands, blocked_child
+        )
+
+        # blocked child 不走 ladder：状态、版本、事件、死 dispatch 全不动。
+        child = store.get_run(blocked_child)
+        assert child.status == "blocked"
+        assert child.run_version == 2
+        assert store.list_events(blocked_child) == []
+        assert _outbox_status(commands, "act-child-20b-dispatch") == "failed"
+
+        # 审计在父事件载荷：来源键区分 ladder child。
+        parent_events = [
+            event
+            for event in store.list_events(run_id)
+            if event.event_type == "run_blocked"
+        ]
+        payload = json.loads(parent_events[-1].payload_json)
+        assert payload["childAutoAcceptedHandoffIds"] == [
+            f"ho-{blocked_child}-orphan-a3"
+        ]
+        assert payload["autoAcceptedHandoffIds"] == []
+    finally:
+        commands.close()
+
+
+def test_reconcile_ladder_child_handoff_accept_stays_once_and_audited_on_child(
+    tmp_path: Path,
+) -> None:
+    """reconciliation_required child 行为与 ⑳ 一致：pass 恰跑一次。
+
+    第一次对账：child 走 ladder，接受审计在 child 自己的事件
+    autoAcceptedHandoffIds，父载荷 childAutoAcceptedHandoffIds 保持空（来源
+    区分）。第二次对账：child 已离场，pre-gate 补接受零命中，无重复接受、
+    accepted_at_ms 不变、无第二个 child 事件。"""
+    commands = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        run_id = "run-parent-20b-ladder"
+        child_run_id = "run-child-20b-ladder"
+        _seed_parent_with_knowledge_children(
+            commands,
+            run_id=run_id,
+            children=[{"run_id": child_run_id, "status": "reconciliation_required"}],
+        )
+        store = commands.store
+
+        def seed_child_ledger(uow):
+            uow.repository.insert_attempt(
+                _attempt(
+                    "evidence_relations",
+                    attempt=3,
+                    status="succeeded",
+                    run_id=child_run_id,
+                    command_id=f"cmd-{child_run_id}",
+                )
+            )
+            _seed_handoff(
+                uow,
+                handoff_id=f"ho-{child_run_id}-orphan-a3",
+                run_id=child_run_id,
+                from_node_run_id=f"nr-{child_run_id}-evidence_relations-a3",
+            )
+            uow.repository.insert_attempt(
+                _attempt(
+                    "knowledge_ingestion",
+                    attempt=2,
+                    status="failed",
+                    problem=_RECEIPT_MISMATCH_PROBLEM,
+                    run_id=child_run_id,
+                    command_id=f"cmd-{child_run_id}",
+                )
+            )
+            uow.repository.insert_outbox(
+                replace(
+                    build_outbox_record(
+                        "act-child-20b-ladder-dispatch",
+                        run_id=child_run_id,
+                        command_id=f"cmd-{child_run_id}",
+                        action_kind="graph_dispatch",
+                        status="failed",
+                    ),
+                    node_run_id=f"nr-{child_run_id}-knowledge_ingestion-a2",
+                    last_problem_json=json.dumps(
+                        _RECEIPT_MISMATCH_PROBLEM, ensure_ascii=False
+                    ),
+                )
+            )
+
+        store.submit(seed_child_ledger, force_flush=True).result(timeout=10)
+
+        commands.service.submit(
+            commands.request(
+                command=WorkflowCommandKind.RECONCILE_RUN,
+                run_id=run_id,
+                node_id=None,
+                expected_run_version=3,
+                idempotency_key="ui:reconcile-20b-ladder-1",
+            )
+        )
+        commands.service.submit(
+            commands.request(
+                command=WorkflowCommandKind.RECONCILE_RUN,
+                run_id=run_id,
+                node_id=None,
+                expected_run_version=4,
+                idempotency_key="ui:reconcile-20b-ladder-2",
+            )
+        )
+
+        # 恰一次接受，accepted_at_ms 未被第二次改写。
+        orphan = _handoff_row(commands, f"ho-{child_run_id}-orphan-a3")
+        assert orphan[8] == "accepted"
+        assert orphan[13] == FIXED_NOW_MS + 1000
+
+        # child 只有一条 ladder 事件，接受审计在 child 载荷。
+        child_events = [
+            event
+            for event in store.list_events(child_run_id)
+            if event.event_type == "run_blocked"
+        ]
+        assert len(child_events) == 1
+        child_payload = json.loads(child_events[0].payload_json)
+        assert child_payload["autoAcceptedHandoffIds"] == [
+            f"ho-{child_run_id}-orphan-a3"
+        ]
+
+        # 两次父事件：ladder child 的接受不走父来源键（区分来源）。
+        parent_events = [
+            event
+            for event in store.list_events(run_id)
+            if event.event_type == "run_blocked"
+        ]
+        assert len(parent_events) == 2
+        for event in parent_events:
+            payload = json.loads(event.payload_json)
+            assert payload["childAutoAcceptedHandoffIds"] == []
+            assert payload["autoAcceptedHandoffIds"] == []
+    finally:
+        commands.close()
