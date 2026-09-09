@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import type { CloseReviewMeetingResponse } from "../../../api/types/hypothesisFirst";
+import type { CloseReviewMeetingResponse, CommandAction } from "../../../api/types/hypothesisFirst";
 
 import {
   executeHypothesisFirstCommand,
@@ -14,6 +14,7 @@ import { VButton, VErrorSummary, VStateSurface } from "../../../components/vui";
 import { MeetingRoundDisplay } from "../meetingRoundDisplay";
 import styles from "./HypothesisFirstMeetingOps.styles";
 import { type HypothesisFirstCommand, type HypothesisFirstNextAction } from "./hypothesisFirstNextAction";
+import type { HypothesisFirstV2NextAction } from "./hypothesisFirstStateV2Adapter";
 import { invalidateHypothesisFirstQueries } from "./useHypothesisFirstChain";
 
 type Language = "zh" | "en";
@@ -163,6 +164,21 @@ export function HypothesisFirstMeetingOps(props: {
     props.runId,
   );
   const canonicalAction = props.nextAction.canonicalAction;
+  // Panel-scoped command resolution: the selection-level canonicalAction only
+  // describes the first awaiting room, so a sibling room waiting for approval
+  // rendered no operable buttons at all. The V2 projection also carries the
+  // full per-room command list (canonicalActions); resolve the enabled command
+  // bound to THIS panel's meeting round. The focus room keeps its
+  // canonicalAction verbatim, and a disabled action never becomes an
+  // executable command (mirrors firstEnabledCommand's `enabled` gate).
+  const panelAction: CommandAction | undefined = (() => {
+    if (canonicalAction && props.nextAction.meetingRoundId === props.meetingRoundId) {
+      return canonicalAction;
+    }
+    const actions = (props.nextAction as HypothesisFirstV2NextAction).canonicalActions ?? [];
+    return actions.find((action) => action.enabled
+      && String((action.payload as Record<string, unknown>).meetingRoundId || "") === props.meetingRoundId);
+  })();
   const canonicalActionUnavailable = () => Promise.reject(new Error("canonical_action_unavailable"));
   const refreshOnConflict = (error: unknown) => {
     if (isHypothesisFirstCommandStateConflict(error)) invalidate();
@@ -174,11 +190,11 @@ export function HypothesisFirstMeetingOps(props: {
   const suppressDraftBlockNoticeRef = useRef(false);
   const draftMutation = useMutation<unknown, Error, void>({
     mutationFn: () => {
-      if (canonicalAction?.command === "regenerate_summary") {
+      if (panelAction?.command === "regenerate_summary") {
         return executeHypothesisFirstCommand(
           props.teamId,
           props.questionId,
-          canonicalAction,
+          panelAction,
           undefined,
           { runId: props.runId },
         );
@@ -251,11 +267,11 @@ export function HypothesisFirstMeetingOps(props: {
   const [approveBlockedReason, setApproveBlockedReason] = useState<string | null>(null);
   const approveMutation = useMutation({
     mutationFn: () => {
-      if (canonicalAction?.command === "approve_summary") {
+      if (panelAction?.command === "approve_summary") {
         return executeHypothesisFirstCommand(
           props.teamId,
           props.questionId,
-          canonicalAction,
+          panelAction,
           { decision: "accepted" },
           { runId: props.runId },
         ).then((receipt) => receipt.result as CloseReviewMeetingResponse);
@@ -326,11 +342,11 @@ export function HypothesisFirstMeetingOps(props: {
   });
   const rejectMutation = useMutation<unknown, Error, void>({
     mutationFn: () => {
-      if (canonicalAction?.command === "approve_summary") {
+      if (panelAction?.command === "approve_summary") {
         return executeHypothesisFirstCommand(
           props.teamId,
           props.questionId,
-          canonicalAction,
+          panelAction,
           { decision: "rejected" },
           { runId: props.runId },
         );
@@ -383,11 +399,11 @@ export function HypothesisFirstMeetingOps(props: {
   const [rejectNotice, setRejectNotice] = useState<string | null>(null);
   const reopenReviewMutation = useMutation<unknown, Error, void>({
     mutationFn: () => {
-      if (canonicalAction && ["retry_review_dispatch", "reopen_review", "resume_discussion", "stop_discussion"].includes(canonicalAction.command)) {
+      if (panelAction && ["retry_review_dispatch", "reopen_review", "resume_discussion", "stop_discussion"].includes(panelAction.command)) {
         return executeHypothesisFirstCommand(
           props.teamId,
           props.questionId,
-          canonicalAction,
+          panelAction,
           undefined,
           { runId: props.runId },
         );
@@ -435,11 +451,11 @@ export function HypothesisFirstMeetingOps(props: {
   // Commands without specialized form handling use the same V2 envelope.
   const canonicalOnlyMutation = useMutation<unknown, Error, void>({
     mutationFn: () => {
-      if (!canonicalAction) return canonicalActionUnavailable();
+      if (!panelAction) return canonicalActionUnavailable();
       return executeHypothesisFirstCommand(
         props.teamId,
         props.questionId,
-        canonicalAction,
+        panelAction,
         undefined,
         { runId: props.runId },
       );
@@ -464,14 +480,16 @@ export function HypothesisFirstMeetingOps(props: {
   const autoDraftFailed = commandEnabled
     && props.nextAction.command === "regenerate_summary"
     && draftMutation.isError;
-  const command = commandEnabled && canonicalAction ? props.nextAction.command : undefined;
+  // A panel-level action (sibling room) is fully executable on its own; the
+  // focus room keeps reading the selection-level aggregation verbatim.
+  const command = commandEnabled && canonicalAction ? props.nextAction.command : panelAction?.command;
   const canonicalOnlyCommand = commandEnabled && Boolean(canonicalAction) && !props.nextAction.command;
-  const commandLabel = commandEnabled && canonicalAction ? props.nextAction.commandLabel : undefined;
+  const commandLabel = commandEnabled && canonicalAction ? props.nextAction.commandLabel : panelAction?.label;
   const commandDetail = failedCandidateDiscussion || failedReviewDiscussion
     ? (isZh ? "放弃本轮失败尝试，以同一批假说开启下一轮" : "Discard the failed attempt and open the next round with the same hypotheses")
     : autoDraftFailed
       ? undefined
-      : (commandEnabled ? props.nextAction.commandDetail : undefined);
+      : (commandEnabled ? props.nextAction.commandDetail : (panelAction?.confirmationText ?? undefined));
   const commandDisabledReason = props.nextAction.disabledReason
     || (command === "handoff_collection" && !canHandoff
       ? (isZh ? "缺少资料搜集运行标识，无法重试自动交接" : "The source-collection run ID is missing; automatic handoff cannot be retried")
@@ -483,6 +501,7 @@ export function HypothesisFirstMeetingOps(props: {
     || reopenReviewMutation.isPending
     || handoffMutation.isPending
     || canonicalOnlyMutation.isPending;
+  const pendingReason = isZh ? "操作进行中，请稍候…" : "An action is in progress…";
   const error =
     draftMutation.error
     || approveMutation.error
@@ -540,9 +559,13 @@ export function HypothesisFirstMeetingOps(props: {
     && command !== "create_formal_run"
     && command !== "human_adjudication",
   );
-  const showReject = commandEnabled
-    && canonicalAction?.command === "approve_summary"
-    && (props.nextAction.stage === "review_awaiting_approval" || props.nextAction.stage === "generation_awaiting_approval");
+  // The reject affordance follows the panel's own approve command. The focus
+  // room keeps the selection-stage gate; a sibling room falls back to its own
+  // round status (awaiting_approval), which is the factual authority for that
+  // room even when the selection-level stage moved on.
+  const showReject = panelAction?.command === "approve_summary"
+    && (props.nextAction.stage === "review_awaiting_approval" || props.nextAction.stage === "generation_awaiting_approval"
+      || (!commandEnabled && roundStatus === "awaiting_approval"));
   const actionBar = (showPrimaryCommand || showReject) ? (
     <div className={styles.actions} data-testid="meeting-round-actions">
       {showPrimaryCommand ? (
@@ -552,8 +575,8 @@ export function HypothesisFirstMeetingOps(props: {
             variant="primary"
             density="compact"
             isPending={pending}
-            isDisabled={Boolean(commandDisabledReason)}
-            disabledReason={commandDisabledReason}
+            isDisabled={Boolean(commandDisabledReason) || pending}
+            disabledReason={pending ? pendingReason : commandDisabledReason}
             onPress={() => {
               if (canonicalOnlyCommand) {
                 canonicalOnlyMutation.mutate();
@@ -575,6 +598,7 @@ export function HypothesisFirstMeetingOps(props: {
           density="compact"
           isPending={rejectMutation.isPending}
           isDisabled={pending}
+          disabledReason={pending ? pendingReason : undefined}
           onPress={() => rejectMutation.mutate()}
         >
           {isZh ? "退回重新整理" : "Send back for revision"}

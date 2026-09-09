@@ -33,6 +33,7 @@ import {
   reopenHypothesisReviewMeeting,
 } from "../../../api/hypothesisFirst";
 import { HypothesisFirstMeetingOps } from "./HypothesisFirstMeetingOps";
+import type { HypothesisFirstV2NextAction } from "./hypothesisFirstStateV2Adapter";
 import type { HypothesisFirstNextAction } from "./hypothesisFirstNextAction";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -102,18 +103,39 @@ const AWAITING_REVIEW_ACTION: HypothesisFirstNextAction = {
   canonicalAction: APPROVE_SUMMARY_ACTION,
 };
 
+// Two candidate review rooms can sit in awaiting_approval at the same time;
+// the selection-level nextAction then aggregates the FIRST room while the
+// sibling panel must stay operable through its own canonicalActions entry.
+const APPROVE_ACTION_A = {
+  ...APPROVE_SUMMARY_ACTION,
+  actionId: "approve-summary:candidate-a",
+  idempotencyKey: "hf2:approve-summary:candidate-a",
+};
+const APPROVE_ACTION_B = {
+  ...APPROVE_SUMMARY_ACTION,
+  actionId: "approve-summary:candidate-b",
+  idempotencyKey: "hf2:approve-summary:candidate-b",
+  payload: { meetingRoundId: "meeting-2" },
+};
+const DUAL_ROOM_ACTION: HypothesisFirstV2NextAction = {
+  ...AWAITING_REVIEW_ACTION,
+  meetingRoundId: "meeting-1",
+  canonicalAction: APPROVE_ACTION_A,
+  canonicalActions: [APPROVE_ACTION_A, APPROVE_ACTION_B],
+};
+
 let container: HTMLDivElement;
 let root: Root;
 let queryClient: QueryClient;
 
-function render(nextAction: HypothesisFirstNextAction) {
+function render(nextAction: HypothesisFirstNextAction, meetingRoundId = "meeting-1") {
   act(() => {
     root.render(
       <QueryClientProvider client={queryClient}>
         <HypothesisFirstMeetingOps
           teamId="team-1"
           questionId="Q-01"
-          meetingRoundId="meeting-1"
+          meetingRoundId={meetingRoundId}
           nextAction={nextAction}
           compact
         />
@@ -633,5 +655,75 @@ describe("HypothesisFirstMeetingOps automatic organization", () => {
     );
     expect(mockedDraftMeetingSummary).not.toHaveBeenCalled();
     expect(container.textContent).toContain("停止后可重新发起搜集");
+  });
+
+  it("keeps a sibling awaiting room operable from its own canonical action", async () => {
+    mockedFetchMeetingRound.mockResolvedValue({
+      schemaVersion: 1,
+      teamId: "team-1",
+      meetingRound: {
+        ...meetingRound("awaiting_approval"),
+        meetingRoundId: "meeting-2",
+        meetingType: "hypothesis_review",
+      },
+    });
+
+    render(DUAL_ROOM_ACTION, "meeting-2");
+
+    await act(async () => {
+      // The sibling room's primary label comes from its own canonical action,
+      // not the selection-level commandLabel (which describes room A).
+      await vi.waitFor(() => expect(container.textContent).toContain("确认本轮结论"));
+      const approve = [...container.querySelectorAll("button")]
+        .find((button) => button.textContent?.includes("确认本轮结论"));
+      const reject = [...container.querySelectorAll("button")]
+        .find((button) => button.textContent?.includes("退回重新整理"));
+      expect(approve).toBeTruthy();
+      expect(reject).toBeTruthy();
+      expect((approve as HTMLButtonElement).disabled).toBe(false);
+      expect((reject as HTMLButtonElement).disabled).toBe(false);
+      reject?.click();
+      await vi.waitFor(() => expect(mockedExecuteCommand).toHaveBeenCalledTimes(1));
+    });
+
+    expect(mockedExecuteCommand).toHaveBeenCalledWith(
+      "team-1",
+      "Q-01",
+      APPROVE_ACTION_B,
+      { decision: "rejected" },
+      { runId: undefined },
+    );
+  });
+
+  it("explains a swallowed click while a panel action is pending", async () => {
+    mockedFetchMeetingRound.mockResolvedValue({
+      schemaVersion: 1,
+      teamId: "team-1",
+      meetingRound: { ...meetingRound("awaiting_approval"), meetingType: "hypothesis_review" },
+    });
+    mockedExecuteCommand.mockImplementationOnce(() => new Promise(() => {}));
+
+    render(AWAITING_REVIEW_ACTION);
+
+    await act(async () => {
+      await vi.waitFor(() => expect(container.textContent).toContain("退回重新整理"));
+      const reject = [...container.querySelectorAll("button")]
+        .find((button) => button.textContent?.includes("退回重新整理"));
+      reject?.click();
+      await vi.waitFor(() => expect(mockedExecuteCommand).toHaveBeenCalledTimes(1));
+    });
+    await act(async () => {
+      await vi.waitFor(() => {
+        const reasons = [...container.querySelectorAll('[data-vui="disabled-tooltip-trigger"]')]
+          .map((trigger) => trigger.getAttribute("aria-label") ?? "");
+        expect(reasons.some((reason) => reason.includes("操作进行中"))).toBe(true);
+      });
+      // The pending gate must also swallow further clicks silently.
+      const reject = [...container.querySelectorAll("button")]
+        .find((button) => button.textContent?.includes("退回重新整理"));
+      reject?.click();
+    });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+    expect(mockedExecuteCommand).toHaveBeenCalledTimes(1);
   });
 });
