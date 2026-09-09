@@ -1889,6 +1889,7 @@ _REVISION_SYSTEM_PROMPT = """你是科研假说修订员。根据 MetaReview 的
 要求：
 - revisedCandidate.candidateId 必须与 parentCandidate.candidateId 完全一致，但 claim 必须是实质修订后的新文本，不能复制原文。
 - 保留并完善可检验预测、机制靶向 falsifier、差异说明与 axisProfile；lineageRefs 只能从 refsWhitelist 选择，不得编造引用。
+- 父候选已有的 testablePrediction、falsifier、axisProfile、lineageRefs 若非空，修订必须保留或完善它们，不得显式输出空字符串、空对象或空列表。
 - changes 必须逐条说明实际改动且不能为空；unresolvedIssues 必须存在且为字符串列表，逐条保留仍未解决的边界或风险；若本次反馈全部解决可为空。
 - 不得把 MetaReview rationale、riskNotes、分数或收据本身冒充 revisedCandidate。
 - 严格输出单个 JSON 对象。
@@ -2357,6 +2358,15 @@ def build_hypothesis_review_runners(
             raise ContractValidationError(
                 "hypothesis revision output is missing revisedCandidate"
             )
+        # A03: mirror the executor's required-science-field contract here so
+        # the model-facing feedback loop rejects an explicitly blanked
+        # prediction/falsifier/axisProfile/lineageRefs before the receipt is
+        # even recorded.  The executor re-runs the same check on its side.
+        from core.web.services.team_workflow.hypothesis_review_executor import (
+            enforce_revision_science_field_contract,
+        )
+
+        enforce_revision_science_field_contract(revised, parent_candidate)
         revised_refs = [
             str(item).strip()
             for item in list(revised.get("lineageRefs") or [])

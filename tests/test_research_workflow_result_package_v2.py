@@ -719,14 +719,22 @@ def _chain_candidate(**overrides: Any) -> dict[str, Any]:
     return record
 
 
-def _patch_hypothesis_authorities(monkeypatch, round_candidates, chain_candidates) -> None:
+def _patch_hypothesis_authorities(
+    monkeypatch, round_candidates, chain_candidates, round_extra: dict[str, Any] | None = None
+) -> None:
     from core.web.services.team_workflow import hypothesis_rounds
     from core.web.services.team_workflow.research_runtime import hypothesis_first_chain
 
+    round_record: dict[str, Any] = {
+        "roundId": "hround-1",
+        "candidates": round_candidates,
+    }
+    if round_extra:
+        round_record.update(round_extra)
     monkeypatch.setattr(
         hypothesis_rounds,
         "get_hypothesis_round",
-        lambda team_id, round_id: {"teamId": team_id, "round": {"roundId": round_id, "candidates": round_candidates}},
+        lambda team_id, round_id: {"teamId": team_id, "round": round_record},
     )
     monkeypatch.setattr(
         hypothesis_first_chain,
@@ -812,6 +820,221 @@ def test_hypotheses_fail_closed_without_review_round_reference(monkeypatch) -> N
             team_id="research-team",
             question_id="SCI-091",
             dimension_payload={},
+        )
+
+
+# ------------------------------------ A04: revisionEnvelope final-version binding
+
+_R2_ROW_SELECTED = {
+    "candidateId": "sci-091-cbdbec3a3",
+    "claim": "REVISED claim: coherence traffic, not raw erase cost, bounds the rate.",
+    "testablePrediction": "REVISED prediction: ops/s tracks P_cool/(N_e*E_e).",
+    "falsifier": "REVISED falsifier: sustained ops/s with no cooling headroom.",
+    "axisProfile": {
+        "mechanism": "REVISED mechanism: coherence traffic dominates.",
+        "boundary": "REVISED boundary: fixed cooling budget.",
+    },
+    "lineageRefs": ["candidate-2026-e9"],
+}
+
+
+def _canonical_revision_hash(rows: list[dict[str, Any]]) -> str:
+    from core.web.services.team_workflow import hypothesis_review_executor
+
+    return hypothesis_review_executor._stable_hash(
+        hypothesis_review_executor.canonical_hypothesis_revision_snapshot(rows)
+    )
+
+
+def _round_revision_envelope(
+    *,
+    parent_id: str,
+    rows: list[dict[str, Any]],
+    output_hash: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "schemaVersion": 1,
+        "phase": "review_revision",
+        "parentCandidateId": parent_id,
+        "revisionReceiptRef": "revision-receipt-1",
+        "revision": {
+            "changes": ["收窄适用边界"],
+            "unresolvedIssues": [],
+            "status": "completed",
+            "actual": True,
+            "outputHash": output_hash or _canonical_revision_hash(rows),
+            "output": {"candidates": rows},
+        },
+    }
+
+
+def _r2_envelope_round_extra() -> dict[str, Any]:
+    sibling = _round_candidate(candidateId="sci-091-cf0889b0d")
+    rows = [
+        dict(_R2_ROW_SELECTED),
+        {
+            "candidateId": sibling["candidateId"],
+            "claim": sibling["claim"],
+        },
+    ]
+    return {
+        "revisionEnvelope": _round_revision_envelope(
+            parent_id="sci-091-cbdbec3a3", rows=rows
+        )
+    }
+
+
+def test_hypotheses_bind_revision_envelope_r2_as_final_version(monkeypatch) -> None:
+    _patch_hypothesis_authorities(
+        monkeypatch,
+        [_round_candidate(), _round_candidate(candidateId="sci-091-cf0889b0d")],
+        [
+            _chain_candidate(),
+            _chain_candidate(candidateId="sci-091-cf0889b0d"),
+        ],
+        round_extra=_r2_envelope_round_extra(),
+    )
+    hypotheses = result_package_v2._hypotheses(
+        {"candidates": [{"candidateId": "hyp-portfolio-1", "claim": "portfolio"}]},
+        team_id="research-team",
+        question_id="SCI-091",
+        dimension_payload={"reviewRoundId": "hround-1"},
+    )
+
+    final = hypotheses[0]
+    assert final["statement"] == _R2_ROW_SELECTED["claim"]
+    assert final["predictions"] == [_R2_ROW_SELECTED["testablePrediction"]]
+    assert final["falsifiability"] == _R2_ROW_SELECTED["falsifier"]
+    assert final["mechanism"] == _R2_ROW_SELECTED["axisProfile"]["mechanism"]
+    assert final["boundary_conditions"] == [
+        _R2_ROW_SELECTED["axisProfile"]["boundary"]
+    ]
+    assert final["supporting_evidence_refs"] == _R2_ROW_SELECTED["lineageRefs"]
+    # The canonical revision snapshot excludes prose: the parent's novelty
+    # statement stays the only persisted novelty basis.
+    assert final["novelty_basis"] == (
+        "Unlike constant-bound alternatives, the mechanism is separable and measurable."
+    )
+    # The unselected candidate keeps its R1/chain projection.
+    other = hypotheses[1]
+    assert other["statement"] == "Erase-cost and cooling jointly bound sustained processing rate."
+    assert other["falsifiability"] == (
+        "A peer-reviewed result showing sustained ops/s rising without better cooling."
+    )
+
+
+def test_hypotheses_bind_r2_over_candidate_details_fragment_content(monkeypatch) -> None:
+    _patch_hypothesis_authorities(
+        monkeypatch,
+        [_round_candidate(), _round_candidate(candidateId="sci-091-cf0889b0d")],
+        [],
+        round_extra=_r2_envelope_round_extra(),
+    )
+    payload = {
+        "portfolioId": "p1",
+        "candidates": [
+            {"candidateId": "sci-091-cbdbec3a3", "claim": "R1 old claim", "scores": {}},
+            {
+                "candidateId": "sci-091-cf0889b0d",
+                "claim": "R1 old claim b",
+                "scores": {},
+            },
+        ],
+        "candidateDetails": {
+            "sci-091-cbdbec3a3": {
+                "statement": "fragment R1 statement a",
+                "mechanism": "fragment mechanism a",
+                "novelty_basis": "fragment novelty a",
+                "predictions": ["fragment prediction a"],
+                "falsificationCriteria": ["fragment criteria a"],
+                "evidenceRefs": ["ev:1"],
+                "counterEvidenceRefs": ["cev:1"],
+                "boundary_conditions": ["fragment boundary a"],
+            },
+            "sci-091-cf0889b0d": {
+                "statement": "fragment R1 statement b",
+                "mechanism": "fragment mechanism b",
+                "novelty_basis": "fragment novelty b",
+                "predictions": ["fragment prediction b"],
+                "falsificationCriteria": ["fragment criteria b"],
+                "evidenceRefs": ["ev:2"],
+                "counterEvidenceRefs": ["cev:2"],
+                "boundary_conditions": ["fragment boundary b"],
+            },
+        },
+    }
+    hypotheses = result_package_v2._hypotheses(
+        payload,
+        team_id="research-team",
+        question_id="SCI-091",
+        dimension_payload={"reviewRoundId": "hround-1"},
+    )
+
+    # Both branches resolve the same hash-pinned R2 authority for the
+    # revised candidate; the unselected candidate keeps its fragment content.
+    assert hypotheses[0]["statement"] == _R2_ROW_SELECTED["claim"]
+    assert hypotheses[0]["predictions"] == [_R2_ROW_SELECTED["testablePrediction"]]
+    assert hypotheses[0]["falsifiability"] == _R2_ROW_SELECTED["falsifier"]
+    assert hypotheses[1]["statement"] == "fragment R1 statement b"
+
+
+def test_hypotheses_fail_closed_on_revision_envelope_hash_mismatch(monkeypatch) -> None:
+    sibling = _round_candidate(candidateId="sci-091-cf0889b0d")
+    rows = [
+        dict(_R2_ROW_SELECTED),
+        {"candidateId": sibling["candidateId"], "claim": sibling["claim"]},
+    ]
+    _patch_hypothesis_authorities(
+        monkeypatch,
+        [_round_candidate(), sibling],
+        [_chain_candidate()],
+        round_extra={
+            "revisionEnvelope": _round_revision_envelope(
+                parent_id="sci-091-cbdbec3a3", rows=rows, output_hash="0" * 64
+            )
+        },
+    )
+
+    with pytest.raises(
+        result_package_v2.ResultPackageV2Error, match="outputHash"
+    ) as exc_info:
+        result_package_v2._hypotheses(
+            {"candidates": [{"candidateId": "hyp-portfolio-1", "claim": "portfolio"}]},
+            team_id="research-team",
+            question_id="SCI-091",
+            dimension_payload={"reviewRoundId": "hround-1"},
+        )
+
+    assert exc_info.value.code == "challenge_v2_feedback_conflict"
+
+
+def test_hypotheses_fail_closed_when_r2_body_is_incomplete(monkeypatch) -> None:
+    broken_r2 = {**_R2_ROW_SELECTED, "falsifier": ""}
+    sibling = _round_candidate(candidateId="sci-091-cf0889b0d")
+    rows = [
+        dict(broken_r2),
+        {"candidateId": sibling["candidateId"], "claim": sibling["claim"]},
+    ]
+    _patch_hypothesis_authorities(
+        monkeypatch,
+        [_round_candidate(), sibling],
+        [_chain_candidate()],
+        round_extra={
+            "revisionEnvelope": _round_revision_envelope(
+                parent_id="sci-091-cbdbec3a3", rows=rows
+            )
+        },
+    )
+
+    with pytest.raises(
+        result_package_v2.ResultPackageV2Error,
+        match="final revision \\(R2\\) is missing falsifier",
+    ):
+        result_package_v2._hypotheses(
+            {"candidates": [{"candidateId": "hyp-portfolio-1", "claim": "portfolio"}]},
+            team_id="research-team",
+            question_id="SCI-091",
+            dimension_payload={"reviewRoundId": "hround-1"},
         )
 
 

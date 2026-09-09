@@ -211,3 +211,163 @@ def test_revision_prompt_describes_empty_unresolved_issues_as_valid() -> None:
     assert "unresolvedIssues 必须存在且为字符串列表" in prompt
     assert "本次反馈全部解决可为空" in prompt
     assert "两者都不能为空" not in prompt
+
+
+# ----------------------------------------------- A03: required science fields
+
+_A03_RICH_PARENT = {
+    **_PARENT_CANDIDATE,
+    "lineageRefs": ["literature:ref-1"],
+    "axisProfile": {"mechanism": "原始机制", "boundary": "原始边界"},
+}
+
+
+def _run_revision_with_parent(parent: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    def runner(*_args: Any) -> hypothesis_review_executor.ProviderBoundReviewResult:
+        return hypothesis_review_executor.ProviderBoundReviewResult(
+            payload=payload,
+            model_invocation_receipt=_revision_receipt(),
+        )
+
+    return hypothesis_review_executor._revision_step(
+        {"contextId": "review-context-1"},
+        [parent],
+        {
+            "recommendationCandidateId": "candidate-a",
+            "rationale": "需要收窄适用边界",
+            "riskNotes": "",
+        },
+        runner=runner,
+        round_id="round-1",
+        formal_receipts=[],
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "blank"),
+    [
+        ("testablePrediction", ""),
+        ("falsifier", "  "),
+        ("axisProfile", {}),
+        ("lineageRefs", []),
+    ],
+)
+def test_formal_revision_rejects_explicitly_blanked_required_science_fields(
+    field: str, blank: Any
+) -> None:
+    payload = {
+        "revisedCandidate": {**_A03_RICH_PARENT, "claim": "修订后的新陈述", field: blank},
+        "changes": ["收窄了适用边界。"],
+        "unresolvedIssues": [],
+    }
+
+    with pytest.raises(
+        ContractValidationError, match=f"revisedCandidate\\.{field}"
+    ) as exc_info:
+        _run_revision_with_parent(_A03_RICH_PARENT, payload)
+
+    assert "必填科学字段契约" in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    ("field", "bad_value"),
+    [
+        ("testablePrediction", 123),
+        ("falsifier", ["not-a-string"]),
+        ("axisProfile", "not-an-object"),
+        ("lineageRefs", "literature:ref-1"),
+    ],
+)
+def test_formal_revision_rejects_wrong_typed_required_science_fields(
+    field: str, bad_value: Any
+) -> None:
+    payload = {
+        "revisedCandidate": {
+            **_A03_RICH_PARENT,
+            "claim": "修订后的新陈述",
+            field: bad_value,
+        },
+        "changes": ["收窄了适用边界。"],
+        "unresolvedIssues": [],
+    }
+
+    with pytest.raises(
+        ContractValidationError, match=f"revisedCandidate\\.{field}"
+    ) as exc_info:
+        _run_revision_with_parent(_A03_RICH_PARENT, payload)
+
+    assert "类型错误" in str(exc_info.value)
+
+
+def test_formal_revision_allows_completing_parent_empty_fields_and_inheritance() -> None:
+    sparse_parent = {
+        **_A03_RICH_PARENT,
+        "lineageRefs": [],
+        "axisProfile": {},
+        "testablePrediction": "",
+        "falsifier": "",
+    }
+    completing = {
+        "revisedCandidate": {
+            **sparse_parent,
+            "claim": "补全后的新陈述",
+            "testablePrediction": "补全后的预测",
+            "falsifier": "补全后的证伪条件",
+            "axisProfile": {"mechanism": "补全机制", "boundary": "补全边界"},
+        },
+        "changes": ["补全了缺失的科学要素。"],
+        "unresolvedIssues": [],
+    }
+    completed = _run_revision_with_parent(sparse_parent, completing)
+    completed_row = completed["revision"]["output"]["candidates"][0]
+    assert completed["revision"]["actual"] is True
+    assert completed_row["testablePrediction"] == "补全后的预测"
+    assert completed_row["falsifier"] == "补全后的证伪条件"
+    assert completed_row["axisProfile"]["mechanism"] == "补全机制"
+
+    # Keys absent from revisedCandidate keep the inherit-from-parent behavior.
+    inheriting = {
+        "revisedCandidate": {**_A03_RICH_PARENT, "claim": "另一个新陈述"},
+        "changes": ["换个角度表述。"],
+        "unresolvedIssues": [],
+    }
+    inherited = _run_revision_with_parent(_A03_RICH_PARENT, inheriting)
+    inherited_row = inherited["revision"]["output"]["candidates"][0]
+    assert inherited_row["testablePrediction"] == _A03_RICH_PARENT["testablePrediction"]
+    assert inherited_row["lineageRefs"] == _A03_RICH_PARENT["lineageRefs"]
+
+
+def test_revision_runner_rejects_blanked_science_fields(monkeypatch) -> None:
+    payload = {
+        "revisedCandidate": {
+            **_A03_RICH_PARENT,
+            "claim": "修订后的新陈述",
+            "testablePrediction": "",
+        },
+        "changes": ["收窄了适用边界。"],
+        "unresolvedIssues": [],
+    }
+    monkeypatch.setattr(
+        llm_review_runners, "_invoke_review_llm", lambda *_args, **_kwargs: payload
+    )
+    runners = llm_review_runners.build_hypothesis_review_runners(
+        {"modelId": "test-model"}, require_provider_receipts=False
+    )
+
+    with pytest.raises(
+        ContractValidationError, match="revisedCandidate\\.testablePrediction"
+    ):
+        runners["revision_runner"](
+            {"contextId": "ctx-1", "question": "q"},
+            dict(_A03_RICH_PARENT),
+            [dict(_A03_RICH_PARENT)],
+            {"recommendationCandidateId": "candidate-a", "metaReviewId": "m1"},
+        )
+
+
+def test_revision_prompt_forbids_explicitly_blanking_required_science_fields() -> None:
+    prompt = llm_review_runners._REVISION_SYSTEM_PROMPT
+
+    assert "不得显式输出空字符串、空对象或空列表" in prompt
+    for field in ("testablePrediction", "falsifier", "axisProfile", "lineageRefs"):
+        assert field in prompt
