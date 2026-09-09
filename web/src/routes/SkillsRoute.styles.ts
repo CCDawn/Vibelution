@@ -15,7 +15,7 @@ const rowButtonSurfaceClass =
 const detailSurfaceClass =
   `${vuiFlatPanelClass}`;
 const refreshButtonClass = `${controlButtonClass} h-[var(--vui-control-height-sm)] w-[var(--vui-control-height-sm)] p-0`;
-const workspaceClass = "grid min-h-0 grid-cols-[clamp(240px,26vw,340px)_minmax(0,1fr)] gap-1.5 px-2 pb-2 pt-1.5 max-[920px]:grid-cols-1 max-[920px]:content-start max-[920px]:overflow-auto";
+const workspaceClass = "grid min-h-0 grid-cols-[clamp(280px,26vw,420px)_minmax(0,1fr)] gap-4 px-4 pb-4 pt-3 max-[920px]:grid-cols-1 max-[920px]:content-start max-[920px]:overflow-auto";
 const panelClass = "grid min-h-0 min-w-0 content-start gap-[7px]";
 const listPanelClass = `${panelClass} grid-rows-[auto_auto_auto_auto_minmax(0,1fr)]`;
 const detailPanelClass = `${panelClass} overflow-auto`;
@@ -46,25 +46,25 @@ const rowSelectClass = `grid h-9 w-7 cursor-pointer place-items-center ${fieldSu
 const hiddenCheckboxClass = "pointer-events-none absolute h-px w-px opacity-0";
 const skillButtonBaseClass = [
   rowButtonSurfaceClass,
-  "!grid grid-cols-[10px_minmax(0,1fr)_auto] items-center gap-2",
+  "!grid grid-cols-[10px_minmax(0,1fr)] [&>span:last-child]:col-start-2 [&>span:last-child]:justify-self-start items-center gap-2",
 ].join(" ");
 const skillButtonActiveClass = "border-[color-mix(in_srgb,var(--accent-warm)_30%,transparent)] bg-[var(--vui-surface-row-hover)] shadow-[var(--vui-shadow-inset-accent)]";
 const sourceDotClass = "h-2 w-2 rounded-full bg-[var(--accent-cool)] data-[source=agents]:bg-[var(--accent-warm)] data-[source=other]:bg-vui-fg-tertiary";
 const skillCopyClass = "grid min-w-0 gap-0.5";
-const skillNameClass = "min-w-0 truncate text-vui-fg-primary";
+const skillNameClass = "min-w-0 line-clamp-2 break-words text-vui-fg-primary";
 const skillDescriptionClass = "m-0 min-w-0 truncate [font-size:var(--vui-font-xs)] leading-[1.3] text-vui-fg-secondary";
 const sourcePillClass = "inline-flex min-h-[21px] items-center justify-center whitespace-nowrap rounded-full border border-vui-border-soft px-1.5 [font-size:var(--vui-font-xs)] text-vui-fg-secondary";
 const emptyStateClass = "m-0 [font-size:var(--vui-font-xs)] leading-[1.3] text-vui-fg-secondary";
 const detailHeaderClass = "flex min-w-0 items-start justify-between gap-3 max-[720px]:flex-wrap";
-const commandPanelClass = `grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 ${detailSurfaceClass} p-2 max-[720px]:grid-cols-[auto_minmax(0,1fr)]`;
+const commandPanelClass = `grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 border-t border-vui-border-subtle py-3 max-[720px]:grid-cols-[auto_minmax(0,1fr)]`;
 const commandBodyClass = "grid min-w-0 gap-1";
 const commandLabelClass = "[font-size:var(--vui-font-xs)] text-vui-fg-tertiary";
 const commandCodeClass = "min-w-0 truncate text-[0.98rem] text-[var(--accent-warm-2)]";
 const commandFeedbackClass = "[font-size:var(--vui-font-xs)] text-[var(--state-success)]";
-const metaGridClass = `grid grid-cols-[110px_minmax(0,1fr)] gap-x-2.5 gap-y-1.5 ${vuiOpaqueRowClass} p-2 max-[720px]:grid-cols-1`;
+const metaGridClass = `grid grid-cols-[110px_minmax(0,1fr)] gap-x-2.5 gap-y-2 py-3 max-[720px]:grid-cols-1`;
 const metaLabelClass = "[font-size:var(--vui-font-xs)] text-vui-fg-tertiary";
 const metaValueClass = "min-w-0 truncate [font-size:var(--vui-font-xs)] text-vui-fg-primary";
-const surfacePanelClass = `grid gap-2 ${detailSurfaceClass} p-2`;
+const surfacePanelClass = `grid gap-3 border-t border-vui-border-subtle py-3`;
 const contentHeaderClass = "flex min-w-0 items-start justify-between gap-3 max-[720px]:flex-wrap";
 const contentPreClass = `m-0 max-h-[48vh] overflow-auto ${fieldSurfaceClass} p-2.5 [font-size:var(--vui-font-xs)] leading-[1.48] text-vui-fg-primary whitespace-pre-wrap break-words`;
 const truncatedNoticeClass = "m-0 [font-size:var(--vui-font-xs)] leading-[1.3] text-vui-fg-secondary";
@@ -76,7 +76,10 @@ const rootPathClass = "min-w-0 truncate";
 const emptyDetailClass = `grid min-h-[190px] place-items-center ${detailSurfaceClass} p-[18px] text-center max-[920px]:min-h-24 max-[920px]:p-3`;
 const emptyDetailTextClass = "m-0 [font-size:var(--vui-font-xs)] leading-[1.3] text-vui-fg-secondary";
 
+const metadataSummaryClass = "cursor-pointer py-2 text-sm text-vui-fg-secondary";
+
 const styles = {
+  metadataSummaryClass,
   routeClass,
   headerClass,
   refreshButtonClass,

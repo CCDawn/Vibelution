@@ -87,7 +87,7 @@ const styles = {
   detailHeader:
     "detailHeader min-w-0 flex flex-wrap items-start justify-between gap-2",
   detailPanel:
-    `detailPanel min-w-0 max-w-full ${panelSurface} grid content-start gap-[7px] overflow-auto`,
+    "detailPanel min-w-0 max-w-full grid content-start gap-4 overflow-auto",
   emptyDetail:
     `emptyDetail min-w-0 max-w-full ${panelSurface} [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]`,
   emptyState:
@@ -131,7 +131,7 @@ const styles = {
   permissionSummaryGrid:
     "permissionSummaryGrid min-w-0 grid gap-[5px] grid-cols-[minmax(0,1fr)]",
   policyDraftPanel:
-    `policyDraftPanel min-w-0 max-w-full ${panelSurface} grid gap-[7px]`,
+    "policyDraftPanel min-w-0 max-w-full grid gap-4 border-t border-vui-border-subtle pt-4",
   policyDraftSummary:
     `policyDraftSummary min-w-0 max-w-full ${rowSurface} px-2 py-[5px] !grid grid-cols-[repeat(4,minmax(0,1fr))] gap-[5px] [font-size:var(--vui-font-xs)] max-[900px]:grid-cols-[repeat(2,minmax(0,1fr))] max-[520px]:grid-cols-[1fr]`,
   policyHint:
@@ -440,7 +440,7 @@ const styles = {
   toolBundleApplyGrid:
     `toolBundleApplyGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] ${vuiStateWarmSoftClass}`,
   toolBundleGroup:
-    "toolBundleGroup min-w-0 max-w-full rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--accent-warm)_16%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-warm)_4%,transparent)] p-[5px]",
+    "toolBundleGroup min-w-0 max-w-full border-b border-vui-border-subtle bg-transparent py-3",
   toolBundleHeader:
     "toolBundleHeader min-w-0 flex flex-wrap items-center justify-between gap-1 px-1 pb-[3px] [font-size:var(--vui-font-xs)]",
   toolBundleTitle:
@@ -452,17 +452,17 @@ const styles = {
   toolBundleSummary:
     "toolBundleSummary min-w-0 max-w-full truncate rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--accent-warm)_18%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-warm)_5%,transparent)] px-2 py-[5px] text-[var(--fg-secondary)]",
   toolButton:
-    `toolButton min-w-0 !grid !h-auto min-h-[var(--vui-control-height-sm)] w-full max-w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center justify-start gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-left text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 ${vuiStateWarmSoftClass}`,
+    `toolButton min-w-0 !grid !h-auto min-h-[var(--vui-control-height-sm)] w-full max-w-full grid-cols-[auto_minmax(0,1fr)] items-center justify-start gap-3 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-left text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 ${vuiStateWarmSoftClass}`,
   toolButtonActive:
     `toolButtonActive min-w-0 ${vuiStateSelectedRowClass}`,
   toolCopy:
-    "toolCopy grid min-w-0 gap-[1px] text-left [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)] [&>strong]:truncate [&>span]:truncate",
+    "toolCopy grid min-w-0 gap-[1px] text-left [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)] [&>strong]:line-clamp-2 [&>strong]:break-words [&>span]:truncate",
   toolDetailPanel:
     "toolDetailPanel min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-warm)_7%,transparent)] p-[7px] text-[var(--accent-warm)] grid min-h-0 content-start gap-[7px] overflow-auto",
   toolList:
     "toolList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   toolPermissionGroup:
-    "toolPermissionGroup min-w-0 max-w-full rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--accent-warm)_16%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-warm)_4%,transparent)] p-[5px]",
+    "toolPermissionGroup min-w-0 max-w-full border-b border-vui-border-subtle bg-transparent py-3",
   toolPermissionGroupList:
     "toolPermissionGroupList min-w-0 grid max-h-[24rem] min-h-0 content-start gap-1 overflow-auto",
   toolPermissionList:
@@ -470,7 +470,7 @@ const styles = {
   toolPermissionMeta:
     "toolPermissionMeta text-vui-fg-secondary [&_em]:not-italic min-w-0 flex flex-wrap items-center gap-1.5",
   toolPermissionRow:
-    "toolPermissionRow min-w-0 max-w-full rounded-[7px] border border-[color:color-mix(in_srgb,var(--border-soft)_58%,transparent)] !bg-[var(--vui-surface-row)] !grid grid-cols-[minmax(0,1fr)_auto] items-center gap-[7px] px-[7px] py-[5px] max-[640px]:grid-cols-[1fr]",
+    "toolPermissionRow min-w-0 max-w-full rounded-[7px] border border-[color:color-mix(in_srgb,var(--border-soft)_58%,transparent)] !bg-[var(--vui-surface-row)] !grid grid-cols-1 min-[1600px]:grid-cols-[minmax(0,1fr)_12rem] items-center gap-3 px-3 py-3 max-[640px]:grid-cols-[1fr]",
   ts:
     "ts min-w-0",
   workspace:

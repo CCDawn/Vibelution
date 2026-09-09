@@ -1,7 +1,7 @@
 import "../design/route-css/workbench-secondary.tailwind.css";
 
 import { useQuery } from "@tanstack/react-query";
-import { Ban, BookOpen, CheckSquare, Copy, FileText, RefreshCw, Search, Sparkles, Square } from "lucide-react";
+import { BookOpen, CheckSquare, Copy, FileText, RefreshCw, Search, Sparkles, Square } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { fetchSkillLibrary, fetchSkillLibraryDetail } from "../api/skills";
@@ -246,6 +246,7 @@ export function SkillsRoute() {
       workspaceClassName={styles.workspaceClass}
       columnsClassName=""
       layoutId={WORKBENCH_LAYOUT_IDS.skills}
+      resize={{ sidebar: { defaultWidth: 400, minWidth: 300, maxWidth: 520 } }}
       data-vui-domain-recipe="skills-workbench"
       ariaLabel={copy.title}
       eyebrow={copy.eyebrow}
@@ -326,26 +327,7 @@ export function SkillsRoute() {
             >
               {allVisibleSkillsSelected ? copy.bulkClear : copy.bulkSelectVisible}
             </VButton>
-            <VButton
-              type="button"
-              className={styles.filterButtonClass}
-              icon={<Ban size={14} />}
-              isDisabled
-              tooltip={copy.bulkReadOnlyReason}
-              disabledReason={copy.bulkReadOnlyReason}
-            >
-              {copy.bulkEdit}
-            </VButton>
-            <VButton
-              type="button"
-              className={styles.filterButtonClass}
-              icon={<Ban size={14} />}
-              isDisabled
-              tooltip={copy.bulkReadOnlyReason}
-              disabledReason={copy.bulkReadOnlyReason}
-            >
-              {copy.bulkDelete}
-            </VButton>
+            <span className={styles.bulkReadOnlyNoteClass}>{copy.bulkReadOnlyReason}</span>
           </VDenseToolbar>
 
           <div className={styles.skillListClass}>
@@ -381,7 +363,6 @@ export function SkillsRoute() {
                       <span className={styles.sourceDotClass} data-source={skill.source} />
                       <span className={styles.skillCopyClass}>
                         <strong className={styles.skillNameClass}>{skill.name}</strong>
-                        <span className={styles.skillDescriptionClass}>{skill.description || skill.command}</span>
                       </span>
                       <span className={styles.sourcePillClass}>{sourceLabel(skill.source, lang)}</span>
                     </VButton>
@@ -424,18 +405,21 @@ export function SkillsRoute() {
                 {copyState ? <strong className={styles.commandFeedbackClass}>{copyState}</strong> : null}
               </div>
 
-              <div className={styles.metaGridClass}>
-                <span className={styles.metaLabelClass}>{copy.aliases}</span>
-                <strong className={styles.metaValueClass}>{activeSkill.aliases.join(", ") || "-"}</strong>
-                <span className={styles.metaLabelClass}>{copy.path}</span>
-                <VTooltip content={activeSkill.path} width="wide">
-                  <strong className={styles.metaValueClass} tabIndex={0}>{activeSkill.path}</strong>
-                </VTooltip>
-                <span className={styles.metaLabelClass}>{copy.hash}</span>
-                <strong className={styles.metaValueClass}>{activeSkill.hash}</strong>
-                <span className={styles.metaLabelClass}>{copy.size}</span>
-                <strong className={styles.metaValueClass}>{formatBytes(activeSkill.contentLength, lang)}</strong>
-              </div>
+              <details>
+                <summary className={styles.metadataSummaryClass}>{lang === "zh" ? "文件信息" : "File information"}</summary>
+                <div className={styles.metaGridClass}>
+                  <span className={styles.metaLabelClass}>{copy.aliases}</span>
+                  <strong className={styles.metaValueClass}>{activeSkill.aliases.join(", ") || "-"}</strong>
+                  <span className={styles.metaLabelClass}>{copy.path}</span>
+                  <VTooltip content={activeSkill.path} width="wide">
+                    <strong className={styles.metaValueClass} tabIndex={0}>{activeSkill.path}</strong>
+                  </VTooltip>
+                  <span className={styles.metaLabelClass}>{copy.hash}</span>
+                  <strong className={styles.metaValueClass}>{activeSkill.hash}</strong>
+                  <span className={styles.metaLabelClass}>{copy.size}</span>
+                  <strong className={styles.metaValueClass}>{formatBytes(activeSkill.contentLength, lang)}</strong>
+                </div>
+              </details>
 
               <section className={styles.surfacePanelClass}>
                 <div className={styles.contentHeaderClass}>
@@ -467,15 +451,15 @@ export function SkillsRoute() {
                 ) : null}
               </section>
 
-              <section className={styles.surfacePanelClass}>
-                <p className={styles.panelEyebrowClass}>{copy.rootPaths}</p>
+              <details className={styles.surfacePanelClass}>
+                <summary className={styles.metadataSummaryClass}>{copy.rootPaths}</summary>
                 {(libraryQuery.data?.roots ?? []).map((root) => (
                   <div key={root.path} className={styles.rootRowClass}>
                     <span className={styles.rootSourceClass}>{sourceLabel(root.source, lang)}</span>
                     <code className={styles.rootPathClass}>{root.path}</code>
                   </div>
                 ))}
-              </section>
+              </details>
             </>
           ) : (
             <VStateSurface

@@ -6,7 +6,6 @@ import {
   VActionGroup,
   VButton,
   VCheckbox,
-  VChip,
   VInput,
   VPanelHeader,
   VStateSurface,
@@ -226,7 +225,7 @@ export function ConfigProviderWizard({
     <VSurface as="section" className={styles.wizard} padding="none" data-wizard-step={state.step}>
       <VPanelHeader
         eyebrow="Provider setup"
-        title="四步 Provider 向导"
+        title="模型服务高级配置"
         actions={<VStatusChip tone={busyLabel ? "warning" : "accent"}>{busyLabel || `步骤 ${selectedStepIndex + 1}/4`}</VStatusChip>}
       />
       <div className={styles.wizardSteps} aria-label="Provider 向导进度">
@@ -246,6 +245,7 @@ export function ConfigProviderWizard({
               const groupTemplates = group.id === "custom"
                 ? []
                 : templates.filter((template) => templateServiceClass(template) === group.id);
+              if (group.id !== "custom" && !groupTemplates.length) return null;
               return (
                 <section key={group.id} className={styles.templateGroup}>
                   <strong>{group.label}</strong>
@@ -264,7 +264,7 @@ export function ConfigProviderWizard({
                       >
                         <span className={styles.providerIdentity}>
                           <strong className={styles.ellipsis}>{template.label}</strong>
-                          <VChip tone="neutral">{templateModelFamily(template)}</VChip>
+                          <small className={styles.muted}>{templateModelFamily(template)}</small>
                         </span>
                       </VButton>
                     ))}
@@ -277,10 +277,9 @@ export function ConfigProviderWizard({
                           onChange({ type: "choose_template", templateId: "custom", serviceClass: "self_hosted" });
                         }}
                       >
-                        自定义 Provider
+                        自定义服务
                       </VButton>
                     ) : null}
-                    {!groupTemplates.length && group.id !== "custom" ? <small className={styles.muted}>当前无可用模板</small> : null}
                   </div>
                 </section>
               );

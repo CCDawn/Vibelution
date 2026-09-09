@@ -9,11 +9,11 @@ const sectionHeaderSurface =
 
 const styles = {
   detailCard:
-    `vui-routes-configoverviewpanel detailCard ${panelSurface} [display:grid] [gap:8px] [padding:14px] [align-content:center] [min-height:96px] [&>_span]:[color:var(--vui-fg-tertiary)] [&>_span]:[font-size:var(--vui-font-sm)] [&>_span]:[font-weight:650] [&>_strong]:[color:var(--vui-fg-primary)] [&>_strong]:[font-size:1.45rem] [&>_strong]:[overflow-wrap:anywhere] [&[data-summary-tone=error]]:[border-color:color-mix(in_srgb,var(--state-error)_34%,var(--vui-border-subtle))] [&[data-summary-tone=warning]]:[border-color:color-mix(in_srgb,var(--state-warning)_34%,var(--vui-border-subtle))]`,
+    "vui-routes-configoverviewpanel detailCard flex items-baseline gap-3 py-2 [&>span]:text-sm [&>span]:text-vui-fg-secondary [&>strong]:text-lg [&>strong]:font-semibold",
   eyebrow:
     "vui-routes-configoverviewpanel eyebrow [margin:0] [color:var(--fg-tertiary)] [font-size:var(--vui-font-xs)] [text-transform:uppercase] [letter-spacing:0.08em]",
   summaryGrid:
-    "vui-routes-configoverviewpanel summaryGrid [display:grid] [gap:12px] [grid-template-columns:repeat(3,minmax(0,1fr))]",
+    "vui-routes-configoverviewpanel summaryGrid flex flex-wrap gap-x-10 gap-y-2",
   sectionHeader:
     `vui-routes-configoverviewpanel sectionHeader [display:flex] [align-items:start] [justify-content:space-between] [gap:8px] [min-height:40px] [padding:7px_var(--config-section-x)] ${sectionHeaderSurface}`,
   sectionIcon:

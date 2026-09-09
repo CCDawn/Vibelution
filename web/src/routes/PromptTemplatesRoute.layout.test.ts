@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { readFileSync } from "node:fs";
+const secondaryStylesSource = readFileSync(new URL("../design/route-css/workbench-secondary.tailwind.css", import.meta.url), "utf8");
 import routerSource from "../app/router.tsx?raw";
 import routeSource from "./PromptTemplatesRoute.tsx?raw";
 import styles from "./PromptTemplatesRoute.styles";
@@ -7,6 +9,8 @@ import stylesSource from "./PromptTemplatesRoute.styles.ts?raw";
 
 describe("PromptTemplatesRoute layout contract", () => {
   it("lives inside Agent management navigation with the shared module bar", () => {
+    expect(secondaryStylesSource).toContain('@source "../../routes/AgentManagementNav.styles.ts"');
+    expect(secondaryStylesSource).toContain('@source "../../routes/AgentManagementModuleBar.styles.ts"');
     expect(routerSource).toContain('path: "agents/prompts"');
     expect(routerSource).toContain("<PromptTemplatesRoute />");
     expect(routeSource).toContain("<AgentManagementModuleBar");
@@ -142,7 +146,7 @@ describe("PromptTemplatesRoute layout contract", () => {
 
   it("keeps the narrow prompt workspace scrollable without oversized editor panels", () => {
     expect(routeSource).toContain("workspaceClass");
-    expect(stylesSource).toContain("clamp(260px,26vw,380px)");
+    expect(stylesSource).toContain("clamp(280px,26vw,440px)");
     expect(stylesSource).toContain("minmax(0,1fr)");
     expect(stylesSource).toContain("max-[980px]:grid-cols-1");
     expect(stylesSource).toContain("max-[980px]:content-start");

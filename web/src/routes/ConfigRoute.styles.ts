@@ -67,23 +67,13 @@ const styles = {
   compactButton:
     "vui-routes-configroute compactButton [min-height:27px] [padding:0_8px] [font-size:var(--vui-font-xs)]",
   configProgressiveBody:
-    "vui-routes-configroute configProgressiveBody [display:grid] [gap:12px] [margin:var(--config-section-y)_var(--config-section-x)_var(--config-section-x)] [&_.treeFieldCardView]:[grid-template-columns:minmax(0,1fr)] [&_.treeFieldCardView]:[gap:5px] [&_.treeFieldCardView]:[min-height:92px] [&_.treeFieldHead]:[grid-column:1] [&_.treeFieldHead]:[grid-row:1] [&_.treeFieldValue]:[grid-column:1] [&_.treeFieldValue]:[grid-row:2] [&_.treeHint]:[grid-column:1] [&_.treeHint]:[grid-row:3] [&_.treeHint]:[-webkit-line-clamp:1] [&_.treeFieldLabel]:[overflow:visible] [&_.treeFieldLabel]:[text-overflow:clip] [&_.treeFieldLabel]:[white-space:normal] [&_.treeFieldCardEdit_.field]:[grid-template-columns:minmax(0,1fr)]",
+    "vui-routes-configroute configProgressiveBody grid min-w-0 w-full max-w-[72rem] gap-5 px-4 py-4",
   configCompactPathProgressiveBody:
-    "vui-routes-configroute configCompactPathProgressiveBody [gap:8px] [&_.configTierHeaderCopy]:![display:flex] [&_.configTierHeaderCopy]:![align-items:baseline] [&_.configTierHeaderCopy]:![gap:8px] [&_.configTierHeaderCopy_span]:[overflow:hidden] [&_.configTierHeaderCopy_span]:[text-overflow:ellipsis] [&_.configTierHeaderCopy_span]:[white-space:nowrap] [&_.treeFieldCardView]:![grid-template-columns:minmax(150px,0.42fr)_minmax(0,1fr)] [&_.treeFieldCardView]:![grid-template-rows:auto_auto] [&_.treeFieldCardView]:![gap:4px_10px] [&_.treeFieldCardView]:![min-height:64px] [&_.treeFieldCardView]:![padding:8px] [&_.treeFieldHead]:![grid-column:1] [&_.treeFieldHead]:![grid-row:1] [&_.treeHint]:![grid-column:1] [&_.treeHint]:![grid-row:2] [&_.treeHint]:![-webkit-line-clamp:1] [&_.treeFieldValue]:![grid-column:2] [&_.treeFieldValue]:![grid-row:1/span_2] [&_.treeFieldValue]:![align-self:center] [&_.treeObjectBlock_>_.treeToggle]:![width:100%] [&_.treeObjectBlock_>_.treeToggle]:![min-height:50px] [&_.treeObjectBlock_>_.treeToggle]:![justify-self:stretch]",
+    "vui-routes-configroute configCompactPathProgressiveBody gap-4",
   configCompactAdvancedProgressiveBody:
-    "vui-routes-configroute configCompactAdvancedProgressiveBody [&_.configAdvancedToggle]:![min-height:64px] [&_.configAdvancedToggle_.configTierHeaderCopy]:![display:grid] [&_.configAdvancedToggle_.configTierHeaderCopy]:![align-items:initial] [&_.configAdvancedToggle_.configTierHeaderCopy]:![gap:3px] [&_.configAdvancedToggle_.configTierHeaderCopy_span]:![white-space:normal]",
-  configCommonGridOne:
-    "vui-routes-configroute configCommonGridOne ![grid-template-columns:minmax(0,1fr)]",
-  configCommonGridFour:
-    "vui-routes-configroute configCommonGridFour ![grid-template-columns:repeat(4,minmax(0,1fr))] max-[1180px]:![grid-template-columns:repeat(2,minmax(0,1fr))]",
-  configCommonGridContext:
-    "vui-routes-configroute configCommonGridContext ![grid-template-columns:repeat(3,minmax(0,1fr))] max-[1180px]:![grid-template-columns:repeat(2,minmax(0,1fr))]",
-  configCommonGridTwo:
-    "vui-routes-configroute configCommonGridTwo ![grid-template-columns:repeat(2,minmax(0,1fr))]",
-  configCommonGridThree:
-    "vui-routes-configroute configCommonGridThree ![grid-template-columns:repeat(3,minmax(0,1fr))] max-[1180px]:![grid-template-columns:repeat(2,minmax(0,1fr))]",
+    "vui-routes-configroute configCompactAdvancedProgressiveBody gap-4",
   configAdvancedGrid:
-    "vui-routes-configroute configAdvancedGrid ![grid-template-columns:repeat(3,minmax(0,1fr))] max-[1180px]:![grid-template-columns:repeat(2,minmax(0,1fr))]",
+    "vui-routes-configroute configAdvancedGrid grid-cols-1",
   configTier:
     "vui-routes-configroute configTier [display:grid] [gap:7px] [min-width:0]",
   configTierHeader:
@@ -93,7 +83,7 @@ const styles = {
   configAdvancedTier:
     "vui-routes-configroute configAdvancedTier [padding-top:10px] [border-top:1px_solid_var(--border-hairline)]",
   configAdvancedToggle:
-    "vui-routes-configroute configAdvancedToggle w-full [display:flex] [align-items:center] [justify-content:space-between] [gap:14px] [min-height:58px] [padding:10px_12px] [border:1px_solid_color-mix(in_srgb,var(--vui-border-subtle)_94%,transparent)] [border-radius:8px] [background:var(--vui-surface-row)] [color:inherit] [text-align:left] hover:[border-color:color-mix(in_srgb,var(--accent-cool)_34%,var(--border-strong))] hover:[background:var(--vui-surface-row-hover)] focus-visible:[outline:2px_solid_var(--accent-cool)] focus-visible:[outline-offset:2px]",
+    "vui-routes-configroute configAdvancedToggle !flex w-full !justify-between !items-center gap-4 !border-0 !bg-transparent !px-0 !py-3 text-left",
   configAdvancedToggleMeta:
     "vui-routes-configroute configAdvancedToggleMeta [display:flex] [align-items:center] [justify-content:end] [gap:8px] [flex:0_0_auto]",
   configAdvancedBody:
@@ -188,10 +178,6 @@ const styles = {
     "vui-routes-configroute sectionHeaderActions [display:flex] [align-items:center] [justify-content:end] [gap:6px] [flex-wrap:wrap]",
   sectionHeaderMain:
     "vui-routes-configroute sectionHeaderMain [display:grid] [gap:3px] [min-width:0]",
-  sectionHeaderMeta:
-    "vui-routes-configroute sectionHeaderMeta [display:inline-flex] [align-items:center] [gap:6px] [min-height:28px] [padding:0_8px] [border:1px_solid_color-mix(in_srgb,var(--vui-border-subtle)_86%,transparent)] [border-radius:999px] [background:var(--vui-control-muted)]",
-  sectionHeaderMetaLabel:
-    "vui-routes-configroute sectionHeaderMetaLabel [color:var(--fg-tertiary)] [font-size:var(--vui-font-xs)] [text-transform:uppercase] [letter-spacing:0.06em]",
   sectionSurface:
     `vui-routes-configroute sectionSurface ${panelSurface} [display:grid] [gap:0] [padding:0] [scroll-margin-top:84px] [overflow:visible] [&>_.sectionText]:[padding:6px_var(--config-section-x)_0] [&>_.sectionText]:[max-width:980px] [&>_.sectionText]:[font-size:var(--vui-font-xs)] [&>_:where(_.hashGrid,.matrixGrid,.healthSummaryGrid,.logHelperGrid,.toggleGrid,.healthWorkbenchGrid,.profileTableWrap,.formSurface,.actionsRow,.rawConfigPanel,.editorWrap,.agentRunPanel_)]:[margin:var(--config-section-y)_var(--config-section-x)_var(--config-section-x)] [&>_.sectionText_+_:where(_.hashGrid,.matrixGrid,.healthSummaryGrid,.logHelperGrid,.toggleGrid,.healthWorkbenchGrid,.profileTableWrap,.formSurface,.actionsRow,.rawConfigPanel,.editorWrap_)]:[margin-top:6px]`,
   sectionText:
@@ -239,33 +225,33 @@ const styles = {
   treeBody:
     "vui-routes-configroute treeBody [display:grid] [gap:8px]",
   treeFieldCard:
-    "vui-routes-configroute treeFieldCard [border:1px_solid_color-mix(in_srgb,var(--vui-border-subtle)_92%,transparent)] [border-radius:7px] [background:var(--vui-surface-row)] [display:grid] [gap:4px] [padding:6px]",
+    "vui-routes-configroute treeFieldCard grid min-w-0 gap-2 border-b border-vui-border-subtle py-4",
   treeFieldCardEdit:
-    "vui-routes-configroute treeFieldCardEdit [align-content:start] [gap:10px] [min-height:56px] [padding:12px]",
+    "vui-routes-configroute treeFieldCardEdit content-start gap-3 py-4 [&_.field]:grid-cols-[16rem_minmax(0,1fr)] [&_.field]:gap-x-8",
   treeFieldCardView:
-    "vui-routes-configroute treeFieldCardView [grid-template-columns:minmax(12rem,0.34fr)_minmax(0,1fr)] [align-items:start] [gap:8px_16px] [min-height:56px] [padding:12px] [&_.treeFieldHead]:[min-width:0] [&_.treeFieldHead]:[justify-content:start] [&_.treeFieldHead]:[gap:6px] [&_.treeFieldLabel]:[overflow:hidden] [&_.treeFieldLabel]:[text-overflow:ellipsis] [&_.treeFieldLabel]:[white-space:nowrap] [&_.treeFieldLabel]:[font-size:var(--vui-font-sm)] [&_.treeHint]:[display:-webkit-box] [&_.treeHint]:[overflow:hidden] [&_.treeHint]:[-webkit-box-orient:vertical] [&_.treeHint]:[grid-column:1/-1] [&_.treeHint]:[grid-row:2] [&_.treeHint]:[-webkit-line-clamp:2] [&_.treeFieldValue]:[grid-column:2] [&_.treeFieldValue]:[grid-row:1] [&_.treeFieldValue]:[min-width:0] [&_.treeFieldValue]:[width:100%] [&_.treeFieldValue]:[min-height:40px] [&_.treeFieldValue]:[padding:9px_12px] [&_.treeFieldValue]:[border:1px_solid_color-mix(in_srgb,var(--vui-border-subtle)_90%,transparent)] [&_.treeFieldValue]:[border-radius:var(--control-radius)] [&_.treeFieldValue]:[background:color-mix(in_srgb,var(--vui-surface-workspace)_92%,var(--vui-surface-panel))] [&_.treeFieldValue]:[font-family:var(--font-mono)]",
+    "vui-routes-configroute treeFieldCardView grid-cols-[16rem_minmax(0,1fr)] items-start gap-x-8 [&_.treeFieldHead]:col-start-1 [&_.treeFieldHead]:row-start-1 [&_.treeFieldHead]:justify-start [&_.treeFieldValue]:col-start-2 [&_.treeFieldValue]:row-start-1 [&_.treeFieldValue]:justify-self-start [&_.treeFieldValue]:max-w-full [&_.treeHint]:col-start-1 [&_.treeHint]:col-span-2 [&_.treeHint]:row-start-2",
   treeFieldHead:
     "vui-routes-configroute treeFieldHead [display:flex] [align-items:start] [justify-content:space-between] [gap:8px] [align-items:center]",
   treeFieldLabel:
-    "vui-routes-configroute treeFieldLabel [color:var(--fg-primary)] [font-size:var(--vui-font-xs)] [font-weight:600]",
+    "vui-routes-configroute treeFieldLabel text-sm font-medium text-vui-fg-primary",
   treeFieldValue:
-    "vui-routes-configroute treeFieldValue [color:var(--fg-secondary)] [overflow-wrap:anywhere] [line-height:1.34] [font-size:var(--vui-font-xs)] [background:color-mix(in_srgb,var(--vui-surface-workspace)_92%,var(--vui-surface-panel))]",
+    "vui-routes-configroute treeFieldValue text-sm leading-relaxed text-vui-fg-secondary break-words",
   treeGrid:
-    "vui-routes-configroute treeGrid [display:grid] [gap:7px] [grid-template-columns:repeat(2,minmax(0,1fr))] [align-items:start] max-[1120px]:[grid-template-columns:repeat(2,minmax(210px,1fr))] max-[720px]:[grid-template-columns:1fr]",
+    "vui-routes-configroute treeGrid grid min-w-0 grid-cols-1 gap-0",
   treeHint:
     "vui-routes-configroute treeHint [margin:0] [color:var(--fg-tertiary)] [font-size:var(--vui-font-xs)] [line-height:1.35]",
   treeNestedBlock:
-    "vui-routes-configroute treeNestedBlock [border:1px_solid_var(--border-hairline)] [border-radius:7px] [background:var(--vui-surface-row)] [display:grid] [gap:5px] [padding:7px]",
+    "vui-routes-configroute treeNestedBlock grid min-w-0 gap-3 border-t border-vui-border-subtle pt-3",
   treeNestedHeader:
     "vui-routes-configroute treeNestedHeader [display:flex] [align-items:start] [justify-content:space-between] [gap:8px] [&_strong]:[color:var(--fg-primary)] [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:[font-weight:600]",
   treeObjectBlock:
-    "vui-routes-configroute treeObjectBlock [border:1px_solid_var(--border-hairline)] [border-radius:7px] [background:var(--vui-surface-row)] [display:grid] [gap:5px] [padding:7px]",
+    "vui-routes-configroute treeObjectBlock grid min-w-0 gap-3 border-t border-vui-border-subtle pt-3",
   treeObjectCell:
     "vui-routes-configroute treeObjectCell [min-width:0] [&_.treeObjectBlock]:[min-height:42px] [&_.treeNestedBlock]:[min-height:42px] [&_.treeToggle]:[min-height:34px] [&_.treeToggle_.treeHint]:[display:none]",
   treeStack:
     "vui-routes-configroute treeStack [display:grid] [gap:6px]",
   treeToggle:
-    "vui-routes-configroute treeToggle [display:flex] [align-items:start] [justify-content:space-between] [gap:8px] [width:100%] [min-height:30px] [padding:0] [border:0] [background:transparent] [color:inherit] [text-align:left] hover:[cursor:pointer] [&_.cardTitle]:[overflow:hidden] [&_.cardTitle]:[text-overflow:ellipsis] [&_.cardTitle]:[white-space:nowrap] [&_.treeHint]:[display:-webkit-box] [&_.treeHint]:[overflow:hidden] [&_.treeHint]:[-webkit-box-orient:vertical] [&_.treeHint]:[-webkit-line-clamp:1]",
+    "vui-routes-configroute treeToggle !flex !w-full !justify-between !items-center gap-3 !border-0 !bg-transparent !px-0 !py-2 text-left",
   treeToggleIcon:
     "vui-routes-configroute treeToggleIcon [color:var(--fg-tertiary)] [flex:0_0_auto] [transition:transform_140ms_ease]",
   treeToggleIconExpanded:
@@ -277,7 +263,7 @@ const styles = {
   toolingMetaPanel:
     "vui-routes-configroute toolingMetaPanel [display:flex] [align-items:center] [justify-content:space-between] [gap:12px] [min-width:0] [&_[data-vui=status-strip]]:[flex:1_1_auto]",
   userProfileAvatarFields:
-    "vui-routes-configroute userProfileAvatarFields [display:grid] [gap:6px] [min-width:0] [grid-template-columns:repeat(2,minmax(0,1fr))] [&_.treeFieldCardView]:![grid-template-columns:minmax(132px,0.44fr)_minmax(0,1fr)] [&_.treeFieldCardView_.treeHint]:[display:none] max-[900px]:[grid-template-columns:1fr]",
+    "vui-routes-configroute userProfileAvatarFields grid min-w-0 grid-cols-1 gap-0",
   userProfileAvatarGroup:
     "vui-routes-configroute userProfileAvatarGroup [min-width:0] [display:grid] [gap:6px]",
   userProfileAvatarHeader:
@@ -285,9 +271,9 @@ const styles = {
   userProfileIdentityFields:
     "vui-routes-configroute userProfileIdentityFields [display:grid] [gap:6px] [min-width:0] [grid-template-columns:minmax(0,1fr)]",
   userProfileLayout:
-    "vui-routes-configroute userProfileLayout [display:grid] [gap:7px] [&_.treeFieldCardView_.treeHint]:[-webkit-line-clamp:1]",
+    "vui-routes-configroute userProfileLayout grid min-w-0 max-w-[72rem] gap-5 p-4",
   userProfilePrimaryGrid:
-    "vui-routes-configroute userProfilePrimaryGrid [display:grid] [align-items:start] [gap:8px] [min-width:0] [grid-template-columns:minmax(240px,0.38fr)_minmax(0,0.62fr)] max-[900px]:[grid-template-columns:1fr]",
+    "vui-routes-configroute userProfilePrimaryGrid grid min-w-0 max-w-[72rem] grid-cols-1 gap-5",
   userProfileAdvancedFields:
     "vui-routes-configroute userProfileAdvancedFields [display:grid] [gap:6px] [min-width:0] [grid-template-columns:minmax(0,1fr)]",
 } as const;

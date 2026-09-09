@@ -1180,14 +1180,6 @@ function isDenseConfigSection(section: ConfigEditorSection): boolean {
   return Number(section.fieldCount || 0) >= 12;
 }
 
-function configCommonGridClass(commonEntryCount: number): string {
-  if (commonEntryCount <= 1) return styles.configCommonGridOne;
-  if (commonEntryCount === 2) return styles.configCommonGridTwo;
-  if (commonEntryCount === 3) return styles.configCommonGridThree;
-  if (commonEntryCount === 4) return styles.configCommonGridFour;
-  return styles.configCommonGridContext;
-}
-
 function ConfigSectionEditor({
   section,
   value,
@@ -1801,8 +1793,8 @@ function ConfigSectionEditor({
 
     return (
       <article key={absolutePath} className={fieldCardClassName} title={kind === "background_image" && hint ? hint : undefined}>
-        {kind !== "background_image" && hint ? <p className={styles.treeHint}>{hint}</p> : null}
         {control}
+        {kind !== "background_image" && hint ? <p className={styles.treeHint}>{hint}</p> : null}
       </article>
     );
   }
@@ -1958,7 +1950,7 @@ function ConfigSectionEditor({
               <VStatusChip tone="neutral">{presentation.advancedCountLabel(tierCounts.common)}</VStatusChip>
             </div>
             <div
-              className={`${styles.treeGrid} ${configCommonGridClass(commonEntries.length)}`}
+              className={styles.treeGrid}
             >
               {commonEntries.map((entry) => renderObjectEntry(entry, absolutePath, mode))}
             </div>
@@ -2071,10 +2063,6 @@ function ConfigSectionEditor({
           <p className={styles.sectionText}>{presentation?.sectionSummary ?? section.summary}</p>
         </div>
         <div className={styles.sectionHeaderActions}>
-          <div className={styles.sectionHeaderMeta}>
-            <span className={styles.sectionHeaderMetaLabel}>{copy.fieldCountLabel}</span>
-            <VStatusChip tone="neutral">{section.fieldCount}</VStatusChip>
-          </div>
           <div className={styles.sectionToolbarGroup}>
             <VButton
               type="button"
@@ -3448,7 +3436,7 @@ export function ConfigRoute() {
         }
         toolbar={isSectionVisible("models") ? undefined : (
           <div className={styles.configToolbar}>
-            <VStatusStrip
+            {isSectionVisible("overview") ? <VStatusStrip
               className={styles.configStatusMeta}
               items={[
                 {
@@ -3466,7 +3454,7 @@ export function ConfigRoute() {
                   ),
                 },
               ]}
-            />
+            /> : null}
             <ConfigSettingsPageTabs
               language={currentLanguage}
               group={activeGroup}
@@ -3537,6 +3525,7 @@ export function ConfigRoute() {
                     variant={providerConnecting ? "primary" : "secondary"}
                     onPress={() => {
                       if (providerQuickSetupState.phase === "success") dispatchProviderQuickSetup({ type: "reset" });
+                      setProviderShowMore(false);
                       setProviderConnecting(true);
                     }}
                   >
@@ -3547,7 +3536,7 @@ export function ConfigRoute() {
                     className={styles.providerModeButton}
                     aria-pressed={providerShowMore}
                     variant={providerShowMore ? "primary" : "ghost"}
-                    onPress={() => setProviderShowMore((open) => !open)}
+                    onPress={() => { setProviderConnecting(false); setProviderShowMore((open) => !open); }}
                   >
                     {providerShowMore ? "收起高级设置" : "高级设置"}
                   </VButton>
@@ -3585,7 +3574,7 @@ export function ConfigRoute() {
                       }}
                     />
                   </>
-                ) : (
+                ) : !providerShowMore ? (
                   <>
                 <ConfigProviderRegistryPanel
                   routeEditor={routeEditProviderId ? <>
@@ -3769,7 +3758,7 @@ export function ConfigRoute() {
                   }}
                 />
                   </>
-                )}
+                ) : null}
                 {providerShowMore ? (
                   <>
                 <ConfigProviderWizard
@@ -3788,14 +3777,14 @@ export function ConfigRoute() {
                     }
                   }}
                 />
-                <ConfigModelMigrationPanel
+                {workspace.modelAliasUsage.totalLiveReferenceCount > 0 ? <ConfigModelMigrationPanel
                   schemaVersion={2}
                   preview={null}
                   aliasUsageCount={workspace.modelAliasUsage.totalLiveReferenceCount}
                   busy={Boolean(busyAction)}
                   onPreview={() => undefined}
                   onApply={() => undefined}
-                />
+                /> : null}
                   </>
                 ) : null}
               </>
