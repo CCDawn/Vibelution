@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, replace
 import json
+import time
 from typing import Any
 
 from core.research.workflow.contracts import PendingAction
@@ -181,3 +182,240 @@ def wake_receipt_completion(uow: Any, *, receipt: dict[str, Any], now_ms: int) -
                                          "sessionId": scope["sessionId"], "turnId": scope["turnId"]}),
                 occurred_at_ms=now_ms,
             ))
+
+
+def _completion_redrive_candidates(repo: Any, limit: int) -> list[Any]:
+    """Blocked runs whose completion cursor sits on a failed dispatch row."""
+    return repo.execute(
+        """
+        SELECT o.action_id, o.run_id, o.node_run_id, o.payload_json,
+               o.last_problem_json, r.team_id
+        FROM outbox_actions o
+        JOIN workflow_runs r ON r.run_id = o.run_id
+        WHERE o.action_kind = 'adapter_dispatch'
+          AND o.status = 'failed'
+          AND json_extract(o.last_problem_json, '$.code') = ?
+          AND r.status = 'blocked'
+          AND json_extract(r.blocked_problem_json, '$.code') = ?
+        ORDER BY o.updated_at_ms ASC, o.action_id ASC
+        LIMIT ?
+        """,
+        (COMPLETION_PENDING, COMPLETION_PENDING, max(1, int(limit))),
+    ).fetchall()
+
+
+def _redrive_preconditions_hold(row: Any) -> tuple[Any, str, str, str, str] | None:
+    """Read-only cursor/family/authority checks; None means keep the block.
+
+    Fail-closed by construction: a missing or self-inconsistent cursor, a
+    family without a completion authority, an authority that has not settled
+    "completed", or a still-live turn all leave the run exactly as blocked.
+    """
+
+    # The outbox envelope id (row[0]) is deliberately not compared to the
+    # payload identity (see _heal_pending_action_identity): heal a lag-walk
+    # payload that omitted its run id instead of rejecting the row.
+    _envelope_action_id, run_id, node_run_id, raw_payload, raw_problem, row_team_id = row
+    try:
+        action = PendingAction.from_dict(json.loads(str(raw_payload or "{}")))
+        problem = json.loads(str(raw_problem or "{}"))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    # The outbox envelope id is not the payload identity (see
+    # _heal_pending_action_identity): heal a lag-walk payload that omitted
+    # its run id instead of rejecting the row.
+    if not action.run_id:
+        action = replace(action, run_id=str(run_id or ""))
+    if action.run_id != run_id:
+        return None
+    cursor = problem.get("completionResume") if isinstance(problem, dict) else None
+    handle = cursor.get("handle") if isinstance(cursor, dict) else None
+    if not isinstance(cursor, dict) or not isinstance(handle, dict):
+        return None
+    if (cursor.get("actionId") != action.action_id
+            or cursor.get("nodeRunId") != action.node_run_id
+            or action.node_run_id != node_run_id):
+        return None
+    session_id = str(handle.get("session_id") or "").strip()
+    turn_id = str(handle.get("turn_id") or "").strip()
+    task_id = str(handle.get("task_id") or "").strip()
+    if not session_id or not turn_id or not task_id:
+        return None
+    from .task_adapter_registry import resolve_agent_task_adapter
+
+    spec = resolve_agent_task_adapter(action.node_id)
+    if spec is None or spec.family != "source_collection":
+        # Only the source-collection family exposes a completion authority
+        # today; every other family keeps its receipt-wake semantics untouched.
+        return None
+    team_id = str(row_team_id or "").strip()
+    from .agent_turn_completion import _stage_task_work_already_complete
+
+    if not _stage_task_work_already_complete(team_id=team_id, task_id=task_id):
+        return None
+    try:
+        from core.web.services.session.turn_diagnostics import (
+            get_session_turn_completion_snapshot,
+        )
+
+        snapshot = get_session_turn_completion_snapshot(session_id, turn_id)
+    except Exception:  # noqa: BLE001 - unreadable execution keeps the block
+        return None
+    if not bool((snapshot or {}).get("terminal")):
+        # A still-live turn must keep its wait semantics: re-arming a live
+        # cursor would downgrade the resume to a fresh continuation path.
+        return None
+    return action, team_id, session_id, turn_id, task_id
+
+
+def redrive_authority_complete_completions(
+    store: Any, *, limit: int = 4, now_ms: int | None = None
+) -> int:
+    """Re-arm completion cursors whose domain authority already finished.
+
+    :func:`wake_receipt_completion` can only fire when the original
+    model-invocation receipt is delivered.  When the process that produced
+    that receipt died before persisting it, the delivery never happens and
+    the blocked run waits forever -- even though the node's real business
+    work already settled "completed" on its domain authority (the
+    source-collection stage completion gate; production run-50d3e53c54de).
+
+    This sweep re-arms the original failed ``adapter_dispatch`` action in
+    exactly that situation, so the ordinary dispatch path consumes the
+    durable ``completionResume`` cursor (the agent-turn completion resume
+    branch: re-read the settled terminal turn, never re-execute or continue
+    it) and closes the node through the normal artifact/handoff commit.
+    Fail-closed: the family must expose a completion authority, the
+    authority must report "completed", and the cursor's turn must already be
+    terminal -- anything else stays blocked.  The re-arm is the same
+    single-transaction write shape as :func:`wake_receipt_completion`
+    (requeue the failed row, unblock the run, emit
+    ``node_completion_resumed``), so replays are idempotent: a row that is
+    no longer failed, an attempt that is no longer running, or a run that is
+    no longer blocked is a no-op.
+    """
+
+    effective_now = int(now_ms if now_ms is not None else time.time() * 1000)
+    try:
+        rows = store.read(lambda repo: _completion_redrive_candidates(repo, limit))
+    except Exception:  # noqa: BLE001 - the sweep must never break its host
+        return 0
+    redriven = 0
+    for row in rows or ():
+        prepared = _redrive_preconditions_hold(row)
+        if prepared is None:
+            continue
+        action, team_id, session_id, turn_id, task_id = prepared
+        action_id, run_id = row[0], row[1]
+        node_id = action.node_id
+        node_run_id = action.node_run_id
+
+        def mutate(
+            uow,
+            *,
+            expected_action_id=action_id,
+            expected_run_id=run_id,
+            expected_node_run_id=node_run_id,
+            expected_node_id=node_id,
+            expected_session_id=session_id,
+            expected_turn_id=turn_id,
+            expected_task_id=task_id,
+            cursor_action_id=action.action_id,
+        ):
+            run = uow.repository.get_run(expected_run_id)
+            if run is None or run.status != "blocked":
+                return False
+            run_problem = json.loads(run.blocked_problem_json or "{}")
+            if run_problem.get("code") != COMPLETION_PENDING:
+                return False
+            attempt = uow.repository.get_attempt(expected_node_run_id)
+            if attempt is None or attempt.status != "running":
+                return False
+            latest = uow.repository.latest_attempt(expected_run_id, attempt.node_id)
+            if latest is None or latest.node_run_id != expected_node_run_id:
+                return False
+            if run.active_node_id != attempt.node_id:
+                return False
+            outbox = uow.repository.get_outbox(expected_action_id)
+            if outbox is None or outbox.status != "failed":
+                return False
+            row_problem = json.loads(outbox.last_problem_json or "{}")
+            cursor = row_problem.get("completionResume") or {}
+            cursor_handle = cursor.get("handle") or {}
+            if (
+                row_problem.get("code") != COMPLETION_PENDING
+                or cursor.get("actionId") != cursor_action_id
+                or cursor.get("nodeRunId") != expected_node_run_id
+                or cursor_handle.get("session_id") != expected_session_id
+                or cursor_handle.get("turn_id") != expected_turn_id
+                or cursor_handle.get("task_id") != expected_task_id
+            ):
+                return False
+            uow.repository.execute(
+                "UPDATE outbox_actions SET status='pending', available_at_ms=?, "
+                "lease_owner=NULL, lease_expires_at_ms=NULL, attempt_count=0, "
+                "updated_at_ms=? WHERE action_id=? AND status='failed'",
+                (effective_now, effective_now, expected_action_id),
+            )
+            uow.repository.update_run_status(
+                expected_run_id,
+                run.team_id,
+                "running",
+                effective_now,
+                blocked_problem_json=None,
+            )
+            from core.research.workflow.ledger import EventRecord
+
+            from .ids import new_id
+            sequence = uow.repository.advance_last_sequence(expected_run_id, 1, effective_now)
+            if sequence is not None:
+                uow.repository.insert_event(EventRecord(
+                    run_id=expected_run_id, sequence=sequence, event_id=new_id("evt"),
+                    run_version=run.run_version, event_type="node_completion_resumed",
+                    actor_json=json.dumps(
+                        {"actorType": "system", "actorId": "completion-authority-redrive"}
+                    ),
+                    correlation_id=expected_action_id, causation_id=None,
+                    payload_json=json.dumps({
+                        "nodeRunId": expected_node_run_id,
+                        "nodeId": expected_node_id,
+                        "sessionId": expected_session_id,
+                        "turnId": expected_turn_id,
+                        "taskId": expected_task_id,
+                        "authorityComplete": True,
+                        "redrive": True,
+                    }),
+                    occurred_at_ms=effective_now,
+                ))
+            return True
+
+        try:
+            changed = bool(store.submit(mutate, force_flush=True).result(timeout=30))
+        except Exception:  # noqa: BLE001 - one broken candidate is isolated
+            changed = False
+        if not changed:
+            continue
+        redriven += 1
+        try:
+            from core.web.services.runtime_scene_service import (
+                record_runtime_scene_event_quietly,
+            )
+
+            record_runtime_scene_event_quietly(
+                "team_workflow_orchestration",
+                "completion_dependency",
+                "completion_dependency.authority_complete_redrive",
+                level="info",
+                outcome="redriven",
+                fields={
+                    "runId": run_id,
+                    "nodeRunId": node_run_id,
+                    "nodeId": node_id,
+                    "outboxActionId": action_id,
+                    "taskId": task_id,
+                    "teamId": team_id,
+                },
+            )
+        except Exception:  # noqa: BLE001, S110 - telemetry cannot break recovery
+            pass
+    return redriven

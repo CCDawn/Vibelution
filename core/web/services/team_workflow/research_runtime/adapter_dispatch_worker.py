@@ -309,7 +309,18 @@ class AdapterDispatchWorker:
 
     def run_repairs_once(self, limit: int = 1) -> int:
         """Dead-letter projection sweep, for the serial maintenance loop."""
-        return self._repair_terminal_failed_adapter_dispatch(limit=max(1, int(limit)))
+        from .completion_dependency import redrive_authority_complete_completions
+
+        repaired = self._repair_terminal_failed_adapter_dispatch(limit=max(1, int(limit)))
+        # Completion-cursor redrive: a blocked run whose receipt can never be
+        # delivered (its producing process died first) but whose domain
+        # authority already settled the work gets its original completion
+        # cursor re-armed through the ordinary dispatch path (see
+        # completion_dependency.redrive_authority_complete_completions).
+        repaired += redrive_authority_complete_completions(
+            self._store, limit=max(1, int(limit)), now_ms=self._now()
+        )
+        return repaired
 
     def _repair_terminal_failed_adapter_dispatch(self, *, limit: int = 4) -> int:
         """Project lease-gate dead letters onto their latest active attempt.

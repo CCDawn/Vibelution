@@ -279,8 +279,18 @@ def _require_formal_model_invocation_receipt(
     input_snapshot: dict[str, Any],
     task_started_at_ms: int,
     formal_receipt: dict[str, Any] | None = None,
+    stage_authority_complete: bool = False,
+    identity: dict[str, str] | None = None,
 ) -> None:
-    """Keep a formal task retryable until its durable receipt is visible."""
+    """Keep a formal task retryable until its durable receipt is visible.
+
+    ``stage_authority_complete`` (durable-cursor resumes only) marks work the
+    source-collection stage completion gate already settled "completed".  A
+    receipt that never persisted because its producing process died can then
+    never become visible, so re-raising would block a gate-verified finished
+    node forever; the gap stays visible as a structured warning scene event
+    instead of being swallowed.  Every other path keeps the strict raise.
+    """
 
     routing = input_snapshot.get("modelRoutingPolicy")
     receipt_required = isinstance(routing, dict) and all(
@@ -291,6 +301,19 @@ def _require_formal_model_invocation_receipt(
         )
     )
     if not receipt_required or formal_receipt is not None:
+        return
+    if stage_authority_complete:
+        _record_turn_continuation_scene_event(
+            "agent_turn.completion_resume_receipt_unavailable_authority_complete",
+            level="warning",
+            outcome="resolved_by_stage_task_authority",
+            fields={
+                "sessionId": str((identity or {}).get("sessionId") or ""),
+                "turnId": str((identity or {}).get("turnId") or ""),
+                "taskId": str((identity or {}).get("taskId") or ""),
+                "terminalStatus": str(snapshot.get("terminalStatus") or ""),
+            },
+        )
         return
     from .completion_dependency import CompletionDependencyPending
     raise CompletionDependencyPending(
@@ -1188,15 +1211,23 @@ def complete_agent_turn_outputs(
             if adapter_spec is not None and adapter_spec.family == "research_project"
             else AGENT_TURN_CONTINUABLE_TERMINAL_STATUSES
         )
+        stage_authority_complete = False
         if (adapter_spec is not None and adapter_spec.family == "source_collection"
                 and _stage_task_work_already_complete(team_id=team_id, task_id=handle.task_id)):
             reconcilable = reconcilable | _FAILURE_TERMINAL_STATUSES
+            # The domain completion gate already verified this work product.
+            # A receipt lost with its dead producing process can never become
+            # visible, so the formal-receipt gate below must not re-defer a
+            # gate-verified finished node forever (see
+            # _require_formal_model_invocation_receipt).
+            stage_authority_complete = True
         snapshot = wait_for_agent_turn_terminal(
             handle.session_id, handle.turn_id, timeout_ms=0,
             reconcilable_terminal_statuses=reconcilable,
         )
         final_turn_id, continuations = handle.turn_id, []
     else:
+        stage_authority_complete = False
         with challenge_task_deadline_scope(
             task_started_at_ms,
             resume_problem=current_challenge_task_resume_problem(),
@@ -1232,6 +1263,12 @@ def complete_agent_turn_outputs(
             input_snapshot=input_snapshot,
             task_started_at_ms=task_started_at_ms,
             formal_receipt=formal_receipt,
+            stage_authority_complete=stage_authority_complete,
+            identity={
+                "sessionId": handle.session_id,
+                "turnId": handle.turn_id,
+                "taskId": str(handle.task_id or ""),
+            },
         )
     except CompletionDependencyPending as exc:
         exc.handle = handle
