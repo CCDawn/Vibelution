@@ -1,136 +1,162 @@
-<p align="center"><img src="docs/assets/readme/vibelution-showcase.png" alt="Vibelution — a local multi-agent workbench. Give agents distinct roles and make their collaboration visible." width="100%"></p>
+<h1 align="center">Vibelution</h1>
 
-<p align="center"><strong>Organize your AI team, from task assignment and discussion to execution and review.</strong></p>
+<p align="center"><strong>Build AI teams that communicate, collaborate, and evolve.</strong></p>
+<p align="center">Native multi-agent setup · Agent communication · Team collaboration · Self and supervised evolution · Virtual characters</p>
 
 <p align="center">
   <a href="README.md">中文</a> · English<br>
-  <a href="#watch-a-research-team-at-work">Research demo</a> · <a href="#core-capabilities">Core capabilities</a> · <a href="#side-products-built-on-the-workbench">Side products</a> · <a href="#get-started">Get started</a>
+  <a href="#native-multi-agent-setup">Build agents</a> · <a href="#agent-communication">Communication</a> · <a href="#team-collaboration">Teams</a> · <a href="#self-evolution-and-supervised-evolution">Evolution</a> · <a href="#virtual-characters">Virtual characters</a> · <a href="#get-started">Get started</a>
 </p>
 
-**Vibelution is a local multi-agent workbench.** Give members roles, models, and tools to discuss, execute, and review tasks. Follow their progress, step in at key decisions, and inspect handoff artifacts in one place.
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/Code-MIT-38bdae?style=flat-square" alt="Code license: MIT"></a>
+  <a href="docs/guides/install-windows.md"><img src="https://img.shields.io/badge/Desktop-Windows-4979e8?style=flat-square" alt="Windows desktop workbench"></a>
+  <a href="https://github.com/CCDawn/Vibelution/issues"><img src="https://img.shields.io/badge/Feedback-welcome-f2b36d?style=flat-square" alt="Feedback welcome"></a>
+</p>
+
+<p align="center">
+  <img src="docs/assets/readme/vibelution-showcase.png" alt="Vibelution showcase composite: native multi-agent research collaboration and a knowledge graph" width="100%">
+</p>
+
+**Vibelution is a local multi-agent platform for people organizing AI teams for academic research.** Create agents in the workbench, configure their roles, models, tools, and memory, and let members collaborate through messages, group discussions, and team workflows. Use evaluation and evolution workflows to improve agents or the project implementation.
+
+From research teams to long-term character interactions, five capabilities form the core experience:
+
+| Core capability | What you can do |
+| --- | --- |
+| **Native multi-agent setup** | Create and manage distinct agents with their own identities, responsibilities, models, prompts, tools, and memory, then organize them into teams |
+| **Agent communication** | Send messages to a specific agent session and request processing; exchange information through member messages, team broadcasts, and group discussions |
+| **Team collaboration** | Assign roles, connect tasks and human checkpoints, and use the research canvas for source collection, knowledge organization, hypothesis review, and experiment design |
+| **Self and supervised evolution** | Inspect, modify, and validate against an explicit objective, or evaluate improvements with datasets and baseline-versus-candidate comparisons |
+| **Virtual characters** | Bind character life capabilities to agents, including schedules, emotions, diaries, long-term memory, and proactive messages |
 
 ## Watch a research team at work
 
-Challenge Cup research demo: follow a team as it gathers sources, develops a hypothesis, and revises it after review.
+**Team discussion → source collection → extraction → knowledge graph → hypothesis generation → review and revision.**
 
-[![Watch the Challenge Cup demo: workflow, team discussion, and knowledge graph](docs/assets/readme/challenge-cup-preview.gif)](docs/assets/readme/challenge-cup-demo.mp4)
+[![Watch the research team demo: workflow, member discussion, and knowledge graph](docs/assets/readme/challenge-cup-preview.gif)](docs/assets/readme/challenge-cup-demo.mp4)
 
-**[▶ Full demo · 2:37 · 1080p · Chinese narration and subtitles](docs/assets/readme/challenge-cup-demo.mp4)** · [Download MP4](docs/assets/readme/challenge-cup-demo.mp4?raw=true) · [Full-resolution graph](docs/assets/readme/challenge-cup-graph.png)
+**[▶ Full demo · 2:37 · 1080p · Chinese narration and subtitles](docs/assets/readme/challenge-cup-demo.mp4)** · [Download MP4](docs/assets/readme/challenge-cup-demo.mp4?raw=true)
 
-**Team discussion → source collection and extraction → knowledge graph → hypothesis and revision.**
+Look at how members divide responsibilities, hand sources to the next stage, and revise a hypothesis after review. Research is one scenario where these platform capabilities work together: researchers decide on directions and conclusions while agents help collect, organize, discuss, and execute the work, leaving traceable research records.
 
-Follow a concrete hypothesis before and after review, and trace it back to source material. The team leaves research records that the next step can use.
+> A Challenge Cup research scenario recorded on September 8, 2026: a replay of real historical data, with Chinese narration and subtitles. It shows workflow and revision records, not fresh execution, experimental findings, or formal competition acceptance. [Media sources and dates](docs/assets/readme/README.md)
 
-> Recorded September 8, 2026: a replay of real historical data, with Chinese narration and subtitles. It does not show fresh execution, experimental validation, or formal competition acceptance. [Media notes](docs/assets/readme/README.md)
+## Native multi-agent setup
 
-[Workflow reference](core/web/services/team_workflow/README.md)
+**Create agents inside Vibelution with their own configuration, sessions, and personal memory, then build teams around the work.** The workbench provides interfaces for role creation, member management, model binding, and tool authorization.
 
-## Core capabilities
+- **Define identities and responsibilities:** Create, edit, archive, and bulk-manage agents, with identity and task prompts for each member.
+- **Choose models by role:** Bind providers and models separately and configure runtime parameters for collection, analysis, coding, and review.
+- **Configure capabilities and accumulated knowledge:** Authorize file, terminal, and search tools; reuse prompts and skills; bind optional plugins. Personal memory can carry into later sessions of the same agent.
+- **Move from individual work to teams:** Work directly with one agent or bind members to team roles and reuse team templates.
 
-### Put distinct roles to work together
+For a research question, for example, configure roles for source collection, hypothesis generation, experiment design, and result review, give them appropriate models and tools, and involve them in the same research workflow.
 
-Assign responsibilities and work through individual sessions and team discussions. Follow tool calls, task status, and handoff artifacts; stop, resume, or take over when needed.
+[Agent configuration and management](core/web/services/agent_directory/README.md) · [Model configuration](docs/ops/config/INDEX.md) · [Tool authorization](docs/agents/tool-authorization-entrypoints.md)
 
-### Make longer workflows visible
+## Agent communication
 
-Connect tasks, conditional branches, and human checkpoints on a canvas. The research pipeline links sources, knowledge, hypotheses, and review while retaining candidate proposals and revisions.
+**An agent can send a message to another agent's specific session and request that it continue the work.** Source handoffs, proposal discussions, and review feedback can flow through the platform's communication capabilities.
 
-### Carry knowledge into the next task
+| Communication channel | Purpose |
+| --- | --- |
+| **Agent-to-agent messages** | Send sources, questions, or feedback to a target session; the message enters its history and can request that session be woken to process it |
+| **Team group chat** | Bring members into a shared discussion and inspect team task rounds and conversation records |
+| **Team broadcasts** | Communicate shared information to a team and inspect broadcasts and member messages |
+| **Delivery and task tracking** | Inspect delivery, session wake, and execution status, distinguishing a delivered message from completed work |
 
-Personal memory and team knowledge bases retain sources and research records. Search and knowledge graphs help trace sources and explore relationships. The GitHub project library helps agents find code worth reusing.
+For example, a source collection agent can hand material to a hypothesis agent, and a reviewer can send feedback to the relevant session. Communication has an explicit destination and is subject to role permissions and team communication rules. Researchers can inspect the records and follow each handoff.
 
-### Equip each role with models and tools
+[Agent communication mechanism](docs/adr/0002-agent-collaboration-session-addressing.md) · [Conversation workbench](web/src/routes/chat/README.md)
 
-Choose models per Agent, reuse prompts, skills, and plugins, and connect files, terminals, search, and coding tools. Configure external CLI agents, MCP, browser automation, or image generation as needed, and track model usage.
+## Team collaboration
 
-### Check improvements against evidence
+**Organize multiple agents' work into a visible workflow.** The team workbench manages members and role relationships, while the research canvas shows task nodes, dependencies, conditional branches, human checkpoints, and stage artifacts.
 
-Supervised evolution compares baselines with candidates. Self-evolution supports inspection, changes, and validation with explicit goals and stop conditions. Evaluation, review, and rollback records make each change inspectable.
+![Historical research canvas replay: task nodes, dependencies, and source collection](docs/assets/readme/research-workflow.png)
 
-<details>
-<summary>Explore all features and configuration guides</summary>
+*Historical replay of the research canvas and a close-up of source collection. Select a node to inspect its task and neighboring stages.*
 
-Availability depends on models, permissions, and runtime configuration. Browser automation is disabled by default; the skill library UI is currently primarily for browsing.
+For academic research, collaboration can cover:
 
-#### Conversations, group discussions, and tasks
+| Research stage | Collaboration and resulting records |
+| --- | --- |
+| **Source and code research** | Search papers, web pages, and public projects through configured tools; screen candidates, extract content, and retain sources. The GitHub library supports local shallow clones and indexing so agents can inspect reusable implementations |
+| **Knowledge organization and handoff** | Organize sources into team knowledge with proposal, review, and ingestion records; personal memory, shared knowledge, and unified search support reuse in later tasks |
+| **Hypotheses and review** | Propose candidate directions, record review feedback and revisions, and compare plans and their supporting evidence |
+| **Experiment design and runs** | Manage datasets, metrics, baselines, and preliminary checks; revise and freeze plan versions and associate preliminary and formal run records |
+| **Iteration and handoff** | Ingest results into knowledge and use iteration and export entry points to carry this round's records into the next stage |
 
-- **Individual sessions:** Create and manage conversations, follow streamed replies, inspect tools, pending approvals, and history, and stop or resume work.
-- **Multi-agent rooms:** Bring several members into a shared discussion, with direct conversations and group rooms in one index.
-- **Coding workspace:** Browse project files, read their contents, work with terminals and tools, and inspect related child sessions.
-- **Kernel Task Center:** Filter tasks by status and assigned Agent, then follow dispatch, execution, delivery outcomes, and artifact references on a timeline.
-- **External agents:** Execution and terminal entry points for configured CLI agents. An MCP gateway lets external coding tools submit tasks to managed project agents and query their results. Both require the appropriate setup.
+[![Historical research knowledge graph: content, relationships, and sources](docs/assets/readme/challenge-cup-graph.png)](docs/assets/readme/challenge-cup-graph.png)
 
-[Conversation workspace](web/src/routes/chat/README.md) · [MCP setup](docs/agents/mcp-managed-agent-gateway.md)
+*[View the full-resolution graph](docs/assets/readme/challenge-cup-graph.png). The graph organizes and traces material; academic conclusions still require checking original sources and experiments.*
 
-#### Agents, prompts, tools, and skills
+Experiment execution depends on supported adapters, data, environment, and run prerequisites. Passing a preliminary check establishes only that check's outcome; experimental performance must come from the corresponding formal run.
 
-- **Agent management:** Create, edit, archive, and bulk-manage roles; inspect model bindings and capabilities.
-- **Prompt templates:** Browse and maintain reusable role instructions, and inspect the context assembled for a conversation.
-- **Tool management:** Inspect the catalog and each Agent's permissions. Configured tools cover files, code edits, commands, tests, webpage retrieval, and paper, news, and project search.
-- **Skill library:** Search and read skill descriptions and details so agents can find reusable methods. The current UI is primarily a browsing surface.
-- **Agent plugins:** Bind optional capabilities to selected agents, such as Virtual Human Life.
-- **Browser automation:** Controlled Computer Use in a sandbox browser; disabled by default and enabled through configuration.
-- **Image generation:** An Agent tool for generating images, requiring the corresponding image service configuration and tool permission.
+[Research workflow and experiment modules](core/web/services/team_workflow/README.md) · [Team knowledge](core/web/services/team_knowledge/README.md) · [Memory and retrieval](core/web/services/memory_rag_services.md)
 
-[Agent configuration](core/web/services/agent_directory/README.md) · [Tool catalog](tools/README.md) · [Tool permissions](docs/agents/tool-authorization-entrypoints.md)
+## Self-evolution and supervised evolution
 
-#### Teams, research, and knowledge
+**Give improvements to agents or the project an objective, a comparison, and an inspectable process.** Vibelution provides two evolution modes.
 
-- **Teams and workflows:** Manage members and role relationships, reuse team templates, and inspect task nodes, branches, human checkpoints, and stage handoffs on a canvas.
-- **Research pipeline:** Work from questions and sources through knowledge organization, hypotheses, review, and experiment design. Keep candidate proposals, revisions, and stage artifacts. Experiment execution and acceptance have their own requirements.
-- **Source processing:** Agent tools for source intake, processing, and retrieval, with source references for subsequent work.
-- **Personal memory and team knowledge:** Separate views of Agent memories and shared knowledge, including proposals, ingestion, and review records.
-- **Search and graphs:** Search memory and knowledge and explore relationships. Optional vector indexing can enhance retrieval when configured.
-- **GitHub project library:** Index shallow clones of public repositories so agents can find code worth reusing.
-- **User documents and governance:** Manage Markdown content, sources, indexes, and effective content. Preview the scope before protected cleanup.
+### Self-evolution: inspect, modify, and validate against a goal
 
-[Team workflows](core/web/services/team_workflow/README.md) · [Knowledge base](core/web/services/team_knowledge/README.md) · [Memory and retrieval](core/web/services/memory_rag_services.md)
+Initiate inspection, modification, and validation within a defined objective and scope. Inspect run status, change transactions, audit, and rollback records. Continuous iteration requires user approval and stopping conditions.
 
-#### Supervised evolution and self-evolution
+**Objective → inspection → modification → validation → review of results and next steps.**
 
-**Supervised evolution: compare before deciding.** Manage datasets and evaluation bundles, compare baselines with candidates, and inspect live runs, history, and the library. Conversation samples have a separate review queue. Proposals and advisory baselines retain records; candidate execution and integration use isolated validation.
+### Supervised evolution: evaluate with baselines and candidates
 
-**Self-evolution: give each improvement a clear goal.** Inspect repository and runtime state, start bounded inspection, modification, and validation, and retain transaction, audit, and rollback records. Continuing loops require user approval and explicit stop conditions.
+Manage evaluation datasets and test bundles, run baseline-versus-candidate comparisons, and review improvement proposals. The workbench provides active runs, historical results, session sample reviews, a proposal library, and recommended baselines. Candidate execution and integration go through isolated validation.
 
-Neither mode grants unrestricted permission to change the project. Producing a proposal does not, by itself, demonstrate an improvement.
+**Baseline evaluation → improvement proposal → candidate execution and re-evaluation → review → integration decision.**
 
-[Evolution modes and execution](core/web/services/evolution_services.md) · [Configuration](docs/ops/config/06-agent-evolution.md)
+![Supervised evolution workbench: evaluation sources, baseline testing, proposal review, and user approval](docs/assets/readme/web-workbench-supervised.png)
 
-#### Models, configuration, and usage
+*An existing repository screenshot illustrating the supervised evolution layout. No run has started in this image; it is not evidence of an improvement.*
 
-- **Models and providers:** Manage providers, model libraries, role bindings, and runtime parameters. Choose models per Agent and configure protocols, output limits, and caching for each provider.
-- **Configuration workspace:** Inspect and adjust runtime settings, model references, and provider drafts. Credentials live outside the repository.
-- **Token usage:** View all-time, daily, seven-day, and latest-call totals, with Agent, session, and model breakdowns, cache reads, context limits, and latency. Records distinguish provider-reported usage, estimates, and missing data.
-- **Interface preferences:** Chinese and English, themes and backgrounds, and persistent pane layouts.
+These modes evaluate and improve agents or the project implementation. The scientific validity of a research hypothesis still needs its own experimental validation, and a generated proposal alone does not establish improved capability.
 
-[Model and configuration guide](docs/ops/config/INDEX.md)
+[Evolution modes and runtime reference](core/web/services/evolution_services.md) · [Agent and evolution configuration](docs/ops/config/06-agent-evolution.md)
 
-#### Git, runtime management, and troubleshooting
+## Virtual characters
 
-- **Git workbench:** Inspect status, diffs, and history, select files to commit, and draft commit messages.
-- **Launcher and system tray:** Start, stop, restart, and open the workbench. Active-task checks protect lifecycle actions while work is running.
-- **Branch instances:** Inspect isolated branch workspaces and their runtime state, and manage separate development instances.
-- **Logs and runtime scenes:** Browse logs and diagnostics, connect session, tool, and process problems, and inspect or export per-run evidence packages.
-- **Maintenance and reset:** Preview cleanup scope and perform protected maintenance on allowed targets.
+**Give agents a character identity, life state, and long-term interactions.** A per-agent life plugin adds schedules, activities, and memory beyond conversation. Browse characters in the gallery and enter their sessions.
 
-[Launcher and desktop](desktop/electron/README.md) · [Logging and diagnostics](core/logging/README.md) · [Runtime configuration](docs/ops/config/07-launcher-runtime-workbench.md)
+![Virtual character gallery: identity, life state, mood, and schedule](docs/assets/readme/companions.png)
 
-</details>
+- **Schedules and daily life:** Manage daily plans, activities, long-term goals, projects, and habits, retaining state across days.
+- **Emotions and relationships:** Derive mood and relationship changes from interactions and life events to inform character expression.
+- **Diaries and long-term memory:** Record completed activities and retain experiences through reflection and sourced memory.
+- **Proactive conversation:** Generate messages according to character state and interaction context, and continue unfinished topics and commitments.
 
-## Side products built on the workbench
+Life and conversation continuity are still being refined. Character capabilities apply only to agents with the plugin explicitly bound and enabled.
 
 <p align="center">
-  <img src="docs/assets/readme/companions.png" alt="Virtual-human lobby" width="52%">
-  <img src="docs/assets/readme/desktop-pet.gif" alt="Desktop buddy idle animation recording" width="16%">
+  <img src="docs/assets/readme/desktop-pet.gif" alt="Recorded desktop companion idle animation" width="150">
 </p>
 
-- **Virtual humans:** Characters with schedules, moods, diaries, long-term memory, and proactive messages. Continuity between life events and dialogue is still being refined. [Character capabilities](core/agent_plugins/virtual_human_life/README.md)
-- **Desktop buddy:** See session status on your desktop, click to inspect conversations, drag to reposition, and reopen it from the system tray.
-- **Pet space:** Inspect levels, experience, state, and achievements.
+Desktop companions can also show session status and open conversations; pet space displays levels, experience, status, and achievements.
+
+[Virtual character life plugin](core/agent_plugins/virtual_human_life/README.md)
+
+## Models, tools, and the research environment
+
+| Capability | What the workbench provides |
+| --- | --- |
+| **Models and usage** | Multiple providers, per-agent model bindings, protocol and cache settings; token usage, cache reads, and latency by agent, session, or model, distinguishing reported, estimated, and missing data |
+| **Prompts, skills, and plugins** | Prompt management, actual session context inspection, and reusable role capabilities; the skill library currently focuses on search and browsing |
+| **Files, terminal, and Git** | Read and modify research code, execute commands and tests, inspect diffs and history, and select files to commit |
+| **External agents** | Connect configured CLI agents; external development tools can use the MCP gateway to submit tasks to non-team managed agents and query results |
+| **Browser and image tools** | Configure services and authorize agent tools as needed; browser automation is disabled by default |
+| **Runtime management and diagnostics** | Launcher lifecycle controls, isolated branch instances, task timelines, logs, and runtime records for investigating long-running tasks |
+
+[Model configuration](docs/ops/config/INDEX.md) · [Tool catalog](tools/README.md) · [MCP setup guide](docs/agents/mcp-managed-agent-gateway.md)
 
 ## Get started
 
-The primary desktop experience is currently **Windows**. Install **Python 3.11+ (3.12 recommended), Node.js 18+, and Git**, then run in PowerShell:
+The primary experience is a **local Windows desktop app**. Install **Python 3.11+ (3.12 recommended), Node.js 18+, and Git**, then run in PowerShell:
 
 ```powershell
 git clone https://github.com/CCDawn/Vibelution.git
@@ -138,18 +164,23 @@ cd Vibelution
 powershell -ExecutionPolicy Bypass -File scripts/install_windows.ps1
 ```
 
-Open **Vibelution Launcher** from the desktop. The first launch prepares the external configuration file. Configure your model and credentials using the [model configuration guide](docs/ops/config/INDEX.md), then start a conversation.
+Open **Vibelution Launcher** from the desktop after installation. The first launch prepares external configuration files; follow the [model configuration guide](docs/ops/config/INDEX.md) to set up models and credentials.
 
-[Windows setup](docs/guides/install-windows.md) · [Development and contributing](CONTRIBUTING.md) · [Linux deployment reference](docs/ops/linux-bootstrap.md)
+**Start building around a research question:**
 
-The workbench runs locally, with models you configure. **Cloud-model requests are sent to the selected provider**; local-first does not mean every inference runs offline. Provider fees may apply. Credentials and runtime configuration live outside the repository.
+1. Create agents and configure their roles, models, prompts, and required tools.
+2. Create or select a research team and bind agents to its roles.
+3. Provide the question, available sources, and this round's objective, then work through sessions, team discussions, and the research workflow.
+4. Inspect member messages, stage artifacts, and review feedback before deciding on the next research direction.
+
+[Windows installation](docs/guides/install-windows.md) · [Development and contributing](CONTRIBUTING.md) · [Linux deployment reference](docs/ops/linux-bootstrap.md)
+
+The workbench runs locally, using models you configure. Cloud model requests are sent to the selected provider and may incur fees; credentials and runtime configuration live outside the repository.
 
 ## Documentation and contributing
 
-This page reflects September 2026 development progress; see [CHANGELOG](CHANGELOG.md) for releases. Share a use case or report a problem in [Issues](https://github.com/CCDawn/Vibelution/issues), or start with the [contribution guide](CONTRIBUTING.md).
+This page presents development progress as of September 2026. See the [CHANGELOG](CHANGELOG.md) for release history. Share research scenarios, multi-agent collaboration problems, and feature suggestions through [Issues](https://github.com/CCDawn/Vibelution/issues), or start with the [contributing guide](CONTRIBUTING.md).
 
----
+[Documentation map](docs/README.md) · [Development standards](docs/standards/README.md) · [Security](SECURITY.md) · [Third-party components](THIRD_PARTY_COMPONENTS.md) · [MIT code license](LICENSE)
 
-[Documentation](docs/README.md) · [Development standards](docs/standards/README.md) · [Security](SECURITY.md) · [Third-party components](THIRD_PARTY_COMPONENTS.md) · [MIT code license](LICENSE)
-
-Character names and third-party media remain the property of their respective rights holders. The code's MIT license does not grant rights to third-party characters or media.
+Character names and third-party assets belong to their respective rights holders. The MIT license for the code does not grant rights to those characters or assets.
