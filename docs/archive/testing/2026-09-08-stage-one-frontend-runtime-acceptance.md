@@ -84,3 +84,101 @@
 - 73667e3f2 修复的是 idempotency 重放门；但 retry_node 实际走**前任务血缘门** `_AUTO_FORMAL_RETRY_STATUSES`（stage_session.py:20，原含 error/failed/incomplete/timed_out/timeout/blocked）。a5 任务落 interrupted → a6 重试仍复用超限会话（formalRetry=False、retryOfSessionId 空，已核账本）。
 - 修复：auto_formal_retry 判定扩为 `status in 集合 OR (status=="interrupted" AND _failed_on_context_budget_loop(前任务))`——**带 context 标记的 interrupted** 才升格新会话 formal retry；无标记的 interrupted（读中断原地续作是既有设计语义，test_source_collection_extraction_resume_after_interrupted_reading_prioritizes_writeback 守护）保持 reuse。dprec 记录承载 quotable text/quote 锚，新会话可无损续作。
 - 测试：test_interrupted_on_context_budget_loop_upgrades_to_formal_retry（正例/反例/None/集合不变式）；首版直接把 interrupted 加进集合被 closeout 影响选择器抓出回归后改为标记门。
+
+
+### B.7 缺陷⑥：v3 上下文策略 trigger 高于窗口推导的 hard limit——压缩永不触发、前置闸死锁（已修复，已加载复验）
+
+- 现象：a7/a8 两轮「重试 资料提炼」全部死在模型调用前的 `context_budget_exhausted` 前置闸（`_context_budget_preflight_guard`），会话被暂停-续跑梯子（3 级 continuation）耗尽后 `agent_turn_continuation_exhausted`。
+- 根因：挑战杯 v3 冻结策略按 262,144 窗口推导 trigger=204,800 / hard=221,184；但运行模型 qwen3.7-plus 的窗口是 131,072，策略合并（`effective_agent_context_compression_policy`）把 effectiveTokenLimit 钳到 131,072 却不改 trigger——trigger(204,800) 永远达不到，压缩永不触发，粗估 139,554 tokens 一直堆到 hard limit 前被前置闸拦死。
+- 修复（9191b21eb）：策略合并新增窗口不变量钳制——policyVersion≥3 时 trigger=min(trigger, effective−16,384)（退化取 effective）、target=min(target, int(effective×2/3))；只降不升，operator 更低值原样透传。新增 3 测试（131,072→trigger 114,688/target 87,381、operator 低值透传、未版本化 trigger≤effective）。
+- 生产验证：a9 重试通过前置闸（粗估 139,554 > trigger 114,688 → 切精确估算 ≈3–4 万 < hard 131,072 → 模型真实调用）。
+
+### B.8 缺陷⑦：formal retry 终态门缺 interrupted——a8 被拒「前任务不在终态」（已修复，已加载复验）
+
+- 现象：缺陷⑤第二层修复后 a8 仍失败，报「Formal retry requires the previous task to be in a terminal state」。
+- 根因：`stage_reconcile` 把 stopped/stopped_by_user/needs_continue 归一成 interrupted 后，`TERMINAL_TASK_STATUSES`（research_project_agent_sessions.py）不含 interrupted——每个 marker 门升级的 context-budget 重试都在会话创建处被拒。
+- 修复（919d2b856）：TERMINAL_TASK_STATUSES 增补 interrupted（附归一化口径注释）；新增 test_formal_retry_accepts_normalized_interrupted_previous_task。
+- 生产验证：a9 formal retry 会话创建成功（attempt 2、retryOfSessionId 回填）。
+
+### B.9 a9 资料提炼成功：22 次抓取、10 次写回、零预算命中（缺陷④⑤⑥⑦链路闭合实证）
+
+- 时间线：a9 会话通过缺陷⑥的钳制闸 + 缺陷⑦的终态门，21:47:26 完成 source_extraction。
+- 量级：22 次 web_fetch、10 次写回、预算零命中；dprec 记录承载 6/8 候选的 quotable text + quote 锚。
+- 产出：candidate_store 21 条 source_manifest 候选——6 keep / 15 needs_more_info，15 条带真实锚 id（不复述具体锚内容，避免报告携带无界原文）。
+
+### B.10 缺陷⑧：预算阻塞事件在知识子 run 上——异常收件箱零信号、一键补预算 CTA 不可达（已修复，真实前端复验）
+
+- 现象：evidence_relations 被 `budget_precheck_insufficient` 阻塞（consumed 2,726,303 > limit 2,000,000，suggested 262,347），但异常收件箱对 SCI-009 返回 0 项——运维台看不到阻塞、也没有恢复入口；`调整上限` 只作用于新建/续跑 run，活 run 无解。
+- 根因（两层，都在 hypothesis_first.py）：`_collect_budget_precheck_blocks` 只回放 formal run 尾部，而阻塞事件挂在 knowledge sideflow 子 run（run-1ca97605acf3）的事件流上；`_resolve_run_version` 只列 challenge-cup-research 的 run，子 run 属 challenge-cup-knowledge-sideflow，补预算端点必 404。
+- 修复（02a1a3135）：formal 尾部顺带解析 `knowledge_invocation_created.childRunId`（生产账本实证 formal seq10 就有），逐子 run fail-soft 回放尾部并给 block 标记子 run id；版本解析 miss 后回退 sideflow listing。route contract +2 测试（11 过）。
+- 生产复验（真实前端按钮链）：重启后收件箱出现 budget_exhausted 项（scope=子 run/evidence_relations）+「一键补预算」CTA（两段式误触防护）；arm→「确认补预算」→ `extend_budget` 命令落库（cmd-f7705a8cfb…，accepted，runVersion 10→11，幂等键 inbox-extend-budget:…:2000000:262347）→ `budget_settled` 上限 2,000,000→2,262,347。前端随后「重试 证据关系」正确 POST 到子 run（retry_node a2/v11）——被 412 拒绝，暴露缺陷⑨。
+- 附带环境事实：Launcher exe 经 git-bash/cmd 转义调用会静默失败（native-launcher-entry.log `native_entry.failed 路径中具有非法字符`），须用 PowerShell 干净引号；`/api/runtime/code-freshness` 可判定 `backend_behind`（本次曾因 closeout 全量选择器耗时导致「重启早于合入」，靠该端点发现并二次重启）。
+
+### B.11 缺陷⑨：补预算基线公式忽略超支——上限提到 2,262,347 仍低于已消耗 2,726,303（已修复，真实前端两轮复验）
+
+- 现象：缺陷⑧补预算落库后，「重试 证据关系」仍 412 `node_not_ready / budget_safety_limit_reached / stage_tokens_limit_reached`。
+- 根因：CTA（`extend_budget_action`）与端点都写死 `new = limit + suggested`；但本阶段消耗已超上限 726,303（准入只在节点边界拦，末节点跑过头），准入公式是 `consumed + estimated > limit`——剩余仍为 0。正确基线：`max(limit, consumed) + suggested` = 2,988,650（恰留 262,347 余量）。
+- 连带：幂等键含 limit:suggested 而非新总额，修公式后会与已执行旧命令同键、幂等重放不加预算，必须改含新总额。
+- 修复（在途）：action/端点/请求模型（+stageConsumedTokens 字段）/前端透传四处同源修正 + 测试更新；落地后按 CTA→重试→evidence_relations 执行继续验收。
+
+
+#### B.11 复验结果（38ab5f18c 合入并 rebuild-and-start 后）
+
+- CTA 新总额正确：收件箱渲染「+262,347 tokens · 新上限 2,988,650」，hint 如实表述「基准 2,726,303 + 262,347；含已消耗 2,726,303」。
+- 第一轮真实点击（arm→确认补预算）：`extend_budget` 落库 cmd-0caf16c113…（键 `inbox-extend-budget:…knowledge_collection:2988650`，v11→12），上限→2,988,650。
+- 前端「重试 证据关系」从 412 变 **202 accepted**（cmd-be7355a343…，retry_node a2/v12→13）：节点真实执行（execution_anchor_bound + artifact_verified + handoff ho-be23f2d99fb…，node_succeeded），子 run blocked→running→执行完成。
+- 后继 knowledge_ingestion 再次预算阻塞（消耗 2,837,952/参考 262,347/建议 +111,649）→ 收件箱自动出现新项且公式正确（max(2,988,650, 2,837,952)+111,649=3,100,299）；第二轮 CTA 点击落库 cmd-652cb45cb4…（键 …:3100299，v13→14），上限→3,100,299。**自续环成立：每轮阻塞都有一键补预算 + 重试出口。**
+- 噪声观察（未修）：evidence_relations 成功后其陈旧阻塞项仍留在收件箱并渲染可点 CTA；点击会以 `idempotency_conflict`（同键不同请求）失败。操作员需按节点核对当前状态，建议后续对已成功节点的阻塞项做消解或标注。
+
+### B.12 缺陷⑩：预算先挡的交错使「重跑上游」合同出口永久不可达（已定案，修复中）
+
+- 现象：补足预算后「重试 知识入库」被 412 拒（blockers=evidence_graph_incomplete——关系图有 1 条 missingLink：source_relation_mapper 断言了指向不存在候选 `…-9143d4d6` 的 contradicts_scale_claim 边，同秒真实候选为 `…-9143d85a`；随机 id 笔误无法被标题/别名语义端点解析修复，merger fail-closed 降级为 missingLink——门禁本身工作正常）。同时「重试 证据关系」按钮 disabled（toast `retry_not_available`），操作员互锁无解。
+- 根因：`sync_run_blocked` 对已 blocked 的 run 直接 return——阻塞原因一经写入永不刷新。run 的 blocked_problem 停留在旧的 `budget_precheck_insufficient`；而 `succeeded_node_rerun_target`（重跑 evidence_relations 的合同出口，注释明确覆盖本场景）只认 `auto_advance_not_ready/evidence_graph_incomplete` 形状；命令级拒绝（NodeNotReadyError）按设计零写入。三段共同构成：预算先挡 → 补预算 → 真实阻塞（图缺口）永远写不进投影 → 重跑出口永不出现。
+- 修复（在途）：拒绝路径 best-effort 刷新已 blocked run 的 blocked_problem 为当前真实 blockers（auto_advance_not_ready + blocker codes，与 worker 的 not-ready 写法同形）；不建 attempt、不 bump 版本、不写事件、幂等。
+
+#### B.12 复验结果（4bb3adf2d 合入并重启后）
+
+- 前端点「重试 知识入库」：命令被 412 拒（预期），但拒绝路径刷新了投影——run 的 blocked_problem 从陈旧 `budget_precheck_insufficient` 更新为 `auto_advance_not_ready / evidence_graph_incomplete`，「重试 证据关系」按钮随即变为「**重跑 证据关系**」且可点（`succeeded_node_rerun` 合同出口首次可达）。
+- 点击「重跑 证据关系」→ retry_node a3 **202 accepted**（evidence_relations 真实重跑）。但重跑产物重新并入时，`source_relation_mapper` 再次断言同一条指向不存在候选 `…-9143d4d6` 的 contradicts 边（讲者读取候选店内自己上一版图并复述——自回声），missingLink 仍为 1；豁免（缺陷⑪）成为合同内的唯一收口面。
+
+### B.13 缺陷⑫：知识子 run 卡 reconciliation_required——「对账运行」不级联、子 run 无任何对账操作面（已定案，修复中）
+
+- 现象：a3 重跑与 worker 已排队的 knowledge_ingestion-a2 graph_dispatch 竞速，dispatch 提交时发现执行回执身份失配（expected `(act-aa29dfbd…, nr-…-knowledge_ingestion-a2)`，got `(act-e4b7c78…, nr-…-evidence_relations-a3)`），子 run run-1ca97605acf3 被标记 `reconciliation_required`（v15，graph_dispatch_invalid），outbox `act-8ec85658…` 终态 failed。此后整条 sideflow 冻结：知识入库/交接全停。
+- 现有操作面核查：formal run 面板「对账运行」是对账唯一前端入口；知识子 run 的节点 offer 白名单只含 ensure/inspect——**子 run 没有任何对账入口**（grep 全仓确认）。真实前端点「对账运行」：`reconcile_formal_run` 200 受理，formal 落 v5 blocked（`knowledge_package_not_materialized` + `hypothesis_round_unconverged`），但子 run 纹丝不动仍 reconciliation_required v15。
+- 根因：`_handle_reconcile_run`（command_service.py）只对 `request.run_id` 做 ledger 权威重规划（superseded→stale、复活 failed graph_dispatch、落位 run 状态）；对知识子 run 仅做 `_compensate_completion_pending_reservations` 预留补偿——复活 SQL 的 `WHERE run_id = ?` 永远指父 run，子 run 的 failed dispatch 无人复活。
+- 修复（在途，codex/fix-reconcile-cascade-child-runs）：把单 run 重规划核心抽成复用 helper，父 run 对账落位后对 `reconciliation_required` 的知识子 run 在**同一事务**内做同构重规划（`KNOWLEDGE_SIDEFLOW_NODE_IDS` 节点序、同样的 auto_advance_not_ready 排除、同款落位阶梯 lands_blocked→BLOCKED / 有活→RUNNING / 零活→保持）+ 子 run 版本递增与 reconciled 事件；blocked/终态子 run 不动。
+
+### B.14 缺陷⑬：收件箱陈旧预算项渲染可点 CTA——点击 409、误点风险（已修复，2fa079183）
+
+- 现象（B.11 复验中实录）：evidence_relations 补预算重试成功后，其旧 `budget_precheck_blocked` 事件仍留在 tail 窗口里，收件箱继续渲染该项的可点「一键补预算」CTA；点击以 `idempotency_conflict`（同键不同请求）409 失败。且当 knowledge_ingestion 随后被阻时两项同屏，arm→确认流程须靠肉眼分辨新旧项，误点陈旧项即 409。
+- 根因：`_collect_budget_precheck_blocks` 无差别收集 tail 里全部 precheck 事件，不判节点是否已越过阻塞。
+- 修复（2fa079183）：派生层按账本真实事件判时效——同节点更新 attempt 的 `node_starting`、经 nodeRunId→nodeId 归属的 `node_succeeded`、同 run 异节点的新 precheck（构造上仅在本节点成功后才触发）、`run_succeeded` 四类证据任一出现即判陈旧丢弃；同节点多块去重保最新；每 run tail 独立过滤保住 ⑧ 的子 run 信号；无法归属的成功保持可见（fail-visible）。+4 测试（16 全绿）。
+- 价值：补预算→重试→成功的自续环每转一圈不再遗留幽灵 CTA，操作员见到的每一项都是当前真阻塞。
+
+### B.15 缺陷⑫修复与⑪豁免面（合入后复验在 B.16 记录）
+
+- ⑫ 修复（72f1af139）：`_handle_reconcile_run` 抽出 `_apply_ledger_reconcile_for_run` 复用核心；父落态后同事务级联 `reconciliation_required` 子 run（`KNOWLEDGE_SIDEFLOW_NODE_IDS` 重排、同款 auto_advance_not_ready 排除、同款落位梯 lands_blocked→BLOCKED/有活→RUNNING/零活→保持、子 run 版本递增 + reconciled run_blocked 事件含 parentRunId）。+5 测试（16 全绿，含幂等与 readiness 裁决保护）。
+- ⑪（19ae6ffad→rebase）：`evidence_graph_waiver` 服务 + `POST /api/research/workflow-runs/{run_id}/evidence-graph/missing-links/waive`（服务端 428 闭合 confirmed/理由≥8 字、404 族、operator scope、幂等 no-op 不改写审计）；写入走 knowledge_kernel 正规候选店面（同锁同 `sourceCollectionRunId` 权威 scope）；`missingLinkCount` 冻结、`waiverCount` 按读侧同口径重算——**门禁不放宽，只登记人工接受**；图工作台「缺口」行清单 + 豁免两段式交互（理由输入→确认），成功后 refetch。后端 18 测试 + 面板 5 测试绿；首版因 VUI 边界门（本地类常量/内联视觉串）打回返工，类串迁入兄弟 `.styles.ts` 后过门。
+
+### B.16 缺陷⑭：对账级联复活「已成功 attempt 绑定的死 dispatch」+ 僵尸 running attempt——reconcile 死循环（现场定案，修复中）
+
+- 复验环境：⑪⑫⑬ 合入（9e1946382/00ca5099b、72f1af139、2fa079183），rebuild-and-start，code-freshness=current。真实前端链：团队 → 选 SCI-009 → 继续运行 → formal 面板「对账运行」。
+- ⑫ 级联**半程生效**：子 run 事件 seq94 = `reconciled run_blocked {reconciled:true, revivedDispatchCount:1, activeWorkFound:true, reconciledStatus:"running", parentRunId:"run-332a539909a6"}`（复活 + 落位 + 事件 + 父唤醒全部按设计工作）；但 seq95 worker 重放该 dispatch 再次终态失败——**同一 `graph_dispatch_invalid` 回执身份失配**（expected ingestion-a2 时代前沿 vs got evidence_relations-a3），子 run 又被打回 reconciliation_required。对账→复活→重撞→再对账 = 死循环。
+- 两层耦合根因（live ledger 证据）：
+  1. 子 run 唯一 failed graph_dispatch（act-8ec85658）绑定的 attempt `evidence_relations-a3` 状态 **succeeded**（其兄弟 graph/adapter dispatch 均成功）——它是重跑竞速窗口遗留的重复后继 dispatch，期望前沿被 a3 重跑本身作废，重放永不可能过回执检查；现复活 SQL 只排除 blocked+auto_advance_not_ready，不排除 succeeded/stale。
+  2. `source_finding-a2` attempt 状态 **running** 僵尸（其 adapter dispatch 早已终态 failed `agent_completion_dependency_pending`，无任何 pending/leased dispatch 能再驱动它），却永久撑起 `has_active_work` 并让 plan 无法落 lands_blocked——落位梯永远走 RUNNING。
+- 修复方向（codex/fix-reconcile-zombie-attempts）：`_apply_ledger_reconcile_for_run` 内先做僵尸 attempt 终局化（starting/dispatching/running 且无 pending/leased dispatch → failed 带 reconciliation 审计问题；waiting_human 与有活 dispatch 的不动），再 plan→supersede→复活；复活排除扩展到 succeeded/stale 绑定（failed 绑定保持可复活，保住 checkpoint_node_mismatch 修复形状）。
+- 预期修复后子 run 诚实落位 BLOCKED（最深真实阻塞 = knowledge_ingestion-a1 的预算问题，预算上限已两次提高、重试可通过准入），随后走 重试知识入库 → readiness（图缺口）→ 豁免 → 执行链。
+
+#### B.16 续：⑭ 复验 + ⑮ 定案与复验（reconcile 死循环全闭合）
+
+- ⑭ 复验（fe06b9420 合入重启后第二次「对账运行」）：三层全部生效——僵尸 source_finding-a2 终局化为 failed（`agent_completion_dependency_pending` 真实原因逐字保留）、绑定已成功 attempt 的问题 dispatch（act-8ec85658）不再复活、搁浅预算预留被同事务补偿（formal evt13-15 reconciled 记录 compensatedReservations 含子 run）。但子 run 仍无落位：`plan_ledger_authority` 按设计只让 readiness 裁决 authored 落位，唯一存活的 ingestion-a1 是预算类事件性阻塞 → 级联走「零工作 continue」= 缺陷⑮。
+- ⑮ 修复（2075ef49c）：级联零工作分支对子 run 专属扩展——重查 post-supersede 尝试，存在存活 blocked attempt 时落 BLOCKED（problem_json 逐字复制、空则哨兵兜底、事件带 `landing: surviving_blocker` 判别符）；真零工作与父 run 行为不变（父 run 事件性阻塞形状有回归测试钉死 reconcile_no_active_work）。
+- ⑮ 前端复验（第三次「对账运行」，真实按钮）：子 run run-1ca97605acf3 落位 **blocked v17**，active_node=knowledge_ingestion，blocked_problem=预算阻塞 verbatim，evt96 `{"reconciled":true, "revivedDispatchCount":0, "reconciledStatus":"blocked", "landing":"surviving_blocker", "parentRunId":"run-332a539909a6"}`。UI 投影随即翻转为「知识搜集失败；可按剩余预算重试」。**reconcile 死循环四层（⑫⑭⑮）+ 预算自续环（⑧⑨⑬）全部闭合。**
+
+### B.17 缺陷⑯：cancel 清理队列残留任务在启动排空时崩溃后端——runtime 无法拉起（P0，事故定案，修复中）
+
+- 事故：⑮ 复验后 ~09:44 后端进程死亡，Launcher start/restart 均 bridge_failed exit 3 无法拉起；前端「后端 离线 / Failed to fetch」。
+- 根因（backend.stderr 五连 traceback + 账本交叉）：`cancel_run_cleanup._handle → _finalize_budget_receipts → finalize_cancelled_run_budget_receipts` 对 run-20f4bcdf8c84 硬断言 `status=='cancelled'`，而该 run 早在 09-05 已从 cancelled 归档为 **archived**（run_archived evt13 archivedFromStatus=cancelled）→ `BudgetAuthorityError` 未捕获穿透 → 进程崩溃；每次启动排空清理队列即重演 = 崩溃环，后端起不来。
+- 影响面：全部运行时验证被硬阻塞（本 run 数据完好：formal blocked v8 / child blocked v17，账本无损）。
+- 修复方向（codex/fix-cancel-cleanup-crash-loop）：(1) finalize 接受 archived-from-cancelled（归档来源权威判定，其余终态保持 fail-loud）；(2) 清理 handler 每任务异常隔离 + 有界重试/停驻，毒条目不得杀进程；(3) 排查四天前陈旧任务为何仍在队列被 re-arm，补完成标记幂等性。
