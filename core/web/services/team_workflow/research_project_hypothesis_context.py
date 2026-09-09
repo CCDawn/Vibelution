@@ -434,6 +434,7 @@ def build_stage_one_grounded_generation_context(
             SCHEMA_VERSION,
         )
         from core.research.workflow.definition_registry import resolve_definition_by_version_id
+        from core.research.workflow.stage_one_definition import STAGE_ONE_SCHEMA_VERSION
 
         pinned = resolve_definition_by_version_id(
             _text(getattr(run, "workflow_version_id", ""))
@@ -446,7 +447,9 @@ def build_stage_one_grounded_generation_context(
         }
     if (
         pinned.workflowId != CHALLENGE_CUP_WORKFLOW_ID
-        or pinned.schemaVersion != SCHEMA_VERSION
+        # Stage-one runs pin the trimmed 3.1 main flow; both sanctioned
+        # schema versions carry the nodes this context binds against.
+        or pinned.schemaVersion not in (SCHEMA_VERSION, STAGE_ONE_SCHEMA_VERSION)
     ):
         return {
             "status": "blocked",

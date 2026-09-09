@@ -13,6 +13,7 @@ from core.research.workflow.contracts import (
 )
 from core.research.workflow.definition import CHALLENGE_CUP_WORKFLOW_ID, SCHEMA_VERSION
 from core.research.workflow.definition_registry import resolve_definition_for_run_record
+from core.research.workflow.stage_one_definition import STAGE_ONE_SCHEMA_VERSION
 from core.research.workflow.knowledge_sideflow_definition import (
     KNOWLEDGE_SIDEFLOW_WORKFLOW_ID,
 )
@@ -69,7 +70,9 @@ class KnowledgeSideflowTrigger:
         except Exception as exc:
             self._record("failed", run, error=type(exc).__name__)
             return {"status": "failed", "error": "definition_resolution_failed"}
-        if definition.schemaVersion != SCHEMA_VERSION:
+        if definition.schemaVersion not in (SCHEMA_VERSION, STAGE_ONE_SCHEMA_VERSION):
+            # Stage-one runs pin the trimmed 3.1 main flow whose nodes this
+            # trigger joins; both sanctioned schema versions are canonical.
             return {"status": "not_canonical"}
 
         artifact = problem_artifact_for_collection(
