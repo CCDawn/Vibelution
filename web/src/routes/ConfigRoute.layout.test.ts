@@ -157,8 +157,8 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).not.toContain("② 添加连接");
     expect(quickSetupSource).toContain("检测连接");
     expect(quickSetupSource).toContain("保存并完成");
-    expect(quickSetupStyles.workspace).toContain("max-w-none");
-    expect(quickSetupStyles.inputGrid).toContain("grid-template-columns");
+    expect(quickSetupStyles.workspace).toContain("max-w-4xl");
+    expect(quickSetupStyles.inputGrid).toContain("grid-cols-1");
     expect(quickSetupSource).toContain('state.phase !== "input"');
     expect(quickSetupStylesSource).not.toContain("min-h-[28rem]");
     expect(quickSetupStylesSource).not.toContain("minmax(22rem,0.9fr)_minmax(28rem,1.1fr)");
@@ -372,8 +372,8 @@ describe("ConfigRoute layout contract", () => {
   it("keeps quick setup in a bounded progressive desktop workspace", () => {
     expect(quickSetupSource).toContain('<div className={styles.workspace}>');
     expect(quickSetupStyles.root).not.toContain("grid-template-columns");
-    expect(quickSetupStyles.workspace).toContain("max-w-none");
-    expect(quickSetupStyles.inputGrid).toContain("[grid-template-columns:minmax(15rem,1fr)_minmax(18rem,1.2fr)_max-content]");
+    expect(quickSetupStyles.workspace).toContain("max-w-4xl");
+    expect(quickSetupStyles.inputGrid).toContain("grid-cols-1");
     expect(quickSetupStyles.field).toContain("[&_[data-vui=select-trigger]]:!h-10");
     expect(quickSetupStyles.field).toContain("[&_[data-vui=select-trigger]]:!min-h-10");
     expect(quickSetupStyles.primaryAction).toContain("min-h-10");
@@ -389,10 +389,10 @@ describe("ConfigRoute layout contract", () => {
   it("keeps existing Provider management in a bounded desktop list-detail grid", () => {
     expect(providerPanelStyles.registryWorkspace).toContain("[--vui-workspace-sidebar:clamp(18rem,24vw,22rem)]");
     expect(providerPanelStyles.registryWorkspace).not.toContain("max-[960px]");
-    expect(providerPanelStyles.providerList).toContain("h-full");
+    expect(providerPanelStyles.providerList).toContain("min-h-0");
     expect(providerPanelStyles.providerList).toContain("overflow-y-auto");
     expect(providerPanelStyles.detailSurface).toContain("overflow-y-auto");
-    expect(styles.providerModelsLayout).toContain("[grid-template-rows:auto_minmax(28rem,1fr)]");
+    expect(styles.providerModelsLayout).toContain("[&>#config-models]:min-h-[28rem]");
   });
 
   it("passes the workspace schema version into legacy model account compatibility", () => {
@@ -519,10 +519,9 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("subtitleHint");
     expect(routeSource).toContain('subtitleHint={copy.subtitleHint}');
     expect(overviewPanelSource).toContain("sourceBodyShort");
-    expect(providerPanelSource).toContain("服务与模型");
-    expect(providerPanelSource).toContain("固定全部已发现");
+    expect(providerPanelSource).toContain("连接设置");
+    expect(providerPanelSource).toContain("添加当前结果");
     expect(providerPanelSource).toContain("编辑");
-    expect(providerPanelSource).toContain('tooltipLabel="模型连接列表说明"');
     expect(overviewPanelSource).toContain('title={copy.sourceBody}');
     expect(providerPanelSource).toContain('title={provider.providerId}');
     expect(routeSource).toContain('title={copy.openEnvironmentHint}');
@@ -580,13 +579,11 @@ describe("ConfigRoute layout contract", () => {
 
   it("converges the provider registry into a compact VUI workbench contract", () => {
     expect(providerPanelStylesSource).not.toMatch(/\bsurface-card\b(?!\))/);
-    expect(providerPanelStylesSource).toContain("vuiSurfaceRecipes");
-    expect(providerPanelStyles.sectionSurface).toContain("rounded-[var(--radius-panel)]");
-    expect(providerPanelStyles.sectionSurface).toMatch(/!bg-vui-surface-panel|!bg-\[var\(--vui-surface-panel\)\]/);
+    expect(providerPanelStyles.sectionSurface).toContain("!rounded-none");
     expect(providerPanelStyles.registryWorkspace).toContain("[--vui-workspace-sidebar:clamp(18rem,24vw,22rem)]");
     expect(providerPanelStyles.providerList).toContain("overflow-y-auto");
-    expect(providerPanelStyles.tableScroll).toContain("h-full");
-    expect(providerPanelStyles.providerButton).toContain("!min-h-[3.5rem]");
+    expect(providerPanelStyles.tableScroll).toContain("min-h-0");
+    expect(providerPanelStyles.providerButton).toContain("!min-h-16");
     expect(providerPanelStyles.tableScroll).toContain("overflow-auto");
     expect(providerPanelStyles.table).toContain("[&_thead]:sticky");
     expect(providerPanelSource).toContain("filterProviderModels");
@@ -1006,7 +1003,6 @@ describe("ConfigRoute layout contract", () => {
     expect(runtimePanelSource).not.toContain("segmentButton");
     expect(draftPanelStyles.actionButton).toContain("var(--vui-control-muted)");
     expect(healthDiagnosticsPanelStyles.findingCard).toMatch(/bg-vui-surface-row|var\(--vui-surface-row\)/);
-    expect(providerPanelStyles.sectionSurface).toMatch(/bg-vui-surface-panel|var\(--vui-surface-panel\)/);
     expect(placeholderPanelStyles.loadingBoard).toMatch(/bg-vui-surface-panel|var\(--vui-surface-panel\)/);
     expect(extractedPanelStylesSource).not.toContain("[background:var(--vui-gradient-route-soft),var(--surface-panel)]");
   });

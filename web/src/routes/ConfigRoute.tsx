@@ -3399,7 +3399,7 @@ export function ConfigRoute() {
             title={copy.pageTitle}
             subtitle={copy.subtitle}
             subtitleHint={copy.subtitleHint}
-            statusLabel={hasPendingApply ? copy.unsavedDraft : copy.syncedDraft}
+            statusLabel={hasPendingApply ? "有未保存修改" : "配置已保存"}
             groups={settingsGroups}
             activeGroupId={activeGroup?.id ?? ""}
             onSelectGroup={handleSelectGroup}
@@ -3450,7 +3450,7 @@ export function ConfigRoute() {
               </VButton>
           </div>
         }
-        toolbar={
+        toolbar={isSectionVisible("models") ? undefined : (
           <div className={styles.configToolbar}>
             <VStatusStrip
               className={styles.configStatusMeta}
@@ -3478,7 +3478,7 @@ export function ConfigRoute() {
               onSelectPage={handleSelectPage}
             />
           </div>
-        }
+        )}
       >
         <div ref={contentViewportRef} className={styles.pageViewport} data-vui-region="config-settings-body">
 
@@ -3535,7 +3535,7 @@ export function ConfigRoute() {
               <>
                 <VActionGroup ariaLabel="模型连接操作">
                   <VButton
-                    tooltip="选模板 → Key → 检测 → 固定模型，完成后写回配置。"
+                    title="选择服务商，填写连接信息，检测后选择模型并保存。"
                     className={styles.providerModeButton}
                     aria-pressed={providerConnecting}
                     variant={providerConnecting ? "primary" : "secondary"}
@@ -3544,7 +3544,7 @@ export function ConfigRoute() {
                     添加连接
                   </VButton>
                   <VButton
-                    tooltip="模板向导、迁移与底层参数。"
+                    title="模板向导、迁移与底层参数。"
                     className={styles.providerModeButton}
                     aria-pressed={providerShowMore}
                     variant={providerShowMore ? "primary" : "ghost"}
@@ -3569,7 +3569,7 @@ export function ConfigRoute() {
                       disabled={structuredActionsDisabled || Boolean(busyAction)}
                       onCredentialChange={setProviderQuickCredential}
                       onProviderChange={(provider) => {
-                        setProviderQuickCredential("");
+                        if (provider.templateId !== providerQuickSetupState.provider.templateId || provider.authKind !== providerQuickSetupState.provider.authKind) setProviderQuickCredential("");
                         dispatchProviderQuickSetup({ type: "set_provider", provider });
                       }}
                       onDetect={(input) => {
@@ -3588,6 +3588,115 @@ export function ConfigRoute() {
                 ) : (
                   <>
                 <ConfigProviderRegistryPanel
+                  routeEditor={routeEditProviderId ? <>
+                {routeEditProviderId && !routePreview ? (
+                  <VSurface as="section" padding="compact" tone="row" className={styles.providerRouteEditSurface}>
+                    <VSection
+                    title="服务地址与协议"
+                    actions={(
+                      <VActionGroup ariaLabel="Provider 路由编辑操作">
+                        <VButton
+                          isDisabled={Boolean(busyAction)}
+                          onPress={() => {
+                            setRouteEditProviderId("");
+                            setRouteEditProvider({});
+                            setRoutePreview(null);
+                            setProviderActionFeedback(null);
+                          }}
+                        >
+                          取消
+                        </VButton>
+                        <VButton
+                          variant="primary"
+                          isDisabled={Boolean(busyAction) || !getString(routeEditProvider.base_url) || !getString(routeEditProvider.driver)}
+                          onPress={() => {
+                            void handlePreviewProviderRoute(routeEditProviderId, routeEditProvider);
+                          }}
+                        >
+                          {providerActionFeedback?.kind === "route" && providerActionFeedback.phase === "busy"
+                            ? "生成预览中…"
+                            : "预览替换影响"}
+                        </VButton>
+                      </VActionGroup>
+                    )}
+                    >
+                    <div className={styles.providerRouteEditGrid}>
+                      <label className={styles.providerRouteEditField}>
+                        <span>服务地址</span>
+                        <VInput
+                          value={getString(routeEditProvider.base_url)}
+                          disabled={Boolean(busyAction)}
+                          onChange={(event) => setRouteEditProvider((current) => ({ ...current, base_url: event.target.value }))}
+                        />
+                      </label>
+                      <label className={styles.providerRouteEditField}>
+                        <span>接口类型</span>
+                        <VStringSelect
+                          ariaLabel="Provider route driver"
+                          value={getString(routeEditProvider.driver)}
+                          isDisabled={Boolean(busyAction)}
+                          options={["openai", "anthropic", "gemini"].map((value) => ({ value, label: value }))}
+                          onValueChange={(driver) => setRouteEditProvider((current) => ({ ...current, driver }))}
+                        />
+                      </label>
+                      <label className={styles.providerRouteEditField}>
+                        <span>请求协议</span>
+                        <VStringSelect
+                          ariaLabel="Provider default wire protocol"
+                          value={getString(asRecord(routeEditProvider.protocols).default)}
+                          isDisabled={Boolean(busyAction)}
+                          options={["responses", "chat_completions", "anthropic_messages", "gemini_generate_content"].map((value) => ({ value, label: value }))}
+                          onValueChange={(defaultProtocol) => setRouteEditProvider((current) => {
+                            const protocols = asRecord(current.protocols);
+                            const allowed = Array.isArray(protocols.allowed) ? protocols.allowed.filter((item): item is string => typeof item === "string") : [];
+                            return {
+                              ...current,
+                              protocols: { ...protocols, default: defaultProtocol, allowed: Array.from(new Set([...allowed, defaultProtocol])) },
+                            };
+                          })}
+                        />
+                      </label>
+                    </div>
+                    <p className={styles.providerRouteEditWarning} role="alert">
+                      保存前会检查哪些模型和 Agent 受到影响，请确认后再应用。
+                    </p>
+                    </VSection>
+                  </VSurface>
+                ) : null}
+                {routePreview ? (
+                  <VStateSurface
+                    tone={routePreview.routeChanged ? "unavailable" : "info"}
+                    title={routePreview.routeChanged ? "确认连接修改" : "连接没有变化"}
+                    facts={routePreview.impactedRefs.map((impact, index) => ({
+                      key: impact.modelRef ?? String(index),
+                      label: impact.modelRef ?? routePreview.modelRefs[index] ?? "modelRef",
+                      value: `${impact.liveReferenceCount ?? 0} 处引用`,
+                    }))}
+                    actions={(
+                      <VActionGroup ariaLabel="Provider 路由替换确认">
+                        <VButton onPress={() => {
+                          setRoutePreview(null);
+                          setProviderActionFeedback(null);
+                        }}>取消</VButton>
+                        <VButton
+                          variant="danger"
+                          isDisabled={!routePreview.routeChanged || !routePreview.routePreviewToken || Boolean(busyAction)}
+                          onPress={() => {
+                            void handleApplyProviderRoutePreview();
+                          }}
+                        >
+                          {providerActionFeedback?.kind === "route" && providerActionFeedback.phase === "busy"
+                            ? "更新中…"
+                            : "确认并更新连接"}
+                        </VButton>
+                      </VActionGroup>
+                    )}
+                  >
+                    以上模型和引用会使用新的连接设置。确认前请核对服务地址与协议。
+                  </VStateSurface>
+                ) : null}
+                  </> : undefined}
+                  onCancelRoute={() => { setRouteEditProviderId(""); setRouteEditProvider({}); setRoutePreview(null); }}
                   rows={providerRows}
                   selectedProviderId={selectedProviderId}
                   selectedTab={selectedProviderTab}
@@ -3664,112 +3773,6 @@ export function ConfigRoute() {
                     void handleDeleteProvider(providerId);
                   }}
                 />
-                {routeEditProviderId && !routePreview ? (
-                  <VSurface as="section" padding="compact" tone="row" className={styles.providerRouteEditSurface}>
-                    <VSection
-                    title={`编辑 ${routeEditProviderId} 的连接路由`}
-                    actions={(
-                      <VActionGroup ariaLabel="Provider 路由编辑操作">
-                        <VButton
-                          isDisabled={Boolean(busyAction)}
-                          onPress={() => {
-                            setRouteEditProviderId("");
-                            setRouteEditProvider({});
-                            setRoutePreview(null);
-                            setProviderActionFeedback(null);
-                          }}
-                        >
-                          取消
-                        </VButton>
-                        <VButton
-                          variant="primary"
-                          isDisabled={Boolean(busyAction) || !getString(routeEditProvider.base_url) || !getString(routeEditProvider.driver)}
-                          onPress={() => {
-                            void handlePreviewProviderRoute(routeEditProviderId, routeEditProvider);
-                          }}
-                        >
-                          {providerActionFeedback?.kind === "route" && providerActionFeedback.phase === "busy"
-                            ? "生成预览中…"
-                            : "预览替换影响"}
-                        </VButton>
-                      </VActionGroup>
-                    )}
-                    >
-                    <div className={styles.providerRouteEditGrid}>
-                      <label className={styles.providerRouteEditField}>
-                        <span>Service root</span>
-                        <VInput
-                          value={getString(routeEditProvider.base_url)}
-                          disabled={Boolean(busyAction)}
-                          onChange={(event) => setRouteEditProvider((current) => ({ ...current, base_url: event.target.value }))}
-                        />
-                      </label>
-                      <label className={styles.providerRouteEditField}>
-                        <span>Driver</span>
-                        <VStringSelect
-                          ariaLabel="Provider route driver"
-                          value={getString(routeEditProvider.driver)}
-                          isDisabled={Boolean(busyAction)}
-                          options={["openai", "anthropic", "gemini"].map((value) => ({ value, label: value }))}
-                          onValueChange={(driver) => setRouteEditProvider((current) => ({ ...current, driver }))}
-                        />
-                      </label>
-                      <label className={styles.providerRouteEditField}>
-                        <span>Default wire protocol</span>
-                        <VStringSelect
-                          ariaLabel="Provider default wire protocol"
-                          value={getString(asRecord(routeEditProvider.protocols).default)}
-                          isDisabled={Boolean(busyAction)}
-                          options={["responses", "chat_completions", "anthropic_messages", "gemini_generate_content"].map((value) => ({ value, label: value }))}
-                          onValueChange={(defaultProtocol) => setRouteEditProvider((current) => {
-                            const protocols = asRecord(current.protocols);
-                            const allowed = Array.isArray(protocols.allowed) ? protocols.allowed.filter((item): item is string => typeof item === "string") : [];
-                            return {
-                              ...current,
-                              protocols: { ...protocols, default: defaultProtocol, allowed: Array.from(new Set([...allowed, defaultProtocol])) },
-                            };
-                          })}
-                        />
-                      </label>
-                    </div>
-                    <p className={styles.providerRouteEditWarning} role="alert">
-                      修改端点、驱动或默认协议后必须先获取后端 preview token；界面不会展示凭据引用或 secret。
-                    </p>
-                    </VSection>
-                  </VSurface>
-                ) : null}
-                {routePreview ? (
-                  <VStateSurface
-                    tone={routePreview.routeChanged ? "unavailable" : "info"}
-                    title={routePreview.routeChanged ? "确认 Provider 路由替换影响" : "当前路由没有变化"}
-                    facts={routePreview.impactedRefs.map((impact, index) => ({
-                      key: impact.modelRef ?? String(index),
-                      label: impact.modelRef ?? routePreview.modelRefs[index] ?? "modelRef",
-                      value: `${impact.liveReferenceCount ?? 0} live`,
-                    }))}
-                    actions={(
-                      <VActionGroup ariaLabel="Provider 路由替换确认">
-                        <VButton onPress={() => {
-                          setRoutePreview(null);
-                          setProviderActionFeedback(null);
-                        }}>取消</VButton>
-                        <VButton
-                          variant="danger"
-                          isDisabled={!routePreview.routeChanged || !routePreview.routePreviewToken || Boolean(busyAction)}
-                          onPress={() => {
-                            void handleApplyProviderRoutePreview();
-                          }}
-                        >
-                          {providerActionFeedback?.kind === "route" && providerActionFeedback.phase === "busy"
-                            ? "更新中…"
-                            : "使用 preview token 更新"}
-                        </VButton>
-                      </VActionGroup>
-                    )}
-                  >
-                    后端 preview token 是唯一授权；本页 checkbox 或布尔值不能替代。受影响 canonical modelRef 与 live-reference counts 如上。
-                  </VStateSurface>
-                ) : null}
                   </>
                 )}
                 {providerShowMore ? (

@@ -1,5 +1,5 @@
-import { AlertTriangle, Database, Image as ImageIcon, Pencil, RefreshCw, Route, Save, Trash2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { AlertTriangle, Database, Image as ImageIcon, Pencil, RefreshCw, Save, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { applyProviderMerge, previewProviderMerge, rollbackProviderMerge, testConfigLlm } from "../api/config";
@@ -80,6 +80,8 @@ export type ConfigProviderRegistryPanelProps = {
   onSaveCredential: (providerId: string) => void;
   onSaveContextWindow: (providerId: string, contextWindow: number | null) => void;
   onEditRoute: (providerId: string) => void;
+  routeEditor?: ReactNode;
+  onCancelRoute?: () => void;
   onPin: (providerId: string, models: ConfigCatalogModel[]) => void;
   onUnpin: (modelRef: string) => void;
   onTestModel: (modelRef: string) => void;
@@ -101,16 +103,15 @@ const MODEL_FILTERS: Array<{
   countKey: "total" | "pinned" | "discovered" | "unavailable";
 }> = [
   { id: "all", label: "全部", countKey: "total" },
-  { id: "pinned", label: "已固定", countKey: "pinned" },
-  { id: "discovered", label: "已发现", countKey: "discovered" },
-  { id: "unavailable", label: "不可用", countKey: "unavailable" },
+  { id: "pinned", label: "已添加", countKey: "pinned" },
+  { id: "discovered", label: "添加模型", countKey: "discovered" },
 ];
 
 function providerStatusLabel(status: string): string {
   const labels: Record<string, string> = {
-    reachable: "可连接", stale: "目录待刷新", not_discovered: "尚未发现模型", configured: "已配置",
+    reachable: "目录已更新", stale: "目录待更新", not_discovered: "尚未发现模型", configured: "已配置",
     auth_failed: "认证失败", discovery_failed: "模型发现失败", protocol_mismatch: "协议不匹配",
-    blocked: "已阻塞", observed: "已发现", pinned: "已固定", missing_remote: "远端目录未返回",
+    blocked: "已阻塞", observed: "已发现", pinned: "已添加", missing_remote: "已添加 · 最新目录未收录",
     disabled: "已禁用",
   };
   return labels[status] || status;
@@ -129,14 +130,12 @@ function ProviderAssetRow({
   inspecting,
   disabled,
   onSelect,
-  onEdit,
 }: {
   row: ProviderRegistryRow;
   selected: boolean;
   inspecting: boolean;
   disabled: boolean;
   onSelect: () => void;
-  onEdit: () => void;
 }) {
   return (
     <div
@@ -150,32 +149,19 @@ function ProviderAssetRow({
         contentLayout="plain"
         variant="ghost"
         aria-pressed={selected}
+        isDisabled={disabled}
         title={`${row.label || row.providerId}\n${row.providerId}`}
         onPress={onSelect}
       >
         <span className={styles.providerIdentity}>
           <strong className={styles.providerLabel}>{row.label || row.providerId}</strong>
-          <small className={styles.providerMeta}>
-            {row.pinnedCount > 0 ? `已固定 ${row.pinnedCount} 个模型` : "尚未固定模型"}
-          </small>
         </span>
         <span className={styles.providerStatusRow}>
+          <small className={styles.providerMeta}>{row.pinnedCount} 个模型</small>
           <VStatusChip tone={statusTone(row.status)} data-provider-status={row.status}>{providerStatusLabel(row.status)}</VStatusChip>
         </span>
       </VButton>
-      <VButton
-        className={styles.providerEditButton}
-        density="compact"
-        variant="secondary"
-        icon={<Pencil size={14} />}
-        data-provider-action="edit-asset"
-        aria-label={`编辑 ${row.label || row.providerId}`}
-        title={`编辑配置：${row.label || row.providerId}`}
-        isDisabled={disabled}
-        onPress={onEdit}
-      >
-        编辑
-      </VButton>
+
     </div>
   );
 }
@@ -387,10 +373,12 @@ function ConnectionTab({
             </div>
           )
         ) : (
-          <p className={styles.muted}>此 Provider 声明为无需凭据。</p>
+          <p className={styles.muted}>此服务无需 API Key。</p>
         )}
       </section>
 
+      <details className={styles.connectionCard}>
+        <summary className={styles.verificationDetails}>上下文上限（高级）{provider.contextWindow ? ` · ${provider.contextWindow.toLocaleString()} token` : " · 未配置"}</summary>
       <section className={styles.connectionCard} aria-label="上下文窗口">
         <VPanelHeader
           className={styles.connectionCardHeader}
@@ -422,6 +410,7 @@ function ConnectionTab({
           </VButton>
         </div>
       </section>
+      </details>
 
       <VButton variant="ghost" aria-expanded={showTechnicalDetails} onPress={() => setShowTechnicalDetails((open) => !open)}>
         {showTechnicalDetails ? "收起连接与部署详情" : "连接与部署详情"}
@@ -496,24 +485,27 @@ export function ProviderModelsTab({
   onProbeReasoning,
 }: ProviderModelsTabProps) {
   const summary = useMemo(() => summarizeProviderModels(provider.models), [provider.models]);
-  const pinnableModels = useMemo(() => pinnableProviderModels(provider.models), [provider.models]);
+  const pinnableModels = useMemo(
+    () => pinnableProviderModels(filterProviderModels(provider.models, modelQuery, "discovered")),
+    [provider.models, modelQuery],
+  );
   const visibleModels = useMemo(
     () => filterProviderModels(provider.models, modelQuery, modelFilter),
     [modelFilter, modelQuery, provider.models],
   );
   const emptyText = provider.models.length === 0
-    ? "该 Provider 暂无模型。先点右上角「发现」。"
+    ? "还没有模型目录，请点击「发现模型」获取。"
     : modelFilter === "pinned" && summary.pinned === 0
-      ? "还没有固定模型。用上方「固定全部已发现」一键加入，或在「已发现」里逐个点「固定到配置」。"
+      ? "还没有添加模型。切换到「添加模型」，选择需要使用的模型。"
       : modelFilter === "discovered" && summary.discovered === 0
-        ? "没有已发现模型。先运行「发现」，或切换到「全部」。"
+        ? "没有待添加模型。可刷新模型目录，或查看「已添加」。"
         : "没有匹配的模型。请调整搜索或筛选条件。";
 
   const [detailModelRef, setDetailModelRef] = useState("");
   const detailModel = provider.models.find((model) => model.modelRef === detailModelRef);
   const verificationColumn: VDenseTableColumn<ConfigCatalogModel> = {
     id: "verification",
-    header: "真实调用",
+    header: "最近测试",
     render: (model) => {
       const verificationStatus = model.verificationStatus || "unverified";
       const errorLabel = (() => {
@@ -536,15 +528,16 @@ export function ProviderModelsTab({
         model.verificationCheckedAt || (verificationStatus === "unverified" ? "未测试" : ""),
       ].filter(Boolean).join(" · ");
       return (
-        <VTooltip content={detail || "未测试"} width="wide">
-          <span className={styles.capabilityHover}>
-            <VStatusChip
-              tone={verificationStatus === "verified" ? "success" : verificationStatus === "failed" ? "danger" : "warning"}
-            >
-              {verificationStatus === "verified" ? "可调用" : verificationStatus === "failed" ? "调用失败" : "未测试"}
-            </VStatusChip>
-          </span>
-        </VTooltip>
+        <div className={styles.verification}>
+          <VStatusChip tone={verificationStatus === "verified" ? "success" : verificationStatus === "failed" ? "danger" : "neutral"}>
+            {verificationStatus === "verified" ? "测试通过" : verificationStatus === "failed" ? "测试失败" : "未测试"}
+          </VStatusChip>
+          {verificationStatus === "failed" ? <>
+            <small className={styles.verificationError}>{errorLabel || "请求未成功"}{model.verificationHttpStatus ? ` · HTTP ${model.verificationHttpStatus}` : ""}</small>
+            <small className={styles.muted}>{["auth_failed", "missing_credential"].includes(model.verificationErrorType || "") ? "请检查连接设置中的 API Key。" : "请检查服务地址与模型名称，再重新测试。"}</small>
+            <details><summary className={styles.verificationDetails}>错误详情</summary><p className={styles.verificationMessage}>{detail}</p></details>
+          </> : model.verificationCheckedAt ? <small className={styles.muted}>{model.verificationCheckedAt}</small> : null}
+        </div>
       );
     },
   };
@@ -657,7 +650,7 @@ export function ProviderModelsTab({
                 title={action.reason}
                 onPress={() => onPin(provider.providerId, [model])}
               >
-                {pinBusy ? "固定中…" : action.label}
+                {pinBusy ? "正在添加…" : "添加到模型库"}
               </VButton>
             ) : null}
             {testAvailable ? (
@@ -678,7 +671,7 @@ export function ProviderModelsTab({
                 title={action.reason || undefined}
                 onPress={() => onUnpin(model.modelRef)}
               >
-                {action.label}
+                从模型库移除
               </VButton>
             ) : action.kind === "in_use" || action.kind === "unavailable" ? (
               <span className={styles.modelActionState} data-model-action={action.kind}>
@@ -701,7 +694,7 @@ export function ProviderModelsTab({
         <VInput
           aria-label="搜索模型"
           className={styles.modelSearch}
-          placeholder="搜索 modelRef、Upstream ID 或名称"
+          placeholder="搜索模型名称或 ID"
           value={modelQuery}
           onChange={(event) => onQueryChange(event.currentTarget.value)}
         />
@@ -719,37 +712,28 @@ export function ProviderModelsTab({
           ))}
         </VActionGroup>
       </div>
-      {pinnableModels.length > 0 ? (
-        <div className={styles.pinBanner} role="region" aria-label="批量固定模型">
-          <VActionGroup ariaLabel="批量固定操作" className={styles.pinBannerActions}>
+      {modelFilter === "discovered" && pinnableModels.length > 0 ? (
+        <div className={styles.pinBanner} role="region" aria-label="批量添加模型">
+          <VActionGroup ariaLabel="批量添加操作" className={styles.pinBannerActions}>
             <VButton
               variant="primary"
               data-model-action="pin-all"
               isDisabled={disabled || pinBusy}
               tooltip={
                 pinBusy
-                  ? "正在固定模型…"
+                  ? "正在添加模型…"
                   : [
-                      "「发现」不等于已入库。点「固定全部已发现」一次写入模型库；保存配置后即可在 Agent 里选用。也可在表格里逐个点「固定到配置」。",
+                      "添加当前搜索结果中的模型，添加成功后可在 Agent 中选用。",
                       provider.refreshDue
-                        ? `目录可能已过期，仍可固定当前列表中的 ${pinnableModels.length} 个已发现模型；建议稍后点「发现模型」刷新。`
+                        ? `目录可能已过期，仍可添加当前列表中的 ${pinnableModels.length} 个已发现模型；建议稍后点「发现模型」刷新。`
                         : "",
                     ].filter(Boolean).join(" ")
               }
               onPress={() => onPin(provider.providerId, pinnableModels)}
             >
-              {pinBusy ? "正在固定…" : `固定全部已发现（${pinnableModels.length}）`}
+              {pinBusy ? "正在添加…" : `添加当前结果（${pinnableModels.length}）`}
             </VButton>
-            {modelFilter !== "discovered" ? (
-              <VButton
-                density="compact"
-                variant="ghost"
-                tooltip="只显示已发现、尚未固定的模型"
-                onPress={() => onFilterChange("discovered")}
-              >
-                只看已发现
-              </VButton>
-            ) : null}
+
           </VActionGroup>
         </div>
       ) : null}
@@ -762,15 +746,19 @@ export function ProviderModelsTab({
           getRowKey={(model) => model.modelRef}
           emptyText={emptyText}
           columns={[
-            { id: "model", header: "模型", className: "w-[42%]", render: (model) => (
+            { id: "model", header: "模型", className: "w-auto", render: (model) => (
               <span className={styles.modelIdentity} data-model-availability={model.availability}>
                 <strong className={styles.modelName} title={model.modelRef}>{model.label || model.modelKey}</strong>
                 <small className={styles.muted}>{providerStatusLabel(model.availability)}</small>
               </span>
             ) },
-            { ...verificationColumn, className: "w-[25%]" },
-            { id: "actions", header: "操作", className: "w-[33%]", render: (model) => (
+            { ...verificationColumn, className: "w-[16rem]" },
+            { id: "actions", header: "操作", className: "w-[12rem]", render: (model) => (
               <div className={styles.compactModelActions}>
+                {(() => {
+                  const action = deriveProviderModelActionState(provider, model, liveReferenceCountByModelRef[model.modelRef] ?? 0, disabled);
+                  return action.kind === "pin" ? <VButton density="compact" variant="primary" isDisabled={action.disabled || pinBusy} title={action.reason} onPress={() => onPin(provider.providerId, [model])}>添加</VButton> : null;
+                })()}
                 <VButton density="compact" variant="ghost" onPress={() => setDetailModelRef(model.modelRef)} aria-label={`${model.label || model.modelKey} 详情`}>详情</VButton>
                 {canTestProviderModel(model) ? <VButton density="compact" isDisabled={disabled} title="发送最小真实模型请求并保存脱敏结果。" onPress={() => onTestModel(model.modelRef)}>测试调用</VButton> : null}
               </div>
@@ -875,6 +863,8 @@ export function ConfigProviderRegistryPanel({
   onSaveCredential,
   onSaveContextWindow,
   onEditRoute,
+  routeEditor,
+  onCancelRoute,
   onPin,
   onUnpin,
   onTestModel,
@@ -1078,6 +1068,7 @@ export function ConfigProviderRegistryPanel({
   function closeInspector() {
     setInspectorOpen(false);
     onCancelCredential();
+    onCancelRoute?.();
   }
 
   const saveContextWindowFor = (target: ProviderRegistryRow) => {
@@ -1093,17 +1084,6 @@ export function ConfigProviderRegistryPanel({
 
   return (
     <VSurface as="section" id="config-models" className={styles.sectionSurface} padding="none">
-      <VPanelHeader
-        className={styles.header}
-        title="服务与模型"
-        tooltip="左栏默认只显示可用服务（已配 Key 且连接正常）。异常服务收在下方折叠区；新厂商请用「添加连接」。"
-        tooltipLabel="模型连接列表说明"
-        actions={(
-          <VStatusChip tone={hasPendingApply ? "warning" : disabled ? "warning" : "success"}>
-            {disabled ? "只读 / 忙碌" : hasPendingApply ? "有未保存修改" : "已与草稿同步"}
-          </VStatusChip>
-        )}
-      />
       {hasPendingApply ? (
         <div className={styles.savePrompt} role="status" data-save-prompt="pending" aria-live="polite">
           <div className={styles.savePromptCopy}>
@@ -1125,7 +1105,7 @@ export function ConfigProviderRegistryPanel({
         className={styles.registryWorkspace}
         resize={{
           layoutId: WORKBENCH_LAYOUT_IDS.configModelAssets,
-          sidebar: { defaultWidth: 260, minWidth: 220, maxWidth: 420 },
+          sidebar: { defaultWidth: 300, minWidth: 260, maxWidth: 420 },
           collapse: {
             sidebar: { separatorLabel: "服务列表宽度", collapseLabel: "收起服务列表", expandLabel: "展开服务列表" },
           },
@@ -1133,16 +1113,16 @@ export function ConfigProviderRegistryPanel({
         sidebar={(
           <div className={styles.providerRail}>
             <div className={styles.providerListSection}>
-              <p className={styles.providerListHeading}>可用服务 · {healthyRows.length}</p>
+              <p className={styles.providerListHeading}>已配置服务 · {healthyRows.length}</p>
               <VEntityList
-                ariaLabel="可用服务列表"
+                ariaLabel="已配置服务列表"
                 activeId={provider?.providerId}
                 className={styles.providerList}
                 items={healthyRows.map((row) => ({ ...row, id: row.providerId }))}
                 empty={(
-                  <VStateSurface tone="empty" title="暂无可用服务">
+                  <VStateSurface tone="empty" title="暂无已配置服务">
                     {abnormalRows.length
-                      ? "当前仅有异常服务。可展开下方「异常服务」处理，或点「添加连接」。"
+                      ? "当前仅有需要处理。可展开下方「需要处理」处理，或点「添加连接」。"
                       : "请点「添加连接」接入中转站并保存 Key。"}
                   </VStateSurface>
                 )}
@@ -1153,7 +1133,6 @@ export function ConfigProviderRegistryPanel({
                     inspecting={inspectorOpen && provider?.providerId === row.providerId}
                     disabled={disabled}
                     onSelect={() => onSelectProvider(row.providerId)}
-                    onEdit={() => openInspector(row.providerId)}
                   />
                 )}
               />
@@ -1170,12 +1149,12 @@ export function ConfigProviderRegistryPanel({
                   tooltip="认证失败 / 发现失败等，默认折叠"
                   onPress={() => setShowAbnormalAssets((open) => !open)}
                 >
-                  <span>异常服务 · {abnormalRows.length}</span>
+                  <span>需要处理 · {abnormalRows.length}</span>
                   <span>{showAbnormalAssets ? "收起" : "展开"}</span>
                 </VButton>
                 {showAbnormalAssets ? (
                   <VEntityList
-                    ariaLabel="异常服务列表"
+                    ariaLabel="需要处理列表"
                     activeId={provider?.providerId}
                     className={styles.providerList}
                     items={abnormalRows.map((row) => ({ ...row, id: row.providerId }))}
@@ -1186,8 +1165,7 @@ export function ConfigProviderRegistryPanel({
                         inspecting={inspectorOpen && provider?.providerId === row.providerId}
                         disabled={disabled}
                         onSelect={() => onSelectProvider(row.providerId)}
-                        onEdit={() => openInspector(row.providerId)}
-                      />
+                          />
                     )}
                   />
                 ) : null}
@@ -1201,17 +1179,17 @@ export function ConfigProviderRegistryPanel({
               <span className={styles.detailIdentity}>
                 <strong title={provider.providerId}>{provider.label || provider.providerId}</strong>
                 <small className={styles.muted}>
-                  已固定 {provider.pinnedCount} 个模型
-                  {provider.contextWindow ? ` · 窗口 ${provider.contextWindow}` : " · 窗口未配置"}
+                  已添加 {provider.pinnedCount} 个模型
+
                 </small>
               </span>
               <VActionGroup ariaLabel="模型库操作" className={styles.actions}>
                 <VButton
                   data-provider-action="discover"
-                  variant="primary"
+                  variant="secondary"
                   icon={<RefreshCw size={14} />}
                   isDisabled={disabled}
-                  title="从中转站 / 上游拉取模型目录（发现后还需固定才会入库）"
+                  title="从中转站 / 上游拉取模型目录（发现后可选择添加到模型库）"
                   onPress={() => onDiscover(provider.providerId)}
                 >
                   {discoverBusy ? "发现中…" : "发现模型"}
@@ -1223,7 +1201,7 @@ export function ConfigProviderRegistryPanel({
                   isDisabled={disabled}
                   onPress={() => openInspector(provider.providerId)}
                 >
-                  编辑配置
+                  连接设置
                 </VButton>
               </VActionGroup>
             </div>
@@ -1265,19 +1243,25 @@ export function ConfigProviderRegistryPanel({
             </div>
           </div>
         ) : (
-          <VStateSurface tone="empty" icon={<Database size={16} />} title="选择左侧已配置服务">点选服务查看已固定模型；点「编辑」修改连接配置。</VStateSurface>
+          <VStateSurface tone="empty" icon={<Database size={16} />} title="选择左侧已配置服务">点选服务查看已添加模型；点「连接设置」修改地址与密钥。</VStateSurface>
         )}
       />
       <VDialog
         open={Boolean(inspectorProvider)}
         onOpenChange={(open) => { if (!open) closeInspector(); }}
         title={inspectorProvider ? `编辑服务 · ${inspectorProvider.label || inspectorProvider.providerId}` : "编辑服务"}
-        description="常用配置：API Key 与上下文窗口。协议、诊断和合并可按需查看。"
+        description="服务地址和密钥只需配置一次，供此服务下的模型共用。"
         size="lg"
       >
         {inspectorProvider ? (
           <div className={styles.inspectorPanel} data-vui-region="config-asset-inspector" data-provider-id={inspectorProvider.providerId}>
             <div className={styles.inspectorBody}>
+              {visibleFeedback ? <p className={visibleFeedback.phase === "error" ? styles.actionFeedbackError : styles.actionFeedback} role="status">{visibleFeedback.message}</p> : null}
+              {routeEditor || <section className={styles.connectionCard}>
+                <h3 className={styles.connectionCardTitle}>服务地址</h3>
+                <p className={styles.connectionAddress}>{inspectorProvider.baseUrl || "未配置"}</p>
+                <VButton data-provider-action="route" variant="secondary" isDisabled={disabled} onPress={() => onEditRoute(inspectorProvider.providerId)}>修改地址与协议</VButton>
+              </section>}
               <ConnectionTab
                 provider={inspectorProvider}
                 contextWindowDraft={contextWindowDraft}
@@ -1292,14 +1276,7 @@ export function ConfigProviderRegistryPanel({
                 onSaveCredential={() => onSaveCredential(inspectorProvider.providerId)}
               />
               <VActionGroup ariaLabel="进阶连接操作" className={styles.actions}>
-                <VButton
-                  data-provider-action="route"
-                  icon={<Route size={14} />}
-                  isDisabled={disabled}
-                  onPress={() => { closeInspector(); onEditRoute(inspectorProvider.providerId); }}
-                >
-                  修改路由
-                </VButton>
+
                 <VButton
                   density="compact"
                   variant="ghost"
@@ -1365,10 +1342,10 @@ export function ConfigProviderRegistryPanel({
                   variant="danger"
                   icon={<Trash2 size={14} />}
                   isDisabled={disabled || providerDeleteBlocked}
-                  title={providerDeleteBlocked ? "先清除 pinned ownership 与 live references，才能删除 Provider。" : "删除 Provider 草稿"}
+                  title={providerDeleteBlocked ? "请先移除此服务下的模型，并解除 Agent 等引用。" : "删除服务 草稿"}
                   onPress={() => onDeleteProvider(inspectorProvider.providerId)}
                 >
-                  删除 Provider
+                  删除服务
                 </VButton>
               </div>
             </div>

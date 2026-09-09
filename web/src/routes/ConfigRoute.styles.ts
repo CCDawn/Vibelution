@@ -115,19 +115,19 @@ const styles = {
   configToolbar:
     "vui-routes-configroute configToolbar grid min-w-0 gap-2 border-b border-[var(--vui-border-subtle)] !bg-vui-surface-panel px-3 py-2",
   content:
-    "vui-routes-configroute content flex min-h-0 min-w-0 h-full flex-col overflow-hidden !bg-vui-surface-panel",
+    "vui-routes-configroute content !flex min-h-0 min-w-0 h-full flex-col overflow-hidden !bg-vui-surface-panel",
   pageViewport:
     "vui-routes-configroute pageViewport [display:grid] [align-content:start] [gap:12px] min-w-0 min-h-0 overflow-y-auto overflow-x-hidden [padding:12px] [scrollbar-gutter:stable] [&:has(>_.providerModelsLayout)]:[align-content:stretch] [&:has(>_.providerModelsLayout)]:[grid-template-rows:minmax(0,1fr)] [&:has(>_.notice):has(>_.providerModelsLayout)]:[grid-template-rows:auto_minmax(0,1fr)]",
   contentModels:
     "vui-routes-configroute contentModels [align-content:stretch] [grid-template-rows:minmax(0,1fr)_auto] [height:100%] [max-height:calc(100dvh_-_76px)] [min-width:0] [&:has(>_.notice)]:[grid-template-rows:auto_minmax(0,1fr)_auto] [&>_.configDiscoverySection:last-child]:[display:grid] [&>_.configDiscoverySection:last-child]:[grid-template-rows:auto_auto] max-[720px]:[max-height:none] max-[720px]:[height:auto] max-[720px]:[overflow:visible]",
   providerModelsLayout:
-    "vui-routes-configroute providerModelsLayout grid h-full min-h-0 min-w-0 [grid-template-rows:auto_minmax(28rem,1fr)] gap-3 overflow-y-auto overflow-x-hidden",
+    "vui-routes-configroute providerModelsLayout flex flex-col h-full min-h-0 min-w-0 gap-4 overflow-y-auto overflow-x-hidden [&>#config-models]:flex-1 [&>#config-models]:min-h-[28rem]",
   providerModeButton:
-    "vui-routes-configroute providerModeButton min-h-10 px-3.5 [font-size:var(--vui-font-sm)] font-semibold",
+    "vui-routes-configroute providerModeButton min-h-10 self-start px-3.5 [font-size:var(--vui-font-sm)] font-semibold",
   providerRouteEditSurface:
     "vui-routes-configroute providerRouteEditSurface grid min-w-0 gap-2",
   providerRouteEditGrid:
-    "vui-routes-configroute providerRouteEditGrid grid min-w-0 grid-cols-3 gap-2 max-[720px]:grid-cols-1",
+    "vui-routes-configroute providerRouteEditGrid grid min-w-0 grid-cols-2 gap-4 [&>label:first-child]:col-span-full",
   providerRouteEditField:
     "vui-routes-configroute providerRouteEditField grid min-w-0 gap-1",
   providerRouteEditWarning:
