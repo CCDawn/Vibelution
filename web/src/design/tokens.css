@@ -95,6 +95,11 @@
     color-mix(in srgb, var(--bg-canvas) 48%, transparent),
     var(--theme-background-overlay-mid)
   );
+  --vui-gradient-preview-canvas: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent-cool) 4%, var(--bg-canvas)),
+    var(--bg-canvas) 260px
+  );
 
   --fg-primary: #f3f4f6;
   --fg-secondary: #b8c0cc;
@@ -322,6 +327,11 @@
     180deg,
     color-mix(in srgb, var(--bg-canvas) 48%, transparent),
     var(--theme-background-overlay-mid)
+  );
+  --vui-gradient-preview-canvas: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent-cool) 4%, var(--bg-canvas)),
+    var(--bg-canvas) 260px
   );
 
   --fg-primary: #101828;

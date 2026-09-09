@@ -23,6 +23,8 @@ const composedGridTemplateModifiers = new Set([
   "ChatCodingRoute.styles.ts:layoutCompactDesktop",
   "ChatCodingRoute.styles.ts:rightPaneWithTabs",
   "ChatCodingRoute.styles.ts:rightPaneWithoutTabs",
+  "ConfigRoute.styles.ts:configAdvancedGrid",
+  "ConfigRoute.styles.ts:treeFieldCardView",
   "GitRoute.styles.ts:workspaceOverview",
   "GitRoute.styles.ts:historyPanel",
   "GitRoute.styles.ts:modelActionRow",
@@ -80,6 +82,10 @@ describe("route style display contract", () => {
     expect(gitRouteSource).toContain("`${styles.workspace} ${styles.workspaceOverview}`");
     expect(gitRouteSource).toContain("`${styles.commitPanel} ${styles.historyPanel}`");
     expect(gitRouteSource).toContain("`${styles.modelDefaultRow} ${styles.modelActionRow}`");
+
+    const configRouteSource = readFileSync(new URL("./ConfigRoute.tsx", import.meta.url), "utf-8");
+    expect(configRouteSource).toContain("`${styles.treeGrid} ${styles.configAdvancedGrid}`");
+    expect(configRouteSource).toContain("`${styles.treeFieldCard} ${styles.treeFieldCardView}`");
 
     expect(directSessionIndexItemSource).toContain("styles.sessionItem,");
     expect(directSessionIndexItemSource).toContain("bulkSelectionEnabled ? styles.sessionItemWithBulkSelect");

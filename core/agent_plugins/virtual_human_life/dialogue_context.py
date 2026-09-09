@@ -85,15 +85,13 @@ def record_interaction_receipt(
         sessions = {}
     session_id = str(entry.get("sessionId") or "").strip()
     previous = sessions.get(session_id)
+    if isinstance(previous, Mapping) and str(previous.get("entryId") or "") == str(entry.get("entryId") or ""):
+        # A dequeue retry is not another arrival and must not unbind its native Turn.
+        return deepcopy(dict(previous))
     previous_ordinal = (
         int(previous.get("turnOrdinal") or 0) if isinstance(previous, Mapping) else 0
     )
-    turn_ordinal = (
-        previous_ordinal
-        if isinstance(previous, Mapping)
-        and str(previous.get("entryId") or "") == str(entry.get("entryId") or "")
-        else previous_ordinal + 1
-    )
+    turn_ordinal = previous_ordinal + 1
     command = entry.get("command") if isinstance(entry.get("command"), Mapping) else {}
     context = {
         "entryId": str(entry.get("entryId") or "").strip(),
@@ -104,6 +102,13 @@ def record_interaction_receipt(
         "generation": int(entry.get("generation") or 0),
         "userIntent": classify_companion_user_intent(command.get("content")),
         "turnId": "",
+        "previousUserArrivedAt": (
+            str(previous.get("currentUserArrivedAt") or "")
+            if isinstance(previous, Mapping) else ""
+        ),
+        "currentUserArrivedAt": (
+            _iso(arrived_at) if (arrived_at := _timestamp(entry.get("createdAt"))) else ""
+        ),
         "updatedAt": _iso(now),
     }
     sessions[session_id] = context
@@ -162,6 +167,8 @@ def interaction_context_for_turn(
         "generation": int(context.get("generation") or 0),
         "userIntent": str(context.get("userIntent") or "small_talk")[:40],
         "turnId": recorded_turn_id,
+        "previousUserArrivedAt": str(context.get("previousUserArrivedAt") or "")[:64],
+        "currentUserArrivedAt": str(context.get("currentUserArrivedAt") or "")[:64],
     }
 
 
