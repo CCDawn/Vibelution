@@ -1,6 +1,6 @@
-import { fetchJson } from "../client";
+import { fetchJson, isFetchJsonHttpError } from "../client";
 
-export { fetchJson };
+export { fetchJson, isFetchJsonHttpError };
 
 export function requireText(value: string, field: string): string {
   const normalized = String(value || "").trim();

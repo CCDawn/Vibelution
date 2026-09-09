@@ -40,6 +40,7 @@ export {
   replayResearchWorkflowEvents,
   researchWorkflowStreamUrl,
 } from "./events";
+export { isFetchJsonHttpError } from "./client";
 export type { EventPage } from "./events";
 export {
   fetchResearchWorkflowHandoffs,
