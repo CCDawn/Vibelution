@@ -15,6 +15,8 @@
 | 用户消息、已选主动消息与第二气泡的插件私有到达 FIFO | `mailbox.py` + `delivery_plan.py` + `delivery_runtime.py` + `service.py` |
 | 夜间反思、记忆强化和来源校验 | `reflection.py` |
 | 长期日历、周期事件、例外和冲突 | `calendar.py` |
+| 双方约定提议、确认、改约和结果闭环（同一日历账本） | `commitments.py` |
+| 真实到达时间的重逢、成功事件与共同话题只读投影 | `reunion.py` |
 | 昼夜节律与非医疗生活需要 | `rhythms.py` |
 | 阅读、新闻、创作和练习兴趣投影 | `interests.py` |
 | 熟悉地点、路线和重要物品 | `world_model.py` |
@@ -54,6 +56,8 @@
 - 兴趣只从可验证的成功 outcome 成长；NPC 不是 Agent，生活动态也不反向写入生活经历。
 - 具身化 provider 和资产均为可选；没有授权资产或 provider 不健康时回退现有立绘，文本会话不受影响。
 - 每轮表达决定只读取有界投影和插件 mailbox 的意图 receipt，不保存用户原文，不调用第二次 LLM，也不能放宽关系、权限或安全边界。
+- 约定候选不入有效日历，后续用户 Turn 确认后才生效；改约未确认保留原约，到点只等待真实结果。新动作要求人物自身 direct Session 与当前用户 Turn，不允许管家代替用户确认。
+- 重逢按 mailbox `createdAt` 而非出队/心跳时间计算；共同经历复用 open loop 内事件/Turn/日期引用，Prompt 定点读成功事件，不创建第二 transcript 或记忆库，也不推断用户在场或未回复惩罚。
 
 ## 主测试
 
@@ -66,5 +70,8 @@
 - `tests/test_virtual_human_life_long_horizon.py`
 - `tests/test_virtual_human_life_continuity.py`
 - `tests/test_virtual_human_life_mailbox.py`
+- `tests/test_companion_commitments.py`
+- `tests/test_companion_reunion.py`
+- `tests/test_companion_lived_continuity.py`
 
 产品契约见 [`docs/prds/2026-08-27-virtual-human-life-plugin.md`](../../../docs/prds/2026-08-27-virtual-human-life-plugin.md)。

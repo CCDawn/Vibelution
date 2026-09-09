@@ -34,6 +34,7 @@ from .calendar import (
     project_calendar_for_date,
 )
 from .causal_contracts import CAUSAL_SCHEMA_VERSION, authorized_reuse_receipt
+from .commitments import apply_commitment_action, project_commitments
 from .companion_preferences import (
     CompanionPreferenceError,
     CompanionPreferenceManager,
@@ -55,6 +56,7 @@ from .delivery_runtime import (
 )
 from .dialogue_context import (
     bind_interaction_receipt_turn,
+    interaction_context_for_turn,
     project_companion_dialogue_context,
     record_interaction_receipt,
 )
@@ -114,6 +116,7 @@ from .reflection import (
     validate_reflection_proposal,
 )
 from .relationship_events import make_relationship_event, project_relationships
+from .reunion import project_reunion_context, project_shared_experiences
 from .rhythms import (
     apply_completed_activity_to_rhythm,
     default_rhythm_projection,
@@ -902,6 +905,9 @@ class VirtualHumanLifeService:
 
     def _dialogue_v2_allowed_source_keys(self, agent_id: str) -> list[str]:
         keys: set[str] = set()
+        direct_session = str((self._agent(agent_id, include_archived=False) or {}).get("directSessionId") or "")
+        if direct_session:
+            keys.update(str(row["sourceKey"]) for row in self._shared_continuity_projection(agent_id, direct_session))
         for row in self.store.read_jsonl(agent_id, "conversation/open_loops.jsonl"):
             if str(row.get("status") or "") == "open":
                 topic_key = str(row.get("topicKey") or "").strip()
@@ -2174,6 +2180,19 @@ class VirtualHumanLifeService:
             run_id=run_id,
             proactive=bool(trigger),
         )
+        if session_id and session_id == str(agent.get("directSessionId") or ""):
+            receipt = interaction_context_for_turn(self.store, agent_id, session_id=session_id, run_id=run_id)
+            dialogue_context["reunionContext"] = project_reunion_context(
+                previous_user_arrived_at=str(receipt.get("previousUserArrivedAt") or ""),
+                current_user_arrived_at=str(receipt.get("currentUserArrivedAt") or ""),
+                local_now=local_now, timezone_name=str(binding.get("timezone") or "Asia/Shanghai"),
+                user_intent=str(receipt.get("userIntent") or ""), proactive=bool(trigger),
+            )
+            dialogue_context["commitments"] = project_commitments(
+                self.store.read_jsonl(agent_id, "calendar/events.jsonl"),
+                session_id=session_id, now=self._now(),
+            )
+            dialogue_context["sharedExperiences"] = self._shared_continuity_projection(agent_id, session_id)
         remaining = [
             {
                 "activityId": str(item.get("activityId") or ""),
@@ -2703,6 +2722,118 @@ class VirtualHumanLifeService:
                 **candidate_result,
                 "heartbeatAt": _iso(current),
             }
+
+    def _require_companion_user_turn(
+        self, agent_id: str, *, session_id: str, turn_id: str,
+    ) -> dict[str, Any]:
+        agent = self._agent(agent_id, include_archived=False) or {}
+        if not session_id or session_id != str(agent.get("directSessionId") or ""):
+            raise RuntimeError("Continuity requires the Companion direct Session.")
+        binding = self._require_enabled_binding(agent_id)
+        receipt = interaction_context_for_turn(
+            self.store, agent_id, session_id=session_id, run_id=turn_id,
+        )
+        if not turn_id or receipt.get("turnId") != turn_id or receipt.get("sourceKind") != "user":
+            raise RuntimeError("Continuity requires the current native user Turn.")
+        return binding
+
+    def _completed_continuity_event(self, agent_id: str, event_id: str) -> tuple[dict[str, Any], str]:
+        if not str(event_id or "").strip():
+            raise ValueError("A successful life event is required.")
+        # Resolve historical references on explicit tool writes only. Prompt reads
+        # use the exact dates saved in open loops, not a full history scan.
+        for path in sorted((self.plugin_root(agent_id) / "events").glob("*.jsonl"), reverse=True):
+            for event in self.store.read_jsonl(agent_id, f"events/{path.name}"):
+                if str(event.get("eventId") or "") != event_id:
+                    continue
+                occurred = _parse_datetime(event.get("occurredAt"))
+                if (event.get("kind") != "activity_completed"
+                    or (event.get("outcome") or {}).get("status") != "succeeded"
+                    or occurred is None or occurred > self._now()):
+                    raise ValueError("Shared continuity requires an already successful life event.")
+                return event, path.stem
+        raise ValueError("The life event does not belong to this Companion.")
+
+    def change_companion_commitment(
+        self, agent_id: str, *, session_id: str, turn_id: str,
+        action: str, commitment_id: str, operation_id: str,
+        title: str = "", start_at: str = "", end_at: str = "",
+        reason: str = "", source_event_id: str = "",
+    ) -> dict[str, Any]:
+        with self._lock_for(agent_id):
+            binding = self._require_companion_user_turn(agent_id, session_id=session_id, turn_id=turn_id)
+            if action == "complete":
+                event, event_date = self._completed_continuity_event(agent_id, source_event_id)
+                schedule = self.store.read_json(agent_id, f"schedules/{event_date}.json") or {}
+                if not any(
+                    item.get("activityId") == event.get("activityId")
+                    and item.get("calendarEventId") == commitment_id
+                    for item in schedule.get("activities", [])
+                ):
+                    raise ValueError("The outcome must belong to this calendar commitment.")
+            old_rows = self.store.read_jsonl(agent_id, "calendar/events.jsonl")
+            rows, result = apply_commitment_action(
+                old_rows, agent_id=agent_id, session_id=session_id, source_turn_id=turn_id,
+                action=action, commitment_id=commitment_id, operation_id=operation_id,
+                title=title, start_at=start_at, end_at=end_at, reason=reason,
+                timezone_name=str(binding.get("timezone") or "Asia/Shanghai"), now=self._now(),
+            )
+            if action == "complete" and not result.get("changed") and result["event"].get("sourceEventId") != source_event_id:
+                raise ValueError("A repeated completion cannot change its outcome source.")
+            if result.get("changed"):
+                if action == "complete":
+                    rows[-1]["sourceEventId"] = source_event_id
+                    result["sourceEventId"] = source_event_id
+                self.store.write_jsonl(agent_id, "calendar/events.jsonl", rows)
+            local_today = self._local_now(binding).date()
+            affected_dates = {local_today.isoformat(), (local_today + timedelta(days=1)).isoformat()}
+            for row in old_rows + rows[-1:]:
+                if row.get("eventId") == commitment_id:
+                    for field in ("startAt", "endAt"):
+                        value = _parse_datetime(row.get(field))
+                        if value is not None:
+                            affected_dates.add(value.astimezone(self._local_now(binding).tzinfo).date().isoformat())
+            # Also repair a schedule sync interrupted after the authoritative ledger write.
+            self._sync_calendar_schedules_for_dates(agent_id, binding=binding, local_dates=affected_dates)
+            return result
+
+    def record_companion_shared_experience(
+        self, agent_id: str, *, session_id: str, turn_id: str,
+        event_id: str, topic_key: str, summary: str,
+    ) -> dict[str, Any]:
+        with self._lock_for(agent_id):
+            self._require_companion_user_turn(agent_id, session_id=session_id, turn_id=turn_id)
+            _, event_date = self._completed_continuity_event(agent_id, event_id)
+            topic_key = str(topic_key or "").strip()[:120]
+            if not topic_key or not str(summary or "").strip():
+                raise ValueError("A shared topic and discussion summary are required.")
+            rows = self.store.read_jsonl(agent_id, "conversation/open_loops.jsonl")
+            scoped = [row for row in rows if row.get("sourceSessionId") == session_id and row.get("kind") == "shared_experience"]
+            reference = {"eventId": event_id, "turnId": turn_id, "localDate": event_date}
+            for row in scoped:
+                if row.get("topicKey") == topic_key and reference in row.get("sharedReferences", []):
+                    return deepcopy(row)
+            updated = upsert_open_loop(
+                scoped, loop_id="shared:" + uuid.uuid4().hex, topic_key=topic_key,
+                kind="shared_experience", summary=summary, source_turn_id=turn_id,
+                source_event_id=event_id, now=self._now(),
+                expires_at=self._now() + timedelta(days=7),
+            )
+            changed = next(row for row in updated if row.get("topicKey") == topic_key and row.get("status") == "open")
+            changed["sourceSessionId"] = session_id
+            changed["sharedReferences"] = [*changed.get("sharedReferences", []), reference][-16:]
+            self.store.write_jsonl(agent_id, "conversation/open_loops.jsonl", ([row for row in rows if row not in scoped] + updated)[-256:])
+            return deepcopy(changed)
+
+    def _shared_continuity_projection(self, agent_id: str, session_id: str) -> list[dict[str, Any]]:
+        loops = self.store.read_jsonl(agent_id, "conversation/open_loops.jsonl")
+        dates = {
+            date.fromisoformat(str(ref["localDate"])).isoformat()
+            for row in loops if row.get("sourceSessionId") == session_id
+            for ref in row.get("sharedReferences", [])
+        }
+        events = [event for day in sorted(dates)[-16:] for event in self.store.read_jsonl(agent_id, f"events/{day}.jsonl")]
+        return project_shared_experiences(open_loops=loops, completed_events=events, session_id=session_id, now=self._now())
 
     def list_events(
         self,
