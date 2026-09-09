@@ -1481,3 +1481,471 @@ def test_v2_build_projects_full_stage_one_authority_end_to_end(
     assert final_summary["limitations"] == ["Overhead quantification is missing."]
     assert output["competition_result_view"]["datasets"] == {"source": [], "target": []}
     assert output["research_plan"]["work_packages"][0]["work_package_id"] == "wp-1"
+
+
+# ----------------------------- review-cited multi-run evidence aggregation
+
+
+def _canonical_batch_ref(run_id: str, digest: str) -> str:
+    return f"evidence_card_batch://research-team/{run_id}/{digest * 64}"
+
+
+def _aggregation_dimension_artifact(cited_refs: list[str]) -> dict:
+    expected, _ = _authority_sections()
+    return {
+        "dimensionReviews": [
+            {**deepcopy(row), "evidence_refs": list(cited_refs)}
+            for row in expected["dimension_reviews"]
+        ]
+    }
+
+
+def _patch_registry_cards(
+    monkeypatch, cards_by_run: dict[str, list[dict]]
+) -> list[str]:
+    """Strict-scoped per-run card loader stand-in; returns the run read log."""
+
+    calls: list[str] = []
+
+    def read_cards(kind, *, team_id, authority_run_id, **_kwargs):
+        assert kind == "evidence_card_batch"
+        calls.append(authority_run_id)
+        cards = cards_by_run.get(authority_run_id)
+        if not cards:
+            return None
+        return {
+            "teamId": team_id,
+            "sourceCollectionRunId": authority_run_id,
+            "evidenceCards": deepcopy(cards),
+            "cardCount": len(cards),
+        }
+
+    monkeypatch.setattr(result_package_v2, "load_scoped_artifact_payload", read_cards)
+    return calls
+
+
+def _aggregation_artifacts() -> tuple[dict, dict[str, dict]]:
+    expected, artifacts = _authority_sections()
+    artifacts["source_candidate_batch"] = {
+        "candidates": [
+            {
+                "candidateId": "candidate-1",
+                "title": "Computational Capacity of the Universe",
+                "sourceKind": "paper",
+                "sourceUrl": "https://doi.org/10.1103/PhysRevLett.88.237901",
+                "retrievedAt": "2026-09-02T17:14:45Z",
+            },
+            {
+                "candidateId": "candidate-2",
+                "title": "Dennard scaling",
+                "sourceKind": "url",
+                "sourceUrl": "https://en.wikipedia.org/wiki/Dennard_scaling",
+                "updatedAt": "2026-09-02T17:15:45Z",
+            },
+        ]
+    }
+    return expected, artifacts
+
+
+def _build_v2_with_aggregation(
+    monkeypatch, artifacts: dict[str, dict], cards_by_run: dict[str, list[dict]]
+) -> tuple[dict, list[str]]:
+    expected = _authority_sections()[0]
+
+    def read_artifact(kind, **_kwargs):
+        if kind not in artifacts:
+            raise result_package_v2.ResultPackageV2Error(
+                f"canonical artifact is missing: {kind}"
+            )
+        return deepcopy(artifacts[kind])
+
+    monkeypatch.setattr(result_package_v2, "_artifact_payload", read_artifact)
+    registry_calls = _patch_registry_cards(monkeypatch, cards_by_run)
+    monkeypatch.setattr(
+        result_package_v2,
+        "_feedback_iterations",
+        lambda **_kwargs: deepcopy(expected["feedback_iterations"]),
+    )
+    monkeypatch.setattr(
+        result_package_v2,
+        "_model_run",
+        lambda *_a, **_k: {**deepcopy(expected["run"]), "run_id": "run-sci-096"},
+    )
+    package = result_package_v2.build_challenge_result_package_v2(
+        generic_package={"runId": "run-sci-096", "factChainHash": "f" * 64},
+        record=_record(),
+        team_id="research-team",
+        workflow_run_id="run-sci-096",
+        source_collection_run_id="source-sci-096",
+    )
+    return package, registry_calls
+
+
+def test_cited_evidence_run_ids_keep_sorted_unique_card_batch_refs() -> None:
+    payload = {
+        "dimensionReviews": [
+            {
+                "evidence_refs": [
+                    _canonical_batch_ref("dprun-run-b", "b"),
+                    "candidate-chat-citation",
+                    f"research_plan://research-team/run-x/{'c' * 64}",
+                ]
+            },
+            {"evidenceRefs": [_canonical_batch_ref("dprun-run-a", "a")]},
+        ],
+        "candidates": [
+            {
+                "dimensionReviews": [
+                    {
+                        "evidence_refs": [
+                            _canonical_batch_ref("dprun-run-b", "b"),
+                            "not a canonical ref",
+                        ]
+                    }
+                ]
+            }
+        ],
+    }
+
+    assert result_package_v2._cited_evidence_run_ids(payload) == [
+        "dprun-run-a",
+        "dprun-run-b",
+    ]
+
+
+def test_aggregated_payload_merges_cited_runs_and_dedupes_card_ids(monkeypatch) -> None:
+    shared_card = _claim_evidence_card(
+        claimEvidenceId="ce-shared",
+        candidateId="candidate-1",
+        quote="Shared duplicated anchor.",
+    )
+    _patch_registry_cards(
+        monkeypatch,
+        {
+            "dprun-run-b": [
+                _claim_evidence_card(
+                    claimEvidenceId="ce-b-challenges",
+                    candidateId="candidate-2",
+                    quote="Counter anchor.",
+                    supportLevel="contradicts",
+                ),
+                shared_card,
+            ],
+            # A cited run without cards contributes nothing.
+            "dprun-run-empty": [],
+            "dprun-run-a": [
+                _claim_evidence_card(claimEvidenceId="ce-a-supports"),
+                shared_card,
+            ],
+        },
+    )
+
+    payload = result_package_v2._aggregated_evidence_card_payload(
+        team_id="research-team",
+        cited_run_ids=["dprun-run-a", "dprun-run-b", "dprun-run-empty"],
+    )
+
+    assert payload == {
+        "teamId": "research-team",
+        "sourceCollectionRunIds": ["dprun-run-a", "dprun-run-b"],
+        "evidenceCards": [
+            _claim_evidence_card(claimEvidenceId="ce-a-supports"),
+            shared_card,
+            _claim_evidence_card(
+                claimEvidenceId="ce-b-challenges",
+                candidateId="candidate-2",
+                quote="Counter anchor.",
+                supportLevel="contradicts",
+            ),
+        ],
+        "cardCount": 3,
+        "aggregatedFromDimensionReviews": True,
+    }
+    assert result_package_v2._aggregated_evidence_card_payload(
+        team_id="research-team",
+        cited_run_ids=["dprun-run-empty"],
+    ) is None
+
+
+def test_evidence_card_payload_layers_aggregation_only_after_missing(
+    monkeypatch,
+) -> None:
+    dimension_payload = _aggregation_dimension_artifact(
+        [_canonical_batch_ref("dprun-run-a", "a")]
+    )
+    first_layer = {
+        "teamId": "research-team",
+        "sourceCollectionRunId": "source-sci-096",
+        "evidenceCards": [_claim_evidence_card()],
+        "cardCount": 1,
+    }
+    monkeypatch.setattr(
+        result_package_v2,
+        "_artifact_payload",
+        lambda kind, **_kwargs: deepcopy(first_layer),
+    )
+    registry_calls = _patch_registry_cards(
+        monkeypatch, {"dprun-run-a": [_claim_evidence_card()]}
+    )
+
+    # Layer one holds: the aggregation loader is never consulted.
+    payload = result_package_v2._evidence_card_payload(
+        team_id="research-team",
+        workflow_run_id="run-sci-096",
+        authority_run_id="source-sci-096",
+        dimension_payload=dimension_payload,
+    )
+    assert payload == first_layer
+    assert registry_calls == []
+
+    # Layer one missing: the review-cited aggregation reads the cited run.
+    def missing_evidence(kind, **_kwargs):
+        raise result_package_v2.ResultPackageV2Error(
+            f"canonical artifact is missing: {kind}"
+        )
+
+    monkeypatch.setattr(result_package_v2, "_artifact_payload", missing_evidence)
+    aggregated = result_package_v2._evidence_card_payload(
+        team_id="research-team",
+        workflow_run_id="run-sci-096",
+        authority_run_id="source-sci-096",
+        dimension_payload=dimension_payload,
+    )
+    assert aggregated["aggregatedFromDimensionReviews"] is True
+    assert aggregated["sourceCollectionRunIds"] == ["dprun-run-a"]
+    assert aggregated["cardCount"] == 1
+
+    # Nothing aggregatable either: the original fail-closed error stands.
+    with pytest.raises(
+        result_package_v2.ResultPackageV2Error,
+        match="^canonical artifact is missing: evidence_card_batch$",
+    ) as exc_info:
+        result_package_v2._evidence_card_payload(
+            team_id="research-team",
+            workflow_run_id="run-sci-096",
+            authority_run_id="source-sci-096",
+            dimension_payload={"dimensionReviews": [{"evidence_refs": ["E1"]}]},
+        )
+    assert str(exc_info.value) == "canonical artifact is missing: evidence_card_batch"
+
+    # An empty layer-one payload also falls through to the aggregation, and
+    # keeps the original payload (and its own fail-closed error) when the
+    # aggregation finds nothing.
+    monkeypatch.setattr(
+        result_package_v2,
+        "_artifact_payload",
+        lambda kind, **_kwargs: {"evidence": []},
+    )
+    empty_fallback = result_package_v2._evidence_card_payload(
+        team_id="research-team",
+        workflow_run_id="run-sci-096",
+        authority_run_id="source-sci-096",
+        dimension_payload=dimension_payload,
+    )
+    assert empty_fallback["aggregatedFromDimensionReviews"] is True
+    no_cited_fallback = result_package_v2._evidence_card_payload(
+        team_id="research-team",
+        workflow_run_id="run-sci-096",
+        authority_run_id="source-sci-096",
+        dimension_payload={"dimensionReviews": [{"evidence_refs": ["E1"]}]},
+    )
+    assert no_cited_fallback == {"evidence": []}
+
+
+def test_v2_build_aggregates_review_cited_evidence_batches(
+    monkeypatch,
+) -> None:
+    """Production SCI-009 shape: the authority run holds no card batch.
+
+    The cards were accumulated across later collection runs, and the
+    dimension reviews cite exactly those runs' canonical batch refs.
+    """
+
+    _, artifacts = _aggregation_artifacts()
+    artifacts["dimension_reviews"] = _aggregation_dimension_artifact(
+        [
+            _canonical_batch_ref("dprun-run-b", "b"),
+            _canonical_batch_ref("dprun-run-a", "a"),
+        ]
+    )
+    del artifacts["evidence_card_batch"]
+    cards_by_run = {
+        "dprun-run-a": [
+            _claim_evidence_card(claimEvidenceId="ce-a-supports"),
+            _claim_evidence_card(
+                claimEvidenceId="ce-shared",
+                quote="Shared duplicated anchor.",
+            ),
+        ],
+        "dprun-run-b": [
+            _claim_evidence_card(
+                claimEvidenceId="ce-b-challenges",
+                candidateId="candidate-2",
+                quote="Counter anchor.",
+                supportLevel="contradicts",
+            ),
+            _claim_evidence_card(
+                claimEvidenceId="ce-shared",
+                quote="Shared duplicated anchor.",
+            ),
+        ],
+    }
+
+    package, registry_calls = _build_v2_with_aggregation(
+        monkeypatch, artifacts, cards_by_run
+    )
+    output = package["challengeQuestionOutput"]
+
+    assert registry_calls == ["dprun-run-a", "dprun-run-b"]
+    assert challenge_question_runs._schema_issues(output) == []
+    evidence_ids = [item["evidence_id"] for item in output["evidence"]]
+    # Cross-run duplicate claimEvidenceId collapses into one evidence row.
+    assert sorted(evidence_ids) == ["ce-a-supports", "ce-b-challenges", "ce-shared"]
+    assert evidence_ids.index("ce-shared") < evidence_ids.index("ce-b-challenges")
+    evidence = {item["evidence_id"]: item for item in output["evidence"]}
+    assert evidence["ce-b-challenges"]["relation"] == "challenges"
+    assert evidence["ce-a-supports"]["source_type"] == "peer_reviewed_paper"
+    checks = {item["evidenceId"]: item for item in package["citationChecks"]}
+    assert set(checks) == set(evidence_ids)
+
+
+def test_v2_single_run_authority_batch_never_invokes_aggregation(monkeypatch) -> None:
+    """SCI-091 shape: an authority-run batch is read exactly as before."""
+
+    _, artifacts = _claim_evidence_artifacts([_claim_evidence_card()])
+    registry_calls = _patch_registry_cards(monkeypatch, {})
+
+    package = _build_v2_with_artifacts(monkeypatch, artifacts)
+    output = package["challengeQuestionOutput"]
+
+    assert challenge_question_runs._schema_issues(output) == []
+    assert [item["evidence_id"] for item in output["evidence"]] == ["ce-anchor"]
+    assert registry_calls == []
+
+
+def _hypothesis_role_card(**overrides: Any) -> dict[str, Any]:
+    """Stored claim-evidence card bound to a hypothesis candidate id.
+
+    Mirrors the production hypothesis-first store: hypothesis-role cards are
+    registered under the hypothesis candidate id, a space disjoint from the
+    ``candidate-<ts>-<hex>`` source ids, and the hypothesis_set authority has
+    no source metadata — so the collection-stage v2 envelope fields travel on
+    the card itself (the projection contract reads card fields first).
+    """
+    card = {
+        "schemaVersion": 1,
+        "claimEvidenceId": "ce-hypothesis",
+        "claimId": "claim-h1",
+        "candidateId": "sci-096-cbf2d69301",
+        "sourceId": "https://doi.org/10.1103/PhysRevLett.88.237901",
+        "locator": {
+            "kind": "citation",
+            "anchor": "abstract",
+            "url": "https://doi.org/10.1103/PhysRevLett.88.237901",
+        },
+        "quote": "The universe performs at most 10^120 operations on 10^90 bits.",
+        "evidenceKind": "primary_result",
+        "reasoningRole": "hypothesis",
+        "supportLevel": "supports",
+        "reviewStatus": "pending",
+        "sourceCollectionRunId": "dprun-run-a",
+        "title": "Computational Capacity of the Universe",
+        "sourceType": "peer_reviewed_paper",
+        "sourceUrl": "https://doi.org/10.1103/PhysRevLett.88.237901",
+        "retrievedAt": "2026-09-02T17:14:45Z",
+    }
+    card.update(overrides)
+    return card
+
+
+def test_v2_aggregated_cards_resolve_hypothesis_level_candidates(
+    monkeypatch,
+) -> None:
+    """Production-shape mirror: two authorities must both be honored.
+
+    The candidates payload carries only source-level ids while the aggregated
+    cards cite hypothesis-level ids; the hypothesis_set authority names those
+    ids, so the orphan gate passes on real identity instead of loosening.
+    """
+
+    _, artifacts = _aggregation_artifacts()
+    artifacts["source_candidate_batch"] = {
+        "candidates": [
+            {
+                "candidateId": "candidate-1",
+                "title": "Computational Capacity of the Universe",
+                "sourceKind": "paper",
+                "sourceUrl": "https://doi.org/10.1103/PhysRevLett.88.237901",
+                "retrievedAt": "2026-09-02T17:14:45Z",
+            }
+        ]
+    }
+    artifacts["hypothesis_set"] = {
+        **artifacts["hypothesis_set"],
+        "candidates": [
+            {
+                "candidateId": "sci-096-cbf2d69301",
+                "claim": "Erase-cost and cooling jointly bound processing.",
+                "status": "reviewed",
+            }
+        ],
+    }
+    artifacts["dimension_reviews"] = _aggregation_dimension_artifact(
+        [
+            _canonical_batch_ref("dprun-run-a", "a"),
+            _canonical_batch_ref("dprun-run-b", "b"),
+        ]
+    )
+    del artifacts["evidence_card_batch"]
+    cards_by_run = {
+        "dprun-run-a": [
+            _hypothesis_role_card(claimEvidenceId="ce-hypo-a"),
+        ],
+        "dprun-run-b": [
+            _hypothesis_role_card(
+                claimEvidenceId="ce-hypo-b",
+                quote="Cooling capacity bounds sustained throughput.",
+                supportLevel="contradicts",
+                sourceCollectionRunId="dprun-run-b",
+            ),
+        ],
+    }
+
+    package, _ = _build_v2_with_aggregation(monkeypatch, artifacts, cards_by_run)
+    output = package["challengeQuestionOutput"]
+
+    assert challenge_question_runs._schema_issues(output) == []
+    evidence = {item["evidence_id"]: item for item in output["evidence"]}
+    assert set(evidence) == {"ce-hypo-a", "ce-hypo-b"}
+    # Card-carried envelope fields project verbatim; pending review keeps the
+    # fail-closed verification floor even though the candidate is hypothesis
+    # level and has no source-screening authority.
+    assert evidence["ce-hypo-a"]["fact"] == (
+        "The universe performs at most 10^120 operations on 10^90 bits."
+    )
+    assert evidence["ce-hypo-a"]["verification_status"] == "unverified"
+    assert evidence["ce-hypo-b"]["relation"] == "challenges"
+    assert evidence["ce-hypo-a"]["source_type"] == "peer_reviewed_paper"
+
+
+def test_v2_aggregated_card_with_unknown_candidate_fails_closed(monkeypatch) -> None:
+    _, artifacts = _aggregation_artifacts()
+    artifacts["dimension_reviews"] = _aggregation_dimension_artifact(
+        [_canonical_batch_ref("dprun-run-a", "a")]
+    )
+    del artifacts["evidence_card_batch"]
+    cards_by_run = {
+        "dprun-run-a": [
+            _hypothesis_role_card(
+                claimEvidenceId="ce-orphan",
+                candidateId="sci-096-nosuchcandidate",
+            ),
+        ],
+    }
+
+    with pytest.raises(
+        result_package_v2.ResultPackageV2Error,
+        match="ce-orphan references candidate sci-096-nosuchcandidate "
+        "missing from source_candidate_batch",
+    ):
+        _build_v2_with_aggregation(monkeypatch, artifacts, cards_by_run)

@@ -19,7 +19,10 @@ from core.research.competition import (
     load_science_question_catalog,
 )
 
-from .artifact_readback_registry import load_scoped_artifact_payload
+from .artifact_readback_registry import (
+    load_scoped_artifact_payload,
+    parse_canonical_ref,
+)
 from .human_gate_artifacts import canonical_sha256
 from .model_invocation_receipt_registry import (
     model_invocation_receipt_coverage,
@@ -511,7 +514,9 @@ def _evidence_item(card: Mapping[str, Any], candidate: Mapping[str, Any]) -> dic
 
 
 def _evidence(
-    evidence_payload: Mapping[str, Any], candidate_payload: Mapping[str, Any]
+    evidence_payload: Mapping[str, Any],
+    candidate_payload: Mapping[str, Any],
+    hypothesis_candidates: Sequence[Mapping[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     direct = _list_of_mappings(evidence_payload.get("evidence"))
     if direct:
@@ -526,6 +531,22 @@ def _evidence(
         _text(item.get("candidateId") or item.get("sourceId") or item.get("recordId")): item
         for item in candidates
     }
+    # Review-cited aggregated batches carry hypothesis-level card bindings:
+    # the claim-evidence store registers hypothesis-role cards under the
+    # hypothesis candidate id, a space disjoint from the source candidate
+    # ids.  The hypothesis_set authority is the second real identity source
+    # for those ids — not a bypass; ids unknown to BOTH authorities still
+    # fail closed below.  Only aggregated payloads pass this parameter, so
+    # the single authority-run path keeps its exact fail-closed behavior.
+    if hypothesis_candidates:
+        for item in hypothesis_candidates:
+            hypothesis_id = _text(
+                item.get("candidateId")
+                or item.get("hypothesisId")
+                or item.get("hypothesis_id")
+            )
+            if hypothesis_id and hypothesis_id not in by_id:
+                by_id[hypothesis_id] = item
     if not cards:
         raise ResultPackageV2Error("canonical evidence_card_batch contains no evidence")
     projected: list[dict[str, Any]] = []
@@ -543,6 +564,139 @@ def _evidence(
             _evidence_item(card, by_id.get(candidate_id or _text(card.get("sourceId")), {}))
         )
     return projected
+
+
+def _cited_evidence_run_ids(dimension_payload: Mapping[str, Any]) -> list[str]:
+    """Authority run ids of the evidence-card batches cited by the reviews.
+
+    Review rows persist canonical ``evidence_card_batch://`` refs (grounded
+    by ``dimension_reviews_input_binding``), so the set of source-collection
+    runs whose cards the review actually read is derivable from the
+    dimension_reviews authority alone.  Bare citations, other kinds, and
+    unparsable refs are ignored; duplicates collapse into a sorted list.
+    """
+
+    runs: set[str] = set()
+    rows = _list_of_mappings(
+        dimension_payload.get("dimensionReviews")
+        or dimension_payload.get("dimension_reviews")
+    )
+    for candidate in _list_of_mappings(dimension_payload.get("candidates")):
+        rows.extend(
+            _list_of_mappings(
+                candidate.get("dimensionReviews")
+                or candidate.get("dimension_reviews")
+            )
+        )
+    for row in rows:
+        for ref in list(row.get("evidence_refs") or row.get("evidenceRefs") or []):
+            parsed = parse_canonical_ref(_text(ref))
+            if parsed and parsed["kind"] == "evidence_card_batch":
+                run_id = _text(parsed["authorityRunId"])
+                if run_id:
+                    runs.add(run_id)
+    return sorted(runs)
+
+
+def _aggregated_evidence_card_payload(
+    *, team_id: str, cited_run_ids: Sequence[str]
+) -> dict[str, Any] | None:
+    """Merge every review-cited run's evidence-card batch into one payload.
+
+    Stage-one runs accumulate claim-evidence cards across several
+    source-collection runs (production SCI-009: 26 material requests spread
+    over 6 runs) while the formal run's snapshot names only the earliest one
+    as its authority, so the single-run read legitimately finds no cards.
+    The cited run ids come from the dimension_reviews authority and each
+    batch is read through the same strict scoped loader the single-run path
+    uses — no run the reviews did not cite is ever read, and a batch that
+    yields no cards contributes nothing.  Cards deduplicate by their
+    claim-evidence identity (the append-only store gives one id one
+    content).  ``None`` means nothing was aggregatable and the caller keeps
+    the original fail-closed behavior.
+    """
+
+    cards: list[dict[str, Any]] = []
+    seen_card_ids: set[str] = set()
+    aggregated_runs: list[str] = []
+    for run_id in cited_run_ids:
+        envelope = load_scoped_artifact_payload(
+            "evidence_card_batch",
+            team_id=team_id,
+            authority_run_id=run_id,
+        )
+        run_cards = (
+            _list_of_mappings(
+                envelope.get("evidenceCards") or envelope.get("cards")
+            )
+            if isinstance(envelope, Mapping)
+            else []
+        )
+        if not run_cards:
+            continue
+        aggregated_runs.append(run_id)
+        for card in run_cards:
+            card_id = _text(
+                _pick(card, "claimEvidenceId", "evidenceId", "evidence_id")
+            )
+            if card_id:
+                if card_id in seen_card_ids:
+                    continue
+                seen_card_ids.add(card_id)
+            cards.append(card)
+    if not cards:
+        return None
+    return {
+        "teamId": team_id,
+        "sourceCollectionRunIds": aggregated_runs,
+        "evidenceCards": cards,
+        "cardCount": len(cards),
+        "aggregatedFromDimensionReviews": True,
+    }
+
+
+def _evidence_card_payload(
+    *,
+    team_id: str,
+    workflow_run_id: str,
+    authority_run_id: str,
+    dimension_payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Read evidence cards: authority run first, review-cited runs second.
+
+    The frozen authority run stays the only first-layer source, so the
+    single-run chain (e.g. SCI-091) is unchanged.  Only when that read fails
+    with the canonical missing error — or comes back without cards — does
+    the aggregation layer read the runs the dimension_reviews actually cite.
+    When nothing is aggregatable, the original fail-closed error stands.
+    """
+
+    missing_error: ResultPackageV2Error | None = None
+    try:
+        payload = _artifact_payload(
+            "evidence_card_batch",
+            team_id=team_id,
+            workflow_run_id=workflow_run_id,
+            authority_run_id=authority_run_id,
+        )
+    except ResultPackageV2Error as exc:
+        if "canonical artifact is missing: evidence_card_batch" not in str(exc):
+            raise
+        missing_error = exc
+    else:
+        if _list_of_mappings(payload.get("evidence")) or _list_of_mappings(
+            payload.get("evidenceCards") or payload.get("cards")
+        ):
+            return payload
+    aggregated = _aggregated_evidence_card_payload(
+        team_id=team_id,
+        cited_run_ids=_cited_evidence_run_ids(dimension_payload),
+    )
+    if aggregated is not None:
+        return aggregated
+    if missing_error is not None:
+        raise missing_error
+    return payload
 
 
 def _citation_checks(evidence: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
@@ -1464,12 +1618,9 @@ def build_challenge_result_package_v2(
         workflow_run_id=workflow_run_id,
         authority_run_id=authority,
     )
-    evidence_cards = _artifact_payload(
-        "evidence_card_batch",
-        team_id=team_id,
-        workflow_run_id=workflow_run_id,
-        authority_run_id=authority,
-    )
+    # The review authorities load before evidence: when the authority run
+    # holds no evidence-card batch, the aggregation fallback derives the
+    # review-cited evidence runs from dimension_reviews.
     hypothesis_set = _artifact_payload(
         "hypothesis_set",
         team_id=team_id,
@@ -1482,6 +1633,12 @@ def build_challenge_result_package_v2(
         workflow_run_id=workflow_run_id,
         authority_run_id=authority,
     )
+    evidence_cards = _evidence_card_payload(
+        team_id=team_id,
+        workflow_run_id=workflow_run_id,
+        authority_run_id=authority,
+        dimension_payload=dimension_payload,
+    )
     research_payload = _artifact_payload(
         "stage1_research_plan" if is_proposal_only_challenge_run(record) else "research_plan",
         team_id=team_id,
@@ -1489,7 +1646,17 @@ def build_challenge_result_package_v2(
         authority_run_id=authority,
     )
     authority_sections = [dimension_payload, hypothesis_set, research_payload]
-    evidence = _evidence(evidence_cards, candidates)
+    evidence = _evidence(
+        evidence_cards,
+        candidates,
+        hypothesis_candidates=(
+            _list_of_mappings(
+                hypothesis_set.get("candidates") or hypothesis_set.get("hypotheses")
+            )
+            if evidence_cards.get("aggregatedFromDimensionReviews")
+            else None
+        ),
+    )
     # The schema's hypothesis items are closed (additionalProperties: false),
     # so the per-candidate novelty contrast stays in its dimension_reviews
     # artifact authority; the hypothesis rows carry the novelty_basis
