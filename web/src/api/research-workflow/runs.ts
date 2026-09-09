@@ -2,6 +2,7 @@ import type {
   ResearchWorkflowNodeDetail,
   ResearchWorkflowSnapshot,
 } from "../types/research-workflow/core";
+import type { TeamWorkflowCandidateGraphEdge } from "../types";
 import { fetchJson } from "../client";
 import { JSON_HEADERS } from "./client";
 
@@ -58,6 +59,41 @@ export type EvidenceGraphMissingLinkWaiveResponse = {
   graphCandidateIds: string[];
   waiver: EvidenceGraphMissingLinkWaiverAudit;
 };
+
+/** Run-scoped missing-link read (A05): the candidate-graph authority the
+ * run's frozen snapshot scopes to — never the team-latest record. */
+export type EvidenceGraphMissingLinksResponse = {
+  runId: string;
+  teamId: string;
+  sourceCollectionRunId: string;
+  candidateGraphId: string;
+  missingLinks: TeamWorkflowCandidateGraphEdge[];
+  summary: Record<string, unknown>;
+};
+
+/**
+ * Read the run-scoped candidate-graph missing links (A05 read face).
+ *
+ * Server resolves ``sourceCollectionRunId`` from the run's frozen input
+ * snapshot (same authority single point as the waive write), then reads the
+ * same scoped graph the readiness gate counts — so the gaps the operator
+ * sees are exactly the gaps a waiver would mutate.
+ */
+export async function fetchEvidenceGraphMissingLinks(options: {
+  runId: string;
+  teamId: string;
+  signal?: AbortSignal;
+}): Promise<EvidenceGraphMissingLinksResponse> {
+  const runId = String(options.runId || "").trim();
+  const teamId = requireTeamId(options.teamId);
+  if (!runId) {
+    throw new Error("runId is required");
+  }
+  return fetchJson<EvidenceGraphMissingLinksResponse>(
+    `/api/research/workflow-runs/${encodeURIComponent(runId)}/evidence-graph/missing-links?teamId=${encodeURIComponent(teamId)}`,
+    { signal: options.signal },
+  );
+}
 
 /**
  * Confirm a human waiver for one evidence-graph missing link (缺陷⑪).

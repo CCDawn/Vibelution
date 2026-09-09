@@ -1,16 +1,16 @@
 /** @vitest-environment happy-dom */
 /**
  * Shared missing-link waiver section (缺陷⑰):
- * rows render from the candidate-graph payload, the two-step confirm posts
- * waiveEvidenceGraphMissingLink with the CHILD workflow run id, controls hide
- * without run context, waived rows badge, success refetches the graph.
+ * rows render from the run-scoped missing-link authority (A05), the two-step
+ * confirm posts waiveEvidenceGraphMissingLink with the CHILD workflow run id,
+ * controls hide without run context, waived rows badge, success refetches.
  */
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { waiveEvidenceGraphMissingLink } from "../../../api/researchWorkflow";
-import type { TeamWorkflowCandidateGraphPayload } from "../../../api/types";
+import type { TeamWorkflowCandidateGraphEdge } from "../../../api/types";
 import {
   MissingLinkWaiverSection,
   type MissingLinkWaiverSectionProps,
@@ -27,42 +27,24 @@ const MISSING_TARGET = "candidate-20260908171904-9143d4d6";
 /** The knowledge sideflow CHILD run — the authority the waive endpoint needs. */
 const CHILD_RUN_ID = "run-1ca97605acf3";
 
-function graphPayload(): TeamWorkflowCandidateGraphPayload {
-  return {
-    nodes: [],
-    edges: [],
-    missingLinks: [
-      {
-        sourceCandidateId: "candidate-a",
-        targetCandidateId: MISSING_TARGET,
-        relation: "supports",
-        edgeState: "",
-      },
-      {
-        sourceCandidateId: "candidate-a",
-        targetCandidateId: "candidate-b",
-        relation: "contradicts",
-        edgeState: "",
-        waived: true,
-        status: "waived",
-        waiver: { by: "local-control-operator", at: "2026-09-08T00:00:00Z", justification: "earlier audit decision" },
-      },
-    ],
-    unreviewedNodes: [],
-    officialBoundary: {
-      writesOfficialKnowledge: false,
-      writesOfficialRag: false,
-      writesOfficialGraph: false,
-      requiresIngestionApproval: true,
+function missingLinksPayload(): TeamWorkflowCandidateGraphEdge[] {
+  return [
+    {
+      sourceCandidateId: "candidate-a",
+      targetCandidateId: MISSING_TARGET,
+      relation: "supports",
+      edgeState: "",
     },
-    summary: {
-      nodeCount: 0,
-      edgeCount: 0,
-      missingLinkCount: 2,
-      unreviewedNodeCount: 0,
+    {
+      sourceCandidateId: "candidate-a",
+      targetCandidateId: "candidate-b",
+      relation: "contradicts",
+      edgeState: "",
+      waived: true,
+      status: "waived",
+      waiver: { by: "local-control-operator", at: "2026-09-08T00:00:00Z", justification: "earlier audit decision" },
     },
-    createdAt: "2026-09-08T00:00:00Z",
-  } as unknown as TeamWorkflowCandidateGraphPayload;
+  ];
 }
 
 function baseProps(): MissingLinkWaiverSectionProps {
@@ -70,7 +52,7 @@ function baseProps(): MissingLinkWaiverSectionProps {
     lang: "zh",
     teamId: "research-team",
     childWorkflowRunId: CHILD_RUN_ID,
-    graph: graphPayload(),
+    missingLinks: missingLinksPayload(),
     refetchGraph: refetchMock,
   };
 }
@@ -128,7 +110,7 @@ describe("MissingLinkWaiverSection", () => {
 
   it("renders a graph-unavailable hint instead of rows when graph data is missing", async () => {
     const props = baseProps();
-    props.graph = null;
+    props.missingLinks = null;
     const view = await mountSection(props);
 
     expect(document.body.querySelector('[data-testid="graph-missing-link-graph-unavailable"]')).not.toBeNull();
@@ -140,7 +122,7 @@ describe("MissingLinkWaiverSection", () => {
 
   it("renders nothing when the loaded graph has no missing links", async () => {
     const props = baseProps();
-    props.graph = { ...graphPayload(), missingLinks: [] };
+    props.missingLinks = [];
     const view = await mountSection(props);
 
     expect(document.body.querySelector('[data-testid="graph-missing-links"]')).toBeNull();

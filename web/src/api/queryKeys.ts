@@ -108,6 +108,10 @@ export const queryKeys = {
     ["research-workflow", workflowId, teamId, "bindings"] as const,
   researchWorkflowLedger: (runId: string, teamId: string) =>
     ["research-workflow", teamId, runId, "ledger"] as const,
+  /** A05: run-scoped missing-link authority — the run id is part of the
+   * cache identity so switching child runs never leaks another run's gaps. */
+  researchWorkflowEvidenceMissingLinks: (runId: string, teamId: string) =>
+    ["research-workflow", teamId, runId, "evidence-missing-links"] as const,
   researchWorkflowBudget: (runId: string, teamId: string) =>
     ["research-workflow", teamId, runId, "budget"] as const,
   researchWorkflowHypotheses: (runId: string, teamId: string) =>

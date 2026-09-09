@@ -559,3 +559,182 @@ def test_readiness_waiver_count_follows_read_side_rule(monkeypatch) -> None:
     stats, _ = _evaluate(monkeypatch, _graph_stats_payload([legacy], waiver_count=0))
     assert stats is not None
     assert stats["waiver_count"] == 1, "status=accepted counts via the read-side rule"
+
+
+# -- run-scoped missing-link read (A05) ---------------------------------------
+
+
+_READ_ROUTE = f"/api/research/workflow-runs/{_RUN}/evidence-graph/missing-links"
+
+
+class _FakeClaimEvidenceStore:
+    """Stands in for the claim-evidence authority behind relation validation."""
+
+    def __init__(self, records: list[dict[str, Any]]) -> None:
+        self._records = records
+
+    def list(self, team_id: str) -> list[dict[str, Any]]:
+        _ = team_id
+        return self._records
+
+
+def _readable_graph_record(
+    candidate_id: str,
+    *,
+    sc_run_id: str,
+    missing_links: list[dict[str, Any]],
+    updated_at: str,
+) -> dict[str, Any]:
+    """A candidate_graph record that passes the relation read-back validation."""
+    return {
+        "schemaVersion": "1.0",
+        "candidateId": candidate_id,
+        "candidateType": "candidate_graph",
+        "teamId": _TEAM,
+        "title": f"graph {candidate_id}",
+        "metadata": {
+            "sourceCollectionRunId": sc_run_id,
+            "graph": {
+                "nodes": [{"candidateId": "candidate-a", "title": "A"}],
+                "edges": [
+                    {
+                        "sourceCandidateId": "candidate-a",
+                        "targetCandidateId": "candidate-b",
+                        "relation": "supports",
+                        "evidenceRefs": ["ce-1"],
+                    }
+                ],
+                "evidenceGaps": [{"gapId": "gap-1"}],
+                "counterEvidenceRefs": [{"evidenceRef": "ce-1"}],
+                "missingLinks": missing_links,
+                "summary": {"missingLinkCount": len(missing_links)},
+            },
+            "missingLinkCount": len(missing_links),
+        },
+        "createdAt": "2026-09-08T10:00:00Z",
+        "updatedAt": updated_at,
+    }
+
+
+def _install_read_authority(
+    monkeypatch: pytest.MonkeyPatch,
+    store: dict[str, Any],
+    *,
+    sc_run_id: str = _SC,
+) -> None:
+    """Point the scoped loader at fake stores (graph store + claim evidence)."""
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.source_collection.candidates.list_candidate_store",
+        lambda *_args, **_kwargs: store,
+    )
+    monkeypatch.setattr(
+        "core.research.evidence.ClaimEvidenceStore",
+        lambda _root: _FakeClaimEvidenceStore(
+            [
+                {
+                    "claimEvidenceId": "ce-1",
+                    "teamId": _TEAM,
+                    "sourceCollectionRunId": sc_run_id,
+                }
+            ]
+        ),
+    )
+
+
+def test_missing_links_route_is_registered_on_the_router() -> None:
+    got = {
+        route.path
+        for route in rt_routes.router.routes
+        if getattr(route, "methods", None) and "GET" in route.methods
+    }
+    assert "/research/workflow-runs/{run_id}/evidence-graph/missing-links" in got
+
+
+def test_missing_links_route_returns_404_for_unknown_run(fake_ledger) -> None:
+    fake_ledger(None)
+    response = _client().get(_READ_ROUTE, params={"teamId": _TEAM})
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "run_not_found"
+
+
+def test_missing_links_route_returns_404_on_team_scope_mismatch(fake_ledger) -> None:
+    fake_ledger(_run_record(team_id="other-team"))
+    response = _client().get(_READ_ROUTE, params={"teamId": _TEAM})
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "team_scope_mismatch"
+
+
+def test_missing_links_route_returns_404_without_source_collection_run(
+    fake_ledger,
+) -> None:
+    fake_ledger(_run_record(input_snapshot={"questionId": "SCI-009"}))
+    response = _client().get(_READ_ROUTE, params={"teamId": _TEAM})
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "graph_not_found"
+
+
+def test_missing_links_read_scopes_to_run_snapshot_not_team_latest(
+    fake_ledger, monkeypatch
+) -> None:
+    """A05: same team, two SC runs; B's graph is newer but A's run sees A's gaps."""
+    fake_ledger(_run_record(input_snapshot={"sourceCollectionRunId": "sc-A"}))
+    store = {
+        "candidates": [
+            # A's own authority — an older updatedAt on purpose.
+            _readable_graph_record(
+                "candidate-graph-a",
+                sc_run_id="sc-A",
+                missing_links=[_missing_link()],
+                updated_at="2026-09-08T10:00:00Z",
+            ),
+            # Another run's newer graph — must never leak into A's inspector.
+            _readable_graph_record(
+                "candidate-graph-b",
+                sc_run_id="sc-B",
+                missing_links=[_missing_link(relation="contradicts")],
+                updated_at="2026-09-09T10:00:00Z",
+            ),
+        ],
+    }
+    _install_read_authority(monkeypatch, store, sc_run_id="sc-A")
+
+    response = _client().get(_READ_ROUTE, params={"teamId": _TEAM})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["runId"] == _RUN
+    assert body["sourceCollectionRunId"] == "sc-A"
+    assert body["candidateGraphId"] == "candidate-graph-a"
+    assert [link["relation"] for link in body["missingLinks"]] == ["supports"]
+
+
+def test_missing_links_read_reflects_waiver_written_in_place(
+    store_surface, fake_ledger, monkeypatch
+) -> None:
+    """Read and write share one scoped authority: the waiver audit shows up."""
+    fake_ledger(_run_record(input_snapshot={"sourceCollectionRunId": _SC}))
+    store_surface.state["store"]["candidates"] = [
+        _readable_graph_record(
+            "candidate-graph-1",
+            sc_run_id=_SC,
+            missing_links=[_missing_link()],
+            updated_at="2026-09-08T10:00:00Z",
+        ),
+    ]
+    _install_read_authority(monkeypatch, store_surface.state["store"])
+
+    before = _client().get(_READ_ROUTE, params={"teamId": _TEAM})
+    assert before.status_code == 200
+    assert before.json()["missingLinks"][0].get("waived") is None
+
+    waived = _client().post(_ROUTE, json=_waive_payload())
+    assert waived.status_code == 200
+
+    after = _client().get(_READ_ROUTE, params={"teamId": _TEAM})
+    assert after.status_code == 200
+    link = after.json()["missingLinks"][0]
+    assert link["waived"] is True
+    assert link["waiver"]["justification"] == _JUSTIFICATION
+    assert after.json()["summary"]["waiverCount"] == 1
+    # The gap itself is never removed by a waiver.
+    assert after.json()["summary"]["missingLinkCount"] == 1

@@ -5,6 +5,8 @@ import type { ResearchBudgetLedgerSnapshot } from "../../../api/types/researchWo
 import {
   agentDisplayInitial,
   budgetMeterPercent,
+  commandOfferIdentity,
+  isUnknownOutcomeCommandError,
   ledgerForStage,
   mergeNodeOverrideLayer,
   nodeInspectorBudgetMeters,
@@ -12,6 +14,7 @@ import {
   pickPrimaryCommandOffer,
   providerVisualId,
   remainingCommandOffers,
+  resolveCurrentCommandOffer,
   researchAgentConfigRoute,
   commandOfferUnavailableReason,
   withoutStartNodeOffers,
@@ -186,5 +189,48 @@ describe("nodeInspectorOpsModel", () => {
     // No current version wired -> legacy behavior, no version gate.
     expect(commandOfferUnavailableReason(stale, true, null)).toBe("");
     expect(commandOfferUnavailableReason(stale, true, undefined)).toBe("");
+  });
+
+  // A06: offer re-resolution for the error-surface retry.
+  describe("commandOfferIdentity / resolveCurrentCommandOffer", () => {
+    const base = {
+      nodeId: "source_finding",
+      available: true,
+      reasonCode: "ready",
+      blockerIds: [],
+      payload: { humanTaskId: "ht-1" },
+    };
+
+    it("matches by command + node + action parameters, ignoring signature fields", () => {
+      const refused: CommandOffer = {
+        ...base, command: "resolve_human_task", label: "x",
+        idempotencyKey: "key-v1", expectedRunVersion: 4,
+      };
+      const refreshed: CommandOffer = {
+        ...base, command: "resolve_human_task", label: "x",
+        idempotencyKey: "key-v2", expectedRunVersion: 7,
+      };
+      expect(commandOfferIdentity(refused)).toBe(commandOfferIdentity(refreshed));
+
+      // A different action parameter is a different command.
+      expect(commandOfferIdentity({ ...refused, payload: { humanTaskId: "ht-2" } }))
+        .not.toBe(commandOfferIdentity(refused));
+      // Key order in the payload must not change identity.
+      expect(commandOfferIdentity({ ...refused, payload: { humanTaskId: "ht-1", mode: "fast" } }))
+        .toBe(commandOfferIdentity({ ...refused, payload: { mode: "fast", humanTaskId: "ht-1" } }));
+
+      expect(resolveCurrentCommandOffer([refreshed], refused)).toEqual(refreshed);
+      expect(resolveCurrentCommandOffer([{ ...refreshed, command: "retry_node" }], refused)).toBeNull();
+      expect(resolveCurrentCommandOffer([refreshed], null)).toBeNull();
+    });
+
+    it("classifies transport-level failures as unknown outcome and HTTP errors as decided", () => {
+      expect(isUnknownOutcomeCommandError(new TypeError("Failed to fetch"))).toBe(true);
+      expect(isUnknownOutcomeCommandError(new Error("network down"))).toBe(true);
+      const httpError = Object.assign(new Error("version conflict"), {
+        name: "FetchJsonHttpError", status: 412, code: "run_version_conflict",
+      });
+      expect(isUnknownOutcomeCommandError(httpError)).toBe(false);
+    });
   });
 });

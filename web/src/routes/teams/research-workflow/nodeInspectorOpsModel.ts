@@ -1,5 +1,6 @@
 import type { EffectiveAgentBinding, ResearchBudgetLedgerSnapshot } from "../../../api/types/researchWorkflow";
 import { isOperatorGatedOffer, type CommandOffer } from "../../../api/types/research-workflow/commands";
+import { isFetchJsonHttpError } from "../../../api/client";
 import type { VStatusTone } from "../../../components/vui";
 
 export const NODE_INSPECTOR_BUDGET_WARN_PERCENT = 80;
@@ -226,4 +227,42 @@ export function researchAgentConfigRoute(agentId: string): string | null {
   const trimmed = agentId.trim();
   if (!trimmed) return null;
   return `/agents?pane=config&agent=${encodeURIComponent(trimmed)}`;
+}
+
+// -- A06 retry contract: re-resolve offers, never replay a refused one --------
+
+/** Stable action parameters for offer identity (key order independent). */
+function stablePayloadKey(payload: CommandOffer["payload"]): string {
+  const record = payload ?? {};
+  return JSON.stringify(Object.keys(record).sort().map((key) => [key, record[key]]));
+}
+
+/** Command identity for retry re-resolution: kind + node + action parameters.
+ * Signature-bound fields (expectedRunVersion / idempotencyKey / authorization)
+ * are deliberately excluded — they are what changes between offer snapshots. */
+export function commandOfferIdentity(offer: CommandOffer): string {
+  return JSON.stringify([offer.command, offer.nodeId ?? "", stablePayloadKey(offer.payload)]);
+}
+
+/** Resolve the CURRENT offer for the same command identity from the freshest
+ * server-signed snapshot. A06: after a definite rejection the retry must carry
+ * a new expectedRunVersion/new idempotency key, so the refused offer itself is
+ * never resubmitted; ``null`` means the command no longer exists as an offer. */
+export function resolveCurrentCommandOffer(
+  offers: CommandOffer[] | null | undefined,
+  previous: CommandOffer | null | undefined,
+): CommandOffer | null {
+  if (!previous) return null;
+  const identity = commandOfferIdentity(previous);
+  return (offers ?? []).find((offer) => commandOfferIdentity(offer) === identity) ?? null;
+}
+
+/** True when a failed submit never produced a verdict: transport-level failure
+ * (network drop / lost response — no HTTP status). Only this class may replay
+ * the original offer with its ORIGINAL idempotency key; the server's command
+ * idempotency contract makes that replay a safe probe instead of a second
+ * execution. HTTP-classified errors (FetchJsonHttpError) had a definite
+ * server verdict and must go through offer re-resolution instead. */
+export function isUnknownOutcomeCommandError(error: unknown): boolean {
+  return !isFetchJsonHttpError(error);
 }
