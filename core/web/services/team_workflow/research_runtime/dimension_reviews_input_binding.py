@@ -18,10 +18,13 @@ persisted records — recomputable means auditable — and never invents content
    ``evidence_card_batch://…`` refs resolved through the team's
    ClaimEvidenceStore — the same store authority the writer's read-back
    verifies by content hash.  Already-canonical refs pass through untouched;
-   a citation that resolves to no scoped evidence cards is left as-is (the
-   writer then blocks with its own precise code), and rows without any
-   citation are never filled in — reconstructing evidence the reviewer never
-   cited would be fabrication, not derivation.
+   unresolvable citations are pruned from rows that keep at least one
+   resolvable ref (the originals stay auditable on the row as ``citationRefs``
+   and in the report), and a row left without any resolvable ref falls back to
+   the evidence cards of its own hypothesis — derivation from the persisted
+   authority the row's ``hypothesis_id`` already names, never fabrication.
+   Rows whose hypothesis holds no cards stay exactly as they arrived, so the
+   writer keeps judging them with its precise fail-closed codes.
 """
 
 from __future__ import annotations
@@ -221,6 +224,16 @@ def recompute_round_input_snapshot_hash(
     )
 
 
+def _candidate_id(value: Mapping[str, Any]) -> str:
+    """Hypothesis id of a row/candidate, mirroring the writer's field family."""
+
+    return _text(
+        value.get("candidateId")
+        or value.get("candidate_id")
+        or value.get("hypothesis_id")
+    )
+
+
 def evidence_batch_ref_for_run(team_id: str, run_id: str) -> str:
     """Content-addressed ref of one run's scoped claim-evidence card batch.
 
@@ -253,14 +266,35 @@ def canonicalize_dimension_review_evidence(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Project a round's review rows onto canonical evidence refs.
 
-    Returns a deep-copied projection in which every bare ``candidate-…``
-    citation that resolves to real scoped evidence cards is replaced by the
-    readable ``evidence_card_batch://…`` ref of the run holding those cards.
-    Already-canonical refs and unresolvable refs pass through unchanged (the
-    writer judges them), and citation-less rows are left empty on purpose.
+    Two deterministic, bounded row-level repairs keep citations that the
+    review LLM minted from permanently blocking authority materialization,
+    without inventing evidence:
 
-    The report is deterministic and bounded; ``unresolvedRefs`` lists the
-    exact citations a later audit should expect to see blocked.
+    1. Unresolvable-citation pruning.  A row whose citations mix resolvable
+       refs (already-canonical refs, or bare ``candidate-…`` citations that
+       resolve through the team's ClaimEvidenceStore to readable
+       ``evidence_card_batch://…`` refs) with unresolvable ones keeps only the
+       resolvable refs in ``evidence_refs``.  The full original citation list
+       stays auditable on the row as ``citationRefs`` (original order), and
+       every dropped citation is still listed in the report's
+       ``unresolvedRefs``.
+    2. Hypothesis-evidence fallback.  A row left without a single resolvable
+       ref after pruning — citation-less rows included — falls back to the
+       evidence cards of its own hypothesis: the row's ``hypothesis_id``-family
+       id is resolved through the same store and the deduplicated, ordered
+       batch refs of the runs holding those cards become the row's
+       ``evidence_refs``.  A hypothesis without cards leaves its rows exactly
+       as they arrived, so the writer keeps judging them fail-closed.
+
+    Idempotent: already-canonical rows pass through byte-identically and never
+    gain ``citationRefs``; ``citationRefs`` is written only when a row's refs
+    were actually pruned or a hypothesis fallback engaged over non-empty
+    original citations.  The report is deterministic and bounded — existing
+    fields keep their meaning, ``unresolvedRefs`` lists the exact citations an
+    audit should expect to see pruned or blocked, and
+    ``rowsFallbackToHypothesisEvidence`` counts fallback rows.  The persisted
+    artifact keeps canonical refs only: the writer rebuilds each row from its
+    own allowed fields and drops the ``citationRefs`` audit key.
     """
 
     from core.research.evidence import ClaimEvidenceStore
@@ -271,32 +305,110 @@ def canonicalize_dimension_review_evidence(
         "unresolvedRefs": [],
         "rowsWithoutRefs": 0,
         "canonicalRefsPassedThrough": 0,
+        "rowsFallbackToHypothesisEvidence": 0,
     }
     citation_refs: dict[str, list[str]] = {}
+    hypothesis_batch_refs: dict[str, list[str]] = {}
 
-    def _resolve(citation: str) -> list[str]:
-        if citation in citation_refs:
-            return citation_refs[citation]
-        refs: list[str] = []
+    def _card_run_ids(candidate_id: str) -> list[str]:
         try:
             cards = ClaimEvidenceStore(PROJECT_ROOT).list(
-                team_id, candidate_id=citation
+                team_id, candidate_id=candidate_id
             )
         except Exception:  # noqa: BLE001 - unreadable store leaves the ref as-is
-            cards = []
-        run_ids = sorted(
+            return []
+        return sorted(
             {
                 _text(card.get("sourceCollectionRunId"))
                 for card in cards
                 if isinstance(card, Mapping) and _text(card.get("sourceCollectionRunId"))
             }
         )
+
+    def _batch_refs(run_ids: list[str]) -> list[str]:
+        refs: list[str] = []
         for run_id in run_ids:
             ref = evidence_batch_ref_for_run(team_id, run_id)
             if ref:
                 refs.append(ref)
+        return refs
+
+    def _resolve(citation: str) -> list[str]:
+        if citation in citation_refs:
+            return citation_refs[citation]
+        refs = _batch_refs(_card_run_ids(citation))
         citation_refs[citation] = refs
         return refs
+
+    def _hypothesis_refs(hypothesis_id: str) -> list[str]:
+        """Batch refs of the evidence cards scoped to one row's own hypothesis."""
+
+        normalized = _text(hypothesis_id)
+        if not normalized:
+            # An empty id would match every card in the store; ground nothing.
+            return []
+        if normalized in hypothesis_batch_refs:
+            return hypothesis_batch_refs[normalized]
+        refs = _batch_refs(_card_run_ids(normalized))
+        hypothesis_batch_refs[normalized] = refs
+        return refs
+
+    def _ground_row(new_row: dict[str, Any]) -> dict[str, Any]:
+        raw_refs = new_row.get("evidence_refs")
+        if raw_refs is None:
+            raw_refs = new_row.get("evidenceRefs")
+        refs = _string_list(raw_refs)
+        if not refs:
+            if isinstance(raw_refs, (list, tuple)):
+                report["rowsWithoutRefs"] += 1
+            fallback = _hypothesis_refs(_candidate_id(new_row))
+            if fallback:
+                report["rowsFallbackToHypothesisEvidence"] += 1
+                new_row["evidence_refs"] = list(fallback)
+                new_row.pop("evidenceRefs", None)
+            return new_row
+        output_refs: list[str] = []
+        unresolvable: list[str] = []
+        for ref in refs:
+            if parse_canonical_ref(ref) is not None:
+                report["canonicalRefsPassedThrough"] += 1
+                output_refs.append(ref)
+                continue
+            mapped = _resolve(ref)
+            if mapped:
+                report["resolvedCitations"].setdefault(ref, mapped)
+                output_refs.extend(mapped)
+                continue
+            if ref not in report["unresolvedRefs"]:
+                report["unresolvedRefs"].append(ref)
+            unresolvable.append(ref)
+            output_refs.append(ref)
+        if not unresolvable:
+            new_row["evidence_refs"] = list(dict.fromkeys(output_refs))
+        else:
+            # Layer 1: keep only the resolvable refs and preserve the full
+            # original citation list on the row for audit.
+            grounded = list(
+                dict.fromkeys(
+                    ref for ref in output_refs if ref not in set(unresolvable)
+                )
+            )
+            if grounded:
+                new_row["citationRefs"] = list(refs)
+                new_row["evidence_refs"] = grounded
+            else:
+                # Layer 2: nothing resolvable — ground the row in its own
+                # hypothesis's evidence cards, or leave it untouched so the
+                # writer keeps judging it with its precise blocker codes.
+                fallback = _hypothesis_refs(_candidate_id(new_row))
+                if fallback:
+                    report["rowsFallbackToHypothesisEvidence"] += 1
+                    new_row["citationRefs"] = list(refs)
+                    new_row["evidence_refs"] = list(fallback)
+                else:
+                    new_row["evidence_refs"] = list(dict.fromkeys(output_refs))
+        new_row.pop("evidenceRefs", None)
+        return new_row
 
     def _walk(rows: Any) -> Any:
         if not isinstance(rows, (list, tuple)):
@@ -306,33 +418,7 @@ def canonicalize_dimension_review_evidence(
             if not isinstance(row, Mapping):
                 projected.append(row)
                 continue
-            new_row = dict(row)
-            raw_refs = new_row.get("evidence_refs")
-            if raw_refs is None:
-                raw_refs = new_row.get("evidenceRefs")
-            refs = _string_list(raw_refs)
-            if not refs:
-                if isinstance(raw_refs, (list, tuple)):
-                    report["rowsWithoutRefs"] += 1
-                projected.append(new_row)
-                continue
-            output_refs: list[str] = []
-            for ref in refs:
-                if parse_canonical_ref(ref) is not None:
-                    report["canonicalRefsPassedThrough"] += 1
-                    output_refs.append(ref)
-                    continue
-                mapped = _resolve(ref)
-                if mapped:
-                    report["resolvedCitations"].setdefault(ref, mapped)
-                    output_refs.extend(mapped)
-                else:
-                    if ref not in report["unresolvedRefs"]:
-                        report["unresolvedRefs"].append(ref)
-                    output_refs.append(ref)
-            new_row["evidence_refs"] = list(dict.fromkeys(output_refs))
-            new_row.pop("evidenceRefs", None)
-            projected.append(new_row)
+            projected.append(_ground_row(dict(row)))
         return projected
 
     projection = deepcopy(dict(review))

@@ -4,8 +4,10 @@
 1. 生成路径计算并持久化的 ``inputSnapshotHash`` 必须能从存储轮 + meeting 店
    逐字节复算（可复算 = 可审计）；
 2. 评审行裸 ``candidate-*`` 引用经 ClaimEvidenceStore 权威映射为可读回的
-   ``evidence_card_batch://`` canonical ref；解析不出与空引用保持 fail-closed，
-   backfill 重放因此要么整体落盘要么以精确 blocker 保持 blocked。
+   ``evidence_card_batch://`` canonical ref；混合行中不可解析引用被剪枝并全量
+   审计（行级 ``citationRefs`` + report），零引用行回退到假说自身证据卡批次，
+   无卡假说行保持原样 fail-closed，backfill 重放因此要么整体落盘要么以精确
+   blocker 保持 blocked。
 """
 
 from __future__ import annotations
@@ -370,7 +372,7 @@ def test_generation_persists_recomputable_snapshot_hash_and_canonical_rows(
 def test_canonicalize_maps_real_citations_and_reports_unresolvable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """裸引用经真实 ClaimEvidenceStore 权威映射；解析不出/空行保持 fail-closed。"""
+    """混合行：可解析引用落地为 canonical ref，不可解析引用被剪枝但全量审计。"""
     _binding_env(tmp_path, monkeypatch)
     canonical_ref = _canonical_ref(tmp_path)
     from core.web.services.team_workflow.research_runtime.artifact_readback_registry import (
@@ -415,20 +417,165 @@ def test_canonicalize_maps_real_citations_and_reports_unresolvable(
     mapped = rows[0]["evidence_refs"]
     # 真实读回：映射出的 ref 必须能被权威读回验证（哈希一致）。
     assert read_domain_artifact(mapped[0]) is not None
-    # 裸引用映射与 canonical 透传指向同一 ref 时按引用列表语义去重。
-    assert mapped == [canonical_ref, _UNRESOLVED_CITATION]
+    # 混合行剪枝：不可解析引用被剪掉，evidence_refs 只留可解析的 canonical ref。
+    assert mapped == [canonical_ref]
+    # 原始引用全量保留在行级 citationRefs（原顺序），审计不丢失。
+    assert rows[0]["citationRefs"] == [
+        _CITED_CARD_CANDIDATE,
+        canonical_ref,
+        _UNRESOLVED_CITATION,
+    ]
     assert report["resolvedCitations"] == {
         _CITED_CARD_CANDIDATE: [canonical_ref]
     }
     assert report["unresolvedRefs"] == [_UNRESOLVED_CITATION]
     assert report["rowsWithoutRefs"] == 1
     assert report["canonicalRefsPassedThrough"] == 1
+    assert report["rowsFallbackToHypothesisEvidence"] == 0
+    # 无卡假说的空引用行保持原样，不写 citationRefs。
+    assert rows[1]["evidence_refs"] == []
+    assert "citationRefs" not in rows[1]
     # 原始评审不被改写。
     assert review["candidates"][0]["dimensionReviews"][0]["evidence_refs"] == [
         _CITED_CARD_CANDIDATE,
         canonical_ref,
         _UNRESOLVED_CITATION,
     ]
+    assert "citationRefs" not in review["candidates"][0]["dimensionReviews"][0]
+
+
+def test_canonicalize_falls_back_to_hypothesis_evidence_cards(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """零引用行回退到假说自身证据卡批次；无卡假说行保持空；重放幂等。"""
+    _binding_env(tmp_path, monkeypatch)
+    hypothesis_run = "dprun-20260908163835448499-11aa22bb"
+    _seed_claim_evidence(tmp_path, candidate_id=_CANDIDATE_A, run_id=hypothesis_run)
+    hypothesis_ref = binding.evidence_batch_ref_for_run(_TEAM_ID, hypothesis_run)
+    assert hypothesis_ref
+
+    review = {
+        "dimensionReviews": [
+            {
+                "hypothesis_id": _CANDIDATE_A,
+                "dimension": "novelty",
+                "rating": "strong",
+                "rationale": "r",
+                "reviewer": "reviewer-1",
+                "evidence_refs": [],
+            },
+            {
+                # 无卡假说：回退不到任何批次，行保持空。
+                "hypothesis_id": _CANDIDATE_B,
+                "dimension": "novelty",
+                "rating": "adequate",
+                "rationale": "r",
+                "reviewer": "reviewer-1",
+                "evidence_refs": [],
+            },
+        ]
+    }
+
+    projection, report = binding.canonicalize_dimension_review_evidence(
+        _TEAM_ID, review
+    )
+    rows = projection["dimensionReviews"]
+    assert rows[0]["evidence_refs"] == [hypothesis_ref]
+    # 原始引用为空：无 citationRefs 可保留。
+    assert "citationRefs" not in rows[0]
+    assert rows[1]["evidence_refs"] == []
+    assert "citationRefs" not in rows[1]
+    assert report["rowsFallbackToHypothesisEvidence"] == 1
+    assert report["rowsWithoutRefs"] == 2
+    assert report["unresolvedRefs"] == []
+
+    # 幂等：回退后的投影再走一遍 canonicalize 完全稳定，不再计回退。
+    projection2, report2 = binding.canonicalize_dimension_review_evidence(
+        _TEAM_ID, projection
+    )
+    rows2 = projection2["dimensionReviews"]
+    assert rows2[0]["evidence_refs"] == [hypothesis_ref]
+    assert rows2[1]["evidence_refs"] == []
+    assert "citationRefs" not in rows2[0]
+    assert report2["rowsFallbackToHypothesisEvidence"] == 0
+    assert report2["canonicalRefsPassedThrough"] == 1
+
+
+def test_canonicalize_all_unresolvable_refs_fall_back_or_stay_blocked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """全部不可解析：有卡假说行回退批次，无卡假说行原样透传供 writer fail-closed。"""
+    _binding_env(tmp_path, monkeypatch)
+    hypothesis_run = "dprun-20260908163835448500-22bb33cc"
+    _seed_claim_evidence(tmp_path, candidate_id=_CANDIDATE_A, run_id=hypothesis_run)
+    hypothesis_ref = binding.evidence_batch_ref_for_run(_TEAM_ID, hypothesis_run)
+    assert hypothesis_ref
+
+    review = {
+        "dimensionReviews": [
+            {
+                "hypothesis_id": _CANDIDATE_A,
+                "dimension": "novelty",
+                "rating": "strong",
+                "rationale": "r",
+                "reviewer": "reviewer-1",
+                "evidence_refs": [_UNRESOLVED_CITATION],
+            },
+            {
+                # 无卡假说：行保持不变（refs 原样透传）。
+                "hypothesis_id": _CANDIDATE_B,
+                "dimension": "novelty",
+                "rating": "adequate",
+                "rationale": "r",
+                "reviewer": "reviewer-1",
+                "evidence_refs": [_UNRESOLVED_CITATION],
+            },
+        ]
+    }
+
+    projection, report = binding.canonicalize_dimension_review_evidence(
+        _TEAM_ID, review
+    )
+    rows = projection["dimensionReviews"]
+    assert rows[0]["evidence_refs"] == [hypothesis_ref]
+    assert rows[0]["citationRefs"] == [_UNRESOLVED_CITATION]
+    assert rows[1]["evidence_refs"] == [_UNRESOLVED_CITATION]
+    assert "citationRefs" not in rows[1]
+    assert report["rowsFallbackToHypothesisEvidence"] == 1
+    assert report["unresolvedRefs"] == [_UNRESOLVED_CITATION]
+
+
+def test_canonicalize_canonical_rows_pass_through_untouched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """已是 canonical 引用的行完全直通：不新增字段、计数稳定（幂等）。"""
+    _binding_env(tmp_path, monkeypatch)
+    canonical_ref = _canonical_ref(tmp_path)
+    row = {
+        "hypothesis_id": _CANDIDATE_A,
+        "dimension": "novelty",
+        "rating": "strong",
+        "rationale": "r",
+        "reviewer": "reviewer-1",
+        "evidence_refs": [canonical_ref],
+    }
+    review = {"dimensionReviews": [dict(row)]}
+
+    projection, report = binding.canonicalize_dimension_review_evidence(
+        _TEAM_ID, review
+    )
+    assert projection["dimensionReviews"] == [row]
+    assert report["canonicalRefsPassedThrough"] == 1
+    assert report["resolvedCitationCount"] == 0
+    assert report["unresolvedRefs"] == []
+    assert report["rowsWithoutRefs"] == 0
+    assert report["rowsFallbackToHypothesisEvidence"] == 0
+
+    projection2, report2 = binding.canonicalize_dimension_review_evidence(
+        _TEAM_ID, projection
+    )
+    assert projection2 == projection
+    assert report2["canonicalRefsPassedThrough"] == 1
 
 
 def _seed_backfill_round(
@@ -624,3 +771,53 @@ def test_auto_backfill_keeps_citationless_legacy_round_blocked(
     assert "dimension_review_evidence_refs_missing" in summary["blockerCodes"]
     # 不部分写入：store 无任何记录。
     assert _artifact_rows() == []
+
+
+def test_auto_backfill_grounds_mixed_citation_round_through_writer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """writer 集成：混合引用 7 维双候选轮剪枝后 materialize 不再报引用 blocker。"""
+    _binding_env(tmp_path, monkeypatch)
+    canonical_ref = _canonical_ref(tmp_path)
+    scope_hash = _real_scope_hash()
+    _seed_meeting_fan_in(scope_hash=scope_hash)
+    from core.research.competition.question_result_package import (
+        REQUIRED_REVIEW_DIMENSIONS,
+    )
+
+    mixed_refs = {
+        dimension: [canonical_ref, _UNRESOLVED_CITATION]
+        for dimension in REQUIRED_REVIEW_DIMENSIONS
+    }
+    rows = _review_rows(mixed_refs, hypothesis_id=_CANDIDATE_A)
+    rows_b = _review_rows(mixed_refs, hypothesis_id=_CANDIDATE_B)
+    round_id = _seed_backfill_round(
+        tmp_path, scope_hash=scope_hash, rows=rows, rows_b=rows_b
+    )
+    _patch_round_candidate_inputs(monkeypatch)
+
+    summary = chain.auto_backfill_missing_round_authorities(
+        _TEAM_ID, question_id=_QUESTION_ID
+    )
+
+    # 剪枝后每行只剩可读回的 canonical ref：引用类 blocker 全部消失。
+    assert summary["status"] == "backfilled", summary
+    assert summary["backfilled"] == 1
+    assert "dimension_review_evidence_ref_invalid" not in summary.get(
+        "blockerCodes", []
+    )
+    assert "dimension_review_evidence_refs_missing" not in summary.get(
+        "blockerCodes", []
+    )
+    artifact_rows = _artifact_rows()
+    assert len(artifact_rows) == 1
+    payload = artifact_rows[0]["payload"]
+    assert payload["reviewRoundId"] == round_id
+    assert payload["dimensionReviews"] and all(
+        row["evidence_refs"] == [canonical_ref]
+        for row in payload["dimensionReviews"]
+    )
+    # writer 只按自己的字段重建行：审计 citationRefs 不落盘。
+    assert all(
+        "citationRefs" not in row for row in payload["dimensionReviews"]
+    )
